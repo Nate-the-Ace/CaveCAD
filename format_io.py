@@ -220,6 +220,8 @@ def write_compass(rows, header_info, output_path):
     with open(output_path, "w", newline="\r\n") as f:
         f.write("\n".join(lines) + "\n\x0c")
 
+    return []
+
 
 # ============================================================
 # Walls (.srv)
@@ -348,6 +350,8 @@ def write_walls(rows, header_info, output_path):
     with open(output_path, "w", newline="\r\n") as f:
         f.write("\n".join(lines) + "\n")
 
+    return []
+
 
 # ============================================================
 # Survex (.svx)
@@ -373,6 +377,10 @@ def parse_survex(content):
     for raw_line in content.splitlines():
         semi_idx = raw_line.find(";")
         line = (raw_line[:semi_idx] if semi_idx >= 0 else raw_line).strip()
+        # A trailing comment on a shot line is that shot's note (that's how
+        # write_survex records notes, and how surveyors annotate legs by hand).
+        # A whole-line comment is just a comment and is dropped.
+        note = raw_line[semi_idx + 1:].strip() if (semi_idx >= 0 and line) else ""
         if not line:
             continue
 
@@ -423,7 +431,7 @@ def parse_survex(content):
                 clino = 0.0
             rows.append(_row(full_name(rec["from"]), full_name(rec["to"]),
                               to_drawing_units(tape, length_unit),
-                              compass, clino, 0, 0, 0, 0))
+                              compass, clino, 0, 0, 0, 0, note))
         elif data_style == "passage":
             rec = dict(zip(passage_fields, fields))
             if "station" not in rec:
@@ -435,6 +443,8 @@ def parse_survex(content):
                 "down": to_drawing_units(_num(rec.get("down")), length_unit),
             }
 
+    # Survex records passage size per STATION, not per shot, so every shot
+    # arriving at a station gets that station's measurements.
     for r in rows:
         lrud = passage_lrud.get(r["to_name"])
         if lrud:
@@ -446,17 +456,89 @@ def parse_survex(content):
     return rows, warnings
 
 
+def _common_station_prefix(rows):
+    """
+    Returns the survey prefix every station name shares, or "" if they don't
+    share one. Survex nests station names inside "*begin <name>" blocks, and
+    a name written inside such a block gains that prefix -- so if the stations
+    came in as "TestSurvey.S1" we can write "*begin TestSurvey" and the plain
+    name "S1", and reading it back gives "TestSurvey.S1" again. If the names
+    have no prefix (say "A1", imported from Compass), we must NOT invent one,
+    or every station would silently come back renamed.
+    """
+    names = [r.get(key) for r in rows for key in ("from_name", "to_name")]
+    names = [n for n in names if n and n not in ("-", "")]
+    if not names:
+        return ""
+    if not all("." in n for n in names):
+        return ""
+    prefixes = {n.rsplit(".", 1)[0] for n in names}
+    return prefixes.pop() if len(prefixes) == 1 else ""
+
+
+def _passage_records(rows):
+    """
+    Collapses per-shot LRUD onto stations, the way Survex stores it.
+
+    Passage size belongs to a station, not to a shot -- so if two shots end at
+    the same station carrying different measurements, only one can be written.
+    All-zero LRUD counts as "not measured" rather than "measured as zero", so a
+    real measurement always wins over blanks instead of being overwritten by
+    them. Genuinely contradictory measurements are reported, not silently
+    dropped. Returns (records, warnings).
+    """
+    records = {}
+    sources = {}
+    warnings = []
+    for r in rows:
+        station = r.get("to_name")
+        if not station or station in ("-", ""):
+            continue
+        lrud = (_num(r.get("left")), _num(r.get("right")),
+                _num(r.get("up")), _num(r.get("down")))
+        if not any(lrud):
+            continue  # nothing measured on this shot
+        if station in records and records[station] != lrud:
+            warnings.append(
+                'Station %s has two different passage sizes: one measured '
+                'from %s, one from %s. A Survex file can only store one size '
+                'per station, so the measurement from %s was saved.'
+                % (station, sources[station], r.get("from_name") or "?",
+                   sources[station])
+            )
+            continue
+        records[station] = lrud
+        sources[station] = r.get("from_name") or "?"
+    return records, warnings
+
+
 def write_survex(rows, header_info, output_path):
-    survey_name = (header_info.get("survey_designation") or "Survey").replace(" ", "_")
-    lines = [
-        "; Exported from Cave Survey Data Entry App",
-        "",
-        f"*begin {survey_name}",
-        "*units length feet",
-        "*data normal from to tape compass clino",
-        "",
-    ]
-    passage_lines = []
+    """Writes a .svx file. Returns a list of plain-language warnings."""
+    warnings = []
+    survey_name = (header_info.get("survey_designation") or "").strip()
+    cave_name = (header_info.get("cave_name") or "").strip()
+
+    # Only wrap the file in *begin/*end when the stations already carry that
+    # prefix -- see _common_station_prefix().
+    prefix = _common_station_prefix(rows)
+
+    def station(name):
+        if prefix and name.startswith(prefix + "."):
+            return name[len(prefix) + 1:]
+        return name
+
+    lines = ["; Exported from Cave Survey Data Entry App"]
+    if cave_name:
+        lines.append("; Cave: %s" % cave_name)
+    if survey_name and survey_name != prefix:
+        lines.append("; Survey: %s" % survey_name)
+    lines.append("")
+    if prefix:
+        lines.append("*begin %s" % prefix.replace(" ", "_"))
+    lines.append("*units length feet")
+    lines.append("*data normal from to tape compass clino")
+    lines.append("")
+
     for r in rows:
         if not r.get("from_name") or not r.get("to_name"):
             continue
@@ -464,29 +546,33 @@ def write_survex(rows, header_info, output_path):
         azimuth = _num(r.get("azimuth"))
         inclination = _num(r.get("inclination"))
         note = (r.get("notes") or "").strip()
-        line = f"{r['from_name']} {r['to_name']} {distance:.2f} {azimuth:.2f} {inclination:.2f}"
+        line = "%s %s %.2f %.2f %.2f" % (
+            station(r["from_name"]), station(r["to_name"]),
+            distance, azimuth, inclination)
         if note:
-            line += f"  ; {note}"
+            # Read back as this shot's note on import. Newlines would split
+            # the shot across lines and corrupt the file.
+            line += "  ; %s" % " ".join(note.split())
         lines.append(line)
 
-        left = _num(r.get("left"))
-        right = _num(r.get("right"))
-        up = _num(r.get("up"))
-        down = _num(r.get("down"))
-        if left or right or up or down:
-            passage_lines.append(f"{r['to_name']} {left:.2f} {right:.2f} {up:.2f} {down:.2f}")
-
-    if passage_lines:
+    records, lrud_warnings = _passage_records(rows)
+    warnings.extend(lrud_warnings)
+    if records:
         lines.append("")
         lines.append("*data passage station left right up down")
-        lines.extend(passage_lines)
+        for name, (left, right, up, down) in records.items():
+            lines.append("%s %.2f %.2f %.2f %.2f"
+                         % (station(name), left, right, up, down))
         lines.append("")
         lines.append("*data")
 
-    lines.append(f"*end {survey_name}")
+    if prefix:
+        lines.append("*end %s" % prefix.replace(" ", "_"))
 
     with open(output_path, "w", newline="\r\n") as f:
         f.write("\n".join(lines) + "\n")
+
+    return warnings
 
 
 # ============================================================

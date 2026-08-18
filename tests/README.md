@@ -68,21 +68,24 @@ Notes on driving QCAD headless, all learned the hard way:
   on a `QFileDialog` that can't exist under `-no-gui`. The harness reads the
   file, strips that trailing call, and `eval`s the rest.
 
-## Known bugs, tracked as expected failures
+## Survex export limits
 
-Three `@unittest.expectedFailure` tests in `test_parsers.py` document real
-Survex export bugs. If one reports **unexpected success**, it's been fixed --
-delete the decorator, not the test.
+Three Survex export bugs used to be tracked here as `expectedFailure`. Two
+were real and are fixed; the third turned out to be inherent to the format.
 
-1. `test_survex_round_trip_preserves_station_names` -- `write_survex` wraps
-   its output in `*begin <survey_designation>`, so re-importing renames every
-   station (`A1` -> `A.A1`).
-2. `test_survex_round_trip_preserves_lrud` -- Survex `*data passage` is keyed
-   by station, so when two shots share a TO station, one shot's LRUD is handed
-   back to both. `A4->A2` (originally all zeros) returns `A1->A2`'s LRUD.
-3. `test_survex_round_trip_preserves_notes` -- `write_survex` emits notes as
-   trailing `; ...` comments, but `parse_survex` strips from the first `;`
-   onward, so it writes a field it can't read back.
+* **Fixed** -- `write_survex` wrapped its output in
+  `*begin <survey_designation>`, which renamed every station on re-import
+  (`A1` -> `A.A1`). It now only emits a `*begin` block when the stations
+  already share that prefix, so both prefixed and plain names round-trip.
+* **Fixed** -- notes were written as trailing `; ...` comments that
+  `parse_survex` then stripped. A trailing comment on a shot line is now read
+  back as that shot's note.
+* **Inherent to Survex, not fixable** -- `*data passage` is keyed by station,
+  so two shots ending at the same station cannot carry different passage
+  sizes. All-zero LRUD is now treated as "not measured" so blanks never
+  clobber real measurements, and a genuine contradiction produces a
+  plain-language warning naming both shots and saying which was kept. See
+  `TestSurvexPassageLrud`.
 
 ## Not covered
 

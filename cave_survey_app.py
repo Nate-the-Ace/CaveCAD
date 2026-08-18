@@ -277,12 +277,19 @@ class CaveSurveyApp:
 
         header_info = {k: v.get() for k, v in self.header_vars.items()}
         try:
-            fio.WRITERS[fmt](rows_data, header_info, path)
+            warnings = fio.WRITERS[fmt](rows_data, header_info, path) or []
         except Exception as e:
             messagebox.showerror("Export", f"Failed to write file:\n\n{e}")
             return
 
-        messagebox.showinfo("Export", f"Saved {len(rows_data)} shot(s) to:\n{path}")
+        message = f"Saved {len(rows_data)} shot(s) to:\n{path}"
+        if warnings:
+            # The file was written; these tell the surveyor what couldn't be
+            # represented in this format, so it's a warning, not an error.
+            message += "\n\nPlease note:\n\n" + "\n\n".join(warnings)
+            messagebox.showwarning("Export", message)
+        else:
+            messagebox.showinfo("Export", message)
 
 
         row = ShotRow(self.rows_container, self.schedule_refresh, self.delete_row)

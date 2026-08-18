@@ -64,6 +64,11 @@ IMPORT/EXPORT FORMAT NOTES:
     directive is read as metres and scaled by 3.280839895. If your QCAD
     drawing is in metres instead, change DRAWING_DISTANCE_UNIT in both
     format_io.py and ImportNativeCaveSurvey.js.
+  - Survex export/import round-trips station names, notes and geometry
+    unchanged. Station names only gain a "*begin" survey block if they
+    already share one (e.g. stations imported from Survex as
+    "TestSurvey.S1" go back out as "*begin TestSurvey" + "S1"); plain
+    names like "A1" are written as-is rather than being renamed.
   - Export writes a single simplified survey in each format using
     whatever's currently in the table (declination is NOT re-applied to
     azimuth on export -- exported as-is). Round-tripping a file through
@@ -100,12 +105,14 @@ KNOWN LIMITATIONS (v1):
   - Declination is recorded but not automatically applied to azimuths.
   - No support yet for editing/re-loading a previously generated DXF back
     into the table.
-  - Survex EXPORT is lossy in three known ways (each tracked by a test in
-    tests/test_parsers.py -- see tests/README.md): station names come back
-    prefixed with the survey designation ("A1" -> "A.A1"); LRUD is shared
-    between any two shots that end at the same station, since *data
-    passage is keyed by station; and notes are written as ";" comments
-    that the importer strips rather than reads back.
+  - Survex passage size (LRUD) is stored per STATION, not per shot --
+    that is how the file format works, and it is not something this app
+    can change. So if two shots end at the same station, they share one
+    set of measurements. Blank (all-zero) LRUD counts as "not measured"
+    and never overwrites a real measurement. If two shots really do
+    record DIFFERENT sizes for the same station, the export keeps the
+    first and tells you which one it kept -- fix the contradiction in
+    your data if that matters.
 
 TESTING:
   ./tests/run_all.sh    -- everything (see tests/README.md)

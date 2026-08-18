@@ -13,6 +13,12 @@ tests/README.md). If one of them starts reporting "unexpected success", the
 underlying bug has been fixed -- delete the decorator rather than the test.
 """
 
+# NOTE ON QCAD EDITIONS: nothing here or in the tools themselves needs QCAD
+# Pro -- the scripts use only scripts/simple.js, RVector, RLineweight and
+# RBlockReference*, all core API. The headless harness driven by
+# differential.py has only been verified against a Pro install, though; see
+# tests/README.md.
+
 import os
 import sys
 import tempfile
@@ -161,32 +167,125 @@ class TestRoundTrip(unittest.TestCase):
         # "*units length feet", so no spurious re-conversion happens.
         self._assert_geometry_preserved(self._round_trip("Survex", ".svx"))
 
-    @unittest.expectedFailure
     def test_survex_round_trip_preserves_station_names(self):
-        # KNOWN BUG: write_survex wraps output in "*begin <survey_designation>",
-        # so re-importing renames every station A1 -> A.A1.
+        # Unprefixed names (as imported from Compass) must NOT gain a survey
+        # prefix on export: "A1" has to come back as "A1", not "A.A1".
         self._assert_names_preserved(self._round_trip("Survex", ".svx"))
 
-    @unittest.expectedFailure
-    def test_survex_round_trip_preserves_lrud(self):
-        # KNOWN BUG: Survex "*data passage" is keyed by station, so when two
-        # shots share a TO station the LRUD of one is handed back to both.
-        # Here A4->A2 (originally 0/0/0/0) comes back with A1->A2's LRUD.
-        back = self._round_trip("Survex", ".svx")
-        for i, (before, after) in enumerate(zip(self.rows, back)):
-            with self.subTest(row=i):
-                for field in ("left", "right", "up", "down"):
-                    self.assertAlmostEqual(float(before[field]),
-                                           float(after[field]), places=2)
-
-    @unittest.expectedFailure
     def test_survex_round_trip_preserves_notes(self):
-        # KNOWN BUG: write_survex emits notes as trailing "; ..." comments,
-        # but parse_survex strips everything from the first ";" onward, so it
-        # writes a field it cannot read back.
         back = self._round_trip("Survex", ".svx")
         self.assertEqual([r["notes"] for r in back],
                          [r["notes"] for r in self.rows])
+
+    def test_survex_round_trip_of_prefixed_names(self):
+        # A survey that really did come from Survex keeps its hierarchy: the
+        # shared "TestSurvey" prefix goes back out as *begin TestSurvey.
+        rows, _ = parse("Survex")
+        path = os.path.join(self.tmp, "prefixed.svx")
+        fio.write_survex(rows, HEADER, path)
+        with open(path) as fh:
+            text = fh.read()
+        self.assertIn("*begin TestSurvey", text)
+        back, _ = fio.parse_survex(text)
+        self.assertEqual([r["from_name"] for r in back],
+                         [r["from_name"] for r in rows])
+        self.assertEqual([r["to_name"] for r in back],
+                         [r["to_name"] for r in rows])
+
+    def test_survex_export_does_not_invent_a_begin_block(self):
+        path = os.path.join(self.tmp, "bare.svx")
+        fio.write_survex(self.rows, HEADER, path)
+        with open(path) as fh:
+            text = fh.read()
+        self.assertNotIn("*begin", text)
+        self.assertNotIn("*end", text)
+
+
+class TestSurvexPassageLrud(unittest.TestCase):
+    """
+    Survex stores passage size per STATION, not per shot, so per-shot LRUD has
+    to be collapsed onto stations on export. Blanks must not clobber real
+    measurements, and genuinely contradictory ones must be reported.
+    """
+
+    def setUp(self):
+        self.tmp = tempfile.mkdtemp(prefix="cavesurvey-lrud-")
+
+    def _write(self, rows):
+        path = os.path.join(self.tmp, "lrud.svx")
+        warnings = fio.write_survex(rows, HEADER, path)
+        with open(path) as fh:
+            return warnings, fh.read()
+
+    def test_blank_lrud_does_not_overwrite_a_real_measurement(self):
+        # A4->A2 carries no measurements; A1->A2 measured the passage at A2.
+        # A2 must keep the real numbers, and no warning is warranted.
+        rows, _ = parse("Compass")
+        warnings, text = self._write(rows)
+        self.assertEqual(warnings, [])
+        self.assertIn("A2 2.10 4.00 0.50 6.20", text)
+
+    def test_blank_lrud_round_trips_as_the_stations_real_size(self):
+        # A4->A2 comes back carrying A2's passage size. That's correct: the
+        # passage at A2 is the same whichever shot you arrived on.
+        rows, _ = parse("Compass")
+        _, text = self._write(rows)
+        back, _ = fio.parse_survex(text)
+        arriving_at_a2 = [r for r in back if r["to_name"] == "A2"]
+        self.assertTrue(arriving_at_a2)
+        for row in arriving_at_a2:
+            self.assertAlmostEqual(float(row["left"]), 2.10, places=2)
+
+    def test_contradictory_lrud_is_reported_not_silently_dropped(self):
+        rows = [
+            fio._row("A1", "A2", 10, 90, 0, 2.0, 3.0, 1.0, 4.0),
+            fio._row("A3", "A2", 12, 180, 0, 9.0, 9.0, 9.0, 9.0),
+        ]
+        warnings, text = self._write(rows)
+        self.assertEqual(len(warnings), 1)
+        self.assertIn("A2", warnings[0])
+        # The message has to name both shots so the surveyor can go fix the
+        # data, and say which one was kept.
+        self.assertIn("A1", warnings[0])
+        self.assertIn("A3", warnings[0])
+        # First one wins; the loser must not also be written.
+        self.assertIn("A2 2.00 3.00 1.00 4.00", text)
+        self.assertNotIn("9.00", text)
+
+    def test_identical_lrud_from_two_shots_is_not_a_conflict(self):
+        rows = [
+            fio._row("A1", "A2", 10, 90, 0, 2.0, 3.0, 1.0, 4.0),
+            fio._row("A3", "A2", 12, 180, 0, 2.0, 3.0, 1.0, 4.0),
+        ]
+        warnings, _ = self._write(rows)
+        self.assertEqual(warnings, [])
+
+
+class TestWriterContract(unittest.TestCase):
+    """Every writer returns a warnings list, so the app can stay format-blind."""
+
+    def setUp(self):
+        self.rows, _ = parse("Compass")
+        self.tmp = tempfile.mkdtemp(prefix="cavesurvey-contract-")
+
+    def test_all_writers_return_a_list(self):
+        for fmt, ext in (("Compass", ".dat"), ("Walls", ".srv"),
+                         ("Survex", ".svx")):
+            with self.subTest(fmt=fmt):
+                result = fio.WRITERS[fmt](
+                    self.rows, HEADER, os.path.join(self.tmp, "w" + ext))
+                self.assertIsInstance(result, list)
+
+    def test_notes_with_newlines_cannot_break_a_survex_line(self):
+        rows = [fio._row("A1", "A2", 10, 90, 0, 0, 0, 0, 0,
+                         "line one\nline two")]
+        path = os.path.join(self.tmp, "note.svx")
+        fio.write_survex(rows, HEADER, path)
+        with open(path) as fh:
+            body = [ln for ln in fh.read().splitlines()
+                    if ln and not ln.startswith((";", "*"))]
+        self.assertEqual(len(body), 1)
+        self.assertIn("line one line two", body[0])
 
 
 @unittest.skipUnless(HAVE_EZDXF, "ezdxf not installed (see tests/README.md)")
