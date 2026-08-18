@@ -89,6 +89,7 @@
 //                re-running any of these tools to continue a survey
 //                from that exact station.
 
+include("scripts/EAction.js");
 include("scripts/simple.js");
 
 var ALIGNMENT_LAYER = "ALIGNMENT";
@@ -824,4 +825,35 @@ function importNativeCaveSurvey() {
     resolveAndDraw(doc, shots, fixedStations, formatLabel);
 }
 
-importNativeCaveSurvey();
+// ============================================================
+// Addon wiring -- turns the function above into a launchable
+// button/menu item/command instead of code that runs immediately
+// on load. The parsers and drawing logic above are untouched.
+// ============================================================
+
+function ImportNativeCaveSurvey(guiAction) {
+    EAction.call(this, guiAction);
+}
+
+ImportNativeCaveSurvey.prototype = new EAction();
+
+// Called when the tool is launched from its button, menu item, or
+// command. Runs the (unchanged) import function once, then terminates.
+ImportNativeCaveSurvey.prototype.beginEvent = function() {
+    EAction.prototype.beginEvent.call(this);
+    importNativeCaveSurvey();
+    this.terminate();
+};
+
+// Called once by QCAD at startup to register the button/menu item.
+ImportNativeCaveSurvey.init = function(basePath) {
+    var action = new RGuiAction(qsTr("Import Native Cave Survey"), RMainWindowQt.getMainWindow());
+    action.setRequiresDocument(true);
+    action.setScriptFile(basePath + "/ImportNativeCaveSurvey.js");
+    action.setIcon(basePath + "/ImportNativeCaveSurvey.svg");
+    action.setStatusTip(qsTr("Import a Walls (.srv), Compass (.dat), or Survex (.svx) survey file and draw it"));
+    action.setDefaultCommands(["importcavesurvey", "ics"]);
+    action.setGroupSortOrder(450);
+    action.setSortOrder(20);
+    action.setWidgetNames(["CaveSurveyMenu", "CaveSurveyToolBar"]);
+};

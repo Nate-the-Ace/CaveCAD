@@ -12,7 +12,8 @@ Requires: Python 3, tkinter (usually bundled with Python), matplotlib, ezdxf.
 Run:
   python3 cave_survey_app.py
 
-By default this looks for NSS_Cave_Template_PLAN.dxf in the same folder as
+By default this looks for NSS_Cave_Template_PLAN.dxf in ../templates/ (and,
+for a loose copy of the app, in the same folder as
 this script. If it isn't found, you'll be asked to locate it once.
 """
 
@@ -428,6 +429,14 @@ class CaveSurveyApp:
 
 def find_template():
     script_dir = os.path.dirname(os.path.abspath(__file__))
+    # templates/ sits beside app/ in the repo; also accept a copy dropped next
+    # to the script, for someone who just downloaded the app on its own.
+    for candidate in (
+        os.path.join(script_dir, os.pardir, "templates", TEMPLATE_FILENAME),
+        os.path.join(script_dir, TEMPLATE_FILENAME),
+    ):
+        if os.path.exists(candidate):
+            return os.path.normpath(candidate)
     candidate = os.path.join(script_dir, TEMPLATE_FILENAME)
     if os.path.isfile(candidate):
         return candidate
@@ -440,7 +449,7 @@ def main():
     if template_path is None:
         messagebox.showinfo(
             "Locate Template",
-            f"Couldn't find {TEMPLATE_FILENAME} next to this script.\n"
+            f"Couldn't find {TEMPLATE_FILENAME} in the templates folder.\n"
             "Please locate it now."
         )
         template_path = filedialog.askopenfilename(

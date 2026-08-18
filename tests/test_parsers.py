@@ -25,7 +25,9 @@ import tempfile
 import unittest
 
 REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-sys.path.insert(0, REPO)
+TESTDATA = os.path.join(REPO, "testdata")
+TEMPLATES = os.path.join(REPO, "templates")
+sys.path.insert(0, os.path.join(REPO, "app"))
 
 import format_io as fio  # noqa: E402
 
@@ -48,7 +50,7 @@ FIXTURES = {
 
 
 def read_fixture(fmt):
-    with open(os.path.join(REPO, FIXTURES[fmt])) as fh:
+    with open(os.path.join(TESTDATA, FIXTURES[fmt])) as fh:
         return fh.read()
 
 
@@ -295,7 +297,7 @@ class TestDxfBuild(unittest.TestCase):
         self.tmp = tempfile.mkdtemp(prefix="cavesurvey-dxf-")
         self.out = os.path.join(self.tmp, "out.dxf")
         self.resolved, self.stations, self.errors = sc.build_dxf(
-            os.path.join(REPO, "NSS_Cave_Template_PLAN.dxf"),
+            os.path.join(TEMPLATES, "NSS_Cave_Template_PLAN.dxf"),
             self.out, HEADER, "A1", 0.0, 0.0, self.rows,
         )
 

@@ -19,6 +19,9 @@
 
 include("scripts/simple.js");
 
+// The add-on copy is the source of truth; this path is relative to the repo root.
+var ADDON_TOOL = "scripts/CaveSurvey/ImportNativeCaveSurvey/ImportNativeCaveSurvey.js";
+
 function readWhole(path) {
     var f = new QFile(path);
     if (!f.open(QIODevice.ReadOnly | QIODevice.Text)) {
@@ -47,7 +50,7 @@ function findRepoRoot() {
     }
     for (var c = 0; c < candidates.length; c++) {
         var dir = candidates[c].replace(/\/+$/, "") + "/";
-        if (new QFileInfo(dir + "ImportNativeCaveSurvey.js").exists()) {
+        if (new QFileInfo(dir + ADDON_TOOL).exists()) {
             return new QFileInfo(dir).absoluteFilePath() + "/";
         }
     }
@@ -85,7 +88,7 @@ if (repo === null) {
     //
     // Either way we only want the parsers, so cut the file at whichever
     // marker comes first and drop the EAction include.
-    var jsPath = jsToolPath === null ? repo + "ImportNativeCaveSurvey.js" : jsToolPath;
+    var jsPath = jsToolPath === null ? repo + ADDON_TOOL : jsToolPath;
     print("### using " + jsPath);
     var src = readWhole(jsPath);
     src = src.replace(/^\s*include\("scripts\/EAction\.js"\);\s*$/m, "");
@@ -102,9 +105,9 @@ if (repo === null) {
     eval(src);
 
     var CASES = [
-        { label: "Compass", file: "TestCave_Compass.dat", parse: parseCompassDat },
-        { label: "Walls",   file: "TestCave_Walls.srv",   parse: parseWallsSrv },
-        { label: "Survex",  file: "TestCave_Survex.svx",  parse: parseSurvexSvx }
+        { label: "Compass", file: "testdata/TestCave_Compass.dat", parse: parseCompassDat },
+        { label: "Walls",   file: "testdata/TestCave_Walls.srv",   parse: parseWallsSrv },
+        { label: "Survex",  file: "testdata/TestCave_Survex.svx",  parse: parseSurvexSvx }
     ];
 
     for (var c = 0; c < CASES.length; c++) {

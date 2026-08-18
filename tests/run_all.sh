@@ -20,18 +20,36 @@ fi
 status=0
 
 echo "=============================================================="
-echo " 1/2  Python unit tests (format_io, survey_core)"
+echo " 1/3  Python unit tests (parsers, DXF output, add-on layout)"
 echo "=============================================================="
 "$PY" -m unittest discover -s tests -v || status=1
 
+QCAD="/Applications/QCAD.app/Contents/Resources/qcad"
+
 echo
 echo "=============================================================="
-echo " 2/2  Differential test (QCAD JS parsers vs Python parsers)"
+echo " 2/3  Add-on syntax check (inside QCAD's own script engine)"
 echo "=============================================================="
-if [ -e "/Applications/QCAD.app/Contents/Resources/qcad" ]; then
+if [ -e "$QCAD" ]; then
+    output=$("$QCAD" -no-dock-icon -no-gui -allow-multiple-instances \
+                 -autostart tests/js_syntax.js "$PWD" 2>/dev/null)
+    echo "$output"
+    case "$output" in
+        *"### SYNTAX OK"*) ;;
+        *) echo "Add-on syntax check did not pass."; status=1 ;;
+    esac
+else
+    echo "SKIP: QCAD not found at $QCAD"
+fi
+
+echo
+echo "=============================================================="
+echo " 3/3  Differential test (QCAD JS parsers vs Python parsers)"
+echo "=============================================================="
+if [ -e "$QCAD" ]; then
     "$PY" tests/differential.py || status=1
 else
-    echo "SKIP: QCAD not found at /Applications/QCAD.app -- pass --qcad to"
+    echo "SKIP: QCAD not found at $QCAD -- pass --qcad to"
     echo "      tests/differential.py manually if it lives elsewhere."
 fi
 

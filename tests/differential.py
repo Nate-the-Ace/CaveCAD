@@ -21,7 +21,8 @@ import subprocess
 import sys
 
 REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-sys.path.insert(0, REPO)
+TESTDATA = os.path.join(REPO, "testdata")
+sys.path.insert(0, os.path.join(REPO, "app"))
 
 import format_io as fio  # noqa: E402
 
@@ -75,7 +76,7 @@ def run_python():
     for fmt, fixture in (("Compass", "TestCave_Compass.dat"),
                          ("Walls", "TestCave_Walls.srv"),
                          ("Survex", "TestCave_Survex.svx")):
-        with open(os.path.join(REPO, fixture)) as fh:
+        with open(os.path.join(TESTDATA, fixture)) as fh:
             results[fmt] = fio.PARSERS[fmt](fh.read())[0]
     return results
 
@@ -113,9 +114,9 @@ def main():
     ap.add_argument("--qcad", default=DEFAULT_QCAD,
                     help="path to QCAD's bundled launcher (default: %(default)s)")
     ap.add_argument("--js", default=None, metavar="PATH",
-                    help="ImportNativeCaveSurvey.js to test (default: the copy "
-                         "beside the fixtures). Point this at the CaveSurvey "
-                         "add-on copy to check that generation instead.")
+                    help="ImportNativeCaveSurvey.js to test. Defaults to the "
+                         "add-on copy under scripts/CaveSurvey/; point this "
+                         "elsewhere to check another copy.")
     args = ap.parse_args()
 
     if not os.path.exists(args.qcad):

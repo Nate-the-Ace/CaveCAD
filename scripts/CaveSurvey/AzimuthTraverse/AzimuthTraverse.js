@@ -21,17 +21,26 @@
 //          position is used and no duplicate marker is ever drawn there.
 //          If its name is readable, that name is used automatically with
 //          no further prompt; if not, you're asked for a name, but the
-//          point itself still isn't re-drawn.
+//          point itself still isn't re-drawn. LRUD is NOT asked again
+//          here, since an existing station should already have it from
+//          whenever it was first created as a TO station.
 //        - If you selected a line/arc/polyline, you'll be asked which
 //          of its two endpoints to continue from, then asked for a
 //          name (a line endpoint isn't itself a named station).
 //        - Otherwise, you'll be asked for a name, then typed X/Y
-//          coordinates.
+//          coordinates. Since this creates a brand new starting station,
+//          you'll ALSO be asked for its Left/Right/Up/Down right after
+//          entering the first shot's azimuth (see step 2) -- this is the
+//          only case where a station's LRUD is asked before its shot's
+//          distance, since otherwise the very first station's LRUD would
+//          never be captured at all.
 //   2. For each shot, prompts appear in this order:
 //        name for the new station (pre-filled with the previous
 //        name's trailing number incremented, e.g. A1 -> A2) ->
-//        Azimuth -> Distance -> Inclination -> Left -> Right -> Up ->
-//        Down. Enter 0 (or cancel) for any numeric field you don't
+//        Azimuth -> [first shot of a new traverse only: Left -> Right ->
+//        Up -> Down for the STARTING station, see step 1] -> Distance ->
+//        Inclination -> Left -> Right -> Up -> Down (for the new TO
+//        station). Enter 0 (or cancel) for any numeric field you don't
 //        have -- this does NOT stop the traverse, only Cancel on
 //        Azimuth/Distance does that.
 //   3. Press Cancel on the Azimuth or Distance prompt to stop.
@@ -45,17 +54,25 @@
 //   text shown next to each point is the name plus elevation, if
 //   nonzero.
 //
-// LAYERS:
-//   ALIGNMENT -- centerline shot lines only.
-//   LRUD      -- LRUD tick lines and U/D text labels.
-//   STATIONS  -- a POINT entity at every station (start + each shot's
-//                endpoint), plus a text label where a name was given.
-//                Station points carry the name as a custom property
-//                ("CaveSurvey"/"Station") for future table-building
-//                scripts, and can be selected before re-running this
-//                tool (or the CSV/native importers) to continue a
-//                traverse from that exact station.
-//   All three layers are created automatically if missing.
+// LAYERS: (matching the NSS Cave Template's CTRL- control layers)
+//   CTRL-SHOTS         -- centerline shot lines only.
+//   CTRL-LRUD          -- LRUD tick lines, plus a POINT entity at the tip
+//                         of each tick, tagged with a lookup name
+//                         ("CaveSurvey"/"LRUDName", e.g. "A1.L" / "A1.R")
+//                         for future scripts (e.g. LRUDWalls.js) to find
+//                         by name instead of recomputing offsets. Not
+//                         present in the template -- created automatically,
+//                         following its CTRL- naming convention.
+//   CTRL-STATIONS      -- a POINT entity at every station (start + each
+//                         shot's endpoint). Station points carry the name
+//                         as a custom property ("CaveSurvey"/"Station")
+//                         for future table-building scripts, and can be
+//                         selected before re-running this tool (or the
+//                         CSV/native importers) to continue a traverse
+//                         from that exact station.
+//   CTRL-STATION-LABELS -- station name/elevation text, and the LRUD
+//                         U/D text note.
+//   All four layers are created automatically if missing.
 //
 // AZIMUTH / LRUD CONVENTION:
 //   Azimuth: standard surveying convention, clockwise from north.
@@ -65,27 +82,23 @@
 //     Drawn as short perpendicular tick lines at the TO station.
 //   U/D: vertical dimensions, can't be drawn in plan view -- placed
 //     as a text label ("U#.## D#.##") next to the TO station.
-//   LRUD is associated with the TO station (far end) of each shot.
+//   LRUD is associated with the TO station (far end) of each shot,
+//   EXCEPT for the very first station of a freshly-created traverse,
+//   which has no incoming shot to attach LRUD to -- its LRUD is asked
+//   right after the first shot's azimuth is entered, using that
+//   azimuth as the direction reference (see step 1/2 above).
 //
-// STATION SYMBOL:
-//   Station points are inserted as references to the "SYM_FIXED_POINT"
-//   block, which must already exist in the drawing (angle 0, uniform
-//   scale set by STATION_BLOCK_SCALE below). If that block isn't found,
-//   this falls back to a plain point entity instead, with a one-time
-//   warning -- so a missing block never breaks the traverse, it just
-//   won't look like your usual symbol.
-//
-// TEXT_HEIGHT below controls the size of text labels -- adjust it to
-// suit your drawing's units/scale.
+// TEXT_HEIGHT below controls the size of text labels and the point
+// display size -- adjust it to suit your drawing's units/scale.
 
+include("scripts/EAction.js");
 include("scripts/simple.js");
 
 var TEXT_HEIGHT = 0.5;
-var ALIGNMENT_LAYER = "ALIGNMENT";
-var LRUD_LAYER = "LRUD";
-var STATIONS_LAYER = "STATIONS";
-var STATION_BLOCK_NAME = "SYM_FIXED_POINT";
-var STATION_BLOCK_SCALE = 1.0; // adjust to suit the block's inherent size vs. your drawing scale
+var ALIGNMENT_LAYER = "CTRL-SHOTS";
+var LRUD_LAYER = "CTRL-LRUD"; // not in the template -- created fresh, following its CTRL- naming convention
+var STATIONS_LAYER = "CTRL-STATIONS";
+var STATION_LABELS_LAYER = "CTRL-STATION-LABELS";
 
 function ensureLayer(name, colorName) {
     if (!hasLayer(name)) {
@@ -94,31 +107,10 @@ function ensureLayer(name, colorName) {
 }
 
 function ensureAllLayers() {
-    ensureLayer(ALIGNMENT_LAYER, "white");
+    ensureLayer(ALIGNMENT_LAYER, "gray");
     ensureLayer(LRUD_LAYER, "yellow");
     ensureLayer(STATIONS_LAYER, "red");
-}
-
-// Inserts a reference to the STATION_BLOCK_NAME block at the given
-// position (angle 0, uniform STATION_BLOCK_SCALE). Falls back to a
-// plain point (with a one-time warning) if that block doesn't exist
-// in this drawing, so a missing block never breaks the traverse.
-var stationBlockMissingWarned = false;
-function addStationSymbol(doc, pos) {
-    var block = doc.queryBlock(STATION_BLOCK_NAME);
-    if (isNull(block)) {
-        if (!stationBlockMissingWarned) {
-            warning("AzimuthTraverse: block \"" + STATION_BLOCK_NAME +
-                "\" not found in this drawing -- falling back to plain points.");
-            stationBlockMissingWarned = true;
-        }
-        return addPoint(pos);
-    }
-    var blockId = block.getId();
-    var scaleVec = new RVector(STATION_BLOCK_SCALE, STATION_BLOCK_SCALE);
-    var bd = new RBlockReferenceData(blockId, pos, scaleVec, 0, 1, 1, 1, 1);
-    var blockRef = new RBlockReferenceEntity(doc, bd);
-    return addEntity(blockRef);
+    ensureLayer(STATION_LABELS_LAYER, "red");
 }
 
 // Best-effort tag of station data onto a point entity so a future
@@ -156,15 +148,14 @@ function tagStationPoint(entity, data) {
 
 // Draws a station point on STATIONS_LAYER and tags it with the full
 // set of shot data that produced it (name, inclination, LRUD,
-// running elevation). Label text is the name plus elevation (if
-// nonzero), offset in the direction implied by azimuthDeg (or a
-// fixed default offset if azimuthDeg is undefined, e.g. the very
-// first station).
+// running elevation). Label text (on STATION_LABELS_LAYER) is the name
+// plus elevation (if nonzero), offset in the direction implied by
+// azimuthDeg (or a fixed default offset if azimuthDeg is undefined,
+// e.g. the very first station).
 function drawStationPoint(pos, name, azimuthDeg, shotData) {
-    var doc = getDocument();
-    startTransaction(doc);
+    startTransaction(getDocument());
     setCurrentLayer(STATIONS_LAYER);
-    var pt = addStationSymbol(doc, pos);
+    var pt = addPoint(pos);
 
     var tagData = {
         name: name,
@@ -176,6 +167,7 @@ function drawStationPoint(pos, name, azimuthDeg, shotData) {
         z: shotData ? shotData.z : undefined
     };
     tagStationPoint(pt, tagData);
+    endTransaction();
 
     if (name !== undefined && name !== null && name !== "") {
         var stLabel = name;
@@ -189,10 +181,14 @@ function drawStationPoint(pos, name, azimuthDeg, shotData) {
             pos.x + labelOffset * Math.sin(labelRad),
             pos.y + labelOffset * Math.cos(labelRad)
         );
+        startTransaction(getDocument());
+        setCurrentLayer(STATION_LABELS_LAYER);
         addSimpleText(stLabel, labelPos, TEXT_HEIGHT, 0, "standard",
             RS.VAlignMiddle, RS.HAlignRight, false, false);
+        endTransaction();
     }
-    endTransaction();
+
+    return pt;
 }
 
 // Returns a perpendicular tick line (as [start, end]) at 'station',
@@ -210,19 +206,50 @@ function lrudTick(station, azimuthDeg, side, length) {
     return [station, end];
 }
 
-// Draws LRUD ticks + U/D text on LRUD_LAYER.
-function drawLrud(station, azimuthDeg, left, right, up, down) {
+// Tags a point entity with a lookup name for future scripts (e.g.
+// LRUDWalls.js), under the same "CaveSurvey" custom property group used
+// by station points, but with its own key ("LRUDName") so it doesn't
+// collide with the "Station" tag. Silently does nothing if custom
+// properties aren't available in this context.
+function tagLrudPoint(entity, name) {
+    if (entity === undefined || entity === null) {
+        return;
+    }
+    if (typeof entity.setCustomProperty !== "function") {
+        return;
+    }
+    try {
+        entity.setCustomProperty("CaveSurvey", "LRUDName", name);
+    } catch (e) {
+        // custom properties not supported here -- ignore, non-critical
+    }
+}
+
+// Draws LRUD ticks on LRUD_LAYER and the U/D text note on
+// STATION_LABELS_LAYER. Also drops a named point at the tip of each
+// tick (e.g. "A1.L" / "A1.R") so a future script (LRUDWalls.js) can
+// look walls up by station name instead of recomputing offsets.
+function drawLrud(station, azimuthDeg, left, right, up, down, name) {
     startTransaction(getDocument());
     setCurrentLayer(LRUD_LAYER);
 
     var leftTick = lrudTick(station, azimuthDeg, "L", left);
     if (leftTick !== null) {
         addLine(leftTick[0], leftTick[1]);
+        if (name !== undefined && name !== null && name !== "") {
+            var leftPt = addPoint(leftTick[1]);
+            tagLrudPoint(leftPt, name + ".L");
+        }
     }
     var rightTick = lrudTick(station, azimuthDeg, "R", right);
     if (rightTick !== null) {
         addLine(rightTick[0], rightTick[1]);
+        if (name !== undefined && name !== null && name !== "") {
+            var rightPt = addPoint(rightTick[1]);
+            tagLrudPoint(rightPt, name + ".R");
+        }
     }
+    endTransaction();
 
     if (up !== 0 || down !== 0) {
         var udText = "U" + up.toFixed(2) + " D" + down.toFixed(2);
@@ -232,10 +259,12 @@ function drawLrud(station, azimuthDeg, left, right, up, down) {
             station.x + noteOffset * Math.sin(noteRad),
             station.y + noteOffset * Math.cos(noteRad)
         );
+        startTransaction(getDocument());
+        setCurrentLayer(STATION_LABELS_LAYER);
         addSimpleText(udText, notePos, TEXT_HEIGHT, 0, "standard",
             RS.VAlignMiddle, RS.HAlignLeft, false, false);
+        endTransaction();
     }
-    endTransaction();
 }
 
 // Tries to derive a starting point from the current selection.
@@ -397,8 +426,9 @@ function azimuthTraverse() {
 
     ensureAllLayers();
 
+    var startPointEntity;
     if (!startPointAlreadyExists) {
-        drawStationPoint(current, startName, undefined, { z: currentZ });
+        startPointEntity = drawStationPoint(current, startName, undefined, { z: currentZ });
     }
 
     while (true) {
@@ -423,6 +453,47 @@ function azimuthTraverse() {
         );
         if (azimuth === undefined) {
             break;
+        }
+
+        // One-time only: the very first station of a freshly-created
+        // traverse never gets asked for LRUD anywhere else, since LRUD
+        // is normally captured for the TO station of each shot. Ask for
+        // it now, using the first shot's azimuth as the only available
+        // direction reference. Skip this if we resumed from an existing
+        // station -- its LRUD should already have been captured whenever
+        // it was originally created as a TO station in an earlier run.
+        if (count === 0 && !startPointAlreadyExists) {
+            var startLeft = getDouble("Azimuth Traverse",
+                "Start station (" + fromLabel + ")\nLeft:", 0.0, 4, 0, 1000000000);
+            if (startLeft === undefined) {
+                startLeft = 0.0;
+            }
+            var startRight = getDouble("Azimuth Traverse",
+                "Start station (" + fromLabel + ")\nRight:", 0.0, 4, 0, 1000000000);
+            if (startRight === undefined) {
+                startRight = 0.0;
+            }
+            var startUp = getDouble("Azimuth Traverse",
+                "Start station (" + fromLabel + ")\nUp:", 0.0, 4, 0, 1000000000);
+            if (startUp === undefined) {
+                startUp = 0.0;
+            }
+            var startDown = getDouble("Azimuth Traverse",
+                "Start station (" + fromLabel + ")\nDown:", 0.0, 4, 0, 1000000000);
+            if (startDown === undefined) {
+                startDown = 0.0;
+            }
+
+            drawLrud(current, azimuth, startLeft, startRight, startUp, startDown, startName);
+
+            if (startPointEntity !== undefined) {
+                tagStationPoint(startPointEntity, {
+                    left: startLeft,
+                    right: startRight,
+                    up: startUp,
+                    down: startDown
+                });
+            }
         }
 
         var distance = getDouble(
@@ -478,7 +549,7 @@ function azimuthTraverse() {
         addLine(current, next);
         endTransaction();
 
-        drawLrud(next, azimuth, left, right, up, down);
+        drawLrud(next, azimuth, left, right, up, down, toName);
         drawStationPoint(next, toName, azimuth, {
             inclination: inclination,
             left: left,
@@ -499,4 +570,37 @@ function azimuthTraverse() {
     }
 }
 
-azimuthTraverse();
+// ============================================================
+// Addon wiring -- turns the function above into a launchable
+// button/menu item/command instead of code that runs immediately
+// on load. The actual traverse logic above is untouched.
+// ============================================================
+
+function AzimuthTraverse(guiAction) {
+    EAction.call(this, guiAction);
+}
+
+AzimuthTraverse.prototype = new EAction();
+
+// Called when the tool is launched from its button, menu item, or
+// command. Runs the (unchanged) interactive traverse function once,
+// then terminates -- same pattern QCAD uses for one-shot tools like
+// auto zoom.
+AzimuthTraverse.prototype.beginEvent = function() {
+    EAction.prototype.beginEvent.call(this);
+    azimuthTraverse();
+    this.terminate();
+};
+
+// Called once by QCAD at startup to register the button/menu item.
+AzimuthTraverse.init = function(basePath) {
+    var action = new RGuiAction(qsTr("Azimuth Traverse"), RMainWindowQt.getMainWindow());
+    action.setRequiresDocument(true);
+    action.setScriptFile(basePath + "/AzimuthTraverse.js");
+    action.setIcon(basePath + "/AzimuthTraverse.svg");
+    action.setStatusTip(qsTr("Interactive azimuth/distance/inclination traverse entry with LRUD and station tagging"));
+    action.setDefaultCommands(["azimuthtraverse", "azt"]);
+    action.setGroupSortOrder(450);
+    action.setSortOrder(10);
+    action.setWidgetNames(["CaveSurveyMenu", "CaveSurveyToolBar"]);
+};
