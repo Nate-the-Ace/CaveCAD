@@ -15,6 +15,13 @@ tests/js_syntax.js -- see tests/README.md.
 import os
 import re
 import unittest
+import xml.etree.ElementTree as ElementTree
+
+# Some things are only required to ship, not to develop. A tool with no icon is
+# perfectly usable from the menu and the command line while it's being written;
+# it just can't go out that way. Those checks live in TestPublishReadiness and
+# stay off by default -- see tests/README.md.
+PUBLISH_CHECK = os.environ.get("CAVESURVEY_PUBLISH_CHECK") == "1"
 
 REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 ADDON = os.path.join(REPO, "scripts", "CaveSurvey")
@@ -108,13 +115,42 @@ class TestAddonLayout(unittest.TestCase):
                 self.assertIsNotNone(
                     find_int(tool_source(name), "action.setSortOrder"))
 
-    @unittest.expectedFailure
+
+@unittest.skipUnless(PUBLISH_CHECK,
+                     "publish check -- run with CAVESURVEY_PUBLISH_CHECK=1, "
+                     "or ./tests/run_all.sh --publish")
+class TestPublishReadiness(unittest.TestCase):
+    """
+    Requirements for shipping the add-on to other people, not for working on it.
+
+    A missing icon doesn't stop a tool working, so it shouldn't fail the day-to-
+    day suite -- but a released toolbar with blank buttons on it is not
+    something to hand a surveyor.
+    """
+
     def test_every_tool_has_an_icon(self):
-        # KNOWN GAP: LRUDWalls and GeoAnchor have no .svg yet, so they show up
-        # on the toolbar as blank buttons. Drop the decorator once they do.
         missing = [name for name in tool_dirs()
                    if "setIcon(" not in tool_source(name)]
-        self.assertEqual(missing, [])
+        self.assertEqual(missing, [], "no toolbar icon: %s" % missing)
+
+    def test_every_icon_is_parseable_svg(self):
+        # A file QCAD can't parse renders exactly like a missing one.
+        for name in tool_dirs():
+            for icon in re.findall(r'setIcon\(basePath \+ "/([^"]+)"\)',
+                                   tool_source(name)):
+                path = os.path.join(ADDON, name, icon)
+                with self.subTest(tool=name, icon=icon):
+                    self.assertTrue(os.path.exists(path))
+                    root = ElementTree.parse(path).getroot()
+                    self.assertTrue(root.tag.endswith("svg"),
+                                    "%s is not an <svg> document" % icon)
+
+    def test_every_tool_has_a_status_tip(self):
+        # This is the one-line explanation shown when hovering the menu entry --
+        # for a layman it's often the only documentation they'll read.
+        for name in tool_dirs():
+            with self.subTest(tool=name):
+                self.assertIn("setStatusTip(", tool_source(name))
 
 
 class TestTemplates(unittest.TestCase):

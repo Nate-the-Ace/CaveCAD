@@ -107,6 +107,8 @@ overwrite real ones, and if two shots genuinely disagree the export says so.
 ./tests/run_all.sh
 ```
 
-See `tests/README.md`. The interesting one is a differential test that runs the
+See `tests/README.md`. `./tests/run_all.sh --publish` additionally checks what
+only matters for a release -- every tool having a toolbar icon and a status tip.
+It currently fails, because `LRUDWalls` and `GeoAnchor` still need icons. The interesting one is a differential test that runs the
 add-on's parsers inside QCAD's own script engine and diffs them against the
 app's Python parsers, so the two implementations can't quietly drift apart.

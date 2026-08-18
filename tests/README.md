@@ -2,7 +2,8 @@
 
 Three layers, cheapest first. Run everything with:
 
-    ./tests/run_all.sh
+    ./tests/run_all.sh             what has to pass while developing
+    ./tests/run_all.sh --publish   also what has to pass before releasing
 
 What is under test, and where it lives:
 
@@ -42,9 +43,22 @@ touched. Only `ImportNativeCaveSurvey`'s parsers get genuinely exercised by the
 differential test; the other five are interactive or GUI-bound, so a syntax
 error in one of them would otherwise surface as a missing menu entry.
 
-One tracked gap: `test_every_tool_has_an_icon` is an `expectedFailure` because
-`LRUDWalls` and `GeoAnchor` have no `.svg` yet and render as blank toolbar
-buttons.
+## Publish checks
+
+Some things are only required to ship, not to develop. A tool with no icon works
+fine from the menu and the command line while it's being written -- it just
+can't go out that way. So `TestPublishReadiness` is off by default and enabled
+by `--publish` (or `CAVESURVEY_PUBLISH_CHECK=1`):
+
+* every tool has a toolbar icon;
+* every referenced icon is parseable SVG, since a file QCAD can't parse renders
+  exactly like a missing one;
+* every tool has a status tip -- the one-line hover text that, for a layman, is
+  often the only documentation they read.
+
+Right now `--publish` fails: `LRUDWalls` and `GeoAnchor` have no `.svg` yet.
+That's expected during development and is the list to work through before a
+release.
 
 ## Layer 1 -- `test_parsers.py`
 

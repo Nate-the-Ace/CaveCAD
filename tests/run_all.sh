@@ -4,9 +4,28 @@
 #
 # Uses .venv/bin/python if a venv exists (so the ezdxf-dependent DXF tests
 # run), otherwise falls back to system python3 and skips those.
+#
+#   ./tests/run_all.sh             what has to pass while developing
+#   ./tests/run_all.sh --publish   also what has to pass before releasing
+#                                  (toolbar icons, status tips)
 
 set -u
 cd "$(dirname "${BASH_SOURCE[0]}")/.." || exit 1
+
+# Icons aren't needed to develop a tool, only to ship it -- so those checks are
+# opt-in rather than a standing failure. See TestPublishReadiness.
+case "${1:-}" in
+    --publish)
+        export CAVESURVEY_PUBLISH_CHECK=1
+        echo "Publish checks ENABLED (toolbar icons, status tips)."
+        echo
+        ;;
+    "") ;;
+    *)
+        echo "usage: $0 [--publish]" >&2
+        exit 2
+        ;;
+esac
 
 if [ -x ".venv/bin/python" ]; then
     PY=".venv/bin/python"
@@ -55,7 +74,11 @@ fi
 
 echo
 if [ "$status" -eq 0 ]; then
-    echo "ALL TESTS PASSED"
+    if [ -n "${CAVESURVEY_PUBLISH_CHECK:-}" ]; then
+        echo "ALL TESTS PASSED -- including publish checks"
+    else
+        echo "ALL TESTS PASSED (publish checks not run; use --publish)"
+    fi
 else
     echo "FAILURES ABOVE"
 fi
