@@ -36,7 +36,16 @@ over the shared fixtures and diffs every field.
 
     python3 tests/differential.py
 
-It exits non-zero on any mismatch, so it works as a pre-commit or CI gate.
+It exits non-zero on any mismatch, so it works as a pre-commit or CI gate. If
+QCAD can't be driven headless it prints `SKIP` and exits 0 rather than failing
+the suite -- see the edition note below.
+
+Two generations of the QCAD scripts exist: the standalone ones in this repo
+(run via **Misc > Development > Run Script...**) and the `CaveSurvey/` add-on
+copies with menu/toolbar wiring. The parsers are identical between them; only
+the entry point differs. Check whichever you like:
+
+    python3 tests/differential.py --js /path/to/CaveSurvey/ImportNativeCaveSurvey/ImportNativeCaveSurvey.js
 This test is what caught the metres/feet split that the unit conversion in
 `format_io.to_drawing_units()` now fixes: the JS converted Survex's default
 metres to feet, Python didn't, and the same file plotted 3.28x different.
@@ -51,6 +60,19 @@ real tool runs in -- with no GUI and no dialogs:
         -no-dock-icon -no-gui -allow-multiple-instances \
         -autostart tests/js_parsers.js "$PWD"
 
+### QCAD edition
+
+The tools themselves need only QCAD **Community**: they use `scripts/simple.js`,
+`RVector`, `RLineweight` and `RBlockReference*`, all core API, plus `EAction`
+and `RGuiAction` for the add-on generation's menu wiring. Nothing Pro-only.
+
+The headless harness below is developer tooling, not something a surveyor runs,
+and it has only been verified against a **Pro** install (the one on this
+machine ships `libqcadproscripts` and `libqcadprojsapi`). Whether Community
+supports `-no-gui` with `-autostart` is untested. If it doesn't,
+`differential.py` skips cleanly and the parsers can still be checked by hand
+in the GUI.
+
 Notes on driving QCAD headless, all learned the hard way:
 
 * Use the launcher at `QCAD.app/Contents/Resources/qcad`, not the binary in
@@ -64,9 +86,12 @@ Notes on driving QCAD headless, all learned the hard way:
 * `qApp.quit()` doesn't exist either; the process exits when the script
   returns. The "Unimplemented code" warnings on stderr are `-no-gui` stubs
   and are harmless.
-* Each tool script ends in a bare call to its own `main()`, which would block
-  on a `QFileDialog` that can't exist under `-no-gui`. The harness reads the
-  file, strips that trailing call, and `eval`s the rest.
+* Each tool script ends in a GUI entry point the harness has to cut away
+  before `eval`: the standalone generation ends in a bare call to its own
+  `main()`, which would block on a `QFileDialog` that can't exist under
+  `-no-gui`; the add-on generation instead ends in `EAction` wiring that
+  touches `RGuiAction` and `RMainWindowQt`, which don't exist headless. The
+  harness handles both.
 
 ## Survex export limits
 

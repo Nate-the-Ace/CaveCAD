@@ -54,15 +54,51 @@ function findRepoRoot() {
     return null;
 }
 
+// An explicit path to a specific ImportNativeCaveSurvey.js, for checking the
+// CaveSurvey add-on copy rather than the one beside the fixtures.
+function findJsToolOverride() {
+    var args = RSettings.getOriginalArguments();
+    for (var i = 0; i < args.length; i++) {
+        var a = "" + args[i];
+        if (a.indexOf("ImportNativeCaveSurvey.js") >= 0 &&
+            new QFileInfo(a).exists()) {
+            return a;
+        }
+    }
+    return null;
+}
+
 var repo = findRepoRoot();
+var jsToolPath = findJsToolOverride();
 if (repo === null) {
     print("### ERROR repo root not found in arguments -- pass it as the last argument");
 } else {
-    // Load the tool's parsers WITHOUT running its interactive main(): the file
-    // ends in a bare importNativeCaveSurvey() call, which would block on a
-    // QFileDialog that cannot exist under -no-gui.
-    var src = readWhole(repo + "ImportNativeCaveSurvey.js");
-    src = src.replace(/importNativeCaveSurvey\(\);\s*$/, "");
+    // Load the tool's parsers WITHOUT any of its GUI entry points. Two
+    // generations of the script exist and both are handled:
+    //
+    //   * standalone (run via Misc > Development > Run Script...) ends in a
+    //     bare importNativeCaveSurvey() call, which would block on a
+    //     QFileDialog that cannot exist under -no-gui;
+    //   * add-on (CaveSurvey menu/toolbar) instead ends in EAction wiring
+    //     that touches RGuiAction and RMainWindowQt, neither of which exists
+    //     headless.
+    //
+    // Either way we only want the parsers, so cut the file at whichever
+    // marker comes first and drop the EAction include.
+    var jsPath = jsToolPath === null ? repo + "ImportNativeCaveSurvey.js" : jsToolPath;
+    print("### using " + jsPath);
+    var src = readWhole(jsPath);
+    src = src.replace(/^\s*include\("scripts\/EAction\.js"\);\s*$/m, "");
+    var cutMarkers = [
+        /\n[^\n]*Addon wiring[\s\S]*$/,          // add-on generation
+        /\nimportNativeCaveSurvey\(\);\s*$/       // standalone generation
+    ];
+    for (var m = 0; m < cutMarkers.length; m++) {
+        src = src.replace(cutMarkers[m], "\n");
+    }
+    if (/importNativeCaveSurvey\(\)\s*;/.test(src.replace(/function[^\n]*\n/g, ""))) {
+        print("### WARNING a call to importNativeCaveSurvey() may still remain");
+    }
     eval(src);
 
     var CASES = [
