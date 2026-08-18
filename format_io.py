@@ -66,6 +66,26 @@ since I don't have access to run those programs.
 import re
 
 
+# Distance-unit handling, kept deliberately identical to
+# ImportNativeCaveSurvey.js's toDrawingUnits() so the QCAD scripts and this
+# app plot the same file at the same scale. Each format supplies its own
+# source unit: Survex defaults to metres, Walls to feet, Compass is always
+# feet -- those defaults come from the formats' own specs, not from us.
+FEET_PER_METER = 3.280839895
+
+DRAWING_DISTANCE_UNIT = "ft"  # must match your QCAD drawing's units
+
+
+def to_drawing_units(value, source_unit):
+    if source_unit == DRAWING_DISTANCE_UNIT:
+        return value
+    if source_unit == "ft" and DRAWING_DISTANCE_UNIT == "m":
+        return value / FEET_PER_METER
+    if source_unit == "m" and DRAWING_DISTANCE_UNIT == "ft":
+        return value * FEET_PER_METER
+    return value
+
+
 def _num(value, default=0.0):
     if value is None:
         return default
@@ -153,8 +173,13 @@ def parse_compass(content):
             if flag_match:
                 notes = (remainder[:flag_match.start()] + remainder[flag_match.end():]).strip()
 
-            rows.append(_row(tokens[0], tokens[1], length, bearing + declination, inc,
-                              left, right, up, down, notes))
+            rows.append(_row(tokens[0], tokens[1],
+                              to_drawing_units(length, "ft"),
+                              bearing + declination, inc,
+                              to_drawing_units(left, "ft"),
+                              to_drawing_units(right, "ft"),
+                              to_drawing_units(up, "ft"),
+                              to_drawing_units(down, "ft"), notes))
 
     return rows, warnings
 
@@ -208,6 +233,7 @@ def parse_walls(content):
     order = ["D", "A", "V"]
     declination = 0.0
     prefix = ""
+    dist_unit = "ft"  # Walls' own default
 
     def apply_prefix(name):
         if name in ("-", ""):
@@ -226,8 +252,10 @@ def parse_walls(content):
             directive = tokens[0].lower()
             if directive == "#units":
                 for tok in tokens[1:]:
-                    if re.match(r"^feet$", tok, re.IGNORECASE):
-                        pass  # feet is our implicit default anyway
+                    if re.match(r"^(feet|ft)$", tok, re.IGNORECASE):
+                        dist_unit = "ft"
+                    elif re.match(r"^(met(er|re)s?|m)$", tok, re.IGNORECASE):
+                        dist_unit = "m"
                     elif re.match(r"^order=", tok, re.IGNORECASE):
                         order = list(tok.split("=", 1)[1].upper())
                     elif re.match(r"^decl(ination)?=", tok, re.IGNORECASE):
@@ -282,8 +310,13 @@ def parse_walls(content):
         if is_splay:
             continue
 
-        rows.append(_row(from_name, to_name, distance, azimuth + declination,
-                          inclination, left, right, up, down))
+        rows.append(_row(from_name, to_name,
+                          to_drawing_units(distance, dist_unit),
+                          azimuth + declination, inclination,
+                          to_drawing_units(left, dist_unit),
+                          to_drawing_units(right, dist_unit),
+                          to_drawing_units(up, dist_unit),
+                          to_drawing_units(down, dist_unit)))
 
     return rows, warnings
 
@@ -327,6 +360,7 @@ def parse_survex(content):
     passage_lrud = {}
 
     prefix_stack = []
+    length_unit = "m"  # Survex's own default
     data_style = None
     normal_fields = ["from", "to", "tape", "compass", "clino"]
     passage_fields = ["station", "left", "right", "up", "down"]
@@ -362,7 +396,14 @@ def parse_survex(content):
                 else:
                     data_style = "other"
             elif cmd == "*units":
-                pass  # length unit not auto-converted here; app assumes feet throughout
+                # Only "*units <quantity...> <unit>" for length is handled;
+                # compass/clino grads are still assumed to be degrees.
+                low = [t.lower() for t in tokens[1:]]
+                if any(q in low for q in ("length", "tape")):
+                    if any(u in low for u in ("feet", "ft")):
+                        length_unit = "ft"
+                    elif any(u in low for u in ("metres", "meters", "metric", "m")):
+                        length_unit = "m"
             continue
 
         fields = line.split()
@@ -381,14 +422,17 @@ def parse_survex(content):
             except ValueError:
                 clino = 0.0
             rows.append(_row(full_name(rec["from"]), full_name(rec["to"]),
-                              tape, compass, clino, 0, 0, 0, 0))
+                              to_drawing_units(tape, length_unit),
+                              compass, clino, 0, 0, 0, 0))
         elif data_style == "passage":
             rec = dict(zip(passage_fields, fields))
             if "station" not in rec:
                 continue
             passage_lrud[full_name(rec["station"])] = {
-                "left": _num(rec.get("left")), "right": _num(rec.get("right")),
-                "up": _num(rec.get("up")), "down": _num(rec.get("down")),
+                "left": to_drawing_units(_num(rec.get("left")), length_unit),
+                "right": to_drawing_units(_num(rec.get("right")), length_unit),
+                "up": to_drawing_units(_num(rec.get("up")), length_unit),
+                "down": to_drawing_units(_num(rec.get("down")), length_unit),
             }
 
     for r in rows:

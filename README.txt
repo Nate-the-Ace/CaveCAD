@@ -47,15 +47,23 @@ IMPORT/EXPORT FORMAT NOTES:
     applied to bearing, fixed FROM TO LENGTH BEARING INC LEFT UP DOWN
     RIGHT column order, "#|X#"/"#|P#" flags supported. NOT supported:
     backsight columns, .MAK projects, multi-file projects.
-  - Walls import: #Units (Feet/Meters noted but not converted -- this app
-    assumes feet throughout; re-scale manually if your file used meters),
-    Order=, Decl=, single-level #Prefix, inline <L,R,U,D> LRUD, splay
-    shots (To = "-") skipped. NOT supported: nested #Prefix stacks,
-    #Fix (use this app's own starting-station fields instead).
+  - Walls import: #Units Feet/Meters (converted to feet), Order=, Decl=,
+    single-level #Prefix, inline <L,R,U,D> LRUD, splay shots (To = "-")
+    skipped. NOT supported: nested #Prefix stacks, #Fix (use this app's
+    own starting-station fields instead).
   - Survex import: *begin/*end hierarchical prefixes (joined with "."),
     *data normal in any field order, *data passage LRUD (matched to
-    stations separately from the leg table, as Survex normally does it).
-    NOT supported: *include, *data diving/cartesian/nosurvey, *calibrate.
+    stations separately from the leg table, as Survex normally does it),
+    *units length feet/metres (converted to feet).
+    NOT supported: *include, *data diving/cartesian/nosurvey, *calibrate,
+    *units compass/clino grads (angles are assumed to be degrees).
+  - UNITS: distances are converted to FEET on import, matching the QCAD
+    scripts' toDrawingUnits() and the NSS template's units. Each format
+    supplies its own default per its own spec -- Survex metres, Walls
+    feet, Compass always feet -- so a Survex file with no *units
+    directive is read as metres and scaled by 3.280839895. If your QCAD
+    drawing is in metres instead, change DRAWING_DISTANCE_UNIT in both
+    format_io.py and ImportNativeCaveSurvey.js.
   - Export writes a single simplified survey in each format using
     whatever's currently in the table (declination is NOT re-applied to
     azimuth on export -- exported as-is). Round-tripping a file through
@@ -92,3 +100,16 @@ KNOWN LIMITATIONS (v1):
   - Declination is recorded but not automatically applied to azimuths.
   - No support yet for editing/re-loading a previously generated DXF back
     into the table.
+  - Survex EXPORT is lossy in three known ways (each tracked by a test in
+    tests/test_parsers.py -- see tests/README.md): station names come back
+    prefixed with the survey designation ("A1" -> "A.A1"); LRUD is shared
+    between any two shots that end at the same station, since *data
+    passage is keyed by station; and notes are written as ";" comments
+    that the importer strips rather than reads back.
+
+TESTING:
+  ./tests/run_all.sh    -- everything (see tests/README.md)
+
+  Includes a differential test that runs the QCAD JS parsers headless
+  inside QCAD's own script engine and diffs them against this app's
+  Python parsers, so the two implementations can't silently drift apart.
