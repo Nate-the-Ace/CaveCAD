@@ -370,17 +370,22 @@ SurveyNotebook.applyTabOrder = function(w) {
     // Station name, the shot's measurements, then the LRUD of the
     // station you are LEAVING, then down the page: name, shot, that
     // station's LRUD, ... The last station's LRUD closes the chain.
-    // Both station names first (the shot's "from -> to" header), then
-    // the measurements, then the LRUD of the station being left.
+    // First segment: both names, the shot, then BOTH stations' LRUD
+    // (the start station's has no other home). Every later segment:
+    // name, shot, then only the NEW station's LRUD -- the previous
+    // station's was filled last cycle and is never revisited.
     var order = [rows[0].name];
-    for (var i = 1; i < rows.length; i++) {
-        var r = rows[i];
-        var from = rows[i - 1];
-        order.push(r.name, r.dist, r.azFs, r.azBs, r.incFs, r.incBs,
-            from.l, from.r, from.u, from.d);
+    if (rows.length > 1) {
+        var r1 = rows[1];
+        order.push(r1.name, r1.dist, r1.azFs, r1.azBs, r1.incFs, r1.incBs,
+            rows[0].l, rows[0].r, rows[0].u, rows[0].d,
+            r1.l, r1.r, r1.u, r1.d);
     }
-    var last = rows[rows.length - 1];
-    order.push(last.l, last.r, last.u, last.d);
+    for (var i = 2; i < rows.length; i++) {
+        var r = rows[i];
+        order.push(r.name, r.dist, r.azFs, r.azBs, r.incFs, r.incBs,
+            r.l, r.r, r.u, r.d);
+    }
     if (w.sentinel !== undefined) {
         order.push(w.sentinel);
     }
