@@ -41,6 +41,15 @@ include("scripts/EAction.js");
 include("scripts/simple.js");
 include(includeBasePath + "/../Core/All.js");
 
+// COMPATIBILITY: the QJSEngine widget bridge exposes a slightly
+// different method set from build to build (e.g. QTableWidget's
+// setHorizontalHeaderLabels is missing before ~3.33). So the panel
+// PROBES the bridge at startup: full table mode when the table API
+// answers, otherwise a text-sheet mode -- one shot per line in the
+// suite's CSV column order, parsed by the same Core CSV reader --
+// so the Notebook works on every build rather than dying on the
+// newest method it touched.
+//
 // The dock is a singleton across invocations; QCAD keeps the script
 // engine alive, so a global holds it.
 var csNotebookDock = csNotebookDock || undefined;
@@ -54,11 +63,69 @@ SurveyNotebook.prototype = new EAction();
 SurveyNotebook.COLUMNS = ["From", "To", "Dist", "Azm", "Inc",
     "L", "R", "U", "D", "Notes"];
 
+/**
+ * True when this build's script bridge supports everything table mode
+ * needs. Probed once with a throwaway table, so a missing method means
+ * a graceful fallback instead of a dead panel.
+ */
+SurveyNotebook.tableSupported = function() {
+    if (typeof QTableWidget === "undefined" ||
+        typeof QTableWidgetItem === "undefined") {
+        return false;
+    }
+    try {
+        var t = new QTableWidget(1, 2);
+        t.setItem(0, 0, new QTableWidgetItem("probe"));
+        if (String(t.item(0, 0).text()) !== "probe") {
+            return false;
+        }
+        t.insertRow(1);
+        t.removeRow(1);
+        if (t.rowCount !== 1) {
+            return false;
+        }
+        SurveyNotebook.setHeaders(t, ["a", "b"]);
+        return true;
+    } catch (e) {
+        return false;
+    }
+};
+
+/** Sets column headers, tolerating older bridges; headers are a
+ *  nicety, so total failure is silently accepted. */
+SurveyNotebook.setHeaders = function(table, labels) {
+    try {
+        table.setHorizontalHeaderLabels(labels);
+        return;
+    } catch (e) {
+        // older bridge: no QStringList overload -- set one by one
+    }
+    try {
+        for (var i = 0; i < labels.length; i++) {
+            table.setHorizontalHeaderItem(i, new QTableWidgetItem(labels[i]));
+        }
+    } catch (e2) {
+        // no headers then; the tooltip documents the columns
+    }
+};
+
+/** Connects a signal, reporting rather than dying when the bridge
+ *  lacks it. Returns true on success. */
+SurveyNotebook.safeConnect = function(signal, fn, what, problems) {
+    try {
+        signal.connect(fn);
+        return true;
+    } catch (e) {
+        problems.push(what + " (" + e + ")");
+        return false;
+    }
+};
+
 // ---------------------------------------------------------------------
 // Table <-> model
 // ---------------------------------------------------------------------
 
-/** Reads the table into a CsModel survey. */
+/** Reads the sheet (table or text mode) into a CsModel survey. */
 SurveyNotebook.surveyFromTable = function(w) {
     var survey = CsModel.newSurvey();
     survey.name = w.nameEdit.text;
@@ -67,6 +134,12 @@ SurveyNotebook.surveyFromTable = function(w) {
     survey.declination = parseFloat(w.declEdit.text) || 0.0;
     survey.declinationSource = w.declSource;
     survey.distanceUnit = w.unit;
+
+    if (w.mode === "text") {
+        var parsed = CsFormatCsv.parse(String(w.editor.toPlainText()));
+        survey.shots = parsed.shots;
+        return survey;
+    }
 
     var t = w.table;
     for (var r = 0; r < t.rowCount; r++) {
@@ -108,7 +181,7 @@ SurveyNotebook.surveyFromTable = function(w) {
     return survey;
 };
 
-/** Fills the table from a CsModel survey (import path). */
+/** Fills the sheet from a CsModel survey (import path). */
 SurveyNotebook.tableFromSurvey = function(w, survey) {
     w.loading = true;
     w.nameEdit.text = survey.name;
@@ -117,6 +190,13 @@ SurveyNotebook.tableFromSurvey = function(w, survey) {
     w.declEdit.text = String(survey.declination || 0);
     w.declSource = survey.declinationSource || "user";
     w.unit = survey.distanceUnit;
+
+    if (w.mode === "text") {
+        w.editor.setPlainText(CsFormatCsv.write(survey));
+        w.loading = false;
+        SurveyNotebook.refresh(w);
+        return;
+    }
 
     var t = w.table;
     t.rowCount = 0;
@@ -396,24 +476,44 @@ SurveyNotebook.buildDock = function(appWin) {
     head2.addWidget(w.inferButton, 0, 0);
     layout.addLayout(head2, 0);
 
-    // ---- the notes-page table ------------------------------------
-    w.table = new QTableWidget(0, SurveyNotebook.COLUMNS.length, body);
-    w.table.setHorizontalHeaderLabels(SurveyNotebook.COLUMNS);
-    w.table.toolTip =
+    // ---- the notes page: table where the bridge allows, text
+    // sheet everywhere else ------------------------------------------
+    var columnHelp =
         "Column order matches a survey notes page.\n" +
         "Azimuth: degrees clockwise from north (true bearing).\n" +
         "Dist: along the tape (slope). Inc: + up, - down.\n" +
         "L/R face the direction of travel; LRUD belongs to the To " +
         "station. Blank LRUD = not measured. To of \"-\" = splay.";
-    layout.addWidget(w.table, 1, 0);
 
-    var rowButtons = new QHBoxLayout();
-    w.addRowButton = new QPushButton("+ Shot");
-    w.delRowButton = new QPushButton("- Shot");
-    rowButtons.addWidget(w.addRowButton, 0, 0);
-    rowButtons.addWidget(w.delRowButton, 0, 0);
-    rowButtons.addStretch(1);
-    layout.addLayout(rowButtons, 0);
+    w.mode = SurveyNotebook.tableSupported() ? "table" : "text";
+
+    if (w.mode === "table") {
+        w.table = new QTableWidget(0, SurveyNotebook.COLUMNS.length, body);
+        SurveyNotebook.setHeaders(w.table, SurveyNotebook.COLUMNS);
+        w.table.toolTip = columnHelp;
+        layout.addWidget(w.table, 1, 0);
+
+        var rowButtons = new QHBoxLayout();
+        w.addRowButton = new QPushButton("+ Shot");
+        w.delRowButton = new QPushButton("- Shot");
+        rowButtons.addWidget(w.addRowButton, 0, 0);
+        rowButtons.addWidget(w.delRowButton, 0, 0);
+        rowButtons.addStretch(1);
+        layout.addLayout(rowButtons, 0);
+    } else {
+        // Text sheet: one shot per line in the CSV column order; the
+        // same Core parser reads it, so nothing downstream differs.
+        w.editor = new QPlainTextEdit(body);
+        w.editor.toolTip = columnHelp;
+        w.editor.setPlainText(
+            "from,to,distance,azimuth,inclination,left,right,up,down,notes\n");
+        layout.addWidget(w.editor, 1, 0);
+        var modeNote = new QLabel(
+            "(text sheet: one shot per line, columns as the header row -- " +
+            "this QCAD build's script bridge lacks the table widget)");
+        modeNote.wordWrap = true;
+        layout.addWidget(modeNote, 0, 0);
+    }
 
     // ---- live status ----------------------------------------------
     w.statusLabel = new QLabel("");
@@ -434,42 +534,55 @@ SurveyNotebook.buildDock = function(appWin) {
     body.setLayout(layout);
     dock.setWidget(body);
 
-    // ---- wiring ------------------------------------------------------
-    w.addRowButton.clicked.connect(function() {
-        var r = w.table.rowCount;
-        w.table.insertRow(r);
-        // pre-fill From with the previous To, the way notes flow
-        if (r > 0) {
-            var prevTo = w.table.item(r - 1, 1);
-            if (prevTo !== null && prevTo !== undefined) {
-                w.table.setItem(r, 0, new QTableWidgetItem(prevTo.text()));
-                w.table.setItem(r, 1, new QTableWidgetItem(
-                    CsModel.nextStationName(String(prevTo.text()))));
+    // ---- wiring: every connect reports rather than dying ----------
+    var problems = [];
+    if (w.mode === "table") {
+        SurveyNotebook.safeConnect(w.addRowButton.clicked, function() {
+            var r = w.table.rowCount;
+            w.table.insertRow(r);
+            // pre-fill From with the previous To, the way notes flow
+            if (r > 0) {
+                var prevTo = w.table.item(r - 1, 1);
+                if (prevTo !== null && prevTo !== undefined) {
+                    w.table.setItem(r, 0, new QTableWidgetItem(prevTo.text()));
+                    w.table.setItem(r, 1, new QTableWidgetItem(
+                        CsModel.nextStationName(String(prevTo.text()))));
+                }
             }
-        }
-    });
-    w.delRowButton.clicked.connect(function() {
-        var r = w.table.currentRow();
-        if (r >= 0) {
-            w.table.removeRow(r);
+        }, "+ Shot button", problems);
+        SurveyNotebook.safeConnect(w.delRowButton.clicked, function() {
+            var r = w.table.currentRow();
+            if (r >= 0) {
+                w.table.removeRow(r);
+                SurveyNotebook.refresh(w);
+            }
+        }, "- Shot button", problems);
+        SurveyNotebook.safeConnect(w.table.cellChanged, function() {
             SurveyNotebook.refresh(w);
-        }
-    });
-    w.table.cellChanged.connect(function() {
-        SurveyNotebook.refresh(w);
-    });
-    w.drawButton.clicked.connect(function() {
+        }, "live refresh", problems);
+    } else {
+        SurveyNotebook.safeConnect(w.editor.textChanged, function() {
+            SurveyNotebook.refresh(w);
+        }, "live refresh", problems);
+    }
+    SurveyNotebook.safeConnect(w.drawButton.clicked, function() {
         SurveyNotebook.drawSurvey(w);
-    });
-    w.importButton.clicked.connect(function() {
+    }, "Draw button", problems);
+    SurveyNotebook.safeConnect(w.importButton.clicked, function() {
         SurveyNotebook.importFile(w);
-    });
-    w.exportButton.clicked.connect(function() {
+    }, "Import button", problems);
+    SurveyNotebook.safeConnect(w.exportButton.clicked, function() {
         SurveyNotebook.exportFile(w);
-    });
-    w.inferButton.clicked.connect(function() {
+    }, "Export button", problems);
+    SurveyNotebook.safeConnect(w.inferButton.clicked, function() {
         SurveyNotebook.inferDeclination(w);
-    });
+    }, "Infer button", problems);
+
+    if (problems.length > 0) {
+        EAction.handleUserWarning("Survey Notebook: this build's script " +
+            "bridge refused: " + problems.join("; ") +
+            " -- those controls are inert; the rest of the panel works.");
+    }
 
     SurveyNotebook.refresh(w);
     return dock;
