@@ -540,10 +540,28 @@ SurveyNotebook.drawSurveyInner = function(w) {
         return;
     }
 
+    // Anchor priority: an explicitly selected station wins; otherwise,
+    // if the page's FIRST station name already exists in the drawing,
+    // the new survey ties into it automatically -- name the tie-in
+    // station on the first line of the notes and the surveys connect,
+    // position and elevation both.
     var anchor;
+    var tieIn = null;
     var sel = CsPick.startPointFromSelection(doc, "Survey Notebook");
     if (sel !== undefined && survey.shots.length > 0) {
         anchor = { name: survey.shots[0].from, x: sel.pos.x, y: sel.pos.y, z: 0 };
+    } else if (survey.shots.length > 0) {
+        var firstName = survey.shots[0].from;
+        var existing = CsTags.collectStations(doc);
+        for (var ei = 0; ei < existing.length; ei++) {
+            if (existing[ei].name === firstName) {
+                var z = CsTags.getNumber(existing[ei].entity, "Elevation");
+                anchor = { name: firstName, x: existing[ei].pos.x,
+                    y: existing[ei].pos.y, z: z === null ? 0 : z };
+                tieIn = firstName;
+                break;
+            }
+        }
     }
 
     var resolved = CsNetwork.resolve(survey, { anchor: anchor });
@@ -555,6 +573,9 @@ SurveyNotebook.drawSurveyInner = function(w) {
     CsDraw.zoomToSurvey(survey, resolved);
 
     QMessageBox.information(null, "Survey Notebook",
+        (tieIn !== null ? ("Tied into existing station " + tieIn +
+            " -- the new survey continues from its position and " +
+            "elevation.\n\n") : "") +
         CsReport.drawSummary(survey, resolved, drawn, findings) +
         "\n\nDrawn as one undo step.");
 };
