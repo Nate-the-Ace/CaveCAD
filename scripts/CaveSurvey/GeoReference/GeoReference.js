@@ -49,19 +49,8 @@ function geoReferenceRun() {
 
     var stationName = CsTags.get(entity, "Station");
 
-    var text = getText("Geo Reference",
-        "Real-world coordinate for " +
-        (stationName !== "" ? ("station " + stationName) : "this point") +
-        ":\n(Google Maps DMS like 39 41'45.8\"N 86 18'34.0\"W, or " +
-        "decimal like 39.6961, -86.3094)", "");
-    if (text === undefined || text === "") {
-        return;
-    }
-    var coord = CsAngles.parseLatLon(text);
+    var coord = CsLocationPick.ask("Geo Reference", "");
     if (coord === null) {
-        warning("Geo Reference: couldn't read that coordinate.\n" +
-            "Expected DMS like 39 41'45.8\"N 86 18'34.0\"W or decimal " +
-            "like 39.6961, -86.3094.");
         return;
     }
 

@@ -27,6 +27,7 @@ include(includeBasePath + "/Layers.js");
 include(includeBasePath + "/Tags.js");
 include(includeBasePath + "/Draw.js");
 include(includeBasePath + "/Pick.js");
+include(includeBasePath + "/LocationPick.js");
 include(includeBasePath + "/Symbols.js");
 include(includeBasePath + "/Sheet.js");
 include(includeBasePath + "/Report.js");

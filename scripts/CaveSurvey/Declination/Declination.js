@@ -42,15 +42,8 @@ function declinationRun() {
         }
     }
 
-    var locText = getText("Declination",
-        "Cave location (decimal like 39.6961, -86.3094 or DMS like " +
-        "39 41'45.8\"N 86 18'34.0\"W):", defaultLoc);
-    if (locText === undefined || locText === "") {
-        return;
-    }
-    var coord = CsAngles.parseLatLon(locText);
+    var coord = CsLocationPick.ask("Declination", defaultLoc);
     if (coord === null) {
-        warning("Declination: couldn't read that location.");
         return;
     }
 

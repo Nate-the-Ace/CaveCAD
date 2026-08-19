@@ -519,15 +519,8 @@ SurveyNotebook.inferDeclination = function(w) {
         }
     }
     if (coord === null) {
-        var text = getText("Survey Notebook",
-            "Cave location (decimal like 39.6961, -86.3094 or DMS):", "");
-        if (text === undefined || text === "") {
-            return;
-        }
-        coord = CsAngles.parseLatLon(text);
+        coord = CsLocationPick.ask("Survey Notebook", "");
         if (coord === null) {
-            QMessageBox.warning(null, "Survey Notebook",
-                "Couldn't read that location.");
             return;
         }
     }
