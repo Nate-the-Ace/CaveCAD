@@ -189,6 +189,22 @@ near(oh.dz, 5.773503, 1e-5, "horizontal tape rise uses tan");
 var rev = CsTraverse.reverseOffset(steep, CsTraverse.SLOPE);
 near(rev.dx, -8.660254, 1e-5, "reverse offset negates");
 
+// fs/bs correction
+near(CsTraverse.effectiveAzimuth({ azimuth: 40, backAzimuth: 222 }),
+    41, 1e-9, "fs/bs azimuth mean");
+near(CsAngles.azimuthDifference(
+    CsTraverse.effectiveAzimuth({ azimuth: 359, backAzimuth: 181 }), 0),
+    0, 1e-9, "fs/bs circular mean across north");
+near(CsTraverse.effectiveAzimuth({ azimuth: 40, backAzimuth: null }),
+    40, 1e-9, "no backsight passthrough");
+near(CsTraverse.effectiveInclination({ inclination: 10, backInclination: -12 }),
+    11, 1e-9, "fs/bs inclination mean, sign flipped");
+var bsShot = { distance: 10, azimuth: 90, inclination: 0,
+    backAzimuth: 272, backInclination: null };
+near(CsTraverse.offset(bsShot, CsTraverse.SLOPE).dx,
+    10 * Math.sin(91 * Math.PI / 180), 1e-9,
+    "offset uses corrected azimuth");
+
 // ---------------------------------------------------------------------
 // Network -- hand-computed square with a deliberate misclosure, plus
 // an out-of-order shot and a branch.
@@ -303,6 +319,18 @@ function hasFinding(code) {
     return false;
 }
 ok(hasFinding("backsight-as-foresight"), "backsight-as-foresight caught");
+var bsBad = CsModel.newSurvey();
+var bsb = shotOf("B1", "B2", 10, 40);
+bsb.backAzimuth = 228; // reversed reads 48 vs fs 40: 8 deg apart
+bsBad.shots.push(bsb);
+var bsFindings = CsValidate.check(bsBad, null);
+var foundBs = false;
+for (var bi = 0; bi < bsFindings.length; bi++) {
+    if (bsFindings[bi].code === "fsbs-azimuth-disagree") {
+        foundBs = true;
+    }
+}
+ok(foundBs, "fs/bs compass disagreement caught");
 ok(hasFinding("self-loop"), "self loop caught");
 ok(hasFinding("bad-distance"), "bad distance caught");
 

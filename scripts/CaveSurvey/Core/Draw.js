@@ -132,11 +132,32 @@ CsDraw.survey = function(survey, resolved, originStation, originPos) {
         return resolved.stations[a].seq - resolved.stations[b].seq;
     });
 
+    // The first drawn leg's azimuth orients the start station's LRUD.
+    var firstLegAzimuth;
+    for (var li = 0; li < resolved.legs.length; li++) {
+        if (!resolved.legs[li].shot.excludeFromPlot) {
+            firstLegAzimuth = CsTraverse.effectiveAzimuth(resolved.legs[li].shot);
+            break;
+        }
+    }
+
     var stationsDrawn = 0;
     var firstPoint;
     for (var i = 0; i < names.length; i++) {
         var name = names[i];
         var lrud = CsModel.lrudForStation(survey, name);
+        // the anchor station: no incoming shot, so its LRUD comes from
+        // the notes page's first-station row (survey.startLrud)
+        if (lrud === null && i === 0 && survey.startLrud !== null &&
+            survey.startLrud !== undefined && firstLegAzimuth !== undefined) {
+            lrud = {
+                left: survey.startLrud.left,
+                right: survey.startLrud.right,
+                up: survey.startLrud.up,
+                down: survey.startLrud.down,
+                azimuth: firstLegAzimuth
+            };
+        }
         var pt = CsDraw.station(at(name), {
             name: name,
             seq: resolved.stations[name].seq,

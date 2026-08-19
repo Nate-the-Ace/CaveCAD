@@ -75,6 +75,30 @@ CsValidate.check = function(survey, resolved) {
             }
         }
 
+        // fs/bs pairs on ONE shot: the built-in instrument check.
+        if (s.backAzimuth !== null && s.backAzimuth !== undefined) {
+            var bsDiff = CsAngles.azimuthDifference(
+                s.azimuth, s.backAzimuth + 180.0);
+            if (bsDiff > 3.0) {
+                findings.push({ severity: "warning", shotIndex: i,
+                    code: "fsbs-azimuth-disagree",
+                    message: "Shot " + s.from + " to " + s.to +
+                        ": foresight and backsight compass disagree by " +
+                        bsDiff.toFixed(1) + " deg (over 3) -- re-read, or " +
+                        "one instrument needs calibrating." });
+            }
+        }
+        if (s.backInclination !== null && s.backInclination !== undefined) {
+            var incDiff = Math.abs(s.inclination - (-s.backInclination));
+            if (incDiff > 3.0) {
+                findings.push({ severity: "warning", shotIndex: i,
+                    code: "fsbs-inclination-disagree",
+                    message: "Shot " + s.from + " to " + s.to +
+                        ": foresight and backsight clino disagree by " +
+                        incDiff.toFixed(1) + " deg (over 3)." });
+            }
+        }
+
         // Nearly plumb shots are common in vertical caves but also a
         // classic sign-flip/typo site -- flag once, gently.
         if (Math.abs(s.inclination) > 85 && s.distance > 0) {

@@ -52,7 +52,12 @@ CsModel.newSurvey = function() {
         declinationSource: "",
         distanceUnit: "ft",
         shots: [],
-        fixed: {}
+        fixed: {},
+        // LRUD of the very first station, which no shot arrives at --
+        // {left, right, up, down} or null. The paper notes page records
+        // it beside the first station; the first shot's azimuth is its
+        // direction reference when drawn.
+        startLrud: null
     };
 };
 
@@ -64,6 +69,8 @@ CsModel.newShot = function() {
         distance: 0.0,
         azimuth: 0.0,
         inclination: 0.0,
+        backAzimuth: null,      // backsight compass, uncorrected (deg)
+        backInclination: null,  // backsight clino, uncorrected (deg)
         left: null,
         right: null,
         up: null,

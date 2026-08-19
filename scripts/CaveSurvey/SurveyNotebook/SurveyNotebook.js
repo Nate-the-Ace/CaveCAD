@@ -1,57 +1,45 @@
 // SurveyNotebook.js
 //
 // QCAD add-on tool: the Survey Notebook -- a docked panel laid out
-// like a paper survey notes page. Type shots into the table, watch
-// the stats, closures and warnings update as you type, then Draw the
-// survey into the drawing in one undo step.
+// the way a cave survey NOTES PAGE is laid out. Stations run down the
+// left with their LRUD beside them; each shot's tape/compass/clino
+// (foresight AND backsight) sits on the line BETWEEN the two stations
+// it connects, exactly where a hand would write it:
 //
-//   +-- Survey Notebook ------------------------------------+
-//   | Survey [......] Date [YYYY-MM-DD] Team [............] |
-//   | Declination [0.0] (E+)  [Infer from date+location]    |
-//   |-------------------------------------------------------|
-//   | From | To | Dist | Azm | Inc | L | R | U | D | Notes  |
-//   |  ... table rows, column order = the notes page ...    |
-//   | [+ Shot] [- Shot]                                     |
-//   |-------------------------------------------------------|
-//   | warnings / loop closures / stats (live)               |
-//   | [Draw]  [Import File...]  [Export File...]            |
-//   +-------------------------------------------------------+
+//   Station | Dist  Azm fs  Azm bs  Inc fs  Inc bs | L  R  U  D
+//   A1      |                                      | 2  4  8  1
+//           | 12.4   45.0   226.0    -3.0    +2.5  |
+//   A2      |                                      | 3  3 12  0
+//           | 18.1  112.5     --      1.5     --   |
+//   A3      |                                      | ...
 //
-// CONVENTIONS shown in the header row so nothing is guessed:
-// azimuth clockwise from north (TRUE bearing -- declination has
-// already been applied to what you type here, or type magnetic and
-// use Infer/enter declination first); distance is slope; L/R face
-// travel; LRUD belongs to the To station; blank LRUD = not measured.
+// Backsights are optional; when present the shot is computed with the
+// standard fs/bs correction (circular mean of foresight and reversed
+// backsight) and a disagreement over 3 degrees is flagged beside the
+// running stats. LRUD belongs to the station it is written beside;
+// the first station's LRUD rides along as the survey's start LRUD.
 //
-// Validation is ADVISORY: a suspect row gets a warning line below
-// the table, never a blocked entry -- the surveyor is the authority
-// on their own notes.
+// [+ Station] grows the page as the survey expands; totals, loop
+// closures, the honest grade and any warnings update as you type.
+// Draw plots the survey in ONE undo step. Import fills the page from
+// any supported file; Export writes Compass/Walls/Survex/CSV.
 //
-// Import fills the table from any supported file (format detected);
-// Export writes the table to Compass/Walls/Survex/CSV. Draw plots
-// the survey (anchored on a selected station, a *fix, or 0,0) as one
-// undo step -- draw again after edits and undo the old one, or work
-// in a fresh document per revision.
+// COMPATIBILITY: the QJSEngine widget bridge exposes a slightly
+// different method set from build to build. The ladder needs only
+// line edits, labels, grid layouts and a scroll area -- wrapped in
+// every build seen so far -- and still probes them at startup,
+// falling back to a text sheet (one shot per line, CSV columns,
+// parsed by Core's own CSV reader) rather than dying. A branched
+// survey doesn't fit a single notes page; importing one switches to
+// the text sheet too.
 //
-// The Infer button estimates declination from the survey date and
-// the drawing's Geo Reference anchor (or a typed location) via IGRF
-// (1900+, see Core/Geomag.js), labelled as the estimate it is.
+// The dock is a singleton; QCAD keeps the engine alive, so a global
+// holds it.
 
 include("scripts/EAction.js");
 include("scripts/simple.js");
 include(includeBasePath + "/../Core/All.js");
 
-// COMPATIBILITY: the QJSEngine widget bridge exposes a slightly
-// different method set from build to build (e.g. QTableWidget's
-// setHorizontalHeaderLabels is missing before ~3.33). So the panel
-// PROBES the bridge at startup: full table mode when the table API
-// answers, otherwise a text-sheet mode -- one shot per line in the
-// suite's CSV column order, parsed by the same Core CSV reader --
-// so the Notebook works on every build rather than dying on the
-// newest method it touched.
-//
-// The dock is a singleton across invocations; QCAD keeps the script
-// engine alive, so a global holds it.
 var csNotebookDock = csNotebookDock || undefined;
 
 function SurveyNotebook(guiAction) {
@@ -60,57 +48,34 @@ function SurveyNotebook(guiAction) {
 
 SurveyNotebook.prototype = new EAction();
 
-SurveyNotebook.COLUMNS = ["From", "To", "Dist", "Azm", "Inc",
-    "L", "R", "U", "D", "Notes"];
+// ---------------------------------------------------------------------
+// Bridge probing
+// ---------------------------------------------------------------------
 
-/**
- * True when this build's script bridge supports everything table mode
- * needs. Probed once with a throwaway table, so a missing method means
- * a graceful fallback instead of a dead panel.
- */
-SurveyNotebook.tableSupported = function() {
-    if (typeof QTableWidget === "undefined" ||
-        typeof QTableWidgetItem === "undefined") {
-        return false;
+/** True when the ladder's widgets all answer in this build. */
+SurveyNotebook.ladderSupported = function() {
+    var needed = ["QLineEdit", "QLabel", "QGridLayout", "QScrollArea",
+        "QWidget", "QPushButton"];
+    for (var i = 0; i < needed.length; i++) {
+        if ((0, eval)("typeof " + needed[i]) === "undefined") {
+            return false;
+        }
     }
     try {
-        var t = new QTableWidget(1, 2);
-        t.setItem(0, 0, new QTableWidgetItem("probe"));
-        if (String(t.item(0, 0).text()) !== "probe") {
+        var probe = new QLineEdit();
+        probe.text = "x";
+        if (String(probe.text) !== "x") {
             return false;
         }
-        t.insertRow(1);
-        t.removeRow(1);
-        if (t.rowCount !== 1) {
-            return false;
-        }
-        SurveyNotebook.setHeaders(t, ["a", "b"]);
+        var g = new QGridLayout();
+        g.addWidget(new QLabel("p"), 0, 0);
         return true;
     } catch (e) {
         return false;
     }
 };
 
-/** Sets column headers, tolerating older bridges; headers are a
- *  nicety, so total failure is silently accepted. */
-SurveyNotebook.setHeaders = function(table, labels) {
-    try {
-        table.setHorizontalHeaderLabels(labels);
-        return;
-    } catch (e) {
-        // older bridge: no QStringList overload -- set one by one
-    }
-    try {
-        for (var i = 0; i < labels.length; i++) {
-            table.setHorizontalHeaderItem(i, new QTableWidgetItem(labels[i]));
-        }
-    } catch (e2) {
-        // no headers then; the tooltip documents the columns
-    }
-};
-
-/** Connects a signal, reporting rather than dying when the bridge
- *  lacks it. Returns true on success. */
+/** Connects a signal, reporting rather than dying when absent. */
 SurveyNotebook.safeConnect = function(signal, fn, what, problems) {
     try {
         signal.connect(fn);
@@ -122,15 +87,25 @@ SurveyNotebook.safeConnect = function(signal, fn, what, problems) {
 };
 
 // ---------------------------------------------------------------------
-// Table <-> model
+// Ladder <-> model
 // ---------------------------------------------------------------------
 
-/** Reads the sheet (table or text mode) into a CsModel survey. */
-SurveyNotebook.surveyFromTable = function(w) {
+/** Numeric cell: "" -> null, junk -> null, number -> number. */
+SurveyNotebook.cellNumber = function(edit) {
+    var v = String(edit.text).replace(/^\s+|\s+$/g, "");
+    if (v === "" || v === "--") {
+        return null;
+    }
+    var n = parseFloat(v);
+    return isNaN(n) ? null : n;
+};
+
+/** Reads the whole panel into a CsModel survey. */
+SurveyNotebook.sheetSurvey = function(w) {
     var survey = CsModel.newSurvey();
-    survey.name = w.nameEdit.text;
-    survey.date = w.dateEdit.text;
-    survey.team = w.teamEdit.text;
+    survey.name = String(w.nameEdit.text);
+    survey.date = String(w.dateEdit.text);
+    survey.team = String(w.teamEdit.text);
     survey.declination = parseFloat(w.declEdit.text) || 0.0;
     survey.declinationSource = w.declSource;
     survey.distanceUnit = w.unit;
@@ -141,48 +116,61 @@ SurveyNotebook.surveyFromTable = function(w) {
         return survey;
     }
 
-    var t = w.table;
-    for (var r = 0; r < t.rowCount; r++) {
-        var cell = function(c) {
-            var item = t.item(r, c);
-            return (item === null || item === undefined) ? "" :
-                String(item.text()).replace(/^\s+|\s+$/g, "");
-        };
-        var from = cell(0);
-        var to = cell(1);
-        if (from === "" && to === "") {
-            continue; // blank row
+    var num = SurveyNotebook.cellNumber;
+    var rows = w.rows;
+
+    if (rows.length > 0) {
+        var r0 = rows[0];
+        var sl = num(r0.l), sr = num(r0.r), su = num(r0.u), sd = num(r0.d);
+        if (sl !== null || sr !== null || su !== null || sd !== null) {
+            survey.startLrud = { left: sl, right: sr, up: su, down: sd };
         }
-        var num = function(c) {
-            var v = cell(c);
-            if (v === "") {
-                return null;
-            }
-            var n = parseFloat(v);
-            return isNaN(n) ? null : n;
-        };
+    }
+
+    for (var i = 1; i < rows.length; i++) {
+        var from = String(rows[i - 1].name.text).replace(/^\s+|\s+$/g, "");
+        var to = String(rows[i].name.text).replace(/^\s+|\s+$/g, "");
+        var dist = num(rows[i].dist);
+        if (from === "" && to === "") {
+            continue;
+        }
         var shot = CsModel.newShot();
         shot.from = from;
         shot.to = to;
-        shot.splay = (to === "" || to === "-");
-        if (shot.splay) {
-            shot.to = "";
-        }
-        shot.distance = num(2) === null ? 0.0 : num(2);
-        shot.azimuth = num(3) === null ? 0.0 : CsAngles.normalizeAzimuth(num(3));
-        shot.inclination = num(4) === null ? 0.0 : num(4);
-        shot.left = num(5);
-        shot.right = num(6);
-        shot.up = num(7);
-        shot.down = num(8);
-        shot.notes = cell(9);
+        shot.distance = dist === null ? 0.0 : dist;
+        var az = num(rows[i].azFs);
+        shot.azimuth = az === null ? 0.0 : CsAngles.normalizeAzimuth(az);
+        shot.backAzimuth = num(rows[i].azBs);
+        var inc = num(rows[i].incFs);
+        shot.inclination = inc === null ? 0.0 : inc;
+        shot.backInclination = num(rows[i].incBs);
+        shot.left = num(rows[i].l);
+        shot.right = num(rows[i].r);
+        shot.up = num(rows[i].u);
+        shot.down = num(rows[i].d);
         survey.shots.push(shot);
     }
     return survey;
 };
 
-/** Fills the sheet from a CsModel survey (import path). */
-SurveyNotebook.tableFromSurvey = function(w, survey) {
+/** True when a survey reads as one linear notes page. */
+SurveyNotebook.isChain = function(survey) {
+    var prev = null;
+    for (var i = 0; i < survey.shots.length; i++) {
+        var s = survey.shots[i];
+        if (s.splay || s.excludeFromAll) {
+            return false;
+        }
+        if (prev !== null && s.from !== prev) {
+            return false;
+        }
+        prev = s.to;
+    }
+    return true;
+};
+
+/** Fills the panel from a survey; branched surveys go to text mode. */
+SurveyNotebook.setSurvey = function(w, survey) {
     w.loading = true;
     w.nameEdit.text = survey.name;
     w.dateEdit.text = survey.date;
@@ -191,6 +179,12 @@ SurveyNotebook.tableFromSurvey = function(w, survey) {
     w.declSource = survey.declinationSource || "user";
     w.unit = survey.distanceUnit;
 
+    if (w.mode === "ladder" && !SurveyNotebook.isChain(survey)) {
+        SurveyNotebook.switchToText(w,
+            "This survey branches or holds splays -- a single notes " +
+            "page is a straight line, so it opened as the text sheet.");
+    }
+
     if (w.mode === "text") {
         w.editor.setPlainText(CsFormatCsv.write(survey));
         w.loading = false;
@@ -198,29 +192,155 @@ SurveyNotebook.tableFromSurvey = function(w, survey) {
         return;
     }
 
-    var t = w.table;
-    t.rowCount = 0;
-    for (var i = 0; i < survey.shots.length; i++) {
-        var s = survey.shots[i];
-        var r = t.rowCount;
-        t.insertRow(r);
-        var put = function(c, v) {
-            t.setItem(r, c, new QTableWidgetItem(
-                v === null || v === undefined ? "" : String(v)));
+    // rebuild the ladder rows
+    SurveyNotebook.clearLadder(w);
+    var names = [];
+    var byTo = {};
+    if (survey.shots.length > 0) {
+        names.push(survey.shots[0].from);
+        for (var i = 0; i < survey.shots.length; i++) {
+            names.push(survey.shots[i].to);
+            byTo[survey.shots[i].to] = survey.shots[i];
+        }
+    } else {
+        names.push("A1");
+    }
+    for (i = 0; i < names.length; i++) {
+        var row = SurveyNotebook.addStationRow(w, names[i]);
+        var shot = byTo[names[i]];
+        var put = function(edit, v) {
+            edit.text = (v === null || v === undefined) ? "" : String(v);
         };
-        put(0, s.from);
-        put(1, s.splay ? "-" : s.to);
-        put(2, s.distance);
-        put(3, s.azimuth);
-        put(4, s.inclination);
-        put(5, s.left);
-        put(6, s.right);
-        put(7, s.up);
-        put(8, s.down);
-        put(9, s.notes);
+        if (shot !== undefined && i > 0) {
+            put(row.dist, shot.distance);
+            put(row.azFs, shot.azimuth);
+            put(row.azBs, shot.backAzimuth);
+            put(row.incFs, shot.inclination);
+            put(row.incBs, shot.backInclination);
+            put(row.l, shot.left);
+            put(row.r, shot.right);
+            put(row.u, shot.up);
+            put(row.d, shot.down);
+        } else if (i === 0 && survey.startLrud) {
+            put(row.l, survey.startLrud.left);
+            put(row.r, survey.startLrud.right);
+            put(row.u, survey.startLrud.up);
+            put(row.d, survey.startLrud.down);
+        }
     }
     w.loading = false;
     SurveyNotebook.refresh(w);
+};
+
+// ---------------------------------------------------------------------
+// Ladder construction
+// ---------------------------------------------------------------------
+
+SurveyNotebook.EDIT_WIDTH = 52;
+
+SurveyNotebook.makeCell = function(w, width) {
+    var e = new QLineEdit();
+    e.maximumWidth = width || SurveyNotebook.EDIT_WIDTH;
+    SurveyNotebook.safeConnect(e.textEdited, function() {
+        SurveyNotebook.refresh(w);
+    }, "cell refresh", w.problems);
+    return e;
+};
+
+/**
+ * Appends one station to the page: a shot line (unless it is the
+ * first station) then the station line, paper-style. Returns the row
+ * record {name, dist, azFs, azBs, incFs, incBs, l, r, u, d}; the
+ * first station's shot edits exist but stay hidden, so every record
+ * has the same shape.
+ */
+SurveyNotebook.addStationRow = function(w, stationName) {
+    var grid = w.grid;
+    var row = {
+        name: SurveyNotebook.makeCell(w, 74),
+        dist: SurveyNotebook.makeCell(w),
+        azFs: SurveyNotebook.makeCell(w),
+        azBs: SurveyNotebook.makeCell(w),
+        incFs: SurveyNotebook.makeCell(w),
+        incBs: SurveyNotebook.makeCell(w),
+        l: SurveyNotebook.makeCell(w, 40),
+        r: SurveyNotebook.makeCell(w, 40),
+        u: SurveyNotebook.makeCell(w, 40),
+        d: SurveyNotebook.makeCell(w, 40),
+        widgets: []
+    };
+    row.name.text = stationName || "";
+
+    var isFirst = (w.rows.length === 0);
+
+    // the shot line, written between the previous station and this one
+    if (!isFirst) {
+        var shotRow = w.gridRow++;
+        grid.addWidget(row.dist, shotRow, 1);
+        grid.addWidget(row.azFs, shotRow, 2);
+        grid.addWidget(row.azBs, shotRow, 3);
+        grid.addWidget(row.incFs, shotRow, 4);
+        grid.addWidget(row.incBs, shotRow, 5);
+        row.widgets.push(row.dist, row.azFs, row.azBs, row.incFs, row.incBs);
+    } else {
+        row.dist.visible = false;
+        row.azFs.visible = false;
+        row.azBs.visible = false;
+        row.incFs.visible = false;
+        row.incBs.visible = false;
+    }
+
+    // the station line: name on the left, LRUD on the right
+    var stRow = w.gridRow++;
+    grid.addWidget(row.name, stRow, 0);
+    grid.addWidget(row.l, stRow, 6);
+    grid.addWidget(row.r, stRow, 7);
+    grid.addWidget(row.u, stRow, 8);
+    grid.addWidget(row.d, stRow, 9);
+    row.widgets.push(row.name, row.l, row.r, row.u, row.d);
+
+    w.rows.push(row);
+    return row;
+};
+
+/** Removes the last station line (and its shot line) from the page. */
+SurveyNotebook.removeLastStation = function(w) {
+    if (w.rows.length <= 1) {
+        return; // a page keeps at least its first station
+    }
+    var row = w.rows.pop();
+    for (var i = 0; i < row.widgets.length; i++) {
+        row.widgets[i].visible = false; // grid rows can't be removed
+    }
+    SurveyNotebook.refresh(w);
+};
+
+/** Hides every ladder row (rebuild path for imports). */
+SurveyNotebook.clearLadder = function(w) {
+    for (var i = 0; i < w.rows.length; i++) {
+        for (var k = 0; k < w.rows[i].widgets.length; k++) {
+            w.rows[i].widgets[k].visible = false;
+        }
+    }
+    w.rows = [];
+};
+
+/** Swaps the ladder for the text sheet (branched imports). */
+SurveyNotebook.switchToText = function(w, why) {
+    if (w.mode === "text") {
+        return;
+    }
+    w.mode = "text";
+    if (w.ladderArea !== undefined) {
+        w.ladderArea.visible = false;
+    }
+    if (w.rowButtonBar !== undefined) {
+        w.rowButtonBar.visible = false;
+    }
+    w.editor.visible = true;
+    if (why) {
+        EAction.handleUserMessage("Survey Notebook: " + why);
+    }
 };
 
 // ---------------------------------------------------------------------
@@ -231,11 +351,12 @@ SurveyNotebook.refresh = function(w) {
     if (w.loading) {
         return;
     }
-    var survey = SurveyNotebook.surveyFromTable(w);
+    var survey = SurveyNotebook.sheetSurvey(w);
     if (survey.shots.length === 0) {
-        w.statusLabel.text = "No shots yet. Column order matches the " +
-            "notes page; azimuth is degrees clockwise from north, " +
-            "distance is along the tape, LRUD belongs to the To station.";
+        w.statusLabel.text = "No shots yet. Shots are written between " +
+            "the stations they connect; azimuth clockwise from north, " +
+            "distance along the tape, backsights optional. LRUD sits " +
+            "beside its station.";
         return;
     }
     var resolved = CsNetwork.resolve(survey, {});
@@ -276,7 +397,7 @@ SurveyNotebook.drawSurvey = function(w) {
         QMessageBox.warning(null, "Survey Notebook", "No drawing is open.");
         return;
     }
-    var survey = SurveyNotebook.surveyFromTable(w);
+    var survey = SurveyNotebook.sheetSurvey(w);
     if (survey.shots.length === 0) {
         QMessageBox.information(null, "Survey Notebook", "No shots to draw.");
         return;
@@ -328,11 +449,11 @@ SurveyNotebook.importFile = function(w) {
             "No shots parsed (format tried: " + format.label + ").");
         return;
     }
-    SurveyNotebook.tableFromSurvey(w, survey);
+    SurveyNotebook.setSurvey(w, survey);
 };
 
 SurveyNotebook.exportFile = function(w) {
-    var survey = SurveyNotebook.surveyFromTable(w);
+    var survey = SurveyNotebook.sheetSurvey(w);
     if (survey.shots.length === 0) {
         QMessageBox.information(null, "Survey Notebook", "Nothing to export.");
         return;
@@ -372,8 +493,7 @@ SurveyNotebook.exportFile = function(w) {
 };
 
 SurveyNotebook.inferDeclination = function(w) {
-    // date from the header; location from the geo anchor or a prompt
-    var m = /^(\d{4})-(\d{1,2})-(\d{1,2})$/.exec(w.dateEdit.text);
+    var m = /^(\d{4})-(\d{1,2})-(\d{1,2})$/.exec(String(w.dateEdit.text));
     if (m === null) {
         QMessageBox.information(null, "Survey Notebook",
             "Enter the survey date (YYYY-MM-DD) in the header first -- " +
@@ -424,7 +544,7 @@ SurveyNotebook.inferDeclination = function(w) {
     w.declEdit.text = result.declination.toFixed(2);
     w.declSource = "igrf";
     QMessageBox.information(null, "Survey Notebook",
-        CsReport.igrfLine(result, coord.lat, coord.lon, w.dateEdit.text) +
+        CsReport.igrfLine(result, coord.lat, coord.lon, String(w.dateEdit.text)) +
         "\n\nFilled into the header -- edit it freely; it stays your call.");
 };
 
@@ -436,10 +556,13 @@ SurveyNotebook.buildDock = function(appWin) {
     var dock = new QDockWidget("Survey Notebook", appWin);
     dock.objectName = "CaveSurveyNotebookDock";
 
-    var w = {}; // widget handles + state, closed over by the handlers
+    var w = {};
     w.loading = false;
     w.declSource = "user";
     w.unit = "ft";
+    w.problems = [];
+    w.rows = [];
+    w.gridRow = 1; // row 0 is the header line
     var doc = getDocument();
     if (doc !== undefined && doc !== null) {
         w.unit = CsUnits.fromDrawingUnit(doc.getUnit(), RS);
@@ -448,7 +571,7 @@ SurveyNotebook.buildDock = function(appWin) {
     var body = new QWidget(dock);
     var layout = new QVBoxLayout();
 
-    // ---- header: survey / date / team ---------------------------
+    // ---- trip header ------------------------------------------------
     var head1 = new QHBoxLayout();
     head1.addWidget(new QLabel("Survey"), 0, 0);
     w.nameEdit = new QLineEdit();
@@ -476,51 +599,62 @@ SurveyNotebook.buildDock = function(appWin) {
     head2.addWidget(w.inferButton, 0, 0);
     layout.addLayout(head2, 0);
 
-    // ---- the notes page: table where the bridge allows, text
-    // sheet everywhere else ------------------------------------------
     var columnHelp =
-        "Column order matches a survey notes page.\n" +
-        "Azimuth: degrees clockwise from north (true bearing).\n" +
-        "Dist: along the tape (slope). Inc: + up, - down.\n" +
-        "L/R face the direction of travel; LRUD belongs to the To " +
-        "station. Blank LRUD = not measured. To of \"-\" = splay.";
+        "The notes page: shots are written between the stations they " +
+        "connect.\n" +
+        "Azm: degrees clockwise from north (true). Dist: along the tape.\n" +
+        "fs = foresight, bs = backsight (optional; used to correct and " +
+        "cross-check).\n" +
+        "L/R face the direction of travel; LRUD sits beside its station.\n" +
+        "Blank = not measured; 0 = wall at the station.";
 
-    w.mode = SurveyNotebook.tableSupported() ? "table" : "text";
+    w.mode = SurveyNotebook.ladderSupported() ? "ladder" : "text";
 
-    if (w.mode === "table") {
-        w.table = new QTableWidget(0, SurveyNotebook.COLUMNS.length, body);
-        SurveyNotebook.setHeaders(w.table, SurveyNotebook.COLUMNS);
-        w.table.toolTip = columnHelp;
-        layout.addWidget(w.table, 1, 0);
+    // ---- the notes page (ladder) --------------------------------------
+    if (w.mode === "ladder") {
+        var inner = new QWidget();
+        w.grid = new QGridLayout();
 
+        var headers = ["Station", "Dist", "Azm fs", "Azm bs",
+            "Inc fs", "Inc bs", "L", "R", "U", "D"];
+        for (var h = 0; h < headers.length; h++) {
+            w.grid.addWidget(new QLabel(headers[h]), 0, h);
+        }
+
+        inner.setLayout(w.grid);
+        inner.toolTip = columnHelp;
+
+        w.ladderArea = new QScrollArea();
+        w.ladderArea.widgetResizable = true;
+        w.ladderArea.setWidget(inner);
+        layout.addWidget(w.ladderArea, 1, 0);
+
+        var rowBar = new QWidget();
         var rowButtons = new QHBoxLayout();
-        w.addRowButton = new QPushButton("+ Shot");
-        w.delRowButton = new QPushButton("- Shot");
+        w.addRowButton = new QPushButton("+ Station");
+        w.delRowButton = new QPushButton("- Station");
         rowButtons.addWidget(w.addRowButton, 0, 0);
         rowButtons.addWidget(w.delRowButton, 0, 0);
         rowButtons.addStretch(1);
-        layout.addLayout(rowButtons, 0);
-    } else {
-        // Text sheet: one shot per line in the CSV column order; the
-        // same Core parser reads it, so nothing downstream differs.
-        w.editor = new QPlainTextEdit(body);
-        w.editor.toolTip = columnHelp;
-        w.editor.setPlainText(
-            "from,to,distance,azimuth,inclination,left,right,up,down,notes\n");
-        layout.addWidget(w.editor, 1, 0);
-        var modeNote = new QLabel(
-            "(text sheet: one shot per line, columns as the header row -- " +
-            "this QCAD build's script bridge lacks the table widget)");
-        modeNote.wordWrap = true;
-        layout.addWidget(modeNote, 0, 0);
+        rowBar.setLayout(rowButtons);
+        w.rowButtonBar = rowBar;
+        layout.addWidget(rowBar, 0, 0);
     }
 
-    // ---- live status ----------------------------------------------
+    // ---- the text sheet (fallback / branched surveys) ------------------
+    w.editor = new QPlainTextEdit(body);
+    w.editor.toolTip = columnHelp;
+    w.editor.setPlainText(
+        "from,to,distance,azimuth,inclination,left,right,up,down,notes\n");
+    layout.addWidget(w.editor, 1, 0);
+    w.editor.visible = (w.mode === "text");
+
+    // ---- live status -----------------------------------------------
     w.statusLabel = new QLabel("");
     w.statusLabel.wordWrap = true;
     layout.addWidget(w.statusLabel, 0, 0);
 
-    // ---- actions ----------------------------------------------------
+    // ---- actions ------------------------------------------------------
     var actions = new QHBoxLayout();
     w.drawButton = new QPushButton("Draw");
     w.drawButton.toolTip = "Draw the survey into the drawing, one undo step.";
@@ -534,53 +668,44 @@ SurveyNotebook.buildDock = function(appWin) {
     body.setLayout(layout);
     dock.setWidget(body);
 
-    // ---- wiring: every connect reports rather than dying ----------
-    var problems = [];
-    if (w.mode === "table") {
+    // ---- wiring ----------------------------------------------------
+    if (w.mode === "ladder") {
         SurveyNotebook.safeConnect(w.addRowButton.clicked, function() {
-            var r = w.table.rowCount;
-            w.table.insertRow(r);
-            // pre-fill From with the previous To, the way notes flow
-            if (r > 0) {
-                var prevTo = w.table.item(r - 1, 1);
-                if (prevTo !== null && prevTo !== undefined) {
-                    w.table.setItem(r, 0, new QTableWidgetItem(prevTo.text()));
-                    w.table.setItem(r, 1, new QTableWidgetItem(
-                        CsModel.nextStationName(String(prevTo.text()))));
-                }
-            }
-        }, "+ Shot button", problems);
+            var prevName = w.rows.length > 0 ?
+                String(w.rows[w.rows.length - 1].name.text) : "";
+            SurveyNotebook.addStationRow(w,
+                CsModel.nextStationName(prevName));
+        }, "+ Station button", w.problems);
         SurveyNotebook.safeConnect(w.delRowButton.clicked, function() {
-            var r = w.table.currentRow();
-            if (r >= 0) {
-                w.table.removeRow(r);
-                SurveyNotebook.refresh(w);
-            }
-        }, "- Shot button", problems);
-        SurveyNotebook.safeConnect(w.table.cellChanged, function() {
-            SurveyNotebook.refresh(w);
-        }, "live refresh", problems);
+            SurveyNotebook.removeLastStation(w);
+        }, "- Station button", w.problems);
     } else {
         SurveyNotebook.safeConnect(w.editor.textChanged, function() {
             SurveyNotebook.refresh(w);
-        }, "live refresh", problems);
+        }, "live refresh", w.problems);
     }
     SurveyNotebook.safeConnect(w.drawButton.clicked, function() {
         SurveyNotebook.drawSurvey(w);
-    }, "Draw button", problems);
+    }, "Draw button", w.problems);
     SurveyNotebook.safeConnect(w.importButton.clicked, function() {
         SurveyNotebook.importFile(w);
-    }, "Import button", problems);
+    }, "Import button", w.problems);
     SurveyNotebook.safeConnect(w.exportButton.clicked, function() {
         SurveyNotebook.exportFile(w);
-    }, "Export button", problems);
+    }, "Export button", w.problems);
     SurveyNotebook.safeConnect(w.inferButton.clicked, function() {
         SurveyNotebook.inferDeclination(w);
-    }, "Infer button", problems);
+    }, "Infer button", w.problems);
 
-    if (problems.length > 0) {
+    // a fresh sheet starts with its first two stations
+    if (w.mode === "ladder") {
+        SurveyNotebook.addStationRow(w, "A1");
+        SurveyNotebook.addStationRow(w, "A2");
+    }
+
+    if (w.problems.length > 0) {
         EAction.handleUserWarning("Survey Notebook: this build's script " +
-            "bridge refused: " + problems.join("; ") +
+            "bridge refused: " + w.problems.join("; ") +
             " -- those controls are inert; the rest of the panel works.");
     }
 
@@ -605,8 +730,6 @@ SurveyNotebook.prototype.beginEvent = function() {
             csNotebookDock.visible = !csNotebookDock.visible;
         }
     } catch (e) {
-        // If this QCAD build's script bridge can't host the dock, say
-        // so honestly instead of dying silently.
         csNotebookDock = undefined;
         warning("Survey Notebook: this QCAD build refused the docked " +
             "panel (" + e + "). Azimuth Traverse and Import Cave Survey " +
@@ -618,10 +741,10 @@ SurveyNotebook.prototype.beginEvent = function() {
 
 SurveyNotebook.init = function(basePath) {
     var action = new RGuiAction(qsTr("Survey Notebook"), RMainWindowQt.getMainWindow());
-    action.setRequiresDocument(false); // the panel may outlive documents
+    action.setRequiresDocument(false);
     action.setScriptFile(basePath + "/SurveyNotebook.js");
     action.setIcon(basePath + "/SurveyNotebook.svg");
-    action.setStatusTip(qsTr("A docked survey notes page: type shots, watch closures live, draw in one step"));
+    action.setStatusTip(qsTr("A docked survey notes page: stations down the side, shots between them, closures live"));
     action.setDefaultCommands(["surveynotebook", "snb"]);
     action.setGroupSortOrder(450);
     action.setSortOrder(15);

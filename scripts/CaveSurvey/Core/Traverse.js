@@ -23,6 +23,33 @@ CsTraverse.SLOPE = "slope";
 CsTraverse.HORIZONTAL = "horizontal";
 
 /**
+ * The azimuth a shot is computed with. With only a foresight, that
+ * foresight; with a backsight too, the circular mean of the foresight
+ * and the reversed backsight -- the standard fs/bs correction, worth
+ * half the instrument error for free.
+ */
+CsTraverse.effectiveAzimuth = function(shot) {
+    if (shot.backAzimuth === null || shot.backAzimuth === undefined) {
+        return shot.azimuth;
+    }
+    var fs = shot.azimuth * Math.PI / 180.0;
+    var bs = (shot.backAzimuth + 180.0) * Math.PI / 180.0;
+    // circular mean, so 359/001 averages to 0, not 180:
+    var x = Math.cos(fs) + Math.cos(bs);
+    var y = Math.sin(fs) + Math.sin(bs);
+    var mean = Math.atan2(y, x) * 180.0 / Math.PI;
+    return ((mean % 360.0) + 360.0) % 360.0;
+};
+
+/** Same for inclination: backsight reads sign-flipped. */
+CsTraverse.effectiveInclination = function(shot) {
+    if (shot.backInclination === null || shot.backInclination === undefined) {
+        return shot.inclination;
+    }
+    return (shot.inclination + (-shot.backInclination)) / 2.0;
+};
+
+/**
  * The offset a shot moves, as {dx, dy, dz, plan}: drawing-plane x/y,
  * vertical rise, and the plan-projected length.
  *
@@ -31,8 +58,8 @@ CsTraverse.HORIZONTAL = "horizontal";
  * \param tapeMode CsTraverse.SLOPE (default) or HORIZONTAL
  */
 CsTraverse.offset = function(shot, tapeMode) {
-    var azRad = shot.azimuth * Math.PI / 180.0;
-    var incRad = shot.inclination * Math.PI / 180.0;
+    var azRad = CsTraverse.effectiveAzimuth(shot) * Math.PI / 180.0;
+    var incRad = CsTraverse.effectiveInclination(shot) * Math.PI / 180.0;
 
     var plan, dz;
     if (tapeMode === CsTraverse.HORIZONTAL) {
