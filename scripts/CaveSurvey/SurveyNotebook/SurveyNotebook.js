@@ -322,12 +322,16 @@ SurveyNotebook.addStationRow = function(w, stationName) {
     row.widgets.push(row.name, row.l, row.r, row.u, row.d);
 
     // Pin the page to the TOP of the scroll area: all the vertical
-    // slack lives in one stretchy empty row below the last station.
-    // Without this the grid centers its rows in whatever height the
-    // panel has -- header floating mid-air, stations at the bottom.
+    // slack lives in ONE stretchy empty row below the last station,
+    // tracked explicitly -- the previous stretch row gets reused by
+    // the next station's widgets, so its stretch must be cleared or
+    // the slack lands mid-page (header at top, new rows at bottom).
     try {
-        grid.setRowStretch(w.gridRow - 1, 0);
-        grid.setRowStretch(w.gridRow, 1);
+        if (w.stretchRow !== undefined) {
+            grid.setRowStretch(w.stretchRow, 0);
+        }
+        w.stretchRow = w.gridRow;
+        grid.setRowStretch(w.stretchRow, 1);
     } catch (e) {
         // older bridge without setRowStretch: cosmetic only
     }
@@ -772,17 +776,53 @@ SurveyNotebook.buildDock = function(appWin) {
         }, "- Station button", w.problems);
         // Focus landing on the "+" catcher = grow the page. Identity
         // is compared by objectName: the bridge wraps the same widget
-        // in a fresh object per signal emission.
+        // in a fresh object per signal emission. The application
+        // object is reached however this build exposes it.
+        w.focusAddWired = false;
+        var app = null;
         try {
-            qApp.focusChanged.connect(function(oldW, newW) {
-                if (newW !== null && newW !== undefined &&
-                    String(newW.objectName) === "CaveSurveyNotebookAutoAdd") {
-                    SurveyNotebook.autoAddStation(w);
-                }
-            });
-        } catch (e) {
-            w.problems.push("auto-add on Tab (" + e +
-                ") -- use the + Station button instead");
+            if (typeof qApp !== "undefined") {
+                app = qApp;
+            } else if (typeof QApplication !== "undefined" &&
+                       typeof QApplication.instance === "function") {
+                app = QApplication.instance();
+            } else if (typeof QCoreApplication !== "undefined" &&
+                       typeof QCoreApplication.instance === "function") {
+                app = QCoreApplication.instance();
+            }
+        } catch (eApp) {
+            app = null;
+        }
+        if (app !== null) {
+            try {
+                app.focusChanged.connect(function(oldW, newW) {
+                    if (newW !== null && newW !== undefined &&
+                        String(newW.objectName) === "CaveSurveyNotebookAutoAdd") {
+                        // consume the click that may follow this focus
+                        // change, so the click path can't double-add
+                        w.sentinelFocusAdd = true;
+                        SurveyNotebook.autoAddStation(w);
+                    }
+                });
+                w.focusAddWired = true;
+            } catch (eSig) {
+                // fall through to the click path
+            }
+        }
+        // Click/Space on "+" always works, focus signal or not. When
+        // the focus path just added (Tab landed here, then the user
+        // ALSO clicked), the flag swallows one click.
+        SurveyNotebook.safeConnect(w.sentinel.clicked, function() {
+            if (w.sentinelFocusAdd === true) {
+                w.sentinelFocusAdd = false;
+                return;
+            }
+            SurveyNotebook.autoAddStation(w);
+        }, "+ catcher click", w.problems);
+        if (!w.focusAddWired) {
+            w.sentinel.toolTip = "Next station: Tab here from the last " +
+                "D, then press Space (this build's bridge has no focus " +
+                "signal, so the extra keypress is needed)";
         }
     } else {
         SurveyNotebook.safeConnect(w.editor.textChanged, function() {
