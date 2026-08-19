@@ -51,25 +51,29 @@ function lrudWallsRun() {
         return;
     }
 
-    CsLayers.ensure(CsLayers.LRUD_WALL_LEFT);
-    CsLayers.ensure(CsLayers.LRUD_WALL_RIGHT);
+    var di = getDocumentInterface();
+    CsLayers.ensure(doc, di, CsLayers.LRUD_WALL_LEFT);
+    CsLayers.ensure(doc, di, CsLayers.LRUD_WALL_RIGHT);
 
-    startTransaction(doc);
+    var op = new RAddObjectsOperation();
+    op.setText("LRUD walls");
     var polylines = 0;
     var drawRuns = function(runList, layerName) {
-        setCurrentLayer(layerName);
         for (var i = 0; i < runList.length; i++) {
-            var pts = [];
+            var data = new RPolylineData();
             for (var k = 0; k < runList[i].length; k++) {
-                pts.push(new RVector(runList[i][k].x, runList[i][k].y));
+                data.appendVertex(new RVector(runList[i][k].x, runList[i][k].y));
             }
-            addPolyline(pts, false);
+            var pl = new RPolylineEntity(doc, data);
+            pl.setLayerId(doc.getLayerId(layerName));
+            CsTags.set(pl, "WallRun", layerName + ":" + i);
+            op.addObject(pl, false);
             polylines++;
         }
     };
     drawRuns(runs.left, CsLayers.LRUD_WALL_LEFT);
     drawRuns(runs.right, CsLayers.LRUD_WALL_RIGHT);
-    endTransaction();
+    di.applyOperation(op);
 
     autoZoom();
     EAction.handleUserMessage("LRUD Walls: " + polylines + " wall run" +

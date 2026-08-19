@@ -85,7 +85,7 @@ function scatterBreakdownRun() {
             "area first.");
         return;
     }
-    CsLayers.ensure(CsLayers.BREAKDOWN);
+    CsLayers.ensure(doc, getDocumentInterface(), CsLayers.BREAKDOWN);
 
     var boundaryLayerId = doc.getLayerId(CsLayers.BREAKDOWN_BOUNDARY);
     var targetLayerId = doc.getLayerId(CsLayers.BREAKDOWN);

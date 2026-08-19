@@ -43,6 +43,23 @@ CsTags.set = function(entity, key, value) {
     }
 };
 
+/**
+ * Writes tags onto an entity ALREADY IN the document. Setting a
+ * property on a queried entity mutates only the script-side copy;
+ * committing it back needs a modify operation with addObject(e,
+ * false) -- the false keeps the entity's layer untouched.
+ */
+CsTags.commit = function(di, entity, keyValues) {
+    for (var k in keyValues) {
+        if (keyValues.hasOwnProperty(k)) {
+            CsTags.set(entity, k, keyValues[k]);
+        }
+    }
+    var op = new RModifyObjectsOperation();
+    op.addObject(entity, false);
+    di.applyOperation(op);
+};
+
 /** Reads one tag, "" if absent or unsupported. */
 CsTags.get = function(entity, key) {
     if (entity === undefined || entity === null) {

@@ -78,7 +78,7 @@ function buildLegendRun() {
         return;
     }
 
-    CsLayers.ensure(CsLayers.LEGEND);
+    CsLayers.ensure(doc, getDocumentInterface(), CsLayers.LEGEND);
 
     var op = new RAddObjectsOperation();
     op.setText("Build legend");

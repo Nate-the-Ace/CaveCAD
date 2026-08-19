@@ -131,10 +131,8 @@ function importCaveSurvey() {
     var resolved = CsNetwork.resolve(survey, { anchor: anchor });
     var findings = CsValidate.check(survey, resolved);
 
-    startTransaction(doc);
     var drawn = CsDraw.survey(survey, resolved, undefined, undefined,
         CsTags.collectStations(doc).length);
-    endTransaction();
 
     if (drawn.stationsDrawn > 0) {
         CsDraw.zoomToSurvey(survey, resolved);

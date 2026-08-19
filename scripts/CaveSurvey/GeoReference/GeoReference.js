@@ -54,11 +54,14 @@ function geoReferenceRun() {
         return;
     }
 
-    startTransaction(doc);
-    CsTags.set(entity, "GeoLat", coord.lat);
-    CsTags.set(entity, "GeoLon", coord.lon);
-    CsTags.set(entity, "GeoStation", stationName !== "" ? stationName : "anchor");
-    endTransaction();
+    // the point is already in the document -- a modify operation is
+    // what actually persists the tags (transaction-wrapped property
+    // writes fail silently in this bridge)
+    CsTags.commit(getDocumentInterface(), entity, {
+        GeoLat: coord.lat,
+        GeoLon: coord.lon,
+        GeoStation: stationName !== "" ? stationName : "anchor"
+    });
     CsLocationPick.remember(coord);
 
     var msg = "Geo Reference: anchor stored on " +

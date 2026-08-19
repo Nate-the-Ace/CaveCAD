@@ -577,9 +577,7 @@ SurveyNotebook.drawSurveyInner = function(w) {
     var pageNames = CsModel.stationNames(survey);
     var replaced = CsDraw.eraseStations(doc, pageNames);
 
-    startTransaction(doc);
     var drawn = CsDraw.survey(survey, resolved, undefined, undefined, seqBase);
-    endTransaction();
     CsDraw.zoomToSurvey(survey, resolved);
 
     QMessageBox.information(null, "Survey Notebook",

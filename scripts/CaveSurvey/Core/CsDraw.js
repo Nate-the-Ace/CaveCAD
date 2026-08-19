@@ -1,31 +1,65 @@
-// Draw.js -- the only Core module that draws.
+// CsDraw.js -- the only Core module that draws.
 //
-// Part of the Cave Survey Core library. QCAD context only: everything
-// here goes through scripts/simple.js and runs inside whatever
-// transaction the CALLER opened. Tools own the transaction so each
-// user action stays one undo step; Draw just adds entities.
+// Part of the Cave Survey Core library. QCAD context only.
 //
-// Text size: TEXT_HEIGHT drawing units, shared by every label the
-// suite makes so the sheet's lettering stays consistent.
+// BUILT ON THE DIRECT ENTITY API, NOT simple.js: in the QJS bridge,
+// simple.js's setCurrentLayer and post-add property writes fail
+// SILENTLY -- a real survey saved to DXF came back with every mark on
+// one layer and not a single tag. The working pattern (proven by
+// headless round-trip): construct the entity, setLayerId and
+// setCustomProperty BEFORE adding, then op.addObject(entity, false)
+// -- the false is what stops the operation stamping the current
+// layer over the one just set.
+//
+// Every drawing function here takes the document and an
+// RAddObjectsOperation; the caller applies the operation, so a tool
+// action stays one undo step. CsDraw.survey manages its own op.
 
 var CsDraw = {};
 
 CsDraw.TEXT_HEIGHT = 0.5;
 
+/** One text entity, layered and tagged, into the op. */
+CsDraw.addText = function(doc, op, layerName, text, pos, halign, tagKey, tagValue) {
+    var data = new RTextData(pos, pos, CsDraw.TEXT_HEIGHT, 100.0,
+        RS.VAlignMiddle, halign, RS.LeftToRight, RS.Exact,
+        1.0, text, "standard", false, false, 0.0, false);
+    var entity = new RTextEntity(doc, data);
+    entity.setLayerId(doc.getLayerId(layerName));
+    if (tagKey !== undefined && tagValue !== undefined && tagValue !== "") {
+        CsTags.set(entity, tagKey, tagValue);
+    }
+    op.addObject(entity, false);
+    return entity;
+};
+
+/** One line, layered and tagged, into the op. */
+CsDraw.addLine = function(doc, op, layerName, from, to, tagKey, tagValue) {
+    var entity = new RLineEntity(doc, new RLineData(from, to));
+    entity.setLayerId(doc.getLayerId(layerName));
+    if (tagKey !== undefined && tagValue !== undefined && tagValue !== "") {
+        CsTags.set(entity, tagKey, tagValue);
+    }
+    op.addObject(entity, false);
+    return entity;
+};
+
+/** One point, layered, into the op (tags via CsTags on the entity
+ *  BEFORE this returns get committed with it). */
+CsDraw.addPoint = function(doc, op, layerName, pos) {
+    var entity = new RPointEntity(doc, new RPointData(pos));
+    entity.setLayerId(doc.getLayerId(layerName));
+    return entity; // caller tags, then op.addObject(entity, false)
+};
+
 /**
- * Draws one station: point on CTRL-STATIONS (tagged), label on
- * CTRL-STATION-LABELS. Label text is the name plus elevation when
- * meaningfully nonzero, offset away from the incoming shot direction
- * (or northeast for an anchor with no incoming shot).
- *
- * \param data {name, seq, azimuth, inclination, left, right, up,
- *              down, z} -- all optional except name
- * \return the point entity (for further tagging), or undefined
+ * Draws one station: tagged point on CTRL-STATIONS, label on
+ * CTRL-STATION-LABELS. Returns the point entity (already added).
  */
-CsDraw.station = function(pos, data) {
-    setCurrentLayer(CsLayers.STATIONS);
-    var pt = addPoint(pos);
+CsDraw.station = function(doc, op, pos, data) {
+    var pt = CsDraw.addPoint(doc, op, CsLayers.STATIONS, pos);
     CsTags.tagStation(pt, data);
+    op.addObject(pt, false);
 
     if (data.name !== undefined && data.name !== "") {
         var label = data.name;
@@ -35,39 +69,27 @@ CsDraw.station = function(pos, data) {
         var rad = (data.azimuth === undefined || data.azimuth === null) ?
             (Math.PI / 4.0) : ((data.azimuth - 90.0) * Math.PI / 180.0);
         var off = CsDraw.TEXT_HEIGHT * 1.5;
-        setCurrentLayer(CsLayers.STATION_LABELS);
-        var labelEntity = addSimpleText(label,
+        CsDraw.addText(doc, op, CsLayers.STATION_LABELS, label,
             new RVector(pos.x + off * Math.sin(rad), pos.y + off * Math.cos(rad)),
-            CsDraw.TEXT_HEIGHT, 0, "standard",
-            RS.VAlignMiddle, RS.HAlignRight, false, false);
-        CsTags.set(labelEntity, "StationLabel", data.name);
+            RS.HAlignRight, "StationLabel", data.name);
     }
     return pt;
 };
 
-/** Draws one centerline shot line on CTRL-SHOTS, tagged with its
- *  endpoint names so a redraw can find and replace it. */
-CsDraw.shotLine = function(fromPos, toPos, fromName, toName) {
-    setCurrentLayer(CsLayers.SHOTS);
-    var line = addLine(fromPos, toPos);
-    if (fromName !== undefined && toName !== undefined &&
-        fromName !== "" && toName !== "") {
-        CsTags.set(line, "Shot", fromName + "->" + toName);
-    }
-    return line;
+/** One centerline shot line on CTRL-SHOTS, tagged with its endpoints. */
+CsDraw.shotLine = function(doc, op, fromPos, toPos, fromName, toName) {
+    var tag = (fromName !== undefined && toName !== undefined &&
+        fromName !== "" && toName !== "") ? (fromName + "->" + toName) : "";
+    return CsDraw.addLine(doc, op, CsLayers.SHOTS, fromPos, toPos,
+        "Shot", tag);
 };
 
 /**
- * Draws a station's LRUD: L/R tick lines with tagged tip points on
- * CTRL-LRUD (so LRUDWalls can find them by name), and the U/D note on
- * CTRL-STATION-LABELS. null measurements draw nothing; 0 draws no
- * tick but still drops the tagged tip point AT the station, because
- * 0 means "the wall is here", which is exactly what a wall builder
- * needs to know.
+ * A station's LRUD: L/R tick lines with tagged tip points on
+ * CTRL-LRUD, U/D note on CTRL-STATION-LABELS. null = not measured
+ * (nothing drawn); 0 = wall at the station (tagged tip point only).
  */
-CsDraw.lrud = function(pos, name, azimuthDeg, left, right, up, down) {
-    setCurrentLayer(CsLayers.LRUD);
-
+CsDraw.lrud = function(doc, op, pos, name, azimuthDeg, left, right, up, down) {
     var sides = [["L", left], ["R", right]];
     for (var i = 0; i < sides.length; i++) {
         var side = sides[i][0];
@@ -80,15 +102,14 @@ CsDraw.lrud = function(pos, name, azimuthDeg, left, right, up, down) {
             tipPos = new RVector(pos.x, pos.y);
         } else {
             var end = CsLrud.tickEnd(pos, azimuthDeg, side, len);
-            var tick = addLine(pos, new RVector(end.x, end.y));
-            if (name !== undefined && name !== "") {
-                CsTags.set(tick, "LRUDLine", name + "." + side);
-            }
             tipPos = new RVector(end.x, end.y);
+            CsDraw.addLine(doc, op, CsLayers.LRUD, pos, tipPos,
+                "LRUDLine", name !== "" ? (name + "." + side) : "");
         }
         if (name !== undefined && name !== "") {
-            var tip = addPoint(tipPos);
+            var tip = CsDraw.addPoint(doc, op, CsLayers.LRUD, tipPos);
             CsTags.set(tip, "LRUDName", name + "." + side);
+            op.addObject(tip, false);
         }
     }
 
@@ -99,33 +120,28 @@ CsDraw.lrud = function(pos, name, azimuthDeg, left, right, up, down) {
             " D" + (hasDown ? down.toFixed(2) : "-");
         var rad = (azimuthDeg + 90.0) * Math.PI / 180.0;
         var off = CsDraw.TEXT_HEIGHT * 1.5;
-        setCurrentLayer(CsLayers.STATION_LABELS);
-        var note = addSimpleText(text,
+        CsDraw.addText(doc, op, CsLayers.STATION_LABELS, text,
             new RVector(pos.x + off * Math.sin(rad), pos.y + off * Math.cos(rad)),
-            CsDraw.TEXT_HEIGHT, 0, "standard",
-            RS.VAlignMiddle, RS.HAlignLeft, false, false);
-        if (name !== undefined && name !== "") {
-            CsTags.set(note, "LRUDNote", name);
-        }
+            RS.HAlignLeft, "LRUDNote", name);
     }
 };
 
 /**
- * Draws a whole resolved survey: stations, shot lines, LRUD, all
- * tagged, offset so that originStation lands on originPos (both
- * optional). Survey-level metadata is tagged onto the first station's
- * point. Caller owns the transaction.
+ * Draws a whole resolved survey as ONE operation (one undo step):
+ * stations, labels, shot lines, LRUD, all layered and tagged.
  *
  * \return {stationsDrawn, shotsDrawn, closuresDrawn, skipped}
  */
 CsDraw.survey = function(survey, resolved, originStation, originPos, seqBase) {
-    // seqBase continues station ordering across surveys in one
-    // drawing: without it a second survey's Seq tags restart at 0 and
-    // interleave with the first survey's when read back in Seq order.
     if (seqBase === undefined || seqBase === null) {
         seqBase = 0;
     }
-    CsLayers.ensureSurveyLayers();
+    var doc = getDocument();
+    var di = getDocumentInterface();
+    CsLayers.ensureSurveyLayers(doc, di);
+
+    var op = new RAddObjectsOperation();
+    op.setText("Draw cave survey");
 
     var offX = 0, offY = 0;
     if (originStation !== undefined && originStation !== null &&
@@ -140,7 +156,6 @@ CsDraw.survey = function(survey, resolved, originStation, originPos, seqBase) {
         return new RVector(st.x + offX, st.y + offY);
     };
 
-    // stations in resolution order, so Seq mirrors the survey
     var names = [];
     for (var n in resolved.stations) {
         if (resolved.stations.hasOwnProperty(n)) {
@@ -151,7 +166,7 @@ CsDraw.survey = function(survey, resolved, originStation, originPos, seqBase) {
         return resolved.stations[a].seq - resolved.stations[b].seq;
     });
 
-    // The first drawn leg's azimuth orients the start station's LRUD.
+    // the first drawn leg's azimuth orients the start station's LRUD
     var firstLegAzimuth;
     for (var li = 0; li < resolved.legs.length; li++) {
         if (!resolved.legs[li].shot.excludeFromPlot) {
@@ -165,8 +180,6 @@ CsDraw.survey = function(survey, resolved, originStation, originPos, seqBase) {
     for (var i = 0; i < names.length; i++) {
         var name = names[i];
         var lrud = CsModel.lrudForStation(survey, name);
-        // the anchor station: no incoming shot, so its LRUD comes from
-        // the notes page's first-station row (survey.startLrud)
         if (lrud === null && i === 0 && survey.startLrud !== null &&
             survey.startLrud !== undefined && firstLegAzimuth !== undefined) {
             lrud = {
@@ -177,7 +190,7 @@ CsDraw.survey = function(survey, resolved, originStation, originPos, seqBase) {
                 azimuth: firstLegAzimuth
             };
         }
-        var pt = CsDraw.station(at(name), {
+        var pt = CsDraw.station(doc, op, at(name), {
             name: name,
             seq: resolved.stations[name].seq + seqBase,
             azimuth: lrud !== null ? lrud.azimuth : undefined,
@@ -191,7 +204,7 @@ CsDraw.survey = function(survey, resolved, originStation, originPos, seqBase) {
             firstPoint = pt;
         }
         if (lrud !== null) {
-            CsDraw.lrud(at(name), name, lrud.azimuth,
+            CsDraw.lrud(doc, op, at(name), name, lrud.azimuth,
                 lrud.left, lrud.right, lrud.up, lrud.down);
         }
         stationsDrawn++;
@@ -203,7 +216,7 @@ CsDraw.survey = function(survey, resolved, originStation, originPos, seqBase) {
         if (leg.shot.excludeFromPlot) {
             continue;
         }
-        CsDraw.shotLine(at(leg.from), at(leg.to), leg.from, leg.to);
+        CsDraw.shotLine(doc, op, at(leg.from), at(leg.to), leg.from, leg.to);
         if (leg.kind === "closure") {
             closuresDrawn++;
         } else {
@@ -211,7 +224,6 @@ CsDraw.survey = function(survey, resolved, originStation, originPos, seqBase) {
         }
     }
 
-    // survey metadata rides on the first station point
     if (firstPoint !== undefined) {
         CsTags.set(firstPoint, "SurveyName", survey.name);
         CsTags.set(firstPoint, "SurveyDate", survey.date);
@@ -220,6 +232,8 @@ CsDraw.survey = function(survey, resolved, originStation, originPos, seqBase) {
         CsTags.set(firstPoint, "DeclinationSource", survey.declinationSource);
         CsTags.set(firstPoint, "DistanceUnit", survey.distanceUnit);
     }
+
+    di.applyOperation(op);
 
     return {
         stationsDrawn: stationsDrawn,
@@ -230,60 +244,10 @@ CsDraw.survey = function(survey, resolved, originStation, originPos, seqBase) {
 };
 
 /**
- * Zooms the focused view to the extents of a just-drawn survey --
- * NOT autoZoom, which fits ALL entities and leaves a fresh survey a
- * speck beside a template's border. Pads by the largest LRUD reach
- * plus a margin. Falls back to autoZoom when the view API refuses.
- */
-CsDraw.zoomToSurvey = function(survey, resolved) {
-    try {
-        var minX = null, minY = null, maxX = null, maxY = null;
-        for (var name in resolved.stations) {
-            if (!resolved.stations.hasOwnProperty(name)) {
-                continue;
-            }
-            var st = resolved.stations[name];
-            if (minX === null || st.x < minX) { minX = st.x; }
-            if (maxX === null || st.x > maxX) { maxX = st.x; }
-            if (minY === null || st.y < minY) { minY = st.y; }
-            if (maxY === null || st.y > maxY) { maxY = st.y; }
-        }
-        if (minX === null) {
-            autoZoom();
-            return;
-        }
-        // LRUD ticks stick out past the stations; pad by the largest
-        var reach = 0;
-        for (var i = 0; i < survey.shots.length; i++) {
-            var sh = survey.shots[i];
-            var vals = [sh.left, sh.right];
-            for (var k = 0; k < vals.length; k++) {
-                if (vals[k] !== null && vals[k] !== undefined &&
-                    vals[k] > reach) {
-                    reach = vals[k];
-                }
-            }
-        }
-        var pad = reach + Math.max((maxX - minX), (maxY - minY)) * 0.05 + 1;
-        var box = new RBox(new RVector(minX - pad, minY - pad),
-            new RVector(maxX + pad, maxY + pad));
-        var view = getDocumentInterface().getLastKnownViewWithFocus();
-        view.zoomTo(box, 10);
-    } catch (e) {
-        try {
-            autoZoom();
-        } catch (e2) {
-            // zoom is a nicety
-        }
-    }
-};
-
-/**
  * Deletes everything previously drawn FOR the given stations: their
  * points, labels, LRUD ticks/tips/notes, and shot lines whose BOTH
  * ends are in the set (a tie-in shot from an older survey keeps its
- * line -- only one of its ends belongs to this page). Runs as its own
- * operation; entities drawn before tagging existed (early builds)
+ * line). Its own operation. Entities drawn by pre-tagging builds
  * cannot be found and survive.
  *
  * \return number of entities removed
@@ -294,7 +258,6 @@ CsDraw.eraseStations = function(doc, stationNames) {
         inSet[stationNames[i]] = true;
     }
     var baseOf = function(tagged) {
-        // "A1.L" -> "A1"
         var m = /^(.*)\.([LR])$/.exec(tagged);
         return m === null ? tagged : m[1];
     };
@@ -347,4 +310,51 @@ CsDraw.eraseStations = function(doc, stationNames) {
         getDocumentInterface().applyOperation(op);
     }
     return removed;
+};
+
+/**
+ * Zooms the focused view to a just-drawn survey's extents -- not
+ * autoZoom, which fits ALL entities and leaves a fresh survey a speck
+ * beside a template's border. Falls back to autoZoom, then to nothing.
+ */
+CsDraw.zoomToSurvey = function(survey, resolved) {
+    try {
+        var minX = null, minY = null, maxX = null, maxY = null;
+        for (var name in resolved.stations) {
+            if (!resolved.stations.hasOwnProperty(name)) {
+                continue;
+            }
+            var st = resolved.stations[name];
+            if (minX === null || st.x < minX) { minX = st.x; }
+            if (maxX === null || st.x > maxX) { maxX = st.x; }
+            if (minY === null || st.y < minY) { minY = st.y; }
+            if (maxY === null || st.y > maxY) { maxY = st.y; }
+        }
+        if (minX === null) {
+            autoZoom();
+            return;
+        }
+        var reach = 0;
+        for (var i = 0; i < survey.shots.length; i++) {
+            var sh = survey.shots[i];
+            var vals = [sh.left, sh.right];
+            for (var k = 0; k < vals.length; k++) {
+                if (vals[k] !== null && vals[k] !== undefined &&
+                    vals[k] > reach) {
+                    reach = vals[k];
+                }
+            }
+        }
+        var pad = reach + Math.max((maxX - minX), (maxY - minY)) * 0.05 + 1;
+        var box = new RBox(new RVector(minX - pad, minY - pad),
+            new RVector(maxX + pad, maxY + pad));
+        var view = getDocumentInterface().getLastKnownViewWithFocus();
+        view.zoomTo(box, 10);
+    } catch (e) {
+        try {
+            autoZoom();
+        } catch (e2) {
+            // zoom is a nicety
+        }
+    }
 };

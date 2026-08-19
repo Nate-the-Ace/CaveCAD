@@ -507,6 +507,78 @@ ok(CsFormatRegistry.detect("renamed.dat", svxContent).id === "survex",
 ok(CsFormatRegistry.detect("x.csv", csvText).id === "csv", "detect csv");
 
 // ---------------------------------------------------------------------
+// Drawing round-trip -- QCAD engine only (node has no R* classes).
+// This is the test that would have caught the silent simple.js
+// failures: draw into a real document, read layers and tags back.
+// ---------------------------------------------------------------------
+
+if (!IS_NODE) {
+    (function() {
+        loadRepoScript("scripts/CaveSurvey/Core/CsLayers.js");
+        loadRepoScript("scripts/CaveSurvey/Core/CsTags.js");
+        loadRepoScript("scripts/CaveSurvey/Core/CsDraw.js");
+
+        var doc = new RDocument(new RMemoryStorage(), new RSpatialIndexNavel());
+        var di = new RDocumentInterface(doc);
+        // CsDraw reaches the document through these globals in GUI
+        // context; provide them here.
+        getDocument = function() { return doc; };
+        getDocumentInterface = function() { return di; };
+
+        var dsv = CsModel.newSurvey();
+        var d1 = shotOf("D1", "D2", 10, 0);
+        d1.left = 2; d1.right = 3; d1.up = 1; d1.down = 0.5;
+        var d2 = shotOf("D2", "D3", 10, 90);
+        d2.left = 1; d2.right = 1;
+        dsv.shots.push(d1);
+        dsv.shots.push(d2);
+        var dres = CsNetwork.resolve(dsv, {});
+        var drawn = CsDraw.survey(dsv, dres);
+
+        ok(drawn.stationsDrawn === 3, "draw: 3 stations drawn");
+        ok(drawn.shotsDrawn === 2, "draw: 2 shots drawn");
+
+        // layers really exist and really hold the entities
+        ok(doc.hasLayer("CTRL-STATIONS"), "draw: stations layer created");
+        ok(doc.hasLayer("CTRL-LRUD"), "draw: lrud layer created");
+        var byLayer = {};
+        var ids = doc.queryAllEntities(false, false);
+        for (var i = 0; i < ids.length; i++) {
+            var e = doc.queryEntity(ids[i]);
+            var ln = doc.getLayerName(e.getLayerId());
+            byLayer[ln] = (byLayer[ln] || 0) + 1;
+        }
+        ok(byLayer["CTRL-STATIONS"] === 3,
+            "draw: 3 points ON CTRL-STATIONS, got " + byLayer["CTRL-STATIONS"]);
+        ok(byLayer["CTRL-SHOTS"] === 2,
+            "draw: 2 lines ON CTRL-SHOTS, got " + byLayer["CTRL-SHOTS"]);
+        ok((byLayer["CTRL-LRUD"] || 0) >= 4,
+            "draw: LRUD ticks+tips on CTRL-LRUD, got " + byLayer["CTRL-LRUD"]);
+
+        // tags really persist
+        var stations = CsTags.collectStations(doc);
+        ok(stations.length === 3, "tags: 3 tagged stations read back");
+        var namesBack = [];
+        for (i = 0; i < stations.length; i++) {
+            namesBack.push(stations[i].name);
+        }
+        ok(namesBack.join(",") === "D1,D2,D3",
+            "tags: Seq order preserved, got " + namesBack.join(","));
+
+        // the reconstructed survey drives walls
+        var rebuilt = CsTags.surveyFromDocument(doc);
+        ok(rebuilt.shots.length === 2, "tags: survey rebuilt from drawing");
+        near(rebuilt.shots[0].left, 2, 1e-9, "tags: LRUD readable from drawing");
+
+        // erase replaces cleanly
+        var removed = CsDraw.eraseStations(doc, ["D1", "D2", "D3"]);
+        ok(removed > 0, "erase: removed " + removed + " marks");
+        ok(CsTags.collectStations(doc).length === 0,
+            "erase: no tagged stations left");
+    })();
+}
+
+// ---------------------------------------------------------------------
 // Report.
 // ---------------------------------------------------------------------
 

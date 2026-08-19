@@ -107,7 +107,7 @@ CsSymbols.insert = function(doc, entry, pos, scale, rotationRad) {
     if (isNull(block)) {
         return null;
     }
-    CsLayers.ensure(entry.layer);
+    CsLayers.ensure(doc, getDocumentInterface(), entry.layer);
     if (scale === undefined) {
         scale = 1.0;
     }

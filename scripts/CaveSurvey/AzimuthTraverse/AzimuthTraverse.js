@@ -84,14 +84,17 @@ function azimuthTraverseRun() {
         current = new RVector(startX, startY);
     }
 
-    CsLayers.ensureSurveyLayers();
+    var di = getDocumentInterface();
+    CsLayers.ensureSurveyLayers(doc, di);
 
     var seq = CsTags.collectStations(doc).length; // continue Seq numbering
     var startPoint;
     if (!startExists) {
-        startTransaction(doc);
-        startPoint = CsDraw.station(current, { name: startName, seq: seq, z: 0.0 });
-        endTransaction();
+        var opStart = new RAddObjectsOperation();
+        opStart.setText("Start station");
+        startPoint = CsDraw.station(doc, opStart, current,
+            { name: startName, seq: seq, z: 0.0 });
+        di.applyOperation(opStart);
         seq++;
     }
 
@@ -133,12 +136,15 @@ function azimuthTraverseRun() {
             var sr = askLrud("Start station " + fromLabel, "Right");
             var su = askLrud("Start station " + fromLabel, "Up");
             var sd = askLrud("Start station " + fromLabel, "Down");
-            startTransaction(doc);
-            CsDraw.lrud(current, startName, azimuth, sl, sr, su, sd);
-            endTransaction();
+            var opLrud = new RAddObjectsOperation();
+            opLrud.setText("Start station LRUD");
+            CsDraw.lrud(doc, opLrud, current, startName, azimuth, sl, sr, su, sd);
+            di.applyOperation(opLrud);
             if (startPoint !== undefined) {
-                CsTags.tagStation(startPoint, { name: startName,
-                    azimuth: azimuth, left: sl, right: sr, up: su, down: sd });
+                // startPoint is already in the document: commit the
+                // LRUD tags through a modify operation
+                CsTags.commit(di, startPoint, { Azimuth: azimuth,
+                    Left: sl, Right: sr, Up: su, Down: sd });
             }
         }
 
@@ -166,13 +172,14 @@ function azimuthTraverseRun() {
         var nextZ = currentZ + o.dz;
 
         // one undo step per shot
-        startTransaction(doc);
-        CsDraw.shotLine(current, next, currentName, toName);
-        CsDraw.lrud(next, toName, azimuth, left, right, up, down);
-        CsDraw.station(next, { name: toName, seq: seq, azimuth: azimuth,
-            inclination: inclination, left: left, right: right,
-            up: up, down: down, z: nextZ });
-        endTransaction();
+        var opShot = new RAddObjectsOperation();
+        opShot.setText("Survey shot");
+        CsDraw.shotLine(doc, opShot, current, next, currentName, toName);
+        CsDraw.lrud(doc, opShot, next, toName, azimuth, left, right, up, down);
+        CsDraw.station(doc, opShot, next, { name: toName, seq: seq,
+            azimuth: azimuth, inclination: inclination, left: left,
+            right: right, up: up, down: down, z: nextZ });
+        di.applyOperation(opShot);
 
         seq++;
         current = next;

@@ -64,22 +64,28 @@ CsLayers.DEFAULTS = {
 };
 
 /**
- * Ensures a layer exists in the current document, creating it with
- * its registry defaults if not. QCAD context only (uses simple.js's
- * hasLayer/addLayer).
+ * Ensures a layer exists, creating it with its registry defaults if
+ * not. Direct RLayer construction -- simple.js's addLayer relies on
+ * current-layer plumbing that fails silently in the QJS bridge.
+ * QCAD context only.
  */
-CsLayers.ensure = function(name) {
-    if (hasLayer(name)) {
+CsLayers.ensure = function(doc, di, name) {
+    if (doc.hasLayer(name)) {
         return;
     }
     var d = CsLayers.DEFAULTS[name] || ["white", "CONTINUOUS", "Weight025"];
-    addLayer(name, d[0], d[1], RLineweight[d[2]]);
+    var layer = new RLayer(doc, name, false, false,
+        new RColor(d[0]), doc.getLinetypeId(d[1]),
+        RLineweight[d[2]], false);
+    var op = new RAddObjectsOperation();
+    op.addObject(layer);
+    di.applyOperation(op);
 };
 
 /** Ensures the layers every survey-drawing tool relies on. */
-CsLayers.ensureSurveyLayers = function() {
-    CsLayers.ensure(CsLayers.SHOTS);
-    CsLayers.ensure(CsLayers.STATIONS);
-    CsLayers.ensure(CsLayers.STATION_LABELS);
-    CsLayers.ensure(CsLayers.LRUD);
+CsLayers.ensureSurveyLayers = function(doc, di) {
+    CsLayers.ensure(doc, di, CsLayers.SHOTS);
+    CsLayers.ensure(doc, di, CsLayers.STATIONS);
+    CsLayers.ensure(doc, di, CsLayers.STATION_LABELS);
+    CsLayers.ensure(doc, di, CsLayers.LRUD);
 };
