@@ -37,13 +37,31 @@ REPO="$PWD"
 
 CAVE=${CAVE:-"$HOME/Documents/Cave"}
 
+# QCAD's per-user folder is named after the EDITION actually running:
+# "QCAD Professional" for a Pro install, "QCAD" for Community. Getting
+# this wrong fails silently -- the add-on sits in a folder QCAD never
+# reads -- so install into every edition folder present, and default
+# to Professional when none exists yet.
 if [ -z "${SCRIPTS:-}" ]; then
     case "$(uname -s)" in
-        Darwin) SCRIPTS="$HOME/Library/Application Support/QCAD/QCAD/scripts" ;;
-        *)      SCRIPTS="${XDG_DATA_HOME:-$HOME/.local/share}/QCAD/QCAD/scripts" ;;
+        Darwin) QCAD_BASE="$HOME/Library/Application Support/QCAD" ;;
+        *)      QCAD_BASE="${XDG_DATA_HOME:-$HOME/.local/share}/QCAD" ;;
     esac
+    SCRIPTS_DIRS=""
+    for edition in "QCAD Professional" "QCAD Community Edition" "QCAD"; do
+        if [ -d "$QCAD_BASE/$edition" ]; then
+            SCRIPTS_DIRS="$SCRIPTS_DIRS$QCAD_BASE/$edition/scripts
+"
+        fi
+    done
+    if [ -z "$SCRIPTS_DIRS" ]; then
+        SCRIPTS_DIRS="$QCAD_BASE/QCAD Professional/scripts
+"
+    fi
+else
+    SCRIPTS_DIRS="$SCRIPTS
+"
 fi
-DEST="$SCRIPTS/CaveSurvey"
 
 # QCAD reads add-ons once, at startup. A publish while it is running looks like
 # it did nothing, which is worth saying out loud rather than leaving to be
@@ -54,13 +72,15 @@ running() {
 
 # ----------------------------------------------------------------- uninstall
 if [ "$1" = "--uninstall" ]; then
-    if [ -e "$DEST" ] || [ -L "$DEST" ]; then
-        rm -rf "$DEST"
-        echo "Removed $DEST"
-        echo "Restart QCAD; the Cave Survey menu will be gone."
-    else
-        echo "Nothing to remove -- not installed at $DEST"
-    fi
+    echo "$SCRIPTS_DIRS" | while IFS= read -r sdir; do
+        [ -z "$sdir" ] && continue
+        DEST="$sdir/CaveSurvey"
+        if [ -e "$DEST" ] || [ -L "$DEST" ]; then
+            rm -rf "$DEST"
+            echo "Removed $DEST"
+        fi
+    done
+    echo "Restart QCAD; the Cave Survey menu will be gone."
     exit 0
 fi
 
@@ -92,20 +112,20 @@ done
 # ----------------------------------------------------- install into QCAD
 # Replaced outright rather than merged: a tool dropped from this release must
 # not linger in QCAD's copy and go on appearing in the menu.
-if [ -L "$DEST" ]; then
-    echo
-    echo "Replacing a symlinked install at $DEST"
-elif [ -d "$DEST" ] && [ -n "$(find "$DEST" -maxdepth 1 -type l)" ]; then
-    echo
-    echo "Replacing a linked development install at $DEST"
-    echo "(install_for_testing.sh links; re-run it if you want those back)"
-elif [ -d "$DEST" ]; then
-    echo
-    echo "Replacing the existing install at $DEST"
-fi
-rm -rf "$DEST"
-mkdir -p "$SCRIPTS"
-cp -R "$STAGE/CaveSurvey" "$DEST"
+INSTALLED_TO=""
+echo "$SCRIPTS_DIRS" | while IFS= read -r sdir; do
+    [ -z "$sdir" ] && continue
+    DEST="$sdir/CaveSurvey"
+    if [ -e "$DEST" ] || [ -L "$DEST" ]; then
+        echo "Replacing the existing install at $DEST"
+    fi
+    rm -rf "$DEST"
+    mkdir -p "$sdir"
+    cp -R "$STAGE/CaveSurvey" "$DEST"
+    echo "Installed: $DEST"
+done
+# for the report below:
+DEST=$(echo "$SCRIPTS_DIRS" | head -n1)/CaveSurvey
 
 # ------------------------------------------------------- archive the release
 # Kept out of QCAD's scripts folder on purpose -- see the note at the top.
