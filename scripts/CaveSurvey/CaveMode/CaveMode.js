@@ -61,15 +61,13 @@ CaveMode.apply = function(on) {
     var appWin = RMainWindowQt.getMainWindow();
     var hidden = [];
 
-    // This bridge has no findChildren, so: menus are reached through
-    // the menu bar's ACTIONS (every top-level menu is one QAction on
-    // the bar, its text is the title), toolbars through findChild by
-    // their stock object names.
-    var menuBar = appWin.menuBar();
-    var menuActions = menuBar.actions();
+    // This bridge wraps no findChildren, so: menus are reached through
+    // the menu bar's ACTIONS (each top-level menu is one QAction whose
+    // text is its title), toolbars through findChild by their stock
+    // object names -- unknown toolbars stay visible, failing safe.
+    var menuActions = appWin.menuBar().actions();
 
     if (on) {
-        // ---- menus -------------------------------------------------
         for (var i = 0; i < menuActions.length; i++) {
             var act = menuActions[i];
             var title = CaveMode.stripAccel(act.text);
@@ -82,7 +80,6 @@ CaveMode.apply = function(on) {
             }
         }
 
-        // ---- toolbars ------------------------------------------------
         for (i = 0; i < CaveMode.HIDE_TOOLBARS.length; i++) {
             var tbName = CaveMode.HIDE_TOOLBARS[i];
             var tb = appWin.findChild(tbName);
@@ -97,7 +94,8 @@ CaveMode.apply = function(on) {
     } else {
         // restore exactly what we hid, nothing else
         var stored = RSettings.getStringValue(CaveMode.SETTING_HIDDEN, "");
-        var names = stored === "" ? [] : stored.split("|");
+        var names = (stored === "" || stored === undefined || stored === null) ?
+            [] : String(stored).split("|");
 
         for (i = 0; i < names.length; i++) {
             var entry = names[i];
