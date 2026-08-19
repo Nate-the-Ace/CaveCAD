@@ -202,6 +202,7 @@ LRUDWalls.init = function(basePath) {
     var action = new RGuiAction(qsTr("LRUD Walls"), RMainWindowQt.getMainWindow());
     action.setRequiresDocument(true);
     action.setScriptFile(basePath + "/LRUDWalls.js");
+    action.setIcon(basePath + "/LRUDWalls.svg");
     action.setStatusTip(qsTr("Draw approximate passage walls from named LRUD points created by Azimuth Traverse"));
     action.setDefaultCommands(["lrudwalls"]);
     action.setGroupSortOrder(450);

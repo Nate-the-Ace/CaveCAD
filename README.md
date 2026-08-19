@@ -17,22 +17,40 @@ requires QCAD Professional.
 | `templates/` | NSS-style plan and profile drawing templates. |
 | `testdata/` | Small example survey files in all three native formats. |
 | `tests/` | Automated tests -- see `tests/README.md`. |
+| `tools/` | Builds the release package -- see [Building the package](#building-the-package). |
 | `legacy/` | Two older scripts not yet part of the add-on. |
 
 ## Installing the QCAD add-on
 
-Copy the `CaveSurvey` folder into QCAD's own `scripts` folder, then restart
-QCAD. A **Cave Survey** menu and toolbar appear.
-
-On macOS, QCAD's scripts folder is inside the application bundle:
+For anyone who just wants to use the tools, hand them a built package rather
+than this repo -- see [Building the package](#building-the-package). It holds
+every tool, the templates and sample surveys, and installs itself:
 
 ```bash
-cp -R scripts/CaveSurvey "/Applications/QCAD.app/Contents/Resources/scripts/"
+./install.sh
 ```
 
-On Windows it's `C:\Program Files\QCAD\scripts\`, and on Linux it's usually
-`/usr/share/qcad/scripts/`. If a QCAD update replaces the application, copy the
-folder in again.
+To install from a checkout instead, copy the `CaveSurvey` folder into QCAD's
+per-user `scripts` folder and restart QCAD. A **Cave Survey** menu and toolbar
+appear.
+
+```bash
+cp -R scripts/CaveSurvey "$HOME/Library/Application Support/QCAD/QCAD/scripts/"
+```
+
+| Platform | QCAD's per-user scripts folder |
+| --- | --- |
+| macOS | `~/Library/Application Support/QCAD/QCAD/scripts` |
+| Windows | `%APPDATA%\QCAD\QCAD\scripts` |
+| Linux | `~/.local/share/QCAD/QCAD/scripts` |
+
+Create `scripts` if it isn't there. Installing into the QCAD application folder
+also works, but a QCAD update replaces the application and takes the tools with
+it, so prefer the paths above.
+
+While working on a tool, `../qcad-align-image-tool/install_for_testing.sh`
+symlinks these working copies into that folder instead of copying them, so an
+edit is live after a restart.
 
 ### The tools
 
@@ -43,9 +61,14 @@ command in QCAD's command line.
 | --- | --- | --- |
 | Azimuth Traverse | `azimuthtraverse`, `azt` | Plots shots one at a time from typed azimuth, distance, inclination and LRUD. Start from a selected station to continue an existing survey. |
 | Import Native Cave Survey | `importcavesurvey`, `ics` | Reads a Walls `.srv`, Compass `.dat` or Survex `.svx` file directly and draws the centerline, stations and LRUD ticks. |
+| Align Image* | `alignimage`, `ali` | Fits a scanned map onto the drawing by matching two points, so passage walls can be traced off it. |
 | LRUD Walls | `lrudwalls` | Draws approximate passage walls through the LRUD points left by Azimuth Traverse. |
 | Scatter Breakdown | `scatterbreakdown`, `scb` | Fills closed `BREAKDOWN-BOUNDARY` polylines with randomized breakdown symbols. |
 | Geo Anchor | `geoanchor` | Moves and scales the whole drawing so one station sits at a real latitude/longitude. |
+
+\* Align Image is maintained in its own project, `../qcad-align-image-tool`,
+and is copied into the add-on when the package is built. It is not in
+`scripts/CaveSurvey/` here.
 
 Start a new map from `templates/NSS_Cave_Template_PLAN.dxf` (or
 `..._PROFILE.dxf`). The tools draw onto its `CTRL-` layers:
@@ -72,6 +95,9 @@ plotted map:
   `app/format_io.py`.
 * **L and R** are measured facing the direction of travel, and LRUD belongs to
   the **To** station of a shot.
+* **Declination** declared in a file is applied on import for Compass
+  (`DECLINATION:`) and Walls (`#Units Decl=`). Survex's `*calibrate
+  declination` is not read, so an `.svx` relying on it comes in rotated.
 
 ## The data-entry app
 
@@ -108,7 +134,28 @@ overwrite real ones, and if two shots genuinely disagree the export says so.
 ```
 
 See `tests/README.md`. `./tests/run_all.sh --publish` additionally checks what
-only matters for a release -- every tool having a toolbar icon and a status tip.
-It currently fails, because `LRUDWalls` and `GeoAnchor` still need icons. The interesting one is a differential test that runs the
-add-on's parsers inside QCAD's own script engine and diffs them against the
-app's Python parsers, so the two implementations can't quietly drift apart.
+only matters for a release -- every tool having a toolbar icon and a status
+tip. The interesting one is a differential test that runs the add-on's parsers
+inside QCAD's own script engine and diffs them against the app's Python
+parsers, so the two implementations can't quietly drift apart.
+
+## Building the package
+
+```bash
+./tools/make_package.sh
+```
+
+Produces `dist/CaveSurveyTools-<version>.zip` -- the whole add-on, the
+templates, the sample surveys, install notes and a per-platform installer. That
+zip is what a release is; the version comes from `VERSION`, or from
+`--version`.
+
+Align Image is copied in from `../qcad-align-image-tool/AlignImage`; point
+`ALIGN_IMAGE` elsewhere if your checkout isn't a sibling. A build with it
+missing fails rather than quietly shipping five tools.
+
+The staged package is checked before it is zipped -- the structural tests with
+the publish gate on, then every script parsed by QCAD's own engine. Both run
+against the *package*, not the repo, because that is the only place all six
+tools are ever seen together: a menu position that collides between Align Image
+and a tool in this repo cannot show up in either project on its own.

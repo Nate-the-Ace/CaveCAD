@@ -226,6 +226,7 @@ GeoAnchor.init = function(basePath) {
     var action = new RGuiAction(qsTr("Geo Anchor"), RMainWindowQt.getMainWindow());
     action.setRequiresDocument(true);
     action.setScriptFile(basePath + "/GeoAnchor.js");
+    action.setIcon(basePath + "/GeoAnchor.svg");
     action.setStatusTip(qsTr("Translate/scale the whole drawing to a real-world lat/lon anchored on a selected station"));
     action.setDefaultCommands(["geoanchor"]);
     action.setGroupSortOrder(450);

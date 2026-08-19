@@ -24,7 +24,15 @@ import xml.etree.ElementTree as ElementTree
 PUBLISH_CHECK = os.environ.get("CAVESURVEY_PUBLISH_CHECK") == "1"
 
 REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-ADDON = os.path.join(REPO, "scripts", "CaveSurvey")
+
+# By default these check the add-on as it sits in the repo. tools/make_package.sh
+# points them at a staged package instead, so the same rules are enforced on what
+# actually ships -- which is the only place AlignImage (a separate project, copied
+# in at build time) is ever seen alongside the other tools. A sort order that only
+# collides once AlignImage is present is exactly the kind of thing that has to fail
+# there rather than in the repo.
+ADDON = os.environ.get("CAVESURVEY_ADDON") or os.path.join(REPO, "scripts", "CaveSurvey")
+TEMPLATES = os.environ.get("CAVESURVEY_TEMPLATES") or os.path.join(REPO, "templates")
 
 # The menu/toolbar object names created by CaveSurvey.js. A tool that doesn't
 # reference both never appears in either place.
@@ -159,7 +167,7 @@ class TestTemplates(unittest.TestCase):
                      "NSS_Cave_Template_PROFILE.dxf"):
             with self.subTest(template=name):
                 self.assertTrue(
-                    os.path.exists(os.path.join(REPO, "templates", name)))
+                    os.path.exists(os.path.join(TEMPLATES, name)))
 
 
 if __name__ == "__main__":
