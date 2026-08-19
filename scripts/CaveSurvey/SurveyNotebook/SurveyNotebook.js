@@ -408,6 +408,13 @@ SurveyNotebook.autoAddStation = function(w) {
     } catch (e) {
         // focus is a nicety
     }
+    // a station added below the fold is scrolled into view -- its D
+    // is the farthest-right, lowest thing the user is about to need
+    try {
+        w.ladderArea.ensureWidgetVisible(row.d);
+    } catch (e2) {
+        // scrolling is a nicety too
+    }
     SurveyNotebook.refresh(w);
 };
 
