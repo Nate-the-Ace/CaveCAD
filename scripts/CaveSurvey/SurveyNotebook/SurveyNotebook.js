@@ -500,6 +500,18 @@ SurveyNotebook.refresh = function(w) {
 // ---------------------------------------------------------------------
 
 SurveyNotebook.drawSurvey = function(w) {
+    // Any failure in here must be SEEN, not swallowed by the engine.
+    try {
+        SurveyNotebook.drawSurveyInner(w);
+    } catch (e) {
+        QMessageBox.warning(null, "Survey Notebook",
+            "Draw failed inside this build's bridge:\n\n" + e +
+            "\n\n" + (e.stack ? String(e.stack).substring(0, 600) : "") +
+            "\n\nPlease report this text.");
+    }
+};
+
+SurveyNotebook.drawSurveyInner = function(w) {
     var doc = getDocument();
     if (doc === undefined || doc === null) {
         QMessageBox.warning(null, "Survey Notebook", "No drawing is open.");
