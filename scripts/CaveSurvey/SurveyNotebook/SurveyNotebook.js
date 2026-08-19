@@ -355,6 +355,9 @@ SurveyNotebook.applyTabOrder = function(w) {
     }
     var last = rows[rows.length - 1];
     order.push(last.l, last.r, last.u, last.d);
+    if (w.sentinel !== undefined) {
+        order.push(w.sentinel);
+    }
     try {
         for (var k = 1; k < order.length; k++) {
             QWidget.setTabOrder(order[k - 1], order[k]);
@@ -362,6 +365,24 @@ SurveyNotebook.applyTabOrder = function(w) {
     } catch (e) {
         // older bridge without setTabOrder: keep default order
     }
+};
+
+/**
+ * Tab off the last station's D and the page GROWS: focus landing on
+ * the small "+" catcher adds the next station (name pre-incremented)
+ * and moves focus into it, so continuous entry never needs the mouse.
+ */
+SurveyNotebook.autoAddStation = function(w) {
+    var prevName = w.rows.length > 0 ?
+        String(w.rows[w.rows.length - 1].name.text) : "";
+    var row = SurveyNotebook.addStationRow(w,
+        CsModel.nextStationName(prevName));
+    try {
+        row.name.setFocus();
+    } catch (e) {
+        // focus is a nicety
+    }
+    SurveyNotebook.refresh(w);
 };
 
 /** Hides every ladder row (rebuild path for imports). */
@@ -670,8 +691,17 @@ SurveyNotebook.buildDock = function(appWin) {
 
         var rowBar = new QWidget();
         var rowButtons = new QHBoxLayout();
+        // The "+" catcher: tabbing off the last station's D lands here,
+        // which adds the next station automatically (see focusChanged
+        // wiring below). Clicking it does the same thing, for free.
+        w.sentinel = new QPushButton("+");
+        w.sentinel.objectName = "CaveSurveyNotebookAutoAdd";
+        w.sentinel.maximumWidth = 32;
+        w.sentinel.toolTip = "Next station: Tab lands here from the " +
+            "last D and adds it automatically";
         w.addRowButton = new QPushButton("+ Station");
         w.delRowButton = new QPushButton("- Station");
+        rowButtons.addWidget(w.sentinel, 0, 0);
         rowButtons.addWidget(w.addRowButton, 0, 0);
         rowButtons.addWidget(w.delRowButton, 0, 0);
         rowButtons.addStretch(1);
@@ -718,6 +748,20 @@ SurveyNotebook.buildDock = function(appWin) {
         SurveyNotebook.safeConnect(w.delRowButton.clicked, function() {
             SurveyNotebook.removeLastStation(w);
         }, "- Station button", w.problems);
+        // Focus landing on the "+" catcher = grow the page. Identity
+        // is compared by objectName: the bridge wraps the same widget
+        // in a fresh object per signal emission.
+        try {
+            qApp.focusChanged.connect(function(oldW, newW) {
+                if (newW !== null && newW !== undefined &&
+                    String(newW.objectName) === "CaveSurveyNotebookAutoAdd") {
+                    SurveyNotebook.autoAddStation(w);
+                }
+            });
+        } catch (e) {
+            w.problems.push("auto-add on Tab (" + e +
+                ") -- use the + Station button instead");
+        }
     } else {
         SurveyNotebook.safeConnect(w.editor.textChanged, function() {
             SurveyNotebook.refresh(w);
