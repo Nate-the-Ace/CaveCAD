@@ -8,22 +8,27 @@
 // silently discards every one, killing tie-ins, replace-on-draw,
 // LRUD Walls and Stats on any drawing that has been closed once.
 //
-// THE FIX: entity HANDLES do survive save/reopen (verified the same
-// way). So the suite keeps a "survey database" -- one text entity on
-// a frozen CTRL-DATA layer holding JSON keyed by entity handle --
-// rewritten whenever tags change, and consulted by CsTags.get as the
-// fallback when an entity's in-memory tag is empty. Tools call
-// CsStore.ensureLoaded(doc) before reading and CsStore.sync(doc, di)
-// after writing; CsTags does the rest transparently.
+// THE FIX: a "survey database" -- one text entity on the CTRL-DATA
+// layer -- rewritten whenever tags change and consulted by CsTags.get
+// as the fallback when an entity's in-memory tag is empty.
+//
+// Records are keyed by GEOMETRY (entity type + position), not by
+// handle: the exporter RENUMBERS handles on save (learned from a real
+// file whose store keys matched nothing after reopen), but a point's
+// coordinates survive any round trip bit-for-bit close. Position is
+// rounded to 1e-4 drawing units for matching; co-located duplicates
+// (tie-in redraws) share one record, which is correct -- they carry
+// the same data.
 
 var CsStore = {};
 
 CsStore.LAYER = "CTRL-DATA";
-CsStore.MARKER = "CAVESURVEYDB v2 ";
+CsStore.MARKER = "CAVESURVEYDB v3 ";
 // Record format (deliberately NOT JSON: MTEXT treats braces as
 // formatting groups, and this build only exposes getPlainText):
-//   <handle>|key=encoded|key=encoded;;<handle>|...
-// values URI-encoded, so separators can never occur inside them.
+//   <type>:<x>:<y>|key=encoded|key=encoded;;...
+// with x/y printed to 4 decimals; values URI-encoded, so separators
+// can never occur inside them.
 // every tag key the suite writes; sync scans these
 CsStore.KEYS = ["Station", "Seq", "Azimuth", "Inclination",
     "Left", "Right", "Up", "Down", "Elevation",
@@ -33,7 +38,34 @@ CsStore.KEYS = ["Station", "Seq", "Azimuth", "Inclination",
     "SurveyName", "SurveyDate", "SurveyTeam",
     "Declination", "DeclinationSource", "DistanceUnit"];
 
-CsStore.map = null; // handle -> {key: value}, for the loaded document
+CsStore.map = null; // geoKey -> {key: value}, for the loaded document
+
+/**
+ * The geometry key of an entity: type + position to 4 decimals.
+ * Points and texts use their position; lines their midpoint;
+ * anything else its bounding-box middle.
+ */
+CsStore.geoKey = function(entity) {
+    var p = null;
+    try {
+        if (typeof entity.getPosition === "function") {
+            p = entity.getPosition();
+        } else if (typeof entity.getStartPoint === "function" &&
+                typeof entity.getEndPoint === "function") {
+            var a = entity.getStartPoint();
+            var b = entity.getEndPoint();
+            p = new RVector((a.x + b.x) / 2.0, (a.y + b.y) / 2.0);
+        } else if (typeof entity.getBoundingBox === "function") {
+            p = entity.getBoundingBox().getCenter();
+        }
+    } catch (e) {
+        p = null;
+    }
+    if (p === null) {
+        return null;
+    }
+    return entity.getType() + ":" + p.x.toFixed(4) + ":" + p.y.toFixed(4);
+};
 
 /** Finds the store text entity, or null. */
 CsStore.findStoreEntity = function(doc) {
@@ -49,7 +81,8 @@ CsStore.findStoreEntity = function(doc) {
         }
         if (typeof e.getPlainText === "function") {
             var t = String(e.getPlainText());
-            if (t.indexOf(CsStore.MARKER) === 0) {
+            // any version: sync must find and REPLACE stale stores too
+            if (t.indexOf("CAVESURVEYDB ") === 0) {
                 return e;
             }
         }
@@ -70,6 +103,9 @@ CsStore.ensureLoaded = function(doc) {
 /** Parses the record format; corrupt input parses to empty. */
 CsStore.parse = function(text) {
     var map = {};
+    if (text.indexOf(CsStore.MARKER) !== 0) {
+        return map; // older store version: keys are meaningless now
+    }
     try {
         var body = text.substring(CsStore.MARKER.length);
         var records = body.split(";;");
@@ -119,10 +155,11 @@ CsStore.lookup = function(entity, key) {
     if (CsStore.map === null) {
         return "";
     }
-    if (typeof entity.getHandle !== "function") {
+    var gk = CsStore.geoKey(entity);
+    if (gk === null) {
         return "";
     }
-    var rec = CsStore.map[String(entity.getHandle())];
+    var rec = CsStore.map[gk];
     if (rec === undefined || rec[key] === undefined) {
         return "";
     }
@@ -143,12 +180,17 @@ CsStore.sync = function(doc, di) {
     var ids = doc.queryAllEntities(false, true);
     for (var i = 0; i < ids.length; i++) {
         var e = doc.queryEntity(ids[i]);
-        if (isNull(e) || typeof e.getHandle !== "function") {
+        if (isNull(e)) {
             continue;
         }
-        var h = String(e.getHandle());
-        var rec = old[h] !== undefined ? old[h] : {};
-        var found = old[h] !== undefined;
+        var gk = CsStore.geoKey(e);
+        if (gk === null) {
+            continue;
+        }
+        // carry the old record for this geometry forward, overlay
+        // whatever native in-memory tags the entity still has
+        var rec = old[gk] !== undefined ? old[gk] : {};
+        var found = old[gk] !== undefined;
         for (var k = 0; k < CsStore.KEYS.length; k++) {
             var key = CsStore.KEYS[k];
             var v = "";
@@ -166,7 +208,16 @@ CsStore.sync = function(doc, di) {
             }
         }
         if (found) {
-            entities[h] = rec;
+            if (entities[gk] !== undefined) {
+                // co-located duplicate: merge (tie-in redraws share data)
+                for (var mk in rec) {
+                    if (rec.hasOwnProperty(mk)) {
+                        entities[gk][mk] = rec[mk];
+                    }
+                }
+            } else {
+                entities[gk] = rec;
+            }
         }
     }
 
