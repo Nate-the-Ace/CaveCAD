@@ -59,6 +59,7 @@ function geoReferenceRun() {
     CsTags.set(entity, "GeoLon", coord.lon);
     CsTags.set(entity, "GeoStation", stationName !== "" ? stationName : "anchor");
     endTransaction();
+    CsLocationPick.remember(coord);
 
     var msg = "Geo Reference: anchor stored on " +
         (stationName !== "" ? ("station " + stationName) : "the selected point") +

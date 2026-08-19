@@ -311,6 +311,7 @@ SurveyNotebook.addStationRow = function(w, stationName) {
     }
 
     w.rows.push(row);
+    SurveyNotebook.applyTabOrder(w);
     return row;
 };
 
@@ -323,7 +324,37 @@ SurveyNotebook.removeLastStation = function(w) {
     for (var i = 0; i < row.widgets.length; i++) {
         row.widgets[i].visible = false; // grid rows can't be removed
     }
+    SurveyNotebook.applyTabOrder(w);
     SurveyNotebook.refresh(w);
+};
+
+/**
+ * Tab order follows the ORDER OF TAKING READINGS, not the layout:
+ * from a station, Tab goes to the shot's measurements (dist, azm
+ * fs/bs, inc fs/bs), then to the NEW station's name, then that
+ * station's LRUD -- because you measure the passage where you just
+ * arrived -- then on down the page. The first station's LRUD (no
+ * incoming shot) comes at the very end of the chain.
+ */
+SurveyNotebook.applyTabOrder = function(w) {
+    var rows = w.rows;
+    if (rows.length === 0) {
+        return;
+    }
+    var order = [rows[0].name];
+    for (var i = 1; i < rows.length; i++) {
+        var r = rows[i];
+        order.push(r.dist, r.azFs, r.azBs, r.incFs, r.incBs,
+            r.name, r.l, r.r, r.u, r.d);
+    }
+    order.push(rows[0].l, rows[0].r, rows[0].u, rows[0].d);
+    try {
+        for (var k = 1; k < order.length; k++) {
+            QWidget.setTabOrder(order[k - 1], order[k]);
+        }
+    } catch (e) {
+        // older bridge without setTabOrder: keep default order
+    }
 };
 
 /** Hides every ladder row (rebuild path for imports). */
@@ -512,24 +543,13 @@ SurveyNotebook.inferDeclination = function(w) {
         return;
     }
 
+    // the drawing's anchor is authoritative and skips the prompt;
+    // otherwise ask, prefilled with the last declared location
     var coord = null;
-    var doc = getDocument();
-    if (doc !== undefined && doc !== null) {
-        var ids = doc.queryAllEntities(false, false);
-        for (var i = 0; i < ids.length; i++) {
-            var e = doc.queryEntity(ids[i]);
-            if (isNull(e)) {
-                continue;
-            }
-            var lat = CsTags.getNumber(e, "GeoLat");
-            var lon = CsTags.getNumber(e, "GeoLon");
-            if (lat !== null && lon !== null) {
-                coord = { lat: lat, lon: lon };
-                break;
-            }
-        }
-    }
-    if (coord === null) {
+    var shared = CsLocationPick.getShared(getDocument());
+    if (shared !== null && shared.source === "anchor") {
+        coord = shared;
+    } else {
         coord = CsLocationPick.ask("Survey Notebook", "");
         if (coord === null) {
             return;

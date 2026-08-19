@@ -16,6 +16,58 @@
 
 var CsLocationPick = {};
 
+// One declared location serves every tool. Priority: the drawing's
+// Geo Reference anchor (authoritative -- it is pinned to a station),
+// then the last location the user declared ANYWHERE (map pick or
+// typed), kept in RSettings so declination checks, new drawings and
+// the Notebook all start from it. A manually declared location is
+// trusted: tools prefill it instead of asking again from scratch.
+
+CsLocationPick.SETTING_LAT = "CaveSurvey/LastLocationLat";
+CsLocationPick.SETTING_LON = "CaveSurvey/LastLocationLon";
+
+/** Remembers a declared location for every other tool. */
+CsLocationPick.remember = function(coord) {
+    try {
+        RSettings.setValue(CsLocationPick.SETTING_LAT, coord.lat);
+        RSettings.setValue(CsLocationPick.SETTING_LON, coord.lon);
+    } catch (e) {
+        // settings unavailable -- non-critical
+    }
+};
+
+/**
+ * The location the suite already knows, or null.
+ * eturn {lat, lon, source} with source "anchor" (a Geo Reference
+ *         in this drawing) or "last" (the last one declared anywhere)
+ */
+CsLocationPick.getShared = function(doc) {
+    if (doc !== undefined && doc !== null) {
+        var ids = doc.queryAllEntities(false, false);
+        for (var i = 0; i < ids.length; i++) {
+            var e = doc.queryEntity(ids[i]);
+            if (isNull(e)) {
+                continue;
+            }
+            var lat = CsTags.getNumber(e, "GeoLat");
+            var lon = CsTags.getNumber(e, "GeoLon");
+            if (lat !== null && lon !== null) {
+                return { lat: lat, lon: lon, source: "anchor" };
+            }
+        }
+    }
+    try {
+        var sl = RSettings.getDoubleValue(CsLocationPick.SETTING_LAT, -999);
+        var so = RSettings.getDoubleValue(CsLocationPick.SETTING_LON, -999);
+        if (sl > -999 && so > -999) {
+            return { lat: sl, lon: so, source: "last" };
+        }
+    } catch (e) {
+        // settings unavailable
+    }
+    return null;
+};
+
 /**
  * Asks for a location, offering the browser map first.
  *
@@ -24,6 +76,16 @@ var CsLocationPick = {};
  * \return {lat, lon} or null (cancelled / unparseable)
  */
 CsLocationPick.ask = function(title, defaultText) {
+    // A location the suite already knows prefills the prompt: the
+    // drawing's anchor first, then the last one declared anywhere.
+    if (defaultText === undefined || defaultText === null || defaultText === "") {
+        var known = CsLocationPick.getShared(
+            typeof getDocument === "function" ? getDocument() : undefined);
+        if (known !== null) {
+            defaultText = known.lat.toFixed(6) + ", " + known.lon.toFixed(6);
+        }
+    }
+
     var useMap = QMessageBox.question(getMainWindow(), title,
         "Pick the location on a map?\n\n" +
         "Yes opens a map in your browser: click the spot, the\n" +
@@ -47,7 +109,10 @@ CsLocationPick.ask = function(title, defaultText) {
     var coord = CsAngles.parseLatLon(text);
     if (coord === null) {
         warning(title + ": couldn't read that coordinate.");
+        return null;
     }
+    // a declared location is trusted -- share it with every tool
+    CsLocationPick.remember(coord);
     return coord;
 };
 

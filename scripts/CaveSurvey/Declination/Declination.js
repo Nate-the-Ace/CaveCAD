@@ -24,25 +24,9 @@ include(includeBasePath + "/../Core/All.js");
 function declinationRun() {
     var doc = getDocument();
 
-    // ---- location: geo anchor if present, else asked --------------
-    var defaultLoc = "";
-    if (doc !== undefined && doc !== null) {
-        var ids = doc.queryAllEntities(false, false);
-        for (var i = 0; i < ids.length; i++) {
-            var e = doc.queryEntity(ids[i]);
-            if (isNull(e)) {
-                continue;
-            }
-            var lat = CsTags.getNumber(e, "GeoLat");
-            var lon = CsTags.getNumber(e, "GeoLon");
-            if (lat !== null && lon !== null) {
-                defaultLoc = lat.toFixed(6) + ", " + lon.toFixed(6);
-                break;
-            }
-        }
-    }
-
-    var coord = CsLocationPick.ask("Declination", defaultLoc);
+    // ---- location: whatever the suite already knows prefills the
+    // prompt (drawing anchor first, then the last declared anywhere)
+    var coord = CsLocationPick.ask("Declination", "");
     if (coord === null) {
         return;
     }
