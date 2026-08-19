@@ -36,18 +36,25 @@ CsDraw.station = function(pos, data) {
             (Math.PI / 4.0) : ((data.azimuth - 90.0) * Math.PI / 180.0);
         var off = CsDraw.TEXT_HEIGHT * 1.5;
         setCurrentLayer(CsLayers.STATION_LABELS);
-        addSimpleText(label,
+        var labelEntity = addSimpleText(label,
             new RVector(pos.x + off * Math.sin(rad), pos.y + off * Math.cos(rad)),
             CsDraw.TEXT_HEIGHT, 0, "standard",
             RS.VAlignMiddle, RS.HAlignRight, false, false);
+        CsTags.set(labelEntity, "StationLabel", data.name);
     }
     return pt;
 };
 
-/** Draws one centerline shot line on CTRL-SHOTS. */
-CsDraw.shotLine = function(fromPos, toPos) {
+/** Draws one centerline shot line on CTRL-SHOTS, tagged with its
+ *  endpoint names so a redraw can find and replace it. */
+CsDraw.shotLine = function(fromPos, toPos, fromName, toName) {
     setCurrentLayer(CsLayers.SHOTS);
-    addLine(fromPos, toPos);
+    var line = addLine(fromPos, toPos);
+    if (fromName !== undefined && toName !== undefined &&
+        fromName !== "" && toName !== "") {
+        CsTags.set(line, "Shot", fromName + "->" + toName);
+    }
+    return line;
 };
 
 /**
@@ -73,7 +80,10 @@ CsDraw.lrud = function(pos, name, azimuthDeg, left, right, up, down) {
             tipPos = new RVector(pos.x, pos.y);
         } else {
             var end = CsLrud.tickEnd(pos, azimuthDeg, side, len);
-            addLine(pos, new RVector(end.x, end.y));
+            var tick = addLine(pos, new RVector(end.x, end.y));
+            if (name !== undefined && name !== "") {
+                CsTags.set(tick, "LRUDLine", name + "." + side);
+            }
             tipPos = new RVector(end.x, end.y);
         }
         if (name !== undefined && name !== "") {
@@ -90,10 +100,13 @@ CsDraw.lrud = function(pos, name, azimuthDeg, left, right, up, down) {
         var rad = (azimuthDeg + 90.0) * Math.PI / 180.0;
         var off = CsDraw.TEXT_HEIGHT * 1.5;
         setCurrentLayer(CsLayers.STATION_LABELS);
-        addSimpleText(text,
+        var note = addSimpleText(text,
             new RVector(pos.x + off * Math.sin(rad), pos.y + off * Math.cos(rad)),
             CsDraw.TEXT_HEIGHT, 0, "standard",
             RS.VAlignMiddle, RS.HAlignLeft, false, false);
+        if (name !== undefined && name !== "") {
+            CsTags.set(note, "LRUDNote", name);
+        }
     }
 };
 
@@ -190,7 +203,7 @@ CsDraw.survey = function(survey, resolved, originStation, originPos, seqBase) {
         if (leg.shot.excludeFromPlot) {
             continue;
         }
-        CsDraw.shotLine(at(leg.from), at(leg.to));
+        CsDraw.shotLine(at(leg.from), at(leg.to), leg.from, leg.to);
         if (leg.kind === "closure") {
             closuresDrawn++;
         } else {
@@ -263,4 +276,75 @@ CsDraw.zoomToSurvey = function(survey, resolved) {
             // zoom is a nicety
         }
     }
+};
+
+/**
+ * Deletes everything previously drawn FOR the given stations: their
+ * points, labels, LRUD ticks/tips/notes, and shot lines whose BOTH
+ * ends are in the set (a tie-in shot from an older survey keeps its
+ * line -- only one of its ends belongs to this page). Runs as its own
+ * operation; entities drawn before tagging existed (early builds)
+ * cannot be found and survive.
+ *
+ * \return number of entities removed
+ */
+CsDraw.eraseStations = function(doc, stationNames) {
+    var inSet = {};
+    for (var i = 0; i < stationNames.length; i++) {
+        inSet[stationNames[i]] = true;
+    }
+    var baseOf = function(tagged) {
+        // "A1.L" -> "A1"
+        var m = /^(.*)\.([LR])$/.exec(tagged);
+        return m === null ? tagged : m[1];
+    };
+
+    var op = new RAddObjectsOperation();
+    op.setText("Replace survey marks");
+    var removed = 0;
+    var ids = doc.queryAllEntities(false, false);
+    for (i = 0; i < ids.length; i++) {
+        var e = doc.queryEntity(ids[i]);
+        if (isNull(e)) {
+            continue;
+        }
+        var kill = false;
+        var v;
+        v = CsTags.get(e, "Station");
+        if (v !== "" && inSet[v] === true) { kill = true; }
+        if (!kill) {
+            v = CsTags.get(e, "StationLabel");
+            if (v !== "" && inSet[v] === true) { kill = true; }
+        }
+        if (!kill) {
+            v = CsTags.get(e, "LRUDName");
+            if (v !== "" && inSet[baseOf(v)] === true) { kill = true; }
+        }
+        if (!kill) {
+            v = CsTags.get(e, "LRUDLine");
+            if (v !== "" && inSet[baseOf(v)] === true) { kill = true; }
+        }
+        if (!kill) {
+            v = CsTags.get(e, "LRUDNote");
+            if (v !== "" && inSet[v] === true) { kill = true; }
+        }
+        if (!kill) {
+            v = CsTags.get(e, "Shot");
+            if (v !== "") {
+                var ends = v.split("->");
+                if (ends.length === 2 && inSet[ends[0]] === true &&
+                    inSet[ends[1]] === true) {
+                    kill = true;
+                }
+            }
+        }
+        if (kill) {
+            op.deleteObject(e);
+            removed++;
+        }
+    }
+    if (removed > 0) {
+        getDocumentInterface().applyOperation(op);
+    }
+    return removed;
 };

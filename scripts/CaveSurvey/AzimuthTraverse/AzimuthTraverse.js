@@ -167,7 +167,7 @@ function azimuthTraverseRun() {
 
         // one undo step per shot
         startTransaction(doc);
-        CsDraw.shotLine(current, next);
+        CsDraw.shotLine(current, next, currentName, toName);
         CsDraw.lrud(next, toName, azimuth, left, right, up, down);
         CsDraw.station(next, { name: toName, seq: seq, azimuth: azimuth,
             inclination: inclination, left: left, right: right,

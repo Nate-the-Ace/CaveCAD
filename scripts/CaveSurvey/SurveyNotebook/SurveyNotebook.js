@@ -567,13 +567,15 @@ SurveyNotebook.drawSurveyInner = function(w) {
     var resolved = CsNetwork.resolve(survey, { anchor: anchor });
     var findings = CsValidate.check(survey, resolved);
 
-    // Tie-ins KEEP EVERYTHING, splay-style: the existing station's
-    // point, label and LRUD stay untouched, and this trip's marks --
-    // its own point at the same spot, its own LRUD ticks -- are added
-    // alongside. Wall detail only ever accumulates. Seq numbering
-    // continues from what the drawing already holds, so station order
-    // stays coherent across surveys.
+    // Redrawing REPLACES: everything previously drawn for the stations
+    // on THIS page -- points, labels, LRUD, and shots between page
+    // stations -- is removed first, so Draw never stacks duplicates.
+    // Older surveys' marks survive untouched (a tie-in shot from an
+    // earlier trip keeps its line: only one of its ends is on this
+    // page). The erase is its own undo step before the draw.
     var seqBase = CsTags.collectStations(doc).length;
+    var pageNames = CsModel.stationNames(survey);
+    var replaced = CsDraw.eraseStations(doc, pageNames);
 
     startTransaction(doc);
     var drawn = CsDraw.survey(survey, resolved, undefined, undefined, seqBase);
@@ -583,10 +585,13 @@ SurveyNotebook.drawSurveyInner = function(w) {
     QMessageBox.information(null, "Survey Notebook",
         (tieIn !== null ? ("Tied into existing station " + tieIn +
             " -- the new survey continues from its position and " +
-            "elevation. Everything is kept, splay-style: the earlier " +
-            "trip's marks and this trip's LRUD sit side by side.\n\n") : "") +
+            "elevation.\n\n") : "") +
+        (replaced > 0 ? ("Replaced " + replaced + " previously drawn " +
+            "mark" + (replaced === 1 ? "" : "s") + " for this page's " +
+            "stations (undo twice to restore them).\n\n") : "") +
         CsReport.drawSummary(survey, resolved, drawn, findings) +
-        "\n\nDrawn as one undo step.");
+        "\n\nDrawn as one undo step" +
+        (replaced > 0 ? " after the replace" : "") + ".");
 };
 
 SurveyNotebook.importFile = function(w) {
@@ -834,9 +839,14 @@ SurveyNotebook.buildDock = function(appWin) {
     w.drawButton.toolTip = "Draw the survey into the drawing, one undo step.";
     w.importButton = new QPushButton("Import File...");
     w.exportButton = new QPushButton("Export File...");
+    w.clearButton = new QPushButton("Clear");
+    w.clearButton.toolTip = "Empty the page for the next survey. The " +
+        "trip header (name, date, team, declination) is kept; nothing " +
+        "in the drawing is touched.";
     actions.addWidget(w.drawButton, 0, 0);
     actions.addWidget(w.importButton, 0, 0);
     actions.addWidget(w.exportButton, 0, 0);
+    actions.addWidget(w.clearButton, 0, 0);
     layout.addLayout(actions, 0);
 
     body.setLayout(layout);
@@ -920,6 +930,23 @@ SurveyNotebook.buildDock = function(appWin) {
     SurveyNotebook.safeConnect(w.inferButton.clicked, function() {
         SurveyNotebook.inferDeclination(w);
     }, "Infer button", w.problems);
+    SurveyNotebook.safeConnect(w.clearButton.clicked, function() {
+        var sure = QMessageBox.question(null, "Survey Notebook",
+            "Clear the page? The trip header stays; the drawing is " +
+            "not touched.", QMessageBox.Yes | QMessageBox.No);
+        if (sure !== QMessageBox.Yes) {
+            return;
+        }
+        if (w.mode === "text") {
+            w.editor.setPlainText(
+                "from,to,distance,azimuth,inclination,left,right,up,down,notes\n");
+        } else {
+            SurveyNotebook.clearLadder(w);
+            SurveyNotebook.addStationRow(w, "A1");
+            SurveyNotebook.addStationRow(w, "A2");
+        }
+        SurveyNotebook.refresh(w);
+    }, "Clear button", w.problems);
 
     // a fresh sheet starts with its first two stations
     if (w.mode === "ladder") {
