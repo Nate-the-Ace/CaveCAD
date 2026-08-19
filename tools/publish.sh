@@ -48,7 +48,7 @@ if [ -z "${SCRIPTS:-}" ]; then
         *)      QCAD_BASE="${XDG_DATA_HOME:-$HOME/.local/share}/QCAD" ;;
     esac
     SCRIPTS_DIRS=""
-    for edition in "QCAD Professional" "QCAD Community Edition" "QCAD"; do
+    for edition in "CaveCAD" "QCAD Professional" "QCAD Community Edition" "QCAD"; do
         if [ -d "$QCAD_BASE/$edition" ]; then
             SCRIPTS_DIRS="$SCRIPTS_DIRS$QCAD_BASE/$edition/scripts
 "
