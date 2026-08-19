@@ -344,12 +344,14 @@ SurveyNotebook.applyTabOrder = function(w) {
     // Station name, the shot's measurements, then the LRUD of the
     // station you are LEAVING, then down the page: name, shot, that
     // station's LRUD, ... The last station's LRUD closes the chain.
+    // Both station names first (the shot's "from -> to" header), then
+    // the measurements, then the LRUD of the station being left.
     var order = [rows[0].name];
     for (var i = 1; i < rows.length; i++) {
         var r = rows[i];
         var from = rows[i - 1];
-        order.push(r.dist, r.azFs, r.azBs, r.incFs, r.incBs,
-            from.l, from.r, from.u, from.d, r.name);
+        order.push(r.name, r.dist, r.azFs, r.azBs, r.incFs, r.incBs,
+            from.l, from.r, from.u, from.d);
     }
     var last = rows[rows.length - 1];
     order.push(last.l, last.r, last.u, last.d);
