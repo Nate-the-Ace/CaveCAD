@@ -48,6 +48,11 @@ cp -R "$REPO/scripts/CaveSurvey" "$STAGE/CaveSurvey"
 # templates, sample surveys, licence
 mkdir -p "$STAGE/templates" "$STAGE/examples" "$STAGE/docs"
 cp "$REPO/templates/"*.dxf "$STAGE/templates/"
+
+# the NSS templates also ship INSIDE the add-on: the default-new hook
+# (CaveTemplate) finds them beside itself, nothing to configure
+mkdir -p "$STAGE/CaveSurvey/Templates"
+cp "$REPO/templates/"*.dxf "$STAGE/CaveSurvey/Templates/"
 cp "$REPO/testdata/"* "$STAGE/examples/"
 cp "$REPO/LICENSE" "$STAGE/LICENSE"
 

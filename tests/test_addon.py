@@ -41,7 +41,7 @@ WIDGET_NAMES = ["CaveSurveyMenu", "CaveSurveyToolBar"]
 
 # A folder is a TOOL if and only if it contains <Folder>.js. Folders
 # without one are libraries (Core/) and are never init'd by QCAD.
-LIBRARY_DIRS = {"Core"}
+LIBRARY_DIRS = {"Core", "Templates"}
 
 
 def all_dirs():
