@@ -719,10 +719,16 @@ SurveyNotebook.buildDock = function(appWin) {
         var rowButtons = new QHBoxLayout();
         // The "+" catcher: tabbing off the last station's D lands here,
         // which adds the next station automatically (see focusChanged
-        // wiring below). Clicking it does the same thing, for free.
-        w.sentinel = new QPushButton("+");
+        // wiring below). A LINE EDIT, not a button: macOS excludes
+        // buttons from Tab navigation unless the system-wide "full
+        // keyboard access" setting is on, which would break the whole
+        // point. Read-only so nothing can be typed into it.
+        w.sentinel = new QLineEdit();
+        w.sentinel.text = "+";
+        w.sentinel.readOnly = true;
         w.sentinel.objectName = "CaveSurveyNotebookAutoAdd";
         w.sentinel.maximumWidth = 32;
+        w.sentinel.alignment = Qt.AlignCenter;
         w.sentinel.toolTip = "Next station: Tab lands here from the " +
             "last D and adds it automatically";
         w.addRowButton = new QPushButton("+ Station");
@@ -809,19 +815,19 @@ SurveyNotebook.buildDock = function(appWin) {
                 // fall through to the click path
             }
         }
-        // Click/Space on "+" always works, focus signal or not. When
-        // the focus path just added (Tab landed here, then the user
-        // ALSO clicked), the flag swallows one click.
-        SurveyNotebook.safeConnect(w.sentinel.clicked, function() {
+        // Enter on "+" always works, focus signal or not (clicking it
+        // focuses it, which the focus path already handles). The flag
+        // guards against a focus-add and an Enter-add stacking.
+        SurveyNotebook.safeConnect(w.sentinel.returnPressed, function() {
             if (w.sentinelFocusAdd === true) {
                 w.sentinelFocusAdd = false;
                 return;
             }
             SurveyNotebook.autoAddStation(w);
-        }, "+ catcher click", w.problems);
+        }, "+ catcher Enter", w.problems);
         if (!w.focusAddWired) {
             w.sentinel.toolTip = "Next station: Tab here from the last " +
-                "D, then press Space (this build's bridge has no focus " +
+                "D, then press Enter (this build's bridge has no focus " +
                 "signal, so the extra keypress is needed)";
         }
     } else {
