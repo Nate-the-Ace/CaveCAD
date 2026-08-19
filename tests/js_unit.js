@@ -49,6 +49,22 @@ if (IS_NODE) {
     };
 }
 
+// Some builds' -autostart engines don't preload library.js:
+if (typeof isNull === "undefined") {
+    isNull = function(v) {
+        if (v === undefined || v === null) {
+            return true;
+        }
+        try {
+            if (typeof v.isNull === "function") {
+                return v.isNull();
+            }
+        } catch (e) {
+        }
+        return false;
+    };
+}
+
 var loaded = {};
 // Core files include() each other with scripts/-rooted paths; loading
 // here goes through the same door so the graph stays honest.
