@@ -567,15 +567,24 @@ SurveyNotebook.drawSurveyInner = function(w) {
     var resolved = CsNetwork.resolve(survey, { anchor: anchor });
     var findings = CsValidate.check(survey, resolved);
 
+    // Tie-ins KEEP EVERYTHING, splay-style: the existing station's
+    // point, label and LRUD stay untouched, and this trip's marks --
+    // its own point at the same spot, its own LRUD ticks -- are added
+    // alongside. Wall detail only ever accumulates. Seq numbering
+    // continues from what the drawing already holds, so station order
+    // stays coherent across surveys.
+    var seqBase = CsTags.collectStations(doc).length;
+
     startTransaction(doc);
-    var drawn = CsDraw.survey(survey, resolved);
+    var drawn = CsDraw.survey(survey, resolved, undefined, undefined, seqBase);
     endTransaction();
     CsDraw.zoomToSurvey(survey, resolved);
 
     QMessageBox.information(null, "Survey Notebook",
         (tieIn !== null ? ("Tied into existing station " + tieIn +
             " -- the new survey continues from its position and " +
-            "elevation.\n\n") : "") +
+            "elevation. Everything is kept, splay-style: the earlier " +
+            "trip's marks and this trip's LRUD sit side by side.\n\n") : "") +
         CsReport.drawSummary(survey, resolved, drawn, findings) +
         "\n\nDrawn as one undo step.");
 };

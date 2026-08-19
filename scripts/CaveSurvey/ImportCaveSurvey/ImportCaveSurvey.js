@@ -132,7 +132,8 @@ function importCaveSurvey() {
     var findings = CsValidate.check(survey, resolved);
 
     startTransaction(doc);
-    var drawn = CsDraw.survey(survey, resolved);
+    var drawn = CsDraw.survey(survey, resolved, undefined, undefined,
+        CsTags.collectStations(doc).length);
     endTransaction();
 
     if (drawn.stationsDrawn > 0) {

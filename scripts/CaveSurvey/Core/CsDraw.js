@@ -105,7 +105,13 @@ CsDraw.lrud = function(pos, name, azimuthDeg, left, right, up, down) {
  *
  * \return {stationsDrawn, shotsDrawn, closuresDrawn, skipped}
  */
-CsDraw.survey = function(survey, resolved, originStation, originPos) {
+CsDraw.survey = function(survey, resolved, originStation, originPos, seqBase) {
+    // seqBase continues station ordering across surveys in one
+    // drawing: without it a second survey's Seq tags restart at 0 and
+    // interleave with the first survey's when read back in Seq order.
+    if (seqBase === undefined || seqBase === null) {
+        seqBase = 0;
+    }
     CsLayers.ensureSurveyLayers();
 
     var offX = 0, offY = 0;
@@ -160,7 +166,7 @@ CsDraw.survey = function(survey, resolved, originStation, originPos) {
         }
         var pt = CsDraw.station(at(name), {
             name: name,
-            seq: resolved.stations[name].seq,
+            seq: resolved.stations[name].seq + seqBase,
             azimuth: lrud !== null ? lrud.azimuth : undefined,
             left: lrud !== null ? lrud.left : undefined,
             right: lrud !== null ? lrud.right : undefined,
