@@ -518,7 +518,7 @@ SurveyNotebook.drawSurvey = function(w) {
     startTransaction(doc);
     var drawn = CsDraw.survey(survey, resolved);
     endTransaction();
-    autoZoom();
+    CsDraw.zoomToSurvey(survey, resolved);
 
     QMessageBox.information(null, "Survey Notebook",
         CsReport.drawSummary(survey, resolved, drawn, findings) +

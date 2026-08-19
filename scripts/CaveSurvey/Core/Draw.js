@@ -209,3 +209,52 @@ CsDraw.survey = function(survey, resolved, originStation, originPos) {
         skipped: resolved.skipped.length
     };
 };
+
+/**
+ * Zooms the focused view to the extents of a just-drawn survey --
+ * NOT autoZoom, which fits ALL entities and leaves a fresh survey a
+ * speck beside a template's border. Pads by the largest LRUD reach
+ * plus a margin. Falls back to autoZoom when the view API refuses.
+ */
+CsDraw.zoomToSurvey = function(survey, resolved) {
+    try {
+        var minX = null, minY = null, maxX = null, maxY = null;
+        for (var name in resolved.stations) {
+            if (!resolved.stations.hasOwnProperty(name)) {
+                continue;
+            }
+            var st = resolved.stations[name];
+            if (minX === null || st.x < minX) { minX = st.x; }
+            if (maxX === null || st.x > maxX) { maxX = st.x; }
+            if (minY === null || st.y < minY) { minY = st.y; }
+            if (maxY === null || st.y > maxY) { maxY = st.y; }
+        }
+        if (minX === null) {
+            autoZoom();
+            return;
+        }
+        // LRUD ticks stick out past the stations; pad by the largest
+        var reach = 0;
+        for (var i = 0; i < survey.shots.length; i++) {
+            var sh = survey.shots[i];
+            var vals = [sh.left, sh.right];
+            for (var k = 0; k < vals.length; k++) {
+                if (vals[k] !== null && vals[k] !== undefined &&
+                    vals[k] > reach) {
+                    reach = vals[k];
+                }
+            }
+        }
+        var pad = reach + Math.max((maxX - minX), (maxY - minY)) * 0.05 + 1;
+        var box = new RBox(new RVector(minX - pad, minY - pad),
+            new RVector(maxX + pad, maxY + pad));
+        var view = getDocumentInterface().getLastKnownViewWithFocus();
+        view.zoomTo(box, 10);
+    } catch (e) {
+        try {
+            autoZoom();
+        } catch (e2) {
+            // zoom is a nicety
+        }
+    }
+};

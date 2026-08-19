@@ -136,7 +136,7 @@ function importCaveSurvey() {
     endTransaction();
 
     if (drawn.stationsDrawn > 0) {
-        autoZoom();
+        CsDraw.zoomToSurvey(survey, resolved);
     }
 
     // -- report in plain language ------------------------------------------
