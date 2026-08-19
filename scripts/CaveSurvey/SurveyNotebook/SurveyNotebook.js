@@ -238,6 +238,28 @@ SurveyNotebook.setSurvey = function(w, survey) {
 
 SurveyNotebook.EDIT_WIDTH = 52;
 
+/**
+ * Makes an edit record in ALL CAPS as you type, the way a notes page
+ * is written. textEdited fires only on user edits, so writing the
+ * uppercased text back cannot loop; the cursor stays put.
+ */
+SurveyNotebook.upperCase = function(w, edit) {
+    SurveyNotebook.safeConnect(edit.textEdited, function() {
+        var t = String(edit.text);
+        var u = t.toUpperCase();
+        if (u !== t) {
+            var pos = edit.cursorPosition;
+            edit.text = u;
+            try {
+                edit.cursorPosition = pos;
+            } catch (e) {
+                // cursor jump to end -- cosmetic
+            }
+        }
+    }, "caps", w.problems);
+    return edit;
+};
+
 SurveyNotebook.makeCell = function(w, width) {
     var e = new QLineEdit();
     e.maximumWidth = width || SurveyNotebook.EDIT_WIDTH;
@@ -257,7 +279,7 @@ SurveyNotebook.makeCell = function(w, width) {
 SurveyNotebook.addStationRow = function(w, stationName) {
     var grid = w.grid;
     var row = {
-        name: SurveyNotebook.makeCell(w, 74),
+        name: SurveyNotebook.upperCase(w, SurveyNotebook.makeCell(w, 74)),
         dist: SurveyNotebook.makeCell(w),
         azFs: SurveyNotebook.makeCell(w),
         azBs: SurveyNotebook.makeCell(w),
@@ -626,7 +648,7 @@ SurveyNotebook.buildDock = function(appWin) {
     // ---- trip header ------------------------------------------------
     var head1 = new QHBoxLayout();
     head1.addWidget(new QLabel("Survey"), 0, 0);
-    w.nameEdit = new QLineEdit();
+    w.nameEdit = SurveyNotebook.upperCase(w, new QLineEdit());
     head1.addWidget(w.nameEdit, 1, 0);
     head1.addWidget(new QLabel("Date"), 0, 0);
     w.dateEdit = new QLineEdit();
@@ -637,7 +659,7 @@ SurveyNotebook.buildDock = function(appWin) {
 
     var head2 = new QHBoxLayout();
     head2.addWidget(new QLabel("Team"), 0, 0);
-    w.teamEdit = new QLineEdit();
+    w.teamEdit = SurveyNotebook.upperCase(w, new QLineEdit());
     head2.addWidget(w.teamEdit, 1, 0);
     head2.addWidget(new QLabel("Decl"), 0, 0);
     w.declEdit = new QLineEdit();
