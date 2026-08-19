@@ -42,11 +42,14 @@ CaveMode.KEEP_MENUS = [
     "Snap", "Layer", "Block", "Cave Survey", "Window", "Help"
 ];
 
-// Toolbars kept visible, by object name prefix. The Cave Survey
-// toolbar and the core drawing/snap bars stay; CAM and the rest hide.
-CaveMode.KEEP_TOOLBARS = [
-    "CaveSurveyToolBar", "FileToolBar", "EditToolBar", "ViewToolBar",
-    "SnapToolBar", "MainToolBar", "PropertiesToolBar"
+// Toolbars HIDDEN by object name -- an explicit list, because this
+// bridge has no findChildren to enumerate with; unknown toolbars stay
+// visible, which fails safe. These are QCAD's stock toolbar object
+// names; the Cave Survey toolbar and anything unrecognised survive.
+CaveMode.HIDE_TOOLBARS = [
+    "ReferencePointsToolBar", "DrawToolBar", "ModifyToolBar",
+    "OrderToolBar", "InfoToolBar", "DimensionToolBar", "MiscToolBar",
+    "BlockToolBar", "LayerToolBar", "WidgetsToolBar", "ScriptToolBar"
 ];
 
 CaveMode.stripAccel = function(title) {
@@ -58,42 +61,34 @@ CaveMode.apply = function(on) {
     var appWin = RMainWindowQt.getMainWindow();
     var hidden = [];
 
+    // This bridge has no findChildren, so: menus are reached through
+    // the menu bar's ACTIONS (every top-level menu is one QAction on
+    // the bar, its text is the title), toolbars through findChild by
+    // their stock object names.
+    var menuBar = appWin.menuBar();
+    var menuActions = menuBar.actions();
+
     if (on) {
         // ---- menus -------------------------------------------------
-        var menuBar = appWin.menuBar();
-        var menus = menuBar.findChildren(QMenu);
-        for (var i = 0; i < menus.length; i++) {
-            var menu = menus[i];
-            // top-level menus only: their parent is the menu bar
-            if (menu.parentWidget() !== menuBar) {
-                continue;
-            }
-            var title = CaveMode.stripAccel(menu.title);
+        for (var i = 0; i < menuActions.length; i++) {
+            var act = menuActions[i];
+            var title = CaveMode.stripAccel(act.text);
             if (CaveMode.KEEP_MENUS.indexOf(title) >= 0) {
                 continue;
             }
-            var act = menu.menuAction();
-            if (act !== null && act.visible) {
+            if (act.visible) {
                 act.visible = false;
                 hidden.push("menu:" + title);
             }
         }
 
         // ---- toolbars ------------------------------------------------
-        var toolbars = appWin.findChildren(QToolBar);
-        for (i = 0; i < toolbars.length; i++) {
-            var tb = toolbars[i];
-            var name = String(tb.objectName);
-            var keep = false;
-            for (var k = 0; k < CaveMode.KEEP_TOOLBARS.length; k++) {
-                if (name.indexOf(CaveMode.KEEP_TOOLBARS[k]) === 0) {
-                    keep = true;
-                    break;
-                }
-            }
-            if (!keep && tb.visible) {
+        for (i = 0; i < CaveMode.HIDE_TOOLBARS.length; i++) {
+            var tbName = CaveMode.HIDE_TOOLBARS[i];
+            var tb = appWin.findChild(tbName);
+            if (tb !== null && tb !== undefined && tb.visible) {
                 tb.visible = false;
-                hidden.push("toolbar:" + name);
+                hidden.push("toolbar:" + tbName);
             }
         }
 
@@ -104,28 +99,19 @@ CaveMode.apply = function(on) {
         var stored = RSettings.getStringValue(CaveMode.SETTING_HIDDEN, "");
         var names = stored === "" ? [] : stored.split("|");
 
-        var menuBar2 = appWin.menuBar();
-        var menus2 = menuBar2.findChildren(QMenu);
-        var toolbars2 = appWin.findChildren(QToolBar);
-
         for (i = 0; i < names.length; i++) {
             var entry = names[i];
             if (entry.indexOf("menu:") === 0) {
                 var mTitle = entry.substring(5);
-                for (var mi = 0; mi < menus2.length; mi++) {
-                    if (CaveMode.stripAccel(menus2[mi].title) === mTitle) {
-                        var mAct = menus2[mi].menuAction();
-                        if (mAct !== null) {
-                            mAct.visible = true;
-                        }
+                for (var mi = 0; mi < menuActions.length; mi++) {
+                    if (CaveMode.stripAccel(menuActions[mi].text) === mTitle) {
+                        menuActions[mi].visible = true;
                     }
                 }
             } else if (entry.indexOf("toolbar:") === 0) {
-                var tName = entry.substring(8);
-                for (var ti = 0; ti < toolbars2.length; ti++) {
-                    if (String(toolbars2[ti].objectName) === tName) {
-                        toolbars2[ti].visible = true;
-                    }
+                var tb2 = appWin.findChild(entry.substring(8));
+                if (tb2 !== null && tb2 !== undefined) {
+                    tb2.visible = true;
                 }
             }
         }
