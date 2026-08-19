@@ -341,13 +341,18 @@ SurveyNotebook.applyTabOrder = function(w) {
     if (rows.length === 0) {
         return;
     }
+    // Station name, the shot's measurements, then the LRUD of the
+    // station you are LEAVING, then down the page: name, shot, that
+    // station's LRUD, ... The last station's LRUD closes the chain.
     var order = [rows[0].name];
     for (var i = 1; i < rows.length; i++) {
         var r = rows[i];
+        var from = rows[i - 1];
         order.push(r.dist, r.azFs, r.azBs, r.incFs, r.incBs,
-            r.name, r.l, r.r, r.u, r.d);
+            from.l, from.r, from.u, from.d, r.name);
     }
-    order.push(rows[0].l, rows[0].r, rows[0].u, rows[0].d);
+    var last = rows[rows.length - 1];
+    order.push(last.l, last.r, last.u, last.d);
     try {
         for (var k = 1; k < order.length; k++) {
             QWidget.setTabOrder(order[k - 1], order[k]);
