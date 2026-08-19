@@ -13,6 +13,11 @@
 //           | 18.1  112.5     --      1.5     --   |
 //   A3      |                                      | ...
 //
+// Azimuth cells hold what the COMPASS read -- magnetic -- and the
+// header's declination (typed, or IGRF-inferred) converts them to the
+// true bearings the drawing uses. Editing the declination swings the
+// whole survey on the next refresh or Draw.
+//
 // Backsights are optional; when present the shot is computed with the
 // standard fs/bs correction (circular mean of foresight and reversed
 // backsight) and a disagreement over 3 degrees is flagged beside the
@@ -138,9 +143,16 @@ SurveyNotebook.sheetSurvey = function(w) {
         shot.from = from;
         shot.to = to;
         shot.distance = dist === null ? 0.0 : dist;
+        // The page records what the COMPASS said (magnetic); the
+        // header's declination converts to the true bearings the
+        // model stores. Change the declination and the whole survey
+        // swings on the next refresh/Draw -- as it should.
         var az = num(rows[i].azFs);
-        shot.azimuth = az === null ? 0.0 : CsAngles.normalizeAzimuth(az);
-        shot.backAzimuth = num(rows[i].azBs);
+        shot.azimuth = az === null ? 0.0 :
+            CsAngles.applyDeclination(az, survey.declination);
+        var azb = num(rows[i].azBs);
+        shot.backAzimuth = azb === null ? null :
+            CsAngles.applyDeclination(azb, survey.declination);
         var inc = num(rows[i].incFs);
         shot.inclination = inc === null ? 0.0 : inc;
         shot.backInclination = num(rows[i].incBs);
@@ -213,8 +225,13 @@ SurveyNotebook.setSurvey = function(w, survey) {
         };
         if (shot !== undefined && i > 0) {
             put(row.dist, shot.distance);
-            put(row.azFs, shot.azimuth);
-            put(row.azBs, shot.backAzimuth);
+            // cells hold compass readings: strip the declination the
+            // model has applied, so round-trips never double-correct
+            put(row.azFs, CsAngles.normalizeAzimuth(
+                shot.azimuth - (survey.declination || 0)).toFixed(2));
+            put(row.azBs, shot.backAzimuth === null ? null :
+                CsAngles.normalizeAzimuth(
+                    shot.backAzimuth - (survey.declination || 0)).toFixed(2));
             put(row.incFs, shot.inclination);
             put(row.incBs, shot.backInclination);
             put(row.l, shot.left);
@@ -704,7 +721,9 @@ SurveyNotebook.buildDock = function(appWin) {
     var columnHelp =
         "The notes page: shots are written between the stations they " +
         "connect.\n" +
-        "Azm: degrees clockwise from north (true). Dist: along the tape.\n" +
+        "Azm: what the COMPASS reads (magnetic, clockwise from north);\n" +
+        "the header's Decl converts to true for the drawing.\n" +
+        "Dist: along the tape.\n" +
         "fs = foresight, bs = backsight (optional; used to correct and " +
         "cross-check).\n" +
         "L/R face the direction of travel; LRUD sits beside its station.\n" +
