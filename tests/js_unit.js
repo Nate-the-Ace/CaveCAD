@@ -515,6 +515,7 @@ ok(CsFormatRegistry.detect("x.csv", csvText).id === "csv", "detect csv");
 if (!IS_NODE) {
     (function() {
         loadRepoScript("scripts/CaveSurvey/Core/CsLayers.js");
+        loadRepoScript("scripts/CaveSurvey/Core/CsStore.js");
         loadRepoScript("scripts/CaveSurvey/Core/CsTags.js");
         loadRepoScript("scripts/CaveSurvey/Core/CsDraw.js");
 
@@ -569,6 +570,35 @@ if (!IS_NODE) {
         var rebuilt = CsTags.surveyFromDocument(doc);
         ok(rebuilt.shots.length === 2, "tags: survey rebuilt from drawing");
         near(rebuilt.shots[0].left, 2, 1e-9, "tags: LRUD readable from drawing");
+
+        // THE PERSISTENCE TEST: this build never writes custom
+        // properties to disk, so tags must come back through the
+        // CsStore survey database after an export/import round trip.
+        var tmpPath = "/tmp/cavesurvey_unit_roundtrip.dxf";
+        ok(di.exportFile(tmpPath,
+            "R27 [2013] DXF Drawing [OpenDesign] (*.dxf)") === true,
+            "persist: export ok");
+        var doc2 = new RDocument(new RMemoryStorage(), new RSpatialIndexNavel());
+        var di2 = new RDocumentInterface(doc2);
+        ok(di2.importFile(tmpPath, "", false) ===
+            RDocumentInterface.IoErrorNoError, "persist: reimport ok");
+        // swap the globals CsDraw/CsTags reach through
+        var oldDoc = doc, oldDi = di;
+        getDocument = function() { return doc2; };
+        getDocumentInterface = function() { return di2; };
+        var stations2 = CsTags.collectStations(doc2);
+        ok(stations2.length === 3,
+            "persist: 3 stations recovered after reopen, got " +
+            stations2.length);
+        var rebuilt2 = CsTags.surveyFromDocument(doc2);
+        ok(rebuilt2.shots.length === 2,
+            "persist: survey rebuilt after reopen");
+        if (rebuilt2.shots.length === 2) {
+            near(rebuilt2.shots[0].left, 2, 1e-9,
+                "persist: LRUD recovered after reopen");
+        }
+        getDocument = function() { return oldDoc; };
+        getDocumentInterface = function() { return oldDi; };
 
         // erase replaces cleanly
         var removed = CsDraw.eraseStations(doc, ["D1", "D2", "D3"]);

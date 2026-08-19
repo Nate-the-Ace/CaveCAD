@@ -58,22 +58,32 @@ CsTags.commit = function(di, entity, keyValues) {
     var op = new RModifyObjectsOperation();
     op.addObject(entity, false);
     di.applyOperation(op);
+    if (typeof CsStore !== "undefined") {
+        CsStore.sync(getDocument(), di);
+    }
 };
 
-/** Reads one tag, "" if absent or unsupported. */
+/** Reads one tag, "" if absent or unsupported. Falls back to the
+ *  survey data store (CsStore) for entities whose in-memory tags a
+ *  save/reopen erased -- this build never writes custom properties
+ *  to disk, so the store is the durable truth. */
 CsTags.get = function(entity, key) {
     if (entity === undefined || entity === null) {
         return "";
     }
-    if (typeof entity.getCustomProperty !== "function") {
-        return "";
+    var v = "";
+    if (typeof entity.getCustomProperty === "function") {
+        try {
+            v = entity.getCustomProperty(CsTags.GROUP, key, "");
+            v = (v === undefined || v === null) ? "" : String(v);
+        } catch (e) {
+            v = "";
+        }
     }
-    try {
-        var v = entity.getCustomProperty(CsTags.GROUP, key, "");
-        return (v === undefined || v === null) ? "" : String(v);
-    } catch (e) {
-        return "";
+    if (v === "" && typeof CsStore !== "undefined") {
+        v = CsStore.lookup(entity, key);
     }
+    return v;
 };
 
 /** Reads a numeric tag; null if absent or not a number. */
@@ -105,6 +115,9 @@ CsTags.tagStation = function(entity, data) {
  * back to entity order for drawings made by the old tools.
  */
 CsTags.collectStations = function(doc) {
+    if (typeof CsStore !== "undefined") {
+        CsStore.ensureLoaded(doc);
+    }
     var out = [];
     var ids = doc.queryAllEntities(false, false);
     for (var i = 0; i < ids.length; i++) {

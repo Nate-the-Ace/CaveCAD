@@ -60,8 +60,15 @@ CsLayers.DEFAULTS = {
     "LEGEND": ["white", "CONTINUOUS", "Weight018"],
     "TEXT-LABELS": ["white", "CONTINUOUS", "Weight018"],
     "TEXT-NOTES": ["white", "CONTINUOUS", "Weight009"],
-    "ENTRANCE": ["white", "CONTINUOUS", "Weight035"]
+    "ENTRANCE": ["white", "CONTINUOUS", "Weight035"],
+    "CTRL-DATA": ["gray", "CONTINUOUS", "Weight000"]
 };
+
+// layers created switched OFF (invisible): the data store. NOT
+// frozen -- frozen, off and locked layers all silently refuse entity
+// adds in this build, so the store's sync toggles the layer on
+// within its own operation and back off afterwards.
+CsLayers.OFF = { "CTRL-DATA": true };
 
 /**
  * Ensures a layer exists, creating it with its registry defaults if
@@ -76,7 +83,7 @@ CsLayers.ensure = function(doc, di, name) {
     var d = CsLayers.DEFAULTS[name] || ["white", "CONTINUOUS", "Weight025"];
     var layer = new RLayer(doc, name, false, false,
         new RColor(d[0]), doc.getLinetypeId(d[1]),
-        RLineweight[d[2]], false);
+        RLineweight[d[2]], CsLayers.OFF[name] === true);
     var op = new RAddObjectsOperation();
     op.addObject(layer);
     di.applyOperation(op);

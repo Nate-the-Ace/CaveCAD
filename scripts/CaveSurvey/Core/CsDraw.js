@@ -234,6 +234,7 @@ CsDraw.survey = function(survey, resolved, originStation, originPos, seqBase) {
     }
 
     di.applyOperation(op);
+    CsStore.sync(doc, di); // tags only persist through the store
 
     return {
         stationsDrawn: stationsDrawn,
@@ -253,6 +254,7 @@ CsDraw.survey = function(survey, resolved, originStation, originPos, seqBase) {
  * \return number of entities removed
  */
 CsDraw.eraseStations = function(doc, stationNames) {
+    CsStore.ensureLoaded(doc);
     var inSet = {};
     for (var i = 0; i < stationNames.length; i++) {
         inSet[stationNames[i]] = true;
@@ -307,7 +309,9 @@ CsDraw.eraseStations = function(doc, stationNames) {
         }
     }
     if (removed > 0) {
-        getDocumentInterface().applyOperation(op);
+        var di2 = getDocumentInterface();
+        di2.applyOperation(op);
+        CsStore.sync(doc, di2);
     }
     return removed;
 };

@@ -83,13 +83,24 @@ CsSheet.textEntitiesInBlock = function(doc, blockName) {
     return out;
 };
 
+/** Reads an entity's text however this bridge allows. */
+CsSheet.textOf = function(entity) {
+    if (typeof entity.getPlainText === "function") {
+        return String(entity.getPlainText());
+    }
+    if (typeof entity.getText === "function") {
+        return String(entity.getText());
+    }
+    return "";
+};
+
 /** The current text of a field, "" when absent/empty. */
 CsSheet.readField = function(doc, field) {
     var texts = CsSheet.textEntitiesInBlock(doc, field.block);
     var parts = [];
     for (var i = 0; i < texts.length; i++) {
-        var t = texts[i].getText();
-        if (t !== undefined && t !== null && t !== "") {
+        var t = CsSheet.textOf(texts[i]);
+        if (t !== "") {
             parts.push(t);
         }
     }
