@@ -1,42 +1,36 @@
-// scatter_breakdown.js
-// Native QCAD script - runs inside QCAD itself, no Python/ezdxf needed.
+// ScatterBreakdown.js
 //
-// HOW TO RUN:
-//   Misc > Development > Run Script...  and pick this file.
-//   (Or paste the whole thing into Misc > Development > Script Shell.)
+// QCAD add-on tool: fill closed BREAKDOWN-BOUNDARY polylines with
+// randomly placed, rotated and scaled breakdown symbols.
+//
+// WHAT CHANGED FROM THE OLD GENERATION: scattering is PER BOUNDARY.
+// Every placed block is tagged with the id of the boundary that owns
+// it, and re-running clears and refills only the boundaries it
+// processes -- several independent breakdown zones no longer destroy
+// each other. One undo step.
 //
 // WORKFLOW:
-//   1. Draw a closed polyline on the BREAKDOWN-BOUNDARY layer around the
-//      area where breakdown/collapse should appear.
-//   2. Run this script. It finds every closed polyline on that layer in the
-//      CURRENTLY OPEN document and fills it with randomly placed, rotated,
-//      and scaled SYM_BREAKDOWN / SYM_BREAKDOWN_B / SYM_BREAKDOWN_C block
-//      references on the BREAKDOWN layer.
-//   3. Adjust the boundary and re-run any time. NOTE: unlike the Python
-//      version, this simple form clears ALL existing breakdown blocks
-//      (not just ones tied to a specific boundary) before re-scattering -
-//      fine if you're working on one pile at a time, but if you have
-//      several independent breakdown zones, scatter and finalize one
-//      boundary before moving to the next (or say the word and I'll add
-//      the same per-boundary XDATA tagging the Python version uses).
+//   1. Draw a closed polyline on BREAKDOWN-BOUNDARY around the area.
+//   2. Run this tool (select specific boundaries first to do only
+//      those; no selection = all closed boundaries on the layer).
+//   3. Adjust the boundary and re-run any time.
 //
-// This is built from confirmed QCAD forum/API examples but has not been
-// run inside an actual QCAD instance - I don't have one to test against
-// the way I tested the Python version directly. If something errors,
-// paste the exact console message back and I'll fix the call.
+// Uses the SYM_BREAKDOWN / _B / _C blocks from the NSS template.
 
 include("scripts/EAction.js");
 include("scripts/simple.js");
+include("scripts/CaveSurvey/Core/All.js");
 
-var BOUNDARY_LAYER = "BREAKDOWN-BOUNDARY";
-var TARGET_LAYER = "BREAKDOWN";
-var VARIANTS = ["SYM_BREAKDOWN", "SYM_BREAKDOWN_B", "SYM_BREAKDOWN_C"];
-var DENSITY = 16;        // boulder clusters per 100 sq ft
-var SCALE_MIN = 0.7;
-var SCALE_MAX = 1.5;
-var MIN_SPACING = null;  // null = auto-derive from density
+// ---- tunables --------------------------------------------------------
 
-function pointInPolygon(px, py, verts) {
+var SB_VARIANTS = ["SYM_BREAKDOWN", "SYM_BREAKDOWN_B", "SYM_BREAKDOWN_C"];
+var SB_DENSITY = 16;       // boulder clusters per 100 sq drawing units
+var SB_SCALE_MIN = 0.7;
+var SB_SCALE_MAX = 1.5;
+
+// ---- geometry helpers (pure) ------------------------------------------
+
+function sbPointInPolygon(px, py, verts) {
     var n = verts.length;
     var inside = false;
     var x1 = verts[0].x, y1 = verts[0].y;
@@ -44,26 +38,27 @@ function pointInPolygon(px, py, verts) {
         var x2 = verts[i % n].x, y2 = verts[i % n].y;
         if ((y1 > py) !== (y2 > py)) {
             var xInt = (x2 - x1) * (py - y1) / (y2 - y1) + x1;
-            if (px < xInt) { inside = !inside; }
+            if (px < xInt) {
+                inside = !inside;
+            }
         }
-        x1 = x2; y1 = y2;
+        x1 = x2;
+        y1 = y2;
     }
     return inside;
 }
 
-function polygonArea(verts) {
+function sbPolygonArea(verts) {
     var a = 0;
-    var n = verts.length;
-    for (var i = 0; i < n; i++) {
-        var p1 = verts[i], p2 = verts[(i + 1) % n];
+    for (var i = 0; i < verts.length; i++) {
+        var p1 = verts[i], p2 = verts[(i + 1) % verts.length];
         a += p1.x * p2.y - p2.x * p1.y;
     }
     return Math.abs(a) / 2.0;
 }
 
-// Drop a trailing vertex that just duplicates the first (geometrically
-// closed polylines often store the closing point explicitly).
-function cleanRing(verts) {
+// closed polylines often store the closing vertex explicitly
+function sbCleanRing(verts) {
     if (verts.length > 1) {
         var first = verts[0], last = verts[verts.length - 1];
         var dx = first.x - last.x, dy = first.y - last.y;
@@ -74,128 +69,167 @@ function cleanRing(verts) {
     return verts;
 }
 
-function scatterBreakdown() {
+// ---- main --------------------------------------------------------------
+
+function scatterBreakdownRun() {
     var doc = getDocument();
-    if (isNull(doc)) {
-        print("ERROR: no open document.");
-    } else {
-        var di = getDocumentInterface();
+    if (doc === undefined || doc === null) {
+        warning("Scatter Breakdown: no active drawing document.");
+        return;
+    }
+    var di = getDocumentInterface();
 
-        if (!doc.hasLayer(BOUNDARY_LAYER)) {
-            print("ERROR: layer '" + BOUNDARY_LAYER + "' not found in this drawing.");
-        } else if (!doc.hasLayer(TARGET_LAYER)) {
-            print("ERROR: layer '" + TARGET_LAYER + "' not found in this drawing.");
-        } else {
-            var boundaryLayerId = doc.getLayerId(BOUNDARY_LAYER);
-            var targetLayerId = doc.getLayerId(TARGET_LAYER);
+    if (!doc.hasLayer(CsLayers.BREAKDOWN_BOUNDARY)) {
+        warning("Scatter Breakdown: draw a closed polyline on the " +
+            CsLayers.BREAKDOWN_BOUNDARY + " layer around the breakdown " +
+            "area first.");
+        return;
+    }
+    CsLayers.ensure(CsLayers.BREAKDOWN);
 
-            // Collect closed boundary polylines on BREAKDOWN-BOUNDARY
-            var polyIds = doc.queryAllEntities(false, false, RS.EntityPolyline);
-            var boundaries = [];
-            for (var i = 0; i < polyIds.length; i++) {
-                var e = doc.queryEntity(polyIds[i]);
-                if (isNull(e)) { continue; }
-                if (e.getLayerId() !== boundaryLayerId) { continue; }
-                if (!e.isGeometricallyClosed()) { continue; }
-                boundaries.push(e);
-            }
-            print("Found " + boundaries.length + " closed boundary polyline(s) on '" +
-                  BOUNDARY_LAYER + "'.");
+    var boundaryLayerId = doc.getLayerId(CsLayers.BREAKDOWN_BOUNDARY);
+    var targetLayerId = doc.getLayerId(CsLayers.BREAKDOWN);
 
-            if (boundaries.length === 0) {
-                print("Draw a closed polyline on that layer first, then re-run.");
-            } else {
-                var op = new RAddObjectsOperation();
-                op.setText("Scatter breakdown");
+    // Selected boundaries only, if any are selected; else every closed
+    // boundary on the layer.
+    var selectedIds = doc.hasSelection() ? doc.querySelectedEntities() : [];
+    var candidateIds = selectedIds.length > 0 ?
+        selectedIds : doc.queryAllEntities(false, false, RS.EntityPolyline);
 
-                // Clear all existing breakdown block references before rescattering
-                var refIds = doc.queryAllEntities(false, false, RS.EntityBlockRef);
-                var removedCount = 0;
-                for (var r = 0; r < refIds.length; r++) {
-                    var ref = doc.queryEntity(refIds[r]);
-                    if (isNull(ref)) { continue; }
-                    if (ref.getLayerId() !== targetLayerId) { continue; }
-                    op.deleteObject(ref);
-                    removedCount++;
+    var boundaries = [];
+    for (var i = 0; i < candidateIds.length; i++) {
+        var e = doc.queryEntity(candidateIds[i]);
+        if (isNull(e) || e.getLayerId() !== boundaryLayerId) {
+            continue;
+        }
+        if (typeof e.isGeometricallyClosed !== "function" ||
+            !e.isGeometricallyClosed()) {
+            continue;
+        }
+        boundaries.push(e);
+    }
+
+    if (boundaries.length === 0) {
+        warning("Scatter Breakdown: no closed polylines found on " +
+            CsLayers.BREAKDOWN_BOUNDARY +
+            (selectedIds.length > 0 ? " in the selection." : "."));
+        return;
+    }
+
+    var op = new RAddObjectsOperation();
+    op.setText("Scatter breakdown");
+
+    // Collect the boundary ids being redone, then clear only THEIR
+    // previous blocks (tagged CaveSurvey/BoundaryId).
+    var redoIds = {};
+    for (i = 0; i < boundaries.length; i++) {
+        redoIds[String(boundaries[i].getId())] = true;
+    }
+    var refIds = doc.queryAllEntities(false, false, RS.EntityBlockRef);
+    var removed = 0;
+    for (i = 0; i < refIds.length; i++) {
+        var ref = doc.queryEntity(refIds[i]);
+        if (isNull(ref) || ref.getLayerId() !== targetLayerId) {
+            continue;
+        }
+        var owner = CsTags.get(ref, "BoundaryId");
+        // untagged blocks (old generation) are treated as owned by
+        // whichever boundary contains them, so re-running cleans up
+        // legacy scatters too
+        if (owner === "") {
+            var pos = ref.getPosition();
+            for (var b = 0; b < boundaries.length; b++) {
+                var ring = sbCleanRing(boundaries[b].getData().getVertices());
+                if (sbPointInPolygon(pos.x, pos.y, ring)) {
+                    owner = String(boundaries[b].getId());
+                    break;
                 }
-
-                var totalPlaced = 0;
-                for (var b = 0; b < boundaries.length; b++) {
-                    var poly = boundaries[b];
-                    var verts = cleanRing(poly.getData().getVertices());
-                    if (verts.length < 3) { continue; }
-
-                    var area = polygonArea(verts);
-                    var targetCount = Math.max(1, Math.round(area / 100.0 * DENSITY));
-                    var spacing = MIN_SPACING;
-                    if (isNull(spacing)) {
-                        spacing = Math.max(0.6, Math.sqrt(area / targetCount) * 0.55);
-                    }
-
-                    var minx = verts[0].x, maxx = verts[0].x;
-                    var miny = verts[0].y, maxy = verts[0].y;
-                    for (var v = 1; v < verts.length; v++) {
-                        minx = Math.min(minx, verts[v].x);
-                        maxx = Math.max(maxx, verts[v].x);
-                        miny = Math.min(miny, verts[v].y);
-                        maxy = Math.max(maxy, verts[v].y);
-                    }
-
-                    var accepted = [];
-                    var maxAttempts = Math.max(200, targetCount * 60);
-                    var attempts = 0;
-                    while (accepted.length < targetCount && attempts < maxAttempts) {
-                        attempts++;
-                        var px = minx + Math.random() * (maxx - minx);
-                        var py = miny + Math.random() * (maxy - miny);
-                        if (!pointInPolygon(px, py, verts)) { continue; }
-                        var ok = true;
-                        for (var k = 0; k < accepted.length; k++) {
-                            var dx = px - accepted[k].x, dy = py - accepted[k].y;
-                            if (dx * dx + dy * dy < spacing * spacing) { ok = false; break; }
-                        }
-                        if (ok) { accepted.push(new RVector(px, py)); }
-                    }
-
-                    for (var a2 = 0; a2 < accepted.length; a2++) {
-                        var variant = VARIANTS[Math.floor(Math.random() * VARIANTS.length)];
-                        var block = doc.queryBlock(variant);
-                        if (isNull(block)) {
-                            print("WARNING: block '" + variant + "' not found - skipping.");
-                            continue;
-                        }
-                        var scale = SCALE_MIN + Math.random() * (SCALE_MAX - SCALE_MIN);
-                        var angle = Math.random() * 2 * Math.PI;
-                        var bd = new RBlockReferenceData(
-                            block.getId(),
-                            accepted[a2],
-                            new RVector(scale, scale),
-                            angle,
-                            1, 1, 1, 1
-                        );
-                        var blockRef = new RBlockReferenceEntity(doc, bd);
-                        blockRef.setLayerId(targetLayerId);
-                        op.addObject(blockRef);
-                    }
-
-                    print("Boundary " + (b + 1) + ": placed " + accepted.length +
-                          " boulder clusters (target " + targetCount +
-                          ", area " + area.toFixed(1) + " sq ft).");
-                    totalPlaced += accepted.length;
-                }
-
-                di.applyOperation(op);
-                print("Removed " + removedCount + " previous boulder(s), placed " +
-                      totalPlaced + " new. Done.");
             }
         }
-}
+        if (redoIds[owner] === true) {
+            op.deleteObject(ref);
+            removed++;
+        }
+    }
+
+    var totalPlaced = 0;
+    var missingBlocks = false;
+
+    for (b = 0; b < boundaries.length; b++) {
+        var poly = boundaries[b];
+        var verts = sbCleanRing(poly.getData().getVertices());
+        if (verts.length < 3) {
+            continue;
+        }
+
+        var area = sbPolygonArea(verts);
+        var targetCount = Math.max(1, Math.round(area / 100.0 * SB_DENSITY));
+        var spacing = Math.max(0.6, Math.sqrt(area / targetCount) * 0.55);
+
+        var minx = verts[0].x, maxx = verts[0].x;
+        var miny = verts[0].y, maxy = verts[0].y;
+        for (var v = 1; v < verts.length; v++) {
+            minx = Math.min(minx, verts[v].x);
+            maxx = Math.max(maxx, verts[v].x);
+            miny = Math.min(miny, verts[v].y);
+            maxy = Math.max(maxy, verts[v].y);
+        }
+
+        var accepted = [];
+        var attempts = 0;
+        var maxAttempts = Math.max(200, targetCount * 60);
+        while (accepted.length < targetCount && attempts < maxAttempts) {
+            attempts++;
+            var px = minx + Math.random() * (maxx - minx);
+            var py = miny + Math.random() * (maxy - miny);
+            if (!sbPointInPolygon(px, py, verts)) {
+                continue;
+            }
+            var okSpacing = true;
+            for (var k = 0; k < accepted.length; k++) {
+                var ddx = px - accepted[k].x, ddy = py - accepted[k].y;
+                if (ddx * ddx + ddy * ddy < spacing * spacing) {
+                    okSpacing = false;
+                    break;
+                }
+            }
+            if (okSpacing) {
+                accepted.push(new RVector(px, py));
+            }
+        }
+
+        for (k = 0; k < accepted.length; k++) {
+            var variant = SB_VARIANTS[Math.floor(Math.random() * SB_VARIANTS.length)];
+            var entry = CsSymbols.byBlock(variant);
+            var scale = SB_SCALE_MIN + Math.random() * (SB_SCALE_MAX - SB_SCALE_MIN);
+            var angle = Math.random() * 2 * Math.PI;
+            var blockRef = CsSymbols.insert(doc, entry, accepted[k], scale, angle);
+            if (blockRef === null) {
+                missingBlocks = true;
+                continue;
+            }
+            CsTags.set(blockRef, "BoundaryId", String(poly.getId()));
+            op.addObject(blockRef, false);
+            totalPlaced++;
+        }
+    }
+
+    di.applyOperation(op);
+
+    var msg = "Scatter Breakdown: " + boundaries.length + " boundar" +
+        (boundaries.length === 1 ? "y" : "ies") + ", " + totalPlaced +
+        " boulders placed" +
+        (removed > 0 ? " (" + removed + " previous cleared from those boundaries only)" : "") +
+        ". Other breakdown zones were not touched.";
+    if (missingBlocks) {
+        msg += " NOTE: the SYM_BREAKDOWN blocks are missing from this " +
+            "drawing -- start from the NSS template to get them.";
+    }
+    EAction.handleUserMessage(msg);
 }
 
 // ============================================================
-// Addon wiring -- turns the function above into a launchable
-// button/menu item/command instead of code that runs immediately
-// on load. The scatter logic above is untouched.
+// Add-on wiring -- the standard pattern; see docs.
 // ============================================================
 
 function ScatterBreakdown(guiAction) {
@@ -204,21 +238,18 @@ function ScatterBreakdown(guiAction) {
 
 ScatterBreakdown.prototype = new EAction();
 
-// Called when the tool is launched from its button, menu item, or
-// command. Runs the (unchanged) scatter function once, then terminates.
 ScatterBreakdown.prototype.beginEvent = function() {
     EAction.prototype.beginEvent.call(this);
-    scatterBreakdown();
+    scatterBreakdownRun();
     this.terminate();
 };
 
-// Called once by QCAD at startup to register the button/menu item.
 ScatterBreakdown.init = function(basePath) {
     var action = new RGuiAction(qsTr("Scatter Breakdown"), RMainWindowQt.getMainWindow());
     action.setRequiresDocument(true);
     action.setScriptFile(basePath + "/ScatterBreakdown.js");
     action.setIcon(basePath + "/ScatterBreakdown.svg");
-    action.setStatusTip(qsTr("Fill closed BREAKDOWN-BOUNDARY polylines with randomized breakdown/collapse symbols"));
+    action.setStatusTip(qsTr("Fill closed BREAKDOWN-BOUNDARY polylines with breakdown symbols, one zone at a time"));
     action.setDefaultCommands(["scatterbreakdown", "scb"]);
     action.setGroupSortOrder(450);
     action.setSortOrder(40);

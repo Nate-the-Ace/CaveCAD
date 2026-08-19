@@ -49,19 +49,27 @@ function findAddon() {
     return null;
 }
 
-// Every .js in the add-on: the menu builder, plus everything inside each tool
-// folder (a tool's own file, and any helper sitting beside it).
+// Every .js in the add-on, recursively: the menu builder, every tool,
+// and the whole Core library (including Core/Format/).
 function collectScripts(addon) {
     var scripts = ["CaveSurvey.js"];
+    var walk = function(rel) {
+        var dir = new QDir(addon + rel);
+        var files = dir.entryInfoList(
+            ["*.js"], makeQDirFilters(QDir.NoDotAndDotDot, QDir.Files), QDir.Name);
+        for (var f = 0; f < files.length; f++) {
+            scripts.push(rel + files[f].fileName());
+        }
+        var subdirs = dir.entryInfoList(
+            ["*"], makeQDirFilters(QDir.NoDotAndDotDot, QDir.Dirs), QDir.Name);
+        for (var d = 0; d < subdirs.length; d++) {
+            walk(rel + subdirs[d].fileName() + "/");
+        }
+    };
     var dirs = new QDir(addon).entryInfoList(
         ["*"], makeQDirFilters(QDir.NoDotAndDotDot, QDir.Dirs), QDir.Name);
     for (var i = 0; i < dirs.length; i++) {
-        var name = dirs[i].fileName();
-        var files = new QDir(addon + name).entryInfoList(
-            ["*.js"], makeQDirFilters(QDir.NoDotAndDotDot, QDir.Files), QDir.Name);
-        for (var f = 0; f < files.length; f++) {
-            scripts.push(name + "/" + files[f].fileName());
-        }
+        walk(dirs[i].fileName() + "/");
     }
     return scripts;
 }

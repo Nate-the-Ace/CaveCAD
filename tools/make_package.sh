@@ -7,15 +7,8 @@
 #   ./tools/make_package.sh --version 1.1.0
 #   ./tools/make_package.sh --stage-only  leave the folder, skip the zip
 #
-# AlignImage is a separate project, so it is copied in at build time from a
-# sibling checkout. Point ALIGN_IMAGE at it if yours lives elsewhere:
-#
-#   ALIGN_IMAGE=~/src/qcad-align-image-tool/AlignImage ./tools/make_package.sh
-#
 # The staged package is checked before it is zipped, using the same structural
-# tests the repo uses, with the publish gate on. That check is the only place
-# the six tools are ever seen together -- AlignImage's menu position can only
-# collide with a repo tool here, never in either project on its own.
+# tests the repo uses, with the publish gate on.
 
 set -u
 cd "$(dirname "${BASH_SOURCE[0]}")/.." || exit 1
@@ -37,9 +30,6 @@ if [ -z "$VERSION" ]; then
     exit 1
 fi
 
-ALIGN_IMAGE=${ALIGN_IMAGE:-"$REPO/../qcad-align-image-tool/AlignImage"}
-ALIGN_DOCS=${ALIGN_DOCS:-"$REPO/../qcad-align-image-tool/README.txt"}
-
 NAME="CaveSurveyTools-$VERSION"
 DIST="$REPO/dist"
 STAGE="$DIST/$NAME"
@@ -55,29 +45,11 @@ mkdir -p "$STAGE"
 # the add-on itself: the menu builder plus one folder per tool
 cp -R "$REPO/scripts/CaveSurvey" "$STAGE/CaveSurvey"
 
-# AlignImage ships from its own project. Missing it is a hard failure rather
-# than a five-tool package that looks complete.
-if [ ! -f "$ALIGN_IMAGE/AlignImage.js" ]; then
-    echo "AlignImage not found at:" >&2
-    echo "  $ALIGN_IMAGE" >&2
-    echo >&2
-    echo "It is a separate project and is copied in at build time. Set" >&2
-    echo "ALIGN_IMAGE=/path/to/AlignImage and run this again." >&2
-    exit 1
-fi
-cp -R "$ALIGN_IMAGE" "$STAGE/CaveSurvey/AlignImage"
-
 # templates, sample surveys, licence
 mkdir -p "$STAGE/templates" "$STAGE/examples" "$STAGE/docs"
 cp "$REPO/templates/"*.dxf "$STAGE/templates/"
 cp "$REPO/testdata/"* "$STAGE/examples/"
 cp "$REPO/LICENSE" "$STAGE/LICENSE"
-
-if [ -f "$ALIGN_DOCS" ]; then
-    cp "$ALIGN_DOCS" "$STAGE/docs/AlignImage.txt"
-else
-    echo "note: AlignImage notes not found at $ALIGN_DOCS -- docs/ will omit them"
-fi
 
 # install notes and installers, with the build stamped in
 COMMIT=$(git -C "$REPO" rev-parse --short HEAD 2>/dev/null || echo "an untracked working copy")
@@ -104,7 +76,7 @@ find "$STAGE" -name "*.pyc" -delete
 # ----------------------------------------------------------------- verify
 echo "Checking the staged package (structure, icons, status tips, menu order)"
 echo
-if [ -x ".venv/bin/python" ]; then PY=".venv/bin/python"; else PY="python3"; fi
+PY="python3"
 
 CAVESURVEY_PUBLISH_CHECK=1 \
 CAVESURVEY_ADDON="$STAGE/CaveSurvey" \

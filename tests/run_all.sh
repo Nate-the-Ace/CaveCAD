@@ -27,19 +27,12 @@ case "${1:-}" in
         ;;
 esac
 
-if [ -x ".venv/bin/python" ]; then
-    PY=".venv/bin/python"
-else
-    PY="python3"
-    echo "NOTE: no .venv found -- using system python3, DXF tests will skip."
-    echo "      python3 -m venv .venv && .venv/bin/pip install ezdxf matplotlib"
-    echo
-fi
+PY="python3"
 
 status=0
 
 echo "=============================================================="
-echo " 1/3  Python unit tests (parsers, DXF output, add-on layout)"
+echo " 1/3  Structural tests (add-on layout, includes, layers)"
 echo "=============================================================="
 "$PY" -m unittest discover -s tests -v || status=1
 
@@ -63,13 +56,23 @@ fi
 
 echo
 echo "=============================================================="
-echo " 3/3  Differential test (QCAD JS parsers vs Python parsers)"
+echo " 3/3  Core unit tests (inside QCAD's own script engine)"
 echo "=============================================================="
 if [ -e "$QCAD" ]; then
-    "$PY" tests/differential.py || status=1
+    output=$("$QCAD" -no-dock-icon -no-gui -allow-multiple-instances \
+                 -autostart tests/js_unit.js "$PWD" 2>/dev/null)
+    echo "$output"
+    case "$output" in
+        *"### UNIT OK"*) ;;
+        *) echo "Core unit tests did not pass."; status=1 ;;
+    esac
 else
-    echo "SKIP: QCAD not found at $QCAD -- pass --qcad to"
-    echo "      tests/differential.py manually if it lives elsewhere."
+    echo "NOTE: QCAD not found -- running the same tests under node instead."
+    if command -v node >/dev/null 2>&1; then
+        node tests/js_unit.js || status=1
+    else
+        echo "SKIP: neither QCAD nor node available."
+    fi
 fi
 
 echo

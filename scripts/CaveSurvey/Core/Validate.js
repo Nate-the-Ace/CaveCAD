@@ -20,6 +20,16 @@ var CsValidate = {};
 
 CsValidate.CLOSURE_WARN_PERCENT = 2.0; // BCRA grade 3 expects 1-5%
 
+/** True when any finding is an error (vs merely a warning). */
+CsValidate.checkHasErrors = function(findings) {
+    for (var i = 0; i < findings.length; i++) {
+        if (findings[i].severity === "error") {
+            return true;
+        }
+    }
+    return false;
+};
+
 /** Runs every check. resolved (from CsNetwork) is optional. */
 CsValidate.check = function(survey, resolved) {
     var findings = [];

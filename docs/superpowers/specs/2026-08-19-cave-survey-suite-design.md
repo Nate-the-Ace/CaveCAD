@@ -334,10 +334,10 @@ qcad-cave-survey/
       Format/
         Registry.js            detection by extension then content
         Compass.js  Walls.js  Survex.js  Csv.js  Therion.js
-    Panel/
-      SurveyNotebook.js        the dock widget (§6)
-      SurveyNotebook.ui
-      ShotTable.js             table model + validation glue
+    SurveyNotebook/
+      SurveyNotebook.js        the dock widget tool (§6) -- a tool folder,
+                               not a library, because QCAD only init()s
+                               folders containing <Folder>.js
     CaveMode/
       CaveMode.js              the kiosk toggle (F1): hide/restore stock UI,
                                set template default, persist state in RSettings

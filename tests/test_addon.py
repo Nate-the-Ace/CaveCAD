@@ -39,12 +39,22 @@ TEMPLATES = os.environ.get("CAVESURVEY_TEMPLATES") or os.path.join(REPO, "templa
 WIDGET_NAMES = ["CaveSurveyMenu", "CaveSurveyToolBar"]
 
 
-def tool_dirs():
+# A folder is a TOOL if and only if it contains <Folder>.js. Folders
+# without one are libraries (Core/) and are never init'd by QCAD.
+LIBRARY_DIRS = {"Core"}
+
+
+def all_dirs():
     return sorted(
         name for name in os.listdir(ADDON)
         if os.path.isdir(os.path.join(ADDON, name))
         and not name.startswith(".")
     )
+
+
+def tool_dirs():
+    return [name for name in all_dirs()
+            if os.path.exists(os.path.join(ADDON, name, name + ".js"))]
 
 
 def tool_source(name):
@@ -63,14 +73,23 @@ class TestAddonLayout(unittest.TestCase):
         # and toolbar the tools attach themselves to.
         self.assertTrue(os.path.exists(os.path.join(ADDON, "CaveSurvey.js")))
 
-    def test_every_tool_lives_in_a_folder_named_after_it(self):
-        # QCAD finds an add-on tool as <Tool>/<Tool>.js. A script sitting loose
-        # beside CaveSurvey.js, or in a mismatched folder, won't be picked up.
-        for name in tool_dirs():
-            with self.subTest(tool=name):
-                self.assertTrue(
+    def test_every_folder_is_a_tool_or_a_known_library(self):
+        # QCAD finds an add-on tool as <Tool>/<Tool>.js. A folder without
+        # one is invisible to QCAD -- fine for the known libraries, a
+        # silent failure for a mistyped tool folder. So libraries are an
+        # explicit allowlist, and anything else must be a proper tool.
+        for name in all_dirs():
+            if name in LIBRARY_DIRS:
+                self.assertFalse(
                     os.path.exists(os.path.join(ADDON, name, name + ".js")),
-                    "expected %s/%s.js" % (name, name))
+                    "%s is a library but contains %s.js -- QCAD would "
+                    "try to init it as a tool" % (name, name))
+            else:
+                with self.subTest(tool=name):
+                    self.assertTrue(
+                        os.path.exists(os.path.join(ADDON, name, name + ".js")),
+                        "expected %s/%s.js (or add %s to LIBRARY_DIRS if "
+                        "it is a new library)" % (name, name, name))
 
     def test_no_stray_scripts_beside_the_menu_builder(self):
         loose = [f for f in os.listdir(ADDON)
@@ -168,6 +187,60 @@ class TestTemplates(unittest.TestCase):
             with self.subTest(template=name):
                 self.assertTrue(
                     os.path.exists(os.path.join(TEMPLATES, name)))
+
+
+class TestIncludes(unittest.TestCase):
+    def test_every_include_target_exists(self):
+        # include() failing at QCAD startup surfaces as the whole add-on
+        # silently missing from the menu. Targets are resolved against
+        # ADDON itself, so the same test serves the repo checkout and a
+        # staged package (where the add-on folder IS scripts/CaveSurvey).
+        for dirpath, _dirnames, filenames in os.walk(ADDON):
+            for filename in filenames:
+                if not filename.endswith(".js"):
+                    continue
+                path = os.path.join(dirpath, filename)
+                with open(path) as fh:
+                    source = fh.read()
+                # only OUR includes -- scripts/EAction.js etc. live in
+                # the QCAD install, not this repo
+                for target in re.findall(
+                        r'include\("scripts/CaveSurvey/([^"]+)"\)', source):
+                    with self.subTest(script=filename, include=target):
+                        self.assertTrue(
+                            os.path.exists(os.path.join(ADDON, target)),
+                            "%s includes missing %s" % (filename, target))
+
+
+class TestLayerVocabulary(unittest.TestCase):
+    """The layer names in Core/Layers.js and the plan template must agree.
+
+    The old importer invented layer names no template carried; this pins
+    the registry to the template so the two cannot drift apart again.
+    """
+
+    def layer_registry(self):
+        with open(os.path.join(ADDON, "Core", "Layers.js")) as fh:
+            source = fh.read()
+        return set(re.findall(r'CsLayers\.[A-Z_]+ = "([^"]+)"', source))
+
+    def template_layers(self, name):
+        with open(os.path.join(TEMPLATES, name), encoding="utf-8",
+                  errors="replace") as fh:
+            content = fh.read()
+        match = re.search(r"2\nLAYER\n(.*?)\n  0\nENDTAB", content, re.S)
+        return set(re.findall(r"^  2\n(.+)$", match.group(1), re.M))
+
+    def test_registry_layers_exist_in_plan_template(self):
+        registry = self.layer_registry()
+        plan = self.template_layers("NSS_Cave_Template_PLAN.dxf")
+        # Wall-run layers are created by LRUDWalls on demand; everything
+        # else the registry names must be in the plan template.
+        created_on_demand = {"CTRL-LRUD-WALL-LEFT", "CTRL-LRUD-WALL-RIGHT"}
+        missing = registry - plan - created_on_demand
+        self.assertEqual(missing, set(),
+                         "layers in Core/Layers.js but not the plan "
+                         "template: %s" % sorted(missing))
 
 
 if __name__ == "__main__":
