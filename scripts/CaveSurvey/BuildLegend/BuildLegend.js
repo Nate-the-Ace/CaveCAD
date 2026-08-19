@@ -19,7 +19,7 @@
 
 include("scripts/EAction.js");
 include("scripts/simple.js");
-include(includeBasePath + "/../Core/All.js");
+include(includeBasePath + "/../Core/CsAll.js");
 
 var BL_ROW_HEIGHT = 2.0;      // drawing units per legend row
 var BL_SYMBOL_SCALE = 1.0;

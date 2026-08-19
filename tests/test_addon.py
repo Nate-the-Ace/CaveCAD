@@ -221,6 +221,25 @@ class TestIncludes(unittest.TestCase):
                             "%s includes missing %s" % (filename, target))
 
 
+class TestBasenameCollisions(unittest.TestCase):
+    """QCAD's include() dedupes by BASENAME: a library file sharing a
+    name with anything QCAD already included (Draw.js, File.js, ...)
+    is skipped silently. Cs-prefixed basenames make that impossible,
+    so every Core file must carry the prefix."""
+
+    def test_core_files_are_cs_prefixed(self):
+        core = os.path.join(ADDON, "Core")
+        for dirpath, _dirnames, filenames in os.walk(core):
+            for filename in filenames:
+                if filename.endswith(".js"):
+                    with self.subTest(script=filename):
+                        self.assertTrue(
+                            filename.startswith("Cs"),
+                            "%s: Core basenames must start with Cs -- "
+                            "include() dedupes by basename and stock "
+                            "QCAD's own scripts win" % filename)
+
+
 class TestLayerVocabulary(unittest.TestCase):
     """The layer names in Core/Layers.js and the plan template must agree.
 
@@ -229,7 +248,7 @@ class TestLayerVocabulary(unittest.TestCase):
     """
 
     def layer_registry(self):
-        with open(os.path.join(ADDON, "Core", "Layers.js")) as fh:
+        with open(os.path.join(ADDON, "Core", "CsLayers.js")) as fh:
             source = fh.read()
         return set(re.findall(r'CsLayers\.[A-Z_]+ = "([^"]+)"', source))
 

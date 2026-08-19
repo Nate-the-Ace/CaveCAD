@@ -34,7 +34,7 @@
 
 include("scripts/EAction.js");
 include("scripts/simple.js");
-include(includeBasePath + "/../Core/All.js");
+include(includeBasePath + "/../Core/CsAll.js");
 
 function importCaveSurvey() {
     var doc = getDocument();

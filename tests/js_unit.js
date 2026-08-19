@@ -68,22 +68,22 @@ function loadRepoScript(scriptPath) {
 
 // Load order: leaves first.
 var CORE_FILES = [
-    "scripts/CaveSurvey/Core/Units.js",
-    "scripts/CaveSurvey/Core/Angles.js",
-    "scripts/CaveSurvey/Core/IgrfCoeffs.js",
-    "scripts/CaveSurvey/Core/Geomag.js",
-    "scripts/CaveSurvey/Core/Model.js",
-    "scripts/CaveSurvey/Core/Traverse.js",
-    "scripts/CaveSurvey/Core/Network.js",
-    "scripts/CaveSurvey/Core/Lrud.js",
-    "scripts/CaveSurvey/Core/Validate.js",
-    "scripts/CaveSurvey/Core/Stats.js",
-    "scripts/CaveSurvey/Core/Grade.js",
-    "scripts/CaveSurvey/Core/Format/Compass.js",
-    "scripts/CaveSurvey/Core/Format/Walls.js",
-    "scripts/CaveSurvey/Core/Format/Survex.js",
-    "scripts/CaveSurvey/Core/Format/Csv.js",
-    "scripts/CaveSurvey/Core/Format/Registry.js"
+    "scripts/CaveSurvey/Core/CsUnits.js",
+    "scripts/CaveSurvey/Core/CsAngles.js",
+    "scripts/CaveSurvey/Core/CsIgrfCoeffs.js",
+    "scripts/CaveSurvey/Core/CsGeomag.js",
+    "scripts/CaveSurvey/Core/CsModel.js",
+    "scripts/CaveSurvey/Core/CsTraverse.js",
+    "scripts/CaveSurvey/Core/CsNetwork.js",
+    "scripts/CaveSurvey/Core/CsLrud.js",
+    "scripts/CaveSurvey/Core/CsValidate.js",
+    "scripts/CaveSurvey/Core/CsStats.js",
+    "scripts/CaveSurvey/Core/CsGrade.js",
+    "scripts/CaveSurvey/Core/Format/CsCompass.js",
+    "scripts/CaveSurvey/Core/Format/CsWalls.js",
+    "scripts/CaveSurvey/Core/Format/CsSurvex.js",
+    "scripts/CaveSurvey/Core/Format/CsCsv.js",
+    "scripts/CaveSurvey/Core/Format/CsRegistry.js"
 ];
 for (var ci = 0; ci < CORE_FILES.length; ci++) {
     loadRepoScript(CORE_FILES[ci]);
