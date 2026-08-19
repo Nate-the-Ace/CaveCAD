@@ -299,6 +299,17 @@ SurveyNotebook.addStationRow = function(w, stationName) {
     grid.addWidget(row.d, stRow, 9);
     row.widgets.push(row.name, row.l, row.r, row.u, row.d);
 
+    // Pin the page to the TOP of the scroll area: all the vertical
+    // slack lives in one stretchy empty row below the last station.
+    // Without this the grid centers its rows in whatever height the
+    // panel has -- header floating mid-air, stations at the bottom.
+    try {
+        grid.setRowStretch(w.gridRow - 1, 0);
+        grid.setRowStretch(w.gridRow, 1);
+    } catch (e) {
+        // older bridge without setRowStretch: cosmetic only
+    }
+
     w.rows.push(row);
     return row;
 };
@@ -612,6 +623,14 @@ SurveyNotebook.buildDock = function(appWin) {
             "Inc fs", "Inc bs", "L", "R", "U", "D"];
         for (var h = 0; h < headers.length; h++) {
             w.grid.addWidget(new QLabel(headers[h]), 0, h);
+        }
+        // scrollbar appears when the page outgrows the panel; the
+        // stretch row (maintained in addStationRow) keeps everything
+        // pinned to the top rather than centered
+        try {
+            w.grid.setColumnStretch(headers.length, 1);
+        } catch (e) {
+            // cosmetic only
         }
 
         inner.setLayout(w.grid);
