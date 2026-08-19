@@ -22,7 +22,7 @@
 // ppigrf (the published Python implementation of the same model) in
 // tests/js_unit.js.
 
-include("scripts/CaveSurvey/Core/IgrfCoeffs.js");
+include(includeBasePath + "/IgrfCoeffs.js");
 
 var CsGeomag = {};
 

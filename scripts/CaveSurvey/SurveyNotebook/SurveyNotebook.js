@@ -39,7 +39,7 @@
 
 include("scripts/EAction.js");
 include("scripts/simple.js");
-include("scripts/CaveSurvey/Core/All.js");
+include(includeBasePath + "/../Core/All.js");
 
 // The dock is a singleton across invocations; QCAD keeps the script
 // engine alive, so a global holds it.

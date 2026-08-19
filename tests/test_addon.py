@@ -192,9 +192,12 @@ class TestTemplates(unittest.TestCase):
 class TestIncludes(unittest.TestCase):
     def test_every_include_target_exists(self):
         # include() failing at QCAD startup surfaces as the whole add-on
-        # silently missing from the menu. Targets are resolved against
-        # ADDON itself, so the same test serves the repo checkout and a
-        # staged package (where the add-on folder IS scripts/CaveSurvey).
+        # silently missing from the menu -- which is exactly how 2.0.0
+        # shipped: include("scripts/CaveSurvey/...") only resolves
+        # against QCAD's OWN scripts folder, never the per-user add-on
+        # folder, and it fails silently. So suite-internal includes must
+        # be includeBasePath-relative, and this test both bans the
+        # broken form and checks the relative targets exist.
         for dirpath, _dirnames, filenames in os.walk(ADDON):
             for filename in filenames:
                 if not filename.endswith(".js"):
@@ -202,13 +205,19 @@ class TestIncludes(unittest.TestCase):
                 path = os.path.join(dirpath, filename)
                 with open(path) as fh:
                     source = fh.read()
-                # only OUR includes -- scripts/EAction.js etc. live in
-                # the QCAD install, not this repo
+
+                self.assertNotRegex(
+                    source, r'include\("scripts/CaveSurvey/',
+                    "%s uses include(\"scripts/CaveSurvey/...\"), which "
+                    "silently fails from the per-user install -- use "
+                    "include(includeBasePath + \"/...\") instead" % filename)
+
                 for target in re.findall(
-                        r'include\("scripts/CaveSurvey/([^"]+)"\)', source):
+                        r'include\(includeBasePath \+ "/([^"]+)"\)', source):
+                    resolved = os.path.normpath(os.path.join(dirpath, target))
                     with self.subTest(script=filename, include=target):
                         self.assertTrue(
-                            os.path.exists(os.path.join(ADDON, target)),
+                            os.path.exists(resolved),
                             "%s includes missing %s" % (filename, target))
 
 

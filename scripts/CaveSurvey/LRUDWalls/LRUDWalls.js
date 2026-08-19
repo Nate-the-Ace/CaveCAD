@@ -24,7 +24,7 @@
 
 include("scripts/EAction.js");
 include("scripts/simple.js");
-include("scripts/CaveSurvey/Core/All.js");
+include(includeBasePath + "/../Core/All.js");
 
 function lrudWallsRun() {
     var doc = getDocument();

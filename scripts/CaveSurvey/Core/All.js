@@ -2,31 +2,31 @@
 //
 // Tools include this one file instead of maintaining their own list:
 //
-//   include("scripts/CaveSurvey/Core/All.js");
+//   include(includeBasePath + "/../Core/All.js");
 //
 // (Deliberately NOT named Core.js: a file named after its folder is
 // how QCAD recognises a TOOL, and Core is a library.)
 
-include("scripts/CaveSurvey/Core/Units.js");
-include("scripts/CaveSurvey/Core/Angles.js");
-include("scripts/CaveSurvey/Core/IgrfCoeffs.js");
-include("scripts/CaveSurvey/Core/Geomag.js");
-include("scripts/CaveSurvey/Core/Model.js");
-include("scripts/CaveSurvey/Core/Traverse.js");
-include("scripts/CaveSurvey/Core/Network.js");
-include("scripts/CaveSurvey/Core/Lrud.js");
-include("scripts/CaveSurvey/Core/Validate.js");
-include("scripts/CaveSurvey/Core/Stats.js");
-include("scripts/CaveSurvey/Core/Grade.js");
-include("scripts/CaveSurvey/Core/Format/Compass.js");
-include("scripts/CaveSurvey/Core/Format/Walls.js");
-include("scripts/CaveSurvey/Core/Format/Survex.js");
-include("scripts/CaveSurvey/Core/Format/Csv.js");
-include("scripts/CaveSurvey/Core/Format/Registry.js");
-include("scripts/CaveSurvey/Core/Layers.js");
-include("scripts/CaveSurvey/Core/Tags.js");
-include("scripts/CaveSurvey/Core/Draw.js");
-include("scripts/CaveSurvey/Core/Pick.js");
-include("scripts/CaveSurvey/Core/Symbols.js");
-include("scripts/CaveSurvey/Core/Sheet.js");
-include("scripts/CaveSurvey/Core/Report.js");
+include(includeBasePath + "/Units.js");
+include(includeBasePath + "/Angles.js");
+include(includeBasePath + "/IgrfCoeffs.js");
+include(includeBasePath + "/Geomag.js");
+include(includeBasePath + "/Model.js");
+include(includeBasePath + "/Traverse.js");
+include(includeBasePath + "/Network.js");
+include(includeBasePath + "/Lrud.js");
+include(includeBasePath + "/Validate.js");
+include(includeBasePath + "/Stats.js");
+include(includeBasePath + "/Grade.js");
+include(includeBasePath + "/Format/Compass.js");
+include(includeBasePath + "/Format/Walls.js");
+include(includeBasePath + "/Format/Survex.js");
+include(includeBasePath + "/Format/Csv.js");
+include(includeBasePath + "/Format/Registry.js");
+include(includeBasePath + "/Layers.js");
+include(includeBasePath + "/Tags.js");
+include(includeBasePath + "/Draw.js");
+include(includeBasePath + "/Pick.js");
+include(includeBasePath + "/Symbols.js");
+include(includeBasePath + "/Sheet.js");
+include(includeBasePath + "/Report.js");
