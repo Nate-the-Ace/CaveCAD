@@ -578,6 +578,36 @@ SurveyNotebook.refresh = function(w) {
 // Actions
 // ---------------------------------------------------------------------
 
+/**
+ * The Elevation tag of whatever single entity is currently selected
+ * in the drawing -- the same one-entity selection CsPick.
+ * startPointFromSelection just resolved into a start point. CsPick
+ * hands back a bare {pos, isExistingStation, existingName}, not the
+ * entity itself, so this re-queries the selection rather than
+ * teaching CsPick a field only the datum fix needs.
+ *
+ * Used when there is no reconstruction to pull a datum from (a fresh
+ * or untagged drawing): the picked point's own tag is the only
+ * elevation information there is. A missing or non-numeric tag must
+ * resolve to 0, never NaN -- NaN would poison every coordinate this
+ * anchor/fixed point seeds.
+ */
+SurveyNotebook.selectionElevation = function(doc) {
+    if (!doc.hasSelection()) {
+        return 0;
+    }
+    var ids = doc.querySelectedEntities();
+    if (ids.length !== 1) {
+        return 0;
+    }
+    var entity = doc.queryEntity(ids[0]);
+    if (isNull(entity)) {
+        return 0;
+    }
+    var z = CsTags.getNumber(entity, "Elevation");
+    return z === null ? 0 : z;
+};
+
 SurveyNotebook.drawSurvey = function(w) {
     // Any failure in here must be SEEN, not swallowed by the engine.
     try {
@@ -628,7 +658,12 @@ SurveyNotebook.drawSurveyInner = function(w) {
     var tieIn = null;
     var sel = CsPick.startPointFromSelection(doc, "Survey Notebook");
     if (sel !== undefined && survey.shots.length > 0) {
-        anchor = { name: survey.shots[0].from, x: sel.pos.x, y: sel.pos.y, z: 0 };
+        // No reconstruction exists on this path (recon was null,
+        // legacy, or empty above), so there is no recorded datum to
+        // pull from CsRevise -- the picked point's own Elevation tag
+        // is the only source, same as the tie-in branch just below.
+        anchor = { name: survey.shots[0].from, x: sel.pos.x, y: sel.pos.y,
+            z: SurveyNotebook.selectionElevation(doc) };
     } else if (survey.shots.length > 0) {
         var firstName = survey.shots[0].from;
         var existing = CsTags.collectStations(doc);
@@ -1135,10 +1170,14 @@ SurveyNotebook.drawMergedSurvey = function(w, doc, survey, recon) {
                 break;
             }
         }
+        // x/y already fall back to the OLD anchor's drawn position --
+        // firstFrom is just a new name riding along on it -- so z has
+        // to match that same station, not firstFrom (a name recon has
+        // never seen, which would resolve anchorZOf to 0 every time).
         anchor = { name: firstFrom,
             x: recon.anchorPos !== null ? recon.anchorPos.x : 0.0,
             y: recon.anchorPos !== null ? recon.anchorPos.y : 0.0,
-            z: 0.0 };
+            z: CsRevise.anchorZOf(recon, recon.anchorName) };
     }
 
     // An explicitly selected start point seeds the PAGE's first
@@ -1151,7 +1190,13 @@ SurveyNotebook.drawMergedSurvey = function(w, doc, survey, recon) {
         var firstPage = survey.shots[0].from;
         if (firstPage !== "" && firstPage !== anchor.name &&
                 merged.fixed[firstPage] === undefined) {
-            merged.fixed[firstPage] = { x: sel.pos.x, y: sel.pos.y, z: 0.0 };
+            // firstPage is a brand-new station recon has never seen
+            // (that's what "merged.fixed[firstPage] === undefined"
+            // means here), so its datum can't come from the
+            // reconstruction either -- same picked-entity source and
+            // NaN guard as the no-recon anchor above.
+            merged.fixed[firstPage] = { x: sel.pos.x, y: sel.pos.y,
+                z: SurveyNotebook.selectionElevation(doc) };
         }
     }
 
