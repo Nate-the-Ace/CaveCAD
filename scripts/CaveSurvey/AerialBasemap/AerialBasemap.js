@@ -218,21 +218,78 @@ AerialBasemap.findAnchor = function(doc) {
 };
 
 /**
- * The drawing's extent, in drawing units, as {width, height, centerX,
- * centerY}. Falls back to a zero-size box at the anchor when the
- * document has no usable extent -- groundExtent's floor then decides
- * the window.
+ * The SURVEY's extent, in drawing units, as {width, height, centerX,
+ * centerY}. Falls back to a zero-size box at the anchor when there is
+ * no usable extent -- groundExtent's floor then decides the window.
+ *
+ * NOT doc.getBoundingBox(true, true): that measures the whole
+ * document, and after a first run the document also contains the
+ * basemap image itself, which groundExtent deliberately makes 25%
+ * larger than the survey it was fetched for. Measuring the document
+ * therefore measures a box that already includes the last photo, so
+ * a second run fetches a wider window, a third wider still --
+ * 1.25x, 1.5625x, 1.953x... compounding forever, exactly the case
+ * "re-run to widen coverage" is supposed to be the SURVEY growing,
+ * not the tool's own output feeding itself. This instead unions each
+ * kept entity's own bounding box by hand (there is no document-wide
+ * "bbox excluding these" call), skipping the basemap image.
+ *
+ * Skipped by TAG, not by layer: CTRL-AERIAL is where this tool puts
+ * its image, but it is an ordinary visible CTRL- layer (deliberately
+ * not in CsLayers.OFF -- see CsLayers.js -- so it plots), and nothing
+ * stops a user parking their own content there too. AerialBasemap=1
+ * is this tool's own marker, set BEFORE the image is ever added (see
+ * place() below), so every basemap it creates carries it and nothing
+ * else ever could -- the same reasoning eraseExisting already relies
+ * on. A layer-based skip would also throw away any such user content
+ * when measuring the survey.
+ *
+ * Hidden/off layers (CTRL-DATA, the legacy tag store; CTRL-HIDDEN,
+ * legs kept for data integrity but never meant to plot -- see
+ * CsLayers.OFF) are excluded too, via entity.isVisible(). That matches
+ * the ignoreHiddenLayers=true behaviour the old whole-document call
+ * already had: data nobody ever sees shouldn't decide how wide a
+ * photograph gets fetched.
  */
 AerialBasemap.surveyBox = function(doc, anchorPos) {
-    var min = null;
-    var max = null;
-    try {
-        min = doc.getBoundingBox(true, true).getMinimum();
-        max = doc.getBoundingBox(true, true).getMaximum();
-    } catch (e) {
-        min = null;
+    var box = null;
+    var ids = doc.queryAllEntities(false, false);
+    for (var i = 0; i < ids.length; i++) {
+        var e = doc.queryEntity(ids[i]);
+        if (isNull(e)) {
+            continue;
+        }
+        if (typeof e.isVisible === "function" && !e.isVisible()) {
+            continue;                       // off/frozen layer, or hidden
+        }
+        if (CsTags.get(e, "AerialBasemap") === "1") {
+            continue;                       // the basemap image itself
+        }
+        var eb;
+        try {
+            eb = e.getBoundingBox();
+        } catch (err) {
+            continue;                       // no geometry to measure
+        }
+        if (isNull(eb) || typeof eb.isSane !== "function" || !eb.isSane()) {
+            continue;
+        }
+        if (box === null) {
+            box = eb;
+        } else {
+            box.growToInclude(eb);
+        }
     }
-    if (min === null || max === null || !isNumber(min.x) || !isNumber(max.x) ||
+
+    if (box === null) {
+        return {
+            width: 0, height: 0,
+            centerX: anchorPos.x, centerY: anchorPos.y
+        };
+    }
+    var min = box.getMinimum();
+    var max = box.getMaximum();
+    if (!isNumber(min.x) || !isNumber(max.x) ||
         max.x < min.x || max.y < min.y) {
         return {
             width: 0, height: 0,
@@ -341,15 +398,35 @@ AerialBasemap.place = function(doc, di, path, bbox, size, unitsPerPixel,
     AerialBasemap.eraseExisting(doc, di);
     CsLayers.ensure(doc, di, CsLayers.AERIAL);
 
-    // Layer and tag BEFORE adding -- see the file header. A modify
-    // operation on an already-added entity is what Geo Reference uses
-    // for the pre-existing anchor station above; a brand new entity
-    // like this one instead gets its layer and tag set on the
-    // script-side object first, then addObject(entity, false) commits
-    // both in one step, with "false" stopping the operation from
-    // re-stamping the current layer over CTRL-AERIAL.
+    // Layer, tag AND draw order BEFORE adding -- see the file header.
+    // A modify operation on an already-added entity is what Geo
+    // Reference uses for the pre-existing anchor station above; a
+    // brand new entity like this one instead gets its layer, tag and
+    // draw order set on the script-side object first, then
+    // addObject(entity, false) commits all three in one step, with
+    // "false" stopping the operation from re-stamping the current
+    // layer over CTRL-AERIAL.
+    //
+    // Draw order sends the photo to the very back, the same call the
+    // stock Modify > Draw Order > To Back tool makes on the current
+    // selection (scripts/Modify/DrawOrder/ToFront/ToFront.js's
+    // moveTo(false)): storage.getMinDrawOrder(), so it sorts at or
+    // below everything already in the document. The "- 1" is the one
+    // difference from that stock tool, and it matters here: To Back
+    // moves entities that are ALREADY in storage, so tying them at the
+    // current minimum is moving them behind everything ELSE. This
+    // entity isn't in storage yet when getMinDrawOrder() is read, so
+    // tying it at that same value risks a draw-order TIE against
+    // whatever currently holds the minimum, and ties are not
+    // documented to resolve in the newest entity's favour. One below
+    // the minimum is unambiguous regardless. Without this, the image
+    // gets no draw order at all and lands wherever the add operation's
+    // own default puts new entities -- which verified live in this
+    // engine is ABOVE everything already there, i.e. on top of the
+    // survey it is supposed to sit under.
     entity.setLayerId(doc.getLayerId(CsLayers.AERIAL));
     CsTags.set(entity, "AerialBasemap", "1");
+    entity.setDrawOrder(doc.getStorage().getMinDrawOrder() - 1);
 
     var op = new RAddObjectsOperation();
     op.setText("Insert aerial basemap");
