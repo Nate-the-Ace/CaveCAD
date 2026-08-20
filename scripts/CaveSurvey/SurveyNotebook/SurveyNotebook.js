@@ -725,6 +725,111 @@ SurveyNotebook.tripSurvey = function(survey, tripId) {
 };
 
 /**
+ * Carries the fields the ladder has no cells for from a trip's OLD
+ * shots onto the page's revised ones. The page holds station name,
+ * distance, azimuth, inclination, LRUD and notes -- it has nowhere to
+ * write a backsight or a Compass exclusion flag, so a page-blank value
+ * must never be allowed to erase what the drawing was already
+ * carrying. Without this, loading a trip and correcting one distance
+ * would quietly throw away every backsight and flag in it.
+ *
+ * Matching is by identity of the leg, in notebook order: a normal shot
+ * takes the next unconsumed old shot with the same (from, to) pair, a
+ * splay takes the next unconsumed old splay off the same station. Each
+ * old shot is consumed at most once, so duplicate legs and repeated
+ * station pairs pair off one-for-one in the order they were written. A
+ * page shot with no counterpart is a leg the user just typed: it keeps
+ * its own blank values, which is correct, not a loss.
+ *
+ * Flags carry over unconditionally. A BACKSIGHT does not: it lives in
+ * the same frame as azimuth (true, declination applied), so the moment
+ * the user edits a shot's azimuth on the page the old backsight stops
+ * describing that leg. A reading that silently disagrees with its
+ * foresight is worse than no reading, so that shot's backAzimuth is
+ * dropped and counted -- backInclination likewise against inclination.
+ *
+ * newShots are mutated in place; callers pass clones. oldShots are
+ * only read. Pure -- no GUI, no document access.
+ *
+ * \return { backsights, droppedBacksights, flags } -- shot counts for
+ *         the Draw report: shots that kept a carried-over backsight
+ *         reading, shots whose backsight was dropped as edited, and
+ *         shots that kept at least one carried-over exclusion flag.
+ */
+SurveyNotebook.carryHiddenFields = function(oldShots, newShots) {
+    var EPS = 1e-9;
+    var FLAGS = ["excludeFromPlot", "excludeFromAll",
+        "excludeFromLength", "noAdjust"];
+    // A splay has no "to", so its identity is its base station plus
+    // its position among that station's splays -- hence one key for
+    // all of them and the queue below does the ordering.
+    var legKey = function(s) {
+        return s.splay ? (s.from + " <splay>") :
+            (s.from + " " + s.to);
+    };
+    var queues = {};    // leg identity -> old shots, notebook order
+    var heads = {};     // leg identity -> how many are consumed
+    var i;
+    for (i = 0; i < oldShots.length; i++) {
+        var k = legKey(oldShots[i]);
+        if (queues[k] === undefined) {
+            queues[k] = [];
+        }
+        queues[k].push(oldShots[i]);
+    }
+
+    var out = { backsights: 0, droppedBacksights: 0, flags: 0 };
+    for (i = 0; i < newShots.length; i++) {
+        var ns = newShots[i];
+        var nk = legKey(ns);
+        var q = queues[nk];
+        var at = heads[nk] === undefined ? 0 : heads[nk];
+        if (q === undefined || at >= q.length) {
+            continue; // a genuinely new leg: there is nothing to carry
+        }
+        heads[nk] = at + 1;
+        var os = q[at];
+
+        var kept = false;
+        var dropped = false;
+        if (os.backAzimuth !== null && os.backAzimuth !== undefined) {
+            if (Math.abs(ns.azimuth - os.azimuth) > EPS) {
+                dropped = true; // page moved the foresight: stale
+            } else {
+                ns.backAzimuth = os.backAzimuth;
+                kept = true;
+            }
+        }
+        if (os.backInclination !== null && os.backInclination !== undefined) {
+            if (Math.abs(ns.inclination - os.inclination) > EPS) {
+                dropped = true;
+            } else {
+                ns.backInclination = os.backInclination;
+                kept = true;
+            }
+        }
+        if (kept) {
+            out.backsights++;
+        }
+        if (dropped) {
+            out.droppedBacksights++;
+        }
+
+        var flagged = false;
+        for (var f = 0; f < FLAGS.length; f++) {
+            if (os[FLAGS[f]] === true) {
+                ns[FLAGS[f]] = true;
+                flagged = true;
+            }
+        }
+        if (flagged) {
+            out.flags++;
+        }
+    }
+    return out;
+};
+
+/**
  * The merge decision: given the RECONSTRUCTED survey (the whole
  * drawing), the page's trip record and the page's shots, builds the
  * merged survey the drawing should now hold. A trip whose fingerprint
@@ -749,6 +854,9 @@ SurveyNotebook.tripSurvey = function(survey, tripId) {
  *   droppedStationNames  station names touched by the replaced trip's
  *              OLD shots -- the erase set must include the ones the
  *              revision no longer uses, or their marks would linger
+ *   carried    what the ladder-invisible fields did on the way in --
+ *              see carryHiddenFields (all zeros for a new trip, which
+ *              has no old shots to carry from)
  * }
  */
 SurveyNotebook.mergeTripIntoSurvey = function(reconSurvey, tripRecord, shots) {
@@ -789,11 +897,14 @@ SurveyNotebook.mergeTripIntoSurvey = function(reconSurvey, tripRecord, shots) {
             droppedStationNames.push(n);
         }
     };
+    var oldTripShots = [];
     for (var i = 0; i < reconSurvey.shots.length; i++) {
         var s = reconSurvey.shots[i];
         if ((s.trip || 0) === tripId) {
             // replaced trip's old shot: dropped (never matches when
-            // the page landed as a NEW trip -- no old shot has its id)
+            // the page landed as a NEW trip -- no old shot has its id),
+            // but kept aside first so what the page can't show survives
+            oldTripShots.push(s);
             dropName(s.from);
             if (!s.splay) {
                 dropName(s.to);
@@ -802,14 +913,22 @@ SurveyNotebook.mergeTripIntoSurvey = function(reconSurvey, tripRecord, shots) {
         }
         merged.shots.push(s);
     }
+    var pageShots = [];
     for (i = 0; i < shots.length; i++) {
         var c = SurveyNotebook.cloneShot(shots[i]);
         c.trip = tripId;
-        merged.shots.push(c);
+        pageShots.push(c);
+    }
+    // The page is the authority on what it can express -- and only on
+    // that. Backsights and exclusion flags have no cells, so they come
+    // across from the shots this trip already had.
+    var carried = SurveyNotebook.carryHiddenFields(oldTripShots, pageShots);
+    for (i = 0; i < pageShots.length; i++) {
+        merged.shots.push(pageShots[i]);
     }
     CsModel.ensureTrips(merged); // mirror trips[0] up to the top level
     return { survey: merged, tripId: tripId, replaced: replaced,
-        droppedStationNames: droppedStationNames };
+        droppedStationNames: droppedStationNames, carried: carried };
 };
 
 /** One trip as a chooser line: "0: ENT 1998-07-04 NS/JB (12 shots)".
@@ -923,8 +1042,10 @@ SurveyNotebook.loadFromDrawing = function(w) {
         " (" + counts[tripId] + " shot" +
         (counts[tripId] === 1 ? "" : "s") + ") from the drawing. Edit " +
         "the page and Draw to revise that trip in place. (Backsights " +
-        "and Compass-style exclusion flags don't fit on this page, so " +
-        "a redraw of this trip writes it without them.)");
+        "and Compass-style exclusion flags don't fit on this page, but " +
+        "they are preserved through the redraw -- except that editing " +
+        "a shot's azimuth drops that shot's backsight, since the two " +
+        "would then disagree.)");
 };
 
 /**
@@ -1036,9 +1157,36 @@ SurveyNotebook.drawMergedSurvey = function(w, doc, survey, recon) {
             "page's shots; the whole survey redrew as one merged model.") :
         ("Added this page as new trip " + merge.tripId + " (" + fp +
             ") alongside the drawing's existing trips.");
-    EAction.handleUserMessage("Survey Notebook: " + tripLine);
+
+    // What the page couldn't show, said out loud: the user has to be
+    // able to tell preserved data from lost data without opening tags.
+    var carried = merge.carried;
+    var carryBits = [];
+    var shotWord = function(n) {
+        return n + " shot" + (n === 1 ? "" : "s");
+    };
+    if (carried.backsights > 0) {
+        carryBits.push("kept the backsight readings on " +
+            shotWord(carried.backsights));
+    }
+    if (carried.flags > 0) {
+        carryBits.push("kept the exclusion flags on " +
+            shotWord(carried.flags));
+    }
+    if (carried.droppedBacksights > 0) {
+        carryBits.push("dropped the backsight on " +
+            shotWord(carried.droppedBacksights) + " whose azimuth or " +
+            "inclination the page changed, since it would no longer " +
+            "agree with the foresight");
+    }
+    var carryLine = carryBits.length === 0 ? "" :
+        (" Backsights and exclusion flags have no cells on the page, " +
+            "so they carried over from the shots the drawing already " +
+            "held: " + carryBits.join("; ") + ".");
+
+    EAction.handleUserMessage("Survey Notebook: " + tripLine + carryLine);
     QMessageBox.information(null, "Survey Notebook",
-        tripLine + "\n\n" +
+        tripLine + carryLine + "\n\n" +
         (replaced > 0 ? ("Replaced " + replaced + " previously drawn " +
             "mark" + (replaced === 1 ? "" : "s") + " (undo twice to " +
             "restore them).\n\n") : "") +
