@@ -162,12 +162,22 @@ RebuildSurveyData.toSlopeDistances = function(survey) {
  * network could not resolve keeps its old marks rather than
  * disappearing.
  *
+ * anchorZ is the elevation the anchor is pinned at -- 0 (the drawing's
+ * own arbitrary origin) unless the caller has a recorded datum to
+ * preserve. Optional; defaults to 0, same as before this parameter
+ * existed.
+ *
  * \return {erased, drawn, resolved}
  */
-RebuildSurveyData.redraw = function(doc, di, survey, anchorName, anchorPos) {
+RebuildSurveyData.redraw = function(doc, di, survey, anchorName, anchorPos,
+        anchorZ) {
+    if (anchorZ === undefined || anchorZ === null || isNaN(anchorZ)) {
+        anchorZ = 0;
+    }
     CsModel.ensureTrips(survey);
     var resolved = CsNetwork.resolve(survey, {
-        anchor: { name: anchorName, x: anchorPos.x, y: anchorPos.y, z: 0 }
+        anchor: { name: anchorName, x: anchorPos.x, y: anchorPos.y,
+            z: anchorZ }
     });
     var names = [];
     for (var n in resolved.stations) {
@@ -246,8 +256,25 @@ RebuildSurveyData.rebuild = function(doc, di) {
         // one trip, from the legacy metadata block
         CsModel.ensureTrips(survey);
 
+        // The anchor's RECORDED elevation, not 0 -- a cave surveyed to
+        // an absolute datum (entrance at, say, 1250 ft) carries that
+        // datum in the anchor's legacy Elevation tag, and
+        // CsTags.surveyFromDocument already reads it into
+        // survey.fixed[name].z (0.0 when the tag is missing, blank or
+        // not a number -- see CsTags.js). Pin the redraw there instead
+        // of at 0 so the datum survives; a drawing whose elevations
+        // were already zero-based is unaffected, since its recorded z
+        // IS zero. Re-guarded here anyway -- a junk value must never
+        // reach CsNetwork.resolve as a NaN anchor.z, which would
+        // propagate silently through the whole redraw.
+        var anchorFixed = survey.fixed.hasOwnProperty(recon.anchorName) ?
+            survey.fixed[recon.anchorName] : null;
+        var anchorZ = (anchorFixed !== null &&
+            typeof anchorFixed.z === "number" && !isNaN(anchorFixed.z)) ?
+            anchorFixed.z : 0.0;
+
         var up = RebuildSurveyData.redraw(doc, di, survey,
-            recon.anchorName, recon.anchorPos);
+            recon.anchorName, recon.anchorPos, anchorZ);
         report.mode = "upgrade";
         report.erased = up.erased;
         report.stations = up.drawn.stationsDrawn;
@@ -258,6 +285,9 @@ RebuildSurveyData.rebuild = function(doc, di) {
             " shot" + (report.shots === 1 ? "" : "s") + " now carry " +
             "their own data. Distances inferred from geometry " +
             "(slope = plan/cos(inclination))." +
+            (anchorZ !== 0 ? " Elevations kept on the recorded datum -- " +
+                recon.anchorName + " at " +
+                CsReport.length(anchorZ, survey.distanceUnit) + "." : "") +
             (report.vertical > 0 ? " " + report.vertical + " near-" +
                 "vertical shot" + (report.vertical === 1 ? "" : "s") +
                 " had no plan length to scale; distance left as drawn." :
