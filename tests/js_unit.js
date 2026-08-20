@@ -2,9 +2,9 @@
 //
 // The Core is pure ECMAScript, so the same tests run two ways:
 //
-//   inside QCAD's own engine (authoritative -- the engine the add-on
+//   inside CaveCAD's own engine (authoritative -- the engine the add-on
 //   really runs in):
-//     /Applications/QCAD.app/Contents/Resources/qcad \
+//     /Applications/CaveCAD.app/Contents/MacOS/CaveCAD \
 //         -no-dock-icon -no-gui -allow-multiple-instances \
 //         -autostart tests/js_unit.js "$PWD"
 //

@@ -96,31 +96,30 @@ The JS side of the differential test, driven by `differential.py` but runnable
 alone. It executes inside QCAD's *own* script engine -- the same engine the
 real tool runs in -- with no GUI and no dialogs:
 
-    /Applications/QCAD.app/Contents/Resources/qcad \
+    /Applications/CaveCAD.app/Contents/MacOS/CaveCAD \
         -no-dock-icon -no-gui -allow-multiple-instances \
         -autostart tests/js_parsers.js "$PWD"
 
-### QCAD edition
+### Target application
 
-The tools themselves need only QCAD **Community**: they use `scripts/simple.js`,
-`RVector`, `RLineweight` and `RBlockReference*`, all core API, plus `EAction`
-and `RGuiAction` for the add-on generation's menu wiring. Nothing Pro-only.
+The tools target **CaveCAD only**: they rely on its native XDATA
+persistence for survey data, which stock QCAD's free writer lacks. API-wise
+they use `scripts/simple.js`, `RVector`, `RLineweight` and
+`RBlockReference*`, plus `EAction` and `RGuiAction` for the menu wiring --
+all present in the CaveCAD build.
 
-The headless harness below is developer tooling, not something a surveyor runs,
-and it has only been verified against a **Pro** install (the one on this
-machine ships `libqcadproscripts` and `libqcadprojsapi`). Whether Community
-supports `-no-gui` with `-autostart` is untested. If it doesn't,
-`differential.py` skips cleanly and the parsers can still be checked by hand
-in the GUI.
+The headless harness below is developer tooling, not something a surveyor
+runs. It drives the CaveCAD binary directly.
 
-Notes on driving QCAD headless, all learned the hard way:
+Notes on driving CaveCAD headless, all learned the hard way:
 
-* Use the launcher at `QCAD.app/Contents/Resources/qcad`, not the binary in
-  `MacOS/` -- it sets `DYLD_LIBRARY_PATH` for you.
-* `-allow-multiple-instances` is required, or QCAD aborts with "Application
-  already running" whenever you have the GUI open.
-* The process cwd is QCAD's own `Resources` directory, *not* where you invoked
-  it. Relative paths won't resolve; pass the repo root as an argument.
+* The binary at `CaveCAD.app/Contents/MacOS/CaveCAD` runs headless directly.
+  A `-autostart` script must not assume `library.js` helpers are preloaded
+  (js_syntax.js and js_unit.js carry their own fallbacks).
+* `-allow-multiple-instances` is required, or the app aborts with
+  "Application already running" whenever you have the GUI open.
+* The process cwd may not be where you invoked it. Relative paths won't
+  resolve; pass the repo root as an argument.
 * `QCoreApplication.arguments()` is not wrapped in this build (3.32.9).
   Use `RSettings.getOriginalArguments()`.
 * `qApp.quit()` doesn't exist either; the process exits when the script

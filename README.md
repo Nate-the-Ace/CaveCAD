@@ -1,15 +1,15 @@
 # CaveCAD
 
 A dedicated cave mapping application built on [QCAD](https://qcad.org)
-Community (GPLv3), plus the Cave Survey add-on suite that also runs in
-stock QCAD: import or type
-survey data, watch loop closures and blunders surface as you work, derive
-passage walls, place NSS-standard symbols, and finish a sheet that would
-survive NSS Cartography Salon judging -- with the conventions explained to you
-along the way.
+Community sources (GPLv3), with the Cave Survey tool suite built in:
+import or type survey data, watch loop closures and blunders surface as
+you work, derive passage walls, place NSS-standard symbols, and finish a
+sheet that would survive NSS Cartography Salon judging -- with the
+conventions explained to you along the way.
 
-Everything works in **QCAD Community** (the free version). Nothing requires
-QCAD Professional.
+The suite targets **CaveCAD only**: it relies on CaveCAD's native XDATA
+persistence for survey data, which stock QCAD's free writer does not
+provide. It is not distributed as an add-on for other QCAD editions.
 
 ## The tools
 

@@ -14,9 +14,6 @@
 // leaves behind. Either way the scan ends up in the right place at the
 // right size, so you can trace passage walls straight off it.
 //
-// Works in QCAD Community (the free version) as well as Professional:
-// it uses no Professional-only features.
-//
 // USAGE:
 //   Cave Survey > Align Image     (or type "ali" on the command line)
 //

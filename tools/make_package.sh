@@ -94,13 +94,14 @@ if [ $? -ne 0 ]; then
     exit 1
 fi
 
-# Parse every script in the package with QCAD's own engine. This is the only
-# check AlignImage's source gets from this repo, and a tool that won't parse is
-# a tool that just isn't in the menu -- with no error anywhere to say why.
-QCAD="/Applications/QCAD.app/Contents/Resources/qcad"
+# Parse every script in the package with CaveCAD's own engine. This is the
+# only check AlignImage's source gets from this repo, and a tool that won't
+# parse is a tool that just isn't in the menu -- with no error anywhere to
+# say why.
+QCAD="/Applications/CaveCAD.app/Contents/MacOS/CaveCAD"
 if [ -e "$QCAD" ]; then
     echo
-    echo "Parsing the package in QCAD's script engine"
+    echo "Parsing the package in CaveCAD's script engine"
     echo
     output=$("$QCAD" -no-dock-icon -no-gui -allow-multiple-instances \
                  -autostart tests/js_syntax.js "$STAGE/CaveSurvey" 2>/dev/null)
@@ -116,8 +117,8 @@ if [ -e "$QCAD" ]; then
     esac
 else
     echo
-    echo "note: QCAD not found at $QCAD -- package scripts were NOT parsed."
-    echo "      Structure was still checked. Install QCAD to close this gap."
+    echo "note: CaveCAD not found at $QCAD -- package scripts were NOT parsed."
+    echo "      Structure was still checked. Install CaveCAD to close this gap."
 fi
 
 # every tool the menu builder will find, for the record

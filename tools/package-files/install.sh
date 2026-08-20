@@ -1,12 +1,12 @@
 #!/bin/sh
 #
-# Installs the Cave Survey tools into QCAD, for macOS and Linux.
+# Installs the Cave Survey tools into CaveCAD, for macOS and Linux.
 #
 #   ./install.sh              install, or upgrade over an older copy
 #   ./install.sh --uninstall  remove them again
 #
-# This copies the CaveSurvey folder into QCAD's per-user scripts folder.
-# That location needs no administrator rights and survives a QCAD update.
+# This copies the CaveSurvey folder into CaveCAD's per-user scripts folder.
+# That location needs no administrator rights and survives a CaveCAD update.
 # Everything it does can be done by hand instead -- see INSTALL.txt.
 
 set -e
@@ -15,8 +15,8 @@ HERE=$(cd "$(dirname "$0")" && pwd)
 SOURCE="$HERE/CaveSurvey"
 
 case "$(uname -s)" in
-    Darwin) SCRIPTS="$HOME/Library/Application Support/QCAD/QCAD/scripts" ;;
-    *)      SCRIPTS="${XDG_DATA_HOME:-$HOME/.local/share}/QCAD/QCAD/scripts" ;;
+    Darwin) SCRIPTS="$HOME/Library/Application Support/QCAD/CaveCAD/scripts" ;;
+    *)      SCRIPTS="${XDG_DATA_HOME:-$HOME/.local/share}/QCAD/CaveCAD/scripts" ;;
 esac
 DEST="$SCRIPTS/CaveSurvey"
 
@@ -24,7 +24,7 @@ if [ "$1" = "--uninstall" ]; then
     if [ -e "$DEST" ]; then
         rm -rf "$DEST"
         echo "Removed $DEST"
-        echo "Restart QCAD; the Cave Survey menu will be gone."
+        echo "Restart CaveCAD; the Cave Survey menu will be gone."
     else
         echo "Nothing to remove -- not installed at $DEST"
     fi
@@ -63,5 +63,5 @@ for tool in "$DEST"/*/; do
     echo "  $(basename "$tool")"
 done
 echo
-echo "Now quit QCAD completely and start it again -- it only looks for"
+echo "Now quit CaveCAD completely and start it again -- it only looks for"
 echo "add-ons at startup. Look for 'Cave Survey' in the menu bar."

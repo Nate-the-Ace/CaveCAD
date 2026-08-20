@@ -130,12 +130,12 @@ CaveMode.prototype.beginEvent = function() {
         var affected = CaveMode.apply(!active);
         if (!active) {
             EAction.handleUserMessage("Cave Mode ON: " + affected.length +
-                " stock menus/toolbars hidden (nothing deleted -- run " +
+                " standard menus/toolbars hidden (nothing deleted -- run " +
                 "cavemode again to restore them). The Cave Survey menu " +
                 "and Survey Notebook are your workspace.");
         } else {
-            EAction.handleUserMessage("Cave Mode OFF: stock QCAD restored (" +
-                affected.length + " items back).");
+            EAction.handleUserMessage("Cave Mode OFF: the full CAD " +
+                "interface is restored (" + affected.length + " items back).");
         }
     } catch (e) {
         warning("Cave Mode: this QCAD build refused the UI toggle (" + e +

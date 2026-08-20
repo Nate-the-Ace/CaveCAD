@@ -7,9 +7,9 @@
 // (Deliberately NOT named Core.js: a file named after its folder is
 // how QCAD recognises a TOOL, and Core is a library.)
 //
-// EVERY library file is Cs-prefixed because QCAD's include() DEDUPES
-// BY BASENAME: a file sharing a name with anything QCAD has already
-// included -- and stock QCAD includes hundreds of scripts at startup,
+// EVERY library file is Cs-prefixed because CaveCAD's include() DEDUPES
+// BY BASENAME: a file sharing a name with anything the application has
+// already included -- and it includes hundreds of scripts at startup,
 // among them Draw.js -- is skipped SILENTLY. That shipped as CsDraw
 // being undefined in the GUI while every test passed headless (where
 // no stock add-ons load). The prefix makes collision impossible.

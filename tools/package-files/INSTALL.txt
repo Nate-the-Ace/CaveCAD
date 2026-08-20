@@ -1,36 +1,40 @@
-Cave Survey tools for QCAD -- version @VERSION@
+Cave Survey tools for CaveCAD -- version @VERSION@
 Installing
 ==============================================================
 
 
-These tools work in QCAD Community (the free version) as well as in
-Professional. Nothing here needs Professional.
+These tools are part of CaveCAD and target it exclusively: they rely
+on CaveCAD's native survey-data persistence. They are not supported
+in other QCAD-based applications.
 
 
 THE SHORT VERSION
 -----------------
-Copy the CaveSurvey folder that sits next to this file into QCAD's
-scripts folder, then restart QCAD. A "Cave Survey" menu and tool bar
+Copy the CaveSurvey folder that sits next to this file into CaveCAD's
+scripts folder, then restart CaveCAD. A "Cave Survey" menu and tool bar
 appear.
 
-QCAD's scripts folder, by platform:
+CaveCAD's scripts folder, by platform:
 
-    macOS     ~/Library/Application Support/QCAD/QCAD/scripts
-    Windows   %APPDATA%\QCAD\QCAD\scripts
-    Linux     ~/.local/share/QCAD/QCAD/scripts
+    macOS     ~/Library/Application Support/QCAD/CaveCAD/scripts
+    Windows   %APPDATA%\QCAD\CaveCAD\scripts
+    Linux     ~/.local/share/QCAD/CaveCAD/scripts
 
-Create the "scripts" folder if it isn't there yet -- QCAD does not make
-it until something needs it. When you're done you should have:
+(The QCAD path segment is the vendor folder the base build uses; the
+CaveCAD segment belongs to the application itself.)
 
-    ...QCAD/scripts/CaveSurvey/CaveSurvey.js
-    ...QCAD/scripts/CaveSurvey/AzimuthTraverse/AzimuthTraverse.js
+Create the "scripts" folder if it isn't there yet -- CaveCAD does not
+make it until something needs it. When you're done you should have:
+
+    ...CaveCAD/scripts/CaveSurvey/CaveSurvey.js
+    ...CaveCAD/scripts/CaveSurvey/AzimuthTraverse/AzimuthTraverse.js
     ...and one folder per tool beside it
 
 Those paths are inside your own user folder, so installing needs no
 administrator rights, and -- the part that matters later -- it survives
-a QCAD update. Installing into the QCAD application folder itself also
-works, but an update replaces the whole application and takes the tools
-with it, silently.
+a CaveCAD update. Installing into the CaveCAD application folder itself
+also works, but an update replaces the whole application and takes the
+tools with it, silently.
 
 
 OR LET IT DO THE COPYING
@@ -47,17 +51,17 @@ over an older copy. To remove the tools again:
 
 CHECKING IT WORKED
 ------------------
-Restart QCAD. "Cave Survey" should be in the menu bar, with six tools
+Restart CaveCAD. "Cave Survey" should be in the menu bar, with six tools
 in it. If it isn't there:
 
   * Check the path. CaveSurvey.js must sit directly inside a folder
     named exactly "CaveSurvey", which sits directly inside "scripts".
     A nested CaveSurvey/CaveSurvey/ is the usual mistake.
 
-  * QCAD looks for add-ons only at startup, so it needs a full quit and
-    restart -- opening a new drawing is not enough.
+  * CaveCAD looks for add-ons only at startup, so it needs a full quit
+    and restart -- opening a new drawing is not enough.
 
-  * QCAD remembers which tool bars you have hidden. If the menu is
+  * CaveCAD remembers which tool bars you have hidden. If the menu is
     there but the tool bar isn't, right-click any tool bar and tick
     "Cave Survey".
 

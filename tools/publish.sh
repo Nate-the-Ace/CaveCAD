@@ -1,23 +1,26 @@
 #!/bin/sh
 #
-# Builds a release and installs it into QCAD's per-user scripts folder, so a
-# build can be tested exactly the way it will be shipped.
+# Builds a release and installs it into CaveCAD's per-user scripts folder,
+# so a build can be tested exactly the way it will be shipped.
 #
-#   ./tools/publish.sh                  build, install into QCAD, archive the zip
+#   ./tools/publish.sh                  build, install into CaveCAD, archive the zip
 #   ./tools/publish.sh --version 1.1.0
-#   ./tools/publish.sh --uninstall      remove the add-on from QCAD again
+#   ./tools/publish.sh --uninstall      remove the add-on from CaveCAD again
 #
-# QCAD has no setting for where add-ons live -- it looks in its own application
-# folder and in the per-user folder below, and nowhere else. So the add-on goes
-# straight into the per-user one, as real files, which is also what a user's
-# install.sh run produces. Nothing is symlinked and nothing is left for QCAD to
-# resolve at startup.
+# CaveCAD has no setting for where add-ons live -- it looks in its own
+# application folder and in the per-user folder below, and nowhere else. So the
+# add-on goes straight into the per-user one, as real files, which is also what
+# a user's install.sh run produces. Nothing is symlinked and nothing is left
+# for CaveCAD to resolve at startup.
 #
-#   ~/Library/Application Support/QCAD/QCAD/scripts/CaveSurvey   (macOS)
-#   ~/.local/share/QCAD/QCAD/scripts/CaveSurvey                  (Linux)
+#   ~/Library/Application Support/QCAD/CaveCAD/scripts/CaveSurvey   (macOS)
+#   ~/.local/share/QCAD/CaveCAD/scripts/CaveSurvey                  (Linux)
+#
+# (The QCAD path segment is the vendor folder the base build uses; the
+# CaveCAD segment is the application's own.)
 #
 # The rest of the release -- the zip, templates, examples, install notes -- goes
-# to the Cave folder instead of into QCAD's scripts folder, because QCAD scans
+# to the Cave folder instead of into the scripts folder, because CaveCAD scans
 # that folder looking for add-ons and anything else there is just clutter in the
 # way.
 #
@@ -25,7 +28,7 @@
 #   SCRIPTS=/path/to/scripts ./tools/publish.sh   install somewhere else
 #
 # The counterpart is install_for_testing.sh in the AlignImage project, which
-# links QCAD straight at the working copies for edit-and-restart iteration.
+# links the app straight at the working copies for edit-and-restart iteration.
 # This script goes through a real verified build instead, so what you test is
 # what a release contains -- including AlignImage, which only ever meets the
 # other five tools in a build.
@@ -37,37 +40,26 @@ REPO="$PWD"
 
 CAVE=${CAVE:-"$HOME/Documents/Cave"}
 
-# QCAD's per-user folder is named after the EDITION actually running:
-# "QCAD Professional" for a Pro install, "QCAD" for Community. Getting
-# this wrong fails silently -- the add-on sits in a folder QCAD never
-# reads -- so install into every edition folder present, and default
-# to Professional when none exists yet.
+# The suite targets CaveCAD only -- it depends on CaveCAD's native XDATA
+# persistence for survey data -- so CaveCAD's folder is the only install
+# target.
 if [ -z "${SCRIPTS:-}" ]; then
     case "$(uname -s)" in
         Darwin) QCAD_BASE="$HOME/Library/Application Support/QCAD" ;;
         *)      QCAD_BASE="${XDG_DATA_HOME:-$HOME/.local/share}/QCAD" ;;
     esac
-    SCRIPTS_DIRS=""
-    for edition in "CaveCAD" "QCAD Professional" "QCAD Community Edition" "QCAD"; do
-        if [ -d "$QCAD_BASE/$edition" ]; then
-            SCRIPTS_DIRS="$SCRIPTS_DIRS$QCAD_BASE/$edition/scripts
+    SCRIPTS_DIRS="$QCAD_BASE/CaveCAD/scripts
 "
-        fi
-    done
-    if [ -z "$SCRIPTS_DIRS" ]; then
-        SCRIPTS_DIRS="$QCAD_BASE/QCAD Professional/scripts
-"
-    fi
 else
     SCRIPTS_DIRS="$SCRIPTS
 "
 fi
 
-# QCAD reads add-ons once, at startup. A publish while it is running looks like
-# it did nothing, which is worth saying out loud rather than leaving to be
+# CaveCAD reads add-ons once, at startup. A publish while it is running looks
+# like it did nothing, which is worth saying out loud rather than leaving to be
 # rediscovered.
 running() {
-    pgrep -f "QCAD.app/Contents/MacOS/QCAD" >/dev/null 2>&1 || pgrep -f "CaveCAD.app/Contents/MacOS/CaveCAD" >/dev/null 2>&1 || pgrep -x qcad >/dev/null 2>&1
+    pgrep -f "CaveCAD.app/Contents/MacOS/CaveCAD" >/dev/null 2>&1 || pgrep -x cavecad >/dev/null 2>&1
 }
 
 # ----------------------------------------------------------------- uninstall
@@ -80,7 +72,7 @@ if [ "$1" = "--uninstall" ]; then
             echo "Removed $DEST"
         fi
     done
-    echo "Restart QCAD; the Cave Survey menu will be gone."
+    echo "Restart CaveCAD; the Cave Survey menu will be gone."
     exit 0
 fi
 
@@ -93,7 +85,7 @@ while [ $# -gt 0 ]; do
 done
 
 # --------------------------------------------------------------------- build
-# Every structural check, plus a parse of each script in QCAD's own engine.
+# Every structural check, plus a parse of each script in CaveCAD's own engine.
 # Nothing is installed if it fails, so a broken build can't replace a working
 # install with one that silently drops out of the menu.
 "$REPO/tools/make_package.sh" --version "$VERSION"
@@ -109,9 +101,9 @@ for f in "$STAGE/CaveSurvey/CaveSurvey.js" "$ZIP"; do
     fi
 done
 
-# ----------------------------------------------------- install into QCAD
+# --------------------------------------------------- install into CaveCAD
 # Replaced outright rather than merged: a tool dropped from this release must
-# not linger in QCAD's copy and go on appearing in the menu.
+# not linger in CaveCAD's copy and go on appearing in the menu.
 INSTALLED_TO=""
 echo "$SCRIPTS_DIRS" | while IFS= read -r sdir; do
     [ -z "$sdir" ] && continue
@@ -128,7 +120,7 @@ done
 DEST=$(echo "$SCRIPTS_DIRS" | head -n1)/CaveSurvey
 
 # ------------------------------------------------------- archive the release
-# Kept out of QCAD's scripts folder on purpose -- see the note at the top.
+# Kept out of CaveCAD's scripts folder on purpose -- see the note at the top.
 mkdir -p "$CAVE/releases"
 cp "$ZIP" "$CAVE/releases/$NAME.zip"
 
@@ -145,21 +137,21 @@ Cave Survey tools $VERSION
 published $(date -u "+%Y-%m-%d %H:%M UTC") from $COMMIT
 built by qcad-azimuth-tool/tools/publish.sh
 
-Installed into QCAD at:
+Installed into CaveCAD at:
   $DEST
 
-QCAD has no setting for that location -- it is one of the two folders QCAD
+CaveCAD has no setting for that location -- it is one of the two folders it
 looks in, so the add-on is installed there directly.
 
 Past builds are in releases/. To go back to one, unzip it and run its
-install.sh. Restart QCAD after any change; add-ons load only at startup.
+install.sh. Restart CaveCAD after any change; add-ons load only at startup.
 NOTE
 
 # ---------------------------------------------------------------- and report
 echo
 echo "Published $NAME"
-echo "  into QCAD:  $DEST"
-echo "  archived:   $CAVE/releases/$NAME.zip"
+echo "  into CaveCAD:  $DEST"
+echo "  archived:      $CAVE/releases/$NAME.zip"
 echo
 echo "Tools installed:"
 for tool in "$DEST"/*/; do
@@ -167,9 +159,9 @@ for tool in "$DEST"/*/; do
 done
 echo
 if running; then
-    echo "QCAD is running right now, and it only reads add-ons at startup --"
+    echo "CaveCAD is running right now, and it only reads add-ons at startup --"
     echo "this publish will not show up until you quit it completely and"
     echo "start it again."
 else
-    echo "Start QCAD and look for 'Cave Survey' in the menu bar."
+    echo "Start CaveCAD and look for 'Cave Survey' in the menu bar."
 fi

@@ -1,15 +1,13 @@
-Cave Survey tools for QCAD -- version @VERSION@
+Cave Survey tools for CaveCAD -- version @VERSION@
 ==============================================================
 
-Six tools for drawing cave surveys in QCAD: plot a traverse by azimuth
+Six tools for drawing cave surveys in CaveCAD: plot a traverse by azimuth
 and distance, import survey files from Walls, Compass or Survex, fit a
 scanned map onto the drawing, derive passage walls from LRUD, scatter
 breakdown symbols, and georeference the finished map.
 
-Everything here works in QCAD Community (the free version).
-
 To install, see INSTALL.txt. After a restart the tools are in the
-"Cave Survey" menu, and each also answers to a name typed on QCAD's
+"Cave Survey" menu, and each also answers to a name typed on CaveCAD's
 command line.
 
 

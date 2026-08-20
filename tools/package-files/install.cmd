@@ -1,18 +1,18 @@
 @echo off
 rem
-rem Installs the Cave Survey tools into QCAD, for Windows.
+rem Installs the Cave Survey tools into CaveCAD, for Windows.
 rem
 rem   install.cmd              install, or upgrade over an older copy
 rem   install.cmd --uninstall  remove them again
 rem
-rem This copies the CaveSurvey folder into QCAD's per-user scripts folder.
-rem That location needs no administrator rights and survives a QCAD update.
+rem This copies the CaveSurvey folder into CaveCAD's per-user scripts folder.
+rem That location needs no administrator rights and survives a CaveCAD update.
 rem Everything it does can be done by hand instead -- see INSTALL.txt.
 
 setlocal
 set "HERE=%~dp0"
 set "SOURCE=%HERE%CaveSurvey"
-set "SCRIPTS=%APPDATA%\QCAD\QCAD\scripts"
+set "SCRIPTS=%APPDATA%\QCAD\CaveCAD\scripts"
 set "DEST=%SCRIPTS%\CaveSurvey"
 
 if /i "%~1"=="--uninstall" goto uninstall
@@ -43,7 +43,7 @@ echo.
 echo Tools installed:
 for /d %%T in ("%DEST%\*") do echo   %%~nxT
 echo.
-echo Now quit QCAD completely and start it again -- it only looks for
+echo Now quit CaveCAD completely and start it again -- it only looks for
 echo add-ons at startup. Look for "Cave Survey" in the menu bar.
 goto done
 
@@ -51,7 +51,7 @@ goto done
 if exist "%DEST%" (
     rmdir /s /q "%DEST%"
     echo Removed %DEST%
-    echo Restart QCAD; the Cave Survey menu will be gone.
+    echo Restart CaveCAD; the Cave Survey menu will be gone.
 ) else (
     echo Nothing to remove -- not installed at %DEST%
 )

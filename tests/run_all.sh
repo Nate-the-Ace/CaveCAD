@@ -36,11 +36,11 @@ echo " 1/3  Structural tests (add-on layout, includes, layers)"
 echo "=============================================================="
 "$PY" -m unittest discover -s tests -v || status=1
 
-QCAD="/Applications/QCAD.app/Contents/Resources/qcad"
+QCAD="/Applications/CaveCAD.app/Contents/MacOS/CaveCAD"
 
 echo
 echo "=============================================================="
-echo " 2/3  Add-on syntax check (inside QCAD's own script engine)"
+echo " 2/3  Add-on syntax check (inside CaveCAD's own script engine)"
 echo "=============================================================="
 if [ -e "$QCAD" ]; then
     output=$("$QCAD" -no-dock-icon -no-gui -allow-multiple-instances \
@@ -51,12 +51,12 @@ if [ -e "$QCAD" ]; then
         *) echo "Add-on syntax check did not pass."; status=1 ;;
     esac
 else
-    echo "SKIP: QCAD not found at $QCAD"
+    echo "SKIP: CaveCAD not found at $QCAD"
 fi
 
 echo
 echo "=============================================================="
-echo " 3/3  Core unit tests (inside QCAD's own script engine)"
+echo " 3/3  Core unit tests (inside CaveCAD's own script engine)"
 echo "=============================================================="
 if [ -e "$QCAD" ]; then
     output=$("$QCAD" -no-dock-icon -no-gui -allow-multiple-instances \
@@ -67,11 +67,11 @@ if [ -e "$QCAD" ]; then
         *) echo "Core unit tests did not pass."; status=1 ;;
     esac
 else
-    echo "NOTE: QCAD not found -- running the same tests under node instead."
+    echo "NOTE: CaveCAD not found -- running the same tests under node instead."
     if command -v node >/dev/null 2>&1; then
         node tests/js_unit.js || status=1
     else
-        echo "SKIP: neither QCAD nor node available."
+        echo "SKIP: neither CaveCAD nor node available."
     fi
 fi
 

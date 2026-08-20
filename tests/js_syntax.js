@@ -19,9 +19,21 @@
 // pointed at a staged package, where AlignImage (a separate project, copied in
 // at build time) sits alongside the rest and gets checked too.
 //
-//   /Applications/QCAD.app/Contents/Resources/qcad \
+//   /Applications/CaveCAD.app/Contents/MacOS/CaveCAD \
 //       -no-dock-icon -no-gui -allow-multiple-instances \
 //       -autostart tests/js_syntax.js <repo-root-or-addon-dir>
+
+// Some builds' -autostart engines don't preload library.js, where
+// makeQDirFilters lives; QDir filter enums OR together numerically.
+if (typeof makeQDirFilters === "undefined") {
+    makeQDirFilters = function() {
+        var v = 0;
+        for (var i = 0; i < arguments.length; i++) {
+            v |= Number(arguments[i]);
+        }
+        return v;
+    };
+}
 
 function readWhole(path) {
     var f = new QFile(path);
