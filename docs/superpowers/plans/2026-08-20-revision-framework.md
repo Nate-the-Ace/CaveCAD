@@ -602,57 +602,66 @@ CsRevise.surveyFromDocument = function(doc) {
 
 ## RESUME HERE (2026-08-20, evening)
 
-Tasks 1-11 are complete, committed, and reviewed. `./tests/run_all.sh --publish` →
-ALL TESTS PASSED (1210 assertions, 45/45 parsed).
+Review backlog is now EMPTY. All findings from the Task 1-11 reviews are fixed and
+committed (see `git log a78c330..`). `./tests/run_all.sh --publish` → ALL TESTS PASSED,
+1225 assertions, 46/46 parsed, 16 structural tests OK. Tree clean.
+
+### Fixed this pass
+- Revision summary names the pivot station, flags the degraded "stale anchor" path, and
+  reports an anchor dragged since reconstruction (`74a6dd8`).
+- `anchorMoved` measures whichever point actually won the pivot, not always trip 0
+  (`adb65d2`).
+- Notebook trip chooser resolves by trip id with a first-match break; labels carry the
+  declination (`7c9b11b`).
+- IGRF button re-checks its preconditions in the click handler, so a bridge that rejects
+  the `enabled = false` write yields an explanation instead of a dead button (`d0fa542`).
+- **Elevation datum, three commits.** `CsDraw` wrote station `Elevation` tags but
+  `CsRevise.surveyFromDocument` never read them, so the reconstructed model had no
+  vertical datum and ANY revision — a plain declination fix included — rewrote every
+  elevation from a zero-anchored resolve, silently rebasing the cave to zero. Plan X/Y was
+  never affected. Now there is ONE mechanism, `CsRevise.anchorZOf(recon, name)`: explicit
+  `*fix` z, then the recorded `Elevation` datum, then 0, always numeric. Legacy upgrade
+  (`371b655`), revisions + Rebuild heal (`754fadd`), and the notebook's three hardcoded
+  `z: 0` anchors (`66071a1`) all route through it. Subtlety worth keeping: when a
+  georeferenced station that is NOT the trip-0 anchor wins the pivot, its z must come from
+  the probe resolve, not from `recon.anchorZ` — pinning the wrong station at the anchor's
+  datum shifts every elevation by the difference between them (measured at 0.86 ft on the
+  test fixture before it was corrected).
+  This bug was live in the published 2.1.0 build.
 
 ### Outstanding work, in priority order
 
-**1. Tests for the four engine fixes in a3f584b — the code shipped, the tests did not.**
-The agent that wrote them stalled before committing its test additions, and the assertion
-count rose only because a parallel session added unrelated `CsGeoProject` tests. So these
-four behaviors are currently UNVERIFIED. Each needs a doc test in the `!IS_NODE` block of
-tests/js_unit.js:
-  - Rigid revision with scale ≠ 1 (e.g. every distance × 2): `classifyChange` reports
-    rigid with `scale ≈ k`; after `apply`, leg `Distance` and LRUD tags equal the NEW
-    values, and `CsRevise.surveyFromDocument` reconstructs the new distances, not the old.
-  - Anchor dragged between reconstruction and apply: the drawing ends anchored at the
-    station's CURRENT position, and `report.anchorMoved` reports the delta.
-  - Georeference on a NON-trip-0 station: after a rigid declination revision that station's
-    coordinates are unchanged (near 1e-9) while others rotate; `report.anchorUsed.source
-    === "georef"`.
-  - An entity on layer `CTRL-AERIAL` is unmoved by a rigid revision, exactly as the
-    existing `TB_*` assertion does.
+**1. Test backfill — deliberately deferred by Nathan, not forgotten.** Everything below
+was verified by throwaway scratchpad harnesses run through the real CaveCAD engine
+(nothing in the repo), so the behavior is proven but not guarded against regression:
+  - The four engine fixes in `a3f584b`: scale ≠ 1 rewriting `Distance`/LRUD tags,
+    `anchorMoved`, `anchorUsed`, and the `CTRL-AERIAL` exemption.
+  - The elevation-datum chain: `anchorZOf` precedence, the georef-pivot probe z, the
+    notebook's three anchor sites, junk-tag → 0 with no NaN.
+  - The tool-layer pure helpers: `Declination.parseTripEdits` / `parseIsoDate` /
+    `declText`, `GeoReference.tripsNeedingRevision`, `SurveyNotebook.carryHiddenFields` /
+    `mergeTripIntoSurvey` / `selectionElevation`. The tool files run
+    `X.prototype = new EAction()` at load, so a headless harness must stub `EAction` —
+    see how the RebuildSurveyData doc tests do it.
 
-**2. Unit tests for the tool-layer pure helpers** (never written): `Declination.parseTripEdits`
-/ `parseIsoDate` / `declText`, `GeoReference.tripsNeedingRevision`,
-`SurveyNotebook.carryHiddenFields` / `mergeTripIntoSurvey`. All are static and
-document-free; the tool files define `X.prototype = new EAction()` at load, so a headless
-harness must stub `EAction` (see how Task 11's tests load RebuildSurveyData).
-
-**3. `CsReport.revisionSummary` should surface the new report fields** — `anchorUsed`
-(which station the revision pivoted on, and whether it came from the georeference) and
-`anchorMoved` (the anchor was dragged; the drawing followed the entity, not the stale
-position). Both are populated but invisible to the user today.
-
-**4. Task 12: docs + publish.** The suite already passes `--publish`. Remaining: refresh
-any user-facing docs that describe the old single-survey model, then `tools/publish.sh`
-(ASK NATHAN FIRST — it installs into CaveCAD's per-user scripts folder and archives to
-~/Documents/Cave).
-
-**5. Live GUI verification — nothing below has ever run in a real CaveCAD window.**
-Headless tests cover the engine; every dialog is unproven. Highest risk first:
-  - Declination's revision dialog is the FIRST `QDialog` + `exec()` in the suite. If the
-    bridge rejects it, the tool must degrade to a warning, not crash.
-  - Notebook "Load from drawing": chooser, magnetic azimuth cells, replace-by-fingerprint
-    on Draw, and the carried-over backsight/flag report line.
+**2. Live GUI verification — nothing in the revision framework has run in a real CaveCAD
+window.** 2.1.0 is already installed, so it is testable right now. Highest risk first:
+  - Declination's revision dialog is the suite's first `QDialog` + `exec()`.
+  - Notebook "Load from drawing": chooser, magnetic azimuth cells, replace-by-fingerprint,
+    and the carried-over backsight/flag report line.
   - GeoReference's per-trip revision questions after anchoring.
-  - RebuildSurveyData on a genuinely old drawing (legacy → v3 upgrade).
-  - The acceptance demo: import testdata/FingerprintCave.dat, run `decl`, set the two
-    1998 trips to -2.50, and confirm the middle section swings while the loop error drops
-    from 4.21 ft to 0.74 ft — matching what importing FingerprintCave_Revised.dat produces.
+  - RebuildSurveyData on a genuinely old drawing (legacy → v3).
+  - Acceptance demo: import `testdata/FingerprintCave.dat`, run `decl`, set both 1998 trips
+    to -2.50, confirm the middle section swings and the loop error drops 4.21 ft → 0.74 ft,
+    matching what importing `FingerprintCave_Revised.dat` produces directly.
 
-### Coordination note
-A parallel session is building the Aerial Basemap tool on this same branch (spec + plan in
-docs/superpowers/, `CsGeoProject.js`, layer `CTRL-AERIAL`). Stage only your own files.
-`CTRL-AERIAL` is already exempt from the rigid transform, and revisions now pivot on the
-georeferenced station, so a basemap stays aligned through a declination fix.
+**3. Republish after the GUI pass** — the installed 2.1.0 predates all seven fixes above.
+`tools/publish.sh` (ASK NATHAN FIRST).
+
+### Known limits, accepted (not bugs to chase)
+- Legacy upgrade follows `Azimuth` tags over measured geometry when they disagree, and
+  infers slope distance as plan/cos(inclination); near-vertical shots keep their drawn
+  distance rather than amplifying plot noise.
+- A notebook round-trip drops a shot's backsight when its azimuth was edited on the page —
+  deliberate: a reading that disagrees with its foresight is worse than none.
+- Stock free QCAD still discards XDATA on save; CaveCAD is the target platform.
