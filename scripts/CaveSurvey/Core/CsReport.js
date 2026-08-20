@@ -113,6 +113,41 @@ CsReport.revisionSummary = function(report) {
         lines.push("Revision changed the survey's shape: the survey marks " +
             "were erased and redrawn from the revised data.");
     }
+
+    // Name the station the revision held fixed -- it decides what
+    // "the drawing rotated" even means geometrically -- and flag a
+    // dragged anchor separately: that's a silent change nobody asked
+    // for, and worth a line even though it isn't an error. Both fields
+    // are absent on reports from older callers, so say nothing rather
+    // than print "undefined".
+    if (report.anchorUsed !== undefined && report.anchorUsed !== null) {
+        var au = report.anchorUsed;
+        if (au.source === "georef") {
+            lines.push("Anchor station: " + au.name + " -- it held still " +
+                "because it is the georeferenced station, the drawing's " +
+                "one tie to real-world coordinates.");
+        } else if (au.source === "stale") {
+            lines.push("");
+            lines.push("WARNING -- anchor station " + au.name +
+                " could not be found in the drawing; its last known " +
+                "position was used instead.");
+        } else {
+            lines.push("Anchor station: " + au.name + " (trip 0's anchor).");
+        }
+
+        if (report.anchorMoved !== undefined && report.anchorMoved !== null) {
+            var dx = report.anchorMoved.dx, dy = report.anchorMoved.dy;
+            var hasOffset = dx !== undefined && dx !== null &&
+                dy !== undefined && dy !== null;
+            var offset = hasOffset ? Math.sqrt(dx * dx + dy * dy) : null;
+            lines.push("Anchor station " + au.name + " had been moved" +
+                (offset !== null ? " " + offset.toFixed(2) : "") +
+                " since the survey was last read from the drawing; the " +
+                "revision followed its current position -- the drawing " +
+                "is the truth.");
+        }
+    }
+
     lines.push("Stations moved: " + report.stationsChanged);
     var top = Math.min(5, report.moved.length);
     for (var i = 0; i < top; i++) {
