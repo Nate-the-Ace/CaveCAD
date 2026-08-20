@@ -200,6 +200,17 @@ CsDraw.survey = function(survey, resolved, originStation, originPos, seqBase) {
         }
     }
 
+    // a station's note rides on the shot arriving at it; the first
+    // station's on survey.startNote
+    var noteFor = {};
+    for (var ni = 0; ni < survey.shots.length; ni++) {
+        var nsh = survey.shots[ni];
+        if (!nsh.splay && !nsh.excludeFromAll && nsh.notes &&
+            nsh.notes !== "") {
+            noteFor[nsh.to] = nsh.notes;
+        }
+    }
+
     var stationsDrawn = 0;
     var firstPoint;
     for (var i = 0; i < names.length; i++) {
@@ -227,7 +238,9 @@ CsDraw.survey = function(survey, resolved, originStation, originPos, seqBase) {
             right: lrud !== null ? lrud.right : undefined,
             up: lrud !== null ? lrud.up : undefined,
             down: lrud !== null ? lrud.down : undefined,
-            z: resolved.stations[name].z
+            z: resolved.stations[name].z,
+            note: noteFor[name] !== undefined ? noteFor[name] :
+                (i === 0 ? survey.startNote : undefined)
         });
         if (firstPoint === undefined) {
             firstPoint = pt;

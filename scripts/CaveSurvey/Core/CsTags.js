@@ -107,6 +107,7 @@ CsTags.tagStation = function(entity, data) {
     CsTags.set(entity, "Up", CsModel.lrudEntryText(data.up, data.upAll));
     CsTags.set(entity, "Down", CsModel.lrudEntryText(data.down, data.downAll));
     CsTags.set(entity, "Elevation", data.z);
+    CsTags.set(entity, "Note", data.note);
 };
 
 /**
@@ -180,7 +181,11 @@ CsTags.surveyFromDocument = function(doc) {
             shot.right = eR.value; shot.rightAll = eR.all;
             shot.up = eU.value; shot.upAll = eU.all;
             shot.down = eD.value; shot.downAll = eD.all;
+            shot.notes = CsTags.get(st.entity, "Note");
             survey.shots.push(shot);
+        }
+        if (prev === null) {
+            survey.startNote = CsTags.get(st.entity, "Note");
         }
         survey.fixed[st.name] = { x: st.pos.x, y: st.pos.y,
             z: CsTags.getNumber(st.entity, "Elevation") || 0.0 };

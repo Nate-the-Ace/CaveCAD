@@ -53,6 +53,8 @@ CsModel.newSurvey = function() {
         distanceUnit: "ft",
         shots: [],
         fixed: {},
+        // note for the very first station (no arriving shot to carry it)
+        startNote: "",
         // LRUD of the very first station, which no shot arrives at --
         // {left, right, up, down} or null. The paper notes page records
         // it beside the first station; the first shot's azimuth is its

@@ -30,7 +30,7 @@ CsStore.MARKER = "CAVESURVEYDB v3 ";
 // with x/y printed to 4 decimals; values URI-encoded, so separators
 // can never occur inside them.
 // every tag key the suite writes; sync scans these
-CsStore.KEYS = ["Station", "Seq", "Azimuth", "Inclination",
+CsStore.KEYS = ["Station", "Seq", "Azimuth", "Inclination", "Note",
     "Left", "Right", "Up", "Down", "Elevation",
     "StationLabel", "LRUDName", "LRUDLine", "LRUDNote", "Shot",
     "WallRun", "BoundaryId", "LegendRow",

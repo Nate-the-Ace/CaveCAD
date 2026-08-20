@@ -141,6 +141,10 @@ SurveyNotebook.sheetSurvey = function(w) {
         }
     }
 
+    if (rows.length > 0) {
+        survey.startNote = String(rows[0].notes.text).replace(/^\s+|\s+$/g, "");
+    }
+
     for (var i = 1; i < rows.length; i++) {
         var from = String(rows[i - 1].name.text).replace(/^\s+|\s+$/g, "");
         var to = String(rows[i].name.text).replace(/^\s+|\s+$/g, "");
@@ -176,6 +180,7 @@ SurveyNotebook.sheetSurvey = function(w) {
         shot.right = eR.value; shot.rightAll = eR.all;
         shot.up = eU.value; shot.upAll = eU.all;
         shot.down = eD.value; shot.downAll = eD.all;
+        shot.notes = String(rows[i].notes.text).replace(/^\s+|\s+$/g, "");
         survey.shots.push(shot);
     }
     return survey;
@@ -254,11 +259,15 @@ SurveyNotebook.setSurvey = function(w, survey) {
             put(row.r, CsModel.lrudEntryText(shot.right, shot.rightAll));
             put(row.u, CsModel.lrudEntryText(shot.up, shot.upAll));
             put(row.d, CsModel.lrudEntryText(shot.down, shot.downAll));
+            put(row.notes, shot.notes);
         } else if (i === 0 && survey.startLrud) {
             put(row.l, survey.startLrud.left);
             put(row.r, survey.startLrud.right);
             put(row.u, survey.startLrud.up);
             put(row.d, survey.startLrud.down);
+        }
+        if (i === 0) {
+            put(row.notes, survey.startNote);
         }
     }
     w.loading = false;
@@ -322,8 +331,21 @@ SurveyNotebook.addStationRow = function(w, stationName) {
         r: SurveyNotebook.makeCell(w, 40),
         u: SurveyNotebook.makeCell(w, 40),
         d: SurveyNotebook.makeCell(w, 40),
+        notes: SurveyNotebook.makeCell(w, 140),
         widgets: []
     };
+    // Notes are INTENTIONAL: click to write one. Never in the tab
+    // order, so flying through measurements can't land here.
+    try {
+        row.notes.focusPolicy = Qt.ClickFocus;
+    } catch (eFp) {
+        // policy unsupported: it stays out of the setTabOrder chain
+        // regardless, which covers the common path
+    }
+    row.notes.placeholderText = "note...";
+    row.notes.toolTip = "Station note -- stored with the survey data " +
+        "(and exported as the shot's comment). Click to edit; Tab " +
+        "never lands here.";
     row.name.text = stationName || "";
 
     var isFirst = (w.rows.length === 0);
@@ -352,7 +374,8 @@ SurveyNotebook.addStationRow = function(w, stationName) {
     grid.addWidget(row.r, stRow, 7);
     grid.addWidget(row.u, stRow, 8);
     grid.addWidget(row.d, stRow, 9);
-    row.widgets.push(row.name, row.l, row.r, row.u, row.d);
+    grid.addWidget(row.notes, stRow, 10);
+    row.widgets.push(row.name, row.l, row.r, row.u, row.d, row.notes);
 
     // Pin the page to the TOP of the scroll area: all the vertical
     // slack lives in ONE stretchy empty row below the last station,
@@ -787,7 +810,7 @@ SurveyNotebook.buildDock = function(appWin) {
         w.grid = new QGridLayout();
 
         var headers = ["Station", "Dist", "Azm fs", "Azm bs",
-            "Inc fs", "Inc bs", "L", "R", "U", "D"];
+            "Inc fs", "Inc bs", "L", "R", "U", "D", "Notes"];
         for (var h = 0; h < headers.length; h++) {
             w.grid.addWidget(new QLabel(headers[h]), 0, h);
         }
@@ -796,6 +819,8 @@ SurveyNotebook.buildDock = function(appWin) {
         // pinned to the top rather than centered
         try {
             w.grid.setColumnStretch(headers.length, 1);
+            // the Notes column soaks up spare width
+            w.grid.setColumnStretch(10, 1);
         } catch (e) {
             // cosmetic only
         }
