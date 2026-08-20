@@ -669,6 +669,50 @@ ok(srvRtFull.startLrud !== null &&
     "Walls round trip startLrud");
 shotsMatch(srv, srvRtFull, "Walls full round trip incl splay");
 
+// Walls has exactly ONE file-wide Decl= (trip 0's) -- a survey with
+// per-trip declinations must still round-trip every shot's TRUE
+// azimuth losslessly, because the writer un-applies uniformly with
+// that single header declination rather than each shot's own trip's
+// (see the comment in CsFormatWalls.write). Build a 2-trip survey by
+// hand: trip 0 (decl 3.0) carries shot A1->A2, a second trip (decl
+// -7.0) carries shot A2->A3.
+var mtSv = CsModel.newSurvey();
+mtSv.distanceUnit = "m";
+mtSv.date = "2020-01-01";
+mtSv.team = "Alice";
+mtSv.declination = 3.0;
+mtSv.declinationSource = "test";
+var mtShot1 = CsModel.newShot();
+mtShot1.from = "A1";
+mtShot1.to = "A2";
+mtShot1.distance = 10.0;
+mtShot1.azimuth = 45.0;
+mtShot1.inclination = 5.0;
+mtShot1.trip = 0;
+mtSv.shots.push(mtShot1);
+CsModel.ensureTrips(mtSv); // trips[0] now carries decl 3.0 from above
+
+var mtTrip2 = CsModel.newTrip();
+mtTrip2.date = "2020-02-02";
+mtTrip2.team = "Bob";
+mtTrip2.declination = -7.0;
+var mtTrip2Id = CsModel.tripIdFor(mtSv, mtTrip2);
+var mtShot2 = CsModel.newShot();
+mtShot2.from = "A2";
+mtShot2.to = "A3";
+mtShot2.distance = 12.0;
+mtShot2.azimuth = 200.0;
+mtShot2.inclination = -3.0;
+mtShot2.trip = mtTrip2Id;
+mtSv.shots.push(mtShot2);
+
+var mtRt = CsFormatWalls.parse(CsFormatWalls.write(mtSv));
+near(CsAngles.azimuthDifference(mtRt.shots[0].azimuth, mtShot1.azimuth), 0, 1e-6,
+    "Walls multi-trip round trip preserves trip 0 TRUE azimuth");
+near(CsAngles.azimuthDifference(mtRt.shots[1].azimuth, mtShot2.azimuth), 0, 1e-6,
+    "Walls multi-trip round trip preserves 2nd trip's TRUE azimuth " +
+    "despite a differing declination not carried by the header");
+
 var svxContent = readTextFile(repoRoot + "/testdata/TestCave_Survex.svx");
 var svx = CsFormatSurvex.parse(svxContent);
 ok(svx.distanceUnit === "m", "Survex default metres");
@@ -967,7 +1011,7 @@ ok(CsFormatRegistry.detect("x.csv", csvText).id === "csv", "detect csv");
 // apart), the third a different day/team AND a re-measured
 // declination, tied back into a loop that only closes once trips 0
 // and 1's declination gets revised.
-var fpContent = readTextFile(repoRoot + "/tests/fixtures/FingerprintCave.dat");
+var fpContent = readTextFile(repoRoot + "/testdata/FingerprintCave.dat");
 var fp = CsFormatCompass.parse(fpContent);
 // caveName is the drawing-level name (file line 1); trips[0].name is
 // the trip designation (SURVEY NAME:) -- the two must stay distinct.

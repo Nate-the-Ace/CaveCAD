@@ -156,6 +156,16 @@ CsFormatSurvex.parse = function(content) {
                 // "Alice, Bob, Carol"). A file that declares *date once
                 // and only then *team lines is unaffected -- teamDirty
                 // is still false at that point.
+                //
+                // KNOWN GAP: this heuristic only fires when a leg sits
+                // between the two *date lines (that's what sets
+                // teamDirty). Two *date lines with NO leg in between
+                // ("*date A / *team Alice / *date B / *team Bob / leg")
+                // never see teamDirty go true before the second *date,
+                // so the reset above does not run and Bob's *team line
+                // appends onto Alice's, wrongly producing team
+                // "Alice, Bob" for the date-B trip. Not fixed here --
+                // just documented.
                 if (teamDirty) {
                     survey.team = "";
                     teamDirty = false;

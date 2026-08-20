@@ -448,17 +448,26 @@ CsFormatWalls.write = function(survey) {
             out.push("#]");
             inExclude = false;
         }
-        // Walls files carry magnetic bearings when Decl= is declared;
-        // the model's azimuths are true, so remove that SHOT's OWN
-        // trip's declination again (Walls declares one header Decl=,
-        // trip 0's, but a shot from a different trip un-applies its
-        // own).
-        var shotDecl = CsModel.tripOf(survey, s).declination || 0;
-        var az = CsAngles.normalizeAzimuth(s.azimuth - shotDecl);
+        // Walls has exactly ONE file-wide Decl= (declared from `decl`
+        // above, i.e. trip 0's) -- there is no per-trip declination in
+        // the format. On reparse every shot gets that single header
+        // value added back in (see the `az + declination` reapply in
+        // parse() above), so a multi-trip survey collapses onto one
+        // trip's declination no matter what we do here. Un-applying
+        // with the SHOT's OWN trip declination would only be correct
+        // for trip 0; for any other trip it leaves a residual of
+        // (headerDecl - shotDecl) baked into the written number, which
+        // reparse then adds AGAIN, corrupting that shot's TRUE azimuth
+        // by (headerDecl - shotDecl) x2. Un-applying uniformly with
+        // `decl` (the header's own value) is what keeps TRUE azimuths
+        // lossless through the round trip -- it is the exact inverse
+        // of what parse() re-applies, even though it is "wrong" per
+        // shot for any trip whose own declination differs.
+        var az = CsAngles.normalizeAzimuth(s.azimuth - decl);
         var azTok = az.toFixed(2);
         if (s.backAzimuth !== null && s.backAzimuth !== undefined) {
             azTok += "/" + CsAngles.normalizeAzimuth(
-                s.backAzimuth - shotDecl).toFixed(2);
+                s.backAzimuth - decl).toFixed(2);
         }
         var incTok = s.inclination.toFixed(2);
         if (s.backInclination !== null && s.backInclination !== undefined) {
