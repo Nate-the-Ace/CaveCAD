@@ -933,7 +933,18 @@ SurveyNotebook.mergeTripIntoSurvey = function(reconSurvey, tripRecord, shots) {
         droppedStationNames: droppedStationNames, carried: carried };
 };
 
-/** One trip as a chooser line: "0: ENT 1998-07-04 NS/JB (12 shots)".
+/** One trip as a chooser line: "Trip 0: ENT 1998-07-04 NS/JB decl -3.50
+ *  (12 shots)". "Trip N:" matches the id the Declination tool's own
+ *  per-trip rows use (Declination.tripLabel), so the same trip reads
+ *  the same way in both places -- and, since the id is unique per
+ *  trip, it is what the caller resolves the user's pick back to a
+ *  trip BY, rather than re-matching the whole label string. The
+ *  declination is included because it is the one field that can
+ *  legitimately be the only difference between two trips sharing a
+ *  date and team -- a resurvey redone to correct a bad declination
+ *  reading, exactly what the revision framework exists for -- so
+ *  leaving it out of the label is how two otherwise-identical trips
+ *  read as indistinguishable to the person choosing between them.
  *  "|" is getItem's separator, so it is flattened out of the free
  *  text. Pure. */
 SurveyNotebook.tripChoiceLabel = function(tripId, trip, shotCount) {
@@ -941,7 +952,11 @@ SurveyNotebook.tripChoiceLabel = function(tripId, trip, shotCount) {
         return String(v === undefined || v === null ? "" : v)
             .replace(/\|/g, "/").replace(/^\s+|\s+$/g, "");
     };
-    var parts = [tripId + ":"];
+    var decl = Number(trip.declination);
+    if (isNaN(decl)) {
+        decl = 0.0;
+    }
+    var parts = ["Trip " + tripId + ":"];
     if (clean(trip.name) !== "") {
         parts.push(clean(trip.name));
     }
@@ -951,6 +966,7 @@ SurveyNotebook.tripChoiceLabel = function(tripId, trip, shotCount) {
     if (clean(trip.team) !== "") {
         parts.push(clean(trip.team));
     }
+    parts.push("decl " + decl.toFixed(2));
     parts.push("(" + shotCount + " shot" +
         (shotCount === 1 ? "" : "s") + ")");
     return parts.join(" ");
@@ -1027,15 +1043,25 @@ SurveyNotebook.loadFromDrawing = function(w) {
         if (choice === undefined) {
             return;
         }
-        tripId = null;
+        // getItem (simple_input.js) hands back dialog.textValue() --
+        // the chosen label's TEXT, not its index -- so the pick has to
+        // be resolved back to a trip by finding that text's POSITION
+        // in the array the labels were built from, first match wins.
+        // That is exact (not lucky) because every label is prefixed
+        // with its trip id (see tripChoiceLabel), which is unique by
+        // construction; the declination in the label just makes the
+        // id-holding trip recognizable to the human doing the picking.
+        var idx = -1;
         for (i = 0; i < labels.length; i++) {
             if (labels[i] === choice) {
-                tripId = withShots[i];
+                idx = i;
+                break;
             }
         }
-        if (tripId === null) {
+        if (idx < 0) {
             return;
         }
+        tripId = withShots[idx];
     }
 
     SurveyNotebook.setSurvey(w,
