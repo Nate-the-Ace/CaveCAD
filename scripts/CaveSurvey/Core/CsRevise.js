@@ -653,7 +653,8 @@ CsRevise.isWorldFixedLayer = function(layerName) {
  *   stationsChanged how many stations moved more than the rigidity eps
  *   loopsBefore     [{from, to, error, percent}] loop closures before
  *   loopsAfter      the same loops after the revision
- *   anchorMoved     {dx, dy} when the trip-0 anchor point had been
+ *   anchorMoved     {dx, dy} when the PIVOT point (whichever won
+ *                   below) had been
  *                   dragged since the reconstruction (null when it had
  *                   not); the revision used the CURRENT position
  *   anchorMissing   true when no point carrying the trip-0 anchor's
@@ -764,9 +765,28 @@ CsRevise.apply = function(doc, di, recon, newSurvey) {
     } else if (geoName !== "" && geoName !== anchorName) {
         var geoLive = livePosOf(geoName);
         if (geoLive !== null) {
+            // Probed in the RECONSTRUCTION frame (trip 0 where the
+            // survey was read from, not where it sits now), because
+            // this probe answers two questions and the second one only
+            // makes sense in that frame: does the name resolve at all,
+            // and where did the georeferenced point sit when we read
+            // the drawing. Resolvability ignores the anchor position
+            // entirely -- only connectivity decides it -- so anchoring
+            // the probe this way costs nothing and keeps the drag
+            // measurement honest.
             var probe = CsNetwork.resolve(recon.survey,
-                { anchor: anchorAt(anchorName, anchorPos) });
+                { anchor: anchorAt(recon.anchorName, recon.anchorPos) });
             if (probe.stations.hasOwnProperty(geoName)) {
+                // The pivot moves to the georeferenced point, so the
+                // drag worth reporting moves with it: trip 0's offset
+                // describes a station we no longer pivot on. Diff the
+                // georeferenced point's live position against where
+                // the reconstruction frame put it.
+                var geoWas = probe.stations[geoName];
+                var gdx = geoLive.x - geoWas.x;
+                var gdy = geoLive.y - geoWas.y;
+                anchorMoved = (Math.sqrt(gdx * gdx + gdy * gdy) > 1e-9) ?
+                    { dx: gdx, dy: gdy } : null;
                 anchorName = geoName;
                 anchorPos = geoLive;
                 anchorSource = "georef";
