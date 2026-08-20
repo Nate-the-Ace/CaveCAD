@@ -162,6 +162,13 @@ function declinationRevise(doc, recon) {
                                 " is before 1900, outside the IGRF model.");
                             return;
                         }
+                        // 2 decimals is the suite-wide IGRF-apply
+                        // convention -- GeoReference.js's own revision
+                        // offer rounds to the same precision before it
+                        // ever reaches reviseDeclination (see its
+                        // tripsNeedingRevision comment). Keeping both
+                        // tools at 2 decimals means a trip revised by
+                        // one reads back as unchanged in the other.
                         var txt = res.declination.toFixed(2);
                         r.edit.text = txt;
                         r.igrfText = txt;
@@ -407,7 +414,7 @@ Declination.recordedText = function(trip) {
  *   text      the field's text on Apply
  *   igrfText  the exact string the IGRF button last filled ("" if never)
  * \return { changes: [{tripId, value, source}] } for every field whose
- *         parsed value differs from recorded by more than 1e-9 --
+ *         text no longer reads as the prefilled declText(recorded) --
  *         source "igrf" when the text still exactly matches the IGRF
  *         fill, "user" otherwise -- OR { error: "..." } when any field
  *         holds something unparseable (a prefilled field always holds
@@ -430,7 +437,18 @@ Declination.parseTripEdits = function(rows) {
             return { error: "Trip " + r.tripId + ": \"" + text +
                 "\" is not a usable number. Nothing was changed." };
         }
-        if (Math.abs(value - r.recorded) <= 1e-9) {
+        // Unchanged means "still reads as what we prefilled", NOT
+        // "equals the recorded double". The prefill is
+        // declText(recorded) -- 4 decimals -- so a recorded
+        // declination carrying more precision than that can never
+        // round-trip a raw comparison: reopening this dialog and
+        // pressing Apply with no edits would manufacture a ~1e-5 deg
+        // "revision", append a junk RevisionLog line, and downgrade
+        // the trip's declinationSource from igrf to user. Compare at
+        // the precision the dialog actually shows -- both revision
+        // tools apply IGRF at 2 decimals, well inside it.
+        var shown = Declination.declText(r.recorded);
+        if (text === shown || Math.abs(value - Number(shown)) <= 1e-9) {
             continue;
         }
         var source = (r.igrfText !== undefined && r.igrfText !== null &&
