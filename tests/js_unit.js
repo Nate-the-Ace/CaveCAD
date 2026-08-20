@@ -223,12 +223,50 @@ tsv.date = "1998-07-04"; tsv.team = "NS/JB"; tsv.declination = -2.5;
 CsModel.ensureTrips(tsv);
 ok(tsv.trips.length === 1, "ensureTrips creates trip 0");
 ok(tsv.trips[0].team === "NS/JB", "trip 0 mirrors team");
-ok(CsModel.tripFingerprint(tsv.trips[0]) === "1998-07-04|-2.5000|NS/JB",
-    "trip fingerprint format");
+ok(CsModel.tripFingerprint(tsv.trips[0]) === "1998-07-04|NS/JB",
+    "trip fingerprint format, got '" + CsModel.tripFingerprint(tsv.trips[0]) + "'");
 var t2 = CsModel.newTrip(); t2.date = "1998-07-04"; t2.team = "KL";
 ok(CsModel.tripIdFor(tsv, t2) === 1, "different team = new trip id");
 ok(CsModel.tripIdFor(tsv, tsv.trips[0]) === 0, "same fingerprint reuses id");
 ok(tsv.trips.length === 2, "tripIdFor appended once");
+
+// Declination is REVISABLE, so it is not identity: the same party on
+// the same day with a re-measured declination is the SAME trip, and
+// the new value takes precedence (Nathan's rule). The collapse is
+// reported, not silent.
+var tDecl = CsModel.newTrip();
+tDecl.date = "1998-07-04"; tDecl.team = "NS/JB"; tDecl.declination = -1.25;
+ok(CsModel.tripIdFor(tsv, tDecl) === 0,
+    "re-measured declination is the same trip, not a new one");
+ok(tsv.trips.length === 2, "tripIdFor did not append for a declination change");
+near(tsv.trips[0].declination, -1.25, 1e-12,
+    "merged trip records the LAST declination read");
+var tFind = CsModel.parseFindings(tsv);
+ok(tFind.length === 1 && tFind[0].code === "merged-declination",
+    "collapsed declination is recorded as a finding, got " +
+    JSON.stringify(tFind));
+ok(tFind.length === 1 && tFind[0].message.indexOf("-2.50 deg") >= 0 &&
+    tFind[0].message.indexOf("-1.25 deg") >= 0 &&
+    tFind[0].message.indexOf("off by 1.25 deg") >= 0,
+    "finding names both declinations and the error it leaves, got '" +
+    (tFind.length === 1 ? tFind[0].message : "") + "'");
+// The findings list a caller gets is a copy: appending to it must not
+// grow the survey's own record.
+tFind.push({ code: "scribble" });
+ok(CsModel.parseFindings(tsv).length === 1,
+    "parseFindings hands out a copy");
+// CsValidate is the path these reach the import summary by.
+var tChecked = CsValidate.check(tsv, null);
+var tSeen = false;
+for (var tci = 0; tci < tChecked.length; tci++) {
+    if (tChecked[tci].code === "merged-declination") {
+        tSeen = true;
+    }
+}
+ok(tSeen, "parse findings reach CsValidate.check's findings");
+CsValidate.check(tsv, null);
+ok(CsModel.parseFindings(tsv).length === 1,
+    "repeated checks do not accumulate onto the survey's parse findings");
 
 var fsh = CsModel.newShot();
 fsh.excludeFromPlot = true; fsh.noAdjust = true;
@@ -293,10 +331,19 @@ CsModel.ensureTrips(clb);
 ok(clb.team === clb.trips[0].team && clb.team !== "direct write",
     "ensureTrips: trips[0] is authority, top-level writes lose");
 
-// tripFingerprint must survive a garbage (non-numeric) declination
-// instead of throwing out of toFixed.
-ok(CsModel.tripFingerprint({date: "", declination: "junk", team: ""}) === "|0.0000|",
-    "fingerprint survives garbage declination");
+// Declination cannot reach the fingerprint at all, so even a garbage
+// (non-numeric) one from a bad parse leaves identity intact -- and a
+// half-built record with no date or team still fingerprints.
+ok(CsModel.tripFingerprint({date: "", declination: "junk", team: ""}) === "|",
+    "fingerprint of an empty trip, got '" +
+    CsModel.tripFingerprint({date: "", declination: "junk", team: ""}) + "'");
+ok(CsModel.tripFingerprint({date: "2020-01-01", declination: "junk",
+        team: "Alice"}) ===
+    CsModel.tripFingerprint({date: "2020-01-01", declination: -7.5,
+        team: "Alice"}),
+    "declination -- garbage or good -- cannot change trip identity");
+ok(CsModel.tripFingerprint({}) === "|",
+    "fingerprint of a record with no fields at all");
 
 // parseFlags ignores letters outside its P/X/L/C vocabulary.
 var gf = CsModel.newShot();
@@ -1033,15 +1080,16 @@ ok(CsFormatRegistry.detect("x.csv", csvText).id === "csv", "detect csv");
 
 // ---------------------------------------------------------------------
 // Trip-aware parsing: every parser emits survey.trips[] keyed by
-// fingerprint (date|declination|team), every shot gets shot.trip, and
-// writers un-apply each shot's OWN trip's declination.
+// fingerprint (date|team), every shot gets shot.trip, and writers
+// un-apply each shot's OWN trip's declination.
 // ---------------------------------------------------------------------
 
-// FIXTURE GATE: FingerprintCave.dat has 3 Compass blocks -- two on the
-// same day but different teams (fingerprint separation keeps them
-// apart), the third a different day/team AND a re-measured
-// declination, tied back into a loop that only closes once trips 0
-// and 1's declination gets revised.
+// FIXTURE GATE: FingerprintCave.dat has 3 Compass blocks and must
+// still read as 3 trips under date|team identity -- ENT and MID share
+// 1998-07-04 and are kept apart by TEAM alone, LOOP is a different
+// DATE. (Its re-measured declination no longer separates anything, so
+// team and date are carrying the whole gate.) The three tie back into
+// a loop that only closes once trips 0 and 1's declination is revised.
 var fpContent = readTextFile(repoRoot + "/testdata/FingerprintCave.dat");
 var fp = CsFormatCompass.parse(fpContent);
 // caveName is the drawing-level name (file line 1); trips[0].name is
@@ -1119,9 +1167,9 @@ if (fpResolved2.loops.length === 1) {
         fpResolved2.loops[0].error);
 }
 
-// Fingerprint MERGE: two Compass blocks sharing date/team/declination
-// (but different SURVEY NAME labels, which aren't part of the
-// fingerprint) collapse into ONE trip.
+// Fingerprint MERGE: two Compass blocks sharing date and team (but
+// different SURVEY NAME labels, which aren't part of the fingerprint)
+// collapse into ONE trip.
 var mergeDat =
     "SURVEY NAME: X\r\nSURVEY DATE: 1 1 2020\r\nSURVEY TEAM:\r\n" +
     "A. One, B. Two\r\nDECLINATION: 1.00  FORMAT: DDDDLUDRLADN\r\n\r\n" +
@@ -1136,6 +1184,76 @@ ok(merged.trips.length === 1, "Compass fingerprint merge: 1 trip, got " +
     merged.trips.length);
 ok(merged.shots.length === 2 && merged.shots[0].trip === 0 &&
     merged.shots[1].trip === 0, "Compass fingerprint merge: both shots trip 0");
+ok(CsModel.parseFindings(merged).length === 0,
+    "Compass fingerprint merge: nothing to report when the declinations agree");
+
+// LOSSY merge: the same two blocks a declination apart. Still one trip
+// (date and team are identity), each shot still carrying the TRUE
+// azimuth its OWN block's declination produced, the trip recording the
+// LAST declination read -- and the collapse reported, not silent.
+var lossyDat =
+    "SURVEY NAME: X\r\nSURVEY DATE: 1 1 2020\r\nSURVEY TEAM:\r\n" +
+    "A. One, B. Two\r\nDECLINATION: 1.00  FORMAT: DDDDLUDRLADN\r\n\r\n" +
+    "FROM TO LENGTH BEARING INC LEFT UP DOWN RIGHT\r\n\r\n" +
+    "A1 A2 10.0 0.0 0.0 1.0 1.0 1.0 1.0\r\n\f\r\n" +
+    "SURVEY NAME: Y\r\nSURVEY DATE: 1 1 2020\r\nSURVEY TEAM:\r\n" +
+    "A. One, B. Two\r\nDECLINATION: 4.00  FORMAT: DDDDLUDRLADN\r\n\r\n" +
+    "FROM TO LENGTH BEARING INC LEFT UP DOWN RIGHT\r\n\r\n" +
+    "B1 B2 10.0 0.0 0.0 1.0 1.0 1.0 1.0\r\n\f\r\n";
+var lossy = CsFormatCompass.parse(lossyDat);
+ok(lossy.trips.length === 1, "Compass lossy merge: 1 trip, got " +
+    lossy.trips.length);
+near(lossy.shots[0].azimuth, 1.0, 1e-9,
+    "Compass lossy merge: block 1's shot keeps its own declination's true azimuth");
+near(lossy.shots[1].azimuth, 4.0, 1e-9,
+    "Compass lossy merge: block 2's shot keeps its own declination's true azimuth");
+near(lossy.trips[0].declination, 4.0, 1e-9,
+    "Compass lossy merge: trip records the last declination read");
+near(lossy.declination, 4.0, 1e-9,
+    "Compass lossy merge: top level mirrors the merged trip");
+var lossyFind = CsModel.parseFindings(lossy);
+ok(lossyFind.length === 1 && lossyFind[0].code === "merged-declination" &&
+    lossyFind[0].severity === "warning" && lossyFind[0].shotIndex === -1,
+    "Compass lossy merge: one survey-wide warning, got " +
+    JSON.stringify(lossyFind));
+if (lossyFind.length === 1) {
+    var lossyMsg = lossyFind[0].message;
+    ok(lossyMsg.indexOf("1.00 deg") >= 0 && lossyMsg.indexOf("4.00 deg") >= 0,
+        "Compass lossy merge: both declinations named, got '" + lossyMsg + "'");
+    ok(lossyMsg.indexOf("off by 3.00 deg") >= 0,
+        "Compass lossy merge: the error it leaves is named, got '" +
+        lossyMsg + "'");
+    ok(lossyMsg.indexOf("\"X\"") >= 0 && lossyMsg.indexOf("1 1 2020") < 0 &&
+        lossyMsg.indexOf("2020-01-01") >= 0 &&
+        lossyMsg.indexOf("A. One, B. Two") >= 0,
+        "Compass lossy merge: the trip is named by label, date and team, got '" +
+        lossyMsg + "'");
+}
+// A merged trip still writes and re-reads losslessly: the writer
+// un-applies the one declination it declares, so TRUE azimuths survive
+// even though the trip's value is wrong for block 2's shot.
+var lossyRt = CsFormatCompass.parse(CsFormatCompass.write(lossy));
+ok(lossyRt.trips.length === 1, "Compass lossy merge round trip: still 1 trip");
+near(CsAngles.azimuthDifference(lossyRt.shots[0].azimuth, 1.0), 0, 1e-6,
+    "Compass lossy merge round trip: shot 1 TRUE azimuth preserved");
+near(CsAngles.azimuthDifference(lossyRt.shots[1].azimuth, 4.0), 0, 1e-6,
+    "Compass lossy merge round trip: shot 2 TRUE azimuth preserved");
+
+// Team, not declination, is what keeps two same-day blocks apart now.
+var teamSplitDat =
+    "SURVEY NAME: X\r\nSURVEY DATE: 1 1 2020\r\nSURVEY TEAM:\r\n" +
+    "A. One\r\nDECLINATION: 1.00  FORMAT: DDDDLUDRLADN\r\n\r\n" +
+    "FROM TO LENGTH BEARING INC LEFT UP DOWN RIGHT\r\n\r\n" +
+    "A1 A2 10.0 0.0 0.0 1.0 1.0 1.0 1.0\r\n\f\r\n" +
+    "SURVEY NAME: Y\r\nSURVEY DATE: 1 1 2020\r\nSURVEY TEAM:\r\n" +
+    "B. Two\r\nDECLINATION: 1.00  FORMAT: DDDDLUDRLADN\r\n\r\n" +
+    "FROM TO LENGTH BEARING INC LEFT UP DOWN RIGHT\r\n\r\n" +
+    "B1 B2 10.0 0.0 0.0 1.0 1.0 1.0 1.0\r\n\f\r\n";
+var teamSplit = CsFormatCompass.parse(teamSplitDat);
+ok(teamSplit.trips.length === 2, "Compass: differing team = 2 trips, got " +
+    teamSplit.trips.length);
+ok(teamSplit.shots[0].trip === 0 && teamSplit.shots[1].trip === 1,
+    "Compass: each team's shot on its own trip");
 
 // Round trip: write(parse(fixture)) then parse again preserves the
 // trips (same fingerprints), the shot count, and the TRUE azimuths.
@@ -1183,9 +1301,10 @@ for (var cti = 0; cti < csvM.shots.length; cti++) {
     ok((csvM.shots[cti].trip || 0) === 0, "CSV: every shot trip 0");
 }
 
-// Survex per-leg trip attribution: a *date/*calibrate change mid-file
-// starts a new trip, and each leg's declination un-apply on write
-// uses ITS OWN trip, not a single survey-wide value.
+// Survex per-leg trip attribution: a *date change mid-file starts a
+// new trip (the *calibrate beside it does not -- declination is not
+// identity), and each leg's declination un-apply on write uses ITS OWN
+// trip, not a single survey-wide value.
 var svxTripSrc = "*data normal from to tape compass clino\r\n" +
     "*date 2020-01-01\r\n*calibrate declination -2.0\r\n" +
     "T1 T2 10.0 90.0 0.0\r\n" +
@@ -1208,6 +1327,30 @@ near(CsAngles.azimuthDifference(svxTripRt.shots[0].azimuth, svxTrip.shots[0].azi
     0, 1e-6, "Survex round trip: leg 1 true azimuth preserved");
 near(CsAngles.azimuthDifference(svxTripRt.shots[1].azimuth, svxTrip.shots[1].azimuth),
     0, 1e-6, "Survex round trip: leg 2 true azimuth preserved");
+
+// A bare *declination change -- no *date, no *team -- is a correction
+// to one trip, not a second trip: the legs merge, each keeping the
+// true azimuth it was read under, and the collapse is reported once
+// however many legs follow it.
+var svxDeclOnly = CsFormatSurvex.parse(
+    "*data normal from to tape compass clino\r\n" +
+    "*date 2020-01-01\r\n*declination 2.0\r\n" +
+    "D1 D2 10.0 90.0 0.0\r\n" +
+    "*declination 5.0\r\n" +
+    "D2 D3 10.0 90.0 0.0\r\n" +
+    "D3 D4 10.0 90.0 0.0\r\n");
+ok(svxDeclOnly.trips.length === 1,
+    "Survex: a declination change alone does not fork a trip, got " +
+    svxDeclOnly.trips.length);
+near(svxDeclOnly.shots[0].azimuth, 92.0, 1e-9,
+    "Survex declination-only merge: leg 1 keeps its own true azimuth");
+near(svxDeclOnly.shots[2].azimuth, 95.0, 1e-9,
+    "Survex declination-only merge: leg 3 keeps its own true azimuth");
+near(svxDeclOnly.trips[0].declination, 5.0, 1e-9,
+    "Survex declination-only merge: trip records the last value read");
+ok(CsModel.parseFindings(svxDeclOnly).length === 1,
+    "Survex declination-only merge: reported once, not once per leg, got " +
+    CsModel.parseFindings(svxDeclOnly).length);
 
 // Survex team boundary regression: *team is a running append with no
 // block scoping, so without a reset at a *date boundary a second

@@ -412,7 +412,11 @@ CsFormatSurvex.parse = function(content) {
             // scoped to *begin/*end), so the tuple currently on
             // survey.date/survey.team/declination IS what's "in
             // force" right here. tripIdFor dedupes legs that share a
-            // fingerprint into one trip.
+            // fingerprint (date and team) into one trip; a bare
+            // *declination change no longer starts one, so legs either
+            // side of it merge and the collapse is reported once
+            // (CsModel.absorbDeclination). The leg keeps the true
+            // azimuth computed from the declination it was read under.
             var legTrip = CsModel.newTrip();
             legTrip.date = survey.date;
             legTrip.team = survey.team;

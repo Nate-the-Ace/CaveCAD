@@ -32,7 +32,11 @@ CsValidate.checkHasErrors = function(findings) {
 
 /** Runs every check. resolved (from CsNetwork) is optional. */
 CsValidate.check = function(survey, resolved) {
-    var findings = [];
+    // Parse-time findings ride along (CsModel.parseFindings): the
+    // reader saw something the survey no longer shows -- a lossy trip
+    // merge, say -- and this is the one list every report already
+    // prints. A copy, so the survey's own list never grows.
+    var findings = CsModel.parseFindings(survey);
     var shots = survey.shots;
     var i, j, s;
 

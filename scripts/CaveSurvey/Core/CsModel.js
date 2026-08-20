@@ -71,12 +71,19 @@
 // Compass, "--" in Walls, blank in CSV) to null, never to 0.
 //
 // Trip identity: two trip records are "the same trip" when their
-// fingerprint -- date + "|" + declination.toFixed(4) + "|" + team --
-// is equal. Declination is included (to 4 decimals) because the same
-// crew can revisit on the same date with a re-measured declination,
-// and that's a distinct trip for un-applying purposes; name is
-// deliberately NOT part of the fingerprint (it's a label, not
-// identity). See tripFingerprint/tripIdFor.
+// fingerprint -- date + "|" + team -- is equal. A trip IS a party
+// surveying on a day; declination is a measurement ABOUT that trip
+// that gets corrected later, so it is deliberately NOT part of the
+// identity -- with it in, correcting a trip's declination turned it
+// into a DIFFERENT trip and forked a duplicate with conflicting legs.
+// Name is out for the same reason it always was: it's a label, not
+// identity. See tripFingerprint/tripIdFor.
+//
+// Parse findings: survey.parseFindings holds things noticed while a
+// file was READ that no later inspection of the survey could
+// rediscover (see addParseFinding) -- CsValidate.check hands them on
+// so they reach the import summary with every other finding. Absent
+// until something is recorded, and never persisted to a drawing.
 
 var CsModel = {};
 
@@ -154,18 +161,111 @@ CsModel.newTrip = function() {
 
 /**
  * The identity string two trip records are compared by: same date,
- * same declination (to 4 decimals), same team means "the same trip".
- * declination is coerced through Number() and any null/undefined/
- * non-numeric/NaN result falls back to 0.0, so a half-built trip
- * record (or one with a garbage/string declination from a bad parse)
- * still fingerprints instead of throwing out of toFixed.
+ * same team means "the same trip". Declination is NOT in it -- it is
+ * revisable, and identity is not: the revision framework corrects a
+ * trip's declination in place and the trip has to stay the same trip
+ * across that correction. Missing fields read as "", so a half-built
+ * record still fingerprints instead of throwing.
  */
 CsModel.tripFingerprint = function(trip) {
-    var d = Number(trip.declination);
+    return (trip.date || "") + "|" + (trip.team || "");
+};
+
+/**
+ * Records something noticed while READING a file -- a fact the survey
+ * itself no longer shows, so no later check could rediscover it (see
+ * absorbDeclination). Rides the same findings list as CsValidate's
+ * live checks: {severity, shotIndex, code, message}, shotIndex -1 for
+ * survey-wide. An identical code+message is recorded once, because a
+ * per-leg parser hits the same condition on every leg that follows.
+ */
+CsModel.addParseFinding = function(survey, severity, code, message) {
+    if (survey.parseFindings === undefined ||
+            survey.parseFindings === null) {
+        survey.parseFindings = [];
+    }
+    for (var i = 0; i < survey.parseFindings.length; i++) {
+        if (survey.parseFindings[i].code === code &&
+                survey.parseFindings[i].message === message) {
+            return;
+        }
+    }
+    survey.parseFindings.push({ severity: severity, shotIndex: -1,
+        code: code, message: message });
+};
+
+/**
+ * The parse-time findings recorded on a survey, as a COPY -- callers
+ * concatenate their own findings onto it, and must not grow the
+ * survey's list by doing so.
+ */
+CsModel.parseFindings = function(survey) {
+    if (survey.parseFindings === undefined ||
+            survey.parseFindings === null) {
+        return [];
+    }
+    return survey.parseFindings.slice(0);
+};
+
+/** "-2.50 deg", the voice the findings use for a declination. */
+CsModel.declinationText = function(value) {
+    var d = Number(value);
     if (isNaN(d)) {
         d = 0.0;
     }
-    return (trip.date || "") + "|" + d.toFixed(4) + "|" + (trip.team || "");
+    return d.toFixed(2) + " deg";
+};
+
+/**
+ * Folds an incoming trip record's declination into the trip it was
+ * found to BE (same date and team). Nathan's rule: the new value takes
+ * precedence, so the LAST one read governs the trip from then on --
+ * that is a decision, not an accident of iteration order.
+ *
+ * The cost when the two disagree is real and must not be silent: each
+ * shot keeps the TRUE azimuth its own block's declination produced at
+ * parse time, but the trip record holds one value, so a later per-trip
+ * revision corrects the whole trip uniformly -- exact for the shots
+ * read with the kept value, off by the difference for the rest. Say so
+ * in the import summary rather than averaging (a number nobody
+ * measured) or splitting the trip back apart (which is the identity
+ * decision undone).
+ */
+CsModel.absorbDeclination = function(survey, tripIndex, incoming) {
+    var existing = survey.trips[tripIndex];
+    var was = Number(existing.declination);
+    var now = Number(incoming.declination);
+    if (isNaN(was)) {
+        was = 0.0;
+    }
+    if (isNaN(now)) {
+        now = 0.0;
+    }
+    // 4 decimals: finer than any compass, and the granularity trip
+    // identity used to compare declinations at.
+    if (Math.abs(was - now) < 5e-5) {
+        return;
+    }
+    var wasText = CsModel.declinationText(was);
+    var nowText = CsModel.declinationText(now);
+    var label = (existing.name ? "\"" + existing.name + "\"" :
+        "trip " + tripIndex) +
+        " (" + (existing.date || "no date") + ", " +
+        (existing.team || "no team") + ")";
+    CsModel.addParseFinding(survey, "warning", "merged-declination",
+        "Trip " + label + " appears more than once in the file with " +
+        "different declinations, " + wasText + " and " + nowText +
+        "; same date and team is one trip, so it now records " +
+        nowText + " -- the last one read. Every shot keeps the true " +
+        "azimuth its own declination produced, but the trip holds one " +
+        "value: revising it corrects the whole trip at once, exact for " +
+        "the shots read with " + nowText + " and off by " +
+        CsModel.declinationText(Math.abs(now - was)) + " for the rest.");
+
+    existing.declination = now;
+    if (incoming.declinationSource) {
+        existing.declinationSource = incoming.declinationSource;
+    }
 };
 
 /**
@@ -237,12 +337,18 @@ CsModel.tripOf = function(survey, shot) {
  * tripRecord itself when no existing trip matches. Always calls
  * ensureTrips first, so this is safe to call on a survey that has
  * never seen a trip before.
+ *
+ * A match takes the incoming record's declination (absorbDeclination),
+ * which is where a lossy merge gets reported -- since declination left
+ * the fingerprint, two blocks one date and team apart but a
+ * declination apart now land here as ONE trip.
  */
 CsModel.tripIdFor = function(survey, tripRecord) {
     CsModel.ensureTrips(survey);
     var fp = CsModel.tripFingerprint(tripRecord);
     for (var i = 0; i < survey.trips.length; i++) {
         if (CsModel.tripFingerprint(survey.trips[i]) === fp) {
+            CsModel.absorbDeclination(survey, i, tripRecord);
             return i;
         }
     }

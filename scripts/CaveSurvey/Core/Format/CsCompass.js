@@ -72,10 +72,13 @@ CsFormatCompass.parse = function(content) {
 
         var lines = block.split(/\r\n|\r|\n/);
 
-        // Every block is its own trip: SURVEY NAME/DATE/TEAM/
-        // DECLINATION identify it, and CsModel.tripIdFor dedupes
-        // blocks that share a fingerprint (same date+declination+
-        // team) into one trip instead of piling up duplicates.
+        // Every block is its own trip, identified by SURVEY DATE and
+        // SURVEY TEAM: CsModel.tripIdFor dedupes blocks sharing that
+        // fingerprint into one trip instead of piling up duplicates.
+        // Two blocks a DECLINATION apart but the same day and party
+        // are one trip too -- the shots below keep the true azimuths
+        // their own block's declination produced, and the collapse is
+        // reported (CsModel.absorbDeclination).
         var nameMatch = block.match(/SURVEY NAME:\s*(.*)/i);
         var blockName = nameMatch ?
             nameMatch[1].replace(/^\s+|\s+$/g, "") : "";
@@ -117,7 +120,10 @@ CsFormatCompass.parse = function(content) {
             // tripIdFor runs below, so ensureTrips' auto-built trip 0
             // (from these same top-level fields) fingerprints equal to
             // this block's own trip record and gets reused instead of
-            // duplicated -- see CsModel.ensureTrips' WARNING.
+            // duplicated -- see CsModel.ensureTrips' WARNING. Seeding
+            // the declination too matters: without it trip 0 would
+            // start at 0.0 and block 1 would report a merge that never
+            // happened.
             survey.name = blockName;
             survey.date = blockDate;
             survey.team = blockTeam;
