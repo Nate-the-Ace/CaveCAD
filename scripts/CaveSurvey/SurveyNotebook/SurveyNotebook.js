@@ -46,7 +46,7 @@
 // -- and fills the header and ladder from it, azimuths converted back
 // to magnetic by stripping that trip's declination. Edit the shots
 // and press Draw: when a trip with the same fingerprint (date |
-// declination | team, see CsModel.tripFingerprint) already exists in
+// team, see CsModel.tripFingerprint) already exists in
 // the drawing, the page's shots REPLACE that trip inside the full
 // merged survey -- everything is erased by station name and the whole
 // merged survey redraws once, so junctions with other trips stay
@@ -889,7 +889,7 @@ SurveyNotebook.carryHiddenFields = function(oldShots, newShots) {
  * The merge decision: given the RECONSTRUCTED survey (the whole
  * drawing), the page's trip record and the page's shots, builds the
  * merged survey the drawing should now hold. A trip whose fingerprint
- * (date | declination | team -- CsModel.tripFingerprint) matches the
+ * (date | team -- CsModel.tripFingerprint) matches the
  * page is REPLACED: its old shots drop out, the page's shots take its
  * trip id, and its trip record is overwritten by the page's (name and
  * start note/LRUD included -- the page is the revision authority).
@@ -1708,28 +1708,25 @@ SurveyNotebook.inferDeclination = function(w) {
 //   header Decl + Draw   The page's azimuth cells are magnetic, so
 //                        re-drawing with a different Decl produces
 //                        exactly the same TRUE azimuths this dialog
-//                        would (cell + D' == old_true - D + D'). The
-//                        GEOMETRY agrees. The BOOKKEEPING does not:
-//                        declination is part of a trip's fingerprint
-//                        (CsModel.tripFingerprint), so a changed Decl
-//                        no longer matches the trip the page was
-//                        loaded from and the page lands as a NEW trip
-//                        BESIDE it -- the original trip's shots stay
-//                        in the model under the same station names,
-//                        the new trip has no old shots to carry
-//                        backsights or exclusion flags from, and
-//                        nothing is written to the RevisionLog.
+//                        would (cell + D' == old_true - D + D'), and
+//                        since declination came OUT of the fingerprint
+//                        the page still matches the trip it was loaded
+//                        from: it REPLACES that trip rather than
+//                        forking a duplicate beside it. Backsights and
+//                        exclusion flags carry over as usual. What it
+//                        does NOT do is write a RevisionLog entry --
+//                        a redraw is not a recorded revision.
 //   this dialog          Rotates the trip's stored azimuths (and its
 //                        backsights) by the difference, keeps the trip
 //                        where it is, and records the change in the
 //                        RevisionLog. One CsRevise.apply.
 //
-// So this dialog is the correct path for "the declination was wrong",
-// and the header field stays what it always was: the declination the
-// page's own readings were taken under. Said out loud in the dialog's
-// intro and in the Decl field's tooltip, because a user who corrects
-// declination in two places and gets two different results is worse
-// off than with either alone.
+// So both paths now land the same geometry on the same trip, and the
+// difference is what gets RECORDED: this dialog states the correction
+// in the RevisionLog and stamps the trip's declinationSource, which is
+// what makes a revision auditable later. Prefer it for "the
+// declination was wrong"; the header field remains what it always was,
+// the declination the page's own readings were taken under.
 // ---------------------------------------------------------------------
 
 /**
