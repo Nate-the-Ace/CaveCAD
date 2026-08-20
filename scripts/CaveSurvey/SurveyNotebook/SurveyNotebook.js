@@ -846,7 +846,7 @@ SurveyNotebook.buildDock = function(appWin) {
         w.ladderArea = new QScrollArea();
         w.ladderArea.widgetResizable = true;
         w.ladderArea.setWidget(inner);
-        layout.addWidget(w.ladderArea, 1, 0);
+        // added to the splitter below, beside the status box
 
         var rowBar = new QWidget();
         var rowButtons = new QHBoxLayout();
@@ -872,7 +872,7 @@ SurveyNotebook.buildDock = function(appWin) {
         rowButtons.addStretch(1);
         rowBar.setLayout(rowButtons);
         w.rowButtonBar = rowBar;
-        layout.addWidget(rowBar, 0, 0);
+        // added after the splitter below, so it sits under the page
     }
 
     // ---- the text sheet (fallback / branched surveys) ------------------
@@ -884,20 +884,37 @@ SurveyNotebook.buildDock = function(appWin) {
     w.editor.visible = (w.mode === "text");
 
     // ---- live status -----------------------------------------------
-    // Fixed height so the button rows below never move: the ladder is
-    // the only thing that flexes with the panel. Read-only text box
-    // rather than a label -- long reports scroll inside it instead of
-    // reshaping the panel, and NoFocus keeps it out of keyboard flow.
+    // The status box shares a vertical SPLITTER with the notes page:
+    // drag the handle to give either more room; the button rows below
+    // never move. Read-only, NoFocus, and toggleable via the Status
+    // button in the action row (visibility remembered).
     w.statusLabel = new QPlainTextEdit();
     w.statusLabel.readOnly = true;
-    w.statusLabel.minimumHeight = 96;
-    w.statusLabel.maximumHeight = 96;
+    w.statusLabel.minimumHeight = 40;
     try {
         w.statusLabel.focusPolicy = Qt.NoFocus;
     } catch (eFp) {
         // cosmetic
     }
-    layout.addWidget(w.statusLabel, 0, 0);
+
+    if (w.mode === "ladder") {
+        w.splitter = new QSplitter(Qt.Vertical);
+        w.splitter.addWidget(w.ladderArea);
+        w.splitter.addWidget(w.statusLabel);
+        try {
+            w.splitter.setStretchFactor(0, 4); // the page gets the growth
+            w.splitter.setStretchFactor(1, 1);
+        } catch (eSf) {
+            // cosmetic
+        }
+        layout.addWidget(w.splitter, 1, 0);
+        layout.addWidget(w.rowButtonBar, 0, 0);
+    } else {
+        layout.addWidget(w.statusLabel, 0, 0);
+        w.statusLabel.maximumHeight = 96;
+    }
+    w.statusLabel.visible =
+        RSettings.getBoolValue("CaveSurvey/NotebookStatusVisible", true);
 
     // ---- actions ------------------------------------------------------
     var actions = new QHBoxLayout();
@@ -905,6 +922,9 @@ SurveyNotebook.buildDock = function(appWin) {
     w.drawButton.toolTip = "Draw the survey into the drawing, one undo step.";
     w.importButton = new QPushButton("Import File...");
     w.exportButton = new QPushButton("Export File...");
+    w.statusButton = new QPushButton("Status");
+    w.statusButton.toolTip = "Show/hide the live status box (drag the " +
+        "bar above it to resize).";
     w.clearButton = new QPushButton("Clear");
     w.clearButton.toolTip = "Empty the page for the next survey. The " +
         "trip header (name, date, team, declination) is kept; nothing " +
@@ -912,6 +932,7 @@ SurveyNotebook.buildDock = function(appWin) {
     actions.addWidget(w.drawButton, 0, 0);
     actions.addWidget(w.importButton, 0, 0);
     actions.addWidget(w.exportButton, 0, 0);
+    actions.addWidget(w.statusButton, 0, 0);
     actions.addWidget(w.clearButton, 0, 0);
     layout.addLayout(actions, 0);
 
@@ -996,6 +1017,11 @@ SurveyNotebook.buildDock = function(appWin) {
     SurveyNotebook.safeConnect(w.inferButton.clicked, function() {
         SurveyNotebook.inferDeclination(w);
     }, "Infer button", w.problems);
+    SurveyNotebook.safeConnect(w.statusButton.clicked, function() {
+        w.statusLabel.visible = !w.statusLabel.visible;
+        RSettings.setValue("CaveSurvey/NotebookStatusVisible",
+            w.statusLabel.visible);
+    }, "Status button", w.problems);
     SurveyNotebook.safeConnect(w.clearButton.clicked, function() {
         var sure = QMessageBox.question(null, "Survey Notebook",
             "Clear the page? The trip header stays; the drawing is " +
