@@ -23,6 +23,7 @@ CsLayers.HIDDEN = "CTRL-HIDDEN";
 CsLayers.LRUD_WALL_LEFT = "CTRL-LRUD-WALL-LEFT";
 CsLayers.LRUD_WALL_RIGHT = "CTRL-LRUD-WALL-RIGHT";
 CsLayers.GRID = "CTRL-GRID";
+CsLayers.AERIAL = "CTRL-AERIAL";
 
 // Feature layers the tools write to.
 CsLayers.WALLS_SURVEYED = "WALLS-SURVEYED";
@@ -53,6 +54,7 @@ CsLayers.DEFAULTS = {
     "CTRL-HIDDEN": ["gray", "CONTINUOUS", "Weight000"],
     "CTRL-LRUD-WALL-LEFT": ["gray", "DASHED", "Weight000"],
     "CTRL-LRUD-WALL-RIGHT": ["gray", "DASHED", "Weight000"],
+    "CTRL-AERIAL": ["gray", "CONTINUOUS", "Weight000"],
     "WALLS-SURVEYED": ["white", "CONTINUOUS", "Weight050"],
     "WALLS-INFERRED": ["gray", "DASHED", "Weight025"],
     "BREAKDOWN": ["white", "CONTINUOUS", "Weight000"],
@@ -155,4 +157,5 @@ CsLayers.ensureSurveyLayers = function(doc, di) {
     CsLayers.ensure(doc, di, CsLayers.LRUD);
     CsLayers.ensure(doc, di, CsLayers.SPLAYS);
     CsLayers.ensure(doc, di, CsLayers.HIDDEN);
+    CsLayers.ensure(doc, di, CsLayers.AERIAL);
 };
