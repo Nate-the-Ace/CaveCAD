@@ -522,28 +522,112 @@ CsRevise.classifyChange = function(oldResolved, newResolved, extent) {
 // ---------------------------------------------------------------------
 
 /**
+ * Layers whose entities are WORLD-FIXED: the rigid path transforms
+ * every other entity in the drawing, and never one of these.
+ *
+ *   "TB_*"         title-block sheet furniture. It belongs to the
+ *                  SHEET, not to the cave, so it must not travel when
+ *                  the cave is re-oriented underneath it.
+ *   "CTRL-AERIAL"  georeferenced aerial basemap imagery. It is pinned
+ *                  to the GROUND. A declination revision re-orients
+ *                  the survey relative to true north -- that is the
+ *                  whole point of it -- so rotating the photo along
+ *                  with the survey would destroy the photo's
+ *                  georeferencing and silently misalign the imagery
+ *                  under the cave.
+ *
+ * Entries are matched as literal layer names, or as prefixes when they
+ * end in "*". Deliberately spelled out here rather than pulled from
+ * CsLayers: this module stays free of any dependency on constants that
+ * file may not define yet.
+ */
+CsRevise.WORLD_FIXED_LAYERS = ["TB_*", "CTRL-AERIAL"];
+
+/** True when entities on layerName must NOT move with the cave (see
+ *  CsRevise.WORLD_FIXED_LAYERS). */
+CsRevise.isWorldFixedLayer = function(layerName) {
+    var name = (layerName === undefined || layerName === null) ? "" :
+        String(layerName);
+    for (var i = 0; i < CsRevise.WORLD_FIXED_LAYERS.length; i++) {
+        var pat = CsRevise.WORLD_FIXED_LAYERS[i];
+        if (pat.charAt(pat.length - 1) === "*") {
+            if (name.indexOf(pat.substring(0, pat.length - 1)) === 0) {
+                return true;
+            }
+        } else if (name === pat) {
+            return true;
+        }
+    }
+    return false;
+};
+
+/**
  * Applies a revised survey model to the drawing it was reconstructed
  * from.
  *
  * Both the old survey (recon.survey) and newSurvey resolve over the
- * SAME anchor -- the reconstruction's trip-0 anchor at its drawn
- * position -- so old station coordinates equal drawing coordinates
- * and the two results are directly comparable. classifyChange then
- * decides the strategy:
+ * SAME anchor, so old station coordinates equal drawing coordinates
+ * and the two results are directly comparable. That anchor is the one
+ * point the revision pivots on -- the one point it does NOT move --
+ * chosen in this order:
+ *
+ *   1. georef  the station named by the drawing's GeoStation tag, at
+ *              its CURRENT position. It is the drawing's single point
+ *              of contact with the real world (a basemap aligns to it,
+ *              an export derives coordinates from it), so a revision
+ *              must never move it. Taken only when that point is still
+ *              in the drawing and takes part in the resolved network.
+ *   2. trip0   recon.anchorName -- the trip-0 anchor -- at its CURRENT
+ *              position.
+ *   3. stale   recon.anchorPos, when the anchor point is gone from the
+ *              drawing altogether.
+ *
+ * "Current" is load-bearing: recon.anchorPos was captured whenever
+ * surveyFromDocument ran, and the point may have been dragged (by the
+ * user, or by any other tool) in between. Resolving against the stale
+ * value would compute the rigid translation for a position the entity
+ * no longer occupies and land the whole drawing offset by
+ * (I - R(theta)) * (stalePos - realPos). So apply re-reads positions
+ * from the document -- the drawing is the truth. A trip-0 anchor drag
+ * beyond 1e-9 is surfaced as report.anchorMoved {dx, dy} (the only
+ * position the reconstruction snapshotted, hence the only one there is
+ * anything to compare against); a vanished anchor point sets
+ * report.anchorMissing. report.anchorUsed says which point won.
+ *
+ * classifyChange then decides the strategy:
  *
  *   RIGID   the whole plan moved as one body (a declination revision,
  *           say). ONE modify operation transforms EVERY entity in the
  *           document -- survey marks AND hand-drawn linework -- by the
- *           fitted similarity, except entities on layers named "TB_*"
- *           (title-block sheet furniture, which must not move with the
- *           cave). The same operation rewrites the tags the revision
- *           touched: leg/splay Azimuth (+ BackAzimuth when present)
- *           from the matching newSurvey shot (matched by Trip +
- *           ShotSeq), each trip anchor's TripDeclination/
- *           TripDeclinationSource, the legacy Declination/
- *           DeclinationSource on the trip-0 anchor, and an appended
- *           RevisionLog line per changed trip. Station-point Azimuth
- *           tags stay as-is (accepted stale -- legs are canonical).
+ *           fitted similarity, except entities on a world-fixed layer
+ *           (see CsRevise.WORLD_FIXED_LAYERS). The same operation
+ *           rewrites every tag the revision touched:
+ *             leg/splay   Distance, Azimuth, BackAzimuth (when
+ *                         present) and the four LRUD lengths, all from
+ *                         the matching newSurvey shot
+ *                         (matched by Trip + ShotSeq) and formatted
+ *                         exactly as CsDraw's legTags would, so a
+ *                         rewritten tag is byte-identical to a freshly
+ *                         drawn one. Lengths matter because a rigid
+ *                         revision can carry a uniform SCALE (a unit
+ *                         re-interpretation): scaling the geometry and
+ *                         leaving Distance/LRUD alone would make
+ *                         surveyFromDocument faithfully reconstruct the
+ *                         WRONG distances.
+ *             station     Elevation (the resolved z, which a scale
+ *                         changes) and, where newSurvey still fixes the
+ *                         station, its Fixed "x,y,z" triple
+ *             trip anchor TripDeclination/TripDeclinationSource/
+ *                         TripDistanceUnit, plus on the trip-0 anchor
+ *                         the legacy Declination/DeclinationSource/
+ *                         DistanceUnit mirror, the regenerated
+ *                         ExcludedShots/UnplacedShots row blobs (their
+ *                         rows carry revised distances and azimuths of
+ *                         their own), and an appended RevisionLog line
+ *                         per changed trip.
+ *           Station-point Azimuth and LRUD tags stay as-is (accepted
+ *           stale -- the leg tags are canonical, and no reader takes
+ *           shot data off a station point on a v3 drawing).
  *
  *   NOT     the survey genuinely changed shape: erase every station's
  *           marks (CsDraw.eraseStations) and redraw the revised survey
@@ -569,23 +653,129 @@ CsRevise.classifyChange = function(oldResolved, newResolved, extent) {
  *   stationsChanged how many stations moved more than the rigidity eps
  *   loopsBefore     [{from, to, error, percent}] loop closures before
  *   loopsAfter      the same loops after the revision
+ *   anchorMoved     {dx, dy} when the trip-0 anchor point had been
+ *                   dragged since the reconstruction (null when it had
+ *                   not); the revision used the CURRENT position
+ *   anchorMissing   true when no point carrying the trip-0 anchor's
+ *                   Station tag is left in the drawing, so
+ *                   recon.anchorPos had to stand in
+ *   anchorUsed      {name, source} the point the revision pivoted on;
+ *                   source is "georef", "trip0" or "stale"
  * }
  */
 CsRevise.apply = function(doc, di, recon, newSurvey) {
     CsModel.ensureTrips(recon.survey);
     CsModel.ensureTrips(newSurvey);
 
-    // -- 1. old and new resolved over the identical anchor -----------
-    var anchorZ = 0.0;
-    var fxAnchor = recon.survey.fixed[recon.anchorName];
-    if (fxAnchor !== undefined && fxAnchor !== null &&
-            fxAnchor.z !== undefined && fxAnchor.z !== null) {
-        anchorZ = fxAnchor.z;
+    // -- 0. the point this revision pivots on ------------------------
+    // Read live, never from the reconstruction's snapshot: a revision
+    // must land where its anchor actually IS. Both resolves (and the
+    // non-rigid redraw) use the one choice made here.
+
+    /** The current position of the point tagged Station = name, or
+     *  null when the drawing has no such point any more. */
+    var livePosOf = function(name) {
+        if (name === "" || name === null || name === undefined) {
+            return null;
+        }
+        var lids = doc.queryAllEntities(false, false);
+        for (var lidx = 0; lidx < lids.length; lidx++) {
+            var le = doc.queryEntity(lids[lidx]);
+            if (isNull(le) || typeof le.getPosition !== "function") {
+                continue;
+            }
+            if (CsTags.get(le, "Station") === name) {
+                return le.getPosition();
+            }
+        }
+        return null;
+    };
+
+    // The drawing's georeferenced station, read straight off the tags:
+    // surveyFromDocument drops GeoLat/GeoLon/GeoStation (CsModel has no
+    // geo field to put them in), so this module looks them up itself.
+    var geoName = "";
+    var gids = doc.queryAllEntities(false, false);
+    for (var gi = 0; gi < gids.length; gi++) {
+        var ge = doc.queryEntity(gids[gi]);
+        if (isNull(ge)) {
+            continue;
+        }
+        var gs = CsTags.get(ge, "GeoStation");
+        if (gs !== "") {
+            geoName = gs;
+            break;
+        }
     }
-    var anchor = { name: recon.anchorName,
-        x: recon.anchorPos !== null ? recon.anchorPos.x : 0.0,
-        y: recon.anchorPos !== null ? recon.anchorPos.y : 0.0,
-        z: anchorZ };
+
+    var anchorName = recon.anchorName;
+    var anchorPos = recon.anchorPos;
+    var anchorSource = "stale";
+    var anchorMoved = null;
+    var anchorMissing = false;
+
+    // trip-0 anchor, re-read (the drag Defect 2 was about)
+    var trip0Live = livePosOf(recon.anchorName);
+    if (recon.anchorName !== "" && recon.anchorName !== null &&
+            recon.anchorName !== undefined) {
+        if (trip0Live === null) {
+            anchorMissing = true;
+        } else {
+            if (recon.anchorPos !== null && recon.anchorPos !== undefined) {
+                var adx = trip0Live.x - recon.anchorPos.x;
+                var ady = trip0Live.y - recon.anchorPos.y;
+                if (Math.sqrt(adx * adx + ady * ady) > 1e-9) {
+                    anchorMoved = { dx: adx, dy: ady };
+                }
+            }
+            anchorPos = trip0Live;
+            anchorSource = "trip0";
+        }
+    }
+
+    var anchorZOf = function(name) {
+        var fx = recon.survey.fixed[name];
+        if (fx !== undefined && fx !== null && fx.z !== undefined &&
+                fx.z !== null) {
+            return fx.z;
+        }
+        return 0.0;
+    };
+    var anchorAt = function(name, pos) {
+        return { name: name,
+            x: pos !== null && pos !== undefined ? pos.x : 0.0,
+            y: pos !== null && pos !== undefined ? pos.y : 0.0,
+            z: anchorZOf(name) };
+    };
+
+    // The georeferenced station WINS. It is the drawing's one point of
+    // contact with the real world -- pinned to a physical spot on the
+    // ground, and what a basemap or a KML export derives real-world
+    // coordinates from. Pivoting anywhere else moves it, silently
+    // breaking every such derivation. It is only the trip-0 anchor by
+    // coincidence, whenever the surveyor happens to georeference the
+    // station the survey also starts at. Taken only when the point is
+    // still in the drawing AND takes part in the resolved network
+    // (probed with the trip-0 anchor, which is also the fallback
+    // choice) -- a name that resolves to nothing would anchor the
+    // revision to a phantom.
+    if (geoName !== "" && geoName === anchorName && anchorSource === "trip0") {
+        anchorSource = "georef"; // the same point, world-pinned as well
+    } else if (geoName !== "" && geoName !== anchorName) {
+        var geoLive = livePosOf(geoName);
+        if (geoLive !== null) {
+            var probe = CsNetwork.resolve(recon.survey,
+                { anchor: anchorAt(anchorName, anchorPos) });
+            if (probe.stations.hasOwnProperty(geoName)) {
+                anchorName = geoName;
+                anchorPos = geoLive;
+                anchorSource = "georef";
+            }
+        }
+    }
+
+    // -- 1. old and new resolved over the identical anchor -----------
+    var anchor = anchorAt(anchorName, anchorPos);
     var oldResolved = CsNetwork.resolve(recon.survey, { anchor: anchor });
     var newResolved = CsNetwork.resolve(newSurvey, { anchor: anchor });
 
@@ -672,8 +862,8 @@ CsRevise.apply = function(doc, di, recon, newSurvey) {
             continue;
         }
         var oln = doc.getLayerName(oe.getLayerId());
-        if (seenLayer[oln] === true || oln.indexOf("TB_") === 0) {
-            continue;
+        if (seenLayer[oln] === true || CsRevise.isWorldFixedLayer(oln)) {
+            continue; // nothing on a world-fixed layer is ever modified
         }
         seenLayer[oln] = true;
         try {
@@ -710,12 +900,45 @@ CsRevise.apply = function(doc, di, recon, newSurvey) {
         // newSurvey shots by (trip, per-trip seq) -- the same counters
         // CsDraw stamps as ShotSeq, so drawn legs/splays match exactly
         var newShotByKey = {};
+        var newSeqOf = [];      // shot index -> its per-trip ShotSeq
         var seqCounters = {};
         for (var ni = 0; ni < newSurvey.shots.length; ni++) {
             var nTrip = newSurvey.shots[ni].trip || 0;
             var nSeq = seqCounters[nTrip] || 0;
             seqCounters[nTrip] = nSeq + 1;
             newShotByKey[nTrip + ":" + nSeq] = newSurvey.shots[ni];
+            newSeqOf[ni] = nSeq;
+        }
+
+        // The shots the drawing can't show as geometry ride the trip-0
+        // anchor as serialized rows -- and those rows carry their own
+        // distances, LRUD and azimuths, every one of which the revision
+        // may have changed. Regenerate them exactly as CsDraw does
+        // (excluded shots in shot order, then the unresolved ones in
+        // resolve order) so the reconstruction reads back the REVISED
+        // rows. Note the one gap CsTags leaves: a blob that becomes
+        // empty cannot be cleared, only overwritten, so a shot that
+        // stops being excluded keeps a stale row until the next redraw.
+        var exRows = [], unRows = [];
+        for (ni = 0; ni < newSurvey.shots.length; ni++) {
+            if (newSurvey.shots[ni].excludeFromAll) {
+                exRows.push((newSurvey.shots[ni].trip || 0) + "\t" +
+                    newSeqOf[ni] + "\t" +
+                    CsModel.shotRowText(newSurvey.shots[ni]));
+            }
+        }
+        for (var ui = 0; ui < newResolved.unresolved.length; ui++) {
+            var ush = newResolved.unresolved[ui];
+            var uSeq = null;
+            for (ni = 0; ni < newSurvey.shots.length; ni++) {
+                if (newSurvey.shots[ni] === ush) {
+                    uSeq = newSeqOf[ni];
+                    break;
+                }
+            }
+            unRows.push((ush.trip || 0) + "\t" +
+                (uSeq === null ? 0 : uSeq) + "\t" +
+                CsModel.shotRowText(ush));
         }
 
         withOffLayersOn(0, function() {
@@ -727,8 +950,9 @@ CsRevise.apply = function(doc, di, recon, newSurvey) {
                 if (isNull(e)) {
                     continue;
                 }
-                if (doc.getLayerName(e.getLayerId()).indexOf("TB_") === 0) {
-                    continue; // sheet furniture stays put
+                if (CsRevise.isWorldFixedLayer(
+                        doc.getLayerName(e.getLayerId()))) {
+                    continue; // sheet furniture and ground-pinned imagery
                 }
                 e.rotate(fit.theta, origin);
                 if (doScale) {
@@ -736,8 +960,17 @@ CsRevise.apply = function(doc, di, recon, newSurvey) {
                 }
                 e.move(new RVector(fit.tx, fit.ty));
 
-                // legs and splays: revised azimuths from the matching
-                // newSurvey shot
+                // legs and splays: every revised reading from the
+                // matching newSurvey shot. The LENGTHS come along --
+                // Distance and the four LRUD sides -- because a rigid
+                // fit may carry a uniform scale, and geometry scaled
+                // under tags that still claim the old lengths is
+                // exactly the silent drift this module exists to
+                // prevent. Written unconditionally: for a pure
+                // declination revision the values are identical, so
+                // this is a no-op there. Formatting matches CsDraw's
+                // legTags field for field, so a rewritten tag is
+                // byte-identical to a freshly drawn one.
                 if (CsTags.get(e, "Distance") !== "" &&
                         (CsTags.get(e, "From") !== "" ||
                          CsTags.get(e, "Splay") !== "")) {
@@ -747,18 +980,49 @@ CsRevise.apply = function(doc, di, recon, newSurvey) {
                         newShotByKey[(eTrip === null ? 0 : eTrip) +
                             ":" + eSeq];
                     if (match !== undefined) {
+                        CsTags.set(e, "Distance", match.distance);
                         CsTags.set(e, "Azimuth", match.azimuth);
                         if (match.backAzimuth !== null &&
                                 match.backAzimuth !== undefined) {
                             CsTags.set(e, "BackAzimuth", match.backAzimuth);
                         }
+                        CsTags.set(e, "Left",
+                            CsModel.lrudEntryText(match.left, match.leftAll));
+                        CsTags.set(e, "Right",
+                            CsModel.lrudEntryText(match.right,
+                                match.rightAll));
+                        CsTags.set(e, "Up",
+                            CsModel.lrudEntryText(match.up, match.upAll));
+                        CsTags.set(e, "Down",
+                            CsModel.lrudEntryText(match.down, match.downAll));
+                    }
+                }
+
+                // station points: the two tags that carry a LENGTH and
+                // therefore go stale under a scale -- the resolved
+                // Elevation, and the Fixed "x,y,z" triple (which the
+                // v3 reader really does read back into survey.fixed).
+                // Azimuth/LRUD on station points stay as-is, accepted
+                // stale: the leg tags are canonical.
+                var stName = CsTags.get(e, "Station");
+                if (stName !== "") {
+                    var nSt = newResolved.stations[stName];
+                    if (nSt !== undefined && nSt !== null) {
+                        CsTags.set(e, "Elevation", nSt.z);
+                    }
+                    if (CsTags.get(e, "Fixed") !== "" &&
+                            newSurvey.fixed.hasOwnProperty(stName)) {
+                        var nfx = newSurvey.fixed[stName];
+                        CsTags.set(e, "Fixed", nfx.x + "," + nfx.y + "," +
+                            (nfx.z === undefined || nfx.z === null ?
+                                0 : nfx.z));
                     }
                 }
 
                 // trip anchor points: revised trip metadata; the trip-0
-                // anchor also the legacy mirror and the RevisionLog
-                if (CsTags.get(e, "Station") !== "" &&
-                        CsTags.get(e, "Trip") !== "") {
+                // anchor also the legacy mirror, the serialized rows
+                // and the RevisionLog
+                if (stName !== "" && CsTags.get(e, "Trip") !== "") {
                     var aTrip = CsTags.getNumber(e, "Trip");
                     aTrip = aTrip === null ? 0 : aTrip;
                     if (newSurvey.trips[aTrip] !== undefined) {
@@ -766,11 +1030,18 @@ CsRevise.apply = function(doc, di, recon, newSurvey) {
                             newSurvey.trips[aTrip].declination);
                         CsTags.set(e, "TripDeclinationSource",
                             newSurvey.trips[aTrip].declinationSource);
+                        // a unit re-interpretation is what a scale IS
+                        CsTags.set(e, "TripDistanceUnit",
+                            newSurvey.trips[aTrip].distanceUnit);
                     }
                     if (aTrip === 0) {
                         CsTags.set(e, "Declination", newSurvey.declination);
                         CsTags.set(e, "DeclinationSource",
                             newSurvey.declinationSource);
+                        CsTags.set(e, "DistanceUnit",
+                            newSurvey.distanceUnit);
+                        CsTags.set(e, "ExcludedShots", exRows.join("\n"));
+                        CsTags.set(e, "UnplacedShots", unRows.join("\n"));
                         CsTags.set(e, "RevisionLog", newLog);
                     }
                 }
@@ -794,8 +1065,7 @@ CsRevise.apply = function(doc, di, recon, newSurvey) {
         withOffLayersOn(0, function() {
             CsDraw.eraseStations(doc, oldNames);
         });
-        CsDraw.survey(newSurvey, newResolved, recon.anchorName,
-            recon.anchorPos);
+        CsDraw.survey(newSurvey, newResolved, anchorName, anchorPos);
         // the redraw wrote fresh v3 tags but knows nothing of history:
         // carry the appended RevisionLog onto the new trip-0 anchor
         if (newLog !== "") {
@@ -824,6 +1094,9 @@ CsRevise.apply = function(doc, di, recon, newSurvey) {
         moved: cls.moved,
         stationsChanged: stationsChanged,
         loopsBefore: loopBrief(oldResolved),
-        loopsAfter: loopBrief(newResolved)
+        loopsAfter: loopBrief(newResolved),
+        anchorMoved: anchorMoved,
+        anchorMissing: anchorMissing,
+        anchorUsed: { name: anchorName, source: anchorSource }
     };
 };
