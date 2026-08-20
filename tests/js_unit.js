@@ -2468,6 +2468,310 @@ if (!IS_NODE) {
             summary.indexOf("re-trace") >= 0,
             "apply-redraw: summary warns about hand-drawn linework");
     })();
+
+    // -----------------------------------------------------------------
+    // RebuildSurveyData: upgrading a drawing to tag schema v3.
+    //
+    // The tool file is loaded like a Core file (loadRepoScript strips
+    // its include() lines); its wiring block runs at load and needs an
+    // EAction base class, which the headless engine has no GUI for --
+    // stub one if the real class isn't there.
+    // -----------------------------------------------------------------
+    if (typeof EAction === "undefined") {
+        EAction = function() {};
+        EAction.prototype.beginEvent = function() {};
+        EAction.prototype.terminate = function() {};
+        EAction.handleUserMessage = function() {};
+    }
+    loadRepoScript(
+        "scripts/CaveSurvey/RebuildSurveyData/RebuildSurveyData.js");
+
+    // every tagged station name -> its drawn position
+    var rsdPositions = function(doc) {
+        var out = {};
+        var sts = CsTags.collectStations(doc);
+        for (var i = 0; i < sts.length; i++) {
+            out[sts[i].name] = { x: sts[i].pos.x, y: sts[i].pos.y };
+        }
+        return out;
+    };
+    // the v3 leg line for one shot, or null
+    var rsdLeg = function(doc, from, to) {
+        var ids = doc.queryAllEntities(false, false);
+        for (var i = 0; i < ids.length; i++) {
+            var e = doc.queryEntity(ids[i]);
+            if (isNull(e)) {
+                continue;
+            }
+            if (CsTags.get(e, "From") === from &&
+                    CsTags.get(e, "To") === to &&
+                    CsTags.get(e, "Distance") !== "") {
+                return e;
+            }
+        }
+        return null;
+    };
+
+    // ---- plan -> slope conversion, including the vertical guard -----
+    (function() {
+        var vsv = CsModel.newSurvey();
+        var vLevel = shotOf("V1", "V2", 5, 0, 0);
+        var vSteep = shotOf("V2", "V3", 5, 90, 60);
+        var vVert = shotOf("V3", "V4", 1e-7, 0, 90);   // straight down/up
+        vsv.shots.push(vLevel);
+        vsv.shots.push(vSteep);
+        vsv.shots.push(vVert);
+        var conv = RebuildSurveyData.toSlopeDistances(vsv);
+        ok(conv.scaled === 1, "rsd-slope: one shot rescaled, got " +
+            conv.scaled);
+        ok(conv.vertical === 1, "rsd-slope: one vertical shot skipped, " +
+            "got " + conv.vertical);
+        near(vLevel.distance, 5, 1e-12,
+            "rsd-slope: a level shot's plan length IS its slope length");
+        near(vSteep.distance, 5 / Math.cos(60 * Math.PI / 180), 1e-9,
+            "rsd-slope: inclined shot scaled by 1/cos(inclination)");
+        near(vVert.distance, 1e-7, 1e-15,
+            "rsd-slope: a vertical shot has no plan length to scale -- " +
+            "distance left exactly as drawn");
+    })();
+
+    // ---- LEGACY UPGRADE: hand-tagged station points, no leg data ----
+    (function() {
+        var doc = new RDocument(new RMemoryStorage(), new RSpatialIndexNavel());
+        var di = new RDocumentInterface(doc);
+        getDocument = function() { return doc; };
+        getDocumentInterface = function() { return di; };
+
+        // a 2-shot chain drawn by a pre-v3 build: station POINTS with
+        // the old per-station tags and the legacy survey block, and no
+        // leg lines at all. Geometry is PLAN, so the inclined shot's
+        // drawn length is 10 * cos(30).
+        var INC = 30.0;
+        var plan = 10.0 * Math.cos(INC * Math.PI / 180.0);
+        CsLayers.ensureSurveyLayers(doc, di);
+        var op = new RAddObjectsOperation();
+        var q1 = CsDraw.addPoint(doc, op, CsLayers.STATIONS,
+            new RVector(0, 0));
+        CsTags.tagStation(q1, { name: "Q1", seq: 0, azimuth: 0,
+            inclination: 0, z: 0, note: "entrance" });
+        CsTags.set(q1, "SurveyName", "OLD CAVE");
+        CsTags.set(q1, "SurveyDate", "1994-06-01");
+        CsTags.set(q1, "SurveyTeam", "N. Schonegg, K. Lee");
+        CsTags.set(q1, "Declination", 3.5);
+        CsTags.set(q1, "DeclinationSource", "user");
+        CsTags.set(q1, "DistanceUnit", "ft");
+        op.addObject(q1, false);
+        var q2 = CsDraw.addPoint(doc, op, CsLayers.STATIONS,
+            new RVector(0, 10));
+        CsTags.tagStation(q2, { name: "Q2", seq: 1, azimuth: 0,
+            inclination: 0, z: 0, left: 2, right: 3 });
+        op.addObject(q2, false);
+        var q3 = CsDraw.addPoint(doc, op, CsLayers.STATIONS,
+            new RVector(plan, 10));
+        CsTags.tagStation(q3, { name: "Q3", seq: 2, azimuth: 90,
+            inclination: INC, z: 10.0 * Math.sin(INC * Math.PI / 180.0) });
+        op.addObject(q3, false);
+        di.applyOperation(op);
+
+        var before = CsRevise.surveyFromDocument(doc);
+        ok(before.legacy === true,
+            "rsd-upgrade: fixture starts as a legacy drawing");
+        var posBefore = rsdPositions(doc);
+
+        var rep = RebuildSurveyData.rebuild(doc, di);
+        ok(rep.mode === "upgrade", "rsd-upgrade: mode 'upgrade', got '" +
+            rep.mode + "'");
+        ok(rep.inferred === true,
+            "rsd-upgrade: report flags inferred distances");
+        ok(rep.stations === 3 && rep.shots === 2,
+            "rsd-upgrade: 3 stations / 2 shots reported, got " +
+            rep.stations + " / " + rep.shots);
+        ok(rep.vertical === 0,
+            "rsd-upgrade: no near-vertical shots in this fixture, got " +
+            rep.vertical);
+        ok(rep.message.indexOf(
+            "inferred from geometry (slope = plan/cos(inclination))")
+            >= 0, "rsd-upgrade: report says distances were inferred, got '" +
+            rep.message + "'");
+
+        // (a) the drawing is no longer legacy
+        var after = CsRevise.surveyFromDocument(doc);
+        ok(after.legacy === false,
+            "rsd-upgrade: reconstruction is v3, not legacy");
+
+        // (b) legs now carry Distance tags
+        var legA = rsdLeg(doc, "Q1", "Q2");
+        var legB = rsdLeg(doc, "Q2", "Q3");
+        ok(legA !== null, "rsd-upgrade: Q1->Q2 leg carries shot data");
+        ok(legB !== null, "rsd-upgrade: Q2->Q3 leg carries shot data");
+        if (legA !== null) {
+            near(CsTags.getNumber(legA, "Distance"), 10.0, 1e-6,
+                "rsd-upgrade: level shot distance unchanged");
+        }
+        // (c) the inclined shot's distance is plan / cos(inclination)
+        if (legB !== null) {
+            near(CsTags.getNumber(legB, "Distance"),
+                plan / Math.cos(INC * Math.PI / 180.0), 1e-6,
+                "rsd-upgrade: inclined shot distance = plan/cos(inc)");
+            near(CsTags.getNumber(legB, "Distance"), 10.0, 1e-6,
+                "rsd-upgrade: inclined shot recovers its slope length");
+            near(CsTags.getNumber(legB, "Inclination"), INC, 1e-9,
+                "rsd-upgrade: inclination carried onto the leg");
+        }
+
+        // (d) station positions untouched
+        var posAfter = rsdPositions(doc);
+        var pn;
+        for (pn in posBefore) {
+            if (posBefore.hasOwnProperty(pn)) {
+                ok(posAfter[pn] !== undefined,
+                    "rsd-upgrade: station " + pn + " survived");
+                if (posAfter[pn] !== undefined) {
+                    near(posAfter[pn].x, posBefore[pn].x, 1e-9,
+                        "rsd-upgrade: " + pn + " x unchanged");
+                    near(posAfter[pn].y, posBefore[pn].y, 1e-9,
+                        "rsd-upgrade: " + pn + " y unchanged");
+                }
+            }
+        }
+
+        // (e) trip 0 carries the legacy metadata block
+        ok(after.survey.trips.length === 1,
+            "rsd-upgrade: one trip, got " + after.survey.trips.length);
+        if (after.survey.trips.length >= 1) {
+            var t0 = after.survey.trips[0];
+            ok(t0.date === "1994-06-01",
+                "rsd-upgrade: trip 0 date, got '" + t0.date + "'");
+            ok(t0.team === "N. Schonegg, K. Lee",
+                "rsd-upgrade: trip 0 team, got '" + t0.team + "'");
+            near(t0.declination, 3.5, 1e-9,
+                "rsd-upgrade: trip 0 declination");
+            ok(t0.declinationSource === "user",
+                "rsd-upgrade: trip 0 declination source, got '" +
+                t0.declinationSource + "'");
+            ok(t0.distanceUnit === "ft",
+                "rsd-upgrade: trip 0 distance unit, got '" +
+                t0.distanceUnit + "'");
+        }
+        ok(after.survey.caveName === "OLD CAVE",
+            "rsd-upgrade: legacy SurveyName becomes the cave name, got '" +
+            after.survey.caveName + "'");
+        ok(after.survey.startNote === "entrance",
+            "rsd-upgrade: start note carried through, got '" +
+            after.survey.startNote + "'");
+        // the LRUD the old station tags carried rides its shot now
+        if (after.survey.shots.length === 2) {
+            near(after.survey.shots[0].left, 2, 1e-9,
+                "rsd-upgrade: legacy LRUD carried onto the shot");
+            near(after.survey.shots[0].right, 3, 1e-9,
+                "rsd-upgrade: legacy LRUD right carried onto the shot");
+        }
+    })();
+
+    // ---- IDEMPOTENCE: running twice on a v3 drawing changes nothing --
+    (function() {
+        var doc = new RDocument(new RMemoryStorage(), new RSpatialIndexNavel());
+        var di = new RDocumentInterface(doc);
+        getDocument = function() { return doc; };
+        getDocumentInterface = function() { return di; };
+
+        var S = CsModel.newSurvey();
+        S.caveName = "IDEM CAVE";
+        S.date = "2019-03-03";
+        S.team = "Cara";
+        S.declination = 1.25;
+        S.declinationSource = "igrf";
+        S.startNote = "gate is locked";
+        S.startLrud = { left: 1, right: 2, up: 3, down: 4,
+            leftAll: null, rightAll: null, upAll: null, downAll: null };
+        var i0 = shotOf("I1", "I2", 10, 0);
+        i0.left = 2; i0.right = 3; i0.up = 1; i0.down = 0.5;
+        var i1 = shotOf("I2", "I3", 10, 90, 15);
+        i1.notes = "steep bit";
+        var i2 = shotOf("I2", "J1", 8, 200, -10);   // branch
+        var i3 = shotOf("I3", "", 4, 45);           // splay
+        i3.splay = true;
+        S.shots.push(i0); S.shots.push(i1); S.shots.push(i2);
+        S.shots.push(i3);
+        CsModel.ensureTrips(S);
+        var res0 = CsNetwork.resolve(S, {});
+        CsDraw.survey(S, res0);
+
+        var posBefore = rsdPositions(doc);
+        var rec0 = CsRevise.surveyFromDocument(doc);
+        ok(rec0.legacy === false, "rsd-idem: fixture starts v3");
+
+        var countAt = function() {
+            return doc.queryAllEntities(false, false).length;
+        };
+
+        var rep1 = RebuildSurveyData.rebuild(doc, di);
+        var count1 = countAt();
+        var pos1 = rsdPositions(doc);
+        ok(rep1.mode === "heal", "rsd-idem: run 1 mode 'heal', got '" +
+            rep1.mode + "'");
+        ok(rep1.inferred === false,
+            "rsd-idem: run 1 infers nothing -- the tags are the survey");
+
+        var rep2 = RebuildSurveyData.rebuild(doc, di);
+        var count2 = countAt();
+        var pos2 = rsdPositions(doc);
+        ok(rep2.mode === "heal", "rsd-idem: run 2 mode 'heal', got '" +
+            rep2.mode + "'");
+        ok(count1 === count2,
+            "rsd-idem: entity count identical between runs, " + count1 +
+            " -> " + count2);
+        ok(rep1.stations === rep2.stations && rep1.shots === rep2.shots,
+            "rsd-idem: same counts reported both runs, " + rep1.stations +
+            "/" + rep1.shots + " then " + rep2.stations + "/" + rep2.shots);
+
+        var pn;
+        for (pn in posBefore) {
+            if (posBefore.hasOwnProperty(pn)) {
+                ok(pos1[pn] !== undefined && pos2[pn] !== undefined,
+                    "rsd-idem: station " + pn + " survived both runs");
+                if (pos1[pn] !== undefined) {
+                    near(pos1[pn].x, posBefore[pn].x, 1e-9,
+                        "rsd-idem: " + pn + " x stable after run 1");
+                    near(pos1[pn].y, posBefore[pn].y, 1e-9,
+                        "rsd-idem: " + pn + " y stable after run 1");
+                }
+                if (pos2[pn] !== undefined) {
+                    near(pos2[pn].x, posBefore[pn].x, 1e-9,
+                        "rsd-idem: " + pn + " x stable after run 2");
+                    near(pos2[pn].y, posBefore[pn].y, 1e-9,
+                        "rsd-idem: " + pn + " y stable after run 2");
+                }
+            }
+        }
+
+        // the survey the drawing reconstructs to is unchanged, field
+        // for field (shotsEqual is hoisted above the gate IIFE)
+        var rec2 = CsRevise.surveyFromDocument(doc);
+        ok(rec2.legacy === false, "rsd-idem: still v3 after two runs");
+        ok(rec2.survey.shots.length === rec0.survey.shots.length,
+            "rsd-idem: shot count unchanged, expected " +
+            rec0.survey.shots.length + ", got " +
+            rec2.survey.shots.length);
+        for (var si = 0; si < rec0.survey.shots.length; si++) {
+            if (si < rec2.survey.shots.length) {
+                shotsEqual(rec0.survey.shots[si], rec2.survey.shots[si],
+                    "rsd-idem shot[" + si + "]");
+            }
+        }
+        ok(rec2.anchorName === rec0.anchorName,
+            "rsd-idem: anchor station unchanged, got '" +
+            rec2.anchorName + "'");
+        ok(rec2.survey.caveName === "IDEM CAVE" &&
+            rec2.survey.date === "2019-03-03" &&
+            rec2.survey.team === "Cara",
+            "rsd-idem: survey metadata survives both runs");
+        near(rec2.survey.declination, 1.25, 1e-9,
+            "rsd-idem: declination survives both runs");
+        ok(rec2.survey.startNote === "gate is locked",
+            "rsd-idem: start note survives both runs, got '" +
+            rec2.survey.startNote + "'");
+    })();
 }
 
 // ---------------------------------------------------------------------
