@@ -70,7 +70,8 @@ CsRevise.shotFromEntity = function(e) {
  * Rebuilds the survey a drawing was drawn FROM, exactly.
  *
  * One pass over every entity:
- *   station points   position; Fixed -> survey.fixed; trip-anchor
+ *   station points   position; Elevation -> the recorded elevation;
+ *                    Fixed -> survey.fixed; trip-anchor
  *                    tags -> trip records; the trip-0 anchor also
  *                    StartNote/StartLrud, the legacy SurveyName
  *                    (which stored caveName||name -- the ambiguity is
@@ -87,6 +88,12 @@ CsRevise.shotFromEntity = function(e) {
  *   survey      the reconstructed CsModel survey
  *   anchorName  the trip-0 anchor station's name ("" if none)
  *   anchorPos   its drawing position (null if none)
+ *   anchorZ     the elevation that anchor station is RECORDED at (its
+ *               Elevation tag). The drawing's vertical datum: a cave
+ *               surveyed to an absolute one (entrance at 1250 ft, say)
+ *               keeps it nowhere else unless the surveyor also declared
+ *               a *fix. Always a number -- 0.0 when the tag is absent,
+ *               blank or not numeric, never NaN
  *   legacy      true when the drawing predates schema v3 and the
  *               result came from CsTags.surveyFromDocument's
  *               chain-guessing instead
@@ -97,7 +104,7 @@ CsRevise.surveyFromDocument = function(doc) {
         CsStore.ensureLoaded(doc);
     }
 
-    var stations = [];      // {name, seq, pos}
+    var stations = [];      // {name, seq, pos, elev}
     var tripRecs = {};      // trip id -> trip record from its anchor
     var maxTrip = -1;
     var fixed = {};
@@ -116,8 +123,12 @@ CsRevise.surveyFromDocument = function(doc) {
 
         var stName = CsTags.get(e, "Station");
         if (stName !== "" && typeof e.getPosition === "function") {
+            // Elevation rides along in this one scan: CsDraw.survey
+            // writes every station's resolved z there, so it is where
+            // the drawing's vertical datum actually lives.
             var st = { name: stName, seq: CsTags.getNumber(e, "Seq"),
-                pos: e.getPosition() };
+                pos: e.getPosition(),
+                elev: CsTags.getNumber(e, "Elevation") };
             stations.push(st);
             var fx = CsTags.get(e, "Fixed");
             if (fx !== "") {
@@ -214,13 +225,21 @@ CsRevise.surveyFromDocument = function(doc) {
     }
     var anchorName = anchorStation !== null ? anchorStation.name : "";
     var anchorPos = anchorStation !== null ? anchorStation.pos : null;
+    // The datum every consumer inherits. Coerced to a number HERE,
+    // once, rather than at each use: a junk tag reaching
+    // CsNetwork.resolve as anchor.z = NaN would spread through every
+    // station it places without a single complaint.
+    var anchorZ = (anchorStation !== null &&
+        typeof anchorStation.elev === "number" &&
+        !isNaN(anchorStation.elev)) ? anchorStation.elev : 0.0;
 
     // pre-v3 drawing: stations, but not one Distance-tagged shot
     // anywhere -- hand it to the legacy chain-guesser, flagged
     if (stations.length > 0 && placed.length === 0 &&
             exBlob === "" && unBlob === "") {
         return { survey: CsTags.surveyFromDocument(doc),
-            anchorName: anchorName, anchorPos: anchorPos, legacy: true };
+            anchorName: anchorName, anchorPos: anchorPos,
+            anchorZ: anchorZ, legacy: true };
     }
 
     // serialized rows: "tripId TAB shotSeq TAB shotRow" per line
@@ -284,7 +303,41 @@ CsRevise.surveyFromDocument = function(doc) {
     }
     CsModel.ensureTrips(survey);
     return { survey: survey, anchorName: anchorName,
-        anchorPos: anchorPos, legacy: false };
+        anchorPos: anchorPos, anchorZ: anchorZ, legacy: false };
+};
+
+/**
+ * The elevation a reconstructed station is pinned at.
+ *
+ * Two records can carry a station's z and they are NOT equal in
+ * authority. survey.fixed (a Fixed="x,y,z" tag, itself from an
+ * explicit *fix/#Fix) is a coordinate the surveyor declared; an
+ * Elevation tag is only what the last redraw computed. So the fix
+ * wins, and the recorded datum -- recon.anchorZ -- stands in when
+ * there is none. Reaching 0 means the drawing says nothing about
+ * height anywhere, which is the ordinary case for a cave surveyed off
+ * its own entrance.
+ *
+ * recon.anchorZ describes ONE station, so only that station may claim
+ * it: handing the anchor's datum to some other pivot would shift every
+ * elevation in the cave by the dz between the two.
+ *
+ * Always returns a number, never NaN -- see surveyFromDocument.
+ *
+ * \param recon CsRevise.surveyFromDocument(doc) result
+ * \param name  the station to pin
+ */
+CsRevise.anchorZOf = function(recon, name) {
+    var fx = recon.survey.fixed[name];
+    if (fx !== undefined && fx !== null && typeof fx.z === "number" &&
+            !isNaN(fx.z)) {
+        return fx.z;
+    }
+    if (name === recon.anchorName && typeof recon.anchorZ === "number" &&
+            !isNaN(recon.anchorZ)) {
+        return recon.anchorZ;
+    }
+    return 0.0;
 };
 
 // ---------------------------------------------------------------------
@@ -594,6 +647,15 @@ CsRevise.isWorldFixedLayer = function(layerName) {
  * anything to compare against); a vanished anchor point sets
  * report.anchorMissing. report.anchorUsed says which point won.
  *
+ * The pivot's HEIGHT matters just as much, because both paths below
+ * rewrite every station's Elevation tag from the resolve: pinned at 0,
+ * a revision would rebase a cave surveyed to an absolute datum onto
+ * the drawing's arbitrary origin and silently destroy that datum. So
+ * the pivot resolves at the elevation the drawing records for it (see
+ * CsRevise.anchorZOf) -- or, when the georeferenced station wins, at
+ * the elevation the reconstruction gives THAT station on the same
+ * datum.
+ *
  * classifyChange then decides the strategy:
  *
  *   RIGID   the whole plan moved as one body (a declination revision,
@@ -734,19 +796,17 @@ CsRevise.apply = function(doc, di, recon, newSurvey) {
         }
     }
 
-    var anchorZOf = function(name) {
-        var fx = recon.survey.fixed[name];
-        if (fx !== undefined && fx !== null && fx.z !== undefined &&
-                fx.z !== null) {
-            return fx.z;
-        }
-        return 0.0;
-    };
-    var anchorAt = function(name, pos) {
+    // The pivot's HEIGHT, kept beside its position because both
+    // resolves and the rigid path's Elevation rewrite hang off it: get
+    // it wrong and the revision rebases the whole cave vertically.
+    // Left null until something knows better than CsRevise.anchorZOf.
+    var pivotZ = null;
+    var anchorAt = function(name, pos, z) {
         return { name: name,
             x: pos !== null && pos !== undefined ? pos.x : 0.0,
             y: pos !== null && pos !== undefined ? pos.y : 0.0,
-            z: anchorZOf(name) };
+            z: (typeof z === "number" && !isNaN(z)) ? z :
+                CsRevise.anchorZOf(recon, name) };
     };
 
     // The georeferenced station WINS. It is the drawing's one point of
@@ -790,12 +850,19 @@ CsRevise.apply = function(doc, di, recon, newSurvey) {
                 anchorName = geoName;
                 anchorPos = geoLive;
                 anchorSource = "georef";
+                // The pivot's z comes from the probe, not from the
+                // anchor's datum: the probe already resolved the whole
+                // network ON that datum, so geoWas.z IS this station's
+                // datum-consistent elevation. Pinning it at the
+                // anchor's own z instead would lift or drop every
+                // elevation in the cave by the dz between the two.
+                pivotZ = geoWas.z;
             }
         }
     }
 
     // -- 1. old and new resolved over the identical anchor -----------
-    var anchor = anchorAt(anchorName, anchorPos);
+    var anchor = anchorAt(anchorName, anchorPos, pivotZ);
     var oldResolved = CsNetwork.resolve(recon.survey, { anchor: anchor });
     var newResolved = CsNetwork.resolve(newSurvey, { anchor: anchor });
 

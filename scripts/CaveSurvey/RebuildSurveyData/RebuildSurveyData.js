@@ -258,20 +258,15 @@ RebuildSurveyData.rebuild = function(doc, di) {
 
         // The anchor's RECORDED elevation, not 0 -- a cave surveyed to
         // an absolute datum (entrance at, say, 1250 ft) carries that
-        // datum in the anchor's legacy Elevation tag, and
-        // CsTags.surveyFromDocument already reads it into
-        // survey.fixed[name].z (0.0 when the tag is missing, blank or
-        // not a number -- see CsTags.js). Pin the redraw there instead
-        // of at 0 so the datum survives; a drawing whose elevations
-        // were already zero-based is unaffected, since its recorded z
-        // IS zero. Re-guarded here anyway -- a junk value must never
-        // reach CsNetwork.resolve as a NaN anchor.z, which would
-        // propagate silently through the whole redraw.
-        var anchorFixed = survey.fixed.hasOwnProperty(recon.anchorName) ?
-            survey.fixed[recon.anchorName] : null;
-        var anchorZ = (anchorFixed !== null &&
-            typeof anchorFixed.z === "number" && !isNaN(anchorFixed.z)) ?
-            anchorFixed.z : 0.0;
+        // datum in the anchor's Elevation tag, and pinning the redraw
+        // at 0 instead would rewrite every one of those tags onto the
+        // drawing's arbitrary origin. A drawing whose elevations were
+        // already zero-based is unaffected: its recorded z IS zero.
+        // One answer for both paths -- CsRevise.anchorZOf, which
+        // prefers an explicit *fix over the tag and is guaranteed
+        // numeric, so no junk value can reach CsNetwork.resolve as a
+        // NaN anchor.z and propagate silently through the redraw.
+        var anchorZ = CsRevise.anchorZOf(recon, recon.anchorName);
 
         var up = RebuildSurveyData.redraw(doc, di, survey,
             recon.anchorName, recon.anchorPos, anchorZ);
@@ -299,9 +294,16 @@ RebuildSurveyData.rebuild = function(doc, di) {
         // ---- already v3: redraw the reconstruction in place ---------
         // Nothing is inferred here -- the tags ARE the survey. The
         // redraw restores marks deleted by hand and is a no-op
-        // otherwise.
+        // otherwise -- but only if it is pinned at the same HEIGHT it
+        // was drawn at. A v3 drawing keeps its datum in the Elevation
+        // tags and nowhere else (a *fix is the exception, not the
+        // rule), and the redraw rewrites those tags, so healing at 0
+        // would flatten the whole cave onto the drawing's origin -- the
+        // same loss the upgrade path above guards against, through the
+        // same one answer.
+        var healZ = CsRevise.anchorZOf(recon, recon.anchorName);
         var heal = RebuildSurveyData.redraw(doc, di, recon.survey,
-            recon.anchorName, recon.anchorPos);
+            recon.anchorName, recon.anchorPos, healZ);
         report.mode = "heal";
         report.erased = heal.erased;
         report.stations = heal.drawn.stationsDrawn;
@@ -310,7 +312,10 @@ RebuildSurveyData.rebuild = function(doc, di) {
             " station" + (report.stations === 1 ? "" : "s") + " and " +
             report.shots + " shot" + (report.shots === 1 ? "" : "s") +
             " from the drawing's own survey data -- already tag schema " +
-            "v3, nothing inferred.";
+            "v3, nothing inferred." +
+            (healZ !== 0 ? " Elevations kept on the recorded datum -- " +
+                recon.anchorName + " at " +
+                CsReport.length(healZ, recon.survey.distanceUnit) + "." : "");
         return report;
     }
 
