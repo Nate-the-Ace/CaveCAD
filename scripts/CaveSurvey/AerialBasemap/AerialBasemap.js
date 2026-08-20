@@ -429,8 +429,7 @@ AerialBasemap.init = function(basePath) {
         RMainWindowQt.getMainWindow());
     action.setRequiresDocument(true);
     action.setScriptFile(basePath + "/AerialBasemap.js");
-    // No setIcon() yet -- the icon and the publish-readiness gate are
-    // Task 4's job (see docs/superpowers/plans/2026-08-20-aerial-basemap.md).
+    action.setIcon(basePath + "/AerialBasemap.svg");
     action.setStatusTip(qsTr("Put an aerial photograph of the surface " +
         "underneath the survey"));
     action.setDefaultCommands(["aerialbasemap", "ab"]);
