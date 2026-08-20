@@ -100,7 +100,8 @@ var CORE_FILES = [
     "scripts/CaveSurvey/Core/Format/CsSurvex.js",
     "scripts/CaveSurvey/Core/Format/CsCsv.js",
     "scripts/CaveSurvey/Core/Format/CsRegistry.js",
-    "scripts/CaveSurvey/Core/CsRevise.js"
+    "scripts/CaveSurvey/Core/CsRevise.js",
+    "scripts/CaveSurvey/Core/CsReport.js"
 ];
 for (var ci = 0; ci < CORE_FILES.length; ci++) {
     loadRepoScript(CORE_FILES[ci]);
@@ -1457,6 +1458,46 @@ if (teamBoundaryRt.trips.length === 2) {
         "classifyChange: identical resolves residual 0");
 })();
 
+// --- revision summary: the plain-language report of an applied revision
+(function() {
+    var rigidText = CsReport.revisionSummary({
+        rigid: true,
+        moved: [{ name: "A5", dist: 1.234 }, { name: "A4", dist: 0.9 }],
+        stationsChanged: 2,
+        loopsBefore: [{ from: "A4", to: "A1", error: 0.52, percent: 1.3 }],
+        loopsAfter: [{ from: "A4", to: "A1", error: 0.31, percent: 0.77 }]
+    });
+    ok(rigidText.indexOf("rigid") >= 0,
+        "revisionSummary: rigid wording, got '" + rigidText + "'");
+    ok(rigidText.indexOf("Stations moved: 2") >= 0,
+        "revisionSummary: stations-moved count");
+    ok(rigidText.indexOf("A5: 1.23") >= 0,
+        "revisionSummary: top mover with 2dp distance");
+    ok(rigidText.indexOf("0.52 -> 0.31") >= 0,
+        "revisionSummary: loop error before -> after");
+    ok(rigidText.indexOf("WARNING") < 0,
+        "revisionSummary: no re-trace warning on a rigid move");
+
+    var manyMoved = [];
+    for (var i = 0; i < 6; i++) {
+        manyMoved.push({ name: "F" + (i + 1), dist: 6 - i });
+    }
+    var redrawText = CsReport.revisionSummary({
+        rigid: false,
+        moved: manyMoved,
+        stationsChanged: 6,
+        loopsBefore: [],
+        loopsAfter: []
+    });
+    ok(redrawText.indexOf("erased and redrawn") >= 0,
+        "revisionSummary: redraw wording");
+    ok(redrawText.indexOf("WARNING") >= 0 &&
+        redrawText.indexOf("re-trace") >= 0,
+        "revisionSummary: redraw warns about hand-drawn linework");
+    ok(redrawText.indexOf("F5") >= 0 && redrawText.indexOf("F6") < 0,
+        "revisionSummary: top 5 movers listed, the 6th not");
+})();
+
 // ---------------------------------------------------------------------
 // Drawing round-trip -- QCAD engine only (node has no R* classes).
 // This is the test that would have caught the silent simple.js
@@ -1895,48 +1936,50 @@ if (!IS_NODE) {
     // unplaced shot, fixed station, multi-reading LRUD side, notes --
     // drawn into a fresh doc and read back EXACTLY.
     // -----------------------------------------------------------------
-    (function() {
-        // --- deep-compare kit --------------------------------------
-        var isArr = function(v) {
-            return Object.prototype.toString.call(v) === "[object Array]";
-        };
-        // exp/got: null==undefined, numbers near 1e-9, arrays
-        // element-wise, everything else exact
-        var valEqual = function(exp, got, label) {
-            var e = (exp === undefined) ? null : exp;
-            var g = (got === undefined) ? null : got;
-            if (e === null || g === null) {
-                ok(e === g, label + ": expected " + e + ", got " + g);
-            } else if (isArr(e) || isArr(g)) {
-                if (!isArr(e) || !isArr(g) || e.length !== g.length) {
-                    ok(false, label + ": array shape, expected " + e +
-                        ", got " + g);
-                } else {
-                    var same = true;
-                    for (var ai = 0; ai < e.length; ai++) {
-                        if (Math.abs(e[ai] - g[ai]) > 1e-9) {
-                            same = false;
-                        }
-                    }
-                    ok(same, label + ": array elements, expected [" +
-                        e.join(",") + "], got [" + g.join(",") + "]");
-                }
-            } else if (typeof e === "number" && typeof g === "number") {
-                near(g, e, 1e-9, label);
+
+    // --- deep-compare kit, shared by the gate and CsRevise.apply tests
+    var isArr = function(v) {
+        return Object.prototype.toString.call(v) === "[object Array]";
+    };
+    // exp/got: null==undefined, numbers near 1e-9, arrays
+    // element-wise, everything else exact
+    var valEqual = function(exp, got, label) {
+        var e = (exp === undefined) ? null : exp;
+        var g = (got === undefined) ? null : got;
+        if (e === null || g === null) {
+            ok(e === g, label + ": expected " + e + ", got " + g);
+        } else if (isArr(e) || isArr(g)) {
+            if (!isArr(e) || !isArr(g) || e.length !== g.length) {
+                ok(false, label + ": array shape, expected " + e +
+                    ", got " + g);
             } else {
-                ok(e === g, label + ": expected '" + e + "', got '" +
-                    g + "'");
-            }
-        };
-        // EVERY key of CsModel.newShot, one assertion each
-        var shotsEqual = function(exp, got, label) {
-            var proto = CsModel.newShot();
-            for (var k in proto) {
-                if (proto.hasOwnProperty(k)) {
-                    valEqual(exp[k], got[k], label + "." + k);
+                var same = true;
+                for (var ai = 0; ai < e.length; ai++) {
+                    if (Math.abs(e[ai] - g[ai]) > 1e-9) {
+                        same = false;
+                    }
                 }
+                ok(same, label + ": array elements, expected [" +
+                    e.join(",") + "], got [" + g.join(",") + "]");
             }
-        };
+        } else if (typeof e === "number" && typeof g === "number") {
+            near(g, e, 1e-9, label);
+        } else {
+            ok(e === g, label + ": expected '" + e + "', got '" +
+                g + "'");
+        }
+    };
+    // EVERY key of CsModel.newShot, one assertion each
+    var shotsEqual = function(exp, got, label) {
+        var proto = CsModel.newShot();
+        for (var k in proto) {
+            if (proto.hasOwnProperty(k)) {
+                valEqual(exp[k], got[k], label + "." + k);
+            }
+        }
+    };
+
+    (function() {
         var lrudEqual = function(exp, got, label) {
             var e = (exp === undefined) ? null : exp;
             var g = (got === undefined) ? null : got;
@@ -2141,6 +2184,289 @@ if (!IS_NODE) {
             "station, got '" + res.anchorName + "'");
         ok(res.anchorPos !== null && Math.abs(res.anchorPos.y) < 1e-9,
             "legacy: anchor position");
+    })();
+
+    // -----------------------------------------------------------------
+    // CsRevise.apply, RIGID path: a whole-drawing declination revision.
+    // One modify operation must transform EVERYTHING -- survey marks
+    // and an untagged scratch line -- except TB_* sheet furniture, and
+    // rewrite the azimuth/declination tags in the same step. The
+    // one-operation claim is proven by a SINGLE di.undo() returning
+    // both the scratch geometry and the tag edits at once.
+    // -----------------------------------------------------------------
+    (function() {
+        var doc = new RDocument(new RMemoryStorage(), new RSpatialIndexNavel());
+        var di = new RDocumentInterface(doc);
+        getDocument = function() { return doc; };
+        getDocumentInterface = function() { return di; };
+
+        var S = CsModel.newSurvey();
+        S.declination = 2.0;
+        S.declinationSource = "user";
+        var r0 = shotOf("R1", "R2", 10, 0);
+        r0.backAzimuth = 180;
+        var r1 = shotOf("R2", "R3", 8, 90);
+        var r2 = shotOf("R3", "R1", 12.81, 218.66);  // loop closure
+        S.shots.push(r0); S.shots.push(r1); S.shots.push(r2);
+        CsModel.ensureTrips(S);
+        var res0 = CsNetwork.resolve(S, {});
+        CsDraw.survey(S, res0);
+
+        // hand-drawn stand-in: an UNTAGGED scratch line on layer "0";
+        // sheet furniture: a text on a TB_ layer, which must not move
+        var tbLayer = new RLayer(doc, "TB_TEST", false, false,
+            new RColor("white"), doc.getLinetypeId("CONTINUOUS"),
+            RLineweight.Weight025, false);
+        var tbOp = new RAddObjectsOperation();
+        tbOp.addObject(tbLayer);
+        di.applyOperation(tbOp);
+        var addOp = new RAddObjectsOperation();
+        var scratchLine = new RLineEntity(doc,
+            new RLineData(new RVector(3, 1), new RVector(7, 2)));
+        scratchLine.setLayerId(doc.getLayerId("0"));
+        addOp.addObject(scratchLine, false);
+        CsDraw.addText(doc, addOp, "TB_TEST", "SHEET 1",
+            new RVector(50, 50), RS.HAlignLeft);
+        di.applyOperation(addOp);
+
+        var scan = function() {
+            var found = { scratch: null, tbText: null,
+                legs: {}, stations: {} };
+            var ids = doc.queryAllEntities(false, false);
+            for (var i = 0; i < ids.length; i++) {
+                var e = doc.queryEntity(ids[i]);
+                if (isNull(e)) {
+                    continue;
+                }
+                var ln = doc.getLayerName(e.getLayerId());
+                if (ln === "0") { found.scratch = e; }
+                if (ln === "TB_TEST") { found.tbText = e; }
+                var sh = CsTags.get(e, "Shot");
+                if (sh !== "") { found.legs[sh] = e; }
+                var stn = CsTags.get(e, "Station");
+                if (stn !== "") { found.stations[stn] = e; }
+            }
+            return found;
+        };
+
+        var recon = CsRevise.surveyFromDocument(doc);
+        ok(recon.legacy === false, "apply-rigid: recon is v3");
+        // an independent second reconstruction is the revision model
+        var newSurvey = CsRevise.surveyFromDocument(doc).survey;
+        var rev = CsRevise.reviseDeclination(newSurvey, 0, 6.0, "igrf");
+        near(rev.delta, 4.0, 1e-9, "apply-rigid: revision delta +4 deg");
+
+        var idsBefore = doc.queryAllEntities(false, false).length;
+        var report = CsRevise.apply(doc, di, recon, newSurvey);
+        var idsAfter = doc.queryAllEntities(false, false).length;
+
+        ok(report.rigid === true, "apply-rigid: classified rigid");
+        ok(idsAfter === idsBefore,
+            "apply-rigid: no entities added or removed, " + idsBefore +
+            " -> " + idsAfter);
+        ok(report.stationsChanged >= 2,
+            "apply-rigid: non-anchor stations counted as moved, got " +
+            report.stationsChanged);
+        ok(report.loopsBefore.length === 1 && report.loopsAfter.length === 1,
+            "apply-rigid: loop reported before and after");
+        if (report.loopsBefore.length === 1 &&
+                report.loopsAfter.length === 1) {
+            near(report.loopsAfter[0].error, report.loopsBefore[0].error,
+                1e-6, "apply-rigid: rigid move keeps the loop error");
+        }
+
+        // azimuth +4 => rotate -4 deg about the anchor (theta CCW-
+        // positive in drawing coords); predict with applyFit itself
+        var th = -4.0 * Math.PI / 180;
+        var ax = recon.anchorPos.x, ay = recon.anchorPos.y;
+        var predFit = { theta: th, scale: 1.0,
+            tx: ax - (Math.cos(th) * ax - Math.sin(th) * ay),
+            ty: ay - (Math.sin(th) * ax + Math.cos(th) * ay) };
+
+        var after = scan();
+        ok(after.scratch !== null, "apply-rigid: scratch line survived");
+        var predS = CsRevise.applyFit(predFit, { x: 3, y: 1 });
+        var predE = CsRevise.applyFit(predFit, { x: 7, y: 2 });
+        var gotS = after.scratch.getStartPoint();
+        var gotE = after.scratch.getEndPoint();
+        near(gotS.x, predS.x, 1e-6, "apply-rigid: scratch start x rotated -4 deg");
+        near(gotS.y, predS.y, 1e-6, "apply-rigid: scratch start y rotated -4 deg");
+        near(gotE.x, predE.x, 1e-6, "apply-rigid: scratch end x rotated -4 deg");
+        near(gotE.y, predE.y, 1e-6, "apply-rigid: scratch end y rotated -4 deg");
+
+        ok(after.tbText !== null, "apply-rigid: TB_TEST text survived");
+        var tbPos = after.tbText.getPosition();
+        near(tbPos.x, 50, 1e-9, "apply-rigid: TB_TEST text x UNCHANGED");
+        near(tbPos.y, 50, 1e-9, "apply-rigid: TB_TEST text y UNCHANGED");
+
+        // station points really rotated: R2 was drawn at (0, 10)
+        ok(after.stations["R2"] !== undefined, "apply-rigid: R2 found");
+        var predR2 = CsRevise.applyFit(predFit, { x: 0, y: 10 });
+        var gotR2 = after.stations["R2"].getPosition();
+        near(gotR2.x, predR2.x, 1e-6, "apply-rigid: station R2 x rotated");
+        near(gotR2.y, predR2.y, 1e-6, "apply-rigid: station R2 y rotated");
+
+        // tags rewritten in the SAME operation
+        var leg01 = after.legs["R1->R2"];
+        ok(leg01 !== undefined, "apply-rigid: R1->R2 leg found");
+        near(CsTags.getNumber(leg01, "Azimuth"), 4.0, 1e-9,
+            "apply-rigid: leg Azimuth tag updated (+4)");
+        near(CsTags.getNumber(leg01, "BackAzimuth"), 184.0, 1e-9,
+            "apply-rigid: leg BackAzimuth tag co-updated");
+        var a0 = after.stations["R1"];
+        ok(a0 !== undefined, "apply-rigid: trip-0 anchor found");
+        near(CsTags.getNumber(a0, "TripDeclination"), 6.0, 1e-9,
+            "apply-rigid: TripDeclination updated");
+        ok(CsTags.get(a0, "TripDeclinationSource") === "igrf",
+            "apply-rigid: TripDeclinationSource updated, got '" +
+            CsTags.get(a0, "TripDeclinationSource") + "'");
+        near(CsTags.getNumber(a0, "Declination"), 6.0, 1e-9,
+            "apply-rigid: legacy Declination mirror updated");
+        var log = CsTags.get(a0, "RevisionLog");
+        ok(log.indexOf("trip 0 declination 2 -> 6 (igrf)") >= 0,
+            "apply-rigid: RevisionLog line appended, got '" + log + "'");
+
+        var summary = CsReport.revisionSummary(report);
+        ok(summary.indexOf("rigid") >= 0 &&
+            summary.indexOf("WARNING") < 0,
+            "apply-rigid: summary uses rigid wording, no warning");
+
+        // (c) ONE-OPERATION PROOF: a single di.undo() must revert the
+        // scratch geometry AND the tag edits together (both proven to
+        // undo correctly in this bridge); a second-op design would need
+        // two undos. Redo re-applies to leave the doc in the applied
+        // state.
+        di.undo();
+        var undone = scan();
+        var uS = undone.scratch.getStartPoint();
+        near(uS.x, 3, 1e-9, "apply-rigid undo: scratch start x restored");
+        near(uS.y, 1, 1e-9, "apply-rigid undo: scratch start y restored");
+        near(CsTags.getNumber(undone.legs["R1->R2"], "Azimuth"), 0.0, 1e-9,
+            "apply-rigid undo: Azimuth tag restored by the SAME undo step");
+        near(CsTags.getNumber(undone.stations["R1"], "TripDeclination"),
+            2.0, 1e-9,
+            "apply-rigid undo: TripDeclination restored by the same step");
+        di.redo();
+        var redone = scan();
+        near(redone.scratch.getStartPoint().x, predS.x, 1e-6,
+            "apply-rigid redo: transform re-applied");
+        near(CsTags.getNumber(redone.legs["R1->R2"], "Azimuth"), 4.0, 1e-9,
+            "apply-rigid redo: tags re-applied");
+    })();
+
+    // -----------------------------------------------------------------
+    // CsRevise.apply, NON-RIGID path: revising one trip of two bends
+    // the survey, so the marks are erased and redrawn. Trip-0 stations
+    // must not move; the redrawn drawing must reconstruct to exactly
+    // the revised survey; the RevisionLog must ride the NEW anchor.
+    // -----------------------------------------------------------------
+    (function() {
+        var doc = new RDocument(new RMemoryStorage(), new RSpatialIndexNavel());
+        var di = new RDocumentInterface(doc);
+        getDocument = function() { return doc; };
+        getDocumentInterface = function() { return di; };
+
+        var S = CsModel.newSurvey();
+        S.declination = 1.0;
+        S.declinationSource = "user";
+        CsModel.ensureTrips(S);
+        var t1 = CsModel.newTrip();
+        t1.name = "UPPER";
+        t1.declination = 1.0;
+        t1.declinationSource = "user";
+        S.trips.push(t1);
+        var n0 = shotOf("N1", "N2", 10, 0);
+        var n1 = shotOf("N2", "N3", 10, 90);
+        var n2 = shotOf("N3", "N4", 8, 45);
+        n2.trip = 1;
+        var n3 = shotOf("N4", "N5", 6, 120);
+        n3.trip = 1;
+        S.shots.push(n0); S.shots.push(n1);
+        S.shots.push(n2); S.shots.push(n3);
+        var res0 = CsNetwork.resolve(S, {});
+        CsDraw.survey(S, res0);
+
+        var posOf = function() {
+            var out = {};
+            var sts = CsTags.collectStations(doc);
+            for (var i = 0; i < sts.length; i++) {
+                out[sts[i].name] = { x: sts[i].pos.x, y: sts[i].pos.y };
+            }
+            return out;
+        };
+        var posBefore = posOf();
+
+        var recon = CsRevise.surveyFromDocument(doc);
+        var newSurvey = CsRevise.surveyFromDocument(doc).survey;
+        CsRevise.reviseDeclination(newSurvey, 1, 11.0, "user"); // +10, trip 1
+
+        var report = CsRevise.apply(doc, di, recon, newSurvey);
+        ok(report.rigid === false, "apply-redraw: classified NOT rigid");
+        ok(report.stationsChanged > 0,
+            "apply-redraw: stationsChanged > 0, got " +
+            report.stationsChanged);
+
+        var posAfter = posOf();
+        var nAfter = 0;
+        for (var pn in posAfter) {
+            if (posAfter.hasOwnProperty(pn)) {
+                nAfter++;
+            }
+        }
+        ok(nAfter === 5, "apply-redraw: 5 stations after redraw, got " +
+            nAfter);
+        var t0names = ["N1", "N2", "N3"];
+        for (var i = 0; i < t0names.length; i++) {
+            var nm = t0names[i];
+            near(posAfter[nm].x, posBefore[nm].x, 1e-6,
+                "apply-redraw: trip-0 station " + nm + " x unchanged");
+            near(posAfter[nm].y, posBefore[nm].y, 1e-6,
+                "apply-redraw: trip-0 station " + nm + " y unchanged");
+        }
+        var d4x = posAfter["N4"].x - posBefore["N4"].x;
+        var d4y = posAfter["N4"].y - posBefore["N4"].y;
+        ok(Math.sqrt(d4x * d4x + d4y * d4y) > 0.1,
+            "apply-redraw: trip-1 station N4 really moved");
+
+        // the redrawn drawing reconstructs to EXACTLY the revised survey
+        var rec2 = CsRevise.surveyFromDocument(doc);
+        ok(rec2.legacy === false, "apply-redraw: still v3 after redraw");
+        ok(rec2.survey.shots.length === newSurvey.shots.length,
+            "apply-redraw: shot count reconstructs, expected " +
+            newSurvey.shots.length + ", got " + rec2.survey.shots.length);
+        for (i = 0; i < newSurvey.shots.length; i++) {
+            if (i < rec2.survey.shots.length) {
+                shotsEqual(newSurvey.shots[i], rec2.survey.shots[i],
+                    "apply-redraw shot[" + i + "]");
+            }
+        }
+
+        // RevisionLog carried onto the NEW trip-0 anchor
+        var newAnchor = null;
+        var ids = doc.queryAllEntities(false, false);
+        for (i = 0; i < ids.length; i++) {
+            var e = doc.queryEntity(ids[i]);
+            if (isNull(e)) {
+                continue;
+            }
+            if (CsTags.get(e, "Station") !== "" &&
+                    CsTags.get(e, "Trip") !== "" &&
+                    CsTags.getNumber(e, "Trip") === 0) {
+                newAnchor = e;
+                break;
+            }
+        }
+        ok(newAnchor !== null, "apply-redraw: new trip-0 anchor found");
+        var log = newAnchor !== null ?
+            CsTags.get(newAnchor, "RevisionLog") : "";
+        ok(log.indexOf("trip 1 declination 1 -> 11 (user)") >= 0,
+            "apply-redraw: RevisionLog on the new anchor, got '" +
+            log + "'");
+
+        var summary = CsReport.revisionSummary(report);
+        ok(summary.indexOf("erased and redrawn") >= 0 &&
+            summary.indexOf("re-trace") >= 0,
+            "apply-redraw: summary warns about hand-drawn linework");
     })();
 }
 

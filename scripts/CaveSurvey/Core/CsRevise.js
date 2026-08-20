@@ -514,3 +514,316 @@ CsRevise.classifyChange = function(oldResolved, newResolved, extent) {
         moved: moved
     };
 };
+
+// ---------------------------------------------------------------------
+// Applying a revision to the open drawing. QCAD context only (the one
+// part of this module that touches entities); everything above stays
+// engine-free.
+// ---------------------------------------------------------------------
+
+/**
+ * Applies a revised survey model to the drawing it was reconstructed
+ * from.
+ *
+ * Both the old survey (recon.survey) and newSurvey resolve over the
+ * SAME anchor -- the reconstruction's trip-0 anchor at its drawn
+ * position -- so old station coordinates equal drawing coordinates
+ * and the two results are directly comparable. classifyChange then
+ * decides the strategy:
+ *
+ *   RIGID   the whole plan moved as one body (a declination revision,
+ *           say). ONE modify operation transforms EVERY entity in the
+ *           document -- survey marks AND hand-drawn linework -- by the
+ *           fitted similarity, except entities on layers named "TB_*"
+ *           (title-block sheet furniture, which must not move with the
+ *           cave). The same operation rewrites the tags the revision
+ *           touched: leg/splay Azimuth (+ BackAzimuth when present)
+ *           from the matching newSurvey shot (matched by Trip +
+ *           ShotSeq), each trip anchor's TripDeclination/
+ *           TripDeclinationSource, the legacy Declination/
+ *           DeclinationSource on the trip-0 anchor, and an appended
+ *           RevisionLog line per changed trip. Station-point Azimuth
+ *           tags stay as-is (accepted stale -- legs are canonical).
+ *
+ *   NOT     the survey genuinely changed shape: erase every station's
+ *           marks (CsDraw.eraseStations) and redraw the revised survey
+ *           in place (CsDraw.survey), which rewrites all v3 tags; the
+ *           RevisionLog (with the old log carried over) is then
+ *           committed onto the new trip-0 anchor. Hand-drawn linework
+ *           near moved stations does NOT follow -- the report warns.
+ *
+ * OFF-layer caveat, probed empirically in this build: add, MODIFY and
+ * DELETE operations are all silently refused for entities on a layer
+ * that is off. Any off layer holding survey entities (CTRL-HIDDEN's
+ * legs) is therefore toggled on around the work via
+ * CsLayers.withLayerOn and restored after.
+ *
+ * \param doc        the document
+ * \param di         its document interface
+ * \param recon      CsRevise.surveyFromDocument(doc) result the
+ *                   revision started from
+ * \param newSurvey  the revised CsModel survey
+ * \return {
+ *   rigid           which path ran
+ *   moved           [{name, dist}] per shared station, largest first
+ *   stationsChanged how many stations moved more than the rigidity eps
+ *   loopsBefore     [{from, to, error, percent}] loop closures before
+ *   loopsAfter      the same loops after the revision
+ * }
+ */
+CsRevise.apply = function(doc, di, recon, newSurvey) {
+    CsModel.ensureTrips(recon.survey);
+    CsModel.ensureTrips(newSurvey);
+
+    // -- 1. old and new resolved over the identical anchor -----------
+    var anchorZ = 0.0;
+    var fxAnchor = recon.survey.fixed[recon.anchorName];
+    if (fxAnchor !== undefined && fxAnchor !== null &&
+            fxAnchor.z !== undefined && fxAnchor.z !== null) {
+        anchorZ = fxAnchor.z;
+    }
+    var anchor = { name: recon.anchorName,
+        x: recon.anchorPos !== null ? recon.anchorPos.x : 0.0,
+        y: recon.anchorPos !== null ? recon.anchorPos.y : 0.0,
+        z: anchorZ };
+    var oldResolved = CsNetwork.resolve(recon.survey, { anchor: anchor });
+    var newResolved = CsNetwork.resolve(newSurvey, { anchor: anchor });
+
+    // -- 2. drawing extent = old stations' bounding-box diagonal -----
+    var minX = null, minY = null, minZ = null;
+    var maxX = null, maxY = null, maxZ = null;
+    for (var sn in oldResolved.stations) {
+        if (!oldResolved.stations.hasOwnProperty(sn)) {
+            continue;
+        }
+        var st = oldResolved.stations[sn];
+        if (minX === null || st.x < minX) { minX = st.x; }
+        if (maxX === null || st.x > maxX) { maxX = st.x; }
+        if (minY === null || st.y < minY) { minY = st.y; }
+        if (maxY === null || st.y > maxY) { maxY = st.y; }
+        if (minZ === null || st.z < minZ) { minZ = st.z; }
+        if (maxZ === null || st.z > maxZ) { maxZ = st.z; }
+    }
+    var extent = 0.0;
+    if (minX !== null) {
+        var exx = maxX - minX, exy = maxY - minY, exz = maxZ - minZ;
+        extent = Math.sqrt(exx * exx + exy * exy + exz * exz);
+    }
+
+    // -- 3. classify ---------------------------------------------------
+    var cls = CsRevise.classifyChange(oldResolved, newResolved, extent);
+    var eps = 1e-6 * Math.max(extent, 1);
+    var stationsChanged = 0;
+    for (var mi = 0; mi < cls.moved.length; mi++) {
+        if (cls.moved[mi].dist > eps) {
+            stationsChanged++;
+        }
+    }
+
+    // -- RevisionLog: one line per trip whose declination changed ----
+    var logLines = [];
+    var tripCount = Math.max(recon.survey.trips.length,
+        newSurvey.trips.length);
+    for (var ti = 0; ti < tripCount; ti++) {
+        var oldTrip = recon.survey.trips[ti];
+        var newTrip = newSurvey.trips[ti];
+        if (oldTrip === undefined || newTrip === undefined) {
+            continue;
+        }
+        if (oldTrip.declination !== newTrip.declination) {
+            logLines.push("trip " + ti + " declination " +
+                oldTrip.declination + " -> " + newTrip.declination +
+                " (" + (newTrip.declinationSource || "unknown") + ")");
+        }
+    }
+
+    // the OLD trip-0 anchor: previous RevisionLog rides on it, and the
+    // rigid path writes the appended log back onto the same point.
+    // (Anchor points are the only entities with BOTH a Station tag and
+    // a Trip tag -- legs carry Trip too, but never Station.)
+    var findAnchor0 = function() {
+        var ids = doc.queryAllEntities(false, false);
+        for (var i = 0; i < ids.length; i++) {
+            var e = doc.queryEntity(ids[i]);
+            if (isNull(e)) {
+                continue;
+            }
+            if (CsTags.get(e, "Station") !== "" &&
+                    CsTags.get(e, "Trip") !== "" &&
+                    CsTags.getNumber(e, "Trip") === 0) {
+                return e;
+            }
+        }
+        return null;
+    };
+    var oldAnchor0 = findAnchor0();
+    var prevLog = oldAnchor0 !== null ?
+        CsTags.get(oldAnchor0, "RevisionLog") : "";
+    var newLog = logLines.length === 0 ? prevLog :
+        (prevLog !== "" ? prevLog + "\n" : "") + logLines.join("\n");
+
+    // -- OFF layers holding entities: ops there are silently refused --
+    var offLayers = [];
+    var seenLayer = {};
+    var scanIds = doc.queryAllEntities(false, false);
+    for (var oi = 0; oi < scanIds.length; oi++) {
+        var oe = doc.queryEntity(scanIds[oi]);
+        if (isNull(oe)) {
+            continue;
+        }
+        var oln = doc.getLayerName(oe.getLayerId());
+        if (seenLayer[oln] === true || oln.indexOf("TB_") === 0) {
+            continue;
+        }
+        seenLayer[oln] = true;
+        try {
+            var olay = doc.queryLayer(oln);
+            if (!isNull(olay) && olay.isOff()) {
+                offLayers.push(oln);
+            }
+        } catch (eOff) {
+            // no layer toggling here -- proceed, the op may still land
+        }
+    }
+    var withOffLayersOn = function(idx, fn) {
+        if (idx >= offLayers.length) {
+            return fn();
+        }
+        return CsLayers.withLayerOn(doc, di, offLayers[idx], function() {
+            return withOffLayersOn(idx + 1, fn);
+        });
+    };
+
+    if (cls.rigid) {
+        // -- 4. RIGID: one modify operation over the whole drawing ---
+        // Geometry idiom proven empirically in this bridge's doc tests:
+        // queried entities support .rotate(rad, RVector), .scale(factor,
+        // RVector) and .move(RVector), and the mutation commits through
+        // RModifyObjectsOperation.addObject(e, false). The sequence
+        // rotate-about-origin, scale-about-origin, move(tx, ty) is
+        // exactly applyFit: scale * R(theta) * p + (tx, ty).
+        var fit = { theta: cls.theta, scale: cls.scale,
+            tx: cls.tx, ty: cls.ty };
+        var origin = new RVector(0, 0);
+        var doScale = Math.abs(fit.scale - 1.0) > 1e-9;
+
+        // newSurvey shots by (trip, per-trip seq) -- the same counters
+        // CsDraw stamps as ShotSeq, so drawn legs/splays match exactly
+        var newShotByKey = {};
+        var seqCounters = {};
+        for (var ni = 0; ni < newSurvey.shots.length; ni++) {
+            var nTrip = newSurvey.shots[ni].trip || 0;
+            var nSeq = seqCounters[nTrip] || 0;
+            seqCounters[nTrip] = nSeq + 1;
+            newShotByKey[nTrip + ":" + nSeq] = newSurvey.shots[ni];
+        }
+
+        withOffLayersOn(0, function() {
+            var op = new RModifyObjectsOperation();
+            op.setText("Apply survey revision");
+            var ids = doc.queryAllEntities(false, false);
+            for (var i = 0; i < ids.length; i++) {
+                var e = doc.queryEntity(ids[i]);
+                if (isNull(e)) {
+                    continue;
+                }
+                if (doc.getLayerName(e.getLayerId()).indexOf("TB_") === 0) {
+                    continue; // sheet furniture stays put
+                }
+                e.rotate(fit.theta, origin);
+                if (doScale) {
+                    e.scale(fit.scale, origin);
+                }
+                e.move(new RVector(fit.tx, fit.ty));
+
+                // legs and splays: revised azimuths from the matching
+                // newSurvey shot
+                if (CsTags.get(e, "Distance") !== "" &&
+                        (CsTags.get(e, "From") !== "" ||
+                         CsTags.get(e, "Splay") !== "")) {
+                    var eTrip = CsTags.getNumber(e, "Trip");
+                    var eSeq = CsTags.getNumber(e, "ShotSeq");
+                    var match = eSeq === null ? undefined :
+                        newShotByKey[(eTrip === null ? 0 : eTrip) +
+                            ":" + eSeq];
+                    if (match !== undefined) {
+                        CsTags.set(e, "Azimuth", match.azimuth);
+                        if (match.backAzimuth !== null &&
+                                match.backAzimuth !== undefined) {
+                            CsTags.set(e, "BackAzimuth", match.backAzimuth);
+                        }
+                    }
+                }
+
+                // trip anchor points: revised trip metadata; the trip-0
+                // anchor also the legacy mirror and the RevisionLog
+                if (CsTags.get(e, "Station") !== "" &&
+                        CsTags.get(e, "Trip") !== "") {
+                    var aTrip = CsTags.getNumber(e, "Trip");
+                    aTrip = aTrip === null ? 0 : aTrip;
+                    if (newSurvey.trips[aTrip] !== undefined) {
+                        CsTags.set(e, "TripDeclination",
+                            newSurvey.trips[aTrip].declination);
+                        CsTags.set(e, "TripDeclinationSource",
+                            newSurvey.trips[aTrip].declinationSource);
+                    }
+                    if (aTrip === 0) {
+                        CsTags.set(e, "Declination", newSurvey.declination);
+                        CsTags.set(e, "DeclinationSource",
+                            newSurvey.declinationSource);
+                        CsTags.set(e, "RevisionLog", newLog);
+                    }
+                }
+
+                op.addObject(e, false);
+            }
+            di.applyOperation(op);
+        });
+        if (typeof CsStore !== "undefined") {
+            // no-op unless a legacy store text exists
+            CsStore.migrate(doc, di);
+        }
+    } else {
+        // -- 5. NOT rigid: erase the old marks, redraw the revision --
+        var oldNames = [];
+        for (var on in oldResolved.stations) {
+            if (oldResolved.stations.hasOwnProperty(on)) {
+                oldNames.push(on);
+            }
+        }
+        withOffLayersOn(0, function() {
+            CsDraw.eraseStations(doc, oldNames);
+        });
+        CsDraw.survey(newSurvey, newResolved, recon.anchorName,
+            recon.anchorPos);
+        // the redraw wrote fresh v3 tags but knows nothing of history:
+        // carry the appended RevisionLog onto the new trip-0 anchor
+        if (newLog !== "") {
+            var newAnchor0 = findAnchor0();
+            if (newAnchor0 !== null) {
+                CsTags.commit(di, newAnchor0, { RevisionLog: newLog });
+            }
+        }
+    }
+
+    // -- 6. report -----------------------------------------------------
+    var loopBrief = function(resolved) {
+        var out = [];
+        for (var li = 0; li < resolved.loops.length; li++) {
+            out.push({
+                from: resolved.loops[li].from,
+                to: resolved.loops[li].to,
+                error: resolved.loops[li].error,
+                percent: resolved.loops[li].percent
+            });
+        }
+        return out;
+    };
+    return {
+        rigid: cls.rigid,
+        moved: cls.moved,
+        stationsChanged: stationsChanged,
+        loopsBefore: loopBrief(oldResolved),
+        loopsAfter: loopBrief(newResolved)
+    };
+};

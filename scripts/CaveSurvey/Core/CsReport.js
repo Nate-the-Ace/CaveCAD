@@ -102,6 +102,49 @@ CsReport.statsSummary = function(survey, stats, grade) {
     return lines.join("\n");
 };
 
+/** Summary of an applied revision (CsRevise.apply's report). */
+CsReport.revisionSummary = function(report) {
+    var lines = [];
+    if (report.rigid) {
+        lines.push("Revision applied as one rigid move: the whole drawing " +
+            "turned and shifted as a single body, hand-drawn linework " +
+            "included.");
+    } else {
+        lines.push("Revision changed the survey's shape: the survey marks " +
+            "were erased and redrawn from the revised data.");
+    }
+    lines.push("Stations moved: " + report.stationsChanged);
+    var top = Math.min(5, report.moved.length);
+    for (var i = 0; i < top; i++) {
+        lines.push("  " + report.moved[i].name + ": " +
+            report.moved[i].dist.toFixed(2));
+    }
+
+    for (i = 0; i < report.loopsAfter.length; i++) {
+        var after = report.loopsAfter[i];
+        var before = null;
+        for (var j = 0; j < report.loopsBefore.length; j++) {
+            if (report.loopsBefore[j].from === after.from &&
+                    report.loopsBefore[j].to === after.to) {
+                before = report.loopsBefore[j];
+                break;
+            }
+        }
+        lines.push("Loop " + after.from + " to " + after.to + ": closes " +
+            (before !== null ? before.error.toFixed(2) + " -> " : "") +
+            after.error.toFixed(2) + " off (" +
+            after.percent.toFixed(2) + "%)" +
+            (after.percent <= 1.0 ? " -- good" : ""));
+    }
+
+    if (!report.rigid) {
+        lines.push("");
+        lines.push("WARNING -- hand-drawn linework near the moved stations " +
+            "did NOT move with them; re-trace walls and detail there.");
+    }
+    return lines.join("\n");
+};
+
 /** One line for an IGRF estimate, always labelled as one. */
 CsReport.igrfLine = function(result, lat, lon, dateText) {
     return "IGRF estimate for " + dateText + " at " +
