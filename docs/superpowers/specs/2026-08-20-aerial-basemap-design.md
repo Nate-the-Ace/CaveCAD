@@ -156,7 +156,8 @@ instead of duplicating it.
 - `CsGeoProject.fromMercator(x, y)` → `{lat, lon}` (round-trip, and the
   Declination/KML use case)
 - `CsGeoProject.groundExtent(drawingBox, unitName, marginFrac, floorM)`
-  → `{width, height, centerOffset}` in ground metres
+  → `{width, height}` in ground metres (the anchor-to-window offset is
+  `mercatorBbox`'s `anchorOffsetM` argument, not part of the extent)
 - `CsGeoProject.mercatorBbox(anchorLat, anchorLon, groundExtent, anchorOffsetM)`
   → `{xmin, ymin, xmax, ymax}` in 3857
 - `CsGeoProject.pixelSize(bbox, nativeResM, maxPx, minPx)` → `{w, h}`,

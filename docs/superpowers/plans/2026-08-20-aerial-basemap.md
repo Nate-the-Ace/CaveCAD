@@ -547,6 +547,8 @@ print(sorted(l.dxf.name for l in doc.layers))
 
 If `ezdxf` is not available, splice the text: copy the 10-or-so lines of the `CTRL-SPLAYS` `LAYER` record inside the `TABLE`/`ENDTAB` block, change the name field (`  2\nCTRL-SPLAYS` → `  2\nCTRL-AERIAL`), and leave the `5`/handle field unique by bumping its last hex digit to a value not already present in the file. Verify the handle is unique with `grep -c` before saving.
 
+**Caution for any future ezdxf edit of a template** (learned here, 2026-08-20): `saveas()` overwrites `$TDCREATE` with the current time, discarding the file's true creation date. Nothing in the codebase reads it, so it was left as-is rather than rewriting the DXF a second time — but a future edit should capture `doc.header["$TDCREATE"]` before saving and write it back. `saveas()` also regenerates `$VERSIONGUID` and advances `$HANDSEED` further than the new objects require; both are harmless as long as the seed still exceeds every handle present, which is worth confirming after any such edit.
+
 - [ ] **Step 5: Verify the test now passes and the template still loads**
 
 ```bash
