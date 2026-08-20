@@ -150,40 +150,65 @@ function declinationRevise(doc, recon) {
 
             var igrfBtn = new QPushButton("IGRF");
             var tripDate = Declination.parseIsoDate(trip.date);
+
+            // The handler re-checks every precondition itself, on the
+            // live 'geo'/'tripDate' values, and is wired UNCONDITIONALLY
+            // -- not only when the preconditions currently hold. That
+            // way the disabling below is purely cosmetic: if this
+            // bridge ever rejects the 'enabled = false' write (caught
+            // below), the button stays clickable but is never wired to
+            // nothing -- clicking it always either fills the field or
+            // says exactly why it can't.
+            // closure per row -- capture row, date and trip now
+            (function(r, d, tr) {
+                connectOk(igrfBtn.clicked, function() {
+                    if (geo === null) {
+                        warning("Declination: no geo reference in this " +
+                            "drawing -- run Geo Reference (georef) to pin " +
+                            "a station to a latitude/longitude, then IGRF " +
+                            "can fill from it.");
+                        return;
+                    }
+                    if (d === null) {
+                        warning("Declination: Trip " + r.tripId +
+                            "'s date (\"" + tr.date + "\") isn't " +
+                            "YYYY-MM-DD, so IGRF can't be evaluated for " +
+                            "it -- give the trip a date in that form.");
+                        return;
+                    }
+                    var res = CsGeomag.declination(geo.lat, geo.lon, d);
+                    if (res === null) {
+                        warning("Declination: " + d.year +
+                            " is before 1900, outside the IGRF model.");
+                        return;
+                    }
+                    // 2 decimals is the suite-wide IGRF-apply
+                    // convention -- GeoReference.js's own revision
+                    // offer rounds to the same precision before it
+                    // ever reaches reviseDeclination (see its
+                    // tripsNeedingRevision comment). Keeping both
+                    // tools at 2 decimals means a trip revised by
+                    // one reads back as unchanged in the other.
+                    var txt = res.declination.toFixed(2);
+                    r.edit.text = txt;
+                    r.igrfText = txt;
+                });
+            })(row, tripDate, trip);
+
             if (geo !== null && tripDate !== null) {
                 igrfBtn.toolTip = "Fill the IGRF estimate for " +
                     trip.date + " at the drawing's geo reference.";
-                // closure per row -- capture row and date now
-                (function(r, d) {
-                    connectOk(igrfBtn.clicked, function() {
-                        var res = CsGeomag.declination(geo.lat, geo.lon, d);
-                        if (res === null) {
-                            warning("Declination: " + d.year +
-                                " is before 1900, outside the IGRF model.");
-                            return;
-                        }
-                        // 2 decimals is the suite-wide IGRF-apply
-                        // convention -- GeoReference.js's own revision
-                        // offer rounds to the same precision before it
-                        // ever reaches reviseDeclination (see its
-                        // tripsNeedingRevision comment). Keeping both
-                        // tools at 2 decimals means a trip revised by
-                        // one reads back as unchanged in the other.
-                        var txt = res.declination.toFixed(2);
-                        r.edit.text = txt;
-                        r.igrfText = txt;
-                    });
-                })(row, tripDate);
             } else {
+                igrfBtn.toolTip = geo === null ?
+                    "No geo reference in this drawing -- run Geo " +
+                    "Reference (georef) to enable IGRF fills." :
+                    "This trip's date isn't YYYY-MM-DD, so IGRF " +
+                    "can't be evaluated for it.";
                 try {
                     igrfBtn.enabled = false;
-                    igrfBtn.toolTip = geo === null ?
-                        "No geo reference in this drawing -- run Geo " +
-                        "Reference (georef) to enable IGRF fills." :
-                        "This trip's date isn't YYYY-MM-DD, so IGRF " +
-                        "can't be evaluated for it.";
                 } catch (eDis) {
-                    // stays enabled but clicking is wired to nothing
+                    // stays enabled -- the click handler above re-checks
+                    // and explains itself, so this is cosmetic only
                 }
             }
             grid.addWidget(igrfBtn, gridRow, 3);
