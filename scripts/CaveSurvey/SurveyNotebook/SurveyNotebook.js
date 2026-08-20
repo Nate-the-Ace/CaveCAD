@@ -280,7 +280,23 @@ SurveyNotebook.setSurvey = function(w, survey) {
 // Ladder construction
 // ---------------------------------------------------------------------
 
-SurveyNotebook.EDIT_WIDTH = 52;
+SurveyNotebook.EDIT_WIDTH = 64;   // measurement cells
+SurveyNotebook.CELL_HEIGHT = 30;  // uniform input height
+SurveyNotebook.FONT_SIZE = 14;    // readable at arm's length
+
+/** Applies the page's font and height to an input widget. */
+SurveyNotebook.styleCell = function(e, height) {
+    try {
+        e.font = new QFont("", SurveyNotebook.FONT_SIZE);
+    } catch (eF) {
+        // font stays at default
+    }
+    e.minimumHeight = height || SurveyNotebook.CELL_HEIGHT;
+    if (height === undefined) {
+        e.maximumHeight = SurveyNotebook.CELL_HEIGHT;
+    }
+    return e;
+};
 
 /**
  * Makes an edit record in ALL CAPS as you type, the way a notes page
@@ -305,7 +321,7 @@ SurveyNotebook.upperCase = function(w, edit) {
 };
 
 SurveyNotebook.makeCell = function(w, width) {
-    var e = new QLineEdit();
+    var e = SurveyNotebook.styleCell(new QLineEdit());
     e.maximumWidth = width || SurveyNotebook.EDIT_WIDTH;
     SurveyNotebook.safeConnect(e.textEdited, function() {
         SurveyNotebook.refresh(w);
@@ -323,25 +339,25 @@ SurveyNotebook.makeCell = function(w, width) {
 SurveyNotebook.addStationRow = function(w, stationName) {
     var grid = w.grid;
     var row = {
-        name: SurveyNotebook.upperCase(w, SurveyNotebook.makeCell(w, 74)),
+        name: SurveyNotebook.upperCase(w, SurveyNotebook.makeCell(w, 84)),
         dist: SurveyNotebook.makeCell(w),
         azFs: SurveyNotebook.makeCell(w),
         azBs: SurveyNotebook.makeCell(w),
         incFs: SurveyNotebook.makeCell(w),
         incBs: SurveyNotebook.makeCell(w),
-        l: SurveyNotebook.makeCell(w, 40),
-        r: SurveyNotebook.makeCell(w, 40),
-        u: SurveyNotebook.makeCell(w, 40),
-        d: SurveyNotebook.makeCell(w, 40),
+        l: SurveyNotebook.makeCell(w, 48),
+        r: SurveyNotebook.makeCell(w, 48),
+        u: SurveyNotebook.makeCell(w, 48),
+        d: SurveyNotebook.makeCell(w, 48),
         notes: new QPlainTextEdit(),
         widgets: []
     };
     // Notes are INTENTIONAL: click to write one. Never in the tab
     // order, so flying through measurements can't land here. A small
     // multiline box, tall enough to actually read.
-    row.notes.minimumWidth = 150;
-    row.notes.minimumHeight = 44;
-    row.notes.maximumHeight = 58;
+    SurveyNotebook.styleCell(row.notes, 48);
+    row.notes.minimumWidth = 170;
+    row.notes.maximumHeight = 48;
     try {
         row.notes.focusPolicy = Qt.ClickFocus;
     } catch (eFp) {
@@ -821,11 +837,23 @@ SurveyNotebook.buildDock = function(appWin) {
     if (w.mode === "ladder") {
         var inner = new QWidget();
         w.grid = new QGridLayout();
+        try {
+            w.grid.setHorizontalSpacing(4);
+            w.grid.setVerticalSpacing(2);
+            w.grid.setContentsMargins(4, 4, 4, 4);
+        } catch (eSp) {
+            // spacing stays at defaults
+        }
 
         var headers = ["Station", "Dist", "Azm fs", "Azm bs",
             "Inc fs", "Inc bs", "L", "R", "U", "D", "Notes"];
         for (var h = 0; h < headers.length; h++) {
-            w.grid.addWidget(new QLabel(headers[h]), 0, h);
+            var hd = new QLabel(headers[h]);
+            try {
+                hd.font = new QFont("", SurveyNotebook.FONT_SIZE);
+            } catch (eHf) {
+            }
+            w.grid.addWidget(hd, 0, h);
         }
         // scrollbar appears when the page outgrows the panel; the
         // stretch row (maintained in addStationRow) keeps everything
