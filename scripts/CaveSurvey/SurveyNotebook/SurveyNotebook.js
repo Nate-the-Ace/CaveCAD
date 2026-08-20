@@ -40,6 +40,20 @@
 // write these shapes automatically, so any file the suite reads
 // lands on the page.
 //
+// THE PAGE IS ALSO THE REVISION UI. Load Drawing reconstructs the
+// survey already drawn (CsRevise.surveyFromDocument, exact tag schema
+// v3), asks which trip when there are several -- one page = ONE trip
+// -- and fills the header and ladder from it, azimuths converted back
+// to magnetic by stripping that trip's declination. Edit the shots
+// and press Draw: when a trip with the same fingerprint (date |
+// declination | team, see CsModel.tripFingerprint) already exists in
+// the drawing, the page's shots REPLACE that trip inside the full
+// merged survey -- everything is erased by station name and the whole
+// merged survey redraws once, so junctions with other trips stay
+// consistent. No fingerprint match appends the page as a new trip.
+// A drawing with no (or only legacy pre-v3) survey data draws exactly
+// the way it always did: plain draw, trip 0.
+//
 // The dock is a singleton; the engine stays alive, so a global
 // holds it.
 
@@ -588,6 +602,23 @@ SurveyNotebook.drawSurveyInner = function(w) {
         return;
     }
 
+    // A drawing that already holds exact (v3) survey data makes Draw
+    // TRIP-AWARE: the page's shots replace (or join) their trip inside
+    // the full merged survey, and the whole thing redraws once.
+    // Anything else -- empty drawing, untagged linework, legacy pre-v3
+    // tags -- takes the plain path below, exactly as it always has.
+    var recon = null;
+    try {
+        recon = CsRevise.surveyFromDocument(doc);
+    } catch (eRecon) {
+        recon = null; // unreadable tags: treat as no existing survey
+    }
+    if (recon !== null && recon.legacy !== true &&
+            recon.survey.shots.length > 0) {
+        SurveyNotebook.drawMergedSurvey(w, doc, survey, recon);
+        return;
+    }
+
     // Anchor priority: an explicitly selected station wins; otherwise,
     // if the page's FIRST station name already exists in the drawing,
     // the new survey ties into it automatically -- name the tie-in
@@ -636,6 +667,382 @@ SurveyNotebook.drawSurveyInner = function(w) {
             "mark" + (replaced === 1 ? "" : "s") + " for this page's " +
             "stations (undo twice to restore them).\n\n") : "") +
         CsReport.drawSummary(survey, resolved, drawn, findings) +
+        "\n\nDrawn as one undo step" +
+        (replaced > 0 ? " after the replace" : "") + ".");
+};
+
+// ---------------------------------------------------------------------
+// Drawing round-trip: the page as the shot-revision UI.
+//
+// The pure half first (no GUI, no document access -- testable
+// headless): cloneShot / tripSurvey / mergeTripIntoSurvey /
+// tripChoiceLabel. The document-touching half (loadFromDrawing,
+// drawMergedSurvey) sits below them.
+// ---------------------------------------------------------------------
+
+/** Shallow copy of one shot (own enumerable fields; the leftAll-style
+ *  arrays stay shared -- nothing downstream mutates them). Pure. */
+SurveyNotebook.cloneShot = function(shot) {
+    var out = {};
+    for (var k in shot) {
+        if (shot.hasOwnProperty(k)) {
+            out[k] = shot[k];
+        }
+    }
+    return out;
+};
+
+/**
+ * Extracts ONE trip from a (possibly multi-trip) survey as a fresh
+ * single-trip survey the ladder can hold: header fields from the trip
+ * record, shots cloned and re-based to trip 0, notebook order
+ * preserved. setSurvey then fills the page from it and strips the
+ * trip's declination from the azimuth cells the same way it does for
+ * imports. Pure -- no GUI, no document access.
+ */
+SurveyNotebook.tripSurvey = function(survey, tripId) {
+    CsModel.ensureTrips(survey);
+    var trip = survey.trips[tripId];
+    var out = CsModel.newSurvey();
+    out.name = trip.name;
+    out.caveName = survey.caveName;
+    out.date = trip.date;
+    out.team = trip.team;
+    out.declination = trip.declination;
+    out.declinationSource = trip.declinationSource;
+    out.distanceUnit = trip.distanceUnit;
+    out.startNote = trip.startNote || "";
+    out.startLrud = trip.startLrud || null;
+    for (var i = 0; i < survey.shots.length; i++) {
+        if ((survey.shots[i].trip || 0) !== tripId) {
+            continue;
+        }
+        var c = SurveyNotebook.cloneShot(survey.shots[i]);
+        c.trip = 0;
+        out.shots.push(c);
+    }
+    return out;
+};
+
+/**
+ * The merge decision: given the RECONSTRUCTED survey (the whole
+ * drawing), the page's trip record and the page's shots, builds the
+ * merged survey the drawing should now hold. A trip whose fingerprint
+ * (date | declination | team -- CsModel.tripFingerprint) matches the
+ * page is REPLACED: its old shots drop out, the page's shots take its
+ * trip id, and its trip record is overwritten by the page's (name and
+ * start note/LRUD included -- the page is the revision authority).
+ * No match appends the page as a new trip.
+ *
+ * Pure -- no GUI, no document access. reconSurvey's shots and trip
+ * records are not mutated (kept shots are shared by reference; the
+ * page's shots are cloned before re-stamping their trip id), though
+ * CsModel.ensureTrips normalizes reconSurvey in place, the suite-wide
+ * idiom.
+ *
+ * \return {
+ *   survey     the merged CsModel survey (fresh object; fixed copied
+ *              so callers may add seed points freely)
+ *   tripId     the trip id the page's shots now carry
+ *   replaced   true when an existing trip was replaced (fingerprint
+ *              matched), false when the page landed as a new trip
+ *   droppedStationNames  station names touched by the replaced trip's
+ *              OLD shots -- the erase set must include the ones the
+ *              revision no longer uses, or their marks would linger
+ * }
+ */
+SurveyNotebook.mergeTripIntoSurvey = function(reconSurvey, tripRecord, shots) {
+    CsModel.ensureTrips(reconSurvey);
+    var merged = CsModel.newSurvey();
+    merged.caveName = reconSurvey.caveName;
+    merged.fixed = {};
+    for (var fn in reconSurvey.fixed) {
+        if (reconSurvey.fixed.hasOwnProperty(fn)) {
+            merged.fixed[fn] = reconSurvey.fixed[fn];
+        }
+    }
+    merged.trips = reconSurvey.trips.slice();
+
+    var fp = CsModel.tripFingerprint(tripRecord);
+    var tripId = -1;
+    for (var t = 0; t < merged.trips.length; t++) {
+        if (CsModel.tripFingerprint(merged.trips[t]) === fp) {
+            tripId = t;
+            break;
+        }
+    }
+    var replaced = tripId >= 0;
+    if (replaced) {
+        // once trips exist they are the authority (see ensureTrips):
+        // the revision writes the trip SLOT, never top-level fields
+        merged.trips[tripId] = tripRecord;
+    } else {
+        merged.trips.push(tripRecord);
+        tripId = merged.trips.length - 1;
+    }
+
+    var droppedSeen = {};
+    var droppedStationNames = [];
+    var dropName = function(n) {
+        if (n !== "" && droppedSeen[n] !== true) {
+            droppedSeen[n] = true;
+            droppedStationNames.push(n);
+        }
+    };
+    for (var i = 0; i < reconSurvey.shots.length; i++) {
+        var s = reconSurvey.shots[i];
+        if ((s.trip || 0) === tripId) {
+            // replaced trip's old shot: dropped (never matches when
+            // the page landed as a NEW trip -- no old shot has its id)
+            dropName(s.from);
+            if (!s.splay) {
+                dropName(s.to);
+            }
+            continue;
+        }
+        merged.shots.push(s);
+    }
+    for (i = 0; i < shots.length; i++) {
+        var c = SurveyNotebook.cloneShot(shots[i]);
+        c.trip = tripId;
+        merged.shots.push(c);
+    }
+    CsModel.ensureTrips(merged); // mirror trips[0] up to the top level
+    return { survey: merged, tripId: tripId, replaced: replaced,
+        droppedStationNames: droppedStationNames };
+};
+
+/** One trip as a chooser line: "0: ENT 1998-07-04 NS/JB (12 shots)".
+ *  "|" is getItem's separator, so it is flattened out of the free
+ *  text. Pure. */
+SurveyNotebook.tripChoiceLabel = function(tripId, trip, shotCount) {
+    var clean = function(v) {
+        return String(v === undefined || v === null ? "" : v)
+            .replace(/\|/g, "/").replace(/^\s+|\s+$/g, "");
+    };
+    var parts = [tripId + ":"];
+    if (clean(trip.name) !== "") {
+        parts.push(clean(trip.name));
+    }
+    if (clean(trip.date) !== "") {
+        parts.push(clean(trip.date));
+    }
+    if (clean(trip.team) !== "") {
+        parts.push(clean(trip.team));
+    }
+    parts.push("(" + shotCount + " shot" +
+        (shotCount === 1 ? "" : "s") + ")");
+    return parts.join(" ");
+};
+
+/**
+ * Load Drawing: reconstructs the survey from the open drawing and
+ * fills the page from ONE of its trips -- the ladder becomes that
+ * trip's revision UI. Multi-trip drawings get a chooser; legacy
+ * (pre-v3) drawings are pointed at Rebuild Survey Data instead, since
+ * a chain-guessed reconstruction is not safe to revise from.
+ */
+SurveyNotebook.loadFromDrawing = function(w) {
+    var doc = getDocument();
+    if (doc === undefined || doc === null) {
+        QMessageBox.warning(null, "Survey Notebook", "No drawing is open.");
+        return;
+    }
+    var recon;
+    try {
+        recon = CsRevise.surveyFromDocument(doc);
+    } catch (eRe) {
+        QMessageBox.warning(null, "Survey Notebook",
+            "Couldn't read the survey back from this drawing (" + eRe + ").");
+        return;
+    }
+    if (recon.legacy === true) {
+        QMessageBox.information(null, "Survey Notebook",
+            "This drawing's survey predates the exact tag schema, so " +
+            "its shots can't be loaded back faithfully.\n\n" +
+            "Run Rebuild Survey Data (command: rebuildsurveydata) " +
+            "first -- it upgrades the tags in place -- then Load " +
+            "Drawing again.");
+        return;
+    }
+    if (recon.survey.shots.length === 0) {
+        QMessageBox.warning(null, "Survey Notebook",
+            "No survey shots found in this drawing -- nothing to load.");
+        return;
+    }
+
+    // one page = ONE trip: count shots per trip, choose when several
+    var counts = {};
+    for (var i = 0; i < recon.survey.shots.length; i++) {
+        var tid = recon.survey.shots[i].trip || 0;
+        counts[tid] = (counts[tid] || 0) + 1;
+    }
+    var withShots = [];
+    for (var t = 0; t < recon.survey.trips.length; t++) {
+        if ((counts[t] || 0) > 0) {
+            withShots.push(t);
+        }
+    }
+    if (withShots.length === 0) {
+        // shots tagged with a trip id no trip record covers (a
+        // hand-edited drawing): no header to load them under
+        QMessageBox.warning(null, "Survey Notebook",
+            "This drawing's shots don't belong to any trip recorded in " +
+            "it, so there's no trip header to load them under.");
+        return;
+    }
+    var tripId;
+    if (withShots.length === 1) {
+        tripId = withShots[0];
+    } else {
+        var labels = [];
+        for (i = 0; i < withShots.length; i++) {
+            labels.push(SurveyNotebook.tripChoiceLabel(withShots[i],
+                recon.survey.trips[withShots[i]], counts[withShots[i]]));
+        }
+        var choice = getItem("Survey Notebook",
+            "This drawing holds " + withShots.length + " trips -- one " +
+            "page is one trip. Load which?", labels.join("|"), 0, "|");
+        if (choice === undefined) {
+            return;
+        }
+        tripId = null;
+        for (i = 0; i < labels.length; i++) {
+            if (labels[i] === choice) {
+                tripId = withShots[i];
+            }
+        }
+        if (tripId === null) {
+            return;
+        }
+    }
+
+    SurveyNotebook.setSurvey(w,
+        SurveyNotebook.tripSurvey(recon.survey, tripId));
+    EAction.handleUserMessage("Survey Notebook: loaded trip " + tripId +
+        " (" + counts[tripId] + " shot" +
+        (counts[tripId] === 1 ? "" : "s") + ") from the drawing. Edit " +
+        "the page and Draw to revise that trip in place. (Backsights " +
+        "and Compass-style exclusion flags don't fit on this page, so " +
+        "a redraw of this trip writes it without them.)");
+};
+
+/**
+ * Trip-aware Draw: merges the page into the reconstructed survey
+ * (see mergeTripIntoSurvey), erases EVERY station the merged survey
+ * owns -- plus any the replaced trip no longer uses -- and redraws
+ * the whole merged survey once. Redrawing everything keeps junction
+ * geometry between trips consistent instead of stitching pages.
+ */
+SurveyNotebook.drawMergedSurvey = function(w, doc, survey, recon) {
+    var tripRecord = CsModel.newTrip();
+    tripRecord.name = survey.name;
+    tripRecord.date = survey.date;
+    tripRecord.team = survey.team;
+    tripRecord.declination = survey.declination;
+    tripRecord.declinationSource = survey.declinationSource;
+    tripRecord.distanceUnit = survey.distanceUnit;
+    tripRecord.startNote = survey.startNote || "";
+    tripRecord.startLrud = survey.startLrud || null;
+
+    var merge = SurveyNotebook.mergeTripIntoSurvey(recon.survey,
+        tripRecord, survey.shots);
+    var merged = merge.survey;
+
+    // Anchor: hold the drawing WHERE IT STANDS. The reconstruction's
+    // trip-0 anchor at its drawn position when its station survives
+    // the merge; otherwise any drawn station the merged survey still
+    // names. Only a page that renamed every station falls through --
+    // then the merged data anchors at the old anchor's position so the
+    // drawing at least stays in its own neighborhood.
+    var mergedNames = CsModel.stationNames(merged);
+    var inMerged = {};
+    for (var i = 0; i < mergedNames.length; i++) {
+        inMerged[mergedNames[i]] = true;
+    }
+    var anchor = null;
+    var existing = CsTags.collectStations(doc);
+    for (i = 0; i < existing.length; i++) {
+        if (inMerged[existing[i].name] !== true) {
+            continue;
+        }
+        var isRecAnchor = (existing[i].name === recon.anchorName);
+        if (anchor === null || isRecAnchor) {
+            var z = CsTags.getNumber(existing[i].entity, "Elevation");
+            anchor = { name: existing[i].name, x: existing[i].pos.x,
+                y: existing[i].pos.y, z: z === null ? 0 : z };
+            if (isRecAnchor) {
+                break;
+            }
+        }
+    }
+    if (anchor === null) {
+        var firstFrom = "";
+        for (i = 0; i < merged.shots.length; i++) {
+            var fs = merged.shots[i];
+            if (!fs.excludeFromAll && !fs.splay &&
+                    fs.from !== "" && fs.to !== "") {
+                firstFrom = fs.from;
+                break;
+            }
+        }
+        anchor = { name: firstFrom,
+            x: recon.anchorPos !== null ? recon.anchorPos.x : 0.0,
+            y: recon.anchorPos !== null ? recon.anchorPos.y : 0.0,
+            z: 0.0 };
+    }
+
+    // An explicitly selected start point seeds the PAGE's first
+    // station as a fixed point -- CsNetwork only consults fixed seeds
+    // for stations the anchored component never reaches, so this
+    // places a genuinely NEW, disconnected trip where the user asked
+    // and changes nothing when the page ties into the existing survey.
+    var sel = CsPick.startPointFromSelection(doc, "Survey Notebook");
+    if (sel !== undefined && survey.shots.length > 0) {
+        var firstPage = survey.shots[0].from;
+        if (firstPage !== "" && firstPage !== anchor.name &&
+                merged.fixed[firstPage] === undefined) {
+            merged.fixed[firstPage] = { x: sel.pos.x, y: sel.pos.y, z: 0.0 };
+        }
+    }
+
+    var resolved = CsNetwork.resolve(merged, { anchor: anchor });
+    var findings = CsValidate.check(merged, resolved);
+
+    // Erase by station name: everything the merged survey owns, plus
+    // the stations the replaced trip's revision dropped. CTRL-HIDDEN
+    // is toggled on around the erase -- this build silently refuses
+    // deletes on an off layer, and excluded legs live there.
+    var eraseNames = mergedNames.slice();
+    for (i = 0; i < merge.droppedStationNames.length; i++) {
+        if (inMerged[merge.droppedStationNames[i]] !== true) {
+            eraseNames.push(merge.droppedStationNames[i]);
+        }
+    }
+    var di = getDocumentInterface();
+    var replaced = CsLayers.withLayerOn(doc, di, CsLayers.HIDDEN,
+        function() {
+            return CsDraw.eraseStations(doc, eraseNames);
+        });
+
+    // fresh Seq numbering continues after whatever survived the erase
+    var seqBase = CsTags.collectStations(doc).length;
+    var drawn = CsDraw.survey(merged, resolved, undefined, undefined, seqBase);
+    CsDraw.zoomToSurvey(merged, resolved);
+
+    var fp = CsModel.tripFingerprint(merged.trips[merge.tripId]);
+    var tripLine = merge.replaced ?
+        ("Replaced trip " + merge.tripId + " (" + fp + ") with this " +
+            "page's shots; the whole survey redrew as one merged model.") :
+        ("Added this page as new trip " + merge.tripId + " (" + fp +
+            ") alongside the drawing's existing trips.");
+    EAction.handleUserMessage("Survey Notebook: " + tripLine);
+    QMessageBox.information(null, "Survey Notebook",
+        tripLine + "\n\n" +
+        (replaced > 0 ? ("Replaced " + replaced + " previously drawn " +
+            "mark" + (replaced === 1 ? "" : "s") + " (undo twice to " +
+            "restore them).\n\n") : "") +
+        CsReport.drawSummary(merged, resolved, drawn, findings) +
         "\n\nDrawn as one undo step" +
         (replaced > 0 ? " after the replace" : "") + ".");
 };
@@ -955,11 +1362,16 @@ SurveyNotebook.buildDock = function(appWin) {
     w.clearButton.toolTip = "Empty the page for the next survey. The " +
         "trip header (name, date, team, declination) is kept; nothing " +
         "in the drawing is touched.";
+    w.loadDrawingButton = new QPushButton("Load from drawing");
+    w.loadDrawingButton.toolTip = "Fill the page from a trip already in " +
+        "the drawing, so this page becomes that trip's revision sheet. " +
+        "Edit and Draw to replace it in place.";
     actions.addWidget(w.drawButton, 0, 0);
     actions.addWidget(w.importButton, 0, 0);
     actions.addWidget(w.exportButton, 0, 0);
     actions.addWidget(w.statusButton, 0, 0);
     actions.addWidget(w.clearButton, 0, 0);
+    actions.addWidget(w.loadDrawingButton, 0, 0);
     layout.addLayout(actions, 0);
 
     body.setLayout(layout);
@@ -1056,6 +1468,9 @@ SurveyNotebook.buildDock = function(appWin) {
         SurveyNotebook.addStationRow(w, "A2");
         SurveyNotebook.refresh(w);
     }, "Clear button", w.problems);
+    SurveyNotebook.safeConnect(w.loadDrawingButton.clicked, function() {
+        SurveyNotebook.loadFromDrawing(w);
+    }, "Load from drawing button", w.problems);
 
     // a fresh sheet starts with its first two stations
     SurveyNotebook.addStationRow(w, "A1");
