@@ -212,6 +212,48 @@ ok(CsModel.lrudEntryText(10, [5, 10]) === "5/10", "entry text round-trips multi"
 ok(CsModel.lrudEntryText(3.5, null) === "3.5", "entry text single");
 
 // ---------------------------------------------------------------------
+// Trips + revision serialization
+// ---------------------------------------------------------------------
+
+var tsv = CsModel.newSurvey();
+tsv.date = "1998-07-04"; tsv.team = "NS/JB"; tsv.declination = -2.5;
+CsModel.ensureTrips(tsv);
+ok(tsv.trips.length === 1, "ensureTrips creates trip 0");
+ok(tsv.trips[0].team === "NS/JB", "trip 0 mirrors team");
+ok(CsModel.tripFingerprint(tsv.trips[0]) === "1998-07-04|-2.5000|NS/JB",
+    "trip fingerprint format");
+var t2 = CsModel.newTrip(); t2.date = "1998-07-04"; t2.team = "KL";
+ok(CsModel.tripIdFor(tsv, t2) === 1, "different team = new trip id");
+ok(CsModel.tripIdFor(tsv, tsv.trips[0]) === 0, "same fingerprint reuses id");
+ok(tsv.trips.length === 2, "tripIdFor appended once");
+
+var fsh = CsModel.newShot();
+fsh.excludeFromPlot = true; fsh.noAdjust = true;
+ok(CsModel.flagsText(fsh) === "PC", "flags text");
+var fsh2 = CsModel.newShot();
+CsModel.parseFlags("CP", fsh2);
+ok(fsh2.excludeFromPlot && fsh2.noAdjust && !fsh2.excludeFromAll,
+    "flags parse order-insensitive");
+
+var row = CsModel.newShot();
+row.from = "A1"; row.to = "A2"; row.distance = 25.4; row.azimuth = 271.5;
+row.inclination = -3; row.backAzimuth = 91.0; row.left = 2; row.leftAll = [2, 5];
+row.excludeFromAll = true; row.notes = "line 1\nline 2";
+var rowBack = CsModel.parseShotRow(CsModel.shotRowText(row));
+ok(rowBack.from === "A1" && rowBack.to === "A2", "shot row endpoints");
+near(rowBack.backAzimuth, 91.0, 1e-9, "shot row backsight");
+ok(rowBack.backInclination === null, "shot row null backsight stays null");
+ok(rowBack.leftAll.join("/") === "2/5", "shot row multi-reading LRUD");
+ok(rowBack.excludeFromAll === true, "shot row flags");
+ok(rowBack.notes === "line 1\nline 2", "shot row notes with newline");
+
+var slr = CsModel.startLrudText({left: 2, right: null, up: 1, down: 0,
+    leftAll: [2, 5], rightAll: null, upAll: null, downAll: null});
+var slrBack = CsModel.parseStartLrud(slr);
+ok(slrBack.right === null && slrBack.down === 0, "startLrud null vs 0");
+ok(slrBack.leftAll.join("/") === "2/5", "startLrud multi-reading");
+
+// ---------------------------------------------------------------------
 // Traverse -- the slope-distance fix.
 // ---------------------------------------------------------------------
 
