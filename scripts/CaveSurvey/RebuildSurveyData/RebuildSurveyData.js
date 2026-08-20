@@ -550,7 +550,7 @@ RebuildSurveyData.init = function(basePath) {
     action.setRequiresDocument(true);
     action.setScriptFile(basePath + "/RebuildSurveyData.js");
     action.setIcon(basePath + "/RebuildSurveyData.svg");
-    action.setStatusTip(qsTr("Recover station names, order and LRUD links on a drawing saved by older builds"));
+    action.setStatusTip(qsTr("Bring an old drawing up to date: upgrades legacy tags, recovers missing station data, and repairs a partly-deleted drawing"));
     action.setDefaultCommands(["rebuildsurveydata", "rsd"]);
     action.setGroupSortOrder(450);
     action.setSortOrder(85);

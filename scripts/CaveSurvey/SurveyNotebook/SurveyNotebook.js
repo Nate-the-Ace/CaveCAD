@@ -763,9 +763,11 @@ SurveyNotebook.carryHiddenFields = function(oldShots, newShots) {
     // A splay has no "to", so its identity is its base station plus
     // its position among that station's splays -- hence one key for
     // all of them and the queue below does the ordering.
+    // NUL joins the parts: a station name can contain a space, it
+    // cannot contain a NUL, so the key can never collide with a name.
     var legKey = function(s) {
-        return s.splay ? (s.from + " <splay>") :
-            (s.from + " " + s.to);
+        return s.splay ? (s.from + "\0<splay>") :
+            (s.from + "\0" + s.to);
     };
     var queues = {};    // leg identity -> old shots, notebook order
     var heads = {};     // leg identity -> how many are consumed
