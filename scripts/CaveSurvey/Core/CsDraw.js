@@ -402,7 +402,10 @@ CsDraw.survey = function(survey, resolved, originStation, originPos, seqBase) {
     }
 
     if (firstPoint !== undefined) {
-        CsTags.set(firstPoint, "SurveyName", survey.name);
+        // Restores this tag's pre-trip-split meaning: the drawing-level
+        // cave name when known, falling back to the trip name for
+        // formats with no separate cave-name concept.
+        CsTags.set(firstPoint, "SurveyName", survey.caveName || survey.name);
         CsTags.set(firstPoint, "SurveyDate", survey.date);
         CsTags.set(firstPoint, "SurveyTeam", survey.team);
         CsTags.set(firstPoint, "Declination", survey.declination);

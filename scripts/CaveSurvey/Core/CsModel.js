@@ -9,6 +9,11 @@
 //
 //   Survey {
 //     name            string, e.g. "Main Passage"
+//     caveName        drawing-level cave name (Compass file line 1);
+//                     distinct from name/trip.name, which are the trip
+//                     designation. "" when the format has no such
+//                     concept (Walls/Survex/CSV). NOT mirrored by
+//                     ensureTrips.
 //     date            "YYYY-MM-DD" or ""
 //     team            string, free text
 //     declination     degrees, positive east, already APPLIED to the
@@ -79,6 +84,12 @@ var CsModel = {};
 CsModel.newSurvey = function() {
     return {
         name: "",
+        // drawing-level cave name (Compass file line 1, e.g. "FINGERPRINT
+        // CAVE"), distinct from survey.name/trip.name which are the trip
+        // designation (Compass "SURVEY NAME:", e.g. "ENT"). NOT mirrored
+        // by ensureTrips -- it is not per-trip data, it belongs to the
+        // whole drawing.
+        caveName: "",
         date: "",
         team: "",
         declination: 0.0,

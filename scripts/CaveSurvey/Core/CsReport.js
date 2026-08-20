@@ -15,8 +15,10 @@ CsReport.length = function(value, unit) {
 /** Summary of an import or a notebook draw. */
 CsReport.drawSummary = function(survey, resolved, drawn, findings) {
     var lines = [];
-    if (survey.name !== "") {
-        lines.push("Survey: " + survey.name);
+    // Prefer the drawing-level cave name over the trip name -- it's
+    // the more meaningful label when both are present.
+    if (survey.caveName || survey.name) {
+        lines.push("Survey: " + (survey.caveName || survey.name));
     }
     lines.push("Stations plotted: " + drawn.stationsDrawn);
     lines.push("Shots drawn: " + drawn.shotsDrawn +

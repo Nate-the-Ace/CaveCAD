@@ -77,6 +77,12 @@ CsFormatSurvex.parse = function(content) {
     var flags = { splay: false, duplicate: false, surface: false };
     var flagStack = [];
     survey.distanceUnit = null;
+    // Set true once a leg has been recorded against the CURRENT
+    // running team; a *date seen after that means a new trip is
+    // starting, so the team must be cleared (see *date handling
+    // below) instead of the next *team lines appending onto the
+    // previous trip's crew.
+    var teamDirty = false;
 
     var intoSurveyUnit = function(v) {
         if (survey.distanceUnit === null) {
@@ -141,6 +147,19 @@ CsFormatSurvex.parse = function(content) {
                     flags = flagStack.pop();
                 }
             } else if (cmd === "*date" && tokens.length > 1) {
+                // A *date seen after at least one leg has been recorded
+                // against the current team means a NEW trip is
+                // starting: clear the running team so the *team lines
+                // that follow build the new crew from scratch instead
+                // of appending onto the previous trip's (else e.g.
+                // "Alice, Bob" + new-trip "Carol" would wrongly read
+                // "Alice, Bob, Carol"). A file that declares *date once
+                // and only then *team lines is unaffected -- teamDirty
+                // is still false at that point.
+                if (teamDirty) {
+                    survey.team = "";
+                    teamDirty = false;
+                }
                 // "*date surveyed 1987-07-11", ranges: keep the first date
                 var dtok = (/^(surveyed|explored)$/i.test(tokens[1]) &&
                     tokens.length > 2) ? tokens[2] : tokens[1];
@@ -389,6 +408,9 @@ CsFormatSurvex.parse = function(content) {
             legTrip.team = survey.team;
             legTrip.declination = declination;
             shot.trip = CsModel.tripIdFor(survey, legTrip);
+            // A leg has now been recorded against the current team;
+            // the next *date marks a trip boundary (see *date above).
+            teamDirty = true;
 
             survey.shots.push(shot);
         } else if (dataStyle === "passage") {
@@ -476,7 +498,9 @@ CsFormatSurvex.parse = function(content) {
 CsFormatSurvex.write = function(survey) {
     CsModel.ensureTrips(survey);
     var out = [];
-    out.push("; " + (survey.name || "Cave survey"));
+    // Prefer the drawing-level cave name (Compass import etc.) over
+    // the trip name for this header comment.
+    out.push("; " + (survey.caveName || survey.name || "Cave survey"));
     if (survey.distanceUnit === "ft") {
         out.push("*units length feet");
     }

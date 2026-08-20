@@ -482,6 +482,10 @@ ok(dat.distanceUnit === "ft", "Compass unit is always feet");
 // trip, so that's what the model keeps.
 ok(dat.name === "A", "Compass survey name (trip 0, from SURVEY NAME), got '" +
     dat.name + "'");
+// survey.caveName is the file's drawing-level line 1 -- distinct from
+// survey.name/trip.name above, which is the SURVEY NAME: trip label.
+ok(dat.caveName === "SECRET CAVE", "Compass cave name (file line 1), got '" +
+    dat.caveName + "'");
 ok(dat.date === "2024-07-10", "Compass survey date, got '" + dat.date + "'");
 near(dat.declination, 2.5, 1e-9, "Compass declination recorded");
 ok(dat.shots.length === 6, "Compass shot count, got " + dat.shots.length);
@@ -835,6 +839,8 @@ function shotsMatch(a, b, what) {
 var datRt = CsFormatCompass.parse(CsFormatCompass.write(dat));
 shotsMatch(dat, datRt, "Compass round trip");
 near(datRt.declination, dat.declination, 1e-9, "Compass round trip declination");
+ok(datRt.caveName === dat.caveName, "Compass round trip cave name, got '" +
+    datRt.caveName + "' vs '" + dat.caveName + "'");
 ok(datRt.startLrud !== null &&
     Math.abs(datRt.startLrud.left - dat.startLrud.left) < 0.01,
     "Compass round trip startLrud");
@@ -963,6 +969,10 @@ ok(CsFormatRegistry.detect("x.csv", csvText).id === "csv", "detect csv");
 // and 1's declination gets revised.
 var fpContent = readTextFile(repoRoot + "/tests/fixtures/FingerprintCave.dat");
 var fp = CsFormatCompass.parse(fpContent);
+// caveName is the drawing-level name (file line 1); trips[0].name is
+// the trip designation (SURVEY NAME:) -- the two must stay distinct.
+ok(fp.caveName === "FINGERPRINT CAVE", "FingerprintCave: cave name, got '" +
+    fp.caveName + "'");
 ok(fp.trips.length === 3, "FingerprintCave: 3 trips, got " + fp.trips.length);
 if (fp.trips.length === 3) {
     ok(fp.trips[0].name === "ENT" && fp.trips[0].date === "1998-07-04" &&
@@ -1056,6 +1066,8 @@ ok(merged.shots.length === 2 && merged.shots[0].trip === 0 &&
 // trips (same fingerprints), the shot count, and the TRUE azimuths.
 var fpWritten = CsFormatCompass.write(fp);
 var fpRt = CsFormatCompass.parse(fpWritten);
+ok(fpRt.caveName === fp.caveName, "FingerprintCave round trip: cave name, got '" +
+    fpRt.caveName + "' vs '" + fp.caveName + "'");
 ok(fpRt.trips.length === 3, "FingerprintCave round trip: 3 trips, got " +
     fpRt.trips.length);
 if (fpRt.trips.length === 3) {
@@ -1121,6 +1133,52 @@ near(CsAngles.azimuthDifference(svxTripRt.shots[0].azimuth, svxTrip.shots[0].azi
     0, 1e-6, "Survex round trip: leg 1 true azimuth preserved");
 near(CsAngles.azimuthDifference(svxTripRt.shots[1].azimuth, svxTrip.shots[1].azimuth),
     0, 1e-6, "Survex round trip: leg 2 true azimuth preserved");
+
+// Survex team boundary regression: *team is a running append with no
+// block scoping, so without a reset at a *date boundary a second
+// trip's crew would wrongly inherit the first trip's members too
+// ("Alice, Bob, Carol" instead of "Carol"). teamDirty tracks whether
+// a leg has been recorded against the current team; *date clears the
+// team only when that's true, i.e. only when a new trip is actually
+// starting.
+var teamBoundarySrc = "*data normal from to tape compass clino\r\n" +
+    "*date 2020.01.01\r\n" +
+    "*team \"Alice\"\r\n" +
+    "*team \"Bob\"\r\n" +
+    "T1 T2 10.0 90.0 0.0\r\n" +
+    "*date 2021.06.15\r\n" +
+    "*team \"Carol\"\r\n" +
+    "T2 T3 10.0 90.0 0.0\r\n";
+var teamBoundary = CsFormatSurvex.parse(teamBoundarySrc);
+ok(teamBoundary.trips.length === 2,
+    "Survex team boundary: 2 trips, got " + teamBoundary.trips.length);
+if (teamBoundary.trips.length === 2) {
+    ok(teamBoundary.trips[0].team === "Alice, Bob",
+        "Survex team boundary: trip 0 team, got '" +
+        teamBoundary.trips[0].team + "'");
+    ok(teamBoundary.trips[1].team === "Carol",
+        "Survex team boundary: trip 1 team must not bleed from trip 0, got '" +
+        teamBoundary.trips[1].team + "'");
+}
+ok(teamBoundary.shots.length === 2 && teamBoundary.shots[0].trip === 0 &&
+    teamBoundary.shots[1].trip === 1,
+    "Survex team boundary: shots tagged trip 0 and trip 1, got " +
+    JSON.stringify([teamBoundary.shots[0].trip, teamBoundary.shots[1].trip]));
+
+// writer round-trips the two distinct teams
+var teamBoundaryWritten = CsFormatSurvex.write(teamBoundary);
+var teamBoundaryRt = CsFormatSurvex.parse(teamBoundaryWritten);
+ok(teamBoundaryRt.trips.length === 2,
+    "Survex team boundary round trip: 2 trips, got " +
+    teamBoundaryRt.trips.length);
+if (teamBoundaryRt.trips.length === 2) {
+    ok(teamBoundaryRt.trips[0].team === "Alice, Bob",
+        "Survex team boundary round trip: trip 0 team, got '" +
+        teamBoundaryRt.trips[0].team + "'");
+    ok(teamBoundaryRt.trips[1].team === "Carol",
+        "Survex team boundary round trip: trip 1 team, got '" +
+        teamBoundaryRt.trips[1].team + "'");
+}
 
 // ---------------------------------------------------------------------
 // Drawing round-trip -- QCAD engine only (node has no R* classes).

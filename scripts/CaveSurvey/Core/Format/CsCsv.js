@@ -184,8 +184,10 @@ CsFormatCsv.write = function(survey) {
     var lrudText = function(v, all) {
         return CsModel.lrudEntryText(v, all);
     };
-    if (survey.name) {
-        out.push("# name: " + survey.name);
+    // Prefer the drawing-level cave name (Compass import etc.) over
+    // the trip name for this header comment.
+    if (survey.caveName || survey.name) {
+        out.push("# name: " + (survey.caveName || survey.name));
     }
     if (survey.date) {
         out.push("# date: " + survey.date);

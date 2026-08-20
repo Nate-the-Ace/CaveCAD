@@ -105,6 +105,14 @@ CsFormatCompass.parse = function(content) {
 
         if (firstBlock) {
             firstBlock = false;
+            // Line 1 of the file is the CAVE name (drawing-level,
+            // e.g. "FINGERPRINT CAVE"), distinct from SURVEY NAME:
+            // (the trip designation, e.g. "ENT") captured as blockName
+            // below. Only the first block's line 1 counts -- later
+            // blocks repeat it verbatim in real files.
+            if (lines.length > 0) {
+                survey.caveName = lines[0].replace(/^\s+|\s+$/g, "");
+            }
             // Seed the top-level fields from the FIRST block BEFORE
             // tripIdFor runs below, so ensureTrips' auto-built trip 0
             // (from these same top-level fields) fingerprints equal to
@@ -416,7 +424,10 @@ CsFormatCompass.write = function(survey) {
             (parseInt(dateParts[2], 10) + " " + parseInt(dateParts[3], 10) + " " +
                 dateParts[1]) : "1 1 1900";
 
-        out.push(trip.name || "CAVE");
+        // Line 1 is the drawing-level cave name, NOT the trip name --
+        // every block repeats it (real Compass files do too). SURVEY
+        // NAME: below is the actual per-trip designation.
+        out.push(survey.caveName || survey.name || "CAVE");
         out.push("SURVEY NAME: " + (trip.name || "1"));
         out.push("SURVEY DATE: " + dateLine + "  COMMENT:");
         out.push("SURVEY TEAM:");

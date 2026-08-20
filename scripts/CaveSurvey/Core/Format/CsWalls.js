@@ -404,7 +404,9 @@ CsFormatWalls.write = function(survey) {
     var out = [];
     var decl = survey.declination || 0;
     var unitWord = survey.distanceUnit === "ft" ? "Feet" : "Meters";
-    out.push("; " + (survey.name || "Cave survey"));
+    // Prefer the drawing-level cave name (Compass import etc.) over
+    // the trip name for this header comment.
+    out.push("; " + (survey.caveName || survey.name || "Cave survey"));
     if (survey.date) {
         out.push("#Date " + survey.date);
     }
