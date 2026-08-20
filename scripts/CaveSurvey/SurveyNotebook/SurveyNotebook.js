@@ -160,15 +160,12 @@ SurveyNotebook.sheetSurvey = function(w) {
         // header's declination converts to the true bearings the
         // model stores. Change the declination and the whole survey
         // swings on the next refresh/Draw -- as it should.
-        var az = num(rows[i].azFs);
+        var az = num(rows[i].az);
         shot.azimuth = az === null ? 0.0 :
             CsAngles.applyDeclination(az, survey.declination);
-        var azb = num(rows[i].azBs);
-        shot.backAzimuth = azb === null ? null :
-            CsAngles.applyDeclination(azb, survey.declination);
-        var inc = num(rows[i].incFs);
+        var inc = num(rows[i].inc);
         shot.inclination = inc === null ? 0.0 : inc;
-        shot.backInclination = num(rows[i].incBs);
+        // backsights live in the scanned notes, not on this page
         // LRUD cells speak notes shorthand: "P" = passage (0),
         // "5/10" = both readings (both are drawn; the larger is the
         // wall). See CsModel.parseLrudEntry.
@@ -248,13 +245,9 @@ SurveyNotebook.setSurvey = function(w, survey) {
             put(row.dist, shot.distance);
             // cells hold compass readings: strip the declination the
             // model has applied, so round-trips never double-correct
-            put(row.azFs, CsAngles.normalizeAzimuth(
+            put(row.az, CsAngles.normalizeAzimuth(
                 shot.azimuth - (survey.declination || 0)).toFixed(2));
-            put(row.azBs, shot.backAzimuth === null ? null :
-                CsAngles.normalizeAzimuth(
-                    shot.backAzimuth - (survey.declination || 0)).toFixed(2));
-            put(row.incFs, shot.inclination);
-            put(row.incBs, shot.backInclination);
+            put(row.inc, shot.inclination);
             put(row.l, CsModel.lrudEntryText(shot.left, shot.leftAll));
             put(row.r, CsModel.lrudEntryText(shot.right, shot.rightAll));
             put(row.u, CsModel.lrudEntryText(shot.up, shot.upAll));
@@ -346,10 +339,8 @@ SurveyNotebook.addStationRow = function(w, stationName) {
     var row = {
         name: SurveyNotebook.upperCase(w, SurveyNotebook.makeCell(w, 84)),
         dist: SurveyNotebook.makeCell(w),
-        azFs: SurveyNotebook.makeCell(w),
-        azBs: SurveyNotebook.makeCell(w),
-        incFs: SurveyNotebook.makeCell(w),
-        incBs: SurveyNotebook.makeCell(w),
+        az: SurveyNotebook.makeCell(w, 72),
+        inc: SurveyNotebook.makeCell(w, 72),
         l: SurveyNotebook.makeCell(w, 48),
         r: SurveyNotebook.makeCell(w, 48),
         u: SurveyNotebook.makeCell(w, 48),
@@ -384,31 +375,27 @@ SurveyNotebook.addStationRow = function(w, stationName) {
     if (!isFirst) {
         var shotRow = w.gridRow++;
         grid.addWidget(row.dist, shotRow, 1);
-        grid.addWidget(row.azFs, shotRow, 2);
-        grid.addWidget(row.azBs, shotRow, 3);
-        grid.addWidget(row.incFs, shotRow, 4);
-        grid.addWidget(row.incBs, shotRow, 5);
-        row.widgets.push(row.dist, row.azFs, row.azBs, row.incFs, row.incBs);
+        grid.addWidget(row.az, shotRow, 2);
+        grid.addWidget(row.inc, shotRow, 3);
+        row.widgets.push(row.dist, row.az, row.inc);
     } else {
         row.dist.visible = false;
-        row.azFs.visible = false;
-        row.azBs.visible = false;
-        row.incFs.visible = false;
-        row.incBs.visible = false;
+        row.az.visible = false;
+        row.inc.visible = false;
     }
 
     // the station line: name on the left, LRUD on the right
     var stRow = w.gridRow++;
     grid.addWidget(row.name, stRow, 0);
-    grid.addWidget(row.l, stRow, 6);
-    grid.addWidget(row.r, stRow, 7);
-    grid.addWidget(row.u, stRow, 8);
-    grid.addWidget(row.d, stRow, 9);
+    grid.addWidget(row.l, stRow, 4);
+    grid.addWidget(row.r, stRow, 5);
+    grid.addWidget(row.u, stRow, 6);
+    grid.addWidget(row.d, stRow, 7);
     // one grid cell: the box's own height makes the station line
     // taller, which keeps it aligned with its row (a 2-row span put
     // the LAST station's note into the stretchy slack row and sent
     // it drifting down the panel)
-    grid.addWidget(row.notes, stRow, 10);
+    grid.addWidget(row.notes, stRow, 8);
     row.widgets.push(row.name, row.l, row.r, row.u, row.d, row.notes);
 
     // Pin the page to the TOP of the scroll area: all the vertical
@@ -467,13 +454,13 @@ SurveyNotebook.applyTabOrder = function(w) {
     var order = [rows[0].name];
     if (rows.length > 1) {
         var r1 = rows[1];
-        order.push(r1.name, r1.dist, r1.azFs, r1.azBs, r1.incFs, r1.incBs,
+        order.push(r1.name, r1.dist, r1.az, r1.inc,
             rows[0].l, rows[0].r, rows[0].u, rows[0].d,
             r1.l, r1.r, r1.u, r1.d);
     }
     for (var i = 2; i < rows.length; i++) {
         var r = rows[i];
-        order.push(r.name, r.dist, r.azFs, r.azBs, r.incFs, r.incBs,
+        order.push(r.name, r.dist, r.az, r.inc,
             r.l, r.r, r.u, r.d);
     }
     if (w.sentinel !== undefined) {
@@ -829,9 +816,7 @@ SurveyNotebook.buildDock = function(appWin) {
         "connect.\n" +
         "Azm: what the COMPASS reads (magnetic, clockwise from north);\n" +
         "the header's Decl converts to true for the drawing.\n" +
-        "Dist: along the tape.\n" +
-        "fs = foresight, bs = backsight (optional; used to correct and " +
-        "cross-check).\n" +
+        "Dist: along the tape. Inc: + up, - down.\n" +
         "L/R face the direction of travel; LRUD sits beside its station.\n" +
         "Blank = not measured; 0 = wall at the station; P = passage " +
         "(no wall, recorded 0); 5/10 = two readings, both drawn.";
@@ -850,8 +835,8 @@ SurveyNotebook.buildDock = function(appWin) {
             // spacing stays at defaults
         }
 
-        var headers = ["Station", "Dist", "Azm fs", "Azm bs",
-            "Inc fs", "Inc bs", "L", "R", "U", "D", "Notes"];
+        var headers = ["Station", "Dist", "Azm", "Inc",
+            "L", "R", "U", "D", "Notes"];
         for (var h = 0; h < headers.length; h++) {
             var hd = new QLabel(headers[h]);
             try {
@@ -869,7 +854,7 @@ SurveyNotebook.buildDock = function(appWin) {
         try {
             w.grid.setColumnStretch(headers.length, 1);
             // the Notes column soaks up spare width
-            w.grid.setColumnStretch(10, 1);
+            w.grid.setColumnStretch(8, 1);
         } catch (e) {
             // cosmetic only
         }
