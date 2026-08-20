@@ -375,110 +375,20 @@ Declination.init = function(basePath) {
 };
 
 // ---------------------------------------------------------------------
-// Pure decision helpers -- no GUI, no document access; testable
-// headless. (Declination is a function declaration, hoisted, so
-// attaching these below the wiring block is safe.)
+// Pure decision helpers -- MOVED to CsRevise.
+//
+// The per-trip revision workflow now also lives in the Survey Notebook
+// (its "Declination..." button), and this tool is on its way out. The
+// helpers went where both callers can reach them and where they survive
+// the deletion of this folder: CsRevise, beside the revision math they
+// serve. These names stay as thin aliases so every call site in this
+// file keeps working meanwhile -- ONE implementation, no second copy to
+// drift. (Declination is a function declaration, hoisted, so attaching
+// these below the wiring block is safe.)
 // ---------------------------------------------------------------------
 
-/** "YYYY-MM-DD" -> {year, month, day}, or null. */
-Declination.parseIsoDate = function(text) {
-    if (text === undefined || text === null) {
-        return null;
-    }
-    var s = String(text).replace(/^\s+|\s+$/g, "");
-    var m = /^(\d{4})-(\d{1,2})-(\d{1,2})$/.exec(s);
-    if (m === null) {
-        return null;
-    }
-    return { year: parseInt(m[1], 10), month: parseInt(m[2], 10),
-        day: parseInt(m[3], 10) };
-};
-
-/** A declination as dialog text: "3.5", "0.0", "-4.25". */
-Declination.declText = function(value) {
-    var n = Number(value);
-    if (isNaN(n)) {
-        return "0.0";
-    }
-    var s = String(Math.round(n * 10000) / 10000);
-    if (s.indexOf(".") < 0 && s.indexOf("e") < 0 && s.indexOf("E") < 0) {
-        s += ".0";
-    }
-    return s;
-};
-
-/** 'Trip 1: ENTRANCE SERIES 2024-03-02 AB, CD' -- blanks drop out. */
-Declination.tripLabel = function(tripId, trip) {
-    var parts = ["Trip " + tripId + ":"];
-    if (trip.name !== undefined && trip.name !== null && trip.name !== "") {
-        parts.push(String(trip.name));
-    }
-    if (trip.date !== undefined && trip.date !== null && trip.date !== "") {
-        parts.push(String(trip.date));
-    }
-    if (trip.team !== undefined && trip.team !== null && trip.team !== "") {
-        parts.push(String(trip.team));
-    }
-    return parts.length === 1 ? "Trip " + tripId : parts.join(" ");
-};
-
-/** The recorded value + where it came from: "0.0 (file)". */
-Declination.recordedText = function(trip) {
-    var src = trip.declinationSource;
-    if (src === undefined || src === null || src === "") {
-        src = "unrecorded";
-    }
-    return Declination.declText(trip.declination) + " (" + src + ")";
-};
-
-/**
- * The revision decisions, from plain data snapshotted off the dialog.
- *
- * \param rows [{tripId, recorded, text, igrfText}] --
- *   recorded  the trip's recorded declination (number)
- *   text      the field's text on Apply
- *   igrfText  the exact string the IGRF button last filled ("" if never)
- * \return { changes: [{tripId, value, source}] } for every field whose
- *         text no longer reads as the prefilled declText(recorded) --
- *         source "igrf" when the text still exactly matches the IGRF
- *         fill, "user" otherwise -- OR { error: "..." } when any field
- *         holds something unparseable (a prefilled field always holds
- *         a valid number, so junk is always an edit gone wrong; the
- *         caller must apply NOTHING).
- */
-Declination.parseTripEdits = function(rows) {
-    var changes = [];
-    for (var i = 0; i < rows.length; i++) {
-        var r = rows[i];
-        var text = String(r.text === undefined || r.text === null ?
-            "" : r.text).replace(/^\s+|\s+$/g, "");
-        if (!/^[+-]?(\d+\.?\d*|\.\d+)$/.test(text)) {
-            return { error: "Trip " + r.tripId + ": \"" + text +
-                "\" is not a number (degrees, east positive). " +
-                "Nothing was changed." };
-        }
-        var value = parseFloat(text);
-        if (!isFinite(value)) {
-            return { error: "Trip " + r.tripId + ": \"" + text +
-                "\" is not a usable number. Nothing was changed." };
-        }
-        // Unchanged means "still reads as what we prefilled", NOT
-        // "equals the recorded double". The prefill is
-        // declText(recorded) -- 4 decimals -- so a recorded
-        // declination carrying more precision than that can never
-        // round-trip a raw comparison: reopening this dialog and
-        // pressing Apply with no edits would manufacture a ~1e-5 deg
-        // "revision", append a junk RevisionLog line, and downgrade
-        // the trip's declinationSource from igrf to user. Compare at
-        // the precision the dialog actually shows -- both revision
-        // tools apply IGRF at 2 decimals, well inside it.
-        var shown = Declination.declText(r.recorded);
-        if (text === shown || Math.abs(value - Number(shown)) <= 1e-9) {
-            continue;
-        }
-        var source = (r.igrfText !== undefined && r.igrfText !== null &&
-            r.igrfText !== "" && text === r.igrfText) ? "igrf" : "user";
-        changes.push({ tripId: r.tripId, value: value, source: source });
-    }
-    return { changes: changes };
-};
+Declination.parseIsoDate = CsRevise.parseIsoDate;
+Declination.declText = CsRevise.declText;
+Declination.tripLabel = CsRevise.tripLabel;
+Declination.recordedText = CsRevise.recordedText;
+Declination.parseTripEdits = CsRevise.parseTripEdits;

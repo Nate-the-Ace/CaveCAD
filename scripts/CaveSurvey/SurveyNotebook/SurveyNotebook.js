@@ -54,6 +54,21 @@
 // A drawing with no (or only legacy pre-v3) survey data draws exactly
 // the way it always did: plain draw, trip 0.
 //
+// THE PAGE ALSO ANCHORS THE DRAWING. When Infer has to ASK where the
+// cave is, it offers to keep that latitude/longitude as the drawing's
+// geo anchor (GeoLat/GeoLon/GeoStation on one station point) -- the
+// drawing's one tie to real-world coordinates, which aerial imagery
+// aligns to, revisions pivot on, and exports derive from. Never
+// without asking, and never on top of an anchor that already exists.
+// See offerGeoAnchor.
+//
+// DECLINATION... revises the drawing's trips WITHOUT loading them: one
+// row per trip, the recorded value beside an editable one, IGRF on tap
+// from the drawing's own geo reference, and one CsRevise.apply that
+// rotates the shots and logs the change. That is the corrective path;
+// the header's Decl field is only what the page's own readings were
+// taken under. The two are compared in full above tripDeclinationDialog.
+//
 // The dock is a singleton; the engine stays alive, so a global
 // holds it.
 
@@ -1338,6 +1353,156 @@ SurveyNotebook.exportFile = function(w) {
         survey.shots.length + " shots to " + fileName);
 };
 
+/**
+ * Offers to keep a PROMPTED location as the drawing's geo anchor --
+ * GeoLat/GeoLon/GeoStation on one station point.
+ *
+ * This is where the Geo Reference tool's actual job lives now. The
+ * anchor is the drawing's one tie to real-world coordinates, and three
+ * separate things read it: the aerial basemap places imagery by it,
+ * CsRevise.apply PIVOTS every revision on the station that carries it
+ * (so it decides what "the drawing rotated" even means), and any
+ * real-world export derives coordinates from it. Without this, asking
+ * the user where the cave is -- which the Infer path already does --
+ * would throw that answer away, and the only remaining way to
+ * establish an anchor would be inserting an aerial photo.
+ *
+ * Four rules, all of them about not surprising anyone:
+ *
+ *   ASK        being prompted for a location is not consent to modify
+ *              the drawing. Declining leaves the drawing untouched and
+ *              the estimate is still made.
+ *   NEVER MOVE an existing anchor. Re-anchoring is a deliberate act,
+ *              and silently relocating it would move a revision's
+ *              rotation centre out from under the user.
+ *   NAME IT    the confirmation says which station will carry it, so
+ *              the choice is never a silent guess.
+ *   NO CARRIER, NO OFFER. A blank page with nothing drawn has no
+ *              station to tag, and inventing an entity to hold the
+ *              anchor would put the pivot somewhere arbitrary.
+ *
+ * The carrier is the single SELECTED station point when there is one,
+ * otherwise the survey's first station (trip 0's anchor -- the
+ * entrance, customarily, which is also where the revision pivot
+ * already sits).
+ *
+ * Note that only PROMPTED locations get here. The per-trip declination
+ * dialog's IGRF fills read the anchor and never ask for a location, so
+ * they have nothing to offer to store.
+ *
+ * \return {station} when the anchor was written, null otherwise
+ *         (no document, already anchored, no carrier, declined, or
+ *         this bridge refused the question or the write)
+ */
+SurveyNotebook.offerGeoAnchor = function(doc, coord) {
+    if (doc === undefined || doc === null || coord === null ||
+            coord === undefined) {
+        return null;
+    }
+    // Already anchored: leave it exactly where it is. getShared reports
+    // source "anchor" only for a GeoLat/GeoLon pair found in THIS
+    // drawing (a remembered app-level location is "last").
+    var known = CsLocationPick.getShared(doc);
+    if (known !== null && known.source === "anchor") {
+        return null;
+    }
+
+    // ---- who carries it --------------------------------------------
+    var carrier = null;
+    try {
+        if (doc.hasSelection()) {
+            var sids = doc.querySelectedEntities();
+            if (sids.length === 1) {
+                var se = doc.queryEntity(sids[0]);
+                if (!isNull(se) && typeof se.getPosition === "function" &&
+                        CsTags.get(se, "Station") !== "") {
+                    carrier = se;
+                }
+            }
+        }
+    } catch (eSel) {
+        carrier = null; // no selection to read: fall through to trip 0
+    }
+    if (carrier === null) {
+        var wanted = "";
+        try {
+            wanted = CsRevise.surveyFromDocument(doc).anchorName;
+        } catch (eRe) {
+            wanted = "";
+        }
+        if (wanted === "" || wanted === null || wanted === undefined) {
+            return null; // nothing drawn: no station to tag
+        }
+        var stations = CsTags.collectStations(doc);
+        for (var i = 0; i < stations.length; i++) {
+            if (stations[i].name === wanted) {
+                carrier = stations[i].entity;
+                break;
+            }
+        }
+        if (carrier === null) {
+            return null;
+        }
+    }
+
+    var stationName = CsTags.get(carrier, "Station");
+    var shown = stationName !== "" ? ("station " + stationName) :
+        "the selected point";
+
+    var answer;
+    try {
+        answer = QMessageBox.question(null, "Survey Notebook",
+            "Store " + coord.lat.toFixed(6) + ", " + coord.lon.toFixed(6) +
+            " as this drawing's geo anchor, on " + shown + "?\n\n" +
+            "The anchor is the drawing's tie to real-world coordinates: " +
+            "aerial imagery aligns to it, revisions pivot on it, and " +
+            "exports derive coordinates from it. The drawing's geometry " +
+            "is NOT changed.\n\n" +
+            "No just uses the location for this estimate.",
+            QMessageBox.Yes | QMessageBox.No);
+    } catch (eQ) {
+        return null; // no question, no write -- the estimate stands alone
+    }
+    if (answer !== QMessageBox.Yes) {
+        return null;
+    }
+
+    try {
+        // A MODIFY OPERATION is what actually persists tags on an
+        // entity already in the document -- transaction-wrapped
+        // property writes fail silently in this bridge, which is why
+        // CsTags.commit exists. Same three tags, same mechanism as
+        // GeoReference.js used, so every existing reader finds it.
+        CsTags.commit(getDocumentInterface(), carrier, {
+            GeoLat: coord.lat,
+            GeoLon: coord.lon,
+            GeoStation: stationName !== "" ? stationName : "anchor"
+        });
+        CsLocationPick.remember(coord);
+    } catch (eW) {
+        QMessageBox.warning(null, "Survey Notebook",
+            "Couldn't store the geo anchor (" + eW +
+            "). The estimate above still stands.");
+        return null;
+    }
+    return { station: stationName !== "" ? stationName : "anchor" };
+};
+
+/**
+ * Infer: the estimate for THIS PAGE's own header, from the header's
+ * date and the cave's location. It fills a text field and touches
+ * nothing else -- except that a location it had to ASK for is offered
+ * to the drawing as its geo anchor (see offerGeoAnchor).
+ *
+ * Do NOT "unify" this with the Declination... button below. They do
+ * different jobs on different data: Infer estimates a declination for
+ * the trip the page is about to draw (the page's magnetic azimuth
+ * cells are converted with it on the next Draw), while Declination...
+ * REVISES trips already stored in the drawing -- rotating their
+ * recorded shots and logging the change. Merging them would mean
+ * either an estimate that silently rewrites the drawing, or a
+ * revision that can't be used until the page holds the trip.
+ */
 SurveyNotebook.inferDeclination = function(w) {
     var m = /^(\d{4})-(\d{1,2})-(\d{1,2})$/.exec(String(w.dateEdit.text));
     if (m === null) {
@@ -1350,6 +1515,7 @@ SurveyNotebook.inferDeclination = function(w) {
     // the drawing's anchor is authoritative and skips the prompt;
     // otherwise ask, prefilled with the last declared location
     var coord = null;
+    var prompted = false;
     var shared = CsLocationPick.getShared(getDocument());
     if (shared !== null && shared.source === "anchor") {
         coord = shared;
@@ -1358,6 +1524,7 @@ SurveyNotebook.inferDeclination = function(w) {
         if (coord === null) {
             return;
         }
+        prompted = true;
     }
 
     var result = CsGeomag.declination(coord.lat, coord.lon, {
@@ -1371,9 +1538,369 @@ SurveyNotebook.inferDeclination = function(w) {
     }
     w.declEdit.text = result.declination.toFixed(2);
     w.declSource = "igrf";
+
+    // A location the user just typed is worth more than one estimate:
+    // offered to the drawing as its geo anchor, since nothing else in
+    // the notebook establishes one. Only for a PROMPTED coordinate --
+    // one read off the drawing's own anchor is already stored.
+    var anchored = prompted ?
+        SurveyNotebook.offerGeoAnchor(getDocument(), coord) : null;
+    var anchorLine = anchored === null ? "" :
+        ("\n\nGeo anchor stored on station " + anchored.station +
+            " -- this drawing's tie to real-world coordinates. Aerial " +
+            "imagery aligns to it and revisions pivot on it; the " +
+            "geometry was not changed.");
+    if (anchored !== null) {
+        EAction.handleUserMessage("Survey Notebook: geo anchor stored on " +
+            "station " + anchored.station + " at " +
+            coord.lat.toFixed(6) + ", " + coord.lon.toFixed(6) + ".");
+    }
+
     QMessageBox.information(null, "Survey Notebook",
         CsReport.igrfLine(result, coord.lat, coord.lon, String(w.dateEdit.text)) +
-        "\n\nFilled into the header -- edit it freely; it stays your call.");
+        "\n\nFilled into the header -- edit it freely; it stays your call." +
+        anchorLine);
+};
+
+// ---------------------------------------------------------------------
+// Per-trip declination revision: the drawing's OWN trips, corrected in
+// place. This is the revision framework's whole point -- drop in the
+// declination a trip should have had and the drawing adjusts -- and it
+// works on trips the page never has to hold.
+//
+// HOW THIS RELATES TO THE HEADER'S Decl FIELD. Both can change a
+// trip's declination, and they do not do the same thing:
+//
+//   header Decl + Draw   The page's azimuth cells are magnetic, so
+//                        re-drawing with a different Decl produces
+//                        exactly the same TRUE azimuths this dialog
+//                        would (cell + D' == old_true - D + D'). The
+//                        GEOMETRY agrees. The BOOKKEEPING does not:
+//                        declination is part of a trip's fingerprint
+//                        (CsModel.tripFingerprint), so a changed Decl
+//                        no longer matches the trip the page was
+//                        loaded from and the page lands as a NEW trip
+//                        BESIDE it -- the original trip's shots stay
+//                        in the model under the same station names,
+//                        the new trip has no old shots to carry
+//                        backsights or exclusion flags from, and
+//                        nothing is written to the RevisionLog.
+//   this dialog          Rotates the trip's stored azimuths (and its
+//                        backsights) by the difference, keeps the trip
+//                        where it is, and records the change in the
+//                        RevisionLog. One CsRevise.apply.
+//
+// So this dialog is the correct path for "the declination was wrong",
+// and the header field stays what it always was: the declination the
+// page's own readings were taken under. Said out loud in the dialog's
+// intro and in the Decl field's tooltip, because a user who corrects
+// declination in two places and gets two different results is worse
+// off than with either alone.
+// ---------------------------------------------------------------------
+
+/**
+ * Declination... : the guard rail in front of the dialog. A drawing
+ * whose reconstruction is a guess (legacy pre-v3 tags) must not be
+ * revised -- revising a guess is how drawings drift -- so it is sent
+ * to Rebuild Survey Data instead.
+ */
+SurveyNotebook.reviseDeclinations = function(w) {
+    // Any failure in here must be SEEN, not swallowed by the engine.
+    try {
+        SurveyNotebook.reviseDeclinationsInner(w);
+    } catch (e) {
+        QMessageBox.warning(null, "Survey Notebook",
+            "Declination revision failed inside this build's bridge:\n\n" +
+            e + "\n\n" +
+            (e.stack ? String(e.stack).substring(0, 600) : "") +
+            "\n\nPlease report this text.");
+    }
+};
+
+SurveyNotebook.reviseDeclinationsInner = function(w) {
+    var doc = getDocument();
+    if (doc === undefined || doc === null) {
+        QMessageBox.warning(null, "Survey Notebook", "No drawing is open.");
+        return;
+    }
+    var recon;
+    try {
+        recon = CsRevise.surveyFromDocument(doc);
+    } catch (eRe) {
+        QMessageBox.warning(null, "Survey Notebook",
+            "Couldn't read the survey back from this drawing (" + eRe + ").");
+        return;
+    }
+    if (recon.legacy === true) {
+        QMessageBox.information(null, "Survey Notebook",
+            "This drawing's survey predates the exact tag schema, so " +
+            "its shots can't be revised safely from what's stored.\n\n" +
+            "Run Rebuild Survey Data (command: rebuildsurveydata) " +
+            "first -- it upgrades the tags in place -- then revise the " +
+            "declination per trip.");
+        return;
+    }
+    if (recon.survey.shots.length === 0) {
+        QMessageBox.warning(null, "Survey Notebook",
+            "No survey shots found in this drawing -- there is no trip " +
+            "declination to revise. Use Infer beside the header's Decl " +
+            "for the page you are about to draw.");
+        return;
+    }
+    SurveyNotebook.tripDeclinationDialog(doc, recon);
+};
+
+/**
+ * The per-trip revision dialog over a v3-tagged survey: one row per
+ * trip (label, recorded value and source, editable field, per-trip
+ * IGRF), applied through CsRevise in one operation.
+ *
+ * GUI only: every decision (what changed, what source, what's
+ * invalid) is made by CsRevise.parseTripEdits over plain data
+ * snapshotted from the widgets, so the logic stays headlessly
+ * testable. Built from QLabel/QLineEdit in a QGridLayout because this
+ * bridge has no QTableWidget, and every construction step is wrapped:
+ * a refused widget must report itself, not kill the dock.
+ */
+SurveyNotebook.tripDeclinationDialog = function(doc, recon) {
+    CsModel.ensureTrips(recon.survey);
+    var trips = recon.survey.trips;
+
+    // IGRF fills only from the DRAWING'S OWN geo reference -- a
+    // remembered location from some other cave would be silently
+    // wrong here. CsLocationPick.getShared scans the entities for
+    // GeoLat/GeoLon and labels a hit source:"anchor".
+    var geo = CsLocationPick.getShared(doc);
+    if (geo !== null && geo.source !== "anchor") {
+        geo = null;
+    }
+
+    // one connect failure on a critical control = unusable dialog
+    var connectOk = function(signal, fn) {
+        try {
+            signal.connect(fn);
+            return true;
+        } catch (e) {
+            return false;
+        }
+    };
+
+    var state = { accepted: false, rowsData: null };
+    var rows = []; // {tripId, recorded, edit, igrfText}
+    var dlg;
+
+    try {
+        dlg = new QDialog(getMainWindow());
+        dlg.windowTitle = "Declination";
+        var layout = new QVBoxLayout();
+
+        var intro = new QLabel(
+            "Trips already in this drawing. Drop in the correct\n" +
+            "declination per trip (degrees, east positive) and the\n" +
+            "drawing adjusts: azimuths rotate by the difference and\n" +
+            "the change is logged. This is the place to correct a\n" +
+            "declination -- the page's own Decl field is the value\n" +
+            "the page's readings were taken under.\n" +
+            "IGRF fills the estimate for a trip's date -- it needs a\n" +
+            "geo-referenced station in the drawing and a YYYY-MM-DD\n" +
+            "trip date.");
+        layout.addWidget(intro, 0, 0);
+
+        var grid = new QGridLayout();
+        grid.addWidget(new QLabel("Trip"), 0, 0);
+        grid.addWidget(new QLabel("Recorded"), 0, 1);
+        grid.addWidget(new QLabel("New declination"), 0, 2);
+
+        for (var t = 0; t < trips.length; t++) {
+            var trip = trips[t];
+            var gridRow = t + 1;
+            grid.addWidget(new QLabel(CsRevise.tripLabel(t, trip)),
+                gridRow, 0);
+            grid.addWidget(new QLabel(CsRevise.recordedText(trip)),
+                gridRow, 1);
+
+            var edit = new QLineEdit();
+            edit.text = CsRevise.declText(trip.declination);
+            grid.addWidget(edit, gridRow, 2);
+
+            var row = { tripId: t, recorded: trip.declination,
+                edit: edit, igrfText: "" };
+            rows.push(row);
+
+            var igrfBtn = new QPushButton("IGRF");
+            var tripDate = CsRevise.parseIsoDate(trip.date);
+
+            // The handler re-checks every precondition itself, on the
+            // live 'geo'/'tripDate' values, and is wired UNCONDITIONALLY
+            // -- not only when the preconditions currently hold. That
+            // way the disabling below is purely cosmetic: if this
+            // bridge ever rejects the 'enabled = false' write (caught
+            // below), the button stays clickable but is never wired to
+            // nothing -- clicking it always either fills the field or
+            // says exactly why it can't. Said in a message box, not on
+            // the command line: this dialog is modal, so a command-line
+            // warning would go unread behind it.
+            // closure per row -- capture row, date and trip now
+            (function(r, d, tr) {
+                connectOk(igrfBtn.clicked, function() {
+                    if (geo === null) {
+                        QMessageBox.warning(null, "Survey Notebook",
+                            "No geo reference in this drawing -- pin a " +
+                            "station to a latitude/longitude first, then " +
+                            "IGRF can fill from it.");
+                        return;
+                    }
+                    if (d === null) {
+                        QMessageBox.warning(null, "Survey Notebook",
+                            "Trip " + r.tripId + "'s date (\"" + tr.date +
+                            "\") isn't YYYY-MM-DD, so IGRF can't be " +
+                            "evaluated for it -- give the trip a date in " +
+                            "that form.");
+                        return;
+                    }
+                    var res = CsGeomag.declination(geo.lat, geo.lon, d);
+                    if (res === null) {
+                        QMessageBox.warning(null, "Survey Notebook",
+                            d.year + " is before 1900, outside the IGRF " +
+                            "model.");
+                        return;
+                    }
+                    // 2 decimals is the suite-wide IGRF-apply
+                    // convention -- the header's Infer button rounds to
+                    // the same precision, and parseTripEdits judges
+                    // "unchanged" at 4. Keeping every IGRF fill at 2
+                    // decimals means a trip revised in one place reads
+                    // back as unchanged in the other.
+                    var txt = res.declination.toFixed(2);
+                    r.edit.text = txt;
+                    r.igrfText = txt;
+                });
+            })(row, tripDate, trip);
+
+            if (geo !== null && tripDate !== null) {
+                igrfBtn.toolTip = "Fill the IGRF estimate for " +
+                    trip.date + " at the drawing's geo reference.";
+            } else {
+                igrfBtn.toolTip = geo === null ?
+                    "No geo reference in this drawing -- pin a station " +
+                    "to a latitude/longitude to enable IGRF fills." :
+                    "This trip's date isn't YYYY-MM-DD, so IGRF " +
+                    "can't be evaluated for it.";
+                try {
+                    igrfBtn.enabled = false;
+                } catch (eDis) {
+                    // stays enabled -- the click handler above re-checks
+                    // and explains itself, so this is cosmetic only
+                }
+            }
+            grid.addWidget(igrfBtn, gridRow, 3);
+        }
+        layout.addLayout(grid, 0);
+
+        var buttons = new QHBoxLayout();
+        buttons.addStretch(1);
+        var applyBtn = new QPushButton("Apply");
+        var cancelBtn = new QPushButton("Cancel");
+        buttons.addWidget(applyBtn, 0, 0);
+        buttons.addWidget(cancelBtn, 0, 0);
+        layout.addLayout(buttons, 0);
+
+        dlg.setLayout(layout);
+
+        var wired = connectOk(applyBtn.clicked, function() {
+            // snapshot the widgets into plain data HERE, while they
+            // are certainly alive; decisions happen after exec()
+            var data = [];
+            for (var i = 0; i < rows.length; i++) {
+                data.push({ tripId: rows[i].tripId,
+                    recorded: rows[i].recorded,
+                    text: String(rows[i].edit.text),
+                    igrfText: rows[i].igrfText });
+            }
+            state.rowsData = data;
+            state.accepted = true;
+            dlg.accept();
+        });
+        wired = connectOk(cancelBtn.clicked, function() {
+            dlg.reject();
+        }) && wired;
+        if (!wired) {
+            QMessageBox.warning(null, "Survey Notebook",
+                "This build's script bridge couldn't wire the dialog " +
+                "buttons. Nothing was changed.");
+            return;
+        }
+
+        dlg.exec();
+    } catch (eDlg) {
+        QMessageBox.warning(null, "Survey Notebook",
+            "Couldn't build the revision dialog (" + eDlg +
+            "). Nothing was changed.");
+        return;
+    }
+
+    if (!state.accepted || state.rowsData === null) {
+        return; // cancelled
+    }
+
+    // ---- decide (pure) ------------------------------------------------
+    var decision = CsRevise.parseTripEdits(state.rowsData);
+    if (decision.error !== undefined) {
+        QMessageBox.warning(null, "Survey Notebook", decision.error);
+        return;
+    }
+    if (decision.changes.length === 0) {
+        QMessageBox.information(null, "Survey Notebook",
+            "No declination changes.");
+        return;
+    }
+
+    // ---- apply ----------------------------------------------------------
+    // CsRevise.apply diffs the OLD model against the NEW: it needs a
+    // PRISTINE reconstruction for its recon argument. reviseDeclination
+    // mutates in place, so reconstruct a second time (the document is
+    // untouched since the first scan -- the two are identical) and
+    // mutate only the copy the dialog was built from.
+    var pristine;
+    try {
+        pristine = CsRevise.surveyFromDocument(doc);
+    } catch (ePr) {
+        QMessageBox.warning(null, "Survey Notebook",
+            "Couldn't re-read the survey (" + ePr +
+            "). Nothing was changed.");
+        return;
+    }
+
+    for (var c = 0; c < decision.changes.length; c++) {
+        var ch = decision.changes[c];
+        CsRevise.reviseDeclination(recon.survey, ch.tripId, ch.value,
+            ch.source);
+    }
+
+    var report;
+    try {
+        report = CsRevise.apply(doc, getDocumentInterface(), pristine,
+            recon.survey);
+    } catch (eAp) {
+        QMessageBox.warning(null, "Survey Notebook",
+            "Applying the revision failed (" + eAp +
+            "). If the drawing looks half-moved, undo restores it.");
+        return;
+    }
+
+    // Name the trips out loud: revisionSummary reports stations, loops
+    // and the anchor, but never which trip moved -- and the whole point
+    // of the dialog was picking one.
+    var tripBits = [];
+    for (c = 0; c < decision.changes.length; c++) {
+        tripBits.push("trip " + decision.changes[c].tripId + " -> " +
+            CsRevise.declText(decision.changes[c].value) +
+            " (" + decision.changes[c].source + ")");
+    }
+    var summary = "Declination revised: " + tripBits.join(", ") + "\n\n" +
+        CsReport.revisionSummary(report);
+    EAction.handleUserMessage(summary);
+    QMessageBox.information(null, "Survey Notebook", summary);
 };
 
 // ---------------------------------------------------------------------
@@ -1419,11 +1946,22 @@ SurveyNotebook.buildDock = function(appWin) {
     w.declEdit = new QLineEdit();
     w.declEdit.placeholderText = "0.0 (E+)";
     w.declEdit.maximumWidth = 80;
+    // Says which of the two declination paths this field is, because
+    // the other one is three buttons away (see the per-trip revision
+    // section above).
+    w.declEdit.toolTip = "The declination THIS PAGE's compass readings " +
+        "were taken under (east positive): the azimuth cells are " +
+        "magnetic, this converts them to true when you Draw.\n" +
+        "To CORRECT the declination of a trip already in the drawing, " +
+        "use Declination... instead -- that rotates the stored shots " +
+        "and logs the revision.";
     head2.addWidget(w.declEdit, 0, 0);
     w.inferButton = new QPushButton("Infer");
     w.inferButton.toolTip =
         "Estimate declination from the survey date and the cave's " +
-        "location (IGRF model, 1900 to present). Always editable.";
+        "location (IGRF model, 1900 to present). Always editable.\n" +
+        "If it has to ask where the cave is, it offers to keep that " +
+        "location as the drawing's geo anchor.";
     head2.addWidget(w.inferButton, 0, 0);
     layout.addLayout(head2, 0);
 
@@ -1587,12 +2125,18 @@ SurveyNotebook.buildDock = function(appWin) {
     w.loadDrawingButton.toolTip = "Fill the page from a trip already in " +
         "the drawing, so this page becomes that trip's revision sheet. " +
         "Edit and Draw to replace it in place.";
+    w.declReviseButton = new QPushButton("Declination...");
+    w.declReviseButton.toolTip = "Correct the declination of the trips " +
+        "already in the drawing: one row per trip, IGRF on tap, and the " +
+        "drawing turns by the difference. Not the same as the header's " +
+        "Decl, which is what this page's own readings were taken under.";
     actions.addWidget(w.drawButton, 0, 0);
     actions.addWidget(w.importButton, 0, 0);
     actions.addWidget(w.exportButton, 0, 0);
     actions.addWidget(w.statusButton, 0, 0);
     actions.addWidget(w.clearButton, 0, 0);
     actions.addWidget(w.loadDrawingButton, 0, 0);
+    actions.addWidget(w.declReviseButton, 0, 0);
     layout.addLayout(actions, 0);
 
     body.setLayout(layout);
@@ -1692,6 +2236,9 @@ SurveyNotebook.buildDock = function(appWin) {
     SurveyNotebook.safeConnect(w.loadDrawingButton.clicked, function() {
         SurveyNotebook.loadFromDrawing(w);
     }, "Load from drawing button", w.problems);
+    SurveyNotebook.safeConnect(w.declReviseButton.clicked, function() {
+        SurveyNotebook.reviseDeclinations(w);
+    }, "Declination button", w.problems);
 
     // a fresh sheet starts with its first two stations
     SurveyNotebook.addStationRow(w, "A1");
