@@ -114,6 +114,20 @@ trips: [ { name, date, team, declination, declinationSource,
 
 `Shot` gains `trip` (integer index into `trips`, default 0).
 
+**Trip identity (user decision 2026-08-20): the fingerprint `date + "|" +
+declination + "|" + team` uniquely identifies a trip.** `CsModel.tripFingerprint
+(trip)` computes it (declination formatted to 4 decimals so float noise can't split
+a trip). Everywhere trips are created or matched, the fingerprint is the key:
+
+- Parsers **dedupe** blocks by fingerprint — two Compass `\f` blocks or Survex
+  sections with the same (date, declination, team) are the SAME trip.
+- Drawing into a document that already has trips: a survey trip whose fingerprint
+  matches an existing drawing trip **reuses that Trip id**; otherwise it gets
+  `maxExistingId + 1`. The integer `Trip` tag is the stable per-drawing index;
+  the fingerprint is the identity.
+- Notebook: a page whose header (date, declination, team) matches an existing
+  drawing trip appends to that trip.
+
 Back-compat: top-level `survey.name/date/team/declination/declinationSource/
 distanceUnit/startNote/startLrud` remain and mirror **trip 0**.
 `CsModel.ensureTrips(survey)` normalizes: no `trips` → create `trips[0]` from the
@@ -123,10 +137,10 @@ entry point (parsers' return, notebook build, reconstruction). Helper
 
 Parsers emit trips:
 
-- **Compass**: one trip per `\f`-separated block (currently merged into one survey,
-  per-block declination applied then forgotten — the record now survives).
-- **Survex**: new trip whenever the effective `(date, team, calibrate-declination)`
-  tuple in force changes between legs.
+- **Compass**: trip per `\f`-separated block, deduped by fingerprint (same
+  date+declination+team = same trip; per-block declination now survives).
+- **Survex**: shots keyed to the effective `(date, declination, team)` fingerprint
+  in force where the leg appears; each distinct fingerprint = one trip.
 - **Walls / CSV**: single trip 0.
 - **Writers** un-apply declination per shot's trip (today: per survey).
 
