@@ -534,18 +534,25 @@ CsDraw.survey = function(survey, resolved, originStation, originPos, seqBase) {
         CsTags.set(anchor0, "StartLrud",
             CsModel.startLrudText(survey.startLrud));
         // Shots the drawing can't show as geometry still reconstruct:
-        // one "tripId TAB shotRow" line per shot (CsTags.set escapes
-        // the newlines between lines itself).
+        // one "tripId TAB shotSeq TAB shotRow" line per shot (CsTags.set
+        // escapes the newlines between lines itself). shotSeq is the
+        // same per-trip counter (shotSeqOf, computed above for the
+        // drawn legs/splays) so a reader can interleave these rows with
+        // the drawn shots and restore the original notebook order
+        // within each trip.
         var exRows = [];
         var unRows = [];
         for (i = 0; i < survey.shots.length; i++) {
             if (survey.shots[i].excludeFromAll) {
                 exRows.push((survey.shots[i].trip || 0) + "\t" +
+                    shotSeqOf[i] + "\t" +
                     CsModel.shotRowText(survey.shots[i]));
             }
         }
         for (i = 0; i < resolved.unresolved.length; i++) {
+            var unIdx = survey.shots.indexOf(resolved.unresolved[i]);
             unRows.push((resolved.unresolved[i].trip || 0) + "\t" +
+                shotSeqOf[unIdx] + "\t" +
                 CsModel.shotRowText(resolved.unresolved[i]));
         }
         if (exRows.length > 0) {

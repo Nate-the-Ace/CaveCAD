@@ -382,12 +382,24 @@ CsModel.lrudEntryText = function(value, all) {
 // Text serialization -- turns Shot/startLrud fields into compact
 // strings and back, so they can be carried as DXF XDATA tag values
 // (one tag value per shot, one shot per drawn segment) without QCAD
-// ever needing to know the survey model shape. Newline handling is
-// deliberately NOT done here: a note's real newlines pass straight
-// through these functions untouched, because the tag carrier (see
-// CsTags.js) is the layer that escapes/unescapes them for storage in
-// a single-line tag. Tabs are the field separator used here, so they
-// ARE stripped from free text below.
+// ever needing to know the survey model shape. Tabs are the field
+// separator used here, so they ARE stripped from free text below.
+//
+// The note field additionally escapes '\' and real newlines (see
+// shotRowText/parseShotRow) so a single row stands on its own even
+// when several rows get "\n"-joined into one multi-row blob (the
+// ExcludedShots/UnplacedShots rows in CsDraw.js): without that, a
+// note's own newline would be indistinguishable from the blob's row
+// separator. That blob then goes through CsTags.set's OWN blob-level
+// escaping (CsTags.js) as an outer layer, which is where this needs
+// care: CsTags.set/get chain plain regex replaces rather than a real
+// escaping state machine, so it is only a correct round-trip when the
+// text it receives contains no backslash sequence that collides with
+// its own escape target. This layer's marker is chosen accordingly
+// (capital 'N' for newline, not 'n' -- see shotRowText) so nothing it
+// writes can ever collide with CsTags' pass, and the two layers
+// compose safely in practice, verified by the "multi-line note" unit
+// test rather than assumed.
 //
 // Trip is deliberately NOT one of the row fields (see shotRowText):
 // trip membership is context the row's CARRIER supplies, not
@@ -407,20 +419,27 @@ CsModel.lrudEntryText = function(value, all) {
 // ---------------------------------------------------------------------
 
 /**
- * The four exclusion/hold flags as a compact letter code -- the same
- * vocabulary Compass uses in "#|PCL#" flag blocks: P excludeFromPlot,
- * X excludeFromAll, L excludeFromLength, C noAdjust. Letter order is
+ * The exclusion/hold flags as a compact letter code. The first four
+ * letters are the same vocabulary Compass uses in "#|PCL#" flag
+ * blocks: P excludeFromPlot, X excludeFromAll, L excludeFromLength,
+ * C noAdjust. S (shot.splay) is this Core's own addition, appended
+ * last -- Compass has no such letter. It exists only for SERIALIZED
+ * rows (ExcludedShots/UnplacedShots): a splay drawn as an entity
+ * already says so implicitly via its "Splay" tag key, but a row has
+ * no such key, so without S an excluded splay would be indistinguishable
+ * from an excluded leg once it's off the network. Letter order is
  * fixed on write but parseFlags reads them in any order.
  */
 CsModel.flagsText = function(shot) {
     return (shot.excludeFromPlot ? "P" : "") +
         (shot.excludeFromAll ? "X" : "") +
         (shot.excludeFromLength ? "L" : "") +
-        (shot.noAdjust ? "C" : "");
+        (shot.noAdjust ? "C" : "") +
+        (shot.splay ? "S" : "");
 };
 
 /**
- * Reads a flagsText code back into shot's four booleans (order does
+ * Reads a flagsText code back into shot's five booleans (order does
  * not matter, unknown letters are ignored, "" or null means all
  * false). Mutates shot in place and returns it, matching parseFlags'
  * cousins elsewhere in the Core (e.g. parseLrudEntry's callers).
@@ -431,6 +450,7 @@ CsModel.parseFlags = function(text, shot) {
     shot.excludeFromAll = t.indexOf("X") >= 0;
     shot.excludeFromLength = t.indexOf("L") >= 0;
     shot.noAdjust = t.indexOf("C") >= 0;
+    shot.splay = t.indexOf("S") >= 0;
     return shot;
 };
 
@@ -445,6 +465,23 @@ CsModel.parseFlags = function(text, shot) {
  * to a space on the way out (tabs are the separator here), and
  * parseShotRow reads everything from field 12 onward back into it so
  * a note that somehow still contains a tab doesn't get truncated.
+ * After the tab swap the note is further escaped ('\' -> '\\', real
+ * newline -> the two literal characters '\' 'N') so the row is
+ * self-contained -- see the block comment above this section for why.
+ * parseShotRow reverses both steps in the opposite order.
+ *
+ * The newline marker deliberately uses capital 'N', NOT lowercase 'n':
+ * this row text gets embedded in a "\n"-joined multi-row blob that
+ * CsTags.set ALSO escapes (its own '\' -> '\\', newline -> '\' 'n'
+ * pass, see CsTags.js), and that outer pass doubles every backslash
+ * blindly, including ones already written here. A lowercase 'n'
+ * marker collides with CsTags' own escape target: once doubled, the
+ * outer unescape's naive left-to-right "\n" scan pairs one backslash
+ * with the 'n' and strands the other as a bare backslash beside a
+ * spurious real newline -- verified to corrupt the row split (see the
+ * "multi-line note" unit test). Capital 'N' can never match CsTags'
+ * lowercase-only pattern, so this layer's escaping survives the outer
+ * pass completely untouched and round-trips correctly.
  *
  * shot.trip is NOT a field here -- see the block comment above this
  * section for why (it's context the row's carrier supplies). Field
@@ -455,7 +492,8 @@ CsModel.shotRowText = function(shot) {
     var numText = function(v) {
         return (v === null || v === undefined) ? "" : String(v);
     };
-    var note = (shot.notes || "").replace(/\t/g, " ");
+    var note = (shot.notes || "").replace(/\t/g, " ")
+        .replace(/\\/g, "\\\\").replace(/\r?\n/g, "\\N");
     return [
         shot.from,
         shot.to,
@@ -502,7 +540,13 @@ CsModel.parseShotRow = function(text) {
         shot[sides[i][0] + "All"] = e.all;
     }
     CsModel.parseFlags(f[11] || "", shot);
-    shot.notes = f.slice(12).join("\t");
+    // Reverse shotRowText's note escaping, in the opposite order it
+    // was applied: unescape the '\' 'N' newline marker first, THEN
+    // undo the backslash doubling (see shotRowText for why the marker
+    // is capital 'N', not 'n' -- lowercase would collide with
+    // CsTags.set's own escaping one layer up).
+    shot.notes = f.slice(12).join("\t")
+        .replace(/\\N/g, "\n").replace(/\\\\/g, "\\");
     return shot;
 };
 

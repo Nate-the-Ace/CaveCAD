@@ -235,6 +235,22 @@ CsModel.parseFlags("CP", fsh2);
 ok(fsh2.excludeFromPlot && fsh2.noAdjust && !fsh2.excludeFromAll,
     "flags parse order-insensitive");
 
+// splay flag S -- canonical write order is P/X/L/C/S (appended last);
+// parse must still accept it in either position relative to the rest.
+var fshS = CsModel.newShot();
+fshS.excludeFromAll = true; fshS.splay = true;
+ok(CsModel.flagsText(fshS) === "XS",
+    "flags text: splay S appended after the Compass letters, got '" +
+    CsModel.flagsText(fshS) + "'");
+var fshS2 = CsModel.newShot();
+CsModel.parseFlags("XS", fshS2);
+ok(fshS2.excludeFromAll === true && fshS2.splay === true,
+    "flags parse: canonical order XS");
+var fshS3 = CsModel.newShot();
+CsModel.parseFlags("SX", fshS3);
+ok(fshS3.excludeFromAll === true && fshS3.splay === true,
+    "flags parse: reversed order SX still parses");
+
 var row = CsModel.newShot();
 row.from = "A1"; row.to = "A2"; row.distance = 25.4; row.azimuth = 271.5;
 row.inclination = -3; row.backAzimuth = 91.0; row.left = 2; row.leftAll = [2, 5];
@@ -246,6 +262,18 @@ ok(rowBack.backInclination === null, "shot row null backsight stays null");
 ok(rowBack.leftAll.join("/") === "2/5", "shot row multi-reading LRUD");
 ok(rowBack.excludeFromAll === true, "shot row flags");
 ok(rowBack.notes === "line 1\nline 2", "shot row notes with newline");
+
+// a note with BOTH a real newline and a backslash must survive
+// shotRowText/parseShotRow exactly -- this is what makes a single row
+// self-contained when several rows get "\n"-joined into one blob
+// (ExcludedShots/UnplacedShots in CsDraw.js)
+var rowEsc = CsModel.newShot();
+rowEsc.from = "B1"; rowEsc.to = "B2"; rowEsc.distance = 12;
+rowEsc.notes = "back\\slash and\nnewline";
+var rowEscBack = CsModel.parseShotRow(CsModel.shotRowText(rowEsc));
+ok(rowEscBack.notes === "back\\slash and\nnewline",
+    "shot row notes with backslash and newline survive escaping, got '" +
+    rowEscBack.notes + "'");
 
 var slr = CsModel.startLrudText({left: 2, right: null, up: 1, down: 0,
     leftAll: [2, 5], rightAll: null, upAll: null, downAll: null});
@@ -1547,13 +1575,21 @@ if (!IS_NODE) {
             CsTags.get(a1, "TripDeclination") === "3",
             "v3: trip 1 anchor metadata");
 
-        // ExcludedShots round-trips through parseShotRow
+        // ExcludedShots round-trips through parseShotRow. Row format is
+        // "tripId TAB shotSeq TAB shotRow" -- split properly instead of
+        // a substring(2) hack, which would break once a trip id reaches
+        // two digits.
         var exText = a0 !== undefined ? CsTags.get(a0, "ExcludedShots") : "";
         ok(exText !== "", "v3: ExcludedShots present");
         var exRows = exText.split("\n");
-        ok(exRows.length === 1 && exRows[0].indexOf("0\t") === 0,
-            "v3: one excluded row, trip-prefixed");
-        var exShot = CsModel.parseShotRow(exRows[0].substring(2));
+        ok(exRows.length === 1, "v3: one excluded row, got " + exRows.length);
+        var exFields = exRows[0].split("\t");
+        ok(exFields[0] === "0",
+            "v3: excluded row trip-prefixed, got '" + exFields[0] + "'");
+        ok(exFields[1] === "4",
+            "v3: excluded row ShotSeq (trip-0 seq 4), got '" +
+            exFields[1] + "'");
+        var exShot = CsModel.parseShotRow(exFields.slice(2).join("\t"));
         ok(exShot.from === "X1" && exShot.to === "X2",
             "v3: excluded row from/to, got " + exShot.from + "->" + exShot.to);
         near(exShot.distance, 7, 1e-9, "v3: excluded row distance");
@@ -1566,7 +1602,11 @@ if (!IS_NODE) {
         var unText = a0 !== undefined ? CsTags.get(a0, "UnplacedShots") : "";
         ok(unText !== "", "v3: UnplacedShots present");
         if (unText !== "") {
-            var unShot = CsModel.parseShotRow(unText.split("\n")[0].substring(2));
+            var unFields = unText.split("\n")[0].split("\t");
+            ok(unFields[1] === "6",
+                "v3: unplaced row ShotSeq (trip-0 seq 6), got '" +
+                unFields[1] + "'");
+            var unShot = CsModel.parseShotRow(unFields.slice(2).join("\t"));
             ok(unShot.from === "Z1" && unShot.to === "Z2",
                 "v3: unplaced row from/to");
             near(unShot.distance, 9, 1e-9, "v3: unplaced row distance");
@@ -1581,6 +1621,65 @@ if (!IS_NODE) {
         var hidLayer = doc.queryLayer("CTRL-HIDDEN");
         ok(!isNull(hidLayer) && hidLayer.isOff() === true,
             "v3: CTRL-HIDDEN restored to OFF after the draw");
+    })();
+
+    // -----------------------------------------------------------------
+    // A note's own embedded newline must not fool the ExcludedShots
+    // blob's "\n"-joined row splitting: shotRowText/parseShotRow now
+    // escape '\' and real newlines per row, so the blob still splits
+    // into exactly one row per excluded shot.
+    // -----------------------------------------------------------------
+    (function() {
+        var doc = new RDocument(new RMemoryStorage(), new RSpatialIndexNavel());
+        var di = new RDocumentInterface(doc);
+        getDocument = function() { return doc; };
+        getDocumentInterface = function() { return di; };
+
+        var msv = CsModel.newSurvey();
+        // a normal, resolvable leg so a station exists to anchor the tags
+        var mOk = shotOf("M0", "M1", 5, 0);          // trip 0, seq 0
+        var m0 = shotOf("M1", "M2", 5, 0);           // trip 0, seq 1: excluded
+        m0.excludeFromAll = true;
+        m0.notes = "line one\nline two";
+        var m1 = shotOf("M2", "M3", 6, 90);          // trip 0, seq 2: excluded
+        m1.excludeFromAll = true;
+        m1.notes = "single line";
+        msv.shots.push(mOk); msv.shots.push(m0); msv.shots.push(m1);
+
+        var mres = CsNetwork.resolve(msv, {});
+        CsDraw.survey(msv, mres);
+
+        var mids = doc.queryAllEntities(false, false);
+        var manchor;
+        for (var mi = 0; mi < mids.length; mi++) {
+            var me = doc.queryEntity(mids[mi]);
+            if (isNull(me)) {
+                continue;
+            }
+            if (CsTags.get(me, "ExcludedShots") !== "") {
+                manchor = me;
+                break;
+            }
+        }
+        ok(manchor !== undefined, "v3: multi-line-note anchor found");
+        if (manchor !== undefined) {
+            var mText = CsTags.get(manchor, "ExcludedShots");
+            var mRows = mText.split("\n");
+            ok(mRows.length === 2,
+                "v3: ExcludedShots still splits into 2 rows when one " +
+                "note has an embedded newline, got " + mRows.length);
+            if (mRows.length === 2) {
+                var mShot0 = CsModel.parseShotRow(
+                    mRows[0].split("\t").slice(2).join("\t"));
+                ok(mShot0.notes === "line one\nline two",
+                    "v3: multi-line note survives row split, got '" +
+                    mShot0.notes + "'");
+                var mShot1 = CsModel.parseShotRow(
+                    mRows[1].split("\t").slice(2).join("\t"));
+                ok(mShot1.notes === "single line",
+                    "v3: sibling row unaffected, got '" + mShot1.notes + "'");
+            }
+        }
     })();
 }
 
