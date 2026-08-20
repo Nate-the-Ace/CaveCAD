@@ -517,10 +517,10 @@ SurveyNotebook.refresh = function(w) {
     }
     var survey = SurveyNotebook.sheetSurvey(w);
     if (survey.shots.length === 0) {
-        w.statusLabel.text = "No shots yet. Shots are written between " +
-            "the stations they connect; azimuth clockwise from north, " +
-            "distance along the tape, backsights optional. LRUD sits " +
-            "beside its station.";
+        w.statusLabel.setPlainText("No shots yet. Shots are written " +
+            "between the stations they connect; azimuth clockwise from " +
+            "north, distance along the tape, backsights optional. LRUD " +
+            "sits beside its station.");
         return;
     }
     var resolved = CsNetwork.resolve(survey, {});
@@ -548,7 +548,7 @@ SurveyNotebook.refresh = function(w) {
     if (findings.length > shown) {
         lines.push("(" + (findings.length - shown) + " more -- see Draw's report)");
     }
-    w.statusLabel.text = lines.join("\n");
+    w.statusLabel.setPlainText(lines.join("\n"));
 };
 
 // ---------------------------------------------------------------------
@@ -869,8 +869,19 @@ SurveyNotebook.buildDock = function(appWin) {
     w.editor.visible = (w.mode === "text");
 
     // ---- live status -----------------------------------------------
-    w.statusLabel = new QLabel("");
-    w.statusLabel.wordWrap = true;
+    // Fixed height so the button rows below never move: the ladder is
+    // the only thing that flexes with the panel. Read-only text box
+    // rather than a label -- long reports scroll inside it instead of
+    // reshaping the panel, and NoFocus keeps it out of keyboard flow.
+    w.statusLabel = new QPlainTextEdit();
+    w.statusLabel.readOnly = true;
+    w.statusLabel.minimumHeight = 96;
+    w.statusLabel.maximumHeight = 96;
+    try {
+        w.statusLabel.focusPolicy = Qt.NoFocus;
+    } catch (eFp) {
+        // cosmetic
+    }
     layout.addWidget(w.statusLabel, 0, 0);
 
     // ---- actions ------------------------------------------------------
