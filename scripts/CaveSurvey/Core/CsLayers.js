@@ -19,6 +19,7 @@ CsLayers.STATIONS = "CTRL-STATIONS";
 CsLayers.STATION_LABELS = "CTRL-STATION-LABELS";
 CsLayers.LRUD = "CTRL-LRUD";
 CsLayers.SPLAYS = "CTRL-SPLAYS";
+CsLayers.HIDDEN = "CTRL-HIDDEN";
 CsLayers.LRUD_WALL_LEFT = "CTRL-LRUD-WALL-LEFT";
 CsLayers.LRUD_WALL_RIGHT = "CTRL-LRUD-WALL-RIGHT";
 CsLayers.GRID = "CTRL-GRID";
@@ -49,6 +50,7 @@ CsLayers.DEFAULTS = {
     "CTRL-STATION-LABELS": ["red", "CONTINUOUS", "Weight025"],
     "CTRL-LRUD": ["pink", "CONTINUOUS", "Weight025"],
     "CTRL-SPLAYS": ["gray", "CONTINUOUS", "Weight000"],
+    "CTRL-HIDDEN": ["gray", "CONTINUOUS", "Weight000"],
     "CTRL-LRUD-WALL-LEFT": ["gray", "DASHED", "Weight000"],
     "CTRL-LRUD-WALL-RIGHT": ["gray", "DASHED", "Weight000"],
     "WALLS-SURVEYED": ["white", "CONTINUOUS", "Weight050"],
@@ -66,11 +68,12 @@ CsLayers.DEFAULTS = {
     "CTRL-DATA": ["gray", "CONTINUOUS", "Weight000"]
 };
 
-// layers created switched OFF (invisible): the data store. NOT
+// layers created switched OFF (invisible): the data store, and
+// CTRL-HIDDEN for legs that must persist but never plot. NOT
 // frozen -- frozen, off and locked layers all silently refuse entity
-// adds in this build, so the store's sync toggles the layer on
-// within its own operation and back off afterwards.
-CsLayers.OFF = { "CTRL-DATA": true };
+// adds in this build, so writers toggle the layer on within their
+// own operation and back off afterwards.
+CsLayers.OFF = { "CTRL-DATA": true, "CTRL-HIDDEN": true };
 
 /**
  * Ensures a layer exists, creating it with its registry defaults if
@@ -98,4 +101,5 @@ CsLayers.ensureSurveyLayers = function(doc, di) {
     CsLayers.ensure(doc, di, CsLayers.STATION_LABELS);
     CsLayers.ensure(doc, di, CsLayers.LRUD);
     CsLayers.ensure(doc, di, CsLayers.SPLAYS);
+    CsLayers.ensure(doc, di, CsLayers.HIDDEN);
 };

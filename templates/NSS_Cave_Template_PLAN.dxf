@@ -549,7 +549,7 @@ $SPLINESEGS
   9
 $HANDSEED
   5
-34B
+34C
   9
 $SURFTAB1
  70
@@ -2459,7 +2459,7 @@ LAYER
 100
 AcDbSymbolTable
  70
-46
+47
   0
 LAYER
   5
@@ -3562,6 +3562,30 @@ CTRL-SPLAYS
 0
  62
 8
+  6
+CONTINUOUS
+370
+0
+390
+13
+347
+21
+  0
+LAYER
+  5
+34B
+330
+1
+100
+AcDbSymbolTableRecord
+100
+AcDbLayerTableRecord
+  2
+CTRL-HIDDEN
+ 70
+0
+ 62
+-8
   6
 CONTINUOUS
 370
