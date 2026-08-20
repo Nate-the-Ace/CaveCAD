@@ -2784,7 +2784,7 @@ if (!IS_NODE) {
     var m0 = CsGeoProject.toMercator(0, 0);
     near(m0.x, 0, 1e-6, "mercator: lon 0 -> x 0");
     near(m0.y, 0, 1e-6, "mercator: lat 0 -> y 0");
-    near(CsGeoProject.toMercator(0, 180).x, 20037508.342789244, 1e-3,
+    near(CsGeoProject.toMercator(0, 180).x, CsGeoProject.WORLD_HALF, 1e-3,
         "mercator: lon 180 -> half world width");
 
     // Round-trip through both directions, at a cave-country latitude.
@@ -2844,6 +2844,59 @@ if (!IS_NODE) {
         CsGeoProject.mercatorBbox(39.1653, -86.5264,
             { width: 50000, height: 50000 }, { x: 0, y: 0 }), 0.3, 4000, 256);
     ok(huge.w <= 4000 && huge.h <= 4000, "pixelSize: clamps at the 4000 px service limit");
+
+    // ASPECT UNDER EXTREME ELONGATION. tiny/huge above are both exactly
+    // square (aspect 1), so they never exercise the cap and the floor
+    // fighting each other on a non-square bbox. A real cave passage can
+    // easily be more elongate than maxPx/minPx = 15.625:1 -- e.g. a
+    // 3000x40 m bounding box becomes 3750x150 after the 25% margin,
+    // aspect 25 -- and the delivered image must still keep ground
+    // pixels square, even though that means the short axis can't reach
+    // the 256 px floor. Both axes must always be at least 1 px and
+    // never more than 4000, whatever the aspect.
+    var elongate = CsGeoProject.pixelSize(
+        CsGeoProject.mercatorBbox(39.1653, -86.5264,
+            { width: 3750, height: 150 }, { x: 0, y: 0 }), 0.3, 4000, 256);
+    var elongateBbox = CsGeoProject.mercatorBbox(39.1653, -86.5264,
+        { width: 3750, height: 150 }, { x: 0, y: 0 });
+    var elongateBboxAspect = (elongateBbox.xmax - elongateBbox.xmin) /
+        (elongateBbox.ymax - elongateBbox.ymin);
+    near(elongateBboxAspect, 25.0, 1e-6,
+        "mercatorBbox: 3750x150 ground is 25:1 in Mercator");
+    near((elongate.w / elongate.h) / elongateBboxAspect, 1.0, 0.01,
+        "pixelSize: elongate bbox (25:1, past the 15.625:1 cap/floor ratio) " +
+        "still keeps pixel aspect matching bbox aspect");
+    ok(elongate.w >= 1 && elongate.w <= 4000,
+        "pixelSize: elongate case keeps w within [1, 4000]");
+    ok(elongate.h >= 1 && elongate.h <= 4000,
+        "pixelSize: elongate case keeps h within [1, 4000]");
+
+    // The mirror case: tall and narrow instead of wide and short.
+    var tallNarrow = CsGeoProject.pixelSize(
+        CsGeoProject.mercatorBbox(39.1653, -86.5264,
+            { width: 150, height: 3750 }, { x: 0, y: 0 }), 0.3, 4000, 256);
+    var tallNarrowBbox = CsGeoProject.mercatorBbox(39.1653, -86.5264,
+        { width: 150, height: 3750 }, { x: 0, y: 0 });
+    var tallNarrowBboxAspect = (tallNarrowBbox.xmax - tallNarrowBbox.xmin) /
+        (tallNarrowBbox.ymax - tallNarrowBbox.ymin);
+    near((tallNarrow.w / tallNarrow.h) / tallNarrowBboxAspect, 1.0, 0.01,
+        "pixelSize: tall-narrow bbox (1:25, below the 1/15.625 threshold) " +
+        "still keeps pixel aspect matching bbox aspect");
+    ok(tallNarrow.w >= 1 && tallNarrow.w <= 4000,
+        "pixelSize: tall-narrow case keeps w within [1, 4000]");
+    ok(tallNarrow.h >= 1 && tallNarrow.h <= 4000,
+        "pixelSize: tall-narrow case keeps h within [1, 4000]");
+
+    // Cap and floor pulling in opposite directions on the SAME
+    // non-square request: the long axis is big enough to need the
+    // 4000 px cap, while the short axis (aspect-locked to it) falls
+    // below the 256 px floor. Aspect preservation wins; the floor
+    // yields (see the comment on CsGeoProject.pixelSize).
+    ok(elongate.w === 4000,
+        "pixelSize: elongate case's long axis hits the 4000 px cap");
+    ok(elongate.h < 256,
+        "pixelSize: elongate case's short axis is left below the 256 px " +
+        "floor because honouring the floor would distort the aspect");
 
     // Drawing scale: units per pixel, in the drawing's own units.
     var uppM = CsGeoProject.drawingUnitsPerPixel(bbox, size.w, 39.1653,

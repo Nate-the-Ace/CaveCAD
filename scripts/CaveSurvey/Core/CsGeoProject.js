@@ -22,7 +22,7 @@
 
 include(includeBasePath + "/CsUnits.js");
 
-function CsGeoProject() {}
+var CsGeoProject = {};
 
 // Semi-major axis of the WGS84 ellipsoid, which spherical Web Mercator
 // uses as the sphere radius.
@@ -138,6 +138,23 @@ CsGeoProject.mercatorBbox = function(anchorLat, anchorLon, groundExtent,
  * at the service limit, floored so a tiny window still yields a usable
  * picture. Aspect always matches the bbox, which is what keeps ground
  * pixels square.
+ *
+ * Both axes are always scaled by the SAME factor, at every step, so
+ * the aspect is preserved by construction rather than being repaired
+ * afterwards by re-deriving one axis (which is exactly what silently
+ * distorted every bbox more elongate than maxPx/minPx = 15.625:1: the
+ * old code re-clamped only the recomputed axis, leaving the other one
+ * wherever the previous step had left it).
+ *
+ * When the bbox is more elongate than maxPx/minPx, the cap and the
+ * floor cannot both be honoured without distorting the aspect --
+ * aspect preservation wins and the floor yields. The floor exists only
+ * to avoid requesting a needlessly tiny image; a wrong aspect makes
+ * the photograph geometrically incorrect under the survey, which is
+ * the one thing this whole Mercator-request path exists to prevent.
+ * In practice the short axis being under the floor is harmless: e.g. a
+ * 40 m wide passage strip left at 150 px is still about 0.27 m/px,
+ * finer than NAIP's own 0.3 m native resolution.
  */
 CsGeoProject.pixelSize = function(bbox, nativeResM, maxPx, minPx) {
     if (nativeResM === undefined || nativeResM === null) {
@@ -151,31 +168,30 @@ CsGeoProject.pixelSize = function(bbox, nativeResM, maxPx, minPx) {
     }
     var mw = bbox.xmax - bbox.xmin;
     var mh = bbox.ymax - bbox.ymin;
-    var aspect = mw / mh;
 
-    var w = Math.round(mw / nativeResM);
-    var h = Math.round(mh / nativeResM);
+    // Ideal size at native resolution. Aspect is exact by construction:
+    // both axes divide by the same nativeResM.
+    var w = mw / nativeResM;
+    var h = mh / nativeResM;
 
-    // Scale down to the cap, preserving aspect.
-    var over = Math.max(w / maxPx, h / maxPx);
-    if (over > 1.0) {
-        w = Math.round(w / over);
-        h = Math.round(h / over);
-    }
-    // Scale up to the floor, preserving aspect.
-    var under = Math.max(minPx / Math.max(w, 1), minPx / Math.max(h, 1));
-    if (under > 1.0) {
-        w = Math.round(w * under);
-        h = Math.round(h * under);
-    }
-    // Re-impose the aspect after rounding, on the longer axis, so the
-    // squareness invariant survives integer pixels.
-    if (aspect >= 1.0) {
-        w = Math.max(minPx, Math.min(maxPx, Math.round(h * aspect)));
-    } else {
-        h = Math.max(minPx, Math.min(maxPx, Math.round(w / aspect)));
-    }
-    return { w: w, h: h };
+    // One shared downscale factor to fit the cap.
+    var down = Math.min(1.0, maxPx / w, maxPx / h);
+    w *= down;
+    h *= down;
+
+    // One shared upscale factor to reach the floor -- but never past
+    // the cap. If the cap already pinned the longer axis at maxPx,
+    // this reduces to 1 (no upscale), which is the floor yielding to
+    // aspect preservation described above.
+    var up = Math.max(1.0, minPx / w, minPx / h);
+    up = Math.min(up, maxPx / Math.max(w, h));
+    w *= up;
+    h *= up;
+
+    return {
+        w: Math.max(1, Math.round(w)),
+        h: Math.max(1, Math.round(h))
+    };
 };
 
 /**
