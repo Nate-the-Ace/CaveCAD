@@ -99,7 +99,8 @@ var CORE_FILES = [
     "scripts/CaveSurvey/Core/Format/CsWalls.js",
     "scripts/CaveSurvey/Core/Format/CsSurvex.js",
     "scripts/CaveSurvey/Core/Format/CsCsv.js",
-    "scripts/CaveSurvey/Core/Format/CsRegistry.js"
+    "scripts/CaveSurvey/Core/Format/CsRegistry.js",
+    "scripts/CaveSurvey/Core/CsRevise.js"
 ];
 for (var ci = 0; ci < CORE_FILES.length; ci++) {
     loadRepoScript(CORE_FILES[ci]);
@@ -1680,6 +1681,262 @@ if (!IS_NODE) {
                     "v3: sibling row unaffected, got '" + mShot1.notes + "'");
             }
         }
+    })();
+
+    // -----------------------------------------------------------------
+    // THE GATE of the revision framework: CsRevise.surveyFromDocument
+    // (draw(S)) deep-equals S, field by field. A rich survey -- two
+    // trips, branch, loop closure, backsight pair, hidden leg,
+    // excluded shot with a multi-line note, splay (with backsight),
+    // unplaced shot, fixed station, multi-reading LRUD side, notes --
+    // drawn into a fresh doc and read back EXACTLY.
+    // -----------------------------------------------------------------
+    (function() {
+        // --- deep-compare kit --------------------------------------
+        var isArr = function(v) {
+            return Object.prototype.toString.call(v) === "[object Array]";
+        };
+        // exp/got: null==undefined, numbers near 1e-9, arrays
+        // element-wise, everything else exact
+        var valEqual = function(exp, got, label) {
+            var e = (exp === undefined) ? null : exp;
+            var g = (got === undefined) ? null : got;
+            if (e === null || g === null) {
+                ok(e === g, label + ": expected " + e + ", got " + g);
+            } else if (isArr(e) || isArr(g)) {
+                if (!isArr(e) || !isArr(g) || e.length !== g.length) {
+                    ok(false, label + ": array shape, expected " + e +
+                        ", got " + g);
+                } else {
+                    var same = true;
+                    for (var ai = 0; ai < e.length; ai++) {
+                        if (Math.abs(e[ai] - g[ai]) > 1e-9) {
+                            same = false;
+                        }
+                    }
+                    ok(same, label + ": array elements, expected [" +
+                        e.join(",") + "], got [" + g.join(",") + "]");
+                }
+            } else if (typeof e === "number" && typeof g === "number") {
+                near(g, e, 1e-9, label);
+            } else {
+                ok(e === g, label + ": expected '" + e + "', got '" +
+                    g + "'");
+            }
+        };
+        // EVERY key of CsModel.newShot, one assertion each
+        var shotsEqual = function(exp, got, label) {
+            var proto = CsModel.newShot();
+            for (var k in proto) {
+                if (proto.hasOwnProperty(k)) {
+                    valEqual(exp[k], got[k], label + "." + k);
+                }
+            }
+        };
+        var lrudEqual = function(exp, got, label) {
+            var e = (exp === undefined) ? null : exp;
+            var g = (got === undefined) ? null : got;
+            if (e === null || g === null) {
+                ok(e === g, label + ": null-ness, expected " + e +
+                    ", got " + g);
+                return;
+            }
+            var keys = ["left", "right", "up", "down",
+                "leftAll", "rightAll", "upAll", "downAll"];
+            for (var ki = 0; ki < keys.length; ki++) {
+                valEqual(e[keys[ki]], g[keys[ki]], label + "." + keys[ki]);
+            }
+        };
+        var tripsEqual = function(exp, got, label) {
+            var proto = CsModel.newTrip();
+            for (var k in proto) {
+                if (proto.hasOwnProperty(k)) {
+                    if (k === "startLrud") {
+                        lrudEqual(exp[k], got[k], label + ".startLrud");
+                    } else {
+                        valEqual(exp[k], got[k], label + "." + k);
+                    }
+                }
+            }
+        };
+
+        // --- the rich fixture survey S ------------------------------
+        var doc = new RDocument(new RMemoryStorage(), new RSpatialIndexNavel());
+        var di = new RDocumentInterface(doc);
+        getDocument = function() { return doc; };
+        getDocumentInterface = function() { return di; };
+
+        var S = CsModel.newSurvey();
+        S.caveName = "TEST CAVE";
+        S.name = "ENT";
+        S.date = "2020-01-01";
+        S.team = "Alice";
+        S.declination = 2.5;
+        S.declinationSource = "user";
+        S.distanceUnit = "ft";
+        S.startNote = "rig here";
+        S.startLrud = { left: 1, right: 2, up: 3, down: 4,
+            leftAll: null, rightAll: null, upAll: null, downAll: null };
+        CsModel.ensureTrips(S);
+        var gt1 = CsModel.newTrip();
+        gt1.name = "UPPER";
+        gt1.date = "2021-05-05";
+        gt1.team = "Bob";
+        gt1.declination = 3.0;
+        gt1.declinationSource = "igrf";
+        gt1.distanceUnit = "ft";
+        S.trips.push(gt1);
+        ok(CsModel.tripFingerprint(S.trips[0]) !==
+            CsModel.tripFingerprint(S.trips[1]),
+            "gate: the two trips have distinct fingerprints");
+
+        var g0 = shotOf("A1", "A2", 10, 0);        // trip 0, seq 0
+        g0.left = 2; g0.right = 3; g0.up = 1; g0.down = 0.5;
+        g0.backAzimuth = 180.5;                     // backsight pair
+        g0.backInclination = -1;
+        var g1 = shotOf("A2", "A3", 10, 90);       // trip 0, seq 1
+        g1.notes = "muddy crawl";
+        g1.left = 10;
+        g1.leftAll = [5, 10];                       // multi-reading side
+        var g2 = shotOf("A2", "B1", 8, 45);        // trip 0, seq 2: branch
+        var g3 = shotOf("A3", "A4", 10, 180);      // trip 0, seq 3
+        var g4 = shotOf("A4", "A1", 10.5, 270);    // trip 0, seq 4: closure
+        var g5 = shotOf("X1", "X2", 7, 10);        // trip 0, seq 5: excluded
+        g5.excludeFromAll = true;
+        g5.notes = "bad shot\nsecond line";         // multi-line note
+        var g6 = shotOf("A2", "", 4, 120, -5);     // trip 0, seq 6: splay
+        g6.splay = true;
+        g6.notes = "to wall";
+        g6.backAzimuth = 300;                       // splay backsight
+        var g7 = shotOf("Z1", "Z2", 9, 33);        // trip 0, seq 7: unplaced
+        var g8 = shotOf("A4", "A5", 8, 45);        // trip 1, seq 0
+        g8.trip = 1;
+        var g9 = shotOf("A5", "A6", 6, 100);       // trip 1, seq 1: hidden
+        g9.trip = 1;
+        g9.excludeFromPlot = true;
+        var g10 = shotOf("", "", 3, 0);            // trip 1, seq 2: blank
+        g10.trip = 1;                               // -- documented loss
+        S.shots.push(g0); S.shots.push(g1); S.shots.push(g2);
+        S.shots.push(g3); S.shots.push(g4); S.shots.push(g5);
+        S.shots.push(g6); S.shots.push(g7); S.shots.push(g8);
+        S.shots.push(g9); S.shots.push(g10);
+        S.fixed["A1"] = { x: 100, y: 200, z: 5 };
+
+        var gres = CsNetwork.resolve(S, {});
+        CsDraw.survey(S, gres);
+
+        // --- reconstruct and deep-compare ---------------------------
+        var res = CsRevise.surveyFromDocument(doc);
+        ok(res.legacy === false, "gate: v3 reconstruction, not legacy");
+        var R = res.survey;
+
+        // documented, accepted loss: the blank-from+to shot vanishes;
+        // everything else comes back in (trip, seq) order == S order
+        var expected = [g0, g1, g2, g3, g4, g5, g6, g7, g8, g9];
+        ok(R.shots.length === expected.length,
+            "gate: shot count (blank shot vanished), expected " +
+            expected.length + ", got " + R.shots.length);
+        for (var gi2 = 0; gi2 < expected.length; gi2++) {
+            if (gi2 < R.shots.length) {
+                shotsEqual(expected[gi2], R.shots[gi2],
+                    "gate shot[" + gi2 + "]");
+            }
+        }
+        var blankBack = false;
+        for (gi2 = 0; gi2 < R.shots.length; gi2++) {
+            if (R.shots[gi2].from === "" && R.shots[gi2].to === "" &&
+                    !R.shots[gi2].splay) {
+                blankBack = true;
+            }
+        }
+        ok(blankBack === false,
+            "gate: blank from+to shot stays vanished (documented loss)");
+
+        // every trip record, every field
+        ok(R.trips.length === 2, "gate: 2 trips reconstructed, got " +
+            R.trips.length);
+        if (R.trips.length === 2) {
+            tripsEqual(S.trips[0], R.trips[0], "gate trip[0]");
+            tripsEqual(S.trips[1], R.trips[1], "gate trip[1]");
+        }
+
+        // survey.fixed deep equal (same key set, same coordinates)
+        var fixedKeysS = [], fixedKeysR = [];
+        var fk;
+        for (fk in S.fixed) {
+            if (S.fixed.hasOwnProperty(fk)) { fixedKeysS.push(fk); }
+        }
+        for (fk in R.fixed) {
+            if (R.fixed.hasOwnProperty(fk)) { fixedKeysR.push(fk); }
+        }
+        fixedKeysS.sort(); fixedKeysR.sort();
+        ok(fixedKeysS.join(",") === fixedKeysR.join(","),
+            "gate: fixed key set, expected '" + fixedKeysS.join(",") +
+            "', got '" + fixedKeysR.join(",") + "'");
+        for (fk in S.fixed) {
+            if (S.fixed.hasOwnProperty(fk) && R.fixed[fk] !== undefined) {
+                near(R.fixed[fk].x, S.fixed[fk].x, 1e-9, "gate fixed." + fk + ".x");
+                near(R.fixed[fk].y, S.fixed[fk].y, 1e-9, "gate fixed." + fk + ".y");
+                near(R.fixed[fk].z, S.fixed[fk].z, 1e-9, "gate fixed." + fk + ".z");
+            }
+        }
+
+        // start data + cave name
+        ok(R.startNote === S.startNote, "gate: startNote, got '" +
+            R.startNote + "'");
+        lrudEqual(S.startLrud, R.startLrud, "gate startLrud");
+        ok(R.caveName === S.caveName, "gate: caveName, expected '" +
+            S.caveName + "', got '" + R.caveName + "'");
+
+        // anchor = trip-0 anchor station, at its drawn position
+        ok(res.anchorName === "A1", "gate: anchorName, got '" +
+            res.anchorName + "'");
+        ok(res.anchorPos !== null, "gate: anchorPos present");
+        if (res.anchorPos !== null) {
+            near(res.anchorPos.x, 100, 1e-9, "gate: anchorPos.x");
+            near(res.anchorPos.y, 200, 1e-9, "gate: anchorPos.y");
+        }
+    })();
+
+    // -----------------------------------------------------------------
+    // Legacy fallback: a drawing with tagged station points but not a
+    // single Distance-tagged leg is pre-v3 -- CsRevise hands it to the
+    // legacy chain-guesser and flags it.
+    // -----------------------------------------------------------------
+    (function() {
+        var doc = new RDocument(new RMemoryStorage(), new RSpatialIndexNavel());
+        var di = new RDocumentInterface(doc);
+        getDocument = function() { return doc; };
+        getDocumentInterface = function() { return di; };
+
+        CsLayers.ensureSurveyLayers(doc, di);
+        var op = new RAddObjectsOperation();
+        var p1 = CsDraw.addPoint(doc, op, CsLayers.STATIONS,
+            new RVector(0, 0));
+        CsTags.tagStation(p1, { name: "L1", seq: 0, azimuth: 0 });
+        op.addObject(p1, false);
+        var p2 = CsDraw.addPoint(doc, op, CsLayers.STATIONS,
+            new RVector(0, 10));
+        CsTags.tagStation(p2, { name: "L2", seq: 1, azimuth: 0 });
+        op.addObject(p2, false);
+        di.applyOperation(op);
+
+        var res = CsRevise.surveyFromDocument(doc);
+        ok(res.legacy === true, "legacy: flagged legacy:true");
+        ok(res.survey.shots.length === 1,
+            "legacy: chain reconstruction returned, got " +
+            res.survey.shots.length + " shots");
+        if (res.survey.shots.length === 1) {
+            near(res.survey.shots[0].distance, 10, 1e-9,
+                "legacy: chained shot distance from geometry");
+            ok(res.survey.shots[0].from === "L1" &&
+                res.survey.shots[0].to === "L2",
+                "legacy: chained shot endpoints");
+        }
+        ok(res.anchorName === "L1", "legacy: anchor falls back to first " +
+            "station, got '" + res.anchorName + "'");
+        ok(res.anchorPos !== null && Math.abs(res.anchorPos.y) < 1e-9,
+            "legacy: anchor position");
     })();
 }
 

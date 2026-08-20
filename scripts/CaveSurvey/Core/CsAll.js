@@ -34,6 +34,7 @@ include(includeBasePath + "/CsLayers.js");
 include(includeBasePath + "/CsStore.js");
 include(includeBasePath + "/CsTags.js");
 include(includeBasePath + "/CsDraw.js");
+include(includeBasePath + "/CsRevise.js");
 include(includeBasePath + "/CsPick.js");
 include(includeBasePath + "/CsLocationPick.js");
 include(includeBasePath + "/CsSymbols.js");
