@@ -153,12 +153,12 @@ near(CsAngles.parseQuadrant("S45W"), 225, 1e-12, "quadrant S45W");
 near(CsAngles.parseQuadrant("s12.5e"), 167.5, 1e-12, "quadrant s12.5e");
 ok(CsAngles.parseQuadrant("123") === undefined, "quadrant rejects plain number");
 
-var dms = CsAngles.parseLatLon("39 41'45.8\"N 86 18'34.0\"W");
+var dms = CsAngles.parseLatLon("40 30'15.0\"N 90 15'30.0\"W");
 ok(dms !== null, "DMS parses");
-near(dms.lat, 39.696056, 1e-4, "DMS latitude");
-near(dms.lon, -86.309444, 1e-4, "DMS longitude");
-var dec = CsAngles.parseLatLon("39.6961, -86.3094");
-ok(dec !== null && Math.abs(dec.lat - 39.6961) < 1e-9, "decimal lat/lon parses");
+near(dms.lat, 40.504167, 1e-4, "DMS latitude");
+near(dms.lon, -90.258333, 1e-4, "DMS longitude");
+var dec = CsAngles.parseLatLon("40.5042, -90.2583");
+ok(dec !== null && Math.abs(dec.lat - 40.5042) < 1e-9, "decimal lat/lon parses");
 ok(CsAngles.parseLatLon("hello") === null, "lat/lon rejects junk");
 
 // ---------------------------------------------------------------------
@@ -2789,10 +2789,10 @@ if (!IS_NODE) {
 
     // Round-trip through both directions, at a cave-country latitude.
     var rt = CsGeoProject.fromMercator(
-        CsGeoProject.toMercator(39.1653, -86.5264).x,
-        CsGeoProject.toMercator(39.1653, -86.5264).y);
-    near(rt.lat, 39.1653, 1e-6, "mercator round-trip: latitude");
-    near(rt.lon, -86.5264, 1e-6, "mercator round-trip: longitude");
+        CsGeoProject.toMercator(40.5042, -90.2583).x,
+        CsGeoProject.toMercator(40.5042, -90.2583).y);
+    near(rt.lat, 40.5042, 1e-6, "mercator round-trip: latitude");
+    near(rt.lon, -90.2583, 1e-6, "mercator round-trip: longitude");
 
     // Ground extent: a 100 ft square drawing is 30.48 m before margin,
     // and a 25% margin makes it 38.1 m.
@@ -2818,7 +2818,7 @@ if (!IS_NODE) {
     // latitude; working in Mercator and matching the pixel aspect to
     // the bbox aspect keeps ground pixels square. This is the assertion
     // that would have caught the original 4326 design.
-    var bbox = CsGeoProject.mercatorBbox(39.1653, -86.5264,
+    var bbox = CsGeoProject.mercatorBbox(40.5042, -90.2583,
         { width: 800, height: 400 }, { x: 0, y: 0 });
     var size = CsGeoProject.pixelSize(bbox, 0.3, 4000, 256);
     var bboxAspect = (bbox.xmax - bbox.xmin) / (bbox.ymax - bbox.ymin);
@@ -2831,17 +2831,17 @@ if (!IS_NODE) {
     // WIDER in Mercator metres than the ground extent it represents.
     var mercWidth = bbox.xmax - bbox.xmin;
     ok(mercWidth > 800, "mercatorBbox: Mercator metres exceed ground metres");
-    near(mercWidth * Math.cos(39.1653 * Math.PI / 180), 800, 1.0,
+    near(mercWidth * Math.cos(40.5042 * Math.PI / 180), 800, 1.0,
         "mercatorBbox: de-inflating by cos(lat) recovers ground width");
 
     // Resolution clamps. A tiny extent must not ask for fewer than the
     // floor; a huge one must not exceed the service's 4000 limit.
     var tiny = CsGeoProject.pixelSize(
-        CsGeoProject.mercatorBbox(39.1653, -86.5264,
+        CsGeoProject.mercatorBbox(40.5042, -90.2583,
             { width: 10, height: 10 }, { x: 0, y: 0 }), 0.3, 4000, 256);
     ok(tiny.w >= 256 && tiny.h >= 256, "pixelSize: floors at 256 px");
     var huge = CsGeoProject.pixelSize(
-        CsGeoProject.mercatorBbox(39.1653, -86.5264,
+        CsGeoProject.mercatorBbox(40.5042, -90.2583,
             { width: 50000, height: 50000 }, { x: 0, y: 0 }), 0.3, 4000, 256);
     ok(huge.w <= 4000 && huge.h <= 4000, "pixelSize: clamps at the 4000 px service limit");
 
@@ -2855,9 +2855,9 @@ if (!IS_NODE) {
     // the 256 px floor. Both axes must always be at least 1 px and
     // never more than 4000, whatever the aspect.
     var elongate = CsGeoProject.pixelSize(
-        CsGeoProject.mercatorBbox(39.1653, -86.5264,
+        CsGeoProject.mercatorBbox(40.5042, -90.2583,
             { width: 3750, height: 150 }, { x: 0, y: 0 }), 0.3, 4000, 256);
-    var elongateBbox = CsGeoProject.mercatorBbox(39.1653, -86.5264,
+    var elongateBbox = CsGeoProject.mercatorBbox(40.5042, -90.2583,
         { width: 3750, height: 150 }, { x: 0, y: 0 });
     var elongateBboxAspect = (elongateBbox.xmax - elongateBbox.xmin) /
         (elongateBbox.ymax - elongateBbox.ymin);
@@ -2873,9 +2873,9 @@ if (!IS_NODE) {
 
     // The mirror case: tall and narrow instead of wide and short.
     var tallNarrow = CsGeoProject.pixelSize(
-        CsGeoProject.mercatorBbox(39.1653, -86.5264,
+        CsGeoProject.mercatorBbox(40.5042, -90.2583,
             { width: 150, height: 3750 }, { x: 0, y: 0 }), 0.3, 4000, 256);
-    var tallNarrowBbox = CsGeoProject.mercatorBbox(39.1653, -86.5264,
+    var tallNarrowBbox = CsGeoProject.mercatorBbox(40.5042, -90.2583,
         { width: 150, height: 3750 }, { x: 0, y: 0 });
     var tallNarrowBboxAspect = (tallNarrowBbox.xmax - tallNarrowBbox.xmin) /
         (tallNarrowBbox.ymax - tallNarrowBbox.ymin);
@@ -2899,16 +2899,16 @@ if (!IS_NODE) {
         "floor because honouring the floor would distort the aspect");
 
     // Drawing scale: units per pixel, in the drawing's own units.
-    var uppM = CsGeoProject.drawingUnitsPerPixel(bbox, size.w, 39.1653,
+    var uppM = CsGeoProject.drawingUnitsPerPixel(bbox, size.w, 40.5042,
         CsUnits.METERS);
     near(uppM * size.w, 800, 1.0, "drawingUnitsPerPixel: metres span the ground width");
-    var uppFt = CsGeoProject.drawingUnitsPerPixel(bbox, size.w, 39.1653,
+    var uppFt = CsGeoProject.drawingUnitsPerPixel(bbox, size.w, 40.5042,
         CsUnits.FEET);
     near(uppFt / uppM, CsUnits.FEET_PER_METER, 1e-6,
         "drawingUnitsPerPixel: feet drawing scales by feet-per-metre");
 
     // The anchor offset shifts the window without resizing it.
-    var off = CsGeoProject.mercatorBbox(39.1653, -86.5264,
+    var off = CsGeoProject.mercatorBbox(40.5042, -90.2583,
         { width: 800, height: 400 }, { x: 100, y: -50 });
     near((off.xmax - off.xmin), (bbox.xmax - bbox.xmin), 1e-6,
         "mercatorBbox: offset preserves width");
@@ -2928,7 +2928,7 @@ if (!IS_NODE) {
     // Coverage. NAIP is US-only; a European request must be refused
     // before it wastes a round trip.
     ok(CsGeoProject.insideCoverage(
-        CsGeoProject.mercatorBbox(39.1653, -86.5264,
+        CsGeoProject.mercatorBbox(40.5042, -90.2583,
             { width: 800, height: 400 }, { x: 0, y: 0 })) === true,
         "insideCoverage: Indiana is inside NAIP");
     ok(CsGeoProject.insideCoverage(

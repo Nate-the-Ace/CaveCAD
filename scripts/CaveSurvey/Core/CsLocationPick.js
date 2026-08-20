@@ -38,7 +38,8 @@ CsLocationPick.remember = function(coord) {
 
 /**
  * The location the suite already knows, or null.
- * eturn {lat, lon, source} with source "anchor" (a Geo Reference
+ * 
+eturn {lat, lon, source} with source "anchor" (a Geo Reference
  *         in this drawing) or "last" (the last one declared anywhere)
  */
 CsLocationPick.getShared = function(doc) {
@@ -96,10 +97,10 @@ CsLocationPick.ask = function(title, defaultText) {
     var prompt;
     if (useMap === QMessageBox.Yes && CsLocationPick.openMap()) {
         prompt = "Paste the coordinate from the map page\n" +
-            "(or type one: decimal like 39.6961, -86.3094 or DMS):";
+            "(or type one: decimal like 40.5042, -90.2583 or DMS):";
     } else {
-        prompt = "Cave location (decimal like 39.6961, -86.3094 or DMS " +
-            "like 39 41'45.8\"N 86 18'34.0\"W):";
+        prompt = "Cave location (decimal like 40.5042, -90.2583 or DMS " +
+            "like 40 30'15.0\"N 90 15'30.0\"W):";
     }
 
     var text = getText(title, prompt, defaultText || "");

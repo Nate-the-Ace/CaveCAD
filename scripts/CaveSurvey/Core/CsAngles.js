@@ -70,9 +70,9 @@ CsAngles.parseQuadrant = function(text) {
 
 /**
  * Parses a latitude/longitude in the common pasted forms:
- *   39 41'45.8"N 86 18'34.0"W     (Google Maps dropped pin, degree
+ *   40 30'15.0"N 90 15'30.0"W     (Google Maps dropped pin, degree
  *                                  symbol optional or mangled)
- *   39.6961, -86.3094             (decimal degrees)
+ *   40.5042, -90.2583             (decimal degrees)
  * Returns {lat, lon} in decimal degrees, or null.
  */
 CsAngles.parseLatLon = function(text) {
