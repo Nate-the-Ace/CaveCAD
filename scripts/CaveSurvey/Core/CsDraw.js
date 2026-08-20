@@ -221,8 +221,13 @@ CsDraw.noteLeader = function(doc, op, pos, name, note, azimuthDeg, lrud) {
 };
 
 /**
- * Draws a whole resolved survey as ONE operation (one undo step):
- * stations, labels, shot lines, LRUD, all layered and tagged.
+ * Draws a whole resolved survey as ONE operation (one undo step) for
+ * the visible survey: stations, labels, shot lines, LRUD, all layered
+ * and tagged. A survey with excludeFromPlot shots issues up to three
+ * more operations on top of that (undo then needs multiple steps),
+ * because CsLayers.withLayerOn must toggle the OFF hidden-legs layer
+ * on, add those legs, and toggle it back off -- this build refuses
+ * adds to a layer that's off.
  *
  * Tag schema v3: the drawing's tags alone reconstruct the survey.
  * Every leg line carries its shot's full data (From/To/Trip/ShotSeq/
@@ -251,13 +256,21 @@ CsDraw.survey = function(survey, resolved, originStation, originPos, seqBase) {
 
     // per-trip shot sequence: shotSeqOf[i] = index of survey.shots[i]
     // within its own trip, in survey.shots order -- what reconstruction
-    // sorts by to restore notebook order inside each trip
+    // sorts by to restore notebook order inside each trip.
+    // Also stamped onto the shot itself as the transient _csSeq
+    // property, since several call sites below only have the shot
+    // object (from resolved.legs/resolved.unresolved, not a
+    // survey.shots index) and would otherwise need an O(n)
+    // survey.shots.indexOf(shot) per shot to look shotSeqOf up --
+    // this precompute loop already visits every shot once, so reading
+    // shot._csSeq back is O(1) instead.
     var shotSeqOf = [];
     var tripCounters = {};
     for (var si = 0; si < survey.shots.length; si++) {
         var sTrip = survey.shots[si].trip || 0;
         shotSeqOf[si] = tripCounters[sTrip] || 0;
         tripCounters[sTrip] = shotSeqOf[si] + 1;
+        survey.shots[si]._csSeq = shotSeqOf[si];
     }
 
     // a station's trip = trip of the first shot that touches it; the
@@ -277,13 +290,16 @@ CsDraw.survey = function(survey, resolved, originStation, originPos, seqBase) {
         }
     }
 
-    // the v3 data tags one drawn leg (or splay) carries
-    var legTags = function(shot, shotIndex) {
+    // the v3 data tags one drawn leg (or splay) carries. shot._csSeq
+    // is the per-trip sequence stamped by the precompute loop above --
+    // reading it here avoids an O(n) survey.shots.indexOf(shot) at
+    // every call site.
+    var legTags = function(shot) {
         var tags = {
             From: shot.from,
             To: shot.to,
             Trip: shot.trip || 0,
-            ShotSeq: shotSeqOf[shotIndex],
+            ShotSeq: shot._csSeq,
             Distance: shot.distance,
             Azimuth: shot.azimuth,
             Inclination: shot.inclination,
@@ -416,7 +432,7 @@ CsDraw.survey = function(survey, resolved, originStation, originPos, seqBase) {
             continue;
         }
         CsDraw.shotLine(doc, op, at(leg.from), at(leg.to), leg.from, leg.to,
-            CsLayers.SHOTS, legTags(leg.shot, survey.shots.indexOf(leg.shot)));
+            CsLayers.SHOTS, legTags(leg.shot));
         if (leg.kind === "closure") {
             closuresDrawn++;
         } else {
@@ -449,7 +465,7 @@ CsDraw.survey = function(survey, resolved, originStation, originPos, seqBase) {
         // the ray carries its readings too (v3): Trip/ShotSeq/Distance/
         // Azimuth/Inclination/Note, so the splay reconstructs from tags
         CsDraw.addLine(doc, op, CsLayers.SPLAYS, sPos, sEnd,
-            "Splay", splayName, legTags(sp, i));
+            "Splay", splayName, legTags(sp));
         var sTip = CsDraw.addPoint(doc, op, CsLayers.SPLAYS, sEnd);
         CsTags.set(sTip, "SplayName", splayName);
         op.addObject(sTip, false);
@@ -550,9 +566,8 @@ CsDraw.survey = function(survey, resolved, originStation, originPos, seqBase) {
             }
         }
         for (i = 0; i < resolved.unresolved.length; i++) {
-            var unIdx = survey.shots.indexOf(resolved.unresolved[i]);
             unRows.push((resolved.unresolved[i].trip || 0) + "\t" +
-                shotSeqOf[unIdx] + "\t" +
+                resolved.unresolved[i]._csSeq + "\t" +
                 CsModel.shotRowText(resolved.unresolved[i]));
         }
         if (exRows.length > 0) {
@@ -578,7 +593,7 @@ CsDraw.survey = function(survey, resolved, originStation, originPos, seqBase) {
                 var hLeg = hiddenLegs[hi];
                 CsDraw.shotLine(doc, hop, at(hLeg.from), at(hLeg.to),
                     hLeg.from, hLeg.to, CsLayers.HIDDEN,
-                    legTags(hLeg.shot, survey.shots.indexOf(hLeg.shot)));
+                    legTags(hLeg.shot));
                 hiddenDrawn++;
             }
             di.applyOperation(hop);
