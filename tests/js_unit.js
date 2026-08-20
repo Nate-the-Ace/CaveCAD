@@ -2945,6 +2945,15 @@ if (!IS_NODE) {
         "imagePathFor: spaces and uppercase extension");
     ok(CsGeoProject.imagePathFor("") === null,
         "imagePathFor: unsaved drawing has no image path");
+    ok(CsGeoProject.imagePathFor("C:\\Cave\\Survey.dxf") ===
+        "C:\\Cave\\Survey-aerial.png",
+        "imagePathFor: Windows-style backslash path");
+    ok(CsGeoProject.imagePathFor("/a/2026.08.20/Cave") ===
+        "/a/2026.08.20/Cave-aerial.png",
+        "imagePathFor: dot in a directory name is not mistaken for an extension");
+    ok(CsGeoProject.imagePathFor("/home/user/Cave") ===
+        "/home/user/Cave-aerial.png",
+        "imagePathFor: filename with no extension at all");
 }
 
 // ---------------------------------------------------------------------

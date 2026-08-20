@@ -50,6 +50,18 @@ function aerialBasemapRun() {
         return;
     }
 
+    // 0. Cheapest check first: an engine with no image support can
+    //    never place the result, so refuse before burning a full NAIP
+    //    download on a fetch whose output could never be used. This
+    //    used to be checked inside place(), which runs AFTER fetch() --
+    //    right result, wrong moment.
+    if (typeof RImageData === "undefined" || typeof RImageEntity === "undefined") {
+        warning("Aerial Basemap: this build's script engine has no " +
+            "image support (RImageData).\nThe CaveCAD fork is the " +
+            "supported platform.");
+        return;
+    }
+
     // 1. The image is written beside the drawing, so the drawing needs
     //    a home first.
     var docPath = doc.getFileName();
@@ -325,12 +337,28 @@ AerialBasemap.fetch = function(url, path) {
     process.start("/usr/bin/curl", ["-s", "--fail",
         "--max-time", String(AerialBasemap.TIMEOUT_S), "-o", path, url]);
     if (!process.waitForFinished((AerialBasemap.TIMEOUT_S + 10) * 1000)) {
+        // waitForFinished returning false covers two very different
+        // cases that this bridge CAN tell apart, but only before
+        // kill() -- killing a process that never started is harmless
+        // but killing one that IS running rewrites its state()/error()
+        // to NotRunning/Crashed, erasing the distinction we need.
+        // Verified live in this engine: a missing binary reports
+        // state() === QProcess.NotRunning and error() ===
+        // QProcess.FailedToStart at this point; a genuinely
+        // still-running process reports Running/Timedout instead.
+        var neverStarted = process.state() === QProcess.NotRunning;
         process.kill();
+        QFile.remove(path);         // never leave a stale photo behind
+        if (neverStarted) {
+            return "curl at /usr/bin/curl could not be started. Check " +
+                "that curl is installed at that path.";
+        }
         return "The download did not finish within " +
             AerialBasemap.TIMEOUT_S + " seconds. Check the network " +
             "connection and try again.";
     }
     if (process.exitCode() !== 0) {
+        QFile.remove(path);         // never leave a stale photo behind
         return "curl exited with code " + process.exitCode() +
             ". The National Map service may be down, or the network " +
             "unavailable.";
@@ -359,6 +387,13 @@ AerialBasemap.fetch = function(url, path) {
  */
 AerialBasemap.place = function(doc, di, path, bbox, size, unitsPerPixel,
                               anchor) {
+    // aerialBasemapRun already checks this before ever calling fetch()
+    // (see Finding 5 -- no point burning a download an engine can't
+    // place), but place() is a small, separately-testable function in
+    // its own right, and it constructs RImageEntity/RImageData
+    // directly below; keeping the guard here too means it stays
+    // correct for any future caller that skips the run-level check,
+    // at the cost of one cheap typeof.
     if (typeof RImageData === "undefined" || typeof RImageEntity === "undefined") {
         return "This build's script engine has no image support " +
             "(RImageData). The CaveCAD fork is the supported platform.";
