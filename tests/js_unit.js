@@ -456,14 +456,62 @@ near(dat.declination, 2.5, 1e-9, "Compass declination recorded");
 ok(dat.shots.length === 6, "Compass shot count, got " + dat.shots.length);
 near(dat.shots[0].azimuth, 145.0, 1e-9, "Compass declination applied to bearing");
 near(dat.shots[0].distance, 15.30, 1e-9, "Compass distance untouched");
-// fixture column order is L U D R
-near(dat.shots[0].left, 2.10, 1e-9, "Compass LEFT column");
-near(dat.shots[0].up, 0.50, 1e-9, "Compass UP column");
-near(dat.shots[0].down, 6.20, 1e-9, "Compass DOWN column");
-near(dat.shots[0].right, 4.00, 1e-9, "Compass RIGHT column");
+// Compass LRUDs default to the FROM station (no FORMAT F/T char in
+// the fixture): the first line's reading describes A1 -> startLrud,
+// and a shot's LRUD comes from the line(s) LEAVING its TO station
+// (the last one wins, like Survex passage data).
+ok(dat.startLrud !== null, "Compass first line LRUD is startLrud");
+near(dat.startLrud.left, 2.10, 1e-9, "Compass startLrud LEFT");
+near(dat.startLrud.up, 0.50, 1e-9, "Compass startLrud UP");
+near(dat.startLrud.down, 6.20, 1e-9, "Compass startLrud DOWN");
+near(dat.startLrud.right, 4.00, 1e-9, "Compass startLrud RIGHT");
+// A2's reading: lines A2-A3 then A2-B1 leave A2; the later one wins
+near(dat.shots[0].left, 0.00, 1e-9, "Compass A2 LRUD left (later line wins)");
+near(dat.shots[0].down, 4.00, 1e-9, "Compass A2 LRUD down");
+near(dat.shots[0].right, 3.50, 1e-9, "Compass A2 LRUD right");
 var flagged = dat.shots[5];
 ok(flagged.excludeFromPlot === true, "Compass #|P# flag");
 ok(flagged.excludeFromAll === false, "#|P# still positions");
+ok(dat.shots[4].noAdjust === true, "Compass #|C# flag kept");
+ok(dat.shots[0].notes === "Entrance drop", "Compass shot comment kept, got '" +
+    dat.shots[0].notes + "'");
+ok(dat.shots[5].notes.indexOf("Excluded from plotting") === 0,
+    "Compass comment after flags kept");
+
+// backsight columns (Azm2 Inc2 after the LRUDs), stored uncorrected;
+// declination goes onto both sights. -999 marks a missing reading.
+var bsDat = "BS CAVE\r\nSURVEY NAME: B\r\nSURVEY DATE: 1 1 2020\r\n" +
+    "SURVEY TEAM:\r\n\r\nDECLINATION: 2.00 FORMAT: DDDDLRUDLADadBT " +
+    "CORRECTIONS: 0.00 0.00 0.00\r\n\r\n" +
+    "FROM TO LEN BEAR INC LEFT UP DOWN RIGHT AZM2 INC2 FLAGS COMMENTS\r\n\r\n" +
+    "B1 B2 13.0 35.0 15.0 1.0 2.0 1.5 1.0 215.5 -15.2 Side Passage\r\n" +
+    "B2 B3 10.0 90.0 0.0 1.0 1.0 1.0 1.0 -999 -999 #|C# no backsight here\r\n\f\r\n";
+var bsD = CsFormatCompass.parse(bsDat);
+ok(bsD.shots.length === 2, "Compass backsight file shot count");
+near(bsD.shots[0].azimuth, 37.0, 1e-9, "Compass FS + declination");
+near(bsD.shots[0].backAzimuth, 217.5, 1e-9, "Compass Azm2 + declination");
+near(bsD.shots[0].backInclination, -15.2, 1e-9, "Compass Inc2 read");
+ok(bsD.shots[0].notes === "Side Passage", "Compass comment after backsights");
+ok(bsD.shots[1].backAzimuth === null, "Compass -999 backsight is null");
+ok(bsD.shots[1].noAdjust === true, "Compass flags after backsights");
+ok(bsD.shots[1].notes === "no backsight here", "Compass comment after flags+bs");
+
+// FORMAT ...T: LRUDs stay on the TO shot, no shift
+var tDat = "T CAVE\r\nSURVEY NAME: T\r\nSURVEY DATE: 1 1 2020\r\n" +
+    "SURVEY TEAM:\r\n\r\nDECLINATION: 0.00 FORMAT: DDDDLRUDLADNT\r\n\r\n" +
+    "FROM TO LEN BEAR INC LEFT UP DOWN RIGHT\r\n\r\n" +
+    "T1 T2 10.0 0.0 0.0 1.0 2.0 3.0 4.0\r\n\f\r\n";
+var tD = CsFormatCompass.parse(tDat);
+near(tD.shots[0].left, 1.0, 1e-9, "Compass FORMAT T keeps LRUD on the shot");
+ok(tD.startLrud === null, "Compass FORMAT T start has no reading");
+
+// splay flag S
+var sDat = "S CAVE\r\nSURVEY NAME: S\r\nSURVEY DATE: 1 1 2020\r\n" +
+    "SURVEY TEAM:\r\n\r\nDECLINATION: 0.00 FORMAT: DDDDLRUDLADNT\r\n\r\n" +
+    "FROM TO LEN BEAR INC LEFT UP DOWN RIGHT\r\n\r\n" +
+    "S1 S1s1 3.0 45.0 0.0 -9.9 -9.9 -9.9 -9.9 #|S#\r\n\f\r\n";
+var sD = CsFormatCompass.parse(sDat);
+ok(sD.shots[0].splay === true, "Compass #|S# is a splay");
 
 var srvContent = readTextFile(repoRoot + "/testdata/TestCave_Walls.srv");
 var srv = CsFormatWalls.parse(srvContent);
@@ -482,14 +530,109 @@ for (var wi = 0; wi < srv.shots.length; wi++) {
 ok(splays === 1, "Walls splay kept as splay");
 ok(wallsShots === 6, "Walls non-splay shot count, got " + wallsShots);
 near(srv.shots[0].azimuth, 92.5, 1e-9, "Walls declination applied");
-var w56 = null;
+// Walls LRUD defaults to the FROM station ("The default assumption is
+// LRUD=F:LRUD"), so a line's reading belongs to its FROM station: the
+// first line's LRUD is the start station's, and the reading beside
+// the W5 W6 shot describes W5 -- it lands on the shot ARRIVING at W5.
+ok(srv.startLrud !== null, "Walls first line LRUD is startLrud");
+near(srv.startLrud.left, 2.0, 1e-9, "Walls startLrud left");
+var wTo5 = null, w56 = null;
 for (wi = 0; wi < srv.shots.length; wi++) {
+    if (srv.shots[wi].to === "W5") {
+        wTo5 = srv.shots[wi];
+    }
     if (srv.shots[wi].from === "W5" && srv.shots[wi].to === "W6") {
         w56 = srv.shots[wi];
     }
 }
-ok(w56 !== null && w56.left === null, "Walls -- marker becomes null, not 0");
-ok(w56 !== null && w56.right === 2.0, "Walls LRUD beside -- still real");
+ok(wTo5 !== null && wTo5.left === null, "Walls -- marker becomes null, not 0");
+ok(wTo5 !== null && wTo5.right === 2.0, "Walls LRUD beside -- still real");
+ok(w56 !== null && w56.left === null && w56.right === null,
+    "Walls last station has no LRUD line, shot stays null");
+
+// no #Units at all: Walls defaults to METERS ("The initial default in
+// each case is meters"), not feet
+var bareSrv = CsFormatWalls.parse("A1 A2 10.0 90.0 0.0\n");
+ok(bareSrv.distanceUnit === "m", "Walls default unit is meters, got " +
+    bareSrv.distanceUnit);
+
+// LRUD=T declared: readings stay on the TO shot, no shift
+var lrudT = CsFormatWalls.parse("#Units Meters Order=DAV LRUD=T\n" +
+    "T1 T2 5.0 0.0 0.0 <1.0,2.0,3.0,0.5>\n");
+near(lrudT.shots[0].left, 1.0, 1e-9, "Walls LRUD=T stays on the shot");
+ok(lrudT.startLrud === null, "Walls LRUD=T start has no reading");
+
+// backsights: FS/BS slash pairs; default TYPEAB/TYPEVB=N (reversed,
+// uncorrected). Declination goes onto both sights.
+var bsSrv = CsFormatWalls.parse("#Units Meters Order=DAV Decl=2.0\n" +
+    "B1 B2 10.0 100/282 5/-5.2\nB2 B3 8.0 10/-- --/3\n");
+near(bsSrv.shots[0].azimuth, 102.0, 1e-9, "Walls FS of pair + declination");
+near(bsSrv.shots[0].backAzimuth, 284.0, 1e-9, "Walls BS of pair + declination");
+near(bsSrv.shots[0].inclination, 5.0, 1e-9, "Walls clino FS of pair");
+near(bsSrv.shots[0].backInclination, -5.2, 1e-9, "Walls clino BS of pair");
+ok(bsSrv.shots[1].backAzimuth === null, "Walls -- backsight stays null");
+near(bsSrv.shots[1].backInclination, 3.0, 1e-9, "Walls isolated back clino");
+
+// corrected backsights: TYPEAB=C means the BS is recorded in the FS
+// sense; the model stores the uncorrected (reversed) reading
+var bsC = CsFormatWalls.parse("#Units Meters Order=DAV TypeAB=C TypeVB=C,2\n" +
+    "C1 C2 10.0 100/102 5/4.8\n");
+near(bsC.shots[0].backAzimuth, 282.0, 1e-9, "Walls TypeAB=C reversed into model");
+near(bsC.shots[0].backInclination, -4.8, 1e-9, "Walls TypeVB=C sign-flipped");
+
+// asterisk LRUD brackets with space delimiters, and a 5th facing value
+var starSrv = CsFormatWalls.parse("#Units Meters Order=DAV LRUD=T\n" +
+    "S1 S2 5.0 0.0 0.0 *1 3 1 0 275*\n");
+near(starSrv.shots[0].left, 1.0, 1e-9, "Walls *...* LRUD brackets");
+near(starSrv.shots[0].right, 3.0, 1e-9, "Walls space-delimited LRUD");
+
+// station-only LRUD line (end-station reading with LRUD=F)
+var soloSrv = CsFormatWalls.parse("#Units Meters Order=DAV\n" +
+    "E1 E2 5.0 0.0 0.0\nE2 <0.5,1.5,2.0,0.1>\n");
+near(soloSrv.shots[0].left, 0.5, 1e-9,
+    "Walls station-only LRUD line reaches the arriving shot");
+
+// splay with the dash on the FROM side is reversed into the model
+var revSrv = CsFormatWalls.parse("#Units Meters Order=DAV\n" +
+    "R1 R2 5.0 0.0 0.0\n- R2 2.0 45.0 10.0\n");
+ok(revSrv.shots[1].splay === true, "Walls FROM-side dash is a splay");
+ok(revSrv.shots[1].from === "R2", "Walls FROM-side splay anchored at the station");
+near(revSrv.shots[1].azimuth, 225.0, 1e-9, "Walls FROM-side splay reversed az");
+near(revSrv.shots[1].inclination, -10.0, 1e-9, "Walls FROM-side splay reversed inc");
+
+// #S segment conventions: P = don't plot, L = length-exclude
+var segSrv = CsFormatWalls.parse("#Units Meters Order=DAV\n" +
+    "G1 G2 5.0 0.0 0.0 #S P\nG2 G3 5.0 0.0 0.0 #S L\nG3 G4 5.0 0.0 0.0 #S PL\n");
+ok(segSrv.shots[0].excludeFromPlot === true, "Walls #S P excluded from plot");
+ok(segSrv.shots[1].excludeFromLength === true, "Walls #S L excluded from length");
+ok(segSrv.shots[2].excludeFromPlot && segSrv.shots[2].excludeFromLength,
+    "Walls #S PL both");
+
+// #[ ... #] block comments hold excluded shots
+var blockSrv = CsFormatWalls.parse("#Units Meters Order=DAV\n" +
+    "H1 H2 5.0 0.0 0.0\n#[ Excluded shots\nH2 H3 4.0 10.0 0.0\n#]\n" +
+    "H3 H4 3.0 20.0 0.0\n");
+ok(blockSrv.shots.length === 3, "Walls #[ #] shots kept, got " +
+    blockSrv.shots.length);
+ok(blockSrv.shots[1].excludeFromAll === true, "Walls #[ #] marks excludeFromAll");
+ok(blockSrv.shots[2].excludeFromAll === false, "Walls #] ends the exclusion");
+
+// per-value unit suffixes
+var sufSrv = CsFormatWalls.parse("#Units Feet Order=DAV\n" +
+    "U1 U2 3m 0.0 0.0\n");
+near(sufSrv.shots[0].distance, 3.0 / 0.3048, 1e-6, "Walls 'm' suffix overrides feet");
+
+// Walls round trip with backsights and startLrud
+var wallsRt2 = CsFormatWalls.parse(CsFormatWalls.write(bsSrv));
+near(wallsRt2.shots[0].backAzimuth, bsSrv.shots[0].backAzimuth, 1e-6,
+    "Walls round trip backAzimuth");
+near(wallsRt2.shots[0].backInclination, bsSrv.shots[0].backInclination, 1e-6,
+    "Walls round trip backInclination");
+var srvRtFull = CsFormatWalls.parse(CsFormatWalls.write(srv));
+ok(srvRtFull.startLrud !== null &&
+    Math.abs(srvRtFull.startLrud.left - srv.startLrud.left) < 1e-6,
+    "Walls round trip startLrud");
+shotsMatch(srv, srvRtFull, "Walls full round trip incl splay");
 
 var svxContent = readTextFile(repoRoot + "/testdata/TestCave_Survex.svx");
 var svx = CsFormatSurvex.parse(svxContent);
@@ -501,17 +644,91 @@ var s23 = svx.shots[1];
 near(s23.left, 0.4, 1e-9, "Survex passage LRUD attached to TO station");
 near(s23.up, 1.2, 1e-9, "Survex passage UP");
 
-// *calibrate declination -- the defect the old importer shipped with
-var calSvx = "*begin C\n*calibrate declination 3.0\n" +
+// *calibrate declination is a ZERO ERROR: Survex SUBTRACTS it from
+// compass readings ("Value = (Reading - ZeroError) * Scale"), so a
+// file written for east declination d carries *calibrate declination
+// -d. Model declination (east positive, added) is therefore -X.
+var calSvx = "*begin C\n*calibrate declination -3.0\n" +
     "*data normal from to tape compass clino\nC1 C2 10.0 90.0 0.0\n*end C\n";
 var cal = CsFormatSurvex.parse(calSvx);
-near(cal.shots[0].azimuth, 93.0, 1e-9, "Survex *calibrate declination applied");
+near(cal.shots[0].azimuth, 93.0, 1e-9, "Survex *calibrate declination subtracted");
+near(cal.declination, 3.0, 1e-9, "Survex *calibrate declination negated into model");
+
+// modern *declination command uses the conventional sign (added)
+var declSvx = "*declination 3.0 degrees\n" +
+    "*data normal from to tape compass clino\nC1 C2 10.0 90.0 0.0\n";
+var decl = CsFormatSurvex.parse(declSvx);
+near(decl.shots[0].azimuth, 93.0, 1e-9, "Survex *declination added");
 
 // grads
 var gradSvx = "*units compass grads\n*data normal from to tape compass clino\n" +
     "G1 G2 10.0 200.0 0.0\n";
 var grad = CsFormatSurvex.parse(gradSvx);
 near(grad.shots[0].azimuth, 180.0, 1e-9, "Survex grads converted");
+
+// plumbed legs: compass omitted with "-", clino as keyword
+var plumbSvx = "*data normal from to tape compass clino\n" +
+    "P1 P2 21.54 - UP\nP2 P3 8.00 - down\nP3 P4 7.36 17.0 LEVEL\n" +
+    "P4 P5 5.00 10.0 +V\n";
+var plumb = CsFormatSurvex.parse(plumbSvx);
+ok(plumb.shots.length === 4, "Survex plumbed legs kept, got " + plumb.shots.length);
+near(plumb.shots[0].inclination, 90.0, 1e-9, "Survex UP is +90");
+near(plumb.shots[1].inclination, -90.0, 1e-9, "Survex down is -90");
+near(plumb.shots[2].inclination, 0.0, 1e-9, "Survex LEVEL is 0");
+near(plumb.shots[2].azimuth, 17.0, 1e-9, "Survex LEVEL keeps compass");
+near(plumb.shots[3].inclination, 90.0, 1e-9, "Survex +V is +90");
+
+// field-name aliases: length/bearing/gradient
+var aliasSvx = "*data normal from to length bearing gradient\n" +
+    "L1 L2 10.0 45.0 2.0\n";
+var alias = CsFormatSurvex.parse(aliasSvx);
+ok(alias.shots.length === 1, "Survex length/bearing/gradient aliases");
+near(alias.shots[0].azimuth, 45.0, 1e-9, "Survex bearing alias read");
+
+// backsights: uncorrected readings into backAzimuth/backInclination,
+// declination applied so both sights share one frame
+var bsSvx = "*calibrate declination -2.0\n" +
+    "*data normal from to tape compass clino backcompass backclino\n" +
+    "B1 B2 10.0 90.0 5.0 270.5 -5.2\nB2 B3 8.0 10.0 0.0 - -\n";
+var bs = CsFormatSurvex.parse(bsSvx);
+near(bs.shots[0].backAzimuth, 272.5, 1e-9, "Survex backcompass read + declination");
+near(bs.shots[0].backInclination, -5.2, 1e-9, "Survex backclino read");
+ok(bs.shots[1].backAzimuth === null, "Survex omitted backsight stays null");
+
+// *flags splay, and anonymous stations
+var flagSvx = "*data normal from to tape compass clino\n" +
+    "*flags splay\nF1 F2 3.0 100.0 0.0\n*flags not splay\n" +
+    "F1 F3 9.0 200.0 0.0\nF3 .. 2.0 50.0 0.0\nF3 . 2.5 60.0 0.0\n";
+var flag = CsFormatSurvex.parse(flagSvx);
+ok(flag.shots[0].splay === true, "Survex *flags splay honoured");
+ok(flag.shots[1].splay === false, "Survex *flags not splay restores");
+ok(flag.shots[2].splay === true && flag.shots[2].to === "",
+    "Survex .. anonymous wall point is a splay");
+ok(flag.shots[3].splay === true, "Survex . anonymous point is a splay");
+
+// duplicate/surface flags map to the exclude fields
+var dupSvx = "*data normal from to tape compass clino\n" +
+    "*flags duplicate\nD1 D2 3.0 10.0 0.0\n*flags not duplicate surface\n" +
+    "D2 D3 4.0 20.0 0.0\n";
+var dup = CsFormatSurvex.parse(dupSvx);
+ok(dup.shots[0].excludeFromLength === true, "Survex duplicate excluded from length");
+ok(dup.shots[1].excludeFromPlot === true, "Survex surface excluded from plot");
+
+// first-station passage record lands in startLrud
+var startSvx = "*data normal from to tape compass clino\nS1 S2 5.0 90.0 0.0\n" +
+    "*data passage station left right up down\nS1 1.0 2.0 3.0 0.5\nS2 - 0.4 - -\n";
+var startP = CsFormatSurvex.parse(startSvx);
+ok(startP.startLrud !== null, "Survex first-station passage kept");
+near(startP.startLrud.left, 1.0, 1e-9, "Survex startLrud left");
+ok(startP.shots[0].left === null && startP.shots[0].right === 0.4,
+    "Survex passage '-' stays null");
+
+// yards convert
+var ydSvx = "*units length yards\n*data normal from to tape compass clino\n" +
+    "Y1 Y2 10.0 0.0 0.0\n";
+var yd = CsFormatSurvex.parse(ydSvx);
+ok(yd.distanceUnit === "m", "Survex yards surveys store metres");
+near(yd.shots[0].distance, 9.144, 1e-6, "Survex yards converted");
 
 // CSV
 var csvText = "from,to,distance,azimuth,inclination,left,right,up,down,notes\n" +
@@ -522,6 +739,49 @@ ok(csv.shots.length === 2, "CSV shot count");
 ok(csv.shots[0].up === null, "CSV blank LRUD is null");
 ok(csv.shots[0].notes === "first shot", "CSV notes");
 ok(csv.shots[1].splay === true, "CSV dash TO is splay");
+
+// metadata comment lines carry what the columns can't; the header row
+// maps the columns, so extended files and legacy files both parse
+var csvMeta = "# name: Deep Cave\n# date: 2026-02-03\n# team: A, B\n" +
+    "# declination: 2.5\n# unit: m\n# fix: A1 100 200 5\n" +
+    "# startlrud: 1/3,2,0.5,\n# startnote: entrance pit\n" +
+    "from,to,distance,azimuth,inclination,left,right,up,down," +
+    "backazimuth,backinclination,flags,notes\n" +
+    "A1,A2,10.5,45,2,1,2,,0.5,225.5,-2.2,,first, shot\n" +
+    "A2,A3,5,90,0,5/10,1,1,1,,,XC,\n";
+var csvM = CsFormatCsv.parse(csvMeta);
+ok(csvM.name === "Deep Cave", "CSV # name");
+ok(csvM.date === "2026-02-03", "CSV # date");
+ok(csvM.team === "A, B", "CSV # team");
+near(csvM.declination, 2.5, 1e-9, "CSV # declination");
+ok(csvM.distanceUnit === "m", "CSV # unit read -- meter surveys stay meters");
+ok(csvM.fixed.hasOwnProperty("A1"), "CSV # fix");
+near(csvM.fixed["A1"].y, 200, 1e-9, "CSV # fix northing");
+ok(csvM.startLrud !== null && csvM.startLrud.left === 3, "CSV # startlrud, largest of 1/3");
+ok(csvM.startNote === "entrance pit", "CSV # startnote");
+near(csvM.shots[0].backAzimuth, 225.5, 1e-9, "CSV backazimuth column");
+near(csvM.shots[0].backInclination, -2.2, 1e-9, "CSV backinclination column");
+ok(csvM.shots[0].notes === "first, shot", "CSV notes keep commas, got '" +
+    csvM.shots[0].notes + "'");
+ok(csvM.shots[1].excludeFromAll === true && csvM.shots[1].noAdjust === true,
+    "CSV flags column");
+ok(csvM.shots[1].left === 10 && csvM.shots[1].leftAll !== null,
+    "CSV 5/10 multi-reading LRUD, largest is primary");
+
+// full round trip: unit, metadata, backsights, flags, multi readings
+var csvMRt = CsFormatCsv.parse(CsFormatCsv.write(csvM));
+ok(csvMRt.distanceUnit === "m", "CSV round trip unit");
+ok(csvMRt.name === "Deep Cave", "CSV round trip name");
+near(csvMRt.declination, 2.5, 1e-9, "CSV round trip declination");
+ok(csvMRt.fixed.hasOwnProperty("A1"), "CSV round trip fix");
+ok(csvMRt.startLrud !== null && csvMRt.startLrud.left === 3,
+    "CSV round trip startLrud");
+near(csvMRt.shots[0].backAzimuth, 225.5, 1e-9, "CSV round trip backsight");
+ok(csvMRt.shots[1].excludeFromAll === true, "CSV round trip flags");
+ok(csvMRt.shots[1].leftAll !== null && csvMRt.shots[1].leftAll.length === 2,
+    "CSV round trip keeps both 5/10 readings");
+ok(csvMRt.shots[0].notes === "first, shot", "CSV round trip notes with commas");
+shotsMatch(csvM, csvMRt, "CSV metadata round trip");
 
 // ---------------------------------------------------------------------
 // Round trips: parse -> write -> parse preserves the survey.
@@ -544,6 +804,34 @@ function shotsMatch(a, b, what) {
 var datRt = CsFormatCompass.parse(CsFormatCompass.write(dat));
 shotsMatch(dat, datRt, "Compass round trip");
 near(datRt.declination, dat.declination, 1e-9, "Compass round trip declination");
+ok(datRt.startLrud !== null &&
+    Math.abs(datRt.startLrud.left - dat.startLrud.left) < 0.01,
+    "Compass round trip startLrud");
+ok(datRt.shots[0].notes === dat.shots[0].notes, "Compass round trip notes");
+ok(datRt.shots[4].noAdjust === true, "Compass round trip #|C#");
+ok(datRt.shots[5].excludeFromPlot === true, "Compass round trip #|P#");
+near(datRt.shots[0].left, dat.shots[0].left, 0.01, "Compass round trip LRUD");
+// last/leaf station LRUD survives via a zero-length carrier shot
+var leafDat = CsModel.newSurvey();
+leafDat.distanceUnit = "ft";
+var lfShot = shotOf("L1", "L2", 10, 0, 0);
+lfShot.left = 1.0; lfShot.right = 2.0; lfShot.up = 3.0; lfShot.down = 0.5;
+leafDat.shots.push(lfShot);
+var leafRt = CsFormatCompass.parse(CsFormatCompass.write(leafDat));
+ok(leafRt.shots.length === 1, "Compass LRUD carrier shot not re-imported, got " +
+    leafRt.shots.length);
+near(leafRt.shots[0].left, 1.0, 0.01, "Compass leaf-station LRUD survives");
+// backsights survive a write/parse cycle
+var bsDRt = CsFormatCompass.parse(CsFormatCompass.write(bsD));
+near(bsDRt.shots[0].backAzimuth, bsD.shots[0].backAzimuth, 0.01,
+    "Compass round trip backAzimuth");
+near(bsDRt.shots[0].backInclination, bsD.shots[0].backInclination, 0.01,
+    "Compass round trip backInclination");
+ok(bsDRt.shots[1].backAzimuth === null, "Compass round trip missing backsight");
+// splays survive
+var sDRt = CsFormatCompass.parse(CsFormatCompass.write(sD));
+ok(sDRt.shots.length === 1 && sDRt.shots[0].splay === true,
+    "Compass round trip splay");
 
 var srvNoSplay = CsModel.newSurvey();
 srvNoSplay.distanceUnit = srv.distanceUnit;
@@ -564,6 +852,52 @@ ok(rtW56 !== null && rtW56.left === null, "Walls round trip keeps null LRUD");
 
 var svxRt = CsFormatSurvex.parse(CsFormatSurvex.write(svx));
 shotsMatch(svx, svxRt, "Survex round trip");
+
+// declination sign survives a write/parse cycle
+var calRt = CsFormatSurvex.parse(CsFormatSurvex.write(cal));
+near(calRt.declination, cal.declination, 1e-9, "Survex round trip declination sign");
+near(CsAngles.azimuthDifference(calRt.shots[0].azimuth, cal.shots[0].azimuth),
+    0, 1e-6, "Survex round trip true azimuth with declination");
+
+// backsights survive a write/parse cycle
+var bsRt = CsFormatSurvex.parse(CsFormatSurvex.write(bs));
+near(bsRt.shots[0].backAzimuth, bs.shots[0].backAzimuth, 1e-6,
+    "Survex round trip backAzimuth");
+near(bsRt.shots[0].backInclination, bs.shots[0].backInclination, 1e-6,
+    "Survex round trip backInclination");
+ok(bsRt.shots[1].backAzimuth === null, "Survex round trip missing backsight");
+
+// splays are written as anonymous stations, never bare "-"
+var splaySv = CsModel.newSurvey();
+splaySv.distanceUnit = "m";
+var spShot = shotOf("A1", "A2", 5, 0, 0);
+var spSplay = shotOf("A1", "", 2, 90, 0);
+spSplay.splay = true;
+splaySv.shots.push(spShot);
+splaySv.shots.push(spSplay);
+var splayText = CsFormatSurvex.write(splaySv);
+ok(!/\t-\t/.test(splayText), "Survex writer avoids bare '-' TO station");
+var splayRt = CsFormatSurvex.parse(splayText);
+ok(splayRt.shots[1].splay === true, "Survex round trip splay");
+
+// startLrud round trips through a first-station passage record
+var startRt = CsFormatSurvex.parse(CsFormatSurvex.write(startP));
+ok(startRt.startLrud !== null && Math.abs(startRt.startLrud.left - 1.0) < 1e-6,
+    "Survex round trip startLrud");
+
+// plumb legs survive a write/parse cycle
+var plumbRt = CsFormatSurvex.parse(CsFormatSurvex.write(plumb));
+shotsMatch(plumb, plumbRt, "Survex round trip plumbs");
+
+// team round trips
+var teamSv = CsModel.newSurvey();
+teamSv.distanceUnit = "m";
+teamSv.team = "Nick Proctor, Anthony Day";
+teamSv.shots.push(shotOf("T1", "T2", 5, 0, 0));
+var teamRt = CsFormatSurvex.parse(CsFormatSurvex.write(teamSv));
+ok(teamRt.team.indexOf("Nick Proctor") >= 0 &&
+    teamRt.team.indexOf("Anthony Day") >= 0, "Survex round trip team, got '" +
+    teamRt.team + "'");
 ok(svxRt.shots[0].from === svx.shots[0].from,
     "Survex round trip keeps station names un-renamed");
 near(svxRt.shots[1].left, 0.4, 1e-9, "Survex round trip passage LRUD");

@@ -102,7 +102,7 @@ CsFormatRegistry.detectByContent = function(content) {
     var head = content.substring(0, 4000);
 
     // Survex: star directives at line starts.
-    if (/^\s*\*(begin|data|units|fix|calibrate|date|team)/im.test(head)) {
+    if (/^\s*\*(begin|data|units|fix|calibrate|declination|flags|alias|date|team)/im.test(head)) {
         return CsFormatRegistry.byId("survex");
     }
     // Walls: hash directives at line starts.
