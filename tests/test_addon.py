@@ -67,6 +67,13 @@ def find_int(source, call):
     return int(match.group(1)) if match else None
 
 
+# The icon file names a tool really registers. Matching the whole call
+# rather than a bare "setIcon(" substring is deliberate: prose mentioning
+# setIcon() in a comment must not count as having one.
+def icons_referenced(source):
+    return re.findall(r'setIcon\(basePath \+ "/([^"]+)"\)', source)
+
+
 class TestAddonLayout(unittest.TestCase):
     def test_addon_has_its_menu_builder(self):
         # CaveSurvey.js must sit beside the tool folders: it creates the menu
@@ -116,9 +123,12 @@ class TestAddonLayout(unittest.TestCase):
 
     def test_referenced_icons_exist(self):
         # A setIcon() pointing at a missing file renders as a blank button.
+        # Note this deliberately validates only what a tool references: a
+        # tool mid-development with no icon at all is fine day to day, and
+        # TestPublishReadiness is what insists on one before shipping.
         for name in tool_dirs():
             source = tool_source(name)
-            for icon in re.findall(r'setIcon\(basePath \+ "/([^"]+)"\)', source):
+            for icon in icons_referenced(source):
                 with self.subTest(tool=name, icon=icon):
                     self.assertTrue(
                         os.path.exists(os.path.join(ADDON, name, icon)),
@@ -156,15 +166,22 @@ class TestPublishReadiness(unittest.TestCase):
     """
 
     def test_every_tool_has_an_icon(self):
+        # Matched against the real call, not a bare "setIcon(" substring:
+        # AerialBasemap once carried the comment "No setIcon() yet -- the
+        # icon is Task 4's job", whose text satisfied a substring check and
+        # left this gate green for a tool that had no icon at all.
         missing = [name for name in tool_dirs()
-                   if "setIcon(" not in tool_source(name)]
+                   if not icons_referenced(tool_source(name))]
         self.assertEqual(missing, [], "no toolbar icon: %s" % missing)
 
     def test_every_icon_is_parseable_svg(self):
         # A file QCAD can't parse renders exactly like a missing one.
         for name in tool_dirs():
-            for icon in re.findall(r'setIcon\(basePath \+ "/([^"]+)"\)',
-                                   tool_source(name)):
+            icons = icons_referenced(tool_source(name))
+            # Assert before the loop: a tool referencing no icon would
+            # otherwise iterate zero times and pass vacuously.
+            self.assertTrue(icons, "%s references no icon" % name)
+            for icon in icons:
                 path = os.path.join(ADDON, name, icon)
                 with self.subTest(tool=name, icon=icon):
                     self.assertTrue(os.path.exists(path))
