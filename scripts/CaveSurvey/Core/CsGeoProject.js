@@ -228,3 +228,23 @@ CsGeoProject.naipUrl = function(bbox, size) {
         "&format=png" +
         "&f=image";
 };
+
+/**
+ * Where the basemap image for a drawing belongs: beside it, under a
+ * neutral name. Deliberately carries no coordinates -- see the
+ * project's entrance-location rule. Returns null for an unsaved
+ * drawing, which has nowhere stable to put it.
+ */
+CsGeoProject.imagePathFor = function(documentPath) {
+    if (documentPath === undefined || documentPath === null ||
+        documentPath === "") {
+        return null;
+    }
+    var cut = documentPath.lastIndexOf(".");
+    var slash = Math.max(documentPath.lastIndexOf("/"),
+        documentPath.lastIndexOf("\\"));
+    if (cut > slash) {
+        return documentPath.substring(0, cut) + "-aerial.png";
+    }
+    return documentPath + "-aerial.png";
+};

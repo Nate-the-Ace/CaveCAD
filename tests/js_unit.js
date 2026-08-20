@@ -2935,6 +2935,16 @@ if (!IS_NODE) {
         CsGeoProject.mercatorBbox(47.5, 11.0,
             { width: 800, height: 400 }, { x: 0, y: 0 })) === false,
         "insideCoverage: the Alps are outside NAIP");
+
+    // The basemap PNG sits beside the drawing under a neutral name --
+    // no coordinates, no cave name beyond what the DXF already carries.
+    ok(CsGeoProject.imagePathFor("/tmp/Cave.dxf") === "/tmp/Cave-aerial.png",
+        "imagePathFor: dxf -> -aerial.png beside it");
+    ok(CsGeoProject.imagePathFor("/a/b/Deep River Cave.DXF") ===
+        "/a/b/Deep River Cave-aerial.png",
+        "imagePathFor: spaces and uppercase extension");
+    ok(CsGeoProject.imagePathFor("") === null,
+        "imagePathFor: unsaved drawing has no image path");
 }
 
 // ---------------------------------------------------------------------
