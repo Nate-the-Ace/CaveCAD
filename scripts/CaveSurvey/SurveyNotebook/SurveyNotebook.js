@@ -60,7 +60,11 @@
 // drawing's one tie to real-world coordinates, which aerial imagery
 // aligns to, revisions pivot on, and exports derive from. Never
 // without asking, and never on top of an anchor that already exists.
-// See offerGeoAnchor.
+// See offerGeoAnchor. And once an anchor IS stored, the drawing's own
+// trips get checked against IGRF for their dates at that location: any
+// trip more than half a degree off is offered a revision on the spot,
+// unasked, because a user who doesn't know their 1998 declination was
+// wrong can't go looking for it. See offerIgrfTripRevisions.
 //
 // DECLINATION... revises the drawing's trips WITHOUT loading them: one
 // row per trip, the recorded value beside an editable one, IGRF on tap
@@ -1489,6 +1493,124 @@ SurveyNotebook.offerGeoAnchor = function(doc, coord) {
 };
 
 /**
+ * The PROACTIVE half of the anchor workflow: with a real location
+ * finally known, VOLUNTEER the trips whose recorded declination
+ * disagrees with the IGRF estimate for their own dates at that spot --
+ * "your 1998 trips are 2.5 deg off" -- instead of waiting for someone
+ * to open the Declination... dialog and notice. This was the Geo
+ * Reference tool's other job, and it is the half a user can't ask for
+ * because they don't yet know there is anything to ask about.
+ *
+ * Only ever after offerGeoAnchor actually WROTE an anchor. A declined
+ * offer must not be turned into a revision campaign, and an anchor
+ * that already existed is not news -- without a freshly stored,
+ * authoritative location there is nothing new to compare against.
+ *
+ * Everything here is a BONUS on top of an anchor that is ALREADY
+ * COMMITTED and already reported, so every call is wrapped: a throw
+ * must fall through quietly, never turn a stored anchor into an error.
+ * And when nothing qualifies, NOTHING is shown -- a proactive offer
+ * that interrupts with "no changes needed" is just noise.
+ *
+ * \param doc   the drawing the anchor was just written to
+ * \param coord the stored anchor coordinate {lat, lon}
+ */
+SurveyNotebook.offerIgrfTripRevisions = function(doc, coord) {
+    if (doc === undefined || doc === null || coord === null ||
+            coord === undefined) {
+        return;
+    }
+    var recon;
+    try {
+        recon = CsRevise.surveyFromDocument(doc);
+    } catch (eRe) {
+        return; // unreadable tags: the anchor above still stands
+    }
+    // NEVER offer on a legacy (pre-v3) reconstruction. Those trips'
+    // declination records are themselves part of the chain-guess the
+    // legacy reader had to make, so revising them is revising a guess
+    // -- which is exactly how drawings drift. Same refusal the
+    // Declination... dialog makes out loud; here it stays silent,
+    // because nobody asked for this offer. A drawing with no shots has
+    // nothing to revise either.
+    if (recon.legacy === true || recon.survey.shots.length === 0) {
+        return;
+    }
+
+    var candidates;
+    try {
+        candidates = CsRevise.tripsNeedingRevision(recon.survey,
+            coord.lat, coord.lon);
+    } catch (eCa) {
+        return;
+    }
+    if (candidates.length === 0) {
+        return; // nothing disagrees: no dialogs at all
+    }
+
+    var marked = [];
+    for (var ci = 0; ci < candidates.length; ci++) {
+        var c = candidates[ci];
+        var answer;
+        try {
+            // IGRF is shown at 2 decimals here because that's the
+            // precision reviseDeclination is actually handed below --
+            // see the rounding comment in CsRevise.tripsNeedingRevision.
+            answer = QMessageBox.question(null, "Survey Notebook",
+                "Trip " + c.tripId + " (" + c.date +
+                (c.team !== "" ? ", " + c.team : "") + "): recorded " +
+                c.recorded.toFixed(2) + " deg, IGRF estimates " +
+                c.igrf.toFixed(2) + " deg here. " +
+                "Revise this trip's azimuths?",
+                QMessageBox.Yes | QMessageBox.No);
+        } catch (eQ) {
+            // This bridge refused the question. Asking about the rest
+            // would fail the same way, and applying what was accepted
+            // so far would revise trips off a half-asked question --
+            // so drop the whole offer.
+            return;
+        }
+        if (answer === QMessageBox.Yes) {
+            marked.push(c);
+        }
+    }
+    if (marked.length === 0) {
+        return; // everything declined: silent, exactly as asked
+    }
+
+    // CsRevise.apply's contract: recon stays the PRISTINE
+    // reconstruction; the revision mutates a SECOND reconstruction of
+    // the same drawing (the document is untouched since the first scan,
+    // so the two start identical). One apply covers every accepted trip.
+    var revised;
+    try {
+        revised = CsRevise.surveyFromDocument(doc).survey;
+        for (var mi = 0; mi < marked.length; mi++) {
+            CsRevise.reviseDeclination(revised, marked[mi].tripId,
+                marked[mi].igrf, "igrf");
+        }
+    } catch (eRv) {
+        QMessageBox.warning(null, "Survey Notebook",
+            "Couldn't prepare the declination revision (" + eRv +
+            "). Nothing further was changed; the geo anchor was still " +
+            "stored.");
+        return;
+    }
+
+    var report;
+    try {
+        report = CsRevise.apply(doc, getDocumentInterface(), recon, revised);
+    } catch (eAp) {
+        QMessageBox.warning(null, "Survey Notebook",
+            "Applying the declination revision failed (" + eAp +
+            "). If the drawing looks half-moved, undo restores it. The " +
+            "geo anchor was still stored.");
+        return;
+    }
+    EAction.handleUserMessage(CsReport.revisionSummary(report));
+};
+
+/**
  * Infer: the estimate for THIS PAGE's own header, from the header's
  * date and the cave's location. It fills a text field and touches
  * nothing else -- except that a location it had to ASK for is offered
@@ -1560,6 +1682,18 @@ SurveyNotebook.inferDeclination = function(w) {
         CsReport.igrfLine(result, coord.lat, coord.lon, String(w.dateEdit.text)) +
         "\n\nFilled into the header -- edit it freely; it stays your call." +
         anchorLine);
+
+    // A freshly WRITTEN anchor is the first authoritative location this
+    // drawing has had, so it is also the moment to volunteer the trips
+    // already in the drawing whose recorded declination disagrees with
+    // IGRF for their own dates here. Only on a write: 'anchored' is
+    // null when the user declined, when an anchor already existed, and
+    // when there was no station to carry one. Asked AFTER the estimate
+    // is delivered above, so the anchor-stored news lands before any
+    // follow-up question -- not interleaved with it.
+    if (anchored !== null) {
+        SurveyNotebook.offerIgrfTripRevisions(getDocument(), coord);
+    }
 };
 
 // ---------------------------------------------------------------------

@@ -191,74 +191,6 @@ function geoReferenceRun() {
 }
 
 // ============================================================
-// Pure decision logic -- no Qt, no document access, so the test
-// suite can exercise it headless (suite convention).
-// ============================================================
-
-/**
- * Which trips deserve an IGRF declination-revision offer once an
- * anchor at (lat, lon) is known.
- *
- * A trip qualifies when ALL of:
- *   - its declinationSource is "" or "user" (a value already stamped
- *     "igrf", or read from a survey data file, is not second-guessed),
- *   - its date parses as YYYY-MM-DD (IGRF needs a real date),
- *   - the IGRF model covers that date (declination() non-null), and
- *   - the recorded declination differs from the IGRF estimate by
- *     more than 0.5 degrees.
- *
- * The returned igrf is already rounded to 2 decimals -- the value a
- * candidate carries is exactly what gets displayed AND, if accepted,
- * exactly what gets applied (see the rounding comment inline below).
- *
- * \param survey CsModel survey (e.g. CsRevise.surveyFromDocument().survey)
- * \param lat    anchor latitude, degrees, north positive
- * \param lon    anchor longitude, degrees, east positive
- * \return [{tripId, recorded, igrf, date, team}] in trip-id order,
- *         igrf rounded to 2 decimals
- */
-GeoReference.tripsNeedingRevision = function(survey, lat, lon) {
-    var out = [];
-    var trips = survey.trips || [];
-    for (var t = 0; t < trips.length; t++) {
-        var trip = trips[t];
-        if (trip.declinationSource !== "" &&
-                trip.declinationSource !== "user") {
-            continue;
-        }
-        var m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(trip.date);
-        if (m === null) {
-            continue;
-        }
-        var igrf = CsGeomag.declination(lat, lon, {
-            year: parseInt(m[1], 10),
-            month: parseInt(m[2], 10),
-            day: parseInt(m[3], 10)
-        });
-        if (igrf === null) {
-            continue;
-        }
-        // Round to 2 decimals HERE -- the one site that decides what
-        // "the IGRF value" for this trip means. Everything downstream
-        // (the question box's toFixed(2), and reviseDeclination if
-        // accepted) uses this SAME rounded number, so what the user
-        // is shown is exactly what gets stored. This also keeps the
-        // convention shared with Declination.js's own IGRF-fill
-        // button, which applies at 2 decimals too (see its comment) --
-        // a trip revised from either tool round-trips through the
-        // other's unchanged-detection instead of registering a
-        // phantom edit.
-        var igrfRounded = Math.round(igrf.declination * 100) / 100;
-        if (Math.abs(trip.declination - igrfRounded) > 0.5) {
-            out.push({ tripId: t, recorded: trip.declination,
-                igrf: igrfRounded, date: trip.date,
-                team: trip.team });
-        }
-    }
-    return out;
-};
-
-// ============================================================
 // Add-on wiring -- the standard pattern; see docs.
 // ============================================================
 
@@ -285,3 +217,20 @@ GeoReference.init = function(basePath) {
     action.setSortOrder(50);
     action.setWidgetNames(["CaveSurveyMenu", "CaveSurveyToolBar"]);
 };
+
+// ---------------------------------------------------------------------
+// Pure decision logic -- MOVED to CsRevise.
+//
+// The proactive offer below the anchor -- "your 1998 trips are 2.5 deg
+// off, revise them?" -- now also fires from the Survey Notebook, right
+// after IT stores an anchor, and this tool is on its way out. The
+// decision about which trips are worth offering went where both
+// callers can reach it and where it survives the deletion of this
+// folder: CsRevise, beside the revision math it serves. This name
+// stays a thin alias so the call site above keeps working meanwhile --
+// ONE implementation, no second copy to drift. (GeoReference is a
+// function declaration, hoisted, so attaching it below the wiring
+// block is safe.)
+// ---------------------------------------------------------------------
+
+GeoReference.tripsNeedingRevision = CsRevise.tripsNeedingRevision;
