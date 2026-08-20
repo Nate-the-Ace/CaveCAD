@@ -152,6 +152,59 @@ CsDraw.lrud = function(doc, op, pos, name, azimuthDeg, left, right, up, down, al
 };
 
 /**
+ * A station's note, written OUTSIDE the passage with a leader back to
+ * the station point: the text sits beyond the nearer measured wall
+ * (right of travel first, left as fallback, a fixed offset when no
+ * LRUD), on TEXT-NOTES, with a leader pointing at the station.
+ */
+CsDraw.noteLeader = function(doc, op, pos, name, note, azimuthDeg, lrud) {
+    var az = (azimuthDeg === undefined || azimuthDeg === null) ?
+        0.0 : azimuthDeg;
+    var side = 90.0; // right of the direction of travel
+    var wall = 0.0;
+    var r = (lrud !== null && lrud !== undefined &&
+        lrud.right !== null && lrud.right !== undefined) ? lrud.right : null;
+    var l = (lrud !== null && lrud !== undefined &&
+        lrud.left !== null && lrud.left !== undefined) ? lrud.left : null;
+    if (r !== null) {
+        wall = r;
+    } else if (l !== null) {
+        side = -90.0;
+        wall = l;
+    }
+    var rad = (az + side) * Math.PI / 180.0;
+    var dirX = Math.sin(rad), dirY = Math.cos(rad);
+    var dist = wall + CsDraw.TEXT_HEIGHT * 4.0;
+    var labelPos = new RVector(pos.x + dirX * dist, pos.y + dirY * dist);
+
+    // leader from the station (arrow end) to just short of the text
+    var head = new RVector(pos.x + dirX * CsDraw.TEXT_HEIGHT * 0.6,
+        pos.y + dirY * CsDraw.TEXT_HEIGHT * 0.6);
+    var tail = new RVector(labelPos.x - dirX * CsDraw.TEXT_HEIGHT,
+        labelPos.y - dirY * CsDraw.TEXT_HEIGHT);
+    var leaderDrawn = false;
+    try {
+        var ld = new RLeaderData();
+        ld.setArrowHead(true);
+        ld.appendVertex(head);
+        ld.appendVertex(tail);
+        var leader = new RLeaderEntity(doc, ld);
+        leader.setLayerId(doc.getLayerId(CsLayers.TEXT_NOTES));
+        CsTags.set(leader, "NoteLeader", name);
+        op.addObject(leader, false);
+        leaderDrawn = true;
+    } catch (e) {
+        // bridge without RLeader*: a plain line still points the way
+    }
+    if (!leaderDrawn) {
+        CsDraw.addLine(doc, op, CsLayers.TEXT_NOTES, head, tail,
+            "NoteLeader", name);
+    }
+    CsDraw.addText(doc, op, CsLayers.TEXT_NOTES, note, labelPos,
+        dirX >= 0 ? RS.HAlignLeft : RS.HAlignRight, "NoteLabel", name);
+};
+
+/**
  * Draws a whole resolved survey as ONE operation (one undo step):
  * stations, labels, shot lines, LRUD, all layered and tagged.
  *
@@ -230,6 +283,8 @@ CsDraw.survey = function(survey, resolved, originStation, originPos, seqBase) {
                 azimuth: firstLegAzimuth
             };
         }
+        var noteText = noteFor[name] !== undefined ? noteFor[name] :
+            (i === 0 ? survey.startNote : undefined);
         var pt = CsDraw.station(doc, op, at(name), {
             name: name,
             seq: resolved.stations[name].seq + seqBase,
@@ -239,8 +294,7 @@ CsDraw.survey = function(survey, resolved, originStation, originPos, seqBase) {
             up: lrud !== null ? lrud.up : undefined,
             down: lrud !== null ? lrud.down : undefined,
             z: resolved.stations[name].z,
-            note: noteFor[name] !== undefined ? noteFor[name] :
-                (i === 0 ? survey.startNote : undefined)
+            note: noteText
         });
         if (firstPoint === undefined) {
             firstPoint = pt;
@@ -251,6 +305,11 @@ CsDraw.survey = function(survey, resolved, originStation, originPos, seqBase) {
                     leftAll: lrud.leftAll, rightAll: lrud.rightAll,
                     upAll: lrud.upAll, downAll: lrud.downAll
                 });
+        }
+        if (noteText !== undefined && noteText !== null && noteText !== "") {
+            CsLayers.ensure(doc, di, CsLayers.TEXT_NOTES);
+            CsDraw.noteLeader(doc, op, at(name), name, noteText,
+                lrud !== null ? lrud.azimuth : firstLegAzimuth, lrud);
         }
         stationsDrawn++;
     }
@@ -269,6 +328,79 @@ CsDraw.survey = function(survey, resolved, originStation, originPos, seqBase) {
         }
     }
 
+    // Splays: rays from their station to the wall they hit, thin and
+    // grey on CTRL-SPLAYS, each ending in a tagged tip point -- the
+    // same shape LRUD ticks leave, so wall tracing can snap to them.
+    // Named <station>.<n> in shot order, matching what the notebook
+    // shows. The network never resolves them (no TO station), so they
+    // are drawn straight off their shot readings. eraseStations strips
+    // the trailing .<n> to replace them on a redraw.
+    var splaysDrawn = 0;
+    var splayCounts = {};
+    for (i = 0; i < survey.shots.length; i++) {
+        var sp = survey.shots[i];
+        if (!sp.splay || sp.excludeFromAll || sp.excludeFromPlot) {
+            continue;
+        }
+        if (!resolved.stations.hasOwnProperty(sp.from)) {
+            continue; // its station never connected -- stays skipped
+        }
+        splayCounts[sp.from] = (splayCounts[sp.from] || 0) + 1;
+        var splayName = sp.from + "." + splayCounts[sp.from];
+        var so = CsTraverse.offset(sp, CsTraverse.SLOPE);
+        var sPos = at(sp.from);
+        var sEnd = new RVector(sPos.x + so.dx, sPos.y + so.dy);
+        CsDraw.addLine(doc, op, CsLayers.SPLAYS, sPos, sEnd,
+            "Splay", splayName);
+        var sTip = CsDraw.addPoint(doc, op, CsLayers.SPLAYS, sEnd);
+        CsTags.set(sTip, "SplayName", splayName);
+        op.addObject(sTip, false);
+        // the tip's name, just past the tip so the ray stays clear
+        var sLen = Math.sqrt(so.dx * so.dx + so.dy * so.dy);
+        var ux = sLen > 1e-9 ? so.dx / sLen : 1.0;
+        var uy = sLen > 1e-9 ? so.dy / sLen : 0.0;
+        CsDraw.addText(doc, op, CsLayers.SPLAYS, splayName,
+            new RVector(sEnd.x + ux * CsDraw.TEXT_HEIGHT * 0.8,
+                sEnd.y + uy * CsDraw.TEXT_HEIGHT * 0.8),
+            ux >= 0 ? RS.HAlignLeft : RS.HAlignRight,
+            "SplayLabel", splayName);
+        splaysDrawn++;
+    }
+
+    // Approximate passage walls from the LRUD, drawn WITH the survey
+    // in the same undo step (this absorbed the old standalone LRUD
+    // Walls tool). Straight dashed runs on the CTRL layers; runs break
+    // at junctions and unmeasured stations on purpose. Tagged with the
+    // survey's station list so eraseStations() can replace them on a
+    // redraw.
+    var wallsDrawn = 0;
+    var runs = CsLrud.wallRuns(survey, resolved);
+    if (runs.left.length > 0 || runs.right.length > 0) {
+        CsLayers.ensure(doc, di, CsLayers.LRUD_WALL_LEFT);
+        CsLayers.ensure(doc, di, CsLayers.LRUD_WALL_RIGHT);
+        var allNames = names.join("|");
+        var drawRuns = function(runList, layerName) {
+            for (var ri = 0; ri < runList.length; ri++) {
+                var data = new RPolylineData();
+                for (var k = 0; k < runList[ri].length; k++) {
+                    // wall points come from the unanchored resolved
+                    // coordinates: apply the same origin offset the
+                    // stations get
+                    data.appendVertex(new RVector(
+                        runList[ri][k].x + offX, runList[ri][k].y + offY));
+                }
+                var pl = new RPolylineEntity(doc, data);
+                pl.setLayerId(doc.getLayerId(layerName));
+                CsTags.set(pl, "WallRun", layerName + ":" + ri);
+                CsTags.set(pl, "WallRunStations", allNames);
+                op.addObject(pl, false);
+                wallsDrawn++;
+            }
+        };
+        drawRuns(runs.left, CsLayers.LRUD_WALL_LEFT);
+        drawRuns(runs.right, CsLayers.LRUD_WALL_RIGHT);
+    }
+
     if (firstPoint !== undefined) {
         CsTags.set(firstPoint, "SurveyName", survey.name);
         CsTags.set(firstPoint, "SurveyDate", survey.date);
@@ -285,7 +417,10 @@ CsDraw.survey = function(survey, resolved, originStation, originPos, seqBase) {
         stationsDrawn: stationsDrawn,
         shotsDrawn: shotsDrawn,
         closuresDrawn: closuresDrawn,
-        skipped: resolved.skipped.length
+        wallsDrawn: wallsDrawn,
+        splaysDrawn: splaysDrawn,
+        // splays that DID draw no longer count as skipped
+        skipped: resolved.skipped.length - splaysDrawn
     };
 };
 
@@ -306,6 +441,11 @@ CsDraw.eraseStations = function(doc, stationNames) {
     }
     var baseOf = function(tagged) {
         var m = /^(.*)\.([LR])$/.exec(tagged);
+        return m === null ? tagged : m[1];
+    };
+    // splay names are <station>.<n>; older files tagged the bare station
+    var splayBaseOf = function(tagged) {
+        var m = /^(.*)\.(\d+)$/.exec(tagged);
         return m === null ? tagged : m[1];
     };
 
@@ -339,12 +479,46 @@ CsDraw.eraseStations = function(doc, stationNames) {
             if (v !== "" && inSet[v] === true) { kill = true; }
         }
         if (!kill) {
+            v = CsTags.get(e, "Splay");
+            if (v !== "" && inSet[splayBaseOf(v)] === true) { kill = true; }
+        }
+        if (!kill) {
+            v = CsTags.get(e, "SplayName");
+            if (v !== "" && inSet[splayBaseOf(v)] === true) { kill = true; }
+        }
+        if (!kill) {
+            v = CsTags.get(e, "SplayLabel");
+            if (v !== "" && inSet[splayBaseOf(v)] === true) { kill = true; }
+        }
+        if (!kill) {
+            v = CsTags.get(e, "NoteLabel");
+            if (v !== "" && inSet[v] === true) { kill = true; }
+        }
+        if (!kill) {
+            v = CsTags.get(e, "NoteLeader");
+            if (v !== "" && inSet[v] === true) { kill = true; }
+        }
+        if (!kill) {
             v = CsTags.get(e, "Shot");
             if (v !== "") {
                 var ends = v.split("->");
                 if (ends.length === 2 && inSet[ends[0]] === true &&
                     inSet[ends[1]] === true) {
                     kill = true;
+                }
+            }
+        }
+        if (!kill) {
+            // wall runs die when ANY of their stations is redrawn --
+            // the redraw regenerates them from the fresh survey
+            v = CsTags.get(e, "WallRunStations");
+            if (v !== "") {
+                var wallNames = v.split("|");
+                for (var wi = 0; wi < wallNames.length; wi++) {
+                    if (inSet[wallNames[wi]] === true) {
+                        kill = true;
+                        break;
+                    }
                 }
             }
         }

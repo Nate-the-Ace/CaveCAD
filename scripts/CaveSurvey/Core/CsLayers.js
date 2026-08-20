@@ -18,6 +18,7 @@ CsLayers.SHOTS = "CTRL-SHOTS";
 CsLayers.STATIONS = "CTRL-STATIONS";
 CsLayers.STATION_LABELS = "CTRL-STATION-LABELS";
 CsLayers.LRUD = "CTRL-LRUD";
+CsLayers.SPLAYS = "CTRL-SPLAYS";
 CsLayers.LRUD_WALL_LEFT = "CTRL-LRUD-WALL-LEFT";
 CsLayers.LRUD_WALL_RIGHT = "CTRL-LRUD-WALL-RIGHT";
 CsLayers.GRID = "CTRL-GRID";
@@ -46,7 +47,8 @@ CsLayers.DEFAULTS = {
     "CTRL-SHOTS": ["gray", "CONTINUOUS", "Weight025"],
     "CTRL-STATIONS": ["red", "CONTINUOUS", "Weight025"],
     "CTRL-STATION-LABELS": ["red", "CONTINUOUS", "Weight025"],
-    "CTRL-LRUD": ["yellow", "CONTINUOUS", "Weight025"],
+    "CTRL-LRUD": ["pink", "CONTINUOUS", "Weight025"],
+    "CTRL-SPLAYS": ["gray", "CONTINUOUS", "Weight000"],
     "CTRL-LRUD-WALL-LEFT": ["gray", "DASHED", "Weight000"],
     "CTRL-LRUD-WALL-RIGHT": ["gray", "DASHED", "Weight000"],
     "WALLS-SURVEYED": ["white", "CONTINUOUS", "Weight050"],
@@ -95,4 +97,5 @@ CsLayers.ensureSurveyLayers = function(doc, di) {
     CsLayers.ensure(doc, di, CsLayers.STATIONS);
     CsLayers.ensure(doc, di, CsLayers.STATION_LABELS);
     CsLayers.ensure(doc, di, CsLayers.LRUD);
+    CsLayers.ensure(doc, di, CsLayers.SPLAYS);
 };

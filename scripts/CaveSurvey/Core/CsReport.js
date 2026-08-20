@@ -23,9 +23,17 @@ CsReport.drawSummary = function(survey, resolved, drawn, findings) {
         (drawn.closuresDrawn > 0 ?
             (" (+" + drawn.closuresDrawn + " loop closure" +
                 (drawn.closuresDrawn === 1 ? "" : "s") + ")") : ""));
+    if (drawn.wallsDrawn !== undefined && drawn.wallsDrawn > 0) {
+        lines.push("Wall runs drawn: " + drawn.wallsDrawn +
+            " (dashed = approximate; trace real walls over them)");
+    }
+    if (drawn.splaysDrawn !== undefined && drawn.splaysDrawn > 0) {
+        lines.push("Splays drawn: " + drawn.splaysDrawn +
+            " (thin rays on CTRL-SPLAYS)");
+    }
     if (drawn.skipped > 0) {
         lines.push("Skipped: " + drawn.skipped +
-            " (splays and excluded shots)");
+            " (excluded shots, or shots that never connected)");
     }
     if (survey.declination !== 0 && survey.declinationSource !== "") {
         var srcWord = { file: "from the file", user: "entered by hand",
