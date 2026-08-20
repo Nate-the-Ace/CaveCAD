@@ -1,6 +1,8 @@
-# Cave Survey for QCAD
+# CaveCAD
 
-A cave mapping workspace built on [QCAD](https://qcad.org): import or type
+A dedicated cave mapping application built on [QCAD](https://qcad.org)
+Community (GPLv3), plus the Cave Survey add-on suite that also runs in
+stock QCAD: import or type
 survey data, watch loop closures and blunders surface as you work, derive
 passage walls, place NSS-standard symbols, and finish a sheet that would
 survive NSS Cartography Salon judging -- with the conventions explained to you
@@ -98,6 +100,22 @@ Three layers, no Python dependencies at all:
    blunder detection, grades, and the IGRF declination model (validated
    against ppigrf-generated fixtures) -- run inside QCAD's engine, or under
    `node` while developing.
+
+## Building CaveCAD itself
+
+The custom application -- QCAD Community rebranded, with native XDATA
+persistence for survey data (upstream's free writer drops custom
+properties; see `cavecad/patches/`) -- builds from pinned upstream
+sources plus the patches in `cavecad/`:
+
+```bash
+./cavecad/build.sh
+```
+
+Produces `~/Applications/CaveCAD.app`. Requires Homebrew `qt`, `cmake`,
+`ninja`. The suite installs into it with `./tools/publish.sh`. CaveCAD
+is GPLv3, as QCAD is; `cavecad/patches/` is the corresponding source
+for every modification.
 
 ## Building and publishing
 
