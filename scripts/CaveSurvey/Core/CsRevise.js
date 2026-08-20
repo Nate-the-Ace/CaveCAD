@@ -22,6 +22,15 @@
 // NOT reconstructed: GeoLat/GeoLon/GeoStation. CsModel's survey shape
 // has no geo field to put them in; the georeference stays a
 // drawing-level tag (see CsTags.js) rather than survey data.
+//
+// Below the reconstruction entry points lives the REVISION MATH: the
+// pure numeric half of the revision framework. reviseDeclination
+// rotates one trip's azimuths to a re-measured declination;
+// similarityFit / classifyChange compare two CsNetwork.resolve results
+// and decide whether the whole plan moved RIGIDLY (rotation + uniform
+// scale + translation -- redraw everything in place) or genuinely
+// changed shape (stations moved relative to each other -- the caller
+// must reconcile). All of it is engine-free and runs under node.
 
 var CsRevise = {};
 
@@ -276,4 +285,232 @@ CsRevise.surveyFromDocument = function(doc) {
     CsModel.ensureTrips(survey);
     return { survey: survey, anchorName: anchorName,
         anchorPos: anchorPos, legacy: false };
+};
+
+// ---------------------------------------------------------------------
+// Revision math -- pure numeric helpers, no document access.
+// ---------------------------------------------------------------------
+
+/**
+ * Re-applies one trip's declination: rotates EVERY azimuth belonging
+ * to that trip (splays and flag-carrying/excluded shots included --
+ * their geometry is just as magnetic as everyone else's) by
+ * delta = newDecl - oldDecl, then records newDecl on the trip.
+ *
+ * Model azimuths are TRUE bearings with declination already applied
+ * (see CsModel.js), so changing a trip's declination from D to D'
+ * means every stored azimuth moves by (D' - D). backAzimuth lives in
+ * the same frame (see the backsight-frame note in CsModel.js), so it
+ * co-rotates whenever present.
+ *
+ * \param survey  the CsModel survey (mutated in place)
+ * \param tripId  index into survey.trips
+ * \param newDecl the re-measured declination, degrees east-positive
+ * \param source  optional new declinationSource ("igrf"/"user"/...);
+ *                the trip's existing source is kept when omitted
+ * \return { delta } the degrees every azimuth moved
+ */
+CsRevise.reviseDeclination = function(survey, tripId, newDecl, source) {
+    CsModel.ensureTrips(survey);
+    var trip = survey.trips[tripId];
+    var delta = newDecl - trip.declination;
+    for (var i = 0; i < survey.shots.length; i++) {
+        var s = survey.shots[i];
+        if ((s.trip || 0) !== tripId) {
+            continue;
+        }
+        s.azimuth = CsAngles.normalizeAzimuth(s.azimuth + delta);
+        if (s.backAzimuth !== null && s.backAzimuth !== undefined) {
+            s.backAzimuth = CsAngles.normalizeAzimuth(s.backAzimuth + delta);
+        }
+    }
+    trip.declination = newDecl;
+    if (source !== undefined && source !== null) {
+        trip.declinationSource = source;
+    }
+    if (tripId === 0) {
+        // trips[0] is the authority over the top-level mirror fields
+        // (see CsModel.ensureTrips) -- re-mirror so survey.declination
+        // reflects the revision immediately.
+        CsModel.ensureTrips(survey);
+    }
+    return { delta: delta };
+};
+
+/**
+ * Least-squares 2D similarity transform (rotation + uniform scale +
+ * translation, NO reflection) mapping each pair's old point onto its
+ * nu point -- the closed-form Procrustes solution:
+ *
+ *   centroids p-bar (old), q-bar (nu); over the centered points
+ *   dp = old - p-bar, dq = nu - q-bar:
+ *     a  = sum(dp.x*dq.x + dp.y*dq.y)
+ *     b  = sum(dp.x*dq.y - dp.y*dq.x)
+ *     s2 = sum(dp.x^2 + dp.y^2)
+ *   theta = atan2(b, a),  scale = sqrt(a^2 + b^2) / s2
+ *   (tx, ty) = q-bar - scale * R(theta) * p-bar
+ *
+ * theta is in RADIANS, counter-clockwise-positive in drawing
+ * coordinates (x east, y north): R(theta) = [cos -sin; sin cos].
+ * Note the suite-wide consequence: adding +d degrees to every azimuth
+ * turns the plan CLOCKWISE, so a declination revision of +d yields
+ * theta = -d * PI/180 here (verified numerically in the unit tests).
+ *
+ * Degenerate inputs, by choice (documented, tested):
+ *   0 pairs   -> null (nothing to fit)
+ *   1 pair    -> pure translation {theta 0, scale 1, maxResidual 0}
+ *   s2 ~ 0    -> all old points coincide: rotation and scale are
+ *                underdetermined, so {theta 0, scale 1, centroid
+ *                translation, maxResidual Infinity} -- Infinity so a
+ *                caller can never certify rigidity from a fit the
+ *                data couldn't support
+ *
+ * \param pairs [{old: {x, y}, nu: {x, y}}]
+ * \return { theta, scale, tx, ty, maxResidual } or null; maxResidual
+ *         is the largest distance between a transformed old point and
+ *         its nu point
+ */
+CsRevise.similarityFit = function(pairs) {
+    if (pairs.length === 0) {
+        return null;
+    }
+    var i;
+    var px = 0.0, py = 0.0, qx = 0.0, qy = 0.0;
+    for (i = 0; i < pairs.length; i++) {
+        px += pairs[i].old.x;
+        py += pairs[i].old.y;
+        qx += pairs[i].nu.x;
+        qy += pairs[i].nu.y;
+    }
+    px /= pairs.length;
+    py /= pairs.length;
+    qx /= pairs.length;
+    qy /= pairs.length;
+
+    var fit;
+    if (pairs.length === 1) {
+        fit = { theta: 0.0, scale: 1.0, tx: qx - px, ty: qy - py };
+    } else {
+        var a = 0.0, b = 0.0, s2 = 0.0;
+        for (i = 0; i < pairs.length; i++) {
+            var dpx = pairs[i].old.x - px;
+            var dpy = pairs[i].old.y - py;
+            var dqx = pairs[i].nu.x - qx;
+            var dqy = pairs[i].nu.y - qy;
+            a += dpx * dqx + dpy * dqy;
+            b += dpx * dqy - dpy * dqx;
+            s2 += dpx * dpx + dpy * dpy;
+        }
+        if (s2 <= 1e-20) {
+            // coincident old points: rotation/scale underdetermined
+            return { theta: 0.0, scale: 1.0, tx: qx - px, ty: qy - py,
+                maxResidual: Infinity };
+        }
+        var theta = Math.atan2(b, a);
+        var scale = Math.sqrt(a * a + b * b) / s2;
+        fit = {
+            theta: theta,
+            scale: scale,
+            tx: qx - scale * (Math.cos(theta) * px - Math.sin(theta) * py),
+            ty: qy - scale * (Math.sin(theta) * px + Math.cos(theta) * py)
+        };
+    }
+
+    var maxResidual = 0.0;
+    for (i = 0; i < pairs.length; i++) {
+        var t = CsRevise.applyFit(fit, pairs[i].old);
+        var rx = t.x - pairs[i].nu.x;
+        var ry = t.y - pairs[i].nu.y;
+        var r = Math.sqrt(rx * rx + ry * ry);
+        if (r > maxResidual) {
+            maxResidual = r;
+        }
+    }
+    fit.maxResidual = maxResidual;
+    return fit;
+};
+
+/**
+ * Applies a similarityFit transform to one {x, y} point:
+ * scale * R(theta) * p + (tx, ty). The one place the rotation-matrix
+ * convention lives, so tests and callers can't disagree with the fit.
+ */
+CsRevise.applyFit = function(fit, pt) {
+    var c = Math.cos(fit.theta);
+    var s = Math.sin(fit.theta);
+    return {
+        x: fit.scale * (c * pt.x - s * pt.y) + fit.tx,
+        y: fit.scale * (s * pt.x + c * pt.y) + fit.ty
+    };
+};
+
+/**
+ * Compares two CsNetwork.resolve results and classifies the change:
+ * RIGID (the whole plan moved as one body -- rotation + uniform scale
+ * + translation in plan, plus one uniform z shift) or not.
+ *
+ * Pairs up every station name present in BOTH results, fits the plan
+ * similarity over them, and checks the z deltas separately (the fit
+ * is 2D; z rigidity just means every station rose/fell by the same
+ * amount). eps scales with the drawing: 1e-6 * max(extent, 1).
+ *
+ * \param oldResolved CsNetwork.resolve output before the edit
+ * \param newResolved CsNetwork.resolve output after the edit
+ * \param extent      characteristic drawing size (e.g. bounding-box
+ *                    diagonal) for the eps scale; anything
+ *                    non-numeric counts as 0 (eps floor 1e-6)
+ * \return {
+ *   rigid        true when the fit exists, its maxResidual < eps,
+ *                and the z change is uniform
+ *   theta, scale, tx, ty, maxResidual   the fit (see similarityFit);
+ *                theta 0 / scale 1 / maxResidual Infinity when no
+ *                stations are shared (fit null -> never rigid)
+ *   moved        [{name, dist}] 3D displacement of every shared
+ *                station, sorted largest first
+ * }
+ */
+CsRevise.classifyChange = function(oldResolved, newResolved, extent) {
+    var e = (typeof extent === "number" && isFinite(extent)) ? extent : 0;
+    var eps = 1e-6 * Math.max(e, 1);
+
+    var pairs = [];
+    var moved = [];
+    var dzMin = null, dzMax = null;
+    for (var name in oldResolved.stations) {
+        if (!oldResolved.stations.hasOwnProperty(name) ||
+                !newResolved.stations.hasOwnProperty(name)) {
+            continue;
+        }
+        var o = oldResolved.stations[name];
+        var n = newResolved.stations[name];
+        pairs.push({ old: { x: o.x, y: o.y }, nu: { x: n.x, y: n.y } });
+        var dz = n.z - o.z;
+        if (dzMin === null || dz < dzMin) {
+            dzMin = dz;
+        }
+        if (dzMax === null || dz > dzMax) {
+            dzMax = dz;
+        }
+        var dx = n.x - o.x;
+        var dy = n.y - o.y;
+        moved.push({ name: name,
+            dist: Math.sqrt(dx * dx + dy * dy + dz * dz) });
+    }
+    moved.sort(function(a, b) {
+        return b.dist - a.dist;
+    });
+
+    var fit = CsRevise.similarityFit(pairs);
+    var zUniform = dzMin === null || (dzMax - dzMin) <= eps;
+    var rigid = fit !== null && fit.maxResidual < eps && zUniform;
+
+    return {
+        rigid: rigid,
+        theta: fit !== null ? fit.theta : 0.0,
+        scale: fit !== null ? fit.scale : 1.0,
+        tx: fit !== null ? fit.tx : 0.0,
+        ty: fit !== null ? fit.ty : 0.0,
+        maxResidual: fit !== null ? fit.maxResidual : Infinity,
+        moved: moved
+    };
 };

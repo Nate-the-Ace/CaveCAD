@@ -1254,6 +1254,210 @@ if (teamBoundaryRt.trips.length === 2) {
 }
 
 // ---------------------------------------------------------------------
+// Revision math (CsRevise) -- declination revision and the numeric
+// rigid-change detector. Pure functions, so these run under node too.
+// ---------------------------------------------------------------------
+
+// --- reviseDeclination: per-trip rotation of stored azimuths --------
+(function() {
+    var sv = CsModel.newSurvey();
+    var wrap = shotOf("R1", "R2", 10, 359);   // wraps past north
+    wrap.backAzimuth = 179;
+    sv.shots.push(wrap);
+    var splay = shotOf("R2", "", 5, 10);
+    splay.splay = true;
+    sv.shots.push(splay);
+    var excluded = shotOf("R2", "RX", 7, 45);
+    excluded.excludeFromAll = true;
+    sv.shots.push(excluded);
+    CsModel.ensureTrips(sv);
+    sv.trips[0].declination = 1.0;
+    sv.trips.push(CsModel.newTrip());
+    sv.trips[1].declination = 4.0;
+    var other = shotOf("R2", "R3", 10, 90);
+    other.trip = 1;
+    sv.shots.push(other);
+
+    var rd = CsRevise.reviseDeclination(sv, 0, 3.0, "igrf");
+    near(rd.delta, 2.0, 1e-12, "reviseDeclination: delta = new - old");
+    near(sv.shots[0].azimuth, 1.0, 1e-9,
+        "reviseDeclination: azimuth wraps 359 + 2 -> 1");
+    near(sv.shots[0].backAzimuth, 181.0, 1e-9,
+        "reviseDeclination: backAzimuth co-rotates");
+    near(sv.shots[1].azimuth, 12.0, 1e-9,
+        "reviseDeclination: splay co-rotates");
+    near(sv.shots[2].azimuth, 47.0, 1e-9,
+        "reviseDeclination: excluded shot co-rotates too");
+    near(sv.shots[3].azimuth, 90.0, 1e-9,
+        "reviseDeclination: other trip's shot untouched");
+    near(sv.trips[0].declination, 3.0, 1e-12,
+        "reviseDeclination: trip record updated");
+    ok(sv.trips[0].declinationSource === "igrf",
+        "reviseDeclination: source recorded when provided");
+    near(sv.declination, 3.0, 1e-12,
+        "reviseDeclination: trip 0 re-mirrors to survey.declination");
+
+    // revising trip 1 leaves trip 0 (and the top-level mirror) alone
+    var rd1 = CsRevise.reviseDeclination(sv, 1, 6.0);
+    near(rd1.delta, 2.0, 1e-12, "reviseDeclination: trip 1 delta");
+    near(sv.shots[3].azimuth, 92.0, 1e-9,
+        "reviseDeclination: trip 1 shot rotated");
+    near(sv.shots[0].azimuth, 1.0, 1e-9,
+        "reviseDeclination: trip 0 shot untouched by trip 1 revision");
+    ok(sv.trips[1].declinationSource === "",
+        "reviseDeclination: source kept when omitted");
+    near(sv.declination, 3.0, 1e-12,
+        "reviseDeclination: trip 1 revision leaves survey.declination");
+})();
+
+// --- similarityFit edges ---------------------------------------------
+(function() {
+    ok(CsRevise.similarityFit([]) === null, "similarityFit: 0 pairs -> null");
+    var one = CsRevise.similarityFit([
+        { old: { x: 1, y: 2 }, nu: { x: 4, y: 6 } }
+    ]);
+    near(one.theta, 0, 1e-12, "similarityFit: 1 pair theta 0");
+    near(one.scale, 1, 1e-12, "similarityFit: 1 pair scale 1");
+    near(one.tx, 3, 1e-12, "similarityFit: 1 pair tx");
+    near(one.ty, 4, 1e-12, "similarityFit: 1 pair ty");
+    near(one.maxResidual, 0, 1e-12, "similarityFit: 1 pair residual 0");
+
+    // coincident old points: underdetermined, never certifiable rigid
+    var degenerate = CsRevise.similarityFit([
+        { old: { x: 5, y: 5 }, nu: { x: 6, y: 5 } },
+        { old: { x: 5, y: 5 }, nu: { x: 6, y: 7 } }
+    ]);
+    ok(degenerate.maxResidual === Infinity,
+        "similarityFit: coincident old points -> maxResidual Infinity");
+})();
+
+// --- rigid detection: declination revision rotates the plan as one
+// body, and the fit's theta sign is proven by application, not by
+// convention: transformed old stations must LAND ON the new ones.
+(function() {
+    var sv = CsModel.newSurvey();
+    sv.shots.push(shotOf("G1", "G2", 10, 0));
+    sv.shots.push(shotOf("G2", "G3", 10, 90));
+    sv.shots.push(shotOf("G2", "G4", 8, 45, 10)); // branch, non-collinear
+    CsModel.ensureTrips(sv);
+    var oldR = CsNetwork.resolve(sv, {});
+    CsRevise.reviseDeclination(sv, 0, sv.trips[0].declination + 5);
+    var newR = CsNetwork.resolve(sv, {});
+    var cc = CsRevise.classifyChange(oldR, newR, 30);
+
+    ok(cc.rigid === true, "classifyChange: declination revision is rigid, " +
+        "maxResidual " + cc.maxResidual);
+    near(cc.scale, 1, 1e-9, "classifyChange: rigid fit scale 1");
+    near(Math.abs(cc.theta), 5 * Math.PI / 180, 1e-9,
+        "classifyChange: |theta| is the 5 deg delta in radians");
+    // sign proof: apply the fit to old stations, must match new exactly
+    var names = ["G2", "G3", "G4"];
+    for (var i = 0; i < names.length; i++) {
+        var t = CsRevise.applyFit(cc, oldR.stations[names[i]]);
+        near(t.x, newR.stations[names[i]].x, 1e-9,
+            "classifyChange: fit maps old " + names[i] + ".x onto new");
+        near(t.y, newR.stations[names[i]].y, 1e-9,
+            "classifyChange: fit maps old " + names[i] + ".y onto new");
+    }
+    // independent geometric check of the SIGN, derived from resolve
+    // itself: azimuth +5 must turn the drawing CLOCKWISE, i.e. by
+    // -5 deg in math (CCW-positive) coordinates about the G1 anchor.
+    var mth = -5 * Math.PI / 180;
+    var g3 = oldR.stations["G3"];
+    near(Math.cos(mth) * g3.x - Math.sin(mth) * g3.y,
+        newR.stations["G3"].x, 1e-9,
+        "azimuth +5 deg rotates the plan clockwise (x)");
+    near(Math.sin(mth) * g3.x + Math.cos(mth) * g3.y,
+        newR.stations["G3"].y, 1e-9,
+        "azimuth +5 deg rotates the plan clockwise (y)");
+    near(cc.theta, mth, 1e-9,
+        "classifyChange: theta = -delta * PI/180 (CCW-positive math frame)");
+})();
+
+// --- non-rigid: revising ONE trip of two bends the survey ------------
+(function() {
+    var sv = CsModel.newSurvey();
+    sv.shots.push(shotOf("M1", "M2", 10, 0));
+    sv.shots.push(shotOf("M2", "M3", 10, 90));
+    CsModel.ensureTrips(sv);
+    sv.trips.push(CsModel.newTrip());
+    var s34 = shotOf("M3", "M4", 10, 0);
+    s34.trip = 1;
+    var s45 = shotOf("M4", "M5", 10, 90);
+    s45.trip = 1;
+    sv.shots.push(s34);
+    sv.shots.push(s45);
+
+    var oldR = CsNetwork.resolve(sv, {});
+    CsRevise.reviseDeclination(sv, 1, 10.0);
+    var newR = CsNetwork.resolve(sv, {});
+    var cc = CsRevise.classifyChange(oldR, newR, 40);
+
+    ok(cc.rigid === false, "classifyChange: one-of-two-trips revision is NOT rigid");
+    ok(cc.moved.length === 5, "classifyChange: every shared station listed, got " +
+        cc.moved.length);
+    ok(cc.moved[0].name === "M4" || cc.moved[0].name === "M5",
+        "classifyChange: top mover is a trip-1 station, got " + cc.moved[0].name);
+    ok(cc.moved[0].dist > 0.1, "classifyChange: top mover really moved");
+    for (var i = 0; i < cc.moved.length; i++) {
+        if (cc.moved[i].name === "M1" || cc.moved[i].name === "M2" ||
+                cc.moved[i].name === "M3") {
+            near(cc.moved[i].dist, 0, 1e-9,
+                "classifyChange: trip-0 station " + cc.moved[i].name +
+                " does not move");
+        }
+    }
+})();
+
+// --- non-rigid: one edited shot moves exactly its downstream ---------
+(function() {
+    var sv = CsModel.newSurvey();
+    sv.shots.push(shotOf("E1", "E2", 10, 0));
+    sv.shots.push(shotOf("E2", "E3", 10, 90));
+    sv.shots.push(shotOf("E3", "E4", 10, 0));
+    sv.shots.push(shotOf("E4", "E5", 10, 90));
+    CsModel.ensureTrips(sv);
+    var oldR = CsNetwork.resolve(sv, {});
+    sv.shots[1].azimuth += 20; // edit a MIDDLE shot directly
+    var newR = CsNetwork.resolve(sv, {});
+    var cc = CsRevise.classifyChange(oldR, newR, 40);
+
+    ok(cc.rigid === false, "classifyChange: edited shot is NOT rigid");
+    ok(cc.moved[0].name === "E3" || cc.moved[0].name === "E4" ||
+        cc.moved[0].name === "E5",
+        "classifyChange: top mover is downstream of the edit, got " +
+        cc.moved[0].name);
+    // E3 rotates about E2; E4/E5 translate with it -- all three shift
+    // the same chord, everything upstream stays put
+    var chord = 2 * 10 * Math.sin(10 * Math.PI / 180);
+    for (var i = 0; i < cc.moved.length; i++) {
+        var m = cc.moved[i];
+        if (m.name === "E1" || m.name === "E2") {
+            near(m.dist, 0, 1e-9,
+                "classifyChange: upstream " + m.name + " does not move");
+        } else {
+            near(m.dist, chord, 1e-9,
+                "classifyChange: downstream " + m.name + " shifts by the chord");
+        }
+    }
+})();
+
+// --- identical resolves are trivially rigid --------------------------
+(function() {
+    var sv = CsModel.newSurvey();
+    sv.shots.push(shotOf("I1", "I2", 10, 0));
+    sv.shots.push(shotOf("I2", "I3", 10, 90));
+    CsModel.ensureTrips(sv);
+    var r = CsNetwork.resolve(sv, {});
+    var cc = CsRevise.classifyChange(r, r, 20);
+    ok(cc.rigid === true, "classifyChange: identical resolves are rigid");
+    near(cc.theta, 0, 1e-12, "classifyChange: identical resolves theta 0");
+    near(cc.scale, 1, 1e-12, "classifyChange: identical resolves scale 1");
+    near(cc.maxResidual, 0, 1e-12,
+        "classifyChange: identical resolves residual 0");
+})();
+
+// ---------------------------------------------------------------------
 // Drawing round-trip -- QCAD engine only (node has no R* classes).
 // This is the test that would have caught the silent simple.js
 // failures: draw into a real document, read layers and tags back.
