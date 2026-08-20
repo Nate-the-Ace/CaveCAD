@@ -284,10 +284,14 @@ SurveyNotebook.EDIT_WIDTH = 64;   // measurement cells
 SurveyNotebook.CELL_HEIGHT = 30;  // uniform input height
 SurveyNotebook.FONT_SIZE = 14;    // readable at arm's length
 
-/** Applies the page's font and height to an input widget. */
+/** Applies the page's font and height to an input widget. Resizes
+ *  the widget's OWN font -- constructing QFont with an empty family
+ *  yields an invalid font and garbles rendering. */
 SurveyNotebook.styleCell = function(e, height) {
     try {
-        e.font = new QFont("", SurveyNotebook.FONT_SIZE);
+        var f = e.font;
+        f.setPointSize(SurveyNotebook.FONT_SIZE);
+        e.font = f;
     } catch (eF) {
         // font stays at default
     }
@@ -323,6 +327,7 @@ SurveyNotebook.upperCase = function(w, edit) {
 SurveyNotebook.makeCell = function(w, width) {
     var e = SurveyNotebook.styleCell(new QLineEdit());
     e.maximumWidth = width || SurveyNotebook.EDIT_WIDTH;
+    e.minimumWidth = width || SurveyNotebook.EDIT_WIDTH;
     SurveyNotebook.safeConnect(e.textEdited, function() {
         SurveyNotebook.refresh(w);
     }, "cell refresh", w.problems);
@@ -850,7 +855,10 @@ SurveyNotebook.buildDock = function(appWin) {
         for (var h = 0; h < headers.length; h++) {
             var hd = new QLabel(headers[h]);
             try {
-                hd.font = new QFont("", SurveyNotebook.FONT_SIZE);
+                var hf = hd.font;
+                hf.setPointSize(SurveyNotebook.FONT_SIZE);
+                hd.font = hf;
+                hd.alignment = Qt.AlignCenter;
             } catch (eHf) {
             }
             w.grid.addWidget(hd, 0, h);
