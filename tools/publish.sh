@@ -67,7 +67,7 @@ fi
 # it did nothing, which is worth saying out loud rather than leaving to be
 # rediscovered.
 running() {
-    pgrep -f "QCAD.app/Contents/MacOS/QCAD" >/dev/null 2>&1 || pgrep -x qcad >/dev/null 2>&1
+    pgrep -f "QCAD.app/Contents/MacOS/QCAD" >/dev/null 2>&1 || pgrep -f "CaveCAD.app/Contents/MacOS/CaveCAD" >/dev/null 2>&1 || pgrep -x qcad >/dev/null 2>&1
 }
 
 # ----------------------------------------------------------------- uninstall
