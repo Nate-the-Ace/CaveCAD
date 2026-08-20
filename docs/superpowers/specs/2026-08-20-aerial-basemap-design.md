@@ -69,16 +69,23 @@ to rotate.
 
 ## Flow
 
-1. **Find the anchor.** Scan point entities for `CaveSurvey/GeoLat` +
-   `GeoLon` custom properties (written by the existing GeoReference
-   tool). Found → use it.
-2. **No anchor → acquire one, in place.** Same interaction GeoReference
-   uses: require exactly one selected station point via `CsPick`, ask
+1. **Find the anchor.** Walk `CsTags.collectStations(doc)` looking for a
+   station carrying `CaveSurvey/GeoLat` + `GeoLon` custom properties
+   (written by the existing GeoReference tool). Found → use it.
+2. **No anchor → acquire one, in place.** By project convention every
+   cave entrance is station **A1** (user, 2026-08-20), so the tool
+   targets the station named `A1` automatically — no selection step. Ask
    for the coordinate with `CsLocationPick.ask` (accepts Google Maps DMS
    or decimal, or a click on the browser map picker), commit
-   `GeoLat`/`GeoLon`/`GeoStation` with `CsTags.commit`, then continue to
-   the fetch. One tool run does the whole job; the user never has to
-   know two tools exist.
+   `GeoLat`/`GeoLon`/`GeoStation` onto that station with
+   `CsTags.commit`, then continue to the fetch. One tool run does the
+   whole job; the user never has to know two tools exist.
+
+   Fallbacks, in order: an already-anchored station wins over A1; if
+   there is no `A1` but exactly one station point is selected, that
+   selection is used (via `CsPick.singleSelected`); if there is no `A1`
+   and no single selection, the tool explains that it needs either a
+   station named A1 or one selected station and stops.
 3. **Compute extent.** Bounding box of the drawing's survey entities,
    expanded by 25% margin, expressed in ground metres via `CsUnits`
    (drawing may be feet or metres). A drawing with no extent or a
@@ -129,23 +136,67 @@ Mode's existing show/hide treatment applies and the PDF deliverable
 the two georeferencing tools sit together in the menu.
 `setRequiresDocument(true)`. Icon `AerialBasemap.svg`.
 
-## Pure math, separated
+## Pure math lives in Core, not in the tool
 
-Static functions on the tool object, no document and no GUI dependency,
-so the headless harness can eval the file and call them:
+The projection and request math goes into a new Core library file
+`Core/CsGeoProject.js` (global `CsGeoProject`, `Cs`-prefixed per the
+basename rule), added to `CsAll.js` and to `js_unit.js`'s `CORE_FILES`.
 
-- `AerialBasemap.groundExtent(bboxDrawingUnits, unitFactor, marginFrac)`
-  → ground metres, with the degenerate-extent floor applied
-- `AerialBasemap.toMercator(lat, lon)` → `{x, y}` metres
-- `AerialBasemap.computeBbox(anchorLatLon, groundExtentMetres, anchorOffsetMetres)`
+Putting it in Core rather than as statics on the tool object is what
+makes it testable: `js_unit.js` loads Core files through its include
+shim, but has no path for loading a tool file (the one attempt in the
+tree, `tests/test_align_math.js`, is orphaned — the `run_tests.sh` it
+names no longer exists and `run_all.sh` never calls it). Core placement
+also means a future KML or web export can reuse the same anchor math
+instead of duplicating it.
+
+`CsGeoProject` API:
+
+- `CsGeoProject.toMercator(lat, lon)` → `{x, y}` metres in EPSG:3857
+- `CsGeoProject.fromMercator(x, y)` → `{lat, lon}` (round-trip, and the
+  Declination/KML use case)
+- `CsGeoProject.groundExtent(drawingBox, unitName, marginFrac, floorM)`
+  → `{width, height, centerOffset}` in ground metres
+- `CsGeoProject.mercatorBbox(anchorLat, anchorLon, groundExtent, anchorOffsetM)`
   → `{xmin, ymin, xmax, ymax}` in 3857
-- `AerialBasemap.pixelSize(bbox3857, nativeResolution, maxPx)` → `{w, h}`
-- `AerialBasemap.drawingScale(bbox3857, pixelW, anchorLat, unitFactor)`
-  → drawing units per pixel
-- `AerialBasemap.buildUrl(bbox, size)` → the request string
+- `CsGeoProject.pixelSize(bbox, nativeResM, maxPx, minPx)` → `{w, h}`,
+  aspect-preserving, clamped
+- `CsGeoProject.drawingUnitsPerPixel(bbox, pixelW, anchorLat, unitName)`
+- `CsGeoProject.naipUrl(bbox, size)` → the `exportImage` request string
+- `CsGeoProject.NAIP_EXTENT_3857` → the service's own extent, for the
+  outside-coverage check
 
-`AerialBasemap.run()` holds everything that touches the document, the
-dialogs, and `QProcess`.
+`AerialBasemap.js` holds only what touches the document, the dialogs and
+`QProcess`.
+
+## Fetch mechanics — verified live
+
+Proven inside CaveCAD's own script engine (headless, 2026-08-20) before
+planning, because it is the only part of the design that could have been
+a dead end:
+
+```js
+var p = new QProcess();
+p.start("/usr/bin/curl", ["-s", "--fail", "--max-time", "60", "-o", out, url]);
+p.waitForFinished(70000);   // true
+p.exitCode();               // 0
+new QFileInfo(out).size();  // 395781
+new QImage(out).width();    // 600, isNull() false
+```
+
+`RImageData` and `RImageEntity` are both `function` in that engine.
+Insertion follows the stock `scripts/Draw/Image/Image.js` shape:
+
+```js
+new RImageEntity(doc, new RImageData(fileName, insertionPoint,
+                                    uVector, vVector, w, h, fade));
+```
+
+`uVector`/`vVector` are the per-pixel step vectors, so scale is
+`uVector = (unitsPerPixel, 0)`, `vVector = (0, unitsPerPixel)` — no
+rotation. Note the bridge stringifies `readAllStandardOutput()` as
+`"QByteArray [JS]"`, so error reporting must lean on the exit code and
+`QFileInfo`/`QImage` checks rather than curl's stdout.
 
 ## Error handling
 
@@ -156,7 +207,7 @@ user can act on.
 |---|---|
 | No active document | warning, return |
 | Document never saved | warning: save first, so the image path resolves |
-| Anchor missing and selection isn't exactly one point | the existing `CsPick` message |
+| Anchor missing, no station `A1`, and not exactly one point selected | warning: needs a station named A1 or one selected station |
 | Coordinate dialog cancelled | silent return |
 | Extent outside NAIP coverage (non-US) | warning naming the limit before fetching |
 | curl missing / non-zero exit / HTTP error | warning quoting the shortest decisive stderr line |
@@ -165,15 +216,18 @@ user can act on.
 
 ## Testing
 
-- **js_unit assertions** for every pure function: Mercator round-trip
-  against known values, bbox aspect vs requested pixel aspect (the
-  squareness invariant that the 4326 experiment violated), the 4000-px
-  clamp, the degenerate-extent floor, feet-vs-metres unit handling, and
-  URL construction. Runs under both node and `qcad -no-gui`.
-- **Structural test** additions: the tool folder shape, `Cs`-prefix rule
-  (no new Core file needed, but the layer registry gains an entry), the
-  `CTRL-AERIAL` layer present in the PLAN template, unique
-  `(groupSortOrder, sortOrder)`.
+- **js_unit assertions** for every `CsGeoProject` function: Mercator
+  round-trip against known values, bbox aspect vs requested pixel aspect
+  (the squareness invariant the 4326 experiment violated), the 4000-px
+  clamp, the degenerate-extent floor, feet-vs-metres unit handling,
+  coverage-extent rejection, and URL construction. Runs under both node
+  and `qcad -no-gui`.
+- **Structural test:** the existing suite already covers what matters
+  here without new cases — `CsGeoProject.js` satisfies the `Cs`-prefix
+  rule, `CTRL-AERIAL` is picked up by the registry-vs-PLAN-template
+  check (so the template must gain the layer), and the tool folder,
+  icon, status tip, command name and sort-order-uniqueness checks all
+  apply automatically to the new folder.
 - **Network fetch and image placement are GUI-verified live only** — one
   run on a real drawing with a known entrance, checking that the photo
   lands under the survey at the right place and scale, and that a second
