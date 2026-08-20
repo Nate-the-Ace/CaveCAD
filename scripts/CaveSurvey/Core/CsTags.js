@@ -102,10 +102,10 @@ CsTags.tagStation = function(entity, data) {
     CsTags.set(entity, "Seq", data.seq);
     CsTags.set(entity, "Azimuth", data.azimuth);
     CsTags.set(entity, "Inclination", data.inclination);
-    CsTags.set(entity, "Left", data.left);
-    CsTags.set(entity, "Right", data.right);
-    CsTags.set(entity, "Up", data.up);
-    CsTags.set(entity, "Down", data.down);
+    CsTags.set(entity, "Left", CsModel.lrudEntryText(data.left, data.leftAll));
+    CsTags.set(entity, "Right", CsModel.lrudEntryText(data.right, data.rightAll));
+    CsTags.set(entity, "Up", CsModel.lrudEntryText(data.up, data.upAll));
+    CsTags.set(entity, "Down", CsModel.lrudEntryText(data.down, data.downAll));
     CsTags.set(entity, "Elevation", data.z);
 };
 
@@ -171,10 +171,15 @@ CsTags.surveyFromDocument = function(doc) {
                 CsAngles.normalizeAzimuth(Math.atan2(dx, dy) * 180.0 / Math.PI);
             var inc = CsTags.getNumber(st.entity, "Inclination");
             shot.inclination = inc !== null ? inc : 0.0;
-            shot.left = CsTags.getNumber(st.entity, "Left");
-            shot.right = CsTags.getNumber(st.entity, "Right");
-            shot.up = CsTags.getNumber(st.entity, "Up");
-            shot.down = CsTags.getNumber(st.entity, "Down");
+            var lrudTag = function(key) {
+                return CsModel.parseLrudEntry(CsTags.get(st.entity, key));
+            };
+            var eL = lrudTag("Left"), eR = lrudTag("Right");
+            var eU = lrudTag("Up"), eD = lrudTag("Down");
+            shot.left = eL.value; shot.leftAll = eL.all;
+            shot.right = eR.value; shot.rightAll = eR.all;
+            shot.up = eU.value; shot.upAll = eU.all;
+            shot.down = eD.value; shot.downAll = eD.all;
             survey.shots.push(shot);
         }
         survey.fixed[st.name] = { x: st.pos.x, y: st.pos.y,

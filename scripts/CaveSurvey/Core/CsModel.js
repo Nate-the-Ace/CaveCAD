@@ -75,6 +75,11 @@ CsModel.newShot = function() {
         right: null,
         up: null,
         down: null,
+        // every reading when a side was written "5/10"; null otherwise
+        leftAll: null,
+        rightAll: null,
+        upAll: null,
+        downAll: null,
         splay: false,
         excludeFromPlot: false,
         excludeFromAll: false,
@@ -100,6 +105,8 @@ CsModel.lrudForStation = function(survey, stationName) {
             (s.left !== null || s.right !== null || s.up !== null || s.down !== null)) {
             found = {
                 left: s.left, right: s.right, up: s.up, down: s.down,
+                leftAll: s.leftAll, rightAll: s.rightAll,
+                upAll: s.upAll, downAll: s.downAll,
                 azimuth: s.azimuth
             };
         }
@@ -148,4 +155,62 @@ CsModel.nextStationName = function(prevName) {
         incremented = "0" + incremented;
     }
     return m[1] + incremented;
+};
+
+/**
+ * Parses one LRUD cell the way survey notes are written:
+ *   "3.5"   one reading
+ *   "P"     passage -- no wall that way; recorded as 0 by convention
+ *   "5/10"  multiple readings (ledge + outer wall): ALL are drawn;
+ *           the LARGEST is the primary value -- the outer wall is
+ *           what wall runs, stats and native-format exports use
+ *   ""      not measured
+ *
+ * \return { value: Number|null primary, all: [Number]|null every
+ *          reading when more than one, raw: String as entered }
+ */
+CsModel.parseLrudEntry = function(text) {
+    var raw = (text === undefined || text === null) ? "" :
+        String(text).replace(/^\s+|\s+$/g, "");
+    if (raw === "" || raw === "--") {
+        return { value: null, all: null, raw: raw };
+    }
+    var parts = raw.split("/");
+    var values = [];
+    for (var i = 0; i < parts.length; i++) {
+        var pTrim = parts[i].replace(/^\s+|\s+$/g, "");
+        if (pTrim === "") {
+            continue;
+        }
+        if (/^[Pp]$/.test(pTrim)) {
+            values.push(0);
+            continue;
+        }
+        var n = parseFloat(pTrim);
+        if (!isNaN(n)) {
+            values.push(n);
+        }
+    }
+    if (values.length === 0) {
+        return { value: null, all: null, raw: raw };
+    }
+    var primary = values[0];
+    for (i = 1; i < values.length; i++) {
+        if (values[i] > primary) {
+            primary = values[i];
+        }
+    }
+    return {
+        value: primary,
+        all: values.length > 1 ? values : null,
+        raw: raw
+    };
+};
+
+/** The cell text for a stored LRUD field ("5/10" round-trips). */
+CsModel.lrudEntryText = function(value, all) {
+    if (all !== null && all !== undefined && all.length > 1) {
+        return all.join("/");
+    }
+    return (value === null || value === undefined) ? "" : String(value);
 };

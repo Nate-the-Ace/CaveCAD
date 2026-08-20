@@ -89,35 +89,60 @@ CsDraw.shotLine = function(doc, op, fromPos, toPos, fromName, toName) {
  * CTRL-LRUD, U/D note on CTRL-STATION-LABELS. null = not measured
  * (nothing drawn); 0 = wall at the station (tagged tip point only).
  */
-CsDraw.lrud = function(doc, op, pos, name, azimuthDeg, left, right, up, down) {
-    var sides = [["L", left], ["R", right]];
+CsDraw.lrud = function(doc, op, pos, name, azimuthDeg, left, right, up, down, allSides) {
+    // allSides (optional): {leftAll, rightAll, upAll, downAll} -- a
+    // side written "5/10" draws EVERY reading. The largest is the
+    // primary (the outer wall, tagged "<name>.L"); the inner ones tag
+    // "<name>.L2", "<name>.L3", ... so wall runs keep following the
+    // outer wall while ledges stay findable.
+    var sides = [
+        ["L", left, allSides ? allSides.leftAll : null],
+        ["R", right, allSides ? allSides.rightAll : null]
+    ];
     for (var i = 0; i < sides.length; i++) {
         var side = sides[i][0];
-        var len = sides[i][1];
-        if (len === null || len === undefined) {
+        var primary = sides[i][1];
+        if (primary === null || primary === undefined) {
             continue;
         }
-        var tipPos;
-        if (len === 0) {
-            tipPos = new RVector(pos.x, pos.y);
-        } else {
-            var end = CsLrud.tickEnd(pos, azimuthDeg, side, len);
-            tipPos = new RVector(end.x, end.y);
-            CsDraw.addLine(doc, op, CsLayers.LRUD, pos, tipPos,
-                "LRUDLine", name !== "" ? (name + "." + side) : "");
+        var values = sides[i][2];
+        if (values === null || values === undefined) {
+            values = [primary];
         }
-        if (name !== undefined && name !== "") {
-            var tip = CsDraw.addPoint(doc, op, CsLayers.LRUD, tipPos);
-            CsTags.set(tip, "LRUDName", name + "." + side);
-            op.addObject(tip, false);
+        var extraIndex = 2;
+        for (var v = 0; v < values.length; v++) {
+            var len = values[v];
+            var isPrimary = (len === primary);
+            var suffix = isPrimary ? side : (side + extraIndex++);
+            var tipPos;
+            if (len === 0) {
+                tipPos = new RVector(pos.x, pos.y);
+            } else {
+                var end = CsLrud.tickEnd(pos, azimuthDeg, side, len);
+                tipPos = new RVector(end.x, end.y);
+                CsDraw.addLine(doc, op, CsLayers.LRUD, pos, tipPos,
+                    "LRUDLine", name !== "" ? (name + "." + suffix) : "");
+            }
+            if (name !== undefined && name !== "") {
+                var tip = CsDraw.addPoint(doc, op, CsLayers.LRUD, tipPos);
+                CsTags.set(tip, "LRUDName", name + "." + suffix);
+                op.addObject(tip, false);
+            }
+            if (isPrimary) {
+                // only the first occurrence of the max is primary
+                primary = NaN;
+            }
         }
     }
 
     var hasUp = up !== null && up !== undefined;
     var hasDown = down !== null && down !== undefined;
     if ((hasUp && up !== 0) || (hasDown && down !== 0)) {
-        var text = "U" + (hasUp ? up.toFixed(2) : "-") +
-            " D" + (hasDown ? down.toFixed(2) : "-");
+        var upText = !hasUp ? "-" :
+            (allSides && allSides.upAll ? allSides.upAll.join("/") : up.toFixed(2));
+        var downText = !hasDown ? "-" :
+            (allSides && allSides.downAll ? allSides.downAll.join("/") : down.toFixed(2));
+        var text = "U" + upText + " D" + downText;
         var rad = (azimuthDeg + 90.0) * Math.PI / 180.0;
         var off = CsDraw.TEXT_HEIGHT * 1.5;
         CsDraw.addText(doc, op, CsLayers.STATION_LABELS, text,
@@ -187,6 +212,10 @@ CsDraw.survey = function(survey, resolved, originStation, originPos, seqBase) {
                 right: survey.startLrud.right,
                 up: survey.startLrud.up,
                 down: survey.startLrud.down,
+                leftAll: survey.startLrud.leftAll || null,
+                rightAll: survey.startLrud.rightAll || null,
+                upAll: survey.startLrud.upAll || null,
+                downAll: survey.startLrud.downAll || null,
                 azimuth: firstLegAzimuth
             };
         }
@@ -205,7 +234,10 @@ CsDraw.survey = function(survey, resolved, originStation, originPos, seqBase) {
         }
         if (lrud !== null) {
             CsDraw.lrud(doc, op, at(name), name, lrud.azimuth,
-                lrud.left, lrud.right, lrud.up, lrud.down);
+                lrud.left, lrud.right, lrud.up, lrud.down, {
+                    leftAll: lrud.leftAll, rightAll: lrud.rightAll,
+                    upAll: lrud.upAll, downAll: lrud.downAll
+                });
         }
         stationsDrawn++;
     }

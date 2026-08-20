@@ -190,6 +190,27 @@ ok(CsModel.nextStationName("A09") === "A10", "next name zero padding");
 ok(CsModel.nextStationName("") === "A1", "next name from nothing");
 ok(CsModel.nextStationName("LEAD") === "LEAD1", "next name no digits");
 
+// LRUD notes shorthand
+var pe = CsModel.parseLrudEntry("P");
+ok(pe.value === 0 && pe.all === null, "P parses as passage = 0");
+pe = CsModel.parseLrudEntry("5/10");
+ok(pe.value === 10, "5/10: primary is the outer wall (10)");
+ok(pe.all !== null && pe.all.length === 2 && pe.all[0] === 5,
+    "5/10: both readings kept");
+pe = CsModel.parseLrudEntry("10/5");
+ok(pe.value === 10, "10/5: primary still the larger");
+pe = CsModel.parseLrudEntry("3.5");
+ok(pe.value === 3.5 && pe.all === null, "single reading unchanged");
+pe = CsModel.parseLrudEntry("p/4");
+ok(pe.value === 4 && pe.all.length === 2 && pe.all[0] === 0,
+    "p/4: passage plus reading");
+pe = CsModel.parseLrudEntry("");
+ok(pe.value === null, "blank = not measured");
+pe = CsModel.parseLrudEntry("junk");
+ok(pe.value === null, "junk = not measured");
+ok(CsModel.lrudEntryText(10, [5, 10]) === "5/10", "entry text round-trips multi");
+ok(CsModel.lrudEntryText(3.5, null) === "3.5", "entry text single");
+
 // ---------------------------------------------------------------------
 // Traverse -- the slope-distance fix.
 // ---------------------------------------------------------------------
@@ -586,6 +607,30 @@ if (!IS_NODE) {
         var rebuilt = CsTags.surveyFromDocument(doc);
         ok(rebuilt.shots.length === 2, "tags: survey rebuilt from drawing");
         near(rebuilt.shots[0].left, 2, 1e-9, "tags: LRUD readable from drawing");
+
+        // multi-reading LRUD: "5/10" draws two tagged tips
+        var msv = CsModel.newSurvey();
+        var msh = shotOf("M1", "M2", 10, 0);
+        msh.left = 10;
+        msh.leftAll = [5, 10];
+        msv.shots.push(msh);
+        var mres = CsNetwork.resolve(msv, {});
+        CsDraw.survey(msv, mres);
+        CsStore.ensureLoaded(doc);
+        var tipNames = [];
+        var mids = doc.queryAllEntities(false, false);
+        for (var mi = 0; mi < mids.length; mi++) {
+            var me = doc.queryEntity(mids[mi]);
+            var mn = CsTags.get(me, "LRUDName");
+            if (mn.indexOf("M2.") === 0) {
+                tipNames.push(mn);
+            }
+        }
+        tipNames.sort();
+        ok(tipNames.join(",") === "M2.L,M2.L2",
+            "multi LRUD: outer wall is .L, inner ledge .L2, got " +
+            tipNames.join(","));
+        CsDraw.eraseStations(doc, ["M1", "M2"]);
 
         // THE PERSISTENCE TEST: this build never writes custom
         // properties to disk, so tags must come back through the

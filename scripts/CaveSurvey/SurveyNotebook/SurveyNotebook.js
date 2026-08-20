@@ -126,9 +126,18 @@ SurveyNotebook.sheetSurvey = function(w) {
 
     if (rows.length > 0) {
         var r0 = rows[0];
-        var sl = num(r0.l), sr = num(r0.r), su = num(r0.u), sd = num(r0.d);
-        if (sl !== null || sr !== null || su !== null || sd !== null) {
-            survey.startLrud = { left: sl, right: sr, up: su, down: sd };
+        var s0L = CsModel.parseLrudEntry(r0.l.text);
+        var s0R = CsModel.parseLrudEntry(r0.r.text);
+        var s0U = CsModel.parseLrudEntry(r0.u.text);
+        var s0D = CsModel.parseLrudEntry(r0.d.text);
+        if (s0L.value !== null || s0R.value !== null ||
+            s0U.value !== null || s0D.value !== null) {
+            survey.startLrud = {
+                left: s0L.value, right: s0R.value,
+                up: s0U.value, down: s0D.value,
+                leftAll: s0L.all, rightAll: s0R.all,
+                upAll: s0U.all, downAll: s0D.all
+            };
         }
     }
 
@@ -156,10 +165,17 @@ SurveyNotebook.sheetSurvey = function(w) {
         var inc = num(rows[i].incFs);
         shot.inclination = inc === null ? 0.0 : inc;
         shot.backInclination = num(rows[i].incBs);
-        shot.left = num(rows[i].l);
-        shot.right = num(rows[i].r);
-        shot.up = num(rows[i].u);
-        shot.down = num(rows[i].d);
+        // LRUD cells speak notes shorthand: "P" = passage (0),
+        // "5/10" = both readings (both are drawn; the larger is the
+        // wall). See CsModel.parseLrudEntry.
+        var eL = CsModel.parseLrudEntry(rows[i].l.text);
+        var eR = CsModel.parseLrudEntry(rows[i].r.text);
+        var eU = CsModel.parseLrudEntry(rows[i].u.text);
+        var eD = CsModel.parseLrudEntry(rows[i].d.text);
+        shot.left = eL.value; shot.leftAll = eL.all;
+        shot.right = eR.value; shot.rightAll = eR.all;
+        shot.up = eU.value; shot.upAll = eU.all;
+        shot.down = eD.value; shot.downAll = eD.all;
         survey.shots.push(shot);
     }
     return survey;
@@ -234,10 +250,10 @@ SurveyNotebook.setSurvey = function(w, survey) {
                     shot.backAzimuth - (survey.declination || 0)).toFixed(2));
             put(row.incFs, shot.inclination);
             put(row.incBs, shot.backInclination);
-            put(row.l, shot.left);
-            put(row.r, shot.right);
-            put(row.u, shot.up);
-            put(row.d, shot.down);
+            put(row.l, CsModel.lrudEntryText(shot.left, shot.leftAll));
+            put(row.r, CsModel.lrudEntryText(shot.right, shot.rightAll));
+            put(row.u, CsModel.lrudEntryText(shot.up, shot.upAll));
+            put(row.d, CsModel.lrudEntryText(shot.down, shot.downAll));
         } else if (i === 0 && survey.startLrud) {
             put(row.l, survey.startLrud.left);
             put(row.r, survey.startLrud.right);
@@ -760,7 +776,8 @@ SurveyNotebook.buildDock = function(appWin) {
         "fs = foresight, bs = backsight (optional; used to correct and " +
         "cross-check).\n" +
         "L/R face the direction of travel; LRUD sits beside its station.\n" +
-        "Blank = not measured; 0 = wall at the station.";
+        "Blank = not measured; 0 = wall at the station; P = passage " +
+        "(no wall, recorded 0); 5/10 = two readings, both drawn.";
 
     w.mode = SurveyNotebook.ladderSupported() ? "ladder" : "text";
 
