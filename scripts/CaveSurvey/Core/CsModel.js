@@ -144,12 +144,16 @@ CsModel.newTrip = function() {
 /**
  * The identity string two trip records are compared by: same date,
  * same declination (to 4 decimals), same team means "the same trip".
- * A null/undefined declination is treated as 0.0 so a half-built trip
- * record still fingerprints instead of throwing.
+ * declination is coerced through Number() and any null/undefined/
+ * non-numeric/NaN result falls back to 0.0, so a half-built trip
+ * record (or one with a garbage/string declination from a bad parse)
+ * still fingerprints instead of throwing out of toFixed.
  */
 CsModel.tripFingerprint = function(trip) {
-    var d = (trip.declination === null || trip.declination === undefined) ?
-        0.0 : trip.declination;
+    var d = Number(trip.declination);
+    if (isNaN(d)) {
+        d = 0.0;
+    }
     return (trip.date || "") + "|" + d.toFixed(4) + "|" + (trip.team || "");
 };
 
@@ -168,6 +172,15 @@ CsModel.tripFingerprint = function(trip) {
  * Called at the top of every function (tripIdFor, writers, etc.) that
  * needs trips to exist, so nothing else has to remember to call it
  * first.
+ *
+ * WARNING -- once trips exists, trips[0] is the authority, not the
+ * top-level fields: this function's second half OVERWRITES
+ * survey.name/date/team/declination/... from trips[0] every time it
+ * runs. A direct write like `survey.team = "x"` after trips already
+ * exists looks like it worked, but is silently lost the next time
+ * anything calls ensureTrips (directly, or via tripIdFor/writers that
+ * call it first). Code that edits metadata once trips exist must
+ * write survey.trips[i].<field> instead of the top-level field.
  */
 CsModel.ensureTrips = function(survey) {
     if (survey.trips === undefined || survey.trips === null ||
@@ -364,6 +377,22 @@ CsModel.lrudEntryText = function(value, all) {
 // CsTags.js) is the layer that escapes/unescapes them for storage in
 // a single-line tag. Tabs are the field separator used here, so they
 // ARE stripped from free text below.
+//
+// Trip is deliberately NOT one of the row fields (see shotRowText):
+// trip membership is context the row's CARRIER supplies, not
+// something every row needs to repeat. A leg line's own tags already
+// say which trip it belongs to; the ExcludedShots/UnplacedShots rows
+// that live on the trip-0 anchor are stored PREFIXED with
+// "tripId\t" ahead of the row text ("tripId\t" + shotRowText(shot)),
+// one such prefixed line per shot, so a single row stays reusable in
+// a plain single-trip context (no trip to prefix, nothing to strip)
+// while still reconstructing correctly in a multi-trip drawing.
+//
+// Field order below is a load-bearing invariant: new fields APPEND at
+// the end, never insert in the middle. parseShotRow reads positional
+// fields, so inserting would shift every field after it and silently
+// misread rows written by an older build; only appending keeps old
+// rows parsing correctly forever.
 // ---------------------------------------------------------------------
 
 /**
@@ -405,6 +434,11 @@ CsModel.parseFlags = function(text, shot) {
  * to a space on the way out (tabs are the separator here), and
  * parseShotRow reads everything from field 12 onward back into it so
  * a note that somehow still contains a tab doesn't get truncated.
+ *
+ * shot.trip is NOT a field here -- see the block comment above this
+ * section for why (it's context the row's carrier supplies). Field
+ * order is otherwise load-bearing: append new fields at the end,
+ * never insert, or old rows parse wrong.
  */
 CsModel.shotRowText = function(shot) {
     var numText = function(v) {

@@ -253,6 +253,32 @@ var slrBack = CsModel.parseStartLrud(slr);
 ok(slrBack.right === null && slrBack.down === 0, "startLrud null vs 0");
 ok(slrBack.leftAll.join("/") === "2/5", "startLrud multi-reading");
 
+// ensureTrips clobber: once trips exists, trips[0] is the authority --
+// a direct top-level write is silently overwritten by the next call.
+var clb = CsModel.newSurvey();
+CsModel.ensureTrips(clb);
+clb.team = "direct write";
+CsModel.ensureTrips(clb);
+ok(clb.team === clb.trips[0].team && clb.team !== "direct write",
+    "ensureTrips: trips[0] is authority, top-level writes lose");
+
+// tripFingerprint must survive a garbage (non-numeric) declination
+// instead of throwing out of toFixed.
+ok(CsModel.tripFingerprint({date: "", declination: "junk", team: ""}) === "|0.0000|",
+    "fingerprint survives garbage declination");
+
+// parseFlags ignores letters outside its P/X/L/C vocabulary.
+var gf = CsModel.newShot();
+CsModel.parseFlags("PZQ9", gf);
+ok(gf.excludeFromPlot && !gf.excludeFromAll, "parseFlags ignores unknown letters");
+
+// parseShotRow tolerates a row truncated to just from/to/distance --
+// every field past what's present falls back to its neutral default.
+var shortRow = CsModel.parseShotRow("A1\tA2\t10");
+ok(shortRow.from === "A1" && shortRow.azimuth === 0.0 &&
+    shortRow.backAzimuth === null && shortRow.notes === "",
+    "parseShotRow tolerates truncated row");
+
 // ---------------------------------------------------------------------
 // Traverse -- the slope-distance fix.
 // ---------------------------------------------------------------------
