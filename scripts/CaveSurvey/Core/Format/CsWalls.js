@@ -384,6 +384,10 @@ CsFormatWalls.parse = function(content) {
     if (survey.distanceUnit === null) {
         survey.distanceUnit = unit;
     }
+    // Walls has no per-block trip concept the way Compass does -- the
+    // whole file is one trip. ensureTrips builds trips[0] from the
+    // top-level fields already set above and stamps every shot 0.
+    CsModel.ensureTrips(survey);
     return survey;
 };
 
@@ -396,6 +400,7 @@ CsFormatWalls.parse = function(content) {
  * conventions and #[ ... #] blocks.
  */
 CsFormatWalls.write = function(survey) {
+    CsModel.ensureTrips(survey);
     var out = [];
     var decl = survey.declination || 0;
     var unitWord = survey.distanceUnit === "ft" ? "Feet" : "Meters";
@@ -442,12 +447,16 @@ CsFormatWalls.write = function(survey) {
             inExclude = false;
         }
         // Walls files carry magnetic bearings when Decl= is declared;
-        // the model's azimuths are true, so remove it again.
-        var az = CsAngles.normalizeAzimuth(s.azimuth - decl);
+        // the model's azimuths are true, so remove that SHOT's OWN
+        // trip's declination again (Walls declares one header Decl=,
+        // trip 0's, but a shot from a different trip un-applies its
+        // own).
+        var shotDecl = CsModel.tripOf(survey, s).declination || 0;
+        var az = CsAngles.normalizeAzimuth(s.azimuth - shotDecl);
         var azTok = az.toFixed(2);
         if (s.backAzimuth !== null && s.backAzimuth !== undefined) {
             azTok += "/" + CsAngles.normalizeAzimuth(
-                s.backAzimuth - decl).toFixed(2);
+                s.backAzimuth - shotDecl).toFixed(2);
         }
         var incTok = s.inclination.toFixed(2);
         if (s.backInclination !== null && s.backInclination !== undefined) {

@@ -476,7 +476,12 @@ ok(grade.uis === "UISv2 3-c", "UIS composite string");
 var datContent = readTextFile(repoRoot + "/testdata/TestCave_Compass.dat");
 var dat = CsFormatCompass.parse(datContent);
 ok(dat.distanceUnit === "ft", "Compass unit is always feet");
-ok(dat.name === "SECRET CAVE", "Compass cave name, got '" + dat.name + "'");
+// survey.name mirrors trip 0's name, which comes from SURVEY NAME
+// (the block label), not the file's first line (the cave name) --
+// per-block trip parsing means the block label is what identifies a
+// trip, so that's what the model keeps.
+ok(dat.name === "A", "Compass survey name (trip 0, from SURVEY NAME), got '" +
+    dat.name + "'");
 ok(dat.date === "2024-07-10", "Compass survey date, got '" + dat.date + "'");
 near(dat.declination, 2.5, 1e-9, "Compass declination recorded");
 ok(dat.shots.length === 6, "Compass shot count, got " + dat.shots.length);
@@ -944,6 +949,178 @@ ok(CsFormatRegistry.detect("", srvContent).id === "walls", "detect srv by conten
 ok(CsFormatRegistry.detect("renamed.dat", svxContent).id === "survex",
     "content overrules a lying extension");
 ok(CsFormatRegistry.detect("x.csv", csvText).id === "csv", "detect csv");
+
+// ---------------------------------------------------------------------
+// Trip-aware parsing: every parser emits survey.trips[] keyed by
+// fingerprint (date|declination|team), every shot gets shot.trip, and
+// writers un-apply each shot's OWN trip's declination.
+// ---------------------------------------------------------------------
+
+// FIXTURE GATE: FingerprintCave.dat has 3 Compass blocks -- two on the
+// same day but different teams (fingerprint separation keeps them
+// apart), the third a different day/team AND a re-measured
+// declination, tied back into a loop that only closes once trips 0
+// and 1's declination gets revised.
+var fpContent = readTextFile(repoRoot + "/tests/fixtures/FingerprintCave.dat");
+var fp = CsFormatCompass.parse(fpContent);
+ok(fp.trips.length === 3, "FingerprintCave: 3 trips, got " + fp.trips.length);
+if (fp.trips.length === 3) {
+    ok(fp.trips[0].name === "ENT" && fp.trips[0].date === "1998-07-04" &&
+        fp.trips[0].team === "N. Schonegg, J. Bender",
+        "FingerprintCave trip 0 (ENT), got " + JSON.stringify(fp.trips[0]));
+    near(fp.trips[0].declination, 0, 1e-9, "FingerprintCave trip 0 declination");
+    ok(fp.trips[1].name === "MID" && fp.trips[1].date === "1998-07-04" &&
+        fp.trips[1].team === "K. Lane, T. Ruiz",
+        "FingerprintCave trip 1 (MID), got " + JSON.stringify(fp.trips[1]));
+    near(fp.trips[1].declination, 0, 1e-9, "FingerprintCave trip 1 declination");
+    ok(fp.trips[2].name === "LOOP" && fp.trips[2].date === "2003-08-15" &&
+        fp.trips[2].team === "N. Schonegg, J. Bender",
+        "FingerprintCave trip 2 (LOOP), got " + JSON.stringify(fp.trips[2]));
+    near(fp.trips[2].declination, -3, 1e-9, "FingerprintCave trip 2 declination");
+}
+ok(fp.shots.length === 18, "FingerprintCave: 18 shots (LRUD carrier folded), got " +
+    fp.shots.length);
+var fpExpectTrip = [0, 0, 0, 0, 0, 1, 1, 1, 1, 1, 1, 1, 2, 2, 2, 2, 2, 2];
+var fpTripsOk = true;
+for (var fpi = 0; fpi < fp.shots.length && fpi < fpExpectTrip.length; fpi++) {
+    if ((fp.shots[fpi].trip || 0) !== fpExpectTrip[fpi]) {
+        fpTripsOk = false;
+    }
+}
+ok(fpTripsOk, "FingerprintCave: every shot's trip matches its block");
+var fpSplays = 0, fpSplayTrip = -1;
+var fpExcludeFromPlot = 0, fpExcludeFromPlotTrip = -1;
+for (var fpj = 0; fpj < fp.shots.length; fpj++) {
+    if (fp.shots[fpj].splay) {
+        fpSplays++;
+        fpSplayTrip = fp.shots[fpj].trip;
+    }
+    if (fp.shots[fpj].excludeFromPlot) {
+        fpExcludeFromPlot++;
+        fpExcludeFromPlotTrip = fp.shots[fpj].trip;
+    }
+}
+ok(fpSplays === 1 && fpSplayTrip === 1, "FingerprintCave: 1 splay, trip 1, got " +
+    fpSplays + " on trip " + fpSplayTrip);
+ok(fpExcludeFromPlot === 1 && fpExcludeFromPlotTrip === 2,
+    "FingerprintCave: 1 excludeFromPlot, trip 2, got " + fpExcludeFromPlot +
+    " on trip " + fpExcludeFromPlotTrip);
+
+var fpResolved = CsNetwork.resolve(fp, {});
+ok(fpResolved.loops.length === 1, "FingerprintCave: one loop found, got " +
+    fpResolved.loops.length);
+if (fpResolved.loops.length === 1) {
+    near(fpResolved.loops[0].error, 4.21, 0.05,
+        "FingerprintCave: as-surveyed loop error ~4.21ft, got " +
+        fpResolved.loops[0].error);
+}
+
+// Revise trips 0 and 1's declination (both were surveyed with the
+// notebook's uncorrected 0.00 declination; -2.5 was the true value)
+// by nudging every one of their shots' TRUE azimuth -- the loop should
+// close much tighter.
+for (var fpk = 0; fpk < fp.shots.length; fpk++) {
+    var fpTripIdx = fp.shots[fpk].trip || 0;
+    if (fpTripIdx === 0 || fpTripIdx === 1) {
+        fp.shots[fpk].azimuth = CsAngles.normalizeAzimuth(
+            fp.shots[fpk].azimuth - 2.5);
+    }
+}
+var fpResolved2 = CsNetwork.resolve(fp, {});
+ok(fpResolved2.loops.length === 1, "FingerprintCave revised: still one loop");
+if (fpResolved2.loops.length === 1) {
+    near(fpResolved2.loops[0].error, 0.74, 0.05,
+        "FingerprintCave: revised loop error ~0.74ft, got " +
+        fpResolved2.loops[0].error);
+}
+
+// Fingerprint MERGE: two Compass blocks sharing date/team/declination
+// (but different SURVEY NAME labels, which aren't part of the
+// fingerprint) collapse into ONE trip.
+var mergeDat =
+    "SURVEY NAME: X\r\nSURVEY DATE: 1 1 2020\r\nSURVEY TEAM:\r\n" +
+    "A. One, B. Two\r\nDECLINATION: 1.00  FORMAT: DDDDLUDRLADN\r\n\r\n" +
+    "FROM TO LENGTH BEARING INC LEFT UP DOWN RIGHT\r\n\r\n" +
+    "A1 A2 10.0 0.0 0.0 1.0 1.0 1.0 1.0\r\n\f\r\n" +
+    "SURVEY NAME: Y\r\nSURVEY DATE: 1 1 2020\r\nSURVEY TEAM:\r\n" +
+    "A. One, B. Two\r\nDECLINATION: 1.00  FORMAT: DDDDLUDRLADN\r\n\r\n" +
+    "FROM TO LENGTH BEARING INC LEFT UP DOWN RIGHT\r\n\r\n" +
+    "B1 B2 10.0 0.0 0.0 1.0 1.0 1.0 1.0\r\n\f\r\n";
+var merged = CsFormatCompass.parse(mergeDat);
+ok(merged.trips.length === 1, "Compass fingerprint merge: 1 trip, got " +
+    merged.trips.length);
+ok(merged.shots.length === 2 && merged.shots[0].trip === 0 &&
+    merged.shots[1].trip === 0, "Compass fingerprint merge: both shots trip 0");
+
+// Round trip: write(parse(fixture)) then parse again preserves the
+// trips (same fingerprints), the shot count, and the TRUE azimuths.
+var fpWritten = CsFormatCompass.write(fp);
+var fpRt = CsFormatCompass.parse(fpWritten);
+ok(fpRt.trips.length === 3, "FingerprintCave round trip: 3 trips, got " +
+    fpRt.trips.length);
+if (fpRt.trips.length === 3) {
+    for (var fpr = 0; fpr < 3; fpr++) {
+        ok(CsModel.tripFingerprint(fpRt.trips[fpr]) ===
+            CsModel.tripFingerprint(fp.trips[fpr]),
+            "FingerprintCave round trip: trip " + fpr + " fingerprint, got " +
+            CsModel.tripFingerprint(fpRt.trips[fpr]) + " vs " +
+            CsModel.tripFingerprint(fp.trips[fpr]));
+    }
+}
+ok(fpRt.shots.length === fp.shots.length,
+    "FingerprintCave round trip: shot count, got " + fpRt.shots.length +
+    " vs " + fp.shots.length);
+for (var fps = 0; fps < Math.min(fp.shots.length, fpRt.shots.length); fps++) {
+    near(CsAngles.azimuthDifference(fp.shots[fps].azimuth, fpRt.shots[fps].azimuth),
+        0, 1e-6, "FingerprintCave round trip: shot " + fps + " TRUE azimuth");
+}
+
+// Walls and CSV are single-trip formats: ensureTrips still lands
+// everything in trip 0, and the survey-level metadata each already
+// tested above (declination, date, name, ...) is trip 0's.
+ok(srv.trips !== undefined && srv.trips.length === 1,
+    "Walls: single trip via ensureTrips, got " + (srv.trips && srv.trips.length));
+if (srv.trips !== undefined && srv.trips.length === 1) {
+    near(srv.trips[0].declination, srv.declination, 1e-9,
+        "Walls trip 0 declination mirrors survey-level");
+}
+for (var wti = 0; wti < srv.shots.length; wti++) {
+    ok((srv.shots[wti].trip || 0) === 0, "Walls: every shot trip 0");
+}
+ok(csvM.trips !== undefined && csvM.trips.length === 1,
+    "CSV: single trip via ensureTrips, got " + (csvM.trips && csvM.trips.length));
+if (csvM.trips !== undefined && csvM.trips.length === 1) {
+    ok(csvM.trips[0].name === "Deep Cave", "CSV trip 0 name mirrors survey-level");
+}
+for (var cti = 0; cti < csvM.shots.length; cti++) {
+    ok((csvM.shots[cti].trip || 0) === 0, "CSV: every shot trip 0");
+}
+
+// Survex per-leg trip attribution: a *date/*calibrate change mid-file
+// starts a new trip, and each leg's declination un-apply on write
+// uses ITS OWN trip, not a single survey-wide value.
+var svxTripSrc = "*data normal from to tape compass clino\r\n" +
+    "*date 2020-01-01\r\n*calibrate declination -2.0\r\n" +
+    "T1 T2 10.0 90.0 0.0\r\n" +
+    "*date 2021-06-15\r\n*calibrate declination 0.0\r\n" +
+    "T2 T3 10.0 90.0 0.0\r\n";
+var svxTrip = CsFormatSurvex.parse(svxTripSrc);
+ok(svxTrip.trips.length === 2, "Survex: two *date/*calibrate tuples, two trips, got " +
+    svxTrip.trips.length);
+ok(svxTrip.shots[0].trip === 0 && svxTrip.shots[1].trip === 1,
+    "Survex: each leg tagged with the tuple in force where it appears");
+near(svxTrip.shots[0].azimuth, 92.0, 1e-9,
+    "Survex: leg 1 true azimuth uses its own trip's declination");
+near(svxTrip.shots[1].azimuth, 90.0, 1e-9,
+    "Survex: leg 2 true azimuth uses its own (zero) declination");
+var svxTripWritten = CsFormatSurvex.write(svxTrip);
+var svxTripRt = CsFormatSurvex.parse(svxTripWritten);
+ok(svxTripRt.trips.length === 2,
+    "Survex round trip: still two trips, got " + svxTripRt.trips.length);
+near(CsAngles.azimuthDifference(svxTripRt.shots[0].azimuth, svxTrip.shots[0].azimuth),
+    0, 1e-6, "Survex round trip: leg 1 true azimuth preserved");
+near(CsAngles.azimuthDifference(svxTripRt.shots[1].azimuth, svxTrip.shots[1].azimuth),
+    0, 1e-6, "Survex round trip: leg 2 true azimuth preserved");
 
 // ---------------------------------------------------------------------
 // Drawing round-trip -- QCAD engine only (node has no R* classes).

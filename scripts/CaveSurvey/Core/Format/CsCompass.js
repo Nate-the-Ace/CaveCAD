@@ -44,9 +44,12 @@ CsFormatCompass.parse = function(content) {
     survey.distanceUnit = "ft";
 
     var blocks = content.split(/\f/);
-    var firstHeader = true;
+    var firstBlock = true;
 
-    // raw shot records, station reference counts, per-station LRUD
+    // raw shot records, station reference counts, per-station LRUD --
+    // shared across every \f block, because a station can be shared
+    // at a block boundary (a survey trip picks up where the previous
+    // one left off, e.g. FingerprintCave's A6/M5).
     var raws = [];
     var stationRefs = {};
     var stationLrud = {};
@@ -69,36 +72,58 @@ CsFormatCompass.parse = function(content) {
 
         var lines = block.split(/\r\n|\r|\n/);
 
-        if (firstHeader) {
-            firstHeader = false;
-            // Line 1 is the cave name; SURVEY NAME / DATE / TEAM follow.
-            if (lines.length > 0) {
-                survey.name = lines[0].replace(/^\s+|\s+$/g, "");
+        // Every block is its own trip: SURVEY NAME/DATE/TEAM/
+        // DECLINATION identify it, and CsModel.tripIdFor dedupes
+        // blocks that share a fingerprint (same date+declination+
+        // team) into one trip instead of piling up duplicates.
+        var nameMatch = block.match(/SURVEY NAME:\s*(.*)/i);
+        var blockName = nameMatch ?
+            nameMatch[1].replace(/^\s+|\s+$/g, "") : "";
+        var blockDate = "";
+        var dateMatch = block.match(/SURVEY DATE:\s*(\d+)\s+(\d+)\s+(\d+)/i);
+        if (dateMatch !== null) {
+            var mo = parseInt(dateMatch[1], 10);
+            var da = parseInt(dateMatch[2], 10);
+            var yr = parseInt(dateMatch[3], 10);
+            if (yr < 100) {
+                yr += (yr > 50) ? 1900 : 2000;
             }
-            var dateMatch = block.match(/SURVEY DATE:\s*(\d+)\s+(\d+)\s+(\d+)/i);
-            if (dateMatch !== null) {
-                var mo = parseInt(dateMatch[1], 10);
-                var da = parseInt(dateMatch[2], 10);
-                var yr = parseInt(dateMatch[3], 10);
-                if (yr < 100) {
-                    yr += (yr > 50) ? 1900 : 2000;
-                }
-                survey.date = yr + "-" + (mo < 10 ? "0" : "") + mo + "-" +
-                    (da < 10 ? "0" : "") + da;
+            blockDate = yr + "-" + (mo < 10 ? "0" : "") + mo + "-" +
+                (da < 10 ? "0" : "") + da;
+        }
+        var blockTeam = "";
+        var teamIdx = -1;
+        for (var ti = 0; ti < lines.length; ti++) {
+            if (/SURVEY TEAM:/i.test(lines[ti])) {
+                teamIdx = ti;
+                break;
             }
-            var teamIdx = -1;
-            for (var ti = 0; ti < lines.length; ti++) {
-                if (/SURVEY TEAM:/i.test(lines[ti])) {
-                    teamIdx = ti;
-                    break;
-                }
-            }
-            if (teamIdx >= 0 && teamIdx + 1 < lines.length) {
-                survey.team = lines[teamIdx + 1].replace(/^\s+|\s+$/g, "");
-            }
+        }
+        if (teamIdx >= 0 && teamIdx + 1 < lines.length) {
+            blockTeam = lines[teamIdx + 1].replace(/^\s+|\s+$/g, "");
+        }
+
+        if (firstBlock) {
+            firstBlock = false;
+            // Seed the top-level fields from the FIRST block BEFORE
+            // tripIdFor runs below, so ensureTrips' auto-built trip 0
+            // (from these same top-level fields) fingerprints equal to
+            // this block's own trip record and gets reused instead of
+            // duplicated -- see CsModel.ensureTrips' WARNING.
+            survey.name = blockName;
+            survey.date = blockDate;
+            survey.team = blockTeam;
             survey.declination = declination;
             survey.declinationSource = declMatch ? "file" : "";
         }
+
+        var blockTrip = CsModel.newTrip();
+        blockTrip.name = blockName;
+        blockTrip.date = blockDate;
+        blockTrip.team = blockTeam;
+        blockTrip.declination = declination;
+        blockTrip.declinationSource = declMatch ? "file" : "";
+        var tripId = CsModel.tripIdFor(survey, blockTrip);
 
         // Header lines can look numeric ("SURVEY DATE: 7 10 2024"), so
         // only lines after the DECLINATION marker are shot candidates.
@@ -177,7 +202,8 @@ CsFormatCompass.parse = function(content) {
                 },
                 flags: flags,
                 notes: comment,
-                lrudAssoc: lrudAssoc
+                lrudAssoc: lrudAssoc,
+                tripId: tripId
             };
             raws.push(raw);
             stationRefs[raw.from] = (stationRefs[raw.from] || 0) + 1;
@@ -220,6 +246,7 @@ CsFormatCompass.parse = function(content) {
         shot.excludeFromLength = r.flags.indexOf("L") >= 0;
         shot.noAdjust = r.flags.indexOf("C") >= 0;
         shot.notes = r.notes;
+        shot.trip = r.tripId;
         survey.shots.push(shot);
     }
 
@@ -242,27 +269,50 @@ CsFormatCompass.parse = function(content) {
         var slF = stationLrud[survey.shots[0].from];
         survey.startLrud = { left: slF.left, right: slF.right,
             up: slF.up, down: slF.down };
+        // trips[0] already exists by now (the first block's tripIdFor
+        // call built it) -- write the trip record directly, per
+        // ensureTrips' WARNING, or the mirror call below silently
+        // drops this on the floor.
+        survey.trips[0].startLrud = survey.startLrud;
     }
 
+    // Mirror trips[0] back onto the top-level fields (see ensureTrips'
+    // WARNING) -- everything else was already seeded from it above.
+    CsModel.ensureTrips(survey);
     return survey;
 };
 
 /**
- * Writes a CsModel survey as a Compass .dat file (one survey block).
+ * Writes a CsModel survey as a Compass .dat file: one \f-delimited
+ * block PER TRIP that actually has shots (see CsModel's Trip shape),
+ * each with its own SURVEY NAME/DATE/TEAM/DECLINATION header. Trips
+ * with no shots write nothing (Compass has no way to represent an
+ * empty block).
+ *
  * Distances are converted to feet, Compass's only storage unit, and
- * azimuths are written back as MAGNETIC by removing the declination
- * the model has applied -- with the declination declared in the
- * header, which is what Compass expects. Backsight columns (Azm2/
- * Inc2, uncorrected, -999 when missing) appear when any shot carries
- * a backsight, declared by FORMAT ...B.
+ * azimuths are written back as MAGNETIC by removing that SHOT's OWN
+ * trip's declination (CsModel.tripOf) -- with the same declination
+ * declared in its block's header, which is what Compass expects.
+ * Backsight columns (Azm2/Inc2, uncorrected, -999 when missing)
+ * appear in every block when ANY shot anywhere carries a backsight
+ * (one FORMAT ...B decision for the whole file, matching the reader's
+ * own per-file/per-block detection), declared by FORMAT ...B.
  *
  * LRUDs are written in Compass' native FROM-station association
  * (FORMAT ...F): each line carries the reading of its FROM station,
  * the first line the startLrud, and a leaf station's reading rides a
  * zero-length carrier shot (the documented Compass idiom), which the
- * parser folds back into the station.
+ * parser folds back into the station. That station bookkeeping is
+ * computed ONCE across every trip's shots together (not per block),
+ * because a station can be shared across a trip boundary (e.g.
+ * FingerprintCave's A6 and M5) exactly as the parser accumulates it;
+ * any reading still unemitted once every block is written rides a
+ * carrier in the LAST block, mirroring the single-block behavior this
+ * replaces.
  */
 CsFormatCompass.write = function(survey) {
+    CsModel.ensureTrips(survey);
+
     var toFt = function(v) {
         return CsUnits.convert(v, survey.distanceUnit, "ft");
     };
@@ -292,27 +342,9 @@ CsFormatCompass.write = function(survey) {
         }
     }
 
-    var dateParts = /^(\d{4})-(\d{2})-(\d{2})$/.exec(survey.date || "");
-    var dateLine = dateParts ?
-        (parseInt(dateParts[2], 10) + " " + parseInt(dateParts[3], 10) + " " +
-            dateParts[1]) : "1 1 1900";
-
-    var out = [];
-    out.push(survey.name || "CAVE");
-    out.push("SURVEY NAME: " + (survey.name || "1"));
-    out.push("SURVEY DATE: " + dateLine + "  COMMENT:");
-    out.push("SURVEY TEAM:");
-    out.push(survey.team || "");
-    out.push("DECLINATION: " + (survey.declination || 0).toFixed(2) +
-        "  FORMAT: DDDDLRUD" + (anyBack ? "LADadB" : "LADN") + "F" +
-        "  CORRECTIONS: 0.00 0.00 0.00");
-    out.push("");
-    out.push("FROM         TO           LENGTH  BEARING      INC     LEFT       UP     DOWN    RIGHT" +
-        (anyBack ? "     AZM2     INC2" : ""));
-    out.push("");
-
     // FROM-station readings: first station <- startLrud, station X <-
-    // the model's reading at X (LRUD lives on the shot arriving at X)
+    // the model's reading at X (LRUD lives on the shot arriving at X).
+    // Computed across the WHOLE survey, before splitting into blocks.
     var stationLrud = {};
     if (survey.shots.length > 0 && survey.startLrud !== null &&
         survey.startLrud !== undefined) {
@@ -329,7 +361,6 @@ CsFormatCompass.write = function(survey) {
     }
     var lrudEmitted = {};
 
-    var decl = survey.declination || 0;
     var lr = function(v) {
         return v === null || v === undefined ? -9.90 : toFt(v);
     };
@@ -355,57 +386,105 @@ CsFormatCompass.write = function(survey) {
         return lineOut;
     };
 
-    for (i = 0; i < survey.shots.length; i++) {
-        s = survey.shots[i];
-        var magnetic = CsAngles.normalizeAzimuth(s.azimuth - decl);
-        var backAz = (s.backAzimuth === null || s.backAzimuth === undefined) ?
-            null : CsAngles.normalizeAzimuth(s.backAzimuth - decl);
-        var backInc = (s.backInclination === null ||
-            s.backInclination === undefined) ? null : s.backInclination;
-
-        // flag letters, at most three (the field's cap)
-        var flags = "";
-        if (s.excludeFromAll) {
-            flags += "X";
+    // Group shots by trip (in trip-index order), skipping any trip
+    // nothing uses.
+    var tripBlocks = [];
+    for (var t = 0; t < survey.trips.length; t++) {
+        var tripShots = [];
+        for (i = 0; i < survey.shots.length; i++) {
+            if ((survey.shots[i].trip || 0) === t) {
+                tripShots.push(survey.shots[i]);
+            }
         }
-        if (s.splay) {
-            flags += "S";
-        }
-        if (s.excludeFromPlot) {
-            flags += "P";
-        }
-        if (s.excludeFromLength) {
-            flags += "L";
-        }
-        if (s.noAdjust) {
-            flags += "C";
-        }
-        flags = flags.substring(0, 3);
-
-        var fromLrud = stationLrud.hasOwnProperty(s.from) ?
-            stationLrud[s.from] :
-            { left: null, right: null, up: null, down: null };
-        if (stationLrud.hasOwnProperty(s.from)) {
-            lrudEmitted[s.from] = true;
-        }
-        var toName = s.to;
-        if (s.splay && toName === "") {
-            splaySeq++;
-            toName = s.from + ".s" + splaySeq;
-        }
-
-        out.push(shotLine(s.from, toName, toFt(s.distance), magnetic,
-            s.inclination, fromLrud, backAz, backInc, flags, s.notes));
-    }
-
-    // leaf stations still holding a reading: zero-length carriers
-    for (var st in stationLrud) {
-        if (stationLrud.hasOwnProperty(st) && !lrudEmitted[st]) {
-            out.push(shotLine(st, st + "_L", 0.0, 0.0, 0.0,
-                stationLrud[st], null, null, "", "LRUD carrier"));
+        if (tripShots.length > 0) {
+            tripBlocks.push({ trip: survey.trips[t], shots: tripShots });
         }
     }
+    if (tripBlocks.length === 0) {
+        // no shots anywhere -- still write trip 0's empty header block
+        tripBlocks.push({ trip: survey.trips[0], shots: [] });
+    }
 
-    out.push("\f");
+    var out = [];
+    for (var bi = 0; bi < tripBlocks.length; bi++) {
+        var block = tripBlocks[bi];
+        var trip = block.trip;
+        var decl = trip.declination || 0;
+
+        var dateParts = /^(\d{4})-(\d{2})-(\d{2})$/.exec(trip.date || "");
+        var dateLine = dateParts ?
+            (parseInt(dateParts[2], 10) + " " + parseInt(dateParts[3], 10) + " " +
+                dateParts[1]) : "1 1 1900";
+
+        out.push(trip.name || "CAVE");
+        out.push("SURVEY NAME: " + (trip.name || "1"));
+        out.push("SURVEY DATE: " + dateLine + "  COMMENT:");
+        out.push("SURVEY TEAM:");
+        out.push(trip.team || "");
+        out.push("DECLINATION: " + decl.toFixed(2) +
+            "  FORMAT: DDDDLRUD" + (anyBack ? "LADadB" : "LADN") + "F" +
+            "  CORRECTIONS: 0.00 0.00 0.00");
+        out.push("");
+        out.push("FROM         TO           LENGTH  BEARING      INC     LEFT       UP     DOWN    RIGHT" +
+            (anyBack ? "     AZM2     INC2" : ""));
+        out.push("");
+
+        for (i = 0; i < block.shots.length; i++) {
+            s = block.shots[i];
+            var magnetic = CsAngles.normalizeAzimuth(s.azimuth - decl);
+            var backAz = (s.backAzimuth === null || s.backAzimuth === undefined) ?
+                null : CsAngles.normalizeAzimuth(s.backAzimuth - decl);
+            var backInc = (s.backInclination === null ||
+                s.backInclination === undefined) ? null : s.backInclination;
+
+            // flag letters, at most three (the field's cap)
+            var flags = "";
+            if (s.excludeFromAll) {
+                flags += "X";
+            }
+            if (s.splay) {
+                flags += "S";
+            }
+            if (s.excludeFromPlot) {
+                flags += "P";
+            }
+            if (s.excludeFromLength) {
+                flags += "L";
+            }
+            if (s.noAdjust) {
+                flags += "C";
+            }
+            flags = flags.substring(0, 3);
+
+            var fromLrud = stationLrud.hasOwnProperty(s.from) ?
+                stationLrud[s.from] :
+                { left: null, right: null, up: null, down: null };
+            if (stationLrud.hasOwnProperty(s.from)) {
+                lrudEmitted[s.from] = true;
+            }
+            var toName = s.to;
+            if (s.splay && toName === "") {
+                splaySeq++;
+                toName = s.from + ".s" + splaySeq;
+            }
+
+            out.push(shotLine(s.from, toName, toFt(s.distance), magnetic,
+                s.inclination, fromLrud, backAz, backInc, flags, s.notes));
+        }
+
+        // leaf stations still holding a reading: zero-length carriers,
+        // held until the LAST block once every shot has had its turn
+        if (bi === tripBlocks.length - 1) {
+            for (var st in stationLrud) {
+                if (stationLrud.hasOwnProperty(st) && !lrudEmitted[st]) {
+                    out.push(shotLine(st, st + "_L", 0.0, 0.0, 0.0,
+                        stationLrud[st], null, null, "", "LRUD carrier"));
+                }
+            }
+        }
+
+        out.push("\f");
+    }
+
     return out.join("\r\n");
 };

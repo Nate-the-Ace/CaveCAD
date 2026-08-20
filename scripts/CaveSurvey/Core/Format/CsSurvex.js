@@ -377,6 +377,19 @@ CsFormatSurvex.parse = function(content) {
             }
 
             shot.notes = notes;
+
+            // The trip in force where this leg appears -- date/team/
+            // declination are tracked as running state above (not
+            // scoped to *begin/*end), so the tuple currently on
+            // survey.date/survey.team/declination IS what's "in
+            // force" right here. tripIdFor dedupes legs that share a
+            // fingerprint into one trip.
+            var legTrip = CsModel.newTrip();
+            legTrip.date = survey.date;
+            legTrip.team = survey.team;
+            legTrip.declination = declination;
+            shot.trip = CsModel.tripIdFor(survey, legTrip);
+
             survey.shots.push(shot);
         } else if (dataStyle === "passage") {
             var prec = {};
@@ -425,11 +438,18 @@ CsFormatSurvex.parse = function(content) {
             left: plFirst.left, right: plFirst.right,
             up: plFirst.up, down: plFirst.down
         };
+        // survey.shots.length > 0 means at least one leg was already
+        // parsed, so trips[0] already exists (built by that leg's
+        // tripIdFor call) -- write the trip record directly, per
+        // ensureTrips' WARNING, or the final ensureTrips call below
+        // silently drops this on the floor.
+        survey.trips[0].startLrud = survey.startLrud;
     }
 
     if (survey.distanceUnit === null) {
         survey.distanceUnit = lengthUnit;
     }
+    CsModel.ensureTrips(survey);
     return survey;
 };
 
@@ -437,10 +457,15 @@ CsFormatSurvex.parse = function(content) {
  * Writes a CsModel survey as a Survex .svx file.
  *
  * Only emits a *begin block when every station already shares that
- * prefix, so plain names round-trip un-renamed. Declination is
- * declared with the modern *declination command (conventional sign)
- * and bearings written back as the raw magnetic readings. Backsights
- * are emitted (and declination-stripped) when any shot carries them.
+ * prefix, so plain names round-trip un-renamed. name/units/*fix stay
+ * survey-level (unchanged by trips); *date, *team and *declination
+ * are TRIP-level, so they're emitted once per trip, right before that
+ * trip's own legs, using that trip's own fields (CsModel.tripOf) --
+ * a single-trip survey (the common case, and every trip's date/team/
+ * declination blank) still emits nothing extra, byte-identical to the
+ * old single-block output. Bearings are written back as the raw
+ * magnetic readings for the trip they belong to. Backsights are
+ * emitted (and declination-stripped) when any shot carries them.
  * Splays become anonymous ".." stations -- a bare "-" is NOT legal
  * Survex without an *alias. Passage LRUD is per-station: the first
  * station's reading comes from survey.startLrud; when two shots into
@@ -449,26 +474,11 @@ CsFormatSurvex.parse = function(content) {
  * representation and are written as comments.
  */
 CsFormatSurvex.write = function(survey) {
+    CsModel.ensureTrips(survey);
     var out = [];
-    var decl = survey.declination || 0;
     out.push("; " + (survey.name || "Cave survey"));
-    if (survey.date) {
-        out.push("*date " + survey.date);
-    }
-    if (survey.team) {
-        var members = survey.team.split(",");
-        for (var ti = 0; ti < members.length; ti++) {
-            var name = members[ti].replace(/^\s+|\s+$/g, "");
-            if (name !== "") {
-                out.push("*team \"" + name + "\"");
-            }
-        }
-    }
     if (survey.distanceUnit === "ft") {
         out.push("*units length feet");
-    }
-    if (decl) {
-        out.push("*declination " + decl.toFixed(2) + " degrees");
     }
 
     for (var fname in survey.fixed) {
@@ -492,56 +502,103 @@ CsFormatSurvex.write = function(survey) {
     out.push("*data normal from to tape compass clino" +
         (anyBack ? " backcompass backclino" : ""));
 
+    // Group shots by trip, in trip-index order, each trip's own shots
+    // kept in their original relative order.
+    var tripOrder = [];
+    var byTrip = {};
+    for (i = 0; i < survey.shots.length; i++) {
+        var t = survey.shots[i].trip || 0;
+        if (!byTrip.hasOwnProperty(t)) {
+            byTrip[t] = [];
+            tripOrder.push(t);
+        }
+        byTrip[t].push(survey.shots[i]);
+    }
+    tripOrder.sort(function(a, b) { return a - b; });
+
     // *flags runs: duplicate <- excludeFromLength, surface <- excludeFromPlot
     var cur = { duplicate: false, surface: false };
     var fmtNum = function(v) {
         return (v === null || v === undefined) ? "-" : v.toFixed(2);
     };
-    for (i = 0; i < survey.shots.length; i++) {
-        s = survey.shots[i];
-        if (s.excludeFromAll) {
-            // no Survex flag means "ignore entirely" -- keep the data
-            // visible to a human, but out of the survey
-            out.push("; excluded shot: " + s.from + " " + (s.to || "-") +
-                " " + s.distance.toFixed(2) +
-                (s.notes ? " ; " + s.notes : ""));
-            continue;
+    // *declination isn't block-scoped in Survex -- it stays in force
+    // until the next *declination/*calibrate -- so unlike the old
+    // single-survey write (one file-wide value, skip when 0 because 0
+    // IS the file's default), a LATER trip going back to 0 must say
+    // so explicitly, or the reader would keep an earlier trip's
+    // nonzero value in force across the boundary. Track what's
+    // actually in force and only emit on a real change.
+    var lastEmittedDecl = 0;
+    for (var tOi = 0; tOi < tripOrder.length; tOi++) {
+        var tripIdx = tripOrder[tOi];
+        var trip = survey.trips[tripIdx];
+        var tripShots = byTrip[tripIdx];
+        var decl = trip.declination || 0;
+
+        if (trip.date) {
+            out.push("*date " + trip.date);
         }
-        var want = {
-            duplicate: !!(s.excludeFromLength && !s.excludeFromPlot),
-            surface: !!s.excludeFromPlot
-        };
-        if (want.duplicate !== cur.duplicate || want.surface !== cur.surface) {
-            var parts = [];
-            if (want.duplicate !== cur.duplicate) {
-                parts.push((want.duplicate ? "" : "not ") + "duplicate");
+        if (trip.team) {
+            var members = trip.team.split(",");
+            for (var ti = 0; ti < members.length; ti++) {
+                var name = members[ti].replace(/^\s+|\s+$/g, "");
+                if (name !== "") {
+                    out.push("*team \"" + name + "\"");
+                }
             }
-            if (want.surface !== cur.surface) {
-                parts.push((want.surface ? "" : "not ") + "surface");
+        }
+        if (decl !== lastEmittedDecl) {
+            out.push("*declination " + decl.toFixed(2) + " degrees");
+            lastEmittedDecl = decl;
+        }
+
+        for (i = 0; i < tripShots.length; i++) {
+            s = tripShots[i];
+            if (s.excludeFromAll) {
+                // no Survex flag means "ignore entirely" -- keep the
+                // data visible to a human, but out of the survey
+                out.push("; excluded shot: " + s.from + " " + (s.to || "-") +
+                    " " + s.distance.toFixed(2) +
+                    (s.notes ? " ; " + s.notes : ""));
+                continue;
             }
-            out.push("*flags " + parts.join(" "));
-            cur = want;
-        }
-        // Survex expects raw compass readings; the model's azimuths
-        // are true, so remove the declination again.
-        var az = CsAngles.normalizeAzimuth(s.azimuth - decl);
-        var toName = s.splay ? (s.to !== "" ? s.to : "..") : s.to;
-        var lineOut = s.from + "\t" + toName + "\t" +
-            s.distance.toFixed(2) + "\t" + az.toFixed(2) + "\t" +
-            s.inclination.toFixed(2);
-        if (anyBack) {
-            var bAz = (s.backAzimuth === null || s.backAzimuth === undefined) ?
-                null : CsAngles.normalizeAzimuth(s.backAzimuth - decl);
-            lineOut += "\t" + fmtNum(bAz) + "\t" + fmtNum(s.backInclination);
-        }
-        if (s.splay && s.to !== "") {
-            // a NAMED splay needs the explicit flag
-            out.push("*flags splay");
+            var want = {
+                duplicate: !!(s.excludeFromLength && !s.excludeFromPlot),
+                surface: !!s.excludeFromPlot
+            };
+            if (want.duplicate !== cur.duplicate || want.surface !== cur.surface) {
+                var parts = [];
+                if (want.duplicate !== cur.duplicate) {
+                    parts.push((want.duplicate ? "" : "not ") + "duplicate");
+                }
+                if (want.surface !== cur.surface) {
+                    parts.push((want.surface ? "" : "not ") + "surface");
+                }
+                out.push("*flags " + parts.join(" "));
+                cur = want;
+            }
+            // Survex expects raw compass readings; the model's
+            // azimuths are true, so remove that leg's own trip's
+            // declination again.
+            var az = CsAngles.normalizeAzimuth(s.azimuth - decl);
+            var toName = s.splay ? (s.to !== "" ? s.to : "..") : s.to;
+            var lineOut = s.from + "\t" + toName + "\t" +
+                s.distance.toFixed(2) + "\t" + az.toFixed(2) + "\t" +
+                s.inclination.toFixed(2);
+            if (anyBack) {
+                var bAz = (s.backAzimuth === null || s.backAzimuth === undefined) ?
+                    null : CsAngles.normalizeAzimuth(s.backAzimuth - decl);
+                lineOut += "\t" + fmtNum(bAz) + "\t" + fmtNum(s.backInclination);
+            }
+            if (s.splay && s.to !== "") {
+                // a NAMED splay needs the explicit flag
+                out.push("*flags splay");
+                out.push(lineOut + (s.notes ? "\t; " + s.notes : ""));
+                out.push("*flags not splay");
+                continue;
+            }
             out.push(lineOut + (s.notes ? "\t; " + s.notes : ""));
-            out.push("*flags not splay");
-            continue;
         }
-        out.push(lineOut + (s.notes ? "\t; " + s.notes : ""));
     }
     if (cur.duplicate || cur.surface) {
         var offs = [];

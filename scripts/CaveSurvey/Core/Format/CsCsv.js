@@ -171,6 +171,11 @@ CsFormatCsv.parse = function(content) {
         // legacy files carried no unit; the model default (ft) stands
         survey.distanceUnit = survey.distanceUnit || "ft";
     }
+    // CSV has no per-row trip concept -- the whole file is one trip.
+    // ensureTrips builds trips[0] from the top-level fields already
+    // set above (via the "# ..." metadata comments) and stamps every
+    // shot 0.
+    CsModel.ensureTrips(survey);
     return survey;
 };
 
