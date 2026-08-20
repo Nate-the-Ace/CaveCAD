@@ -68,12 +68,65 @@ CsLayers.DEFAULTS = {
     "CTRL-DATA": ["gray", "CONTINUOUS", "Weight000"]
 };
 
-// layers created switched OFF (invisible): the data store, and
+// Layers created switched OFF (invisible): the data store, and
 // CTRL-HIDDEN for legs that must persist but never plot. NOT
-// frozen -- frozen, off and locked layers all silently refuse entity
-// adds in this build, so writers toggle the layer on within their
-// own operation and back off afterwards.
+// frozen -- frozen, off and locked layers ALL silently refuse entity
+// adds in this build (RAddObjectsOperation just drops them), so
+// nothing can be drawn onto these layers while they are off: a
+// writer must wrap its add operation in CsLayers.withLayerOn below,
+// which flips the layer visible for the write and restores it after.
 CsLayers.OFF = { "CTRL-DATA": true, "CTRL-HIDDEN": true };
+
+/**
+ * Runs fn with the named layer switched ON, then restores the layer's
+ * previous off state -- even when fn throws. Exists because this
+ * build's RAddObjectsOperation silently refuses to add entities to a
+ * layer that is off (see CsLayers.OFF above): any write targeting a
+ * normally-off layer must happen inside this wrapper or it is lost
+ * without an error. Defensive throughout: a missing layer or a bridge
+ * without layer toggling just runs fn as-is. QCAD context only.
+ *
+ * \return whatever fn returns
+ */
+CsLayers.withLayerOn = function(doc, di, layerName, fn) {
+    var wasOff = false;
+    try {
+        var lay = doc.queryLayer(layerName);
+        if (!isNull(lay) && lay.isOff()) {
+            lay.setOff(false);
+            var opOn = new RModifyObjectsOperation();
+            opOn.addObject(lay, false);
+            di.applyOperation(opOn);
+            wasOff = true;
+        }
+    } catch (e) {
+        wasOff = false; // could not toggle; fn still runs
+    }
+    var result, thrown = null, didThrow = false;
+    try {
+        result = fn();
+    } catch (e2) {
+        thrown = e2;
+        didThrow = true;
+    }
+    if (wasOff) {
+        try {
+            var layOff = doc.queryLayer(layerName);
+            if (!isNull(layOff)) {
+                layOff.setOff(true);
+                var opOff = new RModifyObjectsOperation();
+                opOff.addObject(layOff, false);
+                di.applyOperation(opOff);
+            }
+        } catch (e3) {
+            // restoring visibility is a nicety; the data already landed
+        }
+    }
+    if (didThrow) {
+        throw thrown;
+    }
+    return result;
+};
 
 /**
  * Ensures a layer exists, creating it with its registry defaults if

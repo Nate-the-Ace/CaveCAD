@@ -1314,6 +1314,230 @@ if (!IS_NODE) {
         ok(CsTags.collectStations(doc).length === 0,
             "erase: no tagged stations left");
     })();
+
+    // -----------------------------------------------------------------
+    // Tag schema v3: the drawing's tags alone reconstruct the whole
+    // survey. One shot = one LEG LINE carrying the shot's full data
+    // (the old station-point scheme collides on loop closures); trip
+    // anchors carry per-trip metadata; excluded/unplaced shots
+    // serialize as rows on the trip-0 anchor; excludeFromPlot legs
+    // land on CTRL-HIDDEN (which is OFF -- the write must toggle it).
+    // -----------------------------------------------------------------
+    (function() {
+        var doc = new RDocument(new RMemoryStorage(), new RSpatialIndexNavel());
+        var di = new RDocumentInterface(doc);
+        getDocument = function() { return doc; };
+        getDocumentInterface = function() { return di; };
+
+        var vsv = CsModel.newSurvey();
+        vsv.caveName = "TEST CAVE";
+        vsv.name = "ENT";
+        vsv.date = "2020-01-01";
+        vsv.team = "Alice";
+        vsv.declination = 2.5;
+        vsv.declinationSource = "user";
+        vsv.distanceUnit = "ft";
+        vsv.startNote = "rig here";
+        vsv.startLrud = { left: 1, right: 2, up: 3, down: 4 };
+        CsModel.ensureTrips(vsv);
+        var vt1 = CsModel.newTrip();
+        vt1.name = "UPPER";
+        vt1.date = "2021-05-05";
+        vt1.team = "Bob";
+        vt1.declination = 3.0;
+        vt1.declinationSource = "igrf";
+        vt1.distanceUnit = "ft";
+        vsv.trips.push(vt1);
+        ok(CsModel.tripFingerprint(vsv.trips[0]) !==
+            CsModel.tripFingerprint(vsv.trips[1]),
+            "v3: the two test trips have distinct fingerprints");
+
+        var v0 = shotOf("A1", "A2", 10, 0);        // trip 0, seq 0
+        v0.left = 2; v0.right = 3;
+        v0.backAzimuth = 180.5;                     // backsight pair
+        v0.backInclination = -1;
+        var v1 = shotOf("A2", "A3", 10, 90);       // trip 0, seq 1
+        v1.notes = "muddy crawl";
+        var v2 = shotOf("A3", "A4", 10, 180);      // trip 0, seq 2
+        var v3 = shotOf("A4", "A1", 10.5, 270);    // trip 0, seq 3: closure
+        var v4 = shotOf("A4", "A5", 8, 45);        // trip 1, seq 0
+        v4.trip = 1;
+        var v5 = shotOf("A5", "A6", 6, 100);       // trip 1, seq 1: hidden
+        v5.trip = 1;
+        v5.excludeFromPlot = true;
+        var v6 = shotOf("X1", "X2", 7, 10);        // trip 0, seq 4: excluded
+        v6.excludeFromAll = true;
+        v6.notes = "bad shot";
+        var v7 = shotOf("A2", "", 4, 120, -5);     // trip 0, seq 5: splay
+        v7.splay = true;
+        v7.notes = "to wall";
+        var v8 = shotOf("Z1", "Z2", 9, 33);        // trip 0, seq 6: unplaced
+        vsv.shots.push(v0); vsv.shots.push(v1); vsv.shots.push(v2);
+        vsv.shots.push(v3); vsv.shots.push(v4); vsv.shots.push(v5);
+        vsv.shots.push(v6); vsv.shots.push(v7); vsv.shots.push(v8);
+        vsv.fixed["A1"] = { x: 100, y: 200, z: 5 };
+
+        var vres = CsNetwork.resolve(vsv, {});
+        CsDraw.survey(vsv, vres);
+
+        // read RAW tags back off the entities
+        var legByShot = {};
+        var splayLine = null;
+        var hiddenCount = 0;
+        var stationPt = {};
+        var vids = doc.queryAllEntities(false, false);
+        for (var vi = 0; vi < vids.length; vi++) {
+            var ve = doc.queryEntity(vids[vi]);
+            if (isNull(ve)) {
+                continue;
+            }
+            if (doc.getLayerName(ve.getLayerId()) === "CTRL-HIDDEN") {
+                hiddenCount++;
+            }
+            var vShot = CsTags.get(ve, "Shot");
+            if (vShot !== "") {
+                legByShot[vShot] = ve;
+            }
+            if (CsTags.get(ve, "Splay") !== "") {
+                splayLine = ve;
+            }
+            var vStation = CsTags.get(ve, "Station");
+            if (vStation !== "") {
+                stationPt[vStation] = ve;
+            }
+        }
+
+        // the hidden leg actually LANDED despite CTRL-HIDDEN being OFF
+        ok(hiddenCount >= 1,
+            "v3: CTRL-HIDDEN really holds the plot-excluded leg, got " +
+            hiddenCount);
+
+        var lg = legByShot["A1->A2"];
+        ok(lg !== undefined, "v3: A1->A2 leg found");
+        ok(CsTags.get(lg, "From") === "A1" && CsTags.get(lg, "To") === "A2",
+            "v3: leg From/To");
+        ok(CsTags.get(lg, "Distance") === "10", "v3: leg Distance, got '" +
+            CsTags.get(lg, "Distance") + "'");
+        ok(CsTags.get(lg, "Azimuth") === "0", "v3: leg Azimuth, got '" +
+            CsTags.get(lg, "Azimuth") + "'");
+        ok(CsTags.get(lg, "Inclination") === "0", "v3: leg Inclination");
+        ok(CsTags.get(lg, "Trip") === "0" && CsTags.get(lg, "ShotSeq") === "0",
+            "v3: leg Trip/ShotSeq");
+        ok(CsTags.get(lg, "BackAzimuth") === "180.5" &&
+            CsTags.get(lg, "BackInclination") === "-1",
+            "v3: leg backsight pair");
+        ok(CsTags.get(lg, "Left") === "2" && CsTags.get(lg, "Right") === "3",
+            "v3: leg LRUD");
+
+        // the closure leg carries its OWN shot data -- the whole point
+        // of moving shots onto legs (station tags collide at closures)
+        var cl = legByShot["A4->A1"];
+        ok(cl !== undefined, "v3: closure leg found");
+        ok(cl !== undefined && CsTags.get(cl, "Azimuth") === "270" &&
+            CsTags.get(cl, "Distance") === "10.5" &&
+            CsTags.get(cl, "ShotSeq") === "3",
+            "v3: closure leg carries its own azimuth/distance/seq, got az '" +
+            CsTags.get(cl, "Azimuth") + "'");
+
+        var t1leg = legByShot["A4->A5"];
+        ok(t1leg !== undefined && CsTags.get(t1leg, "Trip") === "1" &&
+            CsTags.get(t1leg, "ShotSeq") === "0",
+            "v3: trip-1 leg Trip/ShotSeq restart per trip");
+
+        var hid = legByShot["A5->A6"];
+        ok(hid !== undefined, "v3: hidden leg drawn, not skipped");
+        if (hid !== undefined) {
+            ok(doc.getLayerName(hid.getLayerId()) === "CTRL-HIDDEN",
+                "v3: hidden leg on CTRL-HIDDEN, got " +
+                doc.getLayerName(hid.getLayerId()));
+            ok(CsTags.get(hid, "Flags") === "P", "v3: hidden leg Flags P");
+            ok(CsTags.get(hid, "Trip") === "1" &&
+                CsTags.get(hid, "ShotSeq") === "1" &&
+                CsTags.get(hid, "Distance") === "6",
+                "v3: hidden leg full data");
+        }
+        // hidden leg's stations still drew as normal
+        ok(stationPt["A6"] !== undefined,
+            "v3: hidden leg's TO station still drawn");
+
+        ok(legByShot["A2->A3"] !== undefined &&
+            CsTags.get(legByShot["A2->A3"], "Note") === "muddy crawl",
+            "v3: leg Note");
+
+        // splay line carries its readings
+        ok(splayLine !== null, "v3: splay line found");
+        if (splayLine !== null) {
+            ok(CsTags.get(splayLine, "Distance") === "4" &&
+                CsTags.get(splayLine, "Azimuth") === "120" &&
+                CsTags.get(splayLine, "Inclination") === "-5",
+                "v3: splay reading tags");
+            ok(CsTags.get(splayLine, "Trip") === "0" &&
+                CsTags.get(splayLine, "ShotSeq") === "5",
+                "v3: splay Trip/ShotSeq");
+            ok(CsTags.get(splayLine, "Note") === "to wall", "v3: splay Note");
+        }
+
+        // trip anchors: trip 0 -> A1 (first station touched by a trip-0
+        // shot), trip 1 -> A5
+        var a0 = stationPt["A1"], a1 = stationPt["A5"];
+        ok(a0 !== undefined && CsTags.get(a0, "Trip") === "0" &&
+            CsTags.get(a0, "TripName") === "ENT" &&
+            CsTags.get(a0, "TripDate") === "2020-01-01" &&
+            CsTags.get(a0, "TripTeam") === "Alice",
+            "v3: trip 0 anchor name/date/team");
+        ok(a0 !== undefined && CsTags.get(a0, "TripDeclination") === "2.5" &&
+            CsTags.get(a0, "TripDeclinationSource") === "user" &&
+            CsTags.get(a0, "TripDistanceUnit") === "ft",
+            "v3: trip 0 anchor declination/unit");
+        ok(a0 !== undefined && CsTags.get(a0, "StartNote") === "rig here" &&
+            CsTags.get(a0, "StartLrud") === "1,2,3,4",
+            "v3: trip 0 anchor StartNote/StartLrud");
+        ok(a0 !== undefined && CsTags.get(a0, "SurveyName") === "TEST CAVE" &&
+            CsTags.get(a0, "SurveyDate") === "2020-01-01" &&
+            CsTags.get(a0, "SurveyTeam") === "Alice",
+            "v3: legacy survey block kept on trip 0 anchor");
+        ok(a1 !== undefined && CsTags.get(a1, "Trip") === "1" &&
+            CsTags.get(a1, "TripName") === "UPPER" &&
+            CsTags.get(a1, "TripTeam") === "Bob" &&
+            CsTags.get(a1, "TripDate") === "2021-05-05" &&
+            CsTags.get(a1, "TripDeclination") === "3",
+            "v3: trip 1 anchor metadata");
+
+        // ExcludedShots round-trips through parseShotRow
+        var exText = a0 !== undefined ? CsTags.get(a0, "ExcludedShots") : "";
+        ok(exText !== "", "v3: ExcludedShots present");
+        var exRows = exText.split("\n");
+        ok(exRows.length === 1 && exRows[0].indexOf("0\t") === 0,
+            "v3: one excluded row, trip-prefixed");
+        var exShot = CsModel.parseShotRow(exRows[0].substring(2));
+        ok(exShot.from === "X1" && exShot.to === "X2",
+            "v3: excluded row from/to, got " + exShot.from + "->" + exShot.to);
+        near(exShot.distance, 7, 1e-9, "v3: excluded row distance");
+        near(exShot.azimuth, 10, 1e-9, "v3: excluded row azimuth");
+        ok(exShot.excludeFromAll === true, "v3: excluded row X flag");
+        ok(exShot.notes === "bad shot", "v3: excluded row note, got '" +
+            exShot.notes + "'");
+
+        // UnplacedShots too
+        var unText = a0 !== undefined ? CsTags.get(a0, "UnplacedShots") : "";
+        ok(unText !== "", "v3: UnplacedShots present");
+        if (unText !== "") {
+            var unShot = CsModel.parseShotRow(unText.split("\n")[0].substring(2));
+            ok(unShot.from === "Z1" && unShot.to === "Z2",
+                "v3: unplaced row from/to");
+            near(unShot.distance, 9, 1e-9, "v3: unplaced row distance");
+        }
+
+        // fixed station
+        ok(a0 !== undefined && CsTags.get(a0, "Fixed") === "100,200,5",
+            "v3: Fixed tag, got '" +
+            (a0 !== undefined ? CsTags.get(a0, "Fixed") : "") + "'");
+
+        // CTRL-HIDDEN itself ends the draw back OFF (withLayerOn restored it)
+        var hidLayer = doc.queryLayer("CTRL-HIDDEN");
+        ok(!isNull(hidLayer) && hidLayer.isOff() === true,
+            "v3: CTRL-HIDDEN restored to OFF after the draw");
+    })();
 }
 
 // ---------------------------------------------------------------------

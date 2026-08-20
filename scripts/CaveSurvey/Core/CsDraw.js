@@ -33,12 +33,22 @@ CsDraw.addText = function(doc, op, layerName, text, pos, halign, tagKey, tagValu
     return entity;
 };
 
-/** One line, layered and tagged, into the op. */
-CsDraw.addLine = function(doc, op, layerName, from, to, tagKey, tagValue) {
+/** One line, layered and tagged, into the op. extraTags (optional)
+ *  is a {key: value} map written after the primary tag; empty/null
+ *  values are dropped by CsTags.set itself. */
+CsDraw.addLine = function(doc, op, layerName, from, to, tagKey, tagValue,
+        extraTags) {
     var entity = new RLineEntity(doc, new RLineData(from, to));
     entity.setLayerId(doc.getLayerId(layerName));
     if (tagKey !== undefined && tagValue !== undefined && tagValue !== "") {
         CsTags.set(entity, tagKey, tagValue);
+    }
+    if (extraTags !== undefined && extraTags !== null) {
+        for (var k in extraTags) {
+            if (extraTags.hasOwnProperty(k)) {
+                CsTags.set(entity, k, extraTags[k]);
+            }
+        }
     }
     op.addObject(entity, false);
     return entity;
@@ -76,12 +86,18 @@ CsDraw.station = function(doc, op, pos, data) {
     return pt;
 };
 
-/** One centerline shot line on CTRL-SHOTS, tagged with its endpoints. */
-CsDraw.shotLine = function(doc, op, fromPos, toPos, fromName, toName) {
+/** One centerline shot line, tagged with its endpoints ("A->B" under
+ *  "Shot" -- eraseStations keys on it). layerName (optional) defaults
+ *  to CTRL-SHOTS; extraTags (optional) adds the schema-v3 shot data
+ *  tags. Older 6-argument callers keep working unchanged. */
+CsDraw.shotLine = function(doc, op, fromPos, toPos, fromName, toName,
+        layerName, extraTags) {
     var tag = (fromName !== undefined && toName !== undefined &&
         fromName !== "" && toName !== "") ? (fromName + "->" + toName) : "";
-    return CsDraw.addLine(doc, op, CsLayers.SHOTS, fromPos, toPos,
-        "Shot", tag);
+    return CsDraw.addLine(doc, op,
+        (layerName === undefined || layerName === null) ?
+            CsLayers.SHOTS : layerName,
+        fromPos, toPos, "Shot", tag, extraTags);
 };
 
 /**
@@ -208,7 +224,21 @@ CsDraw.noteLeader = function(doc, op, pos, name, note, azimuthDeg, lrud) {
  * Draws a whole resolved survey as ONE operation (one undo step):
  * stations, labels, shot lines, LRUD, all layered and tagged.
  *
- * \return {stationsDrawn, shotsDrawn, closuresDrawn, skipped}
+ * Tag schema v3: the drawing's tags alone reconstruct the survey.
+ * Every leg line carries its shot's full data (From/To/Trip/ShotSeq/
+ * Distance/Azimuth/Inclination/LRUD, plus backsights/Flags/Note when
+ * present) -- shots live on LEGS, not stations, because a loop
+ * closure's arrival would overwrite the TO station's tags (the old
+ * scheme's collision; station-level Azimuth etc. remain but legs are
+ * canonical). Each trip's first resolved station anchors that trip's
+ * metadata (Trip* tags); the trip-0 anchor additionally carries
+ * StartNote/StartLrud, the legacy Survey* block, and the shots the
+ * drawing can't show as geometry (ExcludedShots/UnplacedShots rows).
+ * excludeFromPlot legs draw on CTRL-HIDDEN (via CsLayers.withLayerOn,
+ * since that layer is off) instead of being skipped.
+ *
+ * \return {stationsDrawn, shotsDrawn, closuresDrawn, hiddenDrawn,
+ *          wallsDrawn, splaysDrawn, skipped}
  */
 CsDraw.survey = function(survey, resolved, originStation, originPos, seqBase) {
     if (seqBase === undefined || seqBase === null) {
@@ -217,6 +247,59 @@ CsDraw.survey = function(survey, resolved, originStation, originPos, seqBase) {
     var doc = getDocument();
     var di = getDocumentInterface();
     CsLayers.ensureSurveyLayers(doc, di);
+    CsModel.ensureTrips(survey);
+
+    // per-trip shot sequence: shotSeqOf[i] = index of survey.shots[i]
+    // within its own trip, in survey.shots order -- what reconstruction
+    // sorts by to restore notebook order inside each trip
+    var shotSeqOf = [];
+    var tripCounters = {};
+    for (var si = 0; si < survey.shots.length; si++) {
+        var sTrip = survey.shots[si].trip || 0;
+        shotSeqOf[si] = tripCounters[sTrip] || 0;
+        tripCounters[sTrip] = shotSeqOf[si] + 1;
+    }
+
+    // a station's trip = trip of the first shot that touches it; the
+    // first drawn station of each trip anchors that trip's metadata
+    var stationTrip = {};
+    for (si = 0; si < survey.shots.length; si++) {
+        var tSh = survey.shots[si];
+        if (tSh.excludeFromAll) {
+            continue;
+        }
+        if (tSh.from !== "" && stationTrip[tSh.from] === undefined) {
+            stationTrip[tSh.from] = tSh.trip || 0;
+        }
+        if (!tSh.splay && tSh.to !== "" &&
+                stationTrip[tSh.to] === undefined) {
+            stationTrip[tSh.to] = tSh.trip || 0;
+        }
+    }
+
+    // the v3 data tags one drawn leg (or splay) carries
+    var legTags = function(shot, shotIndex) {
+        var tags = {
+            From: shot.from,
+            To: shot.to,
+            Trip: shot.trip || 0,
+            ShotSeq: shotSeqOf[shotIndex],
+            Distance: shot.distance,
+            Azimuth: shot.azimuth,
+            Inclination: shot.inclination,
+            Left: CsModel.lrudEntryText(shot.left, shot.leftAll),
+            Right: CsModel.lrudEntryText(shot.right, shot.rightAll),
+            Up: CsModel.lrudEntryText(shot.up, shot.upAll),
+            Down: CsModel.lrudEntryText(shot.down, shot.downAll),
+            BackAzimuth: shot.backAzimuth,
+            BackInclination: shot.backInclination,
+            Flags: CsModel.flagsText(shot),
+            Note: shot.notes
+        };
+        // CsTags.set drops null/"" values itself, so absent backsights,
+        // empty flag sets and unmeasured LRUD simply write no tag
+        return tags;
+    };
 
     var op = new RAddObjectsOperation();
     op.setText("Draw cave survey");
@@ -266,6 +349,7 @@ CsDraw.survey = function(survey, resolved, originStation, originPos, seqBase) {
 
     var stationsDrawn = 0;
     var firstPoint;
+    var tripAnchor = {}; // trip index -> that trip's anchor point entity
     for (var i = 0; i < names.length; i++) {
         var name = names[i];
         var lrud = CsModel.lrudForStation(survey, name);
@@ -299,6 +383,15 @@ CsDraw.survey = function(survey, resolved, originStation, originPos, seqBase) {
         if (firstPoint === undefined) {
             firstPoint = pt;
         }
+        if (stationTrip[name] !== undefined &&
+                tripAnchor[stationTrip[name]] === undefined) {
+            tripAnchor[stationTrip[name]] = pt;
+        }
+        if (survey.fixed.hasOwnProperty(name)) {
+            var fx = survey.fixed[name];
+            CsTags.set(pt, "Fixed", fx.x + "," + fx.y + "," +
+                (fx.z === undefined || fx.z === null ? 0 : fx.z));
+        }
         if (lrud !== null) {
             CsDraw.lrud(doc, op, at(name), name, lrud.azimuth,
                 lrud.left, lrud.right, lrud.up, lrud.down, {
@@ -315,12 +408,15 @@ CsDraw.survey = function(survey, resolved, originStation, originPos, seqBase) {
     }
 
     var shotsDrawn = 0, closuresDrawn = 0;
+    var hiddenLegs = []; // excludeFromPlot legs -- drawn on CTRL-HIDDEN below
     for (i = 0; i < resolved.legs.length; i++) {
         var leg = resolved.legs[i];
         if (leg.shot.excludeFromPlot) {
+            hiddenLegs.push(leg);
             continue;
         }
-        CsDraw.shotLine(doc, op, at(leg.from), at(leg.to), leg.from, leg.to);
+        CsDraw.shotLine(doc, op, at(leg.from), at(leg.to), leg.from, leg.to,
+            CsLayers.SHOTS, legTags(leg.shot, survey.shots.indexOf(leg.shot)));
         if (leg.kind === "closure") {
             closuresDrawn++;
         } else {
@@ -350,8 +446,10 @@ CsDraw.survey = function(survey, resolved, originStation, originPos, seqBase) {
         var so = CsTraverse.offset(sp, CsTraverse.SLOPE);
         var sPos = at(sp.from);
         var sEnd = new RVector(sPos.x + so.dx, sPos.y + so.dy);
+        // the ray carries its readings too (v3): Trip/ShotSeq/Distance/
+        // Azimuth/Inclination/Note, so the splay reconstructs from tags
         CsDraw.addLine(doc, op, CsLayers.SPLAYS, sPos, sEnd,
-            "Splay", splayName);
+            "Splay", splayName, legTags(sp, i));
         var sTip = CsDraw.addPoint(doc, op, CsLayers.SPLAYS, sEnd);
         CsTags.set(sTip, "SplayName", splayName);
         op.addObject(sTip, false);
@@ -401,25 +499,92 @@ CsDraw.survey = function(survey, resolved, originStation, originPos, seqBase) {
         drawRuns(runs.right, CsLayers.LRUD_WALL_RIGHT);
     }
 
-    if (firstPoint !== undefined) {
-        // Restores this tag's pre-trip-split meaning: the drawing-level
+    // Per-trip anchor tags: each trip's metadata rides on its first
+    // resolved station in drawing order, so the drawing carries every
+    // trip's date/team/declination, not just trip 0's.
+    for (var ti = 0; ti < survey.trips.length; ti++) {
+        var anchorPt = tripAnchor[ti];
+        if (anchorPt === undefined) {
+            continue; // no resolved station belongs to this trip
+        }
+        var trip = survey.trips[ti];
+        CsTags.set(anchorPt, "Trip", ti);
+        CsTags.set(anchorPt, "TripName", trip.name);
+        CsTags.set(anchorPt, "TripDate", trip.date);
+        CsTags.set(anchorPt, "TripTeam", trip.team);
+        CsTags.set(anchorPt, "TripDeclination", trip.declination);
+        CsTags.set(anchorPt, "TripDeclinationSource", trip.declinationSource);
+        CsTags.set(anchorPt, "TripDistanceUnit", trip.distanceUnit);
+    }
+
+    var anchor0 = tripAnchor[0] !== undefined ? tripAnchor[0] : firstPoint;
+    if (anchor0 !== undefined) {
+        // Legacy survey-level block, kept for pre-trip readers. The
+        // name restores its pre-trip-split meaning: the drawing-level
         // cave name when known, falling back to the trip name for
         // formats with no separate cave-name concept.
-        CsTags.set(firstPoint, "SurveyName", survey.caveName || survey.name);
-        CsTags.set(firstPoint, "SurveyDate", survey.date);
-        CsTags.set(firstPoint, "SurveyTeam", survey.team);
-        CsTags.set(firstPoint, "Declination", survey.declination);
-        CsTags.set(firstPoint, "DeclinationSource", survey.declinationSource);
-        CsTags.set(firstPoint, "DistanceUnit", survey.distanceUnit);
+        CsTags.set(anchor0, "SurveyName", survey.caveName || survey.name);
+        CsTags.set(anchor0, "SurveyDate", survey.date);
+        CsTags.set(anchor0, "SurveyTeam", survey.team);
+        CsTags.set(anchor0, "Declination", survey.declination);
+        CsTags.set(anchor0, "DeclinationSource", survey.declinationSource);
+        CsTags.set(anchor0, "DistanceUnit", survey.distanceUnit);
+        // v3: the first station's own data (no arriving shot carries it)
+        CsTags.set(anchor0, "StartNote", survey.startNote);
+        CsTags.set(anchor0, "StartLrud",
+            CsModel.startLrudText(survey.startLrud));
+        // Shots the drawing can't show as geometry still reconstruct:
+        // one "tripId TAB shotRow" line per shot (CsTags.set escapes
+        // the newlines between lines itself).
+        var exRows = [];
+        var unRows = [];
+        for (i = 0; i < survey.shots.length; i++) {
+            if (survey.shots[i].excludeFromAll) {
+                exRows.push((survey.shots[i].trip || 0) + "\t" +
+                    CsModel.shotRowText(survey.shots[i]));
+            }
+        }
+        for (i = 0; i < resolved.unresolved.length; i++) {
+            unRows.push((resolved.unresolved[i].trip || 0) + "\t" +
+                CsModel.shotRowText(resolved.unresolved[i]));
+        }
+        if (exRows.length > 0) {
+            CsTags.set(anchor0, "ExcludedShots", exRows.join("\n"));
+        }
+        if (unRows.length > 0) {
+            CsTags.set(anchor0, "UnplacedShots", unRows.join("\n"));
+        }
     }
 
     di.applyOperation(op);
+
+    // excludeFromPlot legs persist on CTRL-HIDDEN with the same tags
+    // as visible legs. That layer is OFF, and adds to an off layer
+    // silently fail in this build -- withLayerOn flips it on around
+    // this one operation and back off after (see CsLayers.OFF).
+    var hiddenDrawn = 0;
+    if (hiddenLegs.length > 0) {
+        CsLayers.withLayerOn(doc, di, CsLayers.HIDDEN, function() {
+            var hop = new RAddObjectsOperation();
+            hop.setText("Draw hidden survey legs");
+            for (var hi = 0; hi < hiddenLegs.length; hi++) {
+                var hLeg = hiddenLegs[hi];
+                CsDraw.shotLine(doc, hop, at(hLeg.from), at(hLeg.to),
+                    hLeg.from, hLeg.to, CsLayers.HIDDEN,
+                    legTags(hLeg.shot, survey.shots.indexOf(hLeg.shot)));
+                hiddenDrawn++;
+            }
+            di.applyOperation(hop);
+        });
+    }
+
     CsStore.migrate(doc, di); // convert + drop a legacy store, if any
 
     return {
         stationsDrawn: stationsDrawn,
         shotsDrawn: shotsDrawn,
         closuresDrawn: closuresDrawn,
+        hiddenDrawn: hiddenDrawn,
         wallsDrawn: wallsDrawn,
         splaysDrawn: splaysDrawn,
         // splays that DID draw no longer count as skipped
