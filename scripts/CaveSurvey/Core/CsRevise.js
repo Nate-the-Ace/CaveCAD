@@ -21,7 +21,12 @@
 //
 // NOT reconstructed: GeoLat/GeoLon/GeoStation. CsModel's survey shape
 // has no geo field to put them in; the georeference stays a
-// drawing-level tag (see CsTags.js) rather than survey data.
+// drawing-level tag (see CsTags.js) rather than survey data. That
+// means CsRevise.apply has to protect it by hand: its non-rigid path
+// redraws every station from scratch, and a redraw would erase the
+// anchor right along with the geometry it has no field to carry. So
+// apply reads the anchor before the redraw and recommits it after --
+// carried across, never reconstructed.
 //
 // Below the reconstruction entry points lives the REVISION MATH: the
 // pure numeric half of the revision framework. reviseDeclination
@@ -877,8 +882,16 @@ CsRevise.isWorldFixedLayer = function(layerName) {
  *           marks (CsDraw.eraseStations) and redraw the revised survey
  *           in place (CsDraw.survey), which rewrites all v3 tags; the
  *           RevisionLog (with the old log carried over) is then
- *           committed onto the new trip-0 anchor. Hand-drawn linework
- *           near moved stations does NOT follow -- the report warns.
+ *           committed onto the new trip-0 anchor. The GeoLat/GeoLon/
+ *           GeoStation georeference anchor gets the same treatment --
+ *           read off its station before the erase (CsDraw.survey has
+ *           no field for it; see the module header) and recommitted
+ *           after onto whichever point now carries that same Station
+ *           name. When that station did not survive the revision (the
+ *           leg it sat on got deleted), nothing is invented to carry
+ *           it: report.geoAnchorLost names the lost station instead.
+ *           Hand-drawn linework near moved stations does NOT follow --
+ *           the report warns.
  *
  * OFF-layer caveat, probed empirically in this build: add, MODIFY and
  * DELETE operations are all silently refused for entities on a layer
@@ -906,6 +919,13 @@ CsRevise.isWorldFixedLayer = function(layerName) {
  *                   recon.anchorPos had to stand in
  *   anchorUsed      {name, source} the point the revision pivoted on;
  *                   source is "georef", "trip0" or "stale"
+ *   geoAnchorLost   present (the lost station's name) only when a
+ *                   non-rigid revision had a GeoLat/GeoLon/GeoStation
+ *                   anchor to carry across the redraw but the station
+ *                   it lived on is gone from the revised survey.
+ *                   Absent entirely when there was no anchor to carry,
+ *                   or it carried across fine -- so existing callers
+ *                   that never check for it see no behavior change.
  * }
  */
 CsRevise.apply = function(doc, di, recon, newSurvey) {
@@ -940,6 +960,12 @@ CsRevise.apply = function(doc, di, recon, newSurvey) {
     // surveyFromDocument drops GeoLat/GeoLon/GeoStation (CsModel has no
     // geo field to put them in), so this module looks them up itself.
     var geoName = "";
+    // Snapshotted here, before either revision path runs, so the
+    // non-rigid path below can recommit it after CsDraw.survey redraws
+    // the station it rides on out from under it (see the module
+    // header). null when the drawing carries no geo anchor at all --
+    // then there is nothing to carry and nothing to report.
+    var geoAnchor = null;
     var gids = doc.queryAllEntities(false, false);
     for (var gi = 0; gi < gids.length; gi++) {
         var ge = doc.queryEntity(gids[gi]);
@@ -949,6 +975,8 @@ CsRevise.apply = function(doc, di, recon, newSurvey) {
         var gs = CsTags.get(ge, "GeoStation");
         if (gs !== "") {
             geoName = gs;
+            geoAnchor = { station: gs, lat: CsTags.get(ge, "GeoLat"),
+                lon: CsTags.get(ge, "GeoLon") };
             break;
         }
     }
@@ -1120,6 +1148,27 @@ CsRevise.apply = function(doc, di, recon, newSurvey) {
         CsTags.get(oldAnchor0, "RevisionLog") : "";
     var newLog = logLines.length === 0 ? prevLog :
         (prevLog !== "" ? prevLog + "\n" : "") + logLines.join("\n");
+
+    // the redrawn point carrying Station = name, or null -- same
+    // lookup livePosOf uses above, but returning the entity itself
+    // since the geo anchor tags below get COMMITTED onto it, not just
+    // read
+    var findStationEntity = function(name) {
+        var ids = doc.queryAllEntities(false, false);
+        for (var i = 0; i < ids.length; i++) {
+            var e = doc.queryEntity(ids[i]);
+            if (isNull(e)) {
+                continue;
+            }
+            if (CsTags.get(e, "Station") === name) {
+                return e;
+            }
+        }
+        return null;
+    };
+    // set only on the non-rigid path, only when the geo anchor existed
+    // but its station did not survive the revision -- see below
+    var geoAnchorLost = null;
 
     // -- OFF layers holding entities: ops there are silently refused --
     var offLayers = [];
@@ -1343,6 +1392,28 @@ CsRevise.apply = function(doc, di, recon, newSurvey) {
                 CsTags.commit(di, newAnchor0, { RevisionLog: newLog });
             }
         }
+        // Same problem, same shape: GeoLat/GeoLon/GeoStation rode on a
+        // station point that eraseStations just erased, and
+        // CsDraw.survey has no field to have put it back into (see the
+        // module header) -- so recommit the tags snapshotted above
+        // onto whichever point now carries that same Station name.
+        if (geoAnchor !== null) {
+            var newGeoEntity = findStationEntity(geoAnchor.station);
+            if (newGeoEntity !== null) {
+                CsTags.commit(di, newGeoEntity, {
+                    GeoLat: geoAnchor.lat,
+                    GeoLon: geoAnchor.lon,
+                    GeoStation: geoAnchor.station
+                });
+            } else {
+                // the anchored station didn't survive this revision --
+                // the user deleted that leg. There is no honest
+                // carrier for the anchor left in the drawing, so
+                // report it rather than silently dropping it or
+                // inventing a new home for it.
+                geoAnchorLost = geoAnchor.station;
+            }
+        }
     }
 
     // -- 6. report -----------------------------------------------------
@@ -1358,7 +1429,7 @@ CsRevise.apply = function(doc, di, recon, newSurvey) {
         }
         return out;
     };
-    return {
+    var report = {
         rigid: cls.rigid,
         moved: cls.moved,
         stationsChanged: stationsChanged,
@@ -1368,4 +1439,10 @@ CsRevise.apply = function(doc, di, recon, newSurvey) {
         anchorMissing: anchorMissing,
         anchorUsed: { name: anchorName, source: anchorSource }
     };
+    if (geoAnchorLost !== null) {
+        // absent entirely rather than null when nothing was lost, so a
+        // caller that never checks for it sees no shape change
+        report.geoAnchorLost = geoAnchorLost;
+    }
+    return report;
 };
