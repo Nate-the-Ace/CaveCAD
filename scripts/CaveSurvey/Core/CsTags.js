@@ -37,7 +37,10 @@ CsTags.set = function(entity, key, value) {
         return;
     }
     try {
-        entity.setCustomProperty(CsTags.GROUP, key, value);
+        // newlines would break single-line carriers (DXF XDATA group
+        // values); escape on write, unescape in CsTags.get
+        var v = String(value).replace(/\\/g, "\\\\").replace(/\r?\n/g, "\\n");
+        entity.setCustomProperty(CsTags.GROUP, key, v);
     } catch (e) {
         // not supported here -- non-critical
     }
@@ -83,7 +86,8 @@ CsTags.get = function(entity, key) {
     if (v === "" && typeof CsStore !== "undefined") {
         v = CsStore.lookup(entity, key);
     }
-    return v;
+    // undo the newline escaping applied in CsTags.set
+    return v.replace(/\\n/g, "\n").replace(/\\\\/g, "\\");
 };
 
 /** Reads a numeric tag; null if absent or not a number. */

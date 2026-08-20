@@ -566,7 +566,7 @@ if (!IS_NODE) {
         var dsv = CsModel.newSurvey();
         dsv.startNote = "entrance drop, rig here";
         var d1 = shotOf("D1", "D2", 10, 0);
-        d1.notes = "tight squeeze";
+        d1.notes = "tight squeeze\nwatch the ceiling";
         d1.left = 2; d1.right = 3; d1.up = 1; d1.down = 0.5;
         var d2 = shotOf("D2", "D3", 10, 90);
         d2.left = 1; d2.right = 1;
@@ -610,8 +610,8 @@ if (!IS_NODE) {
         ok(rebuilt.shots.length === 2, "tags: survey rebuilt from drawing");
         ok(rebuilt.startNote === "entrance drop, rig here",
             "notes: start station note recovered");
-        ok(rebuilt.shots[0].notes === "tight squeeze",
-            "notes: station note recovered, got '" + rebuilt.shots[0].notes + "'");
+        ok(rebuilt.shots[0].notes === "tight squeeze\nwatch the ceiling",
+            "notes: multiline note recovered, got '" + rebuilt.shots[0].notes + "'");
         near(rebuilt.shots[0].left, 2, 1e-9, "tags: LRUD readable from drawing");
 
         // multi-reading LRUD: "5/10" draws two tagged tips
@@ -661,8 +661,8 @@ if (!IS_NODE) {
         ok(rebuilt2.shots.length === 2,
             "persist: survey rebuilt after reopen");
         if (rebuilt2.shots.length === 2) {
-            ok(rebuilt2.shots[0].notes === "tight squeeze",
-                "persist: station note survives reopen");
+            ok(rebuilt2.shots[0].notes === "tight squeeze\nwatch the ceiling",
+                "persist: multiline note survives reopen");
         }
         if (rebuilt2.shots.length === 2) {
             near(rebuilt2.shots[0].left, 2, 1e-9,
