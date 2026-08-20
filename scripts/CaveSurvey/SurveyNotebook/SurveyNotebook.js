@@ -383,13 +383,11 @@ SurveyNotebook.addStationRow = function(w, stationName) {
     grid.addWidget(row.r, stRow, 7);
     grid.addWidget(row.u, stRow, 8);
     grid.addWidget(row.d, stRow, 9);
-    // span two grid lines (this station's line and the next shot's)
-    // so the note box gets its height without stretching the rows
-    try {
-        grid.addWidget(row.notes, stRow, 10, 2, 1);
-    } catch (eSpan) {
-        grid.addWidget(row.notes, stRow, 10);
-    }
+    // one grid cell: the box's own height makes the station line
+    // taller, which keeps it aligned with its row (a 2-row span put
+    // the LAST station's note into the stretchy slack row and sent
+    // it drifting down the panel)
+    grid.addWidget(row.notes, stRow, 10);
     row.widgets.push(row.name, row.l, row.r, row.u, row.d, row.notes);
 
     // Pin the page to the TOP of the scroll area: all the vertical
