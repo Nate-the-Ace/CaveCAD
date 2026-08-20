@@ -1,18 +1,17 @@
 // RebuildSurveyData.js
 //
 // QCAD add-on tool: recover survey data for LEGACY drawings -- ones
-// drawn before the survey data store existed (or whose tags were
-// lost by any pre-store save; this QCAD build never wrote custom
-// properties to disk, so that is every drawing saved before the
-// store shipped).
+// drawn by builds that lost their tags on save (before tags persisted
+// as entity XDATA, and before the interim survey data store).
 //
 // WHAT IT DOES: walks the geometry the old builds left behind --
 // POINT entities on CTRL-STATIONS with a name label on
 // CTRL-STATION-LABELS beside them, LRUD tip points on CTRL-LRUD near
 // their station -- re-derives each station's name, order and LRUD
-// names, re-tags everything, and writes the survey data store. After
-// one run, tie-ins, replace-on-draw, LRUD Walls and Survey Stats work
-// on the old drawing again.
+// names, and tags the entities directly (custom properties persist
+// natively now). A leftover survey data store text is migrated and
+// deleted. After one run, tie-ins, replace-on-draw, LRUD Walls and
+// Survey Stats work on the old drawing again.
 //
 // HONEST LIMITS: what geometry does not carry cannot be recovered --
 // azimuth, inclination and numeric LRUD readings of legacy shots are
@@ -36,7 +35,11 @@ function rebuildSurveyDataRun() {
         return;
     }
     var di = getDocumentInterface();
-    CsStore.ensureLoaded(doc);
+    // convert a legacy survey data store into entity tags first, so
+    // the tagged-detection below reads real properties -- and so the
+    // store text disappears even when there is nothing else to do
+    var hadStore = CsStore.findStoreEntity(doc) !== null;
+    CsStore.migrate(doc, di);
 
     var LABEL_RADIUS = CsDraw.TEXT_HEIGHT * 6;   // label sits ~0.75 from point
     var LRUD_RADIUS = 1000000;                    // tips matched to NEAREST station
@@ -215,20 +218,23 @@ function rebuildSurveyDataRun() {
     }
 
     if (tagsWritten === 0 && lrudNamed === 0) {
-        EAction.handleUserMessage("Rebuild Survey Data: nothing to do -- " +
-            "every station already carries its data.");
+        EAction.handleUserMessage("Rebuild Survey Data: " +
+            (hadStore ? "migrated the survey data store onto the " +
+                "entities and removed it; nothing else to do." :
+                "nothing to do -- every station already carries its " +
+                "data."));
         return;
     }
 
     di.applyOperation(op);
-    CsStore.sync(doc, di);
+    CsStore.migrate(doc, di);
 
     QMessageBox.information(getMainWindow(), "Rebuild Survey Data",
         "Recovered " + tagsWritten + " station" +
         (tagsWritten === 1 ? "" : "s") + " and " + lrudNamed +
         " LRUD point" + (lrudNamed === 1 ? "" : "s") +
-        " from the drawing's geometry, and wrote the survey data " +
-        "store.\n\nTie-ins, redraw-replace, LRUD Walls and Survey " +
+        " from the drawing's geometry and tagged the entities " +
+        "directly.\n\nTie-ins, redraw-replace, LRUD Walls and Survey " +
         "Stats now work on this drawing. What geometry doesn't carry " +
         "-- legacy azimuth/inclination readings and numeric LRUD -- " +
         "could not be recovered; positions are exact.");

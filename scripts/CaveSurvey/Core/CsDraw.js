@@ -279,7 +279,7 @@ CsDraw.survey = function(survey, resolved, originStation, originPos, seqBase) {
     }
 
     di.applyOperation(op);
-    CsStore.sync(doc, di); // tags only persist through the store
+    CsStore.migrate(doc, di); // convert + drop a legacy store, if any
 
     return {
         stationsDrawn: stationsDrawn,
@@ -356,7 +356,7 @@ CsDraw.eraseStations = function(doc, stationNames) {
     if (removed > 0) {
         var di2 = getDocumentInterface();
         di2.applyOperation(op);
-        CsStore.sync(doc, di2);
+        CsStore.migrate(doc, di2);
     }
     return removed;
 };

@@ -1,42 +1,37 @@
-// CsStore.js -- tag persistence that survives save and reopen.
+// CsStore.js -- LEGACY survey-store migration.
 //
 // Part of the Cave Survey Core library. QCAD context only.
 //
-// THE PROBLEM: this QCAD build never writes custom properties to
-// disk -- not in any DXF/DWG format, with either writer (verified by
-// headless export probing). Tags work in memory, then a save/reopen
-// silently discards every one, killing tie-ins, replace-on-draw,
-// LRUD Walls and Stats on any drawing that has been closed once.
+// HISTORY: early builds appeared to never write custom properties to
+// disk, so tags were serialized into one MTEXT entity ("CAVESURVEYDB")
+// on the CTRL-DATA layer -- the "survey data store". That diagnosis no
+// longer holds: the current build persists custom properties as DXF
+// XDATA (1001 CaveSurvey groups) and reads them back on open, verified
+// by a headless save/reopen round trip. Entity tags are now the single
+// durable truth and nothing writes the store anymore.
 //
-// THE FIX: a "survey database" -- one text entity on the CTRL-DATA
-// layer -- rewritten whenever tags change and consulted by CsTags.get
-// as the fallback when an entity's in-memory tag is empty.
+// WHAT REMAINS here is the legacy path:
+//   - lookup/ensureLoaded: read-only fallback so tools can still read
+//     tags on an old drawing whose data lives only in its store text.
+//   - migrate: copies a store's records onto their entities as real
+//     custom properties, then deletes the store text (and the CTRL-DATA
+//     layer once empty). Runs wherever tags are written, so any legacy
+//     drawing is converted the first time a tool modifies it.
 //
 // Records are keyed by GEOMETRY (entity type + position), not by
-// handle: the exporter RENUMBERS handles on save (learned from a real
-// file whose store keys matched nothing after reopen), but a point's
+// handle: the exporter renumbered handles on save, but a point's
 // coordinates survive any round trip bit-for-bit close. Position is
-// rounded to 1e-4 drawing units for matching; co-located duplicates
-// (tie-in redraws) share one record, which is correct -- they carry
-// the same data.
+// rounded to 1e-4 drawing units for matching.
 
 var CsStore = {};
 
 CsStore.LAYER = "CTRL-DATA";
 CsStore.MARKER = "CAVESURVEYDB v3 ";
-// Record format (deliberately NOT JSON: MTEXT treats braces as
+// Legacy record format (deliberately NOT JSON: MTEXT treats braces as
 // formatting groups, and this build only exposes getPlainText):
 //   <type>:<x>:<y>|key=encoded|key=encoded;;...
 // with x/y printed to 4 decimals; values URI-encoded, so separators
 // can never occur inside them.
-// every tag key the suite writes; sync scans these
-CsStore.KEYS = ["Station", "Seq", "Azimuth", "Inclination", "Note",
-    "Left", "Right", "Up", "Down", "Elevation",
-    "StationLabel", "LRUDName", "LRUDLine", "LRUDNote", "Shot",
-    "WallRun", "BoundaryId", "LegendRow",
-    "GeoLat", "GeoLon", "GeoStation",
-    "SurveyName", "SurveyDate", "SurveyTeam",
-    "Declination", "DeclinationSource", "DistanceUnit"];
 
 CsStore.map = null; // geoKey -> {key: value}, for the loaded document
 
@@ -67,7 +62,7 @@ CsStore.geoKey = function(entity) {
     return entity.getType() + ":" + p.x.toFixed(4) + ":" + p.y.toFixed(4);
 };
 
-/** Finds the store text entity, or null. */
+/** Finds the legacy store text entity, or null. */
 CsStore.findStoreEntity = function(doc) {
     if (!doc.hasLayer(CsStore.LAYER)) {
         return null;
@@ -81,7 +76,7 @@ CsStore.findStoreEntity = function(doc) {
         }
         if (typeof e.getPlainText === "function") {
             var t = String(e.getPlainText());
-            // any version: sync must find and REPLACE stale stores too
+            // any version: migration must find stale stores too
             if (t.indexOf("CAVESURVEYDB ") === 0) {
                 return e;
             }
@@ -90,7 +85,7 @@ CsStore.findStoreEntity = function(doc) {
     return null;
 };
 
-/** Loads (always fresh) the store JSON for this document. */
+/** Loads (always fresh) the legacy store map for this document. */
 CsStore.ensureLoaded = function(doc) {
     CsStore.map = {};
     var store = CsStore.findStoreEntity(doc);
@@ -130,27 +125,7 @@ CsStore.parse = function(text) {
     return map;
 };
 
-/** Serializes the handle map into the record format. */
-CsStore.serialize = function(entities) {
-    var records = [];
-    for (var h in entities) {
-        if (!entities.hasOwnProperty(h)) {
-            continue;
-        }
-        var parts = [h];
-        for (var k in entities[h]) {
-            if (entities[h].hasOwnProperty(k)) {
-                parts.push(k + "=" + encodeURIComponent(String(entities[h][k])));
-            }
-        }
-        if (parts.length > 1) {
-            records.push(parts.join("|"));
-        }
-    }
-    return CsStore.MARKER + records.join(";;");
-};
-
-/** Fallback lookup for CsTags.get. */
+/** Read-only fallback lookup for CsTags.get on unmigrated drawings. */
 CsStore.lookup = function(entity, key) {
     if (CsStore.map === null) {
         return "";
@@ -167,90 +142,86 @@ CsStore.lookup = function(entity, key) {
 };
 
 /**
- * Rebuilds and rewrites the store: native in-memory tags win, the
- * previously stored record fills in what a reopen erased, and
- * handles no longer in the document drop out. One operation.
+ * Migrates a legacy store into entity custom properties and deletes
+ * the store text. No-op (returns 0) when the document has no store.
+ *
+ * Store values are kept in the escaped form CsTags.set wrote them in
+ * (backslashes doubled, newlines as \n), so they are written back RAW
+ * with setCustomProperty -- passing them through CsTags.set again
+ * would double-escape; CsTags.get undoes exactly one level.
+ *
+ * An entity's own non-empty tag always wins over the store record --
+ * the store was only ever the fallback for tags a reopen erased.
+ *
+ * \return number of entities that received migrated tags
  */
-CsStore.sync = function(doc, di) {
+CsStore.migrate = function(doc, di) {
     var storeEntity = CsStore.findStoreEntity(doc);
-    var old = storeEntity !== null ?
-        CsStore.parse(String(storeEntity.getPlainText())) : {};
+    if (storeEntity === null) {
+        CsStore.map = {};
+        return 0;
+    }
+    var records = CsStore.parse(String(storeEntity.getPlainText()));
 
-    var entities = {};
+    var op = new RModifyObjectsOperation();
+    op.setText("Migrate survey data to entity tags");
+    var migrated = 0;
     var ids = doc.queryAllEntities(false, true);
     for (var i = 0; i < ids.length; i++) {
         var e = doc.queryEntity(ids[i]);
-        if (isNull(e)) {
+        if (isNull(e) || typeof e.setCustomProperty !== "function") {
             continue;
         }
         var gk = CsStore.geoKey(e);
-        if (gk === null) {
+        if (gk === null || records[gk] === undefined) {
             continue;
         }
-        // carry the old record for this geometry forward, overlay
-        // whatever native in-memory tags the entity still has
-        var rec = old[gk] !== undefined ? old[gk] : {};
-        var found = old[gk] !== undefined;
-        for (var k = 0; k < CsStore.KEYS.length; k++) {
-            var key = CsStore.KEYS[k];
-            var v = "";
-            if (typeof e.getCustomProperty === "function") {
-                try {
-                    v = e.getCustomProperty(CsTags.GROUP, key, "");
-                    v = (v === undefined || v === null) ? "" : String(v);
-                } catch (e2) {
-                    v = "";
-                }
+        var rec = records[gk];
+        var changed = false;
+        for (var k in rec) {
+            if (!rec.hasOwnProperty(k) || rec[k] === "") {
+                continue;
             }
-            if (v !== "") {
-                rec[key] = v;
-                found = true;
+            var existing = "";
+            try {
+                existing = e.getCustomProperty(CsTags.GROUP, k, "");
+                existing = (existing === undefined || existing === null) ?
+                    "" : String(existing);
+            } catch (e2) {
+                existing = "";
+            }
+            if (existing !== "") {
+                continue;
+            }
+            try {
+                e.setCustomProperty(CsTags.GROUP, k, rec[k]);
+                changed = true;
+            } catch (e3) {
+                // not supported here -- the store text stays as backup
+                CsStore.map = records;
+                return 0;
             }
         }
-        if (found) {
-            if (entities[gk] !== undefined) {
-                // co-located duplicate: merge (tie-in redraws share data)
-                for (var mk in rec) {
-                    if (rec.hasOwnProperty(mk)) {
-                        entities[gk][mk] = rec[mk];
-                    }
-                }
-            } else {
-                entities[gk] = rec;
-            }
+        if (changed) {
+            op.addObject(e, false);
+            migrated++;
         }
     }
 
-    // Write the store text. The layer lives switched OFF so the
-    // store never shows on screen or plot -- but off layers refuse
-    // adds, so the op turns the layer on FIRST (object order within
-    // one operation is sequential), adds the text, and a second tiny
-    // op flips the layer back off.
-    CsLayers.ensure(doc, di, CsStore.LAYER);
-
-    var lay = doc.queryLayer(CsStore.LAYER);
-    lay.setOff(false);
-
-    var op = new RAddObjectsOperation();
-    op.setText("Survey data store");
-    op.addObject(lay, false);
-    if (storeEntity !== null) {
-        op.deleteObject(storeEntity);
-    }
-    var payload = CsStore.serialize(entities);
-    var data = new RTextData(new RVector(0, 0), new RVector(0, 0),
-        0.1, 100.0, RS.VAlignMiddle, RS.HAlignLeft, RS.LeftToRight,
-        RS.Exact, 1.0, payload, "standard", false, false, 0.0, false);
-    var text = new RTextEntity(doc, data);
-    text.setLayerId(doc.getLayerId(CsStore.LAYER));
-    op.addObject(text, false);
+    op.deleteObject(storeEntity);
     di.applyOperation(op);
 
-    var layOff = doc.queryLayer(CsStore.LAYER);
-    layOff.setOff(true);
-    var opOff = new RModifyObjectsOperation();
-    opOff.addObject(layOff, false);
-    di.applyOperation(opOff);
+    // the store was CTRL-DATA's only tenant; drop the layer once empty
+    if (doc.hasLayer(CsStore.LAYER)) {
+        var layerId = doc.getLayerId(CsStore.LAYER);
+        var remaining = doc.queryLayerEntities(layerId, true);
+        if (remaining.length === 0) {
+            var opLayer = new RDeleteObjectsOperation();
+            opLayer.deleteObject(doc.queryLayer(CsStore.LAYER));
+            di.applyOperation(opLayer);
+        }
+    }
 
-    CsStore.map = entities;
+    CsStore.map = {};
+    return migrated;
 };

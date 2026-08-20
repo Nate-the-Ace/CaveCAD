@@ -62,14 +62,16 @@ CsTags.commit = function(di, entity, keyValues) {
     op.addObject(entity, false);
     di.applyOperation(op);
     if (typeof CsStore !== "undefined") {
-        CsStore.sync(getDocument(), di);
+        // custom properties persist natively (DXF XDATA); this only
+        // converts a legacy drawing's store text, then deletes it
+        CsStore.migrate(getDocument(), di);
     }
 };
 
 /** Reads one tag, "" if absent or unsupported. Falls back to the
- *  survey data store (CsStore) for entities whose in-memory tags a
- *  save/reopen erased -- this build never writes custom properties
- *  to disk, so the store is the durable truth. */
+ *  legacy survey data store (CsStore) for drawings saved by early
+ *  builds, whose tags live only in the store text until a modifying
+ *  tool migrates them onto the entities. */
 CsTags.get = function(entity, key) {
     if (entity === undefined || entity === null) {
         return "";
