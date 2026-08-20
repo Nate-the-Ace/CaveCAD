@@ -85,6 +85,7 @@ function loadRepoScript(scriptPath) {
 // Load order: leaves first.
 var CORE_FILES = [
     "scripts/CaveSurvey/Core/CsUnits.js",
+    "scripts/CaveSurvey/Core/CsGeoProject.js",
     "scripts/CaveSurvey/Core/CsAngles.js",
     "scripts/CaveSurvey/Core/CsIgrfCoeffs.js",
     "scripts/CaveSurvey/Core/CsGeomag.js",
@@ -2772,6 +2773,115 @@ if (!IS_NODE) {
             "rsd-idem: start note survives both runs, got '" +
             rec2.survey.startNote + "'");
     })();
+}
+
+// ---------------------------------------------------------------------
+// CsGeoProject -- projection and request math for the aerial basemap.
+// ---------------------------------------------------------------------
+{
+    // Mercator anchors. The equator maps to y=0; 180 degrees of
+    // longitude is half the Mercator world width.
+    var m0 = CsGeoProject.toMercator(0, 0);
+    near(m0.x, 0, 1e-6, "mercator: lon 0 -> x 0");
+    near(m0.y, 0, 1e-6, "mercator: lat 0 -> y 0");
+    near(CsGeoProject.toMercator(0, 180).x, 20037508.342789244, 1e-3,
+        "mercator: lon 180 -> half world width");
+
+    // Round-trip through both directions, at a cave-country latitude.
+    var rt = CsGeoProject.fromMercator(
+        CsGeoProject.toMercator(39.1653, -86.5264).x,
+        CsGeoProject.toMercator(39.1653, -86.5264).y);
+    near(rt.lat, 39.1653, 1e-6, "mercator round-trip: latitude");
+    near(rt.lon, -86.5264, 1e-6, "mercator round-trip: longitude");
+
+    // Ground extent: a 100 ft square drawing is 30.48 m before margin,
+    // and a 25% margin makes it 38.1 m.
+    var extFt = CsGeoProject.groundExtent(
+        { width: 100, height: 100 }, CsUnits.FEET, 0.25, 10);
+    near(extFt.width, 38.1, 1e-6, "groundExtent: feet converted + margin");
+    near(extFt.height, 38.1, 1e-6, "groundExtent: feet height");
+
+    // A metre drawing needs no conversion.
+    var extM = CsGeoProject.groundExtent(
+        { width: 400, height: 200 }, CsUnits.METERS, 0.25, 150);
+    near(extM.width, 500, 1e-6, "groundExtent: metres + margin");
+    near(extM.height, 250, 1e-6, "groundExtent: metres height");
+
+    // Degenerate extent (a single station) floors, per axis.
+    var extFloor = CsGeoProject.groundExtent(
+        { width: 0, height: 0 }, CsUnits.METERS, 0.25, 150);
+    near(extFloor.width, 150, 1e-6, "groundExtent: degenerate floors width");
+    near(extFloor.height, 150, 1e-6, "groundExtent: degenerate floors height");
+
+    // THE SQUARENESS INVARIANT. A lat/lon request stretches the image
+    // because a degree of longitude is shorter than a degree of
+    // latitude; working in Mercator and matching the pixel aspect to
+    // the bbox aspect keeps ground pixels square. This is the assertion
+    // that would have caught the original 4326 design.
+    var bbox = CsGeoProject.mercatorBbox(39.1653, -86.5264,
+        { width: 800, height: 400 }, { x: 0, y: 0 });
+    var size = CsGeoProject.pixelSize(bbox, 0.3, 4000, 256);
+    var bboxAspect = (bbox.xmax - bbox.xmin) / (bbox.ymax - bbox.ymin);
+    var pixAspect = size.w / size.h;
+    near(pixAspect / bboxAspect, 1.0, 0.01,
+        "pixelSize: pixel aspect matches bbox aspect (square ground pixels)");
+    near(bboxAspect, 2.0, 1e-6, "mercatorBbox: 800x400 ground is 2:1 in Mercator");
+
+    // Mercator inflates ground distance by 1/cos(lat), so the bbox is
+    // WIDER in Mercator metres than the ground extent it represents.
+    var mercWidth = bbox.xmax - bbox.xmin;
+    ok(mercWidth > 800, "mercatorBbox: Mercator metres exceed ground metres");
+    near(mercWidth * Math.cos(39.1653 * Math.PI / 180), 800, 1.0,
+        "mercatorBbox: de-inflating by cos(lat) recovers ground width");
+
+    // Resolution clamps. A tiny extent must not ask for fewer than the
+    // floor; a huge one must not exceed the service's 4000 limit.
+    var tiny = CsGeoProject.pixelSize(
+        CsGeoProject.mercatorBbox(39.1653, -86.5264,
+            { width: 10, height: 10 }, { x: 0, y: 0 }), 0.3, 4000, 256);
+    ok(tiny.w >= 256 && tiny.h >= 256, "pixelSize: floors at 256 px");
+    var huge = CsGeoProject.pixelSize(
+        CsGeoProject.mercatorBbox(39.1653, -86.5264,
+            { width: 50000, height: 50000 }, { x: 0, y: 0 }), 0.3, 4000, 256);
+    ok(huge.w <= 4000 && huge.h <= 4000, "pixelSize: clamps at the 4000 px service limit");
+
+    // Drawing scale: units per pixel, in the drawing's own units.
+    var uppM = CsGeoProject.drawingUnitsPerPixel(bbox, size.w, 39.1653,
+        CsUnits.METERS);
+    near(uppM * size.w, 800, 1.0, "drawingUnitsPerPixel: metres span the ground width");
+    var uppFt = CsGeoProject.drawingUnitsPerPixel(bbox, size.w, 39.1653,
+        CsUnits.FEET);
+    near(uppFt / uppM, CsUnits.FEET_PER_METER, 1e-6,
+        "drawingUnitsPerPixel: feet drawing scales by feet-per-metre");
+
+    // The anchor offset shifts the window without resizing it.
+    var off = CsGeoProject.mercatorBbox(39.1653, -86.5264,
+        { width: 800, height: 400 }, { x: 100, y: -50 });
+    near((off.xmax - off.xmin), (bbox.xmax - bbox.xmin), 1e-6,
+        "mercatorBbox: offset preserves width");
+    ok(off.xmin > bbox.xmin, "mercatorBbox: positive x offset moves the window east");
+    ok(off.ymin < bbox.ymin, "mercatorBbox: negative y offset moves the window south");
+
+    // URL construction.
+    var url = CsGeoProject.naipUrl(bbox, size);
+    ok(url.indexOf("bboxSR=3857") >= 0, "naipUrl: bbox spatial reference");
+    ok(url.indexOf("imageSR=3857") >= 0, "naipUrl: image spatial reference");
+    ok(url.indexOf("format=png") >= 0, "naipUrl: PNG format");
+    ok(url.indexOf("f=image") >= 0, "naipUrl: image response");
+    ok(url.indexOf("USGSNAIPImagery") >= 0, "naipUrl: NAIP service");
+    ok(url.indexOf("size=" + size.w + "," + size.h) >= 0, "naipUrl: requested size");
+    ok(url.indexOf(" ") < 0, "naipUrl: no unescaped spaces");
+
+    // Coverage. NAIP is US-only; a European request must be refused
+    // before it wastes a round trip.
+    ok(CsGeoProject.insideCoverage(
+        CsGeoProject.mercatorBbox(39.1653, -86.5264,
+            { width: 800, height: 400 }, { x: 0, y: 0 })) === true,
+        "insideCoverage: Indiana is inside NAIP");
+    ok(CsGeoProject.insideCoverage(
+        CsGeoProject.mercatorBbox(47.5, 11.0,
+            { width: 800, height: 400 }, { x: 0, y: 0 })) === false,
+        "insideCoverage: the Alps are outside NAIP");
 }
 
 // ---------------------------------------------------------------------

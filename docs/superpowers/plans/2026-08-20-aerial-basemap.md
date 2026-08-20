@@ -111,7 +111,7 @@ Then append this block just before the `// Report.` divider near the end of the 
     // Ground extent: a 100 ft square drawing is 30.48 m before margin,
     // and a 25% margin makes it 38.1 m.
     var extFt = CsGeoProject.groundExtent(
-        { width: 100, height: 100 }, CsUnits.FEET, 0.25, 150);
+        { width: 100, height: 100 }, CsUnits.FEET, 0.25, 10);
     near(extFt.width, 38.1, 1e-6, "groundExtent: feet converted + margin");
     near(extFt.height, 38.1, 1e-6, "groundExtent: feet height");
 
