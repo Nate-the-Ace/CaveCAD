@@ -6410,6 +6410,133 @@ ok(gLin.links.length > 0, "linux git help has a link");
 ok(CsSetup.installHelp("osx", "nonsense") === null,
     "installHelp returns null for an unknown program");
 
+// linux/gh has no command, DELIBERATELY: there is no single
+// cross-distro install line (apt repo vs dnf vs snap), and writing
+// one un-verified would repeat the memory-written-fact pattern that
+// caused most of this slice's defects (see the fixture-provenance
+// rule at the top of the plan). Consumers should render links-only
+// when command is empty; this pins the "" as a decision, not an
+// oversight.
+ok(CsSetup.installHelp("linux", "gh").command === "",
+    "installHelp('linux', 'gh').command is deliberately empty -- no verified " +
+    "single cross-distro command exists");
+
+// ---------------------------------------------------------------------
+// CsSetup.verify / discover -- stat cannot tell whether a bare name
+// runs; only launching it can. These use an injected CsProc backend
+// so no real process starts, mirroring the CsProc section above.
+// ---------------------------------------------------------------------
+
+// verify(): starts and exits 0.
+CsProc.setBackend(function(prog, argv, opts) {
+    return { code: 0, out: "gh version 2.97.0", err: "", timedOut: false,
+             notStarted: false };
+});
+var vOk = CsSetup.verify("gh", CsHub.argvVersion());
+ok(vOk.ok === true, "verify.ok is true when the process starts and exits 0");
+ok(vOk.path === "gh", "verify.path echoes the program it ran");
+ok(vOk.notStarted === false, "verify.notStarted is false when it launched fine");
+
+// verify(): never starts at all (the real execve failure shape,
+// confirmed live against a stripped-PATH launch -- see the plan's
+// "ALREADY PROVEN" evidence).
+CsProc.setBackend(function(prog, argv, opts) {
+    return { code: -1, out: "", err: "Child process set up failed: execve: " +
+             "No such file or directory", timedOut: false, notStarted: true };
+});
+var vMissing = CsSetup.verify("gh", CsHub.argvVersion());
+ok(vMissing.ok === false, "verify.ok is false when the process never starts");
+ok(vMissing.notStarted === true, "verify.notStarted is true for a missing binary");
+ok(vMissing.err.indexOf("No such file") !== -1,
+    "verify.err carries the execve message for a missing binary");
+
+// verify(): starts, but exits non-zero -- a real, different problem,
+// not "not installed". ok must be false, but notStarted must be
+// false too, so a caller (discover(), below) can tell them apart.
+CsProc.setBackend(function(prog, argv, opts) {
+    return { code: 1, out: "", err: "gh: some other failure", timedOut: false,
+             notStarted: false };
+});
+var vBroken = CsSetup.verify("gh", CsHub.argvVersion());
+ok(vBroken.ok === false,
+    "verify.ok is false on a non-zero exit even though the process started");
+ok(vBroken.notStarted === false,
+    "verify.notStarted is false on a non-zero exit -- it did start");
+
+// discover(), case 1: an absolute candidate stats successfully. No
+// process may be started at all -- a stat hit is conclusive on its
+// own, and starting gh anyway would defeat the entire point of
+// checking absolute paths first.
+var discover1Calls = [];
+CsProc.setBackend(function(prog, argv, opts) {
+    discover1Calls.push({ prog: prog, argv: argv });
+    return { code: 0, out: "", err: "", timedOut: false, notStarted: false };
+});
+var ghPresent = { "/usr/local/bin/gh": true };
+var d1 = CsSetup.discover("gh", CsHub.argvVersion(), "osx",
+    function(p) { return ghPresent[p] === true; });
+ok(d1 === "/usr/local/bin/gh", "discover returns the stat-resolved absolute path");
+ok(discover1Calls.length === 0,
+    "discover starts NOTHING when an absolute candidate already stats -- " +
+    "the stat hit short-circuits before any execution is attempted");
+
+// discover(), case 2: nothing stats, but the bare name actually runs
+// (the MacPorts / ~/.local/bin / Nix case the plan's fix addresses).
+var discover2Calls = [];
+CsProc.setBackend(function(prog, argv, opts) {
+    discover2Calls.push({ prog: prog, argv: argv });
+    return { code: 0, out: "gh version 2.97.0", err: "", timedOut: false,
+             notStarted: false };
+});
+var d2 = CsSetup.discover("gh", CsHub.argvVersion(), "osx", function() {
+    return false;
+});
+ok(d2 === "gh",
+    "discover falls back to the bare name when nothing stats but it runs");
+ok(discover2Calls.length === 1 && discover2Calls[0].prog === "gh",
+    "discover executed the bare name itself, not a guessed absolute path");
+
+// discover(), case 3: nothing stats, and the bare name never starts
+// either -- genuinely not installed.
+CsProc.setBackend(function(prog, argv, opts) {
+    return { code: -1, out: "", err: "Child process set up failed: execve: " +
+             "No such file or directory", timedOut: false, notStarted: true };
+});
+var d3 = CsSetup.discover("gh", CsHub.argvVersion(), "osx", function() {
+    return false;
+});
+ok(d3 === null,
+    "discover returns null when the bare name never starts -- nothing there");
+
+// discover(), case 4: nothing stats, and the bare name STARTS but
+// exits non-zero. Resolved as FOUND: a --version call that launches
+// and fails is a real binary with a separate problem (broken alias,
+// corrupt install, wrong version flag), not an absence -- "not
+// installed" is exactly the wrong remedy to show for it. That finer
+// diagnosis is what verify().ok (proven false above) is for; discover()
+// only answers "is something there to run at all".
+CsProc.setBackend(function(prog, argv, opts) {
+    return { code: 1, out: "", err: "gh: some other failure", timedOut: false,
+             notStarted: false };
+});
+var d4 = CsSetup.discover("gh", CsHub.argvVersion(), "osx", function() {
+    return false;
+});
+ok(d4 === "gh",
+    "discover still resolves the bare name when it starts, even on a " +
+    "non-zero exit -- that is a different problem than \"not installed\"");
+
+CsProc.setBackend(null);   // restore the real backend, as the CsProc section does
+
+// Engine-only: exercises the REAL CsProc backend (QProcess), which
+// node does not have. Confirms discover() finds this machine's actual
+// git rather than only the injected fakes above.
+if (!IS_NODE) {
+    var realGitPath = CsSetup.discover("git", CsGit.argvVersion());
+    ok(realGitPath !== null,
+        "discover finds the real git on this machine (engine only)");
+}
+
 // ---------------------------------------------------------------------
 // Report.
 // ---------------------------------------------------------------------

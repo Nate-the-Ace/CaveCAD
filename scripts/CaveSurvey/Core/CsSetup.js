@@ -108,6 +108,70 @@ CsSetup.validateCached = function(cached, existsFn) {
     return exists(cached) ? cached : null;
 };
 
+/**
+ * Does `prog` actually run? The ONLY reliable test for a bare name.
+ *
+ * resolve() can only stat absolute candidates; a bare "gh" stats false
+ * even when it is on PATH and works (MacPorts, ~/.local/bin, Nix). So
+ * discovery ends with an execution probe: CsProc's notStarted is true
+ * exactly when the binary could not be launched, which is the question
+ * being asked. Verified live: a missing binary reports
+ * notStarted=true/timedOut=false with the execve message in err.
+ *
+ * `ok` is true only when the process both started AND exited 0 -- a
+ * `--version` call that starts but exits non-zero is a real, separate
+ * problem (a broken alias, a corrupt install) and must not be
+ * reported as "ran fine". It is also not "not installed": that
+ * distinction lives in the extra `notStarted` field below, which
+ * discover() reads instead of `ok` for exactly this reason.
+ *
+ * Returns { ok: bool, path: string, err: string, notStarted: bool }.
+ * `notStarted` is one field beyond what was specified, added so
+ * discover() can tell "never launched" apart from "launched, exited
+ * non-zero" without running the process a second time.
+ */
+CsSetup.verify = function(prog, versionArgv) {
+    var argv = versionArgv ? versionArgv : ["--version"];
+    var r = CsProc.run(prog, argv);
+    return {
+        ok: (r.notStarted !== true) && r.code === 0,
+        path: prog,
+        err: r.err,
+        notStarted: r.notStarted === true
+    };
+};
+
+/**
+ * The full discovery answer: a stat-resolved absolute path if one
+ * exists, otherwise the bare name IF it actually executes, otherwise
+ * null. This is what the ladder should consult -- never resolve()
+ * alone, which cannot see a PATH-only install.
+ *
+ * Order: stat the absolute candidates via resolve(); a hit returns
+ * immediately with NO process ever started -- stat succeeding is
+ * conclusive on its own. Only when nothing stats does this fall back
+ * to verify()-ing the bare name.
+ *
+ * The bare name is treated as found whenever it STARTS, regardless of
+ * its exit code -- see the note on verify() above. A `--version` that
+ * launches and exits non-zero still proves the binary is present and
+ * reachable; that is a different, later problem for the caller (or
+ * verify()'s `ok` field) to surface, not "not installed". Only a
+ * `notStarted` probe -- nothing there to launch at all -- resolves to
+ * null here.
+ */
+CsSetup.discover = function(name, versionArgv, system, existsFn) {
+    var statted = CsSetup.resolve(name, system, existsFn);
+    if (statted !== null) {
+        return statted;
+    }
+    var sys = system ? system : CsSetup.systemId();
+    var cands = CsSetup.candidates(sys, name);
+    var bare = cands[cands.length - 1];
+    var probe = CsSetup.verify(bare, versionArgv);
+    return probe.notStarted ? null : bare;
+};
+
 CsSetup.INSTALL_HELP = {
     osx: {
         git: { command: "xcode-select --install",
