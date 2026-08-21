@@ -7356,6 +7356,74 @@ ok(CsSetup.ladder({ gitPath: "/usr/bin/git" })[0].ok === true,
     "rung 1 still accepts a real path");
 
 // ---------------------------------------------------------------------
+// CsSetup.probe -- collects the ladder's inputs through CsProc.
+//
+// NOTE ON THE INJECTED BACKEND BELOW: the plan's draft of this test
+// had no branch for the credential-helper probe
+// (`git config --get-regexp ^credential`), so that call fell through
+// to the catch-all `{ out: "" }` and rung 5 (helper) failed on a
+// "configured machine" probe -- contradicting the very assertion this
+// test makes (`firstFailure === null`). Added the branch using the
+// SAME captured fixture ladderWith() already uses above
+// ("credential.helper osxkeychain\n", a real `git config
+// --get-regexp` line from this machine), rather than composing a new
+// one.
+// ---------------------------------------------------------------------
+
+var probeCalls = [];
+CsProc.setBackend(function(prog, argv) {
+    probeCalls.push(prog + " " + argv.join(" "));
+    if (argv[0] === "auth" && argv[1] === "status") {
+        return { code: 0, out: AUTH_OK, err: "", timedOut: false };
+    }
+    if (argv[0] === "config" && argv[1] === "--get" && argv[2] === "user.name") {
+        return { code: 0, out: "Nathan Schonegg\n", err: "", timedOut: false };
+    }
+    if (argv[0] === "config" && argv[1] === "--get" && argv[2] === "user.email") {
+        return { code: 0, out: "1+n@users.noreply.github.com\n", err: "",
+                 timedOut: false };
+    }
+    if (argv[0] === "config" && argv[1] === "--get-regexp" &&
+        argv[2] === "^credential") {
+        return { code: 0, out: "credential.helper osxkeychain\n", err: "",
+                 timedOut: false };
+    }
+    return { code: 0, out: "", err: "", timedOut: false };
+});
+
+var probed = CsSetup.probe("/usr/bin/git", "/opt/homebrew/bin/gh");
+ok(probed.gitPath === "/usr/bin/git", "probe carries the git path through");
+ok(CsHub.isAuthenticated(probed.authStatus) === true,
+    "probe collects auth status");
+ok(probed.userName.out.indexOf("Nathan") !== -1, "probe collects user.name");
+var probeLadder = CsSetup.ladder(probed, "osx");
+ok(CsSetup.firstFailure(probeLadder) === null,
+    "a probe of a configured machine passes the ladder");
+
+// A missing gh must short-circuit: no gh commands may be attempted.
+probeCalls = [];
+var probedNoGh = CsSetup.probe("/usr/bin/git", null);
+var ghAttempts = 0;
+for (var pci = 0; pci < probeCalls.length; pci++) {
+    if (probeCalls[pci].indexOf("auth") !== -1) {
+        ghAttempts++;
+    }
+}
+ok(ghAttempts === 0, "probe does not run gh when gh is missing");
+ok(CsSetup.firstFailure(CsSetup.ladder(probedNoGh, "osx")).id === "gh",
+    "a probe without gh fails at the gh rung");
+
+// A missing git must short-circuit harder still: probe() with no git
+// path runs NOTHING at all, not even the two config reads.
+probeCalls = [];
+var probedNoGit = CsSetup.probe(null, "/opt/homebrew/bin/gh");
+ok(probeCalls.length === 0, "probe runs no command at all when git is missing");
+ok(probedNoGit.authStatus === null,
+    "and authStatus stays null -- gh was never reached either");
+
+CsProc.setBackend(null);
+
+// ---------------------------------------------------------------------
 // Report.
 // ---------------------------------------------------------------------
 

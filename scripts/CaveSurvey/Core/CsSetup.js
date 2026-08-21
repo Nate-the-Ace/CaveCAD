@@ -793,6 +793,57 @@ CsSetup.firstFailure = function(rungs) {
 };
 
 /**
+ * Runs the commands the ladder needs and returns its input record.
+ *
+ * Short-circuits twice, each for the same reason: running a command
+ * against a binary this machine does not have produces an error that
+ * describes the WRONG problem (a confusing execve failure instead of
+ * "install this"), so nothing beyond what is already known to be safe
+ * is attempted.
+ *
+ *   no gitPath -> nothing at all is run, not even the two
+ *                 `git config --get` reads; every field stays null.
+ *   no ghPath  -> the two git config reads still run (git IS
+ *                 present), but the credential-helper read and
+ *                 `gh auth status` are never attempted.
+ *
+ * isBlank(), not truthiness: a whitespace-only path is not a real
+ * program and must not reach CsProc.run as one -- the same class of
+ * bug isBlank was introduced to close in the ladder itself (rungs 1
+ * and 2 used to accept a single space as "installed").
+ *
+ * READ-ONLY throughout: the credential-helper check is
+ * `git config --get-regexp ^credential`, never `gh auth setup-git` --
+ * that command CONFIGURES the helper, so running it here would make
+ * opening this dialog the very mutation the check exists to detect
+ * (docs commit ddccee7).
+ */
+CsSetup.probe = function(gitPath, ghPath) {
+    var probe = {
+        gitPath: gitPath,
+        ghPath: ghPath,
+        authStatus: null,
+        credentialHelper: null,
+        userName: null,
+        userEmail: null
+    };
+    if (CsSetup.isBlank(gitPath)) {
+        return probe;
+    }
+    probe.userName = CsProc.run(gitPath, CsGit.argvConfigGet("user.name"));
+    probe.userEmail = CsProc.run(gitPath, CsGit.argvConfigGet("user.email"));
+    if (CsSetup.isBlank(ghPath)) {
+        return probe;
+    }
+    // READ-ONLY. Never run `gh auth setup-git` from a probe -- see
+    // this function's docstring.
+    probe.credentialHelper = CsProc.run(gitPath,
+        ["config", "--get-regexp", "^credential"]);
+    probe.authStatus = CsProc.run(ghPath, CsHub.argvAuthStatus());
+    return probe;
+};
+
+/**
  * Returns argv arrays for setting the commit identity, or [] --
  * ALL-OR-NOTHING -- when any input is not trustworthy, so a caller
  * checking `plan.length === 2` can actually trust that as success.
