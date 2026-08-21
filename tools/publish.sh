@@ -135,7 +135,7 @@ git -C "$REPO" diff --quiet HEAD 2>/dev/null || COMMIT="$COMMIT (with uncommitte
 cat > "$CAVE/PUBLISHED.txt" <<NOTE
 Cave Survey tools $VERSION
 published $(date -u "+%Y-%m-%d %H:%M UTC") from $COMMIT
-built by qcad-azimuth-tool/tools/publish.sh
+built by cavecad-tools/tools/publish.sh
 
 Installed into CaveCAD at:
   $DEST

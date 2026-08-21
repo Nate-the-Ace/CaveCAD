@@ -97,6 +97,6 @@ should draw the same cave.
 LICENCE AND SOURCE
 ------------------
 See LICENSE. Source and issue tracker:
-https://github.com/ndschonegg/qcad-azimuth-tool
+https://github.com/ndschonegg/CaveCAD
 
 Built @BUILD@ from @COMMIT@.
