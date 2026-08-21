@@ -68,7 +68,10 @@ CsGit.argvAheadBehind = function(upstream, head) {
 };
 
 CsGit.argvHooksPath = function(path) {
-    return ["config", "core.hooksPath", path];
+    // Delegates rather than spelling the argv out a second time, so a
+    // future --global/--local fix to argvConfigSet cannot drift out
+    // of sync with this one.
+    return CsGit.argvConfigSet("core.hooksPath", path, false);
 };
 
 CsGit.argvVersion = function() {
@@ -204,6 +207,12 @@ CsGit.parsePorcelain = function(r) {
         // of the line. The path may contain spaces, so split ONCE at
         // column 3.
         var rawCode = line.substring(0, 2);
+        // Collapses index and worktree status into one string -- " M"
+        // and "M " both become "M" here, so `code` does NOT preserve
+        // porcelain's index-vs-worktree distinction. Fine for every
+        // current caller, which only asks "is this file touched" and
+        // "is this a rename", but do not read more into `code` than
+        // that.
         var code = rawCode.replace(/ /g, "");
         var rest = line.substring(3);
         // A rename or copy renders as "old -> new", each side quoted
@@ -239,7 +248,7 @@ CsGit.parseAheadBehind = function(r) {
     if (!r || r.code !== 0) {
         return null;
     }
-    var m = String(r.out).match(/(\d+)\s+(\d+)/);
+    var m = String(r.out).match(/^\s*(\d+)\s+(\d+)/);
     if (m === null) {
         return null;
     }

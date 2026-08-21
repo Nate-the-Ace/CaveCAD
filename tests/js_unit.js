@@ -5849,11 +5849,8 @@ ok(rnOneQuoted[0].origPath === "drawings/asym-old.txt",
 ok(rnOneQuoted[0].path === "drawings/asym new.txt",
     "parsePorcelain: asymmetric rename -- quoted destination is unquoted");
 
-// unquotePath's octal-run decoding leans on decodeURIComponent, which
-// CsStore.js:117 already uses and which the drawing round-trip test
-// (this file, engine-only) exercises with real content -- but per the
-// Task 1 lesson (two API calls that did not exist in this engine,
-// silently swallowed), that is verified directly here too rather than
+// decodeURIComponent's presence in this engine -- see the provenance
+// note on CsGit.js's unquotePath for why this is verified rather than
 // assumed.
 ok(typeof decodeURIComponent === "function",
     "decodeURIComponent exists in this engine -- required by " +
@@ -5886,18 +5883,9 @@ ok(quotedQuoteChar[0].path === "say \"hi\".txt",
     "real quote, not the two-character escape");
 
 // A literal backslash followed by digits that LOOK like an octal
-// escape -- this is the ordering hazard a two-pass unquoter would get
-// wrong (and a shipped version briefly did): git renders the single
-// backslash in "back\123slash.txt" as "\\123slash.txt" (an escaped
-// backslash, then plain digits, not a second escape):
-// ??  "back\\123slash.txt"
-// A pass ordered octal-before-backslash starts matching on the SECOND
-// backslash of that pair and silently decodes "\123" as octal (byte
-// 0x53, "S"), corrupting the path into "back\Sslash.txt" with no
-// visible error -- confirmed against real `git add`, which then fails
-// with "pathspec ... did not match any files". The single left-to-
-// right scan in CsGit.unquotePath processes the escaped backslash
-// first and leaves the following digits untouched.
+// escape -- see the ordering-hazard note on CsGit.js's unquotePath.
+// Fixture: ??  "back\\123slash.txt" (git's escaping of a filename
+// containing one literal backslash followed by "123").
 var quotedBackslash = CsGit.parsePorcelain({ code: 0,
     out: "?? \"back\\\\123slash.txt\"\n", err: "" });
 ok(quotedBackslash[0].path === "back\\123slash.txt",
@@ -5946,14 +5934,8 @@ var shortOctalViaParser = CsGit.parsePorcelain({ code: 0,
 ok(shortOctalViaParser[0].path === "d/a\\3b.dxf",
     "parsePorcelain also returns on a short octal run (does not hang)");
 
-// What is STILL genuinely unhandled, now that quoting is: a filename
-// that itself contains the literal " -> " sequence would be split at
-// the wrong point by the rename detector above. That is deliberately
-// out of scope -- it is genuinely obscure, and guarding against a
-// four-character substring inside a filename costs more clarity than
-// it buys. No -z switch either: it would drop quoting and NUL-
-// separate a rename pair, but the plan specifies --porcelain, and the
-// fix above needed no format change.
+// Still out of scope -- see the note on CsGit.js's parsePorcelain: a
+// filename containing the literal " -> " sequence, and no -z switch.
 
 var ab = CsGit.parseAheadBehind({ code: 0, out: "2\t5\n", err: "" });
 ok(ab.behind === 2 && ab.ahead === 5, "parseAheadBehind reads left-right counts");
