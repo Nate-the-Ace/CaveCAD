@@ -1619,24 +1619,22 @@ GitHubSetup.prototype.beginEvent = function() {
     this.terminate();
 };
 
+// SUPERSEDED BY TASK 5 -- do not write this. It calls CsSetup.resolve(),
+// which is stat-only and reports a gh that lives outside the candidate
+// directories as MISSING even when it is on PATH and works (MacPorts,
+// ~/.local/bin, Nix). That is the exact blind spot CsSetup.discover was
+// added to close, and Task 5 packaged the correct form as
+// CsSetup.discoverTools(). Call that instead:
+//
+//     var tools = CsSetup.discoverTools();   // {gitPath, ghPath}
+//
+// Caching caveat, proven live: discover() may answer with the BARE NAME
+// for a PATH-only install, and validateCached() stats it -- a relative
+// name stats against the process cwd, which inside CaveCAD is
+// .../CaveCAD.app/Contents/Resources. So only an ABSOLUTE path is
+// cacheable; see CsSetup.isCacheable.
 GitHubSetup.resolveTools = function() {
-    var git = CsSetup.validateCached(
-        RSettings.getStringValue(CsSetup.SETTING_GIT, ""));
-    if (git === null) {
-        git = CsSetup.resolve("git");
-        if (git !== null) {
-            RSettings.setValue(CsSetup.SETTING_GIT, git);
-        }
-    }
-    var gh = CsSetup.validateCached(
-        RSettings.getStringValue(CsSetup.SETTING_GH, ""));
-    if (gh === null) {
-        gh = CsSetup.resolve("gh");
-        if (gh !== null) {
-            RSettings.setValue(CsSetup.SETTING_GH, gh);
-        }
-    }
-    return { git: git, gh: gh };
+    return CsSetup.discoverTools();
 };
 
 GitHubSetup.showLadder = function() {
