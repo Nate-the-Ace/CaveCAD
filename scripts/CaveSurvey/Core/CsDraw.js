@@ -627,6 +627,10 @@ CsDraw.survey = function(survey, resolved, originStation, originPos, seqBase) {
  * line). Its own operation. Entities drawn by pre-tagging builds
  * cannot be found and survive.
  *
+ * NEVER deletes traced linework (CsBind's LineworkTrip /
+ * LineworkStations), whatever else that entity carries -- see the
+ * guard at the top of the scan.
+ *
  * \return number of entities removed
  */
 CsDraw.eraseStations = function(doc, stationNames) {
@@ -635,15 +639,14 @@ CsDraw.eraseStations = function(doc, stationNames) {
     for (var i = 0; i < stationNames.length; i++) {
         inSet[stationNames[i]] = true;
     }
-    var baseOf = function(tagged) {
-        var m = /^(.*)\.([LR])$/.exec(tagged);
-        return m === null ? tagged : m[1];
-    };
-    // splay names are <station>.<n>; older files tagged the bare station
-    var splayBaseOf = function(tagged) {
-        var m = /^(.*)\.(\d+)$/.exec(tagged);
-        return m === null ? tagged : m[1];
-    };
+    // LRUD tip names are <station>.L / .R / .L2 ...; splay names are
+    // <station>.<n> (older files tagged the bare station). Both
+    // strippers live in CsBind now, so the erase rules and the linework
+    // binding index cannot disagree about which station "A3.L2"
+    // belongs to -- a disagreement is exactly how a tip point gets
+    // orphaned by a redraw.
+    var baseOf = CsBind.lrudBase;
+    var splayBaseOf = CsBind.splayBase;
 
     var op = new RAddObjectsOperation();
     op.setText("Replace survey marks");
@@ -652,6 +655,21 @@ CsDraw.eraseStations = function(doc, stationNames) {
     for (i = 0; i < ids.length; i++) {
         var e = doc.queryEntity(ids[i]);
         if (isNull(e)) {
+            continue;
+        }
+        // TRACED LINEWORK IS NEVER ERASED. The rules below delete
+        // generated geometry so a redraw can replace it -- wall runs
+        // included, keyed on WallRunStations. Those are OURS: we can
+        // regenerate them from the survey at any time. Linework
+        // carrying LineworkTrip / LineworkStations is the USER's hours
+        // of tracing, and deleting it is unrecoverable -- there is
+        // nothing to regenerate it from. So linework is skipped
+        // outright, BEFORE any rule can match it, rather than merely
+        // not being named by them: a future edit that "tidies"
+        // LineworkStations in alongside WallRunStations has to delete
+        // this block to do it, and the test that pins this behavior
+        // will catch that.
+        if (CsBind.hasLineworkTags(e)) {
             continue;
         }
         var kill = false;

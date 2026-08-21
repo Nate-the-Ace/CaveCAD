@@ -102,6 +102,9 @@ var CORE_FILES = [
     "scripts/CaveSurvey/Core/Format/CsCsv.js",
     "scripts/CaveSurvey/Core/Format/CsRegistry.js",
     "scripts/CaveSurvey/Core/CsRevise.js",
+    // after CsRevise: CsBind's layer gate consults
+    // CsRevise.isWorldFixedLayer when it is loaded
+    "scripts/CaveSurvey/Core/CsBind.js",
     "scripts/CaveSurvey/Core/CsReport.js"
 ];
 for (var ci = 0; ci < CORE_FILES.length; ci++) {
@@ -1722,6 +1725,137 @@ if (teamBoundaryRt.trips.length === 2) {
 })();
 
 // ---------------------------------------------------------------------
+// CsBind -- the pure half of linework binding: the layer gate, suffix
+// stripping, coincidence/proximity over a station index, tag encoding.
+// No document access, so these run under node too.
+// ---------------------------------------------------------------------
+
+(function() {
+    ok(CsBind.TRIP_TAG === "LineworkTrip", "bind: trip tag name");
+    ok(CsBind.STATIONS_TAG === "LineworkStations", "bind: stations tag name");
+
+    // ---- the layer gate: the single decision about what may be
+    // tagged or moved at all. Default is NO. ----
+    ok(CsBind.isLineworkLayer("WALLS-SURVEYED") === true,
+        "gate: a feature layer is linework");
+    ok(CsBind.isLineworkLayer("BREAKDOWN") === true,
+        "gate: BREAKDOWN is linework");
+    ok(CsBind.isLineworkLayer("CTRL-SHOTS") === false,
+        "gate: CTRL-SHOTS is the suite's own geometry");
+    ok(CsBind.isLineworkLayer("CTRL-AERIAL") === false,
+        "gate: CTRL-AERIAL is world-fixed");
+    ok(CsBind.isLineworkLayer("CTRL-LRUD-WALL-LEFT") === false,
+        "gate: generated wall runs are never linework");
+    ok(CsBind.isLineworkLayer("TB_BORDER") === false,
+        "gate: TB_ sheet furniture is never linework");
+    ok(CsBind.isLineworkLayer("") === false, "gate: empty layer name refused");
+    ok(CsBind.isLineworkLayer(null) === false, "gate: null layer name refused");
+    // whatever CsRevise refuses to move, this refuses to claim
+    for (var wf = 0; wf < CsRevise.WORLD_FIXED_LAYERS.length; wf++) {
+        var pat = CsRevise.WORLD_FIXED_LAYERS[wf];
+        var sample = pat.charAt(pat.length - 1) === "*" ?
+            pat.substring(0, pat.length - 1) + "SAMPLE" : pat;
+        ok(CsBind.isLineworkLayer(sample) === false,
+            "gate: world-fixed layer " + sample + " refused");
+    }
+
+    // ---- suffix stripping: LRUD tips, multi-reading LRUD tips and
+    // splay tips all reduce to their station ----
+    ok(CsBind.lrudBase("A3.L") === "A3", "suffix: A3.L -> A3");
+    ok(CsBind.lrudBase("A3.R") === "A3", "suffix: A3.R -> A3");
+    ok(CsBind.lrudBase("A3.L2") === "A3", "suffix: A3.L2 -> A3");
+    ok(CsBind.lrudBase("A3.R12") === "A3", "suffix: A3.R12 -> A3");
+    ok(CsBind.lrudBase("A3") === "A3", "suffix: bare name unchanged");
+    ok(CsBind.splayBase("A3.2") === "A3", "suffix: splay A3.2 -> A3");
+    ok(CsBind.splayBase("A3") === "A3", "suffix: bare splay name unchanged");
+    ok(CsBind.stationBase("A3.L") === "A3", "suffix: stationBase LRUD tip");
+    ok(CsBind.stationBase("A3.L2") === "A3", "suffix: stationBase LRUD ledge");
+    ok(CsBind.stationBase("A3.2") === "A3", "suffix: stationBase splay tip");
+    ok(CsBind.stationBase("A3") === "A3", "suffix: stationBase passthrough");
+    // a station legitimately named with a dot must not be mangled
+    ok(CsBind.stationBase("BS.7A") === "BS.7A",
+        "suffix: a dotted station name that is no tip is left alone");
+
+    // ---- encode/decode round-trip ----
+    ok(CsBind.encodeStations(["A1", "A2", "A3"]) === "A1|A2|A3",
+        "encode: joins with |");
+    ok(CsBind.encodeStations(["A1", "A1", "A2", ""]) === "A1|A2",
+        "encode: duplicates collapse, empties dropped");
+    ok(CsBind.encodeStations([]) === "", "encode: empty list -> empty text");
+    ok(CsBind.encodeStations(null) === "", "encode: null -> empty text");
+    ok(CsBind.decodeStations("").length === 0, "decode: empty text -> no names");
+    ok(CsBind.decodeStations(null).length === 0, "decode: null -> no names");
+    var rt = ["BIG ROOM 1", "A2", "SUMP 3"];
+    var rtBack = CsBind.decodeStations(CsBind.encodeStations(rt));
+    ok(rtBack.join(",") === rt.join(","),
+        "encode/decode: round-trip keeps a name containing a space, got '" +
+        rtBack.join(",") + "'");
+
+    // ---- coincidence over a station index ----
+    // three stations 10 apart, each carrying an LRUD tip 2 out: the
+    // shape a drawn survey really leaves behind
+    var idx = [
+        { name: "A1", x: 0, y: 0 },
+        { name: "A2", x: 0, y: 10 },
+        { name: "A2", x: -2, y: 10 },  // its LRUD tip, same name
+        { name: "A3", x: 0, y: 20 },
+        { name: "A3", x: -2, y: 20 }
+    ];
+    var hit = CsBind.stationsForPoints([{ x: -2, y: 10 }, { x: 0, y: 20 }],
+        idx, 1e-6);
+    ok(hit.join(",") === "A2,A3",
+        "coincide: two snapped vertices bind two stations, got '" +
+        hit.join(",") + "'");
+    var inside = CsBind.stationsForPoints([{ x: 0.0000005, y: 10 }], idx, 1e-6);
+    ok(inside.join(",") === "A2", "coincide: within epsilon hits");
+    var outside = CsBind.stationsForPoints([{ x: 0.01, y: 10 }], idx, 1e-6);
+    ok(outside.length === 0, "coincide: outside epsilon misses");
+    // the same station reached twice (both its LRUD tips) is one name
+    var dup = CsBind.stationsForPoints([{ x: 0, y: 10 }, { x: -2, y: 10 }],
+        idx, 1e-6);
+    ok(dup.join(",") === "A2", "coincide: duplicate names collapse, got '" +
+        dup.join(",") + "'");
+    ok(CsBind.stationsForPoints([], idx, 1e-6).length === 0,
+        "coincide: no points -> no stations");
+    ok(CsBind.stationsForPoints([{ x: 0, y: 0 }], [], 1e-6).length === 0,
+        "coincide: empty index -> no stations");
+    ok(CsBind.stationsForPoints(null, null, 1e-6).length === 0,
+        "coincide: null inputs -> no stations");
+
+    // ---- proximity over a box ----
+    var box = { minX: 1, minY: 9, maxX: 2, maxY: 11 };
+    ok(CsBind.stationsInBox(box, idx, 0).length === 0,
+        "box: nothing inside the bare box");
+    var nearHits = CsBind.stationsInBox(box, idx, 1.5);
+    ok(nearHits.join(",") === "A2", "box: margin reaches A2, got '" +
+        nearHits.join(",") + "'");
+    var wide = CsBind.stationsInBox(box, idx, 11);
+    ok(wide.join(",") === "A1,A2,A3",
+        "box: a wide margin reaches all three, got '" + wide.join(",") + "'");
+    ok(CsBind.stationsInBox(null, idx, 1).length === 0,
+        "box: null box -> no stations");
+    ok(CsBind.boxOfPoints([]) === null, "box: no points -> null box");
+    var bp = CsBind.boxOfPoints([{ x: 3, y: -1 }, { x: -2, y: 4 }]);
+    ok(bp !== null && bp.minX === -2 && bp.maxX === 3 && bp.minY === -1 &&
+        bp.maxY === 4, "box: boxOfPoints spans the points");
+
+    // ---- the margin is read off the drawing's own feature spacing,
+    // so metres and feet give proportionally identical answers ----
+    near(CsBind.marginFor(idx), 2 * CsBind.PROXIMITY_FACTOR, 1e-9,
+        "margin: median nearest-neighbour spacing times the factor");
+    var idxFt = [];
+    for (var fi = 0; fi < idx.length; fi++) {
+        idxFt.push({ name: idx[fi].name, x: idx[fi].x * 3.280839895,
+            y: idx[fi].y * 3.280839895 });
+    }
+    near(CsBind.marginFor(idxFt), CsBind.marginFor(idx) * 3.280839895, 1e-6,
+        "margin: scales with the drawing's units");
+    ok(CsBind.marginFor([]) === 0, "margin: empty index -> 0");
+    ok(CsBind.marginFor([{ name: "A1", x: 0, y: 0 }]) === 0,
+        "margin: one station -> 0");
+})();
+
+// ---------------------------------------------------------------------
 // Drawing round-trip -- QCAD engine only (node has no R* classes).
 // This is the test that would have caught the silent simple.js
 // failures: draw into a real document, read layers and tags back.
@@ -2994,6 +3128,248 @@ if (!IS_NODE) {
         ok(rec2.survey.startNote === "gate is locked",
             "rsd-idem: start note survives both runs, got '" +
             rec2.survey.startNote + "'");
+    })();
+
+    // -----------------------------------------------------------------
+    // Linework binding, document side: the station index built from a
+    // real drawn survey, an entity's points as this bridge exposes
+    // them, and the ordered binding rules (snap / proximity / trip).
+    //
+    // Then THE HAZARD. CsDraw.eraseStations deletes generated geometry
+    // by tag so a redraw can replace it -- wall runs included. Traced
+    // linework must NEVER go the same way: wall runs regenerate from
+    // the survey, traced linework is the user's hours of work and
+    // deleting it is unrecoverable. The last assertions here are the
+    // guard against a future edit tidying the two tags together.
+    // -----------------------------------------------------------------
+    (function() {
+        var doc = new RDocument(new RMemoryStorage(), new RSpatialIndexNavel());
+        var di = new RDocumentInterface(doc);
+        getDocument = function() { return doc; };
+        getDocumentInterface = function() { return di; };
+
+        // three stations 10 apart running north, LRUD 2 left / 3 right
+        // on the two arrival stations -- so the drawing really carries
+        // the tagged tips a wall tracing would snap to
+        var bsv = CsModel.newSurvey();
+        var b1 = shotOf("E1", "E2", 10, 0);
+        b1.left = 2; b1.right = 3;
+        var b2 = shotOf("E2", "E3", 10, 0);
+        b2.left = 2; b2.right = 3;
+        bsv.shots.push(b1); bsv.shots.push(b2);
+        var bres = CsNetwork.resolve(bsv, {});
+        var bdrawn = CsDraw.survey(bsv, bres);
+        ok(bdrawn.wallsDrawn > 0,
+            "bind: the survey drew generated wall runs to erase later, got " +
+            bdrawn.wallsDrawn);
+
+        var findByTag = function(key) {
+            var res = [];
+            var fids = doc.queryAllEntities(false, false);
+            for (var fi = 0; fi < fids.length; fi++) {
+                var fe = doc.queryEntity(fids[fi]);
+                if (isNull(fe)) {
+                    continue;
+                }
+                if (CsTags.get(fe, key) !== "") {
+                    res.push(fe);
+                }
+            }
+            return res;
+        };
+
+        // where the tips actually landed -- read back, not recomputed,
+        // so the snap test is a real coincidence and not arithmetic
+        var tipAt = {};
+        var tips = findByTag("LRUDName");
+        for (var ti2 = 0; ti2 < tips.length; ti2++) {
+            tipAt[CsTags.get(tips[ti2], "LRUDName")] =
+                tips[ti2].getPosition();
+        }
+        ok(tipAt["E2.L"] !== undefined && tipAt["E3.L"] !== undefined,
+            "bind: LRUD tips E2.L and E3.L found to trace against");
+
+        // ---- the station index: stations plus every tagged tip, with
+        // the tip suffixes stripped back to their station ----
+        var bidx = CsBind.stationIndex(doc);
+        var idxNames = {};
+        for (var ii = 0; ii < bidx.length; ii++) {
+            idxNames[bidx[ii].name] = (idxNames[bidx[ii].name] || 0) + 1;
+        }
+        ok(idxNames["E1"] === 1 && idxNames["E2"] === 3 &&
+            idxNames["E3"] === 3,
+            "index: E1 once (no LRUD), E2/E3 once plus two tips each, got " +
+            idxNames["E1"] + "/" + idxNames["E2"] + "/" + idxNames["E3"]);
+        ok(idxNames["E2.L"] === undefined,
+            "index: tip suffixes are stripped, no 'E2.L' entry");
+
+        var addPl = function(layerName, pts) {
+            CsLayers.ensure(doc, di, layerName);
+            var pd = new RPolylineData();
+            for (var pi = 0; pi < pts.length; pi++) {
+                pd.appendVertex(new RVector(pts[pi].x, pts[pi].y));
+            }
+            var pl = new RPolylineEntity(doc, pd);
+            pl.setLayerId(doc.getLayerId(layerName));
+            var aop = new RAddObjectsOperation();
+            aop.addObject(pl, false);
+            di.applyOperation(aop);
+            return pl;
+        };
+
+        // 1: traced by SNAPPING to two LRUD tips -- the exact case
+        var snapPl = addPl("WALLS-SURVEYED",
+            [{ x: tipAt["E2.L"].x, y: tipAt["E2.L"].y },
+             { x: tipAt["E3.L"].x, y: tipAt["E3.L"].y }]);
+        // 2: freehand down the middle of the passage, snapped to nothing
+        var nearPl = addPl("WALLS-SURVEYED",
+            [{ x: 0.7, y: 4 }, { x: 0.7, y: 6 }]);
+        // 3: a construction line miles from the cave
+        var farPl = addPl("WALLS-SURVEYED",
+            [{ x: 1000, y: 1000 }, { x: 1001, y: 1001 }]);
+        // and one on each layer the gate must refuse
+        addPl("CTRL-SHOTS", [{ x: 0, y: 1 }, { x: 0, y: 2 }]);
+        addPl("TB_TEST", [{ x: 0, y: 3 }, { x: 0, y: 4 }]);
+        addPl("CTRL-AERIAL", [{ x: 0, y: 5 }, { x: 0, y: 6 }]);
+
+        // ---- pointsOf, as this bridge really exposes them ----
+        ok(CsBind.pointsOf(snapPl).length === 2,
+            "pointsOf: polyline vertices, got " +
+            CsBind.pointsOf(snapPl).length);
+        var stationPts = findByTag("Station");
+        ok(stationPts.length === 3 &&
+            CsBind.pointsOf(stationPts[0]).length === 1,
+            "pointsOf: a point entity gives its position");
+        ok(CsBind.pointsOf(null).length === 0, "pointsOf: null -> []");
+        ok(CsBind.pointsOf({}).length === 0,
+            "pointsOf: an object it understands nothing about -> [], no throw");
+
+        // ---- the ordered binding rules ----
+        var beps = CsBind.epsilonFor(doc);
+        ok(beps > 0 && beps < 1,
+            "epsilon: derived from the drawing extent, got " + beps);
+        var snapBind = CsBind.bindEntity(doc, snapPl, 0, bidx, beps);
+        ok(snapBind.source === "snap",
+            "bind: snapped polyline binds by coincidence, got " +
+            snapBind.source);
+        var snapNames = snapBind.stations.slice(0).sort();
+        ok(snapNames.join(",") === "E2,E3",
+            "bind: snapped polyline binds exactly its two tips' stations, got '" +
+            snapNames.join(",") + "'");
+
+        var nearBind = CsBind.bindEntity(doc, nearPl, 0, bidx, beps);
+        ok(nearBind.source === "proximity",
+            "bind: freehand near stations falls back to proximity, got " +
+            nearBind.source);
+        var nearSet = {};
+        for (var ni2 = 0; ni2 < nearBind.stations.length; ni2++) {
+            nearSet[nearBind.stations[ni2]] = true;
+        }
+        ok(nearSet["E1"] === true && nearSet["E2"] === true &&
+            nearSet["E3"] === undefined,
+            "bind: proximity picks up the stations it runs between, got '" +
+            nearBind.stations.join(",") + "'");
+
+        var farBind = CsBind.bindEntity(doc, farPl, 0, bidx, beps);
+        ok(farBind.source === "trip" && farBind.stations.length === 0,
+            "bind: an entity far from everything follows its trip alone, got " +
+            farBind.source + "/" + farBind.stations.length);
+
+        // ---- the adopt scan ----
+        var adopt = CsBind.adoptable(doc, 0);
+        var bySource = { snap: 0, proximity: 0, trip: 0 };
+        var badLayer = "";
+        for (var ai = 0; ai < adopt.length; ai++) {
+            bySource[adopt[ai].source] = (bySource[adopt[ai].source] || 0) + 1;
+            if (!CsBind.isLineworkLayer(adopt[ai].layer)) {
+                badLayer = adopt[ai].layer;
+            }
+        }
+        ok(adopt.length === 3,
+            "adopt: exactly the three traced entities are adoptable, got " +
+            adopt.length);
+        ok(bySource.snap === 1 && bySource.proximity === 1 &&
+            bySource.trip === 1,
+            "adopt: one of each source, got snap " + bySource.snap +
+            " proximity " + bySource.proximity + " trip " + bySource.trip);
+        ok(badLayer === "",
+            "adopt: nothing on CTRL-SHOTS / TB_TEST / CTRL-AERIAL is ever " +
+            "adoptable, but got " + badLayer);
+
+        // ---- tagEntities: one operation, tags readable afterwards ----
+        var tagged = CsBind.tagEntities(doc, di, adopt);
+        ok(tagged === 3, "tag: all three tagged in one operation, got " +
+            tagged);
+        var withTrip = findByTag(CsBind.TRIP_TAG);
+        ok(withTrip.length === 3,
+            "tag: LineworkTrip readable back off three entities, got " +
+            withTrip.length);
+        var withStations = findByTag(CsBind.STATIONS_TAG);
+        ok(withStations.length === 2,
+            "tag: only the two that bound stations carry a station list, got " +
+            withStations.length);
+        // by ID, not by shape: the proximity polyline also bound two
+        // stations, and entity query order is not stable
+        var snapText = CsTags.get(doc.queryEntity(snapPl.getId()),
+            CsBind.STATIONS_TAG);
+        ok(CsBind.decodeStations(snapText).slice(0).sort().join(",") ===
+            "E2,E3",
+            "tag: the snapped polyline's station list round-trips, got '" +
+            snapText + "'");
+        // already tagged -> no longer adoptable (no double claim)
+        ok(CsBind.adoptable(doc, 0).length === 0,
+            "adopt: tagged linework is not offered again");
+
+        // ---- an OFF layer: this build silently refuses MODIFIES there
+        // too, so the tag would vanish without withLayerOn ----
+        var offPl = addPl("TRACED-OFF",
+            [{ x: tipAt["E2.L"].x, y: tipAt["E2.L"].y },
+             { x: 5, y: 12 }]);
+        var offLay = doc.queryLayer("TRACED-OFF");
+        offLay.setOff(true);
+        var offOp = new RModifyObjectsOperation();
+        offOp.addObject(offLay, false);
+        di.applyOperation(offOp);
+        ok(doc.queryLayer("TRACED-OFF").isOff() === true,
+            "off layer: TRACED-OFF really is off");
+        var offAdopt = CsBind.adoptable(doc, 0);
+        ok(offAdopt.length === 1 && offAdopt[0].source === "snap",
+            "off layer: the entity on it is still adoptable, got " +
+            offAdopt.length);
+        CsBind.tagEntities(doc, di, offAdopt);
+        ok(findByTag(CsBind.TRIP_TAG).length === 4,
+            "off layer: the tag landed despite the layer being off, got " +
+            findByTag(CsBind.TRIP_TAG).length);
+        ok(doc.queryLayer("TRACED-OFF").isOff() === true,
+            "off layer: left off again afterwards");
+
+        // ---- THE HAZARD ----
+        var wallRunsBefore = findByTag("WallRunStations").length;
+        ok(wallRunsBefore > 0,
+            "erase-guard: generated wall runs present before the erase, got " +
+            wallRunsBefore);
+        var lineworkBefore = findByTag(CsBind.STATIONS_TAG).length;
+        ok(lineworkBefore === 3,
+            "erase-guard: three linework entities carry a station list, got " +
+            lineworkBefore);
+        // the traced polylines list E2/E3 -- exactly the stations being
+        // erased -- and the wall runs list all three
+        CsDraw.eraseStations(doc, ["E1", "E2", "E3"]);
+        ok(findByTag("WallRunStations").length === 0,
+            "erase-guard: GENERATED wall runs over those stations are " +
+            "removed (they regenerate), got " +
+            findByTag("WallRunStations").length);
+        ok(findByTag(CsBind.STATIONS_TAG).length === lineworkBefore,
+            "erase-guard: TRACED linework over the SAME stations SURVIVES " +
+            "-- deleting the user's tracing is unrecoverable; got " +
+            findByTag(CsBind.STATIONS_TAG).length + " of " + lineworkBefore);
+        ok(findByTag(CsBind.TRIP_TAG).length === 4,
+            "erase-guard: the trip-bound linework survives too, got " +
+            findByTag(CsBind.TRIP_TAG).length);
+        ok(CsBind.pointsOf(doc.queryEntity(snapPl.getId())).length === 2,
+            "erase-guard: the surviving tracing is intact, not just present");
+        ok(CsTags.collectStations(doc).length === 0,
+            "erase-guard: the stations themselves did go");
     })();
 }
 
