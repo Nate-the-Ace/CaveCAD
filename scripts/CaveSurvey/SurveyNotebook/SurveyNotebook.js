@@ -1705,8 +1705,7 @@ SurveyNotebook.offerIgrfTripRevisions = function(doc, coord) {
             "geo anchor was still stored.");
         return;
     }
-    EAction.handleUserMessage(CsReport.revisionSummary(report) +
-        SurveyNotebook.claimSuffix(report));
+    EAction.handleUserMessage(CsReport.revisionSummary(report));
 };
 
 /**
@@ -2128,8 +2127,7 @@ SurveyNotebook.tripDeclinationDialog = function(doc, recon) {
             " (" + decision.changes[c].source + ")");
     }
     var summary = "Declination revised: " + tripBits.join(", ") + "\n\n" +
-        CsReport.revisionSummary(report) +
-        SurveyNotebook.claimSuffix(report);
+        CsReport.revisionSummary(report);
     EAction.handleUserMessage(summary);
     QMessageBox.information(null, "Survey Notebook", summary);
 };
@@ -2164,24 +2162,6 @@ SurveyNotebook.tripDeclinationDialog = function(doc, recon) {
 // revealed by moving the wrong passage months later.
 // ---------------------------------------------------------------------
 
-/**
- * The claim sentence to append after CsReport.revisionSummary, from the
- * SAME formatter the notebook's own Draw path uses. "" when the
- * revision claimed nothing.
- *
- * Here rather than in CsReport because CsReport prints the report object
- * and does not yet know about report.lineworkBound; both callers of
- * revisionSummary in the suite are in this file, so this is the whole
- * of the gap. Fold it into CsReport's linework block when that file is
- * next opened -- the words come from CsRevise either way.
- */
-SurveyNotebook.claimSuffix = function(report) {
-    if (report === undefined || report === null) {
-        return "";
-    }
-    var line = CsRevise.lineworkClaimLine(report.lineworkBound);
-    return line === "" ? "" : ("\n" + line);
-};
 
 /** The page's trip identity: date | team, the same fingerprint
  *  mergeTripIntoSurvey matches on. Read straight off the two header

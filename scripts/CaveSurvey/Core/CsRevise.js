@@ -1214,19 +1214,16 @@ CsRevise.lineworkClaimLine = function(bound) {
 };
 
 /**
- * The linework outcome in words: the same sentences
- * CsReport.revisionSummary prints for the same facts, so the two
- * revision paths tell the user one story rather than two.
+ * The linework outcome in words -- the one place these sentences are
+ * written. CsReport.revisionSummary calls it with the fields off
+ * CsRevise.apply's report, and the notebook's Draw calls it with the
+ * same numbers loose, so the two revision paths tell the user one
+ * story rather than two.
  *
- * Lives here rather than in CsReport only because CsReport is the
- * report-formatting module for CsRevise.apply's report OBJECT, and the
- * notebook's Draw has no such object to hand -- it has these numbers
- * and nothing else. When CsReport is next opened, collapse its linework
- * block onto this function and have it append lineworkClaimLine from
- * report.lineworkBound; until then the notebook appends that one line
- * itself after revisionSummary, from the same formatter, so the words
- * are identical either way. The unit tests assert the shared block
- * agrees word for word, so a drift in either one fails the build.
+ * Lives here rather than in CsReport because CsReport formats that
+ * report OBJECT and the notebook's Draw has no such object to hand --
+ * it has these numbers and nothing else. The unit tests assert both
+ * callers agree word for word, so a drift fails the build.
  *
  * \param bound optional -- entities this revision bound by itself
  * \return array of lines
