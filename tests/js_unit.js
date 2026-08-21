@@ -1420,6 +1420,80 @@ if (IS_NODE) {
 }
 
 // ---------------------------------------------------------------------
+// Task 8 -- CsReport says what the adjustment did.
+// ---------------------------------------------------------------------
+
+var adjDrawnStub = { stationsDrawn: 5, shotsDrawn: 5, closuresDrawn: 1,
+    tiesDrawn: 0, wallsDrawn: 0, splaysDrawn: 0, ghostDrawn: 5, skipped: 0 };
+
+var adjText = CsReport.drawSummary(sq, asq, adjDrawnStub, []);
+ok(adjText.indexOf("Adjusted") >= 0,
+    "task 8: an adjusted draw's summary says so, got:\n" + adjText);
+ok(adjText.indexOf("CTRL-RAW") >= 0,
+    "task 8: the summary names the ghost layer so it can be found, got:\n" +
+    adjText);
+ok(adjText.indexOf(asq.summary.worstStation) >= 0,
+    "task 8: the summary names the station that moved most, got:\n" + adjText);
+ok(adjText.indexOf(CsReport.length(asq.summary.worstShift,
+    sq.distanceUnit)) >= 0,
+    "task 8: the summary gives the worst shift's distance, got:\n" + adjText);
+ok(adjText.indexOf("horizontal") >= 0 && adjText.indexOf("vertical") >= 0,
+    "task 8: loop lines report horizontal and vertical error alongside " +
+    "the 3D one, got:\n" + adjText);
+
+// A plain CsNetwork.resolve() result has `.adjusted === undefined`, not
+// `false` -- it must still fall through to the not-adjusted wording,
+// never be mistaken for "adjusted" by a loose truthiness check.
+var rawText = CsReport.drawSummary(sq, rsq, adjDrawnStub, []);
+ok(rawText.indexOf("Adjusted") < 0,
+    "task 8: a plain resolve() result (adjusted undefined) never claims " +
+    "an adjustment, got:\n" + rawText);
+ok(rawText.indexOf("as surveyed") >= 0,
+    "task 8: ...and says the misclosure is still on the closing leg, as " +
+    "surveyed, got:\n" + rawText);
+
+// Adjustment explicitly turned off: CsAdjust.unadjusted's pass-through
+// shape (adjusted: false, no warning) reads the same way as a plain
+// resolve.
+var offText = CsReport.drawSummary(sq, CsAdjust.unadjusted(rsq),
+    adjDrawnStub, []);
+ok(offText.indexOf("Adjusted") < 0,
+    "task 8: an explicitly unadjusted draw does not claim an adjustment, " +
+    "got:\n" + offText);
+ok(offText.indexOf("as surveyed") >= 0,
+    "task 8: ...and says so the same way, got:\n" + offText);
+
+// Non-convergence: CsAdjust puts the warning in summary.warning, and it
+// must appear VERBATIM -- a half-solved network that merely looked
+// adjusted would be worse than an unsolved one.
+var stuckText = CsReport.drawSummary(sq, adjStuck, adjDrawnStub, []);
+ok(stuckText.indexOf(adjStuck.summary.warning) >= 0,
+    "task 8: a non-convergent solve's warning appears verbatim, got:\n" +
+    stuckText);
+ok(stuckText.indexOf("Adjusted by least squares") < 0,
+    "task 8: ...and a starved solve never claims to have adjusted " +
+    "anything, got:\n" + stuckText);
+
+// Control ties are reported separately from loops, and without a
+// percent -- CsNetwork sets percent: null on ties on purpose, and
+// .toFixed() on null throws.
+var tieText = CsReport.drawSummary(tie, rtie, adjDrawnStub, []);
+ok(tieText.indexOf("Control tie") >= 0,
+    "task 8: a component tie is reported as a tie, not a loop, got:\n" +
+    tieText);
+ok(tieText.indexOf("Loop") < 0,
+    "task 8: ...and the word 'Loop' does not leak into a tie-only " +
+    "report, got:\n" + tieText);
+
+// statsSummary's worst-loop line gains horizontal and vertical too.
+var statsForWorst = CsStats.compute(sq, rsq, CsTraverse.SLOPE);
+var gradeForWorst = CsGrade.compute(sq, rsq, statsForWorst);
+var statsText = CsReport.statsSummary(sq, statsForWorst, gradeForWorst);
+ok(statsText.indexOf("horizontal") >= 0 && statsText.indexOf("vertical") >= 0,
+    "task 8: the worst-loop line in Survey Stats reports horizontal and " +
+    "vertical error too, got:\n" + statsText);
+
+// ---------------------------------------------------------------------
 // Task 3 -- CsAdjust: settings, the per-drawing record, and the single
 // resolveAndAdjust entry point.
 // ---------------------------------------------------------------------

@@ -65,7 +65,70 @@ CsReport.drawSummary = function(survey, resolved, drawn, findings) {
             loop.error.toFixed(2) + " off over " +
             loop.traverseLength.toFixed(1) + " surveyed (" +
             loop.percent.toFixed(2) + "%)" +
-            (loop.percent <= 1.0 ? " -- good" : ""));
+            (loop.percent <= 1.0 ? " -- good" : "") +
+            " [horizontal " + loop.horizontal.toFixed(2) +
+            ", vertical " + loop.vertical.toFixed(2) + "]");
+    }
+
+    // A control tie is not a loop: it is the single leg joining two
+    // separately fixed components, with no ring to quote a percentage
+    // of. CsNetwork sets `percent: null` on every tie for exactly that
+    // reason, so this block must never call .toFixed() on it -- only
+    // `error`, `horizontal` and `vertical`, which are always real
+    // numbers here.
+    var ties = resolved.ties || [];
+    for (i = 0; i < ties.length; i++) {
+        var tieItem = ties[i];
+        lines.push("Control tie " + tieItem.from + " to " + tieItem.to +
+            ": " + tieItem.error.toFixed(2) + " between fixed points " +
+            "[horizontal " + tieItem.horizontal.toFixed(2) +
+            ", vertical " + tieItem.vertical.toFixed(2) + "]");
+    }
+
+    // What the adjustment did -- or plainly that none was made, so a
+    // reader is never left guessing which centreline they are looking
+    // at. `resolved.adjusted` is `undefined` on a plain
+    // CsNetwork.resolve() result (never adjusted at all) and `false`
+    // on a CsAdjust.unadjusted() pass-through (switched off, or a
+    // solve that didn't converge); both must fall into the same
+    // "not adjusted" wording, not just the exact boolean false.
+    if (resolved.adjusted === true) {
+        var sum = resolved.summary;
+        if (sum.movedCount > 0) {
+            lines.push("Adjusted by least squares: " + sum.movedCount +
+                " station" + (sum.movedCount === 1 ? "" : "s") +
+                " moved, most of all " + sum.worstStation + " at " +
+                CsReport.length(sum.worstShift, survey.distanceUnit) +
+                " (" + sum.iterations + " iteration" +
+                (sum.iterations === 1 ? "" : "s") + ").");
+        } else if (sum.stationCount > 0) {
+            lines.push("Adjusted by least squares: nothing moved -- " +
+                "the survey already closes within tolerance.");
+        }
+        if (sum.stationCount > 0) {
+            lines.push("The as-surveyed centreline is on layer " +
+                "CTRL-RAW, switched off -- turn it on to see exactly " +
+                "what moved.");
+        }
+        lines.push("Held fixed: " + (sum.pinned.length > 0 ?
+            sum.pinned.join(", ") : "nothing"));
+    } else if (resolved.summary !== undefined && resolved.summary !== null &&
+            resolved.summary.warning !== undefined) {
+        // A half-solved network is worse than an unsolved one, because
+        // it LOOKS adjusted -- CsAdjust already refused to hand back
+        // coordinates in this case, and this warning is its own words,
+        // verbatim, not a paraphrase.
+        lines.push("");
+        lines.push("WARNING -- " + resolved.summary.warning);
+    } else if (resolved.loops.length > 0 && ties.length > 0) {
+        lines.push("Not adjusted: the misclosures above are still " +
+            "as surveyed.");
+    } else if (resolved.loops.length > 0) {
+        lines.push("Not adjusted: the misclosure is still on the " +
+            "closing leg, as surveyed.");
+    } else if (ties.length > 0) {
+        lines.push("Not adjusted: the gap against fixed control is " +
+            "still as surveyed.");
     }
 
     // Task 1b: when an explicit anchor and *fix control shared a
@@ -134,7 +197,9 @@ CsReport.statsSummary = function(survey, stats, grade) {
         "   Loops: " + stats.loopCount);
     if (stats.worstLoop !== null) {
         lines.push("Worst loop closure: " + stats.worstLoop.percent.toFixed(2) +
-            "% (" + stats.worstLoop.from + " to " + stats.worstLoop.to + ")");
+            "% (" + stats.worstLoop.from + " to " + stats.worstLoop.to +
+            ", horizontal " + stats.worstLoop.horizontal.toFixed(2) +
+            ", vertical " + stats.worstLoop.vertical.toFixed(2) + ")");
     }
     lines.push("");
     lines.push("Centreline grade: " + grade.centrelineText);
