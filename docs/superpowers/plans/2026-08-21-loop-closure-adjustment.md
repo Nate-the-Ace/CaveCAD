@@ -2234,6 +2234,31 @@ silently look right while being wrong.
 
 ---
 
+## Performance note recorded 2026-08-21: CG iteration count on chain-like networks
+
+Task 2's solver measured 3,000 stations / 14 loops at 35ms with **2,038 iterations**, and
+4,000 stations at 77ms. That iteration count is expected rather than alarming: conjugate
+gradient on a graph Laplacian converges in roughly O(sqrt(condition number)) iterations,
+and a cave network is chain-like — long passages with few cross-connections — which is
+the worst-conditioned shape there is. Iterations therefore scale with passage length, and
+per-iteration cost scales with station count, so wall time grows roughly quadratically.
+
+Extrapolated, a 20,000-station system is on the order of seconds under node and worse
+under QCAD's older non-JIT engine. Nobody has hit that yet and the in-suite bound (500ms
+at 4,000) will catch a regression, so this is recorded, not scheduled.
+
+**If it ever needs fixing, the right fix is not a better preconditioner — it is a
+different formulation.** The network is a spanning tree plus k extra edges, and k is the
+loop count. Solving in the cycle space makes the unknowns the k loop-flow corrections
+rather than the 3n station coordinates: a dense k×k system, where k is tens even for a
+large cave system, independent of station count. That is the classical loop-based network
+adjustment, and it would turn seconds into microseconds. It is a rewrite of
+`CsAdjust.adjust`'s core, not a tuning change, which is why it is a note here rather than
+a task — the current solver is correct, and correct-and-fast-enough beats a rewrite
+nobody needs yet.
+
+---
+
 ## Self-review
 
 **Spec coverage.** Section 1 (math) → Task 2. Section 2 (return shape, honesty rule)
