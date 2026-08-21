@@ -453,12 +453,19 @@ is enforced by review assignment rather than by memory.
 
 ## The revision log is the message
 
-`RevisionLog` shipped in 2.7.1 on the revision-framework side: an append-only,
+`RevisionLog` landed in `0.2.7.1` on the revision-framework side: an append-only,
 newline-joined text property in the `CaveSurvey` group, on the trip-0 anchor station
 (falling back to the lowest-numbered trip anchor on older drawings), written by both
 revision paths through `CsRevise.appendLog`. Integration notes for this design are in
 `2026-08-21-revisionlog-versioning-notes.md`; the four calls they left open are settled
 here.
+
+Nothing in the suite is released — the version scheme went pre-1.0 (`0.MAJOR.MINOR.PATCH`)
+for exactly that reason, and the revision framework has had no GUI pass. So "landed in
+`0.2.7.1`" means present in the tree and headless-tested, **not** proven in a real window.
+This design depends on `CsRevise.surveyFromDocument` and `RevisionLog` being correct at
+runtime, so a GUI pass on the revision framework is a prerequisite for slice 2, not a
+parallel task.
 
 It carries no timestamps, deliberately — this codebase avoids `Date` for test
 determinism. That composes rather than conflicts: **git supplies the time, the log
@@ -502,8 +509,8 @@ happened** — no versioning logic may treat the log as a complete history, and 
 whose log delta is empty must never be described as "no survey change" with any
 confidence beyond "this drawing does not record one."
 
-**Drawings predating 2.7.1 may have truncated logs**, because every Draw used to destroy
-the log. A short log is not evidence of a short history.
+**Drawings predating `0.2.7.1` may have truncated logs**, because every Draw used to
+destroy the log. A short log is not evidence of a short history.
 
 ## Conflicts, offline, and errors
 
@@ -566,7 +573,7 @@ Unit tests in the existing headless harness (`tests/run_all.sh`, runs under node
   lacks `repo`; the noreply email is built as `<id>+<login>@users.noreply.github.com`.
 - **Revision-log delta** — new lines are extracted against a recorded previous value;
   an unchanged log yields an empty delta and the geometry-only-edit body; a log that
-  SHRANK (the pre-2.7.1 truncation case) is reported rather than diffed as if lines were
+  SHRANK (the pre-`0.2.7.1` truncation case) is reported rather than diffed as if lines were
   deliberately removed.
 - **Log export** — byte-identical across two runs, append-only relative to the previous
   export, and team names present verbatim per decision 9.
