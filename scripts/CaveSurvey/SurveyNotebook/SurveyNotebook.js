@@ -1173,6 +1173,97 @@ SurveyNotebook.loadFromDrawing = function(w) {
 };
 
 /**
+ * What a Draw should write into the drawing's RevisionLog -- the lines
+ * only, in CsRevise.apply's own terse vocabulary ("trip N",
+ * "declination OLD -> NEW (source)"). Pure: no document, no GUI, so
+ * the wording is asserted directly by the unit tests rather than
+ * fished back out of a redrawn drawing.
+ *
+ * Why a Draw logs at all: the header's Decl came OUT of the trip
+ * fingerprint, so retyping it and pressing Draw REPLACES the trip in
+ * place and rotates its azimuths. The geometry moves, the bound
+ * linework follows, and without this nothing in the drawing said so --
+ * which leaves a surveyor six months later with a map that cannot
+ * explain itself. CsRevise.appendLog owns the shape these lines go
+ * into, so the two revision paths keep one log and not two.
+ *
+ * Three independent signals count as "something happened", and the
+ * third is not redundant: a shot deleted off the END of the page moves
+ * no station that both frames share, so stationsMoved alone would miss
+ * it, and a declination edit on a single-shot trip may move nothing
+ * either. None of the three means a Draw that re-drew the same page
+ * unchanged, and that writes NOTHING -- an audit trail that grows on
+ * every no-op is one nobody reads.
+ *
+ * \param info {tripId, fingerprint, replaced, oldDeclination,
+ *              newDeclination, declinationSource, oldShots, newShots,
+ *              stationsMoved, lineworkMoved, lineworkUnmoved,
+ *              lineworkBound}
+ * \return array of log lines, possibly empty
+ */
+SurveyNotebook.revisionLogLines = function(info) {
+    var num = function(v) {
+        return (typeof v === "number" && isFinite(v)) ? v : 0;
+    };
+    var plural = function(n, word) {
+        return n + " " + word + (n === 1 ? "" : "s");
+    };
+    var newShots = num(info.newShots);
+    var stationsMoved = num(info.stationsMoved);
+    var declChanged = info.replaced === true &&
+        info.oldDeclination !== undefined && info.oldDeclination !== null &&
+        info.oldDeclination !== info.newDeclination;
+    var lines = [];
+
+    if (info.replaced !== true) {
+        // "where did trip 2 come from" is exactly the question a log is
+        // for, so an added trip always gets its line. (Whether the line
+        // reaches the drawing is the caller's problem: a drawing with no
+        // trip-0 anchor has nowhere to keep it -- see drawMergedSurvey.)
+        lines.push("trip " + info.tripId + " (" + info.fingerprint +
+            ") added from the notebook page, " + plural(newShots, "shot"));
+    } else if (declChanged || stationsMoved > 0 ||
+            num(info.oldShots) !== newShots) {
+        var bits = [];
+        if (declChanged) {
+            // the one Nathan hit, and the one he would come looking for
+            bits.push("declination " + info.oldDeclination + " -> " +
+                info.newDeclination + " (" +
+                (info.declinationSource || "unknown") + ")");
+        }
+        bits.push(plural(newShots, "shot") + " replaced");
+        bits.push(stationsMoved === 0 ? "no station moved" :
+            plural(stationsMoved, "station") + " moved");
+        lines.push("trip " + info.tripId + " (" + info.fingerprint +
+            ") redrawn from the notebook page: " + bits.join(", "));
+    }
+
+    if (lines.length === 0) {
+        // nothing happened to the survey, so nothing happened to the
+        // linework either -- and a lone "linework:" line under no
+        // heading would be unreadable
+        return lines;
+    }
+    var lwBits = [];
+    if (num(info.lineworkMoved) > 0) {
+        lwBits.push(num(info.lineworkMoved) + " moved");
+    }
+    if (num(info.lineworkUnmoved) > 0) {
+        lwBits.push(num(info.lineworkUnmoved) + " left behind");
+    }
+    if (num(info.lineworkBound) > 0) {
+        // named apart from the moved count for the same reason
+        // CsRevise.lineworkClaimLine names it apart in the report: this
+        // is geometry the suite claimed on the user's behalf
+        lwBits.push(num(info.lineworkBound) + " bound automatically");
+    }
+    if (lwBits.length > 0) {
+        lines.push("  linework: " + lwBits.join(", "));
+    }
+    return lines;
+};
+
+/**
  * Trip-aware Draw: merges the page into the reconstructed survey
  * (see mergeTripIntoSurvey), erases EVERY station the merged survey
  * owns -- plus any the replaced trip no longer uses -- and redraws
@@ -1183,8 +1274,9 @@ SurveyNotebook.loadFromDrawing = function(w) {
  * drawing and drawn again with an edited header (Decl, say) moves the
  * survey. So it ends where CsRevise.apply's non-rigid branch ends --
  * bound linework follows the stations it was traced against
- * (CsRevise.moveLinework). It never reaches CsRevise.apply itself, so
- * nothing is moved twice.
+ * (CsRevise.moveLinework), and the revision writes itself into the
+ * drawing's RevisionLog (SurveyNotebook.revisionLogLines). It never
+ * reaches CsRevise.apply itself, so nothing is moved twice.
  */
 SurveyNotebook.drawMergedSurvey = function(w, doc, survey, recon) {
     var tripRecord = SurveyNotebook.tripRecordOf(survey);
@@ -1292,6 +1384,20 @@ SurveyNotebook.drawMergedSurvey = function(w, doc, survey, recon) {
     var tripNames = CsRevise.tripStationNames(recon.survey);
     var bindPlan = CsBind.planAutoBind(doc, tripNames);
 
+    // And the third thing this moment is the last chance at: the
+    // drawing's RevisionLog. It is a tag on the trip-0 anchor POINT,
+    // and the erase below deletes that point. Read it afterwards and
+    // the whole history reads as "" -- which the append below would then
+    // happily overwrite with just this one entry, silently truncating
+    // every revision before it. That is worse than not logging at all,
+    // so the read goes here, beside oldPos, for exactly the reason
+    // CsRevise.apply reads its own old log before its own erase.
+    //
+    // No anchor -- a first Draw into a drawing that has no trip 0 --
+    // reads as no history, which is precisely what it is. CsTags.get
+    // takes a null entity for exactly this kind of question.
+    var prevLog = CsTags.get(CsRevise.trip0Anchor(doc), "RevisionLog");
+
     var replaced = CsLayers.withLayerOn(doc, di, CsLayers.HIDDEN,
         function() {
             return CsDraw.eraseStations(doc, eraseNames);
@@ -1316,9 +1422,13 @@ SurveyNotebook.drawMergedSurvey = function(w, doc, survey, recon) {
     // happen.
     var newPos = CsRevise.stationPositions(doc);
     var lwExtent = CsRevise.positionsExtent(oldPos);
+    // asked once and kept: the linework gate below and the RevisionLog
+    // entry further down are both answering "did this Draw move the
+    // survey", and they must not be able to answer it differently
+    var stationsMoved = CsRevise.positionsMoved(oldPos, newPos, lwExtent);
     var lw = null;
     var lwBound = 0;
-    if (CsRevise.positionsMoved(oldPos, newPos, lwExtent) > 0) {
+    if (stationsMoved > 0) {
         // The plan becomes tags now: an entity has to be tagged before
         // the mover can see it, and waiting until here means a Draw that
         // moved nothing writes nothing onto the user's own geometry.
@@ -1338,6 +1448,71 @@ SurveyNotebook.drawMergedSurvey = function(w, doc, survey, recon) {
             "page's shots; the whole survey redrew as one merged model.") :
         ("Added this page as new trip " + merge.tripId + " (" + fp +
             ") alongside the drawing's existing trips.");
+
+    // -- the redraw records itself ------------------------------------
+    // Same log, same vocabulary, same append rule as CsRevise.apply's
+    // own revisions (CsRevise.appendLog owns the shape), so a drawing
+    // revised both ways still reads as one history. Built here rather
+    // than earlier because the linework counts are only known now.
+    //
+    // recon.survey.trips[tripId] is still the trip as the DRAWING had
+    // it: mergeTripIntoSurvey slices the array and overwrites the slot
+    // on its own copy, so the old declination survives here to be
+    // named against the page's new one.
+    var oldTrip = recon.survey.trips[merge.tripId];
+    var oldShots = 0;
+    for (i = 0; i < recon.survey.shots.length; i++) {
+        if ((recon.survey.shots[i].trip || 0) === merge.tripId) {
+            oldShots++;
+        }
+    }
+    var logLines = SurveyNotebook.revisionLogLines({
+        tripId: merge.tripId,
+        fingerprint: fp,
+        replaced: merge.replaced,
+        oldDeclination: (oldTrip === undefined || oldTrip === null) ?
+            null : oldTrip.declination,
+        newDeclination: tripRecord.declination,
+        declinationSource: tripRecord.declinationSource,
+        oldShots: oldShots,
+        newShots: survey.shots.length,
+        stationsMoved: stationsMoved,
+        lineworkMoved: lw === null ? 0 : lw.moved,
+        lineworkUnmoved: lw === null ? 0 : lw.unmoved.length,
+        lineworkBound: lwBound
+    });
+    var newLog = CsRevise.appendLog(prevLog, logLines);
+    var logCommitted = false;
+    if (newLog !== "") {
+        // The redraw wrote fresh v3 tags but knows nothing of history,
+        // so the log has to be put back by hand -- onto the NEW trip-0
+        // anchor, the old one having just been erased. Same move
+        // CsRevise.apply's non-rigid branch makes, for the same reason.
+        //
+        // The condition is "there is a log", NOT "this Draw added to
+        // it": every Draw erases the point the log lived on, so a Draw
+        // that appends nothing must still carry the existing log
+        // across or it destroys it. Before this, pressing Draw after
+        // revising declinations through the dialog silently threw that
+        // dialog's whole audit trail away.
+        //
+        // No trip-0 anchor means the entry is DROPPED, and deliberately.
+        // It happens on a first Draw into an empty drawing:
+        // surveyFromDocument hands an empty document one blank trip 0,
+        // the page's fingerprint matches it no better than any other, so
+        // the page lands as trip 1 and nothing in the drawing carries
+        // Trip 0. The log lives on the trip-0 anchor by definition of
+        // the schema, and that is the only point either revision path
+        // reads. Parking it on the trip-1 anchor instead would leave it
+        // somewhere the NEXT revision's erase deletes unread -- so one
+        // lost entry beats a log that quietly loses all of them. The
+        // redraw itself is still reported in the message below.
+        var anchor0 = CsRevise.trip0Anchor(doc);
+        if (anchor0 !== null) {
+            CsTags.commit(di, anchor0, { RevisionLog: newLog });
+            logCommitted = true;
+        }
+    }
 
     // What the page couldn't show, said out loud: the user has to be
     // able to tell preserved data from lost data without opening tags.
@@ -1382,7 +1557,14 @@ SurveyNotebook.drawMergedSurvey = function(w, doc, survey, recon) {
         (lwBound > 0 ? "; binding " + lwBound + " untagged item" +
             (lwBound === 1 ? "" : "s") + " was a further one" : "") +
         (lw !== null && lw.moved > 0 ?
-            "; the linework move is a further one" : "") + ".");
+            "; the linework move is a further one" : "") +
+        // and the log write is the last one, for the same reason: a
+        // user undoing back past the redraw needs to know how many
+        // steps that is. Named for the write, not for the new entry --
+        // it is an operation either way, since even a Draw that appends
+        // nothing has to carry the existing log across the erase
+        (logCommitted ? "; the revision-log write is the last one" : "") +
+        ".");
 };
 
 SurveyNotebook.importFile = function(w) {
@@ -1811,20 +1993,24 @@ SurveyNotebook.inferDeclination = function(w) {
 //                        the page still matches the trip it was loaded
 //                        from: it REPLACES that trip rather than
 //                        forking a duplicate beside it. Backsights and
-//                        exclusion flags carry over as usual. What it
-//                        does NOT do is write a RevisionLog entry --
-//                        a redraw is not a recorded revision.
+//                        exclusion flags carry over as usual, and the
+//                        redraw appends its own RevisionLog line
+//                        (SurveyNotebook.revisionLogLines) naming the
+//                        trip and the declination change.
 //   this dialog          Rotates the trip's stored azimuths (and its
 //                        backsights) by the difference, keeps the trip
 //                        where it is, and records the change in the
 //                        RevisionLog. One CsRevise.apply.
 //
-// So both paths now land the same geometry on the same trip, and the
-// difference is what gets RECORDED: this dialog states the correction
-// in the RevisionLog and stamps the trip's declinationSource, which is
-// what makes a revision auditable later. Prefer it for "the
-// declination was wrong"; the header field remains what it always was,
-// the declination the page's own readings were taken under.
+// So both paths land the same geometry on the same trip, and both now
+// leave a trail in the same log -- read in order, a drawing's history
+// no longer has a hole in it wherever someone reached for the page
+// instead of the dialog. What still differs is REACH and MEANING: the
+// dialog corrects any trip in the drawing without the page having to
+// hold it, and what it writes is a correction ("this trip's
+// declination was wrong"), where the header field is a reading
+// condition ("this is the declination these cells were taken under").
+// Prefer the dialog for "the declination was wrong".
 // ---------------------------------------------------------------------
 
 /**

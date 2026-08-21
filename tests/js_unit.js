@@ -1807,6 +1807,37 @@ if (teamBoundaryRt.trips.length === 2) {
         "lineworkSummary: missing fields read as nothing bound");
 })();
 
+// --- ONE shape for the RevisionLog, two writers ----------------------
+// CsRevise.apply and the Survey Notebook's Draw both append to the same
+// log on the same anchor. The rules asserted here are what make a mixed
+// history readable months later: entries are separated by exactly one
+// newline, the earlier log is carried over VERBATIM, and nothing to say
+// leaves the value untouched -- which is also how a caller signals "no
+// op" to itself, since the value it would commit simply does not differ.
+(function() {
+    ok(CsRevise.appendLog("", ["a"]) === "a",
+        "appendLog: the first entry has nothing to sit under, got '" +
+        CsRevise.appendLog("", ["a"]) + "'");
+    ok(CsRevise.appendLog("a", ["b"]) === "a\nb",
+        "appendLog: one newline between entries, got '" +
+        CsRevise.appendLog("a", ["b"]) + "'");
+    ok(CsRevise.appendLog("a\nb", ["c", "  d"]) === "a\nb\nc\n  d",
+        "appendLog: several new lines land in order under the old ones");
+    // append-only: history can be added to, never edited
+    var old = "trip 0 declination 2 -> 6 (igrf)\ntrip 1 was here";
+    ok(CsRevise.appendLog(old, ["new"]).indexOf(old) === 0,
+        "appendLog: the existing log is preserved byte for byte, never " +
+        "replaced, got '" + CsRevise.appendLog(old, ["new"]) + "'");
+    // nothing to say -> nothing changes, so there is nothing to commit
+    ok(CsRevise.appendLog(old, []) === old,
+        "appendLog: no lines returns the old log unchanged (a no-op Draw " +
+        "writes nothing)");
+    ok(CsRevise.appendLog("", []) === "",
+        "appendLog: no history and no lines is still no log");
+    ok(CsRevise.appendLog(null, null) === "",
+        "appendLog: missing arguments are not a reason to throw");
+})();
+
 // --- the argument prep moveLinework's two callers share --------------
 (function() {
     near(CsRevise.positionsExtent({ A: { x: 0, y: 0, z: 0 },
@@ -4772,6 +4803,330 @@ if (!IS_NODE) {
         }
         ok(boxText.indexOf("bound automatically") < 0,
             "opt-out: and the report claims nothing, got '" + boxText + "'");
+    })();
+
+    // -----------------------------------------------------------------
+    // The Draw path writes the RevisionLog.
+    //
+    // Editing the header Decl and pressing Draw REPLACES the trip and
+    // rotates its azimuths -- declination came out of the fingerprint,
+    // so the page still matches the trip it was loaded from. Nathan hit
+    // exactly that on a real drawing: the geometry moved, the linework
+    // followed, and nothing recorded that it had happened. A drawing
+    // that cannot explain its own geometry six months later is the
+    // failure this logs against.
+    //
+    // The wording is asserted on the pure builder first, then the whole
+    // Draw is run twice over a real document to prove the log
+    // ACCUMULATES -- the entry the first Draw wrote has to survive the
+    // second, whose erase deletes the very point that carried it.
+    // -----------------------------------------------------------------
+    (function() {
+        var lines = function(over) {
+            var info = { tripId: 1, fingerprint: "2002-02-02|UPPER TEAM",
+                replaced: true, oldDeclination: -4.5, newDeclination: -4.5,
+                declinationSource: "user", oldShots: 4, newShots: 4,
+                stationsMoved: 0, lineworkMoved: 0, lineworkUnmoved: 0,
+                lineworkBound: 0 };
+            for (var k in over) {
+                if (over.hasOwnProperty(k)) {
+                    info[k] = over[k];
+                }
+            }
+            return SurveyNotebook.revisionLogLines(info).join("\n");
+        };
+
+        // (a) the declination case, in apply's own vocabulary
+        var decl = lines({ newDeclination: -3.25, stationsMoved: 3 });
+        ok(decl === "trip 1 (2002-02-02|UPPER TEAM) redrawn from the " +
+            "notebook page: declination -4.5 -> -3.25 (user), 4 shots " +
+            "replaced, 3 stations moved",
+            "notebook-log: a declination change names the trip and BOTH " +
+            "values, got '" + decl + "'");
+        ok(decl.indexOf("declination -4.5 -> -3.25 (user)") >= 0,
+            "notebook-log: the old -> new phrasing matches the lines " +
+            "CsRevise.apply writes, so one log reads as one history");
+
+        // (b) a new trip: "where did trip 2 come from" answered
+        var added = lines({ replaced: false, tripId: 2, oldShots: 0,
+            newShots: 1 });
+        ok(added === "trip 2 (2002-02-02|UPPER TEAM) added from the " +
+            "notebook page, 1 shot",
+            "notebook-log: an added trip says so in one line, singular " +
+            "shot count included, got '" + added + "'");
+
+        // (c) a Draw that changed nothing writes nothing. An audit trail
+        //     that grows on every no-op is one nobody reads.
+        ok(lines({}) === "",
+            "notebook-log: an unchanged redraw appends nothing, got '" +
+            lines({}) + "'");
+        ok(lines({ lineworkMoved: 6, lineworkBound: 2 }) === "",
+            "notebook-log: and not even the linework counts can make a " +
+            "no-op write a line");
+
+        // (d) the three independent signals. A shot deleted off the END
+        //     of the page moves no SHARED station, so a shot-count
+        //     change has to count on its own.
+        ok(lines({ stationsMoved: 2 }).indexOf("2 stations moved") >= 0,
+            "notebook-log: moved stations alone are worth recording");
+        ok(lines({ newShots: 3 }).indexOf("3 shots replaced") >= 0 &&
+            lines({ newShots: 3 }).indexOf("no station moved") >= 0,
+            "notebook-log: a dropped shot that moved nothing shared is " +
+            "still recorded, got '" + lines({ newShots: 3 }) + "'");
+
+        // (e) linework on a following line, from the counts already held
+        var lw = lines({ newDeclination: -3.25, stationsMoved: 3,
+            lineworkMoved: 5, lineworkUnmoved: 1, lineworkBound: 2 });
+        ok(lw.indexOf("\n  linework: 5 moved, 1 left behind, " +
+            "2 bound automatically") > 0,
+            "notebook-log: linework follows on its own line, and the " +
+            "automatic claim is named apart, got '" + lw + "'");
+    })();
+
+    (function() {
+        var doc = new RDocument(new RMemoryStorage(),
+            new RSpatialIndexNavel());
+        var di = new RDocumentInterface(doc);
+        getDocument = function() { return doc; };
+        getDocumentInterface = function() { return di; };
+
+        // one trip at declination -4.5, the shape of Nathan's test cave
+        var S = CsModel.newSurvey();
+        S.date = "1998-07-04";
+        S.team = "NS/JB";
+        S.declination = -4.5;
+        S.declinationSource = "user";
+        CsModel.ensureTrips(S);
+        var ls = [shotOf("L1", "L2", 10, 0), shotOf("L2", "L3", 10, 90),
+            shotOf("L3", "L4", 8, 45)];
+        for (var i = 0; i < ls.length; i++) {
+            ls[i].left = 2;
+            ls[i].right = 3;
+            S.shots.push(ls[i]);
+        }
+        CsDraw.survey(S, CsNetwork.resolve(S, {}));
+
+        // a traced wall bound to the trip, so the linework clause is
+        // real rather than a constant
+        var stationAt = CsRevise.stationPositions(doc);
+        CsLayers.ensure(doc, di, "WALLS-SURVEYED");
+        var pd = new RPolylineData();
+        pd.appendVertex(new RVector(stationAt.L3.x + 0.5, stationAt.L3.y));
+        pd.appendVertex(new RVector(stationAt.L4.x + 0.5, stationAt.L4.y));
+        var wall = new RPolylineEntity(doc, pd);
+        wall.setLayerId(doc.getLayerId("WALLS-SURVEYED"));
+        var aop = new RAddObjectsOperation();
+        aop.addObject(wall, false);
+        di.applyOperation(aop);
+        CsBind.tagEntities(doc, di,
+            [{ entity: wall, trip: 0, stations: ["L3", "L4"] }]);
+
+        var realBox = (typeof QMessageBox !== "undefined") ?
+            QMessageBox : undefined;
+        var boxText = "";
+        QMessageBox = {
+            information: function(parent, title, text) {
+                boxText = String(text);
+            },
+            warning: function(parent, title, text) {
+                boxText = "WARNING BOX: " + String(text);
+            }
+        };
+
+        // keyed on getId(): entity query order in this build is NOT
+        // deterministic, so "the anchor" has to be re-found each time
+        // rather than remembered as an object
+        var logNow = function() {
+            var a = CsRevise.trip0Anchor(doc);
+            return a === null ? null : CsTags.get(a, "RevisionLog");
+        };
+        // the page as the drawing holds it, with Decl retyped: the Az
+        // cells are MAGNETIC, so back out the old header and forward
+        // through the new one -- exactly what sheetSurvey does to
+        // untouched cells
+        var drawWithDecl = function(newDecl) {
+            var recon = CsRevise.surveyFromDocument(doc);
+            var page = SurveyNotebook.tripSurvey(recon.survey, 0);
+            var wasDecl = page.declination;
+            page.declination = newDecl;
+            page.declinationSource = "user";
+            for (var k = 0; k < page.shots.length; k++) {
+                var mag = CsAngles.applyDeclination(page.shots[k].azimuth,
+                    -wasDecl);
+                page.shots[k].azimuth =
+                    CsAngles.applyDeclination(mag, newDecl);
+                page.shots[k].declination = null;
+            }
+            SurveyNotebook.drawMergedSurvey(null, doc, page, recon);
+        };
+
+        try {
+            ok(logNow() === "",
+                "notebook-log-doc: a freshly drawn survey has no history " +
+                "yet, got '" + logNow() + "'");
+
+            // -- first revision: -4.5 -> -3.25 ------------------------
+            drawWithDecl(-3.25);
+            var log1 = logNow();
+            ok(log1.indexOf("trip 0 (1998-07-04|NS/JB) redrawn from " +
+                "the notebook page:") === 0,
+                "notebook-log-doc: the first entry names the trip and " +
+                "its fingerprint, got '" + log1 + "'");
+            ok(log1.indexOf("declination -4.5 -> -3.25 (user)") > 0,
+                "notebook-log-doc: and the declination change he would " +
+                "come looking for, got '" + log1 + "'");
+            ok(log1.indexOf("3 shots replaced") > 0,
+                "notebook-log-doc: and how many shots the page replaced");
+            ok(log1.indexOf("stations moved") > 0,
+                "notebook-log-doc: and that stations moved, got '" +
+                log1 + "'");
+            ok(log1.indexOf("\n  linework:") > 0 &&
+                log1.indexOf("moved") > 0,
+                "notebook-log-doc: and the linework that followed, got '" +
+                log1 + "'");
+            ok(boxText.indexOf("revision-log write") > 0,
+                "notebook-log-doc: the extra undo step is said out loud, " +
+                "got '" + boxText + "'");
+
+            // -- second revision: -3.25 -> -1.75 ----------------------
+            // The erase deletes the point that carried log1, so this is
+            // the assertion that the read happens BEFORE the erase: read
+            // after, and log1 would be gone.
+            drawWithDecl(-1.75);
+            var log2 = logNow();
+            ok(log2.indexOf(log1) === 0,
+                "notebook-log-doc: the first entry survived the second " +
+                "revision's erase, byte for byte and still first -- " +
+                "got '" + log2 + "'");
+            ok(log2.indexOf("declination -3.25 -> -1.75 (user)") > 0,
+                "notebook-log-doc: the second change is recorded too, " +
+                "got '" + log2 + "'");
+            ok(log2.indexOf("declination -4.5 -> -3.25 (user)") <
+                log2.indexOf("declination -3.25 -> -1.75 (user)"),
+                "notebook-log-doc: in the order they happened -- the log " +
+                "carries no timestamp, so order IS the chronology");
+            var entries = log2.split("\n");
+            var heads = 0;
+            for (i = 0; i < entries.length; i++) {
+                if (entries[i].indexOf("trip 0 (") === 0) {
+                    heads++;
+                }
+            }
+            ok(heads === 2,
+                "notebook-log-doc: two revisions, two entries -- not one " +
+                "overwritten and not three, got " + heads + " in '" +
+                log2 + "'");
+
+            // -- a Draw that changes nothing ---------------------------
+            // Two facts in one assertion, and the second is the one
+            // that bit: nothing is APPENDED, and the log that was
+            // already there still survives. Every Draw erases the point
+            // the log lives on, so "write nothing" cannot mean "commit
+            // nothing" -- a plain Draw used to destroy the whole audit
+            // trail on its way past.
+            drawWithDecl(-1.75);
+            ok(logNow() === log2,
+                "notebook-log-doc: redrawing the same page appends " +
+                "nothing and destroys nothing, got '" + logNow() + "'");
+
+            // -- a page whose fingerprint matches nothing --------------
+            var recon = CsRevise.surveyFromDocument(doc);
+            var fresh = SurveyNotebook.tripSurvey(recon.survey, 0);
+            fresh.date = "2010-10-10";
+            fresh.team = "SOLO";
+            fresh.shots = [shotOf("Q1", "Q2", 12, 200)];
+            fresh.shots[0].trip = 0;
+            SurveyNotebook.drawMergedSurvey(null, doc, fresh, recon);
+            var log3 = logNow();
+            ok(log3.indexOf(log2) === 0,
+                "notebook-log-doc: the replacement history is still " +
+                "intact under the new trip's entry");
+            ok(log3.indexOf("trip 1 (2010-10-10|SOLO) added from the " +
+                "notebook page, 1 shot") > 0,
+                "notebook-log-doc: 'where did trip 1 come from' is " +
+                "answered in the log, got '" + log3 + "'");
+        } finally {
+            QMessageBox = realBox;
+        }
+    })();
+
+    // -----------------------------------------------------------------
+    // A FIRST Draw into an EMPTY drawing. Two things have to hold, and
+    // the second is a documented limit rather than a feature:
+    //
+    //   1. reading a log off an anchor that does not exist must not
+    //      throw on the way past. Nothing to read is not an error.
+    //   2. the entry is DROPPED, not parked. surveyFromDocument gives an
+    //      empty document one blank trip 0, so the page's fingerprint
+    //      matches nothing and it lands as trip 1 -- leaving a drawing
+    //      with no trip-0 anchor at all. The RevisionLog lives on the
+    //      trip-0 anchor by definition of the schema, and that is the
+    //      only place either revision path looks; writing it onto the
+    //      trip-1 anchor instead would put it somewhere the NEXT
+    //      revision's erase deletes without anyone reading it. Losing
+    //      one entry beats a log that quietly loses all of them.
+    //
+    // CsRevise.apply behaves the same way on such a drawing, so the two
+    // paths at least agree. The real fix is trip numbering, not logging.
+    // -----------------------------------------------------------------
+    (function() {
+        var doc = new RDocument(new RMemoryStorage(),
+            new RSpatialIndexNavel());
+        var di = new RDocumentInterface(doc);
+        getDocument = function() { return doc; };
+        getDocumentInterface = function() { return di; };
+        ok(CsRevise.trip0Anchor(doc) === null,
+            "notebook-log-empty: an empty drawing has no anchor to read");
+
+        var page = CsModel.newSurvey();
+        page.date = "2026-01-01";
+        page.team = "FIRST";
+        page.declination = 0;
+        page.declinationSource = "user";
+        page.shots.push(shotOf("A1", "A2", 10, 45));
+        page.shots.push(shotOf("A2", "A3", 10, 135));
+        var recon = CsRevise.surveyFromDocument(doc);
+
+        var realBox = (typeof QMessageBox !== "undefined") ?
+            QMessageBox : undefined;
+        QMessageBox = {
+            information: function() {},
+            warning: function() {}
+        };
+        var threw = null;
+        try {
+            SurveyNotebook.drawMergedSurvey(null, doc, page, recon);
+        } catch (e) {
+            threw = String(e);
+        } finally {
+            QMessageBox = realBox;
+        }
+        ok(threw === null,
+            "notebook-log-empty: a first Draw with no anchor to read does " +
+            "not throw, got " + threw);
+        ok(CsTags.collectStations(doc).length === 3,
+            "notebook-log-empty: and it still drew the page -- the log is " +
+            "never allowed to cost the user their survey");
+        ok(CsRevise.trip0Anchor(doc) === null,
+            "notebook-log-empty: the page landed as trip 1, so there is " +
+            "still no trip-0 anchor for a log to live on");
+
+        // nothing parked on the trip-1 anchor either: a log the next
+        // revision's erase would delete unread is worse than none
+        var parked = "";
+        var eids = doc.queryAllEntities(false, false);
+        for (var q = 0; q < eids.length; q++) {
+            var ee = doc.queryEntity(eids[q]);
+            if (isNull(ee)) {
+                continue;
+            }
+            if (CsTags.get(ee, "RevisionLog") !== "") {
+                parked += CsTags.get(ee, "RevisionLog");
+            }
+        }
+        ok(parked === "",
+            "notebook-log-empty: the entry is dropped rather than written " +
+            "somewhere no reader looks, got '" + parked + "'");
     })();
 }
 

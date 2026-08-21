@@ -1271,6 +1271,70 @@ CsRevise.lineworkSummary = function(moved, unmoved, bound) {
 };
 
 /**
+ * The drawing's trip-0 anchor point, or null when there is none.
+ * Anchor points are the only entities carrying BOTH a Station tag and
+ * a Trip tag -- legs carry Trip too, but never Station.
+ *
+ * Shared because every revision path needs this same point twice: once
+ * BEFORE the erase, to read the RevisionLog off the entity the erase is
+ * about to delete, and once after the redraw, to put the appended log
+ * back on. Two hand-rolled copies of one scan is how one of them
+ * drifts.
+ */
+CsRevise.trip0Anchor = function(doc) {
+    var ids = doc.queryAllEntities(false, false);
+    for (var i = 0; i < ids.length; i++) {
+        var e = doc.queryEntity(ids[i]);
+        if (isNull(e)) {
+            continue;
+        }
+        if (CsTags.get(e, "Station") !== "" &&
+                CsTags.get(e, "Trip") !== "" &&
+                CsTags.getNumber(e, "Trip") === 0) {
+            return e;
+        }
+    }
+    return null;
+};
+
+/**
+ * The RevisionLog a drawing should carry after a revision: the log it
+ * already had, with these lines appended under it.
+ *
+ * The one home for the log's SHAPE, for the same reason
+ * CsRevise.lineworkSummary is the one home for the linework sentences.
+ * TWO paths revise a trip in place -- CsRevise.apply and the Survey
+ * Notebook's Draw -- and a log whose separator or carry-over rule
+ * differed between them would be unreadable exactly when someone needs
+ * it: months later, reading down a mixed history trying to work out
+ * when the geometry moved.
+ *
+ * The old log is carried over verbatim and NEVER rewritten. History is
+ * append-only here: a revision may add to the record, not edit it. No
+ * lines to add hands the previous log straight back, which is how a
+ * caller says "this changed nothing" without special-casing its own
+ * commit -- the value simply does not differ, so there is nothing to
+ * write.
+ *
+ * Deliberately unstamped. The existing lines carry no timestamp and
+ * this codebase keeps Date out of the Core so the tests stay
+ * deterministic; order down the log is the ordering information.
+ *
+ * \param prevLog the log read off the OLD trip-0 anchor, or ""
+ * \param lines   the entries this revision wants to add
+ * \return the log value to commit
+ */
+CsRevise.appendLog = function(prevLog, lines) {
+    var prev = (prevLog === undefined || prevLog === null) ? "" :
+        String(prevLog);
+    var add = (lines === undefined || lines === null) ? [] : lines;
+    if (add.length === 0) {
+        return prev;
+    }
+    return (prev !== "" ? prev + "\n" : "") + add.join("\n");
+};
+
+/**
  * Applies a revised survey model to the drawing it was reconstructed
  * from.
  *
@@ -1597,29 +1661,17 @@ CsRevise.apply = function(doc, di, recon, newSurvey) {
     }
 
     // the OLD trip-0 anchor: previous RevisionLog rides on it, and the
-    // rigid path writes the appended log back onto the same point.
-    // (Anchor points are the only entities with BOTH a Station tag and
-    // a Trip tag -- legs carry Trip too, but never Station.)
+    // rigid path writes the appended log back onto the same point. Read
+    // HERE, before the non-rigid branch's erase deletes that point --
+    // read it after and the drawing's whole history comes back empty
+    // and this one entry overwrites it.
     var findAnchor0 = function() {
-        var ids = doc.queryAllEntities(false, false);
-        for (var i = 0; i < ids.length; i++) {
-            var e = doc.queryEntity(ids[i]);
-            if (isNull(e)) {
-                continue;
-            }
-            if (CsTags.get(e, "Station") !== "" &&
-                    CsTags.get(e, "Trip") !== "" &&
-                    CsTags.getNumber(e, "Trip") === 0) {
-                return e;
-            }
-        }
-        return null;
+        return CsRevise.trip0Anchor(doc);
     };
     var oldAnchor0 = findAnchor0();
     var prevLog = oldAnchor0 !== null ?
         CsTags.get(oldAnchor0, "RevisionLog") : "";
-    var newLog = logLines.length === 0 ? prevLog :
-        (prevLog !== "" ? prevLog + "\n" : "") + logLines.join("\n");
+    var newLog = CsRevise.appendLog(prevLog, logLines);
 
     // the redrawn point carrying Station = name, or null -- same
     // lookup livePosOf uses above, but returning the entity itself
