@@ -93,11 +93,11 @@ using them, and validate with `typeof` rather than truthiness plus `String()`.
 | 3 | `CsHub` -- gh argv, JSON, privacy gate | CLOSED, 3 rounds |
 | 4 | `CsSetup` discovery | CLOSED |
 | 5 | The six-rung preflight ladder | CLOSED, 4 rounds |
-| 6 | `GitHubSetup` tool + icon + menu | built; spec review found 2 functional defects, fixes in flight |
-| 7 | Device-flow sign-in dialog | built; same fix round |
+| 6 | `GitHubSetup` tool + icon + menu | CLOSED, spec + quality |
+| 7 | Device-flow sign-in dialog | CLOSED, spec + quality |
 | 8 | GUI verification | NOT DONE -- needs you at the keyboard |
 
-Assertions: 1643 -> 2030 engine, 784 -> 1159 node. `--publish` gate passing.
+Assertions: 1643 -> 2044 engine, 784 -> 1173 node. `--publish` gate passing.
 
 ## What Task 8 still needs from you
 
@@ -129,3 +129,35 @@ binary inherits your shell PATH and would hide the exact Finder-PATH bug the
 discovery ladder exists to prevent.
 
 Then: Cave Survey > GitHub Setup. Expect six rungs, all OK, on this machine.
+
+## Two findings from the last round worth keeping
+
+**Per-repo git identity belongs to the CLONE step, not the setup ladder.** The spec
+chose per-repo so the plugin would never silently rewrite a developer's global config
+-- a good instinct that assumed a repo is in scope. In slice 1 there is none: the tool
+runs with no drawing open and CaveCAD's cwd is the app bundle's Resources, where a
+local `git config` exits 128 and writes nothing. So slice 1 now ASKS, then writes
+global; slice 2's clone flow should do per-repo config where a repo really exists.
+
+**CsProc has no setWorkingDirectory.** Every per-repo git operation in slice 2 will
+need that option added, or `git -C <path>`. Noted in CsProc.js itself.
+
+**A Qt detail that is load-bearing and non-obvious.** In this bridge
+`QProcess.FailedToStart` and `QProcess.NotRunning` are BOTH 0. Testing
+`proc.error() === QProcess.FailedToStart` is nonetheless safe, because `error()`
+returns UnknownError (5) when nothing went wrong -- measured:
+
+    successful process  -> error()=5, exitCode()=0
+    non-zero exit       -> error()=5, exitCode()=3
+    missing binary      -> error()=0, exitCode()=255, errorString "execve: No such file"
+
+Note `exitCode()` is 255 for a missing binary, not the 0 Qt's docs imply. Do not
+"simplify" that comparison against a hardcoded number.
+
+## Final state
+
+- 39 commits on `github-versioning`, working tree clean.
+- Nothing pushed. `gh auth status` verified unchanged: ndschonegg, active, `repo` scope.
+- `tools/publish.sh` deliberately NOT run -- it would have downgraded your installed
+  suite, since this branch predates the parallel session's loop-closure work.
+- The real ladder, run end-to-end inside CaveCAD's engine: six green rungs.
