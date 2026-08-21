@@ -1073,6 +1073,173 @@ if (IS_NODE) {
 }
 
 // ---------------------------------------------------------------------
+// Task 1d -- a REAL survey file exercising both two-anchor shapes at
+// once, parsed through CsFormatRegistry like any other testdata file
+// (not an in-memory fixture). Every fixture above this point that
+// touches bridge classification, control ties, or the two-root
+// circuit is built by hand inside this test file; none of it has ever
+// gone through a format parser. testdata/TestCave_TwoFixed.svx closes
+// that gap.
+//
+// Geometry, by hand (see the file's own header comment for the survey
+// data itself -- all bearings 0/90/180/270, all lengths integers):
+//
+//   Component A (the ring), fixed at RA=(0,0,0) and RC=(10,10,0):
+//     RA-RB north 10  -> RB=(0,10,0)
+//     RB-RC east  10  -> RC computed=(10,10,0), matches fixed RC exactly
+//     RC-RD south 10  -> RD=(10,0,0)
+//     RD-RA west  10  -> RA computed=(0,0,0), matches fixed RA exactly
+//   Both closures are EXACT (0 misclosure) by construction, so this is
+//   the real-data twin of the existing synthetic `ring` fixture above:
+//   two fixed stations on one ring produce TWO arc loops, each
+//   viaControl (RA and RC are not surveyed-adjacent, only tied by
+//   shared control), each traverseLength = its own closing leg (10)
+//   plus the one tree leg back to the OTHER anchor (10) = 20.
+//
+//   The bridge leg RD-SB1, east 10 from RD=(10,0,0) -> traversed
+//   SB1=(20,0,0). SB1's own control is *fix (20,3,0) -- a deliberate,
+//   exact 3m misclosure (dy=-3, dx=0, dz=0 -> horizontal=vertical
+//   distance=3). Removing this one leg leaves component B (SB1, SB2)
+//   with no path back to component A at all, so it is a graph bridge:
+//   a control TIE, not a loop, path=[RD,SB1], traverseLength=10 (its
+//   own length only, no ring to walk), percent=null.
+//
+//   Component B: SB1 (fixed) - SB2 (traversed, south... north 10 from
+//   SB1) exists purely so component B is a real little passage, not a
+//   bare fixed point with nothing surveyed off it.
+//
+//   anchors: RA, RC, SB1 (the three *fix stations; SB2 and the ring's
+//   RB/RD are reached by ordinary traversal, not anchors).
+// ---------------------------------------------------------------------
+
+var twoFixedContent = readTextFile(repoRoot + "/testdata/TestCave_TwoFixed.svx");
+var twoFixedFmt = CsFormatRegistry.detect("TestCave_TwoFixed.svx", twoFixedContent);
+ok(twoFixedFmt !== null && twoFixedFmt.id === "survex",
+    "task 1d: TestCave_TwoFixed.svx detects as survex");
+var twoFixed = twoFixedFmt.parse(twoFixedContent);
+ok(twoFixed.shots.length === 6, "task 1d: 6 real shots parsed, got " +
+    twoFixed.shots.length);
+ok(twoFixed.fixed.hasOwnProperty("RA") && twoFixed.fixed.hasOwnProperty("RC") &&
+    twoFixed.fixed.hasOwnProperty("SB1"),
+    "task 1d: all three *fix stations parsed");
+
+var rTwoFixed = CsNetwork.resolve(twoFixed, {});
+
+// -- shape 1: two fixed stations on one ring -> per-arc LOOPS, never
+// ties, matching the hand computation above exactly.
+ok(rTwoFixed.loops.length === 2,
+    "task 1d: the real ring produces two arc loops, got " +
+    rTwoFixed.loops.length);
+var tfArc1 = null, tfArc2 = null;
+for (var tfi = 0; tfi < rTwoFixed.loops.length; tfi++) {
+    var tfLoop = rTwoFixed.loops[tfi];
+    if (tfLoop.from === "RB" && tfLoop.to === "RC") { tfArc1 = tfLoop; }
+    if (tfLoop.from === "RD" && tfLoop.to === "RA") { tfArc2 = tfLoop; }
+}
+ok(tfArc1 !== null && tfArc2 !== null,
+    "task 1d: both expected arcs (RB->RC and RD->RA) are present");
+if (tfArc1 !== null) {
+    near(tfArc1.traverseLength, 20, 1e-9,
+        "task 1d: RB->RC arc traverseLength (closing leg 10 + RA->RB 10)");
+    near(tfArc1.error, 0, 1e-9, "task 1d: RB->RC arc closes exactly");
+    ok(tfArc1.viaControl === true,
+        "task 1d: RB->RC arc is viaControl (RA, RC share control only)");
+}
+if (tfArc2 !== null) {
+    near(tfArc2.traverseLength, 20, 1e-9,
+        "task 1d: RD->RA arc traverseLength (closing leg 10 + RC->RD 10)");
+    near(tfArc2.error, 0, 1e-9, "task 1d: RD->RA arc closes exactly");
+    ok(tfArc2.viaControl === true,
+        "task 1d: RD->RA arc is viaControl");
+}
+
+// -- shape 2: a separately fixed, disconnected component joined by
+// exactly one leg -> a TIE, with the hand-computed 3m misclosure, and
+// percent left null (never a number nobody can trust).
+ok(rTwoFixed.ties.length === 1,
+    "task 1d: the RD-SB1 bridge leg is reported as exactly one tie, got " +
+    rTwoFixed.ties.length);
+if (rTwoFixed.ties.length === 1) {
+    near(rTwoFixed.ties[0].error, 3, 1e-9,
+        "task 1d: tie misclosure is the hand-computed 3m (SB1 control " +
+        "(20,3,0) vs traversed (20,0,0))");
+    ok(rTwoFixed.ties[0].percent === null,
+        "task 1d: tie percent stays null, matching the 'no meaningful " +
+        "percent' rule -- deliberately never asserted as a number");
+    ok(rTwoFixed.ties[0].path.length === 2 &&
+        rTwoFixed.ties[0].path[0] === "RD" && rTwoFixed.ties[0].path[1] === "SB1",
+        "task 1d: tie path is just its own two endpoints, got " +
+        JSON.stringify(rTwoFixed.ties[0].path));
+    ok(rTwoFixed.ties[0].viaControl === false,
+        "task 1d: a tie's path is a real leg, so viaControl is false");
+}
+ok(rTwoFixed.anchors.length === 3,
+    "task 1d: all three *fix stations anchor their own component, got " +
+    rTwoFixed.anchors.length);
+
+// -- the invariance that proves the frame-offset logic, now on real
+// parsed data (Task 1b established this on synthetic fixtures; this
+// is the same check on a real file). An explicit anchor on RA, at a
+// drawing position with no relationship to RA's own (0,0,0) control,
+// must translate RC and SB1's control by the SAME offset and leave
+// every misclosure -- both ring arcs AND the tie -- exactly as they
+// were with no anchor at all. A pure translation cannot change a
+// measured disagreement; if these numbers move, the offset logic is
+// wrong regardless of anything else here.
+var rTwoFixedAnchored = CsNetwork.resolve(twoFixed,
+    { anchor: { name: "RA", x: 1000, y: -1000, z: 0 } });
+ok(rTwoFixedAnchored.controlFrame !== null &&
+    rTwoFixedAnchored.controlFrame !== undefined,
+    "task 1d: an explicit anchor on a fixed station reports a controlFrame");
+if (rTwoFixedAnchored.controlFrame) {
+    near(rTwoFixedAnchored.controlFrame.offset.dx, 1000, 1e-9,
+        "task 1d: controlFrame.offset.dx is the anchor's x minus RA's own control x");
+    near(rTwoFixedAnchored.controlFrame.offset.dy, -1000, 1e-9,
+        "task 1d: controlFrame.offset.dy likewise for y");
+    ok(rTwoFixedAnchored.controlFrame.applied.indexOf("RC") >= 0 &&
+        rTwoFixedAnchored.controlFrame.applied.indexOf("SB1") >= 0,
+        "task 1d: controlFrame names both RC and SB1 as offset-applied -- " +
+        "SB1 shares RA's shot-graph component via the RD-SB1 bridge leg, " +
+        "even though it roots its own anchor, got " +
+        JSON.stringify(rTwoFixedAnchored.controlFrame.applied));
+}
+near(rTwoFixedAnchored.stations["RC"].x, 10 + 1000, 1e-9,
+    "task 1d: RC's control is translated into RA's anchor frame (x)");
+near(rTwoFixedAnchored.stations["RC"].y, 10 + (-1000), 1e-9,
+    "task 1d: RC's control is translated into RA's anchor frame (y)");
+near(rTwoFixedAnchored.stations["SB1"].x, 20 + 1000, 1e-9,
+    "task 1d: SB1's control is translated into RA's anchor frame (x)");
+near(rTwoFixedAnchored.stations["SB1"].y, 3 + (-1000), 1e-9,
+    "task 1d: SB1's control is translated into RA's anchor frame (y)");
+
+ok(rTwoFixedAnchored.loops.length === rTwoFixed.loops.length,
+    "task 1d invariance: anchored resolve keeps the same number of arc loops");
+if (rTwoFixedAnchored.loops.length === rTwoFixed.loops.length) {
+    var tfArc1Anchored = null, tfArc2Anchored = null;
+    for (var tfai = 0; tfai < rTwoFixedAnchored.loops.length; tfai++) {
+        var tfaLoop = rTwoFixedAnchored.loops[tfai];
+        if (tfaLoop.from === "RB" && tfaLoop.to === "RC") { tfArc1Anchored = tfaLoop; }
+        if (tfaLoop.from === "RD" && tfaLoop.to === "RA") { tfArc2Anchored = tfaLoop; }
+    }
+    if (tfArc1 !== null && tfArc1Anchored !== null) {
+        near(tfArc1Anchored.error, tfArc1.error, 1e-9,
+            "task 1d invariance: RB->RC arc misclosure unchanged by the anchor");
+    }
+    if (tfArc2 !== null && tfArc2Anchored !== null) {
+        near(tfArc2Anchored.error, tfArc2.error, 1e-9,
+            "task 1d invariance: RD->RA arc misclosure unchanged by the anchor");
+    }
+}
+ok(rTwoFixedAnchored.ties.length === 1,
+    "task 1d invariance: anchored resolve still reports exactly one tie");
+if (rTwoFixedAnchored.ties.length === 1 && rTwoFixed.ties.length === 1) {
+    near(rTwoFixedAnchored.ties[0].error, rTwoFixed.ties[0].error, 1e-9,
+        "task 1d invariance: tie misclosure is identical with or without " +
+        "the explicit anchor -- a translation cannot change a measured " +
+        "disagreement");
+}
+
+// ---------------------------------------------------------------------
 // Task 2 -- CsAdjust: least-squares loop closure adjustment.
 //
 // The square fixture again (`sq` / `rsq` above), now with EQUAL weights
