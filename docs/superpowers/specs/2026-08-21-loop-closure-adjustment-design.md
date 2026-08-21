@@ -141,7 +141,7 @@ like a `CsNetwork.resolve` result, plus adjustment-specific fields:
 | `raw` | the input `resolved`, for the ghost layer and shift reporting |
 | `shifts` | `{name: {dx, dy, dz, distance}}` per station |
 | `residuals` | per leg, aligned to `legs`: `{dx, dy, dz, distance, standardized}` |
-| `summary` | `{movedCount, worstStation, worstShift, totalCorrection, iterations, converged}` |
+| `summary` | `{movedCount, worstStation, worstShift, rmsShift, iterations, converged}` |
 
 `standardized` is `distance / σ_i` — the blunder statistic. It is computed and
 returned but not surfaced anywhere yet; it is B5's raw material, wired in advance.

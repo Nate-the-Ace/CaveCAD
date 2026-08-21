@@ -521,6 +521,64 @@ var rtwo = CsNetwork.resolve(two, {});
 near(rtwo.stations["Q2"].x, 1010, 1e-9, "second component anchors on its own fix");
 ok(rtwo.unresolved.length === 0, "both components resolve");
 
+// ---- anchors, error components, component ties ----------------------
+ok(rsq.anchors.length === 1 && rsq.anchors[0] === "A4",
+    "resolve exports its anchor (A4, the first usable shot's FROM)");
+if (rsq.loops.length === 1) {
+    near(rsq.loops[0].horizontal, 0.5, 1e-9, "loop horizontal error");
+    near(rsq.loops[0].vertical, 0, 1e-9, "loop vertical error");
+    near(rsq.closures[0].horizontal, 0.5, 1e-9, "closure horizontal error");
+    near(rsq.closures[0].vertical, 0, 1e-9, "closure vertical error");
+}
+
+// a vertical-only misclosure must land in `vertical`, not be smeared
+// into a number a reader takes for a plan error
+var vsq = CsModel.newSurvey();
+vsq.shots.push(shotOf("V1", "V2", 10, 0, 0));
+vsq.shots.push(shotOf("V2", "V3", 10, 90, 0));
+vsq.shots.push(shotOf("V3", "V1", 10 * Math.sqrt(2), 225, 2));
+var rv = CsNetwork.resolve(vsq, {});
+ok(rv.loops.length === 1, "vertical-bust survey has one loop");
+if (rv.loops.length === 1) {
+    // The closing leg's slope distance is fixed, so tilting it by 2 deg
+    // shrinks its plan projection by a factor of cos(2 deg) -- a real,
+    // if tiny, second-order coupling between "vertical bust" and
+    // horizontal error, not a bug to paper over with an exact zero.
+    var expectedHorizontal = 10 * Math.sqrt(2) *
+        (1 - Math.cos(2 * Math.PI / 180));
+    near(rv.loops[0].horizontal, expectedHorizontal, 1e-9,
+        "vertical bust's horizontal error is only the small second-order tilt term");
+    ok(rv.loops[0].vertical > 0.4, "vertical bust shows up as vertical error");
+}
+
+// two fixed components joined by one leg: a control tie, not a loop
+var tie = CsModel.newSurvey();
+tie.shots.push(shotOf("P1", "P2", 10, 0));
+tie.shots.push(shotOf("Q1", "Q2", 10, 0));
+tie.shots.push(shotOf("P2", "Q1", 10, 90));   // joins the two components
+tie.fixed["P1"] = { x: 0, y: 0, z: 0 };
+tie.fixed["Q1"] = { x: 10.4, y: 10, z: 0 };   // 0.4 off where P2->Q1 lands it
+var rtie = CsNetwork.resolve(tie, {});
+ok(rtie.loops.length === 0, "a component tie is not reported as a loop");
+ok(rtie.ties.length === 1, "a component tie is reported as a tie");
+if (rtie.ties.length === 1) {
+    near(rtie.ties[0].error, 0.4, 1e-9, "tie misclosure against fixed control");
+}
+var tieLeg = null;
+for (var tli = 0; tli < rtie.legs.length; tli++) {
+    if (rtie.legs[tli].from === "P2" && rtie.legs[tli].to === "Q1") {
+        tieLeg = rtie.legs[tli];
+    }
+}
+ok(tieLeg !== null && tieLeg.kind === "tie", "the joining leg is kind 'tie'");
+var tieFindings = CsValidate.check(tie, rtie);
+var tieMisclosure = 0;
+for (tli = 0; tli < tieFindings.length; tli++) {
+    if (tieFindings[tli].code === "loop-misclosure") { tieMisclosure++; }
+}
+ok(tieMisclosure === 0, "a tie raises no loop-misclosure finding");
+ok(rtie.anchors.length === 2, "each fixed component contributes an anchor");
+
 // explicit anchor wins
 var ranch = CsNetwork.resolve(back, { anchor: { name: "X1", x: 5, y: 5, z: 0 } });
 near(ranch.stations["X2"].y, -5, 1e-9, "explicit anchor overrides fixed");

@@ -27,12 +27,20 @@ var CsNetwork = {};
  * \return {
  *   stations:   {name: {x, y, z, seq}}  seq = resolution order, the
  *               survey order LRUDWalls and labels rely on
- *   legs:       [{shot, from, to, kind}] kind "new" | "closure",
+ *   legs:       [{shot, from, to, kind}] kind "new" | "closure" | "tie",
  *               in resolution order -- what the drawing draws
- *   closures:   [{shot, atStation, dx, dy, dz, distance}] misclosure
- *               of each closure leg: computed minus already-known
- *   loops:      [{from, to, path, traverseLength, error, percent}]
- *               one per closure, path = station names around the loop
+ *   closures:   [{shot, atStation, dx, dy, dz, horizontal, vertical,
+ *               distance}] misclosure of each closure leg: computed
+ *               minus already-known
+ *   loops:      [{from, to, path, traverseLength, error, horizontal,
+ *               vertical, percent}] one per closure ring, path =
+ *               station names around the loop
+ *   ties:       the same shape, for legs that join two separately
+ *               anchored components -- control ties, not rings, so
+ *               they carry no meaningful percent
+ *   anchors:    [name] stations placed with no parent, in placement
+ *               order: the explicit anchor, the #Fix / *fix seeds, or
+ *               the first usable shot's FROM. CsAdjust pins these.
  *   unresolved: [shot] shots whose stations never connected
  *   skipped:    [shot] excluded / splay shots not resolved
  * }
@@ -45,6 +53,8 @@ CsNetwork.resolve = function(survey, opts) {
     var legs = [];
     var closures = [];
     var loops = [];
+    var ties = [];
+    var anchors = [];
     var skipped = [];
     var seq = 0;
 
@@ -54,6 +64,9 @@ CsNetwork.resolve = function(survey, opts) {
     var place = function(name, x, y, z, from) {
         stations[name] = { x: x, y: y, z: z, seq: seq++ };
         parent[name] = from; // null for anchors
+        if (from === null || from === undefined) {
+            anchors.push(name);
+        }
     };
 
     // ---- pick anchors --------------------------------------------
@@ -80,8 +93,23 @@ CsNetwork.resolve = function(survey, opts) {
     }
     // Fixed stations anchor whatever the explicit anchor doesn't.
     // If an explicit anchor exists, fixed stations in ITS component
-    // would fight it, so they only seed stations not yet placed and
-    // are re-checked each round below for disconnected components.
+    // would fight it, so this only seeds stations not yet placed.
+    //
+    // It seeds EVERY not-yet-placed fixed station, not just one:
+    // seeding them one-per-call used to leave every fixed point but
+    // the first to be discovered lazily, only once the pass loop got
+    // stuck. That is too late when a shot ties two fixed components
+    // together -- such a leg can be processed in the very first pass
+    // (its FROM end resolves and its TO end is reached in the same
+    // pass), before the loop ever gets stuck, so the second fixed
+    // point would be reached first as an ordinary "new" station and
+    // its known coordinate silently discarded, along with the
+    // misclosure against it. Seeding every fixed station up front
+    // means a tying leg always finds both ends already known, so it
+    // is honestly reported as a closure or tie (see below) instead of
+    // quietly overwriting a control point. Re-called (again seeding
+    // everything still unplaced) if the pass loop still gets stuck --
+    // e.g. when an explicit opts.anchor skipped the up-front call.
     var seedFixed = function() {
         var used = false;
         for (var k = 0; k < fixedNames.length; k++) {
@@ -90,7 +118,6 @@ CsNetwork.resolve = function(survey, opts) {
                 var f = survey.fixed[fn];
                 place(fn, f.x, f.y, f.z || 0.0, null);
                 used = true;
-                break; // one per round; the pass loop reconnects the rest
             }
         }
         return used;
@@ -139,12 +166,32 @@ CsNetwork.resolve = function(survey, opts) {
                     dy: fromSt.y + o.dy - toSt.y,
                     dz: fromSt.z + o.dz - toSt.z
                 };
-                mis.distance = Math.sqrt(mis.dx * mis.dx + mis.dy * mis.dy +
+                mis.horizontal = Math.sqrt(mis.dx * mis.dx + mis.dy * mis.dy);
+                mis.vertical = Math.abs(mis.dz);
+                mis.distance = Math.sqrt(mis.horizontal * mis.horizontal +
                     mis.dz * mis.dz);
                 closures.push(mis);
-                legs.push({ shot: shot, from: shot.from, to: shot.to,
-                    kind: "closure" });
-                loops.push(CsNetwork.describeLoop(shot, mis, parent, tapeMode));
+
+                // A loop is a ring in ONE component: both ends trace
+                // back to the same anchor. Two separately anchored
+                // components joined by a leg is a control TIE -- a real
+                // and useful check against the fixed coordinates, but
+                // it has no ring, so a "percent of traverse length"
+                // computed for it is meaningless and used to make
+                // CsValidate cry blunder over a cave with two fixed
+                // entrances.
+                var described = CsNetwork.describeLoop(shot, mis, parent,
+                    tapeMode);
+                if (described.path.length === 2 &&
+                        described.traverseLength === shot.distance) {
+                    legs.push({ shot: shot, from: shot.from, to: shot.to,
+                        kind: "tie" });
+                    ties.push(described);
+                } else {
+                    legs.push({ shot: shot, from: shot.from, to: shot.to,
+                        kind: "closure" });
+                    loops.push(described);
+                }
             } else if (haveFrom) {
                 var of = CsTraverse.offset(shot, tapeMode);
                 var fs = stations[shot.from];
@@ -190,6 +237,8 @@ CsNetwork.resolve = function(survey, opts) {
         legs: legs,
         closures: closures,
         loops: loops,
+        ties: ties,
+        anchors: anchors,
         unresolved: unresolved,
         skipped: skipped
     };
@@ -266,6 +315,8 @@ CsNetwork.describeLoop = function(shot, misclosure, parent, tapeMode) {
         path: path,
         traverseLength: traverseLength,
         error: misclosure.distance,
+        horizontal: misclosure.horizontal,
+        vertical: misclosure.vertical,
         percent: percent
     };
 };
