@@ -102,6 +102,10 @@ CsReport.statsSummary = function(survey, stats, grade) {
     return lines.join("\n");
 };
 
+// How many unmoved traced items a revision summary names before it
+// says "and N more".
+CsReport.UNMOVED_SHOWN = 8;
+
 /** Summary of an applied revision (CsRevise.apply's report). */
 CsReport.revisionSummary = function(report) {
     var lines = [];
@@ -173,9 +177,41 @@ CsReport.revisionSummary = function(report) {
     }
 
     if (!report.rigid) {
-        lines.push("");
-        lines.push("WARNING -- hand-drawn linework near the moved stations " +
-            "did NOT move with them; re-trace walls and detail there.");
+        // Both halves of the linework outcome get said, because the
+        // interesting number is different for each reader: how much
+        // followed the survey (reassurance), and exactly what did not
+        // (a work list). Fields are absent on reports from older
+        // callers, so treat missing as "nothing bound".
+        var moved = (report.lineworkMoved === undefined ||
+            report.lineworkMoved === null) ? 0 : report.lineworkMoved;
+        var unmoved = (report.lineworkUnmoved === undefined ||
+            report.lineworkUnmoved === null) ? [] : report.lineworkUnmoved;
+        lines.push("Traced linework moved with its stations: " + moved);
+        if (unmoved.length > 0) {
+            lines.push("");
+            lines.push("WARNING -- " + unmoved.length + " traced item" +
+                (unmoved.length === 1 ? "" : "s") + " had no surviving " +
+                "station to follow and did NOT move; re-trace walls and " +
+                "detail there:");
+            // capped: this is a summary a beginner reads, not a manifest
+            var cap = Math.min(unmoved.length, CsReport.UNMOVED_SHOWN);
+            for (var u = 0; u < cap; u++) {
+                lines.push("  " + unmoved[u]);
+            }
+            if (unmoved.length > cap) {
+                lines.push("  ... and " + (unmoved.length - cap) + " more");
+            }
+        }
+        if (moved === 0) {
+            // Nothing was bound, so nothing could follow -- and an
+            // unbound trace is invisible to us, which is why this stays
+            // a warning even when the unmoved list above is empty.
+            lines.push("");
+            lines.push("WARNING -- hand-drawn linework that is not bound " +
+                "to the survey did NOT move with it; re-trace walls and " +
+                "detail near the moved stations, or bind it first " +
+                "(Adopt linework) and revise again.");
+        }
     }
     return lines.join("\n");
 };

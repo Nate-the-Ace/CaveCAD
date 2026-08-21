@@ -1722,6 +1722,99 @@ if (teamBoundaryRt.trips.length === 2) {
         "revisionSummary: redraw warns about hand-drawn linework");
     ok(redrawText.indexOf("F5") >= 0 && redrawText.indexOf("F6") < 0,
         "revisionSummary: top 5 movers listed, the 6th not");
+    // an older caller's report has no linework fields at all: the
+    // summary must still read as it always did, not print "undefined"
+    ok(redrawText.indexOf("undefined") < 0,
+        "revisionSummary: a report without linework fields prints no " +
+        "'undefined', got '" + redrawText + "'");
+    ok(redrawText.indexOf("Traced linework moved with its stations: 0") >= 0,
+        "revisionSummary: missing linework fields count as nothing bound");
+
+    // BOTH halves get stated: what followed the survey, and what did not
+    var lwUnmoved = [];
+    for (i = 0; i < CsReport.UNMOVED_SHOWN + 3; i++) {
+        lwUnmoved.push("WALLS-SURVEYED #" + (100 + i));
+    }
+    var lwText = CsReport.revisionSummary({
+        rigid: false,
+        moved: [{ name: "G1", dist: 2 }],
+        stationsChanged: 1,
+        loopsBefore: [], loopsAfter: [],
+        lineworkMoved: 7,
+        lineworkUnmoved: lwUnmoved
+    });
+    ok(lwText.indexOf("Traced linework moved with its stations: 7") >= 0,
+        "revisionSummary: states how much linework followed its stations");
+    ok(lwText.indexOf("3 more") >= 0,
+        "revisionSummary: the unmoved list is capped for display, got '" +
+        lwText + "'");
+    ok(lwText.indexOf("WALLS-SURVEYED #100") >= 0 &&
+        lwText.indexOf("WALLS-SURVEYED #" +
+            (100 + CsReport.UNMOVED_SHOWN)) < 0,
+        "revisionSummary: names the first UNMOVED_SHOWN unmoved items only");
+    ok(lwText.indexOf("re-trace") >= 0,
+        "revisionSummary: unmoved linework still gets the re-trace advice");
+    // ... and with everything moved there is nothing left to warn about
+    var lwAllText = CsReport.revisionSummary({
+        rigid: false,
+        moved: [{ name: "G1", dist: 2 }],
+        stationsChanged: 1,
+        loopsBefore: [], loopsAfter: [],
+        lineworkMoved: 4,
+        lineworkUnmoved: []
+    });
+    ok(lwAllText.indexOf("Traced linework moved with its stations: 4") >= 0,
+        "revisionSummary: all-moved count stated");
+    ok(lwAllText.indexOf("re-trace") < 0,
+        "revisionSummary: no re-trace warning when all linework followed, " +
+        "got '" + lwAllText + "'");
+    // the singular reads as English
+    var lwOneText = CsReport.revisionSummary({
+        rigid: false, moved: [], stationsChanged: 0,
+        loopsBefore: [], loopsAfter: [],
+        lineworkMoved: 1, lineworkUnmoved: ["BREAKDOWN #9"]
+    });
+    ok(lwOneText.indexOf("1 traced item had") >= 0,
+        "revisionSummary: one unmoved item is singular, got '" +
+        lwOneText + "'");
+})();
+
+// --- the linework residual threshold: relative, and looser than the
+// --- rigidity eps for a documented reason ----------------------------
+(function() {
+    ok(typeof CsRevise.LINEWORK_RESIDUAL_FRACTION === "number" &&
+        CsRevise.LINEWORK_RESIDUAL_FRACTION > 1e-6,
+        "linework tol: a relative fraction, looser than the rigidity eps");
+    // the discrimination it exists for: a fit over stations that all
+    // rotated as one body is exact, a fit over stations that bent is not
+    var rigidPairs = [];
+    var bentPairs = [];
+    var th = 10 * Math.PI / 180;
+    for (var i = 0; i < 4; i++) {
+        var p = { x: i * 10, y: 0 };
+        var r = { x: Math.cos(th) * p.x - Math.sin(th) * p.y,
+            y: Math.sin(th) * p.x + Math.cos(th) * p.y };
+        rigidPairs.push({ old: p, nu: r });
+        // only the far half rotates: the passage bent in the middle
+        bentPairs.push({ old: p, nu: i < 2 ? p : r });
+    }
+    var rigidFit = CsRevise.similarityFit(rigidPairs);
+    var bentFit = CsRevise.similarityFit(bentPairs);
+    var tol = CsRevise.LINEWORK_RESIDUAL_FRACTION * 30;
+    ok(rigidFit.maxResidual <= tol,
+        "linework tol: a rigidly-rotated station set fits inside it, got " +
+        rigidFit.maxResidual);
+    ok(bentFit.maxResidual > tol,
+        "linework tol: a bent station set does not, got " +
+        bentFit.maxResidual);
+    // two stations always fit exactly -- which is why the threshold
+    // only ever bites at three or more
+    var twoFit = CsRevise.similarityFit([
+        { old: { x: 0, y: 0 }, nu: { x: 5, y: 5 } },
+        { old: { x: 10, y: 0 }, nu: { x: 5, y: 15 } }
+    ]);
+    near(twoFit.maxResidual, 0, 1e-12,
+        "linework tol: a two-station fit is always exact");
 })();
 
 // ---------------------------------------------------------------------
@@ -1748,6 +1841,21 @@ if (teamBoundaryRt.trips.length === 2) {
         "gate: generated wall runs are never linework");
     ok(CsBind.isLineworkLayer("TB_BORDER") === false,
         "gate: TB_ sheet furniture is never linework");
+    // The sheet furniture the NSS template names WITHOUT a TB_ prefix.
+    // NORTH-ARROW is the one that must never be got wrong: a
+    // declination revision rotates the cave relative to true north, so
+    // an arrow bound to the survey would turn with it and the map would
+    // then lie about its own orientation.
+    ok(CsBind.isLineworkLayer("NORTH-ARROW") === false,
+        "gate: a hand-drawn north arrow is sheet furniture, not linework");
+    ok(CsBind.isLineworkLayer("SCALE-BAR") === false,
+        "gate: SCALE-BAR is sheet furniture");
+    ok(CsBind.isLineworkLayer("TITLE-BLOCK") === false,
+        "gate: TITLE-BLOCK is sheet furniture");
+    ok(CsBind.isLineworkLayer("LEGEND") === false,
+        "gate: LEGEND is sheet furniture");
+    ok(CsBind.isLineworkLayer("BORDER") === false,
+        "gate: BORDER is sheet furniture");
     ok(CsBind.isLineworkLayer("") === false, "gate: empty layer name refused");
     ok(CsBind.isLineworkLayer(null) === false, "gate: null layer name refused");
     // whatever CsRevise refuses to move, this refuses to claim
@@ -3370,6 +3478,269 @@ if (!IS_NODE) {
             "erase-guard: the surviving tracing is intact, not just present");
         ok(CsTags.collectStations(doc).length === 0,
             "erase-guard: the stations themselves did go");
+    })();
+
+    // -----------------------------------------------------------------
+    // Traced linework follows its OWN stations through a NON-RIGID
+    // revision. This is the whole point of the binding: a per-trip
+    // declination fix erases and redraws the survey marks, and before
+    // this step everything the surveyor traced stayed behind.
+    //
+    // The drawing: two trips joined at Q3, LRUD on every arrival
+    // station so there are real tips to snap to. Revising trip 1's
+    // declination alone rotates trip 1 about Q3 and leaves trip 0
+    // exactly where it was -- so one drawing exercises "moves" and
+    // "must not move" at once.
+    //
+    // Everything is identified by getId(), never by shape or by
+    // position in a query result: entity query order in this build is
+    // NOT stable.
+    // -----------------------------------------------------------------
+    (function() {
+        var doc = new RDocument(new RMemoryStorage(), new RSpatialIndexNavel());
+        var di = new RDocumentInterface(doc);
+        getDocument = function() { return doc; };
+        getDocumentInterface = function() { return di; };
+
+        var S = CsModel.newSurvey();
+        S.declination = 1.0;
+        S.declinationSource = "user";
+        CsModel.ensureTrips(S);
+        var qt = CsModel.newTrip();
+        qt.name = "UPPER";
+        qt.declination = 1.0;
+        qt.declinationSource = "user";
+        S.trips.push(qt);
+        var qs = [shotOf("Q1", "Q2", 10, 0), shotOf("Q2", "Q3", 10, 90),
+            shotOf("Q3", "Q4", 8, 45), shotOf("Q4", "Q5", 6, 120)];
+        for (var qi = 0; qi < qs.length; qi++) {
+            qs[qi].left = 2;
+            qs[qi].right = 3;
+            if (qi >= 2) {
+                qs[qi].trip = 1;
+            }
+            S.shots.push(qs[qi]);
+        }
+        CsDraw.survey(S, CsNetwork.resolve(S, {}));
+
+        var lwFind = function(key) {
+            var res = [];
+            var fids = doc.queryAllEntities(false, false);
+            for (var fi = 0; fi < fids.length; fi++) {
+                var fe = doc.queryEntity(fids[fi]);
+                if (!isNull(fe) && CsTags.get(fe, key) !== "") {
+                    res.push(fe);
+                }
+            }
+            return res;
+        };
+        var tipAt = {};
+        var lwTips = lwFind("LRUDName");
+        for (var lt = 0; lt < lwTips.length; lt++) {
+            tipAt[CsTags.get(lwTips[lt], "LRUDName")] =
+                lwTips[lt].getPosition();
+        }
+        ok(tipAt["Q2.L"] !== undefined && tipAt["Q3.L"] !== undefined &&
+            tipAt["Q4.L"] !== undefined && tipAt["Q5.L"] !== undefined,
+            "linework: LRUD tips on both trips found to trace against");
+
+        var addPl = function(layerName, pts) {
+            CsLayers.ensure(doc, di, layerName);
+            var pd = new RPolylineData();
+            for (var pi = 0; pi < pts.length; pi++) {
+                pd.appendVertex(new RVector(pts[pi].x, pts[pi].y));
+            }
+            var pl = new RPolylineEntity(doc, pd);
+            pl.setLayerId(doc.getLayerId(layerName));
+            var aop = new RAddObjectsOperation();
+            aop.addObject(pl, false);
+            di.applyOperation(aop);
+            return pl;
+        };
+        var at = function(name) {
+            return { x: tipAt[name].x, y: tipAt[name].y };
+        };
+
+        // a wall traced by SNAPPING to trip 1's two left-hand tips
+        var wall1 = addPl("WALLS-SURVEYED", [at("Q4.L"), at("Q5.L")]);
+        // and one on trip 0's, which this revision must leave alone
+        var wall0 = addPl("WALLS-SURVEYED", [at("Q2.L"), at("Q3.L")]);
+        var bidx = CsBind.stationIndex(doc);
+        var beps = CsBind.epsilonFor(doc);
+        var b1 = CsBind.bindEntity(doc, wall1, 1, bidx, beps);
+        var b0 = CsBind.bindEntity(doc, wall0, 0, bidx, beps);
+        ok(b1.source === "snap" &&
+            b1.stations.slice(0).sort().join(",") === "Q4,Q5",
+            "linework: the trip-1 wall binds Q4,Q5 by snap, got " +
+            b1.source + " '" + b1.stations.join(",") + "'");
+        ok(b0.source === "snap" &&
+            b0.stations.slice(0).sort().join(",") === "Q2,Q3",
+            "linework: the trip-0 wall binds Q2,Q3 by snap, got " +
+            b0.source + " '" + b0.stations.join(",") + "'");
+
+        // a sketch that snapped to nothing: LineworkTrip ALONE, no
+        // station list. The mover has to see it through the trip tag --
+        // keying on LineworkStations would skip exactly these.
+        var tripOnly = addPl("BREAKDOWN",
+            [{ x: 400, y: 400 }, { x: 402, y: 401 }]);
+        // and one whose stations no longer exist at all: nothing to
+        // follow, so it must be left alone and REPORTED, not guessed at
+        var orphan = addPl("BREAKDOWN",
+            [{ x: 600, y: 600 }, { x: 602, y: 601 }]);
+        CsBind.tagEntities(doc, di, [
+            { entity: wall1, trip: 1, stations: b1.stations },
+            { entity: wall0, trip: 0, stations: b0.stations },
+            { entity: tripOnly, trip: 1, stations: [] },
+            { entity: orphan, trip: 9, stations: ["GONE1", "GONE2"] }
+        ]);
+        ok(CsTags.get(doc.queryEntity(tripOnly.getId()),
+            CsBind.STATIONS_TAG) === "",
+            "linework: the trip-only sketch really carries no station list");
+
+        // Sheet furniture and ground-pinned imagery, each TAGGED as
+        // linework on purpose: the assertion below is that the mover
+        // consults CsBind.isLineworkLayer, not merely that these
+        // entities happen to be untagged. NORTH-ARROW is the one that
+        // matters most -- a declination revision re-orients the cave
+        // against TRUE NORTH, so an arrow that turned with it would
+        // make the sheet lie about which way north is.
+        var furniture = {};
+        var fLayers = ["NORTH-ARROW", "SCALE-BAR", "TITLE-BLOCK", "LEGEND",
+            "BORDER", "TB_TEST", "CTRL-AERIAL"];
+        for (var fl = 0; fl < fLayers.length; fl++) {
+            var fEnt = addPl(fLayers[fl],
+                [{ x: 50 + fl, y: 50 }, { x: 51 + fl, y: 52 }]);
+            CsTags.commit(di, fEnt, { LineworkTrip: 1,
+                LineworkStations: "Q4|Q5" });
+            furniture[fLayers[fl]] = fEnt.getId();
+        }
+
+        var vertsOf = function(id) {
+            return CsBind.pointsOf(doc.queryEntity(id));
+        };
+        var posOf = function() {
+            var out = {};
+            var sts = CsTags.collectStations(doc);
+            for (var i = 0; i < sts.length; i++) {
+                out[sts[i].name] = { x: sts[i].pos.x, y: sts[i].pos.y };
+            }
+            return out;
+        };
+        var ids = { wall1: wall1.getId(), wall0: wall0.getId(),
+            tripOnly: tripOnly.getId(), orphan: orphan.getId() };
+        var before = { wall1: vertsOf(ids.wall1), wall0: vertsOf(ids.wall0),
+            tripOnly: vertsOf(ids.tripOnly),
+            orphan: vertsOf(ids.orphan) };
+        var fBefore = {};
+        for (fl = 0; fl < fLayers.length; fl++) {
+            fBefore[fLayers[fl]] = vertsOf(furniture[fLayers[fl]]);
+        }
+        var posBefore = posOf();
+
+        var recon = CsRevise.surveyFromDocument(doc);
+        var newSurvey = CsRevise.surveyFromDocument(doc).survey;
+        CsRevise.reviseDeclination(newSurvey, 1, 11.0, "user"); // +10, trip 1
+        var report = CsRevise.apply(doc, di, recon, newSurvey);
+        ok(report.rigid === false,
+            "linework: revising one trip of two is NOT rigid");
+
+        var posAfter = posOf();
+        // the fit each entity is entitled to: over ITS OWN stations,
+        // old (pre-revision) -> new (as the redraw left them)
+        var fitOver = function(names) {
+            var pairs = [];
+            for (var i = 0; i < names.length; i++) {
+                pairs.push({ old: posBefore[names[i]],
+                    nu: posAfter[names[i]] });
+            }
+            return CsRevise.similarityFit(pairs);
+        };
+        var checkFollows = function(what, id, fit, was) {
+            var got = vertsOf(id);
+            ok(got.length === was.length,
+                "linework: " + what + " still has " + was.length +
+                " vertices, got " + got.length);
+            for (var i = 0; i < Math.min(got.length, was.length); i++) {
+                var pred = CsRevise.applyFit(fit, was[i]);
+                near(got[i].x, pred.x, 1e-6,
+                    "linework: " + what + " vertex " + i + " x lands on " +
+                    "its own stations' fit");
+                near(got[i].y, pred.y, 1e-6,
+                    "linework: " + what + " vertex " + i + " y lands on " +
+                    "its own stations' fit");
+            }
+        };
+
+        var fit1 = fitOver(["Q4", "Q5"]);
+        near(fit1.maxResidual, 0, 1e-9,
+            "linework: the trip-1 stations moved as one rigid piece");
+        ok(Math.abs(fit1.theta) > 1e-3,
+            "linework: and that piece really turned, theta " + fit1.theta);
+        checkFollows("the trip-1 wall", ids.wall1, fit1, before.wall1);
+        // ... and it MOVED: a fit that predicted "stay put" would pass
+        // the check above for the wrong reason
+        var w1After = vertsOf(ids.wall1);
+        ok(Math.abs(w1After[0].x - before.wall1[0].x) > 1e-3 ||
+            Math.abs(w1After[0].y - before.wall1[0].y) > 1e-3,
+            "linework: the trip-1 wall really moved");
+
+        // trip 0 did not move, so neither may anything traced on it
+        for (var w = 0; w < before.wall0.length; w++) {
+            near(vertsOf(ids.wall0)[w].x, before.wall0[w].x, 1e-9,
+                "linework: trip-0 wall vertex " + w + " x UNCHANGED");
+            near(vertsOf(ids.wall0)[w].y, before.wall0[w].y, 1e-9,
+                "linework: trip-0 wall vertex " + w + " y UNCHANGED");
+        }
+
+        // the trip-only sketch follows its whole trip's fit
+        checkFollows("the trip-only sketch", ids.tripOnly,
+            fitOver(["Q3", "Q4", "Q5"]), before.tripOnly);
+
+        // the orphan: reported, and NOT damaged in the process
+        ok(report.lineworkUnmoved.length === 1,
+            "linework: exactly one entity had nothing left to follow, got " +
+            report.lineworkUnmoved.length + " [" +
+            report.lineworkUnmoved.join(", ") + "]");
+        ok(report.lineworkUnmoved.length === 1 &&
+            report.lineworkUnmoved[0].indexOf("BREAKDOWN") === 0,
+            "linework: the unmoved entity is named by its layer, got '" +
+            report.lineworkUnmoved.join(", ") + "'");
+        var orphanAfter = vertsOf(ids.orphan);
+        ok(orphanAfter.length === 2,
+            "linework: the orphan tracing is intact, got " +
+            orphanAfter.length + " vertices");
+        near(orphanAfter[0].x, before.orphan[0].x, 1e-9,
+            "linework: the orphan tracing did not move");
+        near(orphanAfter[0].y, before.orphan[0].y, 1e-9,
+            "linework: the orphan tracing did not move (y)");
+
+        ok(report.lineworkMoved === 3,
+            "linework: three bound entities followed their stations, got " +
+            report.lineworkMoved);
+
+        // sheet furniture and the georeferenced basemap: tagged, on a
+        // world-fixed layer, and therefore untouched
+        for (fl = 0; fl < fLayers.length; fl++) {
+            var fName = fLayers[fl];
+            var fGot = vertsOf(furniture[fName]);
+            var fWas = fBefore[fName];
+            var same = fGot.length === fWas.length;
+            for (var fv = 0; same && fv < fWas.length; fv++) {
+                same = Math.abs(fGot[fv].x - fWas[fv].x) < 1e-9 &&
+                    Math.abs(fGot[fv].y - fWas[fv].y) < 1e-9;
+            }
+            ok(same, "linework: an entity on " + fName + " did NOT move, " +
+                "even tagged as linework" +
+                (fName === "NORTH-ARROW" ? " -- an arrow that turned with " +
+                    "the cave would make the map lie about north" : ""));
+        }
+
+        var summary = CsReport.revisionSummary(report);
+        ok(summary.indexOf("Traced linework moved with its stations: 3") >= 0,
+            "linework: the summary states how much followed, got '" +
+            summary + "'");
+        ok(summary.indexOf("re-trace") >= 0,
+            "linework: the summary still warns about what did not follow");
     })();
 }
 

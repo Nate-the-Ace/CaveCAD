@@ -812,13 +812,37 @@ CsRevise.tripsNeedingRevision = function(survey, lat, lon) {
  *                  with the survey would destroy the photo's
  *                  georeferencing and silently misalign the imagery
  *                  under the cave.
+ *   "NORTH-ARROW"  THE clearest case, and the one a future reader will
+ *                  question, so it is spelled out: a declination
+ *                  revision rotates the cave relative to TRUE NORTH.
+ *                  An arrow that rotates with the cave keeps pointing
+ *                  at the same passage instead of at north, and the
+ *                  map then LIES about its own orientation -- the one
+ *                  error a reader has no way to detect from the sheet.
+ *                  The arrow stays put; the cave turns under it.
+ *   "SCALE-BAR"    a scale bar is a statement about the SHEET. A rigid
+ *                  revision may carry a uniform scale (a unit
+ *                  re-interpretation), and scaling the bar along with
+ *                  the drawing would leave it reading the old
+ *                  distances forever.
+ *   "TITLE-BLOCK"  the same furniture "TB_*" names, under the layer
+ *   "LEGEND"       name the NSS plan template actually uses. Sheet
+ *   "BORDER"       furniture belongs to the paper, not to the cave.
+ *
+ * This list is also the canonical answer for CsBind.isLineworkLayer,
+ * which consults it: without the five sheet-furniture layers above, a
+ * hand-drawn north arrow on NORTH-ARROW passed that gate as cave
+ * linework and would have been bound to nearby stations and moved with
+ * them. Fixing it here fixes the linework mover AND the adopt scan
+ * from one list.
  *
  * Entries are matched as literal layer names, or as prefixes when they
  * end in "*". Deliberately spelled out here rather than pulled from
  * CsLayers: this module stays free of any dependency on constants that
  * file may not define yet.
  */
-CsRevise.WORLD_FIXED_LAYERS = ["TB_*", "CTRL-AERIAL"];
+CsRevise.WORLD_FIXED_LAYERS = ["TB_*", "CTRL-AERIAL", "NORTH-ARROW",
+    "SCALE-BAR", "TITLE-BLOCK", "LEGEND", "BORDER"];
 
 /** True when entities on layerName must NOT move with the cave (see
  *  CsRevise.WORLD_FIXED_LAYERS). */
@@ -836,6 +860,157 @@ CsRevise.isWorldFixedLayer = function(layerName) {
         }
     }
     return false;
+};
+
+// How far a linework fit's worst station may miss before the move is
+// refused, as a fraction of the drawing's extent (the same relative
+// basis classifyChange uses -- a cave in feet and the same cave in
+// metres must decide identically).
+//
+// WHY IT IS 1000x LOOSER THAN THE RIGIDITY EPS: classifyChange's
+// 1e-6 * extent asks "did ANYTHING change at all", an exactness test.
+// This asks a different question -- is "the entity moved as one rigid
+// piece" an honest description of what happened to ITS stations. A
+// residual of a tenth of a percent of the drawing diagonal is 0.5 mm
+// on a 1:200 sheet of a 100 m cave: thinner than the line itself, and
+// far finer than a hand-traced wall can express in the first place.
+// Above that the passage genuinely bent underneath the entity, no
+// single rigid move describes it, and the spec is explicit that we do
+// not rubber-sheet: the entity is left alone and REPORTED.
+//
+// A fit over exactly two stations always has residual 0 -- a plane
+// similarity has four degrees of freedom and two points supply four
+// equations -- so this threshold only ever bites at three or more.
+// With two, the pair IS the definition of the rigid piece and the
+// honest answer is to follow them.
+CsRevise.LINEWORK_RESIDUAL_FRACTION = 1e-3;
+
+/**
+ * Moves hand-traced linework so it follows the stations it was traced
+ * against. QCAD context only. The non-rigid revision path's last step
+ * -- and ONLY that path's: the rigid path already transforms the whole
+ * drawing in one operation, so running this there would move the same
+ * entity twice.
+ *
+ * Every entity on a linework layer (CsBind.isLineworkLayer is the one
+ * gate; it consults WORLD_FIXED_LAYERS above, so sheet furniture is
+ * excluded from here for free) carrying either linework tag gets a
+ * similarity fit over its own stations' old -> new positions, applied
+ * with the same rotate/scale/move idiom the rigid path uses. The order
+ * of preference, per the spec:
+ *
+ *   its listed stations   LineworkStations, those still resolvable in
+ *                         both frames. One station gives a pure
+ *                         translation (similarityFit's 1-pair case).
+ *   its trip's stations   nothing listed survived -- fit over every
+ *                         station of its LineworkTrip instead, so the
+ *                         entity at least follows the passage it
+ *                         belongs to.
+ *   neither               left exactly where it is and REPORTED.
+ *                         Never guessed at silently.
+ *
+ * \param doc, di       document and its interface
+ * \param oldPos        {name: {x, y}} station positions BEFORE the
+ *                      revision -- the frame the tracing was drawn in
+ * \param newPos        {name: {x, y}} station positions AFTER it
+ * \param tripStations  {tripId: [names]} for the fallback
+ * \param extent        drawing extent for the residual threshold
+ * \return { moved, unmoved } -- moved is a count, unmoved a list of
+ *         "LAYER #id" labels for the report
+ */
+CsRevise.moveLinework = function(doc, di, oldPos, newPos, tripStations,
+        extent) {
+    var result = { moved: 0, unmoved: [] };
+    // Soft dependency, the mirror of CsBind's on this module: nothing
+    // else in CsRevise needs CsBind, and a caller that loaded only
+    // half the Core should get "no linework" rather than a throw.
+    if (typeof CsBind === "undefined") {
+        return result;
+    }
+    var ex = (typeof extent === "number" && isFinite(extent)) ? extent : 0;
+    var tol = CsRevise.LINEWORK_RESIDUAL_FRACTION * Math.max(ex, 1);
+
+    /** old -> new pairs for the names resolvable in BOTH frames. */
+    var pairsFor = function(names) {
+        var pairs = [];
+        var seen = {};
+        for (var i = 0; i < names.length; i++) {
+            var nm = names[i];
+            if (nm === undefined || nm === null || nm === "" ||
+                    seen[nm] === true) {
+                continue;
+            }
+            seen[nm] = true;
+            if (!oldPos.hasOwnProperty(nm) || !newPos.hasOwnProperty(nm)) {
+                continue;
+            }
+            pairs.push({ old: { x: oldPos[nm].x, y: oldPos[nm].y },
+                nu: { x: newPos[nm].x, y: newPos[nm].y } });
+        }
+        return pairs;
+    };
+
+    var origin = new RVector(0, 0);
+    var op = new RModifyObjectsOperation();
+    op.setText("Move traced linework");
+    var anyMoved = false;
+    var ids = doc.queryAllEntities(false, false);
+    for (var i = 0; i < ids.length; i++) {
+        var ent = doc.queryEntity(ids[i]);
+        if (isNull(ent)) {
+            continue;
+        }
+        var layer = CsBind.layerNameOf(doc, ent);
+        if (!CsBind.isLineworkLayer(layer)) {
+            continue;
+        }
+        // EITHER tag, not just the station list: an entity bound with
+        // source "trip" snapped to nothing and so carries only
+        // LineworkTrip. Keying on LineworkStations alone would skip
+        // exactly the entities that need the trip fallback.
+        if (!CsBind.hasLineworkTags(ent)) {
+            continue;
+        }
+        // our own output, should it ever have picked up a linework tag:
+        // the redraw just placed it, and moving it again would apply
+        // the revision to it twice
+        if (CsBind.isSuiteGeometry(ent)) {
+            continue;
+        }
+
+        var label = layer + " #" + ent.getId();
+        var pairs = pairsFor(CsBind.decodeStations(
+            CsTags.get(ent, CsBind.STATIONS_TAG)));
+        if (pairs.length === 0) {
+            var trip = CsTags.getNumber(ent, CsBind.TRIP_TAG);
+            trip = (trip === null) ? 0 : trip;
+            if (tripStations !== undefined && tripStations !== null &&
+                    tripStations.hasOwnProperty(trip)) {
+                pairs = pairsFor(tripStations[trip]);
+            }
+        }
+        var fit = pairs.length === 0 ? null : CsRevise.similarityFit(pairs);
+        // Infinity is similarityFit's honest answer when the old points
+        // all coincide and the rotation is underdetermined -- exactly
+        // the case where a fit must not be trusted.
+        if (fit === null || !isFinite(fit.maxResidual) ||
+                fit.maxResidual > tol) {
+            result.unmoved.push(label);
+            continue;
+        }
+        ent.rotate(fit.theta, origin);
+        if (Math.abs(fit.scale - 1.0) > 1e-9) {
+            ent.scale(fit.scale, origin);
+        }
+        ent.move(new RVector(fit.tx, fit.ty));
+        op.addObject(ent, false); // false: keeps its own layer
+        anyMoved = true;
+        result.moved++;
+    }
+    if (anyMoved) {
+        di.applyOperation(op);
+    }
+    return result;
 };
 
 /**
@@ -927,8 +1102,12 @@ CsRevise.isWorldFixedLayer = function(layerName) {
  *           name. When that station did not survive the revision (the
  *           leg it sat on got deleted), nothing is invented to carry
  *           it: report.geoAnchorLost names the lost station instead.
- *           Hand-drawn linework near moved stations does NOT follow --
- *           the report warns.
+ *           Traced linework then follows the stations it was traced
+ *           against, entity by entity (CsRevise.moveLinework): a wall
+ *           over a corrected shot moves, one far away barely does.
+ *           Anything with no surviving station to follow is left alone
+ *           and named in report.lineworkUnmoved -- the re-trace warning
+ *           is now that honest fallback rather than the default.
  *
  * OFF-layer caveat, probed empirically in this build: add, MODIFY and
  * DELETE operations are all silently refused for entities on a layer
@@ -956,6 +1135,13 @@ CsRevise.isWorldFixedLayer = function(layerName) {
  *                   recon.anchorPos had to stand in
  *   anchorUsed      {name, source} the point the revision pivoted on;
  *                   source is "georef", "trip0" or "stale"
+ *   lineworkMoved   how many traced entities followed their own
+ *                   stations. 0 on the rigid path, where the single
+ *                   whole-drawing transform carried them all already
+ *   lineworkUnmoved ["LAYER #id"] the traced entities that had no
+ *                   surviving station to follow, or whose stations
+ *                   moved too incoherently for one rigid move to
+ *                   describe. Left exactly where they were
  *   geoAnchorLost   present (the lost station's name) only when a
  *                   non-rigid revision had a GeoLat/GeoLon/GeoStation
  *                   anchor to carry across the redraw but the station
@@ -1206,6 +1392,13 @@ CsRevise.apply = function(doc, di, recon, newSurvey) {
     // set only on the non-rigid path, only when the geo anchor existed
     // but its station did not survive the revision -- see below
     var geoAnchorLost = null;
+
+    // Traced-linework outcome, filled in by the non-rigid path only.
+    // Left at 0/[] on the rigid path, where the one whole-drawing
+    // transform already carried every traced entity with it and there
+    // is nothing per-entity to count.
+    var lineworkMoved = 0;
+    var lineworkUnmoved = [];
 
     // -- OFF layers holding entities: ops there are silently refused --
     var offLayers = [];
@@ -1463,6 +1656,52 @@ CsRevise.apply = function(doc, di, recon, newSurvey) {
                 geoAnchorLost = geoAnchor.station;
             }
         }
+
+        // -- 5b. traced linework follows its OWN stations -------------
+        // Which frame each side comes from, because getting it backwards
+        // would move every traced line by the inverse of the revision:
+        //   OLD  oldResolved.stations, the pre-revision resolve over
+        //        this same anchor. Those coordinates ARE the drawing
+        //        coordinates the user traced against -- read before the
+        //        erase, and the only record of them left, since the
+        //        marks that held them have just been deleted.
+        //   NEW  read back off the drawing the redraw above has just
+        //        written. Deliberately not newResolved: the two agree
+        //        mathematically, but the drawing is the truth about
+        //        where the stations actually ended up.
+        var oldPos = {};
+        for (var lp in oldResolved.stations) {
+            if (oldResolved.stations.hasOwnProperty(lp)) {
+                oldPos[lp] = { x: oldResolved.stations[lp].x,
+                    y: oldResolved.stations[lp].y };
+            }
+        }
+        var newPos = {};
+        var fresh = CsTags.collectStations(doc);
+        for (var fi = 0; fi < fresh.length; fi++) {
+            newPos[fresh[fi].name] = { x: fresh[fi].pos.x,
+                y: fresh[fi].pos.y };
+        }
+        // The trip fallback's station lists come from the survey the
+        // drawing was read FROM: a LineworkTrip tag names the trip as
+        // it was when the tracing happened, so those are the names it
+        // could have been bound to.
+        var tripStations = {};
+        for (var tsi = 0; tsi < recon.survey.shots.length; tsi++) {
+            var tsh = recon.survey.shots[tsi];
+            var tkey = tsh.trip || 0;
+            if (tripStations[tkey] === undefined) {
+                tripStations[tkey] = [];
+            }
+            tripStations[tkey].push(tsh.from);
+            tripStations[tkey].push(tsh.to);
+        }
+        withOffLayersOn(0, function() {
+            var lw = CsRevise.moveLinework(doc, di, oldPos, newPos,
+                tripStations, extent);
+            lineworkMoved = lw.moved;
+            lineworkUnmoved = lw.unmoved;
+        });
     }
 
     // -- 6. report -----------------------------------------------------
@@ -1486,7 +1725,9 @@ CsRevise.apply = function(doc, di, recon, newSurvey) {
         loopsAfter: loopBrief(newResolved),
         anchorMoved: anchorMoved,
         anchorMissing: anchorMissing,
-        anchorUsed: { name: anchorName, source: anchorSource }
+        anchorUsed: { name: anchorName, source: anchorSource },
+        lineworkMoved: lineworkMoved,
+        lineworkUnmoved: lineworkUnmoved
     };
     if (geoAnchorLost !== null) {
         // absent entirely rather than null when nothing was lost, so a
