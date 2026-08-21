@@ -137,8 +137,10 @@ CsGit.unquotePath = function(s) {
             // CsStore.js:117 already relies on it, and the drawing
             // round-trip test in tests/js_unit.js decodes a real
             // multiline note through it on the engine leg, not just
-            // node.)
+            // node.) `raw` tracks the same run in its original \ooo
+            // text, for the malformed-byte fallback below.
             var percent = "";
+            var raw = "";
             while (i < inner.length && inner.charAt(i) === "\\" &&
                     inner.charAt(i + 1) >= "0" && inner.charAt(i + 1) <= "7" &&
                     inner.charAt(i + 2) >= "0" && inner.charAt(i + 2) <= "7" &&
@@ -146,15 +148,36 @@ CsGit.unquotePath = function(s) {
                 var octal = inner.substring(i + 1, i + 4);
                 var hex = parseInt(octal, 8).toString(16);
                 percent += "%" + (hex.length < 2 ? "0" + hex : hex).toUpperCase();
+                raw += "\\" + octal;
                 i += 4;
+            }
+            if (percent.length === 0) {
+                // A lone octal digit, or a run cut short of three
+                // digits: NOT a \ooo escape at all, just a backslash
+                // that happens to be followed by 1-2 octal-looking
+                // digits. Real git always emits exactly three digits,
+                // so this never fires on real output -- but the scan
+                // must still advance regardless, or i never moves and
+                // the outer while spins forever. This mirrors the
+                // unrecognized-escape exit below, the only exit that
+                // cannot loop: treat the backslash as literal and let
+                // the loop pick the short digit run back up as plain
+                // characters on the next iterations.
+                out += "\\";
+                i += 1;
+                continue;
             }
             try {
                 out += decodeURIComponent(percent);
             } catch (e) {
-                // A malformed byte run -- keep the raw escapes rather
-                // than losing the rest of the path to a thrown
-                // exception.
-                out += percent;
+                // A malformed byte run -- keep the ORIGINAL \ooo text
+                // (raw), not the %XX form and not just the offending
+                // byte. decodeURIComponent fails the WHOLE run even
+                // when only its last byte is bad, so reverting
+                // anything less than the whole run cannot work; a
+                // path with a malformed byte run is unusable either
+                // way, and this is at least non-destructive.
+                out += raw;
             }
             continue;
         }

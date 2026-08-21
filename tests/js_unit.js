@@ -5769,18 +5769,22 @@ ok(CsGit.parseToplevel({ code: 128, out: "", err: "not a git repository" }) === 
     "parseToplevel returns null outside a work tree");
 
 var gitSt = CsGit.parsePorcelain({ code: 0, out:
-    " M drawings/Blowing Hole.dxf\n?? survey/bh.shots.tsv\nA  notes/trip.md\n", err: "" });
+    " M drawings/plain.dxf\n?? survey/bh.shots.tsv\nA  notes/trip.md\n", err: "" });
 ok(gitSt.length === 3, "parsePorcelain finds 3 entries");
-ok(gitSt[0].path === "drawings/Blowing Hole.dxf",
-    "parsePorcelain keeps an already-unquoted path containing a space " +
-    "(a caller could hand this parser output from a source other than " +
-    "git itself)");
+ok(gitSt[0].path === "drawings/plain.dxf", "parsePorcelain reads the path");
 ok(gitSt[0].code === "M", "parsePorcelain reads the status code");
 ok(gitSt[1].code === "??", "parsePorcelain reads an untracked marker");
 ok(gitSt[0].origPath === null,
     "parsePorcelain: origPath is null (not absent) on a plain modified entry");
 ok(CsGit.parsePorcelain({ code: 0, out: "", err: "" }).length === 0,
     "parsePorcelain on a clean tree is empty");
+
+// The passthrough branch, pinned honestly on the helper itself rather
+// than as a parsePorcelain fixture with a space in an UNQUOTED path --
+// real git always quotes a spaced path (see quotedMod below), so that
+// shape is not something git emits.
+ok(CsGit.unquotePath("d/Blowing Hole.dxf") === "d/Blowing Hole.dxf",
+    "unquotePath passes an unquoted path through unchanged");
 
 // Rename/copy: porcelain renders "old -> new". The destination is the
 // file that now exists -- the one a later `git add` must name -- so
@@ -5903,6 +5907,44 @@ ok(quotedBackslash[0].path === "back\\123slash.txt",
 // this worktree): `git add -- 'back\123slash.txt'` -- the exact
 // string CsGit.argvAdd would build from quotedBackslash[0].path --
 // staged the file with no pathspec error.
+
+// A malformed \ooo byte run: decodeURIComponent fails the WHOLE run
+// even when only its last byte is bad, so unquotePath reverts to the
+// original escape text (not the %XX form, and not just the bad byte)
+// rather than silently discarding the good bytes ahead of it.
+ok(CsGit.unquotePath("\"\\377\"") === "\\377",
+    "unquotePath: a single invalid UTF-8 byte reverts to its raw \\ooo " +
+    "escape rather than the %XX form");
+ok(CsGit.unquotePath("\"a\\303\\251\\303\"") === "a\\303\\251\\303",
+    "unquotePath: one bad trailing byte in a run must not discard the " +
+    "decodable characters ahead of it -- the whole run reverts, raw");
+
+// ---------------------------------------------------------------------
+// Regression guard for a Critical: a short \ooo run (1 or 2 octal
+// digits, or a digit followed by a non-octal character) used to enter
+// the octal branch without ever advancing the scan cursor, spinning
+// CsGit.unquotePath forever. Real git always emits exactly three
+// digits, so nothing triggers this today -- but a hang is the one bug
+// class this suite cannot catch by failing; it just never finishes.
+// Every assertion below completing at all IS the test.
+// ---------------------------------------------------------------------
+ok(CsGit.unquotePath("\"a\\3\"") === "a\\3",
+    "unquotePath returns on a 1-digit run at the end (does not hang)");
+ok(CsGit.unquotePath("\"a\\30\"") === "a\\30",
+    "unquotePath returns on a 2-digit run at the end (does not hang)");
+ok(CsGit.unquotePath("\"a\\3x\"") === "a\\3x",
+    "unquotePath returns on a digit followed by a non-octal char " +
+    "(does not hang)");
+ok(CsGit.unquotePath("\"a\\30b\"") === "a\\30b",
+    "unquotePath returns on a 2-digit run followed by a literal " +
+    "(does not hang)");
+ok(CsGit.unquotePath("\"a\\7\"") === "a\\7",
+    "unquotePath returns on a single trailing digit (does not hang)");
+// Reachable through the public parser, not only the helper.
+var shortOctalViaParser = CsGit.parsePorcelain({ code: 0,
+    out: "?? \"d/a\\3b.dxf\"\n", err: "" });
+ok(shortOctalViaParser[0].path === "d/a\\3b.dxf",
+    "parsePorcelain also returns on a short octal run (does not hang)");
 
 // What is STILL genuinely unhandled, now that quoting is: a filename
 // that itself contains the literal " -> " sequence would be split at
