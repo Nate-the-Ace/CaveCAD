@@ -129,7 +129,7 @@ demand rather than requiring a CaveCAD restart.
 | Platform | What the dialog offers |
 |---|---|
 | macOS | `xcode-select --install` (copyable), link <https://git-scm.com/download/mac> |
-| Windows | link <https://git-scm.com/download/win>, `winget install --id Git.Git` |
+| Windows | link <https://git-scm.com/download/win>, `winget install -e --id Git.Git` |
 | Linux | link <https://git-scm.com/download/linux> |
 
 **2. Is `gh` installed?** `gh --version`. Missing:
@@ -137,7 +137,7 @@ demand rather than requiring a CaveCAD restart.
 | Platform | What the dialog offers |
 |---|---|
 | macOS | `brew install gh`, or the `.pkg` from <https://github.com/cli/cli/releases/latest>, link <https://cli.github.com/> |
-| Windows | `winget install --id GitHub.cli`, link <https://cli.github.com/> |
+| Windows | `winget install -e --id GitHub.cli`, link <https://cli.github.com/> |
 | Linux | link <https://github.com/cli/cli/blob/trunk/docs/install_linux.md> |
 
 Every dialog carries the canonical <https://cli.github.com/> link, a **Copy command**
@@ -186,10 +186,18 @@ existing token authorized for something else will pass rung 3 and then make ever
 repo look nonexistent. Missing scope offers `gh auth refresh -s repo`, which is also the
 remedy when a project later needs `read:org` for an org-owned repo.
 
-**5. Is git's credential helper configured?** `gh auth setup-git`. Without it an HTTPS
-push prompts for a password on a terminal that does not exist, so the push simply hangs
-until the timeout. It fails if no host is authenticated, so it must run after rung 3, and
-it is re-run rather than skipped when rung 3 re-authenticates.
+**5. Is git's credential helper configured?** Read with
+`git config --get-regexp ^credential`. Without any helper an HTTPS push prompts for a
+password on a terminal that does not exist, so it hangs rather than failing.
+
+Two corrections to an earlier draft of this rung, both from measurement rather than
+reasoning. It said to check by running `gh auth setup-git` — but that command
+*configures* the helper, so the check would have been the mutation, and merely opening
+the setup dialog would rewrite the user's git config. A diagnostic must not have that
+side effect. And it required gh's own helper; on the development machine
+`credential.helper` is `osxkeychain`, no gh helper is configured at all, and gh plus
+push work fine. **Any** helper passes. `gh auth setup-git` is offered as a remedy when
+there is none, never run as a probe.
 
 **6. Is there a git identity?** `git config --get user.name` and `--get user.email`. Empty:
 fill them from `gh api user` — `name` (falling back to `login`) and the noreply address
@@ -587,6 +595,25 @@ One integration test, real `git`, no network and no `gh`: create a temp dir, `gi
 repo received the objects. `CsHub` stays faked because it is the network.
 
 `make_package.sh` gains the sort-order uniqueness assertion.
+
+### Verification status as of 2026-08-21 (slice 1)
+
+**Item 4 — PARTIALLY verified, by proxy, not by a Finder launch.** Running CaveCAD
+under a stripped environment (`env -i HOME=$HOME`, the closest approximation to what
+launchd hands a Finder-launched app) reproduces the bug the candidate ladder exists to
+prevent: `PATH` comes back as `/usr/gnu/bin:/usr/local/bin:/bin:/usr/bin:.` with no
+`/opt/homebrew/bin`, a bare `gh` fails with `execve: No such file or directory`, and the
+absolute path works. Discovery via absolute candidates is therefore confirmed necessary
+and sufficient under that environment. A real `open -a CaveCAD` launch has NOT been done.
+
+Note the stripped `PATH` still contains `/usr/local/bin`, so this bug bites Apple Silicon
+Homebrew and would silently fail to reproduce on an Intel Mac.
+
+**Also verified headlessly:** the full `discoverTools` -> `probe` -> `ladder` chain run
+inside CaveCAD's own engine against this machine returns all six rungs green, matching the
+real `gh auth status` and `git config` state checked independently in the shell.
+
+**Item 1 belongs to slice 2** — there is no save wrapper yet.
 
 ### Needs live GUI verification (cannot be proven headless)
 

@@ -29,6 +29,39 @@
 
 **Tests append to `tests/js_unit.js`** in the existing style — a `// ---` banner comment, then bare `ok(...)`/`near(...)` calls at top level. There is no test-function registry. New Core files must also be added to that file's `CORE_FILES` array in dependency order.
 
+**Fixtures for anything an external tool prints MUST be captured from that tool, never
+composed.** This rule was learned the hard way twice in this slice. The `parsePorcelain`
+fixtures below were written from what `git status --porcelain` output looks like from
+memory — unquoted spaced paths — and git has never emitted that: it C-quotes ANY path
+containing a space, so the parser passed its tests while returning a path `git add` would
+reject. Task 1 had the same shape with a Qt API that does not exist in this engine. A test
+built on an invented fixture passes while the feature is broken.
+
+So, before writing a parser test: run the real tool in a throwaway directory (under the
+scratchpad, never inside the worktree), capture its actual bytes, and paste those. Verify
+with `xxd` if quoting or encoding is involved. This applies to every fixture in this plan,
+including the `AUTH_OK` / `AUTH_THIN` `gh auth status` strings in Task 3 — those were
+written from memory too and MUST be re-captured from a real `gh auth status` before being
+trusted. The Task 5 device-flow fixture is the one exception already known-good: it came
+from a live probe on 2026-08-20 and its provenance is recorded in the test comment.
+
+Likewise, **verify any API you have not seen used elsewhere in this repo actually exists**
+before relying on it, rather than trusting this plan's code blocks. They were written
+against the QCAD API as documented, and this bridge diverges.
+
+**Validate with `typeof`, never with truthiness plus `String()`.** This produced the
+worst defect in the slice: `CsHub.parseVisibility` used `String(j.visibility)`, so
+`{"visibility":["PRIVATE"]}` returned `true` from `isPrivate` — the gate carrying "never
+expose a cave entrance" said yes to a non-private shape, because `String(["PRIVATE"])` is
+`"PRIVATE"`. The same pattern threw a `TypeError` on `{"visibility":{"toString":1}}`, and
+in `noreplyEmail` it let `1e21` become a committer address in permanent history. Note also
+that `Math.floor(n) === n` does NOT prove an integer for large doubles — nothing past 2^52
+has a fractional part — so a range cap is needed too.
+
+Guard every field a parser reads with `typeof x === "string"` / `=== "number"` and an
+explicit range check. And when a docstring promises "never throws" or "never returns true
+unless...", make it literally true: later tasks get written trusting it.
+
 **Run after every task:** `./tests/run_all.sh` — expect `ALL TESTS PASSED (publish checks not run; use --publish)`.
 
 ---
@@ -930,7 +963,7 @@ ok(hMac.command === "brew install gh", "osx gh command is brew install gh");
 ok(hMac.links.join(" ").indexOf("https://cli.github.com/") !== -1,
     "osx gh help links cli.github.com");
 var hWin = CsSetup.installHelp("win", "gh");
-ok(hWin.command === "winget install --id GitHub.cli", "win gh command is winget");
+ok(hWin.command === "winget install -e --id GitHub.cli", "win gh command is winget");
 var hLin = CsSetup.installHelp("linux", "gh");
 ok(hLin.links.join(" ").indexOf("install_linux.md") !== -1,
     "linux gh help links the distro instructions");
@@ -1064,9 +1097,9 @@ CsSetup.INSTALL_HELP = {
                       "https://github.com/cli/cli/releases/latest"] }
     },
     win: {
-        git: { command: "winget install --id Git.Git",
+        git: { command: "winget install -e --id Git.Git",
                links: ["https://git-scm.com/download/win"] },
-        gh: { command: "winget install --id GitHub.cli",
+        gh: { command: "winget install -e --id GitHub.cli",
               links: ["https://cli.github.com/"] }
     },
     linux: {
@@ -1162,7 +1195,7 @@ function ladderWith(over) {
         gitPath: "/usr/bin/git",
         ghPath: "/opt/homebrew/bin/gh",
         authStatus: { code: 0, out: AUTH_OK, err: "" },
-        setupGit: { code: 0, out: "", err: "" },
+        credentialHelper: { code: 0, out: "credential.helper osxkeychain\n", err: "" },
         userName: { code: 0, out: "Nathan Schonegg\n", err: "" },
         userEmail: { code: 0, out: "1+n@users.noreply.github.com\n", err: "" }
     };
@@ -1217,7 +1250,7 @@ ok(thinScope[3].remedy.indexOf("auth refresh") !== -1,
 ok(thinScope[3].remedy.indexOf("404") !== -1,
     "the scope remedy explains the 404 symptom");
 
-var noHelper = ladderWith({ setupGit: { code: 1, out: "", err: "no hosts" } });
+var noHelper = ladderWith({ credentialHelper: { code: 1, out: "", err: "" } });
 ok(noHelper[4].ok === false, "a failed setup-git fails the helper rung");
 
 var noIdentity = ladderWith({ userEmail: { code: 1, out: "", err: "" } });
@@ -1344,15 +1377,25 @@ CsSetup.ladder = function(probe, system) {
         blocked = true;
     }
 
-    // 5. credential helper
+    // 5. credential helper -- READ-ONLY, and ANY helper passes.
+    //
+    // The earlier draft read probe.setupGit, populated by RUNNING
+    // `gh auth setup-git` -- but that command CONFIGURES the helper, so the
+    // check was the mutation and opening the dialog would rewrite the user's
+    // git config. It also demanded gh's own helper; on the development
+    // machine credential.helper is `osxkeychain` with no gh helper at all,
+    // and gh plus push work fine. Requiring gh's would tell someone to fix
+    // what is not broken.
     if (blocked) {
         skip("helper", "git can authenticate to GitHub");
-    } else if (probe.setupGit && probe.setupGit.code === 0) {
+    } else if (probe.credentialHelper && probe.credentialHelper.code === 0 &&
+               String(probe.credentialHelper.out).replace(/\s/g, "").length > 0) {
         rungs.push(CsSetup.rung("helper", "git can authenticate to GitHub", true));
     } else {
         rungs.push(CsSetup.rung("helper", "git can authenticate to GitHub", false,
-            "git has no credential helper, so a push waits forever for a " +
-            "password prompt that never appears. Fix with: gh auth setup-git"));
+            "git has no credential helper, so an HTTPS push waits for a " +
+            "password prompt on a terminal that does not exist -- it hangs " +
+            "rather than failing. Offer to run: gh auth setup-git"));
         blocked = true;
     }
 
@@ -1417,6 +1460,39 @@ git commit -m "feat: the preflight ladder, and a device-code parser built from a
 ```
 
 ---
+
+### Qt surface for Tasks 6 and 7 — VERIFIED, do not re-derive
+
+Probed live in CaveCAD 3.33.0's engine on 2026-08-21. Every class these two tasks
+need is present, and widgets construct even under `-no-gui`:
+
+`QDialog`, `QVBoxLayout`, `QHBoxLayout`, `QGridLayout`, `QLabel`, `QPushButton`,
+`QLineEdit`, `QDesktopServices`, `QUrl`, `QCoreApplication`, `QFont`, `QTimer`,
+`QProgressDialog`, `QMessageBox`, `QClipboard`, `QTreeWidget`, `QTreeWidgetItem`,
+`QTextEdit`, `QPlainTextEdit`, `QWidget`.
+
+Confirmed working: `new QUrl(...)` round-trips; `QLabel.text` readable;
+`QDialog.windowTitle` assignable; `QPushButton.clicked` is a function and
+`.clicked.connect(fn)` succeeds; `QVBoxLayout.addWidget` is a function;
+`label.font` is readable and reports `pointSize() === 13`.
+
+**One trap, and it is the shape of every defect in this slice:**
+
+```
+QDesktopServices.openUrl        -> function     OK
+QCoreApplication.processEvents  -> function     OK -- USE THIS ONE
+QApplication.processEvents      -> undefined    DOES NOT EXIST
+```
+
+Task 7's dialog uses `QCoreApplication.processEvents()`, which is correct. Do NOT
+"fix" it to `QApplication.processEvents()`: that is undefined, and called inside the
+dialog's `try/catch` it would fail silently, leaving the poll loop never pumping
+events so the one-time code never appears on screen.
+
+**What the probe does NOT establish:** headless construction is not proof of
+rendering. That the dialog appears, that the code is legible at the enlarged font,
+that buttons respond to clicks, and that `show()` plus the poll loop does not freeze
+the main window are all Task 8 items and cannot be closed from a script.
 
 ### Task 6: GitHubSetup tool — menu wiring and the ladder display
 
@@ -1505,7 +1581,7 @@ CsSetup.probe = function(gitPath, ghPath) {
         gitPath: gitPath,
         ghPath: ghPath,
         authStatus: null,
-        setupGit: null,
+        credentialHelper: null,
         userName: null,
         userEmail: null
     };
@@ -1517,10 +1593,11 @@ CsSetup.probe = function(gitPath, ghPath) {
     if (!ghPath) {
         return probe;
     }
+    // READ-ONLY. Never run `gh auth setup-git` from a probe -- it
+    // configures the helper, so the check would be the mutation.
+    probe.credentialHelper = CsProc.run(gitPath,
+        ["config", "--get-regexp", "^credential"]);
     probe.authStatus = CsProc.run(ghPath, CsHub.argvAuthStatus());
-    if (CsHub.isAuthenticated(probe.authStatus)) {
-        probe.setupGit = CsProc.run(ghPath, CsHub.argvSetupGit());
-    }
     return probe;
 };
 ```
@@ -1553,24 +1630,22 @@ GitHubSetup.prototype.beginEvent = function() {
     this.terminate();
 };
 
+// SUPERSEDED BY TASK 5 -- do not write this. It calls CsSetup.resolve(),
+// which is stat-only and reports a gh that lives outside the candidate
+// directories as MISSING even when it is on PATH and works (MacPorts,
+// ~/.local/bin, Nix). That is the exact blind spot CsSetup.discover was
+// added to close, and Task 5 packaged the correct form as
+// CsSetup.discoverTools(). Call that instead:
+//
+//     var tools = CsSetup.discoverTools();   // {gitPath, ghPath}
+//
+// Caching caveat, proven live: discover() may answer with the BARE NAME
+// for a PATH-only install, and validateCached() stats it -- a relative
+// name stats against the process cwd, which inside CaveCAD is
+// .../CaveCAD.app/Contents/Resources. So only an ABSOLUTE path is
+// cacheable; see CsSetup.isCacheable.
 GitHubSetup.resolveTools = function() {
-    var git = CsSetup.validateCached(
-        RSettings.getStringValue(CsSetup.SETTING_GIT, ""));
-    if (git === null) {
-        git = CsSetup.resolve("git");
-        if (git !== null) {
-            RSettings.setValue(CsSetup.SETTING_GIT, git);
-        }
-    }
-    var gh = CsSetup.validateCached(
-        RSettings.getStringValue(CsSetup.SETTING_GH, ""));
-    if (gh === null) {
-        gh = CsSetup.resolve("gh");
-        if (gh !== null) {
-            RSettings.setValue(CsSetup.SETTING_GH, gh);
-        }
-    }
-    return { git: git, gh: gh };
+    return CsSetup.discoverTools();
 };
 
 GitHubSetup.showLadder = function() {
@@ -1921,7 +1996,7 @@ cd ~/Documents/github/qcad-azimuth-tool && ./tools/publish.sh && open -a CaveCAD
 then run the tool and read the log:
 ```bash
 grep -c "auth status" ~/Library/Application\ Support/QCAD/CaveCAD/cave-git.log
-grep -cE "gh[pousr]_[A-Za-z0-9_]{8,}" ~/Library/Application\ Support/QCAD/CaveCAD/cave-git.log
+grep -cE "gh[pousr]_[A-Za-z0-9_]+|github_pat_[A-Za-z0-9_]+" ~/Library/Application\ Support/QCAD/CaveCAD/cave-git.log
 ```
 Expected: at least 1 for the first, exactly 0 for the second.
 
@@ -1951,7 +2026,7 @@ If the `gh` rung reports missing, discovery is broken under the Finder environme
 
 ```bash
 tail -20 ~/Library/Application\ Support/QCAD/CaveCAD/cave-git.log
-grep -cE "gh[pousr]_[A-Za-z0-9_]{8,}" ~/Library/Application\ Support/QCAD/CaveCAD/cave-git.log
+grep -cE "gh[pousr]_[A-Za-z0-9_]+|github_pat_[A-Za-z0-9_]+" ~/Library/Application\ Support/QCAD/CaveCAD/cave-git.log
 ```
 Expected: command lines with exit codes; `0` matches for the token pattern.
 
@@ -1973,5 +2048,10 @@ git commit -m "docs: record the GUI verification of the setup ladder"
 **Spec coverage.** Executable discovery → Task 4. Ladder rungs 1–6 → Task 5, with `probe` in Task 6. Install links → Task 4. Device flow → Tasks 5 and 7. Token fallback → **not implemented in this slice**; the primary device flow covers the machines in play, and the fallback needs a masked-input dialog whose behavior under the brew bridge is unverified. Tracked as the first item of slice 2 rather than left as a stub here. Redaction → Task 1. `assertPrivate` → Task 3 as `CsHub.isPrivate`; its call sites arrive with clone and push in slice 2. Sort-order uniqueness assertion → already exists as `test_sort_orders_are_unique`, verified in Task 6 rather than duplicated.
 
 **Naming consistency.** `CsProc.run`, `CsProc.setBackend`, `CsProc.redact`; `CsGit.argv*`/`CsGit.parse*`; `CsHub.argv*`/`CsHub.parse*`/`CsHub.isPrivate`/`CsHub.hasRepoScope`/`CsHub.noreplyEmail`; `CsSetup.candidates`/`resolve`/`validateCached`/`installHelp`/`ladder`/`firstFailure`/`probe`/`identityPlan`/`parseDeviceCode`/`readDeviceCode`/`loginSucceeded`. Used identically in every task.
+
+**Deferred from Task 1, deliberately.** The quality review of `CsProc` raised log rotation
+— `cave-git.log` grows unbounded, and "auto-push after every save" makes it a hot path. Left
+out: it is a behavior change that wants its own rotation policy, and nothing auto-pushes
+until slice 2. It belongs with the save wrapper, where it starts to matter.
 
 **Not in this slice:** `CsRepo`, `CsSidecar`, `CsCommitMsg`, `CsSync`, the save wrapper, `CloneProject`, `InitCaveRepo`, `SyncProject`, `ProjectStatus`, `OpenPullRequest`. Slice 2 also depends on a GUI pass of the revision framework, which is not this plan's work.
