@@ -129,7 +129,7 @@ demand rather than requiring a CaveCAD restart.
 | Platform | What the dialog offers |
 |---|---|
 | macOS | `xcode-select --install` (copyable), link <https://git-scm.com/download/mac> |
-| Windows | link <https://git-scm.com/download/win>, `winget install --id Git.Git` |
+| Windows | link <https://git-scm.com/download/win>, `winget install -e --id Git.Git` |
 | Linux | link <https://git-scm.com/download/linux> |
 
 **2. Is `gh` installed?** `gh --version`. Missing:
@@ -137,7 +137,7 @@ demand rather than requiring a CaveCAD restart.
 | Platform | What the dialog offers |
 |---|---|
 | macOS | `brew install gh`, or the `.pkg` from <https://github.com/cli/cli/releases/latest>, link <https://cli.github.com/> |
-| Windows | `winget install --id GitHub.cli`, link <https://cli.github.com/> |
+| Windows | `winget install -e --id GitHub.cli`, link <https://cli.github.com/> |
 | Linux | link <https://github.com/cli/cli/blob/trunk/docs/install_linux.md> |
 
 Every dialog carries the canonical <https://cli.github.com/> link, a **Copy command**
