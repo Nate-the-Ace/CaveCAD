@@ -1,4 +1,4 @@
-; Test Walls survey data -- dummy data for AzimuthTraverse/ImportNativeCaveSurvey testing
+; Test Walls survey data -- dummy data for Import Cave Survey testing
 #Units Feet Order=DAV Decl=2.5
 #Fix W1 1000.00 2000.00 100.00
 

@@ -17,7 +17,6 @@ Each appears in the **Cave Survey** menu and as a command:
 
 | Tool | Command | What it does |
 | --- | --- | --- |
-| Azimuth Traverse | `azt` | Plot shots one at a time from typed azimuth/distance/inclination/LRUD. |
 | Survey Notebook | `snb` | A docked survey notes page: type or import shots, watch closures/stats/warnings live, draw in one undo step, export to any format. Also owns declination: estimate it from the survey date and the cave's location (IGRF), pin that location to a station as the drawing's geo anchor, and correct a trip's declination after the fact -- the drawing rotates around the fix. The walls you trace are tied to the trip they belong to automatically, so they follow it through a revision instead of being left behind -- nothing to switch on, and a revision claims work drawn before this existed. |
 | New Cave Map | `ncm` | Start a sheet from the NSS template, already carrying the control layers and symbol blocks. |
 | Rebuild Survey Data | `rsd` | Re-derive the survey model from what the drawing already holds, and upgrade a legacy drawing's tags to the current schema. |

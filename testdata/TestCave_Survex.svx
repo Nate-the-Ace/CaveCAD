@@ -1,4 +1,4 @@
-; Test Survex survey data -- dummy data for AzimuthTraverse/ImportNativeCaveSurvey testing
+; Test Survex survey data -- dummy data for Import Cave Survey testing
 
 *begin TestSurvey
 *units length metres

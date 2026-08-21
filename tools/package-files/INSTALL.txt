@@ -27,7 +27,7 @@ Create the "scripts" folder if it isn't there yet -- CaveCAD does not
 make it until something needs it. When you're done you should have:
 
     ...CaveCAD/scripts/CaveSurvey/CaveSurvey.js
-    ...CaveCAD/scripts/CaveSurvey/AzimuthTraverse/AzimuthTraverse.js
+    ...CaveCAD/scripts/CaveSurvey/SurveyNotebook/SurveyNotebook.js
     ...and one folder per tool beside it
 
 Those paths are inside your own user folder, so installing needs no

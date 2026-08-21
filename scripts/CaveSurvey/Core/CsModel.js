@@ -446,7 +446,7 @@ CsModel.tripIdFor = function(survey, tripRecord) {
  * arriving at it (LRUD belongs to the TO station). Returns
  * {left, right, up, down, azimuth} or null if the station has none.
  * A survey's very first station can only get LRUD from a shot LEAVING
- * it, which callers handle explicitly (see AzimuthTraverse).
+ * it, which callers handle explicitly.
  */
 CsModel.lrudForStation = function(survey, stationName) {
     var found = null;

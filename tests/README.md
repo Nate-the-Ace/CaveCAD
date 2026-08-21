@@ -153,7 +153,7 @@ were real and are fixed; the third turned out to be inherent to the format.
 
 ## Not covered
 
-`AzimuthTraverse.js` is interactive: it prompts per shot for azimuth,
-distance, inclination and LRUD. Stubbing that isn't worth the fidelity loss,
-so test it by hand in the GUI via **Misc > Development > Run Script...**.
-Same for `CheckStationProperties.js`, which needs a selected entity.
+Behaviour that exists only as GUI interaction -- a dialog the user drives, or
+a command that acts on the current selection -- is not stubbed; the fidelity
+loss isn't worth it. Test those by hand in the GUI, via
+**Misc > Development > Run Script...** for a script that isn't installed yet.

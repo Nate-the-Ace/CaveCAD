@@ -1,9 +1,8 @@
 Cave Survey tools for CaveCAD -- version @VERSION@
 ==============================================================
 
-Six tools for drawing cave surveys in CaveCAD: plot a traverse by azimuth
-and distance, import survey files from Walls, Compass or Survex, fit a
-scanned map onto the drawing, derive passage walls from LRUD, scatter
+Tools for drawing cave surveys in CaveCAD: import survey files from
+Walls, Compass or Survex, fit a scanned map onto the drawing, scatter
 breakdown symbols, and georeference the finished map.
 
 To install, see INSTALL.txt. After a restart the tools are in the
@@ -14,10 +13,6 @@ command line.
 THE TOOLS
 ---------
 
-Azimuth Traverse                            azimuthtraverse, azt
-    Plots shots one at a time from typed azimuth, distance, inclination
-    and LRUD. Select an existing station first to carry on from it.
-
 Import Native Cave Survey                   importcavesurvey, ics
     Reads a Walls (.srv), Compass (.dat) or Survex (.svx) file directly
     and draws the centerline, stations and LRUD ticks.
@@ -27,10 +22,6 @@ Align Image                                 alignimage, ali
     scan and the two matching points in the drawing, and the scan is
     moved, rotated and resized so they line up exactly -- then you can
     trace passage walls off it. See docs/AlignImage.txt.
-
-LRUD Walls                                  lrudwalls
-    Draws approximate passage walls through the LRUD points left behind
-    by Azimuth Traverse.
 
 Scatter Breakdown                           scatterbreakdown, scb
     Fills closed BREAKDOWN-BOUNDARY polylines with randomized breakdown

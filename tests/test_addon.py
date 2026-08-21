@@ -328,8 +328,8 @@ class TestReadmeToolTable(unittest.TestCase):
 
     def test_every_tool_appears_in_the_readme_table(self):
         # ANY of a tool's aliases counts: the table documents the short
-        # form (`azt`) while setDefaultCommands lists the long one first
-        # ("azimuthtraverse"). Requiring the first alias specifically was
+        # form (`snb`) while setDefaultCommands lists the long one first
+        # ("surveynotebook"). Requiring the first alias specifically was
         # this test's own bug on its first run, not the README's.
         listed = self.readme_table_aliases()
         by_tool = self.aliases_by_tool()
