@@ -317,6 +317,76 @@ rather than merely green.
 
 ---
 
+### Task 1c: the bridge classifier must not be quadratic, and must not fabricate a path
+
+**Goal:** Fix the two blocking findings from the Task 1 code-quality review, plus two
+smaller honesty fixes it surfaced.
+
+The review measured the bridge classifier under Node/V8 with a chain-plus-closures
+survey:
+
+```
+n=500  shots=510  time=32ms
+n=1000 shots=1020 time=96ms
+n=2000 shots=2040 time=366ms
+n=4000 shots=4080 time=1501ms
+```
+
+Quadratic, and that is the *fast* engine. QCAD's script engine is older and non-JIT, so
+the ~100ms perceptible threshold arrives well under 1,000 shots, and `resolve()` runs on
+every redraw. Real cave projects reach 5,000-20,000 shots.
+
+**Files:**
+- Modify: `scripts/CaveSurvey/Core/CsNetwork.js`
+- Test: `tests/js_unit.js`
+
+**Acceptance Criteria:**
+- [ ] the bridge test runs only for shots that actually resolve as closures, not for
+      every usable shot — cost becomes O(k·m) with k = closure count
+- [ ] a 4,000-shot survey with a handful of loops resolves in well under 100ms under
+      node, measured and asserted as a loose upper bound so the quadratic cannot return
+      unnoticed
+- [ ] the classifier's verdicts are unchanged on all existing fixtures (square, tie,
+      there-and-back, two-fixed ring, ring+branch) — this is a performance change, not a
+      behavior change, and the existing assertions prove it
+- [ ] the two-root circuit no longer implies an adjacency that does not exist: `path`'s
+      join semantics are documented, and a consumer can tell where the circuit closes
+      through control rather than through a surveyed leg (a `viaControl` flag on the
+      loop record, or an equivalent the implementer judges cleaner)
+- [ ] `.path` contents are asserted for both the single-root and two-root cases — that
+      branch is currently untested
+- [ ] ties carry `percent: null`, matching the docstring's "no meaningful percent"; no
+      consumer formats it (check `CsReport`, `CsValidate`, `CsStats`, `CsRevise`)
+- [ ] a shot with `from === to` is SKIPPED, not scored as a 100%-blown loop
+- [ ] a direct double tie between two already-fixed anchors is tested
+
+**Verify:** `./tests/run_all.sh` → `ALL TESTS PASSED`
+
+**Why restriction rather than Tarjan.** A single-pass Tarjan low-link bridge finder is
+O(n+m) and asymptotically better, but it must track edge IDs rather than parent vertices
+to avoid mistaking a parallel leg for a back edge — and parallel legs (duplicate shots
+between one pair of stations) are ordinary in real survey data. The union-find test is
+already verified correct against four topologies; restricting it to closure candidates
+removes the quadratic without trading a verified classifier for an unverified one. k is
+the number of independent loops, and cave surveys are overwhelmingly tree-like: passages
+branch, closed loops are comparatively rare. Revisit only if a real survey shows k large
+enough to matter.
+
+**The self-loop case, with care.** `from === to` shots are not necessarily garbage: the
+Compass writer in this suite emits zero-length carrier shots to hang leaf-station LRUD
+on, and the parser folds them back. Any that reach the network should be skipped, which
+is what the `usable` filter is for. They must never be scored — a self-loop currently
+resolves as `kind: "loop"`, `percent: 100`, which fires the blunder warning for data
+that is not a blunder.
+
+**Known and deliberately NOT fixed here.** For a branched network, the parent chain back
+to a root is whatever the spanning tree happened to pick, so `percent`'s denominator can
+be a resolver artifact rather than the physical arc. This is pre-existing — the
+single-root case has always had it — and fixing it means choosing a canonical loop path,
+which is a design question, not a cleanup. Recorded so it is not mistaken for new.
+
+---
+
 ### Task 2: `CsAdjust.js` — the solver
 
 **Goal:** A pure Core module that takes a survey and its raw resolve result and returns a resolved-shaped object with adjusted coordinates, per-station shifts, per-leg residuals, and a summary.
