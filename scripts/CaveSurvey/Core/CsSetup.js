@@ -249,12 +249,19 @@ CsSetup.verify = function(prog, versionArgv) {
     // from here. Array.isArray is confirmed present in both node and
     // this engine's own QtScript bridge (CaveCAD 3.33.0).
     var argv = Array.isArray(versionArgv) ? versionArgv : ["--version"];
-    // typeof-guarded like every other cross-Core reference in this
-    // tree (CsBind.js, CsTags.js, CsRevise.js all guard the same way):
-    // this file loads before CsProc in CsAll.js's dependency order, so
-    // in practice this is always defined, but a load-order mistake
-    // should report through the documented shape, not a raw
-    // ReferenceError two frames from wherever the ladder called in.
+    // typeof-guarded, UNLIKE this file's other cross-Core references:
+    // discoverTools calls CsGit.argvVersion()/CsHub.argvVersion(),
+    // and ladder/identityPlan call CsHub.isAuthenticated,
+    // CsHub.noreplyEmail, CsGit.argvConfigSet and others, all with no
+    // guard at all. None of them NEED one: CsAll.js's dependency
+    // order and CORE_FILES's load order both guarantee CsProc, CsGit,
+    // and CsHub are all defined before any of this runs. This one
+    // guard is kept anyway, on the one function here most likely to
+    // be called directly by a future standalone test or script that
+    // does not go through that load order -- it costs one comparison
+    // and turns a load-order mistake into the documented
+    // {ok: false, ...} shape instead of a raw ReferenceError two
+    // frames from wherever the caller reached in.
     if (typeof CsProc === "undefined" || typeof CsProc.run !== "function") {
         return { ok: false, path: prog,
                  err: "CsProc is not available in this environment",
@@ -300,11 +307,17 @@ CsSetup.discover = function(name, versionArgv, system, existsFn) {
     return probe.notStarted ? null : bare;
 };
 
+// upgradeCommand is used only for gh (CsSetup.usageErrorRemedy) -- a
+// gh version mismatch is a real, distinct rung failure (see the
+// AUTH_CAUSE_USAGE_ERROR comment below), but there is no equivalent
+// "git version mismatch" state this ladder detects, so git's entries
+// omit the field rather than carry a value nothing reads.
 CsSetup.INSTALL_HELP = {
     osx: {
         git: { command: "xcode-select --install",
                links: ["https://git-scm.com/download/mac"] },
         gh: { command: "brew install gh",
+              upgradeCommand: "brew upgrade gh",
               links: ["https://cli.github.com/",
                       "https://github.com/cli/cli/releases/latest"] }
     },
@@ -312,14 +325,17 @@ CsSetup.INSTALL_HELP = {
         git: { command: "winget install -e --id Git.Git",
                links: ["https://git-scm.com/download/win"] },
         gh: { command: "winget install -e --id GitHub.cli",
+              upgradeCommand: "winget upgrade --id GitHub.cli",
               links: ["https://cli.github.com/"] }
     },
     linux: {
         git: { command: "sudo apt install git",
                links: ["https://git-scm.com/download/linux"] },
-        // No single command: gh's install path differs per distro
-        // (apt repo, dnf, snap, ...). Links carry the remedy instead.
+        // No single command: gh's install (or upgrade) path differs
+        // per distro (apt repo, dnf, snap, ...). Links carry the
+        // remedy instead -- see missingRemedy/usageErrorRemedy.
         gh: { command: "",
+              upgradeCommand: "",
               links: ["https://cli.github.com/",
                       "https://github.com/cli/cli/blob/trunk/docs/install_linux.md"] }
     }
@@ -355,8 +371,15 @@ CsSetup.installHelp = function(system, name) {
     // establishes the convention "never mutate the backend's own
     // record" for exactly this reason -- a caller pushing onto the
     // returned .links array would otherwise corrupt CsSetup.INSTALL_HELP
-    // for the rest of the process.
-    return { command: entry.command, links: entry.links.slice() };
+    // for the rest of the process. upgradeCommand defaults to "" for
+    // git's entries, which do not define one (see INSTALL_HELP's
+    // comment), so callers never see `undefined`.
+    return {
+        command: entry.command,
+        upgradeCommand: (typeof entry.upgradeCommand === "string")
+            ? entry.upgradeCommand : "",
+        links: entry.links.slice()
+    };
 };
 
 // ---------------------------------------------------------------------
@@ -390,25 +413,53 @@ CsSetup.discoverTools = function(system, existsFn) {
 // Device flow
 // ---------------------------------------------------------------------
 
-CsSetup.DEVICE_URL = "https://github.com/login/device";
+// Built from CsHub.HOST rather than a second literal "github.com" --
+// this file and CsHub.js used to each hardcode the host, two sources
+// of truth for the same fact with nothing keeping them in sync.
+CsSetup.DEVICE_URL = "https://" + CsHub.HOST + "/login/device";
 
-// gh prints "! First copy your one-time code: XXXX-XXXX". Which stream
-// it lands on is an implementation detail (confirmed for auth status
-// text in CsHub.textOf's fixtures), so callers concatenate both
-// streams before handing text here; this only cares about the shape.
+/**
+ * Pulls the one-time device code out of gh's login output. Returns
+ * null -- never a truncated or partial code -- when the shape is not
+ * there. Contrast parseDeviceUrl just below: that one degrades to a
+ * safe default on a miss, because it always has one to fall back to;
+ * this one has no safe substitute for a wrong code, so a miss must be
+ * visible as null, not a guess.
+ *
+ * gh prints "! First copy your one-time code: XXXX-XXXX". Which
+ * stream it lands on is an implementation detail (confirmed for auth
+ * status text in CsHub.textOf's fixtures), so callers concatenate
+ * both streams before handing text here; this only cares about the
+ * shape.
+ */
 CsSetup.parseDeviceCode = function(text) {
     if (typeof text !== "string" || text.length === 0) {
         return null;
     }
-    var m = text.match(/one-time code:\s*([A-Z0-9]{4}-[A-Z0-9]{4})/i);
+    // The trailing (?![A-Za-z0-9-]) is a boundary, not decoration: an
+    // XXXX-XXXX{4}-{4} match is a fixed length, so without it
+    // "one-time code: 1234-5678-9012" matched the first eight
+    // characters and silently returned "1234-5678" -- a real-looking
+    // code that is not the one gh printed. With the boundary, that
+    // input matches nothing (the trailing "-9012" fails it) and
+    // correctly returns null instead of a truncated guess.
+    var m = text.match(
+        /one-time code:\s*([A-Z0-9]{4}-[A-Z0-9]{4})(?![A-Za-z0-9-])/i);
     return m === null ? null : m[1].toUpperCase();
 };
 
+/**
+ * Pulls the device-login URL out of gh's login output, falling back
+ * SILENTLY to the canonical CsSetup.DEVICE_URL when the shape is not
+ * there -- the inverse error contract of parseDeviceCode just above,
+ * which returns null on a miss because it has no safe fallback value.
+ * A URL always has one: the canonical device URL never changes.
+ */
 CsSetup.parseDeviceUrl = function(text) {
     var s = (typeof text === "string") ? text : "";
     // Anchored on the HOST, not just "github.com appears somewhere in
-    // the URL": the previous "\S*" before the literal host spanned
-    // path/query characters too, so
+    // the URL": a prior version's greedy tail before the literal host
+    // spanned path/query characters too, so
     // "https://evil.io/r?u=github.com/login/device" matched and
     // returned the evil.io URL, and
     // "https://evil.github.com.attacker.io/login/device" matched too
@@ -417,11 +468,24 @@ CsSetup.parseDeviceUrl = function(text) {
     // attacker-controlled, so there is no live exploit today, but
     // "opens whatever URL was scraped" is the wrong shape regardless.
     // Requires: https literally, zero or more dot-terminated
-    // subdomain labels, then literally "github.com", then the path
+    // subdomain labels, then literally CsHub.HOST, then the path
     // starting at "/login/device" -- nothing else may sit between the
     // host and that path.
-    var m = s.match(
-        /https:\/\/([A-Za-z0-9-]+\.)*github\.com\/login\/device\S*/i);
+    //
+    // The trailing character class excludes whitespace and the
+    // punctuation that commonly WRAPS a url in prose or markup
+    // (<>"')].,;:!?) rather than being part of it -- a bare "\S*"
+    // here returned "https://github.com/login/device." or
+    // "...device)" with the sentence's own punctuation stuck to the
+    // end, which is a 404 nobody reading the ladder could diagnose.
+    // The canonical device URL has no path/query segment after
+    // "/login/device" at all, so excluding sentence punctuation from
+    // the tail cannot clip anything a real device URL would ever need.
+    var hostPattern = CsHub.HOST.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    var re = new RegExp(
+        "https://([A-Za-z0-9-]+\\.)*" + hostPattern +
+        "/login/device[^\\s<>\"')\\].,;:!?]*", "i");
+    var m = s.match(re);
     return m === null ? CsSetup.DEVICE_URL : m[0];
 };
 
@@ -435,10 +499,81 @@ CsSetup.parseDeviceUrl = function(text) {
 // flag we send" all produce that exact same shape. Collapsing them
 // into "not signed in" sends an offline surveyor, or one running a
 // gh version this add-on has not caught up with, into a sign-in loop
-// on a machine that was never broken.
+// on a machine that was never broken. `cause` exists so a caller can
+// branch on which one happened without re-parsing English out of the
+// remedy text -- id plus cause is a value a caller can switch on,
+// where a sentence is not.
 CsSetup.AUTH_CAUSE_USAGE_ERROR = "usage_error";
 CsSetup.AUTH_CAUSE_NETWORK_FAILURE = "network_failure";
 CsSetup.AUTH_CAUSE_NOT_AUTHENTICATED = "not_authenticated";
+
+// Where a caver actually types a command -- named explicitly because
+// "git was not found. Install it with: xcode-select --install" gives
+// a stranger no next action: nothing on screen accepts that text.
+CsSetup.runPrefix = function(sys) {
+    return (sys === "win") ? "In Command Prompt, run: " : "In Terminal, run: ";
+};
+
+// A real destination for "report this", not just "report this" with
+// nowhere to send it.
+CsSetup.GH_ISSUES_URL = "https://github.com/cli/cli/issues";
+
+/**
+ * The "it's missing, here's the fix" sentence for rungs 1 and 2.
+ *
+ * Handles gh on Linux, whose INSTALL_HELP command is deliberately
+ * empty (no single command covers every distro): a prior version
+ * fixed only the SEPARATOR for that case, not the verb, so it read
+ * "Install it with: <url> <url>" -- nothing installs anything WITH a
+ * link.
+ */
+CsSetup.missingRemedy = function(sys, subject, help) {
+    if (help.command.length > 0) {
+        return subject + " was not found. " + CsSetup.runPrefix(sys) +
+            help.command + "  --  see also: " + help.links.join("  ");
+    }
+    return subject + " was not found. Installing it depends on your " +
+        "Linux distribution -- see: " + help.links.join("  ");
+};
+
+/**
+ * The auth rung's usage_error remedy: gh rejected a flag this add-on
+ * sends, which is a version problem, not a login problem, so this
+ * names an upgrade command (from INSTALL_HELP's upgradeCommand) and a
+ * real place to report it -- never "update gh, or report this" with
+ * no command and no destination.
+ */
+CsSetup.usageErrorRemedy = function(sys) {
+    var help = CsSetup.installHelp(sys, "gh");
+    var fix = (help.upgradeCommand.length > 0)
+        ? CsSetup.runPrefix(sys) + help.upgradeCommand
+        : "upgrading it depends on your Linux distribution -- see: " +
+          help.links.join("  ");
+    return "This gh rejected a flag this add-on uses (--active). That " +
+        "is a gh version mismatch, not a login problem. " + fix +
+        "  --  or report it at " + CsSetup.GH_ISSUES_URL +
+        ". Signing in again will not fix this.";
+};
+
+/**
+ * "Blank" for a git-config-shaped value: not a string at all, or a
+ * string that has nothing left once whitespace is stripped.
+ *
+ * Shared by the ladder's identity rung and identityPlan (see
+ * identityPlan's own docblock) so the two cannot disagree about what
+ * counts as a set name/email. They used to: identityPlan accepted a
+ * merely non-empty user.name, so `{name: "   "}` produced a real
+ * `git config user.name "   "` command, while the ladder's identity
+ * rung used a truthiness-plus-String() check that ALSO reported
+ * success on garbage -- `String(undefined)` is `"undefined"`, nine
+ * non-whitespace characters, so `{userName: {code: 0}}` (no `out` at
+ * all) passed the very rung whose entire job is catching that.
+ * Sharing one predicate closes both: either it is genuinely blank
+ * everywhere, or it genuinely is not.
+ */
+CsSetup.isBlank = function(s) {
+    return typeof s !== "string" || s.replace(/\s/g, "").length === 0;
+};
 
 // ok === true  passed
 // ok === false failed, remedy (and, for the auth rung, cause) applies
@@ -447,17 +582,163 @@ CsSetup.AUTH_CAUSE_NOT_AUTHENTICATED = "not_authenticated";
 //              the surveyor after three problems that are one problem.
 // cause is null unless a rung distinguishes more than one failure
 // mode that would otherwise read as the same thing (only the auth
-// rung does, for now) -- it lets a caller branch without re-parsing
-// the remedy text.
+// rung does, for now). typeof-guarded like `remedy` just above it --
+// the same field on the same function had two different standards
+// until this changed, remedy validated and cause passed through raw.
 CsSetup.rung = function(id, label, ok, remedy, cause) {
     return {
         id: id,
         label: label,
         ok: ok,
         remedy: (typeof remedy === "string") ? remedy : "",
-        cause: (cause === undefined) ? null : cause
+        cause: (typeof cause === "string") ? cause : null
     };
 };
+
+/**
+ * The six rungs, id/label single-sourced here and nowhere else.
+ *
+ * Each entry's evaluate(p, sys) runs ONLY when every earlier rung
+ * passed (see CsSetup.ladder's driver loop) and returns {ok, remedy,
+ * cause} -- remedy/cause are only read when ok === false. This table
+ * plus the loop replaced six near-identical hand-written blocks that
+ * each repeated blocked-checking, id and label literals (19 label
+ * occurrences and 21 id occurrences across the six, before this
+ * change) -- enough duplication that a typo in one copy produced a
+ * label that depended on which failure path ran. It also made "does
+ * this rung set blocked on failure" a per-block decision instead of a
+ * property of the table: rung 6 (identity) was the one block that
+ * never set it, which was invisible only because it happened to be
+ * last. A rung appended after it would have silently run and
+ * reported under a failed identity rung -- the exact defect this
+ * ladder exists to prevent -- with no test catching it, since nothing
+ * downstream of rung 6 existed to be wrong. The driver loop now owns
+ * `blocked` exactly once, so that failure mode cannot recur no matter
+ * how many rungs are added.
+ */
+CsSetup.RUNGS = [
+    {
+        id: "git",
+        label: "git installed",
+        evaluate: function(p, sys) {
+            // typeof + length, never truthiness: a bare `if (p.gitPath)`
+            // accepts `1`, `true`, `{}`, or `" "` as "installed", and
+            // that value becomes a CsProc.run PROGRAM argument in
+            // Task 6 -- the same truthiness-plus-coercion class closed
+            // in CsHub and briefly reopened here.
+            if (typeof p.gitPath === "string" && p.gitPath.length > 0) {
+                return { ok: true };
+            }
+            return { ok: false, remedy: CsSetup.missingRemedy(
+                sys, "git", CsSetup.installHelp(sys, "git")) };
+        }
+    },
+    {
+        id: "gh",
+        label: "GitHub CLI installed",
+        evaluate: function(p, sys) {
+            if (typeof p.ghPath === "string" && p.ghPath.length > 0) {
+                return { ok: true };
+            }
+            return { ok: false, remedy: CsSetup.missingRemedy(
+                sys, "The GitHub CLI", CsSetup.installHelp(sys, "gh")) };
+        }
+    },
+    {
+        id: "auth",
+        label: "Signed in to GitHub",
+        evaluate: function(p, sys) {
+            // Three exit-1-empty-stdout failures share one signal (see
+            // the AUTH_CAUSE_* comment above): check the two
+            // diagnosable causes BEFORE concluding "not signed in",
+            // because that conclusion drives a surveyor into
+            // `gh auth login` -- which fixes nothing for an offline
+            // machine or a gh version mismatch, and looks like it
+            // worked (login succeeds) while the underlying rung stays
+            // broken for the SAME reason next time.
+            if (CsHub.isAuthenticated(p.authStatus)) {
+                return { ok: true };
+            }
+            if (CsHub.isUsageError(p.authStatus)) {
+                return { ok: false, remedy: CsSetup.usageErrorRemedy(sys),
+                         cause: CsSetup.AUTH_CAUSE_USAGE_ERROR };
+            }
+            if (CsHub.isNetworkFailure(p.authStatus)) {
+                return { ok: false,
+                    remedy: "Could not reach GitHub. This looks like a " +
+                        "network problem, not a login problem -- check " +
+                        "your internet connection. Authenticating again " +
+                        "will not fix a machine that is offline.",
+                    cause: CsSetup.AUTH_CAUSE_NETWORK_FAILURE };
+            }
+            return { ok: false,
+                remedy: "Not signed in. Use Sign in to GitHub -- it " +
+                    "opens your browser and no password passes through " +
+                    "CaveCAD.",
+                cause: CsSetup.AUTH_CAUSE_NOT_AUTHENTICATED };
+        }
+    },
+    {
+        id: "scope",
+        label: "Token can see private repositories",
+        evaluate: function(p, sys) {
+            if (CsHub.hasRepoScope(p.authStatus)) {
+                return { ok: true };
+            }
+            return { ok: false,
+                remedy: "This token lacks the 'repo' scope, so a " +
+                    "private cave repository returns 404 -- it looks " +
+                    "as though it does not exist. " +
+                    CsSetup.runPrefix(sys) + "gh auth refresh -s repo" };
+        }
+    },
+    {
+        id: "helper",
+        label: "git can authenticate to GitHub",
+        evaluate: function(p, sys) {
+            // READ-ONLY check: probe.credentialHelper comes from
+            // `git config --get-regexp ^credential`, not from RUNNING
+            // `gh auth setup-git` -- that command CONFIGURES the
+            // helper, so testing via it would make the diagnostic
+            // itself the mutation (a prior version did exactly this;
+            // see docs commit ddccee7). ANY helper passes, not just
+            // gh's own: osxkeychain, manager, store, or gh's helper
+            // all mean git can authenticate. `gh auth setup-git`
+            // remains available below as a user-INITIATED remedy.
+            var ch = p.credentialHelper;
+            if (ch && ch.code === 0 && !CsSetup.isBlank(ch.out)) {
+                return { ok: true };
+            }
+            return { ok: false,
+                remedy: "git has no credential helper, so an HTTPS " +
+                    "push waits for a password prompt on a terminal " +
+                    "that does not exist -- it hangs rather than " +
+                    "failing. " + CsSetup.runPrefix(sys) +
+                    "gh auth setup-git" };
+        }
+    },
+    {
+        id: "identity",
+        label: "Commit name and email set",
+        evaluate: function(p, sys) {
+            // isBlank, never truthiness-plus-String(): String(undefined)
+            // is "undefined" and String(null) is "null", both nine
+            // non-whitespace characters, so a probe with no `out` at
+            // all (or a non-string `out`) reported "identity set" on
+            // this rung until isBlank replaced the bare String() call.
+            var haveName = p.userName && p.userName.code === 0 &&
+                !CsSetup.isBlank(p.userName.out);
+            var haveEmail = p.userEmail && p.userEmail.code === 0 &&
+                !CsSetup.isBlank(p.userEmail.out);
+            if (haveName && haveEmail) {
+                return { ok: true };
+            }
+            return { ok: false,
+                remedy: "git has no commit identity, so a commit " +
+                    "refuses to run. Set it from your GitHub account." };
+        }
+    }
+];
 
 CsSetup.ladder = function(probe, system) {
     // A missing/non-object probe must read as "nothing discovered
@@ -471,109 +752,21 @@ CsSetup.ladder = function(probe, system) {
     var rungs = [];
     var blocked = false;
 
-    function skip(id, label) {
-        rungs.push(CsSetup.rung(id, label, null, ""));
-    }
-
-    // 1. git
-    var gitHelp = CsSetup.installHelp(sys, "git");
-    if (p.gitPath) {
-        rungs.push(CsSetup.rung("git", "git installed", true));
-    } else {
-        rungs.push(CsSetup.rung("git", "git installed", false,
-            "git was not found. Install it with: " + gitHelp.command +
-            "  --  " + gitHelp.links.join(" ")));
-        blocked = true;
-    }
-
-    // 2. gh
-    var ghHelp = CsSetup.installHelp(sys, "gh");
-    if (blocked) {
-        skip("gh", "GitHub CLI installed");
-    } else if (p.ghPath) {
-        rungs.push(CsSetup.rung("gh", "GitHub CLI installed", true));
-    } else {
-        rungs.push(CsSetup.rung("gh", "GitHub CLI installed", false,
-            "The GitHub CLI was not found. Install it with: " +
-            (ghHelp.command.length > 0 ? ghHelp.command + "  --  " : "") +
-            ghHelp.links.join(" ")));
-        blocked = true;
-    }
-
-    // 3. authenticated
-    //
-    // Three exit-1-empty-stdout failures share one signal (see the
-    // AUTH_CAUSE_* comment above): check the two diagnosable causes
-    // BEFORE concluding "not signed in", because that conclusion
-    // drives a surveyor into `gh auth login` -- which fixes nothing
-    // for an offline machine or a gh version mismatch, and looks like
-    // it worked (login succeeds) while the underlying rung stays
-    // broken for the SAME reason next time.
-    if (blocked) {
-        skip("auth", "Signed in to GitHub");
-    } else if (CsHub.isAuthenticated(p.authStatus)) {
-        rungs.push(CsSetup.rung("auth", "Signed in to GitHub", true));
-    } else if (CsHub.isUsageError(p.authStatus)) {
-        rungs.push(CsSetup.rung("auth", "Signed in to GitHub", false,
-            "This gh rejected a flag this add-on uses (--active). That " +
-            "is a gh version mismatch, not a login problem -- update " +
-            "gh, or report this, rather than trying to authenticate again.",
-            CsSetup.AUTH_CAUSE_USAGE_ERROR));
-        blocked = true;
-    } else if (CsHub.isNetworkFailure(p.authStatus)) {
-        rungs.push(CsSetup.rung("auth", "Signed in to GitHub", false,
-            "Could not reach GitHub. This looks like a network problem, " +
-            "not a login problem -- check your internet connection. " +
-            "Authenticating again will not fix a machine that is offline.",
-            CsSetup.AUTH_CAUSE_NETWORK_FAILURE));
-        blocked = true;
-    } else {
-        rungs.push(CsSetup.rung("auth", "Signed in to GitHub", false,
-            "Not signed in. Use Sign in to GitHub below -- it opens your " +
-            "browser and no password passes through CaveCAD.",
-            CsSetup.AUTH_CAUSE_NOT_AUTHENTICATED));
-        blocked = true;
-    }
-
-    // 4. repo scope
-    if (blocked) {
-        skip("scope", "Token can see private repositories");
-    } else if (CsHub.hasRepoScope(p.authStatus)) {
-        rungs.push(CsSetup.rung("scope", "Token can see private repositories", true));
-    } else {
-        rungs.push(CsSetup.rung("scope", "Token can see private repositories", false,
-            "This token lacks the 'repo' scope, so a private cave repository " +
-            "returns 404 -- it looks as though it does not exist. Fix with: " +
-            "gh auth refresh -s repo"));
-        blocked = true;
-    }
-
-    // 5. credential helper
-    if (blocked) {
-        skip("helper", "git can authenticate to GitHub");
-    } else if (p.setupGit && p.setupGit.code === 0) {
-        rungs.push(CsSetup.rung("helper", "git can authenticate to GitHub", true));
-    } else {
-        rungs.push(CsSetup.rung("helper", "git can authenticate to GitHub", false,
-            "git has no credential helper, so a push waits forever for a " +
-            "password prompt that never appears. Fix with: gh auth setup-git"));
-        blocked = true;
-    }
-
-    // 6. identity
-    if (blocked) {
-        skip("identity", "Commit name and email set");
-    } else {
-        var haveName = p.userName && p.userName.code === 0 &&
-            String(p.userName.out).replace(/\s/g, "").length > 0;
-        var haveEmail = p.userEmail && p.userEmail.code === 0 &&
-            String(p.userEmail.out).replace(/\s/g, "").length > 0;
-        if (haveName && haveEmail) {
-            rungs.push(CsSetup.rung("identity", "Commit name and email set", true));
-        } else {
-            rungs.push(CsSetup.rung("identity", "Commit name and email set", false,
-                "git has no commit identity, so a commit refuses to run. " +
-                "Set it from your GitHub account below."));
+    for (var i = 0; i < CsSetup.RUNGS.length; i++) {
+        var r = CsSetup.RUNGS[i];
+        if (blocked) {
+            // Reporting a specific failure ("not authenticated")
+            // under an EARLIER one ("gh is not installed") sends the
+            // surveyor after three problems that are one problem, so
+            // an unevaluated rung gets ok === null, never false or
+            // true, and no remedy or cause.
+            rungs.push(CsSetup.rung(r.id, r.label, null, ""));
+            continue;
+        }
+        var res = r.evaluate(p, sys);
+        rungs.push(CsSetup.rung(r.id, r.label, res.ok, res.remedy, res.cause));
+        if (res.ok === false) {
+            blocked = true;
         }
     }
 
@@ -589,7 +782,10 @@ CsSetup.firstFailure = function(rungs) {
         return null;
     }
     for (var i = 0; i < rungs.length; i++) {
-        if (rungs[i].ok === false) {
+        // rungs[i] itself, not just its .ok field: a malformed array
+        // (e.g. [null]) must read the same as "no failure known"
+        // rather than throw on `null.ok`.
+        if (rungs[i] && rungs[i].ok === false) {
             return rungs[i];
         }
     }
@@ -597,32 +793,25 @@ CsSetup.firstFailure = function(rungs) {
 };
 
 /**
- * Returns argv arrays for setting the commit identity, or [] when any
- * field needed to build them is not trustworthy.
+ * Returns argv arrays for setting the commit identity, or [] --
+ * ALL-OR-NOTHING -- when any input is not trustworthy, so a caller
+ * checking `plan.length === 2` can actually trust that as success.
  *
  * LOCAL by default: silently rewriting a developer's global git
  * identity is an overreach, and this add-on runs on machines that do
  * other work.
  *
- * ALL-OR-NOTHING, deliberately: this used to return a length-2 plan
- * even when CsHub.noreplyEmail(user) came back null (an invalid id --
- * e.g. parseApiUser passing a partial gh response straight through),
- * because the two argv arrays were built unconditionally. A caller
- * checking `plan.length === 2` read that as success and ran it --
- * confirmed live in the real engine that a null argv element coerces
- * to an empty string, so the command that actually executed was
- * `git config user.email ""`, silently wiping the repository's
- * committer address. A partial plan is worse than none, because a
- * caller cannot tell it apart from a good one; parseApiUser has since
- * been fixed to reject a bad id at the source (CsHub.isValidId), but
- * this function no longer trusts that alone -- it checks its own
- * inputs before building anything.
+ * `user.name`'s blank check (CsSetup.isBlank) is the SAME predicate
+ * the ladder's identity rung uses -- see isBlank's own docblock for
+ * why they must agree: a whitespace-only name that passes one check
+ * but not the other produces a fix button that runs a real command
+ * and then reports failure anyway, forever.
  */
 CsSetup.identityPlan = function(user, global) {
-    if (!user || typeof user.login !== "string" || user.login.length === 0) {
+    if (!user || !CsHub.isValidLogin(user.login)) {
         return [];
     }
-    if (typeof user.name !== "string" || user.name.length === 0) {
+    if (CsSetup.isBlank(user.name)) {
         return [];
     }
     var email = CsHub.noreplyEmail(user);

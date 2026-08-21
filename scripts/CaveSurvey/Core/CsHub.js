@@ -224,14 +224,40 @@ CsHub.isValidId = function(id) {
             Number(id) <= MAX_ID);
 };
 
+/**
+ * True for exactly the shapes GitHub itself allows as a login: 1-39
+ * characters, alphanumeric, hyphens allowed but never leading,
+ * trailing, or doubled (the lookahead requires an alphanumeric right
+ * after every hyphen). Verified against real logins via read-only gh
+ * calls on 2026-08-21 -- `gh api user` (ndschonegg) and
+ * `gh api repos/cli/cli --jq .owner.login` / `gh api orgs/cli`
+ * (cli) -- plus octocat and torvalds via `gh api users/<login>`, all
+ * five matching.
+ *
+ * Shared by parseApiUser and noreplyEmail, the same reason isValidId
+ * is: `login` and `id` come from the same JSON response and land in
+ * the same permanent committer address, so a length-only check on one
+ * and a real validator on the other let a login of "  " (two spaces)
+ * or "nd\n--global" reach `git config user.email` as-is --
+ * "5+  @users.noreply.github.com" and
+ * "5+nd\n--global@users.noreply.github.com" respectively, the second
+ * of which is an embedded argv-shaped string riding along inside a
+ * value CsGit.argvConfigSet treats as one opaque argument (CsProc's
+ * argv-array discipline stops it from becoming a second shell
+ * argument, but it is still not a login GitHub would ever issue).
+ * Validating the actual shape, not just non-emptiness, closes both.
+ */
+CsHub.isValidLogin = function(s) {
+    return typeof s === "string" &&
+        /^[A-Za-z0-9](?:[A-Za-z0-9]|-(?=[A-Za-z0-9])){0,38}$/.test(s);
+};
+
 CsHub.parseApiUser = function(r) {
     var j = CsHub.parseJson(r);
-    // typeof, not truthiness, and no String() coercion of an
-    // unvalidated shape: the old `!j.login` + `String(j.login)` let
-    // {"login":["x"]} silently through as "x", and threw outright on
-    // {"login":{"toString":1}} -- the same class of bug parseVisibility
-    // had. gh's login is always a plain non-empty string.
-    if (j === null || typeof j.login !== "string" || j.login.length === 0) {
+    // isValidLogin, not a bare typeof+length check: see its own
+    // docblock for why a login of "  " or one containing control
+    // characters must not travel any further than this parse.
+    if (j === null || !CsHub.isValidLogin(j.login)) {
         return null;
     }
     // id is validated HERE, at the source, with the exact rule
@@ -259,19 +285,17 @@ CsHub.parseApiUser = function(r) {
  * commit -- which is permanent in history and readable by every
  * collaborator added later.
  *
- * `login` and `id` are both typeof-gated, not truthiness-checked: a
- * missing/undefined/null/NaN/malformed value (e.g. from a partial gh
- * api user response, or a login that is an array or object) must not
- * silently stringify into a bogus but well-formed-looking address
- * like "undefined+x@users.noreply.github.com" or
- * "1+[object Object]@users.noreply.github.com" -- a wrong committer
- * address is unfixable once it is in history, same as the real-email
- * leak this function exists to prevent. id validity is delegated to
- * CsHub.isValidId, shared with parseApiUser, so the two cannot
- * disagree.
+ * `login` and `id` validity are both delegated to shared validators
+ * (CsHub.isValidLogin, CsHub.isValidId) also used by parseApiUser, so
+ * the two cannot disagree about what is safe to put in a committer
+ * address: a missing/undefined/null/NaN/malformed id, or a login that
+ * is merely non-empty rather than a real GitHub login shape, must not
+ * silently stringify into a bogus but well-formed-looking address --
+ * a wrong committer address is unfixable once it is in history, same
+ * as the real-email leak this function exists to prevent.
  */
 CsHub.noreplyEmail = function(user) {
-    if (!user || typeof user.login !== "string" || user.login.length === 0) {
+    if (!user || !CsHub.isValidLogin(user.login)) {
         return null;
     }
     if (!CsHub.isValidId(user.id)) {

@@ -6275,6 +6275,65 @@ ok(CsHub.noreplyEmail({ login: true, id: 1 }) === null,
     "noreplyEmail rejects a boolean login " +
     "(was \"1+true@users.noreply.github.com\")");
 
+// Spec review, moderate finding: login got a bare length check while
+// id got a shared validator, even though both come from the same JSON
+// and land in the same permanent committer address. Probed live:
+// noreplyEmail({login:"  ", id:5, ...}) used to return
+// "5+  @users.noreply.github.com", and
+// noreplyEmail({login:"nd\n--global", id:5, ...}) used to return
+// "5+nd\n--global@users.noreply.github.com" -- neither a login GitHub
+// would ever issue. CsHub.isValidLogin closes both, applied wherever
+// noreplyEmail's `login.length === 0` check used to be the only gate.
+//
+// isValidLogin's regex verified against REAL logins via read-only gh
+// calls on 2026-08-21: `gh api user --jq .login` (ndschonegg),
+// `gh api repos/cli/cli --jq .owner.login` and `gh api orgs/cli --jq
+// .login` (cli), `gh api users/octocat --jq .login` (octocat), and
+// `gh api users/torvalds --jq .login` (torvalds, to confirm a login
+// with no hyphen or digit at all also matches). All five did.
+ok(CsHub.isValidLogin("ndschonegg") === true,
+    "isValidLogin accepts a real login, captured via gh api user");
+ok(CsHub.isValidLogin("cli") === true,
+    "isValidLogin accepts a real 3-character org login, captured via " +
+    "gh api repos/cli/cli and gh api orgs/cli");
+ok(CsHub.isValidLogin("octocat") === true &&
+    CsHub.isValidLogin("torvalds") === true,
+    "isValidLogin accepts two more real logins, captured via gh api users/<login>");
+ok(CsHub.isValidLogin("cli-cli") === true,
+    "isValidLogin accepts an internal hyphen");
+ok(CsHub.isValidLogin("  ") === false,
+    "isValidLogin rejects whitespace-only -- the exact live-probed " +
+    "regression: noreplyEmail used to build " +
+    "\"5+  @users.noreply.github.com\" from this");
+ok(CsHub.isValidLogin("nd\n--global") === false,
+    "isValidLogin rejects a login carrying a newline and flag-shaped " +
+    "text -- the other live-probed regression");
+ok(CsHub.isValidLogin("-nd") === false, "isValidLogin rejects a leading hyphen");
+ok(CsHub.isValidLogin("nd-") === false, "isValidLogin rejects a trailing hyphen");
+ok(CsHub.isValidLogin("nd--gg") === false, "isValidLogin rejects a doubled hyphen");
+ok(CsHub.isValidLogin("") === false, "isValidLogin rejects an empty string");
+ok(CsHub.isValidLogin(new Array(40).join("a")) === true,
+    "isValidLogin accepts a login AT GitHub's 39-character maximum " +
+    "(new Array(40).join('a') is 39 a's)");
+ok(CsHub.isValidLogin(new Array(41).join("a")) === false,
+    "isValidLogin rejects a login past GitHub's 39-character maximum " +
+    "(new Array(41).join('a') is 40 a's)");
+ok(CsHub.isValidLogin(null) === false && CsHub.isValidLogin(undefined) === false &&
+   CsHub.isValidLogin(123) === false && CsHub.isValidLogin(["nd"]) === false,
+    "isValidLogin rejects every non-string shape without throwing");
+
+ok(CsHub.noreplyEmail({ login: "  ", id: 5 }) === null,
+    "noreplyEmail rejects a whitespace-only login, the live-probed case");
+ok(CsHub.noreplyEmail({ login: "nd\n--global", id: 5 }) === null,
+    "noreplyEmail rejects a login containing a newline, the other " +
+    "live-probed case");
+ok(CsHub.parseApiUser(
+    { code: 0, out: '{"login":"  ","id":5}', err: "" }) === null,
+    "parseApiUser rejects a whitespace-only login at the source too");
+ok(CsHub.parseApiUser(
+    { code: 0, out: '{"login":"nd\\n--global","id":5}', err: "" }) === null,
+    "parseApiUser rejects a login containing a newline at the source too");
+
 var u = CsHub.parseApiUser({ code: 0, out: API_USER_REAL, err: "" });
 ok(u.login === "ndschonegg" && u.id === 307531413 &&
     u.name === "Nathan Schonegg",
@@ -6823,6 +6882,15 @@ ok(CsSetup.parseDeviceCode(
     "one-time code: AAAA-1111\nsomething else\none-time code: BBBB-2222") ===
     "AAAA-1111",
     "parseDeviceCode returns the FIRST code when the text contains two");
+// Minor: there was no boundary after the code, so a longer code-shaped
+// run of characters silently truncated to the first 4-4 chunk instead
+// of being rejected as not the shape gh actually prints.
+ok(CsSetup.parseDeviceCode("one-time code: 1234-5678-9012") === null,
+    "parseDeviceCode returns null rather than silently truncating a " +
+    "longer code-shaped run to its first 8 characters");
+ok(CsSetup.parseDeviceCode("one-time code: ABCD-1234X") === null,
+    "parseDeviceCode returns null when an extra character follows the " +
+    "code directly, rather than matching just the first 9");
 
 ok(CsSetup.parseDeviceUrl(GH_DEVICE_OUT) === "https://github.com/login/device",
     "parseDeviceUrl reads the device URL");
@@ -6854,6 +6922,25 @@ ok(CsSetup.parseDeviceUrl("http://github.com/login/device") ===
 ok(CsSetup.parseDeviceUrl("https://foo.github.com/login/device") ===
     "https://foo.github.com/login/device",
     "parseDeviceUrl still accepts a genuine *.github.com subdomain");
+// Minor: a bare "\S*" tail included whatever punctuation happened to
+// be WRAPPING the URL in the surrounding prose or markup, not part of
+// the URL itself -- "...device." or "...device)" reached
+// QDesktopServices.openUrl with the sentence's own punctuation stuck
+// on, which is a 404 nobody reading the ladder could diagnose.
+ok(CsSetup.parseDeviceUrl(
+    "Open this URL to continue: https://github.com/login/device.") ===
+    "https://github.com/login/device",
+    "parseDeviceUrl drops a trailing sentence-ending period");
+ok(CsSetup.parseDeviceUrl(
+    "(see https://github.com/login/device)") ===
+    "https://github.com/login/device",
+    "parseDeviceUrl drops a trailing closing parenthesis picked up " +
+    "from surrounding prose");
+ok(CsSetup.parseDeviceUrl(
+    "<a href=\"https://github.com/login/device\">link</a>") ===
+    "https://github.com/login/device",
+    "parseDeviceUrl drops a trailing closing quote and angle bracket " +
+    "from surrounding markup");
 
 // The ladder. Each rung is fed a canned command result, so no process
 // runs and no network is touched. gitPath/ghPath are pre-resolved
@@ -6865,7 +6952,15 @@ function ladderWith(over) {
         gitPath: "/usr/bin/git",
         ghPath: "/opt/homebrew/bin/gh",
         authStatus: { code: 0, out: AUTH_OK, err: "" },
-        setupGit: { code: 0, out: "", err: "" },
+        // credentialHelper, not setupGit: the earlier probe RAN
+        // `gh auth setup-git` to test the helper, but that command
+        // CONFIGURES it -- the check was the mutation, so merely
+        // opening the setup dialog would have rewritten the user's
+        // git config (docs commit ddccee7). This is now the
+        // READ-ONLY `git config --get-regexp ^credential`, and ANY
+        // helper passes, not just gh's own -- osxkeychain here.
+        credentialHelper: { code: 0, out: "credential.helper osxkeychain\n",
+                             err: "" },
         userName: { code: 0, out: "Nathan Schonegg\n", err: "" },
         userEmail: { code: 0, out: "1+n@users.noreply.github.com\n", err: "" }
     };
@@ -6906,9 +7001,55 @@ ok(noGh[2].cause === null,
     "a missing gh must not ALSO report a cause for a check that never ran");
 ok(CsSetup.firstFailure(noGh).id === "gh", "firstFailure names the gh rung");
 
+// Rung 1's remedy names a real place to type the command -- a
+// stranger reading "git was not found. Install it with:
+// xcode-select --install" has no next action otherwise, since
+// nothing on screen accepts that text.
 var noGit = ladderWith({ gitPath: null });
 ok(noGit[0].ok === false, "missing git fails rung 1");
 ok(noGit[1].ok === null, "nothing after a missing git is evaluated");
+ok(noGit[0].remedy.indexOf("xcode-select --install") !== -1,
+    "rung 1's remedy (osx) names the actual command, xcode-select --install");
+ok(noGit[0].remedy.indexOf("In Terminal, run:") !== -1,
+    "rung 1's remedy (osx) says WHERE to type it");
+
+// Spec review, item 1 (the false green): truthiness-plus-String()
+// crept back in via `if (p.gitPath)`/`if (p.ghPath)` -- a bare
+// truthy value like `1`, `true`, or `" "` passed, and that value
+// becomes a CsProc.run PROGRAM argument in Task 6. Both are now
+// typeof-and-length gated.
+ok(CsSetup.ladder({ gitPath: 1, ghPath: "/opt/homebrew/bin/gh",
+    authStatus: { code: 0, out: AUTH_OK, err: "" } }, "osx")[0].ok === false,
+    "rung 1 rejects a truthy non-string gitPath (was accepted before " +
+    "the typeof+length fix)");
+ok(CsSetup.ladder({ gitPath: "/usr/bin/git", ghPath: true }, "osx")[1].ok ===
+    false,
+    "rung 2 rejects a truthy non-string ghPath the same way");
+
+// Item 2: gh's Linux remedy is a broken sentence when INSTALL_HELP's
+// command is deliberately empty (no single command covers every
+// distro) -- a prior version fixed only the separator, not the verb,
+// producing "Install it with: <url> <url>" (nothing installs
+// anything WITH a link). Every ladder() call elsewhere in this suite
+// passes "osx", so this branch was previously untested entirely.
+var noGhLinux = CsSetup.ladder({ gitPath: "/usr/bin/git", ghPath: null },
+    "linux");
+ok(noGhLinux[1].ok === false, "missing gh fails its rung on linux too");
+ok(noGhLinux[1].remedy.toLowerCase().indexOf("install it with:") === -1,
+    "linux's gh remedy does NOT say \"install it with\" a bare URL -- " +
+    "you cannot install anything WITH a link");
+ok(noGhLinux[1].remedy.indexOf("cli.github.com") !== -1 &&
+   noGhLinux[1].remedy.indexOf("install_linux.md") !== -1,
+    "linux's gh remedy still carries both install links");
+ok(noGhLinux[1].remedy.toLowerCase().indexOf("distribution") !== -1,
+    "linux's gh remedy explains WHY there is no single command");
+
+var noGitWin = CsSetup.ladder({ gitPath: null }, "win");
+ok(noGitWin[0].ok === false, "missing git fails its rung on win too");
+ok(noGitWin[0].remedy.indexOf("In Command Prompt, run:") !== -1,
+    "win's remedy says \"In Command Prompt\", not \"In Terminal\"");
+ok(noGitWin[0].remedy.indexOf("winget install -e --id Git.Git") !== -1,
+    "win's git remedy names the actual winget command");
 
 var loggedOut = ladderWith({
     authStatus: { code: 1, out: "", err: AUTH_LOGGED_OUT_ERR } });
@@ -6917,6 +7058,9 @@ ok(loggedOut[2].cause === "not_authenticated",
     "a genuine logout carries the not_authenticated cause");
 ok(loggedOut[2].remedy.toLowerCase().indexOf("sign in") !== -1,
     "the genuine-logout remedy DOES send the surveyor to sign in");
+ok(loggedOut[2].remedy.toLowerCase().indexOf("below") === -1,
+    "the genuine-logout remedy does not assert GUI geography (\"below\") " +
+    "that this Core file has no way to know exists");
 ok(loggedOut[3].ok === null, "scope is not evaluated when logged out");
 
 // The known-live measurement this task exists to fix: a usage error
@@ -6934,19 +7078,28 @@ ok(usageErrorAuth[2].cause === "usage_error",
 // "Run: gh auth login" would have passed both checks unnoticed. Also
 // reject that literal phrase, and -- since a negative-only guard
 // passes just as well for a remedy that says NOTHING -- assert
-// something POSITIVE the remedy must contain: it names the actual
-// fix (update gh) rather than a login flow.
+// something POSITIVE the remedy must contain: a real upgrade command
+// AND a real destination to report it, not "update gh, or report
+// this" naming neither.
 ok(usageErrorAuth[2].remedy.toLowerCase().indexOf("sign in") === -1 &&
    usageErrorAuth[2].remedy.toLowerCase().indexOf("log in") === -1 &&
    usageErrorAuth[2].remedy.toLowerCase().indexOf("auth login") === -1,
     "the usage-error remedy does NOT send the surveyor to (re-)authenticate " +
     "(and does not merely avoid the words while still naming the command)");
-ok(usageErrorAuth[2].remedy.toLowerCase().indexOf("update") !== -1 &&
-    usageErrorAuth[2].remedy.indexOf("gh") !== -1,
-    "the usage-error remedy POSITIVELY says to update gh -- a remedy " +
-    "that said nothing at all would pass the negative check above too");
+ok(usageErrorAuth[2].remedy.indexOf("brew upgrade gh") !== -1,
+    "the usage-error remedy (osx) names the actual upgrade command");
+ok(usageErrorAuth[2].remedy.indexOf(CsSetup.GH_ISSUES_URL) !== -1,
+    "the usage-error remedy names a real place to report it -- a remedy " +
+    "that said nothing at all would still pass the negative check above");
 ok(usageErrorAuth[3].ok === null,
     "scope is still not evaluated after a usage error");
+
+var usageErrorAuthWin = CsSetup.ladder({
+    gitPath: "/usr/bin/git", ghPath: "gh.exe",
+    authStatus: { code: 1, out: "", err: USAGE_ERROR_ERR } }, "win");
+ok(usageErrorAuthWin[2].remedy.indexOf("winget upgrade --id GitHub.cli") !== -1,
+    "the usage-error remedy (win) names the winget upgrade command, " +
+    "not the osx brew one");
 
 var offlineAuth = ladderWith({
     authStatus: { code: 1, out: "", err: NETWORK_FAILURE_ERR } });
@@ -6972,12 +7125,79 @@ ok(thinScope[3].remedy.indexOf("auth refresh") !== -1,
     "the scope remedy is gh auth refresh");
 ok(thinScope[3].remedy.indexOf("404") !== -1,
     "the scope remedy explains the 404 symptom");
+ok(thinScope[3].remedy.indexOf("In Terminal, run:") !== -1,
+    "the scope remedy also says where to type the command");
 
-var noHelper = ladderWith({ setupGit: { code: 1, out: "", err: "no hosts" } });
-ok(noHelper[4].ok === false, "a failed setup-git fails the helper rung");
+// Item 8: rung 5 must read the RENAMED, READ-ONLY probe field.
+// gh auth setup-git remains available as a user-INITIATED remedy
+// (named in the failure text below), never something the probe itself
+// runs -- running it IS configuring the helper, which would make
+// opening the ladder dialog silently rewrite the user's git config.
+var noHelper = ladderWith(
+    { credentialHelper: { code: 1, out: "", err: "" } });
+ok(noHelper[4].ok === false, "a failed credential-helper read fails the helper rung");
+ok(noHelper[4].remedy.indexOf("gh auth setup-git") !== -1,
+    "the helper remedy names the actual fix, gh auth setup-git");
+ok(noHelper[4].remedy.indexOf("In Terminal, run:") !== -1,
+    "the helper remedy also says where to type it");
+var noHelperBlank = ladderWith(
+    { credentialHelper: { code: 0, out: "", err: "" } });
+ok(noHelperBlank[4].ok === false,
+    "exit 0 with EMPTY output still fails -- no credential.* line means " +
+    "no configured helper, regardless of exit code");
+var noHelperWhitespace = ladderWith(
+    { credentialHelper: { code: 0, out: "   \n", err: "" } });
+ok(noHelperWhitespace[4].ok === false,
+    "exit 0 with WHITESPACE-ONLY output fails the same way");
+var anyHelperPasses = ladderWith(
+    { credentialHelper: { code: 0, out: "credential.helper store\n", err: "" } });
+ok(anyHelperPasses[4].ok === true,
+    "a DIFFERENT helper (not gh's own) still passes -- rung 5 no longer " +
+    "demands gh's helper specifically, matching docs commit ddccee7");
 
+// Item 1 (the false green) and item 4 (the tests that would have
+// caught it): the identity rung's job is catching an EMPTY probe, and
+// a prior version reported success on one. String(undefined) is the
+// literal text "undefined" -- nine non-whitespace characters -- and
+// String(null) is "null", so a probe record with `out` missing
+// entirely, or not a string at all, passed a truthiness-plus-String()
+// check that should have failed it.
+ok(CsSetup.ladder({ gitPath: "/usr/bin/git", ghPath: "/opt/homebrew/bin/gh",
+    authStatus: { code: 0, out: AUTH_OK, err: "" },
+    credentialHelper: { code: 0, out: "credential.helper osxkeychain\n", err: "" },
+    userName: { code: 0 }, userEmail: { code: 0 } }, "osx")[5].ok === false,
+    "PROBED LIVE, item 1: userName/userEmail present with code 0 but " +
+    "NO out field at all used to report ok === true on the identity rung");
 var noIdentity = ladderWith({ userEmail: { code: 1, out: "", err: "" } });
 ok(noIdentity[5].ok === false, "a missing user.email fails the identity rung");
+var noIdentityNoName = ladderWith({ userName: { code: 1, out: "", err: "" } });
+ok(noIdentityNoName[5].ok === false,
+    "a missing user.name (not just user.email) also fails the identity rung");
+var noIdentityBlankOut = ladderWith(
+    { userName: { code: 0, out: "   \n", err: "" } });
+ok(noIdentityBlankOut[5].ok === false,
+    "whitespace-only user.name output fails the identity rung -- git " +
+    "config prints a trailing newline for a real value, so this is " +
+    "not a real name either");
+var noIdentityAbsentOut = ladderWith(
+    { userEmail: { code: 0, err: "" } });
+ok(noIdentityAbsentOut[5].ok === false,
+    "user.email present with code 0 but `out` absent entirely fails " +
+    "the identity rung -- the exact false-green shape probed live above");
+var noIdentityNullOut = ladderWith(
+    { userName: { code: 0, out: null, err: "" } });
+ok(noIdentityNullOut[5].ok === false,
+    "user.name with out: null (String(null) === \"null\", also nine " +
+    "non-whitespace characters) fails the identity rung too");
+ok(allGood[5].ok === true,
+    "sanity: the passing fixture used throughout this section still " +
+    "passes the identity rung despite all these new negative checks");
+ok(noIdentity[5].remedy.indexOf("commit refuses to run") !== -1,
+    "the identity remedy names the actual symptom (rung 6's remedy had " +
+    "no assertion at all before this)");
+ok(noIdentity[5].remedy.toLowerCase().indexOf("below") === -1,
+    "the identity remedy does not assert GUI geography (\"below\") " +
+    "that this Core file has no way to know exists");
 
 // Identity plan: per-repo unless asked, so a developer's global git
 // config is never silently rewritten.
@@ -7039,6 +7259,32 @@ ok(CsSetup.identityPlan(
     { login: "nd", id: 12345, name: "N S" }, false).length === 2,
     "identityPlan still returns a full plan for a genuinely valid user");
 
+// Item 3: identityPlan and the ladder's identity rung must agree on
+// what counts as "empty", or pressing the fix button does nothing,
+// forever. PROBED: identityPlan({login:"nd", id:5, name:"   "}) used
+// to return a full length-2 plan (a real
+// `git config user.name "   "` would run), while feeding that exact
+// SAME "   " back through the ladder as user.name's config output
+// still reported rung 6 failed, with the identical remedy -- so the
+// user presses the button, the command runs, and the rung never
+// clears. CsSetup.isBlank now backs both sides.
+ok(CsSetup.identityPlan(
+    { login: "nd", id: 5, name: "   " }, false).length === 0,
+    "identityPlan is [] for a whitespace-only name -- the exact " +
+    "button-that-does-nothing scenario the spec review probed live");
+var whitespaceIdentityRung = CsSetup.ladder({
+    gitPath: "/usr/bin/git", ghPath: "/opt/homebrew/bin/gh",
+    authStatus: { code: 0, out: AUTH_OK, err: "" },
+    credentialHelper: { code: 0, out: "credential.helper osxkeychain\n",
+                         err: "" },
+    userName: { code: 0, out: "   \n", err: "" },
+    userEmail: { code: 0, out: "1+n@users.noreply.github.com\n", err: "" }
+}, "osx");
+ok(whitespaceIdentityRung[5].ok === false,
+    "and the SAME whitespace-only value, fed back as the probed " +
+    "user.name, still correctly fails the ladder's identity rung -- " +
+    "the two can no longer disagree");
+
 // ---------------------------------------------------------------------
 // CsSetup.ladder / firstFailure -- must not throw on a wholly missing
 // or wrongly-shaped argument. Every FIELD inside a probe record was
@@ -7070,6 +7316,24 @@ ok(CsSetup.firstFailure(allGood) === null,
     "firstFailure still works normally on a real, all-passing rungs array");
 ok(CsSetup.firstFailure(noGh) !== null && CsSetup.firstFailure(noGh).id === "gh",
     "firstFailure still works normally on a real, failing rungs array");
+// Minor: a malformed ELEMENT (not just a malformed rungs array) must
+// not throw either.
+ok(CsSetup.firstFailure([null]) === null,
+    "firstFailure([null]) does not throw on a null element -- reads " +
+    "as \"no failure known\", the same as a missing rungs array");
+ok(CsSetup.firstFailure([null, CsSetup.rung("x", "y", false, "z")]).id === "x",
+    "firstFailure still finds a real failure after skipping a null element");
+
+// Minor: rung()'s cause used typeof for `remedy` but passed `cause`
+// through raw -- the same field on the same function, two different
+// standards.
+ok(CsSetup.rung("x", "y", false, "z", 123).cause === null,
+    "rung() coerces a non-string cause to null instead of passing " +
+    "a number through raw");
+ok(CsSetup.rung("x", "y", false, "z", ["bad"]).cause === null,
+    "rung() coerces a non-string cause (an array) to null the same way");
+ok(CsSetup.rung("x", "y", false, "z", "usage_error").cause === "usage_error",
+    "rung() still passes a genuine string cause through unchanged");
 
 // ---------------------------------------------------------------------
 // Report.
