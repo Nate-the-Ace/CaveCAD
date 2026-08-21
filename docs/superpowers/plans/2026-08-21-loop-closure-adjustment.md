@@ -1747,6 +1747,15 @@ git commit -m "fix: linework can never bind to an as-surveyed ghost point"
 - [ ] `CsRevise.apply`'s georeference probe at `:1636` stays a plain `CsNetwork.resolve` — it answers connectivity, not geometry
 - [ ] the georeferenced station is passed as `opts.pinned` wherever the caller knows it
 - [ ] the revision report's `loopsBefore` / `loopsAfter` still show FingerprintCave going 4.21 → 0.74 ft
+- [ ] **added after Task 1b:** no call site passes a placeholder `z` for `opts.anchor`.
+      `ImportCaveSurvey.js` and both `SurveyNotebook.js` sites currently always pass a
+      numeric z, often `0.0`, so Task 1b's "omitted z falls back to the anchored
+      station's own control elevation" protection never fires for the real callers. If
+      an anchored station is also `*fix`ed with a real absolute elevation, the
+      rebase-to-zero bug survives through those paths. Each site must either omit `z`
+      when it has no genuine elevation to supply, or pass the control elevation it
+      means. A test must cover at least one of those call paths with a fixed,
+      absolute-datum anchor station.
 
 **Verify:** `./tests/run_all.sh` → `ALL TESTS PASSED`
 
