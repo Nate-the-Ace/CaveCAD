@@ -5956,21 +5956,29 @@ ok(CsGit.isRejected("! [rejected]        main -> main (fetch first)") === true,
 //
 // Fixture provenance:
 //   AUTH_OK, AUTH_LOGGED_OUT, REPO_VIEW_PUBLIC, REPO_VIEW_PRIVATE_SHAPE,
-//   REPO_VIEW_MISSING and API_USER_REAL are captured bytes from real
-//   `gh` 2.97.0 calls on this machine on 2026-08-21 (all read-only;
+//   REPO_VIEW_MISSING, API_USER_REAL, USAGE_ERROR_ERR and
+//   NETWORK_FAILURE_ERR are captured bytes from real `gh` 2.97.0 calls
+//   on this machine (all read-only, none touching real GitHub state).
 //   AUTH_LOGGED_OUT came from a throwaway GH_CONFIG_DIR, not this
-//   machine's real session). AUTH_OK was re-verified with a live
+//   machine's real session. AUTH_OK was re-verified with a live
 //   `gh auth status --active` call on 2026-08-21 and is byte-identical
 //   to the plain `gh auth status` capture in this single-account case.
-//   AUTH_THIN is that same real AUTH_OK with its scopes line edited to
-//   drop "repo" -- a genuine thin-scope capture would require revoking
-//   a scope on the live token, which this task must not do.
-//   REPO_VIEW_INTERNAL, API_USER_NULL_NAME and TWO_ACCOUNT_RAW are
-//   synthetic: INTERNAL visibility needs an organization-owned repo, a
-//   null gh api user "name" needs a second account that never set a
-//   display name, and a multi-account host needs a second real
-//   GitHub account -- none obtainable from this machine. Each test
-//   says so.
+//   USAGE_ERROR_ERR came from a made-up flag
+//   (`gh auth status --this-flag-does-not-exist`) so it cannot collide
+//   with a real one gh ever adds. NETWORK_FAILURE_ERR came from
+//   pointing gh at an unresolvable proxy host, a self-inflicted
+//   failure that never reaches the real internet, but gh's error
+//   wording for it is genuine. AUTH_THIN is that same real AUTH_OK
+//   with its scopes line edited to drop "repo" -- a genuine thin-scope
+//   capture would require revoking a scope on the live token, which
+//   this task must not do.
+//   REPO_VIEW_INTERNAL and API_USER_NULL_NAME are synthetic: INTERNAL
+//   visibility needs an organization-owned repo, and a null gh api
+//   user "name" needs a second account that never set a display name
+//   -- neither obtainable from this machine. TWO_ACCOUNT_RAW and
+//   ACTIVE_BLOCK_ISOLATED (derived from it) are synthetic for the same
+//   reason: a multi-account host needs a second real GitHub account,
+//   also not obtainable here. Each test says so.
 // ---------------------------------------------------------------------
 
 sameArgv(CsHub.argvAuthStatus(), ["auth", "status", "--active"],
@@ -6083,6 +6091,18 @@ ok(CsHub.parseVisibility({ code: 0, out: '{"visibility":"private"}', err: "" }) 
     "parseVisibility is a STRICT passthrough -- lowercase stays " +
     "lowercase, it is not silently upper-cased into a false PRIVATE " +
     "match (a shape gh never actually emits)");
+// Important-1 adversarial inputs the previous 24-input pass missed:
+// String(["PRIVATE"]) === "PRIVATE" (array-to-string coercion), and
+// String({toString:1}) THROWS (no callable toString/valueOf). Real gh
+// never emits either shape; both must be rejected without throwing.
+ok(CsHub.parseVisibility(
+    { code: 0, out: '{"visibility":["PRIVATE"]}', err: "" }) === null,
+    "parseVisibility rejects a single-element array, does not " +
+    "String()-coerce it into a false PRIVATE match");
+ok(CsHub.parseVisibility(
+    { code: 0, out: '{"visibility":{"toString":1}}', err: "" }) === null,
+    "parseVisibility rejects an object with a non-callable toString " +
+    "instead of throwing");
 
 ok(CsHub.isPrivate({ code: 0, out: REPO_VIEW_PRIVATE_SHAPE, err: "" }) === true,
     "isPrivate accepts PRIVATE");
@@ -6099,6 +6119,25 @@ ok(CsHub.isPrivate(null) === false,
     "isPrivate FAILS CLOSED on no result at all");
 ok(CsHub.isPrivate({ code: 0, out: '{"visibility":"private"}', err: "" }) === false,
     "isPrivate rejects lowercase \"private\" -- a shape gh never emits");
+ok(CsHub.isPrivate({ code: 0, out: '{"visibility":["PRIVATE"]}', err: "" }) === false,
+    "isPrivate does NOT return true for a single-element array " +
+    "(the privacy gate must not be defeated by String() coercion)");
+(function() {
+    var threw = false;
+    var result = null;
+    try {
+        result = CsHub.isPrivate(
+            { code: 0, out: '{"visibility":{"toString":1}}', err: "" });
+    } catch (e) {
+        threw = true;
+    }
+    ok(threw === false,
+        "isPrivate does NOT throw on a visibility object with a " +
+        "non-callable toString");
+    ok(result === false,
+        "... and fails closed (false), the only safe non-throwing " +
+        "answer, rather than returning true");
+})();
 
 // Scopes. A token without repo makes a private repo 404, which reads
 // as "no such repo" -- so this is checked explicitly rather than
@@ -6144,16 +6183,28 @@ ok(CsHub.hasRepoScope({ code: 0, out: TWO_ACCOUNT_RAW, err: "" }) === false,
     "regression guard: without --active, hasRepoScope would read the " +
     "FIRST block's scopes even though the ACTIVE account has repo");
 // gh's --active flag (what argvAuthStatus now actually sends) filters
-// its output to exactly the active account's block per host, so in
-// practice the parsers only ever see that one block -- which is the
-// real captured AUTH_OK fixture above -- and read it correctly with
-// no parser changes needed.
-ok(CsHub.parseLogin({ code: 0, out: AUTH_OK, err: "" }) === "ndschonegg",
-    "with --active's single-block output, parseLogin reads the " +
-    "active account, ndschonegg, not oldaccount");
-ok(CsHub.hasRepoScope({ code: 0, out: AUTH_OK, err: "" }) === true,
-    "with --active's single-block output, hasRepoScope correctly " +
-    "sees repo on the active account");
+// its output to exactly the active account's block per host. The
+// fixture below is MECHANICALLY DERIVED from TWO_ACCOUNT_RAW's second
+// (active) block -- not just a re-assertion against AUTH_OK, which
+// would be tautological here since AUTH_OK is already asserted above
+// and is byte-identical with or without --active in the
+// single-account case. Deriving it from the two-account fixture's
+// active block, in isolation, is what actually distinguishes
+// "--active worked" from "--active is a no-op that happened to pass
+// because there was only one block anyway". Synthetic, same reason as
+// TWO_ACCOUNT_RAW: modeled on gh's documented --active behavior
+// (exactly one block, the active one, no blank-line separator), not
+// captured, since a second real account is not obtainable here.
+var ACTIVE_BLOCK_ISOLATED =
+    "github.com\n" + TWO_ACCOUNT_RAW.split("\n\n")[1];
+ok(CsHub.parseLogin(
+    { code: 0, out: ACTIVE_BLOCK_ISOLATED, err: "" }) === "ndschonegg",
+    "the active block, isolated from the two-account fixture, " +
+    "reads as ndschonegg -- not a re-check of AUTH_OK");
+ok(CsHub.hasRepoScope(
+    { code: 0, out: ACTIVE_BLOCK_ISOLATED, err: "" }) === true,
+    "the active block, isolated from the two-account fixture, " +
+    "shows repo -- not a re-check of AUTH_OK");
 
 // noreply email, so a real address never lands in permanent history.
 ok(CsHub.noreplyEmail({ id: 12345, login: "ndschonegg" }) ===
@@ -6183,6 +6234,46 @@ ok(CsHub.noreplyEmail({ id: "12345", login: "ndschonegg" }) ===
     "(gh api user's id is a JSON number, but this is a defensive " +
     "path, not a captured shape)");
 
+// Important-2: the number and string id branches must AGREE. Every
+// row below was reachable through the ORIGINAL two-branch check
+// (number branch: typeof + isFinite only; string branch: /^\d+$/).
+ok(CsHub.noreplyEmail({ id: -1, login: "x" }) === null,
+    "noreplyEmail rejects a negative number id");
+ok(CsHub.noreplyEmail({ id: 123.5, login: "x" }) === null,
+    "noreplyEmail rejects a non-integer number id");
+ok(CsHub.noreplyEmail({ id: 1e21, login: "x" }) === null,
+    "noreplyEmail rejects 1e21 -- Math.floor(1e21) === 1e21 is " +
+    "trivially true in IEEE 754 (no double past 2^52 has a " +
+    "fractional part left to floor away), so the id must ALSO be " +
+    "capped at Number.MAX_SAFE_INTEGER or this still gets through " +
+    "as the exact well-formed-looking wrong address the review warned " +
+    "about: \"1e+21+x@users.noreply.github.com\"");
+ok(CsHub.noreplyEmail({ id: 1e-5, login: "x" }) === null,
+    "noreplyEmail rejects a sub-1 number id (would stringify as " +
+    "\"0.00001\")");
+ok(CsHub.noreplyEmail({ id: "0123", login: "x" }) === null,
+    "noreplyEmail rejects a leading-zero numeric string id");
+ok(CsHub.noreplyEmail({ id: Number.MAX_SAFE_INTEGER, login: "x" }) ===
+    "9007199254740991+x@users.noreply.github.com",
+    "noreplyEmail accepts an id exactly at Number.MAX_SAFE_INTEGER");
+ok(CsHub.noreplyEmail({ id: Number.MAX_SAFE_INTEGER + 2, login: "x" }) === null,
+    "noreplyEmail rejects an id past Number.MAX_SAFE_INTEGER");
+ok(CsHub.noreplyEmail({ id: "99999999999999999999", login: "x" }) === null,
+    "noreplyEmail rejects a numeric STRING id past " +
+    "Number.MAX_SAFE_INTEGER too -- the two branches still agree");
+
+// Important-2: login was still truthiness-only -- an object, array or
+// boolean login silently stringified into a wrong-but-plausible
+// address instead of being rejected.
+ok(CsHub.noreplyEmail({ login: {}, id: 1 }) === null,
+    "noreplyEmail rejects an object login " +
+    "(was \"1+[object Object]@users.noreply.github.com\")");
+ok(CsHub.noreplyEmail({ login: [], id: 1 }) === null,
+    "noreplyEmail rejects an array login (was \"1+@users.noreply...\")");
+ok(CsHub.noreplyEmail({ login: true, id: 1 }) === null,
+    "noreplyEmail rejects a boolean login " +
+    "(was \"1+true@users.noreply.github.com\")");
+
 var u = CsHub.parseApiUser({ code: 0, out: API_USER_REAL, err: "" });
 ok(u.login === "ndschonegg" && u.id === 307531413 &&
     u.name === "Nathan Schonegg",
@@ -6192,6 +6283,69 @@ ok(u2.name === "solo",
     "parseApiUser falls back to login when name is null (synthetic fixture)");
 ok(CsHub.parseApiUser({ code: 1, out: "", err: "HTTP 401" }) === null,
     "parseApiUser null on failure");
+
+// Minor-1: same class of bug as parseVisibility -- truthiness plus
+// String() coercion let a malformed login through silently (an
+// array) or threw outright (an object with a non-callable toString).
+(function() {
+    var threw = false;
+    var result = null;
+    try {
+        result = CsHub.parseApiUser(
+            { code: 0, out: '{"login":{"toString":1},"id":1}', err: "" });
+    } catch (e) {
+        threw = true;
+    }
+    ok(threw === false,
+        "parseApiUser does NOT throw on a login object with a " +
+        "non-callable toString");
+    ok(result === null,
+        "... and returns null rather than a bogus user object");
+})();
+ok(CsHub.parseApiUser({ code: 0, out: '{"login":["x"],"id":1}', err: "" }) === null,
+    "parseApiUser rejects an array login instead of silently " +
+    "String()-coercing it to \"x\"");
+var u3 = CsHub.parseApiUser(
+    { code: 0, out: '{"login":"x","id":1,"name":{"toString":1}}', err: "" });
+ok(u3 !== null && u3.name === "x",
+    "parseApiUser falls back to login when name is a malformed " +
+    "shape, instead of throwing on String(name)");
+
+// Important-3: a future gh that renames or drops --active must not
+// look identical to "logged out" -- isUsageError distinguishes a
+// usage error from an auth failure. Real capture, gh 2.97.0,
+// 2026-08-21: `gh auth status --this-flag-does-not-exist`, a made-up
+// flag chosen so this cannot collide with a real one gh ever adds.
+// Exit 1, 0 bytes on stdout, 484 bytes on stderr; only the first line
+// is reproduced here since that is all the classifier looks at.
+var USAGE_ERROR_ERR =
+    "unknown flag: --this-flag-does-not-exist\n\n" +
+    "Usage:  gh auth status [flags]\n";
+ok(CsHub.isUsageError({ code: 1, out: "", err: USAGE_ERROR_ERR }) === true,
+    "isUsageError spots a real \"unknown flag\" rejection");
+ok(CsHub.isUsageError({ code: 1, out: "", err: AUTH_LOGGED_OUT_ERR }) === false,
+    "isUsageError does not misclassify a real logged-out message");
+ok(CsHub.isUsageError({ code: 0, out: AUTH_OK, err: "" }) === false,
+    "isUsageError does not misclassify a good auth status");
+
+// Minor-2: pairs with isUsageError so Task 4 can tell "offline" apart
+// from "not private". Real capture, gh 2.97.0, 2026-08-21:
+// `HTTPS_PROXY=http://nonexistent-proxy.invalid gh repo view
+// octocat/Spoon-Knife --json visibility` -- a self-inflicted,
+// no-real-network-touched failure (the proxy host cannot resolve),
+// not a genuine internet outage, but gh's wording for "could not
+// reach the network at all" is real and exact. Exit 1, 0 bytes
+// stdout, 105 bytes stderr.
+var NETWORK_FAILURE_ERR =
+    "error connecting to nonexistent-proxy.invalid\n" +
+    "check your internet connection or https://githubstatus.com\n";
+ok(CsHub.isNetworkFailure({ code: 1, out: "", err: NETWORK_FAILURE_ERR }) === true,
+    "isNetworkFailure spots gh's real offline wording");
+ok(CsHub.isNetworkFailure(
+    { code: 1, out: "", err: REPO_VIEW_MISSING_ERR }) === false,
+    "isNetworkFailure does not misclassify a real \"repo not found\"");
+ok(CsHub.isNetworkFailure({ code: 1, out: "", err: USAGE_ERROR_ERR }) === false,
+    "isNetworkFailure does not misclassify a usage error");
 
 // ---------------------------------------------------------------------
 // Report.

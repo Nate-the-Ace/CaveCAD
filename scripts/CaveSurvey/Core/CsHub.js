@@ -104,17 +104,23 @@ CsHub.parseJson = function(r) {
 
 CsHub.parseVisibility = function(r) {
     var j = CsHub.parseJson(r);
-    if (j === null || !j.visibility) {
+    // typeof, not truthiness, and returned AS-IS, not through
+    // String(): String(["PRIVATE"]) coerces a single-element array to
+    // the string "PRIVATE", which would pass the strict PRIVATE check
+    // below, and String({toString:1}) THROWS a TypeError outright (no
+    // callable toString or valueOf for ToPrimitive to fall back on).
+    // Both were reachable before this gate existed -- gh only ever
+    // emits a plain string here, so anything else is rejected rather
+    // than coerced. Also STRICT on case, deliberately not
+    // case-normalized: real gh only ever emits "PRIVATE"/"PUBLIC"/
+    // "INTERNAL" in uppercase, and accepting a shape gh never
+    // actually produces (lowercase "private") is exactly the kind of
+    // unwarranted leniency that let the Task 2 hang through.
+    if (j === null || typeof j.visibility !== "string" ||
+            j.visibility.length === 0) {
         return null;
     }
-    // STRICT passthrough, deliberately not case-normalized. Real gh
-    // only ever emits "PRIVATE"/"PUBLIC"/"INTERNAL" in uppercase, and
-    // this value feeds the privacy gate below -- accepting a shape gh
-    // never actually produces (lowercase "private") is exactly the
-    // kind of unwarranted leniency that let the Task 2 hang through.
-    // If gh's output ever changes shape, isPrivate should fail
-    // closed, not silently accept it.
-    return String(j.visibility);
+    return j.visibility;
 };
 
 /**
@@ -124,7 +130,13 @@ CsHub.parseVisibility = function(r) {
  * entrance coordinate does not care about the distinction. A failed
  * or unparseable call is rejected too -- see the fail-closed note at
  * the top of this file. `r` may be null/undefined/garbage; this never
- * throws and never returns true for anything but a confirmed PRIVATE.
+ * throws and never returns true for anything but a confirmed PRIVATE
+ * -- and that guarantee lives entirely in parseVisibility's typeof
+ * gate above, not here. A version of parseVisibility that goes back
+ * to truthiness + String() coercion (the previous bug: a one-element
+ * array coerced to the string "PRIVATE" and passed; an object with a
+ * non-callable toString threw) would silently break both halves of
+ * this guarantee again.
  */
 CsHub.isPrivate = function(r) {
     return CsHub.parseVisibility(r) === "PRIVATE";
@@ -170,16 +182,23 @@ CsHub.hasRepoScope = function(r) {
 
 CsHub.parseApiUser = function(r) {
     var j = CsHub.parseJson(r);
-    if (j === null || !j.login) {
+    // typeof, not truthiness, and no String() coercion of an
+    // unvalidated shape: the old `!j.login` + `String(j.login)` let
+    // {"login":["x"]} silently through as "x", and threw outright on
+    // {"login":{"toString":1}} -- the same class of bug parseVisibility
+    // had. gh's login is always a plain non-empty string.
+    if (j === null || typeof j.login !== "string" || j.login.length === 0) {
         return null;
     }
     return {
-        login: String(j.login),
+        login: j.login,
         id: j.id,
-        // GitHub's name field is null for accounts that never set one.
-        name: (j.name === null || j.name === undefined ||
-               String(j.name).length === 0)
-              ? String(j.login) : String(j.name)
+        // GitHub's name field is null for accounts that never set
+        // one. typeof-gated, not just null/undefined-checked, so a
+        // malformed name shape falls back to login instead of
+        // reaching a throwing String() call.
+        name: (typeof j.name === "string" && j.name.length > 0)
+              ? j.name : j.login
     };
 };
 
@@ -188,24 +207,76 @@ CsHub.parseApiUser = function(r) {
  * commit -- which is permanent in history and readable by every
  * collaborator added later.
  *
- * `id` is validated with the same "fail closed, do not guess" spirit
- * as the `login` check right below it: a missing/undefined/null/NaN
- * `id` (e.g. from a partial gh api user response) must not silently
- * stringify into a bogus but well-formed-looking address like
- * "undefined+x@users.noreply.github.com" -- a wrong committer address
- * is unfixable once it is in history, same as the real-email leak
- * this function exists to prevent.
+ * `login` and `id` are both typeof-gated, not truthiness-checked: a
+ * missing/undefined/null/NaN/malformed value (e.g. from a partial gh
+ * api user response, or a login that is an array or object) must not
+ * silently stringify into a bogus but well-formed-looking address
+ * like "undefined+x@users.noreply.github.com" or
+ * "1+[object Object]@users.noreply.github.com" -- a wrong committer
+ * address is unfixable once it is in history, same as the real-email
+ * leak this function exists to prevent.
+ *
+ * The number and string id branches AGREE on what counts as valid:
+ * GitHub ids are positive integers, so a float, a negative, a
+ * leading-zero string, or an exponential-notation number (e.g. 1e21)
+ * is rejected on EITHER branch, not accepted on one and rejected on
+ * the other -- real gh returns id as a JSON number, so a weaker
+ * number branch is the one that actually runs in production, not a
+ * dead code path.
+ *
+ * Both branches also cap at Number.MAX_SAFE_INTEGER (2^53 - 1).
+ * Two different things happen above that line, both rejected here
+ * rather than distinguished: a real GitHub id that large would
+ * already have been silently rounded by JSON.parse before this
+ * function ever sees it, and a bogus value like 1e21 is, in IEEE 754,
+ * ALREADY an integer as far as `Math.floor(id) === id` can tell --
+ * every double beyond 2^52 has no fractional part left to floor away,
+ * so that check alone does not reject it. GitHub ids are 9 digits
+ * today, decades from either problem; the cap exists so this function
+ * cannot be tricked into treating "who knows" as "valid" for either
+ * reason.
  */
 CsHub.noreplyEmail = function(user) {
-    if (!user || !user.login) {
+    if (!user || typeof user.login !== "string" || user.login.length === 0) {
         return null;
     }
     var id = user.id;
-    var idIsValid = (typeof id === "number" && isFinite(id)) ||
-                     (typeof id === "string" && /^\d+$/.test(id));
+    var MAX_ID = Number.MAX_SAFE_INTEGER;
+    var idIsValid = (typeof id === "number" && isFinite(id) &&
+                     Math.floor(id) === id && id > 0 && id <= MAX_ID) ||
+                    (typeof id === "string" && /^[1-9]\d*$/.test(id) &&
+                     Number(id) <= MAX_ID);
     if (!idIsValid) {
         return null;
     }
-    return String(id) + "+" + String(user.login) +
-           "@users.noreply." + CsHub.HOST;
+    return String(id) + "+" + user.login + "@users.noreply." + CsHub.HOST;
+};
+
+// gh rejects an unrecognized flag with exit 1, empty stdout, and
+// "unknown flag: ..." (or "unknown shorthand flag"/"unknown command")
+// on stderr -- verified live against gh 2.97.0 on 2026-08-21 with a
+// made-up flag. That output is indistinguishable from "logged out" to
+// isAuthenticated (both are exit != 0 with no "Logged in to" text),
+// so a future gh that renames or drops --active would make
+// isAuthenticated, hasRepoScope and parseLogin all report "not
+// authenticated" on a fully authenticated machine -- sending the
+// surveyor into a pointless re-auth loop while the real diagnosis
+// (a usage error, not a login problem) sits in `err`, discarded. Task
+// 4's ladder should check this BEFORE concluding "not authenticated".
+CsHub.isUsageError = function(r) {
+    return /unknown flag|unknown shorthand flag|unknown command/i.test(
+        CsHub.textOf(r));
+};
+
+// gh's own friendly wording for "could not reach the network at all"
+// -- verified live on 2026-08-21 by pointing gh at a proxy host that
+// cannot resolve (HTTPS_PROXY/HTTP_PROXY=http://nonexistent-proxy.invalid,
+// no real GitHub traffic involved). isPrivate already fails closed
+// when offline -- rejecting on any non-zero code regardless of why --
+// so this classifier is for DIAGNOSABILITY, not safety: Task 4 needs
+// to tell a surveyor "you appear to be offline" apart from "that repo
+// really is not private".
+CsHub.isNetworkFailure = function(r) {
+    var re = /error connecting to|check your internet connection|githubstatus\.com/i;
+    return re.test(CsHub.textOf(r));
 };
