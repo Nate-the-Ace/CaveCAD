@@ -7424,6 +7424,48 @@ ok(probedNoGit.authStatus === null,
 CsProc.setBackend(null);
 
 // ---------------------------------------------------------------------
+// Device login (Task 7) -- argv, code extraction from a combined
+// stream, and the strict "did it actually work" check. GH_DEVICE_OUT
+// and AUTH_OK are the same captured fixtures the device-flow and
+// ladder sections above already use -- not recomposed here.
+// ---------------------------------------------------------------------
+
+sameArgv(CsSetup.deviceLoginArgv(), CsHub.argvDeviceLogin(),
+    "deviceLoginArgv delegates to CsHub");
+
+ok(CsSetup.readDeviceCode({ out: "", err: GH_DEVICE_OUT }) === "D68F-995C",
+    "readDeviceCode finds the code on stderr");
+ok(CsSetup.readDeviceCode({ out: GH_DEVICE_OUT, err: "" }) === "D68F-995C",
+    "readDeviceCode finds the code on stdout");
+ok(CsSetup.readDeviceCode({ out: "", err: "" }) === null,
+    "readDeviceCode returns null before gh has printed anything");
+ok(CsSetup.readDeviceCode(null) === null,
+    "readDeviceCode tolerates null -- the first poll tick's collected " +
+    "object is never null in practice, but the function must not " +
+    "throw if it ever is");
+ok(CsSetup.readDeviceCode({}) === null,
+    "readDeviceCode tolerates a record with neither field present");
+ok(CsSetup.readDeviceCode({ out: 12345, err: undefined }) === null,
+    "readDeviceCode tolerates a non-string out and a missing err " +
+    "instead of throwing inside String concatenation");
+
+ok(CsSetup.loginSucceeded({ code: 0, out: "", err: "" },
+        { code: 0, out: AUTH_OK, err: "" }) === true,
+    "loginSucceeded requires a passing auth status, not just exit 0");
+ok(CsSetup.loginSucceeded({ code: 0, out: "", err: "" },
+        { code: 1, out: "", err: "not logged in" }) === false,
+    "loginSucceeded rejects exit 0 with a failing auth status");
+ok(CsSetup.loginSucceeded({ code: 1, out: "", err: "cancelled" },
+        { code: 0, out: AUTH_OK, err: "" }) === false,
+    "loginSucceeded rejects a non-zero login even if status looks fine");
+ok(CsSetup.loginSucceeded(null, { code: 0, out: AUTH_OK, err: "" }) === false,
+    "loginSucceeded tolerates a missing loginResult rather than throwing " +
+    "on loginResult.code");
+ok(CsSetup.loginSucceeded({ code: 0 }, null) === false,
+    "loginSucceeded tolerates a missing statusResult -- isAuthenticated " +
+    "already returns false on that, exercised here through the pair");
+
+// ---------------------------------------------------------------------
 // Report.
 // ---------------------------------------------------------------------
 

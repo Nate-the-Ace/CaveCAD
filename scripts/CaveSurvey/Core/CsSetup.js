@@ -843,6 +843,65 @@ CsSetup.probe = function(gitPath, ghPath) {
     return probe;
 };
 
+// ---------------------------------------------------------------------
+// Device login -- argv, code extraction from a live process's
+// collected streams, and the strict "did it actually work" check.
+//
+// These three are pure functions over data GitHubSetup.js collects
+// while driving the real `gh auth login --web` child process (Task 7).
+// They exist here, not in GitHubSetup.js, for the same reason every
+// other parser in this file does: a pure function over a plain object
+// is testable under node with no QProcess and no network, where the
+// dialog itself cannot be.
+// ---------------------------------------------------------------------
+
+/**
+ * gh's device-flow argv, by name so GitHubSetup.js never spells out
+ * CsHub.argvDeviceLogin() itself -- one call site for "what exactly do
+ * we launch" makes it possible to assert the argv exactly in a test
+ * that never imports GitHubSetup.js at all.
+ */
+CsSetup.deviceLoginArgv = function() {
+    return CsHub.argvDeviceLogin();
+};
+
+/**
+ * Extracts the device code from a login process's own {out, err}
+ * collected so far. Tolerant of a missing/malformed argument and of
+ * either field being absent -- this is called on EVERY poll tick
+ * while gh is still running, including the very first one, before gh
+ * has printed anything at all, so "nothing yet" (null) has to be the
+ * ordinary case, not an error.
+ */
+CsSetup.readDeviceCode = function(streams) {
+    if (!streams || typeof streams !== "object") {
+        return null;
+    }
+    var out = (typeof streams.out === "string") ? streams.out : "";
+    var err = (typeof streams.err === "string") ? streams.err : "";
+    return CsSetup.parseDeviceCode(out + "\n" + err);
+};
+
+/**
+ * A login counts only when gh's OWN status agrees -- never a bare
+ * `loginResult.code === 0`.
+ *
+ * Exit 0 alone is not enough: a device flow that unwinds cleanly after
+ * being cancelled or left to expire can still exit 0 in some gh
+ * builds, and a login that "succeeded" without a usable token would
+ * send the surveyor into a confusing 404 later instead of a clear
+ * failure now. CsHub.isAuthenticated is the exact predicate the
+ * ladder's own auth rung trusts (CsSetup.RUNGS, id "auth"), reused
+ * rather than re-derived, so this cannot disagree with what the
+ * ladder will report two seconds later when it re-probes the machine.
+ */
+CsSetup.loginSucceeded = function(loginResult, statusResult) {
+    if (!loginResult || loginResult.code !== 0) {
+        return false;
+    }
+    return CsHub.isAuthenticated(statusResult);
+};
+
 /**
  * Returns argv arrays for setting the commit identity, or [] --
  * ALL-OR-NOTHING -- when any input is not trustworthy, so a caller
