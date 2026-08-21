@@ -17,6 +17,9 @@ Three capabilities, in priority order:
 2. **Clone** — a project or cave repo comes down with its folder conventions intact.
 3. **Pull requests** — a trip becomes a reviewable unit carrying its own survey summary.
 
+All three assume a working, authenticated `gh`, which a new surveyor does not have — so
+**onboarding is part of the feature, not a prerequisite to it.**
+
 ## Why this is feasible at all
 
 Probed in CaveCAD 3.33.0's engine on 2026-08-20 (`-no-gui -autostart`):
@@ -29,6 +32,12 @@ Probed in CaveCAD 3.33.0's engine on 2026-08-20 (`-no-gui -autostart`):
 | `QNetworkAccessManager` | **absent** |
 | `QTemporaryDir` | absent |
 | `git-lfs` on the host | **not installed** |
+
+A third result is a trap rather than a capability: the probe launched CaveCAD **from a
+terminal**, so it inherited a login shell's `PATH` including `/opt/homebrew/bin`. A macOS
+GUI app launched from Finder gets a minimal `PATH` that does **not** include Homebrew, so
+`gh` would be reported "not found" on a machine where it is installed. Executable
+discovery therefore must not rely on `PATH` — see the resolution ladder below.
 
 Two consequences are load-bearing. No `QNetworkAccessManager` means **the GitHub API is
 reachable only through the `gh` CLI** — there is no in-process HTTP fallback, so `gh`
@@ -47,6 +56,7 @@ edge case. And `QTableWidget` is still missing from this bridge (see
 | 5 | **Auto-push after every save.** Backup value comes from it being automatic. |
 | 6 | **Small team, one cave each.** No merge machinery; warn when another open PR touches the same cave. |
 | 7 | **Clones live in `~/Documents/Cave/` directly**, and **`scans/` is gitignored by default.** |
+| 8 | **The plugin onboards a new user end to end** — detects a missing `git` or `gh`, gives platform-specific install links, and drives the GitHub login itself rather than assuming an authenticated CLI. |
 
 Two further calls made in the design and open to reversal at spec review:
 
@@ -82,6 +92,128 @@ a fresh `git clone` does not set. `CloneProject` and `InitCaveRepo` set it expli
 A teammate who clones with plain `git` has no hook until they run `CloneProject` — which
 is exactly why enforcement point 1 exists inside the plugin and is not delegated to the
 hook.
+
+## Onboarding a new user
+
+A new surveyor has no `gh`, possibly no `git`, no token, no git identity, and no
+credential helper. Every one of those produces a different failure, and three of them
+produce failures that look like something else: a missing credential helper looks like a
+password prompt that cannot be answered, an unset `user.email` looks like a commit
+refusing to run, and a token without the `repo` scope makes a private repo return **404
+rather than 403**, which reads as "that repo does not exist" instead of "you cannot see
+it". So onboarding is a ladder with a named remedy at every rung, not a single check.
+
+### Executable discovery comes first
+
+`CsSetup.resolve(name)` finds `git` and `gh` by probing candidates in order and caching
+the winner in `RSettings` under `CaveSurvey/GitPath` and `CaveSurvey/GhPath`:
+
+| Platform | Candidates, in order |
+|---|---|
+| `osx` | `/opt/homebrew/bin`, `/usr/local/bin`, `/usr/bin`, then `PATH` |
+| `win` | `%ProgramFiles%\GitHub CLI\gh.exe`, `%ProgramFiles%\Git\cmd\git.exe`, `%LOCALAPPDATA%\Programs`, then `PATH` |
+| `linux` | `/usr/bin`, `/usr/local/bin`, `$HOME/.local/bin`, then `PATH` |
+
+`PATH` is the last resort, not the first, because of the Finder-launch trap above. A
+cached path that no longer resolves is discarded and the ladder re-runs — an upgrade or a
+Homebrew prefix change must not require clearing settings by hand.
+
+### The ladder
+
+Each rung either passes or shows one dialog whose text is a remedy, and re-checks on
+demand rather than requiring a CaveCAD restart.
+
+**1. Is `git` installed?** `git --version`. Missing:
+
+| Platform | What the dialog offers |
+|---|---|
+| macOS | `xcode-select --install` (copyable), link <https://git-scm.com/download/mac> |
+| Windows | link <https://git-scm.com/download/win>, `winget install --id Git.Git` |
+| Linux | link <https://git-scm.com/download/linux> |
+
+**2. Is `gh` installed?** `gh --version`. Missing:
+
+| Platform | What the dialog offers |
+|---|---|
+| macOS | `brew install gh`, or the `.pkg` from <https://github.com/cli/cli/releases/latest>, link <https://cli.github.com/> |
+| Windows | `winget install --id GitHub.cli`, link <https://cli.github.com/> |
+| Linux | link <https://github.com/cli/cli/blob/trunk/docs/install_linux.md> |
+
+Every dialog carries the canonical <https://cli.github.com/> link, a **Copy command**
+button, and a **Check again** button. Links open through `QDesktopServices.openUrl` —
+the plugin never downloads or runs an installer itself.
+
+**3. Is `gh` authenticated?** `gh auth status`. If not, the device flow, which was probed
+working on 2026-08-20 and is the primary path:
+
+```
+gh auth login --web --git-protocol https --hostname github.com \
+              --scopes repo,read:org --clipboard
+```
+
+Verified behavior without a TTY: `gh` prints `First copy your one-time code: XXXX-XXXX`
+and `https://github.com/login/device`, then blocks while polling GitHub. It does **not**
+error out for want of a terminal and does **not** wait for an Enter keypress. The plugin
+therefore:
+
+1. starts the process, reading **both stdout and stderr** — gh prefixes those lines with
+   `!`, its stderr convention, and the exact stream is a gh implementation detail no
+   design should depend on;
+2. regex-matches `([A-Z0-9]{4}-[A-Z0-9]{4})` out of whichever stream carries it;
+3. shows a non-modal dialog with the code in a large font, a note that `--clipboard`
+   already copied it, and an **Open github.com/login/device** button;
+4. waits for exit, Cancel killing the process; gives up at gh's own 15-minute device-code
+   expiry and says so;
+5. on exit 0 re-runs `gh auth status` to confirm rather than trusting the exit code.
+
+**No secret passes through the plugin on this path** — the browser and gh's own keychain
+storage handle it end to end. That is why the device flow is primary rather than a token
+box.
+
+**Fallback: paste a token.** For a machine that cannot open a browser, a **Use a token
+instead** button opens a field with `QLineEdit.Password` echo mode, and pipes the value to
+`gh auth login --with-token` over stdin. The dialog links
+<https://github.com/settings/tokens> and states the one required scope, `repo`. Handling
+rules, non-negotiable: the value is written to the process's stdin and nowhere else —
+never a variable that outlives the call, never a file, never a command-line argument
+(where it would be visible in `ps`), and `CsProc` must redact `ghp_`/`gho_`/`ghu_`/`ghs_`
+patterns and every `--with-token` stdin write from `cave-git.log`. A logged token is a
+leaked token.
+
+**4. Does the token carry the `repo` scope?** `gh auth status` reports token scopes. An
+existing token authorized for something else will pass rung 3 and then make every private
+repo look nonexistent. Missing scope offers `gh auth refresh -s repo`, which is also the
+remedy when a project later needs `read:org` for an org-owned repo.
+
+**5. Is git's credential helper configured?** `gh auth setup-git`. Without it an HTTPS
+push prompts for a password on a terminal that does not exist, so the push simply hangs
+until the timeout. It fails if no host is authenticated, so it must run after rung 3, and
+it is re-run rather than skipped when rung 3 re-authenticates.
+
+**6. Is there a git identity?** `git config --get user.name` and `--get user.email`. Empty:
+fill them from `gh api user` — `name` (falling back to `login`) and the noreply address
+`<id>+<login>@users.noreply.github.com`, so a surveyor's real email address never lands
+in a commit that is then permanent in history. Default scope is **per-repo** (`git config`
+without `--global`), because a plugin silently rewriting a developer's global git identity
+is an overreach; a **Set globally** checkbox is offered for the plain-laptop case.
+
+### When the ladder runs
+
+- **On demand** from `GitHubSetup`, which shows every rung with a pass/fail state so a
+  half-configured machine is legible at a glance.
+- **Once per session, automatically**, the first time any other git tool runs — including
+  the save wrapper's first attempt. It must never run on every save; the existing
+  "git is unavailable this session" latch covers repeat failures, and a modal appearing
+  mid-drawing on save is the one thing the save path may not do.
+- **Never at CaveCAD startup.** A surveyor who has no interest in GitHub must not meet a
+  login dialog for opening a drawing.
+
+### Deliberately out of scope
+
+SSH keys (`--git-protocol https` throughout, and `--skip-ssh-key` on login), GitHub
+Enterprise hostnames, and organization or SAML SSO authorization flows. Each is a real
+setup a teammate might have, and each is better served by telling them to run
+`gh auth login` in a terminal than by the plugin reimplementing gh's prompts.
 
 ## Repo layout
 
@@ -181,6 +313,7 @@ tests never spawn `git` or touch the network.
 | `Core/CsProc.js` | `CsProc` | The only place `QProcess` is constructed. `CsProc.run(prog, argv, opts)` -> `{code, out, err, timedOut}`. argv arrays exclusively — **never a shell string**, because cave names and macOS paths contain spaces and a shell string turns one argument into two. Per-call timeout. Appends every invocation and its exit code to `~/Library/Application Support/QCAD/CaveCAD/cave-git.log`. |
 | `Core/CsGit.js` | `CsGit` | git verbs: `toplevel`, `status`, `currentBranch`, `defaultBranch`, `checkoutNew`, `add`, `commit`, `push`, `pullRebase`, `clone`, `aheadBehind`, `configLocal`. Pure argv builders separated from execution so they can be asserted in tests. |
 | `Core/CsHub.js` | `CsHub` | `gh` verbs and their JSON: `authStatus`, `repoView`, `repoCreate`, `prCreate`, `prList`, `assertPrivate`, `currentLogin`. |
+| `Core/CsSetup.js` | `CsSetup` | Executable discovery, the preflight ladder, the device-flow login state machine, git identity, and the platform-specific install links. |
 | `Core/CsRepo.js` | `CsRepo` | Scaffold content generation and writing, `CAVE.json` / `CAVES.json` read+write, path -> cave slug resolution, session branch naming. |
 | `Core/CsSidecar.js` | `CsSidecar` | Survey model -> deterministic TSV, and parse back for diffing. |
 | `Core/CsCommitMsg.js` | `CsCommitMsg` | Old sidecar + new sidecar + survey -> commit subject/body and PR title/body. |
@@ -190,13 +323,14 @@ tests never spawn `git` or touch the network.
 
 ## New tools
 
-Menu group stays `450`. Sort orders 25, 27, 30, 32, 34 are free in the current suite
+Menu group stays `450`. Sort orders 22, 25, 27, 30, 32, 34 are free in the current suite
 (used: 5, 10, 15, 20, 40, 52, 60, 70, 75, 78, 80, 85, 90, 95). Because a duplicate
 `(groupSortOrder, sortOrder)` silently displaces a tool from the menu,
 `make_package.sh` gains an assertion that every pair in the suite is unique.
 
 | Tool | Sort | Does |
 |---|---|---|
+| `GitHubSetup/` | 22 | Runs the preflight ladder and the login flow. Also invoked automatically, once per session, the first time any other git tool runs. |
 | `CloneProject/` | 25 | Pick a project or cave repo (`gh repo list` or typed `owner/name`), `assertPrivate`, clone into `~/Documents/Cave/<name>/`, set `core.hooksPath`, read `CAVES.json` and offer member caves, then offer to open a drawing. |
 | `InitCaveRepo/` | 27 | Scaffold a cave or project repo on disk, `git init`, `gh repo create --private`, first commit, push, and register the cave in a project's `CAVES.json`. |
 | `SyncProject/` | 30 | Explicit `git pull --rebase` then push. The only place a rebase is ever attempted. |
@@ -368,6 +502,15 @@ Unit tests in the existing headless harness (`tests/run_all.sh`, runs under node
 - **`gh` JSON parsing** against captured fixture responses for `repo view`, `pr list`,
   `auth status`, including a public-visibility response that must abort.
 - **Branch naming** — sanitization of logins and dates.
+- **Setup ladder** — executable resolution picks the first existing candidate and ignores
+  a cached path that no longer resolves; install-link text is correct for each of `osx`,
+  `win`, `linux`; the device-code regex extracts `XXXX-XXXX` from captured gh output on
+  **either** stream; scope parsing correctly rejects an `auth status` fixture whose token
+  lacks `repo`; the noreply email is built as `<id>+<login>@users.noreply.github.com`.
+- **Token redaction** — `CsProc`'s log writer, given a line containing `ghp_`, `gho_`,
+  `ghu_` or `ghs_` followed by token characters, emits a redacted line. Asserted with a
+  synthetic string, never a real token. This test is the reason the log is safe to attach
+  to a bug report.
 
 One integration test, real `git`, no network and no `gh`: create a temp dir, `git init
 --bare` a remote, clone it through `CsGit`, scaffold, commit, push, and verify the bare
@@ -379,10 +522,16 @@ repo received the objects. `CsHub` stays faked because it is the network.
 
 1. The `Save.prototype.save` wrapper actually fires on File > Save, on Ctrl+S, and on
    Save All — and does **not** fire on AutoSave.
-2. `OpenPullRequest`'s `QDialog` renders and its widgets connect under the brew bridge.
-3. `ProjectStatus`'s `QTreeWidget` populates.
-4. The offline queue behaves with the network actually off.
-5. Push latency on a real save is tolerable in normal use.
+2. The device-flow dialog renders, the code is legible, `QDesktopServices.openUrl` opens
+   the browser, and Cancel actually kills the `gh` child process rather than orphaning it.
+3. The token-fallback field masks its input, and the token never appears in
+   `cave-git.log` after a real login.
+4. `gh` resolution works in a CaveCAD launched **from Finder**, not just from a terminal
+   — the case the original probe could not see.
+5. `OpenPullRequest`'s `QDialog` renders and its widgets connect under the brew bridge.
+6. `ProjectStatus`'s `QTreeWidget` populates.
+7. The offline queue behaves with the network actually off.
+8. Push latency on a real save is tolerable in normal use.
 
 ## Not in scope
 
