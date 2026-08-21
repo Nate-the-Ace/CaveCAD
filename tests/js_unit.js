@@ -6587,6 +6587,234 @@ if (!IS_NODE) {
 }
 
 // ---------------------------------------------------------------------
+// CsSetup.discoverTools -- rungs 1 and 2 (git, gh) must be fed from
+// discover(), never resolve() alone. resolve() is stat-only and
+// returns null for a gh that lives outside every candidate directory
+// even when it is on PATH and works (MacPorts, ~/.local/bin, Nix) --
+// verified live on 2026-08-21: a real binary outside every candidate
+// dir gives resolve() -> null but discover() -> the bare name. A
+// ladder fed from resolve() alone would tell a surveyor with a
+// perfectly working gh that it needs to be installed.
+//
+// discover() runs a real process when nothing stats, so this must be
+// called exactly ONCE per program and its answer cached into the
+// probe record -- not re-run inside the ladder on every rung
+// evaluation, which would relaunch "gh --version" every time the
+// ladder is displayed.
+// ---------------------------------------------------------------------
+
+var dtCalls = [];
+CsProc.setBackend(function(prog, argv, opts) {
+    dtCalls.push(prog);
+    return { code: 0, out: "version", err: "", timedOut: false,
+              notStarted: false };
+});
+// Nothing stats for either program, so both fall through to the
+// bare-name execution probe -- the MacPorts/~/.local/bin/Nix case.
+var dt = CsSetup.discoverTools("osx", function() { return false; });
+ok(dt.gitPath === "git",
+    "discoverTools finds git via the bare-name execution probe when " +
+    "it stats nowhere but actually runs (e.g. MacPorts)");
+ok(dt.ghPath === "gh", "discoverTools finds gh the same way");
+ok(dtCalls.length === 2,
+    "discoverTools ran the execution probe exactly ONCE per program " +
+    "(git, gh), not once per rung or more");
+CsProc.setBackend(null);
+
+// A candidate that stats needs no process started at all.
+var dtCalls2 = [];
+CsProc.setBackend(function(prog, argv, opts) {
+    dtCalls2.push(prog);
+    return { code: 0, out: "", err: "", timedOut: false, notStarted: false };
+});
+var present2 = { "/opt/homebrew/bin/gh": true, "/usr/bin/git": true };
+var dt2 = CsSetup.discoverTools("osx",
+    function(p) { return present2[p] === true; });
+ok(dt2.gitPath === "/usr/bin/git",
+    "discoverTools returns the stat-resolved git path");
+ok(dt2.ghPath === "/opt/homebrew/bin/gh",
+    "discoverTools returns the stat-resolved gh path");
+ok(dtCalls2.length === 0,
+    "no process is started when both candidates already stat");
+CsProc.setBackend(null);
+
+// Genuinely absent: nothing stats, and the bare name never starts.
+CsProc.setBackend(function(prog, argv, opts) {
+    return { code: -1, out: "", err: "execve: No such file or directory",
+             timedOut: false, notStarted: true };
+});
+var dt3 = CsSetup.discoverTools("osx", function() { return false; });
+ok(dt3.gitPath === null && dt3.ghPath === null,
+    "discoverTools returns null for a program that is genuinely nowhere " +
+    "to be found");
+CsProc.setBackend(null);
+
+// ---------------------------------------------------------------------
+// CsSetup -- device-flow parsing and the preflight ladder.
+//
+// The device output below is VERBATIM from a probe of gh 2.97.0 run
+// with no TTY inside CaveCAD 3.33.0 on 2026-08-20. gh printed the code
+// and the URL and then blocked polling: it did not demand a terminal
+// and did not wait for Enter. That is what makes in-app login
+// possible. Provenance recorded here per the plan's ground rules --
+// this is the one fixture in the plan already known-good, not
+// re-captured in this task.
+// ---------------------------------------------------------------------
+
+var GH_DEVICE_OUT = "\n! First copy your one-time code: D68F-995C\n" +
+    "Open this URL to continue in your web browser: " +
+    "https://github.com/login/device\n";
+
+ok(CsSetup.parseDeviceCode(GH_DEVICE_OUT) === "D68F-995C",
+    "parseDeviceCode reads the real gh output");
+ok(CsSetup.parseDeviceCode("First copy your one-time code: ABCD-1234") ===
+    "ABCD-1234", "parseDeviceCode works without the ! prefix");
+ok(CsSetup.parseDeviceCode("one-time code: 12AB-CD34") === "12AB-CD34",
+    "parseDeviceCode accepts digits in either half");
+ok(CsSetup.parseDeviceCode("nothing here") === null,
+    "parseDeviceCode returns null when absent");
+ok(CsSetup.parseDeviceCode("") === null,
+    "parseDeviceCode tolerates empty input");
+ok(CsSetup.parseDeviceCode(null) === null, "parseDeviceCode tolerates null");
+// "from either stream" -- callers concatenate stdout+stderr (the same
+// discipline as CsHub.textOf) before handing text to the parser; the
+// device code can land in either depending on gh's version and TTY
+// detection, so this checks the parser accepts it wherever it lands.
+ok(CsSetup.parseDeviceCode("stdout noise\n" + GH_DEVICE_OUT) === "D68F-995C",
+    "parseDeviceCode finds the code regardless of what precedes it, " +
+    "so a caller can safely hand it stdout+stderr concatenated");
+
+ok(CsSetup.parseDeviceUrl(GH_DEVICE_OUT) === "https://github.com/login/device",
+    "parseDeviceUrl reads the device URL");
+ok(CsSetup.parseDeviceUrl("no url") === "https://github.com/login/device",
+    "parseDeviceUrl falls back to the canonical URL");
+
+// The ladder. Each rung is fed a canned command result, so no process
+// runs and no network is touched. gitPath/ghPath are pre-resolved
+// strings here -- CsSetup.discoverTools (above) is what a real caller
+// uses to obtain them, exactly once, before building this record; the
+// ladder itself stays a pure function over already-collected results.
+function ladderWith(over) {
+    var base = {
+        gitPath: "/usr/bin/git",
+        ghPath: "/opt/homebrew/bin/gh",
+        authStatus: { code: 0, out: AUTH_OK, err: "" },
+        setupGit: { code: 0, out: "", err: "" },
+        userName: { code: 0, out: "Nathan Schonegg\n", err: "" },
+        userEmail: { code: 0, out: "1+n@users.noreply.github.com\n", err: "" }
+    };
+    for (var k in over) {
+        if (over.hasOwnProperty(k)) {
+            base[k] = over[k];
+        }
+    }
+    return CsSetup.ladder(base, "osx");
+}
+
+var allGood = ladderWith({});
+ok(allGood.length === 6, "the ladder has six rungs");
+ok(allGood[0].id === "git" && allGood[1].id === "gh" &&
+   allGood[2].id === "auth" && allGood[3].id === "scope" &&
+   allGood[4].id === "helper" && allGood[5].id === "identity",
+    "rungs are in order: git, gh, auth, scope, helper, identity");
+var allOk = true;
+for (var li = 0; li < allGood.length; li++) {
+    if (!allGood[li].ok) {
+        allOk = false;
+    }
+}
+ok(allOk, "a fully configured machine passes every rung");
+ok(CsSetup.firstFailure(allGood) === null,
+    "firstFailure is null when everything passes");
+ok(allGood[2].cause === null, "a passing auth rung carries no cause");
+
+// Missing gh must not cascade into three more failures.
+var noGh = ladderWith({ ghPath: null });
+ok(noGh[1].ok === false, "missing gh fails its own rung");
+ok(noGh[1].remedy.indexOf("cli.github.com") !== -1,
+    "the gh rung's remedy carries the install link");
+ok(noGh[2].ok === null, "auth rung is NOT EVALUATED when gh is missing");
+ok(noGh[3].ok === null, "scope rung is not evaluated either");
+ok(noGh[2].cause === null,
+    "a rung that was never evaluated carries no cause either -- " +
+    "a missing gh must not ALSO report a cause for a check that never ran");
+ok(CsSetup.firstFailure(noGh).id === "gh", "firstFailure names the gh rung");
+
+var noGit = ladderWith({ gitPath: null });
+ok(noGit[0].ok === false, "missing git fails rung 1");
+ok(noGit[1].ok === null, "nothing after a missing git is evaluated");
+
+var loggedOut = ladderWith({
+    authStatus: { code: 1, out: "", err: AUTH_LOGGED_OUT_ERR } });
+ok(loggedOut[2].ok === false, "logged out fails the auth rung");
+ok(loggedOut[2].cause === "not_authenticated",
+    "a genuine logout carries the not_authenticated cause");
+ok(loggedOut[2].remedy.toLowerCase().indexOf("sign in") !== -1,
+    "the genuine-logout remedy DOES send the surveyor to sign in");
+ok(loggedOut[3].ok === null, "scope is not evaluated when logged out");
+
+// The known-live measurement this task exists to fix: a usage error
+// and a network failure are BOTH exit 1 with empty stdout, exactly
+// like a genuine logout -- isAuthenticated alone cannot tell them
+// apart. Fixtures are the real captures from CsHub's own test section
+// above (USAGE_ERROR_ERR, NETWORK_FAILURE_ERR), not composed here.
+var usageErrorAuth = ladderWith({
+    authStatus: { code: 1, out: "", err: USAGE_ERROR_ERR } });
+ok(usageErrorAuth[2].ok === false, "a usage error fails the auth rung");
+ok(usageErrorAuth[2].cause === "usage_error",
+    "the auth rung's cause is usage_error, not a login problem");
+ok(usageErrorAuth[2].remedy.toLowerCase().indexOf("sign in") === -1 &&
+   usageErrorAuth[2].remedy.toLowerCase().indexOf("log in") === -1,
+    "the usage-error remedy does NOT send the surveyor to (re-)authenticate");
+ok(usageErrorAuth[2].remedy.indexOf("gh") !== -1,
+    "the usage-error remedy points at gh itself (update it, or report it)");
+ok(usageErrorAuth[3].ok === null,
+    "scope is still not evaluated after a usage error");
+
+var offlineAuth = ladderWith({
+    authStatus: { code: 1, out: "", err: NETWORK_FAILURE_ERR } });
+ok(offlineAuth[2].ok === false, "a network failure fails the auth rung");
+ok(offlineAuth[2].cause === "network_failure",
+    "the auth rung's cause is network_failure, not a login problem");
+ok(offlineAuth[2].remedy.toLowerCase().indexOf("sign in") === -1 &&
+   offlineAuth[2].remedy.toLowerCase().indexOf("log in") === -1,
+    "the offline remedy does NOT send the surveyor into a sign-in flow " +
+    "that cannot fix a network problem");
+ok(offlineAuth[3].ok === null,
+    "scope is still not evaluated after a network failure");
+
+var thinScope = ladderWith({ authStatus: { code: 0, out: AUTH_THIN, err: "" } });
+ok(thinScope[2].ok === true, "a thin token is still authenticated");
+ok(thinScope[3].ok === false, "the scope rung catches a token without repo");
+ok(thinScope[3].remedy.indexOf("auth refresh") !== -1,
+    "the scope remedy is gh auth refresh");
+ok(thinScope[3].remedy.indexOf("404") !== -1,
+    "the scope remedy explains the 404 symptom");
+
+var noHelper = ladderWith({ setupGit: { code: 1, out: "", err: "no hosts" } });
+ok(noHelper[4].ok === false, "a failed setup-git fails the helper rung");
+
+var noIdentity = ladderWith({ userEmail: { code: 1, out: "", err: "" } });
+ok(noIdentity[5].ok === false, "a missing user.email fails the identity rung");
+
+// Identity plan: per-repo unless asked, so a developer's global git
+// config is never silently rewritten.
+var idLocal = CsSetup.identityPlan({ login: "ndschonegg", id: 12345,
+    name: "Nathan Schonegg" }, false);
+ok(idLocal.length === 2, "identityPlan sets name and email");
+ok(idLocal[0].join(" ").indexOf("--global") === -1,
+    "identityPlan is LOCAL by default");
+ok(idLocal[1][idLocal[1].length - 1] ===
+    "12345+ndschonegg@users.noreply.github.com",
+    "identityPlan uses the noreply address");
+var idGlobal = CsSetup.identityPlan({ login: "ndschonegg", id: 12345,
+    name: "Nathan Schonegg" }, true);
+ok(idGlobal[0].indexOf("--global") !== -1,
+    "identityPlan honours the global flag when asked");
+ok(CsSetup.identityPlan(null, false).length === 0,
+    "identityPlan is empty without a user");
+
+// ---------------------------------------------------------------------
 // Report.
 // ---------------------------------------------------------------------
 

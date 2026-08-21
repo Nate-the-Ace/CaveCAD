@@ -218,3 +218,229 @@ CsSetup.installHelp = function(system, name) {
     }
     return entry;
 };
+
+// ---------------------------------------------------------------------
+// Tool discovery for the ladder
+//
+// resolve() is stat-only: it returns null for a gh that lives outside
+// every candidate directory even when it is on PATH and works
+// (MacPorts, ~/.local/bin, Nix) -- verified live on 2026-08-21, a real
+// binary outside every candidate dir gives resolve() -> null but
+// discover() -> the bare name. Rungs 1 and 2 of the ladder (git, gh)
+// must be fed from discover(), never from resolve() alone, or the
+// ladder tells a surveyor with a perfectly working gh that it needs to
+// be installed.
+//
+// discover() runs a real process when nothing stats, so this function
+// calls it exactly ONCE per program and returns a plain record for the
+// caller to cache into the ladder's probe -- it must not be called
+// from inside ladder() itself on every rung evaluation, which would
+// relaunch "gh --version" every time the ladder is displayed. The
+// ladder stays a pure function over an already-collected probe record.
+// ---------------------------------------------------------------------
+
+CsSetup.discoverTools = function(system, existsFn) {
+    return {
+        gitPath: CsSetup.discover("git", CsGit.argvVersion(), system, existsFn),
+        ghPath: CsSetup.discover("gh", CsHub.argvVersion(), system, existsFn)
+    };
+};
+
+// ---------------------------------------------------------------------
+// Device flow
+// ---------------------------------------------------------------------
+
+CsSetup.DEVICE_URL = "https://github.com/login/device";
+
+// gh prints "! First copy your one-time code: XXXX-XXXX". Which stream
+// it lands on is an implementation detail (confirmed for auth status
+// text in CsHub.textOf's fixtures), so callers concatenate both
+// streams before handing text here; this only cares about the shape.
+CsSetup.parseDeviceCode = function(text) {
+    if (typeof text !== "string" || text.length === 0) {
+        return null;
+    }
+    var m = text.match(/one-time code:\s*([A-Z0-9]{4}-[A-Z0-9]{4})/i);
+    return m === null ? null : m[1].toUpperCase();
+};
+
+CsSetup.parseDeviceUrl = function(text) {
+    var s = (typeof text === "string") ? text : "";
+    var m = s.match(/https:\/\/\S*github\.com\/login\/device\S*/i);
+    return m === null ? CsSetup.DEVICE_URL : m[0];
+};
+
+// ---------------------------------------------------------------------
+// The ladder
+// ---------------------------------------------------------------------
+
+// Distinguishes gh auth failures that otherwise look identical: exit
+// 1, empty stdout, no "Logged in to" text. Measured live against gh
+// 2.97.0 on 2026-08-21 -- logged-out, offline, and "this gh rejects a
+// flag we send" all produce that exact same shape. Collapsing them
+// into "not signed in" sends an offline surveyor, or one running a
+// gh version this add-on has not caught up with, into a sign-in loop
+// on a machine that was never broken.
+CsSetup.AUTH_CAUSE_USAGE_ERROR = "usage_error";
+CsSetup.AUTH_CAUSE_NETWORK_FAILURE = "network_failure";
+CsSetup.AUTH_CAUSE_NOT_AUTHENTICATED = "not_authenticated";
+
+// ok === true  passed
+// ok === false failed, remedy (and, for the auth rung, cause) applies
+// ok === null  NOT EVALUATED, because an earlier rung failed. Reporting
+//              "not authenticated" under "gh is not installed" sends
+//              the surveyor after three problems that are one problem.
+// cause is null unless a rung distinguishes more than one failure
+// mode that would otherwise read as the same thing (only the auth
+// rung does, for now) -- it lets a caller branch without re-parsing
+// the remedy text.
+CsSetup.rung = function(id, label, ok, remedy, cause) {
+    return {
+        id: id,
+        label: label,
+        ok: ok,
+        remedy: (typeof remedy === "string") ? remedy : "",
+        cause: (cause === undefined) ? null : cause
+    };
+};
+
+CsSetup.ladder = function(probe, system) {
+    var sys = system ? system : CsSetup.systemId();
+    var rungs = [];
+    var blocked = false;
+
+    function skip(id, label) {
+        rungs.push(CsSetup.rung(id, label, null, ""));
+    }
+
+    // 1. git
+    var gitHelp = CsSetup.installHelp(sys, "git");
+    if (probe.gitPath) {
+        rungs.push(CsSetup.rung("git", "git installed", true));
+    } else {
+        rungs.push(CsSetup.rung("git", "git installed", false,
+            "git was not found. Install it with: " + gitHelp.command +
+            "  --  " + gitHelp.links.join(" ")));
+        blocked = true;
+    }
+
+    // 2. gh
+    var ghHelp = CsSetup.installHelp(sys, "gh");
+    if (blocked) {
+        skip("gh", "GitHub CLI installed");
+    } else if (probe.ghPath) {
+        rungs.push(CsSetup.rung("gh", "GitHub CLI installed", true));
+    } else {
+        rungs.push(CsSetup.rung("gh", "GitHub CLI installed", false,
+            "The GitHub CLI was not found. Install it with: " +
+            (ghHelp.command.length > 0 ? ghHelp.command + "  --  " : "") +
+            ghHelp.links.join(" ")));
+        blocked = true;
+    }
+
+    // 3. authenticated
+    //
+    // Three exit-1-empty-stdout failures share one signal (see the
+    // AUTH_CAUSE_* comment above): check the two diagnosable causes
+    // BEFORE concluding "not signed in", because that conclusion
+    // drives a surveyor into `gh auth login` -- which fixes nothing
+    // for an offline machine or a gh version mismatch, and looks like
+    // it worked (login succeeds) while the underlying rung stays
+    // broken for the SAME reason next time.
+    if (blocked) {
+        skip("auth", "Signed in to GitHub");
+    } else if (CsHub.isAuthenticated(probe.authStatus)) {
+        rungs.push(CsSetup.rung("auth", "Signed in to GitHub", true));
+    } else if (CsHub.isUsageError(probe.authStatus)) {
+        rungs.push(CsSetup.rung("auth", "Signed in to GitHub", false,
+            "This gh rejected a flag this add-on uses (--active). That " +
+            "is a gh version mismatch, not a login problem -- update " +
+            "gh, or report this, rather than trying to authenticate again.",
+            CsSetup.AUTH_CAUSE_USAGE_ERROR));
+        blocked = true;
+    } else if (CsHub.isNetworkFailure(probe.authStatus)) {
+        rungs.push(CsSetup.rung("auth", "Signed in to GitHub", false,
+            "Could not reach GitHub. This looks like a network problem, " +
+            "not a login problem -- check your internet connection. " +
+            "Authenticating again will not fix a machine that is offline.",
+            CsSetup.AUTH_CAUSE_NETWORK_FAILURE));
+        blocked = true;
+    } else {
+        rungs.push(CsSetup.rung("auth", "Signed in to GitHub", false,
+            "Not signed in. Use Sign in to GitHub below -- it opens your " +
+            "browser and no password passes through CaveCAD.",
+            CsSetup.AUTH_CAUSE_NOT_AUTHENTICATED));
+        blocked = true;
+    }
+
+    // 4. repo scope
+    if (blocked) {
+        skip("scope", "Token can see private repositories");
+    } else if (CsHub.hasRepoScope(probe.authStatus)) {
+        rungs.push(CsSetup.rung("scope", "Token can see private repositories", true));
+    } else {
+        rungs.push(CsSetup.rung("scope", "Token can see private repositories", false,
+            "This token lacks the 'repo' scope, so a private cave repository " +
+            "returns 404 -- it looks as though it does not exist. Fix with: " +
+            "gh auth refresh -s repo"));
+        blocked = true;
+    }
+
+    // 5. credential helper
+    if (blocked) {
+        skip("helper", "git can authenticate to GitHub");
+    } else if (probe.setupGit && probe.setupGit.code === 0) {
+        rungs.push(CsSetup.rung("helper", "git can authenticate to GitHub", true));
+    } else {
+        rungs.push(CsSetup.rung("helper", "git can authenticate to GitHub", false,
+            "git has no credential helper, so a push waits forever for a " +
+            "password prompt that never appears. Fix with: gh auth setup-git"));
+        blocked = true;
+    }
+
+    // 6. identity
+    if (blocked) {
+        skip("identity", "Commit name and email set");
+    } else {
+        var haveName = probe.userName && probe.userName.code === 0 &&
+            String(probe.userName.out).replace(/\s/g, "").length > 0;
+        var haveEmail = probe.userEmail && probe.userEmail.code === 0 &&
+            String(probe.userEmail.out).replace(/\s/g, "").length > 0;
+        if (haveName && haveEmail) {
+            rungs.push(CsSetup.rung("identity", "Commit name and email set", true));
+        } else {
+            rungs.push(CsSetup.rung("identity", "Commit name and email set", false,
+                "git has no commit identity, so a commit refuses to run. " +
+                "Set it from your GitHub account below."));
+        }
+    }
+
+    return rungs;
+};
+
+CsSetup.firstFailure = function(rungs) {
+    for (var i = 0; i < rungs.length; i++) {
+        if (rungs[i].ok === false) {
+            return rungs[i];
+        }
+    }
+    return null;
+};
+
+/**
+ * Returns argv arrays for setting the commit identity.
+ *
+ * LOCAL by default: silently rewriting a developer's global git
+ * identity is an overreach, and this add-on runs on machines that do
+ * other work.
+ */
+CsSetup.identityPlan = function(user, global) {
+    if (!user || typeof user.login !== "string" || user.login.length === 0) {
+        return [];
+    }
+    var email = CsHub.noreplyEmail(user);
+    return [
+        CsGit.argvConfigSet("user.name", user.name, global === true),
+        CsGit.argvConfigSet("user.email", email, global === true)
+    ];
+};
