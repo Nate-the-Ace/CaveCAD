@@ -85,6 +85,7 @@ function loadRepoScript(scriptPath) {
 // Load order: leaves first.
 var CORE_FILES = [
     "scripts/CaveSurvey/Core/CsUnits.js",
+    "scripts/CaveSurvey/Core/CsProc.js",
     "scripts/CaveSurvey/Core/CsGeoProject.js",
     "scripts/CaveSurvey/Core/CsAngles.js",
     "scripts/CaveSurvey/Core/CsIgrfCoeffs.js",
@@ -5596,6 +5597,50 @@ if (!IS_NODE) {
         "/home/user/Cave-aerial.png",
         "imagePathFor: filename with no extension at all");
 }
+
+// ---------------------------------------------------------------------
+// CsProc -- argv discipline, redaction, injectable backend.
+// ---------------------------------------------------------------------
+
+var procCalls = [];
+CsProc.setBackend(function(prog, argv, opts) {
+    procCalls.push({ prog: prog, argv: argv, opts: opts });
+    return { code: 0, out: "fake-out", err: "", timedOut: false };
+});
+
+var pr = CsProc.run("git", ["commit", "-m", "two words"]);
+ok(pr.code === 0, "CsProc.run returns the backend's code");
+ok(pr.out === "fake-out", "CsProc.run returns stdout");
+ok(pr.timedOut === false, "CsProc.run reports no timeout");
+ok(procCalls.length === 1, "CsProc.run called the backend once");
+ok(procCalls[0].prog === "git", "CsProc passes the program through");
+ok(procCalls[0].argv.length === 3, "CsProc passes 3 arguments, not a joined string");
+ok(procCalls[0].argv[2] === "two words",
+    "CsProc keeps a spaced argument as ONE argument");
+
+// A timeout must not look like success.
+CsProc.setBackend(function() {
+    return { code: -1, out: "", err: "timed out", timedOut: true };
+});
+var pt = CsProc.run("git", ["fetch"]);
+ok(pt.timedOut === true, "CsProc surfaces timedOut");
+ok(pt.code !== 0, "a timeout is a non-zero code");
+
+// Redaction. Synthetic strings only -- never a real token in a test.
+ok(CsProc.redact("Token: ghp_ABCDEFGHIJKLMNOPQRSTUVWXYZ012345")
+        .indexOf("ghp_ABCDEF") === -1,
+    "CsProc.redact removes a ghp_ token");
+ok(CsProc.redact("gho_0123456789abcdefghijklmnopqrstuvwx")
+        .indexOf("<redacted>") !== -1,
+    "CsProc.redact marks a gho_ token");
+ok(CsProc.redact("ghu_AAA ghs_BBB").indexOf("ghu_AAA") === -1 &&
+   CsProc.redact("ghu_AAA ghs_BBB").indexOf("ghs_BBB") === -1,
+    "CsProc.redact removes ghu_ and ghs_ tokens");
+ok(CsProc.redact("no secret here") === "no secret here",
+    "CsProc.redact leaves ordinary text alone");
+ok(CsProc.redact(null) === "", "CsProc.redact tolerates null");
+
+CsProc.setBackend(null);   // restore the real backend for later sections
 
 // ---------------------------------------------------------------------
 // Report.

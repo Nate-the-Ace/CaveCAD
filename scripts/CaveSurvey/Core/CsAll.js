@@ -15,6 +15,7 @@
 // no stock add-ons load). The prefix makes collision impossible.
 
 include(includeBasePath + "/CsUnits.js");
+include(includeBasePath + "/CsProc.js");
 include(includeBasePath + "/CsGeoProject.js");
 include(includeBasePath + "/CsAngles.js");
 include(includeBasePath + "/CsIgrfCoeffs.js");
