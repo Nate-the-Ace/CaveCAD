@@ -6312,6 +6312,31 @@ ok(u3 !== null && u3.name === "x",
     "parseApiUser falls back to login when name is a malformed " +
     "shape, instead of throwing on String(name)");
 
+// Moderate finding from spec review: parseApiUser used to pass j.id
+// through UNVALIDATED, so a bad id traveled downstream as part of an
+// apparently-valid user object -- CsHub.noreplyEmail rejected it
+// later, but by then CsSetup.identityPlan had already built a
+// length-2 argv plan with a null email in it (see identityPlan's own
+// tests below). id is now validated at the SOURCE with the exact rule
+// noreplyEmail uses (CsHub.isValidId), so the two cannot disagree.
+ok(CsHub.parseApiUser({ code: 0, out: '{"login":"x","id":null}', err: "" }) ===
+    null, "parseApiUser rejects a null id at the source");
+ok(CsHub.parseApiUser({ code: 0, out: '{"login":"x"}', err: "" }) === null,
+    "parseApiUser rejects a missing id at the source");
+ok(CsHub.parseApiUser(
+    { code: 0, out: '{"login":"x","id":"abc"}', err: "" }) === null,
+    "parseApiUser rejects a non-numeric string id at the source");
+ok(CsHub.parseApiUser({ code: 0, out: '{"login":"x","id":-1}', err: "" }) ===
+    null, "parseApiUser rejects a negative id at the source");
+ok(CsHub.parseApiUser({ code: 0, out: '{"login":"x","id":1e21}', err: "" }) ===
+    null,
+    "parseApiUser rejects an id past Number.MAX_SAFE_INTEGER at the source " +
+    "-- same 1e21 case noreplyEmail guards, now caught one layer earlier");
+var u4 = CsHub.parseApiUser(
+    { code: 0, out: '{"login":"x","id":307531413,"name":"X"}', err: "" });
+ok(u4 !== null && u4.id === 307531413,
+    "parseApiUser still accepts a real, valid id");
+
 // Important-3: a future gh that renames or drops --active must not
 // look identical to "logged out" -- isUsageError distinguishes a
 // usage error from an auth failure. Real capture, gh 2.97.0,
@@ -6787,11 +6812,48 @@ ok(CsSetup.parseDeviceCode(null) === null, "parseDeviceCode tolerates null");
 ok(CsSetup.parseDeviceCode("stdout noise\n" + GH_DEVICE_OUT) === "D68F-995C",
     "parseDeviceCode finds the code regardless of what precedes it, " +
     "so a caller can safely hand it stdout+stderr concatenated");
+// Pinned by spec review as already correct but previously untested.
+ok(CsSetup.parseDeviceCode("one-time code: abcd-1234") === "ABCD-1234",
+    "parseDeviceCode upcases a lowercase code");
+ok(CsSetup.parseDeviceCode(
+    "ABCD-1234 looks exactly like a code but has no label at all") === null,
+    "parseDeviceCode requires the 'one-time code:' label -- the shape " +
+    "alone is not enough");
+ok(CsSetup.parseDeviceCode(
+    "one-time code: AAAA-1111\nsomething else\none-time code: BBBB-2222") ===
+    "AAAA-1111",
+    "parseDeviceCode returns the FIRST code when the text contains two");
 
 ok(CsSetup.parseDeviceUrl(GH_DEVICE_OUT) === "https://github.com/login/device",
     "parseDeviceUrl reads the device URL");
 ok(CsSetup.parseDeviceUrl("no url") === "https://github.com/login/device",
     "parseDeviceUrl falls back to the canonical URL");
+// Low finding from spec review: the old "\S*" before the literal host
+// spanned path/query characters too, so a URL naming github.com
+// ANYWHERE (not as the actual host) matched and was returned as-is --
+// a bad shape to hand to QDesktopServices.openUrl (Task 7) regardless
+// of today's reachability (gh's own output is not attacker-
+// controlled). All three cases below must fall back to the canonical
+// URL, not return the attacker-shaped one.
+ok(CsSetup.parseDeviceUrl(
+    "go to https://evil.io/r?u=github.com/login/device") ===
+    "https://github.com/login/device",
+    "parseDeviceUrl rejects github.com appearing in the PATH of a " +
+    "different host, and falls back to canonical");
+ok(CsSetup.parseDeviceUrl(
+    "https://evil.github.com.attacker.io/login/device") ===
+    "https://github.com/login/device",
+    "parseDeviceUrl rejects a host that merely CONTAINS github.com as " +
+    "a prefix of a longer real host, and falls back to canonical");
+ok(CsSetup.parseDeviceUrl("http://github.com/login/device") ===
+    "https://github.com/login/device",
+    "parseDeviceUrl rejects a plain http:// URL (only https counts) " +
+    "and falls back to the canonical https URL");
+// A genuine subdomain of github.com is still accepted -- the anchor
+// is the LABEL boundary, not a same-string ban.
+ok(CsSetup.parseDeviceUrl("https://foo.github.com/login/device") ===
+    "https://foo.github.com/login/device",
+    "parseDeviceUrl still accepts a genuine *.github.com subdomain");
 
 // The ladder. Each rung is fed a canned command result, so no process
 // runs and no network is touched. gitPath/ghPath are pre-resolved
@@ -6867,11 +6929,22 @@ var usageErrorAuth = ladderWith({
 ok(usageErrorAuth[2].ok === false, "a usage error fails the auth rung");
 ok(usageErrorAuth[2].cause === "usage_error",
     "the auth rung's cause is usage_error, not a login problem");
+// Spec review found this guard hollow: neither "sign in" nor "log in"
+// occurs in the literal command "gh auth login", so a remedy reading
+// "Run: gh auth login" would have passed both checks unnoticed. Also
+// reject that literal phrase, and -- since a negative-only guard
+// passes just as well for a remedy that says NOTHING -- assert
+// something POSITIVE the remedy must contain: it names the actual
+// fix (update gh) rather than a login flow.
 ok(usageErrorAuth[2].remedy.toLowerCase().indexOf("sign in") === -1 &&
-   usageErrorAuth[2].remedy.toLowerCase().indexOf("log in") === -1,
-    "the usage-error remedy does NOT send the surveyor to (re-)authenticate");
-ok(usageErrorAuth[2].remedy.indexOf("gh") !== -1,
-    "the usage-error remedy points at gh itself (update it, or report it)");
+   usageErrorAuth[2].remedy.toLowerCase().indexOf("log in") === -1 &&
+   usageErrorAuth[2].remedy.toLowerCase().indexOf("auth login") === -1,
+    "the usage-error remedy does NOT send the surveyor to (re-)authenticate " +
+    "(and does not merely avoid the words while still naming the command)");
+ok(usageErrorAuth[2].remedy.toLowerCase().indexOf("update") !== -1 &&
+    usageErrorAuth[2].remedy.indexOf("gh") !== -1,
+    "the usage-error remedy POSITIVELY says to update gh -- a remedy " +
+    "that said nothing at all would pass the negative check above too");
 ok(usageErrorAuth[3].ok === null,
     "scope is still not evaluated after a usage error");
 
@@ -6881,9 +6954,14 @@ ok(offlineAuth[2].ok === false, "a network failure fails the auth rung");
 ok(offlineAuth[2].cause === "network_failure",
     "the auth rung's cause is network_failure, not a login problem");
 ok(offlineAuth[2].remedy.toLowerCase().indexOf("sign in") === -1 &&
-   offlineAuth[2].remedy.toLowerCase().indexOf("log in") === -1,
+   offlineAuth[2].remedy.toLowerCase().indexOf("log in") === -1 &&
+   offlineAuth[2].remedy.toLowerCase().indexOf("auth login") === -1,
     "the offline remedy does NOT send the surveyor into a sign-in flow " +
-    "that cannot fix a network problem");
+    "that cannot fix a network problem, and does not just avoid the words " +
+    "while still naming the login command");
+ok(offlineAuth[2].remedy.toLowerCase().indexOf("connection") !== -1,
+    "the offline remedy POSITIVELY mentions the network connection -- a " +
+    "remedy that said nothing at all would pass the negative check above");
 ok(offlineAuth[3].ok === null,
     "scope is still not evaluated after a network failure");
 
@@ -6917,6 +6995,81 @@ ok(idGlobal[0].indexOf("--global") !== -1,
     "identityPlan honours the global flag when asked");
 ok(CsSetup.identityPlan(null, false).length === 0,
     "identityPlan is empty without a user");
+
+// Moderate finding from spec review, the one with permanent
+// consequences: identityPlan used to build a length-2 plan even when
+// CsHub.noreplyEmail(user) came back null, because the two argv
+// arrays were built unconditionally from whatever `user` held. A
+// caller checking `plan.length === 2` read that as success. Reviewer
+// confirmed LIVE, in the real engine, that a null element in a
+// CsProc.run argv array coerces to an empty string --
+// CsProc.run("/bin/echo", plan[1]) printed "config user.email " -- so
+// the command that actually ran was:
+//
+//     git config user.email ""
+//
+// which silently wipes the repository's committer address, a change
+// as unfixable as the real-email leak this whole path exists to
+// prevent. Fixed at both layers: parseApiUser now rejects a bad id at
+// the source (tested in the CsHub section above), and identityPlan no
+// longer trusts that alone -- every case below must come back [],
+// never a partial plan a length check cannot tell apart from success.
+ok(CsSetup.identityPlan(
+    { login: "nd", id: undefined, name: "N S" }, false).length === 0,
+    "identityPlan is [] -- not a partial plan -- when id is undefined");
+ok(CsSetup.identityPlan(
+    { login: "nd", id: null, name: "N S" }, false).length === 0,
+    "identityPlan is [] when id is null");
+ok(CsSetup.identityPlan(
+    { login: "nd", id: "abc", name: "N S" }, false).length === 0,
+    "identityPlan is [] when id is a non-numeric string");
+ok(CsSetup.identityPlan(
+    { login: "nd", id: 12345, name: ["A"] }, false).length === 0,
+    "identityPlan is [] when name is an array, not a string -- it must " +
+    "not put a malformed shape into the argv array either");
+ok(CsSetup.identityPlan(
+    { login: "nd", id: 12345, name: "" }, false).length === 0,
+    "identityPlan is [] when name is an empty string");
+ok(CsSetup.identityPlan(
+    { login: "nd", id: 12345, name: undefined }, false).length === 0,
+    "identityPlan is [] when name is missing entirely");
+// The valid case must still work after all these gates -- otherwise
+// the fix would just be "always return []", which is not the fix.
+ok(CsSetup.identityPlan(
+    { login: "nd", id: 12345, name: "N S" }, false).length === 2,
+    "identityPlan still returns a full plan for a genuinely valid user");
+
+// ---------------------------------------------------------------------
+// CsSetup.ladder / firstFailure -- must not throw on a wholly missing
+// or wrongly-shaped argument. Every FIELD inside a probe record was
+// already tolerant of a bad shape (probe.gitPath, probe.authStatus,
+// ...); only the probe OBJECT itself, and firstFailure's rungs array,
+// were not -- and Task 6's GUI is a real caller of both. The house
+// convention in this slice is a returned value, not a thrown error.
+// ---------------------------------------------------------------------
+
+var noProbeAtAll = CsSetup.ladder(undefined, "osx");
+ok(noProbeAtAll.length === 6,
+    "ladder(undefined) does not throw -- still returns six rungs");
+ok(noProbeAtAll[0].ok === false,
+    "a missing probe reads as \"nothing discovered\": rung 1 (git) fails");
+ok(noProbeAtAll[1].ok === null,
+    "and everything after it is correctly not evaluated");
+ok(CsSetup.ladder(null, "osx").length === 6,
+    "ladder(null) does not throw either");
+ok(CsSetup.ladder("not an object", "osx")[0].ok === false,
+    "ladder(<a string>) does not throw -- treated the same as no probe");
+
+ok(CsSetup.firstFailure(undefined) === null,
+    "firstFailure(undefined) does not throw -- returns null");
+ok(CsSetup.firstFailure(null) === null,
+    "firstFailure(null) does not throw -- returns null");
+ok(CsSetup.firstFailure("not an array") === null,
+    "firstFailure(<a string>) does not throw -- returns null");
+ok(CsSetup.firstFailure(allGood) === null,
+    "firstFailure still works normally on a real, all-passing rungs array");
+ok(CsSetup.firstFailure(noGh) !== null && CsSetup.firstFailure(noGh).id === "gh",
+    "firstFailure still works normally on a real, failing rungs array");
 
 // ---------------------------------------------------------------------
 // Report.

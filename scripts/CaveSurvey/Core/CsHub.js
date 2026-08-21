@@ -180,6 +180,50 @@ CsHub.hasRepoScope = function(r) {
     return CsHub.parseScopes(r).indexOf("repo") !== -1;
 };
 
+/**
+ * True for exactly the id shapes noreplyEmail is willing to build an
+ * address from: a positive integer (number or numeric string, no
+ * leading zero, no exponential notation), capped at
+ * Number.MAX_SAFE_INTEGER.
+ *
+ * Shared by parseApiUser (below) and noreplyEmail so the two CANNOT
+ * disagree about what counts as a valid GitHub id. They used to: this
+ * check lived only in noreplyEmail, one layer downstream of
+ * parseApiUser, which let a `{"id":<bad>}` gh response travel through
+ * parseApiUser as an apparently-valid user object, into
+ * CsSetup.identityPlan, which builds a 2-element argv array either
+ * way -- so a caller checking `plan.length === 2` read a null email as
+ * success. Validating at the source (here) means a bad id is null
+ * from the very first parse, not a null discovered three calls later.
+ *
+ * The number and string branches AGREE on what counts as valid:
+ * GitHub ids are positive integers, so a float, a negative, a
+ * leading-zero string, or an exponential-notation number (e.g. 1e21)
+ * is rejected on EITHER branch, not accepted on one and rejected on
+ * the other -- real gh returns id as a JSON number, so a weaker
+ * number branch is the one that actually runs in production, not a
+ * dead code path.
+ *
+ * Both branches also cap at Number.MAX_SAFE_INTEGER (2^53 - 1).
+ * Two different things happen above that line, both rejected here
+ * rather than distinguished: a real GitHub id that large would
+ * already have been silently rounded by JSON.parse before this
+ * function ever sees it, and a bogus value like 1e21 is, in IEEE 754,
+ * ALREADY an integer as far as `Math.floor(id) === id` can tell --
+ * every double beyond 2^52 has no fractional part left to floor away,
+ * so that check alone does not reject it. GitHub ids are 9 digits
+ * today, decades from either problem; the cap exists so this function
+ * cannot be tricked into treating "who knows" as "valid" for either
+ * reason.
+ */
+CsHub.isValidId = function(id) {
+    var MAX_ID = Number.MAX_SAFE_INTEGER;
+    return (typeof id === "number" && isFinite(id) &&
+            Math.floor(id) === id && id > 0 && id <= MAX_ID) ||
+           (typeof id === "string" && /^[1-9]\d*$/.test(id) &&
+            Number(id) <= MAX_ID);
+};
+
 CsHub.parseApiUser = function(r) {
     var j = CsHub.parseJson(r);
     // typeof, not truthiness, and no String() coercion of an
@@ -188,6 +232,14 @@ CsHub.parseApiUser = function(r) {
     // {"login":{"toString":1}} -- the same class of bug parseVisibility
     // had. gh's login is always a plain non-empty string.
     if (j === null || typeof j.login !== "string" || j.login.length === 0) {
+        return null;
+    }
+    // id is validated HERE, at the source, with the exact rule
+    // noreplyEmail uses (CsHub.isValidId) -- not left to travel
+    // downstream as a "valid" user object whose id turns out to be
+    // unusable only when noreplyEmail is finally called. See the
+    // isValidId docblock for why this surfaced as a defect.
+    if (!CsHub.isValidId(j.id)) {
         return null;
     }
     return {
@@ -214,42 +266,18 @@ CsHub.parseApiUser = function(r) {
  * like "undefined+x@users.noreply.github.com" or
  * "1+[object Object]@users.noreply.github.com" -- a wrong committer
  * address is unfixable once it is in history, same as the real-email
- * leak this function exists to prevent.
- *
- * The number and string id branches AGREE on what counts as valid:
- * GitHub ids are positive integers, so a float, a negative, a
- * leading-zero string, or an exponential-notation number (e.g. 1e21)
- * is rejected on EITHER branch, not accepted on one and rejected on
- * the other -- real gh returns id as a JSON number, so a weaker
- * number branch is the one that actually runs in production, not a
- * dead code path.
- *
- * Both branches also cap at Number.MAX_SAFE_INTEGER (2^53 - 1).
- * Two different things happen above that line, both rejected here
- * rather than distinguished: a real GitHub id that large would
- * already have been silently rounded by JSON.parse before this
- * function ever sees it, and a bogus value like 1e21 is, in IEEE 754,
- * ALREADY an integer as far as `Math.floor(id) === id` can tell --
- * every double beyond 2^52 has no fractional part left to floor away,
- * so that check alone does not reject it. GitHub ids are 9 digits
- * today, decades from either problem; the cap exists so this function
- * cannot be tricked into treating "who knows" as "valid" for either
- * reason.
+ * leak this function exists to prevent. id validity is delegated to
+ * CsHub.isValidId, shared with parseApiUser, so the two cannot
+ * disagree.
  */
 CsHub.noreplyEmail = function(user) {
     if (!user || typeof user.login !== "string" || user.login.length === 0) {
         return null;
     }
-    var id = user.id;
-    var MAX_ID = Number.MAX_SAFE_INTEGER;
-    var idIsValid = (typeof id === "number" && isFinite(id) &&
-                     Math.floor(id) === id && id > 0 && id <= MAX_ID) ||
-                    (typeof id === "string" && /^[1-9]\d*$/.test(id) &&
-                     Number(id) <= MAX_ID);
-    if (!idIsValid) {
+    if (!CsHub.isValidId(user.id)) {
         return null;
     }
-    return String(id) + "+" + user.login + "@users.noreply." + CsHub.HOST;
+    return String(user.id) + "+" + user.login + "@users.noreply." + CsHub.HOST;
 };
 
 // gh rejects an unrecognized flag with exit 1, empty stdout, and

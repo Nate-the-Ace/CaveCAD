@@ -406,7 +406,22 @@ CsSetup.parseDeviceCode = function(text) {
 
 CsSetup.parseDeviceUrl = function(text) {
     var s = (typeof text === "string") ? text : "";
-    var m = s.match(/https:\/\/\S*github\.com\/login\/device\S*/i);
+    // Anchored on the HOST, not just "github.com appears somewhere in
+    // the URL": the previous "\S*" before the literal host spanned
+    // path/query characters too, so
+    // "https://evil.io/r?u=github.com/login/device" matched and
+    // returned the evil.io URL, and
+    // "https://evil.github.com.attacker.io/login/device" matched too
+    // (github.com followed by more host, not a path). This value ends
+    // up in QDesktopServices.openUrl (Task 7); gh's own output is not
+    // attacker-controlled, so there is no live exploit today, but
+    // "opens whatever URL was scraped" is the wrong shape regardless.
+    // Requires: https literally, zero or more dot-terminated
+    // subdomain labels, then literally "github.com", then the path
+    // starting at "/login/device" -- nothing else may sit between the
+    // host and that path.
+    var m = s.match(
+        /https:\/\/([A-Za-z0-9-]+\.)*github\.com\/login\/device\S*/i);
     return m === null ? CsSetup.DEVICE_URL : m[0];
 };
 
@@ -445,6 +460,13 @@ CsSetup.rung = function(id, label, ok, remedy, cause) {
 };
 
 CsSetup.ladder = function(probe, system) {
+    // A missing/non-object probe must read as "nothing discovered
+    // yet", not throw. Every FIELD inside probe (gitPath, authStatus,
+    // ...) was already tolerant of a bad shape below; only the probe
+    // OBJECT itself was not, and Task 6's GUI is a real caller of
+    // this function. "Nothing discovered" fails rung 1 with its
+    // install remedy, same as an explicit {gitPath: null}.
+    var p = (probe && typeof probe === "object") ? probe : {};
     var sys = system ? system : CsSetup.systemId();
     var rungs = [];
     var blocked = false;
@@ -455,7 +477,7 @@ CsSetup.ladder = function(probe, system) {
 
     // 1. git
     var gitHelp = CsSetup.installHelp(sys, "git");
-    if (probe.gitPath) {
+    if (p.gitPath) {
         rungs.push(CsSetup.rung("git", "git installed", true));
     } else {
         rungs.push(CsSetup.rung("git", "git installed", false,
@@ -468,7 +490,7 @@ CsSetup.ladder = function(probe, system) {
     var ghHelp = CsSetup.installHelp(sys, "gh");
     if (blocked) {
         skip("gh", "GitHub CLI installed");
-    } else if (probe.ghPath) {
+    } else if (p.ghPath) {
         rungs.push(CsSetup.rung("gh", "GitHub CLI installed", true));
     } else {
         rungs.push(CsSetup.rung("gh", "GitHub CLI installed", false,
@@ -489,16 +511,16 @@ CsSetup.ladder = function(probe, system) {
     // broken for the SAME reason next time.
     if (blocked) {
         skip("auth", "Signed in to GitHub");
-    } else if (CsHub.isAuthenticated(probe.authStatus)) {
+    } else if (CsHub.isAuthenticated(p.authStatus)) {
         rungs.push(CsSetup.rung("auth", "Signed in to GitHub", true));
-    } else if (CsHub.isUsageError(probe.authStatus)) {
+    } else if (CsHub.isUsageError(p.authStatus)) {
         rungs.push(CsSetup.rung("auth", "Signed in to GitHub", false,
             "This gh rejected a flag this add-on uses (--active). That " +
             "is a gh version mismatch, not a login problem -- update " +
             "gh, or report this, rather than trying to authenticate again.",
             CsSetup.AUTH_CAUSE_USAGE_ERROR));
         blocked = true;
-    } else if (CsHub.isNetworkFailure(probe.authStatus)) {
+    } else if (CsHub.isNetworkFailure(p.authStatus)) {
         rungs.push(CsSetup.rung("auth", "Signed in to GitHub", false,
             "Could not reach GitHub. This looks like a network problem, " +
             "not a login problem -- check your internet connection. " +
@@ -516,7 +538,7 @@ CsSetup.ladder = function(probe, system) {
     // 4. repo scope
     if (blocked) {
         skip("scope", "Token can see private repositories");
-    } else if (CsHub.hasRepoScope(probe.authStatus)) {
+    } else if (CsHub.hasRepoScope(p.authStatus)) {
         rungs.push(CsSetup.rung("scope", "Token can see private repositories", true));
     } else {
         rungs.push(CsSetup.rung("scope", "Token can see private repositories", false,
@@ -529,7 +551,7 @@ CsSetup.ladder = function(probe, system) {
     // 5. credential helper
     if (blocked) {
         skip("helper", "git can authenticate to GitHub");
-    } else if (probe.setupGit && probe.setupGit.code === 0) {
+    } else if (p.setupGit && p.setupGit.code === 0) {
         rungs.push(CsSetup.rung("helper", "git can authenticate to GitHub", true));
     } else {
         rungs.push(CsSetup.rung("helper", "git can authenticate to GitHub", false,
@@ -542,10 +564,10 @@ CsSetup.ladder = function(probe, system) {
     if (blocked) {
         skip("identity", "Commit name and email set");
     } else {
-        var haveName = probe.userName && probe.userName.code === 0 &&
-            String(probe.userName.out).replace(/\s/g, "").length > 0;
-        var haveEmail = probe.userEmail && probe.userEmail.code === 0 &&
-            String(probe.userEmail.out).replace(/\s/g, "").length > 0;
+        var haveName = p.userName && p.userName.code === 0 &&
+            String(p.userName.out).replace(/\s/g, "").length > 0;
+        var haveEmail = p.userEmail && p.userEmail.code === 0 &&
+            String(p.userEmail.out).replace(/\s/g, "").length > 0;
         if (haveName && haveEmail) {
             rungs.push(CsSetup.rung("identity", "Commit name and email set", true));
         } else {
@@ -559,6 +581,13 @@ CsSetup.ladder = function(probe, system) {
 };
 
 CsSetup.firstFailure = function(rungs) {
+    // A non-array (missing, null, or any other shape) reads as "no
+    // failure known", not a throw -- the house convention in this
+    // slice, and ladder() above has the matching tolerance for its
+    // own argument.
+    if (!Array.isArray(rungs)) {
+        return null;
+    }
     for (var i = 0; i < rungs.length; i++) {
         if (rungs[i].ok === false) {
             return rungs[i];
@@ -568,17 +597,38 @@ CsSetup.firstFailure = function(rungs) {
 };
 
 /**
- * Returns argv arrays for setting the commit identity.
+ * Returns argv arrays for setting the commit identity, or [] when any
+ * field needed to build them is not trustworthy.
  *
  * LOCAL by default: silently rewriting a developer's global git
  * identity is an overreach, and this add-on runs on machines that do
  * other work.
+ *
+ * ALL-OR-NOTHING, deliberately: this used to return a length-2 plan
+ * even when CsHub.noreplyEmail(user) came back null (an invalid id --
+ * e.g. parseApiUser passing a partial gh response straight through),
+ * because the two argv arrays were built unconditionally. A caller
+ * checking `plan.length === 2` read that as success and ran it --
+ * confirmed live in the real engine that a null argv element coerces
+ * to an empty string, so the command that actually executed was
+ * `git config user.email ""`, silently wiping the repository's
+ * committer address. A partial plan is worse than none, because a
+ * caller cannot tell it apart from a good one; parseApiUser has since
+ * been fixed to reject a bad id at the source (CsHub.isValidId), but
+ * this function no longer trusts that alone -- it checks its own
+ * inputs before building anything.
  */
 CsSetup.identityPlan = function(user, global) {
     if (!user || typeof user.login !== "string" || user.login.length === 0) {
         return [];
     }
+    if (typeof user.name !== "string" || user.name.length === 0) {
+        return [];
+    }
     var email = CsHub.noreplyEmail(user);
+    if (email === null) {
+        return [];
+    }
     return [
         CsGit.argvConfigSet("user.name", user.name, global === true),
         CsGit.argvConfigSet("user.email", email, global === true)
