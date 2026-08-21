@@ -661,6 +661,218 @@ var ranch = CsNetwork.resolve(back, { anchor: { name: "X1", x: 5, y: 5, z: 0 } }
 near(ranch.stations["X2"].y, -5, 1e-9, "explicit anchor overrides fixed");
 
 // ---------------------------------------------------------------------
+// Task 1b -- fixed control follows the anchor's frame.
+//
+// `back` has exactly ONE fixed station and it IS the anchor -- the
+// "0 or 1 fixed station" case from the acceptance criteria. There is
+// nothing else to offset, so this must be byte-identical to the
+// resolve above: same station geometry, and a controlFrame that
+// applied nothing.
+// ---------------------------------------------------------------------
+near(ranch.stations["X2"].y, -5, 1e-9,
+    "task 1b: single-fixed-station anchor resolve is unchanged");
+ok(ranch.controlFrame !== null && ranch.controlFrame !== undefined,
+    "task 1b: controlFrame is present even when there is nothing to offset");
+if (ranch.controlFrame) {
+    ok(ranch.controlFrame.applied.length === 0,
+        "task 1b: nothing else to apply the offset to -- one fixed station, and it's the anchor");
+}
+
+// Two-component tie fixture (P1/Q1), reused from the block above but
+// with its own survey object so an explicit anchor can be layered on
+// without disturbing `tie`. The anchor sits at a DIFFERENT drawing
+// position than P1's own control (500,-200 instead of 0,0) so the
+// frame offset is a real, nonzero translation -- proving the
+// invariance below isn't a fluke of both frames coinciding.
+var tieAnchored = CsModel.newSurvey();
+tieAnchored.shots.push(shotOf("P1", "P2", 10, 0));
+tieAnchored.shots.push(shotOf("Q1", "Q2", 10, 0));
+tieAnchored.shots.push(shotOf("P2", "Q1", 10, 90));
+tieAnchored.fixed["P1"] = { x: 0, y: 0, z: 0 };
+tieAnchored.fixed["Q1"] = { x: 10.4, y: 10, z: 0 };
+
+var rNoAnchorTie = CsNetwork.resolve(tieAnchored, {});
+var rAnchoredTie = CsNetwork.resolve(tieAnchored,
+    { anchor: { name: "P1", x: 500, y: -200, z: 0 } });
+
+ok(rAnchoredTie.ties.length === 1,
+    "task 1b: an explicit anchor on a fixed station still reports the tie, not a discard");
+ok(rNoAnchorTie.ties.length === 1,
+    "task 1b: sanity -- the same survey with no anchor also reports one tie");
+if (rAnchoredTie.ties.length === 1 && rNoAnchorTie.ties.length === 1) {
+    // THE INVARIANCE THAT PROVES IT RIGHT: a frame offset is a pure
+    // translation and cannot change a measured disagreement. If these
+    // two numbers differ, the offset logic is wrong regardless of
+    // what else passes.
+    near(rAnchoredTie.ties[0].error, rNoAnchorTie.ties[0].error, 1e-9,
+        "task 1b invariance: tie misclosure is identical with or without the explicit anchor");
+}
+near(rAnchoredTie.stations["Q1"].x, 10.4 + 500, 1e-9,
+    "task 1b: Q1's control is translated by the anchor's offset (x)");
+near(rAnchoredTie.stations["Q1"].y, 10 + (-200), 1e-9,
+    "task 1b: Q1's control is translated by the anchor's offset (y)");
+ok(rAnchoredTie.anchors.length === 2,
+    "task 1b: both P1 (explicit anchor) and Q1 (offset control) anchor their components");
+ok(rAnchoredTie.controlFrame !== null && rAnchoredTie.controlFrame !== undefined,
+    "task 1b: resolve exposes what it did with the fixed frame");
+if (rAnchoredTie.controlFrame) {
+    near(rAnchoredTie.controlFrame.offset.dx, 500, 1e-9,
+        "task 1b: controlFrame.offset.dx is the anchor's x minus P1's own control x");
+    near(rAnchoredTie.controlFrame.offset.dy, -200, 1e-9,
+        "task 1b: controlFrame.offset.dy likewise for y");
+    ok(rAnchoredTie.controlFrame.applied.indexOf("Q1") >= 0,
+        "task 1b: controlFrame names Q1 as an applied (offset) station");
+}
+
+// Same-component variant: two fixed stations on ONE ring (reusing the
+// `ring` fixture from the Task 1 block above), explicit anchor on RA.
+// There is no tie here -- both arcs are loops -- but the invariance
+// still has to hold, and RC's control still has to be translated.
+var rRingAnchored = CsNetwork.resolve(ring,
+    { anchor: { name: "RA", x: 1000, y: -1000, z: 0 } });
+ok(rRingAnchored.loops.length === rring.loops.length,
+    "task 1b: anchored ring keeps the same number of arc loops");
+ok(rRingAnchored.ties.length === 0,
+    "task 1b: still no ties on an anchored single-component ring");
+if (rRingAnchored.loops.length === rring.loops.length) {
+    for (var rai = 0; rai < rring.loops.length; rai++) {
+        near(rRingAnchored.loops[rai].error, rring.loops[rai].error, 1e-9,
+            "task 1b invariance: anchored ring's arc " + rai +
+            " misclosure matches the un-anchored resolve");
+    }
+}
+near(rRingAnchored.stations["RC"].x, 10 + 1000, 1e-9,
+    "task 1b: RC's control is translated into RA's anchor frame (x)");
+near(rRingAnchored.stations["RC"].y, 10 + (-1000), 1e-9,
+    "task 1b: RC's control is translated into RA's anchor frame (y)");
+
+// Explicit anchor whose OWN station has NO control at all: there is
+// nothing to compute a translation from, so today's behavior stands
+// -- P1 and Q1 are both still walked by ordinary traversal, their
+// controls discarded exactly as before this task -- but the fact must
+// be named, not buried a second time.
+var rNoControlAnchor = CsNetwork.resolve(tieAnchored,
+    { anchor: { name: "P2", x: 0, y: 0, z: 0 } });
+near(rNoControlAnchor.stations["Q1"].x, 10, 1e-9,
+    "task 1b: with no control to offset from, Q1 is walked by traversal (unchanged from today)");
+near(rNoControlAnchor.stations["Q1"].y, 0, 1e-9,
+    "task 1b: ...same for y");
+ok(rNoControlAnchor.controlFrame !== null &&
+    rNoControlAnchor.controlFrame !== undefined,
+    "task 1b: resolve names the situation even when it can't fix it");
+if (rNoControlAnchor.controlFrame) {
+    ok(rNoControlAnchor.controlFrame.offset === null,
+        "task 1b: no control to offset from means no offset computed");
+    ok(rNoControlAnchor.controlFrame.notHonored.indexOf("P1") >= 0 &&
+        rNoControlAnchor.controlFrame.notHonored.indexOf("Q1") >= 0,
+        "task 1b: controlFrame names BOTH un-honored fixed stations");
+    ok(rNoControlAnchor.controlFrame.reason !== null &&
+        rNoControlAnchor.controlFrame.reason !== "",
+        "task 1b: controlFrame explains why, in words");
+}
+
+// A fixed station with NO shot path to the anchor at all is a
+// separate cave passage, not a frame disagreement with THIS anchor --
+// it must keep anchoring itself at its own true control, same as
+// always, and must not appear in controlFrame at all (it was never
+// "fought" by this anchor in the first place).
+var islandSv = CsModel.newSurvey();
+islandSv.shots.push(shotOf("P1", "P2", 10, 0));
+islandSv.shots.push(shotOf("Q1", "Q2", 10, 0));
+islandSv.shots.push(shotOf("P2", "Q1", 10, 90));
+islandSv.shots.push(shotOf("Z1", "Z2", 10, 0));   // wholly separate passage
+islandSv.fixed["P1"] = { x: 0, y: 0, z: 0 };
+islandSv.fixed["Q1"] = { x: 10.4, y: 10, z: 0 };
+islandSv.fixed["Z1"] = { x: 9000, y: 9000, z: 0 };
+var rIsland = CsNetwork.resolve(islandSv,
+    { anchor: { name: "P1", x: 500, y: -200, z: 0 } });
+near(rIsland.stations["Z1"].x, 9000, 1e-9,
+    "task 1b: an unrelated fixed island keeps its own true control (x), not the anchor's offset");
+near(rIsland.stations["Z1"].y, 9000, 1e-9,
+    "task 1b: ...same for y");
+if (rIsland.controlFrame) {
+    ok(rIsland.controlFrame.applied.indexOf("Z1") === -1,
+        "task 1b: the unrelated island is not named as an applied offset station");
+    ok(rIsland.controlFrame.notHonored.indexOf("Z1") === -1,
+        "task 1b: ...nor as a not-honored one -- it was never in play for this anchor");
+}
+
+// ---- the elevation subtlety --------------------------------------
+//
+// An absent anchor z must not rebase an absolute-datum cave (an
+// entrance surveyed at 1250 ft, say) down to zero. Only an EXPLICIT
+// anchor z -- including an explicit 0 -- means "move z too".
+var elevSv = CsModel.newSurvey();
+elevSv.shots.push(shotOf("E1", "E2", 10, 0));
+elevSv.shots.push(shotOf("F1", "F2", 10, 0));
+elevSv.shots.push(shotOf("E2", "F1", 10, 90));
+elevSv.fixed["E1"] = { x: 0, y: 0, z: 1250 };
+elevSv.fixed["F1"] = { x: 10, y: 10, z: 1300 };
+
+var rElevNoAnchor = CsNetwork.resolve(elevSv, {});
+// anchor pins E1's drawing position but says nothing about elevation
+var rElevNoZ = CsNetwork.resolve(elevSv,
+    { anchor: { name: "E1", x: 500, y: 500 } });
+near(rElevNoZ.stations["F1"].z, 1300, 1e-9,
+    "task 1b elevation: with no anchor z supplied, F1 keeps its own 1250-ft-class datum, not rebased to 0");
+if (rElevNoZ.controlFrame) {
+    near(rElevNoZ.controlFrame.offset.dz, 0, 1e-9,
+        "task 1b elevation: controlFrame records a zero z-offset when the anchor supplied no z");
+}
+near(rElevNoZ.ties[0].error, rElevNoAnchor.ties[0].error, 1e-9,
+    "task 1b elevation invariance: tie misclosure unaffected by the absent-z fallback");
+
+// an EXPLICIT anchor z (even one that disagrees with the control) DOES
+// drive the offset -- that's the caller deliberately saying "move z"
+var rElevExplicit = CsNetwork.resolve(elevSv,
+    { anchor: { name: "E1", x: 500, y: 500, z: 1000 } });
+near(rElevExplicit.stations["F1"].z, 1300 - 250, 1e-9,
+    "task 1b elevation: an explicit anchor z of 1000 (vs E1's control of 1250) shifts F1 by the same -250");
+if (rElevExplicit.controlFrame) {
+    near(rElevExplicit.controlFrame.offset.dz, -250, 1e-9,
+        "task 1b elevation: controlFrame records the actual z offset applied");
+}
+
+// an explicit anchor z of exactly 0 is still explicit -- not the same
+// as omitting z altogether
+var rElevZeroAnchor = CsNetwork.resolve(elevSv,
+    { anchor: { name: "E1", x: 500, y: 500, z: 0 } });
+near(rElevZeroAnchor.stations["F1"].z, 1300 - 1250, 1e-9,
+    "task 1b elevation: an explicit anchor z of exactly 0 still counts as explicit, not absent");
+
+// ---- CsReport says what happened to the fixed frame ----------------
+var stubDrawn = { stationsDrawn: 0, shotsDrawn: 0, closuresDrawn: 0,
+    wallsDrawn: 0, splaysDrawn: 0, skipped: 0 };
+var offsetSummary = CsReport.drawSummary(tieAnchored, rAnchoredTie, stubDrawn, []);
+ok(offsetSummary.indexOf("Q1") >= 0,
+    "task 1b report: the offset-applied station is named in the summary, got:\n" +
+    offsetSummary);
+ok(offsetSummary.indexOf("538.5") >= 0,
+    "task 1b report: the offset magnitude (sqrt(500^2+200^2)=538.5) is " +
+    "reported in drawing units, got:\n" + offsetSummary);
+// reported exactly once, not once per applied station
+var offsetLines = offsetSummary.split("\n").filter(function(l) {
+    return l.toLowerCase().indexOf("offset") >= 0 ||
+        l.toLowerCase().indexOf("shift") >= 0;
+});
+ok(offsetLines.length === 1,
+    "task 1b report: the applied offset is reported exactly once, got " +
+    offsetLines.length + " lines:\n" + offsetSummary);
+
+var notHonoredSummary = CsReport.drawSummary(tieAnchored, rNoControlAnchor,
+    stubDrawn, []);
+ok(notHonoredSummary.indexOf("P1") >= 0 && notHonoredSummary.indexOf("Q1") >= 0,
+    "task 1b report: un-honored fixed stations are named in the summary, got:\n" +
+    notHonoredSummary);
+
+// no controlFrame at all (0/1 fixed, or no anchor): the summary must
+// not gain a single new line relative to today
+var plainSummaryBefore = CsReport.drawSummary(sq, rsq, stubDrawn, []);
+ok(plainSummaryBefore.toLowerCase().indexOf("offset") === -1 &&
+    plainSummaryBefore.toLowerCase().indexOf("not used") === -1,
+    "task 1b report: a survey with no controlFrame news gets no new lines");
+
+// ---------------------------------------------------------------------
 // LRUD walls
 // ---------------------------------------------------------------------
 
@@ -2565,6 +2777,83 @@ if (!IS_NODE) {
         ok(removed > 0, "erase: removed " + removed + " marks");
         ok(CsTags.collectStations(doc).length === 0,
             "erase: no tagged stations left");
+    })();
+
+    // -----------------------------------------------------------------
+    // Task 1b: CsDraw must never write a Fixed tag that contradicts a
+    // station's own drawn position.
+    // -----------------------------------------------------------------
+    (function() {
+        var doc = new RDocument(new RMemoryStorage(), new RSpatialIndexNavel());
+        var di = new RDocumentInterface(doc);
+        getDocument = function() { return doc; };
+        getDocumentInterface = function() { return di; };
+
+        var fixedTagOf = function(name) {
+            var stations = CsTags.collectStations(doc);
+            for (var i = 0; i < stations.length; i++) {
+                if (stations[i].name === name) {
+                    return CsTags.get(stations[i].entity, "Fixed");
+                }
+            }
+            return undefined;
+        };
+
+        // Fixture: P1/Q1 tied via P2, both fixed, anchored explicitly
+        // on P1 at a drawing position OTHER than its own control --
+        // forcing Q1's control to be translated before it is drawn.
+        var fdSv = CsModel.newSurvey();
+        fdSv.shots.push(shotOf("FD_P1", "FD_P2", 10, 0));
+        fdSv.shots.push(shotOf("FD_Q1", "FD_Q2", 10, 0));
+        fdSv.shots.push(shotOf("FD_P2", "FD_Q1", 10, 90));
+        fdSv.fixed["FD_P1"] = { x: 0, y: 0, z: 0 };
+        fdSv.fixed["FD_Q1"] = { x: 10.4, y: 10, z: 0 };
+        var fdRes = CsNetwork.resolve(fdSv,
+            { anchor: { name: "FD_P1", x: 500, y: 500, z: 0 } });
+        CsDraw.survey(fdSv, fdRes);
+
+        var fdQ1Tag = fixedTagOf("FD_Q1");
+        ok(fdQ1Tag !== undefined && fdQ1Tag !== "",
+            "draw: the offset-controlled station still carries a Fixed tag");
+        if (fdQ1Tag) {
+            var fdParts = fdQ1Tag.split(",");
+            near(parseFloat(fdParts[0]), fdRes.stations["FD_Q1"].x, 1e-6,
+                "draw: Fixed tag's x matches the DRAWN position, not the raw control");
+            near(parseFloat(fdParts[1]), fdRes.stations["FD_Q1"].y, 1e-6,
+                "draw: Fixed tag's y matches the DRAWN position");
+            ok(Math.abs(parseFloat(fdParts[0]) - fdSv.fixed["FD_Q1"].x) > 1,
+                "sanity: the drawn position really differs from the raw control here");
+        }
+
+        // Same fixture, but the anchor has no control of its own: Q1's
+        // control is not honored at all (controlFrame.notHonored), so
+        // there is nothing truthful to write -- no Fixed tag at all,
+        // rather than one that contradicts where Q1 actually landed.
+        var fdSv2 = CsModel.newSurvey();
+        fdSv2.shots.push(shotOf("FE_P1", "FE_P2", 10, 0));
+        fdSv2.shots.push(shotOf("FE_Q1", "FE_Q2", 10, 0));
+        fdSv2.shots.push(shotOf("FE_P2", "FE_Q1", 10, 90));
+        fdSv2.fixed["FE_P1"] = { x: 0, y: 0, z: 0 };
+        fdSv2.fixed["FE_Q1"] = { x: 10.4, y: 10, z: 0 };
+        var fdRes2 = CsNetwork.resolve(fdSv2,
+            { anchor: { name: "FE_P2", x: 0, y: 0, z: 0 } });
+        CsDraw.survey(fdSv2, fdRes2);
+        var fdQ1Tag2 = fixedTagOf("FE_Q1");
+        ok(fdQ1Tag2 === undefined || fdQ1Tag2 === "",
+            "draw: an un-honored fixed station gets no Fixed tag at all, got '" +
+            fdQ1Tag2 + "'");
+
+        // The default (no-anchor) path is untouched: the Fixed tag
+        // still carries the raw control, because here it IS the drawn
+        // position -- byte-identical to before this task.
+        var fdSv3 = CsModel.newSurvey();
+        fdSv3.shots.push(shotOf("FF_P1", "FF_P2", 10, 0));
+        fdSv3.fixed["FF_P1"] = { x: 7, y: 3, z: 42 };
+        var fdRes3 = CsNetwork.resolve(fdSv3, {});
+        CsDraw.survey(fdSv3, fdRes3);
+        ok(fixedTagOf("FF_P1") === "7,3,42",
+            "draw: no-anchor path writes the raw control unchanged, got '" +
+            fixedTagOf("FF_P1") + "'");
     })();
 
     // -----------------------------------------------------------------

@@ -55,6 +55,37 @@ CsReport.drawSummary = function(survey, resolved, drawn, findings) {
             (loop.percent <= 1.0 ? " -- good" : ""));
     }
 
+    // Task 1b: when an explicit anchor and *fix control shared a
+    // station, resolve() may have translated OTHER fixed stations
+    // into the anchor's frame (see CsNetwork.resolve's controlFrame),
+    // or -- when it had nothing to translate them WITH -- left them
+    // for ordinary traversal and named them instead of silently
+    // dropping their control. Either way, say so once, in drawing
+    // units, so a beginner reading the summary knows their fixed
+    // points either moved on paper (not in the real world) or weren't
+    // used at all.
+    var cf = resolved.controlFrame;
+    if (cf !== undefined && cf !== null) {
+        var unit = survey.distanceUnit;
+        if (cf.offset !== null && cf.applied.length > 0) {
+            var planShift = Math.sqrt(cf.offset.dx * cf.offset.dx +
+                cf.offset.dy * cf.offset.dy);
+            lines.push("Fixed control " + cf.applied.join(", ") +
+                " shifted " + CsReport.length(planShift, unit) +
+                " in plan" +
+                (cf.offset.dz !== 0 ?
+                    " and " + CsReport.length(Math.abs(cf.offset.dz), unit) +
+                    (cf.offset.dz > 0 ? " up" : " down") : "") +
+                " to line up with the anchor -- the survey's shape " +
+                "didn't change, only where it's drawn.");
+        }
+        if (cf.notHonored.length > 0) {
+            lines.push("");
+            lines.push("WARNING -- fixed control not used for " +
+                cf.notHonored.join(", ") + ": " + cf.reason + ".");
+        }
+    }
+
     if (resolved.unresolved.length > 0) {
         lines.push("");
         lines.push("WARNING -- " + resolved.unresolved.length +

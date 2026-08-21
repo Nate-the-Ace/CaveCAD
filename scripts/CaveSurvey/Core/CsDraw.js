@@ -410,9 +410,30 @@ CsDraw.survey = function(survey, resolved, originStation, originPos, seqBase) {
             tripAnchor[stationTrip[name]] = pt;
         }
         if (survey.fixed.hasOwnProperty(name)) {
-            var fx = survey.fixed[name];
-            CsTags.set(pt, "Fixed", fx.x + "," + fx.y + "," +
-                (fx.z === undefined || fx.z === null ? 0 : fx.z));
+            // The Fixed tag is read back into survey.fixed verbatim on
+            // reopen (CsTags.surveyFromDocument, CsRevise's scale
+            // rewrite): it has to describe the SAME coordinate the
+            // station is actually drawn at, or a later revision
+            // "corrects" a disagreement between the tag and the
+            // geometry that was never real. Writing the resolved
+            // station position rather than the raw survey.fixed[name]
+            // guarantees that -- the two already coincide whenever
+            // the control was honored as given, or honored via the
+            // anchor's frame offset (CsNetwork.resolve's
+            // controlFrame.applied), so this changes nothing in
+            // either of those common cases. When the control was NOT
+            // honored at all (named in controlFrame.notHonored --
+            // there was no anchor's-frame offset to place it with),
+            // there is nothing truthful to write: the tag is skipped
+            // rather than asserting a control value nobody actually
+            // pinned.
+            var cf = resolved.controlFrame;
+            var fixedNotHonored = cf !== undefined && cf !== null &&
+                cf.notHonored.indexOf(name) >= 0;
+            if (!fixedNotHonored) {
+                var fst = resolved.stations[name];
+                CsTags.set(pt, "Fixed", fst.x + "," + fst.y + "," + fst.z);
+            }
         }
         if (lrud !== null) {
             CsDraw.lrud(doc, op, at(name), name, lrud.azimuth,

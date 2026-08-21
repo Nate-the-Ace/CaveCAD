@@ -14,6 +14,19 @@
 // stations, then the first usable shot's FROM at (0,0,0). If fixed
 // points exist for several disconnected components, each component
 // anchors on its own fixed point.
+//
+// An explicit anchor and #Fix/*fix control live in two different
+// coordinate frames -- a DRAWING position the caller chose (e.g. a
+// point already on the sheet) versus a WORLD control coordinate the
+// surveyor recorded -- and nothing says they share an origin. When the
+// anchored station is ITSELF a fixed station, the translation between
+// the two frames is a known fact (the caller's own anchor position
+// minus that station's own control), and every OTHER fixed station in
+// the same shot-graph component gets moved by that same translation
+// before being pinned, so a real disagreement in the control network
+// still surfaces as a tie or loop misclosure -- see the long comment
+// above seedFixed for why this is safe and what "same component"
+// means here.
 
 var CsNetwork = {};
 
@@ -42,6 +55,27 @@ var CsNetwork = {};
  *   anchors:    [name] stations placed with no parent, in placement
  *               order: the explicit anchor, the #Fix / *fix seeds, or
  *               the first usable shot's FROM. CsAdjust pins these.
+ *   controlFrame: null when there was nothing to reconcile (no
+ *               explicit anchor, or 0-1 fixed stations); otherwise
+ *               {
+ *                 offset: {dx, dy, dz} applied to move fixed control
+ *                     into the anchor's frame, or null when no offset
+ *                     could be computed (the anchor's own station has
+ *                     no control of its own),
+ *                 applied: [name] fixed stations (sharing the
+ *                     anchor's shot-graph component) that were pinned
+ *                     at control + offset,
+ *                 notHonored: [name] fixed stations in the anchor's
+ *                     component that were left for ordinary traversal
+ *                     instead of pinned, because there was no offset
+ *                     to place them with,
+ *                 reason: why, in words, when notHonored is non-empty;
+ *                     null otherwise
+ *               }
+ *               A fixed station with no shot path to the anchor at
+ *               all (a separate cave passage) is not named here: it
+ *               was never in contention with this anchor, and anchors
+ *               itself exactly as it always has.
  *   unresolved: [shot] shots whose stations never connected
  *   skipped:    [shot] excluded / splay shots not resolved
  * }
@@ -81,9 +115,31 @@ CsNetwork.resolve = function(survey, opts) {
         }
     }
 
+    // The anchor's own z is very often not supplied at all -- most
+    // callers only know a plan position (a point clicked in the
+    // drawing). If the anchor's OWN station happens to be a fixed
+    // control point, defaulting an absent z to 0 would silently
+    // rebase an absolute-datum cave (an entrance surveyed at 1250 ft,
+    // say) down toward sea level -- and, worse, it would then disagree
+    // with every OTHER fixed station's real elevation by exactly that
+    // rebasing, manufacturing a fake vertical tie/loop misclosure
+    // where the real survey has none. Falling back to the anchor's
+    // own control z (when it has one) instead of 0 keeps it on its
+    // true datum, for the same reason CsRevise.anchorZOf exists
+    // elsewhere in this codebase. An EXPLICIT z -- including an
+    // explicit 0 -- always wins; this fallback only fires when the
+    // caller supplied none at all.
+    var anchorEffectiveZ;
     if (opts.anchor !== undefined && opts.anchor !== null) {
+        if (opts.anchor.z !== undefined && opts.anchor.z !== null) {
+            anchorEffectiveZ = opts.anchor.z;
+        } else if (survey.fixed.hasOwnProperty(opts.anchor.name)) {
+            anchorEffectiveZ = survey.fixed[opts.anchor.name].z || 0.0;
+        } else {
+            anchorEffectiveZ = 0.0;
+        }
         place(opts.anchor.name, opts.anchor.x, opts.anchor.y,
-            opts.anchor.z || 0.0, null);
+            anchorEffectiveZ, null);
     }
 
     var fixedNames = [];
@@ -94,7 +150,8 @@ CsNetwork.resolve = function(survey, opts) {
     }
     // Fixed stations anchor whatever the explicit anchor doesn't.
     // If an explicit anchor exists, fixed stations in ITS component
-    // would fight it, so this only seeds stations not yet placed.
+    // would fight it -- see the frame-aware seeding block below -- so
+    // this only seeds stations not yet placed.
     //
     // It seeds EVERY not-yet-placed fixed station, not just one:
     // seeding them one-per-call used to leave every fixed point but
@@ -110,7 +167,9 @@ CsNetwork.resolve = function(survey, opts) {
     // is honestly reported as a closure or tie (see below) instead of
     // quietly overwriting a control point. Re-called (again seeding
     // everything still unplaced) if the pass loop still gets stuck --
-    // e.g. when an explicit opts.anchor skipped the up-front call.
+    // e.g. when an explicit opts.anchor left some fixed stations
+    // un-seeded (see below) and one of them turns out to root a
+    // component the anchor's traversal never reaches.
     var seedFixed = function() {
         var used = false;
         for (var k = 0; k < fixedNames.length; k++) {
@@ -124,10 +183,126 @@ CsNetwork.resolve = function(survey, opts) {
         return used;
     };
 
+    // Which station names share a shot-graph component, ignoring
+    // coordinates entirely -- ordinary graph reachability over every
+    // USABLE shot (unlike the per-shot bridge test below, which asks
+    // "minus this one shot", this is the plain whole-graph answer).
+    // Used just below to tell "a fixed station the anchor's traversal
+    // would actually reach, and so would fight" from "an unrelated
+    // fixed passage that anchors itself regardless of what this
+    // anchor does" -- the anchor's frame offset must only ever touch
+    // the former.
+    var wholeGraphParent = {};
+    var wgFind = function(x) {
+        var root = x;
+        while (wholeGraphParent.hasOwnProperty(root) &&
+                wholeGraphParent[root] !== root) {
+            root = wholeGraphParent[root];
+        }
+        while (wholeGraphParent.hasOwnProperty(x) &&
+                wholeGraphParent[x] !== root) {
+            var next = wholeGraphParent[x];
+            wholeGraphParent[x] = root;
+            x = next;
+        }
+        return root;
+    };
+    var wgUnion = function(a, b) {
+        var ra = wgFind(a), rb = wgFind(b);
+        if (ra !== rb) {
+            wholeGraphParent[ra] = rb;
+        }
+    };
+    for (i = 0; i < usable.length; i++) {
+        wgUnion(usable[i].from, usable[i].to);
+    }
 
+    // ---- frame-aware seeding under an explicit anchor -------------
+    //
+    // opts.anchor pins one station at a DRAWING position the caller
+    // chose (e.g. a point already on the sheet); survey.fixed pins
+    // stations at WORLD control coordinates from #Fix / *fix records.
+    // These are two different coordinate frames and nothing says they
+    // share an origin or orientation. Pinning both verbatim would let
+    // the offset BETWEEN the frames show up as a large fake
+    // misclosure on whichever leg happens to tie them together --
+    // that is the "fixed stations fighting an explicit anchor"
+    // problem, and it is real: seeding both without translating one
+    // of them is worse than not seeding at all.
+    //
+    // There is exactly one case where the frames can be honestly
+    // reconciled: when the anchored station is ITSELF a fixed
+    // station. Then the translation between its own control
+    // coordinate and the position the caller anchored it at is not a
+    // guess -- it is a fact handed to us by the caller's own anchor.
+    // Applying that SAME translation to every other fixed station in
+    // the anchor's own shot-graph component moves them into the
+    // anchor's frame without inventing anything, and a real
+    // disagreement in the control network still surfaces (as a tie or
+    // loop misclosure) because a pure translation cannot erase a
+    // measured discrepancy -- it only relocates where it shows up.
+    // Fixed stations OUTSIDE the anchor's component are a different
+    // cave passage entirely: they were never fighting this anchor, so
+    // they are left alone here and anchor themselves via seedFixed,
+    // exactly as they always have.
+    //
+    // When the anchored station has no control of its own, there is
+    // no fact to compute a translation from -- nothing pins the
+    // anchor's frame to the control frame at all. This falls back to
+    // the pre-existing behavior: the fixed stations in the anchor's
+    // component are left for ordinary traversal, same as before this
+    // frame-aware seeding existed. That is still a silent discard of
+    // real survey control, so it is named in controlFrame.notHonored
+    // rather than buried a second time.
+    var controlFrame = null;
     if (opts.anchor === undefined || opts.anchor === null) {
         if (!seedFixed() && usable.length > 0) {
             place(usable[0].from, 0.0, 0.0, 0.0, null);
+        }
+    } else if (survey.fixed.hasOwnProperty(opts.anchor.name)) {
+        var anchorControl = survey.fixed[opts.anchor.name];
+        // anchorEffectiveZ (computed above, where the anchor was
+        // placed) already IS the right z to offset from: when the
+        // caller gave an explicit z, that is it; when they didn't,
+        // it already fell back to this very station's own control z,
+        // which makes dz exactly 0 here -- no separate case needed.
+        var offset = {
+            dx: opts.anchor.x - anchorControl.x,
+            dy: opts.anchor.y - anchorControl.y,
+            dz: anchorEffectiveZ - (anchorControl.z || 0.0)
+        };
+        var appliedNames = [];
+        for (var ofk = 0; ofk < fixedNames.length; ofk++) {
+            var ofn = fixedNames[ofk];
+            if (ofn === opts.anchor.name) {
+                continue; // already placed as the anchor itself, above
+            }
+            if (wgFind(ofn) !== wgFind(opts.anchor.name)) {
+                continue; // unrelated passage -- seedFixed anchors it
+            }
+            var ofc = survey.fixed[ofn];
+            place(ofn, ofc.x + offset.dx, ofc.y + offset.dy,
+                (ofc.z || 0.0) + offset.dz, null);
+            appliedNames.push(ofn);
+        }
+        controlFrame = { offset: offset, applied: appliedNames,
+            notHonored: [], reason: null };
+    } else {
+        var notHonoredNames = [];
+        for (var nhk = 0; nhk < fixedNames.length; nhk++) {
+            if (wgFind(fixedNames[nhk]) === wgFind(opts.anchor.name)) {
+                notHonoredNames.push(fixedNames[nhk]);
+            }
+        }
+        if (notHonoredNames.length > 0) {
+            controlFrame = { offset: null, applied: [],
+                notHonored: notHonoredNames,
+                reason: "anchor station \"" + opts.anchor.name +
+                    "\" has no fixed control of its own, so there is " +
+                    "no known translation between its drawing " +
+                    "position and the fixed stations' world " +
+                    "coordinates -- they were left for ordinary " +
+                    "traversal instead of being pinned" };
         }
     }
 
@@ -301,6 +476,7 @@ CsNetwork.resolve = function(survey, opts) {
         loops: loops,
         ties: ties,
         anchors: anchors,
+        controlFrame: controlFrame,
         unresolved: unresolved,
         skipped: skipped
     };
