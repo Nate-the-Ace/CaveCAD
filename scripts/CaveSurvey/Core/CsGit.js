@@ -94,11 +94,28 @@ CsGit.parsePorcelain = function(r) {
         if (line.length < 4) {
             continue;
         }
-        // Porcelain v1: two status characters, a space, then the path.
-        // The path may contain spaces, so split ONCE at column 3.
-        var code = line.substring(0, 2).replace(/ /g, "");
-        var path = line.substring(3);
-        entries.push({ code: code, path: path });
+        // Porcelain v1: two status characters, a space, then the rest
+        // of the line. The path may contain spaces, so split ONCE at
+        // column 3.
+        var rawCode = line.substring(0, 2);
+        var code = rawCode.replace(/ /g, "");
+        var rest = line.substring(3);
+        // A rename or copy renders as "old -> new". The DESTINATION is
+        // the file that now exists and the one a later `git add` must
+        // name, so that is what `path` carries; `origPath` keeps the
+        // source for a status display. Every other entry sets
+        // origPath to null, rather than omitting the key, so callers
+        // can check it unconditionally.
+        var path = rest;
+        var origPath = null;
+        if (rawCode.indexOf("R") !== -1 || rawCode.indexOf("C") !== -1) {
+            var arrow = rest.indexOf(" -> ");
+            if (arrow !== -1) {
+                origPath = rest.substring(0, arrow);
+                path = rest.substring(arrow + 4);
+            }
+        }
+        entries.push({ code: code, path: path, origPath: origPath });
     }
     return entries;
 };

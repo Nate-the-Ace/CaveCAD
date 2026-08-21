@@ -5772,8 +5772,47 @@ ok(st[0].path === "drawings/Blowing Hole.dxf",
     "parsePorcelain keeps a path containing a space");
 ok(st[0].code === "M", "parsePorcelain reads the status code");
 ok(st[1].code === "??", "parsePorcelain reads an untracked marker");
+ok(st[0].origPath === null,
+    "parsePorcelain: origPath is null (not absent) on a plain modified entry");
 ok(CsGit.parsePorcelain({ code: 0, out: "", err: "" }).length === 0,
     "parsePorcelain on a clean tree is empty");
+
+// Rename/copy: porcelain renders "old -> new". The destination is the
+// file that now exists -- the one a later `git add` must name -- so
+// `path` carries the destination and `origPath` carries the source.
+var rn = CsGit.parsePorcelain({ code: 0,
+    out: "R  drawings/old.dxf -> drawings/new.dxf\n", err: "" });
+ok(rn[0].code === "R", "parsePorcelain: rename keeps the R status code");
+ok(rn[0].path === "drawings/new.dxf",
+    "parsePorcelain: rename's path is the DESTINATION");
+ok(rn[0].origPath === "drawings/old.dxf",
+    "parsePorcelain: rename's origPath is the source");
+
+// The realistic case -- cave names have spaces on both sides of the
+// arrow, which the old parser (no arrow-splitting) would have left as
+// one broken combined string.
+var rnSpaced = CsGit.parsePorcelain({ code: 0,
+    out: "R  drawings/Blowing Hole.dxf -> drawings/Blowing Hole 2.dxf\n", err: "" });
+ok(rnSpaced[0].path === "drawings/Blowing Hole 2.dxf",
+    "parsePorcelain: rename destination survives spaces in both names");
+ok(rnSpaced[0].origPath === "drawings/Blowing Hole.dxf",
+    "parsePorcelain: rename source survives spaces in both names");
+
+// LIMITATION, documented rather than fixed: git quotes and octal-
+// escapes a path with non-ASCII bytes when core.quotePath is on (the
+// default) -- an accented cave name like "Blöwing.dxf" arrives as
+// the literal text "Bl\303\266wing.dxf", quote marks included. The
+// robust fix is `git status --porcelain -z`, which turns off quoting
+// and NUL-separates a rename pair -- but that changes this parser's
+// line-based shape, and the plan specified --porcelain, so switching
+// is deferred rather than done here. This assertion pins today's
+// behavior -- the RAW quoted/escaped text, unmodified -- so anyone
+// who hits an accented name gets pointed straight at this comment.
+var quoted = CsGit.parsePorcelain({ code: 0,
+    out: " M \"drawings/Bl\\303\\266wing.dxf\"\n", err: "" });
+ok(quoted[0].path === "\"drawings/Bl\\303\\266wing.dxf\"",
+    "LIMITATION: parsePorcelain returns a quoted/escaped path AS-IS; " +
+    "see the -z note above this test");
 
 var ab = CsGit.parseAheadBehind({ code: 0, out: "2\t5\n", err: "" });
 ok(ab.behind === 2 && ab.ahead === 5, "parseAheadBehind reads left-right counts");
