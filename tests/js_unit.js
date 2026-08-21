@@ -873,6 +873,183 @@ ok(plainSummaryBefore.toLowerCase().indexOf("offset") === -1 &&
     "task 1b report: a survey with no controlFrame news gets no new lines");
 
 // ---------------------------------------------------------------------
+// Task 1c -- bridge classifier cost and path honesty.
+// ---------------------------------------------------------------------
+
+// The classifier's verdicts on every existing fixture above (square,
+// tie, there-and-back, two-fixed ring, ring+branch, and every Task 1b
+// control-frame fixture) are already proven unchanged by every
+// assertion already run against rsq/rtie/rBackRing/rring/
+// rringBlunder/ranch/rAnchoredTie/rRingAnchored/etc. above -- this is
+// a performance change, not a behavior change, and those pre-existing
+// assertions are the proof; nothing new is needed here for that.
+
+// -- .path is asserted for the single-root case (the square, `rsq`):
+// the closing shot is A3->A4, and its ancestor chain walks all the
+// way back to the anchor A4 -- a real surveyed walk the whole way.
+ok(rsq.loops.length === 1 && rsq.loops[0].path.length === 4 &&
+    rsq.loops[0].path[0] === "A3" && rsq.loops[0].path[1] === "A2" &&
+    rsq.loops[0].path[2] === "A1" && rsq.loops[0].path[3] === "A4",
+    "task 1c: square's single-root loop path walks the ring exactly, got " +
+    (rsq.loops.length === 1 ? JSON.stringify(rsq.loops[0].path) : "n/a"));
+ok(rsq.loops.length === 1 && rsq.loops[0].viaControl === false,
+    "task 1c: single-root loop is not viaControl");
+
+// -- .path for the two-root case (`ring`, RA/RC fixed): path is
+// fromChain ++ reverse(toChain), e.g. [RB, RA, RC] -- which reads as
+// "RA adjacent to RC" even though those two anchors are joined only
+// through shared control, not by any surveyed leg. viaControl names
+// that fact so a consumer doesn't have to re-derive it from path.
+ok(rring.loops.length === 2, "sanity: ring still produces two arc loops");
+if (rring.loops.length === 2) {
+    var rbRc = null, rdRa = null;
+    for (var rli2 = 0; rli2 < rring.loops.length; rli2++) {
+        var lp = rring.loops[rli2];
+        if (lp.from === "RB" && lp.to === "RC") { rbRc = lp; }
+        if (lp.from === "RD" && lp.to === "RA") { rdRa = lp; }
+    }
+    ok(rbRc !== null && rbRc.path.length === 3 && rbRc.path[0] === "RB" &&
+        rbRc.path[1] === "RA" && rbRc.path[2] === "RC",
+        "task 1c: two-root loop path is fromChain ++ reverse(toChain), got " +
+        (rbRc !== null ? JSON.stringify(rbRc.path) : "n/a"));
+    ok(rbRc !== null && rbRc.viaControl === true,
+        "task 1c: RB->RC arc is flagged viaControl -- RA is not really " +
+        "adjacent to RC, they only share control");
+    ok(rdRa !== null && rdRa.path.length === 3 && rdRa.path[0] === "RD" &&
+        rdRa.path[1] === "RC" && rdRa.path[2] === "RA",
+        "task 1c: the other arc's two-root path, got " +
+        (rdRa !== null ? JSON.stringify(rdRa.path) : "n/a"));
+    ok(rdRa !== null && rdRa.viaControl === true,
+        "task 1c: RD->RA arc is also flagged viaControl");
+}
+
+// -- ties carry percent: null, matching the docstring's "no
+// meaningful percent" claim, and are never viaControl (their path is
+// a real surveyed leg, not a fabricated join).
+ok(rtie.ties.length === 1 && rtie.ties[0].percent === null,
+    "task 1c: a tie's percent is null, not a meaningless number, got " +
+    JSON.stringify(rtie.ties.length === 1 ? rtie.ties[0].percent : null));
+ok(rtie.ties.length === 1 && rtie.ties[0].viaControl === false,
+    "task 1c: a tie's path is a real leg, so viaControl is false");
+
+// -- no consumer formats a tie's (null) percent: CsReport, CsValidate
+// and CsStats all only ever read percent off resolved.loops, never
+// resolved.ties (grep confirms no shipped script reads `.ties` at
+// all except this test file) -- but drive them end to end on the tie
+// fixture anyway so a future consumer change that DID start reading
+// ties would trip a real exception here, not just an audit note.
+var tieStatsForNull = CsStats.compute(tie, rtie, CsTraverse.SLOPE);
+var tieGradeForNull = CsGrade.compute(tie, rtie, tieStatsForNull);
+var tieFindingsForNull = CsValidate.check(tie, rtie);
+var tieReportForNull = CsReport.drawSummary(tie, rtie, stubDrawn, []);
+ok(true,
+    "task 1c: CsStats/CsGrade/CsValidate/CsReport all run on a " +
+    "tie-carrying resolve without throwing on a null percent");
+
+// -- a direct double tie between two already-fixed anchors: unlike
+// `tie` above (only Q1, the TO end, is itself a fixed anchor -- P1 is
+// one hop away via P2), here BOTH ends of each tying shot are
+// themselves already-fixed, and there are TWO independent direct
+// ties in the one survey. This exercises chain() at length 1 on
+// both sides and proves two ties don't get confused with each other
+// or misclassified as a loop.
+var doubleTie = CsModel.newSurvey();
+doubleTie.shots.push(shotOf("DP1", "DQ1", 10, 0));   // direct tie #1
+doubleTie.shots.push(shotOf("DQ1", "DR1", 10, 90));  // direct tie #2
+doubleTie.fixed["DP1"] = { x: 0, y: 0, z: 0 };
+doubleTie.fixed["DQ1"] = { x: 0, y: 10.3, z: 0 };    // 0.3 off shot #1's landing
+doubleTie.fixed["DR1"] = { x: 10, y: 10.5, z: 0 };   // 0.2 off shot #2's landing
+var rDoubleTie = CsNetwork.resolve(doubleTie, {});
+ok(rDoubleTie.loops.length === 0 && rDoubleTie.ties.length === 2,
+    "task 1c: a direct double tie between already-fixed anchors reports " +
+    "two ties and no loops, got loops=" + rDoubleTie.loops.length +
+    " ties=" + rDoubleTie.ties.length);
+if (rDoubleTie.ties.length === 2) {
+    for (var dti = 0; dti < rDoubleTie.ties.length; dti++) {
+        ok(rDoubleTie.ties[dti].percent === null,
+            "task 1c: direct tie #" + dti + " percent is null");
+        ok(rDoubleTie.ties[dti].path.length === 2,
+            "task 1c: direct tie #" + dti + " path is just its two " +
+            "endpoints (already fixed on both ends), got " +
+            JSON.stringify(rDoubleTie.ties[dti].path));
+    }
+    var dt1 = null, dt2 = null;
+    for (var dti2 = 0; dti2 < rDoubleTie.ties.length; dti2++) {
+        if (rDoubleTie.ties[dti2].from === "DP1") { dt1 = rDoubleTie.ties[dti2]; }
+        if (rDoubleTie.ties[dti2].from === "DQ1") { dt2 = rDoubleTie.ties[dti2]; }
+    }
+    near(dt1 !== null ? dt1.error : -1, 0.3, 1e-9,
+        "task 1c: direct tie #1 (DP1->DQ1) misclosure");
+    near(dt2 !== null ? dt2.error : -1, 0.2, 1e-9,
+        "task 1c: direct tie #2 (DQ1->DR1) misclosure");
+}
+ok(rDoubleTie.anchors.length === 3,
+    "task 1c: all three already-fixed stations anchor -- none reached by traversal");
+
+// -- a shot with from === to must be SKIPPED, not scored as a
+// 100%-blown loop. This is NOT the Compass zero-length LRUD carrier
+// idiom: CsFormatCompass's reader filters those out during parsing
+// (its isCarrier check) before they ever become a shot at all, and
+// even the ones it writes target a distinct synthetic station name
+// (station + "_L"), never from === to. Any from === to shot reaching
+// here is something else; CsValidate already flags it on its own
+// terms ("self-loop", independent of resolve()). Skipping it costs
+// no LRUD: CsModel.lrudForStation scans survey.shots directly by
+// station name and does not consult resolve()'s usable/skipped split.
+var selfLoopSv = CsModel.newSurvey();
+selfLoopSv.shots.push(shotOf("SL1", "SL2", 10, 0));
+selfLoopSv.shots.push(shotOf("SL2", "SL2", 5, 0)); // self-loop: must be skipped
+var rSelfLoop = CsNetwork.resolve(selfLoopSv, {});
+ok(rSelfLoop.loops.length === 0,
+    "task 1c: a from===to shot is not scored as a loop");
+ok(rSelfLoop.closures.length === 0,
+    "task 1c: a from===to shot produces no closure/misclosure entry at all");
+var slSkipped = false;
+for (var ssi = 0; ssi < rSelfLoop.skipped.length; ssi++) {
+    if (rSelfLoop.skipped[ssi].from === "SL2" &&
+            rSelfLoop.skipped[ssi].to === "SL2") {
+        slSkipped = true;
+    }
+}
+ok(slSkipped, "task 1c: the self-loop shot lands in resolve()'s `skipped`");
+ok(rSelfLoop.stations.hasOwnProperty("SL2"),
+    "task 1c: SL2 is still placed (reached by the earlier real shot) " +
+    "despite its own self-loop shot being skipped");
+
+// -- performance: the bridge classifier must not be quadratic. A
+// chain-plus-a-handful-of-loops survey used to cost O(closure count *
+// usable count^2) -- 32/96/366/1501ms at 500/1000/2000/4000 shots
+// under node (see docs/superpowers/plans/2026-08-21-loop-closure-
+// adjustment.md, Task 1c, for the measured baseline). Restricting the
+// bridge test to closure candidates makes it O(k*m); a 4,000-shot
+// survey with a handful of loops should resolve in well under 100ms.
+// This bound is loose (order of magnitude above the expected cost)
+// so ordinary machine noise doesn't make it flaky, but tight enough
+// that the quadratic could never silently come back unnoticed.
+if (IS_NODE) {
+    var perfSv = CsModel.newSurvey();
+    var perfN = 4000;
+    var perfLoops = 0;
+    for (var pk = 1; pk <= perfN; pk++) {
+        perfSv.shots.push(shotOf("P" + (pk - 1), "P" + pk, 10, 0));
+    }
+    for (pk = 200; pk < perfN; pk += 200) {
+        perfSv.shots.push(shotOf("P" + pk, "P" + (pk - 100), 10, 180));
+        perfLoops++;
+    }
+    var perfT0 = Date.now();
+    var perfR = CsNetwork.resolve(perfSv, {});
+    var perfMs = Date.now() - perfT0;
+    ok(perfR.loops.length === perfLoops,
+        "task 1c perf: sanity check on the built survey's loop count, " +
+        "expected " + perfLoops + " got " + perfR.loops.length);
+    ok(perfMs < 100,
+        "task 1c perf: a " + perfSv.shots.length + "-shot survey with " +
+        perfLoops + " loops resolved in " + perfMs + "ms under node -- " +
+        "want well under 100ms (was ~1500ms before Task 1c)");
+}
+
+// ---------------------------------------------------------------------
 // LRUD walls
 // ---------------------------------------------------------------------
 

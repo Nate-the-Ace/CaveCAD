@@ -47,11 +47,30 @@ var CsNetwork = {};
  *               computed minus already-known; kind "loop" | "tie"
  *               matches which of the two lists below it landed in
  *   loops:      [{from, to, path, traverseLength, error, horizontal,
- *               vertical, percent}] one per closure ring, path =
- *               station names around the loop
+ *               vertical, percent, viaControl}] one per closure ring.
+ *               path is station names from the closure shot's own
+ *               `from` end to its `to` end. When both ends' ancestor
+ *               chains share a common root (the ordinary case), path
+ *               is a real walk: every consecutive pair in it is
+ *               joined by an actual surveyed leg. When they don't --
+ *               two different FIXED stations on the SAME ring, each
+ *               rooting its own half -- path is instead fromChain ++
+ *               reverse(toChain) (e.g. [RB, RA, RC]): the station at
+ *               the JOIN of those two halves is NOT surveyed-adjacent
+ *               to its neighbor there, only connected to it through
+ *               the shared control network, not through any leg a
+ *               surveyor shot. viaControl is true exactly in that
+ *               second case, so a consumer can detect a
+ *               control-joined path by a flag instead of re-deriving
+ *               it from path's contents.
  *   ties:       the same shape, for legs that join two separately
  *               anchored components -- control ties, not rings, so
- *               they carry no meaningful percent
+ *               they carry no meaningful percent (always null here --
+ *               see the field's own "no meaningful percent" reasoning
+ *               above; no consumer should format a tie's percent).
+ *               path is just the tying shot's own two endpoints (a
+ *               real surveyed leg, never fabricated), so viaControl
+ *               is always false for a tie
  *   anchors:    [name] stations placed with no parent, in placement
  *               order: the explicit anchor, the #Fix / *fix seeds, or
  *               the first usable shot's FROM. CsAdjust pins these.
@@ -108,7 +127,27 @@ CsNetwork.resolve = function(survey, opts) {
     var usable = [];
     for (var i = 0; i < survey.shots.length; i++) {
         var s = survey.shots[i];
-        if (s.excludeFromAll || s.splay || s.from === "" || s.to === "") {
+        // from === to is skipped, never scored: a self-loop shot
+        // resolving as a closure would misclassify as a bridge-free
+        // "loop" with the two ends' misclosure equal to the shot's
+        // own full distance -- percent 100, tripping the blunder
+        // warning for data that need not be a blunder at all. This is
+        // NOT the Compass zero-length LRUD carrier idiom: that carrier
+        // never becomes a shot with from === to in the first place --
+        // CsFormatCompass's reader filters it out during parsing (see
+        // its isCarrier check) before it ever reaches survey.shots,
+        // and even when written it targets a distinct synthetic
+        // station name (from + "_L"), not the FROM station itself. Any
+        // from === to shot that reaches here is something else (a
+        // stray data-entry duplicate, most likely) and CsValidate
+        // already flags it on its own terms ("self-loop", independent
+        // of resolve()). Skipping it here does not lose LRUD: any LRUD
+        // fields riding on such a shot are still found by
+        // CsModel.lrudForStation, which scans survey.shots directly by
+        // station name and does not consult resolve()'s
+        // usable/skipped split at all.
+        if (s.excludeFromAll || s.splay || s.from === "" || s.to === "" ||
+                s.from === s.to) {
             skipped.push(s);
         } else {
             usable.push(s);
@@ -306,23 +345,22 @@ CsNetwork.resolve = function(survey, opts) {
         }
     }
 
-    // ---- classify each usable shot as a bridge or a cycle edge ---
+    // ---- classify a shot as a bridge or a cycle edge, lazily ------
     //
     // A closure (both ends already known when the pass loop reaches
     // it) is a genuine LOOP when some path other than the shot itself
     // already connects its two ends -- removing it leaves the survey
     // just as connected. It is a control TIE only when it is the one
     // and only connection between its ends: a graph bridge. This is a
-    // property of the raw shot graph alone, worked out once here from
-    // ALL usable shots, before any resolution happens -- so it never
-    // depends on which order shots resolve in or which station ends
-    // up which spanning-tree root. That independence matters: two
-    // fixed stations on the SAME ring anchor at two different roots
-    // (the pass loop treats each as its own tree), even though the
-    // ring is one component throughout, so "did the parent chains
-    // meet" is the wrong question -- it is a spanning-forest-root
-    // test, not a connectivity test, and the two coincide only when a
-    // component has at most one anchor.
+    // property of the raw shot graph alone, computed from ALL usable
+    // shots, so it never depends on which order shots resolve in or
+    // which station ends up which spanning-tree root. That
+    // independence matters: two fixed stations on the SAME ring
+    // anchor at two different roots (the pass loop treats each as its
+    // own tree), even though the ring is one component throughout, so
+    // "did the parent chains meet" is the wrong question -- it is a
+    // spanning-forest-root test, not a connectivity test, and the two
+    // coincide only when a component has at most one anchor.
     //
     // A whole-graph union-find does not distinguish them either: it
     // would need to include the very shot being asked about, which
@@ -330,12 +368,47 @@ CsNetwork.resolve = function(survey, opts) {
     // including a real tie's one connecting shot. The question that
     // actually distinguishes a tie from a loop is "excluding just
     // this shot, are its ends still connected via the others" -- a
-    // bridge test, not a reachability test. Rebuilding a small
-    // union-find per shot (surveys are not enormous) answers exactly
-    // that, and does so correctly even when a ring carries several
-    // fixed stations and so produces several closures around it.
-    var isBridge = [];
-    for (i = 0; i < usable.length; i++) {
+    // bridge test, not a reachability test.
+    //
+    // A 2026-08 code-quality review measured this rebuilding a
+    // union-find from ALL usable shots for EVERY usable shot,
+    // regardless of whether that shot ever resolves as a closure at
+    // all (an ordinary "new" leg was tested too, pointlessly -- by
+    // definition nothing else yet connects its ends when it resolves,
+    // so it can never be anything but a bridge). That is one O(m)
+    // rebuild per usable shot, O(m^2) overall, and it showed:
+    // 32ms/96ms/366ms/1501ms at 500/1000/2000/4000 shots under node
+    // (quadratic doubling), which crosses the ~100ms perceptible
+    // threshold well under 1,000 shots on QCAD's older, non-JIT
+    // engine, where resolve() runs on every redraw.
+    //
+    // Only a closure shot ever needs this question answered, and
+    // closures are a small minority of usable shots in real survey
+    // data -- cave surveys are overwhelmingly tree-like (passages
+    // branch; closed loops are comparatively rare and prized), so k
+    // (closure count) is normally small relative to m (usable shot
+    // count). Testing lazily -- once per closure, the first time it is
+    // asked, cached after that so a repeated query is free -- turns
+    // the O(m^2) above into O(k*m): a 10,000-shot cave with 50 loops
+    // is 500k union operations, not 100M.
+    //
+    // A single-pass Tarjan low-link bridge finder would be O(n+m) and
+    // asymptotically better still, but it is a materially different,
+    // unverified algorithm: it has to track edge IDs rather than
+    // parent vertices to avoid mistaking a parallel leg (two shots
+    // between the same pair of stations -- ordinary in real survey
+    // data, e.g. a there-and-back) for a back edge. This union-find
+    // test is already verified correct against four topologies
+    // (square, tie, there-and-back, two-fixed ring) plus the Task 1b
+    // control-frame fixtures; making it lazy removes the quadratic
+    // without trading a verified classifier for an unverified one.
+    // Revisit only if a real survey shows k large enough that O(k*m)
+    // itself becomes the bottleneck.
+    var bridgeCache = [];
+    var shotIsBridge = function(i) {
+        if (bridgeCache[i] !== undefined) {
+            return bridgeCache[i];
+        }
         var ufParent = {};
         var ufFind = function(x) {
             var root = x;
@@ -361,8 +434,10 @@ CsNetwork.resolve = function(survey, opts) {
             }
             ufUnion(usable[bj].from, usable[bj].to);
         }
-        isBridge.push(ufFind(usable[i].from) !== ufFind(usable[i].to));
-    }
+        var result = ufFind(usable[i].from) !== ufFind(usable[i].to);
+        bridgeCache[i] = result;
+        return result;
+    };
 
     // ---- resolve by repeated passes ------------------------------
     var resolvedFlags = [];
@@ -407,14 +482,18 @@ CsNetwork.resolve = function(survey, opts) {
 
                 // A loop closes a ring: some other path already joins
                 // its ends, so this shot is not the only connection
-                // between them (isBridge[i] false). A control TIE is
-                // the opposite -- this shot is the one and only link
-                // between two otherwise separate components, the
+                // between them (shotIsBridge(i) false). A control TIE
+                // is the opposite -- this shot is the one and only
+                // link between two otherwise separate components, the
                 // everyday case being a cave with two *fix'ed
                 // entrances. A tie has no ring, so a "percent of
                 // traverse length" computed for it is meaningless and
                 // used to make CsValidate cry blunder over nothing.
-                var sameComponent = !isBridge[i];
+                // This is the only place the bridge test is asked --
+                // exactly the closure shots, never the "new" ones --
+                // see the comment above shotIsBridge for why that
+                // restriction is what removes the quadratic.
+                var sameComponent = !shotIsBridge(i);
                 mis.kind = sameComponent ? "loop" : "tie";
                 closures.push(mis);
 
@@ -490,6 +569,15 @@ CsNetwork.resolve = function(survey, opts) {
  * \param sameComponent true when the caller's bridge test found this
  *        shot is not the only connection between its ends (a loop);
  *        false for a genuine control tie (a bridge).
+ *
+ * \return {from, to, path, traverseLength, error, horizontal,
+ *         vertical, percent, viaControl} -- see CsNetwork.resolve's
+ *         own \return block for path's join semantics (a real walk
+ *         when the ancestor chains share a root, fromChain ++
+ *         reverse(toChain) when they don't) and what viaControl
+ *         flags. percent is null for a tie (sameComponent false):
+ *         there is no ring, so no traverse length a misclosure is a
+ *         meaningful fraction of.
  */
 CsNetwork.describeLoop = function(shot, misclosure, parent, tapeMode,
         sameComponent) {
@@ -537,9 +625,11 @@ CsNetwork.describeLoop = function(shot, misclosure, parent, tapeMode,
 
     var path = [];
     var traverseLength = shot.distance;
+    var viaControl = false;
     if (meet >= 0) {
         // The chains share a root: a plain single-anchor ring. Walk
-        // out from each end only as far as the meeting point.
+        // out from each end only as far as the meeting point. Every
+        // consecutive pair here is a real surveyed adjacency.
         for (i = 0; i <= meet; i++) {
             path.push(fromChain[i]);
         }
@@ -553,18 +643,33 @@ CsNetwork.describeLoop = function(shot, misclosure, parent, tapeMode,
         // fixed stations on the SAME ring, each rooting its own half.
         // The ring still closes; it closes THROUGH the two controls,
         // so the circuit is this shot plus both full chains out to
-        // their own anchors.
+        // their own anchors. path is fromChain ++ reverse(toChain),
+        // e.g. [RB, RA, RC] -- the pair straddling the join (RA, RC
+        // here) is NOT a surveyed adjacency, only a shared-control
+        // one, so viaControl names that fact for any consumer that
+        // would otherwise read consecutive path entries as legs.
         path = fromChain.concat(toChain.slice().reverse());
         traverseLength += walk(fromChain, fromChain.length) +
             walk(toChain, toChain.length);
+        viaControl = true;
     } else {
         // Genuinely separate components: no ring, report the two
-        // endpoints only.
+        // endpoints only -- the tying shot's own from/to, which IS a
+        // real surveyed leg, so viaControl stays false here.
         path = [shot.from, shot.to];
     }
 
-    var percent = traverseLength > 0 ?
-        (misclosure.distance / traverseLength) * 100.0 : 0.0;
+    // A tie has no ring, so there is no traverse length a misclosure
+    // is a meaningful fraction of -- percent is null, matching
+    // CsNetwork.resolve's own "ties carry no meaningful percent"
+    // documentation. Every consumer that formats a percent (CsReport,
+    // CsValidate, CsStats, CsRevise) reads it only from resolved.loops,
+    // never resolved.ties, so this null is never handed to a
+    // .toFixed() call.
+    var percent = sameComponent ?
+        (traverseLength > 0 ?
+            (misclosure.distance / traverseLength) * 100.0 : 0.0) :
+        null;
 
     return {
         from: shot.from,
@@ -574,6 +679,7 @@ CsNetwork.describeLoop = function(shot, misclosure, parent, tapeMode,
         error: misclosure.distance,
         horizontal: misclosure.horizontal,
         vertical: misclosure.vertical,
-        percent: percent
+        percent: percent,
+        viaControl: viaControl
     };
 };
