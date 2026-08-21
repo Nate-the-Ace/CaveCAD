@@ -1,6 +1,8 @@
 // Adjust.js -- least-squares loop closure adjustment.
 //
-// Part of the Cave Survey Core library: pure functions.
+// Part of the Cave Survey Core library: pure functions, EXCEPT
+// currentOptions(), which reads RSettings. See that function's own
+// comment for why the impurity lives here rather than in every tool.
 //
 // CsNetwork.resolve walks a spanning tree, so all of a loop's
 // accumulated error lands on whichever leg happened to close it. This
@@ -667,4 +669,109 @@ CsAdjust.adjust = function(survey, resolved, opts) {
             pinned: pinnedNames
         }
     };
+};
+
+/**
+ * The options in force: the stored settings where a QCAD engine is
+ * present, the defaults where it is not (node, and the unit tests).
+ *
+ * IMPURE, by decision, and the only function in this file that is:
+ * see the module header. The alternative is every tool (CsDraw,
+ * CsBind, CsReport, ...) duplicating three RSettings lookups and three
+ * defaults, and drifting on them the way independently-copied defaults
+ * always do. CsBind.SETTING_AUTO_BIND read RSettings from within Core
+ * first, so the precedent already exists here; this just follows it.
+ * try/catch guards an engine whose getters differ or throw -- the
+ * defaults must stand rather than the caller crashing on a redraw.
+ */
+CsAdjust.currentOptions = function() {
+    var enabled = true;
+    var sigmaTape = CsAdjust.DEFAULT_SIGMA_TAPE;
+    var sigmaAngle = CsAdjust.DEFAULT_SIGMA_ANGLE;
+    if (typeof RSettings !== "undefined") {
+        try {
+            enabled = RSettings.getBoolValue(CsAdjust.SETTING_ENABLED, true);
+            sigmaTape = RSettings.getDoubleValue(CsAdjust.SETTING_SIGMA_TAPE,
+                CsAdjust.DEFAULT_SIGMA_TAPE);
+            sigmaAngle = RSettings.getDoubleValue(CsAdjust.SETTING_SIGMA_ANGLE,
+                CsAdjust.DEFAULT_SIGMA_ANGLE);
+        } catch (e) {
+            // an engine without these getters: the defaults stand
+            enabled = true;
+            sigmaTape = CsAdjust.DEFAULT_SIGMA_TAPE;
+            sigmaAngle = CsAdjust.DEFAULT_SIGMA_ANGLE;
+        }
+    }
+    return { enabled: enabled === true, sigmaTape: sigmaTape,
+        sigmaAngle: sigmaAngle };
+};
+
+/**
+ * The options a DRAWING was adjusted with, from its trip-0 anchor tags,
+ * falling back to the current settings for anything it does not
+ * record.
+ *
+ * A drawing's own record wins so that reopening it and pressing Draw
+ * reproduces the geometry it already has, instead of silently
+ * re-solving under whatever the global setting happens to be today --
+ * the exact failure this feature exists to make visible rather than
+ * sneak past someone.
+ *
+ * \param tags {Adjustment, SigmaTape, SigmaAngle} as read by CsTags.get
+ *             (missing tags read back as "" or undefined -- both are
+ *             treated as "not recorded" below)
+ */
+CsAdjust.optionsFromTags = function(tags) {
+    var current = CsAdjust.currentOptions();
+    tags = tags || {};
+    var mode = tags.Adjustment;
+    var enabled = current.enabled;
+    if (mode === "none") {
+        enabled = false;
+    } else if (mode === "lsq") {
+        enabled = true;
+    }
+    // A blank or unparseable recorded sigma must fall back rather than
+    // yield NaN: NaN would poison every weight the solve builds from
+    // it, silently, since NaN comparisons never throw.
+    var num = function(text, fallback) {
+        if (text === undefined || text === null || text === "") {
+            return fallback;
+        }
+        var v = parseFloat(text);
+        return isNaN(v) ? fallback : v;
+    };
+    return {
+        enabled: enabled,
+        sigmaTape: num(tags.SigmaTape, current.sigmaTape),
+        sigmaAngle: num(tags.SigmaAngle, current.sigmaAngle)
+    };
+};
+
+/** The tag values to record for a given set of options. */
+CsAdjust.tagsFor = function(options) {
+    return {
+        Adjustment: options.enabled ? "lsq" : "none",
+        SigmaTape: String(options.sigmaTape),
+        SigmaAngle: String(options.sigmaAngle)
+    };
+};
+
+/**
+ * Resolve, then adjust if adjustment is on -- the one call every tool
+ * makes, so that "on" and "off" hand back the same shape (both carry
+ * `controlFrame`, both carry `adjusted`, only one carries a non-null
+ * `raw`) and no caller has to branch.
+ *
+ * \param adjustOpts as CsAdjust.adjust's opts, plus `enabled`; omitted
+ *                   means CsAdjust.currentOptions().
+ */
+CsAdjust.resolveAndAdjust = function(survey, resolveOpts, adjustOpts) {
+    var resolved = CsNetwork.resolve(survey, resolveOpts || {});
+    var o = adjustOpts || CsAdjust.currentOptions();
+    if (o.enabled === false) {
+        return CsAdjust.unadjusted(resolved, {
+            sigmaTape: o.sigmaTape, sigmaAngle: o.sigmaAngle });
+    }
+    return CsAdjust.adjust(survey, resolved, o);
 };

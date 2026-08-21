@@ -1373,6 +1373,175 @@ if (IS_NODE) {
 }
 
 // ---------------------------------------------------------------------
+// Task 3 -- CsAdjust: settings, the per-drawing record, and the single
+// resolveAndAdjust entry point.
+// ---------------------------------------------------------------------
+
+// Settings plumbing: under node there is no RSettings, so the defaults
+// must come back rather than an exception, and adjustment is ON by
+// default.
+var defOpts = CsAdjust.currentOptions();
+ok(defOpts.enabled === true, "task 3: adjustment enabled by default");
+near(defOpts.sigmaTape, CsAdjust.DEFAULT_SIGMA_TAPE, 1e-12,
+    "task 3: default sigmaTape");
+near(defOpts.sigmaAngle, CsAdjust.DEFAULT_SIGMA_ANGLE, 1e-12,
+    "task 3: default sigmaAngle");
+
+// A stored setting is read back, and an engine whose getters throw
+// (not just one that is entirely absent) must not raise --
+// currentOptions() falls back to the defaults instead.
+(function() {
+    var realSettings = (typeof RSettings !== "undefined") ?
+        RSettings : undefined;
+    try {
+        RSettings = {
+            getBoolValue: function(key, dflt) {
+                return key === CsAdjust.SETTING_ENABLED ? false : dflt;
+            },
+            getDoubleValue: function(key, dflt) {
+                if (key === CsAdjust.SETTING_SIGMA_TAPE) { return 0.02; }
+                if (key === CsAdjust.SETTING_SIGMA_ANGLE) { return 0.3; }
+                return dflt;
+            }
+        };
+        var stored = CsAdjust.currentOptions();
+        ok(stored.enabled === false,
+            "task 3: currentOptions reads the stored enabled flag");
+        near(stored.sigmaTape, 0.02, 1e-12,
+            "task 3: currentOptions reads the stored sigmaTape");
+        near(stored.sigmaAngle, 0.3, 1e-12,
+            "task 3: currentOptions reads the stored sigmaAngle");
+
+        RSettings = {
+            getBoolValue: function() { throw new Error("no such setting"); },
+            getDoubleValue: function() { throw new Error("no such setting"); }
+        };
+        var thrown = CsAdjust.currentOptions();
+        ok(thrown.enabled === true, "task 3: an engine whose getters throw " +
+            "still returns the enabled default rather than an exception");
+        near(thrown.sigmaTape, CsAdjust.DEFAULT_SIGMA_TAPE, 1e-12,
+            "task 3: ...and the default sigmaTape, not a thrown error");
+    } finally {
+        RSettings = realSettings;
+    }
+})();
+
+// A drawing's own recorded values win over the CURRENT SETTINGS --not
+// merely the hardcoded defaults-- so reopening and redrawing
+// reproduces the geometry it was drawn with even after someone changes
+// the global setting in the meantime.
+(function() {
+    var realSettings = (typeof RSettings !== "undefined") ?
+        RSettings : undefined;
+    try {
+        RSettings = {
+            getBoolValue: function(key, dflt) { return dflt; },
+            getDoubleValue: function(key, dflt) {
+                if (key === CsAdjust.SETTING_SIGMA_TAPE) { return 0.05; }
+                if (key === CsAdjust.SETTING_SIGMA_ANGLE) { return 0.6; }
+                return dflt;
+            }
+        };
+        var fromTags = CsAdjust.optionsFromTags({ Adjustment: "lsq",
+            SigmaTape: "0.01", SigmaAngle: "0.3" });
+        ok(fromTags.enabled === true,
+            "task 3: recorded Adjustment=lsq enables");
+        near(fromTags.sigmaTape, 0.01, 1e-12,
+            "task 3: recorded sigmaTape wins over the current setting");
+        near(fromTags.sigmaAngle, 0.3, 1e-12,
+            "task 3: recorded sigmaAngle wins over the current setting");
+
+        ok(CsAdjust.optionsFromTags({ Adjustment: "none" }).enabled === false,
+            "task 3: recorded Adjustment=none disables");
+        ok(CsAdjust.optionsFromTags({}).enabled === true,
+            "task 3: a drawing with no recorded Adjustment follows the " +
+            "(stubbed, on) settings");
+
+        // absent sigmas follow the SETTINGS, not the hardcoded default
+        var followsSettings = CsAdjust.optionsFromTags({ Adjustment: "lsq" });
+        near(followsSettings.sigmaTape, 0.05, 1e-12,
+            "task 3: an absent recorded sigmaTape follows the setting, " +
+            "not the hardcoded default");
+        near(followsSettings.sigmaAngle, 0.6, 1e-12,
+            "task 3: an absent recorded sigmaAngle follows the setting, " +
+            "not the hardcoded default");
+    } finally {
+        RSettings = realSettings;
+    }
+})();
+
+// Unstubbed (node, no RSettings): a blank or unparseable recorded
+// sigma falls back to the default rather than yielding NaN -- a NaN
+// sigma would poison every weight in the solve.
+ok(CsAdjust.optionsFromTags({ Adjustment: "lsq", SigmaTape: "" })
+    .sigmaTape === CsAdjust.DEFAULT_SIGMA_TAPE,
+    "task 3: a blank recorded sigma falls back to the default");
+var unparseable = CsAdjust.optionsFromTags({ Adjustment: "lsq",
+    SigmaTape: "not-a-number", SigmaAngle: "also-not-a-number" });
+ok(!isNaN(unparseable.sigmaTape) &&
+    unparseable.sigmaTape === CsAdjust.DEFAULT_SIGMA_TAPE,
+    "task 3: an unparseable recorded sigmaTape falls back too, got " +
+    unparseable.sigmaTape);
+ok(!isNaN(unparseable.sigmaAngle) &&
+    unparseable.sigmaAngle === CsAdjust.DEFAULT_SIGMA_ANGLE,
+    "task 3: an unparseable recorded sigmaAngle falls back too, got " +
+    unparseable.sigmaAngle);
+
+// tagsFor round-trips through optionsFromTags to the same options
+// (unstubbed, so "the settings" a bare tag set falls back to are the
+// defaults).
+var rtOn = { enabled: true, sigmaTape: 0.02, sigmaAngle: 0.44 };
+var rtOnTags = CsAdjust.tagsFor(rtOn);
+ok(rtOnTags.Adjustment === "lsq",
+    "task 3: tagsFor records lsq when enabled");
+var rtOnBack = CsAdjust.optionsFromTags(rtOnTags);
+ok(rtOnBack.enabled === true, "task 3: tagsFor/optionsFromTags round-trip " +
+    "enabled");
+near(rtOnBack.sigmaTape, rtOn.sigmaTape, 1e-12,
+    "task 3: tagsFor/optionsFromTags round-trip sigmaTape");
+near(rtOnBack.sigmaAngle, rtOn.sigmaAngle, 1e-12,
+    "task 3: tagsFor/optionsFromTags round-trip sigmaAngle");
+
+var rtOff = { enabled: false, sigmaTape: 0.15, sigmaAngle: 2.0 };
+var rtOffTags = CsAdjust.tagsFor(rtOff);
+ok(rtOffTags.Adjustment === "none",
+    "task 3: tagsFor records none when disabled");
+var rtOffBack = CsAdjust.optionsFromTags(rtOffTags);
+ok(rtOffBack.enabled === false,
+    "task 3: tagsFor/optionsFromTags round-trip enabled=false");
+near(rtOffBack.sigmaTape, rtOff.sigmaTape, 1e-12,
+    "task 3: tagsFor/optionsFromTags round-trip sigmaTape when disabled");
+near(rtOffBack.sigmaAngle, rtOff.sigmaAngle, 1e-12,
+    "task 3: tagsFor/optionsFromTags round-trip sigmaAngle when disabled");
+
+// One call for both paths, one shape out -- and controlFrame must
+// travel in both, because CsDraw and CsReport both read it.
+var freshResolve = CsNetwork.resolve(sq, {});
+var onResult = CsAdjust.resolveAndAdjust(sq, {}, EQ);
+ok(onResult.adjusted === true,
+    "task 3: resolveAndAdjust adjusts when enabled");
+ok(JSON.stringify(onResult.controlFrame) ===
+    JSON.stringify(freshResolve.controlFrame),
+    "task 3: the adjusted result carries controlFrame through");
+
+var offResult = CsAdjust.resolveAndAdjust(sq, {},
+    { enabled: false, sigmaTape: 1, sigmaAngle: 0 });
+ok(offResult.adjusted === false,
+    "task 3: resolveAndAdjust passes through when off");
+ok(offResult.raw === null, "task 3: a pass-through offers no ghost");
+near(offResult.stations["A3"].x, rsq.stations["A3"].x, 1e-12,
+    "task 3: a pass-through is the raw resolve");
+ok(JSON.stringify(offResult.controlFrame) ===
+    JSON.stringify(freshResolve.controlFrame),
+    "task 3: the pass-through result carries controlFrame too");
+
+// adjustOpts omitted means CsAdjust.currentOptions() -- unstubbed, on
+// by default -- so the survey with a real loop comes back adjusted.
+var defaultResult = CsAdjust.resolveAndAdjust(sq, {});
+ok(defaultResult.adjusted === true,
+    "task 3: resolveAndAdjust with no adjustOpts follows currentOptions()");
+
+// ---------------------------------------------------------------------
 // LRUD walls
 // ---------------------------------------------------------------------
 
