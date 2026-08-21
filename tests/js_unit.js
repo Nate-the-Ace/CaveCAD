@@ -92,6 +92,7 @@ var CORE_FILES = [
     "scripts/CaveSurvey/Core/CsModel.js",
     "scripts/CaveSurvey/Core/CsTraverse.js",
     "scripts/CaveSurvey/Core/CsNetwork.js",
+    "scripts/CaveSurvey/Core/CsAdjust.js",
     "scripts/CaveSurvey/Core/CsLrud.js",
     "scripts/CaveSurvey/Core/CsValidate.js",
     "scripts/CaveSurvey/Core/CsStats.js",
@@ -1047,6 +1048,328 @@ if (IS_NODE) {
         "task 1c perf: a " + perfSv.shots.length + "-shot survey with " +
         perfLoops + " loops resolved in " + perfMs + "ms under node -- " +
         "want well under 100ms (was ~1500ms before Task 1c)");
+}
+
+// ---------------------------------------------------------------------
+// Task 2 -- CsAdjust: least-squares loop closure adjustment.
+//
+// The square fixture again (`sq` / `rsq` above), now with EQUAL weights
+// (sigmaTape 1, sigmaAngle 0, so every leg's variance is 1) so the whole
+// answer is doable by hand: four ring legs share one 0.5 misclosure, so
+// each leg's residual is 0.5/4 = 0.125 and the stations walk out in
+// 0.125 steps away from the pinned anchor A4. Solved by hand from the
+// normal equations, NOT read off the solver's own output:
+//
+//   free x unknowns a1, a2, a3, b1 (A4 pinned at 0), observations
+//   a1 = -10.5, a2 - a1 = 0, a3 - a2 = 10, -a3 = 0, b1 - a3 = 5
+//   normal equations 2a1 - a2 = -10.5, 2a2 - a1 - a3 = -10,
+//   3a3 - a2 - b1 = 5, b1 - a3 = 5
+//   solution a1 = -10.375, a2 = -10.25, a3 = -0.125, b1 = 4.875
+//   i.e. +0.125, +0.25, +0.375, +0.375 off the raw traverse.
+// ---------------------------------------------------------------------
+
+var EQ = { sigmaTape: 1, sigmaAngle: 0 };
+var asq = CsAdjust.adjust(sq, rsq, EQ);
+
+ok(asq.summary.converged === true, "square adjustment converges");
+ok(asq.adjusted === true, "adjust marks its result adjusted");
+near(asq.shifts["A4"].distance, 0, 1e-9, "the pinned anchor A4 does not move");
+near(asq.shifts["A1"].dx, 0.125, 1e-9, "A1 shifts one quarter of the misclosure");
+near(asq.shifts["A2"].dx, 0.25, 1e-9, "A2 shifts two quarters");
+near(asq.shifts["A3"].dx, 0.375, 1e-9, "A3 shifts three quarters");
+near(asq.shifts["B1"].dx, 0.375, 1e-9, "the branch rides along with A3");
+near(asq.shifts["A2"].dy, 0, 1e-9, "no y misclosure, no y shift");
+near(asq.shifts["A2"].dz, 0, 1e-9, "no z misclosure, no z shift");
+ok(asq.summary.pinned.length === 1 && asq.summary.pinned[0] === "A4",
+    "the square's only pinned station is its anchor, got " +
+    JSON.stringify(asq.summary.pinned));
+
+var resByPair = {};
+for (var ri = 0; ri < asq.residuals.length; ri++) {
+    var rr = asq.residuals[ri];
+    resByPair[rr.from + ">" + rr.to] = rr;
+}
+near(resByPair["A4>A1"].dx, 0.125, 1e-9, "leg A4-A1 absorbs 0.125");
+near(resByPair["A1>A2"].dx, 0.125, 1e-9, "leg A1-A2 absorbs 0.125");
+near(resByPair["A2>A3"].dx, 0.125, 1e-9, "leg A2-A3 absorbs 0.125");
+near(resByPair["A3>A4"].dx, 0.125, 1e-9, "closure leg A3-A4 absorbs 0.125");
+near(resByPair["A3>B1"].distance, 0, 1e-9, "the branch leg absorbs nothing");
+near(resByPair["A4>A1"].standardized, 0.125, 1e-9,
+    "standardized residual is the residual over sigma (sigma = 1 here)");
+ok(asq.residuals.length === rsq.legs.length,
+    "one residual per leg, aligned to legs");
+
+// The least-squares condition itself, checked independently of the
+// solver: with equal weights the signed residuals must sum to zero at
+// every FREE station (that IS the normal equation at that station).
+// Pinned stations are Dirichlet boundaries and carry no equation.
+function adjustGradientMax(result) {
+    var g = {};
+    var bump = function(name, sign, r) {
+        if (!g.hasOwnProperty(name)) {
+            g[name] = { x: 0.0, y: 0.0, z: 0.0 };
+        }
+        g[name].x += sign * r.dx;
+        g[name].y += sign * r.dy;
+        g[name].z += sign * r.dz;
+    };
+    var i;
+    for (i = 0; i < result.residuals.length; i++) {
+        bump(result.residuals[i].to, 1.0, result.residuals[i]);
+        bump(result.residuals[i].from, -1.0, result.residuals[i]);
+    }
+    var pinnedSet = {};
+    for (i = 0; i < result.summary.pinned.length; i++) {
+        pinnedSet[result.summary.pinned[i]] = true;
+    }
+    var worst = 0.0;
+    for (var nm in g) {
+        if (!g.hasOwnProperty(nm) || pinnedSet[nm] === true) {
+            continue;
+        }
+        worst = Math.max(worst, Math.abs(g[nm].x), Math.abs(g[nm].y),
+            Math.abs(g[nm].z));
+    }
+    return worst;
+}
+ok(adjustGradientMax(asq) < 1e-9,
+    "the square's adjusted coordinates satisfy the normal equations, worst " +
+    "station imbalance " + adjustGradientMax(asq));
+
+// HONESTY: closures, loops and ties pass through as-surveyed. CsGrade
+// reads loops[].percent, so recomputing them post-adjustment would
+// report every survey on earth as grade 5, worst closure 0.00%.
+ok(asq.loops === rsq.loops, "adjust passes the loop list through, not a copy");
+ok(asq.closures === rsq.closures, "adjust passes the closure list through");
+ok(asq.ties === rsq.ties, "adjust passes the tie list through");
+ok(asq.loops.length === rsq.loops.length, "adjust keeps the loop list");
+near(asq.loops[0].error, 0.5, 1e-9, "adjust reports the AS-SURVEYED misclosure");
+var gradeRaw = CsGrade.compute(sq, rsq, CsStats.compute(sq, rsq, CsTraverse.SLOPE));
+var gradeAdj = CsGrade.compute(sq, asq, CsStats.compute(sq, asq, CsTraverse.SLOPE));
+ok(gradeRaw.centreline === gradeAdj.centreline,
+    "adjustment cannot launder the centreline grade");
+ok(gradeRaw.centrelineText === gradeAdj.centrelineText,
+    "adjustment cannot launder the grade's stated reasoning");
+ok(asq.raw === rsq, "the adjusted result carries the raw resolve for the ghost");
+
+// The ghost is only honest while the raw result stays as-surveyed:
+// adjust must build a NEW stations map, never write its answer into the
+// resolve result it was handed. A4 anchors at the origin, so the raw
+// A3 sits at -0.5 (the whole misclosure still on the closing leg).
+near(rsq.stations["A3"].x, -0.5, 1e-12,
+    "adjust leaves the raw resolve's own coordinates untouched");
+near(asq.raw.stations["A3"].x, -0.5, 1e-12,
+    "...so the ghost layer still draws the as-surveyed line");
+ok(asq.stations !== rsq.stations,
+    "the adjusted stations are a new map, not the raw one mutated");
+
+// An `excludeFromPlot` (P) leg is a real measurement that merely isn't
+// drawn, and an `excludeFromLength` (L) leg is a real measurement that
+// merely isn't counted -- the design spec's table says both take part
+// in the adjustment. Nothing else in the suite pins that, so this does:
+// flagging a ring leg P must not change the answer at all.
+var adjFlagged = CsModel.newSurvey();
+adjFlagged.shots.push(shotOf("A4", "A1", 10.5, 270));
+adjFlagged.shots.push(shotOf("A1", "A2", 10, 0));
+var adjFlaggedLeg = shotOf("A2", "A3", 10, 90);
+adjFlaggedLeg.excludeFromPlot = true;
+adjFlagged.shots.push(adjFlaggedLeg);
+var adjFlaggedLeg2 = shotOf("A3", "A4", 10, 180);
+adjFlaggedLeg2.excludeFromLength = true;
+adjFlagged.shots.push(adjFlaggedLeg2);
+var aAdjFlagged = CsAdjust.adjust(adjFlagged, CsNetwork.resolve(adjFlagged, {}), EQ);
+near(aAdjFlagged.shifts["A1"].dx, 0.125, 1e-9,
+    "a P-flagged and an L-flagged leg still constrain the solve (A1)");
+near(aAdjFlagged.shifts["A3"].dx, 0.375, 1e-9,
+    "...and the ring still walks out in equal 0.125 steps (A3)");
+
+// an empty survey is a real state for a tool run on an empty drawing
+var adjEmptySv = CsModel.newSurvey();
+var aAdjEmpty = CsAdjust.adjust(adjEmptySv, CsNetwork.resolve(adjEmptySv, {}), EQ);
+ok(aAdjEmpty.summary.stationCount === 0 && aAdjEmpty.summary.converged === true,
+    "an empty survey adjusts to nothing, without dividing by an empty network");
+
+// a tree has nothing to close: the raw coordinates are already the
+// exact least-squares answer, so the solver must recognise that and
+// not "converge" its way to a different one
+var adjTree = CsModel.newSurvey();
+adjTree.shots.push(shotOf("T1", "T2", 10, 0));
+adjTree.shots.push(shotOf("T2", "T3", 10, 90, 5));
+adjTree.shots.push(shotOf("T2", "T4", 7, 200, -12));
+var rAdjTree = CsNetwork.resolve(adjTree, {});
+var aAdjTree = CsAdjust.adjust(adjTree, rAdjTree, EQ);
+ok(aAdjTree.summary.converged === true, "tree adjustment converges");
+ok(aAdjTree.summary.iterations === 0, "a tree needs no iterations, got " +
+    aAdjTree.summary.iterations);
+near(aAdjTree.summary.worstShift, 0, 1e-9, "a tree does not move");
+
+// idempotence: adjusting the adjusted result is a no-op, and the ghost
+// still shows the ORIGINAL as-surveyed geometry, not the first pass
+var asq2 = CsAdjust.adjust(sq, asq, EQ);
+near(asq2.summary.worstShift, 0, 1e-6, "adjusting an adjusted survey moves nothing");
+ok(asq2.raw === rsq, "re-adjusting keeps the original raw as the ghost");
+
+// two fixed stations, joined through one free middle station. The
+// joining leg arrives with both ends already known and is the only
+// link between them, so it is a control TIE -- and a tie is a real
+// observation: drop it from the solve and M1 stays at 10 instead of
+// splitting the 0.6 disagreement.
+var adjTwoFix = CsModel.newSurvey();
+adjTwoFix.shots.push(shotOf("F1", "M1", 10, 90));
+adjTwoFix.shots.push(shotOf("M1", "F2", 10, 90));
+adjTwoFix.fixed["F1"] = { x: 0, y: 0, z: 0 };
+adjTwoFix.fixed["F2"] = { x: 20.6, y: 0, z: 0 };   // 0.6 further than surveyed
+var rAdjTwoFix = CsNetwork.resolve(adjTwoFix, {});
+ok(rAdjTwoFix.ties.length === 1,
+    "sanity: the F2 leg is a control tie, so this fixture tests a tie in the solve");
+var aAdjTwoFix = CsAdjust.adjust(adjTwoFix, rAdjTwoFix, EQ);
+near(aAdjTwoFix.stations["F1"].x, 0, 1e-9, "fixed F1 stays on its control");
+near(aAdjTwoFix.stations["F2"].x, 20.6, 1e-9, "fixed F2 stays on its control");
+near(aAdjTwoFix.stations["M1"].x, 10.3, 1e-9,
+    "the middle station splits the difference -- the tie leg is in the solve");
+ok(aAdjTwoFix.summary.pinned.length === 2,
+    "both fixed stations are pinned, got " +
+    JSON.stringify(aAdjTwoFix.summary.pinned));
+
+// noAdjust (Flags C) holds its leg's geometry; the neighbour absorbs
+// the error. Held by weight (1e6 x the median), so the surveyed length
+// survives to well inside any drawable tolerance.
+var adjHeld = CsModel.newSurvey();
+var adjHeldLeg = shotOf("H1", "H2", 10, 90);
+adjHeldLeg.noAdjust = true;
+adjHeld.shots.push(adjHeldLeg);
+adjHeld.shots.push(shotOf("H2", "H3", 10, 90));
+adjHeld.fixed["H1"] = { x: 0, y: 0, z: 0 };
+adjHeld.fixed["H3"] = { x: 20.6, y: 0, z: 0 };
+var rAdjHeld = CsNetwork.resolve(adjHeld, {});
+var aAdjHeld = CsAdjust.adjust(adjHeld, rAdjHeld, EQ);
+ok(aAdjHeld.summary.converged === true, "the noAdjust network converges");
+near(aAdjHeld.stations["H2"].x - aAdjHeld.stations["H1"].x, 10, 1e-4,
+    "a noAdjust leg keeps its surveyed length");
+ok(Math.abs(aAdjHeld.stations["H3"].x - aAdjHeld.stations["H2"].x - 10) > 0.5,
+    "...while the neighbouring leg absorbs essentially the whole 0.6");
+
+// non-convergence returns the survey UNADJUSTED, and says so. A
+// half-solved network is worse than an unsolved one because it LOOKS
+// adjusted.
+var adjStuck = CsAdjust.adjust(sq, rsq, { sigmaTape: 1, sigmaAngle: 0,
+    maxIterations: 1, cgTolerance: 1e-30 });
+ok(adjStuck.summary.converged === false, "a starved solve reports non-convergence");
+ok(adjStuck.adjusted === false, "a starved solve does not claim to be adjusted");
+ok(adjStuck.raw === null, "a starved solve offers no ghost -- its geometry IS the raw");
+near(adjStuck.stations["A3"].x, rsq.stations["A3"].x, 1e-12,
+    "a starved solve leaves coordinates exactly as surveyed");
+ok(adjStuck.summary.warning !== undefined && adjStuck.summary.warning !== "",
+    "a starved solve explains itself in words");
+ok(adjStuck.loops === rsq.loops,
+    "even unadjusted, the loop list is the as-surveyed one");
+
+// ---- the pin set follows controlFrame -------------------------------
+//
+// Task 1b: when an explicit anchor is passed and a fixed station's
+// control could NOT be reconciled into the anchor's frame, resolve
+// leaves that station to ordinary traversal and names it in
+// controlFrame.notHonored. Its resolved position is a TRAVERSAL
+// ARTIFACT, not control. Pinning it would freeze a coordinate nobody
+// measured and force the whole adjustment to honour it.
+var adjNh = CsModel.newSurvey();
+adjNh.shots.push(shotOf("N1", "N2", 10, 0));
+adjNh.shots.push(shotOf("N2", "N3", 10, 90));
+adjNh.shots.push(shotOf("N3", "N4", 10, 180));
+adjNh.shots.push(shotOf("N4", "N1", 10.5, 270));   // 0.5 misclosure
+adjNh.fixed["N3"] = { x: 1000, y: 1000, z: 0 };    // world control
+
+// (a) anchored on N1, which has no control of its own: N3's control
+// cannot be placed in the anchor's frame, so N3 is NOT pinned.
+var rAdjNh = CsNetwork.resolve(adjNh, { anchor: { name: "N1", x: 0, y: 0, z: 0 } });
+ok(rAdjNh.controlFrame !== null && rAdjNh.controlFrame.notHonored.indexOf("N3") >= 0,
+    "sanity: resolve reports N3's control as not honored under this anchor");
+var aAdjNh = CsAdjust.adjust(adjNh, rAdjNh, EQ);
+ok(aAdjNh.summary.pinned.indexOf("N3") === -1,
+    "a station named in controlFrame.notHonored is NOT pinned, got " +
+    JSON.stringify(aAdjNh.summary.pinned));
+ok(aAdjNh.summary.pinned.length === 1 && aAdjNh.summary.pinned[0] === "N1",
+    "only the explicit anchor is pinned under an un-honored control frame");
+ok(aAdjNh.shifts["N3"].distance > 1e-6,
+    "the un-honored station is free to move, shifted " +
+    aAdjNh.shifts["N3"].distance);
+ok(Math.abs(aAdjNh.stations["N3"].x - 1000) > 900,
+    "the un-honored station is NOT dragged onto its unreconciled control");
+
+// (b) the same survey with no anchor at all: N3's control IS honored
+// (it seeds the traverse), so it is pinned and must not move.
+var rAdjNhFree = CsNetwork.resolve(adjNh, {});
+ok(rAdjNhFree.controlFrame === null,
+    "sanity: with no explicit anchor there is no frame to reconcile");
+var aAdjNhFree = CsAdjust.adjust(adjNh, rAdjNhFree, EQ);
+ok(aAdjNhFree.summary.pinned.indexOf("N3") >= 0,
+    "honored control IS pinned, got " + JSON.stringify(aAdjNhFree.summary.pinned));
+near(aAdjNhFree.stations["N3"].x, 1000, 1e-9, "pinned control does not move (x)");
+near(aAdjNhFree.stations["N3"].y, 1000, 1e-9, "pinned control does not move (y)");
+near(adjustGradientMax(aAdjNhFree), 0, 1e-9,
+    "the anchored ring's adjustment satisfies the normal equations");
+
+// (c) and controlFrame itself must survive the adjustment. The return
+// shape is a SUPERSET of a resolve result, and two consumers read this
+// field: CsDraw skips writing a `Fixed` tag for an un-honored station
+// (there is no truthful control value to write), and CsReport prints
+// the warning naming it. Dropping the field here would silently
+// reinstate a Fixed tag nobody ever pinned AND delete the warning that
+// says the control went unused -- two truths lost at once, invisibly.
+ok(aAdjNh.controlFrame === rAdjNh.controlFrame,
+    "the adjusted result carries controlFrame through");
+var adjNhReport = CsReport.drawSummary(adjNh, aAdjNh, stubDrawn, []);
+ok(adjNhReport.indexOf("N3") >= 0,
+    "CsReport still warns about the un-honored control from an ADJUSTED " +
+    "result, got:\n" + adjNhReport);
+var aAdjNhStuck = CsAdjust.adjust(adjNh, rAdjNh, { sigmaTape: 1, sigmaAngle: 0,
+    maxIterations: 1, cgTolerance: 1e-30 });
+ok(aAdjNhStuck.controlFrame === rAdjNh.controlFrame,
+    "the unadjusted pass-through carries controlFrame too");
+
+// ---- cost: the solver runs inside redraws ---------------------------
+//
+// resolve() plus adjust() happen on every redraw, so a change that
+// made the solve quadratic in station count would show up as a hang in
+// the GUI, not as a failing test. This bound is deliberately loose --
+// an order of magnitude over the measured cost, so machine noise
+// cannot make it flaky -- but tight enough that quadratic behaviour
+// could never slip through unnoticed.
+if (IS_NODE) {
+    var adjPerfSv = CsModel.newSurvey();
+    var adjPerfN = 3000;
+    var adjPerfLoops = 0;
+    for (var apk = 1; apk <= adjPerfN; apk++) {
+        adjPerfSv.shots.push(shotOf("AP" + (apk - 1), "AP" + apk, 10, 0));
+    }
+    // Real closing legs: back down 100 chain legs of 10 units each,
+    // surveyed 0.4 short, so every loop carries a plausible 0.4
+    // misclosure. (A short closing shot spanning a long gap would
+    // "resolve" and "adjust" fine but would be a 990-unit blunder, not
+    // a survey, and would measure the solver on data no cave produces.)
+    for (apk = 200; apk < adjPerfN; apk += 200) {
+        adjPerfSv.shots.push(shotOf("AP" + apk, "AP" + (apk - 100), 999.6, 180));
+        adjPerfLoops++;
+    }
+    var rAdjPerf = CsNetwork.resolve(adjPerfSv, {});
+    ok(rAdjPerf.loops.length === adjPerfLoops,
+        "task 2 perf: sanity check on the built survey, expected " +
+        adjPerfLoops + " loops got " + rAdjPerf.loops.length);
+    var adjT0 = Date.now();
+    var aAdjPerf = CsAdjust.adjust(adjPerfSv, rAdjPerf, EQ);
+    var adjMs = Date.now() - adjT0;
+    ok(aAdjPerf.summary.converged === true,
+        "task 2 perf: a " + adjPerfN + "-station network with " +
+        adjPerfLoops + " loops converges, in " + aAdjPerf.summary.iterations +
+        " iterations");
+    ok(adjustGradientMax(aAdjPerf) < 1e-5,
+        "task 2 perf: and it really is solved -- worst normal-equation " +
+        "imbalance " + adjustGradientMax(aAdjPerf) + " (measured ~5e-8)");
+    ok(adjMs < 500,
+        "task 2 perf: adjusting " + adjPerfN + " stations took " + adjMs +
+        "ms under node -- measured ~35ms in " +
+        aAdjPerf.summary.iterations + " iterations, so this 500ms bound is " +
+        "an order of magnitude of slack; a quadratic solve would blow it");
 }
 
 // ---------------------------------------------------------------------

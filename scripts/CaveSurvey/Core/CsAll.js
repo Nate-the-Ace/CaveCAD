@@ -22,6 +22,7 @@ include(includeBasePath + "/CsGeomag.js");
 include(includeBasePath + "/CsModel.js");
 include(includeBasePath + "/CsTraverse.js");
 include(includeBasePath + "/CsNetwork.js");
+include(includeBasePath + "/CsAdjust.js");
 include(includeBasePath + "/CsLrud.js");
 include(includeBasePath + "/CsValidate.js");
 include(includeBasePath + "/CsStats.js");
