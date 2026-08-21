@@ -92,6 +92,18 @@ CsGit.parseToplevel = function(r) {
 // bug this file exists to prevent, so every path is run through this
 // before it leaves parsePorcelain.
 //
+// A SINGLE left-to-right scan, deliberately, not a chain of global
+// replace() passes. An earlier version ran the octal-run pass before
+// the "\\" pass, so a real escaped backslash followed by digits --
+// git renders the ONE literal backslash in "back\123slash.txt" as
+// "\\123slash.txt" -- let the octal pass start matching on the
+// second backslash of that pair and silently decode "\123" as octal
+// (byte 0x53, "S"), corrupting the path into "back\Sslash.txt" with
+// no error at all. A single scan that dispatches on the character
+// right after EACH backslash, in the order they actually appear,
+// removes the ordering hazard as a class -- this is the same
+// dispatch git's own unquoting logic uses.
+//
 // Non-quoted input is returned unchanged, so this is always safe to
 // call.
 CsGit.unquotePath = function(s) {
@@ -100,40 +112,58 @@ CsGit.unquotePath = function(s) {
         return s;
     }
     var inner = s.substring(1, s.length - 1);
-    // A run of \ooo octal escapes is a run of UTF-8 BYTES, not
-    // characters one at a time -- "\303\266" is the two bytes of "ö".
-    // Decoding a byte at a time produces mojibake, so gather the
-    // whole run, build a %XX-escaped string, and let
-    // decodeURIComponent do the UTF-8 decode in one shot. (Confirmed
-    // present in this engine: CsStore.js:117 already relies on it, and
-    // the drawing round-trip test in tests/js_unit.js decodes a real
-    // multiline note through it on the engine leg, not just node.)
-    inner = inner.replace(/(?:\\[0-7]{3})+/g, function(run) {
-        var percent = "";
-        var octalRe = /\\([0-7]{3})/g;
-        var m;
-        while ((m = octalRe.exec(run)) !== null) {
-            var hex = parseInt(m[1], 8).toString(16);
-            percent += "%" + (hex.length < 2 ? "0" + hex : hex).toUpperCase();
+    var out = "";
+    var i = 0;
+    while (i < inner.length) {
+        var ch = inner.charAt(i);
+        if (ch !== "\\") {
+            out += ch;
+            i += 1;
+            continue;
         }
-        try {
-            return decodeURIComponent(percent);
-        } catch (e) {
-            // A malformed byte run -- keep the raw escapes rather
-            // than losing the rest of the path to a thrown exception.
-            return run;
+        var next = inner.charAt(i + 1);
+        if (next === "\\") { out += "\\"; i += 2; continue; }
+        if (next === "\"") { out += "\""; i += 2; continue; }
+        if (next === "t") { out += "\t"; i += 2; continue; }
+        if (next === "n") { out += "\n"; i += 2; continue; }
+        if (next === "r") { out += "\r"; i += 2; continue; }
+        if (next >= "0" && next <= "7") {
+            // A CONTIGUOUS run of \ooo escapes is a run of UTF-8
+            // BYTES, not characters one at a time -- "\303\266" is
+            // the two bytes of "ö". Decoding a byte at a time produces
+            // mojibake, so gather the whole run, build a %XX-escaped
+            // string, and let decodeURIComponent do the UTF-8 decode
+            // in one shot. (Confirmed present in this engine:
+            // CsStore.js:117 already relies on it, and the drawing
+            // round-trip test in tests/js_unit.js decodes a real
+            // multiline note through it on the engine leg, not just
+            // node.)
+            var percent = "";
+            while (i < inner.length && inner.charAt(i) === "\\" &&
+                    inner.charAt(i + 1) >= "0" && inner.charAt(i + 1) <= "7" &&
+                    inner.charAt(i + 2) >= "0" && inner.charAt(i + 2) <= "7" &&
+                    inner.charAt(i + 3) >= "0" && inner.charAt(i + 3) <= "7") {
+                var octal = inner.substring(i + 1, i + 4);
+                var hex = parseInt(octal, 8).toString(16);
+                percent += "%" + (hex.length < 2 ? "0" + hex : hex).toUpperCase();
+                i += 4;
+            }
+            try {
+                out += decodeURIComponent(percent);
+            } catch (e) {
+                // A malformed byte run -- keep the raw escapes rather
+                // than losing the rest of the path to a thrown
+                // exception.
+                out += percent;
+            }
+            continue;
         }
-    });
-    return inner.replace(/\\\\|\\"|\\t|\\n|\\r/g, function(m) {
-        switch (m) {
-        case "\\\\": return "\\";
-        case "\\\"": return "\"";
-        case "\\t": return "\t";
-        case "\\n": return "\n";
-        case "\\r": return "\r";
-        }
-        return m;
-    });
+        // An escape this function does not recognize: keep the
+        // backslash literally rather than silently eating it.
+        out += "\\";
+        i += 1;
+    }
+    return out;
 };
 
 CsGit.parsePorcelain = function(r) {

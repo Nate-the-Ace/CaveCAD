@@ -5872,6 +5872,38 @@ ok(quotedAccent[0].path === "café/Blöwing.dxf",
     "parsePorcelain: octal-escaped UTF-8 bytes decode to real accented " +
     "text, not mojibake and not the raw escapes");
 
+// A literal double-quote CHARACTER inside a filename, escaped by git
+// as \" -- unexercised until now:
+// ??  "say \"hi\".txt"
+var quotedQuoteChar = CsGit.parsePorcelain({ code: 0,
+    out: "?? \"say \\\"hi\\\".txt\"\n", err: "" });
+ok(quotedQuoteChar[0].path === "say \"hi\".txt",
+    "parsePorcelain: an escaped literal quote character decodes to a " +
+    "real quote, not the two-character escape");
+
+// A literal backslash followed by digits that LOOK like an octal
+// escape -- this is the ordering hazard a two-pass unquoter would get
+// wrong (and a shipped version briefly did): git renders the single
+// backslash in "back\123slash.txt" as "\\123slash.txt" (an escaped
+// backslash, then plain digits, not a second escape):
+// ??  "back\\123slash.txt"
+// A pass ordered octal-before-backslash starts matching on the SECOND
+// backslash of that pair and silently decodes "\123" as octal (byte
+// 0x53, "S"), corrupting the path into "back\Sslash.txt" with no
+// visible error -- confirmed against real `git add`, which then fails
+// with "pathspec ... did not match any files". The single left-to-
+// right scan in CsGit.unquotePath processes the escaped backslash
+// first and leaves the following digits untouched.
+var quotedBackslash = CsGit.parsePorcelain({ code: 0,
+    out: "?? \"back\\\\123slash.txt\"\n", err: "" });
+ok(quotedBackslash[0].path === "back\\123slash.txt",
+    "parsePorcelain: an escaped backslash does not consume the octal-" +
+    "looking digits that follow it");
+// Round-tripped through a real repo (git 2.54.0, throwaway, outside
+// this worktree): `git add -- 'back\123slash.txt'` -- the exact
+// string CsGit.argvAdd would build from quotedBackslash[0].path --
+// staged the file with no pathspec error.
+
 // What is STILL genuinely unhandled, now that quoting is: a filename
 // that itself contains the literal " -> " sequence would be split at
 // the wrong point by the rename detector above. That is deliberately
