@@ -579,6 +579,83 @@ for (tli = 0; tli < tieFindings.length; tli++) {
 ok(tieMisclosure === 0, "a tie raises no loop-misclosure finding");
 ok(rtie.anchors.length === 2, "each fixed component contributes an anchor");
 
+// closures[] carry a kind matching which list they landed in
+ok(rsq.closures[0].kind === "loop", "square fixture's closure is kind 'loop'");
+ok(rtie.closures[0].kind === "tie", "tie fixture's closure is kind 'tie'");
+
+// a there-and-back 2-station ring is a loop, not a tie: the closing
+// shot is not the network's only connection between its ends (there
+// are two parallel legs between R1 and R2), so the bridge test
+// correctly says "loop", regardless of the chain-meet heuristic this
+// replaced.
+var backRing = CsModel.newSurvey();
+backRing.shots.push(shotOf("R1", "R2", 10, 0));
+backRing.shots.push(shotOf("R2", "R1", 10, 180));
+var rBackRing = CsNetwork.resolve(backRing, {});
+ok(rBackRing.loops.length === 1 && rBackRing.ties.length === 0,
+    "a there-and-back 2-station ring is a loop, not a tie");
+
+// A ring carrying two fixed stations: chain-meet is the wrong test
+// here -- RA and RC anchor at two different spanning-tree roots even
+// though the ring is one component throughout -- which is exactly the
+// regression a spec reviewer caught. Seeding every fixed station up
+// front (needed to make the P1/Q1 tie fixture above work at all)
+// means the RB->RC and RD->RA legs BOTH arrive with both ends already
+// known, so each is independently a closure: the ring produces two
+// closures, one per arc between the two controls, not one figure for
+// the whole ring. Both must come back "loop", never "tie".
+var ring = CsModel.newSurvey();
+ring.shots.push(shotOf("RA", "RB", 10, 0));
+ring.shots.push(shotOf("RB", "RC", 10, 90));
+ring.shots.push(shotOf("RC", "RD", 10, 180));
+ring.shots.push(shotOf("RD", "RA", 10, 270));
+ring.fixed["RA"] = { x: 0, y: 0, z: 0 };
+ring.fixed["RC"] = { x: 10, y: 10, z: 0 };
+var rring = CsNetwork.resolve(ring, {});
+ok(rring.ties.length === 0, "two fixed stations on one ring: no ties");
+ok(rring.loops.length === 2,
+    "two fixed stations on one ring produce two arc closures, both loops");
+if (rring.loops.length === 2) {
+    // Each loop's traverseLength is its OWN arc, not the whole ring:
+    // the closing leg itself (10) plus the one tree leg on the way
+    // back to the other anchor (10) = 20, hand-computed independently
+    // of the implementation.
+    for (var rli = 0; rli < rring.loops.length; rli++) {
+        near(rring.loops[rli].traverseLength, 20, 1e-9,
+            "each arc-loop's traverseLength is its own half of the ring, not the full 40");
+        near(rring.loops[rli].error, 0, 1e-6,
+            "clean ring: each arc closes to (near) zero");
+    }
+}
+
+// Same ring, a deliberate 5-unit blunder on one arc (RB->RC surveyed
+// as 15 instead of 10): CsValidate must flag it, and CsGrade must see
+// that loops exist. This is exactly the blindness the regression
+// caused -- both closures used to be misclassified as ties, and
+// neither CsValidate nor CsGrade ever look at resolved.ties for
+// misclosure.
+var ringBlunder = CsModel.newSurvey();
+ringBlunder.shots.push(shotOf("BA", "BB", 10, 0));
+ringBlunder.shots.push(shotOf("BB", "BC", 15, 90));  // 5-unit blunder
+ringBlunder.shots.push(shotOf("BC", "BD", 10, 180));
+ringBlunder.shots.push(shotOf("BD", "BA", 10, 270));
+ringBlunder.fixed["BA"] = { x: 0, y: 0, z: 0 };
+ringBlunder.fixed["BC"] = { x: 10, y: 10, z: 0 };
+var rringBlunder = CsNetwork.resolve(ringBlunder, {});
+ok(rringBlunder.loops.length === 2 && rringBlunder.ties.length === 0,
+    "blundered ring still resolves to two loops, no ties");
+var blunderFindings = CsValidate.check(ringBlunder, rringBlunder);
+var blunderMisclosures = 0;
+for (var bfi = 0; bfi < blunderFindings.length; bfi++) {
+    if (blunderFindings[bfi].code === "loop-misclosure") { blunderMisclosures++; }
+}
+ok(blunderMisclosures === 1,
+    "the blundered arc raises exactly one loop-misclosure finding");
+var blunderStats = CsStats.compute(ringBlunder, rringBlunder, CsTraverse.SLOPE);
+var blunderGrade = CsGrade.compute(ringBlunder, rringBlunder, blunderStats);
+ok(blunderGrade.centrelineText.indexOf("no loops") === -1,
+    "CsGrade sees the loops -- it must not claim there are none");
+
 // explicit anchor wins
 var ranch = CsNetwork.resolve(back, { anchor: { name: "X1", x: 5, y: 5, z: 0 } });
 near(ranch.stations["X2"].y, -5, 1e-9, "explicit anchor overrides fixed");
