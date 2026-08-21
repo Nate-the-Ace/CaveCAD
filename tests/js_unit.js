@@ -5124,19 +5124,26 @@ if (!IS_NODE) {
     // The old behaviour: an empty document reconstructs to one BLANK
     // trip 0, the page's fingerprint matched it no better than any
     // other, so the page landed past it and the drawing ended up with
-    // no trip-0 anchor. The log lives on the trip-0 anchor by schema,
-    // so the entry was DROPPED -- silently, on every revision, forever.
-    // CsRevise.trip0Anchor's lowest-anchor fallback is what gives such
-    // a drawing somewhere to keep its history.
+    // no trip-0 anchor -- every hand-typed survey started at trip 1 for
+    // no reason a user could explain, and the log was DROPPED, silently,
+    // on every revision, forever. CsRevise.trip0Anchor's lowest-anchor
+    // fallback is what kept such a drawing's log alive despite that, and
+    // it still exists for the drawings already out in Nathan's cave
+    // files -- but SurveyNotebook.mergeTripIntoSurvey now OCCUPIES the
+    // blank placeholder trip 0 (CsModel.isPlaceholderTrip) instead of
+    // appending past it, so a NEWLY typed page anchors at trip 0
+    // directly and the fallback below is never the one doing the work.
     //
-    // Three things have to hold:
+    // Four things have to hold:
     //   1. reading a log off a drawing with no anchor at all must not
     //      throw. Nothing to read is not an error.
-    //   2. the first Draw writes its entry, and onto the anchor both
-    //      revision paths agree to look at.
+    //   2. the first Draw writes its entry, and onto trip 0's own
+    //      anchor, not a fallback.
     //   3. a SECOND Draw finds that entry again across its own
     //      erase-and-redraw and appends to it. A home the next
     //      revision cannot find is no better than no home.
+    //   4. a THIRD, genuinely different page does not displace trip 0
+    //      -- it appends as trip 1, and trip 0's history is untouched.
     // -----------------------------------------------------------------
     (function() {
         var doc = new RDocument(new RMemoryStorage(),
@@ -5190,6 +5197,15 @@ if (!IS_NODE) {
         ok(CsRevise.trip0Anchor(doc) !== null,
             "notebook-log-empty: a typed page gives the drawing an anchor " +
             "the log can live on");
+        // Not just "an anchor" -- TRIP 0's anchor, occupied directly by
+        // mergeTripIntoSurvey rather than reached through
+        // trip0Anchor's lowest-anchor fallback (that fallback is for
+        // drawings that already shipped without a trip 0, not a
+        // standing crutch for brand-new ones).
+        ok(anchorTrip() === 0,
+            "notebook-log-empty: a page typed into an untagged drawing " +
+            "lands as trip 0, not appended past it -- got trip " +
+            anchorTrip());
         var elog1 = logNow();
         ok(elog1.indexOf("(2026-01-01|FIRST) added from the notebook " +
             "page, 2 shots") > 0,
@@ -5198,9 +5214,9 @@ if (!IS_NODE) {
         // The entry names a trip id, and the log has to sit on THAT
         // trip's anchor -- the entry and its home disagreeing is how a
         // reader ends up looking in the wrong place.
-        ok(elog1.indexOf("trip " + anchorTrip() + " (") === 0,
-            "notebook-log-empty: the entry sits on the anchor of the trip " +
-            "it names (trip " + anchorTrip() + "), got '" + elog1 + "'");
+        ok(elog1.indexOf("trip 0 (") === 0,
+            "notebook-log-empty: the entry sits on trip 0's own anchor, " +
+            "got '" + elog1 + "'");
         // exactly one entity carries the log: parking a second copy
         // anywhere would give the next revision two histories to pick
         // from
@@ -5248,11 +5264,69 @@ if (!IS_NODE) {
         var elog2 = logNow();
         ok(elog2 !== null && elog2.indexOf(elog1) === 0,
             "notebook-log-empty: the first entry survived the revision's " +
-            "erase -- the fallback anchor is a STABLE home, got '" +
+            "erase -- trip 0's own anchor is a STABLE home, got '" +
             elog2 + "'");
         ok(elog2.indexOf("declination 0 -> -3.75 (user)") > 0,
             "notebook-log-empty: and the declination change is named, " +
             "which is what the log is for, got '" + elog2 + "'");
+        ok(anchorTrip() === 0,
+            "notebook-log-empty: the revision stayed on trip 0, got trip " +
+            anchorTrip());
+
+        // -- a THIRD, genuinely different page: must NOT displace trip 0 --
+        // Trip 0 is occupied now (a real trip with real shots), so this
+        // is exactly the dangerous case CsModel.isPlaceholderTrip exists
+        // to prevent: a different party's page landing on top of it
+        // would silently merge two people's work under one record.
+        var recon3 = CsRevise.surveyFromDocument(doc);
+        var page3 = CsModel.newSurvey();
+        page3.date = "2026-03-03";
+        page3.team = "SECOND";
+        page3.declination = 0;
+        page3.declinationSource = "user";
+        // Ties into A3 (trip 0's end) so the network resolver places it
+        // without needing an explicit start-point seed -- a disconnected
+        // page needs one (see drawMergedSurvey's anchor comment), which
+        // would only be noise here; the numbering question this checks
+        // does not depend on where the new shot connects.
+        page3.shots.push(shotOf("A3", "B1", 8, 200));
+        QMessageBox = {
+            information: function() {},
+            warning: function() {}
+        };
+        try {
+            SurveyNotebook.drawMergedSurvey(null, doc, page3, recon3);
+        } finally {
+            QMessageBox = realBox;
+        }
+        var elog3 = logNow();
+        ok(anchorTrip() === 0,
+            "notebook-log-empty: trip 0's anchor is still trip 0 after a " +
+            "second page arrives -- got trip " + anchorTrip());
+        ok(elog3 !== null && elog3.indexOf(elog2) === 0,
+            "notebook-log-empty: trip 0's history is untouched by a " +
+            "second, unrelated page -- got '" + elog3 + "'");
+        var tripsSeen = {};
+        var eids3 = doc.queryAllEntities(false, false);
+        for (var r = 0; r < eids3.length; r++) {
+            var er = doc.queryEntity(eids3[r]);
+            if (isNull(er) || CsTags.get(er, "Station") === "" ||
+                    CsTags.get(er, "Trip") === "") {
+                continue;
+            }
+            tripsSeen[CsTags.getNumber(er, "Trip")] = true;
+        }
+        ok(tripsSeen[0] === true && tripsSeen[1] === true,
+            "notebook-log-empty: the second page appended as trip 1 " +
+            "alongside trip 0, not merged into it");
+        ok(CsTags.collectStations(doc).length === 4,
+            "notebook-log-empty: both trips' stations are present -- " +
+            "A1-A3 kept, B1 added, got " +
+            CsTags.collectStations(doc).length);
+        ok(elog3.indexOf("trip 1 (2026-03-03|SECOND) added from the " +
+            "notebook page, 1 shot") > 0,
+            "notebook-log-empty: the log names where trip 1 came from, " +
+            "got '" + elog3 + "'");
     })();
 
     // -----------------------------------------------------------------

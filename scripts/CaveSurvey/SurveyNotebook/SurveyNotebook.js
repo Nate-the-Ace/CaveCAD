@@ -935,7 +935,10 @@ SurveyNotebook.tripRecordOf = function(survey) {
  * page is REPLACED: its old shots drop out, the page's shots take its
  * trip id, and its trip record is overwritten by the page's (name and
  * start note/LRUD included -- the page is the revision authority).
- * No match appends the page as a new trip.
+ * No match OCCUPIES a blank placeholder trip 0 (CsModel.isPlaceholderTrip)
+ * when there is one -- the same rule CsModel.tripIdFor applies -- so a
+ * page typed into a drawing with no tagged survey anchors at trip 0
+ * instead of leaving it empty; otherwise the page appends as a new trip.
  *
  * Pure -- no GUI, no document access. reconSurvey's shots and trip
  * records are not mutated (kept shots are shared by reference; the
@@ -982,6 +985,15 @@ SurveyNotebook.mergeTripIntoSurvey = function(reconSurvey, tripRecord, shots) {
         // once trips exist they are the authority (see ensureTrips):
         // the revision writes the trip SLOT, never top-level fields
         merged.trips[tripId] = tripRecord;
+    } else if (CsModel.isPlaceholderTrip(reconSurvey, 0)) {
+        // trip 0 is an empty slot, not a trip to append past -- occupy
+        // it the way CsModel.tripIdFor does, so a page typed into an
+        // untagged drawing anchors the RevisionLog at trip 0 instead of
+        // leaving trip 0 empty forever (checked against reconSurvey,
+        // not merged, because its shots are what isPlaceholderTrip
+        // reads and merged.shots is still empty at this point)
+        merged.trips[0] = tripRecord;
+        tripId = 0;
     } else {
         merged.trips.push(tripRecord);
         tripId = merged.trips.length - 1;
@@ -1497,16 +1509,22 @@ SurveyNotebook.drawMergedSurvey = function(w, doc, survey, recon) {
         // dialog's whole audit trail away.
         //
         // No trip-0 anchor means the entry is DROPPED, and deliberately.
-        // It happens on a first Draw into an empty drawing:
+        // A first Draw into an empty drawing no longer causes this:
         // surveyFromDocument hands an empty document one blank trip 0,
-        // the page's fingerprint matches it no better than any other, so
-        // the page lands as trip 1 and nothing in the drawing carries
-        // Trip 0. The log lives on the trip-0 anchor by definition of
-        // the schema, and that is the only point either revision path
-        // reads. Parking it on the trip-1 anchor instead would leave it
-        // somewhere the NEXT revision's erase deletes unread -- so one
-        // lost entry beats a log that quietly loses all of them. The
-        // redraw itself is still reported in the message below.
+        // and mergeTripIntoSurvey OCCUPIES that placeholder
+        // (CsModel.isPlaceholderTrip) rather than appending past it, so
+        // the page lands as trip 0 and CsDraw tags a trip-0 anchor for
+        // it. What still reaches this branch is a page with no shots at
+        // all merged into a drawing that has none either -- nothing
+        // resolves, so CsDraw has no station to tag an anchor onto, and
+        // there is nowhere to put the entry regardless of which trip id
+        // it would have carried. The log lives on the trip-0 anchor by
+        // definition of the schema, and that is the only point either
+        // revision path reads. Parking it on some other trip's anchor
+        // instead would leave it somewhere the NEXT revision's erase
+        // deletes unread -- so one lost entry beats a log that quietly
+        // loses all of them. The redraw itself is still reported in the
+        // message below.
         var anchor0 = CsRevise.trip0Anchor(doc);
         if (anchor0 !== null) {
             CsTags.commit(di, anchor0, { RevisionLog: newLog });
