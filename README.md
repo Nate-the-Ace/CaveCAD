@@ -122,5 +122,5 @@ for every modification.
 ./tools/publish.sh          # build + install into QCAD + archive to ~/Documents/Cave
 ```
 
-The version comes from `VERSION`. A build that fails any check produces no
+The version comes from `VERSION`. Nothing is released yet, so it is pre-1.0: `0.MAJOR.MINOR.PATCH`, where the trailing three keep continuity with the builds already published locally (`0.2.7.1` is the 2.7.1 build, honestly numbered). Tags match. A build that fails any check produces no
 zip.
