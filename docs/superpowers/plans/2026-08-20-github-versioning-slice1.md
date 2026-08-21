@@ -1991,7 +1991,7 @@ git commit -m "feat: device-flow sign-in from inside CaveCAD, no secret through 
 
 **Verify:**
 ```bash
-cd ~/Documents/github/qcad-azimuth-tool && ./tools/publish.sh && open -a CaveCAD
+cd ~/Documents/github/cavecad-tools && ./tools/publish.sh && open -a CaveCAD
 ```
 then run the tool and read the log:
 ```bash
@@ -2005,7 +2005,7 @@ Expected: at least 1 for the first, exactly 0 for the second.
 - [ ] **Step 1: Publish the add-on**
 
 ```bash
-cd ~/Documents/github/qcad-azimuth-tool && ./tools/publish.sh
+cd ~/Documents/github/cavecad-tools && ./tools/publish.sh
 ```
 Expected: the structural, syntax and unit gates pass, then the install and archive lines. A failure here is a test failure, not a GUI problem — fix it before launching.
 

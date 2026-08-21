@@ -16,7 +16,7 @@
 - Rigid changes transform the whole drawing (sketches ride); non-rigid changes redraw tagged geometry + report moved stations.
 - Revisions live in existing tools; no new menu entry.
 - Full fidelity: XDATA alone reconstructs the drawing entirely.
-- Repo: `~/Documents/github/qcad-azimuth-tool`, branch `v2`. CaveCAD fork is the target platform (stock free QCAD drops XDATA on save — accepted).
+- Repo: `~/Documents/github/cavecad-tools`, branch `v2`. CaveCAD fork is the target platform (stock free QCAD drops XDATA on save — accepted).
 
 **Conventions the engineer MUST follow** (violations break the suite silently):
 - Every Core file is `Cs`-prefixed, defines a matching global, and lives in `scripts/CaveSurvey/Core/`. Enforced by structural test.

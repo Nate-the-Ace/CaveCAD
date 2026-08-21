@@ -3,11 +3,22 @@
 **Written 2026-08-21 while you slept.** You said to run with my own judgement, so
 the calls below are mine; every one is reversible and every one is explained.
 
+## Directory rename, 2026-08-21
+
+The main checkout was `~/Documents/github/qcad-azimuth-tool` and is now
+`~/Documents/github/cavecad-tools`. The old name was actively misleading: it
+belongs to the ARCHIVED GitHub repo (`ndschonegg/qcad-azimuth-tool`,
+`isArchived: true`), while this checkout's remote is `ndschonegg/CaveCAD`. Not
+renamed to `CaveCAD` because macOS is case-insensitive and
+`~/Documents/github/cavecad` already symlinks to `cavecad-src`, the fork's app
+source. Paths below are updated; the `qcad-ghv` worktree path is unchanged and
+its linkage was repaired.
+
 ## Where the work is
 
     worktree:  ~/Documents/github/qcad-ghv
     branch:    github-versioning
-    NOT in:    ~/Documents/github/qcad-azimuth-tool  (left alone -- a parallel
+    NOT in:    ~/Documents/github/cavecad-tools  (left alone -- a parallel
                session was committing to v2 all night)
 
 A git worktree, so `v2` stayed checked out in the main directory for that other

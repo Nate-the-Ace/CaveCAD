@@ -10,7 +10,7 @@
 
 **Spec:** `docs/superpowers/specs/2026-08-20-aerial-basemap-design.md`
 
-**Branch:** `v2` of `~/Documents/github/qcad-azimuth-tool` (note: that branch already carries unrelated uncommitted edits to `Declination.js`, `GeoReference.js` and a plan `.tasks.json` — leave them alone and never `git add -A`; every commit below stages explicit paths).
+**Branch:** `v2` of `~/Documents/github/cavecad-tools` (note: that branch already carries unrelated uncommitted edits to `Declination.js`, `GeoReference.js` and a plan `.tasks.json` — leave them alone and never `git add -A`; every commit below stages explicit paths).
 
 **User decisions (already made):**
 - Imagery source is USGS NAIP, not Google Earth or Esri World Imagery (Google has no lawful programmatic export; NAIP is public domain, keyless, no attribution obligation).
@@ -69,7 +69,7 @@ Task order follows the dependency chain: Core math and its tests first (Task 1),
 - [ ] **Step 1: Record the current assertion count** (so the increase is provable, not assumed)
 
 ```bash
-cd ~/Documents/github/qcad-azimuth-tool
+cd ~/Documents/github/cavecad-tools
 node tests/js_unit.js | tail -1
 ```
 
@@ -1212,7 +1212,7 @@ git commit -m "feat: Aerial Basemap toolbar icon"
 - [ ] **Step 1: Publish to CaveCAD**
 
 ```bash
-cd ~/Documents/github/qcad-azimuth-tool && ./tools/publish.sh
+cd ~/Documents/github/cavecad-tools && ./tools/publish.sh
 ```
 
 Expected: it reports installing into CaveCAD's per-user scripts folder. If `publish.sh` runs the test suite as a gate, it must pass first.
