@@ -14,8 +14,19 @@ var CsPick = {};
  * contain commas). Anything else returns undefined and the caller
  * falls back to typed coordinates.
  *
+ * `elevation` is the picked entity's own Elevation tag -- the
+ * drawing's vertical datum at that point -- or NULL when it carries
+ * none. Null, not 0: an anchor z of 0 handed to CsNetwork.resolve is
+ * an EXPLICIT instruction to put the survey on the drawing's origin,
+ * and it beats a *fix, so a placeholder 0 here rebases an
+ * absolute-datum cave (an entrance at 1250 ft) down to sea level. A
+ * caller with no genuine elevation to supply must pass this straight
+ * through and let resolve fall back to the anchored station's own
+ * control. A line/arc endpoint never has one.
+ *
  * \param title dialog title for the endpoint question
- * \return {pos, isExistingStation, existingName} or undefined
+ * \return {pos, isExistingStation, existingName, elevation} or
+ *         undefined
  */
 CsPick.startPointFromSelection = function(doc, title) {
     if (!doc.hasSelection()) {
@@ -34,7 +45,8 @@ CsPick.startPointFromSelection = function(doc, title) {
         return {
             pos: entity.getPosition(),
             isExistingStation: true,
-            existingName: CsTags.get(entity, "Station")
+            existingName: CsTags.get(entity, "Station"),
+            elevation: CsTags.getNumber(entity, "Elevation")
         };
     }
 
@@ -55,7 +67,10 @@ CsPick.startPointFromSelection = function(doc, title) {
         return {
             pos: (choice.indexOf("Point 1") === 0) ? p1 : p2,
             isExistingStation: false,
-            existingName: ""
+            existingName: "",
+            // a line endpoint is a coordinate, not a station: the
+            // drawing records no elevation for it at all
+            elevation: null
         };
     }
 

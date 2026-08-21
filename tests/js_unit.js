@@ -1318,6 +1318,31 @@ ok(aAdjNh.shifts["N3"].distance > 1e-6,
 ok(Math.abs(aAdjNh.stations["N3"].x - 1000) > 900,
     "the un-honored station is NOT dragged onto its unreconciled control");
 
+// (a2) opts.pinned is the CALLER saying "hold this one" outright, and
+// it wins over the notHonored exclusion above -- an explicit
+// instruction is not a coordinate nobody chose. Task 7 is the first
+// caller: CsRevise.apply passes the GEOREFERENCED station, the
+// drawing's one point of contact with the real world, so least squares
+// cannot drift the coordinate a basemap or a KML export derives from.
+// (Task 2 shipped opts.pinned with no test at all.)
+var aAdjNhPinned = CsAdjust.adjust(adjNh, rAdjNh,
+    { sigmaTape: 1, sigmaAngle: 0, pinned: ["N3"] });
+ok(aAdjNhPinned.summary.pinned.indexOf("N3") >= 0,
+    "opts.pinned overrides the notHonored exclusion, got " +
+    JSON.stringify(aAdjNhPinned.summary.pinned));
+near(aAdjNhPinned.shifts["N3"].distance, 0, 1e-9,
+    "...and an explicitly pinned station does not move at all (the same " +
+    "station shifted " + aAdjNh.shifts["N3"].distance + " unpinned)");
+// a name the network has never heard of is ignored, not pinned into
+// existence -- CsRevise.apply passes a geo station that may have been
+// deleted from the drawing
+var aAdjNhGhostPin = CsAdjust.adjust(adjNh, rAdjNh,
+    { sigmaTape: 1, sigmaAngle: 0, pinned: ["NOPE", "N3"] });
+ok(aAdjNhGhostPin.summary.pinned.indexOf("NOPE") === -1 &&
+    aAdjNhGhostPin.summary.pinned.indexOf("N3") >= 0,
+    "opts.pinned skips names the network does not have, got " +
+    JSON.stringify(aAdjNhGhostPin.summary.pinned));
+
 // (b) the same survey with no anchor at all: N3's control IS honored
 // (it seeds the traverse), so it is pinned and must not move.
 var rAdjNhFree = CsNetwork.resolve(adjNh, {});
@@ -1562,6 +1587,53 @@ ok(JSON.stringify(offResult.controlFrame) ===
 var defaultResult = CsAdjust.resolveAndAdjust(sq, {});
 ok(defaultResult.adjusted === true,
     "task 3: resolveAndAdjust with no adjustOpts follows currentOptions()");
+
+// ---- task 7: both sides of a revision, identically adjusted --------
+//
+// CsRevise.apply resolves twice -- before and after the revision --
+// and hands both to classifyChange. Adjust ONE side and not the other
+// and the fit reads the adjustment itself as part of the revision: a
+// pure declination change stops classifying as rigid, the drawing gets
+// erased and redrawn, and untagged hand-traced walls go with it. So the
+// property under test is a pair: identical options on both sides stays
+// rigid, and a mismatched pair does not.
+var revLoopSv = function() {
+    var s = CsModel.newSurvey();
+    s.shots.push(shotOf("R1", "R2", 10, 0));
+    s.shots.push(shotOf("R2", "R3", 8, 90));
+    // deliberately mis-shot: the exact closure is 12.806 ft at 218.66,
+    // so this leaves ~1.9 ft of real misclosure for the adjustment to
+    // distribute -- without it the test would prove nothing
+    s.shots.push(shotOf("R3", "R1", 11.5, 225));
+    return s;
+};
+var revAdjOpts = { enabled: true, sigmaTape: 1, sigmaAngle: 0 };
+var revOldSv = revLoopSv();
+var revNewSv = revLoopSv();
+CsRevise.reviseDeclination(revNewSv, 0, 2.0, "user");
+var revOldR = CsAdjust.resolveAndAdjust(revOldSv, {}, revAdjOpts);
+var revNewR = CsAdjust.resolveAndAdjust(revNewSv, {}, revAdjOpts);
+// vacuous otherwise: an adjustment that moved nothing could not be
+// mistaken for a revision either
+ok(revOldR.summary.worstShift > 0.1,
+    "task 7: the fixture really is adjusted -- worst shift " +
+    revOldR.summary.worstShift);
+var revExtent = CsRevise.positionsExtent(revOldR.stations);
+var revCls = CsRevise.classifyChange(revOldR, revNewR, revExtent);
+ok(revCls.rigid === true,
+    "task 7: a declination revision stays RIGID when both sides are " +
+    "adjusted the same way (maxResidual " + revCls.maxResidual + ")");
+near(revCls.theta, -2.0 * Math.PI / 180.0, 1e-9,
+    "task 7: the rigid rotation is the declination delta, sign per " +
+    "CsRevise.applyFit");
+// the trap itself, pinned so nobody re-introduces it: one side adjusted
+// and the other raw is NOT rigid, even though the only real change was
+// a declination
+var revMixedCls = CsRevise.classifyChange(revOldR,
+    CsNetwork.resolve(revNewSv, {}), revExtent);
+ok(revMixedCls.rigid === false,
+    "task 7: adjusting only one side misclassifies the same revision as " +
+    "non-rigid (maxResidual " + revMixedCls.maxResidual + ")");
 
 // ---------------------------------------------------------------------
 // LRUD walls
@@ -7051,6 +7123,370 @@ if (!IS_NODE) {
         ok(a0 !== null && CsTags.getNumber(a0, "Trip") === 0,
             "log-fallback: trip 0 still wins when it is there, got " +
             (a0 === null ? "null" : CsTags.getNumber(a0, "Trip")));
+    })();
+
+    // -----------------------------------------------------------------
+    // Task 7: the drawing records what it was adjusted with.
+    //
+    // Without this record a redraw re-solves under whatever the global
+    // setting happens to be that day, so opening a drawing with the
+    // switch flipped silently moves every station. The record rides on
+    // the trip-0 anchor beside StartNote/StartLrud, and
+    // CsRevise.surveyFromDocument hands it back so a revision uses the
+    // DRAWING's options rather than today's.
+    // -----------------------------------------------------------------
+    (function() {
+        var mk = function(adjOpts) {
+            var doc = new RDocument(new RMemoryStorage(),
+                new RSpatialIndexNavel());
+            var di = new RDocumentInterface(doc);
+            getDocument = function() { return doc; };
+            getDocumentInterface = function() { return di; };
+            var S = CsModel.newSurvey();
+            S.shots.push(shotOf("T1", "T2", 10, 0));
+            S.shots.push(shotOf("T2", "T3", 8, 90));
+            S.shots.push(shotOf("T3", "T1", 11.5, 225));
+            CsDraw.survey(S, CsAdjust.resolveAndAdjust(S, {}, adjOpts));
+            return doc;
+        };
+
+        var onDoc = mk({ enabled: true, sigmaTape: 0.25, sigmaAngle: 2 });
+        var onAnchor = CsRevise.trip0Anchor(onDoc);
+        ok(onAnchor !== null, "adjust-record: the trip-0 anchor is there");
+        ok(CsTags.get(onAnchor, "Adjustment") === "lsq",
+            "adjust-record: an adjusted drawing records Adjustment=lsq, " +
+            "got '" + CsTags.get(onAnchor, "Adjustment") + "'");
+        near(CsTags.getNumber(onAnchor, "SigmaTape"), 0.25, 1e-12,
+            "adjust-record: the sigmas in force are recorded (tape)");
+        near(CsTags.getNumber(onAnchor, "SigmaAngle"), 2, 1e-12,
+            "adjust-record: the sigmas in force are recorded (angle)");
+
+        var onRecon = CsRevise.surveyFromDocument(onDoc);
+        ok(onRecon.adjustTags !== undefined && onRecon.adjustTags !== null,
+            "adjust-record: surveyFromDocument returns adjustTags");
+        var onOpts = CsAdjust.optionsFromTags(onRecon.adjustTags || {});
+        ok(onOpts.enabled === true,
+            "adjust-record: the record round-trips through " +
+            "optionsFromTags as enabled");
+        near(onOpts.sigmaTape, 0.25, 1e-12,
+            "adjust-record: ...with the recorded sigmaTape, not today's " +
+            "setting");
+        near(onOpts.sigmaAngle, 2, 1e-12,
+            "adjust-record: ...and the recorded sigmaAngle");
+
+        // adjustment OFF is a record too: a drawing drawn as-surveyed
+        // must redraw as-surveyed even if the setting is on tomorrow
+        var offDoc = mk({ enabled: false, sigmaTape: 0.25, sigmaAngle: 2 });
+        var offAnchor = CsRevise.trip0Anchor(offDoc);
+        ok(CsTags.get(offAnchor, "Adjustment") === "none",
+            "adjust-record: an unadjusted drawing records Adjustment=none, " +
+            "got '" + CsTags.get(offAnchor, "Adjustment") + "'");
+        var offOpts = CsAdjust.optionsFromTags(
+            CsRevise.surveyFromDocument(offDoc).adjustTags || {});
+        ok(offOpts.enabled === false,
+            "adjust-record: 'none' round-trips as disabled, so a redraw " +
+            "reproduces the as-surveyed geometry");
+
+        // The other way in: a tool holding only the document, not a
+        // reconstruction (Survey Stats). Same three tag names, one
+        // reader, so the two paths cannot drift apart.
+        var viaDoc = CsAdjust.optionsFromTags(
+            CsRevise.adjustTagsOn(CsRevise.trip0Anchor(onDoc)));
+        ok(viaDoc.enabled === true,
+            "adjust-record: reading via trip0Anchor agrees about enabled");
+        near(viaDoc.sigmaTape, 0.25, 1e-12,
+            "adjust-record: ...and about the recorded sigmaTape");
+        // and a drawing with no anchor at all must not throw: "" in
+        // every field is what optionsFromTags calls "not recorded"
+        var noneTags = CsRevise.adjustTagsOn(null);
+        ok(noneTags.Adjustment === "" && noneTags.SigmaTape === "" &&
+            noneTags.SigmaAngle === "",
+            "adjust-record: no anchor reads back as no record, not a throw");
+        ok(CsAdjust.optionsFromTags(noneTags).enabled ===
+            CsAdjust.currentOptions().enabled,
+            "adjust-record: an unrecorded drawing falls back to the " +
+            "current settings");
+    })();
+
+    // -----------------------------------------------------------------
+    // Task 7: Rebuild Survey Data REPAIRS a drawing -- it must not
+    // re-solve it. It erases every station's marks and redraws them, so
+    // solving under today's global setting instead of the drawing's own
+    // record would move the whole cave in answer to a request to fix
+    // its tags. This is the "heal" path, which the tool itself
+    // advertises as "nothing inferred".
+    // -----------------------------------------------------------------
+    (function() {
+        loadRepoScript(
+            "scripts/CaveSurvey/RebuildSurveyData/RebuildSurveyData.js");
+        var doc = new RDocument(new RMemoryStorage(),
+            new RSpatialIndexNavel());
+        var di = new RDocumentInterface(doc);
+        getDocument = function() { return doc; };
+        getDocumentInterface = function() { return di; };
+
+        var S = CsModel.newSurvey();
+        S.shots.push(shotOf("H1", "H2", 10, 0, 10));
+        S.shots.push(shotOf("H2", "H3", 8, 90));
+        S.shots.push(shotOf("H3", "H1", 11.5, 225));
+        CsModel.ensureTrips(S);
+        var drawnRes = CsAdjust.resolveAndAdjust(S, {},
+            { enabled: true, sigmaTape: 1, sigmaAngle: 0 });
+        CsDraw.survey(S, drawnRes);
+        var posBefore = CsRevise.stationPositions(doc);
+        // how far a re-solve WITHOUT the record would snap the drawing
+        var rawGap = 0;
+        for (var rn in posBefore) {
+            if (!posBefore.hasOwnProperty(rn) ||
+                    drawnRes.raw.stations[rn] === undefined) {
+                continue;
+            }
+            var rdx = posBefore[rn].x - drawnRes.raw.stations[rn].x;
+            var rdy = posBefore[rn].y - drawnRes.raw.stations[rn].y;
+            var rd = Math.sqrt(rdx * rdx + rdy * rdy);
+            if (rd > rawGap) {
+                rawGap = rd;
+            }
+        }
+        ok(rawGap > 0.1,
+            "rebuild-heal: the drawing really sits on adjusted, not " +
+            "as-surveyed, coordinates -- gap " + rawGap);
+
+        var rep = RebuildSurveyData.rebuild(doc, di);
+        ok(rep.mode === "heal",
+            "rebuild-heal: took the heal path, got '" + rep.mode + "'");
+        var posAfter = CsRevise.stationPositions(doc);
+        var worst = 0;
+        for (var hn in posBefore) {
+            if (!posBefore.hasOwnProperty(hn) ||
+                    posAfter[hn] === undefined) {
+                continue;
+            }
+            var hdx = posAfter[hn].x - posBefore[hn].x;
+            var hdy = posAfter[hn].y - posBefore[hn].y;
+            var hd = Math.sqrt(hdx * hdx + hdy * hdy);
+            if (hd > worst) {
+                worst = hd;
+            }
+        }
+        near(worst, 0, 1e-9,
+            "rebuild-heal: a repair moved no station -- worst " + worst +
+            " (a re-solve without the drawing's record would have moved " +
+            "one by " + rawGap + ")");
+    })();
+
+    // -----------------------------------------------------------------
+    // Task 7: CsRevise.apply must resolve BOTH sides the way the
+    // drawing was drawn.
+    //
+    // The rigid path rewrites each station's Elevation tag from its own
+    // resolve. Resolve unadjusted while the drawing was drawn adjusted
+    // and a pure declination revision -- which cannot change any
+    // elevation at all -- silently snaps every elevation back to the
+    // as-surveyed value. That is the geometry moving under the
+    // surveyor without a word, through the vertical axis instead of
+    // the horizontal one.
+    // -----------------------------------------------------------------
+    (function() {
+        var doc = new RDocument(new RMemoryStorage(),
+            new RSpatialIndexNavel());
+        var di = new RDocumentInterface(doc);
+        getDocument = function() { return doc; };
+        getDocumentInterface = function() { return di; };
+
+        var S = CsModel.newSurvey();
+        S.declination = 0.0;
+        S.declinationSource = "user";
+        // a loop with a real VERTICAL misclosure: the +10 rise never
+        // comes back down, so the adjustment has 1.7 ft of z to spread
+        S.shots.push(shotOf("Z1", "Z2", 10, 0, 10));
+        S.shots.push(shotOf("Z2", "Z3", 8, 90));
+        S.shots.push(shotOf("Z3", "Z1", 11.5, 225));
+        CsModel.ensureTrips(S);
+
+        var adjOpts = { enabled: true, sigmaTape: 1, sigmaAngle: 0 };
+        var drawnRes = CsAdjust.resolveAndAdjust(S, {}, adjOpts);
+        ok(Math.abs(drawnRes.stations["Z3"].z -
+                drawnRes.raw.stations["Z3"].z) > 0.1,
+            "apply-adjusted: the fixture's adjusted z really differs from " +
+            "the as-surveyed z (adjusted " + drawnRes.stations["Z3"].z +
+            " vs raw " + drawnRes.raw.stations["Z3"].z + ")");
+        CsDraw.survey(S, drawnRes);
+
+        var elevOf = function(name) {
+            var ids = doc.queryAllEntities(false, false);
+            for (var i = 0; i < ids.length; i++) {
+                var e = doc.queryEntity(ids[i]);
+                if (!isNull(e) && CsTags.get(e, "Station") === name) {
+                    return CsTags.getNumber(e, "Elevation");
+                }
+            }
+            return null;
+        };
+        near(elevOf("Z3"), drawnRes.stations["Z3"].z, 1e-9,
+            "apply-adjusted: the drawing starts on the adjusted datum");
+
+        var recon = CsRevise.surveyFromDocument(doc);
+        var newSurvey = CsRevise.surveyFromDocument(doc).survey;
+        CsRevise.reviseDeclination(newSurvey, 0, 3.0, "igrf");
+        var report = CsRevise.apply(doc, di, recon, newSurvey);
+
+        ok(report.rigid === true,
+            "apply-adjusted: a declination revision still classifies as " +
+            "RIGID with both sides adjusted");
+        near(elevOf("Z3"), drawnRes.stations["Z3"].z, 1e-6,
+            "apply-adjusted: a plan rotation leaves the elevations where " +
+            "the drawing had them, got " + elevOf("Z3") + " for an " +
+            "adjusted " + drawnRes.stations["Z3"].z + " (as-surveyed " +
+            drawnRes.raw.stations["Z3"].z + ")");
+        // the honesty rule, through the revision report: loop closures
+        // are the AS-SURVEYED ones, never recomputed from adjusted
+        // coordinates
+        ok(report.loopsBefore.length === 1 && report.loopsAfter.length === 1,
+            "apply-adjusted: one loop reported either side");
+        if (report.loopsBefore.length === 1) {
+            var rawLoop = CsNetwork.resolve(recon.survey, {});
+            near(report.loopsBefore[0].error, rawLoop.loops[0].error, 1e-9,
+                "apply-adjusted: the reported closure is the as-surveyed " +
+                "one, not ~0 from the adjusted coordinates");
+        }
+
+        // The two calls themselves: IDENTICAL options, and the
+        // georeferenced station pinned. Watched rather than inferred,
+        // because "both sides the same" is the whole correctness
+        // argument and nothing downstream reports which options ran.
+        // The geo tags go on Z2, deliberately NOT the anchor.
+        var gop = new RModifyObjectsOperation();
+        var gids = doc.queryAllEntities(false, false);
+        for (var gi = 0; gi < gids.length; gi++) {
+            var ge = doc.queryEntity(gids[gi]);
+            if (!isNull(ge) && CsTags.get(ge, "Station") === "Z2") {
+                CsTags.set(ge, "GeoStation", "Z2");
+                CsTags.set(ge, "GeoLat", "40.5");
+                CsTags.set(ge, "GeoLon", "-90.2");
+                gop.addObject(ge, false);
+            }
+        }
+        di.applyOperation(gop);
+
+        var seenOpts = [];
+        var realRA = CsAdjust.resolveAndAdjust;
+        CsAdjust.resolveAndAdjust = function(sv, rOpts, aOpts) {
+            seenOpts.push(JSON.stringify(aOpts));
+            return realRA.call(CsAdjust, sv, rOpts, aOpts);
+        };
+        var recon2 = CsRevise.surveyFromDocument(doc);
+        var new2 = CsRevise.surveyFromDocument(doc).survey;
+        CsRevise.reviseDeclination(new2, 0, 5.0, "user");
+        try {
+            CsRevise.apply(doc, di, recon2, new2);
+        } finally {
+            CsAdjust.resolveAndAdjust = realRA;
+        }
+        ok(seenOpts.length === 2,
+            "apply-adjusted: apply resolves exactly twice through " +
+            "resolveAndAdjust, got " + seenOpts.length);
+        ok(seenOpts.length === 2 && seenOpts[0] === seenOpts[1],
+            "apply-adjusted: BOTH sides get the SAME adjust options -- " +
+            seenOpts.join("  |  "));
+        ok(seenOpts.length > 0 && seenOpts[0].indexOf("\"Z2\"") >= 0,
+            "apply-adjusted: the georeferenced station is pinned, got " +
+            seenOpts[0]);
+        ok(seenOpts.length > 0 && seenOpts[0].indexOf("\"lsq\"") === -1 &&
+            JSON.parse(seenOpts[0]).enabled === true,
+            "apply-adjusted: the options are the DRAWING's record read " +
+            "back as options, not raw tags, got " + seenOpts[0]);
+    })();
+
+    // -----------------------------------------------------------------
+    // Task 7: no call site may pass a PLACEHOLDER anchor z.
+    //
+    // Driving the real Survey Notebook Draw path (drawSurveyInner) with
+    // a selected scratch point and a page whose first station carries a
+    // *fix at an absolute datum. The picked point has no Elevation tag,
+    // so the old code handed CsNetwork an EXPLICIT anchor z of 0 -- and
+    // an explicit z always beats control, so the cave was rebased from
+    // 1250 ft onto the drawing's origin. Same shape of bug as the
+    // CsRevise.anchorZOf lesson, through a different door.
+    //
+    // Only sheetSurvey (the dock's cells) is stubbed; the selection,
+    // the pick, the elevation lookup, the resolve and the draw are all
+    // the real thing.
+    // -----------------------------------------------------------------
+    (function() {
+        var doc = new RDocument(new RMemoryStorage(),
+            new RSpatialIndexNavel());
+        var di = new RDocumentInterface(doc);
+        getDocument = function() { return doc; };
+        getDocumentInterface = function() { return di; };
+
+        // a bare scratch point, no tags of any kind, and really selected
+        var addOp = new RAddObjectsOperation();
+        var pick = new RPointEntity(doc, new RPointData(new RVector(500, 500)));
+        addOp.addObject(pick, false);
+        di.applyOperation(addOp);
+        doc.selectEntity(doc.queryAllEntities(false, false)[0], true);
+        ok(doc.hasSelection() && doc.querySelectedEntities().length === 1,
+            "anchor-z: one untagged scratch point is selected");
+        var pickedSel = CsPick.startPointFromSelection(doc, "anchor-z");
+        ok(pickedSel !== undefined && pickedSel.elevation === null,
+            "anchor-z: a picked entity with no Elevation tag reports NO " +
+            "elevation, not a placeholder 0 -- got " +
+            (pickedSel === undefined ? "undefined" : pickedSel.elevation));
+
+        var page = CsModel.newSurvey();
+        page.shots.push(shotOf("ENT", "P1", 10, 0));
+        page.shots.push(shotOf("P1", "P2", 10, 90));
+        // the entrance surveyed to an absolute datum, as a *fix / #Fix
+        page.fixed["ENT"] = { x: 0, y: 0, z: 1250 };
+        CsModel.ensureTrips(page);
+
+        var realSheetSurvey = SurveyNotebook.sheetSurvey;
+        var realBox = (typeof QMessageBox !== "undefined") ?
+            QMessageBox : undefined;
+        SurveyNotebook.sheetSurvey = function() { return page; };
+        QMessageBox = {
+            information: function() {},
+            warning: function() {}
+        };
+        try {
+            SurveyNotebook.drawSurveyInner(null);
+        } finally {
+            SurveyNotebook.sheetSurvey = realSheetSurvey;
+            if (realBox !== undefined) {
+                QMessageBox = realBox;
+            }
+        }
+
+        var drawnElev = {};
+        var drawnAt = {};
+        var pids = doc.queryAllEntities(false, false);
+        for (var pi = 0; pi < pids.length; pi++) {
+            var pe = doc.queryEntity(pids[pi]);
+            if (isNull(pe)) {
+                continue;
+            }
+            var pn = CsTags.get(pe, "Station");
+            if (pn !== "") {
+                drawnElev[pn] = CsTags.getNumber(pe, "Elevation");
+                drawnAt[pn] = pe.getPosition();
+            }
+        }
+        ok(drawnAt["ENT"] !== undefined,
+            "anchor-z: the page was drawn (ENT present)");
+        if (drawnAt["ENT"] !== undefined) {
+            near(drawnAt["ENT"].x, 500, 1e-9,
+                "anchor-z: ENT landed on the picked point in PLAN");
+            near(drawnAt["ENT"].y, 500, 1e-9,
+                "anchor-z: ...both axes");
+        }
+        near(drawnElev["ENT"], 1250, 1e-9,
+            "anchor-z: the cave keeps its absolute datum -- ENT at 1250 " +
+            "ft, not rebased onto the picked point's silence, got " +
+            drawnElev["ENT"]);
+        near(drawnElev["P2"], 1250, 1e-9,
+            "anchor-z: ...and so does every station downstream of it, got " +
+            drawnElev["P2"]);
     })();
 }
 

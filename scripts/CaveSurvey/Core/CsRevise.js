@@ -32,11 +32,19 @@
 // pure numeric half of the revision framework. reviseDeclination
 // rotates one trip's azimuths to a re-measured declination, each shot
 // off the declination it records having been computed with;
-// similarityFit / classifyChange compare two CsNetwork.resolve results
-// and decide whether the whole plan moved RIGIDLY (rotation + uniform
+// similarityFit / classifyChange compare two resolve results and
+// decide whether the whole plan moved RIGIDLY (rotation + uniform
 // scale + translation -- redraw everything in place) or genuinely
 // changed shape (stations moved relative to each other -- the caller
 // must reconcile). All of it is engine-free and runs under node.
+//
+// THOSE TWO RESULTS MUST BE SOLVED THE SAME WAY. CsAdjust's return
+// shape is a superset of CsNetwork.resolve's, so either kind goes in
+// -- but adjust one side and not the other and the fit reads the
+// adjustment itself as the revision, and a pure declination change
+// stops classifying as rigid. CsRevise.apply solves both sides through
+// CsAdjust.resolveAndAdjust with one options object, taken from the
+// DRAWING's own record; see the comment at that call.
 
 var CsRevise = {};
 
@@ -107,6 +115,14 @@ CsRevise.shotFromEntity = function(e) {
  *               keeps it nowhere else unless the surveyor also declared
  *               a *fix. Always a number -- 0.0 when the tag is absent,
  *               blank or not numeric, never NaN
+ *   adjustTags  {Adjustment, SigmaTape, SigmaAngle} exactly as the
+ *               trip-0 anchor records them -- the loop-closure
+ *               adjustment THIS drawing's geometry was solved with.
+ *               Shaped for CsAdjust.optionsFromTags, the only thing
+ *               that should interpret it: a drawing recording nothing
+ *               reads back "" in every field and falls back there to
+ *               the current settings. Always an object, never null, so
+ *               a caller can hand it straight over
  *   legacy      true when the drawing predates schema v3 and the
  *               result came from CsTags.surveyFromDocument's
  *               chain-guessing instead
@@ -139,9 +155,14 @@ CsRevise.surveyFromDocument = function(doc) {
             // Elevation rides along in this one scan: CsDraw.survey
             // writes every station's resolved z there, so it is where
             // the drawing's vertical datum actually lives.
+            // `entity` rides along for the same reason: the adjustment
+            // record below is read off whichever of these turns out to
+            // be the trip-0 anchor, and that is not known until the
+            // scan finishes. Kept local -- nothing outside this
+            // function sees these records.
             var st = { name: stName, seq: CsTags.getNumber(e, "Seq"),
                 pos: e.getPosition(),
-                elev: CsTags.getNumber(e, "Elevation") };
+                elev: CsTags.getNumber(e, "Elevation"), entity: e };
             stations.push(st);
             var fx = CsTags.get(e, "Fixed");
             if (fx !== "") {
@@ -246,13 +267,21 @@ CsRevise.surveyFromDocument = function(doc) {
         typeof anchorStation.elev === "number" &&
         !isNaN(anchorStation.elev)) ? anchorStation.elev : 0.0;
 
+    // WHAT THIS DRAWING WAS ADJUSTED WITH. Read off the same point
+    // CsDraw.survey wrote it onto: the trip-0 anchor, or the fallback
+    // chosen just above on a drawing that has no trip 0 -- the same
+    // choice CsRevise.trip0Anchor makes, for the same reason. Read
+    // through the shared helper so the tag names live in one place.
+    var adjustTags = CsRevise.adjustTagsOn(
+        anchorStation !== null ? anchorStation.entity : null);
+
     // pre-v3 drawing: stations, but not one Distance-tagged shot
     // anywhere -- hand it to the legacy chain-guesser, flagged
     if (stations.length > 0 && placed.length === 0 &&
             exBlob === "" && unBlob === "") {
         return { survey: CsTags.surveyFromDocument(doc),
             anchorName: anchorName, anchorPos: anchorPos,
-            anchorZ: anchorZ, legacy: true };
+            anchorZ: anchorZ, adjustTags: adjustTags, legacy: true };
     }
 
     // serialized rows: "tripId TAB shotSeq TAB shotRow" per line
@@ -316,7 +345,8 @@ CsRevise.surveyFromDocument = function(doc) {
     }
     CsModel.ensureTrips(survey);
     return { survey: survey, anchorName: anchorName,
-        anchorPos: anchorPos, anchorZ: anchorZ, legacy: false };
+        anchorPos: anchorPos, anchorZ: anchorZ, adjustTags: adjustTags,
+        legacy: false };
 };
 
 /**
@@ -1331,6 +1361,33 @@ CsRevise.trip0Anchor = function(doc) {
 };
 
 /**
+ * The adjustment record carried by one entity -- the trip-0 anchor --
+ * as {Adjustment, SigmaTape, SigmaAngle}, shaped for
+ * CsAdjust.optionsFromTags. A null or untagged entity yields "" in
+ * every field, which optionsFromTags reads as "not recorded" and falls
+ * back to the current settings for.
+ *
+ * One function owns these three tag NAMES on the read side, because
+ * two readers of one record are two readers that can drift: a tool
+ * with a reconstruction already in hand passes
+ * recon.adjustTags (built here, from its own scan), and a tool that
+ * only has the document passes CsRevise.trip0Anchor(doc) straight in.
+ * CsDraw.survey is the single writer.
+ *
+ * Deliberately NOT interpreted here: what a blank field MEANS is
+ * CsAdjust.optionsFromTags' question, and a second opinion about it on
+ * this side of the record is the same drift by another route.
+ */
+CsRevise.adjustTagsOn = function(entity) {
+    var get = function(key) {
+        return (entity === null || entity === undefined) ? "" :
+            CsTags.get(entity, key);
+    };
+    return { Adjustment: get("Adjustment"), SigmaTape: get("SigmaTape"),
+        SigmaAngle: get("SigmaAngle") };
+};
+
+/**
  * The RevisionLog a drawing should carry after a revision: the log it
  * already had, with these lines appended under it.
  *
@@ -1486,7 +1543,11 @@ CsRevise.appendLog = function(prevLog, lines) {
  *   rigid           which path ran
  *   moved           [{name, dist}] per shared station, largest first
  *   stationsChanged how many stations moved more than the rigidity eps
- *   loopsBefore     [{from, to, error, percent}] loop closures before
+ *   loopsBefore     [{from, to, error, percent}] loop closures before.
+ *                   AS-SURVEYED either side, even when the resolve was
+ *                   adjusted -- see CsAdjust's honesty rule; adjusted
+ *                   closures are ~0 by construction and reporting them
+ *                   would launder every bad loop in the cave
  *   loopsAfter      the same loops after the revision
  *   anchorMoved     {dx, dy} when the PIVOT point (whichever won
  *                   below) had been
@@ -1661,9 +1722,36 @@ CsRevise.apply = function(doc, di, recon, newSurvey) {
     }
 
     // -- 1. old and new resolved over the identical anchor -----------
+    // BOTH SIDES, IDENTICALLY ADJUSTED. Adjust one and not the other
+    // and similarityFit reads the adjustment itself as part of the
+    // revision: a pure declination change stops classifying as rigid,
+    // the drawing gets erased and redrawn, and untagged hand-traced
+    // walls go with it. Both sides UNADJUSTED is no safer once the
+    // drawing itself was drawn adjusted -- the rigid path rewrites
+    // every station's Elevation tag from newResolved, so an unadjusted
+    // resolve would snap the whole cave back to its as-surveyed
+    // heights on a revision that cannot change an elevation at all.
+    //
+    // The options come from the DRAWING's own record rather than
+    // today's settings, for exactly the reason a redraw does: this
+    // revision has to describe the geometry that is actually on the
+    // screen. optionsFromTags falls back to the settings for anything
+    // the drawing does not record.
+    var adjustOpts = CsAdjust.optionsFromTags(recon.adjustTags || {});
+    if (geoName !== "" && geoName !== null && geoName !== undefined) {
+        // The georeferenced station is the drawing's one point of
+        // contact with the real world, and the revision already pivots
+        // about it (see the anchor block above). PIN it, so least
+        // squares cannot drift the one coordinate a basemap or a KML
+        // export derives from. Harmless when it is also the anchor --
+        // CsAdjust.adjust pins by name into a set.
+        adjustOpts.pinned = [geoName];
+    }
     var anchor = anchorAt(anchorName, anchorPos, pivotZ);
-    var oldResolved = CsNetwork.resolve(recon.survey, { anchor: anchor });
-    var newResolved = CsNetwork.resolve(newSurvey, { anchor: anchor });
+    var oldResolved = CsAdjust.resolveAndAdjust(recon.survey,
+        { anchor: anchor }, adjustOpts);
+    var newResolved = CsAdjust.resolveAndAdjust(newSurvey,
+        { anchor: anchor }, adjustOpts);
 
     // -- 2. drawing extent = old stations' bounding-box diagonal -----
     var extent = CsRevise.positionsExtent(oldResolved.stations);

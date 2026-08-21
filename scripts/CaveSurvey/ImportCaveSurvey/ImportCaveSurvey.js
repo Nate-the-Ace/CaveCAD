@@ -123,12 +123,26 @@ function importCaveSurvey() {
             }
         }
         if (firstName !== "") {
-            anchor = { name: firstName, x: sel.pos.x, y: sel.pos.y, z: 0.0 };
+            // z comes from the PICKED POINT's own Elevation tag, and
+            // stays NULL when it has none (see CsPick). A hardcoded 0
+            // here used to be an explicit "put this cave on the
+            // drawing's origin", which beats a #Fix / *fix -- so
+            // importing a file whose entrance is fixed at 1250 ft, or
+            // tying an import into a station already at that height,
+            // silently rebased the whole cave to sea level. Null lets
+            // CsNetwork.resolve fall back to the anchored station's own
+            // control elevation instead.
+            anchor = { name: firstName, x: sel.pos.x, y: sel.pos.y,
+                z: sel.elevation };
         }
     }
 
-    // -- resolve and draw, one undo step ---------------------------------
-    var resolved = CsNetwork.resolve(survey, { anchor: anchor });
+    // -- resolve, adjust and draw, one undo step -------------------------
+    // A fresh import creates geometry, so it takes the CURRENT
+    // settings; CsDraw.survey records what they were on the trip-0
+    // anchor, and every later redraw of this drawing follows that
+    // record rather than re-solving under whatever the setting is then.
+    var resolved = CsAdjust.resolveAndAdjust(survey, { anchor: anchor });
     var findings = CsValidate.check(survey, resolved);
 
     var drawn = CsDraw.survey(survey, resolved, undefined, undefined,

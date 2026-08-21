@@ -165,20 +165,31 @@ RebuildSurveyData.toSlopeDistances = function(survey) {
  * anchorZ is the elevation the anchor is pinned at -- 0 (the drawing's
  * own arbitrary origin) unless the caller has a recorded datum to
  * preserve. Optional; defaults to 0, same as before this parameter
- * existed.
+ * existed. Both callers here hand over CsRevise.anchorZOf, which is a
+ * real recorded datum rather than a placeholder, so the default is
+ * only reached by a caller that genuinely has nothing.
+ *
+ * adjustOpts is the loop-closure adjustment to solve under, as
+ * CsAdjust.resolveAndAdjust takes it. Both callers pass THIS DRAWING's
+ * own record (CsAdjust.optionsFromTags of recon.adjustTags), because
+ * this function erases marks and redraws them: solving under today's
+ * global setting instead would move every station of a drawing the
+ * user only asked to REPAIR. Optional; omitted means the current
+ * settings, which is right only for a caller with no drawing to
+ * reproduce.
  *
  * \return {erased, drawn, resolved}
  */
 RebuildSurveyData.redraw = function(doc, di, survey, anchorName, anchorPos,
-        anchorZ) {
+        anchorZ, adjustOpts) {
     if (anchorZ === undefined || anchorZ === null || isNaN(anchorZ)) {
         anchorZ = 0;
     }
     CsModel.ensureTrips(survey);
-    var resolved = CsNetwork.resolve(survey, {
+    var resolved = CsAdjust.resolveAndAdjust(survey, {
         anchor: { name: anchorName, x: anchorPos.x, y: anchorPos.y,
             z: anchorZ }
-    });
+    }, adjustOpts);
     var names = [];
     for (var n in resolved.stations) {
         if (resolved.stations.hasOwnProperty(n)) {
@@ -278,7 +289,8 @@ RebuildSurveyData.rebuild = function(doc, di) {
         var anchorZ = CsRevise.anchorZOf(recon, recon.anchorName);
 
         var up = RebuildSurveyData.redraw(doc, di, survey,
-            recon.anchorName, recon.anchorPos, anchorZ);
+            recon.anchorName, recon.anchorPos, anchorZ,
+            CsAdjust.optionsFromTags(recon.adjustTags || {}));
         report.mode = "upgrade";
         report.erased = up.erased;
         report.stations = up.drawn.stationsDrawn;
@@ -312,7 +324,8 @@ RebuildSurveyData.rebuild = function(doc, di) {
         // same one answer.
         var healZ = CsRevise.anchorZOf(recon, recon.anchorName);
         var heal = RebuildSurveyData.redraw(doc, di, recon.survey,
-            recon.anchorName, recon.anchorPos, healZ);
+            recon.anchorName, recon.anchorPos, healZ,
+            CsAdjust.optionsFromTags(recon.adjustTags || {}));
         report.mode = "heal";
         report.erased = heal.erased;
         report.stations = heal.drawn.stationsDrawn;

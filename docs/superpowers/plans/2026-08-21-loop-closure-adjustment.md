@@ -2131,6 +2131,112 @@ git add scripts/CaveSurvey/SurveyNotebook/SurveyNotebook.js scripts/CaveSurvey/I
 git commit -m "feat: every tool resolves-and-adjusts, and revisions compare like with like"
 ```
 
+**AS BUILT (2026-08-21).** All six call sites wired and every acceptance
+criterion met. FingerprintCave still prints `4.208174679593278` as-surveyed and
+`0.7378205847170148` revised, digit for digit, because `loopsBefore` /
+`loopsAfter` read `resolved.loops` and `CsAdjust` copies those through
+untouched. `./tests/run_all.sh` → `ALL TESTS PASSED`, `46/46 parsed`,
+`### UNIT OK 1928 assertions` (was 1887; node 988, was 981). Seven departures
+from the draft above, five of them forced by evidence:
+
+1. **Two of the drafted Step-1 test's calls do not exist.**
+   `CsRevise.similarityFit` takes ONE argument -- an array of
+   `{old, nu}` pairs, not two station maps -- and returns `maxResidual`,
+   not `residual`; and `CsRevise.reviseDeclination` mutates its survey in
+   place and returns `{delta, diverged, mixed}`, so
+   `var revised = CsRevise.reviseDeclination(...)` would have handed a
+   summary object to the next resolve. The landed test builds the fixture
+   twice and compares through `CsRevise.classifyChange`, which is what
+   `apply` actually calls -- the drafted test would have exercised a
+   different code path even if it had compiled.
+
+2. **The drafted test passes with no production change, and that is
+   itself the evidence.** Both sides adjusted IS rigid, before and after
+   the wiring, so a bare regression guard proves nothing on its own. What
+   pins the trap is the assertion added beside it: the SAME revision with
+   one side adjusted and the other raw classifies as NON-rigid. That pair
+   is the argument.
+
+3. **THE REAL RED TEST WAS VERTICAL, not horizontal.** `apply`'s rigid
+   path rewrites every station's `Elevation` tag from
+   `newResolved.stations[...].z`. With the drawing drawn adjusted and
+   `apply` still resolving raw, a pure declination revision -- which
+   cannot change an elevation at all -- snapped the whole cave back to
+   its as-surveyed heights: measured at Z3, `0.5788272588897678` becoming
+   `1.7364817766693033`. That is the geometry moving under the surveyor
+   without a word, through the axis nobody was watching. A test pins it.
+
+4. **`RebuildSurveyData` had to take the DRAWING's options, which the
+   draft did not ask for.** Its whole job is repair -- "already tag
+   schema v3, nothing inferred" is its own message -- and it erases every
+   station's marks and redraws them. Solving under today's global setting
+   instead moved a station by 0.1696 ft in answer to a request to fix
+   tags; measured, and now a failing test if it comes back. Same argument
+   applies to `SurveyNotebook.drawMergedSurvey` (which redraws an
+   existing drawing) and to `SurveyStats` (whose Depth is measured over
+   resolved elevations and would otherwise disagree with the map printed
+   beside it). The rule that fell out, and that the comments state at
+   each site: **a tool that CREATES geometry takes the current settings
+   and lets `CsDraw.survey` record them; a tool that REPRODUCES or
+   REPORTS ON existing geometry takes the drawing's record.** The three
+   creating sites (`refresh`, `drawSurveyInner`, `ImportCaveSurvey`) pass
+   no `adjustOpts` at all, exactly as drafted.
+
+5. **`CsRevise.adjustTagsOn(entity)` is new, and `surveyFromDocument`
+   reads the record through it.** `SurveyStats` has a document but no
+   reconstruction, so without a shared reader the three tag names would
+   have been spelled out twice -- which is the drift this whole feature
+   exists to prevent, relocated to the tag layer. One writer
+   (`CsDraw.survey`), one name-owning reader, and `optionsFromTags` still
+   the only thing that interprets a blank field.
+
+6. **`CsPick.startPointFromSelection` now returns `elevation`, and
+   `SurveyNotebook.selectionElevation` is gone.** Its docstring argued
+   against "teaching CsPick a field only the datum fix needs" -- but
+   `ImportCaveSurvey` needed the same answer, and its own placeholder was
+   an unconditional `z: 0.0`. The field is null (never 0) when the picked
+   entity records no elevation, and the three anchor sites pass it
+   straight through so `CsNetwork.resolve`'s Task 1b fallback can fire.
+   The one place that still coerces to a number is
+   `merged.fixed[firstPage]` in `drawMergedSurvey`: that is a `survey.fixed`
+   CONTROL coordinate with no "unspecified" state, and 0 is the honest
+   reading of "nothing is known about this new trip's height" for the
+   disconnected passage that is the only case resolve honours a fixed
+   seed in. Commented as a deliberate difference.
+
+7. **`opts.pinned` shipped in Task 2 with no test at all.** Task 7 is its
+   first caller, so it is pinned here: an explicitly pinned station
+   overrides the `notHonored` exclusion and does not move, and a name the
+   network has never heard of is skipped rather than pinned into
+   existence (which matters, because `apply` may pass a geo station whose
+   point was deleted from the drawing). The `apply` wiring itself is
+   pinned by watching the two calls: exactly two, identical options
+   strings, and `"Z2"` -- a georeferenced station deliberately NOT the
+   anchor -- present in the pin list.
+
+**Not tested, and why.** The four tool files are GUI code. The syntax
+stage parses them inside CaveCAD's engine (`46/46`), which proves they
+parse and nothing more. Two of the six call sites are reachable headlessly
+and are driven end to end -- `SurveyNotebook.drawSurveyInner` (with only
+`sheetSurvey` stubbed; the selection, the pick, the elevation lookup, the
+resolve and the draw are real) and `RebuildSurveyData.rebuild`. The other
+four -- `SurveyNotebook.refresh` (dock widget), `drawMergedSurvey`'s new
+`adjustOpts` argument (covered by the existing notebook-linework test only
+on the unadjusted path), `ImportCaveSurvey` (file dialog) and
+`SurveyStats` (title-block dialogs) -- are wired by inspection only.
+
+**Found in passing, NOT fixed (out of scope, and untestable cheaply).**
+`AzimuthTraverse.js:102` sets `currentZ = 0.0` unconditionally, and every
+station it draws records `Elevation` from that running total. When the
+traverse CONTINUES from a selected existing station (`startExists`, set
+at `:52`), that station may sit on an absolute datum -- so a passage added
+to a cave whose entrance is at 1250 ft is recorded 1250 ft too low, and a
+later Rebuild or revision reads those tags as the truth. The same bug
+family as `anchorZOf`, through a seventh door. The fix material now
+exists (`sel.elevation`), but the tool is one interactive loop over
+`getText`/`getDouble` and testing it means scripting those globals --
+a task of its own, filed rather than done half-way.
+
 ---
 
 ### Task 8: `CsReport` says what happened

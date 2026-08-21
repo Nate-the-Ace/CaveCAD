@@ -237,8 +237,11 @@ CsDraw.noteLeader = function(doc, op, pos, name, note, azimuthDeg, lrud) {
  * scheme's collision; station-level Azimuth etc. remain but legs are
  * canonical). Each trip's first resolved station anchors that trip's
  * metadata (Trip* tags); the trip-0 anchor additionally carries
- * StartNote/StartLrud, the legacy Survey* block, and the shots the
- * drawing can't show as geometry (ExcludedShots/UnplacedShots rows).
+ * StartNote/StartLrud, the legacy Survey* block, the adjustment record
+ * (Adjustment/SigmaTape/SigmaAngle -- what this drawing's geometry was
+ * solved with, so a redraw reproduces it instead of re-solving under
+ * today's settings), and the shots the drawing can't show as geometry
+ * (ExcludedShots/UnplacedShots rows).
  * excludeFromPlot legs draw on CTRL-HIDDEN (via CsLayers.withLayerOn,
  * since that layer is off) instead of being skipped.
  *
@@ -593,6 +596,35 @@ CsDraw.survey = function(survey, resolved, originStation, originPos, seqBase) {
         CsTags.set(anchor0, "StartNote", survey.startNote);
         CsTags.set(anchor0, "StartLrud",
             CsModel.startLrudText(survey.startLrud));
+        // WHAT THIS DRAWING WAS ADJUSTED WITH, so reopening it and
+        // pressing Draw reproduces the geometry it already has instead
+        // of silently re-solving under whatever the global setting
+        // happens to be that day. Recorded unconditionally, including
+        // "none": adjustment OFF is just as much a fact about this
+        // drawing as adjustment on, and a drawing that records nothing
+        // falls back to the settings (see CsAdjust.optionsFromTags),
+        // which is exactly the silent move this record exists to stop.
+        //
+        // The sigmas come from summary, not from CsAdjust's defaults,
+        // because summary is what the solve actually used -- and on the
+        // pass-through path CsAdjust.unadjusted reports the caller's
+        // own sigmas there for this reason. A `resolved` that never
+        // went through CsAdjust at all (a plain CsNetwork.resolve --
+        // several tests, and any caller not yet wired) has no summary:
+        // record the defaults rather than NaN, and Adjustment=none,
+        // which is the truth about such a drawing.
+        var adjTags = CsAdjust.tagsFor({
+            enabled: resolved.adjusted === true,
+            sigmaTape: (resolved.summary !== undefined &&
+                resolved.summary !== null) ? resolved.summary.sigmaTape :
+                CsAdjust.DEFAULT_SIGMA_TAPE,
+            sigmaAngle: (resolved.summary !== undefined &&
+                resolved.summary !== null) ? resolved.summary.sigmaAngle :
+                CsAdjust.DEFAULT_SIGMA_ANGLE
+        });
+        CsTags.set(anchor0, "Adjustment", adjTags.Adjustment);
+        CsTags.set(anchor0, "SigmaTape", adjTags.SigmaTape);
+        CsTags.set(anchor0, "SigmaAngle", adjTags.SigmaAngle);
         // Shots the drawing can't show as geometry still reconstruct:
         // one "tripId TAB shotSeq TAB shotRow" line per shot (CsTags.set
         // escapes the newlines between lines itself). shotSeq is the

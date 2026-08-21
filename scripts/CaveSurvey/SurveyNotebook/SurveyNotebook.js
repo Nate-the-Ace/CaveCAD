@@ -584,7 +584,12 @@ SurveyNotebook.refresh = function(w) {
             "sits beside its station.");
         return;
     }
-    var resolved = CsNetwork.resolve(survey, {});
+    // The status line has to describe what Draw would PRODUCE, so it
+    // resolves-and-adjusts under the current settings -- the same
+    // options Draw itself will take for this page. (Loop errors printed
+    // below stay as-surveyed either way: CsAdjust copies them through
+    // untouched.)
+    var resolved = CsAdjust.resolveAndAdjust(survey, {});
     var findings = CsValidate.check(survey, resolved);
     var stats = CsStats.compute(survey, resolved, CsTraverse.SLOPE);
     var grade = CsGrade.compute(survey, resolved, stats);
@@ -619,35 +624,13 @@ SurveyNotebook.refresh = function(w) {
 // Actions
 // ---------------------------------------------------------------------
 
-/**
- * The Elevation tag of whatever single entity is currently selected
- * in the drawing -- the same one-entity selection CsPick.
- * startPointFromSelection just resolved into a start point. CsPick
- * hands back a bare {pos, isExistingStation, existingName}, not the
- * entity itself, so this re-queries the selection rather than
- * teaching CsPick a field only the datum fix needs.
- *
- * Used when there is no reconstruction to pull a datum from (a fresh
- * or untagged drawing): the picked point's own tag is the only
- * elevation information there is. A missing or non-numeric tag must
- * resolve to 0, never NaN -- NaN would poison every coordinate this
- * anchor/fixed point seeds.
- */
-SurveyNotebook.selectionElevation = function(doc) {
-    if (!doc.hasSelection()) {
-        return 0;
-    }
-    var ids = doc.querySelectedEntities();
-    if (ids.length !== 1) {
-        return 0;
-    }
-    var entity = doc.queryEntity(ids[0]);
-    if (isNull(entity)) {
-        return 0;
-    }
-    var z = CsTags.getNumber(entity, "Elevation");
-    return z === null ? 0 : z;
-};
+// The picked point's own elevation used to be re-queried here, in a
+// SurveyNotebook.selectionElevation that returned 0 for "no Elevation
+// tag". It is now `sel.elevation` on the object CsPick already builds
+// from that same entity -- null when the drawing records none, because
+// an explicit anchor z of 0 beats a *fix and rebases an
+// absolute-datum cave to sea level. Import Cave Survey needed the same
+// answer, and two readers of one tag are two readers that drift.
 
 SurveyNotebook.drawSurvey = function(w) {
     // Any failure in here must be SEEN, not swallowed by the engine.
@@ -703,23 +686,38 @@ SurveyNotebook.drawSurveyInner = function(w) {
         // legacy, or empty above), so there is no recorded datum to
         // pull from CsRevise -- the picked point's own Elevation tag
         // is the only source, same as the tie-in branch just below.
+        //
+        // And when it has none, z stays NULL rather than becoming 0.
+        // An explicit anchor z is an instruction, and it beats a
+        // #Fix / *fix: a placeholder 0 handed over here rebased a cave
+        // whose entrance is fixed at 1250 ft down onto the drawing's
+        // origin, and then disagreed with every other fixed station by
+        // the same 1250, manufacturing a vertical misclosure the real
+        // survey does not have. Null lets CsNetwork.resolve fall back
+        // to that station's own control elevation.
         anchor = { name: survey.shots[0].from, x: sel.pos.x, y: sel.pos.y,
-            z: SurveyNotebook.selectionElevation(doc) };
+            z: sel.elevation };
     } else if (survey.shots.length > 0) {
         var firstName = survey.shots[0].from;
         var existing = CsTags.collectStations(doc);
         for (var ei = 0; ei < existing.length; ei++) {
             if (existing[ei].name === firstName) {
-                var z = CsTags.getNumber(existing[ei].entity, "Elevation");
+                // same rule: a tie-in station with no recorded
+                // elevation supplies no elevation, it does not supply
+                // zero
                 anchor = { name: firstName, x: existing[ei].pos.x,
-                    y: existing[ei].pos.y, z: z === null ? 0 : z };
+                    y: existing[ei].pos.y,
+                    z: CsTags.getNumber(existing[ei].entity, "Elevation") };
                 tieIn = firstName;
                 break;
             }
         }
     }
 
-    var resolved = CsNetwork.resolve(survey, { anchor: anchor });
+    // A page drawn onto an empty or untagged drawing CREATES geometry,
+    // so it takes the current settings; CsDraw.survey records them on
+    // the trip-0 anchor for every later redraw to follow.
+    var resolved = CsAdjust.resolveAndAdjust(survey, { anchor: anchor });
     var findings = CsValidate.check(survey, resolved);
 
     // Redrawing REPLACES: everything previously drawn for the stations
@@ -1315,9 +1313,14 @@ SurveyNotebook.drawMergedSurvey = function(w, doc, survey, recon) {
         }
         var isRecAnchor = (existing[i].name === recon.anchorName);
         if (anchor === null || isRecAnchor) {
-            var z = CsTags.getNumber(existing[i].entity, "Elevation");
+            // z stays NULL when this station records no elevation: an
+            // explicit anchor z beats a *fix, so a placeholder 0 would
+            // rebase an absolute-datum cave onto the drawing's origin.
+            // Null lets CsNetwork.resolve fall back to the station's
+            // own control elevation instead.
             anchor = { name: existing[i].name, x: existing[i].pos.x,
-                y: existing[i].pos.y, z: z === null ? 0 : z };
+                y: existing[i].pos.y,
+                z: CsTags.getNumber(existing[i].entity, "Elevation") };
             if (isRecAnchor) {
                 break;
             }
@@ -1356,14 +1359,32 @@ SurveyNotebook.drawMergedSurvey = function(w, doc, survey, recon) {
             // firstPage is a brand-new station recon has never seen
             // (that's what "merged.fixed[firstPage] === undefined"
             // means here), so its datum can't come from the
-            // reconstruction either -- same picked-entity source and
-            // NaN guard as the no-recon anchor above.
+            // reconstruction either -- the picked point's own tag is
+            // the only source.
+            //
+            // Coerced to a NUMBER here, unlike the anchors above, and
+            // that difference is deliberate: this is a survey.fixed
+            // CONTROL coordinate, which has no "unspecified" state to
+            // fall back to -- resolve reads its z directly. A picked
+            // point with no elevation means nothing is known about this
+            // new trip's height, and 0 is the honest reading of that
+            // for a passage disconnected from every existing datum
+            // (which is the only case resolve honours a fixed seed in).
             merged.fixed[firstPage] = { x: sel.pos.x, y: sel.pos.y,
-                z: SurveyNotebook.selectionElevation(doc) };
+                z: (sel.elevation === null || sel.elevation === undefined) ?
+                    0.0 : sel.elevation };
         }
     }
 
-    var resolved = CsNetwork.resolve(merged, { anchor: anchor });
+    // This path REDRAWS an existing drawing -- it erases every station
+    // the merged survey owns and puts them back -- so it must solve
+    // the way the drawing was solved, not the way today's setting says.
+    // Otherwise flipping the switch and pressing Draw moves the whole
+    // cave under linework that was traced against it, and calls it a
+    // revision. The record comes off the trip-0 anchor, which recon
+    // read before any of this began.
+    var resolved = CsAdjust.resolveAndAdjust(merged, { anchor: anchor },
+        CsAdjust.optionsFromTags(recon.adjustTags || {}));
     var findings = CsValidate.check(merged, resolved);
 
     // Erase by station name: everything the merged survey owns, plus

@@ -35,7 +35,22 @@ function surveyStatsRun() {
     }
     survey.distanceUnit = CsUnits.fromDrawingUnit(doc.getUnit(), RS);
 
-    var resolved = CsNetwork.resolve(survey, {});
+    // Resolve-and-adjust, like every other tool -- and under THIS
+    // DRAWING's recorded options, not today's global setting. Depth is
+    // measured over the resolved station elevations, so a drawing
+    // adjusted yesterday and read with the switch off today would
+    // stamp a depth into the title block that disagrees with the map
+    // printed beside it. This tool reports on existing geometry, so it
+    // follows the drawing's record; the tools that CREATE geometry take
+    // the current settings and CsDraw.survey records what they used.
+    //
+    // Loop closures -- and the BCRA grade CsGrade derives from them --
+    // stay AS-SURVEYED either way: CsAdjust copies them through
+    // untouched, which is its honesty rule and the reason this line is
+    // safe to change at all.
+    var resolved = CsAdjust.resolveAndAdjust(survey, {},
+        CsAdjust.optionsFromTags(
+            CsRevise.adjustTagsOn(CsRevise.trip0Anchor(doc))));
     var stats = CsStats.compute(survey, resolved, CsTraverse.SLOPE);
     var grade = CsGrade.compute(survey, resolved, stats);
 
