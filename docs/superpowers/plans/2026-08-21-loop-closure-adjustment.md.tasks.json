@@ -4,7 +4,7 @@
     {
       "id": 0,
       "subject": "Task 1: CsNetwork anchors, ties, error components",
-      "status": "pending",
+      "status": "completed",
       "description": "**Goal:** CsNetwork.resolve exports the anchors the solver needs, reports horizontal and vertical error beside 3D, and stops calling a two-component tie a loop.\n\n**Files:**\n- Modify: `scripts/CaveSurvey/Core/CsNetwork.js` (resolve, describeLoop)\n- Modify: `docs/superpowers/specs/2026-08-21-loop-closure-adjustment-design.md` (totalCorrection -> rmsShift)\n- Test: `tests/js_unit.js` (Network section, after the disconnected-components block near line 515)\n\n**Acceptance Criteria:**\n- [ ] resolve() returns `anchors`, the station names placed with no parent, in placement order\n- [ ] every closures[i] and loops[i] carries `horizontal` and `vertical` beside distance/error\n- [ ] percent keeps its existing 3D-over-slope-length definition (existing assertions unchanged)\n- [ ] a leg joining two separately-anchored components gets kind 'tie', lands in resolved.ties, and is NOT in loops\n- [ ] CsValidate raises no loop-misclosure finding for a tie\n- [ ] the spec's summary table says rmsShift, not totalCorrection\n\n**Verify:** `node tests/js_unit.js` -> `### UNIT OK <n> assertions`, n up by 14\n\n**Steps:**\n- Write the 14 failing assertions (anchors, error components, vertical-bust survey, two-fixed-component tie)\n- Run node tests/js_unit.js to see red\n- Collect anchors in place() where from === null\n- Add mis.horizontal / mis.vertical in the haveFrom && haveTo branch\n- Classify no-ring closures as kind 'tie' into a new ties array; add ties + anchors to the return\n- Add horizontal/vertical to describeLoop's return\n- Update the resolve doc comment (closures, loops, ties, anchors, kind values)\n- Run to green; patch the spec's field name; commit\n\n```json:metadata\n{\"files\": [\"scripts/CaveSurvey/Core/CsNetwork.js\", \"tests/js_unit.js\", \"docs/superpowers/specs/2026-08-21-loop-closure-adjustment-design.md\"], \"verifyCommand\": \"node tests/js_unit.js\", \"acceptanceCriteria\": [\"anchors exported\", \"horizontal/vertical on closures and loops\", \"ties classified and excluded from loops\", \"no loop-misclosure finding for a tie\"], \"modelTier\": \"standard\"}\n```"
     },
     {
@@ -13,7 +13,8 @@
       "status": "pending",
       "description": "**Goal:** A pure Core module that takes a survey and its raw resolve result and returns a resolved-shaped object with adjusted coordinates, per-station shifts, per-leg residuals, and a summary.\n\n**Files:**\n- Create: `scripts/CaveSurvey/Core/CsAdjust.js`\n- Modify: `scripts/CaveSurvey/Core/CsAll.js` (include after CsNetwork.js)\n- Modify: `tests/js_unit.js` (CORE_FILES after CsNetwork.js; new Adjust test section)\n\n**Acceptance Criteria:**\n- [ ] the hand-computed square with equal weights puts +0.125 on each of the four loop legs and 0 on the branch leg\n- [ ] the pinned anchor does not move; y and z do not move when the misclosure is purely in x\n- [ ] a loopless (tree) survey is returned unchanged in zero iterations\n- [ ] two fixed stations both land exactly on their given coordinates\n- [ ] a noAdjust leg keeps its surveyed geometry while neighbours absorb the error\n- [ ] closures and loops come back identical to the input's -- as-surveyed\n- [ ] CsGrade.compute fed the adjusted result returns the same grade and reasoning as from the raw result\n- [ ] adjusting an already-adjusted survey moves nothing\n- [ ] a starved solve returns converged:false, adjusted:false, raw:null and raw coordinates\n\n**Verify:** `node tests/js_unit.js` -> `### UNIT OK <n>`, n up by 28; then `./tests/run_all.sh` -> ALL TESTS PASSED\n\n**Steps:**\n- Write the 28 failing assertions using EQ = {sigmaTape:1, sigmaAngle:0} against the existing square fixture\n- Register CsAdjust.js in tests/js_unit.js CORE_FILES and in Core/CsAll.js\n- Run to see red (ENOENT on the missing file)\n- Write CsAdjust.js: legVariance, median, extentOf, solve (Jacobi-preconditioned CG, matrix-free), unadjusted, adjust\n- Run node tests, then ./tests/run_all.sh, then commit\n\n```json:metadata\n{\"files\": [\"scripts/CaveSurvey/Core/CsAdjust.js\", \"scripts/CaveSurvey/Core/CsAll.js\", \"tests/js_unit.js\"], \"verifyCommand\": \"node tests/js_unit.js && ./tests/run_all.sh\", \"acceptanceCriteria\": [\"each loop leg absorbs 0.125 on the hand-checked square\", \"tree survey unchanged in 0 iterations\", \"fixed stations land on control\", \"noAdjust leg held\", \"closures/loops pass through as-surveyed\", \"grade cannot be laundered\", \"idempotent\", \"non-convergence returns raw\"], \"modelTier\": \"deep\"}\n```",
       "blockedBy": [
-        0
+        0,
+        9
       ]
     },
     {
@@ -28,7 +29,7 @@
     {
       "id": 3,
       "subject": "Task 4: CTRL-RAW layer",
-      "status": "pending",
+      "status": "completed",
       "description": "**Goal:** A grey dashed layer, off by default, for the as-surveyed ghost: registered, defaulted, and present in the plan template so the structural test passes.\n\n**Files:**\n- Modify: `scripts/CaveSurvey/Core/CsLayers.js` (RAW constant, DEFAULTS, OFF)\n- Modify: `templates/NSS_Cave_Template_PLAN.dxf` (LAYER table record after CTRL-SPLAYS)\n- Test: `tests/js_unit.js` (layers section)\n\n**Acceptance Criteria:**\n- [ ] CsLayers.RAW === 'CTRL-RAW' with DEFAULTS entry ['gray','DASHED','Weight000']\n- [ ] CsLayers.OFF['CTRL-RAW'] === true\n- [ ] test_registry_layers_exist_in_plan_template passes with the new layer\n- [ ] the template's LAYER record uses a handle no other object uses (check 7FF0 is unused first)\n\n**Verify:** `python3 -m unittest discover -s tests -v` -> OK, and `node tests/js_unit.js` -> `### UNIT OK`\n\n**Steps:**\n- Write the three failing layer assertions\n- Add CsLayers.RAW, the DEFAULTS row, and CTRL-RAW to CsLayers.OFF\n- Run the structural test to see the template gap\n- Insert the LAYER record after CTRL-SPLAYS with an unused handle; DASHED is already in the LTYPE table\n- Run both test layers to green; commit\n\n```json:metadata\n{\"files\": [\"scripts/CaveSurvey/Core/CsLayers.js\", \"templates/NSS_Cave_Template_PLAN.dxf\", \"tests/js_unit.js\"], \"verifyCommand\": \"python3 -m unittest discover -s tests -v && node tests/js_unit.js\", \"acceptanceCriteria\": [\"CsLayers.RAW registered dashed and off\", \"registry-vs-template structural test passes\", \"handle unique\"], \"modelTier\": \"mechanical\"}\n```",
       "blockedBy": [
         0
@@ -82,7 +83,16 @@
       "blockedBy": [
         7
       ]
+    },
+    {
+      "id": 9,
+      "subject": "Task 1b: fixed control follows the anchor's frame",
+      "status": "pending",
+      "blockedBy": [
+        0
+      ],
+      "description": "**Goal:** When a survey has two or more fixed stations and the caller passes an explicit anchor, pin the other fixed stations at their control coordinates translated into the anchor's frame, so real control disagreement surfaces as a tie instead of being silently discarded.\n\n**Files:**\n- Modify: `scripts/CaveSurvey/Core/CsNetwork.js` (resolve: frame-aware seedFixed)\n- Modify: `scripts/CaveSurvey/Core/CsDraw.js` (no Fixed tag that contradicts the drawn position)\n- Modify: `scripts/CaveSurvey/Core/CsReport.js` (report the offset, or which stations were not honored)\n- Test: `tests/js_unit.js`\n\n**Acceptance Criteria:**\n- [ ] with an explicit anchor whose station is itself fixed, other fixed stations pin at control + (anchorPos - anchoredStationControl)\n- [ ] the tie misclosure equals the one the same survey reports with no anchor -- a pure translation cannot change the measured disagreement\n- [ ] with an explicit anchor whose station has no control, behavior is unchanged and the report says which fixed stations were not honored and why\n- [ ] a survey with 0 or 1 fixed stations is byte-identical to today on every path\n- [ ] CsDraw never writes Fixed=<coords> on a station drawn elsewhere\n- [ ] the applied offset is reported once, in drawing units\n\n**Verify:** ./tests/run_all.sh -> ALL TESTS PASSED\n\n**Steps:**\n- Write the failing assertions from the acceptance criteria, using the P1/P2/Q1/Q2 two-component fixture plus a same-component variant\n- Implement frame-aware seeding: offset = anchorPos - fixed[anchorName], applied to every other fixed station; fall back to today when the anchored station has no control\n- Stop CsDraw writing a Fixed tag that contradicts the drawn position\n- Report the offset, or the un-honored stations\n- Run the full suite; commit\n\n```json:metadata\n{\"files\": [\"scripts/CaveSurvey/Core/CsNetwork.js\", \"scripts/CaveSurvey/Core/CsDraw.js\", \"scripts/CaveSurvey/Core/CsReport.js\", \"tests/js_unit.js\"], \"verifyCommand\": \"./tests/run_all.sh\", \"acceptanceCriteria\": [\"frame-offset control pinning\", \"tie misclosure invariant under the frame shift\", \"unchanged with 0 or 1 fixed stations\", \"no contradictory Fixed tag\", \"offset reported\"], \"modelTier\": \"deep\"}\n```"
     }
   ],
-  "lastUpdated": "2026-08-21T00:05:13.250907"
+  "lastUpdated": "2026-08-21T00:30:40.732513"
 }

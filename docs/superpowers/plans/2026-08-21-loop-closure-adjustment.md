@@ -16,6 +16,12 @@
 - Folded into scope: disconnected-component false warning; horizontal error reported alongside 3D.
 - Explicitly out of scope: per-leg residuals in the report, `excludeFromLength` in `CsStats`.
 - "Report + as-surveyed ghost layer."
+- **Added 2026-08-21, after Task 1 review:** when a survey carries two or more fixed
+  stations AND a tool passes an explicit anchor, *offset the control into the anchor's
+  frame* — compute the offset between the anchored station's own control coordinate and
+  the anchor position, apply it to every other fixed station, then pin them. Falls back
+  to today's behavior when the anchored station has no control of its own. Chosen over
+  "explicit anchor wins outright" and "world control always wins".
 
 **Spec:** `docs/superpowers/specs/2026-08-21-loop-closure-adjustment-design.md`
 
@@ -256,6 +262,58 @@ In `docs/superpowers/specs/2026-08-21-loop-closure-adjustment-design.md`, in the
 git add scripts/CaveSurvey/Core/CsNetwork.js tests/js_unit.js docs/superpowers/specs/2026-08-21-loop-closure-adjustment-design.md
 git commit -m "feat: resolve exports anchors, splits error components, and calls a tie a tie"
 ```
+
+---
+
+### Task 1b: fixed control follows the anchor's frame
+
+**Goal:** When a survey has two or more fixed stations and the caller passes an explicit
+anchor, the other fixed stations are pinned at their control coordinates *translated into
+the anchor's frame*, so real control disagreement surfaces as a tie instead of being
+silently discarded — and no station is ever tagged with a coordinate that contradicts
+where it is drawn.
+
+Found by the Task 1 spec review, which proved the discard empirically: with
+`{anchor: {name: "P1", ...}}` a second fixed station `Q1` was placed at (10,10,0) by
+traversal while its control said (10.4,10,0), `anchors` omitted it, and no closure, tie
+or finding recorded the disagreement. `ImportCaveSurvey.js:131`,
+`SurveyNotebook.js:722` and `:1366`, and `CsRevise.js:1665-1666` all pass an anchor, so
+this is the common path, not the exotic one.
+
+**Why not simply pin every fixed station.** `opts.anchor` pins a station at a DRAWING
+position; `survey.fixed` pins one at a WORLD coordinate. Pin both unconditionally and
+the offset between two coordinate frames becomes a large fake misclosure on the tying
+leg. The pre-existing comment about fixed stations "fighting" an explicit anchor was
+load-bearing, not naive.
+
+**Files:**
+- Modify: `scripts/CaveSurvey/Core/CsNetwork.js` (`resolve`: frame-aware `seedFixed`)
+- Modify: `scripts/CaveSurvey/Core/CsDraw.js` (never write a `Fixed` tag that contradicts
+  the drawn position)
+- Modify: `scripts/CaveSurvey/Core/CsReport.js` (say when control was offset, and by how
+  much)
+- Test: `tests/js_unit.js`
+
+**Acceptance Criteria:**
+- [ ] with an explicit anchor whose station is ITSELF fixed, every other fixed station is
+      pinned at `control + (anchorPos − anchoredStationControl)`
+- [ ] the resulting tie misclosure equals the one the same survey reports with no anchor
+      at all — the frame shift must not change the measured disagreement
+- [ ] with an explicit anchor whose station has NO control of its own, behavior is
+      unchanged from today (nothing to compute an offset from), and the report says which
+      fixed stations were not honored and why
+- [ ] a survey with 0 or 1 fixed stations is byte-identical to today on every path
+- [ ] `CsDraw` never writes `Fixed=<coords>` on a station drawn somewhere else; where the
+      control was offset, the tag records the offset control, matching the drawn position
+- [ ] the offset applied is reported once, in drawing units
+
+**Verify:** `./tests/run_all.sh` → `ALL TESTS PASSED`
+
+**Steps:** TDD as elsewhere — write the failing assertions first, from the acceptance
+criteria above, using the reviewer's `P1/P2/Q1/Q2` two-component fixture plus a
+same-component variant. The frame offset is a pure translation, so the tie misclosure is
+invariant under it; that invariance is the assertion that proves the implementation right
+rather than merely green.
 
 ---
 
