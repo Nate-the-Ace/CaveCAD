@@ -5959,17 +5959,23 @@ ok(CsGit.isRejected("! [rejected]        main -> main (fetch first)") === true,
 //   REPO_VIEW_MISSING and API_USER_REAL are captured bytes from real
 //   `gh` 2.97.0 calls on this machine on 2026-08-21 (all read-only;
 //   AUTH_LOGGED_OUT came from a throwaway GH_CONFIG_DIR, not this
-//   machine's real session). AUTH_THIN is that same real AUTH_OK with
-//   its scopes line edited to drop "repo" -- a genuine thin-scope
-//   capture would require revoking a scope on the live token, which
-//   this task must not do. REPO_VIEW_INTERNAL and API_USER_NULL_NAME
-//   are synthetic: INTERNAL visibility needs an organization-owned
-//   repo, and a null gh api user "name" needs a second account that
-//   never set a display name. Neither is obtainable from this
-//   machine, and each test says so.
+//   machine's real session). AUTH_OK was re-verified with a live
+//   `gh auth status --active` call on 2026-08-21 and is byte-identical
+//   to the plain `gh auth status` capture in this single-account case.
+//   AUTH_THIN is that same real AUTH_OK with its scopes line edited to
+//   drop "repo" -- a genuine thin-scope capture would require revoking
+//   a scope on the live token, which this task must not do.
+//   REPO_VIEW_INTERNAL, API_USER_NULL_NAME and TWO_ACCOUNT_RAW are
+//   synthetic: INTERNAL visibility needs an organization-owned repo, a
+//   null gh api user "name" needs a second account that never set a
+//   display name, and a multi-account host needs a second real
+//   GitHub account -- none obtainable from this machine. Each test
+//   says so.
 // ---------------------------------------------------------------------
 
-sameArgv(CsHub.argvAuthStatus(), ["auth", "status"], "argvAuthStatus");
+sameArgv(CsHub.argvAuthStatus(), ["auth", "status", "--active"],
+    "argvAuthStatus -- --active is not optional, see the comment on " +
+    "CsHub.argvAuthStatus");
 sameArgv(CsHub.argvDeviceLogin(),
     ["auth", "login", "--web", "--git-protocol", "https",
      "--hostname", "github.com", "--scopes", "repo,read:org",
@@ -5988,6 +5994,9 @@ sameArgv(CsHub.argvRepoView("ndschonegg/cave-blowing-hole"),
     "argvRepoView");
 sameArgv(CsHub.argvRepoCreate("cave-blowing-hole"),
     ["repo", "create", "cave-blowing-hole", "--private"], "argvRepoCreate");
+sameArgv(CsHub.argvRepoCreate("cave blowing hole"),
+    ["repo", "create", "cave blowing hole", "--private"],
+    "argvRepoCreate keeps a spaced name as ONE argument");
 sameArgv(CsHub.argvApiUser(), ["api", "user"], "argvApiUser");
 sameArgv(CsHub.argvVersion(), ["--version"], "argvVersion");
 
@@ -6004,6 +6013,28 @@ var AUTH_THIN = AUTH_OK.replace(
     "'gist', 'read:org', 'repo', 'workflow'", "'gist', 'read:user'");
 var AUTH_LOGGED_OUT_ERR =
     "You are not logged into any GitHub hosts. To log in, run: gh auth login\n";
+
+// Synthetic -- a second real GitHub account cannot be created on this
+// machine, so this is composed rather than captured. Each individual
+// block's shape IS the real captured AUTH_OK shape above, just
+// repeated with a different login/active-flag/scopes, matching gh's
+// documented multi-account-per-host format. This reproduces exactly
+// the Important-1 regression: the active account (ndschonegg, with
+// `repo`) listed SECOND, behind an inactive account (oldaccount, with
+// only `gist`) listed first.
+var TWO_ACCOUNT_RAW =
+    "github.com\n" +
+    "  ✓ Logged in to github.com account oldaccount (keyring)\n" +
+    "  - Active account: false\n" +
+    "  - Git operations protocol: https\n" +
+    "  - Token: ghp_************************************\n" +
+    "  - Token scopes: 'gist'\n" +
+    "\n" +
+    "  ✓ Logged in to github.com account ndschonegg (keyring)\n" +
+    "  - Active account: true\n" +
+    "  - Git operations protocol: https\n" +
+    "  - Token: gho_************************************\n" +
+    "  - Token scopes: 'gist', 'read:org', 'repo', 'workflow'\n";
 
 // gh repo view --json visibility,nameWithOwner,defaultBranchRef -- real
 // captures. Keys come back alphabetically sorted and defaultBranchRef
@@ -6043,6 +6074,15 @@ ok(CsHub.parseVisibility({ code: 0, out: REPO_VIEW_INTERNAL, err: "" }) ===
 ok(CsHub.parseVisibility(
     { code: 1, out: "", err: REPO_VIEW_MISSING_ERR }) === null,
     "parseVisibility returns null when the repo does not exist");
+// Minor-3: STRICT, not case-normalized. Real gh only ever emits
+// uppercase, so lowercase is a shape gh never actually produces --
+// accepting it anyway is exactly the kind of leniency this privacy
+// gate should not have.
+ok(CsHub.parseVisibility({ code: 0, out: '{"visibility":"private"}', err: "" }) ===
+    "private",
+    "parseVisibility is a STRICT passthrough -- lowercase stays " +
+    "lowercase, it is not silently upper-cased into a false PRIVATE " +
+    "match (a shape gh never actually emits)");
 
 ok(CsHub.isPrivate({ code: 0, out: REPO_VIEW_PRIVATE_SHAPE, err: "" }) === true,
     "isPrivate accepts PRIVATE");
@@ -6057,6 +6097,8 @@ ok(CsHub.isPrivate({ code: 1, out: "", err: "gh: command not found" }) === false
     "isPrivate FAILS CLOSED when gh itself cannot be run");
 ok(CsHub.isPrivate(null) === false,
     "isPrivate FAILS CLOSED on no result at all");
+ok(CsHub.isPrivate({ code: 0, out: '{"visibility":"private"}', err: "" }) === false,
+    "isPrivate rejects lowercase \"private\" -- a shape gh never emits");
 
 // Scopes. A token without repo makes a private repo 404, which reads
 // as "no such repo" -- so this is checked explicitly rather than
@@ -6090,12 +6132,56 @@ ok(CsHub.parseLogin({ code: 0, out: "", err: AUTH_OK }) === "ndschonegg",
 ok(CsHub.isAuthenticated({ code: 0, out: "", err: AUTH_OK }) === true,
     "isAuthenticated reads stderr too");
 
+// Important-1 regression guard: without --active, gh would print
+// BOTH account blocks and these parsers -- which only ever match the
+// FIRST occurrence -- would read the inactive account. This is the
+// bug (not the shipped behavior; argvAuthStatus always sends
+// --active), demonstrated on the synthetic two-account fixture above.
+ok(CsHub.parseLogin({ code: 0, out: TWO_ACCOUNT_RAW, err: "" }) === "oldaccount",
+    "regression guard: without --active, parseLogin would read the " +
+    "FIRST block, not the active one (this is the bug --active fixes)");
+ok(CsHub.hasRepoScope({ code: 0, out: TWO_ACCOUNT_RAW, err: "" }) === false,
+    "regression guard: without --active, hasRepoScope would read the " +
+    "FIRST block's scopes even though the ACTIVE account has repo");
+// gh's --active flag (what argvAuthStatus now actually sends) filters
+// its output to exactly the active account's block per host, so in
+// practice the parsers only ever see that one block -- which is the
+// real captured AUTH_OK fixture above -- and read it correctly with
+// no parser changes needed.
+ok(CsHub.parseLogin({ code: 0, out: AUTH_OK, err: "" }) === "ndschonegg",
+    "with --active's single-block output, parseLogin reads the " +
+    "active account, ndschonegg, not oldaccount");
+ok(CsHub.hasRepoScope({ code: 0, out: AUTH_OK, err: "" }) === true,
+    "with --active's single-block output, hasRepoScope correctly " +
+    "sees repo on the active account");
+
 // noreply email, so a real address never lands in permanent history.
 ok(CsHub.noreplyEmail({ id: 12345, login: "ndschonegg" }) ===
     "12345+ndschonegg@users.noreply.github.com", "noreplyEmail shape");
 ok(CsHub.noreplyEmail(null) === null, "noreplyEmail null on no user");
 ok(CsHub.noreplyEmail({ id: 7, login: "" }) === null,
     "noreplyEmail null on an empty login");
+// Important-2: a missing/malformed id must not silently stringify
+// into a bogus-but-plausible-looking address -- a wrong committer
+// address in history is unfixable, same as the real-email leak this
+// function exists to prevent.
+ok(CsHub.noreplyEmail({ id: undefined, login: "x" }) === null,
+    "noreplyEmail null when id is undefined (partial gh api user)");
+ok(CsHub.noreplyEmail({ login: "x" }) === null,
+    "noreplyEmail null when id is missing entirely");
+ok(CsHub.noreplyEmail({ id: null, login: "x" }) === null,
+    "noreplyEmail null when id is null");
+ok(CsHub.noreplyEmail({ id: NaN, login: "x" }) === null,
+    "noreplyEmail null when id is NaN");
+ok(CsHub.noreplyEmail({ id: "", login: "x" }) === null,
+    "noreplyEmail null when id is an empty string");
+ok(CsHub.noreplyEmail({ id: "abc", login: "x" }) === null,
+    "noreplyEmail null when id is a non-numeric string");
+ok(CsHub.noreplyEmail({ id: "12345", login: "ndschonegg" }) ===
+    "12345+ndschonegg@users.noreply.github.com",
+    "noreplyEmail accepts a non-empty numeric STRING id " +
+    "(gh api user's id is a JSON number, but this is a defensive " +
+    "path, not a captured shape)");
 
 var u = CsHub.parseApiUser({ code: 0, out: API_USER_REAL, err: "" });
 ok(u.login === "ndschonegg" && u.id === 307531413 &&

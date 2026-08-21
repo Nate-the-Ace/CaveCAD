@@ -25,8 +25,21 @@ var CsHub = {};
 CsHub.HOST = "github.com";
 CsHub.SCOPES = "repo,read:org";
 
+// "--active" is NOT optional. gh prints one "Logged in to ..." +
+// "Token scopes:" block PER ACCOUNT on a multi-account host (see
+// `gh auth switch`), each with its own "- Active account: true/false"
+// marker that none of the parsers below read. Without --active, every
+// parser reads whichever block gh prints FIRST -- not the one that is
+// actually active. parseLogin feeds noreplyEmail, which feeds
+// `git config user.email`: on a host where the active account is
+// listed second, that writes the WRONG account's committer address
+// into PERMANENT commit history, unfixable after the fact. --active
+// (present in gh 2.97.0, confirmed here with a live read-only call on
+// 2026-08-21, byte-identical to the single-account AUTH_OK fixture)
+// makes "the block gh prints" and "the active block" the same thing
+// by construction, so none of the text parsers below need to change.
 CsHub.argvAuthStatus = function() {
-    return ["auth", "status"];
+    return ["auth", "status", "--active"];
 };
 
 CsHub.argvDeviceLogin = function() {
@@ -94,7 +107,14 @@ CsHub.parseVisibility = function(r) {
     if (j === null || !j.visibility) {
         return null;
     }
-    return String(j.visibility).toUpperCase();
+    // STRICT passthrough, deliberately not case-normalized. Real gh
+    // only ever emits "PRIVATE"/"PUBLIC"/"INTERNAL" in uppercase, and
+    // this value feeds the privacy gate below -- accepting a shape gh
+    // never actually produces (lowercase "private") is exactly the
+    // kind of unwarranted leniency that let the Task 2 hang through.
+    // If gh's output ever changes shape, isPrivate should fail
+    // closed, not silently accept it.
+    return String(j.visibility);
 };
 
 /**
@@ -167,11 +187,25 @@ CsHub.parseApiUser = function(r) {
  * The noreply address, so a surveyor's real email never lands in a
  * commit -- which is permanent in history and readable by every
  * collaborator added later.
+ *
+ * `id` is validated with the same "fail closed, do not guess" spirit
+ * as the `login` check right below it: a missing/undefined/null/NaN
+ * `id` (e.g. from a partial gh api user response) must not silently
+ * stringify into a bogus but well-formed-looking address like
+ * "undefined+x@users.noreply.github.com" -- a wrong committer address
+ * is unfixable once it is in history, same as the real-email leak
+ * this function exists to prevent.
  */
 CsHub.noreplyEmail = function(user) {
     if (!user || !user.login) {
         return null;
     }
-    return String(user.id) + "+" + String(user.login) +
+    var id = user.id;
+    var idIsValid = (typeof id === "number" && isFinite(id)) ||
+                     (typeof id === "string" && /^\d+$/.test(id));
+    if (!idIsValid) {
+        return null;
+    }
+    return String(id) + "+" + String(user.login) +
            "@users.noreply." + CsHub.HOST;
 };
