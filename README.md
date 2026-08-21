@@ -28,10 +28,20 @@ Each appears in the **Cave Survey** menu and as a command:
 | Build Legend | `bl` | Generate the legend from the symbols the map actually uses (NSS names, UIS aliases). |
 | Sheet Check | `shc` | What would a judge mark missing? The NSS required-elements list as a to-do list. |
 | Cave Mode | `cavemode` | Hide stock CAD clutter; QCAD becomes a dedicated cave mapping app. Toggleable, persistent. |
+| GitHub Setup | `ghsetup` | Get this computer ready to use GitHub from inside CaveCAD: finds `git` and `gh` (without trusting `PATH`), gives the install link for your platform when they are missing, signs you in through GitHub's device flow -- the code appears in a dialog, your browser does the authenticating, no password passes through CaveCAD -- then checks the token can see private repositories, that git has a credential helper, and that you have a commit identity. Reports the first thing that is actually wrong rather than a cascade. |
 
 Start a new map from `templates/NSS_Cave_Template_PLAN.dxf` (or
 `..._PROFILE.dxf`) -- the tools draw onto its layers and the title block and
 symbol blocks live there.
+
+## A note on privacy
+
+This repository is public and that is deliberate: it is GPLv3 code, and its test
+fixtures use synthetic local grids rather than real coordinates. **Cave drawings
+are a different matter** — working DXFs carry exact entrance coordinates, so any
+repository holding them must be private. The GitHub Setup tool and the versioning
+work built on it enforce that for the repositories they create and push to; it
+does not apply to this source tree.
 
 ## Conventions
 
@@ -50,6 +60,18 @@ These hold across every tool, and are worth knowing before you trust a map:
   an explicit 0 means "the wall is here".
 * **Declination is positive east**: true = magnetic + declination. Anywhere
   a declination appears it is shown as `x.x° E/W` too.
+* **Loops are adjusted by least squares, and it is ON by default.** A drawn
+  survey has its misclosure distributed across the loop rather than dumped on
+  the closing shot, weighted by `CaveSurvey/SigmaTape` (0.1) and
+  `CaveSurvey/SigmaAngle` (1.5). This *moves stations* -- it is a change to
+  drawn geometry, not an overlay. It is fully reversible: the raw readings are
+  untouched in XDATA, and redrawing with `CaveSurvey/AdjustEnabled` set false
+  reproduces the as-surveyed geometry exactly. The as-surveyed shape is also
+  drawn as a ghost on layer `CTRL-RAW` so you can see what the solver did.
+* **Grades quote the as-surveyed closure, never the adjusted one.** Adjustment
+  makes a loop close by construction, so quoting the post-adjustment figure
+  would make every survey report as BCRA grade 5. Survey Stats reports the
+  worst loop as it was measured.
 
 ## Repository layout
 

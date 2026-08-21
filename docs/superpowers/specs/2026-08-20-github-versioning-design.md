@@ -64,6 +64,23 @@ Two further calls made in the design and open to reversal at spec review:
 - **The sidecar carries no coordinates.** Entrance lat/lon stays only in the DXF.
 - **The pre-push hook fails closed** when it cannot verify visibility.
 
+## Scope of the privacy rule: MAPS are private, the CODE is not
+
+Stated explicitly because the two live side by side and the distinction is
+load-bearing (confirmed by Nathan, 2026-08-21):
+
+- **Cave drawing repositories are private, hard enforced.** They carry entrance
+  coordinates in LocationPick XDATA and `GeoLat`/`GeoLon` on the anchor station.
+  Everything below applies to them.
+- **This add-on's own source repository is public**, and that is intended — it is
+  GPLv3 code derived from QCAD. Its test fixtures use synthetic local grids
+  (`*fix RA 0 0 0`, `#Fix W1 1000.00 2000.00 100.00`), never real coordinates, and
+  `GeoLat`/`GeoLon` appear in it only as tag *names*. Nothing in the source tree
+  identifies a cave.
+
+So `CsHub.isPrivate` gates the repositories the plugin creates and pushes to. It
+says nothing about where this code lives.
+
 ## Privacy: the constraint that shapes everything
 
 The project's first rule is never to expose cave entrance locations
