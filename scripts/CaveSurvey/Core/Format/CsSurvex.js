@@ -382,6 +382,12 @@ CsFormatSurvex.parse = function(content) {
             shot.to = anonTo ? "" : fullName(rec.to);
             shot.distance = intoSurveyUnit(tape);
             shot.azimuth = CsAngles.normalizeAzimuth(compass + declination);
+            // provenance: the value in force at THIS leg. A bare
+            // *declination change does not start a new trip, so this
+            // is the only record of what a leg either side of one was
+            // actually computed with (see CsModel's per-shot
+            // declination note, and the trip comment below).
+            shot.declination = declination;
             shot.inclination = clino;
             shot.excludeFromLength = flags.duplicate || flags.surface;
             shot.excludeFromPlot = flags.surface;
@@ -414,9 +420,10 @@ CsFormatSurvex.parse = function(content) {
             // force" right here. tripIdFor dedupes legs that share a
             // fingerprint (date and team) into one trip; a bare
             // *declination change no longer starts one, so legs either
-            // side of it merge and the collapse is reported once
-            // (CsModel.absorbDeclination). The leg keeps the true
-            // azimuth computed from the declination it was read under.
+            // side of it merge -- losing nothing, because each leg
+            // keeps both the true azimuth computed from the
+            // declination it was read under and (above) that
+            // declination itself.
             var legTrip = CsModel.newTrip();
             legTrip.date = survey.date;
             legTrip.team = survey.team;
@@ -494,13 +501,16 @@ CsFormatSurvex.parse = function(content) {
  *
  * Only emits a *begin block when every station already shares that
  * prefix, so plain names round-trip un-renamed. name/units/*fix stay
- * survey-level (unchanged by trips); *date, *team and *declination
- * are TRIP-level, so they're emitted once per trip, right before that
- * trip's own legs, using that trip's own fields (CsModel.tripOf) --
- * a single-trip survey (the common case, and every trip's date/team/
- * declination blank) still emits nothing extra, byte-identical to the
- * old single-block output. Bearings are written back as the raw
- * magnetic readings for the trip they belong to. Backsights are
+ * survey-level (unchanged by trips); *date and *team are TRIP-level,
+ * so they're emitted once per trip, right before that trip's own
+ * legs, using that trip's own fields (CsModel.tripOf) -- a single-trip
+ * survey (the common case, and every trip's date/team/declination
+ * blank) still emits nothing extra, byte-identical to the old
+ * single-block output. *declination follows the LEG, not the trip: it
+ * is running state in Survex, and a leg records the declination it was
+ * computed with (CsModel.appliedDeclination), so a trip holding two of
+ * them declares both where they change. Bearings are written back as
+ * the raw magnetic readings each leg was read as. Backsights are
  * emitted (and declination-stripped) when any shot carries them.
  * Splays become anonymous ".." stations -- a bare "-" is NOT legal
  * Survex without an *alias. Passage LRUD is per-station: the first
@@ -565,13 +575,16 @@ CsFormatSurvex.write = function(survey) {
     // IS the file's default), a LATER trip going back to 0 must say
     // so explicitly, or the reader would keep an earlier trip's
     // nonzero value in force across the boundary. Track what's
-    // actually in force and only emit on a real change.
+    // actually in force and only emit on a real change. Because it is
+    // running state and not trip state, the emission belongs with the
+    // LEG (below) rather than the trip header: a trip whose shots were
+    // read under two declinations says so mid-trip, exactly as the
+    // file that produced it did.
     var lastEmittedDecl = 0;
     for (var tOi = 0; tOi < tripOrder.length; tOi++) {
         var tripIdx = tripOrder[tOi];
         var trip = survey.trips[tripIdx];
         var tripShots = byTrip[tripIdx];
-        var decl = trip.declination || 0;
 
         if (trip.date) {
             out.push("*date " + trip.date);
@@ -585,10 +598,6 @@ CsFormatSurvex.write = function(survey) {
                 }
             }
         }
-        if (decl !== lastEmittedDecl) {
-            out.push("*declination " + decl.toFixed(2) + " degrees");
-            lastEmittedDecl = decl;
-        }
 
         for (i = 0; i < tripShots.length; i++) {
             s = tripShots[i];
@@ -599,6 +608,16 @@ CsFormatSurvex.write = function(survey) {
                     " " + s.distance.toFixed(2) +
                     (s.notes ? " ; " + s.notes : ""));
                 continue;
+            }
+            // the declination this leg was computed with -- its own,
+            // or its trip's when it records none. Declared before the
+            // leg whenever it differs from what is still in force, so
+            // the reader re-applies the same value this line was
+            // written by.
+            var decl = CsModel.appliedDeclination(s, trip);
+            if (decl !== lastEmittedDecl) {
+                out.push("*declination " + decl.toFixed(2) + " degrees");
+                lastEmittedDecl = decl;
             }
             var want = {
                 duplicate: !!(s.excludeFromLength && !s.excludeFromPlot),
@@ -616,7 +635,7 @@ CsFormatSurvex.write = function(survey) {
                 cur = want;
             }
             // Survex expects raw compass readings; the model's
-            // azimuths are true, so remove that leg's own trip's
+            // azimuths are true, so remove that leg's own applied
             // declination again.
             var az = CsAngles.normalizeAzimuth(s.azimuth - decl);
             var toName = s.splay ? (s.to !== "" ? s.to : "..") : s.to;

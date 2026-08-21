@@ -77,8 +77,9 @@ CsFormatCompass.parse = function(content) {
         // fingerprint into one trip instead of piling up duplicates.
         // Two blocks a DECLINATION apart but the same day and party
         // are one trip too -- the shots below keep the true azimuths
-        // their own block's declination produced, and the collapse is
-        // reported (CsModel.absorbDeclination).
+        // their own block's declination produced AND record that
+        // declination, so the merge costs nothing (see
+        // CsModel.absorbDeclination).
         var nameMatch = block.match(/SURVEY NAME:\s*(.*)/i);
         var blockName = nameMatch ?
             nameMatch[1].replace(/^\s+|\s+$/g, "") : "";
@@ -217,7 +218,12 @@ CsFormatCompass.parse = function(content) {
                 flags: flags,
                 notes: comment,
                 lrudAssoc: lrudAssoc,
-                tripId: tripId
+                tripId: tripId,
+                // provenance: the value just added above. Two blocks
+                // that merge into one trip each keep their own here,
+                // so a revision un-applies what each shot was really
+                // given (see CsModel's per-shot declination note).
+                declination: declination
             };
             raws.push(raw);
             stationRefs[raw.from] = (stationRefs[raw.from] || 0) + 1;
@@ -261,6 +267,7 @@ CsFormatCompass.parse = function(content) {
         shot.noAdjust = r.flags.indexOf("C") >= 0;
         shot.notes = r.notes;
         shot.trip = r.tripId;
+        shot.declination = r.declination;
         survey.shots.push(shot);
     }
 
@@ -298,15 +305,18 @@ CsFormatCompass.parse = function(content) {
 
 /**
  * Writes a CsModel survey as a Compass .dat file: one \f-delimited
- * block PER TRIP that actually has shots (see CsModel's Trip shape),
- * each with its own SURVEY NAME/DATE/TEAM/DECLINATION header. Trips
- * with no shots write nothing (Compass has no way to represent an
- * empty block).
+ * block per (TRIP, applied DECLINATION) group of shots (see CsModel's
+ * Trip shape), each with its own SURVEY NAME/DATE/TEAM/DECLINATION
+ * header. Trips with no shots write nothing (Compass has no way to
+ * represent an empty block). A trip normally has one declination and
+ * so one block; a trip that merged two blocks a declination apart
+ * writes the two back out, which is how it came in.
  *
  * Distances are converted to feet, Compass's only storage unit, and
- * azimuths are written back as MAGNETIC by removing that SHOT's OWN
- * trip's declination (CsModel.tripOf) -- with the same declination
- * declared in its block's header, which is what Compass expects.
+ * azimuths are written back as MAGNETIC by removing the declination
+ * that was APPLIED to that shot (CsModel.appliedDeclination: its own,
+ * or its trip's when it records none) -- the same value declared in
+ * its block's header, which is what Compass expects.
  * Backsight columns (Azm2/Inc2, uncorrected, -999 when missing)
  * appear in every block when ANY shot anywhere carries a backsight
  * (one FORMAT ...B decision for the whole file, matching the reader's
@@ -401,29 +411,56 @@ CsFormatCompass.write = function(survey) {
     };
 
     // Group shots by trip (in trip-index order), skipping any trip
-    // nothing uses.
+    // nothing uses -- and WITHIN a trip by the declination actually
+    // applied to each shot. A block declares exactly one DECLINATION,
+    // so a trip whose shots were read under two of them (two blocks
+    // one date and team apart, merged by tripIdFor) has to go back out
+    // as two blocks: un-applying one group with the other's value
+    // would corrupt its true azimuths on the next read. A shot with no
+    // recorded declination falls back to its trip's, so the ordinary
+    // trip still yields exactly one group and one block.
     var tripBlocks = [];
     for (var t = 0; t < survey.trips.length; t++) {
-        var tripShots = [];
+        var groups = [];        // {decl, shots}, first-appearance order
         for (i = 0; i < survey.shots.length; i++) {
-            if ((survey.shots[i].trip || 0) === t) {
-                tripShots.push(survey.shots[i]);
+            if ((survey.shots[i].trip || 0) !== t) {
+                continue;
             }
+            var sDecl = CsModel.appliedDeclination(survey.shots[i],
+                survey.trips[t]);
+            var g = null;
+            for (var gi = 0; gi < groups.length; gi++) {
+                // same 4-decimal granularity absorbDeclination
+                // compares declinations at
+                if (Math.abs(groups[gi].decl - sDecl) < 5e-5) {
+                    g = groups[gi];
+                    break;
+                }
+            }
+            if (g === null) {
+                g = { decl: sDecl, shots: [] };
+                groups.push(g);
+            }
+            g.shots.push(survey.shots[i]);
         }
-        if (tripShots.length > 0) {
-            tripBlocks.push({ trip: survey.trips[t], shots: tripShots });
+        for (gi = 0; gi < groups.length; gi++) {
+            tripBlocks.push({ trip: survey.trips[t], decl: groups[gi].decl,
+                shots: groups[gi].shots });
         }
     }
     if (tripBlocks.length === 0) {
         // no shots anywhere -- still write trip 0's empty header block
-        tripBlocks.push({ trip: survey.trips[0], shots: [] });
+        tripBlocks.push({ trip: survey.trips[0],
+            decl: survey.trips[0].declination || 0, shots: [] });
     }
 
     var out = [];
     for (var bi = 0; bi < tripBlocks.length; bi++) {
         var block = tripBlocks[bi];
         var trip = block.trip;
-        var decl = trip.declination || 0;
+        // the group's own applied declination, not the trip record's:
+        // it is what this block's shots must be un-applied by
+        var decl = block.decl;
 
         var dateParts = /^(\d{4})-(\d{2})-(\d{2})$/.exec(trip.date || "");
         var dateLine = dateParts ?

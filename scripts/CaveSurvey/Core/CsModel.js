@@ -59,7 +59,29 @@
 //     trip            index into survey.trips this shot belongs to;
 //                     0 when the survey has never been split into
 //                     trips
+//     declination     the declination that was APPLIED to this shot's
+//                     azimuth (and backAzimuth -- one frame, see
+//                     below); null = no per-shot record, fall back to
+//                     the shot's trip (CsModel.appliedDeclination)
 //   }
+//
+// Per-shot declination -- provenance, not identity. A trip is one date
+// and team (see tripFingerprint), so a file that declares two
+// declinations for the same party on the same day merges into ONE
+// trip whose record can hold only one of them. The shots keep the
+// TRUE azimuths each declaration produced either way; recording the
+// value each one was computed with is what lets a later revision
+// un-apply exactly what that shot was given instead of the trip's
+// one value. It is deliberately absent from tripFingerprint and from
+// every writer's header decision except as the grouping key it has to
+// be (see CsFormatCompass.write).
+//
+// The rule the field lives or dies by: whoever CHANGES an azimuth's
+// declination must update it in the same breath, or it starts lying.
+// CsRevise.reviseDeclination does. A tool that rebuilds shots from
+// typed magnetic readings (the Survey Notebook) leaves it null on
+// purpose -- the value it applied IS its trip's, which is exactly
+// what null means.
 //
 // Backsight frame: backAzimuth/backInclination are UNREVERSED (a good
 // backsight compass reads ~180 deg from azimuth, backInclination ~
@@ -83,7 +105,10 @@
 // file was READ that no later inspection of the survey could
 // rediscover (see addParseFinding) -- CsValidate.check hands them on
 // so they reach the import summary with every other finding. Absent
-// until something is recorded, and never persisted to a drawing.
+// until something is recorded, and never persisted to a drawing. No
+// parser records one at the moment: the only finding there ever was
+// warned that a merged trip could not be revised exactly, which
+// per-shot declination made false (see absorbDeclination).
 
 var CsModel = {};
 
@@ -141,7 +166,14 @@ CsModel.newShot = function() {
         notes: "",
         // index into survey.trips; 0 until the survey is split into
         // trips (see ensureTrips)
-        trip: 0
+        trip: 0,
+        // The declination APPLIED to this shot's azimuth and
+        // backAzimuth (they share one frame). null = nothing recorded
+        // for this shot, so its trip's value stands in -- see
+        // appliedDeclination and the per-shot declination note in the
+        // file header, including the rule that whoever changes an
+        // azimuth's declination must update this too.
+        declination: null
     };
 };
 
@@ -169,6 +201,32 @@ CsModel.newTrip = function() {
  */
 CsModel.tripFingerprint = function(trip) {
     return (trip.date || "") + "|" + (trip.team || "");
+};
+
+/**
+ * The declination that WAS applied to a shot's azimuth: its own
+ * recorded value, or its trip's when it has none. The one place the
+ * fallback rule lives, so every writer un-applying a declination and
+ * every revision re-applying one agree by construction. Returns a
+ * number, never null -- a shot with no provenance in a survey with no
+ * trip record reads 0, the same neutral value newTrip starts at.
+ *
+ * \param shot the Shot
+ * \param trip the shot's trip record (CsModel.tripOf), may be absent
+ */
+CsModel.appliedDeclination = function(shot, trip) {
+    if (shot !== null && shot !== undefined &&
+            shot.declination !== null && shot.declination !== undefined) {
+        var d = Number(shot.declination);
+        if (!isNaN(d)) {
+            return d;
+        }
+    }
+    if (trip === null || trip === undefined) {
+        return 0.0;
+    }
+    var t = Number(trip.declination);
+    return isNaN(t) ? 0.0 : t;
 };
 
 /**
@@ -207,29 +265,22 @@ CsModel.parseFindings = function(survey) {
     return survey.parseFindings.slice(0);
 };
 
-/** "-2.50 deg", the voice the findings use for a declination. */
-CsModel.declinationText = function(value) {
-    var d = Number(value);
-    if (isNaN(d)) {
-        d = 0.0;
-    }
-    return d.toFixed(2) + " deg";
-};
-
 /**
  * Folds an incoming trip record's declination into the trip it was
  * found to BE (same date and team). Nathan's rule: the new value takes
  * precedence, so the LAST one read governs the trip from then on --
  * that is a decision, not an accident of iteration order.
  *
- * The cost when the two disagree is real and must not be silent: each
- * shot keeps the TRUE azimuth its own block's declination produced at
- * parse time, but the trip record holds one value, so a later per-trip
- * revision corrects the whole trip uniformly -- exact for the shots
- * read with the kept value, off by the difference for the rest. Say so
- * in the import summary rather than averaging (a number nobody
- * measured) or splitting the trip back apart (which is the identity
- * decision undone).
+ * Nothing is reported, because nothing is lost any more. This used to
+ * warn that a merged trip could only be revised uniformly -- exact
+ * for the shots read with the kept value, off by the difference for
+ * the rest. That is no longer true: each shot records the declination
+ * it was actually computed with (Shot.declination, set by the parser
+ * that applied it), so a revision un-applies each shot's own value and
+ * lands exact for all of them, and the Compass writer splits the
+ * groups back into their own blocks. The trip record's single value is
+ * now just the fallback for shots that carry no provenance of their
+ * own -- a label to display and revise, not the only truth there is.
  */
 CsModel.absorbDeclination = function(survey, tripIndex, incoming) {
     var existing = survey.trips[tripIndex];
@@ -246,22 +297,6 @@ CsModel.absorbDeclination = function(survey, tripIndex, incoming) {
     if (Math.abs(was - now) < 5e-5) {
         return;
     }
-    var wasText = CsModel.declinationText(was);
-    var nowText = CsModel.declinationText(now);
-    var label = (existing.name ? "\"" + existing.name + "\"" :
-        "trip " + tripIndex) +
-        " (" + (existing.date || "no date") + ", " +
-        (existing.team || "no team") + ")";
-    CsModel.addParseFinding(survey, "warning", "merged-declination",
-        "Trip " + label + " appears more than once in the file with " +
-        "different declinations, " + wasText + " and " + nowText +
-        "; same date and team is one trip, so it now records " +
-        nowText + " -- the last one read. Every shot keeps the true " +
-        "azimuth its own declination produced, but the trip holds one " +
-        "value: revising it corrects the whole trip at once, exact for " +
-        "the shots read with " + nowText + " and off by " +
-        CsModel.declinationText(Math.abs(now - was)) + " for the rest.");
-
     existing.declination = now;
     if (incoming.declinationSource) {
         existing.declinationSource = incoming.declinationSource;
@@ -338,10 +373,11 @@ CsModel.tripOf = function(survey, shot) {
  * ensureTrips first, so this is safe to call on a survey that has
  * never seen a trip before.
  *
- * A match takes the incoming record's declination (absorbDeclination),
- * which is where a lossy merge gets reported -- since declination left
- * the fingerprint, two blocks one date and team apart but a
- * declination apart now land here as ONE trip.
+ * A match takes the incoming record's declination
+ * (absorbDeclination) -- since declination left the fingerprint, two
+ * blocks one date and team apart but a declination apart land here as
+ * ONE trip, and each shot's own recorded declination is what keeps
+ * that merge lossless.
  */
 CsModel.tripIdFor = function(survey, tripRecord) {
     CsModel.ensureTrips(survey);
@@ -521,7 +557,9 @@ CsModel.lrudEntryText = function(value, all) {
 // the end, never insert in the middle. parseShotRow reads positional
 // fields, so inserting would shift every field after it and silently
 // misread rows written by an older build; only appending keeps old
-// rows parsing correctly forever.
+// rows parsing correctly forever. Appending past the note, which used
+// to be the last field and is read greedily, works by field COUNT --
+// see shotRowText.
 // ---------------------------------------------------------------------
 
 /**
@@ -562,15 +600,15 @@ CsModel.parseFlags = function(text, shot) {
 
 /**
  * One shot as a tab-separated row: from, to, distance, azimuth,
- * inclination, backAzimuth, backInclination, L, R, U, D, flags, note
- * -- in that fixed order. Numeric fields that are null (only the
- * backsight pair can be) write as "". LRUD fields go through the
- * existing lrudEntryText so "5/10" multi-readings keep round-tripping
- * the same way they do everywhere else in the Core. The note is
- * always the LAST field: any tab it happens to contain is flattened
- * to a space on the way out (tabs are the separator here), and
- * parseShotRow reads everything from field 12 onward back into it so
- * a note that somehow still contains a tab doesn't get truncated.
+ * inclination, backAzimuth, backInclination, L, R, U, D, flags, note,
+ * declination -- in that fixed order. Numeric fields that are null
+ * (the backsight pair and the declination) write as "". LRUD fields
+ * go through the existing lrudEntryText so "5/10" multi-readings keep
+ * round-tripping the same way they do everywhere else in the Core.
+ * Any tab the note contains is flattened to a space on the way out
+ * (tabs are the separator here), and parseShotRow reads every field
+ * from 12 up to the declination back into it so a note that somehow
+ * still contains a tab doesn't get truncated.
  * After the tab swap the note is further escaped ('\' -> '\\', real
  * newline -> the two literal characters '\' 'N') so the row is
  * self-contained -- see the block comment above this section for why.
@@ -593,6 +631,14 @@ CsModel.parseFlags = function(text, shot) {
  * section for why (it's context the row's carrier supplies). Field
  * order is otherwise load-bearing: append new fields at the end,
  * never insert, or old rows parse wrong.
+ *
+ * The declination (field 13) is appended AFTER the note, honouring
+ * that invariant, and the note's greedy read accounts for it: a row
+ * this build writes always has exactly 14 fields, because the note
+ * never contains a tab (they are flattened above) and a null
+ * declination still writes its empty field. So more than 13 fields
+ * means the LAST one is the declination; 13 or fewer is a row from an
+ * older build, with no declination and the note greedy to the end.
  */
 CsModel.shotRowText = function(shot) {
     var numText = function(v) {
@@ -613,7 +659,8 @@ CsModel.shotRowText = function(shot) {
         CsModel.lrudEntryText(shot.up, shot.upAll),
         CsModel.lrudEntryText(shot.down, shot.downAll),
         CsModel.flagsText(shot),
-        note
+        note,
+        numText(shot.declination)
     ].join("\t");
 };
 
@@ -646,12 +693,21 @@ CsModel.parseShotRow = function(text) {
         shot[sides[i][0] + "All"] = e.all;
     }
     CsModel.parseFlags(f[11] || "", shot);
+    // The note runs from field 12 to the last field the declination
+    // does not claim: a row this build wrote has 14 fields with the
+    // declination last (see shotRowText), a shorter one predates the
+    // field and has no declination to read.
+    var noteEnd = f.length;
+    if (f.length > 13) {
+        noteEnd = f.length - 1;
+        shot.declination = num(f[f.length - 1], null);
+    }
     // Reverse shotRowText's note escaping, in the opposite order it
     // was applied: unescape the '\' 'N' newline marker first, THEN
     // undo the backslash doubling (see shotRowText for why the marker
     // is capital 'N', not 'n' -- lowercase would collide with
     // CsTags.set's own escaping one layer up).
-    shot.notes = f.slice(12).join("\t")
+    shot.notes = f.slice(12, noteEnd).join("\t")
         .replace(/\\N/g, "\n").replace(/\\\\/g, "\\");
     return shot;
 };

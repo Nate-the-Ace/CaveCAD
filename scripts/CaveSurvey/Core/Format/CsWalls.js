@@ -339,6 +339,12 @@ CsFormatWalls.parse = function(content) {
         shot.azimuth = CsAngles.normalizeAzimuth(az + declination);
         shot.backAzimuth = backAz === null ? null :
             CsAngles.normalizeAzimuth(backAz + declination);
+        // provenance: the Decl= in force here (see CsModel's per-shot
+        // declination note). Walls has one file-wide value, so this is
+        // normally uniform -- recorded all the same, so a survey that
+        // came from elsewhere and passed through here is no different
+        // from one that never did.
+        shot.declination = declination;
         shot.inclination = inc;
         shot.backInclination = backInc;
         shot.excludeFromPlot = excludePlot;
@@ -449,20 +455,24 @@ CsFormatWalls.write = function(survey) {
             inExclude = false;
         }
         // Walls has exactly ONE file-wide Decl= (declared from `decl`
-        // above, i.e. trip 0's) -- there is no per-trip declination in
-        // the format. On reparse every shot gets that single header
-        // value added back in (see the `az + declination` reapply in
-        // parse() above), so a multi-trip survey collapses onto one
-        // trip's declination no matter what we do here. Un-applying
-        // with the SHOT's OWN trip declination would only be correct
-        // for trip 0; for any other trip it leaves a residual of
+        // above, i.e. trip 0's) -- there is no per-trip, let alone
+        // per-shot, declination in the format. On reparse every shot
+        // gets that single header value added back in (see the
+        // `az + declination` reapply in parse() above), so a survey
+        // with several applied declinations collapses onto one no
+        // matter what we do here. Un-applying with the SHOT's OWN
+        // applied declination would only be correct where it equals
+        // the header's; anywhere else it leaves a residual of
         // (headerDecl - shotDecl) baked into the written number, which
         // reparse then adds AGAIN, corrupting that shot's TRUE azimuth
         // by (headerDecl - shotDecl) x2. Un-applying uniformly with
         // `decl` (the header's own value) is what keeps TRUE azimuths
         // lossless through the round trip -- it is the exact inverse
         // of what parse() re-applies, even though it is "wrong" per
-        // shot for any trip whose own declination differs.
+        // shot for any shot whose own applied declination differs.
+        // What the format costs is the PROVENANCE, not the geometry:
+        // every shot comes back declaring the header's value. Compass
+        // and Survex can express the difference and do.
         var az = CsAngles.normalizeAzimuth(s.azimuth - decl);
         var azTok = az.toFixed(2);
         if (s.backAzimuth !== null && s.backAzimuth !== undefined) {

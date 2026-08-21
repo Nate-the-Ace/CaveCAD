@@ -232,8 +232,10 @@ ok(tsv.trips.length === 2, "tripIdFor appended once");
 
 // Declination is REVISABLE, so it is not identity: the same party on
 // the same day with a re-measured declination is the SAME trip, and
-// the new value takes precedence (Nathan's rule). The collapse is
-// reported, not silent.
+// the new value takes precedence (Nathan's rule). Nothing is reported,
+// because nothing is lost: shots record the declination they were
+// computed with, so the merged trip revises exactly (proven for real
+// parsed shots in the Compass and Survex merge blocks below).
 var tDecl = CsModel.newTrip();
 tDecl.date = "1998-07-04"; tDecl.team = "NS/JB"; tDecl.declination = -1.25;
 ok(CsModel.tripIdFor(tsv, tDecl) === 0,
@@ -241,15 +243,20 @@ ok(CsModel.tripIdFor(tsv, tDecl) === 0,
 ok(tsv.trips.length === 2, "tripIdFor did not append for a declination change");
 near(tsv.trips[0].declination, -1.25, 1e-12,
     "merged trip records the LAST declination read");
+ok(CsModel.parseFindings(tsv).length === 0,
+    "a merged declination is no longer a finding, got " +
+    JSON.stringify(CsModel.parseFindings(tsv)));
+
+// The parse-findings mechanism itself, which no parser currently feeds
+// (see CsModel's header): a recorded finding is deduped by code +
+// message, handed out as a copy, and reaches CsValidate.check.
+CsModel.addParseFinding(tsv, "warning", "test-finding", "noticed once");
+CsModel.addParseFinding(tsv, "warning", "test-finding", "noticed once");
 var tFind = CsModel.parseFindings(tsv);
-ok(tFind.length === 1 && tFind[0].code === "merged-declination",
-    "collapsed declination is recorded as a finding, got " +
+ok(tFind.length === 1 && tFind[0].code === "test-finding" &&
+    tFind[0].shotIndex === -1,
+    "an identical finding is recorded once, survey-wide, got " +
     JSON.stringify(tFind));
-ok(tFind.length === 1 && tFind[0].message.indexOf("-2.50 deg") >= 0 &&
-    tFind[0].message.indexOf("-1.25 deg") >= 0 &&
-    tFind[0].message.indexOf("off by 1.25 deg") >= 0,
-    "finding names both declinations and the error it leaves, got '" +
-    (tFind.length === 1 ? tFind[0].message : "") + "'");
 // The findings list a caller gets is a copy: appending to it must not
 // grow the survey's own record.
 tFind.push({ code: "scribble" });
@@ -259,7 +266,7 @@ ok(CsModel.parseFindings(tsv).length === 1,
 var tChecked = CsValidate.check(tsv, null);
 var tSeen = false;
 for (var tci = 0; tci < tChecked.length; tci++) {
-    if (tChecked[tci].code === "merged-declination") {
+    if (tChecked[tci].code === "test-finding") {
         tSeen = true;
     }
 }
@@ -1187,10 +1194,12 @@ ok(merged.shots.length === 2 && merged.shots[0].trip === 0 &&
 ok(CsModel.parseFindings(merged).length === 0,
     "Compass fingerprint merge: nothing to report when the declinations agree");
 
-// LOSSY merge: the same two blocks a declination apart. Still one trip
-// (date and team are identity), each shot still carrying the TRUE
-// azimuth its OWN block's declination produced, the trip recording the
-// LAST declination read -- and the collapse reported, not silent.
+// MIXED merge: the same two blocks a declination apart. Still one trip
+// (date and team are identity), each shot carrying the TRUE azimuth its
+// OWN block's declination produced AND recording that declination, the
+// trip recording the LAST one read. Nothing is reported because
+// nothing is lost -- proven below by revising the merged trip and
+// finding every shot exact.
 var lossyDat =
     "SURVEY NAME: X\r\nSURVEY DATE: 1 1 2020\r\nSURVEY TEAM:\r\n" +
     "A. One, B. Two\r\nDECLINATION: 1.00  FORMAT: DDDDLUDRLADN\r\n\r\n" +
@@ -1211,33 +1220,55 @@ near(lossy.trips[0].declination, 4.0, 1e-9,
     "Compass lossy merge: trip records the last declination read");
 near(lossy.declination, 4.0, 1e-9,
     "Compass lossy merge: top level mirrors the merged trip");
-var lossyFind = CsModel.parseFindings(lossy);
-ok(lossyFind.length === 1 && lossyFind[0].code === "merged-declination" &&
-    lossyFind[0].severity === "warning" && lossyFind[0].shotIndex === -1,
-    "Compass lossy merge: one survey-wide warning, got " +
-    JSON.stringify(lossyFind));
-if (lossyFind.length === 1) {
-    var lossyMsg = lossyFind[0].message;
-    ok(lossyMsg.indexOf("1.00 deg") >= 0 && lossyMsg.indexOf("4.00 deg") >= 0,
-        "Compass lossy merge: both declinations named, got '" + lossyMsg + "'");
-    ok(lossyMsg.indexOf("off by 3.00 deg") >= 0,
-        "Compass lossy merge: the error it leaves is named, got '" +
-        lossyMsg + "'");
-    ok(lossyMsg.indexOf("\"X\"") >= 0 && lossyMsg.indexOf("1 1 2020") < 0 &&
-        lossyMsg.indexOf("2020-01-01") >= 0 &&
-        lossyMsg.indexOf("A. One, B. Two") >= 0,
-        "Compass lossy merge: the trip is named by label, date and team, got '" +
-        lossyMsg + "'");
-}
-// A merged trip still writes and re-reads losslessly: the writer
-// un-applies the one declination it declares, so TRUE azimuths survive
-// even though the trip's value is wrong for block 2's shot.
-var lossyRt = CsFormatCompass.parse(CsFormatCompass.write(lossy));
-ok(lossyRt.trips.length === 1, "Compass lossy merge round trip: still 1 trip");
+// Each shot's PROVENANCE: the declination the parser actually added to
+// its magnetic reading, kept per shot so the merge costs nothing.
+near(lossy.shots[0].declination, 1.0, 1e-9,
+    "Compass mixed merge: shot 1 records block 1's declination");
+near(lossy.shots[1].declination, 4.0, 1e-9,
+    "Compass mixed merge: shot 2 records block 2's declination");
+ok(CsModel.parseFindings(lossy).length === 0,
+    "Compass mixed merge: nothing to report -- the merge is lossless, got " +
+    JSON.stringify(CsModel.parseFindings(lossy)));
+
+// The proof: revise the merged trip to a THIRD value. Both blocks read
+// 0.00 magnetic, so every true azimuth must land on the new
+// declination exactly -- the case that was provably off by 3 deg for
+// block 1's shot when only the trip remembered a declination.
+var lossyRev = CsFormatCompass.parse(lossyDat);
+var lossyRd = CsRevise.reviseDeclination(lossyRev, 0, -1.5, "igrf");
+near(lossyRev.shots[0].azimuth, 358.5, 1e-9,
+    "Compass mixed merge revised: shot 1 exact (magnetic 0 + -1.5)");
+near(lossyRev.shots[1].azimuth, 358.5, 1e-9,
+    "Compass mixed merge revised: shot 2 exact (magnetic 0 + -1.5)");
+near(lossyRev.shots[0].declination, -1.5, 1e-9,
+    "Compass mixed merge revised: shot 1 provenance is the new value");
+near(lossyRev.shots[1].declination, -1.5, 1e-9,
+    "Compass mixed merge revised: shot 2 provenance is the new value");
+ok(lossyRd.mixed === true && lossyRd.diverged === 1,
+    "Compass mixed merge revised: the return says one shot diverged, got " +
+    JSON.stringify(lossyRd));
+
+// A merged trip writes back out as the two blocks it came in as -- one
+// DECLINATION per block is all Compass can declare, so each group gets
+// its own -- and re-reading reproduces every TRUE azimuth AND its
+// provenance.
+var lossyWritten = CsFormatCompass.write(lossy);
+ok(lossyWritten.split("\f").length - 1 === 2,
+    "Compass mixed merge write: two blocks, got " +
+    (lossyWritten.split("\f").length - 1));
+ok(/DECLINATION: 1\.00/.test(lossyWritten) &&
+    /DECLINATION: 4\.00/.test(lossyWritten),
+    "Compass mixed merge write: both declinations declared");
+var lossyRt = CsFormatCompass.parse(lossyWritten);
+ok(lossyRt.trips.length === 1, "Compass mixed merge round trip: still 1 trip");
 near(CsAngles.azimuthDifference(lossyRt.shots[0].azimuth, 1.0), 0, 1e-6,
-    "Compass lossy merge round trip: shot 1 TRUE azimuth preserved");
+    "Compass mixed merge round trip: shot 1 TRUE azimuth preserved");
 near(CsAngles.azimuthDifference(lossyRt.shots[1].azimuth, 4.0), 0, 1e-6,
-    "Compass lossy merge round trip: shot 2 TRUE azimuth preserved");
+    "Compass mixed merge round trip: shot 2 TRUE azimuth preserved");
+near(lossyRt.shots[0].declination, 1.0, 1e-9,
+    "Compass mixed merge round trip: shot 1 provenance preserved");
+near(lossyRt.shots[1].declination, 4.0, 1e-9,
+    "Compass mixed merge round trip: shot 2 provenance preserved");
 
 // Team, not declination, is what keeps two same-day blocks apart now.
 var teamSplitDat =
@@ -1330,15 +1361,16 @@ near(CsAngles.azimuthDifference(svxTripRt.shots[1].azimuth, svxTrip.shots[1].azi
 
 // A bare *declination change -- no *date, no *team -- is a correction
 // to one trip, not a second trip: the legs merge, each keeping the
-// true azimuth it was read under, and the collapse is reported once
-// however many legs follow it.
-var svxDeclOnly = CsFormatSurvex.parse(
+// true azimuth it was read under and recording the declination in
+// force where it appeared, so the merge is lossless and silent.
+var svxDeclOnlySrc =
     "*data normal from to tape compass clino\r\n" +
     "*date 2020-01-01\r\n*declination 2.0\r\n" +
     "D1 D2 10.0 90.0 0.0\r\n" +
     "*declination 5.0\r\n" +
     "D2 D3 10.0 90.0 0.0\r\n" +
-    "D3 D4 10.0 90.0 0.0\r\n");
+    "D3 D4 10.0 90.0 0.0\r\n";
+var svxDeclOnly = CsFormatSurvex.parse(svxDeclOnlySrc);
 ok(svxDeclOnly.trips.length === 1,
     "Survex: a declination change alone does not fork a trip, got " +
     svxDeclOnly.trips.length);
@@ -1346,11 +1378,38 @@ near(svxDeclOnly.shots[0].azimuth, 92.0, 1e-9,
     "Survex declination-only merge: leg 1 keeps its own true azimuth");
 near(svxDeclOnly.shots[2].azimuth, 95.0, 1e-9,
     "Survex declination-only merge: leg 3 keeps its own true azimuth");
+near(svxDeclOnly.shots[0].declination, 2.0, 1e-9,
+    "Survex declination-only merge: leg 1 records the value in force at it");
+near(svxDeclOnly.shots[2].declination, 5.0, 1e-9,
+    "Survex declination-only merge: leg 3 records the later value");
 near(svxDeclOnly.trips[0].declination, 5.0, 1e-9,
     "Survex declination-only merge: trip records the last value read");
-ok(CsModel.parseFindings(svxDeclOnly).length === 1,
-    "Survex declination-only merge: reported once, not once per leg, got " +
+ok(CsModel.parseFindings(svxDeclOnly).length === 0,
+    "Survex declination-only merge: nothing to report, got " +
     CsModel.parseFindings(svxDeclOnly).length);
+// Revising that one trip is exact for both groups: every leg read 90.0
+// magnetic, so every true azimuth lands on 90 + the new value.
+var svxDeclRev = CsFormatSurvex.parse(svxDeclOnlySrc);
+var svxDeclRd = CsRevise.reviseDeclination(svxDeclRev, 0, -1.0, "user");
+near(svxDeclRev.shots[0].azimuth, 89.0, 1e-9,
+    "Survex mixed trip revised: leg 1 exact (magnetic 90 + -1)");
+near(svxDeclRev.shots[2].azimuth, 89.0, 1e-9,
+    "Survex mixed trip revised: leg 3 exact (magnetic 90 + -1)");
+ok(svxDeclRd.diverged === 1,
+    "Survex mixed trip revised: one leg diverged from the trip's value, got " +
+    svxDeclRd.diverged);
+// and it goes back out declaring both values where they change
+var svxDeclWritten = CsFormatSurvex.write(svxDeclOnly);
+ok(/\*declination 2\.00 degrees/.test(svxDeclWritten) &&
+    /\*declination 5\.00 degrees/.test(svxDeclWritten),
+    "Survex mixed trip write: both declinations declared mid-trip");
+var svxDeclRt = CsFormatSurvex.parse(svxDeclWritten);
+near(svxDeclRt.shots[0].azimuth, 92.0, 1e-9,
+    "Survex mixed trip round trip: leg 1 TRUE azimuth preserved");
+near(svxDeclRt.shots[2].azimuth, 95.0, 1e-9,
+    "Survex mixed trip round trip: leg 3 TRUE azimuth preserved");
+near(svxDeclRt.shots[0].declination, 2.0, 1e-9,
+    "Survex mixed trip round trip: leg 1 provenance preserved");
 
 // Survex team boundary regression: *team is a running append with no
 // block scoping, so without a reset at a *date boundary a second
@@ -1425,6 +1484,10 @@ if (teamBoundaryRt.trips.length === 2) {
 
     var rd = CsRevise.reviseDeclination(sv, 0, 3.0, "igrf");
     near(rd.delta, 2.0, 1e-12, "reviseDeclination: delta = new - old");
+    ok(rd.mixed === false && rd.diverged === 0,
+        "reviseDeclination: no shot recorded its own value, nothing diverged");
+    ok(sv.shots[0].declination === 3.0 && sv.shots[1].declination === 3.0,
+        "reviseDeclination: every revised shot now records the new value");
     near(sv.shots[0].azimuth, 1.0, 1e-9,
         "reviseDeclination: azimuth wraps 359 + 2 -> 1");
     near(sv.shots[0].backAzimuth, 181.0, 1e-9,
@@ -1453,6 +1516,22 @@ if (teamBoundaryRt.trips.length === 2) {
         "reviseDeclination: source kept when omitted");
     near(sv.declination, 3.0, 1e-12,
         "reviseDeclination: trip 1 revision leaves survey.declination");
+
+    // a shot carrying its own DIFFERENT declination is revised off
+    // THAT, while the ones already at the trip's value move by the
+    // trip delta -- one revision, two deltas, both exact
+    var own = shotOf("R3", "R4", 10, 100);
+    own.declination = -2.0;         // trip 0 now records 3.0
+    own.trip = 0;
+    sv.shots.push(own);
+    var rdMixed = CsRevise.reviseDeclination(sv, 0, 5.0);
+    near(sv.shots[4].azimuth, 107.0, 1e-9,
+        "reviseDeclination: own-declination shot moves by 5 - (-2)");
+    near(sv.shots[0].azimuth, 3.0, 1e-9,
+        "reviseDeclination: null-declination shot still moves by 5 - 3");
+    ok(rdMixed.mixed === true && rdMixed.diverged === 1,
+        "reviseDeclination: the return names the one divergent shot, got " +
+        JSON.stringify(rdMixed));
 })();
 
 // --- similarityFit edges ---------------------------------------------

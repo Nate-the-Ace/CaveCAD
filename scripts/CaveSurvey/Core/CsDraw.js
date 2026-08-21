@@ -231,8 +231,8 @@ CsDraw.noteLeader = function(doc, op, pos, name, note, azimuthDeg, lrud) {
  *
  * Tag schema v3: the drawing's tags alone reconstruct the survey.
  * Every leg line carries its shot's full data (From/To/Trip/ShotSeq/
- * Distance/Azimuth/Inclination/LRUD, plus backsights/Flags/Note when
- * present) -- shots live on LEGS, not stations, because a loop
+ * Distance/Azimuth/Inclination/LRUD, plus backsights/Flags/Note/
+ * Declination when present) -- shots live on LEGS, not stations, because a loop
  * closure's arrival would overwrite the TO station's tags (the old
  * scheme's collision; station-level Azimuth etc. remain but legs are
  * canonical). Each trip's first resolved station anchors that trip's
@@ -310,7 +310,13 @@ CsDraw.survey = function(survey, resolved, originStation, originPos, seqBase) {
             BackAzimuth: shot.backAzimuth,
             BackInclination: shot.backInclination,
             Flags: CsModel.flagsText(shot),
-            Note: shot.notes
+            Note: shot.notes,
+            // The declination this shot's azimuth was computed with:
+            // provenance has to survive the save, or a revision of a
+            // reopened drawing is back to guessing from the trip.
+            // Null -- no record, fall back to the trip -- writes no
+            // tag, which reads back as the same null.
+            Declination: shot.declination
         };
         // CsTags.set drops null/"" values itself, so absent backsights,
         // empty flag sets and unmeasured LRUD simply write no tag

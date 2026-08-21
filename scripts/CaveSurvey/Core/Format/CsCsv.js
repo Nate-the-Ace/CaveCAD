@@ -24,7 +24,10 @@
 //
 // "# unit:" matters most -- without it a meter survey re-imported
 // from CSV silently became feet. Azimuths are stored TRUE; the
-// declination line is a record, not a correction to apply.
+// declination line is a record, not a correction to apply -- so no
+// shot here records one either, and a null Shot.declination already
+// means "whatever my trip says", which is exactly what that line
+// becomes (see CsModel's per-shot declination note).
 
 var CsFormatCsv = {};
 

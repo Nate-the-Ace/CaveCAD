@@ -12,7 +12,10 @@
 //   Azimuth      the azimuth of the shot that reached the station
 //                (the LRUD direction reference)
 //   SurveyName, SurveyDate, SurveyTeam, Declination, DeclinationSource,
-//   DistanceUnit   survey-level metadata, on the anchor station point
+//   DistanceUnit   survey-level metadata, on the anchor station point.
+//                Declination ALSO appears on a leg or splay line,
+//                where it means that one shot's applied declination
+//                instead (see CsDraw's legTags)
 //   BoundaryId   ScatterBreakdown's per-boundary ownership tag
 //   GeoLat, GeoLon, GeoStation   the georeference anchor, stored as
 //                data instead of destructively rescaling the drawing

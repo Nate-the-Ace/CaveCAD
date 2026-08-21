@@ -30,7 +30,8 @@
 //
 // Below the reconstruction entry points lives the REVISION MATH: the
 // pure numeric half of the revision framework. reviseDeclination
-// rotates one trip's azimuths to a re-measured declination;
+// rotates one trip's azimuths to a re-measured declination, each shot
+// off the declination it records having been computed with;
 // similarityFit / classifyChange compare two CsNetwork.resolve results
 // and decide whether the whole plan moved RIGIDLY (rotation + uniform
 // scale + translation -- redraw everything in place) or genuinely
@@ -43,7 +44,8 @@ var CsRevise = {};
  * One drawn leg (or splay) line back into a full CsModel shot, from
  * its v3 tags. Numeric fields that are never null in the model
  * (distance/azimuth/inclination) fall back to 0.0 when the tag is
- * missing; the backsight pair genuinely can be absent and stays null.
+ * missing; the backsight pair and the applied declination genuinely
+ * can be absent and stay null.
  */
 CsRevise.shotFromEntity = function(e) {
     var shot = CsModel.newShot();
@@ -68,6 +70,12 @@ CsRevise.shotFromEntity = function(e) {
     CsModel.parseFlags(CsTags.get(e, "Flags"), shot);
     shot.notes = CsTags.get(e, "Note");
     shot.trip = num("Trip", 0);
+    // The declination this shot's azimuth was computed with. No tag --
+    // a drawing from before the field existed, or a shot that never
+    // had its own -- stays null, which means "my trip's value" (see
+    // CsModel.appliedDeclination), exactly what such a drawing implied
+    // all along.
+    shot.declination = CsTags.getNumber(e, "Declination");
     return shot;
 };
 
@@ -352,13 +360,18 @@ CsRevise.anchorZOf = function(recon, name) {
 /**
  * Re-applies one trip's declination: rotates EVERY azimuth belonging
  * to that trip (splays and flag-carrying/excluded shots included --
- * their geometry is just as magnetic as everyone else's) by
- * delta = newDecl - oldDecl, then records newDecl on the trip.
+ * their geometry is just as magnetic as everyone else's) to newDecl,
+ * then records newDecl on the trip AND on every shot it moved.
  *
  * Model azimuths are TRUE bearings with declination already applied
- * (see CsModel.js), so changing a trip's declination from D to D'
- * means every stored azimuth moves by (D' - D). backAzimuth lives in
- * the same frame (see the backsight-frame note in CsModel.js), so it
+ * (see CsModel.js), so an azimuth computed with D moves by (D' - D).
+ * The delta is therefore computed PER SHOT, against the declination
+ * that shot actually records (CsModel.appliedDeclination: its own, or
+ * the trip's when it has none) -- a trip whose shots came in under two
+ * declinations is revised exactly, not uniformly-and-nearly. Every
+ * shot ends up recording newDecl, because after this that IS the
+ * declination its azimuth was computed with. backAzimuth lives in the
+ * same frame (see the backsight-frame note in CsModel.js), so it
  * co-rotates whenever present.
  *
  * \param survey  the CsModel survey (mutated in place)
@@ -366,21 +379,45 @@ CsRevise.anchorZOf = function(recon, name) {
  * \param newDecl the re-measured declination, degrees east-positive
  * \param source  optional new declinationSource ("igrf"/"user"/...);
  *                the trip's existing source is kept when omitted
- * \return { delta } the degrees every azimuth moved
+ * \return {
+ *   delta     the trip-record delta, newDecl - the trip's old value:
+ *             the degrees every shot WITHOUT its own recorded
+ *             declination moved. It describes the whole trip only when
+ *             mixed is false -- there is no single number that
+ *             describes a mixed one, which is why the flag is here
+ *             rather than a plausible-looking average
+ *   diverged  how many shots carried a declination of their own that
+ *             differed from the trip's, and so moved by their own
+ *             delta instead
+ *   mixed     diverged > 0, spelled out for callers that only need to
+ *             know whether delta covers everything
+ * }
  */
 CsRevise.reviseDeclination = function(survey, tripId, newDecl, source) {
     CsModel.ensureTrips(survey);
     var trip = survey.trips[tripId];
-    var delta = newDecl - trip.declination;
+    var tripOld = trip.declination;
+    var delta = newDecl - tripOld;
+    var diverged = 0;
     for (var i = 0; i < survey.shots.length; i++) {
         var s = survey.shots[i];
         if ((s.trip || 0) !== tripId) {
             continue;
         }
-        s.azimuth = CsAngles.normalizeAzimuth(s.azimuth + delta);
-        if (s.backAzimuth !== null && s.backAzimuth !== undefined) {
-            s.backAzimuth = CsAngles.normalizeAzimuth(s.backAzimuth + delta);
+        var applied = CsModel.appliedDeclination(s, trip);
+        // 4 decimals, the granularity every other declination
+        // comparison in the Core uses (CsModel.absorbDeclination)
+        if (Math.abs(applied - tripOld) >= 5e-5) {
+            diverged++;
         }
+        var d = newDecl - applied;
+        s.azimuth = CsAngles.normalizeAzimuth(s.azimuth + d);
+        if (s.backAzimuth !== null && s.backAzimuth !== undefined) {
+            s.backAzimuth = CsAngles.normalizeAzimuth(s.backAzimuth + d);
+        }
+        // the shot's azimuth is now a newDecl azimuth: say so, or the
+        // next revision would un-apply a value this one replaced
+        s.declination = newDecl;
     }
     trip.declination = newDecl;
     if (source !== undefined && source !== null) {
@@ -392,7 +429,7 @@ CsRevise.reviseDeclination = function(survey, tripId, newDecl, source) {
         // reflects the revision immediately.
         CsModel.ensureTrips(survey);
     }
-    return { delta: delta };
+    return { delta: delta, diverged: diverged, mixed: diverged > 0 };
 };
 
 /**
@@ -1303,6 +1340,18 @@ CsRevise.apply = function(doc, di, recon, newSurvey) {
                         if (match.backAzimuth !== null &&
                                 match.backAzimuth !== undefined) {
                             CsTags.set(e, "BackAzimuth", match.backAzimuth);
+                        }
+                        // the rewritten Azimuth was computed with the
+                        // revised declination: its provenance has to
+                        // move with it, or the next revision un-applies
+                        // a value this one already replaced. Same
+                        // limitation as BackAzimuth above -- CsTags
+                        // cannot clear a tag, so a shot that somehow
+                        // LOST its declination keeps the old one until
+                        // a full redraw.
+                        if (match.declination !== null &&
+                                match.declination !== undefined) {
+                            CsTags.set(e, "Declination", match.declination);
                         }
                         CsTags.set(e, "Left",
                             CsModel.lrudEntryText(match.left, match.leftAll));
