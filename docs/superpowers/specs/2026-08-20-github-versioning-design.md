@@ -186,10 +186,18 @@ existing token authorized for something else will pass rung 3 and then make ever
 repo look nonexistent. Missing scope offers `gh auth refresh -s repo`, which is also the
 remedy when a project later needs `read:org` for an org-owned repo.
 
-**5. Is git's credential helper configured?** `gh auth setup-git`. Without it an HTTPS
-push prompts for a password on a terminal that does not exist, so the push simply hangs
-until the timeout. It fails if no host is authenticated, so it must run after rung 3, and
-it is re-run rather than skipped when rung 3 re-authenticates.
+**5. Is git's credential helper configured?** Read with
+`git config --get-regexp ^credential`. Without any helper an HTTPS push prompts for a
+password on a terminal that does not exist, so it hangs rather than failing.
+
+Two corrections to an earlier draft of this rung, both from measurement rather than
+reasoning. It said to check by running `gh auth setup-git` — but that command
+*configures* the helper, so the check would have been the mutation, and merely opening
+the setup dialog would rewrite the user's git config. A diagnostic must not have that
+side effect. And it required gh's own helper; on the development machine
+`credential.helper` is `osxkeychain`, no gh helper is configured at all, and gh plus
+push work fine. **Any** helper passes. `gh auth setup-git` is offered as a remedy when
+there is none, never run as a probe.
 
 **6. Is there a git identity?** `git config --get user.name` and `--get user.email`. Empty:
 fill them from `gh api user` — `name` (falling back to `login`) and the noreply address

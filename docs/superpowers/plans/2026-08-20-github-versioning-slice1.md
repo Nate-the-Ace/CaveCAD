@@ -1195,7 +1195,7 @@ function ladderWith(over) {
         gitPath: "/usr/bin/git",
         ghPath: "/opt/homebrew/bin/gh",
         authStatus: { code: 0, out: AUTH_OK, err: "" },
-        setupGit: { code: 0, out: "", err: "" },
+        credentialHelper: { code: 0, out: "credential.helper osxkeychain\n", err: "" },
         userName: { code: 0, out: "Nathan Schonegg\n", err: "" },
         userEmail: { code: 0, out: "1+n@users.noreply.github.com\n", err: "" }
     };
@@ -1250,7 +1250,7 @@ ok(thinScope[3].remedy.indexOf("auth refresh") !== -1,
 ok(thinScope[3].remedy.indexOf("404") !== -1,
     "the scope remedy explains the 404 symptom");
 
-var noHelper = ladderWith({ setupGit: { code: 1, out: "", err: "no hosts" } });
+var noHelper = ladderWith({ credentialHelper: { code: 1, out: "", err: "" } });
 ok(noHelper[4].ok === false, "a failed setup-git fails the helper rung");
 
 var noIdentity = ladderWith({ userEmail: { code: 1, out: "", err: "" } });
@@ -1377,15 +1377,25 @@ CsSetup.ladder = function(probe, system) {
         blocked = true;
     }
 
-    // 5. credential helper
+    // 5. credential helper -- READ-ONLY, and ANY helper passes.
+    //
+    // The earlier draft read probe.setupGit, populated by RUNNING
+    // `gh auth setup-git` -- but that command CONFIGURES the helper, so the
+    // check was the mutation and opening the dialog would rewrite the user's
+    // git config. It also demanded gh's own helper; on the development
+    // machine credential.helper is `osxkeychain` with no gh helper at all,
+    // and gh plus push work fine. Requiring gh's would tell someone to fix
+    // what is not broken.
     if (blocked) {
         skip("helper", "git can authenticate to GitHub");
-    } else if (probe.setupGit && probe.setupGit.code === 0) {
+    } else if (probe.credentialHelper && probe.credentialHelper.code === 0 &&
+               String(probe.credentialHelper.out).replace(/\s/g, "").length > 0) {
         rungs.push(CsSetup.rung("helper", "git can authenticate to GitHub", true));
     } else {
         rungs.push(CsSetup.rung("helper", "git can authenticate to GitHub", false,
-            "git has no credential helper, so a push waits forever for a " +
-            "password prompt that never appears. Fix with: gh auth setup-git"));
+            "git has no credential helper, so an HTTPS push waits for a " +
+            "password prompt on a terminal that does not exist -- it hangs " +
+            "rather than failing. Offer to run: gh auth setup-git"));
         blocked = true;
     }
 
@@ -1571,7 +1581,7 @@ CsSetup.probe = function(gitPath, ghPath) {
         gitPath: gitPath,
         ghPath: ghPath,
         authStatus: null,
-        setupGit: null,
+        credentialHelper: null,
         userName: null,
         userEmail: null
     };
@@ -1583,10 +1593,11 @@ CsSetup.probe = function(gitPath, ghPath) {
     if (!ghPath) {
         return probe;
     }
+    // READ-ONLY. Never run `gh auth setup-git` from a probe -- it
+    // configures the helper, so the check would be the mutation.
+    probe.credentialHelper = CsProc.run(gitPath,
+        ["config", "--get-regexp", "^credential"]);
     probe.authStatus = CsProc.run(ghPath, CsHub.argvAuthStatus());
-    if (CsHub.isAuthenticated(probe.authStatus)) {
-        probe.setupGit = CsProc.run(ghPath, CsHub.argvSetupGit());
-    }
     return probe;
 };
 ```
