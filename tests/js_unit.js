@@ -2343,6 +2343,19 @@ if (teamBoundaryRt.trips.length === 2) {
 })();
 
 // ---------------------------------------------------------------------
+// Layer registry -- pure data, runs under node and QCAD alike.
+// ---------------------------------------------------------------------
+
+(function() {
+    loadRepoScript("scripts/CaveSurvey/Core/CsLayers.js");
+
+    ok(CsLayers.RAW === "CTRL-RAW", "the as-surveyed ghost layer is CTRL-RAW");
+    ok(CsLayers.DEFAULTS["CTRL-RAW"][1] === "DASHED",
+        "CTRL-RAW is dashed -- it is not the survey, it is where the survey was");
+    ok(CsLayers.OFF["CTRL-RAW"] === true, "CTRL-RAW is created switched off");
+})();
+
+// ---------------------------------------------------------------------
 // Drawing round-trip -- QCAD engine only (node has no R* classes).
 // This is the test that would have caught the silent simple.js
 // failures: draw into a real document, read layers and tags back.

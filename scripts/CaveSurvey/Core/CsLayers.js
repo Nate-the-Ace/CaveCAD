@@ -20,6 +20,7 @@ CsLayers.STATION_LABELS = "CTRL-STATION-LABELS";
 CsLayers.LRUD = "CTRL-LRUD";
 CsLayers.SPLAYS = "CTRL-SPLAYS";
 CsLayers.HIDDEN = "CTRL-HIDDEN";
+CsLayers.RAW = "CTRL-RAW";
 CsLayers.LRUD_WALL_LEFT = "CTRL-LRUD-WALL-LEFT";
 CsLayers.LRUD_WALL_RIGHT = "CTRL-LRUD-WALL-RIGHT";
 CsLayers.GRID = "CTRL-GRID";
@@ -52,6 +53,7 @@ CsLayers.DEFAULTS = {
     "CTRL-LRUD": ["pink", "CONTINUOUS", "Weight025"],
     "CTRL-SPLAYS": ["gray", "CONTINUOUS", "Weight000"],
     "CTRL-HIDDEN": ["gray", "CONTINUOUS", "Weight000"],
+    "CTRL-RAW": ["gray", "DASHED", "Weight000"],
     "CTRL-LRUD-WALL-LEFT": ["gray", "DASHED", "Weight000"],
     "CTRL-LRUD-WALL-RIGHT": ["gray", "DASHED", "Weight000"],
     "CTRL-AERIAL": ["gray", "CONTINUOUS", "Weight000"],
@@ -70,14 +72,17 @@ CsLayers.DEFAULTS = {
     "CTRL-DATA": ["gray", "CONTINUOUS", "Weight000"]
 };
 
-// Layers created switched OFF (invisible): the data store, and
-// CTRL-HIDDEN for legs that must persist but never plot. NOT
+// Layers created switched OFF (invisible): the data store, CTRL-HIDDEN
+// for legs that must persist but never plot, and CTRL-RAW, the
+// as-surveyed ghost -- reference geometry showing where the survey
+// was before adjustment moved it, not the map itself, so a reader
+// switches it on deliberately rather than seeing it by default. NOT
 // frozen -- frozen, off and locked layers ALL silently refuse entity
 // adds in this build (RAddObjectsOperation just drops them), so
 // nothing can be drawn onto these layers while they are off: a
 // writer must wrap its add operation in CsLayers.withLayerOn below,
 // which flips the layer visible for the write and restores it after.
-CsLayers.OFF = { "CTRL-DATA": true, "CTRL-HIDDEN": true };
+CsLayers.OFF = { "CTRL-DATA": true, "CTRL-HIDDEN": true, "CTRL-RAW": true };
 
 /**
  * Runs fn with the named layer switched ON, then restores the layer's

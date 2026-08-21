@@ -3573,6 +3573,30 @@ CONTINUOUS
   0
 LAYER
   5
+7FF0
+330
+1
+100
+AcDbSymbolTableRecord
+100
+AcDbLayerTableRecord
+  2
+CTRL-RAW
+ 70
+0
+ 62
+8
+  6
+DASHED
+370
+0
+390
+13
+347
+21
+  0
+LAYER
+  5
 34B
 330
 1
