@@ -73,6 +73,16 @@
 // the header's Decl field is only what the page's own readings were
 // taken under. The two are compared in full above tripDeclinationDialog.
 //
+// LINEWORK... ties HAND-DRAWN work to the trip it was traced against.
+// Armed, everything you draw is tagged with the page's trip (vertices
+// that snapped to a station, LRUD tip or splay tip bind to those
+// stations exactly), so revising that trip later moves the tracing with
+// the passage instead of leaving it behind. It disarms itself on Clear,
+// on a refilled page, and whenever the page's date or team changes -- a
+// stroke tagged to the wrong trip moves the wrong passage. The same
+// entry adopts linework that is already drawn, previewing what binds to
+// what first. See CsBind.
+//
 // The dock is a singleton; the engine stays alive, so a global
 // holds it.
 
@@ -213,6 +223,13 @@ SurveyNotebook.sheetSurvey = function(w) {
  *  down; a branch gets a blank separator line and its origin station
  *  re-written as the new anchor; splays land as <anchor>.<n> rows. */
 SurveyNotebook.setSurvey = function(w, survey) {
+    // The page is about to become a DIFFERENT trip (an import, or a
+    // trip loaded from the drawing), and the header cells change
+    // programmatically -- no textEdited, so armedTripCheck would never
+    // see it. Arming does not survive that.
+    if (CsBind.isArmed()) {
+        SurveyNotebook.disarmLinework(w, "the page was refilled");
+    }
     w.loading = true;
     w.nameEdit.text = survey.name;
     w.dateEdit.text = survey.date;
@@ -557,9 +574,16 @@ SurveyNotebook.refresh = function(w) {
     if (w.loading) {
         return;
     }
+    // Every keystroke passes through here, which is what makes this the
+    // right place to notice that the page has stopped being the trip
+    // linework binding was armed for (see armedTripCheck).
+    SurveyNotebook.armedTripCheck(w);
+    var armLine = SurveyNotebook.armedStatusLine(w);
     var survey = SurveyNotebook.sheetSurvey(w);
     if (survey.shots.length === 0) {
-        w.statusLabel.setPlainText("No shots yet. Shots are written " +
+        w.statusLabel.setPlainText(
+            (armLine !== "" ? armLine + "\n\n" : "") +
+            "No shots yet. Shots are written " +
             "between the stations they connect; azimuth clockwise from " +
             "north, distance along the tape, backsights optional. LRUD " +
             "sits beside its station.");
@@ -571,6 +595,9 @@ SurveyNotebook.refresh = function(w) {
     var grade = CsGrade.compute(survey, resolved, stats);
 
     var lines = [];
+    if (armLine !== "") {
+        lines.push(armLine);
+    }
     lines.push("Length " + CsReport.length(stats.surveyedLength, w.unit) +
         "   Depth " + CsReport.length(stats.depth, w.unit) +
         "   Stations " + stats.stationCount +
@@ -886,6 +913,26 @@ SurveyNotebook.carryHiddenFields = function(oldShots, newShots) {
 };
 
 /**
+ * The page's header as a trip record. This is what the page's identity
+ * as a TRIP is: mergeTripIntoSurvey matches it against the drawing's
+ * trips by fingerprint (date | team), and linework arming resolves the
+ * page's current trip the same way, so both must read the header
+ * identically. Pure -- no GUI, no document access.
+ */
+SurveyNotebook.tripRecordOf = function(survey) {
+    var trip = CsModel.newTrip();
+    trip.name = survey.name;
+    trip.date = survey.date;
+    trip.team = survey.team;
+    trip.declination = survey.declination;
+    trip.declinationSource = survey.declinationSource;
+    trip.distanceUnit = survey.distanceUnit;
+    trip.startNote = survey.startNote || "";
+    trip.startLrud = survey.startLrud || null;
+    return trip;
+};
+
+/**
  * The merge decision: given the RECONSTRUCTED survey (the whole
  * drawing), the page's trip record and the page's shots, builds the
  * merged survey the drawing should now hold. A trip whose fingerprint
@@ -1138,16 +1185,7 @@ SurveyNotebook.loadFromDrawing = function(w) {
  * geometry between trips consistent instead of stitching pages.
  */
 SurveyNotebook.drawMergedSurvey = function(w, doc, survey, recon) {
-    var tripRecord = CsModel.newTrip();
-    tripRecord.name = survey.name;
-    tripRecord.date = survey.date;
-    tripRecord.team = survey.team;
-    tripRecord.declination = survey.declination;
-    tripRecord.declinationSource = survey.declinationSource;
-    tripRecord.distanceUnit = survey.distanceUnit;
-    tripRecord.startNote = survey.startNote || "";
-    tripRecord.startLrud = survey.startLrud || null;
-
+    var tripRecord = SurveyNotebook.tripRecordOf(survey);
     var merge = SurveyNotebook.mergeTripIntoSurvey(recon.survey,
         tripRecord, survey.shots);
     var merged = merge.survey;
@@ -2035,6 +2073,382 @@ SurveyNotebook.tripDeclinationDialog = function(doc, recon) {
 };
 
 // ---------------------------------------------------------------------
+// Linework binding: what you DRAW, tied to the trip you drew it against
+//
+// ONE action-row entry, not two. The row already carries seven buttons,
+// and the two things this feature needs -- arming, and adopting what is
+// already drawn -- are the same subject seen twice: "which of my
+// strokes belong to this trip?". Folding them behind a single
+// Linework... entry also buys the room to SAY what arming does before
+// it is switched on, which matters more here than a saved click: this
+// is the only feature in the suite that writes tags onto the user's own
+// geometry without being asked again each time. The armed state is not
+// hidden inside the dialog -- the button itself renames to "Linework
+// ARMED: trip N" (and shows pressed where this bridge allows it), and
+// the live status box carries a line while it lasts.
+//
+// Arming is per-TRIP, resolved from the page's own header, and it is
+// dropped the moment the page stops being that trip -- Clear, a fresh
+// import, a Load from drawing, or an edited date/team. A stroke tagged
+// to the wrong trip does not look wrong today; it moves the wrong
+// passage on some later revision, which is exactly the failure this
+// feature exists to prevent.
+// ---------------------------------------------------------------------
+
+/** The page's trip identity: date | team, the same fingerprint
+ *  mergeTripIntoSurvey matches on. Read straight off the two header
+ *  cells -- no document access, so refresh() can call it per keystroke. */
+SurveyNotebook.pageFingerprint = function(w) {
+    return CsModel.tripFingerprint({ date: String(w.dateEdit.text),
+        team: String(w.teamEdit.text) });
+};
+
+/**
+ * Which trip in the DRAWING this page currently is: the one whose
+ * fingerprint matches the header. Linework carries a trip id, so
+ * arming needs a trip that already exists -- a page not yet drawn has
+ * no id to tag with, and inventing one would tag strokes to a trip
+ * that may never land.
+ *
+ * \return {tripId, label, fingerprint, doc} or {error} -- the error is
+ *         already phrased for a message box.
+ */
+SurveyNotebook.pageTrip = function(w) {
+    var doc = getDocument();
+    if (doc === undefined || doc === null) {
+        return { error: "No drawing is open." };
+    }
+    var recon;
+    try {
+        recon = CsRevise.surveyFromDocument(doc);
+    } catch (eRe) {
+        return { error: "Couldn't read the survey back from this " +
+            "drawing (" + eRe + ")." };
+    }
+    if (recon.legacy === true) {
+        return { error: "This drawing's survey predates the exact tag " +
+            "schema, so its trips can't be identified reliably -- and " +
+            "linework has to be tied to a trip id.\n\nRun Rebuild " +
+            "Survey Data (command: rebuildsurveydata) first." };
+    }
+    if (recon.survey.shots.length === 0) {
+        return { error: "Nothing is drawn in this drawing yet. Draw " +
+            "this page first -- linework binds to a trip that exists." };
+    }
+    CsModel.ensureTrips(recon.survey);
+    var fp = SurveyNotebook.pageFingerprint(w);
+    for (var t = 0; t < recon.survey.trips.length; t++) {
+        if (CsModel.tripFingerprint(recon.survey.trips[t]) === fp) {
+            return { tripId: t, fingerprint: fp, doc: doc,
+                label: CsRevise.tripLabel(t, recon.survey.trips[t]) };
+        }
+    }
+    return { error: "This page's trip (" + fp + ") isn't in the " +
+        "drawing yet, so there is no trip id to bind linework to.\n\n" +
+        "Draw the page first, or Load from drawing to work on a trip " +
+        "that is already there." };
+};
+
+/** The armed line for the status box; "" when disarmed. */
+SurveyNotebook.armedStatusLine = function(w) {
+    if (!CsBind.isArmed()) {
+        return "";
+    }
+    return "LINEWORK BINDING ARMED -- everything you draw now is " +
+        "tagged to trip " + CsBind.armedTrip() + " and moves with it " +
+        "when that trip is revised (" + CsBind.taggedWhileArmed +
+        " tagged so far).";
+};
+
+/** Mirrors CsBind's armed state onto the button. CsBind owns the
+ *  state; this is the only place that displays it. */
+SurveyNotebook.updateLineworkButton = function(w) {
+    if (w.lineworkButton === undefined) {
+        return;
+    }
+    var armed = CsBind.isArmed();
+    try {
+        w.lineworkButton.text = armed ?
+            ("Linework ARMED: trip " + CsBind.armedTrip()) : "Linework...";
+    } catch (eT) {
+        // a button that won't be renamed still reports state in the
+        // status box and in its own dialog
+    }
+    try {
+        w.lineworkButton.checked = armed;
+    } catch (eC) {
+        // no checkable buttons in this bridge: the label carries it
+    }
+    try {
+        w.lineworkButton.toolTip = armed ?
+            ("Binding is ON for trip " + CsBind.armedTrip() + ": every " +
+                "line, polyline and block you draw on a non-CTRL layer " +
+                "is tagged to that trip, so a later revision of it " +
+                "moves your tracing too. Click to disarm or to adopt " +
+                "linework that is already drawn.") :
+            ("Tie hand-drawn linework to a survey trip: arm binding " +
+                "and what you draw from then on moves with the trip it " +
+                "was traced against, or adopt what is already drawn.");
+    } catch (eTt) {
+        // tooltip is a nicety
+    }
+};
+
+/** Disarms and says so once. Never calls refresh -- refresh is one of
+ *  its callers (see armedTripCheck). */
+SurveyNotebook.disarmLinework = function(w, why) {
+    var was = CsBind.armedTrip();
+    var n = CsBind.taggedWhileArmed;
+    CsBind.disarm();
+    w.armedFingerprint = "";
+    SurveyNotebook.updateLineworkButton(w);
+    if (was !== null) {
+        EAction.handleUserMessage("Survey Notebook: linework binding " +
+            "disarmed (" + why + "). " + n + " entit" +
+            (n === 1 ? "y was" : "ies were") + " tagged to trip " +
+            was + ".");
+    }
+};
+
+/**
+ * Called from refresh(), so on every keystroke: if the page has stopped
+ * being the trip it was armed for, arming stops with it. Cheap by
+ * design -- a fingerprint compare, no document access.
+ */
+SurveyNotebook.armedTripCheck = function(w) {
+    if (!CsBind.isArmed()) {
+        // Binding can also be dropped from under the page -- the
+        // listener disarms itself when the drawing it was armed on is
+        // not the one being drawn in. Say so and stop showing "armed",
+        // or the button would go on lying about it.
+        if (w.armedFingerprint !== undefined && w.armedFingerprint !== "") {
+            w.armedFingerprint = "";
+            SurveyNotebook.updateLineworkButton(w);
+            EAction.handleUserMessage("Survey Notebook: linework " +
+                "binding stopped -- " + (CsBind.lastError !== "" ?
+                    CsBind.lastError : "it was disarmed elsewhere") + ".");
+        }
+        return;
+    }
+    if (SurveyNotebook.pageFingerprint(w) !== w.armedFingerprint) {
+        SurveyNotebook.disarmLinework(w, "the page's trip changed");
+    }
+};
+
+/** Arms binding for the page's current trip, reporting either way. */
+SurveyNotebook.armLinework = function(w) {
+    var pt = SurveyNotebook.pageTrip(w);
+    if (pt.error !== undefined) {
+        QMessageBox.warning(null, "Survey Notebook", pt.error);
+        return;
+    }
+    if (!CsBind.arm(pt.tripId, pt.doc)) {
+        QMessageBox.warning(null, "Survey Notebook",
+            "This build's script bridge refused the transaction " +
+            "listener, so linework can't be tagged as you draw it (" +
+            CsBind.lastError + ").\n\nDraw your linework and use Adopt " +
+            "instead -- it does the same job afterwards.");
+        return;
+    }
+    w.armedFingerprint = pt.fingerprint;
+    SurveyNotebook.updateLineworkButton(w);
+    SurveyNotebook.refresh(w);
+    EAction.handleUserMessage("Survey Notebook: linework binding armed " +
+        "for " + pt.label + ". What you draw from now on is tagged to " +
+        "that trip; the tagging is its own undo step after each stroke.");
+};
+
+/**
+ * Adopt: tag what is ALREADY drawn. Previews the counts by binding
+ * source before it commits, so the user sees which of their strokes
+ * actually found stations instead of a silent sweep -- an entity that
+ * found none follows its trip as a whole, which is a weaker answer and
+ * worth knowing about before it is written.
+ */
+SurveyNotebook.adoptLinework = function(w) {
+    var pt = SurveyNotebook.pageTrip(w);
+    if (pt.error !== undefined) {
+        QMessageBox.warning(null, "Survey Notebook", pt.error);
+        return;
+    }
+    var items;
+    try {
+        items = CsBind.adoptable(pt.doc, pt.tripId);
+    } catch (eAd) {
+        QMessageBox.warning(null, "Survey Notebook",
+            "Couldn't scan this drawing for linework (" + eAd +
+            "). Nothing was changed.");
+        return;
+    }
+    var c = CsBind.countBySource(items);
+    if (c.total === 0) {
+        QMessageBox.information(null, "Survey Notebook",
+            "Nothing to adopt: every entity on a linework layer in " +
+            "this drawing is either already bound or is the suite's " +
+            "own geometry.");
+        return;
+    }
+    var bound = c.snap + c.proximity;
+    var answer = QMessageBox.question(null, "Survey Notebook",
+        "Bind " + c.total + " untagged entit" +
+        (c.total === 1 ? "y" : "ies") + " to " + pt.label + "?\n\n" +
+        bound + " will bind to stations (" + c.snap +
+        " snapped exactly to station, LRUD or splay points, " +
+        c.proximity + " by proximity)\n" +
+        c.trip + " found none and will follow trip " + pt.tripId +
+        " as a whole\n\n" +
+        "Nothing moves now: this writes the tags, in one undo step. " +
+        "When that trip is next revised, each bound entity moves with " +
+        "its OWN stations.",
+        QMessageBox.Yes | QMessageBox.No);
+    if (answer !== QMessageBox.Yes) {
+        return;
+    }
+
+    var entries = [];
+    for (var i = 0; i < items.length; i++) {
+        entries.push({ entity: items[i].entity, trip: items[i].trip,
+            stations: items[i].stations });
+    }
+    var tagged;
+    try {
+        // Suppressed: the tagging operation is itself a transaction,
+        // and an armed listener would otherwise walk in behind us.
+        tagged = CsBind.withSuppressed(function() {
+            return CsBind.tagEntities(pt.doc, getDocumentInterface(),
+                entries);
+        });
+    } catch (eTag) {
+        QMessageBox.warning(null, "Survey Notebook",
+            "Couldn't write the linework tags (" + eTag +
+            "). Undo restores the drawing if anything was half-written.");
+        return;
+    }
+    var summary = "Bound " + tagged + " entit" +
+        (tagged === 1 ? "y" : "ies") + " to trip " + pt.tripId + ": " +
+        bound + " to stations, " + c.trip + " to the trip as a whole. " +
+        "One undo step.";
+    EAction.handleUserMessage("Survey Notebook: " + summary);
+    QMessageBox.information(null, "Survey Notebook", summary);
+};
+
+/**
+ * The Linework... entry: says what binding does, arms or disarms it for
+ * the page's trip, and offers adoption for what is already drawn.
+ *
+ * Built from QLabel/QPushButton like tripDeclinationDialog, and like it
+ * the work happens AFTER exec() returns -- the adopt path opens its own
+ * preview, which must not stack on top of a modal dialog. A bridge that
+ * refuses the dialog falls back to a plain question box, so arming at
+ * least stays reachable.
+ */
+SurveyNotebook.lineworkDialog = function(w) {
+    var armed = CsBind.isArmed();
+    var pt = SurveyNotebook.pageTrip(w);
+    var canArm = (pt.error === undefined);
+
+    var stateText = armed ?
+        ("Currently ARMED for trip " + CsBind.armedTrip() + ". " +
+            CsBind.taggedWhileArmed + " entit" +
+            (CsBind.taggedWhileArmed === 1 ? "y" : "ies") +
+            " tagged since arming.") :
+        (canArm ? ("Not armed. This page is " + pt.label + ".") :
+            ("Not armed, and can't be: " + pt.error));
+    if (CsBind.lastError !== "") {
+        stateText += "\nLast tagging problem: " + CsBind.lastError;
+    }
+
+    var outcome = "";
+    var dlg = null;
+    try {
+        dlg = new QDialog(getMainWindow());
+        dlg.windowTitle = "Linework";
+        var layout = new QVBoxLayout();
+        layout.addWidget(new QLabel(
+            "Hand-drawn linework -- traced walls, sketched detail,\n" +
+            "inserted symbols -- can be tied to the survey trip it was\n" +
+            "traced against, so that revising that trip moves the\n" +
+            "tracing with it instead of tearing it off the passage.\n" +
+            "\n" +
+            "ARM and everything you draw from then on is tagged to this\n" +
+            "page's trip: vertices that snapped to a station, LRUD tip\n" +
+            "or splay tip bind to those stations exactly, the rest bind\n" +
+            "by proximity, and anything far from the survey follows the\n" +
+            "trip as a whole. Entities on CTRL-* and TB_* layers -- the\n" +
+            "suite's own geometry and the sheet furniture -- are never\n" +
+            "touched, and neither is anything the suite drew itself.\n" +
+            "\n" +
+            "Binding disarms itself on Clear, on a fresh import, and\n" +
+            "whenever the page's date or team changes: a stroke tagged\n" +
+            "to the wrong trip moves the wrong passage later.\n" +
+            "\n" +
+            "ADOPT does the same job for linework already in the\n" +
+            "drawing, with a count of what binds to what before it\n" +
+            "commits."), 0, 0);
+        layout.addWidget(new QLabel(stateText), 0, 0);
+
+        var buttons = new QHBoxLayout();
+        var armBtn = new QPushButton(armed ? "Disarm" : "Arm for this trip");
+        if (!armed && !canArm) {
+            try {
+                armBtn.enabled = false;
+            } catch (eEn) {
+                // stays clickable; armLinework re-checks and explains
+            }
+        }
+        var adoptBtn = new QPushButton("Adopt existing linework...");
+        var closeBtn = new QPushButton("Close");
+        buttons.addWidget(armBtn, 0, 0);
+        buttons.addWidget(adoptBtn, 0, 0);
+        buttons.addStretch(1);
+        buttons.addWidget(closeBtn, 0, 0);
+        layout.addLayout(buttons, 0);
+        dlg.setLayout(layout);
+
+        var wire = function(signal, what) {
+            signal.connect(function() {
+                outcome = what;
+                dlg.accept();
+            });
+        };
+        wire(armBtn.clicked, armed ? "disarm" : "arm");
+        wire(adoptBtn.clicked, "adopt");
+        closeBtn.clicked.connect(function() {
+            dlg.reject();
+        });
+        dlg.exec();
+    } catch (eDlg) {
+        // No dialog in this bridge: arming is the half that can't be
+        // done any other way, so offer that much as a question.
+        var q;
+        try {
+            q = QMessageBox.question(null, "Survey Notebook",
+                stateText + "\n\n" + (armed ?
+                    "Disarm linework binding?" :
+                    "Arm linework binding for this page's trip? What " +
+                    "you draw will be tagged to it.") +
+                "\n\n(This build refused the Linework dialog, so Adopt " +
+                "isn't reachable here: " + eDlg + ")",
+                QMessageBox.Yes | QMessageBox.No);
+        } catch (eQ) {
+            return;
+        }
+        outcome = (q === QMessageBox.Yes) ? (armed ? "disarm" : "arm") : "";
+    }
+
+    if (outcome === "arm") {
+        SurveyNotebook.armLinework(w);
+    } else if (outcome === "disarm") {
+        SurveyNotebook.disarmLinework(w, "you disarmed it");
+        SurveyNotebook.refresh(w);
+    } else if (outcome === "adopt") {
+        SurveyNotebook.adoptLinework(w);
+    }
+    // the button always ends up showing the truth, whatever happened
+    SurveyNotebook.updateLineworkButton(w);
+};
+
+// ---------------------------------------------------------------------
 // Widget construction
 // ---------------------------------------------------------------------
 
@@ -2261,6 +2675,16 @@ SurveyNotebook.buildDock = function(appWin) {
         "already in the drawing: one row per trip, IGRF on tap, and the " +
         "drawing turns by the difference. Not the same as the header's " +
         "Decl, which is what this page's own readings were taken under.";
+    // One entry for both halves of linework binding, and the entry
+    // itself shows whether binding is on -- see the section comment
+    // above lineworkDialog. Checkable so the armed state also reads as
+    // a pressed button where this bridge supports it.
+    w.lineworkButton = new QPushButton("Linework...");
+    try {
+        w.lineworkButton.checkable = true;
+    } catch (eChk) {
+        // not checkable here: the label carries the state on its own
+    }
     actions.addWidget(w.drawButton, 0, 0);
     actions.addWidget(w.importButton, 0, 0);
     actions.addWidget(w.exportButton, 0, 0);
@@ -2268,6 +2692,7 @@ SurveyNotebook.buildDock = function(appWin) {
     actions.addWidget(w.clearButton, 0, 0);
     actions.addWidget(w.loadDrawingButton, 0, 0);
     actions.addWidget(w.declReviseButton, 0, 0);
+    actions.addWidget(w.lineworkButton, 0, 0);
     layout.addLayout(actions, 0);
 
     body.setLayout(layout);
@@ -2359,6 +2784,11 @@ SurveyNotebook.buildDock = function(appWin) {
         if (sure !== QMessageBox.Yes) {
             return;
         }
+        // An emptied page is no longer the trip anything was armed
+        // for, even though the header (and so the fingerprint) stays.
+        if (CsBind.isArmed()) {
+            SurveyNotebook.disarmLinework(w, "the page was cleared");
+        }
         SurveyNotebook.clearLadder(w);
         SurveyNotebook.addStationRow(w, "A1");
         SurveyNotebook.addStationRow(w, "A2");
@@ -2370,6 +2800,43 @@ SurveyNotebook.buildDock = function(appWin) {
     SurveyNotebook.safeConnect(w.declReviseButton.clicked, function() {
         SurveyNotebook.reviseDeclinations(w);
     }, "Declination button", w.problems);
+    SurveyNotebook.safeConnect(w.lineworkButton.clicked, function() {
+        // Any failure in here must be SEEN, not swallowed -- and a
+        // checkable button that toggled itself must not be left
+        // showing a state the binding is not in.
+        try {
+            SurveyNotebook.lineworkDialog(w);
+        } catch (e) {
+            SurveyNotebook.updateLineworkButton(w);
+            QMessageBox.warning(null, "Survey Notebook",
+                "Linework binding failed inside this build's bridge:" +
+                "\n\n" + e + "\n\n" +
+                (e.stack ? String(e.stack).substring(0, 600) : "") +
+                "\n\nPlease report this text.");
+        }
+    }, "Linework button", w.problems);
+    {
+        // The trip fingerprint IS date | team, and neither cell
+        // refreshes the page -- so without these two, editing the date
+        // would leave binding armed for a trip this page no longer is.
+        var headerTripCheck = function() {
+            var was = CsBind.isArmed();
+            SurveyNotebook.armedTripCheck(w);
+            if (was && !CsBind.isArmed()) {
+                SurveyNotebook.refresh(w); // clear the armed status line
+            }
+        };
+        SurveyNotebook.safeConnect(w.dateEdit.textEdited, headerTripCheck,
+            "date trip check", w.problems);
+        SurveyNotebook.safeConnect(w.teamEdit.textEdited, headerTripCheck,
+            "team trip check", w.problems);
+    }
+    // The dock can be rebuilt while the engine (and so CsBind's armed
+    // state) lives on: the header/date the old page was armed for is
+    // gone, so the fresh page starts unarmed and the first refresh
+    // drops any arming left over from it.
+    w.armedFingerprint = "";
+    SurveyNotebook.updateLineworkButton(w);
 
     // a fresh sheet starts with its first two stations
     SurveyNotebook.addStationRow(w, "A1");

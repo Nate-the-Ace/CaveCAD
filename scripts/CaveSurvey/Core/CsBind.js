@@ -706,3 +706,428 @@ CsBind.adoptable = function(doc, tripId) {
     }
     return out;
 };
+
+/** Counts an adoptable list by binding source, for the preview:
+ *  {total, snap, proximity, trip}. Pure over the list. */
+CsBind.countBySource = function(items) {
+    var out = { total: 0, snap: 0, proximity: 0, trip: 0 };
+    if (items === undefined || items === null) {
+        return out;
+    }
+    for (var i = 0; i < items.length; i++) {
+        if (items[i] === undefined || items[i] === null) {
+            continue;
+        }
+        out.total++;
+        if (out[items[i].source] !== undefined) {
+            out[items[i].source]++;
+        }
+    }
+    return out;
+};
+
+// ---------------------------------------------------------------------
+// Arming: tagging linework AS IT IS DRAWN
+// ---------------------------------------------------------------------
+//
+// Arming state lives HERE rather than in the notebook, and is
+// deliberately module-global. The script engine outlives every tool
+// invocation, the transaction listener is installed once for the whole
+// session, and the notebook's dock is a singleton whose widgets can be
+// rebuilt -- so a second home for "are we armed, and for which trip"
+// would be a second answer to it. The notebook MIRRORS this state onto
+// its button; it never owns it.
+//
+// Nothing here removes the listener. A listener installed twice
+// double-tags, and one uninstalled and reinstalled per arming is a
+// lifetime to get wrong for no gain: install lazily on the first arm,
+// after which arming and disarming are pure state, checked at the top
+// of every transaction.
+
+CsBind.armedTripId = null;    // null = disarmed. 0 IS a valid trip id.
+CsBind.armedDocKey = null;    // which drawing (null = don't check)
+CsBind.listener = null;       // the adapter, held so it is not collected
+CsBind.listenerRefused = false; // this bridge said no; don't keep asking
+CsBind.taggedWhileArmed = 0;  // feedback for the notebook
+CsBind.lastError = "";        // last failure inside the handler, if any
+
+/** The armed trip id, or null when disarmed. */
+CsBind.armedTrip = function() {
+    return CsBind.armedTripId;
+};
+
+CsBind.isArmed = function() {
+    return CsBind.armedTripId !== null;
+};
+
+/**
+ * The identity of a drawing, as far as this bridge offers one: its file
+ * name. QCAD only. RDocument has no id or handle, and the bridge wraps
+ * the same document in a FRESH JS object per signal emission (probed:
+ * di.getDocument() !== the document it was built from), so === is not
+ * an option. "" is a legitimate answer -- an unsaved drawing.
+ */
+CsBind.docKey = function(document) {
+    try {
+        var n = document.getFileName();
+        return (n === undefined || n === null) ? "" : String(n);
+    } catch (e) {
+        return "";
+    }
+};
+
+/**
+ * Arms tagging for tripId, installing the listener on first use.
+ * QCAD only. \return true when armed, false when this build refused
+ * the listener (in which case nothing is armed and the caller should
+ * say so -- the adopt action is the fallback).
+ *
+ * Pass the DOCUMENT that trip id belongs to. The listener is
+ * application-wide while a trip id means nothing outside its own
+ * drawing, so without this a stroke drawn in another open drawing
+ * would be tagged to a trip that drawing may not even have -- and
+ * moved by some later revision of the trip that happens to hold that
+ * id. Omitting it (harnesses) means "don't check".
+ */
+CsBind.arm = function(tripId, document) {
+    if (!CsBind.installListener()) {
+        return false;
+    }
+    CsBind.armedDocKey = isNull(document) ? null : CsBind.docKey(document);
+    var t = parseInt(tripId, 10);
+    CsBind.armedTripId = isNaN(t) ? 0 : t;
+    CsBind.taggedWhileArmed = 0;
+    CsBind.lastError = "";
+    // A suppression left unbalanced by an exception thrown mid-draw
+    // would silently keep tagging dead for the rest of the session --
+    // and the user would see an armed button that never tags anything.
+    // withSuppressed's finally already prevents that; this is the belt
+    // to its braces, and arming is the one moment where no legitimate
+    // suppression can be in progress (it comes from a button press,
+    // never from inside a draw).
+    CsBind.suppressDepth = 0;
+    return true;
+};
+
+CsBind.disarm = function() {
+    CsBind.armedTripId = null;
+    CsBind.armedDocKey = null;
+};
+
+// ---- the re-entrancy guard ------------------------------------------
+//
+// The suite's own drawing fires exactly the transaction the listener
+// watches, so CsDraw.survey and CsRevise.apply must not be allowed to
+// look like hand-drawn linework. Two failure modes, both bad:
+//
+//   a suppression that LEAKS (never resumed) kills tagging for the
+//   rest of the session -- armed, and quietly doing nothing;
+//   a suppression that UNBALANCES (resumed twice) tags the next survey
+//   the user draws as if it were their own tracing.
+//
+// So the depth is a counter (nesting is normal: apply() redraws
+// through survey()), resume() never takes it below zero, and the only
+// blessed way in is withSuppressed, whose finally runs even when the
+// drawing throws halfway through.
+
+CsBind.suppressDepth = 0;
+
+/** Prefer withSuppressed -- see its finally. */
+CsBind.suppress = function() {
+    CsBind.suppressDepth++;
+};
+
+CsBind.resume = function() {
+    if (CsBind.suppressDepth > 0) {
+        CsBind.suppressDepth--;
+    }
+};
+
+CsBind.isSuppressed = function() {
+    return CsBind.suppressDepth > 0;
+};
+
+/** Runs fn with tagging suppressed, suppressed exactly once, however
+ *  fn ends. Rethrows whatever fn threw -- swallowing a failed draw
+ *  here would hide it from the tool that has to report it. */
+CsBind.withSuppressed = function(fn) {
+    CsBind.suppress();
+    try {
+        return fn();
+    } finally {
+        CsBind.resume();
+    }
+};
+
+/**
+ * Wraps one owner.name function so every call runs suppressed. Not
+ * every caller can be trusted to remember: CsDraw.survey is called
+ * from four places across three tools and CsRevise.apply from two,
+ * and a caller that forgets does not fail loudly -- it silently tags
+ * the suite's own geometry as the user's tracing. Wrapping the
+ * function itself is the only version of this guard that cannot be
+ * forgotten by the next call site someone adds.
+ *
+ * Idempotent (a flag on the wrapper), and transparent: same this,
+ * same arguments, same return value.
+ */
+CsBind.guardFunction = function(owner, name) {
+    if (owner === undefined || owner === null ||
+            typeof owner[name] !== "function" ||
+            owner[name].csBindGuarded === true) {
+        return false;
+    }
+    var original = owner[name];
+    var wrapper = function() {
+        var self = this;
+        var args = arguments;
+        return CsBind.withSuppressed(function() {
+            return original.apply(self, args);
+        });
+    };
+    wrapper.csBindGuarded = true;
+    wrapper.csBindOriginal = original; // for a harness that wants it back
+    owner[name] = wrapper;
+    return true;
+};
+
+/** Puts the guard on the suite's own drawing entry points. Called
+ *  when the listener is installed -- before that there is nothing to
+ *  guard against. QCAD only (the names are absent under node). */
+CsBind.guardSuiteDrawing = function() {
+    var n = 0;
+    if (typeof CsDraw !== "undefined" &&
+            CsBind.guardFunction(CsDraw, "survey")) {
+        n++;
+    }
+    if (typeof CsRevise !== "undefined" &&
+            CsBind.guardFunction(CsRevise, "apply")) {
+        n++;
+    }
+    return n;
+};
+
+// ---- the listener ----------------------------------------------------
+
+/**
+ * Installs the transaction listener, ONCE per engine. QCAD only.
+ * \return true when the listener is in place (already or newly).
+ */
+CsBind.installListener = function() {
+    if (CsBind.listener !== null) {
+        return true;
+    }
+    if (CsBind.listenerRefused) {
+        return false;
+    }
+    try {
+        var appWin = RMainWindowQt.getMainWindow();
+        var adapter = new RTransactionListenerAdapter();
+        appWin.addTransactionListener(adapter);
+        // The handler is a NAMED function, not this closure's body, so
+        // it can be exercised without a signal (see the harnesses):
+        // headless the main window never delivers transactionUpdated.
+        adapter.transactionUpdated.connect(function(document, transaction) {
+            CsBind.onTransaction(document, transaction);
+        });
+        CsBind.listener = adapter;
+        CsBind.guardSuiteDrawing();
+        return true;
+    } catch (e) {
+        CsBind.listenerRefused = true;
+        CsBind.lastError = String(e);
+        return false;
+    }
+};
+
+/**
+ * The ids in a transaction that are NEWLY ADDED ENTITIES. QCAD only.
+ *
+ * This is the distinction the whole listener rests on.
+ * getAffectedObjects() reports everything the transaction touched --
+ * modifications and deletions included -- and tagging an entity the
+ * user merely MOVED would claim work they never traced, while a
+ * deleted one may not be safely queryable at all. getStatusChanges()
+ * reports only objects whose EXISTENCE changed (created or deleted),
+ * and isUndone() on the object separates the two, exactly as the stock
+ * ExTransactionListener example does. A modified entity appears in
+ * neither list, which is the answer we want.
+ *
+ * There is no fallback to getAffectedObjects when getStatusChanges is
+ * missing: an over-broad answer here writes tags onto the user's
+ * existing drawing, so no answer is the safer failure.
+ *
+ * Two filters beyond that:
+ *   isUndone()          the object was DELETED by this transaction (or
+ *                       is a creation that has since been undone).
+ *   getLayerId absent   not an entity: layers and blocks turn up in
+ *                       status changes too, and only entities answer
+ *                       getLayerId in this bridge (probed: RLayer does
+ *                       not, RLineEntity does). document.queryEntity()
+ *                       cannot be used as the test -- it hands back an
+ *                       REntity for a LAYER id in this build.
+ *
+ * A deletion later UNDONE comes back through here as a creation, so an
+ * untagged stroke restored while armed gets tagged then. That is the
+ * right answer for tracing and a harmless one otherwise.
+ */
+CsBind.addedEntityIds = function(document, transaction) {
+    var out = [];
+    if (isNull(document) || isNull(transaction) ||
+            typeof transaction.getStatusChanges !== "function") {
+        return out;
+    }
+    var ids;
+    try {
+        ids = transaction.getStatusChanges();
+    } catch (e) {
+        return out;
+    }
+    for (var i = 0; i < ids.length; i++) {
+        var obj;
+        try {
+            obj = document.queryObjectDirect(ids[i]);
+        } catch (e2) {
+            continue;
+        }
+        if (isNull(obj) || typeof obj.getLayerId !== "function") {
+            continue;
+        }
+        try {
+            if (typeof obj.isUndone === "function" && obj.isUndone()) {
+                continue;
+            }
+        } catch (e3) {
+            continue;
+        }
+        out.push(ids[i]);
+    }
+    return out;
+};
+
+/**
+ * The document interface to write tags through: the one handed in,
+ * else the main window's, else the GUI global. QCAD only. null when
+ * none can be reached, which means no tagging rather than a throw.
+ */
+CsBind.interfaceFor = function(di) {
+    if (!isNull(di)) {
+        return di;
+    }
+    try {
+        var fromWin = RMainWindowQt.getMainWindow().getDocumentInterface();
+        if (!isNull(fromWin)) {
+            return fromWin;
+        }
+    } catch (e) {
+        // no main window interface here: try the GUI global
+    }
+    try {
+        if (typeof getDocumentInterface === "function") {
+            var g = getDocumentInterface();
+            if (!isNull(g)) {
+                return g;
+            }
+        }
+    } catch (e2) {
+        // nothing to write through
+    }
+    return null;
+};
+
+/**
+ * What the transactionUpdated signal runs. QCAD only.
+ *
+ * NEVER THROWS: this runs inside a Qt signal emission, where a throw
+ * has no caller to report it and can take the emitting operation with
+ * it. A failure is recorded in CsBind.lastError, which the notebook
+ * shows, rather than raised.
+ *
+ * \param di optional -- the harnesses pass their own; the GUI resolves
+ *           it from the main window.
+ * \return the number of entities tagged.
+ */
+CsBind.onTransaction = function(document, transaction, di) {
+    try {
+        return CsBind.onTransactionInner(document, transaction, di);
+    } catch (e) {
+        CsBind.lastError = String(e);
+        return 0;
+    }
+};
+
+CsBind.onTransactionInner = function(document, transaction, di) {
+    // Cheapest checks first: this runs on EVERY transaction in the
+    // application, armed or not.
+    if (CsBind.armedTripId === null || CsBind.suppressDepth > 0) {
+        return 0;
+    }
+    if (isNull(document) || isNull(transaction)) {
+        return 0;
+    }
+    // A different drawing than the one armed: refuse, and stop being
+    // armed. The trip id does not carry over, and quietly tagging on
+    // is the wrong-passage failure this whole feature exists to
+    // prevent. Saving an unsaved drawing renames it and so lands here
+    // too -- which is why disarming records a reason the notebook can
+    // show, instead of going silently dead.
+    if (CsBind.armedDocKey !== null &&
+            CsBind.docKey(document) !== CsBind.armedDocKey) {
+        CsBind.lastError = "the drawing being drawn in is not the one " +
+            "binding was armed on (another drawing came to the front, " +
+            "or this one was saved under a new name), so binding was " +
+            "disarmed rather than tag strokes to the wrong trip";
+        CsBind.disarm();
+        return 0;
+    }
+    var trip = CsBind.armedTripId;
+    var ids = CsBind.addedEntityIds(document, transaction);
+    if (ids.length === 0) {
+        return 0;
+    }
+
+    var entries = [];
+    var idx = null;   // built only once a candidate has survived the
+    var eps = 0;      // gates -- it is a full scan of the drawing
+    for (var i = 0; i < ids.length; i++) {
+        var e;
+        try {
+            e = document.queryEntity(ids[i]);
+        } catch (eQ) {
+            continue;
+        }
+        if (isNull(e)) {
+            continue;
+        }
+        if (!CsBind.isLineworkLayer(CsBind.layerNameOf(document, e))) {
+            continue;
+        }
+        // already claimed, or ours: the layer gate misses our own
+        // output on plain feature layers (note leaders on TEXT-NOTES,
+        // wall runs on WALLS-*), which the suite tags catch
+        if (CsBind.hasLineworkTags(e) || CsBind.isSuiteGeometry(e)) {
+            continue;
+        }
+        if (idx === null) {
+            idx = CsBind.stationIndex(document);
+            eps = CsBind.epsilonFor(document);
+        }
+        var bound = CsBind.bindEntity(document, e, trip, idx, eps);
+        entries.push({ entity: e, trip: trip, stations: bound.stations });
+    }
+    if (entries.length === 0) {
+        return 0;
+    }
+    var target = CsBind.interfaceFor(di);
+    if (target === null) {
+        CsBind.lastError = "no document interface to write tags through";
+        return 0;
+    }
+    // Our own write is itself a transaction: suppressed, or the
+    // listener would recurse into it.
+    var n = CsBind.withSuppressed(function() {
+        return CsBind.tagEntities(document, target, entries);
+    });
+    CsBind.taggedWhileArmed += n;
+    return n;
+};
