@@ -18,6 +18,7 @@ include(includeBasePath + "/CsUnits.js");
 include(includeBasePath + "/CsProc.js");
 include(includeBasePath + "/CsGit.js");
 include(includeBasePath + "/CsHub.js");
+include(includeBasePath + "/CsSetup.js");
 include(includeBasePath + "/CsGeoProject.js");
 include(includeBasePath + "/CsAngles.js");
 include(includeBasePath + "/CsIgrfCoeffs.js");

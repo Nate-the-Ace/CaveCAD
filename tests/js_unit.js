@@ -88,6 +88,7 @@ var CORE_FILES = [
     "scripts/CaveSurvey/Core/CsProc.js",
     "scripts/CaveSurvey/Core/CsGit.js",
     "scripts/CaveSurvey/Core/CsHub.js",
+    "scripts/CaveSurvey/Core/CsSetup.js",
     "scripts/CaveSurvey/Core/CsGeoProject.js",
     "scripts/CaveSurvey/Core/CsAngles.js",
     "scripts/CaveSurvey/Core/CsIgrfCoeffs.js",
@@ -6346,6 +6347,68 @@ ok(CsHub.isNetworkFailure(
     "isNetworkFailure does not misclassify a real \"repo not found\"");
 ok(CsHub.isNetworkFailure({ code: 1, out: "", err: USAGE_ERROR_ERR }) === false,
     "isNetworkFailure does not misclassify a usage error");
+
+// ---------------------------------------------------------------------
+// CsSetup -- discovery and install help.
+//
+// PATH is checked LAST, deliberately. The probe that found gh working
+// inside CaveCAD ran the app FROM A TERMINAL, so it inherited a login
+// shell PATH. Launched from Finder, a macOS GUI app has no
+// /opt/homebrew/bin -- gh would read as "not installed" on a machine
+// that has it.
+// ---------------------------------------------------------------------
+
+var ghMac = CsSetup.candidates("osx", "gh");
+ok(ghMac[0] === "/opt/homebrew/bin/gh", "osx tries Homebrew arm64 first");
+ok(ghMac.indexOf("/usr/local/bin/gh") > 0, "osx includes Homebrew intel prefix");
+ok(ghMac[ghMac.length - 1] === "gh", "bare name (PATH) is LAST, not first");
+
+var gitLinux = CsSetup.candidates("linux", "git");
+ok(gitLinux[0] === "/usr/bin/git", "linux tries /usr/bin first");
+ok(gitLinux[gitLinux.length - 1] === "git", "linux falls back to PATH last");
+
+var ghWin = CsSetup.candidates("win", "gh");
+ok(ghWin[ghWin.length - 1] === "gh.exe", "win falls back to gh.exe on PATH");
+ok(ghWin.length > 1, "win has at least one absolute candidate");
+
+// resolve() takes an injected existence predicate so this is testable
+// with no filesystem.
+var present = { "/usr/local/bin/gh": true };
+ok(CsSetup.resolve("gh", "osx", function(p) { return present[p] === true; }) ===
+    "/usr/local/bin/gh", "resolve picks the first existing candidate");
+ok(CsSetup.resolve("gh", "osx", function() { return false; }) === null,
+    "resolve returns null when nothing exists");
+
+// A stale cache must not survive.
+ok(CsSetup.validateCached("/opt/homebrew/bin/gh",
+        function() { return false; }) === null,
+    "validateCached discards a path that no longer resolves");
+ok(CsSetup.validateCached("/usr/local/bin/gh",
+        function(p) { return present[p] === true; }) === "/usr/local/bin/gh",
+    "validateCached keeps a path that still resolves");
+ok(CsSetup.validateCached("", function() { return true; }) === null,
+    "validateCached rejects an empty cached value");
+
+// Install help, per platform. Every rung's dialog is a remedy, so the
+// text is asserted rather than left to whoever writes the dialog.
+var hMac = CsSetup.installHelp("osx", "gh");
+ok(hMac.command === "brew install gh", "osx gh command is brew install gh");
+ok(hMac.links.join(" ").indexOf("https://cli.github.com/") !== -1,
+    "osx gh help links cli.github.com");
+var hWin = CsSetup.installHelp("win", "gh");
+ok(hWin.command === "winget install -e --id GitHub.cli", "win gh command is winget");
+var hLin = CsSetup.installHelp("linux", "gh");
+ok(hLin.links.join(" ").indexOf("install_linux.md") !== -1,
+    "linux gh help links the distro instructions");
+var gMac = CsSetup.installHelp("osx", "git");
+ok(gMac.command === "xcode-select --install", "osx git command is xcode-select");
+var gWin = CsSetup.installHelp("win", "git");
+ok(gWin.links.join(" ").indexOf("git-scm.com/download/win") !== -1,
+    "win git help links git-scm");
+var gLin = CsSetup.installHelp("linux", "git");
+ok(gLin.links.length > 0, "linux git help has a link");
+ok(CsSetup.installHelp("osx", "nonsense") === null,
+    "installHelp returns null for an unknown program");
 
 // ---------------------------------------------------------------------
 // Report.
