@@ -86,6 +86,7 @@ function loadRepoScript(scriptPath) {
 var CORE_FILES = [
     "scripts/CaveSurvey/Core/CsUnits.js",
     "scripts/CaveSurvey/Core/CsProc.js",
+    "scripts/CaveSurvey/Core/CsGit.js",
     "scripts/CaveSurvey/Core/CsGeoProject.js",
     "scripts/CaveSurvey/Core/CsAngles.js",
     "scripts/CaveSurvey/Core/CsIgrfCoeffs.js",
@@ -5702,6 +5703,80 @@ if (!IS_NODE) {
             "CsProc.log's on-disk line shows <redacted> in place of the token");
     }
 }
+
+// ---------------------------------------------------------------------
+// CsGit -- argv builders (exact arrays) and output parsers.
+// ---------------------------------------------------------------------
+
+function sameArgv(got, want, what) {
+    var equal = (got.length === want.length);
+    if (equal) {
+        for (var i = 0; i < want.length; i++) {
+            if (got[i] !== want[i]) {
+                equal = false;
+                break;
+            }
+        }
+    }
+    ok(equal, what + " (got [" + got.join("|") + "], want [" + want.join("|") + "])");
+}
+
+sameArgv(CsGit.argvToplevel(), ["rev-parse", "--show-toplevel"], "argvToplevel");
+sameArgv(CsGit.argvStatus(), ["status", "--porcelain"], "argvStatus");
+sameArgv(CsGit.argvCurrentBranch(), ["rev-parse", "--abbrev-ref", "HEAD"],
+    "argvCurrentBranch");
+sameArgv(CsGit.argvCommit("msg with spaces"),
+    ["commit", "-m", "msg with spaces"],
+    "argvCommit keeps the message as ONE argument");
+sameArgv(CsGit.argvAdd(["drawings/Blowing Hole.dxf", "survey/bh.shots.tsv"]),
+    ["add", "--", "drawings/Blowing Hole.dxf", "survey/bh.shots.tsv"],
+    "argvAdd separates paths with -- and keeps spaces intact");
+sameArgv(CsGit.argvCheckoutNew("survey/2026-08-20-nd", "main"),
+    ["checkout", "-b", "survey/2026-08-20-nd", "main"], "argvCheckoutNew");
+sameArgv(CsGit.argvPush("origin", "survey/2026-08-20-nd"),
+    ["push", "-u", "origin", "survey/2026-08-20-nd"], "argvPush");
+sameArgv(CsGit.argvClone("https://github.com/o/r.git", "/Users/n/Documents/Cave/r"),
+    ["clone", "https://github.com/o/r.git", "/Users/n/Documents/Cave/r"],
+    "argvClone");
+sameArgv(CsGit.argvConfigSet("user.email", "1+n@users.noreply.github.com", false),
+    ["config", "user.email", "1+n@users.noreply.github.com"],
+    "argvConfigSet local omits --global");
+sameArgv(CsGit.argvConfigSet("user.email", "1+n@users.noreply.github.com", true),
+    ["config", "--global", "user.email", "1+n@users.noreply.github.com"],
+    "argvConfigSet global includes --global");
+sameArgv(CsGit.argvAheadBehind("origin/main", "HEAD"),
+    ["rev-list", "--count", "--left-right", "origin/main...HEAD"],
+    "argvAheadBehind");
+sameArgv(CsGit.argvHooksPath(".githooks"),
+    ["config", "core.hooksPath", ".githooks"], "argvHooksPath");
+
+ok(CsGit.parseToplevel({ code: 0, out: "/Users/n/Documents/Cave/bh\n", err: "" }) ===
+    "/Users/n/Documents/Cave/bh", "parseToplevel trims the newline");
+ok(CsGit.parseToplevel({ code: 128, out: "", err: "not a git repository" }) === null,
+    "parseToplevel returns null outside a work tree");
+
+var st = CsGit.parsePorcelain({ code: 0, out:
+    " M drawings/Blowing Hole.dxf\n?? survey/bh.shots.tsv\nA  notes/trip.md\n", err: "" });
+ok(st.length === 3, "parsePorcelain finds 3 entries");
+ok(st[0].path === "drawings/Blowing Hole.dxf",
+    "parsePorcelain keeps a path containing a space");
+ok(st[0].code === "M", "parsePorcelain reads the status code");
+ok(st[1].code === "??", "parsePorcelain reads an untracked marker");
+ok(CsGit.parsePorcelain({ code: 0, out: "", err: "" }).length === 0,
+    "parsePorcelain on a clean tree is empty");
+
+var ab = CsGit.parseAheadBehind({ code: 0, out: "2\t5\n", err: "" });
+ok(ab.behind === 2 && ab.ahead === 5, "parseAheadBehind reads left-right counts");
+ok(CsGit.parseAheadBehind({ code: 1, out: "", err: "no upstream" }) === null,
+    "parseAheadBehind returns null with no upstream");
+
+ok(CsGit.isNetworkFailure("fatal: unable to access 'https://github.com/': " +
+    "Could not resolve host: github.com") === true,
+    "isNetworkFailure spots an unresolved host");
+ok(CsGit.isNetworkFailure("! [rejected]        main -> main (fetch first)") === false,
+    "isNetworkFailure does not claim a rejected push");
+ok(CsGit.isRejected("! [rejected]        main -> main (fetch first)") === true,
+    "isRejected spots a non-fast-forward");
 
 // ---------------------------------------------------------------------
 // Report.
