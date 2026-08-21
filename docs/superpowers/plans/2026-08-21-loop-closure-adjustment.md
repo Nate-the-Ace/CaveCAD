@@ -387,6 +387,43 @@ which is a design question, not a cleanup. Recorded so it is not mistaken for ne
 
 ---
 
+### Task 1d: a real survey fixture with two fixed stations
+
+**Goal:** Close the coverage gap a real-data regression check surfaced — none of
+`testdata/`'s five cave files carries two or more fixed stations, so bridge-based tie
+classification, control-tie splitting and the two-root circuit have only ever run against
+synthetic fixtures built inside `tests/js_unit.js`.
+
+Measured state of the real data, for the record: FingerprintCave (17 stations, 1 loop, 0
+fixed), FingerprintCave_Revised (same), TestCave_Compass (6 stations, 1 loop, 0 fixed),
+TestCave_Walls (6 stations, 1 loop, **1** fixed `W1`), TestCave_Survex (5 stations, 1
+loop, **1** fixed `TestSurvey.S1`). Maximum fixed-station count anywhere: one.
+
+**Files:**
+- Create: a survey file under `testdata/` with two `*fix` / `#Fix` stations on one
+  connected passage plus a second, separately fixed component
+- Test: `tests/js_unit.js`
+
+**Acceptance Criteria:**
+- [ ] the file is real, parseable survey data in one of the suite's supported formats,
+      not a synthetic in-memory fixture — it must go through the format registry
+- [ ] it exercises BOTH shapes at once: two fixed stations on one ring (which must report
+      per-arc loops, not ties) and a genuinely disconnected fixed component joined by one
+      leg (which must report a tie)
+- [ ] the expected loop count, per-arc traverse lengths, tie count and tie misclosure are
+      hand-computed in a comment and asserted against, not read off the implementation
+- [ ] resolving it with an explicit anchor on one fixed station reports a `controlFrame`
+      whose offset is applied, and the misclosures are invariant against the no-anchor
+      resolve — the same invariance Task 1b established, now on real parsed data
+- [ ] the fixture is small enough to read and verify by hand (single figures of stations)
+
+**Verify:** `./tests/run_all.sh` → `ALL TESTS PASSED`
+
+Low priority relative to the solver chain: it adds confidence in work already shipped
+rather than unblocking anything. Run it when `tests/js_unit.js` is free.
+
+---
+
 ### Task 2: `CsAdjust.js` — the solver
 
 **Goal:** A pure Core module that takes a survey and its raw resolve result and returns a resolved-shaped object with adjusted coordinates, per-station shifts, per-leg residuals, and a summary.

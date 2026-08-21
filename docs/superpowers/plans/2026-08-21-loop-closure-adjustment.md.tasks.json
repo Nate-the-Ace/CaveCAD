@@ -97,12 +97,21 @@
     {
       "id": 10,
       "subject": "Task 1c: bridge classifier cost + path honesty",
-      "status": "pending",
+      "status": "completed",
       "blockedBy": [
         9
       ],
       "description": "**Goal:** Fix the two blocking findings from the Task 1 code-quality review (quadratic bridge classifier; two-root path fabricating a nonexistent adjacency), plus ties carrying a meaningless percent and self-loops being scored as 100%-blown loops.\n\n**Files:**\n- Modify: `scripts/CaveSurvey/Core/CsNetwork.js`\n- Test: `tests/js_unit.js`\n\n**Acceptance Criteria:**\n- [ ] bridge test runs only for shots that resolve as closures -- O(k*m), k = closure count\n- [ ] 4,000-shot survey resolves well under 100ms under node, asserted as a loose upper bound\n- [ ] classifier verdicts unchanged on every existing fixture (performance change, not behavior)\n- [ ] two-root circuit no longer implies a nonexistent adjacency; path join semantics documented and machine-detectable\n- [ ] .path contents asserted for single-root AND two-root cases\n- [ ] ties carry percent: null, and no consumer formats it\n- [ ] a from === to shot is SKIPPED, not scored (Compass zero-length LRUD carriers are real data)\n- [ ] a direct double tie between two fixed anchors is tested\n\n**Verify:** ./tests/run_all.sh -> ALL TESTS PASSED\n\n**Steps:**\n- Measure the current cost first and record the baseline\n- Move the bridge test to run lazily for closure candidates only; memoize\n- Re-run every existing fixture to prove verdicts unchanged\n- Add viaControl (or equivalent) so the control join is detectable; document path semantics\n- Null the percent on ties; skip from === to in the usable filter\n- Add the missing .path and double-tie assertions, plus the timing bound\n- Full suite; commit\n\n```json:metadata\n{\"files\": [\"scripts/CaveSurvey/Core/CsNetwork.js\", \"tests/js_unit.js\"], \"verifyCommand\": \"./tests/run_all.sh\", \"acceptanceCriteria\": [\"closure-only bridge test\", \"4000 shots under 100ms\", \"verdicts unchanged\", \"no fabricated adjacency\", \"path asserted\", \"tie percent null\", \"self-loop skipped\"], \"modelTier\": \"deep\"}\n```"
+    },
+    {
+      "id": 11,
+      "subject": "Task 1d: real fixture with two fixed stations",
+      "status": "pending",
+      "blockedBy": [
+        10
+      ],
+      "description": "**Goal:** Close the coverage gap found by a real-data regression check: no testdata file has 2+ fixed stations, so bridge-based tie classification, control-tie splitting and the two-root circuit have only run against synthetic fixtures.\n\n**Files:**\n- Create: a survey file under `testdata/` with two fixed stations on one connected passage plus a second, separately fixed component\n- Test: `tests/js_unit.js`\n\n**Acceptance Criteria:**\n- [ ] real parseable survey data going through the format registry, not an in-memory fixture\n- [ ] exercises both shapes: two fixed stations on one ring (per-arc loops, not ties) AND a disconnected fixed component joined by one leg (a tie)\n- [ ] expected loop count, per-arc traverse lengths, tie count and tie misclosure hand-computed in a comment and asserted, not read off the implementation\n- [ ] resolving with an explicit anchor on one fixed station reports a controlFrame with the offset applied, and misclosures are invariant vs the no-anchor resolve\n- [ ] small enough to verify by hand\n\n**Verify:** ./tests/run_all.sh -> ALL TESTS PASSED\n\n**Steps:**\n- Write the fixture file by hand, computing its geometry so the expected numbers are known independently\n- Add assertions with the arithmetic shown in comments\n- Run the full suite; commit\n\n```json:metadata\n{\"files\": [\"testdata/\", \"tests/js_unit.js\"], \"verifyCommand\": \"./tests/run_all.sh\", \"acceptanceCriteria\": [\"real parsed fixture\", \"both ring and tie shapes\", \"hand-computed expectations\", \"anchor invariance on real data\"], \"modelTier\": \"standard\"}\n```"
     }
   ],
-  "lastUpdated": "2026-08-21T01:14:20.029321"
+  "lastUpdated": "2026-08-21T01:34:51.459690"
 }
