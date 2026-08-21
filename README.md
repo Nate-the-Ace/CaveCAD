@@ -18,7 +18,7 @@ Each appears in the **Cave Survey** menu and as a command:
 | Tool | Command | What it does |
 | --- | --- | --- |
 | Azimuth Traverse | `azt` | Plot shots one at a time from typed azimuth/distance/inclination/LRUD. |
-| Survey Notebook | `snb` | A docked survey notes page: type or import shots, watch closures/stats/warnings live, draw in one undo step, export to any format. Also owns declination: estimate it from the survey date and the cave's location (IGRF), pin that location to a station as the drawing's geo anchor, and correct a trip's declination after the fact -- the drawing rotates around the fix. Arm linework binding and the walls you trace are tied to the trip they belong to, so they follow it through a revision instead of being left behind. |
+| Survey Notebook | `snb` | A docked survey notes page: type or import shots, watch closures/stats/warnings live, draw in one undo step, export to any format. Also owns declination: estimate it from the survey date and the cave's location (IGRF), pin that location to a station as the drawing's geo anchor, and correct a trip's declination after the fact -- the drawing rotates around the fix. The walls you trace are tied to the trip they belong to automatically, so they follow it through a revision instead of being left behind -- nothing to switch on, and a revision claims work drawn before this existed. |
 | Import Cave Survey | `ics` | Import Compass `.dat`, Walls `.srv`, Survex `.svx` or CSV -- the format is detected for you. |
 | LRUD Walls | `lw` | Approximate passage walls from the survey's LRUD, in survey order (works on imported data too). |
 | Scatter Breakdown | `scb` | Fill closed `BREAKDOWN-BOUNDARY` polylines with breakdown symbols, per boundary. |

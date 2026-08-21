@@ -1403,6 +1403,21 @@ CsBind.interfaceFor = function(di) {
  *           it from the main window.
  * \return the number of entities tagged.
  */
+/**
+ * Above this many entities arriving in ONE transaction, draw-time
+ * binding stands down. A surveyor tracing a wall adds one entity, or a
+ * handful; a DXF import or a big paste arrives in dozens or thousands.
+ * Claiming those would tag a whole imported drawing as this trip's
+ * linework the instant it lands, and bury that fact in a single summary
+ * line nobody asked for.
+ *
+ * Nothing is lost by standing down: the revision-time pass still binds
+ * whatever genuinely sits on the survey, at a moment the user chose and
+ * with the count reported, and Adopt still claims deliberately. Only
+ * the silent mass claim goes away.
+ */
+CsBind.MAX_AUTO_BIND_PER_TRANSACTION = 25;
+
 CsBind.onTransaction = function(document, transaction, di) {
     try {
         return CsBind.onTransactionInner(document, transaction, di);
@@ -1428,6 +1443,16 @@ CsBind.onTransactionInner = function(document, transaction, di) {
     // simply cannot arise once the trip comes from the geometry.
     var ids = CsBind.addedEntityIds(document, transaction);
     if (ids.length === 0) {
+        return 0;
+    }
+    // Bulk arrival is not tracing -- see MAX_AUTO_BIND_PER_TRANSACTION.
+    // Recorded rather than silent: a surveyor who wonders why a pasted
+    // wall was not claimed can find the reason.
+    if (ids.length > CsBind.MAX_AUTO_BIND_PER_TRANSACTION) {
+        CsBind.lastError = "auto-binding stood down: " + ids.length +
+            " entities arrived in one transaction (import or paste), " +
+            "more than " + CsBind.MAX_AUTO_BIND_PER_TRANSACTION +
+            "; a revision will still bind what sits on the survey";
         return 0;
     }
 
