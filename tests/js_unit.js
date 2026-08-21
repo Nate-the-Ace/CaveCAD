@@ -5675,6 +5675,34 @@ if (!IS_NODE) {
     ok(rm.notStarted === true, "real backend: missing binary reports notStarted");
 }
 
+// CsProc.log had never written a single byte in any build: two
+// independent failures (RSettings.getStandardWritableLocation is not
+// a real method here, and `new QIODevice.OpenMode(...)` throws) were
+// both swallowed by this file's own try/catch. logPath() returning
+// null was the visible symptom; confirm it resolves, then round-trip
+// a synthetic token through the real log() and read the file back to
+// confirm the write landed AND arrived redacted.
+if (!IS_NODE) {
+    var logProbePath = CsProc.logPath();
+    ok(logProbePath !== null, "CsProc.logPath resolves in this engine");
+
+    if (logProbePath !== null) {
+        var logProbeWasEnabled = CsProc.logEnabled;
+        CsProc.logEnabled = true;
+        var logProbeMarker = "CSPROC-TEST-PROBE";
+        CsProc.log(logProbeMarker + " ghp_SYNTHETICNOTAREALTOKEN0000000000");
+        CsProc.logEnabled = logProbeWasEnabled;
+
+        var logProbeContents = readTextFile(logProbePath);
+        ok(logProbeContents.indexOf(logProbeMarker) !== -1,
+            "CsProc.log actually wrote the probe line to disk");
+        ok(logProbeContents.indexOf("ghp_SYNTHETICNOTAREALTOKEN0000000000") === -1,
+            "CsProc.log redacts the token before it reaches disk");
+        ok(logProbeContents.indexOf("<redacted>") !== -1,
+            "CsProc.log's on-disk line shows <redacted> in place of the token");
+    }
+}
+
 // ---------------------------------------------------------------------
 // Report.
 // ---------------------------------------------------------------------

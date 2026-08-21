@@ -63,7 +63,12 @@ CsProc.logPath = function() {
         return null;
     }
     try {
-        return RSettings.getStandardWritableLocation() + "/cave-git.log";
+        // getStandardWritableLocation is not a real method on this
+        // engine's RSettings -- confirmed live, it throws and was
+        // being silently swallowed here, which is why this file wrote
+        // nothing in any build until this fix. getDataLocation() is
+        // the one that actually resolves to a writable directory.
+        return RSettings.getDataLocation() + "/cave-git.log";
     } catch (e) {
         return null;
     }
@@ -79,8 +84,14 @@ CsProc.log = function(line) {
     }
     try {
         var f = new QFile(path);
-        if (f.open(new QIODevice.OpenMode(QIODevice.WriteOnly | QIODevice.Append |
-                                         QIODevice.Text))) {
+        // Plain bitwise OR, not the OpenMode constructor -- confirmed
+        // live, `new QIODevice.OpenMode(...)` throws a Type error on
+        // this engine and was the second of two silently swallowed
+        // failures that made this file write nothing. This is the
+        // same pattern already proven at CsLocationPick.js:125 and
+        // SurveyNotebook.js:1646; CsProc was the only file using the
+        // constructor form.
+        if (f.open(QIODevice.WriteOnly | QIODevice.Append | QIODevice.Text)) {
             var s = new QTextStream(f);
             s.writeString(CsProc.redact(line) + "\n");
             f.close();
