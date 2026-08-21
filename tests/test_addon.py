@@ -288,5 +288,67 @@ class TestLayerVocabulary(unittest.TestCase):
                          "template: %s" % sorted(missing))
 
 
+class TestReadmeToolTable(unittest.TestCase):
+    """The README's tool table and the shipped tools must agree.
+
+    Nothing reads the README, so it drifts silently. It advertised
+    `LRUD Walls` (`lw`) for some time after that standalone tool was
+    deleted and its work folded into CsDraw.survey -- a reader would have
+    gone hunting the menu for a tool that no longer existed. Four shipped
+    tools were meanwhile listed nowhere at all.
+
+    Keyed on the COMMAND ALIAS, not the folder name: CaveTemplate/ ships
+    as `newcavemap`/`ncm`, so folder names and commands genuinely differ.
+    """
+
+    def readme_table_aliases(self):
+        with open(os.path.join(REPO, "README.md"), encoding="utf-8") as fh:
+            readme = fh.read()
+        # Scope to the tool table's own section -- the README has other
+        # tables whose second column is also backticked (install paths),
+        # and matching those made this test fail on its first run.
+        section = re.search(r"^## The tools\n(.*?)^## ", readme,
+                            re.M | re.S)
+        self.assertIsNotNone(section, "README has no '## The tools' section")
+        # Rows look like: | Display Name | `alias` | description |
+        rows = re.findall(r"^\|[^|]+\|\s*`([^`]+)`\s*\|",
+                          section.group(1), re.M)
+        return set(rows)
+
+    def aliases_by_tool(self):
+        """tool folder -> every alias it declares in setDefaultCommands."""
+        out = {}
+        for name in tool_dirs():
+            match = re.search(r"setDefaultCommands\(\[([^\]]*)\]\)",
+                              tool_source(name))
+            if match is None:
+                continue
+            out[name] = set(re.findall(r'"([^"]+)"', match.group(1)))
+        return out
+
+    def test_every_tool_appears_in_the_readme_table(self):
+        # ANY of a tool's aliases counts: the table documents the short
+        # form (`azt`) while setDefaultCommands lists the long one first
+        # ("azimuthtraverse"). Requiring the first alias specifically was
+        # this test's own bug on its first run, not the README's.
+        listed = self.readme_table_aliases()
+        by_tool = self.aliases_by_tool()
+        missing = sorted(name for name, aliases in by_tool.items()
+                         if not (aliases & listed))
+        self.assertEqual(missing, [],
+                         "these tools ship but no alias of theirs appears "
+                         "in the README's tool table: %s" % missing)
+
+    def test_readme_table_advertises_no_tool_that_does_not_exist(self):
+        every_alias = set()
+        for aliases in self.aliases_by_tool().values():
+            every_alias.update(aliases)
+        phantom = sorted(a for a in self.readme_table_aliases()
+                         if a not in every_alias)
+        self.assertEqual(phantom, [],
+                         "the README table advertises commands no tool "
+                         "declares: %s" % phantom)
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)
