@@ -83,7 +83,10 @@ CsSetup.fileExists = function(path) {
  * not here.
  */
 CsSetup.resolve = function(name, system, existsFn) {
-    var exists = existsFn ? existsFn : CsSetup.fileExists;
+    // typeof, not truthiness: a truthy non-function existsFn (a
+    // string, an object) would reach exists(cands[i]) below and throw
+    // "exists is not a function" two frames from here.
+    var exists = (typeof existsFn === "function") ? existsFn : CsSetup.fileExists;
     var sys = system ? system : CsSetup.systemId();
     var cands = CsSetup.candidates(sys, name);
     for (var i = 0; i < cands.length; i++) {
@@ -104,7 +107,7 @@ CsSetup.validateCached = function(cached, existsFn) {
     if (typeof cached !== "string" || cached.length === 0) {
         return null;
     }
-    var exists = existsFn ? existsFn : CsSetup.fileExists;
+    var exists = (typeof existsFn === "function") ? existsFn : CsSetup.fileExists;
     return exists(cached) ? cached : null;
 };
 
@@ -131,7 +134,12 @@ CsSetup.validateCached = function(cached, existsFn) {
  * non-zero" without running the process a second time.
  */
 CsSetup.verify = function(prog, versionArgv) {
-    var argv = versionArgv ? versionArgv : ["--version"];
+    // Array.isArray, not truthiness: a truthy non-array versionArgv
+    // (a string, an object) would reach CsProc.run's argv.join(" ")
+    // logging call and throw "argv.join is not a function" two frames
+    // from here. Confirmed present in both node and this engine's own
+    // QtScript bridge (CaveCAD 3.33.0) -- see the js_unit.js test.
+    var argv = Array.isArray(versionArgv) ? versionArgv : ["--version"];
     var r = CsProc.run(prog, argv);
     return {
         ok: (r.notStarted !== true) && r.code === 0,
@@ -200,5 +208,13 @@ CsSetup.INSTALL_HELP = {
 CsSetup.installHelp = function(system, name) {
     var sys = CsSetup.INSTALL_HELP[system] ? system : "osx";
     var entry = CsSetup.INSTALL_HELP[sys][name];
-    return entry ? entry : null;
+    // A bracket lookup on an unknown name resolves up the prototype
+    // chain: entry for name === "toString" or "hasOwnProperty" would
+    // otherwise come back as a Function, not undefined, and pass a
+    // truthiness check. Every real entry here is a plain
+    // {command, links} object, so require that shape explicitly.
+    if (typeof entry !== "object" || entry === null) {
+        return null;
+    }
+    return entry;
 };

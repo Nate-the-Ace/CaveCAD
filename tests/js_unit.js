@@ -6397,9 +6397,14 @@ ok(hMac.links.join(" ").indexOf("https://cli.github.com/") !== -1,
     "osx gh help links cli.github.com");
 var hWin = CsSetup.installHelp("win", "gh");
 ok(hWin.command === "winget install -e --id GitHub.cli", "win gh command is winget");
+ok(hWin.links.join(" ").indexOf("https://cli.github.com/") !== -1,
+    "win gh help links cli.github.com -- criterion says ALWAYS, so every " +
+    "platform is pinned, not just osx");
 var hLin = CsSetup.installHelp("linux", "gh");
 ok(hLin.links.join(" ").indexOf("install_linux.md") !== -1,
     "linux gh help links the distro instructions");
+ok(hLin.links.join(" ").indexOf("https://cli.github.com/") !== -1,
+    "linux gh help links cli.github.com too -- same ALWAYS criterion");
 var gMac = CsSetup.installHelp("osx", "git");
 ok(gMac.command === "xcode-select --install", "osx git command is xcode-select");
 var gWin = CsSetup.installHelp("win", "git");
@@ -6409,6 +6414,15 @@ var gLin = CsSetup.installHelp("linux", "git");
 ok(gLin.links.length > 0, "linux git help has a link");
 ok(CsSetup.installHelp("osx", "nonsense") === null,
     "installHelp returns null for an unknown program");
+
+// A bracket lookup on an unknown name resolves up the prototype chain
+// unless guarded: CsSetup.INSTALL_HELP.osx["toString"] is inherited
+// from Object.prototype and is a Function, which passed the original
+// truthiness check and returned that Function instead of null.
+ok(CsSetup.installHelp("osx", "toString") === null,
+    "installHelp does not return the inherited Object.prototype.toString");
+ok(CsSetup.installHelp("osx", "hasOwnProperty") === null,
+    "installHelp does not return the inherited Object.prototype.hasOwnProperty");
 
 // linux/gh has no command, DELIBERATELY: there is no single
 // cross-distro install line (apt repo vs dnf vs snap), and writing
@@ -6528,13 +6542,48 @@ ok(d4 === "gh",
 
 CsProc.setBackend(null);   // restore the real backend, as the CsProc section does
 
-// Engine-only: exercises the REAL CsProc backend (QProcess), which
-// node does not have. Confirms discover() finds this machine's actual
-// git rather than only the injected fakes above.
+// Bad-shape parameters must fall back to the default rather than
+// throw from two frames down inside CsProc.run. These are cheap to
+// hit by accident (a caller passing a string where an array argv was
+// meant, or a non-function where a predicate was meant), so they are
+// asserted directly rather than left to whatever happened to call in
+// first and throw.
+CsProc.setBackend(function(prog, argv, opts) {
+    return { code: 0, out: "", err: "", timedOut: false, notStarted: false };
+});
+ok(CsSetup.verify("gh", "not-an-array").ok === true,
+    "verify falls back to the default --version argv when versionArgv " +
+    "is not an array, instead of throwing out of CsProc.run's argv.join");
+CsProc.setBackend(null);
+// Compared against the no-existsFn-at-all call rather than pinned to
+// null/a path: this machine has a real gh install (some dev machines
+// do, some do not), so the only environment-independent claim is
+// "a bad-shape existsFn is treated exactly like omitting it", not
+// "the answer is always null".
+ok(CsSetup.resolve("gh", "osx", "not-a-function") === CsSetup.resolve("gh", "osx"),
+    "resolve falls back to the default existsFn when given a non-function " +
+    "(same answer as omitting it), instead of throwing \"exists is not a " +
+    "function\"");
+ok(CsSetup.validateCached("/usr/local/bin/gh", "not-a-function") ===
+    CsSetup.validateCached("/usr/local/bin/gh"),
+    "validateCached falls back to the default existsFn the same way");
+
+// Engine-only: on this machine /usr/bin/git already stats successfully
+// via the real QFileInfo (through candidates()'s "osx"/"linux" dirs
+// and RS.getSystemId()), so this exercises resolve()'s stat path
+// end-to-end for real -- QFileInfo and RS.getSystemId() -- and
+// short-circuits discover() before verify()/CsProc is ever reached.
+// The bare-name execution path (verify() actually launching a real
+// process) is covered by the injected-backend cases above, not by
+// this assertion. This is environment-dependent: on a machine with no
+// git installed anywhere, discover() would correctly return null and
+// this assertion would go red -- that is expected, not a bug in
+// discover() itself.
 if (!IS_NODE) {
     var realGitPath = CsSetup.discover("git", CsGit.argvVersion());
     ok(realGitPath !== null,
-        "discover finds the real git on this machine (engine only)");
+        "discover finds the real git on this machine via real QFileInfo " +
+        "stat, through a full discover() call (engine only)");
 }
 
 // ---------------------------------------------------------------------
