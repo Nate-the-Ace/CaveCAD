@@ -1438,6 +1438,39 @@ git commit -m "feat: the preflight ladder, and a device-code parser built from a
 
 ---
 
+### Qt surface for Tasks 6 and 7 — VERIFIED, do not re-derive
+
+Probed live in CaveCAD 3.33.0's engine on 2026-08-21. Every class these two tasks
+need is present, and widgets construct even under `-no-gui`:
+
+`QDialog`, `QVBoxLayout`, `QHBoxLayout`, `QGridLayout`, `QLabel`, `QPushButton`,
+`QLineEdit`, `QDesktopServices`, `QUrl`, `QCoreApplication`, `QFont`, `QTimer`,
+`QProgressDialog`, `QMessageBox`, `QClipboard`, `QTreeWidget`, `QTreeWidgetItem`,
+`QTextEdit`, `QPlainTextEdit`, `QWidget`.
+
+Confirmed working: `new QUrl(...)` round-trips; `QLabel.text` readable;
+`QDialog.windowTitle` assignable; `QPushButton.clicked` is a function and
+`.clicked.connect(fn)` succeeds; `QVBoxLayout.addWidget` is a function;
+`label.font` is readable and reports `pointSize() === 13`.
+
+**One trap, and it is the shape of every defect in this slice:**
+
+```
+QDesktopServices.openUrl        -> function     OK
+QCoreApplication.processEvents  -> function     OK -- USE THIS ONE
+QApplication.processEvents      -> undefined    DOES NOT EXIST
+```
+
+Task 7's dialog uses `QCoreApplication.processEvents()`, which is correct. Do NOT
+"fix" it to `QApplication.processEvents()`: that is undefined, and called inside the
+dialog's `try/catch` it would fail silently, leaving the poll loop never pumping
+events so the one-time code never appears on screen.
+
+**What the probe does NOT establish:** headless construction is not proof of
+rendering. That the dialog appears, that the code is legible at the enlarged font,
+that buttons respond to clicks, and that `show()` plus the poll loop does not freeze
+the main window are all Task 8 items and cannot be closed from a script.
+
 ### Task 6: GitHubSetup tool — menu wiring and the ladder display
 
 **Goal:** The tool appears on the Cave Survey menu, runs the ladder against the real machine, and shows each rung with its remedy.
