@@ -1271,9 +1271,30 @@ CsRevise.lineworkSummary = function(moved, unmoved, bound) {
 };
 
 /**
- * The drawing's trip-0 anchor point, or null when there is none.
- * Anchor points are the only entities carrying BOTH a Station tag and
- * a Trip tag -- legs carry Trip too, but never Station.
+ * The anchor point the drawing's RevisionLog lives on, or null when the
+ * drawing has no anchors at all. Anchor points are the only entities
+ * carrying BOTH a Station tag and a Trip tag -- legs carry Trip too,
+ * but never Station -- and CsDraw tags exactly one per trip id, so the
+ * scan below cannot be thrown off by the query order.
+ *
+ * Trip 0 when it is there: that is where the schema puts the log, and
+ * a healthy drawing must not have its history wander between
+ * revisions.
+ *
+ * FALLBACK -- the LOWEST-numbered anchor present when there is no trip
+ * 0. Drawings exist whose trips start at 1: CsModel.tripIdFor used to
+ * append the first typed page past ensureTrips' blank placeholder
+ * instead of occupying it, so every survey hand-entered in the
+ * notebook before that was fixed came out with no trip 0 whatsoever.
+ * Those drawings could not carry a log at all -- neither revision path
+ * had anywhere to write it, and the entry was dropped in silence. The
+ * lowest anchor is a stable home for one: it is the same point on
+ * every revision, and it survives an erase-and-redraw the same way
+ * trip 0's does.
+ *
+ * Newly built drawings should never reach the fallback --
+ * CsModel.isPlaceholderTrip sees to it that a first page lands as trip
+ * 0. It is here for the drawings already out in Nathan's cave files.
  *
  * Shared because every revision path needs this same point twice: once
  * BEFORE the erase, to read the RevisionLog off the entity the erase is
@@ -1283,18 +1304,30 @@ CsRevise.lineworkSummary = function(moved, unmoved, bound) {
  */
 CsRevise.trip0Anchor = function(doc) {
     var ids = doc.queryAllEntities(false, false);
+    var best = null;
+    var bestTrip = 0;
     for (var i = 0; i < ids.length; i++) {
         var e = doc.queryEntity(ids[i]);
         if (isNull(e)) {
             continue;
         }
-        if (CsTags.get(e, "Station") !== "" &&
-                CsTags.get(e, "Trip") !== "" &&
-                CsTags.getNumber(e, "Trip") === 0) {
+        if (CsTags.get(e, "Station") === "" ||
+                CsTags.get(e, "Trip") === "") {
+            continue;
+        }
+        var trip = CsTags.getNumber(e, "Trip");
+        if (trip === null || trip < 0) {
+            continue; // an unreadable Trip tag is not a trip number
+        }
+        if (trip === 0) {
             return e;
         }
+        if (best === null || trip < bestTrip) {
+            best = e;
+            bestTrip = trip;
+        }
     }
-    return null;
+    return best;
 };
 
 /**
@@ -1415,7 +1448,9 @@ CsRevise.appendLog = function(prevLog, lines) {
  *           marks (CsDraw.eraseStations) and redraw the revised survey
  *           in place (CsDraw.survey), which rewrites all v3 tags; the
  *           RevisionLog (with the old log carried over) is then
- *           committed onto the new trip-0 anchor. The GeoLat/GeoLon/
+ *           committed onto the new log anchor (CsRevise.trip0Anchor --
+ *           trip 0's point, or the lowest trip's on a drawing that has
+ *           no trip 0). The GeoLat/GeoLon/
  *           GeoStation georeference anchor gets the same treatment --
  *           read off its station before the erase (CsDraw.survey has
  *           no field for it; see the module header) and recommitted
@@ -1672,6 +1707,15 @@ CsRevise.apply = function(doc, di, recon, newSurvey) {
     var prevLog = oldAnchor0 !== null ?
         CsTags.get(oldAnchor0, "RevisionLog") : "";
     var newLog = CsRevise.appendLog(prevLog, logLines);
+    // Which entity the rigid path below writes the log back onto, by
+    // id -- entity query order in this build is not deterministic, so
+    // the entity found here has to be recognized again by identity
+    // rather than re-derived from its tags. On a healthy drawing this
+    // IS the trip-0 anchor; on a drawing whose trips start at 1 it is
+    // trip0Anchor's fallback, and asking trip0Anchor rather than
+    // testing "Trip == 0" inline is what keeps the read and the write
+    // pointing at the same point (see trip0Anchor).
+    var logAnchorId = oldAnchor0 !== null ? oldAnchor0.getId() : null;
 
     // the redrawn point carrying Station = name, or null -- same
     // lookup livePosOf uses above, but returning the entity itself
@@ -1858,8 +1902,11 @@ CsRevise.apply = function(doc, di, recon, newSurvey) {
                 }
 
                 // trip anchor points: revised trip metadata; the trip-0
-                // anchor also the legacy mirror, the serialized rows
-                // and the RevisionLog
+                // anchor also the legacy mirror and the serialized rows.
+                // The RevisionLog is written separately below -- it
+                // follows trip0Anchor's choice, which is the trip-0
+                // anchor here but the lowest one on a drawing that has
+                // no trip 0.
                 if (stName !== "" && CsTags.get(e, "Trip") !== "") {
                     var aTrip = CsTags.getNumber(e, "Trip");
                     aTrip = aTrip === null ? 0 : aTrip;
@@ -1880,8 +1927,15 @@ CsRevise.apply = function(doc, di, recon, newSurvey) {
                             newSurvey.distanceUnit);
                         CsTags.set(e, "ExcludedShots", exRows.join("\n"));
                         CsTags.set(e, "UnplacedShots", unRows.join("\n"));
-                        CsTags.set(e, "RevisionLog", newLog);
                     }
+                }
+                // The log goes back exactly where it was read from, so
+                // the next revision finds it. Unconditional on there
+                // being new lines: appendLog hands the old log straight
+                // back when this revision added nothing, and rewriting
+                // it unchanged is how the point keeps its history.
+                if (logAnchorId !== null && e.getId() === logAnchorId) {
+                    CsTags.set(e, "RevisionLog", newLog);
                 }
 
                 op.addObject(e, false);
@@ -1925,7 +1979,9 @@ CsRevise.apply = function(doc, di, recon, newSurvey) {
         });
         CsDraw.survey(newSurvey, newResolved, anchorName, anchorPos);
         // the redraw wrote fresh v3 tags but knows nothing of history:
-        // carry the appended RevisionLog onto the new trip-0 anchor
+        // carry the appended RevisionLog onto the new log anchor --
+        // findAnchor0 again, so the point written to is the one the
+        // next revision's read will find
         if (newLog !== "") {
             var newAnchor0 = findAnchor0();
             if (newAnchor0 !== null) {

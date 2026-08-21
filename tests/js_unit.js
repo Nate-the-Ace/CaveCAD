@@ -355,6 +355,72 @@ ok(CsModel.tripFingerprint({date: "2020-01-01", declination: "junk",
 ok(CsModel.tripFingerprint({}) === "|",
     "fingerprint of a record with no fields at all");
 
+// ---------------------------------------------------------------------
+// The blank trip 0 ensureTrips has to invent, and who gets to have it.
+//
+// ensureTrips cannot leave trips empty -- the whole suite reads
+// trips[0] -- so a survey with no metadata and no shots gets a blank
+// record standing in for a trip nobody has entered yet. That slot is
+// the ABSENCE of a trip, and tripIdFor must OCCUPY it rather than
+// number past it: a drawing numbered from 1 has no trip-0 anchor, and
+// the RevisionLog lives on the trip-0 anchor by schema, so such a
+// drawing could never carry a revision history at all.
+// ---------------------------------------------------------------------
+var ph = CsModel.newSurvey();
+CsModel.ensureTrips(ph);
+ok(ph.trips.length === 1 && CsModel.tripFingerprint(ph.trips[0]) === "|",
+    "placeholder: an empty survey's invented trip 0 fingerprints blank");
+ok(CsModel.isPlaceholderTrip(ph, 0) === true,
+    "placeholder: blank fingerprint and no shot claiming it = placeholder");
+var phPage = CsModel.newTrip();
+phPage.date = "2026-08-21"; phPage.team = "NS"; phPage.declination = -3.5;
+phPage.declinationSource = "user";
+ok(CsModel.tripIdFor(ph, phPage) === 0,
+    "placeholder: the first real trip TAKES slot 0, it does not append");
+ok(ph.trips.length === 1 && ph.trips[0] === phPage,
+    "placeholder: and the slot now holds that very record, got " +
+    ph.trips.length + " trips");
+// ensureTrips mirrors trips[0] up to the top-level fields, and it ran
+// against the placeholder on the way in -- so occupying the slot has
+// to re-mirror or survey.date/team keep describing the empty slot.
+ok(ph.date === "2026-08-21" && ph.team === "NS" &&
+        ph.declination === -3.5,
+    "placeholder: the top-level mirror describes the real trip, not " +
+    "the slot it replaced -- got '" + ph.date + "|" + ph.team + "'");
+ok(CsModel.isPlaceholderTrip(ph, 0) === false,
+    "placeholder: an occupied slot is no longer a placeholder");
+var phSecond = CsModel.newTrip();
+phSecond.date = "2026-08-22"; phSecond.team = "JB";
+ok(CsModel.tripIdFor(ph, phSecond) === 1,
+    "placeholder: the NEXT different trip appends as 1, as always");
+
+// A real trip may legitimately have no date and no team -- an undated
+// page, an unattributed block -- and its slot is NOT up for grabs.
+// Shots claiming it are what tells the two apart; stealing it would
+// merge two different parties' work under one record.
+var phReal = CsModel.newSurvey();
+phReal.shots.push(shotOf("N1", "N2", 10, 45));
+CsModel.ensureTrips(phReal);
+ok(CsModel.tripFingerprint(phReal.trips[0]) === "|" &&
+        phReal.shots[0].trip === 0,
+    "placeholder: a nameless trip WITH shots still fingerprints blank");
+ok(CsModel.isPlaceholderTrip(phReal, 0) === false,
+    "placeholder: shots claiming the slot make it a real trip");
+var phRealTrip0 = phReal.trips[0];
+var phIntruder = CsModel.newTrip();
+phIntruder.date = "2026-08-21"; phIntruder.team = "NS";
+ok(CsModel.tripIdFor(phReal, phIntruder) === 1,
+    "placeholder: a new page cannot displace a nameless trip that has " +
+    "shots -- it appends");
+ok(phReal.trips[0] === phRealTrip0 && phReal.shots[0].trip === 0,
+    "placeholder: the nameless trip keeps its slot and its shots");
+// and an equally nameless incoming record still MATCHES it by
+// fingerprint, which is the existing identity rule untouched
+ok(CsModel.tripIdFor(phReal, CsModel.newTrip()) === 0,
+    "placeholder: a blank incoming record is still the blank trip");
+ok(CsModel.isPlaceholderTrip(phReal, 7) === false,
+    "placeholder: a trip index that does not exist is not a placeholder");
+
 // parseFlags ignores letters outside its P/X/L/C vocabulary.
 var gf = CsModel.newShot();
 CsModel.parseFlags("PZQ9", gf);
@@ -5051,23 +5117,26 @@ if (!IS_NODE) {
     })();
 
     // -----------------------------------------------------------------
-    // A FIRST Draw into an EMPTY drawing. Two things have to hold, and
-    // the second is a documented limit rather than a feature:
+    // A FIRST Draw into an EMPTY drawing, then a revision of it -- the
+    // whole life of a survey Nathan typed himself, which is the case
+    // that used to carry no history at all.
     //
-    //   1. reading a log off an anchor that does not exist must not
-    //      throw on the way past. Nothing to read is not an error.
-    //   2. the entry is DROPPED, not parked. surveyFromDocument gives an
-    //      empty document one blank trip 0, so the page's fingerprint
-    //      matches nothing and it lands as trip 1 -- leaving a drawing
-    //      with no trip-0 anchor at all. The RevisionLog lives on the
-    //      trip-0 anchor by definition of the schema, and that is the
-    //      only place either revision path looks; writing it onto the
-    //      trip-1 anchor instead would put it somewhere the NEXT
-    //      revision's erase deletes without anyone reading it. Losing
-    //      one entry beats a log that quietly loses all of them.
+    // The old behaviour: an empty document reconstructs to one BLANK
+    // trip 0, the page's fingerprint matched it no better than any
+    // other, so the page landed past it and the drawing ended up with
+    // no trip-0 anchor. The log lives on the trip-0 anchor by schema,
+    // so the entry was DROPPED -- silently, on every revision, forever.
+    // CsRevise.trip0Anchor's lowest-anchor fallback is what gives such
+    // a drawing somewhere to keep its history.
     //
-    // CsRevise.apply behaves the same way on such a drawing, so the two
-    // paths at least agree. The real fix is trip numbering, not logging.
+    // Three things have to hold:
+    //   1. reading a log off a drawing with no anchor at all must not
+    //      throw. Nothing to read is not an error.
+    //   2. the first Draw writes its entry, and onto the anchor both
+    //      revision paths agree to look at.
+    //   3. a SECOND Draw finds that entry again across its own
+    //      erase-and-redraw and appends to it. A home the next
+    //      revision cannot find is no better than no home.
     // -----------------------------------------------------------------
     (function() {
         var doc = new RDocument(new RMemoryStorage(),
@@ -5107,13 +5176,35 @@ if (!IS_NODE) {
         ok(CsTags.collectStations(doc).length === 3,
             "notebook-log-empty: and it still drew the page -- the log is " +
             "never allowed to cost the user their survey");
-        ok(CsRevise.trip0Anchor(doc) === null,
-            "notebook-log-empty: the page landed as trip 1, so there is " +
-            "still no trip-0 anchor for a log to live on");
 
-        // nothing parked on the trip-1 anchor either: a log the next
-        // revision's erase would delete unread is worse than none
-        var parked = "";
+        // keyed on getId(): entity query order in this build is NOT
+        // deterministic, so the anchor is re-found rather than held
+        var logNow = function() {
+            var a = CsRevise.trip0Anchor(doc);
+            return a === null ? null : CsTags.get(a, "RevisionLog");
+        };
+        var anchorTrip = function() {
+            var a = CsRevise.trip0Anchor(doc);
+            return a === null ? null : CsTags.getNumber(a, "Trip");
+        };
+        ok(CsRevise.trip0Anchor(doc) !== null,
+            "notebook-log-empty: a typed page gives the drawing an anchor " +
+            "the log can live on");
+        var elog1 = logNow();
+        ok(elog1.indexOf("(2026-01-01|FIRST) added from the notebook " +
+            "page, 2 shots") > 0,
+            "notebook-log-empty: the first Draw is recorded, not dropped, " +
+            "got '" + elog1 + "'");
+        // The entry names a trip id, and the log has to sit on THAT
+        // trip's anchor -- the entry and its home disagreeing is how a
+        // reader ends up looking in the wrong place.
+        ok(elog1.indexOf("trip " + anchorTrip() + " (") === 0,
+            "notebook-log-empty: the entry sits on the anchor of the trip " +
+            "it names (trip " + anchorTrip() + "), got '" + elog1 + "'");
+        // exactly one entity carries the log: parking a second copy
+        // anywhere would give the next revision two histories to pick
+        // from
+        var carriers = 0;
         var eids = doc.queryAllEntities(false, false);
         for (var q = 0; q < eids.length; q++) {
             var ee = doc.queryEntity(eids[q]);
@@ -5121,12 +5212,133 @@ if (!IS_NODE) {
                 continue;
             }
             if (CsTags.get(ee, "RevisionLog") !== "") {
-                parked += CsTags.get(ee, "RevisionLog");
+                carriers++;
             }
         }
-        ok(parked === "",
-            "notebook-log-empty: the entry is dropped rather than written " +
-            "somewhere no reader looks, got '" + parked + "'");
+        ok(carriers === 1,
+            "notebook-log-empty: the log has exactly one home, got " +
+            carriers);
+
+        // -- and now revise it: the case Nathan asked the log FOR ------
+        // Retype the header declination and Draw again. The Az cells are
+        // MAGNETIC, so back out the old header and forward through the
+        // new one, exactly as sheetSurvey does for untouched cells.
+        var recon2 = CsRevise.surveyFromDocument(doc);
+        var trip = anchorTrip();
+        var page2 = SurveyNotebook.tripSurvey(recon2.survey, trip);
+        var wasDecl = page2.declination;
+        page2.declination = -3.75;
+        page2.declinationSource = "user";
+        for (var k = 0; k < page2.shots.length; k++) {
+            var mag = CsAngles.applyDeclination(page2.shots[k].azimuth,
+                -wasDecl);
+            page2.shots[k].azimuth =
+                CsAngles.applyDeclination(mag, -3.75);
+            page2.shots[k].declination = null;
+        }
+        QMessageBox = {
+            information: function() {},
+            warning: function() {}
+        };
+        try {
+            SurveyNotebook.drawMergedSurvey(null, doc, page2, recon2);
+        } finally {
+            QMessageBox = realBox;
+        }
+        var elog2 = logNow();
+        ok(elog2 !== null && elog2.indexOf(elog1) === 0,
+            "notebook-log-empty: the first entry survived the revision's " +
+            "erase -- the fallback anchor is a STABLE home, got '" +
+            elog2 + "'");
+        ok(elog2.indexOf("declination 0 -> -3.75 (user)") > 0,
+            "notebook-log-empty: and the declination change is named, " +
+            "which is what the log is for, got '" + elog2 + "'");
+    })();
+
+    // -----------------------------------------------------------------
+    // A drawing whose lowest trip is 1, built directly to model the
+    // state the shipped defect already left in Nathan's cave files:
+    // trips numbered from 1, no trip-0 anchor anywhere. Such a drawing
+    // still has to get a working log, which is the whole reason
+    // trip0Anchor falls back to the lowest anchor present.
+    //
+    // CsDraw tags one anchor per trip that has a resolved station, so a
+    // survey whose trip 0 owns no shots simply produces no Trip=0 tag.
+    // -----------------------------------------------------------------
+    (function() {
+        var doc = new RDocument(new RMemoryStorage(),
+            new RSpatialIndexNavel());
+        var di = new RDocumentInterface(doc);
+        getDocument = function() { return doc; };
+        getDocumentInterface = function() { return di; };
+
+        var S = CsModel.newSurvey();
+        CsModel.ensureTrips(S);            // the blank placeholder slot
+        var t1 = CsModel.newTrip();
+        t1.date = "2026-02-02"; t1.team = "LEGACY";
+        t1.declination = -1.0; t1.declinationSource = "user";
+        S.trips.push(t1);
+        var g1 = shotOf("G1", "G2", 10, 30);
+        var g2 = shotOf("G2", "G3", 10, 120);
+        g1.trip = 1; g2.trip = 1;
+        g1.declination = -1.0; g2.declination = -1.0;
+        S.shots.push(g1);
+        S.shots.push(g2);
+        CsDraw.survey(S, CsNetwork.resolve(S, {}));
+
+        var trips = {};
+        var ids = doc.queryAllEntities(false, false);
+        for (var i = 0; i < ids.length; i++) {
+            var e = doc.queryEntity(ids[i]);
+            if (isNull(e) || CsTags.get(e, "Station") === "" ||
+                    CsTags.get(e, "Trip") === "") {
+                continue;
+            }
+            trips[CsTags.getNumber(e, "Trip")] = true;
+        }
+        ok(trips[0] === undefined && trips[1] === true,
+            "log-fallback: the drawing really does start at trip 1 -- no " +
+            "trip-0 anchor to find");
+        var fb = CsRevise.trip0Anchor(doc);
+        ok(fb !== null && CsTags.getNumber(fb, "Trip") === 1,
+            "log-fallback: trip0Anchor falls back to the lowest anchor " +
+            "present, got " + (fb === null ? "null" :
+                CsTags.getNumber(fb, "Trip")));
+
+        // and a real revision through it lands and reads back
+        var recon = CsRevise.surveyFromDocument(doc);
+        var newSurvey = CsRevise.surveyFromDocument(doc).survey;
+        CsRevise.reviseDeclination(newSurvey, 1, -4.0, "igrf");
+        CsRevise.apply(doc, di, recon, newSurvey);
+        var fbLog = CsTags.get(CsRevise.trip0Anchor(doc), "RevisionLog");
+        ok(fbLog.indexOf("trip 1 declination -1 -> -4 (igrf)") >= 0,
+            "log-fallback: a trip-1-only drawing carries its revision " +
+            "after all, got '" + fbLog + "'");
+
+        // Preference unchanged: once the drawing HAS a trip 0, that is
+        // where the log lives. The fallback is for drawings that lack
+        // one, not a new home for the ones that don't.
+        var S2 = CsModel.newSurvey();
+        S2.date = "2026-03-03"; S2.team = "HEALTHY";
+        CsModel.ensureTrips(S2);
+        var s2t1 = CsModel.newTrip();
+        s2t1.date = "2026-03-04"; s2t1.team = "OTHER";
+        S2.trips.push(s2t1);
+        var h1 = shotOf("H1", "H2", 10, 0);
+        var h2 = shotOf("H2", "H3", 10, 90);
+        h2.trip = 1;
+        S2.shots.push(h1);
+        S2.shots.push(h2);
+        var doc2 = new RDocument(new RMemoryStorage(),
+            new RSpatialIndexNavel());
+        var di2 = new RDocumentInterface(doc2);
+        getDocument = function() { return doc2; };
+        getDocumentInterface = function() { return di2; };
+        CsDraw.survey(S2, CsNetwork.resolve(S2, {}));
+        var a0 = CsRevise.trip0Anchor(doc2);
+        ok(a0 !== null && CsTags.getNumber(a0, "Trip") === 0,
+            "log-fallback: trip 0 still wins when it is there, got " +
+            (a0 === null ? "null" : CsTags.getNumber(a0, "Trip")));
     })();
 }
 

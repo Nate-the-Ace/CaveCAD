@@ -366,6 +366,36 @@ CsModel.tripOf = function(survey, shot) {
 };
 
 /**
+ * True when survey.trips[index] is the empty slot ensureTrips builds
+ * out of a survey that had no metadata at all -- not a trip, but the
+ * ABSENCE of one, waiting to be filled.
+ *
+ * Both halves of the test are load-bearing. A blank fingerprint alone
+ * is not enough: a real trip may legitimately have no date and no team
+ * (an undated notebook page, an unattributed Compass block), and
+ * handing its slot to some other party's page would silently merge two
+ * different trips' work under one record. So the slot also has to be
+ * unused -- no shot anywhere claims it. A trip nobody surveyed on and
+ * nobody can name is a placeholder; a nameless trip with shots in it is
+ * a trip.
+ */
+CsModel.isPlaceholderTrip = function(survey, index) {
+    if (survey.trips === undefined || survey.trips === null ||
+            survey.trips[index] === undefined) {
+        return false;
+    }
+    if (CsModel.tripFingerprint(survey.trips[index]) !== "|") {
+        return false;
+    }
+    for (var i = 0; i < survey.shots.length; i++) {
+        if ((survey.shots[i].trip || 0) === index) {
+            return false;
+        }
+    }
+    return true;
+};
+
+/**
  * Finds tripRecord's trip index within survey, matching by
  * fingerprint (see tripFingerprint) so re-importing the same trip
  * twice reuses one slot instead of piling up duplicates. Appends
@@ -378,6 +408,16 @@ CsModel.tripOf = function(survey, shot) {
  * blocks one date and team apart but a declination apart land here as
  * ONE trip, and each shot's own recorded declination is what keeps
  * that merge lossless.
+ *
+ * No match OCCUPIES a placeholder trip 0 (isPlaceholderTrip) rather
+ * than appending past it. ensureTrips has to invent trips[0] out of the
+ * top-level fields before anything can ask this question, and on a
+ * survey with no metadata and no shots -- an empty drawing about to
+ * receive its first typed page -- that invention is blank. Appending
+ * past it left such drawings numbered from 1 with no trip 0 at all,
+ * which reads as arbitrary to a user and, worse, silently costs them
+ * the RevisionLog: the log lives on the trip-0 anchor by schema, so a
+ * drawing with no trip 0 has nowhere to keep its history.
  */
 CsModel.tripIdFor = function(survey, tripRecord) {
     CsModel.ensureTrips(survey);
@@ -387,6 +427,15 @@ CsModel.tripIdFor = function(survey, tripRecord) {
             CsModel.absorbDeclination(survey, i, tripRecord);
             return i;
         }
+    }
+    if (CsModel.isPlaceholderTrip(survey, 0)) {
+        survey.trips[0] = tripRecord;
+        // trips[0] is the authority over the top-level mirror fields
+        // (see ensureTrips' WARNING), and the mirror currently
+        // describes the placeholder we just replaced -- re-mirror or
+        // survey.date/team/declination keep reporting the empty slot.
+        CsModel.ensureTrips(survey);
+        return 0;
     }
     survey.trips.push(tripRecord);
     return survey.trips.length - 1;
