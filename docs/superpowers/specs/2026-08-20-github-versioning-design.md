@@ -596,6 +596,25 @@ repo received the objects. `CsHub` stays faked because it is the network.
 
 `make_package.sh` gains the sort-order uniqueness assertion.
 
+### Verification status as of 2026-08-21 (slice 1)
+
+**Item 4 — PARTIALLY verified, by proxy, not by a Finder launch.** Running CaveCAD
+under a stripped environment (`env -i HOME=$HOME`, the closest approximation to what
+launchd hands a Finder-launched app) reproduces the bug the candidate ladder exists to
+prevent: `PATH` comes back as `/usr/gnu/bin:/usr/local/bin:/bin:/usr/bin:.` with no
+`/opt/homebrew/bin`, a bare `gh` fails with `execve: No such file or directory`, and the
+absolute path works. Discovery via absolute candidates is therefore confirmed necessary
+and sufficient under that environment. A real `open -a CaveCAD` launch has NOT been done.
+
+Note the stripped `PATH` still contains `/usr/local/bin`, so this bug bites Apple Silicon
+Homebrew and would silently fail to reproduce on an Intel Mac.
+
+**Also verified headlessly:** the full `discoverTools` -> `probe` -> `ladder` chain run
+inside CaveCAD's own engine against this machine returns all six rungs green, matching the
+real `gh auth status` and `git config` state checked independently in the shell.
+
+**Item 1 belongs to slice 2** — there is no save wrapper yet.
+
 ### Needs live GUI verification (cannot be proven headless)
 
 1. The `Save.prototype.save` wrapper actually fires on File > Save, on Ctrl+S, and on

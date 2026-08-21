@@ -47,7 +47,7 @@
     {
       "id": 5,
       "subject": "Task 6: GitHubSetup tool and ladder display",
-      "status": "pending",
+      "status": "completed",
       "blockedBy": [
         4
       ],
@@ -72,5 +72,5 @@
       "description": "**USER-ORDERED GATE \u2014 NON-SKIPPABLE.** This task was requested by the user in the current conversation. It MUST NOT be closed by walking around it, by declaring it \"verified inline\", or by substituting a cheaper check. Close only after every item in `acceptanceCriteria` has been re-validated independently, with output captured.\n\n**Goal:** Confirm in a running CaveCAD, launched from Finder, that the tool appears, resolves gh, and reports every rung correctly.\n\n**Files:**\n- Modify: none expected. Any fix goes in the file that owns the failure.\n\n**Acceptance Criteria:**\n- [ ] `./tools/publish.sh` completes and reports the new version installed.\n- [ ] CaveCAD is launched with `open -a CaveCAD` (Finder environment), NOT from a terminal.\n- [ ] \"GitHub Setup\" appears in the Cave Survey menu.\n- [ ] All six rungs report passing on this already-authenticated machine, proving gh was found despite the minimal Finder PATH.\n- [ ] cave-git.log contains the probe's commands and ZERO token matches.\n\n**Verify:** `cd ~/Documents/github/qcad-azimuth-tool && ./tools/publish.sh && open -a CaveCAD`, run the tool, then `grep -cE \"gh[pousr]_[A-Za-z0-9_]{8,}\" ~/Library/Application\\ Support/QCAD/CaveCAD/cave-git.log` -> 0\n\n**Steps:**\n- Publish the add-on; a failure here is a test failure, not a GUI problem.\n- Launch with `open -a CaveCAD` so the app gets launchd's minimal environment -- launching the binary directly would inherit the shell PATH and hide the exact bug Task 4 prevents.\n- Run Cave Survey > GitHub Setup; expect six OK rungs.\n- Check the log is written and contains no token.\n- Append a dated GUI-verified line to the spec for items 1 and 4 only.\n- Commit the spec update.\n\n```json:metadata\n{\"files\": [\"docs/superpowers/specs/2026-08-20-github-versioning-design.md\"], \"verifyCommand\": \"grep -cE \\\"gh[pousr]_[A-Za-z0-9_]{8,}\\\" ~/Library/Application\\\\ Support/QCAD/CaveCAD/cave-git.log\", \"acceptanceCriteria\": [\"publish.sh completes with the new version installed\", \"app launched via open -a CaveCAD, not the binary\", \"GitHub Setup present in the Cave Survey menu\", \"all six rungs report OK under the Finder PATH\", \"cave-git.log has at least one command line and zero token matches\"], \"userGate\": true, \"tags\": [\"user-gate\"], \"gateScope\": \"gui-verification\", \"modelTier\": \"standard\"}\n```"
     }
   ],
-  "lastUpdated": "2026-08-21T04:30:00-04:00"
+  "lastUpdated": "2026-08-21T05:15:00-04:00"
 }
