@@ -5602,6 +5602,11 @@ if (!IS_NODE) {
 // CsProc -- argv discipline, redaction, injectable backend.
 // ---------------------------------------------------------------------
 
+// Under CaveCAD's engine, RSettings and QFile both exist, so CsProc.log
+// would otherwise append real lines to the user's own cave-git.log
+// while this suite runs. Leave it off for the rest of the file.
+CsProc.logEnabled = false;
+
 var procCalls = [];
 CsProc.setBackend(function(prog, argv, opts) {
     procCalls.push({ prog: prog, argv: argv, opts: opts });
@@ -5636,11 +5641,39 @@ ok(CsProc.redact("gho_0123456789abcdefghijklmnopqrstuvwx")
 ok(CsProc.redact("ghu_AAA ghs_BBB").indexOf("ghu_AAA") === -1 &&
    CsProc.redact("ghu_AAA ghs_BBB").indexOf("ghs_BBB") === -1,
     "CsProc.redact removes ghu_ and ghs_ tokens");
+ok(CsProc.redact("tok github_pat_11ABCDEFG0abcdefg")
+        .indexOf("github_pat_11ABCDEFG0abcdefg") === -1,
+    "CsProc.redact removes a github_pat_ fine-grained token");
 ok(CsProc.redact("no secret here") === "no secret here",
     "CsProc.redact leaves ordinary text alone");
 ok(CsProc.redact(null) === "", "CsProc.redact tolerates null");
 
+// hasToken must be a stateless predicate despite TOKEN_RE carrying the
+// "g" flag -- calling .test() on the shared regex directly would walk
+// lastIndex and alternate true/false/true across repeated calls.
+ok(CsProc.hasToken("ghp_AAAAAAAA") === true,
+    "CsProc.hasToken finds a token (first call)");
+ok(CsProc.hasToken("ghp_AAAAAAAA") === true,
+    "CsProc.hasToken finds a token (second call in a row, same answer)");
+ok(CsProc.hasToken("no secret here") === false,
+    "CsProc.hasToken is false for ordinary text");
+
 CsProc.setBackend(null);   // restore the real backend for later sections
+
+// The fake above never exercises CsProc.qprocessBackend -- the only
+// code that does real work, and where both the timeout/notStarted
+// confusion and the missing-QProcess guard would have lived
+// undetected. Run it for real, engine-only (node has no QProcess).
+if (!IS_NODE) {
+    CsProc.setBackend(null);
+    var rv = CsProc.run("/bin/echo", ["one two"]);
+    ok(rv.code === 0, "real backend: /bin/echo exits 0");
+    ok(rv.out.indexOf("one two") === 0, "real backend: captures stdout as ONE arg");
+    var rm = CsProc.run("/usr/bin/no-such-binary-xyz", []);
+    ok(rm.code !== 0, "real backend: missing binary is a failure");
+    ok(rm.timedOut === false, "real backend: missing binary is NOT a timeout");
+    ok(rm.notStarted === true, "real backend: missing binary reports notStarted");
+}
 
 // ---------------------------------------------------------------------
 // Report.
