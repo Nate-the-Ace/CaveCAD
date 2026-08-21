@@ -1921,7 +1921,7 @@ cd ~/Documents/github/qcad-azimuth-tool && ./tools/publish.sh && open -a CaveCAD
 then run the tool and read the log:
 ```bash
 grep -c "auth status" ~/Library/Application\ Support/QCAD/CaveCAD/cave-git.log
-grep -cE "gh[pousr]_[A-Za-z0-9_]{8,}" ~/Library/Application\ Support/QCAD/CaveCAD/cave-git.log
+grep -cE "gh[pousr]_[A-Za-z0-9_]+|github_pat_[A-Za-z0-9_]+" ~/Library/Application\ Support/QCAD/CaveCAD/cave-git.log
 ```
 Expected: at least 1 for the first, exactly 0 for the second.
 
@@ -1951,7 +1951,7 @@ If the `gh` rung reports missing, discovery is broken under the Finder environme
 
 ```bash
 tail -20 ~/Library/Application\ Support/QCAD/CaveCAD/cave-git.log
-grep -cE "gh[pousr]_[A-Za-z0-9_]{8,}" ~/Library/Application\ Support/QCAD/CaveCAD/cave-git.log
+grep -cE "gh[pousr]_[A-Za-z0-9_]+|github_pat_[A-Za-z0-9_]+" ~/Library/Application\ Support/QCAD/CaveCAD/cave-git.log
 ```
 Expected: command lines with exit codes; `0` matches for the token pattern.
 
@@ -1973,5 +1973,10 @@ git commit -m "docs: record the GUI verification of the setup ladder"
 **Spec coverage.** Executable discovery → Task 4. Ladder rungs 1–6 → Task 5, with `probe` in Task 6. Install links → Task 4. Device flow → Tasks 5 and 7. Token fallback → **not implemented in this slice**; the primary device flow covers the machines in play, and the fallback needs a masked-input dialog whose behavior under the brew bridge is unverified. Tracked as the first item of slice 2 rather than left as a stub here. Redaction → Task 1. `assertPrivate` → Task 3 as `CsHub.isPrivate`; its call sites arrive with clone and push in slice 2. Sort-order uniqueness assertion → already exists as `test_sort_orders_are_unique`, verified in Task 6 rather than duplicated.
 
 **Naming consistency.** `CsProc.run`, `CsProc.setBackend`, `CsProc.redact`; `CsGit.argv*`/`CsGit.parse*`; `CsHub.argv*`/`CsHub.parse*`/`CsHub.isPrivate`/`CsHub.hasRepoScope`/`CsHub.noreplyEmail`; `CsSetup.candidates`/`resolve`/`validateCached`/`installHelp`/`ladder`/`firstFailure`/`probe`/`identityPlan`/`parseDeviceCode`/`readDeviceCode`/`loginSucceeded`. Used identically in every task.
+
+**Deferred from Task 1, deliberately.** The quality review of `CsProc` raised log rotation
+— `cave-git.log` grows unbounded, and "auto-push after every save" makes it a hot path. Left
+out: it is a behavior change that wants its own rotation policy, and nothing auto-pushes
+until slice 2. It belongs with the save wrapper, where it starts to matter.
 
 **Not in this slice:** `CsRepo`, `CsSidecar`, `CsCommitMsg`, `CsSync`, the save wrapper, `CloneProject`, `InitCaveRepo`, `SyncProject`, `ProjectStatus`, `OpenPullRequest`. Slice 2 also depends on a GUI pass of the revision framework, which is not this plan's work.
