@@ -950,7 +950,7 @@ ok(hMac.command === "brew install gh", "osx gh command is brew install gh");
 ok(hMac.links.join(" ").indexOf("https://cli.github.com/") !== -1,
     "osx gh help links cli.github.com");
 var hWin = CsSetup.installHelp("win", "gh");
-ok(hWin.command === "winget install --id GitHub.cli", "win gh command is winget");
+ok(hWin.command === "winget install -e --id GitHub.cli", "win gh command is winget");
 var hLin = CsSetup.installHelp("linux", "gh");
 ok(hLin.links.join(" ").indexOf("install_linux.md") !== -1,
     "linux gh help links the distro instructions");
@@ -1084,9 +1084,9 @@ CsSetup.INSTALL_HELP = {
                       "https://github.com/cli/cli/releases/latest"] }
     },
     win: {
-        git: { command: "winget install --id Git.Git",
+        git: { command: "winget install -e --id Git.Git",
                links: ["https://git-scm.com/download/win"] },
-        gh: { command: "winget install --id GitHub.cli",
+        gh: { command: "winget install -e --id GitHub.cli",
               links: ["https://cli.github.com/"] }
     },
     linux: {
