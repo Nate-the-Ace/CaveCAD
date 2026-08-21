@@ -170,6 +170,17 @@ CsProc.qprocessBackend = function(prog, argv, opts) {
  * opts.timeoutMs  -- default CsProc.DEFAULT_TIMEOUT_MS
  * opts.stdin      -- written to the child's stdin, then the channel is
  *                    closed. The ONLY route for a token.
+ *
+ * NO opts.cwd / setWorkingDirectory: every command this slice runs is
+ * either global (no repository in scope yet) or takes its target as
+ * an explicit path argument. That stops being true in slice 2, once a
+ * clone step puts a real repository on disk -- a caller wanting a
+ * command to run INSIDE that repo will need either a cwd option added
+ * here (QProcess::setWorkingDirectory) or `git -C <path>` prepended to
+ * the argv. GitHubSetup's Task 7 review found exactly this gap: a
+ * "local" identity write silently landed in CaveCAD's own process cwd
+ * instead of any repository, because there was nowhere to point it.
+ * Recorded here so slice 2 does not have to rediscover it.
  */
 CsProc.run = function(prog, argv, opts) {
     if (!argv) {

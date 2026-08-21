@@ -12,6 +12,7 @@
 //   Cave Survey > GitHub Setup   (or type "githubsetup"/"ghsetup")
 
 include("scripts/EAction.js");
+include("scripts/simple.js");
 include(includeBasePath + "/../Core/CsAll.js");
 
 function GitHubSetup(guiAction) {
@@ -72,22 +73,34 @@ GitHubSetup.showLadder = function() {
     // "simplify" either branch below back to a handleUserMessage/
     // handleUserWarning newline string.
     if (failure === null) {
-        QMessageBox.information(RMainWindowQt.getMainWindow(),
-            qsTr("GitHub Setup"), body);
+        QMessageBox.information(getMainWindow(), qsTr("GitHub Setup"), body);
         // A one-line summary too -- that is what the command line is
         // good at.
         EAction.handleUserMessage(qsTr("GitHub setup: ready."));
         return;
     }
 
-    QMessageBox.warning(RMainWindowQt.getMainWindow(),
-        qsTr("GitHub Setup"), body);
+    QMessageBox.warning(getMainWindow(), qsTr("GitHub Setup"), body);
     EAction.handleUserWarning(qsTr("GitHub setup is incomplete."));
 
     // Only the rungs this tool can act on get an offer; an install is
     // the user's to run, and the plugin never downloads an installer.
     if (failure.id === "auth") {
-        GitHubSetup.offerSignIn(tools.ghPath);
+        // NOT on cause alone: CsSetup.RUNGS separates three causes
+        // behind the SAME "auth" id (CsSetup.AUTH_CAUSE_USAGE_ERROR,
+        // _NETWORK_FAILURE, _NOT_AUTHENTICATED) precisely because the
+        // remedy differs. A GUI review caught this branching on
+        // `failure.id === "auth"` alone: an offline caver got the
+        // correct warning text ("Authenticating again will not fix a
+        // machine that is offline") from the QMessageBox above, and
+        // THEN a sign-in dialog anyway, stuck forever on "Starting..."
+        // because nothing was ever going to print a code on a machine
+        // with no network. Only the one cause a sign-in dialog can
+        // actually fix gets the offer; the other two already got
+        // their answer in the box above.
+        if (failure.cause === CsSetup.AUTH_CAUSE_NOT_AUTHENTICATED) {
+            GitHubSetup.offerSignIn(tools.ghPath);
+        }
     } else if (failure.id === "scope") {
         // NOT runAndReport: `gh auth refresh -s repo` is a DEVICE-FLOW
         // command exactly like `gh auth login --web` (`gh auth refresh
@@ -114,6 +127,11 @@ GitHubSetup.showLadder = function() {
         }
     }
 };
+
+// Set while a device-flow dialog is open; cleared in runDeviceFlow's
+// own teardown(). See that function's docstring for the re-entrancy
+// hazard this exists to close.
+GitHubSetup.activeFlow = false;
 
 /**
  * Drives ANY gh device-flow command from inside CaveCAD: the one-time
@@ -186,34 +204,81 @@ GitHubSetup.showLadder = function() {
  * box, natural completion, or expiry) the only one that acts; Task 8
  * is where the close-box path actually gets to run.
  *
- * onFinished(loginResult) runs on exactly the path that never killed
- * the child -- natural completion -- with the process's own {code,
- * out, err}. Cancel, the native close box, and the 15-minute expiry
- * never call onFinished at all: there is nothing for a caller to act
- * on when this function is the one that chose to end the process.
+ * onFinished(loginResult, dialog) runs on exactly the path that never
+ * killed the child -- natural completion -- with the process's own
+ * {code, out, err, notStarted}. Cancel, the native close box, and the
+ * 15-minute expiry never call onFinished at all: there is nothing for
+ * a caller to act on when this function is the one that chose to end
+ * the process. The dialog is handed to onFinished STILL OPEN, showing
+ * "Checking with GitHub..." -- onFinished's own status re-check is a
+ * real (if short) network round trip, and a GUI review found the
+ * previous version closing the dialog first, so that wait had no
+ * visible cause on screen. onFinished must call dialog.accept() (or
+ * .reject()) itself once it is actually done.
+ *
+ * loginResult.notStarted is true when gh never ran at all (a bad
+ * path): proc.error() and proc.exitCode() were probed live in this
+ * engine against a nonexistent binary specifically for this fix (no
+ * gh, no git, no network involved) rather than trusted from Qt's
+ * documented behaviour -- QProcess.FailedToStart and QProcess.
+ * NotRunning both measured as 0 here, and exitCode() measured as 255,
+ * NOT the 0 a naive reading of the Qt docs would predict. Regardless
+ * of that number, a FailedToStart process must never be reported as
+ * ordinary success or a login-shaped failure -- onFinished gets
+ * `{code: -1, notStarted: true, err: proc.errorString()}` instead of
+ * whatever the raw (and here, misleading) exitCode() would have said.
  */
 GitHubSetup.runDeviceFlow = function(ghPath, argv, dialogTitle, helpText, onFinished) {
+    // A device-flow child polls GitHub for up to 15 minutes with a
+    // live one-time code on screen; this dialog is non-modal (the
+    // only one in this suite -- every other is dlg.exec(), e.g.
+    // SurveyNotebook.js:2267/2684) so beginEvent()/terminate() return
+    // immediately and the menu item is clickable again long before
+    // that. A GUI review flagged the result: a second click starts a
+    // SECOND `gh auth login`/`gh auth refresh` writing the same gh
+    // config, with two different one-time codes on screen. This guard
+    // (cleared in teardown) refuses a second flow instead.
+    if (GitHubSetup.activeFlow) {
+        EAction.handleUserWarning(qsTr(
+            "A GitHub sign-in or scope request is already in progress. " +
+            "Finish or cancel it first."));
+        return;
+    }
+    GitHubSetup.activeFlow = true;
+
     var proc = new QProcess();
-    var dialog = new QDialog(RMainWindowQt.getMainWindow());
+    var dialog = new QDialog(getMainWindow());
     dialog.windowTitle = dialogTitle;
 
     var layout = new QVBoxLayout();
 
-    var codeLabel = new QLabel(qsTr("Starting..."));
-    var font = codeLabel.font;
-    font.setPointSize(font.pointSize() + 10);
+    // A read-only QLineEdit, not a QLabel: the code needs to be
+    // SELECTABLE. A GUI review noted that offerScopeRefresh's argv has
+    // no --clipboard (only argvDeviceLogin does), so in that flow the
+    // code reaching the clipboard at all depends on this being
+    // something the caver can actually select and copy by hand.
+    // readOnly, not disabled, so it stays focusable/selectable --
+    // precedent at SurveyNotebook.js:2846/2869.
+    var codeEdit = new QLineEdit(qsTr("Starting..."));
+    codeEdit.readOnly = true;
+    var font = codeEdit.font;
+    // Math.max, not a bare "+ 10": pointSize() reports -1 for a font
+    // sized in pixels rather than points, and -1 + 10 is a SMALLER,
+    // harder-to-read 9pt label -- the opposite of the enlargement this
+    // line exists to do.
+    font.setPointSize(Math.max(font.pointSize(), 10) + 10);
     font.setBold(true);
-    codeLabel.font = font;
-    layout.addWidget(codeLabel, 0, 0);
+    codeEdit.font = font;
+    layout.addWidget(codeEdit);
 
     var help = new QLabel(helpText);
     help.wordWrap = true;
-    layout.addWidget(help, 0, 0);
+    layout.addWidget(help);
 
     var openButton = new QPushButton(qsTr("Open github.com/login/device"));
-    layout.addWidget(openButton, 0, 0);
+    layout.addWidget(openButton);
     var cancelButton = new QPushButton(qsTr("Cancel"));
-    layout.addWidget(cancelButton, 0, 0);
+    layout.addWidget(cancelButton);
     dialog.setLayout(layout);
 
     // Read fresh on every poll tick, never assumed fixed: gh's own
@@ -229,13 +294,13 @@ GitHubSetup.runDeviceFlow = function(ghPath, argv, dialogTitle, helpText, onFini
     var EXPIRY_MS = 15 * 60 * 1000;   // gh's own device-code expiry
 
     var timer = new QTimer();
-    timer.singleShot = false;
 
     var teardown = function(killChild) {
         if (settled) {
             return false;
         }
         settled = true;
+        GitHubSetup.activeFlow = false;
         try { timer.stop(); } catch (e) {}
         if (killChild) {
             // Kill, not terminate, and never conditioned on whether gh
@@ -243,6 +308,11 @@ GitHubSetup.runDeviceFlow = function(ghPath, argv, dialogTitle, helpText, onFini
             // polling GitHub after this window is gone, and kill() on
             // an already-finished process is a harmless no-op.
             try { proc.kill(); } catch (e2) {}
+            // Reap it: CsProc's own real backend does the same
+            // waitForFinished() after its kill() (CsProc.js), and
+            // this proc is held only by these closures, so nothing
+            // else will ever collect it otherwise.
+            try { proc.waitForFinished(1000); } catch (e3) {}
         }
         return true;
     };
@@ -276,59 +346,108 @@ GitHubSetup.runDeviceFlow = function(ghPath, argv, dialogTitle, helpText, onFini
     dialog.show();
 
     timer.timeout.connect(function() {
-        if (settled) {
-            return;
-        }
-        waitedMs += POLL_MS;
-
-        // Never blocks: drains whatever gh has written since the last
-        // tick. This is the entire reason a timer replaced the
-        // draft's waitForFinished() loop.
-        collected.out += new QTextStream(proc.readAllStandardOutput()).readAll();
-        collected.err += new QTextStream(proc.readAllStandardError()).readAll();
-
-        if (!codeShown) {
-            var code = CsSetup.readDeviceCode(collected);
-            if (code !== null) {
-                codeLabel.text = code;
-                codeShown = true;
-            }
-        }
-        var seenUrl = CsSetup.parseDeviceUrl(collected.out + "\n" + collected.err);
-        if (seenUrl !== CsSetup.DEVICE_URL) {
-            deviceUrl = seenUrl;
-        }
-
-        // proc.state(), never proc.waitForFinished(): the latter
-        // blocks the caller for up to its argument; the former just
-        // reports what QProcess already knows. Checked BEFORE the
-        // expiry test below so a process that finishes right at the
-        // 15-minute boundary is read normally, not killed for
-        // "expiring" a moment after it actually succeeded.
-        if (proc.state() === QProcess.NotRunning) {
-            if (!teardown(false)) {
+        // Broad but cheap, following CaveMode.js's own timer callback:
+        // an unexpected throw here must not propagate out of a signal
+        // handler into who-knows-where. waitedMs is the only variable
+        // that HAS to survive a bad tick for the 15-minute bound to
+        // keep holding, and it is read fresh on every call regardless
+        // of what a previous tick did.
+        try {
+            if (settled) {
                 return;
             }
-            dialog.accept();
-            // Read exitCode()/output ONLY here, on the one path that
-            // never calls kill() -- see the kill-before-read hazard
-            // in this function's docstring.
-            onFinished({ code: proc.exitCode(), out: collected.out,
-                         err: collected.err });
-            return;
-        }
+            waitedMs += POLL_MS;
 
-        if (waitedMs >= EXPIRY_MS) {
-            if (teardown(true)) {
-                dialog.reject();
-                EAction.handleUserWarning(
-                    qsTr("The one-time code expired before this finished. Try again."));
+            // Never blocks: drains whatever gh has written since the
+            // last tick. This is the entire reason a timer replaced
+            // the draft's waitForFinished() loop.
+            collected.out += new QTextStream(proc.readAllStandardOutput()).readAll();
+            collected.err += new QTextStream(proc.readAllStandardError()).readAll();
+
+            if (!codeShown) {
+                var code = CsSetup.readDeviceCode(collected);
+                if (code !== null) {
+                    codeEdit.text = code;
+                    codeShown = true;
+                    // Open automatically, once, the moment there is a
+                    // code worth entering -- a GUI review noted the
+                    // help text told the caver a browser "opens", but
+                    // nothing ever actually opened one; only the Open
+                    // button did, and only if clicked. Kept as a
+                    // fallback below too, in case this silently fails.
+                    try {
+                        QDesktopServices.openUrl(new QUrl(deviceUrl));
+                    } catch (eOpen) {
+                    }
+                }
             }
+            var seenUrl = CsSetup.parseDeviceUrl(collected.out + "\n" + collected.err);
+            if (seenUrl !== CsSetup.DEVICE_URL) {
+                deviceUrl = seenUrl;
+            }
+
+            // proc.state(), never proc.waitForFinished(): the latter
+            // blocks the caller for up to its argument; the former
+            // just reports what QProcess already knows. Checked
+            // BEFORE the expiry test below so a process that finishes
+            // right at the 15-minute boundary is read normally, not
+            // killed for "expiring" a moment after it actually
+            // succeeded.
+            if (proc.state() === QProcess.NotRunning) {
+                if (!teardown(false)) {
+                    return;
+                }
+                // Read error()/exitCode()/errorString() ONLY here, on
+                // the one path that never calls kill() -- see the
+                // kill-before-read hazard in this function's
+                // docstring, and see the docstring above for why
+                // error()/exitCode() were probed live rather than
+                // trusted from documentation.
+                var failedToStart = (proc.error() === QProcess.FailedToStart);
+                // Keep the dialog up: onFinished still has its own
+                // network round trip (a fresh `gh auth status`) before
+                // there is anything to report, and closing the window
+                // first would leave that wait with no visible cause.
+                codeEdit.text = qsTr("Checking with GitHub...");
+                try { openButton.enabled = false; } catch (e4) {}
+                try { cancelButton.enabled = false; } catch (e5) {}
+                onFinished({
+                    code: failedToStart ? -1 : proc.exitCode(),
+                    out: collected.out,
+                    err: failedToStart ? proc.errorString() : collected.err,
+                    notStarted: failedToStart
+                }, dialog);
+                return;
+            }
+
+            if (waitedMs >= EXPIRY_MS) {
+                if (teardown(true)) {
+                    dialog.reject();
+                    EAction.handleUserWarning(qsTr(
+                        "The one-time code expired before this finished. Try again."));
+                }
+            }
+        } catch (eTick) {
+            // Leave the dialog and the timer alone on any failure --
+            // the next tick, or Cancel, or the 15-minute expiry, still
+            // gets a chance to end this cleanly.
         }
     });
 
     timer.start(POLL_MS);
 };
+
+// Appended to a remedy's own success message so a fresh machine does
+// not need up to six separate trips through the menu with no hint
+// that another is required -- a GUI review found rungs 4-6 left
+// reported "--" (not evaluated) after sign-in or a scope grant with
+// nothing saying the ladder needed re-checking. This is deliberately
+// NOT a re-entry into showLadder() itself: doing that from inside a
+// signal handler would nest a modal QMessageBox in a callback and
+// re-run the (network-bearing) probes right there, which is the exact
+// blocking-on-the-GUI-thread problem this same review round fixed
+// elsewhere.
+GitHubSetup.RUN_AGAIN_HINT = " Run GitHub Setup again to check the remaining steps.";
 
 /**
  * The auth rung's remedy: `gh auth login --web`. See runDeviceFlow's
@@ -340,22 +459,58 @@ GitHubSetup.offerSignIn = function(ghPath) {
     }
     GitHubSetup.runDeviceFlow(ghPath, CsSetup.deviceLoginArgv(),
         qsTr("Sign in to GitHub"),
-        qsTr("Enter this code on the page that opens in your browser. It is already on your clipboard."),
-        function(loginResult) {
+        qsTr("Your browser should open automatically with this page ready. If it does not, click Open github.com/login/device below, then enter the code shown above."),
+        function(loginResult, dialog) {
+            if (loginResult.notStarted === true) {
+                dialog.accept();
+                EAction.handleUserWarning(
+                    qsTr("gh could not be started at %1. You can also " +
+                         "run \"gh auth login\" yourself in a terminal, " +
+                         "which finds gh through your normal PATH rather " +
+                         "than this stored location.").arg(ghPath));
+                return;
+            }
             // Requires a passing `gh auth status`, not just exit 0 --
             // see CsSetup.loginSucceeded's own docstring.
             var status = CsProc.run(ghPath, CsHub.argvAuthStatus());
+            dialog.accept();
             if (!CsSetup.loginSucceeded(loginResult, status)) {
-                var line = loginResult.err.split("\n")[0] ||
+                // The LAST meaningful line, not the first: loginResult.err
+                // is the device-flow child's WHOLE accumulated stream,
+                // which starts with gh's own one-time-code banner --
+                // split("\n")[0] on that is an empty string (the
+                // fixture's leading "\n") every single time, which is
+                // why an earlier version of this line always fell
+                // through to the generic fallback below regardless of
+                // what gh actually said.
+                var line = CsSetup.deviceFlowFailureLine(
+                    loginResult.out + "\n" + loginResult.err) ||
                     qsTr("no further detail was reported.");
+                // The device flow failing is not a dead end: the
+                // token-paste fallback the design spec mentions was
+                // deliberately deferred to slice 2 (unverified masked-
+                // input behaviour under this bridge), not dropped --
+                // this names the one alternative that already exists
+                // today, gh itself, so a caver is never left with
+                // nothing to try next.
                 EAction.handleUserWarning(
-                    qsTr("Sign-in did not complete. %1").arg(line));
+                    qsTr("Sign-in did not complete. %1 You can also run " +
+                         "\"gh auth login\" yourself in a terminal.").arg(line));
                 return;
             }
+            // parseLogin can still be null even when isAuthenticated
+            // (inside loginSucceeded) is true -- the two use different
+            // regexes ("Logged in to " vs. "account (\S+)") -- so this
+            // needs its own fallback rather than risking ".arg(null)"
+            // or an outright throw inside this signal handler, which
+            // would also skip the setup-git call just below.
+            var login = CsHub.parseLogin(status);
             EAction.handleUserMessage(qsTr("Signed in to GitHub as %1.")
-                .arg(CsHub.parseLogin(status)));
+                .arg(CsSetup.isBlank(login) ? qsTr("your GitHub account") : login));
             // Re-run rather than skip: a fresh login needs the
-            // credential helper wired.
+            // credential helper wired. Its own success message carries
+            // the "run again" hint, since it is the last thing this
+            // flow prints.
             GitHubSetup.runAndReport(ghPath, CsHub.argvSetupGit(),
                 qsTr("Configuring git's credential helper"));
         });
@@ -365,9 +520,11 @@ GitHubSetup.offerSignIn = function(ghPath) {
  * The scope rung's remedy: `gh auth refresh -s <scope>`. Also a
  * device-flow command -- see runDeviceFlow's docstring -- so it gets
  * the identical dialog, not GitHubSetup.runAndReport's blocking wait.
- * Success here means the token now actually CARRIES the scope, not
- * merely that gh exited 0: CsHub.hasRepoScope on a fresh `gh auth
- * status` is the same predicate the ladder's own scope rung trusts.
+ * Success here means the token now actually CARRIES the requested
+ * scope, not merely that gh exited 0 -- CsSetup.scopeRefreshSucceeded
+ * checks `scope` itself rather than a hardcoded "repo", so a future
+ * caller asking for a different scope (CsHub.SCOPES is already
+ * "repo,read:org") is checked against what it actually asked for.
  */
 GitHubSetup.offerScopeRefresh = function(ghPath, scope) {
     if (CsSetup.isBlank(ghPath) || CsSetup.isBlank(scope)) {
@@ -375,17 +532,34 @@ GitHubSetup.offerScopeRefresh = function(ghPath, scope) {
     }
     GitHubSetup.runDeviceFlow(ghPath, CsHub.argvRefreshScope(scope),
         qsTr("Grant GitHub access"),
-        qsTr("Enter this code on the page that opens in your browser to grant access."),
-        function(loginResult) {
-            var status = CsProc.run(ghPath, CsHub.argvAuthStatus());
-            if (loginResult.code !== 0 || !CsHub.hasRepoScope(status)) {
-                var line = loginResult.err.split("\n")[0] ||
-                    qsTr("no further detail was reported.");
+        qsTr("Your browser should open automatically with this page ready. If it does not, click Open github.com/login/device below, then enter the code shown above."),
+        function(loginResult, dialog) {
+            if (loginResult.notStarted === true) {
+                dialog.accept();
                 EAction.handleUserWarning(
-                    qsTr("Requesting the repo scope did not complete. %1").arg(line));
+                    qsTr("gh could not be started at %1. You can also " +
+                         "run \"gh auth refresh -s %2\" yourself in a " +
+                         "terminal, which finds gh through your normal " +
+                         "PATH rather than this stored location.")
+                        .arg(ghPath).arg(scope));
                 return;
             }
-            EAction.handleUserMessage(qsTr("The repo scope has been granted."));
+            var status = CsProc.run(ghPath, CsHub.argvAuthStatus());
+            dialog.accept();
+            if (!CsSetup.scopeRefreshSucceeded(loginResult, status, scope)) {
+                var line = CsSetup.deviceFlowFailureLine(
+                    loginResult.out + "\n" + loginResult.err) ||
+                    qsTr("no further detail was reported.");
+                // See offerSignIn's matching comment: not a dead end --
+                // gh itself, run directly, is always the alternative.
+                EAction.handleUserWarning(
+                    qsTr("Requesting the %1 scope did not complete. %2 " +
+                         "You can also run \"gh auth refresh -s %1\" " +
+                         "yourself in a terminal.").arg(scope).arg(line));
+                return;
+            }
+            EAction.handleUserMessage(qsTr("The %1 scope has been granted.")
+                .arg(scope) + GitHubSetup.RUN_AGAIN_HINT);
         });
 };
 
@@ -393,9 +567,15 @@ GitHubSetup.runAndReport = function(prog, argv, what) {
     if (CsSetup.isBlank(prog)) {
         return false;
     }
-    var r = CsProc.run(prog, argv, { timeoutMs: 60000 });
+    // 10s, not CsProc's 30s default: every command this is used for
+    // (`gh auth setup-git`) is a local git-config write, never a
+    // network call -- a GUI review found the previous 60s ceiling
+    // giving a purely local operation the same budget as a call that
+    // actually talks to GitHub.
+    var r = CsProc.run(prog, argv, { timeoutMs: 10000 });
     if (r.code === 0) {
-        EAction.handleUserMessage(what + ": " + qsTr("done."));
+        EAction.handleUserMessage(what + ": " + qsTr("done.") +
+            GitHubSetup.RUN_AGAIN_HINT);
         return true;
     }
     // Shortest decisive line, with the whole output in cave-git.log.
@@ -416,19 +596,48 @@ GitHubSetup.setIdentity = function(gitPath, ghPath) {
         EAction.handleUserWarning(qsTr("Could not read your GitHub account."));
         return;
     }
-    // Local by default. The noreply address keeps a real email out of
-    // history, which is permanent and readable by anyone added later.
-    var plan = CsSetup.identityPlan(user, false);
+    // GLOBAL, not local, and confirmed before writing: CsProc has no
+    // working-directory option (see its own docstring), so a "local"
+    // git config write from here lands in CaveCAD's own process cwd
+    // (".../CaveCAD.app/Contents/Resources" on macOS, measured live),
+    // not in any survey repository -- there IS no repository in scope
+    // in slice 1, since that only exists from slice 2's clone step
+    // onward. The only identity write that can actually succeed here
+    // is therefore the account-wide one, so it is confirmed first, the
+    // same as any other account-wide change (QMessageBox.question,
+    // precedent at SurveyStats.js:55 and Core/CsLocationPick.js:90).
+    var email = CsHub.noreplyEmail(user);
+    var answer = QMessageBox.question(getMainWindow(), qsTr("GitHub Setup"),
+        qsTr("Set your GLOBAL git commit identity (used by every " +
+             "repository on this computer) to %1 <%2>?")
+            .arg(user.name).arg(email),
+        QMessageBox.Yes | QMessageBox.No);
+    if (answer !== QMessageBox.Yes) {
+        return;
+    }
+    var plan = CsSetup.identityPlan(user, true);
     if (plan.length === 0) {
         EAction.handleUserWarning(
             qsTr("Could not determine a commit identity from your GitHub account."));
         return;
     }
+    // Each write's own exit code is checked -- an earlier version
+    // ignored both and unconditionally reported success, so the rung
+    // would fail again next session while the tool insisted it had
+    // already been fixed.
     for (var i = 0; i < plan.length; i++) {
-        CsProc.run(gitPath, plan[i]);
+        var r = CsProc.run(gitPath, plan[i]);
+        if (r.code !== 0) {
+            var line = r.err.split("\n")[0] || qsTr("no further detail was reported.");
+            EAction.handleUserWarning(
+                qsTr("Setting the commit identity failed. %1").arg(line));
+            return;
+        }
     }
-    EAction.handleUserMessage(qsTr("Commit identity set to %1 <%2> for this repository.")
-        .arg(user.name).arg(CsHub.noreplyEmail(user)));
+    // No "for this repository": there is no repository in scope, see
+    // this function's own comment above.
+    EAction.handleUserMessage(qsTr("Commit identity set to %1 <%2>.")
+        .arg(user.name).arg(email) + GitHubSetup.RUN_AGAIN_HINT);
 };
 
 GitHubSetup.init = function(basePath) {

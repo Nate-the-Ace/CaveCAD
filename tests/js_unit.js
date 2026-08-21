@@ -7466,6 +7466,76 @@ ok(CsSetup.loginSucceeded({ code: 0 }, null) === false,
     "already returns false on that, exercised here through the pair");
 
 // ---------------------------------------------------------------------
+// CsSetup.scopeRefreshSucceeded -- the SAME "exit 0 is not enough"
+// discipline as loginSucceeded, but checking for a SPECIFIC scope
+// rather than merely "logged in". AUTH_OK/AUTH_THIN are the same
+// captured fixtures CsHub's own scope tests use above.
+// ---------------------------------------------------------------------
+
+ok(CsSetup.scopeRefreshSucceeded({ code: 0 }, { code: 0, out: AUTH_OK, err: "" },
+    "repo") === true,
+    "scopeRefreshSucceeded true when the fresh status actually carries repo");
+ok(CsSetup.scopeRefreshSucceeded({ code: 0 }, { code: 0, out: AUTH_THIN, err: "" },
+    "repo") === false,
+    "scopeRefreshSucceeded false when the fresh status does NOT carry repo, " +
+    "even though the refresh itself exited 0");
+ok(CsSetup.scopeRefreshSucceeded({ code: 1 }, { code: 0, out: AUTH_OK, err: "" },
+    "repo") === false,
+    "scopeRefreshSucceeded false on a non-zero refresh even if status looks fine");
+// The defect this predicate exists to close: checking the WRONG scope.
+// AUTH_OK carries "repo", "read:org", "gist" and "workflow" but not
+// "delete_repo" -- a caller that hardcoded "repo" regardless of what
+// was actually requested would wrongly report success on a
+// "delete_repo" request here.
+ok(CsSetup.scopeRefreshSucceeded({ code: 0 }, { code: 0, out: AUTH_OK, err: "" },
+    "delete_repo") === false,
+    "scopeRefreshSucceeded checks the SCOPE PASSED IN, not a hardcoded " +
+    "\"repo\" -- AUTH_OK does not carry delete_repo even though it " +
+    "carries repo");
+ok(CsSetup.scopeRefreshSucceeded(null, { code: 0, out: AUTH_OK, err: "" },
+    "repo") === false,
+    "scopeRefreshSucceeded tolerates a missing loginResult");
+ok(CsSetup.scopeRefreshSucceeded({ code: 0 }, { code: 0, out: AUTH_OK, err: "" },
+    "") === false,
+    "scopeRefreshSucceeded tolerates an empty scope string rather than " +
+    "indexOf(\"\") matching everything");
+ok(CsSetup.scopeRefreshSucceeded({ code: 0 }, { code: 0, out: AUTH_OK, err: "" },
+    null) === false,
+    "scopeRefreshSucceeded tolerates a non-string scope");
+
+// ---------------------------------------------------------------------
+// CsSetup.deviceFlowFailureLine -- the last MEANINGFUL line of a
+// device-flow child's output, skipping the one-time-code banner
+// (GH_DEVICE_OUT, the same captured fixture used above) and blank
+// lines, walking from the end.
+// ---------------------------------------------------------------------
+
+ok(CsSetup.deviceFlowFailureLine(GH_DEVICE_OUT) === null,
+    "deviceFlowFailureLine returns null when the output is ONLY the " +
+    "banner -- there is no real failure line to report");
+ok(CsSetup.deviceFlowFailureLine(GH_DEVICE_OUT + "error: could not create token\n") ===
+    "error: could not create token",
+    "deviceFlowFailureLine finds the real line after the banner, not " +
+    "the banner's own blank first line");
+ok(CsSetup.deviceFlowFailureLine(
+    "error: could not create token\n" + GH_DEVICE_OUT) ===
+    "error: could not create token",
+    "deviceFlowFailureLine finds a real line even when the banner " +
+    "comes AFTER it and is trailed by blank lines");
+ok(CsSetup.deviceFlowFailureLine("") === null,
+    "deviceFlowFailureLine tolerates an empty string");
+ok(CsSetup.deviceFlowFailureLine(null) === null,
+    "deviceFlowFailureLine tolerates null");
+ok(CsSetup.deviceFlowFailureLine("\n\n   \n") === null,
+    "deviceFlowFailureLine tolerates a string that is only blank lines");
+ok(CsSetup.deviceFlowFailureLine("first problem\nsecond problem\n") ===
+    "second problem",
+    "deviceFlowFailureLine takes the LAST real line, not the first -- " +
+    "the opposite of runAndReport's single-error idiom, and " +
+    "deliberately so: a device-flow child's LAST line is the one " +
+    "closest to why it actually stopped");
+
+// ---------------------------------------------------------------------
 // Report.
 // ---------------------------------------------------------------------
 

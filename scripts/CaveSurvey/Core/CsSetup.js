@@ -839,7 +839,19 @@ CsSetup.probe = function(gitPath, ghPath) {
     // this function's docstring.
     probe.credentialHelper = CsProc.run(gitPath,
         ["config", "--get-regexp", "^credential"]);
-    probe.authStatus = CsProc.run(ghPath, CsHub.argvAuthStatus());
+    // A short timeout, not CsProc's 30s default: this runs on every
+    // menu click, on the GUI thread, before anything is on screen --
+    // GUI review found the worst case (two --version discovery probes
+    // plus this network round trip, all at 30s) leaving the window
+    // dead for up to 90s with nothing telling the caver why. 10s is
+    // still generous for a local `gh` talking to a reachable GitHub,
+    // and a genuinely offline machine is exactly the case CsHub's own
+    // isNetworkFailure/isUsageError diagnostics are for -- this rung
+    // reporting "not signed in" instead of the truth because the call
+    // timed out early is a worse outcome than the ladder simply saying
+    // so a few seconds sooner.
+    probe.authStatus = CsProc.run(ghPath, CsHub.argvAuthStatus(),
+        { timeoutMs: 10000 });
     return probe;
 };
 
@@ -900,6 +912,67 @@ CsSetup.loginSucceeded = function(loginResult, statusResult) {
         return false;
     }
     return CsHub.isAuthenticated(statusResult);
+};
+
+/**
+ * A scope GRANT counts only when a fresh `gh auth status` actually
+ * carries the requested scope -- never a bare `loginResult.code ===
+ * 0`, for the same reason loginSucceeded above does not trust a bare
+ * exit code either.
+ *
+ * Parameterized on `scope` rather than hardcoded to "repo": a GUI
+ * review caught an earlier draft that ran `gh auth refresh -s
+ * <scope>` but always checked CsHub.hasRepoScope(status) regardless
+ * of which scope was actually requested, so
+ * offerScopeRefresh(gh, "read:org") would have reported success or
+ * failure based on "repo", the wrong grant entirely. Lifted into Core
+ * (rather than left inline in GitHubSetup.js, where the first version
+ * of this check lived and no test could reach it) so this predicate
+ * gets the same test coverage loginSucceeded does.
+ */
+CsSetup.scopeRefreshSucceeded = function(loginResult, statusResult, scope) {
+    if (!loginResult || loginResult.code !== 0) {
+        return false;
+    }
+    if (typeof scope !== "string" || scope.length === 0) {
+        return false;
+    }
+    return CsHub.parseScopes(statusResult).indexOf(scope) !== -1;
+};
+
+/**
+ * The last MEANINGFUL line of a device-flow child's combined output,
+ * for a failure message -- never just the first line.
+ *
+ * A device-flow child's full output starts with gh's own one-time-code
+ * banner (the captured fixture: "\n! First copy your one-time code:
+ * D68F-995C\nOpen this URL to continue in your web browser: ..."), so
+ * `text.split("\n")[0]` -- the idiom GitHubSetup.runAndReport uses
+ * correctly for a single-error stderr -- is EITHER an empty string
+ * (the leading "\n") or the code/URL banner itself for a device-flow
+ * result: neither is the actual failure. A GUI review caught this
+ * reporting "no further detail was reported" on every device-flow
+ * failure regardless of what gh actually said, because the fallback
+ * fired every time. This walks from the END instead, skipping blank
+ * lines and the two banner lines, and returns the first real line it
+ * finds -- or null, exactly like every other parser in this file that
+ * has no safe substitute for "nothing was there" (contrast
+ * parseDeviceUrl, which has a safe fallback and uses one).
+ */
+CsSetup.deviceFlowFailureLine = function(text) {
+    var s = (typeof text === "string") ? text : "";
+    var lines = s.split("\n");
+    for (var i = lines.length - 1; i >= 0; i--) {
+        var line = lines[i].replace(/\s+$/, "");
+        if (line.length === 0) {
+            continue;
+        }
+        if (/one-time code:/i.test(line) || /open this url/i.test(line)) {
+            continue;
+        }
+        return line;
+    }
+    return null;
 };
 
 /**
