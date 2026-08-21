@@ -1180,16 +1180,15 @@ CsRevise.positionsMoved = function(oldPos, newPos, extent) {
 };
 
 /**
- * The linework outcome in words: the same sentences
- * CsReport.revisionSummary prints for the same facts, so the two
- * revision paths tell the user one story rather than two.
+ * The linework outcome in words -- the one place these sentences are
+ * written. CsReport.revisionSummary calls it with the fields off
+ * CsRevise.apply's report, so the two revision paths tell the user one
+ * story rather than two.
  *
- * Lives here rather than in CsReport only because CsReport is the
- * report-formatting module for CsRevise.apply's report OBJECT, and the
- * notebook's Draw has no such object to hand -- it has these two
- * numbers and nothing else. When CsReport is next opened, collapse its
- * linework block onto this function; the unit tests assert the two
- * agree word for word, so a drift in either one fails the build.
+ * Lives here rather than in CsReport because CsReport formats that
+ * report OBJECT and the notebook's Draw has no such object to hand --
+ * it has these two numbers and nothing else. The unit tests assert
+ * both callers agree word for word, so a drift fails the build.
  *
  * \return array of lines
  */

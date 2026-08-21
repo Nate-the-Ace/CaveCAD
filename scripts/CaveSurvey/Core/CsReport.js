@@ -103,7 +103,8 @@ CsReport.statsSummary = function(survey, stats, grade) {
 };
 
 // How many unmoved traced items a revision summary names before it
-// says "and N more".
+// says "and N more". Lives with the other report-shaping numbers, and
+// is read by CsRevise.lineworkSummary, which does the naming.
 CsReport.UNMOVED_SHOWN = 8;
 
 /** Summary of an applied revision (CsRevise.apply's report). */
@@ -177,40 +178,16 @@ CsReport.revisionSummary = function(report) {
     }
 
     if (!report.rigid) {
-        // Both halves of the linework outcome get said, because the
-        // interesting number is different for each reader: how much
-        // followed the survey (reassurance), and exactly what did not
-        // (a work list). Fields are absent on reports from older
-        // callers, so treat missing as "nothing bound".
-        var moved = (report.lineworkMoved === undefined ||
-            report.lineworkMoved === null) ? 0 : report.lineworkMoved;
-        var unmoved = (report.lineworkUnmoved === undefined ||
-            report.lineworkUnmoved === null) ? [] : report.lineworkUnmoved;
-        lines.push("Traced linework moved with its stations: " + moved);
-        if (unmoved.length > 0) {
-            lines.push("");
-            lines.push("WARNING -- " + unmoved.length + " traced item" +
-                (unmoved.length === 1 ? "" : "s") + " had no surviving " +
-                "station to follow and did NOT move; re-trace walls and " +
-                "detail there:");
-            // capped: this is a summary a beginner reads, not a manifest
-            var cap = Math.min(unmoved.length, CsReport.UNMOVED_SHOWN);
-            for (var u = 0; u < cap; u++) {
-                lines.push("  " + unmoved[u]);
-            }
-            if (unmoved.length > cap) {
-                lines.push("  ... and " + (unmoved.length - cap) + " more");
-            }
-        }
-        if (moved === 0) {
-            // Nothing was bound, so nothing could follow -- and an
-            // unbound trace is invisible to us, which is why this stays
-            // a warning even when the unmoved list above is empty.
-            lines.push("");
-            lines.push("WARNING -- hand-drawn linework that is not bound " +
-                "to the survey did NOT move with it; re-trace walls and " +
-                "detail near the moved stations, or bind it first " +
-                "(Adopt linework) and revise again.");
+        // One vocabulary for the linework outcome, spoken by whoever
+        // moved the linework: CsRevise. The notebook's Draw says the
+        // same sentences from the same function with no report object
+        // in hand, so the two revision paths cannot drift apart.
+        // Missing fields are handled there -- absent reads as
+        // "nothing bound" -- so hand them over as they are.
+        var linework = CsRevise.lineworkSummary(report.lineworkMoved,
+            report.lineworkUnmoved);
+        for (i = 0; i < linework.length; i++) {
+            lines.push(linework[i]);
         }
     }
     return lines.join("\n");
