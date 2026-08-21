@@ -56,6 +56,7 @@ edge case. And `QTableWidget` is still missing from this bridge (see
 | 5 | **Auto-push after every save.** Backup value comes from it being automatic. |
 | 6 | **Small team, one cave each.** No merge machinery; warn when another open PR touches the same cave. |
 | 7 | **Clones live in `~/Documents/Cave/` directly**, and **`scans/` is gitignored by default.** |
+| 9 | **The revision log drives commit messages and PR bodies, and exports verbatim** — team names included. |
 | 8 | **The plugin onboards a new user end to end** — detects a missing `git` or `gh`, gives platform-specific install links, and drives the GitHub login itself rather than assuming an authenticated CLI. |
 
 Two further calls made in the design and open to reversal at spec review:
@@ -222,6 +223,7 @@ setup a teammate might have, and each is better served by telling them to run
 ```
 drawings/                  .dxf — the source of truth
 survey/                    generated *.shots.tsv review sidecars
+                           and *.revisions.log, the exported revision log
 notes/                     trip notes, markdown
 exports/                   PDFs handed out; exports/tmp/ ignored
 scans/                     ignored — stays local
@@ -279,6 +281,7 @@ first time a binary DXF lands in the repo and silently corrupt it on checkout.
 *.tsv   text eol=lf
 *.dat   text eol=lf
 *.svx   text eol=lf
+*.log   text eol=lf
 *.svg   text eol=lf
 *.md    text eol=lf
 *.json  text eol=lf
@@ -316,7 +319,7 @@ tests never spawn `git` or touch the network.
 | `Core/CsSetup.js` | `CsSetup` | Executable discovery, the preflight ladder, the device-flow login state machine, git identity, and the platform-specific install links. |
 | `Core/CsRepo.js` | `CsRepo` | Scaffold content generation and writing, `CAVE.json` / `CAVES.json` read+write, path -> cave slug resolution, session branch naming. |
 | `Core/CsSidecar.js` | `CsSidecar` | Survey model -> deterministic TSV, and parse back for diffing. |
-| `Core/CsCommitMsg.js` | `CsCommitMsg` | Old sidecar + new sidecar + survey -> commit subject/body and PR title/body. |
+| `Core/CsCommitMsg.js` | `CsCommitMsg` | Revision-log delta (primary) plus sidecar diff (fallback and subject line) -> commit subject/body and PR title/body. |
 | `Core/CsSync.js` | `CsSync` | The save-path orchestrator: resolve repo, ensure branch, write sidecar, stage, commit, push. Owns the offline queue state and the "git is unavailable this session" latch. |
 
 `Core/CsAll.js` gains the new files in dependency order.
@@ -448,6 +451,60 @@ survey model in process.
 `.github/CODEOWNERS` routes each cave folder to its owner so the one-cave-each convention
 is enforced by review assignment rather than by memory.
 
+## The revision log is the message
+
+`RevisionLog` shipped in 2.7.1 on the revision-framework side: an append-only,
+newline-joined text property in the `CaveSurvey` group, on the trip-0 anchor station
+(falling back to the lowest-numbered trip anchor on older drawings), written by both
+revision paths through `CsRevise.appendLog`. Integration notes for this design are in
+`2026-08-21-revisionlog-versioning-notes.md`; the four calls they left open are settled
+here.
+
+It carries no timestamps, deliberately — this codebase avoids `Date` for test
+determinism. That composes rather than conflicts: **git supplies the time, the log
+supplies the meaning.**
+
+**1. The commit body is the log delta.** `CsCommitMsg` reads `RevisionLog`, diffs it
+against the value recorded at the previous commit, and uses the new lines as the body.
+This replaces generating prose from a sidecar diff, which would have been a worse
+paraphrase of something the drawing already says in the surveyor's own terms. The sidecar
+diff still supplies the subject line's counts.
+
+A save with **no new log lines** is a geometry-only edit — hand-traced walls, sheet
+furniture, a moved label. The body says exactly that rather than inventing a description
+of a revision that did not happen.
+
+**2. The PR body is the same source over a wider window** — the lines added since the
+branch point. "A trip becomes a reviewable unit carrying its own survey summary" then
+requires no generation at all.
+
+**3. It exports to `survey/<slug>.revisions.log`, verbatim.** XDATA is invisible on
+github.com, which defeats the purpose of putting review on GitHub; an append-only text
+file diffs as added lines rather than a rewrite, which is exactly what a reviewer wants.
+It is also the one artifact a DXF diff can never show usefully, because a revision rotates
+every coordinate in the file.
+
+**Team names are included (decision 9).** The names are already on the survey sheets, in
+the trip reports, and in the DXF, and decision 1 keeps the repo private with a
+fail-closed hook. The argument considered and rejected: a collaborator added years later
+reads the whole who-caved-with-whom history retroactively, since private means
+scoped-to-whoever-has-access-in-future, not scoped-to-today's-team. Judged proportionate
+for this team. **Note the asymmetry with coordinates deliberately:** the sidecar still
+omits lat/lon. Names are recoverable social information; an entrance location is not
+recoverable once it is out.
+
+### Two hazards about reading the log
+
+**Stock QCAD drops it.** The log survives as real DXF XDATA only through the CaveCAD
+fork's writer. A drawing opened and saved in stock QCAD loses it silently, as it loses
+every other tag. So a **gap in the log means someone saved elsewhere, not that nothing
+happened** — no versioning logic may treat the log as a complete history, and a commit
+whose log delta is empty must never be described as "no survey change" with any
+confidence beyond "this drawing does not record one."
+
+**Drawings predating 2.7.1 may have truncated logs**, because every Draw used to destroy
+the log. A short log is not evidence of a short history.
+
 ## Conflicts, offline, and errors
 
 **Nothing is ever text-merged.** Both the `.dxf` and the sidecar are regenerated wholes,
@@ -507,6 +564,12 @@ Unit tests in the existing headless harness (`tests/run_all.sh`, runs under node
   `win`, `linux`; the device-code regex extracts `XXXX-XXXX` from captured gh output on
   **either** stream; scope parsing correctly rejects an `auth status` fixture whose token
   lacks `repo`; the noreply email is built as `<id>+<login>@users.noreply.github.com`.
+- **Revision-log delta** — new lines are extracted against a recorded previous value;
+  an unchanged log yields an empty delta and the geometry-only-edit body; a log that
+  SHRANK (the pre-2.7.1 truncation case) is reported rather than diffed as if lines were
+  deliberately removed.
+- **Log export** — byte-identical across two runs, append-only relative to the previous
+  export, and team names present verbatim per decision 9.
 - **Token redaction** — `CsProc`'s log writer, given a line containing `ghp_`, `gho_`,
   `ghu_` or `ghs_` followed by token characters, emits a redacted line. Asserted with a
   synthetic string, never a real token. This test is the reason the log is safe to attach
@@ -547,6 +610,8 @@ repo received the objects. `CsHub` stays faked because it is the network.
   submodule state and does not need the surveyor to understand detached HEAD.
 - **Sanitized-copy export.** Still the right feature if a DXF ever has to leave the
   project, still not needed here, still low priority.
+
+Companion: `docs/superpowers/specs/2026-08-21-revisionlog-versioning-notes.md`.
 
 See [[qcad-plugin-conventions]], [[cave-location-privacy]],
 [[cave-survey-revision-framework]], [[qcad-publish-to-cave]].
