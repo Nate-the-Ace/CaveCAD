@@ -988,8 +988,8 @@ SurveyNotebook.mergeTripIntoSurvey = function(reconSurvey, tripRecord, shots) {
 };
 
 /** One trip as a chooser line: "Trip 0: ENT 1998-07-04 NS/JB decl -3.50
- *  (12 shots)". "Trip N:" matches the id the Declination tool's own
- *  per-trip rows use (Declination.tripLabel), so the same trip reads
+ *  (12 shots)". "Trip N:" matches the id the per-trip revision rows
+ *  use (CsRevise.tripLabel), so the same trip reads
  *  the same way in both places -- and, since the id is unique per
  *  trip, it is what the caller resolves the user's pick back to a
  *  trip BY, rather than re-matching the whole label string. The

@@ -18,13 +18,11 @@ Each appears in the **Cave Survey** menu and as a command:
 | Tool | Command | What it does |
 | --- | --- | --- |
 | Azimuth Traverse | `azt` | Plot shots one at a time from typed azimuth/distance/inclination/LRUD. |
-| Survey Notebook | `snb` | A docked survey notes page: type or import shots, watch closures/stats/warnings live, draw in one undo step, export to any format. |
+| Survey Notebook | `snb` | A docked survey notes page: type or import shots, watch closures/stats/warnings live, draw in one undo step, export to any format. Also owns declination: estimate it from the survey date and the cave's location (IGRF), pin that location to a station as the drawing's geo anchor, and correct a trip's declination after the fact -- the drawing rotates around the fix. |
 | Import Cave Survey | `ics` | Import Compass `.dat`, Walls `.srv`, Survex `.svx` or CSV -- the format is detected for you. |
 | LRUD Walls | `lw` | Approximate passage walls from the survey's LRUD, in survey order (works on imported data too). |
 | Scatter Breakdown | `scb` | Fill closed `BREAKDOWN-BOUNDARY` polylines with breakdown symbols, per boundary. |
 | Align Image | `ali` | Fit a scanned map onto known stations (move/rotate/scale, warp with 3+ points) for wall tracing. |
-| Geo Reference | `georef` | Pin a station to a real lat/lon **as data** -- no destructive rescaling. |
-| Declination | `decl` | IGRF magnetic declination for any location and date since 1900 -- for the old notes that never recorded it. |
 | Survey Stats | `sst` | Length, depth, loop closures, and the honest BCRA/UIS grade, computed from the drawing. |
 | Title Block | `tb` | Fill in the sheet's title block, every NSS required element explained. |
 | Build Legend | `bl` | Generate the legend from the symbols the map actually uses (NSS names, UIS aliases). |
