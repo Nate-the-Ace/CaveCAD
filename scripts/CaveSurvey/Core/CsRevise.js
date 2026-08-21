@@ -916,6 +916,14 @@ CsRevise.LINEWORK_RESIDUAL_FRACTION = 1e-3;
  *   neither               left exactly where it is and REPORTED.
  *                         Never guessed at silently.
  *
+ * An UNTAGGED entity is not this function's problem: both callers run
+ * CsBind.planAutoBind before their erase and CsBind.commitAutoBind
+ * before calling here, so by now anything bindable is bound. What is
+ * still untagged when this runs is untagged on purpose -- it binds to
+ * no station, or the user switched automatic binding off -- and is
+ * left alone for the same reason it always was: we cannot know what it
+ * belongs to, and inventing an answer moves the wrong geometry.
+ *
  * \param doc, di       document and its interface
  * \param oldPos        {name: {x, y}} station positions BEFORE the
  *                      revision -- the frame the tracing was drawn in
@@ -1180,24 +1188,58 @@ CsRevise.positionsMoved = function(oldPos, newPos, extent) {
 };
 
 /**
+ * The one sentence that owns up to an automatic claim: how many
+ * previously untagged entities this revision bound to the survey by
+ * itself. "" when it claimed nothing.
+ *
+ * Said out loud, always, because that is the price of automatic. The
+ * suite just wrote tags onto geometry the surveyor drew, and decided on
+ * their behalf that it belongs to a trip. A user who disagrees can only
+ * disagree with something they were told about -- and the number is
+ * deliberately separate from the moved count, so "12 moved" cannot hide
+ * "and 9 of those I claimed just now".
+ *
+ * Shared by both revision paths, and by CsReport when it is next
+ * opened, so there is one wording of this fact and not three.
+ */
+CsRevise.lineworkClaimLine = function(bound) {
+    var b = (bound === undefined || bound === null) ? 0 : bound;
+    if (b <= 0) {
+        return "";
+    }
+    return "Of those, " + b + " " + (b === 1 ? "was" : "were") +
+        " bound automatically just now -- untagged hand-drawn work " +
+        "that this revision recognised, tied to the stations it was " +
+        "drawn against, and moved. Undo twice to put the tags back.";
+};
+
+/**
  * The linework outcome in words: the same sentences
  * CsReport.revisionSummary prints for the same facts, so the two
  * revision paths tell the user one story rather than two.
  *
  * Lives here rather than in CsReport only because CsReport is the
  * report-formatting module for CsRevise.apply's report OBJECT, and the
- * notebook's Draw has no such object to hand -- it has these two
- * numbers and nothing else. When CsReport is next opened, collapse its
- * linework block onto this function; the unit tests assert the two
- * agree word for word, so a drift in either one fails the build.
+ * notebook's Draw has no such object to hand -- it has these numbers
+ * and nothing else. When CsReport is next opened, collapse its linework
+ * block onto this function and have it append lineworkClaimLine from
+ * report.lineworkBound; until then the notebook appends that one line
+ * itself after revisionSummary, from the same formatter, so the words
+ * are identical either way. The unit tests assert the shared block
+ * agrees word for word, so a drift in either one fails the build.
  *
+ * \param bound optional -- entities this revision bound by itself
  * \return array of lines
  */
-CsRevise.lineworkSummary = function(moved, unmoved) {
+CsRevise.lineworkSummary = function(moved, unmoved, bound) {
     var n = (moved === undefined || moved === null) ? 0 : moved;
     var list = (unmoved === undefined || unmoved === null) ? [] : unmoved;
     var lines = [];
     lines.push("Traced linework moved with its stations: " + n);
+    var claim = CsRevise.lineworkClaimLine(bound);
+    if (claim !== "") {
+        lines.push(claim);
+    }
     if (list.length > 0) {
         lines.push("");
         lines.push("WARNING -- " + list.length + " traced item" +
@@ -1326,6 +1368,12 @@ CsRevise.lineworkSummary = function(moved, unmoved) {
  *           Anything with no surviving station to follow is left alone
  *           and named in report.lineworkUnmoved -- the re-trace warning
  *           is now that honest fallback rather than the default.
+ *           UNTAGGED linework is bound first (CsBind.planAutoBind,
+ *           before the erase, while the station index is still the
+ *           frame it was drawn in) and moves with the rest, so a
+ *           drawing that never heard of binding is revised correctly on
+ *           its first revision. report.lineworkBound counts what that
+ *           claimed.
  *
  * OFF-layer caveat, probed empirically in this build: add, MODIFY and
  * DELETE operations are all silently refused for entities on a layer
@@ -1360,6 +1408,10 @@ CsRevise.lineworkSummary = function(moved, unmoved) {
  *                   surviving station to follow, or whose stations
  *                   moved too incoherently for one rigid move to
  *                   describe. Left exactly where they were
+ *   lineworkBound   how many previously UNTAGGED entities this
+ *                   revision bound to the survey itself, and so now
+ *                   owns. A subset of lineworkMoved, reported apart
+ *                   from it: see CsRevise.lineworkClaimLine
  *   geoAnchorLost   present (the lost station's name) only when a
  *                   non-rigid revision had a GeoLat/GeoLon/GeoStation
  *                   anchor to carry across the redraw but the station
@@ -1599,6 +1651,7 @@ CsRevise.apply = function(doc, di, recon, newSurvey) {
     // is nothing per-entity to count.
     var lineworkMoved = 0;
     var lineworkUnmoved = [];
+    var lineworkBound = 0;
 
     // -- OFF layers holding entities: ops there are silently refused --
     // CsRevise.withOffLayersOn scans per call rather than once up
@@ -1798,6 +1851,26 @@ CsRevise.apply = function(doc, di, recon, newSurvey) {
                 oldNames.push(on);
             }
         }
+
+        // -- 5a. claim the UNTAGGED linework, BEFORE the erase ---------
+        // The order is the correctness argument. Hand-drawn work was
+        // drawn against the stations WHERE THEY WERE, and the only
+        // record of where they were is the geometry the next two lines
+        // delete. So the binding is worked out here, from
+        // CsBind.stationIndex reading the OLD marks (station points,
+        // LRUD tips, splay tips -- all still in place), and only the
+        // WRITING waits for the redraw. Bind afterwards and every
+        // entity would be measured against stations that had already
+        // moved out from under it, which is a plausible-looking wrong
+        // answer -- the worst kind.
+        //
+        // The trip each entity gets is inferred from its own stations
+        // via this same tripStations map, so a wall traced against
+        // trip 2 is claimed for trip 2 whatever the revision is about.
+        var tripNames = CsRevise.tripStationNames(recon.survey);
+        var bindPlan = (typeof CsBind === "undefined") ? [] :
+            CsBind.planAutoBind(doc, tripNames);
+
         withOffLayersOn(function() {
             CsDraw.eraseStations(doc, oldNames);
         });
@@ -1853,9 +1926,17 @@ CsRevise.apply = function(doc, di, recon, newSurvey) {
             }
         }
         var newPos = CsRevise.stationPositions(doc);
+        // The tags go on now, not back at 5a: an entity has to be tagged
+        // before the mover below can see it, and writing them here means
+        // a revision that fell over between the erase and the redraw
+        // never wrote tags onto the user's geometry for a move that did
+        // not happen.
+        if (typeof CsBind !== "undefined") {
+            lineworkBound = CsBind.commitAutoBind(doc, di, bindPlan);
+        }
         withOffLayersOn(function() {
             var lw = CsRevise.moveLinework(doc, di, oldPos, newPos,
-                CsRevise.tripStationNames(recon.survey), extent);
+                tripNames, extent);
             lineworkMoved = lw.moved;
             lineworkUnmoved = lw.unmoved;
         });
@@ -1884,7 +1965,8 @@ CsRevise.apply = function(doc, di, recon, newSurvey) {
         anchorMissing: anchorMissing,
         anchorUsed: { name: anchorName, source: anchorSource },
         lineworkMoved: lineworkMoved,
-        lineworkUnmoved: lineworkUnmoved
+        lineworkUnmoved: lineworkUnmoved,
+        lineworkBound: lineworkBound
     };
     if (geoAnchorLost !== null) {
         // absent entirely rather than null when nothing was lost, so a

@@ -20,6 +20,39 @@
 // tracing can snap to them, so a wall traced by snapping has vertices
 // that COINCIDE EXACTLY with tagged geometry. That is an exact answer,
 // not a proximity guess -- the guess is only the fallback.
+//
+// WHEN BINDING HAPPENS: automatically, and twice over.
+//
+//   as you draw   a transaction listener tags each newly added entity
+//                 on a linework layer (installListener). Auditable --
+//                 the tags are in the drawing before any revision --
+//                 but it rests on a signal this bridge may not
+//                 deliver, and one that cannot be exercised headless.
+//   at revision   planAutoBind / commitAutoBind claim whatever is
+//                 still untagged, from the mover's own vantage point,
+//                 in the last moment before the erase. This one is
+//                 certain: no signal, no arming, and it works on
+//                 drawings made before any of this existed.
+//
+// NOTHING DEPENDS ON THE LISTENER. The revision-time pass is the
+// guarantee; the listener is the same answer arrived at earlier. Both
+// go through the same gates and the same inference, so they cannot
+// disagree about what belongs to whom.
+//
+// There is NO ARMING. The trip is worked out from the stations the
+// entity binds to (tripForStations), which is strictly more correct
+// than asking: trace against trip 2 while the notebook page holds
+// trip 1, and an armed design tags it to trip 1 -- then moves the
+// wrong passage. And an entity that binds to NO station is left
+// entirely alone: with no station there is nothing to infer a trip
+// from, and quietly claiming a surveyor's unrelated construction
+// geometry is the failure they would notice least and resent most.
+//
+// Automatic is the DEFAULT, and it is opt-out (autoBindEnabled).
+// Writing tags onto geometry the user drew themselves is the one thing
+// in this suite that touches their own work unasked, so it gets a
+// switch -- kept in RSettings, thrown from the notebook's Linework...
+// dialog.
 
 var CsBind = {};
 
@@ -349,6 +382,180 @@ CsBind.marginFor = function(stationIndex) {
 };
 
 // ---------------------------------------------------------------------
+// Trip inference -- the trip is READ OFF THE GEOMETRY, not armed
+// ---------------------------------------------------------------------
+//
+// The stations an entity binds to already know which trip they belong
+// to: the survey model says which trip's shots touch each name. So
+// LineworkTrip is derived from the binding instead of from whatever the
+// user last switched on, and a stroke traced against trip 2 is tagged
+// trip 2 even while the notebook page is showing trip 1.
+//
+// THE RULE, when the bound stations span more than one trip: MAJORITY,
+// tie-broken by the NEAREST bound station, and by the lowest trip id if
+// even that is silent.
+//
+// Majority, because a traced wall runs along a passage and the passage
+// is whichever trip owns most of the stations it touches. A junction
+// station belongs to both trips and honestly votes for both, which is
+// what makes the non-shared stations decide -- exactly the right
+// outcome for a wall that crosses a junction and carries on into one
+// trip. Nearest as the tie-break, because a genuine tie means the
+// stroke sits between two passages and the one it was drawn against is
+// the one it is closest to. Lowest id last, so the answer is
+// deterministic rather than dependent on entity query order (which this
+// build does not guarantee).
+//
+// The alternative -- nearest alone -- was rejected: one stray vertex
+// that happens to fall a hair closer to the neighbouring trip would
+// re-attribute an entire traced wall.
+
+/**
+ * {stationName: [tripIds]} from the {tripId: [names]} map
+ * CsRevise.tripStationNames builds. Pure. A junction station appears
+ * under every trip that touches it, and keeps them all.
+ */
+CsBind.tripsByStation = function(tripStations) {
+    var out = {};
+    if (tripStations === undefined || tripStations === null) {
+        return out;
+    }
+    for (var t in tripStations) {
+        if (!tripStations.hasOwnProperty(t)) {
+            continue;
+        }
+        var id = parseInt(t, 10);
+        if (isNaN(id)) {
+            continue;
+        }
+        var names = tripStations[t];
+        if (names === undefined || names === null) {
+            continue;
+        }
+        for (var i = 0; i < names.length; i++) {
+            var nm = names[i];
+            if (nm === undefined || nm === null || nm === "") {
+                continue; // a splay's blank "to"
+            }
+            if (out[nm] === undefined) {
+                out[nm] = [];
+            }
+            var seen = false;
+            for (var k = 0; k < out[nm].length; k++) {
+                if (out[nm][k] === id) {
+                    seen = true;
+                }
+            }
+            if (!seen) {
+                out[nm].push(id);
+            }
+        }
+    }
+    return out;
+};
+
+/**
+ * The trip a set of bound station names belongs to (see THE RULE
+ * above). Pure.
+ *
+ * \param names        the stations the entity bound to
+ * \param tripStations {tripId: [names]}, from CsRevise.tripStationNames
+ * \param nearest      optional -- the bound station nearest the entity,
+ *                     the tie-break. Ignored when it is not one of the
+ *                     tied trips' stations.
+ * \return the trip id, or NULL when not one of the names is known to
+ *         any trip. Null is not 0: trip 0 is a real trip, and writing
+ *         it as a guess would move a passage that has nothing to do
+ *         with the entity.
+ */
+CsBind.tripForStations = function(names, tripStations, nearest) {
+    if (names === undefined || names === null || names.length === 0) {
+        return null;
+    }
+    var byStation = CsBind.tripsByStation(tripStations);
+    var votes = {};
+    var best = 0;
+    for (var i = 0; i < names.length; i++) {
+        var trips = byStation[names[i]];
+        if (trips === undefined) {
+            continue;
+        }
+        for (var k = 0; k < trips.length; k++) {
+            var id = trips[k];
+            votes[id] = (votes[id] || 0) + 1;
+            if (votes[id] > best) {
+                best = votes[id];
+            }
+        }
+    }
+    if (best === 0) {
+        return null;
+    }
+    var tied = [];
+    for (var v in votes) {
+        if (votes.hasOwnProperty(v) && votes[v] === best) {
+            tied.push(parseInt(v, 10));
+        }
+    }
+    if (tied.length === 1) {
+        return tied[0];
+    }
+    // tie-break 1: whichever tied trip owns the nearest bound station
+    var nearTrips = (nearest === undefined || nearest === null) ?
+        undefined : byStation[nearest];
+    if (nearTrips !== undefined) {
+        for (i = 0; i < tied.length; i++) {
+            for (k = 0; k < nearTrips.length; k++) {
+                if (nearTrips[k] === tied[i]) {
+                    return tied[i];
+                }
+            }
+        }
+    }
+    // tie-break 2: deterministic, because query order is not
+    tied.sort(function(a, b) { return a - b; });
+    return tied[0];
+};
+
+/**
+ * The name in names whose index point lies closest to any of points --
+ * the tie-break tripForStations wants. Pure. null when there is
+ * nothing to measure.
+ */
+CsBind.nearestStationName = function(points, stationIndex, names) {
+    if (points === undefined || points === null || points.length === 0 ||
+            stationIndex === undefined || stationIndex === null ||
+            names === undefined || names === null || names.length === 0) {
+        return null;
+    }
+    var wanted = {};
+    for (var i = 0; i < names.length; i++) {
+        wanted[names[i]] = true;
+    }
+    var bestName = null;
+    var bestD2 = null;
+    for (var s = 0; s < stationIndex.length; s++) {
+        var st = stationIndex[s];
+        if (st === undefined || st === null || wanted[st.name] !== true) {
+            continue;
+        }
+        for (var p = 0; p < points.length; p++) {
+            var pt = points[p];
+            if (pt === undefined || pt === null) {
+                continue;
+            }
+            var dx = st.x - pt.x, dy = st.y - pt.y;
+            var d2 = dx * dx + dy * dy;
+            if (bestD2 === null || d2 < bestD2) {
+                bestD2 = d2;
+                bestName = st.name;
+            }
+        }
+    }
+    return bestName;
+};
+
+// ---------------------------------------------------------------------
 // Document side -- QCAD context only from here down
 // ---------------------------------------------------------------------
 
@@ -574,27 +781,53 @@ CsBind.boxOf = function(entity, points) {
  *   3 "trip"       nothing found: no station list, and the entity
  *                  follows its trip as a whole.
  *
- * \return {stations, source, trip}
+ * The TRIP comes from the stations wherever it can (tripForStations),
+ * which is why tripStations is worth passing: it is the difference
+ * between "the trip this entity was traced against" and "the trip
+ * somebody last selected". tripId is only the fallback for when the
+ * inference has nothing to say -- pass it as NULL to mean "infer or
+ * admit you can't", which is what the automatic passes want, and as a
+ * number to mean "and failing that, this one", which is what Adopt
+ * wants (the user named a trip there).
+ *
+ * \return {stations, source, trip} -- trip may be null when nothing
+ *         could be inferred and no fallback was given
  */
-CsBind.bindEntity = function(doc, entity, tripId, index, epsilon) {
-    var trip = (tripId === undefined || tripId === null) ? 0 : tripId;
+CsBind.bindEntity = function(doc, entity, tripId, index, epsilon,
+        tripStations) {
+    var trip = (tripId === undefined) ? 0 : tripId;
     var idx = (index === undefined || index === null) ?
         CsBind.stationIndex(doc) : index;
     var eps = (epsilon === undefined || epsilon === null) ?
         CsBind.epsilonFor(doc) : epsilon;
 
     var points = CsBind.pointsOf(entity);
+    // The stations decide the trip; the fallback only speaks when they
+    // are silent about it.
+    var tripFor = function(names) {
+        if (tripStations === undefined || tripStations === null) {
+            return trip;
+        }
+        var inferred = CsBind.tripForStations(names, tripStations,
+            CsBind.nearestStationName(points, idx, names));
+        return inferred === null ? trip : inferred;
+    };
+
     var snapped = CsBind.stationsForPoints(points, idx, eps);
     if (snapped.length > 0) {
-        return { stations: snapped, source: "snap", trip: trip };
+        return { stations: snapped, source: "snap", trip: tripFor(snapped) };
     }
     var box = CsBind.boxOf(entity, points);
     if (box !== null) {
         var near = CsBind.stationsInBox(box, idx, CsBind.marginFor(idx));
         if (near.length > 0) {
-            return { stations: near, source: "proximity", trip: trip };
+            return { stations: near, source: "proximity",
+                trip: tripFor(near) };
         }
     }
+    // Nothing found: there is no geometry to infer a trip from, so the
+    // only trip on offer is the caller's fallback. The automatic passes
+    // pass null here and drop the entity on the strength of it.
     return { stations: [], source: "trip", trip: trip };
 };
 
@@ -603,7 +836,15 @@ CsBind.bindEntity = function(doc, entity, tripId, index, epsilon) {
  * document, in ONE RModifyObjectsOperation so the whole tagging pass
  * is one undo step. QCAD only.
  *
- * entries: [{entity, trip, stations}] -- stations optional.
+ * entries: [{entity, trip, stations}] -- stations optional, and trip
+ * may be NULL, meaning "these stations, but no honest answer about
+ * which trip". That happens when an entity binds to station points the
+ * survey model does not name, and writing trip 0 instead would tie the
+ * entity to a passage it has nothing to do with. The station list
+ * alone is a complete binding: CsRevise.moveLinework prefers it and
+ * only falls back to the trip. An entry with neither is skipped -- a
+ * pass that "tagged" an entity with nothing is worse than one that
+ * left it alone, because hasLineworkTags would go on saying no.
  *
  * Off layers are handled: this build silently refuses adds, MODIFIES
  * and deletes on a layer that is off, so a tag written to an entity
@@ -646,9 +887,14 @@ CsBind.tagEntities = function(doc, di, entries) {
             if (en === undefined || en === null || isNull(en.entity)) {
                 continue;
             }
-            CsTags.set(en.entity, CsBind.TRIP_TAG,
-                (en.trip === undefined || en.trip === null) ? 0 : en.trip);
             var text = CsBind.encodeStations(en.stations);
+            var hasTrip = (en.trip !== undefined && en.trip !== null);
+            if (!hasTrip && text === "") {
+                continue; // nothing to say about it -- see the note above
+            }
+            if (hasTrip) {
+                CsTags.set(en.entity, CsBind.TRIP_TAG, en.trip);
+            }
             if (text !== "") {
                 CsTags.set(en.entity, CsBind.STATIONS_TAG, text);
             }
@@ -682,8 +928,19 @@ CsBind.tagEntities = function(doc, di, entries) {
  * Skipped: anything the layer gate refuses, anything already carrying
  * a linework tag (re-adopting is a deliberate retag, not a duplicate),
  * and anything carrying a suite tag (our own geometry).
+ *
+ * NOT skipped: an entity that binds to no station at all. That is the
+ * one thing left that only Adopt does. The automatic passes refuse to
+ * claim those (there is no trip to infer and no station to follow),
+ * whereas here the user has named a trip and been shown the count, so
+ * "follow trip N as a whole" is a choice they made rather than a guess
+ * made for them.
+ *
+ * \param tripStations optional {tripId: [names]} -- when given, each
+ *        entity's trip is inferred from its own stations and tripId is
+ *        only the fallback (see bindEntity).
  */
-CsBind.adoptable = function(doc, tripId) {
+CsBind.adoptable = function(doc, tripId, tripStations) {
     var out = [];
     var idx = CsBind.stationIndex(doc);
     var eps = CsBind.epsilonFor(doc);
@@ -700,7 +957,7 @@ CsBind.adoptable = function(doc, tripId) {
         if (CsBind.hasLineworkTags(e) || CsBind.isSuiteGeometry(e)) {
             continue;
         }
-        var bound = CsBind.bindEntity(doc, e, tripId, idx, eps);
+        var bound = CsBind.bindEntity(doc, e, tripId, idx, eps, tripStations);
         out.push({ entity: e, layer: layer, stations: bound.stations,
             source: bound.source, trip: bound.trip });
     }
@@ -727,91 +984,175 @@ CsBind.countBySource = function(items) {
 };
 
 // ---------------------------------------------------------------------
-// Arming: tagging linework AS IT IS DRAWN
+// The switch: automatic, and opt-out
 // ---------------------------------------------------------------------
 //
-// Arming state lives HERE rather than in the notebook, and is
-// deliberately module-global. The script engine outlives every tool
-// invocation, the transaction listener is installed once for the whole
-// session, and the notebook's dock is a singleton whose widgets can be
-// rebuilt -- so a second home for "are we armed, and for which trip"
-// would be a second answer to it. The notebook MIRRORS this state onto
-// its button; it never owns it.
+// ON by default, because Nathan is right that a surveyor should not
+// have to remember to ask for their own tracing to follow their own
+// survey. Off is still offered, because this is the one feature in the
+// suite that writes tags onto geometry the user drew themselves, and
+// somebody will not want that.
 //
-// Nothing here removes the listener. A listener installed twice
-// double-tags, and one uninstalled and reinstalled per arming is a
-// lifetime to get wrong for no gain: install lazily on the first arm,
-// after which arming and disarming are pure state, checked at the top
-// of every transaction.
+// Persisted in RSettings, the way CsLocationPick keeps the last
+// location and the notebook keeps its splitter and status-bar state --
+// a per-user preference, not a per-drawing one: it says how this
+// surveyor likes to work, and it must survive the drawing being closed.
+CsBind.SETTING_AUTO_BIND = "CaveSurvey/LineworkAutoBind";
 
-CsBind.armedTripId = null;    // null = disarmed. 0 IS a valid trip id.
-CsBind.armedDocKey = null;    // which drawing (null = don't check)
+// Harness/test seam ONLY: null means "ask RSettings", true/false force
+// the answer without writing anything. Exists because a test that
+// flipped the real setting and then threw would leave the feature
+// switched off in the user's own configuration -- their preference is
+// not ours to gamble with for a test.
+CsBind.autoBindOverride = null;
+
 CsBind.listener = null;       // the adapter, held so it is not collected
 CsBind.listenerRefused = false; // this bridge said no; don't keep asking
-CsBind.taggedWhileArmed = 0;  // feedback for the notebook
+CsBind.autoTagged = 0;        // tagged by the listener, for the notebook
 CsBind.lastError = "";        // last failure inside the handler, if any
 
-/** The armed trip id, or null when disarmed. */
-CsBind.armedTrip = function() {
-    return CsBind.armedTripId;
-};
-
-CsBind.isArmed = function() {
-    return CsBind.armedTripId !== null;
-};
-
 /**
- * The identity of a drawing, as far as this bridge offers one: its file
- * name. QCAD only. RDocument has no id or handle, and the bridge wraps
- * the same document in a FRESH JS object per signal emission (probed:
- * di.getDocument() !== the document it was built from), so === is not
- * an option. "" is a legitimate answer -- an unsaved drawing.
+ * Whether linework binds itself. Defaults to TRUE -- including when
+ * RSettings is not there at all (node, a harness), because "the
+ * settings are unreachable" is not a reason to stop doing the thing the
+ * feature exists to do.
  */
-CsBind.docKey = function(document) {
+CsBind.autoBindEnabled = function() {
+    if (CsBind.autoBindOverride !== null) {
+        return CsBind.autoBindOverride === true;
+    }
     try {
-        var n = document.getFileName();
-        return (n === undefined || n === null) ? "" : String(n);
+        return RSettings.getBoolValue(CsBind.SETTING_AUTO_BIND, true) === true;
     } catch (e) {
-        return "";
+        return true;
     }
+};
+
+/** Stores the preference. \return the value now in force. */
+CsBind.setAutoBindEnabled = function(on) {
+    var v = (on === true);
+    try {
+        RSettings.setValue(CsBind.SETTING_AUTO_BIND, v);
+    } catch (e) {
+        // No settings store here: the switch lasts the session only,
+        // which is the honest best this build can do.
+        CsBind.autoBindOverride = v;
+        CsBind.lastError = "this build would not store the linework " +
+            "binding preference (" + e + "), so it holds for this " +
+            "session only";
+    }
+    return CsBind.autoBindEnabled();
+};
+
+// ---------------------------------------------------------------------
+// Binding at REVISION time -- the pass nothing depends on a signal for
+// ---------------------------------------------------------------------
+//
+// Split into plan and commit, and the split is the whole point.
+//
+// PLAN reads the drawing and writes nothing. It must run BEFORE the
+// erase-and-redraw, because the linework was drawn against where the
+// stations were THEN: stationIndex(doc) is only the old frame until the
+// redraw replaces it. Bind after, and every entity would be measured
+// against stations that had already moved out from under it.
+//
+// COMMIT writes the tags, and runs after the redraw, so a revision that
+// turns out to move nothing (the notebook's Draw on a page that merely
+// ADDS a trip) writes nothing onto the user's geometry. It re-queries
+// each entity BY ID rather than reusing the entity objects the plan
+// held: those are snapshots taken before an erase, and handing a stale
+// snapshot to a modify operation is how you resurrect old state.
+
+/**
+ * Every untagged entity that CAN be bound, with the binding it would
+ * get: [{id, layer, stations, source, trip}]. QCAD only. WRITES
+ * NOTHING. Empty when the switch is off.
+ *
+ * Refused here, and this is the load-bearing refusal: an entity that
+ * binds to NO station. Under the old armed design a stroke a mile from
+ * the cave still took the armed trip id, because the arming supplied
+ * one. With the trip inferred from stations there is nothing to infer
+ * from -- and claiming a surveyor's unrelated construction geometry
+ * would be the failure they notice least and resent most. Distant
+ * sketches stay unclaimed. (Adopt still offers them, because there the
+ * user says so.)
+ *
+ * \param tripStations {tripId: [names]} from CsRevise.tripStationNames
+ */
+CsBind.planAutoBind = function(doc, tripStations) {
+    var out = [];
+    if (!CsBind.autoBindEnabled() || isNull(doc)) {
+        return out;
+    }
+    var idx = CsBind.stationIndex(doc);
+    if (idx.length === 0) {
+        return out; // nothing drawn to bind against
+    }
+    var eps = CsBind.epsilonFor(doc);
+    var ids = doc.queryAllEntities(false, false);
+    for (var i = 0; i < ids.length; i++) {
+        var e;
+        try {
+            e = doc.queryEntity(ids[i]);
+        } catch (eQ) {
+            continue;
+        }
+        if (isNull(e)) {
+            continue;
+        }
+        var layer = CsBind.layerNameOf(doc, e);
+        if (!CsBind.isLineworkLayer(layer)) {
+            continue;
+        }
+        // Already claimed stays claimed: a deliberate adoption -- or a
+        // correction the user made by hand -- outranks anything this
+        // pass would work out for itself.
+        if (CsBind.hasLineworkTags(e) || CsBind.isSuiteGeometry(e)) {
+            continue;
+        }
+        var bound = CsBind.bindEntity(doc, e, null, idx, eps, tripStations);
+        if (bound.stations.length === 0) {
+            continue; // binds to nothing: not ours to claim
+        }
+        out.push({ id: ids[i], layer: layer, stations: bound.stations,
+            source: bound.source, trip: bound.trip });
+    }
+    return out;
 };
 
 /**
- * Arms tagging for tripId, installing the listener on first use.
- * QCAD only. \return true when armed, false when this build refused
- * the listener (in which case nothing is armed and the caller should
- * say so -- the adopt action is the fallback).
- *
- * Pass the DOCUMENT that trip id belongs to. The listener is
- * application-wide while a trip id means nothing outside its own
- * drawing, so without this a stroke drawn in another open drawing
- * would be tagged to a trip that drawing may not even have -- and
- * moved by some later revision of the trip that happens to hold that
- * id. Omitting it (harnesses) means "don't check".
+ * Writes a plan's tags, one operation. QCAD only.
+ * \return the number of entities newly bound -- the number a revision
+ *         has to OWN UP TO, since it just took ownership of geometry
+ *         the user drew.
  */
-CsBind.arm = function(tripId, document) {
-    if (!CsBind.installListener()) {
-        return false;
+CsBind.commitAutoBind = function(doc, di, plan) {
+    if (plan === undefined || plan === null || plan.length === 0 ||
+            isNull(doc) || isNull(di)) {
+        return 0;
     }
-    CsBind.armedDocKey = isNull(document) ? null : CsBind.docKey(document);
-    var t = parseInt(tripId, 10);
-    CsBind.armedTripId = isNaN(t) ? 0 : t;
-    CsBind.taggedWhileArmed = 0;
-    CsBind.lastError = "";
-    // A suppression left unbalanced by an exception thrown mid-draw
-    // would silently keep tagging dead for the rest of the session --
-    // and the user would see an armed button that never tags anything.
-    // withSuppressed's finally already prevents that; this is the belt
-    // to its braces, and arming is the one moment where no legitimate
-    // suppression can be in progress (it comes from a button press,
-    // never from inside a draw).
-    CsBind.suppressDepth = 0;
-    return true;
-};
-
-CsBind.disarm = function() {
-    CsBind.armedTripId = null;
-    CsBind.armedDocKey = null;
+    var entries = [];
+    for (var i = 0; i < plan.length; i++) {
+        var e;
+        try {
+            e = doc.queryEntity(plan[i].id);
+        } catch (eQ) {
+            continue; // deleted between plan and commit
+        }
+        if (isNull(e) || CsBind.hasLineworkTags(e)) {
+            continue;
+        }
+        entries.push({ entity: e, trip: plan[i].trip,
+            stations: plan[i].stations });
+    }
+    if (entries.length === 0) {
+        return 0;
+    }
+    // Our own write is a transaction like any other: suppressed, or the
+    // listener walks in behind us and tags what we just tagged.
+    return CsBind.withSuppressed(function() {
+        return CsBind.tagEntities(doc, di, entries);
+    });
 };
 
 // ---- the re-entrancy guard ------------------------------------------
@@ -820,8 +1161,10 @@ CsBind.disarm = function() {
 // watches, so CsDraw.survey and CsRevise.apply must not be allowed to
 // look like hand-drawn linework. Two failure modes, both bad:
 //
-//   a suppression that LEAKS (never resumed) kills tagging for the
-//   rest of the session -- armed, and quietly doing nothing;
+//   a suppression that LEAKS (never resumed) kills draw-time tagging
+//   for the rest of the session -- switched on, and quietly doing
+//   nothing (the revision-time pass would still catch up, which is
+//   exactly why that pass does not consult this counter);
 //   a suppression that UNBALANCES (resumed twice) tags the next survey
 //   the user draws as if it were their own tracing.
 //
@@ -908,6 +1251,19 @@ CsBind.guardSuiteDrawing = function() {
 };
 
 // ---- the listener ----------------------------------------------------
+//
+// A BONUS, not a mechanism. It tags as you draw, which is auditable --
+// the tags are in the drawing, visible in the property editor, before
+// any revision -- where the revision-time pass has to infer the same
+// answer later. But whether transactionUpdated is delivered at all
+// cannot be established headless, so nothing is allowed to rest on it:
+// with the listener silent, planAutoBind reaches the same tags at the
+// same moment they first matter.
+//
+// It is installed once for the session and never removed. A listener
+// installed twice double-tags; one installed and removed per document
+// is a lifetime to get wrong for no gain. What used to arm it is now
+// just the switch, checked at the top of every transaction.
 
 /**
  * Installs the transaction listener, ONCE per engine. QCAD only.
@@ -1058,29 +1414,18 @@ CsBind.onTransaction = function(document, transaction, di) {
 
 CsBind.onTransactionInner = function(document, transaction, di) {
     // Cheapest checks first: this runs on EVERY transaction in the
-    // application, armed or not.
-    if (CsBind.armedTripId === null || CsBind.suppressDepth > 0) {
+    // application. RSettings caches, so the switch is a map lookup.
+    if (CsBind.suppressDepth > 0 || !CsBind.autoBindEnabled()) {
         return 0;
     }
     if (isNull(document) || isNull(transaction)) {
         return 0;
     }
-    // A different drawing than the one armed: refuse, and stop being
-    // armed. The trip id does not carry over, and quietly tagging on
-    // is the wrong-passage failure this whole feature exists to
-    // prevent. Saving an unsaved drawing renames it and so lands here
-    // too -- which is why disarming records a reason the notebook can
-    // show, instead of going silently dead.
-    if (CsBind.armedDocKey !== null &&
-            CsBind.docKey(document) !== CsBind.armedDocKey) {
-        CsBind.lastError = "the drawing being drawn in is not the one " +
-            "binding was armed on (another drawing came to the front, " +
-            "or this one was saved under a new name), so binding was " +
-            "disarmed rather than tag strokes to the wrong trip";
-        CsBind.disarm();
-        return 0;
-    }
-    var trip = CsBind.armedTripId;
+    // No drawing check any more, and none is needed: the trip is
+    // inferred from the stations in THIS document, so a stroke drawn in
+    // another open drawing gets that drawing's trips or no trip at all.
+    // The wrong-passage hazard the armed design had to police here
+    // simply cannot arise once the trip comes from the geometry.
     var ids = CsBind.addedEntityIds(document, transaction);
     if (ids.length === 0) {
         return 0;
@@ -1089,6 +1434,7 @@ CsBind.onTransactionInner = function(document, transaction, di) {
     var entries = [];
     var idx = null;   // built only once a candidate has survived the
     var eps = 0;      // gates -- it is a full scan of the drawing
+    var tripStations = null;
     for (var i = 0; i < ids.length; i++) {
         var e;
         try {
@@ -1111,9 +1457,20 @@ CsBind.onTransactionInner = function(document, transaction, di) {
         if (idx === null) {
             idx = CsBind.stationIndex(document);
             eps = CsBind.epsilonFor(document);
+            // Which trip owns which station, read off the drawing --
+            // the same question the revision-time pass asks, answered
+            // from the same source, so the two passes cannot attribute
+            // one stroke differently. Built here, behind the gates,
+            // because it is another full scan.
+            tripStations = CsBind.tripStationsOf(document);
         }
-        var bound = CsBind.bindEntity(document, e, trip, idx, eps);
-        entries.push({ entity: e, trip: trip, stations: bound.stations });
+        var bound = CsBind.bindEntity(document, e, null, idx, eps,
+            tripStations);
+        if (bound.stations.length === 0) {
+            continue; // binds to nothing: not ours to claim
+        }
+        entries.push({ entity: e, trip: bound.trip,
+            stations: bound.stations });
     }
     if (entries.length === 0) {
         return 0;
@@ -1128,6 +1485,34 @@ CsBind.onTransactionInner = function(document, transaction, di) {
     var n = CsBind.withSuppressed(function() {
         return CsBind.tagEntities(document, target, entries);
     });
-    CsBind.taggedWhileArmed += n;
+    CsBind.autoTagged += n;
     return n;
+};
+
+/**
+ * {tripId: [station names]} for a DOCUMENT, for the listener -- which
+ * has a document and no survey model. QCAD only, and never throws: a
+ * drawing whose survey cannot be read back gives no inference, which
+ * costs a trip tag rather than a stroke.
+ *
+ * The revision paths do not come through here; they already hold the
+ * reconstructed survey the revision is being computed from, and pass
+ * CsRevise.tripStationNames of it.
+ */
+CsBind.tripStationsOf = function(document) {
+    try {
+        if (typeof CsRevise === "undefined" ||
+                typeof CsRevise.surveyFromDocument !== "function") {
+            return null;
+        }
+        var recon = CsRevise.surveyFromDocument(document);
+        if (recon === undefined || recon === null) {
+            return null;
+        }
+        return CsRevise.tripStationNames(recon.survey);
+    } catch (e) {
+        CsBind.lastError = "couldn't read the survey back to work out " +
+            "which trip this belongs to (" + e + ")";
+        return null;
+    }
 };

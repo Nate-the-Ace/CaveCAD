@@ -2039,6 +2039,155 @@ if (teamBoundaryRt.trips.length === 2) {
 })();
 
 // ---------------------------------------------------------------------
+// Trip INFERENCE -- the answer that replaced arming. Pure, so it runs
+// under node too.
+//
+// The map's shape is CsRevise.tripStationNames': one entry per trip,
+// station names repeated per shot, a splay's blank "to" included.
+// ---------------------------------------------------------------------
+
+(function() {
+    // trip 0: A1-A2-A3(junction); trip 1: A3-A4-A5 plus a splay
+    var ts = { 0: ["A1", "A2", "A2", "A3"], 1: ["A3", "A4", "A4", "A5", ""] };
+    var by = CsBind.tripsByStation(ts);
+    ok(by["A1"].join(",") === "0", "tripsByStation: A1 is trip 0 only");
+    ok(by["A5"].join(",") === "1", "tripsByStation: A5 is trip 1 only");
+    ok(by["A3"].slice(0).sort().join(",") === "0,1",
+        "tripsByStation: the junction station belongs to BOTH trips, got " +
+        by["A3"]);
+    ok(by[""] === undefined,
+        "tripsByStation: a splay's blank 'to' is not a station");
+    ok(by["A2"].length === 1,
+        "tripsByStation: a name repeated per shot is not counted twice");
+
+    ok(CsBind.tripForStations(["A4", "A5"], ts) === 1,
+        "tripFor: stations of one trip give that trip");
+    ok(CsBind.tripForStations(["A1", "A2"], ts) === 0,
+        "tripFor: and trip 0 is a real answer, not a default");
+    // a wall that crosses the junction and runs on into trip 1: the
+    // junction votes for both, so the non-shared station decides
+    ok(CsBind.tripForStations(["A3", "A4"], ts) === 1,
+        "tripFor: majority -- the junction votes both ways, A4 decides");
+    ok(CsBind.tripForStations(["A2", "A3"], ts) === 0,
+        "tripFor: the mirror case decides for trip 0");
+    // a genuine tie: one station from each trip, nothing shared
+    ok(CsBind.tripForStations(["A1", "A5"], ts, "A5") === 1,
+        "tripFor: a tie goes to the NEAREST bound station's trip");
+    ok(CsBind.tripForStations(["A1", "A5"], ts, "A1") === 0,
+        "tripFor: the same tie the other way round");
+    ok(CsBind.tripForStations(["A1", "A5"], ts) === 0,
+        "tripFor: a tie with no nearest falls to the lowest trip id, so " +
+        "the answer never depends on entity query order");
+    ok(CsBind.tripForStations(["A1", "A5"], ts, "NOPE") === 0,
+        "tripFor: a nearest belonging to neither tied trip is ignored");
+    // nothing to go on: NULL, never 0 -- writing trip 0 as a guess
+    // would tie the entity to a passage it has nothing to do with
+    ok(CsBind.tripForStations(["ZZ1"], ts) === null,
+        "tripFor: stations no trip owns -> null, not trip 0");
+    ok(CsBind.tripForStations([], ts) === null, "tripFor: no stations -> null");
+    ok(CsBind.tripForStations(["A1"], null) === null,
+        "tripFor: no survey to ask -> null");
+
+    var pidx = [{ name: "A1", x: 0, y: 0 }, { name: "A5", x: 100, y: 0 },
+        { name: "A5", x: 103, y: 0 }];
+    ok(CsBind.nearestStationName([{ x: 90, y: 0 }], pidx, ["A1", "A5"]) ===
+        "A5", "nearest: the closer station wins");
+    ok(CsBind.nearestStationName([{ x: 10, y: 0 }], pidx, ["A1", "A5"]) ===
+        "A1", "nearest: and the other way round");
+    ok(CsBind.nearestStationName([{ x: 90, y: 0 }], pidx, ["A1"]) === "A1",
+        "nearest: only names on the shortlist are considered");
+    ok(CsBind.nearestStationName([], pidx, ["A1"]) === null,
+        "nearest: no points -> nothing to measure");
+    ok(CsBind.nearestStationName([{ x: 0, y: 0 }], pidx, []) === null,
+        "nearest: no names -> null");
+})();
+
+// --- the opt-out switch ----------------------------------------------
+// ON by default, and the default has to hold even where the settings
+// store cannot be reached: "no settings" is not a reason to stop doing
+// the thing the feature exists to do. Exercised by SHADOWING the
+// RSettings global (the same trick the QMessageBox-capturing tests
+// further down use), never by writing the user's real preference -- a
+// test that flipped that and then threw would leave the feature
+// switched off in their own configuration.
+(function() {
+    ok(CsBind.SETTING_AUTO_BIND === "CaveSurvey/LineworkAutoBind",
+        "switch: the settings key, got " + CsBind.SETTING_AUTO_BIND);
+    var realOverride = CsBind.autoBindOverride;
+    var realSettings = (typeof RSettings !== "undefined") ?
+        RSettings : undefined;
+    try {
+        CsBind.autoBindOverride = null;
+        var asked = null;
+        var stored = {};
+        RSettings = {
+            getBoolValue: function(key, dflt) {
+                asked = key;
+                return stored.hasOwnProperty(key) ? stored[key] : dflt;
+            },
+            setValue: function(key, value) {
+                stored[key] = value;
+            }
+        };
+        ok(CsBind.autoBindEnabled() === true,
+            "switch: ON by default, with nothing stored");
+        ok(asked === CsBind.SETTING_AUTO_BIND,
+            "switch: read from its own key, got " + asked);
+        ok(CsBind.setAutoBindEnabled(false) === false &&
+            CsBind.autoBindEnabled() === false,
+            "switch: turning it off persists and reads back");
+        ok(stored[CsBind.SETTING_AUTO_BIND] === false,
+            "switch: and it is the SETTING that holds it, so the choice " +
+            "survives the drawing being closed");
+        ok(CsBind.setAutoBindEnabled(true) === true &&
+            CsBind.autoBindEnabled() === true,
+            "switch: and back on again");
+
+        // no settings store at all
+        RSettings = undefined;
+        ok(CsBind.autoBindEnabled() === true,
+            "switch: unreachable settings still means ON");
+
+        // the harness seam wins over both, and writes nothing
+        CsBind.autoBindOverride = false;
+        ok(CsBind.autoBindEnabled() === false,
+            "switch: the override forces off without touching settings");
+        CsBind.autoBindOverride = true;
+        ok(CsBind.autoBindEnabled() === true, "switch: and forces on");
+    } finally {
+        RSettings = realSettings;
+        CsBind.autoBindOverride = realOverride;
+    }
+})();
+
+// --- the sentence a revision owns up with -----------------------------
+(function() {
+    ok(CsRevise.lineworkClaimLine(0) === "" &&
+        CsRevise.lineworkClaimLine(null) === "" &&
+        CsRevise.lineworkClaimLine(undefined) === "",
+        "claim: nothing claimed, nothing said");
+    var one = CsRevise.lineworkClaimLine(1);
+    ok(one.indexOf("1 was bound automatically") >= 0,
+        "claim: the singular reads as English, got '" + one + "'");
+    var many = CsRevise.lineworkClaimLine(9);
+    ok(many.indexOf("9 were bound automatically") >= 0,
+        "claim: the plural does too, got '" + many + "'");
+    ok(many.indexOf("Undo") >= 0,
+        "claim: and says how to take it back, got '" + many + "'");
+    // the shared block is untouched when nothing was claimed, which is
+    // what keeps it word for word identical to CsReport's (asserted
+    // above) while CsReport does not yet know about the claim
+    ok(CsRevise.lineworkSummary(3, []).join("\n") ===
+        CsRevise.lineworkSummary(3, [], 0).join("\n"),
+        "claim: a claim of 0 changes not one character of the summary");
+    var withClaim = CsRevise.lineworkSummary(3, [], 2).join("\n");
+    ok(withClaim.indexOf("Traced linework moved with its stations: 3") >= 0 &&
+        withClaim.indexOf("2 were bound automatically") >= 0,
+        "claim: the summary states the total AND what it claimed, " +
+        "separately -- '3 moved' must not be able to hide '2 claimed'");
+})();
+
+// ---------------------------------------------------------------------
 // Drawing round-trip -- QCAD engine only (node has no R* classes).
 // This is the test that would have caught the silent simple.js
 // failures: draw into a real document, read layers and tags back.
@@ -4114,8 +4263,12 @@ if (!IS_NODE) {
 
     // -----------------------------------------------------------------
     // ... and the same Draw on a page that only ADDS a trip disturbs no
-    // existing station, so it must not touch linework, cost an undo
-    // step, or warn about re-tracing something that did not move.
+    // existing station, so it must not touch linework, claim any, cost
+    // an undo step, or warn about re-tracing something that did not
+    // move. The claim is the part worth insisting on: automatic binding
+    // writes tags onto the user's own geometry, and doing that for a
+    // revision that turned out to be a no-op would be a change to their
+    // drawing in exchange for nothing.
     // -----------------------------------------------------------------
     (function() {
         var doc = new RDocument(new RMemoryStorage(), new RSpatialIndexNavel());
@@ -4131,6 +4284,20 @@ if (!IS_NODE) {
         S.shots.push(shotOf("P2", "P3", 10, 90));
         CsDraw.survey(S, CsNetwork.resolve(S, {}));
         var posBefore = CsRevise.stationPositions(doc);
+
+        // an untagged tracing right on top of the survey: bindable, and
+        // so exactly what must NOT be claimed by a Draw that moves
+        // nothing
+        CsLayers.ensure(doc, di, "WALLS-SURVEYED");
+        var addPd = new RPolylineData();
+        addPd.appendVertex(new RVector(posBefore.P1.x, posBefore.P1.y));
+        addPd.appendVertex(new RVector(posBefore.P2.x, posBefore.P2.y));
+        var addPl = new RPolylineEntity(doc, addPd);
+        addPl.setLayerId(doc.getLayerId("WALLS-SURVEYED"));
+        var addOp = new RAddObjectsOperation();
+        addOp.addObject(addPl, false);
+        di.applyOperation(addOp);
+        var addId = addPl.getId();
 
         var recon = CsRevise.surveyFromDocument(doc);
         var page = CsModel.newSurvey();
@@ -4174,6 +4341,437 @@ if (!IS_NODE) {
             boxText.indexOf("re-trace") < 0,
             "notebook-add: and the report says nothing about linework " +
             "for an event that did not happen, got '" + boxText + "'");
+        ok(CsBind.hasLineworkTags(doc.queryEntity(addId)) === false,
+            "notebook-add: a bindable untagged tracing is NOT claimed by " +
+            "a Draw that moved nothing -- automatic binding writes tags " +
+            "onto the user's geometry, and it owes them a reason");
+        ok(boxText.indexOf("bound automatically") < 0,
+            "notebook-add: and nothing is claimed out loud either, got '" +
+            boxText + "'");
+    })();
+
+    // -----------------------------------------------------------------
+    // AUTOMATIC BINDING, end to end. The point of the redesign: Nathan
+    // drew a spline round a station, adopted it, revised, and it
+    // followed -- but only because he remembered to adopt. Nobody
+    // should have to.
+    //
+    // One drawing, two trips joined at M3, and five kinds of entity
+    // that between them cover every decision this pass makes:
+    //
+    //   autoWall   untagged, snapped to trip 1's LRUD tips -> claimed,
+    //              tagged trip 1 (INFERRED, never told), and moved
+    //   autoRing   untagged closed ring round M5, snapped to nothing ->
+    //              claimed by proximity and moved. Nathan's spline
+    //   trip0Wall  untagged, snapped to trip 0's tips -> claimed and
+    //              tagged trip ZERO from the same pass, in the same
+    //              drawing, which is the proof that the trip comes off
+    //              the geometry and not from a mode
+    //   already    tagged BY HAND with a narrower station list than
+    //              snapping would give -> its tags survive untouched
+    //   far        untagged, nowhere near the survey -> never claimed,
+    //              never moved
+    //   ctrl/arrow untagged but on CTRL-SHOTS / NORTH-ARROW -> never
+    //              claimed, whatever they sit on top of
+    //
+    // Keyed on getId() throughout: entity query order is NOT stable.
+    // -----------------------------------------------------------------
+    (function() {
+        var doc = new RDocument(new RMemoryStorage(), new RSpatialIndexNavel());
+        var di = new RDocumentInterface(doc);
+        getDocument = function() { return doc; };
+        getDocumentInterface = function() { return di; };
+
+        var S = CsModel.newSurvey();
+        S.date = "2005-05-05";
+        S.team = "LOWER";
+        S.declination = 1.0;
+        S.declinationSource = "user";
+        CsModel.ensureTrips(S);
+        var upper = CsModel.newTrip();
+        upper.name = "UPPER";
+        upper.date = "2006-06-06";
+        upper.team = "UPPER TEAM";
+        upper.declination = 1.0;
+        upper.declinationSource = "user";
+        S.trips.push(upper);
+        var ms = [shotOf("M1", "M2", 10, 0), shotOf("M2", "M3", 10, 90),
+            shotOf("M3", "M4", 8, 45), shotOf("M4", "M5", 6, 120)];
+        for (var i = 0; i < ms.length; i++) {
+            ms[i].left = 2;
+            ms[i].right = 3;
+            if (i >= 2) {
+                ms[i].trip = 1;
+            }
+            S.shots.push(ms[i]);
+        }
+        CsDraw.survey(S, CsNetwork.resolve(S, {}));
+
+        var tipAt = {};
+        var scan = doc.queryAllEntities(false, false);
+        for (i = 0; i < scan.length; i++) {
+            var se = doc.queryEntity(scan[i]);
+            if (!isNull(se) && CsTags.get(se, "LRUDName") !== "") {
+                tipAt[CsTags.get(se, "LRUDName")] = se.getPosition();
+            }
+        }
+        var at = function(name) {
+            return { x: tipAt[name].x, y: tipAt[name].y };
+        };
+        var stationAt = CsRevise.stationPositions(doc);
+        ok(tipAt["M2.L"] !== undefined && tipAt["M4.L"] !== undefined &&
+            tipAt["M5.L"] !== undefined,
+            "auto-bind: LRUD tips on both trips to trace against");
+
+        var addPl = function(layerName, pts, closed) {
+            CsLayers.ensure(doc, di, layerName);
+            var pd = new RPolylineData();
+            for (var pi = 0; pi < pts.length; pi++) {
+                pd.appendVertex(new RVector(pts[pi].x, pts[pi].y));
+            }
+            if (closed === true) {
+                try {
+                    pd.setClosed(true);
+                } catch (eClose) {
+                    // an open ring exercises the same binding
+                }
+            }
+            var pl = new RPolylineEntity(doc, pd);
+            pl.setLayerId(doc.getLayerId(layerName));
+            var aop = new RAddObjectsOperation();
+            aop.addObject(pl, false);
+            di.applyOperation(aop);
+            return pl;
+        };
+
+        var autoWall = addPl("WALLS-SURVEYED", [at("M4.L"), at("M5.L")]);
+        var autoRing = addPl("BREAKDOWN", [
+            { x: stationAt.M5.x + 0.4, y: stationAt.M5.y },
+            { x: stationAt.M5.x, y: stationAt.M5.y + 0.4 },
+            { x: stationAt.M5.x - 0.4, y: stationAt.M5.y },
+            { x: stationAt.M5.x, y: stationAt.M5.y - 0.4 }], true);
+        var trip0Wall = addPl("WALLS-SURVEYED", [at("M2.L"), at("M3.L")]);
+        var already = addPl("WALLS-SURVEYED", [at("M4.R"), at("M5.R")]);
+        var far = addPl("WALLS-SURVEYED",
+            [{ x: 900, y: 900 }, { x: 903, y: 901 }]);
+        var ctrl = addPl("CTRL-SHOTS",
+            [at("M4.L"), { x: stationAt.M5.x, y: stationAt.M5.y }]);
+        var arrow = addPl("NORTH-ARROW",
+            [at("M4.L"), { x: stationAt.M5.x, y: stationAt.M5.y }]);
+
+        // the deliberate adoption the automatic pass must not overrule:
+        // M4 ALONE, though snapping would have found M4 and M5
+        CsBind.tagEntities(doc, di, [
+            { entity: already, trip: 1, stations: ["M4"] }
+        ]);
+
+        var vertsOf = function(id) {
+            return CsBind.pointsOf(doc.queryEntity(id));
+        };
+        var ids = { autoWall: autoWall.getId(), autoRing: autoRing.getId(),
+            trip0Wall: trip0Wall.getId(), already: already.getId(),
+            far: far.getId(), ctrl: ctrl.getId(), arrow: arrow.getId() };
+        var before = {};
+        for (var k in ids) {
+            if (ids.hasOwnProperty(k)) {
+                before[k] = vertsOf(ids[k]);
+            }
+        }
+        var posBefore = CsRevise.stationPositions(doc);
+
+        // -- the page: trip 1 loaded, its Decl cell retyped 1 -> 11 ---
+        var recon = CsRevise.surveyFromDocument(doc);
+        var page = SurveyNotebook.tripSurvey(recon.survey, 1);
+        var wasDecl = page.declination;
+        page.declination = 11.0;
+        page.declinationSource = "user";
+        for (i = 0; i < page.shots.length; i++) {
+            var mag = CsAngles.applyDeclination(page.shots[i].azimuth,
+                -wasDecl);
+            page.shots[i].azimuth = CsAngles.applyDeclination(mag, 11.0);
+            page.shots[i].declination = null;
+        }
+
+        var realBox = (typeof QMessageBox !== "undefined") ?
+            QMessageBox : undefined;
+        var realOverride = CsBind.autoBindOverride;
+        var boxText = "";
+        QMessageBox = {
+            information: function(parent, title, text) {
+                boxText = String(text);
+            },
+            warning: function(parent, title, text) {
+                boxText = "WARNING BOX: " + String(text);
+            }
+        };
+        try {
+            // forced ON rather than left to the real setting: this
+            // asserts the behaviour, not the tester's preferences
+            CsBind.autoBindOverride = true;
+            SurveyNotebook.drawMergedSurvey(null, doc, page, recon);
+        } finally {
+            CsBind.autoBindOverride = realOverride;
+            QMessageBox = realBox;
+        }
+
+        var posAfter = CsRevise.stationPositions(doc);
+        ok(Math.abs(posAfter.M5.x - posBefore.M5.x) > 1e-3,
+            "auto-bind: the revision really moved trip 1 -- without that " +
+            "everything below would pass for nothing");
+
+        var tagsOf = function(id) {
+            var e = doc.queryEntity(id);
+            return { trip: CsTags.getNumber(e, CsBind.TRIP_TAG),
+                stations: CsBind.decodeStations(
+                    CsTags.get(e, CsBind.STATIONS_TAG)).slice(0).sort()
+                    .join(",") };
+        };
+        var fitOver = function(names) {
+            var pairs = [];
+            for (var n = 0; n < names.length; n++) {
+                pairs.push({ old: posBefore[names[n]],
+                    nu: posAfter[names[n]] });
+            }
+            return CsRevise.similarityFit(pairs);
+        };
+        var follows = function(what, id, fit) {
+            var got = vertsOf(id);
+            var was = before[what];
+            ok(got.length === was.length,
+                "auto-bind: " + what + " still has " + was.length +
+                " vertices, got " + got.length);
+            var movedAtAll = false;
+            for (var n = 0; n < Math.min(got.length, was.length); n++) {
+                var pred = CsRevise.applyFit(fit, was[n]);
+                near(got[n].x, pred.x, 1e-6, "auto-bind: " + what +
+                    " vertex " + n + " x lands on its own stations' fit");
+                near(got[n].y, pred.y, 1e-6, "auto-bind: " + what +
+                    " vertex " + n + " y lands on its own stations' fit");
+                if (Math.abs(got[n].x - was[n].x) > 1e-3 ||
+                        Math.abs(got[n].y - was[n].y) > 1e-3) {
+                    movedAtAll = true;
+                }
+            }
+            ok(movedAtAll, "auto-bind: " + what + " really moved -- a fit " +
+                "that predicted 'stay put' would pass for the wrong reason");
+        };
+        var stayedPut = function(what, id) {
+            var got = vertsOf(id);
+            var was = before[what];
+            var same = got.length === was.length;
+            for (var n = 0; same && n < was.length; n++) {
+                same = Math.abs(got[n].x - was[n].x) < 1e-9 &&
+                    Math.abs(got[n].y - was[n].y) < 1e-9;
+            }
+            ok(same, "auto-bind: " + what + " did not move");
+        };
+
+        // 1: claimed, tagged with the INFERRED trip, and moved
+        var wallTags = tagsOf(ids.autoWall);
+        ok(wallTags.trip === 1 && wallTags.stations === "M4,M5",
+            "auto-bind: the untagged wall was bound to M4,M5 and to trip " +
+            "1 -- inferred from those stations, never told -- got trip " +
+            wallTags.trip + " '" + wallTags.stations + "'");
+        follows("autoWall", ids.autoWall, fitOver(["M4", "M5"]));
+
+        // 2: Nathan's ring -- snapped to nothing, bound by proximity
+        var ringTags = tagsOf(ids.autoRing);
+        ok(ringTags.trip === 1 && ringTags.stations !== "",
+            "auto-bind: the ring drawn AROUND a station was bound by " +
+            "proximity to trip 1, got trip " + ringTags.trip + " '" +
+            ringTags.stations + "'");
+        follows("autoRing", ids.autoRing,
+            fitOver(CsBind.decodeStations(CsTags.get(
+                doc.queryEntity(ids.autoRing), CsBind.STATIONS_TAG))));
+
+        // 3: the SAME pass, the SAME drawing, the other trip
+        var t0Tags = tagsOf(ids.trip0Wall);
+        ok(t0Tags.trip === 0 && t0Tags.stations === "M2,M3",
+            "auto-bind: the wall over trip 0 was tagged trip ZERO by the " +
+            "same pass -- the trip comes off the geometry, not from a " +
+            "mode -- got trip " + t0Tags.trip + " '" + t0Tags.stations + "'");
+        stayedPut("trip0Wall", ids.trip0Wall);
+
+        // 4: a deliberate adoption is not second-guessed
+        var alreadyTags = tagsOf(ids.already);
+        ok(alreadyTags.stations === "M4",
+            "auto-bind: an already-tagged entity keeps the station list " +
+            "the user gave it (M4 alone, though snapping would say " +
+            "M4,M5), got '" + alreadyTags.stations + "'");
+        ok(alreadyTags.trip === 1,
+            "auto-bind: and its trip tag is untouched, got " +
+            alreadyTags.trip);
+        follows("already", ids.already, fitOver(["M4"]));
+
+        // 5: far away, and therefore not ours
+        ok(CsBind.hasLineworkTags(doc.queryEntity(ids.far)) === false,
+            "auto-bind: an entity that binds to NOTHING is left untagged " +
+            "-- claiming unrelated construction geometry is the failure " +
+            "nobody would notice until it moved");
+        stayedPut("far", ids.far);
+
+        // 6: the layer gate holds even sitting on top of the survey
+        ok(CsBind.hasLineworkTags(doc.queryEntity(ids.ctrl)) === false,
+            "auto-bind: nothing on CTRL-* is ever claimed");
+        stayedPut("ctrl", ids.ctrl);
+        ok(CsBind.hasLineworkTags(doc.queryEntity(ids.arrow)) === false,
+            "auto-bind: nothing on a world-fixed layer is claimed either " +
+            "-- a north arrow that turned with the cave would make the " +
+            "sheet lie about north");
+        stayedPut("arrow", ids.arrow);
+
+        // 7: said out loud. Taking ownership of the user's geometry is
+        // the price of automatic, so the count is reported.
+        ok(boxText.indexOf("3 were bound automatically") >= 0,
+            "auto-bind: the report names how many it claimed, got '" +
+            boxText + "'");
+        // 4, not 3: the trip-0 wall followed its own stations too, and
+        // their fit is the identity because trip 0 did not move. "Moved
+        // with its stations" is the honest description of that -- it is
+        // exactly where it should be.
+        ok(boxText.indexOf("Traced linework moved with its stations: 4") >= 0,
+            "auto-bind: and how many followed, apart from the claim, got '" +
+            boxText + "'");
+        ok(boxText.indexOf("binding 3 untagged items was a further one") >= 0,
+            "auto-bind: and that the binding is its own undo step, got '" +
+            boxText + "'");
+    })();
+
+    // -----------------------------------------------------------------
+    // The NEGATIVE CONTROL: the switch off. Nothing is claimed, nothing
+    // the user did not bind themselves moves -- and linework they DID
+    // bind still follows its stations, because turning off the
+    // convenience must not turn off the feature.
+    // -----------------------------------------------------------------
+    (function() {
+        var doc = new RDocument(new RMemoryStorage(), new RSpatialIndexNavel());
+        var di = new RDocumentInterface(doc);
+        getDocument = function() { return doc; };
+        getDocumentInterface = function() { return di; };
+
+        var S = CsModel.newSurvey();
+        S.date = "2007-07-07";
+        S.team = "LOWER";
+        S.declination = 1.0;
+        S.declinationSource = "user";
+        CsModel.ensureTrips(S);
+        var upper = CsModel.newTrip();
+        upper.name = "UPPER";
+        upper.date = "2008-08-08";
+        upper.team = "UPPER TEAM";
+        upper.declination = 1.0;
+        upper.declinationSource = "user";
+        S.trips.push(upper);
+        var os = [shotOf("O1", "O2", 10, 0), shotOf("O2", "O3", 10, 90),
+            shotOf("O3", "O4", 8, 45), shotOf("O4", "O5", 6, 120)];
+        for (var i = 0; i < os.length; i++) {
+            os[i].left = 2;
+            os[i].right = 3;
+            if (i >= 2) {
+                os[i].trip = 1;
+            }
+            S.shots.push(os[i]);
+        }
+        CsDraw.survey(S, CsNetwork.resolve(S, {}));
+
+        var tipAt = {};
+        var scan = doc.queryAllEntities(false, false);
+        for (i = 0; i < scan.length; i++) {
+            var se = doc.queryEntity(scan[i]);
+            if (!isNull(se) && CsTags.get(se, "LRUDName") !== "") {
+                tipAt[CsTags.get(se, "LRUDName")] = se.getPosition();
+            }
+        }
+        var at = function(name) {
+            return { x: tipAt[name].x, y: tipAt[name].y };
+        };
+        var addPl = function(layerName, pts) {
+            CsLayers.ensure(doc, di, layerName);
+            var pd = new RPolylineData();
+            for (var pi = 0; pi < pts.length; pi++) {
+                pd.appendVertex(new RVector(pts[pi].x, pts[pi].y));
+            }
+            var pl = new RPolylineEntity(doc, pd);
+            pl.setLayerId(doc.getLayerId(layerName));
+            var aop = new RAddObjectsOperation();
+            aop.addObject(pl, false);
+            di.applyOperation(aop);
+            return pl;
+        };
+
+        var untagged = addPl("WALLS-SURVEYED", [at("O4.L"), at("O5.L")]);
+        var tagged = addPl("WALLS-SURVEYED", [at("O4.R"), at("O5.R")]);
+        CsBind.tagEntities(doc, di, [
+            { entity: tagged, trip: 1, stations: ["O4", "O5"] }
+        ]);
+        var vertsOf = function(id) {
+            return CsBind.pointsOf(doc.queryEntity(id));
+        };
+        var ids = { untagged: untagged.getId(), tagged: tagged.getId() };
+        var before = { untagged: vertsOf(ids.untagged),
+            tagged: vertsOf(ids.tagged) };
+        var posBefore = CsRevise.stationPositions(doc);
+
+        var recon = CsRevise.surveyFromDocument(doc);
+        var page = SurveyNotebook.tripSurvey(recon.survey, 1);
+        var wasDecl = page.declination;
+        page.declination = 11.0;
+        page.declinationSource = "user";
+        for (i = 0; i < page.shots.length; i++) {
+            var mag = CsAngles.applyDeclination(page.shots[i].azimuth,
+                -wasDecl);
+            page.shots[i].azimuth = CsAngles.applyDeclination(mag, 11.0);
+            page.shots[i].declination = null;
+        }
+
+        var realBox = (typeof QMessageBox !== "undefined") ?
+            QMessageBox : undefined;
+        var realOverride = CsBind.autoBindOverride;
+        var boxText = "";
+        QMessageBox = {
+            information: function(parent, title, text) {
+                boxText = String(text);
+            },
+            warning: function(parent, title, text) {
+                boxText = "WARNING BOX: " + String(text);
+            }
+        };
+        try {
+            CsBind.autoBindOverride = false; // opted out
+            SurveyNotebook.drawMergedSurvey(null, doc, page, recon);
+        } finally {
+            CsBind.autoBindOverride = realOverride;
+            QMessageBox = realBox;
+        }
+
+        var posAfter = CsRevise.stationPositions(doc);
+        ok(Math.abs(posAfter.O5.x - posBefore.O5.x) > 1e-3,
+            "opt-out: the revision still moved trip 1");
+        ok(CsBind.hasLineworkTags(doc.queryEntity(ids.untagged)) === false,
+            "opt-out: with the switch off, a bindable untagged tracing " +
+            "is NOT claimed");
+        for (i = 0; i < before.untagged.length; i++) {
+            near(vertsOf(ids.untagged)[i].x, before.untagged[i].x, 1e-9,
+                "opt-out: and it does not move (x)");
+            near(vertsOf(ids.untagged)[i].y, before.untagged[i].y, 1e-9,
+                "opt-out: and it does not move (y)");
+        }
+        // the feature itself is untouched: what the user bound follows
+        var tFit = CsRevise.similarityFit([
+            { old: posBefore.O4, nu: posAfter.O4 },
+            { old: posBefore.O5, nu: posAfter.O5 }]);
+        var tGot = vertsOf(ids.tagged);
+        for (i = 0; i < before.tagged.length; i++) {
+            var pred = CsRevise.applyFit(tFit, before.tagged[i]);
+            near(tGot[i].x, pred.x, 1e-6,
+                "opt-out: linework the user DID bind still follows its " +
+                "stations (x)");
+            near(tGot[i].y, pred.y, 1e-6,
+                "opt-out: linework the user DID bind still follows its " +
+                "stations (y)");
+        }
+        ok(boxText.indexOf("bound automatically") < 0,
+            "opt-out: and the report claims nothing, got '" + boxText + "'");
     })();
 }
 
