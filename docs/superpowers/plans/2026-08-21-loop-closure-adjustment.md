@@ -1766,6 +1766,78 @@ git add scripts/CaveSurvey/Core/CsDraw.js tests/js_unit.js
 git commit -m "feat: draw the as-surveyed ghost on CTRL-RAW, and erase it with its stations"
 ```
 
+**AS BUILT (2026-08-21).** The ghost landed as designed. Five departures from
+the draft above, one of them a pre-existing bug the task uncovered.
+
+**1. `markPoint` does not exist, and `shotLine` was the wrong helper.** The
+station-drawing loop uses `CsDraw.station`, which writes a `Station` tag and a
+label — exactly what a ghost must never carry. The real primitive is
+`CsDraw.addPoint(doc, op, layerName, pos)`, which returns an untagged entity for
+the caller to tag and then add; the splay-tip loop (`CsDraw.js`, the
+`SplayName` block) is the shape to copy. `offX` / `offY` were right as drafted.
+
+**2. Ghost lines are drawn with `CsDraw.addLine(..., "RawShot", ...)`, not
+`CsDraw.shotLine`.** `shotLine` sets `Shot="<from>-><to>"` as its primary tag,
+so the drafted call would have given every ghost leg a `Shot` tag alongside its
+`RawShot`. Two places in `tests/js_unit.js` build a `legByShot[shotTag] = entity`
+map and would then have keyed a real leg to a ghost at as-surveyed coordinates;
+`eraseStations`' own `Shot` rule would half-own the ghost as well. The spec's
+"two positions under one name" argument is about stations, but it applies
+verbatim to legs. Ghosts now carry `RawShot` / `RawStation` and nothing else.
+
+`CsRevise.surveyFromDocument` is safe either way — it gates on a `Distance` tag,
+which the ghost never carries — and this is pinned by an assertion that
+reconstruction still finds four shots, not eight.
+
+**3. `CsBind.SUITE_TAGS` was deliberately NOT extended.** Every
+`isSuiteGeometry` call site is gated on `CsBind.isLineworkLayer` first, and
+`CTRL-` is in `NEVER_LINEWORK_PREFIXES`, so a ghost is unreachable from there by
+construction. Adding `RawShot` / `RawStation` to `SUITE_TAGS` would only create a
+new hazard: a user's traced polyline that picked up a stray ghost tag would stop
+being adoptable and stop being moved by a revision.
+
+**4. THE PRE-EXISTING BUG: this build refuses DELETES on an off layer, not just
+adds.** The plan knew adds were dropped; deletes are too, and the engine is loud
+about it:
+
+```
+Warning:  RTransaction::deleteObject: entity not editable (locked or hidden layer)
+Warning:  RDocumentInterface::applyOperation: transaction failed
+```
+
+The refused object is dropped while the rest of the operation lands, so
+`eraseStations` returned a plausible non-zero count and left the entity behind.
+This was already broken for `CTRL-HIDDEN` before any ghost existed: every redraw
+orphaned the old `excludeFromPlot` legs and drew a second copy beside them. A
+test now pins `CTRL-HIDDEN` specifically, independent of the ghost.
+
+The fix is generic rather than a `CTRL-RAW` special case: `eraseStations`
+collects the off layers its kill list touches and nests `CsLayers.withLayerOn`
+around the one delete operation, so a future off layer needs no edit here.
+Locked layers are deliberately NOT unlocked — a lock is something the surveyor
+did on purpose, and an entity on one survives the erase.
+
+**5. The RawShot kill rule is either-end, and the draft's justification for it
+was wrong.** The draft comment said either-end is "the same rule the real leg
+lines follow"; the real leg rule is BOTH ends, precisely so a tie-in shot from an
+older survey keeps its line. Either-end is still right for the ghost, for a
+different reason: a real leg is the drawing's only record of that shot, while a
+ghost leg carries no data at all and the redraw regenerates it from the whole
+reconstructed survey. Keeping it would leave a line pointing at a coordinate
+that just moved, and then a duplicate beside the fresh one. Both halves are
+pinned: a partial erase of `G1` alone takes both ghost legs touching it, and a
+full erase-then-redraw cycle leaves 8 entities on `CTRL-RAW`, not 16.
+
+**Also folded in beyond the brief.** `CTRL-RAW` is created lazily by the ghost
+block via `CsLayers.ensure`, not added to `ensureSurveyLayers` — it was never in
+`ensureSurveyLayers`, and following `TEXT-NOTES` and the wall layers keeps an
+always-empty layer out of every plain survey. And `RebuildSurveyData.shotCount`
+plus the `CsReport` "Shots drawn" line both had to learn `tiesDrawn`: moving ties
+out of `shotsDrawn` would otherwise have silently under-reported every
+two-entrance cave. `ghostDrawn` is deliberately excluded from `shotCount` — the
+ghost is a second picture of shots already counted. Task 8's own ties block is
+unaffected; it adds separate `Control tie ...` lines from `resolved.ties`.
+
 ---
 
 ### Task 6: `CsBind` never binds linework to a ghost

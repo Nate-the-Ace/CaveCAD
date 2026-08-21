@@ -242,8 +242,14 @@ CsDraw.noteLeader = function(doc, op, pos, name, note, azimuthDeg, lrud) {
  * excludeFromPlot legs draw on CTRL-HIDDEN (via CsLayers.withLayerOn,
  * since that layer is off) instead of being skipped.
  *
- * \return {stationsDrawn, shotsDrawn, closuresDrawn, hiddenDrawn,
- *          wallsDrawn, splaysDrawn, skipped}
+ * When `resolved` carries a `raw` result (CsAdjust set one, meaning
+ * something really was adjusted), the AS-SURVEYED centerline is drawn
+ * as a grey dashed ghost on CTRL-RAW -- another off layer, so another
+ * withLayerOn operation. See the block itself for why the ghost is
+ * tagged RawShot/RawStation and nothing else.
+ *
+ * \return {stationsDrawn, shotsDrawn, closuresDrawn, tiesDrawn,
+ *          hiddenDrawn, wallsDrawn, splaysDrawn, ghostDrawn, skipped}
  */
 CsDraw.survey = function(survey, resolved, originStation, originPos, seqBase) {
     if (seqBase === undefined || seqBase === null) {
@@ -450,7 +456,7 @@ CsDraw.survey = function(survey, resolved, originStation, originPos, seqBase) {
         stationsDrawn++;
     }
 
-    var shotsDrawn = 0, closuresDrawn = 0;
+    var shotsDrawn = 0, closuresDrawn = 0, tiesDrawn = 0;
     var hiddenLegs = []; // excludeFromPlot legs -- drawn on CTRL-HIDDEN below
     for (i = 0; i < resolved.legs.length; i++) {
         var leg = resolved.legs[i];
@@ -460,8 +466,19 @@ CsDraw.survey = function(survey, resolved, originStation, originPos, seqBase) {
         }
         CsDraw.shotLine(doc, op, at(leg.from), at(leg.to), leg.from, leg.to,
             CsLayers.SHOTS, legTags(leg.shot));
+        // The three leg kinds CsNetwork produces, counted apart because
+        // they mean different things to a surveyor. "new" extends the
+        // traverse. "closure" arrives back at a station already placed
+        // through the SAME component -- a loop, with a misclosure to
+        // distribute. "tie" is the one shot joining two separately
+        // anchored components (a cave with two *fix'ed entrances): it
+        // has no ring, so no percent-of-traverse error, and calling it
+        // a loop closure would be wrong. Before this it fell into the
+        // ordinary-shot branch by accident rather than by decision.
         if (leg.kind === "closure") {
             closuresDrawn++;
+        } else if (leg.kind === "tie") {
+            tiesDrawn++;
         } else {
             shotsDrawn++;
         }
@@ -627,15 +644,97 @@ CsDraw.survey = function(survey, resolved, originStation, originPos, seqBase) {
         });
     }
 
+    // The AS-SURVEYED ghost. When `resolved` came from CsAdjust and
+    // something was actually adjusted, `raw` holds the pre-adjustment
+    // network -- draw it grey and dashed on CTRL-RAW so that switching
+    // that layer on shows exactly what the adjustment moved and by how
+    // much. This is the "shown" half of "adjustment shown and
+    // reversible". The reversible half needs no code at all: the raw
+    // readings live in XDATA and were never touched, so redrawing with
+    // adjustment off reproduces the as-surveyed drawing exactly.
+    //
+    // No raw means no ghost, and that is not a degenerate case -- it is
+    // adjustment off, or a solve that did not converge. The drawn
+    // geometry then already IS the as-surveyed geometry, and a ghost
+    // lying exactly on top of it would be noise.
+    //
+    // The ghost rides the SAME offX/offY the drawn stations got, never
+    // an offset recomputed from the raw coordinates. Raw and adjusted
+    // are two positions in one frame, so one rigid offset keeps them
+    // registered; a raw-derived offset would pin the ghost's origin
+    // station on top of its drawn point and hide whatever the
+    // adjustment did to that station.
+    //
+    // The ghost carries RawShot / RawStation and NOTHING else -- no
+    // Shot, no Station, none of the v3 data tags. Everything that
+    // reads a drawing back keys on those: CsRevise.surveyFromDocument
+    // would ingest a tagged ghost as a duplicate shot,
+    // CsBind.stationIndex would offer a phantom for linework to snap
+    // to, and eraseStations' leg rule would half-own it. A ghost
+    // answering to those names would put two positions -- adjusted and
+    // as-surveyed -- under one name.
+    var ghostDrawn = 0;
+    var rawResolved = (resolved.raw === undefined || resolved.raw === null) ?
+        null : resolved.raw;
+    if (rawResolved !== null && rawResolved.stations !== undefined &&
+            rawResolved.stations !== null) {
+        // CTRL-RAW is deliberately NOT in ensureSurveyLayers: like
+        // TEXT-NOTES and the wall layers above, it is created by the
+        // drawing that needs it rather than added to every survey. And
+        // it is created OFF (CsLayers.OFF), which is why every add
+        // below sits inside withLayerOn -- this build's
+        // RAddObjectsOperation drops adds to an off layer without a
+        // word, so getting this wrong yields no geometry and no error.
+        CsLayers.ensure(doc, di, CsLayers.RAW);
+        var rawLegs = rawResolved.legs || [];
+        var rawAt = function(stationName) {
+            var rst = rawResolved.stations[stationName];
+            return new RVector(rst.x + offX, rst.y + offY);
+        };
+        CsLayers.withLayerOn(doc, di, CsLayers.RAW, function() {
+            var gop = new RAddObjectsOperation();
+            gop.setText("Draw as-surveyed ghost");
+            for (var gi = 0; gi < rawLegs.length; gi++) {
+                var gLeg = rawLegs[gi];
+                if (gLeg.shot.excludeFromPlot) {
+                    // these draw on CTRL-HIDDEN, itself off: ghosting
+                    // them would only add a second invisible copy
+                    continue;
+                }
+                if (!rawResolved.stations.hasOwnProperty(gLeg.from) ||
+                        !rawResolved.stations.hasOwnProperty(gLeg.to)) {
+                    continue;
+                }
+                CsDraw.addLine(doc, gop, CsLayers.RAW,
+                    rawAt(gLeg.from), rawAt(gLeg.to),
+                    "RawShot", gLeg.from + "->" + gLeg.to);
+                ghostDrawn++;
+            }
+            for (var gName in rawResolved.stations) {
+                if (!rawResolved.stations.hasOwnProperty(gName)) {
+                    continue;
+                }
+                // same shape a splay tip takes: tag the point, THEN add
+                var gPt = CsDraw.addPoint(doc, gop, CsLayers.RAW,
+                    rawAt(gName));
+                CsTags.set(gPt, "RawStation", gName);
+                gop.addObject(gPt, false);
+            }
+            di.applyOperation(gop);
+        });
+    }
+
     CsStore.migrate(doc, di); // convert + drop a legacy store, if any
 
     return {
         stationsDrawn: stationsDrawn,
         shotsDrawn: shotsDrawn,
         closuresDrawn: closuresDrawn,
+        tiesDrawn: tiesDrawn,
         hiddenDrawn: hiddenDrawn,
         wallsDrawn: wallsDrawn,
         splaysDrawn: splaysDrawn,
+        ghostDrawn: ghostDrawn,
         // splays that DID draw no longer count as skipped
         skipped: resolved.skipped.length - splaysDrawn
     };
@@ -648,9 +747,17 @@ CsDraw.survey = function(survey, resolved, originStation, originPos, seqBase) {
  * line). Its own operation. Entities drawn by pre-tagging builds
  * cannot be found and survive.
  *
+ * Ghost geometry on CTRL-RAW goes with its stations too, on either end
+ * rather than both -- see the RawShot rule for why the ghost's rule
+ * differs from the real leg's.
+ *
  * NEVER deletes traced linework (CsBind's LineworkTrip /
  * LineworkStations), whatever else that entity carries -- see the
  * guard at the top of the scan.
+ *
+ * Off layers (CTRL-HIDDEN, CTRL-RAW) are switched on around the delete:
+ * this build refuses deletes there just as it refuses adds, so without
+ * that the entities survive and a redraw doubles them.
  *
  * \return number of entities removed
  */
@@ -672,6 +779,8 @@ CsDraw.eraseStations = function(doc, stationNames) {
     var op = new RAddObjectsOperation();
     op.setText("Replace survey marks");
     var removed = 0;
+    var offLayers = [];      // off layers the kill list touches
+    var offLayerSeen = {};   // layer name -> is it off (asked once)
     var ids = doc.queryAllEntities(false, false);
     for (i = 0; i < ids.length; i++) {
         var e = doc.queryEntity(ids[i]);
@@ -757,14 +866,83 @@ CsDraw.eraseStations = function(doc, stationNames) {
                 }
             }
         }
+        // The as-surveyed ghost on CTRL-RAW. These rules are LAST on
+        // purpose: the traced-linework guard at the top of the scan
+        // still runs before any of them, so an entity carrying the
+        // user's LineworkTrip / LineworkStations is never reached here
+        // however it came to be tagged RawShot or RawStation.
+        if (!kill) {
+            v = CsTags.get(e, "RawStation");
+            if (v !== "" && inSet[v] === true) { kill = true; }
+        }
+        if (!kill) {
+            v = CsTags.get(e, "RawShot");
+            if (v !== "") {
+                // "A1->A2", and EITHER end being replaced replaces the
+                // ghost leg -- deliberately not the both-ends rule the
+                // real leg lines follow above. A real leg spanning an
+                // erased and a kept station is the drawing's only
+                // record of that shot, so it has to survive. A ghost
+                // leg carries no data at all: it is a picture of where
+                // two stations were surveyed, and the redraw
+                // regenerates it from the whole reconstructed survey.
+                // Keeping it would leave a line pointing at a
+                // coordinate that just moved, and then a duplicate
+                // beside the fresh one.
+                var rawEnds = v.split("->");
+                if (inSet[rawEnds[0]] === true ||
+                        inSet[rawEnds[rawEnds.length - 1]] === true) {
+                    kill = true;
+                }
+            }
+        }
         if (kill) {
             op.deleteObject(e);
             removed++;
+            // Which OFF layers this delete has to reach. A DELETE is
+            // refused on an off layer exactly as an add is -- the
+            // engine says "RTransaction::deleteObject: entity not
+            // editable (locked or hidden layer)", drops that object,
+            // and lets the rest of the operation land. The entity then
+            // survives a redraw that draws a second copy beside it.
+            // Collected generically rather than by naming CTRL-RAW and
+            // CTRL-HIDDEN, so a future off layer needs no edit here.
+            //
+            // Locked layers are NOT unlocked: a lock is something the
+            // surveyor did on purpose, and quietly working around it to
+            // delete their entities is not ours to do. Such an entity
+            // survives the erase, which is the honest outcome.
+            try {
+                var kLayer = doc.getLayerName(e.getLayerId());
+                if (offLayerSeen[kLayer] === undefined) {
+                    var kl = doc.queryLayer(kLayer);
+                    offLayerSeen[kLayer] = (!isNull(kl) && kl.isOff());
+                    if (offLayerSeen[kLayer]) {
+                        offLayers.push(kLayer);
+                    }
+                }
+            } catch (eLayer) {
+                // unreadable layer: the delete simply takes its chances
+            }
         }
     }
     if (removed > 0) {
         var di2 = getDocumentInterface();
-        di2.applyOperation(op);
+        // Switch every off layer the kill list touches on around the
+        // ONE delete operation, then let withLayerOn put each back.
+        // Built inside out so the operation runs with all of them on at
+        // once: one operation is still one undo step.
+        var applyDeletes = function() {
+            di2.applyOperation(op);
+        };
+        for (var oi = 0; oi < offLayers.length; oi++) {
+            applyDeletes = (function(layerName, inner) {
+                return function() {
+                    CsLayers.withLayerOn(doc, di2, layerName, inner);
+                };
+            })(offLayers[oi], applyDeletes);
+        }
+        applyDeletes();
         CsStore.migrate(doc, di2);
     }
     return removed;

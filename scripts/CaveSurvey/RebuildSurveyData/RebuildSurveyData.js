@@ -190,10 +190,19 @@ RebuildSurveyData.redraw = function(doc, di, survey, anchorName, anchorPos,
     return { erased: erased, drawn: drawn, resolved: resolved };
 };
 
-/** Total shots the drawing now carries as geometry or hidden legs. */
+/**
+ * Total shots the drawing now carries as geometry or hidden legs.
+ *
+ * Control ties are counted: they are measured shots that drew a leg
+ * line, and they only stopped being part of shotsDrawn when CsDraw gave
+ * them their own counter -- leaving them out here would silently
+ * under-report every two-entrance cave. ghostDrawn is deliberately NOT
+ * counted: the CTRL-RAW ghost is a second picture of shots already
+ * counted here, not more shots.
+ */
 RebuildSurveyData.shotCount = function(drawn) {
-    return drawn.shotsDrawn + drawn.closuresDrawn + drawn.hiddenDrawn +
-        drawn.splaysDrawn;
+    return drawn.shotsDrawn + drawn.closuresDrawn + (drawn.tiesDrawn || 0) +
+        drawn.hiddenDrawn + drawn.splaysDrawn;
 };
 
 /**

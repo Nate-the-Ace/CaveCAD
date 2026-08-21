@@ -21,10 +21,23 @@ CsReport.drawSummary = function(survey, resolved, drawn, findings) {
         lines.push("Survey: " + (survey.caveName || survey.name));
     }
     lines.push("Stations plotted: " + drawn.stationsDrawn);
+    // Loop closures and control ties are counted apart from ordinary
+    // shots by CsDraw, so both have to be named here or the printed
+    // total is smaller than the drawing. A tie is not a closure -- it
+    // is the single leg joining two separately fixed components -- so
+    // it gets its own words. A `drawn` object from before tiesDrawn
+    // existed simply says nothing about ties.
+    var extraLegs = [];
+    if (drawn.closuresDrawn > 0) {
+        extraLegs.push(drawn.closuresDrawn + " loop closure" +
+            (drawn.closuresDrawn === 1 ? "" : "s"));
+    }
+    if (drawn.tiesDrawn !== undefined && drawn.tiesDrawn > 0) {
+        extraLegs.push(drawn.tiesDrawn + " control tie" +
+            (drawn.tiesDrawn === 1 ? "" : "s"));
+    }
     lines.push("Shots drawn: " + drawn.shotsDrawn +
-        (drawn.closuresDrawn > 0 ?
-            (" (+" + drawn.closuresDrawn + " loop closure" +
-                (drawn.closuresDrawn === 1 ? "" : "s") + ")") : ""));
+        (extraLegs.length > 0 ? (" (+" + extraLegs.join(", ") + ")") : ""));
     if (drawn.wallsDrawn !== undefined && drawn.wallsDrawn > 0) {
         lines.push("Wall runs drawn: " + drawn.wallsDrawn +
             " (dashed = approximate; trace real walls over them)");

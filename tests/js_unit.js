@@ -873,6 +873,28 @@ ok(plainSummaryBefore.toLowerCase().indexOf("offset") === -1 &&
     plainSummaryBefore.toLowerCase().indexOf("not used") === -1,
     "task 1b report: a survey with no controlFrame news gets no new lines");
 
+// ---- Task 5: the drawn-shot line has to account for control ties ----
+// CsDraw stopped counting ties as ordinary shots. If the summary does
+// not pick the new counter up, a two-entrance cave silently reports
+// fewer shots drawn than it drew, which is the one thing a drawn-count
+// exists to be trusted about.
+var tieDrawnStub = { stationsDrawn: 4, shotsDrawn: 2, closuresDrawn: 0,
+    tiesDrawn: 1, wallsDrawn: 0, splaysDrawn: 0, skipped: 0 };
+var tieCountSummary = CsReport.drawSummary(tieAnchored, rAnchoredTie,
+    tieDrawnStub, []);
+ok(tieCountSummary.indexOf("1 control tie") >= 0,
+    "task 5 report: the drawn control tie is accounted for in the shot " +
+    "line, got:\n" + tieCountSummary);
+// plural, and never announced when there are none
+var twoTieStub = { stationsDrawn: 6, shotsDrawn: 2, closuresDrawn: 0,
+    tiesDrawn: 2, wallsDrawn: 0, splaysDrawn: 0, skipped: 0 };
+ok(CsReport.drawSummary(tieAnchored, rAnchoredTie, twoTieStub,
+    []).indexOf("2 control ties") >= 0,
+    "task 5 report: two ties read as ties, plural");
+ok(plainSummaryBefore.indexOf("control tie") === -1,
+    "task 5 report: no ties, no mention -- and a drawn object from " +
+    "before this counter existed still summarises cleanly");
+
 // ---------------------------------------------------------------------
 // Task 1c -- bridge classifier cost and path honesty.
 // ---------------------------------------------------------------------
@@ -3526,6 +3548,369 @@ if (!IS_NODE) {
     })();
 
     // -----------------------------------------------------------------
+    // Task 5: a control TIE gets its own drawn counter. A tie is the
+    // single shot joining two separately anchored components; it is not
+    // a loop closure, and counting it as an ordinary shot (which the
+    // else-branch did) was accidental rather than decided.
+    // -----------------------------------------------------------------
+    (function() {
+        var doc = new RDocument(new RMemoryStorage(), new RSpatialIndexNavel());
+        var di = new RDocumentInterface(doc);
+        getDocument = function() { return doc; };
+        getDocumentInterface = function() { return di; };
+
+        // two components, each with its own fixed station, joined by
+        // exactly one shot -- CsNetwork classifies that shot "tie"
+        var tsv = CsModel.newSurvey();
+        tsv.shots.push(shotOf("TP1", "TP2", 10, 0));
+        tsv.shots.push(shotOf("TQ1", "TQ2", 10, 0));
+        tsv.shots.push(shotOf("TP2", "TQ1", 10, 90));
+        tsv.fixed["TP1"] = { x: 0, y: 0, z: 0 };
+        tsv.fixed["TQ1"] = { x: 10.4, y: 10, z: 0 };
+        var tres = CsNetwork.resolve(tsv, {});
+        ok(tres.ties.length === 1,
+            "tie count: the fixture really does produce one tie, got " +
+            tres.ties.length);
+        var tdrawn = CsDraw.survey(tsv, tres);
+        ok(tdrawn.tiesDrawn === 1,
+            "tie count: the control tie is counted as a tie, got " +
+            tdrawn.tiesDrawn);
+        ok(tdrawn.shotsDrawn === 2,
+            "tie count: the tie no longer inflates the ordinary shot " +
+            "count, got " + tdrawn.shotsDrawn);
+        ok(tdrawn.closuresDrawn === 0,
+            "tie count: a tie is not a loop closure, got " +
+            tdrawn.closuresDrawn);
+        // every leg still lands as geometry -- the new counter must
+        // partition the legs, not lose one
+        ok(tdrawn.shotsDrawn + tdrawn.closuresDrawn + tdrawn.tiesDrawn +
+            tdrawn.hiddenDrawn === 3,
+            "tie count: the counters still add up to every drawn leg, got " +
+            (tdrawn.shotsDrawn + tdrawn.closuresDrawn + tdrawn.tiesDrawn +
+             tdrawn.hiddenDrawn));
+    })();
+
+    // -----------------------------------------------------------------
+    // Task 5: the AS-SURVEYED ghost on CTRL-RAW.
+    //
+    // Its own document, following this file's one-IIFE-per-concern
+    // shape: the harness above ends in a full erase and a DXF
+    // round trip, and a four-station loop threaded through it would
+    // change what those assertions are measuring.
+    // -----------------------------------------------------------------
+    (function() {
+        var doc = new RDocument(new RMemoryStorage(), new RSpatialIndexNavel());
+        var di = new RDocumentInterface(doc);
+        getDocument = function() { return doc; };
+        getDocumentInterface = function() { return di; };
+
+        var ghostSurvey = CsModel.newSurvey();
+        ghostSurvey.shots.push(shotOf("G1", "G2", 10, 0));
+        ghostSurvey.shots.push(shotOf("G2", "G3", 10, 90));
+        ghostSurvey.shots.push(shotOf("G3", "G4", 10, 180));
+        ghostSurvey.shots.push(shotOf("G4", "G1", 10.5, 270));
+        var rGhost = CsNetwork.resolve(ghostSurvey, {});
+        var aGhost = CsAdjust.adjust(ghostSurvey, rGhost,
+            { sigmaTape: 1, sigmaAngle: 0 });
+        ok(aGhost.adjusted === true && aGhost.raw !== null,
+            "ghost: the fixture really did adjust, so there IS a raw to draw");
+        // G3 is deliberately NOT the pinned station, and the drawing
+        // origin is nowhere near the survey origin: the ghost has to
+        // ride the DRAWN frame's offset, so the origin station's ghost
+        // point must NOT land on top of its drawn point.
+        var gOrigin = new RVector(100, 200);
+        var drawnGhost = CsDraw.survey(ghostSurvey, aGhost, "G3", gOrigin, 0);
+
+        ok(drawnGhost.ghostDrawn === 4,
+            "ghost: one ghost leg per drawn leg, got " +
+            drawnGhost.ghostDrawn);
+
+        var rawLineAt = {}, rawPointAt = {}, rawLayerCount = 0;
+        var ghostWithShotTag = 0, ghostWithStationTag = 0;
+        var gids = doc.queryAllEntities(false, false);
+        for (var gi = 0; gi < gids.length; gi++) {
+            var ge = doc.queryEntity(gids[gi]);
+            if (isNull(ge)) { continue; }
+            if (doc.getLayerName(ge.getLayerId()) === "CTRL-RAW") {
+                rawLayerCount++;
+            }
+            var rs = CsTags.get(ge, "RawShot");
+            if (rs !== "") {
+                rawLineAt[rs] = ge;
+                if (CsTags.get(ge, "Shot") !== "") { ghostWithShotTag++; }
+            }
+            var rp = CsTags.get(ge, "RawStation");
+            if (rp !== "") {
+                rawPointAt[rp] = ge;
+                if (CsTags.get(ge, "Station") !== "") {
+                    ghostWithStationTag++;
+                }
+            }
+        }
+        var countKeys = function(o) {
+            var c = 0;
+            for (var k in o) { if (o.hasOwnProperty(k)) { c++; } }
+            return c;
+        };
+        ok(countKeys(rawLineAt) === 4,
+            "ghost: four ghost lines tagged RawShot, got " +
+            countKeys(rawLineAt));
+        ok(countKeys(rawPointAt) === 4,
+            "ghost: four ghost points tagged RawStation, got " +
+            countKeys(rawPointAt));
+        // THE ENVIRONMENT HAZARD: CTRL-RAW is created OFF, and this
+        // build's RAddObjectsOperation silently drops adds to an off
+        // layer. If the write is not wrapped in withLayerOn there is no
+        // geometry and no error.
+        ok(rawLayerCount === 8,
+            "ghost: 4 lines + 4 points really LANDED on CTRL-RAW despite " +
+            "the layer being off, got " + rawLayerCount);
+        ok(doc.queryLayer("CTRL-RAW").isOff() === true,
+            "ghost: CTRL-RAW is left switched off again afterwards");
+        // a ghost is not a leg and not a station: nothing that keys on
+        // Shot or Station may ever see two positions under one name
+        ok(ghostWithShotTag === 0,
+            "ghost: ghost lines carry no Shot tag, got " + ghostWithShotTag);
+        ok(ghostWithStationTag === 0,
+            "ghost: ghost points carry no Station tag, got " +
+            ghostWithStationTag);
+        // ... and nothing reconstructs a survey from them
+        var ghostRecon = CsRevise.surveyFromDocument(doc);
+        ok(ghostRecon.survey.shots.length === 4,
+            "ghost: reconstruction still finds four shots, not eight, got " +
+            ghostRecon.survey.shots.length);
+
+        // THE GEOMETRY: the ghost is the AS-SURVEYED centerline placed
+        // in the drawn frame -- raw coordinates plus the same offset the
+        // drawn stations got. Recomputing the offset from the raw
+        // origin instead would pin the ghost to the drawn origin and
+        // hide whatever the adjustment did to that station.
+        var offX = gOrigin.x - aGhost.stations["G3"].x;
+        var offY = gOrigin.y - aGhost.stations["G3"].y;
+        var shiftG3 = Math.abs(rGhost.stations["G3"].x -
+            aGhost.stations["G3"].x) +
+            Math.abs(rGhost.stations["G3"].y - aGhost.stations["G3"].y);
+        ok(shiftG3 > 1e-6,
+            "ghost: sanity -- G3 really moved, so the check below is not " +
+            "vacuous (moved " + shiftG3 + ")");
+        if (rawPointAt["G3"] !== undefined) {
+            var g3 = rawPointAt["G3"].getPosition();
+            near(g3.x, rGhost.stations["G3"].x + offX, 1e-6,
+                "ghost: G3's ghost sits where it was SURVEYED (x)");
+            near(g3.y, rGhost.stations["G3"].y + offY, 1e-6,
+                "ghost: G3's ghost sits where it was SURVEYED (y)");
+            ok(Math.abs(g3.x - gOrigin.x) + Math.abs(g3.y - gOrigin.y) > 1e-6,
+                "ghost: the origin station's ghost does NOT sit on top of " +
+                "its drawn point -- the ghost rides the drawn frame");
+        }
+        if (rawLineAt["G1->G2"] !== undefined) {
+            var gl = rawLineAt["G1->G2"];
+            near(gl.getStartPoint().x, rGhost.stations["G1"].x + offX, 1e-6,
+                "ghost: the G1->G2 ghost line starts at raw G1");
+            near(gl.getEndPoint().y, rGhost.stations["G2"].y + offY, 1e-6,
+                "ghost: the G1->G2 ghost line ends at raw G2");
+        }
+
+        // A PARTIAL erase: a ghost leg is pure derived decoration with
+        // no data on it, so EITHER end being replaced replaces the
+        // ghost -- deliberately NOT the both-ends rule the real leg
+        // lines follow. A real leg spanning an erased and a kept
+        // station is the drawing's only record of that shot and must
+        // survive; a ghost line in the same position is a picture
+        // pointing at a coordinate that is about to move, and the
+        // redraw regenerates it from the whole reconstructed survey
+        // anyway -- keeping it accumulates a stale duplicate.
+        CsDraw.eraseStations(doc, ["G1"]);
+        var afterG1 = {};
+        gids = doc.queryAllEntities(false, false);
+        for (gi = 0; gi < gids.length; gi++) {
+            ge = doc.queryEntity(gids[gi]);
+            if (isNull(ge)) { continue; }
+            var rs2 = CsTags.get(ge, "RawShot");
+            if (rs2 !== "") { afterG1[rs2] = true; }
+            var rp2 = CsTags.get(ge, "RawStation");
+            if (rp2 !== "") { afterG1["pt:" + rp2] = true; }
+        }
+        ok(afterG1["G1->G2"] === undefined &&
+            afterG1["G4->G1"] === undefined,
+            "ghost: erasing G1 alone takes BOTH ghost legs touching it");
+        ok(afterG1["pt:G1"] === undefined,
+            "ghost: erasing G1 alone takes its ghost point");
+        ok(afterG1["G2->G3"] === true && afterG1["G3->G4"] === true &&
+            afterG1["pt:G3"] === true,
+            "ghost: ghost geometry for stations NOT being replaced stays put");
+
+        // A TRACED entity that also happens to carry ghost tags: the
+        // linework guard sits BEFORE every kill rule in eraseStations,
+        // so the new RawShot/RawStation rules must not reach it either.
+        CsLayers.ensure(doc, di, "WALLS-SURVEYED");
+        var decoyData = new RPolylineData();
+        decoyData.appendVertex(new RVector(50, 50));
+        decoyData.appendVertex(new RVector(51, 51));
+        var decoyPl = new RPolylineEntity(doc, decoyData);
+        decoyPl.setLayerId(doc.getLayerId("WALLS-SURVEYED"));
+        CsTags.set(decoyPl, CsBind.STATIONS_TAG,
+            CsBind.encodeStations(["G1", "G2"]));
+        CsTags.set(decoyPl, "RawShot", "G1->G2");
+        CsTags.set(decoyPl, "RawStation", "G1");
+        var decoyOp = new RAddObjectsOperation();
+        decoyOp.addObject(decoyPl, false);
+        di.applyOperation(decoyOp);
+        var decoyId = decoyPl.getId();
+
+        // a redraw must REPLACE the ghost, never accumulate or orphan it
+        CsDraw.eraseStations(doc, ["G1", "G2", "G3", "G4"]);
+        var leftLines = 0, leftPoints = 0, leftOnRaw = 0, decoySurvived = 0;
+        gids = doc.queryAllEntities(false, false);
+        for (gi = 0; gi < gids.length; gi++) {
+            ge = doc.queryEntity(gids[gi]);
+            if (isNull(ge)) { continue; }
+            if (ge.getId() === decoyId) {
+                decoySurvived++;
+                continue;
+            }
+            if (doc.getLayerName(ge.getLayerId()) === "CTRL-RAW") {
+                leftOnRaw++;
+            }
+            if (CsTags.get(ge, "RawShot") !== "") { leftLines++; }
+            if (CsTags.get(ge, "RawStation") !== "") { leftPoints++; }
+        }
+        ok(leftLines === 0 && leftPoints === 0,
+            "ghost: eraseStations leaves no ghost orphans (" + leftLines +
+            " lines, " + leftPoints + " points)");
+        ok(leftOnRaw === 0,
+            "ghost: nothing at all is left on CTRL-RAW after the erase, got " +
+            leftOnRaw);
+        ok(decoySurvived === 1,
+            "ghost: TRACED linework carrying ghost tags SURVIVES -- the " +
+            "linework guard outranks the new kill rules; got " +
+            decoySurvived);
+
+        // THE WHOLE POINT: erase-then-redraw is what every rebuild and
+        // every revision does. The ghost must come back once, not twice.
+        CsDraw.survey(ghostSurvey, aGhost, "G3", gOrigin, 0);
+        var onRawAgain = 0;
+        gids = doc.queryAllEntities(false, false);
+        for (gi = 0; gi < gids.length; gi++) {
+            ge = doc.queryEntity(gids[gi]);
+            if (isNull(ge)) { continue; }
+            if (doc.getLayerName(ge.getLayerId()) === "CTRL-RAW") {
+                onRawAgain++;
+            }
+        }
+        ok(onRawAgain === 8,
+            "ghost: a full erase-then-redraw cycle leaves ONE ghost, not " +
+            "two -- 4 lines + 4 points, got " + onRawAgain);
+    })();
+
+    // -----------------------------------------------------------------
+    // Task 5, found while making the ghost erasable: a DELETE is
+    // refused on an off layer exactly as an add is. The engine says so
+    // out loud --
+    //   RTransaction::deleteObject: entity not editable (locked or
+    //   hidden layer)
+    //   RDocumentInterface::applyOperation: transaction failed
+    // -- and drops that object while the rest of the operation lands.
+    // So this was already broken for CTRL-HIDDEN before any ghost
+    // existed: every redraw orphaned the old hidden legs and drew a
+    // second copy beside them. The fix is generic over off layers, so
+    // this pins CTRL-HIDDEN, not just CTRL-RAW.
+    // -----------------------------------------------------------------
+    (function() {
+        var doc = new RDocument(new RMemoryStorage(), new RSpatialIndexNavel());
+        var di = new RDocumentInterface(doc);
+        getDocument = function() { return doc; };
+        getDocumentInterface = function() { return di; };
+
+        var onLayer = function(layerName) {
+            var c = 0;
+            var ids = doc.queryAllEntities(false, false);
+            for (var i = 0; i < ids.length; i++) {
+                var e = doc.queryEntity(ids[i]);
+                if (isNull(e)) { continue; }
+                if (doc.getLayerName(e.getLayerId()) === layerName) { c++; }
+            }
+            return c;
+        };
+
+        var hsv = CsModel.newSurvey();
+        hsv.shots.push(shotOf("H1", "H2", 10, 0));
+        var hHidden = shotOf("H2", "H3", 10, 90);
+        hHidden.excludeFromPlot = true;
+        hsv.shots.push(hHidden);
+        var hres = CsNetwork.resolve(hsv, {});
+        var hdrawn = CsDraw.survey(hsv, hres);
+        ok(hdrawn.hiddenDrawn === 1,
+            "off-layer erase: the hidden leg drew, got " + hdrawn.hiddenDrawn);
+        ok(onLayer("CTRL-HIDDEN") === 1,
+            "off-layer erase: one entity on CTRL-HIDDEN before, got " +
+            onLayer("CTRL-HIDDEN"));
+
+        CsDraw.eraseStations(doc, ["H1", "H2", "H3"]);
+        ok(onLayer("CTRL-HIDDEN") === 0,
+            "off-layer erase: the hidden leg on the OFF layer really was " +
+            "deleted -- otherwise a redraw orphans it and draws a second " +
+            "copy; got " + onLayer("CTRL-HIDDEN"));
+        ok(doc.queryLayer("CTRL-HIDDEN").isOff() === true,
+            "off-layer erase: CTRL-HIDDEN is left switched off again");
+        ok(CsTags.collectStations(doc).length === 0,
+            "off-layer erase: the ordinary marks went too -- switching a " +
+            "layer on for the delete did not disturb the rest");
+    })();
+
+    // -----------------------------------------------------------------
+    // Task 5: no raw, no ghost. The drawn geometry already IS the
+    // as-surveyed geometry, and a ghost identical to it is noise.
+    // -----------------------------------------------------------------
+    (function() {
+        var doc = new RDocument(new RMemoryStorage(), new RSpatialIndexNavel());
+        var di = new RDocumentInterface(doc);
+        getDocument = function() { return doc; };
+        getDocumentInterface = function() { return di; };
+
+        var onRaw = function() {
+            var c = 0;
+            var ids = doc.queryAllEntities(false, false);
+            for (var i = 0; i < ids.length; i++) {
+                var e = doc.queryEntity(ids[i]);
+                if (isNull(e)) { continue; }
+                if (CsTags.get(e, "RawShot") !== "" ||
+                        CsTags.get(e, "RawStation") !== "") { c++; }
+                if (doc.hasLayer("CTRL-RAW") &&
+                        doc.getLayerName(e.getLayerId()) === "CTRL-RAW") {
+                    c++;
+                }
+            }
+            return c;
+        };
+
+        var nsv = CsModel.newSurvey();
+        nsv.shots.push(shotOf("N1", "N2", 10, 0));
+        nsv.shots.push(shotOf("N2", "N3", 10, 90));
+        nsv.shots.push(shotOf("N3", "N1", 14.5, 225));
+        var nres = CsNetwork.resolve(nsv, {});
+
+        // a plain resolve result has no `raw` property at all
+        var dn1 = CsDraw.survey(nsv, nres);
+        ok(dn1.ghostDrawn === 0,
+            "no ghost: a plain resolve result draws no ghost, got " +
+            dn1.ghostDrawn);
+        ok(onRaw() === 0,
+            "no ghost: nothing on CTRL-RAW from a plain resolve, got " +
+            onRaw());
+
+        // ... and the pass-through shape sets raw to null on purpose
+        CsDraw.eraseStations(doc, ["N1", "N2", "N3"]);
+        var dn2 = CsDraw.survey(nsv, CsAdjust.unadjusted(nres));
+        ok(dn2.ghostDrawn === 0,
+            "no ghost: CsAdjust.unadjusted has raw === null, so no ghost, " +
+            "got " + dn2.ghostDrawn);
+        ok(onRaw() === 0,
+            "no ghost: nothing on CTRL-RAW from an unadjusted result, got " +
+            onRaw());
+    })();
+
+    // -----------------------------------------------------------------
     // Tag schema v3: the drawing's tags alone reconstruct the whole
     // survey. One shot = one LEG LINE carrying the shot's full data
     // (the old station-point scheme collides on loop closures); trip
@@ -4425,6 +4810,17 @@ if (!IS_NODE) {
         near(vVert.distance, 1e-7, 1e-15,
             "rsd-slope: a vertical shot has no plan length to scale -- " +
             "distance left exactly as drawn");
+
+        // Task 5: control ties got their own counter, so the total the
+        // rebuild reports has to count them. Missing tiesDrawn here
+        // would under-report the shots a two-entrance cave carries.
+        ok(RebuildSurveyData.shotCount({ shotsDrawn: 2, closuresDrawn: 1,
+            tiesDrawn: 3, hiddenDrawn: 4, splaysDrawn: 5,
+            ghostDrawn: 99 }) === 15,
+            "rsd-count: ties count toward the drawn shot total and ghosts " +
+            "do not, got " + RebuildSurveyData.shotCount({ shotsDrawn: 2,
+                closuresDrawn: 1, tiesDrawn: 3, hiddenDrawn: 4,
+                splaysDrawn: 5, ghostDrawn: 99 }));
     })();
 
     // ---- LEGACY UPGRADE: hand-tagged station points, no leg data ----
