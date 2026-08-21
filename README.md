@@ -19,8 +19,10 @@ Each appears in the **Cave Survey** menu and as a command:
 | --- | --- | --- |
 | Azimuth Traverse | `azt` | Plot shots one at a time from typed azimuth/distance/inclination/LRUD. |
 | Survey Notebook | `snb` | A docked survey notes page: type or import shots, watch closures/stats/warnings live, draw in one undo step, export to any format. Also owns declination: estimate it from the survey date and the cave's location (IGRF), pin that location to a station as the drawing's geo anchor, and correct a trip's declination after the fact -- the drawing rotates around the fix. The walls you trace are tied to the trip they belong to automatically, so they follow it through a revision instead of being left behind -- nothing to switch on, and a revision claims work drawn before this existed. |
+| New Cave Map | `ncm` | Start a sheet from the NSS template, already carrying the control layers and symbol blocks. |
+| Rebuild Survey Data | `rsd` | Re-derive the survey model from what the drawing already holds, and upgrade a legacy drawing's tags to the current schema. |
+| Aerial Basemap | `ab` | Place georeferenced aerial imagery under the map, anchored to the drawing's geo station. |
 | Import Cave Survey | `ics` | Import Compass `.dat`, Walls `.srv`, Survex `.svx` or CSV -- the format is detected for you. |
-| LRUD Walls | `lw` | Approximate passage walls from the survey's LRUD, in survey order (works on imported data too). |
 | Scatter Breakdown | `scb` | Fill closed `BREAKDOWN-BOUNDARY` polylines with breakdown symbols, per boundary. |
 | Align Image | `ali` | Fit a scanned map onto known stations (move/rotate/scale, warp with 3+ points) for wall tracing. |
 | Survey Stats | `sst` | Length, depth, loop closures, and the honest BCRA/UIS grade, computed from the drawing. |
@@ -28,6 +30,7 @@ Each appears in the **Cave Survey** menu and as a command:
 | Build Legend | `bl` | Generate the legend from the symbols the map actually uses (NSS names, UIS aliases). |
 | Sheet Check | `shc` | What would a judge mark missing? The NSS required-elements list as a to-do list. |
 | Cave Mode | `cavemode` | Hide stock CAD clutter; QCAD becomes a dedicated cave mapping app. Toggleable, persistent. |
+| Swap Theme | `theme` | Toggle CaveCAD between its dark and light interface themes. |
 | GitHub Setup | `ghsetup` | Get this computer ready to use GitHub from inside CaveCAD: finds `git` and `gh` (without trusting `PATH`), gives the install link for your platform when they are missing, signs you in through GitHub's device flow -- the code appears in a dialog, your browser does the authenticating, no password passes through CaveCAD -- then checks the token can see private repositories, that git has a credential helper, and that you have a commit identity. Reports the first thing that is actually wrong rather than a cascade. |
 
 Start a new map from `templates/NSS_Cave_Template_PLAN.dxf` (or
@@ -68,6 +71,10 @@ These hold across every tool, and are worth knowing before you trust a map:
   untouched in XDATA, and redrawing with `CaveSurvey/AdjustEnabled` set false
   reproduces the as-surveyed geometry exactly. The as-surveyed shape is also
   drawn as a ghost on layer `CTRL-RAW` so you can see what the solver did.
+* **Passage walls come with the survey, not from a separate step.** Wall runs
+  are derived from LRUD and drawn inside the same undo step as the centreline,
+  dashed, as something to trace real walls over rather than as the walls
+  themselves. Redrawing replaces them.
 * **Grades quote the as-surveyed closure, never the adjusted one.** Adjustment
   makes a loop close by construction, so quoting the post-adjustment figure
   would make every survey report as BCRA grade 5. Survey Stats reports the
@@ -115,7 +122,7 @@ Three layers, no Python dependencies at all:
    exists, and the layer registry agrees with the templates.
 2. **Syntax** (`tests/js_syntax.js`): every script parsed inside QCAD's own
    engine.
-3. **Unit** (`tests/js_unit.js`): 200+ assertions over the Core library --
+3. **Unit** (`tests/js_unit.js`): 2300+ assertions over the Core library --
    parsers, round-trips, traverse math, network resolution, loop closure,
    blunder detection, grades, and the IGRF declination model (validated
    against ppigrf-generated fixtures) -- run inside QCAD's engine, or under
