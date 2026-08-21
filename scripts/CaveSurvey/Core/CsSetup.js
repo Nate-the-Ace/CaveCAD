@@ -1,15 +1,27 @@
 // CsSetup.js -- getting a machine ready to use GitHub from CaveCAD.
 //
-// Six rungs, each with its own remedy, because these fail in ways that
-// look like something else:
+// Four parts, in the order a surveyor hits them:
 //
-//   no credential helper -> an HTTPS push waits for a password on a
-//                           terminal that does not exist, so it hangs
-//   no user.email        -> commit refuses to run
-//   token without repo   -> a private repo returns 404, reading as
-//                           "no such repository"
+//   1. Executable discovery (candidates/resolve/verify/discover) --
+//      finds git and gh WITHOUT trusting PATH, and without trusting
+//      stat alone for a PATH-only install. See each function's own
+//      docstring for why both are needed.
+//   2. Install help (installHelp) -- per-platform remedy text for
+//      when discovery comes up empty.
+//   3. Device-flow parsing (parseDeviceCode/parseDeviceUrl) -- reads
+//      gh's device-login output so sign-in can happen inside CaveCAD
+//      with no password ever passing through the add-on.
+//   4. The six-rung preflight ladder (ladder) -- git installed, gh
+//      installed, signed in, repo scope, credential helper, commit
+//      identity -- because these fail in ways that look like
+//      something else:
 //
-// Discovery does NOT trust PATH. See the note in the tests.
+//        no credential helper -> an HTTPS push waits for a password
+//                                on a terminal that does not exist,
+//                                so it hangs
+//        no user.email        -> commit refuses to run
+//        token without repo   -> a private repo returns 404, reading
+//                                as "no such repository"
 //
 // This file is pure ECMAScript: no Q*/R* global is referenced at load
 // time, only inside function bodies and guarded by typeof, because
@@ -18,9 +30,31 @@
 
 var CsSetup = {};
 
+/**
+ * RSettings keys the caller (GitHubSetup) uses to persist a
+ * discover()'d git/gh path across launches, once a launch has paid
+ * discover()'s one execution probe. On the NEXT launch the cached
+ * value is read through validateCached(), and a miss there must fall
+ * back to discover() again, NEVER to resolve() alone -- resolve()
+ * cannot see a PATH-only install (see discover()'s docstring). Only
+ * an isCacheable() path should ever be written here in the first
+ * place -- see that function. Reading/writing RSettings itself is not
+ * this file's job; this Core file stays pure JS and never references
+ * RSettings at load time.
+ */
 CsSetup.SETTING_GIT = "CaveSurvey/GitPath";
 CsSetup.SETTING_GH = "CaveSurvey/GhPath";
 
+// "osx"/"win"/"linux" (RS::getSystemId() also returns "freebsd",
+// "netbsd", "openbsd", "solaris", or "unknown" on platforms this
+// add-on does not special-case) are the exact literal return values
+// of RS::getSystemId(), confirmed by reading
+// cavecad-src/src/core/RSPlatform.cpp directly rather than trusting
+// the plan's description of the API. This session only runs on
+// macOS, so only "osx" is exercised live; "win" and "linux" drive the
+// whole per-platform dispatch in candidates() and installHelp() but
+// are trusted from that source reading, not a live probe on either
+// platform.
 CsSetup.systemId = function() {
     if (typeof RS !== "undefined" && RS.getSystemId) {
         try {
@@ -32,6 +66,21 @@ CsSetup.systemId = function() {
 };
 
 /**
+ * The bare (PATH-relying) executable name for `name` on `system` --
+ * "gh.exe" on win, "gh" everywhere else. candidates() below appends
+ * exactly this as its LAST entry, and discover() falls back to
+ * exactly this when nothing stats. Both call this ONE function
+ * instead of discover() rebuilding candidates() and reading its last
+ * element -- that would couple discover()'s correctness to
+ * candidates()'s array ORDERING, so appending a new candidate after
+ * the bare one some day would make discover() probe the wrong thing
+ * with no test failing.
+ */
+CsSetup.bareName = function(system, name) {
+    return (system === "win") ? name + ".exe" : name;
+};
+
+/**
  * Absolute candidates first, the bare name (i.e. PATH) LAST.
  *
  * A macOS GUI app launched from Finder has a minimal PATH with no
@@ -39,7 +88,17 @@ CsSetup.systemId = function() {
  * machines that have it.
  */
 CsSetup.candidates = function(system, name) {
-    var exe = (system === "win") ? name + ".exe" : name;
+    // A bad name is not this function's job to interpret -- e.g. a
+    // caller accidentally passing "gh.exe" on win would otherwise
+    // yield "gh.exe.exe", and passing an already-absolute path would
+    // plant it as the bare candidate that verify() would go on to
+    // EXECUTE. Neither is a real caller in this codebase today, but
+    // both are latent, and an empty candidate list is a safe, cheap
+    // refusal for either.
+    if (typeof name !== "string" || name.length === 0) {
+        return [];
+    }
+    var exe = CsSetup.bareName(system, name);
     var dirs;
     if (system === "win") {
         dirs = [
@@ -67,7 +126,19 @@ CsSetup.fileExists = function(path) {
     }
     try {
         var fi = new QFileInfo(path);
-        return fi.exists() && fi.isFile();
+        // isExecutable() too, not just exists()+isFile(): proven live
+        // on macOS that a chmod 644 regular file passes exists()+
+        // isFile() ([exists, isFile, isExecutable] = [true, true,
+        // false] on a 644 file, all true on a 755 one). Without this,
+        // resolve()/discover() would report that file as "gh
+        // installed" and the NEXT rung would fail with a confusing
+        // "execve: Permission denied" instead of the right remedy
+        // living here. A real program file is executable by
+        // definition, so this cannot reject a genuine hit. Only the
+        // macOS leg was probed live -- Qt's Windows isExecutable() is
+        // extension/ACL based rather than a POSIX permission bit, so
+        // this is trusted on win, not independently verified there.
+        return fi.exists() && fi.isFile() && fi.isExecutable();
     } catch (e) {
         return false;
     }
@@ -98,13 +169,51 @@ CsSetup.resolve = function(name, system, existsFn) {
 };
 
 /**
- * Validates a previously-cached path (e.g. from RSettings) against a
- * live existence check. Returns the path if it is still a non-empty
- * string AND still exists, otherwise null so the caller re-runs
- * discovery.
+ * Only an ABSOLUTE path is safe to cache. discover() can legitimately
+ * return the bare name ("gh") for a PATH-only install (MacPorts,
+ * ~/.local/bin, Nix) -- see discover()'s docstring -- but caching that
+ * bare string breaks the whole point of caching it: validateCached()
+ * later stats it as a path relative to the process's CURRENT WORKING
+ * DIRECTORY, not PATH. Proven live inside CaveCAD:
+ *
+ *   cwd                                =>  .../CaveCAD.app/Contents/Resources
+ *   discover(...)                      =>  "gh"
+ *   validateCached("gh")               =>  null
+ *   QFileInfo("gh").absoluteFilePath() =>  .../Resources/gh
+ *
+ * So caching discover()'s bare-name answer means the cache NEVER
+ * hits for exactly the installs the execution probe was added to
+ * support -- a real subprocess launch on every single startup. And
+ * the mirror hazard: a stray file happening to be named "gh" in that
+ * Resources directory would validate a path nothing intended. Never
+ * cache a bare name; falling back to discover() again on every launch
+ * for that case is the correct, safe behaviour, not a performance bug
+ * to work around.
+ */
+CsSetup.isCacheable = function(path) {
+    if (typeof path !== "string" || path.length === 0) {
+        return false;
+    }
+    if (path.charAt(0) === "/") {
+        return true;
+    }
+    // A Windows drive-letter path: "C:/..." or "C:\...".
+    return /^[A-Za-z]:[\\\/]/.test(path);
+};
+
+/**
+ * Validates a previously-cached path (e.g. from RSettings, under
+ * SETTING_GIT/SETTING_GH) against a live existence check. Returns the
+ * path if it is isCacheable() (a non-empty, absolute-looking string)
+ * AND still exists, otherwise null so the caller re-runs discovery via
+ * discover() -- NEVER via resolve() alone, which cannot see a
+ * PATH-only install (see discover()'s docstring). Rejecting a
+ * non-cacheable value here, rather than just documenting that callers
+ * should not have cached one, is what actually closes the "stray file
+ * named gh in the cwd" hazard described on isCacheable() above.
  */
 CsSetup.validateCached = function(cached, existsFn) {
-    if (typeof cached !== "string" || cached.length === 0) {
+    if (!CsSetup.isCacheable(cached)) {
         return null;
     }
     var exists = (typeof existsFn === "function") ? existsFn : CsSetup.fileExists;
@@ -137,9 +246,20 @@ CsSetup.verify = function(prog, versionArgv) {
     // Array.isArray, not truthiness: a truthy non-array versionArgv
     // (a string, an object) would reach CsProc.run's argv.join(" ")
     // logging call and throw "argv.join is not a function" two frames
-    // from here. Confirmed present in both node and this engine's own
-    // QtScript bridge (CaveCAD 3.33.0) -- see the js_unit.js test.
+    // from here. Array.isArray is confirmed present in both node and
+    // this engine's own QtScript bridge (CaveCAD 3.33.0).
     var argv = Array.isArray(versionArgv) ? versionArgv : ["--version"];
+    // typeof-guarded like every other cross-Core reference in this
+    // tree (CsBind.js, CsTags.js, CsRevise.js all guard the same way):
+    // this file loads before CsProc in CsAll.js's dependency order, so
+    // in practice this is always defined, but a load-order mistake
+    // should report through the documented shape, not a raw
+    // ReferenceError two frames from wherever the ladder called in.
+    if (typeof CsProc === "undefined" || typeof CsProc.run !== "function") {
+        return { ok: false, path: prog,
+                 err: "CsProc is not available in this environment",
+                 notStarted: true };
+    }
     var r = CsProc.run(prog, argv);
     return {
         ok: (r.notStarted !== true) && r.code === 0,
@@ -158,24 +278,24 @@ CsSetup.verify = function(prog, versionArgv) {
  * Order: stat the absolute candidates via resolve(); a hit returns
  * immediately with NO process ever started -- stat succeeding is
  * conclusive on its own. Only when nothing stats does this fall back
- * to verify()-ing the bare name.
+ * to verify()-ing the bare name (via bareName(), not by rebuilding
+ * candidates() and reading its last element).
  *
  * The bare name is treated as found whenever it STARTS, regardless of
- * its exit code -- see the note on verify() above. A `--version` that
- * launches and exits non-zero still proves the binary is present and
- * reachable; that is a different, later problem for the caller (or
- * verify()'s `ok` field) to surface, not "not installed". Only a
- * `notStarted` probe -- nothing there to launch at all -- resolves to
- * null here.
+ * its exit code -- see verify()'s docstring for why a non-zero exit
+ * from a binary that did start is a different, later problem, not
+ * "not installed". Only a `notStarted` probe resolves to null here.
  */
 CsSetup.discover = function(name, versionArgv, system, existsFn) {
+    if (typeof name !== "string" || name.length === 0) {
+        return null;
+    }
     var statted = CsSetup.resolve(name, system, existsFn);
     if (statted !== null) {
         return statted;
     }
     var sys = system ? system : CsSetup.systemId();
-    var cands = CsSetup.candidates(sys, name);
-    var bare = cands[cands.length - 1];
+    var bare = CsSetup.bareName(sys, name);
     var probe = CsSetup.verify(bare, versionArgv);
     return probe.notStarted ? null : bare;
 };
@@ -205,18 +325,38 @@ CsSetup.INSTALL_HELP = {
     }
 };
 
+// A plain truthiness/typeof check on a bracket lookup is not enough
+// to keep the prototype chain out, and this bit BOTH lookups below --
+// proven live in both this engine and node:
+//   INSTALL_HELP[system] for system === "toString" resolves to the
+//     inherited Object.prototype.toString function -- truthy, so the
+//     old `INSTALL_HELP[system] ? system : "osx"` fallback silently
+//     broke and used "toString" as the platform instead of "osx".
+//   table[name] for name === "__proto__" resolves to table's own
+//     prototype object (Object.prototype) via the __proto__ accessor
+//     -- typeof "object" and non-null, so it passed a shape check on
+//     the ENTRY and was returned as if it were a real
+//     {command, links} record.
+// hasOwnProperty.call is the one check that answers "is this actually
+// one of MY keys" rather than "does something answer at this key by
+// any means".
+CsSetup.hasOwn = function(obj, key) {
+    return Object.prototype.hasOwnProperty.call(obj, key);
+};
+
 CsSetup.installHelp = function(system, name) {
-    var sys = CsSetup.INSTALL_HELP[system] ? system : "osx";
-    var entry = CsSetup.INSTALL_HELP[sys][name];
-    // A bracket lookup on an unknown name resolves up the prototype
-    // chain: entry for name === "toString" or "hasOwnProperty" would
-    // otherwise come back as a Function, not undefined, and pass a
-    // truthiness check. Every real entry here is a plain
-    // {command, links} object, so require that shape explicitly.
-    if (typeof entry !== "object" || entry === null) {
+    var sys = CsSetup.hasOwn(CsSetup.INSTALL_HELP, system) ? system : "osx";
+    var table = CsSetup.INSTALL_HELP[sys];
+    if (!CsSetup.hasOwn(table, name)) {
         return null;
     }
-    return entry;
+    var entry = table[name];
+    // A shallow copy, not the live entry: CsProc.run one file away
+    // establishes the convention "never mutate the backend's own
+    // record" for exactly this reason -- a caller pushing onto the
+    // returned .links array would otherwise corrupt CsSetup.INSTALL_HELP
+    // for the rest of the process.
+    return { command: entry.command, links: entry.links.slice() };
 };
 
 // ---------------------------------------------------------------------

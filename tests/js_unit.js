@@ -6371,6 +6371,25 @@ var ghWin = CsSetup.candidates("win", "gh");
 ok(ghWin[ghWin.length - 1] === "gh.exe", "win falls back to gh.exe on PATH");
 ok(ghWin.length > 1, "win has at least one absolute candidate");
 
+// bareName() is the ONE place "what is the bare/PATH candidate"
+// lives -- candidates() appends it, and discover() falls back to it
+// directly, neither by rebuilding the other's array and reading an
+// element by position.
+ok(CsSetup.bareName("win", "gh") === "gh.exe", "bareName adds .exe on win");
+ok(CsSetup.bareName("osx", "gh") === "gh", "bareName leaves the name alone " +
+    "off win");
+ok(CsSetup.bareName("linux", "gh") === "gh", "bareName leaves it alone on " +
+    "linux too");
+
+// candidates() must not misinterpret a bad `name` -- e.g. "gh.exe" on
+// win would otherwise double up to "gh.exe.exe", and an
+// already-absolute name would plant itself as the bare candidate that
+// verify() would go on to EXECUTE. An empty list is a safe refusal.
+ok(CsSetup.candidates("osx", "").length === 0,
+    "candidates refuses an empty name rather than building bogus paths");
+ok(CsSetup.candidates("osx", null).length === 0,
+    "candidates refuses a non-string name the same way");
+
 // resolve() takes an injected existence predicate so this is testable
 // with no filesystem.
 var present = { "/usr/local/bin/gh": true };
@@ -6378,6 +6397,24 @@ ok(CsSetup.resolve("gh", "osx", function(p) { return present[p] === true; }) ===
     "/usr/local/bin/gh", "resolve picks the first existing candidate");
 ok(CsSetup.resolve("gh", "osx", function() { return false; }) === null,
     "resolve returns null when nothing exists");
+
+// isCacheable() is the one function that decides whether a discover()
+// answer is safe to persist (e.g. into RSettings under SETTING_GIT/
+// SETTING_GH): only an absolute path is. discover() can legitimately
+// return the bare name for a PATH-only install, and caching THAT
+// means validateCached() later stats it relative to the process's
+// cwd, not PATH -- proven live inside CaveCAD (see isCacheable's own
+// docstring for the exact cwd/path capture).
+ok(CsSetup.isCacheable("gh") === false,
+    "isCacheable rejects a bare name -- it would stat against cwd, not PATH");
+ok(CsSetup.isCacheable("gh.exe") === false,
+    "isCacheable rejects a bare .exe name the same way");
+ok(CsSetup.isCacheable("/usr/local/bin/gh") === true,
+    "isCacheable accepts an absolute POSIX path");
+ok(CsSetup.isCacheable("C:/Program Files/Git/cmd/git.exe") === true,
+    "isCacheable accepts an absolute Windows drive-letter path");
+ok(CsSetup.isCacheable("") === false, "isCacheable rejects an empty string");
+ok(CsSetup.isCacheable(null) === false, "isCacheable rejects a non-string");
 
 // A stale cache must not survive.
 ok(CsSetup.validateCached("/opt/homebrew/bin/gh",
@@ -6388,6 +6425,14 @@ ok(CsSetup.validateCached("/usr/local/bin/gh",
     "validateCached keeps a path that still resolves");
 ok(CsSetup.validateCached("", function() { return true; }) === null,
     "validateCached rejects an empty cached value");
+// The mirror hazard isCacheable exists to close: a bare name must be
+// refused BEFORE the existence check ever runs, not merely happen to
+// fail it -- otherwise a stray file named "gh" in the process's cwd
+// would validate a path nothing intended. existsFn returning true
+// unconditionally proves this is a real refusal, not a coincidence.
+ok(CsSetup.validateCached("gh", function() { return true; }) === null,
+    "validateCached refuses a bare name even if something answers true " +
+    "for it -- the stray-file-in-cwd hazard isCacheable exists to close");
 
 // Install help, per platform. Every rung's dialog is a remedy, so the
 // text is asserted rather than left to whoever writes the dialog.
@@ -6424,6 +6469,26 @@ ok(CsSetup.installHelp("osx", "toString") === null,
 ok(CsSetup.installHelp("osx", "hasOwnProperty") === null,
     "installHelp does not return the inherited Object.prototype.hasOwnProperty");
 
+// The typeof-object shape check above is not enough on its own: an
+// unknown-name lookup can resolve to a genuine object without being
+// one of the table's own keys. table["__proto__"] (via the __proto__
+// accessor) IS a real, non-null object -- Object.prototype itself --
+// so it passed the old guard and came back as if it were a
+// {command, links} record; a consumer calling .links.join() on it
+// would throw. Proven live in both this engine and node.
+ok(CsSetup.installHelp("osx", "__proto__") === null,
+    "installHelp does not return the inherited Object.prototype via __proto__");
+// And the mirror bug on the OTHER lookup: INSTALL_HELP["toString"] is
+// an inherited Function, which is truthy, so the old
+// `INSTALL_HELP[system] ? system : "osx"` fallback silently picked
+// "toString" as the platform instead of falling back to "osx" -- the
+// documented "unknown system defaults to osx" contract broke without
+// throwing anything. Proven live in both engines.
+ok(CsSetup.installHelp("toString", "gh") !== null &&
+   CsSetup.installHelp("toString", "gh").command === "brew install gh",
+    "installHelp falls back to the osx table when the system name " +
+    "itself collides with an inherited Object.prototype member");
+
 // linux/gh has no command, DELIBERATELY: there is no single
 // cross-distro install line (apt repo vs dnf vs snap), and writing
 // one un-verified would repeat the memory-written-fact pattern that
@@ -6435,11 +6500,28 @@ ok(CsSetup.installHelp("linux", "gh").command === "",
     "installHelp('linux', 'gh').command is deliberately empty -- no verified " +
     "single cross-distro command exists");
 
+// installHelp() must hand back a copy, not a live reference into
+// INSTALL_HELP -- CsProc.run one file away establishes the opposite
+// convention ("never mutate the backend's own record") for exactly
+// this reason. Mutating what one caller got back must not corrupt
+// what the next caller sees.
+var mutateProbe = CsSetup.installHelp("osx", "gh");
+mutateProbe.links.push("MUTATED-BY-TEST");
+ok(CsSetup.installHelp("osx", "gh").links.indexOf("MUTATED-BY-TEST") === -1,
+    "installHelp returns a shallow copy -- mutating .links does not corrupt " +
+    "CsSetup.INSTALL_HELP for the next caller");
+
 // ---------------------------------------------------------------------
 // CsSetup.verify / discover -- stat cannot tell whether a bare name
 // runs; only launching it can. These use an injected CsProc backend
 // so no real process starts, mirroring the CsProc section above.
 // ---------------------------------------------------------------------
+
+// verify()'s versionArgv fallback depends on Array.isArray existing;
+// confirmed live in both node and this engine's QtScript bridge
+// (CaveCAD 3.33.0), pinned here rather than only claimed in a comment.
+ok(typeof Array.isArray === "function",
+    "Array.isArray exists in this environment");
 
 // verify(): starts and exits 0.
 CsProc.setBackend(function(prog, argv, opts) {
@@ -6548,12 +6630,24 @@ CsProc.setBackend(null);   // restore the real backend, as the CsProc section do
 // meant, or a non-function where a predicate was meant), so they are
 // asserted directly rather than left to whatever happened to call in
 // first and throw.
+// The backend below CAPTURES argv rather than ignoring it, so this
+// proves the actual substitution happened -- a backend that ignores
+// argv and always returns success would pass this assertion for `[]`,
+// `["--bogus"]`, or `undefined` just as easily as for the real
+// default, proving only "did not throw".
+var badArgvSeen = [];
 CsProc.setBackend(function(prog, argv, opts) {
+    badArgvSeen.push(argv);
     return { code: 0, out: "", err: "", timedOut: false, notStarted: false };
 });
-ok(CsSetup.verify("gh", "not-an-array").ok === true,
+var badArgvResult = CsSetup.verify("gh", "not-an-array");
+ok(badArgvResult.ok === true,
     "verify falls back to the default --version argv when versionArgv " +
     "is not an array, instead of throwing out of CsProc.run's argv.join");
+ok(badArgvSeen.length === 1 && badArgvSeen[0].length === 1 &&
+   badArgvSeen[0][0] === "--version",
+    "verify substituted the default [\"--version\"] argv specifically, " +
+    "not an empty array or the bad value passed through unchanged");
 CsProc.setBackend(null);
 // Compared against the no-existsFn-at-all call rather than pinned to
 // null/a path: this machine has a real gh install (some dev machines
@@ -6584,6 +6678,16 @@ if (!IS_NODE) {
     ok(realGitPath !== null,
         "discover finds the real git on this machine via real QFileInfo " +
         "stat, through a full discover() call (engine only)");
+
+    // fileExists() itself had zero direct coverage until now, even
+    // though its directory rejection (isFile()) is what keeps a
+    // directory that happens to be named "gh" out of resolve()'s
+    // answer, and isExecutable() is what keeps a non-executable file
+    // out of it. Engine-only: needs the real QFileInfo.
+    ok(CsSetup.fileExists("/usr/bin") === false,
+        "fileExists rejects a directory (engine only)");
+    ok(CsSetup.fileExists("/usr/bin/git") === true,
+        "fileExists accepts a real, executable file (engine only)");
 }
 
 // ---------------------------------------------------------------------
