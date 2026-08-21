@@ -5733,6 +5733,9 @@ sameArgv(CsGit.argvAdd(["drawings/Blowing Hole.dxf", "survey/bh.shots.tsv"]),
     "argvAdd separates paths with -- and keeps spaces intact");
 sameArgv(CsGit.argvCheckoutNew("survey/2026-08-20-nd", "main"),
     ["checkout", "-b", "survey/2026-08-20-nd", "main"], "argvCheckoutNew");
+sameArgv(CsGit.argvCheckoutNew("survey/2026-08-20-nd"),
+    ["checkout", "-b", "survey/2026-08-20-nd"],
+    "argvCheckoutNew with no starting point omits the trailing arg");
 sameArgv(CsGit.argvPush("origin", "survey/2026-08-20-nd"),
     ["push", "-u", "origin", "survey/2026-08-20-nd"], "argvPush");
 sameArgv(CsGit.argvClone("https://github.com/o/r.git", "/Users/n/Documents/Cave/r"),
@@ -5765,14 +5768,16 @@ ok(CsGit.parseToplevel({ code: 0, out: "/Users/n/Documents/Cave/bh\n", err: "" }
 ok(CsGit.parseToplevel({ code: 128, out: "", err: "not a git repository" }) === null,
     "parseToplevel returns null outside a work tree");
 
-var st = CsGit.parsePorcelain({ code: 0, out:
+var gitSt = CsGit.parsePorcelain({ code: 0, out:
     " M drawings/Blowing Hole.dxf\n?? survey/bh.shots.tsv\nA  notes/trip.md\n", err: "" });
-ok(st.length === 3, "parsePorcelain finds 3 entries");
-ok(st[0].path === "drawings/Blowing Hole.dxf",
-    "parsePorcelain keeps a path containing a space");
-ok(st[0].code === "M", "parsePorcelain reads the status code");
-ok(st[1].code === "??", "parsePorcelain reads an untracked marker");
-ok(st[0].origPath === null,
+ok(gitSt.length === 3, "parsePorcelain finds 3 entries");
+ok(gitSt[0].path === "drawings/Blowing Hole.dxf",
+    "parsePorcelain keeps an already-unquoted path containing a space " +
+    "(a caller could hand this parser output from a source other than " +
+    "git itself)");
+ok(gitSt[0].code === "M", "parsePorcelain reads the status code");
+ok(gitSt[1].code === "??", "parsePorcelain reads an untracked marker");
+ok(gitSt[0].origPath === null,
     "parsePorcelain: origPath is null (not absent) on a plain modified entry");
 ok(CsGit.parsePorcelain({ code: 0, out: "", err: "" }).length === 0,
     "parsePorcelain on a clean tree is empty");
@@ -5780,6 +5785,7 @@ ok(CsGit.parsePorcelain({ code: 0, out: "", err: "" }).length === 0,
 // Rename/copy: porcelain renders "old -> new". The destination is the
 // file that now exists -- the one a later `git add` must name -- so
 // `path` carries the destination and `origPath` carries the source.
+// No spaces here, so real git would not quote either side either.
 var rn = CsGit.parsePorcelain({ code: 0,
     out: "R  drawings/old.dxf -> drawings/new.dxf\n", err: "" });
 ok(rn[0].code === "R", "parsePorcelain: rename keeps the R status code");
@@ -5788,31 +5794,92 @@ ok(rn[0].path === "drawings/new.dxf",
 ok(rn[0].origPath === "drawings/old.dxf",
     "parsePorcelain: rename's origPath is the source");
 
-// The realistic case -- cave names have spaces on both sides of the
-// arrow, which the old parser (no arrow-splitting) would have left as
-// one broken combined string.
-var rnSpaced = CsGit.parsePorcelain({ code: 0,
-    out: "R  drawings/Blowing Hole.dxf -> drawings/Blowing Hole 2.dxf\n", err: "" });
-ok(rnSpaced[0].path === "drawings/Blowing Hole 2.dxf",
-    "parsePorcelain: rename destination survives spaces in both names");
-ok(rnSpaced[0].origPath === "drawings/Blowing Hole.dxf",
-    "parsePorcelain: rename source survives spaces in both names");
+// ---------------------------------------------------------------------
+// Real git output, not invented fixtures.
+//
+// A spec review (2026-08-21) found that git C-quotes ANY path with a
+// space -- not only a non-ASCII one -- and it does so in --porcelain
+// with or without core.quotePath. The earlier version of this test
+// section fed the parser a spaced rename with no quotes at all, a
+// shape git never emits, so it passed while the actual bug -- a
+// quoted path reaching CsGit.argvAdd as '"d/Blowing Hole.dxf"',
+// literal quote marks and all, which `git add` rejects -- went
+// uncaught. Every fixture below is copy-pasted byte-for-byte (verified
+// with `xxd`) from `git status --porcelain` (git 2.54.0) run against a
+// throwaway repo under the scratchpad, never against this worktree.
+// ---------------------------------------------------------------------
 
-// LIMITATION, documented rather than fixed: git quotes and octal-
-// escapes a path with non-ASCII bytes when core.quotePath is on (the
-// default) -- an accented cave name like "Blöwing.dxf" arrives as
-// the literal text "Bl\303\266wing.dxf", quote marks included. The
-// robust fix is `git status --porcelain -z`, which turns off quoting
-// and NUL-separates a rename pair -- but that changes this parser's
-// line-based shape, and the plan specified --porcelain, so switching
-// is deferred rather than done here. This assertion pins today's
-// behavior -- the RAW quoted/escaped text, unmodified -- so anyone
-// who hits an accented name gets pointed straight at this comment.
-var quoted = CsGit.parsePorcelain({ code: 0,
-    out: " M \"drawings/Bl\\303\\266wing.dxf\"\n", err: "" });
-ok(quoted[0].path === "\"drawings/Bl\\303\\266wing.dxf\"",
-    "LIMITATION: parsePorcelain returns a quoted/escaped path AS-IS; " +
-    "see the -z note above this test");
+// A plain modified entry, quoted for the space alone -- no non-ASCII
+// involved. This is criterion 3's actual spaced-path case.
+var quotedMod = CsGit.parsePorcelain({ code: 0,
+    out: " M \"d/Blowing Hole.dxf\"\n", err: "" });
+ok(quotedMod[0].code === "M", "parsePorcelain: quoted modified entry's code");
+ok(quotedMod[0].path === "d/Blowing Hole.dxf",
+    "parsePorcelain: quote marks are stripped from a spaced path -- " +
+    "this is the path CsGit.argvAdd must receive");
+
+// An untracked entry, same reason for quoting.
+var quotedUntracked = CsGit.parsePorcelain({ code: 0,
+    out: "?? \"untracked file.txt\"\n", err: "" });
+ok(quotedUntracked[0].code === "??",
+    "parsePorcelain: quoted untracked entry's code");
+ok(quotedUntracked[0].path === "untracked file.txt",
+    "parsePorcelain: quote marks stripped from a quoted untracked path");
+
+// A pure rename, both sides spaced, so git quotes BOTH independently:
+// R  "drawings/old name.txt" -> "drawings/new name.txt"
+var rnBothQuoted = CsGit.parsePorcelain({ code: 0,
+    out: "R  \"drawings/old name.txt\" -> \"drawings/new name.txt\"\n", err: "" });
+ok(rnBothQuoted[0].code === "R", "parsePorcelain: both-quoted rename code");
+ok(rnBothQuoted[0].path === "drawings/new name.txt",
+    "parsePorcelain: both-quoted rename destination is unquoted");
+ok(rnBothQuoted[0].origPath === "drawings/old name.txt",
+    "parsePorcelain: both-quoted rename source is unquoted");
+
+// An asymmetric rename -- only the spaced side is quoted:
+// R  drawings/asym-old.txt -> "drawings/asym new.txt"
+var rnOneQuoted = CsGit.parsePorcelain({ code: 0,
+    out: "R  drawings/asym-old.txt -> \"drawings/asym new.txt\"\n", err: "" });
+ok(rnOneQuoted[0].origPath === "drawings/asym-old.txt",
+    "parsePorcelain: asymmetric rename -- unquoted source is untouched");
+ok(rnOneQuoted[0].path === "drawings/asym new.txt",
+    "parsePorcelain: asymmetric rename -- quoted destination is unquoted");
+
+// unquotePath's octal-run decoding leans on decodeURIComponent, which
+// CsStore.js:117 already uses and which the drawing round-trip test
+// (this file, engine-only) exercises with real content -- but per the
+// Task 1 lesson (two API calls that did not exist in this engine,
+// silently swallowed), that is verified directly here too rather than
+// assumed.
+ok(typeof decodeURIComponent === "function",
+    "decodeURIComponent exists in this engine -- required by " +
+    "CsGit.unquotePath's octal-run decoding");
+ok(decodeURIComponent("%C3%B6") === "ö",
+    "decodeURIComponent decodes a 2-byte UTF-8 sequence correctly");
+
+// Non-ASCII, core.quotePath at its default (on): a "cafe/Blowing.dxf"
+// with real accents comes back octal-escaped as UTF-8 BYTES, two
+// escapes per accented character (\303\251 is "e-acute", \303\266 is
+// "o-diaeresis"):
+// A  "caf\303\251/Bl\303\266wing.dxf"
+// Now that unquotePath decodes the octal runs, this is no longer a
+// pinned limitation -- it is asserted to actually come back as the
+// real accented text.
+var quotedAccent = CsGit.parsePorcelain({ code: 0,
+    out: "A  \"caf\\303\\251/Bl\\303\\266wing.dxf\"\n", err: "" });
+ok(quotedAccent[0].code === "A", "parsePorcelain: non-ASCII entry's code");
+ok(quotedAccent[0].path === "café/Blöwing.dxf",
+    "parsePorcelain: octal-escaped UTF-8 bytes decode to real accented " +
+    "text, not mojibake and not the raw escapes");
+
+// What is STILL genuinely unhandled, now that quoting is: a filename
+// that itself contains the literal " -> " sequence would be split at
+// the wrong point by the rename detector above. That is deliberately
+// out of scope -- it is genuinely obscure, and guarding against a
+// four-character substring inside a filename costs more clarity than
+// it buys. No -z switch either: it would drop quoting and NUL-
+// separate a rename pair, but the plan specifies --porcelain, and the
+// fix above needed no format change.
 
 var ab = CsGit.parseAheadBehind({ code: 0, out: "2\t5\n", err: "" });
 ok(ab.behind === 2 && ab.ahead === 5, "parseAheadBehind reads left-right counts");
