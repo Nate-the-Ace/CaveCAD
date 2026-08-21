@@ -29,6 +29,26 @@
 
 **Tests append to `tests/js_unit.js`** in the existing style — a `// ---` banner comment, then bare `ok(...)`/`near(...)` calls at top level. There is no test-function registry. New Core files must also be added to that file's `CORE_FILES` array in dependency order.
 
+**Fixtures for anything an external tool prints MUST be captured from that tool, never
+composed.** This rule was learned the hard way twice in this slice. The `parsePorcelain`
+fixtures below were written from what `git status --porcelain` output looks like from
+memory — unquoted spaced paths — and git has never emitted that: it C-quotes ANY path
+containing a space, so the parser passed its tests while returning a path `git add` would
+reject. Task 1 had the same shape with a Qt API that does not exist in this engine. A test
+built on an invented fixture passes while the feature is broken.
+
+So, before writing a parser test: run the real tool in a throwaway directory (under the
+scratchpad, never inside the worktree), capture its actual bytes, and paste those. Verify
+with `xxd` if quoting or encoding is involved. This applies to every fixture in this plan,
+including the `AUTH_OK` / `AUTH_THIN` `gh auth status` strings in Task 3 — those were
+written from memory too and MUST be re-captured from a real `gh auth status` before being
+trusted. The Task 5 device-flow fixture is the one exception already known-good: it came
+from a live probe on 2026-08-20 and its provenance is recorded in the test comment.
+
+Likewise, **verify any API you have not seen used elsewhere in this repo actually exists**
+before relying on it, rather than trusting this plan's code blocks. They were written
+against the QCAD API as documented, and this bridge diverges.
+
 **Run after every task:** `./tests/run_all.sh` — expect `ALL TESTS PASSED (publish checks not run; use --publish)`.
 
 ---
