@@ -49,6 +49,19 @@ Likewise, **verify any API you have not seen used elsewhere in this repo actuall
 before relying on it, rather than trusting this plan's code blocks. They were written
 against the QCAD API as documented, and this bridge diverges.
 
+**Validate with `typeof`, never with truthiness plus `String()`.** This produced the
+worst defect in the slice: `CsHub.parseVisibility` used `String(j.visibility)`, so
+`{"visibility":["PRIVATE"]}` returned `true` from `isPrivate` — the gate carrying "never
+expose a cave entrance" said yes to a non-private shape, because `String(["PRIVATE"])` is
+`"PRIVATE"`. The same pattern threw a `TypeError` on `{"visibility":{"toString":1}}`, and
+in `noreplyEmail` it let `1e21` become a committer address in permanent history. Note also
+that `Math.floor(n) === n` does NOT prove an integer for large doubles — nothing past 2^52
+has a fractional part — so a range cap is needed too.
+
+Guard every field a parser reads with `typeof x === "string"` / `=== "number"` and an
+explicit range check. And when a docstring promises "never throws" or "never returns true
+unless...", make it literally true: later tasks get written trusting it.
+
 **Run after every task:** `./tests/run_all.sh` — expect `ALL TESTS PASSED (publish checks not run; use --publish)`.
 
 ---
