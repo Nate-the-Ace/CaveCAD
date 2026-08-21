@@ -5749,6 +5749,16 @@ sameArgv(CsGit.argvAheadBehind("origin/main", "HEAD"),
     "argvAheadBehind");
 sameArgv(CsGit.argvHooksPath(".githooks"),
     ["config", "core.hooksPath", ".githooks"], "argvHooksPath");
+// The plan's own test section stopped short of these three builders,
+// leaving them without the exact-array assertion the acceptance
+// criteria require of every builder. argvConfigGet is confirmed used
+// later (Task 5's identity probe reads user.name/user.email through
+// it), so all three are asserted here rather than left untested or
+// cut for being unused so far.
+sameArgv(CsGit.argvPullRebase(), ["pull", "--rebase"], "argvPullRebase");
+sameArgv(CsGit.argvConfigGet("user.email"), ["config", "--get", "user.email"],
+    "argvConfigGet");
+sameArgv(CsGit.argvVersion(), ["--version"], "argvVersion");
 
 ok(CsGit.parseToplevel({ code: 0, out: "/Users/n/Documents/Cave/bh\n", err: "" }) ===
     "/Users/n/Documents/Cave/bh", "parseToplevel trims the newline");
