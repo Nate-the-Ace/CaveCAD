@@ -52,24 +52,51 @@ GitHubSetup.showLadder = function() {
             lines.push("      " + r.remedy);
         }
     }
+    var body = lines.join("\n");
 
     var failure = CsSetup.firstFailure(rungs);
+
+    // QMessageBox for the multi-line body, NEVER EAction.handleUserMessage/
+    // handleUserWarning for it -- traced through the CaveCAD source:
+    // EAction.handleUserMessage/handleUserWarning -> RMainWindowQt's
+    // handleUserMessage -> emit userMessage -> CommandLine.js does
+    // RS.escape(message) (QString::toHtmlEscaped, which does NOT turn
+    // "\n" into "<br>") and then appendAndScroll("<span>" + message +
+    // "</span>"). The <span> makes Qt treat the whole thing as RICH
+    // TEXT, and rich text collapses every "\n" -- and the "      "
+    // remedy indent -- to a single space. Six rungs plus remedies
+    // would arrive as one unreadable smear, which is this tool's
+    // entire deliverable. QMessageBox renders plain text with real
+    // line breaks, and is already this suite's precedent for a
+    // multi-line report (SheetCheck.js, SurveyStats.js). DO NOT
+    // "simplify" either branch below back to a handleUserMessage/
+    // handleUserWarning newline string.
     if (failure === null) {
-        EAction.handleUserMessage(qsTr("GitHub setup: ready.") + "\n" +
-            lines.join("\n"));
+        QMessageBox.information(RMainWindowQt.getMainWindow(),
+            qsTr("GitHub Setup"), body);
+        // A one-line summary too -- that is what the command line is
+        // good at.
+        EAction.handleUserMessage(qsTr("GitHub setup: ready."));
         return;
     }
 
-    EAction.handleUserWarning(qsTr("GitHub setup is incomplete:") + "\n" +
-        lines.join("\n"));
+    QMessageBox.warning(RMainWindowQt.getMainWindow(),
+        qsTr("GitHub Setup"), body);
+    EAction.handleUserWarning(qsTr("GitHub setup is incomplete."));
 
     // Only the rungs this tool can act on get an offer; an install is
     // the user's to run, and the plugin never downloads an installer.
     if (failure.id === "auth") {
         GitHubSetup.offerSignIn(tools.ghPath);
     } else if (failure.id === "scope") {
-        GitHubSetup.runAndReport(tools.ghPath, CsHub.argvRefreshScope("repo"),
-            qsTr("Requesting the repo scope"));
+        // NOT runAndReport: `gh auth refresh -s repo` is a DEVICE-FLOW
+        // command exactly like `gh auth login --web` (`gh auth refresh
+        // --help` lists `-c, --clipboard  Copy one-time OAuth device
+        // code to clipboard`, the same tell). Routing it through
+        // runAndReport's blocking CsProc.run would freeze the window
+        // for up to a minute AND never show the one-time code, which
+        // would land in the captured stdout instead of on screen.
+        GitHubSetup.offerScopeRefresh(tools.ghPath, "repo");
     } else if (failure.id === "helper") {
         GitHubSetup.runAndReport(tools.ghPath, CsHub.argvSetupGit(),
             qsTr("Configuring git's credential helper"));
@@ -89,13 +116,22 @@ GitHubSetup.showLadder = function() {
 };
 
 /**
- * gh's device flow, driven from inside CaveCAD.
+ * Drives ANY gh device-flow command from inside CaveCAD: the one-time
+ * code on screen, the device URL a click away, and a Cancel that
+ * reaches the real child process rather than orphaning it.
  *
- * Probed on 2026-08-20 with no TTY: `gh auth login --web` prints the
- * one-time code and the device URL, then blocks polling GitHub. It
- * does not demand a terminal and does not wait for Enter. That is
- * what makes an in-app sign-in dialog possible at all -- the code can
- * be shown here while gh itself does the waiting.
+ * Both callers below are device-flow commands, confirmed the same
+ * way: `gh auth login --web` (offerSignIn) was probed live with no
+ * TTY on 2026-08-20 and does exactly this; `gh auth refresh -s <scope>`
+ * (offerScopeRefresh) was confirmed by reading `gh auth refresh
+ * --help`, which lists `-c, --clipboard  Copy one-time OAuth device
+ * code to clipboard` -- the same tell, without ever running the
+ * command (running it would mutate the token's scopes). Both print a
+ * one-time code and a device URL, then block polling GitHub, so both
+ * need exactly this presentation -- routing either through a plain
+ * blocking CsProc.run (as the ladder's non-device-flow remedies
+ * correctly do for `gh auth setup-git`) would freeze the window for
+ * up to a minute and never show the code the user actually needs.
  *
  * QProcess is driven directly here rather than through CsProc.run:
  * that call blocks until the child exits, and the whole point is to
@@ -149,27 +185,28 @@ GitHubSetup.showLadder = function() {
  * `settled` guard makes whichever path fires first (Cancel, the close
  * box, natural completion, or expiry) the only one that acts; Task 8
  * is where the close-box path actually gets to run.
+ *
+ * onFinished(loginResult) runs on exactly the path that never killed
+ * the child -- natural completion -- with the process's own {code,
+ * out, err}. Cancel, the native close box, and the 15-minute expiry
+ * never call onFinished at all: there is nothing for a caller to act
+ * on when this function is the one that chose to end the process.
  */
-GitHubSetup.offerSignIn = function(ghPath) {
-    if (CsSetup.isBlank(ghPath)) {
-        return;
-    }
-
+GitHubSetup.runDeviceFlow = function(ghPath, argv, dialogTitle, helpText, onFinished) {
     var proc = new QProcess();
     var dialog = new QDialog(RMainWindowQt.getMainWindow());
-    dialog.windowTitle = qsTr("Sign in to GitHub");
+    dialog.windowTitle = dialogTitle;
 
     var layout = new QVBoxLayout();
 
-    var codeLabel = new QLabel(qsTr("Starting sign-in..."));
+    var codeLabel = new QLabel(qsTr("Starting..."));
     var font = codeLabel.font;
     font.setPointSize(font.pointSize() + 10);
     font.setBold(true);
     codeLabel.font = font;
     layout.addWidget(codeLabel, 0, 0);
 
-    var help = new QLabel(qsTr("Enter this code on the page that opens " +
-        "in your browser. It is already on your clipboard."));
+    var help = new QLabel(helpText);
     help.wordWrap = true;
     layout.addWidget(help, 0, 0);
 
@@ -235,7 +272,7 @@ GitHubSetup.offerSignIn = function(ghPath) {
         // path if this connection is refused outright.
     }
 
-    proc.start(ghPath, CsSetup.deviceLoginArgv());
+    proc.start(ghPath, argv);
     dialog.show();
 
     timer.timeout.connect(function() {
@@ -276,11 +313,41 @@ GitHubSetup.offerSignIn = function(ghPath) {
             // Read exitCode()/output ONLY here, on the one path that
             // never calls kill() -- see the kill-before-read hazard
             // in this function's docstring.
-            var loginResult = { code: proc.exitCode(), out: collected.out,
-                                 err: collected.err };
+            onFinished({ code: proc.exitCode(), out: collected.out,
+                         err: collected.err });
+            return;
+        }
+
+        if (waitedMs >= EXPIRY_MS) {
+            if (teardown(true)) {
+                dialog.reject();
+                EAction.handleUserWarning(
+                    qsTr("The one-time code expired before this finished. Try again."));
+            }
+        }
+    });
+
+    timer.start(POLL_MS);
+};
+
+/**
+ * The auth rung's remedy: `gh auth login --web`. See runDeviceFlow's
+ * docstring for the shared presentation and its design notes.
+ */
+GitHubSetup.offerSignIn = function(ghPath) {
+    if (CsSetup.isBlank(ghPath)) {
+        return;
+    }
+    GitHubSetup.runDeviceFlow(ghPath, CsSetup.deviceLoginArgv(),
+        qsTr("Sign in to GitHub"),
+        qsTr("Enter this code on the page that opens in your browser. It is already on your clipboard."),
+        function(loginResult) {
+            // Requires a passing `gh auth status`, not just exit 0 --
+            // see CsSetup.loginSucceeded's own docstring.
             var status = CsProc.run(ghPath, CsHub.argvAuthStatus());
             if (!CsSetup.loginSucceeded(loginResult, status)) {
-                var line = String(collected.err).split("\n")[0];
+                var line = loginResult.err.split("\n")[0] ||
+                    qsTr("no further detail was reported.");
                 EAction.handleUserWarning(
                     qsTr("Sign-in did not complete. %1").arg(line));
                 return;
@@ -291,24 +358,39 @@ GitHubSetup.offerSignIn = function(ghPath) {
             // credential helper wired.
             GitHubSetup.runAndReport(ghPath, CsHub.argvSetupGit(),
                 qsTr("Configuring git's credential helper"));
-            return;
-        }
+        });
+};
 
-        if (waitedMs >= EXPIRY_MS) {
-            if (teardown(true)) {
-                dialog.reject();
-                EAction.handleUserWarning(qsTr(
-                    "The one-time code expired before sign-in completed. " +
-                    "Use Sign in to GitHub to try again."));
+/**
+ * The scope rung's remedy: `gh auth refresh -s <scope>`. Also a
+ * device-flow command -- see runDeviceFlow's docstring -- so it gets
+ * the identical dialog, not GitHubSetup.runAndReport's blocking wait.
+ * Success here means the token now actually CARRIES the scope, not
+ * merely that gh exited 0: CsHub.hasRepoScope on a fresh `gh auth
+ * status` is the same predicate the ladder's own scope rung trusts.
+ */
+GitHubSetup.offerScopeRefresh = function(ghPath, scope) {
+    if (CsSetup.isBlank(ghPath) || CsSetup.isBlank(scope)) {
+        return;
+    }
+    GitHubSetup.runDeviceFlow(ghPath, CsHub.argvRefreshScope(scope),
+        qsTr("Grant GitHub access"),
+        qsTr("Enter this code on the page that opens in your browser to grant access."),
+        function(loginResult) {
+            var status = CsProc.run(ghPath, CsHub.argvAuthStatus());
+            if (loginResult.code !== 0 || !CsHub.hasRepoScope(status)) {
+                var line = loginResult.err.split("\n")[0] ||
+                    qsTr("no further detail was reported.");
+                EAction.handleUserWarning(
+                    qsTr("Requesting the repo scope did not complete. %1").arg(line));
+                return;
             }
-        }
-    });
-
-    timer.start(POLL_MS);
+            EAction.handleUserMessage(qsTr("The repo scope has been granted."));
+        });
 };
 
 GitHubSetup.runAndReport = function(prog, argv, what) {
-    if (!prog) {
+    if (CsSetup.isBlank(prog)) {
         return false;
     }
     var r = CsProc.run(prog, argv, { timeoutMs: 60000 });
@@ -317,13 +399,16 @@ GitHubSetup.runAndReport = function(prog, argv, what) {
         return true;
     }
     // Shortest decisive line, with the whole output in cave-git.log.
-    var line = String(r.err).split("\n")[0];
+    // r.err is already a string -- CsProc.run guarantees it -- so no
+    // String() wrap here; the fallback avoids a dangling colon with
+    // nothing after it when stderr came back empty.
+    var line = r.err.split("\n")[0] || qsTr("no further detail was reported.");
     EAction.handleUserWarning(what + ": " + line);
     return false;
 };
 
 GitHubSetup.setIdentity = function(gitPath, ghPath) {
-    if (!gitPath || !ghPath) {
+    if (CsSetup.isBlank(gitPath) || CsSetup.isBlank(ghPath)) {
         return;
     }
     var user = CsHub.parseApiUser(CsProc.run(ghPath, CsHub.argvApiUser()));
