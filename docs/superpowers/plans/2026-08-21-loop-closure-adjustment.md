@@ -463,7 +463,7 @@ Append to `tests/js_unit.js` after Task 1's block:
 var EQ = { sigmaTape: 1, sigmaAngle: 0 };
 var asq = CsAdjust.adjust(sq, rsq, EQ);
 
-ok(asq.converged === true, "square adjustment converges");
+ok(asq.summary.converged === true, "square adjustment converges");
 ok(asq.adjusted === true, "adjust marks its result adjusted");
 near(asq.shifts["A4"].distance, 0, 1e-9, "the pinned anchor A4 does not move");
 near(asq.shifts["A1"].dx, 0.125, 1e-9, "A1 shifts one quarter of the misclosure");
@@ -506,8 +506,8 @@ tree.shots.push(shotOf("T2", "T3", 10, 90, 5));
 tree.shots.push(shotOf("T2", "T4", 7, 200, -12));
 var rtree = CsNetwork.resolve(tree, {});
 var atree = CsAdjust.adjust(tree, rtree, EQ);
-ok(atree.converged === true, "tree adjustment converges");
-ok(atree.iterations === 0, "a tree needs no iterations");
+ok(atree.summary.converged === true, "tree adjustment converges");
+ok(atree.summary.iterations === 0, "a tree needs no iterations");
 near(atree.summary.worstShift, 0, 1e-9, "a tree does not move");
 
 // idempotence: adjusting the adjusted result is a no-op
@@ -542,7 +542,7 @@ near(aheld.stations["H2"].x - aheld.stations["H1"].x, 10, 1e-4,
 // non-convergence returns the survey UNADJUSTED, and says so
 var stuck = CsAdjust.adjust(sq, rsq, { sigmaTape: 1, sigmaAngle: 0,
     maxIterations: 1, cgTolerance: 1e-30 });
-ok(stuck.converged === false, "a starved solve reports non-convergence");
+ok(stuck.summary.converged === false, "a starved solve reports non-convergence");
 ok(stuck.adjusted === false, "a starved solve does not claim to be adjusted");
 ok(stuck.raw === null, "a starved solve offers no ghost -- its geometry IS the raw");
 near(stuck.stations["A3"].x, rsq.stations["A3"].x, 1e-12,
@@ -1167,6 +1167,56 @@ in the unit run.
 git add scripts/CaveSurvey/Core/CsAdjust.js scripts/CaveSurvey/Core/CsAll.js tests/js_unit.js
 git commit -m "feat: least-squares loop closure adjustment in CsAdjust"
 ```
+
+**AS BUILT (2026-08-21, commit `1e4b4bf`).** Four departures from the source
+drafted above, each forced by evidence. Later tasks should work from these, not
+from the draft:
+
+1. **The pin set excludes `resolved.controlFrame.notHonored`.** Task 1b landed
+   after this task was written: when an explicit anchor is passed and a fixed
+   station's control cannot be reconciled into the anchor's frame, resolve
+   leaves that station to ordinary traversal. Its resolved position is a
+   traversal artifact, not control, and pinning it would freeze a coordinate
+   nobody measured. Pinned = `anchors` + `survey.fixed` keys not in
+   `notHonored` + `opts.pinned` (an explicit `opts.pinned` still wins: it is
+   the caller's instruction, not a made-up number). Anchors need no
+   `notHonored` test — the two sets provably cannot overlap; see the comment in
+   the code.
+
+2. **Convergence is measured on `max|r/diag|`, the Jacobi-preconditioned
+   residual** — the coordinate step still *wanted* — against `tol`. The
+   drafted `solve` was wrong in both directions and both drafted assertions
+   caught it: an `n = 1` system (one free station between two fixed ones) is
+   solved EXACTLY by CG's first step, whose size is the whole misclosure, so
+   the two-fixed-station and `noAdjust` fixtures were reported non-convergent
+   and thrown away (`M1` came back at the as-surveyed 10 instead of 10.3); and
+   `!(rz > 0)` never fires for a tree, because a tree's raw coordinates satisfy
+   its own observations only to rounding (~1e-16), so the loopless survey took
+   a pointless iteration. The `if (!(rz > 0)) break` guard before `beta` is
+   gone with it: the loop is only entered when `max|z| > tol`, so `rz > 0`
+   there by construction.
+
+3. **`controlFrame` is copied into both return shapes** (`adjust` and
+   `unadjusted`). `CsDraw.js:430` reads it to decide whether a station's
+   `Fixed` tag can honestly be written and `CsReport.js:67` reads it to warn
+   about unused control, so the drafted shape — which dropped it — would have
+   silently reinstated a `Fixed` tag nobody pinned and deleted the warning
+   saying so, the moment Task 7 wired the call sites through
+   `resolveAndAdjust`. Demonstrated: `CsReport.drawSummary` lost its warning
+   line under test.
+
+4. **`CG_TOLERANCE_FRACTION` is `1e-12`, not `1e-9`** — the spec's number was
+   written on the assumption that this local criterion bounds the coordinate
+   error. Measurements are in the spec's Solving section and in the constant's
+   own comment.
+
+Also settled while building: `converged` and `iterations` live in `summary`,
+never at the top level (the drafted assertions above read them at the top level
+and have been corrected in place); the returned `stations` map is always newly
+built, so `raw` really is the as-surveyed geometry the ghost needs; and the
+node-only cost check asserts a 3,000-station, 14-loop network adjusts in well
+under 500ms (measured ~35ms, 2038 iterations) so the solve cannot go quadratic
+inside a redraw unnoticed.
 
 ---
 

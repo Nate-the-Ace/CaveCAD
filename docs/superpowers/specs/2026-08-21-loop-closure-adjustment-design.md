@@ -112,8 +112,26 @@ The initial guess is the raw `resolve()` coordinates, which are already within t
 misclosure of the answer — so CG converges in a handful of iterations rather than
 the hundreds a cold start would need.
 
-- Tolerance: `CG_TOLERANCE_FRACTION = 1e-9` of the network extent.
-- Iteration cap: `10 × n`.
+- Tolerance: `CG_TOLERANCE_FRACTION = 1e-12` of the network extent, measured on
+  the Jacobi-preconditioned residual `max|r/diag|` — the coordinate step each
+  station's own equation still *wants*, which is a length. **Amended
+  2026-08-21 (Task 2), with measurements.** The original `1e-9` was written as
+  if the criterion bounded the error in the coordinates; it does not. The
+  criterion is *local*, so what it leaves behind is that imbalance amplified by
+  the network's conditioning. On a 4,000-station chain with 19 loops, against
+  the same solve driven to `1e-16`: `1e-9` left **0.13 units** of coordinate
+  error on a 40,000-unit network — the size of a tape reading, i.e. a solver
+  artifact level with the precision of the data it is adjusting — while
+  `1e-12` leaves `1.7e-5` for 15% more iterations (2544 vs 2210) and no
+  measurable time (48ms vs 51ms).
+- Two convergence criteria were tried and are wrong, both documented in
+  `CsAdjust.solve`: *"the step just taken was small"* throws away the exact
+  answer of an `n = 1` system (one free station between two fixed ones), which
+  CG solves in one step whose size is the whole misclosure; and *"the initial
+  residual is exactly zero"* never fires for the tree it exists to catch,
+  because a tree's raw coordinates satisfy its observations only to rounding.
+- Iteration cap: `10 × n` (three orders of magnitude above the counts measured
+  above).
 - **On non-convergence, return the unadjusted result with `converged: false` and a
   warning in the summary.** A half-solved network is worse than an unsolved one,
   because it looks adjusted. Never silently partially adjust.
@@ -136,12 +154,13 @@ like a `CsNetwork.resolve` result, plus adjustment-specific fields:
 |-------|---------|
 | `stations` | **adjusted** coordinates; `seq` preserved from the input |
 | `legs`, `unresolved`, `skipped` | copied from the input verbatim |
-| `closures`, `loops` | copied from the input verbatim — **as-surveyed** |
+| `closures`, `loops`, `ties` | copied from the input verbatim — **as-surveyed** |
+| `anchors`, `controlFrame` | copied from the input verbatim. The return shape is a *superset* of a resolve result, and both of these are read downstream: `CsDraw` consults `controlFrame.notHonored` before writing a station's `Fixed` tag, and `CsReport` prints the warning naming unused control. Dropping either silently reinstates a `Fixed` tag nobody pinned and deletes the warning that says so. |
 | `adjusted` | `true` |
 | `raw` | the input `resolved`, for the ghost layer and shift reporting |
 | `shifts` | `{name: {dx, dy, dz, distance}}` per station |
 | `residuals` | per leg, aligned to `legs`: `{dx, dy, dz, distance, standardized}` |
-| `summary` | `{movedCount, worstStation, worstShift, rmsShift, iterations, converged}` |
+| `summary` | `{stationCount, movedCount, worstStation, worstShift, rmsShift, worstResidual, iterations, converged, sigmaTape, sigmaAngle, pinned}` — note `iterations` and `converged` live **here and only here**, not at the top level; `warning` joins them when a solve is handed back unadjusted |
 
 `standardized` is `distance / σ_i` — the blunder statistic. It is computed and
 returned but not surfaced anywhere yet; it is B5's raw material, wired in advance.
