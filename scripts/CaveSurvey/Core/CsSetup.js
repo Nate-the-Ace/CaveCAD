@@ -626,7 +626,7 @@ CsSetup.RUNGS = [
             // that value becomes a CsProc.run PROGRAM argument in
             // Task 6 -- the same truthiness-plus-coercion class closed
             // in CsHub and briefly reopened here.
-            if (typeof p.gitPath === "string" && p.gitPath.length > 0) {
+            if (!CsSetup.isBlank(p.gitPath)) {
                 return { ok: true };
             }
             return { ok: false, remedy: CsSetup.missingRemedy(
@@ -637,7 +637,7 @@ CsSetup.RUNGS = [
         id: "gh",
         label: "GitHub CLI installed",
         evaluate: function(p, sys) {
-            if (typeof p.ghPath === "string" && p.ghPath.length > 0) {
+            if (!CsSetup.isBlank(p.ghPath)) {
                 return { ok: true };
             }
             return { ok: false, remedy: CsSetup.missingRemedy(

@@ -7336,6 +7336,26 @@ ok(CsSetup.rung("x", "y", false, "z", "usage_error").cause === "usage_error",
     "rung() still passes a genuine string cause through unchanged");
 
 // ---------------------------------------------------------------------
+// Ladder rungs 1 and 2 share isBlank with rung 6.
+//
+// Found by probing the engine after the rung-6 fix landed: rungs 1 and 2
+// used `typeof x === "string" && x.length > 0`, which a single SPACE
+// satisfies -- so ladder({gitPath: " "}) reported "git installed". Not
+// reachable from discoverTools (which returns an absolute path, a bare
+// name, or null) but inconsistent with the predicate written for exactly
+// this, and the value goes on to be a CsProc.run program argument.
+// ---------------------------------------------------------------------
+
+ok(CsSetup.ladder({ gitPath: " " })[0].ok === false,
+    "rung 1 rejects a whitespace-only gitPath");
+ok(CsSetup.ladder({ gitPath: "\t\n" })[0].ok === false,
+    "rung 1 rejects a tab/newline gitPath");
+ok(CsSetup.ladder({ gitPath: "/usr/bin/git", ghPath: " " })[1].ok === false,
+    "rung 2 rejects a whitespace-only ghPath");
+ok(CsSetup.ladder({ gitPath: "/usr/bin/git" })[0].ok === true,
+    "rung 1 still accepts a real path");
+
+// ---------------------------------------------------------------------
 // Report.
 // ---------------------------------------------------------------------
 
