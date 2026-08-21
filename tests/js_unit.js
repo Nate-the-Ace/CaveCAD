@@ -1779,6 +1779,81 @@ if (teamBoundaryRt.trips.length === 2) {
         lwOneText + "'");
 })();
 
+// --- ONE vocabulary for the linework outcome, two callers ------------
+// CsRevise.apply reports through CsReport.revisionSummary; the Survey
+// Notebook's Draw has no report object to hand and reports through
+// CsRevise.lineworkSummary. The user must not be able to tell which
+// path moved their walls, so the two say it in the same words -- and
+// this asserts that, so a drift in either one fails the build rather
+// than shipping two dialects of the same fact.
+(function() {
+    var cases = [[0, []], [3, []], [1, ["WALLS-SURVEYED #12"]],
+        [2, ["A #1", "B #2", "C #3", "D #4", "E #5", "F #6", "G #7",
+            "H #8", "I #9", "J #10"]]];
+    for (var ci = 0; ci < cases.length; ci++) {
+        var lines = CsRevise.lineworkSummary(cases[ci][0], cases[ci][1]);
+        var full = CsReport.revisionSummary({
+            rigid: false, moved: [], stationsChanged: 0,
+            loopsBefore: [], loopsAfter: [],
+            lineworkMoved: cases[ci][0], lineworkUnmoved: cases[ci][1]
+        });
+        ok(full.indexOf(lines.join("\n")) >= 0,
+            "lineworkSummary: case " + ci + " reads word for word as " +
+            "revisionSummary's, got '" + lines.join(" / ") + "'");
+    }
+    // absent counts as nothing bound, same as revisionSummary treats it
+    ok(CsRevise.lineworkSummary(null, null).join("\n").indexOf(
+        "not bound") >= 0,
+        "lineworkSummary: missing fields read as nothing bound");
+})();
+
+// --- the argument prep moveLinework's two callers share --------------
+(function() {
+    near(CsRevise.positionsExtent({ A: { x: 0, y: 0, z: 0 },
+        B: { x: 3, y: 4, z: 12 } }), 13, 1e-12,
+        "positionsExtent: 3D bounding-box diagonal");
+    near(CsRevise.positionsExtent({ A: { x: 0, y: 0 },
+        B: { x: 3, y: 4 } }), 5, 1e-12,
+        "positionsExtent: a map without z measures in plan");
+    ok(CsRevise.positionsExtent({}) === 0.0,
+        "positionsExtent: nothing to measure -> 0");
+
+    // the notebook's gate: did the redraw actually move anything?
+    var was = { A: { x: 0, y: 0 }, B: { x: 100, y: 0 },
+        C: { x: 0, y: 100 } };
+    var now = { A: { x: 0, y: 0 }, B: { x: 100.5, y: 0 },
+        D: { x: 7, y: 7 } };
+    ok(CsRevise.positionsMoved(was, now, 100) === 1,
+        "positionsMoved: only stations in BOTH frames count, and only " +
+        "the ones that moved");
+    ok(CsRevise.positionsMoved(was, was, 100) === 0,
+        "positionsMoved: an untouched frame moved nothing");
+    // eps scales with the drawing, so feet and metres decide alike
+    var tiny = { A: { x: 0, y: 0 } };
+    var tinier = { A: { x: 1e-5, y: 0 } };
+    ok(CsRevise.positionsMoved(tiny, tinier, 1) === 1 &&
+        CsRevise.positionsMoved(tiny, tinier, 1e6) === 0,
+        "positionsMoved: 'moved at all' is relative to the drawing size");
+
+    var tsv = CsModel.newSurvey();
+    tsv.shots.push(shotOf("T1", "T2", 10, 0));
+    var tsSplay = shotOf("T2", "", 3, 90);
+    tsSplay.splay = true;
+    tsSplay.trip = 1;
+    tsv.shots.push(tsSplay);
+    var tsUpper = shotOf("T2", "T3", 10, 90);
+    tsUpper.trip = 1;
+    tsv.shots.push(tsUpper);
+    var tsNames = CsRevise.tripStationNames(tsv);
+    ok(tsNames[0].join(",") === "T1,T2",
+        "tripStationNames: trip 0's own stations, got " + tsNames[0]);
+    ok(tsNames[1].join(",") === "T2,,T2,T3",
+        "tripStationNames: trip 1's, a splay's blank 'to' included -- " +
+        "moveLinework's pair builder drops the blanks, got " + tsNames[1]);
+    ok(CsRevise.tripStationNames(null)[0] === undefined,
+        "tripStationNames: no survey -> nothing to fall back on");
+})();
+
 // --- the linework residual threshold: relative, and looser than the
 // --- rigidity eps for a documented reason ----------------------------
 (function() {
@@ -3741,6 +3816,364 @@ if (!IS_NODE) {
             summary + "'");
         ok(summary.indexOf("re-trace") >= 0,
             "linework: the summary still warns about what did not follow");
+    })();
+
+    // -----------------------------------------------------------------
+    // The SECOND way to revise a trip in place: the Survey Notebook's
+    // Draw. It merges the page into the reconstructed survey, erases by
+    // station name and redraws with CsDraw.survey -- it never goes near
+    // CsRevise.apply -- so before this fix a trip revised through the
+    // page moved the survey and left every traced wall behind. That is
+    // the failure Nathan hit in a real drawing: a spline traced round a
+    // station stayed put while the passage swung under it.
+    //
+    // The page's Az cells are MAGNETIC and the header's Decl converts
+    // them (see sheetSurvey), so retyping Decl and pressing Draw is the
+    // ordinary way in. Simulated here by re-converting the loaded
+    // trip's cells through a new header, which is exactly what the
+    // page's own cells would have produced.
+    //
+    // Keyed on getId() throughout: entity query order is NOT stable.
+    // -----------------------------------------------------------------
+    loadRepoScript("scripts/CaveSurvey/Core/CsPick.js");
+    loadRepoScript("scripts/CaveSurvey/SurveyNotebook/SurveyNotebook.js");
+    (function() {
+        var doc = new RDocument(new RMemoryStorage(), new RSpatialIndexNavel());
+        var di = new RDocumentInterface(doc);
+        getDocument = function() { return doc; };
+        getDocumentInterface = function() { return di; };
+
+        // two trips joined at N3, distinct fingerprints (date | team) so
+        // the page can be matched back to trip 1 and REPLACE it
+        var S = CsModel.newSurvey();
+        S.date = "2001-01-01";
+        S.team = "LOWER TEAM";
+        S.declination = 1.0;
+        S.declinationSource = "user";
+        CsModel.ensureTrips(S);
+        var upper = CsModel.newTrip();
+        upper.name = "UPPER";
+        upper.date = "2002-02-02";
+        upper.team = "UPPER TEAM";
+        upper.declination = 1.0;
+        upper.declinationSource = "user";
+        S.trips.push(upper);
+        var ns = [shotOf("N1", "N2", 10, 0), shotOf("N2", "N3", 10, 90),
+            shotOf("N3", "N4", 8, 45), shotOf("N4", "N5", 6, 120)];
+        for (var i = 0; i < ns.length; i++) {
+            ns[i].left = 2;
+            ns[i].right = 3;
+            if (i >= 2) {
+                ns[i].trip = 1; // the trip the page will revise
+            }
+            S.shots.push(ns[i]);
+        }
+        CsDraw.survey(S, CsNetwork.resolve(S, {}));
+
+        var tipAt = {};
+        var scan = doc.queryAllEntities(false, false);
+        for (i = 0; i < scan.length; i++) {
+            var se = doc.queryEntity(scan[i]);
+            if (!isNull(se) && CsTags.get(se, "LRUDName") !== "") {
+                tipAt[CsTags.get(se, "LRUDName")] = se.getPosition();
+            }
+        }
+        ok(tipAt["N3.L"] !== undefined && tipAt["N4.L"] !== undefined &&
+            tipAt["N5.L"] !== undefined,
+            "notebook-linework: LRUD tips on both trips to trace against");
+        var at = function(name) {
+            return { x: tipAt[name].x, y: tipAt[name].y };
+        };
+        var stationAt = CsRevise.stationPositions(doc);
+
+        var addPl = function(layerName, pts, closed) {
+            CsLayers.ensure(doc, di, layerName);
+            var pd = new RPolylineData();
+            for (var pi = 0; pi < pts.length; pi++) {
+                pd.appendVertex(new RVector(pts[pi].x, pts[pi].y));
+            }
+            if (closed === true) {
+                try {
+                    pd.setClosed(true);
+                } catch (eClose) {
+                    // an open ring still exercises the same binding
+                }
+            }
+            var pl = new RPolylineEntity(doc, pd);
+            pl.setLayerId(doc.getLayerId(layerName));
+            var aop = new RAddObjectsOperation();
+            aop.addObject(pl, false);
+            di.applyOperation(aop);
+            return pl;
+        };
+
+        // a wall traced by SNAPPING to trip 1's left-hand tips, and one
+        // on trip 0's, which this revision must leave exactly alone
+        var wall1 = addPl("WALLS-SURVEYED", [at("N4.L"), at("N5.L")]);
+        var wall0 = addPl("WALLS-SURVEYED", [at("N2.L"), at("N3.L")]);
+        // and Nathan's case: a closed ring drawn AROUND a station,
+        // snapped to nothing, bound by PROXIMITY
+        var ring = addPl("BREAKDOWN", [
+            { x: stationAt.N5.x + 0.4, y: stationAt.N5.y },
+            { x: stationAt.N5.x, y: stationAt.N5.y + 0.4 },
+            { x: stationAt.N5.x - 0.4, y: stationAt.N5.y },
+            { x: stationAt.N5.x, y: stationAt.N5.y - 0.4 }], true);
+        // an untagged tracing: invisible to us, so untouched. Guessing
+        // is what the design rejected.
+        var loose = addPl("WALLS-SURVEYED",
+            [{ x: 400, y: 400 }, { x: 403, y: 401 }]);
+
+        var bidx = CsBind.stationIndex(doc);
+        var beps = CsBind.epsilonFor(doc);
+        var b1 = CsBind.bindEntity(doc, wall1, 1, bidx, beps);
+        var b0 = CsBind.bindEntity(doc, wall0, 0, bidx, beps);
+        var bR = CsBind.bindEntity(doc, ring, 1, bidx, beps);
+        ok(b1.source === "snap" &&
+            b1.stations.slice(0).sort().join(",") === "N4,N5",
+            "notebook-linework: the trip-1 wall binds N4,N5 by snap, got " +
+            b1.source + " '" + b1.stations.join(",") + "'");
+        ok(b0.source === "snap" &&
+            b0.stations.slice(0).sort().join(",") === "N2,N3",
+            "notebook-linework: the trip-0 wall binds N2,N3 by snap, got " +
+            b0.source + " '" + b0.stations.join(",") + "'");
+        ok(bR.source === "proximity" && bR.stations.length > 0,
+            "notebook-linework: the ring binds by proximity, got " +
+            bR.source + " '" + bR.stations.join(",") + "'");
+        var ringTrip1Only = true;
+        for (i = 0; i < bR.stations.length; i++) {
+            if (bR.stations[i] !== "N4" && bR.stations[i] !== "N5") {
+                ringTrip1Only = false;
+            }
+        }
+        ok(ringTrip1Only,
+            "notebook-linework: the ring bound only trip-1 stations, so " +
+            "one rigid move honestly describes it -- got '" +
+            bR.stations.join(",") + "'");
+        CsBind.tagEntities(doc, di, [
+            { entity: wall1, trip: 1, stations: b1.stations },
+            { entity: wall0, trip: 0, stations: b0.stations },
+            { entity: ring, trip: 1, stations: bR.stations }
+        ]);
+
+        var vertsOf = function(id) {
+            return CsBind.pointsOf(doc.queryEntity(id));
+        };
+        var ids = { wall1: wall1.getId(), wall0: wall0.getId(),
+            ring: ring.getId(), loose: loose.getId() };
+        var before = { wall1: vertsOf(ids.wall1),
+            wall0: vertsOf(ids.wall0), ring: vertsOf(ids.ring),
+            loose: vertsOf(ids.loose) };
+        var posBefore = CsRevise.stationPositions(doc);
+
+        // -- the page: trip 1 loaded, its Decl cell retyped 1 -> 11 ---
+        var recon = CsRevise.surveyFromDocument(doc);
+        var page = SurveyNotebook.tripSurvey(recon.survey, 1);
+        var wasDecl = page.declination;
+        page.declination = 11.0;
+        page.declinationSource = "user";
+        for (i = 0; i < page.shots.length; i++) {
+            // back out the old header to recover what the compass read,
+            // then forward through the new one: precisely what
+            // sheetSurvey does to the untouched Az cells
+            var mag = CsAngles.applyDeclination(page.shots[i].azimuth,
+                -wasDecl);
+            page.shots[i].azimuth = CsAngles.applyDeclination(mag, 11.0);
+            page.shots[i].declination = null; // the page has no such cell
+        }
+
+        // Proof that nothing can move twice: count both entry points
+        // across the one user action. Draw must never reach apply (whose
+        // rigid branch transforms the whole drawing), and the mover must
+        // run exactly once.
+        var realApply = CsRevise.apply;
+        var realMove = CsRevise.moveLinework;
+        var applyCalls = 0, moveCalls = 0;
+        CsRevise.apply = function() {
+            applyCalls++;
+            return realApply.apply(CsRevise, arguments);
+        };
+        CsRevise.moveLinework = function() {
+            moveCalls++;
+            return realMove.apply(CsRevise, arguments);
+        };
+        // headless: capture the Draw report instead of showing it
+        var realBox = (typeof QMessageBox !== "undefined") ?
+            QMessageBox : undefined;
+        var boxText = "";
+        QMessageBox = {
+            information: function(parent, title, text) {
+                boxText = String(text);
+            },
+            warning: function(parent, title, text) {
+                boxText = "WARNING BOX: " + String(text);
+            }
+        };
+        try {
+            // w (the dock) is untouched by this function -- the page is
+            // passed in as a survey
+            SurveyNotebook.drawMergedSurvey(null, doc, page, recon);
+        } finally {
+            CsRevise.apply = realApply;
+            CsRevise.moveLinework = realMove;
+            QMessageBox = realBox;
+        }
+
+        ok(applyCalls === 0,
+            "notebook-linework: Draw never reaches CsRevise.apply, so " +
+            "no entity can be transformed by both paths, got " +
+            applyCalls + " calls");
+        ok(moveCalls === 1,
+            "notebook-linework: the linework mover ran exactly once for " +
+            "the one Draw, got " + moveCalls);
+
+        var posAfter = CsRevise.stationPositions(doc);
+        ok(posAfter.N5 !== undefined &&
+            Math.abs(posAfter.N5.x - posBefore.N5.x) > 1e-3,
+            "notebook-linework: the revision really moved trip 1 -- " +
+            "without that the checks below would pass for nothing");
+        near(posAfter.N2.x, posBefore.N2.x, 1e-9,
+            "notebook-linework: trip 0 stayed put (x)");
+        near(posAfter.N2.y, posBefore.N2.y, 1e-9,
+            "notebook-linework: trip 0 stayed put (y)");
+
+        // what each entity is entitled to: a fit over ITS OWN stations,
+        // old (as traced) -> new (as the redraw left them)
+        var fitOver = function(names) {
+            var pairs = [];
+            for (var k = 0; k < names.length; k++) {
+                pairs.push({ old: posBefore[names[k]],
+                    nu: posAfter[names[k]] });
+            }
+            return CsRevise.similarityFit(pairs);
+        };
+        var follows = function(what, id, fit, was) {
+            var got = vertsOf(id);
+            ok(got.length === was.length,
+                "notebook-linework: " + what + " still has " +
+                was.length + " vertices, got " + got.length);
+            for (var k = 0; k < Math.min(got.length, was.length); k++) {
+                var pred = CsRevise.applyFit(fit, was[k]);
+                near(got[k].x, pred.x, 1e-6, "notebook-linework: " +
+                    what + " vertex " + k + " x lands on its own " +
+                    "stations' fit");
+                near(got[k].y, pred.y, 1e-6, "notebook-linework: " +
+                    what + " vertex " + k + " y lands on its own " +
+                    "stations' fit");
+            }
+        };
+
+        var fit1 = fitOver(["N4", "N5"]);
+        near(fit1.maxResidual, 0, 1e-9,
+            "notebook-linework: trip 1's stations moved as one piece");
+        ok(Math.abs(fit1.theta) > 1e-3,
+            "notebook-linework: and that piece really turned, theta " +
+            fit1.theta);
+        follows("the trip-1 wall", ids.wall1, fit1, before.wall1);
+        var w1 = vertsOf(ids.wall1);
+        ok(Math.abs(w1[0].x - before.wall1[0].x) > 1e-3 ||
+            Math.abs(w1[0].y - before.wall1[0].y) > 1e-3,
+            "notebook-linework: the trip-1 wall really moved");
+
+        follows("the proximity-bound ring", ids.ring,
+            fitOver(bR.stations), before.ring);
+        var rg = vertsOf(ids.ring);
+        ok(Math.abs(rg[0].x - before.ring[0].x) > 1e-3 ||
+            Math.abs(rg[0].y - before.ring[0].y) > 1e-3,
+            "notebook-linework: the ring really followed its station -- " +
+            "this is the exact stay-put Nathan saw");
+
+        // trip 0 did not move, so neither may anything traced on it
+        for (i = 0; i < before.wall0.length; i++) {
+            near(vertsOf(ids.wall0)[i].x, before.wall0[i].x, 1e-9,
+                "notebook-linework: trip-0 wall vertex " + i + " x " +
+                "UNCHANGED");
+            near(vertsOf(ids.wall0)[i].y, before.wall0[i].y, 1e-9,
+                "notebook-linework: trip-0 wall vertex " + i + " y " +
+                "UNCHANGED");
+        }
+        // and the untagged tracing is invisible to us: untouched
+        for (i = 0; i < before.loose.length; i++) {
+            near(vertsOf(ids.loose)[i].x, before.loose[i].x, 1e-9,
+                "notebook-linework: an UNTAGGED tracing did not move (x)");
+            near(vertsOf(ids.loose)[i].y, before.loose[i].y, 1e-9,
+                "notebook-linework: an UNTAGGED tracing did not move (y)");
+        }
+
+        // reported in the words the other revision path uses
+        ok(boxText.indexOf(
+            "Traced linework moved with its stations: 3") >= 0,
+            "notebook-linework: the Draw report says how much followed, " +
+            "got '" + boxText + "'");
+        ok(boxText.indexOf("re-trace") < 0,
+            "notebook-linework: nothing was left behind, so no re-trace " +
+            "warning, got '" + boxText + "'");
+        ok(boxText.indexOf("the linework move is a further one") >= 0,
+            "notebook-linework: the report says the move is its own " +
+            "undo step, got '" + boxText + "'");
+    })();
+
+    // -----------------------------------------------------------------
+    // ... and the same Draw on a page that only ADDS a trip disturbs no
+    // existing station, so it must not touch linework, cost an undo
+    // step, or warn about re-tracing something that did not move.
+    // -----------------------------------------------------------------
+    (function() {
+        var doc = new RDocument(new RMemoryStorage(), new RSpatialIndexNavel());
+        var di = new RDocumentInterface(doc);
+        getDocument = function() { return doc; };
+        getDocumentInterface = function() { return di; };
+
+        var S = CsModel.newSurvey();
+        S.date = "2003-03-03";
+        S.team = "FIRST";
+        CsModel.ensureTrips(S);
+        S.shots.push(shotOf("P1", "P2", 10, 0));
+        S.shots.push(shotOf("P2", "P3", 10, 90));
+        CsDraw.survey(S, CsNetwork.resolve(S, {}));
+        var posBefore = CsRevise.stationPositions(doc);
+
+        var recon = CsRevise.surveyFromDocument(doc);
+        var page = CsModel.newSurvey();
+        page.date = "2004-04-04";   // a fingerprint nothing matches
+        page.team = "SECOND";
+        page.shots.push(shotOf("P3", "P4", 7, 180));
+
+        var realMove = CsRevise.moveLinework;
+        var moveCalls = 0;
+        CsRevise.moveLinework = function() {
+            moveCalls++;
+            return realMove.apply(CsRevise, arguments);
+        };
+        var realBox = (typeof QMessageBox !== "undefined") ?
+            QMessageBox : undefined;
+        var boxText = "";
+        QMessageBox = {
+            information: function(parent, title, text) {
+                boxText = String(text);
+            },
+            warning: function(parent, title, text) {
+                boxText = "WARNING BOX: " + String(text);
+            }
+        };
+        try {
+            SurveyNotebook.drawMergedSurvey(null, doc, page, recon);
+        } finally {
+            CsRevise.moveLinework = realMove;
+            QMessageBox = realBox;
+        }
+
+        var posAfter = CsRevise.stationPositions(doc);
+        near(posAfter.P1.x, posBefore.P1.x, 1e-9,
+            "notebook-add: adding a trip moved no existing station");
+        near(posAfter.P3.y, posBefore.P3.y, 1e-9,
+            "notebook-add: the junction station stayed put too");
+        ok(moveCalls === 0,
+            "notebook-add: nothing moved, so the linework mover was " +
+            "never asked, got " + moveCalls + " calls");
+        ok(boxText.indexOf("Traced linework") < 0 &&
+            boxText.indexOf("re-trace") < 0,
+            "notebook-add: and the report says nothing about linework " +
+            "for an event that did not happen, got '" + boxText + "'");
     })();
 }
 

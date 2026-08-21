@@ -1183,6 +1183,13 @@ SurveyNotebook.loadFromDrawing = function(w) {
  * owns -- plus any the replaced trip no longer uses -- and redraws
  * the whole merged survey once. Redrawing everything keeps junction
  * geometry between trips consistent instead of stitching pages.
+ *
+ * This is a REVISION path, not just a draw: a page loaded from the
+ * drawing and drawn again with an edited header (Decl, say) moves the
+ * survey. So it ends where CsRevise.apply's non-rigid branch ends --
+ * bound linework follows the stations it was traced against
+ * (CsRevise.moveLinework). It never reaches CsRevise.apply itself, so
+ * nothing is moved twice.
  */
 SurveyNotebook.drawMergedSurvey = function(w, doc, survey, recon) {
     var tripRecord = SurveyNotebook.tripRecordOf(survey);
@@ -1271,6 +1278,15 @@ SurveyNotebook.drawMergedSurvey = function(w, doc, survey, recon) {
         }
     }
     var di = getDocumentInterface();
+
+    // The frame the user's tracing was drawn in. Captured HERE because
+    // this is the last moment it exists: the erase below deletes the
+    // very marks that hold these coordinates, and nothing else in the
+    // drawing records where they were. (CsRevise.apply reads its old
+    // frame off the pre-revision resolve instead; this path has no
+    // such resolve, so the drawing is both the source and the truth.)
+    var oldPos = CsRevise.stationPositions(doc);
+
     var replaced = CsLayers.withLayerOn(doc, di, CsLayers.HIDDEN,
         function() {
             return CsDraw.eraseStations(doc, eraseNames);
@@ -1280,6 +1296,30 @@ SurveyNotebook.drawMergedSurvey = function(w, doc, survey, recon) {
     var seqBase = CsTags.collectStations(doc).length;
     var drawn = CsDraw.survey(merged, resolved, undefined, undefined, seqBase);
     CsDraw.zoomToSurvey(merged, resolved);
+
+    // -- traced linework follows its own stations ---------------------
+    // This is the second way to revise a trip in place, and it owes the
+    // surveyor's tracing exactly what CsRevise.apply's non-rigid branch
+    // owes it: the marks the wall was drawn against have just been
+    // erased and redrawn somewhere else, so anything bound to them has
+    // to come along or it is silently left behind. Editing the header
+    // Decl and pressing Draw is the ordinary way to reach this.
+    //
+    // Skipped outright when no station actually moved -- a page that
+    // merely ADDS a trip disturbs nothing, and a no-op move would cost
+    // an undo step and a re-tracing warning for an event that did not
+    // happen.
+    var newPos = CsRevise.stationPositions(doc);
+    var lwExtent = CsRevise.positionsExtent(oldPos);
+    var lw = null;
+    if (CsRevise.positionsMoved(oldPos, newPos, lwExtent) > 0) {
+        lw = CsRevise.withOffLayersOn(doc, di, function() {
+            return CsRevise.moveLinework(doc, di, oldPos, newPos,
+                CsRevise.tripStationNames(recon.survey), lwExtent);
+        });
+    }
+    var lwLine = lw === null ? "" :
+        ("\n\n" + CsRevise.lineworkSummary(lw.moved, lw.unmoved).join("\n"));
 
     var fp = CsModel.tripFingerprint(merged.trips[merge.tripId]);
     var tripLine = merge.replaced ?
@@ -1314,15 +1354,21 @@ SurveyNotebook.drawMergedSurvey = function(w, doc, survey, recon) {
             "so they carried over from the shots the drawing already " +
             "held: " + carryBits.join("; ") + ".");
 
-    EAction.handleUserMessage("Survey Notebook: " + tripLine + carryLine);
+    EAction.handleUserMessage("Survey Notebook: " + tripLine + carryLine +
+        lwLine);
     QMessageBox.information(null, "Survey Notebook",
         tripLine + carryLine + "\n\n" +
         (replaced > 0 ? ("Replaced " + replaced + " previously drawn " +
             "mark" + (replaced === 1 ? "" : "s") + " (undo twice to " +
             "restore them).\n\n") : "") +
-        CsReport.drawSummary(merged, resolved, drawn, findings) +
+        CsReport.drawSummary(merged, resolved, drawn, findings) + lwLine +
         "\n\nDrawn as one undo step" +
-        (replaced > 0 ? " after the replace" : "") + ".");
+        (replaced > 0 ? " after the replace" : "") +
+        // said out loud because it changes what one undo does: the
+        // linework move is its own operation, exactly as it is on
+        // CsRevise.apply's path
+        (lw !== null && lw.moved > 0 ?
+            "; the linework move is a further one" : "") + ".");
 };
 
 SurveyNotebook.importFile = function(w) {

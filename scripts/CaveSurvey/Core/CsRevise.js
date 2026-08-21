@@ -887,10 +887,17 @@ CsRevise.LINEWORK_RESIDUAL_FRACTION = 1e-3;
 
 /**
  * Moves hand-traced linework so it follows the stations it was traced
- * against. QCAD context only. The non-rigid revision path's last step
- * -- and ONLY that path's: the rigid path already transforms the whole
- * drawing in one operation, so running this there would move the same
- * entity twice.
+ * against. QCAD context only.
+ *
+ * Called by every path that erases the survey marks and redraws them
+ * from revised data -- CsRevise.apply's non-rigid branch, and the
+ * Survey Notebook's Draw when the page revises a trip already in the
+ * drawing -- and by NO path that transforms the drawing whole. The
+ * rigid branch of apply already carries every traced entity along in
+ * its single whole-drawing operation, so running this there would move
+ * the same entity twice. The two erase-and-redraw paths are mutually
+ * exclusive (Draw never reaches apply), so nothing calls this twice
+ * for one user action.
  *
  * Every entity on a linework layer (CsBind.isLineworkLayer is the one
  * gate; it consults WORLD_FIXED_LAYERS above, so sheet furniture is
@@ -1011,6 +1018,217 @@ CsRevise.moveLinework = function(doc, di, oldPos, newPos, tripStations,
         di.applyOperation(op);
     }
     return result;
+};
+
+// ---------------------------------------------------------------------
+// Argument prep for moveLinework, and the words for its outcome.
+//
+// There are TWO ways to revise a trip in place -- apply's non-rigid
+// branch below, and the Survey Notebook's erase-and-redraw Draw -- and
+// both owe the traced linework the same treatment. Every scrap of prep
+// they share lives here, so the second caller cannot quietly grow a
+// copy that drifts from the first.
+// ---------------------------------------------------------------------
+
+/**
+ * Runs fn with every OFF layer that holds movable entities switched
+ * on, restoring each afterwards. QCAD context only.
+ *
+ * Exists because this build silently refuses adds, MODIFIES and
+ * deletes for entities on a layer that is off (CsLayers.withLayerOn
+ * has the empirical note): a pass that touches entities wherever they
+ * happen to sit is simply lost on those layers without it. Layers are
+ * nested one wrapper deep each, since withLayerOn handles one name.
+ * World-fixed layers are skipped -- nothing on them is ever modified,
+ * so toggling them would be a visible change for no reason.
+ *
+ * \return whatever fn returns
+ */
+CsRevise.withOffLayersOn = function(doc, di, fn) {
+    var offLayers = [];
+    var seen = {};
+    var ids = doc.queryAllEntities(false, false);
+    for (var i = 0; i < ids.length; i++) {
+        var e = doc.queryEntity(ids[i]);
+        if (isNull(e)) {
+            continue;
+        }
+        var ln = doc.getLayerName(e.getLayerId());
+        if (seen[ln] === true || CsRevise.isWorldFixedLayer(ln)) {
+            continue;
+        }
+        seen[ln] = true;
+        try {
+            var lay = doc.queryLayer(ln);
+            if (!isNull(lay) && lay.isOff()) {
+                offLayers.push(ln);
+            }
+        } catch (eOff) {
+            // this bridge cannot toggle layers -- run anyway, the
+            // operation may still land
+        }
+    }
+    var nest = function(idx) {
+        if (idx >= offLayers.length) {
+            return fn();
+        }
+        return CsLayers.withLayerOn(doc, di, offLayers[idx], function() {
+            return nest(idx + 1);
+        });
+    };
+    return nest(0);
+};
+
+/**
+ * {name: {x, y}} for every tagged station point in the drawing.
+ *
+ * Both of moveLinework's frames come from here, because the drawing is
+ * the truth about where a station actually sits -- and on the notebook
+ * path it is the ONLY record of the old frame, so a caller must read
+ * it BEFORE the erase that deletes the marks holding it.
+ */
+CsRevise.stationPositions = function(doc) {
+    var out = {};
+    var sts = CsTags.collectStations(doc);
+    for (var i = 0; i < sts.length; i++) {
+        out[sts[i].name] = { x: sts[i].pos.x, y: sts[i].pos.y };
+    }
+    return out;
+};
+
+/**
+ * {tripId: [station names]} for moveLinework's trip fallback. Read
+ * from the survey the drawing was reconstructed FROM: a LineworkTrip
+ * tag names the trip as it stood when the tracing happened, so those
+ * are the names it could have been bound to.
+ */
+CsRevise.tripStationNames = function(survey) {
+    var out = {};
+    if (survey === undefined || survey === null ||
+            survey.shots === undefined) {
+        return out;
+    }
+    for (var i = 0; i < survey.shots.length; i++) {
+        var sh = survey.shots[i];
+        var key = sh.trip || 0;
+        if (out[key] === undefined) {
+            out[key] = [];
+        }
+        out[key].push(sh.from);
+        out[key].push(sh.to);
+    }
+    return out;
+};
+
+/**
+ * Bounding-box diagonal of a {name: {x, y[, z]}} map -- the
+ * characteristic drawing size classifyChange and moveLinework both
+ * scale their tolerances by, so that a cave in feet and the same cave
+ * in metres decide identically. A map without z (positions read off
+ * the drawing) measures in plan, which is the frame a linework fit
+ * works in anyway.
+ */
+CsRevise.positionsExtent = function(positions) {
+    var minX = null, minY = null, minZ = null;
+    var maxX = null, maxY = null, maxZ = null;
+    for (var n in positions) {
+        if (!positions.hasOwnProperty(n)) {
+            continue;
+        }
+        var p = positions[n];
+        var z = (typeof p.z === "number" && isFinite(p.z)) ? p.z : 0;
+        if (minX === null || p.x < minX) { minX = p.x; }
+        if (maxX === null || p.x > maxX) { maxX = p.x; }
+        if (minY === null || p.y < minY) { minY = p.y; }
+        if (maxY === null || p.y > maxY) { maxY = p.y; }
+        if (minZ === null || z < minZ) { minZ = z; }
+        if (maxZ === null || z > maxZ) { maxZ = z; }
+    }
+    if (minX === null) {
+        return 0.0;
+    }
+    var dx = maxX - minX, dy = maxY - minY, dz = maxZ - minZ;
+    return Math.sqrt(dx * dx + dy * dy + dz * dz);
+};
+
+/**
+ * How many stations present in BOTH frames actually moved, at
+ * classifyChange's own rigidity eps (1e-6 * max(extent, 1)) so the
+ * two agree on what "changed at all" means.
+ *
+ * The notebook's Draw asks this before touching any linework: a page
+ * that merely ADDS a trip disturbs no existing station, and moving
+ * linework then would cost the user an undo step and a warning about
+ * re-tracing for an event that did not happen.
+ */
+CsRevise.positionsMoved = function(oldPos, newPos, extent) {
+    var e = (typeof extent === "number" && isFinite(extent)) ? extent : 0;
+    var eps = 1e-6 * Math.max(e, 1);
+    var n = 0;
+    for (var name in oldPos) {
+        if (!oldPos.hasOwnProperty(name) ||
+                !newPos.hasOwnProperty(name)) {
+            continue;
+        }
+        var dx = newPos[name].x - oldPos[name].x;
+        var dy = newPos[name].y - oldPos[name].y;
+        if (Math.sqrt(dx * dx + dy * dy) > eps) {
+            n++;
+        }
+    }
+    return n;
+};
+
+/**
+ * The linework outcome in words: the same sentences
+ * CsReport.revisionSummary prints for the same facts, so the two
+ * revision paths tell the user one story rather than two.
+ *
+ * Lives here rather than in CsReport only because CsReport is the
+ * report-formatting module for CsRevise.apply's report OBJECT, and the
+ * notebook's Draw has no such object to hand -- it has these two
+ * numbers and nothing else. When CsReport is next opened, collapse its
+ * linework block onto this function; the unit tests assert the two
+ * agree word for word, so a drift in either one fails the build.
+ *
+ * \return array of lines
+ */
+CsRevise.lineworkSummary = function(moved, unmoved) {
+    var n = (moved === undefined || moved === null) ? 0 : moved;
+    var list = (unmoved === undefined || unmoved === null) ? [] : unmoved;
+    var lines = [];
+    lines.push("Traced linework moved with its stations: " + n);
+    if (list.length > 0) {
+        lines.push("");
+        lines.push("WARNING -- " + list.length + " traced item" +
+            (list.length === 1 ? "" : "s") + " had no surviving " +
+            "station to follow and did NOT move; re-trace walls and " +
+            "detail there:");
+        // capped: this is a summary a beginner reads, not a manifest.
+        // Soft read of the cap so this module stays loadable without
+        // CsReport (the whole Core is loaded as separate files).
+        var shown = (typeof CsReport !== "undefined" &&
+            typeof CsReport.UNMOVED_SHOWN === "number") ?
+            CsReport.UNMOVED_SHOWN : 8;
+        var cap = Math.min(list.length, shown);
+        for (var u = 0; u < cap; u++) {
+            lines.push("  " + list[u]);
+        }
+        if (list.length > cap) {
+            lines.push("  ... and " + (list.length - cap) + " more");
+        }
+    }
+    if (n === 0) {
+        // Nothing was bound, so nothing could follow -- and an unbound
+        // trace is invisible to us, which is why this stays a warning
+        // even when the unmoved list above is empty.
+        lines.push("");
+        lines.push("WARNING -- hand-drawn linework that is not bound " +
+            "to the survey did NOT move with it; re-trace walls and " +
+            "detail near the moved stations, or bind it first " +
+            "(Adopt linework) and revise again.");
+    }
+    return lines;
 };
 
 /**
@@ -1300,25 +1518,7 @@ CsRevise.apply = function(doc, di, recon, newSurvey) {
     var newResolved = CsNetwork.resolve(newSurvey, { anchor: anchor });
 
     // -- 2. drawing extent = old stations' bounding-box diagonal -----
-    var minX = null, minY = null, minZ = null;
-    var maxX = null, maxY = null, maxZ = null;
-    for (var sn in oldResolved.stations) {
-        if (!oldResolved.stations.hasOwnProperty(sn)) {
-            continue;
-        }
-        var st = oldResolved.stations[sn];
-        if (minX === null || st.x < minX) { minX = st.x; }
-        if (maxX === null || st.x > maxX) { maxX = st.x; }
-        if (minY === null || st.y < minY) { minY = st.y; }
-        if (maxY === null || st.y > maxY) { maxY = st.y; }
-        if (minZ === null || st.z < minZ) { minZ = st.z; }
-        if (maxZ === null || st.z > maxZ) { maxZ = st.z; }
-    }
-    var extent = 0.0;
-    if (minX !== null) {
-        var exx = maxX - minX, exy = maxY - minY, exz = maxZ - minZ;
-        extent = Math.sqrt(exx * exx + exy * exy + exz * exz);
-    }
+    var extent = CsRevise.positionsExtent(oldResolved.stations);
 
     // -- 3. classify ---------------------------------------------------
     var cls = CsRevise.classifyChange(oldResolved, newResolved, extent);
@@ -1401,35 +1601,11 @@ CsRevise.apply = function(doc, di, recon, newSurvey) {
     var lineworkUnmoved = [];
 
     // -- OFF layers holding entities: ops there are silently refused --
-    var offLayers = [];
-    var seenLayer = {};
-    var scanIds = doc.queryAllEntities(false, false);
-    for (var oi = 0; oi < scanIds.length; oi++) {
-        var oe = doc.queryEntity(scanIds[oi]);
-        if (isNull(oe)) {
-            continue;
-        }
-        var oln = doc.getLayerName(oe.getLayerId());
-        if (seenLayer[oln] === true || CsRevise.isWorldFixedLayer(oln)) {
-            continue; // nothing on a world-fixed layer is ever modified
-        }
-        seenLayer[oln] = true;
-        try {
-            var olay = doc.queryLayer(oln);
-            if (!isNull(olay) && olay.isOff()) {
-                offLayers.push(oln);
-            }
-        } catch (eOff) {
-            // no layer toggling here -- proceed, the op may still land
-        }
-    }
-    var withOffLayersOn = function(idx, fn) {
-        if (idx >= offLayers.length) {
-            return fn();
-        }
-        return CsLayers.withLayerOn(doc, di, offLayers[idx], function() {
-            return withOffLayersOn(idx + 1, fn);
-        });
+    // CsRevise.withOffLayersOn scans per call rather than once up
+    // front, so the linework pass AFTER the redraw sees the layers the
+    // redraw itself populated.
+    var withOffLayersOn = function(fn) {
+        return CsRevise.withOffLayersOn(doc, di, fn);
     };
 
     if (cls.rigid) {
@@ -1489,7 +1665,7 @@ CsRevise.apply = function(doc, di, recon, newSurvey) {
                 CsModel.shotRowText(ush));
         }
 
-        withOffLayersOn(0, function() {
+        withOffLayersOn(function() {
             var op = new RModifyObjectsOperation();
             op.setText("Apply survey revision");
             var ids = doc.queryAllEntities(false, false);
@@ -1622,7 +1798,7 @@ CsRevise.apply = function(doc, di, recon, newSurvey) {
                 oldNames.push(on);
             }
         }
-        withOffLayersOn(0, function() {
+        withOffLayersOn(function() {
             CsDraw.eraseStations(doc, oldNames);
         });
         CsDraw.survey(newSurvey, newResolved, anchorName, anchorPos);
@@ -1676,29 +1852,10 @@ CsRevise.apply = function(doc, di, recon, newSurvey) {
                     y: oldResolved.stations[lp].y };
             }
         }
-        var newPos = {};
-        var fresh = CsTags.collectStations(doc);
-        for (var fi = 0; fi < fresh.length; fi++) {
-            newPos[fresh[fi].name] = { x: fresh[fi].pos.x,
-                y: fresh[fi].pos.y };
-        }
-        // The trip fallback's station lists come from the survey the
-        // drawing was read FROM: a LineworkTrip tag names the trip as
-        // it was when the tracing happened, so those are the names it
-        // could have been bound to.
-        var tripStations = {};
-        for (var tsi = 0; tsi < recon.survey.shots.length; tsi++) {
-            var tsh = recon.survey.shots[tsi];
-            var tkey = tsh.trip || 0;
-            if (tripStations[tkey] === undefined) {
-                tripStations[tkey] = [];
-            }
-            tripStations[tkey].push(tsh.from);
-            tripStations[tkey].push(tsh.to);
-        }
-        withOffLayersOn(0, function() {
+        var newPos = CsRevise.stationPositions(doc);
+        withOffLayersOn(function() {
             var lw = CsRevise.moveLinework(doc, di, oldPos, newPos,
-                tripStations, extent);
+                CsRevise.tripStationNames(recon.survey), extent);
             lineworkMoved = lw.moved;
             lineworkUnmoved = lw.unmoved;
         });
