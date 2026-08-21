@@ -626,6 +626,19 @@ CsBind.epsilonFor = function(doc) {
  * Label entities carrying the same names are deliberately skipped --
  * their position is the text's, offset from the feature, so a vertex
  * never coincides with one.
+ *
+ * CTRL-RAW is refused outright, however an entity there came to carry
+ * Station/LRUDName/SplayName. Today nothing writes those tags onto the
+ * as-surveyed ghost -- it carries RawShot/RawStation and nothing else
+ * (CsDraw.survey), so this is not a fix for a live bug, only defence
+ * against a future edit tagging a ghost carelessly. If it ever did:
+ * the ghost sits at the PRE-adjustment position, inches from the real
+ * station's post-adjustment one, and a wall bound to it would get
+ * dragged against a phantom on the next revision -- or worse, a ghost
+ * carrying a real station's name would put two positions under one
+ * name in this very index. Layer, not prefix: CTRL-STATIONS,
+ * CTRL-LRUD and CTRL-SPLAYS also start with "CTRL-" and must keep
+ * indexing, so this cannot reuse CsBind.isLineworkLayer.
  */
 CsBind.stationIndex = function(doc) {
     if (typeof CsStore !== "undefined") {
@@ -636,6 +649,9 @@ CsBind.stationIndex = function(doc) {
     for (var i = 0; i < ids.length; i++) {
         var e = doc.queryEntity(ids[i]);
         if (isNull(e) || typeof e.getPosition !== "function") {
+            continue;
+        }
+        if (CsBind.layerNameOf(doc, e) === "CTRL-RAW") {
             continue;
         }
         var name = CsTags.get(e, "Station");

@@ -3911,6 +3911,142 @@ if (!IS_NODE) {
     })();
 
     // -----------------------------------------------------------------
+    // Task 6: hand-traced linework must never bind to an as-surveyed
+    // ghost point (CTRL-RAW, RawStation/RawShot -- Task 5). Probed
+    // empirically before writing anything: by construction, a ghost
+    // carries neither Station, LRUDName nor SplayName -- the only keys
+    // stationIndex reads -- so CASES 1 and 3 below already held. The
+    // one case that did NOT hold is the decoy: stationIndex had no
+    // layer check at all, so an entity sitting on CTRL-RAW that
+    // happened to carry a real Station tag (as if some future edit
+    // tagged one carelessly) WAS indexed. That is what the guard in
+    // CsBind.stationIndex below exists for -- defence against a future
+    // mistake, not a fix for a live bug in the ghost itself.
+    // -----------------------------------------------------------------
+    (function() {
+        var doc = new RDocument(new RMemoryStorage(), new RSpatialIndexNavel());
+        var di = new RDocumentInterface(doc);
+        getDocument = function() { return doc; };
+        getDocumentInterface = function() { return di; };
+
+        // a real, misclosing loop so the adjustment actually moves
+        // stations and CsDraw.survey really draws a ghost
+        var psv = CsModel.newSurvey();
+        psv.shots.push(shotOf("P1", "P2", 10, 0));
+        psv.shots.push(shotOf("P2", "P3", 10, 90));
+        psv.shots.push(shotOf("P3", "P4", 10, 180));
+        psv.shots.push(shotOf("P4", "P1", 10.7, 270));
+        var pres = CsNetwork.resolve(psv, {});
+        var padj = CsAdjust.adjust(psv, pres, { sigmaTape: 1, sigmaAngle: 0 });
+        ok(padj.adjusted === true && padj.raw !== null,
+            "ghost-bind: fixture really adjusted, so a ghost really draws");
+        var pdrawn = CsDraw.survey(psv, padj, "P1", new RVector(500, 900), 0);
+        ok(pdrawn.ghostDrawn === 4,
+            "ghost-bind: the ghost drew, got " + pdrawn.ghostDrawn);
+
+        var ghostPosOf = {}, realPosOf = {};
+        var pids = doc.queryAllEntities(false, false);
+        for (var pi = 0; pi < pids.length; pi++) {
+            var pe = doc.queryEntity(pids[pi]);
+            if (isNull(pe)) { continue; }
+            var rst = CsTags.get(pe, "RawStation");
+            if (rst !== "") { ghostPosOf[rst] = pe.getPosition(); }
+            var st = CsTags.get(pe, "Station");
+            if (st !== "") { realPosOf[st] = pe.getPosition(); }
+        }
+        var sep = Math.sqrt(
+            Math.pow(ghostPosOf["P3"].x - realPosOf["P3"].x, 2) +
+            Math.pow(ghostPosOf["P3"].y - realPosOf["P3"].y, 2));
+        ok(sep > 0.01,
+            "ghost-bind: sanity -- ghost P3 and real P3 really sit apart " +
+            "(" + sep + "), so the checks below are not vacuous");
+
+        // ---- CASE 1: no stationIndex entry resolves to an entity
+        // actually sitting on CTRL-RAW ----
+        var pidx = CsBind.stationIndex(doc);
+        var rawIndexable = 0;
+        for (var qi = 0; qi < pids.length; qi++) {
+            var qe = doc.queryEntity(pids[qi]);
+            if (isNull(qe)) { continue; }
+            if (doc.getLayerName(qe.getLayerId()) !== "CTRL-RAW") { continue; }
+            if (CsTags.get(qe, "Station") !== "" ||
+                    CsTags.get(qe, "LRUDName") !== "" ||
+                    CsTags.get(qe, "SplayName") !== "") {
+                rawIndexable++;
+            }
+        }
+        ok(rawIndexable === 0,
+            "ghost-bind: no entity actually on CTRL-RAW carries a tag " +
+            "stationIndex reads (Station/LRUDName/SplayName), got " +
+            rawIndexable);
+        ok(pidx.length === 4,
+            "ghost-bind: stationIndex holds exactly the four real " +
+            "stations, no ghost duplicates, got " + pidx.length);
+        for (var xi = 0; xi < pidx.length; xi++) {
+            var entry = pidx[xi];
+            // P1 is the default pin (CsAdjust.adjust anchors the
+            // lexicographically lowest name when nothing else is
+            // pinned) -- a pinned station has zero adjustment
+            // residual, so its ghost coincides with its real position
+            // EXACTLY, by definition, no matter which entity it came
+            // from. That coincidence is expected and is not this
+            // test's concern; skip it here.
+            if (entry.name === "P1") { continue; }
+            var ghost = ghostPosOf[entry.name];
+            if (ghost !== undefined) {
+                var d = Math.sqrt(Math.pow(entry.x - ghost.x, 2) +
+                    Math.pow(entry.y - ghost.y, 2));
+                ok(d > 0.01,
+                    "ghost-bind: stationIndex entry for " + entry.name +
+                    " is the REAL position, not the ghost's (it is " +
+                    d + " away from the ghost)");
+            }
+        }
+
+        // ---- CASE 3: a wall traced exactly onto a ghost tip's
+        // coordinates must not SNAP-bind to it ----
+        CsLayers.ensure(doc, di, "WALLS-SURVEYED");
+        var gp3 = ghostPosOf["P3"];
+        var wpd = new RPolylineData();
+        wpd.appendVertex(new RVector(gp3.x, gp3.y));
+        wpd.appendVertex(new RVector(gp3.x + 1, gp3.y + 1));
+        var wallPl = new RPolylineEntity(doc, wpd);
+        wallPl.setLayerId(doc.getLayerId("WALLS-SURVEYED"));
+        var wop = new RAddObjectsOperation();
+        wop.addObject(wallPl, false);
+        di.applyOperation(wop);
+
+        var peps = CsBind.epsilonFor(doc);
+        var pbind = CsBind.bindEntity(doc, wallPl, 0, pidx, peps);
+        ok(pbind.source !== "snap",
+            "ghost-bind: a wall traced onto the ghost tip's exact " +
+            "coordinates does not SNAP-bind (no index entry sits there " +
+            "to snap to), got source=" + pbind.source);
+
+        // ---- CASE 4 (the decoy): an entity on CTRL-RAW that DOES
+        // carry a real Station tag, as if some future edit tagged one
+        // carelessly. stationIndex's own layer gate must catch this. ----
+        CsLayers.withLayerOn(doc, di, "CTRL-RAW", function() {
+            var decoyOp = new RAddObjectsOperation();
+            var decoyPt = new RPointEntity(doc,
+                new RPointData(new RVector(gp3.x + 5, gp3.y + 5)));
+            decoyPt.setLayerId(doc.getLayerId("CTRL-RAW"));
+            CsTags.set(decoyPt, "Station", "DECOY1");
+            decoyOp.addObject(decoyPt, false);
+            di.applyOperation(decoyOp);
+        });
+        var idxAfterDecoy = CsBind.stationIndex(doc);
+        var decoyIndexed = false;
+        for (var yi = 0; yi < idxAfterDecoy.length; yi++) {
+            if (idxAfterDecoy[yi].name === "DECOY1") { decoyIndexed = true; }
+        }
+        ok(decoyIndexed === false,
+            "ghost-bind: a decoy Station tag on CTRL-RAW is NOT indexed " +
+            "-- stationIndex's layer gate catches it even though the " +
+            "entity carries the real key stationIndex reads");
+    })();
+
+    // -----------------------------------------------------------------
     // Tag schema v3: the drawing's tags alone reconstruct the whole
     // survey. One shot = one LEG LINE carrying the shot's full data
     // (the old station-point scheme collides on loop closures); trip
