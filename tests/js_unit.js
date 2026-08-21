@@ -87,6 +87,7 @@ var CORE_FILES = [
     "scripts/CaveSurvey/Core/CsUnits.js",
     "scripts/CaveSurvey/Core/CsProc.js",
     "scripts/CaveSurvey/Core/CsGit.js",
+    "scripts/CaveSurvey/Core/CsHub.js",
     "scripts/CaveSurvey/Core/CsGeoProject.js",
     "scripts/CaveSurvey/Core/CsAngles.js",
     "scripts/CaveSurvey/Core/CsIgrfCoeffs.js",
@@ -5949,6 +5950,162 @@ ok(CsGit.isNetworkFailure("! [rejected]        main -> main (fetch first)") === 
     "isNetworkFailure does not claim a rejected push");
 ok(CsGit.isRejected("! [rejected]        main -> main (fetch first)") === true,
     "isRejected spots a non-fast-forward");
+
+// ---------------------------------------------------------------------
+// CsHub -- gh argv, JSON parsing, and the two privacy gates.
+//
+// Fixture provenance:
+//   AUTH_OK, AUTH_LOGGED_OUT, REPO_VIEW_PUBLIC, REPO_VIEW_PRIVATE_SHAPE,
+//   REPO_VIEW_MISSING and API_USER_REAL are captured bytes from real
+//   `gh` 2.97.0 calls on this machine on 2026-08-21 (all read-only;
+//   AUTH_LOGGED_OUT came from a throwaway GH_CONFIG_DIR, not this
+//   machine's real session). AUTH_THIN is that same real AUTH_OK with
+//   its scopes line edited to drop "repo" -- a genuine thin-scope
+//   capture would require revoking a scope on the live token, which
+//   this task must not do. REPO_VIEW_INTERNAL and API_USER_NULL_NAME
+//   are synthetic: INTERNAL visibility needs an organization-owned
+//   repo, and a null gh api user "name" needs a second account that
+//   never set a display name. Neither is obtainable from this
+//   machine, and each test says so.
+// ---------------------------------------------------------------------
+
+sameArgv(CsHub.argvAuthStatus(), ["auth", "status"], "argvAuthStatus");
+sameArgv(CsHub.argvDeviceLogin(),
+    ["auth", "login", "--web", "--git-protocol", "https",
+     "--hostname", "github.com", "--scopes", "repo,read:org",
+     "--clipboard", "--skip-ssh-key"],
+    "argvDeviceLogin");
+sameArgv(CsHub.argvTokenLogin(),
+    ["auth", "login", "--with-token", "--git-protocol", "https",
+     "--hostname", "github.com"],
+    "argvTokenLogin");
+sameArgv(CsHub.argvSetupGit(), ["auth", "setup-git"], "argvSetupGit");
+sameArgv(CsHub.argvRefreshScope("repo"), ["auth", "refresh", "-s", "repo"],
+    "argvRefreshScope");
+sameArgv(CsHub.argvRepoView("ndschonegg/cave-blowing-hole"),
+    ["repo", "view", "ndschonegg/cave-blowing-hole", "--json",
+     "visibility,nameWithOwner,defaultBranchRef"],
+    "argvRepoView");
+sameArgv(CsHub.argvRepoCreate("cave-blowing-hole"),
+    ["repo", "create", "cave-blowing-hole", "--private"], "argvRepoCreate");
+sameArgv(CsHub.argvApiUser(), ["api", "user"], "argvApiUser");
+sameArgv(CsHub.argvVersion(), ["--version"], "argvVersion");
+
+// gh auth status -- real captures. Authenticated lands on STDOUT with
+// exit 0; logged out lands on STDERR with exit 1 and empty stdout.
+// This is why CsHub.textOf must read both streams.
+var AUTH_OK = "github.com\n" +
+    "  ✓ Logged in to github.com account ndschonegg (keyring)\n" +
+    "  - Active account: true\n" +
+    "  - Git operations protocol: https\n" +
+    "  - Token: gho_************************************\n" +
+    "  - Token scopes: 'gist', 'read:org', 'repo', 'workflow'\n";
+var AUTH_THIN = AUTH_OK.replace(
+    "'gist', 'read:org', 'repo', 'workflow'", "'gist', 'read:user'");
+var AUTH_LOGGED_OUT_ERR =
+    "You are not logged into any GitHub hosts. To log in, run: gh auth login\n";
+
+// gh repo view --json visibility,nameWithOwner,defaultBranchRef -- real
+// captures. Keys come back alphabetically sorted and defaultBranchRef
+// is an OBJECT with a "name" key, not a bare string.
+var REPO_VIEW_PUBLIC =
+    '{"defaultBranchRef":{"name":"trunk"},"nameWithOwner":"cli/cli",' +
+    '"visibility":"PUBLIC"}';
+var REPO_VIEW_PRIVATE_SHAPE =
+    '{"defaultBranchRef":{"name":"main"},"nameWithOwner":"owner/name",' +
+    '"visibility":"PRIVATE"}';
+var REPO_VIEW_MISSING_ERR =
+    "GraphQL: Could not resolve to a Repository with the name " +
+    "'owner/name'. (repository)\n";
+// Synthetic -- INTERNAL visibility requires an organization-owned
+// repo, not obtainable from this machine. The literal gh prints for
+// it is the uppercase string "INTERNAL".
+var REPO_VIEW_INTERNAL =
+    '{"defaultBranchRef":{"name":"main"},"nameWithOwner":"org/name",' +
+    '"visibility":"INTERNAL"}';
+
+// gh api user -- real capture (login/id/name subset of the full real
+// response; parseApiUser only reads those three keys so the extra
+// ones gh actually returns do not matter here). id is an integer.
+var API_USER_REAL =
+    '{"login":"ndschonegg","id":307531413,"name":"Nathan Schonegg"}';
+// Synthetic -- a null "name" needs a second GitHub account that never
+// set a display name, not obtainable from this machine.
+var API_USER_NULL_NAME = '{"login":"solo","id":7,"name":null}';
+
+// Visibility. PRIVATE only -- decision 1, no override.
+ok(CsHub.parseVisibility({ code: 0, out: REPO_VIEW_PRIVATE_SHAPE, err: "" }) ===
+    "PRIVATE", "parseVisibility reads PRIVATE");
+ok(CsHub.parseVisibility({ code: 0, out: REPO_VIEW_PUBLIC, err: "" }) ===
+    "PUBLIC", "parseVisibility reads PUBLIC");
+ok(CsHub.parseVisibility({ code: 0, out: REPO_VIEW_INTERNAL, err: "" }) ===
+    "INTERNAL", "parseVisibility reads INTERNAL (synthetic fixture)");
+ok(CsHub.parseVisibility(
+    { code: 1, out: "", err: REPO_VIEW_MISSING_ERR }) === null,
+    "parseVisibility returns null when the repo does not exist");
+
+ok(CsHub.isPrivate({ code: 0, out: REPO_VIEW_PRIVATE_SHAPE, err: "" }) === true,
+    "isPrivate accepts PRIVATE");
+ok(CsHub.isPrivate({ code: 0, out: REPO_VIEW_PUBLIC, err: "" }) === false,
+    "isPrivate rejects PUBLIC");
+ok(CsHub.isPrivate({ code: 0, out: REPO_VIEW_INTERNAL, err: "" }) === false,
+    "isPrivate rejects INTERNAL (synthetic fixture) -- " +
+    "org-visible is not private");
+ok(CsHub.isPrivate({ code: 1, out: "", err: REPO_VIEW_MISSING_ERR }) === false,
+    "isPrivate FAILS CLOSED when the repo cannot be resolved");
+ok(CsHub.isPrivate({ code: 1, out: "", err: "gh: command not found" }) === false,
+    "isPrivate FAILS CLOSED when gh itself cannot be run");
+ok(CsHub.isPrivate(null) === false,
+    "isPrivate FAILS CLOSED on no result at all");
+
+// Scopes. A token without repo makes a private repo 404, which reads
+// as "no such repo" -- so this is checked explicitly rather than
+// discovered.
+var scopes = CsHub.parseScopes({ code: 0, out: AUTH_OK, err: "" });
+ok(scopes.indexOf("repo") !== -1, "parseScopes finds repo");
+ok(scopes.indexOf("read:org") !== -1, "parseScopes finds read:org");
+ok(scopes.indexOf("workflow") !== -1, "parseScopes finds workflow");
+ok(CsHub.hasRepoScope({ code: 0, out: AUTH_OK, err: "" }) === true,
+    "hasRepoScope true when repo present");
+ok(CsHub.hasRepoScope({ code: 0, out: AUTH_THIN, err: "" }) === false,
+    "hasRepoScope false when repo absent");
+ok(CsHub.hasRepoScope({ code: 1, out: "", err: AUTH_LOGGED_OUT_ERR }) === false,
+    "hasRepoScope false when not logged in");
+
+ok(CsHub.parseLogin({ code: 0, out: AUTH_OK, err: "" }) === "ndschonegg",
+    "parseLogin reads the account login");
+ok(CsHub.parseLogin({ code: 1, out: "", err: AUTH_LOGGED_OUT_ERR }) === null,
+    "parseLogin null when not logged in");
+ok(CsHub.isAuthenticated({ code: 0, out: AUTH_OK, err: "" }) === true,
+    "isAuthenticated true on a good status");
+ok(CsHub.isAuthenticated(
+    { code: 1, out: "", err: AUTH_LOGGED_OUT_ERR }) === false,
+    "isAuthenticated false when logged out");
+
+// Real gh writes the authenticated case to stdout and the logged-out
+// case to stderr -- but the stream is a gh implementation detail, so
+// both parseLogin and isAuthenticated must read either one.
+ok(CsHub.parseLogin({ code: 0, out: "", err: AUTH_OK }) === "ndschonegg",
+    "parseLogin reads stderr too");
+ok(CsHub.isAuthenticated({ code: 0, out: "", err: AUTH_OK }) === true,
+    "isAuthenticated reads stderr too");
+
+// noreply email, so a real address never lands in permanent history.
+ok(CsHub.noreplyEmail({ id: 12345, login: "ndschonegg" }) ===
+    "12345+ndschonegg@users.noreply.github.com", "noreplyEmail shape");
+ok(CsHub.noreplyEmail(null) === null, "noreplyEmail null on no user");
+ok(CsHub.noreplyEmail({ id: 7, login: "" }) === null,
+    "noreplyEmail null on an empty login");
+
+var u = CsHub.parseApiUser({ code: 0, out: API_USER_REAL, err: "" });
+ok(u.login === "ndschonegg" && u.id === 307531413 &&
+    u.name === "Nathan Schonegg",
+    "parseApiUser reads login, id and name");
+var u2 = CsHub.parseApiUser({ code: 0, out: API_USER_NULL_NAME, err: "" });
+ok(u2.name === "solo",
+    "parseApiUser falls back to login when name is null (synthetic fixture)");
+ok(CsHub.parseApiUser({ code: 1, out: "", err: "HTTP 401" }) === null,
+    "parseApiUser null on failure");
 
 // ---------------------------------------------------------------------
 // Report.
