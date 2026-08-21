@@ -1396,6 +1396,52 @@ git add scripts/CaveSurvey/Core/CsAdjust.js tests/js_unit.js
 git commit -m "feat: adjustment settings, per-drawing record, and one resolveAndAdjust entry point"
 ```
 
+**AS BUILT (2026-08-21).** The four helpers landed essentially as drafted above
+— unlike Task 2, nothing here was wrong. Two things worth recording for the
+next task anyway:
+
+1. **The Task 2 as-built correction did not touch this task's own code.**
+   `converged`/`iterations` living under `summary` and `controlFrame` copying
+   into both `adjust()` and `unadjusted()` are properties of `CsNetwork.resolve`
+   / `CsAdjust.adjust` / `CsAdjust.unadjusted`, none of which this task's four
+   helpers reimplement — `resolveAndAdjust` just calls them and passes the
+   result through. The drafted `resolveAndAdjust` body above was already
+   correct against the as-built module. What *did* need adding, beyond the
+   drafted test block, was an explicit assertion that `controlFrame` survives
+   `resolveAndAdjust` on both the enabled and disabled paths (`onResult` and
+   `offResult` each checked against a fresh `CsNetwork.resolve(sq, {})`) —
+   the acceptance criteria call this out by name and the drafted Step-1 tests
+   above did not exercise it at all.
+
+2. **Purity decision.** `currentOptions()` stays in `CsAdjust.js` and reads
+   `RSettings` directly, guarded by `typeof` + `try/catch`. The module header
+   now says Core is pure "except `currentOptions()`", and the function's own
+   docstring says so again and points at `CsBind.SETTING_AUTO_BIND` as the
+   precedent. Reasoning: three tools (`CsDraw`, `CsBind`, `CsReport` by Task 8)
+   would otherwise each duplicate the same three `RSettings` lookups and the
+   same three defaults, and copies drift — which is exactly the bug class this
+   feature exists to prevent, just relocated to the settings layer instead of
+   the geometry layer. A single reader with one set of defaults, one try/catch,
+   and one docstring is easier to audit for the "must not throw" requirement
+   than N call sites each doing their own guarding. The alternative (each tool
+   reads settings and passes `options` in) was rejected only because it has no
+   compensating benefit here: `currentOptions()` takes no survey-specific
+   argument and returns a plain value object, so it is trivially injectable —
+   any test or tool that wants a specific `{enabled, sigmaTape, sigmaAngle}`
+   can already pass its own `adjustOpts` to `resolveAndAdjust` and skip
+   `currentOptions()` entirely, which the disabled-path test above does.
+
+The test block above (Step 1) is also expanded past the drafted 13 assertions:
+added coverage for a stubbed `RSettings` with real stored values (the drafted
+tests only ever ran with `RSettings` absent, so "stored values when present"
+and "does not throw when the getters differ" were asserted in the acceptance
+criteria but never actually exercised), for an unparseable (non-blank,
+non-numeric) recorded sigma alongside the drafted blank-string case, for
+`tagsFor` round-tripping through `optionsFromTags` in both the enabled and
+disabled directions, and for a recorded sigma winning over a *non-default*
+stubbed setting (the drafted test only proved it beats the hardcoded default,
+which is also what a bug that ignored the settings entirely would produce).
+
 ---
 
 ### Task 4: The `CTRL-RAW` layer
