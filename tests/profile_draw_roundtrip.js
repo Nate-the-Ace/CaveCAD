@@ -2205,6 +2205,24 @@ function drawPlanSurvey(doc, di, resolved, names) {
     ok(originBefore !== null,
         "the drawing records where the profile region was put");
 
+    // THE GUTTER ITSELF. Nothing asserted this before, so the constant
+    // could have been deleted -- or quietly halved -- with the suite
+    // still green. The elevation's TOP edge must sit exactly
+    // REGION_GUTTER below the plan's southern edge: that is the whole
+    // job of the number, and it is the thing a user notices when the
+    // two views crowd each other.
+    var planX = CsProfileDraw.planExtents(dO);
+    var regionB = CsProfileDraw.regionBounds(CsProfile.build(svO, resO, {}));
+    ok(planX !== null && regionB !== null,
+        "the fixture has both plan geometry and a region to place");
+    near(planX.minY - (originBefore.y + regionB.maxY),
+        CsProfileDraw.REGION_GUTTER, 1e-9,
+        "the elevation's top edge sits exactly REGION_GUTTER below the "
+        + "plan's southern edge");
+    ok(CsProfileDraw.REGION_GUTTER >= 30.0,
+        "the gutter is at least 30 drawing units -- raised from 20 on the "
+        + "drawing evidence that the two views read as one crowded block");
+
     // a sketch traced on the elevation, in the region's own coordinates
     CsLayers.ensure(dO, iO, CsLayers.PROFILE_TRACED_CEILING);
     var opO = new RAddObjectsOperation();

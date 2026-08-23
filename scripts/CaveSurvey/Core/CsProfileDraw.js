@@ -490,12 +490,21 @@ CsProfileDraw.stamp = function(doc, op, profile, origin, bounds) {
 // ---------------------------------------------------------------------
 
 /** Blank drawing units between the plan's southern edge and the top of
- *  the elevation. Twenty label heights: enough that the plan's own
- *  bottom labels and the elevation's top band caption cannot collide at
- *  any zoom, and small enough that both still frame together on screen.
+ *  the elevation. Sixty label heights at CsDraw.TEXT_HEIGHT's 0.5 --
+ *  enough that the plan's own bottom labels and the elevation's top band
+ *  caption cannot collide at any zoom, and that the plan has visible
+ *  room beneath it rather than the elevation crowding its southern edge.
+ *  Raised from 20.0 on the drawing evidence: at twenty the two views
+ *  read as one crowded block.
+ *
  *  In DRAWING units, so it scales with the survey's own units the way
- *  every other spacing in this suite does. */
-CsProfileDraw.REGION_GUTTER = 20.0;
+ *  every other spacing in this suite does -- 30 feet on a survey in
+ *  feet, 30 metres on one in metres. That is deliberate: a metric cave
+ *  is physically larger per unit and wants proportionally more air.
+ *
+ *  (The previous docblock called 20.0 "twenty label heights". It was
+ *  forty: TEXT_HEIGHT is 0.5, not 1.0.) */
+CsProfileDraw.REGION_GUTTER = 30.0;
 
 /**
  * The bounding box of everything in the PLAN frame, as
