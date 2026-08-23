@@ -13595,10 +13595,13 @@ if (!IS_NODE) {
         eqs(result.kept, 2,
             "CsTrace.emit: a straight run keeps only its two endpoints");
 
-        var ids = doc.queryAllEntities(false, false);
-        var landed = doc.queryEntity(ids[ids.length - 1]);
-        eqs(doc.getLayerName(landed.getLayerId()), CsLayers.WALLS_SURVEYED,
-            "CsTrace.emit: the spline lands on the named layer");
+        // queryAllEntities is NOT insertion-ordered, so ids[length-1] is
+        // an arbitrary entity -- it only looked right here because this
+        // document was empty. Find the entity by its layer instead.
+        var onWalls = doc.queryLayerEntities(
+            doc.getLayerId(CsLayers.WALLS_SURVEYED), true);
+        eqs(onWalls.length, 1,
+            "CsTrace.emit: exactly one entity is on the named layer");
 
         // -- emit creates a layer the drawing lacks -----------------
         var doc3 = new RDocument(new RMemoryStorage(), new RSpatialIndexNavel());
@@ -13643,8 +13646,9 @@ if (!IS_NODE) {
             "CsTrace.emit: the layer is switched back off afterwards");
 
         // -- no binding tag ----------------------------------------
-        var traced = doc2.queryEntity(
-            doc2.queryAllEntities(false, false)[offBefore]);
+        var onCeiling = doc2.queryLayerEntities(
+            doc2.getLayerId(CsLayers.PROFILE_TRACED_CEILING), true);
+        var traced = doc2.queryEntity(onCeiling[0]);
         ok(!CsBind.hasLineworkTags(traced),
             "CsTrace.emit: leaves binding to the CsBind sweep, tags nothing");
     }());
@@ -13729,9 +13733,8 @@ if (!IS_NODE) {
             "drag maths: exactly one entity lands for one run");
         ok(res.kept < res.sampled,
             "drag maths: the spline has fewer points than the drag sampled");
-        eqs(planDoc.getLayerName(planDoc.queryEntity(
-                planDoc.queryAllEntities(false, false)[0]).getLayerId()),
-            CsLayers.WALLS_SURVEYED,
+        eqs(planDoc.queryLayerEntities(
+                planDoc.getLayerId(CsLayers.WALLS_SURVEYED), true).length, 1,
             "drag maths: it lands on the armed layer and no other");
 
         // A cross-gutter drag is discarded, so nothing lands.
@@ -13863,6 +13866,35 @@ if (!IS_NODE) {
         near(FeatureTrace.intervalFeet(), 1.0, 1e-9,
             "FeatureTrace.intervalFeet: nonsense falls back");
         FeatureTrace.widgets = undefined;
+
+        // -- the current-layer escape hatch -------------------------
+        var scratch = new RDocument(new RMemoryStorage(),
+            new RSpatialIndexNavel());
+        var scratchDi = new RDocumentInterface(scratch);
+        CsLayers.ensure(scratch, scratchDi, CsLayers.TEXT_NOTES);
+        scratch.setCurrentLayer(CsLayers.TEXT_NOTES);
+
+        FeatureTrace.target = FeatureTrace.CURRENT_LAYER;
+        eqs(FeatureTraceRun.targetLayer(scratch), CsLayers.TEXT_NOTES,
+            "targetLayer: the current-layer sentinel resolves to the drawing's layer");
+        // Resolved at trace time, not when armed: switch the current
+        // layer and the same armed sentinel follows it.
+        scratch.setCurrentLayer("0");
+        eqs(FeatureTraceRun.targetLayer(scratch), "0",
+            "targetLayer: the sentinel follows a change of current layer");
+        eqs(FeatureTraceRun.targetLayer(undefined), CsLayers.WALLS_SURVEYED,
+            "targetLayer: the sentinel without a document falls back");
+        ok(FeatureTrace.CURRENT_LAYER !== CsLayers.WALLS_SURVEYED,
+            "FeatureTrace.CURRENT_LAYER: the sentinel is not a real layer name");
+        var sentinelIsARow = false;
+        for (var ri = 0; ri < FeatureTrace.ROWS.length; ri++) {
+            if (FeatureTrace.ROWS[ri].layer === FeatureTrace.CURRENT_LAYER) {
+                sentinelIsARow = true;
+            }
+        }
+        ok(!sentinelIsARow,
+            "FeatureTrace.CURRENT_LAYER: never appears as a feature row");
+        FeatureTrace.target = undefined;
     }());
 }
 

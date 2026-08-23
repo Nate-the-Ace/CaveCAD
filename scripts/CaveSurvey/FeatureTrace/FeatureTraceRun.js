@@ -40,11 +40,32 @@ FeatureTraceRun.SAMPLE_PIXELS = 6;
 /** The armed layer. Module state on FeatureTrace, set by the panel.
  *  Falls back to WALLS-SURVEYED so this action works before the panel
  *  exists, and if the panel ever fails to build. */
-FeatureTraceRun.targetLayer = function() {
-    if (typeof FeatureTrace !== "undefined" && !isNull(FeatureTrace.target)) {
-        return FeatureTrace.target;
+FeatureTraceRun.targetLayer = function(doc) {
+    if (typeof FeatureTrace === "undefined" || isNull(FeatureTrace.target)) {
+        return CsLayers.WALLS_SURVEYED;
     }
-    return CsLayers.WALLS_SURVEYED;
+    if (FeatureTrace.target === FeatureTrace.CURRENT_LAYER) {
+        // Resolved HERE and not when the button was clicked: the current
+        // layer can change between arming and drawing, and the caver
+        // means the layer that is current when the line is drawn.
+        if (isNull(doc)) {
+            return CsLayers.WALLS_SURVEYED;
+        }
+        var name = doc.getLayerName(doc.getCurrentLayerId());
+        if (isNull(name) || String(name).length === 0) {
+            return CsLayers.WALLS_SURVEYED;
+        }
+        return name;
+    }
+    return FeatureTrace.target;
+};
+
+/** Diagnostics passthrough -- no-op when the panel is absent.
+ *  TEMPORARY: remove with FeatureTrace.log. */
+FeatureTraceRun.log = function(line) {
+    if (typeof FeatureTrace !== "undefined" && !isNull(FeatureTrace.log)) {
+        FeatureTrace.log(line);
+    }
 };
 
 /** The panel's sample interval in feet, or 1.0 without a panel.
@@ -107,7 +128,7 @@ FeatureTraceRun.prototype.setState = function(state) {
     switch (this.state) {
     case FeatureTraceRun.State.Idle:
         var trStart = qsTr("Press and drag to trace %1")
-            .arg(FeatureTraceRun.targetLayer());
+            .arg(FeatureTraceRun.targetLayer(this.getDocument()));
         this.setCommandPrompt(trStart);
         this.setLeftMouseTip(trStart);
         this.setRightMouseTip(EAction.trCancel);
@@ -183,12 +204,15 @@ FeatureTraceRun.prototype.mousePressEvent = function(event) {
     var here = { x: p.x, y: p.y };
 
     var refusal = FeatureTraceRun.frameGuard(this.region,
-        FeatureTraceRun.targetLayer(), here);
+        FeatureTraceRun.targetLayer(this.getDocument()), here);
     if (refusal !== null) {
         EAction.handleUserMessage(refusal);
         return;   // nothing captured, nothing to undo
     }
 
+    FeatureTraceRun.log("press: armed=" + FeatureTrace.target +
+        " resolved=" + FeatureTraceRun.targetLayer(this.getDocument()) +
+        " region=" + (isNull(this.region) ? "none" : "set"));
     this.setState(FeatureTraceRun.State.Drawing);
     this.samples = [here];
 };
@@ -230,7 +254,13 @@ FeatureTraceRun.prototype.mouseReleaseEvent = function(event) {
         return;
     }
 
-    this.commit();
+    FeatureTraceRun.log("release: samples=" + this.samples.length);
+    try {
+        this.commit();
+    } catch (eCommit) {
+        FeatureTraceRun.log("release: commit THREW " + eCommit);
+        throw eCommit;
+    }
     this.setState(FeatureTraceRun.State.Idle);
 };
 
@@ -238,16 +268,47 @@ FeatureTraceRun.prototype.mouseReleaseEvent = function(event) {
 FeatureTraceRun.prototype.commit = function() {
     var doc = this.getDocument();
     var di = this.getDocumentInterface();
+    FeatureTraceRun.log("commit: doc=" + (isNull(doc) ? "null" : "ok") +
+        " di=" + (isNull(di) ? "null" : "ok") +
+        " samples=" + this.samples.length);
     if (isNull(doc) || isNull(di) || this.samples.length < 2) {
+        FeatureTraceRun.log("commit: EARLY RETURN, nothing to draw");
         return;
     }
 
     // The press was in frame; the RELEASE is what proves the whole path
     // was. A wall crossing the gutter describes nothing in either view.
-    if (CsTrace.pathFrame(this.region, this.samples) === null) {
+    var layerName = FeatureTraceRun.targetLayer(doc);
+    var pathFrame = CsTrace.pathFrame(this.region, this.samples);
+    FeatureTraceRun.log("commit: pathFrame=" + pathFrame);
+
+    if (pathFrame === null) {
         EAction.handleUserMessage(qsTr("That run crossed between the plan " +
             "and the elevation. Nothing was drawn -- trace within one view."));
         return;
+    }
+
+    // The press-time guard checked the FIRST point only. A drag that
+    // starts outside the region and ends deep inside it has a single
+    // frame for its whole path, so pathFrame above is happy -- but that
+    // frame can still be the wrong one for the armed layer. Without this
+    // second check a profile row traced entirely up in the plan lands
+    // there, which a headless probe of commit() caught doing exactly
+    // that.
+    //
+    // The current-layer escape hatch is exempt on purpose: its layer is
+    // whatever the caver chose, "sheet" frame layers included, and
+    // refusing those would defeat the point of the button.
+    if (FeatureTrace.target !== FeatureTrace.CURRENT_LAYER) {
+        var wantFrame = CsLayers.frameOf(layerName);
+        if (wantFrame !== pathFrame) {
+            FeatureTraceRun.log("commit: REFUSED want=" + wantFrame +
+                " path=" + pathFrame);
+            EAction.handleUserMessage(qsTr("%1 belongs to the %2 frame, but " +
+                "that run is in the %3 frame. Nothing was drawn.")
+                .arg(layerName).arg(wantFrame).arg(pathFrame));
+            return;
+        }
     }
 
     var unit = CsUnits.fromDrawingUnit(doc.getUnit(), RS);
@@ -257,10 +318,14 @@ FeatureTraceRun.prototype.commit = function() {
     // one smoothing setting means the same thing in both.
     var spacing = CsTrace.spacingFor(unit) * FeatureTraceRun.intervalFeet();
     var tolerance = spacing * FeatureTraceRun.toleranceFraction();
-    var layerName = FeatureTraceRun.targetLayer();
     var result = CsTrace.emit(doc, di, layerName, this.samples,
         spacing, tolerance);
 
+    FeatureTraceRun.log("commit: layer=" + layerName +
+        " spacing=" + spacing + " tol=" + tolerance +
+        " added=" + result.added + " sampled=" + result.sampled +
+        " kept=" + result.kept +
+        " landedOn=" + (result.added ? layerName : "-"));
     if (result.added) {
         EAction.handleUserMessage(qsTr("%1: %2 sampled, %3 kept")
             .arg(layerName).arg(result.sampled).arg(result.kept));

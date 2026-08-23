@@ -31,6 +31,14 @@ FeatureTrace.prototype = new EAction();
  *  targetLayer() falls back to WALLS-SURVEYED. */
 FeatureTrace.target = undefined;
 
+/** Sentinel target meaning "whatever layer the drawing is set to".
+ *
+ *  A sentinel rather than a layer name, resolved at trace time, because
+ *  the current layer can change between arming the button and drawing.
+ *  Deliberately NOT a member of ROWS: every row there must name a real
+ *  registry layer, and a test asserts it. */
+FeatureTrace.CURRENT_LAYER = "\u0000CURRENT-LAYER";
+
 /**
  * The ten traceable features, plan frame first.
  *
@@ -95,6 +103,35 @@ FeatureTrace.smoothingFraction = function(name) {
     return 0.5;
 };
 
+/**
+ * TEMPORARY DIAGNOSTICS -- remove once the vanishing-commit bug is closed.
+ *
+ * Writes one line per event to ~/Documents/Cave/feature-trace-debug.log.
+ * A file and not handleUserMessage because the command line shows one
+ * line at a time and the question is the SEQUENCE: which handlers fire,
+ * with what state, and where it stops.
+ */
+FeatureTrace.LOG_PATH = undefined;
+
+FeatureTrace.log = function(line) {
+    try {
+        if (isNull(FeatureTrace.LOG_PATH)) {
+            FeatureTrace.LOG_PATH = QDir.homePath() +
+                "/Documents/Cave/feature-trace-debug.log";
+        }
+        var f = new QFile(FeatureTrace.LOG_PATH);
+        if (!f.open(new QIODevice.OpenMode(QIODevice.WriteOnly |
+                QIODevice.Append | QIODevice.Text))) {
+            return;
+        }
+        var out = new QTextStream(f);
+        out.writeString(String(line) + "\n");
+        f.close();
+    } catch (e) {
+        // diagnostics must never break the tool they are diagnosing
+    }
+};
+
 /** The dock, and the widgets the panel updates. Module-level singletons
  *  because there is one panel per application window. */
 var csFeatureTraceDock;
@@ -114,6 +151,14 @@ FeatureTrace.armLayer = function(layerName) {
     var w = FeatureTrace.widgets;
     if (isNull(w) || isNull(w.buttons)) {
         return;
+    }
+    try {
+        if (!isNull(w.currentButton)) {
+            w.currentButton.checked =
+                (layerName === FeatureTrace.CURRENT_LAYER);
+        }
+    } catch (eCur) {
+        // as below: armed correctly, only the display is wrong
     }
     for (var i = 0; i < w.buttons.length; i++) {
         try {
@@ -271,6 +316,25 @@ FeatureTrace.buildDock = function(appWin) {
         layout.addLayout(settings, 0);
     } catch (eSettings) {
         w.problems.push("interval/smoothing (" + eSettings + ")");
+    }
+
+    // -- trace on whatever layer the drawing is set to ---------------
+    // Its own button above the groups, not a row: the groups are the
+    // registry's traceable features, and this is an escape hatch for
+    // any layer the registry does not know about.
+    try {
+        w.currentButton = new QPushButton(qsTr("Trace on Current Layer"));
+        w.currentButton.checkable = true;
+        w.currentButton.toolTip = qsTr("Trace onto whichever layer the " +
+            "drawing's current layer is, resolved when you draw. Use this " +
+            "for a layer the feature list does not cover.");
+        w.currentButton.clicked.connect(function() {
+            FeatureTrace.armLayer(FeatureTrace.CURRENT_LAYER);
+            FeatureTrace.startRun();
+        });
+        layout.addWidget(w.currentButton, 0, 0);
+    } catch (eCur) {
+        w.problems.push("current-layer button (" + eCur + ")");
     }
 
     // -- the two frame groups ----------------------------------------
