@@ -167,6 +167,7 @@ FeatureTrace.widgets = undefined;
  */
 FeatureTrace.armLayer = function(layerName) {
     FeatureTrace.target = layerName;
+    FeatureTrace.refreshRuns();
 
     var w = FeatureTrace.widgets;
     if (isNull(w) || isNull(w.buttons)) {
@@ -223,6 +224,62 @@ FeatureTrace.toleranceFraction = function() {
         return FeatureTrace.smoothingFraction(w.smoothingCombo.currentText);
     } catch (e) {
         return FeatureTrace.smoothingFraction(FeatureTrace.DEFAULT_SMOOTHING);
+    }
+};
+
+/** The combo entry meaning "no run: use the shared layer". */
+FeatureTrace.RUN_SHARED = "(all runs)";
+
+/** The run token the panel has selected, or null for the shared layer.
+ *
+ *  Sanitised on the way out so the panel and the layer name can never
+ *  disagree about what run "a" means. */
+FeatureTrace.runToken = function() {
+    var w = FeatureTrace.widgets;
+    if (isNull(w) || isNull(w.runCombo)) {
+        return null;
+    }
+    try {
+        var text = String(w.runCombo.currentText);
+        if (text === FeatureTrace.RUN_SHARED) {
+            return null;
+        }
+        return CsLayerVariants.sanitize(text);
+    } catch (e) {
+        return null;
+    }
+};
+
+/** Repopulates the run list from the bands the drawing actually has.
+ *
+ *  Read from the generated stations layer's variants rather than from
+ *  the survey model: the question is which runs have a band DRAWN, since
+ *  those are the only ones with anything to trace along. Keeps the
+ *  current selection when it still exists, so refreshing does not
+ *  silently re-aim a caver mid-job. */
+FeatureTrace.refreshRuns = function() {
+    var w = FeatureTrace.widgets;
+    if (isNull(w) || isNull(w.runCombo)) {
+        return;
+    }
+    try {
+        var doc = EAction.getDocument();
+        var runs = isNull(doc) ? [] :
+            CsLayerVariants.tokensIn(doc, CsLayers.PROFILE_STATIONS);
+        var was = String(w.runCombo.currentText);
+        w.runCombo.clear();
+        w.runCombo.addItem(FeatureTrace.RUN_SHARED);
+        for (var i = 0; i < runs.length; i++) {
+            w.runCombo.addItem(runs[i]);
+        }
+        for (var k = 0; k < w.runCombo.count; k++) {
+            if (String(w.runCombo.itemText(k)) === was) {
+                w.runCombo.currentIndex = k;
+                break;
+            }
+        }
+    } catch (e) {
+        // a stale run list must never stop a trace
     }
 };
 
@@ -348,6 +405,22 @@ FeatureTrace.buildDock = function(appWin) {
         w.problems.push("interval/smoothing (" + eSettings + ")");
     }
 
+    // -- which survey run a profile feature belongs to ---------------
+    try {
+        var runRow = new QHBoxLayout();
+        runRow.addWidget(new QLabel(qsTr("Run")), 0, 0);
+        w.runCombo = new QComboBox();
+        w.runCombo.addItem(FeatureTrace.RUN_SHARED);
+        w.runCombo.toolTip = qsTr("Which survey run a PROFILE feature " +
+            "belongs to. Each run is drawn as its own band and the bands " +
+            "never overlap, so its walls get their own layers. Plan " +
+            "features ignore this -- the plan is one continuous map.");
+        runRow.addWidget(w.runCombo, 1, 0);
+        layout.addLayout(runRow, 0);
+    } catch (eRun) {
+        w.problems.push("run selector (" + eRun + ")");
+    }
+
     // -- trace on whatever layer the drawing is set to ---------------
     // Its own button above the groups, not a row: the groups are the
     // registry's traceable features, and this is an escape hatch for
@@ -451,6 +524,8 @@ FeatureTrace.prototype.beginEvent = function() {
             csFeatureTraceDock !== null);
         var dock = FeatureTrace.ensureDock();
         dock.visible = existed ? !dock.visible : true;
+        // The drawing may have gained or lost bands since last time.
+        FeatureTrace.refreshRuns();
     } catch (e) {
         csFeatureTraceDock = undefined;
         warning("Feature Trace: this CaveCAD build refused the docked " +

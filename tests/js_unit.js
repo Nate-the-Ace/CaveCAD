@@ -13853,6 +13853,7 @@ if (!IS_NODE) {
 if (!IS_NODE) {
     (function() {
         loadRepoScript("scripts/CaveSurvey/Core/CsLayers.js");
+        loadRepoScript("scripts/CaveSurvey/Core/CsLayerVariants.js");
         loadRepoScript("scripts/CaveSurvey/Core/CsBind.js");
         loadRepoScript("scripts/CaveSurvey/Core/CsTrace.js");
         loadRepoScript("scripts/CaveSurvey/FeatureTrace/FeatureTraceRun.js");
@@ -14080,6 +14081,47 @@ if (!IS_NODE) {
         CsTrace.restoreSnap(snapDi, null);
         eqs(CsTrace.snapNameOf(snapDi.getSnap()), "RSnapFree",
             "CsTrace.restoreSnap: a null name changes nothing");
+
+        // -- the run selector: profile features only ----------------
+        // Each run is drawn as its own band and CsProfile lays bands out
+        // so they never overlap, so a profile feature belongs to exactly
+        // one run. The plan is one continuous map and must NOT be split:
+        // a wall runs straight through survey boundaries.
+        FeatureTrace.widgets = { runCombo: { currentText: "A" } };
+
+        FeatureTrace.target = CsLayers.PROFILE_TRACED_CEILING;
+        eqs(FeatureTraceRun.targetLayer(null), "PROFILE-CEILING-A",
+            "run selector: a profile feature goes to its run's layer");
+
+        FeatureTrace.target = CsLayers.PROFILE_WALLS_INFERRED;
+        eqs(FeatureTraceRun.targetLayer(null), "PROFILE-WALLS-INFERRED-A",
+            "run selector: a multi-word profile base still varies");
+
+        FeatureTrace.target = CsLayers.WALLS_SURVEYED;
+        eqs(FeatureTraceRun.targetLayer(null), CsLayers.WALLS_SURVEYED,
+            "run selector: a PLAN feature is never split by run");
+        FeatureTrace.target = CsLayers.BREAKDOWN_BOUNDARY;
+        eqs(FeatureTraceRun.targetLayer(null), CsLayers.BREAKDOWN_BOUNDARY,
+            "run selector: nor is a plan breakdown boundary");
+
+        // "(all runs)" means the shared layer, not a run called that.
+        FeatureTrace.widgets = { runCombo: { currentText: FeatureTrace.RUN_SHARED } };
+        FeatureTrace.target = CsLayers.PROFILE_TRACED_CEILING;
+        eqs(FeatureTraceRun.targetLayer(null), CsLayers.PROFILE_TRACED_CEILING,
+            "run selector: the shared entry means the shared layer");
+
+        // Lower case from the combo must resolve to the same layer.
+        FeatureTrace.widgets = { runCombo: { currentText: "g" } };
+        eqs(FeatureTraceRun.targetLayer(null), "PROFILE-CEILING-G",
+            "run selector: the run token is sanitised, so g and G are one run");
+
+        // No panel, no run: the drag still works standalone.
+        FeatureTrace.widgets = undefined;
+        eqs(FeatureTraceRun.targetLayer(null), CsLayers.PROFILE_TRACED_CEILING,
+            "run selector: with no panel a profile feature uses the shared layer");
+        ok(FeatureTraceRun.runToken() === null,
+            "run selector: no panel means no run");
+        FeatureTrace.target = undefined;
 
         // -- the current-layer escape hatch -------------------------
         var scratch = new RDocument(new RMemoryStorage(),

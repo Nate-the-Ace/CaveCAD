@@ -45,6 +45,26 @@ FeatureTraceRun.targetLayer = function(doc) {
     if (typeof FeatureTrace === "undefined" || isNull(FeatureTrace.target)) {
         return CsLayers.WALLS_SURVEYED;
     }
+    if (FeatureTrace.target !== FeatureTrace.CURRENT_LAYER) {
+        // A profile feature belongs to ONE survey run: each run is drawn
+        // as its own band, and CsProfile lays bands out so they never
+        // overlap, so nothing traced along one run can meet anything
+        // traced along another. Segregating them also stops the no-gap
+        // tie-in welding one band's ceiling to the next band's floor
+        // when the two happen to be laid out within a foot of each
+        // other. Plan features are untouched: the plan is one
+        // continuous map and a wall runs straight through survey
+        // boundaries.
+        var run = FeatureTraceRun.runToken();
+        if (run !== null &&
+                CsLayers.frameOf(FeatureTrace.target) === "profile") {
+            var variant = CsLayerVariants.nameFor(FeatureTrace.target, run);
+            if (variant !== null) {
+                return variant;
+            }
+        }
+        return FeatureTrace.target;
+    }
     if (FeatureTrace.target === FeatureTrace.CURRENT_LAYER) {
         // Resolved HERE and not when the button was clicked: the current
         // layer can change between arming and drawing, and the caver
@@ -93,6 +113,16 @@ FeatureTraceRun.refusalReason = function(doc, layerName) {
     }
     return qsTr("Nothing was drawn: layer %1 refused the line, and this " +
         "build reports no reason. Please report this.").arg(layerName);
+};
+
+/** The survey run the panel has selected, or null for the shared layer.
+ *  Read through a helper like the other panel values so the drag action
+ *  still works with no panel at all. */
+FeatureTraceRun.runToken = function() {
+    if (typeof FeatureTrace !== "undefined" && !isNull(FeatureTrace.runToken)) {
+        return FeatureTrace.runToken();
+    }
+    return null;
 };
 
 /** Diagnostics passthrough -- no-op when the panel is absent.
