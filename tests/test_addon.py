@@ -108,32 +108,6 @@ def parse_defaults_table():
                 for name, color, linetype, weight in entries)
 
 
-def parse_profile_draw_layers():
-    """The layer NAMES CsProfileDraw actually writes to, parsed straight
-    out of CsProfileDraw.LAYERS() in Core/CsProfileDraw.js -- not a
-    hand-copied guess of what it draws to, which is exactly what an
-    earlier version of test_profile_layers_exist_in_profile_template
-    was: it called CTRL-LRUD one of "the layers the profile generator
-    draws to" (false -- LAYERS() explicitly excludes it) and never
-    checked CTRL-SHOTS/CTRL-STATIONS/CTRL-STATION-LABELS/TEXT-LABELS at
-    all, which were only in the template by luck. Resolves each
-    CsLayers.* reference inside LAYERS() through the registry, so a
-    rename of either constant is caught here rather than silently
-    producing an empty or stale set."""
-    with open(os.path.join(ADDON, "Core", "CsProfileDraw.js")) as fh:
-        source = fh.read()
-    match = re.search(
-        r"CsProfileDraw\.LAYERS = function\(\)\s*\{\s*return\s*\[(.*?)\];",
-        source, re.S)
-    assert match is not None, ("CsProfileDraw.LAYERS() not found -- did "
-                               "its definition change shape?")
-    constant_names = re.findall(r"CsLayers\.([A-Z_]+)", match.group(1))
-    assert constant_names, ("no CsLayers.* references found inside "
-                            "CsProfileDraw.LAYERS()")
-    registry = parse_layer_registry()
-    return set(registry[name] for name in constant_names)
-
-
 SHEET_LAYERS = {"0", "Defpoints", "BORDER", "TITLE-BLOCK", "LEGEND",
                 "SCALE-BAR"}
 
@@ -160,9 +134,9 @@ def frame_of(name):
 # itself, not by anything in this repo -- unlike CsLayers.DEFAULTS,
 # which an earlier tools/add_profile_layers.js was duplicating, these
 # never drift, so hardcoding them here is not that same problem. Only
-# populated for the colour names CsLayers.DEFAULTS actually uses for
-# the four profile-generator layers; extend if a DEFAULTS row starts
-# using a new one.
+# populated for the colour names CsLayers.DEFAULTS uses for the layers
+# TestSyncTemplateLayersTool checks the appearance of; extend if a
+# DEFAULTS row starts using a new one.
 SVG_TRUE_COLOR = {
     "gray": 0x808080,
     "pink": 0xFFC0CB,
@@ -186,29 +160,6 @@ def strip_layer_records(content, names):
             if re.search(r"\n  2\n(.+)\n", e).group(1) not in names]
     new_table = header + "\n  0\nLAYER\n" + "\n  0\nLAYER\n".join(kept)
     return content[:start] + new_table + content[end:]
-
-
-def rename_layer_records(content, mapping):
-    """Renames layers throughout a DXF: the LAYER table's own group 2
-    names, and every entity's group 8 reference to them. Companion to
-    strip_layer_records() above -- used to fabricate a PRE-rename copy
-    of the (already-renamed) shipped PROFILE template, so the tool's
-    rename path can be exercised without a second binary fixture to
-    keep in sync.
-    """
-    def swap(code):
-        def sub(match):
-            return "\n%s\n%s\n" % (code,
-                                    mapping.get(match.group(1),
-                                                match.group(1)))
-        return sub
-
-    start = content.index("  0\nTABLE\n  2\nLAYER\n")
-    end = content.index("\n  0\nENDTAB\n", start)
-    table = re.sub(r"\n  2\n(.+)\n", swap("  2"), content[start:end])
-    head = re.sub(r"\n  8\n(.+)\n", swap("  8"), content[:start])
-    tail = re.sub(r"\n  8\n(.+)\n", swap("  8"), content[end:])
-    return head + table + tail
 
 
 def parse_layer_records(content):
@@ -360,12 +311,22 @@ class TestPublishReadiness(unittest.TestCase):
 
 
 class TestTemplates(unittest.TestCase):
-    def test_both_templates_are_present(self):
-        for name in ("NSS_Cave_Template_PLAN.dxf",
-                     "NSS_Cave_Template_PROFILE.dxf"):
-            with self.subTest(template=name):
-                self.assertTrue(
-                    os.path.exists(os.path.join(TEMPLATES, name)))
+    def test_the_plan_template_is_present(self):
+        self.assertTrue(os.path.exists(
+            os.path.join(TEMPLATES, "NSS_Cave_Template_PLAN.dxf")))
+
+    def test_no_standalone_profile_template_ships(self):
+        """One template, not two. NSS_Cave_Template_PROFILE.dxf is
+        deleted: no code path ever opened it (CaveTemplateApply loads the
+        PLAN template only) and the elevation is drawn INTO the plan
+        drawing now, so a standalone elevation sheet would be a second
+        answer to "which file do I start from". Its absence is pinned
+        rather than merely done, because putting it back also puts back a
+        layer set whose view layers carry plan-frame names -- the
+        cross-frame collision the frame split exists to remove.
+        """
+        self.assertFalse(os.path.exists(
+            os.path.join(TEMPLATES, "NSS_Cave_Template_PROFILE.dxf")))
 
 
 class TestIncludes(unittest.TestCase):
@@ -420,7 +381,7 @@ class TestBasenameCollisions(unittest.TestCase):
 
 
 class TestLayerVocabulary(unittest.TestCase):
-    """The layer names in Core/Layers.js and the plan template must agree.
+    """The layer names in Core/CsLayers.js and the plan template must agree.
 
     The old importer invented layer names no template carried; this pins
     the registry to the template so the two cannot drift apart again.
@@ -436,53 +397,30 @@ class TestLayerVocabulary(unittest.TestCase):
         match = re.search(r"2\nLAYER\n(.*?)\n  0\nENDTAB", content, re.S)
         return set(re.findall(r"^  2\n(.+)$", match.group(1), re.M))
 
-    # The wall run layers are created on demand, so their absence is
-    # not a plan-template omission. Everything else the registry names
-    # must be there -- INCLUDING the profile frame, which used to be
-    # exempted as "belongs to the PROFILE template": the elevation is
-    # drawn into the plan drawing now, so those layers are the plan
-    # template's business like any other.
-    CREATED_ON_DEMAND = {"CTRL-LRUD-WALL-LEFT", "CTRL-LRUD-WALL-RIGHT"}
-
     def test_registry_layers_exist_in_plan_template(self):
+        """EVERY registry layer, with no exemptions. The wall run layers
+        used to be exempted here as "created on demand", and they were
+        indeed created on demand -- which meant a fresh drawing's Layer
+        list did not offer them until the first draw put walls on them,
+        and nothing checked what they looked like when it did.
+        tools/sync_template_layers.js puts every registry layer in the
+        template instead, so the exemption set is gone on purpose: adding
+        one back is how a layer goes missing from the template again.
+        """
         registry = self.layer_registry()
         plan = self.template_layers("NSS_Cave_Template_PLAN.dxf")
-        missing = registry - plan - self.CREATED_ON_DEMAND
+        missing = registry - plan
         self.assertEqual(missing, set(),
                          "layers in Core/CsLayers.js but not the plan "
                          "template: %s" % sorted(missing))
 
-    def test_profile_layers_exist_in_profile_template(self):
-        """Every layer CsProfileDraw.LAYERS() actually writes to must
-        exist in the PROFILE template, or the layer gets invented at
-        runtime with whatever defaults -- exactly the drift this class
-        exists to stop.
-
-        CTRL-PROFILE-LRUD is RESERVED, not drawn to:
-        CsProfileDraw.LAYERS()
-        explicitly excludes it (see that function's own docblock --
-        ensuring it "would promise geometry that never lands on it"),
-        but the template still carries it for a future module to adopt
-        without a template migration. An earlier version of this test
-        called CTRL-LRUD one of "the layers the profile generator draws
-        to", which was false, and it was missing four layers that
-        genuinely ARE drawn to (CTRL-SHOTS, CTRL-STATIONS,
-        CTRL-STATION-LABELS, TEXT-LABELS) -- those were only present in
-        the template by luck, never by assertion.
-        """
-        profile = self.template_layers("NSS_Cave_Template_PROFILE.dxf")
-        RESERVED_NOT_DRAWN = {"CTRL-PROFILE-LRUD"}
-        needed = parse_profile_draw_layers() | RESERVED_NOT_DRAWN
-        missing = needed - profile
-        self.assertEqual(missing, set(),
-                         "layers CsProfileDraw.LAYERS() writes to (or "
-                         "reserves) but the PROFILE template lacks: %s" %
-                         sorted(missing))
-
     def test_plan_template_has_every_profile_frame_layer(self):
-        """The elevation now draws into the plan drawing, so every layer
-        it needs must be in the plan template -- not invented at runtime
-        with whatever defaults happen to apply.
+        """The elevation draws into the plan drawing, so every layer it
+        needs must be in the plan template -- not invented at runtime
+        with whatever defaults happen to apply. Subsumed by the test
+        above now that nothing is exempt from it, and kept anyway: this
+        one fails with the word "profile" in the message, which is the
+        difference between a one-line diagnosis and a hunt.
         """
         registry = self.layer_registry()
         plan = self.template_layers("NSS_Cave_Template_PLAN.dxf")
@@ -494,39 +432,18 @@ class TestLayerVocabulary(unittest.TestCase):
                          "profile-frame layers absent from the PLAN "
                          "template: %s" % sorted(missing))
 
-    def test_profile_template_carries_no_plan_frame_view_layer(self):
-        """A drawing started from the PROFILE template must not carry
-        plan-frame names for its own elevation linework: CTRL-SHOTS
-        there would mean along-passage distance, and CTRL-SHOTS in the
-        plan drawing means easting/northing. One name, two meanings, is
-        the collision this whole frame split removes.
-        """
-        registry = self.layer_registry()
-        profile = self.template_layers("NSS_Cave_Template_PROFILE.dxf")
-        twins = {}
-        for name in registry:
-            if frame_of(name) != "profile":
-                continue
-            if name.startswith("CTRL-PROFILE-"):
-                twins[name] = "CTRL-" + name[len("CTRL-PROFILE-"):]
-            else:
-                twins[name] = name[len("PROFILE-"):]
-        offenders = sorted(twin for twin in twins.values() if twin in profile)
-        self.assertEqual(offenders, [],
-                         "the PROFILE template still carries plan-frame "
-                         "view layers: %s" % offenders)
-
     def test_registry_defines_profile_control_layers(self):
         """Mutation-tested gap: deleting CsLayers.PROFILE_FLOOR and
         CsLayers.PROFILE_CEILING left the whole suite green, because
-        test_registry_layers_exist_in_plan_template only builds an
-        exemption set from whatever names happen to be in the registry
-        -- it never asserts the constants exist at all. This pins both
-        the constant and its CsLayers.DEFAULTS entry, which also
-        protects tools/add_profile_frame_layers.js: that tool reads
-        DEFAULTS through CsLayers.ensure() instead of carrying its own
-        copy of the layer's appearance, so a deleted or wrong DEFAULTS
-        entry breaks both this test and the tool the same way.
+        test_registry_layers_exist_in_plan_template only ever compares
+        the registry against the template -- it never asserts a
+        particular constant exists at all, so deleting one shrinks both
+        sides of the comparison. This pins both the constant and its
+        CsLayers.DEFAULTS entry, which also protects
+        tools/sync_template_layers.js: that tool reads DEFAULTS through
+        CsLayers.ensure() instead of carrying its own copy of a layer's
+        appearance, so a deleted or wrong DEFAULTS entry breaks both this
+        test and the tool the same way.
         """
         with open(os.path.join(ADDON, "Core", "CsLayers.js")) as fh:
             source = fh.read()
@@ -540,22 +457,69 @@ class TestLayerVocabulary(unittest.TestCase):
         self.assertEqual(defaults.get("CTRL-PROFILE-CEILING"),
                          ("gray", "DASHED", "Weight000"))
 
+    WALL_RUN_LAYERS = ("CTRL-LRUD-WALL-LEFT", "CTRL-LRUD-WALL-RIGHT")
 
-class TestAddProfileFrameLayersTool(unittest.TestCase):
-    """tools/add_profile_frame_layers.js must ADD the profile frame to
-    the PLAN template with the right appearance, RENAME the PROFILE
-    template's plan-frame view layers into the frame, and do nothing on
-    every run after either.
+    def test_registry_defines_the_lrud_wall_layers_as_dashed(self):
+        """A wall run is an APPROXIMATION -- straight segments between
+        the LRUD ticks and splay tips either side of the centerline, cut
+        at junctions and at stations with no wall evidence. It has to
+        plot dashed, so a reader can never mistake it for the solid line
+        a wall traced onto WALLS-SURVEYED gets. Same shape as the test
+        above: the constant AND its appearance, because the comparison
+        against the template cannot see a constant that is gone.
+        """
+        with open(os.path.join(ADDON, "Core", "CsLayers.js")) as fh:
+            source = fh.read()
+        self.assertIn('CsLayers.LRUD_WALL_LEFT = "CTRL-LRUD-WALL-LEFT";',
+                      source)
+        self.assertIn('CsLayers.LRUD_WALL_RIGHT = "CTRL-LRUD-WALL-RIGHT";',
+                      source)
+        defaults = parse_defaults_table()
+        for name in self.WALL_RUN_LAYERS:
+            with self.subTest(layer=name):
+                self.assertEqual(defaults.get(name),
+                                 ("gray", "DASHED", "Weight000"),
+                                 "%s must be dashed in CsLayers.DEFAULTS "
+                                 "-- an approximated wall may not plot "
+                                 "like a traced one" % name)
 
-    It replaces tools/add_profile_layers.js, which is deleted: that tool
-    added CTRL-LRUD and CTRL-SPLAYS -- PLAN-frame names -- to the
-    PROFILE template, so re-running it would put back exactly the
-    cross-frame collision this migration removes.
+    def test_plan_template_draws_the_lrud_walls_dashed(self):
+        """And dashed in the SHIPPED template, which is what a new
+        drawing actually gets: CsLayers.ensure() only reaches DEFAULTS
+        for a layer the drawing lacks, so the template's own record is
+        the one that decides how these plot in practice.
+        """
+        with open(os.path.join(TEMPLATES, "NSS_Cave_Template_PLAN.dxf"),
+                  encoding="utf-8", errors="replace") as fh:
+            records = parse_layer_records(fh.read())
+        for name in self.WALL_RUN_LAYERS:
+            with self.subTest(layer=name):
+                self.assertIn(name, records)
+                self.assertNotEqual(
+                    (records[name]["linetype"] or "").upper(), "CONTINUOUS",
+                    "%s plots solid in the plan template" % name)
+                self.assertEqual(
+                    (records[name]["linetype"] or "").upper(), "DASHED",
+                    "%s: linetype %r in the plan template, expected DASHED"
+                    % (name, records[name]["linetype"]))
 
-    Both fixtures are fabricated FROM the shipped templates (records
-    stripped, or renamed back to their plan-frame twins) rather than
-    kept as separate binary files, so neither can drift from the real
-    template the way a second checked-in fixture could.
+
+class TestSyncTemplateLayersTool(unittest.TestCase):
+    """tools/sync_template_layers.js must add every registry layer the
+    PLAN template lacks, give each the appearance CsLayers.DEFAULTS
+    names, and do nothing at all on every run after.
+
+    It replaces tools/add_profile_frame_layers.js, which is deleted,
+    which replaced tools/add_profile_layers.js, also deleted. Each of
+    those carried a HAND-WRITTEN list of the layers it was responsible
+    for, so every layer added to the registry afterwards needed a new
+    one-shot tool with a new list -- and the two LRUD wall run layers
+    were never in any of them. This tool reads the registry itself.
+
+    The fixture is fabricated FROM the shipped template (records
+    stripped) rather than kept as a separate binary file, so it cannot
+    drift from the real template the way a second checked-in fixture
+    could.
 
     Shells out to the real CaveCAD engine (~1s per invocation) because
     "run the one-shot tool and inspect what it wrote" cannot be checked
@@ -567,33 +531,20 @@ class TestAddProfileFrameLayersTool(unittest.TestCase):
         "CAVESURVEY_CAVECAD",
         "/Applications/CaveCAD.app/Contents/MacOS/CaveCAD")
 
-    # The exact layers the tool is responsible for, fixed here
-    # independent of the tool's own WANTED list: if a future edit drops
-    # one, this test must keep expecting it (and fail), not shrink its
-    # own expectation to match whatever the tool currently claims.
-    FRAME_LAYERS = ("CTRL-PROFILE-SHOTS", "CTRL-PROFILE-STATIONS",
-                    "CTRL-PROFILE-STATION-LABELS", "CTRL-PROFILE-SPLAYS",
-                    "CTRL-PROFILE-LRUD", "CTRL-PROFILE-FLOOR",
-                    "CTRL-PROFILE-CEILING", "PROFILE-CEILING",
-                    "PROFILE-FLOOR", "PROFILE-WALLS-INFERRED",
-                    "PROFILE-TEXT-NOTES", "PROFILE-TEXT-LABELS",
-                    "PROFILE-BREAKDOWN", "PROFILE-ENTRANCE")
-
-    # The nine the PROFILE template used to carry under plan-frame
-    # names. Not every frame layer has a twin there: CTRL-PROFILE-FLOOR,
-    # CTRL-PROFILE-CEILING, PROFILE-CEILING, PROFILE-FLOOR and
-    # PROFILE-WALLS-INFERRED were already correctly named.
-    RENAMED = {
-        "CTRL-PROFILE-SHOTS": "CTRL-SHOTS",
-        "CTRL-PROFILE-STATIONS": "CTRL-STATIONS",
-        "CTRL-PROFILE-STATION-LABELS": "CTRL-STATION-LABELS",
-        "CTRL-PROFILE-SPLAYS": "CTRL-SPLAYS",
-        "CTRL-PROFILE-LRUD": "CTRL-LRUD",
-        "PROFILE-TEXT-NOTES": "TEXT-NOTES",
-        "PROFILE-TEXT-LABELS": "TEXT-LABELS",
-        "PROFILE-BREAKDOWN": "BREAKDOWN",
-        "PROFILE-ENTRANCE": "ENTRANCE",
-    }
+    # The exact layers the fixture strips and the tool must put back:
+    # the whole profile frame, plus the two wall run layers the plan
+    # template went without for as long as they were "created on
+    # demand". Fixed here independent of the registry, so an edit that
+    # drops one from the registry fails this test instead of shrinking
+    # its own expectation to match.
+    STRIPPED = ("CTRL-PROFILE-SHOTS", "CTRL-PROFILE-STATIONS",
+                "CTRL-PROFILE-STATION-LABELS", "CTRL-PROFILE-SPLAYS",
+                "CTRL-PROFILE-LRUD", "CTRL-PROFILE-FLOOR",
+                "CTRL-PROFILE-CEILING", "PROFILE-CEILING",
+                "PROFILE-FLOOR", "PROFILE-WALLS-INFERRED",
+                "PROFILE-TEXT-NOTES", "PROFILE-TEXT-LABELS",
+                "PROFILE-BREAKDOWN", "PROFILE-ENTRANCE",
+                "CTRL-LRUD-WALL-LEFT", "CTRL-LRUD-WALL-RIGHT")
 
     def setUp(self):
         if not os.path.exists(self.CAVECAD):
@@ -606,82 +557,64 @@ class TestAddProfileFrameLayersTool(unittest.TestCase):
         result = subprocess.run(
             [self.CAVECAD, "-no-dock-icon", "-no-gui",
              "-allow-multiple-instances", "-autostart",
-             os.path.join(REPO, "tools", "add_profile_frame_layers.js"),
+             os.path.join(REPO, "tools", "sync_template_layers.js"),
              fake_repo_root],
             stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=120)
         return result.stdout.decode("utf-8", "replace")
 
-    def make_fake_repo(self, tmp, plan_bytes=None, profile_bytes=None):
+    def make_fake_repo(self, tmp, plan_bytes=None):
         """A throwaway repoRoot: the tool derives the Core library
-        location AND both template paths from this single argument, so
-        it needs a real scripts/CaveSurvey/Core (symlinked -- CsLayers.js
+        location AND the template path from this single argument, so it
+        needs a real scripts/CaveSurvey/Core (symlinked -- CsLayers.js
         must be the genuine, current one) and a templates/ directory.
-        Passing None for either template leaves that file absent, to
-        exercise the importFile-failure branch. Returns both paths,
-        which may or may not exist on disk."""
+        Passing None for plan_bytes leaves the template absent, to
+        exercise the importFile-failure branch. Returns the template
+        path, which may or may not exist on disk."""
         os.symlink(os.path.join(REPO, "scripts"), os.path.join(tmp, "scripts"))
         os.mkdir(os.path.join(tmp, "templates"))
-        paths = []
-        for name, content in (("NSS_Cave_Template_PLAN.dxf", plan_bytes),
-                              ("NSS_Cave_Template_PROFILE.dxf",
-                               profile_bytes)):
-            path = os.path.join(tmp, "templates", name)
-            if content is not None:
-                with open(path, "wb") as fh:
-                    fh.write(content)
-            paths.append(path)
-        return paths
+        path = os.path.join(tmp, "templates", "NSS_Cave_Template_PLAN.dxf")
+        if plan_bytes is not None:
+            with open(path, "wb") as fh:
+                fh.write(plan_bytes)
+        return path
 
     def shipped(self, name):
         with open(os.path.join(TEMPLATES, name), "rb") as fh:
             return fh.read().decode("utf-8", "replace")
 
     def pre_migration_plan(self):
-        """The shipped PLAN template with the whole profile frame
-        stripped back out, and nothing else touched."""
+        """The shipped PLAN template with STRIPPED taken back out of its
+        LAYER table, and nothing else touched."""
         return strip_layer_records(
             self.shipped("NSS_Cave_Template_PLAN.dxf"),
-            self.FRAME_LAYERS).encode("utf-8")
+            self.STRIPPED).encode("utf-8")
 
-    def pre_rename_profile(self):
-        """The shipped PROFILE template with its profile-frame view
-        layers put BACK under their plan-frame names -- what the
-        template looked like before this migration."""
-        back = dict((new, old) for new, old in self.RENAMED.items())
-        return rename_layer_records(
-            self.shipped("NSS_Cave_Template_PROFILE.dxf"),
-            back).encode("utf-8")
+    def expected_ok_line(self, plan):
+        return ("ok    %s -- %d layer(s) added: %s"
+                % (plan, len(self.STRIPPED),
+                   ", ".join(sorted(self.STRIPPED))))
 
-    def test_add_and_rename_paths_then_idempotence(self):
+    def test_add_path_then_idempotence(self):
         defaults = parse_defaults_table()
 
         with tempfile.TemporaryDirectory() as tmp:
-            plan, profile = self.make_fake_repo(
-                tmp, self.pre_migration_plan(), self.pre_rename_profile())
+            plan = self.make_fake_repo(tmp, self.pre_migration_plan())
 
             first = self.run_tool(tmp)
             lines = first.splitlines()
             self.assertIn(
-                "ok    %s -- %d layer(s) added, 0 renamed"
-                % (plan, len(self.FRAME_LAYERS)), lines,
-                "the PLAN template's add path did not report the exact "
-                "expected line -- got: %r" % first)
-            self.assertIn(
-                "ok    %s -- 0 layer(s) added, %d renamed"
-                % (profile, len(self.RENAMED)), lines,
-                "the PROFILE template's rename path did not report the "
-                "exact expected line -- got: %r" % first)
-            self.assertIn("### ADD PROFILE FRAME LAYERS OK", lines)
+                self.expected_ok_line(plan), lines,
+                "the add path did not report the exact expected line -- "
+                "got: %r" % first)
+            self.assertIn("### SYNC TEMPLATE LAYERS OK", lines)
 
             with open(plan, "rb") as fh:
                 plan_after = fh.read()
-            with open(profile, "rb") as fh:
-                profile_after = fh.read()
 
             # every added layer carries its CsLayers.DEFAULTS appearance
             records = parse_layer_records(
                 plan_after.decode("utf-8", "replace"))
-            for name in self.FRAME_LAYERS:
+            for name in self.STRIPPED:
                 self.assertIn(
                     name, records,
                     "%s missing from the PLAN template's LAYER table "
@@ -705,43 +638,40 @@ class TestAddProfileFrameLayersTool(unittest.TestCase):
                     "%r (%d)" % (name, actual["lineweight"], weight_key,
                                  expected_weight))
 
-            # the rename kept the layer, it did not add a second one
-            profile_names = set(parse_layer_records(
-                profile_after.decode("utf-8", "replace")).keys())
-            for new_name, old_name in self.RENAMED.items():
-                self.assertIn(new_name, profile_names,
-                              "%s is not in the PROFILE template after "
-                              "the rename" % new_name)
-                self.assertNotIn(old_name, profile_names,
-                                 "%s survived the rename -- the PROFILE "
-                                 "template still carries a plan-frame "
-                                 "view layer" % old_name)
-
             second = self.run_tool(tmp)
-            for path in (plan, profile):
-                self.assertIn(
-                    "skip  %s -- every layer already present" % path,
-                    second.splitlines(),
-                    "second run did not report the exact expected skip "
-                    "line for %s -- got: %r" % (path, second))
+            self.assertIn(
+                "skip  %s -- every registry layer already present" % plan,
+                second.splitlines(),
+                "second run did not report the exact expected skip line "
+                "-- got: %r" % second)
 
             with open(plan, "rb") as fh:
                 self.assertEqual(
                     plan_after, fh.read(),
-                    "the tool rewrote an already-migrated PLAN template "
+                    "the tool rewrote an already-current PLAN template "
                     "on a second run -- it is supposed to be a no-op "
                     "once every layer is present")
-            with open(profile, "rb") as fh:
-                self.assertEqual(
-                    profile_after, fh.read(),
-                    "the tool rewrote an already-migrated PROFILE "
-                    "template on a second run")
+
+    def test_the_shipped_template_needs_nothing_added(self):
+        """The tool has been run against the real template, so a run
+        over the shipped bytes must be the pure skip path. This is what
+        catches a layer added to the registry and never poured into the
+        template -- the exact drift the hand-written-list tools kept
+        producing."""
+        with tempfile.TemporaryDirectory() as tmp:
+            plan = self.make_fake_repo(
+                tmp, self.shipped("NSS_Cave_Template_PLAN.dxf")
+                .encode("utf-8"))
+            output = self.run_tool(tmp)
+            self.assertIn(
+                "skip  %s -- every registry layer already present" % plan,
+                output.splitlines(),
+                "the shipped template is missing a registry layer -- "
+                "re-run tools/sync_template_layers.js. Got: %r" % output)
 
     def test_reports_failure_and_creates_nothing_when_template_is_missing(self):
         with tempfile.TemporaryDirectory() as tmp:
-            plan, profile = self.make_fake_repo(
-                tmp, plan_bytes=None,
-                profile_bytes=self.pre_rename_profile())
+            plan = self.make_fake_repo(tmp, plan_bytes=None)
 
             output = self.run_tool(tmp)
 
@@ -750,7 +680,7 @@ class TestAddProfileFrameLayersTool(unittest.TestCase):
                 "importFile failure on a missing template did not "
                 "produce the exact expected FAIL line -- got: %r" %
                 output)
-            self.assertIn("### ADD PROFILE FRAME LAYERS FAIL",
+            self.assertIn("### SYNC TEMPLATE LAYERS FAIL",
                           output.splitlines())
             self.assertFalse(
                 os.path.exists(plan),
@@ -762,8 +692,7 @@ class TestAddProfileFrameLayersTool(unittest.TestCase):
         pre_bytes = self.pre_migration_plan()
 
         with tempfile.TemporaryDirectory() as tmp:
-            plan, profile = self.make_fake_repo(
-                tmp, pre_bytes, self.pre_rename_profile())
+            plan = self.make_fake_repo(tmp, pre_bytes)
             # A read-only target FILE: importFile can still read it (Qt
             # opens for read), but exportFile's rewrite-in-place cannot
             # open it for writing -- a real, reproducible way to trigger
@@ -783,7 +712,7 @@ class TestAddProfileFrameLayersTool(unittest.TestCase):
                 "exportFile failure on a read-only FILE did not "
                 "produce the exact expected FAIL line -- got: %r" %
                 output)
-            self.assertIn("### ADD PROFILE FRAME LAYERS FAIL",
+            self.assertIn("### SYNC TEMPLATE LAYERS FAIL",
                           output.splitlines())
             with open(plan, "rb") as fh:
                 after_bytes = fh.read()
@@ -793,6 +722,41 @@ class TestAddProfileFrameLayersTool(unittest.TestCase):
                 "have failed -- an ignored exportFile failure would "
                 "silently succeed here instead of leaving the "
                 "pre-migration bytes alone")
+
+    def test_reports_failure_and_writes_nothing_when_the_registry_is_empty(self):
+        """The tool's own floor check. Without it, a broken include or a
+        renamed namespace yields an empty wanted-list, every layer counts
+        as "already present", and the run reports success over a template
+        it never looked at -- silence that reads exactly like the skip
+        path above.
+        """
+        with tempfile.TemporaryDirectory() as tmp:
+            core = os.path.join(tmp, "scripts", "CaveSurvey", "Core")
+            os.makedirs(core)
+            with open(os.path.join(core, "CsLayers.js"), "w") as fh:
+                fh.write('var CsLayers = {};\n'
+                         'CsLayers.SHOTS = "CTRL-SHOTS";\n')
+            os.mkdir(os.path.join(tmp, "templates"))
+            plan = os.path.join(tmp, "templates",
+                                "NSS_Cave_Template_PLAN.dxf")
+            pre_bytes = self.pre_migration_plan()
+            with open(plan, "wb") as fh:
+                fh.write(pre_bytes)
+
+            output = self.run_tool(tmp)
+
+            self.assertIn(
+                "FAIL  the layer registry yielded only 1 name(s) -- "
+                "CsLayers did not load", output.splitlines(),
+                "a one-constant registry did not trip the floor check "
+                "-- got: %r" % output)
+            self.assertIn("### SYNC TEMPLATE LAYERS FAIL",
+                          output.splitlines())
+            with open(plan, "rb") as fh:
+                self.assertEqual(
+                    pre_bytes, fh.read(),
+                    "the tool wrote the template despite failing its own "
+                    "floor check")
 
 
 class TestReadmeToolTable(unittest.TestCase):

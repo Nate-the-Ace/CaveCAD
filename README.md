@@ -28,9 +28,10 @@ Each appears in the **Cave Survey** menu and as a command:
 | Generate Profile | `gp` | Rebuild the extended elevation beside the plan: one band per survey run, floor and ceiling lines from LRUD and splays. Normally happens on its own with every draw, from the notebook's own survey model; this forces it from the drawing's own tags instead and prints what it could not show. |
 | Build Legend | `bl` | Generate the legend from the symbols the map actually uses (NSS names, UIS aliases). |
 
-Start a new map from `templates/NSS_Cave_Template_PLAN.dxf` (or
-`..._PROFILE.dxf`) -- the tools draw onto its layers and the title block and
-symbol blocks live there. Every `File > New` starts from the plan template
+Start a new map from `templates/NSS_Cave_Template_PLAN.dxf` -- the tools
+draw onto its layers and the title block and symbol blocks live there. One
+template covers both views: the extended elevation is drawn into the plan
+drawing, below the plan, on its own `PROFILE-` layers. Every `File > New` starts from the plan template
 unless the `CaveSurvey/TemplateOnNew` setting is explicitly false.
 
 The title block is **ordinary text** on the `TITLE-BLOCK` layer: double-click

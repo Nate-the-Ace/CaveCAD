@@ -34,15 +34,23 @@ Geo Anchor                                  geoanchor
 
 STARTING A MAP
 --------------
-Open templates/NSS_Cave_Template_PLAN.dxf (or ..._PROFILE.dxf) and save
-it under your own name. The tools draw onto its CTRL- layers:
+Open templates/NSS_Cave_Template_PLAN.dxf and save it under your own
+name. The tools draw onto its CTRL- layers:
 
     CTRL-SHOTS             centerline shot lines
     CTRL-STATIONS          station point symbols
     CTRL-STATION-LABELS    station names and elevations
     CTRL-LRUD              LRUD tick lines, and up/down text
+    CTRL-LRUD-WALL-LEFT    approximate wall either side of the passage,
+    CTRL-LRUD-WALL-RIGHT     from the LRUD ticks and the splays; dashed,
+                             because it is an approximation, not a wall
+                             you traced
 
-The templates are in feet, which is what the tools assume -- see below.
+The elevation is drawn into the same drawing, below the plan, on the
+PROFILE- and CTRL-PROFILE- layers -- there is no separate profile
+template.
+
+The template is in feet, which is what the tools assume -- see below.
 
 
 CONVENTIONS

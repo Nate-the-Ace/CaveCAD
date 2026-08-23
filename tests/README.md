@@ -29,9 +29,10 @@ a folder named after it, nothing loose sits beside `CaveSurvey.js`,
 two tools share a `(groupSortOrder, sortOrder)` pair, every `Core/` file is
 `Cs`-prefixed (QCAD's `include()` dedupes by basename -- an unprefixed file
 sharing a name with anything QCAD already loads at startup is skipped
-silently), every layer `Core/CsLayers.js` defines exists in the matching
-template, and both `NSS_Cave_Template_PLAN.dxf` and
-`NSS_Cave_Template_PROFILE.dxf` are present. These are the failures that
+silently), every layer `Core/CsLayers.js` defines exists in
+`NSS_Cave_Template_PLAN.dxf` -- with no exemptions, and including the
+profile frame, since the elevation is drawn into the plan drawing -- and
+that no standalone `NSS_Cave_Template_PROFILE.dxf` has come back. These are the failures that
 otherwise show up as a tool mysteriously absent from the menu, or a layer
 silently missing from a fresh drawing.
 
