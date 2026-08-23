@@ -1763,6 +1763,54 @@ git commit -m "feat(CsProfile): lay the bands out and report what did not fit"
 
 ---
 
+## Task 5b: Stop `CsTraverse.offset` laundering absent measurements into geometry
+
+**Goal:** A shot with a missing distance or inclination must not silently become a coordinate. Fix it once, upstream, where both plan view and the profile read it.
+
+**Why this is its own task, and why it comes before anything draws.** `CsTraverse.offset` computes `plan = shot.distance * Math.cos(incRad)`. In JavaScript `null * Math.cos(x)` is `0`, and `undefined * Math.cos(x)` is `NaN`. So a splay with no distance draws AT its station — a wall point asserting the wall is exactly here — and a splay with no inclination draws level. `undefined` is worse: NaN coordinates, which until now died quietly in pure math and from the next task onward would reach `RVector`, the DXF writer, and the drawing itself.
+
+This is the sibling of the elevation-datum trap: not a wrong number, a FABRICATED one, presented with the same confidence as a measurement. It is upstream of the profile, it affects `CsLrud.wallRuns` and `CsDraw`'s splay rays identically today, and the honest fix is one guard rather than eleven per-task ones. Found by the Task 4 review, which confirmed plan view launders it the same way.
+
+**Files:**
+- Modify: `scripts/CaveSurvey/Core/CsTraverse.js`
+- Modify: `scripts/CaveSurvey/Core/CsLrud.js` (skip, rather than place, an unmeasurable splay)
+- Modify: `tests/js_unit.js`
+
+**Acceptance Criteria:**
+- [ ] `CsTraverse.offset` returns null — not a coordinate — when `distance` or the effective inclination/azimuth is null, undefined, or not finite. A caller must be forced to notice
+- [ ] Every existing caller handles that null by SKIPPING the shot, and none of them substitutes a zero. Audit and fix each call site rather than assuming
+- [ ] `CsLrud.stationWallPoints` and `CsLrud.wallRuns` skip an unmeasurable splay instead of placing a wall point at the station — a wall point at the station asserts "the wall is here", which is a measurement nobody made
+- [ ] `CsProfile.bandWallRuns` likewise, including the flat-tick path: no tick from an absent inclination
+- [ ] `CsDraw.survey` does not draw a splay ray for an unmeasurable splay, and reports it
+- [ ] A shot with `distance: 0` is NOT affected: zero is a measurement (the wall is at the station, the station is on the wall) and must keep working exactly as it does now. This is the distinction the whole task turns on
+- [ ] The reports name what was skipped, so a surveyor sees the gap rather than a confident wrong line
+- [ ] No NaN can reach any coordinate: assert directly, in both plan and profile paths
+
+**Verify:** `./tests/run_all.sh` → `ALL TESTS PASSED`, with new named tests for each criterion and a mutation report
+
+**Steps:**
+
+- [ ] **Step 1: Audit every caller before changing anything.** `grep -rn "CsTraverse.offset\|reverseOffset" scripts/ tests/` and write down, per call site, what it does with the result today and what skipping would mean there. Report the list before editing — if any call site cannot tolerate a null, say so and stop.
+
+- [ ] **Step 2: Write the failing tests.** For `offset`: null/undefined/NaN distance and inclination each return null; `distance: 0` still returns a real zero-length offset; a normal shot is unchanged. For `CsLrud`: an unmeasurable splay contributes no wall point. For `CsProfile`: no wall point and no flat tick. Assert `isFinite` on every coordinate produced by a fixture containing a broken shot.
+
+- [ ] **Step 3: Guard `offset`.** Return null on unusable input, and record in the docblock exactly why zero is different from absent — `null * cos = 0` is the trap, in one line, so nobody re-introduces it.
+
+- [ ] **Step 4: Fix each call site** to skip and count rather than place. Keep the counts in the existing report shapes.
+
+- [ ] **Step 5: Run both engines and the full suite**, then mutation-test each new behaviour and report which test kills which mutation.
+
+- [ ] **Step 6: Commit**
+
+```bash
+git add scripts/CaveSurvey/Core/CsTraverse.js scripts/CaveSurvey/Core/CsLrud.js scripts/CaveSurvey/Core/CsProfile.js scripts/CaveSurvey/Core/CsDraw.js tests/js_unit.js
+git commit -m "fix(CsTraverse): an absent measurement is not a coordinate"
+```
+
+**A caution specific to this task.** It touches plan view, which is shipped and in use. Any change in what plan draws for a survey with complete data is a REGRESSION, not an improvement — the whole point is that nothing changes except that fabricated geometry stops appearing. Say explicitly in your report whether any existing test's expected values had to change, and if any did, why that was not a regression.
+
+---
+
 ## Task 6: Layers, the PROFILE template, and the structural tests
 
 **Goal:** Register the two generated-line layers, add them and the LRUD/splay layers to the PROFILE template, and make the structural tests pin profile layers to the profile template instead of failing on the plan one.
