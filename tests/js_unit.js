@@ -14113,6 +14113,211 @@ if (!IS_NODE) {
 }
 
 // ---------------------------------------------------------------------
+// CsLayerVariants -- on-demand layers derived from a registry layer
+// ---------------------------------------------------------------------
+(function() {
+    loadRepoScript("scripts/CaveSurvey/Core/CsLayers.js");
+    loadRepoScript("scripts/CaveSurvey/Core/CsLayerVariants.js");
+
+    // -- sanitize ---------------------------------------------------
+    eqs(CsLayerVariants.sanitize("a"), "A",
+        "CsLayerVariants.sanitize: upper-cased, so run a and run A are one layer");
+    eqs(CsLayerVariants.sanitize("A"), "A",
+        "CsLayerVariants.sanitize: already-upper passes through");
+    eqs(CsLayerVariants.sanitize("MAIN PASSAGE"), "MAIN_PASSAGE",
+        "CsLayerVariants.sanitize: spaces become underscores");
+    eqs(CsLayerVariants.sanitize("A/B*C"), "ABC",
+        "CsLayerVariants.sanitize: DXF-illegal characters are dropped");
+    eqs(CsLayerVariants.sanitize("A-B"), "A_B",
+        "CsLayerVariants.sanitize: the separator cannot survive inside a token");
+    ok(CsLayerVariants.sanitize("///") === null,
+        "CsLayerVariants.sanitize: nothing usable yields null, not an empty segment");
+    ok(CsLayerVariants.sanitize(null) === null,
+        "CsLayerVariants.sanitize: null is null, not a throw");
+
+    // -- nameFor ----------------------------------------------------
+    eqs(CsLayerVariants.nameFor(CsLayers.PROFILE_TRACED_CEILING, "A"),
+        "PROFILE-CEILING-A",
+        "CsLayerVariants.nameFor: the token goes last");
+    eqs(CsLayerVariants.nameFor(CsLayers.PROFILE_SHOTS, "B"),
+        "CTRL-PROFILE-SHOTS-B",
+        "CsLayerVariants.nameFor: a generated base keeps its CTRL- prefix");
+    ok(CsLayerVariants.nameFor("NOT-A-REGISTRY-LAYER", "A") === null,
+        "CsLayerVariants.nameFor: refuses a base with no appearance to inherit");
+    ok(CsLayerVariants.nameFor(CsLayers.PROFILE_TRACED_CEILING, "") === null,
+        "CsLayerVariants.nameFor: refuses an empty token");
+
+    // -- the frame and linework rules survive, which is why token-last
+    eqs(CsLayers.frameOf("PROFILE-CEILING-A"), "profile",
+        "variant: a profile variant is still in the profile frame");
+    eqs(CsLayers.frameOf("CTRL-PROFILE-SHOTS-B"), "profile",
+        "variant: a generated profile variant is still profile frame");
+    eqs(CsLayers.frameOf("WALLS-SURVEYED-A"), "plan",
+        "variant: a plan variant is still in the plan frame");
+
+    // -- split ------------------------------------------------------
+    var sp = CsLayerVariants.split("PROFILE-CEILING-A");
+    ok(sp !== null, "CsLayerVariants.split: reads a variant back");
+    eqs(sp.base, "PROFILE-CEILING", "CsLayerVariants.split: recovers the base");
+    eqs(sp.token, "A", "CsLayerVariants.split: recovers the token");
+
+    // The disambiguation this library turns on: PROFILE-WALLS-INFERRED
+    // splits cleanly into PROFILE-WALLS + INFERRED, and means something
+    // completely different. Only a remainder the registry defines counts.
+    ok(CsLayerVariants.split("PROFILE-WALLS-INFERRED") === null,
+        "CsLayerVariants.split: a REGISTRY layer is not mistaken for a variant");
+    ok(CsLayerVariants.split("WALLS-SURVEYED") === null,
+        "CsLayerVariants.split: nor is a plan registry layer");
+    ok(CsLayerVariants.split("NONSENSE-X") === null,
+        "CsLayerVariants.split: nor is a name with no registry base");
+    ok(CsLayerVariants.split("PROFILE-CEILING") === null,
+        "CsLayerVariants.split: the bare base is not its own variant");
+
+    var deep = CsLayerVariants.split("PROFILE-WALLS-INFERRED-A");
+    ok(deep !== null, "CsLayerVariants.split: a multi-word base still splits");
+    eqs(deep.base, "PROFILE-WALLS-INFERRED",
+        "CsLayerVariants.split: the whole multi-word base is recovered");
+    eqs(deep.token, "A", "CsLayerVariants.split: with its token");
+
+    // -- baseOf -----------------------------------------------------
+    eqs(CsLayerVariants.baseOf("PROFILE-CEILING-A"), "PROFILE-CEILING",
+        "CsLayerVariants.baseOf: a variant points at its base");
+    eqs(CsLayerVariants.baseOf("PROFILE-CEILING"), "PROFILE-CEILING",
+        "CsLayerVariants.baseOf: a registry layer is its own base");
+    ok(CsLayerVariants.baseOf("NONSENSE") === null,
+        "CsLayerVariants.baseOf: an unknown name has no base");
+
+    // -- round trip -------------------------------------------------
+    var bases = [CsLayers.PROFILE_TRACED_CEILING, CsLayers.PROFILE_TRACED_FLOOR,
+        CsLayers.PROFILE_WALLS_INFERRED, CsLayers.PROFILE_BREAKDOWN,
+        CsLayers.PROFILE_ENTRANCE, CsLayers.PROFILE_SHOTS,
+        CsLayers.WALLS_SURVEYED, CsLayers.BREAKDOWN_BOUNDARY];
+    for (var bi = 0; bi < bases.length; bi++) {
+        var nm = CsLayerVariants.nameFor(bases[bi], "G");
+        var back = CsLayerVariants.split(nm);
+        ok(back !== null && back.base === bases[bi] && back.token === "G",
+            "CsLayerVariants: " + bases[bi] + " round-trips through a variant");
+        eqs(CsLayers.frameOf(nm), CsLayers.frameOf(bases[bi]),
+            "CsLayerVariants: " + bases[bi] + " keeps its frame as a variant");
+    }
+
+    // -- comparators are TOTAL orders (this engine's sort is unstable)
+    eqs(CsLayerVariants.compareTokens("A", "A"), 0,
+        "CsLayerVariants.compareTokens: equal tokens compare 0");
+    ok(CsLayerVariants.compareTokens("A", "B") < 0,
+        "CsLayerVariants.compareTokens: orders ascending");
+    ok(CsLayerVariants.compareTokens("B", "A") > 0,
+        "CsLayerVariants.compareTokens: and is antisymmetric");
+}());
+
+// ---------------------------------------------------------------------
+// CsLayerVariants -- creation and queries (QCAD only: needs RDocument)
+// ---------------------------------------------------------------------
+if (!IS_NODE) {
+    (function() {
+        loadRepoScript("scripts/CaveSurvey/Core/CsLayers.js");
+        loadRepoScript("scripts/CaveSurvey/Core/CsLayerVariants.js");
+        loadRepoScript("scripts/CaveSurvey/Core/CsBind.js");
+
+        var doc = new RDocument(new RMemoryStorage(), new RSpatialIndexNavel());
+        var di = new RDocumentInterface(doc);
+
+        // -- created on demand, and NOT before -----------------------
+        ok(!doc.hasLayer("PROFILE-CEILING-A"),
+            "variant fixture: a fresh drawing has no variant layers");
+
+        var made = CsLayerVariants.ensure(doc, di,
+            CsLayers.PROFILE_TRACED_CEILING, "A");
+        eqs(made, "PROFILE-CEILING-A",
+            "CsLayerVariants.ensure: returns the name it made");
+        ok(doc.hasLayer("PROFILE-CEILING-A"),
+            "CsLayerVariants.ensure: the layer now exists");
+
+        // -- APPEARANCE IS INHERITED --------------------------------
+        // The whole point. Without the baseOf hook in CsLayers.ensure a
+        // variant silently takes the white/CONTINUOUS/Weight025 fallback
+        // and looks nothing like the layer it varies.
+        CsLayers.ensure(doc, di, CsLayers.PROFILE_TRACED_CEILING);
+        var baseLay = doc.queryLayer(CsLayers.PROFILE_TRACED_CEILING);
+        var varLay = doc.queryLayer("PROFILE-CEILING-A");
+        eqs(String(varLay.getColor().toString()),
+            String(baseLay.getColor().toString()),
+            "CsLayerVariants: a variant inherits its base's COLOUR");
+        eqs(varLay.getLineweight(), baseLay.getLineweight(),
+            "CsLayerVariants: a variant inherits its base's LINEWEIGHT");
+
+        // A dashed base proves it is really inherited and not a
+        // coincidence of two layers both being white.
+        var dashed = CsLayerVariants.ensure(doc, di,
+            CsLayers.PROFILE_WALLS_INFERRED, "A");
+        CsLayers.ensure(doc, di, CsLayers.PROFILE_WALLS_INFERRED);
+        eqs(doc.queryLayer(dashed).getLinetypeId(),
+            doc.queryLayer(CsLayers.PROFILE_WALLS_INFERRED).getLinetypeId(),
+            "CsLayerVariants: a variant inherits its base's LINETYPE");
+        ok(doc.queryLayer(dashed).getLineweight() !==
+                doc.queryLayer("PROFILE-CEILING-A").getLineweight(),
+            "CsLayerVariants: two variants of DIFFERENT bases differ, so it is really inherited");
+
+        // -- binding eligibility follows the base, for free ----------
+        ok(CsBind.isLineworkLayer("PROFILE-CEILING-A"),
+            "CsLayerVariants: a traced variant is still bindable linework");
+        ok(!CsBind.isLineworkLayer("CTRL-PROFILE-SHOTS-A"),
+            "CsLayerVariants: a generated variant is still refused by CsBind");
+
+        // -- refusals ------------------------------------------------
+        ok(CsLayerVariants.ensure(doc, di, "INVENTED-LAYER", "A") === null,
+            "CsLayerVariants.ensure: refuses a base the registry does not define");
+        ok(!doc.hasLayer("INVENTED-LAYER-A"),
+            "CsLayerVariants.ensure: and creates nothing when it refuses");
+
+        // -- queries -------------------------------------------------
+        CsLayerVariants.ensure(doc, di, CsLayers.PROFILE_TRACED_CEILING, "B");
+        CsLayerVariants.ensure(doc, di, CsLayers.PROFILE_TRACED_FLOOR, "A");
+        CsLayerVariants.ensure(doc, di, CsLayers.PROFILE_SHOTS, "A");
+
+        var toks = CsLayerVariants.tokensIn(doc, CsLayers.PROFILE_TRACED_CEILING);
+        eqs(toks.length, 2, "CsLayerVariants.tokensIn: finds both runs");
+        eqs(toks[0], "A", "CsLayerVariants.tokensIn: sorted, A first");
+        eqs(toks[1], "B", "CsLayerVariants.tokensIn: sorted, B second");
+        eqs(CsLayerVariants.tokensIn(doc, CsLayers.PROFILE_ENTRANCE).length, 0,
+            "CsLayerVariants.tokensIn: a base with no variants yields none");
+
+        // This is what makes token-last naming affordable: isolating one
+        // run is a query, not a hunt through a flat Layer list.
+        // Four: ceiling, floor, walls-inferred and the generated shots.
+        var forA = CsLayerVariants.layersForToken(doc, "A");
+        eqs(forA.length, 4, "CsLayerVariants.layersForToken: all of run A's layers");
+        eqs(forA[0], "CTRL-PROFILE-SHOTS-A",
+            "CsLayerVariants.layersForToken: sorted by name");
+        eqs(CsLayerVariants.layersForToken(doc, "a").length, 4,
+            "CsLayerVariants.layersForToken: the token is sanitised on the way in");
+
+        // -- COMPOSITE tokens, e.g. a run within a trip --------------
+        // No library change needed: sanitize turns an inner "-" into "_"
+        // precisely so a two-part token cannot break the split. Whether
+        // trip BELONGS in a layer name is a separate question -- see the
+        // plan -- but the mechanism is here.
+        var comp = CsLayerVariants.ensure(doc, di,
+            CsLayers.PROFILE_TRACED_CEILING, "B-4");
+        eqs(comp, "PROFILE-CEILING-B_4",
+            "CsLayerVariants: a composite token stays parseable");
+        var compBack = CsLayerVariants.split(comp);
+        eqs(compBack.base, "PROFILE-CEILING",
+            "CsLayerVariants: a composite variant still recovers its base");
+        eqs(compBack.token, "B_4",
+            "CsLayerVariants: and its whole composite token");
+        eqs(CsLayerVariants.layersForToken(doc, "B-4").length, 1,
+            "CsLayerVariants.layersForToken: finds a composite token");
+        eqs(CsLayerVariants.layersForToken(doc, "B").length, 1,
+            "CsLayerVariants.layersForToken: B and B_4 are DIFFERENT tokens, not nested");
+        eqs(CsLayerVariants.layersForToken(doc, "Z").length, 0,
+            "CsLayerVariants.layersForToken: an unused token yields none");
+        eqs(CsLayerVariants.layersForToken(doc, "///").length, 0,
+            "CsLayerVariants.layersForToken: an unusable token yields none, not a throw");
+    }());
+}
+
+// ---------------------------------------------------------------------
 // Report.
 // ---------------------------------------------------------------------
 

@@ -241,7 +241,22 @@ CsLayers.ensure = function(doc, di, name) {
     if (doc.hasLayer(name)) {
         return;
     }
-    var d = CsLayers.DEFAULTS[name] || ["white", "CONTINUOUS", "Weight025"];
+    // A VARIANT layer (PROFILE-CEILING-A) inherits its base layer's
+    // appearance. Without this it takes the fallback below and looks
+    // nothing like the layer it varies -- silently, which is how the
+    // un-registered PROFILE-CEILING got the wrong lineweight before.
+    // Guarded by typeof so CsLayers still loads standalone, which the
+    // one-shot template tools rely on.
+    var d = CsLayers.DEFAULTS[name];
+    if (isNull(d) && typeof CsLayerVariants !== "undefined") {
+        var base = CsLayerVariants.baseOf(name);
+        if (!isNull(base)) {
+            d = CsLayers.DEFAULTS[base];
+        }
+    }
+    if (isNull(d)) {
+        d = ["white", "CONTINUOUS", "Weight025"];
+    }
     var layer = new RLayer(doc, name, false, false,
         new RColor(d[0]), doc.getLinetypeId(d[1]),
         RLineweight[d[2]], CsLayers.OFF[name] === true);
