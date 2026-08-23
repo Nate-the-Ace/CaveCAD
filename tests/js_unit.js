@@ -8465,7 +8465,7 @@ if (!IS_NODE) {
     ok(h.parents["B"] === "A", "letter run B hangs off A");
     ok(h.ties["B"] === "A3", "B ties at the earlier of its two A contacts");
     ok(h.secondTies.length === 1 && h.secondTies[0].run === "B" &&
-        h.secondTies[0].station === "A4" && h.secondTies[0].otherRun === "A",
+        h.secondTies[0].otherStation === "A4" && h.secondTies[0].otherRun === "A",
         "B's second contact reported -- it arrives through the closure leg");
     // THE ORDINARY CASE, not an adversarial one: an everyday spur that
     // closes a loop back onto its own trunk. Phase 1 (new legs only)
@@ -8675,7 +8675,7 @@ if (!IS_NODE) {
 
     var a3ForB = 0;
     for (var sti = 0; sti < h.secondTies.length; sti++) {
-        if (h.secondTies[sti].run === "B" && h.secondTies[sti].station === "A3") {
+        if (h.secondTies[sti].run === "B" && h.secondTies[sti].otherStation === "A3") {
             a3ForB++;
         }
     }
@@ -8728,8 +8728,8 @@ if (!IS_NODE) {
     ok(!threw, "adjacency/hierarchy tolerate empty input instead of throwing");
     var h = CsProfile.hierarchy(CsProfile.groupRuns({}), {});
     ok(h.order.length === 0 && h.cycles.length === 0 &&
-        h.orphans.length === 0 && h.secondTies.length === 0 &&
-        h.mismatches.length === 0,
+        h.orphans.length === 0 && h.strandedRoots.length === 0 &&
+        h.secondTies.length === 0 && h.mismatches.length === 0,
         "hierarchy(groupRuns({}), {}) is the all-empty shape, not a throw");
 }());
 
@@ -8820,6 +8820,58 @@ if (!IS_NODE) {
     var h = CsProfile.hierarchy(CsProfile.groupRuns(r), r);
     eqs(h.orphans.join(","), "C",
         "only the truly disconnected run is an orphan -- not the root too");
+    eqs(h.strandedRoots.join(","), "",
+        "a genuinely disconnected component is never ALSO reported as " +
+        "stranded -- no leg of any kind reaches it, so raw connectivity " +
+        "cannot show it as part of the same cave");
+}());
+
+(function() {
+    // orphans vs strandedRoots -- the split this whole round of review
+    // is about. D places A6, a station of the eventual ROOT run's own
+    // component, via an ordinary "new" leg -- but that leg is
+    // ONE-DIRECTIONAL: only the later-placed side (A, via A6) can ever
+    // treat it as an attaching candidate, so D itself never gets any
+    // candidacy from it at all. A already has a competing candidate
+    // (the B2-A4 rejoin, from the familiar C2 cycle fixture) that wins
+    // and is then discarded by cycle-breaking, leaving A root -- and D,
+    // despite being raw-connected to A's own station A6, never
+    // attached to anything. D is PHYSICALLY part of the same cave (the
+    // union-find says so) but algorithmically stranded: the data needs
+    // no connecting shot, unlike a true orphan.
+    var sv = CsModel.newSurvey();
+    sv.shots = [
+        shotOf("A1", "A2", 10, 0, 0),
+        shotOf("A2", "A3", 10, 0, 0),
+        shotOf("A3", "B1", 10, 0, 0),
+        shotOf("B1", "B2", 10, 0, 0),
+        shotOf("B2", "A4", 10, 0, 0),
+        shotOf("A4", "A5", 10, 0, 0),
+        shotOf("D1", "A6", 8, 0, 0)
+    ];
+    sv.fixed["A1"] = { x: 0, y: 0, z: 0 };
+    sv.fixed["D1"] = { x: 500, y: 500, z: 0 };
+    var r = CsNetwork.resolve(sv, {});
+    var h = CsProfile.hierarchy(CsProfile.groupRuns(r), r);
+
+    ok(h.parents["A"] === null, "A is the primary root (elected by the cycle break)");
+    eqs(h.strandedRoots.join(","), "D",
+        "a second root inside one connected component appears in " +
+        "strandedRoots, not orphans");
+    ok(h.orphans.indexOf("D") < 0, "...and specifically NOT in orphans");
+    ok(h.orphans.indexOf("A") < 0 && h.strandedRoots.indexOf("A") < 0,
+        "the primary root itself appears in NEITHER field");
+
+    // the invariant the whole split rests on: no run is EVER in both
+    var union = h.orphans.concat(h.strandedRoots);
+    var seenBoth = {}, overlap = false;
+    for (var oi = 0; oi < union.length; oi++) {
+        if (seenBoth.hasOwnProperty(union[oi])) {
+            overlap = true;
+        }
+        seenBoth[union[oi]] = true;
+    }
+    ok(!overlap, "orphans and strandedRoots never share a member");
 }());
 
 (function() {
@@ -8948,7 +9000,7 @@ if (!IS_NODE) {
 
     var a3ForB = 0;
     for (var sti = 0; sti < h.secondTies.length; sti++) {
-        if (h.secondTies[sti].run === "B" && h.secondTies[sti].station === "A3") {
+        if (h.secondTies[sti].run === "B" && h.secondTies[sti].otherStation === "A3") {
             a3ForB++;
         }
     }
@@ -8988,7 +9040,7 @@ if (!IS_NODE) {
         "the smaller leg index (A3-D1) wins D's primary tie");
     var demoted = false;
     for (var sti = 0; sti < h.secondTies.length; sti++) {
-        if (h.secondTies[sti].run === "D" && h.secondTies[sti].station === "E2" &&
+        if (h.secondTies[sti].run === "D" && h.secondTies[sti].otherStation === "E2" &&
                 h.secondTies[sti].otherRun === "E") {
             demoted = true;
         }
@@ -9046,7 +9098,7 @@ if (!IS_NODE) {
 
     var found = false;
     for (var sti = 0; sti < h.secondTies.length; sti++) {
-        if (h.secondTies[sti].run === "A" && h.secondTies[sti].station === "B2" &&
+        if (h.secondTies[sti].run === "A" && h.secondTies[sti].otherStation === "B2" &&
                 h.secondTies[sti].otherRun === "B") {
             found = true;
         }

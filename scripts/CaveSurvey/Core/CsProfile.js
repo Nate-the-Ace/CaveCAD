@@ -320,21 +320,37 @@ CsProfile.adjacency = function(resolved) {
  * \param resolved CsNetwork.resolve() result
  * \return {
  *   parents:    {runKey: parentRunKey | null},
- *   ties:       {runKey: stationName | null},
+ *   ties:       {runKey: stationName | null} the station on the
+ *               PARENT run's side of the tie -- NOT a station of
+ *               runKey's own. "B's tie is A3" means B connects to A at
+ *               A3, a station belonging to A, not to B,
  *   order:      [runKey] depth first, siblings by junction distance,
- *   secondTies: [{run, station, otherRun}] further contacts -- otherRun
- *               is simply the run TOUCHED at that second station, not
- *               necessarily this run's parent (the parent can lie in a
- *               third run while a second contact lands in yet another),
+ *   secondTies: [{run, otherStation, otherRun}] further contacts run
+ *               has beyond its own primary tie. otherStation and
+ *               otherRun both describe the OTHER end -- the run
+ *               actually touched, which is not necessarily run's
+ *               parent (the parent can lie in a third run while a
+ *               second contact lands in yet another),
  *   mismatches: [{run, expected, actual}] name vs graph; actual is null
  *               when the graph found no contact at all,
- *   orphans:    [runKey] every parentless run OTHER THAN the primary
- *               root (found by walking up from grouped.order[0]) --
- *               this covers a genuinely disconnected component, but
- *               ALSO a second parentless run that phase 2 could not
- *               merge into the primary tree despite being part of the
- *               same physically connected cave (a "second root"); the
- *               two are not currently told apart here,
+ *   orphans:    [runKey] runs PHYSICALLY DISCONNECTED from the primary
+ *               root -- no leg of any kind, walked or not, reaches
+ *               the root's own component (decided by a raw union-find
+ *               over every leg in resolved.legs, independent of the
+ *               kind-ranked parent forest above). THIS IS THE ONLY
+ *               FIELD THAT TELLS A SURVEYOR TO GO SHOOT A CONNECTING
+ *               LEG -- everything else in this run's data may be fine,
+ *               but nothing ties it to the rest of the cave at all,
+ *   strandedRoots: [runKey] parentless runs OTHER than the primary
+ *               root that raw connectivity shows ARE part of the same
+ *               physical cave -- phase 2's kind-ranked, descendant-
+ *               avoiding search simply never found a way to attach
+ *               them as anyone's child. THIS ASKS NOTHING OF A
+ *               SURVEYOR: the data is fine and nothing needs shooting;
+ *               it is purely a report of how this run ended up as its
+ *               own band-tree root. A run in `orphans` is never ALSO
+ *               here, and vice versa -- the two fields never share a
+ *               member, by construction,
  *   cycles:     [[runKey, ...]] any loop found among phase-1 ("new"-leg)
  *               parents and broken -- see the phase-1 cycle-breaking
  *               pass below. Empty for an ordinary closure/tie loop,
@@ -354,11 +370,11 @@ CsProfile.hierarchy = function(grouped, resolved) {
         // pipeline (groupRuns) already tolerates that, and the next two
         // stages should not be the ones that crash on it.
         return { parents: {}, ties: {}, order: [], secondTies: [],
-            mismatches: [], orphans: [], cycles: [] };
+            mismatches: [], orphans: [], strandedRoots: [], cycles: [] };
     }
 
     var parents = {}, ties = {}, secondTies = [], mismatches = [];
-    var orphans = [];
+    var orphans = [], strandedRoots = [];
     var runOf = {};
     var i, k;
 
@@ -506,7 +522,7 @@ CsProfile.hierarchy = function(grouped, resolved) {
                 seen1[st0] = true;
                 secondTies.push({
                     run: p1Key,
-                    station: st0,
+                    otherStation: st0,
                     otherRun: p1r0[k].otherRun
                 });
             }
@@ -561,7 +577,7 @@ CsProfile.hierarchy = function(grouped, resolved) {
             var already = false;
             for (var si = 0; si < cycleDemotions.length; si++) {
                 if (cycleDemotions[si].run === electedRoot &&
-                        cycleDemotions[si].station === discardedTie) {
+                        cycleDemotions[si].otherStation === discardedTie) {
                     already = true;
                     break;
                 }
@@ -569,7 +585,7 @@ CsProfile.hierarchy = function(grouped, resolved) {
             if (!already) {
                 cycleDemotions.push({
                     run: electedRoot,
-                    station: discardedTie,
+                    otherStation: discardedTie,
                     otherRun: discardedParent
                 });
             }
@@ -676,7 +692,7 @@ CsProfile.hierarchy = function(grouped, resolved) {
                 seen2[stHas] = true;
                 secondTies.push({
                     run: p2Key,
-                    station: stHas,
+                    otherStation: stHas,
                     otherRun: p2r1[k].otherRun
                 });
             }
@@ -709,7 +725,7 @@ CsProfile.hierarchy = function(grouped, resolved) {
                 seen2[stFill] = true;
                 secondTies.push({
                     run: p2Key,
-                    station: stFill,
+                    otherStation: stFill,
                     otherRun: extras[k].otherRun
                 });
             }
@@ -765,14 +781,85 @@ CsProfile.hierarchy = function(grouped, resolved) {
         }
     }
 
+    // ---- raw physical connectivity: a plain union-find over EVERY --
+    // leg in resolved.legs, regardless of kind. Deliberately
+    // independent of the kind-ranked parent forest above: THIS
+    // question is "does any leg, walked or not, connect these two
+    // stations" -- what a surveyor means by "is this passage part of
+    // the same cave" -- not "did phase 1/2's band-tree search manage
+    // to attach it as someone's child". Built ONCE, over the legs, not
+    // per run: O(legs) to build (with path compression/union-by-
+    // attach, amortized near-constant per union), then an O(1)-ish
+    // lookup per station afterward. A run that phase 2 could not
+    // attach (a "second root") can still show up here as physically
+    // connected -- that is exactly the distinction orphans vs
+    // strandedRoots exists to make.
+    var ufParent = {};
+    var ufFind = function(x) {
+        var root = x;
+        while (ufParent.hasOwnProperty(root) && ufParent[root] !== root) {
+            root = ufParent[root];
+        }
+        while (ufParent.hasOwnProperty(x) && ufParent[x] !== root) {
+            var next = ufParent[x];
+            ufParent[x] = root;
+            x = next;
+        }
+        return root;
+    };
+    var ufUnion = function(a, b) {
+        if (!ufParent.hasOwnProperty(a)) {
+            ufParent[a] = a;
+        }
+        if (!ufParent.hasOwnProperty(b)) {
+            ufParent[b] = b;
+        }
+        var ra = ufFind(a), rb = ufFind(b);
+        if (ra !== rb) {
+            ufParent[ra] = rb;
+        }
+    };
+    for (i = 0; i < resolved.legs.length; i++) {
+        ufUnion(resolved.legs[i].from, resolved.legs[i].to);
+    }
+
+    // The set of raw-connectivity roots reachable from the PRIMARY
+    // root's own stations -- computed once, so "is runKey physically
+    // connected to the primary root" is a plain lookup per station,
+    // not a fresh graph walk per run.
+    var primaryRootUF = {};
+    if (primaryRoot !== undefined && grouped.runs.hasOwnProperty(primaryRoot)) {
+        var prStations = grouped.runs[primaryRoot].stations;
+        for (k = 0; k < prStations.length; k++) {
+            primaryRootUF[ufFind(prStations[k])] = true;
+        }
+    }
+    var isPhysicallyConnectedToPrimary = function(runKey) {
+        var stationsOfRun = grouped.runs[runKey].stations;
+        for (var si = 0; si < stationsOfRun.length; si++) {
+            if (primaryRootUF.hasOwnProperty(ufFind(stationsOfRun[si]))) {
+                return true;
+            }
+        }
+        return false;
+    };
+
     for (i = 0; i < grouped.order.length; i++) {
         var fKey = grouped.order[i];
         if (parents[fKey] === null && fKey !== primaryRoot) {
-            // a genuinely disconnected component, OR a second
-            // parentless run phase 2 could not merge into the primary
-            // tree despite being part of the same connected cave --
-            // see the docblock above and the M-7 note in the review
-            orphans.push(fKey);
+            // Two different questions, two different fields, because
+            // they demand two different actions from a surveyor.
+            // orphans: no leg of any kind reaches the primary root's
+            // component -- go shoot a connecting leg. strandedRoots:
+            // raw connectivity says this run IS part of the same cave
+            // -- the data is fine, phase 2's descendant-avoiding
+            // search simply never found a way to attach it as anyone's
+            // child. Never both: this branch chooses exactly one.
+            if (isPhysicallyConnectedToPrimary(fKey)) {
+                strandedRoots.push(fKey);
+            } else {
+                orphans.push(fKey);
+            }
         }
 
         // Reachable regardless of whether a contact was found: a named
@@ -796,6 +883,7 @@ CsProfile.hierarchy = function(grouped, resolved) {
         secondTies: secondTies,
         mismatches: mismatches,
         orphans: orphans,
+        strandedRoots: strandedRoots,
         cycles: cycles
     };
 };
