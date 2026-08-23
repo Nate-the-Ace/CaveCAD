@@ -96,6 +96,7 @@ var CORE_FILES = [
     "scripts/CaveSurvey/Core/CsAdjust.js",
     "scripts/CaveSurvey/Core/CsLrud.js",
     "scripts/CaveSurvey/Core/CsProfile.js",
+    "scripts/CaveSurvey/Core/CsProfileFile.js",
     "scripts/CaveSurvey/Core/CsValidate.js",
     "scripts/CaveSurvey/Core/CsStats.js",
     "scripts/CaveSurvey/Core/CsGrade.js",
@@ -11055,6 +11056,75 @@ if (!IS_NODE) {
     } finally {
         CsProfile.hierarchy = saved;
     }
+}());
+
+// ---------------------------------------------------------------------
+// CsProfileFile -- the sibling document. Only the pure half (siblingPath)
+// is exercised here; the tab lookup and off-screen document machinery
+// are QCAD context only and are covered by
+// tests/profile_file_roundtrip.js instead.
+// ---------------------------------------------------------------------
+
+(function() {
+    ok(CsProfileFile.siblingPath("/x/Cave.dxf") === "/x/Cave-PROFILE.dxf",
+        "sibling path beside the plan");
+    ok(CsProfileFile.siblingPath("/x/y/Big Cave.dxf") ===
+        "/x/y/Big Cave-PROFILE.dxf", "spaces in the name survive");
+    ok(CsProfileFile.siblingPath("/x/Cave-PROFILE.dxf") ===
+        "/x/Cave-PROFILE.dxf", "the profile file is its own sibling");
+    ok(CsProfileFile.siblingPath("") === null, "unsaved drawing has no sibling");
+    ok(CsProfileFile.siblingPath(null) === null, "null path has no sibling");
+}());
+
+(function() {
+    // This install can only ever WRITE dxf (RDxfExporterFactory is the
+    // only exporter registered anywhere in the fork -- see
+    // CsProfileFile.dxfFilter's docblock). So the profile sibling must
+    // always be named .dxf, even if the plan itself somehow carries a
+    // different -- or no -- extension: a "Cave.dwg" plan cannot get a
+    // "Cave-PROFILE.dwg" sibling, because nothing in this build can
+    // write that file back out again.
+    ok(CsProfileFile.siblingPath("/x/Cave.dwg") === "/x/Cave-PROFILE.dxf",
+        "profile sibling is forced to .dxf regardless of the plan's own extension");
+    ok(CsProfileFile.siblingPath("/x/Cave") === "/x/Cave-PROFILE.dxf",
+        "an extensionless plan path still gets a .dxf sibling");
+    ok(CsProfileFile.siblingPath("C:\\Surveys\\Cave.dxf") ===
+        "C:\\Surveys\\Cave-PROFILE.dxf",
+        "backslash path separators (Windows) are recognised too");
+    // A DOT IN A DIRECTORY NAME, with no real extension on the file
+    // itself, is the case that actually distinguishes "backslash
+    // counts as a separator" from "only forward slash does": the last
+    // "." in "C:\J.Doe\Cave" belongs to the directory "J.Doe", not to
+    // "Cave". Getting this wrong truncates the path at the directory's
+    // dot instead of at the (absent) file extension.
+    ok(CsProfileFile.siblingPath("C:\\J.Doe\\Cave") ===
+        "C:\\J.Doe\\Cave-PROFILE.dxf",
+        "a dot in a Windows DIRECTORY name is not mistaken for an extension");
+}());
+
+(function() {
+    // dxfFilter needs RFileExporterRegistry, which exists in CaveCAD's
+    // engine even with no GUI (it is a core registry, not a GUI one) --
+    // so only node, which has neither, is guaranteed to see it degrade
+    // to "". Under CaveCAD this returns the real dxflib filter, proven
+    // by tests/profile_file_roundtrip.js.
+    if (IS_NODE) {
+        ok(CsProfileFile.dxfFilter() === "",
+            "no exporter registry under node -- dxfFilter degrades to \"\"");
+    } else {
+        ok(CsProfileFile.dxfFilter().indexOf("dxflib") >= 0,
+            "CaveCAD's engine does have the exporter registry, headless or not");
+    }
+
+    // openTabFor needs an MDI area, which -no-gui genuinely has none of
+    // in EITHER engine -- so this one degrades to null everywhere this
+    // suite runs.
+    ok(CsProfileFile.openTabFor("/x/Cave-PROFILE.dxf") === null,
+        "no MDI area in a headless run -- openTabFor degrades to null");
+    ok(CsProfileFile.openTabFor(null) === null,
+        "openTabFor(null) is null without even trying the bridge");
+    ok(CsProfileFile.openTabFor("") === null,
+        "openTabFor(\"\") is null without even trying the bridge");
 }());
 
 // ---------------------------------------------------------------------

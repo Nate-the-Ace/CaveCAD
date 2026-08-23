@@ -32,7 +32,7 @@ PY="python3"
 status=0
 
 echo "=============================================================="
-echo " 1/3  Structural tests (add-on layout, includes, layers)"
+echo " 1/4  Structural tests (add-on layout, includes, layers)"
 echo "=============================================================="
 "$PY" -m unittest discover -s tests -v || status=1
 
@@ -40,7 +40,7 @@ QCAD="/Applications/CaveCAD.app/Contents/MacOS/CaveCAD"
 
 echo
 echo "=============================================================="
-echo " 2/3  Add-on syntax check (inside CaveCAD's own script engine)"
+echo " 2/4  Add-on syntax check (inside CaveCAD's own script engine)"
 echo "=============================================================="
 if [ -e "$QCAD" ]; then
     output=$("$QCAD" -no-dock-icon -no-gui -allow-multiple-instances \
@@ -56,7 +56,7 @@ fi
 
 echo
 echo "=============================================================="
-echo " 3/3  Core unit tests (inside CaveCAD's own script engine)"
+echo " 3/4  Core unit tests (inside CaveCAD's own script engine)"
 echo "=============================================================="
 if [ -e "$QCAD" ]; then
     output=$("$QCAD" -no-dock-icon -no-gui -allow-multiple-instances \
@@ -73,6 +73,24 @@ else
     else
         echo "SKIP: neither CaveCAD nor node available."
     fi
+fi
+
+echo
+echo "=============================================================="
+echo " 4/4  Profile file round trip (inside CaveCAD's own script engine)"
+echo "=============================================================="
+if [ -e "$QCAD" ]; then
+    output=$("$QCAD" -no-dock-icon -no-gui -allow-multiple-instances \
+                 -autostart tests/profile_file_roundtrip.js "$PWD" 2>/dev/null)
+    echo "$output"
+    case "$output" in
+        *"### PROFILE FILE OK"*) ;;
+        *) echo "Profile file round trip did not pass."; status=1 ;;
+    esac
+else
+    echo "SKIP: CaveCAD not found -- the round trip needs the real engine" \
+         "(RDocument, RDocumentInterface, real file I/O) and cannot run" \
+         "under node."
 fi
 
 echo
