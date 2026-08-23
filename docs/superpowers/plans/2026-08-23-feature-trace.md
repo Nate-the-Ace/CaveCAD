@@ -1905,6 +1905,28 @@ git commit -m "docs: Feature Trace in the tool table"
 
 **Verify:** trace on a band, regenerate the elevation, and assert the traced curve is still present, unmoved relative to its band, and still bound to the same station.
 
+### Design question raised by the user: per-run profile layers?
+
+> "would it be helpful to further segregate the profiles by run name? A survey's profile gets A added to the layers generated. Survey G gets G added to the layer names and so forth. it worked well enough to segregate the linework from the plan view, surely we can get more detailed and use it to define profile views as well."
+
+**The goal is right; layers are the expensive way to get it.** Plan-vs-profile worked because it is a CLOSED set of two: enumerable in the template, pinned by `test_registry_layers_exist_in_plan_template`. Survey runs are an OPEN set, unbounded and unknown when the template is built.
+
+Costs, all concrete:
+- **This project already tried on-demand layers and reversed it.** That test's own docstring: the wall run layers "used to be exempted here as 'created on demand', and they were indeed created on demand -- which meant a fresh drawing's Layer list did not offer them until the first draw put walls on them."
+- **Layer count.** ~7 traceable profile layers plus CTRL- twins is ~14 per run. Forty runs is ~560 layers, and an unusable Layer List is exactly what this would be trying to fix.
+- **`CsLayers.DEFAULTS[name]` is an exact-key lookup**, so every `PROFILE-A-CEILING` silently takes the `["white","CONTINUOUS","Weight025"]` fallback -- the same wrong-lineweight trap that already bit `PROFILE-CEILING`.
+- The registry-to-template test would have to be weakened from "every registry layer is in the template" to something looser.
+
+**What is already built and does most of the job.** `CsProfileDraw` tags every band entity `ProfileRun = band.key`. Per-run ownership -- regenerate only run G, erase only run G, know which run a traced ceiling belongs to -- needs no new layers, and it is precisely the half this task is about.
+
+**What tags cannot do:** drive the stock Layer List, i.e. switch run G's band off to see past it. That is the only real argument for layers, and it is a smaller feature ("Isolate Run") than a namespace restructure.
+
+**Recommendation:** keep the fixed profile vocabulary, build ownership on `ProfileRun`, and treat per-run visibility as its own feature.
+
+**The number that decides it:** how many survey runs a typical cave has. At ~10-15, per-run profile layers are viable and worth scoping properly -- with appearance resolved by PATTERN from the un-suffixed base layer, so the DEFAULTS trap is closed by construction rather than by discipline. At 50+, tags plus an isolate command wins outright.
+
+**Check before either path:** is `band.key` legal in a DXF layer name? It contains a `CsProfile.PAIR_SEP`, and any sanitising has to round-trip back to the run it names. (`frameOf` is fine either way -- `PROFILE-A-CEILING` still starts with `PROFILE-`.)
+
 ## Deferred decisions
 
 Two things the spec's §12 leaves out on purpose, recorded here so a later reader does not mistake them for oversights:
