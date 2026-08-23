@@ -276,16 +276,31 @@ class TestLayerVocabulary(unittest.TestCase):
         match = re.search(r"2\nLAYER\n(.*?)\n  0\nENDTAB", content, re.S)
         return set(re.findall(r"^  2\n(.+)$", match.group(1), re.M))
 
+    # Profile-only layers belong to the PROFILE template, and the wall
+    # run layers are created on demand -- neither is a plan-template
+    # omission. Everything else the registry names must be there.
+    PROFILE_ONLY = {"CTRL-PROFILE-FLOOR", "CTRL-PROFILE-CEILING"}
+    CREATED_ON_DEMAND = {"CTRL-LRUD-WALL-LEFT", "CTRL-LRUD-WALL-RIGHT"}
+
     def test_registry_layers_exist_in_plan_template(self):
         registry = self.layer_registry()
         plan = self.template_layers("NSS_Cave_Template_PLAN.dxf")
-        # Wall-run layers are created by LRUDWalls on demand; everything
-        # else the registry names must be in the plan template.
-        created_on_demand = {"CTRL-LRUD-WALL-LEFT", "CTRL-LRUD-WALL-RIGHT"}
-        missing = registry - plan - created_on_demand
+        missing = registry - plan - self.CREATED_ON_DEMAND - self.PROFILE_ONLY
         self.assertEqual(missing, set(),
-                         "layers in Core/Layers.js but not the plan "
+                         "layers in Core/CsLayers.js but not the plan "
                          "template: %s" % sorted(missing))
+
+    def test_profile_layers_exist_in_profile_template(self):
+        """The elevation generator draws to these; a template without
+        them means the layers get invented at runtime with whatever
+        defaults, which is exactly the drift this class exists to stop.
+        """
+        profile = self.template_layers("NSS_Cave_Template_PROFILE.dxf")
+        needed = self.PROFILE_ONLY | {"CTRL-LRUD", "CTRL-SPLAYS"}
+        missing = needed - profile
+        self.assertEqual(missing, set(),
+                         "layers the profile generator draws to but the "
+                         "PROFILE template lacks: %s" % sorted(missing))
 
 
 class TestReadmeToolTable(unittest.TestCase):

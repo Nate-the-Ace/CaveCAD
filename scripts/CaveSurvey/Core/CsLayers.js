@@ -23,6 +23,8 @@ CsLayers.HIDDEN = "CTRL-HIDDEN";
 CsLayers.RAW = "CTRL-RAW";
 CsLayers.LRUD_WALL_LEFT = "CTRL-LRUD-WALL-LEFT";
 CsLayers.LRUD_WALL_RIGHT = "CTRL-LRUD-WALL-RIGHT";
+CsLayers.PROFILE_FLOOR = "CTRL-PROFILE-FLOOR";
+CsLayers.PROFILE_CEILING = "CTRL-PROFILE-CEILING";
 CsLayers.GRID = "CTRL-GRID";
 CsLayers.AERIAL = "CTRL-AERIAL";
 
@@ -56,6 +58,8 @@ CsLayers.DEFAULTS = {
     "CTRL-RAW": ["gray", "DASHED", "Weight000"],
     "CTRL-LRUD-WALL-LEFT": ["gray", "DASHED", "Weight000"],
     "CTRL-LRUD-WALL-RIGHT": ["gray", "DASHED", "Weight000"],
+    "CTRL-PROFILE-FLOOR": ["gray", "DASHED", "Weight000"],
+    "CTRL-PROFILE-CEILING": ["gray", "DASHED", "Weight000"],
     "CTRL-AERIAL": ["gray", "CONTINUOUS", "Weight000"],
     "WALLS-SURVEYED": ["white", "CONTINUOUS", "Weight050"],
     "WALLS-INFERRED": ["gray", "DASHED", "Weight025"],
