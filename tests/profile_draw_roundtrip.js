@@ -69,7 +69,8 @@ function loadRepoScript(rel) {
 
 var CORE = ["CsUnits", "CsCave", "CsGeoProject", "CsAngles", "CsIgrfCoeffs",
     "CsGeomag", "CsModel", "CsTraverse", "CsNetwork", "CsAdjust", "CsLrud",
-    "CsValidate", "CsStats", "CsGrade", "CsTags", "CsLayers", "CsDraw",
+    "CsValidate", "CsStats", "CsGrade", "CsTags", "CsStore", "CsLayers",
+    "CsDraw",
     "CsProfile", "CsProfileDraw",
     // CsRevise before CsBind -- CsBind's layer gate consults
     // CsRevise.isWorldFixedLayer when it is loaded.
@@ -2054,6 +2055,126 @@ var ABANDONED_TRACING_WARNING =
         "and a plan-frame line still binds only to the plan stations");
 
     destr(iF);
+}());
+
+// =======================================================================
+// THE REBUILD AND THE ERASE BOTH IGNORE THE PROFILE FRAME.
+//
+// Neither needed a production change, and that is exactly why both are
+// pinned here. RebuildSurveyData recovers stations by the "Station"
+// tag; CsDraw.eraseStations kills by "Station"/"LRUDName"/"SplayName".
+// Profile geometry carries the Profile* namespace on profile-frame
+// layers, so both walk past it -- for free, by naming, not by code. A
+// later change that converged either namespace would break both
+// silently. These assertions are the alarm.
+// =======================================================================
+
+/** How many entities in doc sit on a profile-frame layer. */
+function countProfileFrameEntities(doc) {
+    var ids = doc.queryAllEntities(false, false);
+    var n = 0, i, e;
+    for (i = 0; i < ids.length; i++) {
+        e = doc.queryEntity(ids[i]);
+        if (isNull(e)) { continue; }
+        if (CsLayers.frameOf(doc.getLayerName(e.getLayerId())) === "profile") {
+            n++;
+        }
+    }
+    return n;
+}
+
+/**
+ * Draws a plan survey the way CsDraw.survey does -- station points and
+ * labels tagged Station/StationLabel with Seq, legs tagged Shot -- but
+ * without CsDraw.survey itself, which reads the ACTIVE document through
+ * getDocument()/getDocumentInterface() and so cannot run headless.
+ * Only the tags the rebuild actually reads are written.
+ */
+function drawPlanSurvey(doc, di, resolved, names) {
+    var op = new RAddObjectsOperation();
+    CsLayers.ensure(doc, di, CsLayers.STATIONS);
+    CsLayers.ensure(doc, di, CsLayers.STATION_LABELS);
+    CsLayers.ensure(doc, di, CsLayers.SHOTS);
+    var i, st, pt, label, prev = null;
+    for (i = 0; i < names.length; i++) {
+        st = resolved.stations[names[i]];
+        pt = CsDraw.addPoint(doc, op, CsLayers.STATIONS,
+            new RVector(st.x, st.y));
+        CsTags.set(pt, "Station", names[i]);
+        CsTags.set(pt, "Seq", i);
+        op.addObject(pt, false);
+        label = CsDraw.addText(doc, op, CsLayers.STATION_LABELS, names[i],
+            new RVector(st.x + 1, st.y + 1));
+        CsTags.set(label, "StationLabel", names[i]);
+        op.addObject(label, false);
+        if (prev !== null) {
+            CsDraw.addLine(doc, op, CsLayers.SHOTS,
+                new RVector(prev.x, prev.y), new RVector(st.x, st.y),
+                "Shot", names[i - 1] + "->" + names[i]);
+        }
+        prev = st;
+    }
+    di.applyOperation(op);
+}
+
+(function() {
+    var svR = CsModel.newSurvey();
+    svR.shots = [
+        shotOf("A1", "A2", 10, 0, 0, 4, 2),
+        shotOf("A2", "A3", 10, 90, -10, 4, 2)
+    ];
+    var resR = CsNetwork.resolve(svR, {});
+    var namesR = ["A1", "A2", "A3"];
+
+    // two documents, identical but for the drawn elevation
+    var dPlan = new RDocument(new RMemoryStorage(), createSpatialIndex());
+    var iPlan = new RDocumentInterface(dPlan);
+    drawPlanSurvey(dPlan, iPlan, resR, namesR);
+
+    var dBoth = new RDocument(new RMemoryStorage(), createSpatialIndex());
+    var iBoth = new RDocumentInterface(dBoth);
+    drawPlanSurvey(dBoth, iBoth, resR, namesR);
+    CsProfileDraw.render(dBoth, iBoth, CsProfile.build(svR, resR, {}), {});
+    ok(countProfileFrameEntities(dBoth) > 0,
+        "sanity: the elevation really was drawn into the second drawing");
+
+    var planOnly = CsTags.surveyFromDocument(dPlan);
+    var withProfile = CsTags.surveyFromDocument(dBoth);
+
+    eqs(String(withProfile.shots.length), String(planOnly.shots.length),
+        "a drawn elevation adds NO shots to what the rebuild recovers");
+    eqs(CsModel.stationNames(withProfile).join(","),
+        CsModel.stationNames(planOnly).join(","),
+        "and no stations -- the elevation's own labels carry the SAME " +
+        "station names at entirely different coordinates, which is the " +
+        "trap");
+
+    // erasing a PLAN station leaves the elevation alone
+    // CsDraw.eraseStations reaches for the ACTIVE document's interface
+    // through QCAD's global getDocumentInterface() to apply its delete.
+    // Headless there is no active document, so this stands one in --
+    // the same shim the tool would find in the application, pointed at
+    // the fixture. Restored after, so nothing later in this file sees a
+    // stale interface.
+    var hadGDI = (typeof getDocumentInterface === "undefined") ?
+        null : getDocumentInterface;
+    getDocumentInterface = function() { return iBoth; };
+
+    var beforeProfile = countProfileFrameEntities(dBoth);
+    var removed = CsDraw.eraseStations(dBoth, ["A2"]);
+    eqs(String(removed > 0), "true",
+        "the plan station's own geometry was removed (" + removed + ")");
+    eqs(String(countProfileFrameEntities(dBoth)), String(beforeProfile),
+        "EVERY profile-frame entity survived erasing a PLAN station");
+
+    if (hadGDI === null) {
+        getDocumentInterface = undefined;
+    } else {
+        getDocumentInterface = hadGDI;
+    }
+
+    destr(iPlan);
+    destr(iBoth);
 }());
 
 // =======================================================================
