@@ -637,7 +637,7 @@ class TestAddProfileLayersToolIdempotence(unittest.TestCase):
 
             self.assertIn(
                 "FAIL  cannot write " + target, output.splitlines(),
-                "exportFile failure on a read-only directory did not "
+                "exportFile failure on a read-only FILE did not "
                 "produce the exact expected FAIL line -- got: %r" %
                 output)
             self.assertIn("### ADD PROFILE LAYERS FAIL",
