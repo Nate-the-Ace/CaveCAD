@@ -53,6 +53,8 @@ include(includeBasePath + "/CsTags.js");
 include(includeBasePath + "/CsBind.js");
 include(includeBasePath + "/CsDraw.js");
 include(includeBasePath + "/CsRevise.js");
+// After both CsBind and CsRevise: CsProfileBind calls into each.
+include(includeBasePath + "/CsProfileBind.js");
 include(includeBasePath + "/CsPick.js");
 include(includeBasePath + "/CsLocationPick.js");
 include(includeBasePath + "/CsSymbols.js");

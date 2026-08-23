@@ -70,7 +70,10 @@ function loadRepoScript(rel) {
 var CORE = ["CsUnits", "CsCave", "CsGeoProject", "CsAngles", "CsIgrfCoeffs",
     "CsGeomag", "CsModel", "CsTraverse", "CsNetwork", "CsAdjust", "CsLrud",
     "CsValidate", "CsStats", "CsGrade", "CsTags", "CsLayers", "CsDraw",
-    "CsProfile", "CsProfileDraw"];
+    "CsProfile", "CsProfileDraw",
+    // CsRevise before CsBind -- CsBind's layer gate consults
+    // CsRevise.isWorldFixedLayer when it is loaded.
+    "CsRevise", "CsBind", "CsProfileBind"];
 for (var c = 0; c < CORE.length; c++) {
     loadRepoScript("scripts/CaveSurvey/Core/" + CORE[c] + ".js");
 }
@@ -703,6 +706,450 @@ if (labelD !== null) {
 }
 
 destr(diD);
+
+// =======================================================================
+// 5. THE SKETCH MUST MOVE, NOT MERELY SURVIVE -- Task 11. A line snapped
+//    exactly onto the A2/A3 station points must follow those stations
+//    when a revised shot slides them along the profile.
+//
+//    WHY EXACT COINCIDENCE, NOT A CEILING-HEIGHT OFFSET: CsProfileBind.
+//    stationIndex is built strictly from ProfileStation-tagged POINTS
+//    (see its acceptance criterion), not from ceiling/floor run
+//    vertices -- CsProfile.bandWallRuns' points carry no station name at
+//    all once collected (only `flat` splay ticks do), so there is no
+//    tag to recover one from. A sketch traced at ceiling/floor HEIGHT
+//    therefore never gets the exact-match binding CsBind's plan-side
+//    LRUD tips give a wall snapped to them; it can only ever reach the
+//    PROXIMITY fallback (see fixture 5d below), which is a real,
+//    deliberate divergence from plan-view parity worth stating plainly
+//    rather than leaving implicit. This fixture proves the exact-match
+//    path and the mover cleanly, snapping directly onto the two
+//    station points themselves.
+// =======================================================================
+
+(function() {
+    var sv2 = CsModel.newSurvey();
+    sv2.shots = [
+        shotOf("A1", "A2", 10, 0, 0, 4, 2),
+        shotOf("A2", "A3", 10, 0, 0, 4, 2)
+    ];
+    var res2 = CsNetwork.resolve(sv2, {});
+    var built = CsProfile.build(sv2, res2, {});
+
+    var d2 = new RDocument(new RMemoryStorage(), createSpatialIndex());
+    var i2 = new RDocumentInterface(d2);
+    CsProfileDraw.render(d2, i2, built, {});
+
+    var bandA = built.bands[0];
+    var p2 = null, p3 = null;
+    for (var i = 0; i < bandA.stations.length; i++) {
+        if (bandA.stations[i].name === "A2") { p2 = bandA.stations[i]; }
+        if (bandA.stations[i].name === "A3") { p3 = bandA.stations[i]; }
+    }
+    CsLayers.ensure(d2, i2, "PROFILE-CEILING");
+    var op2 = new RAddObjectsOperation();
+    var traced = new RLineEntity(d2, new RLineData(
+        new RVector(p2.x, p2.y), new RVector(p3.x, p3.y)));
+    traced.setLayerId(d2.getLayerId("PROFILE-CEILING"));
+    op2.addObject(traced, false);
+    i2.applyOperation(op2);
+    var tracedId = traced.getId();
+
+    // now the survey changes: the first leg was really 20 ft, so
+    // everything downstream slides 10 ft along the profile
+    sv2.shots[0].distance = 20;
+    var res3 = CsNetwork.resolve(sv2, {});
+    var rebuilt = CsProfile.build(sv2, res3, {});
+    var counts = CsProfileDraw.render(d2, i2, rebuilt, {});
+
+    var after = d2.queryEntity(tracedId);
+    ok(!isNull(after), "the traced line still exists after regeneration");
+    if (!isNull(after)) {
+        var moved = after.getStartPoint();
+        near(moved.x, p2.x + 10, 0.001,
+            "THE TRACED LINE MOVED WITH ITS STATIONS (x " + moved.x +
+            ", expected " + (p2.x + 10) + ")");
+    }
+    ok(counts.linework !== undefined && counts.linework.moved >= 1,
+        "the move is reported (" + JSON.stringify(counts.linework) + ")");
+    destr(i2);
+}());
+
+// =======================================================================
+// 5b. THE TRAP: the tracing layer is HIDDEN when the revision runs --
+//    exactly the workflow that motivated off-layer protection in the
+//    first place (hiding the generated ceiling to trace over it on the
+//    plain PROFILE-CEILING layer). This build refuses MODIFIES on an
+//    off layer as silently as it refuses adds and deletes, and BOTH the
+//    claim (tags the sketch) and the move (ent.rotate/scale/move plus
+//    op.addObject) are MODIFIES. Without CsRevise.withOffLayersOn around
+//    each, the sketch would be silently left behind while the survey
+//    moves underneath it -- exactly the bug the user asked this task to
+//    fix, reintroduced by the one workflow that needs it most.
+// =======================================================================
+
+(function() {
+    var sv4 = CsModel.newSurvey();
+    sv4.shots = [
+        shotOf("A1", "A2", 10, 0, 0, 4, 2),
+        shotOf("A2", "A3", 10, 0, 0, 4, 2)
+    ];
+    var res4 = CsNetwork.resolve(sv4, {});
+    var built4 = CsProfile.build(sv4, res4, {});
+
+    var d4 = new RDocument(new RMemoryStorage(), createSpatialIndex());
+    var i4 = new RDocumentInterface(d4);
+    CsProfileDraw.render(d4, i4, built4, {});
+
+    var bandA4 = built4.bands[0];
+    var q2 = null, q3 = null;
+    for (var qi = 0; qi < bandA4.stations.length; qi++) {
+        if (bandA4.stations[qi].name === "A2") { q2 = bandA4.stations[qi]; }
+        if (bandA4.stations[qi].name === "A3") { q3 = bandA4.stations[qi]; }
+    }
+    CsLayers.ensure(d4, i4, "PROFILE-CEILING");
+    var op4 = new RAddObjectsOperation();
+    var traced4 = new RLineEntity(d4, new RLineData(
+        new RVector(q2.x, q2.y), new RVector(q3.x, q3.y)));
+    traced4.setLayerId(d4.getLayerId("PROFILE-CEILING"));
+    op4.addObject(traced4, false);
+    i4.applyOperation(op4);
+    var traced4Id = traced4.getId();
+
+    // the user hides their own tracing layer BEFORE the revision runs --
+    // the everyday act of getting a busy sketch out of the way
+    var tracingLayer = d4.queryLayer("PROFILE-CEILING");
+    ok(!isNull(tracingLayer), "sanity: PROFILE-CEILING exists");
+    tracingLayer.setOff(true);
+    var offOp4 = new RModifyObjectsOperation();
+    offOp4.addObject(tracingLayer, false);
+    i4.applyOperation(offOp4);
+    ok(d4.queryLayer("PROFILE-CEILING").isOff(),
+        "sanity: PROFILE-CEILING is now off");
+
+    sv4.shots[0].distance = 20;
+    var res5 = CsNetwork.resolve(sv4, {});
+    var rebuilt4 = CsProfile.build(sv4, res5, {});
+    var counts4 = CsProfileDraw.render(d4, i4, rebuilt4, {});
+
+    var after4 = d4.queryEntity(traced4Id);
+    ok(!isNull(after4),
+        "the traced line on the HIDDEN layer still exists after regen");
+    if (!isNull(after4)) {
+        var moved4 = after4.getStartPoint();
+        near(moved4.x, q2.x + 10, 0.001,
+            "THE TRACED LINE MOVED EVEN THOUGH ITS LAYER WAS HIDDEN (x " +
+            moved4.x + ", expected " + (q2.x + 10) + ")");
+    }
+    ok(counts4.linework !== undefined && counts4.linework.moved >= 1,
+        "the move on a hidden layer is reported (" +
+        JSON.stringify(counts4.linework) + ")");
+    ok(d4.queryLayer("PROFILE-CEILING").isOff(),
+        "the user's own off choice for PROFILE-CEILING was restored " +
+        "afterward");
+    destr(i4);
+}());
+
+// =======================================================================
+// 5c. AN UNBOUND SKETCH -- drawn nowhere near any station -- is left
+//    exactly where it is, and named in counts.linework.unmoved rather
+//    than silently dropped or silently moved on a guess.
+// =======================================================================
+
+(function() {
+    var sv6 = CsModel.newSurvey();
+    sv6.shots = [
+        shotOf("A1", "A2", 10, 0, 0, 4, 2),
+        shotOf("A2", "A3", 10, 0, 0, 4, 2)
+    ];
+    var res6 = CsNetwork.resolve(sv6, {});
+    var built6 = CsProfile.build(sv6, res6, {});
+
+    var d6 = new RDocument(new RMemoryStorage(), createSpatialIndex());
+    var i6 = new RDocumentInterface(d6);
+    CsProfileDraw.render(d6, i6, built6, {});
+
+    // far from every station (the band spans x in [0, 20]) and far
+    // outside marginFor's proximity box, so this cannot bind by either
+    // exact coincidence or proximity
+    CsLayers.ensure(d6, i6, "PROFILE-CEILING");
+    var op6 = new RAddObjectsOperation();
+    var stray = new RLineEntity(d6, new RLineData(
+        new RVector(500, 500), new RVector(520, 500)));
+    stray.setLayerId(d6.getLayerId("PROFILE-CEILING"));
+    op6.addObject(stray, false);
+    i6.applyOperation(op6);
+    var strayId = stray.getId();
+
+    sv6.shots[0].distance = 20;
+    var res7 = CsNetwork.resolve(sv6, {});
+    var rebuilt6 = CsProfile.build(sv6, res7, {});
+    var counts6 = CsProfileDraw.render(d6, i6, rebuilt6, {});
+
+    var strayAfter = d6.queryEntity(strayId);
+    ok(!isNull(strayAfter), "the stray sketch still exists after regen");
+    if (!isNull(strayAfter)) {
+        var strayPos = strayAfter.getStartPoint();
+        near(strayPos.x, 500, 1e-9,
+            "THE UNBOUND SKETCH DID NOT MOVE (x " + strayPos.x + ")");
+        near(strayPos.y, 500, 1e-9,
+            "THE UNBOUND SKETCH DID NOT MOVE (y " + strayPos.y + ")");
+    }
+    ok(counts6.claimed !== undefined && counts6.claimed.skipped >= 1,
+        "claim() names the stray sketch as skipped, not silently " +
+        "dropped (" + JSON.stringify(counts6.claimed) + ")");
+    ok(counts6.linework !== undefined &&
+        counts6.linework.unmoved.length >= 1,
+        "the unbound sketch is NAMED in counts.linework.unmoved -- " +
+        "claim()'s own skippedLabels folded in, since an untagged " +
+        "entity is invisible to moveLinework's own scan by design and " +
+        "would otherwise be reported nowhere at all (" +
+        JSON.stringify(counts6.linework) + ")");
+    destr(i6);
+}());
+
+// =======================================================================
+// 5d. THE PROXIMITY FALLBACK, exercised for real: a sketch traced NEAR
+//    (not exactly onto) a run of stations that all shift by the same
+//    amount. Six stations, corrected leg at the very start (A1->A2) --
+//    A2 through A6 all slide by the same +10, so a sketch bound to
+//    several of them by proximity is still one rigid move, and the
+//    fallback this module falls back to is proven to actually work,
+//    not just to exist unexercised.
+// =======================================================================
+
+(function() {
+    var sv7 = CsModel.newSurvey();
+    sv7.shots = [
+        shotOf("A1", "A2", 10, 0, 0, 4, 2),
+        shotOf("A2", "A3", 10, 0, 0, 4, 2),
+        shotOf("A3", "A4", 10, 0, 0, 4, 2),
+        shotOf("A4", "A5", 10, 0, 0, 4, 2),
+        shotOf("A5", "A6", 10, 0, 0, 4, 2)
+    ];
+    var res8 = CsNetwork.resolve(sv7, {});
+    var built7 = CsProfile.build(sv7, res8, {});
+
+    var d7 = new RDocument(new RMemoryStorage(), createSpatialIndex());
+    var i7 = new RDocumentInterface(d7);
+    CsProfileDraw.render(d7, i7, built7, {});
+
+    var bandA7 = built7.bands[0];
+    var p4 = null, p5 = null;
+    for (var pi = 0; pi < bandA7.stations.length; pi++) {
+        if (bandA7.stations[pi].name === "A4") { p4 = bandA7.stations[pi]; }
+        if (bandA7.stations[pi].name === "A5") { p5 = bandA7.stations[pi]; }
+    }
+    // 1 unit above the centerline: near A4/A5, inside marginFor's
+    // proximity box, but NOT exact coincidence -- stationsForPoints
+    // must fail here for the box fallback to be the path under test
+    CsLayers.ensure(d7, i7, "PROFILE-CEILING");
+    var op7 = new RAddObjectsOperation();
+    var traced7 = new RLineEntity(d7, new RLineData(
+        new RVector(p4.x, p4.y + 1), new RVector(p5.x, p5.y + 1)));
+    traced7.setLayerId(d7.getLayerId("PROFILE-CEILING"));
+    op7.addObject(traced7, false);
+    i7.applyOperation(op7);
+    var traced7Id = traced7.getId();
+
+    sv7.shots[0].distance = 20;
+    var res9 = CsNetwork.resolve(sv7, {});
+    var rebuilt7 = CsProfile.build(sv7, res9, {});
+    var counts7 = CsProfileDraw.render(d7, i7, rebuilt7, {});
+
+    var after7 = d7.queryEntity(traced7Id);
+    ok(!isNull(after7),
+        "the proximity-bound sketch still exists after regeneration");
+    if (!isNull(after7)) {
+        var moved7 = after7.getStartPoint();
+        near(moved7.x, p4.x + 10, 0.001,
+            "THE PROXIMITY-BOUND SKETCH MOVED WITH ITS NEARBY STATIONS " +
+            "(x " + moved7.x + ", expected " + (p4.x + 10) + ")");
+    }
+    ok(counts7.linework !== undefined && counts7.linework.moved >= 1,
+        "the proximity-fallback move is reported (" +
+        JSON.stringify(counts7.linework) + ")");
+    destr(i7);
+}());
+
+// =======================================================================
+// 5e. RUN-QUALIFICATION MATTERS FOR REAL, not just in the abstract: a
+//    spur run B tying off A2 gives "A2" TWO drawn positions in the SAME
+//    document -- its own place in band A, and band B's own X-origin
+//    tie-in copy. Two sketches, each snapped exactly onto stations in
+//    its OWN band, must each follow ONLY its own band's revision. If
+//    CsProfileBind.key ever collapsed to the bare station name, the
+//    two "A2" positions would collide in the before/after maps
+//    (CsProfileBind.positions' "first writer wins" and
+//    CsProfileDraw.positionsOf's later-band-overwrites-earlier would
+//    almost certainly pick DIFFERENT survivors), corrupting whichever
+//    sketch depends on the entry that lost -- proven here rather than
+//    only argued, by reviving the everyday case: a distance correction
+//    upstream in run A must not so much as twitch a spur tied off it.
+// =======================================================================
+
+(function() {
+    var sv8 = CsModel.newSurvey();
+    sv8.shots = [
+        shotOf("A1", "A2", 10, 0, 0, 4, 2),
+        shotOf("A2", "A3", 10, 0, 0, 4, 2),
+        // a real elevation change on the tie leg, so band B's gutter
+        // offset keeps its drawn "A2" tie-copy from landing exactly on
+        // top of band A's own A1 (both would otherwise sit at (0,0))
+        shotOf("A2", "B1", 10, 90, -30, 4, 2),
+        shotOf("B1", "B2", 10, 0, 0, 4, 2)
+    ];
+    var res10 = CsNetwork.resolve(sv8, {});
+    var built8 = CsProfile.build(sv8, res10, {});
+    eqs(built8.bands.length, 2, "sanity: two bands, A and the B spur");
+
+    var d8 = new RDocument(new RMemoryStorage(), createSpatialIndex());
+    var i8 = new RDocumentInterface(d8);
+    CsProfileDraw.render(d8, i8, built8, {});
+
+    var idx8 = CsProfileBind.stationIndex(d8);
+    var drawn = {};
+    for (var xi = 0; xi < idx8.length; xi++) { drawn[idx8[xi].name] = idx8[xi]; }
+    ok(drawn["A/A2"] !== undefined && drawn["B/A2"] !== undefined,
+        "sanity: \"A2\" is drawn TWICE under two DIFFERENT qualified keys");
+    ok(Math.abs(drawn["A/A2"].x - drawn["B/A2"].x) > 1 ||
+        Math.abs(drawn["A/A2"].y - drawn["B/A2"].y) > 1,
+        "sanity: the two A2 copies sit at genuinely different drawn " +
+        "positions (A/A2=" + JSON.stringify(drawn["A/A2"]) + ", B/A2=" +
+        JSON.stringify(drawn["B/A2"]) + ")");
+
+    // sketch bound entirely within band A: A2 -> A3, exact coincidence
+    CsLayers.ensure(d8, i8, "PROFILE-CEILING");
+    var opA = new RAddObjectsOperation();
+    var sketchA = new RLineEntity(d8, new RLineData(
+        new RVector(drawn["A/A2"].x, drawn["A/A2"].y),
+        new RVector(drawn["A/A3"].x, drawn["A/A3"].y)));
+    sketchA.setLayerId(d8.getLayerId("PROFILE-CEILING"));
+    opA.addObject(sketchA, false);
+    i8.applyOperation(opA);
+    var sketchAId = sketchA.getId();
+
+    // sketch bound entirely within band B: its OWN A2 tie-copy -> B1,
+    // exact coincidence -- must never be confused with band A's A2
+    var opB = new RAddObjectsOperation();
+    var sketchB = new RLineEntity(d8, new RLineData(
+        new RVector(drawn["B/A2"].x, drawn["B/A2"].y),
+        new RVector(drawn["B/B1"].x, drawn["B/B1"].y)));
+    sketchB.setLayerId(d8.getLayerId("PROFILE-CEILING"));
+    opB.addObject(sketchB, false);
+    i8.applyOperation(opB);
+    var sketchBId = sketchB.getId();
+
+    var expectA3x = drawn["A/A3"].x, expectB1x = drawn["B/B1"].x,
+        expectB1y = drawn["B/B1"].y;
+
+    // revise ONLY the A1->A2 leg -- band B ties off A2 but restarts its
+    // own X at 0 regardless, so nothing about band B should move at all
+    sv8.shots[0].distance = 20;
+    var res11 = CsNetwork.resolve(sv8, {});
+    var rebuilt8 = CsProfile.build(sv8, res11, {});
+    var counts8 = CsProfileDraw.render(d8, i8, rebuilt8, {});
+
+    eqs(counts8.claimed.tagged, 2, "both sketches got claimed");
+    eqs(counts8.linework.moved, 2,
+        "both sketches' moves are reported (" +
+        JSON.stringify(counts8.linework) + ")");
+
+    var sketchAAfter = d8.queryEntity(sketchAId);
+    var sketchBAfter = d8.queryEntity(sketchBId);
+    ok(!isNull(sketchAAfter) && !isNull(sketchBAfter),
+        "sanity: both sketches survived regeneration");
+    if (!isNull(sketchAAfter)) {
+        near(sketchAAfter.getEndPoint().x, expectA3x + 10, 0.001,
+            "BAND A'S SKETCH FOLLOWED BAND A'S OWN REVISION (x " +
+            sketchAAfter.getEndPoint().x + ", expected " +
+            (expectA3x + 10) + ")");
+    }
+    if (!isNull(sketchBAfter)) {
+        // band B is UNTOUCHED by a correction made entirely upstream in
+        // band A -- this is the assertion a bare, unqualified "A2" key
+        // would corrupt (see this fixture's own banner)
+        near(sketchBAfter.getEndPoint().x, expectB1x, 0.001,
+            "BAND B'S SKETCH DID NOT MOVE -- UNAFFECTED BY BAND A'S " +
+            "REVISION (x " + sketchBAfter.getEndPoint().x +
+            ", expected unchanged " + expectB1x + ")");
+        near(sketchBAfter.getEndPoint().y, expectB1y, 0.001,
+            "BAND B'S SKETCH Y IS ALSO UNCHANGED (y " +
+            sketchBAfter.getEndPoint().y + ", expected " + expectB1y + ")");
+    }
+    destr(i8);
+}());
+
+// =======================================================================
+// 5f. A SKETCH SPANNING TWO BANDS -- documented behaviour, not a defect.
+//    CsRevise.similarityFit over exactly TWO points always finds a
+//    zero-residual fit (two points fully determine a similarity
+//    transform), so moveLinework accepts it even when the two points
+//    come from bands that move independently of one another -- there is
+//    no THIRD point here to expose the inconsistency the way fixture 5's
+//    residual check would catch it for three or more. The result is a
+//    real move, reported as such, that can reshape (rotate/scale) the
+//    sketch to force both endpoints onto their respective targets. This
+//    is CsRevise.moveLinework's own documented tradeoff for a 2-point
+//    fit ("the pair IS the definition of the rigid piece"), inherited
+//    unchanged per the user's explicit decision to reuse it as-is --
+//    profile drawings just reach it more often, because a station name
+//    recurring across bands is normal here, not an edge case.
+// =======================================================================
+
+(function() {
+    var sv9 = CsModel.newSurvey();
+    sv9.shots = [
+        shotOf("A1", "A2", 10, 0, 0, 4, 2),
+        shotOf("A2", "A3", 10, 0, 0, 4, 2),
+        shotOf("A2", "B1", 10, 90, -30, 4, 2),
+        shotOf("B1", "B2", 10, 0, 0, 4, 2)
+    ];
+    var res12 = CsNetwork.resolve(sv9, {});
+    var built9 = CsProfile.build(sv9, res12, {});
+
+    var d9 = new RDocument(new RMemoryStorage(), createSpatialIndex());
+    var i9 = new RDocumentInterface(d9);
+    CsProfileDraw.render(d9, i9, built9, {});
+
+    var idx9 = CsProfileBind.stationIndex(d9);
+    var drawn9 = {};
+    for (var yi = 0; yi < idx9.length; yi++) { drawn9[idx9[yi].name] = idx9[yi]; }
+
+    CsLayers.ensure(d9, i9, "PROFILE-CEILING");
+    var opC = new RAddObjectsOperation();
+    var cross = new RLineEntity(d9, new RLineData(
+        new RVector(drawn9["A/A2"].x, drawn9["A/A2"].y),
+        new RVector(drawn9["B/B1"].x, drawn9["B/B1"].y)));
+    cross.setLayerId(d9.getLayerId("PROFILE-CEILING"));
+    opC.addObject(cross, false);
+    i9.applyOperation(opC);
+    var crossId = cross.getId();
+
+    sv9.shots[0].distance = 20;
+    var res13 = CsNetwork.resolve(sv9, {});
+    var rebuilt9 = CsProfile.build(sv9, res13, {});
+    var counts9 = CsProfileDraw.render(d9, i9, rebuilt9, {});
+
+    eqs(CsBind.decodeStations(CsTags.get(d9.queryEntity(crossId),
+        CsBind.STATIONS_TAG)).join(","), "A/A2,B/B1",
+        "the cross-band sketch is bound to BOTH stations, one per band");
+    ok(counts9.linework !== undefined && counts9.linework.moved === 1,
+        "a 2-point cross-band fit is accepted (residual is always 0 " +
+        "for exactly two points), not refused -- documented behaviour, " +
+        "inherited from CsRevise.moveLinework unchanged (" +
+        JSON.stringify(counts9.linework) + ")");
+    var crossAfter = d9.queryEntity(crossId);
+    ok(!isNull(crossAfter), "sanity: the cross-band sketch still exists");
+    if (!isNull(crossAfter)) {
+        near(crossAfter.getStartPoint().x, drawn9["A/A2"].x + 10, 0.001,
+            "one endpoint lands on A2's own new position");
+        near(crossAfter.getEndPoint().x, drawn9["B/B1"].x, 0.001,
+            "the other endpoint stays on B1's unchanged position -- the " +
+            "line was reshaped to hit both, not translated as a whole");
+    }
+    destr(i9);
+}());
 
 // =======================================================================
 // Report.

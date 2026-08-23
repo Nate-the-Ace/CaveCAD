@@ -374,6 +374,25 @@ CsProfileDraw.band = function(doc, op, band, counts) {
 };
 
 /**
+ * Where every station WILL be once this profile is drawn, keyed the way
+ * CsProfileBind keys them: moveLinework's "after" frame.
+ */
+CsProfileDraw.positionsOf = function(profile) {
+    var out = {};
+    var bands = (profile && profile.bands) ? profile.bands : [];
+    for (var b = 0; b < bands.length; b++) {
+        var band = bands[b];
+        var dz = band.zOffset || 0.0;
+        for (var i = 0; i < band.stations.length; i++) {
+            var st = band.stations[i];
+            out[CsProfileBind.key(band.key, st.name)] =
+                { x: st.x, y: st.y + dz };
+        }
+    }
+    return out;
+};
+
+/**
  * Draws a whole built profile into (doc, di).
  *
  * \param profile CsProfile.build() result
@@ -392,6 +411,24 @@ CsProfileDraw.render = function(doc, di, profile, opts) {
     var layers = CsProfileDraw.LAYERS();
     for (var l = 0; l < layers.length; l++) {
         CsLayers.ensure(doc, di, layers[l]);
+    }
+
+    // ORDER MATTERS, and each step is only correct in this position:
+    //   claim   untagged sketch is bound while the OLD geometry it was
+    //           traced against is still in the drawing to match against
+    //   before  the old station positions are read for the same reason
+    //   erase   only now can the generator's own output go
+    //   draw    the new geometry lands
+    //   move    the sketch is carried to the new positions
+    var claimed = { tagged: 0, skipped: 0 };
+    var before = {};
+    try {
+        claimed = CsProfileBind.claim(doc, di);
+        before = CsProfileBind.positions(doc);
+    } catch (eBind) {
+        // binding is an improvement on leaving the sketch behind, not a
+        // precondition for drawing a profile at all
+        claimed = { tagged: 0, skipped: 0, error: String(eBind) };
     }
 
     var erased = CsProfileDraw.erase(doc, di);
@@ -416,5 +453,45 @@ CsProfileDraw.render = function(doc, di, profile, opts) {
     CsProfileDraw.withOwnLayersOn(doc, di, function() {
         di.applyOperation(op);
     });
+
+    counts.claimed = claimed;
+    counts.linework = { moved: 0, unmoved: [] };
+    try {
+        var after = CsProfileDraw.positionsOf(profile);
+        // the tolerance basis and the "did anything actually move"
+        // question both already have one tested answer in CsRevise --
+        // a second spelling here is how a cave in feet and the same
+        // cave in metres start deciding differently
+        var extent = CsRevise.positionsExtent(after);
+        if (CsRevise.positionsMoved(before, after, extent) > 0) {
+            // moveLinework MODIFIES entities (tag rewrite aside, the
+            // rotate/scale/move themselves are modifies): the tracing
+            // layer a user hid to sketch on undisturbed is not in
+            // CsProfileDraw.LAYERS() and so is untouched by
+            // withOwnLayersOn above -- exactly the layer this move
+            // needs to reach. CsRevise.withOffLayersOn sweeps every
+            // off layer in the document holding entities, this one
+            // included, and restores each afterward.
+            CsRevise.withOffLayersOn(doc, di, function() {
+                counts.linework = CsRevise.moveLinework(doc, di, before,
+                    after, {}, extent);
+            });
+        }
+    } catch (eMove) {
+        counts.linework = { moved: 0, unmoved: ["move failed: " + eMove] };
+    }
+
+    // An entity claim() could bind to NO station at all never gets a
+    // tag, so moveLinework never sees it and never names it -- by
+    // CsRevise's own explicit design, an untagged entity is not that
+    // function's problem. Folding claim()'s own skipped labels in here
+    // is what makes "drawn nowhere near the survey" show up SOMEWHERE
+    // in the one list the caller reads for "what didn't move and why",
+    // rather than only as a bare count with no entity behind it.
+    if (claimed.skippedLabels && claimed.skippedLabels.length > 0) {
+        counts.linework.unmoved =
+            counts.linework.unmoved.concat(claimed.skippedLabels);
+    }
+
     return counts;
 };
