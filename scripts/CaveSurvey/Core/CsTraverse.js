@@ -60,9 +60,20 @@ CsTraverse.effectiveInclination = function(shot) {
  * fabricated coordinate wearing a real measurement's confidence) and
  * `undefined * Math.cos(x)` is `NaN` (a coordinate that poisons every
  * downstream computation with it). Neither is a measurement; `0` is.
+ *
+ * MUST be `typeof v !== "number"`, not a plain `!isFinite(v)` check:
+ * global `isFinite` COERCES its argument first, and `isFinite("")` is
+ * `true` (`""` coerces to `0`). A blank string is the commonest
+ * textual encoding of "absent" (a blank spreadsheet cell, a blank
+ * notebook field before this codebase's own parsers turn it into a
+ * real value or a real absence) -- `unusable("")` must be `true`, and
+ * with a bare `isFinite` it silently was not, admitting exactly the
+ * fabrication this function exists to refuse. Every shot field is a
+ * number by the time it reaches here (every parser `parseFloat`s), so
+ * requiring `typeof v === "number"` costs nothing on real input.
  */
 CsTraverse.unusable = function(v) {
-    return v === null || v === undefined || !isFinite(v);
+    return typeof v !== "number" || !isFinite(v);
 };
 
 /**

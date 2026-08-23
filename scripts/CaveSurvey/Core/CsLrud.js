@@ -262,6 +262,30 @@ CsLrud.wallRuns = function(survey, resolved, tapeMode) {
         // The passage direction at that station: the leg that reached
         // it. Available even where LRUD is not, which is what lets a
         // splay-only station carry walls at all.
+        //
+        // DECLARED DIVERGENCE FROM CsProfile.bandWallRuns (review
+        // minor): if this leg's own azimuth is unusable (no usable
+        // reading, no backsight to fall back on), `passageAz` here is
+        // `null` or `NaN` -- and unlike CsProfile.bandWallRuns's
+        // `hasDir` flag, nothing below guards against it. `azRad =
+        // passageAz * Math.PI / 180` then quietly becomes `0` (null
+        // coerces) or `NaN` (undefined/NaN propagates), so `alongX`/
+        // `alongY` become a wrong-but-finite direction, or NaN. NO
+        // COORDINATE is ever wrong from this: every point in
+        // `entries` comes from `CsTraverse.offset`/`CsLrud.tickEnd`
+        // directly, never from `passageAz`, and the sort's `order`
+        // tiebreak is a total order, so a NaN `t` only ever falls back
+        // to input order rather than corrupting anything -- the
+        // no-NaN-coordinate criterion holds. What breaks is the
+        // along-passage ORDERING promise in this function's own
+        // docblock, silently, for a leg whose own azimuth cannot be
+        // read. Unreachable today (every current writer of a leg's
+        // shot supplies a real azimuth), reachable the moment the
+        // upstream parser task starts passing one through as absent.
+        // Left unguarded rather than adding a second `hasDir`-style
+        // fallback here: that is real design work (what SHOULD the
+        // order fall back to?) that belongs with whichever task first
+        // makes it reachable, not bolted on defensively now.
         var passageAz = CsTraverse.effectiveAzimuth(leg.shot);
 
         var lp = pointsFor(name, "L", lrud, passageAz);

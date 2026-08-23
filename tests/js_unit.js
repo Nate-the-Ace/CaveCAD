@@ -557,6 +557,41 @@ near(CsTraverse.offset(bsShot, CsTraverse.SLOPE).dx,
 }());
 
 // ---------------------------------------------------------------------
+// Review I1: `isFinite` coerces before testing, so a bare `!isFinite(v)`
+// misses every non-number encoding of "absent" -- blank strings above
+// all, the commonest textual spelling, and the one the upstream parser
+// task is about to start producing. One row per coercion hole, both on
+// `unusable` directly and through `offset` end to end.
+// ---------------------------------------------------------------------
+
+(function() {
+    ok(CsTraverse.unusable("") === true, 'unusable(""): a blank string is absent, not zero');
+    ok(CsTraverse.unusable("  ") === true, 'unusable("  "): whitespace is absent too');
+    ok(CsTraverse.unusable(false) === true, "unusable(false): not a number");
+    ok(CsTraverse.unusable([]) === true, "unusable([]): not a number, even though [] == 0");
+    ok(CsTraverse.unusable("5") === true,
+        'unusable("5"): a numeric STRING is still not a number -- every ' +
+        "parser parseFloats before a shot field is ever set, so this " +
+        "costs nothing on real input");
+    ok(CsTraverse.unusable(0) === false, "unusable(0): a real zero is never unusable");
+    ok(CsTraverse.unusable(-5.5) === false, "unusable(-5.5): a real negative is never unusable");
+
+    ok(CsTraverse.offset(
+        { distance: "", azimuth: 45, inclination: 20 }, CsTraverse.SLOPE
+    ) === null, 'offset: a blank-string distance returns null, not a ' +
+        "coordinate at the station");
+    ok(CsTraverse.offset(
+        { distance: 10, azimuth: "  ", inclination: 20 }, CsTraverse.SLOPE
+    ) === null, "offset: a whitespace-string azimuth returns null");
+    ok(CsTraverse.offset(
+        { distance: 10, azimuth: 45, inclination: false }, CsTraverse.SLOPE
+    ) === null, "offset: a boolean inclination returns null");
+    ok(CsTraverse.offset(
+        { distance: [], azimuth: 45, inclination: 20 }, CsTraverse.SLOPE
+    ) === null, "offset: an array distance returns null");
+}());
+
+// ---------------------------------------------------------------------
 // Network -- hand-computed square with a deliberate misclosure, plus
 // an out-of-order shot and a branch.
 // ---------------------------------------------------------------------
@@ -932,6 +967,62 @@ var rElevZeroAnchor = CsNetwork.resolve(elevSv,
 near(rElevZeroAnchor.stations["F1"].z, 1300 - 1250, 1e-9,
     "task 1b elevation: an explicit anchor z of exactly 0 still counts as explicit, not absent");
 
+// ---------------------------------------------------------------------
+// Task 5b review, the sixth door: an absent anchor Z is not zero.
+// `rElevNoZ` above already covers "anchor IS a fixed station with a
+// real z" (falls back to it, unchanged). These cover the other half:
+// no z anywhere at all.
+// ---------------------------------------------------------------------
+
+(function() {
+    // the anchor's name is not a fixed/control station at all, and it
+    // supplied no z: there is nothing anywhere to read an elevation
+    // from. Must anchor at z = null (plan position still matters), not
+    // a fabricated 0, and must name the gap.
+    var sv = CsModel.newSurvey();
+    sv.shots.push(shotOf("G1", "G2", 10, 90)); // due east
+    var r = CsNetwork.resolve(sv, { anchor: { name: "G1", x: 500, y: 500 } });
+    eqs(r.stations["G1"].z, null,
+        "sixth door: an anchor with no z anywhere is placed at z = null, not 0");
+    ok(r.anchorZUnknown !== null && r.anchorZUnknown.name === "G1",
+        "sixth door: the gap is named in anchorZUnknown, not silently absorbed");
+    // x/y still resolve -- plan view does not lose the anchor over a
+    // missing elevation, which the comment above calls the COMMON case
+    near(r.stations["G1"].x, 500, 1e-9,
+        "sixth door: the anchor's x/y still take, even with z unknown");
+    near(r.stations["G2"].x, 510, 1e-9,
+        "sixth door: and the rest of the traverse still resolves off it");
+}());
+
+(function() {
+    // REGRESSION, the distinction this door turns on too: a fixed
+    // anchor station whose OWN control z is a real, explicit 0 (sea
+    // level, or a cave datumed at its own entrance) must NOT be
+    // treated as unknown.
+    var sv = CsModel.newSurvey();
+    sv.shots.push(shotOf("H1", "H2", 10, 0));
+    sv.fixed["H1"] = { x: 0, y: 0, z: 0 };
+    var r = CsNetwork.resolve(sv, { anchor: { name: "H1", x: 500, y: 500 } });
+    eqs(r.stations["H1"].z, 0,
+        "sixth door: a REAL zero control z is used, not treated as unknown");
+    eqs(r.anchorZUnknown, null,
+        "sixth door: anchorZUnknown stays null when a real (even zero) z was found");
+}());
+
+(function() {
+    // defensive-only (no current writer can produce this): if a fixed
+    // station's own z were ever non-finite, that must not fabricate a
+    // 0 either -- same rule, reached the other way.
+    var sv = CsModel.newSurvey();
+    sv.shots.push(shotOf("K1", "K2", 10, 0));
+    sv.fixed["K1"] = { x: 0, y: 0, z: NaN };
+    var r = CsNetwork.resolve(sv, { anchor: { name: "K1", x: 500, y: 500 } });
+    eqs(r.stations["K1"].z, null,
+        "sixth door: a non-finite control z is treated as absent, not 0");
+    ok(r.anchorZUnknown !== null,
+        "sixth door: and named, same as the no-record case");
+}());
+
 // ---- CsReport says what happened to the fixed frame ----------------
 var stubDrawn = { stationsDrawn: 0, shotsDrawn: 0, closuresDrawn: 0,
     wallsDrawn: 0, splaysDrawn: 0, skipped: 0 };
@@ -993,23 +1084,50 @@ ok(plainSummaryBefore.indexOf("control tie") === -1,
 // DID connect).
 // ---------------------------------------------------------------------
 
-var unmeasurableStub = { stationsDrawn: 2, shotsDrawn: 1, closuresDrawn: 0,
-    wallsDrawn: 0, splaysDrawn: 1, splaysSkipped: 2, wallPointsSkipped: 1,
-    skipped: 0 };
-var unmeasurableSummary = CsReport.drawSummary(sq, rsq, unmeasurableStub, []);
-ok(unmeasurableSummary.indexOf("2") >= 0 &&
-    unmeasurableSummary.toLowerCase().indexOf("splay") >= 0 &&
-    (unmeasurableSummary.toLowerCase().indexOf("no distance") >= 0 ||
-     unmeasurableSummary.toLowerCase().indexOf("no usable") >= 0 ||
-     unmeasurableSummary.toLowerCase().indexOf("unmeasurable") >= 0 ||
-     unmeasurableSummary.toLowerCase().indexOf("not measured") >= 0),
-    "task 5b report: unmeasurable splays are named, with a reason, got:\n" +
-    unmeasurableSummary);
+// review I4: this used to be one bundled ok() with substring searches
+// -- deleting either new line still passed it, because the OTHER new
+// line also contains "splay" and "no distance", and indexOf("2") is
+// satisfied by "Stations plotted: 2". Exact-line assertions, one
+// counter at a time, so deleting either line is its own failure.
+var splaysOnlyStub = { stationsDrawn: 2, shotsDrawn: 1, closuresDrawn: 0,
+    wallsDrawn: 0, splaysDrawn: 1, splaysSkipped: 2, skipped: 0 };
+var splaysOnlySummary = CsReport.drawSummary(sq, rsq, splaysOnlyStub, []);
+var splaysOnlyLines = splaysOnlySummary.split("\n");
+ok(splaysOnlyLines.indexOf(
+        "Splays not drawn: 2 (no distance, or no azimuth/inclination, on record)"
+    ) >= 0,
+    "task 5b report: the exact splays-not-drawn line, got:\n" + splaysOnlySummary);
+ok(splaysOnlyLines.filter(function(l) {
+        return l.indexOf("Wall points skipped") >= 0;
+    }).length === 0,
+    "task 5b report: no wallPointsSkipped field means no wall-points line, " +
+    "even though splaysSkipped is reported");
+
+var wallPointsOnlyStub = { stationsDrawn: 2, shotsDrawn: 1, closuresDrawn: 0,
+    wallsDrawn: 0, splaysDrawn: 0, wallPointsSkipped: 1, skipped: 0 };
+var wallPointsOnlySummary = CsReport.drawSummary(sq, rsq, wallPointsOnlyStub, []);
+var wallPointsOnlyLines = wallPointsOnlySummary.split("\n");
+ok(wallPointsOnlyLines.indexOf(
+        "Wall points skipped: 1 (splay had no distance, or no " +
+        "azimuth/inclination, on record)"
+    ) >= 0,
+    "task 5b report: the exact wall-points-skipped line, got:\n" +
+    wallPointsOnlySummary);
+ok(wallPointsOnlyLines.filter(function(l) {
+        return l.indexOf("Splays not drawn") >= 0;
+    }).length === 0,
+    "task 5b report: no splaysSkipped field means no splays-not-drawn line, " +
+    "even though wallPointsSkipped is reported");
+
 // a drawn object from before these counters existed (every test above
 // this one) still summarises with no new line and no crash
-ok(plainSummaryBefore.toLowerCase().indexOf("splay") === -1,
-    "task 5b report: a drawn object with no splaysSkipped field gains " +
-    "no phantom line");
+var plainSummaryLines = plainSummaryBefore.split("\n");
+ok(plainSummaryLines.filter(function(l) {
+        return l.indexOf("Splays not drawn") >= 0 ||
+            l.indexOf("Wall points skipped") >= 0;
+    }).length === 0,
+    "task 5b report: a drawn object with neither counter gains no phantom " +
+    "line, got:\n" + plainSummaryBefore);
 
 // ---------------------------------------------------------------------
 // Task 1c -- bridge classifier cost and path honesty.
@@ -4185,19 +4303,29 @@ if (!IS_NODE) {
         var real = splayOf("D2", 5, 90);      // a genuine, measurable splay
         var ghost = splayOf("D2", 4, 45);     // unmeasurable: no distance
         ghost.distance = null;
-        sv.shots = [main, real, ghost];
+        // review I5: a REAL zero-distance splay (a genuine tie into the
+        // station -- see the CsTraverse/CsLrud "distance 0 is a
+        // measurement" tests) must draw exactly like any other. Placed
+        // AFTER the ghost so a mutation that treats distance===0 as
+        // unmeasurable, or that reuses the ghost's numbering slot,
+        // shows up as a distinct, separately-named failure.
+        var zeroSplay = splayOf("D2", 0, 135);
+        sv.shots = [main, real, ghost, zeroSplay];
         var resolved = CsNetwork.resolve(sv, {});
         var drawn = CsDraw.survey(sv, resolved);
 
-        eqs(drawn.splaysDrawn, 1,
-            "only the measurable splay draws a ray, got " + drawn.splaysDrawn);
+        eqs(drawn.splaysDrawn, 2,
+            "both measurable splays draw, INCLUDING the zero-distance " +
+            "one, got " + drawn.splaysDrawn);
         eqs(drawn.splaysSkipped, 1,
-            "the unmeasurable splay is counted as skipped, not silently dropped");
+            "only the truly unmeasurable splay is counted as skipped");
 
         // no entity anywhere carries the skipped splay's tip -- not a
-        // ray, not a tip point, not a label. D2 has exactly one splay
-        // (D2.1, the real one); a fabricated D2.2 would mean the ghost
-        // drew after all.
+        // ray, not a tip point, not a label. D2 has two DRAWN splays
+        // (D2.1 the real one, D2.3 the zero-distance one) and one
+        // skipped (D2.2, the ghost) -- a fabricated D2.2 would mean the
+        // ghost drew after all; a MISSING D2.3 would mean the zero-
+        // distance regression protection above failed silently.
         var splayNames = [];
         var cids = doc.queryAllEntities(false, false);
         for (var ci = 0; ci < cids.length; ci++) {
@@ -4211,6 +4339,9 @@ if (!IS_NODE) {
             "got splay tags [" + splayNames.join(",") + "]");
         ok(splayNames.indexOf("D2.1") >= 0,
             "the real splay still draws as D2.1");
+        ok(splayNames.indexOf("D2.3") >= 0,
+            "review I5: the REAL zero-distance splay still draws, as " +
+            "D2.3, got splay tags [" + splayNames.join(",") + "]");
 
         // NO NaN reaches any coordinate this draw produced -- assert
         // directly, the plan-view half of the task's own requirement.
@@ -4229,6 +4360,78 @@ if (!IS_NODE) {
             }
         }
         ok(anyNaN === false, "no NaN coordinate reaches any drawn entity");
+    })();
+}
+
+// ---------------------------------------------------------------------
+// Review minors: `drawn.skipped`'s subtraction of splaysSkipped, and
+// `drawn.wallPointsSkipped`'s plumbing from CsLrud.wallRuns, were both
+// unexercised by any test. A fixture where the three counts are all
+// DIFFERENT (1, 2, 1) so a wrong source variable, or a dropped term,
+// changes a specific number rather than surviving by coincidence:
+//   - ghost:      off-axis, unmeasurable -- counted by BOTH the ray
+//                 loop (splaysSkipped) and CsLrud's wall-point loop
+//                 (wallPointsSkipped)
+//   - axialGhost: exactly on-axis, unmeasurable -- CsLrud excludes an
+//                 axial splay from wall consideration BEFORE it would
+//                 ever count it as skipped (same rule as a perfectly
+//                 measured axial splay: neither wall), but CsDraw's
+//                 ray loop has no such filter, so it DOES count this
+//                 one. This is what makes wallPointsSkipped (1) differ
+//                 from splaysSkipped (2) -- a `wallPointsSkipped =
+//                 splaysSkipped` mix-up would show 2, not 1.
+//   - neverConnected: its own station resolves nowhere at all, so it
+//                 never reaches either counter -- only resolved.
+//                 skipped's generic bucket, which `drawn.skipped` must
+//                 still name (as 1), separately from the two above.
+// ---------------------------------------------------------------------
+
+if (!IS_NODE) {
+    (function() {
+        loadRepoScript("scripts/CaveSurvey/Core/CsLayers.js");
+        loadRepoScript("scripts/CaveSurvey/Core/CsStore.js");
+        loadRepoScript("scripts/CaveSurvey/Core/CsTags.js");
+        loadRepoScript("scripts/CaveSurvey/Core/CsDraw.js");
+
+        var doc2 = new RDocument(new RMemoryStorage(), new RSpatialIndexNavel());
+        var di2 = new RDocumentInterface(doc2);
+        getDocument = function() { return doc2; };
+        getDocumentInterface = function() { return di2; };
+
+        var sv2 = CsModel.newSurvey();
+        var main2 = shotOf("E1", "E2", 10, 0); // passage az 0
+        main2.left = 2;
+        var ghost2 = splayOf("E2", 4, 45);     // off-axis, unmeasurable
+        ghost2.distance = null;
+        var axialGhost = splayOf("E2", 3, 0);  // ON-AXIS, unmeasurable
+        axialGhost.distance = null;
+        var neverConnected = splayOf("Z9", 2, 10); // Z9 never resolves
+        sv2.shots = [main2, ghost2, axialGhost, neverConnected];
+        var resolved2 = CsNetwork.resolve(sv2, {});
+        var drawn2 = CsDraw.survey(sv2, resolved2);
+
+        eqs(resolved2.skipped.length, 3,
+            "all three splays land in CsNetwork's generic skipped bucket");
+        eqs(drawn2.splaysSkipped, 2,
+            "both E2 splays count as unmeasurable ray-skips (axial " +
+            "or not) -- only Z9's, which never reaches the offset " +
+            "check at all, does not");
+        eqs(drawn2.wallPointsSkipped, 1,
+            "review minor: CsLrud excludes the AXIAL splay before it " +
+            "would ever count it, so this is 1, not 2 -- proving " +
+            "wallPointsSkipped reads CsLrud.wallRuns.skipped and is " +
+            "not aliased to splaysSkipped");
+        eqs(drawn2.skipped, 1,
+            "review minor: 3 generic-skipped minus 0 drawn minus 2 " +
+            "ray-skipped leaves exactly Z9 -- dropping the " +
+            "'- splaysSkipped' term would show 3 instead");
+
+        // independent cross-check against CsLrud directly, not just
+        // CsDraw's own plumbing of it
+        var runsCheck = CsLrud.wallRuns(sv2, resolved2);
+        eqs(drawn2.wallPointsSkipped, runsCheck.skipped,
+            "drawn.wallPointsSkipped agrees with calling CsLrud.wallRuns " +
+            "directly");
     })();
 }
 
@@ -10474,6 +10677,31 @@ if (!IS_NODE) {
     eqs(w.flat.length, 0, "a no-inclination splay contributes no tick at all");
     eqs(w.ceiling.length, 0, "...and obviously no ceiling either");
     eqs(w.floor.length, 0, "...nor floor");
+    eqs(w.skipped, 1,
+        "review I2: a no-inclination splay is counted as skipped too -- " +
+        "the old m2 pre-guard continued past this counter and undercounted");
+}());
+
+(function() {
+    // review I2's exact repro: two unmeasurable splays, one missing
+    // inclination, one missing distance -- bandWallRuns.skipped must
+    // match CsLrud.wallRuns.skipped on the equivalent plan-side data,
+    // which it did not while the m2 pre-guard bypassed the counter.
+    var sv = CsModel.newSurvey();
+    var s1 = shotOf("A1", "A2", 10, 0, 0);
+    var noInc = splayOf("A2", 5, 0, 0);
+    noInc.inclination = null;
+    var noDist = splayOf("A2", 5, 90, 30);
+    noDist.distance = undefined;
+    sv.shots = [s1, noInc, noDist];
+    var r = CsNetwork.resolve(sv, {});
+    var g = CsProfile.groupRuns(r);
+    var band = CsProfile.unrollBand(g.runs["A"], null, r,
+        CsProfile.hierarchy(g, r), {});
+    var w = CsProfile.bandWallRuns(band, sv, r, {});
+    eqs(w.skipped, 2,
+        "review I2: both unmeasurable splays are counted, not just the " +
+        "no-distance one");
 }());
 
 (function() {
@@ -10854,6 +11082,33 @@ if (!IS_NODE) {
     // resolved was drawn, so findings.undrawn is empty, not merely
     // unchecked.
     eqs(p.findings.undrawn.length, 0, "all four legs drawn: nothing undrawn to report");
+    // review I3: nothing unmeasurable in this fixture either
+    eqs(p.findings.wallPointsSkipped, 0,
+        "a healthy profile with nothing unmeasurable reports 0, not undefined");
+}());
+
+(function() {
+    // review I3: bandWallRuns already counts what it could not place;
+    // build() must SUM that across every band into findings, or the
+    // count dies at the only entry point Tasks 8-11 will ever call.
+    // Two bands, one unmeasurable splay each, so a bug that reads only
+    // the LAST band's count (instead of summing) would still show 1.
+    var sv = CsModel.newSurvey();
+    var mk = function(f, t, az) {
+        var s = shotOf(f, t, 10, az, 0);
+        s.up = 2; s.down = 2;
+        return s;
+    };
+    sv.shots = [mk("A1", "A2", 0), mk("A2", "A3", 0), mk("A2", "B1", 90)];
+    var ghostA = splayOf("A3", 5, 90, 60);
+    ghostA.distance = null;
+    var ghostB = splayOf("B1", 5, 90, 60);
+    ghostB.azimuth = undefined;
+    sv.shots.push(ghostA, ghostB);
+    var r = CsNetwork.resolve(sv, {});
+    var p = CsProfile.build(sv, r, {});
+    eqs(p.findings.wallPointsSkipped, 2,
+        "review I3: summed across BOTH bands, not just the last one built");
 }());
 
 (function() {

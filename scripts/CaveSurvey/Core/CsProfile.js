@@ -1830,23 +1830,23 @@ CsProfile.bandWallRuns = function(band, survey, resolved, opts) {
         var sps = splays[st.name] || [];
         for (var k = 0; k < sps.length; k++) {
             var sp = sps[k];
-            // m2: no inclination on record means nothing to plot --
-            // classifySplay would call this "flat", but plotting it
-            // there would fabricate a coordinate at exactly centerline
-            // elevation for a measurement that does not exist
-            if (CsTraverse.effectiveInclination(sp) === null ||
-                    CsTraverse.effectiveInclination(sp) === undefined) {
-                continue;
-            }
             var o = CsTraverse.offset(sp, tapeMode);
             if (o === null) {
-                // the inclination read as usable above (a real number),
-                // but the distance or the effective azimuth did not --
-                // same fabrication CsLrud.wallRuns refuses on the plan
-                // side: no ceiling/floor point, and no flat tick either
-                // (falling through to the "flat" bucket would plot a
-                // phantom point at exactly the station, the very thing
-                // this whole guard exists to stop)
+                // m2, folded into the one guard rather than kept as
+                // its own pre-check (review I2): CsTraverse.unusable
+                // already refuses null/undefined/NaN/+-Infinity on
+                // distance, azimuth AND inclination, a strict superset
+                // of "no inclination on record" -- so a separate
+                // early `continue` on inclination alone was dead
+                // weight that ALSO under-counted: it dropped a
+                // no-inclination splay without ever reaching this
+                // counter, so `skipped` disagreed with CsLrud.wallRuns
+                // on the very same fixture. classifySplay is never
+                // reached for anything unusable now, on any of its
+                // three inputs -- no ceiling/floor point, no flat tick
+                // (falling through to "flat" would plot a phantom
+                // point at exactly the station, the fabrication this
+                // whole guard exists to stop), and no undercount.
                 skipped++;
                 continue;
             }
@@ -2203,7 +2203,14 @@ CsProfile.layout = function(bands) {
  *          {ceiling, floor, flat, zOffset},
  *   findings: {omitted, mismatches, secondTies, orphans, strandedRoots,
  *              stopped: [{run, station, reason}], ungrouped,
- *              undrawn: [{from, to, kind, reason}]}
+ *              undrawn: [{from, to, kind, reason}],
+ *              wallPointsSkipped: n -- review I3: CsProfile.bandWallRuns
+ *                  already counts splays it could not place (no usable
+ *                  distance/azimuth/inclination); this is the sum of
+ *                  that count over every band, so a profile report can
+ *                  name the gap the same way CsDraw already does for
+ *                  plan view instead of it dying at this, the only
+ *                  entry point Tasks 8-11 call}
  * }
  */
 CsProfile.build = function(survey, resolved, opts) {
@@ -2239,6 +2246,7 @@ CsProfile.build = function(survey, resolved, opts) {
     var omittedOf = {};      // stationName -> true, any run's omitted list
     var drawnStationOf = {}; // stationName -> true, appeared in some band.stations
     var drawnLeg = {};       // "from to" AND "to from" -> true
+    var wallPointsSkipped = 0; // review I3: summed across every band
 
     for (var i = 0; i < hier.order.length; i++) {
         var key = hier.order[i];
@@ -2253,6 +2261,7 @@ CsProfile.build = function(survey, resolved, opts) {
         band.floor = walls.floor;
         band.flat = walls.flat;
         band.parent = hier.parents[key];
+        wallPointsSkipped += walls.skipped;
         bands.push(band);
 
         for (var k = 0; k < band.omitted.length; k++) {
@@ -2317,7 +2326,8 @@ CsProfile.build = function(survey, resolved, opts) {
             strandedRoots: hier.strandedRoots,
             stopped: stopped,
             ungrouped: grouped.ungrouped,
-            undrawn: undrawn
+            undrawn: undrawn,
+            wallPointsSkipped: wallPointsSkipped
         }
     };
 };

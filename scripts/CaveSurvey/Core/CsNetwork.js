@@ -97,6 +97,13 @@ var CsNetwork = {};
  *               itself exactly as it always has.
  *   unresolved: [shot] shots whose stations never connected
  *   skipped:    [shot] excluded / splay shots not resolved
+ *   anchorZUnknown: null when the anchor got a real elevation (or
+ *               there was no explicit anchor at all); otherwise
+ *               {name, reason} -- the anchor was placed anyway (x/y
+ *               matter to plan view even without a z), but at z =
+ *               null rather than a fabricated 0. See the "SIXTH DOOR"
+ *               comment above `anchorEffectiveZ` for why null, not 0,
+ *               and what still does not know about it.
  * }
  */
 CsNetwork.resolve = function(survey, opts) {
@@ -168,14 +175,57 @@ CsNetwork.resolve = function(survey, opts) {
     // elsewhere in this codebase. An EXPLICIT z -- including an
     // explicit 0 -- always wins; this fallback only fires when the
     // caller supplied none at all.
+    //
+    // SIXTH DOOR in the elevation-datum-trap family (see CsTraverse.
+    // offset's own docblock for the first five): `.z || 0.0` treats an
+    // absent z exactly like a real zero, same disease as `null * cos`.
+    // CsTraverse.unusable is the established, already-reviewed test
+    // for "cannot function as part of a real measurement" (absent or
+    // non-finite, but never a real 0) -- reused here rather than
+    // re-deriving the same distinction a second way. Every CURRENT
+    // writer of survey.fixed always sets a real z (CsSurvex/CsWalls/
+    // CsCsv default an omitted #Fix/*fix elevation to 0.0 themselves,
+    // and CsTags/SurveyNotebook do the same reading a drawing's own
+    // Elevation tag -- a different, already-named sibling bug, not
+    // this one), so `survey.fixed[...].z` cannot actually BE unusable
+    // today; this guards the CONTRACT, not a reachable input, exactly
+    // as CsTraverse.offset's own guard did before Task 5b's fix.
+    //
+    // What absent should DO: anchor WITHOUT an elevation (z = null,
+    // not refused) and report it, rather than declining to place the
+    // anchor at all. Refusing would also discard the anchor's x/y --
+    // the very case the comment above calls the COMMON one ("most
+    // callers only know a plan position") -- so plan view, which does
+    // not read station.z at all, would silently stop resolving
+    // anything for the ordinary "I don't know this point's elevation
+    // yet" caller. `null` is also not a new vocabulary word: it is
+    // exactly what CsProfile.zOf already treats as "no resolved Z" and
+    // reports rather than fabricates (see its own docblock). A null
+    // anchor z DOES still reach ordinary `+`/`-` arithmetic further
+    // down this file and in CsAdjust (`fs.z + of.dz`, etc.), where
+    // JavaScript's `null + n` is `n` -- so a descendant station's
+    // elevation would be computed as though the anchor sat at 0. That
+    // is the SAME class of gap this file's callers of CsTraverse.
+    // offset were audited and left with (see Task 5b's commit): making
+    // every `.z` arithmetic site in resolve()/CsAdjust null-tolerant is
+    // a different, larger task, not this one, and -- like those
+    // callers -- unreachable today because no current writer ever
+    // hands this file a null z. `anchorZUnknown` names the gap so a
+    // future caller/report can see it instead of it vanishing into an
+    // ordinary-looking 0.
     var anchorEffectiveZ;
+    var anchorZUnknown = null;
     if (opts.anchor !== undefined && opts.anchor !== null) {
-        if (opts.anchor.z !== undefined && opts.anchor.z !== null) {
+        if (!CsTraverse.unusable(opts.anchor.z)) {
             anchorEffectiveZ = opts.anchor.z;
-        } else if (survey.fixed.hasOwnProperty(opts.anchor.name)) {
-            anchorEffectiveZ = survey.fixed[opts.anchor.name].z || 0.0;
+        } else if (survey.fixed.hasOwnProperty(opts.anchor.name) &&
+                !CsTraverse.unusable(survey.fixed[opts.anchor.name].z)) {
+            anchorEffectiveZ = survey.fixed[opts.anchor.name].z;
         } else {
-            anchorEffectiveZ = 0.0;
+            anchorEffectiveZ = null;
+            anchorZUnknown = { name: opts.anchor.name,
+                reason: "no elevation given for the anchor, and none " +
+                    "on record for its control point" };
         }
         place(opts.anchor.name, opts.anchor.x, opts.anchor.y,
             anchorEffectiveZ, null);
@@ -557,7 +607,8 @@ CsNetwork.resolve = function(survey, opts) {
         anchors: anchors,
         controlFrame: controlFrame,
         unresolved: unresolved,
-        skipped: skipped
+        skipped: skipped,
+        anchorZUnknown: anchorZUnknown
     };
 };
 
