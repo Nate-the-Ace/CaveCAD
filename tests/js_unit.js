@@ -8832,6 +8832,122 @@ if (!IS_NODE) {
 }());
 
 // ---------------------------------------------------------------------
+// Profile -- Task 3: chain finding and unrolling one band.
+// ---------------------------------------------------------------------
+
+(function() {
+    // A1 -> A2 -> A3 level, then A3 -> A4 down at 45 degrees.
+    // A2 also carries a dead-end A2 -> A5 that is IN run A but off
+    // the longest chain.
+    var sv = CsModel.newSurvey();
+    sv.shots = [
+        shotOf("A1", "A2", 10, 0, 0),
+        shotOf("A2", "A3", 10, 90, 0),
+        shotOf("A3", "A4", 10, 90, -45),
+        shotOf("A2", "A5", 3, 180, 0)
+    ];
+    var r = CsNetwork.resolve(sv, {});
+    var g = CsProfile.groupRuns(r);
+    var h = CsProfile.hierarchy(g, r);
+    var band = CsProfile.unrollBand(g.runs["A"], null, r, h, {});
+
+    ok(band.stations[0].name === "A1", "root band starts at its own first station");
+    near(band.stations[0].x, 0, 1e-9, "first station at X 0");
+    near(band.stations[1].x, 10, 1e-9, "level leg advances X by its length");
+    near(band.stations[2].x, 20, 1e-9, "second level leg advances X again");
+
+    // 10 ft at -45 deg: plan 7.0711, rise -7.0711
+    near(band.stations[3].x, 20 + 7.0710678, 1e-5, "sloped leg advances by plan");
+    near(band.stations[3].y, -7.0710678, 1e-5, "sloped leg drops by rise");
+
+    // the drawn leg length is the slope distance, which is the point
+    var dx = band.stations[3].x - band.stations[2].x;
+    var dy = band.stations[3].y - band.stations[2].y;
+    near(Math.sqrt(dx * dx + dy * dy), 10, 1e-5, "leg draws at slope length");
+
+    ok(band.omitted.indexOf("A5") >= 0, "off-chain station reported omitted");
+    ok(band.legs.length === 3, "three legs in the band");
+
+    // A5-A2-A3-A4 is exactly as long as A1-A2-A3-A4, so without a
+    // tie-break the band's contents would depend on iteration order
+    ok(band.stations[0].name === "A1",
+        "equal-length chains resolve to the lower station sequence");
+}());
+
+(function() {
+    // the second tie-break: equal length, equal lowest sequence, so the
+    // lower HIGHEST sequence wins -- A13-A14-A15 over A13-A14-A99
+    var sv = CsModel.newSurvey();
+    sv.shots = [
+        shotOf("A13", "A14", 10, 0, 0),
+        shotOf("A14", "A15", 10, 0, 0),
+        shotOf("A14", "A99", 3, 270, 0)
+    ];
+    var r = CsNetwork.resolve(sv, {});
+    var found = CsProfile.longestChain(
+        CsProfile.groupRuns(r).runs["A"], r);
+    ok(found.chain.join(",") === "A13,A14,A15",
+        "lower highest sequence wins (got " + found.chain.join(",") + ")");
+    ok(found.omitted.join(",") === "A99", "A99 reported omitted");
+}());
+
+(function() {
+    // doubling back in plan must still advance X
+    var sv = CsModel.newSurvey();
+    sv.shots = [
+        shotOf("A1", "A2", 10, 0, 0),
+        shotOf("A2", "A3", 10, 180, 0)   // straight back over A1
+    ];
+    var r = CsNetwork.resolve(sv, {});
+    var g = CsProfile.groupRuns(r);
+    var band = CsProfile.unrollBand(g.runs["A"], null, r,
+        CsProfile.hierarchy(g, r), {});
+    near(band.stations[2].x, 20, 1e-9, "extended elevation never doubles back");
+}());
+
+(function() {
+    // a spur band opens with its tie station at X 0
+    var sv = CsModel.newSurvey();
+    sv.shots = [
+        shotOf("A1", "A2", 10, 0, 0),
+        shotOf("A2", "A2a1", 6, 90, 0),
+        shotOf("A2a1", "A2a2", 6, 90, 0)
+    ];
+    var r = CsNetwork.resolve(sv, {});
+    var g = CsProfile.groupRuns(r);
+    var h = CsProfile.hierarchy(g, r);
+    var band = CsProfile.unrollBand(g.runs["A2a"], h.ties["A2a"], r, h, {});
+
+    ok(band.stations[0].name === "A2", "spur band opens at its tie station");
+    near(band.stations[0].x, 0, 1e-9, "tie station at X 0");
+    near(band.stations[1].x, 6, 1e-9, "tie leg is drawn in the band");
+    ok(band.legs.length === 2, "tie leg plus the spur's own leg");
+    ok(band.tie === "A2", "band records its tie");
+}());
+
+(function() {
+    // elevation datum: a cave anchored at 1200 must profile at 1200
+    var sv = CsModel.newSurvey();
+    sv.shots = [shotOf("A1", "A2", 10, 0, 0)];
+    var r = CsNetwork.resolve(sv, { anchor: { name: "A1", x: 0, y: 0, z: 1200 } });
+    var g = CsProfile.groupRuns(r);
+    var band = CsProfile.unrollBand(g.runs["A"], null, r,
+        CsProfile.hierarchy(g, r), {});
+    near(band.stations[0].y, 1200, 1e-9, "profile keeps the absolute datum");
+    near(band.datum, 1200, 1e-9, "band datum is its own first elevation");
+
+    // exaggeration scales about the datum, and leaves X alone
+    var sv2 = CsModel.newSurvey();
+    sv2.shots = [shotOf("A1", "A2", 10, 0, -45)];
+    var r2 = CsNetwork.resolve(sv2, {});
+    var b2 = CsProfile.unrollBand(CsProfile.groupRuns(r2).runs["A"], null, r2,
+        CsProfile.hierarchy(CsProfile.groupRuns(r2), r2),
+        { exaggeration: 2.0 });
+    near(b2.stations[1].y, -7.0710678 * 2.0, 1e-5, "Y doubled");
+    near(b2.stations[1].x, 7.0710678, 1e-5, "X untouched by exaggeration");
+}());
+
+// ---------------------------------------------------------------------
 // Report.
 // ---------------------------------------------------------------------
 

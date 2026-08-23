@@ -229,11 +229,14 @@ CsProfile.groupRuns = function(resolved) {
  * the band would stop at it.
  *
  * INVARIANT: this function's kind filter (closures out, "new"/"tie" in)
- * and CsProfile.legBetween's kind filter (Task 5) MUST stay identical.
- * They agree today only because both happen to skip exactly "closure" --
- * if either one's filter changes without the other, a chain step this
- * graph offers becomes one legBetween cannot resolve, and the band
- * search stops dead at it with no error, just a short band.
+ * and CsProfile.legBetween's kind filter (Task 3) MUST stay identical.
+ * They are written to agree BY STATEMENT, not by luck (Task 2's review
+ * flagged that the earlier draft only agreed incidentally) -- both
+ * exclude exactly "closure" (and, belt-and-braces, a splay shot,
+ * which resolve() never actually emits as a leg). If either filter
+ * ever changes without the other, a chain step this graph offers
+ * becomes one legBetween cannot resolve, and the band search stops
+ * dead at it with no error, just a short band.
  *
  * Run hierarchy does NOT use this graph; it builds its own from
  * resolved.legs, closures included, because a second contact through a
@@ -790,4 +793,288 @@ CsProfile.bandOrder = function(grouped, parents, ties, resolved) {
         }
     }
     return out;
+};
+
+/** The numeric value of a station's sequence, or a large number when
+ *  it is not numeric -- so lettered sequences sort after numbered. */
+CsProfile.seqNumOf = function(name) {
+    var s = CsProfile.splitName(name);
+    if (s === null || !/^[0-9]+$/.test(s.seq)) {
+        return Number.MAX_VALUE;
+    }
+    return parseInt(s.seq, 10);
+};
+
+/**
+ * Is `path` a better chain than `best`? Longer wins. Equal length is
+ * broken by the LOWEST station sequence in the path, then by the
+ * highest -- so A1-A2-A3-A4 beats A9-A2-A3-A4, and A13-A14-A15 beats
+ * A13-A14-A99. Still tied (same multiset of sequence extremes), the
+ * path's own text breaks it, so two genuinely distinct paths never
+ * compare equal.
+ *
+ * WHY A TIE-BREAK IS REQUIRED, not a nicety: a spur one leg long off
+ * an interior station produces an alternative path of EXACTLY the same
+ * length as the main chain, so "longest wins" alone leaves the band's
+ * contents decided by object iteration order. That is a band that
+ * changes shape between runs for no reason the user did anything to.
+ *
+ * NOT fed to Array.prototype.sort (so CaveCAD's unstable sort is not
+ * directly in play here), but the same discipline applies for the same
+ * reason: this is called as a boolean "is path better" predicate while
+ * walking a deterministic DFS order (run.stations is already sorted by
+ * CsProfile.seqOrder, and adjacency lists are built in resolved.legs
+ * order -- neither depends on this engine's sort), so as long as no two
+ * DISTINCT paths ever both return false against each other here, the
+ * winner is independent of which one the walk reaches first. The final
+ * `path.join(",") < best.join(",")` branch is what guarantees that: two
+ * different station lists never produce equal strings.
+ */
+CsProfile.betterChain = function(path, best) {
+    if (path.length !== best.length) {
+        return path.length > best.length;
+    }
+    if (path.length === 0) {
+        return false;
+    }
+    var stat = function(list) {
+        var lo = Number.MAX_VALUE, hi = -1;
+        for (var i = 0; i < list.length; i++) {
+            var v = CsProfile.seqNumOf(list[i]);
+            if (v < lo) { lo = v; }
+            if (v > hi) { hi = v; }
+        }
+        return { lo: lo, hi: hi };
+    };
+    var a = stat(path), b = stat(best);
+    if (a.lo !== b.lo) {
+        return a.lo < b.lo;
+    }
+    if (a.hi !== b.hi) {
+        return a.hi < b.hi;
+    }
+    // Still tied: decide on the station names themselves rather than on
+    // which one the walk happened to reach first. Search order is not a
+    // property a band's contents should depend on.
+    return path.join(",") < best.join(",");
+};
+
+/**
+ * The longest simple path through one run's own stations.
+ *
+ * Runs are chains in practice, so an exhaustive depth-first search
+ * from every member is affordable and exact -- no heuristic to be
+ * wrong about. Cost is bounded by the run's own size, not the survey's,
+ * because the walk only ever crosses edges into stations `inRun`.
+ *
+ * A run graph built from "new"/"tie" edges (CsProfile.adjacency) is a
+ * tree in the ordinary case -- any loop-closing shot within one
+ * connected component resolves as "closure" and adjacency excludes
+ * it -- so this search is linear-ish in practice (each start explores
+ * its own tree once). If a run's own members ever did carry an
+ * internal cycle through "new"/"tie" edges only, the `visited` guard
+ * still stops the walk from looping forever; it can just cost more.
+ *
+ * \return {chain: [name], omitted: [name]} omitted = run members not
+ *         on the chain, in sequence order
+ */
+CsProfile.longestChain = function(run, resolved) {
+    var adj = CsProfile.adjacency(resolved);
+    var inRun = {};
+    var i;
+    for (i = 0; i < run.stations.length; i++) {
+        inRun[run.stations[i]] = true;
+    }
+
+    var best = [];
+    var walk = function(at, visited, path) {
+        path.push(at);
+        if (CsProfile.betterChain(path, best)) {
+            best = path.slice(0);
+        }
+        var links = adj[at] || [];
+        for (var k = 0; k < links.length; k++) {
+            var nxt = links[k].other;
+            if (!inRun[nxt] || visited[nxt]) {
+                continue;
+            }
+            visited[nxt] = true;
+            walk(nxt, visited, path);
+            visited[nxt] = false;
+        }
+        path.pop();
+    };
+    for (i = 0; i < run.stations.length; i++) {
+        var visited = {};
+        visited[run.stations[i]] = true;
+        walk(run.stations[i], visited, []);
+    }
+
+    var onChain = {};
+    for (i = 0; i < best.length; i++) {
+        onChain[best[i]] = true;
+    }
+    var omitted = [];
+    for (i = 0; i < run.stations.length; i++) {
+        if (!onChain[run.stations[i]]) {
+            omitted.push(run.stations[i]);
+        }
+    }
+
+    // orient the chain by sequence: a survey reads from its low
+    // numbers outward, so the band should too
+    if (best.length >= 2) {
+        var a = CsProfile.splitName(best[0]);
+        var b = CsProfile.splitName(best[best.length - 1]);
+        if (a !== null && b !== null &&
+                CsProfile.seqOrder(a.seq, b.seq) > 0) {
+            best.reverse();
+        }
+    }
+
+    return { chain: best, omitted: omitted };
+};
+
+/**
+ * The leg joining two named stations, or null.
+ *
+ * INVARIANT (see CsProfile.adjacency's own docblock): this function's
+ * kind filter and adjacency's MUST stay identical, both excluding
+ * exactly "closure" (and, belt-and-braces, a splay shot -- resolve()
+ * never actually emits one as a leg). The chain walk finds candidate
+ * steps through adjacency and resolves each one through this function;
+ * if the two filters ever disagreed, a step adjacency offers could
+ * become one this cannot resolve, and unrollBand would silently stop
+ * the band there instead of erroring.
+ */
+CsProfile.legBetween = function(a, b, resolved) {
+    for (var i = 0; i < resolved.legs.length; i++) {
+        var leg = resolved.legs[i];
+        if (leg.kind === "closure") {
+            continue;
+        }
+        if (leg.shot !== undefined && leg.shot !== null && leg.shot.splay) {
+            continue;
+        }
+        if ((leg.from === a && leg.to === b) ||
+                (leg.from === b && leg.to === a)) {
+            return leg;
+        }
+    }
+    return null;
+};
+
+/**
+ * Unrolls one run into a band.
+ *
+ * X advances by each leg's PLAN distance (d * cos inc) and Y is the
+ * station's resolved Z, so the drawn leg length is its slope distance
+ * and every leg appears at true length. X only ever increases: a
+ * passage that doubles back in plan does not double back here, which
+ * is what "extended" means.
+ *
+ * The band OPENS AT ITS TIE STATION, at X = 0, so the leg joining the
+ * run to its parent is drawn inside this band. Without that, the tie
+ * leg belongs to no band at all and vanishes from the profile.
+ *
+ * NEVER DEFAULTS A MISSING Z TO 0. A station with no resolved Z ends
+ * the band right there (`stopped`), including the tie station itself
+ * or the chain's very first member -- `datum` in that case comes back
+ * null, not 0, because a fabricated sea-level datum for a cave
+ * surveyed to an unrelated absolute datum is exactly the bug class
+ * this codebase keeps finding and closing doors on.
+ *
+ * \param run      one grouped run {key, stations}
+ * \param tie      the tie station name, or null for the root run
+ * \param resolved CsNetwork.resolve() result
+ * \param hier     CsProfile.hierarchy() result (unused today; passed so
+ *                 callers need not special-case, and so a future
+ *                 orientation rule has it to hand)
+ * \param opts     {exaggeration: number (default 1), tapeMode}
+ *
+ * \return {
+ *   key, tie, datum,
+ *   stations: [{name, x, y, z}],
+ *   legs:     [{shot, from, to, fromX, fromY, toX, toY}],
+ *   omitted:  [name] run members off the chain,
+ *   stopped:  name | null -- station that ended the band early, either
+ *             for having no resolved Z or because the chain step into
+ *             it has no leg legBetween can resolve
+ * }
+ */
+CsProfile.unrollBand = function(run, tie, resolved, hier, opts) {
+    opts = opts || {};
+    var exag = (opts.exaggeration === undefined ||
+        opts.exaggeration === null) ? 1.0 : opts.exaggeration;
+    var tapeMode = opts.tapeMode || CsTraverse.SLOPE;
+
+    var found = CsProfile.longestChain(run, resolved);
+    var chain = found.chain.slice(0);
+    if (tie !== null && tie !== undefined &&
+            resolved.stations.hasOwnProperty(tie)) {
+        // the chain end nearer the tie leads, so the tie leg is real
+        if (chain.length >= 2 &&
+                CsProfile.legBetween(tie, chain[chain.length - 1], resolved) !== null &&
+                CsProfile.legBetween(tie, chain[0], resolved) === null) {
+            chain.reverse();
+        }
+        chain.unshift(tie);
+    }
+
+    var zOf = function(name) {
+        var st = resolved.stations[name];
+        if (st === undefined || st.z === undefined || st.z === null) {
+            return null;   // NEVER 0: that would rebase an absolute datum
+        }
+        return st.z;
+    };
+
+    // null, not 0, when the chain is empty OR its first member's Z is
+    // unresolved -- either way there is no real elevation to report,
+    // and the main loop below stops at chain[0] itself in the second
+    // case, so no station ever gets drawn against a fabricated datum.
+    var datum = (chain.length > 0) ? zOf(chain[0]) : null;
+    var yOf = function(z) {
+        return datum + (z - datum) * exag;
+    };
+
+    var stations = [], legs = [], stopped = null;
+    var x = 0.0;
+    for (var i = 0; i < chain.length; i++) {
+        var name = chain[i];
+        var z = zOf(name);
+        if (z === null) {
+            stopped = name;
+            break;
+        }
+        if (i > 0) {
+            var leg = CsProfile.legBetween(chain[i - 1], name, resolved);
+            if (leg === null) {
+                stopped = name;   // chain broken: stop, do not invent a link
+                break;
+            }
+            var o = CsTraverse.offset(leg.shot, tapeMode);
+            x += Math.abs(o.plan);
+            legs.push({
+                shot: leg.shot,
+                from: chain[i - 1],
+                to: name,
+                fromX: stations[stations.length - 1].x,
+                fromY: stations[stations.length - 1].y,
+                toX: x,
+                toY: yOf(z)
+            });
+        }
+        stations.push({ name: name, x: x, y: yOf(z), z: z });
+    }
+
+    return {
+        key: run.key,
+        tie: (tie === undefined) ? null : tie,
+        datum: datum,
+        stations: stations,
+        legs: legs,
+        omitted: found.omitted,
+        stopped: stopped
+    };
 };
