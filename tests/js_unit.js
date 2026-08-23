@@ -13457,6 +13457,19 @@ if (!IS_NODE) {
     eqs(CsTrace.reduce(pair, 100.0).length, 2,
         "CsTrace.reduce: endpoints survive any tolerance");
 
+    // No Smoothing is a tolerance of ZERO: every point that departs
+    // from its neighbours' chord at all is kept, so wall detail survives
+    // intact. Only exactly-collinear points drop, which is why a
+    // straight run is still two points and not a hundred.
+    var zig = [];
+    for (var zi = 0; zi <= 20; zi++) {
+        zig.push(pt(zi, (zi % 2) ? 1 : 0));
+    }
+    eqs(CsTrace.reduce(zig, 0).length, zig.length,
+        "CsTrace.reduce: zero tolerance keeps every non-collinear point");
+    eqs(CsTrace.reduce([pt(0, 0), pt(1, 0), pt(2, 0), pt(3, 0)], 0).length, 2,
+        "CsTrace.reduce: zero tolerance still collapses a straight run");
+
     var reduceSource = [pt(0, 0), pt(1, 0), pt(2, 0)];
     CsTrace.reduce(reduceSource, 0.01);
     eqs(reduceSource.length, 3, "CsTrace.reduce: the caller's array is untouched");
@@ -13894,16 +13907,26 @@ if (!IS_NODE) {
         // -- the smoothing table ------------------------------------
         // Tolerance is a FRACTION of the sample spacing, so it means the
         // same thing in a foot drawing and a metre one.
-        ok(FeatureTrace.SMOOTHING.length >= 3,
-            "FeatureTrace.SMOOTHING: at least coarse, medium and fine");
-        var med = FeatureTrace.smoothingFraction("Medium");
-        near(med, 0.5, 1e-9,
-            "FeatureTrace.smoothingFraction: Medium is half the spacing");
+        ok(FeatureTrace.SMOOTHING.length >= 4,
+            "FeatureTrace.SMOOTHING: none, fine, medium and coarse");
+        near(FeatureTrace.smoothingFraction("No Smoothing"), 0.0, 1e-9,
+            "FeatureTrace.smoothingFraction: No Smoothing is a zero tolerance");
         ok(FeatureTrace.smoothingFraction("Fine") <
+                FeatureTrace.smoothingFraction("Medium"),
+            "FeatureTrace.smoothingFraction: Fine is tighter than Medium");
+        ok(FeatureTrace.smoothingFraction("Medium") <
                 FeatureTrace.smoothingFraction("Coarse"),
-            "FeatureTrace.smoothingFraction: finer means a tighter tolerance");
-        near(FeatureTrace.smoothingFraction("nonsense"), 0.5, 1e-9,
-            "FeatureTrace.smoothingFraction: an unknown name falls back to Medium");
+            "FeatureTrace.smoothingFraction: Medium is tighter than Coarse");
+
+        // The scale that shipped was too loose: Medium at HALF the
+        // interval flattened the wall detail. Every step must stay well
+        // under half, or that regression walks back in.
+        ok(FeatureTrace.smoothingFraction("Coarse") < 0.5,
+            "FeatureTrace.SMOOTHING: even Coarse is under half the interval");
+        near(FeatureTrace.smoothingFraction("nonsense"), 0.05, 1e-9,
+            "FeatureTrace.smoothingFraction: an unknown name falls back to the default");
+        eqs(FeatureTrace.DEFAULT_SMOOTHING, "Fine",
+            "FeatureTrace: the default is Fine, not Medium");
 
         // The invariant that fallback relies on.
         ok(FeatureTrace.smoothingFraction(FeatureTrace.DEFAULT_SMOOTHING) > 0,
@@ -13917,7 +13940,7 @@ if (!IS_NODE) {
         // the whole reduction exists to avoid.
         var savedDefault = FeatureTrace.DEFAULT_SMOOTHING;
         FeatureTrace.DEFAULT_SMOOTHING = "Misspelled";
-        near(FeatureTrace.smoothingFraction("also nonsense"), 0.5, 1e-9,
+        near(FeatureTrace.smoothingFraction("also nonsense"), 0.15, 1e-9,
             "FeatureTrace.smoothingFraction: a broken default still yields a usable tolerance");
         FeatureTrace.DEFAULT_SMOOTHING = savedDefault;
 
@@ -13927,22 +13950,28 @@ if (!IS_NODE) {
         FeatureTrace.widgets = undefined;
         near(FeatureTrace.intervalFeet(), 1.0, 1e-9,
             "FeatureTrace.intervalFeet: no panel means one foot");
-        near(FeatureTrace.toleranceFraction(), 0.5, 1e-9,
-            "FeatureTrace.toleranceFraction: no panel means Medium");
+        near(FeatureTrace.toleranceFraction(), 0.05, 1e-9,
+            "FeatureTrace.toleranceFraction: no panel means the default, Fine");
         near(FeatureTraceRun.intervalFeet(), 1.0, 1e-9,
             "FeatureTraceRun.intervalFeet: reads through to the default");
-        near(FeatureTraceRun.toleranceFraction(), 0.5, 1e-9,
+        near(FeatureTraceRun.toleranceFraction(), 0.05, 1e-9,
             "FeatureTraceRun.toleranceFraction: reads through to the default");
 
         // -- and they read the panel when it IS there ---------------
         FeatureTrace.widgets = {
             intervalEdit: { text: "2.5" },
-            smoothingCombo: { currentText: "Fine" }
+            smoothingCombo: { currentText: "Coarse" }
         };
         near(FeatureTrace.intervalFeet(), 2.5, 1e-9,
             "FeatureTrace.intervalFeet: a typed interval is used");
-        near(FeatureTrace.toleranceFraction(), 0.2, 1e-9,
+        near(FeatureTrace.toleranceFraction(), 0.35, 1e-9,
             "FeatureTrace.toleranceFraction: the chosen smoothing is used");
+
+        // No Smoothing must survive the panel read as a real zero, not
+        // get treated as "unset" and replaced by a default.
+        FeatureTrace.widgets = { smoothingCombo: { currentText: "No Smoothing" } };
+        near(FeatureTrace.toleranceFraction(), 0.0, 1e-9,
+            "FeatureTrace.toleranceFraction: No Smoothing reads as zero, not unset");
 
         // Junk in the box must not stop a trace, and must not become a
         // spacing of zero -- CsTrace.resample would return the raw drag.

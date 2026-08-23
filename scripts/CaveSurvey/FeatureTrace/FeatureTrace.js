@@ -73,16 +73,32 @@ FeatureTrace.ROWS = [
  * How hard to thin the trace, as a FRACTION of the sample spacing.
  *
  * A fraction and not an absolute distance, so one setting means the
- * same thing in a foot drawing and a metre one. Coarse keeps only what
- * departs from the chord by a whole interval; Fine keeps a fifth of it.
+ * same thing in a foot drawing and a metre one.
+ *
+ * The first scale here was far too loose -- Medium at HALF the interval
+ * meant a six-inch tolerance at one point per foot, which flattens the
+ * scallops and rock detail that make a cave wall read as a cave wall.
+ * Every step is tighter now, listed from least smoothing to most, and
+ * the default moved to Fine.
+ *
+ * "No Smoothing" is a tolerance of zero: every resampled point becomes
+ * a control point, which is literally one control point per foot of
+ * cave. Only exactly-collinear points drop, so a straight run is still
+ * two points rather than a hundred.
+ *
+ * Note the OTHER lever: reduction can only keep detail the resampling
+ * left. At the default one-foot interval, nothing smaller than a foot
+ * survives no matter what this is set to. For finer walls, lower the
+ * Interval as well.
  */
 FeatureTrace.SMOOTHING = [
-    { label: "Coarse", fraction: 1.0 },
-    { label: "Medium", fraction: 0.5 },
-    { label: "Fine", fraction: 0.2 }
+    { label: "No Smoothing", fraction: 0.0 },
+    { label: "Fine", fraction: 0.05 },
+    { label: "Medium", fraction: 0.15 },
+    { label: "Coarse", fraction: 0.35 }
 ];
 
-FeatureTrace.DEFAULT_SMOOTHING = "Medium";
+FeatureTrace.DEFAULT_SMOOTHING = "Fine";
 
 /** The fraction for a smoothing name, defaulting to Medium. An
  *  unrecognised name must not become a tolerance of zero -- that keeps
@@ -100,7 +116,7 @@ FeatureTrace.smoothingFraction = function(name) {
             return FeatureTrace.SMOOTHING[i].fraction;
         }
     }
-    return 0.5;
+    return 0.15;
 };
 
 /**
@@ -312,10 +328,20 @@ FeatureTrace.buildDock = function(appWin) {
         for (var si = 0; si < FeatureTrace.SMOOTHING.length; si++) {
             w.smoothingCombo.addItem(FeatureTrace.SMOOTHING[si].label);
         }
-        w.smoothingCombo.currentIndex = 1;   // Medium
+        // Selected by NAME. A hardcoded index silently selects the
+        // wrong row the moment the table is reordered -- and it was.
+        for (var sd = 0; sd < FeatureTrace.SMOOTHING.length; sd++) {
+            if (FeatureTrace.SMOOTHING[sd].label ===
+                    FeatureTrace.DEFAULT_SMOOTHING) {
+                w.smoothingCombo.currentIndex = sd;
+                break;
+            }
+        }
         w.smoothingCombo.toolTip = qsTr("How hard to thin the trace. " +
-            "Coarse keeps fewer control points, Fine follows the drag more " +
-            "closely.");
+            "No Smoothing keeps every point -- one control point per " +
+            "interval. Coarse keeps fewest. Detail is also capped by the " +
+            "Interval: nothing smaller than that survives, whatever this " +
+            "is set to.");
         settings.addWidget(w.smoothingCombo, 1, 0);
         layout.addLayout(settings, 0);
     } catch (eSettings) {
