@@ -1927,6 +1927,32 @@ Costs, all concrete:
 
 **Check before either path:** is `band.key` legal in a DXF layer name? It contains a `CsProfile.PAIR_SEP`, and any sanitising has to round-trip back to the run it names. (`frameOf` is fine either way -- `PROFILE-A-CEILING` still starts with `PROFILE-`.)
 
+## Task 10: Per-run profile layers, on demand
+
+**Built already:** `Core/CsLayerVariants.js` -- the general mechanism. Variants are created on demand, inherit their base layer's appearance through `CsLayers.ensure`, keep their frame and binding eligibility by construction (token last), and parse back to (base, token) by testing the remainder against the registry. Composite tokens work with no extra machinery.
+
+**Correction to an earlier claim in this plan:** on-demand variants do NOT weaken `test_registry_layers_exist_in_plan_template`. That test iterates the REGISTRY, and variants are never registry entries, so it needs no exemption and the invariant is untouched. The earlier note said otherwise and was wrong.
+
+**Remaining work:**
+- [ ] `CsProfileDraw` calls `CsLayerVariants.ensure` per band and draws that band to its variant layers, instead of all bands sharing one set
+- [ ] `CsProfileDraw.erase()` scoped to one run's variants, so regenerating run G leaves run A alone -- the ownership win this was for
+- [ ] Feature Trace gains a run selector, so a traced ceiling lands on the right run's layer
+- [ ] An "Isolate Run" command built on `CsLayerVariants.layersForToken`
+- [ ] A token POLICY function: one place decides what token a band gets, so run-only vs run+trip is a one-line change and not a rewrite
+
+### Design question: segregate by trip as well?
+
+> "should we segregate by survey run and trip as well, so we could have visual of something like 'Survey B from Trip 4' and we'd only see that."
+
+Mechanically free -- `nameFor(base, "B-4")` gives `PROFILE-CEILING-B_4` and is tested. Two reasons not to make it the default:
+
+1. **It breaks the no-gap tie-in.** `CsTrace.nearestEnd` ties only within the SAME layer, on purpose, so a surveyed wall cannot weld to an inferred one. Split run B's ceiling into `-B_3` and `-B_4` because it was continued on a later trip and the tie-in REFUSES to join them -- producing exactly the gap that feature exists to prevent, at every trip boundary.
+2. **Trip is already on the entity.** `CsBind.TRIP_TAG` (`LineworkTrip`) carries it and the revision framework depends on it. Trip in the layer name too means two sources of trip truth -- the "second spelling" failure this codebase keeps hitting.
+
+The cleaner division: a survey RUN is stable structure (the profile draws one band per run); a TRIP is provenance. Layers are good at structure, XDATA at provenance.
+
+**Recommendation:** run in the layer, trip stays a tag. "Survey B from Trip 4" becomes an Isolate command combining the run's layers with the trip tag -- which also answers "everything from Trip 4 across all runs", something layer-per-run-per-trip cannot do in one pass. Keep the token policy switchable so run+trip can be tried on a real cave without a rewrite.
+
 ## Deferred decisions
 
 Two things the spec's §12 leaves out on purpose, recorded here so a later reader does not mistake them for oversights:
