@@ -129,6 +129,9 @@
 // per-entity work, previews and undo.
 
 include("scripts/Modify/Transform.js");
+// CsLayers.frameOf: which view a layer belongs to. This tool warps a
+// PLAN onto a scan, and the elevation now lives in the same drawing.
+include(includeBasePath + "/../Core/CsLayers.js");
 
 /**
  * \class AlignImage
@@ -883,11 +886,58 @@ AlignImage.prototype.getFit = function() {
 };
 
 /**
+ * True when this tool may transform the entity at all.
+ *
+ * A PLAN WARP MUST NOT REACH THE ELEVATION. This tool fits a scanned
+ * plan onto known stations: a move, a rotation, a resize, or a
+ * three-station affine warp, all of them statements about EASTING AND
+ * NORTHING. The elevation shares the drawing now, and its X axis is
+ * distance along the passage while its Y is elevation -- rotating that
+ * by the angle a scan happens to be off by produces geometry that
+ * means nothing at all. There is no fit to apply and no correction to
+ * make; the only right answer is to leave it where it is.
+ *
+ * Both halves of the profile frame are refused, generated and traced
+ * alike: the generated half would be redrawn at the wrong place until
+ * the next regeneration silently "fixed" it, and the traced half is the
+ * user's own work, which nothing here may move.
+ *
+ * Defensive: a document or entity this cannot read answers TRUE, so an
+ * unreadable layer name never silently drops a plan entity out of a
+ * warp the user asked for.
+ */
+AlignImage.appliesTo = function(doc, entity) {
+    if (isNull(doc) || isNull(entity)) {
+        return true;
+    }
+    var layerName;
+    try {
+        layerName = doc.getLayerName(entity.getLayerId());
+    } catch (e) {
+        return true;
+    }
+    return CsLayers.frameOf(layerName) !== "profile";
+};
+
+/**
  * Transforms one object. Called by Transform for every picked object.
+ *
+ * Transform (stock QCAD) owns the ONLY place entities are collected for
+ * this tool: it walks the user's selection and calls this once per
+ * entity. So this is also the only place a frame test can go, and one
+ * test here covers every fit the tool can produce.
  */
 AlignImage.prototype.transform = function(entity, k, op, preview, flags) {
     var fit = this.getFit();
     if (isNull(fit)) {
+        return;
+    }
+
+    // Not ours to move: return WITHOUT adding it to the operation, so
+    // the entity is left exactly as it was rather than re-added
+    // unchanged (which would still make it part of the undo step and
+    // still mark the drawing modified).
+    if (!AlignImage.appliesTo(this.getDocument(), entity)) {
         return;
     }
 
