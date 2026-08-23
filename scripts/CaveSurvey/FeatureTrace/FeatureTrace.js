@@ -395,6 +395,23 @@ FeatureTrace.startRun = function() {
     if (isNull(di)) {
         return;
     }
+
+    // If a trace is ALREADY the current action, just leave it running:
+    // armLayer has already changed the target, and the next stroke picks
+    // it up. Calling setCurrentAction again would make QCAD tear down
+    // the action that is running this very click --
+    // deleteTerminatedActions() frees it and the return lands in freed
+    // memory. That is a hard SIGSEGV, and it is what a snap-action
+    // trigger from inside the action lifecycle already cost us once.
+    try {
+        var current = di.getCurrentAction();
+        if (!isNull(current) && current instanceof FeatureTraceRun) {
+            return;
+        }
+    } catch (e) {
+        // cannot read the current action; fall through and start one
+    }
+
     var runAction = RGuiAction.getByScriptFile(
         FeatureTrace.basePath + "/FeatureTraceRun.js");
     di.setCurrentAction(new FeatureTraceRun(runAction));

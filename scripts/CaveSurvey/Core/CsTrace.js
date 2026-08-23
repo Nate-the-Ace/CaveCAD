@@ -355,77 +355,96 @@ CsTrace.degreeFor = function(count) {
     return 3;
 };
 
-/**
- * Switches snapping to free and returns whatever snap was on, so it can
- * be put back. QCAD context only.
- *
- * ANY freehand trace tool must do this. Grid snapping quantises every
- * sampled point to the grid, so a traced wall comes out as a staircase
- * -- and worse, the samples collapse onto each other, so the reduce
- * step throws most of the trace away.
- *
- * Driven through the snap GuiAction rather than di.setSnap alone, so the
- * snap toolbar shows the truth while tracing; a silently-changed snap
- * that the buttons disagree with is its own bug. di.setSnap is the
- * fallback when the action cannot be found.
- *
- * \return the RGuiAction to restore, or null if nothing was checked
- */
-CsTrace.suspendSnap = function(di) {
-    var saved = null;
-    try {
-        var actions = RGuiAction.getActions();
-        for (var i = 0; i < actions.length; i++) {
-            var a = actions[i];
-            if (isNull(a)) {
-                continue;
-            }
-            if (a.getGroup() === "snaps" && a.isChecked()) {
-                saved = a;
-                break;
-            }
-        }
-    } catch (e) {
-        saved = null;   // cannot read the snap state; still go free below
-    }
+/** Snap classes this build has, by name. A TABLE and not eval: the
+ *  name comes from an object's own toString, and eval on that is a
+ *  gadget waiting to happen. RSnapCoordinate is deliberately absent --
+ *  probed, and this build does not define it. */
+CsTrace.SNAPS = {
+    "RSnapFree": function() { return new RSnapFree(); },
+    "RSnapAuto": function() { return new RSnapAuto(); },
+    "RSnapGrid": function() { return new RSnapGrid(); },
+    "RSnapEnd": function() { return new RSnapEnd(); },
+    "RSnapCenter": function() { return new RSnapCenter(); },
+    "RSnapMiddle": function() { return new RSnapMiddle(); },
+    "RSnapIntersection": function() { return new RSnapIntersection(); },
+    "RSnapDistance": function() { return new RSnapDistance(); },
+    "RSnapOnEntity": function() { return new RSnapOnEntity(); },
+    "RSnapPerpendicular": function() { return new RSnapPerpendicular(); },
+    "RSnapReference": function() { return new RSnapReference(); },
+    "RSnapTangential": function() { return new RSnapTangential(); }
+};
 
-    var went = false;
-    try {
-        var free = RGuiAction.getByScriptFile(
-            "scripts/Snap/SnapFree/SnapFree.js");
-        if (!isNull(free)) {
-            free.trigger();
-            went = true;
-        }
-    } catch (e2) {
-        went = false;
+/** The class name of a snap object, or null. getSnap() stringifies as
+ *  e.g. "RSnapGrid [JS]", so the leading identifier is the class. */
+CsTrace.snapNameOf = function(snap) {
+    if (isNull(snap)) {
+        return null;
     }
-    if (!went) {
-        try {
-            di.setSnap(new RSnapFree());
-        } catch (e3) {
-            // no snap control at all; tracing still works, just snapped
-        }
-    }
-    return saved;
+    var m = /^(RSnap[A-Za-z]*)/.exec(String(snap));
+    return m ? m[1] : null;
 };
 
 /**
- * Puts back the snap suspendSnap saved.
+ * Switches snapping to free and returns the NAME of the snap that was
+ * on, so it can be put back.
  *
- * A null saved snap means nothing was checked when we started, so free
- * is already the right state and this does nothing -- restoring some
- * default would be inventing a setting the user never had.
+ * ANY freehand trace tool must do this. Grid snapping quantises every
+ * sampled point onto the grid, so a traced wall comes out a staircase
+ * -- and worse, the samples collapse onto each other, so the reduce
+ * step throws most of the trace away.
+ *
+ * A NAME, not the snap object: RDocumentInterface::setSnap takes
+ * ownership of what it is given, so the object we saved is very likely
+ * freed the moment we install RSnapFree. Restoring it would be a
+ * use-after-free. We construct a fresh one instead.
+ *
+ * Uses di.setSnap ONLY -- never RGuiAction.trigger(). Triggering a snap
+ * action here makes QCAD build a new action, whose setCurrentAction
+ * calls deleteTerminatedActions() and frees the very action that is
+ * running this code. That is a hard SIGSEGV in
+ * RDocumentInterface::deleteTerminatedActions, and it is how this
+ * function was first written.
+ *
+ * The cost of not triggering: the snap toolbar still shows the old snap
+ * while a trace is in progress. It tells the truth again the moment the
+ * tool exits, and a wrong-looking button beats a crash.
+ *
+ * \return the snap class name to restore, or null
  */
-CsTrace.restoreSnap = function(di, saved) {
-    if (isNull(saved)) {
+CsTrace.suspendSnap = function(di) {
+    var name = null;
+    try {
+        name = CsTrace.snapNameOf(di.getSnap());
+    } catch (e) {
+        name = null;
+    }
+    try {
+        di.setSnap(new RSnapFree());
+    } catch (e2) {
+        // no snap control here; tracing still works, just snapped
+    }
+    return name;
+};
+
+/**
+ * Puts back the snap suspendSnap recorded, constructing a fresh one.
+ *
+ * A null or unrecognised name restores nothing: leaving snapping free is
+ * honest, where guessing a default would invent a setting the caver
+ * never chose. Never triggers an action -- see suspendSnap.
+ */
+CsTrace.restoreSnap = function(di, name) {
+    if (isNull(name)) {
+        return;
+    }
+    var make = CsTrace.SNAPS[name];
+    if (isNull(make)) {
         return;
     }
     try {
-        saved.trigger();
+        di.setSnap(make());
     } catch (e) {
-        // the action went away (tool closed, window torn down); the
-        // user's next snap click puts it right and nothing is damaged
+        // the document interface is going away; nothing to repair
     }
 };
 

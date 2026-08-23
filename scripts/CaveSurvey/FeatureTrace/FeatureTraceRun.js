@@ -19,7 +19,7 @@ function FeatureTraceRun(guiAction) {
 
     this.samples = [];      // {x, y} in drawing coordinates
     this.region = null;     // cached profile-frame box; see refreshRegion
-    this.savedSnap = null;  // snap to restore when the action ends
+    this.savedSnap = null;  // snap CLASS NAME to restore on exit
 }
 
 FeatureTraceRun.prototype = new EAction();
@@ -155,7 +155,9 @@ FeatureTraceRun.prototype.beginEvent = function() {
 
     // Grid snap would quantise every sample onto the grid: a traced wall
     // comes out a staircase, and the collapsed samples get thrown away
-    // by the reduce step. Restored in finishEvent below.
+    // by the reduce step. Restored in finishEvent below. setSnap only --
+    // triggering a snap action from an action lifecycle event frees the
+    // running action and segfaults; see CsTrace.suspendSnap.
     this.savedSnap = CsTrace.suspendSnap(this.getDocumentInterface());
 };
 

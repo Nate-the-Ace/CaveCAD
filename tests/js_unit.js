@@ -13957,6 +13957,43 @@ if (!IS_NODE) {
             "FeatureTrace.intervalFeet: nonsense falls back");
         FeatureTrace.widgets = undefined;
 
+        // -- snap suspend / restore, by NAME not by object ----------
+        // The object would be a use-after-free: setSnap takes ownership,
+        // so the snap we saved is freed when RSnapFree replaces it.
+        eqs(CsTrace.snapNameOf(new RSnapGrid()), "RSnapGrid",
+            "CsTrace.snapNameOf: reads the class off a snap object");
+        ok(CsTrace.snapNameOf(null) === null,
+            "CsTrace.snapNameOf: null is null, not a throw");
+        ok(CsTrace.snapNameOf("nonsense") === null,
+            "CsTrace.snapNameOf: junk yields null");
+
+        var snapDoc = new RDocument(new RMemoryStorage(),
+            new RSpatialIndexNavel());
+        var snapDi = new RDocumentInterface(snapDoc);
+        snapDi.setSnap(new RSnapGrid());
+        eqs(CsTrace.snapNameOf(snapDi.getSnap()), "RSnapGrid",
+            "snap fixture: grid snap is on");
+
+        var savedName = CsTrace.suspendSnap(snapDi);
+        eqs(savedName, "RSnapGrid",
+            "CsTrace.suspendSnap: reports the snap it replaced");
+        eqs(CsTrace.snapNameOf(snapDi.getSnap()), "RSnapFree",
+            "CsTrace.suspendSnap: tracing happens with snapping FREE");
+
+        CsTrace.restoreSnap(snapDi, savedName);
+        eqs(CsTrace.snapNameOf(snapDi.getSnap()), "RSnapGrid",
+            "CsTrace.restoreSnap: puts the caver's snap back");
+
+        // A name we cannot build restores nothing rather than inventing
+        // a setting the caver never chose.
+        snapDi.setSnap(new RSnapFree());
+        CsTrace.restoreSnap(snapDi, "RSnapNotAThing");
+        eqs(CsTrace.snapNameOf(snapDi.getSnap()), "RSnapFree",
+            "CsTrace.restoreSnap: an unknown snap name changes nothing");
+        CsTrace.restoreSnap(snapDi, null);
+        eqs(CsTrace.snapNameOf(snapDi.getSnap()), "RSnapFree",
+            "CsTrace.restoreSnap: a null name changes nothing");
+
         // -- the current-layer escape hatch -------------------------
         var scratch = new RDocument(new RMemoryStorage(),
             new RSpatialIndexNavel());
