@@ -1515,7 +1515,7 @@ git commit -m "feat(CsProfile): floor and ceiling from U/D and the splays that m
 - [ ] A band whose elevation span (walls included) clears every placed band keeps `zOffset` 0
 - [ ] A band that would collide is pushed below the lowest placed band by its own height as a gutter, and its `zOffset` is negative
 - [ ] Every leg in the survey appears in exactly one band (coverage assertion, not a spot check)
-- [ ] Findings collected: omitted stations, tie mismatches, second ties, orphan runs, stations with no resolved Z
+- [ ] Findings collected: omitted stations, tie mismatches, second ties, orphan runs (physically disconnected), stranded roots (parentless but connected), stations with no resolved Z — and for each stopped band its `stoppedReason` (`"no-z"` vs `"no-leg"`), since those ask different things of the reader
 
 **Verify:** `node tests/js_unit.js` → `### UNIT OK`, count risen
 
@@ -1667,8 +1667,8 @@ CsProfile.layout = function(bands) {
  * \return {
  *   bands: [band] in band order, each an unrollBand result plus
  *          {ceiling, floor, flat, zOffset},
- *   findings: {omitted, mismatches, secondTies, orphans, stopped,
- *              ungrouped}
+ *   findings: {omitted, mismatches, secondTies, orphans, strandedRoots,
+ *              stopped, ungrouped}
  * }
  */
 CsProfile.build = function(survey, resolved, opts) {
@@ -1711,6 +1711,7 @@ CsProfile.build = function(survey, resolved, opts) {
             mismatches: hier.mismatches,
             secondTies: hier.secondTies,
             orphans: hier.orphans,
+            strandedRoots: hier.strandedRoots,
             stopped: stopped,
             ungrouped: grouped.ungrouped
         }
@@ -2861,12 +2862,30 @@ CsReport.profileSummary = function(profile, outcome) {
         }
     }
     if (f.orphans.length > 0) {
-        lines.push("  no connection to the rest of the survey: " +
-            f.orphans.join(", "));
+        // Disconnected means exactly that: no leg of any kind reaches
+        // the rest of the cave. This one IS actionable -- a connecting
+        // shot is missing.
+        lines.push("  no connection to the rest of the survey, a tie " +
+            "shot is missing: " + f.orphans.join(", "));
+    }
+    if (f.strandedRoots !== undefined && f.strandedRoots.length > 0) {
+        // Connected, but not attached as anyone's child. The data is
+        // fine and nothing needs surveying -- the band simply starts its
+        // own stack. Saying "no connection" here would send someone
+        // hunting for a shot that already exists.
+        lines.push("  connected, but drawn as its own band rather than " +
+            "hanging off another: " + f.strandedRoots.join(", "));
     }
     if (f.stopped.length > 0) {
-        lines.push("  no resolved elevation, band stopped there: " +
-            f.stopped.join(", "));
+        // stoppedReason distinguishes "this station has no elevation"
+        // from "no leg reaches it" -- a reader can act on the first and
+        // only the second points at a gap in the drawn chain.
+        for (i = 0; i < f.stopped.length; i++) {
+            var st = f.stopped[i];
+            var why = (st.reason === "no-leg") ?
+                "no leg reaches it" : "no resolved elevation";
+            lines.push("  band stopped at " + st.station + ": " + why);
+        }
     }
     if (f.ungrouped.length > 0) {
         lines.push("  station names that could not be read as a run: " +
