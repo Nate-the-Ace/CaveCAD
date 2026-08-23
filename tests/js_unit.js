@@ -134,6 +134,15 @@ function near(a, b, tol, what) {
         what + " (expected " + b + " +/- " + tol + ", got " + a + ")");
 }
 
+// Exact equality with a near()-style failure message. Its point is
+// bundled assertions: a single ok(x !== null && x.a === "..." &&
+// x.b === "...", what) reports only which CASE failed, not which
+// FIELD or value -- eqs(actual, expected, what) names the value, so
+// a failure is readable without re-running the test by hand.
+function eqs(a, b, what) {
+    ok(a === b, what + " (expected " + b + ", got " + a + ")");
+}
+
 // ---------------------------------------------------------------------
 // Units
 // ---------------------------------------------------------------------
@@ -8271,32 +8280,38 @@ if (!IS_NODE) {
 // ---------------------------------------------------------------------
 
 (function() {
-    var s = CsProfile.splitName("A20");
-    ok(s !== null && s.base === "A" && s.seq === "20", "A20 splits A + 20");
-    s = CsProfile.splitName("A13a1");
-    ok(s !== null && s.base === "A13a" && s.seq === "1", "A13a1 splits A13a + 1");
-    s = CsProfile.splitName("A13a2b1");
-    ok(s !== null && s.base === "A13a2b" && s.seq === "1",
-        "A13a2b1 splits A13a2b + 1");
-    s = CsProfile.splitName("B1");
-    ok(s !== null && s.base === "B" && s.seq === "1", "B1 splits B + 1");
+    // splitName's result is two fields at once; eqs on a "base|seq"
+    // string names the actual value on failure instead of just the
+    // case label, without three separate ok() calls per name.
+    function sn(name) {
+        var s = CsProfile.splitName(name);
+        return (s === null) ? "null" : (s.base + "|" + s.seq);
+    }
 
-    // one group only: the whole name is the run, no sequence
-    s = CsProfile.splitName("A");
-    ok(s !== null && s.base === "A" && s.seq === "", "bare A is its own run");
+    eqs(sn("A20"), "A|20", "A20 splits A + 20");
+    eqs(sn("A13a1"), "A13a|1", "A13a1 splits A13a + 1");
+    eqs(sn("A13a2b1"), "A13a2b|1", "A13a2b1 splits A13a2b + 1");
+    eqs(sn("B1"), "B|1", "B1 splits B + 1");
+
+    // one group only: the whole name JOINS that run (it is not a
+    // separate run of its own) and carries no sequence
+    eqs(sn("A"), "A|", "bare A joins run A, with no sequence");
 
     // a splay name is not a station name
-    ok(CsProfile.splitName("A3.1") === null, "splay name refused");
-    ok(CsProfile.splitName("") === null, "empty name refused");
-    ok(CsProfile.splitName(null) === null, "null name refused");
+    eqs(sn("A3.1"), "null", "splay name refused");
+    eqs(sn(""), "null", "empty name refused");
+    eqs(sn(null), "null", "null name refused");
 
-    ok(CsProfile.runKeyOf("A13a1") === "A13a", "runKeyOf A13a1");
-    ok(CsProfile.runKeyOf("A20") === "A", "runKeyOf A20");
+    eqs(CsProfile.runKeyOf("A13a1"), "A13a", "runKeyOf A13a1");
+    eqs(CsProfile.runKeyOf("A20"), "A", "runKeyOf A20");
 
-    ok(CsProfile.tieNameOf("A13a") === "A13", "A13a ties A13");
-    ok(CsProfile.tieNameOf("A13a2b") === "A13a2", "A13a2b ties A13a2");
-    ok(CsProfile.tieNameOf("A") === null, "letter run has no name-derived tie");
-    ok(CsProfile.tieNameOf("B") === null, "B has no name-derived tie");
+    eqs(CsProfile.tieNameOfRun("A13a"), "A13", "A13a ties A13");
+    eqs(CsProfile.tieNameOfRun("A13a1"), null,
+        "fed a station name instead of a run key, it refuses");
+    eqs(CsProfile.tieNameOfRun("A13a2b"), "A13a2", "A13a2b ties A13a2");
+    eqs(CsProfile.tieNameOfRun("A"), null,
+        "letter run has no name-derived tie");
+    eqs(CsProfile.tieNameOfRun("B"), null, "B has no name-derived tie");
 }());
 
 (function() {
@@ -8313,10 +8328,13 @@ if (!IS_NODE) {
     var r = CsNetwork.resolve(sv, {});
     var g = CsProfile.groupRuns(r);
 
-    ok(g.order.length === 3, "three runs found");
-    ok(g.runs["A"].stations.join(",") === "A1,A2,A3", "run A members ordered");
-    ok(g.runs["A2a"].stations.join(",") === "A2a1,A2a2", "spur run members");
-    ok(g.runs["B"].stations.join(",") === "B1,B2", "letter run members");
+    // content-checked, not just length: g.order must match the
+    // resolution order the runs were first seen in, A before A2a
+    // before B
+    eqs(g.order.join(","), "A,A2a,B", "runs found in resolution order");
+    eqs(g.runs["A"].stations.join(","), "A1,A2,A3", "run A members ordered");
+    eqs(g.runs["A2a"].stations.join(","), "A2a1,A2a2", "spur run members");
+    eqs(g.runs["B"].stations.join(","), "B1,B2", "letter run members");
 
     // numeric ordering, not lexical: A10 must follow A9
     var sv2 = CsModel.newSurvey();
@@ -8325,8 +8343,96 @@ if (!IS_NODE) {
         shotOf("A10", "A11", 10, 0, 0)
     ];
     var g2 = CsProfile.groupRuns(CsNetwork.resolve(sv2, {}));
-    ok(g2.runs["A"].stations.join(",") === "A9,A10,A11",
+    eqs(g2.runs["A"].stations.join(","), "A9,A10,A11",
         "numeric sequence ordering, not lexical");
+}());
+
+(function() {
+    // The run's origin station -- no sequence at all, e.g. an
+    // entrance or benchmark named plain "A" beside "A1", "A2", ... --
+    // must sort FIRST, not last. Before the fix, seqOrder put an
+    // empty sequence AFTER every numeric one, so "A" trailed "A10".
+    var sv = CsModel.newSurvey();
+    sv.shots = [
+        shotOf("A", "A1", 10, 0, 0),
+        shotOf("A1", "A2", 10, 0, 0),
+        shotOf("A2", "A10", 10, 0, 0)
+    ];
+    var g = CsProfile.groupRuns(CsNetwork.resolve(sv, {}));
+    eqs(g.runs["A"].stations.join(","), "A,A1,A2,A10",
+        "the run's origin leads, then numeric order");
+}());
+
+(function() {
+    // A1 and A01 are DISTINCT stations that parse to the same numeric
+    // value. seqOrder must never call them equal: CaveCAD's sort is
+    // unstable, so an always-0 comparator would place them in whatever
+    // order the engine's internal partitioning happens to leave them,
+    // which can differ by which one the survey lists first. A real
+    // total order does not have that problem -- the result is the same
+    // whichever one comes first in the input.
+    var svFirst = CsModel.newSurvey();
+    svFirst.shots = [
+        shotOf("X1", "A1", 10, 0, 0),
+        shotOf("X1", "A01", 10, 45, 0)
+    ];
+    var svSecond = CsModel.newSurvey();
+    svSecond.shots = [
+        shotOf("X1", "A01", 10, 45, 0),
+        shotOf("X1", "A1", 10, 0, 0)
+    ];
+    var gFirst = CsProfile.groupRuns(CsNetwork.resolve(svFirst, {}));
+    var gSecond = CsProfile.groupRuns(CsNetwork.resolve(svSecond, {}));
+    eqs(gFirst.runs["A"].stations.join(","),
+        gSecond.runs["A"].stations.join(","),
+        "A1/A01 order is fixed, independent of which one is listed first");
+    ok(gFirst.runs["A"].stations.length === 2, "both A1 and A01 kept, not merged");
+}());
+
+(function() {
+    // Property enumeration is not guaranteed to match resolution
+    // order: "9" is a canonical array index by the language spec, so
+    // it enumerates ahead of "A1"/"A2" (ordinary string keys) even
+    // though A1 and A2 resolved first -- true under node too, not
+    // only under CaveCAD's engine. This is the actual case the
+    // names.sort in groupRuns exists for; removing that sort flips
+    // this run order to "9,A".
+    var sv = CsModel.newSurvey();
+    sv.shots = [
+        shotOf("A1", "A2", 10, 0, 0),
+        shotOf("A2", "9", 10, 90, 0)
+    ];
+    var g = CsProfile.groupRuns(CsNetwork.resolve(sv, {}));
+    eqs(g.order.join(","), "A,9",
+        "run order follows resolution order, not property enumeration");
+}());
+
+(function() {
+    // A splay-shaped "station" name must be refused into ungrouped,
+    // not silently dropped or misgrouped. Not something CsNetwork.resolve
+    // would ever actually produce (splays aren't stations), but
+    // groupRuns must not assume its input is already clean.
+    var sv = CsModel.newSurvey();
+    sv.shots = [shotOf("A1", "A2", 10, 0, 0)];
+    var r = CsNetwork.resolve(sv, {});
+    r.stations["A3.1"] = { x: 0, y: 0, z: 0, seq: 99 };
+    var g = CsProfile.groupRuns(r);
+    ok(g.ungrouped.indexOf("A3.1") >= 0,
+        "a splay-shaped name lands in ungrouped, not in a run");
+}());
+
+(function() {
+    // Missing input gets the empty shape, not a thrown TypeError, and
+    // that empty shape must not be confused with "resolved an empty
+    // survey" -- both happen to look the same, which is fine: there is
+    // nothing to group either way.
+    var g1 = CsProfile.groupRuns(undefined);
+    ok(g1.order.length === 0 && g1.ungrouped.length === 0,
+        "groupRuns(undefined) returns the empty shape, does not throw");
+    var g2 = CsProfile.groupRuns(null);
+    ok(g2.order.length === 0, "groupRuns(null) is also empty, not a throw");
+    var g3 = CsProfile.groupRuns({});
+    ok(g3.order.length === 0, "groupRuns({}) with no .stations is also empty");
 }());
 
 // ---------------------------------------------------------------------
