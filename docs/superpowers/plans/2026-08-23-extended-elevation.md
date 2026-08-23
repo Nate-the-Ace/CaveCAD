@@ -1510,6 +1510,7 @@ git commit -m "feat(CsProfile): floor and ceiling from U/D and the splays that m
 
 **Acceptance Criteria:**
 - [ ] `CsProfile.build(survey, resolved, opts)` returns bands in band order, each with its walls and its `zOffset`
+- [ ] `build` constructs the adjacency graph ONCE and passes it to every band. Rebuilding it per band is O(runs × legs) and measured at 60% of total build time on a 401-run survey — `longestChain` takes an optional prebuilt graph for exactly this
 - [ ] A band whose elevation span (walls included) clears every placed band keeps `zOffset` 0
 - [ ] A band that would collide is pushed below the lowest placed band by its own height as a gutter, and its `zOffset` is negative
 - [ ] Every leg in the survey appears in exactly one band (coverage assertion, not a spot check)
@@ -2709,7 +2710,8 @@ git commit -m "feat(CsProfileDraw): draw the elevation, replace only what it dre
 - Modify: `tests/js_unit.js`
 
 **Acceptance Criteria:**
-- [ ] `CsProfile.settings()` reads `CaveSurvey/ProfileAuto` (default true), `CaveSurvey/ProfileVerticalExaggeration` (default 1.0), `CaveSurvey/ProfileFlatSplayDeg` (default 10)
+- [ ] `CsProfile.settings()` reads `CaveSurvey/ProfileAuto` (default true), `CaveSurvey/ProfileVerticalExaggeration` (default 1.0), `CaveSurvey/ProfileFlatSplayDeg` (default 10), `CaveSurvey/ProfileAutoMaxStations` (default 3000)
+- [ ] Above `ProfileAutoMaxStations` the AUTOMATIC pass is skipped and the report says so, naming the manual command. Measured reason: the chain search is quadratic in run length and CaveCAD's engine runs it ~7x slower than node — ~470 ms for one 1000-station run, ~2 s at 2000 — and this runs on every draw. A draw that silently takes seconds longer is worse than one that says why it declined. The manual `GenerateProfile` command is never gated
 - [ ] `CsDraw.survey` calls `CsDraw.profile(survey, resolved)` at its end, after `CsStore.migrate`, and includes the outcome in its return value as `profile`
 - [ ] With `ProfileAuto` false, nothing is opened, written, or created
 - [ ] An unsaved plan drawing produces `{skipped: true, reason: "..."}` and no file
