@@ -8947,6 +8947,84 @@ if (!IS_NODE) {
     near(b2.stations[1].x, 7.0710678, 1e-5, "X untouched by exaggeration");
 }());
 
+(function() {
+    // A run whose only external contact is a CLOSURE leg, not a "new"
+    // or "tie" one. A1-A2-A3 walks into run B (A3-B1-B2, both "new"),
+    // then B2-A1 closes a ring back to the start -- by the time that
+    // shot is resolved both ends are already known and already in the
+    // same component, so CsNetwork.resolve() classifies it "closure",
+    // confirmed by inspecting r.legs below rather than assumed.
+    //
+    // This is deliberately NOT fed through CsProfile.hierarchy to pick
+    // the tie: hierarchy's own phase 1 finds run B's ordinary "new"
+    // parent at A3 first, so the closure at A1 only ever shows up as a
+    // secondTie there -- that is hierarchy's business, not this
+    // function's. What this test targets is unrollBand itself: handed
+    // A1 (the closure-connected station) as `tie` directly, it must
+    // still resolve that tie STEP and draw the tie leg, because the
+    // tie step is not the interior chain walk CsProfile.legBetween
+    // guards -- see CsProfile.tieLegBetween's own docblock for why the
+    // tie step alone is allowed to see a closure.
+    var sv = CsModel.newSurvey();
+    sv.shots = [
+        shotOf("A1", "A2", 10, 0, 0),
+        shotOf("A2", "A3", 10, 90, 0),
+        shotOf("A3", "B1", 10, 180, 0),
+        shotOf("B1", "B2", 10, 270, 0),
+        shotOf("B2", "A1", 5, 0, 0)
+    ];
+    var r = CsNetwork.resolve(sv, {});
+
+    var closureLeg = null;
+    for (var li = 0; li < r.legs.length; li++) {
+        if (r.legs[li].from === "B2" && r.legs[li].to === "A1") {
+            closureLeg = r.legs[li];
+        }
+    }
+    ok(closureLeg !== null && closureLeg.kind === "closure",
+        "fixture assumption: the ring-closing B2-A1 shot resolves as a closure");
+
+    var g = CsProfile.groupRuns(r);
+    var h = CsProfile.hierarchy(g, r);
+    eqs(h.ties["B"], "A3", "fixture assumption: hierarchy's own tie for B is the ordinary new-leg one");
+
+    var band = CsProfile.unrollBand(g.runs["B"], "A1", r, h, {});
+    eqs(band.stations.length, 3, "closure-tied band: tie station plus both of B's own");
+    ok(band.stations[0].name === "A1", "band opens at the closure-connected tie station");
+    ok(band.stations[1].name === "B2", "the closure leg is the tie step, drawn first");
+    ok(band.stations[2].name === "B1", "B's own interior leg still follows, via ordinary legBetween");
+    eqs(band.legs.length, 2, "tie leg (the closure) plus B's one interior leg");
+    ok(band.stopped === null,
+        "a closure-kind tie no longer silently truncates the band");
+}());
+
+(function() {
+    // datum honesty: a station with NO resolved Z at the head of a
+    // chain must stop the band right there, not draw against a
+    // fabricated Y of 0 -- the same bug family (missing Z quietly
+    // rebasing an absolute-datum cave) this file's docblocks call out
+    // repeatedly. Hand-built resolved/run, same style as the M1/I4
+    // bandOrder fixture above, because CsNetwork.resolve() itself never
+    // leaves a placed station's z undefined -- this is the shape a
+    // caller handing unrollBand a partially-built network could still
+    // produce, and it must stay honest even though nothing in normal
+    // resolve() output exercises it today.
+    var run = { key: "A", stations: ["A1", "A2"] };
+    var resolved = {
+        stations: {
+            A1: { x: 0, y: 0, seq: 0 },              // z deliberately absent
+            A2: { x: 0, y: 0, z: 10, seq: 1 }
+        },
+        legs: [
+            { shot: shotOf("A1", "A2", 10, 0, 0), from: "A1", to: "A2", kind: "new" }
+        ]
+    };
+    var band = CsProfile.unrollBand(run, null, resolved, {}, {});
+    ok(band.stopped === "A1", "a missing-Z station at the chain head stops the band there");
+    eqs(band.stations.length, 0, "no station drawn against a fabricated datum");
+    ok(band.datum === null, "datum is null, never a fabricated 0, when the head station has no Z");
+}());
+
 // ---------------------------------------------------------------------
 // Report.
 // ---------------------------------------------------------------------

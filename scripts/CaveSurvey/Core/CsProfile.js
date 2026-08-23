@@ -875,6 +875,17 @@ CsProfile.betterChain = function(path, best) {
  * internal cycle through "new"/"tie" edges only, the `visited` guard
  * still stops the walk from looping forever; it can just cost more.
  *
+ * MEASURED, not assumed (node, this repo's fixtures' scale plus a
+ * synthetic stress run): a straight 300-station chain -- an ordinary
+ * run's actual shape -- unrolls in ~10ms; a straight 1000-station chain
+ * in ~70ms, whether or not it also carries a one-leg spur off every
+ * fifth station (the shape that forces betterChain's tie-break). The
+ * cost that actually hurts is BRANCHING, not length: a run gerrymandered
+ * into a balanced binary tree instead of a chain -- not how real spurs
+ * get named or promoted, see the file banner -- runs ~156ms at 509
+ * stations and ~3.1s at 2045. A real survey run does not take that
+ * shape; if one ever does, this is where to look first.
+ *
  * \return {chain: [name], omitted: [name]} omitted = run members not
  *         on the chain, in sequence order
  */
@@ -936,7 +947,9 @@ CsProfile.longestChain = function(run, resolved) {
 };
 
 /**
- * The leg joining two named stations, or null.
+ * The leg joining two named stations, or null. FOR INTERIOR CHAIN
+ * STEPS ONLY -- see CsProfile.tieLegBetween for the one step (a run's
+ * tie into its parent) that this deliberately does not cover.
  *
  * INVARIANT (see CsProfile.adjacency's own docblock): this function's
  * kind filter and adjacency's MUST stay identical, both excluding
@@ -953,6 +966,57 @@ CsProfile.legBetween = function(a, b, resolved) {
         if (leg.kind === "closure") {
             continue;
         }
+        if (leg.shot !== undefined && leg.shot !== null && leg.shot.splay) {
+            continue;
+        }
+        if ((leg.from === a && leg.to === b) ||
+                (leg.from === b && leg.to === a)) {
+            return leg;
+        }
+    }
+    return null;
+};
+
+/**
+ * The leg joining two named stations, closures included -- the TIE
+ * STEP's lookup, and deliberately not the same one CsProfile.legBetween
+ * gives interior chain steps.
+ *
+ * WHY THIS IS A DIFFERENT FUNCTION, not a flag on legBetween: a flag
+ * that quietly widens a filter is exactly how two filters that are
+ * supposed to agree drift apart again -- see the INVARIANT on
+ * CsProfile.adjacency and CsProfile.legBetween, which this function is
+ * explicitly NOT bound by, and says so by having its own name.
+ *
+ * legBetween excludes "closure" because ITS caller is the interior
+ * chain walk: CsProfile.adjacency only ever OFFERS a step across a
+ * "new"/"tie" edge in the first place, so legBetween refusing a closure
+ * is resolving a graph that already never proposed one -- there is
+ * nothing to disagree about.
+ *
+ * A run's TIE is not a step the chain walk ever proposes; it comes from
+ * CsProfile.hierarchy, which deliberately DOES consider closure and tie
+ * legs when deciding where a run attaches -- a run whose only surveyed
+ * contact anywhere is a ring-closing shot still has to attach
+ * somewhere, and hierarchy's phase 2 exists to let it. Resolving that
+ * same edge against a lookup that refuses closures would be the actual
+ * inconsistency: the edge was chosen by a graph that admits closures,
+ * so it must be resolved by one that does too, or the result is a band
+ * that silently stops one station in -- exactly the failure the
+ * legBetween/adjacency invariant exists to prevent, just relocated to
+ * the one edge that invariant was never about.
+ *
+ * Geometrically this is sound, not merely permitted: a closure leg is
+ * a real surveyed shot with a real length. An extended elevation draws
+ * every leg at its own resolved coordinates -- X cumulative along the
+ * band, Y each station's own resolved Z -- so a closure leg's
+ * misclosure is already absorbed into those coordinates before this
+ * function ever sees it, exactly as it is in plan. Drawing it
+ * introduces no contradiction.
+ */
+CsProfile.tieLegBetween = function(a, b, resolved) {
+    for (var i = 0; i < resolved.legs.length; i++) {
+        var leg = resolved.legs[i];
         if (leg.shot !== undefined && leg.shot !== null && leg.shot.splay) {
             continue;
         }
@@ -998,8 +1062,10 @@ CsProfile.legBetween = function(a, b, resolved) {
  *   legs:     [{shot, from, to, fromX, fromY, toX, toY}],
  *   omitted:  [name] run members off the chain,
  *   stopped:  name | null -- station that ended the band early, either
- *             for having no resolved Z or because the chain step into
- *             it has no leg legBetween can resolve
+ *             for having no resolved Z or because a chain step has no
+ *             leg to resolve it with (legBetween for an interior step,
+ *             CsProfile.tieLegBetween for the tie step -- see that
+ *             function for why the tie step alone may see a closure)
  * }
  */
 CsProfile.unrollBand = function(run, tie, resolved, hier, opts) {
@@ -1010,15 +1076,25 @@ CsProfile.unrollBand = function(run, tie, resolved, hier, opts) {
 
     var found = CsProfile.longestChain(run, resolved);
     var chain = found.chain.slice(0);
+    // tied marks which chain INDEX (0, once unshift below runs) is the
+    // tie station, so the main loop knows its one step -- to index 1 --
+    // is the tie step and must resolve through tieLegBetween, not
+    // legBetween: that step's edge came from CsProfile.hierarchy, which
+    // admits closures, not from the interior chain walk, which doesn't.
+    var tied = false;
     if (tie !== null && tie !== undefined &&
             resolved.stations.hasOwnProperty(tie)) {
-        // the chain end nearer the tie leads, so the tie leg is real
+        // the chain end nearer the tie leads, so the tie leg is real.
+        // tieLegBetween, not legBetween: the tie edge itself may be a
+        // closure (see CsProfile.tieLegBetween), and asking legBetween
+        // here would misjudge -- or fail to find -- that very edge.
         if (chain.length >= 2 &&
-                CsProfile.legBetween(tie, chain[chain.length - 1], resolved) !== null &&
-                CsProfile.legBetween(tie, chain[0], resolved) === null) {
+                CsProfile.tieLegBetween(tie, chain[chain.length - 1], resolved) !== null &&
+                CsProfile.tieLegBetween(tie, chain[0], resolved) === null) {
             chain.reverse();
         }
         chain.unshift(tie);
+        tied = true;
     }
 
     var zOf = function(name) {
@@ -1048,7 +1124,12 @@ CsProfile.unrollBand = function(run, tie, resolved, hier, opts) {
             break;
         }
         if (i > 0) {
-            var leg = CsProfile.legBetween(chain[i - 1], name, resolved);
+            // only the tie step (index 0 -> 1, and only when a tie was
+            // actually unshifted on) may resolve through a closure --
+            // every interior step keeps legBetween's stricter filter
+            var leg = (tied && i === 1)
+                ? CsProfile.tieLegBetween(chain[i - 1], name, resolved)
+                : CsProfile.legBetween(chain[i - 1], name, resolved);
             if (leg === null) {
                 stopped = name;   // chain broken: stop, do not invent a link
                 break;
