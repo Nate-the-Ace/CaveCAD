@@ -8444,6 +8444,53 @@ if (!IS_NODE) {
     ok(g3.order.length === 0, "groupRuns({}) with no .stations is also empty");
 }());
 
+(function() {
+    // A1-A4; spur A2a1-A2a2 off A2; letter run B off A3; B rejoins A4
+    var sv = CsModel.newSurvey();
+    sv.shots = [
+        shotOf("A1", "A2", 10, 0, 0),
+        shotOf("A2", "A3", 10, 0, 0),
+        shotOf("A3", "A4", 10, 0, 0),
+        shotOf("A2", "A2a1", 5, 90, 0),
+        shotOf("A2a1", "A2a2", 5, 90, 0),
+        shotOf("A3", "B1", 8, 45, 0),
+        shotOf("B1", "A4", 8, 315, 0)
+    ];
+    var r = CsNetwork.resolve(sv, {});
+    var h = CsProfile.hierarchy(CsProfile.groupRuns(r), r);
+
+    ok(h.parents["A"] === null, "A is the root run");
+    ok(h.parents["A2a"] === "A", "spur A2a hangs off A");
+    ok(h.ties["A2a"] === "A2", "spur A2a ties at A2");
+    ok(h.parents["B"] === "A", "letter run B hangs off A");
+    ok(h.ties["B"] === "A3", "B ties at the earlier of its two A contacts");
+    ok(h.secondTies.length === 1 && h.secondTies[0].run === "B",
+        "B's second contact reported -- it arrives through the closure leg");
+    ok(h.parents["A2a"] !== undefined && h.parents["A"] === null,
+        "a root run does not adopt its own child as parent");
+    ok(h.mismatches.length === 0, "no name/graph mismatch here");
+    ok(h.order[0] === "A", "root band first");
+    ok(h.order.indexOf("A2a") < h.order.indexOf("B"),
+        "siblings ordered by junction distance along the parent");
+}());
+
+(function() {
+    // the spur's name says A13, its first leg really comes off A14
+    var sv = CsModel.newSurvey();
+    sv.shots = [
+        shotOf("A13", "A14", 10, 0, 0),
+        shotOf("A14", "A13a1", 5, 90, 0)
+    ];
+    var r = CsNetwork.resolve(sv, {});
+    var h = CsProfile.hierarchy(CsProfile.groupRuns(r), r);
+
+    ok(h.ties["A13a"] === "A14", "graph tie wins over the name");
+    ok(h.mismatches.length === 1, "mismatch reported");
+    ok(h.mismatches[0].run === "A13a" &&
+        h.mismatches[0].expected === "A13" &&
+        h.mismatches[0].actual === "A14", "mismatch names both stations");
+}());
+
 // ---------------------------------------------------------------------
 // Report.
 // ---------------------------------------------------------------------

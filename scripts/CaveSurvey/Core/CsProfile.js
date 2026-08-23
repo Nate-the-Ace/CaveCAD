@@ -219,3 +219,264 @@ CsProfile.groupRuns = function(resolved) {
 
     return { runs: runs, order: order, ungrouped: ungrouped };
 };
+
+/**
+ * Station -> the legs that touch it, closures and splays excluded.
+ * THE WALKED-CHAIN GRAPH: its consumer is the chain search that lays
+ * out a band (CsProfile.longestChain), which resolves each step through
+ * CsProfile.legBetween -- and that skips closures. Letting a closure in
+ * here would let a chain include a step legBetween cannot resolve, and
+ * the band would stop at it.
+ *
+ * Run hierarchy does NOT use this graph; it builds its own from
+ * resolved.legs, closures included, because a second contact through a
+ * ring is exactly the thing it has to report. See hierarchy().
+ *
+ * \return {stationName: [{leg, other, seq}]} seq = leg index, so
+ *         "which contact came first" is answerable
+ */
+CsProfile.adjacency = function(resolved) {
+    var adj = {};
+    var add = function(at, other, leg, seq) {
+        if (!adj.hasOwnProperty(at)) {
+            adj[at] = [];
+        }
+        adj[at].push({ leg: leg, other: other, seq: seq });
+    };
+    for (var i = 0; i < resolved.legs.length; i++) {
+        var leg = resolved.legs[i];
+        if (leg.kind === "closure") {
+            continue;
+        }
+        if (leg.shot !== undefined && leg.shot !== null && leg.shot.splay) {
+            continue;
+        }
+        add(leg.from, leg.to, leg, i);
+        add(leg.to, leg.from, leg, i);
+    }
+    return adj;
+};
+
+/**
+ * Which run each run hangs off, where it ties in, and what order the
+ * bands go in.
+ *
+ * The parent is decided by the GRAPH: of all legs leaving this run's
+ * stations to a station in another run, the earliest-resolved one
+ * gives the tie station and the parent run. The name-derived tie
+ * (CsProfile.tieNameOfRun) is used only as a cross-check -- when the two
+ * disagree the graph wins, because it is the measured fact, and the
+ * disagreement is reported as a likely naming blunder.
+ *
+ * \param grouped CsProfile.groupRuns() result
+ * \param resolved CsNetwork.resolve() result
+ * \return {
+ *   parents:    {runKey: parentRunKey | null},
+ *   ties:       {runKey: stationName | null},
+ *   order:      [runKey] depth first, siblings by junction distance,
+ *   secondTies: [{run, station, parentRun}] further contacts,
+ *   mismatches: [{run, expected, actual}] name vs graph,
+ *   orphans:    [runKey] runs with no determinable parent
+ * }
+ */
+CsProfile.hierarchy = function(grouped, resolved) {
+    var parents = {}, ties = {}, secondTies = [], mismatches = [];
+    var orphans = [];
+    var runOf = {};
+    var i, k;
+
+    for (i = 0; i < grouped.order.length; i++) {
+        var run = grouped.runs[grouped.order[i]];
+        for (k = 0; k < run.stations.length; k++) {
+            runOf[run.stations[k]] = run.key;
+        }
+    }
+
+    // CONTACTS USE A DIFFERENT GRAPH FROM adjacency(), deliberately.
+    // Closure and tie legs count here: a closure is a real surveyed
+    // shot, and a run that touches its parent a second time through a
+    // ring (B1-A4 closing B1-A3-A4) has to be able to report that
+    // second contact -- excluded, secondTies can never populate at all.
+    // adjacency() stays closure-free because ITS consumer is the chain
+    // search, which resolves each step through CsProfile.legBetween --
+    // and that skips closures too, so a chain routed through a leg
+    // legBetween cannot find would truncate its own band.
+    var contactLegs = [];
+    for (i = 0; i < resolved.legs.length; i++) {
+        var cl = resolved.legs[i];
+        if (cl.shot !== undefined && cl.shot !== null && cl.shot.splay) {
+            continue;
+        }
+        contactLegs.push({ from: cl.from, to: cl.to, seq: i });
+    }
+
+    var seqOf = function(name) {
+        var st = resolved.stations[name];
+        return (st === undefined || st === null || st.seq === undefined ||
+            st.seq === null) ? Number.MAX_VALUE : st.seq;
+    };
+
+    for (i = 0; i < grouped.order.length; i++) {
+        var key = grouped.order[i];
+        var stations = grouped.runs[key].stations;
+        var inRun = {};
+        for (k = 0; k < stations.length; k++) {
+            inRun[stations[k]] = true;
+        }
+        var contacts = [];
+        for (k = 0; k < contactLegs.length; k++) {
+            var cg = contactLegs[k];
+            var mine = null, other = null;
+            if (inRun[cg.from] === true) {
+                mine = cg.from;
+                other = cg.to;
+            } else if (inRun[cg.to] === true) {
+                mine = cg.to;
+                other = cg.from;
+            } else {
+                continue;
+            }
+            var otherRun = runOf[other];
+            if (otherRun === undefined || otherRun === key) {
+                continue;
+            }
+            // DIRECTION MATTERS, and getting it wrong inverts the whole
+            // hierarchy. A2 is adjacent to A2a1, so a symmetric scan
+            // makes run A -- the root -- adopt its own child A2a as its
+            // parent. The parent side is the station that was already on
+            // the ground when this leg was walked, and resolution order
+            // is exactly that record.
+            if (seqOf(other) >= seqOf(mine)) {
+                continue;
+            }
+            contacts.push({
+                station: other,
+                parentRun: otherRun,
+                seq: cg.seq
+            });
+        }
+        // seq here is the leg's index in resolved.legs, unique per leg,
+        // and one leg cannot contribute two contacts to the same run
+        // (both endpoints in this run is skipped above) -- so this
+        // comparator can never return 0 for distinct entries, which is
+        // required of every comparator here: this engine's sort is not
+        // stable.
+        contacts.sort(function(a, b) { return a.seq - b.seq; });
+
+        if (contacts.length === 0) {
+            // the root run, or a run in its own disconnected component
+            parents[key] = null;
+            ties[key] = null;
+            if (i > 0) {
+                orphans.push(key);
+            }
+            continue;
+        }
+
+        parents[key] = contacts[0].parentRun;
+        ties[key] = contacts[0].station;
+        for (k = 1; k < contacts.length; k++) {
+            if (contacts[k].station === contacts[0].station) {
+                continue;   // the same junction reached twice, not a second tie
+            }
+            secondTies.push({
+                run: key,
+                station: contacts[k].station,
+                parentRun: contacts[k].parentRun
+            });
+        }
+
+        var expected = CsProfile.tieNameOfRun(key);
+        if (expected !== null && expected !== ties[key]) {
+            mismatches.push({
+                run: key,
+                expected: expected,
+                actual: ties[key]
+            });
+        }
+    }
+
+    return {
+        parents: parents,
+        ties: ties,
+        order: CsProfile.bandOrder(grouped, parents, ties, resolved),
+        secondTies: secondTies,
+        mismatches: mismatches,
+        orphans: orphans
+    };
+};
+
+/**
+ * Depth-first band order. Siblings are ordered by how far along their
+ * parent they tie in, measured by the tie station's resolution order
+ * (seq) -- along-distance itself is not known until the parent has
+ * been unrolled, and seq is monotone along a chain, so it gives the
+ * same answer without the circular dependency.
+ *
+ * A run whose parent never gets placed (a disconnected component) is
+ * appended at the end rather than dropped.
+ */
+CsProfile.bandOrder = function(grouped, parents, ties, resolved) {
+    var children = {}, roots = [];
+    var i, key;
+
+    for (i = 0; i < grouped.order.length; i++) {
+        key = grouped.order[i];
+        var p = parents[key];
+        if (p === null || p === undefined || !grouped.runs.hasOwnProperty(p)) {
+            roots.push(key);
+            continue;
+        }
+        if (!children.hasOwnProperty(p)) {
+            children[p] = [];
+        }
+        children[p].push(key);
+    }
+
+    var seqOfTie = function(runKey) {
+        var t = ties[runKey];
+        if (t === null || t === undefined ||
+                !resolved.stations.hasOwnProperty(t)) {
+            return Number.MAX_VALUE;
+        }
+        return resolved.stations[t].seq;
+    };
+    for (key in children) {
+        if (children.hasOwnProperty(key)) {
+            children[key].sort(function(a, b) {
+                var d = seqOfTie(a) - seqOfTie(b);
+                if (d !== 0) {
+                    return d;
+                }
+                // two runs leaving the SAME station tie here, and this
+                // engine's sort is unstable -- without a second key the
+                // band order would differ between runs of the same
+                // drawing. Run key is unique, so it ends the tie.
+                return (a < b) ? -1 : ((a > b) ? 1 : 0);
+            });
+        }
+    }
+
+    var out = [], seen = {};
+    var walk = function(runKey) {
+        if (seen[runKey]) {
+            return;   // a cycle in the parent map cannot loop us forever
+        }
+        seen[runKey] = true;
+        out.push(runKey);
+        var kids = children[runKey] || [];
+        for (var c = 0; c < kids.length; c++) {
+            walk(kids[c]);
+        }
+    };
+    for (i = 0; i < roots.length; i++) {
+        walk(roots[i]);
+    }
+    // anything unreached (parent cycle, or parent in another component)
+    for (i = 0; i < grouped.order.length; i++) {
+        if (!seen[grouped.order[i]]) {
+            walk(grouped.order[i]);
+        }
+    }
+    return out;
+};
