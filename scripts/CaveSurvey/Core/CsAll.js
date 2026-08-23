@@ -25,6 +25,17 @@ include(includeBasePath + "/CsTraverse.js");
 include(includeBasePath + "/CsNetwork.js");
 include(includeBasePath + "/CsAdjust.js");
 include(includeBasePath + "/CsLrud.js");
+// The extended elevation: CsProfile (pure geometry) needs CsLrud above
+// for splaysByStation/legCounts; CsProfileDraw needs CsLayers/CsTags/
+// CsDraw, but only inside function BODIES (RVector, RLineEntity, ...),
+// never at load time -- defining a function that REFERENCES a Cs*
+// global does not touch that global until the function actually runs,
+// so this placement matches tests/js_unit.js's own CORE_FILES order
+// (which loads these three right after CsLrud, well before CsLayers/
+// CsTags/CsDraw) rather than needing to sit after them here too.
+include(includeBasePath + "/CsProfile.js");
+include(includeBasePath + "/CsProfileFile.js");
+include(includeBasePath + "/CsProfileDraw.js");
 include(includeBasePath + "/CsValidate.js");
 include(includeBasePath + "/CsStats.js");
 include(includeBasePath + "/CsGrade.js");

@@ -1542,6 +1542,13 @@ CsProfile.unrollBand = function(run, tie, resolved, hier, opts) {
 CsProfile.FLAT_SPLAY_DEG = 10.0;
 
 /**
+ * Default station count above which CsDraw.profile skips the AUTOMATIC
+ * pass (the manual GenerateProfile command, Task 10, is never gated).
+ * See CsProfile.settings' own docblock for what this counts and why.
+ */
+CsProfile.AUTO_MAX_STATIONS_DEFAULT = 3000;
+
+/**
  * Inclination magnitude (degrees) at and beyond which a leg is treated
  * as PLUMB for passage-direction purposes: a shot that steep is a
  * pitch, and a magnetic compass's reading on a near-vertical shot is
@@ -2330,4 +2337,65 @@ CsProfile.build = function(survey, resolved, opts) {
             wallPointsSkipped: wallPointsSkipped
         }
     };
+};
+
+/**
+ * The settings in force. Reads RSettings when there is one and falls
+ * back to the defaults under node, so the pure tests can call it.
+ *
+ * ProfileAuto defaults TRUE: the user asked for the profile to be a
+ * product of drawing, not a command to remember.
+ *
+ * maxStations: CsDraw.profile's own gate on the AUTOMATIC pass, read
+ * from CaveSurvey/ProfileAutoMaxStations. IT MEASURES THE LARGEST
+ * SINGLE RUN, NOT THE SURVEY'S TOTAL STATION COUNT -- that is a
+ * decision this function's caller (CsDraw.profile) makes, but the
+ * number belongs here beside the other profile settings, not
+ * duplicated at every call site. Recorded here because it is easy to
+ * assume the wrong denominator: CsProfile.longestChain's own docblock
+ * is explicit that its cost is QUADRATIC IN RUN LENGTH, not in the
+ * survey's grand total -- a cave chopped into thirty 150-station named
+ * runs (a common shape: one letter per trip) costs nothing like one
+ * 4500-station run does, even though both surveys have 4500 stations.
+ * Gating on the total would block the harmless thirty-run cave outright
+ * while doing nothing extra to catch the one shape that is actually
+ * slow. See CsDraw.profile for where the largest-run figure is computed
+ * (a plain CsProfile.groupRuns() pass -- cheap, since it is the O(n^2)
+ * chain search inside CsProfile.build that this whole gate exists to
+ * avoid running unconditionally).
+ */
+CsProfile.settings = function() {
+    var auto = true, exag = 1.0, dead = CsProfile.FLAT_SPLAY_DEG;
+    var maxStations = CsProfile.AUTO_MAX_STATIONS_DEFAULT;
+    try {
+        auto = RSettings.getBoolValue("CaveSurvey/ProfileAuto", true);
+        exag = RSettings.getDoubleValue(
+            "CaveSurvey/ProfileVerticalExaggeration", 1.0);
+        dead = RSettings.getDoubleValue("CaveSurvey/ProfileFlatSplayDeg",
+            CsProfile.FLAT_SPLAY_DEG);
+        maxStations = RSettings.getIntValue(
+            "CaveSurvey/ProfileAutoMaxStations",
+            CsProfile.AUTO_MAX_STATIONS_DEFAULT);
+    } catch (e) {
+        // no RSettings (node): the defaults above stand
+    }
+    if (!(exag > 0)) {
+        exag = 1.0;   // a zero or negative exaggeration would flatten the cave
+    }
+    if (!(dead >= 0)) {
+        dead = CsProfile.FLAT_SPLAY_DEG;
+    }
+    if (!(maxStations > 0)) {
+        // Guards a corrupted/hand-edited ini value the same way exag
+        // and dead do above -- NOT defensive filler. A NaN (a
+        // non-numeric string in the ini file) fails every ">"/">="
+        // comparison, so an unguarded gate would silently never fire
+        // (every survey looks "under the limit"), and a zero or
+        // negative value would silently ALWAYS fire (every survey looks
+        // "over" it) -- both are the opposite of "the user's setting is
+        // honored", so both fall back to the shipped default instead.
+        maxStations = CsProfile.AUTO_MAX_STATIONS_DEFAULT;
+    }
+    return { auto: auto, exaggeration: exag, flatSplayDeg: dead,
+        maxStations: maxStations };
 };

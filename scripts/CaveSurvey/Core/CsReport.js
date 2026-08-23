@@ -322,3 +322,146 @@ CsReport.igrfLine = function(result, lat, lon, dateText) {
         CsAngles.formatDeclination(result.declination) +
         " (model accuracy is a fraction of a degree -- fine against any compass)";
 };
+
+/**
+ * What the extended elevation drew, and what it could not show.
+ *
+ * The findings half is the point: a profile that quietly dropped a
+ * side lead, drew a spur at the wrong junction, or skipped an
+ * unmeasurable splay looks exactly like a complete one. EVERY field of
+ * CsProfile.build's `findings` is named here, not just the ones an
+ * acceptance checklist happened to enumerate -- an omission in this
+ * function is exactly the silent-gap failure mode the whole feature
+ * exists to avoid.
+ *
+ * orphans and strandedRoots read DIFFERENTLY on purpose: an orphan
+ * means a tie shot is genuinely missing (go shoot one); a strandedRoot
+ * means the data is fine and the band simply starts its own stack.
+ * Wording them the same would send someone hunting for a shot that
+ * already exists.
+ *
+ * \param profile CsProfile.build() result, or null when nothing was built
+ * \param outcome CsDraw.profile() result: {skipped, reason} or
+ *                {path, created, counts}
+ */
+CsReport.profileSummary = function(profile, outcome) {
+    var lines = [];
+    if (outcome !== undefined && outcome !== null && outcome.skipped) {
+        lines.push("Profile: not written -- " + outcome.reason + ".");
+        return lines.join("\n");
+    }
+    if (profile === null || profile === undefined) {
+        return "Profile: nothing to draw.";
+    }
+
+    var c = (outcome && outcome.counts) ? outcome.counts : {};
+    var where = (outcome && outcome.path) ? outcome.path : "the profile drawing";
+    lines.push("Profile " + (outcome && outcome.created ? "created" : "updated") +
+        ": " + where);
+    lines.push("  " + (c.bandsDrawn || 0) + " band(s), " +
+        (c.legsDrawn || 0) + " leg(s), " + (c.stationsDrawn || 0) +
+        " station(s)");
+    lines.push("  " + (c.ceilingRuns || 0) + " ceiling run(s), " +
+        (c.floorRuns || 0) + " floor run(s), " + (c.flatTicks || 0) +
+        " level splay tick(s)");
+    // level splays are counted, not hidden: a splay inside the dead
+    // zone contributed nothing to either line, and a reader who cannot
+    // see how many there were cannot judge whether the dead zone is
+    // set sensibly for this cave
+
+    var f = profile.findings;
+    var i;
+    if (f.mismatches.length > 0) {
+        for (i = 0; i < f.mismatches.length; i++) {
+            lines.push("  CHECK the name: run " + f.mismatches[i].run +
+                " reads as a spur of " + f.mismatches[i].expected +
+                " but ties in at " + f.mismatches[i].actual +
+                " -- drawn at the surveyed junction");
+        }
+    }
+    if (f.omitted.length > 0) {
+        lines.push("  off the main chain, not drawn: " + f.omitted.join(", "));
+    }
+    if (f.secondTies.length > 0) {
+        for (i = 0; i < f.secondTies.length; i++) {
+            lines.push("  run " + f.secondTies[i].run +
+                " also touches " + f.secondTies[i].otherStation +
+                " (drawn as a tie line, not a second band)");
+        }
+    }
+    if (f.orphans.length > 0) {
+        // Disconnected means exactly that: no leg of any kind reaches
+        // the rest of the cave. This one IS actionable -- a connecting
+        // shot is missing.
+        lines.push("  no connection to the rest of the survey, a tie " +
+            "shot is missing: " + f.orphans.join(", "));
+    }
+    if (f.strandedRoots !== undefined && f.strandedRoots.length > 0) {
+        // Connected, but not attached as anyone's child. The data is
+        // fine and nothing needs surveying -- the band simply starts its
+        // own stack. Saying "no connection" here would send someone
+        // hunting for a shot that already exists.
+        lines.push("  connected, but drawn as its own band rather than " +
+            "hanging off another: " + f.strandedRoots.join(", "));
+    }
+    if (f.stopped.length > 0) {
+        // stoppedReason distinguishes THREE causes, not two -- collapsing
+        // "unmeasurable" into "no resolved elevation" would send a
+        // surveyor to re-check a station's depth gauge when the actual
+        // gap is a shot with no usable distance/azimuth/inclination on
+        // record (CsProfile.unrollBand's own "no-z"/"no-leg"/
+        // "unmeasurable" split, see its docblock).
+        for (i = 0; i < f.stopped.length; i++) {
+            var st = f.stopped[i];
+            var why;
+            if (st.reason === "no-leg") {
+                why = "no leg reaches it";
+            } else if (st.reason === "unmeasurable") {
+                why = "the leg to it has no usable distance, azimuth " +
+                    "or inclination on record";
+            } else {
+                // "no-z", and any future reason this function does not
+                // yet know the name of -- silence here would be worse
+                // than a slightly generic label
+                why = "no resolved elevation";
+            }
+            lines.push("  band stopped at " + st.station + ": " + why);
+        }
+    }
+    if (f.ungrouped.length > 0) {
+        lines.push("  station names that could not be read as a run: " +
+            f.ungrouped.join(", "));
+    }
+    if (f.wallPointsSkipped !== undefined && f.wallPointsSkipped > 0) {
+        lines.push("  " + f.wallPointsSkipped + " splay wall point(s) " +
+            "skipped (no usable distance, or no azimuth/inclination, " +
+            "on record)");
+    }
+    if (f.undrawn !== undefined && f.undrawn.length > 0) {
+        // Every leg CsNetwork.resolve() produced is either drawn in a
+        // band above or named here with why -- see CsProfile.build's
+        // own C2 docblock. Grouped by reason (in first-appearance
+        // order, so this never depends on this engine's object-key
+        // enumeration order, unlike a for-in walk would) rather than
+        // naming each leg individually: a survey with many ordinary
+        // loop closures would otherwise bury the findings that ARE
+        // worth a look under a list of the ones that are not.
+        var byReason = {}, reasonOrder = [];
+        for (i = 0; i < f.undrawn.length; i++) {
+            var urKey = f.undrawn[i].reason;
+            if (!byReason.hasOwnProperty(urKey)) {
+                byReason[urKey] = 0;
+                reasonOrder.push(urKey);
+            }
+            byReason[urKey]++;
+        }
+        var undrawnParts = [];
+        for (var ro = 0; ro < reasonOrder.length; ro++) {
+            undrawnParts.push(byReason[reasonOrder[ro]] + " " +
+                reasonOrder[ro]);
+        }
+        lines.push("  legs not drawn on any band (" + f.undrawn.length +
+            "): " + undrawnParts.join(", "));
+    }
+    return lines.join("\n");
+};

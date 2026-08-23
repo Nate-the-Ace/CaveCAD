@@ -808,6 +808,21 @@ CsDraw.survey = function(survey, resolved, originStation, originPos, seqBase) {
 
     CsStore.migrate(doc, di); // convert + drop a legacy store, if any
 
+    // The extended elevation is a PRODUCT of drawing, not a command to
+    // remember: every notebook Draw, import and revision redraw
+    // refreshes the sibling profile file. Gated by CaveSurvey/
+    // ProfileAuto (default true). Wrapped whole: a profile that cannot
+    // be written must never take the plan draw down with it -- the plan
+    // is the drawing the user is looking at, and everything above this
+    // point has already committed real geometry to it.
+    var profileOutcome = { skipped: true, reason: "profile pass not run" };
+    try {
+        profileOutcome = CsDraw.profile(survey, resolved);
+    } catch (eProfile) {
+        profileOutcome = { skipped: true,
+            reason: "profile pass failed: " + eProfile };
+    }
+
     return {
         stationsDrawn: stationsDrawn,
         shotsDrawn: shotsDrawn,
@@ -830,8 +845,86 @@ CsDraw.survey = function(survey, resolved, originStation, originPos, seqBase) {
         // splays that DID draw no longer count as skipped, and neither
         // do the ones skipped for being unmeasurable -- they have
         // their own, more honest count just above
-        skipped: resolved.skipped.length - splaysDrawn - splaysSkipped
+        skipped: resolved.skipped.length - splaysDrawn - splaysSkipped,
+        // {skipped, reason} or {path, created, counts, profile} -- see
+        // CsDraw.profile. A NEW key on an object every existing caller
+        // already reads by name (RebuildSurveyData.js,
+        // ImportCaveSurvey.js, SurveyNotebook.js, CsRevise.js): none of
+        // them destructure this return value positionally or iterate
+        // its keys, so an additional one is additive, not breaking.
+        profile: profileOutcome
     };
+};
+
+/**
+ * Refreshes the sibling extended elevation for the CURRENT drawing.
+ *
+ * Everything document-shaped happens here; the geometry is CsProfile's
+ * and the drawing is CsProfileDraw's. The one thing this function owns
+ * is the decision about WHERE: an already-open profile tab is drawn
+ * into directly (so the user's own view updates and their undo still
+ * works), and otherwise the file is built off screen and revealed.
+ *
+ * GATED ON RUN SIZE, NOT SURVEY SIZE. CsProfile.settings().maxStations
+ * (CaveSurvey/ProfileAutoMaxStations, default 3000) is compared against
+ * the LARGEST SINGLE RUN, via a plain CsProfile.groupRuns() pass -- see
+ * CsProfile.settings' own docblock for why the denominator matters: the
+ * cost this gate exists to avoid (CsProfile.longestChain's chain search)
+ * is quadratic in one run's length, not in the survey's grand total, so
+ * measuring the total would block a cave chopped into many small named
+ * runs for no reason while doing nothing extra to catch the one shape
+ * that is actually slow. groupRuns() itself is a sort, not a chain
+ * search, so checking this costs nothing close to what a skip avoids.
+ * The manual GenerateProfile command (Task 10) is never gated by this.
+ *
+ * \return {skipped, reason} or {path, created, counts, profile}
+ */
+CsDraw.profile = function(survey, resolved) {
+    var settings = CsProfile.settings();
+    if (!settings.auto) {
+        return { skipped: true,
+            reason: "CaveSurvey/ProfileAuto is off" };
+    }
+
+    var grouped = CsProfile.groupRuns(resolved);
+    var largestRun = 0;
+    for (var gi = 0; gi < grouped.order.length; gi++) {
+        var runLen = grouped.runs[grouped.order[gi]].stations.length;
+        if (runLen > largestRun) {
+            largestRun = runLen;
+        }
+    }
+    if (largestRun > settings.maxStations) {
+        return { skipped: true,
+            reason: "the largest survey run has " + largestRun +
+                " stations, over CaveSurvey/ProfileAutoMaxStations (" +
+                settings.maxStations + ") -- run GenerateProfile by " +
+                "hand to build the profile anyway" };
+    }
+
+    var planPath = getDocument().getFileName();
+    var target = CsProfileFile.resolve(planPath);
+    if (target.doc === null) {
+        return { skipped: true, reason: target.reason };
+    }
+
+    var built = CsProfile.build(survey, resolved, {
+        exaggeration: settings.exaggeration,
+        flatSplayDeg: settings.flatSplayDeg
+    });
+    var counts = CsProfileDraw.render(target.doc, target.di, built, {});
+
+    var written = CsProfileFile.commit(target);
+    if (!written) {
+        return { skipped: true,
+            reason: "could not write " + target.path };
+    }
+    if (target.created) {
+        CsProfileFile.reveal(target.path);
+    }
+
+    return { path: target.path, created: target.created,
+        counts: counts, profile: built };
 };
 
 /**
