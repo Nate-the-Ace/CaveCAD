@@ -46,13 +46,14 @@ CsProfileDraw.TAGS = ["ProfileRun", "ProfileStation", "ProfileShot",
     "ProfileBandLabel", "ProfileZOffset"];
 
 /** Layers the profile writes to, created if the drawing lacks them.
- *  CTRL-LRUD is NOT here -- see the TAGS docblock above; this module
- *  never draws a separate LRUD tick, so ensuring that layer would
+ *  CTRL-PROFILE-LRUD is NOT here -- see the TAGS docblock above;
+ *  this module never draws a separate LRUD tick, so ensuring it would
  *  promise geometry that never lands on it. */
 CsProfileDraw.LAYERS = function() {
-    return [CsLayers.SHOTS, CsLayers.STATIONS, CsLayers.STATION_LABELS,
-        CsLayers.SPLAYS, CsLayers.PROFILE_FLOOR, CsLayers.PROFILE_CEILING,
-        CsLayers.TEXT_LABELS];
+    return [CsLayers.PROFILE_SHOTS, CsLayers.PROFILE_STATIONS,
+        CsLayers.PROFILE_STATION_LABELS, CsLayers.PROFILE_SPLAYS,
+        CsLayers.PROFILE_FLOOR, CsLayers.PROFILE_CEILING,
+        CsLayers.PROFILE_TEXT_LABELS];
 };
 
 /**
@@ -266,7 +267,7 @@ CsProfileDraw.labelY0 = function(band) {
 CsProfileDraw.label = function(doc, op, band, at) {
     var text = CsProfileDraw.labelText(band);
     var y = CsProfileDraw.labelY0(band);
-    var label = CsDraw.addText(doc, op, CsLayers.TEXT_LABELS, text,
+    var label = CsDraw.addText(doc, op, CsLayers.PROFILE_TEXT_LABELS, text,
         at(0, y + CsDraw.TEXT_HEIGHT * 4.0), RS.HAlignLeft,
         "ProfileBandLabel", band.key);
     // CsDraw.addText already queued `label` into `op` via its own
@@ -315,7 +316,7 @@ CsProfileDraw.band = function(doc, op, band, counts) {
 
     for (i = 0; i < band.legs.length; i++) {
         var leg = band.legs[i];
-        CsDraw.addLine(doc, op, CsLayers.SHOTS,
+        CsDraw.addLine(doc, op, CsLayers.PROFILE_SHOTS,
             at(leg.fromX, leg.fromY), at(leg.toX, leg.toY),
             "ProfileShot", leg.from + "->" + leg.to, runTag);
         counts.legsDrawn++;
@@ -323,13 +324,14 @@ CsProfileDraw.band = function(doc, op, band, counts) {
 
     for (i = 0; i < band.stations.length; i++) {
         var st = band.stations[i];
-        var pt = CsDraw.addPoint(doc, op, CsLayers.STATIONS, at(st.x, st.y));
+        var pt = CsDraw.addPoint(doc, op, CsLayers.PROFILE_STATIONS,
+            at(st.x, st.y));
         CsTags.set(pt, "ProfileStation", st.name);
         CsTags.set(pt, "ProfileRun", band.key);
         op.addObject(pt, false);
         counts.stationsDrawn++;
 
-        var label = CsDraw.addText(doc, op, CsLayers.STATION_LABELS,
+        var label = CsDraw.addText(doc, op, CsLayers.PROFILE_STATION_LABELS,
             st.name, at(st.x, st.y + CsDraw.TEXT_HEIGHT * 1.5),
             RS.HAlignCenter, "ProfileStation", st.name);
         // Same after-the-fact tagging as CsProfileDraw.label above:
@@ -364,7 +366,7 @@ CsProfileDraw.band = function(doc, op, band, counts) {
     for (i = 0; i < band.flat.length; i++) {
         var f = band.flat[i];
         var half = CsDraw.TEXT_HEIGHT;
-        CsDraw.addLine(doc, op, CsLayers.SPLAYS,
+        CsDraw.addLine(doc, op, CsLayers.PROFILE_SPLAYS,
             at(f.x, f.y - half), at(f.x, f.y + half),
             "ProfileSplay", f.name, runTag);
         counts.flatTicks++;

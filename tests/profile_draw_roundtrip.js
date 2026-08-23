@@ -162,6 +162,38 @@ function isPointEntity(entity) {
         entity.getType() === RS.EntityPoint;
 }
 
+/**
+ * Sweeps EVERY entity the generator produced in one document and
+ * asserts none of it landed in the plan frame.
+ *
+ * The elevation shares one model space with the plan now, so a
+ * generated entity on CTRL-SHOTS would be indistinguishable from a plan
+ * centerline leg -- to the rebuild, to the linework binder, and to a
+ * plan-wide warp. This looks at everything CsProfileBind calls profile
+ * geometry rather than at the handful of entities the per-kind
+ * assertions below name by hand.
+ *
+ * Must be called while the document is still alive: every fixture here
+ * destr()s its RDocumentInterface when done with it.
+ */
+function assertGeneratedStaysInFrame(doc, where) {
+    var ids = doc.queryAllEntities(false, false);
+    var offenders = [], i, e, lname;
+    for (i = 0; i < ids.length; i++) {
+        e = doc.queryEntity(ids[i]);
+        if (isNull(e) || !CsProfileBind.isProfileGeometry(e)) {
+            continue;
+        }
+        lname = doc.getLayerName(e.getLayerId());
+        if (CsLayers.frameOf(lname) !== "profile") {
+            offenders.push(lname);
+        }
+    }
+    eqs(offenders.join(","), "",
+        "every entity the generator drew in " + where + " is on a " +
+        "profile-frame layer");
+}
+
 /** How many scanned entities carry tagKey === tagValue. */
 function countByTag(scanned, tagKey, tagValue) {
     var n = 0;
@@ -265,13 +297,13 @@ for (var a1j = 0; a1j < a1Entities.length; a1j++) {
 ok(a1Point !== null && a1Label !== null,
     "sanity: A1's point and label were told apart");
 if (a1Point !== null) {
-    eqs(a1Point.layer, CsLayers.STATIONS,
-        "the station POINT lands on CTRL-STATIONS");
+    eqs(a1Point.layer, CsLayers.PROFILE_STATIONS,
+        "the station POINT lands on CTRL-PROFILE-STATIONS");
 }
 if (a1Label !== null) {
-    eqs(a1Label.layer, CsLayers.STATION_LABELS,
-        "the station LABEL lands on CTRL-STATION-LABELS, a different " +
-        "layer from its own point");
+    eqs(a1Label.layer, CsLayers.PROFILE_STATION_LABELS,
+        "the station LABEL lands on CTRL-PROFILE-STATION-LABELS, a " +
+        "different layer from its own point");
 }
 // minor: the label sits TEXT_HEIGHT*1.5 above its point -- a comment
 // in CsProfileDraw.band cites this exact number as the reason a
@@ -291,12 +323,13 @@ for (var a1k = 0; a1k < scanned1.length; a1k++) {
 }
 ok(a1a2Leg !== null, "sanity: found the A1->A2 leg");
 if (a1a2Leg !== null) {
-    eqs(a1a2Leg.layer, CsLayers.SHOTS, "a centerline leg lands on CTRL-SHOTS");
+    eqs(a1a2Leg.layer, CsLayers.PROFILE_SHOTS,
+        "a centerline leg lands on CTRL-PROFILE-SHOTS");
 }
 ok(bandALabel !== null, "sanity: found band A's caption");
 if (bandALabel !== null) {
-    eqs(bandALabel.layer, CsLayers.TEXT_LABELS,
-        "a band caption lands on TEXT-LABELS");
+    eqs(bandALabel.layer, CsLayers.PROFILE_TEXT_LABELS,
+        "a band caption lands on PROFILE-TEXT-LABELS");
     // minor: the caption sits TEXT_HEIGHT*4.0 above CsProfileDraw.
     // labelY0(band) (band A's own zOffset is 0, so no further shift).
     var bandA = null;
@@ -312,6 +345,7 @@ if (bandALabel !== null) {
     }
 }
 
+assertGeneratedStaysInFrame(doc, "the base fixture");
 destr(di);
 
 // =======================================================================
@@ -411,8 +445,8 @@ if (floorEnt !== null) {
         "layer -- the whole point of Task 6's layer split");
 }
 if (flatEnt !== null) {
-    eqs(flatEnt.layer, CsLayers.SPLAYS,
-        "the flat splay tick lands on CTRL-SPLAYS");
+    eqs(flatEnt.layer, CsLayers.PROFILE_SPLAYS,
+        "the flat splay tick lands on CTRL-PROFILE-SPLAYS");
     // minor: the tick's own length. half = CsDraw.TEXT_HEIGHT, drawn
     // from (f.x, f.y-half) to (f.x, f.y+half), so its length is
     // exactly 2 * TEXT_HEIGHT regardless of where f itself sits.
@@ -547,6 +581,7 @@ if (promoted !== null) {
         "on CTRL-PROFILE-CEILING");
 }
 
+assertGeneratedStaysInFrame(docC, "the splay/ceiling fixture");
 destr(diC);
 
 // =======================================================================
