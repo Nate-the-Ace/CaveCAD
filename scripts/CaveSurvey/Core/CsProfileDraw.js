@@ -58,6 +58,89 @@ CsProfileDraw.LAYERS = function() {
 };
 
 /**
+ * The token a band's layers are segregated by, or null for none.
+ *
+ * ONE place decides, so run-only versus run-and-trip is a change here
+ * and not a rewrite. Run only today: a run is stable structure -- the
+ * elevation is literally drawn one band per run -- whereas a trip is
+ * provenance, and provenance already rides on entities as
+ * CsBind.TRIP_TAG. Splitting layers by trip as well would also fragment
+ * a wall continued on a later trip, and CsTrace.nearestEnd only ties
+ * within a layer, so the joins between those fragments could not close.
+ */
+CsProfileDraw.tokenFor = function(band) {
+    if (isNull(band) || isNull(band.key)) {
+        return null;
+    }
+    return band.key;
+};
+
+/**
+ * The layer a band draws `base` to: the band's variant when it has a
+ * token, else `base` itself. Ensures the layer exists. QCAD only.
+ *
+ * ensureProfile and not ensure: per-run segregation is a profile-frame
+ * decision, and the restriction is enforced rather than remembered.
+ */
+CsProfileDraw.layerFor = function(doc, di, base, band) {
+    var name = CsProfileDraw.bandLayer(base, band);
+    if (name !== base) {
+        CsLayerVariants.ensureProfile(doc, di, base,
+            CsProfileDraw.tokenFor(band));
+    }
+    return name;
+};
+
+/** layerFor without the ensure: the NAME a band's `base` layer takes.
+ *  Pure, so a caller with no document interface can still ask -- and so
+ *  the name a band draws to and the name a scan looks for cannot
+ *  disagree. */
+CsProfileDraw.bandLayer = function(base, band) {
+    var token = CsProfileDraw.tokenFor(band);
+    if (token === null || typeof CsLayerVariants === "undefined") {
+        return base;
+    }
+    if (CsLayers.frameOf(base) !== "profile") {
+        return base;
+    }
+    var name = CsLayerVariants.nameFor(base, token);
+    return (name === null) ? base : name;
+};
+
+/**
+ * Every layer this module owns in THIS drawing: its base set, plus every
+ * variant of those bases the drawing already holds. QCAD only.
+ *
+ * Both the ownership test and the off-layer wrapper need this. A
+ * generated band on CTRL-PROFILE-SHOTS-A is ours just as much as one on
+ * CTRL-PROFILE-SHOTS, and if either scan misses it then erase() leaves
+ * it behind and the next render() draws a second copy beside it.
+ */
+CsProfileDraw.ownLayerNames = function(doc) {
+    var out = CsProfileDraw.LAYERS().slice(0);
+    if (typeof CsLayerVariants === "undefined") {
+        return out;
+    }
+    var bases = {};
+    for (var b = 0; b < out.length; b++) {
+        bases[out[b]] = true;
+    }
+    var ids = doc.queryAllLayers();
+    for (var i = 0; i < ids.length; i++) {
+        var lay = doc.queryLayer(ids[i]);
+        if (isNull(lay)) {
+            continue;
+        }
+        var name = lay.getName();
+        var parts = CsLayerVariants.split(name);
+        if (parts !== null && bases[parts.base] === true) {
+            out.push(name);
+        }
+    }
+    return out;
+};
+
+/**
  * Runs fn with EVERY layer this module writes to switched on, then
  * restores each one's own previous on/off state after -- nested via
  * CsLayers.withLayerOn, the same closure-chaining CsDraw.eraseStations
@@ -86,7 +169,10 @@ CsProfileDraw.LAYERS = function() {
  * \return whatever fn returns
  */
 CsProfileDraw.withOwnLayersOn = function(doc, di, fn) {
-    var layers = CsProfileDraw.LAYERS();
+    // ownLayerNames, not LAYERS(): a variant layer the caver switched
+    // off refuses deletes as silently as a base one, and erase() failing
+    // on it means the next render draws a duplicate beside the survivor.
+    var layers = CsProfileDraw.ownLayerNames(doc);
     var wrapped = fn;
     for (var i = 0; i < layers.length; i++) {
         wrapped = (function(layerName, inner) {
@@ -130,14 +216,19 @@ CsProfileDraw.withOwnLayersOn = function(doc, di, fn) {
  * it -- the eraseStations bug this whole feature's brief calls out by
  * name, reproduced here if this wrapper is ever dropped.
  *
+ * Pass `runKey` to erase ONE run's band and leave every other run's
+ * alone -- the point of segregating layers by run in the first place.
+ * Omit it to clear the whole elevation, as before.
+ *
  * \return number of entities removed
  */
-CsProfileDraw.erase = function(doc, di) {
+CsProfileDraw.erase = function(doc, di, runKey) {
     var ownLayers = {};
-    var ownLayerNames = CsProfileDraw.LAYERS();
+    var ownLayerNames = CsProfileDraw.ownLayerNames(doc);
     for (var ln = 0; ln < ownLayerNames.length; ln++) {
         ownLayers[ownLayerNames[ln]] = true;
     }
+    var scoped = !isNull(runKey) && String(runKey).length > 0;
 
     var victims = [];
     var ids = doc.queryAllEntities(false, false);
@@ -170,13 +261,22 @@ CsProfileDraw.erase = function(doc, di) {
         if (ownLayers[layerName] !== true) {
             continue;
         }
+        // Run-scoped erase reads the ProfileRun TAG rather than the
+        // layer's variant token. The tag is on every band entity this
+        // module has ever drawn, including geometry from before layers
+        // were segregated -- scoping by layer name would silently skip
+        // exactly that older output and leave it to double up.
+        if (scoped && CsTags.get(e, "ProfileRun") !== String(runKey)) {
+            continue;
+        }
         victims.push(ids[i]);
     }
     if (victims.length === 0) {
         return 0;
     }
     var op = new RDeleteObjectsOperation();
-    op.setText("Erase generated profile");
+    op.setText(scoped ? "Erase generated profile for " + runKey
+        : "Erase generated profile");
     for (i = 0; i < victims.length; i++) {
         var ent = doc.queryEntity(victims[i]);
         if (!isNull(ent)) {
@@ -265,11 +365,12 @@ CsProfileDraw.labelY0 = function(band) {
  * to be pushed off true elevation to clear another, or drew nothing at
  * all -- why. See CsProfileDraw.labelText for what it says.
  */
-CsProfileDraw.label = function(doc, op, band, at) {
+CsProfileDraw.label = function(doc, di, op, band, at) {
     var text = CsProfileDraw.labelText(band);
     var y = CsProfileDraw.labelY0(band);
-    var label = CsDraw.addText(doc, op, CsLayers.PROFILE_TEXT_LABELS, text,
-        at(0, y + CsDraw.TEXT_HEIGHT * 4.0), RS.HAlignLeft,
+    var label = CsDraw.addText(doc, op,
+        CsProfileDraw.layerFor(doc, di, CsLayers.PROFILE_TEXT_LABELS, band),
+        text, at(0, y + CsDraw.TEXT_HEIGHT * 4.0), RS.HAlignLeft,
         "ProfileBandLabel", band.key);
     // CsDraw.addText already queued `label` into `op` via its own
     // op.addObject(entity, false) -- this second CsTags.set, applied to
@@ -307,7 +408,21 @@ CsProfileDraw.run = function(doc, op, layerName, points, at, tagKey,
 };
 
 /** One band, into an operation already open. */
-CsProfileDraw.band = function(doc, op, band, counts, origin) {
+CsProfileDraw.band = function(doc, di, op, band, counts, origin) {
+    // Every layer this band draws to is resolved through layerFor, which
+    // returns the band's own run variant and creates it on demand. Not
+    // pre-created for every run up front: a band that draws no splays
+    // should not leave an empty splay layer behind for its run.
+    var lyShots = CsProfileDraw.layerFor(doc, di, CsLayers.PROFILE_SHOTS, band);
+    var lyStations = CsProfileDraw.layerFor(doc, di,
+        CsLayers.PROFILE_STATIONS, band);
+    var lyLabels = CsProfileDraw.layerFor(doc, di,
+        CsLayers.PROFILE_STATION_LABELS, band);
+    var lyCeiling = CsProfileDraw.layerFor(doc, di,
+        CsLayers.PROFILE_CEILING, band);
+    var lyFloor = CsProfileDraw.layerFor(doc, di, CsLayers.PROFILE_FLOOR, band);
+    var lySplays = CsProfileDraw.layerFor(doc, di,
+        CsLayers.PROFILE_SPLAYS, band);
     var dz = band.zOffset || 0.0;
     // TWO offsets, and they are not the same thing. dz is the band's
     // own displacement, part of what the elevation SAYS (a spur shown
@@ -324,7 +439,7 @@ CsProfileDraw.band = function(doc, op, band, counts, origin) {
 
     for (i = 0; i < band.legs.length; i++) {
         var leg = band.legs[i];
-        CsDraw.addLine(doc, op, CsLayers.PROFILE_SHOTS,
+        CsDraw.addLine(doc, op, lyShots,
             at(leg.fromX, leg.fromY), at(leg.toX, leg.toY),
             "ProfileShot", leg.from + "->" + leg.to, runTag);
         counts.legsDrawn++;
@@ -332,14 +447,14 @@ CsProfileDraw.band = function(doc, op, band, counts, origin) {
 
     for (i = 0; i < band.stations.length; i++) {
         var st = band.stations[i];
-        var pt = CsDraw.addPoint(doc, op, CsLayers.PROFILE_STATIONS,
+        var pt = CsDraw.addPoint(doc, op, lyStations,
             at(st.x, st.y));
         CsTags.set(pt, "ProfileStation", st.name);
         CsTags.set(pt, "ProfileRun", band.key);
         op.addObject(pt, false);
         counts.stationsDrawn++;
 
-        var label = CsDraw.addText(doc, op, CsLayers.PROFILE_STATION_LABELS,
+        var label = CsDraw.addText(doc, op, lyLabels,
             st.name, at(st.x, st.y + CsDraw.TEXT_HEIGHT * 1.5),
             RS.HAlignCenter, "ProfileStation", st.name);
         // Same after-the-fact tagging as CsProfileDraw.label above:
@@ -353,13 +468,13 @@ CsProfileDraw.band = function(doc, op, band, counts, origin) {
     }
 
     for (i = 0; i < band.ceiling.length; i++) {
-        CsProfileDraw.run(doc, op, CsLayers.PROFILE_CEILING,
+        CsProfileDraw.run(doc, op, lyCeiling,
             band.ceiling[i], at, "ProfileCeilingRun",
             band.key + "." + (i + 1), band.key);
         counts.ceilingRuns++;
     }
     for (i = 0; i < band.floor.length; i++) {
-        CsProfileDraw.run(doc, op, CsLayers.PROFILE_FLOOR,
+        CsProfileDraw.run(doc, op, lyFloor,
             band.floor[i], at, "ProfileFloorRun",
             band.key + "." + (i + 1), band.key);
         counts.floorRuns++;
@@ -374,13 +489,13 @@ CsProfileDraw.band = function(doc, op, band, counts, origin) {
     for (i = 0; i < band.flat.length; i++) {
         var f = band.flat[i];
         var half = CsDraw.TEXT_HEIGHT;
-        CsDraw.addLine(doc, op, CsLayers.PROFILE_SPLAYS,
+        CsDraw.addLine(doc, op, lySplays,
             at(f.x, f.y - half), at(f.x, f.y + half),
             "ProfileSplay", f.name, runTag);
         counts.flatTicks++;
     }
 
-    CsProfileDraw.label(doc, op, band, at);
+    CsProfileDraw.label(doc, di, op, band, at);
 };
 
 /**
@@ -844,7 +959,7 @@ CsProfileDraw.render = function(doc, di, profile, opts) {
 
     var bands = (profile && profile.bands) ? profile.bands : [];
     for (var b = 0; b < bands.length; b++) {
-        CsProfileDraw.band(doc, op, bands[b], counts, origin);
+        CsProfileDraw.band(doc, di, op, bands[b], counts, origin);
         counts.bandsDrawn++;
     }
 

@@ -14344,6 +14344,111 @@ if (!IS_NODE) {
 }
 
 // ---------------------------------------------------------------------
+// CsProfileDraw -- per-run ownership (QCAD only: needs RDocument)
+// ---------------------------------------------------------------------
+if (!IS_NODE) {
+    (function() {
+        loadRepoScript("scripts/CaveSurvey/Core/CsLayers.js");
+        loadRepoScript("scripts/CaveSurvey/Core/CsLayerVariants.js");
+        loadRepoScript("scripts/CaveSurvey/Core/CsTags.js");
+        loadRepoScript("scripts/CaveSurvey/Core/CsProfileDraw.js");
+
+        // -- the token policy ----------------------------------------
+        eqs(CsProfileDraw.tokenFor({ key: "A" }), "A",
+            "CsProfileDraw.tokenFor: a band is segregated by its run");
+        ok(CsProfileDraw.tokenFor(null) === null,
+            "CsProfileDraw.tokenFor: no band, no token");
+        ok(CsProfileDraw.tokenFor({}) === null,
+            "CsProfileDraw.tokenFor: a band with no key gets no token");
+
+        function docWith() {
+            var d = new RDocument(new RMemoryStorage(),
+                new RSpatialIndexNavel());
+            return { doc: d, di: new RDocumentInterface(d) };
+        }
+        /** A generated band entity: on an owned layer, ProfileRun tagged. */
+        function generated(ctx, layerName, runKey) {
+            CsLayers.ensure(ctx.doc, ctx.di, layerName);
+            var e = new RLineEntity(ctx.doc, new RLineData(
+                new RVector(0, 0), new RVector(10, 0)));
+            e.setLayerId(ctx.doc.getLayerId(layerName));
+            CsTags.set(e, "ProfileRun", runKey);
+            var op = new RAddObjectsOperation();
+            op.addObject(e, false);
+            ctx.di.applyOperation(op);
+            return e;
+        }
+
+        // -- layerFor ensures and returns the variant ----------------
+        var c0 = docWith();
+        var got = CsProfileDraw.layerFor(c0.doc, c0.di,
+            CsLayers.PROFILE_SHOTS, { key: "A" });
+        eqs(got, "CTRL-PROFILE-SHOTS-A",
+            "CsProfileDraw.layerFor: a band draws to its own run's layer");
+        ok(c0.doc.hasLayer("CTRL-PROFILE-SHOTS-A"),
+            "CsProfileDraw.layerFor: and creates it on demand");
+        eqs(CsProfileDraw.layerFor(c0.doc, c0.di, CsLayers.PROFILE_SHOTS, null),
+            CsLayers.PROFILE_SHOTS,
+            "CsProfileDraw.layerFor: no band means the shared base layer");
+
+        // -- ownLayerNames sees variants of owned bases only ---------
+        var own = CsProfileDraw.ownLayerNames(c0.doc);
+        var hasVariant = false, hasStrayVariant = false;
+        CsLayerVariants.ensureProfile(c0.doc, c0.di,
+            CsLayers.PROFILE_TRACED_CEILING, "A");   // NOT an owned base
+        own = CsProfileDraw.ownLayerNames(c0.doc);
+        for (var oi = 0; oi < own.length; oi++) {
+            if (own[oi] === "CTRL-PROFILE-SHOTS-A") { hasVariant = true; }
+            if (own[oi] === "PROFILE-CEILING-A") { hasStrayVariant = true; }
+        }
+        ok(hasVariant,
+            "CsProfileDraw.ownLayerNames: a variant of an owned base is ours");
+        ok(!hasStrayVariant,
+            "CsProfileDraw.ownLayerNames: a variant of a TRACED base is NOT ours");
+
+        // -- erase, unscoped: clears every run -----------------------
+        var cAll = docWith();
+        generated(cAll, "CTRL-PROFILE-SHOTS-A", "A");
+        generated(cAll, "CTRL-PROFILE-SHOTS-B", "B");
+        eqs(CsProfileDraw.erase(cAll.doc, cAll.di), 2,
+            "CsProfileDraw.erase: unscoped clears every run's band");
+
+        // -- erase, run-scoped: leaves other runs alone --------------
+        // This is the whole point of segregating by run.
+        var cOne = docWith();
+        generated(cOne, "CTRL-PROFILE-SHOTS-A", "A");
+        generated(cOne, "CTRL-PROFILE-SHOTS-B", "B");
+        generated(cOne, "CTRL-PROFILE-STATIONS-B", "B");
+        eqs(CsProfileDraw.erase(cOne.doc, cOne.di, "A"), 1,
+            "CsProfileDraw.erase: scoped to A removes only A's band");
+        eqs(cOne.doc.queryLayerEntities(
+                cOne.doc.getLayerId("CTRL-PROFILE-SHOTS-B"), true).length, 1,
+            "CsProfileDraw.erase: run B's band is untouched");
+        eqs(CsProfileDraw.erase(cOne.doc, cOne.di, "B"), 2,
+            "CsProfileDraw.erase: scoped to B then removes both of B's");
+
+        // -- legacy geometry: tagged, on the SHARED base layer -------
+        // Scoping reads the ProfileRun TAG, not the layer's token, so
+        // output drawn before layers were segregated is still cleaned.
+        var cOld = docWith();
+        generated(cOld, CsLayers.PROFILE_SHOTS, "A");
+        eqs(CsProfileDraw.erase(cOld.doc, cOld.di, "A"), 1,
+            "CsProfileDraw.erase: scoped erase still finds pre-segregation output");
+
+        // -- the promoted line still survives, variants included -----
+        // A generated curve moved onto a TRACED layer keeps its tags but
+        // stops being ours. That protection must not weaken.
+        var cProm = docWith();
+        generated(cProm, "PROFILE-CEILING-A", "A");   // traced variant
+        eqs(CsProfileDraw.erase(cProm.doc, cProm.di), 0,
+            "CsProfileDraw.erase: a tagged entity on a TRACED variant is spared");
+        eqs(cProm.doc.queryLayerEntities(
+                cProm.doc.getLayerId("PROFILE-CEILING-A"), true).length, 1,
+            "CsProfileDraw.erase: the promoted line is still there");
+    }());
+}
+
+// ---------------------------------------------------------------------
 // Report.
 // ---------------------------------------------------------------------
 
