@@ -120,8 +120,12 @@ FeatureTrace.log = function(line) {
                 "/Documents/Cave/feature-trace-debug.log";
         }
         var f = new QFile(FeatureTrace.LOG_PATH);
-        if (!f.open(new QIODevice.OpenMode(QIODevice.WriteOnly |
-                QIODevice.Append | QIODevice.Text))) {
+        // Plain bitwise OR: this bridge has NO QIODevice.OpenMode
+        // constructor, and `new QIODevice.OpenMode(...)` throws inside
+        // the try/catch below -- which is exactly why the first version
+        // of this logger wrote nothing while every test stayed green.
+        if (!f.open(QIODevice.WriteOnly | QIODevice.Append |
+                QIODevice.Text)) {
             return;
         }
         var out = new QTextStream(f);

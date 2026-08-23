@@ -13645,6 +13645,31 @@ if (!IS_NODE) {
         ok(doc2.queryLayer(CsLayers.PROFILE_TRACED_CEILING).isOff(),
             "CsTrace.emit: the layer is switched back off afterwards");
 
+        // -- LOCKED and FROZEN refuse the add, and emit says so -----
+        // withLayerOn covers OFF only. Locked and frozen also refuse,
+        // silently, and emit must not claim success: an earlier version
+        // returned added:true whenever a curve could be built, so the
+        // panel reported "44 sampled, 10 kept" for a trace that never
+        // reached the drawing.
+        function refusingLayer(which) {
+            var d = new RDocument(new RMemoryStorage(),
+                new RSpatialIndexNavel());
+            var i = new RDocumentInterface(d);
+            CsLayers.ensure(d, i, CsLayers.WALLS_SURVEYED);
+            var lay = d.queryLayer(CsLayers.WALLS_SURVEYED);
+            if (which === "locked") { lay.setLocked(true); }
+            if (which === "frozen") { lay.setFrozen(true); }
+            var mop = new RModifyObjectsOperation();
+            mop.addObject(lay, false);
+            i.applyOperation(mop);
+            return CsTrace.emit(d, i, CsLayers.WALLS_SURVEYED,
+                [pt(0, 0), pt(10, 0), pt(20, 5)], 1.0, 0.5);
+        }
+        ok(refusingLayer("locked").added === false,
+            "CsTrace.emit: a LOCKED layer refuses the add, and emit reports it");
+        ok(refusingLayer("frozen").added === false,
+            "CsTrace.emit: a FROZEN layer refuses the add, and emit reports it");
+
         // -- no binding tag ----------------------------------------
         var onCeiling = doc2.queryLayerEntities(
             doc2.getLayerId(CsLayers.PROFILE_TRACED_CEILING), true);

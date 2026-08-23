@@ -60,6 +60,40 @@ FeatureTraceRun.targetLayer = function(doc) {
     return FeatureTrace.target;
 };
 
+/**
+ * Why an add was refused, as a sentence for the command line.
+ *
+ * Locked and frozen layers refuse adds SILENTLY in this build, and
+ * CsLayers.withLayerOn covers only the off case -- so a caver who
+ * locked a layer earlier gets no error at all, just a missing line.
+ * Reading the state back is the only way to say which it was.
+ */
+FeatureTraceRun.refusalReason = function(doc, layerName) {
+    var lay = null;
+    try {
+        lay = doc.queryLayer(layerName);
+    } catch (e) {
+        lay = null;
+    }
+    if (isNull(lay)) {
+        return qsTr("Nothing was drawn: layer %1 could not be found or " +
+            "created.").arg(layerName);
+    }
+    var locked = false, frozen = false;
+    try { locked = lay.isLocked(); } catch (e1) {}
+    try { frozen = lay.isFrozen(); } catch (e2) {}
+    if (locked) {
+        return qsTr("Nothing was drawn: layer %1 is LOCKED. Unlock it in " +
+            "the Layer List and trace again.").arg(layerName);
+    }
+    if (frozen) {
+        return qsTr("Nothing was drawn: layer %1 is FROZEN. Thaw it in the " +
+            "Layer List and trace again.").arg(layerName);
+    }
+    return qsTr("Nothing was drawn: layer %1 refused the line, and this " +
+        "build reports no reason. Please report this.").arg(layerName);
+};
+
 /** Diagnostics passthrough -- no-op when the panel is absent.
  *  TEMPORARY: remove with FeatureTrace.log. */
 FeatureTraceRun.log = function(line) {
@@ -321,11 +355,38 @@ FeatureTraceRun.prototype.commit = function() {
     var result = CsTrace.emit(doc, di, layerName, this.samples,
         spacing, tolerance);
 
-    FeatureTraceRun.log("commit: layer=" + layerName +
-        " spacing=" + spacing + " tol=" + tolerance +
-        " added=" + result.added + " sampled=" + result.sampled +
-        " kept=" + result.kept +
-        " landedOn=" + (result.added ? layerName : "-"));
+    // TEMPORARY diagnostics. Everything the vanishing-commit question
+    // needs: does the layer resolve, what state is it in, and did the
+    // entity count on it actually change.
+    var diag = "commit: layer=" + layerName + " spacing=" + spacing +
+        " tol=" + tolerance + " added=" + result.added +
+        " sampled=" + result.sampled + " kept=" + result.kept;
+    try {
+        var lid = doc.getLayerId(layerName);
+        diag += " layerId=" + lid + " invalid=" + RObject.INVALID_ID;
+        diag += " onLayer=" + doc.queryLayerEntities(lid, true).length;
+        diag += " docTotal=" + doc.queryAllEntities(false, false).length;
+        var lay = doc.queryLayer(layerName);
+        if (!isNull(lay)) {
+            diag += " off=" + lay.isOff();
+            try { diag += " locked=" + lay.isLocked(); } catch (e1) {}
+            try { diag += " frozen=" + lay.isFrozen(); } catch (e2) {}
+        } else {
+            diag += " layerObj=NULL";
+        }
+    } catch (eDiag) {
+        diag += " DIAG-THREW=" + eDiag;
+    }
+    FeatureTraceRun.log(diag);
+    if (!result.added) {
+        // Something refused the add and this build raises no error for
+        // any of the ways that can happen. Name the likely cause rather
+        // than leaving the caver to wonder where the line went.
+        EAction.handleUserMessage(
+            FeatureTraceRun.refusalReason(doc, layerName));
+        this.refreshRegion();
+        return;
+    }
     if (result.added) {
         EAction.handleUserMessage(qsTr("%1: %2 sampled, %3 kept")
             .arg(layerName).arg(result.sampled).arg(result.kept));

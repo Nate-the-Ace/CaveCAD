@@ -342,7 +342,15 @@ CsTrace.emit = function(doc, di, layerName, points, spacing, tolerance) {
     }
 
     CsLayers.ensure(doc, di, layerName);
-    spline.setLayerId(doc.getLayerId(layerName));
+    var layerId = doc.getLayerId(layerName);
+    spline.setLayerId(layerId);
+
+    // COUNTED, not assumed. An earlier version returned added:true
+    // whenever a curve could be built, so the panel cheerfully reported
+    // "44 sampled, 10 kept" for a trace that never reached the drawing
+    // -- this build refuses adds silently in more ways than one, and a
+    // report that cannot be wrong is worth the extra query.
+    var before = doc.queryLayerEntities(layerId, true).length;
 
     CsLayers.withLayerOn(doc, di, layerName, function() {
         var op = new RAddObjectsOperation();
@@ -350,5 +358,10 @@ CsTrace.emit = function(doc, di, layerName, points, spacing, tolerance) {
         di.applyOperation(op);
     });
 
-    return { added: true, sampled: spaced.length, kept: kept.length };
+    var after = doc.queryLayerEntities(layerId, true).length;
+    return {
+        added: (after > before),
+        sampled: spaced.length,
+        kept: kept.length
+    };
 };
