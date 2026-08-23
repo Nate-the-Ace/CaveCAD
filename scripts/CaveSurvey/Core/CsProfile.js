@@ -1334,8 +1334,24 @@ CsProfile.tieLegBetween = function(a, b, resolved) {
  *
  * \return {
  *   key, tie, datum,
+ *   exaggeration, tapeMode: the SAME two values `opts` was called with
+ *             (defaulted), carried on the band itself rather than left
+ *             for a caller to remember and repeat -- CsProfile.
+ *             bandWallRuns reads them from here, not from its own
+ *             `opts`, so a band's walls can never be scaled against a
+ *             different Y than its own stations were built with. See
+ *             the review note on bandWallRuns for the bug this closes:
+ *             the two used to have to agree by caller discipline alone.
  *   stations: [{name, x, y, z}],
- *   legs:     [{shot, from, to, fromX, fromY, toX, toY}],
+ *   legs:     [{shot, from, to, kind, fromX, fromY, toX, toY}] -- kind
+ *             is the same "new" | "closure" | "tie" CsNetwork.resolve()
+ *             put on the underlying leg, carried through so a caller
+ *             (CsProfile.bandWallRuns's closure break, for one) does not
+ *             have to look it back up by station-name pair, which is
+ *             right only so long as no two legs on this run's own chain
+ *             ever join the same two station names -- true today, but a
+ *             lookup by name is a promise this shape no longer needs to
+ *             keep,
  *   omitted:  [name] run members off the chain -- never on the chain to
  *             begin with, OR the shorter arm at an interior tie,
  *   stopped:  name | null -- station that ended the band early,
@@ -1465,6 +1481,7 @@ CsProfile.unrollBand = function(run, tie, resolved, hier, opts) {
                 shot: leg.shot,
                 from: chain[i - 1],
                 to: name,
+                kind: leg.kind,
                 fromX: stations[stations.length - 1].x,
                 fromY: stations[stations.length - 1].y,
                 toX: x,
@@ -1493,6 +1510,8 @@ CsProfile.unrollBand = function(run, tie, resolved, hier, opts) {
         key: run.key,
         tie: tied ? tie : null,
         datum: datum,
+        exaggeration: exag,
+        tapeMode: tapeMode,
         stations: stations,
         legs: legs,
         omitted: omitted,
@@ -1503,6 +1522,18 @@ CsProfile.unrollBand = function(run, tie, resolved, hier, opts) {
 
 /** Default half-width of the near-horizontal dead zone, in degrees. */
 CsProfile.FLAT_SPLAY_DEG = 10.0;
+
+/**
+ * Inclination magnitude (degrees) at and beyond which a leg is treated
+ * as PLUMB for passage-direction purposes: a shot that steep is a
+ * pitch, and a magnetic compass's reading on a near-vertical shot is
+ * noise, not a passage bearing -- CsValidate already flags a shot past
+ * this same 85 degrees as "near-plumb" for exactly that reason (see
+ * its own near-plumb warning); this reuses the number rather than
+ * inventing a second, disagreeing definition of "plumb" in this
+ * codebase. See bandWallRuns for what "treated as plumb" means here.
+ */
+CsProfile.PLUMB_INCLINATION_DEG = 85.0;
 
 /**
  * Which line a splay belongs to: "ceiling", "floor", or "flat".
@@ -1520,6 +1551,13 @@ CsProfile.FLAT_SPLAY_DEG = 10.0;
  *
  * The boundary itself (exactly +-deadDeg) reads as flat, not as
  * ceiling/floor: `<=` on the absolute value, not `<`.
+ *
+ * A splay with NO inclination on record also reads as "flat" here --
+ * this function has only three answers to give and "unmeasured" isn't
+ * one of them. That is fine for classification, but NOT license to
+ * plot a phantom tick from it: CsProfile.bandWallRuns skips a
+ * no-inclination splay outright, before it ever reaches this function,
+ * rather than trusting "flat" to mean "draw it at centerline."
  */
 CsProfile.classifySplay = function(shot, deadDeg) {
     var dead = (deadDeg === undefined || deadDeg === null) ?
@@ -1546,19 +1584,35 @@ CsProfile.classifySplay = function(shot, deadDeg) {
  * a ledge) still contributes exactly one ceiling and one floor point
  * from `up`/`down`, same as any other station; the extra readings are
  * for a report to explain, not for this previsualization to guess at.
+ * A splay with NO inclination on record contributes NOTHING -- not
+ * even a flat tick -- rather than plotting a coordinate at exactly
+ * centerline elevation for a measurement that was never taken; that
+ * spot is precisely where the dead-zone rationale above says a real
+ * reading is already meaningless, so a fabricated one plotted there is
+ * the worst place to invent one.
  *
  * A splay's X is its station's X plus the along-passage projection of
  * its plan offset, and points within a line are ordered by that
  * projection with the LRUD point at 0 leading its ties -- the SAME
- * rule CsLrud.stationWallPoints uses for the plan walls (there it
- * disambiguates within one SIDE; here within one LINE), so plan and
- * profile order wall evidence identically. As in CsLrud, the `order`
- * field (-1 for the LRUD point, the splay's own index otherwise) is
- * what makes the comparator a TOTAL order: CaveCAD's own Array.sort is
- * unstable, so a comparator that could return 0 for two distinct
- * entries would place them differently between engines, and node's
- * stability would hide it. Here every entry in one station's list has
- * a distinct `order`, so no two distinct entries can ever tie.
+ * ORDERING rule CsLrud.stationWallPoints uses for the plan walls
+ * (there it disambiguates within one SIDE; here within one LINE), so
+ * plan and profile order wall evidence identically. As in CsLrud, the
+ * `order` field (-1 for the LRUD point, the splay's own index
+ * otherwise) is what makes the comparator a TOTAL order: CaveCAD's own
+ * Array.sort is unstable, so a comparator that could return 0 for two
+ * distinct entries would place them differently between engines, and
+ * node's stability would hide it. Here every entry in one station's
+ * list has a distinct `order`, so no two distinct entries can ever tie.
+ *
+ * DIVERGENCE FROM CsLrud, DOCUMENTED (the ORDERING rule is shared, the
+ * ADMISSION rule is not): CsLrud.stationWallPoints excludes a splay
+ * lying exactly along the passage axis -- on the centerline, it says,
+ * so neither wall. That exclusion is a PLAN-ONLY rule and is
+ * deliberately NOT mirrored here: an along-axis splay's horizontal
+ * projection may be zero, but its vertical component is still a real
+ * measurement of where the ceiling or floor is, regardless of which
+ * way the caver was facing. So this function never excludes a splay by
+ * azimuth, only by classifySplay's inclination test.
  *
  * Breaks: a junction station (three or more legs touch it, counted
  * globally over the whole resolved survey -- exactly CsLrud's own
@@ -1568,34 +1622,55 @@ CsProfile.classifySplay = function(shot, deadDeg) {
  * a splay on either line). Each break starts a new polyline rather
  * than inventing a connection across it.
  *
- * CLOSURE DETECTION: band.legs (built by unrollBand) carries each
- * leg's shot but not its resolved `kind` -- unrollBand is band LAYOUT,
- * out of this task's scope, so this looks the kind back up via
- * CsProfile.tieLegBetween(from, to, resolved) instead of reaching into
- * unrollBand to stash it. In practice this only ever matters for a
- * band's very first leg (the tie step): every INTERIOR chain step is
- * resolved through CsProfile.legBetween, which excludes "closure" by
- * construction (see its own docblock), so it can never BE one.
+ * CLOSURE DETECTION reads `kind` straight off band.legs (unrollBand
+ * carries it from the resolved leg now), and, exactly like
+ * CsLrud.wallRuns, a closure-landing station contributes NOTHING at
+ * all here, not even its own LRUD tick or splays: the prior run is
+ * flushed BEFORE that station is looked at, and the walk resumes fresh
+ * on the station after it. Its own evidence is not lost -- a real
+ * physical station is drawn again as an ordinary interior station in
+ * ITS OWN home run's band -- it simply does not ALSO get drawn here,
+ * spanning a leg whose drawn length is not its own tape reading (see
+ * CsProfile.tieLegBetween's own docblock): hanging wall detail across
+ * a leg nobody measured that length of would misrepresent the passage,
+ * the same reasoning the file banner already gives for never curving
+ * between measured points.
  *
  * PASSAGE AZIMUTH for a station's splay projection is the azimuth of
  * the leg that ARRIVES there within this band, same source CsLrud
- * uses. The band's own opening station has no arriving leg WITHIN the
- * band (its arrival, if any, belongs to the parent band, not this
- * one), so it falls back to the band's own first outgoing leg -- a
- * reasonable passage direction even though it is not, strictly, an
- * arrival. That fallback is azimuth-only and never marks a station as
- * a closure break; only a leg that genuinely LANDS on a station (its
- * `to`) can make that station one.
+ * uses -- except when there is nothing usable to read it from, in
+ * which case a splay's along-passage projection is 0, not a guess:
+ *   - the band's own opening station has no arriving leg WITHIN the
+ *     band at all (its arrival, if any, belongs to the parent band),
+ *     so it falls back to the band's own first outgoing leg where one
+ *     exists, and to "no direction" where it does not (a one-station
+ *     band);
+ *   - a PLUMB leg (see PLUMB_INCLINATION_DEG) is excluded from that
+ *     lookup entirely, arriving OR outgoing: its compass reading is
+ *     noise, and projecting a splay against a noise azimuth is worse
+ *     than not projecting it at all. Measured: without this, a
+ *     backward splay at the bottom of a pitch could land before the
+ *     pitch-top station's own points -- X is supposed to be
+ *     monotonically non-decreasing along a wall run (that IS what
+ *     "extended elevation" means), and a splay projected against a
+ *     bearing nobody could actually read broke that.
+ * Either way, "no usable direction" means every splay at that station
+ * sits at exactly its station's X, same as the LRUD tick -- honest
+ * about not knowing WHERE along the passage it belongs, rather than
+ * placing it somewhere a fabricated bearing picked. This azimuth
+ * lookup, direction or absence of one, never marks a station as a
+ * closure break; only `kind === "closure"` on the leg landing there
+ * does that.
  *
  * \param band     CsProfile.unrollBand() result
  * \param survey   the CsModel survey (for LRUD and splay lookup)
  * \param resolved CsNetwork.resolve() result
- * \param opts     {flatSplayDeg: number (default FLAT_SPLAY_DEG),
- *                  exaggeration: number (default 1), tapeMode} --
- *                  exaggeration and tapeMode should match whatever was
- *                  passed to the CsProfile.unrollBand() call that
- *                  produced `band`, or its wall points will be scaled
- *                  against a different Y than its own stations were
+ * \param opts     {flatSplayDeg: number (default FLAT_SPLAY_DEG)} --
+ *                  exaggeration and tapeMode are NOT read from here:
+ *                  they come off `band` itself (set by the
+ *                  CsProfile.unrollBand() call that produced it), so
+ *                  this can never scale its wall points against a
+ *                  different Y than the band's own stations use
  *
  * \return {ceiling: [[{x,y}]], floor: [[{x,y}]],
  *          flat: [{x, y, station, name}]} -- runs shorter than 2
@@ -1606,9 +1681,12 @@ CsProfile.bandWallRuns = function(band, survey, resolved, opts) {
     var dead = (opts.flatSplayDeg === undefined ||
         opts.flatSplayDeg === null) ?
         CsProfile.FLAT_SPLAY_DEG : opts.flatSplayDeg;
-    var exag = (opts.exaggeration === undefined ||
-        opts.exaggeration === null) ? 1.0 : opts.exaggeration;
-    var tapeMode = opts.tapeMode || CsTraverse.SLOPE;
+    // read off the band, not off `opts` -- see the docblock above and
+    // the I4 review note: two independently-defaulted opts objects
+    // agreeing was a caller-discipline promise, not a guarantee
+    var exag = (band.exaggeration === undefined ||
+        band.exaggeration === null) ? 1.0 : band.exaggeration;
+    var tapeMode = band.tapeMode || CsTraverse.SLOPE;
 
     var splays = CsLrud.splaysByStation(survey);
     var counts = CsLrud.legCounts(resolved.legs);
@@ -1632,30 +1710,72 @@ CsProfile.bandWallRuns = function(band, survey, resolved, opts) {
         floor = [];
     };
 
-    // Passage azimuth per station (with the opening-station fallback
-    // described above) and, separately and WITHOUT that fallback,
-    // which stations are landed on by a closure leg.
-    var azAt = {}, closureAt = {};
-    var li, bl, bLeg, az;
+    // Which stations a PLUMB leg lands on, computed FIRST and kept
+    // separate from the azimuth pass below: a plumb-arrival station
+    // must end up with NO passage direction at all, even though it is
+    // very often ALSO the `from` end of the very next (perfectly
+    // ordinary) leg -- without this pass done first, that next leg's
+    // own opening-station fallback (see below) would quietly hand the
+    // pitch-bottom station the OUTGOING leg's azimuth instead, which is
+    // exactly the noise-bearing substitution this whole rule exists to
+    // refuse. A caver's own sense of direction at the bottom of a pitch
+    // is not rescued by which way the passage happens to continue.
+    var plumbArrival = {};
+    var li, bl, inc;
     for (li = 0; li < band.legs.length; li++) {
         bl = band.legs[li];
+        inc = CsTraverse.effectiveInclination(bl.shot);
+        if (inc !== null && inc !== undefined &&
+                Math.abs(inc) >= CsProfile.PLUMB_INCLINATION_DEG) {
+            plumbArrival[bl.to] = true;
+        }
+    }
+
+    // Passage azimuth per station (with the opening-station fallback
+    // described above, withheld for a PLUMB leg's own landing station)
+    // and, separately and with NO such fallback, which stations are
+    // landed on by a closure leg.
+    var azAt = {}, closureAt = {};
+    var az, plumb;
+    for (li = 0; li < band.legs.length; li++) {
+        bl = band.legs[li];
+        if (bl.kind === "closure") {
+            closureAt[bl.to] = true;
+        }
+        inc = CsTraverse.effectiveInclination(bl.shot);
+        plumb = (inc !== null && inc !== undefined &&
+            Math.abs(inc) >= CsProfile.PLUMB_INCLINATION_DEG);
+        if (plumb) {
+            continue;   // a noise bearing is worse than none: skip it
+        }
         az = CsTraverse.effectiveAzimuth(bl.shot);
         azAt[bl.to] = az;
-        if (azAt[bl.from] === undefined) {
+        if (azAt[bl.from] === undefined && !plumbArrival[bl.from]) {
             azAt[bl.from] = az;
-        }
-        bLeg = CsProfile.tieLegBetween(bl.from, bl.to, resolved);
-        if (bLeg !== null && bLeg.kind === "closure") {
-            closureAt[bl.to] = true;
         }
     }
 
     for (var i = 0; i < band.stations.length; i++) {
         var st = band.stations[i];
+
+        // I1: exactly CsLrud.wallRuns' own closure handling -- flush
+        // whatever the run had BEFORE looking at this station, then
+        // skip it completely. Its own evidence is not lost; see the
+        // docblock's CLOSURE DETECTION paragraph for where it surfaces
+        // instead.
+        if (closureAt[st.name] === true) {
+            flush();
+            continue;
+        }
+
         var lrud = CsModel.lrudForStation(survey, st.name);
-        var passageAz = (azAt[st.name] !== undefined) ? azAt[st.name] : 0.0;
-        var azRad = passageAz * Math.PI / 180.0;
-        var alongX = Math.sin(azRad), alongY = Math.cos(azRad);
+        var hasDir = (azAt[st.name] !== undefined);
+        var alongX = 0.0, alongY = 0.0;
+        if (hasDir) {
+            var azRad = azAt[st.name] * Math.PI / 180.0;
+            alongX = Math.sin(azRad);
+            alongY = Math.cos(azRad);
+        }
 
         var cEntries = [], fEntries = [];
 
@@ -1673,8 +1793,20 @@ CsProfile.bandWallRuns = function(band, survey, resolved, opts) {
         var sps = splays[st.name] || [];
         for (var k = 0; k < sps.length; k++) {
             var sp = sps[k];
+            // m2: no inclination on record means nothing to plot --
+            // classifySplay would call this "flat", but plotting it
+            // there would fabricate a coordinate at exactly centerline
+            // elevation for a measurement that does not exist
+            if (CsTraverse.effectiveInclination(sp) === null ||
+                    CsTraverse.effectiveInclination(sp) === undefined) {
+                continue;
+            }
             var o = CsTraverse.offset(sp, tapeMode);
-            var t = o.dx * alongX + o.dy * alongY;
+            // I2: no measured direction means no along-passage claim --
+            // the splay sits at its station's own X, same as the LRUD
+            // point, rather than being projected against a fallback
+            // bearing nobody surveyed
+            var t = hasDir ? (o.dx * alongX + o.dy * alongY) : 0.0;
             var point = { x: st.x + t, y: yOf(st.z + o.dz) };
             var side = CsProfile.classifySplay(sp, dead);
             if (side === "ceiling") {
@@ -1700,7 +1832,6 @@ CsProfile.bandWallRuns = function(band, survey, resolved, opts) {
 
         var isJunction = counts[st.name] > 2;
         var noEvidence = (cEntries.length === 0 && fEntries.length === 0);
-        var closureHere = (closureAt[st.name] === true);
 
         for (k = 0; k < cEntries.length; k++) {
             ceiling.push(cEntries[k].p);
@@ -1709,10 +1840,10 @@ CsProfile.bandWallRuns = function(band, survey, resolved, opts) {
             floor.push(fEntries[k].p);
         }
 
-        // a junction or closure station's own points still terminate
-        // the run they end (same as CsLrud.wallRuns), rather than
-        // being silently dropped from it
-        if (isJunction || noEvidence || closureHere) {
+        // a junction station's own points still terminate the run
+        // they end (same as CsLrud.wallRuns), rather than being
+        // silently dropped from it
+        if (isJunction || noEvidence) {
             flush();
         }
     }
@@ -1880,15 +2011,18 @@ CsProfile.layout = function(bands) {
  * `resolved` (built for some other purpose) may pass it in through
  * opts.adjacency and it is reused rather than rebuilt.
  *
- * The four fields CsProfile.unrollBand and CsProfile.bandWallRuns
- * actually read (exaggeration, tapeMode, flatSplayDeg, and now
- * adjacency) are copied into a small fixed-shape object built ONCE
- * here and handed to every band, rather than adding `.adjacency` onto
- * the caller's own `opts` in place. Mutating the caller's object would
- * be a stale-cache trap for exactly the caller this feature exists
- * for -- CsDraw.survey calls this again on every redraw, and if it
- * reuses one `opts` object across draws, a graph built for an earlier
- * `resolved` must never survive to silently answer for a later one.
+ * The four fields CsProfile.unrollBand reads (exaggeration, tapeMode,
+ * adjacency) plus the one CsProfile.bandWallRuns reads directly
+ * (flatSplayDeg -- it reads exaggeration and tapeMode off the BAND
+ * itself now, not off this opts object; see bandWallRuns' own
+ * docblock for why) are copied into a small fixed-shape object built
+ * ONCE here and handed to every band, rather than adding `.adjacency`
+ * onto the caller's own `opts` in place. Mutating the caller's object
+ * would be a stale-cache trap for exactly the caller this feature
+ * exists for -- CsDraw.survey calls this again on every redraw, and if
+ * it reuses one `opts` object across draws, a graph built for an
+ * earlier `resolved` must never survive to silently answer for a
+ * later one.
  *
  * \param opts {exaggeration, flatSplayDeg, tapeMode, adjacency}
  * \return {

@@ -9468,13 +9468,22 @@ if (!IS_NODE) {
     // guards -- see CsProfile.tieLegBetween's own docblock for why the
     // tie step alone is allowed to see a closure.
     var sv = CsModel.newSurvey();
-    sv.shots = [
-        shotOf("A1", "A2", 10, 0, 0),
-        shotOf("A2", "A3", 10, 90, 0),
-        shotOf("A3", "B1", 10, 180, 0),
-        shotOf("B1", "B2", 10, 270, 0),
-        shotOf("B2", "A1", 5, 0, 0)
-    ];
+    var s1 = shotOf("A1", "A2", 10, 0, 0);
+    var s2 = shotOf("A2", "A3", 10, 90, 0);
+    var s3 = shotOf("A3", "B1", 10, 180, 0);
+    var s4 = shotOf("B1", "B2", 10, 270, 0);
+    var s5 = shotOf("B2", "A1", 5, 0, 0);
+    // I1/I5: the fixture is extended (not replaced) with LRUD and
+    // splay evidence, so bandWallRuns' closure-break behaviour has
+    // something concrete to assert on below the original unrollBand
+    // assertions. s4.up/.down is real evidence recorded AT B2 (the
+    // closure-landing station in this band); s5.up/.down is real
+    // evidence recorded AT A1 (via the closure shot itself).
+    s4.up = 99; s4.down = 99;
+    s5.up = 8; s5.down = 1;
+    var b1Up1 = splayOf("B1", 5, 0, 60);
+    var b1Up2 = splayOf("B1", 5, 90, 45);
+    sv.shots = [s1, s2, s3, s4, s5, b1Up1, b1Up2];
     var r = CsNetwork.resolve(sv, {});
 
     var closureLeg = null;
@@ -9499,6 +9508,28 @@ if (!IS_NODE) {
     ok(band.stopped === null,
         "a closure-kind tie no longer silently truncates the band");
     eqs(band.stoppedReason, null, "no reason to report when nothing stopped the band");
+    eqs(band.legs[0].kind, "closure",
+        "M1: kind travels on the leg record itself now, no name-pair lookup needed");
+
+    // I1: flush BEFORE a closure-landing station and skip it entirely,
+    // exactly like CsLrud.wallRuns' own closure handling. B2 (the
+    // closure landing point in THIS band) carries real LRUD
+    // (up=99/down=99) but must not appear in B's own wall runs here --
+    // that leg's drawn length is not its own tape reading (see
+    // CsProfile.tieLegBetween), so wall detail must not hang across
+    // it. A1's own LRUD (arriving via the closure shot itself) forms a
+    // one-point run all on its own, dropped for being shorter than a
+    // line; B1 alone, via its two splays, is what survives.
+    var w = CsProfile.bandWallRuns(band, sv, r, {});
+    eqs(w.ceiling.length, 1,
+        "one surviving ceiling run: B1's own splays, not A1 or B2");
+    eqs(w.ceiling[0].length, 2,
+        "exactly B1's two splays -- B2's LRUD (99) never joined them");
+    eqs(w.floor.length, 0,
+        "A1's lone floor point was dropped, and neither B2 nor B1 add another");
+    var b1x = band.stations[2].x;
+    near(w.ceiling[0][1].x, b1x, 1e-9,
+        "the forward-facing splay (t=0) sits at B1 itself, not at B2's X");
 }());
 
 (function() {
@@ -9788,6 +9819,399 @@ if (!IS_NODE) {
             CsProfile.hierarchy(g2, r2), {}), sv2, r2, {});
     ok(w2.ceiling.length === 1 && w2.ceiling[0].length === 3,
         "no junction: A2-A3-A4 is one run of three");
+}());
+
+(function() {
+    // I2: no fallback to due north. A one-station band -- band.legs is
+    // EMPTY, there is no leg at all to read a passage direction from --
+    // must not invent one. Every splay's along-passage projection is
+    // 0, so it sits at its own station's X. Before this fix, "no
+    // measured direction" silently defaulted to azimuth 0 (north),
+    // which spread these three splays (aimed 0/90/180 degrees) across
+    // several feet of X nobody surveyed.
+    var resolved = {
+        stations: { A1: { x: 0, y: 0, z: 0, seq: 0 } },
+        legs: []
+    };
+    var run = { key: "A", stations: ["A1"] };
+    var band = CsProfile.unrollBand(run, null, resolved, {}, {});
+    eqs(band.legs.length, 0, "fixture assumption: a one-station band has no legs at all");
+
+    var sv = CsModel.newSurvey();
+    sv.shots = [
+        splayOf("A1", 5, 0, 60),
+        splayOf("A1", 5, 90, 60),
+        splayOf("A1", 5, 180, 60)
+    ];
+    var w = CsProfile.bandWallRuns(band, sv, resolved, {});
+    eqs(w.ceiling.length, 1, "all three splays survive as one run");
+    eqs(w.ceiling[0].length, 3, "one point per splay");
+    for (var i = 0; i < w.ceiling[0].length; i++) {
+        near(w.ceiling[0][i].x, 0, 1e-9,
+            "no fabricated bearing: every splay sits at its own station's X");
+    }
+}());
+
+(function() {
+    // I2: a PLUMB leg's compass reading is noise, so a station reached
+    // by one gets the SAME "no measured direction" treatment as a
+    // one-station band -- every splay there sits at its own station's
+    // X, and that holds even though A2 is ALSO the `from` end of a
+    // perfectly ordinary next leg (which must not rescue it with the
+    // OUTGOING azimuth either). Before this fix, a backward-facing
+    // splay at the bottom of a pitch could be projected against a
+    // noise bearing and land BEFORE the pitch-top station's own
+    // points -- X is supposed to be monotonically non-decreasing along
+    // a wall run (that is what "extended elevation" means), and this
+    // broke it.
+    var sv = CsModel.newSurvey();
+    var top = shotOf("A1", "A2", 10, 30, 89);    // 89 degrees: PLUMB
+    var s2 = shotOf("A2", "A3", 10, 0, 0);
+    s2.up = 6;
+    var backward = splayOf("A2", 5, 210, 60);    // steep AND facing back
+    sv.shots = [top, s2, backward];
+    var r = CsNetwork.resolve(sv, {});
+    var g = CsProfile.groupRuns(r);
+    var band = CsProfile.unrollBand(g.runs["A"], null, r,
+        CsProfile.hierarchy(g, r), {});
+    var w = CsProfile.bandWallRuns(band, sv, r, {});
+
+    eqs(w.ceiling.length, 1, "one ceiling run across the pitch");
+    eqs(w.ceiling[0].length, 2, "A2's own splay plus A3's LRUD tick");
+    var sorted = true;
+    for (var i = 1; i < w.ceiling[0].length; i++) {
+        if (w.ceiling[0][i].x < w.ceiling[0][i - 1].x - 1e-9) { sorted = false; }
+    }
+    ok(sorted, "monotone X across a pitch, even with a backward-facing splay at the bottom");
+    near(w.ceiling[0][0].x, band.stations[1].x, 1e-9,
+        "the plumb-arrival station's own splay sits at exactly its own X, " +
+        "not projected backward against a noise bearing");
+}());
+
+(function() {
+    // I5, exact criterion wording: "the LRUD tick at 0 leading ties."
+    // No existing fixture creates a genuine t-tie -- a zero-distance
+    // splay does, in one line: CsTraverse.offset returns dx=dy=dz=0
+    // for it regardless of azimuth or inclination, so it lands at
+    // exactly t=0, the same along-passage position as the station's
+    // own LRUD tick.
+    var sv = CsModel.newSurvey();
+    var s1 = shotOf("A1", "A2", 10, 0, 0);
+    s1.up = 4;
+    var zeroSplay = splayOf("A2", 0, 45, 60);   // zero distance, steep: ceiling, t=0
+    sv.shots = [s1, zeroSplay];
+    var r = CsNetwork.resolve(sv, {});
+    var g = CsProfile.groupRuns(r);
+    var band = CsProfile.unrollBand(g.runs["A"], null, r,
+        CsProfile.hierarchy(g, r), {});
+    var w = CsProfile.bandWallRuns(band, sv, r, {});
+
+    eqs(w.ceiling.length, 1, "one ceiling run: the LRUD tick plus the tying splay");
+    eqs(w.ceiling[0].length, 2, "both points survive -- both sit at the same X");
+    var a2x = band.stations[1].x;
+    near(w.ceiling[0][0].x, a2x, 1e-9, "both points sit at A2's X (a genuine tie)");
+    near(w.ceiling[0][1].x, a2x, 1e-9, "both points sit at A2's X (a genuine tie)");
+    near(w.ceiling[0][0].y, band.stations[1].z + 4, 1e-9,
+        "the LRUD tick (order -1) leads the tie: it is U=4 above the station");
+    near(w.ceiling[0][1].y, band.stations[1].z, 1e-9,
+        "the zero-distance splay (order 0) follows: its own dz is 0");
+}());
+
+(function() {
+    // I5: the no-evidence break must fire on a genuine INTERIOR
+    // station, not just the band's own opening one (where flush() on
+    // an already-empty accumulator is a no-op regardless of whether
+    // the check exists at all -- every earlier fixture's evidence-less
+    // station was the first one, which is why this is its own test).
+    // A3 here has neither an LRUD tick nor a splay, splitting a
+    // would-be one-run band into two.
+    var sv = CsModel.newSurvey();
+    var mk = function(f, t) {
+        var s = shotOf(f, t, 10, 0, 0);
+        s.up = 5;
+        return s;
+    };
+    var noEvidenceLeg = shotOf("A2", "A3", 10, 0, 0);   // no up/down at all
+    var a1Splay = splayOf("A1", 5, 0, 60);
+    sv.shots = [mk("A1", "A2"), noEvidenceLeg, mk("A3", "A4"), mk("A4", "A5"), a1Splay];
+    var r = CsNetwork.resolve(sv, {});
+    var g = CsProfile.groupRuns(r);
+    var band = CsProfile.unrollBand(g.runs["A"], null, r,
+        CsProfile.hierarchy(g, r), {});
+    var w = CsProfile.bandWallRuns(band, sv, r, {});
+
+    eqs(w.ceiling.length, 2, "A3's own no-evidence break splits the band into two runs");
+    eqs(w.ceiling[0].length, 2, "run 1: A1's splay plus A2's LRUD tick");
+    eqs(w.ceiling[1].length, 2, "run 2: A4 and A5's own LRUD ticks");
+    near(w.ceiling[1][0].x, band.stations[3].x, 1e-9,
+        "run 2 opens at A4, not somehow bridged from A2 across A3's gap");
+}());
+
+(function() {
+    // I5: the total-order tiebreak between two DISTINCT splays (not
+    // just an LRUD tick vs a splay, covered separately above). Built
+    // to tie EXACTLY, not approximately -- an approximate tie would
+    // just sort by whichever t is numerically smaller and never touch
+    // the comparator's order-based tiebreak line at all, so a mutation
+    // that broke or reversed that line would go uncaught. Both splays
+    // share azimuth 0 against a passage azimuth of 0 (both exact, no
+    // rounding at all), so each one's t equals its own plan projection
+    // exactly; d2 is chosen so the two plan projections round-trip to
+    // the SAME double, verified as a fixture assumption below rather
+    // than assumed.
+    var d1 = 5, inc1 = 60;
+    var plan1 = d1 * Math.cos(inc1 * Math.PI / 180);
+    var inc2 = 30;
+    var c2 = Math.cos(inc2 * Math.PI / 180);
+    var d2 = plan1 / c2;
+    ok(d1 * Math.cos(inc1 * Math.PI / 180) === d2 * c2,
+        "fixture assumption: the two splays' plan projections tie exactly");
+
+    var sv = CsModel.newSurvey();
+    var s1 = shotOf("A1", "A2", 10, 0, 0);
+    var spA = splayOf("A2", d1, 0, inc1);   // order 0, steeper: more U
+    var spB = splayOf("A2", d2, 0, inc2);   // order 1, same plan projection
+    sv.shots = [s1, spA, spB];
+    var r = CsNetwork.resolve(sv, {});
+    var g = CsProfile.groupRuns(r);
+    var band = CsProfile.unrollBand(g.runs["A"], null, r,
+        CsProfile.hierarchy(g, r), {});
+    var w = CsProfile.bandWallRuns(band, sv, r, {});
+
+    eqs(w.ceiling.length, 1, "one ceiling run: the two tying splays");
+    eqs(w.ceiling[0].length, 2, "both survive -- a comparator returning 0 would not drop either");
+    near(w.ceiling[0][0].x, w.ceiling[0][1].x, 1e-9, "both sit at the same X -- this IS the tie");
+    ok(w.ceiling[0][0].y !== w.ceiling[0][1].y,
+        "fixture assumption: they are DISTINCT points (different U), not a no-op tie");
+    ok(w.ceiling[0][0].y > w.ceiling[0][1].y,
+        "order breaks the tie by splay index: spA (order 0, steeper -- higher U) leads spB (order 1)");
+}());
+
+(function() {
+    // I5: the default 10 degree dead zone, and a custom flatSplayDeg
+    // actually changing bandWallRuns' own output (not just
+    // classifySplay in isolation, already covered above). A 7 degree
+    // splay is flat under the default, but a real ceiling hit once the
+    // caller narrows the dead zone to 5.
+    var sv = CsModel.newSurvey();
+    var s1 = shotOf("A1", "A2", 10, 0, 0);
+    s1.up = 6;
+    var s2 = shotOf("A2", "A3", 10, 0, 0);
+    s2.up = 6;
+    var sp = splayOf("A2", 5, 0, 7);
+    sv.shots = [s1, s2, sp];
+    var r = CsNetwork.resolve(sv, {});
+    var g = CsProfile.groupRuns(r);
+    var band = CsProfile.unrollBand(g.runs["A"], null, r,
+        CsProfile.hierarchy(g, r), {});
+
+    var wDefault = CsProfile.bandWallRuns(band, sv, r, {});
+    eqs(wDefault.flat.length, 1, "default 10 deg dead zone: a 7 deg splay is flat");
+    eqs(wDefault.ceiling[0].length, 2, "...only the two LRUD ticks join the ceiling");
+
+    var wNarrow = CsProfile.bandWallRuns(band, sv, r, { flatSplayDeg: 5 });
+    eqs(wNarrow.flat.length, 0, "custom 5 deg dead zone: the same 7 deg splay clears it");
+    eqs(wNarrow.ceiling[0].length, 3, "...and joins the ceiling run instead");
+}());
+
+(function() {
+    // I5: D===0 draws a floor point at the station (the wall is AT the
+    // station), and null U draws nothing at all -- the mirror image of
+    // the existing "U===0, D===null" fixture above, so both directions
+    // of the null-vs-zero rule are independently exercised.
+    var sv = CsModel.newSurvey();
+    var s1 = shotOf("A1", "A2", 10, 0, 0);
+    s1.up = null; s1.down = 0;
+    var s2 = shotOf("A2", "A3", 10, 0, 0);
+    s2.up = null; s2.down = 0;
+    sv.shots = [s1, s2];
+    var r = CsNetwork.resolve(sv, {});
+    var g = CsProfile.groupRuns(r);
+    var band = CsProfile.unrollBand(g.runs["A"], null, r,
+        CsProfile.hierarchy(g, r), {});
+    var w = CsProfile.bandWallRuns(band, sv, r, {});
+    near(w.floor[0][0].y, band.stations[1].z, 1e-9,
+        "D of 0 is a floor point at the station");
+    ok(w.ceiling.length === 0, "null U draws no ceiling at all");
+}());
+
+(function() {
+    // I5: floor runs shorter than 2 points are dropped, checked
+    // INDEPENDENTLY of ceiling -- a mutation could weaken floor's own
+    // threshold (e.g. >=1) while leaving ceiling's correct, and no
+    // existing fixture asserts on w.floor's length on its own.
+    var sv = CsModel.newSurvey();
+    var s1 = shotOf("A1", "A2", 10, 0, 0);
+    s1.down = 3;   // A2's only floor evidence anywhere in this survey
+    sv.shots = [s1];
+    var r = CsNetwork.resolve(sv, {});
+    var g = CsProfile.groupRuns(r);
+    var band = CsProfile.unrollBand(g.runs["A"], null, r,
+        CsProfile.hierarchy(g, r), {});
+    var w = CsProfile.bandWallRuns(band, sv, r, {});
+    eqs(w.floor.length, 0, "a single floor point is dropped for being shorter than a line");
+}());
+
+(function() {
+    // I5: a junction station's own point is INCLUDED in the run it
+    // terminates -- the docblock's explicit claim, previously only
+    // exercised where the junction's own point formed a LONE 1-point
+    // run that got dropped anyway (indistinguishable from exclusion).
+    // Here A2 supplies a first point so A3's own tick joins a real
+    // 2-point run before that run is cut off.
+    var sv = CsModel.newSurvey();
+    var mk = function(f, t, az) {
+        var s = shotOf(f, t, 10, az, 0);
+        s.up = 5;
+        return s;
+    };
+    sv.shots = [mk("A1", "A2", 0), mk("A2", "A3", 0), mk("A3", "A4", 0),
+        mk("A3", "A3a1", 90)];
+    var r = CsNetwork.resolve(sv, {});
+    var g = CsProfile.groupRuns(r);
+    var band = CsProfile.unrollBand(g.runs["A"], null, r,
+        CsProfile.hierarchy(g, r), {});
+    var w = CsProfile.bandWallRuns(band, sv, r, {});
+
+    eqs(w.ceiling.length, 1, "one run survives");
+    eqs(w.ceiling[0].length, 2, "A2's tick AND A3's own tick -- the junction's point is included");
+    near(w.ceiling[0][1].x, band.stations[2].x, 1e-9,
+        "the second point is A3 itself, not dropped from the run it ends");
+}());
+
+(function() {
+    // I5: passage azimuth must come from the ARRIVING leg, not the
+    // outgoing one -- every earlier fixture uses azimuth 0 throughout,
+    // which cannot tell the two apart. A2 is reached going north
+    // (azimuth 0) and leaves going east (azimuth 90); a splay aimed
+    // east at A2 is ALONG the outgoing leg but PERPENDICULAR to the
+    // arriving one. Using the wrong leg's azimuth would give it a
+    // large nonzero along-passage projection instead of ~0.
+    var sv = CsModel.newSurvey();
+    var s1 = shotOf("A1", "A2", 10, 0, 0);    // arrives heading north (az 0)
+    s1.up = 6;
+    var s2 = shotOf("A2", "A3", 10, 90, 0);   // leaves heading east (az 90)
+    var sp = splayOf("A2", 5, 90, 45);        // aimed east: along the OUTGOING leg
+    sv.shots = [s1, s2, sp];
+    var r = CsNetwork.resolve(sv, {});
+    var g = CsProfile.groupRuns(r);
+    var band = CsProfile.unrollBand(g.runs["A"], null, r,
+        CsProfile.hierarchy(g, r), {});
+    var w = CsProfile.bandWallRuns(band, sv, r, {});
+
+    eqs(w.ceiling.length, 1, "A2's tick plus its splay");
+    eqs(w.ceiling[0].length, 2, "A3 has no evidence of its own, so the run ends right after A2");
+    near(w.ceiling[0][1].x, band.stations[1].x, 1e-6,
+        "the splay uses the ARRIVING leg's azimuth (north): aimed east, it projects to ~0, " +
+        "not the large offset the OUTGOING leg's azimuth (east) would give it");
+}());
+
+(function() {
+    // I5: upAll/downAll are never read, even when populated -- a
+    // multi-reading LRUD ("5/10" describing a ledge) still contributes
+    // exactly one ceiling and one floor point, from up/down alone.
+    var sv = CsModel.newSurvey();
+    var s1 = shotOf("A1", "A2", 10, 0, 0);
+    s1.up = 4;
+    s1.upAll = [500, 999];      // if this were ever read, y would be way off
+    s1.down = 2;
+    s1.downAll = [500, 999];
+    var s2 = shotOf("A2", "A3", 10, 0, 0);
+    s2.up = 4; s2.down = 2;
+    sv.shots = [s1, s2];
+    var r = CsNetwork.resolve(sv, {});
+    var g = CsProfile.groupRuns(r);
+    var band = CsProfile.unrollBand(g.runs["A"], null, r,
+        CsProfile.hierarchy(g, r), {});
+    var w = CsProfile.bandWallRuns(band, sv, r, {});
+    near(w.ceiling[0][0].y, band.stations[1].z + 4, 1e-9,
+        "ceiling Y comes from up (4), never upAll");
+    near(w.floor[0][0].y, band.stations[1].z - 2, 1e-9,
+        "floor Y comes from down (2), never downAll");
+}());
+
+(function() {
+    // I5: flat tick naming is <station>.<n>, 1-indexed by the splay's
+    // OWN position among ALL splays at that station (not among just
+    // the flat ones) -- matching CsDraw's own numbering, which later
+    // tasks cross-reference. Four splays alternate ceiling/flat/floor/
+    // flat: the flat ticks must be A2.2 and A2.4.
+    var sv = CsModel.newSurvey();
+    var s1 = shotOf("A1", "A2", 10, 0, 0);
+    var sps = [
+        splayOf("A2", 5, 0, 45),      // 1st: ceiling
+        splayOf("A2", 5, 90, 3),      // 2nd: flat -> A2.2
+        splayOf("A2", 5, 180, -45),   // 3rd: floor
+        splayOf("A2", 5, 270, 5)      // 4th: flat -> A2.4
+    ];
+    sv.shots = [s1].concat(sps);
+    var r = CsNetwork.resolve(sv, {});
+    var g = CsProfile.groupRuns(r);
+    var band = CsProfile.unrollBand(g.runs["A"], null, r,
+        CsProfile.hierarchy(g, r), {});
+    var w = CsProfile.bandWallRuns(band, sv, r, {});
+
+    eqs(w.flat.length, 2, "two flat splays out of the four");
+    eqs(w.flat[0].name, "A2.2", "the 2nd splay overall, not the 1st flat one");
+    eqs(w.flat[1].name, "A2.4", "the 4th splay overall, not the 2nd flat one");
+}());
+
+(function() {
+    // m2: a splay with NO inclination on record must be skipped
+    // outright, not plotted as a flat tick at exactly centerline
+    // elevation -- a fabricated coordinate for a measurement that was
+    // never taken, at precisely the level the dead-zone rationale
+    // calls meaningless.
+    var sv = CsModel.newSurvey();
+    var s1 = shotOf("A1", "A2", 10, 0, 0);
+    var noInc = splayOf("A2", 5, 0, 0);
+    noInc.inclination = null;
+    sv.shots = [s1, noInc];
+    var r = CsNetwork.resolve(sv, {});
+    var g = CsProfile.groupRuns(r);
+    var band = CsProfile.unrollBand(g.runs["A"], null, r,
+        CsProfile.hierarchy(g, r), {});
+    var w = CsProfile.bandWallRuns(band, sv, r, {});
+    eqs(w.flat.length, 0, "a no-inclination splay contributes no tick at all");
+    eqs(w.ceiling.length, 0, "...and obviously no ceiling either");
+    eqs(w.floor.length, 0, "...nor floor");
+}());
+
+(function() {
+    // I4: the invariant is now structural, not just documented. A band
+    // built with exaggeration 5 -- its own station Y already scaled up
+    // accordingly -- must scale its wall points the SAME way even when
+    // bandWallRuns is called with a DIFFERENT (or missing) exaggeration
+    // in its own opts; it reads exaggeration/tapeMode off `band` itself
+    // now, not off opts. The rise is real (inc 30, not level) so the
+    // station's own Y is meaningfully amplified by the x5: under the
+    // OLD bug (bandWallRuns re-deriving Y from its own, mismatched
+    // opts.exaggeration default of 1), the ceiling would compute to Y
+    // 9 while the station itself sits at Y 25 -- a ceiling drawn BELOW
+    // its own station, measured exactly as the review reported it.
+    var sv = CsModel.newSurvey();
+    var s1 = shotOf("A1", "A2", 10, 0, 30);   // rise = 10*sin(30) = 5
+    s1.up = 4;
+    var s2 = shotOf("A2", "A3", 10, 0, 30);   // A2 alone is <2 points and gets dropped
+    s2.up = 4;
+    sv.shots = [s1, s2];
+    var r = CsNetwork.resolve(sv, {});
+    var g = CsProfile.groupRuns(r);
+    var band = CsProfile.unrollBand(g.runs["A"], null, r,
+        CsProfile.hierarchy(g, r), { exaggeration: 5 });
+    eqs(band.exaggeration, 5, "fixture assumption: the band records its own exaggeration");
+    var a2 = band.stations[1];
+    near(a2.y, band.datum + 5 * 5, 1e-9,
+        "fixture assumption: A2's own Y is scaled by the band's exaggeration");
+
+    // opts.exaggeration here is deliberately absent (defaults to 1) --
+    // a mismatch against the band's own 5, on purpose
+    var w = CsProfile.bandWallRuns(band, sv, r, {});
+    near(w.ceiling[0][0].y, band.datum + (5 + 4) * 5, 1e-9,
+        "ceiling scales by the BAND's exaggeration (5), not opts' mismatched default (1)");
+    ok(w.ceiling[0][0].y > a2.y,
+        "the ceiling point stays above its own (already-scaled) station -- " +
+        "a mismatched opts used to be able to put it below");
 }());
 
 // ---------------------------------------------------------------------
