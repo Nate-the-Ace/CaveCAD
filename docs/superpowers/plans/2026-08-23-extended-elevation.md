@@ -742,7 +742,8 @@ git commit -m "feat(CsProfile): the graph decides band order, the name only cros
 - [ ] A band's first point is its tie station at X = 0; the tie leg is part of the band
 - [ ] Horizontal step per leg = `d·cos(inc)`, vertical step = `d·sin(inc)`, so each leg's drawn length equals its slope distance
 - [ ] A leg doubling back in plan still advances X (extended, not projected)
-- [ ] Y is the station's resolved Z, never a defaulted 0; a station with no resolved Z ends the band and is reported
+- [ ] Y is the station's resolved Z, never a defaulted 0; a station with no resolved Z ends the band and is reported. `datum` stays null in that case rather than becoming 0 — a fabricated datum is the elevation-datum trap
+- [ ] The TIE step resolves through `CsProfile.tieLegBetween`, which admits closure legs, while every interior step keeps using `legBetween`. The tie edge was chosen by `hierarchy`, whose contact graph admits closures, so refusing one here produced a silently short band — the exact failure the adjacency/legBetween invariant exists to prevent
 - [ ] Vertical exaggeration scales Y about the band's own datum, never X
 
 **Verify:** `node tests/js_unit.js` → `### UNIT OK`, count risen
@@ -1069,10 +1070,13 @@ CsProfile.unrollBand = function(run, tie, resolved, hier, opts) {
         return st.z;
     };
 
+    // NO FALLBACK TO 0. A null datum means the chain's head has no
+    // resolved elevation, and substituting 0 there would rebase a cave
+    // surveyed to an absolute datum -- the bug family this codebase has
+    // been bitten by five times. datum stays null; the loop below reads
+    // the same zOf(chain[0]) on its first iteration and stops, so no
+    // NaN ever reaches yOf.
     var datum = (chain.length > 0) ? zOf(chain[0]) : null;
-    if (datum === null) {
-        datum = 0.0;   // no station placed at all; the band will be empty
-    }
     var yOf = function(z) {
         return datum + (z - datum) * exag;
     };
