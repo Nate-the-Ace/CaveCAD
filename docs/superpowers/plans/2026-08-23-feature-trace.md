@@ -1933,8 +1933,10 @@ Costs, all concrete:
 
 **Correction to an earlier claim in this plan:** on-demand variants do NOT weaken `test_registry_layers_exist_in_plan_template`. That test iterates the REGISTRY, and variants are never registry entries, so it needs no exemption and the invariant is untouched. The earlier note said otherwise and was wrong.
 
+**Scope decided: PROFILE ONLY.** The plan view is not segregated by run. Enforced in code by `CsLayerVariants.ensureProfile`, which refuses a plan- or sheet-frame base, and which every profile-drawing caller uses instead of the general `ensure`. The reason is not symmetry: the plan is ONE CONTINUOUS MAP -- a caver reads a passage across survey boundaries and traces walls straight through them, so per-run plan layers would fragment one wall into several AND stop `CsTrace.nearestEnd` closing the joins, since it only ties within a layer. The elevation is already drawn one band per run, so there the division is real. The general `ensure` stays general for other tools.
+
 **Remaining work:**
-- [ ] `CsProfileDraw` calls `CsLayerVariants.ensure` per band and draws that band to its variant layers, instead of all bands sharing one set
+- [ ] `CsProfileDraw` calls `CsLayerVariants.ensureProfile` per band and draws that band to its variant layers, instead of all bands sharing one set
 - [ ] `CsProfileDraw.erase()` scoped to one run's variants, so regenerating run G leaves run A alone -- the ownership win this was for
 - [ ] Feature Trace gains a run selector, so a traced ceiling lands on the right run's layer
 - [ ] An "Isolate Run" command built on `CsLayerVariants.layersForToken`

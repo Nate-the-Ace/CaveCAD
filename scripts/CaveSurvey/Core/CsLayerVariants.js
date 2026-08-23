@@ -146,6 +146,32 @@ CsLayerVariants.ensure = function(doc, di, base, token) {
 };
 
 /**
+ * ensure(), restricted to the PROFILE frame. Returns null for anything
+ * else. QCAD context only.
+ *
+ * A deliberate scoping decision, not a limitation of the mechanism:
+ * segregating by survey run is wanted for the elevation and NOT for the
+ * plan. The plan is one continuous map -- a caver reads a passage across
+ * survey boundaries and traces walls straight through them, so splitting
+ * plan walls per run would fragment one wall into several layers and
+ * (because CsTrace.nearestEnd only ties within a layer) refuse to close
+ * the joins between them. The elevation is already drawn as one BAND PER
+ * RUN, so per-run layers follow a division that is really there.
+ *
+ * Every profile-drawing caller goes through this rather than ensure(),
+ * so the decision lives in code instead of in whoever remembers it. The
+ * general ensure() stays general on purpose: the library exists for
+ * other tools too, and a future per-trip or per-sheet use has no reason
+ * to inherit this restriction.
+ */
+CsLayerVariants.ensureProfile = function(doc, di, base, token) {
+    if (isNull(base) || CsLayers.frameOf(base) !== "profile") {
+        return null;
+    }
+    return CsLayerVariants.ensure(doc, di, base, token);
+};
+
+/**
  * Every token this drawing already has a variant of `base` for, sorted.
  * QCAD context only.
  *

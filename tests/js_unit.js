@@ -14264,6 +14264,32 @@ if (!IS_NODE) {
         ok(!CsBind.isLineworkLayer("CTRL-PROFILE-SHOTS-A"),
             "CsLayerVariants: a generated variant is still refused by CsBind");
 
+        // -- profile-only scoping -----------------------------------
+        // Segregating by run is wanted for the elevation and NOT for the
+        // plan: a caver traces plan walls straight through survey
+        // boundaries, and per-run plan layers would fragment one wall
+        // into several AND stop nearestEnd closing the joins, since it
+        // only ties within a layer. The elevation is already drawn one
+        // band per run, so there the division is real.
+        eqs(CsLayerVariants.ensureProfile(doc, di,
+                CsLayers.PROFILE_TRACED_FLOOR, "C"), "PROFILE-FLOOR-C",
+            "ensureProfile: a profile base is allowed");
+        ok(CsLayerVariants.ensureProfile(doc, di,
+                CsLayers.WALLS_SURVEYED, "C") === null,
+            "ensureProfile: a PLAN base is refused -- plan view is not segregated");
+        ok(!doc.hasLayer("WALLS-SURVEYED-C"),
+            "ensureProfile: and nothing is created when it refuses");
+        ok(CsLayerVariants.ensureProfile(doc, di, CsLayers.BORDER, "C") === null,
+            "ensureProfile: a SHEET base is refused too");
+        ok(CsLayerVariants.ensureProfile(doc, di,
+                CsLayers.PROFILE_SHOTS, "C") !== null,
+            "ensureProfile: a GENERATED profile base is allowed");
+
+        // The general ensure() stays general: the library serves other
+        // tools, and a future per-trip use should not inherit this rule.
+        ok(CsLayerVariants.ensure(doc, di, CsLayers.WALLS_SURVEYED, "C") !== null,
+            "ensure: the unrestricted call is still general by design");
+
         // -- refusals ------------------------------------------------
         ok(CsLayerVariants.ensure(doc, di, "INVENTED-LAYER", "A") === null,
             "CsLayerVariants.ensure: refuses a base the registry does not define");
