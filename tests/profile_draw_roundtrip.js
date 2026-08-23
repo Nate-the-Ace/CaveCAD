@@ -2308,6 +2308,95 @@ function drawPlanSurvey(doc, di, resolved, names) {
 }());
 
 // =======================================================================
+// THE EXAGGERATION STAMP: an exaggerated elevation says so.
+//
+// A vertical exaggeration makes the cave look deeper than it is, and
+// the sheet's own scale bar measures the PLAN. Somebody scaling a
+// height off an exaggerated elevation with that bar reads a wrong
+// number and has nothing in the drawing to tell them so -- which is
+// what this stamp is for.
+//
+// The text is asserted in UPPER CASE because every string this suite
+// draws goes through CsDraw.addText, which capitalises at that one
+// chokepoint (CsDraw.caps) -- so the stamp is spelled in the source in
+// ordinary case and lands on the paper like every other label.
+// =======================================================================
+
+/** The exaggeration stamp entities in a drawing, by their own tag. */
+function stampsIn(doc) {
+    var ids = doc.queryAllEntities(false, false);
+    var out = [], i, e, v;
+    for (i = 0; i < ids.length; i++) {
+        e = doc.queryEntity(ids[i]);
+        if (isNull(e)) { continue; }
+        v = CsTags.get(e, "ProfileExaggerationStamp");
+        if (v !== null && v !== "") {
+            out.push(e);
+        }
+    }
+    return out;
+}
+
+/** The two-shot fixture this section renders, built fresh each time. */
+function exaggerationFixture(exag) {
+    var sv = CsModel.newSurvey();
+    sv.shots = [
+        shotOf("X1", "X2", 10, 0, -20, 4, 2),
+        shotOf("X2", "X3", 10, 0, -20, 4, 2)
+    ];
+    return CsProfile.build(sv, CsNetwork.resolve(sv, {}),
+        { exaggeration: exag });
+}
+
+/** Renders that fixture at one exaggeration into a fresh document. */
+function drawAtExaggeration(exag) {
+    var d = new RDocument(new RMemoryStorage(), createSpatialIndex());
+    var i = new RDocumentInterface(d);
+    CsProfileDraw.render(d, i, exaggerationFixture(exag), {});
+    return { doc: d, di: i };
+}
+
+(function() {
+    // At the default 1.0 there is nothing to warn about, and a notice
+    // that is always there is one nobody reads.
+    var one = drawAtExaggeration(1.0);
+    eqs(String(stampsIn(one.doc).length), "0",
+        "AT 1.0, THE DEFAULT, NO STAMP IS DRAWN AT ALL");
+    destr(one.di);
+
+    var two = drawAtExaggeration(2.0);
+    var stamps2 = stampsIn(two.doc);
+    eqs(String(stamps2.length), "1", "at 2.0 exactly one stamp is drawn");
+    if (stamps2.length === 1) {
+        eqs(stamps2[0].getPlainText(),
+            "VERTICAL EXAGGERATION 2X -- NOT TO SHEET SCALE",
+            "the stamp reads exactly this, a whole factor as 2x");
+        eqs(two.doc.getLayerName(stamps2[0].getLayerId()),
+            CsLayers.PROFILE_TEXT_LABELS,
+            "the stamp lands on PROFILE-TEXT-LABELS");
+        eqs(String(CsProfileBind.isProfileGeometry(stamps2[0])), "true",
+            "and it is generator-owned, so the next redraw erases it " +
+            "rather than stacking a second one on top");
+    }
+
+    // the redraw half of that claim, executed rather than argued
+    CsProfileDraw.render(two.doc, two.di, exaggerationFixture(2.0), {});
+    eqs(String(stampsIn(two.doc).length), "1",
+        "a redraw leaves exactly ONE stamp, not two");
+    destr(two.di);
+
+    var half = drawAtExaggeration(1.5);
+    var stamps15 = stampsIn(half.doc);
+    eqs(String(stamps15.length), "1", "at 1.5 exactly one stamp is drawn");
+    if (stamps15.length === 1) {
+        eqs(stamps15[0].getPlainText(),
+            "VERTICAL EXAGGERATION 1.5X -- NOT TO SHEET SCALE",
+            "a fractional factor keeps its fraction: 1.5x, not 2x or 1x");
+    }
+    destr(half.di);
+}());
+
+// =======================================================================
 // Report.
 // =======================================================================
 
