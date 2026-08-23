@@ -276,15 +276,32 @@ CsProfile.adjacency = function(resolved) {
  * Which run each run hangs off, where it ties in, and what order the
  * bands go in.
  *
- * The parent is decided by the GRAPH, not simply by "earliest seq" --
- * see the per-kind ranking below, RANK before SEQ, for why raw seq
- * alone is not safe. The name-derived tie (CsProfile.tieNameOfRun) is
- * used only as a cross-check -- when the two disagree the graph wins,
- * because it is the measured fact, and the disagreement is reported as
- * a likely naming blunder. That check runs even when the graph found
- * NO contact at all: a named spur with zero contacts still had a name
- * asserting a tie, and reporting nothing there would hide the single
- * most suspicious state this function can produce.
+ * TWO PHASES, not one ranked pass. Phase 1 assigns parents using ONLY
+ * "new" legs (a measured placement fact -- the directional seq test is
+ * safe here) and breaks any cycle it finds among them; a cycle in
+ * phase 1 is genuine, because every edge involved really did place a
+ * station. Phase 2 then lets a run still parentless after phase 1 use
+ * its closure/tie contacts to fill the gap, but skips any candidate
+ * that is already a descendant of this run -- an ordinary loop (a
+ * spur closing a ring back onto its own trunk) is the everyday case
+ * this guards: the spur already has the trunk as parent from phase 1,
+ * so the trunk seeing the SAME closure from its own side must not
+ * also claim the spur as ITS parent. A skipped candidate creates no
+ * parent, no cycle, and no secondTie -- it is the same physical
+ * junction the descendant already reported from its own side, and
+ * reporting it twice would not be new information. This is why an
+ * ordinary loop-closing survey reports an EMPTY `cycles` -- only a
+ * loop made entirely of "new" legs (phase 1) is a real ambiguity;
+ * every closure/tie ambiguity has an escape hatch (skip and let the
+ * other side keep it) that a "new"-leg loop does not.
+ *
+ * The name-derived tie (CsProfile.tieNameOfRun) is used only as a
+ * cross-check -- when the two disagree the graph wins, because it is
+ * the measured fact, and the disagreement is reported as a likely
+ * naming blunder. That check runs even when the graph found NO
+ * contact at all, in either phase: a named spur with zero contacts
+ * still had a name asserting a tie, and reporting nothing there would
+ * hide the single most suspicious state this function can produce.
  *
  * \param grouped CsProfile.groupRuns() result
  * \param resolved CsNetwork.resolve() result
@@ -298,9 +315,13 @@ CsProfile.adjacency = function(resolved) {
  *               third run while a second contact lands in yet another),
  *   mismatches: [{run, expected, actual}] name vs graph; actual is null
  *               when the graph found no contact at all,
- *   orphans:    [runKey] runs with no determinable parent,
- *   cycles:     [[runKey, ...]] any loop found in the parent map and
- *               broken -- see the cycle-breaking pass below
+ *   orphans:    [runKey] runs with no determinable parent in EITHER
+ *               phase (a genuinely disconnected component),
+ *   cycles:     [[runKey, ...]] any loop found among phase-1 ("new"-leg)
+ *               parents and broken -- see the phase-1 cycle-breaking
+ *               pass below. Empty for an ordinary closure/tie loop,
+ *               which phase 2 resolves without ever needing to detect
+ *               a cycle at all
  * }
  */
 CsProfile.hierarchy = function(grouped, resolved) {
@@ -373,6 +394,16 @@ CsProfile.hierarchy = function(grouped, resolved) {
         earliestSeqOfRun[erKey] = erMin;
     }
 
+    // Per run, split contacts into two lists by leg kind. Each list is
+    // already in ascending seq (leg-index) order because contactLegs
+    // itself is iterated in that order and entries are only ever
+    // appended, never reordered -- but each is sorted explicitly below
+    // anyway, so the guarantee does not quietly depend on that staying
+    // true. seq is a leg's unique index and one leg contributes at most
+    // one entry to a given run's list (both endpoints in this run is
+    // skipped below), so within a list this can never tie for distinct
+    // entries.
+    var rank0ByRun = {}, rank1ByRun = {};
     for (i = 0; i < grouped.order.length; i++) {
         var key = grouped.order[i];
         var stations = grouped.runs[key].stations;
@@ -380,7 +411,7 @@ CsProfile.hierarchy = function(grouped, resolved) {
         for (k = 0; k < stations.length; k++) {
             inRun[stations[k]] = true;
         }
-        var contacts = [];
+        var r0 = [], r1 = [];
         for (k = 0; k < contactLegs.length; k++) {
             var cg = contactLegs[k];
             var mine = null, other = null;
@@ -397,114 +428,77 @@ CsProfile.hierarchy = function(grouped, resolved) {
             if (otherRun === undefined || otherRun === key) {
                 continue;
             }
-            // RANK BEFORE SEQ. A "new" leg's smaller-seq end genuinely
-            // is the parent side -- that is also what makes a
-            // backwards-entered spur (A2a1->A2) resolve correctly, so
-            // it is kept exactly as before. But a "closure" or "tie"
-            // leg connects two stations that were BOTH already placed
-            // by the time it was walked, so seq says nothing about
-            // parentage there -- and worse, a *fix'ed station is
-            // SEEDED before any traversal at all (CsNetwork.seedFixed),
-            // so its seq can be artificially tiny despite the survey
-            // reaching it, graph-wise, very late. Applying the "new"
-            // leg's directional rule to a closure/tie leg is exactly
-            // what let a fixed entrance's seed-time seq masquerade as
-            // "this run already existed," corrupting the whole
-            // hierarchy on real two-entrance surveys. So a closure/tie
-            // leg is kept as a candidate in EITHER direction, but
-            // ranked after every "new" contact (rank 1 vs rank 0) --
-            // it only wins when nothing better ties this run in, and a
-            // symmetric candidate on both sides of such a leg is
-            // exactly what the cycle-breaking pass below exists to
-            // resolve.
-            var rank;
             if (cg.kind === "new") {
+                // A "new" leg's smaller-seq end genuinely is the parent
+                // side -- that is also what makes a backwards-entered
+                // spur (A2a1->A2) resolve correctly.
                 if (seqOf(other) >= seqOf(mine)) {
                     continue;
                 }
-                rank = 0;
+                r0.push({ station: other, otherRun: otherRun, seq: cg.seq });
             } else {
-                rank = 1;
+                // "closure"/"tie": both ends were already placed by the
+                // time this leg was walked, so seq says nothing about
+                // parentage -- and a *fix'ed station is SEEDED before
+                // any traversal at all (CsNetwork.seedFixed), so its
+                // seq can be artificially tiny despite the survey
+                // reaching it, graph-wise, very late. Kept, unfiltered,
+                // as a rank-1 candidate for phase 2 below -- never used
+                // to assign a phase-1 parent.
+                r1.push({ station: other, otherRun: otherRun, seq: cg.seq });
             }
-            contacts.push({
-                station: other,
-                otherRun: otherRun,
-                rank: rank,
-                seq: cg.seq
-            });
         }
-        // (rank, seq) is a total order: rank is 0 or 1, and within a
-        // rank, seq is the leg's index in resolved.legs -- unique per
-        // leg, and one leg cannot contribute two contacts to the same
-        // run (both endpoints in this run is skipped above) -- so this
-        // comparator can never return 0 for distinct entries, which is
-        // required of every comparator here: this engine's sort is not
-        // stable.
-        contacts.sort(function(a, b) {
-            if (a.rank !== b.rank) {
-                return a.rank - b.rank;
-            }
-            return a.seq - b.seq;
-        });
+        r0.sort(function(a, b) { return a.seq - b.seq; });
+        r1.sort(function(a, b) { return a.seq - b.seq; });
+        rank0ByRun[key] = r0;
+        rank1ByRun[key] = r1;
+    }
 
-        var expected = CsProfile.tieNameOfRun(key);
-
-        if (contacts.length === 0) {
-            // the root run, or a run in its own disconnected component
-            parents[key] = null;
-            ties[key] = null;
-            if (i > 0) {
-                orphans.push(key);
-            }
+    // ---- Phase 1: parents from "new" legs only ---------------------
+    //
+    // This is the only source of a PRIMARY tie: a "new" leg is the leg
+    // that actually placed a station, so its direction is a measured
+    // fact. Multiple qualifying "new" contacts for the same run are
+    // rare but possible; the earliest becomes the tie, the rest become
+    // ordinary secondTies.
+    for (i = 0; i < grouped.order.length; i++) {
+        var p1Key = grouped.order[i];
+        var p1r0 = rank0ByRun[p1Key];
+        if (p1r0.length === 0) {
+            parents[p1Key] = null;
+            ties[p1Key] = null;
         } else {
-            parents[key] = contacts[0].otherRun;
-            ties[key] = contacts[0].station;
-            // Dedupe against every station already emitted for this
-            // run, not just contacts[0]'s -- a junction reached a THIRD
-            // time (two different closure legs both landing back on
-            // the same station) is still only one second contact worth
-            // reporting, not two identical rows.
-            var seenStation = {};
-            seenStation[contacts[0].station] = true;
-            for (k = 1; k < contacts.length; k++) {
-                var stK = contacts[k].station;
-                if (seenStation.hasOwnProperty(stK)) {
-                    continue;
+            parents[p1Key] = p1r0[0].otherRun;
+            ties[p1Key] = p1r0[0].station;
+            var seen0 = {};
+            seen0[p1r0[0].station] = true;
+            for (k = 1; k < p1r0.length; k++) {
+                var st0 = p1r0[k].station;
+                if (seen0.hasOwnProperty(st0)) {
+                    continue;   // same junction reached twice, not a second tie
                 }
-                seenStation[stK] = true;
+                seen0[st0] = true;
                 secondTies.push({
-                    run: key,
-                    station: stK,
-                    otherRun: contacts[k].otherRun
+                    run: p1Key,
+                    station: st0,
+                    otherRun: p1r0[k].otherRun
                 });
             }
         }
-
-        // Reachable regardless of whether a contact was found: a named
-        // spur (expected !== null) that the graph ties nowhere at all
-        // is exactly as much a mismatch as one the graph ties somewhere
-        // else -- actual is null in that case, not silently skipped.
-        if (expected !== null && expected !== ties[key]) {
-            mismatches.push({
-                run: key,
-                expected: expected,
-                actual: ties[key]
-            });
-        }
     }
 
-    // ---- break any cycle in the parent map -----------------------
+    // ---- break any cycle among phase-1 (new-leg-only) parents -------
     //
     // Each run has at most one parent, so `parents` is a functional
     // graph: walking parent pointers from any run either reaches a
-    // null-parent root, or loops back on itself. A loop is possible
-    // even after the per-kind ranking above -- two runs can each pick
-    // a DIFFERENT qualifying edge to the other (a fixed-entrance ring
-    // where each side's own best contact points at the other; a side
-    // passage renumbered back into the trunk, where each run's own
-    // "new"-leg contact happens to point at the other run), each edge
-    // locally legitimate, together forming a cycle no single run's own
-    // contact list could ever reveal.
+    // null-parent root, or loops back on itself. A loop here is genuine
+    // -- every edge involved is a "new" leg, a measured placement fact
+    // -- unlike a closure/tie edge, which phase 1 never sees at all. A
+    // side passage renumbered back into the trunk (A1..A3, B1-B2,
+    // A4-A5, every leg "new") is exactly this: each run's own contact
+    // list independently and correctly picks a "new" edge to the
+    // other, and only walking the parent chain afterward finds the
+    // resulting cycle.
     //
     // The loop member whose EARLIEST station (by resolution .seq) is
     // smallest becomes the root: it is the one that was on the ground
@@ -574,6 +568,132 @@ CsProfile.hierarchy = function(grouped, resolved) {
         }
         for (var pi = 0; pi < path.length; pi++) {
             settled[path[pi]] = true;
+        }
+    }
+
+    // ---- Phase 2: closure/tie legs fill remaining gaps only ---------
+    //
+    // A run still parentless after phase 1 gets ONE more chance: its
+    // closure/tie contacts, in seq order, become candidate parents --
+    // but a candidate is skipped when it is ALREADY a descendant of
+    // this run, because that is the SAME physical junction the
+    // descendant already reported from its own side (an ordinary
+    // trunk-with-a-spur-that-closes-a-loop is the everyday case: the
+    // spur's "new" leg already gives it the trunk as parent in phase 1,
+    // so the trunk seeing the SAME closure from its own side must not
+    // also claim the spur as ITS parent). A skipped candidate creates
+    // no parent, no cycle, and no secondTie -- reporting it again would
+    // describe one physical junction twice.
+    //
+    // Processed from the LATEST-anchored run back to the earliest --
+    // the reverse of grouped.order, which is itself ordered by each
+    // run's earliest station (see earliestSeqOfRun). This lets a run
+    // whose entire connection to an already-established run is a
+    // single closure/tie leg (never a "new" one -- e.g. two separately
+    // *fixed* components joined only by a tie) claim that connection as
+    // ITS parent before the earlier, already-established run gets a
+    // chance to see the very same leg from its own side and mistake it
+    // for a parent claim of its own: by the time the earlier run is
+    // examined, the later one already has it recorded as a live parent,
+    // so the descendant check (which reads the CURRENT parents map, not
+    // a frozen phase-1 snapshot) correctly recognizes it and skips it.
+    var isDescendant = function(ancestorKey, candidateKey) {
+        var cur2 = candidateKey;
+        var guard = 0;
+        while (cur2 !== null && cur2 !== undefined && parents.hasOwnProperty(cur2)) {
+            if (cur2 === ancestorKey) {
+                return true;
+            }
+            cur2 = parents[cur2];
+            guard++;
+            if (guard > grouped.order.length + 1) {
+                break;   // parents is acyclic by this point; belt-and-braces
+            }
+        }
+        return false;
+    };
+
+    for (i = grouped.order.length - 1; i >= 0; i--) {
+        var p2Key = grouped.order[i];
+        var p2r1 = rank1ByRun[p2Key];
+
+        if (parents[p2Key] !== null) {
+            // Already has a phase-1 parent: its closure/tie contacts
+            // are ordinary secondTies, not primary-candidate material.
+            var seenHas = {};
+            seenHas[ties[p2Key]] = true;
+            for (k = 0; k < p2r1.length; k++) {
+                var stHas = p2r1[k].station;
+                if (seenHas.hasOwnProperty(stHas)) {
+                    continue;
+                }
+                seenHas[stHas] = true;
+                secondTies.push({
+                    run: p2Key,
+                    station: stHas,
+                    otherRun: p2r1[k].otherRun
+                });
+            }
+            continue;
+        }
+
+        // Still parentless: look for the first closure/tie candidate
+        // that is not already a descendant of this run.
+        var chosen = null;
+        var extras = [];
+        for (k = 0; k < p2r1.length; k++) {
+            if (isDescendant(p2Key, p2r1[k].otherRun)) {
+                continue;
+            }
+            if (chosen === null) {
+                chosen = p2r1[k];
+            } else {
+                extras.push(p2r1[k]);
+            }
+        }
+        if (chosen !== null) {
+            parents[p2Key] = chosen.otherRun;
+            ties[p2Key] = chosen.station;
+            var seenFill = {};
+            seenFill[chosen.station] = true;
+            for (k = 0; k < extras.length; k++) {
+                var stFill = extras[k].station;
+                if (seenFill.hasOwnProperty(stFill)) {
+                    continue;
+                }
+                seenFill[stFill] = true;
+                secondTies.push({
+                    run: p2Key,
+                    station: stFill,
+                    otherRun: extras[k].otherRun
+                });
+            }
+        }
+    }
+
+    // ---- final pass: orphans and name/graph mismatches --------------
+    //
+    // Both need the FINAL tie, which phase 2 may have set after phase 1
+    // left it null, so this runs only after both phases are done.
+    for (i = 0; i < grouped.order.length; i++) {
+        var fKey = grouped.order[i];
+        if (parents[fKey] === null && i > 0) {
+            // the root run (i === 0), or a run in its own disconnected
+            // component that no phase found a contact for at all
+            orphans.push(fKey);
+        }
+
+        // Reachable regardless of whether a contact was found: a named
+        // spur (expected !== null) that the graph ties nowhere at all
+        // is exactly as much a mismatch as one the graph ties somewhere
+        // else -- actual is null in that case, not silently skipped.
+        var expected = CsProfile.tieNameOfRun(fKey);
+        if (expected !== null && expected !== ties[fKey]) {
+            mismatches.push({
+                run: fKey,
+                expected: expected,
+                actual: ties[fKey]
+            });
         }
     }
 

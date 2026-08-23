@@ -8464,33 +8464,20 @@ if (!IS_NODE) {
     ok(h.ties["A2a"] === "A2", "spur A2a ties at A2");
     ok(h.parents["B"] === "A", "letter run B hangs off A");
     ok(h.ties["B"] === "A3", "B ties at the earlier of its two A contacts");
-    // The B1-A4 closure is a candidate from BOTH ends (rank AFTER any
-    // "new" contact, but a candidate all the same -- see hierarchy()'s
-    // RANK BEFORE SEQ comment): B's own contact list reports it as a
-    // second tie, and symmetrically it is A's ONLY candidate, which
-    // would make the root adopt B as ITS parent if left alone. The
-    // cycle-breaking pass demotes A's side of that same candidacy to a
-    // secondTie too (A has the smaller earliest station, A1, so A stays
-    // root) rather than silently dropping it.
-    var hasBA4 = false, hasAB1 = false;
-    for (var sti = 0; sti < h.secondTies.length; sti++) {
-        if (h.secondTies[sti].run === "B" && h.secondTies[sti].station === "A4" &&
-                h.secondTies[sti].otherRun === "A") {
-            hasBA4 = true;
-        }
-        if (h.secondTies[sti].run === "A" && h.secondTies[sti].station === "B1" &&
-                h.secondTies[sti].otherRun === "B") {
-            hasAB1 = true;
-        }
-    }
-    ok(h.secondTies.length === 2 && hasBA4,
+    ok(h.secondTies.length === 1 && h.secondTies[0].run === "B" &&
+        h.secondTies[0].station === "A4" && h.secondTies[0].otherRun === "A",
         "B's second contact reported -- it arrives through the closure leg");
-    ok(hasAB1,
-        "the same ring gives A a symmetric candidate, correctly demoted " +
-        "rather than dropped by cycle-breaking");
-    ok(h.cycles.length === 1 && h.cycles[0].length === 2 &&
-        h.cycles[0].indexOf("A") >= 0 && h.cycles[0].indexOf("B") >= 0,
-        "the ring's mutual candidacy is reported as a broken cycle");
+    // THE ORDINARY CASE, not an adversarial one: an everyday spur that
+    // closes a loop back onto its own trunk. Phase 1 (new legs only)
+    // already gives B its parent A at A3, so when phase 2 looks at A's
+    // OWN view of that same closure (A4-B1) it finds B is already A's
+    // descendant and skips the candidate entirely -- no parent, no
+    // secondTie, no cycle. This is the regression this whole round of
+    // review exists to prevent: an earlier, broader rank-1 rule made
+    // EVERY closing loop report a spurious cycle, which is noise on any
+    // real cave survey (loops are everywhere). Real caves are full of
+    // exactly this shape, so `cycles` staying empty here is the point.
+    ok(h.cycles.length === 0, "an ordinary closing loop reports no cycle at all");
     ok(h.parents["A2a"] !== undefined && h.parents["A"] === null,
         "a root run does not adopt its own child as parent");
     ok(h.mismatches.length === 0, "no name/graph mismatch here");
@@ -8600,6 +8587,59 @@ if (!IS_NODE) {
         seenRuns[h.order[oi]] = true;
     }
     ok(!dup, "...and no run appears twice");
+}());
+
+(function() {
+    // Phase 2's reason to exist: two SEPARATELY anchored components
+    // (their own *fix'ed stations) whose only connection is a single
+    // leg -- both ends already known when it is walked, so it is "tie"
+    // kind, never "new". Neither run gets a phase-1 parent at all. The
+    // later component (B, not holding the survey's globally-earliest
+    // station) must still end up with a parent -- without phase 2 a
+    // tie-only run would be a permanent, unreported orphan.
+    var sv = CsModel.newSurvey();
+    sv.shots = [
+        shotOf("A1", "A2", 10, 0, 0),
+        shotOf("B1", "B2", 10, 0, 0),
+        shotOf("A2", "B1", 8, 0, 0)
+    ];
+    sv.fixed["A1"] = { x: 0, y: 0, z: 0 };
+    sv.fixed["B1"] = { x: 500, y: 500, z: 0 };
+    var r = CsNetwork.resolve(sv, {});
+    ok(r.legs[2].kind === "tie",
+        "fixture assumption: the connecting leg really is a tie, not new");
+    var h = CsProfile.hierarchy(CsProfile.groupRuns(r), r);
+
+    ok(h.parents["A"] === null, "A (holding the earlier fixed station) stays root");
+    ok(h.parents["B"] === "A" && h.ties["B"] === "A2",
+        "B, tie-only, still gets a parent from phase 2 -- not a permanent orphan");
+    ok(h.orphans.length === 0, "neither run is a false orphan");
+    ok(h.cycles.length === 0,
+        "no mutual claim: by the time A's own view of the same tie leg is " +
+        "checked, B already has A live as its parent, so A sees B as its " +
+        "own descendant and skips it");
+}());
+
+(function() {
+    // A run whose ONLY contact of any kind is a closure/tie, and whose
+    // candidate is NOT a descendant, must still get that parent -- the
+    // descendant check is a narrow exception, not a blanket refusal of
+    // every closure/tie candidate.
+    var sv = CsModel.newSurvey();
+    sv.shots = [
+        shotOf("A1", "A2", 10, 0, 0),
+        shotOf("A2", "A3", 10, 0, 0),
+        shotOf("C1", "C2", 10, 0, 0),
+        shotOf("C2", "A3", 8, 0, 0)
+    ];
+    sv.fixed["A1"] = { x: 0, y: 0, z: 0 };
+    sv.fixed["C1"] = { x: 500, y: 500, z: 0 };
+    var r = CsNetwork.resolve(sv, {});
+    var h = CsProfile.hierarchy(CsProfile.groupRuns(r), r);
+
+    ok(h.parents["C"] === "A" && h.ties["C"] === "A3",
+        "C's only contact is a closure/tie, and A is not C's descendant, " +
+        "so C still gets A as its parent");
 }());
 
 (function() {
