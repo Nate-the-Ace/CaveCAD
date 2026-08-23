@@ -1,10 +1,14 @@
 """
 Structural tests for the scripts/CaveSurvey/ QCAD add-on.
 
-None of this needs QCAD -- it's the layout and menu wiring that QCAD relies on
-to find and order the tools. These failures are the miserable kind to diagnose
-by hand: a tool that just isn't in the menu, an icon that renders blank, or two
-tools whose order silently depends on load sequence.
+Almost none of this needs QCAD -- it's the layout and menu wiring that QCAD
+relies on to find and order the tools. These failures are the miserable kind
+to diagnose by hand: a tool that just isn't in the menu, an icon that renders
+blank, or two tools whose order silently depends on load sequence. The one
+exception is TestAddProfileLayersToolIdempotence, which shells out to CaveCAD
+itself (~1s per invocation) because "run the one-shot tool twice and diff the
+bytes" cannot be checked any other way; it skips itself when CaveCAD is not
+installed at the expected path.
 
     python3 -m unittest discover -s tests -v
 
@@ -14,6 +18,9 @@ tests/js_syntax.js -- see tests/README.md.
 
 import os
 import re
+import shutil
+import subprocess
+import tempfile
 import unittest
 import xml.etree.ElementTree as ElementTree
 
@@ -301,6 +308,119 @@ class TestLayerVocabulary(unittest.TestCase):
         self.assertEqual(missing, set(),
                          "layers the profile generator draws to but the "
                          "PROFILE template lacks: %s" % sorted(missing))
+
+    def defaults_table(self):
+        with open(os.path.join(ADDON, "Core", "CsLayers.js")) as fh:
+            source = fh.read()
+        match = re.search(r"CsLayers\.DEFAULTS = \{(.*?)\n\};", source,
+                          re.S)
+        self.assertIsNotNone(match, "CsLayers.DEFAULTS table not found -- "
+                             "did its opening/closing syntax change?")
+        entries = re.findall(
+            r'"([^"]+)":\s*\[\s*"([^"]+)",\s*"([^"]+)",\s*"([^"]+)"\s*\]',
+            match.group(1))
+        return dict((name, (color, linetype, weight))
+                    for name, color, linetype, weight in entries)
+
+    def test_registry_defines_profile_control_layers(self):
+        """Mutation-tested gap: deleting CsLayers.PROFILE_FLOOR and
+        CsLayers.PROFILE_CEILING left the whole suite green, because
+        test_registry_layers_exist_in_plan_template only builds an
+        exemption set from whatever names happen to be in the registry
+        -- it never asserts the constants exist at all. This pins both
+        the constant and its CsLayers.DEFAULTS entry, which also
+        protects tools/add_profile_layers.js: that tool now reads
+        DEFAULTS through CsLayers.ensure() instead of carrying its own
+        copy of the layer's appearance, so a deleted or wrong DEFAULTS
+        entry breaks both this test and the tool the same way.
+        """
+        with open(os.path.join(ADDON, "Core", "CsLayers.js")) as fh:
+            source = fh.read()
+        self.assertIn('CsLayers.PROFILE_FLOOR = "CTRL-PROFILE-FLOOR";',
+                     source)
+        self.assertIn('CsLayers.PROFILE_CEILING = "CTRL-PROFILE-CEILING";',
+                     source)
+        defaults = self.defaults_table()
+        self.assertEqual(defaults.get("CTRL-PROFILE-FLOOR"),
+                         ("gray", "DASHED", "Weight000"))
+        self.assertEqual(defaults.get("CTRL-PROFILE-CEILING"),
+                         ("gray", "DASHED", "Weight000"))
+
+
+class TestAddProfileLayersToolIdempotence(unittest.TestCase):
+    """tools/add_profile_layers.js must be a no-op once every layer it
+    wants is already present -- the shipped template is exactly that
+    state, so from here on EVERY run against it must leave the bytes
+    untouched. A prior review confirmed this property had no automated
+    coverage at all (only a manual double-run), so a broken idempotence
+    guard -- e.g. dropping the doc.hasLayer() check inside the tool --
+    could re-export the template on every invocation without any test
+    noticing. Runs the real tool under the real engine on a throwaway
+    copy; nothing here touches the repo's own template file.
+    """
+
+    CAVECAD = os.environ.get(
+        "CAVESURVEY_CAVECAD",
+        "/Applications/CaveCAD.app/Contents/MacOS/CaveCAD")
+
+    def run_tool(self, fake_repo_root):
+        # -no-dock-icon/-no-gui/-allow-multiple-instances match the
+        # invocation documented in the tool's own header and run_all.sh.
+        result = subprocess.run(
+            [self.CAVECAD, "-no-dock-icon", "-no-gui",
+             "-allow-multiple-instances", "-autostart",
+             os.path.join(REPO, "tools", "add_profile_layers.js"),
+             fake_repo_root],
+            stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=60)
+        return result.stdout.decode("utf-8", "replace")
+
+    def test_second_run_does_not_rewrite_the_template(self):
+        if not os.path.exists(self.CAVECAD):
+            self.skipTest("CaveCAD not found at %s -- see run_all.sh" %
+                          self.CAVECAD)
+
+        real_template = os.path.join(TEMPLATES,
+                                     "NSS_Cave_Template_PROFILE.dxf")
+        with open(real_template, "rb") as fh:
+            original_bytes = fh.read()
+
+        with tempfile.TemporaryDirectory() as tmp:
+            # The tool derives BOTH the Core library location and the
+            # template path from the single repoRoot argument, so the
+            # fake root needs a real scripts/CaveSurvey/Core (symlinked
+            # -- CsLayers.js must be the genuine, current one) and a
+            # throwaway copy of just the template it writes to.
+            os.symlink(os.path.join(REPO, "scripts"),
+                       os.path.join(tmp, "scripts"))
+            os.mkdir(os.path.join(tmp, "templates"))
+            target = os.path.join(tmp, "templates",
+                                  "NSS_Cave_Template_PROFILE.dxf")
+            shutil.copyfile(real_template, target)
+
+            first_output = self.run_tool(tmp)
+            with open(target, "rb") as fh:
+                after_first = fh.read()
+
+            second_output = self.run_tool(tmp)
+            with open(target, "rb") as fh:
+                after_second = fh.read()
+
+        self.assertIn("skip", first_output,
+                      "the shipped template is supposed to already carry "
+                      "every layer the tool wants, so even the FIRST run "
+                      "here should be a no-op -- got: %r" % first_output)
+        self.assertEqual(
+            original_bytes, after_first,
+            "add_profile_layers.js rewrote the template even though it "
+            "reported skip on the first run")
+        self.assertIn("skip", second_output,
+                      "second run did not report skip -- got: %r" %
+                      second_output)
+        self.assertEqual(
+            after_first, after_second,
+            "add_profile_layers.js rewrote an already-migrated template "
+            "on a second run -- it is supposed to be a no-op once every "
+            "layer is present")
 
 
 class TestReadmeToolTable(unittest.TestCase):

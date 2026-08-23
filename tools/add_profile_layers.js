@@ -7,9 +7,21 @@
 // Same shape as tools/upcase_template_text.js: an off-screen document,
 // a modification, an export back over the same file. Safe to re-run --
 // a layer already present is left alone and the file is not rewritten.
+//
+// Carries only the LIST of layers it is responsible for adding, never
+// their appearance. CsLayers.ensure(doc, di, name) -- the same function
+// every drawing tool calls -- is the one place that resolves a layer's
+// colour/linetype/lineweight, from CsLayers.DEFAULTS in Core/CsLayers.js.
+// An earlier version of this file carried its own copy of that table;
+// nothing would have caught it drifting from DEFAULTS, which a mutation
+// review confirmed by deleting the DEFAULTS entries and watching the
+// whole suite stay green. Reading DEFAULTS through ensure() closes that
+// gap by construction: there is exactly one definition of what
+// CTRL-PROFILE-FLOOR looks like.
 
 var args = RSettings.getOriginalArguments();
 var repoRoot = args[args.length - 1];
+var core = repoRoot + "/scripts/CaveSurvey/Core";
 
 if (typeof isNull === "undefined") {
     isNull = function(v) {
@@ -19,12 +31,17 @@ if (typeof isNull === "undefined") {
     };
 }
 
-// name -> [colorName, linetype, lineweight]
+includeBasePath = core;
+include(core + "/CsLayers.js");
+
+// Layers the extended elevation generator draws to. Named through the
+// registry, not string literals, so a rename of the constant is a
+// syntax error here rather than a silent drift.
 var WANTED = [
-    ["CTRL-PROFILE-FLOOR", "gray", "DASHED", RLineweight.Weight000],
-    ["CTRL-PROFILE-CEILING", "gray", "DASHED", RLineweight.Weight000],
-    ["CTRL-LRUD", "pink", "CONTINUOUS", RLineweight.Weight025],
-    ["CTRL-SPLAYS", "gray", "CONTINUOUS", RLineweight.Weight000]
+    CsLayers.PROFILE_FLOOR,
+    CsLayers.PROFILE_CEILING,
+    CsLayers.LRUD,
+    CsLayers.SPLAYS
 ];
 
 /** The DXF writer that persists custom properties: see the plan's
@@ -48,17 +65,13 @@ function addLayers(path) {
         return false;
     }
 
-    var op = new RAddObjectsOperation();
     var added = 0;
     for (var i = 0; i < WANTED.length; i++) {
-        var name = WANTED[i][0];
+        var name = WANTED[i];
         if (doc.hasLayer(name)) {
             continue;
         }
-        var layer = new RLayer(doc, name, false, false,
-            new RColor(WANTED[i][1]), doc.getLinetypeId(WANTED[i][2]),
-            WANTED[i][3]);
-        op.addObject(layer);
+        CsLayers.ensure(doc, di, name);
         added++;
     }
 
@@ -66,7 +79,6 @@ function addLayers(path) {
         print("skip  " + path + " -- every layer already present");
         return true;
     }
-    di.applyOperation(op);
 
     if (di.exportFile(path, dxfLibFilter()) !== true) {
         print("FAIL  cannot write " + path);
