@@ -2175,8 +2175,14 @@ CsProfileFile.siblingPath = function(planPath) {
  *
  * THIS CHOICE IS LOAD BEARING. RFileExporterRegistry picks the LOWEST
  * canExport score, and RDxfExporterFactory scores 1 for a filter naming
- * "dxflib" against 100 for a bare .dxf -- so naming the filter is what
- * selects the dxflib writer, the one CaveCAD taught to emit custom
+ * "dxflib" against 100 for a bare .dxf. NOTE, verified three ways after
+ * this was written: in THIS fork it makes no difference -- only one DXF
+ * exporter is registered and instantiate() never sees the name filter,
+ * so exportFile(path, "") reaches the same writer. The tags persist
+ * because this fork's only DXF writer emits XDATA, NOT because we named
+ * the filter. Keep naming it as declared intent, but do not reason from
+ * it: whoever debugs a lost tag will be looking in the wrong place.
+ * The writer CaveCAD taught to emit custom
  * properties as XDATA. Exported by any other writer, every profile tag
  * on every entity is silently dropped and the next regeneration cannot
  * find its own previous output to erase.
@@ -2458,11 +2464,14 @@ git commit -m "feat(CsProfileFile): the profile's own drawing, and the writer th
 - [ ] No separate U/D tick and no splay ray is drawn: the U/D measurement is already the first point of its run and a ceiling/floor splay is already a vertex in one, so a second copy would double the sheet's linework for no new information
 - [ ] Every entity carries `ProfileRun`, plus its own specific tag from the namespace table
 - [ ] A band with a non-zero `zOffset` has that offset applied to every Y it draws, and its label says so
-- [ ] `CsProfileDraw.erase(doc, di)` removes every entity carrying a `Profile*` tag and nothing else — sketched linework survives, including linework on `PROFILE-FLOOR`/`PROFILE-CEILING`
+- [ ] `CsProfileDraw.erase(doc, di)` removes an entity only when it is BOTH `Profile*`-tagged AND on a layer in `CsProfileDraw.LAYERS()`. Tag alone is not enough, and the difference is a realistic user action: the obvious cartographer move is to take a generated `CTRL-PROFILE-CEILING` polyline you like and change its layer to `PROFILE-CEILING` to keep it rather than retracing it. XDATA is per-entity and survives a layer change, so a tag-only test destroys that promoted line on the next draw. With the layer condition it stays put and the generator draws a fresh one beside it
+- [ ] A test asserts WHICH LAYER each kind of generated entity lands on. Drawing every ceiling run onto `PROFILE_FLOOR` instead left a whole suite green — and that split is the entire payload of the layers task
+- [ ] The generated run polylines' `ProfileRun` tag is asserted, not just the flat tick's — Task 11 keys its binding index on `ProfileRun`
+- [ ] `ProfileZOffset` is asserted as WRITTEN on a displaced band's caption, not only as absent on an undisplaced one — sketched linework survives, including linework on `PROFILE-FLOOR`/`PROFILE-CEILING`
 - [ ] Drawing twice produces the same entity count as drawing once (no duplication)
 - [ ] Layers created via `CsLayers.ensure` when the document lacks them, AND both the erase and the add wrapped in `CsLayers.withLayerOn` over the whole layer set. None of these layers ships off, but a user switches `CTRL-PROFILE-CEILING` off precisely in order to trace over it — and this build silently refuses adds AND deletes on an off layer, so the old run survives while the new one is dropped, or a second copy lands beside it. Measured by toggling the layer between two renders
 - [ ] Every `Profile*`-tagged entity also carries `ProfileRun`, INCLUDING the station text label — `CsDraw.addText` takes only one tag, so the label needs tagging after the fact, the same pattern `CsDraw.survey` uses for its `Trip*` tags
-- [ ] A band with zero stations (stopped at its first station) has `datum === null`, so any label position computed as `band.datum + offset` silently coerces to a fabricated 0. The label's Y must be an explicit constant, documented as NOT a survey-data default, and its text must name the station and reason instead of reading as a normal band
+- [ ] A band with zero stations (stopped at its first station) has `datum === null`. The label's Y must be an explicit constant, documented as NOT a survey-data default, and its text must name the station and reason rather than reading as a normal band. CORRECTION TO AN EARLIER CLAIM IN THIS PLAN: that was a refactor, not a bug fix. `null + TEXT_HEIGHT*4` evaluates to the same number as `0.0 + TEXT_HEIGHT*4`, so nothing was ever drawn at a wrong height — a mutation using `band.datum` directly survives precisely because it is an equivalent mutant. What improved is that the code no longer DEPENDS on null-coercion. The elevation-datum convention is the place where an inflated claim is most expensive, so it is corrected here
 - [ ] `zOffset` is actually applied to drawn geometry — assert a real drawn COORDINATE, not just counts and tags. A full test suite once passed with `zOffset` never applied at all, because nothing checked a coordinate
 
 **Verify:** `/Applications/CaveCAD.app/Contents/MacOS/CaveCAD -no-dock-icon -no-gui -allow-multiple-instances -autostart tests/profile_draw_roundtrip.js "$PWD"` → `### PROFILE DRAW OK`
@@ -3285,6 +3294,7 @@ git commit -m "feat(GenerateProfile): force the elevation and show what it could
 - [ ] `CsProfileBind.claim(doc, di)` tags untagged linework-layer entities with `LineworkStations` holding run-qualified names, and never touches an entity carrying a `Profile*` tag
 - [ ] `CsProfileBind.positions(doc)` reads the CURRENT profile station positions as `{key: {x, y}}` — the "before" frame
 - [ ] `CsProfileDraw.positionsOf(profile)` returns the "after" frame from built bands, `zOffset` included
+- [ ] THE MOVE MUST RUN INSIDE `CsRevise.withOffLayersOn`, NOT `CsProfileDraw.withOwnLayersOn`. The move MODIFIES the sketch, which lives on `PROFILE-FLOOR`/`PROFILE-CEILING` — layers deliberately NOT in `CsProfileDraw.LAYERS()`. This build refuses MODIFIES on an off layer as silently as adds and deletes, so if the user has hidden their tracing layer — the exact workflow that motivated the off-layer protection — the move is silently dropped and the sketch stays behind while the survey moves under it. `CsRevise.withOffLayersOn` already sweeps every layer holding entities, which is what is needed: Task 11 cannot know which layers a user chose to trace on, so widening `withOwnLayersOn` is the wrong fix
 - [ ] `render` order is: claim → read before-positions → erase → draw → move. Read after the erase and the before-frame is gone; move before the draw and there is nothing to move toward
 - [ ] The move is skipped entirely when `CsRevise.positionsMoved` reports nothing moved (a redraw that only adds a band must not cost an undo step)
 - [ ] Tolerance and the moved test both come from `CsRevise.positionsExtent`/`positionsMoved` — no second definition of drawing size in this module
