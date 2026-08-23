@@ -97,6 +97,15 @@ var CORE_FILES = [
     "scripts/CaveSurvey/Core/CsLrud.js",
     "scripts/CaveSurvey/Core/CsProfile.js",
     "scripts/CaveSurvey/Core/CsProfileFile.js",
+    // CsProfileDraw is QCAD-context for render()/erase()/band()/run()/
+    // label() (RVector, RLineEntity, ...), but CsProfileDraw.labelText
+    // and CsProfileDraw.labelY0 are pure -- no document, no QCAD symbol
+    // -- and can be loaded and called here exactly like CsProfile's own
+    // functions. Loading the file costs nothing under node: none of its
+    // QCAD-only functions are ever CALLED from this file, only defined,
+    // and defining a function that REFERENCES CsLayers/CsDraw/CsTags
+    // does not touch either symbol until that function actually runs.
+    "scripts/CaveSurvey/Core/CsProfileDraw.js",
     "scripts/CaveSurvey/Core/CsValidate.js",
     "scripts/CaveSurvey/Core/CsStats.js",
     "scripts/CaveSurvey/Core/CsGrade.js",
@@ -11681,6 +11690,61 @@ if (!IS_NODE) {
     ok(CsProfileFile.openTabFor("") === null,
         "openTabFor(\"\") is null without even trying the bridge");
 }());
+
+// ---------------------------------------------------------------------
+// Task 8: CsProfileDraw's pure helpers -- labelText (what the band's
+// caption says) and labelY0 (where it sits before zOffset is applied).
+// Everything else in CsProfileDraw (render/erase/band/run/label itself)
+// is QCAD-context only -- RVector, RLineEntity, RPolylineData, the
+// document -- and is instead proven by tests/profile_draw_roundtrip.js
+// under CaveCAD, which is also the only place the two properties that
+// matter to a user who sketches on the profile (regeneration replaces
+// only its own output; regeneration never doubles it) can be checked
+// at all.
+// ---------------------------------------------------------------------
+
+eqs(CsProfileDraw.labelText({ key: "A", tie: null, zOffset: 0.0,
+    stations: [{ name: "A1", x: 0, y: 0, z: 0 }] }),
+    "A SURVEY", "labelText: root band, no offset");
+
+eqs(CsProfileDraw.labelText({ key: "A13a", tie: "A13", zOffset: 0.0,
+    stations: [{ name: "A13", x: 0, y: 0, z: 0 }] }),
+    "A13a SURVEY (FROM A13)", "labelText: tied band names its tie");
+
+eqs(CsProfileDraw.labelText({ key: "B", tie: null, zOffset: -12.5,
+    stations: [{ name: "B1", x: 0, y: 0, z: 0 }] }),
+    "B SURVEY -- SHOWN 12.5 BELOW TRUE ELEVATION",
+    "labelText: negative zOffset reads BELOW");
+
+eqs(CsProfileDraw.labelText({ key: "C", tie: "A4", zOffset: 8.0,
+    stations: [{ name: "A4", x: 0, y: 0, z: 0 }] }),
+    "C SURVEY (FROM A4) -- SHOWN 8.0 ABOVE TRUE ELEVATION",
+    "labelText: tie and positive zOffset both appear, tie before offset");
+
+eqs(CsProfileDraw.labelText({ key: "D", tie: null, zOffset: 1e-10,
+    stations: [{ name: "D1", x: 0, y: 0, z: 0 }] }),
+    "D SURVEY",
+    "labelText: a zOffset under the 1e-9 epsilon reads as no offset");
+
+eqs(CsProfileDraw.labelText({ key: "E", tie: null, zOffset: 0.0,
+    stations: [], stopped: "E1", stoppedReason: "no-z" }),
+    "E SURVEY -- STOPPED AT E1 (no-z)",
+    "labelText: a band that stopped at its own first station says so, " +
+    "instead of a bare caption or a fabricated elevation");
+
+eqs(CsProfileDraw.labelText({ key: "F", tie: "A9", zOffset: 3.0,
+    stations: [], stopped: "F1", stoppedReason: "no-leg" }),
+    "F SURVEY (FROM A9) -- STOPPED AT F1 (no-leg)",
+    "labelText: the tie still shows on a stopped band; zOffset does not " +
+    "(CsProfile.layout never assigns one -- a stopped band has no span " +
+    "to place, see CsProfile.bandSpan -- so there is nothing to report)");
+
+eqs(CsProfileDraw.labelY0(
+        { stations: [{ name: "A1", x: 0, y: 42.5, z: 42.5 }] }),
+    42.5, "labelY0: the first station's own Y");
+
+eqs(CsProfileDraw.labelY0({ stations: [] }), 0.0,
+    "labelY0: 0.0, not a null-coerced datum, for a zero-station band");
 
 // ---------------------------------------------------------------------
 // Report.
