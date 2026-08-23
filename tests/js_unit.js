@@ -85,6 +85,7 @@ function loadRepoScript(scriptPath) {
 // Load order: leaves first.
 var CORE_FILES = [
     "scripts/CaveSurvey/Core/CsUnits.js",
+    "scripts/CaveSurvey/Core/CsCave.js",
     "scripts/CaveSurvey/Core/CsGeoProject.js",
     "scripts/CaveSurvey/Core/CsAngles.js",
     "scripts/CaveSurvey/Core/CsIgrfCoeffs.js",
@@ -7910,6 +7911,60 @@ if (!IS_NODE) {
     ok(CsGeoProject.imagePathFor("/home/user/Cave") ===
         "/home/user/Cave-aerial.png",
         "imagePathFor: filename with no extension at all");
+}
+
+// ---------------------------------------------------------------------
+// CsCave -- the cave folder on the shared drive.
+//
+// Drive does the syncing; this only knows the folder shape, so that a
+// scanned sketch is one click away from the drawing it belongs to.
+// Pure half only here -- driveRoots/pointAtScans need QDir and RSettings.
+// ---------------------------------------------------------------------
+
+var CSCAVE_DOC = "/u/Library/CloudStorage/GoogleDrive-me/My Drive/" +
+    "BIG Survey Group/ALL DAY CAVE/All Day Cave.dxf";
+var CSCAVE_ROOTS = ["/u/Library/CloudStorage/GoogleDrive-me"];
+
+ok(CsCave.folderOf(CSCAVE_DOC).indexOf("ALL DAY CAVE") !== -1 &&
+   CsCave.folderOf(CSCAVE_DOC).indexOf(".dxf") === -1,
+    "the cave folder is the folder the drawing sits in");
+ok(CsCave.nameOf(CSCAVE_DOC) === "ALL DAY CAVE",
+    "the cave is named the way the surveyor named the folder -- spaces, " +
+    "capitals and all, never a slug");
+ok(CsCave.scansDir(CSCAVE_DOC).indexOf("/ALL DAY CAVE/scans") !== -1,
+    "scans/ sits beside the drawing");
+ok(CsCave.folderOf("Untitled.dxf") === null &&
+   CsCave.folderOf("") === null && CsCave.folderOf(null) === null,
+    "an unsaved drawing has no cave folder");
+ok(CsCave.scansDir(null) === null, "and no scans folder either");
+
+ok(CsCave.isUnderDrive(CSCAVE_DOC, CSCAVE_ROOTS) === true,
+    "a drawing under the drive is recognised");
+ok(CsCave.isUnderDrive("/u/Desktop/scratch.dxf", CSCAVE_ROOTS) === false,
+    "one outside it is not -- scans/ is never created beside a stray DXF");
+// The prefix trap: a sibling whose name STARTS with the root's name.
+ok(CsCave.isUnderDrive("/u/Library/CloudStorage/GoogleDrive-metoo/x.dxf",
+        CSCAVE_ROOTS) === false,
+    "a second account's folder is not mistaken for the first's");
+ok(CsCave.isUnderDrive(CSCAVE_DOC,
+        ["/u/Library/CloudStorage/GoogleDrive-me/"]) === true,
+    "a trailing slash on the root changes nothing");
+ok(CsCave.isUnderDrive(CSCAVE_DOC, []) === false &&
+   CsCave.isUnderDrive(CSCAVE_DOC, null) === false,
+    "no drive folders means nothing is under one");
+ok(CsCave.isUnderDrive(CSCAVE_DOC, ["", "  "]) === false,
+    "an empty root never matches everything -- the bug that would put " +
+    "scans/ beside every drawing on the machine");
+
+// Engine-only: the two halves that touch QDir and RSettings.
+if (!IS_NODE) {
+    var cscaveRoots = CsCave.driveRoots();
+    ok(Object.prototype.toString.call(cscaveRoots) === "[object Array]",
+        "driveRoots answers a list in this engine, even with no Drive");
+    ok(CsCave.pointAtScans("/nowhere/outside/any/drive/x.dxf") === null,
+        "a drawing outside every drive folder creates nothing");
+    ok(CsCave.pointAtScans("") === null && CsCave.pointAtScans(null) === null,
+        "and neither does an unsaved one");
 }
 
 // ---------------------------------------------------------------------
