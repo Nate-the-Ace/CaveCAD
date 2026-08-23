@@ -48,6 +48,22 @@
 
 ---
 
+## A note on the history of this branch
+
+Commit `423f9c8`, whose message reads "docs: three tool-wiring facts the Task 10 brief missed",
+ALSO contains Task 8's erase-scope fix — 104 lines of `Core/CsProfileDraw.js` and 250 of
+`tests/profile_draw_roundtrip.js`. The message is wrong about its own contents.
+
+Cause, recorded because it is a trap anyone running parallel agents in one checkout will hit:
+several agents were editing disjoint files concurrently, but they share ONE git index. An agent
+had staged its work with `git add`; a `git commit` issued elsewhere with no pathspec then committed
+the whole index, sweeping those files into an unrelated commit. The content was verified
+byte-identical to what the agent intended and the suite was green at that commit, so nothing is
+corrupt — only mislabelled, and the history is not rewritten to hide it.
+
+The fix, applied from that point on: always `git commit -m "..." -- <paths>`, never a bare
+`git commit`, whenever more than one writer is active. Better still, serialise writers.
+
 ## Conventions every task must follow
 
 Learned the hard way in this repo; violating any of these produces a silent failure, not an error.
