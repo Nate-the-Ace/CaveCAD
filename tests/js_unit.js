@@ -13554,6 +13554,103 @@ if (!IS_NODE) {
 }
 
 // ---------------------------------------------------------------------
+// CsTrace -- fitSpline and emit (QCAD only: RSpline and a document)
+// ---------------------------------------------------------------------
+if (!IS_NODE) {
+    (function() {
+        loadRepoScript("scripts/CaveSurvey/Core/CsLayers.js");
+        loadRepoScript("scripts/CaveSurvey/Core/CsBind.js");
+        loadRepoScript("scripts/CaveSurvey/Core/CsTrace.js");
+
+        function pt(x, y) { return { x: x, y: y }; }
+
+        var doc = new RDocument(new RMemoryStorage(), new RSpatialIndexNavel());
+        var di = new RDocumentInterface(doc);
+
+        // -- fitSpline ----------------------------------------------
+        ok(CsTrace.fitSpline(doc, [pt(0, 0)]) === null,
+            "CsTrace.fitSpline: one point is not a curve");
+        ok(CsTrace.fitSpline(doc, []) === null,
+            "CsTrace.fitSpline: no points is not a curve");
+
+        var spline = CsTrace.fitSpline(doc, [pt(0, 0), pt(5, 1), pt(10, 0)]);
+        ok(!isNull(spline), "CsTrace.fitSpline: three points make a spline");
+        eqs(spline.getFitPoints().length, 3,
+            "CsTrace.fitSpline: every input point becomes a fit point");
+        // Asserted, not assumed: stock addSpline never calls setDegree,
+        // so this pins that a fit-point spline really is cubic here.
+        eqs(spline.getDegree(), 3, "CsTrace.fitSpline: the curve is cubic");
+        near(spline.getFitPoints()[1].x, 5.0, 1e-9,
+            "CsTrace.fitSpline: fit points keep their order");
+
+        // -- emit onto a normal layer -------------------------------
+        var before = doc.queryAllEntities(false, false).length;
+        var result = CsTrace.emit(doc, di, CsLayers.WALLS_SURVEYED,
+            [pt(0, 0), pt(10, 0), pt(20, 0)], 1.0, 0.01);
+        ok(result.added === true, "CsTrace.emit: a real path is added");
+        eqs(doc.queryAllEntities(false, false).length, before + 1,
+            "CsTrace.emit: exactly one entity lands");
+        ok(result.sampled > result.kept,
+            "CsTrace.emit: reduction dropped points from a straight run");
+        eqs(result.kept, 2,
+            "CsTrace.emit: a straight run keeps only its two endpoints");
+
+        var ids = doc.queryAllEntities(false, false);
+        var landed = doc.queryEntity(ids[ids.length - 1]);
+        eqs(doc.getLayerName(landed.getLayerId()), CsLayers.WALLS_SURVEYED,
+            "CsTrace.emit: the spline lands on the named layer");
+
+        // -- emit creates a layer the drawing lacks -----------------
+        var doc3 = new RDocument(new RMemoryStorage(), new RSpatialIndexNavel());
+        var di3 = new RDocumentInterface(doc3);
+        ok(!doc3.hasLayer(CsLayers.BREAKDOWN_BOUNDARY),
+            "CsTrace.emit fixture: the target layer is absent to begin with");
+        CsTrace.emit(doc3, di3, CsLayers.BREAKDOWN_BOUNDARY,
+            [pt(0, 0), pt(4, 4)], 1.0, 0.01);
+        ok(doc3.hasLayer(CsLayers.BREAKDOWN_BOUNDARY),
+            "CsTrace.emit: ensures the layer rather than failing");
+
+        // -- emit adds nothing for a degenerate path ----------------
+        var beforeShort = doc.queryAllEntities(false, false).length;
+        var shortResult = CsTrace.emit(doc, di, CsLayers.WALLS_SURVEYED,
+            [pt(3, 3)], 1.0, 0.01);
+        ok(shortResult.added === false,
+            "CsTrace.emit: a one-point path reports nothing added");
+        eqs(doc.queryAllEntities(false, false).length, beforeShort,
+            "CsTrace.emit: a one-point path adds no entity");
+
+        // -- emit onto an OFF layer ---------------------------------
+        // This build drops adds on an off layer with NO error at all,
+        // and switching the feature layer off to see the scan beneath
+        // is the workflow this tool exists for.
+        var doc2 = new RDocument(new RMemoryStorage(), new RSpatialIndexNavel());
+        var di2 = new RDocumentInterface(doc2);
+        CsLayers.ensure(doc2, di2, CsLayers.PROFILE_TRACED_CEILING);
+        var lay = doc2.queryLayer(CsLayers.PROFILE_TRACED_CEILING);
+        lay.setOff(true);
+        var opOff = new RModifyObjectsOperation();
+        opOff.addObject(lay, false);
+        di2.applyOperation(opOff);
+        ok(doc2.queryLayer(CsLayers.PROFILE_TRACED_CEILING).isOff(),
+            "CsTrace.emit fixture: the target layer starts off");
+
+        var offBefore = doc2.queryAllEntities(false, false).length;
+        CsTrace.emit(doc2, di2, CsLayers.PROFILE_TRACED_CEILING,
+            [pt(0, -100), pt(10, -100), pt(20, -95)], 1.0, 0.01);
+        eqs(doc2.queryAllEntities(false, false).length, offBefore + 1,
+            "CsTrace.emit: the spline lands even though the layer is off");
+        ok(doc2.queryLayer(CsLayers.PROFILE_TRACED_CEILING).isOff(),
+            "CsTrace.emit: the layer is switched back off afterwards");
+
+        // -- no binding tag ----------------------------------------
+        var traced = doc2.queryEntity(
+            doc2.queryAllEntities(false, false)[offBefore]);
+        ok(!CsBind.hasLineworkTags(traced),
+            "CsTrace.emit: leaves binding to the CsBind sweep, tags nothing");
+    }());
+}
+
+// ---------------------------------------------------------------------
 // Report.
 // ---------------------------------------------------------------------
 

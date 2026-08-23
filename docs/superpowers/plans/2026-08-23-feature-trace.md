@@ -708,6 +708,7 @@ git commit -m "feat(CsTrace): answer which frame a point and a path fall in"
 
 **Acceptance Criteria:**
 - [ ] `CsTrace.fitSpline(doc, points)` returns an `RSplineEntity` whose fit points are exactly the input points in order
+- [ ] `fitSpline` calls no `setDegree`, matching stock `addSpline` in `simple_create.js`, and a test PINS that the result is cubic (`getDegree() === 3`) rather than assuming it
 - [ ] `fitSpline` returns `null` for fewer than 2 points rather than an entity with nothing in it
 - [ ] `CsTrace.emit(doc, di, layerName, points, spacing, tolerance)` runs resample → reduce → fit → add, and the added entity's layer is `layerName`
 - [ ] `emit` calls `CsLayers.ensure`, so tracing onto a layer the drawing lacks creates it with its registry appearance rather than falling back to a default

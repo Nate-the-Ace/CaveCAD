@@ -290,3 +290,65 @@ CsTrace.pathFrame = function(box, points) {
     }
     return first;
 };
+
+/**
+ * A spline through `points` as FIT points, or null when there is no
+ * curve to make.
+ *
+ * Fit points and not control points: a fit-point spline passes THROUGH
+ * the places the caver dragged over, and QCAD's own spline editing then
+ * lets those points be nudged afterwards. Control points would put the
+ * curve near the trace instead of on it.
+ *
+ * No setDegree call, matching stock addSpline in simple_create.js: a
+ * fit-point spline is cubic here already, and a test pins that rather
+ * than trusting it.
+ */
+CsTrace.fitSpline = function(doc, points) {
+    if (isNull(points) || points.length < 2) {
+        return null;
+    }
+    var spline = new RSpline();
+    spline.setPeriodic(false);
+    for (var i = 0; i < points.length; i++) {
+        spline.appendFitPoint(new RVector(points[i].x, points[i].y));
+    }
+    return new RSplineEntity(doc, new RSplineData(spline));
+};
+
+/**
+ * The whole pipeline: resample the captured drag, reduce it, fit a
+ * spline, and add it to `layerName`.
+ *
+ * Wrapped in CsLayers.withLayerOn because this build's
+ * RAddObjectsOperation silently refuses an add to a layer that is off
+ * -- no error, no exception, the entity simply never lands. Switching
+ * the feature layer off to see the scanned sketch underneath is the
+ * ordinary way to use this tool, so without the wrapper the tool would
+ * appear to work and draw nothing.
+ *
+ * Deliberately does NOT tag the result for binding. The existing
+ * CsBind.tagEntities sweep picks up new linework on a bindable layer
+ * already; tagging here would bind it twice.
+ *
+ * \return {added: bool, sampled: int, kept: int}
+ */
+CsTrace.emit = function(doc, di, layerName, points, spacing, tolerance) {
+    var spaced = CsTrace.resample(points, spacing);
+    var kept = CsTrace.reduce(spaced, tolerance);
+    var spline = CsTrace.fitSpline(doc, kept);
+    if (spline === null) {
+        return { added: false, sampled: spaced.length, kept: kept.length };
+    }
+
+    CsLayers.ensure(doc, di, layerName);
+    spline.setLayerId(doc.getLayerId(layerName));
+
+    CsLayers.withLayerOn(doc, di, layerName, function() {
+        var op = new RAddObjectsOperation();
+        op.addObject(spline, false);
+        di.applyOperation(op);
+    });
+
+    return { added: true, sampled: spaced.length, kept: kept.length };
+};
