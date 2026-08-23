@@ -45,6 +45,12 @@ mkdir -p "$STAGE"
 # the add-on itself: the menu builder plus one folder per tool
 cp -R "$REPO/scripts/CaveSurvey" "$STAGE/CaveSurvey"
 
+# the version, stamped into the add-on so it can report itself at run time
+# (CaveSurvey.getVersion() reads this file; CaveCAD shows it on the splash
+# screen and in Help > About > Script Add-Ons). Never in the source tree --
+# the packaged copy is the only one that carries a version.
+printf '%s\n' "$VERSION" > "$STAGE/CaveSurvey/VERSION"
+
 # templates, sample surveys, licence
 mkdir -p "$STAGE/templates" "$STAGE/examples" "$STAGE/docs"
 cp "$REPO/templates/"*.dxf "$STAGE/templates/"

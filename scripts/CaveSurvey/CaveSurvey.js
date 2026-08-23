@@ -38,7 +38,50 @@ CaveSurvey.getTitle = function() {
     return qsTr("Cave Survey");
 };
 
-CaveSurvey.init = function(basePath) {
+// The suite's version, read once from the VERSION file that
+// tools/make_package.sh stamps into the packaged add-on. A source tree run
+// straight from the repository has no such file, and reports nothing --
+// only a published build claims a version number.
+//
+// CaveCAD reads this property for the Script Add-Ons tab of Help > About;
+// init() below also writes it onto the splash screen.
+CaveSurvey.version = undefined;
+
+CaveSurvey.getVersion = function(basePath) {
+    if (!isNull(CaveSurvey.version)) {
+        return CaveSurvey.version;
+    }
+
+    if (isNull(basePath)) {
+        return undefined;
+    }
+
+    var fileName = basePath + "/VERSION";
+    if (!new QFileInfo(fileName).exists()) {
+        return undefined;
+    }
+
+    var contents = readTextFile(fileName);
+    if (isNull(contents)) {
+        return undefined;
+    }
+
+    contents = contents.trim();
+    if (contents.length===0) {
+        return undefined;
+    }
+
+    CaveSurvey.version = contents;
+    return CaveSurvey.version;
+};
+
+CaveSurvey.init = function(basePath, splash) {
     CaveSurvey.getMenu();
     CaveSurvey.getToolBar();
+
+    // report the suite on the splash screen, beside CaveCAD's own version:
+    var version = CaveSurvey.getVersion(basePath);
+    if (!isNull(splash) && !isNull(version)) {
+        splash.showMessage(qsTr("Cave Survey Tools %1").arg(version) + "\n", Qt.AlignBottom);
+    }
 };
