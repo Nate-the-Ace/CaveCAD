@@ -379,7 +379,8 @@ git commit -m "feat(CsProfile): station names decide which survey run a station 
 - [ ] A run touching another run at two stations reports the second as a `secondTie`, whose `otherRun` is the run touched — NOT necessarily the parent, since a second contact can land in a third run
 - [ ] The junction is the earliest contact by LEG, ranked new-legs-before-closure/tie — not the earliest-resolved station. The two coincide on a simple fixture and diverge in general, and the leg rule is the correct one: it is where the run was walked in from
 - [ ] The first run (no tie at all) is the root; band order is depth-first, siblings ordered by junction distance along the parent
-- [ ] A run with no contacts at all (a disconnected component) is reported in `orphans` and appended AFTER every run reachable from a real root, rather than being emitted in its `grouped.order` position as though it were the root
+- [ ] The primary root is found by WALKING THE PARENT CHAIN UP from `grouped.order[0]` — never by position in run order. Position is not rootness: `grouped.order[0]`'s own run can acquire a parent (two fixed entrances, six shots, fully connected), and then the real root is reported as disconnected. 535 of 6000 random surveys hit that condition, and this output reaches the user as "orphan runs", telling a surveyor a connected passage is not connected
+- [ ] `orphans` means PHYSICALLY DISCONNECTED and nothing else, decided by a raw union-find over every leg in `resolved.legs` regardless of kind, independent of the kind-ranked parent forest. A parentless run that raw connectivity shows IS part of the same cave belongs in a separate `strandedRoots` field. The two demand different actions: "orphan" tells a surveyor to go shoot a connecting leg, which is wrong and wasteful advice for a run whose data is already fine and which merely never got attached as anyone's child
 - [ ] A cycle in the parent map — reachable from ordinary data, e.g. a side passage that rejoins where the trunk is numbered onward from the branch — is broken in favour of the earliest-started run, the discarded contact is demoted to a `secondTie`, and the cycle is reported in a `cycles` field. `bandOrder` keeps its own cycle guard as a backstop, so every run is emitted exactly once regardless
 - [ ] A named spur whose graph gives it NO contact is reported as a mismatch (expected station from the name, actual `null`) rather than silently treated as a root
 
@@ -3566,6 +3567,15 @@ These are choices, not omissions. Each is listed here so a later reader does not
   cycle in the parent map, every run appears exactly once in the
   band order. This is self-consistent — the first-placed run is the root, and the band
   order then starts where the survey started — and is decided behaviour, not an accident.
+- **The tie edge is resolved by station PAIR, not by leg identity.** `unrollBand` re-searches
+  for a leg between the tie station and the chain rather than being handed the leg
+  `hierarchy` actually chose. That is benign only because of an ordering property of
+  `CsNetwork.resolve`: a pair carrying a `new` or `tie` leg is always emitted before a
+  second leg on that pair can be classified `closure`, so the re-search's first match
+  always agrees with `hierarchy`'s new-before-closure ranking. Neither file states that
+  property. The durable fix is for `hierarchy` to return the tie leg alongside the tie
+  station, but that changes a return contract Task 2 settled after three rounds, so it is
+  recorded here rather than done.
 - **Punctuation in a station name silently becomes part of the run key.** `splitName`
   treats a run of non-alphanumerics as a fourth group class, so `A-1` keys run `A-`,
   `A'1` keys `A'`, and `A 1` keys `"A "` — a typo makes its own run rather than being
