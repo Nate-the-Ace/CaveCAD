@@ -7,10 +7,10 @@
 // (NewFile.addPostNewAction), so EVERY new document -- File > New,
 // Cmd+N, anything -- gets the NSS template poured in: all layers
 // (the empty CTRL- ones included), the SYM_* symbol blocks, the
-// TB_* title blocks, border and bar scales. The fill happens in
-// CaveTemplateApply.js and is gated on Cave Mode being active (or
-// the CaveSurvey/TemplateOnNew setting explicitly true), so a stock
-// QCAD install with the suite merely present keeps its plain New.
+// title block text, border and bar scales. The fill happens in
+// CaveTemplateApply.js and is ON BY DEFAULT -- this is a cave
+// mapping build; only setting CaveSurvey/TemplateOnNew to false
+// explicitly gets a plain new document back.
 //
 // The template ships INSIDE the add-on (Templates/ beside this
 // folder, placed there by the package build), so there is no path
@@ -30,8 +30,9 @@ CaveTemplate.prototype = new EAction();
 CaveTemplate.prototype.beginEvent = function() {
     EAction.prototype.beginEvent.call(this);
 
-    // Make sure the fill is on for this explicit request, whatever
-    // the Cave Mode state -- the user asked for a cave map by name.
+    // Make sure the fill is on for this explicit request even on a
+    // machine that switched TemplateOnNew off -- the user asked for
+    // a cave map by name.
     RSettings.setValue("CaveSurvey/TemplateOnNewOnce", true);
 
     var candidates = [

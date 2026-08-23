@@ -5,9 +5,10 @@
 // File > New (registered in CaveTemplate.init), which then calls
 // initNewFile(mdiChild).
 //
-// GATED: runs only when Cave Mode is active, the TemplateOnNew
-// setting is true, or New Cave Map set the one-shot flag -- a stock
-// QCAD install with the suite merely present keeps its plain New.
+// ON BY DEFAULT: this is a cave mapping build, so every File > New
+// starts as an NSS cave map. Setting CaveSurvey/TemplateOnNew to
+// FALSE (explicitly, per machine) is the only way to get a plain new
+// document back; New Cave Map's one-shot flag overrides even that.
 //
 // The paste copies ALL layers (the template's empty CTRL- layers are
 // the point) and empty blocks (the unused SYM_* symbols are the
@@ -20,9 +21,10 @@ function initNewFile(mdiChild) {
     if (once) {
         RSettings.setValue("CaveSurvey/TemplateOnNewOnce", false);
     }
+    // Default TRUE: absent the setting, pour the template. Only an
+    // explicit false switches it off, and the one-shot flag beats it.
     var enabled = once ||
-        RSettings.getBoolValue("CaveSurvey/TemplateOnNew", false) ||
-        RSettings.getBoolValue("CaveSurvey/CaveModeActive", false);
+        RSettings.getBoolValue("CaveSurvey/TemplateOnNew", true);
     if (!enabled) {
         return;
     }
