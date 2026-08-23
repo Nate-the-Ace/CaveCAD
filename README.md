@@ -30,7 +30,6 @@ Each appears in the **Cave Survey** menu and as a command:
 | Sheet Check | `shc` | What would a judge mark missing? The NSS required-elements list as a to-do list. |
 | Cave Mode | `cavemode` | Hide stock CAD clutter; QCAD becomes a dedicated cave mapping app. Toggleable, persistent. |
 | Swap Theme | `theme` | Toggle CaveCAD between its dark and light interface themes. |
-| GitHub Setup | `ghsetup` | Get this computer ready to use GitHub from inside CaveCAD: finds `git` and `gh` (without trusting `PATH`), gives the install link for your platform when they are missing, signs you in through GitHub's device flow -- the code appears in a dialog, your browser does the authenticating, no password passes through CaveCAD -- then checks the token can see private repositories, that git has a credential helper, and that you have a commit identity. Reports the first thing that is actually wrong rather than a cascade. |
 
 Start a new map from `templates/NSS_Cave_Template_PLAN.dxf` (or
 `..._PROFILE.dxf`) -- the tools draw onto its layers and the title block and
@@ -40,10 +39,10 @@ symbol blocks live there.
 
 This repository is public and that is deliberate: it is GPLv3 code, and its test
 fixtures use synthetic local grids rather than real coordinates. **Cave drawings
-are a different matter** — working DXFs carry exact entrance coordinates, so any
-repository holding them must be private. The GitHub Setup tool and the versioning
-work built on it enforce that for the repositories they create and push to; it
-does not apply to this source tree.
+are a different matter** — working DXFs carry exact entrance coordinates, so
+wherever you keep them must be private. Cave folders live in a shared drive the
+survey group controls, never in a public repository; none of that applies to this
+source tree.
 
 ## Conventions
 
