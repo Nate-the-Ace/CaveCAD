@@ -1768,36 +1768,82 @@ CsProfile.bandSpan = function(band) {
  *
  * A band whose span clears every band already placed keeps offset 0
  * and reads at TRUE elevation. A band that would collide is pushed
- * below the lowest placed band, by its own height as a gutter, and
- * records the offset so the drawing can label it -- a displaced band
- * that did not say so would misinform a reader about depth.
+ * below the lowest placed band, by a GUTTER, and records the offset so
+ * the drawing can label it -- a displaced band that did not say so
+ * would misinform a reader about depth.
  *
- * Degenerate bands (a single station, or all one elevation) still get
- * a gutter, from GUTTER_MIN, or two bands would land on one line.
+ * THE GUTTER IS A SEPARATION, NOT A GEOMETRIC QUANTITY OF THE BAND
+ * BEING MOVED. The first cut of this rule set it to the colliding
+ * band's OWN height, and that fails exactly where it matters: a band
+ * ten times taller than everything else then gets a gutter ten times
+ * bigger than everything else's, so one outsized band shoves every
+ * band below it far down the page. A big band deserves more ROOM to
+ * draw in -- that is what its own height already buys it -- not more
+ * EMPTY SPACE wrapped around it. Rejected for exactly that reason.
+ *
+ * What the gutter should track instead is the profile's TYPICAL band,
+ * so it reads as "a little more than a normal gap" everywhere, rather
+ * than scaling with whichever band happens to be enormous. Half the
+ * MEDIAN band height across the whole profile does that: MEDIAN, not
+ * mean, so the one huge outlier that this whole rule exists to tame
+ * cannot itself drag the separation up for every other band the way an
+ * average would (a profile of four 4-unit bands and one 2000-unit one
+ * has a median of 4, not a mean of ~403). Floored at GUTTER_MIN so a
+ * profile of uniformly flat, near-zero-height passages still gets a
+ * visible separation instead of one derived from ~0.
+ *
+ * Computed ONCE, from the spans this function already has to compute
+ * to place every band -- not per band, and not by asking bandSpan for
+ * the same band's span twice.
  *
  * `placedHi` is only ever raised by a band that CLEARS the stack above
  * it; a band pushed below never raises it, because it did not add
  * anything above the existing top -- it only extends the stack
- * downward. That is why a run of several colliding bands each land a
- * clean GUTTER_MIN (or their own height, if larger) below the
- * previous one rather than drifting further every time: `placedLo`
- * alone tracks the bottom of the stack so far, and each new collision
- * measures from there.
- *
- * A band far taller than its neighbours is pushed down by exactly its
- * own (enormous) height, per the rule above -- so one outsized band
- * leaves an equally outsized blank gutter under the rest of the
- * stack. That was observed, not fixed: it is what "pushed down by its
- * own height" means for a band with no comparably sized neighbour, and
- * changing it is a design call for whoever reviews the drawn profile,
- * not a bug this task found reason to correct.
+ * downward. That is why a run of several colliding bands each land the
+ * same constant gutter below the previous one rather than drifting
+ * further every time: `placedLo` alone tracks the bottom of the stack
+ * so far, and each new collision measures from there.
  */
 CsProfile.GUTTER_MIN = 5.0;
 
 CsProfile.layout = function(bands) {
+    var i;
+
+    // One pass to get every band's span (or null), so the median below
+    // is computed from data already in hand -- bandSpan is never asked
+    // to recompute the same band's span a second time in the loop that
+    // follows.
+    var spans = [];
+    for (i = 0; i < bands.length; i++) {
+        spans.push(CsProfile.bandSpan(bands[i]));
+    }
+
+    var heights = [];
+    for (i = 0; i < spans.length; i++) {
+        if (spans[i] !== null) {
+            heights.push(spans[i].hi - spans[i].lo);
+        }
+    }
+    // A plain numeric sort. CaveCAD's own Array.prototype.sort is
+    // UNSTABLE for a comparator that calls two DISTINCT elements equal
+    // (see this file's other sorts) -- but that concern is about which
+    // of two equal-ranked ITEMS ends up first, and there is no
+    // per-band identity here to lose: two bands of the same height
+    // contribute the same number to this array either way, so any
+    // reordering among equal heights produces the identical sorted
+    // array of numbers, on both engines.
+    heights.sort(function(a, b) { return a - b; });
+    var median = 0.0;
+    if (heights.length > 0) {
+        var mid = Math.floor(heights.length / 2);
+        median = (heights.length % 2 === 1) ?
+            heights[mid] : (heights[mid - 1] + heights[mid]) / 2.0;
+    }
+    var gutter = Math.max(CsProfile.GUTTER_MIN, 0.5 * median);
+
     var placedLo = null, placedHi = null;
-    for (var i = 0; i < bands.length; i++) {
-        var span = CsProfile.bandSpan(bands[i]);
+    for (i = 0; i < bands.length; i++) {
+        var span = spans[i];
         if (span === null) {
             bands[i].zOffset = 0.0;
             continue;
@@ -1815,8 +1861,6 @@ CsProfile.layout = function(bands) {
             placedHi = Math.max(placedHi, span.hi);
             continue;
         }
-        var height = span.hi - span.lo;
-        var gutter = Math.max(height, CsProfile.GUTTER_MIN);
         bands[i].zOffset = (placedLo - gutter) - span.hi;
         placedLo = span.lo + bands[i].zOffset;
     }

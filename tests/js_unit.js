@@ -9861,10 +9861,34 @@ if (!IS_NODE) {
 }());
 
 (function() {
-    // three bands with the SAME span: each collision pushes below the
-    // lowest point placed so far, by GUTTER_MIN (their height, 4, is
-    // less than GUTTER_MIN, 5) -- not by some ever-growing amount, and
-    // not all crammed against the very first band.
+    // bandSpan is called exactly once per band inside layout -- the
+    // median is computed from spans already in hand, not by asking
+    // bandSpan for the same band's span a second time.
+    var real = CsProfile.bandSpan;
+    var calls = 0;
+    CsProfile.bandSpan = function(band) {
+        calls++;
+        return real(band);
+    };
+    try {
+        var b0 = { stations: [{ y: -2 }, { y: 2 }] };
+        var b1 = { stations: [{ y: -2 }, { y: 2 }] };
+        var b2 = { stations: [{ y: -2 }, { y: 2 }] };
+        CsProfile.layout([b0, b1, b2]);
+        eqs(calls, 3,
+            "bandSpan called exactly once per band, not once more per " +
+            "collision to compute the median separately");
+    } finally {
+        CsProfile.bandSpan = real;
+    }
+}());
+
+(function() {
+    // three bands with the SAME span (height 4, so half their MEDIAN is
+    // 2, floored to GUTTER_MIN 5): each collision pushes below the
+    // lowest point placed so far by that one constant gutter -- not by
+    // some ever-growing amount, and not all crammed against the very
+    // first band.
     var b0 = { stations: [{ y: -2 }, { y: 2 }] };
     var b1 = { stations: [{ y: -2 }, { y: 2 }] };
     var b2 = { stations: [{ y: -2 }, { y: 2 }] };
@@ -9873,7 +9897,7 @@ if (!IS_NODE) {
     eqs(b1.zOffset, -9, "b1 pushed GUTTER_MIN below b0's bottom, plus its own height");
     eqs(b2.zOffset, -18, "b2 pushed the same GUTTER_MIN below b1, not stacked on b0");
     // measured, not merely asserted: the gap between consecutive placed
-    // bands is exactly GUTTER_MIN once each band's own height is netted
+    // bands is exactly the gutter once each band's own height is netted
     // out, for every pair, not just the first collision
     var b0Bottom = -2 + b0.zOffset, b1Top = 2 + b1.zOffset;
     var b1Bottom = -2 + b1.zOffset, b2Top = 2 + b2.zOffset;
@@ -9886,7 +9910,8 @@ if (!IS_NODE) {
 (function() {
     // a degenerate, zero-height band (a single station, or a dead-level
     // passage) still gets GUTTER_MIN, not a zero gutter that would land
-    // two bands on the very same line
+    // two bands on the very same line -- half of a zero median is
+    // still floored at GUTTER_MIN
     var b0 = { stations: [{ y: 0 }, { y: 0 }] };
     var b1 = { stations: [{ y: 0 }, { y: 0 }] };
     CsProfile.layout([b0, b1]);
@@ -9896,24 +9921,62 @@ if (!IS_NODE) {
 }());
 
 (function() {
-    // OBSERVED, not fixed: a band whose own span vastly exceeds its
-    // neighbours' is pushed down by its own (equally vast) height, so
-    // one outsized band leaves an equally outsized blank gutter under
-    // everything below it. This is exactly what "pushed down by its
-    // own height" means for a band with nothing else that size to
-    // measure against -- readability of THAT result is a judgement
-    // call for whoever reviews the drawn profile, not a defect this
-    // task found reason to change.
+    // FIXED, not merely observed: a band whose own span vastly exceeds
+    // its neighbour's no longer sets its own gutter. With only two
+    // bands (heights 4 and 2000) the median of the two is 1002, so the
+    // gutter is half of that, 501 -- smaller than the old rule's 2000,
+    // and governed by a value shared across the whole profile rather
+    // than by whichever band happens to be huge. The five-band fixture
+    // below is the one that actually separates median from mean.
     var normal = { stations: [{ y: -2 }, { y: 2 }] };
     var huge = { stations: [{ y: -1000 }, { y: 1000 }] };
     CsProfile.layout([normal, huge]);
     eqs(normal.zOffset, 0, "the ordinary band sits at true elevation");
-    eqs(huge.zOffset, -3002,
-        "the oversized band is pushed down by its own 2000-unit height, " +
-        "not clamped to some smaller gutter");
+    eqs(huge.zOffset, -1503,
+        "gutter is half the median height (1002/2 = 501), not the huge " +
+        "band's own 2000-unit height");
     var hugeTop = 1000 + huge.zOffset;
-    near(normal.stations[0].y - hugeTop, 2000, 1e-9,
-        "the blank gutter under the huge band is as big as the band itself");
+    near(normal.stations[0].y - hugeTop, 501, 1e-9,
+        "the blank gutter is 501 units, not 2000 -- a fraction of a " +
+        "typical band, not proportional to the outlier");
+}());
+
+(function() {
+    // THE CASE THAT DISTINGUISHES MEDIAN FROM MEAN: one band's height
+    // is enormous (2000) and four out of five bands are small (4). The
+    // MEDIAN of [4,4,4,4,2000] is 4 (the middle of five sorted values),
+    // so the gutter stays GUTTER_MIN (half of 4 is 2, floored to 5) --
+    // the separation follows the small bands, not the outlier. A MEAN
+    // would instead average to (4*4+2000)/5 = 403.2, giving a gutter of
+    // ~201.6 and failing every assertion below.
+    var b0 = { stations: [{ y: -2 }, { y: 2 }] };       // normal, height 4
+    var b1 = { stations: [{ y: -1000 }, { y: 1000 }] }; // the one huge band
+    var b2 = { stations: [{ y: -2 }, { y: 2 }] };       // normal
+    var b3 = { stations: [{ y: -2 }, { y: 2 }] };       // normal
+    var b4 = { stations: [{ y: -2 }, { y: 2 }] };       // normal
+    CsProfile.layout([b0, b1, b2, b3, b4]);
+
+    eqs(b0.zOffset, 0, "b0 placed first, at true elevation");
+    eqs(b1.zOffset, -1007,
+        "the huge band is pushed by GUTTER_MIN (median stays 4, gutter " +
+        "floors to 5), not by its own height or a mean-inflated one");
+    eqs(b2.zOffset, -2014, "b2's gutter below the huge band is still just 5");
+    eqs(b3.zOffset, -2023, "b3's gutter is still 5 -- constant, not growing");
+    eqs(b4.zOffset, -2032, "b4's gutter is still 5 -- the median never moved");
+
+    // every consecutive gap is exactly GUTTER_MIN, including the one
+    // straddling the huge band -- the outlier changes ITS OWN offset,
+    // never the separation applied to its neighbours
+    var bottom = function(b) { return -2 + b.zOffset; };
+    var top = function(b, hi) { return hi + b.zOffset; };
+    near(bottom(b0) - top(b1, 1000), CsProfile.GUTTER_MIN, 1e-9,
+        "gap straddling the huge band is still one plain gutter");
+    near((-1000 + b1.zOffset) - top(b2, 2), CsProfile.GUTTER_MIN, 1e-9,
+        "gap after the huge band is the same gutter, unaffected by it");
+    near(bottom(b2) - top(b3, 2), CsProfile.GUTTER_MIN, 1e-9,
+        "gap between two ordinary bands, unchanged");
+    near(bottom(b3) - top(b4, 2), CsProfile.GUTTER_MIN, 1e-9,
+        "and the next one -- the gutter never drifts");
 }());
 
 // ---------------------------------------------------------------------
