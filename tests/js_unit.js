@@ -9026,6 +9026,149 @@ if (!IS_NODE) {
 }());
 
 // ---------------------------------------------------------------------
+// Floor and ceiling: classifySplay's dead zone, then bandWallRuns.
+// ---------------------------------------------------------------------
+
+(function() {
+    ok(CsProfile.classifySplay(shotOf("A1", "", 5, 0, 40), 10) === "ceiling",
+        "steep up splay joins the ceiling");
+    ok(CsProfile.classifySplay(shotOf("A1", "", 5, 0, -40), 10) === "floor",
+        "steep down splay joins the floor");
+    ok(CsProfile.classifySplay(shotOf("A1", "", 5, 0, 3), 10) === "flat",
+        "shallow splay joins neither");
+    ok(CsProfile.classifySplay(shotOf("A1", "", 5, 0, 10), 10) === "flat",
+        "the dead zone boundary is flat, not ceiling");
+    ok(CsProfile.classifySplay(shotOf("A1", "", 5, 0, -10), 10) === "flat",
+        "boundary below is flat too");
+    ok(CsProfile.classifySplay(shotOf("A1", "", 5, 0, 11), 10) === "ceiling",
+        "just outside the dead zone counts");
+}());
+
+(function() {
+    // A1 -> A2 -> A3, level, each station 4 up and 2 down
+    var sv = CsModel.newSurvey();
+    var s1 = shotOf("A1", "A2", 10, 0, 0);
+    s1.up = 4; s1.down = 2;
+    var s2 = shotOf("A2", "A3", 10, 0, 0);
+    s2.up = 4; s2.down = 2;
+    sv.shots = [s1, s2];
+    var r = CsNetwork.resolve(sv, {});
+    var g = CsProfile.groupRuns(r);
+    var h = CsProfile.hierarchy(g, r);
+    var band = CsProfile.unrollBand(g.runs["A"], null, r, h, {});
+    var w = CsProfile.bandWallRuns(band, sv, r, {});
+
+    ok(w.ceiling.length === 1, "one ceiling run");
+    ok(w.ceiling[0].length >= 2, "ceiling run has at least two points");
+    near(w.ceiling[0][0].y, 4, 1e-9, "ceiling sits U above the station");
+    near(w.floor[0][0].y, -2, 1e-9, "floor sits D below the station");
+    near(w.ceiling[0][0].x, band.stations[1].x, 1e-9,
+        "the LRUD point sits at its own station's X");
+}());
+
+(function() {
+    // zero and null: 0 is a point at the station, null is no point
+    var sv = CsModel.newSurvey();
+    var s1 = shotOf("A1", "A2", 10, 0, 0);
+    s1.up = 0; s1.down = null;
+    var s2 = shotOf("A2", "A3", 10, 0, 0);
+    s2.up = 0; s2.down = null;
+    sv.shots = [s1, s2];
+    var r = CsNetwork.resolve(sv, {});
+    var g = CsProfile.groupRuns(r);
+    var band = CsProfile.unrollBand(g.runs["A"], null, r,
+        CsProfile.hierarchy(g, r), {});
+    var w = CsProfile.bandWallRuns(band, sv, r, {});
+    near(w.ceiling[0][0].y, 0, 1e-9, "U of 0 is a ceiling point at the station");
+    ok(w.floor.length === 0, "null D draws no floor at all");
+}());
+
+(function() {
+    // splays: one up, one down, one flat -- and along-passage ordering.
+    // The legs carry U/D as well, so each line has an LRUD point at
+    // every station: without that, a run of one point is dropped and
+    // there is nothing to assert about ordering.
+    var sv = CsModel.newSurvey();
+    var s1 = shotOf("A1", "A2", 10, 0, 0);
+    s1.up = 6; s1.down = 6;
+    var s2 = shotOf("A2", "A3", 10, 0, 0);
+    s2.up = 6; s2.down = 6;
+    var up = splayOf("A2", 5, 0, 60);      // forward and up
+    var down = splayOf("A2", 5, 180, -60); // backward and down
+    var flat = splayOf("A2", 5, 90, 0);    // sideways, level
+    sv.shots = [s1, s2, up, down, flat];
+    var r = CsNetwork.resolve(sv, {});
+    var g = CsProfile.groupRuns(r);
+    var band = CsProfile.unrollBand(g.runs["A"], null, r,
+        CsProfile.hierarchy(g, r), {});
+    var w = CsProfile.bandWallRuns(band, sv, r, {});
+
+    ok(w.flat.length === 1 && w.flat[0].station === "A2",
+        "the level splay is a flat tick, in neither line");
+
+    // A2 contributes its U point and the up splay; A3 its U point.
+    // A1 has no LRUD (nothing arrives at it) so it contributes nothing.
+    ok(w.ceiling.length === 1, "one ceiling run (got " + w.ceiling.length + ")");
+    ok(w.ceiling[0].length === 3,
+        "A2 tick + A2 up splay + A3 tick (got " + w.ceiling[0].length + ")");
+
+    var a2x = band.stations[1].x, a3x = band.stations[2].x;
+    // 5 ft at 60 deg up: plan 2.5, forward along the passage
+    near(w.ceiling[0][0].x, a2x, 1e-9, "the LRUD point leads, at its station");
+    near(w.ceiling[0][1].x, a2x + 2.5, 1e-5,
+        "the forward up splay sits its plan projection past the station");
+    ok(w.ceiling[0][1].x < a3x, "and still short of the next station");
+
+    // X must be non-decreasing along the run, or the wall zigzags
+    var sorted = true;
+    for (var i = 1; i < w.ceiling[0].length; i++) {
+        if (w.ceiling[0][i].x < w.ceiling[0][i - 1].x - 1e-9) { sorted = false; }
+    }
+    ok(sorted, "ceiling points are ordered along the passage");
+
+    // the backward down splay lands BEFORE its station's floor tick
+    ok(w.floor[0][0].x < a2x, "a backward splay lands before its station");
+}());
+
+(function() {
+    // a junction ends a run rather than guessing across it
+    var sv = CsModel.newSurvey();
+    var mk = function(f, t, az) {
+        var s = shotOf(f, t, 10, az, 0);
+        s.up = 3; s.down = 3;
+        return s;
+    };
+    sv.shots = [mk("A1", "A2", 0), mk("A2", "A3", 0), mk("A3", "A4", 0),
+        mk("A2", "A2a1", 90)];
+    var r = CsNetwork.resolve(sv, {});
+    var g = CsProfile.groupRuns(r);
+    var band = CsProfile.unrollBand(g.runs["A"], null, r,
+        CsProfile.hierarchy(g, r), {});
+    var w = CsProfile.bandWallRuns(band, sv, r, {});
+
+    // A1 has no LRUD, so it breaks an empty run. A2 is a junction (three
+    // legs touch it) and ends its own run at one point, which is dropped
+    // for being shorter than a line. A3-A4 is the surviving run -- and
+    // the point of the test is that A2 is NOT joined to it.
+    ok(w.ceiling.length === 1,
+        "one surviving ceiling run (got " + w.ceiling.length + ")");
+    ok(w.ceiling[0].length === 2, "and it is A3-A4 only");
+    near(w.ceiling[0][0].x, band.stations[2].x, 1e-9,
+        "the run starts at A3, not at the junction");
+
+    // without the junction, the same survey gives ONE run of three
+    var sv2 = CsModel.newSurvey();
+    sv2.shots = [mk("A1", "A2", 0), mk("A2", "A3", 0), mk("A3", "A4", 0)];
+    var r2 = CsNetwork.resolve(sv2, {});
+    var g2 = CsProfile.groupRuns(r2);
+    var w2 = CsProfile.bandWallRuns(
+        CsProfile.unrollBand(g2.runs["A"], null, r2,
+            CsProfile.hierarchy(g2, r2), {}), sv2, r2, {});
+    ok(w2.ceiling.length === 1 && w2.ceiling[0].length === 3,
+        "no junction: A2-A3-A4 is one run of three");
+}());
+
+// ---------------------------------------------------------------------
 // Report.
 // ---------------------------------------------------------------------
 
