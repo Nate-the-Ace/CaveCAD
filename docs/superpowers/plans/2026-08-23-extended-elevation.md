@@ -59,6 +59,13 @@ Learned the hard way in this repo; violating any of these produces a silent fail
 - **All text through `CsDraw.addText`**, which capitalises via `CsDraw.caps`. Never capitalise model data.
 - **Tag writes via `CsTags.set`**, never `setCustomProperty` directly.
 - **`EAction.handleUserMessage` cannot show multi-line text** (newlines collapse). Multi-line output uses `QMessageBox.information`.
+- **`CsNetwork.resolve` now reports `anchorZUnknown`.** Closing the sixth elevation-datum door
+  meant deciding what an anchor with no elevation DOES. It anchors without one (`z = null`) and
+  says so, rather than refusing — refusing would discard the anchor's x/y as well, and that
+  file's own comment calls "the caller knows only a plan position" the common case, not an edge
+  case. `null` is also already the vocabulary `CsProfile` uses for "no resolved Z". NOT yet
+  propagated: a descendant station's `fs.z + of.dz` still treats a null anchor z as 0, which is
+  the same larger task as the unguarded non-splay `offset` callers.
 - **`.seq` IS NOT WALK ORDER FOR ANCHORED STATIONS.** `CsNetwork.seedFixed` places every
   fixed / `#Fix` / `*fix` station up front, before any traversal, deliberately. So a fixed
   station's low `.seq` records SEEDING, not walking. Any rule of the form "the earlier-seq
