@@ -13957,6 +13957,64 @@ if (!IS_NODE) {
             "FeatureTrace.intervalFeet: nonsense falls back");
         FeatureTrace.widgets = undefined;
 
+        // -- no-gap walls: ties to a nearby wall end ----------------
+        function pt(x, y) { return { x: x, y: y }; }
+
+        ok(CsTrace.tiesOn(CsLayers.WALLS_SURVEYED),
+            "CsTrace.tiesOn: surveyed walls tie");
+        ok(CsTrace.tiesOn(CsLayers.PROFILE_TRACED_FLOOR),
+            "CsTrace.tiesOn: the elevation's floor is a wall, so it ties");
+        ok(!CsTrace.tiesOn(CsLayers.BREAKDOWN_BOUNDARY),
+            "CsTrace.tiesOn: a breakdown boundary does NOT weld to walls");
+        ok(!CsTrace.tiesOn(CsLayers.ENTRANCE),
+            "CsTrace.tiesOn: an entrance does NOT weld to walls");
+
+        var tieDoc = new RDocument(new RMemoryStorage(),
+            new RSpatialIndexNavel());
+        var tieDi = new RDocumentInterface(tieDoc);
+        // An existing wall from (0,0) to (10,0).
+        CsTrace.emit(tieDoc, tieDi, CsLayers.WALLS_SURVEYED,
+            [pt(0, 0), pt(5, 0), pt(10, 0)], 1.0, 0.01);
+
+        var found = CsTrace.nearestEnd(tieDoc, pt(10.4, 0.3),
+            CsLayers.WALLS_SURVEYED, 1.0);
+        ok(found !== null, "CsTrace.nearestEnd: finds an end within a foot");
+        near(found.x, 10.0, 1e-6, "CsTrace.nearestEnd: returns the end's x");
+        near(found.y, 0.0, 1e-6, "CsTrace.nearestEnd: returns the end's y");
+
+        ok(CsTrace.nearestEnd(tieDoc, pt(14, 0), CsLayers.WALLS_SURVEYED,
+            1.0) === null,
+            "CsTrace.nearestEnd: a deliberate gap is left alone");
+        ok(CsTrace.nearestEnd(tieDoc, pt(10.2, 0), CsLayers.WALLS_INFERRED,
+            1.0) === null,
+            "CsTrace.nearestEnd: never ties across to another layer");
+
+        // The join itself: a second stroke starting near the first's end
+        // begins exactly there, so the wall has no gap.
+        var second = CsTrace.tieEnds(tieDoc,
+            [pt(10.35, 0.25), pt(15, 2), pt(20, 5)],
+            CsLayers.WALLS_SURVEYED, 1.0);
+        near(second[0].x, 10.0, 1e-6, "CsTrace.tieEnds: the stroke starts at the wall end");
+        near(second[0].y, 0.0, 1e-6, "CsTrace.tieEnds: exactly, in y too");
+        near(second[2].x, 20.0, 1e-6, "CsTrace.tieEnds: a far end is untouched");
+
+        // Idempotent: re-tying a joined stroke must not make it drift.
+        var again = CsTrace.tieEnds(tieDoc, second,
+            CsLayers.WALLS_SURVEYED, 1.0);
+        near(again[0].x, second[0].x, 1e-9,
+            "CsTrace.tieEnds: tying twice does not move the join");
+
+        var srcTie = [pt(10.35, 0.25), pt(15, 2)];
+        CsTrace.tieEnds(tieDoc, srcTie, CsLayers.WALLS_SURVEYED, 1.0);
+        near(srcTie[0].x, 10.35, 1e-9,
+            "CsTrace.tieEnds: the caller's array is untouched");
+
+        // A non-tying layer passes straight through.
+        var noTie = CsTrace.tieEnds(tieDoc, [pt(10.35, 0.25), pt(15, 2)],
+            CsLayers.ENTRANCE, 1.0);
+        near(noTie[0].x, 10.35, 1e-9,
+            "CsTrace.tieEnds: a non-wall layer is not tied");
+
         // -- snap suspend / restore, by NAME not by object ----------
         // The object would be a use-after-free: setSnap takes ownership,
         // so the snap we saved is freed when RSnapFree replaces it.

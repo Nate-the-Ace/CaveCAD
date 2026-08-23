@@ -448,6 +448,114 @@ CsTrace.restoreSnap = function(di, name) {
     }
 };
 
+/** How close a trace has to start or end to an existing wall end for
+ *  the two to be joined, in FEET of cave. One foot: close enough that
+ *  the caver meant it, far enough that a deliberate gap survives. */
+CsTrace.TIE_FEET = 1.0;
+
+/**
+ * Layers whose ends tie together. Walls only.
+ *
+ * A breakdown boundary is a closed outline and an entrance is a symbol
+ * -- welding those to a passing wall would be wrong, and quietly. The
+ * elevation's ceiling and floor ARE its walls, so they tie too.
+ */
+CsTrace.TIE_LAYERS = function() {
+    return [CsLayers.WALLS_SURVEYED, CsLayers.WALLS_INFERRED,
+        CsLayers.PROFILE_TRACED_CEILING, CsLayers.PROFILE_TRACED_FLOOR,
+        CsLayers.PROFILE_WALLS_INFERRED];
+};
+
+/** Whether ends on `layerName` tie to each other. */
+CsTrace.tiesOn = function(layerName) {
+    var list = CsTrace.TIE_LAYERS();
+    for (var i = 0; i < list.length; i++) {
+        if (list[i] === layerName) {
+            return true;
+        }
+    }
+    return false;
+};
+
+/**
+ * The nearest start-or-end point of an existing curve on `layerName`
+ * within `tolerance` of `point`, as {x, y}, or null.
+ *
+ * Deliberately NOT QCAD's snapping. Native snap is a global mode with
+ * its own UI, it would fight the free-snap this tool needs while
+ * dragging, and it snaps to everything rather than to wall ends on one
+ * layer. This is a plain distance test over the ends we care about --
+ * the caver's own words for it were "if I start a wall within a foot of
+ * the end of another, just start drawing from that point instead".
+ *
+ * Same layer only: a surveyed wall must not weld itself to an inferred
+ * one, nor to an elevation trace that happens to sit at similar
+ * coordinates. QCAD context only.
+ */
+CsTrace.nearestEnd = function(doc, point, layerName, tolerance) {
+    if (!(tolerance > 0) || !doc.hasLayer(layerName)) {
+        return null;
+    }
+    var ids = doc.queryLayerEntities(doc.getLayerId(layerName), true);
+    var best = null;
+    var bestDist = tolerance;
+    var i, k;
+
+    for (i = 0; i < ids.length; i++) {
+        var e = doc.queryEntity(ids[i]);
+        if (isNull(e)) {
+            continue;
+        }
+        var ends = [];
+        try {
+            ends.push(e.getStartPoint());
+            ends.push(e.getEndPoint());
+        } catch (eEnds) {
+            continue;   // an entity with no ends (a point, a label)
+        }
+        for (k = 0; k < ends.length; k++) {
+            var end = ends[k];
+            if (isNull(end)) {
+                continue;
+            }
+            var cand = { x: end.x, y: end.y };
+            var d = CsTrace.distance(point, cand);
+            if (d <= bestDist) {
+                bestDist = d;
+                best = cand;
+            }
+        }
+    }
+    return best;
+};
+
+/**
+ * `points` with its first and last moved onto nearby wall ends, so
+ * consecutive strokes share an exact coordinate and leave no gap.
+ *
+ * Idempotent: a point already sitting on an end is at distance 0 from
+ * it and comes back unchanged, so re-tracing a joined wall cannot make
+ * it drift.
+ *
+ * Returns a copy; the caller's array is untouched.
+ */
+CsTrace.tieEnds = function(doc, points, layerName, tolerance) {
+    var out = CsTrace.copyOf(points);
+    if (out.length < 2 || !CsTrace.tiesOn(layerName)) {
+        return out;
+    }
+    var head = CsTrace.nearestEnd(doc, out[0], layerName, tolerance);
+    if (head !== null) {
+        out[0] = head;
+    }
+    var tail = CsTrace.nearestEnd(doc, out[out.length - 1], layerName,
+        tolerance);
+    if (tail !== null) {
+        out[out.length - 1] = tail;
+    }
+    return out;
+};
+
 /**
  * The whole pipeline: resample the captured drag, reduce it, fit a
  * spline, and add it to `layerName`.

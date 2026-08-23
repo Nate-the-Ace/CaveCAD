@@ -370,10 +370,19 @@ FeatureTraceRun.prototype.commit = function() {
     // panel's interval keeps that field in feet whatever the drawing is
     // in. Tolerance is a fraction of the spacing for the same reason:
     // one smoothing setting means the same thing in both.
-    var spacing = CsTrace.spacingFor(unit) * FeatureTraceRun.intervalFeet();
+    var perFoot = CsTrace.spacingFor(unit);
+    var spacing = perFoot * FeatureTraceRun.intervalFeet();
     var tolerance = spacing * FeatureTraceRun.toleranceFraction();
-    var result = CsTrace.emit(doc, di, layerName, this.samples,
-        spacing, tolerance);
+
+    // No-gap walls: a stroke starting or ending within a foot of an
+    // existing wall end begins or ends exactly THERE instead. Our own
+    // distance test, not QCAD's snapping -- native snap is a global mode
+    // that would fight the free-snap a drag needs, and it would catch
+    // everything rather than wall ends on this one layer.
+    var tied = CsTrace.tieEnds(doc, this.samples, layerName,
+        perFoot * CsTrace.TIE_FEET);
+
+    var result = CsTrace.emit(doc, di, layerName, tied, spacing, tolerance);
 
     // TEMPORARY diagnostics. Everything the vanishing-commit question
     // needs: does the layer resolve, what state is it in, and did the
