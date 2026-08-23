@@ -73,7 +73,11 @@ var CORE = ["CsUnits", "CsCave", "CsGeoProject", "CsAngles", "CsIgrfCoeffs",
     "CsProfile", "CsProfileDraw",
     // CsRevise before CsBind -- CsBind's layer gate consults
     // CsRevise.isWorldFixedLayer when it is loaded.
-    "CsRevise", "CsBind", "CsProfileBind"];
+    "CsRevise", "CsBind", "CsProfileBind",
+    // CsReport last: needed only so this file can assert the WORDS
+    // CsReport.profileSummary prints (Critical 1's own fix), not just
+    // the counts object underneath them.
+    "CsReport"];
 for (var c = 0; c < CORE.length; c++) {
     loadRepoScript("scripts/CaveSurvey/Core/" + CORE[c] + ".js");
 }
@@ -88,6 +92,16 @@ function eqs(a, b, what) {
 function near(a, b, tol, what) {
     ok(Math.abs(a - b) <= tol,
         what + " (expected " + b + " +/- " + tol + ", got " + a + ")");
+}
+/** map[key] if present, else a NaN placeholder -- lets a fixture that
+ *  builds several sketches off a lookup table (fixtures 5e/5f below)
+ *  keep going after a failed sanity check instead of dereferencing
+ *  .x/.y on undefined and throwing a raw, uncaught TypeError that
+ *  would kill this whole run BEFORE the failure list the sanity check
+ *  just appended to ever gets printed -- three separate mutations were
+ *  found to do exactly that. */
+function entryOf(map, key) {
+    return map.hasOwnProperty(key) ? map[key] : { x: NaN, y: NaN };
 }
 
 function shotOf(from, to, d, az, inc, u, dn) {
@@ -770,7 +784,8 @@ destr(diD);
             "THE TRACED LINE MOVED WITH ITS STATIONS (x " + moved.x +
             ", expected " + (p2.x + 10) + ")");
     }
-    ok(counts.linework !== undefined && counts.linework.moved >= 1,
+    ok(counts.linework !== undefined, "sanity: counts.linework exists");
+    eqs(counts.linework.moved, 1,
         "the move is reported (" + JSON.stringify(counts.linework) + ")");
     destr(i2);
 }());
@@ -841,7 +856,8 @@ destr(diD);
             "THE TRACED LINE MOVED EVEN THOUGH ITS LAYER WAS HIDDEN (x " +
             moved4.x + ", expected " + (q2.x + 10) + ")");
     }
-    ok(counts4.linework !== undefined && counts4.linework.moved >= 1,
+    ok(counts4.linework !== undefined, "sanity: counts4.linework exists");
+    eqs(counts4.linework.moved, 1,
         "the move on a hidden layer is reported (" +
         JSON.stringify(counts4.linework) + ")");
     ok(d4.queryLayer("PROFILE-CEILING").isOff(),
@@ -895,11 +911,12 @@ destr(diD);
         near(strayPos.y, 500, 1e-9,
             "THE UNBOUND SKETCH DID NOT MOVE (y " + strayPos.y + ")");
     }
-    ok(counts6.claimed !== undefined && counts6.claimed.skipped >= 1,
+    ok(counts6.claimed !== undefined, "sanity: counts6.claimed exists");
+    eqs(counts6.claimed.skipped, 1,
         "claim() names the stray sketch as skipped, not silently " +
         "dropped (" + JSON.stringify(counts6.claimed) + ")");
-    ok(counts6.linework !== undefined &&
-        counts6.linework.unmoved.length >= 1,
+    ok(counts6.linework !== undefined, "sanity: counts6.linework exists");
+    eqs(counts6.linework.unmoved.length, 1,
         "the unbound sketch is NAMED in counts.linework.unmoved -- " +
         "claim()'s own skippedLabels folded in, since an untagged " +
         "entity is invisible to moveLinework's own scan by design and " +
@@ -966,7 +983,8 @@ destr(diD);
             "THE PROXIMITY-BOUND SKETCH MOVED WITH ITS NEARBY STATIONS " +
             "(x " + moved7.x + ", expected " + (p4.x + 10) + ")");
     }
-    ok(counts7.linework !== undefined && counts7.linework.moved >= 1,
+    ok(counts7.linework !== undefined, "sanity: counts7.linework exists");
+    eqs(counts7.linework.moved, 1,
         "the proximity-fallback move is reported (" +
         JSON.stringify(counts7.linework) + ")");
     destr(i7);
@@ -1012,8 +1030,12 @@ destr(diD);
     for (var xi = 0; xi < idx8.length; xi++) { drawn[idx8[xi].name] = idx8[xi]; }
     ok(drawn["A/A2"] !== undefined && drawn["B/A2"] !== undefined,
         "sanity: \"A2\" is drawn TWICE under two DIFFERENT qualified keys");
-    ok(Math.abs(drawn["A/A2"].x - drawn["B/A2"].x) > 1 ||
-        Math.abs(drawn["A/A2"].y - drawn["B/A2"].y) > 1,
+    // entryOf(), not a direct dereference: a mutation that breaks the
+    // sanity check above (drawn["A/A2"] or drawn["B/A2"] missing) must
+    // fail a NAMED assertion, not crash this whole file on a raw
+    // TypeError before the failure list above even gets printed.
+    ok(Math.abs(entryOf(drawn, "A/A2").x - entryOf(drawn, "B/A2").x) > 1 ||
+        Math.abs(entryOf(drawn, "A/A2").y - entryOf(drawn, "B/A2").y) > 1,
         "sanity: the two A2 copies sit at genuinely different drawn " +
         "positions (A/A2=" + JSON.stringify(drawn["A/A2"]) + ", B/A2=" +
         JSON.stringify(drawn["B/A2"]) + ")");
@@ -1022,8 +1044,8 @@ destr(diD);
     CsLayers.ensure(d8, i8, "PROFILE-CEILING");
     var opA = new RAddObjectsOperation();
     var sketchA = new RLineEntity(d8, new RLineData(
-        new RVector(drawn["A/A2"].x, drawn["A/A2"].y),
-        new RVector(drawn["A/A3"].x, drawn["A/A3"].y)));
+        new RVector(entryOf(drawn, "A/A2").x, entryOf(drawn, "A/A2").y),
+        new RVector(entryOf(drawn, "A/A3").x, entryOf(drawn, "A/A3").y)));
     sketchA.setLayerId(d8.getLayerId("PROFILE-CEILING"));
     opA.addObject(sketchA, false);
     i8.applyOperation(opA);
@@ -1033,15 +1055,16 @@ destr(diD);
     // exact coincidence -- must never be confused with band A's A2
     var opB = new RAddObjectsOperation();
     var sketchB = new RLineEntity(d8, new RLineData(
-        new RVector(drawn["B/A2"].x, drawn["B/A2"].y),
-        new RVector(drawn["B/B1"].x, drawn["B/B1"].y)));
+        new RVector(entryOf(drawn, "B/A2").x, entryOf(drawn, "B/A2").y),
+        new RVector(entryOf(drawn, "B/B1").x, entryOf(drawn, "B/B1").y)));
     sketchB.setLayerId(d8.getLayerId("PROFILE-CEILING"));
     opB.addObject(sketchB, false);
     i8.applyOperation(opB);
     var sketchBId = sketchB.getId();
 
-    var expectA3x = drawn["A/A3"].x, expectB1x = drawn["B/B1"].x,
-        expectB1y = drawn["B/B1"].y;
+    var expectA3x = entryOf(drawn, "A/A3").x,
+        expectB1x = entryOf(drawn, "B/B1").x,
+        expectB1y = entryOf(drawn, "B/B1").y;
 
     // revise ONLY the A1->A2 leg -- band B ties off A2 but restarts its
     // own X at 0 regardless, so nothing about band B should move at all
@@ -1116,11 +1139,17 @@ destr(diD);
     var drawn9 = {};
     for (var yi = 0; yi < idx9.length; yi++) { drawn9[idx9[yi].name] = idx9[yi]; }
 
+    ok(drawn9["A/A2"] !== undefined && drawn9["B/B1"] !== undefined,
+        "sanity: A/A2 and B/B1 are both in the stationIndex");
+
     CsLayers.ensure(d9, i9, "PROFILE-CEILING");
     var opC = new RAddObjectsOperation();
+    // entryOf(), not a direct dereference -- see fixture 5e's own note
+    // on why: a failed sanity check above must fail loudly, not crash
+    // this file on a raw TypeError first.
     var cross = new RLineEntity(d9, new RLineData(
-        new RVector(drawn9["A/A2"].x, drawn9["A/A2"].y),
-        new RVector(drawn9["B/B1"].x, drawn9["B/B1"].y)));
+        new RVector(entryOf(drawn9, "A/A2").x, entryOf(drawn9, "A/A2").y),
+        new RVector(entryOf(drawn9, "B/B1").x, entryOf(drawn9, "B/B1").y)));
     cross.setLayerId(d9.getLayerId("PROFILE-CEILING"));
     opC.addObject(cross, false);
     i9.applyOperation(opC);
@@ -1142,13 +1171,523 @@ destr(diD);
     var crossAfter = d9.queryEntity(crossId);
     ok(!isNull(crossAfter), "sanity: the cross-band sketch still exists");
     if (!isNull(crossAfter)) {
-        near(crossAfter.getStartPoint().x, drawn9["A/A2"].x + 10, 0.001,
-            "one endpoint lands on A2's own new position");
-        near(crossAfter.getEndPoint().x, drawn9["B/B1"].x, 0.001,
+        near(crossAfter.getStartPoint().x, entryOf(drawn9, "A/A2").x + 10,
+            0.001, "one endpoint lands on A2's own new position");
+        near(crossAfter.getEndPoint().x, entryOf(drawn9, "B/B1").x, 0.001,
             "the other endpoint stays on B1's unchanged position -- the " +
             "line was reshaped to hit both, not translated as a whole");
     }
     destr(i9);
+}());
+
+// =======================================================================
+// 6. CRITICAL 3 -- a PROMOTED STATION POINT (not a ceiling run, which
+//    fixture 2b already covers) must not create a permanently
+//    corrupting duplicate index entry. The promoted point survives
+//    erase() (same ownership test as 2b), and the next render() draws
+//    a FRESH point at the recomputed position beside it -- now TWO
+//    EntityPoints answer to the SAME run-qualified key (A/A2). Before
+//    this fix, CsProfileBind.stationIndex indexed both (its own
+//    comment used to claim a duplicate "would be a bug in the draw",
+//    which this fixture disproves) and positions()' "first writer
+//    wins" took WHICHEVER ONE queryAllEntities happened to list first
+//    -- unspecified order per this repo's own convention -- so a
+//    sketch bound to A/A2 could be moved by a bogus delta forever,
+//    since the stale promoted point never moves again once it is off
+//    CsProfileDraw's own layers.
+// =======================================================================
+
+(function() {
+    var svP = CsModel.newSurvey();
+    svP.shots = [
+        shotOf("A1", "A2", 10, 0, 0, 4, 2),
+        shotOf("A2", "A3", 10, 0, 0, 4, 2)
+    ];
+    var resP = CsNetwork.resolve(svP, {});
+    var builtP = CsProfile.build(svP, resP, {});
+
+    var dP = new RDocument(new RMemoryStorage(), createSpatialIndex());
+    var iP = new RDocumentInterface(dP);
+    CsProfileDraw.render(dP, iP, builtP, {});
+
+    // find A2's station POINT (not its label -- see isPointEntity above)
+    var a2Id = null;
+    var idsP0 = dP.queryAllEntities(false, false);
+    for (var pi0 = 0; pi0 < idsP0.length; pi0++) {
+        var eP0 = dP.queryEntity(idsP0[pi0]);
+        if (isNull(eP0) || !isPointEntity(eP0)) { continue; }
+        if (CsTags.get(eP0, "ProfileStation") === "A2" &&
+                CsTags.get(eP0, "ProfileRun") === "A") {
+            a2Id = idsP0[pi0];
+        }
+    }
+    ok(a2Id !== null, "sanity: found A2's station point to promote");
+
+    if (a2Id !== null) {
+        // promote it: change ITS LAYER to the plain tracing layer,
+        // exactly the cartographer move fixture 2b already covers for
+        // a ceiling run -- XDATA (ProfileStation/ProfileRun) survives
+        // with it
+        CsLayers.ensure(dP, iP, "PROFILE-CEILING");
+        var promoteOpP = new RModifyObjectsOperation();
+        var a2Ent = dP.queryEntity(a2Id);
+        var a2StalePos = a2Ent.getPosition();
+        a2Ent.setLayerId(dP.getLayerId("PROFILE-CEILING"));
+        promoteOpP.addObject(a2Ent, false);
+        iP.applyOperation(promoteOpP);
+        ok(dP.getLayerName(dP.queryEntity(a2Id).getLayerId()) ===
+            "PROFILE-CEILING",
+            "sanity: A2's point really did move to the plain tracing " +
+            "layer");
+        ok(CsTags.get(dP.queryEntity(a2Id), "ProfileStation") === "A2",
+            "sanity: XDATA survived the layer change");
+
+        // revise: A1->A2 grows by 10, so a FRESH A2 point lands 10 away
+        // from the stale, promoted one
+        svP.shots[0].distance = 20;
+        var resP2 = CsNetwork.resolve(svP, {});
+        var rebuiltP = CsProfile.build(svP, resP2, {});
+        CsProfileDraw.render(dP, iP, rebuiltP, {});
+
+        var idxP = CsProfileBind.stationIndex(dP);
+        var a2Entries = [];
+        for (var pi = 0; pi < idxP.length; pi++) {
+            if (idxP[pi].name === "A/A2") { a2Entries.push(idxP[pi]); }
+        }
+        eqs(a2Entries.length, 1,
+            "stationIndex() HAS EXACTLY ONE ENTRY FOR A/A2 -- the " +
+            "promoted, stale point (now off CsProfileDraw's own " +
+            "layers) must drop out of the index, not sit alongside " +
+            "the fresh one (entries: " + JSON.stringify(a2Entries) + ")");
+        if (a2Entries.length === 1) {
+            near(a2Entries[0].x, a2StalePos.x + 10, 0.001,
+                "the ONE indexed A/A2 position is the FRESH one, not " +
+                "the stale promoted point left behind at its old " +
+                "position (got " + a2Entries[0].x + ", expected " +
+                (a2StalePos.x + 10) + ")");
+        }
+
+        // positions() is the exact function moveLinework's "before"
+        // frame is built from -- the review's own reproduction measured
+        // THIS function specifically
+        var posP = CsProfileBind.positions(dP);
+        ok(posP.hasOwnProperty("A/A2"), "positions() still has an A/A2 entry");
+        if (posP.hasOwnProperty("A/A2")) {
+            near(posP["A/A2"].x, a2StalePos.x + 10, 0.001,
+                "positions()['A/A2'] READS THE FRESH POSITION, not the " +
+                "stale promoted point's (got " + posP["A/A2"].x +
+                ", stale was " + a2StalePos.x + ")");
+        }
+    }
+
+    destr(iP);
+}());
+
+// =======================================================================
+// 7. CRITICAL 2 -- claim() must respect CsBind.autoBindEnabled(). With
+//    the switch OFF, CsBind.planAutoBind claims nothing on the plan
+//    side (its own FIRST guard, documented "Empty when the switch is
+//    off"); CsProfileBind.claim must refuse the identical way, or a
+//    user who explicitly switched binding off still gets an
+//    unauthorised write (LineworkStations) to their own drawing, and
+//    the sketch moves out from under them anyway -- exactly what the
+//    switch's own OFF tooltip promises will NOT happen ("revising a
+//    trip will move the survey and leave your tracing behind").
+// =======================================================================
+
+(function() {
+    var svS = CsModel.newSurvey();
+    svS.shots = [
+        shotOf("A1", "A2", 10, 0, 0, 4, 2),
+        shotOf("A2", "A3", 10, 0, 0, 4, 2)
+    ];
+    var resS = CsNetwork.resolve(svS, {});
+    var builtS = CsProfile.build(svS, resS, {});
+
+    var dS = new RDocument(new RMemoryStorage(), createSpatialIndex());
+    var iS = new RDocumentInterface(dS);
+    CsProfileDraw.render(dS, iS, builtS, {});
+
+    var bandAS = builtS.bands[0];
+    var s2 = null, s3 = null;
+    for (var si = 0; si < bandAS.stations.length; si++) {
+        if (bandAS.stations[si].name === "A2") { s2 = bandAS.stations[si]; }
+        if (bandAS.stations[si].name === "A3") { s3 = bandAS.stations[si]; }
+    }
+    CsLayers.ensure(dS, iS, "PROFILE-CEILING");
+    var opS = new RAddObjectsOperation();
+    var tracedS = new RLineEntity(dS, new RLineData(
+        new RVector(s2.x, s2.y), new RVector(s3.x, s3.y)));
+    tracedS.setLayerId(dS.getLayerId("PROFILE-CEILING"));
+    opS.addObject(tracedS, false);
+    iS.applyOperation(opS);
+    var tracedSId = tracedS.getId();
+
+    var realOverrideOff = CsBind.autoBindOverride;
+    try {
+        CsBind.autoBindOverride = false; // the user's own explicit choice
+
+        // a genuine move, so claim() is even REACHED at all -- see
+        // CsProfileDraw.render's own "claim costs an undo step" guard,
+        // which skips claim() entirely when nothing is going to move
+        svS.shots[0].distance = 20;
+        var resS2 = CsNetwork.resolve(svS, {});
+        var rebuiltS = CsProfile.build(svS, resS2, {});
+        var countsS = CsProfileDraw.render(dS, iS, rebuiltS, {});
+
+        ok(countsS.linework.moved === 0, "sanity: the survey really did " +
+            "change (a move was attempted; the switch, not a no-op, " +
+            "is why nothing got claimed)");
+        eqs(countsS.claimed.tagged, 0,
+            "WITH THE SWITCH OFF, claim() TAGS NOTHING (got " +
+            JSON.stringify(countsS.claimed) + ")");
+        ok(CsBind.hasLineworkTags(dS.queryEntity(tracedSId)) === false,
+            "the untagged sketch is STILL untagged -- no unauthorised " +
+            "write to the user's own drawing");
+        var afterS = dS.queryEntity(tracedSId).getStartPoint();
+        near(afterS.x, s2.x, 1e-9,
+            "OPT-OUT: THE NEVER-CLAIMED SKETCH DID NOT MOVE, exactly " +
+            "the promise the OFF tooltip makes (\"leave your tracing " +
+            "behind\")");
+    } finally {
+        CsBind.autoBindOverride = realOverrideOff;
+    }
+    destr(iS);
+}());
+
+// =======================================================================
+// 7b. THE CONTRAST CASE, for the SAME code path: with the switch back
+//    ON (its default), an identical untagged sketch IS claimed and DOES
+//    move -- proving 7's refusal above is really the switch's doing,
+//    not some other reason the fixture happens to skip claiming.
+// =======================================================================
+
+(function() {
+    var svT = CsModel.newSurvey();
+    svT.shots = [
+        shotOf("A1", "A2", 10, 0, 0, 4, 2),
+        shotOf("A2", "A3", 10, 0, 0, 4, 2)
+    ];
+    var resT = CsNetwork.resolve(svT, {});
+    var builtT = CsProfile.build(svT, resT, {});
+
+    var dT = new RDocument(new RMemoryStorage(), createSpatialIndex());
+    var iT = new RDocumentInterface(dT);
+    CsProfileDraw.render(dT, iT, builtT, {});
+
+    var bandAT = builtT.bands[0];
+    var t2 = null, t3 = null;
+    for (var ti = 0; ti < bandAT.stations.length; ti++) {
+        if (bandAT.stations[ti].name === "A2") { t2 = bandAT.stations[ti]; }
+        if (bandAT.stations[ti].name === "A3") { t3 = bandAT.stations[ti]; }
+    }
+    CsLayers.ensure(dT, iT, "PROFILE-CEILING");
+    var opT = new RAddObjectsOperation();
+    var tracedT = new RLineEntity(dT, new RLineData(
+        new RVector(t2.x, t2.y), new RVector(t3.x, t3.y)));
+    tracedT.setLayerId(dT.getLayerId("PROFILE-CEILING"));
+    opT.addObject(tracedT, false);
+    iT.applyOperation(opT);
+    var tracedTId = tracedT.getId();
+
+    var realOverrideOn = CsBind.autoBindOverride;
+    try {
+        CsBind.autoBindOverride = true; // explicitly ON, not just default
+
+        svT.shots[0].distance = 20;
+        var resT2 = CsNetwork.resolve(svT, {});
+        var rebuiltT = CsProfile.build(svT, resT2, {});
+        var countsT = CsProfileDraw.render(dT, iT, rebuiltT, {});
+
+        eqs(countsT.claimed.tagged, 1,
+            "WITH THE SWITCH ON, claim() DOES tag the sketch (got " +
+            JSON.stringify(countsT.claimed) + ")");
+        ok(CsBind.hasLineworkTags(dT.queryEntity(tracedTId)) === true,
+            "the sketch is now tagged");
+        eqs(countsT.linework.moved, 1, "and it moved");
+        near(dT.queryEntity(tracedTId).getStartPoint().x, t2.x + 10, 0.001,
+            "the claimed sketch actually followed its station");
+    } finally {
+        CsBind.autoBindOverride = realOverrideOn;
+    }
+    destr(iT);
+}());
+
+// =======================================================================
+// 8. IMPORTANT #5a -- redrawing an UNCHANGED profile must not move (or
+//    cost an undo step for) linework that never needed to move at all.
+//    Without CsRevise.positionsMoved's own guard around the claim AND
+//    the move calls, an idempotent redraw would still find an exact
+//    (zero-distance) fit for an already-bound entity and dutifully
+//    rotate/scale/move it by nothing, reporting a "move" that never had
+//    to happen.
+// =======================================================================
+
+(function() {
+    var svG = CsModel.newSurvey();
+    svG.shots = [
+        shotOf("A1", "A2", 10, 0, 0, 4, 2),
+        shotOf("A2", "A3", 10, 0, 0, 4, 2)
+    ];
+    var resG = CsNetwork.resolve(svG, {});
+    var builtG = CsProfile.build(svG, resG, {});
+
+    var dG = new RDocument(new RMemoryStorage(), createSpatialIndex());
+    var iG = new RDocumentInterface(dG);
+    CsProfileDraw.render(dG, iG, builtG, {});
+
+    var bandAG = builtG.bands[0];
+    var g2 = null, g3 = null;
+    for (var gi = 0; gi < bandAG.stations.length; gi++) {
+        if (bandAG.stations[gi].name === "A2") { g2 = bandAG.stations[gi]; }
+        if (bandAG.stations[gi].name === "A3") { g3 = bandAG.stations[gi]; }
+    }
+    CsLayers.ensure(dG, iG, "PROFILE-CEILING");
+    var opG = new RAddObjectsOperation();
+    var tracedG = new RLineEntity(dG, new RLineData(
+        new RVector(g2.x, g2.y), new RVector(g3.x, g3.y)));
+    tracedG.setLayerId(dG.getLayerId("PROFILE-CEILING"));
+    opG.addObject(tracedG, false);
+    iG.applyOperation(opG);
+    var tracedGId = tracedG.getId();
+
+    // one real revision: claims and moves the sketch
+    svG.shots[0].distance = 20;
+    var resG2 = CsNetwork.resolve(svG, {});
+    var rebuiltG = CsProfile.build(svG, resG2, {});
+    var countsG1 = CsProfileDraw.render(dG, iG, rebuiltG, {});
+    eqs(countsG1.linework.moved, 1,
+        "sanity: the one real revision moved the sketch");
+    ok(CsBind.hasLineworkTags(dG.queryEntity(tracedGId)) === true,
+        "sanity: the sketch got tagged along the way");
+
+    var posBeforeIdempotent = dG.queryEntity(tracedGId).getStartPoint();
+
+    // redraw the SAME, unchanged profile again -- nothing moved, so the
+    // already-tagged, already-in-place sketch must be reported as NOT
+    // moved this time, not moved-by-zero
+    var countsG2 = CsProfileDraw.render(dG, iG, rebuiltG, {});
+    eqs(countsG2.linework.moved, 0,
+        "AN UNCHANGED REDRAW REPORTS ZERO LINEWORK MOVES, not a " +
+        "moved-by-nothing count (got " +
+        JSON.stringify(countsG2.linework) + ")");
+    var posAfterIdempotent = dG.queryEntity(tracedGId).getStartPoint();
+    near(posAfterIdempotent.x, posBeforeIdempotent.x, 1e-9,
+        "the sketch's position is unchanged after the idempotent redraw");
+
+    destr(iG);
+}());
+
+// =======================================================================
+// 9. IMPORTANT #5b -- THE RESIDUAL-REFUSAL TOLERANCE, exercised for
+//    real: a sketch spanning stations that move INCOHERENTLY (one stays
+//    exactly still, two others share one nonzero shift -- no single
+//    rigid transform describes both at once) is refused and left EXACTLY
+//    where it was, and named in counts.linework.unmoved --
+//    CsRevise.moveLinework's own "refuse and report rather than mangle"
+//    property, otherwise never exercised for the profile side at all
+//    (every other fixture in this file that moves a sketch keeps its
+//    bound stations moving as one rigid piece).
+// =======================================================================
+
+(function() {
+    var svH = CsModel.newSurvey();
+    svH.shots = [
+        shotOf("A1", "A2", 10, 0, 0, 4, 2),
+        shotOf("A2", "A3", 10, 0, 20, 4, 2),
+        shotOf("A3", "A4", 10, 0, -15, 4, 2),
+        shotOf("A4", "A5", 10, 0, 25, 4, 2)
+    ];
+    var resH = CsNetwork.resolve(svH, {});
+    var builtH = CsProfile.build(svH, resH, {});
+
+    var dH = new RDocument(new RMemoryStorage(), createSpatialIndex());
+    var iH = new RDocumentInterface(dH);
+    CsProfileDraw.render(dH, iH, builtH, {});
+
+    var bandAH = builtH.bands[0];
+    var h1 = null, h3 = null, h5 = null;
+    for (var hi = 0; hi < bandAH.stations.length; hi++) {
+        if (bandAH.stations[hi].name === "A1") { h1 = bandAH.stations[hi]; }
+        if (bandAH.stations[hi].name === "A3") { h3 = bandAH.stations[hi]; }
+        if (bandAH.stations[hi].name === "A5") { h5 = bandAH.stations[hi]; }
+    }
+    ok(h1 !== null && h3 !== null && h5 !== null,
+        "sanity: found A1, A3 and A5 in the built profile");
+
+    if (h1 !== null && h3 !== null && h5 !== null) {
+        // a 3-vertex polyline snapped EXACTLY onto A1, A3 and A5 -- three
+        // points is enough to over-determine similarityFit (four degrees
+        // of freedom, six equations), so a genuinely incoherent
+        // movement among them cannot hide inside the fit
+        CsLayers.ensure(dH, iH, "PROFILE-CEILING");
+        var opH = new RAddObjectsOperation();
+        var dataH = new RPolylineData();
+        dataH.appendVertex(new RVector(h1.x, h1.y));
+        dataH.appendVertex(new RVector(h3.x, h3.y));
+        dataH.appendVertex(new RVector(h5.x, h5.y));
+        var tracedH = new RPolylineEntity(dH, dataH);
+        tracedH.setLayerId(dH.getLayerId("PROFILE-CEILING"));
+        opH.addObject(tracedH, false);
+        iH.applyOperation(opH);
+        var tracedHId = tracedH.getId();
+        var beforeVerts = [tracedH.getVertexAt(0), tracedH.getVertexAt(1),
+            tracedH.getVertexAt(2)];
+
+        // ONE interior leg grows: A1 stays exactly where it is; A3 and
+        // A5 both shift by the SAME delta (the shift happens once, at
+        // A2->A3, and then carries forward unchanged through A4 and
+        // A5) -- so the bound set is A1 (shift zero) plus two points
+        // sharing one nonzero shift, a shape no single
+        // rotate+scale+translate can reproduce for a real passage
+        svH.shots[1].distance = 20;
+        var resH2 = CsNetwork.resolve(svH, {});
+        var rebuiltH = CsProfile.build(svH, resH2, {});
+        var countsH = CsProfileDraw.render(dH, iH, rebuiltH, {});
+
+        ok(countsH.claimed.tagged >= 1, "sanity: the sketch got claimed");
+        eqs(countsH.linework.moved, 0,
+            "THE INCOHERENT SKETCH IS REFUSED, NOT MANGLED (got " +
+            JSON.stringify(countsH.linework) + ")");
+        var foundLabel = false;
+        for (var li = 0; li < countsH.linework.unmoved.length; li++) {
+            if (countsH.linework.unmoved[li].indexOf("#" + tracedHId) >= 0) {
+                foundLabel = true;
+            }
+        }
+        ok(foundLabel,
+            "the refused sketch is NAMED in counts.linework.unmoved (" +
+            JSON.stringify(countsH.linework.unmoved) + ")");
+
+        var afterH = dH.queryEntity(tracedHId);
+        ok(!isNull(afterH), "the refused sketch still exists");
+        if (!isNull(afterH)) {
+            for (var vi = 0; vi < 3; vi++) {
+                var bv = beforeVerts[vi], av = afterH.getVertexAt(vi);
+                near(av.x, bv.x, 1e-9,
+                    "vertex " + vi + " x is BYTE-IDENTICAL to before " +
+                    "the refused move (left exactly where it was)");
+                near(av.y, bv.y, 1e-9,
+                    "vertex " + vi + " y is BYTE-IDENTICAL to before " +
+                    "the refused move");
+            }
+        }
+        destr(iH);
+    }
+}());
+
+// =======================================================================
+// 10. CRITICAL 1 -- the linework outcome (and any binding/move failure)
+//    must reach the REPORT, not just the counts object.
+//    CsProfileDraw.render already folds a caught exception from
+//    claim()/positions() into counts.claimed.error, and one from
+//    moveLinework into a "move failed:" entry in
+//    counts.linework.unmoved -- both are silently dropped if
+//    CsReport.profileSummary never reads them. This proves each path
+//    end to end: force a failure, then check the PRINTED REPORT text
+//    actually says so, not just that the counts object carries it.
+// =======================================================================
+
+(function() {
+    var svR = CsModel.newSurvey();
+    svR.shots = [
+        shotOf("A1", "A2", 10, 0, 0, 4, 2),
+        shotOf("A2", "A3", 10, 0, 0, 4, 2)
+    ];
+    var resR = CsNetwork.resolve(svR, {});
+    var builtR = CsProfile.build(svR, resR, {});
+
+    var dR = new RDocument(new RMemoryStorage(), createSpatialIndex());
+    var iR = new RDocumentInterface(dR);
+    CsProfileDraw.render(dR, iR, builtR, {});
+
+    var bandAR = builtR.bands[0];
+    var r2 = null, r3 = null;
+    for (var ri = 0; ri < bandAR.stations.length; ri++) {
+        if (bandAR.stations[ri].name === "A2") { r2 = bandAR.stations[ri]; }
+        if (bandAR.stations[ri].name === "A3") { r3 = bandAR.stations[ri]; }
+    }
+    CsLayers.ensure(dR, iR, "PROFILE-CEILING");
+    var opR = new RAddObjectsOperation();
+    var tracedR = new RLineEntity(dR, new RLineData(
+        new RVector(r2.x, r2.y), new RVector(r3.x, r3.y)));
+    tracedR.setLayerId(dR.getLayerId("PROFILE-CEILING"));
+    opR.addObject(tracedR, false);
+    iR.applyOperation(opR);
+
+    // 10a. the ordinary, successful case: the PRINTED REPORT names the
+    // move outcome -- CsRevise.lineworkSummary's own wording, so a
+    // mutation deleting the CsReport.profileSummary call site fails a
+    // NAMED assertion here, not just a JSON.stringify() on the counts.
+    svR.shots[0].distance = 20;
+    var resR2 = CsNetwork.resolve(svR, {});
+    var rebuiltR = CsProfile.build(svR, resR2, {});
+    var countsR = CsProfileDraw.render(dR, iR, rebuiltR, {});
+    eqs(countsR.linework.moved, 1, "sanity: the sketch actually moved");
+    var reportR = CsReport.profileSummary(rebuiltR,
+        { path: "x.dxf", created: false, counts: countsR });
+    ok(reportR.indexOf("Traced linework moved with its stations: " +
+        countsR.linework.moved) >= 0,
+        "THE REPORT NAMES THE LINEWORK MOVE OUTCOME, not just the " +
+        "counts object nobody prints (report was:\n" + reportR + ")");
+
+    // 10b. force a failure inside the CLAIM path -- the review's own
+    // reproduction: an undefined/throwing CsProfileBind.claim looks,
+    // from render()'s own try/catch, exactly like CsProfileBind never
+    // having loaded at all.
+    var realClaim = CsProfileBind.claim;
+    CsProfileBind.claim = function() {
+        throw new Error("forced claim failure");
+    };
+    var countsClaimFail, rebuiltR2;
+    try {
+        svR.shots[0].distance = 30;
+        var resR3 = CsNetwork.resolve(svR, {});
+        rebuiltR2 = CsProfile.build(svR, resR3, {});
+        countsClaimFail = CsProfileDraw.render(dR, iR, rebuiltR2, {});
+    } finally {
+        CsProfileBind.claim = realClaim;
+    }
+    ok(countsClaimFail.claimed.error !== undefined,
+        "sanity: the forced claim failure reached counts.claimed.error");
+    var reportClaimFail = CsReport.profileSummary(rebuiltR2,
+        { path: "x.dxf", created: false, counts: countsClaimFail });
+    ok(reportClaimFail.indexOf("forced claim failure") >= 0,
+        "A CLAIM-PATH EXCEPTION IS VISIBLE IN THE REPORT, not only in " +
+        "the counts object nobody prints (report was:\n" +
+        reportClaimFail + ")");
+    ok(reportClaimFail.toUpperCase().indexOf("WARNING") >= 0,
+        "the claim failure reads as a WARNING, not a line buried among " +
+        "ordinary counts (report was:\n" + reportClaimFail + ")");
+
+    // 10c. force a failure inside the MOVE path.
+    var realMove = CsRevise.moveLinework;
+    CsRevise.moveLinework = function() {
+        throw new Error("forced move failure");
+    };
+    var countsMoveFail, rebuiltR3;
+    try {
+        svR.shots[0].distance = 40;
+        var resR4 = CsNetwork.resolve(svR, {});
+        rebuiltR3 = CsProfile.build(svR, resR4, {});
+        countsMoveFail = CsProfileDraw.render(dR, iR, rebuiltR3, {});
+    } finally {
+        CsRevise.moveLinework = realMove;
+    }
+    ok(countsMoveFail.linework.unmoved.length >= 1 &&
+        countsMoveFail.linework.unmoved[0].indexOf("move failed") >= 0,
+        "sanity: the forced move failure reached counts.linework.unmoved" +
+        " (" + JSON.stringify(countsMoveFail.linework) + ")");
+    var reportMoveFail = CsReport.profileSummary(rebuiltR3,
+        { path: "x.dxf", created: false, counts: countsMoveFail });
+    ok(reportMoveFail.toUpperCase().indexOf("WARNING") >= 0,
+        "A MOVE-PATH EXCEPTION SURFACES AS A VISIBLE WARNING IN THE " +
+        "REPORT (report was:\n" + reportMoveFail + ")");
+    ok(reportMoveFail.indexOf("move failed") >= 0,
+        "the report names the actual failure, not merely a generic " +
+        "warning banner (report was:\n" + reportMoveFail + ")");
+
+    destr(iR);
 }());
 
 // =======================================================================

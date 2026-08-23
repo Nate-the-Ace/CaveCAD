@@ -340,6 +340,12 @@ CsReport.igrfLine = function(result, lat, lon, dateText) {
  * Wording them the same would send someone hunting for a shot that
  * already exists.
  *
+ * outcome.counts.linework and .claimed are named here too, for the
+ * identical reason: CsProfileDraw.render folds a caught binding/move
+ * exception into exactly those two fields, and a field this function
+ * never reads is a field the user never hears about no matter how
+ * loudly the code underneath it screams.
+ *
  * \param profile CsProfile.build() result, or null when nothing was built
  * \param outcome CsDraw.profile() result: {skipped, reason} or
  *                {path, created, counts}
@@ -368,6 +374,46 @@ CsReport.profileSummary = function(profile, outcome) {
     // zone contributed nothing to either line, and a reader who cannot
     // see how many there were cannot judge whether the dead zone is
     // set sensibly for this cave
+
+    // The linework outcome -- moved/unmoved traced sketch, and how many
+    // previously untagged sketches this run bound to the survey itself
+    // -- reaches the user through the exact same words CsRevise.
+    // lineworkSummary already gives the PLAN side (see
+    // CsReport.revisionSummary above): one vocabulary for "did my
+    // tracing follow the revision", not two. CsProfileDraw.render
+    // ALWAYS sets c.linework/c.claimed on a real counts object (even
+    // when claim()/moveLinework threw -- see that function's own
+    // \return docblock), so their absence here means this outcome was
+    // never handed a counts object at all, which already returned
+    // above ({skipped: ...} or profile === null) -- not a legitimate
+    // "nothing to report" state reached from here.
+    //
+    // c.claimed.tagged IS the "bound" count lineworkSummary expects,
+    // not merely A SUBSET of it the way CsRevise.apply's own
+    // lineworkBound is on the plan side: every tag CsProfileBind.claim
+    // writes is brand new (a profile drawing has no prior-tagged
+    // linework concept the way a revised plan does), so there is no
+    // larger "already bound" total to carve this one out of.
+    if (c.linework !== undefined) {
+        var pLines = CsRevise.lineworkSummary(c.linework.moved,
+            c.linework.unmoved, c.claimed ? c.claimed.tagged : 0);
+        for (var pi = 0; pi < pLines.length; pi++) {
+            lines.push("  " + pLines[pi]);
+        }
+    }
+    // A THROWN exception is a different claim from "this sketch simply
+    // has no station to follow": lineworkSummary's own WARNING above
+    // already surfaces a caught "move failed:" entry (CsProfileDraw.
+    // render folds it into c.linework.unmoved), but a binding failure
+    // inside claim()/positions() itself has nowhere else to go --
+    // c.claimed.error is set instead of c.claimed.tagged/skipped ever
+    // being reached at all, and a caught exception that reaches no one
+    // is worse than a crash that at least stops the show.
+    if (c.claimed && c.claimed.error) {
+        lines.push("  WARNING -- binding traced linework to the survey " +
+            "failed, so nothing was claimed or moved for it this run: " +
+            c.claimed.error);
+    }
 
     var f = profile.findings;
     var i;

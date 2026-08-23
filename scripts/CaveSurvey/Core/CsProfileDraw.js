@@ -404,7 +404,13 @@ CsProfileDraw.positionsOf = function(profile) {
  *                 removed outright, so a real future option does not
  *                 have to change this function's call signature.
  * \return {bandsDrawn, legsDrawn, stationsDrawn, ceilingRuns,
- *          floorRuns, flatTicks, erased}
+ *          floorRuns, flatTicks, erased, claimed, linework} --
+ *          claimed and linework are CsProfileBind.claim's own result
+ *          and CsRevise.moveLinework's own result (or this function's
+ *          {error: ...} / {moved: 0, unmoved: ["move failed: ..."]}
+ *          stand-ins when either step threw); CsReport.profileSummary
+ *          is what turns both into the words a user actually reads --
+ *          see that function for why neither may be dropped silently.
  */
 CsProfileDraw.render = function(doc, di, profile, opts) {
     opts = opts || {};   // accepted, currently unread -- see \param opts
@@ -414,17 +420,40 @@ CsProfileDraw.render = function(doc, di, profile, opts) {
     }
 
     // ORDER MATTERS, and each step is only correct in this position:
+    //   before  read FIRST -- claim() only writes TAGS, it never moves
+    //           a station point, so reading old positions ahead of it
+    //           sees exactly the same drawing claim() itself would
     //   claim   untagged sketch is bound while the OLD geometry it was
-    //           traced against is still in the drawing to match against
-    //   before  the old station positions are read for the same reason
+    //           traced against is still in the drawing to match
+    //           against -- but ONLY when this redraw will actually move
+    //           something (the positionsMoved check right below): an
+    //           add-only first draw, or a re-render of an unchanged
+    //           profile, has no old/new position mismatch anywhere, so
+    //           claiming now would cost the user an undo step
+    //           (RModifyObjectsOperation) for a tag a LATER, real
+    //           revision will still write when it actually matters,
+    //           against whatever is on the ground at that time
     //   erase   only now can the generator's own output go
     //   draw    the new geometry lands
     //   move    the sketch is carried to the new positions
     var claimed = { tagged: 0, skipped: 0 };
     var before = {};
     try {
-        claimed = CsProfileBind.claim(doc, di);
         before = CsProfileBind.positions(doc);
+        // A PREVIEW only, purely to decide whether claim() below is
+        // worth running at all: positionsOf(profile) is a pure function
+        // of the already-built profile object, no document access
+        // needed, so computing it here costs nothing ahead of the real
+        // move's own after/extent further down (which recompute the
+        // identical values -- `profile` does not change across this
+        // call, so there is nothing to gain by threading one copy
+        // through both places instead of asking for it twice).
+        var previewAfter = CsProfileDraw.positionsOf(profile);
+        var previewExtent = CsRevise.positionsExtent(previewAfter);
+        if (CsRevise.positionsMoved(before, previewAfter,
+                previewExtent) > 0) {
+            claimed = CsProfileBind.claim(doc, di);
+        }
     } catch (eBind) {
         // binding is an improvement on leaving the sketch behind, not a
         // precondition for drawing a profile at all
@@ -473,6 +502,19 @@ CsProfileDraw.render = function(doc, di, profile, opts) {
             // off layer in the document holding entities, this one
             // included, and restores each afterward.
             CsRevise.withOffLayersOn(doc, di, function() {
+                // {} for tripStations, ALWAYS: that fallback exists on
+                // the plan side for a sketch that snapped to no listed
+                // station at all, so moveLinework can still fit it over
+                // its trip's OTHER stations instead of giving up. A
+                // profile has no equivalent -- one trip's stations are
+                // scattered across however many bands it touches, at
+                // different X/Y entirely (that is the whole reason keys
+                // are run-qualified, see this file's own banner), so
+                // there is no single coherent "this trip's stations"
+                // position set to fall back to the way plan's one flat
+                // drawing has. An entity with no resolvable station list
+                // here has nothing left to fall back on and is reported
+                // unmoved, which is the honest answer.
                 counts.linework = CsRevise.moveLinework(doc, di, before,
                     after, {}, extent);
             });

@@ -318,6 +318,39 @@ if (tplPath !== null) {
                 "the report text is exactly CsReport.profileSummary's " +
                 "own output for what was actually built and drawn");
         }
+
+        // ---- claim 4: CsProfileBind is actually WIRED into CsAll.js,
+        // and its outcome actually reaches the dialog, through the REAL
+        // include() chain -- not tests/profile_draw_roundtrip.js's own
+        // hand-picked CORE file list, which bypasses CsAll.js's
+        // basename bookkeeping entirely and so can never prove a
+        // dropped `include(".../CsProfileBind.js")` line would be
+        // caught. This file is the one that drives the real include(),
+        // so this is the one place that regression is actually
+        // reachable. ------------------------------------------------
+        if (spy.capturedCounts !== null) {
+            ok(spy.capturedCounts.claimed !== undefined &&
+                spy.capturedCounts.claimed.error === undefined,
+                "CsProfileBind.claim() ran through the real CsAll.js " +
+                "include chain with no error (got " +
+                JSON.stringify(spy.capturedCounts.claimed) + ")");
+            eqs(spy.capturedCounts.claimed.tagged, 0,
+                "sanity: nothing to claim on a document with no prior " +
+                "sketch");
+            ok(spy.capturedCounts.linework !== undefined,
+                "the linework outcome is present on a real render()");
+            eqs(spy.capturedCounts.linework.moved, 0,
+                "sanity: nothing moves on a document's first-ever draw");
+        }
+        if (spy.informationCalls.length === 1) {
+            ok(spy.informationCalls[0].text.indexOf(
+                "Traced linework moved with its stations: 0") >= 0,
+                "THE LINEWORK OUTCOME REACHED THE ACTUAL DIALOG TEXT, " +
+                "via CsReport.profileSummary -> CsRevise.lineworkSummary, " +
+                "driven by the tool's OWN run() through the real " +
+                "CsAll.js include chain (text was:\n" +
+                spy.informationCalls[0].text + ")");
+        }
     });
 
     ok(new QFileInfo(siblingPathA).exists(),
