@@ -10,7 +10,9 @@
 // (bad closure) but only support one UP, and the report says which.
 //
 // Offers to write length, depth and grade into the title block's
-// TB_LENGTH / TB_DEPTH / TB_SURVEY_CODE fields, one undo step.
+// length / depth / survey code lines, one undo step. Those lines are
+// ordinary text you can edit or delete; a deleted one is simply not
+// written (see Core/CsSheet.js).
 //
 // USAGE:
 //   Cave Survey > Survey Stats   (or type "sst")
@@ -57,10 +59,16 @@ function surveyStatsRun() {
     var summary = CsReport.statsSummary(survey, stats, grade);
 
     // ---- offer to stamp the title block ----------------------------
-    var canStamp =
-        CsSheet.textEntitiesInBlock(doc, "TB_LENGTH").length > 0 ||
-        CsSheet.textEntitiesInBlock(doc, "TB_DEPTH").length > 0 ||
-        CsSheet.textEntitiesInBlock(doc, "TB_SURVEY_CODE").length > 0;
+    // Any of the three lines present -- as tagged title block text, or
+    // as a TB_* block in a drawing from the older template.
+    var canStamp = false;
+    var stampable = ["length", "depth", "surveyCode"];
+    for (var s = 0; s < stampable.length; s++) {
+        if (CsSheet.fieldEntities(doc, CsSheet.fieldById(stampable[s])).length > 0) {
+            canStamp = true;
+            break;
+        }
+    }
 
     if (!canStamp) {
         QMessageBox.information(getMainWindow(), "Survey Stats", summary);

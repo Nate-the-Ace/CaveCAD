@@ -1,51 +1,71 @@
-// Sheet.js -- the map sheet: title block fields and the judge's
-// checklist.
+// CsSheet.js -- the map sheet's title block text.
 //
 // Part of the Cave Survey Core library. FIELDS is pure data; the
-// readers/writers and the checklist need a document.
+// readers and writers need a document.
 //
-// The field registry mirrors the NSS Cartography Salon core elements
-// -- the published checklist of what a cave map must contain -- and
-// maps each onto the TB_* blocks the plan template carries. "required"
-// marks salon Core Elements; the rest are conventions worth having.
+// THE TITLE BLOCK IS PLAIN TEXT. Each field is one ordinary text
+// entity on the TITLE-BLOCK layer, tagged CaveSurvey/TBField with the
+// field id. Double-click to edit it, drag it anywhere, delete the
+// ones this map doesn't use -- it is a text box, not a form. The tag
+// is only there so Survey Stats can stamp computed length, depth and
+// grade into the right lines without asking.
+//
+// A field that carries no tag is still a perfectly good title block
+// line; it just won't be auto-filled.
+//
+// LEGACY DRAWINGS: builds before this one kept every field inside a
+// one-off TB_* block definition, which is why editing one needed a
+// dedicated tool. Those drawings still read and write correctly --
+// every lookup tries the tagged text first and falls back to the
+// block.
 
 var CsSheet = {};
 
-// id, block, label, required, hint
+// The tag that marks a text entity as a title block field.
+CsSheet.TAG = "TBField";
+
+// The layer new title block text belongs on.
+CsSheet.LAYER = "TITLE-BLOCK";
+
+// id, block (legacy carrier), label, prefix printed ahead of the
+// value, required, hint
 CsSheet.FIELDS = [
     { id: "caveName", block: "TB_CAVE_NAME", label: "Cave name",
-        required: true,
-        hint: "Unabbreviated. The salon docks points for abbreviations." },
+        prefix: "", required: true,
+        hint: "Unabbreviated, most prominent text on the sheet." },
     { id: "location", block: "TB_LOCATION", label: "Geographic location",
-        required: true,
+        prefix: "Location:  ", required: true,
         hint: "State and county at minimum. Coordinates must name their system, units and datum." },
     { id: "surveyedBy", block: "TB_SURVEYED_BY", label: "Surveyed by",
-        required: true,
-        hint: "Who held the instruments. Credit is a required element, not a courtesy." },
+        prefix: "Surveyed by:  ", required: true,
+        hint: "Who held the instruments." },
     { id: "cartographyBy", block: "TB_CARTOGRAPHY_BY", label: "Cartography by",
-        required: true,
+        prefix: "Cartography by:  ", required: true,
         hint: "Who drew the map, with the year." },
     { id: "date", block: "TB_DATE", label: "Survey date(s)",
-        required: true,
+        prefix: "Date surveyed:  ", required: true,
         hint: "The date range of the fieldwork, not the drafting." },
     { id: "surveyMethod", block: "TB_SURVEY_METHOD", label: "Survey method",
-        required: false,
+        prefix: "Survey method:  ", required: false,
         hint: "Instruments used (e.g. Suunto and tape, DistoX) or the survey grade." },
     { id: "length", block: "TB_LENGTH", label: "Surveyed length",
-        required: false,
+        prefix: "Length:  ", required: false,
         hint: "Total surveyed length -- Survey Stats computes this." },
     { id: "depth", block: "TB_DEPTH", label: "Vertical extent",
-        required: false,
+        prefix: "Depth:  ", required: false,
         hint: "Total vertical range -- Survey Stats computes this." },
     { id: "personnel", block: "TB_PERSONNEL", label: "Personnel",
-        required: false,
+        prefix: "Personnel:  ", required: false,
         hint: "Full crew list, if different from Surveyed by." },
     { id: "surveyCode", block: "TB_SURVEY_CODE", label: "Survey grade",
-        required: false,
+        prefix: "Survey code:  ", required: false,
         hint: "e.g. UISv2 5-c. Survey Stats derives the defensible one." },
     { id: "copyright", block: "TB_COPYRIGHT", label: "Copyright",
-        required: false,
-        hint: "If present, must carry a year." }
+        prefix: "©  ", required: false,
+        hint: "If present, must carry a year." },
+    { id: "legendNote", block: "TB_LEGEND_NOTE", label: "Legend note",
+        prefix: "", required: false,
+        hint: "Which symbol standard the map follows." }
 ];
 
 CsSheet.fieldById = function(id) {
@@ -58,29 +78,24 @@ CsSheet.fieldById = function(id) {
 };
 
 // ---------------------------------------------------------------------
-// Reading and writing TB_* block text. The title block fields are
-// one-off blocks holding text entities; editing the text inside the
-// block definition is exactly what updating the sheet means.
+// Finding a field. Tagged text first, legacy TB_* block second.
 // ---------------------------------------------------------------------
 
-/** Text entities inside a named block definition: [entity]. */
-CsSheet.textEntitiesInBlock = function(doc, blockName) {
-    var block = doc.queryBlock(blockName);
-    if (isNull(block)) {
-        return [];
+/**
+ * Is this entity a text? library.js's isTextEntity is not loaded in
+ * every context this Core runs in (the headless test engine and the
+ * one-shot migration scripts have no library.js), so fall back to
+ * duck-typing rather than throwing where the helper is absent.
+ */
+CsSheet.isText = function(entity) {
+    if (isNull(entity)) {
+        return false;
     }
-    var out = [];
-    var ids = doc.queryBlockEntities(block.getId());
-    for (var i = 0; i < ids.length; i++) {
-        var e = doc.queryEntity(ids[i]);
-        if (isNull(e)) {
-            continue;
-        }
-        if (isTextEntity(e) || isTextBasedEntity(e)) {
-            out.push(e);
-        }
+    if (typeof isTextEntity === "function" &&
+        typeof isTextBasedEntity === "function") {
+        return isTextEntity(entity) || isTextBasedEntity(entity);
     }
-    return out;
+    return typeof entity.getPlainText === "function";
 };
 
 /** Reads an entity's text however this bridge allows. */
@@ -94,9 +109,72 @@ CsSheet.textOf = function(entity) {
     return "";
 };
 
+/**
+ * Every text entity in the drawing tagged as this field: [entity].
+ * More than one is legal -- a map may print its cave name twice --
+ * and all of them are kept in step by a write.
+ */
+CsSheet.taggedTexts = function(doc, field) {
+    var out = [];
+    if (isNull(field) || typeof CsTags === "undefined") {
+        return out;
+    }
+    var ids = doc.queryAllEntities(false, false);
+    for (var i = 0; i < ids.length; i++) {
+        var e = doc.queryEntity(ids[i]);
+        if (isNull(e)) {
+            continue;
+        }
+        if (!CsSheet.isText(e)) {
+            continue;
+        }
+        if (CsTags.get(e, CsSheet.TAG) === field.id) {
+            out.push(e);
+        }
+    }
+    return out;
+};
+
+/** LEGACY: text entities inside a named block definition: [entity]. */
+CsSheet.textEntitiesInBlock = function(doc, blockName) {
+    var block = doc.queryBlock(blockName);
+    if (isNull(block)) {
+        return [];
+    }
+    var out = [];
+    var ids = doc.queryBlockEntities(block.getId());
+    for (var i = 0; i < ids.length; i++) {
+        var e = doc.queryEntity(ids[i]);
+        if (isNull(e)) {
+            continue;
+        }
+        if (CsSheet.isText(e)) {
+            out.push(e);
+        }
+    }
+    return out;
+};
+
+/**
+ * The entities carrying this field, whichever way the drawing holds
+ * it. Tagged text wins; a drawing from an older template falls back
+ * to its TB_* block.
+ */
+CsSheet.fieldEntities = function(doc, field) {
+    var texts = CsSheet.taggedTexts(doc, field);
+    if (texts.length > 0) {
+        return texts;
+    }
+    return CsSheet.textEntitiesInBlock(doc, field.block);
+};
+
+// ---------------------------------------------------------------------
+// Reading and writing.
+// ---------------------------------------------------------------------
+
 /** The current text of a field, "" when absent/empty. */
 CsSheet.readField = function(doc, field) {
-    var texts = CsSheet.textEntitiesInBlock(doc, field.block);
+    var texts = CsSheet.fieldEntities(doc, field);
     var parts = [];
     for (var i = 0; i < texts.length; i++) {
         var t = CsSheet.textOf(texts[i]);
@@ -108,108 +186,42 @@ CsSheet.readField = function(doc, field) {
 };
 
 /**
- * Writes a field's text, replacing the LAST text entity in the block
- * (the value line; earlier entities are usually the printed label).
- * Caller owns the transaction. Returns false when the block or a
- * text entity to write is missing.
+ * Writes a field's value, keeping the printed label ahead of it and
+ * capitalising the line, so a stamped length reads
+ * "LENGTH:  1,234 FT" and not a bare number.
+ *
+ * Tagged text: every entity carrying the tag is set. Legacy block:
+ * the LAST text entity in the block is replaced (earlier ones are
+ * usually the printed label).
+ *
+ * Caller owns the transaction. Returns false when the drawing has
+ * nowhere to put this field -- the line was deleted, which is a
+ * legitimate choice and never an error.
  */
 CsSheet.writeField = function(doc, op, field, value) {
+    if (isNull(field)) {
+        return false;
+    }
+    // lettering, like everything else drawn on the sheet (CsDraw.caps)
+    var text = (isNull(field.prefix) ? "" : field.prefix) + value;
+    text = (typeof CsDraw !== "undefined") ? CsDraw.caps(text) :
+        String(text).toUpperCase();
+
+    var tagged = CsSheet.taggedTexts(doc, field);
+    if (tagged.length > 0) {
+        for (var i = 0; i < tagged.length; i++) {
+            tagged[i].setText(text);
+            op.addObject(tagged[i], false);
+        }
+        return true;
+    }
+
     var texts = CsSheet.textEntitiesInBlock(doc, field.block);
     if (texts.length === 0) {
         return false;
     }
     var target = texts[texts.length - 1];
-    target.setText(value);
+    target.setText(text);
     op.addObject(target, false);
     return true;
-};
-
-// ---------------------------------------------------------------------
-// The sheet checklist -- "what would a judge mark missing?"
-// ---------------------------------------------------------------------
-
-/** True when a layer exists and holds at least one entity. */
-CsSheet.layerHasEntities = function(doc, layerName) {
-    if (!doc.hasLayer(layerName)) {
-        return false;
-    }
-    var layerId = doc.getLayerId(layerName);
-    var ids = doc.queryAllEntities(false, false);
-    for (var i = 0; i < ids.length; i++) {
-        var e = doc.queryEntity(ids[i]);
-        if (!isNull(e) && e.getLayerId() === layerId) {
-            return true;
-        }
-    }
-    return false;
-};
-
-/** True when at least one reference to blockName (or prefix match) exists. */
-CsSheet.hasBlockReference = function(doc, blockNamePrefix) {
-    var ids = doc.queryAllEntities(false, false, RS.EntityBlockRef);
-    for (var i = 0; i < ids.length; i++) {
-        var e = doc.queryEntity(ids[i]);
-        if (isNull(e)) {
-            continue;
-        }
-        var block = doc.queryBlock(e.getReferencedBlockId());
-        if (!isNull(block) && block.getName().indexOf(blockNamePrefix) === 0) {
-            return true;
-        }
-    }
-    return false;
-};
-
-/**
- * Runs the checklist. Returns [{item, ok, why}] in salon order --
- * plain language, each "why" telling the beginner what convention
- * asks for and how to satisfy it.
- */
-CsSheet.checklist = function(doc) {
-    var results = [];
-    var add = function(item, ok, why) {
-        results.push({ item: item, ok: ok, why: why });
-    };
-
-    var fieldFilled = function(id) {
-        var f = CsSheet.fieldById(id);
-        var v = CsSheet.readField(doc, f);
-        // template placeholders look like "CAVE NAME" / "..." -- treat
-        // pure placeholder-ish values as empty
-        return v !== "" && !/^[.\s_-]*$/.test(v);
-    };
-
-    add("Cave name", fieldFilled("caveName"),
-        "Every map names its cave, unabbreviated, most prominently on the sheet.");
-    add("Geographic location", fieldFilled("location"),
-        "State/county at minimum; coordinates must include system, units and datum.");
-    add("Surveyor credit and dates", fieldFilled("surveyedBy") && fieldFilled("date"),
-        "Who surveyed, and when the fieldwork was done.");
-    add("Cartographer", fieldFilled("cartographyBy"),
-        "Who drew the map, with the year.");
-    add("North arrow", CsSheet.hasBlockReference(doc, "SYM_NORTH_ARROW") ||
-        CsSheet.hasBlockReference(doc, "TB_NORTH_ARROW") ||
-        CsSheet.layerHasEntities(doc, CsLayers.NORTH_ARROW),
-        "True north preferred; a magnetic arrow must state its date.");
-    add("Bar scale", CsSheet.hasBlockReference(doc, "TB_BAR_SCALE") ||
-        CsSheet.layerHasEntities(doc, CsLayers.SCALE_BAR),
-        "A graphic bar scale is required -- text-only scales lose points, ratio-only scales fail. Place Scale Bar does this.");
-    add("Entrance", CsSheet.hasBlockReference(doc, "SYM_ENTRANCE") ||
-        CsSheet.layerHasEntities(doc, CsLayers.ENTRANCE),
-        "An obvious entrance, or a clearly indicated connection to the rest of the cave.");
-    add("Legend", CsSheet.layerHasEntities(doc, CsLayers.LEGEND),
-        "Non-standard symbols must be defined; Build Legend generates one from the symbols actually used.");
-    add("Cross-sections", CsSheet.layerHasEntities(doc, CsLayers.CROSS_SECTION_MARKERS),
-        "Cross-sections keyed to the plan with arrowed view direction. The single most-omitted element.");
-    add("Border", CsSheet.layerHasEntities(doc, CsLayers.BORDER),
-        "A border defines the document limits.");
-    add("Vertical control", CsSheet.layerHasEntities(doc, "CEILING-HEIGHT") ||
-        CsSheet.layerHasEntities(doc, "PITS-DOMES") ||
-        CsSheet.layerHasEntities(doc, "FLOOR-SLOPE"),
-        "Elevation must be readable somewhere: profile, ceiling heights, pit depths or slope ticks.");
-    add("Passage walls", CsSheet.layerHasEntities(doc, CsLayers.WALLS_SURVEYED) ||
-        CsSheet.layerHasEntities(doc, CsLayers.WALLS_INFERRED),
-        "A centerline alone is a line plot, not a map -- trace walls from LRUD and scans.");
-
-    return results;
 };
