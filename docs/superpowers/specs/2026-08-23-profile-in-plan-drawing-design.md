@@ -78,9 +78,16 @@ bindable.
 `PROFILE-FLOOR` and `PROFILE-WALLS-INFERRED` already exist; the rest of what a
 caver draws on an elevation gets `PROFILE-` twins.
 
-The profile template's layer set migrates into the plan template. The structural
-test that pins the registry to the templates extends to cover the profile frame,
-and the PROFILE template itself stops being a separate sheet template.
+The profile template's layer set migrates into the plan template, and the
+structural test pinning the registry to the templates extends to cover the
+profile frame.
+
+`NSS_Cave_Template_PROFILE.dxf` itself is KEPT, not deleted. Two reasons: a
+structural test asserts both templates are present, and the file remains a valid
+standalone elevation sheet if the deliberate one-way export in §9 is ever wanted.
+It simply stops being poured into a new document by this feature. Renaming its
+layers to the profile frame is still required, so that a drawing started from it
+does not carry plan-frame layer names.
 
 ## 5. The four consumers that become frame-aware
 
