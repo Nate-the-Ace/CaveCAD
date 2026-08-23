@@ -198,3 +198,95 @@ CsTrace.reduceSpan = function(points, first, last, tolerance, keep) {
     CsTrace.reduceSpan(points, first, worstAt, tolerance, keep);
     CsTrace.reduceSpan(points, worstAt, last, tolerance, keep);
 };
+
+// ---------------------------------------------------------------------
+// The point-to-frame test. QCAD context only -- it reads a document.
+// ---------------------------------------------------------------------
+
+/**
+ * The bounding box of everything drawn in the profile frame, as
+ * {minX, minY, maxX, maxY}, or null when this drawing has no profile
+ * geometry in it at all.
+ *
+ * Delegates to CsProfileDraw.frameExtents rather than carrying its own
+ * union: that function already walks the entities, asks
+ * CsLayers.frameOf, survives an entity whose layer or bounding box the
+ * bridge refuses, and does NOT assume getCorner1() holds the smaller
+ * coordinate. A second copy here would have to keep agreeing with it
+ * about all four.
+ *
+ * Derived from ENTITIES, deliberately, rather than from
+ * CsProfileDraw.regionOrigin(). The origin marker gives a POINT and not
+ * an extent, so a region test built on it would have to re-derive the
+ * band bounds from the survey model -- work this tool has no reason to
+ * do. And the caver's own tracing legitimately GROWS the region: a
+ * floor sketched below the generated band is profile-frame geometry,
+ * and a region that stopped at the generator's output would call the
+ * caver's own linework plan.
+ */
+CsTrace.profileRegion = function(doc) {
+    return CsProfileDraw.frameExtents(doc, "profile");
+};
+
+/**
+ * Which view a POINT falls in, given a region box: "profile" inside it,
+ * "plan" everywhere else.
+ *
+ * Pure -- a box and a point, no document -- so node tests it and, more
+ * importantly, so a caller can compute the box ONCE and ask this many
+ * times. The cursor readout asks per mouse-move event, and the box
+ * costs a walk of every entity in the drawing.
+ *
+ * "plan" is the answer for anything outside the region, INCLUDING the
+ * gutter between the two views and every point in a drawing with no
+ * elevation yet. That matches CsLayers.frameOf's own deliberate
+ * default: the dangerous mistake is a profile-scoped operation claiming
+ * ground it does not own, so unclaimed ground belongs to the frame that
+ * owns the drawing's origin.
+ */
+CsTrace.frameIn = function(box, point) {
+    if (isNull(box) || box === null) {
+        return "plan";
+    }
+    if (point.x < box.minX || point.x > box.maxX ||
+            point.y < box.minY || point.y > box.maxY) {
+        return "plan";
+    }
+    return "profile";
+};
+
+/**
+ * frameIn against the region this document happens to have right now.
+ *
+ * Convenience only, and NOT for use per mouse-move event: it walks
+ * every entity in the drawing. Anything asking repeatedly must call
+ * profileRegion once, hold the box, and use frameIn.
+ */
+CsTrace.frameAt = function(doc, point) {
+    return CsTrace.frameIn(CsTrace.profileRegion(doc), point);
+};
+
+/**
+ * The one frame every point of a path shares, or null when they
+ * disagree.
+ *
+ * null is what makes a cross-gutter drag refusable at release. A wall
+ * that starts in the plan and ends in the elevation describes nothing
+ * in either view, and letting it land would put linework into a
+ * drawing whose whole binding model assumes frames do not mix.
+ *
+ * Takes the BOX, not the document: once per drag instead of once per
+ * point keeps this O(points) rather than O(points x entities).
+ */
+CsTrace.pathFrame = function(box, points) {
+    if (isNull(points) || points.length === 0) {
+        return null;
+    }
+    var first = CsTrace.frameIn(box, points[0]);
+    for (var i = 1; i < points.length; i++) {
+        if (CsTrace.frameIn(box, points[i]) !== first) {
+            return null;
+        }
+    }
+    return first;
+};

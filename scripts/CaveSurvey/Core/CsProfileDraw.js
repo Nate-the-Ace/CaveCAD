@@ -507,17 +507,24 @@ CsProfileDraw.stamp = function(doc, op, profile, origin, bounds) {
 CsProfileDraw.REGION_GUTTER = 30.0;
 
 /**
- * The bounding box of everything in the PLAN frame, as
- * {minX, minY, maxX, maxY}, or null when the drawing holds no plan
- * geometry at all. QCAD only.
+ * The bounding box of everything in ONE frame -- "plan", "profile" or
+ * "sheet" -- as {minX, minY, maxX, maxY}, or null when the drawing
+ * holds no geometry in that frame at all. QCAD only.
  *
  * Frame-scoped rather than doc.getBoundingBox(): the elevation is IN
  * this drawing, so the document's own extents already include the
  * region being placed. Feeding that back in would push the region
  * further down on every single redraw -- a drawing that walks south
  * forever, one gutter at a time.
+ *
+ * The frame is a PARAMETER because Feature Trace needs the same union
+ * for the profile frame, to decide which view a point falls in. This
+ * shipped as planExtents with "plan" written into the middle of it; a
+ * second copy with one string changed is how the two would come to
+ * disagree about what counts as inside a frame. The frame itself is
+ * still answered only by CsLayers.frameOf.
  */
-CsProfileDraw.planExtents = function(doc) {
+CsProfileDraw.frameExtents = function(doc, frame) {
     var ids = doc.queryAllEntities(false, false);
     var out = null, i, e, box, lname;
     for (i = 0; i < ids.length; i++) {
@@ -530,7 +537,7 @@ CsProfileDraw.planExtents = function(doc) {
         } catch (eLayer) {
             continue;
         }
-        if (CsLayers.frameOf(lname) !== "plan") {
+        if (CsLayers.frameOf(lname) !== frame) {
             continue;
         }
         try {
@@ -553,6 +560,13 @@ CsProfileDraw.planExtents = function(doc) {
         }
     }
     return out;
+};
+
+/** frameExtents for the plan frame. Kept as its own name because every
+ *  existing caller reads better for it, and because the plan frame is
+ *  the one the drawing's origin belongs to. */
+CsProfileDraw.planExtents = function(doc) {
+    return CsProfileDraw.frameExtents(doc, "plan");
 };
 
 /**

@@ -452,7 +452,7 @@ git commit -m "feat(CsTrace): resample and reduce a captured drag"
 - Modify: `tests/js_unit.js`
 
 **Acceptance Criteria:**
-- [ ] `CsTrace.profileRegion(doc)` returns `{minX, minY, maxX, maxY}` unioned over every entity whose layer answers `"profile"` to `CsLayers.frameOf`, or `null` when there are none
+- [ ] `CsTrace.profileRegion(doc)` returns `{minX, minY, maxX, maxY}` for the profile frame, or `null` when there are none. **DEVIATION FROM PLAN, implemented:** it delegates to a generalised `CsProfileDraw.frameExtents(doc, frame)` rather than carrying its own union. `planExtents` already was this function with `"plan"` written into the middle of it — including the try/catch around a bridge-refused layer or bounding box, and `Math.min(c1.x, c2.x)` rather than assuming `getCorner1()` holds the smaller coordinate, which the planned duplicate got wrong. `planExtents(doc)` survives as a thin alias so no existing caller changed
 - [ ] `profileRegion` asks `CsLayers.frameOf` and does NOT test for a `PROFILE-` prefix itself — grepping this file for the string `"PROFILE"` finds nothing
 - [ ] `CsTrace.frameIn(box, point)` is PURE — a box and a point in, a frame string out, no document — so node runs it and callers can CACHE the box
 - [ ] `CsTrace.frameAt(doc, point)` is a thin wrapper over `frameIn(profileRegion(doc), point)` and returns `"profile"` inside the box, `"plan"` outside it

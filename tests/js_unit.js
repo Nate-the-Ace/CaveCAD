@@ -13463,6 +13463,97 @@ if (!IS_NODE) {
 }());
 
 // ---------------------------------------------------------------------
+// CsTrace -- the point-to-frame region test (QCAD only: needs RDocument)
+// ---------------------------------------------------------------------
+if (!IS_NODE) {
+    (function() {
+        loadRepoScript("scripts/CaveSurvey/Core/CsLayers.js");
+        loadRepoScript("scripts/CaveSurvey/Core/CsTrace.js");
+
+        function lineOn(doc, di, layerName, x1, y1, x2, y2) {
+            CsLayers.ensure(doc, di, layerName);
+            var e = new RLineEntity(doc, new RLineData(
+                new RVector(x1, y1), new RVector(x2, y2)));
+            e.setLayerId(doc.getLayerId(layerName));
+            var op = new RAddObjectsOperation();
+            op.addObject(e, false);
+            di.applyOperation(op);
+            return e;
+        }
+
+        // -- frameExtents generalises planExtents -------------------
+        // profileRegion is CsProfileDraw.frameExtents(doc, "profile"):
+        // the same union planExtents already did for the plan frame,
+        // with the frame passed in rather than hardcoded.
+        var docG = new RDocument(new RMemoryStorage(), new RSpatialIndexNavel());
+        var diG = new RDocumentInterface(docG);
+        lineOn(docG, diG, CsLayers.WALLS_SURVEYED, 0, 0, 100, 50);
+        var planBox = CsProfileDraw.frameExtents(docG, "plan");
+        ok(planBox !== null, "frameExtents: finds plan geometry");
+        ok(CsProfileDraw.frameExtents(docG, "profile") === null,
+            "frameExtents: the same drawing has no profile geometry");
+        near(CsProfileDraw.planExtents(docG).maxY, planBox.maxY, 1e-9,
+            "planExtents: still answers exactly what frameExtents does");
+
+        // -- an empty drawing has no region at all -------------------
+        var docA = new RDocument(new RMemoryStorage(), new RSpatialIndexNavel());
+        ok(CsTrace.profileRegion(docA) === null,
+            "CsTrace.profileRegion: a drawing with no profile geometry has no region");
+        eqs(CsTrace.frameAt(docA, { x: 0, y: -500 }), "plan",
+            "CsTrace.frameAt: with no region every point is plan");
+
+        // -- plan above, profile below, as CsProfileDraw places them --
+        var docB = new RDocument(new RMemoryStorage(), new RSpatialIndexNavel());
+        var diB = new RDocumentInterface(docB);
+        lineOn(docB, diB, CsLayers.WALLS_SURVEYED, 0, 0, 100, 50);
+        lineOn(docB, diB, CsLayers.PROFILE_TRACED_CEILING, 0, -200, 100, -180);
+
+        var region = CsTrace.profileRegion(docB);
+        ok(region !== null, "CsTrace.profileRegion: profile geometry makes a region");
+        near(region.maxY, -180, 1e-6,
+            "CsTrace.profileRegion: the region's top is the profile geometry's top");
+
+        eqs(CsTrace.frameAt(docB, { x: 50, y: -190 }), "profile",
+            "CsTrace.frameAt: a point inside the region is profile");
+        eqs(CsTrace.frameAt(docB, { x: 50, y: 25 }), "plan",
+            "CsTrace.frameAt: a point in the plan geometry is plan");
+        eqs(CsTrace.frameAt(docB, { x: 50, y: -100 }), "plan",
+            "CsTrace.frameAt: a point in the gutter is plan, not profile");
+
+        // -- hand-traced linework grows the region -------------------
+        lineOn(docB, diB, CsLayers.PROFILE_TRACED_FLOOR, 0, -400, 100, -390);
+        eqs(CsTrace.frameAt(docB, { x: 50, y: -395 }), "profile",
+            "CsTrace.frameAt: hand-traced profile linework extends the region");
+
+        // -- OVERLAPPING coordinates, both directions ----------------
+        // The real risk: one model space, two frames. A profile line at
+        // the SAME absolute coordinates as plan geometry must still
+        // answer profile, and a plan line there must still answer plan.
+        var docC = new RDocument(new RMemoryStorage(), new RSpatialIndexNavel());
+        var diC = new RDocumentInterface(docC);
+        lineOn(docC, diC, CsLayers.PROFILE_TRACED_CEILING, 0, 0, 100, 10);
+        eqs(CsTrace.frameAt(docC, { x: 50, y: 5 }), "profile",
+            "CsTrace.frameAt: a profile region at the origin is still profile");
+
+        var docD = new RDocument(new RMemoryStorage(), new RSpatialIndexNavel());
+        var diD = new RDocumentInterface(docD);
+        lineOn(docD, diD, CsLayers.WALLS_SURVEYED, 0, 0, 100, 10);
+        eqs(CsTrace.frameAt(docD, { x: 50, y: 5 }), "plan",
+            "CsTrace.frameAt: the same coordinates with only plan geometry are plan");
+
+        // -- the whole-path check -----------------------------------
+        var boxB = CsTrace.profileRegion(docB);
+        eqs(CsTrace.pathFrame(boxB, [{ x: 50, y: -190 }, { x: 60, y: -185 }]),
+            "profile",
+            "CsTrace.pathFrame: a path wholly inside the region is profile");
+        ok(CsTrace.pathFrame(boxB, [{ x: 50, y: 25 }, { x: 50, y: -190 }]) === null,
+            "CsTrace.pathFrame: a path crossing the gutter has no single frame");
+        eqs(CsTrace.frameIn(null, { x: 0, y: 0 }), "plan",
+            "CsTrace.frameIn: a null region makes every point plan");
+    }());
+}
+
+// ---------------------------------------------------------------------
 // Report.
 // ---------------------------------------------------------------------
 
