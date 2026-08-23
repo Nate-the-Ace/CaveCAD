@@ -59,6 +59,16 @@ Learned the hard way in this repo; violating any of these produces a silent fail
 - **All text through `CsDraw.addText`**, which capitalises via `CsDraw.caps`. Never capitalise model data.
 - **Tag writes via `CsTags.set`**, never `setCustomProperty` directly.
 - **`EAction.handleUserMessage` cannot show multi-line text** (newlines collapse). Multi-line output uses `QMessageBox.information`.
+- **`.seq` IS NOT WALK ORDER FOR ANCHORED STATIONS.** `CsNetwork.seedFixed` places every
+  fixed / `#Fix` / `*fix` station up front, before any traversal, deliberately. So a fixed
+  station's low `.seq` records SEEDING, not walking. Any rule of the form "the earlier-seq
+  station was already on the ground when this leg was walked" is therefore true only for
+  `kind === "new"` legs. For `closure` and `tie` legs BOTH ends were already placed and
+  `.seq` carries no parent information at all. Established the hard way in the Task 2
+  review, on a two-fixed-entrance cave — the everyday case — where the trunk was adopted
+  by a side passage and two runs claimed each other as parent. Every later task that
+  reasons from `.seq` must be checked against a multi-anchor survey, not just a
+  single-entrance one.
 - **CaveCAD's `Array.prototype.sort` is UNSTABLE.** Measured in the Task 1 quality review: a comparator returning 0 for 24 equal elements scrambled them, while node (stable) left them alone. So a comparator that can return 0 for two DISTINCT items produces geometry that differs between engines — and the node tests will never see it. Every comparator in this feature must be a total order: break every tie on something unique (text, index, station name).
 
 Run `./tests/run_all.sh` before every commit. Baseline at plan time: 42/42 files parsed, 2008 assertions, all green.
@@ -366,9 +376,12 @@ git commit -m "feat(CsProfile): station names decide which survey run a station 
 - [ ] Contacts are DIRECTIONAL: a cross-run leg counts only when the other station was resolved earlier (`.seq`) than the run's own station. Without this a root run adopts its own child as parent
 - [ ] A spur's parent run and tie station come from the graph
 - [ ] When the graph tie disagrees with the name-derived tie, the graph wins and a mismatch record is returned
-- [ ] A run touching its parent at two stations reports the second as a `secondTie`, choosing the earlier-resolved station as the junction
+- [ ] A run touching another run at two stations reports the second as a `secondTie`, whose `otherRun` is the run touched — NOT necessarily the parent, since a second contact can land in a third run
+- [ ] The junction is the earliest contact by LEG, ranked new-legs-before-closure/tie — not the earliest-resolved station. The two coincide on a simple fixture and diverge in general, and the leg rule is the correct one: it is where the run was walked in from
 - [ ] The first run (no tie at all) is the root; band order is depth-first, siblings ordered by junction distance along the parent
-- [ ] A run whose parent cannot be determined is placed after all placed runs and reported
+- [ ] A run with no contacts at all (a disconnected component) is reported in `orphans` and appended AFTER every run reachable from a real root, rather than being emitted in its `grouped.order` position as though it were the root
+- [ ] A cycle in the parent map — reachable from ordinary data, e.g. a side passage that rejoins where the trunk is numbered onward from the branch — is broken in favour of the earliest-started run, the discarded contact is demoted to a `secondTie`, and the cycle is reported in a `cycles` field. `bandOrder` keeps its own cycle guard as a backstop, so every run is emitted exactly once regardless
+- [ ] A named spur whose graph gives it NO contact is reported as a mismatch (expected station from the name, actual `null`) rather than silently treated as a root
 
 **Verify:** `node tests/js_unit.js` → `### UNIT OK` with count risen; no failures
 
@@ -3508,6 +3521,17 @@ These are choices, not omissions. Each is listed here so a later reader does not
 - **Projected profile is a different tool.** `PROFILE-PROJECTED` stays empty; nothing here writes to it.
 - **No length heuristic decides spur versus branch.** The surveyor's naming decides, always.
 
+- **Parent assignment is two-phase, and phase 2 walks runs in REVERSE band order.**
+  Phase 1 uses only `kind === "new"` legs with the directional seq test; cycles among
+  those are genuine (both runs really do arrive from the other) and are broken and
+  reported. Phase 2 then fills in still-parentless runs from `closure`/`tie` contacts,
+  skipping any candidate that is already a descendant — so an ordinary loop closure
+  produces NO cycle report, because that junction is already recorded from the other
+  side. Phase 2 must iterate latest-anchored-first against the LIVE parent map, not a
+  phase-1 snapshot: where a tie joins two separately fixed components, neither end has a
+  phase-1 parent to freeze, and only processing the later one first lets the descendant
+  check see anything at all. Established by measurement in Task 2, and the descendant
+  check is mutation-verified as load-bearing.
 - **A survey anchored inside a spur makes that spur the root band.** The directional
   contact test asks which station was already placed when a leg was walked, so if
   resolution starts inside `A13a` then `A13a` is the root and the trunk `A` becomes its
