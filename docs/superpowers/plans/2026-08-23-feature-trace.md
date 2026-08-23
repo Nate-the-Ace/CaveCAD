@@ -905,6 +905,9 @@ git commit -m "feat(CsTrace): fit a spline and emit it onto its feature layer"
 
 **Acceptance Criteria:**
 - [ ] `./tests/run_all.sh --publish` passes, structural tests included — the three constraints in the Conventions section above are what this exercises
+- [ ] **DEVIATION, implemented:** sort order is **45**, not the 75 this plan first proposed — 75 is Generate Profile's, and a clash leaves menu order down to load sequence. 45 puts Feature Trace beside Scatter Breakdown (40), the other drawing tool
+- [ ] **DEVIATION, implemented:** `FeatureTraceRun.frameGuard` and the whole-path check landed HERE rather than in Task 6, because `mousePressEvent` cannot be written without them. Task 6 keeps only the panel-side indicators
+- [ ] **DEVIATION, implemented:** Task 7 (the README row) was pulled forward, so the suite is green for the remaining tasks instead of hiding new breakage behind a known failure
 - [ ] The Cave Survey menu and toolbar both show one new "Feature Trace" entry
 - [ ] Holding the left button and dragging across the drawing area shows a live preview polyline following the cursor
 - [ ] Releasing the button replaces the preview with ONE spline on `WALLS-SURVEYED`, and the spline has visibly fewer control points than the drag had samples

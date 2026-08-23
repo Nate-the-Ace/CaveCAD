@@ -24,6 +24,7 @@ Each appears in the **Cave Survey** menu and as a command:
 | Import Cave Survey | `ics` | Import Compass `.dat`, Walls `.srv`, Survex `.svx` or CSV -- the format is detected for you. |
 | Scatter Breakdown | `scb` | Fill closed `BREAKDOWN-BOUNDARY` polylines with breakdown symbols, per boundary. |
 | Align Image | `ali` | Fit a scanned map onto known stations (move/rotate/scale, warp with 3+ points) for wall tracing. |
+| Feature Trace | `ft` | Trace walls and other features freehand: hold the button and drag along the sketch, and a smooth line follows at one control point per foot of cave. Pick the feature from the docked panel and it lands on that feature's own layer -- plan features and elevation features are separate rows, and tracing one while the cursor is over the other view is refused rather than drawn in the wrong place. |
 | Survey Stats | `sst` | Length, depth, loop closures, and the honest BCRA/UIS grade, computed from the drawing. |
 | Generate Profile | `gp` | Rebuild the extended elevation beside the plan: one band per survey run, floor and ceiling lines from LRUD and splays. Normally happens on its own with every draw, from the notebook's own survey model; this forces it from the drawing's own tags instead and prints what it could not show. |
 | Build Legend | `bl` | Generate the legend from the symbols the map actually uses (NSS names, UIS aliases). |

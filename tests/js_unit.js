@@ -13651,6 +13651,97 @@ if (!IS_NODE) {
 }
 
 // ---------------------------------------------------------------------
+// FeatureTraceRun -- the frame guard, and the drag maths without a mouse
+// ---------------------------------------------------------------------
+if (!IS_NODE) {
+    (function() {
+        loadRepoScript("scripts/CaveSurvey/Core/CsLayers.js");
+        loadRepoScript("scripts/CaveSurvey/Core/CsTrace.js");
+        loadRepoScript("scripts/CaveSurvey/FeatureTrace/FeatureTraceRun.js");
+
+        function pt(x, y) { return { x: x, y: y }; }
+
+        var doc = new RDocument(new RMemoryStorage(), new RSpatialIndexNavel());
+        var di = new RDocumentInterface(doc);
+
+        CsLayers.ensure(doc, di, CsLayers.PROFILE_TRACED_CEILING);
+        var band = new RLineEntity(doc, new RLineData(
+            new RVector(0, -200), new RVector(100, -180)));
+        band.setLayerId(doc.getLayerId(CsLayers.PROFILE_TRACED_CEILING));
+        var op = new RAddObjectsOperation();
+        op.addObject(band, false);
+        di.applyOperation(op);
+
+        var box = CsTrace.profileRegion(doc);
+
+        // -- in frame, both ways ------------------------------------
+        ok(FeatureTraceRun.frameGuard(box, CsLayers.PROFILE_TRACED_CEILING,
+            pt(50, -190)) === null,
+            "frameGuard: a profile layer traced inside the region is allowed");
+        ok(FeatureTraceRun.frameGuard(box, CsLayers.WALLS_SURVEYED,
+            pt(50, 500)) === null,
+            "frameGuard: a plan layer traced outside the region is allowed");
+
+        // -- out of frame, both ways --------------------------------
+        var up = FeatureTraceRun.frameGuard(box,
+            CsLayers.PROFILE_TRACED_CEILING, pt(50, 500));
+        ok(up !== null,
+            "frameGuard: a profile layer traced up in the plan is refused");
+        ok(String(up).indexOf("profile") >= 0,
+            "frameGuard: the refusal names the layer's frame");
+        ok(String(up).indexOf("plan") >= 0,
+            "frameGuard: the refusal names the frame the cursor was in");
+
+        ok(FeatureTraceRun.frameGuard(box, CsLayers.WALLS_SURVEYED,
+            pt(50, -190)) !== null,
+            "frameGuard: a plan layer traced down in the region is refused");
+
+        // -- targetLayer: fallback AND the armed case ---------------
+        // Both halves, because a test of only the fallback passes even
+        // if targetLayer ignores the armed target entirely -- which is
+        // the whole mechanism the panel drives it through.
+        eqs(FeatureTraceRun.targetLayer(), CsLayers.WALLS_SURVEYED,
+            "FeatureTraceRun.targetLayer: falls back to surveyed walls unarmed");
+
+        FeatureTrace = { target: CsLayers.PROFILE_TRACED_FLOOR };
+        eqs(FeatureTraceRun.targetLayer(), CsLayers.PROFILE_TRACED_FLOOR,
+            "FeatureTraceRun.targetLayer: an armed target is what gets traced");
+        FeatureTrace = { target: undefined };
+        eqs(FeatureTraceRun.targetLayer(), CsLayers.WALLS_SURVEYED,
+            "FeatureTraceRun.targetLayer: disarming falls back again");
+
+        // -- the drag maths, without a mouse ------------------------
+        // A live drag is mouse-only, but what it DOES with the samples
+        // is not: this is the same emit() call commit() makes, on a
+        // sample list shaped like a real 6px-threshold capture.
+        var samples = [];
+        var i;
+        for (i = 0; i <= 60; i++) {
+            samples.push(pt(i * 0.5, 0));   // 30 ft of wall, ~6in apart
+        }
+        var planDoc = new RDocument(new RMemoryStorage(),
+            new RSpatialIndexNavel());
+        var planDi = new RDocumentInterface(planDoc);
+        var res = CsTrace.emit(planDoc, planDi, CsLayers.WALLS_SURVEYED,
+            samples, 1.0, 0.5);
+        ok(res.added === true, "drag maths: a 30 ft straight run is drawn");
+        eqs(planDoc.queryAllEntities(false, false).length, 1,
+            "drag maths: exactly one entity lands for one run");
+        ok(res.kept < res.sampled,
+            "drag maths: the spline has fewer points than the drag sampled");
+        eqs(planDoc.getLayerName(planDoc.queryEntity(
+                planDoc.queryAllEntities(false, false)[0]).getLayerId()),
+            CsLayers.WALLS_SURVEYED,
+            "drag maths: it lands on the armed layer and no other");
+
+        // A cross-gutter drag is discarded, so nothing lands.
+        var crossing = [pt(50, 500), pt(50, 300), pt(50, -190)];
+        ok(CsTrace.pathFrame(box, crossing) === null,
+            "drag maths: a drag from the plan into the region has no frame");
+    }());
+}
+
+// ---------------------------------------------------------------------
 // Report.
 // ---------------------------------------------------------------------
 
