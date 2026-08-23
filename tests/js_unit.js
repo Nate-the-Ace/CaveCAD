@@ -8524,6 +8524,20 @@ if (!IS_NODE) {
 }());
 
 (function() {
+    // I6: adjacency's OTHER filter, pinned directly. resolve() never
+    // actually emits a splay leg (see the belt-and-braces comment on
+    // adjacency itself), so nothing in normal use exercises this --
+    // dropping the filter currently survives the whole suite. Fed a
+    // hand-built leg marked splay, adjacency() must still exclude it.
+    var resolved = {
+        legs: [{ shot: { splay: true }, from: "A1", to: "A2", kind: "new" }]
+    };
+    var adj = CsProfile.adjacency(resolved);
+    ok((adj["A1"] || []).length === 0,
+        "a splay-flagged leg contributes no adjacency edge, even though its kind is \"new\"");
+}());
+
+(function() {
     // C1: two *fixed* entrances on one connected cave, closing a ring.
     // CsNetwork.seedFixed places every fixed station up front, before
     // any traversal, so a fixed station's low .seq records SEEDING,
@@ -9061,6 +9075,25 @@ if (!IS_NODE) {
     var h = CsProfile.hierarchy(g, r);
     var band = CsProfile.unrollBand(g.runs["A"], null, r, h, {});
 
+    // I2: a caller-supplied opts.adjacency must produce the identical
+    // band to building the graph internally -- the whole point of
+    // accepting one is that Task 5 can hand the same prebuilt graph to
+    // every band in a survey without changing what comes out.
+    var prebuiltAdj = CsProfile.adjacency(r);
+    var bandViaAdj = CsProfile.unrollBand(g.runs["A"], null, r, h, { adjacency: prebuiltAdj });
+    eqs(JSON.stringify(bandViaAdj.stations), JSON.stringify(band.stations),
+        "opts.adjacency produces the identical stations");
+    eqs(JSON.stringify(bandViaAdj.omitted), JSON.stringify(band.omitted),
+        "opts.adjacency produces the identical omitted list");
+
+    // and it is genuinely CONSULTED, not silently accepted and ignored:
+    // a deliberately empty graph must starve the walk down to one
+    // isolated station, proving longestChain actually reads the graph
+    // it was handed rather than rebuilding its own regardless.
+    var starved = CsProfile.longestChain(g.runs["A"], r, {});
+    eqs(starved.chain.length, 1,
+        "an empty prebuilt adjacency graph starves the walk to one station -- the parameter is wired in");
+
     ok(band.stations[0].name === "A1", "root band starts at its own first station");
     near(band.stations[0].x, 0, 1e-9, "first station at X 0");
     near(band.stations[1].x, 10, 1e-9, "level leg advances X by its length");
@@ -9082,6 +9115,51 @@ if (!IS_NODE) {
     // tie-break the band's contents would depend on iteration order
     ok(band.stations[0].name === "A1",
         "equal-length chains resolve to the lower station sequence");
+
+    // I4: the legs[] payload itself, not just its length -- six
+    // mutations (fromX/fromY hardcoded 0, from/to swapped, shot: null,
+    // toY ignoring exaggeration, toX multiplied by exaggeration) all
+    // survived a suite that only ever checked band.legs.length. This
+    // fixture's nonzero X values catch a hardcoded-0 fromX/toX; the
+    // exaggeration fixture further below catches the other two.
+    for (var li0 = 0; li0 < band.legs.length; li0++) {
+        eqs(band.legs[li0].fromX, band.stations[li0].x,
+            "leg " + li0 + " fromX matches its FROM station's X");
+        eqs(band.legs[li0].fromY, band.stations[li0].y,
+            "leg " + li0 + " fromY matches its FROM station's Y");
+        eqs(band.legs[li0].toX, band.stations[li0 + 1].x,
+            "leg " + li0 + " toX matches its TO station's X");
+        eqs(band.legs[li0].toY, band.stations[li0 + 1].y,
+            "leg " + li0 + " toY matches its TO station's Y");
+        eqs(band.legs[li0].from, band.stations[li0].name,
+            "leg " + li0 + " from matches its FROM station's name");
+        eqs(band.legs[li0].to, band.stations[li0 + 1].name,
+            "leg " + li0 + " to matches its TO station's name");
+        ok(band.legs[li0].shot !== null && band.legs[li0].shot !== undefined,
+            "leg " + li0 + " carries its real shot, not null");
+    }
+}());
+
+(function() {
+    // I6: legBetween's OWN two filters, pinned directly (adjacency's
+    // splay filter is pinned separately above). Dropping either one --
+    // the closure exclusion, which is the entire point of its
+    // invariant with adjacency, or the splay guard -- currently
+    // survives the suite with nothing to catch it.
+    var closureResolved = {
+        legs: [{ shot: shotOf("A1", "A2", 10, 0, 0), from: "A1", to: "A2", kind: "closure" }]
+    };
+    ok(CsProfile.legBetween("A1", "A2", closureResolved) === null,
+        "legBetween refuses a closure leg");
+    var splayResolved = {
+        legs: [{ shot: { splay: true }, from: "A1", to: "A2", kind: "new" }]
+    };
+    ok(CsProfile.legBetween("A1", "A2", splayResolved) === null,
+        "legBetween refuses a splay-flagged leg too");
+    // tieLegBetween's own splay guard, same idea: it deliberately admits
+    // closures (that is its whole purpose) but must still refuse a splay
+    ok(CsProfile.tieLegBetween("A1", "A2", splayResolved) === null,
+        "tieLegBetween refuses a splay-flagged leg despite admitting closures");
 }());
 
 (function() {
@@ -9102,6 +9180,96 @@ if (!IS_NODE) {
 }());
 
 (function() {
+    // I5, the HI tier in isolation: equal length, equal LOWEST
+    // sequence, so the LOWEST of the two candidates' own highest
+    // sequence must win -- A1-A2-A99 over A1-A2-A100. Chosen so the
+    // join tier's lexicographic order ACTIVELY DISAGREES with the
+    // numeric hi order ("A100" < "A99" as text, since '1' < '9'):
+    // dropping the hi tier and falling straight to join here gives
+    // A1,A2,A100 instead, confirmed by mutation.
+    var sv = CsModel.newSurvey();
+    sv.shots = [
+        shotOf("A1", "A2", 10, 0, 0),
+        shotOf("A2", "A99", 10, 0, 0),
+        shotOf("A2", "A100", 10, 90, 0)
+    ];
+    var r = CsNetwork.resolve(sv, {});
+    var found = CsProfile.longestChain(CsProfile.groupRuns(r).runs["A"], r);
+    eqs(found.chain.join(","), "A1,A2,A99",
+        "the hi tier picks the lower highest sequence, not the join tier's own preference");
+}());
+
+(function() {
+    // I5, the JOIN tier in isolation: a "star" of LETTERED (non-numeric)
+    // sequences -- Ax is the hub, Ay/Az/Aw its three spokes. seqNumOf
+    // returns Number.MAX_VALUE for every one of them, so the lo and hi
+    // tiers tie on EVERY candidate 3-station path through the hub, and
+    // only the join tier can ever pick a winner. Shuffled 200 times
+    // (both the leg order and the run's own station order), correct
+    // code must land on the SAME chain regardless of iteration order;
+    // without the join tier nothing breaks the tie at all, so whichever
+    // candidate the DFS happens to reach first survives untouched, and
+    // shuffling should surface more than one distinct result.
+    var legsBase = [
+        { shot: shotOf("Ax", "Ay", 10, 0, 0), from: "Ax", to: "Ay", kind: "new" },
+        { shot: shotOf("Ax", "Az", 10, 90, 0), from: "Ax", to: "Az", kind: "new" },
+        { shot: shotOf("Ax", "Aw", 10, 180, 0), from: "Ax", to: "Aw", kind: "new" }
+    ];
+    var stationsBase = ["Ax", "Ay", "Az", "Aw"];
+    var resolvedStations = {
+        Ax: { x: 0, y: 0, z: 0, seq: 0 }, Ay: { x: 0, y: 0, z: 0, seq: 1 },
+        Az: { x: 0, y: 0, z: 0, seq: 2 }, Aw: { x: 0, y: 0, z: 0, seq: 3 }
+    };
+    var shuffle = function(arr) {
+        var a = arr.slice(0);
+        for (var si = a.length - 1; si > 0; si--) {
+            var sj = Math.floor(Math.random() * (si + 1));
+            var tmp = a[si]; a[si] = a[sj]; a[sj] = tmp;
+        }
+        return a;
+    };
+    var distinct = {};
+    for (var trial = 0; trial < 200; trial++) {
+        var resolved = { stations: resolvedStations, legs: shuffle(legsBase) };
+        var run = { key: "A", stations: shuffle(stationsBase) };
+        var found = CsProfile.longestChain(run, resolved);
+        distinct[found.chain.join(",")] = true;
+    }
+    var distinctKeys = [];
+    for (var dk in distinct) {
+        if (distinct.hasOwnProperty(dk)) { distinctKeys.push(dk); }
+    }
+    eqs(distinctKeys.length, 1,
+        "the join tier picks the same chain regardless of iteration order (got " +
+        distinctKeys.join(" | ") + ")");
+}());
+
+(function() {
+    // I5, the LO tier in isolation, direct on betterChain: not
+    // separable through longestChain without a contrived fixture, so
+    // this is the honest way to reach it -- A9 beats A10 as the path's
+    // OWN lowest sequence, regardless of the other (tied, higher)
+    // member in each list.
+    ok(CsProfile.betterChain(["A9", "A50"], ["A10", "A050"]) === true,
+        "the lo tier alone decides: A9 < A10 as the lowest sequence in each path");
+}());
+
+(function() {
+    // the final seqOrder reorientation is doing real work, not merely
+    // confirming what the join tier already delivered: A9 and A10 sort
+    // ASCENDING numerically (9 < 10) but DESCENDING lexicographically
+    // ("A10" < "A9" as text), so the join tier's own lo/hi-tied
+    // resolution actively prefers "A10,A9" -- only the final,
+    // numeric-aware seqOrder pass corrects it back to ascending.
+    var sv = CsModel.newSurvey();
+    sv.shots = [shotOf("A9", "A10", 10, 0, 0)];
+    var r = CsNetwork.resolve(sv, {});
+    var found = CsProfile.longestChain(CsProfile.groupRuns(r).runs["A"], r);
+    eqs(found.chain.join(","), "A9,A10",
+        "seqOrder reorientation wins over the join tier's own lexicographic preference");
+}());
+
+(function() {
     // doubling back in plan must still advance X
     var sv = CsModel.newSurvey();
     sv.shots = [
@@ -9113,6 +9281,46 @@ if (!IS_NODE) {
     var band = CsProfile.unrollBand(g.runs["A"], null, r,
         CsProfile.hierarchy(g, r), {});
     near(band.stations[2].x, 20, 1e-9, "extended elevation never doubles back");
+}());
+
+(function() {
+    // Math.abs at the X step, and the vertical-leg behaviour the plan
+    // now records as correct: a +90 degree shot's own PLAN distance is
+    // essentially zero, so both stations land on the SAME X -- a
+    // vertical shaft draws as a vertical line, exactly as a real one
+    // looks in profile. Measured (not assumed): CsTraverse.offset gives
+    // a slightly POSITIVE plan at exactly +/-90 in this engine (cos of
+    // 90 degrees in radians rounds a hair positive), so this fixture
+    // alone would pass even without Math.abs -- the second assertion
+    // below, at an angle measured to give a slightly NEGATIVE plan
+    // instead, is the one Math.abs is actually for: without it, X
+    // would step backwards by that (tiny but real) amount.
+    var sv = CsModel.newSurvey();
+    sv.shots = [shotOf("A1", "A2", 10, 0, 90)];
+    var r = CsNetwork.resolve(sv, {});
+    var g = CsProfile.groupRuns(r);
+    var band = CsProfile.unrollBand(g.runs["A"], null, r,
+        CsProfile.hierarchy(g, r), {});
+    near(band.stations[1].x, band.stations[0].x, 1e-9,
+        "a vertical leg keeps both stations on the same X");
+    near(band.stations[1].y, 10, 1e-9, "vertical leg's full rise still shows in Y");
+
+    // measured: cos(90.00005 degrees) is slightly NEGATIVE in this
+    // engine, so this shot's own plan distance is a tiny negative
+    // number -- without Math.abs, x += o.plan would step X backwards.
+    var pastVertical = CsTraverse.offset(
+        { distance: 10, azimuth: 0, inclination: 90.00005 }, CsTraverse.SLOPE);
+    ok(pastVertical.plan < 0,
+        "fixture assumption: a hair past vertical gives a negative plan (got " +
+        pastVertical.plan + ")");
+    var sv2 = CsModel.newSurvey();
+    sv2.shots = [shotOf("A1", "A2", 10, 0, 90.00005)];
+    var r2 = CsNetwork.resolve(sv2, {});
+    var g2 = CsProfile.groupRuns(r2);
+    var band2 = CsProfile.unrollBand(g2.runs["A"], null, r2,
+        CsProfile.hierarchy(g2, r2), {});
+    ok(band2.stations[1].x >= band2.stations[0].x,
+        "Math.abs keeps X from stepping backwards on a negative-plan leg");
 }());
 
 (function() {
@@ -9136,6 +9344,23 @@ if (!IS_NODE) {
 }());
 
 (function() {
+    // band.tie must not report a tie that was never actually drawn:
+    // Task 5 stacks siblings by junction and has no other way to tell
+    // "opened at this tie" from "the tie name was never usable" apart.
+    // "Ghost" is not in resolved.stations at all, so the tie-handling
+    // block never runs and the band is just run A's own plain chain.
+    var sv = CsModel.newSurvey();
+    sv.shots = [shotOf("A1", "A2", 10, 0, 0)];
+    var r = CsNetwork.resolve(sv, {});
+    var g = CsProfile.groupRuns(r);
+    var band = CsProfile.unrollBand(g.runs["A"], "Ghost", r,
+        CsProfile.hierarchy(g, r), {});
+    ok(band.tie === null,
+        "an unusable tie (absent from resolved.stations) reports null, not the ghost name");
+    eqs(band.stations.length, 2, "the band is still run A's own plain chain");
+}());
+
+(function() {
     // elevation datum: a cave anchored at 1200 must profile at 1200
     var sv = CsModel.newSurvey();
     sv.shots = [shotOf("A1", "A2", 10, 0, 0)];
@@ -9146,6 +9371,13 @@ if (!IS_NODE) {
     near(band.stations[0].y, 1200, 1e-9, "profile keeps the absolute datum");
     near(band.datum, 1200, 1e-9, "band datum is its own first elevation");
 
+    // I4: fromY is nonzero here (1200, the anchored datum), which the
+    // root-band fixture above never exercises (it starts at Y 0) --
+    // catches a "fromY hardcoded to 0" mutation this specific leg would
+    // otherwise let through.
+    eqs(band.legs[0].fromY, band.stations[0].y, "leg 0 fromY matches the anchored datum, not 0");
+    eqs(band.legs[0].toY, band.stations[1].y, "leg 0 toY matches its TO station's Y");
+
     // exaggeration scales about the datum, and leaves X alone
     var sv2 = CsModel.newSurvey();
     sv2.shots = [shotOf("A1", "A2", 10, 0, -45)];
@@ -9155,6 +9387,14 @@ if (!IS_NODE) {
         { exaggeration: 2.0 });
     near(b2.stations[1].y, -7.0710678 * 2.0, 1e-5, "Y doubled");
     near(b2.stations[1].x, 7.0710678, 1e-5, "X untouched by exaggeration");
+
+    // I4: legs[0].toX/toY must match the ALREADY-exaggerated stations
+    // array exactly -- catches "toY ignoring exaggeration" (toY would
+    // then be the raw, unscaled rise) and "toX multiplied by
+    // exaggeration" (toX would then differ from the un-exaggerated X)
+    // in one comparison each, since stations[] is the trusted value.
+    eqs(b2.legs[0].toX, b2.stations[1].x, "leg 0 toX matches the (unscaled) station X");
+    eqs(b2.legs[0].toY, b2.stations[1].y, "leg 0 toY matches the exaggerated station Y");
 }());
 
 (function() {
@@ -9206,6 +9446,49 @@ if (!IS_NODE) {
     eqs(band.legs.length, 2, "tie leg (the closure) plus B's one interior leg");
     ok(band.stopped === null,
         "a closure-kind tie no longer silently truncates the band");
+    eqs(band.stoppedReason, null, "no reason to report when nothing stopped the band");
+}());
+
+(function() {
+    // I7: a closure tie leg does NOT draw at its own tape length --
+    // stated as a measured fact, not claimed away. A1..B2 all resolve
+    // level (Y stays 0 throughout via an ordinary path), then a
+    // closure shot B2->A1 at 5.00 ft and +30 degrees ties B to A: its
+    // OWN implied rise is 5*sin(30) = 2.5 ft, but both its endpoints
+    // already resolved to Y 0 independently, so the network's actual
+    // Y-difference across this leg is 0, not 2.5 -- that gap IS the
+    // misclosure this leg carries. Drawn length is therefore just its
+    // plan advance, 5*cos(30) = 4.3301 ft, about 13% short of the tape.
+    var sv = CsModel.newSurvey();
+    sv.shots = [
+        shotOf("A1", "A2", 10, 0, 0),
+        shotOf("A2", "A3", 10, 90, 0),
+        shotOf("A3", "B1", 10, 180, 0),
+        shotOf("B1", "B2", 10, 270, 0),
+        shotOf("B2", "A1", 5, 0, 30)
+    ];
+    var r = CsNetwork.resolve(sv, {});
+    var closureLeg = null;
+    for (var li2 = 0; li2 < r.legs.length; li2++) {
+        if (r.legs[li2].from === "B2" && r.legs[li2].to === "A1") {
+            closureLeg = r.legs[li2];
+        }
+    }
+    ok(closureLeg !== null && closureLeg.kind === "closure",
+        "fixture assumption: B2->A1 again resolves as a closure");
+    eqs(r.stations["A1"].z, r.stations["B2"].z,
+        "fixture assumption: both ends resolve to the same Y independent of this leg");
+
+    var g = CsProfile.groupRuns(r);
+    var h = CsProfile.hierarchy(g, r);
+    var band = CsProfile.unrollBand(g.runs["B"], "A1", r, h, {});
+    var tieLeg = band.legs[0];
+    var drawnLen = Math.sqrt(
+        Math.pow(tieLeg.toX - tieLeg.fromX, 2) + Math.pow(tieLeg.toY - tieLeg.fromY, 2));
+    near(drawnLen, 4.3301, 1e-4,
+        "the closure tie leg draws at its plan advance, not its 5.00 ft tape reading");
+    ok(Math.abs(drawnLen - 5.0) / 5.0 > 0.1,
+        "off by more than 10% of the tape -- not a rounding-scale discrepancy");
 }());
 
 (function() {
@@ -9233,6 +9516,83 @@ if (!IS_NODE) {
     ok(band.stopped === "A1", "a missing-Z station at the chain head stops the band there");
     eqs(band.stations.length, 0, "no station drawn against a fabricated datum");
     ok(band.datum === null, "datum is null, never a fabricated 0, when the head station has no Z");
+    eqs(band.stoppedReason, "no-z",
+        "I8: the reason distinguishes a bad Z from a missing leg -- this one is no-z");
+}());
+
+(function() {
+    // I8: the OTHER reason, "no-leg" -- a station with a perfectly
+    // good Z whose only problem is that no leg (of ANY kind, closure
+    // included -- CsProfile.tieLegBetween's own admission) reaches it
+    // from the tie. "Tie" here has no contact anywhere on run A's own
+    // chain at all (not even a closure), so it can only be prefixed and
+    // honestly fail at the very next step -- never silently treated as
+    // if nothing were wrong.
+    var run = { key: "A", stations: ["A1", "A2"] };
+    var resolved = {
+        stations: {
+            Tie: { x: 0, y: 0, z: 100, seq: 0 },
+            A1: { x: 0, y: 0, z: 0, seq: 1 },
+            A2: { x: 0, y: 0, z: 10, seq: 2 }
+        },
+        legs: [
+            { shot: shotOf("A1", "A2", 10, 0, 0), from: "A1", to: "A2", kind: "new" }
+        ]
+    };
+    var band = CsProfile.unrollBand(run, "Tie", resolved, {}, {});
+    eqs(band.stations.length, 1, "only the tie station itself draws");
+    ok(band.stations[0].name === "Tie", "the one drawn station is the tie");
+    eqs(band.stopped, "A1", "A1 has a perfectly good Z (0) -- the failure is elsewhere");
+    eqs(band.stoppedReason, "no-leg", "the reason is no-leg, not no-z, for a resolvable-Z station");
+}());
+
+(function() {
+    // C1 (the review's Critical): a run entered at an INTERIOR
+    // junction, surveyed both ways -- A3 ties in at B1, then
+    // B1-B2-B3-B4 one direction and B1-B5-B6-B7 the other. Run B's own
+    // longest internal chain runs straight THROUGH B1 end to end
+    // (B4..B1..B7); the tie's contact station (B1) is the MIDDLE of
+    // that chain, not either end. The old endpoint-only assumption
+    // unshifted the tie in front of whichever end the chain happened to
+    // start at (B4), found no leg from A3 to B4, and discarded the
+    // entire seven-station, eight-leg run down to one point. The fixed
+    // code scans for where the tie actually attaches, then keeps the
+    // longer of the two arms (equal here, so the tie-break -- lower
+    // highest sequence, same rule as everywhere else in this file --
+    // picks the B4 arm over the B7 arm) and demotes the other arm's
+    // stations to `omitted` instead of vanishing the whole band.
+    var sv = CsModel.newSurvey();
+    sv.shots = [
+        shotOf("A1", "A2", 10, 0, 0),
+        shotOf("A2", "A3", 10, 0, 0),
+        shotOf("A3", "B1", 8, 90, 0),
+        shotOf("B1", "B2", 10, 0, 0),
+        shotOf("B2", "B3", 10, 90, 0),
+        shotOf("B3", "B4", 10, 90, 0),
+        shotOf("B1", "B5", 10, 180, 0),
+        shotOf("B5", "B6", 10, 270, 0),
+        shotOf("B6", "B7", 10, 270, 0)
+    ];
+    var r = CsNetwork.resolve(sv, {});
+    var g = CsProfile.groupRuns(r);
+    var h = CsProfile.hierarchy(g, r);
+    eqs(h.ties["B"], "A3", "fixture assumption: B ties to the run at A3 (into B1)");
+    var found = CsProfile.longestChain(g.runs["B"], r);
+    eqs(found.chain.join(","), "B4,B3,B2,B1,B5,B6,B7",
+        "fixture assumption: run B's own longest chain runs through B1, not ending on it");
+
+    var band = CsProfile.unrollBand(g.runs["B"], "A3", r, h, {});
+    ok(band.stopped === null, "the run is no longer silently discarded to one point");
+    eqs(band.stations.length, 5, "tie station plus the four-station arm it keeps");
+    eqs(
+        band.stations.map(function(s) { return s.name; }).join(","),
+        "A3,B1,B2,B3,B4",
+        "the kept arm runs from the tie through the junction to B4, not B7"
+    );
+    eqs(band.legs.length, 4, "tie leg into B1, plus three interior legs out to B4");
+    ok(band.omitted.indexOf("B5") >= 0 && band.omitted.indexOf("B6") >= 0 &&
+        band.omitted.indexOf("B7") >= 0,
+        "the shorter arm's stations are demoted to omitted, not lost outright");
 }());
 
 // ---------------------------------------------------------------------

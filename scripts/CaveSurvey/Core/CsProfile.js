@@ -238,6 +238,16 @@ CsProfile.groupRuns = function(resolved) {
  * becomes one legBetween cannot resolve, and the band search stops
  * dead at it with no error, just a short band.
  *
+ * THE STATED EXCEPTION: there is a THIRD leg lookup, CsProfile.
+ * tieLegBetween, used for exactly one step per band -- the tie step,
+ * where a run attaches to its parent. That step is never offered by
+ * this graph at all (it is not an interior chain step), so it is not
+ * bound by the invariant above; tieLegBetween deliberately admits a
+ * closure there, because CsProfile.hierarchy (which chooses a run's
+ * tie) admits them too. A reader who stops at "two functions, one
+ * invariant" has not seen the whole picture -- see tieLegBetween's own
+ * docblock for why the exception exists and what it costs.
+ *
  * Run hierarchy does NOT use this graph; it builds its own from
  * resolved.legs, closures included, because a second contact through a
  * ring is exactly the thing it has to report. See hierarchy().
@@ -906,8 +916,11 @@ CsProfile.seqNumOf = function(name) {
  * order -- neither depends on this engine's sort), so as long as no two
  * DISTINCT paths ever both return false against each other here, the
  * winner is independent of which one the walk reaches first. The final
- * `path.join(",") < best.join(",")` branch is what guarantees that: two
- * different station lists never produce equal strings.
+ * `path.join(" ") < best.join(" ")` branch is what guarantees that: two
+ * different station lists never produce equal strings -- joined on a
+ * space rather than a comma, because CsProfile.splitName's own
+ * catch-all group admits arbitrary punctuation in a station name,
+ * comma included, and a space costs nothing to prefer instead.
  */
 CsProfile.betterChain = function(path, best) {
     if (path.length !== best.length) {
@@ -935,45 +948,102 @@ CsProfile.betterChain = function(path, best) {
     // Still tied: decide on the station names themselves rather than on
     // which one the walk happened to reach first. Search order is not a
     // property a band's contents should depend on.
-    return path.join(",") < best.join(",");
+    return path.join(" ") < best.join(" ");
 };
 
 /**
  * The longest simple path through one run's own stations.
  *
- * Runs are chains in practice, so an exhaustive depth-first search
- * from every member is affordable and exact -- no heuristic to be
- * wrong about. Cost is bounded by the run's own size, not the survey's,
- * because the walk only ever crosses edges into stations `inRun`.
+ * COMPLEXITY IS QUADRATIC IN RUN LENGTH, not "cheap in practice" --
+ * n DFS starts, each an O(n) walk, is Theta(n^2) for a chain-shaped
+ * run, and WORSE with branching (a run gerrymandered into a balanced
+ * binary tree instead of a chain -- not how real spurs get named or
+ * promoted, see the file banner). The mitigation actually in this
+ * function is starting the search only from LEAF stations (in-run
+ * degree <= 1, see `starts` below): exact for a chain or a tree,
+ * because a tree's longest simple path always ends at two leaves, so a
+ * chain needs only 2 starts instead of n. This is a LARGE
+ * CONSTANT-FACTOR WIN, measured below at roughly 9-10x on an ordinary
+ * chain -- NOT a change of complexity class. The remaining cost, even
+ * from just 2 starts, is `best = path.slice(0)` on every improving
+ * step of a single deep walk, which is itself O(k) at path length k --
+ * for a plain chain that fires on almost every step, so the walk still
+ * lands somewhere between linear and quadratic in practice. Fixing
+ * that is a further, NOT-YET-DONE optimization; what shipped is the
+ * fewer-starts win only.
  *
- * A run graph built from "new"/"tie" edges (CsProfile.adjacency) is a
- * tree in the ordinary case -- any loop-closing shot within one
- * connected component resolves as "closure" and adjacency excludes
- * it -- so this search is linear-ish in practice (each start explores
- * its own tree once). If a run's own members ever did carry an
- * internal cycle through "new"/"tie" edges only, the `visited` guard
- * still stops the walk from looping forever; it can just cost more.
+ * MEASURED (both engines this runs in; CaveCAD is the authoritative
+ * one -- every draw runs there, not under node -- and consistently
+ * far slower, which is why both are quoted rather than node alone):
  *
- * MEASURED, not assumed (node, this repo's fixtures' scale plus a
- * synthetic stress run): a straight 300-station chain -- an ordinary
- * run's actual shape -- unrolls in ~10ms; a straight 1000-station chain
- * in ~70ms, whether or not it also carries a one-leg spur off every
- * fifth station (the shape that forces betterChain's tie-break). The
- * cost that actually hurts is BRANCHING, not length: a run gerrymandered
- * into a balanced binary tree instead of a chain -- not how real spurs
- * get named or promoted, see the file banner -- runs ~156ms at 509
- * stations and ~3.1s at 2045. A real survey run does not take that
- * shape; if one ever does, this is where to look first.
+ *   shape                        node      CaveCAD   CaveCAD, pre-fix
+ *   --------------------------   -------   -------   ----------------
+ *   300-station chain            ~2ms      ~6ms      (not measured)
+ *   1000-station chain           ~3ms      ~52ms     ~473ms  (~9x)
+ *   2000-station chain           ~8ms      ~200ms    ~1993ms (~10x)
+ *   511-station balanced tree    ~87ms     ~1.4s     (not measured)
+ *   2047-station balanced tree   ~1.7s     ~27s      (not measured)
  *
+ * "pre-fix" is this same CaveCAD engine's own timing before the
+ * leaf-only start selection existed, from the review that found this
+ * cost -- kept beside the current numbers because the ~9-10x drop IS
+ * the constant-factor win claimed above, not an assumption.
+ *
+ * A real survey run does not take the balanced-tree shape; if one ever
+ * does, this is where to look first. One good result worth keeping:
+ * CaveCAD's engine walked a 5000-station chain -- a single DFS
+ * recursing 5000 stack frames deep -- in ~1.4s with no stack-depth
+ * failure, so that risk is cleared by measurement, not left as a
+ * worry. (The balanced tree's own longest single walk is much
+ * shallower than its station count -- about 2*depth -- so it is the
+ * chain figures above, not the tree ones, that actually test recursion
+ * depth.)
+ *
+ * Cost is bounded by the run's own size, not the survey's, because the
+ * walk only ever crosses edges into stations `inRun`. Pass a prebuilt
+ * `adj` (CsProfile.adjacency(resolved)) when laying out many bands from
+ * the same resolved survey -- rebuilding the whole-survey graph once
+ * per run, instead of once per band, is most of the cost above a few
+ * hundred runs; CsProfile.unrollBand accepts the same graph via
+ * `opts.adjacency` and forwards it here.
+ *
+ * \param adj optional, CsProfile.adjacency(resolved) already built;
+ *            built fresh from `resolved` when omitted
  * \return {chain: [name], omitted: [name]} omitted = run members not
  *         on the chain, in sequence order
  */
-CsProfile.longestChain = function(run, resolved) {
-    var adj = CsProfile.adjacency(resolved);
+CsProfile.longestChain = function(run, resolved, adj) {
+    adj = adj || CsProfile.adjacency(resolved);
     var inRun = {};
     var i;
     for (i = 0; i < run.stations.length; i++) {
         inRun[run.stations[i]] = true;
+    }
+
+    // In-run degree, so the search can start only from a LEAF (degree
+    // <= 1) instead of from every station -- see the docblock above.
+    // Falls back to every station when the run graph has no leaf at
+    // all: a genuine cycle through "new"/"tie" edges only, which the
+    // ordinary case (see CsProfile.adjacency) says should not happen,
+    // but which must not silently return an empty chain if it ever did.
+    var degree = function(name) {
+        var links = adj[name] || [];
+        var d = 0;
+        for (var li = 0; li < links.length; li++) {
+            if (inRun[links[li].other]) {
+                d++;
+            }
+        }
+        return d;
+    };
+    var starts = [];
+    for (i = 0; i < run.stations.length; i++) {
+        if (degree(run.stations[i]) <= 1) {
+            starts.push(run.stations[i]);
+        }
+    }
+    if (starts.length === 0) {
+        starts = run.stations.slice(0);
     }
 
     var best = [];
@@ -994,10 +1064,10 @@ CsProfile.longestChain = function(run, resolved) {
         }
         path.pop();
     };
-    for (i = 0; i < run.stations.length; i++) {
+    for (i = 0; i < starts.length; i++) {
         var visited = {};
-        visited[run.stations[i]] = true;
-        walk(run.stations[i], visited, []);
+        visited[starts[i]] = true;
+        walk(starts[i], visited, []);
     }
 
     var onChain = {};
@@ -1086,12 +1156,19 @@ CsProfile.legBetween = function(a, b, resolved) {
  * the one edge that invariant was never about.
  *
  * Geometrically this is sound, not merely permitted: a closure leg is
- * a real surveyed shot with a real length. An extended elevation draws
- * every leg at its own resolved coordinates -- X cumulative along the
- * band, Y each station's own resolved Z -- so a closure leg's
- * misclosure is already absorbed into those coordinates before this
- * function ever sees it, exactly as it is in plan. Drawing it
- * introduces no contradiction.
+ * a real surveyed shot, and its two endpoints are already resolved
+ * coordinates -- X cumulative along the band, Y each station's own
+ * resolved Z -- so admitting it draws SOMETHING real, not a
+ * fabrication. It is NOT, though, drawn at the shot's own tape length:
+ * the leg's own measured rise need not match the difference between
+ * its two endpoints' independently-resolved Z (that gap IS the
+ * misclosure), so the segment as drawn can come out short or long of
+ * the tape reading. Measured: a closure tie leg surveyed as 5.00 ft at
+ * +30 degrees, whose two endpoints happen to resolve to the same Y,
+ * draws at 4.3301 ft -- 13% short of the tape, because the drawn
+ * length is plan-advance-plus-resolved-Y-difference, not the shot's
+ * own slope distance. See CsProfile.unrollBand's own docblock for the
+ * ordinary (non-closure) case, which does not have this gap.
  */
 CsProfile.tieLegBetween = function(a, b, resolved) {
     for (var i = 0; i < resolved.legs.length; i++) {
@@ -1111,21 +1188,49 @@ CsProfile.tieLegBetween = function(a, b, resolved) {
  * Unrolls one run into a band.
  *
  * X advances by each leg's PLAN distance (d * cos inc) and Y is the
- * station's resolved Z, so the drawn leg length is its slope distance
- * and every leg appears at true length. X only ever increases: a
- * passage that doubles back in plan does not double back here, which
- * is what "extended" means.
+ * station's resolved Z. X only ever increases: a passage that doubles
+ * back in plan does not double back here, which is what "extended"
+ * means. For an ORDINARY (non-closure) leg this also means the drawn
+ * length equals its own slope distance exactly, up to whatever residual
+ * CsAdjust left behind redistributing an ordinary loop's misclosure --
+ * on the order of 0.0028 ft on a 100 ft leg in this repo's own
+ * adjustment fixtures, not something to raise an alarm over. The ONE
+ * exception is the tie step when it is a closure: see
+ * CsProfile.tieLegBetween's own docblock for why that leg can draw
+ * short (or long) of its own tape reading, measurably so.
  *
  * The band OPENS AT ITS TIE STATION, at X = 0, so the leg joining the
  * run to its parent is drawn inside this band. Without that, the tie
  * leg belongs to no band at all and vanishes from the profile.
  *
+ * THE TIE NEED NOT BE AN ENDPOINT OF THE RUN'S OWN LONGEST CHAIN. An
+ * ordinary "entered at a junction, surveyed both ways" run (A3 ties in
+ * at B1, then B1-B2-B3-B4 one direction and B1-B5-B6-B7 the other) has
+ * its longest internal chain running THROUGH that junction, end to end
+ * (B4..B1..B7) -- the tie station attaches in the MIDDLE of it, not at
+ * either end. A single band can only extend one direction from its
+ * tie, so this scans the whole chain for where the tie actually
+ * attaches (via CsProfile.tieLegBetween, which may be a closure -- see
+ * that function), then keeps the LONGER of the two arms on that
+ * station and demotes the shorter arm's stations to `omitted`. Equal
+ * arms fall back to CsProfile.betterChain's own tie-break, applied to
+ * the two candidate arms (each including the shared attach station, so
+ * they compare as ordinary chains). What this must never do is what it
+ * used to: assume the tie only ever meets an ENDPOINT, unshift blindly,
+ * and let an unrelated interior junction discard the entire run down to
+ * one point.
+ *
  * NEVER DEFAULTS A MISSING Z TO 0. A station with no resolved Z ends
- * the band right there (`stopped`), including the tie station itself
- * or the chain's very first member -- `datum` in that case comes back
- * null, not 0, because a fabricated sea-level datum for a cave
- * surveyed to an unrelated absolute datum is exactly the bug class
- * this codebase keeps finding and closing doors on.
+ * the band right there (`stopped`, `stoppedReason` "no-z"), including
+ * the tie station itself or the chain's very first member -- `datum`
+ * in that case comes back null, not 0, because a fabricated sea-level
+ * datum for a cave surveyed to an unrelated absolute datum is exactly
+ * the bug class this codebase keeps finding and closing doors on. A
+ * chain step with a perfectly good Z but no leg to resolve it with
+ * (`stoppedReason` "no-leg") is a different failure and reported as one
+ * -- Tasks 5-11 have to explain this to a user, and "somewhere has no
+ * elevation" and "somewhere isn't actually connected" are not the same
+ * sentence.
  *
  * \param run      one grouped run {key, stations}
  * \param tie      the tie station name, or null for the root run
@@ -1133,18 +1238,21 @@ CsProfile.tieLegBetween = function(a, b, resolved) {
  * \param hier     CsProfile.hierarchy() result (unused today; passed so
  *                 callers need not special-case, and so a future
  *                 orientation rule has it to hand)
- * \param opts     {exaggeration: number (default 1), tapeMode}
+ * \param opts     {exaggeration: number (default 1), tapeMode,
+ *                  adjacency: CsProfile.adjacency(resolved) already
+ *                  built -- forwarded to CsProfile.longestChain so
+ *                  laying out many bands from the same resolved survey
+ *                  need not rebuild the whole-survey graph per band}
  *
  * \return {
  *   key, tie, datum,
  *   stations: [{name, x, y, z}],
  *   legs:     [{shot, from, to, fromX, fromY, toX, toY}],
- *   omitted:  [name] run members off the chain,
- *   stopped:  name | null -- station that ended the band early, either
- *             for having no resolved Z or because a chain step has no
- *             leg to resolve it with (legBetween for an interior step,
- *             CsProfile.tieLegBetween for the tie step -- see that
- *             function for why the tie step alone may see a closure)
+ *   omitted:  [name] run members off the chain -- never on the chain to
+ *             begin with, OR the shorter arm at an interior tie,
+ *   stopped:  name | null -- station that ended the band early,
+ *   stoppedReason: "no-z" | "no-leg" | null -- which of the two; see
+ *             above. null exactly when `stopped` is null.
  * }
  */
 CsProfile.unrollBand = function(run, tie, resolved, hier, opts) {
@@ -1153,24 +1261,72 @@ CsProfile.unrollBand = function(run, tie, resolved, hier, opts) {
         opts.exaggeration === null) ? 1.0 : opts.exaggeration;
     var tapeMode = opts.tapeMode || CsTraverse.SLOPE;
 
-    var found = CsProfile.longestChain(run, resolved);
+    var found = CsProfile.longestChain(run, resolved, opts.adjacency);
     var chain = found.chain.slice(0);
-    // tied marks which chain INDEX (0, once unshift below runs) is the
-    // tie station, so the main loop knows its one step -- to index 1 --
-    // is the tie step and must resolve through tieLegBetween, not
-    // legBetween: that step's edge came from CsProfile.hierarchy, which
-    // admits closures, not from the interior chain walk, which doesn't.
+    // tied marks whether index 0 (once unshift below runs) really is a
+    // DRAWN tie station, so the main loop knows its one step -- to
+    // index 1 -- is the tie step and must resolve through
+    // tieLegBetween, not legBetween: that step's edge came from
+    // CsProfile.hierarchy, which admits closures, not from the interior
+    // chain walk, which doesn't. Also what `tie` in the return value
+    // reports: a tie name the caller passed but that was never actually
+    // incorporated (absent from resolved.stations) must not come back
+    // as if it were drawn -- Task 5 stacks siblings by junction and has
+    // no other way to tell the two apart.
     var tied = false;
     if (tie !== null && tie !== undefined &&
             resolved.stations.hasOwnProperty(tie)) {
-        // the chain end nearer the tie leads, so the tie leg is real.
+        // WHERE does the tie attach? Not assumed to be an endpoint --
+        // scanned for, because an ordinary "entered at a junction,
+        // surveyed both ways" run has its longest internal chain
+        // passing THROUGH the tie's contact station, not ending on it.
         // tieLegBetween, not legBetween: the tie edge itself may be a
         // closure (see CsProfile.tieLegBetween), and asking legBetween
         // here would misjudge -- or fail to find -- that very edge.
-        if (chain.length >= 2 &&
-                CsProfile.tieLegBetween(tie, chain[chain.length - 1], resolved) !== null &&
-                CsProfile.tieLegBetween(tie, chain[0], resolved) === null) {
-            chain.reverse();
+        var attachIdx = -1;
+        for (var ai = 0; ai < chain.length; ai++) {
+            if (CsProfile.tieLegBetween(tie, chain[ai], resolved) !== null) {
+                attachIdx = ai;
+                break;
+            }
+        }
+        if (attachIdx === -1) {
+            // The tie has no resolvable contact anywhere on the run's
+            // OWN longest chain (its one contact touches a station this
+            // chain omitted). Prefix anyway (below, with the rest);
+            // the main loop reports an honest `stopped`/"no-leg" rather
+            // than fabricating a link that was never surveyed.
+        } else {
+            // Split the chain at the attach point into its two arms
+            // (excluding the attach station itself, which both keep),
+            // then keep the longer arm -- attach station leading, so it
+            // sits next to the tie once unshifted -- and demote the
+            // shorter arm's own stations to `omitted`. An endpoint
+            // attach (attachIdx 0 or chain.length-1) is the same
+            // computation with one arm naturally empty, so this
+            // replaces the old endpoint-only reversal check entirely
+            // rather than sitting beside it.
+            var leftOnly = chain.slice(0, attachIdx);
+            var rightOnly = chain.slice(attachIdx + 1);
+            var leftKept = chain.slice(0, attachIdx + 1).reverse();
+            var rightKept = chain.slice(attachIdx);
+            var keepRight;
+            if (leftOnly.length !== rightOnly.length) {
+                keepRight = rightOnly.length > leftOnly.length;
+            } else {
+                // Equal arms -- an ordinary symmetric junction. Reuse
+                // CsProfile.betterChain's own already-total-order
+                // tie-break (lowest sequence, then highest, then text)
+                // on the two candidate arms rather than inventing a
+                // second rule: both arms include the shared attach
+                // station, so they compare as ordinary chains.
+                keepRight = CsProfile.betterChain(rightKept, leftKept);
+            }
+            // the demoted (shorter, or tie-broken-away) arm needs no
+            // bookkeeping of its own here: `omitted` below is recomputed
+            // fresh from final chain membership, so cutting it from
+            // `chain` is the only step that matters.
+            chain = keepRight ? rightKept : leftKept;
         }
         chain.unshift(tie);
         tied = true;
@@ -1193,13 +1349,14 @@ CsProfile.unrollBand = function(run, tie, resolved, hier, opts) {
         return datum + (z - datum) * exag;
     };
 
-    var stations = [], legs = [], stopped = null;
+    var stations = [], legs = [], stopped = null, stoppedReason = null;
     var x = 0.0;
     for (var i = 0; i < chain.length; i++) {
         var name = chain[i];
         var z = zOf(name);
         if (z === null) {
             stopped = name;
+            stoppedReason = "no-z";
             break;
         }
         if (i > 0) {
@@ -1211,6 +1368,7 @@ CsProfile.unrollBand = function(run, tie, resolved, hier, opts) {
                 : CsProfile.legBetween(chain[i - 1], name, resolved);
             if (leg === null) {
                 stopped = name;   // chain broken: stop, do not invent a link
+                stoppedReason = "no-leg";
                 break;
             }
             var o = CsTraverse.offset(leg.shot, tapeMode);
@@ -1228,14 +1386,30 @@ CsProfile.unrollBand = function(run, tie, resolved, hier, opts) {
         stations.push({ name: name, x: x, y: yOf(z), z: z });
     }
 
+    // Recomputed fresh from final chain membership, rather than reusing
+    // found.omitted directly, so a demoted arm (see above) is folded in
+    // uniformly with whatever longestChain itself already excluded --
+    // one list, run.stations' own sequence order preserved either way.
+    var onChain = {};
+    for (var oc = 0; oc < chain.length; oc++) {
+        onChain[chain[oc]] = true;
+    }
+    var omitted = [];
+    for (var os = 0; os < run.stations.length; os++) {
+        if (!onChain[run.stations[os]]) {
+            omitted.push(run.stations[os]);
+        }
+    }
+
     return {
         key: run.key,
-        tie: (tie === undefined) ? null : tie,
+        tie: tied ? tie : null,
         datum: datum,
         stations: stations,
         legs: legs,
-        omitted: found.omitted,
-        stopped: stopped
+        omitted: omitted,
+        stopped: stopped,
+        stoppedReason: stoppedReason
     };
 };
 
