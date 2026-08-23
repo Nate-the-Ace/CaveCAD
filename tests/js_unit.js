@@ -11672,6 +11672,19 @@ if (!IS_NODE) {
     ok(CsProfileFile.siblingPath("C:\\J.Doe\\Cave") ===
         "C:\\J.Doe\\Cave-PROFILE.dxf",
         "a dot in a Windows DIRECTORY name is not mistaken for an extension");
+    // Case-insensitive suffix check: this build targets macOS and
+    // Windows, both case-insensitive-but-case-preserving, so a plan
+    // saved as "Cave-profile.dxf" must be recognised as already a
+    // profile too -- getting this wrong hands back a garbled, doubly-
+    // suffixed "Cave-profile-PROFILE.dxf" instead (found the hard way
+    // while building a same-file-different-case test for the resolve()
+    // self-target refusal, in tests/profile_file_roundtrip.js).
+    ok(CsProfileFile.siblingPath("/x/Cave-profile.dxf") ===
+        "/x/Cave-profile.dxf",
+        "the -PROFILE suffix check is case-insensitive");
+    ok(CsProfileFile.siblingPath("/x/Cave-PrOfIlE.dxf") ===
+        "/x/Cave-PrOfIlE.dxf",
+        "...any mixed case, not just all-lowercase");
 }());
 
 (function() {
@@ -11687,16 +11700,108 @@ if (!IS_NODE) {
         ok(CsProfileFile.dxfFilter().indexOf("dxflib") >= 0,
             "CaveCAD's engine does have the exporter registry, headless or not");
     }
+}());
 
-    // openTabFor needs an MDI area, which -no-gui genuinely has none of
-    // in EITHER engine -- so this one degrades to null everywhere this
-    // suite runs.
+(function() {
+    // openTabFor's REAL MDI area is unreachable from any headless
+    // script (node has none of the QCAD bridge at all; CaveCAD's own
+    // -no-gui engine has the bridge but no main window). But its
+    // matching logic -- given a list of open documents, find the one
+    // whose file matches -- is plain JavaScript once the list exists,
+    // so CsProfileFile._listOpenChildren's seam lets it be exercised
+    // here against a FAKE list of {getDocument, getDocumentInterface}
+    // stubs. This is the only route to covering this branch at all;
+    // without it, three real mutations here were confirmed to survive
+    // every existing assertion: dropping the null/empty guard, using
+    // raw string comparison instead of _comparablePath, and never
+    // consulting the list in the first place.
+
+    // 1. The null/empty guard must short-circuit BEFORE touching the
+    // list at all -- proven with a spy, not by checking the return
+    // value alone (both "guard present" and "guard absent, but the
+    // list is empty" return null identically, which is exactly why
+    // openTabFor(null) === null used to be a decorative assertion).
+    var spyCalled = false;
+    var spyChildren = [{
+        getDocument: function() { spyCalled = true; return null; },
+        getDocumentInterface: function() { return null; }
+    }];
+    ok(CsProfileFile.openTabFor(null, spyChildren) === null,
+        "openTabFor(null, ...) is null");
+    ok(!spyCalled,
+        "...and the guard never even looked at the children list to get there");
+
+    spyCalled = false;
+    ok(CsProfileFile.openTabFor("", spyChildren) === null,
+        "openTabFor(\"\", ...) is null");
+    ok(!spyCalled, "...same guard, same short-circuit");
+
+    // 2. The matching logic actually finds the right one among several,
+    // skips a null document instead of crashing on it, and returns the
+    // MATCHED child's own doc/di -- not just "something".
+    function fakeChild(fileName, docTag, diTag) {
+        return {
+            getDocument: function() {
+                return (fileName === null) ? null :
+                    { getFileName: function() { return fileName; } };
+            },
+            getDocumentInterface: function() { return diTag; }
+        };
+    }
+    var children = [
+        fakeChild(null, null, "di0"),               // isNull(doc) branch
+        fakeChild("/x/Other.dxf", "docOther", "diOther"),
+        fakeChild("/x/Cave-PROFILE.dxf", "docCave", "diCave")
+    ];
+    // isNull() treats a plain {} as non-null (no isNull() method, and
+    // not null/undefined) -- matches this file's own isNull() shim and
+    // library.js's real one, so a fake with getFileName() is "a
+    // document" as far as this matching loop is concerned.
+    var found = CsProfileFile.openTabFor("/x/Cave-PROFILE.dxf", children);
+    ok(found !== null, "the matching tab is found among several");
+    ok(found !== null && found.di === "diCave",
+        "...and it's the MATCHED child's di, not some other one (got: '" +
+        (found ? found.di : "null") + "')");
+
+    ok(CsProfileFile.openTabFor("/x/Nobody-Has-This.dxf", children) === null,
+        "no match among real candidates is still null, not a crash");
+
+    // 3. One malformed child (getDocument() throws) must not sink the
+    // whole scan -- the match after it is still found.
+    var poisonChildren = [
+        { getDocument: function() { throw new Error("bad child"); } },
+        fakeChild("/x/Cave-PROFILE.dxf", "docCave", "diAfterPoison")
+    ];
+    var foundAfterPoison =
+        CsProfileFile.openTabFor("/x/Cave-PROFILE.dxf", poisonChildren);
+    ok(foundAfterPoison !== null && foundAfterPoison.di === "diAfterPoison",
+        "a throwing child does not sink the scan for the match after it");
+
+    // Sanity: the real (non-injected) call path still degrades to null
+    // with no MDI area, in both engines this suite runs under.
     ok(CsProfileFile.openTabFor("/x/Cave-PROFILE.dxf") === null,
         "no MDI area in a headless run -- openTabFor degrades to null");
-    ok(CsProfileFile.openTabFor(null) === null,
-        "openTabFor(null) is null without even trying the bridge");
-    ok(CsProfileFile.openTabFor("") === null,
-        "openTabFor(\"\") is null without even trying the bridge");
+    ok(CsProfileFile._listOpenChildren().length === 0,
+        "and there is nothing to enumerate in the first place");
+}());
+
+(function() {
+    // commit()'s two early-return branches touch no QCAD API at all,
+    // so they're testable here under plain node -- and both were
+    // previously untested branches (the review flagged the open-tab
+    // short-circuit by name). resolved.di is deliberately something
+    // that would THROW if commit() ever tried to call .exportFile() on
+    // it, so a regression that ignores `offscreen` and exports anyway
+    // fails LOUDLY (a thrown TypeError) rather than passing by luck.
+    var poisonDi = { exportFile: function() {
+        throw new Error("commit() should never reach exportFile here");
+    } };
+    ok(CsProfileFile.commit({ doc: {}, di: poisonDi, offscreen: false }) ===
+        true,
+        "commit() short-circuits an already-open tab without exporting");
+    ok(CsProfileFile.commit({ doc: null, di: null, offscreen: false }) ===
+        false,
+        "commit() reports false when there is no document at all");
 }());
 
 // ---------------------------------------------------------------------
@@ -12227,6 +12332,57 @@ if (!IS_NODE) {
                     "and it actually wrote the sibling file");
                 new QFile(siblingPathF).remove();
             }
+
+            // ---------------------------------------------------------
+            // G. THE WORST FINDING FROM THIS TASK'S REVIEW, proven end
+            // to end: a plan whose OWN file name already ends -PROFILE
+            // must not draw the elevation into itself. Without
+            // CsProfileFile.resolve()'s self-target refusal, siblingPath
+            // is idempotent here, openTabFor would match the CURRENT
+            // document's own tab, and CsProfileDraw.render would erase
+            // and redraw the elevation directly on top of this
+            // document's own CTRL-SHOTS/CTRL-STATIONS/
+            // CTRL-STATION-LABELS geometry -- exactly what "the profile
+            // needs to be its own file" exists to prevent.
+            // ---------------------------------------------------------
+            RSettings.setValue(KEY_MAX, CsProfile.AUTO_MAX_STATIONS_DEFAULT);
+            var planPathG =
+                QDir.tempPath() + "/cs_unit_hook_planG-PROFILE.dxf";
+            new QFile(planPathG).remove();
+            var fdG = freshDoc(planPathG);
+
+            var svG = CsModel.newSurvey();
+            svG.shots = [shotOf("R1", "R2", 10, 0, 0)];
+            var drawnG = CsDraw.survey(svG, CsNetwork.resolve(svG, {}));
+
+            eqs(pf(drawnG, "skipped"), true,
+                "a plan already named -PROFILE refuses to profile itself");
+            eqs(pf(drawnG, "reason"),
+                "this drawing is already a profile; the elevation is " +
+                "generated from the plan beside it",
+                "the reason says so in these exact words");
+            ok(drawnG.stationsDrawn > 0,
+                "sanity: the plan draw itself still ran normally " +
+                "despite the profile refusal");
+
+            // PROOF, not inference: nothing tagged as profile geometry
+            // landed on THIS document -- the one and only document in
+            // play, since the plan and the (refused) profile are the
+            // same file. A regression that fell through to drawing
+            // anyway would plant ProfileRun-tagged entities right here.
+            var idsG = fdG.doc.queryAllEntities(false, false);
+            var foundProfileTagG = false;
+            for (var giG = 0; giG < idsG.length; giG++) {
+                var eG = fdG.doc.queryEntity(idsG[giG]);
+                if (isNull(eG)) { continue; }
+                if (CsTags.get(eG, "ProfileRun") !== "") {
+                    foundProfileTagG = true;
+                }
+            }
+            ok(!foundProfileTagG,
+                "PROOF: no ProfileRun-tagged entity landed on the " +
+                "plan's own document");
+            new QFile(planPathG).remove();
         } finally {
             RSettings.setValue(KEY_AUTO, hadAuto);
             RSettings.setValue(KEY_MAX, hadMax);

@@ -63,6 +63,7 @@ function loadRepoScript(rel) {
     (0, eval)(src);
 }
 
+loadRepoScript("scripts/CaveSurvey/Core/CsLayers.js");
 loadRepoScript("scripts/CaveSurvey/Core/CsTags.js");
 loadRepoScript("scripts/CaveSurvey/Core/CsProfileFile.js");
 
@@ -146,8 +147,63 @@ ok(CsProfileFile.siblingPath("") === null,
 
 var r1 = CsProfileFile.resolve("");
 ok(r1.doc === null, "resolve('') refuses to invent a location");
-ok(r1.reason !== null && r1.reason.length > 0,
-    "resolve('') explains itself (got: '" + r1.reason + "')");
+ok(r1.reason === "the drawing has no file name yet -- save it and the " +
+        "profile will be written beside it",
+    "resolve('') explains itself in these exact words (got: '" +
+    r1.reason + "')");
+
+// ---------------------------------------------------------------------
+// 3b. resolve() when the "plan" IS already a profile drawing -- the
+//     WORST finding from this task's review. siblingPath is idempotent
+//     for a path already ending -PROFILE (by design: the profile file
+//     is its own sibling), which means resolve() must refuse here
+//     rather than matching the plan's own open tab and drawing the
+//     elevation directly on top of the plan's own CTRL-SHOTS/
+//     CTRL-STATIONS geometry -- precisely what "the profile needs to be
+//     its own file" exists to prevent.
+// ---------------------------------------------------------------------
+
+var selfPlanPath = QDir.tempPath() + "/cs_profile_roundtrip_self-PROFILE.dxf";
+ok(CsProfileFile.siblingPath(selfPlanPath) === selfPlanPath,
+    "sanity: siblingPath is idempotent here, exactly the trap condition");
+
+var rSelf = CsProfileFile.resolve(selfPlanPath);
+ok(rSelf.doc === null,
+    "resolve() refuses when the plan's own path is already a profile");
+ok(rSelf.reason === "this drawing is already a profile; the elevation " +
+        "is generated from the plan beside it",
+    "the reason says so in these exact words (got: '" + rSelf.reason + "')");
+
+// _comparablePath's cross-case file-identity matching, isolated from
+// siblingPath's OWN case handling (tested separately, purely, in
+// tests/js_unit.js -- CsProfileFile.siblingPath's suffix check is
+// case-insensitive so a plan named "Cave-profile.dxf" is not handed a
+// garbled double-suffixed sibling). This is the mechanism the
+// self-target refusal above relies on for a same-file, different-case
+// route: canonicalFilePath() only normalises case for a file that
+// EXISTS, so this needs a real marker file on disk to mean anything.
+var caseFile = QDir.tempPath() + "/cs_profile_roundtrip_case-PROFILE.dxf";
+new QFile(caseFile).remove();
+var caseMarker = new QFile(caseFile);
+caseMarker.open(QIODevice.WriteOnly);
+caseMarker.close();
+
+var caseFileLower = caseFile.toLowerCase();
+if (new QFileInfo(caseFileLower).exists()) {
+    // Confirms this filesystem really is case-insensitive (true on the
+    // macOS/Windows this add-on ships for) before treating a match here
+    // as meaningful, rather than asserting a platform-dependent fact as
+    // if it always held.
+    ok(CsProfileFile._comparablePath(caseFile) ===
+            CsProfileFile._comparablePath(caseFileLower),
+        "_comparablePath treats a differently-cased path to the same " +
+        "EXISTING file as identical (proves canonicalFilePath() is " +
+        "doing the normalising, not a fluke of the fallback)");
+}
+// else: this filesystem is case-sensitive, so the lowercase variant
+// really is a different file and correctly does NOT match -- nothing
+// to assert on this platform.
+new QFile(caseFile).remove();
 
 // ---------------------------------------------------------------------
 // 4a. resolve() when the sibling path exists but is EMPTY (0 bytes) --
@@ -170,8 +226,8 @@ ok(CsProfileFile.siblingPath(planPathForEmpty) === emptyPath,
 var r2 = CsProfileFile.resolve(planPathForEmpty);
 ok(r2.doc === null,
     "resolve() refuses a zero-byte sibling instead of pretending it worked");
-ok(r2.reason !== null && r2.reason.indexOf(emptyPath) >= 0,
-    "the reason names the file that could not be read (got: '" +
+ok(r2.reason === "could not read " + emptyPath,
+    "the reason names the file in these exact words (got: '" +
     r2.reason + "')");
 new QFile(emptyPath).remove();
 
@@ -179,17 +235,24 @@ new QFile(emptyPath).remove();
 // 4b. resolve() when the sibling path exists but holds GARBAGE --
 //     syntactically present, non-empty, but not actually a DXF file.
 //
-//     TESTED, NOT ASSUMED, and the result contradicts the naive
-//     expectation: dxflib's parser is lenient about content it cannot
-//     understand and RDxfImporter reports no error for it -- resolve()
-//     gets back RDocumentInterface.IoErrorNoError and an EMPTY document,
-//     not a failure. There is no zero-size or permission signal to
-//     catch here, so resolve() cannot currently tell "garbage" apart
-//     from "a legitimately empty but valid DXF". Recorded here rather
-//     than silently asserted around: a later task drawing into this
-//     resolved document would find an empty doc missing every PROFILE
-//     template layer, which is a real (if different) gap worth knowing
-//     about, not something Task 7 closes.
+//     dxflib's parser is lenient about content it cannot understand:
+//     RDxfImporter reports no error for a non-DXF text file, and
+//     importFile() comes back RDocumentInterface.IoErrorNoError with an
+//     EMPTY document rather than failing -- TESTED, not assumed. There
+//     is no zero-size or permission signal to catch this at the
+//     importFile() level, so resolve() checks the document's CONTENT
+//     afterward instead: _looksLikeProfile() looks for the
+//     PROFILE-CEILING layer Task 6 pinned into the real template, which
+//     an empty "imported" garbage document will never have. Without
+//     this check the garbage file would be blessed permanently -- from
+//     the moment commit() next wrote a plausible DXF over it, `exists`
+//     would be true forever after and the PROFILE template would never
+//     be consulted again, silently stripping every piece of template
+//     furniture including the PROFILE-CEILING tracing layer the
+//     surveyor is meant to sketch on (removing Task 11's premise).
+//
+//     DECISION: refuse and report, not silently repour from the
+//     template -- see CsProfileFile.resolve's own comment for why.
 // ---------------------------------------------------------------------
 
 var garbagePath =
@@ -206,10 +269,14 @@ ok(CsProfileFile.siblingPath(planPathForGarbage) === garbagePath,
     "sanity: the garbage file really is where resolve() will look");
 
 var r3 = CsProfileFile.resolve(planPathForGarbage);
-ok(r3.doc !== null,
-    "VERIFIED, not a defect this task introduced: dxflib's lenient " +
-    "parser accepts a non-DXF text file as an empty document instead " +
-    "of failing (got doc === null: " + (r3.doc === null) + ")");
+ok(r3.doc === null,
+    "resolve() refuses a garbage sibling instead of blessing it " +
+    "permanently (got doc === null: " + (r3.doc === null) + ")");
+ok(r3.reason === garbagePath + " exists but does not look like a " +
+        "profile drawing (no PROFILE-CEILING layer) -- move it aside " +
+        "or delete it so the profile can be rebuilt from the template",
+    "the reason explains what's wrong and what to do about it " +
+    "(got: '" + r3.reason + "')");
 if (r3.doc !== null && r3.offscreen) {
     try { destr(r3.di); } catch (eCleanup) { }
 }
@@ -253,6 +320,21 @@ if (tpl !== null) {
             "commit() writes the fresh offscreen document out to disk");
         ok(new QFileInfo(freshSibling).exists(),
             "the sibling file actually landed on disk after commit()");
+
+        // 4c-ii. NO FALSE POSITIVE: _looksLikeProfile must accept this
+        // file the SECOND time around too -- a real, template-derived
+        // profile committed to disk must not be mistaken for garbage
+        // by the same check that refuses r3's garbage file above.
+        var r4b = CsProfileFile.resolve(planPathForFresh);
+        ok(r4b.doc !== null,
+            "a real, already-committed profile is accepted on a second " +
+            "resolve(), not refused as garbage (reason: '" +
+            r4b.reason + "')");
+        ok(r4b.created === false,
+            "created is false the second time: the file was already there");
+        if (r4b.doc !== null && r4b.offscreen) {
+            try { destr(r4b.di); } catch (eCleanup2) { }
+        }
     }
 }
 new QFile(freshSibling).remove();
@@ -308,8 +390,9 @@ try {
     var r5 = CsProfileFile.resolve(planPathForNoTpl);
     ok(r5.doc === null,
         "resolve() refuses when no template can be found");
-    ok(r5.reason !== null && r5.reason.indexOf("template") >= 0,
-        "the reason says so in words a surveyor could act on (got: '" +
+    ok(r5.reason === "NSS_Cave_Template_PROFILE.dxf not found beside " +
+            "the add-on or in Documents/Cave/templates",
+        "the reason says so in these exact words (got: '" +
         r5.reason + "')");
 } finally {
     CsProfileFile.templatePath = savedTemplatePath;
@@ -317,17 +400,65 @@ try {
 
 // ---------------------------------------------------------------------
 // 5. openTabFor degrades to null in a headless run (-no-gui has no MDI
-//    area at all) instead of throwing. This is the most this headless
-//    script CAN prove about openTabFor -- actually finding an already
-//    open tab needs a real GUI session, which -no-gui by definition
-//    does not have. That half of the acceptance criteria (matching an
-//    ALREADY OPEN tab) is verified by reading library.js's openFiles()
-//    -- which enumerates subWindowList()/getDocument() the identical
-//    way -- rather than by execution here.
+//    area at all) instead of throwing. This is the most a headless
+//    script can prove about the REAL MDI area, since -no-gui by
+//    definition does not have one. The matching logic itself --
+//    actually finding a tab among several candidates -- is instead
+//    proven against INJECTED fake children in tests/js_unit.js's own
+//    CsProfileFile section (CsProfileFile._listOpenChildren is exactly
+//    the seam that makes that possible under node too).
 // ---------------------------------------------------------------------
 
 ok(CsProfileFile.openTabFor("/x/Cave-PROFILE.dxf") === null,
     "openTabFor degrades to null with no MDI area (headless)");
+ok(CsProfileFile._listOpenChildren().length === 0,
+    "there really is no MDI area to enumerate in this headless run");
+
+// ---------------------------------------------------------------------
+// 5b. resolve() and commit() actually CONSULT an open tab when there is
+//     one, end to end -- not just that openTabFor itself finds one.
+//     There is no real MDI area to open a tab in under -no-gui, so
+//     openTabFor is monkey-patched (same technique as templatePath
+//     above) to report a fake tab for this one path, proving resolve()
+//     takes the open-tab branch (offscreen: false, no template or
+//     import involved) and commit() takes its no-export short-circuit
+//     for it, rather than silently falling through to the offscreen
+//     path regardless of what openTabFor says.
+// ---------------------------------------------------------------------
+
+var savedOpenTabFor = CsProfileFile.openTabFor;
+var fakeOpenDoc = { MARKER: "fake open tab's document" };
+var fakeOpenDi = { MARKER: "fake open tab's document interface" };
+var openTabForCalledWith = null;
+CsProfileFile.openTabFor = function(path) {
+    openTabForCalledWith = path;
+    return { doc: fakeOpenDoc, di: fakeOpenDi };
+};
+try {
+    var openPlanPath = QDir.tempPath() + "/cs_profile_roundtrip_open.dxf";
+    var openSiblingPath = CsProfileFile.siblingPath(openPlanPath);
+    var r7 = CsProfileFile.resolve(openPlanPath);
+    ok(openTabForCalledWith === openSiblingPath,
+        "resolve() actually calls openTabFor with the sibling path, " +
+        "not skipping it (got called with: '" + openTabForCalledWith + "')");
+    ok(r7.doc === fakeOpenDoc && r7.di === fakeOpenDi,
+        "resolve() returns the OPEN TAB's doc/di, not a fresh one, " +
+        "when openTabFor reports one is open");
+    ok(r7.offscreen === false,
+        "an open tab is not offscreen -- nothing to export or destroy");
+    ok(r7.created === false,
+        "an already-open tab was not just created");
+
+    // commit() must take the no-export short-circuit for this result:
+    // resolved.di here is the FAKE di above, which has no exportFile()
+    // at all -- if commit() ever tried to call it, this would throw
+    // instead of returning cleanly.
+    ok(CsProfileFile.commit(r7) === true,
+        "commit() short-circuits an open tab's result without " +
+        "attempting to export it");
+} finally {
+    CsProfileFile.openTabFor = savedOpenTabFor;
+}
 
 // ---------------------------------------------------------------------
 // Report.
