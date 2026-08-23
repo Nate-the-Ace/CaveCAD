@@ -221,8 +221,12 @@ CsProfileBind.stationIndex = function(doc) {
         if (isNull(pos)) {
             continue;
         }
+        // frame: what CsBind.bindEntity's cross-frame refusal reads.
+        // Every entry here is profile by construction (ownLayers above
+        // is CsProfileDraw.LAYERS()), so this labels the index rather
+        // than deciding anything about it.
         out.push({ name: CsProfileBind.key(run, station),
-            x: pos.x, y: pos.y });
+            x: pos.x, y: pos.y, frame: "profile" });
     }
     return out;
 };
@@ -334,6 +338,17 @@ CsProfileBind.claim = function(doc, di) {
         }
         var layer = CsBind.layerNameOf(doc, e);
         if (!CsBind.isLineworkLayer(layer)) {
+            continue;
+        }
+        // THIS PASS BELONGS TO THE ELEVATION. The plan and the
+        // elevation share one drawing now, and the elevation is placed
+        // directly below the plan, so a plan wall traced near the
+        // drawing's southern edge sits a few units from profile
+        // stations in ABSOLUTE coordinates -- which is all
+        // stationsInBox and marginFor below can see. Without this
+        // gate, this pass tags that wall with a profile station and
+        // the next redraw drags it along the elevation.
+        if (CsLayers.frameOf(layer) !== "profile") {
             continue;
         }
         if (CsBind.hasLineworkTags(e)) {

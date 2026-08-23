@@ -1905,6 +1905,158 @@ var ABANDONED_TRACING_WARNING =
 }());
 
 // =======================================================================
+// FRAME CROSSING: the hazard sharing one drawing introduces.
+//
+// A plan station and a profile station three units apart in ABSOLUTE
+// coordinates, with a line traced beside each -- close enough that each
+// line's proximity box holds BOTH stations. stationsInBox and marginFor
+// match by absolute proximity alone, so nothing but the frame can tell
+// these two apart, and the elevation sits directly below the plan, so
+// the frames really are neighbours at their boundary.
+//
+// Deliberately NOT a snap fixture: a traced endpoint landing exactly on
+// a station point is decided by coincidence, never by proximity, so a
+// snapped line would bind correctly even with no frame filter at all
+// and would prove nothing. Every line here is traced NEAR the stations
+// and none coincides with one.
+// =======================================================================
+
+(function() {
+    var dF = new RDocument(new RMemoryStorage(), createSpatialIndex());
+    var iF = new RDocumentInterface(dF);
+    var op = new RAddObjectsOperation();
+
+    CsLayers.ensure(dF, iF, CsLayers.STATIONS);
+    CsLayers.ensure(dF, iF, CsLayers.PROFILE_STATIONS);
+    CsLayers.ensure(dF, iF, CsLayers.WALLS_SURVEYED);
+    CsLayers.ensure(dF, iF, CsLayers.PROFILE_TRACED_CEILING);
+
+    var planPt = CsDraw.addPoint(dF, op, CsLayers.STATIONS,
+        new RVector(100, 100));
+    CsTags.set(planPt, "Station", "P1");
+    op.addObject(planPt, false);
+    var planPt2 = CsDraw.addPoint(dF, op, CsLayers.STATIONS,
+        new RVector(112, 106));
+    CsTags.set(planPt2, "Station", "P2");
+    op.addObject(planPt2, false);
+
+    var profPt = CsDraw.addPoint(dF, op, CsLayers.PROFILE_STATIONS,
+        new RVector(103, 100));
+    CsTags.set(profPt, "ProfileStation", "Q1");
+    CsTags.set(profPt, "ProfileRun", "Q");
+    op.addObject(profPt, false);
+
+    // A point on a PROFILE-frame layer carrying the PLAN's own Station
+    // tag. Ordinary copy-paste produces this: a user duplicates a plan
+    // station into the elevation region to line something up, and the
+    // copy keeps every tag it had. Its coordinates mean along-passage
+    // distance now, so the plan index must not contain it -- the tag
+    // says plan, the layer says profile, and the LAYER is what decides.
+    var strayPt = CsDraw.addPoint(dF, op, CsLayers.PROFILE_STATIONS,
+        new RVector(104, 101));
+    CsTags.set(strayPt, "Station", "P9");
+    op.addObject(strayPt, false);
+
+    // both boxes below hold BOTH frames' stations
+    var planLine = new RLineEntity(dF, new RLineData(
+        new RVector(99, 99), new RVector(110, 104)));
+    planLine.setLayerId(dF.getLayerId(CsLayers.WALLS_SURVEYED));
+    op.addObject(planLine, false);
+
+    var profLine = new RLineEntity(dF, new RLineData(
+        new RVector(99, 99.5), new RVector(110, 104.5)));
+    profLine.setLayerId(dF.getLayerId(CsLayers.PROFILE_TRACED_CEILING));
+    op.addObject(profLine, false);
+    iF.applyOperation(op);
+
+    var planIdx = CsBind.stationIndex(dF, "plan");
+    var profIdx = CsProfileBind.stationIndex(dF);
+
+    var planNames = [], profNames = [], i;
+    for (i = 0; i < planIdx.length; i++) { planNames.push(planIdx[i].name); }
+    for (i = 0; i < profIdx.length; i++) { profNames.push(profIdx[i].name); }
+
+    eqs(planNames.sort().join(","), "P1,P2",
+        "the plan index holds ONLY the plan stations");
+    eqs(profNames.join(","), "Q/Q1",
+        "the profile index holds ONLY the profile station, run-qualified");
+
+    // the default frame is plan, so every caller written before frames
+    // existed keeps the behaviour it had
+    var defaultNames = [], defaultIdx = CsBind.stationIndex(dF);
+    for (i = 0; i < defaultIdx.length; i++) {
+        defaultNames.push(defaultIdx[i].name);
+    }
+    eqs(defaultNames.sort().join(","), "P1,P2",
+        "stationIndex() with no frame is the PLAN frame");
+
+    // sanity: each line's box really does hold the OTHER frame's
+    // station too, so the assertions below are about the frame filter
+    // and not about the boxes missing each other
+    var eps = CsBind.epsilonFor(dF);
+    var mixed = planIdx.concat(profIdx);
+    var boxNames = CsBind.stationsInBox(
+        CsBind.boxOf(dF.queryEntity(profLine.getId())), mixed,
+        CsBind.marginFor(mixed));
+    ok(boxNames.length > 1,
+        "sanity: the traced profile line's proximity box holds BOTH " +
+        "frames' stations (got " + boxNames.join(",") + ")");
+
+    /** An entity's LineworkStations tag, decoded and sorted. */
+    var boundNames = function(doc, entity) {
+        return CsBind.decodeStations(
+            CsTags.get(doc.queryEntity(entity.getId()),
+                CsBind.STATIONS_TAG)).sort().join(",");
+    };
+
+    var wasAuto = CsBind.autoBindOverride;
+    CsBind.autoBindOverride = true;
+    try {
+        // The PROFILE pass runs FIRST, while the plan wall is still
+        // untagged. Order matters: this pass skips anything already
+        // carrying a linework tag, so binding the plan wall first would
+        // hide a missing frame gate behind that skip rather than
+        // testing it.
+        CsProfileBind.claim(dF, iF);
+        eqs(boundNames(dF, profLine), "Q/Q1",
+            "the profile-frame line bound to Q/Q1 and NOT to the plan " +
+            "stations beside it");
+        // the reverse crossing, which is the live one: the profile
+        // claim pass walks EVERY linework layer, so without a frame
+        // test it tags an untagged plan wall with a profile station
+        eqs(boundNames(dF, planLine), "",
+            "THE PROFILE CLAIM PASS DID NOT TOUCH THE UNTAGGED PLAN " +
+            "WALL -- it never reaches across the frame");
+
+        CsBind.commitAutoBind(dF, iF, CsBind.planAutoBind(dF, {}));
+        // decoded and SORTED, never compared as one encoded string:
+        // the order two equally-valid stations come back in is the
+        // document's query order, which this engine does not promise
+        // to repeat between runs -- pinning "P1|P2" fails at random.
+        eqs(boundNames(dF, planLine), "P1,P2",
+            "the plan-frame line bound to the plan stations and NOT to " +
+            "the profile station beside them");
+    } finally {
+        CsBind.autoBindOverride = wasAuto;
+    }
+
+    // bindEntity refuses across frames even when HANDED a mixed index:
+    // the guarantee must not rest on every caller passing the right one
+    eqs(String(mixed.length), "3", "sanity: the mixed index holds both frames");
+    var crossed = CsBind.bindEntity(dF, dF.queryEntity(profLine.getId()),
+        null, mixed, eps);
+    eqs(crossed.stations.join(","), "Q/Q1",
+        "handed BOTH frames' stations, a profile-frame line still binds " +
+        "only to the profile station");
+    var crossedPlan = CsBind.bindEntity(dF, dF.queryEntity(planLine.getId()),
+        null, mixed, eps);
+    eqs(crossedPlan.stations.sort().join(","), "P1,P2",
+        "and a plan-frame line still binds only to the plan stations");
+
+    destr(iF);
+}());
+
+// =======================================================================
 // Report.
 // =======================================================================
 

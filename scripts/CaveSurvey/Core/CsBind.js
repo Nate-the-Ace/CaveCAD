@@ -239,6 +239,26 @@ CsBind.PROXIMITY_FACTOR = 2.0;
 CsBind.MARGIN_SAMPLE_CAP = 300; // nearest-neighbour scan is O(n*m)
 
 /**
+ * The entries of a station index that belong to one frame. An entry
+ * that carries no frame is kept: see CsBind.bindEntity for why an
+ * unlabelled index is treated as eligible rather than as suspect.
+ * Pure.
+ */
+CsBind.inFrame = function(index, frame) {
+    if (index === undefined || index === null) {
+        return [];
+    }
+    var out = [], i;
+    for (i = 0; i < index.length; i++) {
+        if (index[i].frame === undefined || index[i].frame === null ||
+                index[i].frame === frame) {
+            out.push(index[i]);
+        }
+    }
+    return out;
+};
+
+/**
  * The station names in stationIndex coinciding with any of points,
  * within epsilon. Pure -- no document access. Order of first
  * appearance; duplicates collapsed.
@@ -639,8 +659,26 @@ CsBind.epsilonFor = function(doc) {
  * name in this very index. Layer, not prefix: CTRL-STATIONS,
  * CTRL-LRUD and CTRL-SPLAYS also start with "CTRL-" and must keep
  * indexing, so this cannot reuse CsBind.isLineworkLayer.
+ *
+ * \param frame "plan" (default) or "profile" -- which view's stations
+ *              to index. Omitted means plan, so every caller written
+ *              before frames existed keeps its behaviour unchanged.
+ *
+ * WHY A FRAME AT ALL. Since the elevation moved into the plan drawing,
+ * two coordinate frames share one model space: plan X/Y are easting and
+ * northing, profile X is distance along the passage. This index feeds
+ * stationsInBox/marginFor, which match by ABSOLUTE proximity -- and the
+ * profile region sits directly below the plan, so the two frames are
+ * guaranteed to be near each other at their boundary. Without the
+ * filter, a ceiling line traced on the elevation binds to whichever
+ * plan station happens to lie nearest, and the next revision drags it
+ * somewhere meaningless.
+ *
+ * Every entry carries its own frame, so CsBind.bindEntity can refuse a
+ * cross-frame binding even when handed an index somebody else built.
  */
-CsBind.stationIndex = function(doc) {
+CsBind.stationIndex = function(doc, frame) {
+    var want = (frame === undefined || frame === null) ? "plan" : frame;
     if (typeof CsStore !== "undefined") {
         CsStore.ensureLoaded(doc);
     }
@@ -651,7 +689,11 @@ CsBind.stationIndex = function(doc) {
         if (isNull(e) || typeof e.getPosition !== "function") {
             continue;
         }
-        if (CsBind.layerNameOf(doc, e) === "CTRL-RAW") {
+        var layerName = CsBind.layerNameOf(doc, e);
+        if (layerName === "CTRL-RAW") {
+            continue;
+        }
+        if (CsLayers.frameOf(layerName) !== want) {
             continue;
         }
         var name = CsTags.get(e, "Station");
@@ -673,7 +715,7 @@ CsBind.stationIndex = function(doc) {
         if (isNull(pos)) {
             continue;
         }
-        out.push({ name: name, x: pos.x, y: pos.y });
+        out.push({ name: name, x: pos.x, y: pos.y, frame: want });
     }
     return out;
 };
@@ -812,8 +854,17 @@ CsBind.boxOf = function(entity, points) {
 CsBind.bindEntity = function(doc, entity, tripId, index, epsilon,
         tripStations) {
     var trip = (tripId === undefined) ? 0 : tripId;
+    // An entity binds within its OWN frame, never across one. Belt to
+    // the frame-scoped index's braces: even handed a mixed index -- by
+    // a caller that predates frames, or one serving both views in a
+    // single pass -- a ceiling line traced on the elevation cannot
+    // bind to the plan station a few units away in absolute
+    // coordinates. Entries with no frame at all (an index somebody
+    // built by hand) are left eligible: this refuses a KNOWN crossing,
+    // it does not demand provenance nothing used to carry.
+    var entFrame = CsLayers.frameOf(CsBind.layerNameOf(doc, entity));
     var idx = (index === undefined || index === null) ?
-        CsBind.stationIndex(doc) : index;
+        CsBind.stationIndex(doc, entFrame) : CsBind.inFrame(index, entFrame);
     var eps = (epsilon === undefined || epsilon === null) ?
         CsBind.epsilonFor(doc) : epsilon;
 
@@ -970,6 +1021,15 @@ CsBind.adoptable = function(doc, tripId, tripStations) {
         if (!CsBind.isLineworkLayer(layer)) {
             continue;
         }
+        // A PLAN pass, and only the plan's. The elevation shares this
+        // drawing and sits directly below the plan, so profile-frame
+        // linework is a few units from plan stations in the absolute
+        // coordinates this binding matches on. Its own pass --
+        // CsProfileBind.claim -- binds it against profile stations;
+        // reaching it from here would bind it to the plan instead.
+        if (CsLayers.frameOf(layer) !== "plan") {
+            continue;
+        }
         if (CsBind.hasLineworkTags(e) || CsBind.isSuiteGeometry(e)) {
             continue;
         }
@@ -1118,6 +1178,15 @@ CsBind.planAutoBind = function(doc, tripStations) {
         }
         var layer = CsBind.layerNameOf(doc, e);
         if (!CsBind.isLineworkLayer(layer)) {
+            continue;
+        }
+        // A PLAN pass, and only the plan's. The elevation shares this
+        // drawing and sits directly below the plan, so profile-frame
+        // linework is a few units from plan stations in the absolute
+        // coordinates this binding matches on. Its own pass --
+        // CsProfileBind.claim -- binds it against profile stations;
+        // reaching it from here would bind it to the plan instead.
+        if (CsLayers.frameOf(layer) !== "plan") {
             continue;
         }
         // Already claimed stays claimed: a deliberate adoption -- or a
@@ -1486,9 +1555,20 @@ CsBind.onTransactionInner = function(document, transaction, di) {
         if (isNull(e)) {
             continue;
         }
-        if (!CsBind.isLineworkLayer(CsBind.layerNameOf(document, e))) {
+        var layerOf = CsBind.layerNameOf(document, e);
+        if (!CsBind.isLineworkLayer(layerOf)) {
             continue;
         }
+        // A PLAN pass, and only the plan's. The elevation shares this
+        // drawing and sits directly below the plan, so profile-frame
+        // linework is a few units from plan stations in the absolute
+        // coordinates this binding matches on. Its own pass --
+        // CsProfileBind.claim -- binds it against profile stations;
+        // reaching it from here would bind it to the plan instead.
+        if (CsLayers.frameOf(layerOf) !== "plan") {
+            continue;
+        }
+
         // already claimed, or ours: the layer gate misses our own
         // output on plain feature layers (note leaders on TEXT-NOTES,
         // wall runs on WALLS-*), which the suite tags catch

@@ -14091,6 +14091,34 @@ if (!IS_NODE) {
 }());
 
 // ---------------------------------------------------------------------
+// CsBind.inFrame -- the pure half of the cross-frame refusal
+// ---------------------------------------------------------------------
+
+(function() {
+    var idx = [
+        { name: "P1", x: 0, y: 0, frame: "plan" },
+        { name: "Q/Q1", x: 1, y: 0, frame: "profile" },
+        { name: "OLD", x: 2, y: 0 }
+    ];
+    var namesOf = function(list) {
+        var out = [], i;
+        for (i = 0; i < list.length; i++) { out.push(list[i].name); }
+        return out.join(",");
+    };
+    eqs(namesOf(CsBind.inFrame(idx, "plan")), "P1,OLD",
+        "the plan frame keeps its own stations");
+    eqs(namesOf(CsBind.inFrame(idx, "profile")), "Q/Q1,OLD",
+        "the profile frame keeps its own stations");
+    // An entry with no frame at all comes from an index built by hand,
+    // before frames existed. Keeping it refuses a KNOWN crossing
+    // without demanding provenance nothing used to carry.
+    eqs(namesOf(CsBind.inFrame(idx, "sheet")), "OLD",
+        "an unlabelled entry stays eligible in every frame");
+    eqs(String(CsBind.inFrame(null, "plan").length), "0",
+        "a null index is empty, not a throw");
+}());
+
+// ---------------------------------------------------------------------
 // Report.
 // ---------------------------------------------------------------------
 
