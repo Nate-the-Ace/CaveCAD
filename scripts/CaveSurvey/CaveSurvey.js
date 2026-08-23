@@ -16,6 +16,10 @@
  */
 
 include("scripts/EAction.js");
+// The Core library, so init() below can install the cave-folder hook.
+// Tools include the same file themselves; include() dedupes by basename,
+// so this costs nothing when a tool has already loaded it.
+include(includeBasePath + "/Core/CsAll.js");
 
 function CaveSurvey(guiAction) {
     EAction.call(this, guiAction);
@@ -78,6 +82,15 @@ CaveSurvey.getVersion = function(basePath) {
 CaveSurvey.init = function(basePath, splash) {
     CaveSurvey.getMenu();
     CaveSurvey.getToolBar();
+
+    // Cave folders on the shared drive: after a save, make sure this
+    // cave's scans/ folder exists and point the image picker at it, so
+    // Draw > Image opens on the sketches for the cave in front of you.
+    // No menu entry -- a convenience you have to switch on is one that
+    // is off on the machine that needed it. See CsCave.js.
+    if (typeof CsCave !== "undefined") {
+        CsCave.installSaveHook();
+    }
 
     // report the suite on the splash screen, beside CaveCAD's own version:
     var version = CaveSurvey.getVersion(basePath);
