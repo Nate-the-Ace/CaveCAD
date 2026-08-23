@@ -92,9 +92,10 @@ These are not obvious from reading the add-on, and getting any of them wrong fai
 
 **Acceptance Criteria:**
 - [ ] `CsTrace.resample(points, spacing)` returns points at fixed arc-length `spacing` along the input polyline, always including the first and last input point
+- [ ] A run whose length is NOT a whole number of intervals keeps its own endpoint — the case that makes the tail push load-bearing, and the assertion indexes from the END so the mutation fails cleanly instead of throwing before the report prints
 - [ ] `resample` with fewer than 2 points returns a copy of the input, not null and not a throw
 - [ ] `resample` with `spacing <= 0` returns a copy of the input rather than looping forever
-- [ ] `resample` skips zero-length segments instead of dividing by zero
+- [ ] `resample` skips zero-length segments. NOT a divide-by-zero guard, despite reading like one: `walked` is `spacing - carried` and `carried` is strictly less than `spacing`, so `walked > 0` and the inner loop can never run when a segment is 0. Removing the guard is behaviour-preserving and NO test can kill it — verified by mutation, and the code comment says so
 - [ ] `CsTrace.reduce(points, tolerance)` is Ramer–Douglas–Peucker: a straight run collapses to exactly its 2 endpoints, and every dropped point lies within `tolerance` of the kept polyline
 - [ ] `reduce` with fewer than 3 points returns a copy of the input
 - [ ] `reduce` NEVER drops the first or last point

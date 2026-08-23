@@ -13382,6 +13382,87 @@ if (!IS_NODE) {
 }());
 
 // ---------------------------------------------------------------------
+// CsTrace -- resample and reduce
+// ---------------------------------------------------------------------
+(function() {
+    loadRepoScript("scripts/CaveSurvey/Core/CsUnits.js");
+    loadRepoScript("scripts/CaveSurvey/Core/CsTrace.js");
+
+    function pt(x, y) { return { x: x, y: y }; }
+
+    // -- spacingFor -------------------------------------------------
+    near(CsTrace.spacingFor("ft"), 1.0, 1e-9,
+        "CsTrace.spacingFor: a foot drawing spaces at 1.0");
+    near(CsTrace.spacingFor("m"), 0.3048, 1e-9,
+        "CsTrace.spacingFor: a metre drawing spaces at 0.3048");
+
+    // -- resample ---------------------------------------------------
+    var line = [pt(0, 0), pt(10, 0)];
+    var evenly = CsTrace.resample(line, 2.0);
+    eqs(evenly.length, 6, "CsTrace.resample: 10 units at 2 gives 6 points");
+    near(evenly[1].x, 2.0, 1e-9, "CsTrace.resample: second point at 2.0");
+    near(evenly[5].x, 10.0, 1e-9, "CsTrace.resample: last input point kept");
+
+    // A run whose length is NOT a whole number of intervals: 5 units at
+    // spacing 2 gives 0, 2, 4 and then the end at 5. Without the tail
+    // push the caver's chosen endpoint is silently rounded back to 4,
+    // visibly shortening every wall run -- and the 10-at-2 case above
+    // cannot see it, because there the last interval lands on the end.
+    var ragged = CsTrace.resample([pt(0, 0), pt(5, 0)], 2.0);
+    eqs(ragged.length, 4, "CsTrace.resample: a ragged end keeps the endpoint");
+    // Indexed from the END, not by a fixed [3]: with the tail push
+    // removed there is no element 3, and reading .x off undefined throws
+    // before the report can print -- a real failure made invisible.
+    near(ragged[ragged.length - 1].x, 5.0, 1e-9,
+        "CsTrace.resample: the ragged endpoint is the input's own last point");
+
+    var short = CsTrace.resample([pt(3, 4)], 1.0);
+    eqs(short.length, 1, "CsTrace.resample: a single point is returned as-is");
+
+    var degenerate = CsTrace.resample(line, 0);
+    eqs(degenerate.length, 2,
+        "CsTrace.resample: spacing 0 returns the input, it does not hang");
+
+    var withDupes = CsTrace.resample([pt(0, 0), pt(0, 0), pt(4, 0)], 2.0);
+    eqs(withDupes.length, 3,
+        "CsTrace.resample: a zero-length segment is skipped, not divided by");
+
+    var source = [pt(0, 0), pt(10, 0)];
+    CsTrace.resample(source, 2.0);
+    eqs(source.length, 2, "CsTrace.resample: the caller's array is untouched");
+
+    var aliasProbe = [pt(1, 1)];
+    var aliasOut = CsTrace.resample(aliasProbe, 1.0);
+    aliasOut[0].x = 99;
+    near(aliasProbe[0].x, 1.0, 1e-9,
+        "CsTrace.resample: the degenerate return does not alias the input");
+
+    // -- reduce -----------------------------------------------------
+    var straight = [pt(0, 0), pt(1, 0), pt(2, 0), pt(3, 0), pt(4, 0)];
+    var thinned = CsTrace.reduce(straight, 0.01);
+    eqs(thinned.length, 2,
+        "CsTrace.reduce: a straight run collapses to its two endpoints");
+
+    var corner = [pt(0, 0), pt(5, 0), pt(5, 5)];
+    eqs(CsTrace.reduce(corner, 0.01).length, 3,
+        "CsTrace.reduce: a real corner is kept");
+
+    var bulge = [pt(0, 0), pt(2, 1), pt(4, 0)];
+    eqs(CsTrace.reduce(bulge, 2.0).length, 2,
+        "CsTrace.reduce: a bulge inside tolerance is dropped");
+    eqs(CsTrace.reduce(bulge, 0.5).length, 3,
+        "CsTrace.reduce: the same bulge outside tolerance is kept");
+
+    var pair = [pt(0, 0), pt(9, 9)];
+    eqs(CsTrace.reduce(pair, 100.0).length, 2,
+        "CsTrace.reduce: endpoints survive any tolerance");
+
+    var reduceSource = [pt(0, 0), pt(1, 0), pt(2, 0)];
+    CsTrace.reduce(reduceSource, 0.01);
+    eqs(reduceSource.length, 3, "CsTrace.reduce: the caller's array is untouched");
+}());
+
+// ---------------------------------------------------------------------
 // Report.
 // ---------------------------------------------------------------------
 

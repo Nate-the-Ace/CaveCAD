@@ -367,6 +367,43 @@ class TestBasenameCollisions(unittest.TestCase):
     is skipped silently. Cs-prefixed basenames make that impossible,
     so every Core file must carry the prefix."""
 
+    def test_every_core_file_is_included_by_csall(self):
+        # A Core file missing from CsAll.js is undefined at runtime in
+        # EVERY tool, and nothing else in this suite notices: js_unit.js
+        # loads Core files individually with loadRepoScript, so it passes
+        # either way. This is the only place that gap is visible.
+        core = os.path.join(ADDON, "Core")
+        with open(os.path.join(core, "CsAll.js")) as handle:
+            source = handle.read()
+        # Parse the LIVE include lines, not the file text. A first cut of
+        # this test grepped the whole file for the filename, which a
+        # commented-out include still satisfies -- so it passed with the
+        # include disabled, exactly the vacuous-substring failure the
+        # icon test's comment warns about.
+        listed = set()
+        for line in source.splitlines():
+            stripped = line.strip()
+            if stripped.startswith("//"):
+                continue
+            found = re.search(r'include\(includeBasePath \+ "([^"]+)"\)',
+                              stripped)
+            if found:
+                listed.add(os.path.basename(found.group(1)))
+        missing = []
+        for dirpath, _dirnames, filenames in os.walk(core):
+            for filename in sorted(filenames):
+                if not filename.startswith("Cs") or \
+                        not filename.endswith(".js"):
+                    continue
+                if filename == "CsAll.js":
+                    continue
+                if filename not in listed:
+                    missing.append(os.path.relpath(
+                        os.path.join(dirpath, filename), core))
+        self.assertEqual(sorted(missing), [],
+                         "these Core files are not included by CsAll.js: "
+                         "%s" % sorted(missing))
+
     def test_core_files_are_cs_prefixed(self):
         core = os.path.join(ADDON, "Core")
         for dirpath, _dirnames, filenames in os.walk(core):
