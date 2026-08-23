@@ -505,7 +505,7 @@ CsProfile.adjacency = function(resolved) {
  *   parents:    {runKey: parentRunKey | null},
  *   ties:       {runKey: stationName | null},
  *   order:      [runKey] depth first, siblings by junction distance,
- *   secondTies: [{run, station, otherRun}] further contacts -- otherRun
+ *   secondTies: [{run, otherStation, otherRun}] further contacts -- otherRun
  *               is the run TOUCHED, not necessarily the parent: a second
  *               contact can land in a third run,
  *   mismatches: [{run, expected, actual}] name vs graph,
@@ -615,7 +615,7 @@ CsProfile.hierarchy = function(grouped, resolved) {
             }
             secondTies.push({
                 run: key,
-                station: contacts[k].station,
+                otherStation: contacts[k].station,
                 parentRun: contacts[k].parentRun
             });
         }
@@ -2857,7 +2857,7 @@ CsReport.profileSummary = function(profile, outcome) {
     if (f.secondTies.length > 0) {
         for (i = 0; i < f.secondTies.length; i++) {
             lines.push("  run " + f.secondTies[i].run +
-                " also touches " + f.secondTies[i].station +
+                " also touches " + f.secondTies[i].otherStation +
                 " (drawn as a tie line, not a second band)");
         }
     }
