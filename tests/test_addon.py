@@ -18,7 +18,6 @@ tests/js_syntax.js -- see tests/README.md.
 
 import os
 import re
-import shutil
 import subprocess
 import tempfile
 import unittest
@@ -79,6 +78,117 @@ def find_int(source, call):
 # setIcon() in a comment must not count as having one.
 def icons_referenced(source):
     return re.findall(r'setIcon\(basePath \+ "/([^"]+)"\)', source)
+
+
+def parse_layer_registry():
+    """CONSTANT_NAME -> layer-name string, for every CsLayers.X = "..."
+    assignment in Core/CsLayers.js. Shared by TestLayerVocabulary (which
+    only needs the values) and anything that needs to resolve a
+    CsLayers.SOME_CONSTANT reference found elsewhere in the source back
+    to its string."""
+    with open(os.path.join(ADDON, "Core", "CsLayers.js")) as fh:
+        source = fh.read()
+    return dict(re.findall(r'CsLayers\.([A-Z_]+) = "([^"]+)"', source))
+
+
+def parse_defaults_table():
+    """name -> (colorName, linetype, lineweightKey) for every row of
+    CsLayers.DEFAULTS in Core/CsLayers.js. Source-scraped rather than
+    imported (this is a QCAD-context .js file, not something Python can
+    execute) so a test comparing against it tracks edits automatically."""
+    with open(os.path.join(ADDON, "Core", "CsLayers.js")) as fh:
+        source = fh.read()
+    match = re.search(r"CsLayers\.DEFAULTS = \{(.*?)\n\};", source, re.S)
+    assert match is not None, ("CsLayers.DEFAULTS table not found -- did "
+                               "its opening/closing syntax change?")
+    entries = re.findall(
+        r'"([^"]+)":\s*\[\s*"([^"]+)",\s*"([^"]+)",\s*"([^"]+)"\s*\]',
+        match.group(1))
+    return dict((name, (color, linetype, weight))
+                for name, color, linetype, weight in entries)
+
+
+def parse_profile_draw_layers():
+    """The layer NAMES CsProfileDraw actually writes to, parsed straight
+    out of CsProfileDraw.LAYERS() in Core/CsProfileDraw.js -- not a
+    hand-copied guess of what it draws to, which is exactly what an
+    earlier version of test_profile_layers_exist_in_profile_template
+    was: it called CTRL-LRUD one of "the layers the profile generator
+    draws to" (false -- LAYERS() explicitly excludes it) and never
+    checked CTRL-SHOTS/CTRL-STATIONS/CTRL-STATION-LABELS/TEXT-LABELS at
+    all, which were only in the template by luck. Resolves each
+    CsLayers.* reference inside LAYERS() through the registry, so a
+    rename of either constant is caught here rather than silently
+    producing an empty or stale set."""
+    with open(os.path.join(ADDON, "Core", "CsProfileDraw.js")) as fh:
+        source = fh.read()
+    match = re.search(
+        r"CsProfileDraw\.LAYERS = function\(\)\s*\{\s*return\s*\[(.*?)\];",
+        source, re.S)
+    assert match is not None, ("CsProfileDraw.LAYERS() not found -- did "
+                               "its definition change shape?")
+    constant_names = re.findall(r"CsLayers\.([A-Z_]+)", match.group(1))
+    assert constant_names, ("no CsLayers.* references found inside "
+                            "CsProfileDraw.LAYERS()")
+    registry = parse_layer_registry()
+    return set(registry[name] for name in constant_names)
+
+
+# Standard SVG/CSS extended colour keywords, as Qt's QColor(name)
+# resolves them and RDxfExporter serialises the result into DXF group
+# 420 (AutoCAD true colour, 0xRRGGBB). Fixed by the colour-name spec
+# itself, not by anything in this repo -- unlike CsLayers.DEFAULTS,
+# which tools/add_profile_layers.js was previously duplicating, these
+# never drift, so hardcoding them here is not that same problem. Only
+# populated for the colour names CsLayers.DEFAULTS actually uses for
+# the four profile-generator layers; extend if a DEFAULTS row starts
+# using a new one.
+SVG_TRUE_COLOR = {
+    "gray": 0x808080,
+    "pink": 0xFFC0CB,
+}
+
+
+def strip_layer_records(content, names):
+    """Removes the named records from a DXF's LAYER table, byte-for-byte
+    identical otherwise. Used to fabricate a pre-migration copy of the
+    (already-migrated) shipped template, so the tool's ADD path can be
+    exercised without a second binary fixture to keep in sync."""
+    start = content.index("  0\nTABLE\n  2\nLAYER\n")
+    end = content.index("\n  0\nENDTAB\n", start)
+    table = content[start:end]
+    header, sep, rest = table.partition("\n  0\nLAYER\n")
+    assert sep, "LAYER table has no LAYER records to strip from"
+    entries = rest.split("\n  0\nLAYER\n")
+    kept = [e for e in entries
+            if re.search(r"\n  2\n(.+)\n", e).group(1) not in names]
+    new_table = header + "\n  0\nLAYER\n" + "\n  0\nLAYER\n".join(kept)
+    return content[:start] + new_table + content[end:]
+
+
+def parse_layer_records(content):
+    """name -> {"truecolor": int, "linetype": str, "lineweight": int}
+    for every record in a DXF's LAYER table. Companion to
+    strip_layer_records() above -- same delimiter logic, read direction
+    instead of write."""
+    start = content.index("  0\nTABLE\n  2\nLAYER\n")
+    end = content.index("\n  0\nENDTAB\n", start)
+    table = content[start:end]
+    _, sep, rest = table.partition("\n  0\nLAYER\n")
+    assert sep, "LAYER table has no LAYER records to parse"
+    out = {}
+    for entry in rest.split("\n  0\nLAYER\n"):
+        name = re.search(r"\n  2\n(.+)\n", entry).group(1)
+        truecolor = re.search(r"\n420\n(\d+)\n", entry)
+        linetype = re.search(r"\n  6\n(.+)\n", entry)
+        lineweight = re.search(r"\n370\n(-?\d+)\n", entry)
+        out[name] = {
+            "truecolor": int(truecolor.group(1)) if truecolor else None,
+            "linetype": linetype.group(1) if linetype else None,
+            "lineweight": (int(lineweight.group(1))
+                          if lineweight else None),
+        }
+    return out
 
 
 class TestAddonLayout(unittest.TestCase):
@@ -272,9 +382,7 @@ class TestLayerVocabulary(unittest.TestCase):
     """
 
     def layer_registry(self):
-        with open(os.path.join(ADDON, "Core", "CsLayers.js")) as fh:
-            source = fh.read()
-        return set(re.findall(r'CsLayers\.[A-Z_]+ = "([^"]+)"', source))
+        return set(parse_layer_registry().values())
 
     def template_layers(self, name):
         with open(os.path.join(TEMPLATES, name), encoding="utf-8",
@@ -298,29 +406,30 @@ class TestLayerVocabulary(unittest.TestCase):
                          "template: %s" % sorted(missing))
 
     def test_profile_layers_exist_in_profile_template(self):
-        """The elevation generator draws to these; a template without
-        them means the layers get invented at runtime with whatever
-        defaults, which is exactly the drift this class exists to stop.
+        """Every layer CsProfileDraw.LAYERS() actually writes to must
+        exist in the PROFILE template, or the layer gets invented at
+        runtime with whatever defaults -- exactly the drift this class
+        exists to stop.
+
+        CTRL-LRUD is RESERVED, not drawn to: CsProfileDraw.LAYERS()
+        explicitly excludes it (see that function's own docblock --
+        ensuring it "would promise geometry that never lands on it"),
+        but the template still carries it for a future module to adopt
+        without a template migration. An earlier version of this test
+        called CTRL-LRUD one of "the layers the profile generator draws
+        to", which was false, and it was missing four layers that
+        genuinely ARE drawn to (CTRL-SHOTS, CTRL-STATIONS,
+        CTRL-STATION-LABELS, TEXT-LABELS) -- those were only present in
+        the template by luck, never by assertion.
         """
         profile = self.template_layers("NSS_Cave_Template_PROFILE.dxf")
-        needed = self.PROFILE_ONLY | {"CTRL-LRUD", "CTRL-SPLAYS"}
+        RESERVED_NOT_DRAWN = {"CTRL-LRUD"}
+        needed = parse_profile_draw_layers() | RESERVED_NOT_DRAWN
         missing = needed - profile
         self.assertEqual(missing, set(),
-                         "layers the profile generator draws to but the "
-                         "PROFILE template lacks: %s" % sorted(missing))
-
-    def defaults_table(self):
-        with open(os.path.join(ADDON, "Core", "CsLayers.js")) as fh:
-            source = fh.read()
-        match = re.search(r"CsLayers\.DEFAULTS = \{(.*?)\n\};", source,
-                          re.S)
-        self.assertIsNotNone(match, "CsLayers.DEFAULTS table not found -- "
-                             "did its opening/closing syntax change?")
-        entries = re.findall(
-            r'"([^"]+)":\s*\[\s*"([^"]+)",\s*"([^"]+)",\s*"([^"]+)"\s*\]',
-            match.group(1))
-        return dict((name, (color, linetype, weight))
-                    for name, color, linetype, weight in entries)
+                         "layers CsProfileDraw.LAYERS() writes to (or "
+                         "reserves) but the PROFILE template lacks: %s" %
+                         sorted(missing))
 
     def test_registry_defines_profile_control_layers(self):
         """Mutation-tested gap: deleting CsLayers.PROFILE_FLOOR and
@@ -340,7 +449,7 @@ class TestLayerVocabulary(unittest.TestCase):
                      source)
         self.assertIn('CsLayers.PROFILE_CEILING = "CTRL-PROFILE-CEILING";',
                      source)
-        defaults = self.defaults_table()
+        defaults = parse_defaults_table()
         self.assertEqual(defaults.get("CTRL-PROFILE-FLOOR"),
                          ("gray", "DASHED", "Weight000"))
         self.assertEqual(defaults.get("CTRL-PROFILE-CEILING"),
@@ -348,20 +457,44 @@ class TestLayerVocabulary(unittest.TestCase):
 
 
 class TestAddProfileLayersToolIdempotence(unittest.TestCase):
-    """tools/add_profile_layers.js must be a no-op once every layer it
-    wants is already present -- the shipped template is exactly that
-    state, so from here on EVERY run against it must leave the bytes
-    untouched. A prior review confirmed this property had no automated
-    coverage at all (only a manual double-run), so a broken idempotence
-    guard -- e.g. dropping the doc.hasLayer() check inside the tool --
-    could re-export the template on every invocation without any test
-    noticing. Runs the real tool under the real engine on a throwaway
-    copy; nothing here touches the repo's own template file.
+    """tools/add_profile_layers.js must both ADD its four layers, with
+    the right appearance, when they are missing, AND do nothing on every
+    run after. A prior review found the ADD path had zero coverage: the
+    first version of this test only ever ran the tool against an
+    already-migrated template, where doing nothing IS correct -- so a
+    tool that never added anything, always reported skip, dropped
+    CTRL-LRUD/CTRL-SPLAYS from its own worklist, or fell back to a
+    hand-rolled layer with the wrong colour/linetype/lineweight all
+    survived a fully green suite. test_add_path_then_idempotence
+    fabricates a pre-migration copy of the shipped template by
+    stripping just the four target LAYER records back out with
+    strip_layer_records(), so the fixture stays byte-for-byte the real
+    template otherwise and cannot drift from it. The other two tests
+    cover the importFile/exportFile failure branches, which a fixture
+    that always succeeds can never reach.
+
+    Shells out to the real CaveCAD engine (~1s per invocation) because
+    "run the one-shot tool and inspect what it wrote" cannot be checked
+    any other way; every test here skips itself when CaveCAD is not
+    installed at the expected path.
     """
 
     CAVECAD = os.environ.get(
         "CAVESURVEY_CAVECAD",
         "/Applications/CaveCAD.app/Contents/MacOS/CaveCAD")
+
+    # The exact four layers tools/add_profile_layers.js is responsible
+    # for. Fixed here independent of the tool's own WANTED list: if a
+    # future edit drops one of these from WANTED, this test must keep
+    # expecting it (and fail), not silently shrink its own expectation
+    # to match whatever the tool currently claims to do.
+    ADDED_LAYERS = ("CTRL-PROFILE-FLOOR", "CTRL-PROFILE-CEILING",
+                   "CTRL-LRUD", "CTRL-SPLAYS")
+
+    def setUp(self):
+        if not os.path.exists(self.CAVECAD):
+            self.skipTest("CaveCAD not found at %s -- see run_all.sh" %
+                          self.CAVECAD)
 
     def run_tool(self, fake_repo_root):
         # -no-dock-icon/-no-gui/-allow-multiple-instances match the
@@ -374,53 +507,149 @@ class TestAddProfileLayersToolIdempotence(unittest.TestCase):
             stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=60)
         return result.stdout.decode("utf-8", "replace")
 
-    def test_second_run_does_not_rewrite_the_template(self):
-        if not os.path.exists(self.CAVECAD):
-            self.skipTest("CaveCAD not found at %s -- see run_all.sh" %
-                          self.CAVECAD)
+    def make_fake_repo(self, tmp, template_bytes=None):
+        """A throwaway repoRoot: the tool derives BOTH the Core library
+        location and the template path from this single argument, so it
+        needs a real scripts/CaveSurvey/Core (symlinked -- CsLayers.js
+        must be the genuine, current one) and a templates/ directory.
+        template_bytes=None leaves the target file absent, to exercise
+        the importFile-failure branch. Returns the target path (which
+        may or may not exist on disk, per template_bytes)."""
+        os.symlink(os.path.join(REPO, "scripts"), os.path.join(tmp, "scripts"))
+        os.mkdir(os.path.join(tmp, "templates"))
+        target = os.path.join(tmp, "templates",
+                              "NSS_Cave_Template_PROFILE.dxf")
+        if template_bytes is not None:
+            with open(target, "wb") as fh:
+                fh.write(template_bytes)
+        return target
 
+    def pre_migration_bytes(self):
+        """The shipped, already-migrated template with exactly the four
+        layers this tool owns stripped back out -- everything else
+        (including every OTHER layer) is untouched, so this fixture
+        cannot drift from the real template the way a hand-maintained
+        second fixture file could."""
         real_template = os.path.join(TEMPLATES,
                                      "NSS_Cave_Template_PROFILE.dxf")
         with open(real_template, "rb") as fh:
-            original_bytes = fh.read()
+            migrated_text = fh.read().decode("utf-8", "replace")
+        stripped_text = strip_layer_records(migrated_text, self.ADDED_LAYERS)
+        return stripped_text.encode("utf-8")
+
+    def test_add_path_then_idempotence(self):
+        defaults = parse_defaults_table()
 
         with tempfile.TemporaryDirectory() as tmp:
-            # The tool derives BOTH the Core library location and the
-            # template path from the single repoRoot argument, so the
-            # fake root needs a real scripts/CaveSurvey/Core (symlinked
-            # -- CsLayers.js must be the genuine, current one) and a
-            # throwaway copy of just the template it writes to.
-            os.symlink(os.path.join(REPO, "scripts"),
-                       os.path.join(tmp, "scripts"))
-            os.mkdir(os.path.join(tmp, "templates"))
-            target = os.path.join(tmp, "templates",
-                                  "NSS_Cave_Template_PROFILE.dxf")
-            shutil.copyfile(real_template, target)
+            target = self.make_fake_repo(tmp, self.pre_migration_bytes())
 
             first_output = self.run_tool(tmp)
+            expected_ok_line = ("ok    %s -- %d layer(s) added" %
+                                (target, len(self.ADDED_LAYERS)))
+            self.assertIn(
+                expected_ok_line, first_output.splitlines(),
+                "first run against a pre-migration template did not "
+                "report the exact expected add line -- got: %r" %
+                first_output)
+
             with open(target, "rb") as fh:
-                after_first = fh.read()
+                after_add_bytes = fh.read()
+            records = parse_layer_records(
+                after_add_bytes.decode("utf-8", "replace"))
+
+            for name in self.ADDED_LAYERS:
+                self.assertIn(
+                    name, records,
+                    "%s missing from the LAYER table after the tool "
+                    "reported adding it" % name)
+                color_name, linetype, weight_key = defaults[name]
+                expected_truecolor = SVG_TRUE_COLOR[color_name]
+                expected_weight = int(weight_key.replace("Weight", ""))
+                actual = records[name]
+                self.assertEqual(
+                    actual["truecolor"], expected_truecolor,
+                    "%s: colour 0x%06X does not match CsLayers.DEFAULTS "
+                    "%r (0x%06X)" % (name, actual["truecolor"] or 0,
+                                    color_name, expected_truecolor))
+                self.assertEqual(
+                    (actual["linetype"] or "").upper(), linetype.upper(),
+                    "%s: linetype %r does not match CsLayers.DEFAULTS %r"
+                    % (name, actual["linetype"], linetype))
+                self.assertEqual(
+                    actual["lineweight"], expected_weight,
+                    "%s: lineweight %r does not match CsLayers.DEFAULTS "
+                    "%r (%d)" % (name, actual["lineweight"], weight_key,
+                                expected_weight))
 
             second_output = self.run_tool(tmp)
-            with open(target, "rb") as fh:
-                after_second = fh.read()
+            expected_skip_line = ("skip  %s -- every layer already "
+                                  "present" % target)
+            self.assertIn(
+                expected_skip_line, second_output.splitlines(),
+                "second run did not report the exact expected skip "
+                "line -- got: %r" % second_output)
 
-        self.assertIn("skip", first_output,
-                      "the shipped template is supposed to already carry "
-                      "every layer the tool wants, so even the FIRST run "
-                      "here should be a no-op -- got: %r" % first_output)
-        self.assertEqual(
-            original_bytes, after_first,
-            "add_profile_layers.js rewrote the template even though it "
-            "reported skip on the first run")
-        self.assertIn("skip", second_output,
-                      "second run did not report skip -- got: %r" %
-                      second_output)
-        self.assertEqual(
-            after_first, after_second,
-            "add_profile_layers.js rewrote an already-migrated template "
-            "on a second run -- it is supposed to be a no-op once every "
-            "layer is present")
+            with open(target, "rb") as fh:
+                after_second_bytes = fh.read()
+            self.assertEqual(
+                after_add_bytes, after_second_bytes,
+                "add_profile_layers.js rewrote an already-migrated "
+                "template on a second run -- it is supposed to be a "
+                "no-op once every layer is present")
+
+    def test_reports_failure_and_creates_nothing_when_template_is_missing(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            target = self.make_fake_repo(tmp, template_bytes=None)
+
+            output = self.run_tool(tmp)
+
+            self.assertIn(
+                "FAIL  cannot read " + target, output.splitlines(),
+                "importFile failure on a missing template did not "
+                "produce the exact expected FAIL line -- got: %r" %
+                output)
+            self.assertIn("### ADD PROFILE LAYERS FAIL",
+                         output.splitlines())
+            self.assertFalse(
+                os.path.exists(target),
+                "the tool created a template file after failing to read "
+                "one that did not exist -- an ignored importFile "
+                "failure would do exactly this")
+
+    def test_reports_failure_and_leaves_file_untouched_when_export_fails(self):
+        pre_bytes = self.pre_migration_bytes()
+
+        with tempfile.TemporaryDirectory() as tmp:
+            target = self.make_fake_repo(tmp, pre_bytes)
+            # A read-only target FILE: importFile can still read it (Qt
+            # opens for read), but exportFile's rewrite-in-place cannot
+            # open it for writing -- a real, reproducible way to trigger
+            # the exportFile FAIL branch rather than assuming it can
+            # never fire. (A read-only DIRECTORY with a writable file
+            # inside does NOT reproduce this: the exporter truncates the
+            # existing file in place rather than replacing it, which
+            # only needs write permission on the file itself.)
+            os.chmod(target, 0o444)
+            try:
+                output = self.run_tool(tmp)
+            finally:
+                os.chmod(target, 0o644)
+
+            self.assertIn(
+                "FAIL  cannot write " + target, output.splitlines(),
+                "exportFile failure on a read-only directory did not "
+                "produce the exact expected FAIL line -- got: %r" %
+                output)
+            self.assertIn("### ADD PROFILE LAYERS FAIL",
+                         output.splitlines())
+            with open(target, "rb") as fh:
+                after_bytes = fh.read()
+            self.assertEqual(
+                pre_bytes, after_bytes,
+                "the file changed even though exportFile is supposed to "
+                "have failed -- an ignored exportFile failure would "
+                "silently succeed here instead of leaving the "
+                "pre-migration bytes alone")
 
 
 class TestReadmeToolTable(unittest.TestCase):
