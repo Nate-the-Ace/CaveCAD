@@ -82,6 +82,10 @@ function ok(cond, what) {
 function eqs(a, b, what) {
     ok(a === b, what + " (expected " + b + ", got " + a + ")");
 }
+function near(a, b, tol, what) {
+    ok(Math.abs(a - b) <= tol,
+        what + " (expected " + b + " +/- " + tol + ", got " + a + ")");
+}
 
 function shotOf(from, to, d, az, inc, u, dn) {
     var s = CsModel.newShot();
@@ -92,7 +96,18 @@ function shotOf(from, to, d, az, inc, u, dn) {
     return s;
 }
 
-/** Every Profile*-tagged entity in the doc, as {id, tags: {key: value}}. */
+// This file's OWN literal namespace list, kept deliberately separate
+// from CsProfileDraw.TAGS: a scanner reading the constant it is meant
+// to be testing would let a mutation that drops a tag from TAGS mutate
+// the test right alongside the code, so every kill through that tag
+// would prove nothing about erase()/render() at all. Kept in sync BY
+// HAND with the table in CsProfileDraw.js's own file banner.
+var KNOWN_PROFILE_TAGS = ["ProfileRun", "ProfileStation", "ProfileShot",
+    "ProfileSplay", "ProfileFloorRun", "ProfileCeilingRun",
+    "ProfileBandLabel", "ProfileZOffset"];
+
+/** Every Profile*-tagged entity in the doc, as
+ *  {id, entity, layer, tags: {key: value}}. */
 function scanProfileEntities(doc) {
     var out = [];
     var ids = doc.queryAllEntities(false, false);
@@ -101,18 +116,33 @@ function scanProfileEntities(doc) {
         if (isNull(e)) { continue; }
         var tags = {};
         var any = false;
-        for (var t = 0; t < CsProfileDraw.TAGS.length; t++) {
-            var v = CsTags.get(e, CsProfileDraw.TAGS[t]);
+        for (var t = 0; t < KNOWN_PROFILE_TAGS.length; t++) {
+            var v = CsTags.get(e, KNOWN_PROFILE_TAGS[t]);
             if (v !== null && v !== "") {
-                tags[CsProfileDraw.TAGS[t]] = v;
+                tags[KNOWN_PROFILE_TAGS[t]] = v;
                 any = true;
             }
         }
         if (any) {
-            out.push({ id: ids[i], entity: e, tags: tags });
+            var layerName = null;
+            try {
+                layerName = doc.getLayerName(e.getLayerId());
+            } catch (eLayer) {
+                layerName = null;
+            }
+            out.push({ id: ids[i], entity: e, layer: layerName, tags: tags });
         }
     }
     return out;
+}
+
+/** True if entity is a plain point (RS.EntityPoint), the same getType()
+ *  idiom RebuildSurveyData.js uses to tell entity kinds apart -- used
+ *  below to separate a station's POINT from its text LABEL, since both
+ *  carry the identical ProfileStation tag. */
+function isPointEntity(entity) {
+    return typeof entity.getType === "function" &&
+        entity.getType() === RS.EntityPoint;
 }
 
 /** How many scanned entities carry tagKey === tagValue. */
@@ -201,6 +231,70 @@ for (var a1i = 0; a1i < a1Entities.length; a1i++) {
         "A1's entity #" + a1i + " (by ProfileStation) also carries ProfileRun");
 }
 
+// property: the layer split is the whole payload of Task 6 -- drawing
+// every kind of entity onto the wrong (but still valid) layer would
+// leave every count/tag assertion above green. Checked here for the
+// three kinds this fixture produces; fixture 2 below covers the other
+// three (ceiling/floor/flat all need real wall evidence to exist at
+// all).
+var a1Point = null, a1Label = null;
+for (var a1j = 0; a1j < a1Entities.length; a1j++) {
+    if (isPointEntity(a1Entities[a1j].entity)) {
+        a1Point = a1Entities[a1j];
+    } else {
+        a1Label = a1Entities[a1j];
+    }
+}
+ok(a1Point !== null && a1Label !== null,
+    "sanity: A1's point and label were told apart");
+if (a1Point !== null) {
+    eqs(a1Point.layer, CsLayers.STATIONS,
+        "the station POINT lands on CTRL-STATIONS");
+}
+if (a1Label !== null) {
+    eqs(a1Label.layer, CsLayers.STATION_LABELS,
+        "the station LABEL lands on CTRL-STATION-LABELS, a different " +
+        "layer from its own point");
+}
+// minor: the label sits TEXT_HEIGHT*1.5 above its point -- a comment
+// in CsProfileDraw.band cites this exact number as the reason a
+// getType() filter is needed at all (section 3 below), so the number
+// itself is worth pinning down, not just its consequence.
+if (a1Point !== null && a1Label !== null) {
+    near(a1Label.entity.getPosition().y - a1Point.entity.getPosition().y,
+        CsDraw.TEXT_HEIGHT * 1.5, 1e-9,
+        "the station label's Y offset above its point is exactly " +
+        "TEXT_HEIGHT * 1.5");
+}
+
+var a1a2Leg = null, bandALabel = null;
+for (var a1k = 0; a1k < scanned1.length; a1k++) {
+    if (scanned1[a1k].tags.ProfileShot === "A1->A2") { a1a2Leg = scanned1[a1k]; }
+    if (scanned1[a1k].tags.ProfileBandLabel === "A") { bandALabel = scanned1[a1k]; }
+}
+ok(a1a2Leg !== null, "sanity: found the A1->A2 leg");
+if (a1a2Leg !== null) {
+    eqs(a1a2Leg.layer, CsLayers.SHOTS, "a centerline leg lands on CTRL-SHOTS");
+}
+ok(bandALabel !== null, "sanity: found band A's caption");
+if (bandALabel !== null) {
+    eqs(bandALabel.layer, CsLayers.TEXT_LABELS,
+        "a band caption lands on TEXT-LABELS");
+    // minor: the caption sits TEXT_HEIGHT*4.0 above CsProfileDraw.
+    // labelY0(band) (band A's own zOffset is 0, so no further shift).
+    var bandA = null;
+    for (var bak = 0; bak < profile.bands.length; bak++) {
+        if (profile.bands[bak].key === "A") { bandA = profile.bands[bak]; }
+    }
+    if (bandA !== null) {
+        near(bandALabel.entity.getPosition().y -
+                (CsProfileDraw.labelY0(bandA) + (bandA.zOffset || 0.0)),
+            CsDraw.TEXT_HEIGHT * 4.0, 1e-9,
+            "the band caption's Y offset above the band's reference " +
+            "height is exactly TEXT_HEIGHT * 4.0");
+    }
+}
+
 destr(di);
 
 // =======================================================================
@@ -265,6 +359,58 @@ for (var fsi = 0; fsi < scannedC1.length; fsi++) {
             "the flat tick also carries ProfileRun");
     }
 }
+
+// property 3, over THIS fixture: fixture 1's own sweep never produces
+// a wall run at all, so it cannot see a ceiling/floor polyline missing
+// ProfileRun -- only this fixture's ceiling/floor/flat entities can.
+var missingRunC = 0;
+for (var mci = 0; mci < scannedC1.length; mci++) {
+    if (scannedC1[mci].tags.ProfileRun === undefined) { missingRunC++; }
+}
+eqs(missingRunC, 0,
+    "every Profile*-tagged entity in the wall-run fixture also carries " +
+    "ProfileRun (" + missingRunC + " of " + scannedC1.length +
+    " did not)");
+
+// property 2 (Task 6's whole payload): the ceiling/floor/flat layer
+// split is otherwise unasserted anywhere in this file -- drawing every
+// ceiling run onto CsLayers.PROFILE_FLOOR instead would leave every
+// count and tag assertion above green.
+var ceilingEnt = null, floorEnt = null, flatEnt = null;
+for (var lci = 0; lci < scannedC1.length; lci++) {
+    if (scannedC1[lci].tags.ProfileCeilingRun === "C.1") { ceilingEnt = scannedC1[lci]; }
+    if (scannedC1[lci].tags.ProfileFloorRun === "C.1") { floorEnt = scannedC1[lci]; }
+    if (scannedC1[lci].tags.ProfileSplay === "C2.1") { flatEnt = scannedC1[lci]; }
+}
+ok(ceilingEnt !== null && floorEnt !== null && flatEnt !== null,
+    "sanity: found the ceiling run, floor run, and flat tick");
+if (ceilingEnt !== null) {
+    eqs(ceilingEnt.layer, CsLayers.PROFILE_CEILING,
+        "the ceiling run lands on CTRL-PROFILE-CEILING");
+}
+if (floorEnt !== null) {
+    eqs(floorEnt.layer, CsLayers.PROFILE_FLOOR,
+        "the floor run lands on CTRL-PROFILE-FLOOR, not the ceiling's " +
+        "layer -- the whole point of Task 6's layer split");
+}
+if (flatEnt !== null) {
+    eqs(flatEnt.layer, CsLayers.SPLAYS,
+        "the flat splay tick lands on CTRL-SPLAYS");
+    // minor: the tick's own length. half = CsDraw.TEXT_HEIGHT, drawn
+    // from (f.x, f.y-half) to (f.x, f.y+half), so its length is
+    // exactly 2 * TEXT_HEIGHT regardless of where f itself sits.
+    if (typeof flatEnt.entity.getStartPoint === "function" &&
+            typeof flatEnt.entity.getEndPoint === "function") {
+        var fp1 = flatEnt.entity.getStartPoint();
+        var fp2 = flatEnt.entity.getEndPoint();
+        var flatLen = Math.sqrt(
+            (fp2.x - fp1.x) * (fp2.x - fp1.x) +
+            (fp2.y - fp1.y) * (fp2.y - fp1.y));
+        near(flatLen, CsDraw.TEXT_HEIGHT * 2.0, 1e-9,
+            "the flat tick's own length is exactly 2 * TEXT_HEIGHT");
+    }
+}
+
 var oldCeilingId = null;
 for (var ci = 0; ci < scannedC1.length; ci++) {
     if (scannedC1[ci].tags.ProfileCeilingRun === "C.1") {
@@ -310,6 +456,79 @@ eqs(countByTag(scannedC2, "ProfileSplay", "C2.1"), 1,
 ok(docC.queryLayer(CsLayers.PROFILE_CEILING).isOff(),
     "CsLayers.withLayerOn restored the user's own off choice afterward " +
     "-- the redraw did not leave their layer visible");
+
+// =======================================================================
+// 2b. THE PROMOTED-LINE CASE. A cartographer who likes a generated
+//    ceiling run does not retrace it by hand -- they change ITS LAYER
+//    from CTRL-PROFILE-CEILING to the plain PROFILE-CEILING tracing
+//    layer and keep it. XDATA is per-entity and survives a layer
+//    change, so the promoted line still carries ProfileCeilingRun/
+//    ProfileRun afterward. erase()'s ORIGINAL tag-only scan destroyed
+//    it on the very next redraw -- this is the review finding that
+//    made erase() require BOTH tag AND layer membership; this is the
+//    test that proves the fix actually holds.
+// =======================================================================
+
+var promoted = null;
+for (var pci = 0; pci < scannedC2.length; pci++) {
+    if (scannedC2[pci].tags.ProfileCeilingRun === "C.1") { promoted = scannedC2[pci]; }
+}
+ok(promoted !== null, "sanity: found the current ceiling run to promote");
+if (promoted !== null) {
+    var promotedId = promoted.id;
+    var promotedEnt = docC.queryEntity(promotedId);
+    // The plain PROFILE-CEILING tracing layer has never been created
+    // in this fixture's document (nothing traced on it yet) -- ensure
+    // it first, or getLayerId() below returns the default "0" layer's
+    // id instead of failing loudly.
+    CsLayers.ensure(docC, diC, "PROFILE-CEILING");
+    // CTRL-PROFILE-CEILING is still off from section 2 above -- turn it
+    // back on first, the ordinary way a person would before touching
+    // anything on it, so this is a layer CHANGE, not another off-layer
+    // scenario layered on top of the one already covered.
+    CsLayers.withLayerOn(docC, diC, CsLayers.PROFILE_CEILING, function() {
+        var promoteOp = new RModifyObjectsOperation();
+        promotedEnt.setLayerId(docC.getLayerId("PROFILE-CEILING"));
+        promoteOp.addObject(promotedEnt, false);
+        diC.applyOperation(promoteOp);
+    });
+    ok(docC.getLayerName(docC.queryEntity(promotedId).getLayerId()) ===
+        "PROFILE-CEILING",
+        "sanity: the ceiling run really did move to the plain tracing " +
+        "layer");
+    ok(CsTags.get(docC.queryEntity(promotedId), "ProfileCeilingRun") === "C.1",
+        "sanity: XDATA survived the layer change -- the promoted line " +
+        "still carries its own tag");
+
+    CsProfileDraw.render(docC, diC, profileC, {});
+
+    var promotedAfter = docC.queryEntity(promotedId);
+    ok(!isNull(promotedAfter) &&
+        !(typeof promotedAfter.isUndone === "function" &&
+            promotedAfter.isUndone()),
+        "THE PROMOTED LINE SURVIVED REGENERATION");
+    if (!isNull(promotedAfter)) {
+        eqs(docC.getLayerName(promotedAfter.getLayerId()), "PROFILE-CEILING",
+            "the promoted line was not swept back onto CTRL-PROFILE-CEILING");
+    }
+
+    var scannedC3 = scanProfileEntities(docC);
+    eqs(countByTag(scannedC3, "ProfileCeilingRun", "C.1"), 2,
+        "TWO entities now carry ProfileCeilingRun=C.1: the promoted " +
+        "line (kept, on the tracing layer) and a fresh one render() " +
+        "drew beside it (on CTRL-PROFILE-CEILING) -- not one (the " +
+        "promoted line eaten) and not merged into a single copy");
+    var freshOnOwnLayer = 0;
+    for (var pcj = 0; pcj < scannedC3.length; pcj++) {
+        if (scannedC3[pcj].tags.ProfileCeilingRun === "C.1" &&
+                scannedC3[pcj].layer === CsLayers.PROFILE_CEILING) {
+            freshOnOwnLayer++;
+        }
+    }
+    eqs(freshOnOwnLayer, 1,
+        "exactly one of the two C.1-tagged entities is the fresh copy " +
+        "on CTRL-PROFILE-CEILING");
+}
 
 destr(diC);
 
@@ -386,6 +605,27 @@ if (bandQ !== null && bandR !== null) {
             "), not at its true elevation 0 (got " + r1Pos.y + ") -- " +
             "PROOF zOffset actually reaches drawn geometry, not just " +
             "the caption");
+    }
+
+    // ProfileZOffset itself is only ever asserted ABSENT (fixture 4,
+    // zOffset === 0) elsewhere in this file -- the positive case, where
+    // a real displacement actually gets tagged and captioned, was
+    // unasserted even though bandR already has zOffset = -5 right here.
+    var bandRLabel = null;
+    for (var eri = 0; eri < scannedE.length; eri++) {
+        if (scannedE[eri].tags.ProfileBandLabel === "R") { bandRLabel = scannedE[eri]; }
+    }
+    ok(bandRLabel !== null, "sanity: found band R's caption");
+    if (bandRLabel !== null) {
+        eqs(bandRLabel.tags.ProfileZOffset, String(bandR.zOffset),
+            "the displaced band's caption is tagged with its own " +
+            "zOffset, not merely captioned in prose");
+        var expectedRText = CsDraw.caps(CsProfileDraw.labelText(bandR));
+        if (typeof bandRLabel.entity.getPlainText === "function") {
+            eqs(bandRLabel.entity.getPlainText(), expectedRText,
+                "the displaced band's caption reads the real offset " +
+                "(e.g. \"R SURVEY -- SHOWN 5.0 BELOW TRUE ELEVATION\")");
+        }
     }
     destr(diE);
 }

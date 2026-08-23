@@ -12,8 +12,14 @@
 // its own, so that plan-side scanners (CsDraw.eraseStations,
 // RebuildSurveyData, CsRevise) can never mistake an elevation for a
 // plan even if the two drawings are one day merged. erase() keys on
-// exactly this namespace, which is what makes regeneration replace the
-// generator's own output and leave hand-drawn work alone.
+// BOTH this namespace AND layer membership (CsProfileDraw.LAYERS()) --
+// the tag alone is what THIS module writes, never a guarantee about
+// what every entity in the drawing carries: a generated line promoted
+// to a plain tracing layer (see erase()'s own docblock) keeps its tag
+// through the move, and only the layer check is what then tells the
+// two apart. That pairing is what makes regeneration replace the
+// generator's own output and leave hand-drawn -- and hand-promoted --
+// work alone.
 //
 //   ProfileRun         every entity of a band: its run key
 //   ProfileStation     station point and its label
@@ -93,12 +99,27 @@ CsProfileDraw.withOwnLayersOn = function(doc, di, fn) {
 /**
  * Erases every entity this module drew, and only those.
  *
- * Any Profile* tag marks an entity as ours. Nothing else is touched:
- * hand-drawn linework on PROFILE-FLOOR / PROFILE-CEILING (the plain,
- * un-prefixed pair the PROFILE template reserves for tracing) carries
- * no Profile* tag, so it is invisible to this scan -- which is the
- * whole reason the generated lines went onto a CTRL- pair of their own
- * rather than sharing those layers.
+ * BOTH a Profile* tag AND a layer in CsProfileDraw.LAYERS() are
+ * required -- a tag alone is NOT proof of ownership. The obvious
+ * cartographer move is to take a generated CTRL-PROFILE-CEILING
+ * polyline worth keeping and change ITS LAYER to the plain,
+ * un-prefixed PROFILE-CEILING tracing layer, rather than retracing it
+ * by hand. XDATA is per-entity and survives a layer change, so that
+ * promoted line still carries every Profile* tag it was drawn with --
+ * a tag-only scan destroyed it on the very next redraw, exactly the
+ * "regeneration must not eat MY work" property this whole module
+ * exists to protect, on the one piece of kept work that happens to
+ * still answer to our own tags. Checking the layer too costs nothing
+ * against the generator's own output (render() never draws anywhere
+ * else) and is what makes the promoted line survive: the scan still
+ * finds it (it IS tagged), but its layer is not one of ours, so it is
+ * left alone and a fresh copy is drawn beside it instead.
+ *
+ * Ordinary hand-drawn linework typically carries no Profile* tag at
+ * all, which is most of why a plain sketch survives -- but that is a
+ * fact about how people usually draw, not something this function can
+ * safely rely on by itself; the layer check is what makes the
+ * ownership test hold for every case, promoted lines included.
  *
  * The delete runs inside CsProfileDraw.withOwnLayersOn: off layers
  * refuse deletes as silently as they refuse adds in this build, so
@@ -110,6 +131,12 @@ CsProfileDraw.withOwnLayersOn = function(doc, di, fn) {
  * \return number of entities removed
  */
 CsProfileDraw.erase = function(doc, di) {
+    var ownLayers = {};
+    var ownLayerNames = CsProfileDraw.LAYERS();
+    for (var ln = 0; ln < ownLayerNames.length; ln++) {
+        ownLayers[ownLayerNames[ln]] = true;
+    }
+
     var victims = [];
     var ids = doc.queryAllEntities(false, false);
     for (var i = 0; i < ids.length; i++) {
@@ -117,13 +144,31 @@ CsProfileDraw.erase = function(doc, di) {
         if (isNull(e)) {
             continue;
         }
+        var tagged = false;
         for (var t = 0; t < CsProfileDraw.TAGS.length; t++) {
             var v = CsTags.get(e, CsProfileDraw.TAGS[t]);
             if (v !== null && v !== "") {
-                victims.push(ids[i]);
+                tagged = true;
                 break;
             }
         }
+        if (!tagged) {
+            continue;
+        }
+        // Tagged is not enough on its own (see above): also require
+        // the entity to still be sitting on one of OUR layers. A
+        // promoted line's layer name is not in this set, so it never
+        // reaches `victims` even though the tag loop just found it.
+        var layerName;
+        try {
+            layerName = doc.getLayerName(e.getLayerId());
+        } catch (eLayer) {
+            continue;   // layer unreadable: not provably ours, leave it
+        }
+        if (ownLayers[layerName] !== true) {
+            continue;
+        }
+        victims.push(ids[i]);
     }
     if (victims.length === 0) {
         return 0;
@@ -190,14 +235,21 @@ CsProfileDraw.labelText = function(band) {
  * tempting shortcut -- `band.datum` -- is null in EXACTLY this case
  * (CsProfile.unrollBand: datum is null whenever the chain is empty or
  * its first member's Z never resolved, which is also the only way
- * `stations` itself comes back empty), and `null + number` in this
- * language silently coerces to the same fabricated zero that "never
- * default a missing Z to 0" exists to forbid everywhere else in this
- * codebase. Returning a literal 0.0 here is not that default in
- * disguise: no station, wall point, or leg is ever drawn at this
- * height for this band (there is nothing left to draw), and
- * CsProfileDraw.labelText's caption for this same case names the real
- * station and reason a reader would otherwise have to guess at.
+ * `stations` itself comes back empty). NOT A BUG FIX, TO BE CLEAR:
+ * `null + h` and `0.0 + h` are the same number in this language, so a
+ * caller using `band.datum` directly would have drawn at exactly this
+ * same height -- nothing was ever drawn wrong, and a mutation that
+ * reverts this to `band.datum` is an EQUIVALENT mutant, not a covered
+ * one. What this buys is that the code no longer DEPENDS on that
+ * coercion to reach the right number by accident: reading `0.0` here
+ * says plainly "no station, wall point, or leg is drawn at this height
+ * for this band" rather than resting on `null`'s arithmetic behavior,
+ * which is exactly the kind of implicit reliance the "never default a
+ * missing Z to 0" convention exists to keep out of code that touches
+ * real survey elevations -- even though, this one time, the coercion
+ * and the explicit value happen to agree. CsProfileDraw.labelText's
+ * caption for this same case names the real station and reason a
+ * reader would otherwise have to guess at.
  */
 CsProfileDraw.labelY0 = function(band) {
     if (band.stations.length > 0) {
@@ -253,7 +305,7 @@ CsProfileDraw.run = function(doc, op, layerName, points, at, tagKey,
 };
 
 /** One band, into an operation already open. */
-CsProfileDraw.band = function(doc, op, band, counts, opts) {
+CsProfileDraw.band = function(doc, op, band, counts) {
     var dz = band.zOffset || 0.0;
     var at = function(x, y) {
         return new RVector(x, y + dz);
@@ -318,21 +370,25 @@ CsProfileDraw.band = function(doc, op, band, counts, opts) {
         counts.flatTicks++;
     }
 
-    if (opts.labelBands !== false) {
-        CsProfileDraw.label(doc, op, band, at);
-    }
+    CsProfileDraw.label(doc, op, band, at);
 };
 
 /**
  * Draws a whole built profile into (doc, di).
  *
  * \param profile CsProfile.build() result
- * \param opts    {labelBands: bool (default true)}
+ * \param opts    reserved for future options; currently unused (a
+ *                 labelBands suppress-the-caption switch was dropped --
+ *                 no caller ever set it, Task 10's tool has no reason
+ *                 to suppress a band's label, and a dead option left in
+ *                 place only accumulates). Kept as a parameter, not
+ *                 removed outright, so a real future option does not
+ *                 have to change this function's call signature.
  * \return {bandsDrawn, legsDrawn, stationsDrawn, ceilingRuns,
  *          floorRuns, flatTicks, erased}
  */
 CsProfileDraw.render = function(doc, di, profile, opts) {
-    opts = opts || {};
+    opts = opts || {};   // accepted, currently unread -- see \param opts
     var layers = CsProfileDraw.LAYERS();
     for (var l = 0; l < layers.length; l++) {
         CsLayers.ensure(doc, di, layers[l]);
@@ -348,7 +404,7 @@ CsProfileDraw.render = function(doc, di, profile, opts) {
 
     var bands = (profile && profile.bands) ? profile.bands : [];
     for (var b = 0; b < bands.length; b++) {
-        CsProfileDraw.band(doc, op, bands[b], counts, opts);
+        CsProfileDraw.band(doc, op, bands[b], counts);
         counts.bandsDrawn++;
     }
 

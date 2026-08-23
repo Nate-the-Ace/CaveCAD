@@ -58,6 +58,24 @@ Learned the hard way in this repo; violating any of these produces a silent fail
 - **Never default a missing Z to 0.** That silently rebases a cave surveyed to an absolute datum. If a station has no resolved Z, skip it and report it.
 - **All text through `CsDraw.addText`**, which capitalises via `CsDraw.caps`. Never capitalise model data.
 - **Tag writes via `CsTags.set`**, never `setCustomProperty` directly.
+- **Every tool includes BOTH `scripts/EAction.js` AND `scripts/simple.js`.** `getDocument()`,
+  `getMainWindow()` and `warning()` all live in `simple.js`, and every shipped tool in this suite
+  includes it. Omitting it produces a tool whose globals are undefined depending on load order —
+  no error, just a tool that does not work. Also: guard-clause failures use the plain `warning()`
+  global (every native tool does), and `QMessageBox.*` takes `getMainWindow()`, not
+  `RMainWindowQt.getMainWindow()` — that longer form is for `init()`'s `RGuiAction` only.
+- **A TOOL THAT REPORTS ON EXISTING GEOMETRY MUST RESOLVE UNDER THE DRAWING'S OWN ADJUSTMENT
+  TAGS**, via `CsAdjust.resolveAndAdjust` with `CsAdjust.optionsFromTags(...)` read off the trip-0
+  anchor — the pattern `SurveyStats` already uses and documents. A bare `CsNetwork.resolve` would
+  re-solve under today's global settings, so a manually forced profile would disagree with the
+  automatically drawn one on any survey with loop closures. Every caller of `CsDraw.survey`
+  already resolves-and-adjusts, so the automatic path is adjusted; the manual path must match.
+- **NO TOOL'S `run()` IS EXERCISED BY THE SUITE.** `js_unit.js` loads only `Core/`, and
+  `test_addon.py` greps source text. So a tool's runtime path — reading the drawing, choosing the
+  document, showing the report — is verified by reading unless a task adds a headless script that
+  drives it, in the shape of `tests/profile_file_roundtrip.js`. This repo's own history says
+  reading is not enough: `include()` basename dedupe and the edition-folder path both shipped as
+  "undefined in the GUI while every test passed".
 - **`EAction.handleUserMessage` cannot show multi-line text** (newlines collapse). Multi-line output uses `QMessageBox.information`.
 - **`CsNetwork.resolve` now reports `anchorZUnknown`.** Closing the sixth elevation-datum door
   meant deciding what an anchor with no elevation DOES. It anchors without one (`z = null`) and
