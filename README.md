@@ -25,6 +25,7 @@ Each appears in the **Cave Survey** menu and as a command:
 | Scatter Breakdown | `scb` | Fill closed `BREAKDOWN-BOUNDARY` polylines with breakdown symbols, per boundary. |
 | Align Image | `ali` | Fit a scanned map onto known stations (move/rotate/scale, warp with 3+ points) for wall tracing. |
 | Survey Stats | `sst` | Length, depth, loop closures, and the honest BCRA/UIS grade, computed from the drawing. |
+| Generate Profile | `gp` | Rebuild the extended elevation beside the plan: one band per survey run, floor and ceiling lines from LRUD and splays. Normally happens on its own with every draw -- this forces it and prints what it could not show. |
 | Build Legend | `bl` | Generate the legend from the symbols the map actually uses (NSS names, UIS aliases). |
 
 Start a new map from `templates/NSS_Cave_Template_PLAN.dxf` (or
