@@ -1318,7 +1318,13 @@ CsProfile.tieLegBetween = function(a, b, resolved) {
  * (`stoppedReason` "no-leg") is a different failure and reported as one
  * -- Tasks 5-11 have to explain this to a user, and "somewhere has no
  * elevation" and "somewhere isn't actually connected" are not the same
- * sentence.
+ * sentence. A THIRD failure, distinct from both: the leg exists and
+ * both ends have a good Z, but the leg's own shot has no usable
+ * distance/azimuth/inclination (`CsTraverse.offset` returned null;
+ * `stoppedReason` "unmeasurable") -- X cannot be computed without
+ * fabricating it, so the band stops rather than collapsing the next
+ * station onto this one (a null distance's `plan` would be 0) or
+ * poisoning every X after it with NaN (an undefined distance's would).
  *
  * \param run      one grouped run {key, stations}
  * \param tie      the tie station name, or null for the root run
@@ -1355,8 +1361,8 @@ CsProfile.tieLegBetween = function(a, b, resolved) {
  *   omitted:  [name] run members off the chain -- never on the chain to
  *             begin with, OR the shorter arm at an interior tie,
  *   stopped:  name | null -- station that ended the band early,
- *   stoppedReason: "no-z" | "no-leg" | null -- which of the two; see
- *             above. null exactly when `stopped` is null.
+ *   stoppedReason: "no-z" | "no-leg" | "unmeasurable" | null -- which
+ *             one; see above. null exactly when `stopped` is null.
  * }
  */
 CsProfile.unrollBand = function(run, tie, resolved, hier, opts) {
@@ -1476,6 +1482,18 @@ CsProfile.unrollBand = function(run, tie, resolved, hier, opts) {
                 break;
             }
             var o = CsTraverse.offset(leg.shot, tapeMode);
+            if (o === null) {
+                // the leg exists but its shot has no usable distance/
+                // azimuth/inclination: X cannot be computed without
+                // either fabricating it (null distance: plan collapses
+                // to 0, landing this station on top of the last one)
+                // or poisoning it with NaN (undefined distance). Same
+                // honesty as no-z/no-leg -- stop here, name why, never
+                // invent a coordinate.
+                stopped = name;
+                stoppedReason = "unmeasurable";
+                break;
+            }
             x += Math.abs(o.plan);
             legs.push({
                 shot: leg.shot,
@@ -1673,8 +1691,11 @@ CsProfile.classifySplay = function(shot, deadDeg) {
  *                  different Y than the band's own stations use
  *
  * \return {ceiling: [[{x,y}]], floor: [[{x,y}]],
- *          flat: [{x, y, station, name}]} -- runs shorter than 2
- *          points are dropped, same rule as CsLrud.wallRuns
+ *          flat: [{x, y, station, name}], skipped: n} -- runs shorter
+ *          than 2 points are dropped, same rule as CsLrud.wallRuns;
+ *          `skipped` counts splays with no usable distance/azimuth/
+ *          inclination (CsTraverse.offset returned null for them) --
+ *          they contribute no ceiling/floor point and no flat tick
  */
 CsProfile.bandWallRuns = function(band, survey, resolved, opts) {
     opts = opts || {};
@@ -1698,6 +1719,7 @@ CsProfile.bandWallRuns = function(band, survey, resolved, opts) {
 
     var ceilingRuns = [], floorRuns = [], flat = [];
     var ceiling = [], floor = [];
+    var skipped = 0;
 
     var flush = function() {
         if (ceiling.length >= 2) {
@@ -1802,6 +1824,17 @@ CsProfile.bandWallRuns = function(band, survey, resolved, opts) {
                 continue;
             }
             var o = CsTraverse.offset(sp, tapeMode);
+            if (o === null) {
+                // the inclination read as usable above (a real number),
+                // but the distance or the effective azimuth did not --
+                // same fabrication CsLrud.wallRuns refuses on the plan
+                // side: no ceiling/floor point, and no flat tick either
+                // (falling through to the "flat" bucket would plot a
+                // phantom point at exactly the station, the very thing
+                // this whole guard exists to stop)
+                skipped++;
+                continue;
+            }
             // I2: no measured direction means no along-passage claim --
             // the splay sits at its station's own X, same as the LRUD
             // point, rather than being projected against a fallback
@@ -1849,7 +1882,8 @@ CsProfile.bandWallRuns = function(band, survey, resolved, opts) {
     }
     flush();
 
-    return { ceiling: ceilingRuns, floor: floorRuns, flat: flat };
+    return { ceiling: ceilingRuns, floor: floorRuns, flat: flat,
+        skipped: skipped };
 };
 
 /**

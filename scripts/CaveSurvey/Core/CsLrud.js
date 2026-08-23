@@ -115,10 +115,15 @@ CsLrud.relativeBearing = function(a, b) {
  * \param splays    [shot] from this station, or undefined
  * \param side      "L" or "R"
  * \param tapeMode  CsTraverse.SLOPE (default) or HORIZONTAL
+ * \param stats     optional {skipped: n} accumulator: bumped once per
+ *                  splay this call could not place (see below) so a
+ *                  caller can report the gap instead of it vanishing
+ *                  silently into an empty return
  *
  * \return [{x, y}] -- possibly empty
  */
-CsLrud.stationWallPoints = function(st, passageAz, lrud, splays, side, tapeMode) {
+CsLrud.stationWallPoints = function(st, passageAz, lrud, splays, side,
+        tapeMode, stats) {
     var entries = [];
 
     if (lrud !== null && lrud !== undefined) {
@@ -151,6 +156,19 @@ CsLrud.stationWallPoints = function(st, passageAz, lrud, splays, side, tapeMode)
                 continue;
             }
             var o = CsTraverse.offset(sp, tapeMode);
+            if (o === null) {
+                // no distance or no inclination/azimuth on record: a
+                // wall point at the station would assert "the wall is
+                // exactly here" for a measurement nobody took, so this
+                // splay contributes NOTHING rather than a fabricated
+                // point (see CsTraverse.offset's own docblock -- 0
+                // IS a measurement and is never skipped here; this
+                // branch is only ever null, absent, non-finite input)
+                if (stats !== undefined && stats !== null) {
+                    stats.skipped++;
+                }
+                continue;
+            }
             entries.push({
                 p: { x: st.x + o.dx, y: st.y + o.dy },
                 t: o.dx * alongX + o.dy * alongY,
@@ -189,8 +207,12 @@ CsLrud.stationWallPoints = function(st, passageAz, lrud, splays, side, tapeMode)
  * \param tapeMode CsTraverse.SLOPE (default) or HORIZONTAL -- how the
  *                 splay tapes are read, matching what CsDraw plots
  *
- * \return {left: [[{x,y}]], right: [[{x,y}]]} -- arrays of point runs;
- *         runs shorter than 2 points are dropped.
+ * \return {left: [[{x,y}]], right: [[{x,y}]], skipped: n} -- arrays of
+ *         point runs (runs shorter than 2 points are dropped) plus the
+ *         count of splays that had no usable distance/azimuth/
+ *         inclination and so contributed no wall point at all -- named
+ *         here rather than dropped silently, so a caller can report
+ *         the gap.
  */
 CsLrud.wallRuns = function(survey, resolved, tapeMode) {
     if (tapeMode === undefined || tapeMode === null) {
@@ -200,6 +222,7 @@ CsLrud.wallRuns = function(survey, resolved, tapeMode) {
     var splays = CsLrud.splaysByStation(survey);
     var leftRuns = [], rightRuns = [];
     var left = [], right = [];
+    var stats = { skipped: 0 };
 
     var flush = function() {
         if (left.length >= 2) {
@@ -218,7 +241,7 @@ CsLrud.wallRuns = function(survey, resolved, tapeMode) {
             return [];
         }
         return CsLrud.stationWallPoints(st, passageAz, lrud,
-            splays[stationName], side, tapeMode);
+            splays[stationName], side, tapeMode, stats);
     };
 
     var append = function(target, pts) {
@@ -259,5 +282,5 @@ CsLrud.wallRuns = function(survey, resolved, tapeMode) {
     }
     flush();
 
-    return { left: leftRuns, right: rightRuns };
+    return { left: leftRuns, right: rightRuns, skipped: stats.skipped };
 };

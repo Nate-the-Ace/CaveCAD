@@ -477,6 +477,85 @@ near(CsTraverse.offset(bsShot, CsTraverse.SLOPE).dx,
     "offset uses corrected azimuth");
 
 // ---------------------------------------------------------------------
+// Traverse -- an absent measurement is not a coordinate.
+//
+// `null * Math.cos(x)` is `0`; `undefined * Math.cos(x)` is `NaN`. So
+// without a guard, a shot with no distance draws AT its station (a
+// fabricated wall point) and one with no distance recorded as
+// `undefined` poisons every coordinate downstream with NaN. The guard
+// must catch both, plus the same failure mode on the EFFECTIVE
+// (fs/bs-corrected) azimuth and inclination -- and must NOT catch a
+// real zero, which is a measurement, not an absence.
+// ---------------------------------------------------------------------
+
+(function() {
+    var complete = { distance: 10, azimuth: 45, inclination: 20 };
+    ok(CsTraverse.offset(complete, CsTraverse.SLOPE) !== null,
+        "a complete shot still returns a real offset");
+
+    ok(CsTraverse.offset(
+        { distance: null, azimuth: 45, inclination: 20 }, CsTraverse.SLOPE
+    ) === null, "null distance returns null, not a coordinate");
+    ok(CsTraverse.offset(
+        { distance: undefined, azimuth: 45, inclination: 20 }, CsTraverse.SLOPE
+    ) === null, "undefined distance returns null, not NaN");
+    ok(CsTraverse.offset(
+        { distance: NaN, azimuth: 45, inclination: 20 }, CsTraverse.SLOPE
+    ) === null, "NaN distance returns null");
+    ok(CsTraverse.offset(
+        { distance: Infinity, azimuth: 45, inclination: 20 }, CsTraverse.SLOPE
+    ) === null, "non-finite (Infinity) distance returns null");
+
+    ok(CsTraverse.offset(
+        { distance: 10, azimuth: 45, inclination: null }, CsTraverse.SLOPE
+    ) === null, "null inclination returns null, not a level shot");
+    ok(CsTraverse.offset(
+        { distance: 10, azimuth: 45, inclination: undefined }, CsTraverse.SLOPE
+    ) === null, "undefined inclination returns null");
+
+    ok(CsTraverse.offset(
+        { distance: 10, azimuth: null, inclination: 20 }, CsTraverse.SLOPE
+    ) === null, "null azimuth returns null, not a north-facing fabrication");
+    ok(CsTraverse.offset(
+        { distance: 10, azimuth: undefined, inclination: 20 }, CsTraverse.SLOPE
+    ) === null, "undefined azimuth returns null");
+
+    // the EFFECTIVE inclination/azimuth is what is checked: a bad
+    // backsight that poisons the fs/bs mean must be caught too, not
+    // just the raw foresight field
+    ok(CsTraverse.offset({
+        distance: 10, azimuth: 45, inclination: 20, backInclination: NaN
+    }, CsTraverse.SLOPE) === null,
+        "a NaN backsight poisoning the effective inclination returns null");
+
+    // THE DISTINCTION THE WHOLE TASK TURNS ON: zero is a measurement,
+    // absence is not. A zero-length, zero-inclination, zero-azimuth
+    // shot is a real (if degenerate) reading and must keep returning
+    // real, non-null geometry exactly as it always has.
+    var zero = CsTraverse.offset(
+        { distance: 0, azimuth: 0, inclination: 0 }, CsTraverse.SLOPE);
+    ok(zero !== null, "distance 0 is a measurement, not an absence");
+    near(zero.dx, 0, 1e-9, "zero distance: dx is really zero");
+    near(zero.dy, 0, 1e-9, "zero distance: dy is really zero");
+    near(zero.dz, 0, 1e-9, "zero distance: dz is really zero");
+    var zeroInc = CsTraverse.offset(
+        { distance: 10, azimuth: 0, inclination: 0 }, CsTraverse.SLOPE);
+    ok(zeroInc !== null, "inclination 0 is a level shot, not an absence");
+    near(zeroInc.plan, 10, 1e-9, "level shot keeps its full plan distance");
+
+    // reverseOffset must not launder a null through the negation --
+    // -null is still fabricated geometry
+    ok(CsTraverse.reverseOffset(
+        { distance: null, azimuth: 45, inclination: 20 }, CsTraverse.SLOPE
+    ) === null, "reverseOffset passes the null through rather than " +
+        "negating undefined fields");
+    var revComplete = CsTraverse.reverseOffset(complete, CsTraverse.SLOPE);
+    ok(revComplete !== null, "reverseOffset still works for a real shot");
+    near(revComplete.dx, -CsTraverse.offset(complete, CsTraverse.SLOPE).dx,
+        1e-9, "reverseOffset still negates a real shot's offset");
+}());
+
+// ---------------------------------------------------------------------
 // Network -- hand-computed square with a deliberate misclosure, plus
 // an out-of-order shot and a branch.
 // ---------------------------------------------------------------------
@@ -905,6 +984,31 @@ ok(CsReport.drawSummary(tieAnchored, rAnchoredTie, twoTieStub,
 ok(plainSummaryBefore.indexOf("control tie") === -1,
     "task 5 report: no ties, no mention -- and a drawn object from " +
     "before this counter existed still summarises cleanly");
+
+// ---------------------------------------------------------------------
+// Task 5b: an unmeasurable splay's absence is named in the report, not
+// silently folded into the generic "skipped" line (which means
+// "excluded, or never connected" -- an unmeasurable splay's station
+// DID connect).
+// ---------------------------------------------------------------------
+
+var unmeasurableStub = { stationsDrawn: 2, shotsDrawn: 1, closuresDrawn: 0,
+    wallsDrawn: 0, splaysDrawn: 1, splaysSkipped: 2, wallPointsSkipped: 1,
+    skipped: 0 };
+var unmeasurableSummary = CsReport.drawSummary(sq, rsq, unmeasurableStub, []);
+ok(unmeasurableSummary.indexOf("2") >= 0 &&
+    unmeasurableSummary.toLowerCase().indexOf("splay") >= 0 &&
+    (unmeasurableSummary.toLowerCase().indexOf("no distance") >= 0 ||
+     unmeasurableSummary.toLowerCase().indexOf("no usable") >= 0 ||
+     unmeasurableSummary.toLowerCase().indexOf("unmeasurable") >= 0 ||
+     unmeasurableSummary.toLowerCase().indexOf("not measured") >= 0),
+    "task 5b report: unmeasurable splays are named, with a reason, got:\n" +
+    unmeasurableSummary);
+// a drawn object from before these counters existed (every test above
+// this one) still summarises with no new line and no crash
+ok(plainSummaryBefore.toLowerCase().indexOf("splay") === -1,
+    "task 5b report: a drawn object with no splaysSkipped field gains " +
+    "no phantom line");
 
 // ---------------------------------------------------------------------
 // Task 1c -- bridge classifier cost and path honesty.
@@ -2113,6 +2217,97 @@ function splayFixture() {
     ok(w.left.length === 0 && w.right.length === 0,
         "splay walls: no splays, no change -- a single LRUD point is " +
         "still not a run");
+})();
+
+// ---------------------------------------------------------------------
+// Splay walls -- an unmeasurable splay is skipped, not placed at the
+// station. `splayOf` cannot itself build a null-distance shot (`d`
+// passes straight through, but a real fixture needs `s.distance` set
+// after construction), so these fixtures poke the field directly.
+// ---------------------------------------------------------------------
+
+(function() {
+    // a no-distance splay must NOT become a wall point at the
+    // station: that would assert "the wall is exactly here" for a
+    // measurement nobody took.
+    var sv = splayFixture();
+    var ghost = splayOf("A2", 5, 90); // would-be right wall point at x=5
+    ghost.distance = null;
+    sv.shots.push(ghost);
+    var w = CsLrud.wallRuns(sv, CsNetwork.resolve(sv, {}));
+    var atStation = false, anyRight = false;
+    for (var i = 0; i < w.right.length; i++) {
+        for (var j = 0; j < w.right[i].length; j++) {
+            anyRight = true;
+            if (Math.abs(w.right[i][j].x - 0) < 1e-9 &&
+                    Math.abs(w.right[i][j].y - 10) < 1e-9) {
+                atStation = true;
+            }
+        }
+    }
+    ok(atStation === false,
+        "splay walls: a no-distance splay does not fabricate a wall " +
+        "point at the station");
+    ok(anyRight === false,
+        "splay walls: with the LRUD-only fixture and one unmeasurable " +
+        "splay, the right side has no evidence at all");
+    eqs(CsLrud.stationWallPoints({ x: 0, y: 10 }, 0, null, [ghost], "R",
+        CsTraverse.SLOPE).length, 0,
+        "stationWallPoints: an unmeasurable splay contributes zero points");
+})();
+
+(function() {
+    // a no-inclination splay must not draw level either -- same rule,
+    // the other missing field.
+    var sv = splayFixture();
+    var ghost = splayOf("A2", 5, 90);
+    ghost.inclination = null;
+    sv.shots.push(ghost);
+    var w = CsLrud.wallRuns(sv, CsNetwork.resolve(sv, {}));
+    var found = false;
+    for (var i = 0; i < w.right.length; i++) {
+        for (var j = 0; j < w.right[i].length; j++) {
+            if (Math.abs(w.right[i][j].x - 5) < 1e-9) { found = true; }
+        }
+    }
+    ok(found === false,
+        "splay walls: a no-inclination splay is skipped, not drawn level");
+})();
+
+(function() {
+    // REGRESSION, the distinction the whole task turns on: a REAL
+    // zero-distance splay (a genuine tie between the LRUD tick and a
+    // measured point exactly at the station) must keep producing a
+    // wall point, unchanged.
+    var sv = splayFixture();
+    sv.shots.push(splayOf("A2", 0, 90)); // real zero distance
+    var w = CsLrud.wallRuns(sv, CsNetwork.resolve(sv, {}));
+    var atStation = false;
+    for (var i = 0; i < w.right.length; i++) {
+        for (var j = 0; j < w.right[i].length; j++) {
+            if (Math.abs(w.right[i][j].x - 0) < 1e-9 &&
+                    Math.abs(w.right[i][j].y - 10) < 1e-9) {
+                atStation = true;
+            }
+        }
+    }
+    ok(atStation, "splay walls: a REAL zero-distance splay still " +
+        "places a wall point at the station -- zero is a measurement");
+})();
+
+(function() {
+    // wallRuns reports what it skipped, so a surveyor sees the gap
+    // rather than a confident wrong line.
+    var sv = splayFixture();
+    var ghost1 = splayOf("A2", 5, 90);
+    ghost1.distance = undefined;
+    var ghost2 = splayOf("A2", 5, 270);
+    ghost2.inclination = undefined;
+    sv.shots.push(ghost1);
+    sv.shots.push(ghost2);
+    var w = CsLrud.wallRuns(sv, CsNetwork.resolve(sv, {}));
+    eqs(w.skipped, 2,
+        "wallRuns: both unmeasurable splays are counted as skipped");
 })();
 
 // ---------------------------------------------------------------------
@@ -3960,6 +4155,79 @@ if (!IS_NODE) {
         ok(CsSheet.readField(tbDoc, field) === "LENGTH:  1,234 FT",
             "caps: a stamped title block value letters in caps, got '" +
             CsSheet.readField(tbDoc, field) + "'");
+    })();
+}
+
+// ---------------------------------------------------------------------
+// Task 5b, drawn end to end: an unmeasurable splay draws no ray and no
+// wall point, but is named in what CsDraw.survey reports. QCAD engine
+// only -- this is the path that would have reached RVector and the DXF
+// writer with a fabricated (or NaN) coordinate before CsTraverse.offset
+// guarded against it.
+// ---------------------------------------------------------------------
+
+if (!IS_NODE) {
+    (function() {
+        loadRepoScript("scripts/CaveSurvey/Core/CsLayers.js");
+        loadRepoScript("scripts/CaveSurvey/Core/CsStore.js");
+        loadRepoScript("scripts/CaveSurvey/Core/CsTags.js");
+        loadRepoScript("scripts/CaveSurvey/Core/CsDraw.js");
+
+        var doc = new RDocument(new RMemoryStorage(), new RSpatialIndexNavel());
+        var di = new RDocumentInterface(doc);
+        getDocument = function() { return doc; };
+        getDocumentInterface = function() { return di; };
+
+        var sv = CsModel.newSurvey();
+        var main = shotOf("D1", "D2", 10, 0);
+        main.left = 2; // gives D2 wall evidence so LRUD is in play too
+        var real = splayOf("D2", 5, 90);      // a genuine, measurable splay
+        var ghost = splayOf("D2", 4, 45);     // unmeasurable: no distance
+        ghost.distance = null;
+        sv.shots = [main, real, ghost];
+        var resolved = CsNetwork.resolve(sv, {});
+        var drawn = CsDraw.survey(sv, resolved);
+
+        eqs(drawn.splaysDrawn, 1,
+            "only the measurable splay draws a ray, got " + drawn.splaysDrawn);
+        eqs(drawn.splaysSkipped, 1,
+            "the unmeasurable splay is counted as skipped, not silently dropped");
+
+        // no entity anywhere carries the skipped splay's tip -- not a
+        // ray, not a tip point, not a label. D2 has exactly one splay
+        // (D2.1, the real one); a fabricated D2.2 would mean the ghost
+        // drew after all.
+        var splayNames = [];
+        var cids = doc.queryAllEntities(false, false);
+        for (var ci = 0; ci < cids.length; ci++) {
+            var ce = doc.queryEntity(cids[ci]);
+            if (isNull(ce)) { continue; }
+            var sn = CsTags.get(ce, "SplayName");
+            if (sn !== null && sn !== undefined) { splayNames.push(String(sn)); }
+        }
+        ok(splayNames.indexOf("D2.2") < 0,
+            "the unmeasurable splay never reaches the drawing as D2.2, " +
+            "got splay tags [" + splayNames.join(",") + "]");
+        ok(splayNames.indexOf("D2.1") >= 0,
+            "the real splay still draws as D2.1");
+
+        // NO NaN reaches any coordinate this draw produced -- assert
+        // directly, the plan-view half of the task's own requirement.
+        var anyNaN = false;
+        for (ci = 0; ci < cids.length; ci++) {
+            var pe = doc.queryEntity(cids[ci]);
+            if (isNull(pe) || typeof pe.getBoundingBox !== "function") {
+                continue;
+            }
+            var bb = pe.getBoundingBox();
+            if (bb === undefined || bb === null) { continue; }
+            var mn = bb.getMinimum(), mx = bb.getMaximum();
+            if (!isFinite(mn.x) || !isFinite(mn.y) ||
+                    !isFinite(mx.x) || !isFinite(mx.y)) {
+                anyNaN = true;
+            }
+        }
+        ok(anyNaN === false, "no NaN coordinate reaches any drawn entity");
     })();
 }
 
@@ -9630,6 +9898,36 @@ if (!IS_NODE) {
 }());
 
 (function() {
+    // Task 5b: a THIRD reason a chain step can fail -- the leg exists
+    // and both stations have a good Z, but the leg's own shot has no
+    // usable distance/azimuth/inclination. Before CsTraverse.offset's
+    // guard this would either fabricate X (null distance: plan = 0, so
+    // A2 lands on TOP of A1 in the profile) or poison X with NaN
+    // (undefined distance) -- silently, since unrollBand never checked
+    // offset()'s result at all. Now it stops the band right there,
+    // same honesty as no-z/no-leg, rather than either fabrication.
+    var run = { key: "A", stations: ["A1", "A2"] };
+    var badShot = shotOf("A1", "A2", 10, 0, 0);
+    badShot.distance = null;
+    var resolved = {
+        stations: {
+            A1: { x: 0, y: 0, z: 0, seq: 0 },
+            A2: { x: 0, y: 0, z: 10, seq: 1 }   // a perfectly good Z
+        },
+        legs: [
+            { shot: badShot, from: "A1", to: "A2", kind: "new" }
+        ]
+    };
+    var band = CsProfile.unrollBand(run, null, resolved, {}, {});
+    eqs(band.stations.length, 1, "only A1 draws -- A2's X cannot be computed");
+    eqs(band.stopped, "A2", "the band stops at the station the bad leg would have reached");
+    eqs(band.stoppedReason, "unmeasurable",
+        "the reason names the actual cause: no usable measurement, not no-z/no-leg");
+    ok(isFinite(band.stations[0].x) && isFinite(band.stations[0].y),
+        "no NaN reaches the one station that DID draw");
+}());
+
+(function() {
     // C1 (the review's Critical): a run entered at an INTERIOR
     // junction, surveyed both ways -- A3 ties in at B1, then
     // B1-B2-B3-B4 one direction and B1-B5-B6-B7 the other. Run B's own
@@ -10175,6 +10473,59 @@ if (!IS_NODE) {
     eqs(w.flat.length, 0, "a no-inclination splay contributes no tick at all");
     eqs(w.ceiling.length, 0, "...and obviously no ceiling either");
     eqs(w.floor.length, 0, "...nor floor");
+}());
+
+(function() {
+    // Task 5b: the m2 guard above only ever caught a missing
+    // INCLINATION (checked before bandWallRuns ever calls
+    // CsTraverse.offset). A missing DISTANCE, or a missing AZIMUTH,
+    // sailed straight past that pre-check and into offset() itself --
+    // which, before CsTraverse.offset's own guard, either fabricated a
+    // point at the station (null distance) or handed back NaN
+    // (undefined distance/azimuth). Same rule, the other missing
+    // fields: no ceiling point, no flat tick, and bandWallRuns counts
+    // what it skipped.
+    var sv = CsModel.newSurvey();
+    var s1 = shotOf("A1", "A2", 10, 0, 0);
+    s1.up = 4;
+    var real = splayOf("A2", 5, 45, 60);       // a genuine ceiling hit
+    var ghostDist = splayOf("A2", 5, 60, 60);
+    ghostDist.distance = undefined;            // missing distance
+    var ghostAz = splayOf("A2", 5, 30, 60);
+    ghostAz.azimuth = null;                    // missing azimuth
+    sv.shots = [s1, real, ghostDist, ghostAz];
+    var r = CsNetwork.resolve(sv, {});
+    var g = CsProfile.groupRuns(r);
+    var band = CsProfile.unrollBand(g.runs["A"], null, r,
+        CsProfile.hierarchy(g, r), {});
+    var w = CsProfile.bandWallRuns(band, sv, r, {});
+
+    eqs(w.ceiling.length, 1,
+        "one ceiling run: the LRUD tick plus the ONE real splay");
+    eqs(w.ceiling[0].length, 2,
+        "the missing-distance and missing-azimuth splays add no point");
+    eqs(w.flat.length, 0,
+        "an unmeasurable splay does not fall back to a flat tick either");
+    eqs(w.skipped, 2,
+        "bandWallRuns counts both unmeasurable splays as skipped");
+
+    // REGRESSION, the distinction the whole task turns on: a REAL
+    // zero-distance splay at this same station must still place a
+    // ceiling point exactly as it always has.
+    var sv2 = CsModel.newSurvey();
+    var s1b = shotOf("A1", "A2", 10, 0, 0);
+    s1b.up = 4;
+    var zeroSplay = splayOf("A2", 0, 45, 60);
+    sv2.shots = [s1b, zeroSplay];
+    var r2 = CsNetwork.resolve(sv2, {});
+    var g2 = CsProfile.groupRuns(r2);
+    var band2 = CsProfile.unrollBand(g2.runs["A"], null, r2,
+        CsProfile.hierarchy(g2, r2), {});
+    var w2 = CsProfile.bandWallRuns(band2, sv2, r2, {});
+    eqs(w2.ceiling.length, 1,
+        "a REAL zero-distance splay still ties into the ceiling run");
+    eqs(w2.skipped, 0, "...and is not counted as skipped -- zero is a " +
+        "measurement");
 }());
 
 (function() {

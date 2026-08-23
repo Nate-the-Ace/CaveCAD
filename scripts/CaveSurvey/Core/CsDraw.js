@@ -284,7 +284,11 @@ CsDraw.noteLeader = function(doc, op, pos, name, note, azimuthDeg, lrud) {
  * tagged RawShot/RawStation and nothing else.
  *
  * \return {stationsDrawn, shotsDrawn, closuresDrawn, tiesDrawn,
- *          hiddenDrawn, wallsDrawn, splaysDrawn, ghostDrawn, skipped}
+ *          hiddenDrawn, wallsDrawn, splaysDrawn, ghostDrawn, skipped,
+ *          splaysSkipped, wallPointsSkipped} -- the last two count
+ *          splays CsTraverse.offset refused (no usable distance/
+ *          azimuth/inclination), named apart from `skipped` (excluded,
+ *          or never connected) so a report never conflates the two
  */
 CsDraw.survey = function(survey, resolved, originStation, originPos, seqBase) {
     if (seqBase === undefined || seqBase === null) {
@@ -527,6 +531,7 @@ CsDraw.survey = function(survey, resolved, originStation, originPos, seqBase) {
     // are drawn straight off their shot readings. eraseStations strips
     // the trailing .<n> to replace them on a redraw.
     var splaysDrawn = 0;
+    var splaysSkipped = 0;
     var splayCounts = {};
     for (i = 0; i < survey.shots.length; i++) {
         var sp = survey.shots[i];
@@ -536,9 +541,21 @@ CsDraw.survey = function(survey, resolved, originStation, originPos, seqBase) {
         if (!resolved.stations.hasOwnProperty(sp.from)) {
             continue; // its station never connected -- stays skipped
         }
+        // count against the station's OWN row order even when this
+        // splay turns out unmeasurable, so a splay that DOES draw
+        // keeps the number matching its row in the notebook -- a gap
+        // in the numbering (D2.1, D2.3) is itself a signal, not a bug
         splayCounts[sp.from] = (splayCounts[sp.from] || 0) + 1;
         var splayName = sp.from + "." + splayCounts[sp.from];
         var so = CsTraverse.offset(sp, CsTraverse.SLOPE);
+        if (so === null) {
+            // no distance or no azimuth/inclination on record: a ray
+            // drawn from null*cos (at the station) or NaN (poisoning
+            // RVector and the DXF writer) would both assert a
+            // measurement nobody took. Skip it and count it instead.
+            splaysSkipped++;
+            continue;
+        }
         var sPos = at(sp.from);
         var sEnd = new RVector(sPos.x + so.dx, sPos.y + so.dy);
         // the ray carries its readings too (v3): Trip/ShotSeq/Distance/
@@ -568,6 +585,7 @@ CsDraw.survey = function(survey, resolved, originStation, originPos, seqBase) {
     // redraw.
     var wallsDrawn = 0;
     var runs = CsLrud.wallRuns(survey, resolved);
+    var wallPointsSkipped = runs.skipped;
     if (runs.left.length > 0 || runs.right.length > 0) {
         CsLayers.ensure(doc, di, CsLayers.LRUD_WALL_LEFT);
         CsLayers.ensure(doc, di, CsLayers.LRUD_WALL_RIGHT);
@@ -799,8 +817,20 @@ CsDraw.survey = function(survey, resolved, originStation, originPos, seqBase) {
         wallsDrawn: wallsDrawn,
         splaysDrawn: splaysDrawn,
         ghostDrawn: ghostDrawn,
-        // splays that DID draw no longer count as skipped
-        skipped: resolved.skipped.length - splaysDrawn
+        // splays with no usable distance/azimuth/inclination -- named
+        // apart from `skipped` below, which means "excluded, or never
+        // connected": an unmeasurable splay's station DID connect, so
+        // folding it into that bucket would misreport why it is
+        // missing from the drawing
+        splaysSkipped: splaysSkipped,
+        // same distinction for the LRUD-derived wall runs: a splay
+        // that contributed no ceiling/floor point because it had
+        // nothing usable to offer, as counted by CsLrud.wallRuns
+        wallPointsSkipped: wallPointsSkipped,
+        // splays that DID draw no longer count as skipped, and neither
+        // do the ones skipped for being unmeasurable -- they have
+        // their own, more honest count just above
+        skipped: resolved.skipped.length - splaysDrawn - splaysSkipped
     };
 };
 

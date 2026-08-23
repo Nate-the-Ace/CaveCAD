@@ -50,16 +50,50 @@ CsTraverse.effectiveInclination = function(shot) {
 };
 
 /**
+ * True when a reading cannot function as part of a real measurement:
+ * absent (`null`/`undefined`) or not finite (`NaN`, `+-Infinity`).
+ * NOT true for `0` -- a zero distance/azimuth/inclination IS a
+ * measurement (the wall is at the station; a dead-level or
+ * due-north shot really is that), and must be treated exactly like
+ * any other real number. This is the one-line reason the guard below
+ * exists at all: in JavaScript, `null * Math.cos(x)` is `0` (a
+ * fabricated coordinate wearing a real measurement's confidence) and
+ * `undefined * Math.cos(x)` is `NaN` (a coordinate that poisons every
+ * downstream computation with it). Neither is a measurement; `0` is.
+ */
+CsTraverse.unusable = function(v) {
+    return v === null || v === undefined || !isFinite(v);
+};
+
+/**
  * The offset a shot moves, as {dx, dy, dz, plan}: drawing-plane x/y,
  * vertical rise, and the plan-projected length.
+ *
+ * Returns `null` -- not a coordinate -- when `distance` or the
+ * EFFECTIVE (fs/bs-corrected) azimuth or inclination is absent or
+ * non-finite. See `CsTraverse.unusable` for exactly why `null`/
+ * `undefined` are refused here while `0` is not: this is the
+ * distinction that keeps a splay with no distance from drawing AT its
+ * station, and a splay with no inclination from drawing dead level,
+ * as though either were a real reading. Every caller MUST check for
+ * `null` and skip the shot -- never substitute a zero, which is
+ * exactly the fabrication this guard exists to stop.
  *
  * \param shot {distance, azimuth, inclination} (degrees; azimuth
  *             clockwise from north)
  * \param tapeMode CsTraverse.SLOPE (default) or HORIZONTAL
+ * \return {dx, dy, dz, plan} or `null`
  */
 CsTraverse.offset = function(shot, tapeMode) {
-    var azRad = CsTraverse.effectiveAzimuth(shot) * Math.PI / 180.0;
-    var incRad = CsTraverse.effectiveInclination(shot) * Math.PI / 180.0;
+    var az = CsTraverse.effectiveAzimuth(shot);
+    var inc = CsTraverse.effectiveInclination(shot);
+    if (CsTraverse.unusable(shot.distance) || CsTraverse.unusable(az) ||
+            CsTraverse.unusable(inc)) {
+        return null;
+    }
+
+    var azRad = az * Math.PI / 180.0;
+    var incRad = inc * Math.PI / 180.0;
 
     var plan, dz;
     if (tapeMode === CsTraverse.HORIZONTAL) {
@@ -78,8 +112,16 @@ CsTraverse.offset = function(shot, tapeMode) {
     };
 };
 
-/** The same shot walked backwards (for resolving against a known TO). */
+/**
+ * The same shot walked backwards (for resolving against a known TO).
+ * Passes a `null` offset straight through -- negating `undefined`
+ * fields would itself fabricate NaN geometry, the exact failure mode
+ * `offset` above exists to refuse.
+ */
 CsTraverse.reverseOffset = function(shot, tapeMode) {
     var o = CsTraverse.offset(shot, tapeMode);
+    if (o === null) {
+        return null;
+    }
     return { dx: -o.dx, dy: -o.dy, dz: -o.dz, plan: o.plan };
 };

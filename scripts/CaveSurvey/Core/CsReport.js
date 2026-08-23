@@ -46,6 +46,19 @@ CsReport.drawSummary = function(survey, resolved, drawn, findings) {
         lines.push("Splays drawn: " + drawn.splaysDrawn +
             " (thin rays on CTRL-SPLAYS)");
     }
+    // Named apart from the generic "Skipped" line below: that one
+    // means excluded or never-connected, but an unmeasurable splay's
+    // OWN station did connect -- the gap is that nobody recorded a
+    // distance or a reading for the splay itself. Conflating the two
+    // would tell a surveyor to go check a connection that is fine.
+    if (drawn.splaysSkipped !== undefined && drawn.splaysSkipped > 0) {
+        lines.push("Splays not drawn: " + drawn.splaysSkipped +
+            " (no distance, or no azimuth/inclination, on record)");
+    }
+    if (drawn.wallPointsSkipped !== undefined && drawn.wallPointsSkipped > 0) {
+        lines.push("Wall points skipped: " + drawn.wallPointsSkipped +
+            " (splay had no distance, or no azimuth/inclination, on record)");
+    }
     if (drawn.skipped > 0) {
         lines.push("Skipped: " + drawn.skipped +
             " (excluded shots, or shots that never connected)");
