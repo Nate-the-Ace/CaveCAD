@@ -1883,6 +1883,28 @@ git commit -m "docs: Feature Trace in the tool table"
 
 **Open question for the user, to settle before building:** "previewed splines" -- whether a stroke should also tie to the run drawn immediately before it while that one is still the active preview, or only to curves already committed to the drawing. Committed-only is simpler and is what the criteria above describe.
 
+## Task 9: Profile linework ownership (NEXT SESSION -- user's pick)
+
+**Goal:** Settle who owns what on profile-frame layers, so regenerating the elevation can never eat, move or orphan linework a caver drew by hand.
+
+**Why now.** Feature Trace has just started WRITING to profile-frame traceable layers (`PROFILE-CEILING`, `PROFILE-FLOOR`, `PROFILE-WALLS-INFERRED`), in the same drawing the generator rebuilds. Before this there was no hand-drawn profile linework to lose.
+
+**What is already verified (do not re-derive):**
+- `CsProfileDraw.erase()` requires **BOTH** a `Profile*` tag **AND** membership of `CsProfileDraw.LAYERS()`. Feature Trace writes NO tags, so its output is out of reach of erase() on that count alone.
+- `CsProfileDraw.LAYERS()` is `CTRL-PROFILE-SHOTS`, `-STATIONS`, `-STATION-LABELS`, `-SPLAYS`, `-FLOOR`, `-CEILING`, plus **`PROFILE-TEXT-LABELS`**. Traced `PROFILE-CEILING` and `PROFILE-FLOOR` are NOT in it.
+- `CsTrace.emit` adds no `CsBind` tag; the existing `CsBind.tagEntities` sweep is what binds new linework.
+
+**The seam to look at first.** `CsProfileDraw.LAYERS()` claims `PROFILE-TEXT-LABELS` -- an **un-prefixed, bindable, caver-facing** layer -- while every other entry is `CTRL-`. So the generator both writes to and erases from a layer in the user's own namespace. Today the tag half of the gate saves an untagged hand-drawn label, but anything that ever *adopts* linework into a `Profile*` tag (the Notebook's adopt path, `CsRevise`) would make it erasable. Either the generator's labels move to `CTRL-PROFILE-TEXT-LABELS`, or that exception gets stated and tested as deliberate.
+
+**Questions to answer:**
+- [ ] Should generated band labels move to a `CTRL-` layer, leaving `PROFILE-TEXT-LABELS` wholly the caver's?
+- [ ] Does `translateRegion` move hand-traced profile linework by exactly the origin delta, and is that asserted? A trace that does not travel with its band detaches from the geometry it described.
+- [ ] Does `CsBind`'s sweep actually bind traced profile linework to PROFILE-frame stations, so a loop-closure adjustment carries traced ceilings and floors along?
+- [ ] Should Feature Trace mark its output as user-owned explicitly, rather than relying on the ABSENCE of a generator tag? Absence is a weak claim -- any future sweep that tags broadly would silently transfer ownership.
+- [ ] What happens to a traced ceiling when the survey it described is deleted or re-surveyed? Orphaned linework in the region is the profile-frame twin of the plan's revision problem.
+
+**Verify:** trace on a band, regenerate the elevation, and assert the traced curve is still present, unmoved relative to its band, and still bound to the same station.
+
 ## Deferred decisions
 
 Two things the spec's §12 leaves out on purpose, recorded here so a later reader does not mistake them for oversights:
