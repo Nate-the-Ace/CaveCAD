@@ -892,19 +892,35 @@ CsDraw.survey = function(survey, resolved, originStation, originPos, seqBase) {
  * survey chopped into thirty 150-station named runs -- the "one letter
  * per trip" shape a real cave actually takes -- sailed through that gate
  * (no run anywhere near the limit) while costing WITHIN A FEW PERCENT of
- * what one single 4500-station run costs to build, because the dominant
- * term is actually CsProfile.legBetween's linear scan of resolved.legs
- * on every chain step (CsProfile.unrollBand calls it once per station in
- * every band) -- O(total stations x total legs), not O(run length^2). A
+ * what one single 4500-station run costs to build, because the cost is
+ * governed by the TOTAL station count, not by O(run length^2). A
  * largest-run-only gate measured the wrong denominator: it let the
  * expensive many-run shape through and did nothing extra to catch it.
  * See the comment on the comparison itself, below, for why the fix
  * checks the total ALONE rather than "largest run OR total" -- the two
  * are not independent conditions once they share a threshold.
- * groupRuns() itself is a sort, not a chain search or a legBetween scan,
- * so computing both numbers here costs nothing close to what a skip
- * avoids. The manual GenerateProfile command (Task 10) is never gated
- * by this.
+ * groupRuns() itself is a sort, not a chain search or a per-pair leg
+ * lookup, so computing both numbers here costs nothing close to what a
+ * skip avoids. The manual GenerateProfile command (Task 10) is never
+ * gated by this.
+ *
+ * WHAT THE DOMINANT TERM IS, AS OF THE LEG INDEX. That "within a few
+ * percent" measurement was originally explained by CsProfile.legBetween
+ * scanning all of resolved.legs on every chain step -- O(total stations
+ * x total legs). CsProfile.legIndex now makes each of those a
+ * one-bucket lookup: 20.2 million leg comparisons down to ~4,500 on a
+ * 4500-station survey, and a build 40-46% faster across every shape
+ * measured. The gate's own conclusion is UNCHANGED, and so is its
+ * threshold: the total still governs, because the remaining dominant
+ * term -- CsProfile.bandWallRuns, through CsModel.lrudForStation's own
+ * full scan of survey.shots once per station per band -- has exactly
+ * the same O(total stations x total shots) shape one function over. At
+ * the 3000 default the automatic pass measures about half a second on
+ * CaveCAD (was about nine tenths); 4500 would be ~1.25s and 8000 ~4.3s
+ * on every single draw, which is why the default was reconsidered on
+ * these numbers and deliberately LEFT at 3000. CsProfile.settings' own
+ * docblock carries the whole table, the per-function split, and the
+ * scratch measurement of the change that would earn a higher ceiling.
  *
  * \return {skipped, reason} or {path, created, counts, profile}
  */

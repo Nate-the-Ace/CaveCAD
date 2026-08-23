@@ -10004,6 +10004,520 @@ if (!IS_NODE) {
         "tieLegBetween refuses a splay-flagged leg despite admitting closures");
 }());
 
+// ---------------------------------------------------------------------
+// CsProfile: the once-per-build leg index (CsProfile.legIndex) --
+// CsProfile.legBetween and CsProfile.tieLegBetween used to scan all of
+// resolved.legs on every chain step. The index changes WHICH legs each
+// lookup looks at and nothing else; these tests are what says so.
+// ---------------------------------------------------------------------
+
+// The complete-data profile fixture and its snapshot, shared between the
+// golden generator and tests/js_unit.js so the two can never drift.
+function profileGoldenSurvey() {
+    var sp = function(from, d, az, inc) {
+        var s = shotOf(from, "", d, az, inc);
+        s.splay = true;
+        return s;
+    };
+    var sv = CsModel.newSurvey();
+    // trunk A, closing a ring back onto A1 (a "closure" leg)
+    sv.shots.push(shotOf("A1", "A2", 10, 0, 5));
+    sv.shots.push(shotOf("A2", "A3", 10, 45, -3));
+    sv.shots.push(shotOf("A3", "A4", 12, 90, 8));
+    sv.shots.push(shotOf("A4", "A5", 11, 135, -6));
+    sv.shots.push(shotOf("A5", "A6", 9, 200, 2));
+    sv.shots.push(shotOf("A6", "A1", 21.4, 290, -6));
+    // run B ties in at A3 -- an INTERIOR station of A's own longest chain
+    sv.shots.push(shotOf("A3", "B1", 7, 300, 10));
+    sv.shots.push(shotOf("B1", "B2", 8, 300, 4));
+    sv.shots.push(shotOf("B2", "B3", 8, 310, -2));
+    sv.shots.push(shotOf("B2", "B7", 4, 20, 1));      // B's own demoted arm
+    // a lowercase spur off A4
+    sv.shots.push(shotOf("A4", "A4a1", 6, 10, -12));
+    sv.shots.push(shotOf("A4a1", "A4a2", 6, 15, -4));
+    // a SECOND anchored component, joined by a control tie
+    sv.shots.push(shotOf("C1", "C2", 10, 0, 0));
+    sv.shots.push(shotOf("C2", "C3", 10, 90, 3));
+    sv.shots.push(shotOf("C3", "B3", 15.2, 40, -2));
+    // splays, so ceiling/floor runs and the flat ticks are covered too
+    sv.shots.push(sp("A2", 3, 90, 40));
+    sv.shots.push(sp("A2", 4, 270, -35));
+    sv.shots.push(sp("A3", 2.5, 0, 55));
+    sv.shots.push(sp("A3", 3.5, 180, -50));
+    sv.shots.push(sp("B2", 5, 45, 30));
+    sv.shots.push(sp("B2", 5, 225, -30));
+    sv.shots.push(sp("C2", 2, 0, 60));
+    sv.shots.push(sp("C2", 2, 180, -60));
+    sv.shots.push(sp("A4", 3, 90, 45));
+    sv.shots.push(sp("A4", 3, 270, -45));
+    sv.shots.push(sp("A5", 3, 90, 20));
+    sv.shots.push(sp("A5", 3, 270, -20));
+    sv.shots.push(sp("B1", 4, 30, 35));
+    sv.shots.push(sp("B1", 4, 210, -35));
+    sv.shots.push(sp("B3", 4, 30, 25));
+    sv.shots.push(sp("B3", 4, 210, -25));
+    sv.shots.push(sp("C1", 2, 0, 50));
+    sv.shots.push(sp("C1", 2, 180, -50));
+    sv.shots.push(sp("C3", 2, 0, 45));
+    sv.shots.push(sp("C3", 2, 180, -45));
+    sv.shots.push(sp("A4a1", 2, 10, 40));
+    sv.shots.push(sp("A4a1", 2, 190, -40));
+    sv.shots.push(sp("A4a2", 2, 15, 40));
+    sv.shots.push(sp("A4a2", 2, 195, -40));
+    sv.shots.push(sp("A2", 6, 90, 3));                // near-horizontal: FLAT
+    sv.fixed["A1"] = { x: 0, y: 0, z: 100 };
+    sv.fixed["C1"] = { x: 200, y: 200, z: 140 };
+    return sv;
+}
+
+// Every number CsProfile.build produced, one line at a time, at nine
+// decimals -- so a comparison is point-for-point and a failure names
+// the one point that moved. Nine decimals, not toString(), because the
+// two engines' default float formatting is not the same text.
+function profileSnapshotLines(built) {
+    var lines = [], b, i, j;
+    var n9 = function(v) {
+        return (typeof v === "number") ? v.toFixed(9) : String(v);
+    };
+    var runLines = function(label, runs) {
+        if (runs === undefined || runs === null) {
+            lines.push("  " + label + "=none");
+            return;
+        }
+        for (var r = 0; r < runs.length; r++) {
+            var s = "  " + label + "[" + r + "]";
+            for (var p = 0; p < runs[r].length; p++) {
+                s += " (" + n9(runs[r][p].x) + "," + n9(runs[r][p].y) + ")";
+            }
+            lines.push(s);
+        }
+    };
+    lines.push("bands=" + built.bands.length);
+    for (i = 0; i < built.bands.length; i++) {
+        b = built.bands[i];
+        lines.push("BAND " + i + " key=" + b.key + " tie=" + b.tie +
+            " datum=" + n9(b.datum) + " exag=" + n9(b.exaggeration) +
+            " tapeMode=" + b.tapeMode + " parent=" + b.parent +
+            " zOffset=" + n9(b.zOffset) + " stopped=" + b.stopped +
+            " reason=" + b.stoppedReason +
+            " omitted=[" + b.omitted.join(",") + "]");
+        for (j = 0; j < b.stations.length; j++) {
+            lines.push("  ST " + b.stations[j].name +
+                " x=" + n9(b.stations[j].x) + " y=" + n9(b.stations[j].y) +
+                " z=" + n9(b.stations[j].z));
+        }
+        for (j = 0; j < b.legs.length; j++) {
+            lines.push("  LG " + b.legs[j].from + "->" + b.legs[j].to +
+                " kind=" + b.legs[j].kind +
+                " (" + n9(b.legs[j].fromX) + "," + n9(b.legs[j].fromY) +
+                ")->(" + n9(b.legs[j].toX) + "," + n9(b.legs[j].toY) + ")" +
+                " shotD=" + n9(b.legs[j].shot ? b.legs[j].shot.distance : null));
+        }
+        runLines("CEIL", b.ceiling);
+        runLines("FLOOR", b.floor);
+        if (b.flat !== undefined && b.flat !== null) {
+            for (j = 0; j < b.flat.length; j++) {
+                lines.push("  FLAT " + b.flat[j].name + " " +
+                    n9(b.flat[j].x) + "," + n9(b.flat[j].y));
+            }
+        }
+    }
+    var f = built.findings;
+    lines.push("F.omitted=[" + f.omitted.join(",") + "]");
+    lines.push("F.ungrouped=[" + f.ungrouped.join(",") + "]");
+    lines.push("F.orphans=[" + f.orphans.join(",") + "]");
+    lines.push("F.strandedRoots=[" + f.strandedRoots.join(",") + "]");
+    lines.push("F.wallPointsSkipped=" + f.wallPointsSkipped);
+    for (i = 0; i < f.stopped.length; i++) {
+        lines.push("F.stopped " + f.stopped[i].run + " " +
+            f.stopped[i].station + " " + f.stopped[i].reason);
+    }
+    for (i = 0; i < f.mismatches.length; i++) {
+        lines.push("F.mismatch " + f.mismatches[i].run + " " +
+            f.mismatches[i].expected + " " + f.mismatches[i].actual);
+    }
+    for (i = 0; i < f.secondTies.length; i++) {
+        lines.push("F.secondTie " + f.secondTies[i].run + " " +
+            f.secondTies[i].otherRun + " " + f.secondTies[i].otherStation);
+    }
+    for (i = 0; i < f.undrawn.length; i++) {
+        lines.push("F.undrawn " + f.undrawn[i].from + "->" + f.undrawn[i].to +
+            " " + f.undrawn[i].kind + " " + f.undrawn[i].reason);
+    }
+    return lines;
+}
+
+// The geometry this fixture produced BEFORE CsProfile.legIndex existed,
+// generated from the pre-change file and identical under node and
+// CaveCAD. The index is a speed change, so every number here is a
+// number the change must not move.
+var PROFILE_GEOMETRY_BEFORE_INDEX = [
+    "bands=4",
+    "BAND 0 key=A tie=null datum=100.000000000 exag=1.000000000 tapeMode=slope parent=null zOffset=0.000000000 stopped=null reason=null omitted=[]",
+    "  ST A1 x=0.000000000 y=100.000000000 z=100.000000000",
+    "  ST A2 x=9.961946981 y=100.871557427 z=100.871557427",
+    "  ST A3 x=19.948242328 y=100.348197865 z=100.348197865",
+    "  ST A4 x=31.831459153 y=102.018275077 z=102.018275077",
+    "  ST A5 x=42.771200002 y=100.868461981 z=100.868461981",
+    "  ST A6 x=51.765717446 y=101.182557451 z=101.182557451",
+    "  LG A1->A2 kind=new (0.000000000,100.000000000)->(9.961946981,100.871557427) shotD=10.000000000",
+    "  LG A2->A3 kind=new (9.961946981,100.871557427)->(19.948242328,100.348197865) shotD=10.000000000",
+    "  LG A3->A4 kind=new (19.948242328,100.348197865)->(31.831459153,102.018275077) shotD=12.000000000",
+    "  LG A4->A5 kind=new (31.831459153,102.018275077)->(42.771200002,100.868461981) shotD=11.000000000",
+    "  LG A5->A6 kind=new (42.771200002,100.868461981)->(51.765717446,101.182557451) shotD=9.000000000",
+    "  CEIL[0] (9.961946981,102.799920257) (20.962191798,102.396077976)",
+    "  FLOOR[0] (9.961946981,98.577251682) (18.357424157,97.667042314)",
+    "  FLAT A2.3 9.961946981,101.185573165",
+    "BAND 1 key=B tie=A3 datum=100.348197865 exag=1.000000000 tapeMode=slope parent=A zOffset=-11.954744585 stopped=null reason=null omitted=[B7]",
+    "  ST A3 x=0.000000000 y=100.348197865 z=100.348197865",
+    "  ST B1 x=6.893654271 y=101.563735109 z=101.563735109",
+    "  ST B2 x=14.874166673 y=102.121786899 z=102.121786899",
+    "  ST B3 x=22.869293289 y=101.842590925 z=101.842590925",
+    "  LG A3->B1 kind=new (0.000000000,100.348197865)->(6.893654271,101.563735109) shotD=7.000000000",
+    "  LG B1->B2 kind=new (6.893654271,101.563735109)->(14.874166673,102.121786899) shotD=8.000000000",
+    "  LG B2->B3 kind=new (14.874166673,102.121786899)->(22.869293289,101.842590925) shotD=8.000000000",
+    "  CEIL[0] (6.893654271,103.858040854) (13.753447333,104.621786899)",
+    "  FLOOR[0] (6.893654271,99.269429363) (15.994886013,99.621786899)",
+    "BAND 2 key=C tie=B3 datum=101.842590925 exag=1.000000000 tapeMode=slope parent=B zOffset=-59.622888346 stopped=null reason=null omitted=[]",
+    "  ST B3 x=0.000000000 y=101.842590925 z=101.842590925",
+    "  ST C3 x=15.190740571 y=140.523359562 z=140.523359562",
+    "  ST C2 x=25.177035918 y=140.000000000 z=140.000000000",
+    "  ST C1 x=35.177035918 y=140.000000000 z=140.000000000",
+    "  LG B3->C3 kind=tie (0.000000000,101.842590925)->(15.190740571,140.523359562) shotD=15.200000000",
+    "  LG C3->C2 kind=new (15.190740571,140.523359562)->(25.177035918,140.000000000) shotD=10.000000000",
+    "  LG C2->C1 kind=new (25.177035918,140.000000000)->(35.177035918,140.000000000) shotD=10.000000000",
+    "  CEIL[0] (3.570155741,103.533063972) (16.274091012,141.937573125) (25.177035918,141.732050808) (36.462611138,141.532088886)",
+    "  FLOOR[0] (-3.570155741,100.152117878) (14.107390130,139.109146000) (25.177035918,138.267949192) (33.891460699,138.467911114)",
+    "BAND 3 key=A4a tie=A4 datum=102.018275077 exag=1.000000000 tapeMode=slope parent=A zOffset=-66.527150619 stopped=null reason=null omitted=[]",
+    "  ST A4 x=0.000000000 y=102.018275077 z=102.018275077",
+    "  ST A4a1 x=5.868885604 y=100.770804932 z=100.770804932",
+    "  ST A4a2 x=11.854269906 y=100.352266089 z=100.352266089",
+    "  LG A4->A4a1 kind=new (0.000000000,102.018275077)->(5.868885604,100.770804932) shotD=6.000000000",
+    "  LG A4a1->A4a2 kind=new (5.868885604,100.770804932)->(11.854269906,100.352266089) shotD=6.000000000",
+    "  CEIL[0] (7.400974491,102.056380151) (13.386358792,101.637841309)",
+    "  FLOOR[0] (4.336796718,99.485229712) (10.322181020,99.066690870)",
+    "F.omitted=[B7]",
+    "F.ungrouped=[]",
+    "F.orphans=[]",
+    "F.strandedRoots=[]",
+    "F.wallPointsSkipped=0",
+    "F.undrawn A6->A1 closure closure",
+    "F.undrawn B2->B7 new demoted arm"
+];
+
+(function() {
+    // ---------------------------------------------------------------
+    // CsProfile.pairKey / CsProfile.legIndex, and the promise the whole
+    // index rests on: it changes WHICH legs a lookup looks at, never
+    // WHICH ONES PASS. Every assertion below is written so that
+    // deleting the behaviour it names makes THIS test fail, not some
+    // distant geometry test.
+    // ---------------------------------------------------------------
+
+    // -- pairKey is an UNORDERED key -------------------------------
+    eqs(CsProfile.pairKey("A1", "B2"), CsProfile.pairKey("B2", "A1"),
+        "pairKey is the same string whichever way round the pair is given");
+    ok(CsProfile.pairKey("A1", "A2") !== CsProfile.pairKey("A1", "A3"),
+        "pairKey still tells two different pairs apart");
+
+    // -- pairKey cannot collide two DIFFERENT pairs ----------------
+    // The separator is what makes this true. Every printable candidate
+    // fails here: with a space, ("A B","C") and ("A","B C") share a key
+    // and one bucket, and first-match-wins then hands back a leg from
+    // the wrong pair -- silently.
+    var COLLIDE = [" ", ",", "-", ".", "/", "|", ":", "\t"];
+    for (var cx = 0; cx < COLLIDE.length; cx++) {
+        var ch = COLLIDE[cx];
+        ok(CsProfile.pairKey("A" + ch + "B", "C") !==
+                CsProfile.pairKey("A", "B" + ch + "C"),
+            "pairKey does not collide two pairs whose names contain '" +
+                ch + "'");
+    }
+
+    // -- a pairKey is never an Object.prototype member name ---------
+    // Every key carries a PAIR_SEP and no builtin name does, which is
+    // what makes plain [] access on a legIndex safe. Driven end to end
+    // rather than asserted on the string, because the lookup is the
+    // thing that would break.
+    var protoResolved = { legs: [
+        { shot: shotOf("__proto__", "hasOwnProperty", 10, 0, 0),
+          from: "__proto__", to: "hasOwnProperty", kind: "new" }
+    ] };
+    var protoIndex = CsProfile.legIndex(protoResolved);
+    ok(CsProfile.legBetween("__proto__", "hasOwnProperty", protoResolved,
+            protoIndex) === protoResolved.legs[0],
+        "a station named __proto__ still indexes and resolves like any other");
+    ok(CsProfile.legBetween("hasOwnProperty", "toString", protoResolved,
+            protoIndex) === null,
+        "and a pair with no leg comes back null, not an inherited value");
+
+    // -- legIndex FILTERS NOTHING ----------------------------------
+    // This is the safety argument for the whole change: the kind
+    // filters stay in legBetween and tieLegBetween, and the index never
+    // becomes a third copy of them. If it ever started filtering,
+    // tieLegBetween would lose the closure legs it exists to find.
+    var mixedResolved = { legs: [
+        { shot: shotOf("A1", "A2", 10, 0, 0), from: "A1", to: "A2",
+          kind: "closure" },
+        { shot: { splay: true }, from: "A2", to: "A3", kind: "new" },
+        { shot: shotOf("A3", "A4", 10, 0, 0), from: "A3", to: "A4",
+          kind: "new" }
+    ] };
+    var mixedIndex = CsProfile.legIndex(mixedResolved);
+    eqs((mixedIndex[CsProfile.pairKey("A1", "A2")] || []).length, 1,
+        "legIndex keeps a CLOSURE leg in its bucket -- it filters nothing");
+    eqs((mixedIndex[CsProfile.pairKey("A2", "A3")] || []).length, 1,
+        "legIndex keeps a SPLAY-flagged leg in its bucket too");
+    ok(CsProfile.legBetween("A1", "A2", mixedResolved, mixedIndex) === null,
+        "legBetween still refuses that closure THROUGH the index");
+    ok(CsProfile.legBetween("A2", "A3", mixedResolved, mixedIndex) === null,
+        "legBetween still refuses that splay leg THROUGH the index");
+    ok(CsProfile.tieLegBetween("A1", "A2", mixedResolved, mixedIndex) ===
+            mixedResolved.legs[0],
+        "tieLegBetween still ADMITS that closure through the index -- the " +
+        "one stated exception to the shared filter");
+    ok(CsProfile.tieLegBetween("A2", "A3", mixedResolved, mixedIndex) === null,
+        "tieLegBetween still refuses a splay through the index");
+
+    // -- empty input tolerance, same as adjacency() ----------------
+    var emptyIdx = CsProfile.legIndex({ legs: null });
+    var emptyKeys = 0;
+    for (var ek in emptyIdx) {
+        if (emptyIdx.hasOwnProperty(ek)) { emptyKeys++; }
+    }
+    eqs(emptyKeys, 0, "legIndex tolerates a resolved with no legs at all");
+
+    // ---------------------------------------------------------------
+    // A DUPLICATE PAIR: two legs joining the same two stations. First
+    // match wins, and a bucket lists a pair's legs in resolved.legs
+    // order, so the indexed and unindexed answers must be the SAME
+    // OBJECT -- not merely an equal-looking one.
+    // ---------------------------------------------------------------
+    var placeThenClose = { legs: [
+        { shot: shotOf("A1", "A2", 10, 0, 0), from: "A1", to: "A2",
+          kind: "new" },
+        // the second leg on the same pair, written BACKWARDS, so this
+        // also pins that a bucket is keyed on the unordered pair
+        { shot: shotOf("A2", "A1", 99, 180, 0), from: "A2", to: "A1",
+          kind: "closure" }
+    ] };
+    var ptcIndex = CsProfile.legIndex(placeThenClose);
+    eqs((ptcIndex[CsProfile.pairKey("A1", "A2")] || []).length, 2,
+        "both legs of a duplicate pair land in ONE bucket, either direction");
+    eqs(ptcIndex[CsProfile.pairKey("A1", "A2")][0], placeThenClose.legs[0],
+        "and the bucket keeps them in resolved.legs order");
+    ok(CsProfile.legBetween("A1", "A2", placeThenClose) ===
+            placeThenClose.legs[0] &&
+        CsProfile.legBetween("A1", "A2", placeThenClose, ptcIndex) ===
+            placeThenClose.legs[0],
+        "duplicate pair: legBetween returns the PLACING leg, indexed and not");
+    ok(CsProfile.tieLegBetween("A1", "A2", placeThenClose) ===
+            placeThenClose.legs[0] &&
+        CsProfile.tieLegBetween("A1", "A2", placeThenClose, ptcIndex) ===
+            placeThenClose.legs[0],
+        "duplicate pair: tieLegBetween returns the FIRST leg, indexed and not");
+
+    // both legs closures -- the pair whose ends were already reachable
+    // by other routes. legBetween finds nothing; tieLegBetween takes
+    // the EARLIER closure, and the index must not reorder them.
+    var twoClosures = { legs: [
+        { shot: shotOf("A1", "A2", 7, 0, 0), from: "A1", to: "A2",
+          kind: "closure" },
+        { shot: shotOf("A1", "A2", 8, 0, 0), from: "A1", to: "A2",
+          kind: "closure" }
+    ] };
+    var tcIndex = CsProfile.legIndex(twoClosures);
+    ok(CsProfile.legBetween("A1", "A2", twoClosures) === null &&
+        CsProfile.legBetween("A1", "A2", twoClosures, tcIndex) === null,
+        "two closures on one pair: legBetween finds nothing, indexed and not");
+    ok(CsProfile.tieLegBetween("A1", "A2", twoClosures) ===
+            twoClosures.legs[0] &&
+        CsProfile.tieLegBetween("A1", "A2", twoClosures, tcIndex) ===
+            twoClosures.legs[0],
+        "two closures on one pair: tieLegBetween returns the EARLIER one, " +
+        "indexed and not");
+
+    // ---------------------------------------------------------------
+    // THE ORDERING PROPERTY ITSELF, pinned on CsNetwork.resolve rather
+    // than assumed by CsProfile: a shot is classified "closure" only
+    // when both its ends are ALREADY placed, so for any pair carrying
+    // two legs the placing ("new") leg is emitted FIRST. That is what
+    // makes the tie step's kind lookup behave as its docblock says.
+    // ---------------------------------------------------------------
+    var dupSv = CsModel.newSurvey();
+    dupSv.shots.push(shotOf("D1", "D2", 10, 0, 0));
+    dupSv.shots.push(shotOf("D2", "D3", 10, 90, 0));
+    dupSv.shots.push(shotOf("D1", "D2", 10.3, 2, 1));  // same pair again
+    var dupRes = CsNetwork.resolve(dupSv, {});
+    var firstOnPair = null, closureBeforeNew = false, sawNew = false;
+    for (var dl = 0; dl < dupRes.legs.length; dl++) {
+        var dleg = dupRes.legs[dl];
+        if (CsProfile.pairKey(dleg.from, dleg.to) !==
+                CsProfile.pairKey("D1", "D2")) {
+            continue;
+        }
+        if (firstOnPair === null) { firstOnPair = dleg; }
+        if (dleg.kind === "closure" && !sawNew) { closureBeforeNew = true; }
+        if (dleg.kind === "new") { sawNew = true; }
+    }
+    eqs((firstOnPair === null) ? "none" : firstOnPair.kind, "new",
+        "resolve emits a duplicate pair's PLACING leg first");
+    ok(!closureBeforeNew,
+        "resolve never emits a closure on a pair before that pair's own " +
+        "placing leg");
+
+    // ---------------------------------------------------------------
+    // CsProfile.build: ONE index for the whole profile, handed down to
+    // every band, and never written back onto the caller's own opts.
+    // ---------------------------------------------------------------
+    var bsv = CsModel.newSurvey();
+    bsv.shots.push(shotOf("E1", "E2", 10, 0, 0));
+    bsv.shots.push(shotOf("E2", "E3", 10, 90, 0));
+    bsv.shots.push(shotOf("E2", "F1", 8, 270, 0));
+    bsv.shots.push(shotOf("F1", "F2", 8, 270, 0));
+    var bres = CsNetwork.resolve(bsv, {});
+
+    var realIndex = CsProfile.legIndex;
+    var indexCalls = 0;
+    try {
+        CsProfile.legIndex = function(r) {
+            indexCalls++;
+            return realIndex.call(CsProfile, r);
+        };
+        var counted = CsProfile.build(bsv, bres, {});
+        eqs(indexCalls, 1,
+            "build constructs its leg index EXACTLY ONCE for the whole " +
+            "profile, not once per band");
+        eqs(counted.bands.length, 2, "and the two bands still come out");
+    } finally {
+        CsProfile.legIndex = realIndex;
+    }
+
+    // Does build actually HAND the index down? Feed it a deliberately
+    // empty one: if every band resolves its steps through opts.legIndex,
+    // every band must now stop for want of a leg. If build were still
+    // scanning resolved.legs the bands would draw normally and this
+    // would fail -- which is the point.
+    try {
+        CsProfile.legIndex = function() { return {}; };
+        var starved = CsProfile.build(bsv, bres, {});
+        var allStopped = (starved.bands.length > 0);
+        for (var sb = 0; sb < starved.bands.length; sb++) {
+            if (starved.bands[sb].stoppedReason !== "no-leg") {
+                allStopped = false;
+            }
+        }
+        ok(allStopped,
+            "build hands its leg index to every band -- starve the index " +
+            "and every band stops with 'no-leg'");
+    } finally {
+        CsProfile.legIndex = realIndex;
+    }
+
+    // C1, extended to the index: a caller's own opts object must come
+    // back untouched, because CsDraw.survey reuses one across draws and
+    // a map built from an earlier `resolved` answering for a later one
+    // is a silently wrong profile.
+    var reused = { exaggeration: 1.0 };
+    CsProfile.build(bsv, bres, reused);
+    ok(reused.legIndex === undefined,
+        "build never writes its leg index back onto the caller's opts");
+    ok(reused.adjacency === undefined,
+        "nor its adjacency graph -- same rule, same reason");
+    ok(reused.splaysByStation === undefined && reused.legCounts === undefined,
+        "nor the two CsLrud maps");
+
+    // ...and the consequence, driven rather than asserted on a field:
+    // the SAME opts object across two DIFFERENT surveys still builds
+    // the second one correctly.
+    var otherSv = CsModel.newSurvey();
+    otherSv.shots.push(shotOf("G1", "G2", 10, 0, 0));
+    otherSv.shots.push(shotOf("G2", "G3", 10, 0, 0));
+    var otherRes = CsNetwork.resolve(otherSv, {});
+    var second = CsProfile.build(otherSv, otherRes, reused);
+    eqs(second.bands.length, 1, "a reused opts object: the second build " +
+        "still finds its one band");
+    eqs(second.bands[0].stations.length, 3,
+        "and draws all three of its stations -- no stale index answered " +
+        "for the wrong survey");
+
+    // ---------------------------------------------------------------
+    // THE LOAD-BEARING INVARIANT, driven over a real survey: every edge
+    // CsProfile.adjacency offers as a chain step, CsProfile.legBetween
+    // can resolve -- through the index and without it. If the two kind
+    // filters ever diverge, a chain includes a step legBetween cannot
+    // resolve and the band silently stops there.
+    // ---------------------------------------------------------------
+    var invSv = profileGoldenSurvey();
+    var invRes = CsNetwork.resolve(invSv, {});
+    var invAdj = CsProfile.adjacency(invRes);
+    var invIdx = CsProfile.legIndex(invRes);
+    var unresolvable = 0, disagreed = 0, edges = 0;
+    for (var at in invAdj) {
+        if (!invAdj.hasOwnProperty(at)) { continue; }
+        for (var ai2 = 0; ai2 < invAdj[at].length; ai2++) {
+            var other = invAdj[at][ai2].other;
+            edges++;
+            var plain = CsProfile.legBetween(at, other, invRes);
+            var viaIdx = CsProfile.legBetween(at, other, invRes, invIdx);
+            if (plain === null) { unresolvable++; }
+            if (plain !== viaIdx) { disagreed++; }
+        }
+    }
+    ok(edges > 0, "the invariant walk actually had edges to check");
+    eqs(unresolvable, 0,
+        "every edge adjacency offers, legBetween resolves -- the filters " +
+        "still agree by statement");
+    eqs(disagreed, 0,
+        "and the index returns the identical leg object on every one of them");
+
+    // the same equality over every pair resolve() produced, both lookups
+    var legDisagreed = 0, tieDisagreed = 0;
+    for (var pl = 0; pl < invRes.legs.length; pl++) {
+        var pleg = invRes.legs[pl];
+        if (CsProfile.legBetween(pleg.from, pleg.to, invRes) !==
+                CsProfile.legBetween(pleg.from, pleg.to, invRes, invIdx)) {
+            legDisagreed++;
+        }
+        if (CsProfile.tieLegBetween(pleg.from, pleg.to, invRes) !==
+                CsProfile.tieLegBetween(pleg.from, pleg.to, invRes, invIdx)) {
+            tieDisagreed++;
+        }
+    }
+    eqs(legDisagreed, 0, "legBetween: indexed and unindexed agree on every " +
+        "pair of a real survey");
+    eqs(tieDisagreed, 0, "tieLegBetween: likewise, closures included");
+
+    // ---------------------------------------------------------------
+    // THE GEOMETRY ITSELF, point for point, against the output this
+    // fixture produced BEFORE the index existed. A survey with
+    // branches, an interior tie, a loop closure, a control tie between
+    // two anchored components, a demoted arm, wall runs on every band
+    // and a flat tick. Any movement here is a regression, not an
+    // improvement, so this is one assertion that names the line that
+    // moved rather than many that each name a field.
+    // ---------------------------------------------------------------
+    var golden = CsProfile.build(invSv, invRes, {});
+    var actual = profileSnapshotLines(golden);
+    var diffAt = -1;
+    for (var gi2 = 0; gi2 < Math.max(actual.length,
+            PROFILE_GEOMETRY_BEFORE_INDEX.length); gi2++) {
+        if (actual[gi2] !== PROFILE_GEOMETRY_BEFORE_INDEX[gi2]) {
+            diffAt = gi2;
+            break;
+        }
+    }
+    ok(diffAt === -1 &&
+            actual.length === PROFILE_GEOMETRY_BEFORE_INDEX.length,
+        "the complete-data profile fixture is geometrically unchanged, " +
+        "band for band and point for point" + ((diffAt >= 0) ?
+            " -- line " + diffAt + " expected '" +
+            PROFILE_GEOMETRY_BEFORE_INDEX[diffAt] + "', got '" +
+            actual[diffAt] + "'" :
+            " (" + actual.length + " vs " +
+            PROFILE_GEOMETRY_BEFORE_INDEX.length + " lines)"));
+}());
+
 (function() {
     // the second tie-break: equal length, equal lowest sequence, so the
     // lower HIGHEST sequence wins -- A13-A14-A15 over A13-A14-A99

@@ -248,6 +248,14 @@ CsProfile.groupRuns = function(resolved) {
  * invariant" has not seen the whole picture -- see tieLegBetween's own
  * docblock for why the exception exists and what it costs.
  *
+ * THE LEG INDEX DOES NOT MOVE ANY OF THIS. CsProfile.legIndex buckets
+ * legs by unordered station pair so those two lookups stop scanning all
+ * of resolved.legs, and it deliberately filters NOTHING -- there are
+ * still exactly two kind filters in this file, in the two functions
+ * named above, and the invariant is still between those two. See
+ * CsProfile.legIndex for why a filtering index would have been a third
+ * copy of the very thing this paragraph exists to keep singular.
+ *
  * Run hierarchy does NOT use this graph; it builds its own from
  * resolved.legs, closures included, because a second contact through a
  * ring is exactly the thing it has to report. See hierarchy().
@@ -1087,13 +1095,36 @@ CsProfile.betterChain = function(path, best) {
  * chain figures above, not the tree ones, that actually test recursion
  * depth.)
  *
+ * THE TABLE ABOVE IS THIS FUNCTION ALONE, and it is NOT re-derived
+ * here: the leg index (CsProfile.legIndex) changed nothing about this
+ * search, whose own comparison count barely moves. What the index DID
+ * change is this function's SHARE of a build, and that is worth stating
+ * because the old answer was "not the dominant cost, CsProfile.
+ * legBetween is". Measured on CaveCAD after the index, per function
+ * within one CsProfile.build:
+ *
+ *   one 4500-station run:  build 1221ms, of which this 222ms (18%)
+ *   thirty 150-station runs: build 1099ms, of which this 40ms (4%)
+ *   one 3000-station run:  build 566ms, of which this 70ms (12%)
+ *
+ * So this is now the SECOND cost in a build, not the first and not a
+ * rounding error. The first is CsProfile.bandWallRuns, at 78-92% across
+ * those same shapes -- see CsProfile.settings' own docblock for what is
+ * quadratic there and the scratch measurement of fixing it. A separate
+ * measurement attempt for this table's own rows produced figures
+ * several times LOWER than the ones above it on a differently-shaped
+ * fixture, which is why they were left alone rather than overwritten:
+ * two numbers measured different ways do not belong in one column.
+ *
  * Cost is bounded by the run's own size, not the survey's, because the
  * walk only ever crosses edges into stations `inRun`. Pass a prebuilt
  * `adj` (CsProfile.adjacency(resolved)) when laying out many bands from
  * the same resolved survey -- rebuilding the whole-survey graph once
  * per run, instead of once per band, is most of the cost above a few
  * hundred runs; CsProfile.unrollBand accepts the same graph via
- * `opts.adjacency` and forwards it here.
+ * `opts.adjacency` and forwards it here. CsProfile.legIndex gets the
+ * same once-per-build treatment for the same reason, one layer down in
+ * CsProfile.unrollBand.
  *
  * \param adj optional, CsProfile.adjacency(resolved) already built;
  *            built fresh from `resolved` when omitted
@@ -1184,6 +1215,108 @@ CsProfile.longestChain = function(run, resolved, adj) {
 };
 
 /**
+ * Separator inside a CsProfile.pairKey. A NUL is used because it is the
+ * one character a station name cannot carry: names come from a survey
+ * file's text, and every reader in Core/Format splits on whitespace or
+ * a delimiter long before a NUL could survive into one. A printable
+ * separator would not do -- "A B" paired with "C" and "A" paired with
+ * "B C" would collide on a space, and the collision would be SILENT
+ * (two unrelated pairs sharing one bucket, first-match-wins handing
+ * back the wrong leg). CsProfile.build's own `drawnLeg` map further
+ * down still keys on a space, deliberately: it only ever asks "is this
+ * exact leg drawn", never "give me the leg for this pair", so a
+ * collision there costs a misreported finding, not wrong geometry.
+ */
+CsProfile.PAIR_SEP = "\u0000";
+
+/**
+ * The unordered-pair key for two station names: pairKey(a, b) and
+ * pairKey(b, a) are the same string. Sorted, not concatenated in the
+ * order given, because a leg's own from/to direction is exactly what a
+ * lookup by pair must NOT care about.
+ *
+ * Also why the key can never be "__proto__" or any other Object.prototype
+ * member name: every key this returns contains a CsProfile.PAIR_SEP, and
+ * no builtin name does. Plain [] access on a CsProfile.legIndex is
+ * therefore safe.
+ */
+CsProfile.pairKey = function(a, b) {
+    return (a < b) ? (a + CsProfile.PAIR_SEP + b)
+                   : (b + CsProfile.PAIR_SEP + a);
+};
+
+/**
+ * Unordered station pair -> the legs joining it, IN resolved.legs ORDER.
+ * Built once per CsProfile.build and handed to CsProfile.legBetween and
+ * CsProfile.tieLegBetween, which without it scan all of resolved.legs on
+ * every single chain step -- O(total stations x total legs) over the
+ * whole survey, and the measured dominant cost of a build before this
+ * existed (see CsProfile.settings' own docblock for the before/after
+ * table).
+ *
+ * IT FILTERS NOTHING. Every leg resolved.legs holds goes into a bucket,
+ * closures and (hypothetical) splay legs included. That is the whole
+ * safety argument for the change: this index decides only WHICH legs a
+ * lookup LOOKS AT, never which ones PASS. The legs it keeps out of a
+ * given bucket are exactly the ones whose endpoints do not match, which
+ * every lookup's own endpoint test would have rejected anyway -- so
+ * CsProfile.legBetween's and CsProfile.tieLegBetween's kind filters stay
+ * where they have always been, in those two functions, unchanged and
+ * still stated to agree with CsProfile.adjacency's. An index that
+ * pre-filtered by kind would have quietly become a THIRD copy of that
+ * filter, and a third copy is precisely what those docblocks' invariant
+ * exists to prevent.
+ *
+ * ORDER IS PRESERVED, AND THAT IS LOAD-BEARING, NOT INCIDENTAL. Two
+ * legs CAN join the same two stations, and both lookups take the FIRST
+ * match. A bucket lists a pair's legs in the same relative order
+ * resolved.legs does, so first-match-wins picks the identical leg it
+ * picked before this index existed -- the equivalence is structural and
+ * holds whatever order CsNetwork.resolve emits legs in.
+ *
+ * WHAT THAT ORDER ACTUALLY IS, since the tie step's kind lookup depends
+ * on it: CsNetwork.resolve classifies a shot as "closure" (or a control
+ * "tie") only when BOTH its ends are already placed, and as "new" when
+ * it is the shot that places one of them. So for any pair carrying two
+ * legs, a "new" leg -- if the pair has one at all -- is always emitted
+ * BEFORE any closure on that same pair: once the "new" leg has run,
+ * both ends are known, which is precisely what makes every later leg on
+ * the pair a closure. A pair whose ends were both already reachable by
+ * other routes carries closures only, in emission order. Consequence:
+ * CsProfile.legBetween (closures out) returns a pair's placing leg, and
+ * CsProfile.tieLegBetween (closures in) returns that same placing leg
+ * when there is one and the earliest closure otherwise. This paragraph
+ * is a statement ABOUT CsNetwork.resolve, pinned by its own named test,
+ * not an assumption this index makes -- see above: the index is
+ * order-preserving, so it cannot change the answer even if resolve()
+ * ever stopped behaving this way.
+ *
+ * NEVER ACCEPTED FROM A CALLER, same as the adjacency graph -- see the
+ * C1 paragraph on CsProfile.build for the measured failure that rule
+ * comes from. CsProfile.build constructs one from THIS call's
+ * `resolved`, every call, and nothing writes it back onto the caller's
+ * own `opts` object.
+ *
+ * \return {pairKey: [leg]} -- absent (undefined) for a pair with no leg
+ */
+CsProfile.legIndex = function(resolved) {
+    var index = {};
+    if (resolved === undefined || resolved === null ||
+            resolved.legs === undefined || resolved.legs === null) {
+        return index;   // same empty-input tolerance as adjacency()
+    }
+    for (var i = 0; i < resolved.legs.length; i++) {
+        var leg = resolved.legs[i];
+        var key = CsProfile.pairKey(leg.from, leg.to);
+        if (!index.hasOwnProperty(key)) {
+            index[key] = [];
+        }
+        index[key].push(leg);
+    }
+    return index;
+};
+
+/**
  * The leg joining two named stations, or null. FOR INTERIOR CHAIN
  * STEPS ONLY -- see CsProfile.tieLegBetween for the one step (a run's
  * tie into its parent) that this deliberately does not cover.
@@ -1197,26 +1330,32 @@ CsProfile.longestChain = function(run, resolved, adj) {
  * become one this cannot resolve, and unrollBand would silently stop
  * the band there instead of erroring.
  *
- * THIS IS THE DOMINANT COST IN CsProfile.build, MEASURED, NOT
- * longestChain's chain search: CsProfile.unrollBand calls this once per
- * interior station in every band, and each call is a LINEAR SCAN of
- * resolved.legs -- O(total stations x total legs) over the whole
- * survey. See CsProfile.settings' own docblock (the maxStations
- * paragraph) for the numbers that pinned this down: a survey chopped
- * into many small named runs costs as much to build as one run holding
- * all the same stations, because this scan does not care how the
- * stations are grouped into runs, only how many of them there are in
- * total. NOT memoized or indexed against `resolved` in this round --
- * a per-station or per-pair lookup built once per CsProfile.build call
- * would turn this from O(legs) to O(1) per step and was measured to cut
- * a 30-run, 4500-station build from roughly 2s to roughly 1.2s on
- * CaveCAD -- but that is a separate change with its own risk (a cache
- * that must be invalidated exactly when `resolved` changes and never
- * otherwise) and remains outstanding.
+ * THIS USED TO BE THE DOMINANT COST IN CsProfile.build, MEASURED --
+ * CsProfile.unrollBand calls it once per interior station in every
+ * band, and without `index` each call is a LINEAR SCAN of resolved.legs,
+ * O(total stations x total legs) over the whole survey. Pass `index`
+ * (CsProfile.legIndex(resolved)) and the same call reads one small
+ * bucket instead: a 4500-station build went from ~20.2 million leg
+ * comparisons to ~13 thousand, and from ~2.2s to ~0.4s on CaveCAD. See
+ * CsProfile.settings' own docblock for the full before/after table.
+ * `index` is OPTIONAL and changes no answer: a bucket holds exactly the
+ * legs on this pair, in resolved.legs order, so the first match is the
+ * same leg the full scan found -- see CsProfile.legIndex for why that
+ * equivalence is structural rather than a property of any one survey.
+ * The filter below is one statement either way, run over whichever
+ * candidate list it was handed, so an indexed and an unindexed lookup
+ * cannot drift apart from each other any more than either can drift
+ * from CsProfile.adjacency.
+ *
+ * \param index optional, CsProfile.legIndex(resolved) already built;
+ *              all of resolved.legs is scanned when omitted
  */
-CsProfile.legBetween = function(a, b, resolved) {
-    for (var i = 0; i < resolved.legs.length; i++) {
-        var leg = resolved.legs[i];
+CsProfile.legBetween = function(a, b, resolved, index) {
+    var legs = (index === undefined || index === null)
+        ? resolved.legs
+        : (index[CsProfile.pairKey(a, b)] || []);
+    for (var i = 0; i < legs.length; i++) {
+        var leg = legs[i];
         if (leg.kind === "closure") {
             continue;
         }
@@ -1274,10 +1413,27 @@ CsProfile.legBetween = function(a, b, resolved) {
  * length is plan-advance-plus-resolved-Y-difference, not the shot's
  * own slope distance. See CsProfile.unrollBand's own docblock for the
  * ordinary (non-closure) case, which does not have this gap.
+ *
+ * TAKES THE SAME OPTIONAL `index` AS CsProfile.legBetween, for the same
+ * reason and with the same guarantee -- and it matters more here than
+ * there, because CsProfile.unrollBand asks this one question once per
+ * chain station while hunting for where the tie attaches, not once per
+ * band. A pair carrying two legs is where the two functions visibly
+ * differ (this one can return a closure the other skips), and a bucket
+ * lists a pair's legs in resolved.legs order, so BOTH still return
+ * exactly the leg they returned before the index existed. See
+ * CsProfile.legIndex, whose docblock also states which of a duplicate
+ * pair's legs CsNetwork.resolve emits first, and why.
+ *
+ * \param index optional, CsProfile.legIndex(resolved) already built;
+ *              all of resolved.legs is scanned when omitted
  */
-CsProfile.tieLegBetween = function(a, b, resolved) {
-    for (var i = 0; i < resolved.legs.length; i++) {
-        var leg = resolved.legs[i];
+CsProfile.tieLegBetween = function(a, b, resolved, index) {
+    var legs = (index === undefined || index === null)
+        ? resolved.legs
+        : (index[CsProfile.pairKey(a, b)] || []);
+    for (var i = 0; i < legs.length; i++) {
+        var leg = legs[i];
         if (leg.shot !== undefined && leg.shot !== null && leg.shot.splay) {
             continue;
         }
@@ -1353,7 +1509,14 @@ CsProfile.tieLegBetween = function(a, b, resolved) {
  *                  adjacency: CsProfile.adjacency(resolved) already
  *                  built -- forwarded to CsProfile.longestChain so
  *                  laying out many bands from the same resolved survey
- *                  need not rebuild the whole-survey graph per band}
+ *                  need not rebuild the whole-survey graph per band,
+ *                  legIndex: CsProfile.legIndex(resolved) already
+ *                  built -- handed to every CsProfile.legBetween and
+ *                  CsProfile.tieLegBetween call below, including the
+ *                  attach-point scan, which asks one question per chain
+ *                  station and was a full resolved.legs scan each time.
+ *                  Both are OPTIONAL: omit either and this rebuilds
+ *                  nothing, it simply pays the unindexed cost}
  *
  * \return {
  *   key, tie, datum,
@@ -1412,7 +1575,8 @@ CsProfile.unrollBand = function(run, tie, resolved, hier, opts) {
         // here would misjudge -- or fail to find -- that very edge.
         var attachIdx = -1;
         for (var ai = 0; ai < chain.length; ai++) {
-            if (CsProfile.tieLegBetween(tie, chain[ai], resolved) !== null) {
+            if (CsProfile.tieLegBetween(tie, chain[ai], resolved,
+                    opts.legIndex) !== null) {
                 attachIdx = ai;
                 break;
             }
@@ -1491,8 +1655,10 @@ CsProfile.unrollBand = function(run, tie, resolved, hier, opts) {
             // actually unshifted on) may resolve through a closure --
             // every interior step keeps legBetween's stricter filter
             var leg = (tied && i === 1)
-                ? CsProfile.tieLegBetween(chain[i - 1], name, resolved)
-                : CsProfile.legBetween(chain[i - 1], name, resolved);
+                ? CsProfile.tieLegBetween(chain[i - 1], name, resolved,
+                    opts.legIndex)
+                : CsProfile.legBetween(chain[i - 1], name, resolved,
+                    opts.legIndex);
             if (leg === null) {
                 stopped = name;   // chain broken: stop, do not invent a link
                 stoppedReason = "no-leg";
@@ -2166,8 +2332,20 @@ CsProfile.layout = function(bands) {
  * adjacency graph -- there is no caller override to reopen the C1 trap
  * for either.
  *
- * The three fields CsProfile.unrollBand reads (exaggeration, tapeMode,
- * adjacency) plus the three CsProfile.bandWallRuns reads directly
+ * AND SO DOES THE LEG INDEX. CsProfile.legIndex(resolved) is built here
+ * exactly once and handed down through the same `bandOpts` object,
+ * because CsProfile.legBetween and CsProfile.tieLegBetween without it
+ * scan all of resolved.legs on EVERY chain step -- 20.2 million leg
+ * comparisons on a 4500-station survey, 226 million on a 15,000-station
+ * one, and the measured dominant cost of a build. Indexed, those become
+ * roughly one comparison per station and the build runs 40-46% faster;
+ * see CsProfile.settings' own docblock for the whole before/after table
+ * and for what is STILL quadratic afterwards. It is bound by C1 above
+ * as strictly as the adjacency graph: no caller override, built from
+ * THIS call's `resolved`, and never written onto `opts`.
+ *
+ * The four fields CsProfile.unrollBand reads (exaggeration, tapeMode,
+ * adjacency, legIndex) plus the three CsProfile.bandWallRuns reads directly
  * (flatSplayDeg, splaysByStation, legCounts -- it reads exaggeration
  * and tapeMode off the BAND itself instead, set by the unrollBand call
  * that produced it; see bandWallRuns' own docblock for why) are copied
@@ -2249,6 +2427,7 @@ CsProfile.build = function(survey, resolved, opts) {
         tapeMode: opts.tapeMode,
         flatSplayDeg: opts.flatSplayDeg,
         adjacency: CsProfile.adjacency(resolved),
+        legIndex: CsProfile.legIndex(resolved),
         splaysByStation: CsLrud.splaysByStation(survey),
         legCounts: CsLrud.legCounts(resolved.legs)
     };
@@ -2378,66 +2557,87 @@ CsProfile.build = function(survey, resolved, opts) {
  * function's own docblock), so a cave chopped into many small named
  * runs should cost "nothing like" one run holding all the same
  * stations. Measured on CaveCAD (this engine -- the only one a real
- * draw ever runs in; node is roughly 20-25x faster on this same pure
- * code and would understate every number below):
+ * draw ever runs in; node is roughly 15-25x faster on this same pure
+ * code and would understate every number below), best of three runs,
+ * one shape per process so the engine's own GC pauses cannot smear one
+ * shape's cost onto the next:
  *
- *   shape                                     ms      legBetween scans
- *   ---------------------------------------   -----   -----------------
- *   one 4500-station run                      2174    10,127,250
- *   thirty 150-station runs (4500 total)      2211    10,061,970
+ *   shape                                BEFORE the leg index      AFTER it
+ *                                           ms   comparisons      ms  comparisons
+ *   ----------------------------------   -----  ------------   -----  -----------
+ *   one 1000-station run                   112       998,001      67          999
+ *   one 1200-station run                   158     1,437,601      94        1,199
+ *   eight 150-station runs (1200)          153     1,445,994      88        1,206
+ *   one 2400-station run                   601     5,755,201     355        2,399
+ *   sixteen 150-station runs (2400)        579     5,791,186     323        2,414
+ *   one 3000-station run                   933     8,994,001     539        2,999
+ *   twenty 150-station runs (3000)         905     9,050,982     505        3,018
+ *   one 4500-station run                  2095    20,241,001    1252        4,499
+ *   thirty 150-station runs (4500)        1918    20,371,472    1088        4,528
+ *   one 4800-station run                  2449    23,030,401    1442        4,799
+ *   thirty-two 150-station runs (4800)    2189    23,179,170    1229        4,830
+ *   one 8000-station run                  7197    63,984,001    4267        7,999
+ *   fifty 150-station runs (7500)         5381    56,602,452    2935        7,548
+ *   a hundred 150-station runs (15000)   21190   226,454,902   11563       15,098
  *
- * Within 2% of each other -- the "costs nothing like" claim was false.
- * Holding run length fixed at 150 and growing only the RUN COUNT (so
- * only the TOTAL changes) shows why: 1200 stations total, 154ms; 2400,
- * 581ms; 4800, 2234ms -- clean quadratic growth in the TOTAL, not in any
- * one run's length. The actual dominant cost is CsProfile.legBetween
- * linearly scanning resolved.legs on every chain step (CsProfile.
- * unrollBand calls it once per station in every band, across every
- * band) -- O(total stations x total legs) -- not CsProfile.longestChain's
- * own O(run length^2) search, which is what the old gate was built to
- * catch and is a real cost, just no longer the dominant one now that
- * longestChain's own leaf-only-start optimization has cut its share
- * down (see that function's docblock). A largest-run-only gate measured
- * a quantity that does not govern the cost it existed to bound: it let
- * the many-small-runs shape through while doing nothing extra to catch
- * the one shape it was actually built for.
+ * TWO SEPARATE FACTS LIVE IN THAT TABLE. First, the "costs nothing
+ * like" claim was false and still is: at every size, one big run and
+ * many small runs summing to the same TOTAL cost within a few percent
+ * of each other. A largest-run-only gate measured a quantity that does
+ * not govern the cost it existed to bound -- it let the many-small-runs
+ * shape through while doing nothing extra to catch the one shape it was
+ * actually built for. THAT is why the condition checks the total.
  *
- * WHAT THE 3000 DEFAULT MEANS NOW: CsProfile.longestChain's own timing
- * table quotes ~473ms (1000 stations) and ~1993ms (2000 stations) as
- * its PRE-fix numbers, from before the leaf-only-start optimization
- * existed -- those are what this default was originally weighed
- * against. Measured fresh, post-fix, through the SAME full pipeline
- * (CsProfile.build end to end, not longestChain alone): a 1000-station
- * single chain now builds in 118ms and a 2000-station chain in 433ms.
- * The leaf-only-start fix already closed most of the original gap;
- * what cost remains at these sizes is legBetween's scan, not the chain
- * search. At the default of 3000, an ordinary single-run survey now
- * builds in ABOUT A SECOND, not "well under half a second" as an
- * earlier pass here claimed against its own adjacent numbers -- 433ms
- * at 2000 stations, under the quadratic growth this same paragraph
- * asserts, already implies roughly double that at 3000, and a direct
- * measurement on CaveCAD confirms it: 964 / 1003 / 970 ms across three
- * isolated runs. And -- because this gate checks the TOTAL, not just
- * the largest run -- a many-run survey totalling 3000 stations costs
- * the same to build (890 / 881 / 893 ms measured for 20 runs of 150
- * stations each) and is now caught by the same number, which it was
- * not before this fix. legBetween itself is NOT memoized or indexed as
- * part of this change (see that function's own file for the follow-up
- * this leaves outstanding: a hash-map index would cut the 30x150 shape
- * above from roughly 2s to roughly 1.2s) -- that is a separate change
- * with its own risk, so the 3000 default remains a real ceiling on
- * build time (about a second, not half of one), not a number that only
- * mattered before the leaf-only fix.
+ * Second, the leg comparison column: CsProfile.legBetween used to scan
+ * all of resolved.legs on every chain step, so the comparison count
+ * grew as O(total stations x total legs) -- 226 MILLION comparisons on a
+ * 15,000-station survey. CsProfile.legIndex (built once per build, see
+ * CsProfile.build) makes each of those a one-bucket lookup and the
+ * column collapses to roughly one comparison per station. Build time
+ * fell 40-46% across the whole table.
+ *
+ * WHAT IS STILL QUADRATIC, AND WHERE IT MOVED TO. Build time did NOT
+ * become linear, and the table above shows it plainly: 3000 stations at
+ * ~0.5s, 4500 at ~1.25s, 8000 at ~4.3s. Measured per function on
+ * CaveCAD after the index, the dominant term is now CsProfile.
+ * bandWallRuns -- 452ms of a 566ms build at one 3000-station run,
+ * 1014ms of a 1099ms build at thirty 150-station runs (78-92% across
+ * these sizes), against CsProfile.longestChain's 222ms of 1221ms at a
+ * single 4500-station run and 40ms of 1099ms spread over thirty runs.
+ * The cause is the same SHAPE one function over: CsModel.lrudForStation
+ * is a full linear scan of survey.shots, it never early-exits, and
+ * CsProfile.bandWallRuns calls it once per station in every band --
+ * O(total stations x total shots), exactly what CsProfile.legBetween
+ * was. Scratch-measured (a hoisted station -> LRUD map, NOT part of
+ * this change): one 4500-station run 1276ms -> 248ms, thirty
+ * 150-station runs 1132ms -> 69ms, one 3000-station run 562ms -> 102ms,
+ * a hundred 150-station runs 11837ms -> 1780ms. That is the change that
+ * would earn a higher ceiling here; it belongs to CsModel or to a third
+ * hoisted map beside splaysByStation and legCounts, and has its own
+ * review surface.
+ *
+ * WHY THE DEFAULT STAYS AT 3000. The gate exists because this runs on
+ * EVERY plan draw (CsDraw.profile), and a draw that silently takes
+ * seconds longer is worse than one that says why it declined. At 3000
+ * the automatic pass now costs about half a second on CaveCAD instead
+ * of about nine tenths -- the same ceiling, bought with twice the
+ * margin. Raising it was considered and rejected on the numbers above:
+ * 4500 would put a ~1.25s stall on every draw and 8000 a ~4.3s one, and
+ * because the remaining term is still quadratic in the TOTAL, every
+ * step up the ceiling costs more than the last. A faster legBetween
+ * makes the 3000 default comfortable; it does not make a bigger number
+ * safe. The honest unlock is the lrudForStation index above, measured
+ * at ~0.1s for 3000 and ~1.8s for 15,000 -- with that in, raising this
+ * default (or dropping the gate) becomes a decision about the largest
+ * cave anyone draws, not about the engine.
  *
  * A run that is branchy rather than chain-shaped can still cost far
  * more than its station count suggests independent of either number
- * here -- a balanced-binary-tree-shaped 511-station run measured
- * 1642 / 1646 / 1682 ms on CaveCAD in this same pass (legBetween
- * barely touched: the cost there is almost entirely CsProfile.
- * longestChain's own O(n^2) search over many leaf starts), against
- * 34 / 35 / 35 ms for an ordinary 511-station chain -- roughly 1.6
- * seconds against roughly 35 milliseconds, not the "about 800ms" and
- * "a few milliseconds" an earlier pass here claimed. Neither the
+ * here -- a balanced-binary-tree-shaped 511-station run measures
+ * seconds on CaveCAD against a few milliseconds for an ordinary
+ * 511-station chain, and that cost is almost entirely CsProfile.
+ * longestChain's own O(n^2) search over many leaf starts, untouched by
+ * the leg index (its comparison count barely moves). Neither the
  * largest-run nor the total check catches this when the run itself
  * stays under the threshold -- see CsProfile.longestChain's own
  * docblock, which already says a real survey run does not take this
