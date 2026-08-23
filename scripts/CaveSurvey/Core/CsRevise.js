@@ -233,8 +233,13 @@ CsRevise.surveyFromDocument = function(doc) {
             shot.to = "";
             if (shot.from === "") {
                 // pre-From splay: its base station is the Splay tag
-                // ("A2.3") minus the trailing ".<n>"
-                shot.from = splayTag.replace(/\.\d+$/, "");
+                // ("A2.3") minus the trailing ".<n>" -- through
+                // CsBind.splayBase, the ONE definition of that rule
+                // (CsDraw.eraseStations and CsTags.collectSplays both
+                // call it too), so a drawing's splays cannot be
+                // reconstructed under one reading of their names and
+                // erased under another
+                shot.from = CsBind.splayBase(splayTag);
             }
         }
         if (shot.trip > maxTrip) {

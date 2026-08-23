@@ -6196,14 +6196,28 @@ if (!IS_NODE) {
         var vLevel = shotOf("V1", "V2", 5, 0, 0);
         var vSteep = shotOf("V2", "V3", 5, 90, 60);
         var vVert = shotOf("V3", "V4", 1e-7, 0, 90);   // straight down/up
+        // A splay recovered from its tip alone: bearing and plan length
+        // on record, inclination NOT. Reachable since
+        // CsTags.collectSplays learned to rebuild splays from a
+        // drawing's own geometry. `null * Math.PI / 180` is 0 and
+        // `Math.cos(0)` is 1, so without a guard this shot's distance
+        // is divided by one and then REPORTED AS RESCALED -- a
+        // plan-to-slope conversion claimed on the one shot where the
+        // conversion is impossible.
+        var vNoInc = splayOf("V2", 7, 45);
+        vNoInc.inclination = null;
         vsv.shots.push(vLevel);
         vsv.shots.push(vSteep);
         vsv.shots.push(vVert);
+        vsv.shots.push(vNoInc);
         var conv = RebuildSurveyData.toSlopeDistances(vsv);
         ok(conv.scaled === 1, "rsd-slope: one shot rescaled, got " +
             conv.scaled);
         ok(conv.vertical === 1, "rsd-slope: one vertical shot skipped, " +
             "got " + conv.vertical);
+        near(vNoInc.distance, 7, 1e-12,
+            "rsd-slope: a shot with NO inclination on record keeps its " +
+            "distance exactly -- there is no cos to divide by");
         near(vLevel.distance, 5, 1e-12,
             "rsd-slope: a level shot's plan length IS its slope length");
         near(vSteep.distance, 5 / Math.cos(60 * Math.PI / 180), 1e-9,
@@ -6260,6 +6274,16 @@ if (!IS_NODE) {
         CsTags.tagStation(q3, { name: "Q3", seq: 2, azimuth: 90,
             inclination: INC, z: 10.0 * Math.sin(INC * Math.PI / 180.0) });
         op.addObject(q3, false);
+        // A pre-v3 SPLAY: a tip point carrying nothing but its name,
+        // which is all an old build wrote. CsTags.collectSplays now
+        // recovers it from its position -- bearing and plan length, but
+        // no inclination, so the redraw cannot put it back and the run
+        // has to SAY so instead of losing it silently (which is what
+        // happened before the reader could see splays at all).
+        var qs = CsDraw.addPoint(doc, op, CsLayers.SPLAYS,
+            new RVector(3, 14));
+        CsTags.set(qs, "SplayName", "Q2.1");
+        op.addObject(qs, false);
         di.applyOperation(op);
 
         var before = CsRevise.surveyFromDocument(doc);
@@ -6278,6 +6302,18 @@ if (!IS_NODE) {
         ok(rep.vertical === 0,
             "rsd-upgrade: no near-vertical shots in this fixture, got " +
             rep.vertical);
+        ok(rep.scaled === 1,
+            "rsd-upgrade: exactly ONE shot was rescaled -- the recovered " +
+            "splay has no inclination to convert against and must not " +
+            "be counted as converted, got " + rep.scaled);
+        ok(rep.splaysUnplaceable === 1,
+            "rsd-upgrade: the one splay the redraw could not put back is " +
+            "reported, not lost in silence, got " + rep.splaysUnplaceable);
+        ok(rep.message.indexOf(
+            "1 splay had no inclination on record and could not be " +
+            "redrawn.") >= 0,
+            "rsd-upgrade: and the loss is named in the user's own " +
+            "message, got '" + rep.message + "'");
         ok(rep.message.indexOf(
             "inferred from geometry (slope = plan/cos(inclination))")
             >= 0, "rsd-upgrade: report says distances were inferred, got '" +
@@ -12829,6 +12865,482 @@ if (!IS_NODE) {
         } finally {
             RSettings.setValue(KEY_AUTO, hadAuto);
             RSettings.setValue(KEY_MAX, hadMax);
+        }
+    }());
+}
+
+// ---------------------------------------------------------------------
+// SPLAY RECOVERY: CsTags.surveyFromDocument rebuilds splay shots from
+// the drawing's own Splay/SplayName geometry.
+//
+// QCAD-context only, and per this repo's mutation-testing convention
+// that is not a limitation to work around: CsTags.js and CsDraw.js are
+// never loaded under node at all, so a node test cannot touch a line of
+// either. Every assertion below is named so that deleting the
+// behaviour it covers fails THAT assertion by name.
+//
+// The gap this closes: the reader walked Station-tagged points only, so
+// a cave whose floor and ceiling come from splays rebuilt as a bare
+// centerline -- measured, before the fix, as 4 splays / 1 ceiling run /
+// 1 floor run from the live survey model versus 0 / 0 / 0 through
+// CsTags.surveyFromDocument.
+// ---------------------------------------------------------------------
+
+if (!IS_NODE) {
+    (function() {
+        loadRepoScript("scripts/CaveSurvey/Core/CsLayers.js");
+        loadRepoScript("scripts/CaveSurvey/Core/CsStore.js");
+        loadRepoScript("scripts/CaveSurvey/Core/CsTags.js");
+        loadRepoScript("scripts/CaveSurvey/Core/CsDraw.js");
+
+        // The sibling-elevation pass fires on every CsDraw.survey call
+        // and is not what this block is testing; keep it inert and put
+        // the user's own setting back, exactly as the Task 9 block does.
+        var KEY_AUTO = "CaveSurvey/ProfileAuto";
+        var hadAuto = RSettings.getBoolValue(KEY_AUTO, true);
+        RSettings.setValue(KEY_AUTO, false);
+
+        function spDoc() {
+            var d = new RDocument(new RMemoryStorage(),
+                new RSpatialIndexNavel());
+            var i = new RDocumentInterface(d);
+            getDocument = function() { return d; };
+            getDocumentInterface = function() { return i; };
+            return { doc: d, di: i };
+        }
+
+        // every SplayName-tagged tip in the drawing, name -> {x, y}
+        function spTips(doc) {
+            var out = {};
+            var ids = doc.queryAllEntities(false, false);
+            for (var i = 0; i < ids.length; i++) {
+                var e = doc.queryEntity(ids[i]);
+                if (isNull(e) || typeof e.getPosition !== "function") {
+                    continue;
+                }
+                var n = CsTags.get(e, "SplayName");
+                if (n === "") {
+                    continue;
+                }
+                var p = e.getPosition();
+                out[n] = { x: p.x, y: p.y };
+            }
+            return out;
+        }
+
+        // the splay shots of a survey, in survey.shots order
+        function spShots(survey) {
+            var out = [];
+            for (var i = 0; i < survey.shots.length; i++) {
+                if (survey.shots[i].splay) {
+                    out.push(survey.shots[i]);
+                }
+            }
+            return out;
+        }
+
+        // one station point, hand-tagged, for the fixtures below that
+        // need a shape CsDraw.survey would never draw
+        function spStation(doc, op, name, seq, x, y) {
+            var pt = CsDraw.addPoint(doc, op, CsLayers.STATIONS,
+                new RVector(x, y));
+            CsTags.tagStation(pt, { name: name, seq: seq, azimuth: 0,
+                inclination: 0, z: 0 });
+            op.addObject(pt, false);
+            return pt;
+        }
+
+        // one splay TIP point and nothing else: no ray, so no shot tags
+        function spTip(doc, op, name, x, y) {
+            var pt = CsDraw.addPoint(doc, op, CsLayers.SPLAYS,
+                new RVector(x, y));
+            CsTags.set(pt, "SplayName", name);
+            op.addObject(pt, false);
+            return pt;
+        }
+
+        try {
+            // =============================================================
+            // 1. THE FIX ITSELF: a drawn survey's splays come back, from
+            //    the ray's own schema-v3 shot tags, exactly.
+            // =============================================================
+            var f1 = spDoc();
+            var sv1 = CsModel.newSurvey();
+            var sp1a = splayOf("S2", 5, 90, 25);
+            sp1a.notes = "ceiling pocket";
+            var sp1b = splayOf("S2", 3, 200, -30);
+            var sp1c = splayOf("S3", 7, 0, 45);
+            sv1.shots = [shotOf("S1", "S2", 10, 0, 0),
+                shotOf("S2", "S3", 10, 90, 0), sp1a, sp1b, sp1c];
+            var res1 = CsNetwork.resolve(sv1, {});
+            var drawn1 = CsDraw.survey(sv1, res1);
+            eqs(drawn1.splaysDrawn, 3,
+                "sanity: the fixture drew 3 splay rays");
+
+            var rb1 = CsTags.surveyFromDocument(f1.doc);
+            var got1 = spShots(rb1);
+            eqs(got1.length, 3,
+                "splay recovery: all 3 drawn splays come back as splay " +
+                "shots (0 was the whole bug)");
+            var flagsOk = true, toOk = true;
+            for (var i1 = 0; i1 < got1.length; i1++) {
+                if (got1[i1].splay !== true) { flagsOk = false; }
+                if (got1[i1].to !== "") { toOk = false; }
+            }
+            ok(flagsOk, "splay recovery: every recovered splay carries " +
+                "splay === true");
+            ok(toOk, "splay recovery: every recovered splay has to === " +
+                "\"\" (a splay has no TO station)");
+
+            // WHICH station each belongs to, and in which order -- the
+            // two facts a redraw's numbering depends on.
+            var names1 = [];
+            for (i1 = 0; i1 < got1.length; i1++) {
+                names1.push(got1[i1].from);
+            }
+            eqs(names1.join(","), "S2,S2,S3",
+                "splay recovery: each splay comes back on the station " +
+                "its own tag names, its station's splays consecutive " +
+                "and in their drawn order");
+
+            // read from the RAY's tags, not guessed from the tip: the
+            // tip carries no inclination at all, so a reader that fell
+            // back to geometry here would hand back null/0 for all three
+            near(got1[0].distance, 5, 1e-9,
+                "splay recovery: distance comes off the ray's own tag");
+            near(got1[0].azimuth, 90, 1e-9,
+                "splay recovery: azimuth comes off the ray's own tag");
+            near(got1[0].inclination, 25, 1e-9,
+                "splay recovery: INCLINATION comes off the ray's own tag " +
+                "-- the one reading a plan drawing's geometry cannot show");
+            near(got1[1].inclination, -30, 1e-9,
+                "splay recovery: a downward splay keeps its sign");
+            near(got1[2].distance, 7, 1e-9,
+                "splay recovery: the second station's splay is its own " +
+                "shot, not a copy of the first station's");
+            eqs(got1[0].notes, "ceiling pocket",
+                "splay recovery: a splay's note rides back with it");
+
+            // =============================================================
+            // 2. ADDING SPLAYS MUST NOT MOVE ONE CENTERLINE STATION.
+            //    CsNetwork.resolve routes every splay to `skipped` and
+            //    emits no leg for one; if that ever stops being true,
+            //    every drawing this reader touches silently changes
+            //    shape. Compared against the SAME survey with its splays
+            //    removed, so the comparison is about the splays alone.
+            // =============================================================
+            var stripped = CsModel.newSurvey();
+            stripped.fixed = rb1.fixed;
+            for (i1 = 0; i1 < rb1.shots.length; i1++) {
+                if (!rb1.shots[i1].splay) {
+                    stripped.shots.push(rb1.shots[i1]);
+                }
+            }
+            var resWith = CsNetwork.resolve(rb1, {});
+            var resWithout = CsNetwork.resolve(stripped, {});
+            eqs(resWith.legs.length, resWithout.legs.length,
+                "splays change nothing: the same number of legs resolve " +
+                "with the splays present as without them");
+            var moved = [];
+            for (var n2 in resWithout.stations) {
+                if (!resWithout.stations.hasOwnProperty(n2)) { continue; }
+                var a2 = resWith.stations[n2], b2 = resWithout.stations[n2];
+                if (a2 === undefined ||
+                        Math.abs(a2.x - b2.x) > 1e-12 ||
+                        Math.abs(a2.y - b2.y) > 1e-12 ||
+                        a2.z !== b2.z) {
+                    moved.push(n2);
+                }
+            }
+            eqs(moved.join(","), "",
+                "splays change nothing: every station resolves to the " +
+                "IDENTICAL coordinate with the splays present");
+            eqs(resWith.skipped.length - resWithout.skipped.length, 3,
+                "splays change nothing: all 3 land in resolve()'s " +
+                "`skipped` list, which is where a splay belongs");
+
+            // =============================================================
+            // 3. ROUND TRIP: drawn -> rebuilt from the drawing -> redrawn
+            //    puts every splay tip back on its own coordinate, under
+            //    its own name. This is the assertion a splay COUNT cannot
+            //    make: a reader that recovered three splays with the
+            //    wrong bearings, or in the wrong order (so the names
+            //    swap), passes a count check and fails this.
+            // =============================================================
+            var tipsBefore = spTips(f1.doc);
+            CsDraw.eraseStations(f1.doc, ["S1", "S2", "S3"]);
+            eqs(CsTags.collectStations(f1.doc).length, 0,
+                "sanity: the erase really cleared the drawing before the " +
+                "redraw");
+            var drawn1b = CsDraw.survey(rb1, resWith);
+            eqs(drawn1b.splaysDrawn, 3,
+                "round trip: the redraw draws all 3 splays again");
+            var tipsAfter = spTips(f1.doc);
+            var offBy = [];
+            for (var tn in tipsBefore) {
+                if (!tipsBefore.hasOwnProperty(tn)) { continue; }
+                if (tipsAfter[tn] === undefined) {
+                    offBy.push(tn + ":gone");
+                } else if (Math.abs(tipsAfter[tn].x - tipsBefore[tn].x) > 1e-9 ||
+                        Math.abs(tipsAfter[tn].y - tipsBefore[tn].y) > 1e-9) {
+                    offBy.push(tn + ":moved");
+                }
+            }
+            eqs(offBy.join(","), "",
+                "ROUND TRIP: every splay tip is redrawn at the exact " +
+                "coordinate it was drawn at, under the same name");
+
+            // =============================================================
+            // 4. TIP-ONLY RECOVERY (a pre-v3 ray, or a ray deleted by
+            //    hand): bearing and PLAN length come back; inclination
+            //    comes back NULL, not a fabricated 0.
+            // =============================================================
+            var f4 = spDoc();
+            CsLayers.ensureSurveyLayers(f4.doc, f4.di);
+            var op4 = new RAddObjectsOperation();
+            spStation(f4.doc, op4, "T1", 0, 0, 0);
+            spStation(f4.doc, op4, "T2", 1, 0, 10);
+            // hung on T2, the station a LEG ARRIVES AT: CsLrud.wallRuns
+            // walks arrival stations, so a splay on the very first
+            // station of a chain is never offered to it and could not
+            // prove the "counted, not dropped" claim below at all.
+            spTip(f4.doc, op4, "T2.1", 3, 14);  // 3-4-5 from T2, brg 36.87
+            f4.di.applyOperation(op4);
+
+            var rb4 = CsTags.surveyFromDocument(f4.doc);
+            var got4 = spShots(rb4);
+            eqs(got4.length, 1,
+                "tip-only splay: a tip with no ray is still recovered");
+            if (got4.length === 1) {
+                eqs(got4[0].from, "T2",
+                    "tip-only splay: it hangs on the station its name " +
+                    "names");
+                near(got4[0].distance, 5, 1e-9,
+                    "tip-only splay: distance is the tip's PLAN distance " +
+                    "from its station");
+                near(got4[0].azimuth,
+                    Math.atan2(3, 4) * 180.0 / Math.PI, 1e-9,
+                    "tip-only splay: azimuth is the tip's own bearing");
+                eqs(got4[0].inclination, null,
+                    "tip-only splay: INCLINATION IS NULL, not a " +
+                    "fabricated 0 -- a plan drawing shows the horizontal " +
+                    "projection and nothing else, and a 0 here would " +
+                    "assert a dead-level shot nobody measured");
+                eqs(CsTraverse.offset(got4[0], CsTraverse.SLOPE), null,
+                    "tip-only splay: with no inclination on record it " +
+                    "places no coordinate at all -- CsTraverse.offset " +
+                    "refuses it");
+            }
+            var walls4 = CsLrud.wallRuns(rb4, CsNetwork.resolve(rb4, {}));
+            ok(walls4.skipped >= 1,
+                "tip-only splay: it is COUNTED as an unplaceable wall " +
+                "point rather than vanishing silently, got " +
+                walls4.skipped);
+
+            // =============================================================
+            // 5. ORPHANED GEOMETRY IS NOT RECOVERED: a tip whose base
+            //    station is gone from the drawing has no origin to
+            //    measure from, and CsDraw.survey would not redraw it
+            //    either. This is the case GenerateProfile's own
+            //    splay-loss warning still exists to name.
+            // =============================================================
+            var f5 = spDoc();
+            CsLayers.ensureSurveyLayers(f5.doc, f5.di);
+            var op5 = new RAddObjectsOperation();
+            spStation(f5.doc, op5, "U1", 0, 0, 0);
+            spStation(f5.doc, op5, "U2", 1, 0, 10);
+            spTip(f5.doc, op5, "U1.1", 2, 0);
+            spTip(f5.doc, op5, "GHOST.1", 50, 50);
+            f5.di.applyOperation(op5);
+
+            var got5 = spShots(CsTags.surveyFromDocument(f5.doc));
+            eqs(got5.length, 1,
+                "orphan splay: only the splay with a real station comes " +
+                "back -- the one naming a station the drawing no longer " +
+                "has is refused");
+            if (got5.length === 1) {
+                eqs(got5[0].from, "U1",
+                    "orphan splay: and it is the RIGHT one that survived");
+            }
+
+            // =============================================================
+            // 6. WHICH STATION A SPLAY BELONGS TO IS CsBind.splayBase's
+            //    ANSWER, NOT A SECOND COPY OF THE RULE. Both fixtures
+            //    here are shapes a hand-rolled base-name stripper gets
+            //    wrong: a DOTTED station name (a `split(".")[0]` reads
+            //    "A.1.3" as station "A") and a two-digit splay index (a
+            //    `\.\d$` regex leaves "B1.12" unstripped).
+            // =============================================================
+            var f6 = spDoc();
+            CsLayers.ensureSurveyLayers(f6.doc, f6.di);
+            var op6 = new RAddObjectsOperation();
+            spStation(f6.doc, op6, "A.1", 0, 0, 0);
+            spStation(f6.doc, op6, "B1", 1, 0, 10);
+            spTip(f6.doc, op6, "A.1.3", 0, -4);
+            spTip(f6.doc, op6, "B1.9", 4, 10);
+            spTip(f6.doc, op6, "B1.12", 6, 10);
+            f6.di.applyOperation(op6);
+
+            var got6 = spShots(CsTags.surveyFromDocument(f6.doc));
+            var from6 = [];
+            for (var i6 = 0; i6 < got6.length; i6++) {
+                from6.push(got6[i6].from);
+            }
+            eqs(from6.join(","), "A.1,B1,B1",
+                "splayBase: a splay on a DOTTED station name (\"A.1.3\") " +
+                "belongs to \"A.1\", and a two-digit index (\"B1.12\") " +
+                "still reduces to \"B1\"");
+            // ORDER is numeric, not lexicographic: ".9" before ".12"
+            var d9 = null, d12 = null;
+            for (i6 = 0; i6 < got6.length; i6++) {
+                if (got6[i6].from !== "B1") { continue; }
+                if (d9 === null) { d9 = got6[i6].distance; }
+                else if (d12 === null) { d12 = got6[i6].distance; }
+            }
+            near(d9, 4, 1e-9,
+                "splay order: B1.9 comes before B1.12 -- the index is " +
+                "compared as a NUMBER, so a redraw renumbers them .1/.2 " +
+                "in that order rather than putting .12 first");
+            near(d12, 6, 1e-9,
+                "splay order: and B1.12 is the second of the two");
+
+            eqs(CsTags.splayIndex("A3.12"), 12,
+                "splayIndex: a two-digit index reads as 12");
+            eqs(CsTags.splayIndex("A.1.3"), 3,
+                "splayIndex: only the LAST dotted group is the index");
+            eqs(CsTags.splayIndex("A3"), -1,
+                "splayIndex: a bare station name (an older drawing's " +
+                "splay tag) has no index");
+
+            // =============================================================
+            // 7. CsRevise.shotFromEntity IS the reader for the ray's tag
+            //    set, not a second copy of it here -- proved by a field
+            //    CsTags' own legacy centerline guesser never reads back:
+            //    a splay's applied Declination.
+            // =============================================================
+            var f7 = spDoc();
+            var sv7 = CsModel.newSurvey();
+            var sp7 = splayOf("W2", 6, 45, 15);
+            sp7.declination = 3.25;
+            sp7.excludeFromLength = true;
+            sv7.shots = [shotOf("W1", "W2", 10, 0, 0), sp7];
+            CsDraw.survey(sv7, CsNetwork.resolve(sv7, {}));
+            var got7 = spShots(CsTags.surveyFromDocument(f7.doc));
+            eqs(got7.length, 1, "sanity: the declination fixture's splay " +
+                "came back");
+            if (got7.length === 1) {
+                near(got7[0].declination, 3.25, 1e-9,
+                    "shared reader: the splay's APPLIED DECLINATION comes " +
+                    "back -- a field only CsRevise.shotFromEntity knows " +
+                    "how to read, so a hand-rolled distance/azimuth/" +
+                    "inclination reader here would lose it");
+                ok(got7[0].excludeFromLength === true,
+                    "shared reader: and so do its flags");
+            }
+
+            // =============================================================
+            // 8. THE CONSUMERS. SurveyStats reads this same survey
+            //    through CsStats.compute; a survey that gains splays must
+            //    report the same length and the same shot count, or every
+            //    drawing's title block changes the day this landed.
+            // =============================================================
+            var st8with = CsStats.compute(rb1, resWith, CsTraverse.SLOPE);
+            var st8without = CsStats.compute(stripped, resWithout,
+                CsTraverse.SLOPE);
+            near(st8with.surveyedLength, st8without.surveyedLength, 1e-12,
+                "consumer SurveyStats: surveyed length is unchanged by " +
+                "the recovered splays");
+            eqs(st8with.shotCount, st8without.shotCount,
+                "consumer SurveyStats: the shot count is unchanged by " +
+                "the recovered splays");
+            near(st8with.depth, st8without.depth, 1e-12,
+                "consumer SurveyStats: depth is unchanged by the " +
+                "recovered splays");
+
+            // =============================================================
+            // 9. THE OTHER READER'S OWN COPY OF THE SAME RULE.
+            //    CsRevise.surveyFromDocument (the exact v3 reader every
+            //    revision tool uses) also derives a pre-From splay's
+            //    station from its Splay tag, and had its own inline
+            //    `replace(/\.\d+$/, "")` for it. It now calls
+            //    CsBind.splayBase too, so a drawing's splays cannot be
+            //    reconstructed under one reading of their names and
+            //    ERASED under another. Proved on a DOTTED station name,
+            //    the shape a naive stripper gets wrong.
+            // =============================================================
+            var f9 = spDoc();
+            CsLayers.ensureSurveyLayers(f9.doc, f9.di);
+            var op9 = new RAddObjectsOperation();
+            spStation(f9.doc, op9, "C.1", 0, 0, 0);
+            spStation(f9.doc, op9, "C.2", 1, 0, 10);
+            // a v3 splay ray with NO From tag -- what an early v3 build
+            // wrote, and the branch CsRevise's Splay-tag fallback is for
+            CsDraw.addLine(f9.doc, op9, CsLayers.SPLAYS,
+                new RVector(0, 0), new RVector(4, 0),
+                "Splay", "C.1.2",
+                { Distance: 4, Azimuth: 90, Inclination: 20 });
+            f9.di.applyOperation(op9);
+
+            var rec9 = CsRevise.surveyFromDocument(f9.doc);
+            var got9 = spShots(rec9.survey);
+            eqs(got9.length, 1,
+                "CsRevise pre-From splay: the ray is read back as a splay " +
+                "shot");
+            if (got9.length === 1) {
+                eqs(got9[0].from, "C.1",
+                    "CsRevise pre-From splay: its station comes from " +
+                    "CsBind.splayBase, so a DOTTED station name survives " +
+                    "-- a split-on-dot reading would say \"C\"");
+                near(got9[0].inclination, 20, 1e-9,
+                    "CsRevise pre-From splay: and its readings come off " +
+                    "the ray");
+            }
+            // the SAME name, read by the SAME rule, on the erase side
+            eqs(CsBind.splayBase("C.1.2"), "C.1",
+                "one rule: CsDraw.eraseStations strips \"C.1.2\" to the " +
+                "same station the two readers hang it on");
+
+            // =============================================================
+            // 10. A SPLAY IS NEVER HANDED BACK AS AN ORDINARY LEG. The
+            //     reader forces `to` empty rather than trusting whatever
+            //     the ray carries, and this is the shape that proves it:
+            //     a hand-edited (or foreign) ray whose To tag is filled
+            //     in. Trust it and CsNetwork.resolve stops skipping the
+            //     shot, places a station nobody surveyed, and the whole
+            //     drawing changes shape the day splay recovery landed --
+            //     the one outcome this task is not allowed to have.
+            // =============================================================
+            var f10 = spDoc();
+            CsLayers.ensureSurveyLayers(f10.doc, f10.di);
+            var op10 = new RAddObjectsOperation();
+            spStation(f10.doc, op10, "V1", 0, 0, 0);
+            spStation(f10.doc, op10, "V2", 1, 0, 10);
+            CsDraw.addLine(f10.doc, op10, CsLayers.SPLAYS,
+                new RVector(0, 10), new RVector(4, 10),
+                "Splay", "V2.1",
+                { From: "V2", To: "V9", Distance: 4, Azimuth: 90,
+                  Inclination: 0 });
+            f10.di.applyOperation(op10);
+
+            var rb10 = CsTags.surveyFromDocument(f10.doc);
+            var got10 = spShots(rb10);
+            eqs(got10.length, 1,
+                "sanity: the To-tagged splay ray came back as a splay");
+            if (got10.length === 1) {
+                eqs(got10[0].to, "",
+                    "a splay is never an ordinary leg: its TO is forced " +
+                    "empty, whatever the ray's own To tag says");
+            }
+            var res10 = CsNetwork.resolve(rb10, {});
+            ok(res10.stations["V9"] === undefined,
+                "a splay is never an ordinary leg: no station is placed " +
+                "at its tip -- trusting the To tag would survey V9 into " +
+                "existence");
+            eqs(res10.legs.length, 1,
+                "a splay is never an ordinary leg: exactly the one real " +
+                "leg resolves, got " + res10.legs.length);
+        } finally {
+            RSettings.setValue(KEY_AUTO, hadAuto);
         }
     }());
 }
