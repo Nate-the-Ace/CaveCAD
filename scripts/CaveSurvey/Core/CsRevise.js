@@ -1246,21 +1246,42 @@ CsRevise.lineworkClaimLine = function(bound) {
 /**
  * The linework outcome in words -- the one place these sentences are
  * written. CsReport.revisionSummary calls it with the fields off
- * CsRevise.apply's report, and the notebook's Draw calls it with the
- * same numbers loose, so the two revision paths tell the user one
- * story rather than two.
+ * CsRevise.apply's report, the notebook's Draw calls it with the same
+ * numbers loose, and CsReport.profileSummary calls it for the profile
+ * side (see that function's own comment for why one vocabulary serves
+ * all three), so every caller tells the user one story rather than two.
  *
  * Lives here rather than in CsReport because CsReport formats that
  * report OBJECT and the notebook's Draw has no such object to hand --
  * it has these numbers and nothing else. The unit tests assert both
  * callers agree word for word, so a drift fails the build.
  *
- * \param bound optional -- entities this revision bound by itself
+ * \param bound         optional -- entities this revision bound by
+ *                       itself
+ * \param stationsMoved optional, defaults to true (every existing
+ *                       caller reaches this function only after a real
+ *                       change: CsRevise.apply's non-rigid branch only
+ *                       runs when classifyChange already found the
+ *                       survey's shape changed, and the notebook's Draw
+ *                       only calls this at all when its own
+ *                       positionsMoved gate passed -- see that call
+ *                       site). Pass `false` when moved===0 because there
+ *                       was nothing to move in the first place (a first-
+ *                       ever draw, or an idempotent redraw) rather than
+ *                       because bound linework failed to follow real
+ *                       station movement: CsProfileDraw.render's own
+ *                       positionsMoved guard runs BEFORE every draw,
+ *                       automatic or manual, so it is the one caller
+ *                       that reaches this function on the "nothing
+ *                       moved at all" path routinely, not just on a
+ *                       genuine refusal -- see CsReport.profileSummary.
  * \return array of lines
  */
-CsRevise.lineworkSummary = function(moved, unmoved, bound) {
+CsRevise.lineworkSummary = function(moved, unmoved, bound, stationsMoved) {
     var n = (moved === undefined || moved === null) ? 0 : moved;
     var list = (unmoved === undefined || unmoved === null) ? [] : unmoved;
+    var didStationsMove = (stationsMoved === undefined ||
+        stationsMoved === null) ? true : !!stationsMoved;
     var lines = [];
     lines.push("Traced linework moved with its stations: " + n);
     var claim = CsRevise.lineworkClaimLine(bound);
@@ -1287,10 +1308,16 @@ CsRevise.lineworkSummary = function(moved, unmoved, bound) {
             lines.push("  ... and " + (list.length - cap) + " more");
         }
     }
-    if (n === 0) {
+    if (n === 0 && didStationsMove) {
         // Nothing was bound, so nothing could follow -- and an unbound
         // trace is invisible to us, which is why this stays a warning
-        // even when the unmoved list above is empty.
+        // even when the unmoved list above is empty. But this is only
+        // true when something actually moved: on a first-ever draw (or
+        // an idempotent redraw of an unchanged profile) moved===0
+        // because there was NOTHING for a sketch to follow yet, not
+        // because a sketch failed to follow it -- didStationsMove=false
+        // says so, and the warning would otherwise fire on every clean
+        // run of a feature that draws on every plan draw.
         lines.push("");
         lines.push("WARNING -- hand-drawn linework that is not bound " +
             "to the survey did NOT move with it; re-trace walls and " +
@@ -1834,6 +1861,20 @@ CsRevise.apply = function(doc, di, recon, newSurvey) {
     var lineworkUnmoved = [];
     var lineworkBound = 0;
 
+    // The profile pass's own outcome (CsDraw.survey's return value has
+    // carried a `profile` field, {skipped, reason} or {path, created,
+    // counts, profile}, since CsDraw.js's own profile-summary fix --
+    // ImportCaveSurvey.js, SurveyNotebook.js and RebuildSurveyData.js
+    // all surface it, but this function used to call CsDraw.survey below
+    // and DISCARD the return value outright, so "Revise a trip" -- the
+    // flagship workflow this whole feature was built for -- was
+    // completely silent about a profile skipped for size, skipped
+    // because ProfileAuto is off, skipped for an unsaved drawing, or
+    // skipped because the pass threw. null on the rigid path, where
+    // CsDraw.survey is never called at all (the whole-drawing transform
+    // moves everything, profile included, without a redraw).
+    var profileOutcome = null;
+
     // -- OFF layers holding entities: ops there are silently refused --
     // CsRevise.withOffLayersOn scans per call rather than once up
     // front, so the linework pass AFTER the redraw sees the layers the
@@ -2065,7 +2106,8 @@ CsRevise.apply = function(doc, di, recon, newSurvey) {
         withOffLayersOn(function() {
             CsDraw.eraseStations(doc, oldNames);
         });
-        CsDraw.survey(newSurvey, newResolved, anchorName, anchorPos);
+        profileOutcome = CsDraw.survey(newSurvey, newResolved, anchorName,
+            anchorPos).profile;
         // the redraw wrote fresh v3 tags but knows nothing of history:
         // carry the appended RevisionLog onto the new log anchor --
         // findAnchor0 again, so the point written to is the one the
@@ -2165,6 +2207,16 @@ CsRevise.apply = function(doc, di, recon, newSurvey) {
         // absent entirely rather than null when nothing was lost, so a
         // caller that never checks for it sees no shape change
         report.geoAnchorLost = geoAnchorLost;
+    }
+    if (profileOutcome !== null) {
+        // absent on the rigid path (CsDraw.survey is never called
+        // there), present on the non-rigid path whether the profile
+        // pass succeeded or was skipped -- CsReport.revisionSummary
+        // reads it to surface a skip the same way CsReport.drawSummary
+        // already does for every OTHER caller of CsDraw.survey (see
+        // this var's own declaration above for why that used to be
+        // silent here specifically).
+        report.profile = profileOutcome;
     }
     return report;
 };

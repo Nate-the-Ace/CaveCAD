@@ -244,6 +244,7 @@ function withSpies(fn) {
     var savedInformation = QMessageBox.information;
     var savedHandleUserMessage = EAction.handleUserMessage;
     var savedWarningHandler = warning.handler;
+    var savedReveal = CsProfileFile.reveal;
 
     var spy = {
         capturedSurvey: null,
@@ -251,7 +252,8 @@ function withSpies(fn) {
         capturedCounts: null,
         informationCalls: [],
         handleUserMessageCalls: [],
-        warnings: []
+        warnings: [],
+        revealCalls: []
     };
 
     CsTags.surveyFromDocument = function(doc) {
@@ -274,6 +276,15 @@ function withSpies(fn) {
     warning.handler = function(msg) {
         spy.warnings.push(msg);
     };
+    // IMPORTANT 3 -- reveal(): wraps straight through to the real
+    // implementation (openFiles() swallows its own exception headlessly
+    // anyway) purely to RECORD whether the manual tool asked to reveal
+    // the drawing at all, since that is exactly the behaviour this
+    // feature's own reveal-policy fix changed.
+    CsProfileFile.reveal = function(path) {
+        spy.revealCalls.push(path);
+        return savedReveal(path);
+    };
 
     try {
         fn(spy);
@@ -283,6 +294,7 @@ function withSpies(fn) {
         QMessageBox.information = savedInformation;
         EAction.handleUserMessage = savedHandleUserMessage;
         warning.handler = savedWarningHandler;
+        CsProfileFile.reveal = savedReveal;
     }
 }
 
@@ -435,10 +447,44 @@ if (tplPath !== null) {
                 "CsAll.js include chain (text was:\n" +
                 spy.informationCalls[0].text + ")");
         }
+
+        // ---- IMPORTANT 3, sanity half: a freshly-created sibling is
+        // revealed -- true under BOTH the old unified policy and this
+        // fix's "always" policy, so this alone does not prove the fix.
+        // Scenario A2 right below is the one that actually distinguishes
+        // them. ---------------------------------------------------------
+        eqs(spy.revealCalls.length, 1,
+            "sanity: a newly created sibling is revealed exactly once");
     });
 
     ok(new QFileInfo(siblingPathA).exists(),
         "PROOF: the sibling PROFILE.dxf actually landed on disk");
+
+    // ===================================================================
+    // Scenario A2: IMPORTANT 3's OWN FIX, proven. The sibling from
+    // scenario A above is deliberately NOT removed -- it now exists on
+    // disk but is not open as a tab, exactly `target.created === false,
+    // target.offscreen === true` from CsProfileFile.resolve, the common
+    // case for a SECOND run of this tool. Before this fix, CsDraw.
+    // profileNow's unified "reveal only if created" policy meant this
+    // run would silently rewrite the file and never open it; the manual
+    // tool's whole reason to exist is "show me my profile now", so it
+    // must reveal here too.
+    // ===================================================================
+    withSpies(function(spy) {
+        new GenerateProfile(null).beginEvent();
+        eqs(spy.informationCalls.length, 1,
+            "sanity: the second run against an EXISTING, unopened " +
+            "sibling still reports normally, not as a refusal");
+        eqs(spy.revealCalls.length, 1,
+            "IMPORTANT 3'S OWN FIX: a sibling that already existed on " +
+            "disk (not freshly created, not already open as a tab) is " +
+            "STILL revealed by the manual command -- \"show me my " +
+            "profile now\" means show it, whether or not this run " +
+            "happened to create the file (got " +
+            JSON.stringify(spy.revealCalls) + ")");
+    });
+
     new QFile(siblingPathA).remove();
 } else {
     failures.push("SKIPPED scenario A entirely -- no PROFILE template " +

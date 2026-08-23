@@ -2412,28 +2412,36 @@ CsProfile.build = function(survey, resolved, opts) {
  * The leaf-only-start fix already closed most of the original gap;
  * what cost remains at these sizes is legBetween's scan, not the chain
  * search. At the default of 3000, an ordinary single-run survey now
- * builds in well under half a second, and -- because this gate checks
- * the TOTAL, not just the largest run -- a many-run survey totalling
- * 3000 stations costs the same to build and is now caught by the same
- * number, which it was not before this fix. legBetween itself is NOT
- * memoized or indexed as part of this change (see that function's own
- * file for the follow-up this leaves outstanding: a hash-map index
- * would cut the 30x150 shape above from roughly 2s to roughly 1.2s) --
- * that is a separate change with its own risk, so the 3000 default
- * remains a real ceiling on build time, not a number that only mattered
- * before the leaf-only fix.
+ * builds in ABOUT A SECOND, not "well under half a second" as an
+ * earlier pass here claimed against its own adjacent numbers -- 433ms
+ * at 2000 stations, under the quadratic growth this same paragraph
+ * asserts, already implies roughly double that at 3000, and a direct
+ * measurement on CaveCAD confirms it: 964 / 1003 / 970 ms across three
+ * isolated runs. And -- because this gate checks the TOTAL, not just
+ * the largest run -- a many-run survey totalling 3000 stations costs
+ * the same to build (890 / 881 / 893 ms measured for 20 runs of 150
+ * stations each) and is now caught by the same number, which it was
+ * not before this fix. legBetween itself is NOT memoized or indexed as
+ * part of this change (see that function's own file for the follow-up
+ * this leaves outstanding: a hash-map index would cut the 30x150 shape
+ * above from roughly 2s to roughly 1.2s) -- that is a separate change
+ * with its own risk, so the 3000 default remains a real ceiling on
+ * build time (about a second, not half of one), not a number that only
+ * mattered before the leaf-only fix.
  *
  * A run that is branchy rather than chain-shaped can still cost far
  * more than its station count suggests independent of either number
- * here -- a balanced-binary-tree-shaped 511-station run measured about
- * 800ms on CaveCAD in this same pass (legBetween barely touched: the
- * cost there is almost entirely CsProfile.longestChain's own O(n^2)
- * search over many leaf starts), against a few milliseconds for an
- * ordinary 511-station chain. Neither the largest-run nor the total
- * check catches this when the run itself stays under the threshold --
- * see CsProfile.longestChain's own docblock, which already says a real
- * survey run does not take this shape and names it as the place to look
- * first if one ever does.
+ * here -- a balanced-binary-tree-shaped 511-station run measured
+ * 1642 / 1646 / 1682 ms on CaveCAD in this same pass (legBetween
+ * barely touched: the cost there is almost entirely CsProfile.
+ * longestChain's own O(n^2) search over many leaf starts), against
+ * 34 / 35 / 35 ms for an ordinary 511-station chain -- roughly 1.6
+ * seconds against roughly 35 milliseconds, not the "about 800ms" and
+ * "a few milliseconds" an earlier pass here claimed. Neither the
+ * largest-run nor the total check catches this when the run itself
+ * stays under the threshold -- see CsProfile.longestChain's own
+ * docblock, which already says a real survey run does not take this
+ * shape and names it as the place to look first if one ever does.
  */
 CsProfile.settings = function() {
     var auto = true, exag = 1.0, dead = CsProfile.FLAT_SPLAY_DEG;

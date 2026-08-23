@@ -113,6 +113,30 @@ var CsNetwork = {};
  *               own Elevation tag is missing or garbled -- see
  *               CsTags.surveyFromDocument's own "SEVENTH DOOR" comment
  *               and seedFixed's comment just above it in this file.
+ *
+ *               NEITHER FIELD HAS A PRODUCTION READER TODAY, AND THAT IS
+ *               DELIBERATE, NOT AN OVERSIGHT LEFT FOR LATER. Both are
+ *               diagnostic/test-only: CsAdjust.resolveAndAdjust (the
+ *               path every shipped caller actually uses) rebuilds a NEW
+ *               result object in both CsAdjust.unadjusted and CsAdjust.
+ *               adjust, and neither copies these two fields across -- so
+ *               even a future reader sitting downstream of an adjustment
+ *               pass could not see them no matter how it is wired. This
+ *               is not a silent gap for the null-z case itself: a
+ *               station placed with anchorZUnknown/fixedZUnknown set
+ *               still carries a real, honestly-null z, and CsProfile.
+ *               build's own unrollBand already refuses to draw a band
+ *               past a null-z station and names it in findings.stopped
+ *               with reason "no-z" (see CsReport.profileSummary's own
+ *               wording for that case) -- that is the channel a user
+ *               actually learns of a null z through today. If a direct
+ *               report of WHICH *fix/anchor line lacked an elevation
+ *               tag (as opposed to which STATION downstream of it ran
+ *               out of resolved z) is ever wanted, these two fields are
+ *               where that information already lives -- it would need
+ *               to be plumbed through CsAdjust's own return objects
+ *               first, not merely read here, since resolveAndAdjust is
+ *               what every production caller actually sees.
  * }
  */
 CsNetwork.resolve = function(survey, opts) {

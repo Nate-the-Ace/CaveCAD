@@ -763,6 +763,16 @@ CsAdjust.tagsFor = function(options) {
  * `controlFrame`, both carry `adjusted`, only one carries a non-null
  * `raw`) and no caller has to branch.
  *
+ * NOT carried through, either branch: CsNetwork.resolve's own
+ * `anchorZUnknown` / `fixedZUnknown` (see that function's own docblock
+ * for why that is deliberate, and where a user actually learns of a
+ * null z instead -- CsProfile's findings.stopped, reason "no-z"). Both
+ * CsAdjust.unadjusted and CsAdjust.adjust build a fresh result object
+ * rather than passing `resolved` through, and neither copies these two
+ * fields -- since this function is what every shipped caller actually
+ * calls, that means the fields are effectively invisible past this
+ * point today, diagnostic/test-only via a bare CsNetwork.resolve() call.
+ *
  * \param adjustOpts as CsAdjust.adjust's opts, plus `enabled`; omitted
  *                   means CsAdjust.currentOptions().
  */

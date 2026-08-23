@@ -217,6 +217,37 @@ RebuildSurveyData.shotCount = function(drawn) {
 };
 
 /**
+ * The profile pass's own outcome, in the one sentence this tool's
+ * report needs -- "" when the pass succeeded (silent on success, same
+ * convention CsReport.drawSummary and CsReport.revisionSummary already
+ * use: this is a "something you expected did not happen" channel, not
+ * the full counts/findings report GenerateProfile gives).
+ *
+ * `drawn` is CsDraw.survey's own return value (RebuildSurveyData.redraw
+ * hands it straight back as `.drawn`), which has carried a `.profile`
+ * field ({skipped, reason} or {path, created, counts, profile}) since
+ * CsDraw.js's own profile-summary fix -- ImportCaveSurvey.js,
+ * SurveyNotebook.js and CsRevise.js all surface it, but this tool's own
+ * redraw() used to read only shotCount(drawn) from the identical return
+ * value, so "Rebuild Survey Data" never told the user a profile was
+ * skipped for size, for ProfileAuto being off, for an unsaved drawing,
+ * or because the pass threw -- the same silent gap CsRevise.apply had,
+ * fixed the same way, in the same words.
+ *
+ * \return a sentence with a LEADING SPACE (so it appends onto an
+ *         existing message with one blank between sentences) and no
+ *         trailing space, or "" when there is nothing to say
+ */
+RebuildSurveyData.profileNote = function(drawn) {
+    if (drawn === undefined || drawn === null ||
+            drawn.profile === undefined || drawn.profile === null ||
+            !drawn.profile.skipped) {
+        return "";
+    }
+    return " Profile: not written -- " + drawn.profile.reason + ".";
+};
+
+/**
  * The whole job, headless.
  *
  * \return {
@@ -307,7 +338,8 @@ RebuildSurveyData.rebuild = function(doc, di) {
             (report.vertical > 0 ? " " + report.vertical + " near-" +
                 "vertical shot" + (report.vertical === 1 ? "" : "s") +
                 " had no plan length to scale; distance left as drawn." :
-                "");
+                "") +
+            RebuildSurveyData.profileNote(up.drawn);
         return report;
     }
 
@@ -337,7 +369,8 @@ RebuildSurveyData.rebuild = function(doc, di) {
             "v3, nothing inferred." +
             (healZ !== 0 ? " Elevations kept on the recorded datum -- " +
                 recon.anchorName + " at " +
-                CsReport.length(healZ, recon.survey.distanceUnit) + "." : "");
+                CsReport.length(healZ, recon.survey.distanceUnit) + "." : "") +
+            RebuildSurveyData.profileNote(heal.drawn);
         return report;
     }
 

@@ -970,6 +970,10 @@ CsDraw.profile = function(survey, resolved) {
                 "hand to build the profile anyway" };
     }
 
+    // revealPolicy omitted: this is the AUTOMATIC pass, run on every
+    // plan draw -- see CsDraw.profileNow's own docblock for why it must
+    // stay quiet-unless-created rather than reveal every time the way
+    // GenerateProfile (the manual command) does.
     return CsDraw.profileNow(getDocument(), survey, resolved, settings);
 };
 
@@ -988,22 +992,46 @@ CsDraw.profile = function(survey, resolved) {
  * run inside some future caller), so this never assumes there is a
  * global "current" one.
  *
- * REVEAL POLICY: reveal only a NEWLY CREATED sibling file
- * (target.created), never one that already existed. An already-open
- * tab is never revealed either (target.created is only ever true on
- * the offscreen-build path -- see CsProfileFile.resolve). This is ONE
- * policy for BOTH callers: the tool's own copy of this sequence used to
- * reveal unconditionally, with nothing documenting why that should
- * differ from the automatic path -- there was no actual reason for it
- * to, so this version settles it once, here, for both.
+ * REVEAL POLICY -- DELIBERATELY DIFFERENT FOR THE TWO CALLERS, an
+ * earlier pass through this function got this wrong: it unified both
+ * callers onto "reveal only a NEWLY CREATED sibling file
+ * (target.created)" on the stated grounds that there was no reason for
+ * them to differ. There is one. CsDraw.profile's automatic pass runs on
+ * EVERY plan draw -- opening a tab every time would steal focus from
+ * whatever the user is actually doing, so quiet-unless-created is
+ * correct there; that is `revealPolicy` left at its default,
+ * "auto-quiet". GenerateProfile's whole reason to exist is "show me my
+ * profile now" -- a manual command the user reached for on purpose --
+ * so it must reveal the drawing on every successful outcome, not only
+ * when target.created happens to be true. `target.created` is
+ * `!exists` (see CsProfileFile.resolve): the common case for a SECOND
+ * run of this tool is a sibling that already exists on disk but is not
+ * currently open as a tab (offscreen: true, created: false) -- exactly
+ * the case the unified policy silently rewrote the file for and then
+ * showed the user nothing. Pass revealPolicy === "always" (Generate
+ * Profile does) to reveal after every non-skipped outcome regardless of
+ * `created`; an already-open tab (offscreen: false) reveals harmlessly
+ * too -- CsProfileFile.reveal's own openFiles() call focuses the
+ * existing tab rather than opening a duplicate, so calling it on a
+ * drawing already on screen costs nothing.
  *
- * \param settings CsProfile.settings() already read by the caller (both
- *                 gates in CsDraw.profile need it before this point, and
- *                 the manual tool reads it once for the same fields, so
- *                 neither caller should read it twice)
+ * \param settings     CsProfile.settings() already read by the caller
+ *                     (both gates in CsDraw.profile need it before this
+ *                     point, and the manual tool reads it once for the
+ *                     same fields, so neither caller should read it
+ *                     twice)
+ * \param revealPolicy "auto-quiet" (default, or omitted) reveals only a
+ *                     newly created sibling -- the automatic pass's
+ *                     policy, so it never steals focus on an ordinary
+ *                     plan draw. "always" reveals on every successful
+ *                     (non-skipped) outcome -- the manual command's
+ *                     policy, matching the tool's pre-unification
+ *                     behaviour: "show me my profile now" means show it,
+ *                     whether the file was just created or already
+ *                     existed.
  * \return {skipped, reason} or {path, created, counts, profile}
  */
-CsDraw.profileNow = function(doc, survey, resolved, settings) {
+CsDraw.profileNow = function(doc, survey, resolved, settings, revealPolicy) {
     var target = CsProfileFile.resolve(doc.getFileName());
     if (target.doc === null) {
         return { skipped: true, reason: target.reason };
@@ -1056,7 +1084,15 @@ CsDraw.profileNow = function(doc, survey, resolved, settings) {
     // safely on disk by this point regardless of what reveal() does.
     var outcome = { path: target.path, created: target.created,
         counts: counts, profile: built };
-    if (target.created) {
+    // See this function's own \param revealPolicy docblock above: the
+    // automatic pass (revealPolicy left at its default) reveals only a
+    // brand-new sibling, so it never steals focus on an ordinary plan
+    // draw; the manual GenerateProfile command passes "always" so a run
+    // against an already-existing-but-unopened sibling still shows the
+    // user what it just rebuilt, instead of silently rewriting a file
+    // nobody sees.
+    var shouldReveal = (revealPolicy === "always") ? true : target.created;
+    if (shouldReveal) {
         try {
             CsProfileFile.reveal(target.path);
         } catch (eReveal) {

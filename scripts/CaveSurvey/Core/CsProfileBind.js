@@ -70,19 +70,50 @@
 // shape change with too few points to pin down anything better. The
 // user's explicit decision (see this feature's own commit history) was
 // to reuse similarityFit UNCHANGED rather than fork a
-// translation-and-scale-only variant for profiles -- measured cost,
-// so this is not a hypothetical: correcting ONE leg's inclination from
-// 0 degrees to 20 degrees, with a ceiling polyline bound across that
-// leg's two endpoints (a 2-point fit, always zero-residual, so nothing
-// here refuses it and nothing reports it), tilts the sketch by 10.000
-// degrees -- exactly half the 20-degree correction -- at scale
-// 0.98481 and maxResidual 4.4e-16. A stroke traced running straight up
-// (90.00 degrees) comes back at 100.00 degrees, its length shrunk from
-// 5.000 to 4.924. Only a ONE-station sketch is safe from this (a
-// 1-pair fit is pure translation, theta forced to 0 -- see
+// translation-and-scale-only variant for profiles -- measured cost, so
+// this is not a hypothetical, and the numbers below are re-measured on
+// CaveCAD (an earlier pass through this banner got them wrong, in the
+// reassuring direction -- half the true tilt and a shrink that never
+// happens): correcting ONE leg's inclination from 0 degrees to 20
+// degrees, with a ceiling polyline bound EXACTLY ACROSS THAT LEG'S OWN
+// TWO ENDPOINTS (a 2-point fit, always zero-residual, so nothing here
+// refuses it and nothing reports it), tilts the sketch by the FULL
+// 20.000 degrees -- not half of it -- at scale 1.00000 (length
+// PRESERVED, not shrunk) and maxResidual on the order of 1e-15
+// (floating-point noise around an exact fit). A stroke traced running
+// straight up (90.00 degrees) comes back at 110.00 degrees, its length
+// unchanged at 5.000. This holds regardless of which leg is corrected
+// or how many legs the cave has (checked correcting leg 1 and leg 2,
+// in 1/2/3-leg caves): the leg's own two endpoints are exactly
+// slope-distance apart in BOTH the old and the new unroll (only the
+// split between along-passage run and elevation rise changes, not the
+// chord length between them), so a 2-point fit spanning just those two
+// points always recovers the inclination delta itself as theta, with
+// scale forced to 1 by construction -- there is nothing here for a
+// shrink to come from.
+//
+// A WIDER span tells a different, genuinely worse story, and must not
+// be confused with the case above: binding across A1 and A4 in a
+// 3-leg cave (only the first leg's inclination corrected; A4 three legs
+// downstream) measures theta 6.636 degrees, scale 0.98651, the same
+// 90-degree stroke landing at 96.64 degrees with its length shrunk to
+// 4.933. Still a 2-point fit, so still zero-residual by construction --
+// but now the two bound points straddle two UNCHANGED legs as well as
+// the one that moved, so the single rigid transform that maps A1 and A4
+// exactly is not a pure rotation of the corrected leg at all; it is
+// whatever rotation-plus-scale best drags the far endpoint along too,
+// which is why a longer trace both under-reports the true tilt and
+// invents a shrink that never happened to any real geometry. The
+// qualitative warning below stands (and, on the numbers above, was
+// understated by roughly 2x for the common short-trace case): a sketch
+// snapped to a leg's own two ends rotates and scales safely; anything
+// spanning further inherits plan's rotation tolerance whether or not a
+// rotation is what actually happened to the passage, and the error
+// grows with the span. Only a ONE-STATION sketch is safe from either
+// case (a 1-pair fit is pure translation, theta forced to 0 -- see
 // similarityFit's own 1-pair branch); anything spanning two or more
-// stations inherits plan's rotation tolerance whether or not a
-// rotation is what actually happened to the passage.
+// stations is subject to one of the two effects above depending on
+// which stations it is bound to.
 
 var CsProfileBind = {};
 

@@ -170,10 +170,18 @@ function generateProfileRun() {
     // command -- so this calls CsDraw.profileNow directly: the shared
     // post-gate sequence (resolve where to draw, build, draw, commit,
     // reveal) that CsDraw.profile itself calls once its own two gates
-    // pass. See CsDraw.profileNow's own docblock for the ONE reveal
-    // policy this now shares with the automatic path.
+    // pass. revealPolicy: "always" -- this command's entire reason to
+    // exist is "show me my profile now", so it must open the drawing on
+    // every successful run, not only when the sibling happened to be
+    // freshly created. Without this, the common case -- a sibling that
+    // already exists on disk but is not currently open as a tab -- would
+    // rewrite the file and tell the user about it in a dialog while
+    // never actually showing them the drawing. See CsDraw.profileNow's
+    // own docblock for why the AUTOMATIC pass must not do the same
+    // (it would steal focus on every ordinary plan draw).
     var settings = CsProfile.settings();
-    var outcome = CsDraw.profileNow(doc, survey, resolved, settings);
+    var outcome = CsDraw.profileNow(doc, survey, resolved, settings,
+        "always");
     if (outcome.skipped) {
         generateProfileRefuse(outcome.reason);
         return;

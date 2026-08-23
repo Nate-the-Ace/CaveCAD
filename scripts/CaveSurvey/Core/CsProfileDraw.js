@@ -404,13 +404,36 @@ CsProfileDraw.positionsOf = function(profile) {
  *                 removed outright, so a real future option does not
  *                 have to change this function's call signature.
  * \return {bandsDrawn, legsDrawn, stationsDrawn, ceilingRuns,
- *          floorRuns, flatTicks, erased, claimed, linework} --
+ *          floorRuns, flatTicks, erased, claimed, linework,
+ *          stationsMoved} --
  *          claimed and linework are CsProfileBind.claim's own result
  *          and CsRevise.moveLinework's own result (or this function's
  *          {error: ...} / {moved: 0, unmoved: ["move failed: ..."]}
  *          stand-ins when either step threw); CsReport.profileSummary
  *          is what turns both into the words a user actually reads --
  *          see that function for why neither may be dropped silently.
+ *          stationsMoved is true only when CsRevise.positionsMoved found
+ *          at least one profile station that actually shifted between
+ *          the pre-erase drawing and this redraw -- false on a brand
+ *          new profile (nothing existed to compare against) and on an
+ *          idempotent redraw of an unchanged one. CsReport.profileSummary
+ *          reads it to tell "nothing moved, so there was nothing for a
+ *          sketch to follow" apart from "stations moved but a sketch
+ *          failed to follow them" -- moved===0 means something very
+ *          different in each case, and only one of them is worth a
+ *          warning (see CRITICAL 1 in this feature's review history).
+ *          `erased` (how many stale generator-owned entities this call
+ *          deleted before redrawing -- CsProfileDraw.erase's own return
+ *          value) is DELIBERATELY internal-only, not merely dropped:
+ *          it counts THIS module's own prior output being replaced, not
+ *          anything the surveyor did or needs to act on -- there is no
+ *          "warning" or "check this" reading of it the way there is for
+ *          claimed/linework/stationsMoved above. It exists so a caller
+ *          debugging a doubled- or dropped-entity regression (the two
+ *          failure modes this file's own tests, e.g. tests/profile_draw
+ *          _roundtrip.js's off-layer fixture, exist to catch) has a
+ *          number to compare against bandsDrawn/legsDrawn without
+ *          re-deriving it from a queryAllEntities() scan by hand.
  */
 CsProfileDraw.render = function(doc, di, profile, opts) {
     opts = opts || {};   // accepted, currently unread -- see \param opts
@@ -485,6 +508,14 @@ CsProfileDraw.render = function(doc, di, profile, opts) {
 
     counts.claimed = claimed;
     counts.linework = { moved: 0, unmoved: [] };
+    // Recorded BEFORE moveLinework runs (and kept even if moveLinework
+    // then throws, below): CsReport.profileSummary needs to tell "no
+    // station moved, so there was nothing for a sketch to follow" apart
+    // from "a station moved but the sketch didn't follow it" -- both
+    // read as counts.linework.moved === 0, and only the second is worth
+    // a warning. See this function's own \return docblock and CRITICAL 1
+    // in this feature's review history.
+    counts.stationsMoved = false;
     try {
         var after = CsProfileDraw.positionsOf(profile);
         // the tolerance basis and the "did anything actually move"
@@ -493,6 +524,7 @@ CsProfileDraw.render = function(doc, di, profile, opts) {
         // cave in metres start deciding differently
         var extent = CsRevise.positionsExtent(after);
         if (CsRevise.positionsMoved(before, after, extent) > 0) {
+            counts.stationsMoved = true;
             // moveLinework MODIFIES entities (tag rewrite aside, the
             // rotate/scale/move themselves are modifies): the tracing
             // layer a user hid to sketch on undisturbed is not in

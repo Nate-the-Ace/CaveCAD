@@ -326,6 +326,25 @@ CsReport.revisionSummary = function(report) {
             lines.push(linework[i]);
         }
     }
+
+    // The profile pass's own outcome -- present only when CsRevise.apply
+    // actually called CsDraw.survey (the non-rigid path; see that
+    // function's own profileOutcome declaration). Same field, same
+    // wording as CsReport.drawSummary's identical block, so a profile
+    // skipped for size, for ProfileAuto being off, for an unsaved
+    // drawing, or because the pass threw, reads the same words whether
+    // it happened on an import, a notebook Draw, or "Revise a trip" --
+    // this feature's own flagship workflow, which used to say nothing
+    // about it at all (CsRevise.apply discarded CsDraw.survey's return
+    // value outright). Silent on a SUCCESSFUL profile pass, matching
+    // drawSummary's own convention -- the manual GenerateProfile command
+    // is where the full counts/findings report lives (CsReport.
+    // profileSummary); this is only the "something you expected did not
+    // happen" channel.
+    if (report.profile !== undefined && report.profile !== null &&
+            report.profile.skipped) {
+        lines.push("Profile: not written -- " + report.profile.reason + ".");
+    }
     return lines.join("\n");
 };
 
@@ -359,6 +378,18 @@ CsReport.igrfLine = function(result, lat, lon, dateText) {
  * exception into exactly those two fields, and a field this function
  * never reads is a field the user never hears about no matter how
  * loudly the code underneath it screams.
+ *
+ * outcome.counts.stationsMoved distinguishes the two reasons
+ * c.linework.moved can read 0: nothing existed to move yet (a first-
+ * ever profile, or an idempotent redraw of an unchanged one -- render's
+ * own positionsMoved guard runs on EVERY draw, automatic or manual,
+ * unlike the plan side's revision-only callers of lineworkSummary), or
+ * stations genuinely moved and bound linework failed to follow. Only
+ * the second is a real warning; passing stationsMoved through to
+ * CsRevise.lineworkSummary is what tells them apart instead of warning
+ * "your tracing did not move with the survey" on every clean run of a
+ * feature that draws on every plan draw (CRITICAL 1 in this feature's
+ * review history).
  *
  * \param profile CsProfile.build() result, or null when nothing was built
  * \param outcome CsDraw.profile() result: {skipped, reason} or
@@ -410,9 +441,15 @@ CsReport.profileSummary = function(profile, outcome) {
     // larger "already bound" total to carve this one out of.
     if (c.linework !== undefined) {
         var pLines = CsRevise.lineworkSummary(c.linework.moved,
-            c.linework.unmoved, c.claimed ? c.claimed.tagged : 0);
+            c.linework.unmoved, c.claimed ? c.claimed.tagged : 0,
+            c.stationsMoved);
         for (var pi = 0; pi < pLines.length; pi++) {
-            lines.push("  " + pLines[pi]);
+            // Not "  " + pLines[pi] unconditionally: lineworkSummary
+            // inserts a deliberate BLANK line as a separator before its
+            // own WARNING blocks, and prefixing that blank line here
+            // turned it into a two-space trailing-whitespace line in
+            // the dialog -- invisible, but not actually blank.
+            lines.push(pLines[pi] === "" ? "" : "  " + pLines[pi]);
         }
     }
     // A THROWN exception is a different claim from "this sketch simply

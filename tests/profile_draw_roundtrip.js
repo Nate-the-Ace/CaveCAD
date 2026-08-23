@@ -1691,6 +1691,185 @@ destr(diD);
 }());
 
 // =======================================================================
+// 11. CRITICAL 1 -- THIS FEATURE'S OWN FIX. render()'s positionsMoved
+//    guard (fixture 8's own subject) exists to recognise "nothing moved,
+//    so there was nothing for bound linework to follow" -- but before
+//    this fix, CsReport.profileSummary routed EVERY moved===0 outcome
+//    through CsRevise.lineworkSummary's unconditional "your tracing did
+//    NOT move with the survey, re-trace or bind it" warning, which is
+//    exactly backwards on a first-ever draw or an idempotent redraw:
+//    nothing moved because there was nothing TO move, not because a
+//    sketch failed to follow something that did. Pinned here as three
+//    exact-line checks against the real production call
+//    (CsProfileDraw.render -> CsReport.profileSummary, not a hand-built
+//    counts object): a brand-new profile (11a) and an idempotent redraw
+//    of an already-bound sketch (11b) must print NO warning; a genuine
+//    refusal where stations truly moved (11c, same shape as fixture 9's
+//    incoherent-movement case) must still print it -- the fix must
+//    suppress the FALSE warning without suppressing the true one.
+// =======================================================================
+
+var ABANDONED_TRACING_WARNING =
+    "  WARNING -- hand-drawn linework that is not bound " +
+    "to the survey did NOT move with it; re-trace walls and " +
+    "detail near the moved stations, or bind it first " +
+    "(Adopt linework) and revise again.";
+
+// -- 11a. a brand-new profile, no tracing at all -----------------------
+(function() {
+    var sv11a = CsModel.newSurvey();
+    sv11a.shots = [ shotOf("A1", "A2", 10, 0, 0, 4, 2) ];
+    var res11a = CsNetwork.resolve(sv11a, {});
+    var built11a = CsProfile.build(sv11a, res11a, {});
+
+    var d11a = new RDocument(new RMemoryStorage(), createSpatialIndex());
+    var i11a = new RDocumentInterface(d11a);
+    var counts11a = CsProfileDraw.render(d11a, i11a, built11a, {});
+
+    eqs(counts11a.linework.moved, 0,
+        "sanity: nothing moved on a brand-new profile's first draw");
+    ok(counts11a.stationsMoved === false,
+        "sanity: render() itself recognises nothing moved -- " +
+        "stationsMoved is false");
+
+    var report11a = CsReport.profileSummary(built11a,
+        { path: "x.dxf", created: true, counts: counts11a });
+    var lines11a = report11a.split("\n");
+    ok(lines11a.indexOf(
+        "  Traced linework moved with its stations: 0") >= 0,
+        "the moved-count line still prints on a clean first draw, got:\n" +
+        report11a);
+    ok(lines11a.indexOf(ABANDONED_TRACING_WARNING) < 0,
+        "CRITICAL 1's OWN FIX: a brand-new profile with no tracing at " +
+        "all prints NO abandoned-tracing warning -- nothing existed to " +
+        "move, so there was nothing for a sketch to follow (report " +
+        "was:\n" + report11a + ")");
+    destr(i11a);
+}());
+
+// -- 11b. an idempotent redraw of an ALREADY-BOUND sketch --------------
+(function() {
+    var sv11b = CsModel.newSurvey();
+    sv11b.shots = [
+        shotOf("A1", "A2", 10, 0, 0, 4, 2),
+        shotOf("A2", "A3", 10, 0, 0, 4, 2)
+    ];
+    var res11b = CsNetwork.resolve(sv11b, {});
+    var built11b = CsProfile.build(sv11b, res11b, {});
+
+    var d11b = new RDocument(new RMemoryStorage(), createSpatialIndex());
+    var i11b = new RDocumentInterface(d11b);
+    CsProfileDraw.render(d11b, i11b, built11b, {});
+
+    var bandA11b = built11b.bands[0];
+    var b2 = null, b3 = null;
+    for (var bi = 0; bi < bandA11b.stations.length; bi++) {
+        if (bandA11b.stations[bi].name === "A2") { b2 = bandA11b.stations[bi]; }
+        if (bandA11b.stations[bi].name === "A3") { b3 = bandA11b.stations[bi]; }
+    }
+    CsLayers.ensure(d11b, i11b, "PROFILE-CEILING");
+    var op11b = new RAddObjectsOperation();
+    var traced11b = new RLineEntity(d11b, new RLineData(
+        new RVector(b2.x, b2.y), new RVector(b3.x, b3.y)));
+    traced11b.setLayerId(d11b.getLayerId("PROFILE-CEILING"));
+    op11b.addObject(traced11b, false);
+    i11b.applyOperation(op11b);
+
+    // one real revision: claims and moves the sketch, same shape as
+    // fixture 8's own IMPORTANT #5a case
+    sv11b.shots[0].distance = 20;
+    var res11b2 = CsNetwork.resolve(sv11b, {});
+    var rebuilt11b = CsProfile.build(sv11b, res11b2, {});
+    var counts11bMove = CsProfileDraw.render(d11b, i11b, rebuilt11b, {});
+    eqs(counts11bMove.linework.moved, 1,
+        "sanity: the sketch really did move once, for real, before the " +
+        "idempotent redraw below");
+
+    // redraw the SAME, unchanged profile again -- nothing moves this
+    // time, including the already-bound sketch
+    var counts11bIdle = CsProfileDraw.render(d11b, i11b, rebuilt11b, {});
+    eqs(counts11bIdle.linework.moved, 0,
+        "sanity: an idempotent redraw reports zero linework moves");
+    ok(counts11bIdle.stationsMoved === false,
+        "sanity: render() recognises no station actually moved this time");
+
+    var report11b = CsReport.profileSummary(rebuilt11b,
+        { path: "x.dxf", created: false, counts: counts11bIdle });
+    var lines11b = report11b.split("\n");
+    ok(lines11b.indexOf(ABANDONED_TRACING_WARNING) < 0,
+        "CRITICAL 1's OWN FIX: an idempotent redraw -- nothing moved, " +
+        "not even the already-bound sketch from a moment ago -- prints " +
+        "NO abandoned-tracing warning either, got:\n" + report11b);
+    destr(i11b);
+}());
+
+// -- 11c. THE CONTRAST CASE: stations genuinely moved and a bound
+//    sketch genuinely failed to follow (same shape as fixture 9's
+//    incoherent-movement refusal) -- the warning MUST still fire, or
+//    11a/11b's fix has been over-applied into silence.
+(function() {
+    var svI = CsModel.newSurvey();
+    svI.shots = [
+        shotOf("A1", "A2", 10, 0, 0, 4, 2),
+        shotOf("A2", "A3", 10, 0, 20, 4, 2),
+        shotOf("A3", "A4", 10, 0, -15, 4, 2),
+        shotOf("A4", "A5", 10, 0, 25, 4, 2)
+    ];
+    var resI = CsNetwork.resolve(svI, {});
+    var builtI = CsProfile.build(svI, resI, {});
+
+    var dI = new RDocument(new RMemoryStorage(), createSpatialIndex());
+    var iI = new RDocumentInterface(dI);
+    CsProfileDraw.render(dI, iI, builtI, {});
+
+    var bandAI = builtI.bands[0];
+    var i1 = null, i3 = null, i5 = null;
+    for (var ii = 0; ii < bandAI.stations.length; ii++) {
+        if (bandAI.stations[ii].name === "A1") { i1 = bandAI.stations[ii]; }
+        if (bandAI.stations[ii].name === "A3") { i3 = bandAI.stations[ii]; }
+        if (bandAI.stations[ii].name === "A5") { i5 = bandAI.stations[ii]; }
+    }
+    ok(i1 !== null && i3 !== null && i5 !== null,
+        "sanity: found A1, A3 and A5 in the built profile");
+
+    if (i1 !== null && i3 !== null && i5 !== null) {
+        CsLayers.ensure(dI, iI, "PROFILE-CEILING");
+        var opI = new RAddObjectsOperation();
+        var dataI = new RPolylineData();
+        dataI.appendVertex(new RVector(i1.x, i1.y));
+        dataI.appendVertex(new RVector(i3.x, i3.y));
+        dataI.appendVertex(new RVector(i5.x, i5.y));
+        var tracedI = new RPolylineEntity(dI, dataI);
+        tracedI.setLayerId(dI.getLayerId("PROFILE-CEILING"));
+        opI.addObject(tracedI, false);
+        iI.applyOperation(opI);
+
+        svI.shots[1].distance = 20;
+        var resI2 = CsNetwork.resolve(svI, {});
+        var rebuiltI = CsProfile.build(svI, resI2, {});
+        var countsI = CsProfileDraw.render(dI, iI, rebuiltI, {});
+
+        eqs(countsI.linework.moved, 0,
+            "sanity: the incoherent sketch is refused (moved 0), same as " +
+            "fixture 9 above");
+        ok(countsI.stationsMoved === true,
+            "sanity: render() recognises that stations DID genuinely " +
+            "move this time -- the refusal below is real, not a no-op " +
+            "redraw wearing a refusal's clothes");
+
+        var reportI = CsReport.profileSummary(rebuiltI,
+            { path: "x.dxf", created: false, counts: countsI });
+        var linesI = reportI.split("\n");
+        ok(linesI.indexOf(ABANDONED_TRACING_WARNING) >= 0,
+            "CRITICAL 1's FIX DOES NOT OVER-SUPPRESS: stations genuinely " +
+            "moved and the bound sketch genuinely failed to follow them, " +
+            "so the abandoned-tracing warning still fires (report was:\n" +
+            reportI + ")");
+        destr(iI);
+    }
+}());
+
+// =======================================================================
 // Report.
 // =======================================================================
 

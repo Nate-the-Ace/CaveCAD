@@ -3862,6 +3862,60 @@ if (teamBoundaryRt.trips.length === 2) {
         "lineworkSummary: missing fields read as nothing bound");
 })();
 
+// --- CRITICAL 1's own fix: lineworkSummary's 4th argument, stationsMoved
+// -------------------------------------------------------------------
+// CsReport.profileSummary calls this with moved===0 on EVERY clean
+// profile draw (a first-ever draw, or an idempotent redraw of an
+// unchanged one -- CsProfileDraw.render runs its positionsMoved guard on
+// every call, automatic or manual), not only on a real revision the way
+// CsRevise.apply and the notebook's Draw do. Without this argument, the
+// unconditional "hand-drawn linework did NOT move with it" warning at
+// the bottom of this function fired on every one of those clean runs,
+// telling the user their tracing was abandoned when nothing had moved
+// for it to follow in the first place. Exact-line assertions against
+// the exact WARNING text this function owns, not a substring, per this
+// feature's own rule against bundled substring checks.
+(function() {
+    var ABANDONED = "WARNING -- hand-drawn linework that is not bound " +
+        "to the survey did NOT move with it; re-trace walls and " +
+        "detail near the moved stations, or bind it first " +
+        "(Adopt linework) and revise again.";
+
+    // stationsMoved omitted (undefined): defaults to true, so every
+    // EXISTING caller (CsRevise.apply, the notebook's Draw -- neither of
+    // which passes a 4th argument) keeps behaving exactly as before this
+    // fix landed.
+    ok(CsRevise.lineworkSummary(0, [], 0).indexOf(ABANDONED) >= 0,
+        "lineworkSummary: 4th arg omitted defaults to true -- existing " +
+        "callers still warn on moved===0, unchanged from before this fix");
+
+    // stationsMoved explicitly false: nothing moved, so there was
+    // nothing for a sketch to follow -- no warning at all.
+    var quiet = CsRevise.lineworkSummary(0, [], 0, false);
+    ok(quiet.indexOf(ABANDONED) < 0,
+        "lineworkSummary: stationsMoved=false suppresses the abandoned-" +
+        "tracing warning, got '" + quiet.join(" / ") + "'");
+    ok(quiet.indexOf("Traced linework moved with its stations: 0") >= 0,
+        "lineworkSummary: the moved-count line still prints even when " +
+        "the warning is suppressed");
+
+    // stationsMoved explicitly true, moved still 0: a REAL refusal --
+    // stations genuinely moved and bound linework failed to follow --
+    // must still warn. This is the case CRITICAL 1's fix must not
+    // over-suppress.
+    var real = CsRevise.lineworkSummary(0, [], 0, true);
+    ok(real.indexOf(ABANDONED) >= 0,
+        "lineworkSummary: stationsMoved=true still warns on moved===0 " +
+        "-- a genuine refusal is not silenced by this fix");
+
+    // moved > 0: no warning either way, stationsMoved is irrelevant once
+    // something actually moved
+    ok(CsRevise.lineworkSummary(3, [], 0, false).indexOf(ABANDONED) < 0 &&
+        CsRevise.lineworkSummary(3, [], 0, true).indexOf(ABANDONED) < 0,
+        "lineworkSummary: moved > 0 never warns, regardless of " +
+        "stationsMoved");
+})();
+
 // --- ONE shape for the RevisionLog, two writers ----------------------
 // CsRevise.apply and the Survey Notebook's Draw both append to the same
 // log on the same anchor. The rules asserted here are what make a mixed
@@ -6008,6 +6062,19 @@ if (!IS_NODE) {
         ok(summary.indexOf("rigid") >= 0 &&
             summary.indexOf("WARNING") < 0,
             "apply-rigid: summary uses rigid wording, no warning");
+        // CRITICAL 2's fix, negative half: the rigid path never calls
+        // CsDraw.survey at all (the whole-drawing transform moves
+        // everything, profile included, without a redraw) -- report.
+        // profile must stay absent here, not merely false or null, or a
+        // rigid move would print a bogus "Profile: not written" line for
+        // a profile pass that was never even attempted.
+        ok(report.profile === undefined,
+            "apply-rigid: report.profile is absent on the rigid path " +
+            "(no CsDraw.survey call to report on), got " +
+            JSON.stringify(report.profile));
+        ok(summary.indexOf("Profile:") < 0,
+            "apply-rigid: no profile line at all in a rigid move's " +
+            "summary, got:\n" + summary);
 
         // (c) ONE-OPERATION PROOF: a single di.undo() must revert the
         // scratch geometry AND the tag edits together (both proven to
@@ -6145,6 +6212,29 @@ if (!IS_NODE) {
         ok(summary.indexOf("erased and redrawn") >= 0 &&
             summary.indexOf("re-trace") >= 0,
             "apply-redraw: summary warns about hand-drawn linework");
+
+        // CRITICAL 2 -- "Revise a trip" is the flagship workflow this
+        // whole feature was built for, and CsRevise.apply's non-rigid
+        // path used to DISCARD CsDraw.survey's return value outright, so
+        // report.profile did not exist at all and this revision's own
+        // profile pass (skipped here: this fixture's doc has no file
+        // name, same as RebuildSurveyData's own fixtures below) was
+        // completely silent. Same field, same wording as CsReport.
+        // drawSummary's identical skip line.
+        ok(report.profile !== undefined && report.profile !== null,
+            "apply-redraw: CRITICAL 2 -- report.profile is present on " +
+            "the non-rigid path, not discarded");
+        if (report.profile !== undefined && report.profile !== null) {
+            ok(report.profile.skipped === true,
+                "apply-redraw: sanity -- this fixture's doc has no file " +
+                "name, so the profile pass really is skipped");
+        }
+        ok(summary.indexOf(
+            "Profile: not written -- the drawing has no file name yet")
+            >= 0,
+            "apply-redraw: CRITICAL 2 -- the skipped profile pass " +
+            "reaches CsReport.revisionSummary's own text, got:\n" +
+            summary);
     })();
 
     // -----------------------------------------------------------------
@@ -6282,6 +6372,18 @@ if (!IS_NODE) {
             "inferred from geometry (slope = plan/cos(inclination))")
             >= 0, "rsd-upgrade: report says distances were inferred, got '" +
             rep.message + "'");
+        // CRITICAL 2: RebuildSurveyData.redraw's own CsDraw.survey call
+        // draws a profile pass too, and this fixture's doc has no file
+        // name (siblingPath has nowhere to put one) -- before this fix
+        // the return value's own .profile field was read only for
+        // shotCount(), so this skip was completely silent. Same words as
+        // CsReport.drawSummary's identical skip line, so the two never
+        // read as two different facts.
+        ok(rep.message.indexOf(
+            "Profile: not written -- the drawing has no file name yet")
+            >= 0,
+            "rsd-upgrade: CRITICAL 2 -- the skipped profile pass reaches " +
+            "the report, got '" + rep.message + "'");
 
         // (a) the drawing is no longer legacy
         var after = CsRevise.surveyFromDocument(doc);
@@ -6401,6 +6503,15 @@ if (!IS_NODE) {
             rep1.mode + "'");
         ok(rep1.inferred === false,
             "rsd-idem: run 1 infers nothing -- the tags are the survey");
+        // CRITICAL 2, the "heal" mode's own copy of the same fix (see the
+        // identical assertion in the "upgrade" fixture above): this doc
+        // also has no file name, so the profile pass is skipped, and
+        // that skip must reach rep1.message too.
+        ok(rep1.message.indexOf(
+            "Profile: not written -- the drawing has no file name yet")
+            >= 0,
+            "rsd-idem: CRITICAL 2 -- the heal path's skipped profile " +
+            "pass reaches the report too, got '" + rep1.message + "'");
 
         var rep2 = RebuildSurveyData.rebuild(doc, di);
         var count2 = countAt();
@@ -12084,6 +12195,41 @@ eqs(CsProfileDraw.labelY0({ stations: [] }), 0.0,
         { skipped: true, reason: "the drawing has no file name yet" });
     ok(skipped.indexOf("no file name") >= 0,
         "a skipped profile says why in words");
+}());
+
+// --- CRITICAL 1's own trailing-whitespace fix ------------------------
+// CsRevise.lineworkSummary inserts a deliberate BLANK line ("") as a
+// separator before its own WARNING blocks. CsReport.profileSummary used
+// to prefix EVERY line it copied from lineworkSummary with two spaces
+// unconditionally, turning that deliberate blank line into "  " -- a
+// line that LOOKS empty in a dialog but carries trailing whitespace an
+// exact-line reader (or a diff) would see. Exact-line assertion against
+// the split array, not a substring check, since a substring check on
+// the whole text cannot tell "" apart from "  " (both satisfy
+// indexOf("") >= 0 trivially).
+(function() {
+    var textWithWarning = CsReport.profileSummary(
+        { findings: { omitted: [], mismatches: [], secondTies: [],
+            orphans: [], strandedRoots: [], stopped: [], ungrouped: [],
+            undrawn: [], wallPointsSkipped: 0 } },
+        { path: "/x/Cave-PROFILE.dxf", created: false,
+            counts: { linework: { moved: 0, unmoved: ["LAYER #1"] },
+                claimed: { tagged: 0 }, stationsMoved: true } });
+    var lines = textWithWarning.split("\n");
+    var sawBlank = false;
+    for (var i = 0; i < lines.length; i++) {
+        if (lines[i] === "  ") {
+            ok(false, "profileSummary: the separator line before a " +
+                "WARNING block is TWO SPACES, not truly blank -- " +
+                "trailing whitespace, got line " + i + " of:\n" +
+                textWithWarning);
+        }
+        if (lines[i] === "") {
+            sawBlank = true;
+        }
+    }
+    ok(sawBlank, "profileSummary: the separator line before a WARNING " +
+        "block is a genuinely EMPTY line, got:\n" + textWithWarning);
 }());
 
 (function() {
