@@ -8464,8 +8464,33 @@ if (!IS_NODE) {
     ok(h.ties["A2a"] === "A2", "spur A2a ties at A2");
     ok(h.parents["B"] === "A", "letter run B hangs off A");
     ok(h.ties["B"] === "A3", "B ties at the earlier of its two A contacts");
-    ok(h.secondTies.length === 1 && h.secondTies[0].run === "B",
+    // The B1-A4 closure is a candidate from BOTH ends (rank AFTER any
+    // "new" contact, but a candidate all the same -- see hierarchy()'s
+    // RANK BEFORE SEQ comment): B's own contact list reports it as a
+    // second tie, and symmetrically it is A's ONLY candidate, which
+    // would make the root adopt B as ITS parent if left alone. The
+    // cycle-breaking pass demotes A's side of that same candidacy to a
+    // secondTie too (A has the smaller earliest station, A1, so A stays
+    // root) rather than silently dropping it.
+    var hasBA4 = false, hasAB1 = false;
+    for (var sti = 0; sti < h.secondTies.length; sti++) {
+        if (h.secondTies[sti].run === "B" && h.secondTies[sti].station === "A4" &&
+                h.secondTies[sti].otherRun === "A") {
+            hasBA4 = true;
+        }
+        if (h.secondTies[sti].run === "A" && h.secondTies[sti].station === "B1" &&
+                h.secondTies[sti].otherRun === "B") {
+            hasAB1 = true;
+        }
+    }
+    ok(h.secondTies.length === 2 && hasBA4,
         "B's second contact reported -- it arrives through the closure leg");
+    ok(hasAB1,
+        "the same ring gives A a symmetric candidate, correctly demoted " +
+        "rather than dropped by cycle-breaking");
+    ok(h.cycles.length === 1 && h.cycles[0].length === 2 &&
+        h.cycles[0].indexOf("A") >= 0 && h.cycles[0].indexOf("B") >= 0,
+        "the ring's mutual candidacy is reported as a broken cycle");
     ok(h.parents["A2a"] !== undefined && h.parents["A"] === null,
         "a root run does not adopt its own child as parent");
     ok(h.mismatches.length === 0, "no name/graph mismatch here");
@@ -8489,6 +8514,281 @@ if (!IS_NODE) {
     ok(h.mismatches[0].run === "A13a" &&
         h.mismatches[0].expected === "A13" &&
         h.mismatches[0].actual === "A14", "mismatch names both stations");
+}());
+
+(function() {
+    // adjacency() itself, direct: the walked-chain graph excludes a
+    // closure entirely (not just ranks it lower, as hierarchy's own
+    // contact graph does) -- A3's closing leg back to A1 must not
+    // appear on EITHER station's list.
+    var sv = CsModel.newSurvey();
+    sv.shots = [
+        shotOf("A1", "A2", 10, 0, 0),
+        shotOf("A2", "A3", 10, 0, 0),
+        shotOf("A3", "A1", 10, 90, 0)   // closes the ring -- a "closure" leg
+    ];
+    var r = CsNetwork.resolve(sv, {});
+    ok(r.legs[2].kind === "closure", "fixture assumption: A3->A1 really is a closure");
+    var adj = CsProfile.adjacency(r);
+    ok(adj["A1"].length === 1 && adj["A1"][0].other === "A2",
+        "A1 sees only its new-kind neighbor, not the closure back from A3");
+    ok(adj["A3"].length === 1 && adj["A3"][0].other === "A2",
+        "A3's closure leg to A1 is excluded from its own list too");
+}());
+
+(function() {
+    // C1: two *fixed* entrances on one connected cave, closing a ring.
+    // CsNetwork.seedFixed places every fixed station up front, before
+    // any traversal, so a fixed station's low .seq records SEEDING,
+    // not walking -- raw-seq directionality alone mistakes that for
+    // "this run already existed" and corrupts the hierarchy. Ranking
+    // by leg kind first (closure/tie legs can't use seq for direction
+    // at all) plus cycle-breaking on the earliest actual station fixes
+    // it: A (anchored by the earlier-seeded fixed station A1) is root,
+    // B ties at A3 (the real tie, not the fixed station B1), and B is
+    // no longer falsely reported as an orphan while ALSO being A's
+    // parent.
+    var sv = CsModel.newSurvey();
+    sv.shots = [
+        shotOf("A1", "A2", 10, 0, 0),
+        shotOf("A2", "A3", 10, 0, 0),
+        shotOf("B1", "B2", 10, 0, 0),
+        shotOf("A3", "B1", 8, 45, 0)
+    ];
+    sv.fixed["A1"] = { x: 0, y: 0, z: 0 };
+    sv.fixed["B1"] = { x: 100, y: 100, z: 0 };
+    var r = CsNetwork.resolve(sv, {});
+    var h = CsProfile.hierarchy(CsProfile.groupRuns(r), r);
+
+    ok(h.parents["A"] === null, "A (seeded first) is root");
+    ok(h.parents["B"] === "A" && h.ties["B"] === "A3",
+        "B ties at A3, the real connecting station -- not the fixed B1");
+    ok(h.orphans.indexOf("B") < 0, "the false orphan is gone");
+}());
+
+(function() {
+    // C2: a side passage renumbered back into the trunk (A1..A3, B1-B2,
+    // A4-A5) -- each run's OWN contact list independently and correctly
+    // picks a "new"-kind edge to the other run, so the per-run ranking
+    // alone cannot see the resulting cycle. Only walking the parent
+    // chain afterward finds it. Must still produce a proper root, every
+    // run exactly once in `order`, and the cycle reported rather than
+    // silently resolved.
+    var sv = CsModel.newSurvey();
+    sv.shots = [
+        shotOf("A1", "A2", 10, 0, 0),
+        shotOf("A2", "A3", 10, 0, 0),
+        shotOf("A3", "B1", 10, 0, 0),
+        shotOf("B1", "B2", 10, 0, 0),
+        shotOf("B2", "A4", 10, 0, 0),
+        shotOf("A4", "A5", 10, 0, 0)
+    ];
+    var r = CsNetwork.resolve(sv, {});
+    var g = CsProfile.groupRuns(r);
+    var h = CsProfile.hierarchy(g, r);
+
+    ok(h.parents["A"] === null, "A (holding the very first station) becomes root");
+    ok(h.cycles.length === 1 &&
+        h.cycles[0].indexOf("A") >= 0 && h.cycles[0].indexOf("B") >= 0,
+        "the rejoining side passage is reported as a broken cycle");
+    ok(h.order.length === g.order.length, "every run appears in the band order");
+    var seenRuns = {}, dup = false;
+    for (var oi = 0; oi < h.order.length; oi++) {
+        if (seenRuns.hasOwnProperty(h.order[oi])) {
+            dup = true;
+        }
+        seenRuns[h.order[oi]] = true;
+    }
+    ok(!dup, "...and no run appears twice");
+}());
+
+(function() {
+    // I1: the same junction (A3) reached from run B through TWO
+    // different closure legs (B1->A3 and B2->A3) must be reported once,
+    // not twice -- the dedupe has to track every station already
+    // emitted for this run, not just the first one.
+    var sv = CsModel.newSurvey();
+    sv.shots = [
+        shotOf("A1", "A2", 10, 0, 0),
+        shotOf("A2", "A3", 10, 0, 0),
+        shotOf("A1", "B1", 8, 45, 0),
+        shotOf("B1", "B2", 5, 0, 0),
+        shotOf("B1", "A3", 8, 0, 0),
+        shotOf("B2", "A3", 8, 0, 0)
+    ];
+    var r = CsNetwork.resolve(sv, {});
+    var h = CsProfile.hierarchy(CsProfile.groupRuns(r), r);
+
+    var a3ForB = 0;
+    for (var sti = 0; sti < h.secondTies.length; sti++) {
+        if (h.secondTies[sti].run === "B" && h.secondTies[sti].station === "A3") {
+            a3ForB++;
+        }
+    }
+    ok(a3ForB === 1,
+        "A3 reached twice through two different closures is one secondTie, not two");
+}());
+
+(function() {
+    // I2: a run's second contact can land in a THIRD run entirely --
+    // B and C both hang off A directly, and also close a ring with
+    // EACH OTHER. The secondTie's otherRun names the run actually
+    // touched (C, from B's perspective), which is not B's parent (A).
+    var sv = CsModel.newSurvey();
+    sv.shots = [
+        shotOf("A1", "A2", 10, 0, 0),
+        shotOf("A2", "B1", 10, 0, 0),
+        shotOf("B1", "B2", 10, 0, 0),
+        shotOf("A2", "C1", 10, 0, 0),
+        shotOf("C1", "C2", 10, 0, 0),
+        shotOf("C2", "B2", 10, 0, 0)
+    ];
+    var r = CsNetwork.resolve(sv, {});
+    var h = CsProfile.hierarchy(CsProfile.groupRuns(r), r);
+
+    ok(h.parents["B"] === "A" && h.parents["C"] === "A",
+        "B and C both hang directly off A");
+    var found = false;
+    for (var sti = 0; sti < h.secondTies.length; sti++) {
+        if (h.secondTies[sti].run === "B" && h.secondTies[sti].otherRun === "C") {
+            found = true;
+        }
+    }
+    ok(found, "B's second contact names C (the run actually touched), " +
+        "not A (B's own parent) -- otherRun, not parentRun");
+}());
+
+(function() {
+    // I3: adjacency() and hierarchy() must tolerate the same empty
+    // inputs groupRuns() is already hardened for (Task 1), not throw.
+    var threw = false;
+    try {
+        CsProfile.adjacency(null);
+        CsProfile.adjacency({});
+        CsProfile.adjacency(undefined);
+        CsProfile.hierarchy(CsProfile.groupRuns({}), {});
+        CsProfile.hierarchy(CsProfile.groupRuns(undefined), undefined);
+    } catch (e) {
+        threw = true;
+    }
+    ok(!threw, "adjacency/hierarchy tolerate empty input instead of throwing");
+    var h = CsProfile.hierarchy(CsProfile.groupRuns({}), {});
+    ok(h.order.length === 0 && h.cycles.length === 0 &&
+        h.orphans.length === 0 && h.secondTies.length === 0 &&
+        h.mismatches.length === 0,
+        "hierarchy(groupRuns({}), {}) is the all-empty shape, not a throw");
+}());
+
+(function() {
+    // The single most suspicious state hierarchy() can produce: a
+    // NAMED spur (its own name asserts a tie station) that the graph
+    // ties to NOTHING at all. Q1a1/Q1a2 are surveyed as their own
+    // fixed, fully disconnected component -- Q1a's name asserts a tie
+    // at "Q1", a station that does not even exist here. The mismatch
+    // check must still fire even though the zero-contacts branch never
+    // reaches a real tie station.
+    var sv = CsModel.newSurvey();
+    sv.shots = [
+        shotOf("A1", "A2", 10, 0, 0),
+        shotOf("Q1a1", "Q1a2", 5, 0, 0)
+    ];
+    sv.fixed["A1"] = { x: 0, y: 0, z: 0 };
+    sv.fixed["Q1a1"] = { x: 500, y: 500, z: 0 };
+    var r = CsNetwork.resolve(sv, {});
+    var h = CsProfile.hierarchy(CsProfile.groupRuns(r), r);
+
+    ok(h.ties["Q1a"] === null, "the graph gives Q1a no tie at all");
+    ok(h.mismatches.length === 1 && h.mismatches[0].run === "Q1a" &&
+        h.mismatches[0].expected === "Q1" && h.mismatches[0].actual === null,
+        "a named spur with zero contacts is still reported as a mismatch");
+}());
+
+(function() {
+    // I4: siblings whose INSERTION order is the OPPOSITE of their
+    // junction order. The A4 spur is surveyed (and so resolved) before
+    // the A2 spur, so grouped.order is [A, A4a, A2a] -- but A2a ties in
+    // earlier along the trunk (A2 before A4), so the band must still
+    // read [A, A2a, A4a]. An always-0 sibling comparator would pass
+    // this fixture only by accident under a stable sort and never
+    // under CaveCAD's unstable one; here insertion order is wrong on
+    // purpose so node's stability cannot save it either.
+    var sv = CsModel.newSurvey();
+    sv.shots = [
+        shotOf("A1", "A2", 10, 0, 0),
+        shotOf("A2", "A3", 10, 0, 0),
+        shotOf("A3", "A4", 10, 0, 0),
+        shotOf("A4", "A5", 10, 0, 0),
+        shotOf("A4", "A4a1", 5, 0, 0),
+        shotOf("A2", "A2a1", 5, 0, 0)
+    ];
+    var r = CsNetwork.resolve(sv, {});
+    var g = CsProfile.groupRuns(r);
+    eqs(g.order.join(","), "A,A4a,A2a",
+        "fixture assumption: A4a resolves (and so is inserted) before A2a");
+    var h = CsProfile.hierarchy(g, r);
+    eqs(h.order.join(","), "A,A2a,A4a",
+        "the band follows junction distance, not insertion order");
+}());
+
+(function() {
+    // I4: two spurs off the SAME station (A2), inserted b-then-a. Since
+    // both tie at the identical station, seqOfTie ties exactly -- this
+    // is the only fixture that exercises the run-key tiebreak itself,
+    // not seqOfTie doing the sorting work.
+    var sv = CsModel.newSurvey();
+    sv.shots = [
+        shotOf("A1", "A2", 10, 0, 0),
+        shotOf("A2", "A3", 10, 0, 0),
+        shotOf("A2", "A2b1", 5, 0, 0),
+        shotOf("A2", "A2a1", 5, 0, 0)
+    ];
+    var r = CsNetwork.resolve(sv, {});
+    var g = CsProfile.groupRuns(r);
+    eqs(g.order.join(","), "A,A2b,A2a",
+        "fixture assumption: A2b resolves (and so is inserted) before A2a");
+    var h = CsProfile.hierarchy(g, r);
+    eqs(h.order.join(","), "A,A2a,A2b",
+        "same junction: the run-key tiebreak, not seqOfTie, decides order");
+}());
+
+(function() {
+    // I4: a genuine orphan -- two disconnected fixed components -- must
+    // be reported, and reported alone: the root itself must never
+    // appear in orphans just because it also has zero contacts.
+    var sv = CsModel.newSurvey();
+    sv.shots = [
+        shotOf("A1", "A2", 10, 0, 0),
+        shotOf("C1", "C2", 10, 0, 0)
+    ];
+    sv.fixed["A1"] = { x: 0, y: 0, z: 0 };
+    sv.fixed["C1"] = { x: 500, y: 500, z: 0 };
+    var r = CsNetwork.resolve(sv, {});
+    var h = CsProfile.hierarchy(CsProfile.groupRuns(r), r);
+    eqs(h.orphans.join(","), "C",
+        "only the truly disconnected run is an orphan -- not the root too");
+}());
+
+(function() {
+    // M1/I4: CsProfile.bandOrder is public and can be called directly
+    // with a hand-built parents map hierarchy() never would produce --
+    // an UNBROKEN cycle (hierarchy breaks every cycle it finds before
+    // calling this). Without the unreached-fallback loop, a pure cycle
+    // has no null-parent root, so `roots` is empty and the walk never
+    // runs at all, silently emitting an empty order. Without the `seen`
+    // guard, walking into the cycle recurses forever.
+    var grouped = {
+        runs: {
+            A: { key: "A", stations: ["s1"] },
+            B: { key: "B", stations: ["s2"] }
+        },
+        order: ["A", "B"]
+    };
+    var parents = { A: "B", B: "A" };
+    var ties = { A: "s1", B: "s2" };
+    var resolved = { stations: { s1: { seq: 0 }, s2: { seq: 1 } } };
+    var order = CsProfile.bandOrder(grouped, parents, ties, resolved);
+    ok(order.length === 2 && order.indexOf("A") >= 0 && order.indexOf("B") >= 0,
+        "an unbroken cycle fed directly to bandOrder still emits every run once");
 }());
 
 // ---------------------------------------------------------------------

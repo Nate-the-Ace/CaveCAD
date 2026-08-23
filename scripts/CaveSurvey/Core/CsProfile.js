@@ -228,6 +228,13 @@ CsProfile.groupRuns = function(resolved) {
  * here would let a chain include a step legBetween cannot resolve, and
  * the band would stop at it.
  *
+ * INVARIANT: this function's kind filter (closures out, "new"/"tie" in)
+ * and CsProfile.legBetween's kind filter (Task 5) MUST stay identical.
+ * They agree today only because both happen to skip exactly "closure" --
+ * if either one's filter changes without the other, a chain step this
+ * graph offers becomes one legBetween cannot resolve, and the band
+ * search stops dead at it with no error, just a short band.
+ *
  * Run hierarchy does NOT use this graph; it builds its own from
  * resolved.legs, closures included, because a second contact through a
  * ring is exactly the thing it has to report. See hierarchy().
@@ -237,6 +244,10 @@ CsProfile.groupRuns = function(resolved) {
  */
 CsProfile.adjacency = function(resolved) {
     var adj = {};
+    if (resolved === undefined || resolved === null ||
+            resolved.legs === undefined || resolved.legs === null) {
+        return adj;   // same empty-input tolerance as groupRuns()
+    }
     var add = function(at, other, leg, seq) {
         if (!adj.hasOwnProperty(at)) {
             adj[at] = [];
@@ -248,6 +259,10 @@ CsProfile.adjacency = function(resolved) {
         if (leg.kind === "closure") {
             continue;
         }
+        // Belt-and-braces: CsNetwork.resolve routes splay shots to
+        // `skipped` and never emits a splay leg at all, so this branch
+        // has no live case today. Kept so a future change to resolve()
+        // can't silently let a splay leg into the walked-chain graph.
         if (leg.shot !== undefined && leg.shot !== null && leg.shot.splay) {
             continue;
         }
@@ -261,12 +276,15 @@ CsProfile.adjacency = function(resolved) {
  * Which run each run hangs off, where it ties in, and what order the
  * bands go in.
  *
- * The parent is decided by the GRAPH: of all legs leaving this run's
- * stations to a station in another run, the earliest-resolved one
- * gives the tie station and the parent run. The name-derived tie
- * (CsProfile.tieNameOfRun) is used only as a cross-check -- when the two
- * disagree the graph wins, because it is the measured fact, and the
- * disagreement is reported as a likely naming blunder.
+ * The parent is decided by the GRAPH, not simply by "earliest seq" --
+ * see the per-kind ranking below, RANK before SEQ, for why raw seq
+ * alone is not safe. The name-derived tie (CsProfile.tieNameOfRun) is
+ * used only as a cross-check -- when the two disagree the graph wins,
+ * because it is the measured fact, and the disagreement is reported as
+ * a likely naming blunder. That check runs even when the graph found
+ * NO contact at all: a named spur with zero contacts still had a name
+ * asserting a tie, and reporting nothing there would hide the single
+ * most suspicious state this function can produce.
  *
  * \param grouped CsProfile.groupRuns() result
  * \param resolved CsNetwork.resolve() result
@@ -274,12 +292,32 @@ CsProfile.adjacency = function(resolved) {
  *   parents:    {runKey: parentRunKey | null},
  *   ties:       {runKey: stationName | null},
  *   order:      [runKey] depth first, siblings by junction distance,
- *   secondTies: [{run, station, parentRun}] further contacts,
- *   mismatches: [{run, expected, actual}] name vs graph,
- *   orphans:    [runKey] runs with no determinable parent
+ *   secondTies: [{run, station, otherRun}] further contacts -- otherRun
+ *               is simply the run TOUCHED at that second station, not
+ *               necessarily this run's parent (the parent can lie in a
+ *               third run while a second contact lands in yet another),
+ *   mismatches: [{run, expected, actual}] name vs graph; actual is null
+ *               when the graph found no contact at all,
+ *   orphans:    [runKey] runs with no determinable parent,
+ *   cycles:     [[runKey, ...]] any loop found in the parent map and
+ *               broken -- see the cycle-breaking pass below
  * }
  */
 CsProfile.hierarchy = function(grouped, resolved) {
+    if (grouped === undefined || grouped === null ||
+            grouped.order === undefined || grouped.order === null ||
+            resolved === undefined || resolved === null ||
+            resolved.legs === undefined || resolved.legs === null ||
+            resolved.stations === undefined || resolved.stations === null) {
+        // Same empty-input tolerance as groupRuns(): a caller can hand
+        // this an unresolved/empty survey and get the all-empty shape
+        // back rather than a TypeError -- the first stage of this
+        // pipeline (groupRuns) already tolerates that, and the next two
+        // stages should not be the ones that crash on it.
+        return { parents: {}, ties: {}, order: [], secondTies: [],
+            mismatches: [], orphans: [], cycles: [] };
+    }
+
     var parents = {}, ties = {}, secondTies = [], mismatches = [];
     var orphans = [];
     var runOf = {};
@@ -304,10 +342,12 @@ CsProfile.hierarchy = function(grouped, resolved) {
     var contactLegs = [];
     for (i = 0; i < resolved.legs.length; i++) {
         var cl = resolved.legs[i];
+        // Belt-and-braces, same as adjacency(): resolve() never emits a
+        // splay leg, so this branch has no live case today.
         if (cl.shot !== undefined && cl.shot !== null && cl.shot.splay) {
             continue;
         }
-        contactLegs.push({ from: cl.from, to: cl.to, seq: i });
+        contactLegs.push({ from: cl.from, to: cl.to, kind: cl.kind, seq: i });
     }
 
     var seqOf = function(name) {
@@ -315,6 +355,23 @@ CsProfile.hierarchy = function(grouped, resolved) {
         return (st === undefined || st === null || st.seq === undefined ||
             st.seq === null) ? Number.MAX_VALUE : st.seq;
     };
+
+    // The earliest (smallest-seq) station in each run -- used only to
+    // break a cycle in the parent map, below. Computed once here
+    // because it depends solely on run membership, not on contacts.
+    var earliestSeqOfRun = {};
+    for (i = 0; i < grouped.order.length; i++) {
+        var erKey = grouped.order[i];
+        var erStations = grouped.runs[erKey].stations;
+        var erMin = Number.MAX_VALUE;
+        for (k = 0; k < erStations.length; k++) {
+            var erSeq = seqOf(erStations[k]);
+            if (erSeq < erMin) {
+                erMin = erSeq;
+            }
+        }
+        earliestSeqOfRun[erKey] = erMin;
+    }
 
     for (i = 0; i < grouped.order.length; i++) {
         var key = grouped.order[i];
@@ -340,28 +397,57 @@ CsProfile.hierarchy = function(grouped, resolved) {
             if (otherRun === undefined || otherRun === key) {
                 continue;
             }
-            // DIRECTION MATTERS, and getting it wrong inverts the whole
-            // hierarchy. A2 is adjacent to A2a1, so a symmetric scan
-            // makes run A -- the root -- adopt its own child A2a as its
-            // parent. The parent side is the station that was already on
-            // the ground when this leg was walked, and resolution order
-            // is exactly that record.
-            if (seqOf(other) >= seqOf(mine)) {
-                continue;
+            // RANK BEFORE SEQ. A "new" leg's smaller-seq end genuinely
+            // is the parent side -- that is also what makes a
+            // backwards-entered spur (A2a1->A2) resolve correctly, so
+            // it is kept exactly as before. But a "closure" or "tie"
+            // leg connects two stations that were BOTH already placed
+            // by the time it was walked, so seq says nothing about
+            // parentage there -- and worse, a *fix'ed station is
+            // SEEDED before any traversal at all (CsNetwork.seedFixed),
+            // so its seq can be artificially tiny despite the survey
+            // reaching it, graph-wise, very late. Applying the "new"
+            // leg's directional rule to a closure/tie leg is exactly
+            // what let a fixed entrance's seed-time seq masquerade as
+            // "this run already existed," corrupting the whole
+            // hierarchy on real two-entrance surveys. So a closure/tie
+            // leg is kept as a candidate in EITHER direction, but
+            // ranked after every "new" contact (rank 1 vs rank 0) --
+            // it only wins when nothing better ties this run in, and a
+            // symmetric candidate on both sides of such a leg is
+            // exactly what the cycle-breaking pass below exists to
+            // resolve.
+            var rank;
+            if (cg.kind === "new") {
+                if (seqOf(other) >= seqOf(mine)) {
+                    continue;
+                }
+                rank = 0;
+            } else {
+                rank = 1;
             }
             contacts.push({
                 station: other,
-                parentRun: otherRun,
+                otherRun: otherRun,
+                rank: rank,
                 seq: cg.seq
             });
         }
-        // seq here is the leg's index in resolved.legs, unique per leg,
-        // and one leg cannot contribute two contacts to the same run
-        // (both endpoints in this run is skipped above) -- so this
+        // (rank, seq) is a total order: rank is 0 or 1, and within a
+        // rank, seq is the leg's index in resolved.legs -- unique per
+        // leg, and one leg cannot contribute two contacts to the same
+        // run (both endpoints in this run is skipped above) -- so this
         // comparator can never return 0 for distinct entries, which is
         // required of every comparator here: this engine's sort is not
         // stable.
-        contacts.sort(function(a, b) { return a.seq - b.seq; });
+        contacts.sort(function(a, b) {
+            if (a.rank !== b.rank) {
+                return a.rank - b.rank;
+            }
+            return a.seq - b.seq;
+        });
+
+        var expected = CsProfile.tieNameOfRun(key);
 
         if (contacts.length === 0) {
             // the root run, or a run in its own disconnected component
@@ -370,23 +456,34 @@ CsProfile.hierarchy = function(grouped, resolved) {
             if (i > 0) {
                 orphans.push(key);
             }
-            continue;
-        }
-
-        parents[key] = contacts[0].parentRun;
-        ties[key] = contacts[0].station;
-        for (k = 1; k < contacts.length; k++) {
-            if (contacts[k].station === contacts[0].station) {
-                continue;   // the same junction reached twice, not a second tie
+        } else {
+            parents[key] = contacts[0].otherRun;
+            ties[key] = contacts[0].station;
+            // Dedupe against every station already emitted for this
+            // run, not just contacts[0]'s -- a junction reached a THIRD
+            // time (two different closure legs both landing back on
+            // the same station) is still only one second contact worth
+            // reporting, not two identical rows.
+            var seenStation = {};
+            seenStation[contacts[0].station] = true;
+            for (k = 1; k < contacts.length; k++) {
+                var stK = contacts[k].station;
+                if (seenStation.hasOwnProperty(stK)) {
+                    continue;
+                }
+                seenStation[stK] = true;
+                secondTies.push({
+                    run: key,
+                    station: stK,
+                    otherRun: contacts[k].otherRun
+                });
             }
-            secondTies.push({
-                run: key,
-                station: contacts[k].station,
-                parentRun: contacts[k].parentRun
-            });
         }
 
-        var expected = CsProfile.tieNameOfRun(key);
+        // Reachable regardless of whether a contact was found: a named
+        // spur (expected !== null) that the graph ties nowhere at all
+        // is exactly as much a mismatch as one the graph ties somewhere
+        // else -- actual is null in that case, not silently skipped.
         if (expected !== null && expected !== ties[key]) {
             mismatches.push({
                 run: key,
@@ -396,13 +493,98 @@ CsProfile.hierarchy = function(grouped, resolved) {
         }
     }
 
+    // ---- break any cycle in the parent map -----------------------
+    //
+    // Each run has at most one parent, so `parents` is a functional
+    // graph: walking parent pointers from any run either reaches a
+    // null-parent root, or loops back on itself. A loop is possible
+    // even after the per-kind ranking above -- two runs can each pick
+    // a DIFFERENT qualifying edge to the other (a fixed-entrance ring
+    // where each side's own best contact points at the other; a side
+    // passage renumbered back into the trunk, where each run's own
+    // "new"-leg contact happens to point at the other run), each edge
+    // locally legitimate, together forming a cycle no single run's own
+    // contact list could ever reveal.
+    //
+    // The loop member whose EARLIEST station (by resolution .seq) is
+    // smallest becomes the root: it is the one that was on the ground
+    // first, so its claim to being upstream of the rest of the loop is
+    // at least as good as any other member's. Its own discarded
+    // parent/tie is not thrown away -- it becomes a secondTie, so the
+    // graph fact it carried is demoted, not deleted.
+    var cycles = [];
+    var settled = {};
+    var breakCycle = function(members) {
+        var electedRoot = members[0];
+        var bestSeq = earliestSeqOfRun[electedRoot];
+        for (var m = 1; m < members.length; m++) {
+            var s = earliestSeqOfRun[members[m]];
+            if (s < bestSeq) {
+                bestSeq = s;
+                electedRoot = members[m];
+            }
+        }
+        var discardedParent = parents[electedRoot];
+        var discardedTie = ties[electedRoot];
+        if (discardedTie !== null && discardedTie !== undefined) {
+            var already = false;
+            for (var si = 0; si < secondTies.length; si++) {
+                if (secondTies[si].run === electedRoot &&
+                        secondTies[si].station === discardedTie) {
+                    already = true;
+                    break;
+                }
+            }
+            if (!already) {
+                secondTies.push({
+                    run: electedRoot,
+                    station: discardedTie,
+                    otherRun: discardedParent
+                });
+            }
+        }
+        parents[electedRoot] = null;
+        ties[electedRoot] = null;
+    };
+
+    for (i = 0; i < grouped.order.length; i++) {
+        var startKey = grouped.order[i];
+        if (settled.hasOwnProperty(startKey)) {
+            continue;
+        }
+        var path = [], indexInPath = {};
+        var cur = startKey;
+        while (true) {
+            if (settled.hasOwnProperty(cur)) {
+                break;   // walks into an already-settled acyclic chain
+            }
+            if (indexInPath.hasOwnProperty(cur)) {
+                var cycleMembers = path.slice(indexInPath[cur]);
+                breakCycle(cycleMembers);
+                cycles.push(cycleMembers);
+                break;
+            }
+            indexInPath[cur] = path.length;
+            path.push(cur);
+            var p = parents[cur];
+            if (p === null || p === undefined || !grouped.runs.hasOwnProperty(p)) {
+                break;   // reached a root
+            }
+            cur = p;
+        }
+        for (var pi = 0; pi < path.length; pi++) {
+            settled[path[pi]] = true;
+        }
+    }
+
     return {
         parents: parents,
         ties: ties,
         order: CsProfile.bandOrder(grouped, parents, ties, resolved),
         secondTies: secondTies,
         mismatches: mismatches,
-        orphans: orphans
+        orphans: orphans,
+        cycles: cycles
     };
 };
 
@@ -414,7 +596,16 @@ CsProfile.hierarchy = function(grouped, resolved) {
  * same answer without the circular dependency.
  *
  * A run whose parent never gets placed (a disconnected component) is
- * appended at the end rather than dropped.
+ * appended at the end rather than dropped. hierarchy() breaks every
+ * cycle in `parents` before calling this, so in normal use `seen`
+ * below is belt-and-braces, not a load-bearing path -- but this
+ * function is public and can be called directly with a hand-built
+ * parents/ties map that DOES still carry an unbroken cycle, and in
+ * that case `seen` is what stops the walk from recursing forever, and
+ * the unreached-fallback loop is what stops a cyclic parents map from
+ * silently emitting an empty order (a pure cycle has no null-parent
+ * root, so `roots` alone would be empty and the walk would never run
+ * at all).
  */
 CsProfile.bandOrder = function(grouped, parents, ties, resolved) {
     var children = {}, roots = [];
@@ -459,7 +650,7 @@ CsProfile.bandOrder = function(grouped, parents, ties, resolved) {
 
     var out = [], seen = {};
     var walk = function(runKey) {
-        if (seen[runKey]) {
+        if (seen.hasOwnProperty(runKey)) {
             return;   // a cycle in the parent map cannot loop us forever
         }
         seen[runKey] = true;
@@ -474,7 +665,7 @@ CsProfile.bandOrder = function(grouped, parents, ties, resolved) {
     }
     // anything unreached (parent cycle, or parent in another component)
     for (i = 0; i < grouped.order.length; i++) {
-        if (!seen[grouped.order[i]]) {
+        if (!seen.hasOwnProperty(grouped.order[i])) {
             walk(grouped.order[i]);
         }
     }
