@@ -292,28 +292,141 @@ CsTrace.pathFrame = function(box, points) {
 };
 
 /**
- * A spline through `points` as FIT points, or null when there is no
- * curve to make.
+ * A cubic spline whose CONTROL points are `points`, or null when there
+ * is no curve to make.
  *
- * Fit points and not control points: a fit-point spline passes THROUGH
- * the places the caver dragged over, and QCAD's own spline editing then
- * lets those points be nudged afterwards. Control points would put the
- * curve near the trace instead of on it.
+ * Control points, not fit points: FIT-POINT SPLINES ARE A QCAD PRO
+ * FEATURE, and this suite targets CaveCAD, a fork of the Community
+ * edition. There is no interpolation engine here to turn fit points
+ * into a curve.
  *
- * No setDegree call, matching stock addSpline in simple_create.js: a
- * fit-point spline is cubic here already, and a test pins that rather
- * than trusting it.
+ * It fails SILENTLY, which is what cost a release: appendFitPoint
+ * leaves getControlPoints() empty, the entity's bounding box is 0 x 0,
+ * nothing renders, and the DXF exporter writes no SPLINE record at all
+ * -- so a trace vanished on save. updateFromFitPoints() does not help.
+ * Worst of all isValid() still answers TRUE, which is exactly why no
+ * assertion caught it. Never assert a spline by isValid(); assert its
+ * BOUNDING BOX and a DXF round trip.
+ *
+ * The trade: a control-point spline APPROXIMATES its points rather than
+ * passing through them, so the curve sits a little inside a tight bend.
+ * A cubic B-spline stays within the convex hull of its control polygon,
+ * so at one point per foot the deviation is inches -- invisible at
+ * survey scale. On a sharp corner it rounds more, which is what the
+ * panel's Smoothing control is for: Fine keeps more points and holds
+ * the corner tighter.
+ *
+ * setDegree(3) explicitly: a control-point spline does not inherit a
+ * degree from anywhere, and a test pins that the result is cubic.
  */
 CsTrace.fitSpline = function(doc, points) {
     if (isNull(points) || points.length < 2) {
         return null;
     }
     var spline = new RSpline();
+    spline.setDegree(CsTrace.degreeFor(points.length));
     spline.setPeriodic(false);
     for (var i = 0; i < points.length; i++) {
-        spline.appendFitPoint(new RVector(points[i].x, points[i].y));
+        spline.appendControlPoint(new RVector(points[i].x, points[i].y));
     }
     return new RSplineEntity(doc, new RSplineData(spline));
+};
+
+/**
+ * The highest degree `count` control points can actually carry, capped
+ * at cubic.
+ *
+ * A B-spline of degree d needs at least d + 1 control points. Ask for
+ * cubic with two and the curve is degenerate: no geometry, no bounding
+ * box, no DXF record, and -- as ever in this build -- no error either.
+ *
+ * This is not a corner case. A STRAIGHT passage is the commonest thing
+ * a caver traces, reduce() collapses it to exactly its two endpoints,
+ * and every straight wall would silently vanish. Two points give a
+ * degree-1 spline, which is the straight line that trace actually was.
+ */
+CsTrace.degreeFor = function(count) {
+    if (count <= 2) {
+        return 1;
+    }
+    if (count === 3) {
+        return 2;
+    }
+    return 3;
+};
+
+/**
+ * Switches snapping to free and returns whatever snap was on, so it can
+ * be put back. QCAD context only.
+ *
+ * ANY freehand trace tool must do this. Grid snapping quantises every
+ * sampled point to the grid, so a traced wall comes out as a staircase
+ * -- and worse, the samples collapse onto each other, so the reduce
+ * step throws most of the trace away.
+ *
+ * Driven through the snap GuiAction rather than di.setSnap alone, so the
+ * snap toolbar shows the truth while tracing; a silently-changed snap
+ * that the buttons disagree with is its own bug. di.setSnap is the
+ * fallback when the action cannot be found.
+ *
+ * \return the RGuiAction to restore, or null if nothing was checked
+ */
+CsTrace.suspendSnap = function(di) {
+    var saved = null;
+    try {
+        var actions = RGuiAction.getActions();
+        for (var i = 0; i < actions.length; i++) {
+            var a = actions[i];
+            if (isNull(a)) {
+                continue;
+            }
+            if (a.getGroup() === "snaps" && a.isChecked()) {
+                saved = a;
+                break;
+            }
+        }
+    } catch (e) {
+        saved = null;   // cannot read the snap state; still go free below
+    }
+
+    var went = false;
+    try {
+        var free = RGuiAction.getByScriptFile(
+            "scripts/Snap/SnapFree/SnapFree.js");
+        if (!isNull(free)) {
+            free.trigger();
+            went = true;
+        }
+    } catch (e2) {
+        went = false;
+    }
+    if (!went) {
+        try {
+            di.setSnap(new RSnapFree());
+        } catch (e3) {
+            // no snap control at all; tracing still works, just snapped
+        }
+    }
+    return saved;
+};
+
+/**
+ * Puts back the snap suspendSnap saved.
+ *
+ * A null saved snap means nothing was checked when we started, so free
+ * is already the right state and this does nothing -- restoring some
+ * default would be inventing a setting the user never had.
+ */
+CsTrace.restoreSnap = function(di, saved) {
+    if (isNull(saved)) {
+        return;
+    }
+    try {
+        saved.trigger();
+    } catch (e) {
+        // the action went away (tool closed, window torn down); the
+        // user's next snap click puts it right and nothing is damaged
+    }
 };
 
 /**

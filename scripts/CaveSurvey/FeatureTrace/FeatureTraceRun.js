@@ -17,8 +17,9 @@ include(includeBasePath + "/../Core/CsAll.js");
 function FeatureTraceRun(guiAction) {
     EAction.call(this, guiAction);
 
-    this.samples = [];    // {x, y} in drawing coordinates
-    this.region = null;   // cached profile-frame box; see refreshRegion
+    this.samples = [];      // {x, y} in drawing coordinates
+    this.region = null;     // cached profile-frame box; see refreshRegion
+    this.savedSnap = null;  // snap to restore when the action ends
 }
 
 FeatureTraceRun.prototype = new EAction();
@@ -151,6 +152,23 @@ FeatureTraceRun.prototype.beginEvent = function() {
     EAction.prototype.beginEvent.call(this);
     this.setState(FeatureTraceRun.State.Idle);
     this.refreshRegion();
+
+    // Grid snap would quantise every sample onto the grid: a traced wall
+    // comes out a staircase, and the collapsed samples get thrown away
+    // by the reduce step. Restored in finishEvent below.
+    this.savedSnap = CsTrace.suspendSnap(this.getDocumentInterface());
+};
+
+/** Restores the snap the caver had.
+ *
+ *  finishEvent and not mouseReleaseEvent: this fires however the action
+ *  ends -- Escape, another tool taking over, the window closing -- so
+ *  the snap cannot be left switched off by an exit path nobody thought
+ *  about. */
+FeatureTraceRun.prototype.finishEvent = function() {
+    EAction.prototype.finishEvent.call(this);
+    CsTrace.restoreSnap(this.getDocumentInterface(), this.savedSnap);
+    this.savedSnap = null;
 };
 
 FeatureTraceRun.prototype.setState = function(state) {

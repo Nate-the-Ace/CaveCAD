@@ -13575,13 +13575,39 @@ if (!IS_NODE) {
 
         var spline = CsTrace.fitSpline(doc, [pt(0, 0), pt(5, 1), pt(10, 0)]);
         ok(!isNull(spline), "CsTrace.fitSpline: three points make a spline");
-        eqs(spline.getFitPoints().length, 3,
-            "CsTrace.fitSpline: every input point becomes a fit point");
-        // Asserted, not assumed: stock addSpline never calls setDegree,
-        // so this pins that a fit-point spline really is cubic here.
-        eqs(spline.getDegree(), 3, "CsTrace.fitSpline: the curve is cubic");
-        near(spline.getFitPoints()[1].x, 5.0, 1e-9,
-            "CsTrace.fitSpline: fit points keep their order");
+        eqs(spline.getData().getControlPoints().length, 3,
+            "CsTrace.fitSpline: every input point becomes a CONTROL point");
+        eqs(spline.getData().getFitPoints().length, 0,
+            "CsTrace.fitSpline: no fit points -- they have no geometry in this build");
+        // Degree follows the point count: a B-spline of degree d needs
+        // d+1 control points, and asking for cubic with fewer yields a
+        // curve with no geometry at all.
+        eqs(spline.getData().getDegree(), 2,
+            "CsTrace.fitSpline: three control points give a quadratic");
+        eqs(CsTrace.degreeFor(2), 1, "CsTrace.degreeFor: two points are linear");
+        eqs(CsTrace.degreeFor(3), 2, "CsTrace.degreeFor: three are quadratic");
+        eqs(CsTrace.degreeFor(4), 3, "CsTrace.degreeFor: four are cubic");
+        eqs(CsTrace.degreeFor(50), 3, "CsTrace.degreeFor: capped at cubic");
+
+        // The straight-passage case that would otherwise vanish: the
+        // commonest trace there is, reduced to exactly two points.
+        var straightDoc = new RDocument(new RMemoryStorage(),
+            new RSpatialIndexNavel());
+        var straightDi = new RDocumentInterface(straightDoc);
+        var sres = CsTrace.emit(straightDoc, straightDi,
+            CsLayers.WALLS_SURVEYED,
+            [pt(0, 0), pt(10, 0), pt(20, 0)], 1.0, 0.01);
+        eqs(sres.kept, 2, "straight run: reduce keeps just the endpoints");
+        ok(sres.added === true, "straight run: it is drawn");
+        var sEnt = straightDoc.queryEntity(straightDoc.queryLayerEntities(
+            straightDoc.getLayerId(CsLayers.WALLS_SURVEYED), true)[0]);
+        ok(sEnt.getBoundingBox().getWidth() > 15.0,
+            "straight run: a two-point trace has real width, not a 0x0 box");
+        near(spline.getData().getControlPoints()[1].x, 5.0, 1e-9,
+            "CsTrace.fitSpline: control points keep their order");
+
+        // Geometry is asserted on the ADDED entity, below: a bounding
+        // box is only computed once the entity is in a document.
 
         // -- emit onto a normal layer -------------------------------
         var before = doc.queryAllEntities(false, false).length;
@@ -13602,6 +13628,45 @@ if (!IS_NODE) {
             doc.getLayerId(CsLayers.WALLS_SURVEYED), true);
         eqs(onWalls.length, 1,
             "CsTrace.emit: exactly one entity is on the named layer");
+
+        // THE CHECKS THAT WOULD HAVE CAUGHT THE SHIPPED BUG.
+        //
+        // Fit-point splines are a QCAD PRO feature; CaveCAD forks the
+        // Community edition, so appendFitPoint yields a spline with no
+        // control points, a 0 x 0 bounding box, and no DXF record --
+        // while isValid() still answers TRUE. Three traces landed in the
+        // document, reported success, rendered nothing and vanished on
+        // save. So: never assert a spline by isValid(). Assert that it
+        // occupies space, and that it survives a round trip to file.
+        var addedEnt = doc.queryEntity(onWalls[0]);
+        var addedBox = addedEnt.getBoundingBox();
+        ok(addedBox.getWidth() > 15.0,
+            "CsTrace.emit: the landed curve occupies real width");
+        ok(addedEnt.getData().getControlPoints().length >= 2,
+            "CsTrace.emit: the landed curve has control points");
+
+        var rtPath = repoRoot + "/tests/.trace-roundtrip.dxf";
+        var rtFilter = "";
+        var rtFilters = RFileExporterRegistry.getFilterStrings();
+        for (var rf = 0; rf < rtFilters.length; rf++) {
+            if (String(rtFilters[rf]).indexOf("dxflib") >= 0) {
+                rtFilter = rtFilters[rf];
+                break;
+            }
+        }
+        ok(di.exportFile(rtPath, rtFilter, false),
+            "CsTrace.emit round trip: the drawing exports");
+
+        var rtDoc = new RDocument(new RMemoryStorage(),
+            new RSpatialIndexNavel());
+        var rtDi = new RDocumentInterface(rtDoc);
+        eqs(rtDi.importFile(rtPath, "", false),
+            RDocumentInterface.IoErrorNoError,
+            "CsTrace.emit round trip: the file reads back");
+        eqs(rtDoc.queryLayerEntities(
+                rtDoc.getLayerId(CsLayers.WALLS_SURVEYED), true).length, 1,
+            "CsTrace.emit round trip: the traced curve SURVIVES the save");
+        new QFile(rtPath).remove();
 
         // -- emit creates a layer the drawing lacks -----------------
         var doc3 = new RDocument(new RMemoryStorage(), new RSpatialIndexNavel());
