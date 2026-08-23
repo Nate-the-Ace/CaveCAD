@@ -53,6 +53,28 @@ plan file. It is created from `templates/NSS_Cave_Template_PROFILE.dxf`
 on first generation and opened in a second tab with
 `openFiles([path], false)` (`scripts/library.js`).
 
+Two mechanism facts were established while planning, and both changed the
+design for the better:
+
+*An already-open profile tab is drawn into directly.* `openFiles` itself
+enumerates open documents -- `mdiArea.subWindowList()`, then
+`getDocument()` on each child -- and `RMdiChildQt` also exposes
+`getDocumentInterface()`. So when the profile is already open we draw
+into that tab rather than rewriting the file underneath the user: their
+view updates, their undo still works, and unsaved sketching is not
+clobbered. Only when no tab holds it is the file built off screen and
+then revealed.
+
+*The DXF writer must be the dxflib one, named explicitly.*
+`RFileExporterRegistry::getFileExporter` picks the LOWEST `canExport`
+score, and `RDxfExporterFactory::canExport` returns 1 for a name filter
+containing "dxflib" against 100 for a bare `.dxf`. Naming the filter is
+therefore what selects the writer CaveCAD taught to emit custom
+properties as XDATA. Exported by any other writer, every profile tag is
+silently dropped -- and the next regeneration cannot find its own
+previous output to erase, so it doubles it instead. This is verified by
+a round-trip test rather than assumed.
+
 Generation is **not** a separate step the user has to remember. Every
 `CsDraw.survey` pass — notebook Draw, import, revision redraw —
 regenerates the sibling file in the same breath, gated by
