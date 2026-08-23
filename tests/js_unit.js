@@ -10697,34 +10697,60 @@ if (!IS_NODE) {
 }());
 
 (function() {
-    // FIXED, not merely observed: a band whose own span vastly exceeds
-    // its neighbour's no longer sets its own gutter. With only two
-    // bands (heights 4 and 2000) the median of the two is 1002, so the
-    // gutter is half of that, 501 -- smaller than the old rule's 2000,
-    // and governed by a value shared across the whole profile rather
-    // than by whichever band happens to be huge. The five-band fixture
-    // below is the one that actually separates median from mean.
+    // I3, THE n=2 CASE: a median-of-the-whole-profile rule was tried
+    // here first and FAILED at exactly this size -- the median of two
+    // values [4, 2000] IS 1002, so half of it (501) still left the
+    // 4-unit band with a gutter 125x its own height, merely 4x smaller
+    // than the height-based rule it replaced. Two runs is the commonest
+    // small-cave shape there is, so this is not an edge case to wave
+    // off. The fix anchors to a LOW order statistic (nearest-rank,
+    // index ceil(0.25n)-1) instead: at n=2 that index is 0, the
+    // SMALLER of the two heights, so the gutter is half of 4 (floored
+    // to GUTTER_MIN=5), not half of 1002.
     var normal = { stations: [{ y: -2 }, { y: 2 }] };
     var huge = { stations: [{ y: -1000 }, { y: 1000 }] };
     CsProfile.layout([normal, huge]);
     eqs(normal.zOffset, 0, "the ordinary band sits at true elevation");
-    eqs(huge.zOffset, -1503,
-        "gutter is half the median height (1002/2 = 501), not the huge " +
-        "band's own 2000-unit height");
+    eqs(huge.zOffset, -1007,
+        "gutter is GUTTER_MIN (anchored to the small band's height 4, " +
+        "not the median of the pair, 1002)");
     var hugeTop = 1000 + huge.zOffset;
-    near(normal.stations[0].y - hugeTop, 501, 1e-9,
-        "the blank gutter is 501 units, not 2000 -- a fraction of a " +
-        "typical band, not proportional to the outlier");
+    near(normal.stations[0].y - hugeTop, CsProfile.GUTTER_MIN, 1e-9,
+        "the blank gutter is 5 units, not 501 -- anchored to the small " +
+        "band, not split down the middle with the outlier");
 }());
 
 (function() {
-    // THE CASE THAT DISTINGUISHES MEDIAN FROM MEAN: one band's height
-    // is enormous (2000) and four out of five bands are small (4). The
-    // MEDIAN of [4,4,4,4,2000] is 4 (the middle of five sorted values),
-    // so the gutter stays GUTTER_MIN (half of 4 is 2, floored to 5) --
-    // the separation follows the small bands, not the outlier. A MEAN
-    // would instead average to (4*4+2000)/5 = 403.2, giving a gutter of
-    // ~201.6 and failing every assertion below.
+    // I3, THE n=4 CASE FROM THE SAME REVIEW: two small bands and two
+    // huge ones, [4, 4, 2000, 2000]. A median-of-four here averages the
+    // two middle (sorted) values, (4+2000)/2 = 1002 -- the SAME failure
+    // as n=2, restated. The low order statistic used instead lands on
+    // index ceil(0.25*4)-1 = 0, the smallest value (4), so the gutter
+    // stays anchored to the small bands even though they are outnumbered.
+    var s0 = { stations: [{ y: -2 }, { y: 2 }] };       // small, height 4
+    var s1 = { stations: [{ y: -2 }, { y: 2 }] };       // small, height 4
+    var h0 = { stations: [{ y: -1000 }, { y: 1000 }] }; // huge, height 2000
+    var h1 = { stations: [{ y: -1000 }, { y: 1000 }] }; // huge, height 2000
+    CsProfile.layout([s0, s1, h0, h1]);
+    eqs(s0.zOffset, 0, "s0 placed first, at true elevation");
+    eqs(s1.zOffset, -9, "s1 collides with s0: GUTTER_MIN(5) plus s0's own height(4)");
+    eqs(h0.zOffset, -1016,
+        "h0's gutter is still GUTTER_MIN (5), anchored to the small " +
+        "bands, not a median of 1002 pulled up by its own huge neighbour");
+    eqs(h1.zOffset, -3021,
+        "h1's gutter is also GUTTER_MIN (5) -- two huge bands in the " +
+        "profile do not move the statistic off the small ones");
+}());
+
+(function() {
+    // THE CASE THAT DISTINGUISHES THE LOW QUANTILE FROM A MEAN: one
+    // band's height is enormous (2000) and four out of five bands are
+    // small (4). The chosen statistic (index ceil(0.25*5)-1 = 1 into
+    // [4,4,4,4,2000] sorted) is 4, so the gutter stays GUTTER_MIN (half
+    // of 4 is 2, floored to 5) -- the separation follows the small
+    // bands, not the outlier. A MEAN would instead average to
+    // (4*4+2000)/5 = 403.2, giving a gutter of ~201.6 and failing every
+    // assertion below.
     var b0 = { stations: [{ y: -2 }, { y: 2 }] };       // normal, height 4
     var b1 = { stations: [{ y: -1000 }, { y: 1000 }] }; // the one huge band
     var b2 = { stations: [{ y: -2 }, { y: 2 }] };       // normal
@@ -10734,11 +10760,11 @@ if (!IS_NODE) {
 
     eqs(b0.zOffset, 0, "b0 placed first, at true elevation");
     eqs(b1.zOffset, -1007,
-        "the huge band is pushed by GUTTER_MIN (median stays 4, gutter " +
-        "floors to 5), not by its own height or a mean-inflated one");
+        "the huge band is pushed by GUTTER_MIN (the statistic stays 4, " +
+        "gutter floors to 5), not by its own height or a mean-inflated one");
     eqs(b2.zOffset, -2014, "b2's gutter below the huge band is still just 5");
     eqs(b3.zOffset, -2023, "b3's gutter is still 5 -- constant, not growing");
-    eqs(b4.zOffset, -2032, "b4's gutter is still 5 -- the median never moved");
+    eqs(b4.zOffset, -2032, "b4's gutter is still 5 -- the statistic never moved");
 
     // every consecutive gap is exactly GUTTER_MIN, including the one
     // straddling the huge band -- the outlier changes ITS OWN offset,
@@ -10777,24 +10803,57 @@ if (!IS_NODE) {
     ok(p.bands[0].zOffset === 0, "the first band sits at true elevation");
     ok(p.bands[1].zOffset < 0, "the colliding band is pushed down");
 
+    // band.parent: the root carries no parent, the child carries the
+    // run it hangs off -- a mutation dropping this assignment entirely
+    // would still leave every OTHER assertion in this file green.
+    eqs(p.bands[0].parent, null, "A, the root, has no parent");
+    eqs(p.bands[1].parent, "A", "B hangs off A");
+
+    // I5: build() could return every band with ceiling/floor/flat
+    // emptied out and this suite would not notice without an assertion
+    // on ACTUAL wall content, not just that the arrays exist. Band A's
+    // own ceiling/floor both end up empty in this fixture (A2 is a
+    // three-leg junction, so A1/A2/A3 each contribute at most a lone,
+    // sub-2-point run that CsProfile.bandWallRuns drops) -- band B is
+    // the one with real, multi-point wall evidence here.
+    eqs(p.bands[1].ceiling.length, 1, "B has one ceiling run");
+    eqs(p.bands[1].ceiling[0].length, 2, "of two points (B1, B2 -- U=2 each)");
+    eqs(p.bands[1].ceiling[0][0].y, 2, "the first ceiling point sits at U above datum");
+    eqs(p.bands[1].floor.length, 1, "B has one floor run");
+    eqs(p.bands[1].floor[0].length, 2, "of two points (B1, B2 -- D=2 each)");
+    eqs(p.bands[1].floor[0][0].y, -2, "the first floor point sits at D below datum");
+
+    // I6: a report printing "stopped at null" for a band that never
+    // stopped is exactly as wrong as failing to report one that did --
+    // this fixture is healthy end to end, so findings.stopped must be
+    // reported as empty, not merely never checked.
+    eqs(p.findings.stopped.length, 0, "a healthy two-band profile stops nowhere");
+
     // every leg drawn appears in at most one band -- no leg is EVER
-    // drawn twice. In THIS fixture (no interior tie, nothing demoted)
-    // that also means every leg is drawn exactly once; see the separate
-    // interior-tie fixture below for the general case, where a demoted
-    // arm's legs are drawn in NO band at all.
+    // drawn twice. A single canonical key (station names in a fixed
+    // order) makes this ONE equality check per leg instead of a
+    // bundled "not forward AND not backward" pair. In THIS fixture (no
+    // interior tie, nothing demoted) that also means every leg is
+    // drawn exactly once; see the separate interior-tie fixture below
+    // for the general case, where a demoted arm's legs are drawn in NO
+    // band at all.
     var seen = {}, total = 0;
     for (var b = 0; b < p.bands.length; b++) {
         for (var l = 0; l < p.bands[b].legs.length; l++) {
             var leg = p.bands[b].legs[l];
-            var key = leg.from + "->" + leg.to;
-            var rev = leg.to + "->" + leg.from;
-            ok(seen[key] === undefined && seen[rev] === undefined,
-                "leg " + key + " drawn once only");
-            seen[key] = true;
+            var canon = (leg.from < leg.to) ?
+                (leg.from + "->" + leg.to) : (leg.to + "->" + leg.from);
+            ok(seen[canon] === undefined, "leg " + canon + " drawn once only");
+            seen[canon] = true;
             total++;
         }
     }
     ok(total === 4, "all four legs drawn, none lost (no demotion in this fixture)");
+
+    // C2: nothing left over to explain either -- every leg the survey
+    // resolved was drawn, so findings.undrawn is empty, not merely
+    // unchecked.
+    eqs(p.findings.undrawn.length, 0, "all four legs drawn: nothing undrawn to report");
 }());
 
 (function() {
@@ -10813,19 +10872,22 @@ if (!IS_NODE) {
 }());
 
 (function() {
-    // THE HONEST LEG-COVERAGE INVARIANT. "every leg lands in exactly
-    // one band" is only true when nothing gets demoted -- Task 3's
-    // interior-tie fix (reused verbatim from the C1 fixture above)
-    // moves a run's shorter arm to `omitted`, and NONE of that arm's
-    // legs are drawn in ANY band: B1-B5, B5-B6, B6-B7 vanish from the
-    // drawing entirely, on purpose, because drawing them would require
-    // inventing a second copy of B1 that was never surveyed twice.
+    // I1: "every leg is drawn, or has an endpoint in some band's
+    // `omitted`" was fuzzed over 20,000 random surveys and FAILED in
+    // 17% of them -- closure and cross-run-tie legs touch no omitted
+    // station at all, they are simply never candidates for any band's
+    // chain, and in 2,738 of those failures there was no `stopped`
+    // finding either to explain them some other way. Now that C2's
+    // findings.undrawn exists, THAT is the invariant this file stands
+    // behind: no leg is EVER drawn in more than one band, and every
+    // undrawn leg is named, with a reason, in findings.undrawn --
+    // nothing is simply unaccounted for.
     //
-    // The invariant this file can actually stand behind is narrower:
-    // (1) no leg is EVER drawn in more than one band, and (2) every leg
-    // that is NOT drawn touches a station this same build() run reports
-    // in some band's `omitted` list -- so a missing leg is always
-    // explained by the findings, never simply lost.
+    // This fixture demonstrates the specific case Task 3's interior-tie
+    // fix introduced: a run entered at an interior junction demotes its
+    // shorter arm (B1-B5-B6-B7) to `omitted`, and none of that arm's
+    // legs are drawn in ANY band -- drawing them would need a second
+    // copy of B1 that was never surveyed twice.
     var sv = CsModel.newSurvey();
     sv.shots = [
         shotOf("A1", "A2", 10, 0, 0),
@@ -10842,43 +10904,37 @@ if (!IS_NODE) {
     var p = CsProfile.build(sv, r, {});
     eqs(p.bands.length, 2, "fixture assumption: run A and run B");
 
-    var allOmitted = {};
-    for (var b = 0; b < p.bands.length; b++) {
-        for (var o = 0; o < p.bands[b].omitted.length; o++) {
-            allOmitted[p.bands[b].omitted[o]] = true;
-        }
-    }
-    eqs(Object.keys(allOmitted).sort().join(","), "B5,B6,B7",
-        "fixture assumption: the shorter arm is the one demoted");
-
+    // no leg is ever drawn in more than one band -- one canonical key
+    // per leg, one equality check, not a bundled "not forward AND not
+    // backward" pair
     var seen = {}, drawn = 0;
-    for (b = 0; b < p.bands.length; b++) {
+    for (var b = 0; b < p.bands.length; b++) {
         for (var l = 0; l < p.bands[b].legs.length; l++) {
             var leg = p.bands[b].legs[l];
-            var key = leg.from + "->" + leg.to;
-            var rev = leg.to + "->" + leg.from;
-            ok(seen[key] === undefined && seen[rev] === undefined,
-                "leg " + key + " is never drawn in more than one band");
-            seen[key] = true;
+            var canon = (leg.from < leg.to) ?
+                (leg.from + "->" + leg.to) : (leg.to + "->" + leg.from);
+            ok(seen[canon] === undefined,
+                "leg " + canon + " is never drawn in more than one band");
+            seen[canon] = true;
             drawn++;
         }
     }
     eqs(drawn, 6, "6 of the survey's 9 legs are drawn (A1-A2,A2-A3,A3-B1,B1-B2,B2-B3,B3-B4)");
 
-    // every leg of the whole survey is either drawn, or has an endpoint
-    // in some band's omitted list -- nothing is simply unaccounted for
-    var accounted = 0;
-    for (var i = 0; i < r.legs.length; i++) {
-        var rl = r.legs[i];
-        var k1 = rl.from + "->" + rl.to, k2 = rl.to + "->" + rl.from;
-        if (seen[k1] || seen[k2]) {
-            accounted++;
-        } else if (allOmitted[rl.from] || allOmitted[rl.to]) {
-            accounted++;
-        }
-    }
-    eqs(accounted, r.legs.length,
-        "every leg in the survey is either drawn once, or explained by omitted");
+    // the honest invariant: findings.undrawn names exactly the other 3,
+    // each with reason "demoted arm" -- not a loose "touches some
+    // omitted station somewhere" check, the actual finding a report
+    // would print
+    eqs(p.findings.undrawn.length, 3, "the shorter arm's three legs are all undrawn");
+    eqs(p.findings.undrawn[0].from, "B1", "first undrawn leg starts at B1");
+    eqs(p.findings.undrawn[0].to, "B5", "and ends at B5");
+    eqs(p.findings.undrawn[0].reason, "demoted arm", "reason: demoted arm");
+    eqs(p.findings.undrawn[1].from, "B5", "second undrawn leg starts at B5");
+    eqs(p.findings.undrawn[1].to, "B6", "and ends at B6");
+    eqs(p.findings.undrawn[1].reason, "demoted arm", "reason: demoted arm");
+    eqs(p.findings.undrawn[2].from, "B6", "third undrawn leg starts at B6");
+    eqs(p.findings.undrawn[2].to, "B7", "and ends at B7");
+    eqs(p.findings.undrawn[2].reason, "demoted arm", "reason: demoted arm");
 }());
 
 (function() {
@@ -10914,25 +10970,42 @@ if (!IS_NODE) {
 }());
 
 (function() {
-    // a caller-supplied adjacency graph is reused, not rebuilt on top of
+    // C1: build() no longer accepts an adjacency graph from the
+    // caller AT ALL -- a graph built from a DIFFERENT resolved once
+    // silently produced a wrong profile with no error and no finding.
+    // A correct build of this survey gives A three stations and B
+    // four (B's own three plus the tie station A3, drawn again as B's
+    // own opening station); passing in a graph built from a totally
+    // unrelated survey must have NO effect on that result at all --
+    // proving build() computes and uses its own, always, rather than
+    // trusting whatever a caller happens to hand in through `opts`.
     var sv = CsModel.newSurvey();
-    sv.shots = [shotOf("A1", "A2", 10, 0, 0), shotOf("A2", "A3", 10, 0, 0)];
+    sv.shots = [
+        shotOf("A1", "A2", 10, 0, 0),
+        shotOf("A2", "A3", 10, 0, 0),
+        shotOf("A3", "B1", 8, 90, 0),
+        shotOf("B1", "B2", 10, 0, 0),
+        shotOf("B2", "B3", 10, 90, 0)
+    ];
     var r = CsNetwork.resolve(sv, {});
-    var preBuilt = CsProfile.adjacency(r);
 
-    var calls = 0;
-    var real = CsProfile.adjacency;
-    CsProfile.adjacency = function(resolved) {
-        calls++;
-        return real(resolved);
-    };
-    try {
-        CsProfile.build(sv, r, { adjacency: preBuilt });
-        eqs(calls, 0,
-            "a graph handed in through opts.adjacency is reused, never rebuilt");
-    } finally {
-        CsProfile.adjacency = real;
-    }
+    var sv2 = CsModel.newSurvey();
+    sv2.shots = [shotOf("X1", "X2", 10, 0, 0)];
+    var r2 = CsNetwork.resolve(sv2, {});
+    var staleGraph = CsProfile.adjacency(r2);
+
+    var correct = CsProfile.build(sv, r, {});
+    eqs(correct.bands.length, 2, "fixture assumption: run A and run B");
+    eqs(correct.bands[0].stations.length, 3, "A's correct station count");
+    eqs(correct.bands[1].stations.length, 4, "B's correct station count");
+
+    var poisoned = CsProfile.build(sv, r, { adjacency: staleGraph });
+    eqs(poisoned.bands[0].stations.length, 3,
+        "a stale opts.adjacency from an unrelated survey changes nothing -- " +
+        "A is still 3 stations, not silently 1");
+    eqs(poisoned.bands[1].stations.length, 4,
+        "and B is still 4, not silently 2 -- the stale graph is ignored, " +
+        "not merged with or preferred over build's own");
 }());
 
 (function() {
@@ -10964,7 +11037,9 @@ if (!IS_NODE) {
 }());
 
 (function() {
-    // secondTies survive into findings too, unaltered
+    // secondTies survive into findings too, unaltered -- one exact
+    // check per field, not one bundled ok() a mismatch on any single
+    // field would still pass by way of the others reading true.
     var sv = CsModel.newSurvey();
     sv.shots = [
         shotOf("A1", "A2", 10, 0, 0),
@@ -10977,11 +11052,19 @@ if (!IS_NODE) {
     ];
     var r = CsNetwork.resolve(sv, {});
     var p = CsProfile.build(sv, r, {});
-    ok(p.findings.secondTies.length === 1 &&
-        p.findings.secondTies[0].run === "B" &&
-        p.findings.secondTies[0].otherStation === "A4" &&
-        p.findings.secondTies[0].otherRun === "A",
-        "B's second contact (the closure back to A4) reaches findings.secondTies");
+    eqs(p.findings.secondTies.length, 1, "one second contact reported");
+    eqs(p.findings.secondTies[0].run, "B", "the run with the second contact");
+    eqs(p.findings.secondTies[0].otherStation, "A4", "the station it touches");
+    eqs(p.findings.secondTies[0].otherRun, "A", "the run that station belongs to");
+
+    // C2, the "closure" reason: B1-A4 is exactly this second contact,
+    // and it is a real surveyed shot that draws in no band at all --
+    // findings.undrawn is where a report finds it, not silence.
+    eqs(p.findings.undrawn.length, 1, "one undrawn leg: the closure back to A4");
+    eqs(p.findings.undrawn[0].from, "B1", "the closure leg's own from");
+    eqs(p.findings.undrawn[0].to, "A4", "and to");
+    eqs(p.findings.undrawn[0].kind, "closure", "its kind, read straight off the leg");
+    eqs(p.findings.undrawn[0].reason, "closure", "reason: closure");
 }());
 
 (function() {
@@ -11056,6 +11139,223 @@ if (!IS_NODE) {
     } finally {
         CsProfile.hierarchy = saved;
     }
+}());
+
+(function() {
+    // C2, the minimal repro: a bare triangle, A1-A2-A3-A1, where the
+    // last leg closes the loop. The closure draws in no band -- Task 4
+    // established that -- but before findings.undrawn existed, nothing
+    // anywhere said so: omitted, stopped, mismatches, all empty, and a
+    // real surveyed shot simply vanished from the profile with no trace.
+    var sv = CsModel.newSurvey();
+    sv.shots = [
+        shotOf("A1", "A2", 10, 0, 0),
+        shotOf("A2", "A3", 10, 90, 0),
+        shotOf("A3", "A1", 14.14, 225, 0)
+    ];
+    var r = CsNetwork.resolve(sv, {});
+    var p = CsProfile.build(sv, r, {});
+
+    eqs(p.bands.length, 1, "one band: A1, A2, A3 all belong to run A");
+    eqs(p.bands[0].stations.length, 3, "all three stations drawn");
+    eqs(p.findings.omitted.length, 0, "nothing omitted -- every station IS on the chain");
+    eqs(p.findings.stopped.length, 0, "the band never stopped");
+
+    eqs(p.findings.undrawn.length, 1, "the closure leg is the one undrawn leg");
+    eqs(p.findings.undrawn[0].from, "A3", "the closure's own from");
+    eqs(p.findings.undrawn[0].to, "A1", "and to");
+    eqs(p.findings.undrawn[0].kind, "closure", "its kind");
+    eqs(p.findings.undrawn[0].reason, "closure", "reason: closure");
+}());
+
+(function() {
+    // C2, the "cross-run tie" reason: hierarchy is stubbed (same
+    // technique as the no-z/no-leg fixtures above) to a run "A" that
+    // ties at station T, while a completely separate run "B" is left
+    // out of hier.order entirely -- so the T-B1 leg is a genuine
+    // cross-run contact build() never draws for anyone. This is the
+    // shape of an ordinary hierarchy secondTie (see the B/A4 fixture
+    // above) with the closure removed, isolating the reason a
+    // non-closure cross-run leg gets when it is not the one tie its
+    // child run actually used.
+    var saved = CsProfile.hierarchy;
+    var resolved = {
+        stations: {
+            T: { x: 0, y: 0, z: 0, seq: 0 },
+            A1: { x: 0, y: 0, z: 5, seq: 1 },
+            B1: { x: 0, y: 0, z: 6, seq: 2 }
+        },
+        legs: [
+            { shot: shotOf("T", "A1", 10, 0, 0), from: "T", to: "A1", kind: "new" },
+            { shot: shotOf("T", "B1", 10, 0, 0), from: "T", to: "B1", kind: "new" }
+        ]
+    };
+    var survey = CsModel.newSurvey();
+    survey.shots = [resolved.legs[0].shot, resolved.legs[1].shot];
+    CsProfile.hierarchy = function() {
+        return {
+            parents: { A: null }, ties: { A: "T" }, order: ["A"],
+            secondTies: [], mismatches: [], orphans: [], strandedRoots: [],
+            cycles: []
+        };
+    };
+    try {
+        var p = CsProfile.build(survey, resolved, {});
+        eqs(p.bands.length, 1, "only run A is ever placed as a band");
+        eqs(p.findings.undrawn.length, 1, "the T-B1 leg is undrawn");
+        eqs(p.findings.undrawn[0].from, "T", "its own from");
+        eqs(p.findings.undrawn[0].to, "B1", "and to");
+        eqs(p.findings.undrawn[0].reason, "cross-run tie",
+            "reason: cross-run tie, not demoted arm or after-stop");
+    } finally {
+        CsProfile.hierarchy = saved;
+    }
+}());
+
+(function() {
+    // C2, the "after-stop" reason: A2 has no resolved Z, so the band
+    // stops there -- but unrollBand's own `stopped` names only A2
+    // itself, not the leg that arrives at it (A1-A2) or anything past
+    // it (A2-A3). Both of those legs are undrawn and, before this
+    // finding existed, their stations never appeared ANYWHERE in
+    // findings: not omitted (they ARE on the run's own longest chain),
+    // not stopped (only the one station name is), simply absent.
+    var saved = CsProfile.hierarchy;
+    var resolved = {
+        stations: {
+            A1: { x: 0, y: 0, z: 0, seq: 0 },
+            A2: { x: 0, y: 0, seq: 1 },              // z deliberately absent
+            A3: { x: 0, y: 0, z: 10, seq: 2 }
+        },
+        legs: [
+            { shot: shotOf("A1", "A2", 10, 0, 0), from: "A1", to: "A2", kind: "new" },
+            { shot: shotOf("A2", "A3", 10, 0, 0), from: "A2", to: "A3", kind: "new" }
+        ]
+    };
+    var survey = CsModel.newSurvey();
+    survey.shots = [resolved.legs[0].shot, resolved.legs[1].shot];
+    CsProfile.hierarchy = function() {
+        return {
+            parents: { A: null }, ties: { A: null }, order: ["A"],
+            secondTies: [], mismatches: [], orphans: [], strandedRoots: [],
+            cycles: []
+        };
+    };
+    try {
+        var p = CsProfile.build(survey, resolved, {});
+        eqs(p.bands[0].stations.length, 1, "only A1 was actually drawn");
+        eqs(p.bands[0].omitted.length, 0,
+            "A2 and A3 are not omitted -- they ARE on the chain, just unreached");
+        eqs(p.findings.stopped.length, 1, "one stopped band");
+        eqs(p.findings.stopped[0].station, "A2", "stopped names only A2 itself");
+
+        eqs(p.findings.undrawn.length, 2, "both legs past (and into) the stop are undrawn");
+        eqs(p.findings.undrawn[0].from, "A1", "the leg arriving at the stop station");
+        eqs(p.findings.undrawn[0].to, "A2", "");
+        eqs(p.findings.undrawn[0].reason, "after-stop",
+            "reason: after-stop, even for the leg landing ON the stop station");
+        eqs(p.findings.undrawn[1].from, "A2", "the leg past the stop station");
+        eqs(p.findings.undrawn[1].to, "A3", "");
+        eqs(p.findings.undrawn[1].reason, "after-stop",
+            "reason: after-stop -- A3 never appears in ANY finding otherwise");
+    } finally {
+        CsProfile.hierarchy = saved;
+    }
+}());
+
+(function() {
+    // I4: bandSpan's ceiling loop is the one nothing in this suite
+    // exercised as the SOURCE of `hi` -- delete it entirely and the
+    // rest of this file stays green, because every other bandSpan
+    // fixture makes floor the minimum and flat the maximum. A ceiling
+    // point higher than every other source closes that gap.
+    var band = {
+        stations: [{ y: 5 }, { y: 10 }],
+        ceiling: [[{ y: 100 }]],
+        floor: [[{ y: -3 }]],
+        flat: [{ y: 20 }]
+    };
+    var span = CsProfile.bandSpan(band);
+    eqs(span.lo, -3, "lo is still the floor point");
+    eqs(span.hi, 100, "hi comes from the ceiling point, the highest of the four sources");
+}());
+
+(function() {
+    // the null-span exclusion from the gutter statistic: a band that
+    // drew nothing contributes NO height, not a phantom zero. Two real
+    // bands of height 2000 sandwich one empty band -- if the empty
+    // band's null span were wrongly treated as height 0, the 3-value
+    // statistic [0, 2000, 2000] would pick the 0 (index
+    // ceil(0.25*3)-1 = 0) and collapse the gutter to GUTTER_MIN. Only
+    // counting the two REAL heights ([2000, 2000], n=2, index 0) gives
+    // 2000, half of which is the gutter actually used below.
+    var b0 = { stations: [{ y: -1000 }, { y: 1000 }] };
+    var empty = { stations: [] };
+    var b1 = { stations: [{ y: -1000 }, { y: 1000 }] };
+    CsProfile.layout([b0, empty, b1]);
+    eqs(b0.zOffset, 0, "b0 placed first");
+    eqs(empty.zOffset, 0, "the empty band gets no offset and touches nothing");
+    eqs(b1.zOffset, -3000,
+        "gutter is 1000 (half the real 2000-height statistic), not 5 " +
+        "(which a phantom zero-height entry would have produced)");
+}());
+
+(function() {
+    // I2: CsLrud.splaysByStation and CsLrud.legCounts are each called
+    // exactly once per build() -- not once per band -- matching the
+    // adjacency graph's own once-per-profile treatment. Measured at
+    // 22.8% and 21.7% of a 276ms build (401 runs) when each was
+    // instead recomputed per band.
+    var sv = CsModel.newSurvey();
+    var mk = function(f, t, az) {
+        var s = shotOf(f, t, 10, az, 0);
+        s.up = 1; s.down = 1;
+        return s;
+    };
+    sv.shots = [mk("A1", "A2", 0), mk("A2", "A3", 0),
+        mk("A2", "B1", 90), mk("B1", "B2", 90),
+        mk("A3", "C1", 180), mk("C1", "C2", 180)];
+    var r = CsNetwork.resolve(sv, {});
+
+    var splayCalls = 0, countCalls = 0;
+    var realSplays = CsLrud.splaysByStation, realCounts = CsLrud.legCounts;
+    CsLrud.splaysByStation = function(s) { splayCalls++; return realSplays(s); };
+    CsLrud.legCounts = function(l) { countCalls++; return realCounts(l); };
+    try {
+        var p = CsProfile.build(sv, r, {});
+        eqs(p.bands.length, 3, "fixture assumption: three bands (A, B, C)");
+        eqs(splayCalls, 1, "CsLrud.splaysByStation called exactly once for the whole profile");
+        eqs(countCalls, 1, "CsLrud.legCounts called exactly once for the whole profile");
+    } finally {
+        CsLrud.splaysByStation = realSplays;
+        CsLrud.legCounts = realCounts;
+    }
+}());
+
+(function() {
+    // bandOpts.flatSplayDeg actually reaches CsProfile.bandWallRuns
+    // through build() -- a 15-degree splay is "ceiling" under the
+    // default 10-degree dead zone, and "flat" once build() is asked
+    // for a wider one.
+    function splayOf2(from, d, az, inc) {
+        var s = CsModel.newShot();
+        s.from = from; s.to = ""; s.distance = d; s.azimuth = az;
+        s.inclination = inc;
+        s.splay = true;
+        return s;
+    }
+    var sv = CsModel.newSurvey();
+    sv.shots = [shotOf("A1", "A2", 10, 0, 0), splayOf2("A2", 5, 0, 15)];
+    var r = CsNetwork.resolve(sv, {});
+
+    var pDefault = CsProfile.build(sv, r, {});
+    eqs(pDefault.bands[0].flat.length, 0,
+        "under the default 10-degree dead zone the 15-degree splay is ceiling, not flat");
+
+    var pWide = CsProfile.build(sv, r, { flatSplayDeg: 20 });
+    eqs(pWide.bands[0].flat.length, 1,
+        "opts.flatSplayDeg reached bandWallRuns: the same 15-degree splay " +
+        "reads as flat under a 20-degree dead zone");
 }());
 
 // ---------------------------------------------------------------------

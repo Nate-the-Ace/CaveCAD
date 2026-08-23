@@ -1683,7 +1683,12 @@ CsProfile.classifySplay = function(shot, deadDeg) {
  * \param band     CsProfile.unrollBand() result
  * \param survey   the CsModel survey (for LRUD and splay lookup)
  * \param resolved CsNetwork.resolve() result
- * \param opts     {flatSplayDeg: number (default FLAT_SPLAY_DEG)} --
+ * \param opts     {flatSplayDeg: number (default FLAT_SPLAY_DEG),
+ *                  splaysByStation: CsLrud.splaysByStation(survey)
+ *                  already built, legCounts: CsLrud.legCounts(resolved.
+ *                  legs) already built -- both optional, computed fresh
+ *                  when absent; CsProfile.build hoists them once for
+ *                  the whole profile (see I2) and hands them down here} --
  *                  exaggeration and tapeMode are NOT read from here:
  *                  they come off `band` itself (set by the
  *                  CsProfile.unrollBand() call that produced it), so
@@ -1709,8 +1714,18 @@ CsProfile.bandWallRuns = function(band, survey, resolved, opts) {
         band.exaggeration === null) ? 1.0 : band.exaggeration;
     var tapeMode = band.tapeMode || CsTraverse.SLOPE;
 
-    var splays = CsLrud.splaysByStation(survey);
-    var counts = CsLrud.legCounts(resolved.legs);
+    // I2: CsProfile.build hoists both of these once for the whole
+    // profile and hands them down here through `opts`, the same
+    // pattern opts.adjacency already established for CsProfile.
+    // longestChain -- measured at 45% of a 276ms build (401 runs,
+    // 10,024 shots) when each was instead recomputed once PER BAND.
+    // Standalone callers (this file's own tests among them) get a
+    // fresh computation, so bandWallRuns is never wrong on its own.
+    var splays = (opts.splaysByStation !== undefined &&
+        opts.splaysByStation !== null) ?
+        opts.splaysByStation : CsLrud.splaysByStation(survey);
+    var counts = (opts.legCounts !== undefined && opts.legCounts !== null) ?
+        opts.legCounts : CsLrud.legCounts(resolved.legs);
 
     var datum = band.datum;
     var yOf = function(z) {
@@ -1948,18 +1963,47 @@ CsProfile.bandSpan = function(band) {
  *
  * What the gutter should track instead is the profile's TYPICAL band,
  * so it reads as "a little more than a normal gap" everywhere, rather
- * than scaling with whichever band happens to be enormous. Half the
- * MEDIAN band height across the whole profile does that: MEDIAN, not
- * mean, so the one huge outlier that this whole rule exists to tame
- * cannot itself drag the separation up for every other band the way an
- * average would (a profile of four 4-unit bands and one 2000-unit one
- * has a median of 4, not a mean of ~403). Floored at GUTTER_MIN so a
- * profile of uniformly flat, near-zero-height passages still gets a
- * visible separation instead of one derived from ~0.
+ * than scaling with whichever band happens to be enormous.
+ *
+ * THE SECOND CUT OF THIS RULE USED HALF THE MEDIAN HEIGHT, AND THAT
+ * ALSO FAILED -- at small band counts, which is the COMMONEST shape a
+ * real cave survey takes, not an edge case. With only two bands
+ * (heights 4 and 2000) the median of the two IS 1002, so the gutter
+ * came out to 501: a 4-unit band still got a blank gutter 125x its own
+ * height, merely 4x smaller than the height-based rule it replaced.
+ * Same failure at four bands ([4,4,2000,2000]): the median sits
+ * squarely between the two groups and inherits half the outlier's
+ * scale. The median-of-the-whole-profile framing was only ever true
+ * once tall bands are a strict MINORITY of a reasonably large
+ * profile -- a two-run survey does not qualify, and it is the most
+ * common shape there is.
+ *
+ * What actually holds at small n is a LOW ORDER STATISTIC: the
+ * smallest height at or above the bottom quarter of the sorted list
+ * (nearest-rank, index ceil(0.25n)-1 into heights sorted ascending),
+ * not an interpolated quantile and not the median. At n=2 this
+ * resolves to the SMALLER of the two heights (index 0), so [4, 2000]
+ * gives 4, not 1002 -- the separation follows the small band even
+ * though it is outnumbered one-to-one. At n=5 with four small bands
+ * and one huge one it still resolves to a small value, same as the
+ * median did, so nothing already working regresses. Floored at
+ * GUTTER_MIN so a profile of uniformly flat, near-zero-height passages
+ * still gets a visible separation instead of one derived from ~0.
+ *
+ * This is not claimed to be right for every distribution -- a profile
+ * where EVERY band happens to be enormous simply gets a large (if
+ * proportionate) gutter, correctly, because there is no small band to
+ * anchor to. What it fixes is specifically the common case this
+ * docblock got wrong the first two times: a handful of runs, one of
+ * them a deep pit, the rest ordinary passage.
  *
  * Computed ONCE, from the spans this function already has to compute
  * to place every band -- not per band, and not by asking bandSpan for
- * the same band's span twice.
+ * the same band's span twice. A band with no span (drew nothing at
+ * all) contributes NO entry to the height list -- it is excluded, not
+ * counted as a phantom zero, which would otherwise pull a small-n
+ * quantile toward zero for a reason that has nothing to do with any
+ * band's actual size.
  *
  * `placedHi` is only ever raised by a band that CLEARS the stack above
  * it; a band pushed below never raises it, because it did not add
@@ -1968,16 +2012,32 @@ CsProfile.bandSpan = function(band) {
  * same constant gutter below the previous one rather than drifting
  * further every time: `placedLo` alone tracks the bottom of the stack
  * so far, and each new collision measures from there.
+ *
+ * A DISCONTINUITY AT THE COLLISION BOUNDARY, OBSERVED AND LEFT AS IS:
+ * a span that touches the placed range EXACTLY (`clears` uses strict
+ * `>`/`<`) collides and pays the full gutter, while a span a
+ * vanishingly small epsilon further away clears and pays none --
+ * fuzzed over 20,000 random surveys, two bands were once found sitting
+ * 1.76e-5 apart at true elevation on either side of exactly this line.
+ * That is not wrong: both bands are exactly where their own resolved
+ * elevations put them, and "just barely touches" and "just barely
+ * clears" are genuinely different physical facts about the cave. It is
+ * simply a sharp edge in the rule worth knowing about before reading
+ * two bands' near-equal spacing as a bug.
  */
 CsProfile.GUTTER_MIN = 5.0;
+
+/** The fraction of the sorted height list the gutter is anchored to --
+ *  see the docblock above for why the low end, not the middle. */
+CsProfile.GUTTER_QUANTILE = 0.25;
 
 CsProfile.layout = function(bands) {
     var i;
 
-    // One pass to get every band's span (or null), so the median below
-    // is computed from data already in hand -- bandSpan is never asked
-    // to recompute the same band's span a second time in the loop that
-    // follows.
+    // One pass to get every band's span (or null), so the statistic
+    // below is computed from data already in hand -- bandSpan is never
+    // asked to recompute the same band's span a second time in the
+    // loop that follows.
     var spans = [];
     for (i = 0; i < bands.length; i++) {
         spans.push(CsProfile.bandSpan(bands[i]));
@@ -1998,13 +2058,19 @@ CsProfile.layout = function(bands) {
     // reordering among equal heights produces the identical sorted
     // array of numbers, on both engines.
     heights.sort(function(a, b) { return a - b; });
-    var median = 0.0;
+    var low = 0.0;
     if (heights.length > 0) {
-        var mid = Math.floor(heights.length / 2);
-        median = (heights.length % 2 === 1) ?
-            heights[mid] : (heights[mid - 1] + heights[mid]) / 2.0;
+        // Nearest-rank, not interpolated: nearest-rank is biased
+        // toward the SMALLER of two straddling samples rather than
+        // averaging them, which is exactly what keeps a 2-band profile
+        // anchored to its small band instead of splitting the
+        // difference with the outlier (see the docblock above).
+        var idx = Math.ceil(CsProfile.GUTTER_QUANTILE * heights.length) - 1;
+        if (idx < 0) { idx = 0; }
+        if (idx > heights.length - 1) { idx = heights.length - 1; }
+        low = heights[idx];
     }
-    var gutter = Math.max(CsProfile.GUTTER_MIN, 0.5 * median);
+    var gutter = Math.max(CsProfile.GUTTER_MIN, 0.5 * low);
 
     var placedLo = null, placedHi = null;
     for (i = 0; i < bands.length; i++) {
@@ -2041,29 +2107,103 @@ CsProfile.layout = function(bands) {
  * unrollBand's own opts.adjacency) rebuilds the whole-survey graph
  * itself whenever it is not handed one; doing that per band is
  * O(runs x legs) and was measured at 60% of total build time on a
- * 401-run survey. A caller that already has a graph for this same
- * `resolved` (built for some other purpose) may pass it in through
- * opts.adjacency and it is reused rather than rebuilt.
+ * 401-run survey.
  *
- * The four fields CsProfile.unrollBand reads (exaggeration, tapeMode,
- * adjacency) plus the one CsProfile.bandWallRuns reads directly
- * (flatSplayDeg -- it reads exaggeration and tapeMode off the BAND
- * itself now, not off this opts object; see bandWallRuns' own
- * docblock for why) are copied into a small fixed-shape object built
- * ONCE here and handed to every band, rather than adding `.adjacency`
- * onto the caller's own `opts` in place. Mutating the caller's object
- * would be a stale-cache trap for exactly the caller this feature
- * exists for -- CsDraw.survey calls this again on every redraw, and if
- * it reuses one `opts` object across draws, a graph built for an
- * earlier `resolved` must never survive to silently answer for a
- * later one.
+ * C1: THIS GRAPH IS NEVER ACCEPTED FROM THE CALLER, ON PURPOSE -- an
+ * earlier version honored an `opts.adjacency` a caller could pass in,
+ * reasoning that a caller who already had a graph for this same
+ * `resolved` could hand it in and save a rebuild. Measured
+ * consequence: a graph built from a DIFFERENT `resolved` -- handed in
+ * by mistake, or surviving in a variable across two calls -- silently
+ * produces a WRONG profile with no error and no finding. A two-run,
+ * six-station survey whose correct bands are a 3-station A and a
+ * 4-station B (the tie station is drawn twice, once in each band)
+ * collapsed to a 1-station A and a 2-station B under a graph built
+ * from an unrelated two-station survey: every lookup in the stale
+ * graph simply came back empty, so CsProfile.longestChain's own walk
+ * never left its starting station. Nothing in scripts/ ever needed
+ * this override -- only this file's own tests exercised it -- so the
+ * override itself was the defect. The alternative (stamp a token on
+ * the graph CsProfile.adjacency returns, refuse one whose token
+ * disagrees with `resolved`) was considered and rejected: a token
+ * still lets a future caller pass a matching-but-irrelevant graph, or
+ * simply route around the check by constructing one by hand, and
+ * every one of those failure modes is silent by nature -- removing
+ * the parameter removes the whole failure CLASS rather than adding a
+ * guard a later change could quietly bypass.
  *
- * \param opts {exaggeration, flatSplayDeg, tapeMode, adjacency}
+ * I2: CsLrud.splaysByStation(survey) and CsLrud.legCounts(resolved.
+ * legs) get the SAME once-per-profile treatment as the adjacency graph
+ * above, for the same reason -- CsProfile.bandWallRuns rebuilding
+ * either per band measured at 22.8% and 21.7% of build time
+ * respectively (401 runs, 10,024 shots; 45% of build combined,
+ * matching the 60% adjacency measurement in scale). Both are built
+ * fresh from THIS call's `survey`/`resolved`, every time, same as the
+ * adjacency graph -- there is no caller override to reopen the C1 trap
+ * for either.
+ *
+ * The three fields CsProfile.unrollBand reads (exaggeration, tapeMode,
+ * adjacency) plus the three CsProfile.bandWallRuns reads directly
+ * (flatSplayDeg, splaysByStation, legCounts -- it reads exaggeration
+ * and tapeMode off the BAND itself instead, set by the unrollBand call
+ * that produced it; see bandWallRuns' own docblock for why) are copied
+ * into one small fixed-shape object built ONCE here and handed to
+ * every band. `opts` itself is never written to -- CsDraw.survey will
+ * call this again on every redraw once it is wired up (Task 8), and if
+ * it reuses one `opts` object across draws, a graph or map built for
+ * an earlier `resolved` must never survive on that object to silently
+ * answer for a later one.
+ *
+ * C2: FINDINGS.UNDRAWN -- every leg CsNetwork.resolve() produced is
+ * either drawn in exactly one band above, or reported here with WHY it
+ * was not. Not drawing a closure, an extra cross-run contact, a
+ * demoted arm, or a leg past a stop is each independently correct (see
+ * their own call sites) -- but a survey with a real, surveyed shot
+ * that appears in NO band and NO finding is a leg that silently
+ * vanished, and the plan's whole findings doctrine exists to prevent
+ * exactly that. Reasons:
+ *   "closure"        -- kind === "closure"; Task 4 established these
+ *                        draw nothing (a closure's own docblock, on
+ *                        CsProfile.tieLegBetween, covers why one of
+ *                        them still gets used for a TIE step),
+ *   "cross-run tie"   -- connects two different runs and is not the
+ *                        one tie leg its child run actually drew --
+ *                        every hierarchy secondTie is exactly this,
+ *                        plus any cross-run "new" contact hierarchy's
+ *                        phase 1 ranked below the one it kept,
+ *   "demoted arm"     -- both ends in the SAME run, and at least one
+ *                        touches a station that run's own band reports
+ *                        in `omitted` -- covers both an interior-tie
+ *                        split's shorter arm and a station simply off
+ *                        the run's own longest chain to begin with;
+ *                        unrollBand's `omitted` does not distinguish
+ *                        the two causes, so neither does this,
+ *   "after-stop"      -- both ends in the same run, NEITHER omitted,
+ *                        yet at least one was never actually placed
+ *                        into that band's `stations` -- the station
+ *                        the walk stopped AT, or anything downstream
+ *                        of it, that unrollBand's own `stopped` field
+ *                        names only the FIRST of. Computed as run
+ *                        membership minus what the band actually drew
+ *                        minus what it reports omitted -- the leftover
+ *                        is exactly this,
+ *   "other"           -- same run, neither end omitted, both ends
+ *                        actually drawn, not a closure -- an undrawn
+ *                        second contact within one run's own graph.
+ *                        No fixture in this suite reaches it (a real
+ *                        same-run reconnection is classified "closure"
+ *                        by CsNetwork.resolve before it gets here), but
+ *                        an unclassified leg must never be silently
+ *                        omitted from `undrawn` altogether, so it is
+ *                        the fallback, not a missing case.
+ *
+ * \param opts {exaggeration, flatSplayDeg, tapeMode}
  * \return {
  *   bands: [band] in band order, each an unrollBand result plus
  *          {ceiling, floor, flat, zOffset},
  *   findings: {omitted, mismatches, secondTies, orphans, strandedRoots,
- *              stopped: [{run, station, reason}], ungrouped}
+ *              stopped: [{run, station, reason}], ungrouped,
+ *              undrawn: [{from, to, kind, reason}]}
  * }
  */
 CsProfile.build = function(survey, resolved, opts) {
@@ -2071,17 +2211,35 @@ CsProfile.build = function(survey, resolved, opts) {
     var grouped = CsProfile.groupRuns(resolved);
     var hier = CsProfile.hierarchy(grouped, resolved);
 
-    var adjacency = (opts.adjacency !== undefined && opts.adjacency !== null) ?
-        opts.adjacency : CsProfile.adjacency(resolved);
+    // C1/I2: always fresh, from THIS resolved/survey, never taken from
+    // the caller -- see the docblock above.
     var bandOpts = {
         exaggeration: opts.exaggeration,
         tapeMode: opts.tapeMode,
         flatSplayDeg: opts.flatSplayDeg,
-        adjacency: adjacency
+        adjacency: CsProfile.adjacency(resolved),
+        splaysByStation: CsLrud.splaysByStation(survey),
+        legCounts: CsLrud.legCounts(resolved.legs)
     };
+
+    // station name -> its run key, for classifying an undrawn leg as
+    // same-run or cross-run below. Built once, over every grouped
+    // station, independent of which runs hier.order actually visits.
+    var runOf = {};
+    var ri, rs;
+    for (ri = 0; ri < grouped.order.length; ri++) {
+        var roStations = grouped.runs[grouped.order[ri]].stations;
+        for (rs = 0; rs < roStations.length; rs++) {
+            runOf[roStations[rs]] = grouped.order[ri];
+        }
+    }
 
     var bands = [];
     var omitted = [], stopped = [];
+    var omittedOf = {};      // stationName -> true, any run's omitted list
+    var drawnStationOf = {}; // stationName -> true, appeared in some band.stations
+    var drawnLeg = {};       // "from to" AND "to from" -> true
+
     for (var i = 0; i < hier.order.length; i++) {
         var key = hier.order[i];
         var run = grouped.runs[key];
@@ -2095,11 +2253,19 @@ CsProfile.build = function(survey, resolved, opts) {
         band.floor = walls.floor;
         band.flat = walls.flat;
         band.parent = hier.parents[key];
-        band.zOffset = 0.0;
         bands.push(band);
 
         for (var k = 0; k < band.omitted.length; k++) {
             omitted.push(band.omitted[k]);
+            omittedOf[band.omitted[k]] = true;
+        }
+        for (var si = 0; si < band.stations.length; si++) {
+            drawnStationOf[band.stations[si].name] = true;
+        }
+        for (var li = 0; li < band.legs.length; li++) {
+            var bl = band.legs[li];
+            drawnLeg[bl.from + " " + bl.to] = true;
+            drawnLeg[bl.to + " " + bl.from] = true;
         }
         if (band.stopped !== null) {
             // The station alone says WHERE a band ended; the reason
@@ -2118,6 +2284,29 @@ CsProfile.build = function(survey, resolved, opts) {
 
     CsProfile.layout(bands);
 
+    // C2: see the docblock above for what each reason means.
+    var undrawn = [];
+    for (var li2 = 0; li2 < resolved.legs.length; li2++) {
+        var leg = resolved.legs[li2];
+        if (drawnLeg.hasOwnProperty(leg.from + " " + leg.to)) {
+            continue;
+        }
+        var reason;
+        if (leg.kind === "closure") {
+            reason = "closure";
+        } else if (runOf[leg.from] !== runOf[leg.to]) {
+            reason = "cross-run tie";
+        } else if (drawnStationOf[leg.from] !== true ||
+                drawnStationOf[leg.to] !== true) {
+            reason = (omittedOf[leg.from] === true ||
+                omittedOf[leg.to] === true) ? "demoted arm" : "after-stop";
+        } else {
+            reason = "other";
+        }
+        undrawn.push({ from: leg.from, to: leg.to, kind: leg.kind,
+            reason: reason });
+    }
+
     return {
         bands: bands,
         findings: {
@@ -2127,7 +2316,8 @@ CsProfile.build = function(survey, resolved, opts) {
             orphans: hier.orphans,
             strandedRoots: hier.strandedRoots,
             stopped: stopped,
-            ungrouped: grouped.ungrouped
+            ungrouped: grouped.ungrouped,
+            undrawn: undrawn
         }
     };
 };
