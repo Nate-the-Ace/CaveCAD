@@ -28,6 +28,37 @@ CsLayers.PROFILE_CEILING = "CTRL-PROFILE-CEILING";
 CsLayers.GRID = "CTRL-GRID";
 CsLayers.AERIAL = "CTRL-AERIAL";
 
+// The profile frame's own control layers. EVERY ONE BEGINS "CTRL-",
+// and that is load-bearing rather than cosmetic: CsBind's
+// NEVER_LINEWORK_PREFIXES already refuses that prefix, so generated
+// profile geometry stays ineligible for binding and moving with no
+// change to CsBind at all. Drop the prefix and the generator's own
+// output becomes bindable -- a test in js_unit.js asserts this.
+//
+// NAMING TRAP, READ BEFORE USING EITHER: CsLayers.PROFILE_CEILING is
+// the GENERATED layer CTRL-PROFILE-CEILING, which the generator owns
+// and ERASES on every redraw. CsLayers.PROFILE_TRACED_CEILING is the
+// hand-traced PROFILE-CEILING, which is the user's own work and must
+// NEVER be erased. The two constants are one word apart and mean
+// opposite things. Same for floor.
+CsLayers.PROFILE_SHOTS = "CTRL-PROFILE-SHOTS";
+CsLayers.PROFILE_STATIONS = "CTRL-PROFILE-STATIONS";
+CsLayers.PROFILE_STATION_LABELS = "CTRL-PROFILE-STATION-LABELS";
+CsLayers.PROFILE_SPLAYS = "CTRL-PROFILE-SPLAYS";
+CsLayers.PROFILE_LRUD = "CTRL-PROFILE-LRUD";
+
+// The profile frame's traceable layers -- what a caver draws on an
+// elevation. These must NOT begin "CTRL-", for the mirror of the
+// reason above: hand-traced profile linework has to stay bindable so
+// it moves when the survey does.
+CsLayers.PROFILE_TRACED_CEILING = "PROFILE-CEILING";
+CsLayers.PROFILE_TRACED_FLOOR = "PROFILE-FLOOR";
+CsLayers.PROFILE_WALLS_INFERRED = "PROFILE-WALLS-INFERRED";
+CsLayers.PROFILE_TEXT_NOTES = "PROFILE-TEXT-NOTES";
+CsLayers.PROFILE_TEXT_LABELS = "PROFILE-TEXT-LABELS";
+CsLayers.PROFILE_BREAKDOWN = "PROFILE-BREAKDOWN";
+CsLayers.PROFILE_ENTRANCE = "PROFILE-ENTRANCE";
+
 // Feature layers the tools write to.
 CsLayers.WALLS_SURVEYED = "WALLS-SURVEYED";
 CsLayers.WALLS_INFERRED = "WALLS-INFERRED";
@@ -60,7 +91,29 @@ CsLayers.DEFAULTS = {
     "CTRL-LRUD-WALL-RIGHT": ["gray", "DASHED", "Weight000"],
     "CTRL-PROFILE-FLOOR": ["gray", "DASHED", "Weight000"],
     "CTRL-PROFILE-CEILING": ["gray", "DASHED", "Weight000"],
+    // The profile frame's generated layers mirror their plan twins'
+    // appearance, so the same kind of geometry reads the same in both
+    // views of one sheet.
+    "CTRL-PROFILE-SHOTS": ["gray", "CONTINUOUS", "Weight025"],
+    "CTRL-PROFILE-STATIONS": ["red", "CONTINUOUS", "Weight025"],
+    "CTRL-PROFILE-STATION-LABELS": ["red", "CONTINUOUS", "Weight025"],
+    "CTRL-PROFILE-SPLAYS": ["gray", "CONTINUOUS", "Weight000"],
+    "CTRL-PROFILE-LRUD": ["pink", "CONTINUOUS", "Weight025"],
+    // and the traceable ones mirror the plan feature layer a caver
+    // would reach for to draw the same thing. Ceiling and floor are
+    // the elevation's wall lines, hence WALLS-SURVEYED's weight.
+    "PROFILE-CEILING": ["white", "CONTINUOUS", "Weight050"],
+    "PROFILE-FLOOR": ["white", "CONTINUOUS", "Weight050"],
+    "PROFILE-WALLS-INFERRED": ["gray", "DASHED", "Weight025"],
+    "PROFILE-TEXT-NOTES": ["white", "CONTINUOUS", "Weight009"],
+    "PROFILE-TEXT-LABELS": ["white", "CONTINUOUS", "Weight018"],
+    "PROFILE-BREAKDOWN": ["white", "CONTINUOUS", "Weight000"],
+    "PROFILE-ENTRANCE": ["white", "CONTINUOUS", "Weight035"],
     "CTRL-AERIAL": ["gray", "CONTINUOUS", "Weight000"],
+    // Matches the plan template's own CTRL-GRID record (light gray,
+    // continuous, 0.13mm) so a drawing without the template gets the
+    // same grid rather than the fallback appearance.
+    "CTRL-GRID": ["gray", "CONTINUOUS", "Weight013"],
     "WALLS-SURVEYED": ["white", "CONTINUOUS", "Weight050"],
     "WALLS-INFERRED": ["gray", "DASHED", "Weight025"],
     "BREAKDOWN": ["white", "CONTINUOUS", "Weight000"],
@@ -74,6 +127,45 @@ CsLayers.DEFAULTS = {
     "TEXT-NOTES": ["white", "CONTINUOUS", "Weight009"],
     "ENTRANCE": ["white", "CONTINUOUS", "Weight035"],
     "CTRL-DATA": ["gray", "CONTINUOUS", "Weight000"]
+};
+
+// Layers that belong to the SHEET rather than to either view: one
+// drawing prints as one sheet, and a plan with an elevation below it is
+// ordinary cave cartography, so these are shared on purpose.
+CsLayers.SHEET_LAYERS = ["0", "Defpoints", "BORDER", "TITLE-BLOCK",
+    "LEGEND", "SCALE-BAR"];
+
+/**
+ * Which view a layer belongs to: "plan", "profile" or "sheet".
+ *
+ * THE ONLY PLACE THIS QUESTION IS ANSWERED. CsBind, RebuildSurveyData,
+ * eraseStations and the warp tools all ask here rather than each
+ * matching a prefix their own way -- those are shipped plan-view files,
+ * and a second spelling of "is this profile?" is how they start
+ * disagreeing about the same layer.
+ *
+ * An unrecognised name answers "plan", deliberately. The dangerous
+ * mistake is a profile-scoped sweep picking up a layer nobody
+ * classified -- a user's own layer, or one a future feature adds -- so
+ * the default is the frame that owns the drawing's origin.
+ */
+CsLayers.frameOf = function(layerName) {
+    if (layerName === undefined || layerName === null) {
+        return "plan";
+    }
+    var name = String(layerName);
+    var i;
+    for (i = 0; i < CsLayers.SHEET_LAYERS.length; i++) {
+        if (name === CsLayers.SHEET_LAYERS[i]) {
+            return "sheet";
+        }
+    }
+    // Both spellings of the profile frame: CTRL-PROFILE-* for generated
+    // geometry, PROFILE-* for what is traced by hand.
+    if (name.indexOf("CTRL-PROFILE-") === 0 || name.indexOf("PROFILE-") === 0) {
+        return "profile";
+    }
+    return "plan";
 };
 
 // Layers created switched OFF (invisible): the data store, CTRL-HIDDEN

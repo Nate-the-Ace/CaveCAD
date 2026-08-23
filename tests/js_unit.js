@@ -14006,6 +14006,91 @@ if (!IS_NODE) {
 }
 
 // ---------------------------------------------------------------------
+// CsLayers.frameOf -- the single frame test
+// ---------------------------------------------------------------------
+
+(function() {
+    eqs(CsLayers.frameOf(CsLayers.SHOTS), "plan", "CTRL-SHOTS is plan");
+    eqs(CsLayers.frameOf(CsLayers.WALLS_SURVEYED), "plan", "WALLS-SURVEYED is plan");
+    eqs(CsLayers.frameOf(CsLayers.PROFILE_FLOOR), "profile",
+        "CTRL-PROFILE-FLOOR is profile");
+    eqs(CsLayers.frameOf(CsLayers.PROFILE_SHOTS), "profile",
+        "CTRL-PROFILE-SHOTS is profile");
+    eqs(CsLayers.frameOf("PROFILE-CEILING"), "profile",
+        "the traced ceiling layer is profile");
+    eqs(CsLayers.frameOf(CsLayers.BORDER), "sheet", "BORDER is sheet");
+    eqs(CsLayers.frameOf(CsLayers.TITLE_BLOCK), "sheet", "TITLE-BLOCK is sheet");
+    eqs(CsLayers.frameOf(CsLayers.SCALE_BAR), "sheet", "SCALE-BAR is sheet");
+    eqs(CsLayers.frameOf(CsLayers.LEGEND), "sheet", "LEGEND is sheet");
+    eqs(CsLayers.frameOf("0"), "sheet", "layer 0 is sheet");
+    eqs(CsLayers.frameOf("Defpoints"), "sheet", "Defpoints is sheet");
+
+    // An unknown layer defaults to PLAN, deliberately: a profile-scoped
+    // sweep must never pick up a layer nobody classified.
+    eqs(CsLayers.frameOf("SOMEONES-OWN-LAYER"), "plan",
+        "an unknown layer defaults to plan, never profile");
+    eqs(CsLayers.frameOf(""), "plan", "an empty name defaults to plan");
+    eqs(CsLayers.frameOf(null), "plan", "null defaults to plan");
+}());
+
+(function() {
+    // THE LOAD-BEARING RULE. Generated profile geometry must stay
+    // ineligible for binding, and it stays ineligible only because the
+    // name begins CTRL-. If a rename ever drops that prefix, the
+    // generator's own output becomes bindable and movable, and this
+    // assertion is what says so.
+    var generated = [CsLayers.PROFILE_FLOOR, CsLayers.PROFILE_CEILING,
+        CsLayers.PROFILE_SHOTS, CsLayers.PROFILE_STATIONS,
+        CsLayers.PROFILE_STATION_LABELS, CsLayers.PROFILE_SPLAYS,
+        CsLayers.PROFILE_LRUD];
+    var i;
+    for (i = 0; i < generated.length; i++) {
+        ok(generated[i].indexOf("CTRL-") === 0,
+            generated[i] + " begins CTRL- (the binding gate depends on it)");
+        ok(CsBind.isLineworkLayer(generated[i]) === false,
+            generated[i] + " is NOT bindable linework");
+        eqs(CsLayers.frameOf(generated[i]), "profile",
+            generated[i] + " is in the profile frame");
+    }
+
+    var traceable = ["PROFILE-CEILING", "PROFILE-FLOOR",
+        "PROFILE-WALLS-INFERRED", "PROFILE-TEXT-NOTES",
+        "PROFILE-TEXT-LABELS", "PROFILE-BREAKDOWN", "PROFILE-ENTRANCE"];
+    for (i = 0; i < traceable.length; i++) {
+        ok(traceable[i].indexOf("CTRL-") !== 0,
+            traceable[i] + " does NOT begin CTRL-");
+        ok(CsBind.isLineworkLayer(traceable[i]) === true,
+            traceable[i] + " IS bindable linework -- it is traced by hand");
+        eqs(CsLayers.frameOf(traceable[i]), "profile",
+            traceable[i] + " is in the profile frame");
+    }
+}());
+
+(function() {
+    // every registry layer answers exactly one frame, and has a default
+    var seen = {}, missing = [], bad = [];
+    for (var k in CsLayers) {
+        if (!CsLayers.hasOwnProperty(k) || typeof CsLayers[k] !== "string") {
+            continue;
+        }
+        var name = CsLayers[k];
+        var f = CsLayers.frameOf(name);
+        if (f !== "plan" && f !== "profile" && f !== "sheet") {
+            bad.push(name + "=" + f);
+        }
+        if (seen.hasOwnProperty(name) && seen[name] !== f) {
+            bad.push(name + " answers two frames");
+        }
+        seen[name] = f;
+        if (f !== "sheet" && !CsLayers.DEFAULTS.hasOwnProperty(name)) {
+            missing.push(name);
+        }
+    }
+    eqs(bad.join(","), "", "no layer answers a bad or doubled frame");
+    eqs(missing.join(","), "", "every non-sheet registry layer has a DEFAULTS row");
+}());
+
+// ---------------------------------------------------------------------
 // Report.
 // ---------------------------------------------------------------------
 
