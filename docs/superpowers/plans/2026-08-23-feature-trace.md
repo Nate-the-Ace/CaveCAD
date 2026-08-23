@@ -1858,6 +1858,31 @@ git commit -m "docs: Feature Trace in the tool table"
 
 ---
 
+## Task 8: Tie wall traces into nearby wall ends (no-gap walls)
+
+**Goal:** A wall trace that starts or ends near an existing wall end joins it exactly, so a passage can be built from several strokes with no gaps.
+
+**REVERSES a spec decision.** §12 said "Snapping trace ends to each other or to stations" was deliberately out, on the grounds that where two runs meet is a cartographer's judgement. The user has asked for it directly: "i also want the cave wall tools specifically to tie into any nearby existing or previewed splines and continue with them to make no-gap walls easy to do." Their call, and it is the right one for the actual job -- a wall drawn in three strokes with three near-misses is three gaps to hunt down later.
+
+**Files:**
+- Modify: `scripts/CaveSurvey/Core/CsTrace.js`
+- Modify: `scripts/CaveSurvey/FeatureTrace/FeatureTraceRun.js`
+- Modify: `tests/js_unit.js`
+
+**Acceptance Criteria:**
+- [ ] `CsTrace.nearestEnd(doc, point, layerName, tolerance)` returns the closest start or end point of an existing curve ON THE SAME LAYER within `tolerance`, or null
+- [ ] Same layer only. A wall must not weld itself to a breakdown boundary or to an elevation trace that happens to sit nearby
+- [ ] The FIRST sampled point snaps to that end when one is in range, and the LAST likewise, so consecutive strokes share an exact coordinate
+- [ ] Tolerance is derived from the sample interval (not a new hardcoded number) and scales with the drawing unit
+- [ ] Ends already coincident are left alone -- snapping must be idempotent, so re-tracing a joined wall does not drift it
+- [ ] A trace whose both ends land on the SAME existing curve's two ends does not silently close a loop the caver did not draw
+- [ ] Only wall layers tie: `WALLS-SURVEYED`, `WALLS-INFERRED` and their profile twins. `ENTRANCE` and the breakdown layers are left alone unless asked for
+- [ ] Snapping is visible in the preview, so the caver can see the join happen before releasing
+
+**Verify:** CaveCAD `tests/js_unit.js` above the Task 6 count, then `./tools/publish.sh`, restart, and draw a passage as three strokes -- the joins are exact, checked by selecting the curves and reading their endpoint coordinates
+
+**Open question for the user, to settle before building:** "previewed splines" -- whether a stroke should also tie to the run drawn immediately before it while that one is still the active preview, or only to curves already committed to the drawing. Committed-only is simpler and is what the criteria above describe.
+
 ## Deferred decisions
 
 Two things the spec's §12 leaves out on purpose, recorded here so a later reader does not mistake them for oversights:
