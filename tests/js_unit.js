@@ -8831,6 +8831,216 @@ if (!IS_NODE) {
         "an unbroken cycle fed directly to bandOrder still emits every run once");
 }());
 
+(function() {
+    // I-1: two fixed entrances, fully connected -- grouped.order[0]'s
+    // own run ("A", since A1 is seeded before B1) ends up as a CHILD
+    // (parent "B"), while "B" is the true root. Position in
+    // grouped.order is not rootness: the primary root has to be found
+    // by walking the parent chain, not assumed to be index 0.
+    var sv = CsModel.newSurvey();
+    sv.shots = [
+        shotOf("B1", "B2", 10, 0, 0),
+        shotOf("B2", "B3", 10, 0, 0),
+        shotOf("A4", "B3", 10, 0, 0),
+        shotOf("A1", "A2", 10, 0, 0),
+        shotOf("A2", "A3", 10, 0, 0),
+        shotOf("A3", "A4", 10, 0, 0)
+    ];
+    sv.fixed["A1"] = { x: 0, y: 0, z: 0 };
+    sv.fixed["B1"] = { x: 500, y: 500, z: 0 };
+    var r = CsNetwork.resolve(sv, {});
+    var g = CsProfile.groupRuns(r);
+    eqs(g.order.join(","), "A,B",
+        "fixture assumption: A (holding the earlier fixed station) is grouped.order[0]");
+    var h = CsProfile.hierarchy(g, r);
+
+    ok(h.parents["A"] === "B" && h.parents["B"] === null,
+        "A, though grouped.order[0], ends up B's child -- B is the true root");
+    eqs(h.orphans.join(","), "",
+        "the true root (B) is never reported as an orphan just because " +
+        "it is not grouped.order[0]");
+}());
+
+(function() {
+    // M-2: same topology (A-B-C, each separately *fixed*, joined only
+    // by tie legs A2-B1 and B2-C1) -- ONLY the order the three fixed
+    // stations were REGISTERED in differs (that decides which of B1/C1
+    // gets the smaller resolution seq, hence which run phase 2's
+    // reverse sweep reaches first). The physical structure -- and
+    // therefore parents/ties/order -- comes out identical either way.
+    // secondTies must ALSO be order-independent: a candidate that
+    // looks free when this run is examined but becomes this run's own
+    // descendant moments later, in the SAME phase-2 pass, must not
+    // survive as a "second" contact -- it is describing the exact
+    // junction the descendant now reports as its own primary tie.
+    function build(fixedOrder) {
+        var sv = CsModel.newSurvey();
+        sv.shots = [
+            shotOf("A1", "A2", 10, 0, 0),
+            shotOf("B1", "B2", 10, 0, 0),
+            shotOf("C1", "C2", 10, 0, 0),
+            shotOf("A2", "B1", 8, 0, 0),
+            shotOf("B2", "C1", 8, 0, 0)
+        ];
+        sv.fixed["A1"] = { x: 0, y: 0, z: 0 };
+        sv.fixed[fixedOrder[0]] = { x: 500, y: 0, z: 0 };
+        sv.fixed[fixedOrder[1]] = { x: 1000, y: 0, z: 0 };
+        return CsNetwork.resolve(sv, {});
+    }
+    var rBC = build(["B1", "C1"]);   // B registered (and so seeded) before C
+    var rCB = build(["C1", "B1"]);   // C registered (and so seeded) before B
+    var gBC = CsProfile.groupRuns(rBC), gCB = CsProfile.groupRuns(rCB);
+    eqs(gBC.order.join(","), "A,B,C", "fixture assumption: B seeded before C");
+    eqs(gCB.order.join(","), "A,C,B", "fixture assumption: C seeded before B");
+    var hBC = CsProfile.hierarchy(gBC, rBC);
+    var hCB = CsProfile.hierarchy(gCB, rCB);
+
+    ok(hBC.parents["B"] === "A" && hBC.parents["C"] === "B",
+        "B registered first: A-B-C chain, as expected");
+    ok(hCB.parents["B"] === "A" && hCB.parents["C"] === "B",
+        "C registered first: same final parents, regardless of " +
+        "registration order");
+    eqs(hBC.secondTies.length + "", "0", "B registered first: no spurious second tie");
+    eqs(hCB.secondTies.length + "", "0",
+        "C registered first: MUST also be empty -- B's own phase-2 " +
+        "examination sees C as free (not yet anyone's descendant) and " +
+        "reports it as a second contact, but C becomes B's descendant " +
+        "moments later in this very pass, so that entry describes C's " +
+        "own primary tie a second time unless the final filter removes it");
+}());
+
+(function() {
+    // M-3: a station (A3) reached by run B through a qualifying "new"
+    // leg (A3-B5, phase 1's own SECOND rank-0 contact, already
+    // deduped and reported once) AND, separately, through a closure
+    // (B6-A3, phase 2). Two different dedupe maps that do not share
+    // state would let this same station through twice -- once from
+    // each phase -- even though the I1 fixture (two closures, one map)
+    // already looks green.
+    var sv = CsModel.newSurvey();
+    sv.shots = [
+        shotOf("A1", "A2", 10, 0, 0),
+        shotOf("A2", "A3", 10, 0, 0),
+        shotOf("A2", "B1", 8, 0, 0),
+        shotOf("B1", "B2", 5, 0, 0),
+        shotOf("A3", "B5", 8, 0, 0),
+        shotOf("B5", "B6", 5, 0, 0),
+        shotOf("B6", "A3", 8, 0, 0)
+    ];
+    var r = CsNetwork.resolve(sv, {});
+    ok(r.legs[6].kind === "closure",
+        "fixture assumption: B6->A3 really is a closure");
+    var h = CsProfile.hierarchy(CsProfile.groupRuns(r), r);
+
+    var a3ForB = 0;
+    for (var sti = 0; sti < h.secondTies.length; sti++) {
+        if (h.secondTies[sti].run === "B" && h.secondTies[sti].station === "A3") {
+            a3ForB++;
+        }
+    }
+    eqs(a3ForB + "", "1",
+        "A3, reached via a phase-1 'new' leg AND a phase-2 closure, is " +
+        "one secondTie -- the two phases must share a dedupe map");
+}());
+
+(function() {
+    // M-4: run D is parentless after phase 1 (its only cross-run legs
+    // are closures) and has TWO rank-1 candidates -- A (leg index 5)
+    // and E (leg index 6, and E already has ITS OWN phase-1 parent, A,
+    // so E can never itself become D's parent or vice versa through
+    // this test). The smaller leg index must win as D's primary tie;
+    // the other must be demoted to a secondTie via the phase-2 EXTRAS
+    // path specifically (not phase 1's dedupe, and not the "already
+    // has a parent" branch -- D has neither here).
+    var sv = CsModel.newSurvey();
+    sv.shots = [
+        shotOf("A1", "A2", 10, 0, 0),
+        shotOf("A2", "A3", 10, 0, 0),
+        shotOf("A2", "E1", 8, 0, 0),
+        shotOf("E1", "E2", 5, 0, 0),
+        shotOf("D1", "D2", 10, 0, 0),
+        shotOf("A3", "D1", 8, 0, 0),   // leg index 5 -- must win
+        shotOf("E2", "D1", 8, 0, 0)    // leg index 6 -- must be demoted
+    ];
+    sv.fixed["A1"] = { x: 0, y: 0, z: 0 };
+    sv.fixed["D1"] = { x: 500, y: 500, z: 0 };
+    var r = CsNetwork.resolve(sv, {});
+    ok(r.legs[5].kind === "closure" && r.legs[6].kind === "closure",
+        "fixture assumption: both of D's candidates are closures, so " +
+        "phase 1 gives D nothing at all");
+    var h = CsProfile.hierarchy(CsProfile.groupRuns(r), r);
+
+    ok(h.parents["D"] === "A" && h.ties["D"] === "A3",
+        "the smaller leg index (A3-D1) wins D's primary tie");
+    var demoted = false;
+    for (var sti = 0; sti < h.secondTies.length; sti++) {
+        if (h.secondTies[sti].run === "D" && h.secondTies[sti].station === "E2" &&
+                h.secondTies[sti].otherRun === "E") {
+            demoted = true;
+        }
+    }
+    ok(demoted, "the losing candidate (E) is demoted to a secondTie for D");
+}());
+
+(function() {
+    // M-5: breakCycle must elect the EARLIEST-STARTED member, not the
+    // cycle's entry point. This fixture separates them: the parent-
+    // chain walk starts at P (grouped.order[0]) and enters the cycle
+    // at A, so a naive "elect cycleMembers[0]" would elect A -- but B
+    // (seeded first, as a fixed station) is the one that was on the
+    // ground earliest, and must be the one that ends up root.
+    var sv = CsModel.newSurvey();
+    sv.shots = [
+        shotOf("P1", "P2", 10, 0, 0),
+        shotOf("B1", "B2", 10, 0, 0),
+        shotOf("B2", "A5", 10, 0, 0),
+        shotOf("A5", "B7", 10, 0, 0),
+        shotOf("A5", "P3", 10, 0, 0)
+    ];
+    sv.fixed["P1"] = { x: 0, y: 0, z: 0 };
+    sv.fixed["B1"] = { x: 500, y: 500, z: 0 };
+    var r = CsNetwork.resolve(sv, {});
+    var g = CsProfile.groupRuns(r);
+    eqs(g.order.join(","), "P,B,A",
+        "fixture assumption: the parent-chain walk starts at P and " +
+        "enters the cycle at A, not at B");
+    var h = CsProfile.hierarchy(g, r);
+
+    ok(h.parents["B"] === null,
+        "B (seeded first, the earliest-started member) is elected root");
+    ok(h.parents["A"] === "B" && h.parents["P"] === "A",
+        "A and P both end up hanging off B, not the other way around");
+}());
+
+(function() {
+    // M-6: breakCycle's discarded-contact demotion. The rejoining side
+    // passage (A1..A3, B1-B2, A4-A5, every leg "new") elects A root
+    // and discards A's own original claim on B (tied at B2) -- that
+    // discarded contact must survive as a secondTie, not be silently
+    // dropped.
+    var sv = CsModel.newSurvey();
+    sv.shots = [
+        shotOf("A1", "A2", 10, 0, 0),
+        shotOf("A2", "A3", 10, 0, 0),
+        shotOf("A3", "B1", 10, 0, 0),
+        shotOf("B1", "B2", 10, 0, 0),
+        shotOf("B2", "A4", 10, 0, 0),
+        shotOf("A4", "A5", 10, 0, 0)
+    ];
+    var r = CsNetwork.resolve(sv, {});
+    var h = CsProfile.hierarchy(CsProfile.groupRuns(r), r);
+
+    var found = false;
+    for (var sti = 0; sti < h.secondTies.length; sti++) {
+        if (h.secondTies[sti].run === "A" && h.secondTies[sti].station === "B2" &&
+                h.secondTies[sti].otherRun === "B") {
+            found = true;
+        }
+    }
+    ok(found, "A's discarded parent claim on B (tied at B2) survives as " +
+        "a secondTie -- the cycle break demotes it, it does not drop it");
+}());
+
 // ---------------------------------------------------------------------
 // Profile -- Task 3: chain finding and unrolling one band.
 // ---------------------------------------------------------------------

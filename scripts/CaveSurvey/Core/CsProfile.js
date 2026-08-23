@@ -318,8 +318,13 @@ CsProfile.adjacency = function(resolved) {
  *               third run while a second contact lands in yet another),
  *   mismatches: [{run, expected, actual}] name vs graph; actual is null
  *               when the graph found no contact at all,
- *   orphans:    [runKey] runs with no determinable parent in EITHER
- *               phase (a genuinely disconnected component),
+ *   orphans:    [runKey] every parentless run OTHER THAN the primary
+ *               root (found by walking up from grouped.order[0]) --
+ *               this covers a genuinely disconnected component, but
+ *               ALSO a second parentless run that phase 2 could not
+ *               merge into the primary tree despite being part of the
+ *               same physically connected cave (a "second root"); the
+ *               two are not currently told apart here,
  *   cycles:     [[runKey, ...]] any loop found among phase-1 ("new"-leg)
  *               parents and broken -- see the phase-1 cycle-breaking
  *               pass below. Empty for an ordinary closure/tie loop,
@@ -464,23 +469,31 @@ CsProfile.hierarchy = function(grouped, resolved) {
     // fact. Multiple qualifying "new" contacts for the same run are
     // rare but possible; the earliest becomes the tie, the rest become
     // ordinary secondTies.
+    //
+    // seenByRun[key] tracks every station already reported as a tie or
+    // secondTie FOR THIS RUN, seeded here and REUSED (not reset) when
+    // phase 2 looks at this same run's closure/tie contacts below --
+    // one map spanning both phases, so a station a "new" leg already
+    // reported cannot also be reported again by a later closure that
+    // happens to land on the identical station.
+    var seenByRun = {};
     for (i = 0; i < grouped.order.length; i++) {
         var p1Key = grouped.order[i];
         var p1r0 = rank0ByRun[p1Key];
+        var seen1 = {};
         if (p1r0.length === 0) {
             parents[p1Key] = null;
             ties[p1Key] = null;
         } else {
             parents[p1Key] = p1r0[0].otherRun;
             ties[p1Key] = p1r0[0].station;
-            var seen0 = {};
-            seen0[p1r0[0].station] = true;
+            seen1[p1r0[0].station] = true;
             for (k = 1; k < p1r0.length; k++) {
                 var st0 = p1r0[k].station;
-                if (seen0.hasOwnProperty(st0)) {
+                if (seen1.hasOwnProperty(st0)) {
                     continue;   // same junction reached twice, not a second tie
                 }
-                seen0[st0] = true;
+                seen1[st0] = true;
                 secondTies.push({
                     run: p1Key,
                     station: st0,
@@ -488,6 +501,7 @@ CsProfile.hierarchy = function(grouped, resolved) {
                 });
             }
         }
+        seenByRun[p1Key] = seen1;
     }
 
     // ---- break any cycle among phase-1 (new-leg-only) parents -------
@@ -508,9 +522,19 @@ CsProfile.hierarchy = function(grouped, resolved) {
     // first, so its claim to being upstream of the rest of the loop is
     // at least as good as any other member's. Its own discarded
     // parent/tie is not thrown away -- it becomes a secondTie, so the
-    // graph fact it carried is demoted, not deleted.
+    // graph fact it carried is demoted, not deleted. Pushed to
+    // `cycleDemotions`, NOT `secondTies` directly: the discarded
+    // parent is, by construction, always a descendant of the elected
+    // root once the cycle is broken (that is what breaking the cycle
+    // in the root's favour MEANS), so the general descendant-filter
+    // phase 2 runs below (see M-2 in the review) would otherwise
+    // delete this very entry as if it were an order-dependent
+    // duplicate. It is not one -- it is required by design -- so it is
+    // kept out of the array that filter inspects, and merged back in
+    // once that filter has run.
     var cycles = [];
     var settled = {};
+    var cycleDemotions = [];
     var breakCycle = function(members) {
         var electedRoot = members[0];
         var bestSeq = earliestSeqOfRun[electedRoot];
@@ -525,15 +549,15 @@ CsProfile.hierarchy = function(grouped, resolved) {
         var discardedTie = ties[electedRoot];
         if (discardedTie !== null && discardedTie !== undefined) {
             var already = false;
-            for (var si = 0; si < secondTies.length; si++) {
-                if (secondTies[si].run === electedRoot &&
-                        secondTies[si].station === discardedTie) {
+            for (var si = 0; si < cycleDemotions.length; si++) {
+                if (cycleDemotions[si].run === electedRoot &&
+                        cycleDemotions[si].station === discardedTie) {
                     already = true;
                     break;
                 }
             }
             if (!already) {
-                secondTies.push({
+                cycleDemotions.push({
                     run: electedRoot,
                     station: discardedTie,
                     otherRun: discardedParent
@@ -588,18 +612,24 @@ CsProfile.hierarchy = function(grouped, resolved) {
     // no parent, no cycle, and no secondTie -- reporting it again would
     // describe one physical junction twice.
     //
+    // A parentless run is the root of its own (so far unconnected)
+    // tree, so a candidate that is NOT its descendant is necessarily in
+    // a DIFFERENT tree -- adopting it only ever merges two trees into
+    // one, and can never create a cycle, in ANY iteration order. This
+    // is provable from that alone and was confirmed over thousands of
+    // random surveys: iteration order changes which tree ends up on
+    // top of which (see below), never whether the result has a cycle.
+    //
     // Processed from the LATEST-anchored run back to the earliest --
     // the reverse of grouped.order, which is itself ordered by each
-    // run's earliest station (see earliestSeqOfRun). This lets a run
-    // whose entire connection to an already-established run is a
-    // single closure/tie leg (never a "new" one -- e.g. two separately
-    // *fixed* components joined only by a tie) claim that connection as
-    // ITS parent before the earlier, already-established run gets a
-    // chance to see the very same leg from its own side and mistake it
-    // for a parent claim of its own: by the time the earlier run is
-    // examined, the later one already has it recorded as a live parent,
-    // so the descendant check (which reads the CURRENT parents map, not
-    // a frozen phase-1 snapshot) correctly recognizes it and skips it.
+    // run's earliest station (see earliestSeqOfRun) -- purely to choose
+    // a DIRECTION when two components' only connection is a single
+    // closure/tie leg (e.g. two separately *fixed* components joined
+    // by nothing else): the later-anchored one claims it as ITS parent
+    // first, so the earlier, already-established one sees the later
+    // one as its own descendant by the time it looks and correctly
+    // does not also try to adopt it. Reversing this order still cannot
+    // produce a cycle -- only a different (equally valid) tree shape.
     var isDescendant = function(ancestorKey, candidateKey) {
         var cur2 = candidateKey;
         var guard = 0;
@@ -619,18 +649,21 @@ CsProfile.hierarchy = function(grouped, resolved) {
     for (i = grouped.order.length - 1; i >= 0; i--) {
         var p2Key = grouped.order[i];
         var p2r1 = rank1ByRun[p2Key];
+        var seen2 = seenByRun[p2Key];
 
         if (parents[p2Key] !== null) {
             // Already has a phase-1 parent: its closure/tie contacts
             // are ordinary secondTies, not primary-candidate material.
-            var seenHas = {};
-            seenHas[ties[p2Key]] = true;
+            // seen2 already carries this run's primary tie station (and
+            // any phase-1 secondTie stations) from the block above, so
+            // a closure landing on one of THOSE stations is correctly
+            // recognised as the same junction, not a new one (M-3).
             for (k = 0; k < p2r1.length; k++) {
                 var stHas = p2r1[k].station;
-                if (seenHas.hasOwnProperty(stHas)) {
+                if (seen2.hasOwnProperty(stHas)) {
                     continue;
                 }
-                seenHas[stHas] = true;
+                seen2[stHas] = true;
                 secondTies.push({
                     run: p2Key,
                     station: stHas,
@@ -657,14 +690,13 @@ CsProfile.hierarchy = function(grouped, resolved) {
         if (chosen !== null) {
             parents[p2Key] = chosen.otherRun;
             ties[p2Key] = chosen.station;
-            var seenFill = {};
-            seenFill[chosen.station] = true;
+            seen2[chosen.station] = true;
             for (k = 0; k < extras.length; k++) {
                 var stFill = extras[k].station;
-                if (seenFill.hasOwnProperty(stFill)) {
+                if (seen2.hasOwnProperty(stFill)) {
                     continue;
                 }
-                seenFill[stFill] = true;
+                seen2[stFill] = true;
                 secondTies.push({
                     run: p2Key,
                     station: stFill,
@@ -674,15 +706,62 @@ CsProfile.hierarchy = function(grouped, resolved) {
         }
     }
 
-    // ---- final pass: orphans and name/graph mismatches --------------
+    // ---- final filter: one physical junction, reported once --------
     //
-    // Both need the FINAL tie, which phase 2 may have set after phase 1
-    // left it null, so this runs only after both phases are done.
+    // Phase 2 decides each run's OWN candidates using the parents map
+    // AS IT STOOD AT THAT MOMENT, not the final one: a candidate that
+    // looked like a legitimate second contact when THIS run was
+    // examined can become this run's OWN descendant a little later in
+    // the SAME pass, via that candidate's own separate phase-2
+    // assignment -- at which point the entry describes exactly the
+    // junction the descendant now reports as ITS primary tie, and
+    // WHICH shot order happens to produce the duplicate depends only
+    // on iteration order among runs with no other qualifying
+    // candidate, not on anything physically different about the
+    // survey (M-2). Re-checked here against the FULLY SETTLED parents
+    // map, once, so the result no longer depends on that timing.
+    // cycleDemotions is merged back in afterward, unfiltered -- see the
+    // comment on it above for why it must not go through this check.
+    var filteredSecondTies = [];
+    for (i = 0; i < secondTies.length; i++) {
+        if (isDescendant(secondTies[i].run, secondTies[i].otherRun)) {
+            continue;
+        }
+        filteredSecondTies.push(secondTies[i]);
+    }
+    secondTies = filteredSecondTies.concat(cycleDemotions);
+
+    // ---- primary root, orphans, and name/graph mismatches ----------
+    //
+    // grouped.order[0]'s own run need not itself be parentless -- a
+    // phase-1 cycle can elect some OTHER member as root (breakCycle
+    // picks the earliest STATION, not the earliest RUN), and phase 2
+    // can equally leave grouped.order[0] with a parent while some
+    // other run stays the tree's true root. Walking up from
+    // grouped.order[0] once finds the actual root regardless of which
+    // run that turns out to be; using array POSITION as a stand-in for
+    // rootness was the I-1 bug (parents[grouped.order[0]] !== null yet
+    // some other run wrongly reported as the disconnected one).
+    var primaryRoot = grouped.order[0];
+    if (primaryRoot !== undefined) {
+        var rootGuard = 0;
+        while (parents[primaryRoot] !== null && parents[primaryRoot] !== undefined &&
+                grouped.runs.hasOwnProperty(parents[primaryRoot])) {
+            primaryRoot = parents[primaryRoot];
+            rootGuard++;
+            if (rootGuard > grouped.order.length + 1) {
+                break;   // acyclic by this point; belt-and-braces
+            }
+        }
+    }
+
     for (i = 0; i < grouped.order.length; i++) {
         var fKey = grouped.order[i];
-        if (parents[fKey] === null && i > 0) {
-            // the root run (i === 0), or a run in its own disconnected
-            // component that no phase found a contact for at all
+        if (parents[fKey] === null && fKey !== primaryRoot) {
+            // a genuinely disconnected component, OR a second
+            // parentless run phase 2 could not merge into the primary
+            // tree despite being part of the same connected cave --
+            // see the docblock above and the M-7 note in the review
             orphans.push(fKey);
         }
 
