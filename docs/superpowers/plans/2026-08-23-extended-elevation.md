@@ -2460,7 +2460,10 @@ git commit -m "feat(CsProfileFile): the profile's own drawing, and the writer th
 - [ ] A band with a non-zero `zOffset` has that offset applied to every Y it draws, and its label says so
 - [ ] `CsProfileDraw.erase(doc, di)` removes every entity carrying a `Profile*` tag and nothing else — sketched linework survives, including linework on `PROFILE-FLOOR`/`PROFILE-CEILING`
 - [ ] Drawing twice produces the same entity count as drawing once (no duplication)
-- [ ] Layers created via `CsLayers.ensure` when the document lacks them; writes wrapped in `CsLayers.withLayerOn` for any layer that may be off
+- [ ] Layers created via `CsLayers.ensure` when the document lacks them, AND both the erase and the add wrapped in `CsLayers.withLayerOn` over the whole layer set. None of these layers ships off, but a user switches `CTRL-PROFILE-CEILING` off precisely in order to trace over it — and this build silently refuses adds AND deletes on an off layer, so the old run survives while the new one is dropped, or a second copy lands beside it. Measured by toggling the layer between two renders
+- [ ] Every `Profile*`-tagged entity also carries `ProfileRun`, INCLUDING the station text label — `CsDraw.addText` takes only one tag, so the label needs tagging after the fact, the same pattern `CsDraw.survey` uses for its `Trip*` tags
+- [ ] A band with zero stations (stopped at its first station) has `datum === null`, so any label position computed as `band.datum + offset` silently coerces to a fabricated 0. The label's Y must be an explicit constant, documented as NOT a survey-data default, and its text must name the station and reason instead of reading as a normal band
+- [ ] `zOffset` is actually applied to drawn geometry — assert a real drawn COORDINATE, not just counts and tags. A full test suite once passed with `zOffset` never applied at all, because nothing checked a coordinate
 
 **Verify:** `/Applications/CaveCAD.app/Contents/MacOS/CaveCAD -no-dock-icon -no-gui -allow-multiple-instances -autostart tests/profile_draw_roundtrip.js "$PWD"` → `### PROFILE DRAW OK`
 
@@ -2603,7 +2606,6 @@ Create `scripts/CaveSurvey/Core/CsProfileDraw.js`:
 //   ProfileRun         every entity of a band: its run key
 //   ProfileStation     station point and its label
 //   ProfileShot        centerline leg, "A1->A2"
-//   ProfileLrud        a U or D tick, "A2.U" / "A2.D"
 //   ProfileSplay       splay ray, tip, or flat tick
 //   ProfileFloorRun    generated floor polyline
 //   ProfileCeilingRun  generated ceiling polyline
@@ -2613,7 +2615,7 @@ Create `scripts/CaveSurvey/Core/CsProfileDraw.js`:
 var CsProfileDraw = {};
 
 CsProfileDraw.TAGS = ["ProfileRun", "ProfileStation", "ProfileShot",
-    "ProfileLrud", "ProfileSplay", "ProfileFloorRun", "ProfileCeilingRun",
+    "ProfileSplay", "ProfileFloorRun", "ProfileCeilingRun",
     "ProfileBandLabel", "ProfileZOffset"];
 
 /** Layers the profile writes to, created if the drawing lacks them. */
