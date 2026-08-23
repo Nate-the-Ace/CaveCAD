@@ -122,7 +122,7 @@ function buildLegendRun() {
             100.0,
             RS.VAlignMiddle, RS.HAlignLeft,
             RS.LeftToRight, RS.Exact,
-            1.0, label, "standard", false, false, 0.0, false));
+            1.0, CsDraw.caps(label), "standard", false, false, 0.0, false));
         text.setLayerId(legendLayerId);
         CsTags.set(text, "LegendRow", entry.block);
         op.addObject(text, false);

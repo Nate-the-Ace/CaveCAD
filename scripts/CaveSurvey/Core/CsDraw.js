@@ -19,11 +19,43 @@ var CsDraw = {};
 
 CsDraw.TEXT_HEIGHT = 0.5;
 
-/** One text entity, layered and tagged, into the op. */
+/**
+ * LETTERING IS UPPERCASE. Every piece of text this suite draws --
+ * station labels, splay names, notes, the legend, title block values
+ * -- is capitalised, the drafting convention that predates all of
+ * this and that a hand-lettered cave map has always followed.
+ *
+ * It happens where the entity is MADE, never to the data behind it:
+ * the note you typed stays as you typed it in the notebook and in
+ * XDATA, and only the drawn text is capitalised. Nothing is lost, so
+ * nothing has to be undone if the convention ever changes.
+ *
+ * The character after a backslash keeps its case: MText formatting
+ * codes are case-sensitive (\P breaks a paragraph, \p sets paragraph
+ * properties), so blind uppercasing would rewrite one into the other.
+ */
+CsDraw.caps = function(text) {
+    if (text === undefined || text === null) {
+        return "";
+    }
+    var s = String(text);
+    var out = "";
+    for (var i = 0; i < s.length; i++) {
+        if (s.charAt(i) === "\\" && i + 1 < s.length) {
+            out += s.charAt(i) + s.charAt(i + 1);   // escape code, verbatim
+            i++;
+            continue;
+        }
+        out += s.charAt(i).toUpperCase();
+    }
+    return out;
+};
+
+/** One text entity, layered, capitalised and tagged, into the op. */
 CsDraw.addText = function(doc, op, layerName, text, pos, halign, tagKey, tagValue) {
     var data = new RTextData(pos, pos, CsDraw.TEXT_HEIGHT, 100.0,
         RS.VAlignMiddle, halign, RS.LeftToRight, RS.Exact,
-        1.0, text, "standard", false, false, 0.0, false);
+        1.0, CsDraw.caps(text), "standard", false, false, 0.0, false);
     var entity = new RTextEntity(doc, data);
     entity.setLayerId(doc.getLayerId(layerName));
     if (tagKey !== undefined && tagValue !== undefined && tagValue !== "") {

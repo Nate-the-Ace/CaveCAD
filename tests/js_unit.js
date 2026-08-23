@@ -3851,12 +3851,6 @@ if (teamBoundaryRt.trips.length === 2) {
 // ---------------------------------------------------------------------
 
 // ---------------------------------------------------------------------
-// Drawing round-trip -- QCAD engine only (node has no R* classes).
-// This is the test that would have caught the silent simple.js
-// failures: draw into a real document, read layers and tags back.
-// ---------------------------------------------------------------------
-
-// ---------------------------------------------------------------------
 // Lettering: everything the tools draw is UPPERCASE, the drafting
 // convention. Enforced where the entity is made, so the survey data
 // underneath keeps the case it was typed in.

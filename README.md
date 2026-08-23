@@ -25,15 +25,17 @@ Each appears in the **Cave Survey** menu and as a command:
 | Scatter Breakdown | `scb` | Fill closed `BREAKDOWN-BOUNDARY` polylines with breakdown symbols, per boundary. |
 | Align Image | `ali` | Fit a scanned map onto known stations (move/rotate/scale, warp with 3+ points) for wall tracing. |
 | Survey Stats | `sst` | Length, depth, loop closures, and the honest BCRA/UIS grade, computed from the drawing. |
-| Title Block | `tb` | Fill in the sheet's title block, every NSS required element explained. |
 | Build Legend | `bl` | Generate the legend from the symbols the map actually uses (NSS names, UIS aliases). |
-| Sheet Check | `shc` | What would a judge mark missing? The NSS required-elements list as a to-do list. |
-| Cave Mode | `cavemode` | Hide stock CAD clutter; QCAD becomes a dedicated cave mapping app. Toggleable, persistent. |
-| Swap Theme | `theme` | Toggle CaveCAD between its dark and light interface themes. |
 
 Start a new map from `templates/NSS_Cave_Template_PLAN.dxf` (or
 `..._PROFILE.dxf`) -- the tools draw onto its layers and the title block and
-symbol blocks live there.
+symbol blocks live there. Every `File > New` starts from the plan template
+unless the `CaveSurvey/TemplateOnNew` setting is explicitly false.
+
+The title block is **ordinary text** on the `TITLE-BLOCK` layer: double-click
+a line to edit it, drag it where you want it, delete the lines this map does
+not use. Survey Stats can still stamp length, depth and grade into their
+lines, which it finds by a hidden field tag rather than by position.
 
 ## A note on privacy
 
@@ -69,10 +71,21 @@ These hold across every tool, and are worth knowing before you trust a map:
   untouched in XDATA, and redrawing with `CaveSurvey/AdjustEnabled` set false
   reproduces the as-surveyed geometry exactly. The as-surveyed shape is also
   drawn as a ghost on layer `CTRL-RAW` so you can see what the solver did.
+* **Everything the tools draw letters in UPPERCASE.** Station labels, splay
+  names, notes, the legend, title block values, and the templates' own lines --
+  the drafting convention a hand-lettered cave map has always followed.
+  Capitalisation happens where the entity is made (`CsDraw.caps`), never to the
+  data behind it: the note you typed keeps its case in the notebook and in
+  XDATA.
 * **Passage walls come with the survey, not from a separate step.** Wall runs
-  are derived from LRUD and drawn inside the same undo step as the centreline,
-  dashed, as something to trace real walls over rather than as the walls
-  themselves. Redrawing replaces them.
+  are derived from LRUD **and from every splay** -- a splay tip is a measured
+  wall hit, so it joins the wall on the side it was shot, ordered along the
+  passage -- and drawn inside the same undo step as the centreline, dashed, as
+  something to trace real walls over rather than as the walls themselves. A
+  station with splays but no LRUD still carries walls. Splays are used
+  unfiltered, so a ceiling shot pulls its wall in toward the station: that is
+  the data talking, and tracing is where you overrule it. Redrawing replaces
+  them.
 * **Grades quote the as-surveyed closure, never the adjusted one.** Adjustment
   makes a loop close by construction, so quoting the post-adjustment figure
   would make every survey report as BCRA grade 5. Survey Stats reports the
