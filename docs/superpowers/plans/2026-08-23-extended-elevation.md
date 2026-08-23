@@ -75,7 +75,7 @@ Run `./tests/run_all.sh` before every commit. Baseline at plan time: 42/42 files
 
 **Acceptance Criteria:**
 - [ ] `A20` → run `A`, seq `20`; `A13a1` → run `A13a`, seq `1`; `A13a2b1` → run `A13a2b`, seq `1`; `B1` → run `B`, seq `1`
-- [ ] A single-group name (`A`, `12`) is its own run with an empty sequence
+- [ ] A single-group name (`A`, `12`) keys its own run key and carries no sequence, so it JOINS the run its name is the base of and leads it — a bare `A` is run `A`'s origin station and sorts before `A1`
 - [ ] `tieNameOfRun` returns `A13` for run `A13a`, `A13a2` for run `A13a2b`, and `null` for run `A` or `B`
 - [ ] Splay names (`A3.1`) are refused by the parser, not misread as stations
 - [ ] `groupRuns` returns runs whose members are ordered numerically when sequences are numeric, lexically otherwise
@@ -105,9 +105,11 @@ Append to `tests/js_unit.js`, before the final summary print:
     s = CsProfile.splitName("B1");
     ok(s !== null && s.base === "B" && s.seq === "1", "B1 splits B + 1");
 
-    // one group only: the whole name is the run, no sequence
+    // one group only: the whole name is the base and there is no
+    // sequence, so the station JOINS run A as its origin -- it does not
+    // become a run of its own
     s = CsProfile.splitName("A");
-    ok(s !== null && s.base === "A" && s.seq === "", "bare A is its own run");
+    eqs(sn(CsProfile.splitName("A")), "A|", "bare A carries no sequence");
 
     // a splay name is not a station name
     ok(CsProfile.splitName("A3.1") === null, "splay name refused");
@@ -208,10 +210,11 @@ var CsProfile = {};
  * like characters. Returns null for anything that is not a station
  * name: empty, null, or a splay (which carries a dot).
  *
- * A name with only one group (e.g. "A", "12") is its own run with an
- * empty sequence -- it cannot be grouped with anything else, and
- * pretending its single group is a sequence would put "A" and "B" in
- * one nameless run.
+ * A name with only one group (e.g. "A", "12") has the whole name as its
+ * base and no sequence. It therefore JOINS the run its name keys -- a
+ * bare "A" is run A's origin station -- and an empty sequence sorts
+ * first, because an origin leads its run. Pretending the single group
+ * were a sequence instead would put "A" and "B" in one nameless run.
  */
 CsProfile.splitName = function(name) {
     if (name === undefined || name === null) {

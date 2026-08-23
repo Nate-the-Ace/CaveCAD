@@ -8405,6 +8405,15 @@ if (!IS_NODE) {
     var g = CsProfile.groupRuns(CsNetwork.resolve(sv, {}));
     eqs(g.order.join(","), "A,9",
         "run order follows resolution order, not property enumeration");
+
+    // Hardening on the same claim, from a synthetic resolve: .seq here
+    // deliberately DISAGREES with insertion order, so no property
+    // enumeration order can imitate the right answer -- the sort has to
+    // be doing the work. The fixture above stays because it exercises
+    // real resolve() output; this one cannot be satisfied by accident.
+    eqs(CsProfile.groupRuns({ stations: { A1: { seq: 5 }, A2: { seq: 6 },
+        B1: { seq: 0 } } }).order.join(","), "B,A",
+        "run order comes from .seq, not from insertion order");
 }());
 
 (function() {
