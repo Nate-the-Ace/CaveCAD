@@ -70,6 +70,13 @@ Each was a real defect in this codebase. Not style preferences.
 - **Never let a missing measurement become a number.** A fabricated coordinate is worse than a refusal.
 - **Comments explain WHY. A false comment is worse than none.**
 
+### The repo is NOT what CaveCAD runs
+
+**Every GUI check in this plan requires `./tools/publish.sh` first, then a FULL restart of CaveCAD.** Add-ons load only at startup, and CaveCAD reads real files from
+`~/Library/Application Support/QCAD/CaveCAD/scripts/CaveSurvey` — a plain copy that `publish.sh` replaces outright. Nothing is symlinked; editing the repo changes nothing the app can see.
+
+This cost a round trip on Task 4: the tool was reported missing from the Cave Survey menu, and the cause was simply that the installed copy predated it. The headless suites (`run_all.sh`, `js_unit.js`) read the repo directly, so they can be fully green while the app still shows an old build. A green suite is NOT evidence that the app has your code.
+
 ### Three structural-test constraints discovered while planning
 
 These are not obvious from reading the add-on, and getting any of them wrong fails `tests/test_addon.py` in a way whose message does not name the cause.
@@ -918,7 +925,7 @@ git commit -m "feat(CsTrace): fit a spline and emit it onto its feature layer"
 - [ ] Zooming in and out changes the on-screen sample density hardly at all, because the capture threshold is screen-space
 - [ ] Nothing lands on any layer other than `WALLS-SURVEYED`
 
-**Verify:** `./tests/run_all.sh --publish` → `ALL TESTS PASSED -- including publish checks`, then the GUI observations above captured by hand in CaveCAD with the drawing's layer list before and after
+**Verify:** `./tests/run_all.sh --publish` → `ALL TESTS PASSED -- including publish checks`, then `./tools/publish.sh` and a full CaveCAD restart, then the GUI observations above captured by hand with the drawing's layer list before and after
 
 **Steps:**
 
@@ -1220,7 +1227,7 @@ If `75` is taken with group 450, pick a free number and use it instead. `test_so
 
 Expected: `ALL TESTS PASSED -- including publish checks`. If `test_every_tool_declares_a_sort_order` fails, the local variable is not called `action`. If `test_every_tool_appears_in_the_readme_table` fails, that is Task 7's job — note it and continue.
 
-- [ ] **Step 6: Capture the GUI observations.** Open CaveCAD on a drawing made from the plan template. For each acceptance criterion above, perform it and record the result. Capture, at minimum: the layer list before and after a trace, the undo history depth after one trace, and the control-point count of the resulting spline against the number of samples reported in the command line message.
+- [ ] **Step 6: Publish, restart, then capture the GUI observations.** Run `./tools/publish.sh`, quit CaveCAD completely and reopen it — the repo is not what it runs; see the Conventions note above. Then open a drawing made from the plan template. For each acceptance criterion above, perform it and record the result. Capture, at minimum: the layer list before and after a trace, the undo history depth after one trace, and the control-point count of the resulting spline against the number of samples reported in the command line message.
 
 - [ ] **Step 7: Commit.**
 
@@ -1253,7 +1260,7 @@ git commit -m "feat(FeatureTrace): freehand drag-trace onto a feature layer"
 - [ ] A failure to build the dock at all warns and leaves the menu entry harmless rather than throwing at startup
 - [ ] `./tests/run_all.sh --publish` still passes
 
-**Verify:** `./tests/run_all.sh --publish` → `ALL TESTS PASSED -- including publish checks`, then in CaveCAD: open the panel, arm each of the ten rows in turn, trace once per row, and confirm each spline landed on the layer its row names and that the armed row stayed checked
+**Verify:** `./tests/run_all.sh --publish` → `ALL TESTS PASSED -- including publish checks`, then `./tools/publish.sh` and a full CaveCAD restart, then in CaveCAD: open the panel, arm each of the ten rows in turn, trace once per row, and confirm each spline landed on the layer its row names and that the armed row stayed checked
 
 **Steps:**
 
