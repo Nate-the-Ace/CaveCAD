@@ -329,8 +329,15 @@ if (a1a2Leg !== null) {
 }
 ok(bandALabel !== null, "sanity: found band A's caption");
 if (bandALabel !== null) {
-    eqs(bandALabel.layer, CsLayers.PROFILE_TEXT_LABELS,
-        "a band caption lands on PROFILE-TEXT-LABELS");
+    // CTRL-, not the caver's PROFILE-TEXT-LABELS. A generated caption on
+    // the traced layer made erase() the owner of a layer in the user's
+    // namespace, and made captions bindable linework as far as CsBind
+    // was concerned -- and per-run variants turned that into a whole
+    // family of generator-owned traced layers.
+    eqs(bandALabel.layer, CsLayers.PROFILE_BAND_LABELS,
+        "a band caption lands on CTRL-PROFILE-TEXT-LABELS");
+    ok(bandALabel.layer !== CsLayers.PROFILE_TEXT_LABELS,
+        "a band caption stays OUT of the caver's text layer");
     // minor: the caption sits TEXT_HEIGHT*4.0 above CsProfileDraw.
     // labelY0(band) (band A's own zOffset is 0, so no further shift).
     var bandA = null;
@@ -2390,8 +2397,8 @@ function drawAtExaggeration(exag) {
             "VERTICAL EXAGGERATION 2X -- NOT TO SHEET SCALE",
             "the stamp reads exactly this, a whole factor as 2x");
         eqs(two.doc.getLayerName(stamps2[0].getLayerId()),
-            CsLayers.PROFILE_TEXT_LABELS,
-            "the stamp lands on PROFILE-TEXT-LABELS");
+            CsLayers.PROFILE_BAND_LABELS,
+            "the stamp lands on CTRL-PROFILE-TEXT-LABELS");
         eqs(String(CsProfileBind.isProfileGeometry(stamps2[0])), "true",
             "and it is generator-owned, so the next redraw erases it " +
             "rather than stacking a second one on top");

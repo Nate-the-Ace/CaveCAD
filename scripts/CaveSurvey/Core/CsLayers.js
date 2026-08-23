@@ -46,6 +46,16 @@ CsLayers.PROFILE_STATIONS = "CTRL-PROFILE-STATIONS";
 CsLayers.PROFILE_STATION_LABELS = "CTRL-PROFILE-STATION-LABELS";
 CsLayers.PROFILE_SPLAYS = "CTRL-PROFILE-SPLAYS";
 CsLayers.PROFILE_LRUD = "CTRL-PROFILE-LRUD";
+// The generator's own band captions and its exaggeration stamp.
+//
+// CTRL-, like every other layer the generator owns. They used to share
+// the caver's PROFILE-TEXT-LABELS, which made erase() the owner of a
+// layer in the user's namespace AND made generated captions bindable
+// linework as far as CsBind was concerned. Per-run variants multiplied
+// that: PROFILE-TEXT-LABELS-A was a generator-owned layer sitting in the
+// traced vocabulary. A test now asserts every layer in
+// CsProfileDraw.LAYERS() is CTRL-, so this cannot drift back.
+CsLayers.PROFILE_BAND_LABELS = "CTRL-PROFILE-TEXT-LABELS";
 
 // The profile frame's traceable layers -- what a caver draws on an
 // elevation. These must NOT begin "CTRL-", for the mirror of the
@@ -99,6 +109,7 @@ CsLayers.DEFAULTS = {
     "CTRL-PROFILE-STATION-LABELS": ["red", "CONTINUOUS", "Weight025"],
     "CTRL-PROFILE-SPLAYS": ["gray", "CONTINUOUS", "Weight000"],
     "CTRL-PROFILE-LRUD": ["pink", "CONTINUOUS", "Weight025"],
+    "CTRL-PROFILE-TEXT-LABELS": ["red", "CONTINUOUS", "Weight018"],
     // and the traceable ones mirror the plan feature layer a caver
     // would reach for to draw the same thing. Ceiling and floor are
     // the elevation's wall lines, hence WALLS-SURVEYED's weight.

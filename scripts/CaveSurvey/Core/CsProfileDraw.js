@@ -54,7 +54,7 @@ CsProfileDraw.LAYERS = function() {
     return [CsLayers.PROFILE_SHOTS, CsLayers.PROFILE_STATIONS,
         CsLayers.PROFILE_STATION_LABELS, CsLayers.PROFILE_SPLAYS,
         CsLayers.PROFILE_FLOOR, CsLayers.PROFILE_CEILING,
-        CsLayers.PROFILE_TEXT_LABELS];
+        CsLayers.PROFILE_BAND_LABELS];
 };
 
 /**
@@ -369,7 +369,7 @@ CsProfileDraw.label = function(doc, di, op, band, at) {
     var text = CsProfileDraw.labelText(band);
     var y = CsProfileDraw.labelY0(band);
     var label = CsDraw.addText(doc, op,
-        CsProfileDraw.layerFor(doc, di, CsLayers.PROFILE_TEXT_LABELS, band),
+        CsProfileDraw.layerFor(doc, di, CsLayers.PROFILE_BAND_LABELS, band),
         text, at(0, y + CsDraw.TEXT_HEIGHT * 4.0), RS.HAlignLeft,
         "ProfileBandLabel", band.key);
     // CsDraw.addText already queued `label` into `op` via its own
@@ -596,7 +596,7 @@ CsProfileDraw.stamp = function(doc, op, profile, origin, bounds) {
     // caption (which sits TEXT_HEIGHT * 4 above its band).
     var pos = new RVector(ox + bounds.minX,
         oy + bounds.maxY + CsDraw.TEXT_HEIGHT * 7.0);
-    return CsDraw.addText(doc, op, CsLayers.PROFILE_TEXT_LABELS, text, pos,
+    return CsDraw.addText(doc, op, CsLayers.PROFILE_BAND_LABELS, text, pos,
         RS.HAlignLeft, "ProfileExaggerationStamp", text);
 };
 

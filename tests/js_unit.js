@@ -14351,6 +14351,7 @@ if (!IS_NODE) {
         loadRepoScript("scripts/CaveSurvey/Core/CsLayers.js");
         loadRepoScript("scripts/CaveSurvey/Core/CsLayerVariants.js");
         loadRepoScript("scripts/CaveSurvey/Core/CsTags.js");
+        loadRepoScript("scripts/CaveSurvey/Core/CsBind.js");
         loadRepoScript("scripts/CaveSurvey/Core/CsProfileDraw.js");
 
         // -- the token policy ----------------------------------------
@@ -14434,6 +14435,31 @@ if (!IS_NODE) {
         generated(cOld, CsLayers.PROFILE_SHOTS, "A");
         eqs(CsProfileDraw.erase(cOld.doc, cOld.di, "A"), 1,
             "CsProfileDraw.erase: scoped erase still finds pre-segregation output");
+
+        // -- THE GENERATOR OWNS NOTHING IN THE CAVER'S NAMESPACE -----
+        // Its captions used to live on PROFILE-TEXT-LABELS, so erase()
+        // owned a layer in the traced vocabulary and CsBind treated
+        // generated captions as bindable linework. Per-run variants made
+        // it worse: PROFILE-TEXT-LABELS-A was a generator-owned layer in
+        // the user's namespace. Every owned layer is CTRL- now, and this
+        // is what stops it drifting back.
+        var owned = CsProfileDraw.LAYERS();
+        for (var oj = 0; oj < owned.length; oj++) {
+            ok(String(owned[oj]).indexOf("CTRL-") === 0,
+                "CsProfileDraw.LAYERS: " + owned[oj] +
+                    " is CTRL-, so the generator owns nothing traceable");
+            ok(!CsBind.isLineworkLayer(owned[oj]),
+                "CsProfileDraw.LAYERS: " + owned[oj] +
+                    " is not bindable linework");
+        }
+
+        // A caver's OWN label on the traced layer survives erase even
+        // when it carries a Profile* tag -- the promoted-line case, on
+        // the layer that used to be shared.
+        var cLbl = docWith();
+        generated(cLbl, CsLayers.PROFILE_TEXT_LABELS, "A");
+        eqs(CsProfileDraw.erase(cLbl.doc, cLbl.di), 0,
+            "CsProfileDraw.erase: a label on the CAVER's text layer is spared");
 
         // -- the promoted line still survives, variants included -----
         // A generated curve moved onto a TRACED layer keeps its tags but
