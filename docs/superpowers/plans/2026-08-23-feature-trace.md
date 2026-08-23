@@ -1252,6 +1252,10 @@ git commit -m "feat(FeatureTrace): freehand drag-trace onto a feature layer"
 - [ ] The menu entry toggles dock visibility rather than starting a trace
 - [ ] Two `QGroupBox`es, `Plan` and `Profile`, hold five rows each, in the order and with the labels from the spec's §7
 - [ ] Every row's layer comes from a `CsLayers` CONSTANT, never a string literal
+- [ ] **PLAN GAP, now closed:** the Interval and Smoothing controls appeared in the spec's panel sketch but no task implemented them. The panel now owns both, and the drag reads them through `FeatureTraceRun.intervalFeet()` / `toleranceFraction()`, which fall back to 1 ft / Medium when there is no panel
+- [ ] Interval is in FEET whatever the drawing's unit is (`spacingFor` converts), and the tolerance is a FRACTION of the spacing, so one smoothing setting means the same thing in a foot drawing and a metre one
+- [ ] A blank, negative or non-numeric interval falls back to 1 ft rather than becoming a spacing of 0 — `resample` returns the raw drag unchanged at spacing 0
+- [ ] `QGroupBox` and `QComboBox` are proven in this bridge (stock `PropertyEditor.js` uses both); the suite had used neither before
 - [ ] A test asserts `CsBind.isLineworkLayer` is TRUE for every row's layer — false for any `CTRL-` name, so the `PROFILE_FLOOR`/`PROFILE_TRACED_FLOOR` slip becomes a named failure instead of work the next redraw eats
 - [ ] A test asserts every row's `CsLayers.frameOf` matches the group it is built into, and that each group holds exactly 5 rows
 - [ ] Clicking a row sets `FeatureTrace.target` and starts `FeatureTraceRun`

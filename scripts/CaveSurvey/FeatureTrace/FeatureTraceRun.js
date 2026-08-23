@@ -47,6 +47,27 @@ FeatureTraceRun.targetLayer = function() {
     return CsLayers.WALLS_SURVEYED;
 };
 
+/** The panel's sample interval in feet, or 1.0 without a panel.
+ *  Every panel read goes through a helper like this so the drag action
+ *  works standalone -- it is usable before the panel exists and if the
+ *  panel ever fails to build. */
+FeatureTraceRun.intervalFeet = function() {
+    if (typeof FeatureTrace !== "undefined" &&
+            !isNull(FeatureTrace.intervalFeet)) {
+        return FeatureTrace.intervalFeet();
+    }
+    return 1.0;
+};
+
+/** The panel's reduce tolerance as a fraction of the spacing, or a half. */
+FeatureTraceRun.toleranceFraction = function() {
+    if (typeof FeatureTrace !== "undefined" &&
+            !isNull(FeatureTrace.toleranceFraction)) {
+        return FeatureTrace.toleranceFraction();
+    }
+    return 0.5;
+};
+
 /**
  * null when `layerName` may be traced at `point`, otherwise the reason
  * it may not.
@@ -230,10 +251,15 @@ FeatureTraceRun.prototype.commit = function() {
     }
 
     var unit = CsUnits.fromDrawingUnit(doc.getUnit(), RS);
-    var spacing = CsTrace.spacingFor(unit);
+    // spacingFor gives drawing units per FOOT, so multiplying by the
+    // panel's interval keeps that field in feet whatever the drawing is
+    // in. Tolerance is a fraction of the spacing for the same reason:
+    // one smoothing setting means the same thing in both.
+    var spacing = CsTrace.spacingFor(unit) * FeatureTraceRun.intervalFeet();
+    var tolerance = spacing * FeatureTraceRun.toleranceFraction();
     var layerName = FeatureTraceRun.targetLayer();
     var result = CsTrace.emit(doc, di, layerName, this.samples,
-        spacing, spacing / 2.0);
+        spacing, tolerance);
 
     if (result.added) {
         EAction.handleUserMessage(qsTr("%1: %2 sampled, %3 kept")

@@ -13742,6 +13742,131 @@ if (!IS_NODE) {
 }
 
 // ---------------------------------------------------------------------
+// FeatureTrace.ROWS -- the table cannot name a generator-owned layer
+// ---------------------------------------------------------------------
+if (!IS_NODE) {
+    (function() {
+        loadRepoScript("scripts/CaveSurvey/Core/CsLayers.js");
+        loadRepoScript("scripts/CaveSurvey/Core/CsBind.js");
+        loadRepoScript("scripts/CaveSurvey/Core/CsTrace.js");
+        loadRepoScript("scripts/CaveSurvey/FeatureTrace/FeatureTraceRun.js");
+        loadRepoScript("scripts/CaveSurvey/FeatureTrace/FeatureTrace.js");
+
+        eqs(FeatureTrace.ROWS.length, 10,
+            "FeatureTrace.ROWS: ten traceable features");
+
+        var planCount = 0, profileCount = 0, i;
+        var seen = {};
+        for (i = 0; i < FeatureTrace.ROWS.length; i++) {
+            var row = FeatureTrace.ROWS[i];
+
+            // The one-word slip this kills: CsLayers.PROFILE_FLOOR is the
+            // GENERATED CTRL-PROFILE-FLOOR, which erase() owns and clears.
+            // isLineworkLayer is false for anything CTRL-, so a row naming
+            // the generated twin fails HERE instead of losing an hour of
+            // tracing at the next redraw.
+            ok(CsBind.isLineworkLayer(row.layer),
+                "FeatureTrace.ROWS: " + row.layer +
+                    " is a linework layer, not a generated CTRL- one");
+
+            var frame = CsLayers.frameOf(row.layer);
+            ok(frame === "plan" || frame === "profile",
+                "FeatureTrace.ROWS: " + row.layer + " is in a view frame");
+            if (frame === "plan") { planCount++; } else { profileCount++; }
+
+            ok(!isNull(row.label) && row.label.length > 0,
+                "FeatureTrace.ROWS: " + row.layer + " has a label");
+
+            ok(isNull(seen[row.layer]),
+                "FeatureTrace.ROWS: " + row.layer + " appears once only");
+            seen[row.layer] = true;
+
+            // Every layer must be in the registry's DEFAULTS, or ensure()
+            // silently gives it the fallback appearance instead of the
+            // traced-wall weight the template carries.
+            ok(!isNull(CsLayers.DEFAULTS[row.layer]),
+                "FeatureTrace.ROWS: " + row.layer + " has a DEFAULTS entry");
+        }
+        eqs(planCount, 5, "FeatureTrace.ROWS: five plan rows");
+        eqs(profileCount, 5, "FeatureTrace.ROWS: five profile rows");
+
+        // -- arming is what FeatureTraceRun reads -------------------
+        FeatureTrace.target = undefined;
+        FeatureTrace.armLayer(CsLayers.PROFILE_TRACED_FLOOR);
+        eqs(FeatureTrace.target, CsLayers.PROFILE_TRACED_FLOOR,
+            "FeatureTrace.armLayer: sets the target the drag reads");
+        eqs(FeatureTraceRun.targetLayer(), CsLayers.PROFILE_TRACED_FLOOR,
+            "FeatureTrace.armLayer: the drag traces what the panel armed");
+
+        // -- the smoothing table ------------------------------------
+        // Tolerance is a FRACTION of the sample spacing, so it means the
+        // same thing in a foot drawing and a metre one.
+        ok(FeatureTrace.SMOOTHING.length >= 3,
+            "FeatureTrace.SMOOTHING: at least coarse, medium and fine");
+        var med = FeatureTrace.smoothingFraction("Medium");
+        near(med, 0.5, 1e-9,
+            "FeatureTrace.smoothingFraction: Medium is half the spacing");
+        ok(FeatureTrace.smoothingFraction("Fine") <
+                FeatureTrace.smoothingFraction("Coarse"),
+            "FeatureTrace.smoothingFraction: finer means a tighter tolerance");
+        near(FeatureTrace.smoothingFraction("nonsense"), 0.5, 1e-9,
+            "FeatureTrace.smoothingFraction: an unknown name falls back to Medium");
+
+        // The invariant that fallback relies on.
+        ok(FeatureTrace.smoothingFraction(FeatureTrace.DEFAULT_SMOOTHING) > 0,
+            "FeatureTrace: DEFAULT_SMOOTHING is a name that is in SMOOTHING");
+
+        // And the last-ditch constant, which is only reachable if that
+        // invariant is broken. Untested it was dead code a mutation
+        // survived; without it a misspelled default would return
+        // undefined, making the tolerance NaN -- and a NaN tolerance
+        // keeps EVERY sampled point, which is the 400-fit-point spline
+        // the whole reduction exists to avoid.
+        var savedDefault = FeatureTrace.DEFAULT_SMOOTHING;
+        FeatureTrace.DEFAULT_SMOOTHING = "Misspelled";
+        near(FeatureTrace.smoothingFraction("also nonsense"), 0.5, 1e-9,
+            "FeatureTrace.smoothingFraction: a broken default still yields a usable tolerance");
+        FeatureTrace.DEFAULT_SMOOTHING = savedDefault;
+
+        // -- panel reads degrade to defaults without widgets --------
+        // The drag action must work standalone: before the panel is
+        // built, and if the bridge refuses to build it at all.
+        FeatureTrace.widgets = undefined;
+        near(FeatureTrace.intervalFeet(), 1.0, 1e-9,
+            "FeatureTrace.intervalFeet: no panel means one foot");
+        near(FeatureTrace.toleranceFraction(), 0.5, 1e-9,
+            "FeatureTrace.toleranceFraction: no panel means Medium");
+        near(FeatureTraceRun.intervalFeet(), 1.0, 1e-9,
+            "FeatureTraceRun.intervalFeet: reads through to the default");
+        near(FeatureTraceRun.toleranceFraction(), 0.5, 1e-9,
+            "FeatureTraceRun.toleranceFraction: reads through to the default");
+
+        // -- and they read the panel when it IS there ---------------
+        FeatureTrace.widgets = {
+            intervalEdit: { text: "2.5" },
+            smoothingCombo: { currentText: "Fine" }
+        };
+        near(FeatureTrace.intervalFeet(), 2.5, 1e-9,
+            "FeatureTrace.intervalFeet: a typed interval is used");
+        near(FeatureTrace.toleranceFraction(), 0.2, 1e-9,
+            "FeatureTrace.toleranceFraction: the chosen smoothing is used");
+
+        // Junk in the box must not stop a trace, and must not become a
+        // spacing of zero -- CsTrace.resample would return the raw drag.
+        FeatureTrace.widgets = { intervalEdit: { text: "" } };
+        near(FeatureTrace.intervalFeet(), 1.0, 1e-9,
+            "FeatureTrace.intervalFeet: a blank field falls back to one foot");
+        FeatureTrace.widgets = { intervalEdit: { text: "-3" } };
+        near(FeatureTrace.intervalFeet(), 1.0, 1e-9,
+            "FeatureTrace.intervalFeet: a negative interval falls back");
+        FeatureTrace.widgets = { intervalEdit: { text: "banana" } };
+        near(FeatureTrace.intervalFeet(), 1.0, 1e-9,
+            "FeatureTrace.intervalFeet: nonsense falls back");
+        FeatureTrace.widgets = undefined;
+    }());
+}
+
+// ---------------------------------------------------------------------
 // Report.
 // ---------------------------------------------------------------------
 
