@@ -361,7 +361,9 @@ git commit -m "feat(CsProfile): station names decide which survey run a station 
 - Modify: `tests/js_unit.js`
 
 **Acceptance Criteria:**
-- [ ] `adjacency` maps each station to its non-splay, non-closure legs
+- [ ] `adjacency` maps each station to its non-splay, non-closure legs — this is the WALKED-CHAIN graph, consumed by Task 3's chain search
+- [ ] `hierarchy` builds its own contact graph instead of using `adjacency`: closure and tie legs DO count as contacts, because a run that touches its parent a second time through a ring must be able to report it
+- [ ] Contacts are DIRECTIONAL: a cross-run leg counts only when the other station was resolved earlier (`.seq`) than the run's own station. Without this a root run adopts its own child as parent
 - [ ] A spur's parent run and tie station come from the graph
 - [ ] When the graph tie disagrees with the name-derived tie, the graph wins and a mismatch record is returned
 - [ ] A run touching its parent at two stations reports the second as a `secondTie`, choosing the earlier-resolved station as the junction
@@ -398,7 +400,9 @@ Append to `tests/js_unit.js`:
     ok(h.parents["B"] === "A", "letter run B hangs off A");
     ok(h.ties["B"] === "A3", "B ties at the earlier of its two A contacts");
     ok(h.secondTies.length === 1 && h.secondTies[0].run === "B",
-        "B's second contact reported");
+        "B's second contact reported -- it arrives through the closure leg");
+    ok(h.parents["A2a"] !== undefined && h.parents["A"] === null,
+        "a root run does not adopt its own child as parent");
     ok(h.mismatches.length === 0, "no name/graph mismatch here");
     ok(h.order[0] === "A", "root band first");
     ok(h.order.indexOf("A2a") < h.order.indexOf("B"),
@@ -435,10 +439,15 @@ Append to `scripts/CaveSurvey/Core/CsProfile.js`:
 ```javascript
 /**
  * Station -> the legs that touch it, closures and splays excluded.
- * Closure legs are excluded because a closure is a second arrival at
- * an already-placed station: treating it as a connection would let a
- * run inherit a parent through a ring rather than through the leg the
- * surveyor actually walked from.
+ * THE WALKED-CHAIN GRAPH: its consumer is the chain search that lays
+ * out a band (CsProfile.longestChain), which resolves each step through
+ * CsProfile.legBetween -- and that skips closures. Letting a closure in
+ * here would let a chain include a step legBetween cannot resolve, and
+ * the band would stop at it.
+ *
+ * Run hierarchy does NOT use this graph; it builds its own from
+ * resolved.legs, closures included, because a second contact through a
+ * ring is exactly the thing it has to report. See hierarchy().
  *
  * \return {stationName: [{leg, other, seq}]} seq = leg index, so
  *         "which contact came first" is answerable
@@ -501,24 +510,75 @@ CsProfile.hierarchy = function(grouped, resolved) {
         }
     }
 
+    // CONTACTS USE A DIFFERENT GRAPH FROM adjacency(), deliberately.
+    // Closure and tie legs count here: a closure is a real surveyed
+    // shot, and a run that touches its parent a second time through a
+    // ring (B1-A4 closing B1-A3-A4) has to be able to report that
+    // second contact -- excluded, secondTies can never populate at all.
+    // adjacency() stays closure-free because ITS consumer is the chain
+    // search, which resolves each step through CsProfile.legBetween --
+    // and that skips closures too, so a chain routed through a leg
+    // legBetween cannot find would truncate its own band.
+    var contactLegs = [];
+    for (i = 0; i < resolved.legs.length; i++) {
+        var cl = resolved.legs[i];
+        if (cl.shot !== undefined && cl.shot !== null && cl.shot.splay) {
+            continue;
+        }
+        contactLegs.push({ from: cl.from, to: cl.to, seq: i });
+    }
+
+    var seqOf = function(name) {
+        var st = resolved.stations[name];
+        return (st === undefined || st === null || st.seq === undefined ||
+            st.seq === null) ? Number.MAX_VALUE : st.seq;
+    };
+
     for (i = 0; i < grouped.order.length; i++) {
         var key = grouped.order[i];
         var stations = grouped.runs[key].stations;
-        var contacts = [];
+        var inRun = {};
         for (k = 0; k < stations.length; k++) {
-            var links = adj[stations[k]] || [];
-            for (var j = 0; j < links.length; j++) {
-                var otherRun = runOf[links[j].other];
-                if (otherRun === undefined || otherRun === key) {
-                    continue;
-                }
-                contacts.push({
-                    station: links[j].other,
-                    parentRun: otherRun,
-                    seq: links[j].seq
-                });
-            }
+            inRun[stations[k]] = true;
         }
+        var contacts = [];
+        for (k = 0; k < contactLegs.length; k++) {
+            var cg = contactLegs[k];
+            var mine = null, other = null;
+            if (inRun[cg.from] === true) {
+                mine = cg.from;
+                other = cg.to;
+            } else if (inRun[cg.to] === true) {
+                mine = cg.to;
+                other = cg.from;
+            } else {
+                continue;
+            }
+            var otherRun = runOf[other];
+            if (otherRun === undefined || otherRun === key) {
+                continue;
+            }
+            // DIRECTION MATTERS, and getting it wrong inverts the whole
+            // hierarchy. A2 is adjacent to A2a1, so a symmetric scan
+            // makes run A -- the root -- adopt its own child A2a as its
+            // parent. The parent side is the station that was already on
+            // the ground when this leg was walked, and resolution order
+            // is exactly that record.
+            if (seqOf(other) >= seqOf(mine)) {
+                continue;
+            }
+            contacts.push({
+                station: other,
+                parentRun: otherRun,
+                seq: cg.seq
+            });
+        }
+        // seq here is the leg's index in resolved.legs, unique per leg,
+        // and one leg cannot contribute two contacts to the same run
+        // (both endpoints in this run is skipped above) -- so this
+        // comparator can never return 0 for distinct entries, which is
+        // required of every comparator here: this engine's sort is not
+        // stable.
         contacts.sort(function(a, b) { return a.seq - b.seq; });
 
         if (contacts.length === 0) {
@@ -3448,6 +3508,13 @@ These are choices, not omissions. Each is listed here so a later reader does not
 - **Projected profile is a different tool.** `PROFILE-PROJECTED` stays empty; nothing here writes to it.
 - **No length heuristic decides spur versus branch.** The surveyor's naming decides, always.
 
+- **A survey anchored inside a spur makes that spur the root band.** The directional
+  contact test asks which station was already placed when a leg was walked, so if
+  resolution starts inside `A13a` then `A13a` is the root and the trunk `A` becomes its
+  child, tying in at the anchor. Verified in Task 2 against a real fixture: no crash, no
+  cycle in the parent map, `orphans` stays empty, every run appears exactly once in the
+  band order. This is self-consistent — the first-placed run is the root, and the band
+  order then starts where the survey started — and is decided behaviour, not an accident.
 - **Punctuation in a station name silently becomes part of the run key.** `splitName`
   treats a run of non-alphanumerics as a fourth group class, so `A-1` keys run `A-`,
   `A'1` keys `A'`, and `A 1` keys `"A "` — a typo makes its own run rather than being
