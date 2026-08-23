@@ -504,7 +504,9 @@ CsProfile.adjacency = function(resolved) {
  *   parents:    {runKey: parentRunKey | null},
  *   ties:       {runKey: stationName | null},
  *   order:      [runKey] depth first, siblings by junction distance,
- *   secondTies: [{run, station, parentRun}] further contacts,
+ *   secondTies: [{run, station, otherRun}] further contacts -- otherRun
+ *               is the run TOUCHED, not necessarily the parent: a second
+ *               contact can land in a third run,
  *   mismatches: [{run, expected, actual}] name vs graph,
  *   orphans:    [runKey] runs with no determinable parent
  * }
@@ -1456,11 +1458,23 @@ CsProfile.bandWallRuns = function(band, survey, resolved, opts) {
             floor.push(fEntries[k].p);
         }
 
-        // a closure leg arriving here ends the runs for the same reason
+        // A closure leg arriving here ends the runs for the same reason
         // the plan walls end at one: a second arrival is not a
-        // continuation of the passage as walked
-        var closureHere = (arrival !== undefined && arrival.shot !== undefined &&
-            arrival.kind === "closure");
+        // continuation of the passage as walked.
+        //
+        // The leg's kind CANNOT be read off band.legs -- unrollBand
+        // pushes {shot, from, to, fromX, fromY, toX, toY} and no kind --
+        // so a check like `arrival.kind === "closure"` compares
+        // undefined and silently never fires. Look the kind up instead,
+        // and keep this lookup separate from the passage-azimuth map:
+        // that one falls back to the band's opening station, and a
+        // closure landing elsewhere must not inherit that fallback.
+        var closureHere = false;
+        if (arrival !== undefined && arrival !== null) {
+            var kindLeg = CsProfile.tieLegBetween(arrival.from, arrival.to,
+                resolved);
+            closureHere = (kindLeg !== null && kindLeg.kind === "closure");
+        }
 
         if (isJunction || noEvidence || closureHere) {
             flush();
@@ -3534,13 +3548,20 @@ These are choices, not omissions. Each is listed here so a later reader does not
   side. Phase 2 must iterate latest-anchored-first against the LIVE parent map, not a
   phase-1 snapshot: where a tie joins two separately fixed components, neither end has a
   phase-1 parent to freeze, and only processing the later one first lets the descendant
-  check see anything at all. Established by measurement in Task 2, and the descendant
-  check is mutation-verified as load-bearing.
+  check see anything at all — but note precisely what that order buys. CYCLE SAFETY DOES
+  NOT DEPEND ON IT: phase 2 only ever adds an edge from a parentless run to a candidate
+  that is not its descendant, and a parentless run is the root of its own tree, so the
+  candidate is provably in a different tree and the edge merges two trees. The forest
+  stays a forest under ANY iteration order — verified over 4000 random surveys, zero
+  cycles. What the order decides is DIRECTION: forward order lets the natural root claim
+  a later run as its parent and the tree comes out upside down. Do not "optimise" this
+  loop believing cycles are the risk; the risk is an inverted tree. The descendant check
+  is mutation-verified as load-bearing.
 - **A survey anchored inside a spur makes that spur the root band.** The directional
   contact test asks which station was already placed when a leg was walked, so if
   resolution starts inside `A13a` then `A13a` is the root and the trunk `A` becomes its
   child, tying in at the anchor. Verified in Task 2 against a real fixture: no crash, no
-  cycle in the parent map, `orphans` stays empty, every run appears exactly once in the
+  cycle in the parent map, every run appears exactly once in the
   band order. This is self-consistent — the first-placed run is the root, and the band
   order then starts where the survey started — and is decided behaviour, not an accident.
 - **Punctuation in a station name silently becomes part of the run key.** `splitName`
