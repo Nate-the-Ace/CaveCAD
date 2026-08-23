@@ -95,6 +95,7 @@ var CORE_FILES = [
     "scripts/CaveSurvey/Core/CsNetwork.js",
     "scripts/CaveSurvey/Core/CsAdjust.js",
     "scripts/CaveSurvey/Core/CsLrud.js",
+    "scripts/CaveSurvey/Core/CsProfile.js",
     "scripts/CaveSurvey/Core/CsValidate.js",
     "scripts/CaveSurvey/Core/CsStats.js",
     "scripts/CaveSurvey/Core/CsGrade.js",
@@ -8264,6 +8265,69 @@ if (!IS_NODE) {
     ok(CsCave.pointAtScans("") === null && CsCave.pointAtScans(null) === null,
         "and neither does an unsaved one");
 }
+
+// ---------------------------------------------------------------------
+// CsProfile -- name parsing and run grouping
+// ---------------------------------------------------------------------
+
+(function() {
+    var s = CsProfile.splitName("A20");
+    ok(s !== null && s.base === "A" && s.seq === "20", "A20 splits A + 20");
+    s = CsProfile.splitName("A13a1");
+    ok(s !== null && s.base === "A13a" && s.seq === "1", "A13a1 splits A13a + 1");
+    s = CsProfile.splitName("A13a2b1");
+    ok(s !== null && s.base === "A13a2b" && s.seq === "1",
+        "A13a2b1 splits A13a2b + 1");
+    s = CsProfile.splitName("B1");
+    ok(s !== null && s.base === "B" && s.seq === "1", "B1 splits B + 1");
+
+    // one group only: the whole name is the run, no sequence
+    s = CsProfile.splitName("A");
+    ok(s !== null && s.base === "A" && s.seq === "", "bare A is its own run");
+
+    // a splay name is not a station name
+    ok(CsProfile.splitName("A3.1") === null, "splay name refused");
+    ok(CsProfile.splitName("") === null, "empty name refused");
+    ok(CsProfile.splitName(null) === null, "null name refused");
+
+    ok(CsProfile.runKeyOf("A13a1") === "A13a", "runKeyOf A13a1");
+    ok(CsProfile.runKeyOf("A20") === "A", "runKeyOf A20");
+
+    ok(CsProfile.tieNameOf("A13a") === "A13", "A13a ties A13");
+    ok(CsProfile.tieNameOf("A13a2b") === "A13a2", "A13a2b ties A13a2");
+    ok(CsProfile.tieNameOf("A") === null, "letter run has no name-derived tie");
+    ok(CsProfile.tieNameOf("B") === null, "B has no name-derived tie");
+}());
+
+(function() {
+    // A1-A3 with a spur off A2, plus a letter run off A3
+    var sv = CsModel.newSurvey();
+    sv.shots = [
+        shotOf("A1", "A2", 10, 0, 0),
+        shotOf("A2", "A3", 10, 0, 0),
+        shotOf("A2", "A2a1", 5, 90, 0),
+        shotOf("A2a1", "A2a2", 5, 90, 0),
+        shotOf("A3", "B1", 8, 45, 0),
+        shotOf("B1", "B2", 8, 45, 0)
+    ];
+    var r = CsNetwork.resolve(sv, {});
+    var g = CsProfile.groupRuns(r);
+
+    ok(g.order.length === 3, "three runs found");
+    ok(g.runs["A"].stations.join(",") === "A1,A2,A3", "run A members ordered");
+    ok(g.runs["A2a"].stations.join(",") === "A2a1,A2a2", "spur run members");
+    ok(g.runs["B"].stations.join(",") === "B1,B2", "letter run members");
+
+    // numeric ordering, not lexical: A10 must follow A9
+    var sv2 = CsModel.newSurvey();
+    sv2.shots = [
+        shotOf("A9", "A10", 10, 0, 0),
+        shotOf("A10", "A11", 10, 0, 0)
+    ];
+    var g2 = CsProfile.groupRuns(CsNetwork.resolve(sv2, {}));
+    ok(g2.runs["A"].stations.join(",") === "A9,A10,A11",
+        "numeric sequence ordering, not lexical");
+}());
 
 // ---------------------------------------------------------------------
 // Report.
