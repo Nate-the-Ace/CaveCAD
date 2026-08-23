@@ -11794,6 +11794,14 @@ eqs(CsProfileDraw.labelY0({ stations: [] }), 0.0,
     ok(p.findings.mismatches.length === 1 &&
         p.findings.mismatches[0].run === "A13a",
         "sanity: A13a really is a name/graph mismatch");
+    // this fixture's demoted A14->A99 leg is ALSO the one place this
+    // suite exercises findings.undrawn through the report -- without
+    // this, deleting CsReport.profileSummary's whole `undrawn` block
+    // leaves every other assertion here green (confirmed: that exact
+    // deletion was tried and nothing else in this suite caught it)
+    ok(p.findings.undrawn.length === 1 &&
+        p.findings.undrawn[0].reason === "demoted arm",
+        "sanity: the demoted A14->A99 leg really is in findings.undrawn");
 
     var text = CsReport.profileSummary(p, {
         path: "/x/Cave-PROFILE.dxf", created: true,
@@ -11804,6 +11812,8 @@ eqs(CsProfileDraw.labelY0({ stations: [] }), 0.0,
     ok(text.indexOf("Cave-PROFILE.dxf") >= 0, "report names the file");
     ok(text.indexOf("A13a") >= 0, "report names the mismatching run");
     ok(text.indexOf("A99") >= 0, "report names the omitted station");
+    ok(text.indexOf("demoted arm") >= 0,
+        "report names the undrawn leg's own reason");
     ok(text.length > 0, "report is not empty");
 
     var skipped = CsReport.profileSummary(null,
@@ -11840,6 +11850,48 @@ eqs(CsProfileDraw.labelY0({ stations: [] }), 0.0,
         "an orphan run tells the surveyor a tie shot is missing");
     ok(text.indexOf("its own band rather than hanging off another") < 0,
         "an orphan is never worded as a strandedRoot");
+}());
+
+(function() {
+    // secondTies, ungrouped and wallPointsSkipped each get their own
+    // hand-built findings object rather than a fresh survey fixture --
+    // hierarchy()/build() already exercise the FIRST two extensively
+    // elsewhere in this suite (CsProfile's own test block above), so
+    // this is purely about proving CsReport.profileSummary's own text
+    // for them, the same way the stopped/reason test just above does.
+    function textFor(findings) {
+        return CsReport.profileSummary({ findings: findings },
+            { path: "/x/Cave-PROFILE.dxf", created: false, counts: {} });
+    }
+    var base = { omitted: [], mismatches: [], secondTies: [],
+        orphans: [], strandedRoots: [], stopped: [], ungrouped: [],
+        undrawn: [], wallPointsSkipped: 0 };
+
+    function withField(name, value) {
+        var f = {};
+        for (var k in base) { if (base.hasOwnProperty(k)) { f[k] = base[k]; } }
+        f[name] = value;
+        return f;
+    }
+
+    var secondTieText = textFor(withField("secondTies",
+        [{ run: "B", otherStation: "A9", otherRun: "A" }]));
+    ok(secondTieText.indexOf("B") >= 0 && secondTieText.indexOf("A9") >= 0,
+        "a second tie names both the run and the station it also touches");
+
+    var ungroupedText = textFor(withField("ungrouped", ["A#", "?"]));
+    ok(ungroupedText.indexOf("A#") >= 0 && ungroupedText.indexOf("?") >= 0,
+        "an ungrouped station name is named, not just counted");
+
+    var wpsText = textFor(withField("wallPointsSkipped", 3));
+    ok(wpsText.indexOf("3 splay wall point") >= 0,
+        "wallPointsSkipped is reported, not silently dropped -- deleting " +
+        "CsReport.profileSummary's own handling for it left every other " +
+        "assertion in this suite green (tried by hand before adding this)");
+
+    var zeroWpsText = textFor(base);
+    ok(zeroWpsText.indexOf("splay wall point") < 0,
+        "a zero wallPointsSkipped prints no line at all -- nothing to warn about");
 }());
 
 (function() {
