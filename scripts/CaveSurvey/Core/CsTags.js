@@ -6,6 +6,10 @@
 // Everything rides under the property group "CaveSurvey":
 //   Station      station name, on CTRL-STATIONS points
 //   LRUDName     "A1.L" / "A1.R", on CTRL-LRUD tip points
+//   Splay        "A1.2", on the CTRL-SPLAYS ray line -- which also
+//                carries the same schema-v3 shot data as a leg line
+//   SplayName    "A1.2", on the ray's tip point
+//   SplayLabel   "A1.2", on the tip's text label (lettering, not data)
 //   Seq          integer resolution order, on station points -- what
 //                LRUDWalls sorts by instead of entity creation order
 //   Inclination, Left, Right, Up, Down, Elevation   shot data
@@ -158,10 +162,210 @@ CsTags.collectStations = function(doc) {
 };
 
 /**
+ * The trailing index of a splay name: "A3.2" -> 2. -1 when the name
+ * carries none (an older drawing tagged the bare station). Pure.
+ *
+ * The companion of CsBind.splayBase, which answers the other half of
+ * the same name ("A3.2" -> "A3"), and DERIVED FROM IT rather than
+ * matching the suffix a second time: there is exactly one definition
+ * in this codebase of what a splay suffix is, and it lives there.
+ */
+CsTags.splayIndex = function(tagged) {
+    var s = (tagged === undefined || tagged === null) ? "" : String(tagged);
+    var base = CsBind.splayBase(s);
+    if (base === s) {
+        return -1; // no ".<n>" suffix at all
+    }
+    var n = parseInt(s.substring(base.length + 1), 10);
+    return isNaN(n) ? -1 : n;
+};
+
+/**
+ * Every splay the drawing still carries, rebuilt as CsModel shots:
+ * `splay` true, `to` "", `from` the station its own name names.
+ *
+ * WHERE A SPLAY LIVES IN A DRAWING (CsDraw.survey's own shape): a ray
+ * line on CTRL-SPLAYS tagged `Splay` = "<station>.<n>", a tip POINT at
+ * its far end tagged `SplayName` with that same name, and a text label
+ * tagged `SplayLabel`. The label is lettering, not data, and is never
+ * read here.
+ *
+ * TWO WAYS BACK, best first:
+ *
+ *   1. THE RAY'S OWN SHOT TAGS. CsDraw.survey writes a splay ray the
+ *      SAME schema-v3 tag set it writes onto a leg line (Distance,
+ *      Azimuth, Inclination, the backsight pair, LRUD, Flags, Trip,
+ *      ShotSeq, Note, Declination) -- see its `legTags(sp)` call. Read
+ *      through CsRevise.shotFromEntity, the one reader for that tag
+ *      set, so a field added there is not silently missing here. This
+ *      path is EXACT: the splay comes back field for field and redraws
+ *      to the coordinates it was drawn at.
+ *
+ *   2. THE TIP'S POSITION, relative to its station -- for a ray that
+ *      predates v3 (no Distance tag), or whose ray was deleted by
+ *      hand. A plan drawing shows a splay's HORIZONTAL projection and
+ *      nothing else, so azimuth and plan distance come back and
+ *      INCLINATION DOES NOT: it comes back null, never 0. Fabricating
+ *      a 0 here would assert a dead-level shot nobody measured -- the
+ *      exact case CsTraverse.unusable's own docblock names ("a splay
+ *      with no inclination from drawing dead level, as though either
+ *      were a real reading") -- and would plant a phantom wall point
+ *      at centerline elevation, which CsProfile.bandWallRuns refuses
+ *      to do on purpose. Such a splay is still recovered as DATA: it
+ *      is a real splay at a real bearing, and both CsDraw.survey
+ *      (`splaysSkipped`) and CsProfile.build (`wallPointsSkipped`)
+ *      count it as unplaceable and say so in their reports, which is
+ *      strictly more than the nothing it used to come back as.
+ *
+ * NOT RECOVERED: splay geometry whose base station is no longer in the
+ * drawing. There is no station to hang it on and no origin to measure
+ * its tip from, and CsDraw.survey would skip it anyway (it draws only
+ * splays whose `from` actually resolved). A caller that needs to know
+ * counts SplayName tips itself and compares -- see GenerateProfile.js.
+ *
+ * ORDER: by station (the Seq order `stations` is already in), then by
+ * the splay's own trailing index, then by name. A TOTAL order, never 0
+ * for two distinct splays, because CaveCAD's Array.prototype.sort is
+ * unstable where node's is stable (tests/README.md) and a comparator
+ * that can return 0 produces different geometry in each engine. That
+ * ordering restores each station's splays in the order CsDraw.survey
+ * numbered them, so a redraw hands out the same names. ONE exception,
+ * inherent rather than fixable: where the original survey had an
+ * unmeasurable splay, CsDraw left a GAP in the numbering (D2.1, D2.3
+ * with D2.2 never drawn), and a gap cannot come back from a drawing
+ * that never showed it -- the two surviving splays redraw as D2.1 and
+ * D2.2, at their original coordinates.
+ *
+ * QCAD only.
+ *
+ * \param doc      the document
+ * \param stations CsTags.collectStations(doc) result -- already sorted,
+ *                 and the only source of station positions here
+ * \return [shot] -- possibly empty
+ */
+CsTags.collectSplays = function(doc, stations) {
+    var posOf = {}, rankOf = {};
+    var i;
+    for (i = 0; i < stations.length; i++) {
+        posOf[stations[i].name] = stations[i].pos;
+        rankOf[stations[i].name] = i;
+    }
+
+    // one pass, gathering the ray and the tip of each named splay
+    var parts = {}, names = [];
+    var ids = doc.queryAllEntities(false, false);
+    for (i = 0; i < ids.length; i++) {
+        var e = doc.queryEntity(ids[i]);
+        if (isNull(e)) {
+            continue;
+        }
+        var rayName = CsTags.get(e, "Splay");
+        var tipName = rayName === "" ? CsTags.get(e, "SplayName") : "";
+        var name = rayName !== "" ? rayName : tipName;
+        if (name === "") {
+            continue;
+        }
+        if (!parts.hasOwnProperty(name)) {
+            parts[name] = { ray: null, tip: null };
+            names.push(name);
+        }
+        if (rayName !== "") {
+            parts[name].ray = e;
+        } else if (typeof e.getPosition === "function") {
+            parts[name].tip = e;
+        }
+    }
+
+    var rows = [];
+    for (i = 0; i < names.length; i++) {
+        var station = CsBind.splayBase(names[i]);
+        if (!posOf.hasOwnProperty(station)) {
+            continue; // orphaned geometry -- see the docblock
+        }
+        var shot = CsTags.splayShot(parts[names[i]].ray,
+            parts[names[i]].tip, posOf[station]);
+        if (shot === null) {
+            continue;
+        }
+        shot.from = station;
+        shot.to = "";
+        shot.splay = true;
+        rows.push({ shot: shot, rank: rankOf[station],
+            index: CsTags.splayIndex(names[i]), name: names[i] });
+    }
+    rows.sort(function(a, b) {
+        if (a.rank !== b.rank) {
+            return a.rank - b.rank;
+        }
+        if (a.index !== b.index) {
+            return a.index - b.index;
+        }
+        return a.name < b.name ? -1 : 1; // names are unique: never 0
+    });
+
+    var out = [];
+    for (i = 0; i < rows.length; i++) {
+        out.push(rows[i].shot);
+    }
+    return out;
+};
+
+/**
+ * One splay's readings, from its ray's shot tags where it has them and
+ * from its tip's position where it does not. `from`/`to`/`splay` are
+ * the caller's to set (CsTags.collectSplays does). Returns null when
+ * neither carrier says anything usable.
+ *
+ * The Distance tag is the test for "this ray carries shot data" --
+ * exactly the test CsRevise.surveyFromDocument uses for the same
+ * question, and it matters: CsRevise.shotFromEntity defaults an absent
+ * Distance to 0.0, so handing it a pre-v3 ray would invent a splay
+ * with a real, surveyed length of zero.
+ *
+ * \param ray        the CTRL-SPLAYS line, or null
+ * \param tip        its tip point, or null
+ * \param stationPos the base station's drawn position
+ */
+CsTags.splayShot = function(ray, tip, stationPos) {
+    if (ray !== null && CsTags.get(ray, "Distance") !== "") {
+        return CsRevise.shotFromEntity(ray);
+    }
+    if (tip === null) {
+        return null; // a ray with no readings and no tip says nothing
+    }
+    var shot = CsModel.newShot();
+    var p = tip.getPosition();
+    var dx = p.x - stationPos.x;
+    var dy = p.y - stationPos.y;
+    shot.distance = Math.sqrt(dx * dx + dy * dy);
+    shot.azimuth = CsAngles.normalizeAzimuth(
+        Math.atan2(dx, dy) * 180.0 / Math.PI);
+    shot.inclination = null; // NOT 0.0 -- see collectSplays' docblock
+    return shot;
+};
+
+/**
  * Rebuilds a CsModel survey from a drawing's tags -- the property
  * that lets any tool run on any drawing the suite (or the previous
- * generation of it) produced. Stations only; shots are reconstructed
- * as far as the tags allow (azimuth/LRUD per station).
+ * generation of it) produced. The CENTERLINE is guessed: the stations
+ * are chained in Seq order and each leg is inferred from the drawn
+ * geometry plus that station's own azimuth/inclination/LRUD tags (see
+ * CsRevise.surveyFromDocument, which reads a schema-v3 drawing back
+ * exactly instead). The SPLAYS are not guessed -- they come back from
+ * their own tagged geometry through CsTags.collectSplays, exactly
+ * where their readings are on record and as honest data with no
+ * inclination where they are not.
+ *
+ * Splays are appended AFTER every leg, station by station. Nothing
+ * downstream reads splays positionally -- CsLrud.splaysByStation keys
+ * them by `from`, CsNetwork.resolve routes every one of them to
+ * `skipped` and emits no leg, CsStats/CsModel.lrudForStation/
+ * CsValidate all filter them out -- so a survey that gains splays here
+ * resolves to EXACTLY the geometry it resolved to before, and only the
+ * floor/ceiling and wall passes see anything new. What survey.shots
+ * order does decide is the numbering a redraw hands out (CsDraw.survey
+ * counts 1..n per station in this order), which is why collectSplays
+ * sorts rather than returns scan order.
  *
  * SEVENTH DOOR in the elevation-datum-trap family (CsTraverse.offset's
  * own docblock names the first five; CsNetwork.resolve's anchorEffectiveZ
@@ -224,6 +428,10 @@ CsTags.surveyFromDocument = function(doc) {
         survey.fixed[st.name] = { x: st.pos.x, y: st.pos.y,
             z: CsTags.getNumber(st.entity, "Elevation") };
         prev = st;
+    }
+    var splays = CsTags.collectSplays(doc, stations);
+    for (var sp = 0; sp < splays.length; sp++) {
+        survey.shots.push(splays[sp]);
     }
     return survey;
 };

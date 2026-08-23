@@ -157,15 +157,12 @@ function splayOf(from, d, az, inc) {
 // PLUMBING works, not re-testing CsProfile's own geometry, which
 // tests/js_unit.js and tests/profile_draw_roundtrip.js already do).
 //
-// MINOR (untested behaviours): this fixture used to have no LRUD and no
-// splays at all, so it could never see CRITICAL C -- the manual tool
-// rebuilds its survey from Station-tagged points only
-// (CsTags.surveyFromDocument), which never reconstructs a splay shot,
-// so a cave whose floor/ceiling comes from splays gets a silently
-// centerline-only profile from this tool. P2 now carries real LRUD
-// (so the profile draws a real ceiling/floor from it, proving that part
-// still works) AND a real splay (so generateProfileSplayLossWarning has
-// something real to detect as unrecovered).
+// P2 carries real LRUD (so the profile draws a real ceiling/floor from
+// it) AND a real splay. The splay was added when the tool could only
+// DETECT that it had dropped every splay; it stays because the tool now
+// RECOVERS it, and a fixture with no splay at all could prove neither.
+// Scenario F below is the harder version of the same claim: a cave
+// whose floor and ceiling come from splays and NOTHING else.
 //
 // getDocument/getDocumentInterface are reassigned here, exactly as
 // tests/js_unit.js's own freshDoc() helper does for the identical
@@ -329,9 +326,18 @@ if (tplPath !== null) {
             "generateProfileRun() called CsTags.surveyFromDocument to " +
             "rebuild the survey (a tool that read a notebook, a cache, " +
             "or nothing at all would leave this null)");
+        // SPLAY SHOTS ARE SKIPPED HERE, and that is not a workaround:
+        // the rebuild now recovers them (see the splay claims below),
+        // a splay has no TO station by definition, and counting its
+        // "" would make this a station count of 5 for a four-station
+        // drawing -- measuring the wrong thing, which is exactly what
+        // this assertion's own message warns against.
         var distinctStations = {};
         if (spy.capturedSurvey !== null) {
             for (var i = 0; i < spy.capturedSurvey.shots.length; i++) {
+                if (spy.capturedSurvey.shots[i].splay) {
+                    continue;
+                }
                 distinctStations[spy.capturedSurvey.shots[i].from] = true;
                 distinctStations[spy.capturedSurvey.shots[i].to] = true;
             }
@@ -380,32 +386,36 @@ if (tplPath !== null) {
                 "the CRITICAL C splay-loss warning");
         }
 
-        // ---- CRITICAL C, driven end to end: the fixture's own P2
-        // splay is drawn in the plan (fixtureDoc) but CANNOT survive
-        // CsTags.surveyFromDocument's Station-only walk, so the report
-        // must say so in words naming the real count (1). Without this
-        // fixture carrying a real splay at all, this whole gap was
-        // invisible to every test this tool had -- see the fixture's
-        // own MINOR comment above. -----------------------------------
+        // ---- claim 3b: THE SPLAY GAP IS CLOSED, driven end to end.
+        // The fixture's own P2 splay is drawn in the plan (fixtureDoc)
+        // and now survives the rebuild -- CsTags.surveyFromDocument
+        // reads it back off its own Splay/SplayName geometry. Both
+        // halves are asserted: the splay IS in the survey the tool
+        // profiled, AND the dialog carries no splay-loss warning, since
+        // there is no longer any loss to report. This used to be the
+        // opposite pair of assertions (0 recovered, a WARNING line in
+        // the text) -- the whole point of the change. -----------------
+        if (spy.capturedSurvey !== null) {
+            eqs(generateProfileCountRecoveredSplays(spy.capturedSurvey), 1,
+                "the tool's own rebuild recovers the drawing's splay " +
+                "(0 was the gap this closed)");
+        }
         if (spy.informationCalls.length === 1) {
-            ok(spy.informationCalls[0].text.indexOf(
-                "WARNING -- 1 splay(s) tagged in the drawing could not " +
-                "be recovered") >= 0,
-                "CRITICAL C: the manual tool's own splay-loss gap is " +
-                "named in the dialog text, got:\n" +
-                spy.informationCalls[0].text);
+            ok(spy.informationCalls[0].text.indexOf("WARNING -- ") < 0 ||
+                spy.informationCalls[0].text.indexOf(
+                    "splay(s) tagged in the drawing") < 0,
+                "no splay-loss warning on a drawing whose splays all " +
+                "came back, got:\n" + spy.informationCalls[0].text);
         }
         if (spy.capturedSurvey !== null) {
-            eqs(generateProfileCountRecoveredSplays(spy.capturedSurvey), 0,
-                "sanity: CsTags.surveyFromDocument really does recover " +
-                "zero splays from a drawing that has one -- this is the " +
-                "gap CRITICAL C detects, not something this test invented");
+            eqs(generateProfileSplayLossWarning(fixtureDoc,
+                spy.capturedSurvey), "",
+                "and the warning helper itself returns nothing for it");
         }
-        // sanity: the fixture's own LRUD (Elevation/Left/Right/Up/Down
-        // ARE read back from tags, unlike splays) still produces a real
-        // ceiling and floor run -- the splay-loss warning above is
-        // about splays specifically, not a sign the whole profile came
-        // back empty.
+        // sanity: the fixture's own LRUD still produces a real ceiling
+        // and floor run -- so a failure in the splay claims above reads
+        // as "the splays broke", not "the whole profile came back
+        // empty".
         if (spy.capturedCounts !== null) {
             ok(spy.capturedCounts.ceilingRuns > 0 &&
                 spy.capturedCounts.floorRuns > 0,
@@ -604,12 +614,185 @@ if (tplPath !== null) {
         "found, so nothing above it could be proven either");
 }
 
+// =======================================================================
+// Scenario F: THE MEASURED CONSEQUENCE, end to end -- a cave whose floor
+// and ceiling come ENTIRELY from splays, with no LRUD anywhere.
+//
+// This is the shape the whole splay-recovery task was reported against:
+// through the automatic pass (which is handed the live survey model) it
+// recovered 4 splays and drew 1 ceiling run and 1 floor run; through
+// THIS tool, which rebuilds from the drawing instead, it recovered 0 and
+// drew 0 and 0. Scenario A's fixture cannot show that -- its P2 LRUD
+// draws a ceiling and a floor run whether or not a single splay comes
+// back, so its run counts are identical either way. Here they are the
+// whole assertion: revert the recovery and this scenario reports
+// ceilingRuns 0, floorRuns 0.
+// =======================================================================
+
+if (tplPath !== null) {
+    var splayDoc = new RDocument(new RMemoryStorage(), createSpatialIndex());
+    var splayDi = new RDocumentInterface(splayDoc);
+    getDocument = function() { return splayDoc; };
+    getDocumentInterface = function() { return splayDi; };
+
+    var hadAutoF = RSettings.getBoolValue(KEY_AUTO, true);
+    RSettings.setValue(KEY_AUTO, false); // the fixture draw is inert here too
+    try {
+        var splaySurvey = CsModel.newSurvey();
+        // Two adjacent stations each carrying an UP and a DOWN splay --
+        // two ceiling points and two floor points, which is what makes a
+        // RUN (a single point on a line is not one, same rule as
+        // CsLrud.wallRuns). No left/right/up/down anywhere: every wall
+        // point this cave has is a splay.
+        splaySurvey.shots = [
+            shotOf("F1", "F2", 10, 0, 0),
+            shotOf("F2", "F3", 10, 0, 0),
+            splayOf("F2", 4, 90, 60),    // ceiling
+            splayOf("F2", 3, 270, -60),  // floor
+            splayOf("F3", 4, 90, 60),    // ceiling
+            splayOf("F3", 3, 270, -60)   // floor
+        ];
+        var splayDrawn = CsDraw.survey(splaySurvey,
+            CsNetwork.resolve(splaySurvey, {}));
+        eqs(splayDrawn.splaysDrawn, 4,
+            "sanity: the splay-only fixture drew 4 splay rays");
+    } finally {
+        RSettings.setValue(KEY_AUTO, hadAutoF);
+    }
+
+    var planPathF = QDir.tempPath() + "/cs_generate_profile_run_planF.dxf";
+    var siblingPathF = CsProfileFile.siblingPath(planPathF);
+    new QFile(siblingPathF).remove();
+    splayDoc.setFileName(planPathF);
+
+    withSpies(function(spy) {
+        new GenerateProfile(null).beginEvent();
+
+        if (spy.capturedSurvey !== null) {
+            eqs(generateProfileCountRecoveredSplays(spy.capturedSurvey), 4,
+                "SPLAY-ONLY CAVE: all 4 splays are recovered from the " +
+                "drawing (this was 0 -- the whole gap)");
+        }
+        if (spy.capturedCounts !== null) {
+            ok(spy.capturedCounts.ceilingRuns > 0,
+                "SPLAY-ONLY CAVE: a real ceiling run is drawn from the " +
+                "splays alone (this was 0), got " +
+                spy.capturedCounts.ceilingRuns);
+            ok(spy.capturedCounts.floorRuns > 0,
+                "SPLAY-ONLY CAVE: a real floor run is drawn from the " +
+                "splays alone (this was 0), got " +
+                spy.capturedCounts.floorRuns);
+        }
+        eqs(spy.informationCalls.length, 1,
+            "SPLAY-ONLY CAVE: the report still reaches the user exactly " +
+            "once");
+    });
+    ok(new QFileInfo(siblingPathF).exists(),
+        "SPLAY-ONLY CAVE: the sibling PROFILE.dxf landed on disk");
+    new QFile(siblingPathF).remove();
+} else {
+    failures.push("SKIPPED scenario F entirely -- no PROFILE template " +
+        "found, so nothing above it could be proven either");
+}
+
+// =======================================================================
+// Scenario G: the splay-loss warning is not dead code. It no longer
+// fires for "splays are never recovered" (they are), but it still fires
+// for the one case CsTags.collectSplays deliberately refuses: splay
+// geometry whose base station is no longer in the drawing -- a station
+// point erased by hand, its splays left behind. There is no origin to
+// measure such a tip from and CsDraw.survey would not redraw it either,
+// so the tool has to SAY the profile is missing it.
+// =======================================================================
+
+if (tplPath !== null) {
+    var ghostDoc = new RDocument(new RMemoryStorage(), createSpatialIndex());
+    var ghostDi = new RDocumentInterface(ghostDoc);
+    getDocument = function() { return ghostDoc; };
+    getDocumentInterface = function() { return ghostDi; };
+
+    var hadAutoG = RSettings.getBoolValue(KEY_AUTO, true);
+    RSettings.setValue(KEY_AUTO, false);
+    try {
+        var ghostSurvey = CsModel.newSurvey();
+        var ghostUp = shotOf("G1", "G2", 10, 0, 0);
+        ghostUp.up = 1;
+        ghostUp.down = 1;
+        var ghostUp2 = shotOf("G2", "G3", 10, 0, 0);
+        ghostUp2.up = 1;
+        ghostUp2.down = 1;
+        ghostSurvey.shots = [ghostUp, ghostUp2, splayOf("G2", 4, 90, 40)];
+        CsDraw.survey(ghostSurvey, CsNetwork.resolve(ghostSurvey, {}));
+    } finally {
+        RSettings.setValue(KEY_AUTO, hadAutoG);
+    }
+
+    // ORPHAN the drawn splay by renaming its tip and its ray onto a
+    // station this drawing does not have. Renaming, rather than deleting
+    // G2, is what leaves the rest of the survey intact so the profile
+    // still builds and still has a report to carry the warning.
+    var ghostOp = new RModifyObjectsOperation();
+    var ghostIds = ghostDoc.queryAllEntities(false, false);
+    var ghostRetagged = 0;
+    for (var gi = 0; gi < ghostIds.length; gi++) {
+        var ge = ghostDoc.queryEntity(ghostIds[gi]);
+        if (isNull(ge)) {
+            continue;
+        }
+        if (CsTags.get(ge, "SplayName") !== "") {
+            CsTags.set(ge, "SplayName", "GONE.1");
+            ghostOp.addObject(ge, false);
+            ghostRetagged++;
+        } else if (CsTags.get(ge, "Splay") !== "") {
+            CsTags.set(ge, "Splay", "GONE.1");
+            ghostOp.addObject(ge, false);
+            ghostRetagged++;
+        }
+    }
+    ghostDi.applyOperation(ghostOp);
+    eqs(ghostRetagged, 2,
+        "sanity: both carriers of the splay (its ray and its tip) were " +
+        "re-tagged onto a station the drawing does not have");
+
+    var planPathG = QDir.tempPath() + "/cs_generate_profile_run_planG.dxf";
+    var siblingPathG = CsProfileFile.siblingPath(planPathG);
+    new QFile(siblingPathG).remove();
+    ghostDoc.setFileName(planPathG);
+
+    withSpies(function(spy) {
+        new GenerateProfile(null).beginEvent();
+
+        if (spy.capturedSurvey !== null) {
+            eqs(generateProfileCountRecoveredSplays(spy.capturedSurvey), 0,
+                "ORPHANED SPLAY: it is refused, not hung on a station " +
+                "that is not there");
+        }
+        eqs(spy.informationCalls.length, 1,
+            "ORPHANED SPLAY: the report still reaches the user");
+        if (spy.informationCalls.length === 1) {
+            ok(spy.informationCalls[0].text.indexOf(
+                "WARNING -- 1 splay(s) tagged in the drawing, but only " +
+                "0 could be rebuilt from it") >= 0,
+                "ORPHANED SPLAY: the warning still fires, and names both " +
+                "counts, got:\n" + spy.informationCalls[0].text);
+        }
+    });
+    new QFile(siblingPathG).remove();
+    destr(ghostDi);
+} else {
+    failures.push("SKIPPED scenario G entirely -- no PROFILE template " +
+        "found, so nothing above it could be proven either");
+}
+
 // ---------------------------------------------------------------------
 // Report.
 // ---------------------------------------------------------------------
 
 destr(fixtureDi);
 destr(emptyDi);
+if (typeof splayDi !== "undefined") {
+    destr(splayDi);
+}
 
 if (failures.length === 0) {
     print("### GENERATE PROFILE RUN OK");

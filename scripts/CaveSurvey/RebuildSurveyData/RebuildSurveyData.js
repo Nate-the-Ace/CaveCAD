@@ -41,7 +41,11 @@
 // (slope = plan / cos(inclination)) rather than read from the notes, so
 // they are as good as the plot was; a shot standing within 1e-6 of
 // vertical in cos has no plan length to scale, so its distance is left
-// exactly as it was and the run reports how many. Azimuths come from
+// exactly as it was and the run reports how many. SPLAYS on that path
+// come back from their tip positions alone (a pre-v3 ray carries only
+// its name), which gives a bearing and a plan length but no
+// inclination -- so the redraw cannot place them and the run reports
+// how many were lost rather than losing them silently. Azimuths come from
 // the station's Azimuth tag where one exists (the drawn geometry is
 // used only where it does not), so a drawing whose tags disagreed with
 // its plot follows the tags. In case 3, azimuth, inclination and
@@ -131,6 +135,19 @@ RebuildSurveyData.legacyMeta = function(doc) {
  * amplify plot noise by millions) and it is counted so the run can say
  * so.
  *
+ * A shot with NO USABLE INCLINATION AT ALL is left alone and counted as
+ * neither. Reachable since CsTags.surveyFromDocument learned to rebuild
+ * splays: a splay recovered from its tip's position alone comes back
+ * with inclination null (a plan drawing records the horizontal
+ * projection and nothing else), and `null * Math.PI / 180` is 0, so
+ * `Math.cos(...)` is 1 and the loop below would divide the distance by
+ * one and then report the shot as RESCALED -- claiming a plan-to-slope
+ * conversion that never happened, on the one shot whose inclination
+ * makes the conversion impossible. CsTraverse.unusable is the
+ * established test for "cannot function as part of a real measurement"
+ * (absent or non-finite, but never a real 0), reused here rather than
+ * re-derived.
+ *
  * \return {scaled, vertical} how many shots were rescaled, and how
  *         many were left alone as near-vertical
  */
@@ -138,6 +155,9 @@ RebuildSurveyData.toSlopeDistances = function(survey) {
     var scaled = 0, vertical = 0;
     for (var i = 0; i < survey.shots.length; i++) {
         var shot = survey.shots[i];
+        if (CsTraverse.unusable(shot.inclination)) {
+            continue;
+        }
         if (shot.inclination === 0) {
             continue;
         }
@@ -256,6 +276,10 @@ RebuildSurveyData.profileNote = function(drawn) {
  *             from its geometry), "nothing" (nothing to do)
  *   stations, shots   what the drawing now carries
  *   scaled, vertical  distance conversions done / left alone (upgrade)
+ *   splaysUnplaceable  splays the redraw could NOT put back, because
+ *             nothing on record says where they point (see the note
+ *             below on the upgrade path's splay loss). 0 on every path
+ *             that redraws nothing
  *   inferred  true when the distances came from geometry, not notes
  *   erased    entities removed before the redraw
  *   tagsWritten, lrudNamed   the geometry path's recoveries
@@ -267,9 +291,9 @@ RebuildSurveyData.profileNote = function(drawn) {
  */
 RebuildSurveyData.rebuild = function(doc, di) {
     var report = { mode: "nothing", stations: 0, shots: 0, scaled: 0,
-        vertical: 0, inferred: false, erased: 0, tagsWritten: 0,
-        lrudNamed: 0, hadStore: false, message: "", dialog: "",
-        warning: "" };
+        vertical: 0, splaysUnplaceable: 0, inferred: false, erased: 0,
+        tagsWritten: 0, lrudNamed: 0, hadStore: false, message: "",
+        dialog: "", warning: "" };
 
     // A legacy survey data store becomes entity tags FIRST, so
     // everything below reads real properties -- and so the store text
@@ -326,6 +350,18 @@ RebuildSurveyData.rebuild = function(doc, di) {
         report.erased = up.erased;
         report.stations = up.drawn.stationsDrawn;
         report.shots = RebuildSurveyData.shotCount(up.drawn);
+        // SPLAY LOSS ON THIS PATH, NAMED RATHER THAN SILENT. A pre-v3
+        // splay ray carries only its name, so CsTags.collectSplays
+        // recovers it from its TIP's position -- which gives a bearing
+        // and a plan length but no inclination, and CsDraw.survey will
+        // not draw a ray it cannot place (nor should it: that is the
+        // dead-level fabrication CsTraverse.unusable exists to refuse).
+        // The redraw has already ERASED the old ray by then, exactly as
+        // it erases every other mark of the stations it replaces, so
+        // those splays are genuinely gone from the drawing -- as they
+        // were before the reader could see them at all, only now the
+        // run can say how many instead of the loss being invisible.
+        report.splaysUnplaceable = up.drawn.splaysSkipped || 0;
         report.message = "Rebuild Survey Data: upgraded this drawing to " +
             "tag schema v3 -- " + report.stations + " station" +
             (report.stations === 1 ? "" : "s") + " and " + report.shots +
@@ -338,6 +374,11 @@ RebuildSurveyData.rebuild = function(doc, di) {
             (report.vertical > 0 ? " " + report.vertical + " near-" +
                 "vertical shot" + (report.vertical === 1 ? "" : "s") +
                 " had no plan length to scale; distance left as drawn." :
+                "") +
+            (report.splaysUnplaceable > 0 ? " " +
+                report.splaysUnplaceable + " splay" +
+                (report.splaysUnplaceable === 1 ? "" : "s") +
+                " had no inclination on record and could not be redrawn." :
                 "") +
             RebuildSurveyData.profileNote(up.drawn);
         return report;
@@ -362,6 +403,7 @@ RebuildSurveyData.rebuild = function(doc, di) {
         report.erased = heal.erased;
         report.stations = heal.drawn.stationsDrawn;
         report.shots = RebuildSurveyData.shotCount(heal.drawn);
+        report.splaysUnplaceable = heal.drawn.splaysSkipped || 0;
         report.message = "Rebuild Survey Data: redrew " + report.stations +
             " station" + (report.stations === 1 ? "" : "s") + " and " +
             report.shots + " shot" + (report.shots === 1 ? "" : "s") +
@@ -370,6 +412,11 @@ RebuildSurveyData.rebuild = function(doc, di) {
             (healZ !== 0 ? " Elevations kept on the recorded datum -- " +
                 recon.anchorName + " at " +
                 CsReport.length(healZ, recon.survey.distanceUnit) + "." : "") +
+            (report.splaysUnplaceable > 0 ? " " +
+                report.splaysUnplaceable + " splay" +
+                (report.splaysUnplaceable === 1 ? "" : "s") +
+                " had no inclination on record and could not be redrawn." :
+                "") +
             RebuildSurveyData.profileNote(heal.drawn);
         return report;
     }

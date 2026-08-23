@@ -16,18 +16,27 @@
 // ProfileAutoMaxStations -- forcing past both is the point of running it
 // by hand.
 //
-// A REAL LIMIT OF THIS PATH, NOT JUST OF THE AUTOMATIC ONE: this tool
-// rebuilds its survey from the DRAWING's own tags (CsTags.
-// surveyFromDocument), which walks Station-tagged points only. Splay
-// geometry is tagged SplayName, not Station, so no splay shot is ever
-// reconstructed here -- a cave whose floor and ceiling come partly or
-// entirely from splays gets a profile built from LRUD alone, with the
-// splay contribution silently missing, UNLESS the drawing's own splays
-// still exist and this tool can at least COUNT them against what it
-// recovered (see splayLossWarning below). This is a real gap, not
-// nothing: it means "floor and ceiling lines from LRUD and splays," the
-// phrase the automatic path earns, is not a claim this manual path can
-// make for itself without checking.
+// WHAT REBUILDING FROM THE DRAWING COSTS, AND WHAT IT NO LONGER COSTS:
+// this tool rebuilds its survey from the DRAWING's own tags
+// (CsTags.surveyFromDocument) rather than from a notebook that may not
+// be open. Splays USED TO BE LOST that way -- that reader walked
+// Station-tagged points only, and splay geometry is tagged Splay (on
+// the ray) and SplayName (on the tip), so a cave whose floor and
+// ceiling come from splays got a profile built from LRUD alone. It no
+// longer does: CsTags.collectSplays rebuilds each splay from its ray's
+// own schema-v3 shot tags, exactly, and falls back to the tip's
+// position where a pre-v3 ray has no readings on it. So "floor and
+// ceiling lines from LRUD and splays" is a claim this manual path
+// earns too.
+//
+// TWO RESIDUAL GAPS, both reported rather than silent:
+//   * a splay recovered from its TIP alone has no inclination on
+//     record (a plan drawing shows only the horizontal projection), so
+//     it places no floor or ceiling point -- counted in the profile
+//     report's own "splay wall point(s) skipped" line;
+//   * splay geometry whose base station is gone from the drawing has
+//     nothing to hang on and is not recovered at all -- counted by
+//     generateProfileSplayLossWarning below.
 //
 // USAGE:
 //   Cave Survey > Generate Profile   (or type "gp")
@@ -82,16 +91,27 @@ function generateProfileCountRecoveredSplays(survey) {
 }
 
 /**
- * CRITICAL C: detect -- not recover -- the splay-loss gap named in this
- * file's own header comment. `survey` is CsTags.surveyFromDocument's own
- * reconstruction, which never sets a shot's `.splay` flag at all (it
- * only walks Station-tagged points), so CsLrud.splaysByStation(survey)
- * is CURRENTLY ALWAYS EMPTY for it -- there is no live case today where
- * this comes back anything but "every drawn splay is unrecovered." It is
- * still written as a genuine comparison, not a bare "drawnSplays > 0"
- * check: if surveyFromDocument is ever taught to recover SOME splays (a
- * separate task -- see the header comment), this keeps reporting exactly
- * the remaining gap instead of continuing to claim total loss.
+ * The splay geometry the rebuild could not account for at all.
+ *
+ * CsTags.collectSplays recovers a splay from its ray's shot tags, or
+ * from its tip's position, and this compares what it produced against
+ * what the drawing still shows. On a drawing this suite drew the two
+ * agree and this says nothing. It fires for the one case the reader
+ * deliberately refuses: splay geometry whose base station is no longer
+ * in the drawing (a station point erased by hand, its splays left
+ * behind), which has no origin to measure a tip from and which
+ * CsDraw.survey would not redraw either.
+ *
+ * NOT a "splays are never recovered" notice any more -- that is what
+ * this used to be, when the comparison could only ever come back
+ * "all of them." It was written as a genuine comparison rather than a
+ * bare `drawn > 0` check precisely so that teaching the reader to
+ * recover splays would leave it reporting the REMAINING gap instead of
+ * a claim that had stopped being true; this is that.
+ *
+ * A splay recovered from its tip alone, with no inclination on record,
+ * is NOT counted here: it came back as real data and the profile's own
+ * report names it under "splay wall point(s) skipped."
  *
  * \return a warning line (leading blank line included) or "" when the
  *         counts agree (nothing to report, including the ordinary case
@@ -103,13 +123,13 @@ function generateProfileSplayLossWarning(doc, survey) {
     if (drawn === recovered) {
         return "";
     }
-    return "\n\nWARNING -- " + drawn + " splay(s) tagged in the drawing " +
-        "could not be recovered by this tool: it rebuilds the survey " +
-        "from Station-tagged centerline points only (CsTags." +
-        "surveyFromDocument), and splay geometry is tagged SplayName, " +
-        "not Station. The floor and ceiling lines above come from LRUD " +
-        "alone -- run Import Cave Survey or the Survey Notebook instead " +
-        "if the splay data needs to be part of the profile.";
+    return "\n\nWARNING -- " + drawn + " splay(s) tagged in the drawing, " +
+        "but only " + recovered + " could be rebuilt from it: a splay " +
+        "whose own station is no longer in the drawing has nothing to " +
+        "hang on. The floor and ceiling lines above are missing that " +
+        "many splays -- run Rebuild Survey Data to repair the drawing, " +
+        "or Import Cave Survey or the Survey Notebook to draw it again " +
+        "from the notes.";
 }
 
 function generateProfileRun() {
@@ -121,10 +141,10 @@ function generateProfileRun() {
 
     // From the DRAWING, not a notebook that may not be open: the survey
     // model lives on the entities themselves, so a profile can be
-    // rebuilt from any drawing the suite has ever drawn. See this file's
-    // own header comment for the real limit that comes with rebuilding
-    // from tags rather than from a notebook: splays are never recovered
-    // this way, only detected (generateProfileSplayLossWarning below).
+    // rebuilt from any drawing the suite has ever drawn -- splays
+    // included (CsTags.collectSplays). See this file's own header
+    // comment for the two residual gaps that rebuilding from tags
+    // still has, and where each one is reported.
     var survey = CsTags.surveyFromDocument(doc);
     if (survey.shots.length === 0) {
         generateProfileRefuse("no tagged survey stations found.\n" +
