@@ -1720,3 +1720,202 @@ CsProfile.bandWallRuns = function(band, survey, resolved, opts) {
 
     return { ceiling: ceilingRuns, floor: floorRuns, flat: flat };
 };
+
+/**
+ * The vertical span a band occupies, walls included, before any
+ * offset. Returns null when the band drew nothing at all.
+ *
+ * ORDERING COUPLING, DEFENDED HERE RATHER THAN LEFT IMPLICIT: band.
+ * ceiling/floor/flat only exist because CsProfile.build assigns them
+ * (from CsProfile.bandWallRuns) before ever calling CsProfile.layout --
+ * a raw CsProfile.unrollBand() result has none of the three. Rather
+ * than require every caller to remember that ordering, a missing array
+ * here is simply treated as empty: a band with no walls computed yet
+ * still gets a well-defined (if smaller) span from its stations alone,
+ * instead of a TypeError two call frames away from the actual mistake.
+ */
+CsProfile.bandSpan = function(band) {
+    var lo = null, hi = null;
+    var note = function(y) {
+        if (lo === null || y < lo) { lo = y; }
+        if (hi === null || y > hi) { hi = y; }
+    };
+    var ceiling = band.ceiling || [];
+    var floor = band.floor || [];
+    var flat = band.flat || [];
+    var i, k;
+    for (i = 0; i < band.stations.length; i++) {
+        note(band.stations[i].y);
+    }
+    for (i = 0; i < ceiling.length; i++) {
+        for (k = 0; k < ceiling[i].length; k++) {
+            note(ceiling[i][k].y);
+        }
+    }
+    for (i = 0; i < floor.length; i++) {
+        for (k = 0; k < floor[i].length; k++) {
+            note(floor[i][k].y);
+        }
+    }
+    for (i = 0; i < flat.length; i++) {
+        note(flat[i].y);
+    }
+    return (lo === null) ? null : { lo: lo, hi: hi };
+};
+
+/**
+ * Assigns each band its zOffset in place.
+ *
+ * A band whose span clears every band already placed keeps offset 0
+ * and reads at TRUE elevation. A band that would collide is pushed
+ * below the lowest placed band, by its own height as a gutter, and
+ * records the offset so the drawing can label it -- a displaced band
+ * that did not say so would misinform a reader about depth.
+ *
+ * Degenerate bands (a single station, or all one elevation) still get
+ * a gutter, from GUTTER_MIN, or two bands would land on one line.
+ *
+ * `placedHi` is only ever raised by a band that CLEARS the stack above
+ * it; a band pushed below never raises it, because it did not add
+ * anything above the existing top -- it only extends the stack
+ * downward. That is why a run of several colliding bands each land a
+ * clean GUTTER_MIN (or their own height, if larger) below the
+ * previous one rather than drifting further every time: `placedLo`
+ * alone tracks the bottom of the stack so far, and each new collision
+ * measures from there.
+ *
+ * A band far taller than its neighbours is pushed down by exactly its
+ * own (enormous) height, per the rule above -- so one outsized band
+ * leaves an equally outsized blank gutter under the rest of the
+ * stack. That was observed, not fixed: it is what "pushed down by its
+ * own height" means for a band with no comparably sized neighbour, and
+ * changing it is a design call for whoever reviews the drawn profile,
+ * not a bug this task found reason to correct.
+ */
+CsProfile.GUTTER_MIN = 5.0;
+
+CsProfile.layout = function(bands) {
+    var placedLo = null, placedHi = null;
+    for (var i = 0; i < bands.length; i++) {
+        var span = CsProfile.bandSpan(bands[i]);
+        if (span === null) {
+            bands[i].zOffset = 0.0;
+            continue;
+        }
+        if (placedLo === null) {
+            bands[i].zOffset = 0.0;
+            placedLo = span.lo;
+            placedHi = span.hi;
+            continue;
+        }
+        var clears = (span.lo > placedHi) || (span.hi < placedLo);
+        if (clears) {
+            bands[i].zOffset = 0.0;
+            placedLo = Math.min(placedLo, span.lo);
+            placedHi = Math.max(placedHi, span.hi);
+            continue;
+        }
+        var height = span.hi - span.lo;
+        var gutter = Math.max(height, CsProfile.GUTTER_MIN);
+        bands[i].zOffset = (placedLo - gutter) - span.hi;
+        placedLo = span.lo + bands[i].zOffset;
+    }
+    return bands;
+};
+
+/**
+ * The whole profile: every band, laid out, with its walls and the
+ * findings a report should print.
+ *
+ * THE ADJACENCY GRAPH IS BUILT EXACTLY ONCE for the whole profile, not
+ * once per band. CsProfile.longestChain (reached through CsProfile.
+ * unrollBand's own opts.adjacency) rebuilds the whole-survey graph
+ * itself whenever it is not handed one; doing that per band is
+ * O(runs x legs) and was measured at 60% of total build time on a
+ * 401-run survey. A caller that already has a graph for this same
+ * `resolved` (built for some other purpose) may pass it in through
+ * opts.adjacency and it is reused rather than rebuilt.
+ *
+ * The four fields CsProfile.unrollBand and CsProfile.bandWallRuns
+ * actually read (exaggeration, tapeMode, flatSplayDeg, and now
+ * adjacency) are copied into a small fixed-shape object built ONCE
+ * here and handed to every band, rather than adding `.adjacency` onto
+ * the caller's own `opts` in place. Mutating the caller's object would
+ * be a stale-cache trap for exactly the caller this feature exists
+ * for -- CsDraw.survey calls this again on every redraw, and if it
+ * reuses one `opts` object across draws, a graph built for an earlier
+ * `resolved` must never survive to silently answer for a later one.
+ *
+ * \param opts {exaggeration, flatSplayDeg, tapeMode, adjacency}
+ * \return {
+ *   bands: [band] in band order, each an unrollBand result plus
+ *          {ceiling, floor, flat, zOffset},
+ *   findings: {omitted, mismatches, secondTies, orphans, strandedRoots,
+ *              stopped: [{run, station, reason}], ungrouped}
+ * }
+ */
+CsProfile.build = function(survey, resolved, opts) {
+    opts = opts || {};
+    var grouped = CsProfile.groupRuns(resolved);
+    var hier = CsProfile.hierarchy(grouped, resolved);
+
+    var adjacency = (opts.adjacency !== undefined && opts.adjacency !== null) ?
+        opts.adjacency : CsProfile.adjacency(resolved);
+    var bandOpts = {
+        exaggeration: opts.exaggeration,
+        tapeMode: opts.tapeMode,
+        flatSplayDeg: opts.flatSplayDeg,
+        adjacency: adjacency
+    };
+
+    var bands = [];
+    var omitted = [], stopped = [];
+    for (var i = 0; i < hier.order.length; i++) {
+        var key = hier.order[i];
+        var run = grouped.runs[key];
+        if (run === undefined) {
+            continue;
+        }
+        var band = CsProfile.unrollBand(run, hier.ties[key], resolved,
+            hier, bandOpts);
+        var walls = CsProfile.bandWallRuns(band, survey, resolved, bandOpts);
+        band.ceiling = walls.ceiling;
+        band.floor = walls.floor;
+        band.flat = walls.flat;
+        band.parent = hier.parents[key];
+        band.zOffset = 0.0;
+        bands.push(band);
+
+        for (var k = 0; k < band.omitted.length; k++) {
+            omitted.push(band.omitted[k]);
+        }
+        if (band.stopped !== null) {
+            // The station alone says WHERE a band ended; the reason
+            // says WHY, and "a bad Z" versus "a missing leg" ask a
+            // surveyor to do two different things (see unrollBand's
+            // own docblock) -- flattening both into one bare name here
+            // would erase that distinction one call frame before the
+            // report that needs it.
+            stopped.push({
+                run: key,
+                station: band.stopped,
+                reason: band.stoppedReason
+            });
+        }
+    }
+
+    CsProfile.layout(bands);
+
+    return {
+        bands: bands,
+        findings: {
+            omitted: omitted,
+            mismatches: hier.mismatches,
+            secondTies: hier.secondTies,
+            orphans: hier.orphans,
+            strandedRoots: hier.strandedRoots,
+            stopped: stopped,
+            ungrouped: grouped.ungrouped
+        }
+    };
+};
