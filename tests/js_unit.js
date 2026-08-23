@@ -1911,6 +1911,201 @@ ok(CsLrud.tickEnd({ x: 0, y: 0 }, 0, "L", null) === null, "null LRUD no tick");
 ok(CsLrud.tickEnd({ x: 0, y: 0 }, 0, "L", 0) === null, "zero LRUD no tick");
 
 // ---------------------------------------------------------------------
+// Splays feed the walls too. A splay tip IS a measured wall hit; before
+// this it was drawn as a ray and then ignored by wall generation, so a
+// DistoX survey with dozens of wall shots per station still got walls
+// built from four LRUD numbers.
+//
+// Side comes from the sign of (splay azimuth - passage azimuth); order
+// within a station's side from the along-passage projection, so a
+// backward splay lands before the station's LRUD tick and a forward one
+// after it, and the run advances instead of zigzagging.
+// ---------------------------------------------------------------------
+
+function splayOf(from, d, az, inc) {
+    var s = CsModel.newShot();
+    s.from = from;
+    s.to = "";
+    s.distance = d;
+    s.azimuth = az;
+    s.inclination = inc || 0;
+    s.splay = true;
+    return s;
+}
+
+// A1 -> A2 -> A3, due north, LRUD only at A2.
+function splayFixture() {
+    var sv = CsModel.newSurvey();
+    var s1 = shotOf("A1", "A2", 10, 0);
+    s1.left = 2;
+    s1.right = 3;
+    sv.shots.push(s1);
+    sv.shots.push(shotOf("A2", "A3", 10, 0));
+    return sv;
+}
+
+(function() {
+    // due east splay at A2 (passage runs north): a RIGHT wall point,
+    // at the splay's own tip, not at the LRUD tick
+    var sv = splayFixture();
+    sv.shots.push(splayOf("A2", 5, 90));
+    var r = CsNetwork.resolve(sv, {});
+    var w = CsLrud.wallRuns(sv, r);
+    var right = [];
+    for (var i = 0; i < w.right.length; i++) {
+        for (var j = 0; j < w.right[i].length; j++) { right.push(w.right[i][j]); }
+    }
+    var hit = null;
+    for (i = 0; i < right.length; i++) {
+        if (Math.abs(right[i].x - 5) < 1e-9 && Math.abs(right[i].y - 10) < 1e-9) {
+            hit = right[i];
+        }
+    }
+    ok(hit !== null, "splay walls: east splay becomes a right wall point at its tip");
+
+    // and it did not land on the left
+    var leftBad = false;
+    for (i = 0; i < w.left.length; i++) {
+        for (var k = 0; k < w.left[i].length; k++) {
+            if (w.left[i][k].x > 0.5) { leftBad = true; }
+        }
+    }
+    ok(leftBad === false, "splay walls: an east splay never joins the left wall");
+})();
+
+(function() {
+    // due west splay -> left wall
+    var sv = splayFixture();
+    sv.shots.push(splayOf("A2", 4, 270));
+    var w = CsLrud.wallRuns(sv, CsNetwork.resolve(sv, {}));
+    var found = false;
+    for (var i = 0; i < w.left.length; i++) {
+        for (var j = 0; j < w.left[i].length; j++) {
+            if (Math.abs(w.left[i][j].x + 4) < 1e-9) { found = true; }
+        }
+    }
+    ok(found, "splay walls: west splay becomes a left wall point");
+})();
+
+(function() {
+    // ordering: a BACKWARD-left splay (az 225) comes before A2's LRUD
+    // tick, a FORWARD-left one (az 315) after it
+    var sv = splayFixture();
+    sv.shots.push(splayOf("A2", Math.sqrt(2), 315));   // forward-left
+    sv.shots.push(splayOf("A2", Math.sqrt(2), 225));   // backward-left
+    var w = CsLrud.wallRuns(sv, CsNetwork.resolve(sv, {}));
+    var ys = [];
+    for (var i = 0; i < w.left.length; i++) {
+        for (var j = 0; j < w.left[i].length; j++) { ys.push(w.left[i][j].y); }
+    }
+    var sorted = true;
+    for (i = 1; i < ys.length; i++) {
+        if (ys[i] < ys[i - 1] - 1e-9) { sorted = false; }
+    }
+    ok(ys.length >= 3 && sorted,
+        "splay walls: a station's own splays run backward-to-forward, got [" +
+        ys.join(",") + "]");
+})();
+
+(function() {
+    // a station with splays but NO LRUD still contributes wall points
+    // (and no longer breaks the run for want of four numbers)
+    var sv = CsModel.newSurvey();
+    var a = shotOf("B1", "B2", 10, 0);
+    a.left = 2; a.right = 2;
+    sv.shots.push(a);
+    sv.shots.push(shotOf("B2", "B3", 10, 0));   // B3: no LRUD at all
+    sv.shots.push(splayOf("B3", 3, 90));
+    sv.shots.push(splayOf("B3", 3, 270));
+    var w = CsLrud.wallRuns(sv, CsNetwork.resolve(sv, {}));
+    var right3 = false, left3 = false;
+    for (var i = 0; i < w.right.length; i++) {
+        for (var j = 0; j < w.right[i].length; j++) {
+            if (Math.abs(w.right[i][j].x - 3) < 1e-9 &&
+                Math.abs(w.right[i][j].y - 20) < 1e-9) { right3 = true; }
+        }
+    }
+    for (i = 0; i < w.left.length; i++) {
+        for (j = 0; j < w.left[i].length; j++) {
+            if (Math.abs(w.left[i][j].x + 3) < 1e-9 &&
+                Math.abs(w.left[i][j].y - 20) < 1e-9) { left3 = true; }
+        }
+    }
+    ok(right3 && left3,
+        "splay walls: a splay-only station contributes both walls");
+})();
+
+(function() {
+    // an AXIAL splay (straight up or down the passage) sits on the
+    // centerline and belongs to neither wall
+    var sv = splayFixture();
+    sv.shots.push(splayOf("A2", 6, 0));
+    sv.shots.push(splayOf("A2", 6, 180));
+    var w = CsLrud.wallRuns(sv, CsNetwork.resolve(sv, {}));
+    var bad = 0;
+    var scan = function(runs) {
+        for (var i = 0; i < runs.length; i++) {
+            for (var j = 0; j < runs[i].length; j++) {
+                if (Math.abs(runs[i][j].x) < 1e-9 &&
+                    Math.abs(runs[i][j].y - 4) < 1e-9) { bad++; }
+                if (Math.abs(runs[i][j].x) < 1e-9 &&
+                    Math.abs(runs[i][j].y - 16) < 1e-9) { bad++; }
+            }
+        }
+    };
+    scan(w.left); scan(w.right);
+    ok(bad === 0, "splay walls: axial splays join neither wall");
+})();
+
+(function() {
+    // a splay kept out of the plot keeps out of the walls too
+    var sv = splayFixture();
+    var hidden = splayOf("A2", 7, 90);
+    hidden.excludeFromPlot = true;
+    var dropped = splayOf("A2", 8, 90);
+    dropped.excludeFromAll = true;
+    sv.shots.push(hidden);
+    sv.shots.push(dropped);
+    var w = CsLrud.wallRuns(sv, CsNetwork.resolve(sv, {}));
+    var bad = false;
+    for (var i = 0; i < w.right.length; i++) {
+        for (var j = 0; j < w.right[i].length; j++) {
+            if (w.right[i][j].x > 3.5) { bad = true; }
+        }
+    }
+    ok(bad === false,
+        "splay walls: excluded splays stay out of the walls, as they do " +
+        "out of the plot");
+})();
+
+(function() {
+    // steep splays are NOT filtered: every splay counts, so a near-
+    // vertical one contributes its (short) plan projection
+    var sv = splayFixture();
+    sv.shots.push(splayOf("A2", 10, 90, 80));   // plan = 10*cos(80) = 1.736
+    var w = CsLrud.wallRuns(sv, CsNetwork.resolve(sv, {}));
+    var found = false;
+    for (var i = 0; i < w.right.length; i++) {
+        for (var j = 0; j < w.right[i].length; j++) {
+            if (Math.abs(w.right[i][j].x - 10 * Math.cos(80 * Math.PI / 180)) < 1e-9) {
+                found = true;
+            }
+        }
+    }
+    ok(found, "splay walls: a steep splay still counts, at its plan length");
+})();
+
+(function() {
+    // REGRESSION: with no splays, a lone LRUD station still yields no
+    // run -- one point is not a wall, and that has to stay true.
+    var sv = splayFixture();
+    var w = CsLrud.wallRuns(sv, CsNetwork.resolve(sv, {}));
+    ok(w.left.length === 0 && w.right.length === 0,
+        "splay walls: no splays, no change -- a single LRUD point is " +
+        "still not a run");
+})();
+
+// ---------------------------------------------------------------------
 // Validate -- planted blunders.
 // ---------------------------------------------------------------------
 
@@ -3654,6 +3849,115 @@ if (teamBoundaryRt.trips.length === 2) {
 // This is the test that would have caught the silent simple.js
 // failures: draw into a real document, read layers and tags back.
 // ---------------------------------------------------------------------
+
+// ---------------------------------------------------------------------
+// Drawing round-trip -- QCAD engine only (node has no R* classes).
+// This is the test that would have caught the silent simple.js
+// failures: draw into a real document, read layers and tags back.
+// ---------------------------------------------------------------------
+
+// ---------------------------------------------------------------------
+// Lettering: everything the tools draw is UPPERCASE, the drafting
+// convention. Enforced where the entity is made, so the survey data
+// underneath keeps the case it was typed in.
+// ---------------------------------------------------------------------
+
+if (!IS_NODE) {
+    (function() {
+        loadRepoScript("scripts/CaveSurvey/Core/CsLayers.js");
+        loadRepoScript("scripts/CaveSurvey/Core/CsStore.js");
+        loadRepoScript("scripts/CaveSurvey/Core/CsTags.js");
+        loadRepoScript("scripts/CaveSurvey/Core/CsDraw.js");
+        loadRepoScript("scripts/CaveSurvey/Core/CsSheet.js");
+
+        ok(CsDraw.caps("Sand floor, crawl") === "SAND FLOOR, CRAWL",
+            "caps: plain text uppercased");
+        ok(CsDraw.caps("a1") === "A1", "caps: station names too");
+        ok(CsDraw.caps("") === "", "caps: empty stays empty");
+        ok(CsDraw.caps(null) === "", "caps: null is not a crash");
+        // MText formatting codes are case-sensitive: \P is a paragraph
+        // break, \p is a paragraph property. Uppercasing blind would
+        // rewrite one into the other, so the character after a
+        // backslash keeps its case.
+        ok(CsDraw.caps("line one\\pline two") === "LINE ONE\\pLINE TWO",
+            "caps: an escape code keeps its case, got " +
+            CsDraw.caps("line one\\pline two"));
+
+        var doc = new RDocument(new RMemoryStorage(), new RSpatialIndexNavel());
+        var di = new RDocumentInterface(doc);
+        getDocument = function() { return doc; };
+        getDocumentInterface = function() { return di; };
+
+        // addText is the chokepoint every drawn label goes through
+        var layer = new RLayer(doc, "CAPS-TEST", false, false,
+            new RColor("white"), doc.getLinetypeId("CONTINUOUS"),
+            RLineweight.Weight025, false);
+        var lop = new RAddObjectsOperation();
+        lop.addObject(layer);
+        di.applyOperation(lop);
+        var top = new RAddObjectsOperation();
+        var drawnText = CsDraw.addText(doc, top, "CAPS-TEST", "Sheet 1",
+            new RVector(0, 0), RS.HAlignLeft, "CapsTest", "one");
+        di.applyOperation(top);
+        ok(String(drawnText.getPlainText()) === "SHEET 1",
+            "caps: addText letters in caps, got '" +
+            drawnText.getPlainText() + "'");
+        // the TAG is data, not lettering -- it keeps its own case
+        ok(CsTags.get(drawnText, "CapsTest") === "one",
+            "caps: tags are data and keep their case");
+
+        // a drawn survey: station labels and notes come out capitalised
+        var csv = CsModel.newSurvey();
+        var cs1 = shotOf("c1", "c2", 10, 0);
+        cs1.notes = "muddy crawl";
+        csv.shots.push(cs1);
+        CsDraw.survey(csv, CsNetwork.resolve(csv, {}));
+        var lowerFound = false;
+        var noteSeen = false;
+        var cids = doc.queryAllEntities(false, false);
+        for (var ci = 0; ci < cids.length; ci++) {
+            var ce = doc.queryEntity(cids[ci]);
+            if (isNull(ce) || typeof ce.getPlainText !== "function") {
+                continue;
+            }
+            var txt = String(ce.getPlainText());
+            if (txt !== txt.toUpperCase()) { lowerFound = true; }
+            if (txt.indexOf("MUDDY CRAWL") >= 0) { noteSeen = true; }
+        }
+        ok(lowerFound === false, "caps: nothing drawn carries lower case");
+        ok(noteSeen, "caps: a station note is drawn in caps");
+
+        // the survey data itself is untouched -- caps is lettering only
+        ok(csv.shots[0].notes === "muddy crawl",
+            "caps: the typed note keeps its case in the model");
+        var reread = CsTags.surveyFromDocument(doc);
+        var keptCase = false;
+        for (var ri = 0; ri < reread.shots.length; ri++) {
+            if (reread.shots[ri].notes === "muddy crawl") { keptCase = true; }
+        }
+        ok(keptCase, "caps: the note reads back out of XDATA as typed");
+
+        // title block values are lettering too
+        var tbDoc = new RDocument(new RMemoryStorage(), new RSpatialIndexNavel());
+        var tbDi = new RDocumentInterface(tbDoc);
+        var field = CsSheet.fieldById("length");
+        var tbAdd = new RAddObjectsOperation();
+        var tbText = new RTextEntity(tbDoc, new RTextData(
+            new RVector(0, 0), new RVector(0, 0), 0.14, 0.0,
+            RS.VAlignTop, RS.HAlignLeft, RS.LeftToRight, RS.Exact, 1.0,
+            "Length:  ____ ft", "standard", false, false, 0.0, false));
+        CsTags.set(tbText, CsSheet.TAG, "length");
+        tbAdd.addObject(tbText, false);
+        tbDi.applyOperation(tbAdd);
+        var tbOp2 = new RModifyObjectsOperation();
+        ok(CsSheet.writeField(tbDoc, tbOp2, field, "1,234 ft") === true,
+            "caps: title block field written");
+        tbDi.applyOperation(tbOp2);
+        ok(CsSheet.readField(tbDoc, field) === "LENGTH:  1,234 FT",
+            "caps: a stamped title block value letters in caps, got '" +
+            CsSheet.readField(tbDoc, field) + "'");
+    })();
+}
 
 if (!IS_NODE) {
     (function() {
