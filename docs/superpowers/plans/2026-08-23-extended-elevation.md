@@ -73,6 +73,21 @@ Learned the hard way in this repo; violating any of these produces a silent fail
 
 Run `./tests/run_all.sh` before every commit. Baseline at plan time: 42/42 files parsed, 2008 assertions, all green.
 
+- **A RISING ASSERTION COUNT IS NOT COVERAGE.** Measured on this feature: Task 3's review
+  mutated 18 behaviours and 11 survived a fully green suite; Task 4's mutated 34 and only 14
+  died to a named assertion — 41%, including the total-order tiebreak the unstable-sort
+  convention exists to protect. For every acceptance criterion: DELETE the behaviour, run the
+  suite, confirm a NAMED test fails, and report which mutation each test kills. A test that
+  survives its own mutation is decoration, and a predicted assertion delta (Task 4's brief
+  said +16, it delivered +25) verifies nothing.
+- **DECLARE EVERY DELIBERATE DIVERGENCE FROM PLAN VIEW.** These functions mirror plan-view
+  equivalents in `CsLrud`, and the mirroring is never total. Task 4 diverged twice — admitting
+  an along-axis splay that plan excludes as centerline (correct: in elevation it is still real
+  vertical evidence) and handling closure walls differently (a defect) — while its docblock
+  asserted parity in prose. Any task mirroring a plan-view rule must list, in its report AND
+  in the code comment, every deliberate difference and why. An unstated divergence reads as a
+  bug; a false claim of parity hides a real one.
+
 ---
 
 ## Task 1: Station name parsing and run grouping
@@ -743,8 +758,10 @@ git commit -m "feat(CsProfile): the graph decides band order, the name only cros
 - [ ] Equal-length candidates are broken deterministically: lowest station sequence first, then highest — a one-leg spur off an interior station must not decide the band by iteration order
 - [ ] Stations in the run but off that chain are returned as `omitted`
 - [ ] A band's first point is its tie station at X = 0; the tie leg is part of the band
-- [ ] Horizontal step per leg = `d·cos(inc)`, vertical step = `d·sin(inc)`, so each leg's drawn length equals its slope distance
+- [ ] The tie may attach to the MIDDLE of the chain, not only an endpoint — a run surveyed both ways from its junction (`A3→B1`, then `B1→B2→B3` and `B1→B5→B6`) puts its tie contact interior. Assuming an endpoint collapses the band to a single point and silently discards every station and leg in the run. Find where the tie actually attaches, take the longer arm from there, and report the shorter arm's stations in `omitted`
+- [ ] Horizontal step per leg = `d·cos(inc)`; vertical position is each station's RESOLVED Z. Do NOT also state this as `d·sin(inc)`: the two agree only for unadjusted `new` legs. They diverge ~13% on the closure legs the tie step deliberately admits (that leg's rise is misclosure the resolved Z has already absorbed) and by a hair after `CsAdjust`. Resolved Z is the choice — it matches plan view and is what a revision must be reproducible against
 - [ ] A leg doubling back in plan still advances X (extended, not projected)
+- [ ] A PITCH puts two stations on the same X, and that is correct: at inclination ±90 the plan distance is 0 (~-1.8e-15 in floating point, so `Math.abs` is load-bearing or X steps backwards) and the leg draws as a pure vertical of its full tape. A zero-distance leg — including a shot with a missing tape, which resolves to distance 0 — draws as a coincident pair. Floor/ceiling and drawing both have to cope with coincident X and zero-length legs
 - [ ] Y is the station's resolved Z, never a defaulted 0; a station with no resolved Z ends the band and is reported. `datum` stays null in that case rather than becoming 0 — a fabricated datum is the elevation-datum trap
 - [ ] The TIE step resolves through `CsProfile.tieLegBetween`, which admits closure legs, while every interior step keeps using `legBetween`. The tie edge was chosen by `hierarchy`, whose contact graph admits closures, so refusing one here produced a silently short band — the exact failure the adjacency/legBetween invariant exists to prevent
 - [ ] Vertical exaggeration scales Y about the band's own datum, never X
@@ -1153,7 +1170,11 @@ git commit -m "feat(CsProfile): unroll a run into a band, tie station and all"
 - [ ] A splay above the dead zone joins the ceiling, below joins the floor, inside it joins neither and is returned as a flat tick
 - [ ] Dead zone default is 10°, configurable, and boundary values are classified as flat
 - [ ] A splay's X = its station's X + the along-passage projection of its plan offset; within a line, points are ordered by that projection with the LRUD tick at 0 leading ties
+- [ ] WHERE THERE IS NO PASSAGE DIRECTION, THERE IS NO PROJECTION. Two live cases: a band with no legs at all (one station, or stopped at index 1), and a station reached by a PLUMB leg, whose compass reading is noise. In both the projection is 0 and the splay sits at its station's X — never projected against a fabricated azimuth. Falling back to 0° projects against due north: measured, a one-station band with splays at 0/90/180 spread ±6.43 ft along a direction nobody surveyed
+- [ ] A wall run must never reverse in X. At a pitch the X advance is ~0, so a backward splay at the pitch bottom would otherwise land before the pitch-top station's points — measured as a run going 10 → 7.95 → 10.0 → 12.05. Monotone X is the defining property of an extended elevation
+- [ ] `unrollBand` RECORDS `exaggeration` and `tapeMode` on the band it returns, and `bandWallRuns` reads them from the band rather than taking them again as options. Measured failure of the alternative: a band built with exaggeration 5 whose walls used the default put the ceiling BELOW its own station (station y 8.68, ceiling y 4.74). An invariant asking every caller to pass the same value twice will be broken, and every remaining task is a caller
 - [ ] Runs break at junction stations (3+ non-splay legs), at closure legs, and at stations with no vertical evidence
+- [ ] At a closure leg the run flushes BEFORE the closure's landing station, so that station contributes NO wall points — exactly what `CsLrud.wallRuns` does in plan, and plan view is the reference. The geometry is the reason: a closure leg draws at a length that is not its tape reading, so wall points hung across it would be squeezed onto a leg whose length is not a measurement
 - [ ] Runs of fewer than 2 points are dropped
 
 **Verify:** `node tests/js_unit.js` → `### UNIT OK`, count risen
