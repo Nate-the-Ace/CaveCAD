@@ -59,6 +59,7 @@ Learned the hard way in this repo; violating any of these produces a silent fail
 - **All text through `CsDraw.addText`**, which capitalises via `CsDraw.caps`. Never capitalise model data.
 - **Tag writes via `CsTags.set`**, never `setCustomProperty` directly.
 - **`EAction.handleUserMessage` cannot show multi-line text** (newlines collapse). Multi-line output uses `QMessageBox.information`.
+- **CaveCAD's `Array.prototype.sort` is UNSTABLE.** Measured in the Task 1 quality review: a comparator returning 0 for 24 equal elements scrambled them, while node (stable) left them alone. So a comparator that can return 0 for two DISTINCT items produces geometry that differs between engines — and the node tests will never see it. Every comparator in this feature must be a total order: break every tie on something unique (text, index, station name).
 
 Run `./tests/run_all.sh` before every commit. Baseline at plan time: 42/42 files parsed, 2008 assertions, all green.
 
@@ -75,12 +76,12 @@ Run `./tests/run_all.sh` before every commit. Baseline at plan time: 42/42 files
 **Acceptance Criteria:**
 - [ ] `A20` → run `A`, seq `20`; `A13a1` → run `A13a`, seq `1`; `A13a2b1` → run `A13a2b`, seq `1`; `B1` → run `B`, seq `1`
 - [ ] A single-group name (`A`, `12`) is its own run with an empty sequence
-- [ ] `tieNameOf` returns `A13` for run `A13a`, `A13a2` for run `A13a2b`, and `null` for run `A` or `B`
+- [ ] `tieNameOfRun` returns `A13` for run `A13a`, `A13a2` for run `A13a2b`, and `null` for run `A` or `B`
 - [ ] Splay names (`A3.1`) are refused by the parser, not misread as stations
 - [ ] `groupRuns` returns runs whose members are ordered numerically when sequences are numeric, lexically otherwise
 - [ ] Runs are keyed by run key with no station appearing in two runs
 
-**Verify:** `node tests/js_unit.js` → `### UNIT OK <n> assertions` with n > 2008
+**Verify:** `node tests/js_unit.js` → `### UNIT OK <n> assertions`, up 19 from the node baseline of 1052. Note the two engines report DIFFERENT totals — node 1052, CaveCAD 2008 at plan time — because `js_unit.js` guards some blocks with `if (!IS_NODE)`. Compare each engine against its own baseline; a count from one engine says nothing about the other.
 
 **Steps:**
 
@@ -116,10 +117,12 @@ Append to `tests/js_unit.js`, before the final summary print:
     ok(CsProfile.runKeyOf("A13a1") === "A13a", "runKeyOf A13a1");
     ok(CsProfile.runKeyOf("A20") === "A", "runKeyOf A20");
 
-    ok(CsProfile.tieNameOf("A13a") === "A13", "A13a ties A13");
-    ok(CsProfile.tieNameOf("A13a2b") === "A13a2", "A13a2b ties A13a2");
-    ok(CsProfile.tieNameOf("A") === null, "letter run has no name-derived tie");
-    ok(CsProfile.tieNameOf("B") === null, "B has no name-derived tie");
+    ok(CsProfile.tieNameOfRun("A13a") === "A13", "A13a ties A13");
+    ok(CsProfile.tieNameOfRun("A13a1") === null,
+        "fed a station name instead of a run key, it refuses");
+    ok(CsProfile.tieNameOfRun("A13a2b") === "A13a2", "A13a2b ties A13a2");
+    ok(CsProfile.tieNameOfRun("A") === null, "letter run has no name-derived tie");
+    ok(CsProfile.tieNameOfRun("B") === null, "B has no name-derived tie");
 }());
 
 (function() {
@@ -241,8 +244,14 @@ CsProfile.runKeyOf = function(name) {
  * trailing lowercase group. "A13a" -> "A13"; "A13a2b" -> "A13a2".
  * null for a letter run (B, A), which has no name-derived tie and
  * must get its parent from the graph.
+ *
+ * TAKES A RUN KEY, NOT A STATION NAME -- hence the name. Fed a station
+ * name it returns null (no trailing lowercase group), which is the
+ * same value that legitimately means "letter run, ask the graph", so
+ * the mistake would look like an answer. Read call sites as
+ * tieNameOfRun(runKeyOf(name)).
  */
-CsProfile.tieNameOf = function(runKey) {
+CsProfile.tieNameOfRun = function(runKey) {
     if (runKey === undefined || runKey === null) {
         return null;
     }
@@ -460,7 +469,7 @@ CsProfile.adjacency = function(resolved) {
  * The parent is decided by the GRAPH: of all legs leaving this run's
  * stations to a station in another run, the earliest-resolved one
  * gives the tie station and the parent run. The name-derived tie
- * (CsProfile.tieNameOf) is used only as a cross-check -- when the two
+ * (CsProfile.tieNameOfRun) is used only as a cross-check -- when the two
  * disagree the graph wins, because it is the measured fact, and the
  * disagreement is reported as a likely naming blunder.
  *
@@ -532,7 +541,7 @@ CsProfile.hierarchy = function(grouped, resolved) {
             });
         }
 
-        var expected = CsProfile.tieNameOf(key);
+        var expected = CsProfile.tieNameOfRun(key);
         if (expected !== null && expected !== ties[key]) {
             mismatches.push({
                 run: key,
@@ -590,7 +599,15 @@ CsProfile.bandOrder = function(grouped, parents, ties, resolved) {
     for (key in children) {
         if (children.hasOwnProperty(key)) {
             children[key].sort(function(a, b) {
-                return seqOfTie(a) - seqOfTie(b);
+                var d = seqOfTie(a) - seqOfTie(b);
+                if (d !== 0) {
+                    return d;
+                }
+                // two runs leaving the SAME station tie here, and this
+                // engine's sort is unstable -- without a second key the
+                // band order would differ between runs of the same
+                // drawing. Run key is unique, so it ends the tie.
+                return (a < b) ? -1 : ((a > b) ? 1 : 0);
             });
         }
     }
@@ -829,7 +846,10 @@ CsProfile.betterChain = function(path, best) {
     if (a.hi !== b.hi) {
         return a.hi < b.hi;
     }
-    return false;   // a genuine tie: keep the one already found
+    // Still tied: decide on the station names themselves rather than on
+    // which one the walk happened to reach first. Search order is not a
+    // property a band's contents should depend on.
+    return path.join(",") < best.join(",");
 };
 
 /**
@@ -3424,3 +3444,15 @@ These are choices, not omissions. Each is listed here so a later reader does not
 - **Sketched linework can be tilted by a revision.** `CsRevise.similarityFit` is reused unchanged by user decision. Rotation is meaningful in plan and not in an elevation, so a differential station move can be absorbed as a small tilt. If that is ever observed, the fix is a fit with theta pinned to zero — not a new mover.
 - **Projected profile is a different tool.** `PROFILE-PROJECTED` stays empty; nothing here writes to it.
 - **No length heuristic decides spur versus branch.** The surveyor's naming decides, always.
+
+- **Punctuation in a station name silently becomes part of the run key.** `splitName`
+  treats a run of non-alphanumerics as a fourth group class, so `A-1` keys run `A-`,
+  `A'1` keys `A'`, and `A 1` keys `"A "` — a typo makes its own run rather than being
+  refused. Only the dot is rejected, because a dot means splay. Catching typos would
+  need a whitelist of legal name shapes, which is a naming-policy decision, not a
+  profile decision. Recorded from the Task 1 spec review.
+- **A name can be a station and a run key at once.** With `A1` and `A1a1` both present,
+  `A1` is a station in run `A` and simultaneously the key of run `A1`. Nothing keys
+  bands and stations in one namespace — profile linework keys are run-qualified
+  (`CsProfileBind.key`) precisely so this cannot collide — but any future code that
+  keys them together must qualify them too.
