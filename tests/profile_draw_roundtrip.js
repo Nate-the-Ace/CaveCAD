@@ -2178,6 +2178,136 @@ function drawPlanSurvey(doc, di, resolved, names) {
 }());
 
 // =======================================================================
+// THE REGION MOVES, AND THE SKETCH MOVES WITH IT.
+//
+// The elevation is drawn into the plan drawing at a region below the
+// plan's own extents, and that origin is RECOMPUTED on every draw. When
+// the survey grows southward the plan's extents grow with it, the
+// region slides down, and everything in the profile frame -- the
+// generated geometry and the user's own tracing alike -- has to travel
+// with it or the tracing is left describing empty space.
+// =======================================================================
+
+(function() {
+    var svO = CsModel.newSurvey();
+    svO.shots = [
+        shotOf("A1", "A2", 10, 0, 0, 4, 2),
+        shotOf("A2", "A3", 10, 0, -5, 4, 2)
+    ];
+    var resO = CsNetwork.resolve(svO, {});
+
+    var dO = new RDocument(new RMemoryStorage(), createSpatialIndex());
+    var iO = new RDocumentInterface(dO);
+    drawPlanSurvey(dO, iO, resO, ["A1", "A2", "A3"]);
+    CsProfileDraw.render(dO, iO, CsProfile.build(svO, resO, {}), {});
+
+    var originBefore = CsProfileDraw.regionOrigin(dO);
+    ok(originBefore !== null,
+        "the drawing records where the profile region was put");
+
+    // a sketch traced on the elevation, in the region's own coordinates
+    CsLayers.ensure(dO, iO, CsLayers.PROFILE_TRACED_CEILING);
+    var opO = new RAddObjectsOperation();
+    var sketch = new RLineEntity(dO, new RLineData(
+        new RVector(originBefore.x + 5, originBefore.y + 3),
+        new RVector(originBefore.x + 15, originBefore.y + 4)));
+    sketch.setLayerId(dO.getLayerId(CsLayers.PROFILE_TRACED_CEILING));
+    opO.addObject(sketch, false);
+    iO.applyOperation(opO);
+    var sketchId = sketch.getId();
+    var startBefore = dO.queryEntity(sketchId).getStartPoint();
+    var sx = startBefore.x, sy = startBefore.y;
+
+    // A SECOND sketch, drawn in the region but nowhere near a station:
+    // a note about a passage the survey does not reach, an outline
+    // sketched ahead of the next trip. It binds to NOTHING, so
+    // moveLinework can never carry it -- the region translation is the
+    // only thing that can, and without one it would be left behind
+    // while everything around it moved.
+    var opFar = new RAddObjectsOperation();
+    var farSketch = new RLineEntity(dO, new RLineData(
+        new RVector(originBefore.x + 900, originBefore.y + 700),
+        new RVector(originBefore.x + 910, originBefore.y + 701)));
+    farSketch.setLayerId(dO.getLayerId(CsLayers.PROFILE_TRACED_CEILING));
+    opFar.addObject(farSketch, false);
+    iO.applyOperation(opFar);
+    var farId = farSketch.getId();
+    var farBefore = dO.queryEntity(farId).getStartPoint();
+    var fx = farBefore.x, fy = farBefore.y;
+
+    // AND THE TRACING LAYER IS SWITCHED OFF for the redraw -- the
+    // ordinary thing a caver does to sketch undisturbed, and the case
+    // this build punishes silently: a modify on an off layer is dropped
+    // with no error at all, so a translation that runs outside
+    // CsRevise.withOffLayersOn leaves every hidden sketch behind while
+    // moving everything visible.
+    var tracingLayer = dO.queryLayer(CsLayers.PROFILE_TRACED_CEILING);
+    ok(!isNull(tracingLayer), "sanity: the tracing layer exists to hide");
+    if (!isNull(tracingLayer)) {
+        tracingLayer.setOff(true);
+        var opOff = new RModifyObjectsOperation();
+        opOff.addObject(tracingLayer, false);
+        iO.applyOperation(opOff);
+        ok(dO.queryLayer(CsLayers.PROFILE_TRACED_CEILING).isOff(),
+            "sanity: the tracing layer really is off for the redraw");
+    }
+
+    // the survey grows southward, so the PLAN's extents grow and the
+    // region below them has to move
+    svO.shots.push(shotOf("A3", "A4", 200, 180, 0, 4, 2));
+    var resO2 = CsNetwork.resolve(svO, {});
+    drawPlanSurvey(dO, iO, resO2, ["A4"]);
+    CsProfileDraw.render(dO, iO, CsProfile.build(svO, resO2, {}), {});
+
+    var originAfter = CsProfileDraw.regionOrigin(dO);
+    ok(originAfter !== null, "and still records it after the redraw");
+    var dx = originAfter.x - originBefore.x;
+    var dy = originAfter.y - originBefore.y;
+    ok(Math.abs(dy) > 1e-9, "the origin really did move (dy " + dy + ")");
+
+    var farAfter = dO.queryEntity(farId).getStartPoint();
+    near(farAfter.x - fx, dx, 1e-9,
+        "THE UNBOUND SKETCH MOVED BY EXACTLY THE ORIGIN DELTA IN X -- " +
+        "nothing but the region translation can carry it");
+    near(farAfter.y - fy, dy, 1e-9,
+        "THE UNBOUND SKETCH MOVED BY EXACTLY THE ORIGIN DELTA IN Y");
+
+    var startAfter = dO.queryEntity(sketchId).getStartPoint();
+    near(startAfter.x - sx, dx, 1e-9,
+        "THE SKETCH MOVED BY EXACTLY THE ORIGIN DELTA IN X");
+    near(startAfter.y - sy, dy, 1e-9,
+        "THE SKETCH MOVED BY EXACTLY THE ORIGIN DELTA IN Y");
+
+    // and the drawn coordinates really are origin + band coordinate:
+    // asserted against the built profile's own numbers, not merely
+    // "it moved"
+    var built2 = CsProfile.build(svO, resO2, {});
+    var wanted = CsProfileDraw.positionsOf(built2, originAfter);
+    var drawn = CsProfileBind.positions(dO);
+    var checked = 0, k;
+    for (k in wanted) {
+        if (!wanted.hasOwnProperty(k) || !drawn.hasOwnProperty(k)) {
+            continue;
+        }
+        near(drawn[k].x, wanted[k].x, 1e-9,
+            k + " was drawn at origin + its band x");
+        near(drawn[k].y, wanted[k].y, 1e-9,
+            k + " was drawn at origin + its band y (zOffset included)");
+        checked++;
+    }
+    ok(checked > 0, "sanity: some station was checked against the origin");
+
+    // the region sits BELOW the plan, which is the whole placement rule
+    var planBox = CsProfileDraw.planExtents(dO);
+    ok(planBox !== null, "sanity: the plan has extents to sit below");
+    ok(originAfter.y < planBox.minY,
+        "the region's origin is below the plan's own extents (origin y " +
+        originAfter.y + ", plan minY " + planBox.minY + ")");
+
+    destr(iO);
+}());
+
+// =======================================================================
 // Report.
 // =======================================================================
 

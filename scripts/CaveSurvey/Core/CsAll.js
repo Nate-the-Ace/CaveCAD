@@ -34,7 +34,6 @@ include(includeBasePath + "/CsLrud.js");
 // (which loads these three right after CsLrud, well before CsLayers/
 // CsTags/CsDraw) rather than needing to sit after them here too.
 include(includeBasePath + "/CsProfile.js");
-include(includeBasePath + "/CsProfileFile.js");
 include(includeBasePath + "/CsProfileDraw.js");
 include(includeBasePath + "/CsValidate.js");
 include(includeBasePath + "/CsStats.js");

@@ -393,7 +393,7 @@ CsReport.igrfLine = function(result, lat, lon, dateText) {
  *
  * \param profile CsProfile.build() result, or null when nothing was built
  * \param outcome CsDraw.profile() result: {skipped, reason} or
- *                {path, created, counts}
+ *                {counts, profile}
  */
 CsReport.profileSummary = function(profile, outcome) {
     var lines = [];
@@ -406,9 +406,11 @@ CsReport.profileSummary = function(profile, outcome) {
     }
 
     var c = (outcome && outcome.counts) ? outcome.counts : {};
-    var where = (outcome && outcome.path) ? outcome.path : "the profile drawing";
-    lines.push("Profile " + (outcome && outcome.created ? "created" : "updated") +
-        ": " + where);
+    // "in this drawing", not a file name: the elevation is a REGION of
+    // the drawing the user is looking at now, not a sibling file they
+    // would have to go and open. Naming a path here again would send a
+    // reader looking for a file that no longer exists.
+    lines.push("Profile drawn in this drawing, below the plan");
     lines.push("  " + (c.bandsDrawn || 0) + " band(s), " +
         (c.legsDrawn || 0) + " leg(s), " + (c.stationsDrawn || 0) +
         " station(s)");

@@ -188,20 +188,19 @@ function generateProfileRun() {
     // BOTH of CsDraw.profile's own gates (ProfileAuto, size) are bypassed
     // on purpose -- forcing past both is the entire point of a manual
     // command -- so this calls CsDraw.profileNow directly: the shared
-    // post-gate sequence (resolve where to draw, build, draw, commit,
-    // reveal) that CsDraw.profile itself calls once its own two gates
-    // pass. revealPolicy: "always" -- this command's entire reason to
-    // exist is "show me my profile now", so it must open the drawing on
-    // every successful run, not only when the sibling happened to be
-    // freshly created. Without this, the common case -- a sibling that
-    // already exists on disk but is not currently open as a tab -- would
-    // rewrite the file and tell the user about it in a dialog while
-    // never actually showing them the drawing. See CsDraw.profileNow's
-    // own docblock for why the AUTOMATIC pass must not do the same
-    // (it would steal focus on every ordinary plan draw).
+    // post-gate sequence (build, draw) that CsDraw.profile itself calls
+    // once its own two gates pass.
+    //
+    // NO REVEAL POLICY ANY MORE, and nothing lost with it: the
+    // elevation used to be written to a sibling -PROFILE.dxf, so "show
+    // me my profile now" meant opening a second drawing, and this
+    // command had to ask for that explicitly (the automatic pass must
+    // not, or it would steal focus on every plan draw). The elevation
+    // is a region of THIS drawing now, below the plan -- it is already
+    // on screen the moment it is drawn, for both callers.
     var settings = CsProfile.settings();
-    var outcome = CsDraw.profileNow(doc, survey, resolved, settings,
-        "always");
+    var outcome = CsDraw.profileNow(doc, getDocumentInterface(), survey,
+        resolved, settings);
     if (outcome.skipped) {
         generateProfileRefuse(outcome.reason);
         return;
@@ -217,8 +216,8 @@ function generateProfileRun() {
     // ImportCaveSurvey.js already use for exactly this reason. Wrapped
     // defensively per this feature's own rule that a failure must
     // degrade, not crash -- by this point the rebuild above already
-    // committed real geometry to the profile file, so a dialog that
-    // fails to open must not make the command look like it did nothing.
+    // drew real geometry into the drawing, so a dialog that fails to
+    // open must not make the command look like it did nothing.
     try {
         QMessageBox.information(getMainWindow(), "Generate Profile", text);
     } catch (e) {

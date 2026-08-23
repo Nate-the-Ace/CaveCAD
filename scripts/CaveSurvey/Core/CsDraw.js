@@ -931,21 +931,6 @@ CsDraw.profile = function(survey, resolved) {
             reason: "CaveSurvey/ProfileAuto is off" };
     }
 
-    // MINOR: checked BEFORE the size gate below, deliberately. An
-    // unsaved drawing has nowhere to put a sibling regardless of survey
-    // size, so there is no reason to make it pay for the O(total
-    // stations) CsProfile.groupRuns() pass first -- siblingPath() is
-    // pure and does no file I/O, so this costs nothing when the drawing
-    // IS saved. The reason text is CsProfileFile's own single-sourced
-    // constant (not duplicated here as a string literal) so this early
-    // exit and CsProfileFile.resolve()'s OWN identical check, reached
-    // moments later once the drawing IS saved, can never drift apart in
-    // wording.
-    var planPath = getDocument().getFileName();
-    if (CsProfileFile.siblingPath(planPath) === null) {
-        return { skipped: true, reason: CsProfileFile.NO_FILENAME_REASON };
-    }
-
     var grouped = CsProfile.groupRuns(resolved);
     var largestRun = 0;
     var totalStations = 0;
@@ -986,137 +971,46 @@ CsDraw.profile = function(survey, resolved) {
                 "hand to build the profile anyway" };
     }
 
-    // revealPolicy omitted: this is the AUTOMATIC pass, run on every
-    // plan draw -- see CsDraw.profileNow's own docblock for why it must
-    // stay quiet-unless-created rather than reveal every time the way
-    // GenerateProfile (the manual command) does.
-    return CsDraw.profileNow(getDocument(), survey, resolved, settings);
+    return CsDraw.profileNow(getDocument(), getDocumentInterface(),
+        survey, resolved, settings);
 };
 
 /**
  * The post-gate half of CsDraw.profile, factored out so the manual
- * GenerateProfile command (Task 10) can share it byte-for-byte instead
- * of maintaining its own copy. BOTH of CsDraw.profile's gates (auto
+ * GenerateProfile command can share it byte-for-byte instead of
+ * maintaining its own copy. BOTH of CsDraw.profile's gates (auto
  * switch, size) run BEFORE this function is ever called -- Generate
  * Profile bypasses both on purpose (that is the whole point of a manual
  * command), so this is exactly the part there was ever anything to
- * share: resolve where to draw, build, draw, commit, reveal.
+ * share: build, and draw.
  *
- * Takes `doc` EXPLICITLY, unlike CsDraw.profile, which reads it from
- * getDocument() -- the manual tool already has its own `doc` in hand
- * (it is not necessarily "the current document" by the time this would
- * run inside some future caller), so this never assumes there is a
- * global "current" one.
+ * DRAWS INTO THE DOCUMENT IT IS GIVEN. The elevation used to live in a
+ * sibling -PROFILE.dxf file, which meant an unsaved drawing had nowhere
+ * to put it, the two files could disagree about the same cave, and the
+ * Survey Notebook -- which reads the drawing it is opened on -- could
+ * not edit a survey it found only in the plan. One drawing holds one
+ * survey model now; the elevation is a REGION of it, placed below the
+ * plan and kept in its own layer frame (CsLayers.frameOf). There is no
+ * sibling path to resolve, nothing to commit, and no second tab to
+ * reveal -- so the refusals that were about those are gone too, rather
+ * than reworded.
  *
- * REVEAL POLICY -- DELIBERATELY DIFFERENT FOR THE TWO CALLERS, an
- * earlier pass through this function got this wrong: it unified both
- * callers onto "reveal only a NEWLY CREATED sibling file
- * (target.created)" on the stated grounds that there was no reason for
- * them to differ. There is one. CsDraw.profile's automatic pass runs on
- * EVERY plan draw -- opening a tab every time would steal focus from
- * whatever the user is actually doing, so quiet-unless-created is
- * correct there; that is `revealPolicy` left at its default,
- * "auto-quiet". GenerateProfile's whole reason to exist is "show me my
- * profile now" -- a manual command the user reached for on purpose --
- * so it must reveal the drawing on every successful outcome, not only
- * when target.created happens to be true. `target.created` is
- * `!exists` (see CsProfileFile.resolve): the common case for a SECOND
- * run of this tool is a sibling that already exists on disk but is not
- * currently open as a tab (offscreen: true, created: false) -- exactly
- * the case the unified policy silently rewrote the file for and then
- * showed the user nothing. Pass revealPolicy === "always" (Generate
- * Profile does) to reveal after every non-skipped outcome regardless of
- * `created`; an already-open tab (offscreen: false) reveals harmlessly
- * too -- CsProfileFile.reveal's own openFiles() call focuses the
- * existing tab rather than opening a duplicate, so calling it on a
- * drawing already on screen costs nothing.
+ * Takes `doc` and `di` EXPLICITLY: the manual tool already has both in
+ * hand, so this never assumes there is a global "current" document.
  *
- * \param settings     CsProfile.settings() already read by the caller
- *                     (both gates in CsDraw.profile need it before this
- *                     point, and the manual tool reads it once for the
- *                     same fields, so neither caller should read it
- *                     twice)
- * \param revealPolicy "auto-quiet" (default, or omitted) reveals only a
- *                     newly created sibling -- the automatic pass's
- *                     policy, so it never steals focus on an ordinary
- *                     plan draw. "always" reveals on every successful
- *                     (non-skipped) outcome -- the manual command's
- *                     policy, matching the tool's pre-unification
- *                     behaviour: "show me my profile now" means show it,
- *                     whether the file was just created or already
- *                     existed.
- * \return {skipped, reason} or {path, created, counts, profile}
+ * \param settings CsProfile.settings() already read by the caller
+ *                 (both gates in CsDraw.profile need it before this
+ *                 point, and the manual tool reads it once for the same
+ *                 fields, so neither caller should read it twice)
+ * \return {skipped, reason} or {counts, profile}
  */
-CsDraw.profileNow = function(doc, survey, resolved, settings, revealPolicy) {
-    var target = CsProfileFile.resolve(doc.getFileName());
-    if (target.doc === null) {
-        return { skipped: true, reason: target.reason };
-    }
-
-    // MINOR: an off-screen target.di (CsProfileFile.resolve built a
-    // fresh memory document for us) is normally disposed of by
-    // CsProfileFile.commit(), win or lose -- but commit() is never
-    // reached if build()/render() throws, and an open-tab target
-    // (target.offscreen === false) is the user's own live document and
-    // must NEVER be destroyed, thrown exception or not. `drewOk` is
-    // what tells the finally block below which case it is in: without
-    // this, a failed draw on the offscreen path leaked one
-    // RDocument/RDocumentInterface per failure. The exception itself is
-    // NOT caught here -- it still propagates to this function's own
-    // caller exactly as it did before this leak fix existed (CsDraw.
-    // profile's caller, CsDraw.survey, already wraps ITS call to
-    // CsDraw.profile in the try/catch that turns this into a reported
-    // "profile pass failed" outcome; catching it a second time here,
-    // under a different message, would just make the two paths
-    // disagree about what a thrown build/render failure is called).
-    var built, counts;
-    var drewOk = false;
-    try {
-        built = CsProfile.build(survey, resolved, {
-            exaggeration: settings.exaggeration,
-            flatSplayDeg: settings.flatSplayDeg
-        });
-        counts = CsProfileDraw.render(target.doc, target.di, built, {});
-        drewOk = true;
-    } finally {
-        if (!drewOk && target.offscreen) {
-            try { destr(target.di); } catch (eDestr) { /* nicety */ }
-        }
-    }
-
-    var written = CsProfileFile.commit(target);
-    if (!written) {
-        return { skipped: true,
-            reason: "could not write " + target.path };
-    }
-
-    // The outcome is built BEFORE reveal() runs, and returned
-    // unconditionally afterward: reveal() already swallows its own
-    // openFiles() exception (headless runs have no GUI to open a tab
-    // in), but this is a second, independent safety net so a future
-    // change to reveal()'s own implementation cannot regress "the file
-    // committed successfully" into "the profile pass failed" just
-    // because OPENING it in a tab hit a problem -- the file is already
-    // safely on disk by this point regardless of what reveal() does.
-    var outcome = { path: target.path, created: target.created,
-        counts: counts, profile: built };
-    // See this function's own \param revealPolicy docblock above: the
-    // automatic pass (revealPolicy left at its default) reveals only a
-    // brand-new sibling, so it never steals focus on an ordinary plan
-    // draw; the manual GenerateProfile command passes "always" so a run
-    // against an already-existing-but-unopened sibling still shows the
-    // user what it just rebuilt, instead of silently rewriting a file
-    // nobody sees.
-    var shouldReveal = (revealPolicy === "always") ? true : target.created;
-    if (shouldReveal) {
-        try {
-            CsProfileFile.reveal(target.path);
-        } catch (eReveal) {
-            // see the comment above: a failed reveal never turns a
-            // successful write into a reported failure
-        }
-    }
-    return outcome;
+CsDraw.profileNow = function(doc, di, survey, resolved, settings) {
+    var built = CsProfile.build(survey, resolved, {
+        exaggeration: settings.exaggeration,
+        flatSplayDeg: settings.flatSplayDeg
+    });
+    var counts = CsProfileDraw.render(doc, di, built, {});
+    return { counts: counts, profile: built };
 };
 
 /**

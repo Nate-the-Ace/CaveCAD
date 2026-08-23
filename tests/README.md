@@ -1,6 +1,6 @@
 # Tests
 
-Five stages, cheapest first, all driven by one script:
+Six stages, cheapest first, all driven by one script:
 
     ./tests/run_all.sh             what has to pass while developing
     ./tests/run_all.sh --publish   also what has to pass before releasing
@@ -21,7 +21,7 @@ virtualenv, no `pip install`, nothing to skip cleanly if it's missing:
 `tests/test_addon.py` imports only `os`, `re`, `shutil`, `subprocess`,
 `tempfile`, `unittest` and `xml.etree.ElementTree`.
 
-## Stage 1/5 -- `test_addon.py` (structural tests)
+## Stage 1/6 -- `test_addon.py` (structural tests)
 
 Checks the add-on's structure without running any of it: every tool lives in
 a folder named after it, nothing loose sits beside `CaveSurvey.js`,
@@ -35,7 +35,7 @@ template, and both `NSS_Cave_Template_PLAN.dxf` and
 otherwise show up as a tool mysteriously absent from the menu, or a layer
 silently missing from a fresh drawing.
 
-## Stage 2/5 -- `js_syntax.js` (add-on syntax check)
+## Stage 2/6 -- `js_syntax.js` (add-on syntax check)
 
 Parses every script under `scripts/CaveSurvey/` inside QCAD's own ECMAScript
 engine, by wrapping each in a function expression and `eval`-ing it -- which
@@ -43,7 +43,7 @@ parses without executing, so no dialog opens and `RMainWindowQt` is never
 touched. Catches a syntax error that would otherwise surface only as a tool
 silently missing from the menu at runtime.
 
-## Stage 3/5 -- `js_unit.js` (Core unit tests)
+## Stage 3/6 -- `js_unit.js` (Core unit tests)
 
 Unit tests for `scripts/CaveSurvey/Core/*.js` -- the pure survey engine
 (parsing, network resolution, LRUD, adjustment, the extended-elevation
@@ -60,24 +60,34 @@ return 0 for two distinct items produces different geometry in each. Every
 Core file loaded here must stay loadable under plain node: nothing may touch
 `R*`/`Q*` globals at file (as opposed to function-body) scope.
 
-## Stage 4/5 -- `profile_file_roundtrip.js`
+## Stage 4/6 -- `profile_draw_roundtrip.js`
 
-QCAD-context only (real `RDocument`/`RDocumentInterface`, real file I/O), so
-it cannot run under node. Proves the extended elevation's document-resolution
-half (`Core/CsProfileFile.js`): sibling path derivation in the real engine,
-resolving to the PROFILE template on a first run, refusing (rather than
-silently blessing) a sibling that is empty, unreadable, or is the plan's own
-file, and -- the load-bearing fact the whole tagging scheme rests on -- a
-custom property written into an entity survives export through the dxflib
-DXF writer and reimport intact.
+QCAD-context only (real `RDocument`/`RDocumentInterface`), so it cannot run
+under node. Proves the drawing half (`Core/CsProfileDraw.js`): rendering a
+built profile creates its layers and geometry, every entity it draws lands
+in the PROFILE frame (`CsLayers.frameOf`), a second render erases exactly
+what the first one drew (by its `Profile*` tags) and redraws in its place,
+hand-drawn linework on the plain `PROFILE-FLOOR` / `PROFILE-CEILING` tracing
+layers is never touched, the region's origin is recomputed below the plan's
+extents and the user's tracing travels with it, and a line traced on the
+elevation binds to elevation stations rather than to the plan stations a
+few units away in absolute coordinates.
 
-## Stage 5/5 -- `profile_draw_roundtrip.js`
+## Stage 5/6 -- `generate_profile_run.js`
 
-Also QCAD-context only. Proves the drawing half (`Core/CsProfileDraw.js`):
-rendering a built profile creates its layers and geometry, a second render
-erases exactly what the first one drew (by its `Profile*` tags) and redraws
-in its place, and hand-drawn linework on the plain `PROFILE-FLOOR` /
-`PROFILE-CEILING` tracing layers is never touched.
+Drives the Generate Profile TOOL's own entry point (not just the Core
+library it calls) through the real `include()` chain, against a real
+document: the survey is rebuilt from the drawing's own tags, splays
+included, the elevation is drawn into that same drawing, and the report
+reaches the user through `QMessageBox.information` with its newlines
+intact.
+
+## Stage 6/6 -- `align_image_frame.js`
+
+Calls `AlignImage.prototype.transform` -- the one per-entity hook this repo
+owns, since stock QCAD's `Transform` owns the selection walk -- against a
+real document, and proves a plan warp moves the plan's own geometry and
+leaves every profile-frame entity at exactly its original coordinates.
 
 ## Publish checks
 
@@ -140,7 +150,6 @@ All learned the hard way, and relevant to any new `-autostart` test script:
   test suite depends on this.
 * A headless run (`-no-gui`) has no MDI area at all: `RMainWindowQt` exists,
   but its main window and MDI area are null. Any code path that enumerates
-  open tabs (`CsProfileFile.openTabFor`) degrades to "nothing is open" here,
-  by design -- it cannot be exercised end-to-end by a headless script, only
-  by hand in the real GUI, or against injected fakes (see
-  `CsProfileFile._listOpenChildren` and its unit tests in `js_unit.js`).
+  open tabs degrades to "nothing is open" here, by design -- it cannot be
+  exercised end-to-end by a headless script, only by hand in the real GUI or
+  against injected fakes.

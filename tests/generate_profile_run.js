@@ -222,11 +222,6 @@ ok(taggedStationCount === 4,
     taggedStationCount + ") -- otherwise every assertion below is " +
     "measuring the wrong thing");
 
-var tplPath = CsProfileFile.templatePath();
-ok(tplPath !== null,
-    "sanity: the PROFILE template is found -- otherwise the happy-path " +
-    "scenario below cannot be reached at all");
-
 // ---------------------------------------------------------------------
 // Spy helpers: wrap a Cs* function, call straight through to the real
 // implementation, and record what passed through. Every spy is
@@ -235,13 +230,28 @@ ok(tplPath !== null,
 // whatever ran next.
 // ---------------------------------------------------------------------
 
+/** How many entities in doc sit on a profile-frame layer -- the
+ *  elevation is drawn into the plan drawing now, so "did it draw?" is
+ *  a question about this document, not about a file beside it. */
+function profileFrameCount(doc) {
+    var ids = doc.queryAllEntities(false, false);
+    var n = 0, i, e;
+    for (i = 0; i < ids.length; i++) {
+        e = doc.queryEntity(ids[i]);
+        if (isNull(e)) { continue; }
+        if (CsLayers.frameOf(doc.getLayerName(e.getLayerId())) === "profile") {
+            n++;
+        }
+    }
+    return n;
+}
+
 function withSpies(fn) {
     var savedSurveyFromDocument = CsTags.surveyFromDocument;
     var savedRender = CsProfileDraw.render;
     var savedInformation = QMessageBox.information;
     var savedHandleUserMessage = EAction.handleUserMessage;
     var savedWarningHandler = warning.handler;
-    var savedReveal = CsProfileFile.reveal;
 
     var spy = {
         capturedSurvey: null,
@@ -249,8 +259,7 @@ function withSpies(fn) {
         capturedCounts: null,
         informationCalls: [],
         handleUserMessageCalls: [],
-        warnings: [],
-        revealCalls: []
+        warnings: []
     };
 
     CsTags.surveyFromDocument = function(doc) {
@@ -273,16 +282,6 @@ function withSpies(fn) {
     warning.handler = function(msg) {
         spy.warnings.push(msg);
     };
-    // IMPORTANT 3 -- reveal(): wraps straight through to the real
-    // implementation (openFiles() swallows its own exception headlessly
-    // anyway) purely to RECORD whether the manual tool asked to reveal
-    // the drawing at all, since that is exactly the behaviour this
-    // feature's own reveal-policy fix changed.
-    CsProfileFile.reveal = function(path) {
-        spy.revealCalls.push(path);
-        return savedReveal(path);
-    };
-
     try {
         fn(spy);
     } finally {
@@ -291,21 +290,18 @@ function withSpies(fn) {
         QMessageBox.information = savedInformation;
         EAction.handleUserMessage = savedHandleUserMessage;
         warning.handler = savedWarningHandler;
-        CsProfileFile.reveal = savedReveal;
     }
 }
 
 // =======================================================================
-// Scenario A: happy path -- a saved plan with real survey tags rebuilds
-// a real sibling PROFILE file and reports through QMessageBox only.
+// Scenario A: happy path -- a plan with real survey tags draws its
+// elevation INTO THIS DRAWING and reports through QMessageBox only.
 // =======================================================================
 
-if (tplPath !== null) {
-    var planPathA = QDir.tempPath() + "/cs_generate_profile_run_planA.dxf";
-    var siblingPathA = CsProfileFile.siblingPath(planPathA);
-    new QFile(siblingPathA).remove();
-    fixtureDoc.setFileName(planPathA);
+var planPathA = QDir.tempPath() + "/cs_generate_profile_run_planA.dxf";
+fixtureDoc.setFileName(planPathA);
 
+{
     withSpies(function(spy) {
         // IMPORTANT (untested behaviours): driven through the tool's
         // OWN wired entry point, new GenerateProfile(null).beginEvent(),
@@ -377,7 +373,7 @@ if (tplPath !== null) {
         if (spy.informationCalls.length === 1 &&
                 spy.capturedBuilt !== null) {
             var expectedText = CsReport.profileSummary(spy.capturedBuilt, {
-                path: siblingPathA, created: true, counts: spy.capturedCounts
+                counts: spy.capturedCounts
             }) + generateProfileSplayLossWarning(fixtureDoc,
                 spy.capturedSurvey);
             eqs(spy.informationCalls[0].text, expectedText,
@@ -458,97 +454,73 @@ if (tplPath !== null) {
                 spy.informationCalls[0].text + ")");
         }
 
-        // ---- IMPORTANT 3, sanity half: a freshly-created sibling is
-        // revealed -- true under BOTH the old unified policy and this
-        // fix's "always" policy, so this alone does not prove the fix.
-        // Scenario A2 right below is the one that actually distinguishes
-        // them. ---------------------------------------------------------
-        eqs(spy.revealCalls.length, 1,
-            "sanity: a newly created sibling is revealed exactly once");
+        // ---- and the elevation landed in THIS drawing, on
+        // profile-frame layers: the claim the whole move is about.
+        var idsA = fixtureDoc.queryAllEntities(false, false);
+        var inFrameA = 0;
+        for (var ai2 = 0; ai2 < idsA.length; ai2++) {
+            var eA = fixtureDoc.queryEntity(idsA[ai2]);
+            if (isNull(eA)) { continue; }
+            if (CsLayers.frameOf(fixtureDoc.getLayerName(
+                    eA.getLayerId())) === "profile") {
+                inFrameA++;
+            }
+        }
+        ok(inFrameA > 0,
+            "PROOF: THE ELEVATION LANDED IN THE PLAN'S OWN DRAWING, on " +
+            "profile-frame layers -- there is no sibling file any more");
     });
 
-    ok(new QFileInfo(siblingPathA).exists(),
-        "PROOF: the sibling PROFILE.dxf actually landed on disk");
+    ok(!new QFileInfo(QDir.tempPath() +
+            "/cs_generate_profile_run_planA-PROFILE.dxf").exists(),
+        "and no -PROFILE sibling was written beside the plan");
 
     // ===================================================================
-    // Scenario A2: IMPORTANT 3's OWN FIX, proven. The sibling from
-    // scenario A above is deliberately NOT removed -- it now exists on
-    // disk but is not open as a tab, exactly `target.created === false,
-    // target.offscreen === true` from CsProfileFile.resolve, the common
-    // case for a SECOND run of this tool. Before this fix, CsDraw.
-    // profileNow's unified "reveal only if created" policy meant this
-    // run would silently rewrite the file and never open it; the manual
-    // tool's whole reason to exist is "show me my profile now", so it
-    // must reveal here too.
+    // Scenario A2: a SECOND run is an ordinary redraw, not a refusal and
+    // not a duplicate. This used to be the case that distinguished the
+    // sibling reveal policies; what it proves now is that re-running the
+    // command against a drawing that already holds an elevation reports
+    // normally.
     // ===================================================================
     withSpies(function(spy) {
         new GenerateProfile(null).beginEvent();
         eqs(spy.informationCalls.length, 1,
-            "sanity: the second run against an EXISTING, unopened " +
-            "sibling still reports normally, not as a refusal");
-        eqs(spy.revealCalls.length, 1,
-            "IMPORTANT 3'S OWN FIX: a sibling that already existed on " +
-            "disk (not freshly created, not already open as a tab) is " +
-            "STILL revealed by the manual command -- \"show me my " +
-            "profile now\" means show it, whether or not this run " +
-            "happened to create the file (got " +
-            JSON.stringify(spy.revealCalls) + ")");
+            "the second run against a drawing that already holds an " +
+            "elevation still reports normally, not as a refusal");
     });
-
-    new QFile(siblingPathA).remove();
-} else {
-    failures.push("SKIPPED scenario A entirely -- no PROFILE template " +
-        "found, so nothing above it could be proven either");
 }
 
 // =======================================================================
-// Scenario B: refusal -- an unsaved drawing. No path to write to, and
-// CsProfileFile.resolve() says so in words; the tool must surface that
-// reason (not a generic failure) and must not attempt any report.
+// Scenario B: AN UNSAVED DRAWING DRAWS ITS ELEVATION LIKE ANY OTHER.
+//
+// This used to be a refusal, and so did "this drawing is already a
+// profile" (scenario C) and "the sibling could not be written"
+// (scenario E). All three were about the sibling FILE: a drawing with
+// no path had nowhere to put one, a drawing already named -PROFILE
+// would have targeted itself, and a failed export had to be reported
+// rather than swallowed. There is no sibling now -- the elevation is a
+// region of the drawing in front of the user -- so those refusals are
+// gone with the thing they were about, and what has to be proven
+// instead is that the case they refused now WORKS.
 // =======================================================================
 
 fixtureDoc.setFileName("");
 withSpies(function(spy) {
     generateProfileRun();
-    eqs(spy.warnings.length, 1, "exactly one warning fired");
-    eqs(spy.warnings[0],
-        "Generate Profile: the drawing has no file name yet -- save " +
-        "it and the profile will be written beside it.",
-        "the refusal reason for an unsaved drawing, in these exact words");
-    eqs(spy.informationCalls.length, 0,
-        "a refusal shows no report -- there is nothing built to report on");
-    eqs(spy.handleUserMessageCalls.length, 0,
-        "a refusal does not fall through to handleUserMessage either");
+    eqs(spy.warnings.length, 0,
+        "an unsaved drawing is not refused any more (warnings: " +
+        JSON.stringify(spy.warnings) + ")");
+    eqs(spy.informationCalls.length, 1,
+        "it reports what it drew, like any other run");
+    ok(spy.capturedCounts !== null && spy.capturedCounts.stationsDrawn > 0,
+        "and it really drew the elevation into the unsaved drawing");
 });
 
 // =======================================================================
-// Scenario C: refusal -- this drawing IS a profile (its own sibling
-// path is itself, by siblingPath's idempotence rule). Drawing the
-// elevation directly onto the plan's own CTRL-SHOTS/CTRL-STATIONS
-// geometry is exactly what "the profile needs to be its own file"
-// exists to prevent, so this must refuse and say why, not just refuse.
-// =======================================================================
-
-var selfPath = QDir.tempPath() +
-    "/cs_generate_profile_run_self-PROFILE.dxf";
-fixtureDoc.setFileName(selfPath);
-withSpies(function(spy) {
-    generateProfileRun();
-    eqs(spy.warnings.length, 1, "exactly one warning fired");
-    eqs(spy.warnings[0],
-        "Generate Profile: this drawing is already a profile; the " +
-        "elevation is generated from the plan beside it.",
-        "the refusal reason for a plan that is itself a profile, in " +
-        "these exact words");
-    eqs(spy.informationCalls.length, 0,
-        "a refusal shows no report here either");
-});
-
-// =======================================================================
-// Scenario D: a drawing with no survey tags at all -- not a refusal
-// CsProfileFile ever sees (the tool never gets that far), so it is
-// tested separately from B/C above. Established convention across
-// every tool in this suite (SurveyStats, BuildLegend, ImportCaveSurvey,
+// Scenario D: a drawing with no survey tags at all. The tool never gets
+// as far as drawing anything, so this is the one refusal that survives
+// the move into the plan drawing. Established convention across every
+// tool in this suite (SurveyStats, BuildLegend, ImportCaveSurvey,
 // ScatterBreakdown) is to WARN rather than stay silent when a tool
 // finds nothing to work with -- checked against those tools' own
 // source before writing GenerateProfile.js, not assumed.
@@ -569,50 +541,8 @@ withSpies(function(spy) {
         "the refusal reason for a drawing with no survey tags, in " +
         "these exact words");
     eqs(spy.informationCalls.length, 0,
-        "a refusal shows no report here either");
+        "a refusal shows no report");
 });
-
-// =======================================================================
-// Scenario E: MINOR (untested behaviours) -- the commit-failure branch,
-// now shared with CsDraw.profile through CsDraw.profileNow, had no
-// coverage on the MANUAL tool's own side (tests/js_unit.js's Task 9
-// block covers the automatic path). CsProfileFile.commit() returning
-// false (a real write failure) must surface as a named refusal, not be
-// swallowed or reported as success.
-// =======================================================================
-
-if (tplPath !== null) {
-    var planPathE = QDir.tempPath() + "/cs_generate_profile_run_planE.dxf";
-    var siblingPathE = CsProfileFile.siblingPath(planPathE);
-    new QFile(siblingPathE).remove();
-    fixtureDoc.setFileName(planPathE);
-    getDocument = function() { return fixtureDoc; };
-    getDocumentInterface = function() { return fixtureDi; };
-
-    var savedCommitE = CsProfileFile.commit;
-    CsProfileFile.commit = function() { return false; };
-    withSpies(function(spy) {
-        try {
-            generateProfileRun();
-        } finally {
-            CsProfileFile.commit = savedCommitE;
-        }
-        eqs(spy.warnings.length, 1, "exactly one warning fired");
-        eqs(spy.warnings[0],
-            "Generate Profile: could not write " + siblingPathE + ".",
-            "MINOR now covered: a commit() failure is reported by name, " +
-            "not silently treated as success");
-        eqs(spy.informationCalls.length, 0,
-            "a commit failure shows no report -- nothing was actually " +
-            "written to show");
-    });
-    ok(!new QFileInfo(siblingPathE).exists(),
-        "PROOF: the forced commit failure wrote nothing to the sibling " +
-        "path");
-} else {
-    failures.push("SKIPPED scenario E entirely -- no PROFILE template " +
-        "found, so nothing above it could be proven either");
-}
 
 // =======================================================================
 // Scenario F: THE MEASURED CONSEQUENCE, end to end -- a cave whose floor
@@ -629,7 +559,7 @@ if (tplPath !== null) {
 // ceilingRuns 0, floorRuns 0.
 // =======================================================================
 
-if (tplPath !== null) {
+{
     var splayDoc = new RDocument(new RMemoryStorage(), createSpatialIndex());
     var splayDi = new RDocumentInterface(splayDoc);
     getDocument = function() { return splayDoc; };
@@ -660,10 +590,8 @@ if (tplPath !== null) {
         RSettings.setValue(KEY_AUTO, hadAutoF);
     }
 
-    var planPathF = QDir.tempPath() + "/cs_generate_profile_run_planF.dxf";
-    var siblingPathF = CsProfileFile.siblingPath(planPathF);
-    new QFile(siblingPathF).remove();
-    splayDoc.setFileName(planPathF);
+    splayDoc.setFileName(
+        QDir.tempPath() + "/cs_generate_profile_run_planF.dxf");
 
     withSpies(function(spy) {
         new GenerateProfile(null).beginEvent();
@@ -687,12 +615,8 @@ if (tplPath !== null) {
             "SPLAY-ONLY CAVE: the report still reaches the user exactly " +
             "once");
     });
-    ok(new QFileInfo(siblingPathF).exists(),
-        "SPLAY-ONLY CAVE: the sibling PROFILE.dxf landed on disk");
-    new QFile(siblingPathF).remove();
-} else {
-    failures.push("SKIPPED scenario F entirely -- no PROFILE template " +
-        "found, so nothing above it could be proven either");
+    ok(profileFrameCount(splayDoc) > 0,
+        "SPLAY-ONLY CAVE: the elevation landed in the drawing itself");
 }
 
 // =======================================================================
@@ -705,7 +629,7 @@ if (tplPath !== null) {
 // so the tool has to SAY the profile is missing it.
 // =======================================================================
 
-if (tplPath !== null) {
+{
     var ghostDoc = new RDocument(new RMemoryStorage(), createSpatialIndex());
     var ghostDi = new RDocumentInterface(ghostDoc);
     getDocument = function() { return ghostDoc; };
@@ -754,10 +678,8 @@ if (tplPath !== null) {
         "sanity: both carriers of the splay (its ray and its tip) were " +
         "re-tagged onto a station the drawing does not have");
 
-    var planPathG = QDir.tempPath() + "/cs_generate_profile_run_planG.dxf";
-    var siblingPathG = CsProfileFile.siblingPath(planPathG);
-    new QFile(siblingPathG).remove();
-    ghostDoc.setFileName(planPathG);
+    ghostDoc.setFileName(
+        QDir.tempPath() + "/cs_generate_profile_run_planG.dxf");
 
     withSpies(function(spy) {
         new GenerateProfile(null).beginEvent();
@@ -777,11 +699,7 @@ if (tplPath !== null) {
                 "counts, got:\n" + spy.informationCalls[0].text);
         }
     });
-    new QFile(siblingPathG).remove();
     destr(ghostDi);
-} else {
-    failures.push("SKIPPED scenario G entirely -- no PROFILE template " +
-        "found, so nothing above it could be proven either");
 }
 
 // ---------------------------------------------------------------------

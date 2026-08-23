@@ -43,7 +43,7 @@ var CsProfileDraw = {};
 
 CsProfileDraw.TAGS = ["ProfileRun", "ProfileStation", "ProfileShot",
     "ProfileSplay", "ProfileFloorRun", "ProfileCeilingRun",
-    "ProfileBandLabel", "ProfileZOffset"];
+    "ProfileBandLabel", "ProfileZOffset", "ProfileOrigin"];
 
 /** Layers the profile writes to, created if the drawing lacks them.
  *  CTRL-PROFILE-LRUD is NOT here -- see the TAGS docblock above;
@@ -306,10 +306,17 @@ CsProfileDraw.run = function(doc, op, layerName, points, at, tagKey,
 };
 
 /** One band, into an operation already open. */
-CsProfileDraw.band = function(doc, op, band, counts) {
+CsProfileDraw.band = function(doc, op, band, counts, origin) {
     var dz = band.zOffset || 0.0;
+    // TWO offsets, and they are not the same thing. dz is the band's
+    // own displacement, part of what the elevation SAYS (a spur shown
+    // below true elevation so it does not overprint the trunk, and
+    // labelled as such). The origin is where the whole region was
+    // placed in the drawing, which says nothing about the cave at all.
+    var ox = (origin === undefined || origin === null) ? 0 : origin.x;
+    var oy = (origin === undefined || origin === null) ? 0 : origin.y;
     var at = function(x, y) {
-        return new RVector(x, y + dz);
+        return new RVector(ox + x, oy + y + dz);
     };
     var runTag = { ProfileRun: band.key };
     var i;
@@ -379,8 +386,14 @@ CsProfileDraw.band = function(doc, op, band, counts) {
  * Where every station WILL be once this profile is drawn, keyed the way
  * CsProfileBind keys them: moveLinework's "after" frame.
  */
-CsProfileDraw.positionsOf = function(profile) {
+CsProfileDraw.positionsOf = function(profile, origin) {
     var out = {};
+    // The region's own placement in the drawing. Omitted means (0, 0):
+    // the band coordinates themselves, which is what a caller comparing
+    // one BUILD against another wants. render() passes the real origin,
+    // because what it compares against is what is on the paper.
+    var ox = (origin === undefined || origin === null) ? 0 : origin.x;
+    var oy = (origin === undefined || origin === null) ? 0 : origin.y;
     var bands = (profile && profile.bands) ? profile.bands : [];
     for (var b = 0; b < bands.length; b++) {
         var band = bands[b];
@@ -388,10 +401,231 @@ CsProfileDraw.positionsOf = function(profile) {
         for (var i = 0; i < band.stations.length; i++) {
             var st = band.stations[i];
             out[CsProfileBind.key(band.key, st.name)] =
-                { x: st.x, y: st.y + dz };
+                { x: ox + st.x, y: oy + st.y + dz };
         }
     }
     return out;
+};
+
+// ---------------------------------------------------------------------
+// THE REGION: where the elevation is placed in the plan drawing.
+// ---------------------------------------------------------------------
+
+/** Blank drawing units between the plan's southern edge and the top of
+ *  the elevation. Twenty label heights: enough that the plan's own
+ *  bottom labels and the elevation's top band caption cannot collide at
+ *  any zoom, and small enough that both still frame together on screen.
+ *  In DRAWING units, so it scales with the survey's own units the way
+ *  every other spacing in this suite does. */
+CsProfileDraw.REGION_GUTTER = 20.0;
+
+/**
+ * The bounding box of everything in the PLAN frame, as
+ * {minX, minY, maxX, maxY}, or null when the drawing holds no plan
+ * geometry at all. QCAD only.
+ *
+ * Frame-scoped rather than doc.getBoundingBox(): the elevation is IN
+ * this drawing, so the document's own extents already include the
+ * region being placed. Feeding that back in would push the region
+ * further down on every single redraw -- a drawing that walks south
+ * forever, one gutter at a time.
+ */
+CsProfileDraw.planExtents = function(doc) {
+    var ids = doc.queryAllEntities(false, false);
+    var out = null, i, e, box, lname;
+    for (i = 0; i < ids.length; i++) {
+        e = doc.queryEntity(ids[i]);
+        if (isNull(e)) {
+            continue;
+        }
+        try {
+            lname = doc.getLayerName(e.getLayerId());
+        } catch (eLayer) {
+            continue;
+        }
+        if (CsLayers.frameOf(lname) !== "plan") {
+            continue;
+        }
+        try {
+            box = e.getBoundingBox();
+        } catch (eBox) {
+            continue;
+        }
+        if (isNull(box)) {
+            continue;
+        }
+        var c1 = box.getCorner1(), c2 = box.getCorner2();
+        if (out === null) {
+            out = { minX: Math.min(c1.x, c2.x), minY: Math.min(c1.y, c2.y),
+                maxX: Math.max(c1.x, c2.x), maxY: Math.max(c1.y, c2.y) };
+        } else {
+            out.minX = Math.min(out.minX, c1.x, c2.x);
+            out.minY = Math.min(out.minY, c1.y, c2.y);
+            out.maxX = Math.max(out.maxX, c1.x, c2.x);
+            out.maxY = Math.max(out.maxY, c1.y, c2.y);
+        }
+    }
+    return out;
+};
+
+/**
+ * The bounding box of a BUILT profile's own coordinates (band X from
+ * zero, Y at true elevation, each band's zOffset included), as
+ * {minX, minY, maxX, maxY}, or null for a profile with nothing in it.
+ * Pure -- no document.
+ *
+ * Stations and legs only. Wall runs hang off the stations they belong
+ * to by at most the passage's own height, which the gutter already
+ * covers, and scanning them would double this function's cost on the
+ * one code path that is already quadratic in the survey total.
+ */
+CsProfileDraw.regionBounds = function(profile) {
+    var bands = (profile && profile.bands) ? profile.bands : [];
+    var out = null, b, i, dz;
+    var see = function(x, y) {
+        if (out === null) {
+            out = { minX: x, minY: y, maxX: x, maxY: y };
+            return;
+        }
+        out.minX = Math.min(out.minX, x);
+        out.minY = Math.min(out.minY, y);
+        out.maxX = Math.max(out.maxX, x);
+        out.maxY = Math.max(out.maxY, y);
+    };
+    for (b = 0; b < bands.length; b++) {
+        dz = bands[b].zOffset || 0.0;
+        for (i = 0; i < bands[b].stations.length; i++) {
+            see(bands[b].stations[i].x, bands[b].stations[i].y + dz);
+        }
+        for (i = 0; i < bands[b].legs.length; i++) {
+            see(bands[b].legs[i].fromX, bands[b].legs[i].fromY + dz);
+            see(bands[b].legs[i].toX, bands[b].legs[i].toY + dz);
+        }
+    }
+    return out;
+};
+
+/**
+ * Where to put the region THIS time: the offset added to every band
+ * coordinate so the elevation lands below the plan, left edges lined
+ * up. QCAD only.
+ *
+ * RECOMPUTED EVERY DRAW rather than stored once and kept. A stored
+ * anchor would go stale the moment the survey grew southward -- the
+ * elevation would end up overlapping the plan it is supposed to sit
+ * under, and no redraw would ever fix it. The cost of recomputing is
+ * that the region MOVES, which is why CsProfileDraw.translateRegion
+ * exists: the user's own tracing has to travel with it.
+ *
+ * A drawing with no plan geometry (the elevation drawn first, or drawn
+ * alone) has nothing to sit below, so the region stays at the origin
+ * and the band coordinates are the drawing's coordinates.
+ */
+CsProfileDraw.computeOrigin = function(doc, profile) {
+    var plan = CsProfileDraw.planExtents(doc);
+    var bounds = CsProfileDraw.regionBounds(profile);
+    if (plan === null || bounds === null) {
+        return new RVector(0, 0);
+    }
+    return new RVector(plan.minX - bounds.minX,
+        plan.minY - CsProfileDraw.REGION_GUTTER - bounds.maxY);
+};
+
+/**
+ * Where the region was put LAST time, as {x, y}, or null when this
+ * drawing has no elevation in it yet. QCAD only.
+ *
+ * Read from a marker point the draw itself leaves behind, tagged
+ * ProfileOrigin -- the drawing is the record, the same principle the
+ * rest of this suite works on. The marker is generator-owned (its tag
+ * is in CsProfileDraw.TAGS) so erase() clears it and the next draw
+ * writes a fresh one; a user who deletes it gets a drawing that reads
+ * as "no region yet", which costs one un-translated redraw and nothing
+ * worse.
+ */
+CsProfileDraw.regionOrigin = function(doc) {
+    var ids = doc.queryAllEntities(false, false);
+    var i, e, v;
+    for (i = 0; i < ids.length; i++) {
+        e = doc.queryEntity(ids[i]);
+        if (isNull(e)) {
+            continue;
+        }
+        v = CsTags.get(e, "ProfileOrigin");
+        if (v === null || v === "") {
+            continue;
+        }
+        var parts = String(v).split(",");
+        if (parts.length !== 2) {
+            continue;
+        }
+        var x = parseFloat(parts[0]), y = parseFloat(parts[1]);
+        if (isNaN(x) || isNaN(y)) {
+            // A marker that cannot be read is not a position: a
+            // fabricated one would translate the whole region by a
+            // wrong delta, which is worse than redrawing it in place.
+            continue;
+        }
+        return { x: x, y: y };
+    }
+    return null;
+};
+
+/**
+ * Moves EVERY entity in the profile frame by one vector. QCAD only.
+ * \return the number of entities moved
+ *
+ * ONE VECTOR OVER A FRAME-SCOPED SELECTION -- not a per-entity
+ * similarity fit. The cross-file version of this feature needed a fit
+ * (CsRevise.similarityFit) because the stations themselves had moved
+ * relative to each other; here nothing has changed shape at all, only
+ * where the region was placed, so there is nothing to fit, no residual
+ * to report and no refusal to make. Every entity moves by the same
+ * delta or the region is not rigid.
+ *
+ * Generated geometry is moved too, even though the redraw that follows
+ * replaces it at the new origin anyway: the cost is one translation of
+ * geometry about to be erased, and the benefit is that this function
+ * has ONE rule -- everything in the frame moves -- rather than a
+ * carve-out that a later reader would have to re-derive.
+ *
+ * Runs inside CsRevise.withOffLayersOn: this MODIFIES user linework,
+ * which may well sit on a layer the user switched off to sketch
+ * undisturbed, and this build drops a modify on an off layer as
+ * silently as it drops an add.
+ */
+CsProfileDraw.translateRegion = function(doc, di, dx, dy) {
+    if (Math.abs(dx) < 1e-9 && Math.abs(dy) < 1e-9) {
+        return 0;   // the region did not move
+    }
+    var offset = new RVector(dx, dy);
+    var ids = doc.queryAllEntities(false, false);
+    var op = new RModifyObjectsOperation();
+    op.setText("Move the elevation region");
+    var moved = 0, i, e, lname;
+    for (i = 0; i < ids.length; i++) {
+        e = doc.queryEntity(ids[i]);
+        if (isNull(e)) {
+            continue;
+        }
+        try {
+            lname = doc.getLayerName(e.getLayerId());
+        } catch (eLayer) {
+            continue;
+        }
+        if (CsLayers.frameOf(lname) !== "profile") {
+            continue;
+        }
+        e.move(offset);
+        op.addObject(e, false);
+        moved++;
+    }
+    if (moved > 0) {
+        CsRevise.withOffLayersOn(doc, di, function() {
+            di.applyOperation(op);
+        });
+    }
+    return moved;
 };
 
 /**
@@ -444,6 +678,20 @@ CsProfileDraw.render = function(doc, di, profile, opts) {
         CsLayers.ensure(doc, di, layers[l]);
     }
 
+    // WHERE THE REGION GOES THIS TIME, and the move that gets the
+    // drawing there. Both happen BEFORE `before` is read below: the
+    // translation shifts the old generated geometry AND the user's
+    // tracing by the same vector, so reading positions afterward
+    // compares like with like. Read them first and moveLinework would
+    // see the region delta as a station movement and apply it to the
+    // sketch a SECOND time.
+    var origin = CsProfileDraw.computeOrigin(doc, profile);
+    var previous = CsProfileDraw.regionOrigin(doc);
+    if (previous !== null) {
+        CsProfileDraw.translateRegion(doc, di, origin.x - previous.x,
+            origin.y - previous.y);
+    }
+
     // ORDER MATTERS, and each step is only correct in this position:
     //   before  read FIRST -- claim() only writes TAGS, it never moves
     //           a station point, so reading old positions ahead of it
@@ -473,7 +721,7 @@ CsProfileDraw.render = function(doc, di, profile, opts) {
         // identical values -- `profile` does not change across this
         // call, so there is nothing to gain by threading one copy
         // through both places instead of asking for it twice).
-        var previewAfter = CsProfileDraw.positionsOf(profile);
+        var previewAfter = CsProfileDraw.positionsOf(profile, origin);
         var previewExtent = CsRevise.positionsExtent(previewAfter);
         if (CsRevise.positionsMoved(before, previewAfter,
                 previewExtent) > 0) {
@@ -495,9 +743,20 @@ CsProfileDraw.render = function(doc, di, profile, opts) {
 
     var bands = (profile && profile.bands) ? profile.bands : [];
     for (var b = 0; b < bands.length; b++) {
-        CsProfileDraw.band(doc, op, bands[b], counts);
+        CsProfileDraw.band(doc, op, bands[b], counts, origin);
         counts.bandsDrawn++;
     }
+
+    // The marker that lets the NEXT draw know where this one put the
+    // region, so it can translate the user's tracing by the difference.
+    // Written last, into the same operation as the geometry it belongs
+    // with, and erased by the next erase() like every other tagged
+    // thing this module owns.
+    var marker = CsDraw.addPoint(doc, op, CsLayers.PROFILE_STATIONS,
+        new RVector(origin.x, origin.y));
+    CsTags.set(marker, "ProfileOrigin", origin.x + "," + origin.y);
+    op.addObject(marker, false);
+    counts.origin = { x: origin.x, y: origin.y };
 
     // Wrapped exactly like erase()'s delete, and for the identical
     // reason: any layer in CsProfileDraw.LAYERS() may be off by the
@@ -519,7 +778,7 @@ CsProfileDraw.render = function(doc, di, profile, opts) {
     // in this feature's review history.
     counts.stationsMoved = false;
     try {
-        var after = CsProfileDraw.positionsOf(profile);
+        var after = CsProfileDraw.positionsOf(profile, origin);
         // the tolerance basis and the "did anything actually move"
         // question both already have one tested answer in CsRevise --
         // a second spelling here is how a cave in feet and the same
