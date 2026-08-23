@@ -1807,6 +1807,22 @@ git add scripts/CaveSurvey/Core/CsTraverse.js scripts/CaveSurvey/Core/CsLrud.js 
 git commit -m "fix(CsTraverse): an absent measurement is not a coordinate"
 ```
 
+**What the audit found, recorded because it changes where the real bug lives.** The guard
+above is the contract `CsTraverse.offset` should have had, and it is now enforced and tested.
+But it is UNREACHABLE from real data today: every shot-producing path — all four format
+parsers and the Survey Notebook editor — already substitutes `0.0` for a blank distance,
+azimuth or inclination before a shot object exists. So the live, reachable form of this bug
+family is one layer upstream, where a missing inclination becomes a level shot and a missing
+azimuth becomes due north. That is suite-wide rather than profile-specific, it touches
+parsers whose round-trip tests are load-bearing, and it is tracked separately rather than
+folded in here.
+
+Also recorded: `CsNetwork`, `CsAdjust` and `CsStats` call `offset` only on non-splay
+main-traverse legs, and were deliberately left unguarded. Making them handle a null offset
+means deciding what an unresolvable main-traverse leg does to loop closure, misclosure and
+the least-squares solver — a larger question than this task, and one that cannot be answered
+by adding a null check.
+
 **A caution specific to this task.** It touches plan view, which is shipped and in use. Any change in what plan draws for a survey with complete data is a REGRESSION, not an improvement — the whole point is that nothing changes except that fabricated geometry stops appearing. Say explicitly in your report whether any existing test's expected values had to change, and if any did, why that was not a regression.
 
 ---

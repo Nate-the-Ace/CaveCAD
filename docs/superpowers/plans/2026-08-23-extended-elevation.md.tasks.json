@@ -46,7 +46,7 @@
     {
       "id": 99,
       "subject": "Task 5b: Stop `CsTraverse.offset` laundering absent measurements into geometry",
-      "status": "pending",
+      "status": "completed",
       "blockedBy": [
         4
       ],
