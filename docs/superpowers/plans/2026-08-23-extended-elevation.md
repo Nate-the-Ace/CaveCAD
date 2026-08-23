@@ -73,6 +73,14 @@ Learned the hard way in this repo; violating any of these produces a silent fail
 
 Run `./tests/run_all.sh` before every commit. Baseline at plan time: 42/42 files parsed, 2008 assertions, all green.
 
+- **NO BUNDLED `ok()` WITH SUBSTRING MATCHING.** A review found a report assertion that passed
+  because text from an ENTIRELY DIFFERENT feature happened to contain the substrings it
+  searched for — deleting the line under test changed nothing. `tests/js_unit.js` documents this
+  in its own `eqs` docblock; the rule is now explicit. Assert exact strings, one assertion each.
+- **MUTATION-TEST `CsDraw` AND `CsReport` UNDER CaveCAD, NOT NODE.** `CsDraw.js` is not loaded
+  under node at all, so a node-only mutation round cannot touch it — and 5 of the 7 surviving
+  mutations in one review lived exactly there. Any task touching those files must run its
+  mutation round in CaveCAD's engine and say that it did.
 - **A RISING ASSERTION COUNT IS NOT COVERAGE.** Measured on this feature: Task 3's review
   mutated 18 behaviours and 11 survived a fully green suite; Task 4's mutated 34 and only 14
   died to a named assertion — 41%, including the total-order tiebreak the unstable-sort
@@ -1534,8 +1542,10 @@ git commit -m "feat(CsProfile): floor and ceiling from U/D and the splays that m
 - [ ] `CsProfile.build(survey, resolved, opts)` returns bands in band order, each with its walls and its `zOffset`
 - [ ] `build` constructs the adjacency graph ONCE and passes it to every band. Rebuilding it per band is O(runs × legs) and measured at 60% of total build time on a 401-run survey — `longestChain` takes an optional prebuilt graph for exactly this
 - [ ] A band whose elevation span (walls included) clears every placed band keeps `zOffset` 0
-- [ ] A band that would collide is pushed below the lowest placed band, and its `zOffset` is negative. The gutter is `max(GUTTER_MIN, 0.5 × MEDIAN band height across the profile)` — NOT the moved band's own height. Measured failure of that original rule: a band of height 2000 beside a neighbour of height 4 left a 2000-unit hole and shoved everything below it off the page. A gutter is a separation, not a geometric quantity; it should scale with the profile's typical band, and a big band deserves more room, not more empty space around it. Median rather than mean so one deep pit does not inflate every gap
+- [ ] A band that would collide is pushed below the lowest placed band, and its `zOffset` is negative. The gutter is `max(GUTTER_MIN, 0.5 × MEDIAN band height)` CAPPED in multiples of `GUTTER_MIN` — because the median only tames an outlier once tall bands are a strict minority. Measured: at two bands of heights [4, 2000] the median IS 1002, so the gutter is 501 and the 4-unit band gets a blank gutter 125× its own height. Two runs is the commonest small-cave shape — NOT the moved band's own height. Measured failure of that original rule: a band of height 2000 beside a neighbour of height 4 left a 2000-unit hole and shoved everything below it off the page. A gutter is a separation, not a geometric quantity; it should scale with the profile's typical band, and a big band deserves more room, not more empty space around it. Median rather than mean so one deep pit does not inflate every gap
 - [ ] The honest coverage invariant, in two parts: no leg is drawn in more than one band, AND every leg that is NOT drawn has at least one endpoint in some band's `omitted` list. "Exactly one band" stopped being true when the interior-tie fix began demoting a run's shorter arm — those legs are deliberately in no band, because drawing them would need a second copy of a station that was never surveyed. What matters is that nothing vanishes unexplained
+- [ ] `findings.undrawn` names every leg the profile did NOT draw, with a reason (closure, cross-run tie, demoted arm, after-stop). Measured need: a plain three-shot loop `A1→A2→A3→A1` drops its closure leg with EVERY findings list empty — a surveyed leg vanishing with nothing saying so. And the union of `omitted`, `stopped`, `orphans`, `strandedRoots` and `secondTies` does not reconstruct it: 17% of 20,000 random surveys have an undrawn leg that appears in none of them. This is the field the drawing tasks need most
+- [ ] `build` hoists `CsLrud.splaysByStation` and `CsLrud.legCounts` too, not just the adjacency graph. Measured on a 401-run survey: those two were rebuilt once per band, 22.8% and 21.7% of a 276 ms build — 45% together, the same waste the adjacency criterion cites at 60%
 - [ ] `build` constructs the adjacency graph ONCE into its own options object, and must NOT write it onto the caller's `opts`: `CsDraw.survey` calls `build` on every redraw, and a graph cached onto a reused options object would outlive the `resolved` it was built from
 - [ ] Findings collected: omitted stations, tie mismatches, second ties, orphan runs (physically disconnected), stranded roots (parentless but connected), stations with no resolved Z — and for each stopped band its `stoppedReason` (`"no-z"` vs `"no-leg"`), since those ask different things of the reader
 
@@ -1822,6 +1832,27 @@ main-traverse legs, and were deliberately left unguarded. Making them handle a n
 means deciding what an unresolvable main-traverse leg does to loop closure, misclosure and
 the least-squares solver — a larger question than this task, and one that cannot be answered
 by adding a null check.
+
+**Three anchors for whoever writes the upstream parser task**, found by the review of this one
+and recorded so the audit does not have to be repeated:
+
+- `Core/Format/CsWalls.js:281-286` — Walls encodes "not measured" as `--`, and the reader turns
+  that into `distance = 0.0`. So Walls' ABSENT and Walls' MEASURED ZERO are the same value
+  today, and `CsTraverse` now documents zero as "the wall is at the station".
+- `Core/Format/CsCompass.js:163-168` — Compass's `-999` sentinel is applied to BACKSIGHTS via
+  `isMissingReading` but not to the foresight azimuth or inclination.
+- **The real cost, which is not written down anywhere else:** `CsNetwork.js:468/512/520`,
+  `CsAdjust.js:506/616` and `CsStats.js:33` dereference `CsTraverse.offset`'s result
+  unconditionally. The day the parsers stop fabricating zeros, those three files begin throwing
+  `TypeError` and take the ENTIRE plan-view draw down with them, naming neither the shot nor the
+  station. The upstream fix is therefore not a one-file change, and the brief must say so.
+
+**A sixth door in the elevation-datum family, found by this review.** `CsNetwork.js:176`:
+`anchorEffectiveZ = survey.fixed[opts.anchor.name].z || 0.0`, with a fifteen-line comment
+directly above it arguing that defaulting an absent Z to 0 rebases an absolute-datum cave. The
+`else` branch at `:178` does the same. Not live today — every current writer of `survey.fixed`
+sets `z` — but it is in the file the profile's elevations ultimately come from, and five doors
+of this family have already been found and closed.
 
 **A caution specific to this task.** It touches plan view, which is shipped and in use. Any change in what plan draws for a survey with complete data is a REGRESSION, not an improvement — the whole point is that nothing changes except that fabricated geometry stops appearing. Say explicitly in your report whether any existing test's expected values had to change, and if any did, why that was not a regression.
 
