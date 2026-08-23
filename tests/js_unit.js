@@ -1040,6 +1040,69 @@ near(rElevZeroAnchor.stations["F1"].z, 1300 - 1250, 1e-9,
         "sixth door: and named, same as the no-record case");
 }());
 
+// ---------------------------------------------------------------------
+// EIGHTH DOOR (elevation-datum trap, seedFixed's own copy of the sixth
+// door's fabrication): a *fix'ed/#Fix'ed station with no usable z must
+// resolve at z = null, not a silently refabricated 0 -- the identical
+// `f.z || 0.0` disease the anchor path already refuses, now reachable
+// because CsTags.surveyFromDocument's own "SEVENTH DOOR" fix hands this
+// file a real null for the first time. Pure CsNetwork.resolve logic, so
+// tested here under node as well as CaveCAD, unlike the seventh door
+// itself (CsTags.js needs a real document).
+// ---------------------------------------------------------------------
+
+(function() {
+    // no z at all on the fixed entry (key simply absent) -- the
+    // ordinary "hand-built survey.fixed object with a typo" shape.
+    var sv = CsModel.newSurvey();
+    sv.shots.push(shotOf("N1", "N2", 10, 0));
+    sv.fixed["N1"] = { x: 0, y: 0 };   // no z key at all
+    var r = CsNetwork.resolve(sv, {});
+    eqs(r.stations["N1"].z, null,
+        "eighth door: a *fix'ed station missing z entirely resolves at " +
+        "z = null, not 0");
+    ok(r.fixedZUnknown.indexOf("N1") >= 0,
+        "eighth door: the gap is named in fixedZUnknown, not silently " +
+        "absorbed");
+}());
+
+(function() {
+    // explicit null (what CsTags.surveyFromDocument's own fix now
+    // writes for a station with no Elevation tag) and a non-finite
+    // value (a corrupted numeric field) both take the same path.
+    var sv = CsModel.newSurvey();
+    sv.shots.push(shotOf("P1", "P2", 10, 0));
+    sv.fixed["P1"] = { x: 0, y: 0, z: null };
+    var r = CsNetwork.resolve(sv, {});
+    eqs(r.stations["P1"].z, null,
+        "eighth door: an explicit null fixed z resolves at z = null");
+    ok(r.fixedZUnknown.indexOf("P1") >= 0, "and is named");
+
+    var sv2 = CsModel.newSurvey();
+    sv2.shots.push(shotOf("Q1", "Q2", 10, 0));
+    sv2.fixed["Q1"] = { x: 0, y: 0, z: NaN };
+    var r2 = CsNetwork.resolve(sv2, {});
+    eqs(r2.stations["Q1"].z, null,
+        "eighth door: a non-finite fixed z is treated as absent, not 0");
+    ok(r2.fixedZUnknown.indexOf("Q1") >= 0, "and is named");
+}());
+
+(function() {
+    // REGRESSION, same distinction as the sixth door's own regression
+    // test: a *fix'ed station whose real control z is exactly 0 (sea
+    // level, or a cave datumed at its own entrance) must NOT be treated
+    // as unknown, and must NOT appear in fixedZUnknown.
+    var sv = CsModel.newSurvey();
+    sv.shots.push(shotOf("R1", "R2", 10, 0));
+    sv.fixed["R1"] = { x: 0, y: 0, z: 0 };
+    var r = CsNetwork.resolve(sv, {});
+    eqs(r.stations["R1"].z, 0,
+        "eighth door: a REAL zero fixed z is used, not treated as unknown");
+    eqs(r.fixedZUnknown.length, 0,
+        "eighth door: fixedZUnknown stays empty when every fixed " +
+        "station has a real (even zero) z");
+}());
+
 // ---- CsReport says what happened to the fixed frame ----------------
 var stubDrawn = { stationsDrawn: 0, shotsDrawn: 0, closuresDrawn: 0,
     wallsDrawn: 0, splaysDrawn: 0, skipped: 0 };
@@ -1145,6 +1208,44 @@ ok(plainSummaryLines.filter(function(l) {
     }).length === 0,
     "task 5b report: a drawn object with neither counter gains no phantom " +
     "line, got:\n" + plainSummaryBefore);
+
+// ---------------------------------------------------------------------
+// Critical A (extended-elevation review): the AUTOMATIC profile pass's
+// own skip reason has to reach the ordinary draw summary, not just the
+// MANUAL GenerateProfile tool's dialog (CsReport.profileSummary) --
+// before this fix `drawn.profile` was a real field on CsDraw.survey's
+// return value that CsReport.drawSummary never read at all, so a plan
+// draw that skipped the profile for size, a ProfileAuto switched off,
+// an unsaved drawing, or a profile pass that threw, told the user
+// nothing whatsoever about it.
+// ---------------------------------------------------------------------
+var profileSkippedStub = { stationsDrawn: 2, shotsDrawn: 1, closuresDrawn: 0,
+    wallsDrawn: 0, splaysDrawn: 0, skipped: 0,
+    profile: { skipped: true, reason: "CaveSurvey/ProfileAuto is off" } };
+var profileSkippedSummary = CsReport.drawSummary(sq, rsq,
+    profileSkippedStub, []);
+var profileSkippedLines = profileSkippedSummary.split("\n");
+ok(profileSkippedLines.indexOf(
+        "Profile: not written -- CaveSurvey/ProfileAuto is off.") >= 0,
+    "CRITICAL A: the automatic profile skip reason reaches the ordinary " +
+    "draw summary, got:\n" + profileSkippedSummary);
+
+var profileOkStub = { stationsDrawn: 2, shotsDrawn: 1, closuresDrawn: 0,
+    wallsDrawn: 0, splaysDrawn: 0, skipped: 0,
+    profile: { path: "/x/Cave-PROFILE.dxf", created: true, counts: {} } };
+var profileOkSummary = CsReport.drawSummary(sq, rsq, profileOkStub, []);
+ok(profileOkSummary.indexOf("Profile: not written") < 0,
+    "CRITICAL A: a profile pass that actually wrote something prints no " +
+    "skip line at all, got:\n" + profileOkSummary);
+
+// a drawn object with no `profile` key at all (every fixture above this
+// one, and every caller from before Task 9 existed) must still
+// summarise cleanly with no phantom line and no crash
+ok(plainSummaryLines.filter(function(l) {
+        return l.indexOf("Profile:") >= 0;
+    }).length === 0,
+    "CRITICAL A: a drawn object with no profile field gains no phantom " +
+    "profile line, got:\n" + plainSummaryBefore);
 
 // ---------------------------------------------------------------------
 // Task 1c -- bridge classifier cost and path honesty.
@@ -4540,6 +4641,59 @@ if (!IS_NODE) {
             "multi LRUD: outer wall is .L, inner ledge .L2, got " +
             tipNames.join(","));
         CsDraw.eraseStations(doc, ["M1", "M2"]);
+
+        // -----------------------------------------------------------
+        // SEVENTH DOOR in the elevation-datum-trap family: a station
+        // with no usable resolved z draws no Elevation tag at all
+        // (CsTags.set drops a null value on write), so reading it back
+        // through CsTags.surveyFromDocument used to fabricate a 0 via
+        // `getNumber(...) || 0.0` -- exactly the "sixth door" fabrication
+        // CsNetwork's own anchorEffectiveZ already refuses. Z1 here is
+        // an anchor given no z and no fixed control to fall back on
+        // (the sixth-door scenario itself), so it resolves at z = null
+        // and CsDraw draws it with no Elevation tag.
+        // -----------------------------------------------------------
+        var zsv = CsModel.newSurvey();
+        zsv.shots.push(shotOf("Z1", "Z2", 10, 0));
+        var zres = CsNetwork.resolve(zsv,
+            { anchor: { name: "Z1", x: 900, y: 900 } });
+        ok(zres.anchorZUnknown !== null,
+            "sanity: the Z1 anchor really has no usable z in this fixture");
+        eqs(zres.stations["Z1"].z, null,
+            "sanity: Z1 resolves at z = null, not a fabricated 0");
+        CsDraw.survey(zsv, zres);
+
+        var zStations = CsTags.collectStations(doc);
+        var z1Entity = null;
+        for (var zi = 0; zi < zStations.length; zi++) {
+            if (zStations[zi].name === "Z1") { z1Entity = zStations[zi].entity; }
+        }
+        ok(z1Entity !== null, "sanity: Z1 was actually drawn and tagged");
+        eqs(CsTags.get(z1Entity, "Elevation"), "",
+            "sanity: no Elevation tag was written for a station with no z");
+
+        var zRebuilt = CsTags.surveyFromDocument(doc);
+        ok(zRebuilt.fixed.hasOwnProperty("Z1"),
+            "sanity: Z1 reads back as a fixed station");
+        eqs(zRebuilt.fixed["Z1"].z, null,
+            "SEVENTH DOOR: a station with no Elevation tag reconstructs " +
+            "at z = null, not a fabricated 0.0 (got " +
+            zRebuilt.fixed["Z1"].z + ")");
+
+        // EIGHTH-DOOR companion, fixed in the same change: feeding that
+        // null back through CsNetwork.resolve's seedFixed (every
+        // station surveyFromDocument reads back is *fix'ed -- Critical
+        // C's own finding) must not silently refabricate the exact 0
+        // CsTags.surveyFromDocument just refused to invent, or the
+        // seventh-door fix would only make the OBJECT more honest
+        // without changing what actually gets resolved and drawn.
+        var zres2 = CsNetwork.resolve(zRebuilt, {});
+        eqs(zres2.stations["Z1"].z, null,
+            "EIGHTH DOOR (CsNetwork.resolve's seedFixed): a *fix'ed " +
+            "station with no usable z resolves at z = null, not 0");
+        ok(zres2.fixedZUnknown.indexOf("Z1") >= 0,
+            "and the gap is named in fixedZUnknown, not silently absorbed");
+        CsDraw.eraseStations(doc, ["Z1", "Z2"]);
 
         // THE PERSISTENCE TEST: this build never writes custom
         // properties to disk, so tags must come back through the
@@ -11874,11 +12028,13 @@ eqs(CsProfileDraw.labelY0({ stations: [] }), 0.0,
     // "A99" -- a plain continuation of run "A", not a branch off it --
     // would show up as omitted. It does not: A13/A14/A99 form one
     // unbranched in-run chain (CsProfile.longestChain has nothing to
-    // choose between), so CsProfile.build's own findings.omitted comes
-    // back empty for it (checked directly against CsProfile.build,
-    // not assumed) and the original assertion would have passed for the
-    // wrong reason -- or failed outright -- rather than actually
-    // exercising "an omitted station is named". A14->A15 is added here
+    // choose between), so CsProfile.build's own findings.omitted, and
+    // in fact every findings field, comes back empty for it (checked
+    // directly against CsProfile.build's own output, not assumed) --
+    // "A99" never appears anywhere in the report at all in that case,
+    // so the original assertion would have FAILED OUTRIGHT, not passed
+    // for the wrong reason, rather than actually exercising "an omitted
+    // station is named". A14->A15 is added here
     // so run "A" has a genuine competing branch (A13-A14-A15 beats
     // A13-A14-A99 on CsProfile.betterChain's own lo/hi tie-break, since
     // 99 loses to 15 as the chain's high end), which is what actually
@@ -11919,7 +12075,10 @@ eqs(CsProfileDraw.labelY0({ stations: [] }), 0.0,
     ok(text.indexOf("A99") >= 0, "report names the omitted station");
     ok(text.indexOf("demoted arm") >= 0,
         "report names the undrawn leg's own reason");
-    ok(text.length > 0, "report is not empty");
+    // MINOR: "report is not empty" used to be asserted here too, but it
+    // is a tautology once the four indexOf checks above already pass --
+    // any one of them being true already implies text.length > 0.
+    // Dropped rather than kept as dead weight.
 
     var skipped = CsReport.profileSummary(null,
         { skipped: true, reason: "the drawing has no file name yet" });
@@ -11958,6 +12117,47 @@ eqs(CsProfileDraw.labelY0({ stations: [] }), 0.0,
 }());
 
 (function() {
+    // POSITIVE companion to the negative check just above: a REAL
+    // strandedRoots entry must actually produce the strandedRoots
+    // wording in CsReport.profileSummary's output, not just fail to
+    // produce the orphan wording. Without this, deleting
+    // profileSummary's whole strandedRoots block left the suite green
+    // (confirmed by hand before adding this test) -- the negative
+    // check above passes MORE strongly with the block gone (there is
+    // then no way for either wording to appear), which is exactly the
+    // failure mode a negative-only pair of assertions cannot catch.
+    // Same D-is-stranded-not-orphan fixture CsProfile.hierarchy's own
+    // test block above uses (search "orphans vs strandedRoots").
+    var svS = CsModel.newSurvey();
+    svS.shots = [
+        shotOf("A1", "A2", 10, 0, 0),
+        shotOf("A2", "A3", 10, 0, 0),
+        shotOf("A3", "B1", 10, 0, 0),
+        shotOf("B1", "B2", 10, 0, 0),
+        shotOf("B2", "A4", 10, 0, 0),
+        shotOf("A4", "A5", 10, 0, 0),
+        shotOf("D1", "A6", 8, 0, 0)
+    ];
+    svS.fixed["A1"] = { x: 0, y: 0, z: 0 };
+    svS.fixed["D1"] = { x: 500, y: 500, z: 0 };
+    var rS = CsNetwork.resolve(svS, {});
+    var pS = CsProfile.build(svS, rS, {});
+    ok(pS.findings.strandedRoots.indexOf("D") >= 0,
+        "sanity: D really is a strandedRoot in this fixture's findings");
+
+    var textS = CsReport.profileSummary(pS,
+        { path: "/x/Cave-PROFILE.dxf", created: false,
+            counts: { bandsDrawn: 2, legsDrawn: 7, stationsDrawn: 11 } });
+    ok(textS.indexOf(
+            "connected, but drawn as its own band rather than hanging " +
+            "off another: D") >= 0,
+        "CRITICAL (untested behaviours): a real strandedRoot produces " +
+        "the exact strandedRoots line, got:\n" + textS);
+    ok(textS.indexOf("tie shot is missing") < 0,
+        "and a strandedRoot is never worded as an orphan");
+}());
+
+(function() {
     // secondTies, ungrouped and wallPointsSkipped each get their own
     // hand-built findings object rather than a fresh survey fixture --
     // hierarchy()/build() already exercise the FIRST two extensively
@@ -11979,14 +12179,29 @@ eqs(CsProfileDraw.labelY0({ stations: [] }), 0.0,
         return f;
     }
 
+    // MINOR (untested behaviours -- "close mutation gaps" commit): these
+    // two used to be ONE bundled ok() each, with two indexOf checks
+    // joined by &&, and one of those searched for the single character
+    // "B" -- which "run B also touches A9" satisfies by pure luck, but
+    // so does nearly anything else in this report (a station count, the
+    // word "band", "Cave-PROFILE.dxf"'s own filename...). Split into
+    // exact-line assertions, one per line, so each one actually pins
+    // down what it claims to.
     var secondTieText = textFor(withField("secondTies",
         [{ run: "B", otherStation: "A9", otherRun: "A" }]));
-    ok(secondTieText.indexOf("B") >= 0 && secondTieText.indexOf("A9") >= 0,
-        "a second tie names both the run and the station it also touches");
+    var secondTieLines = secondTieText.split("\n");
+    ok(secondTieLines.indexOf(
+            "  run B also touches A9 (drawn as a tie line, not a " +
+            "second band)") >= 0,
+        "a second tie names both the run and the station it also " +
+        "touches, in these exact words, got:\n" + secondTieText);
 
     var ungroupedText = textFor(withField("ungrouped", ["A#", "?"]));
-    ok(ungroupedText.indexOf("A#") >= 0 && ungroupedText.indexOf("?") >= 0,
-        "an ungrouped station name is named, not just counted");
+    var ungroupedLines = ungroupedText.split("\n");
+    ok(ungroupedLines.indexOf(
+            "  station names that could not be read as a run: A#, ?") >= 0,
+        "an ungrouped station name is named, not just counted, in " +
+        "these exact words, got:\n" + ungroupedText);
 
     var wpsText = textFor(withField("wallPointsSkipped", 3));
     ok(wpsText.indexOf("3 splay wall point") >= 0,
@@ -12032,6 +12247,16 @@ eqs(CsProfileDraw.labelY0({ stations: [] }), 0.0,
     ok(unmeasurableText.indexOf("no leg reaches it") < 0,
         "stopped/unmeasurable is NOT worded as a missing leg either -- " +
         "the leg exists, its shot just has nothing usable on it");
+    // POSITIVE companion to the two negatives above: no-leg and no-z
+    // each already have a positive assertion on their OWN wording;
+    // unmeasurable had only negatives, so deleting its actual wording
+    // out of CsReport.profileSummary (while leaving the no-leg/no-z
+    // wording alone) would still leave both negatives above green.
+    ok(unmeasurableText.indexOf(
+            "the leg to it has no usable distance, azimuth or " +
+            "inclination on record") >= 0,
+        "stopped/unmeasurable reads with its own actual wording, got:\n" +
+        unmeasurableText);
 }());
 
 (function() {
@@ -12071,6 +12296,32 @@ eqs(CsProfileDraw.labelY0({ stations: [] }), 0.0,
             "a zero ProfileAutoMaxStations falls back to the default too");
     } finally {
         RSettings.setValue(key, had);
+    }
+}());
+
+(function() {
+    // MINOR (untested behaviours): the `if (!(exag > 0))` guard on
+    // CsProfile.settings' own exaggeration reading had no test at all --
+    // same guard style, same reasoning as maxStations' guard just above
+    // (a zero or negative exaggeration would flatten the cave onto one
+    // line; a NaN from a corrupted ini value fails an unguarded ">"
+    // silently rather than falling back).
+    if (typeof RSettings === "undefined") {
+        return;   // node: nothing to corrupt, this guard has no target
+    }
+    var exagKey = "CaveSurvey/ProfileVerticalExaggeration";
+    var hadExag = RSettings.getDoubleValue(exagKey, -999);
+    try {
+        RSettings.setValue(exagKey, -2.0);
+        eqs(CsProfile.settings().exaggeration, 1.0,
+            "a negative exaggeration falls back to 1.0, not the " +
+            "negative value that would flip the profile upside down");
+        RSettings.setValue(exagKey, 0.0);
+        eqs(CsProfile.settings().exaggeration, 1.0,
+            "a zero exaggeration falls back to 1.0, not the zero that " +
+            "would flatten the whole profile onto one line");
+    } finally {
+        RSettings.setValue(exagKey, hadExag);
     }
 }());
 
@@ -12207,6 +12458,60 @@ if (!IS_NODE) {
                     "the forced failure wrote nothing to the sibling path");
 
                 new QFile(siblingPathD).remove();
+
+                // -----------------------------------------------------
+                // CRITICAL D: an exception whose OWN toString() throws
+                // must not escape CsDraw.survey either. The catch block
+                // builds its reason string via string concatenation
+                // ("profile pass failed: " + eProfile), which calls
+                // eProfile.toString() -- a hostile or merely buggy thrown
+                // value whose toString() itself throws would otherwise
+                // propagate a SECOND exception straight out of the catch
+                // and out of CsDraw.survey with it, breaking "the profile
+                // pass can never take the plan draw down" for exactly the
+                // adversarial case that guarantee exists to cover.
+                // -----------------------------------------------------
+                var planPathD2 = QDir.tempPath() + "/cs_unit_hook_planD2.dxf";
+                var siblingPathD2 = CsProfileFile.siblingPath(planPathD2);
+                new QFile(siblingPathD2).remove();
+                freshDoc(planPathD2);
+
+                var svD2 = CsModel.newSurvey();
+                svD2.shots = [shotOf("N1", "N2", 10, 0, 0)];
+                var resD2 = CsNetwork.resolve(svD2, {});
+
+                var savedBuild2 = CsProfile.build;
+                CsProfile.build = function() {
+                    var poison = { toString: function() {
+                        throw new Error("toString itself throws");
+                    } };
+                    throw poison;
+                };
+                var threwD2 = false, drawnD2 = null;
+                try {
+                    try {
+                        drawnD2 = CsDraw.survey(svD2, resD2);
+                    } catch (eD2) {
+                        threwD2 = true;
+                    }
+                } finally {
+                    CsProfile.build = savedBuild2;
+                }
+
+                ok(!threwD2,
+                    "CRITICAL D: a profile-pass exception whose own " +
+                    "toString() throws still does not propagate out of " +
+                    "CsDraw.survey");
+                ok(drawnD2 !== null && drawnD2.stationsDrawn > 0,
+                    "CRITICAL D: the plan draw itself still completed " +
+                    "despite the adversarial throw");
+                ok(pf(drawnD2, "skipped") === true,
+                    "CRITICAL D: the failure is still reported as a skip");
+                eqs(pf(drawnD2, "reason"), "profile pass failed",
+                    "CRITICAL D: falls back to the plain reason when " +
+                    "describing the exception itself fails");
+
+                new QFile(siblingPathD2).remove();
             }
 
             // ---------------------------------------------------------
@@ -12254,10 +12559,12 @@ if (!IS_NODE) {
             // ---------------------------------------------------------
             // E. above ProfileAutoMaxStations, the AUTOMATIC pass is
             // skipped and the reason names the manual command -- and
-            // this is measured against the LARGEST RUN (4 stations, all
-            // named M, one unbranched chain), not against some other
-            // count, so a low-enough limit on this small fixture proves
-            // the gate actually fires rather than merely existing.
+            // this fixture (4 stations, all named M, one unbranched
+            // chain) has its largest run AND its total both equal to 4,
+            // so a low-enough limit on it proves the gate actually
+            // fires rather than merely existing, without yet telling
+            // largest-run-based firing apart from total-based firing
+            // (that distinction is what fixture F, just below, is for).
             // ---------------------------------------------------------
             RSettings.setValue(KEY_MAX, 2);
             var planPathE = QDir.tempPath() + "/cs_unit_hook_planE.dxf";
@@ -12287,14 +12594,19 @@ if (!IS_NODE) {
                 "sibling path");
 
             // ---------------------------------------------------------
-            // F. the gate measures the LARGEST RUN, not the survey's
-            // total station count -- a mutation this feature's own
-            // brief flagged as a likely wrong guess (CsProfile.
-            // settings' docblock explains why). Two runs of 2 stations
-            // each (P, tying to Q) total 4 resolved stations, over the
-            // maxStations=2 set for test E's own fixture just above --
-            // a total-based gate would wrongly skip this; a largest-run
-            // gate (2 is not > 2) must not.
+            // F. CRITICAL B, fixed: the gate now measures the survey's
+            // TOTAL station count, not just its largest run. An earlier
+            // draft of this gate (and this exact fixture, before the
+            // fix) proved the opposite thing on purpose -- "a largest-
+            // run gate must NOT skip a survey whose total is over the
+            // limit but whose largest run is not" -- which is precisely
+            // the measured-false shape CsProfile.settings' own docblock
+            // now documents: a cave chopped into many small named runs
+            // costs as much to build as one run holding the same total,
+            // so letting it through was the bug, not a feature. Two runs
+            // of 2 stations each (P, tying to Q) total 4 resolved
+            // stations, over the maxStations=2 set for test E's own
+            // fixture just above; NEITHER run individually exceeds 2.
             // ---------------------------------------------------------
             if (tpl !== null) {
                 RSettings.setValue(KEY_MAX, 2);
@@ -12323,14 +12635,45 @@ if (!IS_NODE) {
                     "stations, even though the survey totals 4");
 
                 var drawnF = CsDraw.survey(svF, resF);
-                ok(pf(drawnF, "skipped") === undefined,
-                    "PROOF: a survey whose LARGEST RUN is at the limit " +
-                    "is NOT skipped, even though its TOTAL station " +
-                    "count (4) is over the same limit (2) -- got " +
-                    "skipped, reason: '" + pf(drawnF, "reason") + "'");
-                ok(new QFileInfo(siblingPathF).exists(),
-                    "and it actually wrote the sibling file");
-                new QFile(siblingPathF).remove();
+                eqs(pf(drawnF, "skipped"), true,
+                    "CRITICAL B: a survey whose TOTAL station count (4) " +
+                    "is over the limit (2) is skipped even though " +
+                    "NEITHER individual run is (largest 2) -- got: '" +
+                    pf(drawnF, "reason") + "'");
+                ok(String(pf(drawnF, "reason") || "").indexOf("4 stations")
+                        >= 0,
+                    "the reason names the actual total (got: '" +
+                    pf(drawnF, "reason") + "')");
+                ok(String(pf(drawnF, "reason") || "")
+                        .indexOf("largest run 2") >= 0,
+                    "the reason ALSO names the largest run, for " +
+                    "diagnostic value, even though it is not what " +
+                    "decided the outcome here (got: '" +
+                    pf(drawnF, "reason") + "')");
+                ok(!new QFileInfo(siblingPathF).exists(),
+                    "PROOF: the total-based skip wrote nothing to the " +
+                    "sibling path either");
+
+                // F2: raising the limit back up to comfortably cover the
+                // total (not just the largest run) lets the identical
+                // fixture draw normally -- proves this is a real,
+                // reversible gate and not a fixture that can now never
+                // pass.
+                RSettings.setValue(KEY_MAX,
+                    CsProfile.AUTO_MAX_STATIONS_DEFAULT);
+                var planPathF2 = QDir.tempPath() +
+                    "/cs_unit_hook_planF2.dxf";
+                var siblingPathF2 = CsProfileFile.siblingPath(planPathF2);
+                new QFile(siblingPathF2).remove();
+                freshDoc(planPathF2);
+                var drawnF2 = CsDraw.survey(svF, CsNetwork.resolve(svF, {}));
+                ok(pf(drawnF2, "skipped") === undefined,
+                    "F2: the same shape, under a limit that covers its " +
+                    "total, is NOT skipped -- got skipped, reason: '" +
+                    pf(drawnF2, "reason") + "'");
+                ok(new QFileInfo(siblingPathF2).exists(),
+                    "F2: and it actually wrote the sibling file");
+                new QFile(siblingPathF2).remove();
             }
 
             // ---------------------------------------------------------
@@ -12383,6 +12726,106 @@ if (!IS_NODE) {
                 "PROOF: no ProfileRun-tagged entity landed on the " +
                 "plan's own document");
             new QFile(planPathG).remove();
+
+            // ---------------------------------------------------------
+            // H. MINOR (untested behaviours): `target.created` had no
+            // test at all -- every scenario above draws onto a sibling
+            // that does not exist yet, so `created` is always true and
+            // the `if (target.created)` branch (guarding reveal()) is
+            // never exercised on its FALSE side. Draw the SAME plan
+            // TWICE: the first draw creates the sibling (created=true,
+            // as already proven above); redrawing onto that same,
+            // already-valid sibling must report created=false the
+            // second time, since CsProfileFile.resolve() finds a real
+            // file that already looks like a profile.
+            // ---------------------------------------------------------
+            var planPathH = QDir.tempPath() + "/cs_unit_hook_planH.dxf";
+            var siblingPathH = CsProfileFile.siblingPath(planPathH);
+            new QFile(siblingPathH).remove();
+            freshDoc(planPathH);
+
+            // Spy on reveal() itself: the REVEAL POLICY documented on
+            // CsDraw.profileNow is "only a NEWLY CREATED sibling is
+            // revealed" -- a guard this suite never actually watched
+            // fire or not fire before. Counting calls, not just
+            // checking the `created` field, is what actually pins the
+            // `if (target.created)` branch down: a mutation that always
+            // calls reveal() regardless of `created` would still leave
+            // `created` itself correct and this call-count wrong.
+            var savedReveal = CsProfileFile.reveal;
+            var revealCalls = 0;
+            CsProfileFile.reveal = function(path) {
+                revealCalls++;
+                return savedReveal(path);
+            };
+
+            var svH = CsModel.newSurvey();
+            svH.shots = [shotOf("S1", "S2", 10, 0, 0)];
+            var resH = CsNetwork.resolve(svH, {});
+            var drawnH1, drawnH2;
+            try {
+                drawnH1 = CsDraw.survey(svH, resH);
+                ok(pf(drawnH1, "skipped") === undefined,
+                    "sanity: the first draw onto planH is not skipped");
+                ok(pf(drawnH1, "created") === true,
+                    "sanity: the first draw creates the sibling");
+                eqs(revealCalls, 1,
+                    "H: a newly created sibling IS revealed (reveal() " +
+                    "called once)");
+
+                drawnH2 = CsDraw.survey(svH, resH);
+                ok(pf(drawnH2, "skipped") === undefined,
+                    "H: redrawing onto an existing, valid sibling is not " +
+                    "skipped");
+                eqs(pf(drawnH2, "created"), false,
+                    "H: redrawing onto an already-valid sibling reports " +
+                    "created=false, not true");
+                eqs(revealCalls, 1,
+                    "H: MINOR now covered -- redrawing onto an existing " +
+                    "sibling does NOT call reveal() again (still 1 call " +
+                    "total, from the first draw only)");
+            } finally {
+                CsProfileFile.reveal = savedReveal;
+            }
+            new QFile(siblingPathH).remove();
+
+            // ---------------------------------------------------------
+            // I. the commit-failure branch: CsProfileFile.commit()
+            // returning false (a real write failure -- disk full, a
+            // permissions problem, anything short of an exception) must
+            // be reported as a named skip, not silently treated as
+            // success. Forced by monkey-patching commit() itself, the
+            // same technique test D already uses for CsProfile.build.
+            // ---------------------------------------------------------
+            var planPathI = QDir.tempPath() + "/cs_unit_hook_planI.dxf";
+            var siblingPathI = CsProfileFile.siblingPath(planPathI);
+            new QFile(siblingPathI).remove();
+            freshDoc(planPathI);
+
+            var svI = CsModel.newSurvey();
+            svI.shots = [shotOf("T1", "T2", 10, 0, 0)];
+            var resI = CsNetwork.resolve(svI, {});
+
+            var savedCommit = CsProfileFile.commit;
+            CsProfileFile.commit = function() { return false; };
+            var drawnI;
+            try {
+                drawnI = CsDraw.survey(svI, resI);
+            } finally {
+                CsProfileFile.commit = savedCommit;
+            }
+
+            eqs(pf(drawnI, "skipped"), true,
+                "I: a commit() failure is reported as a skip, not " +
+                "treated as success");
+            ok(String(pf(drawnI, "reason") || "")
+                    .indexOf("could not write") >= 0,
+                "I: the reason names what failed (got: '" +
+                pf(drawnI, "reason") + "')");
+            ok(String(pf(drawnI, "reason") || "")
+                    .indexOf(siblingPathI) >= 0,
+                "I: and names the path it could not write");
+            new QFile(siblingPathI).remove();
         } finally {
             RSettings.setValue(KEY_AUTO, hadAuto);
             RSettings.setValue(KEY_MAX, hadMax);

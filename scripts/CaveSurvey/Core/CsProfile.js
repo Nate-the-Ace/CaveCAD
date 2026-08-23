@@ -1196,6 +1196,23 @@ CsProfile.longestChain = function(run, resolved, adj) {
  * if the two filters ever disagreed, a step adjacency offers could
  * become one this cannot resolve, and unrollBand would silently stop
  * the band there instead of erroring.
+ *
+ * THIS IS THE DOMINANT COST IN CsProfile.build, MEASURED, NOT
+ * longestChain's chain search: CsProfile.unrollBand calls this once per
+ * interior station in every band, and each call is a LINEAR SCAN of
+ * resolved.legs -- O(total stations x total legs) over the whole
+ * survey. See CsProfile.settings' own docblock (the maxStations
+ * paragraph) for the numbers that pinned this down: a survey chopped
+ * into many small named runs costs as much to build as one run holding
+ * all the same stations, because this scan does not care how the
+ * stations are grouped into runs, only how many of them there are in
+ * total. NOT memoized or indexed against `resolved` in this round --
+ * a per-station or per-pair lookup built once per CsProfile.build call
+ * would turn this from O(legs) to O(1) per step and was measured to cut
+ * a 30-run, 4500-station build from roughly 2s to roughly 1.2s on
+ * CaveCAD -- but that is a separate change with its own risk (a cache
+ * that must be invalidated exactly when `resolved` changes and never
+ * otherwise) and remains outstanding.
  */
 CsProfile.legBetween = function(a, b, resolved) {
     for (var i = 0; i < resolved.legs.length; i++) {
@@ -2347,22 +2364,76 @@ CsProfile.build = function(survey, resolved, opts) {
  * product of drawing, not a command to remember.
  *
  * maxStations: CsDraw.profile's own gate on the AUTOMATIC pass, read
- * from CaveSurvey/ProfileAutoMaxStations. IT MEASURES THE LARGEST
- * SINGLE RUN, NOT THE SURVEY'S TOTAL STATION COUNT -- that is a
- * decision this function's caller (CsDraw.profile) makes, but the
- * number belongs here beside the other profile settings, not
- * duplicated at every call site. Recorded here because it is easy to
- * assume the wrong denominator: CsProfile.longestChain's own docblock
- * is explicit that its cost is QUADRATIC IN RUN LENGTH, not in the
- * survey's grand total -- a cave chopped into thirty 150-station named
- * runs (a common shape: one letter per trip) costs nothing like one
- * 4500-station run does, even though both surveys have 4500 stations.
- * Gating on the total would block the harmless thirty-run cave outright
- * while doing nothing extra to catch the one shape that is actually
- * slow. See CsDraw.profile for where the largest-run figure is computed
- * (a plain CsProfile.groupRuns() pass -- cheap, since it is the O(n^2)
- * chain search inside CsProfile.build that this whole gate exists to
- * avoid running unconditionally).
+ * from CaveSurvey/ProfileAutoMaxStations. Compared against the survey's
+ * TOTAL STATION COUNT; the LARGEST SINGLE RUN is also computed there and
+ * named in the skip reason for diagnostic value, but is not itself a
+ * separate condition -- see CsDraw.profile for where both figures are
+ * computed (a plain CsProfile.groupRuns() pass, cheap relative to what a
+ * skip avoids) and the comment on its comparison for why one number,
+ * not two, decides the outcome.
+ *
+ * THIS USED TO CHECK THE LARGEST RUN ALONE, ON A THEORY THAT MEASURED
+ * FALSE. The reasoning at the time was that CsProfile.longestChain's
+ * chain search is quadratic in ONE run's length (true, see that
+ * function's own docblock), so a cave chopped into many small named
+ * runs should cost "nothing like" one run holding all the same
+ * stations. Measured on CaveCAD (this engine -- the only one a real
+ * draw ever runs in; node is roughly 20-25x faster on this same pure
+ * code and would understate every number below):
+ *
+ *   shape                                     ms      legBetween scans
+ *   ---------------------------------------   -----   -----------------
+ *   one 4500-station run                      2174    10,127,250
+ *   thirty 150-station runs (4500 total)      2211    10,061,970
+ *
+ * Within 2% of each other -- the "costs nothing like" claim was false.
+ * Holding run length fixed at 150 and growing only the RUN COUNT (so
+ * only the TOTAL changes) shows why: 1200 stations total, 154ms; 2400,
+ * 581ms; 4800, 2234ms -- clean quadratic growth in the TOTAL, not in any
+ * one run's length. The actual dominant cost is CsProfile.legBetween
+ * linearly scanning resolved.legs on every chain step (CsProfile.
+ * unrollBand calls it once per station in every band, across every
+ * band) -- O(total stations x total legs) -- not CsProfile.longestChain's
+ * own O(run length^2) search, which is what the old gate was built to
+ * catch and is a real cost, just no longer the dominant one now that
+ * longestChain's own leaf-only-start optimization has cut its share
+ * down (see that function's docblock). A largest-run-only gate measured
+ * a quantity that does not govern the cost it existed to bound: it let
+ * the many-small-runs shape through while doing nothing extra to catch
+ * the one shape it was actually built for.
+ *
+ * WHAT THE 3000 DEFAULT MEANS NOW: CsProfile.longestChain's own timing
+ * table quotes ~473ms (1000 stations) and ~1993ms (2000 stations) as
+ * its PRE-fix numbers, from before the leaf-only-start optimization
+ * existed -- those are what this default was originally weighed
+ * against. Measured fresh, post-fix, through the SAME full pipeline
+ * (CsProfile.build end to end, not longestChain alone): a 1000-station
+ * single chain now builds in 118ms and a 2000-station chain in 433ms.
+ * The leaf-only-start fix already closed most of the original gap;
+ * what cost remains at these sizes is legBetween's scan, not the chain
+ * search. At the default of 3000, an ordinary single-run survey now
+ * builds in well under half a second, and -- because this gate checks
+ * the TOTAL, not just the largest run -- a many-run survey totalling
+ * 3000 stations costs the same to build and is now caught by the same
+ * number, which it was not before this fix. legBetween itself is NOT
+ * memoized or indexed as part of this change (see that function's own
+ * file for the follow-up this leaves outstanding: a hash-map index
+ * would cut the 30x150 shape above from roughly 2s to roughly 1.2s) --
+ * that is a separate change with its own risk, so the 3000 default
+ * remains a real ceiling on build time, not a number that only mattered
+ * before the leaf-only fix.
+ *
+ * A run that is branchy rather than chain-shaped can still cost far
+ * more than its station count suggests independent of either number
+ * here -- a balanced-binary-tree-shaped 511-station run measured about
+ * 800ms on CaveCAD in this same pass (legBetween barely touched: the
+ * cost there is almost entirely CsProfile.longestChain's own O(n^2)
+ * search over many leaf starts), against a few milliseconds for an
+ * ordinary 511-station chain. Neither the largest-run nor the total
+ * check catches this when the run itself stays under the threshold --
+ * see CsProfile.longestChain's own docblock, which already says a real
+ * survey run does not take this shape and names it as the place to look
+ * first if one ever does.
  */
 CsProfile.settings = function() {
     var auto = true, exag = 1.0, dead = CsProfile.FLAT_SPLAY_DEG;

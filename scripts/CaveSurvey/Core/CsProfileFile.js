@@ -37,6 +37,17 @@ var CsProfileFile = {};
 CsProfileFile.SUFFIX = "-PROFILE";
 
 /**
+ * The one spelling of "this drawing has nowhere to put a sibling" --
+ * shared with CsDraw.profile, which checks siblingPath() itself (a
+ * pure, free call) BEFORE running its own O(total stations) size gate,
+ * so an unsaved drawing never pays for that gate at all. Single-sourced
+ * here rather than duplicated as a string literal at both call sites,
+ * so the two can never drift apart in wording.
+ */
+CsProfileFile.NO_FILENAME_REASON = "the drawing has no file name yet -- " +
+    "save it and the profile will be written beside it";
+
+/**
  * The profile file that belongs beside a plan drawing. Pure.
  *
  * null when there is no path at all: an unsaved drawing has nowhere to
@@ -318,9 +329,7 @@ CsProfileFile.resolve = function(planPath) {
     var path = CsProfileFile.siblingPath(planPath);
     if (path === null) {
         return { doc: null, di: null, path: null, offscreen: false,
-            created: false,
-            reason: "the drawing has no file name yet -- save it and " +
-                "the profile will be written beside it" };
+            created: false, reason: CsProfileFile.NO_FILENAME_REASON };
     }
 
     // A plan whose OWN name already ends in -PROFILE is the case

@@ -819,8 +819,24 @@ CsDraw.survey = function(survey, resolved, originStation, originPos, seqBase) {
     try {
         profileOutcome = CsDraw.profile(survey, resolved);
     } catch (eProfile) {
-        profileOutcome = { skipped: true,
-            reason: "profile pass failed: " + eProfile };
+        // Building the reason string is ITSELF not safe to trust: string
+        // concatenation calls eProfile.toString(), and an exception whose
+        // own toString() throws (a hostile or merely buggy object thrown
+        // from somewhere deep in the profile pass) would propagate straight
+        // out of this catch and out of CsDraw.survey with it -- exactly
+        // the "the profile pass can never take the plan draw down" promise
+        // this whole try/catch exists to keep, broken by the one line
+        // meant to report the failure. Set a safe default FIRST, then try
+        // to improve it; a second failure trying to describe the first
+        // one is swallowed rather than allowed to escape in its place.
+        profileOutcome = { skipped: true, reason: "profile pass failed" };
+        try {
+            profileOutcome.reason = "profile pass failed: " + eProfile;
+        } catch (eStr) {
+            // eProfile.toString() itself threw -- the reason set above
+            // stands; a description of the failure is a nicety, not a
+            // requirement the plan draw can be allowed to fail over
+        }
     }
 
     return {
@@ -865,17 +881,30 @@ CsDraw.survey = function(survey, resolved, originStation, originPos, seqBase) {
  * into directly (so the user's own view updates and their undo still
  * works), and otherwise the file is built off screen and revealed.
  *
- * GATED ON RUN SIZE, NOT SURVEY SIZE. CsProfile.settings().maxStations
+ * GATED ON THE SURVEY'S TOTAL STATION COUNT, WITH THE LARGEST SINGLE RUN
+ * COMPUTED AND NAMED ALONGSIDE IT. CsProfile.settings().maxStations
  * (CaveSurvey/ProfileAutoMaxStations, default 3000) is compared against
- * the LARGEST SINGLE RUN, via a plain CsProfile.groupRuns() pass -- see
- * CsProfile.settings' own docblock for why the denominator matters: the
- * cost this gate exists to avoid (CsProfile.longestChain's chain search)
- * is quadratic in one run's length, not in the survey's grand total, so
- * measuring the total would block a cave chopped into many small named
- * runs for no reason while doing nothing extra to catch the one shape
- * that is actually slow. groupRuns() itself is a sort, not a chain
- * search, so checking this costs nothing close to what a skip avoids.
- * The manual GenerateProfile command (Task 10) is never gated by this.
+ * the total, via a plain CsProfile.groupRuns() pass -- see CsProfile.
+ * settings' own docblock for the full measurement, but in short: an
+ * earlier draft of this gate checked the largest run ALONE, on the
+ * theory that CsProfile.longestChain's chain search (quadratic in one
+ * run's length) was the cost worth avoiding. Measured on CaveCAD: a
+ * survey chopped into thirty 150-station named runs -- the "one letter
+ * per trip" shape a real cave actually takes -- sailed through that gate
+ * (no run anywhere near the limit) while costing WITHIN A FEW PERCENT of
+ * what one single 4500-station run costs to build, because the dominant
+ * term is actually CsProfile.legBetween's linear scan of resolved.legs
+ * on every chain step (CsProfile.unrollBand calls it once per station in
+ * every band) -- O(total stations x total legs), not O(run length^2). A
+ * largest-run-only gate measured the wrong denominator: it let the
+ * expensive many-run shape through and did nothing extra to catch it.
+ * See the comment on the comparison itself, below, for why the fix
+ * checks the total ALONE rather than "largest run OR total" -- the two
+ * are not independent conditions once they share a threshold.
+ * groupRuns() itself is a sort, not a chain search or a legBetween scan,
+ * so computing both numbers here costs nothing close to what a skip
+ * avoids. The manual GenerateProfile command (Task 10) is never gated
+ * by this.
  *
  * \return {skipped, reason} or {path, created, counts, profile}
  */
@@ -886,45 +915,156 @@ CsDraw.profile = function(survey, resolved) {
             reason: "CaveSurvey/ProfileAuto is off" };
     }
 
+    // MINOR: checked BEFORE the size gate below, deliberately. An
+    // unsaved drawing has nowhere to put a sibling regardless of survey
+    // size, so there is no reason to make it pay for the O(total
+    // stations) CsProfile.groupRuns() pass first -- siblingPath() is
+    // pure and does no file I/O, so this costs nothing when the drawing
+    // IS saved. The reason text is CsProfileFile's own single-sourced
+    // constant (not duplicated here as a string literal) so this early
+    // exit and CsProfileFile.resolve()'s OWN identical check, reached
+    // moments later once the drawing IS saved, can never drift apart in
+    // wording.
+    var planPath = getDocument().getFileName();
+    if (CsProfileFile.siblingPath(planPath) === null) {
+        return { skipped: true, reason: CsProfileFile.NO_FILENAME_REASON };
+    }
+
     var grouped = CsProfile.groupRuns(resolved);
     var largestRun = 0;
+    var totalStations = 0;
     for (var gi = 0; gi < grouped.order.length; gi++) {
         var runLen = grouped.runs[grouped.order[gi]].stations.length;
+        totalStations += runLen;
         if (runLen > largestRun) {
             largestRun = runLen;
         }
     }
-    if (largestRun > settings.maxStations) {
+    // THE CONDITION CHECKS totalStations ALONE, DELIBERATELY, even
+    // though both numbers are computed and both are named in the
+    // message below. totalStations is the sum of every run's own
+    // length, so totalStations >= largestRun ALWAYS (one or more
+    // non-negative addends can never sum to less than their own
+    // maximum) -- an "or largestRun > settings.maxStations" clause here
+    // could therefore never independently trip this gate: whenever it
+    // would, the total clause already has, at the identical threshold.
+    // That is not an oversight; it is why there is only one comparison
+    // to write. largestRun is still computed and still named in the
+    // reason string below, because it is genuinely useful DIAGNOSTIC
+    // information (a surveyor reading "4500 stations across 1 run" vs.
+    // "4500 stations across 30 runs (largest 150)" learns something
+    // real about their own data either way), just not a SEPARATE gating
+    // condition -- see CsProfile.settings' own docblock for the
+    // measurement this replaces (a largest-run-only gate that let a
+    // many-small-runs survey costing the same as one big run straight
+    // through).
+    if (totalStations > settings.maxStations) {
         return { skipped: true,
-            reason: "the largest survey run has " + largestRun +
-                " stations, over CaveSurvey/ProfileAutoMaxStations (" +
+            reason: "the survey has " + totalStations + " station" +
+                (totalStations === 1 ? "" : "s") + " across " +
+                grouped.order.length + " run" +
+                (grouped.order.length === 1 ? "" : "s") +
+                " (largest run " + largestRun + "), over " +
+                "CaveSurvey/ProfileAutoMaxStations (" +
                 settings.maxStations + ") -- run GenerateProfile by " +
                 "hand to build the profile anyway" };
     }
 
-    var planPath = getDocument().getFileName();
-    var target = CsProfileFile.resolve(planPath);
+    return CsDraw.profileNow(getDocument(), survey, resolved, settings);
+};
+
+/**
+ * The post-gate half of CsDraw.profile, factored out so the manual
+ * GenerateProfile command (Task 10) can share it byte-for-byte instead
+ * of maintaining its own copy. BOTH of CsDraw.profile's gates (auto
+ * switch, size) run BEFORE this function is ever called -- Generate
+ * Profile bypasses both on purpose (that is the whole point of a manual
+ * command), so this is exactly the part there was ever anything to
+ * share: resolve where to draw, build, draw, commit, reveal.
+ *
+ * Takes `doc` EXPLICITLY, unlike CsDraw.profile, which reads it from
+ * getDocument() -- the manual tool already has its own `doc` in hand
+ * (it is not necessarily "the current document" by the time this would
+ * run inside some future caller), so this never assumes there is a
+ * global "current" one.
+ *
+ * REVEAL POLICY: reveal only a NEWLY CREATED sibling file
+ * (target.created), never one that already existed. An already-open
+ * tab is never revealed either (target.created is only ever true on
+ * the offscreen-build path -- see CsProfileFile.resolve). This is ONE
+ * policy for BOTH callers: the tool's own copy of this sequence used to
+ * reveal unconditionally, with nothing documenting why that should
+ * differ from the automatic path -- there was no actual reason for it
+ * to, so this version settles it once, here, for both.
+ *
+ * \param settings CsProfile.settings() already read by the caller (both
+ *                 gates in CsDraw.profile need it before this point, and
+ *                 the manual tool reads it once for the same fields, so
+ *                 neither caller should read it twice)
+ * \return {skipped, reason} or {path, created, counts, profile}
+ */
+CsDraw.profileNow = function(doc, survey, resolved, settings) {
+    var target = CsProfileFile.resolve(doc.getFileName());
     if (target.doc === null) {
         return { skipped: true, reason: target.reason };
     }
 
-    var built = CsProfile.build(survey, resolved, {
-        exaggeration: settings.exaggeration,
-        flatSplayDeg: settings.flatSplayDeg
-    });
-    var counts = CsProfileDraw.render(target.doc, target.di, built, {});
+    // MINOR: an off-screen target.di (CsProfileFile.resolve built a
+    // fresh memory document for us) is normally disposed of by
+    // CsProfileFile.commit(), win or lose -- but commit() is never
+    // reached if build()/render() throws, and an open-tab target
+    // (target.offscreen === false) is the user's own live document and
+    // must NEVER be destroyed, thrown exception or not. `drewOk` is
+    // what tells the finally block below which case it is in: without
+    // this, a failed draw on the offscreen path leaked one
+    // RDocument/RDocumentInterface per failure. The exception itself is
+    // NOT caught here -- it still propagates to this function's own
+    // caller exactly as it did before this leak fix existed (CsDraw.
+    // profile's caller, CsDraw.survey, already wraps ITS call to
+    // CsDraw.profile in the try/catch that turns this into a reported
+    // "profile pass failed" outcome; catching it a second time here,
+    // under a different message, would just make the two paths
+    // disagree about what a thrown build/render failure is called).
+    var built, counts;
+    var drewOk = false;
+    try {
+        built = CsProfile.build(survey, resolved, {
+            exaggeration: settings.exaggeration,
+            flatSplayDeg: settings.flatSplayDeg
+        });
+        counts = CsProfileDraw.render(target.doc, target.di, built, {});
+        drewOk = true;
+    } finally {
+        if (!drewOk && target.offscreen) {
+            try { destr(target.di); } catch (eDestr) { /* nicety */ }
+        }
+    }
 
     var written = CsProfileFile.commit(target);
     if (!written) {
         return { skipped: true,
             reason: "could not write " + target.path };
     }
-    if (target.created) {
-        CsProfileFile.reveal(target.path);
-    }
 
-    return { path: target.path, created: target.created,
+    // The outcome is built BEFORE reveal() runs, and returned
+    // unconditionally afterward: reveal() already swallows its own
+    // openFiles() exception (headless runs have no GUI to open a tab
+    // in), but this is a second, independent safety net so a future
+    // change to reveal()'s own implementation cannot regress "the file
+    // committed successfully" into "the profile pass failed" just
+    // because OPENING it in a tab hit a problem -- the file is already
+    // safely on disk by this point regardless of what reveal() does.
+    var outcome = { path: target.path, created: target.created,
         counts: counts, profile: built };
+    if (target.created) {
+        try {
+            CsProfileFile.reveal(target.path);
+        } catch (eReveal) {
+            // see the comment above: a failed reveal never turns a
+            // successful write into a reported failure
+        }
+    }
+    return outcome;
 };
 
 /**

@@ -139,12 +139,33 @@ function shotOf(from, to, d, az, inc) {
     return s;
 }
 
+function splayOf(from, d, az, inc) {
+    var s = CsModel.newShot();
+    s.from = from;
+    s.to = "";
+    s.distance = d;
+    s.azimuth = az;
+    s.inclination = inc || 0;
+    s.splay = true;
+    return s;
+}
+
 // ---------------------------------------------------------------------
 // Fixture: one real off-screen document carrying a real, tagged, four-
 // station survey (P1-P2-P3-P4, a plain chain with no branching -- kept
 // simple deliberately, since the point of this file is proving the
 // PLUMBING works, not re-testing CsProfile's own geometry, which
 // tests/js_unit.js and tests/profile_draw_roundtrip.js already do).
+//
+// MINOR (untested behaviours): this fixture used to have no LRUD and no
+// splays at all, so it could never see CRITICAL C -- the manual tool
+// rebuilds its survey from Station-tagged points only
+// (CsTags.surveyFromDocument), which never reconstructs a splay shot,
+// so a cave whose floor/ceiling comes from splays gets a silently
+// centerline-only profile from this tool. P2 now carries real LRUD
+// (so the profile draws a real ceiling/floor from it, proving that part
+// still works) AND a real splay (so generateProfileSplayLossWarning has
+// something real to detect as unrecovered).
 //
 // getDocument/getDocumentInterface are reassigned here, exactly as
 // tests/js_unit.js's own freshDoc() helper does for the identical
@@ -167,10 +188,25 @@ RSettings.setValue(KEY_AUTO, false); // the fixture draw is not what this
                                       // file is testing; keep it inert
 try {
     var fixtureSurvey = CsModel.newSurvey();
+    // LRUD is attributed to the shot's ARRIVING (TO) station, the same
+    // convention tests/js_unit.js's own splayFixture() uses -- so P1->P2
+    // and P2->P3 each carrying up/down puts real LRUD on P2 AND P3,
+    // adjacent stations, which is what actually gives CsProfile.
+    // bandWallRuns two points to connect into one real ceiling run and
+    // one real floor run (a single LRUD point alone is not a "run").
+    var fixtureP1p2 = shotOf("P1", "P2", 10, 0, 0);
+    fixtureP1p2.up = 1;
+    fixtureP1p2.down = 0.5;
+    var fixtureP2 = shotOf("P2", "P3", 10, 90, 0);
+    fixtureP2.left = 2;
+    fixtureP2.right = 3;
+    fixtureP2.up = 1;
+    fixtureP2.down = 0.5;
     fixtureSurvey.shots = [
-        shotOf("P1", "P2", 10, 0, 0),
-        shotOf("P2", "P3", 10, 90, 0),
-        shotOf("P3", "P4", 10, 180, 0)
+        fixtureP1p2,
+        fixtureP2,
+        shotOf("P3", "P4", 10, 180, 0),
+        splayOf("P2", 4, 45, 20)
     ];
     CsDraw.survey(fixtureSurvey, CsNetwork.resolve(fixtureSurvey, {}));
 } finally {
@@ -262,7 +298,18 @@ if (tplPath !== null) {
     fixtureDoc.setFileName(planPathA);
 
     withSpies(function(spy) {
-        generateProfileRun();
+        // IMPORTANT (untested behaviours): driven through the tool's
+        // OWN wired entry point, new GenerateProfile(null).beginEvent(),
+        // not the bare generateProfileRun() free function every
+        // scenario in this file used to call directly. Deleting the
+        // generateProfileRun() call OUT of beginEvent survived every
+        // other test here, because they all call the free function
+        // themselves -- a miswired beginEvent would mean a menu item
+        // that does nothing, with a fully green suite. guiAction is
+        // null: this action was never triggered from an actual menu
+        // click, which EAction's own constructor already tolerates
+        // (isNull(guiAction) guards every place it matters).
+        new GenerateProfile(null).beginEvent();
 
         // ---- claim 1: rebuilt from CsTags.surveyFromDocument, not a
         // notebook, and not zero stations -----------------------------
@@ -313,10 +360,47 @@ if (tplPath !== null) {
                 spy.capturedBuilt !== null) {
             var expectedText = CsReport.profileSummary(spy.capturedBuilt, {
                 path: siblingPathA, created: true, counts: spy.capturedCounts
-            });
+            }) + generateProfileSplayLossWarning(fixtureDoc,
+                spy.capturedSurvey);
             eqs(spy.informationCalls[0].text, expectedText,
                 "the report text is exactly CsReport.profileSummary's " +
-                "own output for what was actually built and drawn");
+                "own output for what was actually built and drawn, plus " +
+                "the CRITICAL C splay-loss warning");
+        }
+
+        // ---- CRITICAL C, driven end to end: the fixture's own P2
+        // splay is drawn in the plan (fixtureDoc) but CANNOT survive
+        // CsTags.surveyFromDocument's Station-only walk, so the report
+        // must say so in words naming the real count (1). Without this
+        // fixture carrying a real splay at all, this whole gap was
+        // invisible to every test this tool had -- see the fixture's
+        // own MINOR comment above. -----------------------------------
+        if (spy.informationCalls.length === 1) {
+            ok(spy.informationCalls[0].text.indexOf(
+                "WARNING -- 1 splay(s) tagged in the drawing could not " +
+                "be recovered") >= 0,
+                "CRITICAL C: the manual tool's own splay-loss gap is " +
+                "named in the dialog text, got:\n" +
+                spy.informationCalls[0].text);
+        }
+        if (spy.capturedSurvey !== null) {
+            eqs(generateProfileCountRecoveredSplays(spy.capturedSurvey), 0,
+                "sanity: CsTags.surveyFromDocument really does recover " +
+                "zero splays from a drawing that has one -- this is the " +
+                "gap CRITICAL C detects, not something this test invented");
+        }
+        // sanity: the fixture's own LRUD (Elevation/Left/Right/Up/Down
+        // ARE read back from tags, unlike splays) still produces a real
+        // ceiling and floor run -- the splay-loss warning above is
+        // about splays specifically, not a sign the whole profile came
+        // back empty.
+        if (spy.capturedCounts !== null) {
+            ok(spy.capturedCounts.ceilingRuns > 0 &&
+                spy.capturedCounts.floorRuns > 0,
+                "sanity: the fixture's LRUD (recovered from tags, unlike " +
+                "its splay) still produces a real ceiling/floor run, " +
+                "got ceilingRuns=" + spy.capturedCounts.ceilingRuns +
+                " floorRuns=" + spy.capturedCounts.floorRuns);
         }
 
         // ---- claim 4: CsProfileBind is actually WIRED into CsAll.js,
@@ -431,6 +515,48 @@ withSpies(function(spy) {
     eqs(spy.informationCalls.length, 0,
         "a refusal shows no report here either");
 });
+
+// =======================================================================
+// Scenario E: MINOR (untested behaviours) -- the commit-failure branch,
+// now shared with CsDraw.profile through CsDraw.profileNow, had no
+// coverage on the MANUAL tool's own side (tests/js_unit.js's Task 9
+// block covers the automatic path). CsProfileFile.commit() returning
+// false (a real write failure) must surface as a named refusal, not be
+// swallowed or reported as success.
+// =======================================================================
+
+if (tplPath !== null) {
+    var planPathE = QDir.tempPath() + "/cs_generate_profile_run_planE.dxf";
+    var siblingPathE = CsProfileFile.siblingPath(planPathE);
+    new QFile(siblingPathE).remove();
+    fixtureDoc.setFileName(planPathE);
+    getDocument = function() { return fixtureDoc; };
+    getDocumentInterface = function() { return fixtureDi; };
+
+    var savedCommitE = CsProfileFile.commit;
+    CsProfileFile.commit = function() { return false; };
+    withSpies(function(spy) {
+        try {
+            generateProfileRun();
+        } finally {
+            CsProfileFile.commit = savedCommitE;
+        }
+        eqs(spy.warnings.length, 1, "exactly one warning fired");
+        eqs(spy.warnings[0],
+            "Generate Profile: could not write " + siblingPathE + ".",
+            "MINOR now covered: a commit() failure is reported by name, " +
+            "not silently treated as success");
+        eqs(spy.informationCalls.length, 0,
+            "a commit failure shows no report -- nothing was actually " +
+            "written to show");
+    });
+    ok(!new QFileInfo(siblingPathE).exists(),
+        "PROOF: the forced commit failure wrote nothing to the sibling " +
+        "path");
+} else {
+    failures.push("SKIPPED scenario E entirely -- no PROFILE template " +
+        "found, so nothing above it could be proven either");
+}
 
 // ---------------------------------------------------------------------
 // Report.

@@ -162,6 +162,31 @@ CsTags.collectStations = function(doc) {
  * that lets any tool run on any drawing the suite (or the previous
  * generation of it) produced. Stations only; shots are reconstructed
  * as far as the tags allow (azimuth/LRUD per station).
+ *
+ * SEVENTH DOOR in the elevation-datum-trap family (CsTraverse.offset's
+ * own docblock names the first five; CsNetwork.resolve's anchorEffectiveZ
+ * comment names the sixth and is the direct model for this one): every
+ * station this function reconstructs is written into survey.fixed with
+ * a REAL x/y/z, whether or not the drawing's own Elevation tag actually
+ * had a number in it -- `CsTags.getNumber(...) || 0.0` used to treat "no
+ * tag" and "unparseable tag" exactly like a real, surveyed 0.0, the same
+ * disease as every other door in this family. UNREACHABLE TODAY: nothing
+ * this suite ships ever writes a station without an Elevation tag, and
+ * every current writer of that tag parses to a real number -- but this
+ * function's own docblock advertises reading foreign and hand-edited
+ * drawings, and a drawing edited by hand (or written by a future format
+ * reader) is exactly where a missing or garbled Elevation tag would
+ * first appear. WHAT ABSENT SHOULD DO: report it as null, not invent a
+ * sea-level datum for a cave that may be surveyed to an unrelated
+ * absolute one -- the same answer CsNetwork.resolve's anchor path
+ * already gives for the identical question, and CsTraverse.unusable /
+ * CsProfile.zOf already treat null as "no resolved elevation" rather
+ * than crashing on it. CsNetwork.resolve's own seedFixed had the exact
+ * same `f.z || 0.0` fabrication one frame downstream of survey.fixed
+ * (see its own comment, which used to say this exact station-tag path
+ * was the reason that line could never actually see a null) -- fixed in
+ * the same change, or this fix would only have made the OBJECT more
+ * honest without changing what actually gets resolved and drawn.
  */
 CsTags.surveyFromDocument = function(doc) {
     var survey = CsModel.newSurvey();
@@ -197,7 +222,7 @@ CsTags.surveyFromDocument = function(doc) {
             survey.startNote = CsTags.get(st.entity, "Note");
         }
         survey.fixed[st.name] = { x: st.pos.x, y: st.pos.y,
-            z: CsTags.getNumber(st.entity, "Elevation") || 0.0 };
+            z: CsTags.getNumber(st.entity, "Elevation") };
         prev = st;
     }
     return survey;

@@ -63,6 +63,20 @@ CsReport.drawSummary = function(survey, resolved, drawn, findings) {
         lines.push("Skipped: " + drawn.skipped +
             " (excluded shots, or shots that never connected)");
     }
+    // The AUTOMATIC profile pass's own outcome, folded into the ordinary
+    // draw summary every production caller already shows -- without
+    // this, CsReport.profileSummary (which says the identical thing in
+    // the identical words) is only ever read by the MANUAL GenerateProfile
+    // tool, so a plan draw that skipped the profile for size, a
+    // ProfileAuto switched off, an unsaved drawing, or a profile pass
+    // that threw, never told the user anything at all: `drawn.profile`
+    // was a real field on CsDraw.survey's return value that nothing
+    // shipped ever read. Same wording as profileSummary's own skip line
+    // so the two paths never describe the same event two different ways.
+    if (drawn.profile !== undefined && drawn.profile !== null &&
+            drawn.profile.skipped) {
+        lines.push("Profile: not written -- " + drawn.profile.reason + ".");
+    }
     if (survey.declination !== 0 && survey.declinationSource !== "") {
         var srcWord = { file: "from the file", user: "entered by hand",
             igrf: "IGRF estimate" }[survey.declinationSource] ||

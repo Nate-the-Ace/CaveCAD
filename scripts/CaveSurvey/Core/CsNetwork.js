@@ -104,6 +104,15 @@ var CsNetwork = {};
  *               null rather than a fabricated 0. See the "SIXTH DOOR"
  *               comment above `anchorEffectiveZ` for why null, not 0,
  *               and what still does not know about it.
+ *   fixedZUnknown: [name] -- every *fix'ed/#Fix'ed station seedFixed()
+ *               placed with no usable z (survey.fixed[name].z absent or
+ *               non-finite): still placed at its real x/y, but z =
+ *               null rather than a fabricated 0. [] when every fixed
+ *               station had a real elevation, which is every fixture
+ *               and every shipped writer today except a drawing whose
+ *               own Elevation tag is missing or garbled -- see
+ *               CsTags.surveyFromDocument's own "SEVENTH DOOR" comment
+ *               and seedFixed's comment just above it in this file.
  * }
  */
 CsNetwork.resolve = function(survey, opts) {
@@ -182,14 +191,27 @@ CsNetwork.resolve = function(survey, opts) {
     // CsTraverse.unusable is the established, already-reviewed test
     // for "cannot function as part of a real measurement" (absent or
     // non-finite, but never a real 0) -- reused here rather than
-    // re-deriving the same distinction a second way. Every CURRENT
-    // writer of survey.fixed always sets a real z (CsSurvex/CsWalls/
-    // CsCsv default an omitted #Fix/*fix elevation to 0.0 themselves,
-    // and CsTags/SurveyNotebook do the same reading a drawing's own
-    // Elevation tag -- a different, already-named sibling bug, not
-    // this one), so `survey.fixed[...].z` cannot actually BE unusable
-    // today; this guards the CONTRACT, not a reachable input, exactly
-    // as CsTraverse.offset's own guard did before Task 5b's fix.
+    // re-deriving the same distinction a second way. CsSurvex/CsWalls/
+    // CsCsv default an omitted #Fix/*fix elevation to 0.0 themselves
+    // (a real, if arbitrary, decision those parsers make on purpose,
+    // not a gap), and SurveyNotebook's own anchor-building already
+    // passes a real null through untouched (see its own "z stays NULL"
+    // comments) -- so THIS particular fallback, on the explicit-anchor
+    // path, was already guarding a contract no current caller could
+    // violate.
+    //
+    // seedFixed(), a few dozen lines below, is a DIFFERENT story: it
+    // had the IDENTICAL `f.z || 0.0` fabrication on survey.fixed's OWN
+    // entries, and until the SEVENTH DOOR closed (CsTags.
+    // surveyFromDocument, which used to write `getNumber(...) || 0.0`
+    // into survey.fixed directly) that really was unreachable, for the
+    // same "every current writer sets a real z" reason. It is not
+    // unreachable any more -- surveyFromDocument now hands back a real
+    // null for a station with no (or a garbled) Elevation tag, so
+    // seedFixed has its own null-tolerant fix now too (see its own
+    // comment) rather than silently re-fabricating the exact 0 this
+    // file's OWN docblock spent a paragraph refusing to invent for the
+    // anchor.
     //
     // What absent should DO: anchor WITHOUT an elevation (z = null,
     // not refused) and report it, rather than declining to place the
@@ -215,6 +237,12 @@ CsNetwork.resolve = function(survey, opts) {
     // ordinary-looking 0.
     var anchorEffectiveZ;
     var anchorZUnknown = null;
+    // Parallel to anchorZUnknown, but plural: any *fix'ed/#Fix'ed
+    // station seedFixed() places with no usable z (see that function's
+    // own comment). Populated as seedFixed runs, potentially across
+    // several calls (it is re-invoked whenever the pass loop gets
+    // stuck), so this is declared here rather than inside it.
+    var fixedZUnknown = [];
     if (opts.anchor !== undefined && opts.anchor !== null) {
         if (!CsTraverse.unusable(opts.anchor.z)) {
             anchorEffectiveZ = opts.anchor.z;
@@ -265,7 +293,25 @@ CsNetwork.resolve = function(survey, opts) {
             var fn = fixedNames[k];
             if (!stations.hasOwnProperty(fn)) {
                 var f = survey.fixed[fn];
-                place(fn, f.x, f.y, f.z || 0.0, null);
+                // SIXTH DOOR, same fix, second site: `f.z || 0.0` is the
+                // identical fabrication anchorEffectiveZ's own comment
+                // (above) already refused for the explicit anchor --
+                // this is where a *fix'ed/#Fix'ed station with no
+                // elevation on record gets exactly the same treatment,
+                // now that CsTags.surveyFromDocument (the "already-named
+                // sibling bug" the old comment here pointed at) actually
+                // hands this file a null z instead of a fabricated one.
+                // x/y still place the station -- plan view and every
+                // consumer that never reads .z are unaffected -- but z
+                // stays null rather than silently rebasing an
+                // absolute-datum cave toward sea level. CsTraverse.
+                // unusable()'s test (not a bare `!== null`) also catches
+                // a NaN from a corrupted numeric field the same way.
+                var fz = CsTraverse.unusable(f.z) ? null : f.z;
+                if (fz === null) {
+                    fixedZUnknown.push(fn);
+                }
+                place(fn, f.x, f.y, fz, null);
                 used = true;
             }
         }
@@ -608,7 +654,8 @@ CsNetwork.resolve = function(survey, opts) {
         controlFrame: controlFrame,
         unresolved: unresolved,
         skipped: skipped,
-        anchorZUnknown: anchorZUnknown
+        anchorZUnknown: anchorZUnknown,
+        fixedZUnknown: fixedZUnknown
     };
 };
 
