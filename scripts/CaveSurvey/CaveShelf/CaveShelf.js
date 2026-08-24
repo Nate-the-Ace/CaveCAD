@@ -616,7 +616,9 @@ CaveShelf.show = function() {
     // (new cave, close) stay in the footer.
     var caveActions = new QHBoxLayout();
     var revealButton = new QPushButton(qsTr("Reveal in Finder"));
-    var pdfButton = new QPushButton(qsTr("Open PDF/"));
+    var pdfButton = new QPushButton(qsTr("Open Project PDF Folder"));
+    pdfButton.toolTip = qsTr("The PDF/ folder inside this cave's project, " +
+        "where plotted maps are kept.");
     var packageButton = new QPushButton(qsTr("Package..."));
     caveActions.addWidget(revealButton, 0, 0);
     caveActions.addWidget(pdfButton, 0, 0);
