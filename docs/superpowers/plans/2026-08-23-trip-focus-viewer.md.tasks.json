@@ -28,7 +28,7 @@
     {
       "id": 3,
       "subject": "Task 4: The contributions list",
-      "status": "needs_rework",
+      "status": "completed",
       "blockedBy": [
         2
       ],
@@ -37,7 +37,7 @@
     {
       "id": 4,
       "subject": "Task 5: Filtering the view",
-      "status": "pending",
+      "status": "completed",
       "blockedBy": [
         3
       ],
@@ -46,16 +46,16 @@
     {
       "id": 5,
       "subject": "Task 6: Ship it",
-      "status": "pending",
+      "status": "blocked",
       "blockedBy": [
         4
       ],
-      "description": "**Goal:** The tool is documented, the publish gate is green, and it is installed in CaveCAD.\n\n**Files:**\n- Modify: `README.md`\n- Modify: `docs/superpowers/specs/2026-08-23-trip-focus-viewer-design.md`\n\n**Acceptance Criteria:**\n- `CAVESURVEY_PUBLISH_CHECK=1 bash tests/run_all.sh` green\n- `tools/publish.sh` installs and archives without error\n- The spec's \"Limits, accepted\" section records what the GUI checks actually found -- in particular whether `setAllowInvisible(true)` was needed (no precedent for it exists anywhere in scripts/, so this is the first recorded answer) and how long the copy took on the largest drawing tried\n- The version is bumped the way the repo already bumps it (read `git log -- tools/publish.sh README.md` first; do not invent a scheme)\n\n**Verify:** `CAVESURVEY_PUBLISH_CHECK=1 bash tests/run_all.sh` -> all sections OK, then `tools/publish.sh` -> exits 0\n\n**Steps:** read how the last feature bumped the version, append the GUI findings to the spec, run the publish gate, publish, commit.\n\n```json:metadata\n{\"files\": [\"README.md\", \"docs/superpowers/specs/2026-08-23-trip-focus-viewer-design.md\"], \"verifyCommand\": \"CAVESURVEY_PUBLISH_CHECK=1 bash tests/run_all.sh\", \"acceptanceCriteria\": [\"publish gate green\", \"publish.sh exits 0\", \"spec records the measured limits, not the guessed ones\", \"version bumped the repo's own way\"], \"modelTier\": \"mechanical\"}\n```"
+      "description": "**BLOCKED ON A HUMAN.** Everything except the version bump and publish is done. The GUI gate (15 checks) is in the design doc and has to be run by a person in CaveCAD before this ships: a green suite has already been wrong four times here about whether the window can even open. VERSION deliberately left at 0.5.0.0.\n\n**Goal:** The tool is documented, the publish gate is green, and it is installed in CaveCAD.\n\n**Files:**\n- Modify: `README.md`\n- Modify: `docs/superpowers/specs/2026-08-23-trip-focus-viewer-design.md`\n\n**Acceptance Criteria:**\n- `CAVESURVEY_PUBLISH_CHECK=1 bash tests/run_all.sh` green\n- `tools/publish.sh` installs and archives without error\n- The spec's \"Limits, accepted\" section records what the GUI checks actually found -- in particular whether `setAllowInvisible(true)` was needed (no precedent for it exists anywhere in scripts/, so this is the first recorded answer) and how long the copy took on the largest drawing tried\n- The version is bumped the way the repo already bumps it (read `git log -- tools/publish.sh README.md` first; do not invent a scheme)\n\n**Verify:** `CAVESURVEY_PUBLISH_CHECK=1 bash tests/run_all.sh` -> all sections OK, then `tools/publish.sh` -> exits 0\n\n**Steps:** read how the last feature bumped the version, append the GUI findings to the spec, run the publish gate, publish, commit.\n\n```json:metadata\n{\"files\": [\"README.md\", \"docs/superpowers/specs/2026-08-23-trip-focus-viewer-design.md\"], \"verifyCommand\": \"CAVESURVEY_PUBLISH_CHECK=1 bash tests/run_all.sh\", \"acceptanceCriteria\": [\"publish gate green\", \"publish.sh exits 0\", \"spec records the measured limits, not the guessed ones\", \"version bumped the repo's own way\"], \"modelTier\": \"mechanical\"}\n```"
     },
     {
       "id": 6,
       "subject": "Task 7: Wall runs carry their own stations",
-      "status": "pending",
+      "status": "completed",
       "blockedBy": [
         1
       ],
@@ -64,12 +64,12 @@
     {
       "id": 7,
       "subject": "Task 8: Rebuild the list pane on constructible widgets",
-      "status": "pending",
+      "status": "completed",
       "blockedBy": [
         3
       ],
       "description": "**Goal:** Build the contributions list from QCheckBox + QLabel in a QGridLayout inside a QScrollArea. QTreeWidget, QTreeWidgetItem's checkState and QListWidget are NOT constructible from script in this build -- probed in CaveCAD 3.33.0's engine. The tree version threw on setHeaderLabels for every drawing while run_all.sh stayed green, because no test constructed the widget.\n\n**Files:**\n- Modify: `scripts/CaveSurvey/TripFocus/TripFocus.js`\n- Test: `tests/js_unit.js`\n\n**Acceptance Criteria:**\n- no QTreeWidget/QTreeWidgetItem/QListWidget anywhere in the add-on\n- QScrollArea over a QGridLayout, checkbox + distance + share per row, trailing stretch row\n- four section headers, each a QCheckBox that cascades to its rows\n- empty section shows a disabled '(none recorded)' label, no checkbox\n- the '(not in any run)' row has no checkbox\n- selection state in a JS entries array, NOT recovered by walking widget children\n- picked() covered by a headless test that constructs real QCheckBox widgets and ticks them\n- every user-visible string wrapped in qsTr\n\n**Verify:** `bash tests/run_all.sh` plus a headless probe asserting picked() reflects ticked boxes\n\n```json:metadata\n{\"files\": [\"scripts/CaveSurvey/TripFocus/TripFocus.js\", \"tests/js_unit.js\"], \"verifyCommand\": \"bash tests/run_all.sh\", \"acceptanceCriteria\": [\"no unconstructible widget classes remain\", \"grid pane with cascade\", \"selection in a JS array not the widget tree\", \"picked() tested headlessly with real checkboxes\", \"opens on survey/no-survey/empty drawings\"], \"modelTier\": \"standard\"}\n```"
     }
   ],
-  "lastUpdated": "2026-08-23"
+  "lastUpdated": "2026-08-24"
 }

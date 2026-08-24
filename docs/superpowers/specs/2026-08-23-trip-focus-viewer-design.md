@@ -186,6 +186,19 @@ permanently, whatever is checked.
   primitive plus one button -- available later, deliberately not now.
 - **It costs a second copy of the drawing in memory.** Fine at cave scale;
   measure on the largest real survey before assuming.
+- **A wall run no longer jumps across a junction, and that is a map fix, not a
+  viewer fix.** `CsLrud.wallRuns` walked the legs in resolution order and broke a
+  run only at a junction, a station with no wall evidence, or a closure -- never
+  checking that the next leg continued from the previous one's arrival. So a
+  junction whose two branches both carried LRUD produced ONE polyline spanning
+  both, with a segment crossing open cave between them (measured:
+  `(-15.56, 22.73)` straight to `(5.66, 18.49)`). That is wrong in drawings
+  already plotted; Trip Focus only made it visible by asking which passage a wall
+  belongs to. Fixed in `dcde28b`, verified by dumping every wall polyline across
+  eight fixtures before and after: the only change anywhere is that glued run
+  splitting in two, with every coordinate byte-identical. `CsProfile.bandWallRuns`
+  was probed for the same gap and does not have it -- it walks a chain that
+  `unrollBand` has already validated leg by leg.
 - **A drawing tagged before Task 7 keeps all its wall runs visible under every
   selection**, because every wall polyline carried the whole survey's station
   list until then. Any redraw from the notebook re-tags them. Accepted rather
