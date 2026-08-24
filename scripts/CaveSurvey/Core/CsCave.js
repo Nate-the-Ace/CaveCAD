@@ -311,8 +311,23 @@ CsCave.ensureProjectFolders = function(folder, force) {
  * \return true if a picture landed somewhere.
  */
 CsCave.writePreview = function(docPath, image) {
-    if (image === undefined || image === null) { return false; }
     var wrote = false;
+    var usable = false;
+    try {
+        usable = image !== undefined && image !== null && !image.isNull();
+    } catch (eNull) {
+        usable = false;
+    }
+
+    // No picture in hand? The stock save has just handed one to
+    // RSettings.addRecentFile, which wrote it to the application cache
+    // -- so take it from there. The thumbnail on the document interface
+    // is only refreshed from a graphics view WITH FOCUS, and a save that
+    // happens while a dialog is up (importing a cave is exactly that)
+    // finds no focused view and leaves it empty.
+    if (!usable) {
+        return CsCave.copyCachedPreview(docPath);
+    }
 
     var put = function(target) {
         if (target === null || target === undefined) { return false; }
@@ -334,6 +349,34 @@ CsCave.writePreview = function(docPath, image) {
     } catch (eCache) {
     }
     return wrote;
+};
+
+/**
+ * Copies the application's cached thumbnail for a drawing into the
+ * cave's images/ folder. The fallback for a save with no focused view.
+ *
+ * \return true if a picture landed.
+ */
+CsCave.copyCachedPreview = function(docPath) {
+    if (typeof RSettings === "undefined" ||
+            typeof RSettings.getThumbnailFilePath !== "function") {
+        return false;
+    }
+    try {
+        var cached = String(RSettings.getThumbnailFilePath(docPath));
+        var info = new QFileInfo(cached);
+        if (!info.exists() || info.size() === 0) { return false; }
+
+        var target = CsCave.previewPathFor(docPath);
+        if (target === null) { return false; }
+        (new QFileInfo(String(target))).dir().mkpath(".");
+        if ((new QFileInfo(String(target))).exists()) {
+            (new QFile(String(target))).remove();
+        }
+        return (new QFile(cached)).copy(String(target)) === true;
+    } catch (e) {
+        return false;
+    }
 };
 
 // Makes sure this cave's scans/ folder exists, and points the stock
