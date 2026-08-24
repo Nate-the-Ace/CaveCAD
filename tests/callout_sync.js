@@ -153,10 +153,19 @@ var id = CalloutWrite.create(doc, di, {
         leader: CsCallout.LEADER_CURVED,
         height: CalloutWrite.textHeight(doc)
     });
+    var vBefore = CalloutWrite.members(doc, cid).leaders[0]
+        .getData().countVertices();
     CalloutSync.run(doc, di);
     var d = CalloutWrite.members(doc, cid).leaders[0].getData();
-    ok(Math.abs(d.getBulgeAt(0)) > 1e-9,
-        "a curved leader is STILL curved after a sync, not straightened");
+    // Curves are traced as SEGMENTS, not carried as a bulge: an arc is
+    // destroyed by a DXF save (the exporter drops the arc's start vertex,
+    // which is the arrow tip). So "still curved" means "still has its
+    // extra vertices", not "still has a bulge".
+    ok(d.countVertices() > 3,
+        "a curved leader is STILL curved after a sync, not straightened " +
+        "(got " + d.countVertices() + " vertices)");
+    eqs(d.countVertices(), vBefore,
+        "and traced at the same resolution as when it was placed");
 })();
 
 // ---------------------------------------------------------------------
