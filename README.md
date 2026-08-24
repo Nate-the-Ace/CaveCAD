@@ -168,6 +168,11 @@ for every modification.
 ```bash
 ./tools/make_package.sh     # dist/CaveSurveyTools-<version>.zip, fully gated
 ./tools/publish.sh          # build + install into QCAD + archive to ~/Documents/Cave
+
+# a shelf full of invented caves, for screenshots and for trying the
+# tools without typing survey data in by hand:
+CaveCAD -no-dock-icon -no-gui -allow-multiple-instances \
+    -autostart tools/make_demo_caves.js "$PWD"   # -> ~/Documents/Cave/demo
 ```
 
 The version comes from `VERSION`. Nothing is released yet, so it is pre-1.0: `0.MAJOR.MINOR.PATCH`, where the trailing three keep continuity with the builds already published locally (`0.2.7.1` is the 2.7.1 build, honestly numbered). Tags match. A build that fails any check produces no

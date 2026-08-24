@@ -269,6 +269,14 @@ CaveShelf.summarize = function(recon) {
     };
 };
 
+/**
+ * "1 trip", "6 trips" -- a cave with one of something is common enough
+ * that "1 trips" would be on screen most of the time.
+ */
+CaveShelf.count = function(n, noun) {
+    return n + " " + noun + (n === 1 ? "" : "s");
+};
+
 /** "4,180 ft" */
 CaveShelf.formatLength = function(length, unit) {
     var rounded = Math.round(length);
@@ -487,9 +495,10 @@ CaveShelf.show = function() {
         var pdfs = CsCave.pdfFiles(state.record.folder);
         var parts = [where,
             CaveShelf.formatLength(read.length, read.unit) + qsTr(" surveyed"),
-            read.trips.length + qsTr(" trips")];
+            CaveShelf.count(read.trips.length, "trip")];
         if (pdfs.length > 0) {
-            parts.push(pdfs.length + qsTr(" maps in PDF/"));
+            parts.push(CaveShelf.count(pdfs.length, "map") +
+                qsTr(" in PDF/"));
         }
         if (read.legacy) {
             parts.push(qsTr("pre-v3 tags: trips are approximate"));

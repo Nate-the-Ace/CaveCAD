@@ -324,7 +324,11 @@ PackageCave.dxfFilter = function() {
     try {
         var filters = RFileExporterRegistry.getFilterStrings();
         for (var i = 0; i < filters.length; i++) {
-            if (filters[i].contains("dxflib") && filters[i].contains("*.dxf")) {
+            // String.contains is a library.js extension: present in the
+            // application, absent in a bare -autostart engine.
+            var label = String(filters[i]);
+            if (label.indexOf("dxflib") !== -1 &&
+                    label.indexOf("*.dxf") !== -1) {
                 return filters[i];
             }
         }
