@@ -1603,6 +1603,37 @@ git commit -m "feat(TripFocus): list each trip, team, person and run with its di
 
 ### Task 5: Filtering the view
 
+**AMENDED AFTER IMPLEMENTATION (commit `485ffae`).** The `applyFocus` source
+below is superseded -- read the shipped `TripFocus.js`. Its mechanism does not
+work: **`entity.setInvisible()` inside an `RModifyObjectsOperation` is silently
+dropped for any ordinary entity.** `RTransaction`'s modify path is a property
+diff over `object->getPropertyTypeIds()` (`RTransaction.cpp:845,868`) and only
+saves when that diff reports a change (`:915,935`), while
+`RObject::PropertyInvisible` is registered once against `RObject::getRtti()`
+(`RObject.cpp:75`) and re-registered per type only by `RAttributeEntity` /
+`RAttributeDefinitionEntity`. The clone's flag flips; the stored object never
+changes; nothing errors. `setAllowInvisible(true)` and `setAllowAll(true)` do
+NOT rescue it -- they gate an earlier check that is never reached, which is
+exactly why the draft treated them as load-bearing. (This is also why
+`CsLayers.withLayerOn` works: `RLayer` registers its own off/frozen
+properties.)
+
+The shipped mechanism is `RChangePropertyOperation(RObject.PropertyInvisible,
+value, RS.EntityAll, false)` over the PREVIEW document's own selection -- what
+QCAD's property editor itself uses, handing the transaction an explicit
+one-property set instead of relying on the diff. It also calls
+`setAllowInvisible(true)` internally, so the caller needs no such call.
+Verified in both directions in the real engine, and the un-hide assertion in
+`tests/trip_focus_filter.js` was confirmed to go red when that branch is
+broken.
+
+Two further corrections made while implementing: `CsLayers.ensureSurveyLayers`
+does NOT create `CTRL-LRUD-WALL-LEFT`, `CTRL-PROFILE-FLOOR` or `TITLE-BLOCK`,
+so the test must `CsLayers.ensure` them explicitly or its entities land on the
+default layer and the profile-frame assertions pass for the wrong reason; and
+`show()` calls `reapply()` once after wiring, so the profile band is out of the
+window from the moment it opens rather than after the first click.
+
 **Goal:** Checking rows filters the preview: only entities attributable to the checked stations are drawn, the profile band never is, and All / Refresh work.
 
 **Files:**
