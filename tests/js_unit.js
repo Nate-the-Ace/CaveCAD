@@ -16563,6 +16563,75 @@ if (!IS_NODE) {
 })();
 
 // ---------------------------------------------------------------------
+// CsCallout.reflow -- leader geometry
+// ---------------------------------------------------------------------
+
+(function() {
+    // a 20-wide, 4-tall text box sitting with its lower-left at (100, 50)
+    var box = { x1: 100, y1: 50, x2: 120, y2: 54 };
+    var mid = 52;   // vertical middle of the box
+
+    // --- tips to the LEFT of the text -> landing on the left side ----
+    var r = CsCallout.reflow(box, [{ x: 60, y: 40 }],
+                             { side: "auto", dimasz: 2, dimscale: 1 });
+    eqs(r.side, "left", "reflow: tips left of text -> left landing");
+    near(r.landing.x, 100, 1e-9, "reflow: landing sits on the box's left edge");
+    near(r.landing.y, mid, 1e-9,
+        "reflow: landing at the box's VERTICAL MIDDLE, not its baseline");
+    eqs(r.branches.length, 1, "reflow: one tip -> one branch");
+    eqs(r.branches[0].length, 3, "reflow: a branch is tip, elbow, landing end");
+    near(r.branches[0][0].x, 60, 1e-9, "reflow: branch starts at the tip");
+    near(r.branches[0][0].y, 40, 1e-9, "reflow: branch starts at the tip (y)");
+    // elbow is landing-length away from the box, at landing height
+    near(r.branches[0][1].x, 98, 1e-9, "reflow: elbow one landing out");
+    near(r.branches[0][1].y, mid, 1e-9, "reflow: elbow at landing height");
+    near(r.branches[0][2].x, 100, 1e-9, "reflow: branch ends at the landing");
+
+    // --- tips to the RIGHT -> landing flips ---------------------------
+    var rr = CsCallout.reflow(box, [{ x: 200, y: 90 }],
+                              { side: "auto", dimasz: 2, dimscale: 1 });
+    eqs(rr.side, "right", "reflow: tips right of text -> right landing");
+    near(rr.landing.x, 120, 1e-9, "reflow: right landing on the box's right edge");
+    near(rr.branches[0][1].x, 122, 1e-9, "reflow: right elbow one landing out");
+
+    // --- pinned side overrides the geometry ---------------------------
+    var rp = CsCallout.reflow(box, [{ x: 60, y: 40 }],
+                              { side: "right", dimasz: 2, dimscale: 1 });
+    eqs(rp.side, "right", "reflow: pinned side beats the auto choice");
+    near(rp.landing.x, 120, 1e-9, "reflow: pinned right lands right");
+
+    // --- multi-branch: all branches share one landing ------------------
+    var rm = CsCallout.reflow(box, [{ x: 60, y: 40 }, { x: 55, y: 70 },
+                                    { x: 70, y: 20 }],
+                              { side: "auto", dimasz: 2, dimscale: 1 });
+    eqs(rm.branches.length, 3, "reflow: three tips -> three branches");
+    for (var i = 0; i < 3; i++) {
+        near(rm.branches[i][2].x, rm.landing.x, 1e-9,
+            "reflow: branch " + i + " ends at the shared landing x");
+        near(rm.branches[i][2].y, rm.landing.y, 1e-9,
+            "reflow: branch " + i + " ends at the shared landing y");
+    }
+
+    // --- dimasz absent -> fall back to a text-height multiple ---------
+    var rf = CsCallout.reflow(box, [{ x: 60, y: 40 }],
+                              { side: "auto", dimasz: null, dimscale: null });
+    ok(Math.abs(rf.branches[0][1].x - rf.landing.x) > 0,
+        "reflow: no dimasz still produces a non-zero landing");
+    near(Math.abs(rf.branches[0][1].x - rf.landing.x), 4 * 0.5, 1e-9,
+        "reflow: landing falls back to half the box height -- " +
+        "box is 4 tall, so 2");
+
+    // --- degenerate inputs -------------------------------------------
+    var rz = CsCallout.reflow(box, [], { side: "auto", dimasz: 2, dimscale: 1 });
+    eqs(rz.branches.length, 0, "reflow: no tips -> no branches, no throw");
+
+    var ri = CsCallout.reflow(box, [{ x: 110, y: 52 }],
+                              { side: "auto", dimasz: 2, dimscale: 1 });
+    eqs(ri.branches[0].length, 3,
+        "reflow: a tip INSIDE the text box still yields a valid branch");
+})();
+
+// ---------------------------------------------------------------------
 // Report.
 // ---------------------------------------------------------------------
 

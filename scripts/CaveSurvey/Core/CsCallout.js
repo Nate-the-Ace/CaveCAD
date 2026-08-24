@@ -86,3 +86,77 @@ CsCallout.nextId = function(existing) {
     }
     return String(max + 1);
 };
+
+/**
+ * Solve the leader geometry for one callout.
+ *
+ * \param box  the text's bounding box as {x1, y1, x2, y2}, x1 < x2 and
+ *             y1 < y2 -- plain numbers, NOT an RBox (this file is pure)
+ * \param tips [{x, y}] one arrow tip per branch, possibly empty
+ * \param opts {side: "auto"|"left"|"right",
+ *              dimasz: number|null, dimscale: number|null}
+ * \return {side, landing: {x, y}, branches: [[{x,y},{x,y},{x,y}]]}
+ *
+ * WHY THE LANDING ATTACHES AT THE VERTICAL MIDDLE and not at the first
+ * line's baseline (which is the more AutoCAD-ish choice): these notes
+ * get EDITED. A caver adds a second line to "bad air" and a
+ * baseline-attached landing jumps by a full line height, so every arrow
+ * in the callout visibly swings. Middle attachment moves by half a line
+ * instead, and moves the same amount whichever end the line was added
+ * to. The cost is that a tall multi-line note's arrow leaves from the
+ * middle of the block rather than beside its first line; that reads
+ * fine on a map and does not move when the note is reworded.
+ */
+CsCallout.reflow = function(box, tips, opts) {
+    var o = opts || {};
+    var list = tips || [];
+
+    var height = Math.abs(box.y2 - box.y1);
+    var centerX = (box.x1 + box.x2) / 2.0;
+    var midY = (box.y1 + box.y2) / 2.0;
+
+    // Landing length. dimasz x dimscale is the arrow size the drawing's
+    // dimension style already uses, so a callout matches the sheet's
+    // other annotation. Absent either, half the text height: a fixed
+    // number would be wrong at every scale but one, and this drawing's
+    // text height IS its scale, expressed.
+    var landingLen;
+    if (o.dimasz !== null && o.dimasz !== undefined &&
+            o.dimscale !== null && o.dimscale !== undefined &&
+            o.dimasz > 0 && o.dimscale > 0) {
+        landingLen = o.dimasz * o.dimscale;
+    } else {
+        landingLen = height * 0.5;
+    }
+
+    // Side. "auto" compares the mean tip x against the box centre: the
+    // landing should leave the text TOWARD the thing being pointed at,
+    // or the leader crosses its own text.
+    var side = o.side;
+    if (side !== "left" && side !== "right") {
+        var sum = 0;
+        for (var i = 0; i < list.length; i++) {
+            sum += list[i].x;
+        }
+        var meanX = (list.length > 0) ? (sum / list.length) : centerX;
+        side = (meanX <= centerX) ? "left" : "right";
+    }
+
+    var landing = {
+        x: (side === "left") ? box.x1 : box.x2,
+        y: midY
+    };
+    var elbowX = (side === "left") ?
+        (landing.x - landingLen) : (landing.x + landingLen);
+
+    var branches = [];
+    for (var k = 0; k < list.length; k++) {
+        branches.push([
+            { x: list[k].x, y: list[k].y },
+            { x: elbowX, y: landing.y },
+            { x: landing.x, y: landing.y }
+        ]);
+    }
+
+    return { side: side, landing: landing, branches: branches };
+};
