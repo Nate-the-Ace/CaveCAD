@@ -128,6 +128,34 @@ eqs(CsTags.get(m.leaders[0], CsCallout.KEY.ROLE), CsCallout.ROLE_LEADER,
 eqs(CsTags.get(m.leaders[0], CsCallout.KEY.ID), String(id),
     "a leader carries the SAME id as its text");
 
+// --- WHERE THE TEXT ACTUALLY LANDED ----------------------------------
+// Assert the BOUNDING BOX, not getPosition(). setPosition() reads back
+// whatever you gave it even when the text renders at the origin,
+// because the entity draws at its ALIGNMENT point -- so a getPosition()
+// assertion passes while the caver sees the note at 0,0. That is
+// exactly how this shipped, and got caught by hand instead of here.
+(function() {
+    var box = CalloutWrite.boxOf(m.text);
+    near(box.x1, 100, 1e-6, "the text's box starts at the requested x");
+    near(box.y2, 50, 1e-6, "the text's box top is at the requested y");
+    ok(box.x2 > box.x1, "the text's box has real width");
+    ok(box.y2 > box.y1, "the text's box has real height");
+    ok(!(Math.abs(box.x1) < 1e-9 && Math.abs(box.y2) < 1e-9),
+        "the text did NOT snap to the origin");
+
+    // And the leaders must land ON that box, not near the origin --
+    // boxOf feeds reflow, so a mislocated text silently mislocates
+    // every arrow too.
+    for (var i = 0; i < m.leaders.length; i++) {
+        var d = m.leaders[i].getData();
+        var last = d.getVertexAt(d.countVertices() - 1);
+        ok(last.x >= box.x1 - 1e-6 && last.x <= box.x2 + 1e-6,
+            "leader " + i + " lands on the text's box in x, not at the origin");
+        ok(last.y >= box.y1 - 1e-6 && last.y <= box.y2 + 1e-6,
+            "leader " + i + " lands within the text's box in y");
+    }
+})();
+
 // --- layer discipline: never the current layer ------------------------
 eqs(doc.getLayerName(m.text.getLayerId()), CsLayers.NOTES_HAZARD,
     "the text landed on its STYLE's layer");

@@ -111,7 +111,24 @@ CalloutWrite.create = function(doc, di, spec) {
     // --- the text ----------------------------------------------------
     var textData = new RTextData();
     textData.setText(spec.text);
-    textData.setPosition(new RVector(spec.position.x, spec.position.y));
+    // BOTH position AND alignment point, and the second one is the one
+    // that actually places the text.
+    //
+    // setPosition alone LIES. getPosition() reads back exactly what you
+    // gave it while getAlignmentPoint() stays at 0,0 -- and the entity
+    // renders at the ALIGNMENT POINT, so the text lands on the origin.
+    // Measured in this engine: setPosition(100,50) alone yields a
+    // bounding box of (0,-4)..(16.78,0); setting both yields
+    // (100,46)..(116.78,50).
+    //
+    // This shipped once. It is invisible to any test that asserts
+    // getPosition(), which is why the test beside this file asserts the
+    // BOUNDING BOX instead. It also broke the leaders, not just the
+    // text: CalloutWrite.boxOf feeds that same box to CsCallout.reflow,
+    // so a text at the origin solved every landing against the origin.
+    var at = new RVector(spec.position.x, spec.position.y);
+    textData.setPosition(at);
+    textData.setAlignmentPoint(at);
     textData.setTextHeight(spec.height);
     var textEntity = new RTextEntity(doc, textData);
     textEntity.setLayerId(doc.getLayerId(layerName));
