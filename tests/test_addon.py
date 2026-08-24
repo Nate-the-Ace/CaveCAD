@@ -897,5 +897,185 @@ class TestReadmeToolTable(unittest.TestCase):
                          "declares: %s" % phantom)
 
 
+# ---------------------------------------------------------------------
+# Shipped template vs the layer registry.
+# ---------------------------------------------------------------------
+#
+# CsLayers.ensure() resolves a layer's appearance at CREATION ONLY.
+# Once a layer exists in the shipped template, editing its
+# CsLayers.DEFAULTS row does not recolour it, and re-running
+# tools/sync_template_layers.js does not either -- that tool only ADDS
+# layers it cannot find. So the registry and the template can silently
+# disagree, and since every new drawing is born from the template, a
+# disagreement means the SAME cave map looks different depending on
+# whether the caver started from the template or not.
+#
+# This already shipped once: NOTES-ELEVATION and NOTES-ELEVATION-LINE
+# went out with their colours inverted -- the unmeasured fallback
+# brighter than the real reading -- and nothing objected, because the
+# only checks were name presence
+# (test_registry_layers_exist_in_plan_template) and a sync-tool test
+# that compares DEFAULTS against itself.
+#
+# THE DRIFT THAT EXISTS TODAY IS RECORDED, NOT FIXED. Sixteen of the
+# forty-five registry layers already disagree with the template, and
+# resolving them is a cartographic decision, not a test's business:
+# some are pure representation (0x7f7f7f vs 0x808080 -- two spellings
+# of "gray"), some are real (ENTRANCE is red in the template and white
+# in the registry), and in two cases THE TEMPLATE IS THE BETTER ONE --
+# it uses the real NSS cave linetypes where the registry says plain
+# DASHED. Recording each divergence as the template's ACTUAL value
+# means this test fails on any NEW drift, and also fails if a recorded
+# drift is RESOLVED, which forces this table to stay honest instead of
+# quietly rotting.
+#
+# name -> {"color": truecolor, "linetype": str, "lineweight": int}
+# Only the keys that actually diverge are listed per layer.
+TEMPLATE_APPEARANCE_DRIFT = {
+    # -- "gray" spelled 0x7f7f7f (the ACI-8 grey the template was
+    #    authored with) where the registry means SVG 0x808080. Same
+    #    intent, one bit apart; harmless, and not worth rewriting the
+    #    shipped template over.
+    "CTRL-AERIAL": {"color": 0x7F7F7F},
+    "CTRL-HIDDEN": {"color": 0x7F7F7F},
+    "CTRL-RAW": {"color": 0x7F7F7F},
+    "CTRL-SPLAYS": {"color": 0x7F7F7F},
+    "CTRL-SHOTS": {"color": 0x7F7F7F, "lineweight": 9},
+    "BREAKDOWN": {"color": 0x7F7F7F, "lineweight": 18},
+    "TEXT-NOTES": {"color": 0x7F7F7F, "lineweight": 0},
+    # -- CTRL-GRID is a lighter grey than the registry's. The DEFAULTS
+    #    comment claims it "matches the plan template's own CTRL-GRID
+    #    record"; it does not, and that comment is wrong.
+    "CTRL-GRID": {"color": 0xBFBFBF},
+    # -- REAL disagreements. Someone has to choose; nobody has.
+    #    ENTRANCE: red in the template, white in the registry.
+    "ENTRANCE": {"color": 0xFF0000, "lineweight": 50},
+    #    CROSS-SECTION-MARKERS: green in the template, white in the
+    #    registry.
+    "CROSS-SECTION-MARKERS": {"color": 0x00FF00, "lineweight": 18},
+    #    WALLS-INFERRED is the one that matters most. In the template it
+    #    is WHITE and NSS_INFERRED; the registry says gray and DASHED.
+    #    White makes an INFERRED wall render identically to a SURVEYED
+    #    one in any template-born drawing -- the same class of mistake as
+    #    the ELEVATION/ELEVATION-LINE inversion. The linetype, though, is
+    #    the template being RIGHT: NSS_INFERRED is the real cave
+    #    cartography linetype and DASHED is a generic stand-in.
+    "WALLS-INFERRED": {"color": 0xFFFFFF, "linetype": "NSS_INFERRED",
+                       "lineweight": 35},
+    #    BREAKDOWN-BOUNDARY, same shape: template linetype NSS_DOTTED is
+    #    better than the registry's DASHED; its colour is a light grey
+    #    where the registry says cyan.
+    "BREAKDOWN-BOUNDARY": {"color": 0xBABABA, "linetype": "NSS_DOTTED",
+                           "lineweight": 9},
+    # -- lineweight-only drift.
+    "CTRL-LRUD": {"lineweight": 9},
+    "CTRL-STATIONS": {"lineweight": 18},
+    "CTRL-STATION-LABELS": {"lineweight": 0},
+    "TEXT-LABELS": {"lineweight": 0},
+}
+
+
+class TestTemplateMatchesRegistry(unittest.TestCase):
+    """The shipped template's layer appearance against CsLayers.DEFAULTS.
+
+    Companion to TestLayerVocabulary (which checks PRESENCE) and to
+    TestSyncTemplateLayersTool (which checks that the sync tool APPLIES
+    DEFAULTS when it creates a layer, and therefore cannot catch a
+    template that already disagrees).
+    """
+
+    def template_records(self):
+        path = os.path.join(TEMPLATES, "NSS_Cave_Template_PLAN.dxf")
+        with open(path, encoding="utf-8", errors="replace") as fh:
+            return parse_layer_records(fh.read())
+
+    @staticmethod
+    def nominal_lineweight(key):
+        """"Weight025" -> 25. The DXF stores hundredths of a mm in
+        group 370 and the registry names the same number."""
+        match = re.match(r"Weight(\d+)$", key)
+        assert match is not None, ("unrecognised lineweight key %r -- "
+                                  "extend nominal_lineweight()" % key)
+        return int(match.group(1))
+
+    def test_shipped_template_appearance_matches_registry(self):
+        defaults = parse_defaults_table()
+        records = self.template_records()
+
+        for name in sorted(defaults):
+            color_name, linetype, weight_key = defaults[name]
+            record = records.get(name)
+            if record is None:
+                # Presence is TestLayerVocabulary's job, not this test's.
+                continue
+            drift = TEMPLATE_APPEARANCE_DRIFT.get(name, {})
+
+            expected_color = drift.get("color", SVG_TRUE_COLOR[color_name])
+            self.assertEqual(
+                record["truecolor"], expected_color,
+                "%s: template truecolor 0x%06X, expected 0x%06X (%s). "
+                "If this layer's appearance was deliberately changed, "
+                "update CsLayers.DEFAULTS and re-sync the template, or "
+                "record the divergence in TEMPLATE_APPEARANCE_DRIFT with "
+                "a reason." % (name, record["truecolor"] or 0,
+                               expected_color, color_name))
+
+            # Linetype compares case-insensitively: the template writes
+            # "Continuous" and the registry "CONTINUOUS" for 35 layers,
+            # which is spelling, not drift.
+            expected_lt = drift.get("linetype", linetype)
+            self.assertEqual(
+                (record["linetype"] or "").upper(), expected_lt.upper(),
+                "%s: template linetype %r, expected %r"
+                % (name, record["linetype"], expected_lt))
+
+            expected_lw = drift.get(
+                "lineweight", self.nominal_lineweight(weight_key))
+            self.assertEqual(
+                record["lineweight"], expected_lw,
+                "%s: template lineweight %r, expected %r (%s)"
+                % (name, record["lineweight"], expected_lw, weight_key))
+
+    def test_drift_table_has_no_stale_entries(self):
+        """A recorded divergence that no longer diverges must be removed.
+
+        Without this, resolving a drift leaves a false record behind
+        saying the template and registry disagree when they now agree --
+        and the next reader trusts it.
+        """
+        defaults = parse_defaults_table()
+        records = self.template_records()
+        stale = []
+
+        for name, drift in sorted(TEMPLATE_APPEARANCE_DRIFT.items()):
+            record = records.get(name)
+            if record is None or name not in defaults:
+                stale.append("%s (no longer in template or registry)" % name)
+                continue
+            color_name, linetype, weight_key = defaults[name]
+            for field, recorded in sorted(drift.items()):
+                if field == "color":
+                    actual_default = SVG_TRUE_COLOR[color_name]
+                    now = record["truecolor"]
+                elif field == "linetype":
+                    actual_default = linetype.upper()
+                    now = (record["linetype"] or "").upper()
+                    recorded = recorded.upper()
+                else:
+                    actual_default = self.nominal_lineweight(weight_key)
+                    now = record["lineweight"]
+                if now == actual_default:
+                    stale.append("%s[%s] now AGREES with the registry"
+                                 % (name, field))
+                elif now != recorded:
+                    stale.append("%s[%s] drifted again: recorded %r, now %r"
+                                 % (name, field, recorded, now))
+
+        self.assertEqual(
+            stale, [],
+            "TEMPLATE_APPEARANCE_DRIFT is out of date -- remove or "
+            "correct these entries: %s" % stale)
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)
