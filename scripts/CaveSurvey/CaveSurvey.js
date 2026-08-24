@@ -99,7 +99,14 @@ CaveSurvey.init = function(basePath, splash) {
     // No menu entry: a guard you have to switch on is one that is off on
     // the machine that needed it.
     if (typeof CsBackup !== "undefined") {
-        CsBackup.installSaveHook();
+        // A guard that fails silently is not a guard. If the save hook
+        // cannot be installed, say so at startup rather than let a
+        // caver believe their work is protected when it is not.
+        if (CsBackup.installSaveHook() !== true) {
+            warning("Cave Survey: could not install the drawing-backup " +
+                "hook. Saves will NOT keep a previous version beside the " +
+                "drawing -- please report this.");
+        }
     }
 
     // report the suite on the splash screen, beside CaveCAD's own version:

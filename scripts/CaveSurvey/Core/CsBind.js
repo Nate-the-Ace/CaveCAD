@@ -937,7 +937,9 @@ CsBind.tagEntities = function(doc, di, entries) {
         offSeen[ln] = true;
         try {
             var lay = doc.queryLayer(ln);
-            if (!isNull(lay) && lay.isOff()) {
+            // refusesEdits: a tag write is a MODIFY, and frozen refuses
+            // modifies as silently as off does.
+            if (CsLayers.refusesEdits(lay)) {
                 offLayers.push(ln);
             }
         } catch (e) {

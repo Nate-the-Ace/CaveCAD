@@ -192,6 +192,44 @@ CsLayers.frameOf = function(layerName) {
 CsLayers.OFF = { "CTRL-DATA": true, "CTRL-HIDDEN": true, "CTRL-RAW": true };
 
 /**
+ * True when this layer will SILENTLY REFUSE edits -- adds, deletes and
+ * modifies alike. Off or frozen.
+ *
+ * ONE predicate, because there were four copies of it and they did not
+ * agree. Three tested isOff() alone, so a FROZEN layer was never
+ * unwrapped: CsDraw.eraseStations left the as-surveyed ghost undeleted
+ * (it accumulated a copy per redraw, and printed "Transaction failed"
+ * with nothing to say which layer), and CsBind.tagEntities lost its tag
+ * writes outright. Both were found only after a real drawing was
+ * damaged.
+ *
+ * LOCKED is not included, deliberately. A lock is something the surveyor
+ * did on purpose; off and frozen are visibility, which a writer may
+ * reveal for the length of its own write. A locked layer refuses, and
+ * that is the honest outcome -- see FeatureTraceRun.refusalReason.
+ *
+ * Anything unreadable answers false: attempt the edit rather than
+ * silently skip the layer.
+ */
+CsLayers.refusesEdits = function(lay) {
+    if (isNull(lay)) {
+        return false;
+    }
+    try {
+        if (lay.isOff()) {
+            return true;
+        }
+    } catch (eOff) {
+        return false;
+    }
+    try {
+        return lay.isFrozen() === true;
+    } catch (eFrozen) {
+        return false;   // no frozen concept in this build
+    }
+};
+
+/**
  * Runs fn with the named layer VISIBLE -- neither off nor frozen -- then
  * restores whichever of those it had to change, even when fn throws.
  *

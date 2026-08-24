@@ -650,7 +650,9 @@ FeatureTrace.refresh = function(docIn) {
                 var off = false;
                 if (!isNull(doc) && doc.hasLayer(layerName)) {
                     var lay = doc.queryLayer(layerName);
-                    off = !isNull(lay) && lay.isOff();
+                    // frozen counts as hidden: the trace lands and is
+                    // just as invisible either way.
+                    off = CsLayers.refusesEdits(lay);
                 }
                 entry.button.text = off ?
                     entry.row.label + "   (hidden)" : entry.row.label;

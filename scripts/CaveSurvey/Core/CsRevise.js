@@ -1111,13 +1111,7 @@ CsRevise.withOffLayersOn = function(doc, di, fn) {
             // as-surveyed ghost on a frozen CTRL-RAW then accumulated a
             // fresh copy on every redraw: five copies of the same
             // geometry in a real drawing before this was caught.
-            var frozen = false;
-            try {
-                frozen = lay.isFrozen();
-            } catch (eFz) {
-                frozen = false;
-            }
-            if (!isNull(lay) && (lay.isOff() || frozen)) {
+            if (CsLayers.refusesEdits(lay)) {
                 offLayers.push(ln);
             }
         } catch (eOff) {

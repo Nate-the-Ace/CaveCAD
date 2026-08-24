@@ -32,6 +32,10 @@
 
 var CsBackup = {};
 
+/** Set once a "could not write the backup" warning has been shown, so a
+ *  broken guard says so without nagging on every save. */
+CsBackup.warnedThisSession = false;
+
 /** Appended to the drawing's own name, so the backup sits beside it and
  *  sorts next to it. Not a hidden file: a backup nobody can see is a
  *  backup nobody remembers to use. */
@@ -187,9 +191,11 @@ CsBackup.copyPrevious = function(path) {
  * BEFORE, because by the time the save has returned the previous version
  * is already gone.
  *
- * The path comes from the document, so this covers Save. A Save As to a
- * different path overwrites that destination without a backup -- worth
- * knowing, and worth fixing when the pre-save destination can be read.
+ * Covers Save AND Save As: SaveAs.prototype is a Save, and it overrides
+ * only beginEvent, so both route through this one function. What a Save
+ * As does NOT get is a backup of its DESTINATION when that file already
+ * exists -- the path read here is the document's current one, which is
+ * the file being left behind rather than the one being overwritten.
  *
  * \return true when the hook is installed
  */
@@ -213,7 +219,20 @@ CsBackup.installSaveHook = function() {
             if (typeof EAction !== "undefined") {
                 var doc = EAction.getDocument();
                 if (!isNull(doc)) {
-                    CsBackup.copyPrevious(doc.getFileName());
+                    var path = doc.getFileName();
+                    // Only complain when a backup was DUE and did not
+                    // happen. No previous file (a first save) and a
+                    // Drive-managed folder are both correct silences.
+                    var due = CsBackup.worthKeeping(path) &&
+                        !CsBackup.inGoogleDrive(path);
+                    var made = CsBackup.copyPrevious(path);
+                    if (due && !made && !CsBackup.warnedThisSession) {
+                        CsBackup.warnedThisSession = true;
+                        warning("Cave Survey: could not keep a backup of " +
+                            path + CsBackup.SUFFIX + ". Saving anyway -- " +
+                            "but there is no previous version to fall back " +
+                            "on, so check the folder is writable.");
+                    }
                 }
             }
         } catch (e) {

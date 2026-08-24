@@ -1189,7 +1189,12 @@ CsDraw.eraseStations = function(doc, stationNames) {
                 var kLayer = doc.getLayerName(e.getLayerId());
                 if (offLayerSeen[kLayer] === undefined) {
                     var kl = doc.queryLayer(kLayer);
-                    offLayerSeen[kLayer] = (!isNull(kl) && kl.isOff());
+                    // refusesEdits, not isOff: FROZEN refuses a delete
+                    // just as off does, and testing only off left the
+                    // ghost on a frozen CTRL-RAW undeleted -- one more
+                    // copy on every redraw, and one "Transaction failed"
+                    // naming nothing.
+                    offLayerSeen[kLayer] = CsLayers.refusesEdits(kl);
                     if (offLayerSeen[kLayer]) {
                         offLayers.push(kLayer);
                     }
