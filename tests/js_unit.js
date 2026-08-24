@@ -115,6 +115,7 @@ var CORE_FILES = [
     // does not touch either symbol until that function actually runs.
     "scripts/CaveSurvey/Core/CsProfileDraw.js",
     "scripts/CaveSurvey/Core/CsCallout.js",
+    "scripts/CaveSurvey/Core/CsElevation.js",
     "scripts/CaveSurvey/Core/CsValidate.js",
     "scripts/CaveSurvey/Core/CsStats.js",
     "scripts/CaveSurvey/Core/CsGrade.js",
@@ -16711,6 +16712,15 @@ if (!IS_NODE) {
     // to clear that layer, and a hand-placed note there would go too.
     var pickable = CsCallout.pickableStyles();
     ok(pickable.length > 0, "there are styles a human can pick");
+
+    // "Notes" is the plain note: the default, and first in the dropdown.
+    eqs(CsCallout.STYLE_DEFAULT, "notes",
+        "the default callout style is the plain note");
+    eqs(pickable[0], "notes",
+        "and it LEADS the dropdown -- pickableStyles walks STYLES in " +
+        "insertion order, so the table's first entry is the first offered");
+    ok(CsLayers.DEFAULTS.hasOwnProperty(CsCallout.STYLES["notes"]),
+        "and CsLayers can create its layer from scratch");
     var offered = false;
     for (var pi = 0; pi < pickable.length; pi++) {
         if (pickable[pi] === "annotation") { offered = true; }
@@ -16730,6 +16740,202 @@ if (!IS_NODE) {
     ok(CsLayers.DEFAULTS[CsCallout.STYLES["elevation-line"]][0] !==
        CsLayers.DEFAULTS[CsCallout.STYLES["elevation"]][0],
         "the elevation fallback layer is a different COLOR");
+})();
+
+// ---------------------------------------------------------------------
+// CsElevation -- the FLOOR, not the survey line
+// ---------------------------------------------------------------------
+
+(function() {
+    // --- floorWalkable ------------------------------------------------
+    // parseLrudEntry returns {value: the MAX of a multi-value entry,
+    // all: every reading}. The callout wants the SHALLOWEST: a caver
+    // stands on the 2, the 6 is a pit below it.
+    eqs(CsElevation.floorWalkable(CsModel.parseLrudEntry("2/6")), 2,
+        "floorWalkable: 2/6 is walkable at 2, not at the pit bottom");
+    eqs(CsElevation.floorWalkable(CsModel.parseLrudEntry("6/2")), 2,
+        "floorWalkable: the order in the cell does not matter");
+    eqs(CsElevation.floorWalkable(CsModel.parseLrudEntry("3")), 3,
+        "floorWalkable: a single reading is itself");
+    eqs(CsElevation.floorWalkable(CsModel.parseLrudEntry("P")), 0,
+        "floorWalkable: P is a REAL zero -- floor at the survey line");
+    eqs(CsElevation.floorWalkable(CsModel.parseLrudEntry("")), null,
+        "floorWalkable: an empty cell is UNKNOWN, not zero");
+    eqs(CsElevation.floorWalkable(CsModel.parseLrudEntry("--")), null,
+        "floorWalkable: -- is unknown, not zero");
+    eqs(CsElevation.floorWalkable(null), null,
+        "floorWalkable: null in, null out, no throw");
+
+    // The divergence from CsProfile is INTENTIONAL and pinned here so a
+    // future "cleanup" that unifies them fails loudly.
+    var e26 = CsModel.parseLrudEntry("2/6");
+    eqs(e26.value, 6,
+        "parseLrudEntry.value is the DEEPEST -- what CsProfile draws");
+    eqs(CsElevation.floorWalkable(e26), 2,
+        "floorWalkable is the SHALLOWEST -- the two disagree ON PURPOSE");
+})();
+
+(function() {
+    // A1 --100--> A2 --100--> A3, the second leg climbing 10.
+    // LRUD attaches to the shot whose `to` is the station, so sampling
+    // the A2->A3 leg gives both endpoints a D the ordinary way and keeps
+    // this fixture about floors rather than about survey.startLrud.
+    var INC10 = Math.asin(0.1) * 180.0 / Math.PI;   // dz = 10 over 100
+
+    function fixture(o) {
+        o = o || {};
+        var sv = CsModel.newSurvey();
+
+        var s1 = shotOf("A1", "A2", 100, 90, 0);
+        s1.down = (o.d2 === undefined) ? 5 : o.d2;
+        s1.downAll = (o.d2All === undefined) ? null : o.d2All;
+
+        var s2 = shotOf("A2", "A3", 100, 90, INC10);
+        s2.down = (o.d3 === undefined) ? 3 : o.d3;
+        s2.downAll = (o.d3All === undefined) ? null : o.d3All;
+
+        sv.shots.push(s1);
+        sv.shots.push(s2);
+
+        if (o.splay) {
+            var sp = shotOf("A2", "", o.splay.distance, 90,
+                            o.splay.inclination);
+            sp.splay = true;
+            sv.shots.push(sp);
+        }
+
+        var res = CsNetwork.resolve(sv,
+            { anchor: { name: "A1", x: 0, y: 0, z: 1000 } });
+        return { survey: sv, resolved: res };
+    }
+    function midOf(res, from, to) {
+        var a = res.stations[from], b = res.stations[to];
+        return { x: (a.x + b.x) / 2.0, y: (a.y + b.y) / 2.0 };
+    }
+
+    var fx = fixture({});
+    var a2 = fx.resolved.stations["A2"], a3 = fx.resolved.stations["A3"];
+    ok(a2 !== undefined && a3 !== undefined, "fixture: the survey resolved");
+    var lineMid = (a2.z + a3.z) / 2.0;
+
+    var sm = CsElevation.sampleFloor(fx.survey, fx.resolved,
+                                     midOf(fx.resolved, "A2", "A3"),
+                                     { tolerance: 5 });
+    ok(sm !== null, "sampleFloor: a point on a leg samples");
+    eqs(sm.basis, "floor", "sampleFloor: LRUD present -> basis floor");
+    eqs(sm.from, "A2", "sampleFloor: names the from station");
+    eqs(sm.to, "A3", "sampleFloor: names the to station");
+    near(sm.fraction, 0.5, 1e-6, "sampleFloor: records the position along");
+    near(sm.z, lineMid - 4.0, 1e-6,
+        "sampleFloor: mid-leg floor is mid line z minus mid D (5 and 3 -> 4)");
+    ok(sm.z < lineMid,
+        "sampleFloor: the FLOOR is BELOW the survey line -- the whole point");
+    eqs(sm.multi, false, "sampleFloor: a single-value D is not multi");
+
+    var at = CsElevation.sampleFloor(fx.survey, fx.resolved,
+                                     { x: a3.x, y: a3.y }, { tolerance: 5 });
+    near(at.z, a3.z - 3.0, 1e-6, "sampleFloor: at A3, floor is its z minus 3");
+
+    eqs(CsElevation.sampleFloor(fx.survey, fx.resolved,
+                                { x: a2.x, y: a2.y + 900 }, { tolerance: 5 }),
+        null, "sampleFloor: nothing within tolerance returns NULL, not a guess");
+
+    // --- the fallback -------------------------------------------------
+    var bare = fixture({ d2: null, d3: null });
+    var fb = CsElevation.sampleFloor(bare.survey, bare.resolved,
+                                     midOf(bare.resolved, "A2", "A3"),
+                                     { tolerance: 5 });
+    ok(fb !== null, "sampleFloor: no D at all still answers");
+    eqs(fb.basis, "line", "sampleFloor: no floor evidence -> basis line");
+    var bLine = (bare.resolved.stations["A2"].z +
+                 bare.resolved.stations["A3"].z) / 2.0;
+    near(fb.z, bLine, 1e-6, "sampleFloor: the fallback IS the survey-line z");
+    ok(fb.z !== 0,
+        "sampleFloor: never a fabricated zero -- a 0 here would rebase " +
+        "an absolute-datum cave");
+
+    // --- a down splay is evidence and moves the answer ----------------
+    var wsp = fixture({ splay: { distance: 20, inclination: -40 } });
+    var sp = CsElevation.sampleFloor(wsp.survey, wsp.resolved,
+                                     midOf(wsp.resolved, "A2", "A3"),
+                                     { tolerance: 5 });
+    ok(sp !== null && sp.basis === "floor",
+        "sampleFloor: a down splay is floor evidence");
+    ok(sp.z < sm.z,
+        "sampleFloor: a down splay between the stations LOWERS the floor " +
+        "(got " + sp.z.toFixed(3) + ", LRUD-only was " + sm.z.toFixed(3) + ")");
+
+    // --- a splay with NO inclination is not evidence at all -----------
+    var nsp = fixture({ splay: { distance: 20, inclination: null } });
+    var ni = CsElevation.sampleFloor(nsp.survey, nsp.resolved,
+                                     midOf(nsp.resolved, "A2", "A3"),
+                                     { tolerance: 5 });
+    near(ni.z, sm.z, 1e-6,
+        "sampleFloor: a no-inclination splay is IGNORED, never read as " +
+        "flat-at-centreline");
+
+    // --- a splay CLASSIFIED as floor but UNUSABLE -------------------
+    // This is what the CsTraverse.offset guard is actually for, and the
+    // no-inclination case above does NOT test it: classifySplay already
+    // calls a no-inclination splay "flat", so the floor filter catches it
+    // whether the guard exists or not. Mutation-verified -- removing the
+    // guard left the suite green until this case was added.
+    //
+    // A splay with a DOWN inclination and NO DISTANCE classifies as
+    // "floor" and gets past that filter. offset() refuses it. Without the
+    // guard its dz would read 0 and plant a phantom floor point at
+    // exactly centreline -- the fabrication the guard exists to stop.
+    (function() {
+        var sv = CsModel.newSurvey();
+        var s1 = shotOf("A1", "A2", 100, 90, 0);
+        s1.down = 5;
+        var s2 = shotOf("A2", "A3", 100, 90, INC10);
+        s2.down = 3;
+        sv.shots.push(s1);
+        sv.shots.push(s2);
+        var bad = shotOf("A2", "", null, 90, -40);   // no distance
+        bad.splay = true;
+        sv.shots.push(bad);
+        var res = CsNetwork.resolve(sv,
+            { anchor: { name: "A1", x: 0, y: 0, z: 1000 } });
+        eqs(CsProfile.classifySplay(bad, undefined), "floor",
+            "fixture: a down splay with no distance still classifies as " +
+            "floor, so the floor filter alone would let it through");
+        var got = CsElevation.sampleFloor(sv, res,
+            midOf(res, "A2", "A3"), { tolerance: 5 });
+        near(got.z, sm.z, 1e-6,
+            "sampleFloor: a splay offset() refuses is IGNORED -- it must " +
+            "not contribute a floor point at centreline");
+    })();
+
+    // --- an UP splay must not be treated as floor ---------------------
+    var usp = fixture({ splay: { distance: 20, inclination: 40 } });
+    var up = CsElevation.sampleFloor(usp.survey, usp.resolved,
+                                     midOf(usp.resolved, "A2", "A3"),
+                                     { tolerance: 5 });
+    near(up.z, sm.z, 1e-6,
+        "sampleFloor: a CEILING splay does not raise the floor");
+
+    // --- multi: label the walkable floor, flag the pit ----------------
+    var pit = fixture({ d3: 20, d3All: [3, 20] });
+    var pf = CsElevation.sampleFloor(pit.survey, pit.resolved,
+                                     { x: a3.x, y: a3.y }, { tolerance: 5 });
+    near(pf.z, pit.resolved.stations["A3"].z - 3.0, 1e-6,
+        "sampleFloor: 3/20 labels the WALKABLE 3, not the pit bottom 20");
+    eqs(pf.multi, true,
+        "sampleFloor: and flags that a pit drops below this floor");
+
+    // --- interpolate's edge behaviour --------------------------------
+    var pts = [{ t: 0.25, z: 100 }, { t: 0.75, z: 200 }];
+    near(CsElevation.interpolate(pts, 0.5, 0), 150, 1e-9,
+        "interpolate: halfway between two evidence points");
+    near(CsElevation.interpolate(pts, 0.0, 0), 100, 1e-9,
+        "interpolate: before the first evidence, the nearest z -- NOT an " +
+        "extrapolation into rock nobody measured");
+    near(CsElevation.interpolate(pts, 1.0, 0), 200, 1e-9,
+        "interpolate: past the last evidence, likewise");
+    near(CsElevation.interpolate([], 0.5, 42), 42, 1e-9,
+        "interpolate: no evidence at all falls back to the caller's z");
 })();
 
 // ---------------------------------------------------------------------

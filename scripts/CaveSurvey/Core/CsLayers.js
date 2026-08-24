@@ -73,6 +73,8 @@ CsLayers.PROFILE_ENTRANCE = "PROFILE-ENTRANCE";
 // members go here and never on the current layer -- a note drawn onto
 // WALLS-SURVEYED becomes wall linework the next time anything works by
 // layer.
+// The plain note, and the default callout style.
+CsLayers.NOTES_GENERAL = "NOTES-GENERAL";
 CsLayers.NOTES_HAZARD = "NOTES-HAZARD";
 CsLayers.NOTES_DIG = "NOTES-DIG";
 CsLayers.NOTES_EQUIPMENT = "NOTES-EQUIPMENT";
@@ -162,6 +164,9 @@ CsLayers.DEFAULTS = {
     // passes a "the two differ" test while making the fallback OUTSHINE
     // the measurement -- the exact misreading this pair exists to stop.
     // Do not reverse them.
+    // The plain note: the default style, so it reads like ordinary map
+    // lettering rather than announcing itself.
+    "NOTES-GENERAL": ["white", "CONTINUOUS", "Weight018"],
     "NOTES-HAZARD": ["red", "CONTINUOUS", "Weight025"],
     "NOTES-DIG": ["pink", "CONTINUOUS", "Weight018"],
     "NOTES-EQUIPMENT": ["cyan", "CONTINUOUS", "Weight018"],
@@ -397,6 +402,7 @@ CsLayers.ensureSurveyLayers = function(doc, di) {
  *  command before it writes, so a drawing that never saw the template
  *  still gets the right appearance. */
 CsLayers.ensureCalloutLayers = function(doc, di) {
+    CsLayers.ensure(doc, di, CsLayers.NOTES_GENERAL);
     CsLayers.ensure(doc, di, CsLayers.NOTES_HAZARD);
     CsLayers.ensure(doc, di, CsLayers.NOTES_DIG);
     CsLayers.ensure(doc, di, CsLayers.NOTES_EQUIPMENT);

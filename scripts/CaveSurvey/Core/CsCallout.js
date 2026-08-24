@@ -46,6 +46,11 @@ CsCallout.BASIS_LINE = "line";
  *  never on the current layer: a note drawn onto WALLS-SURVEYED
  *  silently becomes wall linework on the next layer-driven operation. */
 CsCallout.STYLES = {
+    // FIRST in this table on purpose: object key order is insertion
+    // order, and pickableStyles() walks it, so this is what leads the
+    // dropdown. It is also STYLE_DEFAULT below -- the plain note a caver
+    // reaches for most is the one that should need no choosing.
+    "notes": "NOTES-GENERAL",
     "hazard": "NOTES-HAZARD",
     "dig": "NOTES-DIG",
     "equipment": "NOTES-EQUIPMENT",
@@ -77,7 +82,7 @@ CsCallout.pickableStyles = function() {
     return out;
 };
 
-CsCallout.STYLE_DEFAULT = "name";
+CsCallout.STYLE_DEFAULT = "notes";
 
 // Leader SHAPE, a separate axis from the content style above: a hazard
 // note and a dig note can each be drawn straight or curved.
