@@ -319,19 +319,8 @@ Callout.askForNote = function(currentStyle) {
         }
     }
 
-    // one connect failure on a critical control = unusable dialog
-    var connectOk = function(signal, fn) {
-        try {
-            signal.connect(fn);
-            return true;
-        } catch (eCon) {
-            return false;
-        }
-    };
-
-    var state = { accepted: false };
-    var chosen = { name: currentStyle || CsCallout.STYLE_DEFAULT };
-    var edit;
+    var edit = null;
+    var combo = null;
 
     try {
         var dlg = new QDialog(getMainWindow());
@@ -340,78 +329,98 @@ Callout.askForNote = function(currentStyle) {
 
         layout.addWidget(new QLabel(qsTr(
             "Note text. It stays an ordinary text entity, so you can " +
-            "edit it later by double-clicking it -- the arrows follow.")),
-            0, 0);
+            "edit it later by double-clicking it.")), 0, 0);
 
         edit = new QLineEdit();
         layout.addWidget(edit, 0, 0);
 
+        // A COMBO BOX, not a row of checkable buttons.
+        //
+        // The buttons were a real defect, not a styling preference. The
+        // chosen style was accumulated in a clicked handler, so a style
+        // the caver never clicked stayed at the default -- and because
+        // Qt gives dialog buttons autoDefault, pressing Enter after
+        // typing the note accepted the dialog before any style was
+        // picked at all. Three callouts in a caver's drawing came out
+        // "name" when one was meant to be an elevation, with nothing to
+        // show anything had gone wrong.
+        //
+        // A combo cannot be in that state: it always HAS a value, that
+        // value is visible, and it is read off the widget after exec()
+        // rather than reconstructed from events. If no signal ever
+        // fires, currentText is still right. QComboBox was probed
+        // constructible and functional in this bridge (addItem,
+        // currentText, currentIndexChanged) before being used here --
+        // unlike QTreeWidget/QListWidget, which return convincing stubs.
         layout.addWidget(new QLabel(qsTr("Style:")), 0, 0);
-        var styleRow = new QHBoxLayout();
-        var buttons = [];
+        combo = new QComboBox();
+        var wanted = currentStyle || CsCallout.STYLE_DEFAULT;
         for (var i = 0; i < styleNames.length; i++) {
-            var b = new QPushButton(styleNames[i]);
-            try {
-                b.checkable = true;
-                b.checked = (styleNames[i] === chosen.name);
-            } catch (eChk) {
-                // not checkable in this bridge: it still clicks, and a
-                // click is all we actually need
+            combo.addItem(styleNames[i]);
+            if (styleNames[i] === wanted) {
+                try {
+                    combo.currentIndex = i;
+                } catch (eIdx) {
+                    // cosmetic: the caver can still pick from the list
+                }
             }
-            styleRow.addWidget(b, 0, 0);
-            buttons.push({ button: b, name: styleNames[i] });
         }
-        layout.addLayout(styleRow, 0);
+        layout.addWidget(combo, 0, 0);
 
         var bar = new QHBoxLayout();
         var okBtn = new QPushButton(qsTr("Place"));
         var cancelBtn = new QPushButton(qsTr("Cancel"));
+        // Enter must mean Place, and must not be captured by anything
+        // else in the dialog. Both probed settable in this bridge.
+        try {
+            okBtn.autoDefault = true;
+            okBtn["default"] = true;
+            cancelBtn.autoDefault = false;
+        } catch (eDef) {
+            // Enter may then do nothing; the buttons still click
+        }
         bar.addStretch(1);
         bar.addWidget(okBtn, 0, 0);
         bar.addWidget(cancelBtn, 0, 0);
         layout.addLayout(bar, 0);
         dlg.setLayout(layout);
 
-        for (var k = 0; k < buttons.length; k++) {
-            (function(entry) {
-                connectOk(entry.button.clicked, function() {
-                    chosen.name = entry.name;
-                    for (var j = 0; j < buttons.length; j++) {
-                        try {
-                            buttons[j].button.checked =
-                                (buttons[j].name === entry.name);
-                        } catch (eSet) {
-                            // cosmetic only
-                        }
-                    }
-                });
-            })(buttons[k]);
+        var wired = true;
+        try {
+            okBtn.clicked.connect(function() { dlg.accept(); });
+            cancelBtn.clicked.connect(function() { dlg.reject(); });
+        } catch (eCon) {
+            wired = false;
+        }
+        if (!wired) {
+            // Without a working Place button the dialog cannot be
+            // completed, so do not show a trap -- fall through to the
+            // prompt below.
+            throw new Error("callout dialog buttons could not be wired");
         }
 
-        var wired = connectOk(okBtn.clicked, function() {
-            state.accepted = true;
-            dlg.accept();
-        });
-        wired = connectOk(cancelBtn.clicked, function() {
-            dlg.reject();
-        }) && wired;
-        if (!wired) {
-            QMessageBox.warning(getMainWindow(), qsTr("Callout"),
-                qsTr("This build's script bridge couldn't wire the " +
-                    "dialog buttons. Nothing was placed."));
+        // Everything is read AFTER exec() returns, while the widgets are
+        // certainly still alive and before anything can free them.
+        if (dlg.exec() === 0) {
             return null;
         }
-
-        // Decisions happen AFTER exec() returns, while the widgets are
-        // certainly still alive.
-        dlg.exec();
+        var typed = edit.text;
+        if (typed === null || typed === undefined ||
+                String(typed).length === 0) {
+            return null;
+        }
+        var style = String(combo.currentText);
+        if (!CsCallout.STYLES.hasOwnProperty(style)) {
+            style = CsCallout.STYLE_DEFAULT;
+        }
+        return { text: String(typed), style: style };
     } catch (eDlg) {
-        // No QDialog in this bridge. The text is the half that cannot
-        // be done any other way, so ask for that much and take the
-        // default style.
+        // No usable dialog in this bridge. The text is the half that
+        // cannot be done any other way, so ask for that much and take
+        // the style the caller came in with.
         try {
-            var typed2 = QInputDialog.getText(getMainWindow(),
-                qsTr("Callout"), qsTr("Note text:"));
+            var typed2 = QInputDialog.getText(null, qsTr("Callout"),
+                qsTr("Note text:"));
             if (typed2 !== null && typed2 !== undefined &&
                     String(typed2).length > 0) {
                 return { text: String(typed2),
@@ -422,16 +431,6 @@ Callout.askForNote = function(currentStyle) {
         }
         return null;
     }
-
-    if (!state.accepted) {
-        return null;
-    }
-    var typed = edit.text;
-    if (typed === null || typed === undefined ||
-            String(typed).length === 0) {
-        return null;
-    }
-    return { text: String(typed), style: chosen.name };
 };
 
 // Called once by QCAD at startup to register the menu item / button.
