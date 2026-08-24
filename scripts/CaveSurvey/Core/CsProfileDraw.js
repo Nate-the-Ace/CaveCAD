@@ -1172,19 +1172,22 @@ CsProfileDraw.render = function(doc, di, profile, opts) {
             // off layer in the document holding entities, this one
             // included, and restores each afterward.
             CsRevise.withOffLayersOn(doc, di, function() {
-                // {} for tripStations, ALWAYS: that fallback exists on
-                // the plan side for a sketch that snapped to no listed
-                // station at all, so moveLinework can still fit it over
-                // its trip's OTHER stations instead of giving up. A
-                // profile has no equivalent -- one trip's stations are
-                // scattered across however many bands it touches, at
-                // different X/Y entirely (that is the whole reason keys
-                // are run-qualified, see this file's own banner), so
-                // there is no single coherent "this trip's stations"
-                // position set to fall back to the way plan's one flat
-                // drawing has. An entity with no resolvable station list
-                // here has nothing left to fall back on and is reported
-                // unmoved, which is the honest answer.
+                // {} for tripStations, still: the plan's fallback is
+                // "this sketch's TRIP's other stations", and a trip's
+                // stations really are scattered across however many
+                // bands it touches, at unrelated X/Y -- that is why keys
+                // are run-qualified in the first place. So there is no
+                // trip-shaped set to offer here.
+                //
+                // The profile's equivalent lives one step earlier now.
+                // Since bands draw to per-run layers, a traced line's
+                // LAYER names its run, and CsProfileBind.claim falls
+                // back to that run's whole band when no station matches
+                // by distance. A run IS one coherent position set, which
+                // a trip is not. So a line traced well above its
+                // stations gets a station list there rather than
+                // arriving here with nothing -- which is what used to
+                // leave it silently unmoved forever.
                 counts.linework = CsRevise.moveLinework(doc, di, before,
                     after, {}, extent);
             });

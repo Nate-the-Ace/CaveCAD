@@ -320,6 +320,36 @@ CsProfileBind.positions = function(doc) {
  * stated once: CsProfileBind treats CsBind, CsRevise and CsProfileDraw
  * as hard dependencies throughout, never as optional ones.
  */
+/**
+ * The index entries belonging to one run, by their run-qualified names.
+ *
+ * Exists because a traced line's LAYER now names its run
+ * (PROFILE-CEILING-A), which is a firmer statement of what it belongs to
+ * than any distance test. The profile used to have no coherent
+ * "these stations" set to fall back to -- one trip's stations are
+ * scattered across however many bands it touches -- but a RUN's
+ * stations are exactly one band, at coherent coordinates.
+ */
+CsProfileBind.stationsOfRun = function(index, runKey) {
+    var prefix = String(runKey) + "/";
+    var out = [];
+    for (var i = 0; i < index.length; i++) {
+        if (String(index[i].name).indexOf(prefix) === 0) {
+            out.push(index[i]);
+        }
+    }
+    return out;
+};
+
+/** Just the names from an index subset. */
+CsProfileBind.namesOf = function(index) {
+    var out = [];
+    for (var i = 0; i < index.length; i++) {
+        out.push(index[i].name);
+    }
+    return out;
+};
+
 CsProfileBind.claim = function(doc, di) {
     var result = { tagged: 0, skipped: 0, skippedLabels: [] };
     if (!CsBind.autoBindEnabled()) {
@@ -363,10 +393,44 @@ CsProfileBind.claim = function(doc, di) {
             continue;   // already claimed, by this pass or an earlier one
         }
         var pts = CsBind.pointsOf(e);
-        var names = CsBind.stationsForPoints(pts, index, epsilon);
+
+        // WHICH STATIONS THIS LINE ANSWERS TO.
+        //
+        // If its layer names a run, scope the search to that run's
+        // stations. Two things follow, both wanted: a line can never
+        // bind across runs however close another band sits in absolute
+        // coordinates, and a line that matches no station by DISTANCE
+        // still has somewhere to fall back to -- its own run's band.
+        //
+        // That fallback is new. Before layers were segregated there was
+        // no coherent set to offer: a trip's stations are scattered
+        // across however many bands it touches, at unrelated
+        // coordinates. A run's stations are one band. So a ceiling
+        // traced well above its stations -- outside marginFor's box, and
+        // therefore silently skipped and never moved again -- now binds
+        // to the band it was drawn over.
+        var scoped = index;
+        var runOfLayer = null;
+        if (typeof CsLayerVariants !== "undefined") {
+            var vparts = CsLayerVariants.split(layer);
+            if (vparts !== null) {
+                runOfLayer = vparts.token;
+                scoped = CsProfileBind.stationsOfRun(index, runOfLayer);
+            }
+        }
+        if (scoped.length === 0) {
+            scoped = index;      // a run with no stations drawn: no scope
+            runOfLayer = null;
+        }
+
+        var names = CsBind.stationsForPoints(pts, scoped, epsilon);
         if (names.length === 0) {
-            names = CsBind.stationsInBox(CsBind.boxOfPoints(pts), index,
-                CsBind.marginFor(index));
+            names = CsBind.stationsInBox(CsBind.boxOfPoints(pts), scoped,
+                CsBind.marginFor(scoped));
+        }
+        if (names.length === 0 && runOfLayer !== null) {
+            // The whole band it belongs to, as the last resort.
+            names = CsProfileBind.namesOf(scoped);
         }
         if (names.length === 0) {
             result.skipped++;

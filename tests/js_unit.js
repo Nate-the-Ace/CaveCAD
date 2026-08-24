@@ -14853,6 +14853,75 @@ if (!IS_NODE) {
                 "CsProfileBind.stationIndex: a point on a TRACED layer is not a station of ours");
         }());
 
+        // -- binding scopes to the layer's RUN -----------------------
+        (function() {
+            var idx = [
+                { name: "A/A1", x: 0, y: -200 },
+                { name: "A/A2", x: 30, y: -200 },
+                { name: "B/B1", x: 0, y: -400 }
+            ];
+            var runA = CsProfileBind.stationsOfRun(idx, "A");
+            eqs(runA.length, 2, "stationsOfRun: two stations in run A");
+            eqs(CsProfileBind.stationsOfRun(idx, "B").length, 1,
+                "stationsOfRun: one in run B");
+            eqs(CsProfileBind.stationsOfRun(idx, "Z").length, 0,
+                "stationsOfRun: none for a run with no stations");
+            eqs(CsProfileBind.namesOf(runA).join(","), "A/A1,A/A2",
+                "namesOf: the run-qualified names, in order");
+
+            // The behaviour that was broken: a ceiling traced WELL ABOVE
+            // its stations. Distance-based binding skipped it, so it was
+            // never tagged and never moved again. Its layer names run A,
+            // so it now binds to run A's band.
+            var ctx = docWith();
+            function stationPt(layerName, name, x, y) {
+                CsLayers.ensure(ctx.doc, ctx.di, layerName);
+                var pt5 = new RPointEntity(ctx.doc,
+                    new RPointData(new RVector(x, y)));
+                pt5.setLayerId(ctx.doc.getLayerId(layerName));
+                CsTags.set(pt5, "ProfileStation", name);
+                CsTags.set(pt5, "ProfileRun", "A");
+                var o = new RAddObjectsOperation();
+                o.addObject(pt5, false);
+                ctx.di.applyOperation(o);
+            }
+            stationPt("CTRL-PROFILE-STATIONS-A", "A1", 0, -200);
+            stationPt("CTRL-PROFILE-STATIONS-A", "A2", 30, -200);
+
+            // Traced 500 units above the band: nowhere near any station.
+            var traced = CsLayerVariants.ensureProfile(ctx.doc, ctx.di,
+                CsLayers.PROFILE_TRACED_CEILING, "A");
+            var sp5 = new RSpline();
+            sp5.setDegree(1);
+            sp5.appendControlPoint(new RVector(0, 300));
+            sp5.appendControlPoint(new RVector(30, 300));
+            var ent5 = new RSplineEntity(ctx.doc, new RSplineData(sp5));
+            ent5.setLayerId(ctx.doc.getLayerId(traced));
+            var op5 = new RAddObjectsOperation();
+            op5.addObject(ent5, false);
+            ctx.di.applyOperation(op5);
+
+            if (CsBind.autoBindEnabled()) {
+                var res5 = CsProfileBind.claim(ctx.doc, ctx.di);
+                eqs(res5.tagged, 1,
+                    "claim: a ceiling traced far above its band still binds, via its run");
+                eqs(res5.skipped, 0,
+                    "claim: and is not skipped as unbindable");
+
+                var again = ctx.doc.queryEntity(ctx.doc.queryLayerEntities(
+                    ctx.doc.getLayerId(traced), true)[0]);
+                var tag5 = CsTags.get(again, CsBind.STATIONS_TAG);
+                ok(tag5 !== null && tag5 !== "",
+                    "claim: the binding tag is written");
+                ok(String(tag5).indexOf("A/") >= 0,
+                    "claim: it names run A's stations, not another band's");
+                ok(String(tag5).indexOf("B/") < 0,
+                    "claim: and never binds across runs");
+            } else {
+                ok(true, "claim: auto-bind is off in this environment, not exercised");
+            }
+        }());
+
         // -- A FULL REGENERATE CLEARS THE SHARED LAYERS --------------
         // Nothing draws to the shared profile layers any more; every
         // band goes to its run's variant. So the pre-segregation

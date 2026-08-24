@@ -242,8 +242,10 @@ FeatureTrace.isolatedRun = null;
  * against whatever selection existed for the instant after clear().
  */
 FeatureTrace.onRunChosen = function() {
+    // Always repaint: choosing a run enables the Profile group, and
+    // choosing "(all runs)" disables it again.
+    FeatureTrace.refresh();
     if (FeatureTrace.isolatedRun === null) {
-        FeatureTrace.refresh();
         return;
     }
     var run = FeatureTrace.runToken();
@@ -304,6 +306,22 @@ FeatureTrace.showAllRuns = function() {
     try {
         var n = CsProfileDraw.showAllRuns(doc, di);
         FeatureTrace.isolatedRun = null;
+        // The selector must say what the view shows, or the panel claims
+        // a run is in focus when every run is on screen.
+        try {
+            var w2 = FeatureTrace.widgets;
+            if (!isNull(w2) && !isNull(w2.runCombo)) {
+                for (var i2 = 0; i2 < w2.runCombo.count; i2++) {
+                    if (String(w2.runCombo.itemText(i2)) ===
+                            FeatureTrace.RUN_SHARED) {
+                        w2.runCombo.currentIndex = i2;
+                        break;
+                    }
+                }
+            }
+        } catch (eSel) {
+            // the readout is a nicety; the layers already changed
+        }
         FeatureTrace.refresh(doc);
         EAction.handleUserMessage(qsTr("Every profile run is visible " +
             "again (%1 layer(s) changed).").arg(n));
@@ -650,10 +668,22 @@ FeatureTrace.refresh = function(docIn) {
         if (!isNull(w.profileGroup)) {
             var hasRegion = !isNull(doc) &&
                 CsTrace.profileRegion(doc) !== null;
-            w.profileGroup.enabled = hasRegion;
-            w.profileGroup.toolTip = hasRegion ? "" :
+            // A RUN IS REQUIRED, not optional. Every traced profile line
+            // then lives on a run's layer, which is what states which
+            // band it belongs to -- and that is what CsProfileBind uses
+            // to decide which stations it must move with. Left on the
+            // shared layer it has no run, and binding falls back to
+            // guessing by distance, which silently skips anything traced
+            // far from its stations.
+            var hasRun = FeatureTrace.runToken() !== null;
+            w.profileGroup.enabled = hasRegion && hasRun;
+            w.profileGroup.toolTip = !hasRegion ?
                 qsTr("This drawing has no elevation yet -- run Generate " +
-                    "Profile first.");
+                    "Profile first.") :
+                (!hasRun ? qsTr("Choose which run you are working on " +
+                    "above. A profile feature has to belong to one, so " +
+                    "that it moves with that band when the survey is " +
+                    "revised.") : "");
         }
     } catch (e2) {
         // leave the group as it is: a wrongly-enabled row still refuses
