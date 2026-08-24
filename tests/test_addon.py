@@ -929,6 +929,14 @@ class TestReadmeToolTable(unittest.TestCase):
 # drift is RESOLVED, which forces this table to stay honest instead of
 # quietly rotting.
 #
+# STATUS, 2026-08-24: the owner has DEFERRED resolving this drift -- a
+# layer rewrite is coming and will need to touch all of it anyway. So
+# this table is deliberately a record of the status quo, not a to-do
+# list being worked down. Its job until that rewrite is to stop NEW
+# drift appearing while the old drift stands. When the rewrite happens,
+# the entries flagged "REAL disagreement" below are the ones that need a
+# decision, and WALLS-INFERRED is the one that matters most.
+#
 # name -> {"color": truecolor, "linetype": str, "lineweight": int}
 # Only the keys that actually diverge are listed per layer.
 TEMPLATE_APPEARANCE_DRIFT = {
