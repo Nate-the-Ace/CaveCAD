@@ -10,13 +10,17 @@
 // hiding entities in the drawing itself: everything this window does is
 // done to a PRIVATE COPY, so the user's drawing is never WRITTEN to.
 // That is not tidiness. Hiding entities in the real document walks into
-// four separate silent failures in this build -- an invisible entity is
-// not editable, so un-hiding it is refused with no error; eraseStations
-// then cannot delete it either, so the next redraw draws a duplicate
-// beside it; every toggle marks the drawing modified; and every toggle
-// lands on the undo stack. A scratch copy has none of those, and it is
-// also what makes the next step (colour by trip) safe, since recolouring
-// a copy cannot overwrite the cartographer's own colours.
+// four separate silent failures in this build -- toggling Invisible
+// through a plain modify operation silently no-ops in EITHER direction
+// for an ordinary entity (RObject::PropertyInvisible is never
+// re-registered per concrete type, so the property-diff modify never
+// sees it change -- see applyFocus's own docblock for the full
+// mechanism); eraseStations then cannot delete what it cannot edit
+// either, so the next redraw draws a duplicate beside it; every toggle
+// marks the drawing modified; and every toggle lands on the undo stack.
+// A scratch copy has none of those, and it is also what makes the next
+// step (colour by trip) safe, since recolouring a copy cannot overwrite
+// the cartographer's own colours.
 //
 // One nuance on "never touched": building that private copy has to
 // SELECT entities on the real document for a moment (see fillPreview's
@@ -52,11 +56,16 @@ TripFocus.inCascade = false;
  *   read: {survey, resolved} or null,
  *   attribution: {entityId: {refuses, isPlanFrame, att}},
  *   tripStations, runStations, tripsForGroup: see computeGroups,
- *   view: AutoZoomView, emptyNotice: QLabel, pickNotice: QLabel}
+ *   sourceDisplayName: see displayNameOf,
+ *   emptyNotice: QLabel, pickNotice: QLabel}
  *  while the window is open, null otherwise. (Before Task 8 this held
  *  {tree, read, view, doc} -- QTreeWidget cannot be built in this
  *  engine at all, so that shape no longer exists anywhere; see
- *  buildList.) */
+ *  buildList. NOT `view` any more either: it was written here and never
+ *  read back -- dead since the manual setScene/autoZoom call this
+ *  window used to make right after opening was replaced by
+ *  AutoZoomView's own resizeEvent-driven zoom, see show()'s own
+ *  docblock.) */
 TripFocus.state = null;
 
 TripFocus.prototype.beginEvent = function() {
@@ -116,22 +125,38 @@ TripFocus.prototype.beginEvent = function() {
  * PARTIAL: the other selected entities still copy, `changed`/logging
  * gives no count, and only that one entity is simply missing from the
  * destination -- a private copy quietly short by exactly the
- * entities the source happened to have individually hidden (an OFF or
- * FROZEN LAYER is not this problem: a normally-visible entity that
- * merely sits on such a layer copies across fine, confirmed the same
- * way). So each invisible entity is rebuilt BY HAND instead: a fresh,
- * same-type entity from its own DATA (a plain read of `sourceDoc`,
- * and `getData()`'s data carries no Invisible flag of its own, so the
- * fresh entity starts out addable), added to `di`'s document, then
- * re-hidden there via the exact mechanism `applyFocus` already uses
- * for the same reason. See `rebuildHiddenEntity`.
+ * entities the source happened to have individually hidden. So each
+ * invisible entity is rebuilt BY HAND instead: a fresh, same-type entity
+ * from its own DATA (a plain read of `sourceDoc`, and `getData()`'s data
+ * carries no Invisible flag of its own, so the fresh entity starts out
+ * addable), added to `di`'s document, then re-hidden there via the exact
+ * mechanism `applyFocus` already uses for the same reason. See
+ * `rebuildHiddenEntity`.
  *
- * \return the number of source entities this could not carry across
- *         even by hand (an entity type `rebuildHiddenEntity` does not
- *         know how to reconstruct) -- 0 for every entity type this
- *         suite has ever been observed to draw. `show`/`refresh`
- *         report a non-zero result in the window rather than let it
- *         pass as silent, partial data loss.
+ * A VISIBLE entity on an OFF or FROZEN layer IS ALSO THIS PROBLEM --
+ * CORRECTED, this used to be documented (and probed) the other way.
+ * `selectEntities` itself silently refuses to select an entity sitting
+ * on a layer `CsLayers.refusesEdits` would flag, exactly the same way
+ * `RAddObjectsOperation`/`RTransaction::addObject` refuse an edit to one
+ * (see `ensureLayerLike`'s and `rebuildHiddenEntity`'s own docblocks for
+ * that half of the same rule). So a visible entity on such a layer never
+ * even enters `visibleIds`' selection below, never reaches
+ * `RCopyOperation`, and is silently absent from the preview -- the exact
+ * same failure SHAPE as the individually-hidden case above, one step
+ * earlier in the pipeline. Confirmed by probe: `querySelectedEntities()`
+ * right after `selectEntities(visibleIds, false)` comes back short by
+ * exactly the ids on a refusing layer. Counted below alongside
+ * `unrebuilt`, for the same reason: a preview silently missing entities
+ * must say so rather than read as a complete copy.
+ *
+ * \return the number of source entities this preview is missing that the
+ *         source itself does not miss -- entities `rebuildHiddenEntity`
+ *         could not reconstruct (an entity type it does not know how to
+ *         rebuild, or one it refused for a reason of its own -- see that
+ *         function's docblock) PLUS visible entities silently dropped
+ *         from the selection above for sitting on an off or frozen
+ *         layer. `show`/`refresh` report a non-zero result in the
+ *         window rather than let it pass as silent, partial data loss.
  */
 TripFocus.fillPreview = function(di, sourceDoc) {
     di.clear();
@@ -156,8 +181,17 @@ TripFocus.fillPreview = function(di, sourceDoc) {
 
     var previousSelection = sourceDoc.querySelectedEntities();
     sourceDoc.clearSelection();
+    var droppedOffLayer = 0;
     if (visibleIds.length > 0) {
         sourceDoc.selectEntities(visibleIds, false);
+        // see this function's own docblock: an entity on an off or
+        // frozen layer never actually lands in the selection, so this
+        // is the one point where that silent drop can still be counted
+        // -- after the copy, di's own document is a moving target
+        // (rebuildHiddenEntity is about to add more entities to it) and
+        // is no longer safe to diff against visibleIds for this.
+        droppedOffLayer = visibleIds.length -
+            sourceDoc.querySelectedEntities().length;
         var op = new RCopyOperation(new RVector(0, 0), sourceDoc);
         di.applyOperation(op);
     }
@@ -166,7 +200,7 @@ TripFocus.fillPreview = function(di, sourceDoc) {
         sourceDoc.selectEntities(previousSelection, false);
     }
 
-    var unrebuilt = 0;
+    var unrebuilt = droppedOffLayer;
     for (i = 0; i < hiddenIds.length; i++) {
         e = sourceDoc.queryEntity(hiddenIds[i]);
         if (isNull(e) ||
@@ -198,7 +232,20 @@ TripFocus.entityClassName = function(entity) {
  *  off/frozen/color/lineweight -- the same properties RCopyOperation
  *  itself would have carried across. Best-effort: an unreadable source
  *  layer property falls back to a plain visible CONTINUOUS layer
- *  rather than failing the whole rebuild over cosmetics. */
+ *  rather than failing the whole rebuild over cosmetics.
+ *
+ *  CONSTRUCTOR ARGUMENT ORDER, READ FROM THE GENERATED WRAPPER RATHER
+ *  THAN GUESSED (`RLayer(document, name, frozen, locked, color,
+ *  linetypeId, lineweight, off)` -- confirmed against
+ *  `rlayer_wrapper.cpp`'s own parameter list, not the property names on
+ *  RLayer.xml alone, which read in a deceptively different order). A
+ *  previous version of this call passed `(dstDoc, layerName, off,
+ *  frozen, ...)`, which silently swapped `off` into the `frozen` slot
+ *  and hard-coded the actual `off` slot to `false` -- so the layer this
+ *  produced was never actually OFF, only (if the source happened to be
+ *  off) FROZEN instead, which refuses the same edits for a different,
+ *  wrong-looking reason. Caught by probe, not by inspection: `isOff()`
+ *  on the result read false even when `off` was passed `true`. */
 TripFocus.ensureLayerLike = function(dstDoc, dstDi, srcDoc, layerName) {
     if (dstDoc.hasLayer(layerName)) {
         return;
@@ -212,8 +259,8 @@ TripFocus.ensureLayerLike = function(dstDoc, dstDi, srcDoc, layerName) {
         try { color = srcLayer.getColor(); } catch (eColor) { }
         try { lineweight = srcLayer.getLineweight(); } catch (eLw) { }
     }
-    var newLayer = new RLayer(dstDoc, layerName, off, frozen, color,
-        dstDoc.getLinetypeId("CONTINUOUS"), lineweight, false);
+    var newLayer = new RLayer(dstDoc, layerName, frozen, false, color,
+        dstDoc.getLinetypeId("CONTINUOUS"), lineweight, off);
     var op = new RAddObjectsOperation();
     op.addObject(newLayer);
     dstDi.applyOperation(op);
@@ -224,14 +271,80 @@ TripFocus.ensureLayerLike = function(dstDoc, dstDi, srcDoc, layerName) {
  *  for why this exists and what was probed before trusting it. Reads
  *  `srcDoc` only (`queryLayer`, `getData()`, plain getters); every
  *  write lands on `dstDoc`/`dstDi`, which is always the preview, never
- *  the source. \return true on success. */
+ *  the source.
+ *
+ *  THREE THINGS A NAIVE REBUILD GETS WRONG, each found by probe rather
+ *  than assumed from reading the operation classes:
+ *
+ *  1. `getData()` carries geometry, NOT custom properties -- a tagged
+ *     station point (`Station='A9'`) arrives with no tag at all, which
+ *     `CsFocus.stationsOf` then reads as `{names:[],kind:"none"}`, and
+ *     the fail-safe rule (unattributable stays visible -- CsFocus.js's
+ *     own header) means `applyFocus` will ACTIVELY UN-HIDE it on the
+ *     very first click, regardless of what is checked. Fixed by
+ *     `copyCustomPropertiesFrom`, confirmed by probe to exist and work
+ *     on the installed engine (unlike `RCopyOperation.setSelectionOnly`
+ *     -- this build is genuinely behind `cavecad-src` in some places and
+ *     ahead of the parts that were checked against it in others, so
+ *     each API used here was probed on its own). Called with no `title`
+ *     argument, which copies EVERY property group the entity carries,
+ *     not only `CsTags.GROUP` ("CaveSurvey") -- a drawing can carry
+ *     custom properties this suite knows nothing about, and losing
+ *     those on rebuild would be exactly the same silent narrowing this
+ *     fix exists to close.
+ *
+ *  2. The add can be REFUSED OUTRIGHT and nothing here used to notice.
+ *     `ensureLayerLike` recreates the source layer's own off/frozen
+ *     state (see its own docblock for a real bug that used to defeat
+ *     that), and `RAddObjectsOperation` silently refuses an add to an
+ *     off or frozen layer -- the same rule `CsLayers.OFF`/
+ *     `CsLayers.withLayerOn` exist to route around for every other
+ *     writer in this suite. A hidden entity on such a layer is not a
+ *     corner case here: `CTRL-RAW` (the as-surveyed ghost) ships off by
+ *     convention, and a caver hiding a redundant raw leg on it is
+ *     exactly the shape of entity this function exists to rebuild.
+ *     FIXED by wrapping the add (and the re-hide right after it, which
+ *     needs the layer just as visible) in `CsLayers.withLayerOn`, the
+ *     suite's own established answer to this exact refusal -- and by
+ *     checking `fresh.getId()` afterward regardless, since `withLayerOn`
+ *     only covers off/frozen and there is no reason to trust every
+ *     future refusal reason will be one of those two.
+ *
+ *  3. A rebuilt `RBlockReferenceEntity` can carry a dangling reference.
+ *     `RCopyOperation` only carries a block across when it copies an
+ *     entity that uses it; an individually hidden block reference was
+ *     never selected for that copy, so if nothing else in the drawing
+ *     also uses the same block, `dstDoc` never receives it at all.
+ *     Rebuilding the reference anyway would add real geometry whose
+ *     `referencedBlockId` resolves to nothing in this document --
+ *     confirmed by probe: `getReferencedBlockName()` on the rebuilt
+ *     entity is empty (the name lookup needs the SOURCE document, which
+ *     `getData()` does not carry), and `dstDoc.queryBlock(id)` for the
+ *     numeric id it does carry comes back null. Cave drawings use block
+ *     references for symbols, so this is not a hypothetical. Counted as
+ *     a rebuild failure rather than silently added: a missing symbol,
+ *     reported, beats a live-looking one that resolves to nothing.
+ *
+ *  \return true on success. */
 TripFocus.rebuildHiddenEntity = function(dstDoc, dstDi, srcDoc, srcEntity) {
     try {
         var Ctor = global[TripFocus.entityClassName(srcEntity)];
         if (typeof Ctor !== "function") {
             return false;
         }
+
+        if (typeof srcEntity.getReferencedBlockName === "function") {
+            var blockName = srcEntity.getReferencedBlockName();
+            if (blockName !== "" && !dstDoc.hasBlock(blockName)) {
+                return false;   // see this function's own docblock,
+                                // point 3 -- the block was never copied
+                                // and rebuilding the reference anyway
+                                // would only be a dangling one
+            }
+        }
+
         var fresh = new Ctor(dstDoc, srcEntity.getData());
+        fresh.copyCustomPropertiesFrom(srcEntity);   // see docblock, 1
 
         var layerName = srcEntity.getLayerName();
         TripFocus.ensureLayerLike(dstDoc, dstDi, srcDoc, layerName);
@@ -241,18 +354,33 @@ TripFocus.rebuildHiddenEntity = function(dstDoc, dstDi, srcDoc, srcEntity) {
                                       // fresh entity's own state match
                                       // what it already is, explicitly
 
-        var addOp = new RAddObjectsOperation();
-        addOp.addObject(fresh, false);
-        dstDi.applyOperation(addOp);
+        var landed = CsLayers.withLayerOn(dstDoc, dstDi, layerName,
+                function() {
+            var addOp = new RAddObjectsOperation();
+            addOp.addObject(fresh, false);
+            dstDi.applyOperation(addOp);
+            if (fresh.getId() === RObject.INVALID_ID) {
+                return false;   // see docblock, 2 -- the add was
+                                 // refused for some other reason;
+                                 // withLayerOn already ruled out off/
+                                 // frozen, so this is a genuine failure
+            }
 
-        // now hidden in the PREVIEW exactly the way it was in the
-        // source -- via RChangePropertyOperation, the one mechanism
-        // this whole file trusts to make an Invisible change stick
-        dstDoc.selectEntities([fresh.getId()], false);
-        dstDi.applyOperation(new RChangePropertyOperation(
-            RObject.PropertyInvisible, true, RS.EntityAll, false));
-        dstDoc.clearSelection();
-        return true;
+            // now hidden in the PREVIEW exactly the way it was in the
+            // source -- via RChangePropertyOperation, the one mechanism
+            // this whole file trusts to make an Invisible change stick.
+            // Done INSIDE withLayerOn, not after: RChangePropertyOperation
+            // refuses an off/frozen-layer entity exactly as the add
+            // above does (see applyFocus's own docblock), and
+            // withLayerOn has already restored the layer's real state
+            // by the time this function returns.
+            dstDoc.selectEntities([fresh.getId()], false);
+            dstDi.applyOperation(new RChangePropertyOperation(
+                RObject.PropertyInvisible, true, RS.EntityAll, false));
+            dstDoc.clearSelection();
+            return true;
+        });
+        return landed === true;
     } catch (eRebuild) {
         return false;
     }
@@ -263,12 +391,18 @@ TripFocus.rebuildHiddenEntity = function(dstDoc, dstDi, srcDoc, srcEntity) {
  * ONCE per preview build/Refresh instead of once per click.
  *
  * WHY: measured in the real engine, `CsFocus.stationsOf` (tag parsing)
- * and `CsBind.layerNameOf` (which can fall back to `CsStore.lookup`)
- * together dominate the cost of `applyFocus`'s walk -- 725ms out of a
- * ~900ms first click at 7,000 entities, growing to seconds at cave
- * scale (a 4,000-shot survey is comfortably 28,000+ entities). Neither
- * an entity's tags nor its layer changes between clicks on the same
- * preview document, so recomputing them per click is pure waste.
+ * and `CsBind.layerNameOf` (`doc.getLayerName(entity.getLayerId())` in a
+ * plain try/catch -- CORRECTED: it does NOT fall back to
+ * `CsStore.lookup`, that reads differently, see `CsBind.js` itself)
+ * together account for the cost `applyFocus`'s walk saves by caching
+ * them: 690ms uncached vs 447ms cached at 7,000 entities, a ~35% cut of
+ * one click's cost -- CORRECTED, this used to claim 725ms out of a
+ * ~900ms click and imply the saving grows to 9-14 SECONDS at cave scale;
+ * neither number was ever actually measured. The saving is real and
+ * worth having (a 4,000-shot survey is comfortably 28,000+ entities,
+ * where every millisecond repeats per click), just smaller than that.
+ * Neither an entity's tags nor its layer changes between clicks on the
+ * same preview document, so recomputing them per click is pure waste.
  * `applyFocus` uses this cache when given one, and falls back to
  * computing the same two things fresh, per entity, when not -- which
  * keeps it correct for a caller (tests included) that has no cache to
@@ -283,6 +417,16 @@ TripFocus.rebuildHiddenEntity = function(dstDoc, dstDi, srcDoc, srcEntity) {
  * full-size operation over it for nothing. Skipping it here means it
  * is never considered at all, which is also strictly correct: nothing
  * this window does needs to touch an entity nobody will ever see.
+ *
+ * THIS SKIP CANNOT ACTUALLY FIRE TODAY, and that is not a reason to
+ * delete it. `fillPreview` now excludes an off/frozen-layer entity from
+ * the preview entirely (see its own docblock) -- `RCopyOperation` never
+ * receives one, so `previewDoc` never holds one, so `refuses` is true
+ * for zero entries this function ever builds. Kept anyway as cheap
+ * insurance against the copy mechanism changing again the way it
+ * already has once on this branch (`RCopyOperation.setSelectionOnly`):
+ * if a future build copies such an entity across after all, this is
+ * what keeps `applyFocus` from spinning on it forever.
  *
  * \return {attribution: {entityId: {refuses, isPlanFrame, att}},
  *          entityCount: number} -- the count is how many entities the
@@ -534,6 +678,79 @@ TripFocus.picked = function(entries) {
     return out;
 };
 
+/** A stable string identifying `entry` across a Refresh rebuild --
+ *  "section:pick", e.g. "trips:3" or "people:Nathan Schonegg". `pick` is
+ *  a number for a trip and a string for everything else (see `picked`'s
+ *  own docblock), hence the explicit `String()`: without it "trips:3"
+ *  and "trips:3" from two different rebuilds could still fail a `===`
+ *  if one pick were ever read back as a string and the other a number,
+ *  which is exactly the kind of drift a rebuild is free to introduce
+ *  since it re-derives every pick from scratch. Returns null for a row
+ *  with no pick at all (the "(not in any run)" rows `picked` also
+ *  skips), so a caller filtering on this never needs its own isNull
+ *  check duplicated. */
+TripFocus.pickKey = function(entry) {
+    if (isNull(entry.pick)) {
+        return null;
+    }
+    return entry.section + ":" + String(entry.pick);
+};
+
+/** Re-ticks every entry in `entries` (a freshly rebuilt list, e.g. from
+ *  `refresh`) whose `pickKey` was in `keys` before the rebuild that
+ *  produced it -- WITHOUT re-running the filter once per box, the same
+ *  concern `setChecked`/`syncHeaderChecked` exist for elsewhere. Reads
+ *  `entries` only, deliberately: the header checkboxes are re-derived
+ *  from their own rows by the caller afterward (see `wireList`'s own
+ *  per-row sync), not restored independently here, so there is exactly
+ *  one place that decides whether a header reads as ticked.
+ *
+ *  WHY THIS EXISTS: the list pane is rebuilt from scratch on every
+ *  Refresh (`buildList` returns brand new `QCheckBox`es with `checked`
+ *  defaulting to false), so without this every Refresh silently threw
+ *  away whatever the reader had ticked and jumped back to showing the
+ *  whole cave -- probed: `picked()` went from three trips checked to
+ *  none, across one `refresh()` call, with nothing in the window to
+ *  explain why the view had just changed.
+ *
+ *  A key not found in the new `entries` is real information, not an
+ *  error to swallow: it means the trip/team/person/run it named is
+ *  simply gone from this reading of the drawing (a trip deleted, a run
+ *  renamed) -- reported back rather than dropped silently, so a caller
+ *  can tell the reader their pick did not survive rather than let them
+ *  wonder why fewer things are ticked than they left checked.
+ *
+ *  \return the subset of `keys` that matched nothing in `entries` */
+TripFocus.applyPickKeys = function(entries, keys) {
+    if (keys.length === 0) {
+        return [];
+    }
+    var want = {};
+    var i;
+    for (i = 0; i < keys.length; i++) {
+        want[keys[i]] = true;
+    }
+    var found = {};
+    var toCheck = [];
+    for (i = 0; i < entries.length; i++) {
+        var key = TripFocus.pickKey(entries[i]);
+        if (key !== null && want.hasOwnProperty(key)) {
+            toCheck.push(entries[i]);
+            found[key] = true;
+        }
+    }
+    if (toCheck.length > 0) {
+        TripFocus.setChecked(toCheck, true);
+    }
+    var missing = [];
+    for (i = 0; i < keys.length; i++) {
+        if (!found.hasOwnProperty(keys[i])) {
+            missing.push(keys[i]);
+        }
+    }
+    return missing;
+};
+
 /** Mirrors CsFocus.isVisible's own per-attribution test, given an
  *  ALREADY-COMPUTED attribution (CsFocus.stationsOf's return shape)
  *  instead of an entity. The whole point of buildAttribution is to
@@ -696,13 +913,52 @@ TripFocus.applyFocus = function(di, stationSet, attribution) {
  *  alike) without each individual change re-running the filter --
  *  shared by wireList's own per-section cascade and the All button,
  *  which is one more reason to have only one copy of this: the pane
- *  that replaced the tree is the whole reason there were two. */
+ *  that replaced the tree is the whole reason there were two.
+ *
+ *  try/finally, not a bare assign-true-then-assign-false: `setChecked`
+ *  on a box can run arbitrary Qt code (a connected slot, a repaint), and
+ *  a throw partway through used to leave `TripFocus.inCascade` latched
+ *  true forever -- every checkbox in the window would silently stop
+ *  re-applying the filter for the rest of the window's life, with
+ *  nothing to say why. */
 TripFocus.setChecked = function(items, state) {
     TripFocus.inCascade = true;
-    for (var i = 0; i < items.length; i++) {
-        items[i].box.setChecked(state);
+    try {
+        for (var i = 0; i < items.length; i++) {
+            items[i].box.setChecked(state);
+        }
+    } finally {
+        TripFocus.inCascade = false;
     }
-    TripFocus.inCascade = false;
+};
+
+/** Ticks or unticks `head.box` to match whether every one of its own
+ *  rows is now checked -- called after a plain row (not the header
+ *  itself) changes, so the header stops lying about its own rows the
+ *  moment they stop agreeing with it. Before this, unticking every row
+ *  under a checked header by hand left the header still ticked, and
+ *  clicking it then UNTICKED every row a second time instead of doing
+ *  the one thing a reader would expect (re-ticking them) -- two clicks
+ *  to get anywhere. Guarded by `inCascade` the same way `setChecked`
+ *  itself is, so this sync's own `setChecked` call cannot re-cascade
+ *  into the rows that triggered it. */
+TripFocus.syncHeaderChecked = function(head) {
+    var allChecked = true;
+    for (var i = 0; i < head.entries.length; i++) {
+        if (!head.entries[i].box.checked) {
+            allChecked = false;
+            break;
+        }
+    }
+    if (head.box.checked === allChecked) {
+        return;
+    }
+    TripFocus.inCascade = true;
+    try {
+        head.box.setChecked(allChecked);
+    } finally {
+        TripFocus.inCascade = false;
+    }
 };
 
 /** The text for emptyNotice, or null when the copy needs no comment --
@@ -727,15 +983,88 @@ TripFocus.copyStatusText = function(entityCount, unrebuilt) {
 /** Shows or hides the "nothing checked matched a station" notice --
  *  see reapply, the only caller. Separate from emptyNotice (which
  *  reports the PREVIEW being empty or incomplete, decided once per
- *  open/Refresh): this one is decided fresh on every checkbox change. */
+ *  open/Refresh): this one is decided fresh on every checkbox change.
+ *
+ *  COMBINED with `state.staleRefreshNotice` when one is set (see
+ *  `refresh`), rather than one replacing the other: `reapply` calls this
+ *  unconditionally on every checkbox change, including the one `refresh`
+ *  itself makes right after re-ticking whatever picks still exist, so a
+ *  plain overwrite here would erase a "some of what was checked no
+ *  longer exists" notice the moment refresh finished -- before the
+ *  reader had any chance to see it. */
 TripFocus.setPickNotice = function(message) {
     var notice = TripFocus.state.pickNotice;
-    if (message === null || message === undefined) {
+    var sticky = TripFocus.state.staleRefreshNotice;
+    var parts = [];
+    if (!isNull(sticky) && sticky !== "") {
+        parts.push(sticky);
+    }
+    if (!(message === null || message === undefined) && message !== "") {
+        parts.push(message);
+    }
+    if (parts.length === 0) {
         notice.visible = false;
         return;
     }
-    notice.text = message;
+    notice.text = parts.join("  ");
     notice.visible = true;
+};
+
+/** The document Refresh should read from, resolved FRESH on every call
+ *  rather than trusting a JS reference that might by now be dangling.
+ *
+ *  WHY THIS EXISTS: `refresh`'s button used to be wired to
+ *  `function() { TripFocus.refresh(doc); }`, closing over the very
+ *  `RDocument` `show()` was first opened against. `show()`'s own
+ *  docblock already explains why the window stays bound to that one
+ *  document rather than re-pointing at whatever is current -- but
+ *  nothing stopped the reader from CLOSING that drawing, leaving the
+ *  Trip Focus window open, and pressing Refresh anyway. `RDocument` is
+ *  not a `QObject`, so there is no `destroyed` signal to hook, and
+ *  PROBED, exhaustively, before writing this: neither `isNull()` nor
+ *  `isDeleted()` can tell a freed `RDocument` from a live one --
+ *  both stayed false for a document whose `RDocumentInterface` had
+ *  already been `destr()`'d, right up until the next real method call
+ *  on it (`queryAllEntities()`, in the probe) SEGFAULTED THE WHOLE
+ *  PROCESS rather than throwing a catchable exception. A `try`/`catch`
+ *  around that call is worthless -- there is nothing here to catch.
+ *  So there is no safe way to keep using a captured document reference
+ *  once its own document might have closed.
+ *  `EAction.getDocument()` is what every other tool in this suite already
+ *  trusts for "the document to work on right now" -- it always reflects
+ *  whatever is actually live in the main window, so it can never itself
+ *  be a stale pointer, and in a headless engine (or between documents)
+ *  it comes back `undefined` rather than a dangling one. The trade
+ *  `refresh` makes for that safety: if some OTHER document now has
+ *  focus, Refresh reads THAT one rather than crashing -- `displayNameOf`
+ *  is what tells the reader when that has happened, in `refresh` below,
+ *  rather than let the window quietly start describing a different cave
+ *  under the same title.
+ *  \return the current document, or null when none is open */
+TripFocus.currentDocument = function() {
+    try {
+        var d = EAction.getDocument();
+        return isNull(d) ? null : d;
+    } catch (eCur) {
+        return null;
+    }
+};
+
+/** The name `show`/`refresh` put in the window title -- the drawing's
+ *  file name, or "Untitled" for one never saved. Shared so the two
+ *  cannot read a document's name two different ways. */
+TripFocus.displayNameOf = function(doc) {
+    var displayName = qsTr("Untitled");
+    try {
+        var fileName = doc.getFileName();
+        if (fileName !== undefined && fileName !== null &&
+                String(fileName) !== "") {
+            displayName = new QFileInfo(String(fileName)).fileName();
+        }
+    } catch (eName) {
+        // cosmetic only -- falls back to "Untitled"
+    }
+    return displayName;
 };
 
 /** Re-reads the drawing and rebuilds everything derived from it: the
@@ -744,6 +1073,18 @@ TripFocus.setPickNotice = function(message) {
  *  mirror -- transactionUpdated is still unverified in this build, so
  *  refreshing is something the reader asks for rather than something
  *  we promise and half-deliver.
+ *
+ *  GUARDED against a window that is not actually open: `TripFocus.state`
+ *  is null before `show()` finishes building it and after `cleanUp()`
+ *  tears it down, and `TripFocus.previewDi` the same. Nothing should be
+ *  able to call `refresh()` in either window, but "should" is not a
+ *  guarantee worth skipping a two-line check for.
+ *
+ *  TAKES NO ARGUMENT, unlike this function's previous version, which
+ *  took `sourceDoc` from a closure the Refresh button held onto for the
+ *  window's entire life -- see `currentDocument`'s own docblock for why
+ *  that is exactly the reference that could go stale, and why resolving
+ *  fresh here instead is the fix.
  *
  *  NEVER SWAPS TripFocus.previewDi FOR A NEW ONE, unlike this
  *  function's first draft. `RGraphicsView::setScene` (RGraphicsView.cpp)
@@ -765,9 +1106,61 @@ TripFocus.setPickNotice = function(message) {
  *  `this.previewDi.clear()` and refills the SAME document every time
  *  the pattern changes. This function does exactly that, through
  *  fillPreview. */
-TripFocus.refresh = function(sourceDoc) {
+TripFocus.refresh = function() {
+    if (isNull(TripFocus.state) || isNull(TripFocus.previewDi)) {
+        return;   // the window is not actually open -- nothing to do
+    }
+
+    var doc = TripFocus.currentDocument();
+    if (isNull(doc)) {
+        TripFocus.state.emptyNotice.text = qsTr(
+            "No drawing is open to refresh from -- showing the last " +
+            "copy that was read.");
+        TripFocus.state.emptyNotice.visible = true;
+        return;
+    }
+
+    // Honesty, not identity: this build offers no safe way to confirm
+    // `doc` is the SAME document `show()` opened against (see
+    // `currentDocument`'s own docblock) -- only that it is a live one.
+    // Naming it again, every time it differs, is what keeps the window
+    // from silently describing a different cave under its original
+    // title.
+    var displayName = TripFocus.displayNameOf(doc);
+    if (displayName !== TripFocus.state.sourceDisplayName) {
+        TripFocus.state.sourceDisplayName = displayName;
+        if (!isNull(TripFocus.dialog)) {
+            try {
+                TripFocus.dialog.windowTitle =
+                    qsTr("Trip Focus") + " -- " + displayName;
+            } catch (eTitle) {
+            }
+        }
+    }
+
+    // Capture what is checked BEFORE the pane is rebuilt -- buildList
+    // below returns brand new checkboxes, all unchecked, and without
+    // this a Refresh silently threw away every one of the reader's own
+    // picks (probed: picked() went from three trips checked to none
+    // across one refresh() call).
+    var picked = TripFocus.picked(TripFocus.state.entries);
+    var keptKeys = [];
+    var pk, ai;
+    for (ai = 0; ai < picked.trips.length; ai++) {
+        keptKeys.push("trips:" + String(picked.trips[ai]));
+    }
+    for (ai = 0; ai < picked.teams.length; ai++) {
+        keptKeys.push("teams:" + picked.teams[ai]);
+    }
+    for (ai = 0; ai < picked.people.length; ai++) {
+        keptKeys.push("people:" + picked.people[ai]);
+    }
+    for (ai = 0; ai < picked.runs.length; ai++) {
+        keptKeys.push("runs:" + picked.runs[ai]);
+    }
+
     var di = TripFocus.previewDi;
-    var unrebuilt = TripFocus.fillPreview(di, sourceDoc);
+    var unrebuilt = TripFocus.fillPreview(di, doc);
     di.regenerateScenes();
 
     var built = TripFocus.buildAttribution(di.getDocument());
@@ -780,7 +1173,7 @@ TripFocus.refresh = function(sourceDoc) {
         TripFocus.state.emptyNotice.visible = true;
     }
 
-    var read = TripFocus.readSurvey(sourceDoc);
+    var read = TripFocus.readSurvey(doc);
     TripFocus.state.read = read;
     var groups = TripFocus.computeGroups(read);
     TripFocus.state.tripStations = groups.tripStations;
@@ -803,7 +1196,17 @@ TripFocus.refresh = function(sourceDoc) {
         index = 0;
         sizes = null;
     }
-    TripFocus.state.list.setParent(null);
+    // destr(), not setParent(null): the old pane's QScrollArea, its
+    // grid, every row's QCheckBox and every closure wireList connected
+    // to one of them used to just become a parent-less orphan here,
+    // kept alive by nothing but the Qt reference the C++ side still
+    // held -- ten Refreshes was ten abandoned panes for the window's
+    // whole remaining life. destr() is this suite's standard way to
+    // free a widget script code constructed (see cleanUp's own
+    // docblock); freeing it BEFORE inserting the replacement, matching
+    // this function's own previous order, since Qt widget deletion
+    // removes a widget from its parent's layout on its own.
+    destr(TripFocus.state.list);
     splitter.insertWidget(index, listBuilt.widget);
     if (sizes !== null) {
         try {
@@ -815,6 +1218,23 @@ TripFocus.refresh = function(sourceDoc) {
     TripFocus.state.entries = listBuilt.entries;
     TripFocus.state.headers = listBuilt.headers;
     TripFocus.wireList();
+
+    var missingKeys = TripFocus.applyPickKeys(TripFocus.state.entries,
+        keptKeys);
+    for (ai = 0; ai < TripFocus.state.headers.length; ai++) {
+        TripFocus.syncHeaderChecked(TripFocus.state.headers[ai]);
+    }
+    // one or more of the reader's picks no longer exist in this reading
+    // of the drawing (a trip deleted, a run renamed) -- said out loud
+    // rather than just quietly ticking fewer boxes than they left
+    // checked. Set on `state` rather than the notice widget directly:
+    // `reapply` below calls `setPickNotice` unconditionally, which would
+    // otherwise erase this before it was ever seen -- see
+    // `setPickNotice`'s own docblock.
+    TripFocus.state.staleRefreshNotice = missingKeys.length > 0 ?
+        (qsTr("Some of what was checked no longer exists in this " +
+            "drawing and could not be re-checked: ") +
+            missingKeys.join(", ")) : null;
     TripFocus.reapply();
 };
 
@@ -868,23 +1288,33 @@ TripFocus.reapply = function() {
 };
 
 /** Wires every checkbox in the pane: a section header cascades its
- *  check state to its own rows, and every real change -- a cascaded
- *  header or a plain row alike -- re-applies the focus filter
+ *  check state to its own rows, a plain row syncs its own header back
+ *  to match its rows (see `syncHeaderChecked`), and every real change --
+ *  a cascaded header or a plain row alike -- re-applies the focus filter
  *  afterwards. Pulled out of show() into its own function so Refresh
  *  can re-wire the replacement pane the same way. Guarded: a failed
  *  connect must leave the window usable with plain independent
  *  checkboxes rather than crash the whole tool over a cascade that is a
  *  convenience, not the point of this window.
  *
+ *  Iterates `headers` only, not a separate flat `entries` pass: every
+ *  row with a real checkbox belongs to exactly one section, so exactly
+ *  one header's own `entries` list already covers all of them, and
+ *  wiring the row handler per-header (rather than one handler shared by
+ *  every row in the pane, as this used to do) is what lets that handler
+ *  know WHICH header to sync without any other bookkeeping.
+ *
  *  TripFocus.inCascade is the re-entrancy guard: setting a row's own
  *  `checked` from inside the header's handler fires that row's OWN
  *  `toggled` too, which would otherwise call reapply() once per row
  *  cascaded instead of once for the whole header click (the tree
- *  version guarded the exact same re-entrance the same way). */
+ *  version guarded the exact same re-entrance the same way) -- and, now,
+ *  setting the header's own `checked` from inside a row's handler fires
+ *  the header's `toggled` right back, which would otherwise re-cascade
+ *  the sync it was just doing back down into every row. */
 TripFocus.wireList = function() {
     var headers = TripFocus.state.headers;
-    var entries = TripFocus.state.entries;
-    var i;
+    var i, j;
 
     var makeHeaderHandler = function(head) {
         return function(checked) {
@@ -895,11 +1325,14 @@ TripFocus.wireList = function() {
             TripFocus.reapply();
         };
     };
-    var rowHandler = function() {
-        if (TripFocus.inCascade) {
-            return;
-        }
-        TripFocus.reapply();
+    var makeRowHandler = function(head) {
+        return function() {
+            if (TripFocus.inCascade) {
+                return;
+            }
+            TripFocus.syncHeaderChecked(head);
+            TripFocus.reapply();
+        };
     };
 
     for (i = 0; i < headers.length; i++) {
@@ -907,11 +1340,12 @@ TripFocus.wireList = function() {
             headers[i].box.toggled.connect(makeHeaderHandler(headers[i]));
         } catch (eHead) {
         }
-    }
-    for (i = 0; i < entries.length; i++) {
-        try {
-            entries[i].box.toggled.connect(rowHandler);
-        } catch (eRow) {
+        var rowHandler = makeRowHandler(headers[i]);
+        for (j = 0; j < headers[i].entries.length; j++) {
+            try {
+                headers[i].entries[j].box.toggled.connect(rowHandler);
+            } catch (eRow) {
+            }
         }
     }
 };
@@ -933,11 +1367,12 @@ TripFocus.show = function(doc) {
     // document it was first opened against. That is a deliberate
     // simplification, decided here rather than left to be discovered
     // as a bug: the window is a one-shot snapshot (see readSurvey's
-    // docblock) with no live link back to any document, so there is
-    // nothing today that could re-point an already-open window at a
-    // different one short of tearing it down and rebuilding it --
-    // which Refresh already does, on request, against the SAME
-    // document.
+    // docblock) with no live link back to any document. Refresh (see
+    // its own docblock) reads whatever document is CURRENTLY open
+    // instead of holding onto this one specifically -- the one safe
+    // choice once a captured `RDocument` reference can go stale -- and
+    // renames the window when that turns out to differ, rather than
+    // silently describing a different cave under this title.
     if (!isNull(TripFocus.dialog)) {
         TripFocus.dialog.raise();
         return;
@@ -975,17 +1410,9 @@ TripFocus.show = function(doc) {
     // readSurvey's docblock) and raise() above deliberately keeps
     // showing whatever document it was first opened against -- naming
     // it here is the reader's only way to check they are not comparing
-    // trips against yesterday's cave.
-    var displayName = qsTr("Untitled");
-    try {
-        var fileName = doc.getFileName();
-        if (fileName !== undefined && fileName !== null &&
-            String(fileName) !== "") {
-            displayName = new QFileInfo(String(fileName)).fileName();
-        }
-    } catch (eName) {
-        // cosmetic only -- the window still opens with the plain title
-    }
+    // trips against yesterday's cave. See displayNameOf, shared with
+    // refresh() so the two never read a document's name two ways.
+    var displayName = TripFocus.displayNameOf(doc);
     dlg.windowTitle = qsTr("Trip Focus") + " -- " + displayName;
     // a window in its own right, not a sheet stuck to the main one:
     // the reader compares it against the drawing behind it
@@ -1051,7 +1478,8 @@ TripFocus.show = function(doc) {
         attribution: preview.attribution,
         tripStations: groups.tripStations, runStations: groups.runStations,
         tripsForGroup: groups.tripsForGroup,
-        view: view, emptyNotice: emptyNotice, pickNotice: pickNotice };
+        sourceDisplayName: displayName, staleRefreshNotice: null,
+        emptyNotice: emptyNotice, pickNotice: pickNotice };
 
     // Section checkboxes drive their own rows, and every change re-runs
     // the filter -- see TripFocus.wireList, pulled out on its own so
@@ -1073,10 +1501,16 @@ TripFocus.show = function(doc) {
     buttons.addWidget(closeButton, 0, 0);
     layout.addLayout(buttons, 0);
 
-    // All three connects are guarded alike: a failed connect leaves
-    // that one button inert rather than aborting the window's
-    // construction over what is, in every case, a convenience wiring
-    // rather than the point of the window.
+    // All four connects are guarded alike -- including dlg.finished,
+    // which previously was not: a failed connect leaving a button inert
+    // is a convenience lost, but a failed dlg.finished connect used to
+    // mean cleanUp() would never run at all, leaking the preview
+    // document and the dialog's own C++ widgets for the rest of the
+    // application's life. Guarding it cannot make that leak NOT happen
+    // if the connect genuinely fails -- nothing here can substitute for
+    // the signal -- but it keeps that one failure from being an
+    // uncaught exception on top of the leak, which is the same standard
+    // every other connect in this function already gets.
     try {
         allButton.clicked.connect(function() {
             TripFocus.setChecked(TripFocus.state.headers, true);
@@ -1086,8 +1520,11 @@ TripFocus.show = function(doc) {
     } catch (eAll) {
     }
     try {
+        // No `doc` argument, deliberately -- see refresh's and
+        // currentDocument's own docblocks for why closing over it here
+        // is exactly the stale reference this fix removes.
         refreshButton.clicked.connect(function() {
-            TripFocus.refresh(doc);
+            TripFocus.refresh();
         });
     } catch (eRefresh) {
     }
@@ -1101,7 +1538,10 @@ TripFocus.show = function(doc) {
         closeButton.clicked.connect(function() { dlg.reject(); });
     } catch (eClose) {
     }
-    dlg.finished.connect(function() { TripFocus.cleanUp(); });
+    try {
+        dlg.finished.connect(function() { TripFocus.cleanUp(); });
+    } catch (eFinished) {
+    }
 
     dlg.setLayout(layout);
     dlg.resize(900, 600);
