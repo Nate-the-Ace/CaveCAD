@@ -606,6 +606,76 @@ FeatureTrace.buildDock = function(appWin) {
  *  transaction, which is when the region can actually change. */
 FeatureTrace.regionBox = null;
 
+/** Debounce for the panel's own rescans. See markDirty. */
+FeatureTrace.dirtyTimer = null;
+
+/** How long after the last change the panel repaints itself, in ms.
+ *  Long enough to swallow a whole redraw's worth of operations, short
+ *  enough that a caver never notices the delay. */
+FeatureTrace.DIRTY_MS = 150;
+
+/**
+ * Note that the drawing changed, and repaint ONCE after it settles.
+ *
+ * The listeners used to do the work inline, and that made the panel
+ * quadratic in a redraw. Measured on a 278-entity drawing:
+ * CsTrace.profileRegion 5.4 ms, CsProfileDraw.runsIn 6.7 ms -- about
+ * 17 ms of full-document scanning per notification. Our own redraw
+ * applies DOZENS of operations (every CsLayers.withLayerOn toggle is
+ * one, and the profile owns 40-odd layers once runs are segregated), and
+ * each fired the listener again. Changing one shot's inclination took a
+ * very long time, and on a real cave it would be unusable.
+ *
+ * Restarting the timer on each change is what makes it a debounce rather
+ * than a throttle: a burst of eighty operations schedules one repaint,
+ * 150 ms after the last of them.
+ */
+FeatureTrace.markDirty = function() {
+    try {
+        if (FeatureTrace.dirtyTimer === null) {
+            var t = new QTimer();
+            try {
+                t.setSingleShot(true);
+            } catch (eSingle) {
+                // property form, or a bridge without it: the flush is
+                // idempotent either way
+            }
+            t.timeout.connect(function() {
+                try {
+                    FeatureTrace.flush();
+                } catch (eFlush) {
+                    // a repaint must never throw into the application
+                }
+            });
+            FeatureTrace.dirtyTimer = t;
+        }
+        FeatureTrace.dirtyTimer.start(FeatureTrace.DIRTY_MS);
+    } catch (e) {
+        // No timer in this bridge: fall back to repainting inline. Slow,
+        // but a stale panel is worse than a slow one.
+        FeatureTrace.flush();
+    }
+};
+
+/** One repaint: the region box, the run list and the row states, each
+ *  computed once. */
+FeatureTrace.flush = function() {
+    var doc = null;
+    try {
+        doc = EAction.getDocument();
+    } catch (eDoc) {
+        doc = null;
+    }
+    try {
+        FeatureTrace.regionBox = isNull(doc) ? null :
+            CsTrace.profileRegion(doc);
+    } catch (eBox) {
+        FeatureTrace.regionBox = null;
+    }
+    FeatureTrace.refreshRuns(doc);
+    FeatureTrace.refresh(doc, FeatureTrace.regionBox);
+};
+
 /**
  * Repaints what the panel knows about the drawing.
  *
@@ -614,7 +684,7 @@ FeatureTrace.regionBox = null;
  * so; and a drawing with no elevation refuses every profile row for a
  * reason no click can explain.
  */
-FeatureTrace.refresh = function(docIn) {
+FeatureTrace.refresh = function(docIn, regionIn) {
     var w = FeatureTrace.widgets;
     if (isNull(w)) {
         return;
@@ -668,8 +738,13 @@ FeatureTrace.refresh = function(docIn) {
 
     try {
         if (!isNull(w.profileGroup)) {
-            var hasRegion = !isNull(doc) &&
-                CsTrace.profileRegion(doc) !== null;
+            // The region is PASSED IN, computed once per repaint by
+            // flush(). Recomputing it here would double the cost of
+            // every repaint, and CsTrace.profileRegion walks every
+            // entity in the drawing.
+            var region = (regionIn === undefined) ?
+                FeatureTrace.regionBox : regionIn;
+            var hasRegion = !isNull(region);
             // A RUN IS REQUIRED, not optional. Every traced profile line
             // then lives on a run's layer, which is what states which
             // band it belongs to -- and that is what CsProfileBind uses
@@ -722,16 +797,7 @@ FeatureTrace.installListener = function(appWin) {
                         !csFeatureTraceDock.visible) {
                     return;
                 }
-                FeatureTrace.refreshRuns(document);
-                // The region can only change on a transaction, which is
-                // what lets the cursor readout cache it.
-                try {
-                    FeatureTrace.regionBox = isNull(document) ? null :
-                        CsTrace.profileRegion(document);
-                } catch (eBox) {
-                    FeatureTrace.regionBox = null;
-                }
-                FeatureTrace.refresh(document);
+                FeatureTrace.markDirty();
             } catch (eInner) {
                 // a listener must never throw into the application
             }
@@ -774,7 +840,7 @@ FeatureTrace.installListener = function(appWin) {
                         !csFeatureTraceDock.visible) {
                     return;
                 }
-                FeatureTrace.refresh(EAction.getDocument());
+                FeatureTrace.markDirty();
             } catch (eLay) {
                 // as above
             }
@@ -842,10 +908,7 @@ FeatureTrace.prototype.beginEvent = function() {
         // The drawing may have gained or lost bands since last time.
         FeatureTrace.refreshRuns();
         try {
-            var shown = EAction.getDocument();
-            FeatureTrace.regionBox = isNull(shown) ? null :
-                CsTrace.profileRegion(shown);
-            FeatureTrace.refresh(shown);
+            FeatureTrace.flush();
         } catch (eShow) {
             // a stale panel must never stop the tool opening
         }

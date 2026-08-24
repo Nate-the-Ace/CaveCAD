@@ -14319,8 +14319,11 @@ if (!IS_NODE) {
                 ]
             };
 
+            // The region is passed in: flush() computes it once per
+            // repaint, because profileRegion walks every entity and the
+            // panel used to recompute it on every notification.
             // No elevation yet: the Profile group is gated off and says why.
-            FeatureTrace.refresh(d);
+            FeatureTrace.refresh(d, CsTrace.profileRegion(d));
             ok(group.enabled === false,
                 "FeatureTrace.refresh: no elevation disables the Profile group");
             ok(String(group.toolTip).indexOf("Generate Profile") >= 0,
@@ -14334,7 +14337,7 @@ if (!IS_NODE) {
             var bop = new RAddObjectsOperation();
             bop.addObject(band, false);
             di3.applyOperation(bop);
-            FeatureTrace.refresh(d);
+            FeatureTrace.refresh(d, CsTrace.profileRegion(d));
             ok(group.enabled === true,
                 "FeatureTrace.refresh: an elevation enables the Profile group");
 
@@ -14342,7 +14345,7 @@ if (!IS_NODE) {
             // what a click would actually draw to.
             CsLayerVariants.ensureProfile(d, di3,
                 CsLayers.PROFILE_TRACED_CEILING, "A");
-            FeatureTrace.refresh(d);
+            FeatureTrace.refresh(d, CsTrace.profileRegion(d));
             eqs(ceilingBtn.text, "Ceiling",
                 "FeatureTrace.refresh: a visible layer shows a plain label");
             eqs(ceilingBtn.toolTip, "PROFILE-CEILING-A",
@@ -14354,7 +14357,7 @@ if (!IS_NODE) {
             mop.addObject(lay, false);
             di3.applyOperation(mop);
 
-            FeatureTrace.refresh(d);
+            FeatureTrace.refresh(d, CsTrace.profileRegion(d));
             ok(String(ceilingBtn.text).indexOf("hidden") >= 0,
                 "FeatureTrace.refresh: an OFF target layer is marked hidden");
             ok(String(ceilingBtn.toolTip).indexOf("switched OFF") >= 0,
