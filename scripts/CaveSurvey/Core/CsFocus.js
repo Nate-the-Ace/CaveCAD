@@ -29,11 +29,17 @@
 
 var CsFocus = {};
 
-/** How each tag's value maps to station names.
- *
- *  `base` is applied to the tag value; `split` means the value is a
- *  station LIST rather than one name; `both` means an "A1->A2" pair
- *  where the entity belongs to both ends. */
+/** How each tag's value maps to station names, keyed by MODE (the
+ *  `mode` field below), not by tag:
+ *    "one"  -- the tag's value (after `base`, if given) is one station
+ *              name.
+ *    "pair" -- the value is an "A1->A2" pair; the entity belongs to
+ *              both ends (see ALL_ENDS_MODES below).
+ *    "list" -- the value is a "|"-joined station LIST (CsBind.
+ *              decodeStations); the entity belongs to any one of them.
+ *  `base` is applied to the tag value first (CsBind.lrudBase /
+ *  splayBase), to recover the station an LRUD or splay TIP belongs to
+ *  from its own suffixed name. */
 CsFocus.TAG_RULES = [
     { tag: "Station",          mode: "one" },
     { tag: "StationLabel",     mode: "one" },
@@ -53,14 +59,34 @@ CsFocus.TAG_RULES = [
     { tag: "ProfileStation",   mode: "one",  kind: "profile" }
 ];
 
-/** Tags whose presence means "every station has to be in focus", as
- *  against "any one of them". A LEG is the drawing's only record of a
- *  shot between two stations, so it belongs to both; a WALL RUN is
- *  generated geometry following a chain, and showing it beside a focused
- *  station it touches is more useful than hiding it because the chain
- *  wandered out of focus. */
+/** Which MODES (see TAG_RULES above) need every station in focus, as
+ *  against any one of them. Only "pair" does: a LEG is the drawing's
+ *  only record of a shot between two stations, so it belongs to both.
+ *  "list" (WallRunStations) is deliberately OR, not AND -- a wall run
+ *  generated from a chain should show beside any focused station it
+ *  touches, even if the chain wandered briefly out of focus.
+ *
+ *  THAT OR CHOICE IS CORRECT ONLY ONCE WallRunStations CARRIES A RUN'S
+ *  OWN STATIONS. It does not today: CsDraw.js builds one `allNames`
+ *  string from EVERY resolved station in the WHOLE drawing (`names.
+ *  join("|")`, around CsDraw.js:592) and writes that same string onto
+ *  every wall run it draws, whichever trip or run the wall belongs to.
+ *  So right now, under OR, every wall run in the cave matches every
+ *  focus selection -- a single-trip view comes back with the whole
+ *  cave's dashed walls overlaid, not just that trip's. This is a
+ *  tagging bug at the source, not a reason to change OR to AND here:
+ *  Task 7 (see the plan doc) fixes CsLrud/CsDraw to tag each wall run
+ *  with only the stations its own chain followed, and OR is exactly
+ *  right once that lands. Until then, a drawing that was drawn or
+ *  redrawn before Task 7 keeps ALL of its wall runs visible under
+ *  every selection; only a redraw performed after Task 7 ships
+ *  corrects it for that drawing. */
 CsFocus.ALL_ENDS_MODES = { pair: true };
 
+/** Applies a TAG_RULES `base` (see above) to a raw tag value, so a
+ *  station-derived tip name (an LRUD or splay suffix) becomes the
+ *  station it belongs to. Called once per rule inside stationsOf; not
+ *  meaningful on its own. */
 CsFocus.applyBase = function(value, base) {
     if (base === "lrud") {
         return CsBind.lrudBase(value);
@@ -74,8 +100,32 @@ CsFocus.applyBase = function(value, base) {
 /**
  * The stations an entity belongs to.
  *
+ * FIRST MATCH WINS: the rules are tried in TAG_RULES order and the
+ * first one whose tag is present (and non-empty after its mode is
+ * applied) decides the answer -- later rules are never consulted. That
+ * puts LineworkStations (last in TAG_RULES) behind all 13 suite tags
+ * ahead of it: an entity carrying both a suite tag and LineworkStations
+ * would be attributed by the suite tag, not the linework one. No
+ * entity the suite draws carries both today, so this is latent -- but
+ * it means the tag-parity test below pins list MEMBERSHIP only, not
+ * priority. eraseStations does NOT share this risk: it tests
+ * CsBind.hasLineworkTags(e) first, before any per-tag rule, precisely
+ * so linework always wins there. A future hybrid entity (both a suite
+ * tag and a linework tag) would erase safely but focus by the wrong
+ * rule, silently.
+ *
+ * LineworkStations also serves two different name namespaces: CsBind.
+ * tagEntities writes plain station names onto plan-frame linework,
+ * while CsProfileBind.claim writes run-qualified names ("A/A2|A/A3")
+ * onto profile-frame linework. This function treats both the same way
+ * -- as station names -- which is only safe because CsProfileBind's
+ * output lives on PROFILE-* and CTRL-PROFILE-* layers and the CALLER
+ * (isVisible's caller, via isPlanFrame) hides those layers outright.
+ * The correctness that makes this benign lives outside this function.
+ *
  * \return {names: [stationName], kind: "suite"|"linework"|"profile"|
- *          "none", mode: the rule that matched, or ""}
+ *          "none", mode: the matched rule's mode ("one"|"pair"|"list"),
+ *          or "" when nothing matched}
  */
 CsFocus.stationsOf = function(entity) {
     for (var i = 0; i < CsFocus.TAG_RULES.length; i++) {
@@ -86,11 +136,18 @@ CsFocus.stationsOf = function(entity) {
         }
         var names = [];
         if (rule.mode === "pair") {
+            // A pair that is not exactly two non-empty ends ("A1->",
+            // "->A2", a stray extra "->") does not attribute to just
+            // the one end it does have -- eraseStations' own pair rule
+            // (CsDraw.js, the Shot branch) requires ends.length === 2
+            // and ignores anything else, and stationsOf has to agree
+            // or a half-written pair could show under a focus
+            // eraseStations would never touch. Reachable only from
+            // hand-edited or truncated XDATA, never from a normal draw.
             var ends = String(value).split("->");
-            for (var e = 0; e < ends.length; e++) {
-                if (ends[e] !== "") {
-                    names.push(ends[e]);
-                }
+            if (ends.length === 2 && ends[0] !== "" && ends[1] !== "") {
+                names.push(ends[0]);
+                names.push(ends[1]);
             }
         } else if (rule.mode === "list") {
             var members = CsBind.decodeStations(value);
@@ -156,16 +213,49 @@ CsFocus.isPlanFrame = function(layerName) {
  * The station set a window selection makes.
  *
  * \param picked {trips: [tripId], teams: [teamText], people: [name],
- *                runs: [runKey]} -- any key may be absent
+ *                runs: [runKey]} -- any key may be absent; null/
+ *                undefined (or a null/undefined picked itself) is
+ *                treated as "picked nothing"
  * \param tripStations {tripId: [stationName]} from
  *                     CsRevise.tripStationNames
- * \param runStations {runKey: [stationName]} from CsProfile.groupRuns
- * \param tripsForGroup {teamText or person: [tripId]} -- what byTeam
- *                      and byPerson put in their rows' tripIds
+ * \param runStations {runKey: [stationName]} -- NOT CsProfile.
+ *                     groupRuns(resolved) itself: that returns
+ *                     {runs, order, ungrouped} where runs[key] is
+ *                     {key, stations}. Build this parameter as
+ *                     {runKey: grouped.runs[runKey].stations} from
+ *                     that, one line at each call site. Passing
+ *                     groupRuns' result directly compiles, throws
+ *                     nothing, and silently contributes zero stations
+ *                     for every run -- see the test below that pins
+ *                     this trap.
+ * \param tripsForGroup a map this function treats as OPAQUE: each key
+ *                      is exactly the string a Teams or People row's
+ *                      `pick` carries, and each value is that group's
+ *                      [tripId]. TripFocusRows.tripsForGroup is the one
+ *                      producer today, and it prefixes every key --
+ *                      "team:" + the team text verbatim, "person:" +
+ *                      CsContrib.personKey(name) -- so a solo trip
+ *                      whose team text happens to equal its one
+ *                      member's name still gets two independent keys
+ *                      ("team:Nathan" vs "person:NATHAN") rather than
+ *                      colliding into one, which is a real bug this
+ *                      file used to be exposed to before the prefix
+ *                      was added on the producer side. This function
+ *                      does not need to know the prefix scheme; it
+ *                      only needs `groups[g][i]` (see below) to be the
+ *                      exact same string tripsForGroup used as a key,
+ *                      null/undefined (or a missing key) is treated as
+ *                      "no trips for this group" -- any key may be
+ *                      absent
  * \return {stationName: true}
  */
 CsFocus.stationSet = function(picked, tripStations, runStations,
         tripsForGroup) {
+    picked = (picked === undefined || picked === null) ? {} : picked;
+    tripStations = (tripStations === undefined || tripStations === null) ?
+        {} : tripStations;
+    runStations = (runStations === undefined || runStations === null) ?
+        {} : runStations;
     var set = {};
     var addTrip = function(id) {
         var names = tripStations[id];
@@ -212,7 +302,11 @@ CsFocus.stationSet = function(picked, tripStations, runStations,
                 continue;
             }
             for (j = 0; j < members.length; j++) {
-                if (members[j] !== "") {
+                // same three-way guard as addTrip's -- a run's station
+                // list is not immune to a blank/null/undefined entry
+                // any more than a trip's is
+                if (members[j] !== "" && members[j] !== null &&
+                        members[j] !== undefined) {
                     set[members[j]] = true;
                 }
             }
@@ -223,8 +317,10 @@ CsFocus.stationSet = function(picked, tripStations, runStations,
 
 /** True when the selection picked nothing at all -- the window shows
  *  everything rather than an empty view, because a blank drawing looks
- *  like a broken tool. */
+ *  like a broken tool. A null/undefined `picked` is itself "picked
+ *  nothing", the same contract stationSet uses. */
 CsFocus.isEmptySelection = function(picked) {
+    picked = (picked === undefined || picked === null) ? {} : picked;
     var keys = ["trips", "teams", "people", "runs"];
     for (var i = 0; i < keys.length; i++) {
         var list = picked[keys[i]];

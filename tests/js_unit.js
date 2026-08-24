@@ -15592,6 +15592,41 @@ if (!IS_NODE) {
         "CTRL-PROFILE-FLOOR")).kind, "profile",
         "CsFocus.stationsOf: profile geometry is its own kind");
 
+    // -- malformed tag values fall through to "none" (A4/A5) ----------
+    // Each of these is a tag the suite would never write intact, but a
+    // hand-edited or truncated XDATA blob can, and the fail-safe rule
+    // depends on the fall-through at "a tag present but empty
+    // attributes nothing" actually being reached for every one of
+    // them, not just the tidy cases.
+    eqs(CsFocus.stationsOf(fake({ Shot: "->" })).kind, "none",
+        "CsFocus.stationsOf: a pair with both ends blank attributes " +
+            "nothing");
+    eqs(CsFocus.stationsOf(fake({ Shot: "" })).kind, "none",
+        "CsFocus.stationsOf: an empty Shot value attributes nothing");
+    eqs(CsFocus.stationsOf(fake({ WallRunStations: "|||" })).kind, "none",
+        "CsFocus.stationsOf: an all-blank wall run list attributes " +
+            "nothing");
+    eqs(CsFocus.stationsOf(fake({ LRUDName: ".L" })).kind, "none",
+        "CsFocus.stationsOf: an LRUD tip with no station before the " +
+            "suffix attributes nothing");
+    eqs(CsFocus.stationsOf(fake({ SplayName: ".4" })).kind, "none",
+        "CsFocus.stationsOf: a splay tip with no station before the " +
+            "suffix attributes nothing");
+    // A half-written pair ("A1->") must not attribute to the one end it
+    // does have -- eraseStations' own Shot rule requires both ends, so
+    // stationsOf has to agree or a half pair could show under a focus
+    // eraseStations would never touch.
+    eqs(CsFocus.stationsOf(fake({ Shot: "A1->" })).kind, "none",
+        "CsFocus.stationsOf: a pair missing its second end attributes " +
+            "nothing, not just its first end");
+    // Fall-through has to reach a LATER rule, not just stop at "none":
+    // a blank Station tag (present but empty) must not swallow the
+    // entity -- Shot, further down TAG_RULES, still gets its turn.
+    eqs(CsFocus.stationsOf(fake({ Station: "", Shot: "A1->A2" })).names
+        .join(","), "A1,A2",
+        "CsFocus.stationsOf: a blank Station falls through to a real " +
+            "Shot rule later in the table");
+
     // -- visibility --------------------------------------------------
     var focus = setOf(["A1", "A2"]);
     ok(CsFocus.isVisible(fake({ Shot: "A1->A2" }), focus),
@@ -15605,6 +15640,9 @@ if (!IS_NODE) {
         "border, basemap, the reader's own sketches");
     ok(CsFocus.isVisible(fake({ Station: "A1" }), null),
         "CsFocus.isVisible: a null focus set is 'All', not 'nothing'");
+    ok(!CsFocus.isVisible(fake({ Station: "A1" }), {}),
+        "CsFocus.isVisible: an EMPTY focus set (something attributable, " +
+            "nothing picked) hides -- the one input that hides everything");
 
     // -- plan only ---------------------------------------------------
     ok(CsFocus.isPlanFrame("CTRL-SHOTS"),
@@ -15626,6 +15664,114 @@ if (!IS_NODE) {
         "CsFocus.stationSet: leaves out what nothing picked");
     ok(set[""] !== true,
         "CsFocus.stationSet: the blank TO of a splay is not a station");
+
+    // -- runStations must be {runKey: [stationName]}, NOT the raw
+    // -- CsProfile.groupRuns(resolved) result (A2). That function
+    // -- returns {runs, order, ungrouped} where runs[key] is
+    // -- {key, stations} -- passing IT directly compiles, throws
+    // -- nothing, and silently contributes zero stations for every
+    // -- run picked. This pins the trap so it stays documented by a
+    // -- test, not only by the docblock's prose.
+    var wrongShapeSet = CsFocus.stationSet({ runs: ["A"] }, {},
+        { A: { key: "A", stations: ["A1", "A2"] } });
+    var wrongShapeKeys = [];
+    for (var wk in wrongShapeSet) {
+        if (wrongShapeSet.hasOwnProperty(wk)) { wrongShapeKeys.push(wk); }
+    }
+    eqs(wrongShapeKeys.length, 0,
+        "CsFocus.stationSet: handing it groupRuns' own {key,stations} " +
+            "shape instead of the flat {runKey: [names]} it wants " +
+            "yields an EMPTY set, not an error -- exactly the trap the " +
+            "docblock now warns about");
+
+    // -- teams/people union via tripsForGroup, and the prefixed-key
+    // -- contract (A3/A4): TripFocusRows.tripsForGroup keys teams as
+    // -- "team:" + teamText and people as "person:" + CsContrib.
+    // -- personKey(name), so a solo trip whose team text IS its one
+    // -- member's name still resolves the two rows independently.
+    var soloTripStations = { 0: ["X1"], 1: ["Y1"] };
+    var soloGroups = { "team:Nathan": [0], "person:NATHAN": [1] };
+    var teamOnlySet = CsFocus.stationSet({ teams: ["team:Nathan"] },
+        soloTripStations, {}, soloGroups);
+    ok(teamOnlySet["X1"] === true && teamOnlySet["Y1"] !== true,
+        "CsFocus.stationSet: 'team:Nathan' resolves the TEAM row's " +
+            "trip only");
+    var personOnlySet = CsFocus.stationSet({ people: ["person:NATHAN"] },
+        soloTripStations, {}, soloGroups);
+    ok(personOnlySet["Y1"] === true && personOnlySet["X1"] !== true,
+        "CsFocus.stationSet: 'person:NATHAN' resolves the PERSON row's " +
+            "trip only -- the two keys never collide even though the " +
+            "team text and the person's name are the same string");
+
+    var unionGroups = { "team:Alpha": [0], "person:BOB": [1] };
+    var unionTripStations = { 0: ["T1"], 1: ["T2"] };
+    var unionSet = CsFocus.stationSet(
+        { teams: ["team:Alpha"], people: ["person:BOB"] },
+        unionTripStations, {}, unionGroups);
+    ok(unionSet["T1"] === true && unionSet["T2"] === true,
+        "CsFocus.stationSet: a teams pick and a people pick union " +
+            "together through tripsForGroup, just like trips and runs do");
+    var noGroupSet = CsFocus.stationSet({ teams: ["team:Nobody"] },
+        unionTripStations, {}, unionGroups);
+    var noGroupKeys = [];
+    for (var ngk in noGroupSet) {
+        if (noGroupSet.hasOwnProperty(ngk)) { noGroupKeys.push(ngk); }
+    }
+    eqs(noGroupKeys.length, 0,
+        "CsFocus.stationSet: a team/person key tripsForGroup has never " +
+            "heard of contributes nothing, not an error");
+
+    // -- the runs branch guards null/undefined the same three-way way
+    // -- addTrip does, not just "" (A6).
+    var gapRuns = { A: ["A1", null, undefined, ""] };
+    var gapSet = CsFocus.stationSet({ runs: ["A"] }, {}, gapRuns);
+    var gapKeys = [];
+    for (var gk in gapSet) {
+        if (gapSet.hasOwnProperty(gk)) { gapKeys.push(gk); }
+    }
+    eqs(gapKeys.sort().join(","), "A1",
+        "CsFocus.stationSet: null/undefined members of a run's station " +
+            "list are guarded exactly like a blank one, not turned into " +
+            "keys \"null\"/\"undefined\"");
+
+    // -- a consistent defensiveness contract (A7): every parameter
+    // -- tolerates a missing/null value the same way tripsForGroup
+    // -- already did, none of them throw.
+    var threwFocus = null;
+    try {
+        CsFocus.stationSet(null, {}, {});
+        CsFocus.stationSet({ trips: [0] }, undefined, {});
+        CsFocus.stationSet({ runs: ["A"] }, {}, undefined);
+        CsFocus.isEmptySelection(null);
+    } catch (eFocus) {
+        threwFocus = String(eFocus);
+    }
+    ok(threwFocus === null,
+        "CsFocus.stationSet/isEmptySelection: a null/undefined " +
+            "picked/tripStations/runStations does not throw, got " +
+            threwFocus);
+    var nullPickedSet = CsFocus.stationSet(null, {}, {});
+    var nullPickedKeys = [];
+    for (var npk in nullPickedSet) {
+        if (nullPickedSet.hasOwnProperty(npk)) { nullPickedKeys.push(npk); }
+    }
+    eqs(nullPickedKeys.length, 0,
+        "CsFocus.stationSet: a null picked selection contributes nothing");
+
+    // -- isEmptySelection ---------------------------------------------
+    ok(CsFocus.isEmptySelection({}),
+        "CsFocus.isEmptySelection: nothing picked at all is empty");
+    ok(CsFocus.isEmptySelection({ trips: [], teams: [], people: [],
+        runs: [] }),
+        "CsFocus.isEmptySelection: every key present but empty is still " +
+            "empty");
+    ok(!CsFocus.isEmptySelection({ trips: [0] }),
+        "CsFocus.isEmptySelection: a real pick is not empty");
+    ok(!CsFocus.isEmptySelection({ runs: ["A"] }),
+        "CsFocus.isEmptySelection: a run pick counts too, not just trips");
+    ok(CsFocus.isEmptySelection(null),
+        "CsFocus.isEmptySelection: null picked is 'picked nothing', " +
+            "same contract as stationSet's");
 
     // -- THE INVARIANT: the erase rules and the focus rules read the
     // -- same tags. A tag added to one and not the other means geometry
@@ -15654,8 +15800,7 @@ if (!IS_NODE) {
     }
     for (name in focusTags) {
         if (focusTags.hasOwnProperty(name) &&
-                name !== CsBind.STATIONS_TAG && name !== "ProfileStation" &&
-                name !== "ProfileRun") {
+                name !== CsBind.STATIONS_TAG && name !== "ProfileStation") {
             ok(eraseTags[name] === true,
                 "CsFocus.TAG_RULES: " + name + " is not a tag eraseStations " +
                     "reads -- either it is stale or erase has a gap");
