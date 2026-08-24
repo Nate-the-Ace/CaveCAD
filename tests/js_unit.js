@@ -95,11 +95,13 @@ var CORE_FILES = [
     "scripts/CaveSurvey/Core/CsUuid.js",
     "scripts/CaveSurvey/Core/CsUnits.js",
     "scripts/CaveSurvey/Core/CsCave.js",
+    "scripts/CaveSurvey/Core/CsShelf.js",
     "scripts/CaveSurvey/Core/CsGeoProject.js",
     "scripts/CaveSurvey/Core/CsAngles.js",
     "scripts/CaveSurvey/Core/CsIgrfCoeffs.js",
     "scripts/CaveSurvey/Core/CsGeomag.js",
     "scripts/CaveSurvey/Core/CsModel.js",
+    "scripts/CaveSurvey/Core/CsFrontier.js",
     "scripts/CaveSurvey/Core/CsTraverse.js",
     "scripts/CaveSurvey/Core/CsNetwork.js",
     "scripts/CaveSurvey/Core/CsAdjust.js",
@@ -16753,6 +16755,173 @@ if (!IS_NODE) {
     eqs(CsUuid.isValid(one.toUpperCase()), false,
         "isValid is case-sensitive, so an id has exactly one spelling");
 })();
+
+// ---------------------------------------------------------------------
+// Shelf -- the caves this machine knows about
+// ---------------------------------------------------------------------
+
+eqs(CsShelf.basename("/a/b/ALL DAY CAVE"), "ALL DAY CAVE", "basename of a folder");
+eqs(CsShelf.stem("/a/All Day Cave.dxf"), "All Day Cave", "stem drops the extension");
+eqs(CsShelf.extension("/a/MAP.DWG"), "dwg", "extension is lower-cased");
+ok(CsShelf.sameFolder("/a/B/", "/A/b"), "folder comparison ignores case and slash");
+ok(!CsShelf.sameFolder("", ""), "empty folders are not the same cave");
+
+// A record without a folder is meaningless; a record without a name
+// takes the folder's own name, which is what the convention says the
+// cave is called.
+ok(CsShelf.normalize({ name: "x" }) === null, "record without a folder is rejected");
+eqs(CsShelf.normalize({ folder: "/d/BC Pit" }).name, "BC Pit",
+    "record name falls back to the folder name");
+
+// Which file in a cave folder is THE drawing.
+eqs(CsShelf.pickDrawing(["/c/ALL DAY CAVE/All Day Cave.dxf"], "/c/ALL DAY CAVE"),
+    "/c/ALL DAY CAVE/All Day Cave.dxf", "the obvious case");
+eqs(CsShelf.pickDrawing([
+        "/c/CAVE/Notes.dxf",
+        "/c/CAVE/Cave.dwg",
+        "/c/CAVE/Cave.dxf"
+    ], "/c/CAVE"),
+    "/c/CAVE/Cave.dxf", "a DXF matching the folder beats a DWG and a stranger");
+eqs(CsShelf.pickDrawing([
+        "/c/STUDABAKER CAVE/CARTO/STUDABAKER MAP.dwg"
+    ], "/c/STUDABAKER CAVE"),
+    "/c/STUDABAKER CAVE/CARTO/STUDABAKER MAP.dwg",
+    "a DWG one level down is still the drawing when it is all there is");
+eqs(CsShelf.pickDrawing([
+        "/c/CAVE/CARTO/Cave.dxf",
+        "/c/CAVE/Cave.dxf"
+    ], "/c/CAVE"),
+    "/c/CAVE/Cave.dxf", "shallower wins over deeper");
+ok(CsShelf.pickDrawing(["/c/CAVE/Cave-PROFILE.dxf"], "/c/CAVE") === null,
+    "the legacy sibling elevation is never the drawing");
+ok(CsShelf.pickDrawing(["/c/CAVE/NSS_Cave_Template_PLAN.dxf"], "/c/CAVE") === null,
+    "a template copied in is never the drawing");
+ok(CsShelf.pickDrawing(["/c/CAVE/map.pdf"], "/c/CAVE") === null,
+    "a PDF is not a drawing");
+ok(CsShelf.pickDrawing([], "/c/CAVE") === null, "no candidates, no drawing");
+
+// The round trip through settings, including the comma that made a
+// QStringList the wrong container.
+var shelfRecords = [
+    { name: "Smith, J. Cave", folder: "/d/Smith, J. Cave", drawing: "/d/Smith, J. Cave/x.dxf" },
+    { name: "BC Pit", folder: "/d/BC Pit", drawing: "" }
+];
+var shelfBack = CsShelf.parse(CsShelf.serialize(shelfRecords));
+eqs(shelfBack.length, 2, "both records survive the round trip");
+eqs(shelfBack[0].name, "Smith, J. Cave", "a comma in a cave name survives");
+eqs(CsShelf.parse("not json at all").length, 0, "unparseable settings mean no caves");
+eqs(CsShelf.parse("").length, 0, "empty settings mean no caves");
+eqs(CsShelf.parse('[{"name":"x"}]').length, 0, "a folderless record is dropped on read");
+
+// Registering the same folder twice refreshes rather than duplicates,
+// and a refresh carrying no drawing keeps the one already known.
+var shelfList = [];
+CsShelf.put(shelfList, { name: "BC Pit", folder: "/d/BC Pit", drawing: "/d/BC Pit/a.dxf" });
+CsShelf.put(shelfList, { name: "BC Pit", folder: "/d/bc pit/" });
+eqs(shelfList.length, 1, "the same folder registers once");
+eqs(shelfList[0].drawing, "/d/BC Pit/a.dxf", "a refresh does not blank the drawing");
+ok(CsShelf.remove(shelfList, "/d/BC Pit"), "a cave can be forgotten");
+eqs(shelfList.length, 0, "forgetting removes the record");
+
+eqs(CsShelf.sorted([{ name: "Zed", folder: "/z" }, { name: "abc", folder: "/a" }])[0].name,
+    "abc", "the shelf lists caves by name");
+
+// ---------------------------------------------------------------------
+// Frontier -- where the survey stopped
+// ---------------------------------------------------------------------
+
+function frontierShot(from, to, trip, lrud) {
+    var shot = CsModel.newShot();
+    shot.from = from;
+    shot.to = to;
+    shot.distance = 10.0;
+    shot.azimuth = 90.0;
+    shot.trip = (trip === undefined) ? 0 : trip;
+    if (lrud === true) {
+        shot.left = 2.0; shot.right = 3.0; shot.up = 8.0; shot.down = 1.0;
+    }
+    return shot;
+}
+
+function frontierSurvey(shots) {
+    var survey = CsModel.newSurvey();
+    survey.shots = shots;
+    return survey;
+}
+
+// A plain chain has exactly one open end: the far end. The station the
+// survey starts from is the anchor, not a lead.
+var frChain = frontierSurvey([
+    frontierShot("A1", "A2"),
+    frontierShot("A2", "A3")
+]);
+var frEnds = CsFrontier.openEnds(frChain);
+eqs(frEnds.length, 1, "chain has one open end");
+eqs(frEnds[0].station, "A3", "chain open end is the far station");
+eqs(CsFrontier.degrees(frChain).A2, 2, "mid-chain station has degree 2");
+ok(CsFrontier.anchors(frChain).A1 === true, "first station is an anchor");
+
+// A branch leaves two ends.
+var frBranch = frontierSurvey([
+    frontierShot("A1", "A2"),
+    frontierShot("A2", "A3"),
+    frontierShot("A2", "B1")
+]);
+var frBranchEnds = CsFrontier.openEnds(frBranch);
+eqs(frBranchEnds.length, 2, "branch has two open ends");
+
+// Splays hang off a station and come back -- counting them would make
+// every splayed station look like a junction, and would offer the splay
+// tip itself as a lead.
+var frSplayShot = frontierShot("A3", "A3.1");
+frSplayShot.splay = true;
+var frSplay = frontierSurvey([
+    frontierShot("A1", "A2"),
+    frontierShot("A2", "A3"),
+    frSplayShot
+]);
+var frSplayEnds = CsFrontier.openEnds(frSplay);
+eqs(frSplayEnds.length, 1, "splay does not add an open end");
+eqs(frSplayEnds[0].station, "A3", "splayed station is still the open end");
+
+// A station the party tied off is not a lead, and only a human knows.
+eqs(CsFrontier.openEnds(frChain, { closed: ["A3"] }).length, 0,
+    "closed station drops out");
+
+// Fixed stations are control, never leads.
+var frFixed = frontierSurvey([
+    frontierShot("A1", "A2"),
+    frontierShot("A2", "A3")
+]);
+frFixed.fixed = { A3: { x: 0, y: 0, z: 0 } };
+eqs(CsFrontier.openEnds(frFixed).length, 0, "fixed station is not an open end");
+
+// Newest trip first: the end you want is the one the last trip walked
+// away from.
+var frTrips = frontierSurvey([
+    frontierShot("A1", "A2", 0),
+    frontierShot("A2", "A3", 0),
+    frontierShot("A2", "B1", 2)
+]);
+var frTripEnds = CsFrontier.openEnds(frTrips);
+eqs(frTripEnds[0].station, "B1", "newest trip's end sorts first");
+eqs(frTripEnds[0].trip, 2, "open end carries the trip that stopped there");
+eqs(CsFrontier.openEndsOfTrip(frTrips, 2).length, 1, "one end left by trip 2");
+eqs(CsFrontier.openEndsOfTrip(frTrips, 0)[0].station, "A3",
+    "trip 0's own end is the old one");
+
+// An end with no wall measurements is worth flagging: nothing to draw
+// walls from at the tie-in.
+var frLrud = frontierSurvey([
+    frontierShot("A1", "A2", 0, true),
+    frontierShot("A2", "A3", 0, true)
+]);
+eqs(CsFrontier.openEnds(frLrud)[0].hasLrud, true, "LRUD on arriving leg");
+eqs(CsFrontier.openEnds(frChain)[0].hasLrud, false, "no LRUD recorded");
+
+// Junk in, empty out -- never a throw.
+eqs(CsFrontier.openEnds(null).length, 0, "null survey yields no ends");
+eqs(CsFrontier.openEnds(frontierSurvey([])).length, 0, "empty survey yields no ends");
 
 // ---------------------------------------------------------------------
 // Report.

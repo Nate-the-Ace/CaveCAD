@@ -7,7 +7,16 @@
 //
 //     ALL DAY CAVE/            the cave, named the way people say it
 //       All Day Cave.dxf       the drawing
+//       All Day Cave-aerial.png  the basemap, when one was fetched
 //       scans/                 scanned hand sketches
+//       PDF/                   produced maps
+//
+// PDF/ is where finished maps are kept, and nothing in the suite ever
+// writes one: plotting a sheet is the cartographer's job, and Package
+// Cave Project only COLLECTS what it finds there. Its name is matched
+// case-insensitively -- "PDF", "pdf" and "Pdf" are all the same folder
+// to a surveyor, and on Linux they are three different folders to
+// QDir.
 //
 // That is the entire convention. No marker file, no index, no slug --
 // a cave folder is simply the folder a cave drawing was saved in, which
@@ -28,6 +37,10 @@
 var CsCave = {};
 
 CsCave.SCANS = "scans";
+CsCave.PDF = "PDF";
+
+// The folders a cave project keeps beside its drawing.
+CsCave.SUBFOLDERS = [CsCave.SCANS, CsCave.PDF];
 
 // An explicit drive folder, when the automatic answer is wrong -- a
 // second account, a non-default mount, a group that keeps caves on
@@ -59,6 +72,18 @@ CsCave.nameOf = function(docPath) {
 CsCave.scansDir = function(docPath) {
     var folder = CsCave.folderOf(docPath);
     return folder === null ? null : folder + "/" + CsCave.SCANS;
+};
+
+CsCave.pdfDir = function(docPath) {
+    var folder = CsCave.folderOf(docPath);
+    return folder === null ? null : folder + "/" + CsCave.PDF;
+};
+
+// Is this file name a PDF? Extension only, case-insensitive -- the
+// packager trusts the folder, not the bytes.
+CsCave.isPdfName = function(name) {
+    if (typeof name !== "string") { return false; }
+    return /\.pdf$/i.test(name);
 };
 
 // Is this drawing inside one of the drive folders?
@@ -127,6 +152,88 @@ CsCave.driveRoots = function() {
     } catch (e2) {
     }
     return roots;
+};
+
+// A subfolder of `folder` whose name matches `name` however it was
+// cased, or null. macOS does not care about the difference; Linux does,
+// and a cave folder that came off somebody else's machine can hold
+// "pdf" where this one would have made "PDF".
+CsCave.findSubfolder = function(folder, name) {
+    if (typeof QDir === "undefined") { return null; }
+    if (typeof folder !== "string" || folder === "" ||
+            typeof name !== "string" || name === "") {
+        return null;
+    }
+    try {
+        var dir = new QDir(folder);
+        if (!dir.exists()) { return null; }
+        var wanted = name.toLowerCase();
+        var names = dir.entryList([], QDir.Dirs | QDir.NoDotAndDotDot, 0);
+        for (var i = 0; i < names.length; i++) {
+            var n = String(names[i]);
+            if (n.toLowerCase() === wanted) { return folder + "/" + n; }
+        }
+    } catch (e) {
+    }
+    return null;
+};
+
+// The cave's PDF folder as it exists on disk, whatever its casing, or
+// null when there is none. Read-only: this never creates anything.
+CsCave.pdfFolderOf = function(folder) {
+    return CsCave.findSubfolder(folder, CsCave.PDF);
+};
+
+// Every PDF in a cave's PDF folder, as full paths, name-sorted.
+// An absent folder and an empty one both answer [] -- "no maps" is a
+// normal state for a cave nobody has plotted yet, not an error.
+CsCave.pdfFiles = function(folder) {
+    var out = [];
+    if (typeof QDir === "undefined") { return out; }
+    var pdfDir = CsCave.pdfFolderOf(folder);
+    if (pdfDir === null) { return out; }
+    try {
+        var dir = new QDir(pdfDir);
+        var names = dir.entryList([], QDir.Files | QDir.NoDotAndDotDot, QDir.Name);
+        for (var i = 0; i < names.length; i++) {
+            var n = String(names[i]);
+            if (CsCave.isPdfName(n)) { out.push(pdfDir + "/" + n); }
+        }
+    } catch (e) {
+    }
+    return out;
+};
+
+// Creates the folders a cave project keeps (scans/, PDF/) inside an
+// EXISTING cave folder, skipping any that are already there under any
+// casing.
+//
+// Same restraint as pointAtScans: only under a drive root, so the app
+// never scatters empty folders through directories that have nothing to
+// do with caving. `force` is for the launcher's own New Cave flow,
+// where the user just said in so many words that this folder is a cave.
+//
+// \return the folders created (possibly empty), or null when there was
+// nothing to do.
+CsCave.ensureProjectFolders = function(folder, force) {
+    if (typeof QDir === "undefined") { return null; }
+    if (typeof folder !== "string" || folder === "") { return null; }
+    if (force !== true && !CsCave.isUnderDrive(folder + "/x", CsCave.driveRoots())) {
+        return null;
+    }
+    var made = [];
+    try {
+        if (!(new QDir(folder)).exists()) { return null; }
+        for (var i = 0; i < CsCave.SUBFOLDERS.length; i++) {
+            var sub = CsCave.SUBFOLDERS[i];
+            if (CsCave.findSubfolder(folder, sub) !== null) { continue; }
+            var path = folder + "/" + sub;
+            if ((new QDir()).mkpath(path)) { made.push(path); }
+        }
+    } catch (e) {
+        return made;
+    }
+    return made;
 };
 
 // Makes sure this cave's scans/ folder exists, and points the stock
