@@ -45,6 +45,22 @@ mkdir -p "$STAGE"
 # the add-on itself: the menu builder plus one folder per tool
 cp -R "$REPO/scripts/CaveSurvey" "$STAGE/CaveSurvey"
 
+# PARKED TOOLS -- present in the repo, deliberately NOT shipped.
+# Nathan's call, 2026-08-24: "this is not ready for distribution. we'll freeze
+# this here. do not have it as part of any future releases until i come back to
+# it and [test] it manually." The code, its tests and its docs all stay in the
+# tree and keep running in tests/run_all.sh, so the work does not rot -- it just
+# never reaches a package. To unpark one, delete its line here and restore its
+# row in the README's tool table (a structural test pins that a parked tool is
+# absent from the table, so the two cannot drift).
+PARKED_TOOLS="TripFocus"
+for parked in $PARKED_TOOLS; do
+    if [ -d "$STAGE/CaveSurvey/$parked" ]; then
+        rm -rf "$STAGE/CaveSurvey/$parked"
+        echo "parked, not shipped: $parked"
+    fi
+done
+
 # the version, stamped into the add-on so it can report itself at run time
 # (CaveSurvey.getVersion() reads this file; CaveCAD shows it on the splash
 # screen and in Help > About > Script Add-Ons). Never in the source tree --

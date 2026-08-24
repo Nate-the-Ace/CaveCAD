@@ -834,6 +834,20 @@ class TestReadmeToolTable(unittest.TestCase):
             out[name] = set(re.findall(r'"([^"]+)"', match.group(1)))
         return out
 
+    # Tools that live in the repo but are deliberately not shipped -- see
+    # PARKED_TOOLS in tools/make_package.sh. A parked tool must NOT appear in
+    # the README's table, because that table documents what a user gets.
+    PARKED = {"TripFocus"}
+
+    def test_a_parked_tool_is_absent_from_the_readme_table(self):
+        listed = self.readme_table_aliases()
+        by_tool = self.aliases_by_tool()
+        leaked = sorted(name for name in self.PARKED
+                        if name in by_tool and (by_tool[name] & listed))
+        self.assertEqual(leaked, [],
+                         "these tools are parked (not shipped) but the README "
+                         "advertises them: %s" % leaked)
+
     def test_every_tool_appears_in_the_readme_table(self):
         # ANY of a tool's aliases counts: the table documents the short
         # form (`snb`) while setDefaultCommands lists the long one first
@@ -842,7 +856,7 @@ class TestReadmeToolTable(unittest.TestCase):
         listed = self.readme_table_aliases()
         by_tool = self.aliases_by_tool()
         missing = sorted(name for name, aliases in by_tool.items()
-                         if not (aliases & listed))
+                         if name not in self.PARKED and not (aliases & listed))
         self.assertEqual(missing, [],
                          "these tools ship but no alias of theirs appears "
                          "in the README's tool table: %s" % missing)
