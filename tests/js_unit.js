@@ -16629,6 +16629,27 @@ if (!IS_NODE) {
                               { side: "auto", dimasz: 2, dimscale: 1 });
     eqs(ri.branches[0].length, 3,
         "reflow: a tip INSIDE the text box still yields a valid branch");
+    // This tip sits exactly at centerX, so it is the ONLY case that
+    // exercises the <= tie-break. Assert the SIDE, not just the branch
+    // shape: flipping <= to < still yields a 3-point branch, so a
+    // length-only assertion lets that regression through silently.
+    eqs(ri.side, "left",
+        "reflow: a mean tip x exactly at centre resolves LEFT (<=, not <)");
+    near(ri.landing.x, 100, 1e-9,
+        "reflow: and its landing is on the left edge to match");
+
+    // A zero dimasz must FALL BACK, not produce a zero-length landing.
+    // The guard requires both values > 0; without this case that
+    // threshold is unasserted.
+    var r0 = CsCallout.reflow(box, [{ x: 60, y: 40 }],
+                              { side: "auto", dimasz: 0, dimscale: 1 });
+    near(Math.abs(r0.branches[0][1].x - r0.landing.x), 2, 1e-9,
+        "reflow: dimasz 0 falls back to half the box height, " +
+        "not a zero-length landing");
+    var r0s = CsCallout.reflow(box, [{ x: 60, y: 40 }],
+                               { side: "auto", dimasz: 2, dimscale: 0 });
+    near(Math.abs(r0s.branches[0][1].x - r0s.landing.x), 2, 1e-9,
+        "reflow: dimscale 0 falls back the same way");
 })();
 
 // ---------------------------------------------------------------------
