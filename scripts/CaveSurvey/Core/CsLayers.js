@@ -153,15 +153,20 @@ CsLayers.DEFAULTS = {
     // not miss. Every color and weight below is one already proven
     // elsewhere in this table -- "yellow" and "green" do not appear
     // anywhere else in CsLayers.DEFAULTS, so they are not used here.
-    // ELEVATION-LINE is deliberately a DIFFERENT colour from ELEVATION:
-    // it carries a survey-line elevation standing in for an unmeasured
-    // floor, and it must not be mistakable for the real thing on a plot.
+    // ELEVATION vs ELEVATION-LINE is a DIRECTED pair, not merely two
+    // different colours. ELEVATION-LINE carries a survey-line elevation
+    // standing in for a floor nobody measured, so it must read as
+    // PROVISIONAL: the muted colour, dashed, hairline. ELEVATION is the
+    // real reading and gets the plain, legible one. Swapping them still
+    // passes a "the two differ" test while making the fallback OUTSHINE
+    // the measurement -- the exact misreading this pair exists to stop.
+    // Do not reverse them.
     "NOTES-HAZARD": ["red", "CONTINUOUS", "Weight025"],
     "NOTES-DIG": ["pink", "CONTINUOUS", "Weight018"],
     "NOTES-EQUIPMENT": ["cyan", "CONTINUOUS", "Weight018"],
     "NOTES-NAME": ["white", "CONTINUOUS", "Weight018"],
-    "NOTES-ELEVATION": ["gray", "CONTINUOUS", "Weight018"],
-    "NOTES-ELEVATION-LINE": ["white", "DASHED", "Weight009"]
+    "NOTES-ELEVATION": ["white", "CONTINUOUS", "Weight018"],
+    "NOTES-ELEVATION-LINE": ["gray", "DASHED", "Weight009"]
 };
 
 // Layers that belong to the SHEET rather than to either view: one
