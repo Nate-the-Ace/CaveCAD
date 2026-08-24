@@ -32,7 +32,7 @@ PY="python3"
 status=0
 
 echo "=============================================================="
-echo " 1/6  Structural tests (add-on layout, includes, layers)"
+echo " 1/7  Structural tests (add-on layout, includes, layers)"
 echo "=============================================================="
 "$PY" -m unittest discover -s tests -v || status=1
 
@@ -40,7 +40,7 @@ QCAD="/Applications/CaveCAD.app/Contents/MacOS/CaveCAD"
 
 echo
 echo "=============================================================="
-echo " 2/6  Add-on syntax check (inside CaveCAD's own script engine)"
+echo " 2/7  Add-on syntax check (inside CaveCAD's own script engine)"
 echo "=============================================================="
 if [ -e "$QCAD" ]; then
     output=$("$QCAD" -no-dock-icon -no-gui -allow-multiple-instances \
@@ -56,7 +56,7 @@ fi
 
 echo
 echo "=============================================================="
-echo " 3/6  Core unit tests (inside CaveCAD's own script engine)"
+echo " 3/7  Core unit tests (inside CaveCAD's own script engine)"
 echo "=============================================================="
 if [ -e "$QCAD" ]; then
     output=$("$QCAD" -no-dock-icon -no-gui -allow-multiple-instances \
@@ -77,7 +77,7 @@ fi
 
 echo
 echo "=============================================================="
-echo " 4/6  Profile draw round trip (inside CaveCAD's own script engine)"
+echo " 4/7  Profile draw round trip (inside CaveCAD's own script engine)"
 echo "=============================================================="
 if [ -e "$QCAD" ]; then
     output=$("$QCAD" -no-dock-icon -no-gui -allow-multiple-instances \
@@ -95,7 +95,7 @@ fi
 
 echo
 echo "=============================================================="
-echo " 5/6  Generate Profile tool, driven headlessly (inside CaveCAD's own script engine)"
+echo " 5/7  Generate Profile tool, driven headlessly (inside CaveCAD's own script engine)"
 echo "=============================================================="
 if [ -e "$QCAD" ]; then
     output=$("$QCAD" -no-dock-icon -no-gui -allow-multiple-instances \
@@ -113,7 +113,7 @@ fi
 
 echo
 echo "=============================================================="
-echo " 6/6  AlignImage stays in the plan frame (inside CaveCAD's own script engine)"
+echo " 6/7  AlignImage stays in the plan frame (inside CaveCAD's own script engine)"
 echo "=============================================================="
 if [ -e "$QCAD" ]; then
     output=$("$QCAD" -no-dock-icon -no-gui -allow-multiple-instances \
@@ -127,6 +127,24 @@ else
     echo "SKIP: CaveCAD not found -- this calls the tool's own" \
          "per-entity transform() against a real RDocument and cannot" \
          "run under node."
+fi
+
+echo
+echo "=============================================================="
+echo " 7/7  Trip Focus filters the preview (inside CaveCAD's own script engine)"
+echo "=============================================================="
+if [ -e "$QCAD" ]; then
+    output=$("$QCAD" -no-dock-icon -no-gui -allow-multiple-instances \
+                 -autostart tests/trip_focus_filter.js "$PWD" 2>/dev/null)
+    echo "$output"
+    case "$output" in
+        *"### FILTER OK"*) ;;
+        *) echo "Trip Focus filter test did not pass."; status=1 ;;
+    esac
+else
+    echo "SKIP: CaveCAD not found -- this drives TripFocus.applyFocus" \
+         "against a real RDocument/RDocumentInterface and cannot run" \
+         "under node."
 fi
 
 echo
