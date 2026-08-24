@@ -14136,6 +14136,81 @@ if (!IS_NODE) {
             FeatureTrace.widgets = undefined;
         }());
 
+        // -- refresh: hidden-layer markers and the profile gate ------
+        (function() {
+            var d = new RDocument(new RMemoryStorage(),
+                new RSpatialIndexNavel());
+            var di3 = new RDocumentInterface(d);
+
+            function btn(label) {
+                return { text: label, toolTip: "" };
+            }
+            var ceilingBtn = btn("Ceiling");
+            var wallsBtn = btn("Surveyed Walls");
+            var group = { enabled: true, toolTip: "" };
+            FeatureTrace.widgets = {
+                runCombo: { currentText: "A" },
+                profileGroup: group,
+                buttons: [
+                    { button: ceilingBtn,
+                      row: { label: "Ceiling",
+                             layer: CsLayers.PROFILE_TRACED_CEILING } },
+                    { button: wallsBtn,
+                      row: { label: "Surveyed Walls",
+                             layer: CsLayers.WALLS_SURVEYED } }
+                ]
+            };
+
+            // No elevation yet: the Profile group is gated off and says why.
+            FeatureTrace.refresh(d);
+            ok(group.enabled === false,
+                "FeatureTrace.refresh: no elevation disables the Profile group");
+            ok(String(group.toolTip).indexOf("Generate Profile") >= 0,
+                "FeatureTrace.refresh: and the tooltip says what to do");
+
+            // Give it a band, and the group opens up.
+            CsLayers.ensure(d, di3, CsLayers.PROFILE_SHOTS);
+            var band = new RLineEntity(d, new RLineData(
+                new RVector(0, -200), new RVector(50, -190)));
+            band.setLayerId(d.getLayerId(CsLayers.PROFILE_SHOTS));
+            var bop = new RAddObjectsOperation();
+            bop.addObject(band, false);
+            di3.applyOperation(bop);
+            FeatureTrace.refresh(d);
+            ok(group.enabled === true,
+                "FeatureTrace.refresh: an elevation enables the Profile group");
+
+            // The marker follows the SELECTED RUN's layer, since that is
+            // what a click would actually draw to.
+            CsLayerVariants.ensureProfile(d, di3,
+                CsLayers.PROFILE_TRACED_CEILING, "A");
+            FeatureTrace.refresh(d);
+            eqs(ceilingBtn.text, "Ceiling",
+                "FeatureTrace.refresh: a visible layer shows a plain label");
+            eqs(ceilingBtn.toolTip, "PROFILE-CEILING-A",
+                "FeatureTrace.refresh: the tooltip names the run's layer");
+
+            var lay = d.queryLayer("PROFILE-CEILING-A");
+            lay.setOff(true);
+            var mop = new RModifyObjectsOperation();
+            mop.addObject(lay, false);
+            di3.applyOperation(mop);
+
+            FeatureTrace.refresh(d);
+            ok(String(ceilingBtn.text).indexOf("hidden") >= 0,
+                "FeatureTrace.refresh: an OFF target layer is marked hidden");
+            ok(String(ceilingBtn.toolTip).indexOf("switched OFF") >= 0,
+                "FeatureTrace.refresh: and the tooltip explains the risk");
+
+            // A plan row ignores the run entirely.
+            eqs(wallsBtn.toolTip, CsLayers.WALLS_SURVEYED,
+                "FeatureTrace.refresh: a plan row is never run-qualified");
+            eqs(wallsBtn.text, "Surveyed Walls",
+                "FeatureTrace.refresh: and is unmarked while its layer is on");
+
+            FeatureTrace.widgets = undefined;
+        }());
+
         // -- the run selector: profile features only ----------------
         // Each run is drawn as its own band and CsProfile lays bands out
         // so they never overlap, so a profile feature belongs to exactly
@@ -14500,6 +14575,52 @@ if (!IS_NODE) {
         eqs(CsProfileDraw.runsIn(new RDocument(new RMemoryStorage(),
                 new RSpatialIndexNavel())).length, 0,
             "CsProfileDraw.runsIn: an empty drawing has no runs");
+
+        // -- isolate one run ----------------------------------------
+        (function() {
+            var d = new RDocument(new RMemoryStorage(),
+                new RSpatialIndexNavel());
+            var i3 = new RDocumentInterface(d);
+            // Two runs, each with a generated band layer and a traced one.
+            CsLayerVariants.ensureProfile(d, i3, CsLayers.PROFILE_SHOTS, "A");
+            CsLayerVariants.ensureProfile(d, i3,
+                CsLayers.PROFILE_TRACED_CEILING, "A");
+            CsLayerVariants.ensureProfile(d, i3, CsLayers.PROFILE_SHOTS, "B");
+            CsLayers.ensure(d, i3, CsLayers.PROFILE_SHOTS);   // shared
+            CsLayers.ensure(d, i3, CsLayers.WALLS_SURVEYED);  // plan
+
+            eqs(CsProfileDraw.profileVariantLayers(d).length, 3,
+                "profileVariantLayers: three variants, shared and plan excluded");
+
+            var moved = CsProfileDraw.isolateRun(d, i3, "A");
+            eqs(moved, 1, "isolateRun: only run B's layer had to change");
+            ok(!d.queryLayer("CTRL-PROFILE-SHOTS-A").isOff(),
+                "isolateRun: run A's band stays visible");
+            ok(!d.queryLayer("PROFILE-CEILING-A").isOff(),
+                "isolateRun: run A's TRACED work stays visible too");
+            ok(d.queryLayer("CTRL-PROFILE-SHOTS-B").isOff(),
+                "isolateRun: run B is hidden");
+            ok(!d.queryLayer(CsLayers.PROFILE_SHOTS).isOff(),
+                "isolateRun: the SHARED profile layer is left alone");
+            ok(!d.queryLayer(CsLayers.WALLS_SURVEYED).isOff(),
+                "isolateRun: plan layers are never touched");
+
+            // Idempotent: isolating the same run again changes nothing.
+            eqs(CsProfileDraw.isolateRun(d, i3, "A"), 0,
+                "isolateRun: isolating the same run twice is a no-op");
+
+            // Case-folded, like every other use of a run token.
+            CsProfileDraw.showAllRuns(d, i3);
+            eqs(CsProfileDraw.isolateRun(d, i3, "a"), 1,
+                "isolateRun: a lower-case run isolates the same layers");
+            ok(d.queryLayer("CTRL-PROFILE-SHOTS-B").isOff(),
+                "isolateRun: and B is hidden by it");
+
+            eqs(CsProfileDraw.showAllRuns(d, i3), 1,
+                "showAllRuns: brings the hidden run back");
+            ok(!d.queryLayer("CTRL-PROFILE-SHOTS-B").isOff(),
+                "showAllRuns: run B is visible again");
+        }());
 
         // -- the token policy ----------------------------------------
         eqs(CsProfileDraw.tokenFor({ key: "A" }), "A",

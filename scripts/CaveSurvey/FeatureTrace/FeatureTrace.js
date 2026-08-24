@@ -135,6 +135,7 @@ FeatureTrace.widgets = undefined;
 FeatureTrace.armLayer = function(layerName) {
     FeatureTrace.target = layerName;
     FeatureTrace.refreshRuns();
+    FeatureTrace.refresh();
 
     var w = FeatureTrace.widgets;
     if (isNull(w) || isNull(w.buttons)) {
@@ -214,6 +215,49 @@ FeatureTrace.runToken = function() {
         return CsLayerVariants.sanitize(text);
     } catch (e) {
         return null;
+    }
+};
+
+/** Shows only the selected run's profile layers.
+ *
+ *  Refuses with a message when no run is selected rather than quietly
+ *  showing everything: "(all runs)" and "isolate" are opposite
+ *  intentions, and guessing which was meant would hide or reveal work
+ *  the caver did not ask about. */
+FeatureTrace.isolateSelectedRun = function() {
+    var run = FeatureTrace.runToken();
+    if (run === null) {
+        EAction.handleUserMessage(qsTr("Pick a run above first -- " +
+            "\"(all runs)\" has nothing to isolate."));
+        return;
+    }
+    var doc = EAction.getDocument();
+    var di = EAction.getDocumentInterface();
+    if (isNull(doc) || isNull(di)) {
+        return;
+    }
+    try {
+        var n = CsProfileDraw.isolateRun(doc, di, run);
+        EAction.handleUserMessage(qsTr("Showing run %1 only (%2 layer(s) " +
+            "hidden or shown).").arg(run).arg(n));
+    } catch (e) {
+        warning("Feature Trace: could not isolate run " + run + " (" + e + ")");
+    }
+};
+
+/** Brings every profile run back into view. */
+FeatureTrace.showAllRuns = function() {
+    var doc = EAction.getDocument();
+    var di = EAction.getDocumentInterface();
+    if (isNull(doc) || isNull(di)) {
+        return;
+    }
+    try {
+        var n = CsProfileDraw.showAllRuns(doc, di);
+        EAction.handleUserMessage(qsTr("Every profile run is visible " +
+            "again (%1 layer(s) changed).").arg(n));
+    } catch (e) {
+        warning("Feature Trace: could not show all runs (" + e + ")");
     }
 };
 
@@ -410,6 +454,29 @@ FeatureTrace.buildDock = function(appWin) {
                 "own layers. The plan rows above ignore this -- the plan " +
                 "is one continuous map.");
             runRow.addWidget(w.runCombo, 1, 0);
+
+            // Isolate acts on the run the combo has SELECTED, so the
+            // visible run and the run being traced cannot drift apart.
+            // They must not: an off layer still accepts a trace (emit
+            // wraps the add in withLayerOn) and then hides it again, so
+            // tracing a run you cannot see lands work you cannot find.
+            w.isolateButton = new QPushButton(qsTr("Isolate"));
+            w.isolateButton.toolTip = qsTr("Show only the selected run's " +
+                "profile layers, band and traced work both. The shared " +
+                "profile layers and the whole plan are left alone.");
+            w.isolateButton.clicked.connect(function() {
+                FeatureTrace.isolateSelectedRun();
+            });
+            runRow.addWidget(w.isolateButton, 0, 0);
+
+            w.showAllButton = new QPushButton(qsTr("Show All"));
+            w.showAllButton.toolTip = qsTr("Bring every profile run back " +
+                "into view.");
+            w.showAllButton.clicked.connect(function() {
+                FeatureTrace.showAllRuns();
+            });
+            runRow.addWidget(w.showAllButton, 0, 0);
+
             layout.addLayout(runRow, 0);
         } catch (eRun) {
             w.problems.push("run selector (" + eRun + ")");
@@ -444,6 +511,77 @@ FeatureTrace.buildDock = function(appWin) {
     return dock;
 };
 
+/** The profile region, cached.
+ *
+ *  Cached because the cursor readout asks per mouse move and
+ *  CsTrace.profileRegion walks every entity: a per-move scan would make
+ *  the whole application crawl on a real cave. Refreshed on any
+ *  transaction, which is when the region can actually change. */
+FeatureTrace.regionBox = null;
+
+/**
+ * Repaints what the panel knows about the drawing.
+ *
+ * Both of these are otherwise SILENT failures: an off layer refuses adds
+ * with no error, so an hour of tracing lands nowhere and nothing says
+ * so; and a drawing with no elevation refuses every profile row for a
+ * reason no click can explain.
+ */
+FeatureTrace.refresh = function(docIn) {
+    var w = FeatureTrace.widgets;
+    if (isNull(w)) {
+        return;
+    }
+    var doc = isNull(docIn) ? EAction.getDocument() : docIn;
+
+    if (!isNull(w.buttons)) {
+        for (var i = 0; i < w.buttons.length; i++) {
+            var entry = w.buttons[i];
+            try {
+                // The row's layer for the CURRENTLY selected run: that is
+                // what a click would actually draw to, so that is the
+                // layer whose state the caver needs to know about.
+                var layerName = entry.row.layer;
+                var run = FeatureTrace.runToken();
+                if (run !== null &&
+                        CsLayers.frameOf(layerName) === "profile") {
+                    var v = CsLayerVariants.nameFor(layerName, run);
+                    if (v !== null) {
+                        layerName = v;
+                    }
+                }
+                var off = false;
+                if (!isNull(doc) && doc.hasLayer(layerName)) {
+                    var lay = doc.queryLayer(layerName);
+                    off = !isNull(lay) && lay.isOff();
+                }
+                entry.button.text = off ?
+                    entry.row.label + "   (hidden)" : entry.row.label;
+                entry.button.toolTip = off ?
+                    layerName + " is switched OFF -- a trace will land on " +
+                        "it but you will not see it" : layerName;
+            } catch (e) {
+                // an unreadable button is still armable; only its label
+                // goes stale, and that must never stop a trace
+            }
+        }
+    }
+
+    try {
+        if (!isNull(w.profileGroup)) {
+            var hasRegion = !isNull(doc) &&
+                CsTrace.profileRegion(doc) !== null;
+            w.profileGroup.enabled = hasRegion;
+            w.profileGroup.toolTip = hasRegion ? "" :
+                qsTr("This drawing has no elevation yet -- run Generate " +
+                    "Profile first.");
+        }
+    } catch (e2) {
+        // leave the group as it is: a wrongly-enabled row still refuses
+        // an out-of-frame press via frameGuard
+    }
+};
+
 /**
  * Keeps the run list following the DRAWING rather than the panel's own
  * toggle. Idempotent -- installed once.
@@ -474,11 +612,63 @@ FeatureTrace.installListener = function(appWin) {
                     return;
                 }
                 FeatureTrace.refreshRuns(document);
+                // The region can only change on a transaction, which is
+                // what lets the cursor readout cache it.
+                try {
+                    FeatureTrace.regionBox = isNull(document) ? null :
+                        CsTrace.profileRegion(document);
+                } catch (eBox) {
+                    FeatureTrace.regionBox = null;
+                }
+                FeatureTrace.refresh(document);
             } catch (eInner) {
                 // a listener must never throw into the application
             }
         });
         FeatureTrace.listener = adapter;
+
+        // The cursor readout. A COORDINATE listener, not the trace
+        // action's own mouse handler: that only fires while a trace is
+        // already running, so the readout sat at "--" exactly when a
+        // caver was deciding which row to arm.
+        var coord = new RCoordinateListenerAdapter();
+        appWin.addCoordinateListener(coord);
+        coord.coordinateUpdated.connect(function(docIface) {
+            try {
+                if (csFeatureTraceDock === undefined ||
+                        csFeatureTraceDock === null ||
+                        !csFeatureTraceDock.visible || isNull(docIface)) {
+                    return;
+                }
+                var pos = docIface.getLastPosition();
+                if (isNull(pos)) {
+                    return;
+                }
+                FeatureTrace.showCursorFrame(CsTrace.frameIn(
+                    FeatureTrace.regionBox, { x: pos.x, y: pos.y }));
+            } catch (eCoord) {
+                // a listener must never throw into the application
+            }
+        });
+        FeatureTrace.coordListener = coord;
+
+        // Layer visibility is what the "(hidden)" markers report, and it
+        // does not always change through a transaction.
+        var layerAdapter = new RLayerListenerAdapter();
+        appWin.addLayerListener(layerAdapter);
+        layerAdapter.layersUpdated.connect(function(docIface, ids) {
+            try {
+                if (csFeatureTraceDock === undefined ||
+                        csFeatureTraceDock === null ||
+                        !csFeatureTraceDock.visible) {
+                    return;
+                }
+                FeatureTrace.refresh(EAction.getDocument());
+            } catch (eLay) {
+                // as above
+            }
+        });
+        FeatureTrace.layerListener = layerAdapter;
     } catch (e) {
         FeatureTrace.listener = null;
         warning("Feature Trace: could not watch the drawing for survey " +
@@ -540,6 +730,14 @@ FeatureTrace.prototype.beginEvent = function() {
         dock.visible = existed ? !dock.visible : true;
         // The drawing may have gained or lost bands since last time.
         FeatureTrace.refreshRuns();
+        try {
+            var shown = EAction.getDocument();
+            FeatureTrace.regionBox = isNull(shown) ? null :
+                CsTrace.profileRegion(shown);
+            FeatureTrace.refresh(shown);
+        } catch (eShow) {
+            // a stale panel must never stop the tool opening
+        }
     } catch (e) {
         csFeatureTraceDock = undefined;
         warning("Feature Trace: this CaveCAD build refused the docked " +

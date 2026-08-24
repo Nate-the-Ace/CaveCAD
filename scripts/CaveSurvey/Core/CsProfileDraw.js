@@ -161,6 +161,94 @@ CsProfileDraw.runsIn = function(doc) {
     return out;
 };
 
+/**
+ * Every profile-frame VARIANT layer in the drawing, as
+ * [{name, token}]. QCAD only.
+ *
+ * Both generated and traced: isolating a run means seeing its band AND
+ * the work drawn on it, which are different layers with the same token.
+ */
+CsProfileDraw.profileVariantLayers = function(doc) {
+    var out = [];
+    var ids = doc.queryAllLayers();
+    for (var i = 0; i < ids.length; i++) {
+        var lay = doc.queryLayer(ids[i]);
+        if (isNull(lay)) {
+            continue;
+        }
+        var name = lay.getName();
+        var parts = CsLayerVariants.split(name);
+        if (parts === null) {
+            continue;
+        }
+        if (CsLayers.frameOf(parts.base) !== "profile") {
+            continue;
+        }
+        out.push({ name: name, token: parts.token });
+    }
+    return out;
+};
+
+/**
+ * Switches every profile-frame variant layer on or off so only `token`
+ * shows. QCAD only.
+ *
+ * ONE operation for every layer, so isolating a run is one undo step
+ * rather than a dozen a caver has to walk back individually.
+ *
+ * The SHARED profile layers are deliberately left alone. They hold
+ * pre-segregation geometry that belongs to no run, and hiding work
+ * whose owner cannot be named would be worse than showing it.
+ *
+ * Note the interaction this creates with tracing: an off layer refuses
+ * adds, and CsTrace.emit only works through it because it wraps the add
+ * in CsLayers.withLayerOn -- which restores the layer to off afterwards.
+ * So a trace aimed at a HIDDEN run lands correctly and is then invisible.
+ * That is why the panel isolates the run it has selected, keeping the
+ * two in step by construction.
+ *
+ * \return number of layers whose visibility changed
+ */
+CsProfileDraw.isolateRun = function(doc, di, token) {
+    var wanted = CsLayerVariants.sanitize(token);
+    var layers = CsProfileDraw.profileVariantLayers(doc);
+    var op = new RModifyObjectsOperation();
+    op.setText(wanted === null ? "Show all profile runs"
+        : "Isolate profile run " + wanted);
+    var changed = 0;
+
+    for (var i = 0; i < layers.length; i++) {
+        var lay = doc.queryLayer(layers[i].name);
+        if (isNull(lay)) {
+            continue;
+        }
+        var shouldBeOff = (wanted !== null && layers[i].token !== wanted);
+        var isOff = false;
+        try {
+            isOff = lay.isOff();
+        } catch (e) {
+            continue;
+        }
+        if (isOff === shouldBeOff) {
+            continue;
+        }
+        lay.setOff(shouldBeOff);
+        op.addObject(lay, false);
+        changed++;
+    }
+
+    if (changed > 0) {
+        di.applyOperation(op);
+    }
+    return changed;
+};
+
+/** Every profile run visible again. A null token to isolateRun means
+ *  exactly this, so there is one implementation and not two. */
+CsProfileDraw.showAllRuns = function(doc, di) {
+    return CsProfileDraw.isolateRun(doc, di, null);
+};
+
 /** layerFor without the ensure: the NAME a band's `base` layer takes.
  *  Pure, so a caller with no document interface can still ask -- and so
  *  the name a band draws to and the name a scan looks for cannot
