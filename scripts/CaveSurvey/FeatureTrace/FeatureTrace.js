@@ -252,11 +252,11 @@ FeatureTrace.runToken = function() {
 
 /** Repopulates the run list from the bands the drawing actually has.
  *
- *  Read from the generated stations layer's variants rather than from
- *  the survey model: the question is which runs have a band DRAWN, since
- *  those are the only ones with anything to trace along. Keeps the
- *  current selection when it still exists, so refreshing does not
- *  silently re-aim a caver mid-job. */
+ *  From CsProfileDraw.runsIn, which reads the SURVEY -- a caver picks
+ *  the run first and the tool second, so the list must be populated
+ *  before any elevation has been generated. Keeps the current selection
+ *  when it still exists, so refreshing does not silently re-aim a caver
+ *  mid-job. */
 FeatureTrace.refreshRuns = function() {
     var w = FeatureTrace.widgets;
     if (isNull(w) || isNull(w.runCombo)) {
@@ -264,8 +264,7 @@ FeatureTrace.refreshRuns = function() {
     }
     try {
         var doc = EAction.getDocument();
-        var runs = isNull(doc) ? [] :
-            CsLayerVariants.tokensIn(doc, CsLayers.PROFILE_STATIONS);
+        var runs = isNull(doc) ? [] : CsProfileDraw.runsIn(doc);
         var was = String(w.runCombo.currentText);
         w.runCombo.clear();
         w.runCombo.addItem(FeatureTrace.RUN_SHARED);
@@ -405,22 +404,6 @@ FeatureTrace.buildDock = function(appWin) {
         w.problems.push("interval/smoothing (" + eSettings + ")");
     }
 
-    // -- which survey run a profile feature belongs to ---------------
-    try {
-        var runRow = new QHBoxLayout();
-        runRow.addWidget(new QLabel(qsTr("Run")), 0, 0);
-        w.runCombo = new QComboBox();
-        w.runCombo.addItem(FeatureTrace.RUN_SHARED);
-        w.runCombo.toolTip = qsTr("Which survey run a PROFILE feature " +
-            "belongs to. Each run is drawn as its own band and the bands " +
-            "never overlap, so its walls get their own layers. Plan " +
-            "features ignore this -- the plan is one continuous map.");
-        runRow.addWidget(w.runCombo, 1, 0);
-        layout.addLayout(runRow, 0);
-    } catch (eRun) {
-        w.problems.push("run selector (" + eRun + ")");
-    }
-
     // -- trace on whatever layer the drawing is set to ---------------
     // Its own button above the groups, not a row: the groups are the
     // registry's traceable features, and this is an escape hatch for
@@ -444,6 +427,27 @@ FeatureTrace.buildDock = function(appWin) {
     try {
         w.planGroup = FeatureTrace.buildGroup(w, body, "plan", qsTr("Plan"));
         layout.addWidget(w.planGroup, 0, 0);
+        // The run selector sits HERE, directly above the group it
+        // governs: it applies to profile features and to nothing else,
+        // and a control at the top of the panel read as though it
+        // applied to the plan rows too.
+        try {
+            var runRow = new QHBoxLayout();
+            runRow.addWidget(
+                new QLabel(qsTr("Work on Which Profile Run? :")), 0, 0);
+            w.runCombo = new QComboBox();
+            w.runCombo.addItem(FeatureTrace.RUN_SHARED);
+            w.runCombo.toolTip = qsTr("Which survey run the profile " +
+                "features below belong to. Each run is drawn as its own " +
+                "band and the bands never overlap, so its walls get their " +
+                "own layers. The plan rows above ignore this -- the plan " +
+                "is one continuous map.");
+            runRow.addWidget(w.runCombo, 1, 0);
+            layout.addLayout(runRow, 0);
+        } catch (eRun) {
+            w.problems.push("run selector (" + eRun + ")");
+        }
+
         w.profileGroup = FeatureTrace.buildGroup(w, body, "profile",
             qsTr("Profile"));
         layout.addWidget(w.profileGroup, 0, 0);

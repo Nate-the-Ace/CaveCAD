@@ -14396,6 +14396,57 @@ if (!IS_NODE) {
         loadRepoScript("scripts/CaveSurvey/Core/CsBind.js");
         loadRepoScript("scripts/CaveSurvey/Core/CsProfileDraw.js");
 
+        // -- runsIn: the run list exists BEFORE any band is drawn ----
+        // The workflow is run first, tool second. Deriving the list from
+        // drawn bands left it empty until an elevation had already been
+        // generated, which is the workflow backwards. Every band IS
+        // drawn on every plot, so after a plot both sources agree -- the
+        // difference is only before the first one, which is exactly when
+        // a caver needs to choose a run.
+        (function() {
+            var d = new RDocument(new RMemoryStorage(),
+                new RSpatialIndexNavel());
+            var i2 = new RDocumentInterface(d);
+            CsLayers.ensure(d, i2, CsLayers.STATIONS);
+            var names = ["A1", "A2", "B1", "G7"];
+            var op2 = new RAddObjectsOperation();
+            for (var n = 0; n < names.length; n++) {
+                var pt2 = new RPointEntity(d,
+                    new RPointData(new RVector(n * 5, 0)));
+                pt2.setLayerId(d.getLayerId(CsLayers.STATIONS));
+                CsTags.set(pt2, "Station", names[n]);
+                op2.addObject(pt2, false);
+            }
+            i2.applyOperation(op2);
+
+            var runs = CsProfileDraw.runsIn(d);
+            eqs(runs.length, 3,
+                "CsProfileDraw.runsIn: three runs from four stations");
+            eqs(runs[0], "A", "CsProfileDraw.runsIn: sorted, A first");
+            eqs(runs[1], "B", "CsProfileDraw.runsIn: B second");
+            eqs(runs[2], "G", "CsProfileDraw.runsIn: G third");
+
+            // No profile layers exist at all yet -- that is the point.
+            ok(!d.hasLayer("CTRL-PROFILE-STATIONS-A"),
+                "CsProfileDraw.runsIn: no band has been drawn");
+
+            // A run whose survey is gone but whose linework remains must
+            // still be reachable from the panel that made it.
+            CsLayerVariants.ensureProfile(d, i2,
+                CsLayers.PROFILE_TRACED_CEILING, "Z");
+            var withOrphan = CsProfileDraw.runsIn(d);
+            var sawZ = false;
+            for (var z = 0; z < withOrphan.length; z++) {
+                if (withOrphan[z] === "Z") { sawZ = true; }
+            }
+            ok(sawZ,
+                "CsProfileDraw.runsIn: a run with linework but no survey still lists");
+        }());
+
+        eqs(CsProfileDraw.runsIn(new RDocument(new RMemoryStorage(),
+                new RSpatialIndexNavel())).length, 0,
+            "CsProfileDraw.runsIn: an empty drawing has no runs");
+
         // -- the token policy ----------------------------------------
         eqs(CsProfileDraw.tokenFor({ key: "A" }), "A",
             "CsProfileDraw.tokenFor: a band is segregated by its run");

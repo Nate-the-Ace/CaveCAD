@@ -91,6 +91,76 @@ CsProfileDraw.layerFor = function(doc, di, base, band) {
     return name;
 };
 
+/**
+ * Every survey run this drawing holds, sorted. QCAD only.
+ *
+ * Read from the SURVEY, not from drawn bands. A caver picks the run they
+ * are working on and THEN picks a tool, so the run list has to exist
+ * before any elevation has been generated -- deriving it from the band
+ * layers made it empty until a profile had already been drawn, which is
+ * the workflow backwards.
+ *
+ * Plan-frame stations are the source because that is where the survey
+ * lives: the plan frame owns the horizontal truth permanently, and a
+ * station is in the drawing from the moment a trip is entered.
+ *
+ * Unioned with tokens already present on profile variant layers, so a
+ * run whose survey has since been deleted still appears while its
+ * linework is still sitting there -- otherwise that work becomes
+ * unreachable from the panel that made it.
+ */
+CsProfileDraw.runsIn = function(doc) {
+    var seen = {};
+    var i;
+
+    try {
+        var stations = CsBind.stationIndex(doc, "plan");
+        for (i = 0; i < stations.length; i++) {
+            var key = CsProfile.runKeyOf(stations[i].name);
+            if (isNull(key) || String(key).length === 0) {
+                continue;
+            }
+            var clean = CsLayerVariants.sanitize(key);
+            if (clean !== null) {
+                seen[clean] = true;
+            }
+        }
+    } catch (e) {
+        // no readable survey yet; the variant scan below still applies
+    }
+
+    try {
+        var bases = CsProfileDraw.LAYERS();
+        var ids = doc.queryAllLayers();
+        for (i = 0; i < ids.length; i++) {
+            var lay = doc.queryLayer(ids[i]);
+            if (isNull(lay)) {
+                continue;
+            }
+            var parts = CsLayerVariants.split(lay.getName());
+            if (parts === null) {
+                continue;
+            }
+            // Any profile-frame variant counts, traced or generated: the
+            // point is that work exists for that run.
+            if (CsLayers.frameOf(parts.base) === "profile") {
+                seen[parts.token] = true;
+            }
+        }
+    } catch (e2) {
+        // layer table unreadable; return whatever the survey gave
+    }
+
+    var out = [];
+    for (var k in seen) {
+        if (seen.hasOwnProperty(k)) {
+            out.push(k);
+        }
+    }
+    out.sort(CsLayerVariants.compareTokens);
+    return out;
+};
+
 /** layerFor without the ensure: the NAME a band's `base` layer takes.
  *  Pure, so a caller with no document interface can still ask -- and so
  *  the name a band draws to and the name a scan looks for cannot
