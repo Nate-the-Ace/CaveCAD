@@ -423,6 +423,16 @@ PackageCave.ask = function(parent, record) {
     applyDefaults();
     updateWhere();
 
+    // Shown, raised and activated before it blocks: raised from the cave
+    // shelf (itself modal), a dialog that just exec()s lands BEHIND it,
+    // and the application then refuses input until somebody finds the
+    // window they cannot see.
+    try {
+        dialog.show();
+        dialog.raise();
+        dialog.activateWindow();
+    } catch (eRaise) {
+    }
     var answer = dialog.exec();
     var options = null;
     if (answer !== 0) {
@@ -939,7 +949,7 @@ function CaveShelfReadForPackage(record) {
  *
  * \return true if an archive was written.
  */
-PackageCave.forRecord = function(record) {
+PackageCave.forRecord = function(record, parent) {
     if (record === null || record === undefined) { return false; }
     if (CsShelf.clean(record.drawing) === "" ||
             !(new QFileInfo(record.drawing)).exists()) {
@@ -948,7 +958,8 @@ PackageCave.forRecord = function(record) {
         return false;
     }
 
-    var options = PackageCave.ask(RMainWindowQt.getMainWindow(), record);
+    var options = PackageCave.ask(
+        isNull(parent) ? RMainWindowQt.getMainWindow() : parent, record);
     if (options === null) { return false; }
 
     return PackageCave.build(record, options);

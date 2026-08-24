@@ -808,16 +808,15 @@ CaveShelf.show = function() {
                 "installed."));
             return;
         }
-        PackageCave.forRecord(state.record);
+        PackageCave.forRecord(state.record, dialog);
     });
 
     forgetButton.clicked.connect(function() {
         if (state.record === null) { return; }
-        var answer = QMessageBox.question(RMainWindowQt.getMainWindow(), qsTr("Forget Cave"),
+        var answer = CaveShelf.confirm(dialog, qsTr("Forget Cave"),
             qsTr("Take %1 off the shelf?\n\nThe folder and everything in " +
-                "it stays exactly where it is.").arg(state.record.name),
-            QMessageBox.Yes | QMessageBox.No);
-        if (answer === QMessageBox.Yes) {
+                "it stays exactly where it is.").arg(state.record.name));
+        if (answer) {
             CsShelf.forget(state.record.folder);
             fillList();
             showDetail();
@@ -1247,7 +1246,7 @@ CaveShelf.addFolder = function(parent) {
     }
 
     if (fresh.length === 0) {
-        QMessageBox.information(RMainWindowQt.getMainWindow(),
+        CaveShelf.inform(parent,
             qsTr("Import Folder"),
             candidates.length === 0 ?
                 qsTr("No caves in that folder: nothing there holds a drawing " +
@@ -1265,12 +1264,11 @@ CaveShelf.addFolder = function(parent) {
         lines.push(qsTr("   ...and %1 more").arg(fresh.length - lines.length));
     }
 
-    var answer = QMessageBox.question(RMainWindowQt.getMainWindow(),
+    var answer = CaveShelf.confirm(parent,
         qsTr("Import Folder"),
         qsTr("Import these %1 caves onto the shelf?\n\n").arg(fresh.length) +
-            lines.join("\n"),
-        QMessageBox.Yes | QMessageBox.No);
-    if (answer !== QMessageBox.Yes) { return 0; }
+            lines.join("\n"));
+    if (!answer) { return 0; }
 
     for (var a = 0; a < fresh.length; a++) {
         CsShelf.register(fresh[a]);
@@ -1278,6 +1276,75 @@ CaveShelf.addFolder = function(parent) {
     EAction.handleUserMessage(qsTr("%1 caves added to the shelf.")
         .arg(fresh.length));
     return fresh.length;
+};
+
+// ---------------------------------------------------------------------
+// Asking things, on top of the shelf
+//
+// The shelf runs modal (exec), and a dialog raised from it went BEHIND
+// it: the question was on screen, hidden, with the application refusing
+// input until somebody found and answered it. The static convenience
+// calls (QInputDialog.getText, QMessageBox.question) give no chance to
+// intervene -- they build, show and block in one step -- so each one is
+// built here as an instance instead, shown, raised, and only then run.
+// ---------------------------------------------------------------------
+
+/** show + raise + activate + exec, which is the whole point of these. */
+CaveShelf.runOnTop = function(dialog) {
+    try {
+        dialog.show();
+        dialog.raise();
+        dialog.activateWindow();
+    } catch (e) {
+        // A build that refuses raise() still gets a working dialog.
+    }
+    return dialog.exec();
+};
+
+/** A typed answer, or null. */
+CaveShelf.prompt = function(parent, title, label, preset) {
+    var dialog = new QInputDialog(parent);
+    dialog.windowTitle = title;
+    dialog.setInputMode(QInputDialog.TextInput);
+    dialog.setLabelText(label);
+    dialog.setTextValue(preset === undefined || preset === null ? "" : preset);
+    var answer = CaveShelf.runOnTop(dialog);
+    var text = (answer === 0) ? null : String(dialog.textValue());
+    destrDialog(dialog);
+    return text;
+};
+
+/** One of a list, or null. */
+CaveShelf.choose = function(parent, title, label, items) {
+    var dialog = new QInputDialog(parent);
+    dialog.windowTitle = title;
+    dialog.setLabelText(label);
+    dialog.setComboBoxItems(items);
+    var answer = CaveShelf.runOnTop(dialog);
+    var text = (answer === 0) ? null : String(dialog.textValue());
+    destrDialog(dialog);
+    return text;
+};
+
+/** True for yes. */
+CaveShelf.confirm = function(parent, title, text) {
+    var box = new QMessageBox(parent);
+    box.windowTitle = title;
+    box.setText(text);
+    box.setStandardButtons(QMessageBox.Yes | QMessageBox.No);
+    var answer = CaveShelf.runOnTop(box);
+    destrDialog(box);
+    return answer;
+};
+
+/** Says something and waits for OK. */
+CaveShelf.inform = function(parent, title, text) {
+    var box = new QMessageBox(parent);
+    box.windowTitle = title;
+    box.setText(text);
+    box.setStandardButtons(QMessageBox.Ok);
+    CaveShelf.runOnTop(box);
+    destrDialog(box);
 };
 
 /**
@@ -1343,10 +1410,9 @@ CaveShelf.importSurveyFile = function(parent, path) {
         for (var i = 0; i < CsFormatRegistry.FORMATS.length; i++) {
             labels.push(CsFormatRegistry.FORMATS[i].label);
         }
-        var choice = QInputDialog.getItem(parent, qsTr("Import Cave"),
-            qsTr("The format could not be detected — which is it?"),
-            labels, 0, false);
-        if (isNull(choice) || String(choice) === "") { return null; }
+        var choice = CaveShelf.choose(parent, qsTr("Import Cave"),
+            qsTr("The format could not be detected — which is it?"), labels);
+        if (choice === null || choice === "") { return null; }
         for (i = 0; i < CsFormatRegistry.FORMATS.length; i++) {
             if (CsFormatRegistry.FORMATS[i].label === String(choice)) {
                 format = CsFormatRegistry.FORMATS[i];
@@ -1374,12 +1440,11 @@ CaveShelf.importSurveyFile = function(parent, path) {
     var suggested = CsShelf.clean(survey.caveName);
     if (suggested === "") { suggested = CsShelf.stem(path); }
 
-    var typed = QInputDialog.getText(parent, qsTr("Import Cave"),
+    var typed = CaveShelf.prompt(parent, qsTr("Import Cave"),
         qsTr("%1 shots read. What is this cave called?")
-            .arg(survey.shots.length),
-        QLineEdit.Normal, suggested);
-    if (isNull(typed)) { return null; }
-    var name = CsPackage.safeName(String(typed));
+            .arg(survey.shots.length), suggested);
+    if (typed === null) { return null; }
+    var name = CsPackage.safeName(typed);
     if (name === "") { return null; }
 
     // ---- where it lives --------------------------------------------------
@@ -1474,13 +1539,13 @@ CaveShelf.offerProjectFolders = function(parent, folder) {
     }
     if (missing.length === 0) { return; }
 
-    var answer = QMessageBox.question(RMainWindowQt.getMainWindow(), qsTr("Cave Project Folders"),
+    var answer = CaveShelf.confirm(parent, qsTr("Cave Project Folders"),
         qsTr("This cave has no %1 folder. Create it?\n\n" +
             "scans/ holds the hand sketches (Draw > Image opens there); " +
             "PDF/ holds the maps you plot, and is what Package Cave " +
-            "Project collects.").arg(missing.join("/ and no ")),
-        QMessageBox.Yes | QMessageBox.No);
-    if (answer === QMessageBox.Yes) {
+            "Project collects; images/ holds photographs.")
+            .arg(missing.join("/ and no ")));
+    if (answer) {
         CsCave.ensureProjectFolders(folder, true);
     }
 };
@@ -1496,10 +1561,10 @@ CaveShelf.offerProjectFolders = function(parent, folder) {
  * \return the record created, or null.
  */
 CaveShelf.newCave = function(parent) {
-    var typed = QInputDialog.getText(parent, qsTr("New Cave"),
-        qsTr("Cave name, the way people say it:"), QLineEdit.Normal, "");
-    if (isNull(typed)) { return null; }
-    var name = String(typed).replace(/^\s+|\s+$/g, "");
+    var typed = CaveShelf.prompt(parent, qsTr("New Cave"),
+        qsTr("Cave name, the way people say it:"), "");
+    if (typed === null) { return null; }
+    var name = typed.replace(/^\s+|\s+$/g, "");
     if (name === "") { return null; }
 
     // A cave name is a folder name and a file name. Only the characters
@@ -1523,11 +1588,11 @@ CaveShelf.newCave = function(parent) {
 
     var folder = parentFolder + "/" + safe;
     if ((new QDir(folder)).exists()) {
-        var answer = QMessageBox.question(RMainWindowQt.getMainWindow(), qsTr("Folder Exists"),
-            qsTr("%1 already exists. Put the new drawing in it?")
-                .arg(folder),
-            QMessageBox.Yes | QMessageBox.No);
-        if (answer !== QMessageBox.Yes) { return null; }
+        if (!CaveShelf.confirm(parent, qsTr("Folder Exists"),
+                qsTr("%1 already exists. Put the new drawing in it?")
+                    .arg(folder))) {
+            return null;
+        }
     }
     else if (!(new QDir()).mkpath(folder)) {
         EAction.handleUserWarning(qsTr("Could not create %1").arg(folder));
@@ -1538,11 +1603,11 @@ CaveShelf.newCave = function(parent) {
 
     var drawing = folder + "/" + safe + ".dxf";
     if ((new QFileInfo(drawing)).exists()) {
-        var overwrite = QMessageBox.question(RMainWindowQt.getMainWindow(), qsTr("Drawing Exists"),
-            qsTr("%1 already exists. Open it instead of starting a new " +
-                "one?").arg(drawing),
-            QMessageBox.Yes | QMessageBox.No);
-        if (overwrite !== QMessageBox.Yes) { return null; }
+        if (!CaveShelf.confirm(parent, qsTr("Drawing Exists"),
+                qsTr("%1 already exists. Open it instead of starting a " +
+                    "new one?").arg(drawing))) {
+            return null;
+        }
         var existing = CsShelf.normalize({ name: name, folder: folder,
             drawing: drawing });
         CsShelf.register(existing);
