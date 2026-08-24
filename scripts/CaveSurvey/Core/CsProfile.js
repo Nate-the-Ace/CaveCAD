@@ -2215,11 +2215,20 @@ CsProfile.bandSpan = function(band) {
  * simply a sharp edge in the rule worth knowing about before reading
  * two bands' near-equal spacing as a bug.
  */
-CsProfile.GUTTER_MIN = 5.0;
+CsProfile.GUTTER_MIN = 20.0;
 
 /** The fraction of the sorted height list the gutter is anchored to --
  *  see the docblock above for why the low end, not the middle. */
 CsProfile.GUTTER_QUANTILE = 0.25;
+
+/** How many typical band heights of clear space between bands.
+ *
+ *  Was 0.5, which read as "they do not overlap" rather than "there is
+ *  room here". A caver annotates the elevation in the space BETWEEN
+ *  bands -- notes, cross sections -- so the gap has to be usable, not
+ *  merely non-zero. Raise this and every band spreads further apart;
+ *  lower it and the region gets shorter and tighter. */
+CsProfile.GUTTER_FACTOR = 1.0;
 
 CsProfile.layout = function(bands) {
     var i;
@@ -2260,7 +2269,10 @@ CsProfile.layout = function(bands) {
         if (idx > heights.length - 1) { idx = heights.length - 1; }
         low = heights[idx];
     }
-    var gutter = Math.max(CsProfile.GUTTER_MIN, 0.5 * low);
+    // A FULL typical band height of space, not half. Half left no room
+    // to write in: a caver annotates the elevation between the bands --
+    // notes, cross sections -- and those need somewhere to sit.
+    var gutter = Math.max(CsProfile.GUTTER_MIN, CsProfile.GUTTER_FACTOR * low);
 
     var placedLo = null, placedHi = null;
     for (i = 0; i < bands.length; i++) {
@@ -2275,6 +2287,12 @@ CsProfile.layout = function(bands) {
             placedHi = span.hi;
             continue;
         }
+        // Mere non-overlap, deliberately. Requiring a full gutter of
+        // separation here would displace bands that are genuinely clear,
+        // and a displaced band no longer reads at true elevation -- the
+        // one property an elevation exists to carry. Raising the gutter
+        // (GUTTER_FACTOR) gives room where bands actually collide
+        // without spending that.
         var clears = (span.lo > placedHi) || (span.hi < placedLo);
         if (clears) {
             bands[i].zOffset = 0.0;

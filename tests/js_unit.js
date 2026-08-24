@@ -10206,7 +10206,14 @@ var PROFILE_GEOMETRY_BEFORE_INDEX = [
     "  CEIL[0] (9.961946981,102.799920257) (20.962191798,102.396077976)",
     "  FLOOR[0] (9.961946981,98.577251682) (18.357424157,97.667042314)",
     "  FLAT A2.3 9.961946981,101.185573165",
-    "BAND 1 key=B tie=A3 datum=100.348197865 exag=1.000000000 tapeMode=slope parent=A zOffset=-11.954744585 stopped=null reason=null omitted=[B7]",
+    // zOffset moved from -11.954744585 to -26.954744585 when
+    // CsProfile.GUTTER_MIN went 5 -> 20, for room to annotate between
+    // bands. The delta is exactly 15 -- the whole of the constant's
+    // change and nothing else -- which is what says this line is the
+    // intended widening rather than a geometry regression hiding in a
+    // golden fixture. Any FURTHER movement here is a real change and
+    // must be explained, not re-baselined.
+    "BAND 1 key=B tie=A3 datum=100.348197865 exag=1.000000000 tapeMode=slope parent=A zOffset=-26.954744585 stopped=null reason=null omitted=[B7]",
     "  ST A3 x=0.000000000 y=100.348197865 z=100.348197865",
     "  ST B1 x=6.893654271 y=101.563735109 z=101.563735109",
     "  ST B2 x=14.874166673 y=102.121786899 z=102.121786899",
@@ -10216,7 +10223,7 @@ var PROFILE_GEOMETRY_BEFORE_INDEX = [
     "  LG B2->B3 kind=new (14.874166673,102.121786899)->(22.869293289,101.842590925) shotD=8.000000000",
     "  CEIL[0] (6.893654271,103.858040854) (13.753447333,104.621786899)",
     "  FLOOR[0] (6.893654271,99.269429363) (15.994886013,99.621786899)",
-    "BAND 2 key=C tie=B3 datum=101.842590925 exag=1.000000000 tapeMode=slope parent=B zOffset=-59.622888346 stopped=null reason=null omitted=[]",
+    "BAND 2 key=C tie=B3 datum=101.842590925 exag=1.000000000 tapeMode=slope parent=B zOffset=-89.622888346 stopped=null reason=null omitted=[]",
     "  ST B3 x=0.000000000 y=101.842590925 z=101.842590925",
     "  ST C3 x=15.190740571 y=140.523359562 z=140.523359562",
     "  ST C2 x=25.177035918 y=140.000000000 z=140.000000000",
@@ -10226,7 +10233,7 @@ var PROFILE_GEOMETRY_BEFORE_INDEX = [
     "  LG C2->C1 kind=new (25.177035918,140.000000000)->(35.177035918,140.000000000) shotD=10.000000000",
     "  CEIL[0] (3.570155741,103.533063972) (16.274091012,141.937573125) (25.177035918,141.732050808) (36.462611138,141.532088886)",
     "  FLOOR[0] (-3.570155741,100.152117878) (14.107390130,139.109146000) (25.177035918,138.267949192) (33.891460699,138.467911114)",
-    "BAND 3 key=A4a tie=A4 datum=102.018275077 exag=1.000000000 tapeMode=slope parent=A zOffset=-66.527150619 stopped=null reason=null omitted=[]",
+    "BAND 3 key=A4a tie=A4 datum=102.018275077 exag=1.000000000 tapeMode=slope parent=A zOffset=-111.527150619 stopped=null reason=null omitted=[]",
     "  ST A4 x=0.000000000 y=102.018275077 z=102.018275077",
     "  ST A4a1 x=5.868885604 y=100.770804932 z=100.770804932",
     "  ST A4a2 x=11.854269906 y=100.352266089 z=100.352266089",
@@ -11768,8 +11775,10 @@ var PROFILE_GEOMETRY_BEFORE_INDEX = [
     var b2 = { stations: [{ y: -2 }, { y: 2 }] };
     CsProfile.layout([b0, b1, b2]);
     eqs(b0.zOffset, 0, "b0 placed first, at true elevation");
-    eqs(b1.zOffset, -9, "b1 pushed GUTTER_MIN below b0's bottom, plus its own height");
-    eqs(b2.zOffset, -18, "b2 pushed the same GUTTER_MIN below b1, not stacked on b0");
+    eqs(b1.zOffset, -(4 + CsProfile.GUTTER_MIN),
+        "b1 pushed one gutter below b0's bottom, plus its own height");
+    eqs(b2.zOffset, -(8 + 2 * CsProfile.GUTTER_MIN),
+        "b2 pushed the same gutter below b1, not stacked on b0");
     // measured, not merely asserted: the gap between consecutive placed
     // bands is exactly the gutter once each band's own height is netted
     // out, for every pair, not just the first collision
@@ -11809,12 +11818,12 @@ var PROFILE_GEOMETRY_BEFORE_INDEX = [
     var huge = { stations: [{ y: -1000 }, { y: 1000 }] };
     CsProfile.layout([normal, huge]);
     eqs(normal.zOffset, 0, "the ordinary band sits at true elevation");
-    eqs(huge.zOffset, -1007,
+    eqs(huge.zOffset, -(1002 + CsProfile.GUTTER_MIN),
         "gutter is GUTTER_MIN (anchored to the small band's height 4, " +
         "not the median of the pair, 1002)");
     var hugeTop = 1000 + huge.zOffset;
     near(normal.stations[0].y - hugeTop, CsProfile.GUTTER_MIN, 1e-9,
-        "the blank gutter is 5 units, not 501 -- anchored to the small " +
+        "the blank gutter is one GUTTER_MIN, not 501 -- anchored to the small " +
         "band, not split down the middle with the outlier");
 }());
 
@@ -11831,12 +11840,13 @@ var PROFILE_GEOMETRY_BEFORE_INDEX = [
     var h1 = { stations: [{ y: -1000 }, { y: 1000 }] }; // huge, height 2000
     CsProfile.layout([s0, s1, h0, h1]);
     eqs(s0.zOffset, 0, "s0 placed first, at true elevation");
-    eqs(s1.zOffset, -9, "s1 collides with s0: GUTTER_MIN(5) plus s0's own height(4)");
-    eqs(h0.zOffset, -1016,
-        "h0's gutter is still GUTTER_MIN (5), anchored to the small " +
+    eqs(s1.zOffset, -(4 + CsProfile.GUTTER_MIN),
+        "s1 collides with s0: one gutter plus s0's own height(4)");
+    eqs(h0.zOffset, -(1006 + 2 * CsProfile.GUTTER_MIN),
+        "h0's gutter is still GUTTER_MIN, anchored to the small " +
         "bands, not a median of 1002 pulled up by its own huge neighbour");
-    eqs(h1.zOffset, -3021,
-        "h1's gutter is also GUTTER_MIN (5) -- two huge bands in the " +
+    eqs(h1.zOffset, -(3006 + 3 * CsProfile.GUTTER_MIN),
+        "h1's gutter is also GUTTER_MIN -- two huge bands in the " +
         "profile do not move the statistic off the small ones");
 }());
 
@@ -11857,12 +11867,15 @@ var PROFILE_GEOMETRY_BEFORE_INDEX = [
     CsProfile.layout([b0, b1, b2, b3, b4]);
 
     eqs(b0.zOffset, 0, "b0 placed first, at true elevation");
-    eqs(b1.zOffset, -1007,
+    eqs(b1.zOffset, -(1002 + CsProfile.GUTTER_MIN),
         "the huge band is pushed by GUTTER_MIN (the statistic stays 4, " +
-        "gutter floors to 5), not by its own height or a mean-inflated one");
-    eqs(b2.zOffset, -2014, "b2's gutter below the huge band is still just 5");
-    eqs(b3.zOffset, -2023, "b3's gutter is still 5 -- constant, not growing");
-    eqs(b4.zOffset, -2032, "b4's gutter is still 5 -- the statistic never moved");
+        "gutter floors to GUTTER_MIN), not by its own height or a mean-inflated one");
+    eqs(b2.zOffset, -(2004 + 2 * CsProfile.GUTTER_MIN),
+        "b2's gutter below the huge band is still one plain gutter");
+    eqs(b3.zOffset, -(2008 + 3 * CsProfile.GUTTER_MIN),
+        "b3's gutter is constant, not growing");
+    eqs(b4.zOffset, -(2012 + 4 * CsProfile.GUTTER_MIN),
+        "b4's gutter is unchanged -- the statistic never moved");
 
     // every consecutive gap is exactly GUTTER_MIN, including the one
     // straddling the huge band -- the outlier changes ITS OWN offset,
@@ -12420,8 +12433,8 @@ var PROFILE_GEOMETRY_BEFORE_INDEX = [
     CsProfile.layout([b0, empty, b1]);
     eqs(b0.zOffset, 0, "b0 placed first");
     eqs(empty.zOffset, 0, "the empty band gets no offset and touches nothing");
-    eqs(b1.zOffset, -3000,
-        "gutter is 1000 (half the real 2000-height statistic), not 5 " +
+    eqs(b1.zOffset, -(2000 + CsProfile.GUTTER_FACTOR * 2000),
+        "gutter is GUTTER_FACTOR x the real 2000-height statistic, not GUTTER_MIN " +
         "(which a phantom zero-height entry would have produced)");
 }());
 
