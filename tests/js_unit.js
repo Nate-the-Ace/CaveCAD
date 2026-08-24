@@ -14136,6 +14136,48 @@ if (!IS_NODE) {
             FeatureTrace.widgets = undefined;
         }());
 
+        // -- changing the run hot-swaps an isolated view -------------
+        (function() {
+            // onRunChosen is a plain function precisely so this is
+            // testable without a live combo box.
+            var calls = [];
+            var realIsolate = FeatureTrace.isolateSelectedRun;
+            var realShowAll = FeatureTrace.showAllRuns;
+            FeatureTrace.isolateSelectedRun = function() {
+                calls.push("isolate:" + FeatureTrace.runToken());
+            };
+            FeatureTrace.showAllRuns = function() { calls.push("showAll"); };
+
+            // Not isolated: changing the run must NOT hide the rest of
+            // the cave just because the caver switched which run they
+            // are tracing.
+            FeatureTrace.isolatedRun = null;
+            FeatureTrace.widgets = { runCombo: { currentText: "B" } };
+            FeatureTrace.onRunChosen();
+            eqs(calls.length, 0,
+                "onRunChosen: no isolation active means no view change");
+
+            // Isolated on A, caver picks B: hot-swap to B.
+            FeatureTrace.isolatedRun = "A";
+            FeatureTrace.onRunChosen();
+            eqs(calls.length, 1, "onRunChosen: isolated, so the view swaps");
+            eqs(calls[0], "isolate:B",
+                "onRunChosen: it swaps to the NEWLY chosen run");
+
+            // Isolated, caver picks "(all runs)": show everything.
+            calls = [];
+            FeatureTrace.widgets = {
+                runCombo: { currentText: FeatureTrace.RUN_SHARED } };
+            FeatureTrace.onRunChosen();
+            eqs(calls[0], "showAll",
+                "onRunChosen: choosing (all runs) while isolated shows all");
+
+            FeatureTrace.isolateSelectedRun = realIsolate;
+            FeatureTrace.showAllRuns = realShowAll;
+            FeatureTrace.isolatedRun = null;
+            FeatureTrace.widgets = undefined;
+        }());
+
         // -- refresh: hidden-layer markers and the profile gate ------
         (function() {
             var d = new RDocument(new RMemoryStorage(),
@@ -14741,6 +14783,115 @@ if (!IS_NODE) {
             "CsProfileDraw.erase: the promoted line is still there");
     }());
 }
+
+// ---------------------------------------------------------------------
+// CsContrib -- who surveyed what, in distance and percent
+// ---------------------------------------------------------------------
+(function() {
+    loadRepoScript("scripts/CaveSurvey/Core/CsAngles.js");
+    loadRepoScript("scripts/CaveSurvey/Core/CsUnits.js");
+    loadRepoScript("scripts/CaveSurvey/Core/CsModel.js");
+    loadRepoScript("scripts/CaveSurvey/Core/CsTraverse.js");
+    loadRepoScript("scripts/CaveSurvey/Core/CsNetwork.js");
+    loadRepoScript("scripts/CaveSurvey/Core/CsProfile.js");
+    loadRepoScript("scripts/CaveSurvey/Core/CsStats.js");
+    loadRepoScript("scripts/CaveSurvey/Core/CsContrib.js");
+
+    // -- people ------------------------------------------------------
+    var people = CsContrib.people("Nathan, Jim and Sarah/Bob & Ann");
+    eqs(people.join(","), "Nathan,Jim,Sarah,Bob,Ann",
+        "CsContrib.people: splits on comma, 'and', slash and ampersand");
+    eqs(CsContrib.people("").length, 0,
+        "CsContrib.people: no team text means nobody credited");
+    eqs(CsContrib.people("Nathan, nathan").join(","), "Nathan",
+        "CsContrib.people: one person, however they capitalised it");
+
+    // -- a two-trip survey -------------------------------------------
+    var survey = CsModel.newSurvey();
+    survey.distanceUnit = "ft";
+    var t0 = CsModel.newTrip();
+    t0.date = "2024-03-16"; t0.team = "Nathan, Jim";
+    var t1 = CsModel.newTrip();
+    t1.date = "2024-04-20"; t1.team = "Nathan, Sarah";
+    survey.trips = [t0, t1];
+
+    var shot = function(from, to, dist, trip) {
+        var s = CsModel.newShot();
+        s.from = from; s.to = to; s.distance = dist;
+        s.azimuth = 90.0; s.inclination = 0.0; s.trip = trip;
+        return s;
+    };
+    survey.shots = [
+        shot("A1", "A2", 10.0, 0),
+        shot("A2", "A3", 30.0, 0),
+        shot("A3", "B1", 60.0, 1)
+    ];
+    // a splay and an excluded shot: counted by neither, exactly as
+    // CsStats.compute counts neither, so the rows still sum to Length
+    var sp = shot("A2", "", 5.0, 0); sp.splay = true;
+    var ex = shot("A3", "A4", 99.0, 1); ex.excludeFromAll = true;
+    survey.shots.push(sp);
+    survey.shots.push(ex);
+
+    var resolved = CsNetwork.resolve(survey);
+    var stats = CsStats.compute(survey, resolved, CsTraverse.SLOPE);
+
+    var trips = CsContrib.byTrip(survey, resolved, CsTraverse.SLOPE);
+    eqs(trips.length, 2, "CsContrib.byTrip: one row per trip");
+    eqs(trips[0].distance, 40.0, "CsContrib.byTrip: trip 0 surveyed 40");
+    eqs(trips[1].distance, 60.0, "CsContrib.byTrip: trip 1 surveyed 60");
+    eqs(trips[0].percent, 40.0, "CsContrib.byTrip: trip 0 is 40% of the cave");
+    eqs(trips[0].distance + trips[1].distance, stats.surveyedLength,
+        "CsContrib.byTrip: the rows sum to the title block's Length");
+    eqs(trips[0].date, "2024-03-16", "CsContrib.byTrip: carries the date");
+    eqs(trips[0].shotCount, 2, "CsContrib.byTrip: counts the counted shots");
+
+    // -- teams -------------------------------------------------------
+    var teams = CsContrib.byTeam(trips);
+    eqs(teams.length, 2, "CsContrib.byTeam: two distinct parties");
+    eqs(teams[0].team, "Nathan, Jim", "CsContrib.byTeam: keyed on the team text");
+    eqs(teams[0].tripCount, 1, "CsContrib.byTeam: counts its trips");
+
+    // -- people ------------------------------------------------------
+    var persons = CsContrib.byPerson(trips);
+    eqs(persons.rows.length, 3, "CsContrib.byPerson: Nathan, Jim, Sarah");
+    var nathan = null, jim = null;
+    for (var i = 0; i < persons.rows.length; i++) {
+        if (persons.rows[i].person === "Nathan") { nathan = persons.rows[i]; }
+        if (persons.rows[i].person === "Jim") { jim = persons.rows[i]; }
+    }
+    eqs(nathan.distance, 100.0,
+        "CsContrib.byPerson: on both trips, credited both in full");
+    eqs(jim.distance, 40.0, "CsContrib.byPerson: one trip, credited it");
+    ok(persons.overlapping,
+        "CsContrib.byPerson: flags that credited totals exceed the cave");
+
+    // -- runs --------------------------------------------------------
+    var runs = CsContrib.byRun(survey, resolved, CsTraverse.SLOPE);
+    eqs(runs.length, 2, "CsContrib.byRun: runs A and B");
+    eqs(runs[0].run, "A", "CsContrib.byRun: run A first, in survey order");
+    eqs(runs[0].distance, 40.0,
+        "CsContrib.byRun: a leg belongs to the run its TO station is in");
+    eqs(runs[1].distance, 60.0, "CsContrib.byRun: the leg into B1 is B's");
+
+    // -- empty survey ------------------------------------------------
+    var empty = CsModel.newSurvey();
+    var emptyResolved = CsNetwork.resolve(empty);
+    var emptyTrips = CsContrib.byTrip(empty, emptyResolved, CsTraverse.SLOPE);
+    eqs(emptyTrips.length, 1, "CsContrib.byTrip: an empty survey has trip 0");
+    eqs(emptyTrips[0].percent, 0.0,
+        "CsContrib.byTrip: nothing surveyed is 0%, never NaN");
+
+    // -- formatting --------------------------------------------------
+    eqs(CsContrib.distanceText(1234.4, "ft"), "1,234 ft",
+        "CsContrib.distanceText: grouped, rounded, with the unit");
+    eqs(CsContrib.percentText(13.6), "14%",
+        "CsContrib.percentText: whole percent");
+    eqs(CsContrib.percentText(0.2), "<1%",
+        "CsContrib.percentText: a real contribution never reads as 0%");
+    eqs(CsContrib.percentText(0.0), "0%",
+        "CsContrib.percentText: nothing really is 0%");
+})();
 
 // ---------------------------------------------------------------------
 // Report.

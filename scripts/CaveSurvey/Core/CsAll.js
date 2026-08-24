@@ -61,3 +61,6 @@ include(includeBasePath + "/CsLocationPick.js");
 include(includeBasePath + "/CsSymbols.js");
 include(includeBasePath + "/CsSheet.js");
 include(includeBasePath + "/CsReport.js");
+// After CsModel, CsTraverse, CsProfile and (optionally) CsRevise --
+// CsContrib calls ensureTrips, offset, groupRuns and tripLabel.
+include(includeBasePath + "/CsContrib.js");
