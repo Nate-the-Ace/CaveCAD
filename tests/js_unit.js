@@ -113,6 +113,7 @@ var CORE_FILES = [
     // and defining a function that REFERENCES CsLayers/CsDraw/CsTags
     // does not touch either symbol until that function actually runs.
     "scripts/CaveSurvey/Core/CsProfileDraw.js",
+    "scripts/CaveSurvey/Core/CsCallout.js",
     "scripts/CaveSurvey/Core/CsValidate.js",
     "scripts/CaveSurvey/Core/CsStats.js",
     "scripts/CaveSurvey/Core/CsGrade.js",
@@ -16522,6 +16523,35 @@ if (!IS_NODE) {
     eqs(CsStore.isEmpty(), true,
         "CsStore.isEmpty: setMap(null) reads back as empty, same as " +
         "the never-loaded state");
+})();
+
+// ---------------------------------------------------------------------
+// CsCallout -- data model
+// ---------------------------------------------------------------------
+
+(function() {
+    eqs(CsCallout.KEY.ID, "CalloutId", "CsCallout.KEY.ID");
+    eqs(CsCallout.KEY.ROLE, "CalloutRole", "CsCallout.KEY.ROLE");
+    eqs(CsCallout.KEY.KIND, "CalloutKind", "CsCallout.KEY.KIND");
+    eqs(CsCallout.KEY.STYLE, "CalloutStyle", "CsCallout.KEY.STYLE");
+    eqs(CsCallout.KEY.SIDE, "CalloutSide", "CsCallout.KEY.SIDE");
+    eqs(CsCallout.KEY.ELEV_BASIS, "ElevBasis", "CsCallout.KEY.ELEV_BASIS");
+
+    // every style resolves to a layer
+    var names = ["hazard", "dig", "equipment", "name", "elevation",
+                 "elevation-line"];
+    for (var i = 0; i < names.length; i++) {
+        ok(typeof CsCallout.STYLES[names[i]] === "string" &&
+           CsCallout.STYLES[names[i]].length > 0,
+           "CsCallout.STYLES has a layer for " + names[i]);
+    }
+
+    // id allocation
+    eqs(CsCallout.nextId([]), "1", "nextId on an empty drawing");
+    eqs(CsCallout.nextId(["1", "2", "3"]), "4", "nextId after 1..3");
+    eqs(CsCallout.nextId(["7"]), "8", "nextId is max+1, not count+1");
+    eqs(CsCallout.nextId(["2", "", "abc", "5"]), "6",
+        "nextId ignores junk rather than throwing");
 })();
 
 // ---------------------------------------------------------------------

@@ -35,6 +35,7 @@ include(includeBasePath + "/CsLrud.js");
 // CsTags/CsDraw) rather than needing to sit after them here too.
 include(includeBasePath + "/CsProfile.js");
 include(includeBasePath + "/CsProfileDraw.js");
+include(includeBasePath + "/CsCallout.js");
 include(includeBasePath + "/CsValidate.js");
 include(includeBasePath + "/CsStats.js");
 include(includeBasePath + "/CsGrade.js");
