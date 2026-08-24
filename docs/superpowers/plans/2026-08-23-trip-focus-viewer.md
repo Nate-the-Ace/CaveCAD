@@ -53,6 +53,18 @@
 
 **Verify:** `bash tests/run_all.sh` -> `### UNIT OK <n> assertions` with n greater than the current count, and no `### UNIT FAIL`
 
+**AMENDED AFTER REVIEW (Task 3, commit `d032c32`).** Three wiring defects
+in Task 3's draft below were found and corrected while implementing, and the
+corrections apply to every later task that copies this shape:
+`include("scripts/CaveSurvey/...")` is a BANNED form (a structural test greps
+for it; it resolves only against the app bundle and dies silently from a
+per-user install) — use `includeBasePath`-relative, as the snippets now do;
+`button.clicked.connect(dlg, "close")` has no precedent in either repo — use a
+function literal, as `SurveyNotebook.js` and `HatchDialog.js` do; and
+`cleanUp()` must call `destrDialog(dlg)` as well as `destr(previewDi)`, or the
+dialog, parented to the main window, outlives every close and ten reopens
+leave ten live view+scene trees behind.
+
 **AMENDED AFTER REVIEW (commit `126ec76`).** The Step 3 source below is the
 first draft and is superseded by the shipped `CsContrib.js`; read the file,
 not this snippet, when you need the current behaviour. Four defects in the
@@ -978,7 +990,7 @@ git commit -m "feat(CsFocus): attribute drawn entities to trips, teams and runs"
 
 include("scripts/EAction.js");
 include("scripts/simple.js");
-include("scripts/CaveSurvey/Core/CsAll.js");
+include(includeBasePath + "/../Core/CsAll.js");
 
 function TripFocus(guiAction) {
     EAction.call(this, guiAction);
@@ -1065,12 +1077,18 @@ TripFocus.show = function(doc) {
     imageView.autoZoom();
 };
 
-/** Frees the scratch document. A preview left behind holds a whole
- *  second copy of the drawing; ten opens without this is ten copies. */
+/** Frees the scratch document AND the dialog. A preview left behind
+ *  holds a whole second copy of the drawing; ten opens without this is
+ *  ten copies. The dialog needs freeing too -- it is parented to the
+ *  main window, so without destrDialog it survives every close until
+ *  the app exits, taking its view and scene with it. */
 TripFocus.cleanUp = function() {
     if (TripFocus.previewDi !== null && TripFocus.previewDi !== undefined) {
         destr(TripFocus.previewDi);
         TripFocus.previewDi = null;
+    }
+    if (TripFocus.dialog !== null && TripFocus.dialog !== undefined) {
+        destrDialog(TripFocus.dialog);
     }
     TripFocus.dialog = null;
     TripFocus.state = null;
@@ -1377,10 +1395,14 @@ Expected: `### UNIT OK <n> assertions`
 
 - [ ] **Step 5: Build the tree pane in `TripFocus.js`**
 
-Add the include at the top, beside the others:
+Add the include at the top, beside the others. It MUST be
+`includeBasePath`-relative: `tests/test_addon.py`'s
+`test_every_include_target_exists` greps for and BANS the
+`include("scripts/CaveSurvey/...")` form, because it resolves only
+against the app bundle and fails silently from a per-user install.
 
 ```js
-include("scripts/CaveSurvey/TripFocus/TripFocusRows.js");
+include(includeBasePath + "/TripFocusRows.js");
 ```
 
 Add the tree builder, and put the tree and the view in a splitter

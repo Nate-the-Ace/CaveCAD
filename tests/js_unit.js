@@ -15097,6 +15097,19 @@ if (!IS_NODE) {
         "Schonegg, Nathan|Doe, Jane",
         "CsContrib.people: a semicolon list splits on semicolons only");
 
+    // Splitting on semicolons ONLY -- honouring no other separator --
+    // used to merge "Nathan and Jim" into one phantom contributor and
+    // erase both real cavers; a semicolon segment must still recover
+    // "and" / "&" / "/" / "+" / newline, just not the comma.
+    eqs(CsContrib.people("Nathan and Jim; Sarah").join(","),
+        "Nathan,Jim,Sarah",
+        "CsContrib.people: a semicolon segment still splits on 'and'");
+    eqs(CsContrib.people(
+            "Schonegg, Nathan; Doe, Jane and Bob Jones").join("|"),
+        "Schonegg, Nathan|Doe, Jane|Bob Jones",
+        "CsContrib.people: each segment keeps its OWN comma whole " +
+            "while still splitting on 'and' within the segment");
+
     // A trailing suffix reads as its own person once the comma before
     // it is treated as an ordinary separator -- "Nathan Schonegg, Jr."
     // used to hand back a person named "Jr.".
@@ -15106,11 +15119,38 @@ if (!IS_NODE) {
     eqs(CsContrib.people("Nathan, et al.").join(","), "Nathan, et al.",
         "CsContrib.people: 'et al.' re-attaches too");
 
+    // The merge has to be gated on the separator having been a comma:
+    // "Jr." after "and" is somebody's own nickname, a second person,
+    // not a suffix on the first.
+    eqs(CsContrib.people("Nathan and Jr.").join(","), "Nathan,Jr.",
+        "CsContrib.people: a suffix only re-attaches after a COMMA");
+
+    // Two spellings of the same suffixed name must dedup to one.
+    eqs(CsContrib.people(
+            "Nathan Schonegg, Jr., Nathan Schonegg Jr.").join(","),
+        "Nathan Schonegg, Jr.",
+        "CsContrib.people: '.' and ',' spelling differences dedup " +
+            "to the first spelling seen");
+
     eqs(CsContrib.people("Nathan\nJim").join(","), "Nathan,Jim",
         "CsContrib.people: a newline is a separator");
     eqs(CsContrib.people("Mary Smith-Jones, Jim").join(","),
         "Mary Smith-Jones,Jim",
         "CsContrib.people: a hyphenated surname is NOT split");
+
+    // A team wrapped in its OWN parens/brackets is not a role note on
+    // one name -- the wrapping IS the team text, and used to be erased
+    // wholesale, crediting nobody.
+    eqs(CsContrib.people("(Nathan, Jim)").join(","), "Nathan,Jim",
+        "CsContrib.people: a team wrapped in parens is unwrapped, not " +
+            "erased");
+    // Nested parens defeat the role-note regex (it matches only up to
+    // the FIRST ')'), leaving a stray ')' glued to the name.
+    eqs(CsContrib.people("Nathan (book (main)), Jim").join(","),
+        "Nathan,Jim",
+        "CsContrib.people: a stray ')' left by nested parens is trimmed");
+    eqs(CsContrib.people("Nathan ), Jim").join(","), "Nathan,Jim",
+        "CsContrib.people: an unmatched stray ')' is trimmed the same way");
 
     // -- a two-trip survey ---------------------------------------------
     var survey = CsModel.newSurvey();
@@ -15210,6 +15250,19 @@ if (!IS_NODE) {
     ok(!soloPersons.overlapping,
         "CsContrib.byPerson: solo parties never overlap");
 
+    // Two spellings of the same person, across DIFFERENT trips, must
+    // dedup to one row rather than splitting his distance in two.
+    var suffixRows = [
+        { tripId: 0, team: "Nathan Schonegg, Jr.", distance: 10.0 },
+        { tripId: 1, team: "Nathan Schonegg Jr.", distance: 20.0 }
+    ];
+    var suffixPersons = CsContrib.byPerson(suffixRows);
+    eqs(suffixPersons.rows.length, 1,
+        "CsContrib.byPerson: 'Schonegg, Jr.' and 'Schonegg Jr.' are " +
+            "one person, not two rows");
+    eqs(suffixPersons.rows[0].distance, 30.0,
+        "CsContrib.byPerson: credited together across both spellings");
+
     // -- runs --------------------------------------------------------
     var runs = CsContrib.byRun(survey, resolved, CsTraverse.SLOPE);
     eqs(runs.rows.length, 2, "CsContrib.byRun: runs A and B");
@@ -15303,6 +15356,31 @@ if (!IS_NODE) {
     eqs(fracTrips[1].distance, 25.0,
         "CsContrib.byTrip: trip 1.5 floors to trip 1 instead of crashing");
 
+    // -- a shot with no usable geometry must be skipped whole -----------
+    // Adding its distance while dropping its planDistance (the old
+    // half-counting bug) used to manufacture a NaN that silently
+    // poisoned the trip/run total instead of failing loudly.
+    var nullOffSurvey = CsModel.newSurvey();
+    nullOffSurvey.shots = [
+        shot("A1", "A2", 40.0, 0),
+        shot("Z1", "Z2", NaN, 0)
+    ];
+    var nullOffResolved = CsNetwork.resolve(nullOffSurvey);
+    var nullOffTrips = CsContrib.byTrip(nullOffSurvey, nullOffResolved,
+        CsTraverse.SLOPE);
+    eqs(nullOffTrips[0].distance, 40.0,
+        "CsContrib.byTrip: a shot with no usable geometry contributes " +
+            "nothing, not NaN");
+    var nullOffRuns = CsContrib.byRun(nullOffSurvey, nullOffResolved,
+        CsTraverse.SLOPE);
+    eqs(nullOffRuns.rows.length, 1,
+        "CsContrib.byRun: the unusable shot reaches neither a run nor " +
+            "unassigned");
+    eqs(nullOffRuns.rows[0].distance, 40.0,
+        "CsContrib.byRun: run A's real distance, untouched by the NaN shot");
+    eqs(nullOffRuns.unassigned, 0.0,
+        "CsContrib.byRun: unassigned stays a real number, not NaN");
+
     // -- formatting ------------------------------------------------------
     eqs(CsContrib.distanceText(1234.4, "ft"), "1,234 ft",
         "CsContrib.distanceText: grouped, rounded, with the unit");
@@ -15310,12 +15388,17 @@ if (!IS_NODE) {
         "CsContrib.distanceText: non-finite reads as 0, not 'In,fin,ity'");
     eqs(CsContrib.distanceText(NaN, "ft"), "0 ft",
         "CsContrib.distanceText: NaN is guarded the same way");
+    eqs(CsContrib.distanceText(1e21, "ft"), "0 ft",
+        "CsContrib.distanceText: exponential notation is guarded the " +
+            "same way, not '1e,+21'");
     eqs(CsContrib.percentText(13.6), "14%",
         "CsContrib.percentText: whole percent");
     eqs(CsContrib.percentText(0.2), "<1%",
         "CsContrib.percentText: a real contribution never reads as 0%");
     eqs(CsContrib.percentText(0.0), "0%",
         "CsContrib.percentText: nothing really is 0%");
+    eqs(CsContrib.percentText(NaN), "0%",
+        "CsContrib.percentText: guarded like its siblings, for symmetry");
     eqs(CsContrib.share(Infinity, 100.0), 0.0,
         "CsContrib.share: a non-finite numerator is 0, not Infinity");
     eqs(CsContrib.share(NaN, 100.0), 0.0,

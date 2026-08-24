@@ -24,18 +24,40 @@
 
 var CsContrib = {};
 
-/** Team text -> people. Separators: comma, semicolon, slash,
- *  ampersand, plus, a run of newlines, and the word "and" (which is
- *  why "Ann and Bob" splits but "Alexander" does not -- the pattern
- *  needs the word whole). Deliberately NOT a bare hyphen: that would
- *  split a hyphenated surname ("Mary Smith-Jones") into two people. */
-CsContrib.PERSON_SPLIT = /\s*(?:,|;|\/|&|\+|\n+|\band\b)\s*/i;
+/** Separators used when a comma is safe to treat as a break between
+ *  two people: semicolon, slash, ampersand, plus, a run of newlines,
+ *  and the word "and" (which is why "Ann and Bob" splits but
+ *  "Alexander" does not -- the pattern needs the word whole), PLUS a
+ *  bare comma. Deliberately NOT a bare hyphen: that would split a
+ *  hyphenated surname ("Mary Smith-Jones") into two people.
+ *
+ *  Plain regex SOURCE STRINGS, not RegExp literals: splitTagged below
+ *  builds a fresh RegExp per call so a leftover `lastIndex` never
+ *  leaks between calls, and building it from `new RegExp(str, "gi")`
+ *  directly -- rather than from a literal's own `.source` -- turned
+ *  out to matter. Reconstructing via `.source` is exactly what broke
+ *  the "/" alternative silently under CaveCAD's own script engine
+ *  (it split fine under node, the same regex simply stopped matching
+ *  a literal "/" once round-tripped through .source there) while
+ *  raising no error either engine's side, so this file was left with
+ *  a working test suite in one engine and a real bug in the other. A
+ *  literal used directly (as every other regex in this file is) never
+ *  goes through .source and is not at risk. */
+CsContrib.SEP_GENERIC_SOURCE = ",|;|/|&|\\+|\\n+|\\band\\b";
+
+/** The same separators MINUS the comma, for text that is already
+ *  known to be a surname-first list ("Last, First; Last, First"),
+ *  where a comma is part of one name, not a break between two. */
+CsContrib.SEP_NO_COMMA_SOURCE = "/|&|\\+|\\n+|\\band\\b";
 
 /** Trailing tokens that read as part of the PREVIOUS name, not as a
- *  person of their own, once a generic split has cut a name in two on
- *  the comma that precedes them ("Nathan Schonegg, Jr." must not hand
+ *  person of their own, once a split has cut a name in two on the
+ *  comma that precedes them ("Nathan Schonegg, Jr." must not hand
  *  back a person named "Jr."). Matched case-insensitively against the
- *  whole trimmed token. */
+ *  whole trimmed token. Gated on the separator having actually BEEN a
+ *  comma (see splitTagged/people below) -- "Nathan and Jr." is a
+ *  two-person party where "Jr." is somebody's real nickname, not a
+ *  suffix to re-attach. */
 CsContrib.NAME_SUFFIXES = ["jr", "jr.", "sr", "sr.", "ii", "iii", "iv",
     "phd", "ph.d.", "et al", "et al."];
 
@@ -50,48 +72,125 @@ CsContrib.isNameSuffix = function(token) {
 };
 
 /**
+ * Splits `text` on every match of the separator pattern `sepSource`
+ * (a regex SOURCE STRING -- see the two SEP_*_SOURCE constants above
+ * for why a string, not a RegExp), and for each resulting piece also
+ * reports whether the separator immediately BEFORE it was a literal
+ * comma (as opposed to ";", "/", "&", "+", a newline, or "and"). That
+ * is the one fact the suffix merge in `people` needs and `String.
+ * split` throws away.
+ *
+ * \return [{name, precededByComma}] -- name is untrimmed, exactly the
+ *         text between two separators (or the ends of the string)
+ */
+CsContrib.splitTagged = function(text, sepSource) {
+    var re = new RegExp(sepSource, "gi");
+    var tokens = [];
+    var lastIndex = 0;
+    var precededByComma = false;
+    var m;
+    while ((m = re.exec(text)) !== null) {
+        tokens.push({ name: text.substring(lastIndex, m.index),
+            precededByComma: precededByComma });
+        precededByComma = (m[0] === ",");
+        lastIndex = m.index + m[0].length;
+        if (m[0].length === 0) {
+            re.lastIndex++;
+        }
+    }
+    tokens.push({ name: text.substring(lastIndex),
+        precededByComma: precededByComma });
+    return tokens;
+};
+
+/** The key two spellings of the SAME person dedup on: punctuation
+ *  stripped, runs of whitespace collapsed to one space, upper-cased.
+ *  "Nathan Schonegg, Jr." and "Nathan Schonegg Jr." (typed without the
+ *  comma on a later trip) must land on one row, not two -- the row's
+ *  DISPLAYED name still keeps whichever spelling was seen first. */
+CsContrib.personKey = function(name) {
+    return String(name)
+        .replace(/[.,]/g, "")
+        .replace(/\s+/g, " ")
+        .replace(/^\s+|\s+$/g, "")
+        .toUpperCase();
+};
+
+/**
  * Team text -> the people on it.
  *
- * Three passes, in this order, each closing a way the naive
- * "split on punctuation" reading fabricates contributors nobody typed:
+ * In order, each closing a way the naive "split on punctuation"
+ * reading fabricates -- or erases -- contributors nobody intended:
  *
- *   1. Parenthesised / bracketed role notes ("(book and sketch)",
- *      "[sketch]") are stripped before anything else looks at the
- *      text -- otherwise the "and" or comma INSIDE the note splits
- *      like a separator and hands back a phantom person.
- *   2. A team text containing a semicolon is read as a surname-first
- *      list ("Last, First; Last, First") and split on semicolons
- *      ONLY: the comma there is part of one name, not a break between
- *      two, so the generic comma-splitting path is skipped entirely.
- *   3. Otherwise, split on the generic separators above, then
- *      re-attach a trailing NAME_SUFFIXES token onto the name before
- *      it, so "Nathan Schonegg, Jr." reads as one person.
+ *   1. A team text wrapped ENTIRELY in one pair of parens or brackets
+ *      ("(Nathan, Jim)") is unwrapped first: the wrapping IS the team
+ *      text here, not a role note on one name, and running the
+ *      role-note stripper on it as-is would erase the whole thing.
+ *   2. Parenthesised / bracketed role notes ("(book and sketch)",
+ *      "[sketch]") are stripped next -- otherwise the "and" or comma
+ *      INSIDE the note splits like a separator and hands back a
+ *      phantom person. A stray, unmatched bracket character this
+ *      leaves glued to a name (nested parens defeat the regex) is
+ *      swept up per-name in step 4.
+ *   3. A team text containing a semicolon is read as a surname-first
+ *      list ("Last, First; Last, First"): each semicolon-delimited
+ *      segment is split on the generic separators MINUS the comma, so
+ *      "Doe, Jane and Bob Jones" still recovers two people while
+ *      "Schonegg, Nathan"'s own comma is left alone. Otherwise the
+ *      whole text is split on the generic separators, comma included.
+ *   4. Each resulting piece has stray leading/trailing whitespace and
+ *      bracket characters trimmed, then a trailing NAME_SUFFIXES token
+ *      is re-attached onto the name before it -- but ONLY when the
+ *      separator that produced the split was actually a comma, so
+ *      "Nathan Schonegg, Jr." merges while "Nathan and Jr." (Jr. as
+ *      somebody's own nickname) does not.
  *
- * Case-insensitive de-duplication (kept from the first version) still
- * runs last, over whatever the three passes produced.
+ * Case-insensitive, punctuation-insensitive de-duplication (see
+ * personKey) runs last, over whatever the four steps produced.
  */
 CsContrib.people = function(teamText) {
     if (teamText === undefined || teamText === null) {
         return [];
     }
-    var text = String(teamText)
-        .replace(/\([^)]*\)/g, " ")
-        .replace(/\[[^\]]*\]/g, " ");
+    var text = String(teamText).replace(/^\s+|\s+$/g, "");
 
-    var parts;
+    if (text.length >= 2) {
+        if (text.charAt(0) === "(" &&
+                text.charAt(text.length - 1) === ")") {
+            text = text.substring(1, text.length - 1);
+        } else if (text.charAt(0) === "[" &&
+                text.charAt(text.length - 1) === "]") {
+            text = text.substring(1, text.length - 1);
+        }
+    }
+
+    text = text.replace(/\([^)]*\)/g, " ").replace(/\[[^\]]*\]/g, " ");
+
+    var tokens;
     if (text.indexOf(";") >= 0) {
-        parts = text.split(/\s*;\s*/);
+        var segments = text.split(/\s*;\s*/);
+        tokens = [];
+        for (var si = 0; si < segments.length; si++) {
+            var sub = CsContrib.splitTagged(segments[si],
+                CsContrib.SEP_NO_COMMA_SOURCE);
+            for (var sj = 0; sj < sub.length; sj++) {
+                tokens.push(sub[sj]);
+            }
+        }
     } else {
-        parts = text.split(CsContrib.PERSON_SPLIT);
+        tokens = CsContrib.splitTagged(text, CsContrib.SEP_GENERIC_SOURCE);
     }
 
     var merged = [];
-    for (var i = 0; i < parts.length; i++) {
-        var name = parts[i].replace(/^\s+|\s+$/g, "");
+    for (var i = 0; i < tokens.length; i++) {
+        var name = tokens[i].name
+            .replace(/^[\s()\[\]]+/, "")
+            .replace(/[\s()\[\]]+$/, "");
         if (name.length === 0) {
             continue;
         }
-        if (CsContrib.isNameSuffix(name) && merged.length > 0) {
+        if (tokens[i].precededByComma && CsContrib.isNameSuffix(name) &&
+                merged.length > 0) {
             merged[merged.length - 1] = merged[merged.length - 1] +
                 ", " + name;
             continue;
@@ -101,10 +200,11 @@ CsContrib.people = function(teamText) {
 
     var out = [], seen = {};
     for (var m = 0; m < merged.length; m++) {
-        // one person however they capitalised it, keeping the first
-        // spelling seen -- a survey where "nathan" and "Nathan" are two
-        // contributors is a data-entry artefact, not two people
-        var key = merged[m].toUpperCase();
+        // one person however they spelled or punctuated it, keeping
+        // the first spelling seen -- a survey where "nathan" and
+        // "Nathan" are two contributors is a data-entry artefact, not
+        // two people
+        var key = CsContrib.personKey(merged[m]);
         if (seen[key] === true) {
             continue;
         }
@@ -177,6 +277,17 @@ CsContrib.byTrip = function(survey, resolved, tapeMode) {
         if (!CsContrib.counts(s)) {
             continue;
         }
+        var off = CsTraverse.offset(s, tapeMode);
+        if (off === null) {
+            // No usable geometry (a non-finite distance/azimuth/
+            // inclination survives resolve() inside a disconnected
+            // block). Skip the WHOLE shot rather than adding its
+            // distance while dropping its planDistance -- half-
+            // counting it would manufacture a NaN that surfaces later
+            // as a believable all-zero table instead of a loud
+            // failure.
+            continue;
+        }
         // A stale or hand-edited trip index can be fractional
         // (CsTags.getNumber reads a hand-edited "Trip=1.5" tag with
         // parseFloat) or simply gone -- floor the first, and fall the
@@ -189,10 +300,7 @@ CsContrib.byTrip = function(survey, resolved, tapeMode) {
             id = 0;
         }
         rows[id].distance += s.distance;
-        var off = CsTraverse.offset(s, tapeMode);
-        if (off !== null) {
-            rows[id].planDistance += off.plan;
-        }
+        rows[id].planDistance += off.plan;
         rows[id].shotCount++;
         stationsSeen[id][s.from] = true;
         stationsSeen[id][s.to] = true;
@@ -266,7 +374,11 @@ CsContrib.byPerson = function(tripRows) {
             overlapping = true;
         }
         for (var p = 0; p < names.length; p++) {
-            var key = names[p].toUpperCase();
+            // Normalised, punctuation-insensitive key: "Nathan
+            // Schonegg, Jr." on one trip and "Nathan Schonegg Jr." on
+            // another (typed without the comma) are the same person,
+            // not two rows -- see personKey's own docblock.
+            var key = CsContrib.personKey(names[p]);
             if (byKey[key] === undefined) {
                 byKey[key] = { person: names[p], distance: 0.0,
                     percent: 0.0, tripCount: 0, tripIds: [] };
@@ -335,6 +447,14 @@ CsContrib.byRun = function(survey, resolved, tapeMode) {
         if (!CsContrib.counts(s)) {
             continue;
         }
+        var off = CsTraverse.offset(s, tapeMode);
+        if (off === null) {
+            // See byTrip's identical guard: skip the whole shot, not
+            // just its planDistance, or `unassigned` (and every row's
+            // percent) can end up NaN while distanceText/percentText
+            // render that as a plausible-looking "0 ft" / "0%".
+            continue;
+        }
         total += s.distance;
         var run = runOf[s.to];
         if (run === undefined) {
@@ -347,10 +467,7 @@ CsContrib.byRun = function(survey, resolved, tapeMode) {
                 stations: grouped.runs[run].stations };
         }
         byKey[run].distance += s.distance;
-        var off = CsTraverse.offset(s, tapeMode);
-        if (off !== null) {
-            byKey[run].planDistance += off.plan;
-        }
+        byKey[run].planDistance += off.plan;
         byKey[run].shotCount++;
     }
 
@@ -370,9 +487,11 @@ CsContrib.byRun = function(survey, resolved, tapeMode) {
 /** "1,234 ft" -- grouped, rounded to the whole unit, unit appended.
  *  Matches CsSheet's title-block Length so the two never look like
  *  different measurements of the same cave. A non-finite distance
- *  (Infinity, -Infinity, NaN) reads as 0 rather than falling through
- *  to the digit-grouping loop, which otherwise treats "Infinity"'s
- *  own letters as digits and produces something like "In,fin,ity". */
+ *  (Infinity, -Infinity, NaN) OR one so large JS stringifies it in
+ *  exponential notation ("1e+21") reads as 0 rather than falling
+ *  through to the digit-grouping loop, which otherwise treats letters
+ *  like "Infinity"'s or "1e+21"'s own characters as digits and
+ *  produces something like "In,fin,ity" or "1e,+21". */
 CsContrib.distanceText = function(distance, unit) {
     var d = (distance === null || distance === undefined) ? 0 : distance;
     if (typeof d !== "number" || !isFinite(d)) {
@@ -380,6 +499,10 @@ CsContrib.distanceText = function(distance, unit) {
     }
     var n = Math.round(d);
     var text = String(Math.abs(n));
+    if (!/^[0-9]+$/.test(text)) {
+        n = 0;
+        text = "0";
+    }
     var grouped = "";
     while (text.length > 3) {
         grouped = "," + text.substring(text.length - 3) + grouped;
@@ -394,9 +517,14 @@ CsContrib.distanceText = function(distance, unit) {
 };
 
 /** "14%" -- and "<1%" for a real but tiny share, because a row that
- *  reads 0% next to a drawn passage looks like a bug. */
+ *  reads 0% next to a drawn passage looks like a bug. Guarded against
+ *  non-finite input like its siblings distanceText and share, though
+ *  nothing in this file can hand it one today. */
 CsContrib.percentText = function(percent) {
     var p = (percent === null || percent === undefined) ? 0 : percent;
+    if (typeof p !== "number" || !isFinite(p)) {
+        p = 0;
+    }
     if (p > 0 && p < 0.5) {
         return "<1%";
     }
