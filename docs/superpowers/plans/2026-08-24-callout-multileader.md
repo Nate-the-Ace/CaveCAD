@@ -1159,6 +1159,14 @@ place a two-branch note. Then `./tests/run_all.sh` → all sections OK.
 
 **Steps:**
 
+**`reflow` returns `side` and `landing`, which nothing outside `CsCallout.js`
+reads yet.** Task 4's `writeLeaders` consumes only `geom.branches`. Code review on
+Task 2 flagged this as potential dead API surface. Use them here for the live
+placement preview — showing the landing and its chosen side while the caver is
+still picking is exactly what they are for. If this command ends up not needing
+them, say so in the task report so they can be pruned deliberately rather than
+left as decoration.
+
 - [ ] **Step 1: Read the reference implementation**
 
 Read `scripts/CaveSurvey/AlignImage/AlignImage.js` end to end. It is the suite's

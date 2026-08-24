@@ -16650,6 +16650,35 @@ if (!IS_NODE) {
                                { side: "auto", dimasz: 2, dimscale: 0 });
     near(Math.abs(r0s.branches[0][1].x - r0s.landing.x), 2, 1e-9,
         "reflow: dimscale 0 falls back the same way");
+
+    // A zero-height box with no dimasz has nothing to derive a landing
+    // from, so the elbow collapses onto the landing point. Degenerate
+    // but SILENT, which is why it is pinned: the shape is intentional,
+    // and a future refactor that "fixes" it into a minimum length would
+    // change what an empty text draws.
+    var flat = CsCallout.reflow({ x1: 0, y1: 10, x2: 20, y2: 10 },
+                                [{ x: -30, y: 10 }],
+                                { side: "auto", dimasz: null,
+                                  dimscale: null });
+    near(flat.branches[0][1].x, flat.branches[0][2].x, 1e-9,
+        "reflow: a zero-height box collapses elbow onto landing, by design");
+
+    // The docblock's x1<x2 / y1<y2 precondition is load-bearing: an
+    // inverted box attaches the landing to the geometrically wrong
+    // edge, silently. The only production caller normalises with
+    // Math.min/max (CalloutWrite.boxOf), and this pins WHY that
+    // normalisation cannot be dropped.
+    var inv = CsCallout.reflow({ x1: 120, y1: 54, x2: 100, y2: 50 },
+                               [{ x: 60, y: 40 }],
+                               { side: "auto", dimasz: 2, dimscale: 1 });
+    near(inv.landing.x, 120, 1e-9,
+        "reflow: an INVERTED box lands on x1 regardless -- callers must " +
+        "normalise (CalloutWrite.boxOf does); this is not a guard");
+
+    // The null-argument fallbacks are real, not decoration.
+    var rn = CsCallout.reflow(box, null, null);
+    eqs(rn.branches.length, 0, "reflow: null tips is the empty case");
+    eqs(rn.side, "left", "reflow: null opts still resolves a side");
 })();
 
 // ---------------------------------------------------------------------
