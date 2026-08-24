@@ -13745,8 +13745,66 @@ if (!IS_NODE) {
         }
         ok(refusingLayer("locked").added === false,
             "CsTrace.emit: a LOCKED layer refuses the add, and emit reports it");
-        ok(refusingLayer("frozen").added === false,
-            "CsTrace.emit: a FROZEN layer refuses the add, and emit reports it");
+
+        // FROZEN is now cleared for the write, like OFF. A drawing with
+        // CTRL-RAW frozen made every Survey Notebook redraw print
+        // "Transaction failed" twice with nothing to say which layer.
+        ok(refusingLayer("frozen").added === true,
+            "CsTrace.emit: a FROZEN layer is thawed for the write, like OFF");
+
+        // ...and put back exactly as it was.
+        (function() {
+            var d = new RDocument(new RMemoryStorage(),
+                new RSpatialIndexNavel());
+            var i4 = new RDocumentInterface(d);
+            CsLayers.ensure(d, i4, CsLayers.WALLS_SURVEYED);
+            var lay4 = d.queryLayer(CsLayers.WALLS_SURVEYED);
+            lay4.setFrozen(true);
+            var m4 = new RModifyObjectsOperation();
+            m4.addObject(lay4, false);
+            i4.applyOperation(m4);
+            ok(d.queryLayer(CsLayers.WALLS_SURVEYED).isFrozen(),
+                "withLayerOn fixture: the layer starts frozen");
+
+            var ran = false;
+            CsLayers.withLayerOn(d, i4, CsLayers.WALLS_SURVEYED, function() {
+                ran = true;
+                ok(!d.queryLayer(CsLayers.WALLS_SURVEYED).isFrozen(),
+                    "withLayerOn: thawed while fn runs");
+            });
+            ok(ran, "withLayerOn: fn ran");
+            ok(d.queryLayer(CsLayers.WALLS_SURVEYED).isFrozen(),
+                "withLayerOn: frozen again afterwards");
+
+            // Restored even when fn throws, or a failed draw would leave
+            // the caver's layer thawed with no sign of it.
+            var threw = false;
+            try {
+                CsLayers.withLayerOn(d, i4, CsLayers.WALLS_SURVEYED,
+                    function() { throw new Error("boom"); });
+            } catch (eBoom) {
+                threw = true;
+            }
+            ok(threw, "withLayerOn: it re-throws fn's error");
+            ok(d.queryLayer(CsLayers.WALLS_SURVEYED).isFrozen(),
+                "withLayerOn: still frozen again after a throw");
+
+            // LOCKED is left alone on purpose: protection, not visibility.
+            var d5 = new RDocument(new RMemoryStorage(),
+                new RSpatialIndexNavel());
+            var i5 = new RDocumentInterface(d5);
+            CsLayers.ensure(d5, i5, CsLayers.WALLS_SURVEYED);
+            var lay5 = d5.queryLayer(CsLayers.WALLS_SURVEYED);
+            lay5.setLocked(true);
+            var m5 = new RModifyObjectsOperation();
+            m5.addObject(lay5, false);
+            i5.applyOperation(m5);
+            CsLayers.withLayerOn(d5, i5, CsLayers.WALLS_SURVEYED,
+                function() {
+                    ok(d5.queryLayer(CsLayers.WALLS_SURVEYED).isLocked(),
+                        "withLayerOn: a LOCKED layer stays locked -- not ours to override");
+                });
+        }());
 
         // -- no binding tag ----------------------------------------
         var onCeiling = doc2.queryLayerEntities(

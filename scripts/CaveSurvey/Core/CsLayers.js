@@ -192,8 +192,15 @@ CsLayers.frameOf = function(layerName) {
 CsLayers.OFF = { "CTRL-DATA": true, "CTRL-HIDDEN": true, "CTRL-RAW": true };
 
 /**
- * Runs fn with the named layer switched ON, then restores the layer's
- * previous off state -- even when fn throws. Exists because this
+ * Runs fn with the named layer VISIBLE -- neither off nor frozen -- then
+ * restores whichever of those it had to change, even when fn throws.
+ *
+ * LOCKED is deliberately NOT cleared. Off and frozen are visibility, and
+ * a writer may reasonably reveal a layer for the length of its own
+ * write. Locked is protection: a caver locked it to stop things
+ * changing, and overriding that silently would be the tool deciding it
+ * knows better. A locked layer still refuses the write, and callers that
+ * care report it -- see FeatureTraceRun.refusalReason. Exists because this
  * build's RAddObjectsOperation silently refuses to add entities to a
  * layer that is off (see CsLayers.OFF above): any write targeting a
  * normally-off layer must happen inside this wrapper or it is lost
@@ -204,17 +211,38 @@ CsLayers.OFF = { "CTRL-DATA": true, "CTRL-HIDDEN": true, "CTRL-RAW": true };
  */
 CsLayers.withLayerOn = function(doc, di, layerName, fn) {
     var wasOff = false;
+    var wasFrozen = false;
     try {
         var lay = doc.queryLayer(layerName);
-        if (!isNull(lay) && lay.isOff()) {
-            lay.setOff(false);
-            var opOn = new RModifyObjectsOperation();
-            opOn.addObject(lay, false);
-            di.applyOperation(opOn);
-            wasOff = true;
+        if (!isNull(lay)) {
+            if (lay.isOff()) {
+                lay.setOff(false);
+                wasOff = true;
+            }
+            // FROZEN refuses operations exactly as OFF does, and this
+            // function used to clear only OFF. A drawing with CTRL-RAW
+            // frozen -- an ordinary thing for a caver to do to the
+            // as-surveyed ghost -- made every redraw report "Transaction
+            // failed. Please check for block recursions and locked or
+            // invisible layers or blocks." twice, with nothing to say
+            // which layer or why.
+            try {
+                if (lay.isFrozen()) {
+                    lay.setFrozen(false);
+                    wasFrozen = true;
+                }
+            } catch (eFrozen) {
+                wasFrozen = false;   // no frozen concept in this build
+            }
+            if (wasOff || wasFrozen) {
+                var opOn = new RModifyObjectsOperation();
+                opOn.addObject(lay, false);
+                di.applyOperation(opOn);
+            }
         }
     } catch (e) {
         wasOff = false; // could not toggle; fn still runs
+        wasFrozen = false;
     }
     var result, thrown = null, didThrow = false;
     try {
@@ -223,11 +251,16 @@ CsLayers.withLayerOn = function(doc, di, layerName, fn) {
         thrown = e2;
         didThrow = true;
     }
-    if (wasOff) {
+    if (wasOff || wasFrozen) {
         try {
             var layOff = doc.queryLayer(layerName);
             if (!isNull(layOff)) {
-                layOff.setOff(true);
+                if (wasOff) {
+                    layOff.setOff(true);
+                }
+                if (wasFrozen) {
+                    layOff.setFrozen(true);
+                }
                 var opOff = new RModifyObjectsOperation();
                 opOff.addObject(layOff, false);
                 di.applyOperation(opOff);
