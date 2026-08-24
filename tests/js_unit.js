@@ -92,6 +92,7 @@ function loadRepoScript(scriptPath) {
 
 // Load order: leaves first.
 var CORE_FILES = [
+    "scripts/CaveSurvey/Core/CsUuid.js",
     "scripts/CaveSurvey/Core/CsUnits.js",
     "scripts/CaveSurvey/Core/CsCave.js",
     "scripts/CaveSurvey/Core/CsGeoProject.js",
@@ -16546,20 +16547,15 @@ if (!IS_NODE) {
            "CsCallout.STYLES has a layer for " + names[i]);
     }
 
-    // id allocation
-    eqs(CsCallout.nextId([]), "1", "nextId on an empty drawing");
-    eqs(CsCallout.nextId(["1", "2", "3"]), "4", "nextId after 1..3");
-    eqs(CsCallout.nextId(["7"]), "8", "nextId is max+1, not count+1");
-    eqs(CsCallout.nextId(["2", "", "abc", "5"]), "6",
-        "nextId ignores junk rather than throwing");
-    // parseInt reads a leading-numeric string, so this is NOT skipped.
-    // Pinned because the docblock makes a safety claim that rests on it:
-    // a misread tag may cause an id to be skipped, never reused.
-    eqs(CsCallout.nextId(["3abc"]), "4",
-        "nextId reads a leading-numeric tag as its prefix, and only " +
-        "ever raises the maximum -- so a misread never REUSES an id");
-    eqs(CsCallout.nextId(null), "1",
-        "nextId on null input is the empty-drawing answer, not a throw");
+    // CalloutId now comes from the shared CsUuid library; the shape
+    // and uniqueness tests live with it, below. Here, only that the
+    // callout vocabulary still hands one out, and that the collision-
+    // prone counter is gone.
+    eqs(typeof CsCallout.nextId, "undefined",
+        "the max-plus-one counter is GONE: it numbered from 1 in every " +
+        "drawing, so merging two caves collided on every id");
+    ok(CsUuid.isValid(CsCallout.newId()),
+        "CsCallout.newId hands out a valid CsUuid");
 })();
 
 // ---------------------------------------------------------------------
@@ -16714,6 +16710,47 @@ if (!IS_NODE) {
     ok(CsLayers.DEFAULTS[CsCallout.STYLES["elevation-line"]][0] !==
        CsLayers.DEFAULTS[CsCallout.STYLES["elevation"]][0],
         "the elevation fallback layer is a different COLOR");
+})();
+
+// ---------------------------------------------------------------------
+// CsUuid -- the shared identity library
+// ---------------------------------------------------------------------
+
+(function() {
+    var one = CsUuid.v4();
+    ok(CsUuid.isValid(one), "v4 produces a valid id (got " + one + ")");
+    eqs(one.length, 36, "an id is 36 characters, well inside XDATA limits");
+    eqs(one.charAt(14), "4", "the version nibble is 4");
+    ok("89ab".indexOf(one.charAt(19)) >= 0,
+        "the variant nibble is one of 8/9/a/b");
+
+    // Uniqueness is the ONLY property anything may depend on, so it
+    // gets a real sample rather than a token pair.
+    var seen = {};
+    var bad = 0;
+    for (var i = 0; i < 2000; i++) {
+        var v = CsUuid.v4();
+        if (seen.hasOwnProperty(v)) { bad++; }
+        if (!CsUuid.isValid(v)) { bad += 1000; }
+        seen[v] = true;
+    }
+    eqs(bad, 0, "2000 ids are all distinct and all well formed");
+
+    // isValid must refuse junk rather than throw: a drawing carrying one
+    // hand-edited tag still has to open.
+    eqs(CsUuid.isValid(null), false, "isValid(null) is false, not a throw");
+    eqs(CsUuid.isValid(undefined), false, "isValid(undefined) is false");
+    eqs(CsUuid.isValid(""), false, "isValid(\"\") is false");
+    eqs(CsUuid.isValid("1"), false,
+        "isValid rejects the OLD counter format, so a legacy id is " +
+        "recognisable as not-a-uuid rather than silently accepted");
+    eqs(CsUuid.isValid(7), false, "isValid rejects a number");
+    eqs(CsUuid.isValid("XXXXXXXX-xxxx-4xxx-8xxx-xxxxxxxxxxxx"), false,
+        "isValid rejects non-hex of the right shape");
+    // upper case is NOT accepted: v4() emits lower case, and accepting
+    // both would let two spellings of one id exist.
+    eqs(CsUuid.isValid(one.toUpperCase()), false,
+        "isValid is case-sensitive, so an id has exactly one spelling");
 })();
 
 // ---------------------------------------------------------------------

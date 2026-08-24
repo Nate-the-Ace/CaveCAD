@@ -45,6 +45,7 @@ if (typeof isNull === "undefined") {
 }
 
 var FILES = [
+    "scripts/CaveSurvey/Core/CsUuid.js",
     "scripts/CaveSurvey/Core/CsUnits.js",
     "scripts/CaveSurvey/Core/CsTags.js",
     "scripts/CaveSurvey/Core/CsStore.js",

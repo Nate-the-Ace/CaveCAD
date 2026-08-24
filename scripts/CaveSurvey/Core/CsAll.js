@@ -14,6 +14,8 @@
 // being undefined in the GUI while every test passed headless (where
 // no stock add-ons load). The prefix makes collision impossible.
 
+// No dependencies of its own, so first.
+include(includeBasePath + "/CsUuid.js");
 include(includeBasePath + "/CsUnits.js");
 include(includeBasePath + "/CsCave.js");
 include(includeBasePath + "/CsGeoProject.js");

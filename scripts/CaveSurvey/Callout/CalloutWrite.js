@@ -106,7 +106,9 @@ CalloutWrite.create = function(doc, di, spec) {
         CsCallout.STYLE_DEFAULT];
     CsLayers.ensure(doc, di, layerName);
 
-    var id = CsCallout.nextId(CalloutWrite.existingIds(doc));
+    // A UUID, so no scan of the drawing and no collision with a
+    // pasted or merged-in callout. See CsCallout.newId.
+    var id = CsCallout.newId();
 
     // --- the text ----------------------------------------------------
     // Built with the FULL RTextData constructor, position and alignment

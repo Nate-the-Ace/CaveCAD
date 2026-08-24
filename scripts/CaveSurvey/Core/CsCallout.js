@@ -56,35 +56,14 @@ CsCallout.STYLES = {
 CsCallout.STYLE_DEFAULT = "name";
 
 /**
- * The next free CalloutId, as a string, given every id already in the
- * drawing.
- *
- * Max-plus-one, NOT count-plus-one: deleting callout 2 of 3 and then
- * placing a new one must not hand out "3" again and silently weld the
- * new text to the old leader. Junk entries are ignored rather than
- * thrown on -- a hand-edited DXF is a thing that happens, and refusing
- * to place a callout because of one bad tag elsewhere in the drawing is
- * worse than skipping it.
- *
- * "Ignored" is precise about one case: parseInt reads a LEADING-numeric
- * string, so "3abc" counts as id 3 rather than being skipped. That is
- * safe, and safe for one reason only -- this allocator never does
- * anything but raise the maximum, so a misread value can cause an id to
- * be SKIPPED but never REUSED. Reuse is the failure that matters: it
- * welds a new text to an old leader. Do not "fix" this into strict
- * validation that throws or returns null on a malformed tag; a drawing
- * with one bad tag must still accept new callouts.
+ * A fresh CalloutId. Delegates to CsUuid, the suite's general identity
+ * library -- more dynamically linked labels and objects are planned and
+ * they should all draw from one place. See CsUuid's own docblock for
+ * when an opaque id is the right key and when a survey-meaningful one
+ * is (CsBind's integer trip id being the counter-example).
  */
-CsCallout.nextId = function(existing) {
-    var max = 0;
-    var list = existing || [];
-    for (var i = 0; i < list.length; i++) {
-        var n = parseInt(list[i], 10);
-        if (!isNaN(n) && n > max) {
-            max = n;
-        }
-    }
-    return String(max + 1);
+CsCallout.newId = function() {
+    return CsUuid.v4();
 };
 
 /**
