@@ -1968,3 +1968,56 @@ Expected: exits 0, reports the install path and the archive
 git add -A
 git commit -m "docs(TripFocus): record the GUI findings and ship v<version>"
 ```
+
+---
+
+### Task 7: Wall runs carry their own stations
+
+**Goal:** A generated LRUD wall run is tagged with the stations IT followed, not with every station in the drawing, so a focus can tell one passage's walls from another's.
+
+**Why this task exists.** `CsDraw.js:592` is `var allNames = names.join("|")`, where `names` is every resolved station in the drawing (`CsDraw.js:387-395`), and that one string is written as `WallRunStations` to every left and right wall polyline. The tag's own name promises the run's stations; it delivers the survey's. Nothing noticed until Trip Focus asked the question, because the only previous consumer was `eraseStations`, for which "every wall run dies on any redraw" is over-broad but safe. For a FOCUS it is fatal: `CsFocus` matches a wall run when ANY of its stations is in focus, so every wall run in the cave matches every selection, and a single-trip view comes overlaid with dashed walls for the whole map.
+
+**Files:**
+- Modify: `scripts/CaveSurvey/Core/CsLrud.js` (`wallRuns` return shape)
+- Modify: `scripts/CaveSurvey/Core/CsDraw.js` (the wall-run tagging block, around line 586-600)
+- Test: `tests/js_unit.js`
+
+**Acceptance Criteria:**
+- [ ] `CsLrud.wallRuns` returns, for each run, the station names that run was built from, in run order -- alongside the points it already returns
+- [ ] `CsDraw.survey` tags each wall polyline with only its own run's stations
+- [ ] A survey with two disjoint passages produces wall runs whose station lists do not overlap
+- [ ] `eraseStations` still replaces a wall run when any of ITS stations is redrawn, and no longer kills wall runs belonging to passages that were not redrawn -- assert both halves
+- [ ] `CsFocus.isVisible` shows a wall run for a focused passage and hides one for an unfocused passage, on a document drawn by `CsDraw.survey` rather than by hand-written tags
+- [ ] The `CsLrud.wallRuns` return-shape change is absorbed by every existing caller (grep for it) with no behaviour change to the drawn geometry itself
+
+**Verify:** `bash tests/run_all.sh` -> all six sections OK, and the new assertions present in the CaveCAD-engine count
+
+**Steps:**
+
+- [ ] **Step 1: Read the three pieces before changing any of them**
+
+`CsLrud.wallRuns` (`scripts/CaveSurvey/Core/CsLrud.js`, from its docblock through `return`), the wall-run block in `CsDraw.survey` (`scripts/CaveSurvey/Core/CsDraw.js:586-620`), and `eraseStations`' `WallRunStations` rule. `wallRuns` currently accumulates bare `{x,y}` points into `left`/`right` arrays and flushes them at a break; the station whose points are being appended is known at that moment (`pointsFor(stationName, ...)`), so the run's station list can be accumulated in the same walk. That is the whole change on the `CsLrud` side.
+
+- [ ] **Step 2: Write the failing tests**
+
+Assert, in this order: that `wallRuns` reports per-run stations for a two-passage survey and that the two runs' lists are disjoint; that a document drawn by `CsDraw.survey` carries a `WallRunStations` tag naming only one passage's stations; that `eraseStations` on passage A's stations leaves passage B's wall runs alive (the half that is broken today -- it currently deletes them); and that `CsFocus.isVisible` hides an unfocused passage's wall run. Write the `CsFocus` assertion against a REAL drawn document, not a hand-written tag: the hand-written 3-station values in the existing `CsFocus` tests are exactly why this defect survived review.
+
+- [ ] **Step 3: Extend `CsLrud.wallRuns`**
+
+Accumulate a station-name list per run beside the points, flushing it with the same `flush()` that flushes the points, so a run's names and its points cannot get out of step. Keep the existing `{left, right, skipped}` keys working -- decide deliberately whether the names ride as a parallel array (`leftStations`) or each run becomes `{points, stations}`, and say in the docblock which and why. A parallel array keeps every existing caller untouched; the object shape makes it impossible to pair the wrong list with the wrong run. Prefer the shape that cannot be mispaired unless a caller makes that expensive.
+
+- [ ] **Step 4: Tag per run in `CsDraw.survey`**
+
+Replace `allNames` with the run's own list. Update the comment that currently says "Tagged with the survey's station list" -- it is honest about today's behaviour and would become a lie.
+
+- [ ] **Step 5: Note the legacy consequence**
+
+A drawing tagged before this change carries the all-stations list, so its wall runs stay visible under every Trip Focus selection. That is accepted rather than worked around: any redraw from the notebook re-tags them, and a heuristic guess at "this list looks like the whole survey" would be a second source of truth about what a wall run belongs to. Record it in the spec's "Limits, accepted" section.
+
+- [ ] **Step 6: Verify and commit**
+
+```bash
+bash tests/run_all.sh
+git add scripts/CaveSurvey/Core/CsLrud.js scripts/CaveSurvey/Core/CsDraw.js tests/js_unit.js
+git commit -m "fix(CsLrud): a wall run carries its own stations, not the whole survey's"
+```
