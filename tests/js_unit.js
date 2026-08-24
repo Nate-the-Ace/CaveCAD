@@ -14082,6 +14082,60 @@ if (!IS_NODE) {
         eqs(CsTrace.snapNameOf(snapDi.getSnap()), "RSnapFree",
             "CsTrace.restoreSnap: a null name changes nothing");
 
+        // -- refreshRuns actually populates from a drawing ----------
+        // The logic, independent of what triggers it. (The bug in use was
+        // the TRIGGER: an already-open panel never refreshed for a
+        // drawing opened afterwards. A transaction listener covers that
+        // now; this locks the population itself.)
+        (function() {
+            var d = new RDocument(new RMemoryStorage(),
+                new RSpatialIndexNavel());
+            var di2 = new RDocumentInterface(d);
+            CsLayers.ensure(d, di2, CsLayers.STATIONS);
+            var op3 = new RAddObjectsOperation();
+            var nms = ["A1", "M4", "SINK2"];
+            for (var q = 0; q < nms.length; q++) {
+                var p3 = new RPointEntity(d,
+                    new RPointData(new RVector(q * 3, 0)));
+                p3.setLayerId(d.getLayerId(CsLayers.STATIONS));
+                CsTags.set(p3, "Station", nms[q]);
+                op3.addObject(p3, false);
+            }
+            di2.applyOperation(op3);
+
+            // A combo stub: only what refreshRuns actually touches.
+            var items = [];
+            var combo = {
+                currentText: FeatureTrace.RUN_SHARED,
+                currentIndex: 0,
+                clear: function() { items = []; },
+                addItem: function(t) { items.push(t); },
+                itemText: function(i) { return items[i]; }
+            };
+            Object.defineProperty(combo, "count", {
+                get: function() { return items.length; }
+            });
+            FeatureTrace.widgets = { runCombo: combo };
+
+            FeatureTrace.refreshRuns(d);
+            eqs(items.length, 4,
+                "FeatureTrace.refreshRuns: the shared entry plus three runs");
+            eqs(items[0], FeatureTrace.RUN_SHARED,
+                "FeatureTrace.refreshRuns: shared entry first");
+            eqs(items[1], "A", "FeatureTrace.refreshRuns: A listed");
+            eqs(items[2], "M", "FeatureTrace.refreshRuns: M listed");
+            eqs(items[3], "SINK",
+                "FeatureTrace.refreshRuns: a multi-letter run listed too");
+
+            // Selection survives a refresh, so re-scanning cannot
+            // silently re-aim a caver mid-job.
+            combo.currentText = "M";
+            FeatureTrace.refreshRuns(d);
+            eqs(combo.currentIndex, 2,
+                "FeatureTrace.refreshRuns: the chosen run stays chosen");
+            FeatureTrace.widgets = undefined;
+        }());
+
         // -- the run selector: profile features only ----------------
         // Each run is drawn as its own band and CsProfile lays bands out
         // so they never overlap, so a profile feature belongs to exactly

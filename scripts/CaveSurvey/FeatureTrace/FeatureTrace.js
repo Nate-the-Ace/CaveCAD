@@ -257,13 +257,13 @@ FeatureTrace.runToken = function() {
  *  before any elevation has been generated. Keeps the current selection
  *  when it still exists, so refreshing does not silently re-aim a caver
  *  mid-job. */
-FeatureTrace.refreshRuns = function() {
+FeatureTrace.refreshRuns = function(docIn) {
     var w = FeatureTrace.widgets;
     if (isNull(w) || isNull(w.runCombo)) {
         return;
     }
     try {
-        var doc = EAction.getDocument();
+        var doc = isNull(docIn) ? EAction.getDocument() : docIn;
         var runs = isNull(doc) ? [] : CsProfileDraw.runsIn(doc);
         var was = String(w.runCombo.currentText);
         w.runCombo.clear();
@@ -477,6 +477,49 @@ FeatureTrace.buildDock = function(appWin) {
     return dock;
 };
 
+/**
+ * Keeps the run list following the DRAWING rather than the panel's own
+ * toggle. Idempotent -- installed once.
+ *
+ * Without this the list was only rebuilt when the dock was toggled or a
+ * feature armed, so a panel that was already open (restored visible by
+ * the saved window state at startup) never learned the runs of a drawing
+ * opened afterwards. Opening a file, redrawing the notebook and deleting
+ * geometry all run transactions, so this catches every path that can
+ * change which runs exist.
+ *
+ * Guarded on dock VISIBILITY, because CsProfileDraw.runsIn walks every
+ * entity: a hidden panel must not make every transaction in the
+ * application pay for a scan it will not display.
+ */
+FeatureTrace.installListener = function(appWin) {
+    if (FeatureTrace.listener !== undefined) {
+        return;
+    }
+    try {
+        var adapter = new RTransactionListenerAdapter();
+        appWin.addTransactionListener(adapter);
+        adapter.transactionUpdated.connect(function(document, transaction) {
+            try {
+                if (csFeatureTraceDock === undefined ||
+                        csFeatureTraceDock === null ||
+                        !csFeatureTraceDock.visible) {
+                    return;
+                }
+                FeatureTrace.refreshRuns(document);
+            } catch (eInner) {
+                // a listener must never throw into the application
+            }
+        });
+        FeatureTrace.listener = adapter;
+    } catch (e) {
+        FeatureTrace.listener = null;
+        warning("Feature Trace: could not watch the drawing for survey " +
+            "runs (" + e + "); the run list refreshes when the panel is " +
+            "reopened or a feature is armed.");
+    }
+};
+
 /** Builds the dock and hands it to the main window. Idempotent. */
 FeatureTrace.ensureDock = function() {
     if (csFeatureTraceDock !== undefined && csFeatureTraceDock !== null) {
@@ -567,6 +610,7 @@ FeatureTrace.init = function(basePath) {
     try {
         var dock = FeatureTrace.ensureDock();
         dock.visible = false;
+        FeatureTrace.installListener(RMainWindowQt.getMainWindow());
     } catch (eInit) {
         csFeatureTraceDock = undefined;
         warning("Feature Trace: could not build the panel at startup (" +
