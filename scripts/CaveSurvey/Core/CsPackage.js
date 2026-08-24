@@ -27,6 +27,21 @@ CsPackage.GEO_TAGS = ["GeoLat", "GeoLon", "GeoStation"];
 // archive cannot sync itself to the whole group by accident.
 CsPackage.DEPOT = "Documents/Cave/depot";
 
+/**
+ * Today as YYYY-MM-DD, from the script engine's own Date.
+ *
+ * NOT QDate: this bridge does not define it at all (ReferenceError), and
+ * QDateTime.currentDateTime().toString(format) ignores the format and
+ * answers Qt's default text -- neither can produce a sortable stamp for
+ * a file name.
+ */
+CsPackage.todayText = function(now) {
+    var when = (now === undefined || now === null) ? new Date() : now;
+    var pad2 = function(n) { return (n < 10 ? "0" : "") + n; };
+    return when.getFullYear() + "-" + pad2(when.getMonth() + 1) + "-" +
+        pad2(when.getDate());
+};
+
 CsPackage.depotFor = function(homePath) {
     var home = (homePath === undefined || homePath === null) ? "" :
         String(homePath).replace(/\/+$/, "");

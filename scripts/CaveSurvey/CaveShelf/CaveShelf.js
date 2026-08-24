@@ -104,14 +104,21 @@ function caveShowLauncher() {
 // Reading a cave
 // ---------------------------------------------------------------------
 
-/** Seconds-resolution modification time of a file, or 0. */
+/**
+ * A stamp that changes whenever the file does, for the read cache.
+ *
+ * Modification time AND size: QDateTime.toString() ignores the format
+ * string this bridge passes it, so the text is whatever Qt's default
+ * is -- fine as an identity, useless as a parsed date, and the size
+ * catches an edit that lands inside the same second.
+ */
 CaveShelf.mtimeOf = function(path) {
     try {
         var info = new QFileInfo(path);
-        if (!info.exists()) { return 0; }
-        return info.lastModified().toString("yyyyMMddhhmmss");
+        if (!info.exists()) { return "0"; }
+        return String(info.lastModified().toString()) + ":" + info.size();
     } catch (e) {
-        return 0;
+        return "0";
     }
 };
 
@@ -317,8 +324,23 @@ CaveShelf.show = function() {
     search.placeholderText = qsTr("Search caves");
     left.addWidget(search, 0, 0);
 
-    var list = new QListWidget();
+    // A one-column table, not a QListWidget: this bridge generates
+    // QListWidget (and QTreeWidget) as WRAPPER-ONLY classes -- they can
+    // wrap a widget C++ made, and `new QListWidget()` only warns "No
+    // constructor found" and hands back an object with nothing behind
+    // it, which the layout then refuses as a null widget. QTableWidget
+    // is generated with a real constructor, so the shelf is a table
+    // with one column and no headers.
+    var list = new QTableWidget(0, 1);
     list.minimumWidth = 240;
+    try {
+        list.horizontalHeader().visible = false;
+        list.verticalHeader().visible = false;
+        list.horizontalHeader().stretchLastSection = true;
+        list.selectionBehavior = QAbstractItemView.SelectRows;
+        list.editTriggers = QAbstractItemView.NoEditTriggers;
+    } catch (eList) {
+    }
     left.addWidget(list, 1, 0);
 
     var leftButtons = new QHBoxLayout();
@@ -394,7 +416,7 @@ CaveShelf.show = function() {
     var fillList = function(selectFolder) {
         var needle = String(search.text).toLowerCase();
         state.records = [];
-        list.clear();
+        list.setRowCount(0);
         var all = CsShelf.list();
         for (var i = 0; i < all.length; i++) {
             var record = all[i];
@@ -404,7 +426,9 @@ CaveShelf.show = function() {
                 continue;
             }
             state.records.push(record);
-            list.addItem(record.name);
+            list.setRowCount(state.records.length);
+            list.setItem(state.records.length - 1, 0,
+                new QTableWidgetItem(record.name));
         }
         if (state.records.length === 0) {
             return;
@@ -414,11 +438,11 @@ CaveShelf.show = function() {
             var found = CsShelf.indexOfFolder(state.records, selectFolder);
             if (found !== -1) { at = found; }
         }
-        list.setCurrentRow(at);
+        list.selectRow(at);
     };
 
     var showDetail = function() {
-        var row = list.currentRow;
+        var row = list.currentRow();
         state.trip = -1;
         state.record = (row >= 0 && row < state.records.length) ?
             state.records[row] : null;
@@ -502,7 +526,7 @@ CaveShelf.show = function() {
     });
 
     table.itemSelectionChanged.connect(function() {
-        state.trip = table.currentRow;
+        state.trip = table.currentRow();
         if (state.read !== null) {
             frontier.text = CaveShelf.frontierText(state.read, state.trip);
         }

@@ -3170,8 +3170,9 @@ SurveyNotebook.startTripAt = function(station) {
         w.loading = true;
         w.nameEdit.text = "";
         w.teamEdit.text = "";
-        if (typeof QDate !== "undefined") {
-            w.dateEdit.text = QDate.currentDate().toString("yyyy-MM-dd");
+        if (typeof CsPackage !== "undefined") {
+            // CsPackage.todayText, not QDate: this bridge has no QDate.
+            w.dateEdit.text = CsPackage.todayText();
         }
         SurveyNotebook.clearLadder(w);
         // The tie-in, then the row its first shot arrives at.

@@ -16843,6 +16843,13 @@ eqs(CsPackage.archiveName("", "", false), "Cave.zip", "a nameless cave still pac
 eqs(CsPackage.depotFor("/Users/x"), "/Users/x/Documents/Cave/depot",
     "packages land in the depot, not the drive folder");
 
+// The engine has no QDate, so the date a package is stamped with comes
+// from the script engine's own Date.
+eqs(CsPackage.todayText(new Date(2026, 7, 4)), "2026-08-04",
+    "the package date is zero-padded and sortable");
+eqs(CsPackage.todayText(new Date(2026, 11, 31)), "2026-12-31",
+    "December is month 12, not 11");
+
 var pkgMac = CsPackage.zipCommand("darwin", "/tmp/stage", "ALL DAY CAVE", "/d/a.zip");
 eqs(pkgMac.program, "/usr/bin/ditto", "macOS zips with ditto");
 ok(pkgMac.args.indexOf("--keepParent") !== -1,
@@ -16862,7 +16869,7 @@ var pkgManifest = CsPackage.manifest({
     caveName: "All Day Cave",
     date: "2026-08-24",
     full: false,
-    generator: "CaveCAD Cave Survey 0.7.0.0",
+    generator: "CaveCAD Cave Survey 0.8.0.0",
     length: 4180,
     unit: "ft",
     trips: [{ id: 0, date: "2026-05-02", team: "SCHONEGG", shots: 40,

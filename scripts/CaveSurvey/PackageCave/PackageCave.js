@@ -222,11 +222,7 @@ PackageCave.ask = function(parent, record, counts) {
 
 /** Today, as the file names and the manifest write it. */
 PackageCave.today = function() {
-    try {
-        return String(QDate.currentDate().toString("yyyy-MM-dd"));
-    } catch (e) {
-        return "";
-    }
+    return CsPackage.todayText();
 };
 
 // ---------------------------------------------------------------------
