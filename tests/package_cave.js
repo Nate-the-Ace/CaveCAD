@@ -175,6 +175,66 @@ eqs(geoTagsIn(fullFolder + "/Pitfall Cave.dxf").geo, 3,
     "the full archive keeps the anchor");
 
 // ---------------------------------------------------------------------
+// Photographs: the metadata has to be gone, and the picture still there.
+// ---------------------------------------------------------------------
+
+var imagesFolder = caveFolder + "/images";
+ok((new QDir()).mkpath(imagesFolder), "made the cave's images folder");
+
+// A real JPEG carrying real GPS EXIF (testdata/exif-gps-sample.jpg,
+// built by hand: an APP1 segment with a GPS IFD). Testing the strip
+// against a picture with nothing to strip would prove nothing.
+var exifSource = repoRoot + "/testdata/exif-gps-sample.jpg";
+ok((new QFileInfo(exifSource)).exists(), "the EXIF fixture is present");
+ok((new QFile(exifSource)).copy(imagesFolder + "/entrance.jpg"),
+    "put a photograph in the cave");
+// The generated map preview lives in the same folder and must never be
+// packaged: the drawing it pictures is already in the archive.
+writeTextFile(imagesFolder + "/Pitfall Cave preview.png", "not a photograph");
+
+// Searched with grep rather than by reading the bytes here: QFile's
+// readAll() hands this engine a QByteArray whose size() is 0 and whose
+// indexOf() is undefined, so a byte search written that way silently
+// answers "found" for everything -- which is how a broken strip would
+// have passed this very test.
+function fileHas(path, needle) {
+    var process = new QProcess();
+    process.start("/usr/bin/grep", ["-c", "-a", needle, path]);
+    if (!process.waitForFinished(10000)) {
+        process.kill();
+        return false;
+    }
+    // The EXIT CODE, not the output: grep answers 0 when it found the
+    // needle and 1 when it did not, while readAllStandardOutput() hands
+    // this engine an object whose String() is a description rather than
+    // the bytes -- parse that and every answer is "found".
+    return process.exitCode() === 0;
+}
+
+eqs(CsCave.imageFiles(caveFolder).length, 1,
+    "the preview is not counted as a photograph");
+ok(fileHas(imagesFolder + "/entrance.jpg", "Exif"),
+    "the photograph really does carry EXIF before packaging");
+
+var photoStage = root + "/staging/PITFALL CAVE/images";
+var photoResult = PackageCave.copyPhotosStripped(
+    CsCave.imageFiles(caveFolder), photoStage);
+eqs(photoResult.copied, 1, "the photograph was packaged");
+eqs(photoResult.skipped.length, 0, "nothing had to be left out");
+
+var packed = photoStage + "/entrance.jpg";
+ok((new QFileInfo(packed)).exists(), "the stripped photograph exists");
+ok(!fileHas(packed, "Exif"), "no EXIF marker survives packaging");
+ok(!fileHas(packed, "GPS"), "no GPS block survives packaging");
+
+// Stripped, not destroyed: it still has to BE the photograph.
+var packedImage = new QImageReader(packed).read();
+ok(!isNull(packedImage) && !packedImage.isNull(),
+    "the packaged photograph is still a readable image");
+eqs(packedImage.width(), 16, "same width as the original");
+eqs(packedImage.height(), 16, "same height as the original");
+
+// ---------------------------------------------------------------------
 // The platform's own zip program really makes an archive.
 // ---------------------------------------------------------------------
 

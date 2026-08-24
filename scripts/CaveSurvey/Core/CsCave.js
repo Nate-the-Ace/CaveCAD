@@ -10,6 +10,7 @@
 //       All Day Cave-aerial.png  the basemap, when one was fetched
 //       scans/                 scanned hand sketches
 //       PDF/                   produced maps
+//       images/                photographs, and the map's own preview
 //
 // PDF/ is where finished maps are kept, and nothing in the suite ever
 // writes one: plotting a sheet is the cartographer's job, and Package
@@ -38,9 +39,53 @@ var CsCave = {};
 
 CsCave.SCANS = "scans";
 CsCave.PDF = "PDF";
+CsCave.IMAGES = "images";
 
 // The folders a cave project keeps beside its drawing.
-CsCave.SUBFOLDERS = [CsCave.SCANS, CsCave.PDF];
+CsCave.SUBFOLDERS = [CsCave.SCANS, CsCave.PDF, CsCave.IMAGES];
+
+// The map's own preview lives in images/ with the photographs, under a
+// name derived from the drawing, so a person looking in that folder can
+// tell the generated picture from the ones they put there.
+CsCave.PREVIEW_SUFFIX = " preview.png";
+
+// PHOTOGRAPHS OF A CAVE ARE LOCATION DATA. An entrance photograph shows
+// where the entrance is, and a phone writes the coordinates into the
+// file besides. Nothing here reads or strips EXIF, so images/ is
+// treated exactly like scans/ when a project is packaged: left out of a
+// sanitized package unless somebody asks for it by name. See
+// PackageCave.js.
+
+/** The images folder for a cave folder, as it exists, or null. */
+CsCave.imagesFolderOf = function(folder) {
+    return CsCave.findSubfolder(folder, CsCave.IMAGES);
+};
+
+/**
+ * Where the map preview for a drawing belongs: inside the cave's own
+ * images folder, named after the drawing.
+ *
+ * \return the path, or null when the drawing has no folder.
+ */
+CsCave.previewPathFor = function(docPath) {
+    var folder = CsCave.folderOf(docPath);
+    if (folder === null) { return null; }
+    var stem = docPath.substring(folder.length + 1);
+    var dot = stem.lastIndexOf(".");
+    if (dot > 0) { stem = stem.substring(0, dot); }
+    if (stem === "") { return null; }
+    var images = CsCave.imagesFolderOf(folder);
+    if (images === null) { images = folder + "/" + CsCave.IMAGES; }
+    return images + "/" + stem + CsCave.PREVIEW_SUFFIX;
+};
+
+/** True for the generated preview, as opposed to somebody's photograph. */
+CsCave.isPreviewName = function(name) {
+    if (typeof name !== "string") { return false; }
+    return name.length > CsCave.PREVIEW_SUFFIX.length &&
+        name.substring(name.length - CsCave.PREVIEW_SUFFIX.length) ===
+            CsCave.PREVIEW_SUFFIX;
+};
 
 // An explicit drive folder, when the automatic answer is wrong -- a
 // second account, a non-default mount, a group that keeps caves on
@@ -184,6 +229,27 @@ CsCave.pdfFolderOf = function(folder) {
     return CsCave.findSubfolder(folder, CsCave.PDF);
 };
 
+// The photographs in a cave's images folder -- everything except the
+// preview this suite generates. Name-sorted, full paths.
+CsCave.imageFiles = function(folder, includePreview) {
+    var out = [];
+    if (typeof QDir === "undefined") { return out; }
+    var images = CsCave.imagesFolderOf(folder);
+    if (images === null) { return out; }
+    try {
+        var dir = new QDir(images);
+        var names = dir.entryList([], QDir.Files | QDir.NoDotAndDotDot, QDir.Name);
+        for (var i = 0; i < names.length; i++) {
+            var n = String(names[i]);
+            if (n.indexOf(".") === 0) { continue; }
+            if (includePreview !== true && CsCave.isPreviewName(n)) { continue; }
+            out.push(images + "/" + n);
+        }
+    } catch (e) {
+    }
+    return out;
+};
+
 // Every PDF in a cave's PDF folder, as full paths, name-sorted.
 // An absent folder and an empty one both answer [] -- "no maps" is a
 // normal state for a cave nobody has plotted yet, not an error.
@@ -236,6 +302,40 @@ CsCave.ensureProjectFolders = function(folder, force) {
     return made;
 };
 
+/**
+ * Writes a drawing's preview picture into its cave project (images/),
+ * and into the application's own thumbnail cache as well so the stock
+ * recent-files list shows the same picture.
+ *
+ * \param image a QImage, normally RDocumentInterface.getThumbnail()
+ * \return true if a picture landed somewhere.
+ */
+CsCave.writePreview = function(docPath, image) {
+    if (image === undefined || image === null) { return false; }
+    var wrote = false;
+
+    var put = function(target) {
+        if (target === null || target === undefined) { return false; }
+        try {
+            var info = new QFileInfo(String(target));
+            info.dir().mkpath(".");
+            return image.save(String(target), "PNG") === true;
+        } catch (e) {
+            return false;
+        }
+    };
+
+    if (put(CsCave.previewPathFor(docPath))) { wrote = true; }
+    try {
+        if (typeof RSettings !== "undefined" &&
+                typeof RSettings.getThumbnailFilePath === "function") {
+            if (put(RSettings.getThumbnailFilePath(docPath))) { wrote = true; }
+        }
+    } catch (eCache) {
+    }
+    return wrote;
+};
+
 // Makes sure this cave's scans/ folder exists, and points the stock
 // image picker at it. Returns the folder, or null when there was
 // nothing to do -- an unsaved drawing, or one outside every drive.
@@ -286,6 +386,23 @@ CsCave.installSaveHook = function() {
     if (Save.prototype.save.csCaveWrapped === true) { return true; }
     var stock = Save.prototype.save;
     var wrapped = function() {
+        // Refresh the drawing's thumbnail from the view BEFORE the save
+        // runs. The stock save hands di.getThumbnail() to
+        // RSettings.addRecentFile, which is what writes the PNG into
+        // the cache -- but NOTHING in the application ever calls
+        // updateThumbnail(), so the image handed over is empty and the
+        // cache stays empty with it. One call here gives every saved
+        // cave a picture, and the cave shelf shows it.
+        var thumbDi = null;
+        try {
+            thumbDi = EAction.getDocumentInterface();
+            if (!isNull(thumbDi) && isFunction(thumbDi.updateThumbnail)) {
+                thumbDi.updateThumbnail();
+            }
+        } catch (eThumb) {
+            // A picture is never a reason a save fails.
+        }
+
         var result = stock.apply(this, arguments);
         if (result === false) { return result; }
         try {
@@ -302,6 +419,12 @@ CsCave.installSaveHook = function() {
                         CsShelf.registerSaved(savedPath);
                     }
                     CsCave.ensureProjectFolders(CsCave.folderOf(savedPath));
+                    // The picture refreshed above, kept where the cave
+                    // keeps its images rather than only in this
+                    // machine's cache.
+                    if (!isNull(thumbDi) && isFunction(thumbDi.getThumbnail)) {
+                        CsCave.writePreview(savedPath, thumbDi.getThumbnail());
+                    }
                 }
             }
         } catch (e) {

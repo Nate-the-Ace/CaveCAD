@@ -446,3 +446,201 @@ CsShelf.registerSaved = function(docPath) {
         drawing: path
     });
 };
+
+// ---------------------------------------------------------------------
+// What the shelf SAYS about a cave -- pure, so tests/js_unit.js can
+// pin the wording and the thresholds without a document.
+//
+// The point of these is triage. A shelf that only lists caves is a
+// worse file browser; a shelf that says WHICH cave needs attention,
+// before anything is opened, is the thing a file browser cannot be.
+// ---------------------------------------------------------------------
+
+/**
+ * The one-line survey health summary under the trip table.
+ *
+ * \param stats  a CsStats.compute result (or null)
+ * \param grade  a CsGrade.compute result (or null)
+ * \param unit   "ft" / "m"
+ */
+CsShelf.healthText = function(stats, grade, unit) {
+    if (stats === null || stats === undefined) { return ""; }
+    var parts = [];
+    var u = (unit === undefined || unit === null) ? "" : unit;
+
+    if (typeof stats.depth === "number" && stats.depth > 0) {
+        parts.push("depth " + Math.round(stats.depth) + " " + u);
+    }
+    if (typeof stats.stationCount === "number") {
+        parts.push(stats.stationCount + " station" +
+            (stats.stationCount === 1 ? "" : "s"));
+    }
+    if (typeof stats.loopCount === "number" && stats.loopCount > 0) {
+        parts.push(stats.loopCount + " loop" +
+            (stats.loopCount === 1 ? "" : "s"));
+    }
+    if (grade !== null && grade !== undefined && grade.uis) {
+        parts.push(grade.uis);
+    }
+    return parts.join("  ·  ");
+};
+
+/** The worst loop's closure as a percentage, or null when there are none. */
+CsShelf.worstClosure = function(stats) {
+    if (stats === null || stats === undefined ||
+            stats.worstLoop === null || stats.worstLoop === undefined) {
+        return null;
+    }
+    var percent = stats.worstLoop.percent;
+    return (typeof percent === "number" && isFinite(percent)) ? percent : null;
+};
+
+/**
+ * The chips shown beside a cave's name.
+ *
+ * Every one of these is a condition somebody would want to act on, and
+ * every one is derived from what the drawing already records -- nothing
+ * here is a preference or a guess. Warnings come first, because the
+ * whole reason to look at a shelf is to find the cave that needs work.
+ *
+ * \param info {
+ *   legacy          drawing predates tag schema v3
+ *   unbound         count of linework strokes no trip owns
+ *   openEndNoLrud   an open end with no wall measurements
+ *   pdfs            how many maps are in PDF/
+ *   geo             the drawing carries a georeference anchor
+ *   elevation       an extended elevation has been drawn
+ *   closure         worst loop closure, percent (null: no loops)
+ *   closureWarnAt   the percentage that counts as too much
+ *   driftedTrips    trips whose declination disagrees with IGRF
+ *   errors          count of CsValidate findings of severity "error"
+ * }
+ * \return [{key, label, warn}]
+ */
+CsShelf.badges = function(info) {
+    var i = (info === undefined || info === null) ? {} : info;
+    var out = [];
+    var add = function(key, label, warn) {
+        out.push({ key: key, label: label, warn: warn === true });
+    };
+
+    if (typeof i.errors === "number" && i.errors > 0) {
+        add("errors", i.errors + " survey error" + (i.errors === 1 ? "" : "s"),
+            true);
+    }
+    if (typeof i.closure === "number" && typeof i.closureWarnAt === "number" &&
+            i.closure > i.closureWarnAt) {
+        add("closure", "closes " + (Math.round(i.closure * 10) / 10) + "%", true);
+    }
+    if (typeof i.driftedTrips === "number" && i.driftedTrips > 0) {
+        add("declination", i.driftedTrips + " trip" +
+            (i.driftedTrips === 1 ? "" : "s") + " off IGRF", true);
+    }
+    if (i.legacy === true) {
+        add("legacy", "legacy tags", true);
+    }
+    if (typeof i.unbound === "number" && i.unbound > 0) {
+        add("unbound", i.unbound + " stroke" + (i.unbound === 1 ? "" : "s") +
+            " unbound", true);
+    }
+    if (i.openEndNoLrud === true) {
+        add("lrud", "open end without LRUD", true);
+    }
+
+    if (i.geo === true) { add("geo", "georeferenced", false); }
+    if (i.elevation === true) { add("elevation", "has elevation", false); }
+    if (typeof i.pdfs === "number" && i.pdfs === 0) {
+        add("nomap", "no map plotted", false);
+    }
+    return out;
+};
+
+/** The chips as one line of text. */
+CsShelf.badgeLine = function(badges) {
+    if (Object.prototype.toString.call(badges) !== "[object Array]" ||
+            badges.length === 0) {
+        return "";
+    }
+    var parts = [];
+    for (var i = 0; i < badges.length; i++) {
+        parts.push((badges[i].warn ? "⚠ " : "") + badges[i].label);
+    }
+    return parts.join("   ");
+};
+
+/**
+ * Trips whose recorded declination disagrees with IGRF for their own
+ * date at the cave's location.
+ *
+ * Half a degree is the threshold the notebook's own revision offer uses:
+ * below that the difference is not worth a redraw, above it the drawing
+ * is turned by an angle somebody can measure on the map.
+ *
+ * \param trips   [{id, date, declination}]
+ * \param igrfFor function(dateText) -> declination degrees, or null
+ * \return [{id, recorded, igrf, delta}]
+ */
+/**
+ * "YYYY-MM-DD" to the {year, month, day} shape CsGeomag.decimalYear
+ * wants -- NOT a JS Date, which that function reads as NaN and turns
+ * silently into a declination of NaN, i.e. no comparison at all.
+ *
+ * \return {year, month, day}, or null when the text is not a date.
+ */
+CsShelf.dateParts = function(text) {
+    if (typeof text !== "string") { return null; }
+    var m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(CsShelf.clean(text));
+    if (m === null) { return null; }
+    var month = parseInt(m[2], 10);
+    var day = parseInt(m[3], 10);
+    if (month < 1 || month > 12 || day < 1 || day > 31) { return null; }
+    return { year: parseInt(m[1], 10), month: month, day: day };
+};
+
+/**
+ * The declination out of a CsGeomag.declination result.
+ *
+ * That function answers an OBJECT ({declination, inclinationMag,
+ * horizontalNt, totalNt, year}), not a number. Using the result
+ * directly in arithmetic yields NaN, every comparison against it is
+ * false, and a drift check built that way reports "nothing wrong"
+ * forever -- which is precisely what it did until this existed.
+ *
+ * \return degrees east-positive, or null.
+ */
+CsShelf.declinationValue = function(result) {
+    if (result === null || result === undefined) { return null; }
+    if (typeof result === "number") {
+        return isFinite(result) ? result : null;
+    }
+    var value = result.declination;
+    return (typeof value === "number" && isFinite(value)) ? value : null;
+};
+
+CsShelf.DRIFT_DEGREES = 0.5;
+
+CsShelf.declinationDrift = function(trips, igrfFor) {
+    var out = [];
+    if (Object.prototype.toString.call(trips) !== "[object Array]" ||
+            typeof igrfFor !== "function") {
+        return out;
+    }
+    for (var i = 0; i < trips.length; i++) {
+        var trip = trips[i];
+        if (trip === null || trip === undefined) { continue; }
+        var recorded = trip.declination;
+        if (typeof recorded !== "number") { continue; }
+        var igrf = null;
+        try {
+            igrf = igrfFor(trip.date);
+        } catch (e) {
+            igrf = null;
+        }
+        if (typeof igrf !== "number" || !isFinite(igrf)) { continue; }
+        var delta = igrf - recorded;
+        if (Math.abs(delta) < CsShelf.DRIFT_DEGREES) { continue; }
+        out.push({ id: trip.id === undefined ? i : trip.id,
+            recorded: recorded, igrf: igrf, delta: delta });
+    }
+    return out;
+};

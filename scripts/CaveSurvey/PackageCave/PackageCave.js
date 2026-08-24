@@ -11,6 +11,26 @@
 // project to the next cartographer, and says so in its file name and
 // its manifest.
 //
+// PHOTOGRAPHS ARE LOCATION DATA, like sketches and more so: an entrance
+// photograph shows where the entrance is, and a phone writes the
+// coordinates into the file besides. So images/ follows the same rule
+// as scans/ -- a checkbox, off by default in a sanitized package, on in
+// a full archive -- and the map preview this suite generates into that
+// folder is skipped entirely, being a picture of the drawing that is
+// already in the package.
+//
+// AND EVERY PHOTOGRAPH IS RE-ENCODED ON THE WAY IN, which is what
+// removes the metadata: Qt writes no EXIF, so decoding the picture and
+// writing it out again leaves the pixels and nothing else -- no GPS, no
+// timestamp, no camera. The rotation EXIF used to carry is applied to
+// the pixels first (setAutoTransform), or every portrait photograph
+// would come out of the package on its side.
+//
+// A photograph that CANNOT be decoded is LEFT OUT, and the manifest
+// says so. Copying it untouched would be the one outcome worse than
+// either: a file nobody checked, carrying whatever it carries, inside a
+// package labelled sanitized.
+//
 // PDFs SHIP AS THEY ARE, in both kinds. A map in the cave's PDF/ folder
 // was plotted on purpose by somebody who decided what it shows, and
 // nothing here second-guesses that. Nor does anything here PLOT one:
@@ -153,19 +173,32 @@ PackageCave.ask = function(parent, record, counts) {
     scans.enabled = counts.scans > 0;
     scans.toolTip = qsTr("Sketches often carry access notes, parking and " +
         "landowner names.");
+    var images = new QCheckBox(qsTr("Photographs from images/ (%1)")
+        .arg(counts.images));
+    images.checked = false;
+    images.enabled = counts.images > 0;
+    images.toolTip = qsTr("An entrance photograph shows where the entrance " +
+        "is, and phones write the coordinates into the file. Nothing here " +
+        "strips them.");
     includeLayout.addWidget(pdfs, 0, 0);
     includeLayout.addWidget(data, 0, 0);
     includeLayout.addWidget(scans, 0, 0);
+    includeLayout.addWidget(images, 0, 0);
     includes.setLayout(includeLayout);
     layout.addWidget(includes, 0, 0);
 
     // The mode carries the sketches with it, until the user says
     // otherwise -- after which their choice stands.
     var scansTouched = { yes: false };
+    var imagesTouched = { yes: false };
     scans.clicked.connect(function() { scansTouched.yes = true; });
+    images.clicked.connect(function() { imagesTouched.yes = true; });
     var followMode = function() {
         if (!scansTouched.yes && scans.enabled) {
             scans.checked = full.checked === true;
+        }
+        if (!imagesTouched.yes && images.enabled) {
+            images.checked = full.checked === true;
         }
     };
     full.toggled.connect(followMode);
@@ -213,6 +246,7 @@ PackageCave.ask = function(parent, record, counts) {
             pdfs: pdfs.checked === true,
             data: data.checked === true,
             scans: scans.checked === true,
+            images: images.checked === true,
             destination: destination
         };
     }
@@ -243,6 +277,56 @@ PackageCave.filesIn = function(folder) {
     } catch (e) {
     }
     return out;
+};
+
+/**
+ * Copies photographs, stripped of their metadata, into the staging
+ * folder.
+ *
+ * \return {copied, skipped: [name]} -- skipped are the ones no image
+ *         plugin could decode, which are deliberately not copied at all.
+ */
+PackageCave.copyPhotosStripped = function(paths, targetFolder) {
+    var result = { copied: 0, skipped: [] };
+    if (!(new QDir()).mkpath(targetFolder)) { return result; }
+
+    for (var i = 0; i < paths.length; i++) {
+        var source = paths[i];
+        var name = CsShelf.basename(source);
+        var image = null;
+        try {
+            var reader = new QImageReader(source);
+            // Bake in the orientation before the tag that carried it is
+            // dropped with everything else.
+            reader.setAutoTransform(true);
+            image = reader.read();
+        } catch (eRead) {
+            image = null;
+        }
+        if (isNull(image) || image.isNull()) {
+            result.skipped.push(name);
+            continue;
+        }
+
+        var target = targetFolder + "/" + name;
+        var written = false;
+        try {
+            var format = CsShelf.extension(name);
+            if (format === "jpg" || format === "jpeg" || format === "jfif") {
+                // 92: re-encoding is the price of stripping, and this is
+                // high enough that nobody looking at a cave photograph
+                // can tell.
+                written = image.save(target, "JPEG", 92) === true;
+            } else {
+                written = image.save(target) === true;
+            }
+        } catch (eWrite) {
+            written = false;
+        }
+
+        if (written) { result.copied++; } else { result.skipped.push(name); }
+    }
+    return result;
 };
 
 /** Copies into an existing staging folder; returns how many landed. */
@@ -451,6 +535,27 @@ PackageCave.build = function(record, options) {
         }
     }
 
+    // ---- photographs ---------------------------------------------------
+    if (options.images) {
+        var photos = CsCave.imageFiles(caveFolder);
+        var photoResult = PackageCave.copyPhotosStripped(photos,
+            staging + "/" + CsCave.IMAGES);
+        if (photoResult.copied > 0) {
+            contents.push({ path: CsCave.IMAGES + "/ (" + photoResult.copied + ")",
+                note: "photographs, re-encoded — no EXIF, no GPS" });
+        }
+        if (photoResult.skipped.length > 0) {
+            contents.push({ path: "(left out)",
+                note: photoResult.skipped.length + " photograph(s) no image " +
+                    "plugin could read, so their metadata could not be " +
+                    "removed: " + photoResult.skipped.join(", ") });
+            EAction.handleUserWarning(qsTr("%1 photograph(s) were left out " +
+                "of the package: nothing here can decode them, so their " +
+                "metadata could not be stripped.")
+                .arg(photoResult.skipped.length));
+        }
+    }
+
     // ---- the aerial photograph, full archives only ---------------------
     if (options.full) {
         var aerial = CsGeoProject.imagePathFor(record.drawing);
@@ -598,28 +703,41 @@ function CaveShelfReadForPackage(record) {
     return read.ok ? read : null;
 }
 
-function packageCaveRun() {
-    var appWin = RMainWindowQt.getMainWindow();
-
-    var record = PackageCave.chooseCave(appWin);
-    if (record === null) { return; }
-
+/**
+ * Packages one cave, start to finish: counts what is there, asks, and
+ * builds. Public because the cave shelf packages the cave it already
+ * has selected rather than asking again which cave is meant.
+ *
+ * \return true if an archive was written.
+ */
+PackageCave.forRecord = function(record) {
+    if (record === null || record === undefined) { return false; }
     if (CsShelf.clean(record.drawing) === "" ||
             !(new QFileInfo(record.drawing)).exists()) {
         EAction.handleUserWarning(qsTr("This cave has no drawing to " +
             "package yet."));
-        return;
+        return false;
     }
 
+    var appWin = RMainWindowQt.getMainWindow();
     var scansFolder = CsCave.findSubfolder(record.folder, CsCave.SCANS);
     var counts = {
         pdfs: CsCave.pdfFiles(record.folder).length,
         scans: scansFolder === null ? 0 :
-            PackageCave.filesIn(scansFolder).length
+            PackageCave.filesIn(scansFolder).length,
+        // The generated map preview is not a photograph and never
+        // travels: the drawing it pictures is already in the package.
+        images: CsCave.imageFiles(record.folder).length
     };
 
     var options = PackageCave.ask(appWin, record, counts);
-    if (options === null) { return; }
+    if (options === null) { return false; }
 
-    PackageCave.build(record, options);
+    return PackageCave.build(record, options);
+};
+
+function packageCaveRun() {
+    var record = PackageCave.chooseCave(RMainWindowQt.getMainWindow());
+    if (record === null) { return; }
+    PackageCave.forRecord(record);
 }

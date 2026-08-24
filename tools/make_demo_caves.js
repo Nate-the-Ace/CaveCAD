@@ -147,6 +147,19 @@ function tieBack(survey, from, to, trip) {
         between(-4, 4), trip));
 }
 
+// The invented location every demo cave shares: a plausible but
+// arbitrary point in the southern Indiana karst. Not a cave.
+var GEO = { lat: 38.42137, lon: -86.51884 };
+
+/** IGRF declination at GEO for a "YYYY-MM-DD" date, or 0. */
+function igrfAt(dateText) {
+    var parts = CsShelf.dateParts(dateText);
+    if (parts === null) { return 0; }
+    var value = CsShelf.declinationValue(
+        CsGeomag.declination(GEO.lat, GEO.lon, parts, 0.0));
+    return value === null ? 0 : value;
+}
+
 function trip(name, date, team, decl, source) {
     var t = CsModel.newTrip();
     t.name = name;
@@ -189,11 +202,19 @@ function buildCave(spec) {
     var anchors = ["A1"];
 
     for (var t = 0; t < spec.trips; t++) {
-        var when = new Date(Date.parse(spec.startDate + "T12:00:00Z") +
+        var whenDate = new Date(Date.parse(spec.startDate + "T12:00:00Z") +
             t * 37 * 86400000);
+        // Trips are surveyed under the declination that was actually
+        // right for the day -- otherwise every trip in every demo cave
+        // reads as an error, and a flag that fires on everything says
+        // nothing. ONE trip is deliberately wrong, where the spec asks
+        // for it, so the drift warning has something true to catch.
+        var when = CsPackage.todayText(whenDate);
+        var correct = round1(igrfAt(when));
+        var recorded = (spec.driftTrip === t) ? round1(correct + 1.8) : correct;
         survey.trips.push(trip(TRIP_NAMES[t % TRIP_NAMES.length],
-            CsPackage.todayText(when), TEAMS[t % TEAMS.length],
-            round1(between(-1.5, 3.5)), t % 3 === 0 ? "igrf" : "user"));
+            when, TEAMS[t % TEAMS.length], recorded,
+            (spec.driftTrip === t) ? "user" : "igrf"));
 
         // Trip 0 starts at the entrance; later trips carry on from an
         // end an earlier trip left, which is what makes the frontier
@@ -302,15 +323,15 @@ function writeDrawing(survey, path, geo) {
 var CAVES = [
     {
         name: "Whippoorwill Cave",
-        trips: 6, perTrip: 9, openEnds: 2, noLrudEnd: true,
+        trips: 6, perTrip: 9, openEnds: 2, noLrudEnd: true, driftTrip: 3,
         startDate: "2026-02-14", geo: true,
-        scans: 4, pdfs: 2, aerial: true
+        scans: 4, pdfs: 2, photos: 3, aerial: true
     },
     {
         name: "Lantern Cave",
         trips: 11, perTrip: 11, openEnds: 0,
         startDate: "2024-09-07", geo: true,
-        scans: 6, pdfs: 1
+        scans: 6, pdfs: 1, photos: 1
     },
     {
         name: "Copperhead Pit",
@@ -363,6 +384,7 @@ for (var c = 0; c < CAVES.length; c++) {
     mkpath(folder);
     mkpath(folder + "/scans");
     mkpath(folder + "/PDF");
+    mkpath(folder + "/images");
 
     // sketches: named the way a scanned notes page gets named
     for (var s = 0; s < (spec.scans || 0); s++) {
@@ -396,6 +418,14 @@ for (var c = 0; c < CAVES.length; c++) {
             writeTextFileHere(CsGeoProject.imagePathFor(drawingPath),
                 "aerial basemap stand-in\n");
         }
+    }
+
+    for (var im = 0; im < (spec.photos || 0); im++) {
+        writeTextFileHere(folder + "/images/" +
+            (im === 0 ? "entrance" : "passage-" + im) + ".jpg",
+            "photograph stand-in for " + spec.name + ".\n" +
+            "A real one would be a JPEG, and would carry the coordinates " +
+            "the camera wrote into it.\n");
     }
 
     for (var p = 0; p < (spec.pdfs || 0); p++) {

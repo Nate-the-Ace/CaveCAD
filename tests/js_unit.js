@@ -16828,6 +16828,102 @@ eqs(CsShelf.sorted([{ name: "Zed", folder: "/z" }, { name: "abc", folder: "/a" }
     "abc", "the shelf lists caves by name");
 
 // ---------------------------------------------------------------------
+// The cave project's images folder
+// ---------------------------------------------------------------------
+
+eqs(CsCave.previewPathFor("/d/ALL DAY CAVE/All Day Cave.dxf"),
+    "/d/ALL DAY CAVE/images/All Day Cave preview.png",
+    "the map's preview belongs with the cave's pictures");
+ok(CsCave.previewPathFor("nofolder.dxf") === null,
+    "a drawing with no folder has nowhere to put a preview");
+ok(CsCave.isPreviewName("All Day Cave preview.png"),
+    "the generated preview is recognisable by name");
+ok(!CsCave.isPreviewName("entrance.jpg"),
+    "somebody's photograph is not the preview");
+ok(!CsCave.isPreviewName("preview.png"),
+    "a bare preview.png is a photograph somebody named that");
+eqs(CsCave.SUBFOLDERS.join(","), "scans,PDF,images",
+    "a cave project keeps sketches, maps and pictures");
+
+// ---------------------------------------------------------------------
+// Shelf triage -- health, badges, declination drift
+// ---------------------------------------------------------------------
+
+eqs(CsShelf.healthText({ depth: 141.7, stationCount: 55, loopCount: 3 },
+        { uis: "UISv2 5-B" }, "ft"),
+    "depth 142 ft  ·  55 stations  ·  3 loops  ·  UISv2 5-B",
+    "the health line reads like a caption");
+eqs(CsShelf.healthText({ depth: 0, stationCount: 1, loopCount: 0 }, null, "ft"),
+    "1 station", "a one-station cave says station, not stations");
+eqs(CsShelf.healthText(null, null, "ft"), "", "no stats, no health line");
+
+eqs(CsShelf.worstClosure({ worstLoop: { percent: 2.44 } }), 2.44,
+    "worst closure comes off the worst loop");
+ok(CsShelf.worstClosure({ worstLoop: null }) === null,
+    "a cave with no loops has no closure figure");
+
+// Warnings first: the reason to look at a shelf is to find the cave
+// that needs work.
+var shelfBadges = CsShelf.badges({
+    errors: 2, closure: 2.4, closureWarnAt: 2.0, driftedTrips: 1,
+    legacy: true, unbound: 14, openEndNoLrud: true,
+    geo: true, elevation: true, pdfs: 0
+});
+eqs(shelfBadges[0].key, "errors", "survey errors lead");
+ok(shelfBadges[0].warn, "an error badge is a warning");
+var shelfKeys = [];
+for (var sbi = 0; sbi < shelfBadges.length; sbi++) { shelfKeys.push(shelfBadges[sbi].key); }
+eqs(shelfKeys.join(","),
+    "errors,closure,declination,legacy,unbound,lrud,geo,elevation,nomap",
+    "every condition becomes a badge, warnings before status");
+ok(!shelfBadges[shelfKeys.indexOf("geo")].warn,
+    "georeferenced is status, not a warning");
+eqs(CsShelf.badges({ closure: 1.2, closureWarnAt: 2.0, pdfs: 0 }).length, 1,
+    "closure inside the threshold raises nothing but the no-map note");
+eqs(CsShelf.badges({ closure: 1.2, closureWarnAt: 2.0 }).length, 0,
+    "an unknown PDF count claims nothing -- absent is not zero");
+eqs(CsShelf.badges({}).length, 0, "a cave with nothing to say gets no badges");
+ok(CsShelf.badgeLine(shelfBadges).indexOf("⚠ closes 2.4%") !== -1,
+    "the badge line marks warnings");
+eqs(CsShelf.badgeLine([]), "", "no badges, no line");
+
+// The date shape CsGeomag wants. A JS Date here reads as NaN and the
+// drift check silently never fires -- which is exactly what shipped
+// once.
+eqs(JSON.stringify(CsShelf.dateParts("2026-08-24")),
+    '{"year":2026,"month":8,"day":24}', "a survey date becomes IGRF's shape");
+ok(CsShelf.dateParts("24/08/2026") === null, "another order is not a date");
+ok(CsShelf.dateParts("2026-13-01") === null, "month 13 is not a date");
+ok(CsShelf.dateParts("") === null, "no date, no parts");
+ok(CsShelf.dateParts(new Date()) === null, "a JS Date is not accepted silently");
+
+// CsGeomag answers an object, not a number: reading it as a number is
+// NaN, and a drift check comparing against NaN says "all fine" forever.
+near(CsShelf.declinationValue({ declination: -4.31, year: 2026 }), -4.31, 1e-12,
+    "the declination comes out of the result object");
+near(CsShelf.declinationValue(-4.31), -4.31, 1e-12, "a bare number passes through");
+ok(CsShelf.declinationValue(null) === null, "no result, no value");
+ok(CsShelf.declinationValue({ declination: NaN }) === null, "NaN is not a value");
+ok(CsShelf.declinationValue({}) === null, "an object without one is not a value");
+
+// Declination drift, against a stubbed IGRF.
+var driftTrips = [
+    { id: 0, date: "1998-05-02", declination: 1.2 },
+    { id: 1, date: "2026-05-02", declination: 2.6 },
+    { id: 2, date: "2026-06-02", declination: null }
+];
+var drifted = CsShelf.declinationDrift(driftTrips, function(when) {
+    return when === "1998-05-02" ? 2.63 : 2.60;
+});
+eqs(drifted.length, 1, "only the trip that disagrees is reported");
+eqs(drifted[0].id, 0, "and it is the one with the old declination");
+near(drifted[0].delta, 1.43, 1e-9, "the drift is IGRF minus what was recorded");
+eqs(CsShelf.declinationDrift(driftTrips, function() { return null; }).length, 0,
+    "no IGRF answer, no drift claim");
+eqs(CsShelf.declinationDrift(null, function() { return 1; }).length, 0,
+    "junk in, empty out");
+
+// ---------------------------------------------------------------------
 // Package -- the archive name, the zip command, the manifest
 // ---------------------------------------------------------------------
 

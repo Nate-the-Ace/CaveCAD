@@ -105,6 +105,32 @@ function caveShowLauncher() {
 // ---------------------------------------------------------------------
 
 /**
+ * Is this file a placeholder the sync client has not filled in?
+ *
+ * A zero-byte drawing under a synced drive is the honest, portable
+ * signal: Drive for Desktop leaves entries whose bytes are elsewhere,
+ * and a DXF is never legitimately empty. Anything cleverer would mean
+ * reading macOS file flags through a shell, which is a lot of machinery
+ * for a message.
+ *
+ * \return the sentence to show, or null when the file is fine.
+ */
+CaveShelf.notDownloaded = function(path) {
+    try {
+        var info = new QFileInfo(path);
+        if (!info.exists() || info.size() > 0) { return null; }
+    } catch (e) {
+        return null;
+    }
+    if (!CsCave.isUnderDrive(path, CsCave.driveRoots())) {
+        return "The drawing is empty:\n" + path;
+    }
+    return "Not downloaded from the drive yet — the file is here but its " +
+        "contents are not.\n\nOpen the cave's folder (Reveal in Finder) " +
+        "and let the drive fetch it, then come back.";
+};
+
+/**
  * A stamp that changes whenever the file does, for the read cache.
  *
  * Modification time AND size: QDateTime.toString() ignores the format
@@ -162,6 +188,14 @@ CaveShelf.readCave = function(record) {
         return blank;
     }
 
+    // A Drive placeholder: the entry is there, the bytes are not. Saying
+    // so beats letting the import fail with something about DXF syntax.
+    var pending = CaveShelf.notDownloaded(path);
+    if (pending !== null) {
+        blank.error = pending;
+        return blank;
+    }
+
     var stamp = CaveShelf.mtimeOf(path);
     var cached = CaveShelf.cache[path];
     if (cached !== undefined && cached.stamp === stamp) {
@@ -174,13 +208,20 @@ CaveShelf.readCave = function(record) {
     try {
         if (sourceDi.importFile(path, "", false) !==
                 RDocumentInterface.IoErrorNoError) {
-            read = { ok: false, error: "Could not read:\n" + path,
+            var why = "Could not read:\n" + path;
+            if (CsCave.isUnderDrive(path, CsCave.driveRoots())) {
+                why += "\n\nThis cave is on a synced drive. If the file has " +
+                    "not been downloaded to this machine yet, open its " +
+                    "folder and let the drive fetch it, then try again.";
+            }
+            read = { ok: false, error: why,
                 trips: [], ends: [], length: 0, unit: "ft", legacy: false,
-                survey: null };
+                survey: null, startable: false };
         }
         else {
-            read = CaveShelf.summarize(
-                CsRevise.surveyFromDocument(sourceDi.getDocument()));
+            var caveDoc = sourceDi.getDocument();
+            read = CaveShelf.summarize(CsRevise.surveyFromDocument(caveDoc),
+                caveDoc, record.folder);
         }
     } catch (e) {
         read = { ok: false, error: "Could not read this cave: " + e,
@@ -194,8 +235,17 @@ CaveShelf.readCave = function(record) {
     return read;
 };
 
-/** The reconstruction, arranged the way the detail pane reads it. */
-CaveShelf.summarize = function(recon) {
+/**
+ * Everything the shelf can learn about a cave in one pass over the
+ * document it has already opened: what the survey is, and what about it
+ * wants attention.
+ *
+ * The triage half is the point. Length and trip count describe a cave;
+ * a bad loop closure, a trip surveyed under the wrong declination, or
+ * linework no trip owns are things somebody has to DO something about,
+ * and a shelf that shows them turns a list of files into a work queue.
+ */
+CaveShelf.summarize = function(recon, doc, folder) {
     var survey = (recon === null || recon === undefined) ? null : recon.survey;
     if (survey === null || survey === undefined) {
         return { ok: false, error: "This drawing carries no survey data.",
@@ -251,8 +301,14 @@ CaveShelf.summarize = function(recon) {
     }
     trips.sort(function(a, b) { return a.id - b.id; });
 
+    var health = CaveShelf.inspect(survey, recon, doc, folder);
+
     return {
         ok: survey.shots.length > 0,
+        stats: health.stats,
+        grade: health.grade,
+        badges: health.badges,
+        drift: health.drift,
         // A fresh template drawing has no shots. That is not a fault --
         // it is a cave waiting for its first trip, and New Trip must
         // stay live for it.
@@ -275,6 +331,134 @@ CaveShelf.summarize = function(recon) {
  */
 CaveShelf.count = function(n, noun) {
     return n + " " + noun + (n === 1 ? "" : "s");
+};
+
+/**
+ * The triage pass: solve the survey the way the DRAWING was solved, and
+ * read the conditions worth flagging off the document itself.
+ *
+ * Solved through CsAdjust.resolveAndAdjust with the drawing's own
+ * recorded options (CsRevise hands them over as adjustTags), not with
+ * the current settings -- a closure figure computed under a different
+ * adjustment than the geometry on screen is a number about nothing.
+ *
+ * Everything here is wrapped: a cave that cannot be analysed still
+ * lists, with fewer things said about it.
+ */
+CaveShelf.inspect = function(survey, recon, doc, folder) {
+    var out = { stats: null, grade: null, badges: [], drift: [] };
+    if (survey === null || survey === undefined) { return out; }
+
+    var resolved = null;
+    try {
+        resolved = CsAdjust.resolveAndAdjust(survey, {},
+            CsAdjust.optionsFromTags(recon.adjustTags));
+        out.stats = CsStats.compute(survey, resolved);
+        out.grade = CsGrade.compute(survey, resolved, out.stats);
+    } catch (eSolve) {
+    }
+
+    var errors = 0;
+    try {
+        var findings = CsValidate.check(survey, resolved);
+        for (var f = 0; f < findings.length; f++) {
+            if (findings[f].severity === "error") { errors++; }
+        }
+    } catch (eCheck) {
+    }
+
+    var scan = CaveShelf.scanDocument(doc);
+
+    // Declination against IGRF, but only where the cave says where it
+    // is: without an anchor there is no honest comparison to make.
+    if (scan.lat !== null && scan.lon !== null) {
+        var trips = [];
+        var records = (Object.prototype.toString.call(survey.trips) ===
+            "[object Array]") ? survey.trips : [];
+        for (var t = 0; t < records.length; t++) {
+            trips.push({ id: t, date: records[t].date,
+                declination: records[t].declination });
+        }
+        out.drift = CsShelf.declinationDrift(trips, function(when) {
+            var parts = CsShelf.dateParts(when);
+            if (parts === null) { return null; }
+            return CsShelf.declinationValue(
+                CsGeomag.declination(scan.lat, scan.lon, parts, 0.0));
+        });
+    }
+
+    var ends = CsFrontier.openEnds(survey);
+    var noLrud = false;
+    for (var e = 0; e < ends.length; e++) {
+        if (ends[e].hasLrud === false) { noLrud = true; }
+    }
+
+    out.badges = CsShelf.badges({
+        errors: errors,
+        closure: CsShelf.worstClosure(out.stats),
+        closureWarnAt: CsValidate.CLOSURE_WARN_PERCENT,
+        driftedTrips: out.drift.length,
+        legacy: recon.legacy === true,
+        unbound: scan.unbound,
+        openEndNoLrud: noLrud,
+        geo: scan.lat !== null,
+        elevation: scan.elevation,
+        pdfs: CsCave.pdfFiles(folder).length
+    });
+    return out;
+};
+
+/**
+ * One walk over the drawing for the three things only the document
+ * knows: whether it is georeferenced (and where, which stays INSIDE
+ * this function -- the coordinate is never shown, only used to ask IGRF
+ * a question), whether an extended elevation has been drawn, and how
+ * much traced linework belongs to no trip.
+ */
+CaveShelf.scanDocument = function(doc) {
+    var out = { lat: null, lon: null, elevation: false, unbound: 0 };
+    if (isNull(doc)) { return out; }
+
+    var ids;
+    try {
+        ids = doc.queryAllEntities(false, false);
+    } catch (eQuery) {
+        return out;
+    }
+
+    for (var i = 0; i < ids.length; i++) {
+        var e;
+        try {
+            e = doc.queryEntity(ids[i]);
+        } catch (eEnt) {
+            continue;
+        }
+        if (isNull(e)) { continue; }
+
+        if (out.lat === null) {
+            var lat = CsTags.getNumber(e, "GeoLat");
+            var lon = CsTags.getNumber(e, "GeoLon");
+            if (lat !== null && lon !== null) {
+                out.lat = lat;
+                out.lon = lon;
+            }
+        }
+
+        if (!out.elevation && CsTags.get(e, "ProfileRun") !== null &&
+                CsTags.get(e, "ProfileRun") !== undefined) {
+            out.elevation = true;
+        }
+
+        try {
+            var layer = doc.getLayerName(e.getLayerId());
+            if (CsBind.isLineworkLayer(layer) &&
+                    isNull(CsTags.get(e, CsBind.TRIP_TAG))) {
+                out.unbound++;
+            }
+        } catch (eLayer) {
+        }
+    }
+    return out;
 };
 
 /** "4,180 ft" */
@@ -360,16 +544,28 @@ CaveShelf.show = function() {
 
     var leftButtons = new QHBoxLayout();
     var addButton = new QPushButton(qsTr("Add Cave..."));
+    var addFolderButton = new QPushButton(qsTr("Add Folder..."));
+    addFolderButton.toolTip = qsTr("Registers every cave inside a folder " +
+        "at once -- a survey group's shared folder, say.");
     var forgetButton = new QPushButton(qsTr("Forget"));
     forgetButton.toolTip = qsTr("Removes the cave from this list. " +
         "Nothing on disk is touched.");
     leftButtons.addWidget(addButton, 1, 0);
+    leftButtons.addWidget(addFolderButton, 0, 0);
     leftButtons.addWidget(forgetButton, 0, 0);
     left.addLayout(leftButtons, 0);
     main.addLayout(left, 0);
 
     // ---- right: the selected cave ------------------------------------
     var right = new QVBoxLayout();
+
+    // The cave's name and its picture share the top of the pane.
+    var header = new QHBoxLayout();
+    var thumb = new QLabel("");
+    thumb.setFixedSize(new QSize(CaveShelf.THUMB_W, CaveShelf.THUMB_H));
+    thumb.alignment = Qt.AlignCenter;
+    var heading = new QVBoxLayout();
+
     var title = new QLabel("");
     try {
         var titleFont = title.font;
@@ -378,11 +574,20 @@ CaveShelf.show = function() {
         title.font = titleFont;
     } catch (eFont) {
     }
-    right.addWidget(title, 0, 0);
+    heading.addWidget(title, 0, 0);
 
     var subtitle = new QLabel("");
     subtitle.wordWrap = true;
-    right.addWidget(subtitle, 0, 0);
+    heading.addWidget(subtitle, 0, 0);
+
+    var badges = new QLabel("");
+    badges.wordWrap = true;
+    heading.addWidget(badges, 0, 0);
+    heading.addStretch(1);
+
+    header.addWidget(thumb, 0, 0);
+    header.addLayout(heading, 1);
+    right.addLayout(header, 0);
 
     var table = new QTableWidget(0, 5);
     try {
@@ -396,9 +601,26 @@ CaveShelf.show = function() {
     }
     right.addWidget(table, 1, 0);
 
+    var health = new QLabel("");
+    health.wordWrap = true;
+    right.addWidget(health, 0, 0);
+
     var frontier = new QLabel("");
     frontier.wordWrap = true;
     right.addWidget(frontier, 0, 0);
+
+    // The cave's own actions sit with the cave; the window's actions
+    // (new cave, close) stay in the footer.
+    var caveActions = new QHBoxLayout();
+    var revealButton = new QPushButton(qsTr("Reveal in Finder"));
+    var pdfButton = new QPushButton(qsTr("Open PDF/"));
+    var packageButton = new QPushButton(qsTr("Package..."));
+    caveActions.addWidget(revealButton, 0, 0);
+    caveActions.addWidget(pdfButton, 0, 0);
+    caveActions.addWidget(packageButton, 0, 0);
+    caveActions.addStretch(1);
+    right.addLayout(caveActions, 0);
+
     main.addLayout(right, 1);
     outer.addLayout(main, 1);
 
@@ -464,6 +686,10 @@ CaveShelf.show = function() {
 
         table.setRowCount(0);
 
+        badges.text = "";
+        health.text = "";
+        CaveShelf.showThumbnail(thumb, state.record);
+
         if (state.record === null) {
             title.text = state.records.length === 0 ?
                 qsTr("No caves on the shelf yet") : "";
@@ -472,7 +698,8 @@ CaveShelf.show = function() {
                     "Saving a drawing inside one adds it here by itself.") : "";
             frontier.text = "";
             state.read = null;
-            CaveShelf.updateButtons(state, openButton, tripButton, forgetButton);
+            CaveShelf.updateButtons(state, openButton, tripButton, forgetButton,
+                revealButton, pdfButton, packageButton);
             return;
         }
 
@@ -488,7 +715,8 @@ CaveShelf.show = function() {
         if (!read.ok) {
             subtitle.text = where + "\n" + read.error;
             frontier.text = "";
-            CaveShelf.updateButtons(state, openButton, tripButton, forgetButton);
+            CaveShelf.updateButtons(state, openButton, tripButton, forgetButton,
+                revealButton, pdfButton, packageButton);
             return;
         }
 
@@ -528,8 +756,12 @@ CaveShelf.show = function() {
         } catch (eResize) {
         }
 
+        badges.text = CsShelf.badgeLine(read.badges);
+        health.text = CsShelf.healthText(read.stats, read.grade, read.unit) +
+            CaveShelf.driftText(read.drift);
         frontier.text = CaveShelf.frontierText(read);
-        CaveShelf.updateButtons(state, openButton, tripButton, forgetButton);
+        CaveShelf.updateButtons(state, openButton, tripButton, forgetButton,
+            revealButton, pdfButton, packageButton);
     };
 
     // ---- wiring -------------------------------------------------------
@@ -546,12 +778,38 @@ CaveShelf.show = function() {
         if (state.read !== null) {
             frontier.text = CaveShelf.frontierText(state.read, state.trip);
         }
-        CaveShelf.updateButtons(state, openButton, tripButton, forgetButton);
+        CaveShelf.updateButtons(state, openButton, tripButton, forgetButton,
+            revealButton, pdfButton, packageButton);
     });
 
     addButton.clicked.connect(function() {
         var added = CaveShelf.addCave(dialog);
         if (added !== null) { fillList(added.folder); }
+    });
+
+    addFolderButton.clicked.connect(function() {
+        var count = CaveShelf.addFolder(dialog);
+        if (count > 0) { fillList(); showDetail(); }
+    });
+
+    revealButton.clicked.connect(function() {
+        if (state.record !== null) { CaveShelf.reveal(state.record.folder); }
+    });
+
+    pdfButton.clicked.connect(function() {
+        if (state.record === null) { return; }
+        var pdfDir = CsCave.pdfFolderOf(state.record.folder);
+        CaveShelf.reveal(pdfDir === null ? state.record.folder : pdfDir);
+    });
+
+    packageButton.clicked.connect(function() {
+        if (state.record === null) { return; }
+        if (typeof PackageCave === "undefined") {
+            EAction.handleUserWarning(qsTr("Package Cave Project is not " +
+                "installed."));
+            return;
+        }
+        PackageCave.forRecord(state.record);
     });
 
     forgetButton.clicked.connect(function() {
@@ -632,7 +890,8 @@ CaveShelf.frontierText = function(read, tripRow) {
  * drawing CaveCAD cannot open -- a DWG -- because guessing what to do
  * beside somebody's DWG is not this button's business.
  */
-CaveShelf.updateButtons = function(state, openButton, tripButton, forgetButton) {
+CaveShelf.updateButtons = function(state, openButton, tripButton, forgetButton,
+        revealButton, pdfButton, packageButton) {
     var record = state.record;
     var read = state.read;
     var hasDrawing = record !== null && CsShelf.clean(record.drawing) !== "";
@@ -657,6 +916,15 @@ CaveShelf.updateButtons = function(state, openButton, tripButton, forgetButton) 
     tripButton.enabled = record !== null && !isDwg &&
         (openButton.enabled || state.needsDrawing);
 
+    if (revealButton !== undefined) {
+        // A folder can always be opened, even for a cave with nothing in
+        // it yet -- that is often exactly when somebody wants to look.
+        revealButton.enabled = record !== null;
+        pdfButton.enabled = record !== null;
+        // Packaging needs something to package.
+        packageButton.enabled = hasDrawing && !isDwg;
+    }
+
     // Always "New Trip". Making the drawing when a cave has none is
     // what starting a trip MEANS for a cave nobody has surveyed yet --
     // it is not a different action, and a button that renames itself
@@ -676,6 +944,7 @@ CaveShelf.openRecord = function(record) {
     var path = CsShelf.clean(record.drawing);
     if (path === "" || !(new QFileInfo(path)).exists()) { return false; }
     openFiles([path], false);
+    CaveShelf.captureThumbnailSoon(path);
     return true;
 };
 
@@ -778,6 +1047,239 @@ CaveShelf.startTrip = function(state) {
             "Notebook did not: ") + e);
     }
     return true;
+};
+
+// The preview's box. Thumbnails are written at 512px on the long side,
+// so this only ever scales down.
+CaveShelf.THUMB_W = 150;
+CaveShelf.THUMB_H = 110;
+
+/**
+ * Where this drawing's preview lives.
+ *
+ * In the cave's own images/ folder, beside the photographs -- the map's
+ * picture is part of the project, travels with it, and is visible to
+ * the whole survey group rather than sitting in one machine's cache.
+ * The application's own cache path (an MD5 under the app cache
+ * directory, which is where the stock recent-files thumbnail goes) is
+ * the fallback for a drawing that has no cave folder at all.
+ *
+ * \return the path, or null when there is no picture yet.
+ */
+CaveShelf.thumbnailFor = function(drawing) {
+    var path = CsShelf.clean(drawing);
+    if (path === "") { return null; }
+
+    var usable = function(candidate) {
+        if (candidate === null || candidate === undefined) { return null; }
+        try {
+            var info = new QFileInfo(String(candidate));
+            return (info.exists() && info.size() > 0) ? String(candidate) : null;
+        } catch (e) {
+            return null;
+        }
+    };
+
+    var inProject = usable(CsCave.previewPathFor(path));
+    if (inProject !== null) { return inProject; }
+
+    try {
+        return usable(RSettings.getThumbnailFilePath(path));
+    } catch (eCache) {
+        return null;
+    }
+};
+
+/**
+ * Puts the cave's picture in the label, or a word about why there
+ * isn't one.
+ *
+ * A cave gets its picture the first time it is saved (or opened) since
+ * thumbnails started being written -- so an old cave shows the note
+ * until somebody opens it, which is honest and needs no bulk render
+ * pass over everybody's drawings.
+ */
+CaveShelf.showThumbnail = function(label, record) {
+    label.text = "";
+    try {
+        label.setPixmap(new QPixmap());
+    } catch (eClear) {
+    }
+    if (record === null || record === undefined) { return; }
+
+    var path = CaveShelf.thumbnailFor(record.drawing);
+    if (path === null) {
+        label.text = qsTr("no preview yet");
+        return;
+    }
+    try {
+        var pixmap = new QPixmap(path);
+        if (pixmap.isNull()) {
+            label.text = qsTr("no preview yet");
+            return;
+        }
+        label.setPixmap(pixmap.scaled(CaveShelf.THUMB_W, CaveShelf.THUMB_H,
+            Qt.KeepAspectRatio, Qt.SmoothTransformation));
+    } catch (e) {
+        label.text = qsTr("no preview yet");
+    }
+};
+
+/**
+ * Takes the picture for a cave that has just been opened, so a drawing
+ * somebody only looks at still earns a preview -- saving is not the
+ * only way to visit a cave.
+ *
+ * Queued: the view has to paint before there is anything to capture.
+ */
+CaveShelf.captureThumbnailSoon = function(drawing) {
+    if (typeof QTimer === "undefined") { return; }
+    var path = CsShelf.clean(drawing);
+    if (path === "") { return; }
+    try {
+        var timer = new QTimer(RMainWindowQt.getMainWindow());
+        timer.singleShot = true;
+        timer.timeout.connect(function() {
+            try {
+                var di = EAction.getDocumentInterface();
+                if (isNull(di) || !isFunction(di.updateThumbnail)) { return; }
+                di.updateThumbnail();
+                var image = di.getThumbnail();
+                if (isNull(image) || image.isNull()) { return; }
+                CsCave.writePreview(path, image);
+            } catch (eShot) {
+                // A preview is never worth an error message.
+            }
+        });
+        timer.start(1200);
+    } catch (e) {
+    }
+};
+
+/**
+ * Opens a folder in the desktop's own file manager.
+ *
+ * The shelf knows where every cave lives; making somebody navigate
+ * there by hand to look at a scan or drop a PDF in is a small daily
+ * tax for no reason.
+ */
+CaveShelf.reveal = function(folder) {
+    var path = CsShelf.clean(folder);
+    if (path === "" || !(new QFileInfo(path)).exists()) { return false; }
+    try {
+        return QDesktopServices.openUrl(new QUrl("file://" + path));
+    } catch (e) {
+        EAction.handleUserWarning(qsTr("Could not open ") + path);
+        return false;
+    }
+};
+
+/** What the drift flag says under the health line. */
+CaveShelf.driftText = function(drift) {
+    if (Object.prototype.toString.call(drift) !== "[object Array]" ||
+            drift.length === 0) {
+        return "";
+    }
+    var worst = drift[0];
+    for (var i = 1; i < drift.length; i++) {
+        if (Math.abs(drift[i].delta) > Math.abs(worst.delta)) {
+            worst = drift[i];
+        }
+    }
+    var off = Math.round(Math.abs(worst.delta) * 100) / 100;
+    return "\n" + qsTr("Trip %1 was surveyed at %2° declination; IGRF says " +
+        "%3° for that date here — %4° out.")
+        .arg(worst.id)
+        .arg(Math.round(worst.recorded * 100) / 100)
+        .arg(Math.round(worst.igrf * 100) / 100)
+        .arg(off);
+};
+
+/**
+ * Registers every cave inside one folder -- a survey group's shared
+ * folder, typically.
+ *
+ * This is the answer to the cost of an explicit registry, and it is
+ * deliberately still a DECISION: one folder, chosen, scanned once, with
+ * what was found shown before anything is written. What it is not is a
+ * standing sweep of the drive at every startup, which is the thing that
+ * makes a launcher slow on the machine with the most caves.
+ *
+ * \return how many caves were added.
+ */
+CaveShelf.addFolder = function(parent) {
+    var roots = CsCave.driveRoots();
+    var start = roots.length > 0 ? roots[0] : QDir.homePath();
+
+    var picked = QFileDialog.getExistingDirectory(parent,
+        qsTr("Pick a folder that holds caves"), start);
+    if (isNull(picked) || String(picked) === "") { return 0; }
+    var folder = String(picked).replace(/\\/g, "/").replace(/\/+$/, "");
+
+    var subs = [];
+    try {
+        var dir = new QDir(folder);
+        subs = dir.entryList([], QDir.Dirs | QDir.NoDotAndDotDot, QDir.Name);
+    } catch (e) {
+        return 0;
+    }
+
+    // The folder itself may BE a cave; a folder of caves is the other
+    // case. Both are worth handling, because people point at both.
+    var candidates = [];
+    var self = CsShelf.recordFor(folder);
+    if (self !== null && self.drawing !== "") { candidates.push(self); }
+    for (var i = 0; i < subs.length; i++) {
+        var sub = folder + "/" + String(subs[i]);
+        var record = CsShelf.recordFor(sub);
+        if (record === null) { continue; }
+        // A folder with neither a drawing nor sketches is not a cave --
+        // it is somebody's spreadsheets.
+        var scans = CsCave.findSubfolder(sub, CsCave.SCANS);
+        if (record.drawing === "" && scans === null) { continue; }
+        candidates.push(record);
+    }
+
+    var known = CsShelf.list();
+    var fresh = [];
+    for (var c = 0; c < candidates.length; c++) {
+        if (CsShelf.indexOfFolder(known, candidates[c].folder) === -1) {
+            fresh.push(candidates[c]);
+        }
+    }
+
+    if (fresh.length === 0) {
+        QMessageBox.information(RMainWindowQt.getMainWindow(),
+            qsTr("Add Folder"),
+            candidates.length === 0 ?
+                qsTr("No caves in that folder: nothing there holds a drawing " +
+                    "or a scans folder.") :
+                qsTr("Every cave in that folder is already on the shelf."));
+        return 0;
+    }
+
+    var lines = [];
+    for (var f = 0; f < fresh.length && f < 20; f++) {
+        lines.push("   " + fresh[f].name +
+            (fresh[f].drawing === "" ? qsTr("  (no drawing yet)") : ""));
+    }
+    if (fresh.length > lines.length) {
+        lines.push(qsTr("   ...and %1 more").arg(fresh.length - lines.length));
+    }
+
+    var answer = QMessageBox.question(RMainWindowQt.getMainWindow(),
+        qsTr("Add Folder"),
+        qsTr("Add these %1 caves to the shelf?\n\n").arg(fresh.length) +
+            lines.join("\n"),
+        QMessageBox.Yes | QMessageBox.No);
+    if (answer !== QMessageBox.Yes) { return 0; }
+
+    for (var a = 0; a < fresh.length; a++) {
+        CsShelf.register(fresh[a]);
+    }
+    EAction.handleUserMessage(qsTr("%1 caves added to the shelf.")
+        .arg(fresh.length));
+    return fresh.length;
 };
 
 /**
