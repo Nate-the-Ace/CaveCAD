@@ -199,8 +199,25 @@ CsLrud.stationWallPoints = function(st, passageAz, lrud, splays, side,
  * points -- the station's LRUD tick end (or the station itself where
  * a side reads 0) plus every splay that hit that side. A run breaks
  * at a junction station, at a station with NO wall evidence at all
- * (neither LRUD nor splays), and at a closure leg -- each break
+ * (neither LRUD nor splays), at a closure leg, and where the next leg
+ * does not continue from the previous one's arrival -- each break
  * starts a new polyline rather than inventing a connection.
+ *
+ * THAT LAST BREAK EXISTS BECAUSE "resolution order" is not "walk
+ * order". resolved.legs can place a junction station's arrival, then
+ * immediately place ONE branch off it end-to-end, then place a SECOND
+ * branch off the SAME junction station next -- both branches' legs
+ * have their `from` at the junction, so nothing about them looks
+ * wrong individually. Without this check, the second branch's first
+ * leg lands right after the first branch's last point in the SAME
+ * open buffer (nothing had flushed it), so one polyline would jump
+ * straight from one branch's far end to the other branch's near end
+ * -- a wall segment crossing open cave that was never surveyed. This
+ * was reachable only where a junction's branches both carried wall
+ * evidence starting at the very next station; every fixture that
+ * predates this fix happens to separate branches with a no-evidence
+ * station, which already flushes for an unrelated reason and hid the
+ * gap.
  *
  * \param survey   the CsModel survey (for LRUD and splay lookup)
  * \param resolved CsNetwork.resolve() result
@@ -289,11 +306,29 @@ CsLrud.wallRuns = function(survey, resolved, tapeMode) {
         }
     };
 
+    // The arrival station of the previous leg walked into the CURRENT
+    // buffer (not the run's start, and not touched by a flush() that
+    // happened for junction/no-evidence reasons within the same leg --
+    // see below). null before the first leg and right after a closure,
+    // where there is no "previous arrival" a next leg owes continuity
+    // to.
+    var prevTo = null;
+
     for (var i = 0; i < resolved.legs.length; i++) {
         var leg = resolved.legs[i];
         if (leg.kind === "closure") {
             flush();
+            prevTo = null;
             continue;
+        }
+        if (prevTo !== null && leg.from !== prevTo) {
+            // This leg does not continue from where the buffered run
+            // left off -- e.g. a second branch off the same junction
+            // station, walked right after the first branch finished
+            // in resolution order. Whatever is buffered is a real,
+            // continuous run; what is about to be appended is not
+            // part of it.
+            flush();
         }
         // The leg reached a new station (leg.to for forward legs).
         var name = leg.to;
@@ -337,11 +372,13 @@ CsLrud.wallRuns = function(survey, resolved, tapeMode) {
             append(left, lp, leftNames, leftSeen, name);
             append(right, rp, rightNames, rightSeen, name);
             flush();
+            prevTo = name;
             continue;
         }
 
         append(left, lp, leftNames, leftSeen, name);
         append(right, rp, rightNames, rightSeen, name);
+        prevTo = name;
     }
     flush();
 

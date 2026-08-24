@@ -2609,6 +2609,132 @@ function splayFixture() {
 })();
 
 // ---------------------------------------------------------------------
+// RUN CONTINUITY: a measured junction whose branches BOTH carry LRUD
+// starting at the very next station must not glue them into one run.
+//
+// J1 -> J2 (junction) -> L1 -> L2 (left branch, LRUD throughout)
+//                J2 -> R1 -> R2 (right branch, LRUD throughout)
+//
+// In resolution order (this is also the shot order here) the left
+// branch's two legs resolve completely before the right branch's do,
+// so a walk keyed only on "arrival station name" -- with no check
+// that the next leg's FROM continues the previous leg's TO -- appends
+// R1/R2's points onto the SAME open buffer as L1/L2's, producing one
+// polyline that jumps across open cave from the left branch's far end
+// to the right branch's near end. THIS is the case every fixture
+// above (and every fixture Task 7 shipped with) could not catch: they
+// all separate branches with a no-evidence station, which flushes for
+// an unrelated reason and hides the gap. Here both branches carry
+// wall evidence immediately, so only the continuity check catches it.
+// ---------------------------------------------------------------------
+(function() {
+    loadRepoScript("scripts/CaveSurvey/Core/CsLayers.js");
+    loadRepoScript("scripts/CaveSurvey/Core/CsTags.js");
+    loadRepoScript("scripts/CaveSurvey/Core/CsBind.js");
+    loadRepoScript("scripts/CaveSurvey/Core/CsFocus.js");
+
+    var sv = CsModel.newSurvey();
+    var j1 = shotOf("J1", "J2", 10, 0);             // anchor -> junction
+    var j2 = shotOf("J2", "L1", 10, 315);
+    j2.left = 2; j2.right = 2;
+    var j3 = shotOf("L1", "L2", 10, 315);
+    j3.left = 2; j3.right = 2;
+    var j4 = shotOf("J2", "R1", 10, 45);
+    j4.left = 2; j4.right = 2;
+    var j5 = shotOf("R1", "R2", 10, 45);
+    j5.left = 2; j5.right = 2;
+    sv.shots = [j1, j2, j3, j4, j5];
+
+    var jr = CsNetwork.resolve(sv, {});
+    eqs(CsLrud.legCounts(jr.legs)["J2"], 3,
+        "fixture assumption: J2 really is a junction (3 legs touch it)");
+
+    var jw = CsLrud.wallRuns(sv, jr);
+    eqs(jw.left.length, 2,
+        "run continuity: the junction's two LRUD-carrying branches " +
+        "make TWO left runs, not one glued run, got " + jw.left.length);
+    eqs(jw.right.length, 2,
+        "run continuity: same for the right side, got " + jw.right.length);
+    if (jw.left.length === 2 && jw.right.length === 2) {
+        eqs(jw.left[0].stations.join(","), "L1,L2",
+            "run continuity: the left branch's own left run names only " +
+            "L1,L2");
+        eqs(jw.left[1].stations.join(","), "R1,R2",
+            "run continuity: the right branch's own left run names only " +
+            "R1,R2, never L1 or L2");
+        eqs(jw.right[0].stations.join(","), "L1,L2",
+            "run continuity: the left branch's right run agrees with its " +
+            "left run");
+        eqs(jw.right[1].stations.join(","), "R1,R2",
+            "run continuity: the right branch's right run agrees with " +
+            "its left run");
+
+        var jOverlap = false, jSeen = {}, jn;
+        for (jn = 0; jn < jw.left[0].stations.length; jn++) {
+            jSeen[jw.left[0].stations[jn]] = true;
+        }
+        for (jn = 0; jn < jw.left[1].stations.length; jn++) {
+            if (jSeen[jw.left[1].stations[jn]] === true) { jOverlap = true; }
+        }
+        ok(!jOverlap,
+            "run continuity: the two branches' station lists are " +
+            "disjoint -- no station named on both sides of the junction");
+    }
+
+    // -- CsFocus.isVisible: an L-only focus must show the L branch's
+    // -- walls and hide the R branch's, using the exact WallRunStations
+    // -- text CsDraw would write for each run (CsBind.encodeStations).
+    var fakeWallEntity = function(stations) {
+        var tagValue = CsBind.encodeStations(stations);
+        return {
+            getLayerName: function() { return "CTRL-LRUD-WALL-LEFT"; },
+            getCustomProperty: function(group, key, def) {
+                if (group !== "CaveSurvey" || key !== "WallRunStations") {
+                    return def;
+                }
+                return tagValue;
+            }
+        };
+    };
+    // COUNT-BASED AND TAG-TEXT-INDEPENDENT, deliberately: a version of
+    // this check that first buckets runs by their decoded station
+    // string (e.g. `=== "L1,L2"`) goes vacuous under the very bug this
+    // test targets, exactly the trap review flagged in the existing
+    // Task 7 doc test (tests/js_unit.js, "passageOneVisible"/
+    // "passageTwoVisible" above) -- pre-fix there is no run whose
+    // decoded list is exactly "L1,L2" OR exactly "R1,R2" (there is one
+    // run per side, "L1,L2,R1,R2"), so a bucket keyed on either exact
+    // string is empty and a `=== 0` assertion on it would pass for the
+    // wrong reason. Counting VISIBLE entities against the TOTAL number
+    // of wall-run entities has no such blind spot: it fails whether the
+    // bug manifests as "the wrong runs are visible" or as "there are
+    // fewer runs than there should be".
+    var focusL = { L1: true, L2: true };
+    var allRuns = jw.left.concat(jw.right);
+    var totalRuns = allRuns.length;
+    var visibleRuns = 0;
+    for (var ji = 0; ji < allRuns.length; ji++) {
+        var ent = fakeWallEntity(allRuns[ji].stations);
+        if (CsFocus.isVisible(ent, focusL)) {
+            visibleRuns++;
+        }
+    }
+    eqs(totalRuns, 4,
+        "run continuity + CsFocus.isVisible: four separate wall-run " +
+        "entities exist to test visibility on (two per side) -- got " +
+        totalRuns);
+    eqs(visibleRuns, 2,
+        "run continuity + CsFocus.isVisible: exactly HALF of the wall " +
+        "runs (the left branch's own two) show under an L-only focus, " +
+        "got " + visibleRuns + " of " + totalRuns + " -- before the " +
+        "continuity fix there were only two runs total (both branches " +
+        "glued into one per side) and BOTH show under this focus " +
+        "because the glued station list still contains L1, which is " +
+        "exactly the bug: the right branch riding along on the left " +
+        "branch's focus");
+})();
+
+// ---------------------------------------------------------------------
 // Validate -- planted blunders.
 // ---------------------------------------------------------------------
 
