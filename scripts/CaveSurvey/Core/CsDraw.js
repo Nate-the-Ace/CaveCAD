@@ -610,6 +610,23 @@ CsDraw.survey = function(survey, resolved, originStation, originPos, seqBase) {
                 var pl = new RPolylineEntity(doc, data);
                 pl.setLayerId(doc.getLayerId(layerName));
                 CsTags.set(pl, "WallRun", layerName + ":" + ri);
+                // GUARDED INVARIANT (review minor): CsTags.set is a
+                // silent no-op on "", so a run whose `stations` encoded
+                // to empty would draw WITHOUT a WallRunStations tag at
+                // all -- and eraseStations' wall-run rule matches only
+                // entities THAT CARRY the tag, so a redraw could never
+                // find this polyline to replace it. Every redraw would
+                // then stack a fresh duplicate on top of the last one,
+                // forever. CsLrud.wallRuns' own docblock guarantees this
+                // cannot happen (every run it returns has length >= 2,
+                // and every point comes from a named station, so
+                // `stations` always has at least one entry) -- this is
+                // therefore unreachable today, but it is new in kind
+                // under Task 7: before it, WallRunStations held the
+                // whole survey's names, which could never be empty
+                // either, for an unrelated reason. If that guarantee
+                // ever stops holding, this is where a run silently
+                // starts drawing itself un-erasable.
                 CsTags.set(pl, "WallRunStations",
                     CsBind.encodeStations(run.stations));
                 op.addObject(pl, false);

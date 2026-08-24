@@ -16114,50 +16114,69 @@ if (!IS_NODE) {
 
         // -- CsFocus.isVisible, on THIS drawn document, before anything
         // -- is erased: passage one focused, passage two must not show.
+        //
+        // COUNT-BASED AND TAG-TEXT-INDEPENDENT ON PURPOSE (review
+        // finding): a version of this check that first buckets entities
+        // by their decoded, sorted station STRING (`=== "T2,T3"`, `===
+        // "T5,T6"`) goes vacuous under the exact bug this test exists to
+        // catch. Before this task, CsDraw built one `allNames` string
+        // from every resolved station in the WHOLE drawing, so every
+        // entity's decoded/sorted string was the same six-station list,
+        // never exactly "T2,T3" or "T5,T6" -- both buckets would be
+        // EMPTY, `passageTwoVisible === 0` would pass for having nothing
+        // to count rather than for the right reason, and the assertion
+        // would say nothing about the four wall runs that were, in
+        // fact, ALL visible under this focus. Counting how many of the
+        // four entities are visible, full stop, has no such blind spot:
+        // it fails whether the wrong runs show, too many show, or too
+        // few do.
         var focusOne = { T2: true, T3: true };
-        var passageOneVisible = 0, passageTwoVisible = 0;
         var entsForFocus = wallEntities();
+        var visibleUnderFocusOne = 0;
         for (var fi = 0; fi < entsForFocus.length; fi++) {
-            var vis = CsFocus.isVisible(entsForFocus[fi].entity, focusOne);
-            if (entsForFocus[fi].stations === "T2,T3" && vis) {
-                passageOneVisible++;
-            }
-            if (entsForFocus[fi].stations === "T5,T6" && vis) {
-                passageTwoVisible++;
+            if (CsFocus.isVisible(entsForFocus[fi].entity, focusOne)) {
+                visibleUnderFocusOne++;
             }
         }
-        eqs(passageOneVisible, 2,
-            "CsFocus.isVisible, real drawn document: passage one's own " +
-            "wall runs show under a passage-one focus");
-        eqs(passageTwoVisible, 0,
-            "CsFocus.isVisible, real drawn document: passage two's wall " +
-            "runs do NOT show under a passage-one focus -- unreachable " +
-            "before this fix, since every wall run carried the whole " +
-            "survey's stations and so matched every focus");
+        eqs(visibleUnderFocusOne, 2,
+            "CsFocus.isVisible, real drawn document: exactly 2 of the 4 " +
+            "wall polylines (passage one's own) show under a passage-one " +
+            "focus, got " + visibleUnderFocusOne + " -- before this fix " +
+            "every wall run carried the whole survey's stations, so all " +
+            "4 would show here, not 2");
 
-        // -- eraseStations, BOTH halves ---------------------------------
-        var countOver = function(stationCsv) {
-            var n = 0, ents = wallEntities();
+        // -- eraseStations, BOTH halves -- also count/membership-based
+        // -- rather than bucketed by exact decoded-station string, for
+        // -- the same reason as the visibility check just above.
+        var stationsMentioned = function(ents, name) {
             for (var i = 0; i < ents.length; i++) {
-                if (ents[i].stations === stationCsv) { n++; }
+                var names = ents[i].stations.split(",");
+                for (var ni = 0; ni < names.length; ni++) {
+                    if (names[ni] === name) { return true; }
+                }
             }
-            return n;
+            return false;
         };
-        ok(countOver("T2,T3") > 0 && countOver("T5,T6") > 0,
-            "task7-doc: both passages' wall runs exist before the erase");
+        var beforeErase = wallEntities();
+        eqs(beforeErase.length, 4,
+            "task7-doc: both passages' wall runs (4 total) exist before " +
+            "the erase, got " + beforeErase.length);
 
         CsDraw.eraseStations(doc, ["T2", "T3"]);
 
-        eqs(countOver("T2,T3"), 0,
-            "eraseStations, half 1 (already true before this fix): a " +
-            "wall run is replaced when any of ITS OWN stations is " +
-            "redrawn");
-        eqs(countOver("T5,T6"), 2,
-            "eraseStations, half 2 (THE HALF THAT WAS BROKEN): a wall " +
-            "run belonging to a passage that was NOT redrawn survives -- " +
+        var afterErase = wallEntities();
+        eqs(afterErase.length, 2,
+            "eraseStations: exactly the two runs that do NOT touch T2 or " +
+            "T3 survive the erase, got " + afterErase.length + " -- " +
             "before this fix every wall run carried the whole survey's " +
-            "stations, so erasing T2/T3 would have killed T5/T6's walls " +
-            "too");
+            "stations (T2 and T3 included), so erasing T2/T3 would have " +
+            "killed all four, not left two standing");
+        ok(!stationsMentioned(afterErase, "T2") &&
+                !stationsMentioned(afterErase, "T3"),
+            "eraseStations: no surviving wall run mentions T2 or T3 " +
+            "(THE HALF THAT WAS BROKEN: a wall run belonging to a " +
+            "passage that was NOT redrawn survives, tagged with only " +
+            "its own stations)");
     })();
 }
 
@@ -16437,7 +16456,7 @@ if (!IS_NODE) {
     loadRepoScript("scripts/CaveSurvey/Core/CsStore.js");
 
     // -- an empty store costs no geometry-key computation ------------
-    CsStore.map = {};
+    CsStore.setMap({});
     var positionCalls = 0;
     var untaggedEntity = {
         getType: function() { return "RPointEntity"; },
@@ -16451,7 +16470,7 @@ if (!IS_NODE) {
     eqs(CsStore.isEmpty(), true, "CsStore.isEmpty: {} is empty");
 
     // a null map (never loaded at all) short-circuits the same way
-    CsStore.map = null;
+    CsStore.setMap(null);
     eqs(CsStore.lookup(untaggedEntity, "Station"), "",
         "CsStore.lookup: a null map (never loaded) also returns empty " +
         "without computing a key");
@@ -16462,7 +16481,7 @@ if (!IS_NODE) {
     // -- a populated store still resolves a legacy record -------------
     // geoKey rounds position to 4 decimals: 1.23456 -> "1.2346",
     // 3.45678 -> "3.4568" (CsStore.geoKey's own rounding rule).
-    CsStore.map = { "RPointEntity:1.2346:3.4568": { Station: "A1" } };
+    CsStore.setMap({ "RPointEntity:1.2346:3.4568": { Station: "A1" } });
     var taggedEntity = {
         getType: function() { return "RPointEntity"; },
         getPosition: function() {
@@ -16487,7 +16506,22 @@ if (!IS_NODE) {
         "(the geometry matches, the field does not) still returns " +
         "empty, not a wrong value");
 
-    CsStore.map = null;
+    // CsStore.isEmpty is now a cached read (CsStore.setMap computes it
+    // once, where the map is actually assigned) rather than a fresh
+    // for-in scan on every call -- these two pin that the CACHED
+    // answer still agrees with the same edge cases the old per-call
+    // scan got right: a record whose OWN VALUE happens to be `{}` is
+    // still a record (the for-in a for-in would have seen the KEY
+    // "k", never mind what {} holds), and a null map is empty without
+    // needing a map to scan at all.
+    CsStore.setMap({ k: {} });
+    eqs(CsStore.isEmpty(), false,
+        "CsStore.isEmpty: {k:{}} is NOT empty -- one record whose own " +
+        "value is an empty object is still one record");
+    CsStore.setMap(null);
+    eqs(CsStore.isEmpty(), true,
+        "CsStore.isEmpty: setMap(null) reads back as empty, same as " +
+        "the never-loaded state");
 })();
 
 // ---------------------------------------------------------------------

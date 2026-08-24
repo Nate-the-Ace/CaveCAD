@@ -1887,7 +1887,21 @@ CsProfile.classifySplay = function(shot, deadDeg) {
  *
  * \return {ceiling: [[{x,y}]], floor: [[{x,y}]],
  *          flat: [{x, y, station, name}], skipped: n} -- runs shorter
- *          than 2 points are dropped, same rule as CsLrud.wallRuns;
+ *          than 2 points are dropped, same RULE as CsLrud.wallRuns.
+ *          THE SHAPE IS NOT THE SAME, THOUGH, and calling
+ *          CsLrud.wallRuns "the reference implementation" for a rule
+ *          stopped meaning "and therefore the same return shape" as of
+ *          the commit that gave each of ITS runs their own station
+ *          list (14af1ca, "a wall run carries its own stations, not
+ *          the whole survey's"): that function now returns
+ *          {points: [{x,y}], stations: [name]} per run, not a bare
+ *          point array. ceiling/floor here are still bare [[{x,y}]] --
+ *          bandWallRuns has no per-run station list of its own yet. A
+ *          future task that adds one (the profile side is the obvious
+ *          next consumer of per-run stations) has to build the same
+ *          {points, stations} pairing itself; it must not assume this
+ *          array already carries it just because the RULE citations
+ *          below and in this function's body point at CsLrud.wallRuns.
  *          `skipped` counts splays with no usable distance/azimuth/
  *          inclination (CsTraverse.offset returned null for them) --
  *          they contribute no ceiling/floor point and no flat tick
@@ -1985,11 +1999,12 @@ CsProfile.bandWallRuns = function(band, survey, resolved, opts) {
     for (var i = 0; i < band.stations.length; i++) {
         var st = band.stations[i];
 
-        // I1: exactly CsLrud.wallRuns' own closure handling -- flush
-        // whatever the run had BEFORE looking at this station, then
-        // skip it completely. Its own evidence is not lost; see the
-        // docblock's CLOSURE DETECTION paragraph for where it surfaces
-        // instead.
+        // I1: exactly CsLrud.wallRuns' own closure handling (the RULE,
+        // not the return SHAPE -- see this function's own return
+        // docblock above) -- flush whatever the run had BEFORE looking
+        // at this station, then skip it completely. Its own evidence
+        // is not lost; see the docblock's CLOSURE DETECTION paragraph
+        // for where it surfaces instead.
         if (closureAt[st.name] === true) {
             flush();
             continue;
@@ -2030,8 +2045,11 @@ CsProfile.bandWallRuns = function(band, survey, resolved, opts) {
                 // early `continue` on inclination alone was dead
                 // weight that ALSO under-counted: it dropped a
                 // no-inclination splay without ever reaching this
-                // counter, so `skipped` disagreed with CsLrud.wallRuns
-                // on the very same fixture. classifySplay is never
+                // counter, so `skipped` (the COUNT -- this is not a
+                // shape claim, see this function's own return
+                // docblock above for how the shapes diverge) disagreed
+                // with CsLrud.wallRuns' on the very same fixture.
+                // classifySplay is never
                 // reached for anything unusable now, on any of its
                 // three inputs -- no ceiling/floor point, no flat tick
                 // (falling through to "flat" would plot a phantom
@@ -2079,8 +2097,33 @@ CsProfile.bandWallRuns = function(band, survey, resolved, opts) {
         }
 
         // a junction station's own points still terminate the run
-        // they end (same as CsLrud.wallRuns), rather than being
-        // silently dropped from it
+        // they end (same RULE as CsLrud.wallRuns -- again, not the
+        // same return shape, see this function's own return docblock
+        // above), rather than being silently dropped from it
+        //
+        // PROBED FOR CsLrud.wallRuns' OWN CONTINUITY GAP (review
+        // minor) AND FOUND IMMUNE: CsLrud.wallRuns walks resolved.legs
+        // in RESOLUTION order, so a junction whose two branches both
+        // carry wall evidence starting at the very next station could
+        // (before its own continuity fix) glue both branches into one
+        // polyline -- resolution order can place a whole branch, then
+        // a second branch off the SAME junction station, with nothing
+        // to say the second one's `from` doesn't continue the first
+        // one's `to`. This loop cannot have that failure mode: it
+        // walks `band.stations`, which unrollBand builds by resolving
+        // each step through CsProfile.legBetween/tieLegBetween, so
+        // band.stations[i] and band.stations[i+1] are ALWAYS joined by
+        // a real leg or the band stops there instead (band.stopped).
+        // Concretely, on a T-junction fixture matching the one that
+        // exposed CsLrud.wallRuns' bug (a run "J1,J2,L1,L2,R1,R2" with
+        // LRUD on both branches immediately past the junction J2),
+        // CsProfile.longestChain picks the single longest REAL path --
+        // here L2-L1-J2-R1-R2, a walk of actual surveyed edges straight
+        // through the junction -- and this isJunction check still
+        // correctly splits it into two runs at J2. There is no station
+        // list this loop could ever see where two entries are NOT
+        // leg-adjacent, so there is nothing here for a continuity check
+        // to catch.
         if (isJunction || noEvidence) {
             flush();
         }

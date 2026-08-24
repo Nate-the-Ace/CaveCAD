@@ -67,20 +67,22 @@ CsFocus.TAG_RULES = [
  *  touches, even if the chain wandered briefly out of focus.
  *
  *  THAT OR CHOICE IS CORRECT ONLY ONCE WallRunStations CARRIES A RUN'S
- *  OWN STATIONS. It does not today: CsDraw.js builds one `allNames`
- *  string from EVERY resolved station in the WHOLE drawing (`names.
- *  join("|")`, around CsDraw.js:592) and writes that same string onto
- *  every wall run it draws, whichever trip or run the wall belongs to.
- *  So right now, under OR, every wall run in the cave matches every
- *  focus selection -- a single-trip view comes back with the whole
- *  cave's dashed walls overlaid, not just that trip's. This is a
- *  tagging bug at the source, not a reason to change OR to AND here:
- *  Task 7 (see the plan doc) fixes CsLrud/CsDraw to tag each wall run
- *  with only the stations its own chain followed, and OR is exactly
- *  right once that lands. Until then, a drawing that was drawn or
- *  redrawn before Task 7 keeps ALL of its wall runs visible under
- *  every selection; only a redraw performed after Task 7 ships
- *  corrects it for that drawing. */
+ *  OWN STATIONS -- and now it does. Before commit 14af1ca ("a wall run
+ *  carries its own stations, not the whole survey's"), CsDraw.js built
+ *  one `allNames` string from EVERY resolved station in the WHOLE
+ *  drawing and wrote that same string onto every wall run it drew,
+ *  whichever trip or run the wall belonged to, so under OR every wall
+ *  run in the cave matched every focus selection -- a single-trip view
+ *  came back with the whole cave's dashed walls overlaid, not just
+ *  that trip's. 14af1ca fixed the tagging at the source (CsLrud/CsDraw
+ *  now tag each wall run with only the stations its own chain
+ *  followed), which is what makes OR correct here rather than merely
+ *  convenient. DO NOT read that fix as license to switch this to AND:
+ *  a wall run generated from a chain that wandered one station out of
+ *  focus is still meant to show, and AND would hide it. A drawing
+ *  drawn or redrawn BEFORE 14af1ca keeps ALL of its wall runs visible
+ *  under every selection until it is redrawn; only a redraw performed
+ *  after that commit corrects it for that drawing. */
 CsFocus.ALL_ENDS_MODES = { pair: true };
 
 /** Applies a TAG_RULES `base` (see above) to a raw tag value, so a
