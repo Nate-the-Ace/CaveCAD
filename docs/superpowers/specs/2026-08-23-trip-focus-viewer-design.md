@@ -60,7 +60,27 @@ Read out of the fork's source, not from docs. Each of these is load-bearing.
 - **`RGraphicsViewQt` brings its own navigation.** It implements
   `wheelEvent` and `mouseMoveEvent`, so the popup pans and zooms without any
   action plumbing.
-- **A whole-document copy needs no selection.**
+- **~~A whole-document copy needs no selection.~~ CORRECTED 2026-08-24.** The
+  claim below was read out of `cavecad-src` and is FALSE for the engine that
+  actually runs: `RCopyOperation.setSelectionOnly` is `undefined` in
+  `/Applications/CaveCAD.app` (binary Aug 19 22:50) while present in the source
+  tree (HEAD Aug 21). The installed app is behind the source, so the source is
+  documentation of a future build, not ground truth. `tests/run_all.sh`
+  hard-codes that app, so it IS the target platform.
+  **What `fillPreview` therefore does:** it saves the source document's
+  selection, selects the model-space entities that are not individually hidden,
+  runs the selection-based `RCopyOperation`, then clears and restores the
+  original selection; individually hidden entities are rebuilt by hand, because
+  `RCopyOperation` refuses them (and `setAllowInvisible`/`setAllowAll`, which do
+  exist, do not change that). Model space is selected explicitly by
+  `getBlockId() === getModelSpaceBlockId()` rather than trusting
+  `queryAllEntities`, whose `allBlocks` default is false and would silently copy
+  only whatever block the user is editing.
+  **So "the user's document is never touched" carries one honest exception:** its
+  SELECTION is changed for the duration of the copy and restored. Probed: that
+  neither sets the modified flag nor adds a transaction, so nothing is written
+  and no save prompt appears -- but a listener watching selection would see it.
+- **~~(superseded)~~ A whole-document copy needs no selection.**
   `RCopyOperation(new RVector(0,0), sourceDoc)` defaults to
   `selectionOnly(true)` (`RCopyOperation.cpp:37`), and
   `setSelectionOnly(false)` is exposed to script
