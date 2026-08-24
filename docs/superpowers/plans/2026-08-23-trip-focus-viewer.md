@@ -2021,3 +2021,61 @@ bash tests/run_all.sh
 git add scripts/CaveSurvey/Core/CsLrud.js scripts/CaveSurvey/Core/CsDraw.js tests/js_unit.js
 git commit -m "fix(CsLrud): a wall run carries its own stations, not the whole survey's"
 ```
+
+---
+
+### Task 8: Rebuild the list pane on widgets this bridge actually has
+
+**Goal:** The contributions list is built from `QCheckBox` and `QLabel` in a `QGridLayout`, because `QTreeWidget` cannot be constructed from script in this build at all.
+
+**Why this task exists — and why no test caught it.** Task 4 built the pane on `QTreeWidget`, on the authority of a note in my own memory saying that widget "exists". It does not, in the only sense that matters. Probed directly in CaveCAD 3.33.0's engine, 2026-08-23:
+
+```
+Warning: "QTreeWidget.js: No constructor found for class QTreeWidget"
+new QTreeWidget()              -> a STUB whose toString() is a convincing "QTreeWidget [JS]"
+QTreeWidget.setHeaderLabels    -> undefined
+QTreeWidget.topLevelItemCount  -> undefined
+new QTreeWidgetItem()          -> constructs, but checkState/setCheckState are undefined
+new QListWidget()              -> "No constructor found" as well
+QCheckBox, QScrollArea, QGridLayout, QLabel, QWidget, QSplitter, QDialog,
+QLineEdit, QPushButton         -> all construct fine
+```
+
+So `TripFocus.buildTree` threw on `setHeaderLabels` for EVERY drawing — the window could not open at all — while `run_all.sh` stayed green through six sections, because no test ever constructed the widget. Stock QCAD only ever obtains a tree via `WidgetFactory.createWidget(<ui file>).findChild(...)`, never through `new`. Reading Qt's generated binding source is not evidence either: those files exist for classes this build never registers.
+
+**Files:**
+- Modify: `scripts/CaveSurvey/TripFocus/TripFocus.js` (replace `buildTree`/`picked`/`wireTree` and the splitter's left pane)
+- Test: `tests/js_unit.js`
+
+**Acceptance Criteria:**
+- [ ] No `QTreeWidget`, `QTreeWidgetItem` or `QListWidget` anywhere in the add-on
+- [ ] The pane is a `QScrollArea` over a `QWidget` with a `QGridLayout`: one row per entry, column 0 the checkbox (its text is the contributor), column 1 the distance, column 2 the share, and a trailing stretch row so rows pin to the top rather than spreading down the pane
+- [ ] Four section headers, each itself a `QCheckBox` whose text is the section title; toggling it sets every row in that section
+- [ ] A section with no rows shows a disabled `QLabel` reading "(none recorded)" and no checkbox
+- [ ] The `(not in any run)` row is a `QLabel` with no checkbox at all -- there is nothing to focus, so there is nothing to tick
+- [ ] **Selection state lives in a JS array of `{section, pick, box}`, not in the widget hierarchy.** `TripFocus.picked()` reads that array. Walking widget children to recover selection is what made the old `picked` both untestable and silently wrong
+- [ ] `TripFocus.picked()` is covered by a HEADLESS test that constructs real `QCheckBox` widgets and ticks them -- `QCheckBox` constructs fine under `-no-gui`, so the previous "needs a live widget, cannot be tested" excuse does not apply
+- [ ] Every user-visible string wrapped in `qsTr`
+- [ ] The window opens on a drawing with a survey, on a drawing with none, and on an empty drawing, without an exception
+
+**Verify:** `bash tests/run_all.sh` green, plus a probe script that constructs the pane headlessly and asserts `picked()` reflects the ticked boxes
+
+**Steps:**
+
+- [ ] **Step 1: Probe before you build.** Write a throwaway `-no-gui -autostart` script that constructs every widget class you intend to use and calls the methods you intend to call. Paste its output in your report. This is the step whose absence let the tree ship.
+
+- [ ] **Step 2: Write the failing headless test for `picked()`** in `tests/js_unit.js`, gated to the real engine (`if (!IS_NODE)`), constructing the pane via a `TripFocus.buildList(read)` that returns `{widget, entries}`, ticking a known set of boxes, and asserting `TripFocus.picked()` returns exactly the matching `{trips, teams, people, runs}` -- including that a `(not in any run)` entry can never appear in it.
+
+- [ ] **Step 3: Replace `buildTree` with `buildList`.** Keep the section/row data coming from `TripFocusRows.build` unchanged -- that part is pure, correct and already tested. Only the widget layer changes. `QCheckBox` carries its own label, so a row is `[checkbox, distanceLabel, shareLabel]`; keep the checkbox's text the plain contributor name and put the `pick` in the entries array, never in the widget.
+
+- [ ] **Step 4: Cascade without a signal storm.** A section checkbox sets its rows directly from the entries array. Guard against re-entrancy the way the tree version did (a module-level flag), because setting a child's `checked` fires `toggled` again.
+
+- [ ] **Step 5: Re-wire All, Refresh and `reapply`** against `TripFocus.picked()` as an opaque call. Task 5's filtering path must not reach into the widgets at all.
+
+- [ ] **Step 6: Verify and commit**
+
+```bash
+bash tests/run_all.sh
+git add scripts/CaveSurvey/TripFocus/TripFocus.js tests/js_unit.js
+git commit -m "fix(TripFocus): build the list from widgets this bridge can construct"
+```

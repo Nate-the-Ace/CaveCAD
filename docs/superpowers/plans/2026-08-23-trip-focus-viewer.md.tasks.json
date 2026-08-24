@@ -28,7 +28,7 @@
     {
       "id": 3,
       "subject": "Task 4: The contributions list",
-      "status": "pending",
+      "status": "needs_rework",
       "blockedBy": [
         2
       ],
@@ -60,6 +60,15 @@
         1
       ],
       "description": "**Goal:** A generated LRUD wall run is tagged with the stations IT followed, not every station in the drawing, so a focus can tell one passage's walls from another's.\n\n**Files:**\n- Modify: `scripts/CaveSurvey/Core/CsLrud.js`\n- Modify: `scripts/CaveSurvey/Core/CsDraw.js`\n- Test: `tests/js_unit.js`\n\n**Acceptance Criteria:**\n- wallRuns reports per-run station names alongside its points\n- CsDraw tags each wall polyline with only its own run's stations\n- two disjoint passages produce non-overlapping station lists\n- eraseStations still replaces a run when any of ITS stations is redrawn, and no longer kills runs from passages that were not redrawn\n- CsFocus.isVisible hides an unfocused passage's wall run, asserted against a REALLY drawn document not a hand-written tag\n\n**Verify:** `bash tests/run_all.sh`\n\n```json:metadata\n{\"files\": [\"scripts/CaveSurvey/Core/CsLrud.js\", \"scripts/CaveSurvey/Core/CsDraw.js\", \"tests/js_unit.js\"], \"verifyCommand\": \"bash tests/run_all.sh\", \"acceptanceCriteria\": [\"per-run station names returned\", \"per-run tagging in CsDraw\", \"disjoint passages tag disjointly\", \"erase precision both halves asserted\", \"CsFocus hides an unfocused passage's walls on a drawn document\"], \"modelTier\": \"standard\"}\n```"
+    },
+    {
+      "id": 7,
+      "subject": "Task 8: Rebuild the list pane on constructible widgets",
+      "status": "pending",
+      "blockedBy": [
+        3
+      ],
+      "description": "**Goal:** Build the contributions list from QCheckBox + QLabel in a QGridLayout inside a QScrollArea. QTreeWidget, QTreeWidgetItem's checkState and QListWidget are NOT constructible from script in this build -- probed in CaveCAD 3.33.0's engine. The tree version threw on setHeaderLabels for every drawing while run_all.sh stayed green, because no test constructed the widget.\n\n**Files:**\n- Modify: `scripts/CaveSurvey/TripFocus/TripFocus.js`\n- Test: `tests/js_unit.js`\n\n**Acceptance Criteria:**\n- no QTreeWidget/QTreeWidgetItem/QListWidget anywhere in the add-on\n- QScrollArea over a QGridLayout, checkbox + distance + share per row, trailing stretch row\n- four section headers, each a QCheckBox that cascades to its rows\n- empty section shows a disabled '(none recorded)' label, no checkbox\n- the '(not in any run)' row has no checkbox\n- selection state in a JS entries array, NOT recovered by walking widget children\n- picked() covered by a headless test that constructs real QCheckBox widgets and ticks them\n- every user-visible string wrapped in qsTr\n\n**Verify:** `bash tests/run_all.sh` plus a headless probe asserting picked() reflects ticked boxes\n\n```json:metadata\n{\"files\": [\"scripts/CaveSurvey/TripFocus/TripFocus.js\", \"tests/js_unit.js\"], \"verifyCommand\": \"bash tests/run_all.sh\", \"acceptanceCriteria\": [\"no unconstructible widget classes remain\", \"grid pane with cascade\", \"selection in a JS array not the widget tree\", \"picked() tested headlessly with real checkboxes\", \"opens on survey/no-survey/empty drawings\"], \"modelTier\": \"standard\"}\n```"
     }
   ],
   "lastUpdated": "2026-08-23"
