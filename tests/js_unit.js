@@ -15462,6 +15462,125 @@ if (!IS_NODE) {
 }
 
 // ---------------------------------------------------------------------
+// CsFocus -- what a trip/team/person/run selection makes visible
+// ---------------------------------------------------------------------
+(function() {
+    loadRepoScript("scripts/CaveSurvey/Core/CsLayers.js");
+    loadRepoScript("scripts/CaveSurvey/Core/CsTags.js");
+    loadRepoScript("scripts/CaveSurvey/Core/CsBind.js");
+    loadRepoScript("scripts/CaveSurvey/Core/CsFocus.js");
+
+    // A stub entity: CsTags.get reads custom properties, so the test
+    // fakes exactly that surface and nothing else.
+    var fake = function(tags, layer) {
+        return {
+            _tags: tags,
+            getLayerName: function() { return layer || "CTRL-SHOTS"; },
+            getCustomProperty: function(group, key, def) {
+                if (group !== "CaveSurvey") { return def; }
+                return this._tags.hasOwnProperty(key) ? this._tags[key] : def;
+            }
+        };
+    };
+
+    var setOf = function(names) {
+        var s = {};
+        for (var i = 0; i < names.length; i++) { s[names[i]] = true; }
+        return s;
+    };
+
+    // -- attribution -------------------------------------------------
+    eqs(CsFocus.stationsOf(fake({ Station: "A1" })).names.join(","), "A1",
+        "CsFocus.stationsOf: a station point is its own station");
+    eqs(CsFocus.stationsOf(fake({ LRUDName: "A3.L2" })).names.join(","), "A3",
+        "CsFocus.stationsOf: an inner LRUD tip belongs to its station");
+    eqs(CsFocus.stationsOf(fake({ SplayName: "A3.4" })).names.join(","), "A3",
+        "CsFocus.stationsOf: a splay tip belongs to the station it shoots from");
+    eqs(CsFocus.stationsOf(fake({ Shot: "A1->A2" })).names.join(","), "A1,A2",
+        "CsFocus.stationsOf: a leg belongs to both its ends");
+    eqs(CsFocus.stationsOf(fake({ WallRunStations: "A1|A2|A3" })).names.length, 3,
+        "CsFocus.stationsOf: a wall run belongs to every station it followed");
+    eqs(CsFocus.stationsOf(fake({})).kind, "none",
+        "CsFocus.stationsOf: an untagged entity belongs to nothing");
+    eqs(CsFocus.stationsOf(fake({ LineworkStations: "A2|A3" },
+        "WALLS")).kind, "linework",
+        "CsFocus.stationsOf: traced linework is its own kind");
+    eqs(CsFocus.stationsOf(fake({ ProfileStation: "A2" },
+        "CTRL-PROFILE-FLOOR")).kind, "profile",
+        "CsFocus.stationsOf: profile geometry is its own kind");
+
+    // -- visibility --------------------------------------------------
+    var focus = setOf(["A1", "A2"]);
+    ok(CsFocus.isVisible(fake({ Shot: "A1->A2" }), focus),
+        "CsFocus.isVisible: a leg inside the focus shows");
+    ok(!CsFocus.isVisible(fake({ Shot: "A2->A3" }), focus),
+        "CsFocus.isVisible: a leg leaving the focus does not");
+    ok(CsFocus.isVisible(fake({ WallRunStations: "A2|A3|A4" }), focus),
+        "CsFocus.isVisible: a wall run shows when ANY of its stations is focused");
+    ok(CsFocus.isVisible(fake({}), focus),
+        "CsFocus.isVisible: an untagged entity always shows -- title block, " +
+        "border, basemap, the reader's own sketches");
+    ok(CsFocus.isVisible(fake({ Station: "A1" }), null),
+        "CsFocus.isVisible: a null focus set is 'All', not 'nothing'");
+
+    // -- plan only ---------------------------------------------------
+    ok(CsFocus.isPlanFrame("CTRL-SHOTS"),
+        "CsFocus.isPlanFrame: plan geometry is in frame");
+    ok(!CsFocus.isPlanFrame("CTRL-PROFILE-FLOOR"),
+        "CsFocus.isPlanFrame: generated profile geometry is not");
+    ok(!CsFocus.isPlanFrame("PROFILE-WALLS"),
+        "CsFocus.isPlanFrame: hand-traced profile geometry is not either");
+
+    // -- station sets ------------------------------------------------
+    var tripStations = { 0: ["A1", "A2", ""], 1: ["A2", "A3"] };
+    var runs = { A: ["A1", "A2", "A3"], B: ["B1"] };
+    var set = CsFocus.stationSet({
+        trips: [1], runs: ["B"]
+    }, tripStations, runs);
+    ok(set["A3"] === true && set["B1"] === true,
+        "CsFocus.stationSet: unions the trips and the runs picked");
+    ok(set["A1"] !== true,
+        "CsFocus.stationSet: leaves out what nothing picked");
+    ok(set[""] !== true,
+        "CsFocus.stationSet: the blank TO of a splay is not a station");
+
+    // -- THE INVARIANT: the erase rules and the focus rules read the
+    // -- same tags. A tag added to one and not the other means geometry
+    // -- a redraw replaces but a focus cannot see, which is silent.
+    var drawSource = readTextFile(repoRoot +
+        "/scripts/CaveSurvey/Core/CsDraw.js");
+    var eraseBody = drawSource.substring(
+        drawSource.indexOf("CsDraw.eraseStations = function"));
+    eraseBody = eraseBody.substring(0, eraseBody.indexOf("\n};"));
+    var eraseTags = {}, m;
+    var re = /CsTags\.get\(e,\s*"([A-Za-z]+)"\)/g;
+    while ((m = re.exec(eraseBody)) !== null) {
+        eraseTags[m[1]] = true;
+    }
+    var focusTags = {};
+    for (var r = 0; r < CsFocus.TAG_RULES.length; r++) {
+        focusTags[CsFocus.TAG_RULES[r].tag] = true;
+    }
+    var name;
+    for (name in eraseTags) {
+        if (eraseTags.hasOwnProperty(name)) {
+            ok(focusTags[name] === true,
+                "CsFocus.TAG_RULES: eraseStations reads " + name +
+                    " -- focus must attribute it too");
+        }
+    }
+    for (name in focusTags) {
+        if (focusTags.hasOwnProperty(name) &&
+                name !== CsBind.STATIONS_TAG && name !== "ProfileStation" &&
+                name !== "ProfileRun") {
+            ok(eraseTags[name] === true,
+                "CsFocus.TAG_RULES: " + name + " is not a tag eraseStations " +
+                    "reads -- either it is stale or erase has a gap");
+        }
+    }
+})();
+
+// ---------------------------------------------------------------------
 // Report.
 // ---------------------------------------------------------------------
 

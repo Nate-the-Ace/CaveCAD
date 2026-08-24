@@ -65,3 +65,5 @@ include(includeBasePath + "/CsReport.js");
 // After CsModel, CsTraverse, CsProfile and (optionally) CsRevise --
 // CsContrib calls ensureTrips, offset, groupRuns and tripLabel.
 include(includeBasePath + "/CsContrib.js");
+// After CsTags, CsBind and CsLayers -- CsFocus calls all three.
+include(includeBasePath + "/CsFocus.js");
