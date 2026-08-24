@@ -12,7 +12,7 @@
  * interactive tool -- a State enum, initState() (not setState) for
  * prompts/cursor/click-mode, pickCoordinate(event, preview) for both
  * the real pick and the live preview, escapeEvent stepping back one
- * state, enterEvent finishing a repeatable pick. Deviating from that
+ * state. Deviating from that
  * shape is what makes a tool feel unlike the rest of the suite.
  *
  * NOTHING is added to the document until finish() succeeds. That is
@@ -96,16 +96,12 @@ Callout.prototype.initState = function() {
         di.clearPreview();
         di.repaintViews();
 
-        var tipMsg = (this.tips.length === 0) ?
-            qsTr("Pick what the arrow points at") :
-            qsTr("Pick another arrow target, or press Enter for the note position");
+        var tipMsg = qsTr("Pick what the arrow points at");
         this.setCommandPrompt(tipMsg);
         this.setLeftMouseTip(tipMsg);
-        // Only the very first pick can CANCEL the command outright --
-        // once a tip exists, the right button (and Escape) step back
-        // to let it be re-picked, matching escapeEvent below.
-        this.setRightMouseTip(
-            this.tips.length === 0 ? EAction.trCancel : EAction.trBack);
+        // A single tip, so this state is always the FIRST step: the
+        // right button cancels outright and never steps back.
+        this.setRightMouseTip(EAction.trCancel);
         EAction.showSnapTools();
         break;
 
@@ -126,14 +122,10 @@ Callout.prototype.escapeEvent = function() {
         break;
 
     case Callout.State.PickingTip:
-        if (this.tips.length > 0) {
-            // step back over the tip picked last, so it can be
-            // re-picked, rather than cancelling the whole command
-            this.tips.pop();
-            this.setState(Callout.State.PickingTip);
-        } else {
-            EAction.prototype.escapeEvent.call(this);
-        }
+        // The first step of a two-click gesture: nothing picked yet to
+        // step back over, so escape cancels. Escape from
+        // PickingPosition (above) is what re-picks the arrow.
+        EAction.prototype.escapeEvent.call(this);
         break;
 
     default:
@@ -143,15 +135,8 @@ Callout.prototype.escapeEvent = function() {
 };
 
 Callout.prototype.enterEvent = function() {
-    if (this.state === Callout.State.PickingTip) {
-        if (this.tips.length === 0) {
-            EAction.handleUserWarning(
-                qsTr("Pick at least one arrow target first"));
-            return;
-        }
-        this.setState(Callout.State.PickingPosition);
-        return;
-    }
+    // Nothing to confirm: the gesture is two clicks and each one
+    // advances on its own. Enter keeps EAction's default meaning.
     EAction.prototype.enterEvent.call(this);
 };
 
@@ -169,9 +154,19 @@ Callout.prototype.pickCoordinate = function(event, preview) {
     switch (this.state) {
     case Callout.State.PickingTip:
         if (!preview) {
-            this.tips.push({ x: pos.x, y: pos.y });
+            // ONE arrow, then straight on to the text position. The
+            // repeatable multi-tip pick (and its Enter-to-continue) was
+            // the caver's own call to drop: picking one target and then
+            // saying where the note goes is the whole gesture, and an
+            // Enter step in the middle of it is a step to forget.
+            //
+            // The write layer still takes an ARRAY of tips and still
+            // places one leader per tip -- that is how arrows get added
+            // to an EXISTING callout later. It is only this command's
+            // gesture that is single-shot.
+            this.tips = [{ x: pos.x, y: pos.y }];
             di.setRelativeZero(pos);
-            this.setState(Callout.State.PickingTip);  // refresh prompt, allow another
+            this.setState(Callout.State.PickingPosition);
         }
         break;
 
