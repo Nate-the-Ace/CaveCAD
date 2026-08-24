@@ -126,7 +126,7 @@ CaveShelf.notDownloaded = function(path) {
         return "The drawing is empty:\n" + path;
     }
     return "Not downloaded from the drive yet — the file is here but its " +
-        "contents are not.\n\nOpen the cave's folder (Reveal in Finder) " +
+        "contents are not.\n\nOpen the cave's folder (Open Project Folder) " +
         "and let the drive fetch it, then come back.";
 };
 
@@ -615,13 +615,11 @@ CaveShelf.show = function() {
     // The cave's own actions sit with the cave; the window's actions
     // (new cave, close) stay in the footer.
     var caveActions = new QHBoxLayout();
-    var revealButton = new QPushButton(qsTr("Reveal in Finder"));
-    var pdfButton = new QPushButton(qsTr("Open Project PDF Folder"));
-    pdfButton.toolTip = qsTr("The PDF/ folder inside this cave's project, " +
-        "where plotted maps are kept.");
+    var revealButton = new QPushButton(qsTr("Open Project Folder"));
+    revealButton.toolTip = qsTr("This cave's folder, with its drawing, " +
+        "scans/, PDF/ and images/ inside it.");
     var packageButton = new QPushButton(qsTr("Package..."));
     caveActions.addWidget(revealButton, 0, 0);
-    caveActions.addWidget(pdfButton, 0, 0);
     caveActions.addWidget(packageButton, 0, 0);
     caveActions.addStretch(1);
     right.addLayout(caveActions, 0);
@@ -706,7 +704,7 @@ CaveShelf.show = function() {
             frontier.text = "";
             state.read = null;
             CaveShelf.updateButtons(state, openButton, tripButton, forgetButton,
-                revealButton, pdfButton, packageButton);
+                revealButton, packageButton);
             return;
         }
 
@@ -723,7 +721,7 @@ CaveShelf.show = function() {
             subtitle.text = where + "\n" + read.error;
             frontier.text = "";
             CaveShelf.updateButtons(state, openButton, tripButton, forgetButton,
-                revealButton, pdfButton, packageButton);
+                revealButton, packageButton);
             return;
         }
 
@@ -768,7 +766,7 @@ CaveShelf.show = function() {
             CaveShelf.driftText(read.drift);
         frontier.text = CaveShelf.frontierText(read);
         CaveShelf.updateButtons(state, openButton, tripButton, forgetButton,
-            revealButton, pdfButton, packageButton);
+            revealButton, packageButton);
     };
 
     // ---- wiring -------------------------------------------------------
@@ -786,7 +784,7 @@ CaveShelf.show = function() {
             frontier.text = CaveShelf.frontierText(state.read, state.trip);
         }
         CaveShelf.updateButtons(state, openButton, tripButton, forgetButton,
-            revealButton, pdfButton, packageButton);
+            revealButton, packageButton);
     });
 
     addButton.clicked.connect(function() {
@@ -801,12 +799,6 @@ CaveShelf.show = function() {
 
     revealButton.clicked.connect(function() {
         if (state.record !== null) { CaveShelf.reveal(state.record.folder); }
-    });
-
-    pdfButton.clicked.connect(function() {
-        if (state.record === null) { return; }
-        var pdfDir = CsCave.pdfFolderOf(state.record.folder);
-        CaveShelf.reveal(pdfDir === null ? state.record.folder : pdfDir);
     });
 
     packageButton.clicked.connect(function() {
@@ -898,7 +890,7 @@ CaveShelf.frontierText = function(read, tripRow) {
  * beside somebody's DWG is not this button's business.
  */
 CaveShelf.updateButtons = function(state, openButton, tripButton, forgetButton,
-        revealButton, pdfButton, packageButton) {
+        revealButton, packageButton) {
     var record = state.record;
     var read = state.read;
     var hasDrawing = record !== null && CsShelf.clean(record.drawing) !== "";
@@ -927,7 +919,6 @@ CaveShelf.updateButtons = function(state, openButton, tripButton, forgetButton,
         // A folder can always be opened, even for a cave with nothing in
         // it yet -- that is often exactly when somebody wants to look.
         revealButton.enabled = record !== null;
-        pdfButton.enabled = record !== null;
         // Packaging needs something to package.
         packageButton.enabled = hasDrawing && !isDwg;
     }
