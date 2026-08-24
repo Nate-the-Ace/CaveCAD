@@ -283,7 +283,18 @@ CsCave.installSaveHook = function() {
         try {
             if (typeof EAction !== "undefined") {
                 var doc = EAction.getDocument();
-                if (!isNull(doc)) { CsCave.pointAtScans(doc.getFileName()); }
+                if (!isNull(doc)) {
+                    var savedPath = doc.getFileName();
+                    CsCave.pointAtScans(savedPath);
+                    // A cave saved under a drive root puts itself on the
+                    // launcher's shelf, so the list fills from ordinary
+                    // work rather than from the Add Cave button, and
+                    // gains the folders a cave project keeps.
+                    if (typeof CsShelf !== "undefined") {
+                        CsShelf.registerSaved(savedPath);
+                    }
+                    CsCave.ensureProjectFolders(CsCave.folderOf(savedPath));
+                }
             }
         } catch (e) {
             // A folder convenience never breaks a save.

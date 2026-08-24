@@ -17,6 +17,7 @@ Each appears in the **Cave Survey** menu and as a command:
 
 | Tool | Command | What it does |
 | --- | --- | --- |
+| Caves | `caves` | The window CaveCAD opens on: the caves registered on this machine, each one's trips with date, team, shot count and the stations it stopped at, and the way in -- open the drawing, start a trip tied into an open end, or begin a new cave (folder, scans/, PDF/, a drawing on the NSS template, saved before you see it). Switch it off in its own footer, or with the setting `Startup/ShowCaveLauncher`. |
 | Survey Notebook | `snb` | A docked survey notes page: type or import shots, watch closures/stats/warnings live, draw in one undo step, export to any format. Also owns declination: estimate it from the survey date and the cave's location (IGRF), pin that location to a station as the drawing's geo anchor, and correct a trip's declination after the fact -- the drawing rotates around the fix. The walls you trace are tied to the trip they belong to automatically, so they follow it through a revision instead of being left behind -- nothing to switch on, and a revision claims work drawn before this existed. |
 | New Cave Map | `ncm` | Start a sheet from the NSS template, already carrying the control layers and symbol blocks. |
 | Rebuild Survey Data | `rsd` | Re-derive the survey model from what the drawing already holds, and upgrade a legacy drawing's tags to the current schema. |

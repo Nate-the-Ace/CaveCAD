@@ -3117,6 +3117,13 @@ SurveyNotebook.buildDock = function(appWin) {
     }
 
     SurveyNotebook.refresh(w);
+
+    // The page model is otherwise reachable only through the closures
+    // the dock's own controls hold. The launcher needs it to open a
+    // trip on a chosen station (startTripAt below), so the last dock
+    // built publishes it here -- the dock is a singleton, so "last" and
+    // "the" are the same thing.
+    SurveyNotebook.page = w;
     return dock;
 };
 
@@ -3134,6 +3141,49 @@ SurveyNotebook.ensureDock = function() {
     csNotebookDock = SurveyNotebook.buildDock(appWin);
     appWin.addDockWidget(Qt.RightDockWidgetArea, csNotebookDock);
     return csNotebookDock;
+};
+
+/**
+ * Opens the notebook on a blank trip that starts AT a named station --
+ * "carry on where trip 6 stopped", from the cave launcher.
+ *
+ * The page is a fresh trip, not a reconstruction: the shots are the
+ * ones about to be measured. Only the tie-in station is filled in, and
+ * a blank row beneath it for the first new station, because that is
+ * exactly what a paper page looks like at the start of a trip.
+ *
+ * Deliberately NOT setSurvey: an empty survey makes that function open
+ * a page on "A1", which is right for a new cave and wrong for every
+ * continuation.
+ *
+ * \param station the station the new trip ties into.
+ * \return true if the page was seeded.
+ */
+SurveyNotebook.startTripAt = function(station) {
+    var w = SurveyNotebook.page;
+    if (w === undefined || w === null) { return false; }
+
+    var name = (station === undefined || station === null) ? "" : String(station);
+    if (name === "") { return false; }
+
+    try {
+        w.loading = true;
+        w.nameEdit.text = "";
+        w.teamEdit.text = "";
+        if (typeof QDate !== "undefined") {
+            w.dateEdit.text = QDate.currentDate().toString("yyyy-MM-dd");
+        }
+        SurveyNotebook.clearLadder(w);
+        // The tie-in, then the row its first shot arrives at.
+        SurveyNotebook.addStationRow(w, name);
+        SurveyNotebook.addStationRow(w, "");
+        w.loading = false;
+        SurveyNotebook.refresh(w);
+        return true;
+    } catch (e) {
+        w.loading = false;
+        return false;
+    }
 };
 
 SurveyNotebook.prototype.beginEvent = function() {
