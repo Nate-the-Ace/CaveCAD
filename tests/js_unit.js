@@ -15069,9 +15069,10 @@ if (!IS_NODE) {
     loadRepoScript("scripts/CaveSurvey/Core/CsNetwork.js");
     loadRepoScript("scripts/CaveSurvey/Core/CsProfile.js");
     loadRepoScript("scripts/CaveSurvey/Core/CsStats.js");
+    loadRepoScript("scripts/CaveSurvey/Core/CsRevise.js");
     loadRepoScript("scripts/CaveSurvey/Core/CsContrib.js");
 
-    // -- people ------------------------------------------------------
+    // -- people --------------------------------------------------------
     var people = CsContrib.people("Nathan, Jim and Sarah/Bob & Ann");
     eqs(people.join(","), "Nathan,Jim,Sarah,Bob,Ann",
         "CsContrib.people: splits on comma, 'and', slash and ampersand");
@@ -15080,7 +15081,38 @@ if (!IS_NODE) {
     eqs(CsContrib.people("Nathan, nathan").join(","), "Nathan",
         "CsContrib.people: one person, however they capitalised it");
 
-    // -- a two-trip survey -------------------------------------------
+    // A role note in parens or brackets used to ride along in the
+    // name and split on its OWN "and"/comma -- "Nathan (book and
+    // sketch), Jim" used to hand back a phantom "sketch)".
+    eqs(CsContrib.people("Nathan (book and sketch), Jim").join(","),
+        "Nathan,Jim",
+        "CsContrib.people: a parenthesised role note is stripped, not split");
+    eqs(CsContrib.people("Nathan [sketch], Jim").join(","), "Nathan,Jim",
+        "CsContrib.people: a bracketed role note is stripped the same way");
+
+    // A semicolon-separated list is surname-first ("Last, First; Last,
+    // First"): its commas are part of ONE name, so splitting on comma
+    // too used to hand back four phantom people from two real ones.
+    eqs(CsContrib.people("Schonegg, Nathan; Doe, Jane").join("|"),
+        "Schonegg, Nathan|Doe, Jane",
+        "CsContrib.people: a semicolon list splits on semicolons only");
+
+    // A trailing suffix reads as its own person once the comma before
+    // it is treated as an ordinary separator -- "Nathan Schonegg, Jr."
+    // used to hand back a person named "Jr.".
+    eqs(CsContrib.people("Nathan Schonegg, Jr.").join(","),
+        "Nathan Schonegg, Jr.",
+        "CsContrib.people: a name suffix re-attaches, not its own person");
+    eqs(CsContrib.people("Nathan, et al.").join(","), "Nathan, et al.",
+        "CsContrib.people: 'et al.' re-attaches too");
+
+    eqs(CsContrib.people("Nathan\nJim").join(","), "Nathan,Jim",
+        "CsContrib.people: a newline is a separator");
+    eqs(CsContrib.people("Mary Smith-Jones, Jim").join(","),
+        "Mary Smith-Jones,Jim",
+        "CsContrib.people: a hyphenated surname is NOT split");
+
+    // -- a two-trip survey ---------------------------------------------
     var survey = CsModel.newSurvey();
     survey.distanceUnit = "ft";
     var t0 = CsModel.newTrip();
@@ -15119,14 +15151,25 @@ if (!IS_NODE) {
         "CsContrib.byTrip: the rows sum to the title block's Length");
     eqs(trips[0].date, "2024-03-16", "CsContrib.byTrip: carries the date");
     eqs(trips[0].shotCount, 2, "CsContrib.byTrip: counts the counted shots");
+    eqs(trips[0].label, "Trip 0: 2024-03-16 Nathan, Jim",
+        "CsContrib.byTrip: label comes straight from CsRevise.tripLabel");
+    eqs(trips[0].planDistance, 40.0,
+        "CsContrib.byTrip: level shots, so planDistance matches distance");
+    eqs(trips[0].stationCount, 3,
+        "CsContrib.byTrip: A1, A2 and A3 are touched by trip 0's shots");
 
-    // -- teams -------------------------------------------------------
+    // -- teams -----------------------------------------------------------
     var teams = CsContrib.byTeam(trips);
     eqs(teams.length, 2, "CsContrib.byTeam: two distinct parties");
     eqs(teams[0].team, "Nathan, Jim", "CsContrib.byTeam: keyed on the team text");
     eqs(teams[0].tripCount, 1, "CsContrib.byTeam: counts its trips");
+    eqs(teams[0].tripIds.join(","), "0", "CsContrib.byTeam: which trips, by id");
+    eqs(teams[0].distance, 40.0, "CsContrib.byTeam: sums the trip distance");
+    eqs(teams[0].percent, 40.0, "CsContrib.byTeam: and its share of the cave");
+    eqs(teams[1].distance, 60.0, "CsContrib.byTeam: the second party's distance");
+    eqs(teams[1].percent, 60.0, "CsContrib.byTeam: and its share");
 
-    // -- people ------------------------------------------------------
+    // -- people, credited per trip in full ------------------------------
     var persons = CsContrib.byPerson(trips);
     eqs(persons.rows.length, 3, "CsContrib.byPerson: Nathan, Jim, Sarah");
     var nathan = null, jim = null;
@@ -15136,19 +15179,95 @@ if (!IS_NODE) {
     }
     eqs(nathan.distance, 100.0,
         "CsContrib.byPerson: on both trips, credited both in full");
+    eqs(nathan.tripIds.join(","), "0,1",
+        "CsContrib.byPerson: which trips credited him");
     eqs(jim.distance, 40.0, "CsContrib.byPerson: one trip, credited it");
     ok(persons.overlapping,
-        "CsContrib.byPerson: flags that credited totals exceed the cave");
+        "CsContrib.byPerson: a two-person trip flags overlapping credit");
+
+    // overlapping is a PER-TRIP test, not a grand-total one: a blank-
+    // team trip carrying enough of its own distance used to keep the
+    // credited sum under the survey total even while a party of two
+    // was double-counted on another trip, so the flag read false
+    // exactly when it was needed.
+    var mixedRows = [
+        { tripId: 0, team: "Nathan, Jim", distance: 100.0 },
+        { tripId: 1, team: "", distance: 400.0 }
+    ];
+    ok(CsContrib.byPerson(mixedRows).overlapping,
+        "CsContrib.byPerson: an unattributed trip must not hide a real " +
+            "double-count elsewhere (100 to Nathan AND 100 to Jim, on a " +
+            "500 ft survey)");
+
+    // and the flag must also read false when nobody doubles up --
+    // otherwise a hardcoded `true` would pass the checks above too.
+    var soloRows = [
+        { tripId: 0, team: "Nathan", distance: 50.0 },
+        { tripId: 1, team: "Jim", distance: 50.0 }
+    ];
+    var soloPersons = CsContrib.byPerson(soloRows);
+    eqs(soloPersons.rows.length, 2, "CsContrib.byPerson: two solo trips");
+    ok(!soloPersons.overlapping,
+        "CsContrib.byPerson: solo parties never overlap");
 
     // -- runs --------------------------------------------------------
     var runs = CsContrib.byRun(survey, resolved, CsTraverse.SLOPE);
-    eqs(runs.length, 2, "CsContrib.byRun: runs A and B");
-    eqs(runs[0].run, "A", "CsContrib.byRun: run A first, in survey order");
-    eqs(runs[0].distance, 40.0,
+    eqs(runs.rows.length, 2, "CsContrib.byRun: runs A and B");
+    eqs(runs.rows[0].run, "A", "CsContrib.byRun: run A first, in survey order");
+    eqs(runs.rows[0].distance, 40.0,
         "CsContrib.byRun: a leg belongs to the run its TO station is in");
-    eqs(runs[1].distance, 60.0, "CsContrib.byRun: the leg into B1 is B's");
+    eqs(runs.rows[1].distance, 60.0, "CsContrib.byRun: the leg into B1 is B's");
+    eqs(runs.rows[0].shotCount, 2, "CsContrib.byRun: A got two of the shots");
+    eqs(runs.rows[1].shotCount, 1, "CsContrib.byRun: B got the other one");
+    eqs(runs.rows[0].planDistance, 40.0,
+        "CsContrib.byRun: level shots, so planDistance follows tapeMode " +
+            "just like byTrip's");
+    eqs(runs.unassigned, 0.0,
+        "CsContrib.byRun: every counted shot here ties into a run");
 
-    // -- empty survey ------------------------------------------------
+    // A disconnected block (surveyed, not yet tied in to the rest of
+    // the cave) must not be dropped and silently rescale the rest to
+    // fill 100% -- it has to show up as unassigned distance instead.
+    var partial = CsModel.newSurvey();
+    partial.shots = [
+        shot("A1", "A2", 200.0, 0),
+        shot("Q1", "Q2", 300.0, 0)
+    ];
+    var partialResolved = CsNetwork.resolve(partial);
+    var partialRuns = CsContrib.byRun(partial, partialResolved, CsTraverse.SLOPE);
+    eqs(partialRuns.rows.length, 1,
+        "CsContrib.byRun: only the tied-in run gets a row");
+    eqs(partialRuns.rows[0].run, "A", "CsContrib.byRun: run A is the tied one");
+    eqs(partialRuns.rows[0].distance, 200.0,
+        "CsContrib.byRun: run A's own 200 ft");
+    eqs(partialRuns.rows[0].percent, 40.0,
+        "CsContrib.byRun: 200 of the FULL 500 ft counted, not rescaled " +
+            "to 100% once Q's untied 300 ft is set aside");
+    eqs(partialRuns.unassigned, 300.0,
+        "CsContrib.byRun: the untied block's distance is reported, not dropped");
+
+    // Resolution order and shot-discovery order happen to coincide in
+    // the fixture above, so a version of byRun that skipped the final
+    // re-ordering pass and just emitted runs in the order shots
+    // introduced them would ALSO pass every assertion so far. Force
+    // the two orders to disagree: A's station resolves with a HIGHER
+    // seq than B's, even though A's shot appears first in the array.
+    var orderSurvey = CsModel.newSurvey();
+    orderSurvey.shots = [
+        shot("X1", "A2", 10.0, 0),
+        shot("X2", "B1", 20.0, 0)
+    ];
+    var orderResolved = { stations: {
+        "A2": { x: 0, y: 0, z: 0, seq: 5 },
+        "B1": { x: 0, y: 0, z: 0, seq: 1 }
+    } };
+    var orderRuns = CsContrib.byRun(orderSurvey, orderResolved, CsTraverse.SLOPE);
+    eqs(orderRuns.rows[0].run, "B",
+        "CsContrib.byRun: resolution order (B resolved first) wins, not " +
+            "the order shots happened to introduce the runs in");
+    eqs(orderRuns.rows[1].run, "A", "CsContrib.byRun: A comes second here");
+
+    // -- empty survey --------------------------------------------------
     var empty = CsModel.newSurvey();
     var emptyResolved = CsNetwork.resolve(empty);
     var emptyTrips = CsContrib.byTrip(empty, emptyResolved, CsTraverse.SLOPE);
@@ -15156,15 +15275,51 @@ if (!IS_NODE) {
     eqs(emptyTrips[0].percent, 0.0,
         "CsContrib.byTrip: nothing surveyed is 0%, never NaN");
 
-    // -- formatting --------------------------------------------------
+    var emptyTeams = CsContrib.byTeam(emptyTrips);
+    eqs(emptyTeams.length, 1,
+        "CsContrib.byTeam: still one (blank) team row, not zero");
+    eqs(emptyTeams[0].percent, 0.0,
+        "CsContrib.byTeam: zero distance is 0%, never NaN");
+
+    var emptyPersons = CsContrib.byPerson(emptyTrips);
+    eqs(emptyPersons.rows.length, 0,
+        "CsContrib.byPerson: a blank team credits nobody");
+    ok(!emptyPersons.overlapping,
+        "CsContrib.byPerson: nobody credited means nothing to overlap");
+
+    var emptyRuns = CsContrib.byRun(empty, emptyResolved, CsTraverse.SLOPE);
+    eqs(emptyRuns.rows.length, 0, "CsContrib.byRun: no shots means no runs");
+    eqs(emptyRuns.unassigned, 0.0,
+        "CsContrib.byRun: nothing counted, nothing unassigned");
+
+    // -- a fractional trip index must floor, not crash ------------------
+    // CsTags.getNumber reads a hand-edited "Trip=1.5" tag with
+    // parseFloat, so this is a real value byTrip has to survive.
+    var fracSurvey = CsModel.newSurvey();
+    fracSurvey.trips = [CsModel.newTrip(), CsModel.newTrip()];
+    fracSurvey.shots = [shot("P1", "P2", 25.0, 1.5)];
+    var fracResolved = CsNetwork.resolve(fracSurvey);
+    var fracTrips = CsContrib.byTrip(fracSurvey, fracResolved, CsTraverse.SLOPE);
+    eqs(fracTrips[1].distance, 25.0,
+        "CsContrib.byTrip: trip 1.5 floors to trip 1 instead of crashing");
+
+    // -- formatting ------------------------------------------------------
     eqs(CsContrib.distanceText(1234.4, "ft"), "1,234 ft",
         "CsContrib.distanceText: grouped, rounded, with the unit");
+    eqs(CsContrib.distanceText(Infinity, "ft"), "0 ft",
+        "CsContrib.distanceText: non-finite reads as 0, not 'In,fin,ity'");
+    eqs(CsContrib.distanceText(NaN, "ft"), "0 ft",
+        "CsContrib.distanceText: NaN is guarded the same way");
     eqs(CsContrib.percentText(13.6), "14%",
         "CsContrib.percentText: whole percent");
     eqs(CsContrib.percentText(0.2), "<1%",
         "CsContrib.percentText: a real contribution never reads as 0%");
     eqs(CsContrib.percentText(0.0), "0%",
         "CsContrib.percentText: nothing really is 0%");
+    eqs(CsContrib.share(Infinity, 100.0), 0.0,
+        "CsContrib.share: a non-finite numerator is 0, not Infinity");
+    eqs(CsContrib.share(NaN, 100.0), 0.0,
+        "CsContrib.share: NaN numerator is 0, not NaN");
 })();
 
 // ---------------------------------------------------------------------
