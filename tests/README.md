@@ -1,6 +1,6 @@
 # Tests
 
-Six stages, cheapest first, all driven by one script:
+Nine stages, cheapest first, all driven by one script:
 
     ./tests/run_all.sh             what has to pass while developing
     ./tests/run_all.sh --publish   also what has to pass before releasing
@@ -21,7 +21,7 @@ virtualenv, no `pip install`, nothing to skip cleanly if it's missing:
 `tests/test_addon.py` imports only `os`, `re`, `shutil`, `subprocess`,
 `tempfile`, `unittest` and `xml.etree.ElementTree`.
 
-## Stage 1/6 -- `test_addon.py` (structural tests)
+## Stage 1/9 -- `test_addon.py` (structural tests)
 
 Checks the add-on's structure without running any of it: every tool lives in
 a folder named after it, nothing loose sits beside `CaveSurvey.js`,
@@ -36,7 +36,7 @@ that no standalone `NSS_Cave_Template_PROFILE.dxf` has come back. These are the 
 otherwise show up as a tool mysteriously absent from the menu, or a layer
 silently missing from a fresh drawing.
 
-## Stage 2/6 -- `js_syntax.js` (add-on syntax check)
+## Stage 2/9 -- `js_syntax.js` (add-on syntax check)
 
 Parses every script under `scripts/CaveSurvey/` inside QCAD's own ECMAScript
 engine, by wrapping each in a function expression and `eval`-ing it -- which
@@ -44,7 +44,7 @@ parses without executing, so no dialog opens and `RMainWindowQt` is never
 touched. Catches a syntax error that would otherwise surface only as a tool
 silently missing from the menu at runtime.
 
-## Stage 3/6 -- `js_unit.js` (Core unit tests)
+## Stage 3/9 -- `js_unit.js` (Core unit tests)
 
 Unit tests for `scripts/CaveSurvey/Core/*.js` -- the pure survey engine
 (parsing, network resolution, LRUD, adjustment, the extended-elevation
@@ -61,7 +61,7 @@ return 0 for two distinct items produces different geometry in each. Every
 Core file loaded here must stay loadable under plain node: nothing may touch
 `R*`/`Q*` globals at file (as opposed to function-body) scope.
 
-## Stage 4/6 -- `profile_draw_roundtrip.js`
+## Stage 4/9 -- `profile_draw_roundtrip.js`
 
 QCAD-context only (real `RDocument`/`RDocumentInterface`), so it cannot run
 under node. Proves the drawing half (`Core/CsProfileDraw.js`): rendering a
@@ -74,7 +74,7 @@ extents and the user's tracing travels with it, and a line traced on the
 elevation binds to elevation stations rather than to the plan stations a
 few units away in absolute coordinates.
 
-## Stage 5/6 -- `generate_profile_run.js`
+## Stage 5/9 -- `generate_profile_run.js`
 
 Drives the Generate Profile TOOL's own entry point (not just the Core
 library it calls) through the real `include()` chain, against a real
@@ -83,7 +83,7 @@ included, the elevation is drawn into that same drawing, and the report
 reaches the user through `QMessageBox.information` with its newlines
 intact.
 
-## Stage 6/6 -- `align_image_frame.js`
+## Stage 6/9 -- `align_image_frame.js`
 
 Calls `AlignImage.prototype.transform` -- the one per-entity hook this repo
 owns, since stock QCAD's `Transform` owns the selection walk -- against a
@@ -154,3 +154,18 @@ All learned the hard way, and relevant to any new `-autostart` test script:
   open tabs degrades to "nothing is open" here, by design -- it cannot be
   exercised end-to-end by a headless script, only by hand in the real GUI or
   against injected fakes.
+
+## Stage 7/9 -- `callout_write.js`, Stage 8/9 -- `callout_sync.js`
+
+The callout suite against a real document: what a note writes, and what a
+revision does to the notes already drawn.
+
+## Stage 9/9 -- `package_cave.js`
+
+Package Cave Project against real files in a temp cave folder. It writes a DXF
+carrying both survey tags and a geographic anchor, stages a sanitized copy and a
+full one, and re-imports each to prove the difference is real: the sanitized
+drawing keeps its station and loses all three geo tags, the full one keeps
+everything, and the original on disk is untouched. Then it runs the platform's
+own zip program (`ditto`, `zip`, or `Compress-Archive`) and checks an archive
+actually appeared -- none of which can be faked under node.

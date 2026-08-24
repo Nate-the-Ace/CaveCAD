@@ -96,6 +96,7 @@ var CORE_FILES = [
     "scripts/CaveSurvey/Core/CsUnits.js",
     "scripts/CaveSurvey/Core/CsCave.js",
     "scripts/CaveSurvey/Core/CsShelf.js",
+    "scripts/CaveSurvey/Core/CsPackage.js",
     "scripts/CaveSurvey/Core/CsGeoProject.js",
     "scripts/CaveSurvey/Core/CsAngles.js",
     "scripts/CaveSurvey/Core/CsIgrfCoeffs.js",
@@ -16825,6 +16826,59 @@ eqs(shelfList.length, 0, "forgetting removes the record");
 
 eqs(CsShelf.sorted([{ name: "Zed", folder: "/z" }, { name: "abc", folder: "/a" }])[0].name,
     "abc", "the shelf lists caves by name");
+
+// ---------------------------------------------------------------------
+// Package -- the archive name, the zip command, the manifest
+// ---------------------------------------------------------------------
+
+eqs(CsPackage.archiveName("All Day Cave", "2026-08-24", false),
+    "All Day Cave 2026-08-24.zip", "sanitized package name");
+eqs(CsPackage.archiveName("All Day Cave", "2026-08-24", true),
+    "All Day Cave 2026-08-24 FULL.zip",
+    "a full archive says so in its file name");
+eqs(CsPackage.archiveName("BC Pit: North/South", "2026-01-01", false),
+    "BC Pit NorthSouth 2026-01-01.zip",
+    "characters a file name cannot hold are dropped");
+eqs(CsPackage.archiveName("", "", false), "Cave.zip", "a nameless cave still packages");
+eqs(CsPackage.depotFor("/Users/x"), "/Users/x/Documents/Cave/depot",
+    "packages land in the depot, not the drive folder");
+
+var pkgMac = CsPackage.zipCommand("darwin", "/tmp/stage", "ALL DAY CAVE", "/d/a.zip");
+eqs(pkgMac.program, "/usr/bin/ditto", "macOS zips with ditto");
+ok(pkgMac.args.indexOf("--keepParent") !== -1,
+    "the archive keeps the cave folder as its root");
+var pkgWin = CsPackage.zipCommand("windows", "/tmp/stage", "CAVE", "/d/a.zip");
+eqs(pkgWin.program, "powershell", "Windows zips with Compress-Archive");
+var pkgNix = CsPackage.zipCommand("linux", "/tmp/stage", "CAVE", "/d/a.zip");
+eqs(pkgNix.program, "zip", "everything else zips with zip(1)");
+eqs(pkgNix.workingDirectory, "/tmp/stage",
+    "zip runs in the staging directory so paths stay relative");
+eqs(pkgNix.args[pkgNix.args.length - 1], "CAVE", "zip is handed the folder, not its contents");
+
+eqs(CsPackage.formatLength(4180.4, "ft"), "4,180 ft", "length reads like a number");
+eqs(CsPackage.formatLength(0, "m"), "0 m", "a cave with no survey still formats");
+
+var pkgManifest = CsPackage.manifest({
+    caveName: "All Day Cave",
+    date: "2026-08-24",
+    full: false,
+    generator: "CaveCAD Cave Survey 0.7.0.0",
+    length: 4180,
+    unit: "ft",
+    trips: [{ id: 0, date: "2026-05-02", team: "SCHONEGG", shots: 40,
+        declination: 1.25, declinationSource: "igrf" }],
+    ends: [{ station: "A14", hasLrud: false }],
+    contents: [{ path: "All Day Cave.dxf", note: "the drawing" }]
+});
+ok(pkgManifest.indexOf("ALL DAY CAVE") === 0, "the manifest opens with the cave");
+ok(pkgManifest.indexOf("SANITIZED") !== -1, "a sanitized package says so");
+ok(pkgManifest.indexOf("A14 (no LRUD)") !== -1, "open ends are named in the manifest");
+ok(pkgManifest.indexOf("1.25 E (igrf)") !== -1,
+    "each trip's declination and where it came from");
+ok(pkgManifest.indexOf("4,180 ft") !== -1, "the length is in the manifest");
+ok(CsPackage.manifest({ full: true }).indexOf("FULL ARCHIVE") !== -1,
+    "a full archive warns in its manifest");
+ok(CsPackage.manifest({}).length > 0, "an empty package still gets a manifest");
 
 // ---------------------------------------------------------------------
 // Frontier -- where the survey stopped

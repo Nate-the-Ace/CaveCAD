@@ -32,7 +32,7 @@ PY="python3"
 status=0
 
 echo "=============================================================="
-echo " 1/8  Structural tests (add-on layout, includes, layers)"
+echo " 1/9  Structural tests (add-on layout, includes, layers)"
 echo "=============================================================="
 "$PY" -m unittest discover -s tests -v || status=1
 
@@ -40,7 +40,7 @@ QCAD="/Applications/CaveCAD.app/Contents/MacOS/CaveCAD"
 
 echo
 echo "=============================================================="
-echo " 2/8  Add-on syntax check (inside CaveCAD's own script engine)"
+echo " 2/9  Add-on syntax check (inside CaveCAD's own script engine)"
 echo "=============================================================="
 if [ -e "$QCAD" ]; then
     output=$("$QCAD" -no-dock-icon -no-gui -allow-multiple-instances \
@@ -56,7 +56,7 @@ fi
 
 echo
 echo "=============================================================="
-echo " 3/8  Core unit tests (inside CaveCAD's own script engine)"
+echo " 3/9  Core unit tests (inside CaveCAD's own script engine)"
 echo "=============================================================="
 if [ -e "$QCAD" ]; then
     output=$("$QCAD" -no-dock-icon -no-gui -allow-multiple-instances \
@@ -77,7 +77,7 @@ fi
 
 echo
 echo "=============================================================="
-echo " 4/8  Profile draw round trip (inside CaveCAD's own script engine)"
+echo " 4/9  Profile draw round trip (inside CaveCAD's own script engine)"
 echo "=============================================================="
 if [ -e "$QCAD" ]; then
     output=$("$QCAD" -no-dock-icon -no-gui -allow-multiple-instances \
@@ -95,7 +95,7 @@ fi
 
 echo
 echo "=============================================================="
-echo " 5/8  Generate Profile tool, driven headlessly (inside CaveCAD's own script engine)"
+echo " 5/9  Generate Profile tool, driven headlessly (inside CaveCAD's own script engine)"
 echo "=============================================================="
 if [ -e "$QCAD" ]; then
     output=$("$QCAD" -no-dock-icon -no-gui -allow-multiple-instances \
@@ -113,7 +113,7 @@ fi
 
 echo
 echo "=============================================================="
-echo " 6/8  AlignImage stays in the plan frame (inside CaveCAD's own script engine)"
+echo " 6/9  AlignImage stays in the plan frame (inside CaveCAD's own script engine)"
 echo "=============================================================="
 if [ -e "$QCAD" ]; then
     output=$("$QCAD" -no-dock-icon -no-gui -allow-multiple-instances \
@@ -131,7 +131,7 @@ fi
 
 echo
 echo "=============================================================="
-echo " 7/8  CalloutWrite (inside CaveCAD's own script engine)"
+echo " 7/9  CalloutWrite (inside CaveCAD's own script engine)"
 echo "=============================================================="
 if [ -e "$QCAD" ]; then
     output=$("$QCAD" -no-dock-icon -no-gui -allow-multiple-instances \
@@ -148,7 +148,7 @@ fi
 
 echo
 echo "=============================================================="
-echo " 8/8  CalloutSync (inside CaveCAD's own script engine)"
+echo " 8/9  CalloutSync (inside CaveCAD's own script engine)"
 echo "=============================================================="
 if [ -e "$QCAD" ]; then
     output=$("$QCAD" -no-dock-icon -no-gui -allow-multiple-instances \
@@ -161,6 +161,24 @@ if [ -e "$QCAD" ]; then
 else
     echo "SKIP: CaveCAD not found -- this drives CalloutSync against a" \
          "real RDocument/RDocumentInterface and cannot run under node."
+fi
+
+echo
+echo "=============================================================="
+echo " 9/9  Package Cave Project (inside CaveCAD's own script engine)"
+echo "=============================================================="
+if [ -e "$QCAD" ]; then
+    output=$("$QCAD" -no-dock-icon -no-gui -allow-multiple-instances \
+                 -autostart tests/package_cave.js "$PWD" 2>/dev/null)
+    echo "$output"
+    case "$output" in
+        *"### PACKAGE CAVE OK"*) ;;
+        *) echo "Package Cave Project test did not pass."; status=1 ;;
+    esac
+else
+    echo "SKIP: CaveCAD not found -- this writes a real DXF, strips it," \
+         "and shells out to the platform's zip program; none of that" \
+         "can run under node."
 fi
 
 echo

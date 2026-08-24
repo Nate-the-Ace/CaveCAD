@@ -21,6 +21,7 @@ include(includeBasePath + "/CsCave.js");
 // After CsCave: the shelf reads CsCave.SCANS/PDF when it scans a cave
 // folder, and CsCave.driveRoots when a save registers itself.
 include(includeBasePath + "/CsShelf.js");
+include(includeBasePath + "/CsPackage.js");
 include(includeBasePath + "/CsGeoProject.js");
 include(includeBasePath + "/CsAngles.js");
 include(includeBasePath + "/CsIgrfCoeffs.js");
