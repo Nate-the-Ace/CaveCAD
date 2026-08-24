@@ -207,12 +207,33 @@ CsLrud.stationWallPoints = function(st, passageAz, lrud, splays, side,
  * \param tapeMode CsTraverse.SLOPE (default) or HORIZONTAL -- how the
  *                 splay tapes are read, matching what CsDraw plots
  *
- * \return {left: [[{x,y}]], right: [[{x,y}]], skipped: n} -- arrays of
- *         point runs (runs shorter than 2 points are dropped) plus the
- *         count of splays that had no usable distance/azimuth/
- *         inclination and so contributed no wall point at all -- named
- *         here rather than dropped silently, so a caller can report
- *         the gap.
+ * \return {left: [{points:[{x,y}], stations:[name]}],
+ *          right: [{points:[{x,y}], stations:[name]}], skipped: n}
+ *
+ *         Each run pairs its points with the station names it was
+ *         built from, IN THE SAME OBJECT -- not two same-indexed arrays
+ *         (`points`/`stations` alongside `left`/`right`). A caller that
+ *         reads `left[i]` and `stations[i]` has to trust two counters
+ *         stay in lockstep across every flush(); a caller that reads
+ *         `left[i].stations` cannot get that pairing wrong, because
+ *         there is only ever one array to index into. That is the
+ *         whole reason this task exists (a `WallRunStations` tag that
+ *         quietly stopped matching the run it was written on), so the
+ *         return shape is chosen to make the same class of mistake
+ *         impossible here, at the one call site that pays for it
+ *         (`CsDraw.survey`) and in every test in `tests/js_unit.js`
+ *         that reads this return, which is where nearly all of the
+ *         cost landed.
+ *
+ *         `stations` lists the run's OWN arrival stations, in run
+ *         order, deduplicated, and only for a station that actually
+ *         contributed at least one point on THAT side -- a station
+ *         with an LRUD tick on the left but nothing on the right
+ *         appears in that run's `left[].stations` and not in the
+ *         matching `right` run. Runs shorter than 2 points are dropped
+ *         (as before), and `skipped` is unchanged: the count of splays
+ *         that had no usable distance/azimuth/inclination and so
+ *         contributed no wall point at all.
  */
 CsLrud.wallRuns = function(survey, resolved, tapeMode) {
     if (tapeMode === undefined || tapeMode === null) {
@@ -222,17 +243,23 @@ CsLrud.wallRuns = function(survey, resolved, tapeMode) {
     var splays = CsLrud.splaysByStation(survey);
     var leftRuns = [], rightRuns = [];
     var left = [], right = [];
+    var leftNames = [], leftSeen = {};
+    var rightNames = [], rightSeen = {};
     var stats = { skipped: 0 };
 
     var flush = function() {
         if (left.length >= 2) {
-            leftRuns.push(left);
+            leftRuns.push({ points: left, stations: leftNames });
         }
         if (right.length >= 2) {
-            rightRuns.push(right);
+            rightRuns.push({ points: right, stations: rightNames });
         }
         left = [];
         right = [];
+        leftNames = [];
+        leftSeen = {};
+        rightNames = [];
+        rightSeen = {};
     };
 
     var pointsFor = function(stationName, side, lrud, passageAz) {
@@ -244,9 +271,21 @@ CsLrud.wallRuns = function(survey, resolved, tapeMode) {
             splays[stationName], side, tapeMode, stats);
     };
 
-    var append = function(target, pts) {
+    // Records `stationName` against the run currently being built, for
+    // whichever side just received a point -- the station whose points
+    // are being appended is known right here, which is what lets the
+    // name and the point travel together instead of being reconciled
+    // afterwards.
+    var append = function(target, pts, names, seen, stationName) {
+        if (pts.length === 0) {
+            return;
+        }
         for (var k = 0; k < pts.length; k++) {
             target.push(pts[k]);
+        }
+        if (seen[stationName] !== true) {
+            seen[stationName] = true;
+            names.push(stationName);
         }
     };
 
@@ -295,14 +334,14 @@ CsLrud.wallRuns = function(survey, resolved, tapeMode) {
             // junction, or a station with nothing measured about its
             // walls: close out the runs. A junction station's own
             // points still terminate them.
-            append(left, lp);
-            append(right, rp);
+            append(left, lp, leftNames, leftSeen, name);
+            append(right, rp, rightNames, rightSeen, name);
             flush();
             continue;
         }
 
-        append(left, lp);
-        append(right, rp);
+        append(left, lp, leftNames, leftSeen, name);
+        append(right, rp, rightNames, rightSeen, name);
     }
     flush();
 

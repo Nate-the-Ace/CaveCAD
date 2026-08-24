@@ -2247,12 +2247,16 @@ var rl = CsNetwork.resolve(lsv, {});
 var runs = CsLrud.wallRuns(lsv, rl);
 ok(runs.left.length === 1, "one left wall run");
 if (runs.left.length === 1) {
-    near(runs.left[0][0].x, -2, 1e-9, "left wall point offset west");
-    near(runs.left[0][1].x, -1, 1e-9, "second left wall point");
+    near(runs.left[0].points[0].x, -2, 1e-9, "left wall point offset west");
+    near(runs.left[0].points[1].x, -1, 1e-9, "second left wall point");
+    eqs(runs.left[0].stations.join(","), "A2,A3",
+        "wallRuns: a run's own stations ride alongside its points");
 }
 ok(runs.right.length === 1, "one right wall run");
 if (runs.right.length === 1) {
-    near(runs.right[0][1].x, 0, 1e-9, "right 0 means wall at station");
+    near(runs.right[0].points[1].x, 0, 1e-9, "right 0 means wall at station");
+    eqs(runs.right[0].stations.join(","), "A2,A3",
+        "wallRuns: the right run's stations agree with the left run's");
 }
 
 var tick = CsLrud.tickEnd({ x: 0, y: 0 }, 0, "R", 2);
@@ -2303,7 +2307,9 @@ function splayFixture() {
     var w = CsLrud.wallRuns(sv, r);
     var right = [];
     for (var i = 0; i < w.right.length; i++) {
-        for (var j = 0; j < w.right[i].length; j++) { right.push(w.right[i][j]); }
+        for (var j = 0; j < w.right[i].points.length; j++) {
+            right.push(w.right[i].points[j]);
+        }
     }
     var hit = null;
     for (i = 0; i < right.length; i++) {
@@ -2316,8 +2322,8 @@ function splayFixture() {
     // and it did not land on the left
     var leftBad = false;
     for (i = 0; i < w.left.length; i++) {
-        for (var k = 0; k < w.left[i].length; k++) {
-            if (w.left[i][k].x > 0.5) { leftBad = true; }
+        for (var k = 0; k < w.left[i].points.length; k++) {
+            if (w.left[i].points[k].x > 0.5) { leftBad = true; }
         }
     }
     ok(leftBad === false, "splay walls: an east splay never joins the left wall");
@@ -2330,8 +2336,8 @@ function splayFixture() {
     var w = CsLrud.wallRuns(sv, CsNetwork.resolve(sv, {}));
     var found = false;
     for (var i = 0; i < w.left.length; i++) {
-        for (var j = 0; j < w.left[i].length; j++) {
-            if (Math.abs(w.left[i][j].x + 4) < 1e-9) { found = true; }
+        for (var j = 0; j < w.left[i].points.length; j++) {
+            if (Math.abs(w.left[i].points[j].x + 4) < 1e-9) { found = true; }
         }
     }
     ok(found, "splay walls: west splay becomes a left wall point");
@@ -2346,7 +2352,9 @@ function splayFixture() {
     var w = CsLrud.wallRuns(sv, CsNetwork.resolve(sv, {}));
     var ys = [];
     for (var i = 0; i < w.left.length; i++) {
-        for (var j = 0; j < w.left[i].length; j++) { ys.push(w.left[i][j].y); }
+        for (var j = 0; j < w.left[i].points.length; j++) {
+            ys.push(w.left[i].points[j].y);
+        }
     }
     var sorted = true;
     for (i = 1; i < ys.length; i++) {
@@ -2370,15 +2378,15 @@ function splayFixture() {
     var w = CsLrud.wallRuns(sv, CsNetwork.resolve(sv, {}));
     var right3 = false, left3 = false;
     for (var i = 0; i < w.right.length; i++) {
-        for (var j = 0; j < w.right[i].length; j++) {
-            if (Math.abs(w.right[i][j].x - 3) < 1e-9 &&
-                Math.abs(w.right[i][j].y - 20) < 1e-9) { right3 = true; }
+        for (var j = 0; j < w.right[i].points.length; j++) {
+            if (Math.abs(w.right[i].points[j].x - 3) < 1e-9 &&
+                Math.abs(w.right[i].points[j].y - 20) < 1e-9) { right3 = true; }
         }
     }
     for (i = 0; i < w.left.length; i++) {
-        for (j = 0; j < w.left[i].length; j++) {
-            if (Math.abs(w.left[i][j].x + 3) < 1e-9 &&
-                Math.abs(w.left[i][j].y - 20) < 1e-9) { left3 = true; }
+        for (j = 0; j < w.left[i].points.length; j++) {
+            if (Math.abs(w.left[i].points[j].x + 3) < 1e-9 &&
+                Math.abs(w.left[i].points[j].y - 20) < 1e-9) { left3 = true; }
         }
     }
     ok(right3 && left3,
@@ -2395,11 +2403,10 @@ function splayFixture() {
     var bad = 0;
     var scan = function(runs) {
         for (var i = 0; i < runs.length; i++) {
-            for (var j = 0; j < runs[i].length; j++) {
-                if (Math.abs(runs[i][j].x) < 1e-9 &&
-                    Math.abs(runs[i][j].y - 4) < 1e-9) { bad++; }
-                if (Math.abs(runs[i][j].x) < 1e-9 &&
-                    Math.abs(runs[i][j].y - 16) < 1e-9) { bad++; }
+            for (var j = 0; j < runs[i].points.length; j++) {
+                var p = runs[i].points[j];
+                if (Math.abs(p.x) < 1e-9 && Math.abs(p.y - 4) < 1e-9) { bad++; }
+                if (Math.abs(p.x) < 1e-9 && Math.abs(p.y - 16) < 1e-9) { bad++; }
             }
         }
     };
@@ -2419,8 +2426,8 @@ function splayFixture() {
     var w = CsLrud.wallRuns(sv, CsNetwork.resolve(sv, {}));
     var bad = false;
     for (var i = 0; i < w.right.length; i++) {
-        for (var j = 0; j < w.right[i].length; j++) {
-            if (w.right[i][j].x > 3.5) { bad = true; }
+        for (var j = 0; j < w.right[i].points.length; j++) {
+            if (w.right[i].points[j].x > 3.5) { bad = true; }
         }
     }
     ok(bad === false,
@@ -2436,8 +2443,9 @@ function splayFixture() {
     var w = CsLrud.wallRuns(sv, CsNetwork.resolve(sv, {}));
     var found = false;
     for (var i = 0; i < w.right.length; i++) {
-        for (var j = 0; j < w.right[i].length; j++) {
-            if (Math.abs(w.right[i][j].x - 10 * Math.cos(80 * Math.PI / 180)) < 1e-9) {
+        for (var j = 0; j < w.right[i].points.length; j++) {
+            if (Math.abs(w.right[i].points[j].x -
+                    10 * Math.cos(80 * Math.PI / 180)) < 1e-9) {
                 found = true;
             }
         }
@@ -2473,10 +2481,10 @@ function splayFixture() {
     var w = CsLrud.wallRuns(sv, CsNetwork.resolve(sv, {}));
     var atStation = false, anyRight = false;
     for (var i = 0; i < w.right.length; i++) {
-        for (var j = 0; j < w.right[i].length; j++) {
+        for (var j = 0; j < w.right[i].points.length; j++) {
             anyRight = true;
-            if (Math.abs(w.right[i][j].x - 0) < 1e-9 &&
-                    Math.abs(w.right[i][j].y - 10) < 1e-9) {
+            if (Math.abs(w.right[i].points[j].x - 0) < 1e-9 &&
+                    Math.abs(w.right[i].points[j].y - 10) < 1e-9) {
                 atStation = true;
             }
         }
@@ -2502,8 +2510,8 @@ function splayFixture() {
     var w = CsLrud.wallRuns(sv, CsNetwork.resolve(sv, {}));
     var found = false;
     for (var i = 0; i < w.right.length; i++) {
-        for (var j = 0; j < w.right[i].length; j++) {
-            if (Math.abs(w.right[i][j].x - 5) < 1e-9) { found = true; }
+        for (var j = 0; j < w.right[i].points.length; j++) {
+            if (Math.abs(w.right[i].points[j].x - 5) < 1e-9) { found = true; }
         }
     }
     ok(found === false,
@@ -2520,9 +2528,9 @@ function splayFixture() {
     var w = CsLrud.wallRuns(sv, CsNetwork.resolve(sv, {}));
     var atStation = false;
     for (var i = 0; i < w.right.length; i++) {
-        for (var j = 0; j < w.right[i].length; j++) {
-            if (Math.abs(w.right[i][j].x - 0) < 1e-9 &&
-                    Math.abs(w.right[i][j].y - 10) < 1e-9) {
+        for (var j = 0; j < w.right[i].points.length; j++) {
+            if (Math.abs(w.right[i].points[j].x - 0) < 1e-9 &&
+                    Math.abs(w.right[i].points[j].y - 10) < 1e-9) {
                 atStation = true;
             }
         }
@@ -2544,6 +2552,60 @@ function splayFixture() {
     var w = CsLrud.wallRuns(sv, CsNetwork.resolve(sv, {}));
     eqs(w.skipped, 2,
         "wallRuns: both unmeasurable splays are counted as skipped");
+})();
+
+// ---------------------------------------------------------------------
+// Task 7: a wall run carries its OWN stations, not the whole survey's.
+//
+// Two disjoint passages in one survey, separated by a station with no
+// wall evidence at all (C4: no LRUD, no splay) so the run breaks
+// naturally, exactly as the existing junction/no-evidence rule already
+// does -- no change to WHEN a run breaks, only to WHAT each run
+// remembers about itself once it does.
+// ---------------------------------------------------------------------
+(function() {
+    var sv = CsModel.newSurvey();
+    var c1 = shotOf("C1", "C2", 10, 0);
+    c1.left = 2; c1.right = 2;
+    var c2 = shotOf("C2", "C3", 10, 0);
+    c2.left = 2; c2.right = 2;
+    var c3 = shotOf("C3", "C4", 10, 0);      // C4: no LRUD, no splay --
+    sv.shots.push(c1);                       // breaks the run here
+    sv.shots.push(c2);
+    sv.shots.push(c3);
+    var c4 = shotOf("C4", "C5", 10, 0);
+    c4.left = 2; c4.right = 2;
+    var c5 = shotOf("C5", "C6", 10, 0);
+    c5.left = 2; c5.right = 2;
+    sv.shots.push(c4);
+    sv.shots.push(c5);
+
+    var w = CsLrud.wallRuns(sv, CsNetwork.resolve(sv, {}));
+    eqs(w.left.length, 2, "wallRuns: two disjoint passages, two left runs");
+    eqs(w.right.length, 2, "wallRuns: two disjoint passages, two right runs");
+    if (w.left.length === 2 && w.right.length === 2) {
+        eqs(w.left[0].stations.join(","), "C2,C3",
+            "wallRuns: passage one's left run names only its own stations");
+        eqs(w.left[1].stations.join(","), "C5,C6",
+            "wallRuns: passage two's left run names only its own stations");
+        eqs(w.right[0].stations.join(","), "C2,C3",
+            "wallRuns: passage one's right run agrees with its left run");
+        eqs(w.right[1].stations.join(","), "C5,C6",
+            "wallRuns: passage two's right run agrees with its left run");
+
+        var overlap = false;
+        var seenInFirst = {}, n;
+        for (n = 0; n < w.left[0].stations.length; n++) {
+            seenInFirst[w.left[0].stations[n]] = true;
+        }
+        for (n = 0; n < w.left[1].stations.length; n++) {
+            if (seenInFirst[w.left[1].stations[n]] === true) { overlap = true; }
+        }
+        ok(!overlap,
+            "wallRuns: the two passages' station lists do not overlap -- " +
+            "this is what a WallRunStations tag built from names.join(\"|\") " +
+            "over the WHOLE drawing could never promise");
+    }
 })();
 
 // ---------------------------------------------------------------------
@@ -15838,6 +15900,140 @@ if (!IS_NODE) {
         }
     }
 })();
+
+// ---------------------------------------------------------------------
+// Task 7, on a REAL drawn document. The pure CsLrud.wallRuns fixture
+// above and the hand-written 3-station tags in the CsFocus test above
+// both prove their own layer correctly, but neither could have caught
+// the actual defect: CsDraw.js building `allNames` from EVERY resolved
+// station and writing that one string onto EVERY wall polyline. That
+// needs a document CsDraw.survey actually drew.
+// ---------------------------------------------------------------------
+if (!IS_NODE) {
+    (function() {
+        loadRepoScript("scripts/CaveSurvey/Core/CsLayers.js");
+        loadRepoScript("scripts/CaveSurvey/Core/CsStore.js");
+        loadRepoScript("scripts/CaveSurvey/Core/CsTags.js");
+        loadRepoScript("scripts/CaveSurvey/Core/CsDraw.js");
+        loadRepoScript("scripts/CaveSurvey/Core/CsFocus.js");
+
+        var doc = new RDocument(new RMemoryStorage(), new RSpatialIndexNavel());
+        var di = new RDocumentInterface(doc);
+        // CsDraw.survey reads the current document through these
+        // globals in GUI context; provide them here, as
+        // tests/profile_draw_roundtrip.js and the other document tests
+        // in this file do.
+        getDocument = function() { return doc; };
+        getDocumentInterface = function() { return di; };
+
+        // Two disjoint passages, T1..T3 and T4..T6, separated at T4 by
+        // a station with no LRUD and no splay -- the same natural
+        // break the pure wallRuns fixture above uses, now drawn for
+        // real instead of asserted against CsLrud directly.
+        var t1 = shotOf("T1", "T2", 10, 0);
+        t1.left = 2; t1.right = 2;
+        var t2 = shotOf("T2", "T3", 10, 0);
+        t2.left = 2; t2.right = 2;
+        var t3 = shotOf("T3", "T4", 10, 0);   // T4: no LRUD, no splay
+        var t4 = shotOf("T4", "T5", 10, 0);
+        t4.left = 2; t4.right = 2;
+        var t5 = shotOf("T5", "T6", 10, 0);
+        t5.left = 2; t5.right = 2;
+        var tsv = CsModel.newSurvey();
+        tsv.shots = [t1, t2, t3, t4, t5];
+        var tres = CsNetwork.resolve(tsv, {});
+        var tdrawn = CsDraw.survey(tsv, tres);
+        eqs(tdrawn.wallsDrawn, 4,
+            "task7-doc: two disjoint passages drew exactly four wall " +
+            "polylines (left+right for each), got " + tdrawn.wallsDrawn);
+
+        var wallEntities = function() {
+            var res = [];
+            var ids = doc.queryAllEntities(false, false);
+            for (var i = 0; i < ids.length; i++) {
+                var e = doc.queryEntity(ids[i]);
+                if (isNull(e)) { continue; }
+                var v = CsTags.get(e, "WallRunStations");
+                if (v !== "") {
+                    res.push({ entity: e,
+                        stations: CsBind.decodeStations(v).slice(0).sort()
+                            .join(",") });
+                }
+            }
+            return res;
+        };
+
+        var before = wallEntities();
+        eqs(before.length, 4,
+            "task7-doc: four wall polylines carry a WallRunStations tag, " +
+            "got " + before.length);
+        var wholeSurveyBad = false, passageOneCount = 0, passageTwoCount = 0;
+        for (var wi = 0; wi < before.length; wi++) {
+            // THE BUG THIS TASK FIXES: names.join("|") over the WHOLE
+            // drawing would list stations from BOTH passages (and the
+            // T1 anchor) on every single run.
+            if (before[wi].stations.split(",").length > 2) {
+                wholeSurveyBad = true;
+            }
+            if (before[wi].stations === "T2,T3") { passageOneCount++; }
+            if (before[wi].stations === "T5,T6") { passageTwoCount++; }
+        }
+        ok(!wholeSurveyBad,
+            "task7-doc: no wall run is tagged with more than its own " +
+            "two stations, let alone the whole survey's");
+        eqs(passageOneCount, 2,
+            "task7-doc: passage one's left AND right runs name only T2,T3");
+        eqs(passageTwoCount, 2,
+            "task7-doc: passage two's left AND right runs name only T5,T6");
+
+        // -- CsFocus.isVisible, on THIS drawn document, before anything
+        // -- is erased: passage one focused, passage two must not show.
+        var focusOne = { T2: true, T3: true };
+        var passageOneVisible = 0, passageTwoVisible = 0;
+        var entsForFocus = wallEntities();
+        for (var fi = 0; fi < entsForFocus.length; fi++) {
+            var vis = CsFocus.isVisible(entsForFocus[fi].entity, focusOne);
+            if (entsForFocus[fi].stations === "T2,T3" && vis) {
+                passageOneVisible++;
+            }
+            if (entsForFocus[fi].stations === "T5,T6" && vis) {
+                passageTwoVisible++;
+            }
+        }
+        eqs(passageOneVisible, 2,
+            "CsFocus.isVisible, real drawn document: passage one's own " +
+            "wall runs show under a passage-one focus");
+        eqs(passageTwoVisible, 0,
+            "CsFocus.isVisible, real drawn document: passage two's wall " +
+            "runs do NOT show under a passage-one focus -- unreachable " +
+            "before this fix, since every wall run carried the whole " +
+            "survey's stations and so matched every focus");
+
+        // -- eraseStations, BOTH halves ---------------------------------
+        var countOver = function(stationCsv) {
+            var n = 0, ents = wallEntities();
+            for (var i = 0; i < ents.length; i++) {
+                if (ents[i].stations === stationCsv) { n++; }
+            }
+            return n;
+        };
+        ok(countOver("T2,T3") > 0 && countOver("T5,T6") > 0,
+            "task7-doc: both passages' wall runs exist before the erase");
+
+        CsDraw.eraseStations(doc, ["T2", "T3"]);
+
+        eqs(countOver("T2,T3"), 0,
+            "eraseStations, half 1 (already true before this fix): a " +
+            "wall run is replaced when any of ITS OWN stations is " +
+            "redrawn");
+        eqs(countOver("T5,T6"), 2,
+            "eraseStations, half 2 (THE HALF THAT WAS BROKEN): a wall " +
+            "run belonging to a passage that was NOT redrawn survives -- " +
+            "before this fix every wall run carried the whole survey's " +
+            "stations, so erasing T2/T3 would have killed T5/T6's walls " +
+            "too");
+    })();
+}
 
 // ---------------------------------------------------------------------
 // TripFocus.sections -- the rows the window lists (pure part)

@@ -581,29 +581,37 @@ CsDraw.survey = function(survey, resolved, originStation, originPos, seqBase) {
     // in the same undo step (this absorbed the old standalone LRUD
     // Walls tool). Straight dashed runs on the CTRL layers; runs break
     // at junctions and unmeasured stations on purpose. Tagged with the
-    // survey's station list so eraseStations() can replace them on a
-    // redraw.
+    // RUN'S OWN station list (CsLrud.wallRuns now returns
+    // {points, stations} per run) so eraseStations() replaces a wall
+    // run when any of ITS OWN stations is redrawn, and leaves alone
+    // wall runs belonging to a passage that was not touched. Before
+    // this, every run was tagged with EVERY resolved station in the
+    // whole drawing, which made eraseStations over-broad (any redraw
+    // deleted every wall run) and made a station-set FOCUS wrong
+    // outright (every wall run matched every focus selection) -- see
+    // Task 7 in the trip-focus-viewer plan.
     var wallsDrawn = 0;
     var runs = CsLrud.wallRuns(survey, resolved);
     var wallPointsSkipped = runs.skipped;
     if (runs.left.length > 0 || runs.right.length > 0) {
         CsLayers.ensure(doc, di, CsLayers.LRUD_WALL_LEFT);
         CsLayers.ensure(doc, di, CsLayers.LRUD_WALL_RIGHT);
-        var allNames = names.join("|");
         var drawRuns = function(runList, layerName) {
             for (var ri = 0; ri < runList.length; ri++) {
+                var run = runList[ri];
                 var data = new RPolylineData();
-                for (var k = 0; k < runList[ri].length; k++) {
+                for (var k = 0; k < run.points.length; k++) {
                     // wall points come from the unanchored resolved
                     // coordinates: apply the same origin offset the
                     // stations get
                     data.appendVertex(new RVector(
-                        runList[ri][k].x + offX, runList[ri][k].y + offY));
+                        run.points[k].x + offX, run.points[k].y + offY));
                 }
                 var pl = new RPolylineEntity(doc, data);
                 pl.setLayerId(doc.getLayerId(layerName));
                 CsTags.set(pl, "WallRun", layerName + ":" + ri);
-                CsTags.set(pl, "WallRunStations", allNames);
+                CsTags.set(pl, "WallRunStations",
+                    CsBind.encodeStations(run.stations));
                 op.addObject(pl, false);
                 wallsDrawn++;
             }
