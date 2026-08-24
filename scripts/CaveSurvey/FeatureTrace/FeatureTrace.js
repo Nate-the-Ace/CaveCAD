@@ -119,39 +119,6 @@ FeatureTrace.smoothingFraction = function(name) {
     return 0.15;
 };
 
-/**
- * TEMPORARY DIAGNOSTICS -- remove once the vanishing-commit bug is closed.
- *
- * Writes one line per event to ~/Documents/Cave/feature-trace-debug.log.
- * A file and not handleUserMessage because the command line shows one
- * line at a time and the question is the SEQUENCE: which handlers fire,
- * with what state, and where it stops.
- */
-FeatureTrace.LOG_PATH = undefined;
-
-FeatureTrace.log = function(line) {
-    try {
-        if (isNull(FeatureTrace.LOG_PATH)) {
-            FeatureTrace.LOG_PATH = QDir.homePath() +
-                "/Documents/Cave/feature-trace-debug.log";
-        }
-        var f = new QFile(FeatureTrace.LOG_PATH);
-        // Plain bitwise OR: this bridge has NO QIODevice.OpenMode
-        // constructor, and `new QIODevice.OpenMode(...)` throws inside
-        // the try/catch below -- which is exactly why the first version
-        // of this logger wrote nothing while every test stayed green.
-        if (!f.open(QIODevice.WriteOnly | QIODevice.Append |
-                QIODevice.Text)) {
-            return;
-        }
-        var out = new QTextStream(f);
-        out.writeString(String(line) + "\n");
-        f.close();
-    } catch (e) {
-        // diagnostics must never break the tool they are diagnosing
-    }
-};
-
 /** The dock, and the widgets the panel updates. Module-level singletons
  *  because there is one panel per application window. */
 var csFeatureTraceDock;

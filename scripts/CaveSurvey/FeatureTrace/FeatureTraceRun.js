@@ -125,14 +125,6 @@ FeatureTraceRun.runToken = function() {
     return null;
 };
 
-/** Diagnostics passthrough -- no-op when the panel is absent.
- *  TEMPORARY: remove with FeatureTrace.log. */
-FeatureTraceRun.log = function(line) {
-    if (typeof FeatureTrace !== "undefined" && !isNull(FeatureTrace.log)) {
-        FeatureTrace.log(line);
-    }
-};
-
 /** The panel's sample interval in feet, or 1.0 without a panel.
  *  Every panel read goes through a helper like this so the drag action
  *  works standalone -- it is usable before the panel exists and if the
@@ -294,9 +286,6 @@ FeatureTraceRun.prototype.mousePressEvent = function(event) {
         return;   // nothing captured, nothing to undo
     }
 
-    FeatureTraceRun.log("press: armed=" + FeatureTrace.target +
-        " resolved=" + FeatureTraceRun.targetLayer(this.getDocument()) +
-        " region=" + (isNull(this.region) ? "none" : "set"));
     this.setState(FeatureTraceRun.State.Drawing);
     this.samples = [here];
 };
@@ -338,13 +327,7 @@ FeatureTraceRun.prototype.mouseReleaseEvent = function(event) {
         return;
     }
 
-    FeatureTraceRun.log("release: samples=" + this.samples.length);
-    try {
-        this.commit();
-    } catch (eCommit) {
-        FeatureTraceRun.log("release: commit THREW " + eCommit);
-        throw eCommit;
-    }
+    this.commit();
     this.setState(FeatureTraceRun.State.Idle);
 };
 
@@ -352,11 +335,7 @@ FeatureTraceRun.prototype.mouseReleaseEvent = function(event) {
 FeatureTraceRun.prototype.commit = function() {
     var doc = this.getDocument();
     var di = this.getDocumentInterface();
-    FeatureTraceRun.log("commit: doc=" + (isNull(doc) ? "null" : "ok") +
-        " di=" + (isNull(di) ? "null" : "ok") +
-        " samples=" + this.samples.length);
     if (isNull(doc) || isNull(di) || this.samples.length < 2) {
-        FeatureTraceRun.log("commit: EARLY RETURN, nothing to draw");
         return;
     }
 
@@ -364,7 +343,6 @@ FeatureTraceRun.prototype.commit = function() {
     // was. A wall crossing the gutter describes nothing in either view.
     var layerName = FeatureTraceRun.targetLayer(doc);
     var pathFrame = CsTrace.pathFrame(this.region, this.samples);
-    FeatureTraceRun.log("commit: pathFrame=" + pathFrame);
 
     if (pathFrame === null) {
         EAction.handleUserMessage(qsTr("That run crossed between the plan " +
@@ -386,8 +364,6 @@ FeatureTraceRun.prototype.commit = function() {
     if (FeatureTrace.target !== FeatureTrace.CURRENT_LAYER) {
         var wantFrame = CsLayers.frameOf(layerName);
         if (wantFrame !== pathFrame) {
-            FeatureTraceRun.log("commit: REFUSED want=" + wantFrame +
-                " path=" + pathFrame);
             EAction.handleUserMessage(qsTr("%1 belongs to the %2 frame, but " +
                 "that run is in the %3 frame. Nothing was drawn.")
                 .arg(layerName).arg(wantFrame).arg(pathFrame));
@@ -414,29 +390,6 @@ FeatureTraceRun.prototype.commit = function() {
 
     var result = CsTrace.emit(doc, di, layerName, tied, spacing, tolerance);
 
-    // TEMPORARY diagnostics. Everything the vanishing-commit question
-    // needs: does the layer resolve, what state is it in, and did the
-    // entity count on it actually change.
-    var diag = "commit: layer=" + layerName + " spacing=" + spacing +
-        " tol=" + tolerance + " added=" + result.added +
-        " sampled=" + result.sampled + " kept=" + result.kept;
-    try {
-        var lid = doc.getLayerId(layerName);
-        diag += " layerId=" + lid + " invalid=" + RObject.INVALID_ID;
-        diag += " onLayer=" + doc.queryLayerEntities(lid, true).length;
-        diag += " docTotal=" + doc.queryAllEntities(false, false).length;
-        var lay = doc.queryLayer(layerName);
-        if (!isNull(lay)) {
-            diag += " off=" + lay.isOff();
-            try { diag += " locked=" + lay.isLocked(); } catch (e1) {}
-            try { diag += " frozen=" + lay.isFrozen(); } catch (e2) {}
-        } else {
-            diag += " layerObj=NULL";
-        }
-    } catch (eDiag) {
-        diag += " DIAG-THREW=" + eDiag;
-    }
-    FeatureTraceRun.log(diag);
     if (!result.added) {
         // Something refused the add and this build raises no error for
         // any of the ways that can happen. Name the likely cause rather
