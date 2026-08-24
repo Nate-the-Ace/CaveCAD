@@ -85,15 +85,26 @@ CsCallout.LEADER_STRAIGHT = "straight";
 CsCallout.LEADER_CURVED = "curved";
 CsCallout.LEADER_DEFAULT = CsCallout.LEADER_STRAIGHT;
 
-// How much a curved leader bows, as a QCAD polyline BULGE on the
-// tip-to-elbow segment (bulge = tan(quarter of the included angle), so
-// 0.35 is a shallow arc of roughly 38 degrees). A curve is drawn as an
-// arc segment of the leader's own polyline, NOT as a spline: fit-point
-// splines are a QCAD Pro feature and fail SILENTLY in this build --
-// empty control points, no bounding box, no DXF record -- while
-// isValid() still returns true. An arc-segmented polyline is a real
-// RLeaderEntity that keeps its arrowhead, which was probed.
-CsCallout.CURVE_BULGE = 0.35;
+// A curved leader is drawn as SHORT STRAIGHT SEGMENTS tracing the
+// curve, not as an arc.
+//
+// It was an arc first, carried as a QCAD polyline bulge on the
+// tip-to-elbow segment. That worked in memory and CORRUPTED THE LEADER
+// ON SAVE. Measured: a leader (10,10,bulge 0.35) -> (20,10) -> (22,10)
+// came back from a DXF round trip as (20,10) -> (22,10) -> (0,0). The
+// DXF LEADER record has no bulge concept, so the exporter dropped the
+// arc's START vertex -- which is the ARROW TIP -- shifted the rest down
+// and padded with a phantom vertex at the origin. A straight leader
+// round-trips perfectly, so many small straight segments are safe where
+// one arc is not.
+//
+// CURVE_OFFSET is how far the curve bows off the straight chord, as a
+// fraction of the chord's own length, so the bow stays proportionate at
+// any scale. CURVE_SEGMENTS is how finely it is traced: 8 reads as a
+// curve at plot scale and keeps the leader's vertex list short enough to
+// stay legible in the DXF.
+CsCallout.CURVE_OFFSET = 0.18;
+CsCallout.CURVE_SEGMENTS = 8;
 
 /**
  * A fresh CalloutId. Delegates to CsUuid, the suite's general identity
@@ -192,25 +203,55 @@ CsCallout.reflow = function(box, tips, opts) {
     // stays straight, because that is the segment the text sits against
     // and a curved landing reads as a mistake rather than a style.
     //
-    // In QCAD a bulge belongs to the vertex the segment STARTS at, so it
-    // goes on the tip. Its SIGN decides which way the arc bows; flipping
-    // it with the side keeps both mirror images bowing the same way
-    // relative to the note instead of one of them curling back over the
-    // leader.
+    // The curve is a quadratic Bezier from tip to elbow, sampled into
+    // CURVE_SEGMENTS straight pieces. Its control point sits off the
+    // midpoint of the chord, perpendicular to it, on the side that bows
+    // AWAY from the note -- so a left-hand and a right-hand leader are
+    // mirror images rather than one of them curling back over itself.
     var curved = (o.leader === CsCallout.LEADER_CURVED);
-    var bulge = 0.0;
-    if (curved) {
-        bulge = (side === "left") ?
-            CsCallout.CURVE_BULGE : -CsCallout.CURVE_BULGE;
-    }
 
     var branches = [];
     for (var k = 0; k < list.length; k++) {
-        branches.push([
-            { x: list[k].x, y: list[k].y, bulge: bulge },
-            { x: elbowX, y: landing.y, bulge: 0.0 },
-            { x: landing.x, y: landing.y, bulge: 0.0 }
-        ]);
+        var tip = { x: list[k].x, y: list[k].y };
+        var elbow = { x: elbowX, y: landing.y };
+        var pts = [];
+
+        if (!curved) {
+            pts.push({ x: tip.x, y: tip.y, bulge: 0.0 });
+        } else {
+            var dx = elbow.x - tip.x;
+            var dy = elbow.y - tip.y;
+            var chord = Math.sqrt(dx * dx + dy * dy);
+            if (chord < 1e-9) {
+                // tip and elbow coincide: there is no chord to bow off,
+                // and inventing one would draw a loop out of nothing
+                pts.push({ x: tip.x, y: tip.y, bulge: 0.0 });
+            } else {
+                // perpendicular, pointing away from the note
+                var sign = (side === "left") ? 1.0 : -1.0;
+                var px = -dy / chord * chord * CsCallout.CURVE_OFFSET * sign;
+                var py = dx / chord * chord * CsCallout.CURVE_OFFSET * sign;
+                var ctrl = {
+                    x: (tip.x + elbow.x) / 2.0 + px,
+                    y: (tip.y + elbow.y) / 2.0 + py
+                };
+                for (var sIdx = 0; sIdx < CsCallout.CURVE_SEGMENTS; sIdx++) {
+                    var t = sIdx / CsCallout.CURVE_SEGMENTS;
+                    var mt = 1.0 - t;
+                    pts.push({
+                        x: mt * mt * tip.x + 2 * mt * t * ctrl.x +
+                            t * t * elbow.x,
+                        y: mt * mt * tip.y + 2 * mt * t * ctrl.y +
+                            t * t * elbow.y,
+                        bulge: 0.0
+                    });
+                }
+            }
+        }
+
+        pts.push({ x: elbow.x, y: elbow.y, bulge: 0.0 });
+        pts.push({ x: landing.x, y: landing.y, bulge: 0.0 });
+        branches.push(pts);
     }
 
     return { side: side, landing: landing, branches: branches,

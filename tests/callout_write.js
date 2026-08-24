@@ -295,16 +295,41 @@ eqs(CsTags.get(m2.text, CsCallout.KEY.ID), textBefore,
         "the leader SHAPE is recorded on the text, so a reflow can keep it");
 
     var cd = cm.leaders[0].getData();
-    ok(Math.abs(cd.getBulgeAt(0)) > 1e-9,
-        "a curved leader carries a bulge on its TIP vertex (got " +
-        cd.getBulgeAt(0) + ")");
-    near(cd.getBulgeAt(1), 0, 1e-9,
-        "the SHOULDER stays straight -- a curved landing reads as a mistake");
+    ok(cd.countVertices() > 3,
+        "a curved leader is traced in SEGMENTS, not one arc (got " +
+        cd.countVertices() + " vertices)");
+    // NO BULGES ANYWHERE. An arc carried as a bulge corrupts the leader
+    // on save: the DXF LEADER record has no bulge concept, so the
+    // exporter drops the arc's START vertex -- the ARROW TIP -- shifts
+    // the rest down and pads with a phantom vertex at the origin.
+    // Measured: (10,10,b0.35) -> (20,10) -> (22,10) came back as
+    // (20,10) -> (22,10) -> (0,0).
+    var anyBulge = false;
+    for (var bi = 0; bi < cd.countVertices(); bi++) {
+        if (Math.abs(cd.getBulgeAt(bi)) > 1e-9) { anyBulge = true; }
+    }
+    eqs(anyBulge, false,
+        "and carries NO bulge -- an arc does not survive a DXF save");
+
+    // it must actually bow: some interior vertex off the straight chord
+    var v0 = cd.getVertexAt(0);
+    var vN = cd.getVertexAt(cd.countVertices() - 1);
+    var bowed = false;
+    for (var ci = 1; ci < cd.countVertices() - 1; ci++) {
+        var vi = cd.getVertexAt(ci);
+        // distance from the chord v0->vN
+        var ax = vN.x - v0.x, ay = vN.y - v0.y;
+        var len = Math.sqrt(ax * ax + ay * ay);
+        if (len < 1e-9) { continue; }
+        var dist = Math.abs((vi.x - v0.x) * ay - (vi.y - v0.y) * ax) / len;
+        if (dist > 1e-6) { bowed = true; }
+    }
+    ok(bowed, "and it genuinely bows off the straight line");
 
     // the curve must survive a reflow, or moving the text straightens it
     CalloutWrite.applyReflow(doc, di, cid, null);
-    var cd2 = CalloutWrite.members(doc, cid).leaders[0].getData();
-    ok(Math.abs(cd2.getBulgeAt(0)) > 1e-9,
+    ok(CalloutWrite.members(doc, cid).leaders[0].getData()
+        .countVertices() > 3,
         "the curve SURVIVES a reflow, read back off the text's own tag");
 
     // and a straight one stays straight
@@ -315,8 +340,8 @@ eqs(CsTags.get(m2.text, CsCallout.KEY.ID), textBefore,
         height: CalloutWrite.textHeight(doc)
     });
     var sd = CalloutWrite.members(doc, sid).leaders[0].getData();
-    near(sd.getBulgeAt(0), 0, 1e-9,
-        "the default leader is straight: no bulge anywhere");
+    eqs(sd.countVertices(), 3,
+        "the default leader is straight: tip, elbow, landing and no more");
 })();
 
 // --- THE DXF ROUND TRIP -----------------------------------------------
@@ -382,6 +407,51 @@ eqs(CsTags.get(m2.text, CsCallout.KEY.ID), textBefore,
     CalloutWrite.applyReflow(rtDoc, rtDi, id, null);
     eqs(CalloutWrite.members(rtDoc, id).leaders.length, 2,
         "round trip: the REOPENED callout still reflows to two leaders");
+
+    // GEOMETRY, not just tags. The original round-trip test checked ids,
+    // roles and style and passed while a curved leader was being
+    // CORRUPTED on save -- the arrow tip dropped and a phantom vertex
+    // added at the origin. Tags surviving is not geometry surviving.
+    var rtLeaders = rt.leaders;
+    for (var gi = 0; gi < rtLeaders.length; gi++) {
+        var gd = rtLeaders[gi].getData();
+        var gn = gd.countVertices();
+        eqs(gn, 3, "round trip: leader " + gi +
+            " keeps exactly its three vertices");
+        var v = gd.getVertexAt(0);
+        ok(!(Math.abs(v.x) < 1e-9 && Math.abs(v.y) < 1e-9),
+            "round trip: leader " + gi + "'s first vertex is the arrow " +
+            "TIP, not a phantom (0,0) the exporter invented");
+    }
+
+    // and the same for a CURVED one, which is where it actually broke
+    var cRt = CalloutWrite.create(doc, di, {
+        text: "curve rt", position: { x: 700, y: 700 },
+        tips: [{ x: 660, y: 690 }],
+        style: "name", kind: CsCallout.KIND_TEXT,
+        leader: CsCallout.LEADER_CURVED,
+        height: CalloutWrite.textHeight(doc)
+    });
+    var cBefore = CalloutWrite.members(doc, cRt).leaders[0]
+        .getData().countVertices();
+    var cPath = repoRoot + "/tests/.callout-curve-rt.dxf";
+    ok(di.exportFile(cPath, rtFilter, false),
+        "round trip: a curved callout exports");
+    var cDoc = new RDocument(new RMemoryStorage(), new RSpatialIndexNavel());
+    var cDi = new RDocumentInterface(cDoc);
+    eqs(cDi.importFile(cPath, "", false),
+        RDocumentInterface.IoErrorNoError,
+        "round trip: and reads back");
+    var cm2 = CalloutWrite.members(cDoc, cRt);
+    ok(cm2.text !== null, "round trip: the curved callout's note survives");
+    eqs(cm2.leaders.length, 1, "and its leader");
+    eqs(cm2.leaders[0].getData().countVertices(), cBefore,
+        "round trip: the CURVED leader keeps every vertex (" + cBefore +
+        ") -- an arc lost one and gained a phantom origin");
+    var cv0 = cm2.leaders[0].getData().getVertexAt(0);
+    ok(!(Math.abs(cv0.x) < 1e-9 && Math.abs(cv0.y) < 1e-9),
+        "round trip: and its arrow TIP is still the first vertex");
+    new QFile(cPath).remove();
 
     new QFile(rtPath).remove();
 })();
