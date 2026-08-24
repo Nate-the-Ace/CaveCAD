@@ -16682,6 +16682,41 @@ if (!IS_NODE) {
 })();
 
 // ---------------------------------------------------------------------
+// Callout style layers
+// ---------------------------------------------------------------------
+
+(function() {
+    // Every style must resolve to a layer that CsLayers can actually
+    // create. A style whose layer has no DEFAULTS row gets created with
+    // fallback appearance, which is how a hazard note ends up looking
+    // like a station tick.
+    for (var name in CsCallout.STYLES) {
+        if (!CsCallout.STYLES.hasOwnProperty(name)) {
+            continue;
+        }
+        var layer = CsCallout.STYLES[name];
+        ok(CsLayers.DEFAULTS.hasOwnProperty(layer),
+            "CsLayers.DEFAULTS has a row for callout layer " + layer +
+            " (style " + name + ")");
+        var row = CsLayers.DEFAULTS[layer];
+        ok(row && row.length === 3,
+            "CsLayers.DEFAULTS[" + layer + "] is [color, linetype, weight]");
+    }
+
+    eqs(typeof CsLayers.ensureCalloutLayers, "function",
+        "CsLayers.ensureCalloutLayers exists");
+
+    // The fallback style must differ visibly from the real one: a
+    // line-basis elevation label that looks identical to a floor label
+    // is the whole failure this design set out to avoid.
+    ok(CsCallout.STYLES["elevation"] !== CsCallout.STYLES["elevation-line"],
+        "the elevation fallback has its OWN layer, not the floor layer");
+    ok(CsLayers.DEFAULTS[CsCallout.STYLES["elevation-line"]][0] !==
+       CsLayers.DEFAULTS[CsCallout.STYLES["elevation"]][0],
+        "the elevation fallback layer is a different COLOR");
+})();
+
+// ---------------------------------------------------------------------
 // Report.
 // ---------------------------------------------------------------------
 

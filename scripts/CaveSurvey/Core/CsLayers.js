@@ -69,6 +69,17 @@ CsLayers.PROFILE_TEXT_LABELS = "PROFILE-TEXT-LABELS";
 CsLayers.PROFILE_BREAKDOWN = "PROFILE-BREAKDOWN";
 CsLayers.PROFILE_ENTRANCE = "PROFILE-ENTRANCE";
 
+// Callout (multileader) layers, one per CsCallout style. Callout
+// members go here and never on the current layer -- a note drawn onto
+// WALLS-SURVEYED becomes wall linework the next time anything works by
+// layer.
+CsLayers.NOTES_HAZARD = "NOTES-HAZARD";
+CsLayers.NOTES_DIG = "NOTES-DIG";
+CsLayers.NOTES_EQUIPMENT = "NOTES-EQUIPMENT";
+CsLayers.NOTES_NAME = "NOTES-NAME";
+CsLayers.NOTES_ELEVATION = "NOTES-ELEVATION";
+CsLayers.NOTES_ELEVATION_LINE = "NOTES-ELEVATION-LINE";
+
 // Feature layers the tools write to.
 CsLayers.WALLS_SURVEYED = "WALLS-SURVEYED";
 CsLayers.WALLS_INFERRED = "WALLS-INFERRED";
@@ -137,7 +148,20 @@ CsLayers.DEFAULTS = {
     "TEXT-LABELS": ["white", "CONTINUOUS", "Weight018"],
     "TEXT-NOTES": ["white", "CONTINUOUS", "Weight009"],
     "ENTRANCE": ["white", "CONTINUOUS", "Weight035"],
-    "CTRL-DATA": ["gray", "CONTINUOUS", "Weight000"]
+    "CTRL-DATA": ["gray", "CONTINUOUS", "Weight000"],
+    // Callout layers. Hazard is red because it is the one a caver must
+    // not miss. Every color and weight below is one already proven
+    // elsewhere in this table -- "yellow" and "green" do not appear
+    // anywhere else in CsLayers.DEFAULTS, so they are not used here.
+    // ELEVATION-LINE is deliberately a DIFFERENT colour from ELEVATION:
+    // it carries a survey-line elevation standing in for an unmeasured
+    // floor, and it must not be mistakable for the real thing on a plot.
+    "NOTES-HAZARD": ["red", "CONTINUOUS", "Weight025"],
+    "NOTES-DIG": ["pink", "CONTINUOUS", "Weight018"],
+    "NOTES-EQUIPMENT": ["cyan", "CONTINUOUS", "Weight018"],
+    "NOTES-NAME": ["white", "CONTINUOUS", "Weight018"],
+    "NOTES-ELEVATION": ["gray", "CONTINUOUS", "Weight018"],
+    "NOTES-ELEVATION-LINE": ["white", "DASHED", "Weight009"]
 };
 
 // Layers that belong to the SHEET rather than to either view: one
@@ -356,4 +380,16 @@ CsLayers.ensureSurveyLayers = function(doc, di) {
     CsLayers.ensure(doc, di, CsLayers.SPLAYS);
     CsLayers.ensure(doc, di, CsLayers.HIDDEN);
     CsLayers.ensure(doc, di, CsLayers.AERIAL);
+};
+
+/** Ensure every callout style layer exists. Called by each callout
+ *  command before it writes, so a drawing that never saw the template
+ *  still gets the right appearance. */
+CsLayers.ensureCalloutLayers = function(doc, di) {
+    CsLayers.ensure(doc, di, CsLayers.NOTES_HAZARD);
+    CsLayers.ensure(doc, di, CsLayers.NOTES_DIG);
+    CsLayers.ensure(doc, di, CsLayers.NOTES_EQUIPMENT);
+    CsLayers.ensure(doc, di, CsLayers.NOTES_NAME);
+    CsLayers.ensure(doc, di, CsLayers.NOTES_ELEVATION);
+    CsLayers.ensure(doc, di, CsLayers.NOTES_ELEVATION_LINE);
 };
