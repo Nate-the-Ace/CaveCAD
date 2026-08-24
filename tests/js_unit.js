@@ -16292,6 +16292,79 @@ if (!IS_NODE) {
 }
 
 // ---------------------------------------------------------------------
+// CsStore -- the legacy fallback must cost nothing when there is
+// nothing to fall back to.
+//
+// CsTags.get calls CsStore.lookup on every miss, and CsStore.lookup
+// used to compute a geometry key (a getPosition, two toFixed(4) calls
+// and a string concat) EVERY time, even when CsStore.map holds no
+// records at all -- which is the case for essentially every real
+// drawing, since CsStore.ensureLoaded sets map to {} whether or not a
+// legacy store text was even found. Measured in the real engine over
+// CsFocus.stationsOf across 7,000 entities: 725ms with map non-null
+// (this fallback engaged on every miss) vs. 94ms with it null -- a
+// 7.7x cost paid to serve drawings that predate the current tag
+// schema, on nearly every drawing whether it needs the fallback or
+// not.
+// ---------------------------------------------------------------------
+(function() {
+    loadRepoScript("scripts/CaveSurvey/Core/CsStore.js");
+
+    // -- an empty store costs no geometry-key computation ------------
+    CsStore.map = {};
+    var positionCalls = 0;
+    var untaggedEntity = {
+        getType: function() { return "RPointEntity"; },
+        getPosition: function() { positionCalls++; return { x: 1, y: 2 }; }
+    };
+    eqs(CsStore.lookup(untaggedEntity, "Station"), "",
+        "CsStore.lookup: an empty store returns empty, same as always");
+    eqs(positionCalls, 0,
+        "CsStore.lookup: an empty store computes NO geometry key at " +
+        "all -- the cost this task removes");
+    eqs(CsStore.isEmpty(), true, "CsStore.isEmpty: {} is empty");
+
+    // a null map (never loaded at all) short-circuits the same way
+    CsStore.map = null;
+    eqs(CsStore.lookup(untaggedEntity, "Station"), "",
+        "CsStore.lookup: a null map (never loaded) also returns empty " +
+        "without computing a key");
+    eqs(positionCalls, 0,
+        "CsStore.lookup: still zero geometry-key calls -- null is " +
+        "empty too");
+
+    // -- a populated store still resolves a legacy record -------------
+    // geoKey rounds position to 4 decimals: 1.23456 -> "1.2346",
+    // 3.45678 -> "3.4568" (CsStore.geoKey's own rounding rule).
+    CsStore.map = { "RPointEntity:1.2346:3.4568": { Station: "A1" } };
+    var taggedEntity = {
+        getType: function() { return "RPointEntity"; },
+        getPosition: function() {
+            positionCalls++;
+            return { x: 1.23456, y: 3.45678 };
+        }
+    };
+    eqs(CsStore.lookup(taggedEntity, "Station"), "A1",
+        "CsStore.lookup: a populated store still resolves a legacy " +
+        "record -- the fallback this task must not regress");
+    ok(positionCalls > 0,
+        "CsStore.lookup: resolving a real record DOES compute a " +
+        "geometry key -- the short-circuit only skips it when there " +
+        "is nothing in the store to find at all");
+    eqs(CsStore.isEmpty(), false,
+        "CsStore.isEmpty: a populated map is not empty");
+
+    // a miss against a populated store (wrong KEY, not wrong geometry)
+    // still costs a key lookup but never fabricates a hit
+    eqs(CsStore.lookup(taggedEntity, "NotARealKey"), "",
+        "CsStore.lookup: a populated store missing the requested key " +
+        "(the geometry matches, the field does not) still returns " +
+        "empty, not a wrong value");
+
+    CsStore.map = null;
+})();
+
+// ---------------------------------------------------------------------
 // Report.
 // ---------------------------------------------------------------------
 
