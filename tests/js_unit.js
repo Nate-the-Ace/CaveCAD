@@ -14624,6 +14624,8 @@ if (!IS_NODE) {
         loadRepoScript("scripts/CaveSurvey/Core/CsTags.js");
         loadRepoScript("scripts/CaveSurvey/Core/CsBind.js");
         loadRepoScript("scripts/CaveSurvey/Core/CsProfileDraw.js");
+        loadRepoScript("scripts/CaveSurvey/Core/CsRevise.js");
+        loadRepoScript("scripts/CaveSurvey/Core/CsProfileBind.js");
 
         // -- runsIn: the run list exists BEFORE any band is drawn ----
         // The workflow is run first, tool second. Deriving the list from
@@ -14795,6 +14797,61 @@ if (!IS_NODE) {
             "CsProfileDraw.erase: run B's band is untouched");
         eqs(CsProfileDraw.erase(cOne.doc, cOne.di, "B"), 2,
             "CsProfileDraw.erase: scoped to B then removes both of B's");
+
+        // -- THE BINDER MUST SEE STATIONS ON PER-RUN LAYERS ----------
+        // Reported from use: "in the profile, the drawn linework failed
+        // to scale with the revised length of A2 to A3."
+        //
+        // CsProfileBind.stationIndex tested membership against
+        // LAYERS() -- base names only -- so once bands drew to per-run
+        // variants it rejected every station. The index came back empty,
+        // claim() bailed, positions() had nothing to compare, and
+        // CsRevise.positionsMoved therefore saw no movement: the band
+        // redrew and the traced ceiling stayed put.
+        (function() {
+            function stationOn(ctx, layerName, name, x, y) {
+                CsLayers.ensure(ctx.doc, ctx.di, layerName);
+                var pt4 = new RPointEntity(ctx.doc,
+                    new RPointData(new RVector(x, y)));
+                pt4.setLayerId(ctx.doc.getLayerId(layerName));
+                CsTags.set(pt4, "ProfileStation", name);
+                CsTags.set(pt4, "ProfileRun", "A");
+                var o = new RAddObjectsOperation();
+                o.addObject(pt4, false);
+                ctx.di.applyOperation(o);
+            }
+
+            var cVar = docWith();
+            stationOn(cVar, "CTRL-PROFILE-STATIONS-A", "A2", 0, -200);
+            stationOn(cVar, "CTRL-PROFILE-STATIONS-A", "A3", 30, -200);
+            var idxVar = CsProfileBind.stationIndex(cVar.doc);
+            eqs(idxVar.length, 2,
+                "CsProfileBind.stationIndex: finds stations on a per-run layer");
+
+            // positions() feeds CsRevise.positionsMoved. Empty here is
+            // exactly why a revised shot moved nothing.
+            // Keys are namespaced by run -- "A/A2", not "A2" -- so one
+            // trip's station names cannot collide across bands.
+            var posVar = CsProfileBind.positions(cVar.doc);
+            ok(!isNull(posVar["A/A2"]),
+                "CsProfileBind.positions: a per-run station reaches the move comparison");
+            ok(!isNull(posVar["A/A3"]),
+                "CsProfileBind.positions: and so does the far end of the revised shot");
+
+            // The shared layer must keep working, for drawings that
+            // predate segregation.
+            var cShr = docWith();
+            stationOn(cShr, CsLayers.PROFILE_STATIONS, "A2", 0, -200);
+            eqs(CsProfileBind.stationIndex(cShr.doc).length, 1,
+                "CsProfileBind.stationIndex: a shared-layer station still counts");
+
+            // And a station on a layer that is NOT ours is still ignored,
+            // which is the ownership property the base test protected.
+            var cAlien = docWith();
+            stationOn(cAlien, CsLayers.PROFILE_TRACED_CEILING, "A2", 0, -200);
+            eqs(CsProfileBind.stationIndex(cAlien.doc).length, 0,
+                "CsProfileBind.stationIndex: a point on a TRACED layer is not a station of ours");
+        }());
 
         // -- A FULL REGENERATE CLEARS THE SHARED LAYERS --------------
         // Nothing draws to the shared profile layers any more; every

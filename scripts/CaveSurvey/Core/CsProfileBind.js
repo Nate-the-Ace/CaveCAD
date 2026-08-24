@@ -149,8 +149,16 @@ CsProfileBind.key = function(run, station) {
  */
 CsProfileBind.stationIndex = function(doc) {
     var out = [];
+    // ownLayerNames(doc), NOT LAYERS(): bands draw to per-run VARIANTS
+    // of those bases -- CTRL-PROFILE-STATIONS-A rather than
+    // CTRL-PROFILE-STATIONS. Testing the bases alone rejected every
+    // station in a segregated drawing, so this index came back empty,
+    // claim() bailed on it, positions() had nothing to compare, and
+    // CsRevise.positionsMoved therefore reported no movement -- so a
+    // revised shot length redrew the band and left the caver's traced
+    // ceiling and floor exactly where they were.
     var ownLayers = {};
-    var ownLayerNames = CsProfileDraw.LAYERS();
+    var ownLayerNames = CsProfileDraw.ownLayerNames(doc);
     for (var ln = 0; ln < ownLayerNames.length; ln++) {
         ownLayers[ownLayerNames[ln]] = true;
     }
