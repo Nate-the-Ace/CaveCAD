@@ -81,6 +81,27 @@ phantoms, and `\band\b` fired inside `"(book and sketch)"`); and two
 assertions could not fail. Task 4 consumes the new `{rows, unassigned}`
 shape.
 
+**WHERE THOSE FIXES ACTUALLY LANDED.** A second round of `CsContrib` review
+fixes (the semicolon branch that erased cavers, a whole team in parentheses
+crediting nobody, suffix merging after any separator, dedup keyed on the
+display spelling, the half-counted shot on a null `offset`, and guards on
+`percentText`/`distanceText`) is committed under `bb3f38a`, whose message
+describes only the plan amendment: the coordinator ran `git commit` while
+those files were already staged, so a docs commit swallowed a 228-line
+library change. The history was left alone rather than amended, because the
+branch tip is shared with a concurrent session. Read `bb3f38a` in full, not
+its subject line.
+
+**AN ENGINE DIFFERENCE WORTH KEEPING,** found while fixing `people()`:
+rebuilding a `RegExp` from another regex's `.source` SILENTLY DROPS an
+alternative in CaveCAD's own script engine while working correctly under
+node. `"Nathan, Jim and Sarah/Bob & Ann"` came back with `Sarah/Bob` as one
+token. The separator patterns are therefore stored as plain strings and the
+`RegExp` is built from those, never through `.source`. This is the second
+time a defect has been invisible to node and visible only in the real
+engine, which is why `bash tests/run_all.sh` is the authority and
+`node tests/js_unit.js` is convenience.
+
 **Steps:**
 
 - [ ] **Step 1: Write the failing tests** -- append to `tests/js_unit.js`, before the closing summary block
