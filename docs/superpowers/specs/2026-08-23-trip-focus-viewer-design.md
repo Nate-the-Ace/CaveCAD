@@ -186,8 +186,76 @@ permanently, whatever is checked.
   primitive plus one button -- available later, deliberately not now.
 - **It costs a second copy of the drawing in memory.** Fine at cave scale;
   measure on the largest real survey before assuming.
+- **A drawing tagged before Task 7 keeps all its wall runs visible under every
+  selection**, because every wall polyline carried the whole survey's station
+  list until then. Any redraw from the notebook re-tags them. Accepted rather
+  than worked around: a heuristic guessing "this list looks like the whole
+  survey" would be a second source of truth about what a wall run belongs to.
+- **An entity type the hidden-entity rebuild cannot reconstruct is counted, not
+  guessed at.** `RCopyOperation` refuses an individually hidden entity, so those
+  are rebuilt by hand from their class name; anything that fails is reported as
+  a count rather than silently dropped.
 - **Print or PDF from the popup plots the focus**, because print goes
   through a scene. That is a feature, not a caveat, but it is worth knowing.
+
+## The GUI gate -- run this before publishing
+
+**Nothing in this feature has been seen in a window.** Everything below passed
+`bash tests/run_all.sh` (7/7 sections, 3313 assertions, 24 filter checks) and
+that is exactly the evidence that has already been wrong four times here:
+`QTreeWidget` not being constructible, `setInvisible` in a modify operation
+being a silent no-op, `RCopyOperation.setSelectionOnly` not existing in the
+installed binary, and every wall run carrying the whole survey's station list.
+Each passed a green suite. So the suite is not the gate; this list is.
+
+Install and launch first:
+
+```
+tools/publish.sh && open /Applications/CaveCAD.app
+```
+
+Then, on a drawing with a real survey (the Pitfall Cave fixture in `testdata/`
+has four trips):
+
+1. Type `tf`. A window titled for the drawing opens as its own window, listing
+   **Trips / Teams / People / Survey runs**, each row with a distance and a
+   share, beside a view of the cave.
+2. The four trip distances sum to the Length on the title block. The People
+   section says out loud that everyone on a trip is credited its whole
+   distance, so those percentages exceed 100%.
+3. Tick one trip. The view narrows to that trip's work. **No profile band ever
+   appears, under any selection** -- this window is plan-only.
+4. Tick a section header. Every row under it ticks, and the view updates once.
+5. **Press All. Everything comes back.** This is the check that silently fails
+   if the un-hide path regresses, and it has regressed once already.
+6. Tick a person who was on two trips: both trips' work draws.
+7. Tick a survey run: that lettered run draws -- and its dashed LRUD walls
+   belong to that passage only, not to the whole cave.
+8. Drag the window's size grip. The cave rescales to fill the pane; nothing is
+   clipped or stranded.
+9. Edit the drawing, then press **Refresh**. Both panes update, and resizing
+   still rescales afterwards. (Refresh previously blanked the pane permanently.)
+10. Double-click into the title block to edit it, press Escape, then type `tf`.
+    The window shows the **cave**, not the title block's few lines.
+11. Hide an entity by hand in the real drawing (property editor, Invisible),
+    then `tf`. The preview still shows the whole cave rather than coming up
+    blank.
+12. Open on an empty drawing: the pane says there is no survey data, and the
+    view says the drawing is empty -- neither is a silent blank.
+13. Close and reopen ten times, watching memory. It should not climb.
+14. Switch the app between light and dark themes: the toolbar icon reads
+    clearly in both.
+15. **Finally, the promise that matters most.** Close the window and confirm the
+    drawing shows no modified marker, Undo names whatever it named before, and
+    your selection is what it was. (Building the preview does select entities on
+    the real document for an instant and restore them -- probed to set no
+    modified flag and add no transaction, but it is the one honest exception to
+    "never touched".)
+
+If 1-15 pass, bump `VERSION` (this is a feature release, so `0.6.0.0` by the
+scheme in the README) and publish. The version was deliberately NOT bumped
+while this was unverified, and because a concurrent session has its own
+unreleased work on this branch that a bump would misattribute.
 
 ## Decisions on record (Nathan, 2026-08-23)
 
