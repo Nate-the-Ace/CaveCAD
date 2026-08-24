@@ -49,6 +49,7 @@ var FILES = [
     "scripts/CaveSurvey/Core/CsTags.js",
     "scripts/CaveSurvey/Core/CsStore.js",
     "scripts/CaveSurvey/Core/CsLayers.js",
+    "scripts/CaveSurvey/Core/CsDraw.js",
     "scripts/CaveSurvey/Core/CsCallout.js",
     "scripts/CaveSurvey/Callout/CalloutWrite.js"
 ];
@@ -81,18 +82,15 @@ CsLayers.ensureCalloutLayers(doc, di);
 eqs(CalloutWrite.existingIds(doc).length, 0,
     "existingIds on an empty drawing");
 
-// --- dimVar: a fresh document answers 0 for every dim variable, which
-// must come back null, never a fabricated length --------------------
-eqs(CalloutWrite.dimVar(doc, RS.DIMASZ), null,
-    "dimVar maps an unset (0) DIMASZ to null, not 0");
-eqs(CalloutWrite.dimVar(doc, RS.DIMSCALE), null,
-    "dimVar maps an unset (0) DIMSCALE to null, not 0");
-eqs(CalloutWrite.dimVar(doc, RS.DIMTXT), null,
-    "dimVar maps an unset (0) DIMTXT to null, not 0");
-
-// --- textHeight: no DIMTXT set, so the 2.5 last resort carries -------
-eqs(CalloutWrite.textHeight(doc), 2.5,
-    "textHeight falls back to 2.5 when the drawing's own DIMTXT is unset");
+// --- textHeight: the suite's own label height, NOT the drawing's
+// DIMTXT. Measured in a real cave drawing DIMTXT is 0.0833 with
+// DIMSCALE 1, which drew a note 0.08 units tall across 200 feet of
+// passage -- invisible. A note must come out the size of the station
+// labels beside it. ------------------------------------------------
+eqs(CalloutWrite.textHeight(doc), CsDraw.TEXT_HEIGHT,
+    "textHeight is the same height every other label in the suite uses");
+ok(CalloutWrite.textHeight(doc) > 0.2,
+    "textHeight is a legible size, not a dimension-annotation size");
 
 // --- suffixFor: follows the drawing's own unit, not a constant -------
 doc.setUnit(RS.Meter);
@@ -137,7 +135,11 @@ eqs(CsTags.get(m.leaders[0], CsCallout.KEY.ID), String(id),
 (function() {
     var box = CalloutWrite.boxOf(m.text);
     near(box.x1, 100, 1e-6, "the text's box starts at the requested x");
-    near(box.y2, 50, 1e-6, "the text's box top is at the requested y");
+    // VAlignMiddle: the pick point is the note's vertical MIDDLE, which
+    // is also where reflow attaches the landing -- so the arrow leaves
+    // at exactly the height the caver clicked.
+    near((box.y1 + box.y2) / 2.0, 50, 1e-6,
+        "the text's box is centred vertically ON the requested y");
     ok(box.x2 > box.x1, "the text's box has real width");
     ok(box.y2 > box.y1, "the text's box has real height");
     ok(!(Math.abs(box.x1) < 1e-9 && Math.abs(box.y2) < 1e-9),

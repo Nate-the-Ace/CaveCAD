@@ -109,27 +109,29 @@ CalloutWrite.create = function(doc, di, spec) {
     var id = CsCallout.nextId(CalloutWrite.existingIds(doc));
 
     // --- the text ----------------------------------------------------
-    var textData = new RTextData();
-    textData.setText(spec.text);
-    // BOTH position AND alignment point, and the second one is the one
-    // that actually places the text.
+    // Built with the FULL RTextData constructor, position and alignment
+    // point both, exactly as CsDraw.addText does (CsDraw.js:55). Not
+    // with setters.
     //
-    // setPosition alone LIES. getPosition() reads back exactly what you
-    // gave it while getAlignmentPoint() stays at 0,0 -- and the entity
-    // renders at the ALIGNMENT POINT, so the text lands on the origin.
-    // Measured in this engine: setPosition(100,50) alone yields a
-    // bounding box of (0,-4)..(16.78,0); setting both yields
-    // (100,46)..(116.78,50).
+    // setPosition() ALONE IS A LIE: it reads back whatever you gave it
+    // while getAlignmentPoint() stays 0,0, and the entity RENDERS at the
+    // alignment point -- so the text lands on the origin. Measured:
+    // setPosition(100,50) alone gives a bounding box of
+    // (0,-4)..(16.78,0). That shipped once, and it also dragged the
+    // leaders with it, because CalloutWrite.boxOf feeds the same box to
+    // CsCallout.reflow. Passing both points to the constructor makes the
+    // mistake structurally impossible rather than merely fixed.
     //
-    // This shipped once. It is invisible to any test that asserts
-    // getPosition(), which is why the test beside this file asserts the
-    // BOUNDING BOX instead. It also broke the leaders, not just the
-    // text: CalloutWrite.boxOf feeds that same box to CsCallout.reflow,
-    // so a text at the origin solved every landing against the origin.
+    // VAlignMiddle so the pick point is the note's vertical MIDDLE:
+    // reflow attaches the landing at the box's vertical middle too, so
+    // the arrow leaves at exactly the height the caver clicked.
+    //
+    // Not CsDraw.caps(): station labels are capitalised by convention,
+    // but a caver's own note is theirs as typed.
     var at = new RVector(spec.position.x, spec.position.y);
-    textData.setPosition(at);
-    textData.setAlignmentPoint(at);
-    textData.setTextHeight(spec.height);
+    var textData = new RTextData(at, at, spec.height, 100.0,
+        RS.VAlignMiddle, RS.HAlignLeft, RS.LeftToRight, RS.Exact,
+        1.0, spec.text, "standard", false, false, 0.0, false);
     var textEntity = new RTextEntity(doc, textData);
     textEntity.setLayerId(doc.getLayerId(layerName));
 
@@ -200,8 +202,13 @@ CalloutWrite.writeLeaders = function(doc, di, id, tips, style, layerName,
     var side = CsTags.get(m.text, CsCallout.KEY.SIDE);
     var geom = CsCallout.reflow(CalloutWrite.boxOf(m.text), tips, {
         side: (side === "" ? "auto" : side),
-        dimasz: CalloutWrite.dimVar(doc, RS.DIMASZ),
-        dimscale: CalloutWrite.dimVar(doc, RS.DIMSCALE)
+        // NOT DIMASZ/DIMSCALE. Measured in a real drawing they are
+        // 0.0833 and 1, which would put a 0.08-unit landing on a
+        // 0.5-unit-tall note -- a shoulder too short to see. reflow's
+        // own fallback is half the text height, which stays right at
+        // every scale because it is expressed IN the note's own size.
+        dimasz: null,
+        dimscale: null
     });
 
     CsLayers.withLayerOn(doc, di, layerName, function() {
@@ -292,30 +299,24 @@ CalloutWrite.applyReflow = function(doc, di, id, group) {
 };
 
 /**
- * One dimension variable, or null when the drawing has not set it.
+ * Text height for a new callout: the SAME height every other label in
+ * this suite uses.
  *
- * The default MUST be numeric: getKnownVariable(handle, null) returns
- * undefined and prints "RJSHelper::js2cpp_QVariant: no wrapper", and
- * the one-argument form returns undefined too. 0 comes back for an
- * unset variable, and 0 is not a usable length -- so it maps to null
- * and lets CsCallout.reflow's landing-length fallback carry it.
- */
-CalloutWrite.dimVar = function(doc, handle) {
-    var v = doc.getKnownVariable(handle, 0);
-    if (v === null || v === undefined || v <= 0) {
-        return null;
-    }
-    return v;
-};
-
-/**
- * Text height for a new callout: the drawing's own DIMTXT, so a note
- * matches the sheet's other annotation at whatever scale it plots. Lives
- * here rather than on any one command because all of them need it.
+ * NOT the drawing's DIMTXT. That was the first attempt and it is wrong
+ * by two orders of magnitude on a real cave map: measured in a caver's
+ * own drawing, DIMTXT is 0.0833 (one inch, in a drawing whose unit is
+ * feet) with DIMSCALE 1, which put a "test test test" note in a box
+ * 0.55 x 0.08 units across a passage spanning ~200 feet. Invisible.
+ * DIMTXT is sized for dimension annotation on a plotted sheet, not for
+ * map lettering.
+ *
+ * CsDraw.TEXT_HEIGHT is what station labels are drawn at, so a note
+ * comes out the same size as the labels beside it -- which is what a
+ * caver expects and the only definition of "right size" this suite
+ * actually has.
  */
 CalloutWrite.textHeight = function(doc) {
-    var h = CalloutWrite.dimVar(doc, RS.DIMTXT);
-    return (h === null) ? 2.5 : h;   // 2.5 is a last resort, not a default
+    return CsDraw.TEXT_HEIGHT;
 };
 
 /**
