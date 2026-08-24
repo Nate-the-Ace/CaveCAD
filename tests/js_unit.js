@@ -15957,6 +15957,145 @@ if (!IS_NODE) {
 })();
 
 // ---------------------------------------------------------------------
+// TripFocus.buildList / TripFocus.picked -- QCAD engine only. This is
+// the pane QTreeWidget was replaced with (Task 8): `new QTreeWidget()`
+// in this build's script engine constructs a convincing stub -- its
+// `setHeaderLabels` and `topLevelItemCount` are `undefined` -- so the
+// window could not open at all, and `picked()` always read back
+// nothing, and NOTHING caught either, because no test ever
+// constructed the widget. `QCheckBox` constructs and works fine under
+// `-no-gui`, which is what makes this test possible and required: it
+// builds the real pane, ticks real checkboxes, and reads `picked()`
+// back -- the first automated check this function has ever had.
+// ---------------------------------------------------------------------
+if (!IS_NODE) {
+    (function() {
+        // EAction is TripFocus.js's one load-time dependency
+        // (`TripFocus.prototype = new EAction();`, run when the file is
+        // loaded, not deferred into a function) -- not part of this
+        // repo, so it comes from the real engine's own include(),
+        // exactly as tests/trip_focus_filter.js already does.
+        include("scripts/EAction.js");
+        include("scripts/simple.js");
+
+        loadRepoScript("scripts/CaveSurvey/Core/CsAngles.js");
+        loadRepoScript("scripts/CaveSurvey/Core/CsUnits.js");
+        loadRepoScript("scripts/CaveSurvey/Core/CsModel.js");
+        loadRepoScript("scripts/CaveSurvey/Core/CsTraverse.js");
+        loadRepoScript("scripts/CaveSurvey/Core/CsNetwork.js");
+        loadRepoScript("scripts/CaveSurvey/Core/CsProfile.js");
+        loadRepoScript("scripts/CaveSurvey/Core/CsStats.js");
+        loadRepoScript("scripts/CaveSurvey/Core/CsContrib.js");
+        loadRepoScript("scripts/CaveSurvey/TripFocus/TripFocusRows.js");
+        loadRepoScript("scripts/CaveSurvey/TripFocus/TripFocus.js");
+
+        // Two trips, two teams, three people, one real run plus a
+        // stray shot no run can claim -- exercises all four sections
+        // AND the one row that must never become an entry at all.
+        var t0 = CsModel.newTrip();
+        t0.date = "2024-01-01"; t0.team = "Nathan, Jim";
+        var t1 = CsModel.newTrip();
+        t1.date = "2024-02-02"; t1.team = "Sarah";
+        var survey = CsModel.newSurvey();
+        survey.distanceUnit = "ft";
+        survey.trips = [t0, t1];
+
+        var s0 = CsModel.newShot();
+        s0.from = "A1"; s0.to = "A2"; s0.distance = 100.0;
+        s0.azimuth = 0.0; s0.trip = 0;
+        var s1 = CsModel.newShot();
+        s1.from = "A2"; s1.to = "A3"; s1.distance = 50.0;
+        s1.azimuth = 0.0; s1.trip = 1;
+        // Q.2 is a dotted name splitName refuses, so this shot never
+        // resolves into the network and its distance can join no run
+        // -- exactly TripFocusRows' "(not in any run)" row.
+        var stray = CsModel.newShot();
+        stray.from = "Q1"; stray.to = "Q.2"; stray.distance = 30.0;
+        stray.azimuth = 0.0; stray.trip = 0;
+        survey.shots = [s0, s1, stray];
+
+        var resolved = CsNetwork.resolve(survey);
+        var read = { survey: survey, resolved: resolved };
+
+        var built = TripFocus.buildList(read);
+        eqs(built.headers.length, 4,
+            "TripFocus.buildList: four section headers, one per section");
+        eqs(built.headers[3].entries.length, 1,
+            "TripFocus.buildList: Survey runs has one CHECKABLE row -- " +
+            "run A -- the unassigned row is not among its entries");
+        eqs(built.entries.length, 8,
+            "TripFocus.buildList: 2 trips + 2 teams + 3 people + 1 run " +
+            "= 8 checkable entries; the unassigned row adds no entry");
+
+        var noNullPick = true;
+        var e;
+        for (var i = 0; i < built.entries.length; i++) {
+            if (isNull(built.entries[i].pick)) {
+                noNullPick = false;
+            }
+        }
+        ok(noNullPick,
+            "TripFocus.buildList: the \"(not in any run)\" row can " +
+            "never appear in picked() -- it has no entry to appear as");
+
+        var findEntry = function(section, pick) {
+            for (var i = 0; i < built.entries.length; i++) {
+                var en = built.entries[i];
+                if (en.section === section && en.pick === pick) {
+                    return en;
+                }
+            }
+            return null;
+        };
+
+        var tripEntry = findEntry("trips", 0);
+        var teamEntry = findEntry("teams", "team:Sarah");
+        var runEntry = findEntry("runs", "A");
+        ok(!isNull(tripEntry) && !isNull(teamEntry) && !isNull(runEntry),
+            "TripFocus.buildList: the entries this test ticks all exist " +
+            "with the picks TripFocusRows.build is documented to write");
+
+        // Tick a KNOWN subset via real QCheckBox widgets -- constructs
+        // fine under -no-gui, which is the whole point of this test.
+        tripEntry.box.setChecked(true);
+        teamEntry.box.setChecked(true);
+        runEntry.box.setChecked(true);
+        // everything else -- including all three People rows and the
+        // OTHER trip/team -- is left unchecked deliberately, so a
+        // picked() that accidentally reads every row (not just checked
+        // ones) has something to get wrong
+
+        var picked = TripFocus.picked(built.entries);
+        eqs(picked.trips.length, 1, "TripFocus.picked: one trip ticked");
+        eqs(picked.trips[0], 0,
+            "TripFocus.picked: trip 0's pick round-trips as a NUMBER, " +
+            "not a string -- there is no Qt.UserRole text round trip " +
+            "any more now that state lives off the widgets entirely");
+        eqs(picked.teams.length, 1, "TripFocus.picked: one team ticked");
+        eqs(picked.teams[0], "team:Sarah",
+            "TripFocus.picked: the team pick keeps its team: prefix");
+        eqs(picked.people.length, 0,
+            "TripFocus.picked: no People row was ticked, so none reported " +
+            "-- proves picked() is not just reporting every row it sees");
+        eqs(picked.runs.length, 1, "TripFocus.picked: one run ticked");
+        eqs(picked.runs[0], "A",
+            "TripFocus.picked: the run pick is the plain run key");
+
+        // Untick everything and confirm picked() empties out with it --
+        // pins that picked() reads LIVE checkbox state, not a snapshot
+        // taken when the entries were ticked above.
+        tripEntry.box.setChecked(false);
+        teamEntry.box.setChecked(false);
+        runEntry.box.setChecked(false);
+        var pickedNone = TripFocus.picked(built.entries);
+        ok(pickedNone.trips.length === 0 && pickedNone.teams.length === 0 &&
+            pickedNone.people.length === 0 && pickedNone.runs.length === 0,
+            "TripFocus.picked: unticking every box reads back as nothing " +
+            "picked at all");
+    })();
+}
+
+// ---------------------------------------------------------------------
 // Report.
 // ---------------------------------------------------------------------
 

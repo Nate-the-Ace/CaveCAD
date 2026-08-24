@@ -37,7 +37,8 @@ TripFocus.prototype = new EAction();
  *  and each claim to be the focus. */
 TripFocus.dialog = null;
 TripFocus.previewDi = null;
-/** {tree, read, view, doc} while the window is open, null otherwise. */
+/** {list, entries, headers, read, view, doc} while the window is open,
+ *  null otherwise. */
 TripFocus.state = null;
 
 TripFocus.prototype.beginEvent = function() {
@@ -88,94 +89,158 @@ TripFocus.COL_WHAT = 0;
 TripFocus.COL_DISTANCE = 1;
 TripFocus.COL_SHARE = 2;
 
-/** The list pane. Section items carry their own key in column 0's
- *  user role so picked() can read a checked child's section without
- *  walking back up by title text. */
-TripFocus.buildTree = function(read) {
-    var tree = new QTreeWidget();
-    tree.objectName = "TripFocusTree";
-    tree.columnCount = 3;
-    tree.setHeaderLabels(["Contributor", "Distance", "Share"]);
-    tree.rootIsDecorated = true;
-    tree.uniformRowHeights = true;
+/**
+ * The list pane: QCheckBox and QLabel in a QGridLayout inside a
+ * QScrollArea. NOT QTreeWidget or QListWidget -- this build cannot
+ * construct either from script at all (`new QTreeWidget()` returns a
+ * convincing stub whose `setHeaderLabels` and `topLevelItemCount` are
+ * `undefined`; `new QListWidget()` fails outright). Confirmed by a
+ * throwaway `-no-gui -autostart` probe before any of this was written;
+ * see this tool's report for the transcript. The section and row DATA
+ * still comes from `TripFocusRows.build` unchanged -- that part is
+ * pure, already tested, and none of this function's business; only the
+ * widget layer is new.
+ *
+ * SELECTION STATE LIVES IN THE RETURNED `entries` ARRAY, never in the
+ * grid. `TripFocus.picked()` reads that array; nothing in this file
+ * walks the widget tree to recover what is checked -- that is what made
+ * the old tree-based `picked` both untestable and silently wrong.
+ * `headers` is returned only so the caller can wire each section
+ * checkbox's cascade (see `wireList`); it plays no part in `picked()`.
+ *
+ * \return {widget: QScrollArea,
+ *          entries: [{section, pick, box}],
+ *          headers: [{section, box, entries: [entry, ...]}]}
+ */
+TripFocus.buildList = function(read) {
+    var entries = [];
+    var headers = [];
+    var inner = new QWidget();
+    var grid = new QGridLayout();
+    inner.setLayout(grid);
+    try {
+        grid.setHorizontalSpacing(6);
+        grid.setVerticalSpacing(2);
+        grid.setContentsMargins(4, 4, 4, 4);
+    } catch (eSp) {
+        // spacing stays at whatever the bridge defaults to
+    }
+    var gridRow = 0;
+
+    var addSpanning = function(widget) {
+        grid.addWidget(widget, gridRow, TripFocus.COL_WHAT, 1, 3);
+        gridRow++;
+    };
 
     if (read === null) {
-        var none = new QTreeWidgetItem(tree);
-        none.setText(TripFocus.COL_WHAT, "No survey data in this drawing");
+        var none = new QLabel(qsTr("No survey data in this drawing"));
         none.setDisabled(true);
-        return tree;
-    }
+        addSpanning(none);
+    } else {
+        var sections = TripFocusRows.build(read.survey, read.resolved,
+            CsTraverse.SLOPE);
+        for (var s = 0; s < sections.length; s++) {
+            var section = sections[s];
+            var headerText = section.title +
+                (section.note === "" ? "" : "  -- " + section.note);
 
-    var sections = TripFocusRows.build(read.survey, read.resolved,
-        CsTraverse.SLOPE);
-    for (var s = 0; s < sections.length; s++) {
-        var section = sections[s];
-        var head = new QTreeWidgetItem(tree);
-        head.setText(TripFocus.COL_WHAT, section.title +
-            (section.note === "" ? "" : "  -- " + section.note));
-        head.setData(TripFocus.COL_WHAT, Qt.UserRole, section.key);
-        head.setExpanded(true);
-
-        if (section.rows.length === 0) {
-            head.setDisabled(true);
-            head.setText(TripFocus.COL_WHAT, section.title +
-                "  (none recorded)");
-            continue;
-        }
-        head.setFlags(head.flags() | Qt.ItemIsUserCheckable);
-        head.setCheckState(TripFocus.COL_WHAT, Qt.Unchecked);
-
-        for (var r = 0; r < section.rows.length; r++) {
-            var row = section.rows[r];
-            var item = new QTreeWidgetItem(head);
-            item.setText(TripFocus.COL_WHAT, row.label);
-            item.setText(TripFocus.COL_DISTANCE, row.distanceText);
-            item.setText(TripFocus.COL_SHARE, row.percentText);
-            if (isNull(row.pick)) {
-                // informational only -- see TripFocusRows' unassigned row
-                item.setDisabled(true);
-            } else {
-                item.setFlags(item.flags() | Qt.ItemIsUserCheckable);
-                item.setCheckState(TripFocus.COL_WHAT, Qt.Unchecked);
-            }
-            item.setData(TripFocus.COL_WHAT, Qt.UserRole, section.key);
-            item.setData(TripFocus.COL_SHARE, Qt.UserRole,
-                isNull(row.pick) ? null : String(row.pick));
-        }
-    }
-    return tree;
-};
-
-/** What is checked, in the shape CsFocus.stationSet wants. A trip's
- *  pick round-trips through text (Qt.UserRole is set as a string), so
- *  it comes back parsed rather than as "0". Team and person picks
- *  come back exactly as TripFocusRows.build wrote them ("team:..." /
- *  "person:..." -- see that file's docblock for why the namespace
- *  prefix matters), which is what CsFocus.stationSet's tripsForGroup
- *  lookup now expects. */
-TripFocus.picked = function(tree) {
-    var out = { trips: [], teams: [], people: [], runs: [] };
-    for (var s = 0; s < tree.topLevelItemCount; s++) {
-        var head = tree.topLevelItem(s);
-        for (var r = 0; r < head.childCount(); r++) {
-            var item = head.child(r);
-            if (item.checkState(TripFocus.COL_WHAT) !== Qt.Checked) {
+            if (section.rows.length === 0) {
+                var empty = new QLabel(headerText +
+                    qsTr("  (none recorded)"));
+                empty.setDisabled(true);
+                addSpanning(empty);
                 continue;
             }
-            var key = item.data(TripFocus.COL_WHAT, Qt.UserRole);
-            var pick = item.data(TripFocus.COL_SHARE, Qt.UserRole);
-            if (isNull(pick) || pick === "null") {
-                continue;   // the "(not in any run)" row: nothing to focus
+
+            // the section header: a checkbox in its own right, which
+            // cascades to every row below it -- see wireList
+            var headBox = new QCheckBox(headerText);
+            addSpanning(headBox);
+            var headerEntries = [];
+
+            for (var r = 0; r < section.rows.length; r++) {
+                var row = section.rows[r];
+                var distLabel = new QLabel(row.distanceText);
+                var shareLabel = new QLabel(row.percentText);
+
+                if (isNull(row.pick)) {
+                    // "(not in any run)" -- informational only, see
+                    // TripFocusRows' own docblock: there is no station
+                    // set to focus, so there is nothing to tick
+                    var info = new QLabel(row.label);
+                    grid.addWidget(info, gridRow, TripFocus.COL_WHAT);
+                    grid.addWidget(distLabel, gridRow,
+                        TripFocus.COL_DISTANCE);
+                    grid.addWidget(shareLabel, gridRow,
+                        TripFocus.COL_SHARE);
+                    gridRow++;
+                    continue;
+                }
+
+                var box = new QCheckBox(row.label);
+                grid.addWidget(box, gridRow, TripFocus.COL_WHAT);
+                grid.addWidget(distLabel, gridRow, TripFocus.COL_DISTANCE);
+                grid.addWidget(shareLabel, gridRow, TripFocus.COL_SHARE);
+                gridRow++;
+
+                var entry = { section: section.key, pick: row.pick,
+                    box: box };
+                entries.push(entry);
+                headerEntries.push(entry);
             }
-            if (key === "trips") {
-                out.trips.push(parseInt(pick, 10));
-            } else if (key === "teams") {
-                out.teams.push(String(pick));
-            } else if (key === "people") {
-                out.people.push(String(pick));
-            } else if (key === "runs") {
-                out.runs.push(String(pick));
-            }
+
+            headers.push({ section: section.key, box: headBox,
+                entries: headerEntries });
+        }
+    }
+
+    // one stretchy empty row below the last one, so rows pin to the
+    // top of the scroll area instead of spreading down it -- the same
+    // device SurveyNotebook's own grid-in-a-QScrollArea uses for its
+    // notes page
+    try {
+        grid.setRowStretch(gridRow, 1);
+    } catch (eStretch) {
+        // cosmetic only
+    }
+
+    var scroll = new QScrollArea();
+    scroll.objectName = "TripFocusList";
+    scroll.widgetResizable = true;
+    scroll.setWidget(inner);
+
+    return { widget: scroll, entries: entries, headers: headers };
+};
+
+/** What is checked, in the shape CsFocus.stationSet wants. Reads
+ *  `entries` -- the JS array buildList returned, each a
+ *  {section, pick, box} -- never a widget's own parent/child
+ *  structure. A trip's pick is the plain tripId TripFocusRows.build
+ *  wrote: a number, not a string -- there is no Qt.UserRole round trip
+ *  through text to undo any more, now that selection state lives off
+ *  the widgets entirely. Team and person picks come back exactly as
+ *  TripFocusRows.build wrote them ("team:..." / "person:..." -- see
+ *  that file's docblock for why the namespace prefix matters). */
+TripFocus.picked = function(entries) {
+    var out = { trips: [], teams: [], people: [], runs: [] };
+    for (var i = 0; i < entries.length; i++) {
+        var entry = entries[i];
+        if (!entry.box.checked) {
+            continue;
+        }
+        if (isNull(entry.pick)) {
+            continue;   // defensive: buildList never gives the
+                        // unpickable "(not in any run)" row an entry
+                        // in the first place, so this should not fire
+        }
+        if (entry.section === "trips") {
+            out.trips.push(entry.pick);
+        } else if (entry.section === "teams") {
+            out.teams.push(String(entry.pick));
+        } else if (entry.section === "people") {
+            out.people.push(String(entry.pick));
+        } else if (entry.section === "runs") {
+            out.runs.push(String(entry.pick));
         }
     }
     return out;
@@ -275,32 +340,34 @@ TripFocus.refresh = function(sourceDoc) {
 
     var read = TripFocus.readSurvey(sourceDoc);
     TripFocus.state.read = read;
-    var fresh = TripFocus.buildTree(read);
-    // swap the tree in place inside the splitter, so the reader's pane
+    var built = TripFocus.buildList(read);
+    // swap the pane in place inside the splitter, so the reader's pane
     // widths survive a Refresh -- guarded, since sizes()/setSizes() are
     // not guaranteed by this Qt bridge (see SurveyNotebook.js's own
     // splitter for the same guard); losing the split is cosmetic, so a
-    // failure here must not stop the tree from being replaced.
-    var splitter = TripFocus.state.tree.parentWidget();
+    // failure here must not stop the pane from being replaced.
+    var splitter = TripFocus.state.list.parentWidget();
     var index = 0;
     var sizes = null;
     try {
-        index = splitter.indexOf(TripFocus.state.tree);
+        index = splitter.indexOf(TripFocus.state.list);
         sizes = splitter.sizes();
     } catch (eSizes) {
         index = 0;
         sizes = null;
     }
-    TripFocus.state.tree.setParent(null);
-    splitter.insertWidget(index, fresh);
+    TripFocus.state.list.setParent(null);
+    splitter.insertWidget(index, built.widget);
     if (sizes !== null) {
         try {
             splitter.setSizes(sizes);
         } catch (eSetSizes) {
         }
     }
-    TripFocus.state.tree = fresh;
-    TripFocus.wireTree();
+    TripFocus.state.list = built.widget;
+    TripFocus.state.entries = built.entries;
+    TripFocus.state.headers = built.headers;
+    TripFocus.wireList();
     TripFocus.reapply();
 };
 
@@ -311,7 +378,7 @@ TripFocus.reapply = function() {
         TripFocus.applyFocus(TripFocus.previewDi, null);
         return;
     }
-    var picked = TripFocus.picked(TripFocus.state.tree);
+    var picked = TripFocus.picked(TripFocus.state.entries);
     if (CsFocus.isEmptySelection(picked)) {
         // nothing checked shows everything: a blank window looks like a
         // broken tool, not like an empty selection
@@ -331,34 +398,65 @@ TripFocus.reapply = function() {
     TripFocus.applyFocus(TripFocus.previewDi, set);
 };
 
-/** Wires the tree's itemChanged signal: a section header cascades its
- *  check state to its children, and every real checkbox change --
- *  cascaded header or plain leaf alike -- re-applies the focus filter
+/** Checks or unchecks every {box} in `items` (entries or headers
+ *  alike) without each individual change re-running the filter --
+ *  shared by wireList's own per-section cascade and the All button,
+ *  which is one more reason to have only one copy of this: the pane
+ *  that replaced the tree is the whole reason there were two. */
+TripFocus.setChecked = function(items, state) {
+    TripFocus.inCascade = true;
+    for (var i = 0; i < items.length; i++) {
+        items[i].box.setChecked(state);
+    }
+    TripFocus.inCascade = false;
+};
+
+/** Wires every checkbox in the pane: a section header cascades its
+ *  check state to its own rows, and every real change -- a cascaded
+ *  header or a plain row alike -- re-applies the focus filter
  *  afterwards. Pulled out of show() into its own function so Refresh
- *  can re-wire the replacement tree the same way. Guarded: a failed
+ *  can re-wire the replacement pane the same way. Guarded: a failed
  *  connect must leave the window usable with plain independent
  *  checkboxes rather than crash the whole tool over a cascade that is a
- *  convenience, not the point of this window. */
-TripFocus.wireTree = function() {
-    var tree = TripFocus.state.tree;
-    try {
-        tree.itemChanged.connect(function(item, column) {
-            if (column !== TripFocus.COL_WHAT || TripFocus.inCascade) {
+ *  convenience, not the point of this window.
+ *
+ *  TripFocus.inCascade is the re-entrancy guard: setting a row's own
+ *  `checked` from inside the header's handler fires that row's OWN
+ *  `toggled` too, which would otherwise call reapply() once per row
+ *  cascaded instead of once for the whole header click (the tree
+ *  version guarded the exact same re-entrance the same way). */
+TripFocus.wireList = function() {
+    var headers = TripFocus.state.headers;
+    var entries = TripFocus.state.entries;
+    var i;
+
+    var makeHeaderHandler = function(head) {
+        return function(checked) {
+            if (TripFocus.inCascade) {
                 return;
             }
-            if (item.childCount() > 0) {
-                TripFocus.inCascade = true;   // a child's own itemChanged
-                                              // would otherwise re-enter
-                                              // this handler
-                var state = item.checkState(TripFocus.COL_WHAT);
-                for (var r = 0; r < item.childCount(); r++) {
-                    item.child(r).setCheckState(TripFocus.COL_WHAT, state);
-                }
-                TripFocus.inCascade = false;
-            }
+            TripFocus.setChecked(head.entries, checked);
             TripFocus.reapply();
-        });
-    } catch (e) {
+        };
+    };
+    var rowHandler = function() {
+        if (TripFocus.inCascade) {
+            return;
+        }
+        TripFocus.reapply();
+    };
+
+    for (i = 0; i < headers.length; i++) {
+        try {
+            headers[i].box.toggled.connect(makeHeaderHandler(headers[i]));
+        } catch (eHead) {
+        }
+    }
+    for (i = 0; i < entries.length; i++) {
+        try {
+            entries[i].box.toggled.connect(rowHandler);
+        } catch (eRow) {
+        }
     }
 };
 
@@ -386,25 +484,26 @@ TripFocus.show = function(doc) {
     imageView.setMargin(10);
 
     var read = TripFocus.readSurvey(doc);
-    var tree = TripFocus.buildTree(read);
+    var built = TripFocus.buildList(read);
 
     var splitter = new QSplitter(Qt.Horizontal, dlg);
-    splitter.addWidget(tree);
+    splitter.addWidget(built.widget);
     splitter.addWidget(view);
     splitter.setSizes([320, 620]);
     layout.addWidget(splitter, 1, 0);
 
     // one window at a time (show() raises the existing one), so the
     // window's parts live here rather than as properties bolted onto the
-    // QDialog wrapper -- Refresh replaces the tree widget, and a stale
+    // QDialog wrapper -- Refresh replaces the list widget, and a stale
     // reference on a wrapper object is the kind of thing that reads as
     // "the buttons stopped working" much later
-    TripFocus.state = { tree: tree, read: read, view: view, doc: doc };
+    TripFocus.state = { list: built.widget, entries: built.entries,
+        headers: built.headers, read: read, view: view, doc: doc };
 
-    // Section checkboxes drive their children, and every change re-runs
-    // the filter -- see TripFocus.wireTree, pulled out on its own so
-    // Refresh can re-wire the replacement tree the same way.
-    TripFocus.wireTree();
+    // Section checkboxes drive their own rows, and every change re-runs
+    // the filter -- see TripFocus.wireList, pulled out on its own so
+    // Refresh can re-wire the replacement pane the same way.
+    TripFocus.wireList();
     // Nothing is checked yet, which reapply() reads as All -- but the
     // profile band is out of this window regardless of what is checked
     // (see applyFocus), so this first call is what keeps it off the very
@@ -422,24 +521,12 @@ TripFocus.show = function(doc) {
     layout.addLayout(buttons, 0);
 
     // All: checks every checkable row, then filters once -- guarded the
-    // same way wireTree's own cascade is, so the per-child checkState
+    // same way wireList's own cascade is, so the per-row checkState
     // notifications this fires do not each re-run the filter.
     try {
         allButton.clicked.connect(function() {
-            TripFocus.inCascade = true;
-            var tree = TripFocus.state.tree;
-            for (var s = 0; s < tree.topLevelItemCount; s++) {
-                var head = tree.topLevelItem(s);
-                if (head.childCount() === 0) {
-                    continue;
-                }
-                head.setCheckState(TripFocus.COL_WHAT, Qt.Checked);
-                for (var r = 0; r < head.childCount(); r++) {
-                    head.child(r).setCheckState(TripFocus.COL_WHAT,
-                        Qt.Checked);
-                }
-            }
-            TripFocus.inCascade = false;
+            TripFocus.setChecked(TripFocus.state.headers, true);
+            TripFocus.setChecked(TripFocus.state.entries, true);
             TripFocus.reapply();
         });
     } catch (eAll) {
