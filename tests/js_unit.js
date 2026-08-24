@@ -15261,6 +15261,23 @@ if (!IS_NODE) {
             ok(new QFileInfo(liveBak).exists(),
                 "eraseStations: the last saved version is kept BEFORE it erases");
 
+            // A single Draw runs both destructive operations, so the
+            // same unchanged file must not be copied twice.
+            var stampAfter = CsBackup.lastBackedUp;
+            ok(stampAfter !== null,
+                "CsBackup: the backed-up file is fingerprinted");
+            ok(CsBackup.beforeWrite(live) === true,
+                "CsBackup.beforeWrite: a second call still reports protected");
+            eqs(CsBackup.lastBackedUp, stampAfter,
+                "CsBackup.beforeWrite: and does not re-copy unchanged bytes");
+
+            // A deleted .bak is remade, not skipped because we remember.
+            new QFile(liveBak).remove();
+            ok(CsBackup.beforeWrite(live) === true,
+                "CsBackup.beforeWrite: remakes a backup that went missing");
+            ok(new QFileInfo(liveBak).exists(),
+                "CsBackup.beforeWrite: the file is back");
+
             new QFile(live).remove();
             new QFile(liveBak).remove();
         }());

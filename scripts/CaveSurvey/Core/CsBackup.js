@@ -36,6 +36,14 @@ var CsBackup = {};
  *  broken guard says so without nagging on every save. */
 CsBackup.warnedThisSession = false;
 
+/** The (path, size, modified) already backed up, so the same bytes are
+ *  not copied twice. A single Notebook Draw runs BOTH destructive
+ *  operations -- eraseStations and CsProfileDraw.erase -- so without
+ *  this it copies the whole drawing twice per draw for no gain: the file
+ *  on disk cannot have changed in between, because only a save changes
+ *  it. On a multi-megabyte cave redrawn repeatedly that is real churn. */
+CsBackup.lastBackedUp = null;
+
 /** Appended to the drawing's own name, so the backup sits beside it and
  *  sorts next to it. Not a hidden file: a backup nobody can see is a
  *  backup nobody remembers to use. */
@@ -151,6 +159,17 @@ CsBackup.worthKeeping = function(path) {
     }
 };
 
+/** True when a backup file for `path` is actually present. Checked
+ *  alongside the fingerprint so a deleted .bak is remade rather than
+ *  skipped because we remember making it once. */
+CsBackup.hasBackup = function(path) {
+    try {
+        return new QFileInfo(String(path) + CsBackup.SUFFIX).exists();
+    } catch (e) {
+        return false;
+    }
+};
+
 /**
  * Copies `path` to `path` + SUFFIX, replacing any previous backup.
  *
@@ -214,8 +233,32 @@ CsBackup.copyPrevious = function(path) {
  */
 CsBackup.beforeWrite = function(path) {
     var due = CsBackup.worthKeeping(path) && !CsBackup.inGoogleDrive(path);
+    if (!due) {
+        return false;
+    }
+
+    // Already have this exact file? Then the backup on disk is the same
+    // bytes and copying again buys nothing. Keyed on size AND modified
+    // time, because only a save changes the file -- and a save changes
+    // both.
+    var stamp = null;
+    try {
+        var info = new QFileInfo(String(path));
+        stamp = String(path) + "|" + info.size() + "|" +
+            String(info.lastModified().toString());
+    } catch (eStamp) {
+        stamp = null;   // cannot fingerprint it: copy, do not guess
+    }
+    if (stamp !== null && CsBackup.lastBackedUp === stamp &&
+            CsBackup.hasBackup(path)) {
+        return true;
+    }
+
     var made = CsBackup.copyPrevious(path);
-    if (due && !made && !CsBackup.warnedThisSession) {
+    if (made && stamp !== null) {
+        CsBackup.lastBackedUp = stamp;
+    }
+    if (!made && !CsBackup.warnedThisSession) {
         CsBackup.warnedThisSession = true;
         warning("Cave Survey: could not keep a backup of " + path +
             CsBackup.SUFFIX + ". Saving anyway -- but there is no " +
