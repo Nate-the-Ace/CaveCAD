@@ -47,6 +47,22 @@ a numbered section there.
 
 ---
 
+## Status: SHIPPED in 0.7.0.0
+
+Delivered and pushed 2026-08-24. The plan was followed loosely from Task 5 on:
+the caver drove the remaining shape interactively (single-pick workflow, curved
+leaders, the text flip, elevation folded into the existing tool AND a dedicated
+two-click tool), so several planned tasks were superseded rather than executed as
+written. CsCalloutElev in particular was planned as a separate command, argued
+down to a style on the existing one, then reinstated as a two-click tool for the
+repetitive case -- both routes now exist.
+
+**Reviews owed and not run:** Tasks 5, 8 and 9 were due full two-stage review
+under the policy below. They received hand-testing by the owner instead, which
+caught more than a review would have -- the freeze, the 0,0 placement, the style
+dropdown not sticking, the page-only refresh. The owner elected to skip the
+review pass on 2026-08-24. Recorded rather than quietly dropped.
+
 ## Review policy for this run
 
 Agreed with the user after Task 3. Not uniform, on purpose — review effort goes
