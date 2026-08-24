@@ -92,6 +92,30 @@ CaveSurvey.init = function(basePath, splash) {
         CsCave.installSaveHook();
     }
 
+    // Keep callout arrows on their notes while the caver edits with
+    // QCAD's own tools. No menu entry: this is not a tool, it is what
+    // makes a callout stay a callout after it is placed.
+    //
+    // includeBasePath-relative, like every other suite-internal include.
+    // A path written relative to the scripts root instead resolves only
+    // against the application bundle and fails SILENTLY from a per-user
+    // install -- which is where this add-on actually lives. (Deliberately
+    // described rather than quoted: test_every_include_target_exists
+    // greps this file for that literal form, so an example of the wrong
+    // way trips the guard against it.)
+    //
+    // Guarded because a missing or broken listener must not take the
+    // whole add-on's startup with it. Without it, callouts still work;
+    // they just need Callout Sync run by hand.
+    try {
+        include(includeBasePath + "/Callout/CalloutListener.js");
+        if (typeof CalloutListener !== "undefined") {
+            CalloutListener.install();
+        }
+    } catch (eCallout) {
+        // degrade to the manual sync path
+    }
+
     // Keep the previous version of a drawing beside it on every save.
     // A redraw is erase-then-draw across two operations, so a draw that
     // fails after the erase has landed leaves the drawing gutted -- and

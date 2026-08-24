@@ -71,6 +71,12 @@ for (var fi = 0; fi < FILES.length; fi++) {
     (0, eval)(src);
 })();
 
+// CalloutListener has no include()s and no EAction plumbing in its
+// static half, so it loads directly. install() is NOT exercised here --
+// it needs a real main window with a document open -- but reconcile()
+// takes doc and di explicitly precisely so it can be driven from here.
+loadRepoScript("scripts/CaveSurvey/Callout/CalloutListener.js");
+
 var passed = 0;
 var failures = [];
 function ok(c, what) { if (c) { passed++; } else { failures.push(what); } }
@@ -254,6 +260,108 @@ var id = CalloutWrite.create(doc, di, {
     var uop = new RModifyObjectsOperation();
     uop.addObject(lay, false);
     di.applyOperation(uop);
+})();
+
+// ---------------------------------------------------------------------
+// CalloutListener.reconcile -- the live-glue decisions.
+//
+// install() and the transaction handler need a main window with a
+// document open and cannot run here. reconcile() is the part that
+// decides what happens, and it takes doc/di explicitly so it can.
+// ---------------------------------------------------------------------
+
+// --- a moved note: reflow, in the caller's undo group ----------------
+(function() {
+    var rid = CalloutWrite.create(doc, di, {
+        text: "listener reflow", position: { x: 2000, y: 100 },
+        tips: [{ x: 1960, y: 90 }],
+        style: "name", kind: CsCallout.KIND_TEXT,
+        height: CalloutWrite.textHeight(doc)
+    });
+    var m = CalloutWrite.members(doc, rid);
+    var td = m.text.getData();
+    var was = td.getAlignmentPoint();
+    td.setPosition(new RVector(was.x + 200, was.y + 150));
+    td.setAlignmentPoint(new RVector(was.x + 200, was.y + 150));
+    m.text.setData(td);
+    var mop = new RModifyObjectsOperation();
+    mop.addObject(m.text, false);
+    di.applyOperation(mop);
+
+    eqs(CalloutListener.reconcile(doc, di, rid, -1), "reflowed",
+        "reconcile reflows a callout whose note moved");
+    var after = CalloutWrite.members(doc, rid);
+    var box = CalloutWrite.boxOf(after.text);
+    var last = after.leaders[0].getData();
+    var end = last.getVertexAt(last.countVertices() - 1);
+    ok(end.x >= box.x1 - 1e-6 && end.x <= box.x2 + 1e-6,
+        "and the arrow landed back on the moved note");
+})();
+
+// --- the note deleted: its orphaned arrows go with it ----------------
+(function() {
+    var oid = CalloutWrite.create(doc, di, {
+        text: "doomed", position: { x: 2500, y: 100 },
+        tips: [{ x: 2460, y: 90 }, { x: 2470, y: 130 }],
+        style: "name", kind: CsCallout.KIND_TEXT,
+        height: CalloutWrite.textHeight(doc)
+    });
+    var m = CalloutWrite.members(doc, oid);
+    var del = new RDeleteObjectsOperation();
+    del.deleteObject(m.text);
+    di.applyOperation(del);
+
+    eqs(CalloutWrite.members(doc, oid).leaders.length, 2,
+        "fixture: deleting the note leaves both arrows orphaned");
+    eqs(CalloutListener.reconcile(doc, di, oid, -1), "orphans-removed",
+        "reconcile removes arrows that point at nothing");
+    eqs(CalloutWrite.members(doc, oid).leaders.length, 0,
+        "and they are actually gone");
+})();
+
+// --- the LAST arrow deleted: the note SURVIVES -----------------------
+// Asymmetric with the case above, on purpose. A note without an arrow is
+// still a note; deleting a caver's words because they deleted an arrow
+// would destroy work they never asked to lose.
+(function() {
+    var kid = CalloutWrite.create(doc, di, {
+        text: "keep my words", position: { x: 3000, y: 100 },
+        tips: [{ x: 2960, y: 90 }],
+        style: "name", kind: CsCallout.KIND_TEXT,
+        height: CalloutWrite.textHeight(doc)
+    });
+    var m = CalloutWrite.members(doc, kid);
+    var textId = m.text.getId();
+    var del = new RDeleteObjectsOperation();
+    del.deleteObject(m.leaders[0]);
+    di.applyOperation(del);
+
+    eqs(CalloutListener.reconcile(doc, di, kid, -1), "unlinked",
+        "reconcile unlinks a note whose last arrow was deleted");
+
+    var survivor = doc.queryEntity(textId);
+    ok(!isNull(survivor),
+        "THE NOTE SURVIVES -- it is not deleted along with its arrow");
+    eqs(CsTags.get(survivor, CsCallout.KEY.ID), "",
+        "and its callout tags are stripped, so it is ordinary text now");
+    eqs(CalloutWrite.members(doc, kid).text, null,
+        "so the callout no longer exists as a callout");
+})();
+
+// --- the gate: a transaction touching no callout is a no-op ---------
+(function() {
+    var before = doc.queryAllEntities(false, true).length;
+    var lid = CalloutWrite.create(doc, di, {
+        text: "bystander", position: { x: 3500, y: 100 },
+        tips: [{ x: 3460, y: 90 }],
+        style: "name", kind: CsCallout.KIND_TEXT,
+        height: CalloutWrite.textHeight(doc)
+    });
+    // an id nothing carries
+    eqs(CalloutListener.reconcile(doc, di, CsUuid.v4(), -1), "nothing",
+        "reconcile on an id no entity carries does nothing at all");
+    ok(CalloutWrite.members(doc, lid).text !== null,
+        "and the real callout beside it is untouched");
 })();
 
 var out;

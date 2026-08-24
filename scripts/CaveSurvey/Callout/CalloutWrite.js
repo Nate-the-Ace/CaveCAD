@@ -401,10 +401,29 @@ CalloutWrite.suffixFor = function(doc) {
     return (unit === CsUnits.METERS) ? " m" : "'";
 };
 
-/** Strip callout tags off an entity, leaving it as ordinary geometry. */
+/**
+ * Strip EVERY callout tag off an entity, leaving ordinary geometry.
+ *
+ * Uses CsTags.remove, not CsTags.set(key, ""). set() returns early on an
+ * empty value by design -- so the original version of this function
+ * silently did nothing, and a note that had lost its last arrow kept its
+ * CalloutId and stayed a half-callout that members() still matched.
+ * Caught by the listener's own test.
+ *
+ * Strips the whole key set, not just the id: a text left carrying
+ * CalloutStyle or CalloutLeader is litter that reads as meaningful to
+ * the next person who greps for it.
+ */
 CalloutWrite.unlink = function(di, entity) {
-    var t = {};
-    t[CsCallout.KEY.ID] = "";
-    t[CsCallout.KEY.ROLE] = "";
-    CsTags.commit(di, entity, t);
+    if (isNull(entity)) {
+        return;
+    }
+    for (var name in CsCallout.KEY) {
+        if (CsCallout.KEY.hasOwnProperty(name)) {
+            CsTags.remove(entity, CsCallout.KEY[name]);
+        }
+    }
+    var op = new RModifyObjectsOperation();
+    op.addObject(entity, false);
+    di.applyOperation(op);
 };

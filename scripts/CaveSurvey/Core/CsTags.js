@@ -54,6 +54,35 @@ CsTags.set = function(entity, key, value) {
 };
 
 /**
+ * REMOVES a tag from an entity, script-side. Commit with a modify
+ * operation the same way CsTags.commit does.
+ *
+ * Needed because CsTags.set CANNOT clear a tag: it returns early on
+ * null/undefined/"" by design, so that a caller passing an absent
+ * reading writes nothing rather than writing an empty string. That is
+ * right for writing, and it means "set it to empty" is not a way to
+ * unset. CalloutWrite.unlink tried exactly that and silently did
+ * nothing -- a text that had lost its last leader kept its CalloutId
+ * and stayed a half-callout no tool could see the other half of.
+ *
+ * entity.removeCustomProperty(group, key) is the real removal and was
+ * probed present in this build.
+ */
+CsTags.remove = function(entity, key) {
+    if (entity === undefined || entity === null) {
+        return;
+    }
+    if (typeof entity.removeCustomProperty !== "function") {
+        return;
+    }
+    try {
+        entity.removeCustomProperty(CsTags.GROUP, key);
+    } catch (e) {
+        // not supported here -- non-critical, same posture as set()
+    }
+};
+
+/**
  * Writes tags onto an entity ALREADY IN the document. Setting a
  * property on a queried entity mutates only the script-side copy;
  * committing it back needs a modify operation with addObject(e,
