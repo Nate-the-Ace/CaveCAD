@@ -104,6 +104,7 @@ it.** A silent workaround is how the previous design died.
 | `scripts/CaveSurvey/CalloutSync/CalloutSync.svg` | Icon. |
 | `scripts/CaveSurvey/CaveSurvey.js` | MODIFY: install the listener once at startup. |
 | `scripts/CaveSurvey/Core/CsLayers.js` | MODIFY: six callout style layers + `DEFAULTS` rows. |
+| `scripts/CaveSurvey/Core/CsAll.js` | MODIFY: `include` both new Core files. **Enforced** — see below. |
 | `tests/js_unit.js` | MODIFY: load the two new Core files; add their test blocks. |
 
 **Purity discipline, inherited from `CsProfileDraw.js`:** `CsCallout.js` and
@@ -111,6 +112,14 @@ it.** A silent workaround is how the previous design died.
 take and return PLAIN objects (`{x, y}`), never `RVector`, and never touch a
 document. Everything QCAD-shaped lives in `CalloutWrite.js`, which the unit tests
 do not load. This is what makes the geometry testable at all.
+
+**Every new Core file MUST be registered in `Core/CsAll.js`.** A structural test,
+`test_every_core_file_is_included_by_csall`, fails the moment a `Core/*.js` file
+exists that `CsAll.js` does not `include`. Found the hard way in Task 1: the file
+list said `CsCallout.js` + `js_unit.js`, and `run_all.sh` section 1 went red until
+`CsAll.js` was updated too. Add the include in the SAME relative position as the
+`CORE_FILES` entry. This applies to `CsCallout.js` (Task 1) and `CsElevation.js`
+(Task 7); `CsLayers.js` already exists and needs no new registration.
 
 **Basename safety:** QCAD's `include()` dedupes by BASENAME and skips the
 duplicate silently, invisibly to headless tests. `Callout.js`, `CalloutElev.js`,
@@ -1678,6 +1687,7 @@ LRUD `D` and down-splays, with an honest fallback and no fabricated zeros.
 **Files:**
 - Create: `scripts/CaveSurvey/Core/CsElevation.js`
 - Modify: `tests/js_unit.js`
+- Modify: `scripts/CaveSurvey/Core/CsAll.js` (enforced by a structural test)
 
 **Acceptance Criteria:**
 - [ ] `CsElevation.floorWalkable(lrud)` returns the SHALLOWEST of a multi-value
@@ -2152,15 +2162,28 @@ CsElevation.interpolate = function(points, t, fallbackZ) {
 };
 ```
 
-- [ ] **Step 4: Register with the harness**
+- [ ] **Step 4: Register with the harness AND with CsAll.js**
 
-Add to `CORE_FILES` in `tests/js_unit.js`, AFTER `CsProfile.js` (it calls
-`CsProfile.classifySplay`) and after `CsCallout.js` (it uses
-`CsCallout.BASIS_*`):
+Two registrations, both required. Add to `CORE_FILES` in `tests/js_unit.js`,
+AFTER `CsProfile.js` (it calls `CsProfile.classifySplay`) and after
+`CsCallout.js` (it uses `CsCallout.BASIS_*`):
 
 ```javascript
     "scripts/CaveSurvey/Core/CsElevation.js",
 ```
+
+Then add the matching include to `scripts/CaveSurvey/Core/CsAll.js`, in the same
+relative position:
+
+```javascript
+include(includeBasePath + "/CsElevation.js");
+```
+
+Skipping the second one turns `run_all.sh` section 1 red via
+`test_every_core_file_is_included_by_csall`. This bit Task 1.
+
+**Files** for this task therefore also includes:
+`Modify: scripts/CaveSurvey/Core/CsAll.js`
 
 - [ ] **Step 5: Run tests both ways**
 
