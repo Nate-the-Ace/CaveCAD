@@ -218,6 +218,43 @@ FeatureTrace.runToken = function() {
     }
 };
 
+/** The run currently isolated, or null when every run is visible.
+ *
+ *  Held so that CHANGING the run hot-swaps the view instead of leaving
+ *  the caver looking at the old run's band while tracing the new one --
+ *  which is the invisible-work trap the Isolate button exists to avoid
+ *  in the first place. */
+FeatureTrace.isolatedRun = null;
+
+/**
+ * The run selection changed by hand. Hot-swaps the isolated view.
+ *
+ * A plain function rather than a closure in the signal wiring, so the
+ * behaviour is testable without a live combo box.
+ *
+ * Only acts while something IS isolated: if the caver is looking at
+ * every run, changing which run they trace should not suddenly hide the
+ * rest of the cave.
+ *
+ * Wired to the combo's `activated`, which fires only on a real user
+ * choice -- not on the programmatic clear/repopulate that refreshRuns
+ * does. Using currentIndexChanged would have re-isolated mid-refresh,
+ * against whatever selection existed for the instant after clear().
+ */
+FeatureTrace.onRunChosen = function() {
+    if (FeatureTrace.isolatedRun === null) {
+        FeatureTrace.refresh();
+        return;
+    }
+    var run = FeatureTrace.runToken();
+    if (run === null) {
+        // "(all runs)" chosen while isolated: they asked for all of it.
+        FeatureTrace.showAllRuns();
+        return;
+    }
+    FeatureTrace.isolateSelectedRun();
+};
+
 /** Shows only the selected run's profile layers.
  *
  *  Refuses with a message when no run is selected rather than quietly
@@ -231,13 +268,20 @@ FeatureTrace.isolateSelectedRun = function() {
             "\"(all runs)\" has nothing to isolate."));
         return;
     }
-    var doc = EAction.getDocument();
-    var di = EAction.getDocumentInterface();
+    var doc = null, di = null;
+    try {
+        doc = EAction.getDocument();
+        di = EAction.getDocumentInterface();
+    } catch (eEnv) {
+        return;
+    }
     if (isNull(doc) || isNull(di)) {
         return;
     }
     try {
         var n = CsProfileDraw.isolateRun(doc, di, run);
+        FeatureTrace.isolatedRun = run;
+        FeatureTrace.refresh(doc);
         EAction.handleUserMessage(qsTr("Showing run %1 only (%2 layer(s) " +
             "hidden or shown).").arg(run).arg(n));
     } catch (e) {
@@ -247,13 +291,20 @@ FeatureTrace.isolateSelectedRun = function() {
 
 /** Brings every profile run back into view. */
 FeatureTrace.showAllRuns = function() {
-    var doc = EAction.getDocument();
-    var di = EAction.getDocumentInterface();
+    var doc = null, di = null;
+    try {
+        doc = EAction.getDocument();
+        di = EAction.getDocumentInterface();
+    } catch (eEnv) {
+        return;
+    }
     if (isNull(doc) || isNull(di)) {
         return;
     }
     try {
         var n = CsProfileDraw.showAllRuns(doc, di);
+        FeatureTrace.isolatedRun = null;
+        FeatureTrace.refresh(doc);
         EAction.handleUserMessage(qsTr("Every profile run is visible " +
             "again (%1 layer(s) changed).").arg(n));
     } catch (e) {
@@ -282,11 +333,19 @@ FeatureTrace.refreshRuns = function(docIn) {
         for (var i = 0; i < runs.length; i++) {
             w.runCombo.addItem(runs[i]);
         }
+        var found = false;
         for (var k = 0; k < w.runCombo.count; k++) {
             if (String(w.runCombo.itemText(k)) === was) {
                 w.runCombo.currentIndex = k;
+                found = true;
                 break;
             }
+        }
+        // The isolated run has gone from the drawing -- its survey was
+        // deleted. Leaving it isolated would show an empty elevation
+        // with no way to tell why, so bring everything back.
+        if (!found && FeatureTrace.isolatedRun !== null) {
+            FeatureTrace.showAllRuns();
         }
     } catch (e) {
         // a stale run list must never stop a trace
@@ -453,6 +512,16 @@ FeatureTrace.buildDock = function(appWin) {
                 "band and the bands never overlap, so its walls get their " +
                 "own layers. The plan rows above ignore this -- the plan " +
                 "is one continuous map.");
+            // `activated`, not currentIndexChanged: it fires only on a
+            // real user choice, so refreshRuns' clear/repopulate cannot
+            // trigger a spurious hot-swap.
+            w.runCombo.activated.connect(function(index) {
+                try {
+                    FeatureTrace.onRunChosen();
+                } catch (eSwap) {
+                    // never throw out of a signal handler
+                }
+            });
             runRow.addWidget(w.runCombo, 1, 0);
 
             // Isolate acts on the run the combo has SELECTED, so the
@@ -532,7 +601,17 @@ FeatureTrace.refresh = function(docIn) {
     if (isNull(w)) {
         return;
     }
-    var doc = isNull(docIn) ? EAction.getDocument() : docIn;
+    // Guarded: EAction.getDocument does not exist in every engine this
+    // code is loaded into (the headless test harness among them), and a
+    // panel repaint must never be the thing that throws.
+    var doc = docIn;
+    if (isNull(doc)) {
+        try {
+            doc = EAction.getDocument();
+        } catch (eDoc) {
+            doc = null;
+        }
+    }
 
     if (!isNull(w.buttons)) {
         for (var i = 0; i < w.buttons.length; i++) {
