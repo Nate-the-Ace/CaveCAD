@@ -230,36 +230,15 @@ Callout.prototype.pickCoordinate = function(event, preview) {
  * would swallow the callout in silence.
  */
 /**
- * A function that samples the floor elevation at the arrow point and
- * returns {label, sample}, or null when no leg is near enough.
- *
- * Returned as a closure so the dialog can call it LAZILY -- resolving the
- * survey network is real work on a big cave, and an ordinary note must
- * not pay for it.
+ * A closure the dialog can call LAZILY. The work itself lives on
+ * CalloutWrite, shared with the dedicated elevation tool.
  */
 Callout.elevProviderFor = function(doc, tips) {
     return function() {
-        if (isNull(doc) || tips.length === 0) {
+        if (tips.length === 0) {
             return null;
         }
-        var sample;
-        try {
-            var survey = CsTags.surveyFromDocument(doc);
-            var resolved = CsNetwork.resolve(survey, {});
-            sample = CsElevation.sampleFloor(survey, resolved,
-                { x: tips[0].x, y: tips[0].y }, {});
-        } catch (e) {
-            return null;
-        }
-        if (sample === null) {
-            return null;
-        }
-        var label = CsCallout.elevLabel(sample,
-            CalloutWrite.suffixFor(doc));
-        if (label === null) {
-            return null;
-        }
-        return { label: label, sample: sample };
+        return CalloutWrite.sampleElevationAt(doc, tips[0]);
     };
 };
 
@@ -556,13 +535,7 @@ Callout.askForNote = function(currentStyle, currentLeader, currentText,
             var smp = elevState.sample.sample;
             out.style = CsCallout.elevStyle(smp);
             out.kind = CsCallout.KIND_ELEV;
-            out.tags = {};
-            out.tags[CsCallout.KEY.ELEV_BASIS] = smp.basis;
-            out.tags[CsCallout.KEY.ELEV_FROM] = smp.from;
-            out.tags[CsCallout.KEY.ELEV_TO] = smp.to;
-            out.tags[CsCallout.KEY.ELEV_FRACTION] = String(smp.fraction);
-            out.tags[CsCallout.KEY.ELEV_VALUE] = String(smp.z);
-            out.tags[CsCallout.KEY.ELEV_MULTI] = smp.multi ? "1" : "";
+            out.tags = CalloutWrite.elevTags(smp);
         }
         return out;
     } catch (eDlg) {

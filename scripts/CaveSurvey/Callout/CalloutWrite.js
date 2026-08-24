@@ -498,6 +498,55 @@ CalloutWrite.suffixFor = function(doc) {
 };
 
 /**
+ * The floor elevation at a point, ready to label: {label, sample}, or
+ * null when no leg is near enough to answer honestly.
+ *
+ * Lives here rather than on either command because BOTH need it -- the
+ * callout tool offers it in its dialog, the elevation tool places it
+ * without asking -- and a command reaching into a sibling command's file
+ * is how a silent include failure gets introduced.
+ *
+ * EXPENSIVE: it resolves the whole survey network. Call it when the
+ * caver has actually asked for an elevation, never speculatively.
+ */
+CalloutWrite.sampleElevationAt = function(doc, point) {
+    if (isNull(doc) || point === null || point === undefined) {
+        return null;
+    }
+    var sample;
+    try {
+        var survey = CsTags.surveyFromDocument(doc);
+        var resolved = CsNetwork.resolve(survey, {});
+        sample = CsElevation.sampleFloor(survey, resolved,
+            { x: point.x, y: point.y }, {});
+    } catch (e) {
+        return null;
+    }
+    if (sample === null) {
+        return null;
+    }
+    var label = CsCallout.elevLabel(sample, CalloutWrite.suffixFor(doc));
+    if (label === null) {
+        return null;
+    }
+    return { label: label, sample: sample };
+};
+
+/** The XDATA an elevation callout carries so CsCalloutSync can
+ *  re-derive it -- which is how a LINE stand-in upgrades itself to a
+ *  real floor reading once somebody enters D on a later trip. */
+CalloutWrite.elevTags = function(sample) {
+    var t = {};
+    t[CsCallout.KEY.ELEV_BASIS] = sample.basis;
+    t[CsCallout.KEY.ELEV_FROM] = sample.from;
+    t[CsCallout.KEY.ELEV_TO] = sample.to;
+    t[CsCallout.KEY.ELEV_FRACTION] = String(sample.fraction);
+    t[CsCallout.KEY.ELEV_VALUE] = String(sample.z);
+    t[CsCallout.KEY.ELEV_MULTI] = sample.multi ? "1" : "";
+    return t;
+};
+
+/**
  * Strip EVERY callout tag off an entity, leaving ordinary geometry.
  *
  * Uses CsTags.remove, not CsTags.set(key, ""). set() returns early on an
