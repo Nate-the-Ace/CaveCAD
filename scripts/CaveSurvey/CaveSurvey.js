@@ -92,6 +92,16 @@ CaveSurvey.init = function(basePath, splash) {
         CsCave.installSaveHook();
     }
 
+    // Keep the previous version of a drawing beside it on every save.
+    // A redraw is erase-then-draw across two operations, so a draw that
+    // fails after the erase has landed leaves the drawing gutted -- and
+    // the next save writes that over the only copy. That has happened.
+    // No menu entry: a guard you have to switch on is one that is off on
+    // the machine that needed it.
+    if (typeof CsBackup !== "undefined") {
+        CsBackup.installSaveHook();
+    }
+
     // report the suite on the splash screen, beside CaveCAD's own version:
     var version = CaveSurvey.getVersion(basePath);
     if (!isNull(splash) && !isNull(version)) {

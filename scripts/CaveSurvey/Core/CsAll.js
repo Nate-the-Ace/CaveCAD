@@ -45,6 +45,7 @@ include(includeBasePath + "/Format/CsCsv.js");
 include(includeBasePath + "/Format/CsRegistry.js");
 include(includeBasePath + "/CsLayers.js");
 include(includeBasePath + "/CsLayerVariants.js");
+include(includeBasePath + "/CsBackup.js");
 include(includeBasePath + "/CsTrace.js");
 include(includeBasePath + "/CsStore.js");
 include(includeBasePath + "/CsTags.js");

@@ -15165,6 +15165,93 @@ if (!IS_NODE) {
 })();
 
 // ---------------------------------------------------------------------
+// CsBackup -- the previous version, kept beside the drawing
+// ---------------------------------------------------------------------
+if (!IS_NODE) {
+    (function() {
+        loadRepoScript("scripts/CaveSurvey/Core/CsBackup.js");
+
+        var dir = QDir.tempPath();
+        var target = dir + "/cs-backup-probe.dxf";
+        var bak = target + CsBackup.SUFFIX;
+
+        function write(path, text) {
+            var f = new QFile(path);
+            if (!f.open(QIODevice.WriteOnly | QIODevice.Truncate |
+                    QIODevice.Text)) {
+                return false;
+            }
+            var out = new QTextStream(f);
+            out.writeString(text);
+            f.close();
+            return true;
+        }
+        function read(path) {
+            var f = new QFile(path);
+            if (!f.open(QIODevice.ReadOnly | QIODevice.Text)) {
+                return null;
+            }
+            var text = new QTextStream(f).readAll();
+            f.close();
+            return text;
+        }
+        new QFile(target).remove();
+        new QFile(bak).remove();
+
+        // Nothing to preserve yet: a first save must not fabricate one.
+        ok(CsBackup.copyPrevious(target) === false,
+            "CsBackup: no file yet means no backup");
+        ok(!new QFileInfo(bak).exists(),
+            "CsBackup: and nothing is created");
+
+        ok(write(target, "VERSION-ONE"), "CsBackup fixture: wrote version one");
+        ok(CsBackup.copyPrevious(target) === true,
+            "CsBackup: an existing drawing is backed up");
+        eqs(read(bak), "VERSION-ONE",
+            "CsBackup: the backup holds the previous bytes");
+
+        // The point of the whole thing: the backup keeps the PREVIOUS
+        // version while the drawing itself moves on.
+        ok(write(target, "VERSION-TWO-GUTTED"), "CsBackup fixture: overwrote it");
+        eqs(read(bak), "VERSION-ONE",
+            "CsBackup: the backup still holds version one, not the new bytes");
+
+        // Second save: the backup advances by exactly one generation.
+        ok(CsBackup.copyPrevious(target) === true,
+            "CsBackup: a second save backs up again");
+        eqs(read(bak), "VERSION-TWO-GUTTED",
+            "CsBackup: one generation only -- version one is gone now");
+
+        // An EMPTY file must never replace a good backup with nothing:
+        // that would be this feature losing the data it exists to keep.
+        ok(write(target, ""), "CsBackup fixture: truncated the drawing");
+        ok(CsBackup.copyPrevious(target) === false,
+            "CsBackup: an empty file is not worth keeping");
+        eqs(read(bak), "VERSION-TWO-GUTTED",
+            "CsBackup: so the existing backup survives untouched");
+
+        // -- inside Google Drive, Drive's own history is trusted -----
+        var roots = CsBackup.driveRoots();
+        ok(roots.length >= 0, "CsBackup.driveRoots: answers without throwing");
+        ok(CsBackup.inGoogleDrive(target) === false,
+            "CsBackup.inGoogleDrive: a temp-dir drawing is not in Drive");
+        ok(CsBackup.inGoogleDrive("") === false,
+            "CsBackup.inGoogleDrive: an empty path is not in Drive");
+        if (roots.length > 0) {
+            ok(CsBackup.inGoogleDrive(roots[0] + "/caves/x.dxf") === true,
+                "CsBackup.inGoogleDrive: a path under a real Drive root is");
+            ok(CsBackup.inGoogleDrive(roots[0] + "-not-really/x.dxf") === false,
+                "CsBackup.inGoogleDrive: a sibling with the root as a prefix is NOT");
+        } else {
+            ok(true, "CsBackup.inGoogleDrive: no Drive on this machine to check");
+        }
+
+        new QFile(target).remove();
+        new QFile(bak).remove();
+    }());
+}
+
+// ---------------------------------------------------------------------
 // Report.
 // ---------------------------------------------------------------------
 
