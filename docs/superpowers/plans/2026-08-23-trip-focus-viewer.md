@@ -53,6 +53,22 @@
 
 **Verify:** `bash tests/run_all.sh` -> `### UNIT OK <n> assertions` with n greater than the current count, and no `### UNIT FAIL`
 
+**AMENDED AFTER REVIEW (commit `126ec76`).** The Step 3 source below is the
+first draft and is superseded by the shipped `CsContrib.js`; read the file,
+not this snippet, when you need the current behaviour. Four defects in the
+draft were found by code review and fixed: `byRun` dropped distance no run
+could claim AND renormalised the survivors to 100% (a 500 ft cave with a
+300 ft untied block reported one run at 100%), so it now returns
+`{rows, unassigned}` with every share taken against the whole cave;
+`byPerson.overlapping` tested the grand total, so a two-person trip beside
+an unattributed one suppressed the credit note exactly when the rows
+double-counted, and is now a per-trip test; `people()` invented
+contributors out of punctuation (`"Nathan Schonegg, Jr."` credited a person
+named "Jr.", a semicolon-separated surname-first list shattered into
+phantoms, and `\band\b` fired inside `"(book and sketch)"`); and two
+assertions could not fail. Task 4 consumes the new `{rows, unassigned}`
+shape.
+
 **Steps:**
 
 - [ ] **Step 1: Write the failing tests** -- append to `tests/js_unit.js`, before the closing summary block
@@ -1150,6 +1166,7 @@ git commit -m "feat(TripFocus): a standalone window rendering its own copy of th
 - [ ] Checking a section item checks all its children; a section with no rows reads "none recorded" and is disabled rather than absent
 - [ ] `TripFocus.picked(tree)` returns `{trips, teams, people, runs}` from the checked items
 - [ ] A drawing with no survey in it opens the window with every section empty and no exception
+- [ ] When `CsContrib.byRun` reports unassigned distance, the Survey runs section lists a `(not in any run)` row that is NOT checkable, so the runs visibly do not add up to the whole cave
 
 **Verify:** `bash tests/run_all.sh` green; in the GUI, `tf` on the Pitfall Cave fixture lists its four trips with distances that sum to the title block Length
 
@@ -1196,6 +1213,28 @@ git commit -m "feat(TripFocus): a standalone window rendering its own copy of th
         "TripFocusRows.build: the People section says credit is not divided");
 
     var empty = CsModel.newSurvey();
+    // a shot into a station that never resolved: its distance belongs to
+    // no run, and the section has to say so rather than rescale itself
+    var orphaned = CsModel.newSurvey();
+    orphaned.distanceUnit = "ft";
+    orphaned.trips = [t0];
+    var connected = CsModel.newShot();
+    connected.from = "A1"; connected.to = "A2";
+    connected.distance = 200.0; connected.azimuth = 0.0;
+    var stray = CsModel.newShot();
+    stray.from = "Q1"; stray.to = "Q.2";   // splitName refuses a dotted name
+    stray.distance = 300.0; stray.azimuth = 0.0;
+    orphaned.shots = [connected, stray];
+    var orphanSections = TripFocusRows.build(orphaned,
+        CsNetwork.resolve(orphaned), CsTraverse.SLOPE);
+    var runSection = orphanSections[3];
+    var unassignedRow = runSection.rows[runSection.rows.length - 1];
+    eqs(unassignedRow.label, "(not in any run)",
+        "TripFocusRows.build: distance no run claimed is listed, not dropped");
+    ok(isNull(unassignedRow.pick),
+        "TripFocusRows.build: the unassigned row is not checkable -- there " +
+        "is no station set to focus");
+
     var emptySections = TripFocusRows.build(empty,
         CsNetwork.resolve(empty), CsTraverse.SLOPE);
     eqs(emptySections.length, 4,
@@ -1237,7 +1276,18 @@ TripFocusRows.build = function(survey, resolved, tapeMode) {
     var tripRows = CsContrib.byTrip(survey, resolved, tapeMode);
     var teamRows = CsContrib.byTeam(tripRows);
     var personResult = CsContrib.byPerson(tripRows);
-    var runRows = CsContrib.byRun(survey, resolved, tapeMode);
+    var runResult = CsContrib.byRun(survey, resolved, tapeMode);
+    var runRows = runResult.rows;
+
+    /** Summed distance of the run rows -- the denominator's other half
+     *  when working out what share the unclaimed distance is. */
+    var runTotal = function(rows) {
+        var sum = 0.0;
+        for (var r = 0; r < rows.length; r++) {
+            sum += rows[r].distance;
+        }
+        return sum;
+    };
 
     var display = function(label, row, pick) {
         return {
@@ -1275,6 +1325,23 @@ TripFocusRows.build = function(survey, resolved, tapeMode) {
     for (i = 0; i < runRows.length; i++) {
         runs.push(display("Survey " + runRows[i].run, runRows[i],
             runRows[i].run));
+    }
+    // Distance no run could claim -- a shot into a station that never
+    // resolved, which is the normal state of a survey mid-project. It is
+    // LISTED so the runs visibly do not add up to the cave, and it is
+    // NOT checkable (pick null): there is no station set to focus, since
+    // the stations it belongs to are exactly the ones the drawing could
+    // not place. Hiding it instead would make the Survey runs section
+    // quietly claim 100% of a cave it only covers part of.
+    if (runResult.unassigned > 0) {
+        runs.push({
+            label: "(not in any run)",
+            distanceText: CsContrib.distanceText(runResult.unassigned, unit),
+            percentText: CsContrib.percentText(
+                CsContrib.share(runResult.unassigned,
+                    runResult.unassigned + runTotal(runRows))),
+            pick: null
+        });
     }
 
     return [
@@ -1383,11 +1450,16 @@ TripFocus.buildTree = function(read) {
             item.setText(TripFocus.COL_WHAT, row.label);
             item.setText(TripFocus.COL_DISTANCE, row.distanceText);
             item.setText(TripFocus.COL_SHARE, row.percentText);
-            item.setFlags(item.flags() | Qt.ItemIsUserCheckable);
-            item.setCheckState(TripFocus.COL_WHAT, Qt.Unchecked);
+            if (isNull(row.pick)) {
+                // informational only -- see TripFocusRows' unassigned row
+                item.setDisabled(true);
+            } else {
+                item.setFlags(item.flags() | Qt.ItemIsUserCheckable);
+                item.setCheckState(TripFocus.COL_WHAT, Qt.Unchecked);
+            }
             item.setData(TripFocus.COL_WHAT, Qt.UserRole, section.key);
             item.setData(TripFocus.COL_SHARE, Qt.UserRole,
-                String(row.pick));
+                isNull(row.pick) ? null : String(row.pick));
         }
     }
     return tree;
@@ -1407,6 +1479,9 @@ TripFocus.picked = function(tree) {
             }
             var key = item.data(TripFocus.COL_WHAT, Qt.UserRole);
             var pick = item.data(TripFocus.COL_SHARE, Qt.UserRole);
+            if (isNull(pick) || pick === "null") {
+                continue;   // the "(not in any run)" row: nothing to focus
+            }
             if (key === "trips") {
                 out.trips.push(parseInt(pick, 10));
             } else if (key === "teams") {
