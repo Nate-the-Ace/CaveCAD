@@ -364,6 +364,71 @@ var id = CalloutWrite.create(doc, di, {
         "and the real callout beside it is untouched");
 })();
 
+// ---------------------------------------------------------------------
+// A REFLOW THAT CHANGES NOTHING MUST WRITE NOTHING.
+//
+// This is the regression guard for a FREEZE. writeLeaders used to delete
+// and re-add every leader unconditionally, so an unchanged callout still
+// produced transactions -- and CalloutListener hears every transaction,
+// so each pointless rewrite fired it again. Committing a label locked up
+// CaveCAD. The busy flag only guards a synchronous re-entry; a queued
+// signal arrives after it is cleared.
+// ---------------------------------------------------------------------
+(function() {
+    var iid = CalloutWrite.create(doc, di, {
+        text: "no-op reflow", position: { x: 4000, y: 100 },
+        tips: [{ x: 3960, y: 90 }, { x: 3970, y: 130 }],
+        style: "name", kind: CsCallout.KIND_TEXT,
+        height: CalloutWrite.textHeight(doc)
+    });
+
+    function leaderIdSig() {
+        var mm = CalloutWrite.members(doc, iid);
+        var out = [];
+        for (var i = 0; i < mm.leaders.length; i++) {
+            out.push(mm.leaders[i].getId());
+        }
+        out.sort(function(a, b) { return a - b; });
+        return out.join(",");
+    }
+
+    var sig0 = leaderIdSig();
+    CalloutWrite.applyReflow(doc, di, iid, null);
+    var sig1 = leaderIdSig();
+    CalloutWrite.applyReflow(doc, di, iid, null);
+    var sig2 = leaderIdSig();
+
+    eqs(sig1, sig0,
+        "reflowing an UNCHANGED callout replaces no entities (ids " +
+        sig0 + " -> " + sig1 + ")");
+    eqs(sig2, sig0, "and again, so the cycle cannot run away");
+
+    // ...but a reflow that SHOULD write still does. Without this, the
+    // fix above could be "never write" and the guard would still pass.
+    var mm = CalloutWrite.members(doc, iid);
+    var td = mm.text.getData();
+    var was = td.getAlignmentPoint();
+    td.setPosition(new RVector(was.x + 250, was.y));
+    td.setAlignmentPoint(new RVector(was.x + 250, was.y));
+    mm.text.setData(td);
+    var mop = new RModifyObjectsOperation();
+    mop.addObject(mm.text, false);
+    di.applyOperation(mop);
+
+    CalloutWrite.applyReflow(doc, di, iid, null);
+    ok(leaderIdSig() !== sig0,
+        "a reflow that IS needed still rewrites the leaders");
+
+    var box = CalloutWrite.boxOf(CalloutWrite.members(doc, iid).text);
+    var after = CalloutWrite.members(doc, iid).leaders;
+    for (var k = 0; k < after.length; k++) {
+        var d = after[k].getData();
+        var end = d.getVertexAt(d.countVertices() - 1);
+        ok(end.x >= box.x1 - 1e-6 && end.x <= box.x2 + 1e-6,
+            "and leader " + k + " landed on the moved note");
+    }
+})();
+
 var out;
 if (failures.length === 0) {
     out = "### CALLOUT-SYNC OK " + passed;

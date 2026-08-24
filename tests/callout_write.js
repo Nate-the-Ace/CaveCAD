@@ -179,25 +179,46 @@ eqs(CsTags.get(m2.text, CsCallout.KEY.ID), textBefore,
     "reflow did not disturb the text's tags");
 
 // --- undo grouping passes through -------------------------------------
-// Two grouped applies must collapse to a single undo.
-var leadersBeforeGroup = CalloutWrite.members(doc, id).leaders.length;
-var before = doc.queryAllEntities(false, true).length;
-CalloutWrite.applyReflow(doc, di, id, 4242);
-CalloutWrite.applyReflow(doc, di, id, 4242);
-di.undo();
-eqs(doc.queryAllEntities(false, true).length, before,
-    "two group-4242 reflows collapse into ONE undo");
-// The count-only check above is not enough: it is exactly what let a
-// real defect through -- an untagged, orphaned leader left the entity
-// COUNT correct while the callout's actual composition was broken
-// (tagging used to ride a separate, ungrouped operation next to the
-// grouped add/delete, so undoing the group could strand a leader that
-// existed but carried no CalloutId/CalloutRole at all). members()
-// only finds an entity BY ITS TAG, so this is the real proof the group
-// was atomic, not merely that nothing leaked or vanished by count.
-eqs(CalloutWrite.members(doc, id).leaders.length, leadersBeforeGroup,
-    "... and after that undo, members() still finds the ORIGINAL " +
-    "number of leaders BY TAG (not just the same entity count)");
+// The scenario the listener creates: a caver's edit and the reflow it
+// triggers share a transaction group, so ONE undo takes both.
+//
+// This deliberately MOVES the note first. A reflow of an unchanged
+// callout now writes nothing at all (that is what stopped CaveCAD
+// freezing), so it produces no undo step -- and an undo test built on
+// no-op reflows would silently undo whatever came before instead.
+(function() {
+    var g = 4242;
+    var m0 = CalloutWrite.members(doc, id);
+    var leadersBeforeGroup = m0.leaders.length;
+
+    var td = m0.text.getData();
+    var was = td.getAlignmentPoint();
+    td.setPosition(new RVector(was.x + 120, was.y + 40));
+    td.setAlignmentPoint(new RVector(was.x + 120, was.y + 40));
+    m0.text.setData(td);
+    var mop = new RModifyObjectsOperation();
+    mop.addObject(m0.text, false);
+    mop.setTransactionGroup(g);
+    di.applyOperation(mop);
+
+    // the reflow that edit would trigger, in the SAME group
+    CalloutWrite.applyReflow(doc, di, id, g);
+
+    var movedBox = CalloutWrite.boxOf(CalloutWrite.members(doc, id).text);
+    near(movedBox.x1, was.x + 120, 1e-6,
+        "fixture: the note really did move (and boxOf sees it)");
+
+    di.undo();
+
+    var back = CalloutWrite.members(doc, id);
+    eqs(back.leaders.length, leadersBeforeGroup,
+        "after ONE undo, members() still finds the original number of " +
+        "leaders BY TAG -- not merely the same entity count");
+    var backBox = CalloutWrite.boxOf(back.text);
+    near(backBox.x1, was.x, 1e-6,
+        "and the note is back where it started, so the single undo took " +
+        "the edit AND its reflow together");
+})();
 
 // --- ONE GESTURE, ONE UNDO ------------------------------------------
 // create() builds text and every leader into a SINGLE operation, so a

@@ -54,8 +54,30 @@ CalloutWrite.members = function(doc, id) {
     return res;
 };
 
-/** The text's bounding box as the plain {x1,y1,x2,y2} CsCallout wants. */
+/**
+ * The text's bounding box as the plain {x1,y1,x2,y2} CsCallout wants.
+ *
+ * update() FIRST, and it is not optional. An entity's bounding box is
+ * CACHED, and a modify operation does not invalidate it -- not even
+ * across a fresh doc.queryEntity(). Measured: after moving a note's
+ * alignment point from x=1000 to x=1250, both entity.getBoundingBox()
+ * and entity.getData().getBoundingBox() still reported 1000.000..1000.778;
+ * only after entity.update() did it read 1250.000..1250.778.
+ *
+ * This is what made "the arrows do not follow the note" survive a test
+ * suite. The sync test asserted that the leaders landed on
+ * boxOf(text) -- and boxOf was stale, so the leaders were being solved
+ * against the note's OLD position and then checked against that same old
+ * position. Both sides agreed and the test passed while the drawing was
+ * wrong. A comparison is only evidence if the two sides can disagree.
+ */
 CalloutWrite.boxOf = function(textEntity) {
+    try {
+        textEntity.update();
+    } catch (e) {
+        // no update() in this bridge: fall through and use whatever the
+        // cached box says rather than failing the whole reflow
+    }
     var b = textEntity.getBoundingBox();
     var c1 = b.getCorner1();
     var c2 = b.getCorner2();
@@ -247,6 +269,60 @@ CalloutWrite.create = function(doc, di, spec) {
 };
 
 /**
+ * A canonical, order-independent signature for a set of leader
+ * geometries, so "did anything actually change?" is one string compare.
+ *
+ * Order-independent because members() reads through queryAllEntities,
+ * which is NOT insertion-ordered: the same three leaders can come back
+ * in any order, and comparing them pairwise in that order would report a
+ * change that is not one.
+ *
+ * Rounded to 1e-6. Reflow is deterministic, so an unchanged callout
+ * reproduces its own coordinates bit for bit; the rounding is only there
+ * so a float that round-trips through the DXF writer and back still
+ * matches itself.
+ */
+CalloutWrite.geometrySignature = function(branches) {
+    var parts = [];
+    var round = function(n) {
+        return String(Math.round(n * 1000000) / 1000000);
+    };
+    for (var b = 0; b < branches.length; b++) {
+        var pts = branches[b];
+        var one = [];
+        for (var v = 0; v < pts.length; v++) {
+            one.push(round(pts[v].x) + "," + round(pts[v].y) + "," +
+                round(pts[v].bulge || 0.0));
+        }
+        parts.push(one.join("|"));
+    }
+    parts.sort();
+    return parts.join(" / ");
+};
+
+/** The same signature, read off the leaders a callout actually has. */
+CalloutWrite.signatureOfLeaders = function(leaders) {
+    var branches = [];
+    for (var i = 0; i < leaders.length; i++) {
+        var d = leaders[i].getData();
+        var n = d.countVertices();
+        var pts = [];
+        for (var v = 0; v < n; v++) {
+            var p = d.getVertexAt(v);
+            var bulge = 0.0;
+            try {
+                bulge = d.getBulgeAt(v);
+            } catch (e) {
+                bulge = 0.0;
+            }
+            pts.push({ x: p.x, y: p.y, bulge: bulge });
+        }
+        branches.push(pts);
+    }
+    return CalloutWrite.geometrySignature(branches);
+};
+
+/**
  * Delete this callout's leaders and write one per tip, reflowed against
  * the text's CURRENT box. `group` is a transaction group id or null.
  */
@@ -272,6 +348,26 @@ CalloutWrite.writeLeaders = function(doc, di, id, tips, style, layerName,
         dimasz: null,
         dimscale: null
     });
+
+    // NOTHING TO DO IS NOT A WRITE.
+    //
+    // This is what stopped CaveCAD freezing. writeLeaders used to delete
+    // and re-add every leader unconditionally, so a reflow that changed
+    // nothing still produced transactions -- measured: leader entity ids
+    // climbing 56, 57, 58 on an untouched callout. CalloutListener hears
+    // every transaction, so each pointless rewrite fired it again. The
+    // busy flag only guards a SYNCHRONOUS re-entry; if the signal is
+    // delivered queued, the nested calls arrive after the flag is
+    // cleared and the thing runs away.
+    //
+    // So the guard is not "do not recurse", it is "do not write when
+    // there is nothing to write". A reflow of an unchanged callout is now
+    // a string compare and a return, which terminates the cycle no matter
+    // how the signal is delivered.
+    if (CalloutWrite.signatureOfLeaders(m.leaders) ===
+            CalloutWrite.geometrySignature(geom.branches)) {
+        return;
+    }
 
     CsLayers.withLayerOn(doc, di, layerName, function() {
         // out with the old
