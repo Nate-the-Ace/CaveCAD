@@ -1103,7 +1103,21 @@ CsRevise.withOffLayersOn = function(doc, di, fn) {
         seen[ln] = true;
         try {
             var lay = doc.queryLayer(ln);
-            if (!isNull(lay) && lay.isOff()) {
+            // OFF **or FROZEN**. Frozen refuses operations exactly as off
+            // does, and collecting only the off ones left a
+            // frozen-but-visible-in-the-list layer unwrapped -- so its
+            // DELETES were refused while CsLayers.withLayerOn (which
+            // does clear frozen) let the matching ADDS through. The
+            // as-surveyed ghost on a frozen CTRL-RAW then accumulated a
+            // fresh copy on every redraw: five copies of the same
+            // geometry in a real drawing before this was caught.
+            var frozen = false;
+            try {
+                frozen = lay.isFrozen();
+            } catch (eFz) {
+                frozen = false;
+            }
+            if (!isNull(lay) && (lay.isOff() || frozen)) {
                 offLayers.push(ln);
             }
         } catch (eOff) {

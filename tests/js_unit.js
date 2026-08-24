@@ -13802,6 +13802,51 @@ if (!IS_NODE) {
             ok(d.queryLayer(CsLayers.WALLS_SURVEYED).isFrozen(),
                 "withLayerOn: still frozen again after a throw");
 
+            // A FROZEN layer's DELETE must work too, not only its add.
+            // Adds go through CsLayers.withLayerOn (frozen-aware) while
+            // deletes go through CsRevise.withOffLayersOn, which
+            // collected off layers only -- so the as-surveyed ghost on a
+            // frozen CTRL-RAW gained a fresh copy on every redraw.
+            // Measured in a real drawing: five copies of the same
+            // geometry, 170 entities where 35 belonged.
+            var dFz = new RDocument(new RMemoryStorage(),
+                new RSpatialIndexNavel());
+            var iFz = new RDocumentInterface(dFz);
+            CsLayers.ensure(dFz, iFz, CsLayers.RAW);
+            var ghost = new RLineEntity(dFz, new RLineData(
+                new RVector(0, 0), new RVector(10, 0)));
+            ghost.setLayerId(dFz.getLayerId(CsLayers.RAW));
+            // CTRL-RAW ships OFF (CsLayers.OFF), so even the fixture's
+            // own add has to go through the wrapper.
+            CsLayers.withLayerOn(dFz, iFz, CsLayers.RAW, function() {
+                var aop = new RAddObjectsOperation();
+                aop.addObject(ghost, false);
+                iFz.applyOperation(aop);
+            });
+            eqs(dFz.queryLayerEntities(dFz.getLayerId(CsLayers.RAW),
+                true).length, 1, "frozen-delete fixture: one ghost present");
+
+            var rawLay = dFz.queryLayer(CsLayers.RAW);
+            rawLay.setFrozen(true);
+            var fop = new RModifyObjectsOperation();
+            fop.addObject(rawLay, false);
+            iFz.applyOperation(fop);
+            ok(dFz.queryLayer(CsLayers.RAW).isFrozen(),
+                "frozen-delete fixture: the layer is frozen");
+
+            var victim = dFz.queryEntity(dFz.queryLayerEntities(
+                dFz.getLayerId(CsLayers.RAW), true)[0]);
+            CsRevise.withOffLayersOn(dFz, iFz, function() {
+                var dop = new RDeleteObjectsOperation();
+                dop.deleteObject(victim);
+                iFz.applyOperation(dop);
+            });
+            eqs(dFz.queryLayerEntities(dFz.getLayerId(CsLayers.RAW),
+                true).length, 0,
+                "withOffLayersOn: a delete on a FROZEN layer actually lands");
+            ok(dFz.queryLayer(CsLayers.RAW).isFrozen(),
+                "withOffLayersOn: and the layer is frozen again afterwards");
+
             // LOCKED is left alone on purpose: protection, not visibility.
             var d5 = new RDocument(new RMemoryStorage(),
                 new RSpatialIndexNavel());
