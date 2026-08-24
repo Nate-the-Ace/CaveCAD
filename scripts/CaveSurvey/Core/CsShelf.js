@@ -424,7 +424,7 @@ CsShelf.recordFor = function(folder) {
 
 /**
  * Registers the cave a drawing was just saved into, so the shelf fills
- * itself from ordinary work instead of from the Add Cave button.
+ * itself from ordinary work instead of from the Import Cave button.
  *
  * Only under a drive root, matching CsCave.pointAtScans: a DXF saved to
  * the desktop is not a cave project, and a launcher that accumulated

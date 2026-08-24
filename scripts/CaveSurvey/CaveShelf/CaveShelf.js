@@ -543,8 +543,8 @@ CaveShelf.show = function() {
     left.addWidget(list, 1, 0);
 
     var leftButtons = new QHBoxLayout();
-    var addButton = new QPushButton(qsTr("Add Cave..."));
-    var addFolderButton = new QPushButton(qsTr("Add Folder..."));
+    var addButton = new QPushButton(qsTr("Import Cave..."));
+    var addFolderButton = new QPushButton(qsTr("Import Folder..."));
     addFolderButton.toolTip = qsTr("Registers every cave inside a folder " +
         "at once -- a survey group's shared folder, say.");
     var forgetButton = new QPushButton(qsTr("Forget"));
@@ -694,7 +694,7 @@ CaveShelf.show = function() {
             title.text = state.records.length === 0 ?
                 qsTr("No caves on the shelf yet") : "";
             subtitle.text = state.records.length === 0 ?
-                qsTr("Add Cave... points at a cave's folder on your drive. " +
+                qsTr("Import Cave... points at a cave's folder on your drive. " +
                     "Saving a drawing inside one adds it here by itself.") : "";
             frontier.text = "";
             state.read = null;
@@ -1250,7 +1250,7 @@ CaveShelf.addFolder = function(parent) {
 
     if (fresh.length === 0) {
         QMessageBox.information(RMainWindowQt.getMainWindow(),
-            qsTr("Add Folder"),
+            qsTr("Import Folder"),
             candidates.length === 0 ?
                 qsTr("No caves in that folder: nothing there holds a drawing " +
                     "or a scans folder.") :
@@ -1268,8 +1268,8 @@ CaveShelf.addFolder = function(parent) {
     }
 
     var answer = QMessageBox.question(RMainWindowQt.getMainWindow(),
-        qsTr("Add Folder"),
-        qsTr("Add these %1 caves to the shelf?\n\n").arg(fresh.length) +
+        qsTr("Import Folder"),
+        qsTr("Import these %1 caves onto the shelf?\n\n").arg(fresh.length) +
             lines.join("\n"),
         QMessageBox.Yes | QMessageBox.No);
     if (answer !== QMessageBox.Yes) { return 0; }
