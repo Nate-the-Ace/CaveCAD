@@ -306,8 +306,43 @@ CalloutSync.run = function(doc, di) {
         }
     }
 
+    // Re-derive elevation labels as well. A draw does this too, but a
+    // caver who has just corrected a reading and wants the labels to
+    // catch up should not have to redraw the whole map to get it.
+    var elev = null;
+    try {
+        var survey = CsTags.surveyFromDocument(doc);
+        var resolved = CsNetwork.resolve(survey, {});
+        elev = CalloutWrite.refreshElevations(doc, di, survey, resolved);
+    } catch (eElev) {
+        elev = null;    // no survey in this drawing, or it would not
+                        // resolve: the reflow above still stands
+    }
+
     var lines = [];
     lines.push(qsTr("Reflowed %1 callout(s).").arg(done));
+    if (elev !== null) {
+        if (elev.upgraded > 0) {
+            lines.push(qsTr("%1 elevation label(s) UPGRADED from a " +
+                "survey-line stand-in to a measured floor.")
+                .arg(elev.upgraded));
+        }
+        if (elev.downgraded > 0) {
+            lines.push(qsTr("%1 elevation label(s) fell back to the " +
+                "survey line -- their floor reading is gone.")
+                .arg(elev.downgraded));
+        }
+        if (elev.updated > 0) {
+            lines.push(qsTr("%1 elevation label(s) re-derived.")
+                .arg(elev.updated));
+        }
+        if (elev.lost > 0) {
+            lines.push(qsTr("%1 elevation label(s) could NOT be " +
+                "re-derived -- the leg they were sampled on is gone. " +
+                "They are left as they are; check them by hand.")
+                .arg(elev.lost));
+        }
+    }
     if (rekeyed > 0) {
         lines.push(qsTr("Re-keyed %1 copied callout(s) that shared an id " +
             "with another.").arg(rekeyed));

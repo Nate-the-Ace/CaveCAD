@@ -940,6 +940,37 @@ CsDraw.survey = function(survey, resolved, originStation, originPos, seqBase) {
         }
     }
 
+    // ELEVATION LABELS ARE RE-DERIVED ON EVERY DRAW.
+    //
+    // An elevation label is a snapshot of the floor at one point at one
+    // moment. Correct a reading, add a D that was missing, re-close a
+    // loop -- and the number on the map is now a lie still sitting there
+    // looking authoritative. Each callout stores the leg and the fraction
+    // along it that it was sampled at, so the answer is simply asked
+    // again.
+    //
+    // Here rather than in the notebook because EVERY draw path runs
+    // through this function -- SurveyNotebook twice, RebuildSurveyData,
+    // ImportCaveSurvey and CsRevise -- so one hook covers all five
+    // instead of the one that happened to get mentioned. And survey and
+    // resolved are already in hand, so it costs no second resolve.
+    //
+    // SOFT dependency, the same typeof idiom CsBind uses for CsRevise:
+    // Core must not hard-require a tool folder, and a build without the
+    // callout tools still has to draw a map.
+    var elevationRefresh = null;
+    if (typeof CalloutWrite !== "undefined" &&
+            typeof CalloutWrite.refreshElevations === "function") {
+        try {
+            elevationRefresh =
+                CalloutWrite.refreshElevations(doc, di, survey, resolved);
+        } catch (eElev) {
+            // A map must still draw even if the labels cannot be
+            // refreshed. Reported as null rather than pretended.
+            elevationRefresh = null;
+        }
+    }
+
     return {
         stationsDrawn: stationsDrawn,
         shotsDrawn: shotsDrawn,
@@ -969,7 +1000,12 @@ CsDraw.survey = function(survey, resolved, originStation, originPos, seqBase) {
         // ImportCaveSurvey.js, SurveyNotebook.js, CsRevise.js): none of
         // them destructure this return value positionally or iterate
         // its keys, so an additional one is additive, not breaking.
-        profile: profileOutcome
+        profile: profileOutcome,
+        // {updated, upgraded, downgraded, lost, unchanged} from
+        // re-deriving elevation callouts, or null if the callout tools
+        // are not loaded. Additive: no existing caller iterates these
+        // keys or reads them positionally.
+        elevations: elevationRefresh
     };
 };
 

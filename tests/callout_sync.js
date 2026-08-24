@@ -43,8 +43,15 @@ var FILES = [
     "scripts/CaveSurvey/Core/CsTags.js",
     "scripts/CaveSurvey/Core/CsStore.js",
     "scripts/CaveSurvey/Core/CsLayers.js",
+    "scripts/CaveSurvey/Core/CsModel.js",
+    "scripts/CaveSurvey/Core/CsAngles.js",
+    "scripts/CaveSurvey/Core/CsTraverse.js",
+    "scripts/CaveSurvey/Core/CsNetwork.js",
+    "scripts/CaveSurvey/Core/CsLrud.js",
+    "scripts/CaveSurvey/Core/CsProfile.js",
     "scripts/CaveSurvey/Core/CsDraw.js",
     "scripts/CaveSurvey/Core/CsCallout.js",
+    "scripts/CaveSurvey/Core/CsElevation.js",
     "scripts/CaveSurvey/Callout/CalloutWrite.js"
 ];
 for (var fi = 0; fi < FILES.length; fi++) {
@@ -436,6 +443,131 @@ var id = CalloutWrite.create(doc, di, {
         ok(end.x >= box.x1 - 1e-6 && end.x <= box.x2 + 1e-6,
             "and leader " + k + " landed on the moved note");
     }
+})();
+
+// ---------------------------------------------------------------------
+// ELEVATION LABELS TRACK A REVISION.
+//
+// A label is a snapshot of the floor at one point at one moment. Correct
+// a reading or add a D that was missing and the number on the map is a
+// lie still looking authoritative. Every draw re-derives them from the
+// leg and fraction each one stores; so does cscsync.
+// ---------------------------------------------------------------------
+(function() {
+    function shotOf(from, to, d, az, inc) {
+        var sh = CsModel.newShot();
+        sh.from = from; sh.to = to;
+        sh.distance = d; sh.azimuth = az;
+        sh.inclination = inc || 0;
+        return sh;
+    }
+    // A1 --100--> A2 --100--> A3. `withD` decides whether A3 has a floor
+    // reading at all, which is what an upgrade turns on.
+    function build(withD) {
+        var sv = CsModel.newSurvey();
+        var s1 = shotOf("A1", "A2", 100, 90, 0);
+        s1.down = withD ? 5 : null;
+        var s2 = shotOf("A2", "A3", 100, 90, 0);
+        s2.down = withD ? 3 : null;
+        sv.shots.push(s1); sv.shots.push(s2);
+        var res = CsNetwork.resolve(sv,
+            { anchor: { name: "A1", x: 0, y: 0, z: 1000 } });
+        return { survey: sv, resolved: res };
+    }
+
+    var noD = build(false);
+    var a2 = noD.resolved.stations["A2"], a3 = noD.resolved.stations["A3"];
+    var mid = { x: (a2.x + a3.x) / 2.0, y: (a2.y + a3.y) / 2.0 };
+
+    // sample with NO D: a survey-line stand-in
+    var lineSample = CsElevation.sampleFloor(noD.survey, noD.resolved,
+                                             mid, {});
+    eqs(lineSample.basis, "line",
+        "fixture: with no D the sample is a survey-line stand-in");
+
+    var eid = CalloutWrite.create(doc, di, {
+        text: CsCallout.elevLabel(lineSample, "'"),
+        position: { x: mid.x + 20, y: mid.y + 20 },
+        tips: [{ x: mid.x, y: mid.y }],
+        style: CsCallout.elevStyle(lineSample),
+        kind: CsCallout.KIND_ELEV,
+        tags: CalloutWrite.elevTags(lineSample),
+        height: CalloutWrite.textHeight(doc)
+    });
+    var em = CalloutWrite.members(doc, eid);
+    ok(em.text.getData().getText().indexOf("LINE") >= 0,
+        "it starts as a LINE stand-in, and says so");
+    eqs(doc.getLayerName(em.text.getLayerId()),
+        CsCallout.STYLES["elevation-line"], "on the muted fallback layer");
+
+    // NOW the D exists -- the revision a caver just entered
+    var withD = build(true);
+    var r1 = CalloutWrite.refreshElevations(doc, di, withD.survey,
+                                            withD.resolved);
+    eqs(r1.upgraded, 1,
+        "refresh UPGRADES the stand-in to a measured floor");
+
+    var after = CalloutWrite.members(doc, eid);
+    var newText = after.text.getData().getText();
+    ok(newText.indexOf("LINE") < 0,
+        "the LINE warning is gone from the label (now " +
+        JSON.stringify(newText) + ")");
+    eqs(CsTags.get(after.text, CsCallout.KEY.ELEV_BASIS), "floor",
+        "and its recorded basis is now floor");
+    eqs(doc.getLayerName(after.text.getLayerId()),
+        CsCallout.STYLES["elevation"],
+        "and it MOVED to the measured layer -- left on the muted one it " +
+        "would keep telling the reader it was a guess");
+
+    // the arrows must have followed the new text
+    var abox = CalloutWrite.boxOf(after.text);
+    var aend = after.leaders[0].getData();
+    var alast = aend.getVertexAt(aend.countVertices() - 1);
+    ok(alast.x >= abox.x1 - 1e-6 && alast.x <= abox.x2 + 1e-6,
+        "and the arrow re-attached to the relabelled note");
+
+    // idempotent: refreshing again changes nothing
+    var r2 = CalloutWrite.refreshElevations(doc, di, withD.survey,
+                                            withD.resolved);
+    eqs(r2.upgraded, 0, "refreshing again upgrades nothing");
+    eqs(r2.unchanged, 1, "it reports the label as unchanged");
+
+    // --- A HAND-EDITED LABEL IS NEVER OVERWRITTEN -------------------
+    var mine = "1234.5' I MEASURED THIS";
+    var htd = after.text.getData();
+    htd.setText(mine);
+    after.text.setData(htd);
+    var hop = new RModifyObjectsOperation();
+    hop.addObject(after.text, false);
+    di.applyOperation(hop);
+
+    var r3 = CalloutWrite.refreshElevations(doc, di, withD.survey,
+                                            withD.resolved);
+    eqs(r3.updated + r3.upgraded + r3.downgraded, 0,
+        "a hand-edited label is not rewritten");
+    eqs(CalloutWrite.members(doc, eid).text.getData().getText(), mine,
+        "the caver's own words survive -- they were standing in the " +
+        "passage and the computed number was not");
+
+    // --- a label whose leg is GONE is reported, not guessed ----------
+    var orphanTags = CalloutWrite.elevTags({
+        z: 999, basis: CsCallout.BASIS_FLOOR,
+        from: "ZZ9", to: "ZZ10", fraction: 0.5, multi: false
+    });
+    var oid = CalloutWrite.create(doc, di, {
+        text: CsCallout.elevLabel({ z: 999, basis: "floor", multi: false }, "'"),
+        position: { x: 8000, y: 8000 },
+        tips: [{ x: 7960, y: 7990 }],
+        style: "elevation", kind: CsCallout.KIND_ELEV,
+        tags: orphanTags, height: CalloutWrite.textHeight(doc)
+    });
+    var r4 = CalloutWrite.refreshElevations(doc, di, withD.survey,
+                                            withD.resolved);
+    ok(r4.lost >= 1,
+        "a label whose leg has left the survey is COUNTED as lost");
+    eqs(CalloutWrite.members(doc, oid).text.getData().getText(), "999.0'",
+        "and left exactly as it was -- a number whose basis vanished is " +
+        "something to tell the caver, not to silently delete");
 })();
 
 var out;

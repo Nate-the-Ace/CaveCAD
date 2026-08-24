@@ -547,6 +547,152 @@ CalloutWrite.elevTags = function(sample) {
 };
 
 /**
+ * Re-derive every elevation callout in the drawing from its stored
+ * provenance. Returns {updated, upgraded, downgraded, lost, unchanged}.
+ *
+ * THIS IS WHAT MAKES AN ELEVATION LABEL TRACK A REVISION. A label is a
+ * snapshot of the floor at one point at one moment. Enter a corrected
+ * reading, add the D that was missing, re-run a loop closure -- and the
+ * number on the map is now a lie, still sitting there looking
+ * authoritative. Every callout carries the leg and the fraction along it
+ * that it was sampled at, so the answer can simply be asked again.
+ *
+ * The two outcomes worth naming:
+ *
+ *   UPGRADED -- a "~1234.5' LINE" stand-in becomes a real floor reading
+ *   because somebody finally entered D. The label loses its tilde and
+ *   its warning, and MOVES to the measured-elevation layer. Leaving it
+ *   on the muted layer would keep telling the reader it was a guess.
+ *
+ *   DOWNGRADED -- the reverse, when a D is removed or a leg is redrawn
+ *   without one. Better to say so than to keep showing a floor number
+ *   nothing supports.
+ *
+ * A HAND-EDITED LABEL IS NEVER OVERWRITTEN. If the text does not match
+ * what the stored value would have produced, a human changed it -- and
+ * that edit is worth more than anything computed here, because they were
+ * standing in the passage. Left exactly alone.
+ *
+ * Takes survey and resolved from the caller: at draw time they are
+ * already in hand, so a redraw refreshes labels without resolving the
+ * network a second time.
+ */
+CalloutWrite.refreshElevations = function(doc, di, survey, resolved) {
+    var out = { updated: 0, upgraded: 0, downgraded: 0, lost: 0,
+                unchanged: 0 };
+    if (isNull(doc) || isNull(di) || isNull(survey) || isNull(resolved)) {
+        return out;
+    }
+    var suffix = CalloutWrite.suffixFor(doc);
+    var ids = CalloutWrite.existingIds(doc);
+
+    for (var i = 0; i < ids.length; i++) {
+        var id = ids[i];
+        var m = CalloutWrite.members(doc, id);
+        if (m.text === null) {
+            continue;
+        }
+        if (CsTags.get(m.text, CsCallout.KEY.KIND) !== CsCallout.KIND_ELEV) {
+            continue;
+        }
+
+        var storedBasis = CsTags.get(m.text, CsCallout.KEY.ELEV_BASIS);
+        var storedValue = parseFloat(
+            CsTags.get(m.text, CsCallout.KEY.ELEV_VALUE));
+        var storedMulti =
+            CsTags.get(m.text, CsCallout.KEY.ELEV_MULTI) === "1";
+        var current = m.text.getData().getText();
+
+        // Hand-edited? Then it is not ours to rewrite.
+        if (!isNaN(storedValue)) {
+            var wasLabel = CsCallout.elevLabel({
+                z: storedValue, basis: storedBasis, multi: storedMulti
+            }, suffix);
+            if (wasLabel !== null && current !== wasLabel) {
+                out.unchanged++;
+                continue;
+            }
+        }
+
+        var from = CsTags.get(m.text, CsCallout.KEY.ELEV_FROM);
+        var to = CsTags.get(m.text, CsCallout.KEY.ELEV_TO);
+        var fraction = parseFloat(
+            CsTags.get(m.text, CsCallout.KEY.ELEV_FRACTION));
+        if (from === "" || to === "" || isNaN(fraction)) {
+            out.lost++;
+            continue;
+        }
+        var a = resolved.stations[from];
+        var b = resolved.stations[to];
+        if (a === undefined || b === undefined) {
+            // The leg this label was sampled on is gone from the survey.
+            // Left alone and COUNTED: a number whose basis has vanished
+            // is exactly what a caver needs told, not silently deleted.
+            out.lost++;
+            continue;
+        }
+
+        var point = { x: a.x + (b.x - a.x) * fraction,
+                      y: a.y + (b.y - a.y) * fraction };
+        var sample = CsElevation.sampleFloor(survey, resolved, point, {});
+        if (sample === null) {
+            out.lost++;
+            continue;
+        }
+
+        var label = CsCallout.elevLabel(sample, suffix);
+        var style = CsCallout.elevStyle(sample);
+        var oldStyle = CsTags.get(m.text, CsCallout.KEY.STYLE);
+
+        if (label === current && style === oldStyle) {
+            out.unchanged++;
+            continue;
+        }
+
+        var layerName = CsCallout.STYLES[style];
+        CsLayers.ensure(doc, di, layerName);
+        var layerId = doc.getLayerId(layerName);
+
+        CsLayers.withLayerOn(doc, di, layerName, function() {
+            var td = m.text.getData();
+            td.setText(label);
+            m.text.setData(td);
+            m.text.setLayerId(layerId);
+            CsTags.set(m.text, CsCallout.KEY.ELEV_BASIS, sample.basis);
+            CsTags.set(m.text, CsCallout.KEY.ELEV_VALUE, String(sample.z));
+            CsTags.set(m.text, CsCallout.KEY.STYLE, style);
+            // ELEV_MULTI is a flag, and CsTags.set cannot write "" -- it
+            // returns early on an empty value by design. So clearing it
+            // is a REMOVE, not a set.
+            if (sample.multi) {
+                CsTags.set(m.text, CsCallout.KEY.ELEV_MULTI, "1");
+            } else {
+                CsTags.remove(m.text, CsCallout.KEY.ELEV_MULTI);
+            }
+            var op = new RModifyObjectsOperation();
+            op.addObject(m.text, false);
+            di.applyOperation(op);
+        });
+
+        // The text changed, so its box changed, so the arrows are now
+        // pointing at the wrong edge. Reflow is a no-op when nothing
+        // moved, so this is safe to call unconditionally.
+        CalloutWrite.applyReflow(doc, di, id, null);
+
+        if (storedBasis === CsCallout.BASIS_LINE &&
+                sample.basis === CsCallout.BASIS_FLOOR) {
+            out.upgraded++;
+        } else if (storedBasis === CsCallout.BASIS_FLOOR &&
+                sample.basis === CsCallout.BASIS_LINE) {
+            out.downgraded++;
+        } else {
+            out.updated++;
+        }
+    }
+    return out;
+};
+
+/**
  * Strip EVERY callout tag off an entity, leaving ordinary geometry.
  *
  * Uses CsTags.remove, not CsTags.set(key, ""). set() returns early on an
