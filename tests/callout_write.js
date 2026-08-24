@@ -149,12 +149,83 @@ eqs(CsTags.get(m2.text, CsCallout.KEY.ID), textBefore,
 
 // --- undo grouping passes through -------------------------------------
 // Two grouped applies must collapse to a single undo.
+var leadersBeforeGroup = CalloutWrite.members(doc, id).leaders.length;
 var before = doc.queryAllEntities(false, true).length;
 CalloutWrite.applyReflow(doc, di, id, 4242);
 CalloutWrite.applyReflow(doc, di, id, 4242);
 di.undo();
 eqs(doc.queryAllEntities(false, true).length, before,
     "two group-4242 reflows collapse into ONE undo");
+// The count-only check above is not enough: it is exactly what let a
+// real defect through -- an untagged, orphaned leader left the entity
+// COUNT correct while the callout's actual composition was broken
+// (tagging used to ride a separate, ungrouped operation next to the
+// grouped add/delete, so undoing the group could strand a leader that
+// existed but carried no CalloutId/CalloutRole at all). members()
+// only finds an entity BY ITS TAG, so this is the real proof the group
+// was atomic, not merely that nothing leaked or vanished by count.
+eqs(CalloutWrite.members(doc, id).leaders.length, leadersBeforeGroup,
+    "... and after that undo, members() still finds the ORIGINAL " +
+    "number of leaders BY TAG (not just the same entity count)");
+
+// --- THE DXF ROUND TRIP -----------------------------------------------
+// The single most load-bearing test in this file. A callout is a LINKED
+// PAIR and the link is XDATA -- there is no side table and no registry
+// object in the drawing. If CalloutId does not survive export/import,
+// then every callout in every saved file silently decays into an
+// unrelated text and some loose arrows the moment it is reopened, and
+// nothing else in this suite would notice: the in-memory tests all pass
+// against a document that was never written to disk.
+(function() {
+    var rtPath = repoRoot + "/tests/.callout-roundtrip.dxf";
+
+    // Find the dxflib filter the same way the rest of the suite does.
+    var rtFilter = "";
+    var filters = RFileExporterRegistry.getFilterStrings();
+    for (var f = 0; f < filters.length; f++) {
+        if (String(filters[f]).indexOf("dxflib") >= 0) {
+            rtFilter = filters[f];
+            break;
+        }
+    }
+
+    ok(di.exportFile(rtPath, rtFilter, false),
+        "round trip: the drawing with a callout in it exports");
+
+    var rtDoc = new RDocument(new RMemoryStorage(), new RSpatialIndexNavel());
+    var rtDi = new RDocumentInterface(rtDoc);
+    eqs(rtDi.importFile(rtPath, "", false),
+        RDocumentInterface.IoErrorNoError,
+        "round trip: the file reads back");
+
+    // The id must come back, or the pair is not a pair any more.
+    var ids = CalloutWrite.existingIds(rtDoc);
+    eqs(ids.length, 1, "round trip: exactly one CalloutId survives the save");
+    eqs(String(ids[0]), String(id),
+        "round trip: it is the SAME id, not a regenerated one");
+
+    var rt = CalloutWrite.members(rtDoc, ids[0]);
+    ok(rt.text !== null, "round trip: the text is still found BY ITS TAG");
+    eqs(rt.leaders.length, 2,
+        "round trip: both leaders are still found by the same tag");
+
+    // Roles must survive too: without them members() cannot tell which
+    // entity is the text, and reflow would have nothing to attach to.
+    eqs(CsTags.get(rt.text, CsCallout.KEY.ROLE), CsCallout.ROLE_TEXT,
+        "round trip: the text's role tag survives");
+    eqs(CsTags.get(rt.leaders[0], CsCallout.KEY.ROLE), CsCallout.ROLE_LEADER,
+        "round trip: a leader's role tag survives");
+    eqs(CsTags.get(rt.text, CsCallout.KEY.STYLE), "hazard",
+        "round trip: the style survives, so a reflow still knows its layer");
+
+    // And the reopened callout must still be reflowable -- the whole
+    // point of persisting the link.
+    CalloutWrite.applyReflow(rtDoc, rtDi, ids[0], null);
+    eqs(CalloutWrite.members(rtDoc, ids[0]).leaders.length, 2,
+        "round trip: the REOPENED callout still reflows to two leaders");
+
+    new QFile(rtPath).remove();
+})();
 
 var out;
 if (failures.length === 0) {

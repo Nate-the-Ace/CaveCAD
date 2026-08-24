@@ -109,8 +109,6 @@ CalloutWrite.create = function(doc, di, spec) {
     var id = CsCallout.nextId(CalloutWrite.existingIds(doc));
 
     // --- the text ----------------------------------------------------
-    var before = CalloutWrite.idSet(doc);
-
     var textData = new RTextData();
     textData.setText(spec.text);
     textData.setPosition(new RVector(spec.position.x, spec.position.y));
@@ -118,23 +116,17 @@ CalloutWrite.create = function(doc, di, spec) {
     var textEntity = new RTextEntity(doc, textData);
     textEntity.setLayerId(doc.getLayerId(layerName));
 
-    CsLayers.withLayerOn(doc, di, layerName, function() {
-        var op = new RAddObjectsOperation();
-        op.addObject(textEntity, false);
-        di.applyOperation(op);
-    });
-
-    var added = CalloutWrite.newIds(doc, before);
-    if (added.length !== 1) {
-        // An operation that "succeeded" may have added nothing: a
-        // LOCKED or FROZEN layer refuses silently and withLayerOn
-        // covers OFF only.
-        throw new Error("callout text was not added -- layer " +
-            layerName + " may be locked or frozen");
-    }
-    var textId = added[0];
-    var text = doc.queryEntity(textId);
-
+    // Tag BEFORE adding, not with a follow-up CsTags.commit.
+    // CsDraw.js's own header names this the working pattern in this
+    // bridge: setCustomProperty on the script-side entity, THEN
+    // op.addObject(entity, false), so the tags land as part of the
+    // SAME operation as the add. CsTags.commit is the wrong tool for a
+    // brand-new entity -- it applies its OWN, separate, UNGROUPED
+    // RModifyObjectsOperation after the add, which is exactly what
+    // made a grouped reflow non-atomic (see writeLeaders below, where
+    // this was a real, reproduced bug: undoing a transaction group
+    // reverted the add but not the follow-up tagging modify, leaving
+    // an untagged leader that members() could no longer see).
     var tags = {};
     tags[CsCallout.KEY.ID] = id;
     tags[CsCallout.KEY.ROLE] = CsCallout.ROLE_TEXT;
@@ -148,7 +140,28 @@ CalloutWrite.create = function(doc, di, spec) {
             }
         }
     }
-    CsTags.commit(di, text, tags);
+    for (var tk in tags) {
+        if (tags.hasOwnProperty(tk)) {
+            CsTags.set(textEntity, tk, tags[tk]);
+        }
+    }
+
+    // idSet/newIds is now VERIFICATION ONLY -- the entity is already
+    // tagged, so nothing here needs to look it up by id. The hazard it
+    // guards stays real: an operation can "succeed" and add nothing at
+    // all (a LOCKED or FROZEN layer refuses silently, and withLayerOn
+    // covers OFF only), so this still throws rather than returning a
+    // half-built callout.
+    var before = CalloutWrite.idSet(doc);
+    CsLayers.withLayerOn(doc, di, layerName, function() {
+        var op = new RAddObjectsOperation();
+        op.addObject(textEntity, false);
+        di.applyOperation(op);
+    });
+    if (CalloutWrite.newIds(doc, before).length !== 1) {
+        throw new Error("callout text was not added -- layer " +
+            layerName + " may be locked or frozen");
+    }
 
     // --- the leaders -------------------------------------------------
     CalloutWrite.writeLeaders(doc, di, id, spec.tips, style, layerName, null);
@@ -194,7 +207,6 @@ CalloutWrite.writeLeaders = function(doc, di, id, tips, style, layerName,
 
         // in with the new
         for (var b = 0; b < geom.branches.length; b++) {
-            var before = CalloutWrite.idSet(doc);
             var pl = new RPolyline();
             var pts = geom.branches[b];
             for (var p = 0; p < pts.length; p++) {
@@ -204,6 +216,23 @@ CalloutWrite.writeLeaders = function(doc, di, id, tips, style, layerName,
             var ent = new RLeaderEntity(doc, data);
             ent.setLayerId(doc.getLayerId(layerName));
 
+            // Tag BEFORE adding -- see create()'s own comment. This is
+            // what makes a grouped reflow ATOMIC: the add below is the
+            // ONLY operation that writes this leader, tags included,
+            // and it is the one that carries `group`. A separate,
+            // ungrouped CsTags.commit() after the add (the previous
+            // shape of this loop) meant undoing the group reverted the
+            // add's geometry but not the tagging modify next to it --
+            // reproduced by hand: a leader survived undo with no
+            // CalloutId/CalloutRole at all, invisible to members()
+            // from that point on.
+            CsTags.set(ent, CsCallout.KEY.ID, String(id));
+            CsTags.set(ent, CsCallout.KEY.ROLE, CsCallout.ROLE_LEADER);
+            CsTags.set(ent, CsCallout.KEY.STYLE, style);
+
+            // Verification only, same as create() -- an add that lands
+            // nothing (locked/frozen layer) must not pass silently.
+            var before = CalloutWrite.idSet(doc);
             var op = new RAddObjectsOperation();
             op.addObject(ent, false);
             if (group !== null && group !== undefined) {
@@ -211,14 +240,9 @@ CalloutWrite.writeLeaders = function(doc, di, id, tips, style, layerName,
             }
             di.applyOperation(op);
 
-            var added = CalloutWrite.newIds(doc, before);
-            if (added.length === 1) {
-                var live = doc.queryEntity(added[0]);
-                var t = {};
-                t[CsCallout.KEY.ID] = String(id);
-                t[CsCallout.KEY.ROLE] = CsCallout.ROLE_LEADER;
-                t[CsCallout.KEY.STYLE] = style;
-                CsTags.commit(di, live, t);
+            if (CalloutWrite.newIds(doc, before).length !== 1) {
+                throw new Error("callout leader was not added -- layer " +
+                    layerName + " may be locked or frozen");
             }
         }
     });
