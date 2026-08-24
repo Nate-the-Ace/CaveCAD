@@ -530,6 +530,14 @@ still gets sane colors and no callout ever lands on the current layer.
 
 **Steps:**
 
+**This task's guard test is load-bearing, not a formality.** `CsCallout.STYLES`
+(Task 1) and `CsLayers.DEFAULTS` (this task) each type the same six layer-name
+string literals, in two files, independently — `CsCallout.js` loads BEFORE
+`CsLayers.js`, so it cannot reference `CsLayers.NOTES_HAZARD` without becoming a
+lazy function. Between Task 1 landing and this task landing, a typo in either
+table is silently uncaught. The `for...in` cross-check below is what closes that
+window. Do not weaken it to a spot check of one or two styles.
+
 - [ ] **Step 1: Write the failing test**
 
 Append to `tests/js_unit.js`:

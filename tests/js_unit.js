@@ -16552,6 +16552,14 @@ if (!IS_NODE) {
     eqs(CsCallout.nextId(["7"]), "8", "nextId is max+1, not count+1");
     eqs(CsCallout.nextId(["2", "", "abc", "5"]), "6",
         "nextId ignores junk rather than throwing");
+    // parseInt reads a leading-numeric string, so this is NOT skipped.
+    // Pinned because the docblock makes a safety claim that rests on it:
+    // a misread tag may cause an id to be skipped, never reused.
+    eqs(CsCallout.nextId(["3abc"]), "4",
+        "nextId reads a leading-numeric tag as its prefix, and only " +
+        "ever raises the maximum -- so a misread never REUSES an id");
+    eqs(CsCallout.nextId(null), "1",
+        "nextId on null input is the empty-drawing answer, not a throw");
 })();
 
 // ---------------------------------------------------------------------

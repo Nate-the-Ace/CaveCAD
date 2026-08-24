@@ -61,10 +61,19 @@ CsCallout.STYLE_DEFAULT = "name";
  *
  * Max-plus-one, NOT count-plus-one: deleting callout 2 of 3 and then
  * placing a new one must not hand out "3" again and silently weld the
- * new text to the old leader. Junk entries (empty string, non-numeric)
- * are ignored rather than thrown on -- a hand-edited DXF is a thing
- * that happens, and refusing to place a callout because of one bad tag
- * elsewhere in the drawing is worse than skipping it.
+ * new text to the old leader. Junk entries are ignored rather than
+ * thrown on -- a hand-edited DXF is a thing that happens, and refusing
+ * to place a callout because of one bad tag elsewhere in the drawing is
+ * worse than skipping it.
+ *
+ * "Ignored" is precise about one case: parseInt reads a LEADING-numeric
+ * string, so "3abc" counts as id 3 rather than being skipped. That is
+ * safe, and safe for one reason only -- this allocator never does
+ * anything but raise the maximum, so a misread value can cause an id to
+ * be SKIPPED but never REUSED. Reuse is the failure that matters: it
+ * welds a new text to an old leader. Do not "fix" this into strict
+ * validation that throws or returns null on a malformed tag; a drawing
+ * with one bad tag must still accept new callouts.
  */
 CsCallout.nextId = function(existing) {
     var max = 0;
