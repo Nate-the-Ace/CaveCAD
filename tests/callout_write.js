@@ -553,6 +553,86 @@ eqs(CsTags.get(m2.text, CsCallout.KEY.ID), textBefore,
         "point of making these real callouts");
 })();
 
+// ---------------------------------------------------------------------
+// An ELEVATION callout is an ordinary callout carrying its provenance.
+//
+// There is no separate elevation command: the callout tool picks the
+// arrow point before its dialog opens, so the tip is known and the
+// number is simply offered in the text field. What makes it an elevation
+// callout is the kind and the tags that let CsCalloutSync re-derive it.
+// ---------------------------------------------------------------------
+(function() {
+    CsLayers.ensure(doc, di, CsCallout.STYLES["elevation"]);
+    CsLayers.ensure(doc, di, CsCallout.STYLES["elevation-line"]);
+
+    // a measured floor
+    var floorSample = { z: 1234.51, basis: CsCallout.BASIS_FLOOR,
+        from: "A2", to: "A3", fraction: 0.5, multi: false };
+    var label = CsCallout.elevLabel(floorSample, "'");
+    eqs(label, "1234.5'", "the label is the formatted floor elevation");
+
+    var tags = {};
+    tags[CsCallout.KEY.ELEV_BASIS] = floorSample.basis;
+    tags[CsCallout.KEY.ELEV_FROM] = floorSample.from;
+    tags[CsCallout.KEY.ELEV_TO] = floorSample.to;
+    tags[CsCallout.KEY.ELEV_FRACTION] = String(floorSample.fraction);
+    tags[CsCallout.KEY.ELEV_VALUE] = String(floorSample.z);
+
+    var eid = CalloutWrite.create(doc, di, {
+        text: label, position: { x: 7000, y: 7000 },
+        tips: [{ x: 6960, y: 6990 }],
+        style: CsCallout.elevStyle(floorSample),
+        kind: CsCallout.KIND_ELEV,
+        tags: tags,
+        height: CalloutWrite.textHeight(doc)
+    });
+    var em = CalloutWrite.members(doc, eid);
+    eqs(CsTags.get(em.text, CsCallout.KEY.KIND), CsCallout.KIND_ELEV,
+        "it is marked as an elevation callout");
+    eqs(doc.getLayerName(em.text.getLayerId()),
+        CsCallout.STYLES["elevation"], "on the elevation layer");
+    eqs(CsTags.get(em.text, CsCallout.KEY.ELEV_BASIS), "floor",
+        "and carries the basis it was derived from");
+    eqs(CsTags.get(em.text, CsCallout.KEY.ELEV_FROM), "A2",
+        "and the leg it was sampled on -- which is how sync re-derives it");
+    eqs(CsTags.get(em.text, CsCallout.KEY.ELEV_TO), "A3", "both ends");
+    eqs(CsTags.get(em.text, CsCallout.KEY.ELEV_FRACTION), "0.5",
+        "and where along that leg");
+
+    // it is a NORMAL callout in every other respect
+    eqs(em.leaders.length, 1, "it has its arrow");
+    var eb = CalloutWrite.boxOf(em.text);
+    var eend = em.leaders[0].getData().getVertexAt(2);
+    ok(eend.x >= eb.x1 - 1e-6 && eend.x <= eb.x2 + 1e-6,
+        "attached like any other callout, so the listener manages it too");
+
+    // --- a LINE-basis sample is forced onto the muted style ----------
+    var lineSample = { z: 1005.0, basis: CsCallout.BASIS_LINE,
+        from: "A2", to: "A3", fraction: 0.5, multi: false };
+    eqs(CsCallout.elevLabel(lineSample, "'"), "~1005.0' LINE",
+        "a stand-in label says LINE on its face");
+    eqs(CsCallout.elevStyle(lineSample), "elevation-line",
+        "and is forced onto the fallback style");
+
+    var lTags = {};
+    lTags[CsCallout.KEY.ELEV_BASIS] = lineSample.basis;
+    var lid = CalloutWrite.create(doc, di, {
+        text: CsCallout.elevLabel(lineSample, "'"),
+        position: { x: 7000, y: 6900 },
+        tips: [{ x: 6960, y: 6890 }],
+        style: CsCallout.elevStyle(lineSample),
+        kind: CsCallout.KIND_ELEV, tags: lTags,
+        height: CalloutWrite.textHeight(doc)
+    });
+    var lm = CalloutWrite.members(doc, lid);
+    eqs(doc.getLayerName(lm.text.getLayerId()),
+        CsCallout.STYLES["elevation-line"],
+        "a stand-in lands on the MUTED layer, so a plot cannot pass it " +
+        "off as a measurement");
+    ok(CsCallout.STYLES["elevation-line"] !== CsCallout.STYLES["elevation"],
+        "which is a different layer from a real reading");
+})();
+
 var out;
 if (failures.length === 0) {
     out = "### CALLOUT-WRITE OK " + passed;

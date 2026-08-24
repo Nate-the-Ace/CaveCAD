@@ -16939,6 +16939,35 @@ if (!IS_NODE) {
 })();
 
 // ---------------------------------------------------------------------
+// CsCallout.elevLabel / elevStyle
+// ---------------------------------------------------------------------
+
+(function() {
+    eqs(CsCallout.elevLabel({ z: 1234.51, basis: "floor", multi: false }, "'"),
+        "1234.5'", "elevLabel: a floor elevation is just the number");
+    eqs(CsCallout.elevLabel({ z: 1234.51, basis: "floor", multi: true }, "'"),
+        "1234.5' (pit)",
+        "elevLabel: multi warns that a pit drops below this floor");
+    eqs(CsCallout.elevLabel({ z: 1234.51, basis: "line", multi: false }, "'"),
+        "~1234.5' LINE",
+        "elevLabel: a line-basis label SAYS SO, so a plot cannot mislead");
+    eqs(CsCallout.elevLabel({ z: -12.44, basis: "floor", multi: false }, " m"),
+        "-12.4 m", "elevLabel: negative elevations and a metric suffix");
+    eqs(CsCallout.elevLabel(null, "'"), null,
+        "elevLabel: no sample, no label -- never a fabricated string");
+    eqs(CsCallout.elevLabel({ z: null, basis: "floor" }, "'"), null,
+        "elevLabel: a null z is no label either");
+
+    eqs(CsCallout.elevStyle({ basis: "floor" }), "elevation",
+        "elevStyle: a measured floor gets the elevation style");
+    eqs(CsCallout.elevStyle({ basis: "line" }), "elevation-line",
+        "elevStyle: a stand-in is FORCED onto the fallback style -- the " +
+        "difference between a measurement and a guess is not a preference");
+    eqs(CsCallout.elevStyle(null), "elevation",
+        "elevStyle: no sample defaults to the plain elevation style");
+})();
+
+// ---------------------------------------------------------------------
 // CsUuid -- the shared identity library
 // ---------------------------------------------------------------------
 

@@ -32,6 +32,8 @@ function Callout(guiAction) {
     this.tips = [];             // [{x,y}] one per branch, in pick order
     this.noteText = undefined;  // collected between the two picks
     this.leader = CsCallout.LEADER_DEFAULT;
+    this.kind = CsCallout.KIND_TEXT;
+    this.extraTags = null;
     this.previewPos = undefined;
     this.position = null;       // {x,y} chosen note position, or null
     this.previewPos = undefined; // last mouse position while picking it
@@ -135,6 +137,7 @@ Callout.prototype.pickCoordinate = function(event, preview) {
     if (isNull(di)) {
         return;
     }
+    var doc = this.getDocument();
     var pos = event.getModelPosition();
 
     switch (this.state) {
@@ -159,7 +162,7 @@ Callout.prototype.pickCoordinate = function(event, preview) {
             di.setRelativeZero(pos);
 
             var asked = Callout.askForNote(this.style, this.leader,
-                this.noteText);
+                this.noteText, Callout.elevProviderFor(doc, this.tips));
             if (asked === null) {
                 // cancelled at the dialog: nothing was ever added
                 this.terminate();
@@ -168,6 +171,8 @@ Callout.prototype.pickCoordinate = function(event, preview) {
             this.noteText = asked.text;
             this.style = asked.style;
             this.leader = asked.leader;
+            this.kind = asked.kind || CsCallout.KIND_TEXT;
+            this.extraTags = asked.tags || null;
 
             this.setState(Callout.State.PickingPosition);
         }
@@ -224,6 +229,40 @@ Callout.prototype.pickCoordinate = function(event, preview) {
  * applied straight from here would skip all three, and a locked layer
  * would swallow the callout in silence.
  */
+/**
+ * A function that samples the floor elevation at the arrow point and
+ * returns {label, sample}, or null when no leg is near enough.
+ *
+ * Returned as a closure so the dialog can call it LAZILY -- resolving the
+ * survey network is real work on a big cave, and an ordinary note must
+ * not pay for it.
+ */
+Callout.elevProviderFor = function(doc, tips) {
+    return function() {
+        if (isNull(doc) || tips.length === 0) {
+            return null;
+        }
+        var sample;
+        try {
+            var survey = CsTags.surveyFromDocument(doc);
+            var resolved = CsNetwork.resolve(survey, {});
+            sample = CsElevation.sampleFloor(survey, resolved,
+                { x: tips[0].x, y: tips[0].y }, {});
+        } catch (e) {
+            return null;
+        }
+        if (sample === null) {
+            return null;
+        }
+        var label = CsCallout.elevLabel(sample,
+            CalloutWrite.suffixFor(doc));
+        if (label === null) {
+            return null;
+        }
+        return { label: label, sample: sample };
+    };
+};
+
 Callout.prototype.getOperation = function(preview) {
     if (!preview) {
         return undefined;
@@ -242,7 +281,8 @@ Callout.prototype.getOperation = function(preview) {
             tips: this.tips,
             style: this.style,
             leader: this.leader,
-            kind: CsCallout.KIND_TEXT,
+            kind: this.kind || CsCallout.KIND_TEXT,
+            tags: this.extraTags,
             height: CalloutWrite.textHeight(doc)
         });
     } catch (e) {
@@ -270,7 +310,8 @@ Callout.prototype.finish = function() {
             tips: this.tips,
             style: this.style,
             leader: this.leader,
-            kind: CsCallout.KIND_TEXT,
+            kind: this.kind || CsCallout.KIND_TEXT,
+            tags: this.extraTags,
             height: CalloutWrite.textHeight(doc)
         });
     } catch (e) {
@@ -307,7 +348,8 @@ Callout.prototype.finish = function() {
  * Note the addWidget(w, 0, 0) / addLayout(l, 0) arity -- this bridge
  * wants the extra arguments.
  */
-Callout.askForNote = function(currentStyle, currentLeader, currentText) {
+Callout.askForNote = function(currentStyle, currentLeader, currentText,
+        elevProvider) {
     // Only what a human may choose: the generated-note style is not on
     // offer, because the next map regenerate is entitled to clear its
     // layer and a hand-placed note there would go with it.
@@ -371,6 +413,64 @@ Callout.askForNote = function(currentStyle, currentLeader, currentText) {
             }
         }
         layout.addWidget(combo, 0, 0);
+
+        // Picking an elevation style FILLS THE TEXT with the sampled
+        // floor elevation. There is no separate elevation command: this
+        // tool already picks the arrow point before the dialog opens, so
+        // the tip is known by now and the number can simply be offered --
+        // and the elevation callout then inherits the flip, the curve, the
+        // live preview, CsCalloutSync and the listener for free.
+        //
+        // Sampled LAZILY, only when the style is chosen: it needs the
+        // whole survey resolved, which is real work on a big cave and
+        // must not be paid for by every ordinary note.
+        //
+        // The provider closes over the document. That is safe HERE and
+        // only here: this dialog is modal and short-lived, so the closure
+        // cannot outlive the call. A freed RDocument segfaults rather than
+        // throwing, so a long-lived closure over one is never acceptable.
+        var elevState = { sample: null, asked: false };
+        if (typeof elevProvider === "function") {
+            try {
+                combo.currentIndexChanged.connect(function() {
+                    var picked = String(combo.currentText);
+                    if (picked !== "elevation" &&
+                            picked !== "elevation-line") {
+                        return;
+                    }
+                    if (!elevState.asked) {
+                        elevState.asked = true;
+                        elevState.sample = elevProvider();
+                    }
+                    if (elevState.sample === null) {
+                        // No floor could be sampled. Say so once and let
+                        // the caver type whatever they know -- refusing
+                        // the whole command would be worse than offering
+                        // no number.
+                        try {
+                            QMessageBox.information(getMainWindow(),
+                                qsTr("Callout"),
+                                qsTr("No survey leg near that arrow " +
+                                    "point, so no floor elevation could " +
+                                    "be worked out. Type a value if you " +
+                                    "know one."));
+                        } catch (eNo) {
+                            // no dialog: the empty field says it too
+                        }
+                        return;
+                    }
+                    try {
+                        edit.text = elevState.sample.label;
+                        edit.selectAll();
+                    } catch (eFill) {
+                        // the caver can still type it
+                    }
+                });
+            } catch (eCon) {
+                // no signal: the elevation styles still place a note,
+                // just without the number filled in
+            }
+        }
 
         // Leader SHAPE: a separate axis from the style above. Same combo
         // reasoning -- it always has a value and it is read off the
@@ -440,7 +540,31 @@ Callout.askForNote = function(currentStyle, currentLeader, currentText) {
         if (shape !== CsCallout.LEADER_CURVED) {
             shape = CsCallout.LEADER_STRAIGHT;
         }
-        return { text: String(typed), style: style, leader: shape };
+
+        var out = { text: String(typed), style: style, leader: shape };
+
+        // An elevation callout carries where its number came from, so
+        // CsCalloutSync can re-derive it later -- which is how a "LINE"
+        // stand-in UPGRADES itself to a real floor reading once somebody
+        // enters D on a later trip.
+        //
+        // And the style is FORCED from the basis: a stand-in goes on the
+        // muted fallback layer whichever of the two the caver picked,
+        // because that distinction is not a preference.
+        if ((style === "elevation" || style === "elevation-line") &&
+                elevState.sample !== null) {
+            var smp = elevState.sample.sample;
+            out.style = CsCallout.elevStyle(smp);
+            out.kind = CsCallout.KIND_ELEV;
+            out.tags = {};
+            out.tags[CsCallout.KEY.ELEV_BASIS] = smp.basis;
+            out.tags[CsCallout.KEY.ELEV_FROM] = smp.from;
+            out.tags[CsCallout.KEY.ELEV_TO] = smp.to;
+            out.tags[CsCallout.KEY.ELEV_FRACTION] = String(smp.fraction);
+            out.tags[CsCallout.KEY.ELEV_VALUE] = String(smp.z);
+            out.tags[CsCallout.KEY.ELEV_MULTI] = smp.multi ? "1" : "";
+        }
+        return out;
     } catch (eDlg) {
         // No usable dialog in this bridge. The text is the half that
         // cannot be done any other way, so ask for that much and take

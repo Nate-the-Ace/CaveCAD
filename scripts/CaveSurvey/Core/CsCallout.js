@@ -123,6 +123,44 @@ CsCallout.newId = function() {
 };
 
 /**
+ * The text of an elevation callout.
+ *
+ * A "line" basis label must be UNMISTAKABLE. It carries a survey-line
+ * elevation standing in for a floor nobody measured, and on a plotted
+ * map an unmarked one reads as surveyed fact. Hence both the tilde and
+ * the word LINE, plus its own muted layer via elevStyle().
+ *
+ * `multi` means the governing D had more than one reading: this is the
+ * WALKABLE floor and there is a pit below it. The reader gets told,
+ * because "1234.5" over a shaft is a dangerous kind of tidy.
+ */
+CsCallout.elevLabel = function(sample, suffix) {
+    if (sample === null || sample === undefined ||
+            sample.z === null || sample.z === undefined) {
+        return null;
+    }
+    var sfx = (suffix === null || suffix === undefined) ? "" : suffix;
+    var n = (Math.round(sample.z * 10) / 10).toFixed(1);
+    if (sample.basis === CsCallout.BASIS_LINE) {
+        return "~" + n + sfx + " LINE";
+    }
+    return n + sfx + (sample.multi ? " (pit)" : "");
+};
+
+/**
+ * The style an elevation sample should be drawn in.
+ *
+ * A line-basis sample is FORCED onto the fallback style regardless of
+ * what the caver picked, because the distinction is not a preference --
+ * it is the difference between a measurement and a stand-in, and a plot
+ * must not blur it.
+ */
+CsCallout.elevStyle = function(sample) {
+    return (sample && sample.basis === CsCallout.BASIS_LINE) ?
+        "elevation-line" : "elevation";
+};
+
+/**
  * Which side of the note the leader leaves from: "left" or "right".
  *
  * Shared so that the two callers cannot drift. reflow() passes the text
