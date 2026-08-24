@@ -131,8 +131,27 @@ CalloutWrite.create = function(doc, di, spec) {
     // Not CsDraw.caps(): station labels are capitalised by convention,
     // but a caver's own note is theirs as typed.
     var at = new RVector(spec.position.x, spec.position.y);
+
+    // THE FLIP. The note grows AWAY from the arrow, so its near edge
+    // sits exactly on the pick point and the leader never crosses its
+    // own text.
+    //
+    // Arrow to the LEFT of the pick  -> text extends right -> HAlignLeft
+    // Arrow to the RIGHT of the pick -> text extends left  -> HAlignRight
+    //
+    // Measured: with the pick at x=100 and a 15-unit note, HAlignLeft
+    // gives a box of 100..115 and HAlignRight gives 84.78..100. Either
+    // way the edge on the arrow's side is x=100, which is where reflow
+    // then puts the landing.
+    //
+    // The side is decided from the PICK POINT here, not from a text box,
+    // because the text does not exist yet and its width is unknown.
+    // CsCallout.sideFor is shared with reflow so the two cannot drift.
+    var side = CsCallout.sideFor(spec.tips, spec.position.x);
+    var halign = (side === "left") ? RS.HAlignLeft : RS.HAlignRight;
+
     var textData = new RTextData(at, at, spec.height, 100.0,
-        RS.VAlignMiddle, RS.HAlignLeft, RS.LeftToRight, RS.Exact,
+        RS.VAlignMiddle, halign, RS.LeftToRight, RS.Exact,
         1.0, spec.text, "standard", false, false, 0.0, false);
     var textEntity = new RTextEntity(doc, textData);
     textEntity.setLayerId(doc.getLayerId(layerName));
@@ -154,6 +173,7 @@ CalloutWrite.create = function(doc, di, spec) {
     tags[CsCallout.KEY.KIND] = spec.kind || CsCallout.KIND_TEXT;
     tags[CsCallout.KEY.STYLE] = style;
     tags[CsCallout.KEY.SIDE] = "auto";
+    tags[CsCallout.KEY.LEADER] = spec.leader || CsCallout.LEADER_DEFAULT;
     if (spec.tags) {
         for (var k in spec.tags) {
             if (spec.tags.hasOwnProperty(k)) {
@@ -202,7 +222,11 @@ CalloutWrite.writeLeaders = function(doc, di, id, tips, style, layerName,
     }
 
     var side = CsTags.get(m.text, CsCallout.KEY.SIDE);
+    // The leader SHAPE is read back off the text, not passed in, so a
+    // reflow after a move or an edit keeps the curve the caver chose.
+    var shape = CsTags.get(m.text, CsCallout.KEY.LEADER);
     var geom = CsCallout.reflow(CalloutWrite.boxOf(m.text), tips, {
+        leader: (shape === "" ? CsCallout.LEADER_DEFAULT : shape),
         side: (side === "" ? "auto" : side),
         // NOT DIMASZ/DIMSCALE. Measured in a real drawing they are
         // 0.0833 and 1, which would put a 0.08-unit landing on a
@@ -236,7 +260,13 @@ CalloutWrite.writeLeaders = function(doc, di, id, tips, style, layerName,
             var pl = new RPolyline();
             var pts = geom.branches[b];
             for (var p = 0; p < pts.length; p++) {
-                pl.appendVertex(new RVector(pts[p].x, pts[p].y));
+                // The second argument is the BULGE, which in QCAD
+                // belongs to the vertex a segment STARTS at. A straight
+                // leader passes 0.0 throughout; a curved one carries the
+                // arc on its tip vertex. Probed: RLeaderData(polyline,
+                // true) preserves bulges AND its arrowhead.
+                pl.appendVertex(new RVector(pts[p].x, pts[p].y),
+                    pts[p].bulge || 0.0);
             }
             var data = new RLeaderData(pl, true);   // true = arrowHead
             var ent = new RLeaderEntity(doc, data);

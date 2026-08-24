@@ -199,6 +199,81 @@ eqs(CalloutWrite.members(doc, id).leaders.length, leadersBeforeGroup,
     "... and after that undo, members() still finds the ORIGINAL " +
     "number of leaders BY TAG (not just the same entity count)");
 
+// --- THE FLIP: the note grows AWAY from the arrow -------------------
+// An arrow to the RIGHT of the pick must push the text LEFT, so the
+// text's near edge is on the pick and the leader never crosses its own
+// letters. Without the flip both cases produce a box extending right,
+// and the right-hand case draws its shoulder straight through the note.
+(function() {
+    var rid = CalloutWrite.create(doc, di, {
+        text: "flip me", position: { x: 300, y: 300 },
+        tips: [{ x: 340, y: 290 }],          // arrow to the RIGHT
+        style: "name", kind: CsCallout.KIND_TEXT,
+        height: CalloutWrite.textHeight(doc)
+    });
+    var rm = CalloutWrite.members(doc, rid);
+    var rb = CalloutWrite.boxOf(rm.text);
+    ok(rb.x2 <= 300 + 1e-6,
+        "arrow on the right: the note extends LEFT of the pick (box ends at " +
+        rb.x2.toFixed(3) + ")");
+    near(rb.x2, 300, 1e-6, "and its near edge sits exactly on the pick");
+
+    var rd = rm.leaders[0].getData();
+    var rlast = rd.getVertexAt(rd.countVertices() - 1);
+    near(rlast.x, 300, 1e-6,
+        "the landing attaches at that near edge, not across the text");
+
+    // and the mirror case still behaves
+    var lid = CalloutWrite.create(doc, di, {
+        text: "flip me", position: { x: 300, y: 260 },
+        tips: [{ x: 260, y: 250 }],          // arrow to the LEFT
+        style: "name", kind: CsCallout.KIND_TEXT,
+        height: CalloutWrite.textHeight(doc)
+    });
+    var lb = CalloutWrite.boxOf(CalloutWrite.members(doc, lid).text);
+    ok(lb.x1 >= 300 - 1e-6,
+        "arrow on the left: the note extends RIGHT of the pick");
+    near(lb.x1, 300, 1e-6, "near edge on the pick again, mirrored");
+})();
+
+// --- CURVED leaders -------------------------------------------------
+(function() {
+    var cid = CalloutWrite.create(doc, di, {
+        text: "curvy", position: { x: 400, y: 400 },
+        tips: [{ x: 360, y: 380 }],
+        style: "name", kind: CsCallout.KIND_TEXT,
+        leader: CsCallout.LEADER_CURVED,
+        height: CalloutWrite.textHeight(doc)
+    });
+    var cm = CalloutWrite.members(doc, cid);
+    eqs(CsTags.get(cm.text, CsCallout.KEY.LEADER), CsCallout.LEADER_CURVED,
+        "the leader SHAPE is recorded on the text, so a reflow can keep it");
+
+    var cd = cm.leaders[0].getData();
+    ok(Math.abs(cd.getBulgeAt(0)) > 1e-9,
+        "a curved leader carries a bulge on its TIP vertex (got " +
+        cd.getBulgeAt(0) + ")");
+    near(cd.getBulgeAt(1), 0, 1e-9,
+        "the SHOULDER stays straight -- a curved landing reads as a mistake");
+
+    // the curve must survive a reflow, or moving the text straightens it
+    CalloutWrite.applyReflow(doc, di, cid, null);
+    var cd2 = CalloutWrite.members(doc, cid).leaders[0].getData();
+    ok(Math.abs(cd2.getBulgeAt(0)) > 1e-9,
+        "the curve SURVIVES a reflow, read back off the text's own tag");
+
+    // and a straight one stays straight
+    var sid = CalloutWrite.create(doc, di, {
+        text: "straight", position: { x: 400, y: 360 },
+        tips: [{ x: 360, y: 340 }],
+        style: "name", kind: CsCallout.KIND_TEXT,
+        height: CalloutWrite.textHeight(doc)
+    });
+    var sd = CalloutWrite.members(doc, sid).leaders[0].getData();
+    near(sd.getBulgeAt(0), 0, 1e-9,
+        "the default leader is straight: no bulge anywhere");
+})();
+
 // --- THE DXF ROUND TRIP -----------------------------------------------
 // The single most load-bearing test in this file. A callout is a LINKED
 // PAIR and the link is XDATA -- there is no side table and no registry
@@ -229,13 +304,21 @@ eqs(CalloutWrite.members(doc, id).leaders.length, leadersBeforeGroup,
         RDocumentInterface.IoErrorNoError,
         "round trip: the file reads back");
 
-    // The id must come back, or the pair is not a pair any more.
+    // The id must come back, or the pair is not a pair any more. Assert
+    // that THIS callout's id survived, not a count -- other callouts in
+    // the fixture are none of this test's business, and a count makes it
+    // break every time one is added.
     var ids = CalloutWrite.existingIds(rtDoc);
-    eqs(ids.length, 1, "round trip: exactly one CalloutId survives the save");
-    eqs(String(ids[0]), String(id),
-        "round trip: it is the SAME id, not a regenerated one");
+    var found = false;
+    for (var q = 0; q < ids.length; q++) {
+        if (String(ids[q]) === String(id)) {
+            found = true;
+        }
+    }
+    ok(found, "round trip: this callout's own id survives the save, " +
+        "unchanged and not regenerated");
 
-    var rt = CalloutWrite.members(rtDoc, ids[0]);
+    var rt = CalloutWrite.members(rtDoc, id);
     ok(rt.text !== null, "round trip: the text is still found BY ITS TAG");
     eqs(rt.leaders.length, 2,
         "round trip: both leaders are still found by the same tag");
@@ -251,8 +334,8 @@ eqs(CalloutWrite.members(doc, id).leaders.length, leadersBeforeGroup,
 
     // And the reopened callout must still be reflowable -- the whole
     // point of persisting the link.
-    CalloutWrite.applyReflow(rtDoc, rtDi, ids[0], null);
-    eqs(CalloutWrite.members(rtDoc, ids[0]).leaders.length, 2,
+    CalloutWrite.applyReflow(rtDoc, rtDi, id, null);
+    eqs(CalloutWrite.members(rtDoc, id).leaders.length, 2,
         "round trip: the REOPENED callout still reflows to two leaders");
 
     new QFile(rtPath).remove();
