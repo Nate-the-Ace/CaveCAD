@@ -79,10 +79,29 @@ Read out of the fork's source, not from docs. Each of these is load-bearing.
 - **Non-undoable operations exist.** `new RModifyObjectsOperation(false)`
   (`RModifyObjectsOperation.h:38`); `RTransaction` only calls
   `beginTransaction()` when undoable (`RTransaction.cpp:161`).
-- **Un-hiding needs permission.** `op.setAllowInvisible(true)`
-  (`ROperation.h:87`) or the modify silently declines. There is no
-  precedent for this call anywhere in `scripts/` -- it has to be checked in
-  the GUI, not only headless.
+- **~~Un-hiding needs permission.~~ CORRECTED 2026-08-23, by probe.** The
+  claim above was that `op.setAllowInvisible(true)` makes an
+  `RModifyObjectsOperation` able to un-hide an entity. It is worse than
+  that: **`entity.setInvisible()` inside a modify operation does nothing at
+  all for an ordinary entity, in either direction.** `RTransaction`'s modify
+  path is a PROPERTY DIFF -- it walks `object->getPropertyTypeIds()`
+  (`RTransaction.cpp:845,868`), and only calls `storage->saveObject()` when
+  that diff reports a change (`:915,935`). `RObject::PropertyInvisible` is
+  registered once against `RObject::getRtti()` (`RObject.cpp:75`), i.e.
+  `ObjectUnknown`, and is re-registered per type only by `RAttributeEntity`
+  and `RAttributeDefinitionEntity`. So for a line or a point the diff never
+  sees `Invisible` change, `objectHasChanged` stays false, and the mutation
+  is dropped in silence. `setAllowInvisible`/`setAllowAll` gate an earlier
+  check that is never reached, which is why they looked load-bearing. This
+  is also why `CsLayers.withLayerOn` works: `RLayer` DOES register its own
+  off/frozen properties.
+  **The mechanism that works** is `RChangePropertyOperation(RObject.PropertyInvisible,
+  value, RS.EntityAll, false)` applied over the document's own selection --
+  what QCAD's property editor itself uses. It hands the transaction an
+  explicit one-property set instead of relying on the diff. In Trip Focus the
+  selection used is the PREVIEW document's, cleared before
+  `regenerateScenes()`, so the user's document neither gains a selection nor
+  can see one.
 
 ## Where the numbers come from
 
