@@ -29,6 +29,7 @@ Each appears in the **Cave Survey** menu and as a command:
 | Generate Profile | `gp` | Rebuild the extended elevation beside the plan: one band per survey run, floor and ceiling lines from LRUD and splays. Normally happens on its own with every draw, from the notebook's own survey model; this forces it from the drawing's own tags instead and prints what it could not show. |
 | Build Legend | `bl` | Generate the legend from the symbols the map actually uses (NSS names, UIS aliases). |
 | Callout | `cscal` | Place a text note bound to one or more leader arrows -- QCAD has no multileader, so this is a real text entity and a real leader per arrow, linked so the note stays text-editable and the arrows can be reflowed after a move. |
+| Callout Sync | `cscsync` | Put every callout arrow back on its note after the note has been moved or reworded, and re-key a copied callout that ended up sharing an id with the original. |
 
 Start a new map from `templates/NSS_Cave_Template_PLAN.dxf` -- the tools
 draw onto its layers and the title block and symbol blocks live there. One
