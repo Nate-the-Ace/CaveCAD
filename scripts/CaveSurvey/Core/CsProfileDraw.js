@@ -381,6 +381,15 @@ CsProfileDraw.withOwnLayersOn = function(doc, di, fn) {
  * \return number of entities removed
  */
 CsProfileDraw.erase = function(doc, di, runKey) {
+    // Same reason as CsDraw.eraseStations: back up the last saved file
+    // before removing anything. See CsBackup.
+    try {
+        if (typeof CsBackup !== "undefined") {
+            CsBackup.beforeWrite(doc.getFileName());
+        }
+    } catch (eBak) {
+        // never a precondition for drawing
+    }
     var ownLayers = {};
     var ownLayerNames = CsProfileDraw.ownLayerNames(doc);
     for (var ln = 0; ln < ownLayerNames.length; ln++) {

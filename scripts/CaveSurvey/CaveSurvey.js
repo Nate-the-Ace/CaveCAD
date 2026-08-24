@@ -98,16 +98,12 @@ CaveSurvey.init = function(basePath, splash) {
     // the next save writes that over the only copy. That has happened.
     // No menu entry: a guard you have to switch on is one that is off on
     // the machine that needed it.
-    if (typeof CsBackup !== "undefined") {
-        // A guard that fails silently is not a guard. If the save hook
-        // cannot be installed, say so at startup rather than let a
-        // caver believe their work is protected when it is not.
-        if (CsBackup.installSaveHook() !== true) {
-            warning("Cave Survey: could not install the drawing-backup " +
-                "hook. Saves will NOT keep a previous version beside the " +
-                "drawing -- please report this.");
-        }
-    }
+    // No backup hook is installed here on purpose. Neither available
+    // mechanism reaches a save: a Save.prototype patch never runs in
+    // QCAD's own action context, and the export listener's signals are
+    // not fired by the DXF writer (both measured -- see CsBackup). The
+    // backup is taken instead at the moment that matters, immediately
+    // before this suite's own destructive operations.
 
     // report the suite on the splash screen, beside CaveCAD's own version:
     var version = CaveSurvey.getVersion(basePath);

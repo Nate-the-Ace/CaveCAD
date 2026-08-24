@@ -1035,6 +1035,18 @@ CsDraw.profileNow = function(doc, di, survey, resolved, settings) {
  * \return number of entities removed
  */
 CsDraw.eraseStations = function(doc, stationNames) {
+    // Keep the last saved version beside the drawing BEFORE removing
+    // anything. A redraw is erase-then-draw across two operations, and a
+    // draw that fails after this has landed leaves the drawing gutted --
+    // that destroyed a real survey with nothing to fall back on. Never
+    // throws, skipped inside Google Drive; see CsBackup.
+    try {
+        if (typeof CsBackup !== "undefined") {
+            CsBackup.beforeWrite(doc.getFileName());
+        }
+    } catch (eBak) {
+        // a backup is protection, never a precondition for drawing
+    }
     CsStore.ensureLoaded(doc);
     var inSet = {};
     for (var i = 0; i < stationNames.length; i++) {

@@ -182,67 +182,45 @@ CsBackup.copyPrevious = function(path) {
 };
 
 /**
- * Wraps Save so the previous version is kept before it is overwritten.
- * Idempotent. QCAD context only.
+ * WHY THERE IS NO "ON SAVE" HOOK, and there cannot be one from here.
+ * Both candidates were tried and measured:
  *
- * The same monkey-patch CsCave.installSaveHook uses, on purpose -- one
- * established way of hooking a save in this suite rather than two. The
- * difference is the side: CsCave runs AFTER a successful save, this runs
- * BEFORE, because by the time the save has returned the previous version
- * is already gone.
+ *   - Wrapping Save.prototype.save installs cleanly, reports success,
+ *     and never runs. QCAD builds an action in its own script context
+ *     (RScriptHandlerJs::createActionDocumentLevel), so the prototype
+ *     patched from add-on init is not the prototype the action uses.
+ *     CsCave.installSaveHook uses the same mechanism and is very likely
+ *     just as inert.
+ *   - RExportListenerAdapter's preExport/postExport/endOfExport fire
+ *     ZERO times for RDocumentInterface::exportFile, which is what a
+ *     save actually calls. Those signals belong to the graphics-export
+ *     framework, not the DXF writer. Counted: 0, 0, 0.
  *
- * Covers Save AND Save As: SaveAs.prototype is a Save, and it overrides
- * only beginEvent, so both route through this one function. What a Save
- * As does NOT get is a backup of its DESTINATION when that file already
- * exists -- the path read here is the document's current one, which is
- * the file being left behind rather than the one being overwritten.
+ * So the backup is taken at the moment that actually matters instead --
+ * immediately before this suite's own destructive operations, from
+ * CsDraw.eraseStations and CsProfileDraw.erase. That is a better moment
+ * than a save anyway: it snapshots the last saved good file BEFORE the
+ * tool that might gut the drawing runs, which is exactly the sequence
+ * that destroyed a real survey.
  *
- * \return true when the hook is installed
+ * What it does not cover: a drawing damaged by hand and saved. QCAD's
+ * own AutoSave is the separate net for that, and it keeps the CURRENT
+ * state rather than the previous one.
  */
-CsBackup.installSaveHook = function() {
-    if (typeof Save === "undefined") {
-        if (typeof include === "function") {
-            try { include("scripts/File/Save/Save.js"); } catch (e) {}
-        }
-    }
-    if (typeof Save === "undefined" || !Save.prototype ||
-            typeof Save.prototype.save !== "function") {
-        return false;
-    }
-    if (Save.prototype.save.csBackupWrapped === true) {
-        return true;
-    }
 
-    var stock = Save.prototype.save;
-    var wrapped = function() {
-        try {
-            if (typeof EAction !== "undefined") {
-                var doc = EAction.getDocument();
-                if (!isNull(doc)) {
-                    var path = doc.getFileName();
-                    // Only complain when a backup was DUE and did not
-                    // happen. No previous file (a first save) and a
-                    // Drive-managed folder are both correct silences.
-                    var due = CsBackup.worthKeeping(path) &&
-                        !CsBackup.inGoogleDrive(path);
-                    var made = CsBackup.copyPrevious(path);
-                    if (due && !made && !CsBackup.warnedThisSession) {
-                        CsBackup.warnedThisSession = true;
-                        warning("Cave Survey: could not keep a backup of " +
-                            path + CsBackup.SUFFIX + ". Saving anyway -- " +
-                            "but there is no previous version to fall back " +
-                            "on, so check the folder is writable.");
-                    }
-                }
-            }
-        } catch (e) {
-            // A failed backup NEVER blocks a save. Refusing to save
-            // because we could not make a copy would be its own way of
-            // losing work.
-        }
-        return stock.apply(this, arguments);
-    };
-    wrapped.csBackupWrapped = true;
-    Save.prototype.save = wrapped;
-    return true;
+/**
+ * Keep the previous version of `path`, and say so if it was due and
+ * failed. The one entry point both hooks call.
+ */
+CsBackup.beforeWrite = function(path) {
+    var due = CsBackup.worthKeeping(path) && !CsBackup.inGoogleDrive(path);
+    var made = CsBackup.copyPrevious(path);
+    if (due && !made && !CsBackup.warnedThisSession) {
+        CsBackup.warnedThisSession = true;
+        warning("Cave Survey: could not keep a backup of " + path +
+            CsBackup.SUFFIX + ". Saving anyway -- but there is no " +
+            "previous version to fall back on, so check the folder is " +
+            "writable.");
+    }
+    return made;
 };

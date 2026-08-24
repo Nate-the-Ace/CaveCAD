@@ -15230,6 +15230,41 @@ if (!IS_NODE) {
         eqs(read(bak), "VERSION-TWO-GUTTED",
             "CsBackup: so the existing backup survives untouched");
 
+        // -- the backup fires from the destructive operation ---------
+        // The real integration: eraseStations backs the file up before
+        // it removes anything. No "on save" hook exists -- see CsBackup
+        // for the two that were tried and measured inert.
+        (function() {
+            var d2 = new RDocument(new RMemoryStorage(),
+                new RSpatialIndexNavel());
+            var i6 = new RDocumentInterface(d2);
+            var live = QDir.tempPath() + "/cs-erase-backup.dxf";
+            var liveBak = live + CsBackup.SUFFIX;
+            new QFile(live).remove();
+            new QFile(liveBak).remove();
+
+            CsLayers.ensure(d2, i6, CsLayers.STATIONS);
+            var pt6 = new RPointEntity(d2, new RPointData(new RVector(0, 0)));
+            pt6.setLayerId(d2.getLayerId(CsLayers.STATIONS));
+            CsTags.set(pt6, "Station", "A1");
+            var o6 = new RAddObjectsOperation();
+            o6.addObject(pt6, false);
+            i6.applyOperation(o6);
+            i6.exportFile(live, "", false);
+            ok(new QFileInfo(live).exists(),
+                "erase-backup fixture: a saved drawing exists on disk");
+            d2.setFileName(live);
+
+            ok(!new QFileInfo(liveBak).exists(),
+                "erase-backup: no backup before the destructive call");
+            CsDraw.eraseStations(d2, ["A1"]);
+            ok(new QFileInfo(liveBak).exists(),
+                "eraseStations: the last saved version is kept BEFORE it erases");
+
+            new QFile(live).remove();
+            new QFile(liveBak).remove();
+        }());
+
         // -- inside Google Drive, Drive's own history is trusted -----
         var roots = CsBackup.driveRoots();
         ok(roots.length >= 0, "CsBackup.driveRoots: answers without throwing");
