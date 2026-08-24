@@ -456,6 +456,103 @@ eqs(CsTags.get(m2.text, CsCallout.KEY.ID), textBefore,
     new QFile(rtPath).remove();
 })();
 
+// ---------------------------------------------------------------------
+// A GENERATED note label is a real callout.
+//
+// CsDraw.noteLeader is what the suite draws from a station's Note. It
+// used to emit a text plus a bare two-point leader, so the suite drew
+// something a caver could not adjust: move the label and the arrow
+// stayed. It now carries the same CalloutId link a hand-placed callout
+// does, on its own layer.
+// ---------------------------------------------------------------------
+(function() {
+    CsLayers.ensure(doc, di, CsCallout.STYLES["annotation"]);
+
+    var before = CalloutWrite.idSet(doc);
+    var op = new RAddObjectsOperation();
+    CsDraw.noteLeader(doc, op, { x: 6000, y: 6000 }, "A7",
+        "bad air below here", 90.0, { left: 3, right: 4 });
+    di.applyOperation(op);
+    var added = CalloutWrite.newIds(doc, before);
+    eqs(added.length, 2,
+        "a generated note label is TWO entities: the note and its arrow");
+
+    // find the callout it created
+    var genId = null;
+    var textEnt = null, leaderEnt = null;
+    for (var i = 0; i < added.length; i++) {
+        var e = doc.queryEntity(added[i]);
+        var role = CsTags.get(e, CsCallout.KEY.ROLE);
+        if (role === CsCallout.ROLE_TEXT) {
+            textEnt = e;
+            genId = CsTags.get(e, CsCallout.KEY.ID);
+        } else if (role === CsCallout.ROLE_LEADER) {
+            leaderEnt = e;
+        }
+    }
+    ok(genId !== null && CsUuid.isValid(genId),
+        "the generated label carries a real CalloutId");
+    ok(textEnt !== null && leaderEnt !== null,
+        "with a text role and a leader role");
+    eqs(CsTags.get(leaderEnt, CsCallout.KEY.ID), genId,
+        "and both share it, so the arrow is bound to the note");
+
+    eqs(CsTags.get(textEnt, CsCallout.KEY.STYLE), "annotation",
+        "its style is the generated one");
+    eqs(doc.getLayerName(textEnt.getLayerId()),
+        CsCallout.STYLES["annotation"],
+        "and it is on the generated-notes layer, not with hand-placed notes");
+    eqs(doc.getLayerName(leaderEnt.getLayerId()),
+        CsCallout.STYLES["annotation"], "arrow too");
+
+    // THE OLD TAGS MUST SURVIVE. eraseStations finds these by TAG, not by
+    // layer, so dropping them would make every redraw pile up duplicates
+    // instead of replacing. CsBind also reads them to know this is the
+    // suite's own output and not a caver's linework to claim.
+    eqs(CsTags.get(textEnt, "NoteLabel"), "A7",
+        "the note keeps its NoteLabel tag, so a redraw still erases it");
+    eqs(CsTags.get(leaderEnt, "NoteLeader"), "A7",
+        "and the arrow keeps NoteLeader");
+
+    // it is a MANAGEABLE callout: found by members, attached, reflowable
+    var gm = CalloutWrite.members(doc, genId);
+    ok(gm.text !== null && gm.leaders.length === 1,
+        "members() sees it as a callout, so sync and the listener manage it");
+    var gbox = CalloutWrite.boxOf(gm.text);
+    var gd = gm.leaders[0].getData();
+    eqs(gd.countVertices(), 3,
+        "its arrow is a real leader: tip, elbow, landing");
+    var gend = gd.getVertexAt(2);
+    ok(gend.x >= gbox.x1 - 1e-6 && gend.x <= gbox.x2 + 1e-6,
+        "and it lands ON the note, like a hand-placed one");
+
+    // The layer must EXIST before noteLeader runs. A drawing that never
+    // saw the template has no NOTES-ANNOTATION, and getLayerId would
+    // hand back an invalid id -- entities landing on nothing, silently.
+    // CsDraw's own caller ensures it; this pins that the layer name
+    // noteLeader uses is one CsLayers actually knows how to create.
+    ok(CsLayers.DEFAULTS.hasOwnProperty(CsCallout.STYLES["annotation"]),
+        "CsLayers can create the generated-notes layer from scratch");
+
+    // move the generated label; a reflow must bring its arrow along
+    var gtd = gm.text.getData();
+    var gwas = gtd.getAlignmentPoint();
+    gtd.setPosition(new RVector(gwas.x + 40, gwas.y + 15));
+    gtd.setAlignmentPoint(new RVector(gwas.x + 40, gwas.y + 15));
+    gm.text.setData(gtd);
+    var gmop = new RModifyObjectsOperation();
+    gmop.addObject(gm.text, false);
+    di.applyOperation(gmop);
+
+    CalloutWrite.applyReflow(doc, di, genId, null);
+    var g2 = CalloutWrite.members(doc, genId);
+    var g2box = CalloutWrite.boxOf(g2.text);
+    var g2end = g2.leaders[0].getData().getVertexAt(2);
+    ok(g2end.x >= g2box.x1 - 1e-6 && g2end.x <= g2box.x2 + 1e-6,
+        "MOVING a generated label brings its arrow with it -- the whole " +
+        "point of making these real callouts");
+})();
+
 var out;
 if (failures.length === 0) {
     out = "### CALLOUT-WRITE OK " + passed;

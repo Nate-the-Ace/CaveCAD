@@ -225,31 +225,101 @@ CsDraw.noteLeader = function(doc, op, pos, name, note, azimuthDeg, lrud) {
     var dist = wall + CsDraw.TEXT_HEIGHT * 4.0;
     var labelPos = new RVector(pos.x + dirX * dist, pos.y + dirY * dist);
 
-    // leader from the station (arrow end) to just short of the text
-    var head = new RVector(pos.x + dirX * CsDraw.TEXT_HEIGHT * 0.6,
-        pos.y + dirY * CsDraw.TEXT_HEIGHT * 0.6);
-    var tail = new RVector(labelPos.x - dirX * CsDraw.TEXT_HEIGHT,
-        labelPos.y - dirY * CsDraw.TEXT_HEIGHT);
+    // The arrow stops just short of the station so the arrowhead does
+    // not sit on top of the station dot.
+    var tip = { x: pos.x + dirX * CsDraw.TEXT_HEIGHT * 0.6,
+                y: pos.y + dirY * CsDraw.TEXT_HEIGHT * 0.6 };
+
+    // A GENERATED NOTE LABEL IS A REAL CALLOUT.
+    //
+    // It used to be a text plus a bare two-point leader, which meant the
+    // suite drew something a caver could not then adjust: move the label
+    // and the arrow stayed. Now it carries the same CalloutId link a
+    // hand-placed callout does, so CalloutListener reflows it live and
+    // CsCalloutSync repairs it -- the generated notes and the hand ones
+    // behave identically once they are on the sheet.
+    //
+    // ON ITS OWN LAYER (NOTES-ANNOTATION), because a regenerate is
+    // entitled to clear what it drew and must not take hand-placed notes
+    // with it. Appearance matches a hand-placed name note on purpose: a
+    // reader should not be able to tell which notes were drawn for them.
+    //
+    // THE OLD TAGS STAY. NoteLabel/NoteLeader are how eraseStations finds
+    // these to remove on a redraw (it matches by TAG, not by layer -- see
+    // its station-name rules), how CsBind knows this is the suite's own
+    // output and not a caver's linework to claim, and how CsFocus filters
+    // a trip view. Dropping them to "modernise" would break a redraw into
+    // duplicates and let the binder claim the suite's own drawing.
+    var layerName = CsCallout.STYLES["annotation"];
+    var layerId = doc.getLayerId(layerName);
+    var id = CsCallout.newId();
+
+    // Alignment follows the side the label sits on, so the text grows
+    // AWAY from the station and its near edge faces the arrow. This is
+    // the rule addText already used here; it is now shared with the
+    // interactive command through CsCallout.
+    var halign = (dirX >= 0) ? RS.HAlignLeft : RS.HAlignRight;
+
+    var textData = new RTextData(labelPos, labelPos, CsDraw.TEXT_HEIGHT,
+        100.0, RS.VAlignMiddle, halign, RS.LeftToRight, RS.Exact,
+        1.0, CsDraw.caps(note), "standard", false, false, 0.0, false);
+    var textEntity = new RTextEntity(doc, textData);
+    textEntity.setLayerId(layerId);
+    CsTags.set(textEntity, "NoteLabel", name);
+    CsTags.set(textEntity, CsCallout.KEY.ID, id);
+    CsTags.set(textEntity, CsCallout.KEY.ROLE, CsCallout.ROLE_TEXT);
+    CsTags.set(textEntity, CsCallout.KEY.KIND, CsCallout.KIND_TEXT);
+    CsTags.set(textEntity, CsCallout.KEY.STYLE, "annotation");
+    CsTags.set(textEntity, CsCallout.KEY.SIDE, "auto");
+    CsTags.set(textEntity, CsCallout.KEY.LEADER,
+        CsCallout.LEADER_STRAIGHT);
+    op.addObject(textEntity, false);
+
+    // Solved against the text's REAL box, which is readable BEFORE the
+    // entity is added -- so the label and its arrow land in the caller's
+    // single operation and one undo takes the whole redraw.
+    var b = textData.getBoundingBox();
+    var c1 = b.getCorner1(), c2 = b.getCorner2();
+    var box = {
+        x1: Math.min(c1.x, c2.x), y1: Math.min(c1.y, c2.y),
+        x2: Math.max(c1.x, c2.x), y2: Math.max(c1.y, c2.y)
+    };
+    var geom = CsCallout.reflow(box, [tip], {
+        side: "auto",
+        leader: CsCallout.LEADER_STRAIGHT,
+        dimasz: null,
+        dimscale: null
+    });
+
     var leaderDrawn = false;
     try {
-        var ld = new RLeaderData();
-        ld.setArrowHead(true);
-        ld.appendVertex(head);
-        ld.appendVertex(tail);
-        var leader = new RLeaderEntity(doc, ld);
-        leader.setLayerId(doc.getLayerId(CsLayers.TEXT_NOTES));
+        var pl = new RPolyline();
+        var pts = geom.branches[0];
+        for (var v = 0; v < pts.length; v++) {
+            pl.appendVertex(new RVector(pts[v].x, pts[v].y),
+                pts[v].bulge || 0.0);
+        }
+        var leader = new RLeaderEntity(doc, new RLeaderData(pl, true));
+        leader.setLayerId(layerId);
         CsTags.set(leader, "NoteLeader", name);
+        CsTags.set(leader, CsCallout.KEY.ID, id);
+        CsTags.set(leader, CsCallout.KEY.ROLE, CsCallout.ROLE_LEADER);
+        CsTags.set(leader, CsCallout.KEY.STYLE, "annotation");
         op.addObject(leader, false);
         leaderDrawn = true;
     } catch (e) {
-        // bridge without RLeader*: a plain line still points the way
+        // bridge without RLeader*: a plain line still points the way,
+        // and it keeps the NoteLeader tag so a redraw still erases it.
+        // It carries no CalloutId: half a callout is worse than none,
+        // because members() would match a leader that cannot be reflowed.
     }
     if (!leaderDrawn) {
-        CsDraw.addLine(doc, op, CsLayers.TEXT_NOTES, head, tail,
+        var lastPt = geom.branches[0][geom.branches[0].length - 1];
+        CsDraw.addLine(doc, op, layerName,
+            new RVector(tip.x, tip.y),
+            new RVector(lastPt.x, lastPt.y),
             "NoteLeader", name);
     }
-    CsDraw.addText(doc, op, CsLayers.TEXT_NOTES, note, labelPos,
-        dirX >= 0 ? RS.HAlignLeft : RS.HAlignRight, "NoteLabel", name);
 };
 
 /**
@@ -488,7 +558,13 @@ CsDraw.survey = function(survey, resolved, originStation, originPos, seqBase) {
                 });
         }
         if (noteText !== undefined && noteText !== null && noteText !== "") {
-            CsLayers.ensure(doc, di, CsLayers.TEXT_NOTES);
+            // NOTES-ANNOTATION, not TEXT-NOTES: generated note labels
+            // moved to their own layer so a regenerate can clear what it
+            // drew without taking hand-placed notes with it. Ensured
+            // here because a drawing that never saw the template has no
+            // such layer, and getLayerId would then hand noteLeader an
+            // invalid id -- entities land, on nothing, silently.
+            CsLayers.ensure(doc, di, CsLayers.NOTES_ANNOTATION);
             CsDraw.noteLeader(doc, op, at(name), name, noteText,
                 lrud !== null ? lrud.azimuth : firstLegAzimuth, lrud);
         }
