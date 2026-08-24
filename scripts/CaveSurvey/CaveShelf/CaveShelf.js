@@ -139,12 +139,14 @@ CaveShelf.mtimeOf = function(path) {
  */
 CaveShelf.readCave = function(record) {
     var blank = { ok: false, error: "", trips: [], ends: [], length: 0,
-        unit: "ft", legacy: false, survey: null };
+        unit: "ft", legacy: false, survey: null, startable: false };
 
     if (record === null || record === undefined ||
             CsShelf.clean(record.drawing) === "") {
-        blank.error = "No drawing registered for this cave yet. " +
-            "Add Cave... again once one is saved in the folder.";
+        blank.error = "No drawing yet. New Trip starts one from the NSS " +
+            "template, saves it in this folder, and opens the notebook " +
+            "on the first station.";
+        blank.startable = true;
         return blank;
     }
 
@@ -198,7 +200,7 @@ CaveShelf.summarize = function(recon) {
     if (survey === null || survey === undefined) {
         return { ok: false, error: "This drawing carries no survey data.",
             trips: [], ends: [], length: 0, unit: "ft", legacy: false,
-            survey: null };
+            survey: null, startable: true };
     }
 
     var unit = survey.distanceUnit === undefined || survey.distanceUnit === null ?
@@ -251,8 +253,13 @@ CaveShelf.summarize = function(recon) {
 
     return {
         ok: survey.shots.length > 0,
+        // A fresh template drawing has no shots. That is not a fault --
+        // it is a cave waiting for its first trip, and New Trip must
+        // stay live for it.
+        startable: survey.shots.length === 0,
         error: survey.shots.length > 0 ? "" :
-            "This drawing carries no survey data yet.",
+            "No survey in this drawing yet. New Trip opens the notebook " +
+            "on the first station.",
         survey: survey,
         trips: trips,
         ends: ends,
@@ -603,28 +610,49 @@ CaveShelf.frontierText = function(read, tripRow) {
     return text;
 };
 
-/** Enables what can be done to the selected cave, and says so. */
+/**
+ * Enables what can be done to the selected cave, and says so.
+ *
+ * New Trip is the way IN to a cave, so it stays live in the three states
+ * a cave can be in before it has any survey: no drawing at all (starting
+ * the trip starts the drawing), a drawing with nothing in it, and a
+ * drawing whose trips have left an open end. A cave that already HAS a
+ * drawing never gets a second one -- the new trip is a numbered trip
+ * inside that drawing, which is what lets loop closure solve across
+ * trips and a revision correct one trip without touching the others. The only thing that disables it is a
+ * drawing CaveCAD cannot open -- a DWG -- because guessing what to do
+ * beside somebody's DWG is not this button's business.
+ */
 CaveShelf.updateButtons = function(state, openButton, tripButton, forgetButton) {
     var record = state.record;
-    var readable = record !== null && state.read !== null && state.read.ok;
+    var read = state.read;
+    var hasDrawing = record !== null && CsShelf.clean(record.drawing) !== "";
+    var isDwg = hasDrawing && CsShelf.extension(record.drawing) === "dwg";
 
     forgetButton.enabled = record !== null;
-    openButton.enabled = record !== null && CsShelf.clean(record.drawing) !== "" &&
-        CsShelf.extension(record.drawing) !== "dwg";
+    openButton.enabled = hasDrawing && !isDwg;
 
     var station = "";
-    if (readable) {
-        if (state.trip >= 0 && state.trip < state.read.trips.length &&
-                state.read.trips[state.trip].ends.length > 0) {
-            station = state.read.trips[state.trip].ends[0].station;
+    if (read !== null && read.ok) {
+        if (state.trip >= 0 && state.trip < read.trips.length &&
+                read.trips[state.trip].ends.length > 0) {
+            station = read.trips[state.trip].ends[0].station;
         }
         else {
-            station = CaveShelf.tieInFor(state.read);
+            station = CaveShelf.tieInFor(read);
         }
     }
     state.station = station;
+    state.needsDrawing = record !== null && !hasDrawing;
 
-    tripButton.enabled = openButton.enabled && readable;
+    tripButton.enabled = record !== null && !isDwg &&
+        (openButton.enabled || state.needsDrawing);
+
+    // Always "New Trip". Making the drawing when a cave has none is
+    // what starting a trip MEANS for a cave nobody has surveyed yet --
+    // it is not a different action, and a button that renames itself
+    // buries the one thing the user came here to do. The label only
+    // gains detail when there is a station to tie into.
     tripButton.text = station === "" ? qsTr("New Trip") :
         qsTr("New Trip from %1").arg(station);
 };
@@ -643,23 +671,97 @@ CaveShelf.openRecord = function(record) {
 };
 
 /**
- * Opens the cave and starts a trip on the station the survey stopped at.
+ * Creates a cave's drawing: the NSS template, saved into the cave's own
+ * folder under the cave's own name.
+ *
+ * Shared by New Cave... (which makes the folder first) and by New Trip
+ * on a cave that was registered before it had any drawing -- adding a
+ * folder off the drive and then wanting to survey it is the ordinary
+ * way a cave starts, and it must not dead-end.
+ *
+ * \return the drawing's path, or null.
+ */
+CaveShelf.startDrawing = function(record) {
+    if (record === null || record === undefined) { return null; }
+
+    var stem = CsPackage.safeName(record.name);
+    if (stem === "") { stem = CsShelf.basename(record.folder); }
+    if (stem === "") { stem = "Cave"; }
+    var drawing = record.folder + "/" + stem + ".dxf";
+
+    // Already there (somebody saved one since this cave was added):
+    // adopt it rather than writing over it.
+    if ((new QFileInfo(drawing)).exists()) {
+        CsShelf.register({ name: record.name, folder: record.folder,
+            drawing: drawing });
+        CaveShelf.openRecord({ drawing: drawing });
+        return drawing;
+    }
+
+    // The template pours itself into the new document (CaveTemplate's
+    // post-new hook); the one-shot flag makes that true even where
+    // somebody switched the default off.
+    RSettings.setValue("CaveSurvey/TemplateOnNewOnce", true);
+    var newAction = RGuiAction.getByScriptFile("scripts/File/NewFile/NewFile.js");
+    if (isNull(newAction)) {
+        EAction.handleUserWarning(qsTr("Could not reach File > New."));
+        return null;
+    }
+    newAction.slotTrigger();
+
+    var saved = false;
+    try {
+        saved = new Save().save(drawing, "", false) !== false;
+    } catch (e) {
+        saved = false;
+    }
+    if (!saved) {
+        EAction.handleUserWarning(qsTr("The drawing could not be saved " +
+            "into %1. Use File > Save As.").arg(record.folder));
+        return null;
+    }
+
+    CsCave.ensureProjectFolders(record.folder, true);
+    CsShelf.register({ name: record.name, folder: record.folder,
+        drawing: drawing });
+    delete CaveShelf.cache[drawing];
+    return drawing;
+};
+
+/**
+ * Opens the cave and starts a trip in the notebook.
+ *
+ * Three states, one button. A cave with no drawing gets one made and
+ * lands on A1 -- the entrance, by project convention. A drawing with no
+ * survey yet also lands on A1. A drawing whose trips left an open end
+ * lands on that station.
  *
  * The notebook owns the page from here: this fills in the tie-in and
  * the blank row under it, which is what a paper page looks like when a
  * trip starts, and nothing else.
  */
 CaveShelf.startTrip = function(state) {
-    if (!CaveShelf.openRecord(state.record)) { return false; }
+    var record = state.record;
+    if (record === null || record === undefined) { return false; }
 
-    var station = state.station === undefined ? "" : state.station;
+    if (state.needsDrawing === true) {
+        if (CaveShelf.startDrawing(record) === null) { return false; }
+    }
+    else if (!CaveShelf.openRecord(record)) {
+        return false;
+    }
+
+    var station = (state.station === undefined || state.station === "") ?
+        "A1" : state.station;
     if (typeof SurveyNotebook === "undefined") { return true; }
 
     try {
         var dock = SurveyNotebook.ensureDock();
         dock.visible = true;
-        if (station !== "" && SurveyNotebook.startTripAt(station) === true) {
-            EAction.handleUserMessage(
+        if (SurveyNotebook.startTripAt(station) === true) {
+            EAction.handleUserMessage(state.needsDrawing === true ?
+                qsTr("%1 started. The notebook is open at %2.")
+                    .arg(record.name).arg(station) :
                 qsTr("New trip tied into %1.").arg(station));
         }
     } catch (e) {
@@ -748,8 +850,10 @@ CaveShelf.newCave = function(parent) {
 
     // A cave name is a folder name and a file name. Only the characters
     // that cannot BE either are removed -- spaces, commas and
-    // apostrophes are how caves are actually named.
-    var safe = name.replace(/[\/\\:*?"<>|]/g, "").replace(/^\s+|\s+$/g, "");
+    // apostrophes are how caves are actually named. Same sanitizer the
+    // drawing's own file name uses, so the folder and the file inside
+    // it can never disagree.
+    var safe = CsPackage.safeName(name);
     if (safe === "") {
         EAction.handleUserWarning(qsTr("That name has nothing in it a " +
             "folder can be called."));
@@ -792,32 +896,10 @@ CaveShelf.newCave = function(parent) {
         return existing;
     }
 
-    // The template pours itself into the new document (CaveTemplate's
-    // post-new hook); the one-shot flag makes that true even on a
-    // machine where somebody switched it off.
-    RSettings.setValue("CaveSurvey/TemplateOnNewOnce", true);
-    var newAction = RGuiAction.getByScriptFile("scripts/File/NewFile/NewFile.js");
-    if (isNull(newAction)) {
-        EAction.handleUserWarning(qsTr("Could not reach File > New."));
-        return null;
-    }
-    newAction.slotTrigger();
-
-    var saved = false;
-    try {
-        saved = new Save().save(drawing, "", false) !== false;
-    } catch (e) {
-        saved = false;
-    }
-    if (!saved) {
-        EAction.handleUserWarning(qsTr("%1 was created, but the drawing " +
-            "could not be saved into it. Use File > Save As.").arg(folder));
-        return null;
-    }
-
     var record = CsShelf.normalize({ name: name, folder: folder,
-        drawing: drawing });
-    CsShelf.register(record);
+        drawing: "" });
+    if (CaveShelf.startDrawing(record) === null) { return null; }
+
     EAction.handleUserMessage(qsTr("%1 started: %2").arg(name).arg(drawing));
-    return record;
+    return CsShelf.find(folder);
 };

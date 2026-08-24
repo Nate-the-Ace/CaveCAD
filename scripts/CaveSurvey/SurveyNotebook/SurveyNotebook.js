@@ -3017,8 +3017,20 @@ SurveyNotebook.buildDock = function(appWin) {
         if (app !== null) {
             try {
                 app.focusChanged.connect(function(oldW, newW) {
-                    if (newW !== null && newW !== undefined &&
-                        String(newW.objectName) === "CaveSurveyNotebookAutoAdd") {
+                    // Reading objectName off a widget whose C++ side is
+                    // already gone prints "wrapped is NULL" and a stack
+                    // trace -- which every modal dialog in the suite
+                    // triggers as it closes, the cave launcher included.
+                    // Focus moving somewhere this listener does not care
+                    // about is the normal case, not an error.
+                    var focused = "";
+                    try {
+                        focused = (newW === null || newW === undefined) ? "" :
+                            String(newW.objectName);
+                    } catch (eGone) {
+                        return;
+                    }
+                    if (focused === "CaveSurveyNotebookAutoAdd") {
                         // consume the click that may follow this focus
                         // change, so the click path can't double-add
                         w.sentinelFocusAdd = true;

@@ -243,9 +243,17 @@ CsCave.pointAtScans = function(docPath) {
     if (typeof RSettings === "undefined" || typeof QDir === "undefined") {
         return null;
     }
-    var scans = CsCave.scansDir(docPath);
-    if (scans === null) { return null; }
+    var folder = CsCave.folderOf(docPath);
+    if (folder === null) { return null; }
     if (!CsCave.isUnderDrive(docPath, CsCave.driveRoots())) { return null; }
+
+    // The folder as it EXISTS, whatever its casing -- real cave folders
+    // in the wild carry "Scans" as often as "scans", and building the
+    // path literally makes a second folder beside the first on any
+    // case-sensitive filesystem.
+    var scans = CsCave.findSubfolder(folder, CsCave.SCANS);
+    if (scans === null) { scans = CsCave.scansDir(docPath); }
+    if (scans === null) { return null; }
     try {
         if (!(new QDir(scans)).exists() && !(new QDir()).mkpath(scans)) {
             return null;
