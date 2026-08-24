@@ -862,6 +862,10 @@ class TestReadmeToolTable(unittest.TestCase):
     # Tools that live in the repo but are deliberately not shipped -- see
     # PARKED_TOOLS in tools/make_package.sh. A parked tool must NOT appear in
     # the README's table, because that table documents what a user gets.
+    # Kept after Trip Focus's tool folder was removed (docs/FROZEN.md):
+    # it costs nothing, and it means a reintroduced parked tool is
+    # exempted and README-checked correctly from its first commit rather
+    # than after someone rediscovers this set.
     PARKED = {"TripFocus"}
 
     def test_a_parked_tool_is_absent_from_the_readme_table(self):

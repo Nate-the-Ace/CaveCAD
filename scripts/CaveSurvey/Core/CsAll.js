@@ -59,6 +59,14 @@ include(includeBasePath + "/CsTags.js");
 // so the erase rules and the binding index cannot disagree about which
 // station a tip name belongs to.
 include(includeBasePath + "/CsBind.js");
+// After CsTags, CsBind and CsLayers -- CsFocus calls all three.
+//
+// KEPT although the Trip Focus TOOL is frozen and its folder removed
+// (docs/FROZEN.md). This is a pure Core library, not the viewer, and
+// tests/js_unit.js uses CsFocus.isVisible as the observable for a
+// WALL-RUN CONTINUITY regression -- a feature that does ship. Deleting
+// the library would delete a guard on live code.
+include(includeBasePath + "/CsFocus.js");
 include(includeBasePath + "/CsDraw.js");
 include(includeBasePath + "/CsRevise.js");
 // After both CsBind and CsRevise: CsProfileBind calls into each.
@@ -71,5 +79,3 @@ include(includeBasePath + "/CsReport.js");
 // After CsModel, CsTraverse, CsProfile and (optionally) CsRevise --
 // CsContrib calls ensureTrips, offset, groupRuns and tripLabel.
 include(includeBasePath + "/CsContrib.js");
-// After CsTags, CsBind and CsLayers -- CsFocus calls all three.
-include(includeBasePath + "/CsFocus.js");

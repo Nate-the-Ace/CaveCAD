@@ -18,13 +18,19 @@ What that means concretely:
   published build and no installed add-on contains it. Verified in the shipped
   `0.8.x-callout-preview` builds: the installed tool list has no Trip Focus
   entry.
-- **Its source remains in the repository**, under
-  `scripts/CaveSurvey/TripFocus/`, with its Core half in
-  `scripts/CaveSurvey/Core/CsFocus.js` and its test in
-  `tests/trip_focus_filter.js`. History is not being rewritten to remove it: the
-  commits interleave with unrelated work, and `tests/run_all.sh` section 7 still
-  runs that test, so excising it would be a destructive change to a green suite
-  for no delivery benefit.
+- **The tool is REMOVED from the tree.** `scripts/CaveSurvey/TripFocus/` and
+  `tests/trip_focus_filter.js` are deleted, and `tests/run_all.sh` no longer has
+  a Trip Focus section (it runs eight, not nine). History keeps them: the commits
+  interleave with unrelated work, and rewriting another session's commits to
+  erase a parked feature is destructive for no delivery benefit. Frozen means
+  not shipped and not developed, not erased from the record.
+- **`scripts/CaveSurvey/Core/CsFocus.js` DELIBERATELY STAYS.** It is a pure Core
+  library, not the viewer. `tests/js_unit.js` uses `CsFocus.isVisible` as the
+  observable for a WALL-RUN CONTINUITY regression -- a feature that does ship --
+  and that test is count-based precisely so it cannot go vacuous under the bug
+  it guards. Deleting the library to tidy up a frozen tool would delete a guard
+  on live code. It ships in the package as an inert file with no menu entry,
+  which is harmless; a menu tool would not be.
 - **Do not add to it.** No new features, no fixes beyond keeping the existing
   test green if something else breaks it.
 

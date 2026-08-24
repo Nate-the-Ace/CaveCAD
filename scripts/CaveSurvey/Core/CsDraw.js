@@ -247,7 +247,8 @@ CsDraw.noteLeader = function(doc, op, pos, name, note, azimuthDeg, lrud) {
     // THE OLD TAGS STAY. NoteLabel/NoteLeader are how eraseStations finds
     // these to remove on a redraw (it matches by TAG, not by layer -- see
     // its station-name rules), how CsBind knows this is the suite's own
-    // output and not a caver's linework to claim, and how CsFocus filters
+    // output and not a caver's linework to claim, and (for the frozen
+    // Trip Focus, see docs/FROZEN.md) how CsFocus filters
     // a trip view. Dropping them to "modernise" would break a redraw into
     // duplicates and let the binder claim the suite's own drawing.
     var layerName = CsCallout.STYLES["annotation"];
