@@ -549,6 +549,58 @@ var id = CalloutWrite.create(doc, di, {
         "the caver's own words survive -- they were standing in the " +
         "passage and the computed number was not");
 
+    // --- THE PARTIAL-SURVEY TRAP -----------------------------------
+    // SurveyNotebook draws ONE PAGE at a time, so a draw hook holding
+    // that page's survey sees only its stations. Refreshing against it
+    // reported every label on another page as "lost" and re-derived this
+    // page's against a partial network, where a boundary label can lose
+    // its D and spuriously downgrade. This pins the mechanism: the same
+    // label, refreshed against a survey that does not contain its leg,
+    // is reported lost -- which is why the draw hook must read the whole
+    // drawing instead.
+    (function() {
+        // A FRESH label, not the hand-edited one above: hand-edit
+        // protection is checked before the leg lookup, so a protected
+        // label would report "unchanged" and never exercise this.
+        var freshSample = CsElevation.sampleFloor(withD.survey,
+            withD.resolved, mid, {});
+        var pid = CalloutWrite.create(doc, di, {
+            text: CsCallout.elevLabel(freshSample, "'"),
+            position: { x: mid.x + 60, y: mid.y + 60 },
+            tips: [{ x: mid.x, y: mid.y }],
+            style: CsCallout.elevStyle(freshSample),
+            kind: CsCallout.KIND_ELEV,
+            tags: CalloutWrite.elevTags(freshSample),
+            height: CalloutWrite.textHeight(doc)
+        });
+        var wasText = CalloutWrite.members(doc, pid).text.getData().getText();
+
+        var other = CsModel.newSurvey();
+        var o1 = shotOf("Z1", "Z2", 50, 0, 0);
+        o1.down = 2;
+        other.shots.push(o1);
+        var oRes = CsNetwork.resolve(other,
+            { anchor: { name: "Z1", x: 5000, y: 5000, z: 500 } });
+
+        var partial = CalloutWrite.refreshElevations(doc, di, other, oRes);
+        ok(partial.lost >= 1,
+            "refreshed against a survey WITHOUT the label's leg, the " +
+            "label is reported LOST -- the exact mis-report a page-only " +
+            "draw hook produced (lost=" + partial.lost + ")");
+        eqs(partial.updated, 0,
+            "and nothing is re-derived from a network that does not " +
+            "contain the leg");
+        eqs(CalloutWrite.members(doc, pid).text.getData().getText(), wasText,
+            "and a mis-report never rewrites the label");
+
+        // against the FULL survey the same label re-derives normally
+        var full = CalloutWrite.refreshElevations(doc, di, withD.survey,
+                                                  withD.resolved);
+        eqs(full.lost, 0,
+            "against the whole survey nothing is lost -- which is why " +
+            "the draw hook reads the drawing rather than the page");
+    })();
+
     // --- a label whose leg is GONE is reported, not guessed ----------
     var orphanTags = CalloutWrite.elevTags({
         z: 999, basis: CsCallout.BASIS_FLOOR,

@@ -547,6 +547,46 @@ CalloutWrite.elevTags = function(sample) {
 };
 
 /**
+ * Re-derive every elevation callout against the WHOLE DRAWING's survey.
+ *
+ * This is the entry point every caller should use. The variant below
+ * takes a survey and resolved network as arguments, and it is a trap for
+ * the draw path: SurveyNotebook draws ONE PAGE at a time, so the survey
+ * it hands to CsDraw.survey holds only that page's stations and shots.
+ * Refreshing against it would report every label on another page as
+ * "lost", and would re-derive the labels on THIS page against a partial
+ * network -- partial legs, partial LRUD -- so a label near a page
+ * boundary could lose its D and spuriously downgrade to a survey-line
+ * stand-in. Found by the caver: draw was "not recalcing properly".
+ *
+ * So this reads the survey back out of the DRAWING, which is the only
+ * complete picture and also the one the labels actually sit on. It costs
+ * a network resolve. An earlier version of the draw hook reused the
+ * page's already-resolved network to avoid exactly that cost; the cost
+ * was worth paying and the saving was wrong.
+ *
+ * Returns the same counts, or null when the drawing carries no readable
+ * survey (an empty or untagged drawing has nothing to re-derive from,
+ * which is not an error).
+ */
+CalloutWrite.refreshElevationsFromDocument = function(doc, di) {
+    if (isNull(doc) || isNull(di)) {
+        return null;
+    }
+    var survey, resolved;
+    try {
+        survey = CsTags.surveyFromDocument(doc);
+        resolved = CsNetwork.resolve(survey, {});
+    } catch (e) {
+        return null;
+    }
+    if (isNull(survey) || isNull(resolved)) {
+        return null;
+    }
+    return CalloutWrite.refreshElevations(doc, di, survey, resolved);
+};
+
+/**
  * Re-derive every elevation callout in the drawing from its stored
  * provenance. Returns {updated, upgraded, downgraded, lost, unchanged}.
  *
@@ -573,9 +613,11 @@ CalloutWrite.elevTags = function(sample) {
  * that edit is worth more than anything computed here, because they were
  * standing in the passage. Left exactly alone.
  *
- * Takes survey and resolved from the caller: at draw time they are
- * already in hand, so a redraw refreshes labels without resolving the
- * network a second time.
+ * TAKES survey and resolved FROM THE CALLER, which makes it the wrong
+ * function for a draw hook: a caller holding only one page's survey will
+ * mis-report every other page's labels as lost and re-derive this page's
+ * against a partial network. Use refreshElevationsFromDocument above
+ * unless you are certain your survey covers the whole drawing.
  */
 CalloutWrite.refreshElevations = function(doc, di, survey, resolved) {
     var out = { updated: 0, upgraded: 0, downgraded: 0, lost: 0,

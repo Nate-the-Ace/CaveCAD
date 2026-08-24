@@ -952,18 +952,25 @@ CsDraw.survey = function(survey, resolved, originStation, originPos, seqBase) {
     // Here rather than in the notebook because EVERY draw path runs
     // through this function -- SurveyNotebook twice, RebuildSurveyData,
     // ImportCaveSurvey and CsRevise -- so one hook covers all five
-    // instead of the one that happened to get mentioned. And survey and
-    // resolved are already in hand, so it costs no second resolve.
+    // instead of the one that happened to get mentioned.
+    //
+    // It re-reads the survey FROM THE DRAWING rather than reusing the
+    // one passed in, and that is not laziness. SurveyNotebook draws ONE
+    // PAGE at a time, so `survey` and `resolved` here can hold a single
+    // page's stations -- refreshing against them reported every label on
+    // another page as lost, and re-derived this page's labels against a
+    // partial network where a boundary label could lose its D. The
+    // second resolve is the price of a correct answer.
     //
     // SOFT dependency, the same typeof idiom CsBind uses for CsRevise:
     // Core must not hard-require a tool folder, and a build without the
     // callout tools still has to draw a map.
     var elevationRefresh = null;
     if (typeof CalloutWrite !== "undefined" &&
-            typeof CalloutWrite.refreshElevations === "function") {
+            typeof CalloutWrite.refreshElevationsFromDocument === "function") {
         try {
             elevationRefresh =
-                CalloutWrite.refreshElevations(doc, di, survey, resolved);
+                CalloutWrite.refreshElevationsFromDocument(doc, di);
         } catch (eElev) {
             // A map must still draw even if the labels cannot be
             // refreshed. Reported as null rather than pretended.

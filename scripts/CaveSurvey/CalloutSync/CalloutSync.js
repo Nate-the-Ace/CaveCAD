@@ -309,15 +309,10 @@ CalloutSync.run = function(doc, di) {
     // Re-derive elevation labels as well. A draw does this too, but a
     // caver who has just corrected a reading and wants the labels to
     // catch up should not have to redraw the whole map to get it.
-    var elev = null;
-    try {
-        var survey = CsTags.surveyFromDocument(doc);
-        var resolved = CsNetwork.resolve(survey, {});
-        elev = CalloutWrite.refreshElevations(doc, di, survey, resolved);
-    } catch (eElev) {
-        elev = null;    // no survey in this drawing, or it would not
-                        // resolve: the reflow above still stands
-    }
+    // The from-document entry point: it reads the WHOLE drawing's survey,
+    // which is the only complete picture. Never the argument-taking
+    // variant here.
+    var elev = CalloutWrite.refreshElevationsFromDocument(doc, di);
 
     var lines = [];
     lines.push(qsTr("Reflowed %1 callout(s).").arg(done));
