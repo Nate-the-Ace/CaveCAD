@@ -14738,6 +14738,35 @@ if (!IS_NODE) {
         eqs(CsProfileDraw.erase(cOne.doc, cOne.di, "B"), 2,
             "CsProfileDraw.erase: scoped to B then removes both of B's");
 
+        // -- A FULL REGENERATE CLEARS THE SHARED LAYERS --------------
+        // Nothing draws to the shared profile layers any more; every
+        // band goes to its run's variant. So the pre-segregation
+        // geometry sitting on them has to go on the next full draw, or a
+        // caver keeps seeing an old elevation underneath the new one.
+        // render() calls erase() unscoped, and ownLayerNames includes
+        // the shared bases -- this is what pins that, since dropping the
+        // bases from ownLayerNames would silently orphan all of it.
+        var cShared = docWith();
+        generated(cShared, CsLayers.PROFILE_SHOTS, "A");
+        generated(cShared, CsLayers.PROFILE_STATIONS, "B");
+        generated(cShared, "CTRL-PROFILE-SHOTS-A", "A");
+        eqs(CsProfileDraw.erase(cShared.doc, cShared.di), 3,
+            "erase unscoped: clears the SHARED layers as well as the variants");
+        eqs(cShared.doc.queryLayerEntities(
+                cShared.doc.getLayerId(CsLayers.PROFILE_SHOTS), true).length, 0,
+            "erase unscoped: no pre-segregation geometry is left behind");
+
+        var ownNames = CsProfileDraw.ownLayerNames(cShared.doc);
+        var bases = CsProfileDraw.LAYERS();
+        for (var bj = 0; bj < bases.length; bj++) {
+            var present = false;
+            for (var oj2 = 0; oj2 < ownNames.length; oj2++) {
+                if (ownNames[oj2] === bases[bj]) { present = true; }
+            }
+            ok(present, "ownLayerNames: still claims the shared base " +
+                bases[bj] + ", or its old geometry would be orphaned");
+        }
+
         // -- legacy geometry: tagged, on the SHARED base layer -------
         // Scoping reads the ProfileRun TAG, not the layer's token, so
         // output drawn before layers were segregated is still cleaned.
