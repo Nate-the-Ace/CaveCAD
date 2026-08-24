@@ -547,10 +547,10 @@ CaveShelf.show = function() {
 
     forgetButton.clicked.connect(function() {
         if (state.record === null) { return; }
-        var answer = QMessageBox.question(dialog, qsTr("Forget Cave"),
+        var answer = QMessageBox.question(RMainWindowQt.getMainWindow(), qsTr("Forget Cave"),
             qsTr("Take %1 off the shelf?\n\nThe folder and everything in " +
                 "it stays exactly where it is.").arg(state.record.name),
-            makeQMessageBoxStandardButtons(QMessageBox.Yes, QMessageBox.No));
+            QMessageBox.Yes | QMessageBox.No);
         if (answer === QMessageBox.Yes) {
             CsShelf.forget(state.record.folder);
             fillList();
@@ -792,11 +792,11 @@ CaveShelf.addCave = function(parent) {
     if (record === null) { return null; }
 
     if (record.drawing === "") {
-        var answer = QMessageBox.question(parent, qsTr("No Drawing Found"),
+        var answer = QMessageBox.question(RMainWindowQt.getMainWindow(), qsTr("No Drawing Found"),
             qsTr("No DXF or DWG in %1 or one folder below it.\n\n" +
                 "Add it anyway? The cave will sit on the shelf until a " +
                 "drawing is saved in it.").arg(record.name),
-            makeQMessageBoxStandardButtons(QMessageBox.Yes, QMessageBox.No));
+            QMessageBox.Yes | QMessageBox.No);
         if (answer !== QMessageBox.Yes) { return null; }
     }
 
@@ -820,12 +820,12 @@ CaveShelf.offerProjectFolders = function(parent, folder) {
     }
     if (missing.length === 0) { return; }
 
-    var answer = QMessageBox.question(parent, qsTr("Cave Project Folders"),
+    var answer = QMessageBox.question(RMainWindowQt.getMainWindow(), qsTr("Cave Project Folders"),
         qsTr("This cave has no %1 folder. Create it?\n\n" +
             "scans/ holds the hand sketches (Draw > Image opens there); " +
             "PDF/ holds the maps you plot, and is what Package Cave " +
             "Project collects.").arg(missing.join("/ and no ")),
-        makeQMessageBoxStandardButtons(QMessageBox.Yes, QMessageBox.No));
+        QMessageBox.Yes | QMessageBox.No);
     if (answer === QMessageBox.Yes) {
         CsCave.ensureProjectFolders(folder, true);
     }
@@ -869,10 +869,10 @@ CaveShelf.newCave = function(parent) {
 
     var folder = parentFolder + "/" + safe;
     if ((new QDir(folder)).exists()) {
-        var answer = QMessageBox.question(parent, qsTr("Folder Exists"),
+        var answer = QMessageBox.question(RMainWindowQt.getMainWindow(), qsTr("Folder Exists"),
             qsTr("%1 already exists. Put the new drawing in it?")
                 .arg(folder),
-            makeQMessageBoxStandardButtons(QMessageBox.Yes, QMessageBox.No));
+            QMessageBox.Yes | QMessageBox.No);
         if (answer !== QMessageBox.Yes) { return null; }
     }
     else if (!(new QDir()).mkpath(folder)) {
@@ -884,10 +884,10 @@ CaveShelf.newCave = function(parent) {
 
     var drawing = folder + "/" + safe + ".dxf";
     if ((new QFileInfo(drawing)).exists()) {
-        var overwrite = QMessageBox.question(parent, qsTr("Drawing Exists"),
+        var overwrite = QMessageBox.question(RMainWindowQt.getMainWindow(), qsTr("Drawing Exists"),
             qsTr("%1 already exists. Open it instead of starting a new " +
                 "one?").arg(drawing),
-            makeQMessageBoxStandardButtons(QMessageBox.Yes, QMessageBox.No));
+            QMessageBox.Yes | QMessageBox.No);
         if (overwrite !== QMessageBox.Yes) { return null; }
         var existing = CsShelf.normalize({ name: name, folder: folder,
             drawing: drawing });
