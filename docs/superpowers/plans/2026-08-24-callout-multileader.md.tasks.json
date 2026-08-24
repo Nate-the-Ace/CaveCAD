@@ -10,7 +10,7 @@
     {
       "id": 1,
       "subject": "Task 2: CsCallout.reflow leader geometry",
-      "status": "pending",
+      "status": "completed",
       "blockedBy": [
         0
       ],
@@ -19,11 +19,11 @@
     {
       "id": 2,
       "subject": "Task 3: Six callout style layers",
-      "status": "pending",
+      "status": "completed",
       "blockedBy": [
         0
       ],
-      "description": "**Goal:** CsLayers knows the callout layers, so a drawing without the template still gets sane colors and no callout lands on the current layer.\n\n**Files:**\n- Modify: scripts/CaveSurvey/Core/CsLayers.js\n- Modify: tests/js_unit.js\n\n**Acceptance Criteria:**\n- [ ] Six new CsLayers name constants, one per CsCallout.STYLES value\n- [ ] Each has a CsLayers.DEFAULTS row of [colorName, linetype, weightKey]\n- [ ] Every layer named in CsCallout.STYLES has a DEFAULTS row, asserted by test\n- [ ] CsLayers.ensureCalloutLayers(doc, di) exists and ensures all six\n- [ ] elevation-line's layer is a DIFFERENT COLOR from elevation's\n\n**Verify:** node tests/js_unit.js && ./tests/run_all.sh -> ### UNIT OK <n> assertions\n\n**Steps:**\n- Write the failing test that walks CsCallout.STYLES against CsLayers.DEFAULTS\n- Add the six NOTES_* name constants\n- Add the six DEFAULTS rows (hazard red, elevation-line gray DASHED Weight009)\n- Add ensureCalloutLayers beside ensureSurveyLayers\n- Run both runners\n- Commit\n\n```json:metadata\n{\"files\": [\"scripts/CaveSurvey/Core/CsLayers.js\", \"tests/js_unit.js\"], \"verifyCommand\": \"node tests/js_unit.js && ./tests/run_all.sh\", \"acceptanceCriteria\": [\"six constants\", \"six DEFAULTS rows\", \"style-to-layer coverage asserted\", \"ensureCalloutLayers exists\", \"fallback layer visibly different\"], \"modelTier\": \"mechanical\"}\n```"
+      "description": "**Goal:** CsLayers knows the callout layers, so a drawing without the template still gets sane colors and no callout lands on the current layer.\n\n**Files:**\n- Modify: scripts/CaveSurvey/Core/CsLayers.js\n- Modify: tests/js_unit.js\n- Modify: templates/NSS_Cave_Template_PLAN.dxf (via tools/sync_template_layers.js, NOT by hand)\n\n**Acceptance Criteria:**\n- [ ] Six new CsLayers name constants, one per CsCallout.STYLES value\n- [ ] Each has a CsLayers.DEFAULTS row of [colorName, linetype, weightKey]\n- [ ] Every layer named in CsCallout.STYLES has a DEFAULTS row, asserted by test\n- [ ] CsLayers.ensureCalloutLayers(doc, di) exists and ensures all six\n- [ ] elevation-line's layer is a DIFFERENT COLOR from elevation's\n\n**Verify:** node tests/js_unit.js && ./tests/run_all.sh -> ### UNIT OK <n> assertions\n\n**Steps:**\n- Write the failing test that walks CsCallout.STYLES against CsLayers.DEFAULTS\n- Add the six NOTES_* name constants\n- Add the six DEFAULTS rows (hazard red, elevation-line gray DASHED Weight009)\n- Add ensureCalloutLayers beside ensureSurveyLayers\n- Run both runners\n- Commit\n\n```json:metadata\n{\"files\": [\"scripts/CaveSurvey/Core/CsLayers.js\", \"tests/js_unit.js\"], \"verifyCommand\": \"node tests/js_unit.js && ./tests/run_all.sh\", \"acceptanceCriteria\": [\"six constants\", \"six DEFAULTS rows\", \"style-to-layer coverage asserted\", \"ensureCalloutLayers exists\", \"fallback layer visibly different\"], \"modelTier\": \"mechanical\"}\n```"
     },
     {
       "id": 3,

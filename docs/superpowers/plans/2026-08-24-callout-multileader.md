@@ -47,6 +47,24 @@ a numbered section there.
 
 ---
 
+## Review policy for this run
+
+Agreed with the user after Task 3. Not uniform, on purpose — review effort goes
+where a silent failure is expensive and the unit tests are thin.
+
+| Tasks | Review | Why |
+|---|---|---|
+| 4, 5, 8, 9 | full two-stage (spec, then quality) | Document and undo semantics, and the GUI commands. This is where unit tests cover least and a defect reaches a caver's drawing. |
+| 7 | full two-stage | The floor-elevation math. A wrong number here is a wrong elevation on a published cave map, and the tests are the plan author's own, so they can be wrong in the same direction as the code. |
+| 3, 6, 10 | single combined pass | Mechanical, and already guarded by tests that exist. |
+
+What the reviews have actually caught so far, for whoever is deciding whether to
+keep paying for them: a docblock claiming `nextId` rejects non-numeric input when
+`parseInt("3abc")` is 3; two untested operators in `reflow` (`<=` tie-break and
+the `dimasz > 0` threshold), both since mutation-verified; and confirmation that
+the tip round-trip through `applyReflow` cannot drift. Task 3's own colour
+inversion was caught by the coordinator, not by a review.
+
 ## Engine facts this plan depends on
 
 All probed against the INSTALLED binary `/Applications/CaveCAD.app` on
@@ -65,6 +83,49 @@ with `setArrowHead` / `hasArrowHead` / `appendVertex` / `setDimasz` /
 Confirmed BEHAVIORALLY (not by setter existence): two `RAddObjectsOperation`s
 sharing a transaction group collapse into ONE undo — 2 entities went to 0 on a
 single `di.undo()`, while the ungrouped control went 2 to 1.
+
+**Corrections found by ACTUALLY RUNNING the engine during Task 4.** Both were
+errors in this plan, from reading source rather than probing:
+
+- **`RDeleteObjectsOperation.deleteObject` takes ONE argument, not two.** This
+  plan originally wrote `deleteObject(entity, doc)`; the engine prints
+  `Too many arguments, ignoring 1` on every call. Every other caller in this
+  repo passes one (`CsStore`, `CsProfileDraw`, `CsDraw`, `ScatterBreakdown`,
+  `BuildLegend`, `AerialBasemap`). Fixed throughout this plan.
+- **A test harness must use INDIRECT eval: `(0, eval)(src)`, not `eval(src)`.**
+  Direct eval inside a `loadRepoScript` helper scopes every `Cs*` global into
+  that function, so they vanish the moment it returns —
+  `ReferenceError: CsLayers is not defined`. `tests/profile_draw_roundtrip.js`
+  already carries a comment about exactly this. A harness also needs the
+  `isNull` shim AND `getDocument = function() { return doc; }`, because
+  `CsTags.commit` falls through to `CsStore.migrate(getDocument(), di)` and a
+  null there throws `Cannot call method 'hasLayer' of null`.
+- **TAG BEFORE ADDING, never after.** `CsDraw.js:10` states the convention:
+  `setCustomProperty` BEFORE adding, then `op.addObject(entity, false)`.
+  `CsTags.commit` applies its OWN `RModifyObjectsOperation` and takes no
+  transaction group, so tagging after the add makes a grouped write NON-ATOMIC:
+  undoing the group reverts the add but leaves the tagging transaction
+  uncorrelated, and the document keeps an UNTAGGED leader that `members()` can
+  no longer see. Caught by the DXF round-trip test, which failed with
+  "both leaders are still found by the same tag (expected 2, got 1)" while an
+  entity-COUNT assertion passed. `CsTags.commit` remains correct for Task 8's
+  `refreshElev`, which modifies an entity already in the document.
+- **Undo grouping is sensitive to ENTITY OBJECT IDENTITY, not just to the
+  transaction group.** Probed while verifying the fix above: two
+  `RAddObjectsOperation`s sharing a group collapse into one undo, and an
+  UNGROUPED `RModifyObjectsOperation` sandwiched between two same-group adds
+  does NOT break that merge (3 entities → 1 on a single undo). So "a stray
+  ungrouped modify" is not by itself the hazard. What actually broke was
+  tagging a FRESHLY RE-QUERIED wrapper — `doc.queryEntity(addedId)` — rather
+  than the original in-script entity object. Tagging the same reference you
+  added, even after the add, did not reproduce the bug. Do not conclude from
+  this that tag-after-add is safe: it is fragile in a way that depends on which
+  wrapper you hold, which is exactly why the suite's rule is the simple one —
+  tag the object, then add it, once.
+- **Assert composition, not counts.** The undo-grouping test originally checked
+  only `queryAllEntities().length`, which is why the untagged-leader state slipped
+  through. Any assertion about a callout surviving an operation must go through
+  `CalloutWrite.members` and count TAGGED members.
 
 Second probe round, same day, of the API this plan actually calls:
 
@@ -105,6 +166,7 @@ it.** A silent workaround is how the previous design died.
 | `scripts/CaveSurvey/CaveSurvey.js` | MODIFY: install the listener once at startup. |
 | `scripts/CaveSurvey/Core/CsLayers.js` | MODIFY: six callout style layers + `DEFAULTS` rows. |
 | `scripts/CaveSurvey/Core/CsAll.js` | MODIFY: `include` both new Core files. **Enforced** — see below. |
+| `templates/NSS_Cave_Template_PLAN.dxf` | MODIFY (Task 3, mechanically): every `CsLayers` registry layer must already exist in the shipped template — `test_registry_layers_exist_in_plan_template` has no on-demand exemption. Do NOT hand-edit. Run `tools/sync_template_layers.js` against the installed CaveCAD. It re-serialises the whole DXF (~8900 lines of handle renumbering), so verify layer count and entity count before and after rather than reading the diff. Appearance is resolved at CREATION only, so changing a `DEFAULTS` colour after a sync means reverting the DXF and re-syncing, not re-running over the existing layers. |
 | `tests/js_unit.js` | MODIFY: load the two new Core files; add their test blocks. |
 
 **Purity discipline, inherited from `CsProfileDraw.js`:** `CsCallout.js` and
@@ -675,8 +737,14 @@ of what a callout looks like in a document.
       passes `group` through to `setTransactionGroup` when non-null.
 - [ ] Entity ids are learned by DIFFING the id set, never by
       `ids[ids.length - 1]`.
-- [ ] The whole round trip survives a DXF save/load: a created callout's tags
-      and geometry read back.
+- [ ] **The whole round trip survives a DXF save/load** — export, reimport, and
+      find the callout again BY ITS TAGS: same id, text role, both leader roles,
+      style, and the reopened callout still reflows. This is the single most
+      load-bearing test in the task: the link between a text and its leaders is
+      XDATA and nothing else, so if it does not persist, every saved callout
+      decays into an unrelated text and some loose arrows on reopen, and no
+      in-memory test would notice. Use the `RFileExporterRegistry`
+      dxflib-filter idiom already in `tests/js_unit.js` around line 13864.
 
 **Verify:** `./tests/run_all.sh` → the `callout_write` section prints
 `### CALLOUT-WRITE OK`
@@ -998,7 +1066,7 @@ CalloutWrite.writeLeaders = function(doc, di, id, tips, style, layerName,
         if (m.leaders.length > 0) {
             var del = new RDeleteObjectsOperation();
             for (var d = 0; d < m.leaders.length; d++) {
-                del.deleteObject(m.leaders[d], doc);
+                del.deleteObject(m.leaders[d]);
             }
             if (group !== null && group !== undefined) {
                 del.setTransactionGroup(group);
@@ -2771,7 +2839,7 @@ CalloutListener.reconcile = function(doc, di, id, group) {
         if (m.leaders.length > 0) {
             var del = new RDeleteObjectsOperation();
             for (var i = 0; i < m.leaders.length; i++) {
-                del.deleteObject(m.leaders[i], doc);
+                del.deleteObject(m.leaders[i]);
             }
             if (group !== null && group !== undefined) {
                 del.setTransactionGroup(group);
