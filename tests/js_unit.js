@@ -15110,6 +15110,19 @@ if (!IS_NODE) {
         "CsContrib.people: each segment keeps its OWN comma whole " +
             "while still splitting on 'and' within the segment");
 
+    // B1: a semicolon does NOT prove every comma in the text is name-
+    // internal -- only that every SEGMENT it delimits has one of its
+    // own. "Nathan; Jim, Sarah" has a semicolon but its first segment
+    // ("Nathan") carries no comma, so the comma in "Jim, Sarah" is a
+    // real separator, not part of one surname-first name. Treating any
+    // semicolon as proof used to keep "Jim, Sarah" as one contributor
+    // and erase Sarah with no row at all.
+    eqs(CsContrib.people("Nathan; Jim, Sarah").join(","),
+        "Nathan,Jim,Sarah",
+        "CsContrib.people: a semicolon segment with no comma of its " +
+            "own means the comma elsewhere is a real separator, not " +
+            "name-internal");
+
     // A trailing suffix reads as its own person once the comma before
     // it is treated as an ordinary separator -- "Nathan Schonegg, Jr."
     // used to hand back a person named "Jr.".
@@ -15144,6 +15157,17 @@ if (!IS_NODE) {
     eqs(CsContrib.people("(Nathan, Jim)").join(","), "Nathan,Jim",
         "CsContrib.people: a team wrapped in parens is unwrapped, not " +
             "erased");
+    // B2: the unwrap has to loop -- a team text can be wrapped more
+    // than one layer deep, and unwrapping only once used to leave the
+    // remaining wrapped layer to the role-note stripper, which erases
+    // it wholesale (nobody credited), the exact silent-zero the single-
+    // layer unwrap was added to fix.
+    eqs(CsContrib.people("((Nathan, Jim))").join(","), "Nathan,Jim",
+        "CsContrib.people: a team wrapped in TWO layers of parens is " +
+            "still unwrapped, not erased");
+    eqs(CsContrib.people("[(Nathan, Jim)]").join(","), "Nathan,Jim",
+        "CsContrib.people: mixed bracket/paren double-wrapping " +
+            "unwraps the same way");
     // Nested parens defeat the role-note regex (it matches only up to
     // the FIRST ')'), leaving a stray ')' glued to the name.
     eqs(CsContrib.people("Nathan (book (main)), Jim").join(","),
@@ -15151,6 +15175,13 @@ if (!IS_NODE) {
         "CsContrib.people: a stray ')' left by nested parens is trimmed");
     eqs(CsContrib.people("Nathan ), Jim").join(","), "Nathan,Jim",
         "CsContrib.people: an unmatched stray ')' is trimmed the same way");
+
+    // B3: a token that is bare punctuation with no letter or digit at
+    // all -- left over once a split cuts on a comma that was not
+    // actually separating two names -- must not survive as a "person".
+    eqs(CsContrib.people("., Jim").join(","), "Jim",
+        "CsContrib.people: a bare '.' token is dropped, not credited " +
+            "as a person named '.'");
 
     // -- a two-trip survey ---------------------------------------------
     var survey = CsModel.newSurvey();

@@ -16,6 +16,17 @@
 // (excludeFromLength is not honoured); closing that is a CsStats change
 // and belongs with the task already spawned for it, not here.
 //
+// One more divergence from CsStats, and this one is deliberate rather
+// than inherited: byTrip and byRun both skip a shot whose CsTraverse.
+// offset(s, tapeMode) comes back null (no usable geometry -- a non-
+// finite distance/azimuth/inclination survives resolve() inside a
+// disconnected block), where CsStats.compute calls .plan on that same
+// null and throws. Skipping is the right call here: a trip/run summary
+// window has no business crashing over one bad shot elsewhere in the
+// survey, and the alternative (half-counting distance without
+// planDistance) manufactures a NaN that poisons the total silently.
+// See byTrip's and byRun's own comments at the skip itself.
+//
 // CREDIT IS NOT DIVIDED. Two people on one trip are each credited its
 // full distance, so People percentages can exceed 100%. Dividing 412 ft
 // by a party of three invents a number nobody measured. byPerson
@@ -123,9 +134,13 @@ CsContrib.personKey = function(name) {
  * reading fabricates -- or erases -- contributors nobody intended:
  *
  *   1. A team text wrapped ENTIRELY in one pair of parens or brackets
- *      ("(Nathan, Jim)") is unwrapped first: the wrapping IS the team
- *      text here, not a role note on one name, and running the
- *      role-note stripper on it as-is would erase the whole thing.
+ *      ("(Nathan, Jim)", or nested, "((Nathan, Jim))" / "[(Nathan,
+ *      Jim)]") is unwrapped first, one layer at a time until the text
+ *      is no longer fully wrapped: the wrapping IS the team text here,
+ *      not a role note on one name, and running the role-note stripper
+ *      on it as-is would erase the whole thing. Stopping after one
+ *      layer used to leave a double-wrapped team ("((Nathan, Jim))")
+ *      erased the same way.
  *   2. Parenthesised / bracketed role notes ("(book and sketch)",
  *      "[sketch]") are stripped next -- otherwise the "and" or comma
  *      INSIDE the note splits like a separator and hands back a
@@ -133,17 +148,26 @@ CsContrib.personKey = function(name) {
  *      leaves glued to a name (nested parens defeat the regex) is
  *      swept up per-name in step 4.
  *   3. A team text containing a semicolon is read as a surname-first
- *      list ("Last, First; Last, First"): each semicolon-delimited
- *      segment is split on the generic separators MINUS the comma, so
- *      "Doe, Jane and Bob Jones" still recovers two people while
- *      "Schonegg, Nathan"'s own comma is left alone. Otherwise the
- *      whole text is split on the generic separators, comma included.
+ *      list ("Last, First; Last, First") ONLY when EVERY semicolon-
+ *      delimited segment contains a comma: each such segment is split
+ *      on the generic separators MINUS the comma, so "Doe, Jane and
+ *      Bob Jones" still recovers two people while "Schonegg, Nathan"'s
+ *      own comma is left alone. The moment even one segment has no
+ *      comma of its own ("Nathan; Jim, Sarah" -- the first segment is
+ *      one bare name), the semicolon cannot be trusted as a name-
+ *      internal separator either, and the WHOLE text falls back to the
+ *      generic separators, comma included (which still splits on ";"
+ *      as one of them). Treating ANY semicolon as proof that every
+ *      comma in the text is name-internal used to erase Sarah entirely
+ *      and merge "Jim, Sarah" into one contributor.
  *   4. Each resulting piece has stray leading/trailing whitespace and
- *      bracket characters trimmed, then a trailing NAME_SUFFIXES token
- *      is re-attached onto the name before it -- but ONLY when the
- *      separator that produced the split was actually a comma, so
- *      "Nathan Schonegg, Jr." merges while "Nathan and Jr." (Jr. as
- *      somebody's own nickname) does not.
+ *      bracket characters trimmed, then dropped outright if what is
+ *      left has no letter and no digit at all (a bare "." or a stray
+ *      unmatched bracket with nothing else) -- otherwise a trailing
+ *      NAME_SUFFIXES token is re-attached onto the name before it, but
+ *      ONLY when the separator that produced the split was actually a
+ *      comma, so "Nathan Schonegg, Jr." merges while "Nathan and Jr."
+ *      (Jr. as somebody's own nickname) does not.
  *
  * Case-insensitive, punctuation-insensitive de-duplication (see
  * personKey) runs last, over whatever the four steps produced.
@@ -154,28 +178,53 @@ CsContrib.people = function(teamText) {
     }
     var text = String(teamText).replace(/^\s+|\s+$/g, "");
 
-    if (text.length >= 2) {
-        if (text.charAt(0) === "(" &&
-                text.charAt(text.length - 1) === ")") {
-            text = text.substring(1, text.length - 1);
-        } else if (text.charAt(0) === "[" &&
-                text.charAt(text.length - 1) === "]") {
-            text = text.substring(1, text.length - 1);
-        }
+    // Loop, not a single if/else-if: a team text can be wrapped more
+    // than one layer deep ("((Nathan, Jim))", or mixed, "[(Nathan,
+    // Jim)]"), and stopping after one layer left the still-wrapped
+    // remainder to be swept up by the role-note stripper below --
+    // which erases it, crediting nobody, the exact silent-zero this
+    // unwrap exists to prevent.
+    while (text.length >= 2 &&
+            ((text.charAt(0) === "(" &&
+                text.charAt(text.length - 1) === ")") ||
+             (text.charAt(0) === "[" &&
+                text.charAt(text.length - 1) === "]"))) {
+        text = text.substring(1, text.length - 1).replace(/^\s+|\s+$/g, "");
     }
 
     text = text.replace(/\([^)]*\)/g, " ").replace(/\[[^\]]*\]/g, " ");
 
     var tokens;
+    // A semicolon proves the text is a surname-first list ("Last,
+    // First; Last, First") -- and therefore that every comma in it is
+    // name-internal, not a separator -- only when EVERY segment it
+    // delimits contains a comma of its own. "Nathan; Jim, Sarah" has a
+    // semicolon but its first segment ("Nathan") has no comma, so the
+    // discriminator fails and the whole text falls back to the generic
+    // separators (which still split on ";"); treating the bare
+    // semicolon alone as proof used to keep "Jim, Sarah" together as
+    // one contributor and erase Sarah.
     if (text.indexOf(";") >= 0) {
         var segments = text.split(/\s*;\s*/);
-        tokens = [];
-        for (var si = 0; si < segments.length; si++) {
-            var sub = CsContrib.splitTagged(segments[si],
-                CsContrib.SEP_NO_COMMA_SOURCE);
-            for (var sj = 0; sj < sub.length; sj++) {
-                tokens.push(sub[sj]);
+        var allSegmentsHaveComma = true;
+        for (var ci = 0; ci < segments.length; ci++) {
+            if (segments[ci].indexOf(",") < 0) {
+                allSegmentsHaveComma = false;
+                break;
             }
+        }
+        if (allSegmentsHaveComma) {
+            tokens = [];
+            for (var si = 0; si < segments.length; si++) {
+                var sub = CsContrib.splitTagged(segments[si],
+                    CsContrib.SEP_NO_COMMA_SOURCE);
+                for (var sj = 0; sj < sub.length; sj++) {
+                    tokens.push(sub[sj]);
+                }
+            }
+        } else {
+            tokens = CsContrib.splitTagged(text,
+                CsContrib.SEP_GENERIC_SOURCE);
         }
     } else {
         tokens = CsContrib.splitTagged(text, CsContrib.SEP_GENERIC_SOURCE);
@@ -187,6 +236,16 @@ CsContrib.people = function(teamText) {
             .replace(/^[\s()\[\]]+/, "")
             .replace(/[\s()\[\]]+$/, "");
         if (name.length === 0) {
+            continue;
+        }
+        // Mismatched bracket types ("Nathan (book]") and bare
+        // punctuation left over from a split (a lone "." before a
+        // trailing suffix, "., Jim") survive the boundary-only trim
+        // above -- it only strips runs of whitespace/brackets AT THE
+        // ENDS of a token, not stray punctuation with no letter or
+        // digit anywhere in it. Drop any such token outright rather
+        // than hand back a "person" named "." or "(".
+        if (!/[A-Za-z0-9]/.test(name)) {
             continue;
         }
         if (tokens[i].precededByComma && CsContrib.isNameSuffix(name) &&
