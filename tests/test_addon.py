@@ -138,6 +138,7 @@ def frame_of(name):
 # TestSyncTemplateLayersTool checks the appearance of; extend if a
 # DEFAULTS row starts using a new one.
 SVG_TRUE_COLOR = {
+    "cyan": 0x00FFFF,
     "gray": 0x808080,
     "pink": 0xFFC0CB,
     "red": 0xFF0000,
@@ -581,7 +582,31 @@ class TestSyncTemplateLayersTool(unittest.TestCase):
                 "PROFILE-FLOOR", "PROFILE-WALLS-INFERRED",
                 "PROFILE-TEXT-NOTES", "PROFILE-TEXT-LABELS",
                 "PROFILE-BREAKDOWN", "PROFILE-ENTRANCE",
-                "CTRL-LRUD-WALL-LEFT", "CTRL-LRUD-WALL-RIGHT")
+                "CTRL-LRUD-WALL-LEFT", "CTRL-LRUD-WALL-RIGHT",
+                # The callout style layers, so the sync tool is shown
+                # to apply their DEFAULTS colour/linetype/weight when it
+                # CREATES them.
+                #
+                # Be precise about what this does NOT prove. This test
+                # strips the layers, re-syncs, and compares the result
+                # against DEFAULTS -- so DEFAULTS is both the input and
+                # the expectation, and changing a DEFAULTS row moves
+                # both sides together. Verified by mutation: inverting
+                # NOTES-ELEVATION/NOTES-ELEVATION-LINE leaves this suite
+                # green. Nothing here checks that the ALREADY-SHIPPED
+                # template agrees with DEFAULTS, and CsLayers.ensure
+                # resolves appearance at CREATION only, so a re-sync
+                # over existing layers does not recolour them. That is a
+                # real, pre-existing gap -- it let
+                # ELEVATION/ELEVATION-LINE ship inverted -- and closing
+                # it is not a one-liner: 42 of the template's 44
+                # registry layers carry an ACI index (group 62) and no
+                # truecolour (group 420) at all, so such a test first
+                # needs a decision about which representation is
+                # canonical.
+                "NOTES-HAZARD", "NOTES-DIG", "NOTES-EQUIPMENT",
+                "NOTES-NAME", "NOTES-ELEVATION",
+                "NOTES-ELEVATION-LINE")
 
     def setUp(self):
         if not os.path.exists(self.CAVECAD):
