@@ -16828,6 +16828,29 @@ eqs(CsShelf.sorted([{ name: "Zed", folder: "/z" }, { name: "abc", folder: "/a" }
     "abc", "the shelf lists caves by name");
 
 // ---------------------------------------------------------------------
+// Rescaling a whole survey between units
+// ---------------------------------------------------------------------
+
+var convSurvey = CsModel.newSurvey();
+convSurvey.distanceUnit = "m";
+var convShot = CsModel.newShot();
+convShot.from = "A1"; convShot.to = "A2";
+convShot.distance = 10.0; convShot.left = 2.0; convShot.up = null;
+convSurvey.shots.push(convShot);
+convSurvey.fixed = { A1: { x: 1.0, y: 2.0, z: 3.0 } };
+convSurvey.startLrud = { left: 1.0, right: 2.0, up: 3.0, down: 4.0 };
+
+CsUnits.convertSurvey(convSurvey, "ft");
+near(convSurvey.shots[0].distance, 32.808398950, 1e-6, "distance rescales");
+near(convSurvey.shots[0].left, 6.561679790, 1e-6, "LRUD rescales with it");
+ok(convSurvey.shots[0].up === null, "a missing LRUD side stays missing");
+near(convSurvey.fixed.A1.x, 3.280839895, 1e-6, "fixed stations rescale too");
+near(convSurvey.startLrud.down, 13.123359580, 1e-6, "so does the start LRUD");
+eqs(convSurvey.distanceUnit, "ft", "and the survey says what it is now");
+near(CsUnits.convertSurvey(convSurvey, "ft").shots[0].distance, 32.808398950,
+    1e-6, "converting to the unit it already has changes nothing");
+
+// ---------------------------------------------------------------------
 // The cave project's images folder
 // ---------------------------------------------------------------------
 

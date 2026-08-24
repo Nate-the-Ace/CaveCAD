@@ -544,9 +544,12 @@ CaveShelf.show = function() {
 
     var leftButtons = new QHBoxLayout();
     var addButton = new QPushButton(qsTr("Import Cave..."));
+    addButton.toolTip = qsTr("From a file: a survey in Compass, Survex, " +
+        "Walls or CSV becomes a new cave project, drawing and all; a DXF " +
+        "or DWG joins the shelf where it already sits.");
     var addFolderButton = new QPushButton(qsTr("Import Folder..."));
-    addFolderButton.toolTip = qsTr("Registers every cave inside a folder " +
-        "at once -- a survey group's shared folder, say.");
+    addFolderButton.toolTip = qsTr("From a folder: one cave project, or a " +
+        "folder holding several -- a survey group's shared folder, say.");
     var forgetButton = new QPushButton(qsTr("Forget"));
     forgetButton.toolTip = qsTr("Removes the cave from this list. " +
         "Nothing on disk is touched.");
@@ -694,8 +697,10 @@ CaveShelf.show = function() {
             title.text = state.records.length === 0 ?
                 qsTr("No caves on the shelf yet") : "";
             subtitle.text = state.records.length === 0 ?
-                qsTr("Import Cave... points at a cave's folder on your drive. " +
-                    "Saving a drawing inside one adds it here by itself.") : "";
+                qsTr("Import Cave... reads a survey file (Compass, Survex, " +
+                    "Walls, CSV) or an existing drawing. Import Folder... " +
+                    "takes a cave folder, or a folder of them. Saving a " +
+                    "drawing under your drive adds it here by itself.") : "";
             frontier.text = "";
             state.read = null;
             CaveShelf.updateButtons(state, openButton, tripButton, forgetButton,
@@ -783,8 +788,8 @@ CaveShelf.show = function() {
     });
 
     addButton.clicked.connect(function() {
-        var added = CaveShelf.addCave(dialog);
-        if (added !== null) { fillList(added.folder); }
+        var added = CaveShelf.importFile(dialog);
+        if (added !== null) { fillList(added.folder); showDetail(); }
     });
 
     addFolderButton.clicked.connect(function() {
@@ -1283,37 +1288,182 @@ CaveShelf.addFolder = function(parent) {
 };
 
 /**
- * Registers a cave folder the user points at.
+ * Imports a cave from a FILE: either a drawing that already exists, or
+ * a survey file that becomes one.
  *
- * One folder, scanned two levels deep -- see CsShelf's header for why
- * this is not a sweep of the whole drive.
+ * Pointing at survey data is how a cave joins the shelf when it has
+ * never been in CaveCAD at all -- somebody hands over a Compass file
+ * and there is no folder, no drawing and no project yet. So this makes
+ * all three: the folder and its scans/PDF/images, a drawing on the NSS
+ * template with the survey drawn into it, and the original data file
+ * kept beside the drawing, because the file somebody handed over is
+ * evidence and deleting it later should be a decision, not a side
+ * effect.
  *
- * \return the record registered, or null.
+ * \return the record imported, or null.
  */
-CaveShelf.addCave = function(parent) {
+CaveShelf.importFile = function(parent) {
     var roots = CsCave.driveRoots();
     var start = roots.length > 0 ? roots[0] : QDir.homePath();
 
-    var folder = QFileDialog.getExistingDirectory(parent,
-        qsTr("Pick a cave's folder"), start);
-    if (isNull(folder) || String(folder) === "") { return null; }
-    folder = String(folder).replace(/\\/g, "/").replace(/\/+$/, "");
+    var filter = qsTr("Cave surveys and drawings") + " (*.dat *.srv *.svx " +
+        "*.csv *.dxf *.dwg);;" + CsFormatRegistry.combinedFileFilter() +
+        ";;" + qsTr("Drawings") + " (*.dxf *.dwg);;" +
+        qsTr("Every file") + " (*)";
 
-    var record = CsShelf.recordFor(folder);
-    if (record === null) { return null; }
+    var picked = QFileDialog.getOpenFileName(parent,
+        qsTr("Import a cave from a file"), start, filter);
+    if (isNull(picked) || String(picked) === "") { return null; }
+    var path = String(picked).replace(/\\/g, "/");
 
-    if (record.drawing === "") {
-        var answer = QMessageBox.question(RMainWindowQt.getMainWindow(), qsTr("No Drawing Found"),
-            qsTr("No DXF or DWG in %1 or one folder below it.\n\n" +
-                "Add it anyway? The cave will sit on the shelf until a " +
-                "drawing is saved in it.").arg(record.name),
-            QMessageBox.Yes | QMessageBox.No);
-        if (answer !== QMessageBox.Yes) { return null; }
+    // A drawing is already a cave: its folder is the project.
+    var extension = CsShelf.extension(path);
+    if (extension === "dxf" || extension === "dwg") {
+        var folder = CsCave.folderOf(path);
+        if (folder === null) { return null; }
+        var existing = CsShelf.normalize({ name: CsCave.nameOf(path),
+            folder: folder, drawing: path });
+        CsShelf.register(existing);
+        CaveShelf.offerProjectFolders(parent, folder);
+        return existing;
     }
 
-    CsShelf.register(record);
-    CaveShelf.offerProjectFolders(parent, folder);
-    return record;
+    return CaveShelf.importSurveyFile(parent, path);
+};
+
+/**
+ * Reads a survey file, makes a cave project for it, and draws it.
+ */
+CaveShelf.importSurveyFile = function(parent, path) {
+    // ---- read and parse ------------------------------------------------
+    var file = new QFile(path);
+    if (!file.open(QIODevice.ReadOnly | QIODevice.Text)) {
+        EAction.handleUserWarning(qsTr("Could not open ") + path);
+        return null;
+    }
+    var content = new QTextStream(file).readAll();
+    file.close();
+
+    var format = CsFormatRegistry.detect(path, content);
+    if (format === null) {
+        var labels = [];
+        for (var i = 0; i < CsFormatRegistry.FORMATS.length; i++) {
+            labels.push(CsFormatRegistry.FORMATS[i].label);
+        }
+        var choice = QInputDialog.getItem(parent, qsTr("Import Cave"),
+            qsTr("The format could not be detected — which is it?"),
+            labels, 0, false);
+        if (isNull(choice) || String(choice) === "") { return null; }
+        for (i = 0; i < CsFormatRegistry.FORMATS.length; i++) {
+            if (CsFormatRegistry.FORMATS[i].label === String(choice)) {
+                format = CsFormatRegistry.FORMATS[i];
+            }
+        }
+        if (format === null) { return null; }
+    }
+
+    var survey;
+    try {
+        survey = format.parse(content);
+    } catch (eParse) {
+        EAction.handleUserWarning(qsTr("Could not read this as %1: ")
+            .arg(format.label) + eParse);
+        return null;
+    }
+    if (survey === null || survey === undefined ||
+            survey.shots.length === 0) {
+        EAction.handleUserWarning(qsTr("No shots were read from this file " +
+            "(tried %1).").arg(format.label));
+        return null;
+    }
+
+    // ---- name it ---------------------------------------------------------
+    var suggested = CsShelf.clean(survey.caveName);
+    if (suggested === "") { suggested = CsShelf.stem(path); }
+
+    var typed = QInputDialog.getText(parent, qsTr("Import Cave"),
+        qsTr("%1 shots read. What is this cave called?")
+            .arg(survey.shots.length),
+        QLineEdit.Normal, suggested);
+    if (isNull(typed)) { return null; }
+    var name = CsPackage.safeName(String(typed));
+    if (name === "") { return null; }
+
+    // ---- where it lives --------------------------------------------------
+    var roots = CsCave.driveRoots();
+    var start = roots.length > 0 ? roots[0] : QDir.homePath();
+    var parentFolder = QFileDialog.getExistingDirectory(parent,
+        qsTr("Where should %1 live?").arg(name), start);
+    if (isNull(parentFolder) || String(parentFolder) === "") { return null; }
+    parentFolder = String(parentFolder).replace(/\\/g, "/")
+        .replace(/\/+$/, "");
+
+    var folder = parentFolder + "/" + name;
+    if (!(new QDir(folder)).exists() && !(new QDir()).mkpath(folder)) {
+        EAction.handleUserWarning(qsTr("Could not create ") + folder);
+        return null;
+    }
+    CsCave.ensureProjectFolders(folder, true);
+
+    // ---- the drawing, from the template ----------------------------------
+    var record = CsShelf.normalize({ name: name, folder: folder,
+        drawing: "" });
+    var drawing = CaveShelf.startDrawing(record);
+    if (drawing === null) { return null; }
+
+    // ---- draw the survey into it ------------------------------------------
+    var drawn = CaveShelf.drawImportedSurvey(survey);
+    if (!drawn) {
+        EAction.handleUserWarning(qsTr("%1 was created, but the survey " +
+            "could not be drawn into it. Import Cave Survey can try again " +
+            "into the open drawing.").arg(name));
+    }
+
+    // ---- keep the file somebody handed over ------------------------------
+    try {
+        var kept = folder + "/" + CsShelf.basename(path);
+        if (!(new QFileInfo(kept)).exists()) {
+            (new QFile(path)).copy(kept);
+        }
+    } catch (eKeep) {
+    }
+
+    var saved = CsShelf.find(folder);
+    EAction.handleUserMessage(qsTr("%1 imported: %2 shots from %3.")
+        .arg(name).arg(survey.shots.length).arg(CsShelf.basename(path)));
+    return saved === null ? record : saved;
+};
+
+/**
+ * Draws a parsed survey into the drawing that is open now, in the
+ * drawing's own unit, and saves it.
+ *
+ * \return true if the survey was drawn.
+ */
+CaveShelf.drawImportedSurvey = function(survey) {
+    try {
+        var doc = EAction.getDocument();
+        var di = EAction.getDocumentInterface();
+        if (isNull(doc) || isNull(di)) { return false; }
+
+        // The file's unit is whatever the surveyors used; the drawing's
+        // is whatever the template is in. Rescale before drawing, or the
+        // cave comes out the right shape at the wrong size.
+        CsUnits.convertSurvey(survey, CsUnits.fromDrawingUnit(doc.getUnit(), RS));
+
+        var resolved = CsAdjust.resolveAndAdjust(survey, {},
+            CsAdjust.currentOptions());
+        CsDraw.survey(survey, resolved, undefined, undefined, 0);
+
+        try {
+            di.autoZoom();
+        } catch (eZoom) {
+        }
+        new Save().save(EAction.getDocument().getFileName(), "", false);
+        return true;
+    } catch (e) {
+        return false;
+    }
 };
 
 /**

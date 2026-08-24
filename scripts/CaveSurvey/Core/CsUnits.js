@@ -74,3 +74,60 @@ CsUnits.fromDrawingUnit = function(rsUnit, rs) {
     }
     return CsUnits.FEET;
 };
+
+/**
+ * Rescales a whole survey into another distance unit, in place.
+ *
+ * Distances, LRUD and fixed-station coordinates all carry the survey's
+ * unit; angles do not. Written here rather than inline at each caller
+ * because a copy that forgets the fixed stations, or the LRUD, is a
+ * drawing that looks right until somebody measures it.
+ *
+ * \return the survey.
+ */
+CsUnits.convertSurvey = function(survey, toUnit) {
+    if (survey === undefined || survey === null) { return survey; }
+    var from = CsUnits.normalize(survey.distanceUnit);
+    var to = CsUnits.normalize(toUnit);
+    if (from === undefined || to === undefined || from === to) {
+        return survey;
+    }
+
+    var factor = CsUnits.convert(1.0, from, to);
+    var scale = function(value) {
+        return (typeof value === "number") ? value * factor : value;
+    };
+
+    var shots = (Object.prototype.toString.call(survey.shots) ===
+        "[object Array]") ? survey.shots : [];
+    for (var i = 0; i < shots.length; i++) {
+        var shot = shots[i];
+        shot.distance = scale(shot.distance);
+        shot.left = scale(shot.left);
+        shot.right = scale(shot.right);
+        shot.up = scale(shot.up);
+        shot.down = scale(shot.down);
+    }
+
+    if (survey.fixed !== undefined && survey.fixed !== null) {
+        for (var name in survey.fixed) {
+            if (!Object.prototype.hasOwnProperty.call(survey.fixed, name)) {
+                continue;
+            }
+            var point = survey.fixed[name];
+            point.x = scale(point.x);
+            point.y = scale(point.y);
+            point.z = scale(point.z);
+        }
+    }
+
+    if (survey.startLrud !== undefined && survey.startLrud !== null) {
+        survey.startLrud.left = scale(survey.startLrud.left);
+        survey.startLrud.right = scale(survey.startLrud.right);
+        survey.startLrud.up = scale(survey.startLrud.up);
+        survey.startLrud.down = scale(survey.startLrud.down);
+    }
+
+    survey.distanceUnit = to;
+    return survey;
+};
