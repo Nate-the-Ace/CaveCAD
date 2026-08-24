@@ -24,6 +24,7 @@
 include("scripts/EAction.js");
 include("scripts/simple.js");
 include(includeBasePath + "/../Core/CsAll.js");
+include(includeBasePath + "/TripFocusRows.js");
 
 function TripFocus(guiAction) {
     EAction.call(this, guiAction);
@@ -67,6 +68,119 @@ TripFocus.buildPreview = function(sourceDoc) {
     return di;
 };
 
+/** The reconstructed survey the window is describing, or null when the
+ *  drawing holds none. Read once per open/Refresh -- surveyFromDocument
+ *  is a full document scan. */
+TripFocus.readSurvey = function(doc) {
+    try {
+        var recon = CsRevise.surveyFromDocument(doc);
+        if (isNull(recon) || isNull(recon.survey)) {
+            return null;
+        }
+        var resolved = CsNetwork.resolve(recon.survey);
+        return { survey: recon.survey, resolved: resolved };
+    } catch (e) {
+        return null;
+    }
+};
+
+TripFocus.COL_WHAT = 0;
+TripFocus.COL_DISTANCE = 1;
+TripFocus.COL_SHARE = 2;
+
+/** The list pane. Section items carry their own key in column 0's
+ *  user role so picked() can read a checked child's section without
+ *  walking back up by title text. */
+TripFocus.buildTree = function(read) {
+    var tree = new QTreeWidget();
+    tree.objectName = "TripFocusTree";
+    tree.columnCount = 3;
+    tree.setHeaderLabels(["Contributor", "Distance", "Share"]);
+    tree.rootIsDecorated = true;
+    tree.uniformRowHeights = true;
+
+    if (read === null) {
+        var none = new QTreeWidgetItem(tree);
+        none.setText(TripFocus.COL_WHAT, "No survey data in this drawing");
+        none.setDisabled(true);
+        return tree;
+    }
+
+    var sections = TripFocusRows.build(read.survey, read.resolved,
+        CsTraverse.SLOPE);
+    for (var s = 0; s < sections.length; s++) {
+        var section = sections[s];
+        var head = new QTreeWidgetItem(tree);
+        head.setText(TripFocus.COL_WHAT, section.title +
+            (section.note === "" ? "" : "  -- " + section.note));
+        head.setData(TripFocus.COL_WHAT, Qt.UserRole, section.key);
+        head.setExpanded(true);
+
+        if (section.rows.length === 0) {
+            head.setDisabled(true);
+            head.setText(TripFocus.COL_WHAT, section.title +
+                "  (none recorded)");
+            continue;
+        }
+        head.setFlags(head.flags() | Qt.ItemIsUserCheckable);
+        head.setCheckState(TripFocus.COL_WHAT, Qt.Unchecked);
+
+        for (var r = 0; r < section.rows.length; r++) {
+            var row = section.rows[r];
+            var item = new QTreeWidgetItem(head);
+            item.setText(TripFocus.COL_WHAT, row.label);
+            item.setText(TripFocus.COL_DISTANCE, row.distanceText);
+            item.setText(TripFocus.COL_SHARE, row.percentText);
+            if (isNull(row.pick)) {
+                // informational only -- see TripFocusRows' unassigned row
+                item.setDisabled(true);
+            } else {
+                item.setFlags(item.flags() | Qt.ItemIsUserCheckable);
+                item.setCheckState(TripFocus.COL_WHAT, Qt.Unchecked);
+            }
+            item.setData(TripFocus.COL_WHAT, Qt.UserRole, section.key);
+            item.setData(TripFocus.COL_SHARE, Qt.UserRole,
+                isNull(row.pick) ? null : String(row.pick));
+        }
+    }
+    return tree;
+};
+
+/** What is checked, in the shape CsFocus.stationSet wants. A trip's
+ *  pick round-trips through text (Qt.UserRole is set as a string), so
+ *  it comes back parsed rather than as "0". Team and person picks
+ *  come back exactly as TripFocusRows.build wrote them ("team:..." /
+ *  "person:..." -- see that file's docblock for why the namespace
+ *  prefix matters), which is what CsFocus.stationSet's tripsForGroup
+ *  lookup now expects. */
+TripFocus.picked = function(tree) {
+    var out = { trips: [], teams: [], people: [], runs: [] };
+    for (var s = 0; s < tree.topLevelItemCount; s++) {
+        var head = tree.topLevelItem(s);
+        for (var r = 0; r < head.childCount(); r++) {
+            var item = head.child(r);
+            if (item.checkState(TripFocus.COL_WHAT) !== Qt.Checked) {
+                continue;
+            }
+            var key = item.data(TripFocus.COL_WHAT, Qt.UserRole);
+            var pick = item.data(TripFocus.COL_SHARE, Qt.UserRole);
+            if (isNull(pick) || pick === "null") {
+                continue;   // the "(not in any run)" row: nothing to focus
+            }
+            if (key === "trips") {
+                out.trips.push(parseInt(pick, 10));
+            } else if (key === "teams") {
+                out.teams.push(String(pick));
+            } else if (key === "people") {
+                out.people.push(String(pick));
+            } else if (key === "runs") {
+                out.runs.push(String(pick));
+            }
+        }
+    }
+    return out;
+};
+
 TripFocus.show = function(doc) {
     if (TripFocus.dialog !== null && TripFocus.dialog !== undefined) {
         TripFocus.dialog.raise();
@@ -89,7 +203,46 @@ TripFocus.show = function(doc) {
     imageView.setScene(new RGraphicsSceneQt(di));
     imageView.setPaintOrigin(false);
     imageView.setMargin(10);
-    layout.addWidget(view, 1, 0);
+
+    var read = TripFocus.readSurvey(doc);
+    var tree = TripFocus.buildTree(read);
+
+    var splitter = new QSplitter(Qt.Horizontal, dlg);
+    splitter.addWidget(tree);
+    splitter.addWidget(view);
+    splitter.setSizes([320, 620]);
+    layout.addWidget(splitter, 1, 0);
+
+    // one window at a time (show() raises the existing one), so the
+    // window's parts live here rather than as properties bolted onto the
+    // QDialog wrapper -- Refresh replaces the tree widget, and a stale
+    // reference on a wrapper object is the kind of thing that reads as
+    // "the buttons stopped working" much later
+    TripFocus.state = { tree: tree, read: read, view: view, doc: doc };
+
+    // Section checkboxes drive their children. Guarded: a failed
+    // connect must leave the window usable with plain independent
+    // checkboxes rather than crash the whole tool over a cascade that
+    // is a convenience, not the point of this window.
+    try {
+        tree.itemChanged.connect(function(item, column) {
+            if (column !== TripFocus.COL_WHAT || TripFocus.inCascade) {
+                return;
+            }
+            if (item.childCount() === 0) {
+                return;
+            }
+            TripFocus.inCascade = true;   // a child's own itemChanged
+                                          // would otherwise re-enter
+                                          // this handler
+            var state = item.checkState(TripFocus.COL_WHAT);
+            for (var r = 0; r < item.childCount(); r++) {
+                item.child(r).setCheckState(TripFocus.COL_WHAT, state);
+            }
+            TripFocus.inCascade = false;
+        });
+    } catch (e) {
+    }
 
     var buttons = new QHBoxLayout();
     var closeButton = new QPushButton("Close");

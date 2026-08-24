@@ -15664,6 +15664,123 @@ if (!IS_NODE) {
 })();
 
 // ---------------------------------------------------------------------
+// TripFocus.sections -- the rows the window lists (pure part)
+// ---------------------------------------------------------------------
+(function() {
+    loadRepoScript("scripts/CaveSurvey/Core/CsAngles.js");
+    loadRepoScript("scripts/CaveSurvey/Core/CsUnits.js");
+    loadRepoScript("scripts/CaveSurvey/Core/CsModel.js");
+    loadRepoScript("scripts/CaveSurvey/Core/CsTraverse.js");
+    loadRepoScript("scripts/CaveSurvey/Core/CsNetwork.js");
+    loadRepoScript("scripts/CaveSurvey/Core/CsProfile.js");
+    loadRepoScript("scripts/CaveSurvey/Core/CsStats.js");
+    loadRepoScript("scripts/CaveSurvey/Core/CsContrib.js");
+    loadRepoScript("scripts/CaveSurvey/TripFocus/TripFocusRows.js");
+
+    var survey = CsModel.newSurvey();
+    survey.distanceUnit = "ft";
+    var t0 = CsModel.newTrip();
+    t0.date = "2024-03-16"; t0.team = "Nathan, Jim";
+    survey.trips = [t0];
+    var s = CsModel.newShot();
+    s.from = "A1"; s.to = "A2"; s.distance = 100.0; s.azimuth = 0.0;
+    survey.shots = [s];
+    var resolved = CsNetwork.resolve(survey);
+
+    var sections = TripFocusRows.build(survey, resolved, CsTraverse.SLOPE);
+    eqs(sections.length, 4,
+        "TripFocusRows.build: trips, teams, people and runs");
+    eqs(sections[0].key, "trips", "TripFocusRows.build: trips first");
+    eqs(sections[0].rows[0].distanceText, "100 ft",
+        "TripFocusRows.build: the row carries its formatted distance");
+    eqs(sections[0].rows[0].percentText, "100%",
+        "TripFocusRows.build: one trip surveyed all of it");
+    eqs(sections[2].key, "people", "TripFocusRows.build: people third");
+    eqs(sections[2].rows.length, 2, "TripFocusRows.build: Nathan and Jim");
+    ok(sections[2].note.length > 0,
+        "TripFocusRows.build: the People section says credit is not divided");
+
+    var empty = CsModel.newSurvey();
+    // a shot into a station that never resolved: its distance belongs to
+    // no run, and the section has to say so rather than rescale itself
+    var orphaned = CsModel.newSurvey();
+    orphaned.distanceUnit = "ft";
+    orphaned.trips = [t0];
+    var connected = CsModel.newShot();
+    connected.from = "A1"; connected.to = "A2";
+    connected.distance = 200.0; connected.azimuth = 0.0;
+    var stray = CsModel.newShot();
+    stray.from = "Q1"; stray.to = "Q.2";   // splitName refuses a dotted name
+    stray.distance = 300.0; stray.azimuth = 0.0;
+    orphaned.shots = [connected, stray];
+    var orphanSections = TripFocusRows.build(orphaned,
+        CsNetwork.resolve(orphaned), CsTraverse.SLOPE);
+    var runSection = orphanSections[3];
+    var unassignedRow = runSection.rows[runSection.rows.length - 1];
+    eqs(unassignedRow.label, "(not in any run)",
+        "TripFocusRows.build: distance no run claimed is listed, not dropped");
+    ok(isNull(unassignedRow.pick),
+        "TripFocusRows.build: the unassigned row is not checkable -- there " +
+        "is no station set to focus");
+
+    var emptySections = TripFocusRows.build(empty,
+        CsNetwork.resolve(empty), CsTraverse.SLOPE);
+    eqs(emptySections.length, 4,
+        "TripFocusRows.build: an empty drawing still has four sections");
+    eqs(emptySections[3].rows.length, 0,
+        "TripFocusRows.build: no runs in an empty drawing");
+
+    // -------------------------------------------------------------
+    // Mid-flight fix: tripsForGroup is one flat map covering TWO key
+    // namespaces (byTeam keys on team text verbatim; byPerson exposes
+    // `person` in display case while deduping on CsContrib.personKey).
+    // A solo trip whose team text IS its one member's name would put
+    // the same string in both namespaces unprefixed, so whichever
+    // section wrote the map last would win and checking the Teams row
+    // could silently return the PERSON's trip ids instead (every trip
+    // that person was on, not just this one). Pin the fix: each row's
+    // `pick` -- and tripsForGroup's own key -- must carry a namespace
+    // prefix ("team:" / "person:"), and the two must resolve to the
+    // SAME trip through their OWN, different, keys.
+    // -------------------------------------------------------------
+    var soloSurvey = CsModel.newSurvey();
+    soloSurvey.distanceUnit = "ft";
+    var soloTrip = CsModel.newTrip();
+    soloTrip.date = "2024-04-01"; soloTrip.team = "Nathan";
+    soloSurvey.trips = [soloTrip];
+    var soloShot = CsModel.newShot();
+    soloShot.from = "B1"; soloShot.to = "B2";
+    soloShot.distance = 50.0; soloShot.azimuth = 0.0;
+    soloSurvey.shots = [soloShot];
+    var soloResolved = CsNetwork.resolve(soloSurvey);
+
+    var soloSections = TripFocusRows.build(soloSurvey, soloResolved,
+        CsTraverse.SLOPE);
+    var soloTeamRow = soloSections[1].rows[0];
+    var soloPersonRow = soloSections[2].rows[0];
+    eqs(soloTeamRow.pick, "team:Nathan",
+        "TripFocusRows.build: a Teams row's pick is namespaced team:");
+    eqs(soloPersonRow.pick, "person:NATHAN",
+        "TripFocusRows.build: a People row's pick is namespaced person: " +
+        "and keyed on CsContrib.personKey, not the display name");
+    ok(soloTeamRow.pick !== soloPersonRow.pick,
+        "TripFocusRows.build: a solo trip named after its own team text " +
+        "does not collide Teams and People onto one pick");
+
+    var groups = TripFocusRows.tripsForGroup(soloSurvey, soloResolved,
+        CsTraverse.SLOPE);
+    ok(groups["team:Nathan"] !== undefined &&
+        groups["team:Nathan"].length === 1 &&
+        groups["team:Nathan"][0] === 0,
+        "TripFocusRows.tripsForGroup: the team: key resolves to the trip");
+    ok(groups["person:NATHAN"] !== undefined &&
+        groups["person:NATHAN"].length === 1 &&
+        groups["person:NATHAN"][0] === 0,
+        "TripFocusRows.tripsForGroup: the person: key resolves to the " +
+        "same trip via its own namespace, not the team's");
+})();
+
+// ---------------------------------------------------------------------
 // Report.
 // ---------------------------------------------------------------------
 
