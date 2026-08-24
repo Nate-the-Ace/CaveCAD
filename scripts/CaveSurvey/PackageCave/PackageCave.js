@@ -124,18 +124,137 @@ PackageCave.chooseCave = function(parent) {
 // ---------------------------------------------------------------------
 
 /**
- * Asks what kind of package and what goes in it.
+ * Everything in a cave project that could go in a package, as a tree:
+ * root entries first, then one group per project folder.
  *
- * scans/ is a real choice rather than a policy: handing a project to a
- * new cartographer means handing over the sketches, and that handoff is
- * the full archive -- so scans follow the mode by default (off when
- * sanitized, on when full) and the user can say otherwise either way.
+ * Two of the entries are not files at all yet -- the manifest and the
+ * interchange exports are written INTO the package as it is built --
+ * and they sit in the same list because from the user's side they are
+ * the same decision: is this in the zip or not.
  *
- * \return {full, pdfs, data, scans, destination} or null.
+ * \return [{ key, label, detail, kind, path, forced, sanitized, full,
+ *            sanitizedAllowed, children }]
  */
-PackageCave.ask = function(parent, record, counts) {
+PackageCave.contentsOf = function(record) {
+    var groups = [];
+    var root = { key: "root", label: "", children: [] };
+
+    var sizeOf = function(path) {
+        try {
+            var bytes = (new QFileInfo(path)).size();
+            if (bytes < 1024) { return bytes + " B"; }
+            if (bytes < 1024 * 1024) { return Math.round(bytes / 1024) + " KB"; }
+            return (Math.round(bytes / 1024 / 102.4) / 10) + " MB";
+        } catch (e) {
+            return "";
+        }
+    };
+
+    // ---- the drawing, and the things written beside it ---------------
+    root.children.push({
+        key: "drawing", kind: "drawing", path: record.drawing,
+        label: CsShelf.basename(record.drawing),
+        detail: qsTr("the survey drawing — %1").arg(sizeOf(record.drawing)),
+        forced: true, sanitized: true, full: true, sanitizedAllowed: true
+    });
+
+    var aerial = CsGeoProject.imagePathFor(record.drawing);
+    if (aerial !== null && (new QFileInfo(aerial)).exists()) {
+        root.children.push({
+            key: "aerial", kind: "aerial", path: aerial,
+            label: CsShelf.basename(aerial),
+            detail: qsTr("aerial basemap — SHOWS THE SURFACE LOCATION"),
+            forced: false, sanitized: false, full: true,
+            // Never in a sanitized package, whatever is ticked: the
+            // photograph IS the location, and a package that says
+            // sanitized cannot carry it.
+            sanitizedAllowed: false
+        });
+    }
+
+    root.children.push({
+        key: "data", kind: "data", path: "",
+        label: qsTr("data/ — Compass, Survex, CSV"),
+        detail: qsTr("written from the survey as the package is built"),
+        forced: false, sanitized: true, full: true, sanitizedAllowed: true
+    });
+
+    root.children.push({
+        key: "manifest", kind: "manifest", path: "",
+        label: "MANIFEST.txt",
+        detail: qsTr("cave, trips, declinations, open ends — always included"),
+        forced: true, sanitized: true, full: true, sanitizedAllowed: true
+    });
+
+    groups.push(root);
+
+    // ---- a group per project folder ----------------------------------
+    var folderGroup = function(key, label, files, kind, defaults, detailFor) {
+        if (files.length === 0) { return; }
+        var children = [];
+        for (var i = 0; i < files.length; i++) {
+            children.push({
+                key: key + ":" + i, kind: kind, path: files[i],
+                label: CsShelf.basename(files[i]),
+                detail: detailFor(files[i], sizeOf(files[i])),
+                forced: false,
+                sanitized: defaults.sanitized,
+                full: defaults.full,
+                sanitizedAllowed: true
+            });
+        }
+        groups.push({ key: key, label: label + "  (" + children.length + ")",
+            children: children });
+    };
+
+    folderGroup("pdf", CsCave.PDF + "/", CsCave.pdfFiles(record.folder), "pdf",
+        { sanitized: true, full: true },
+        function(path, size) { return qsTr("a plotted map — %1").arg(size); });
+
+    var scansFolder = CsCave.findSubfolder(record.folder, CsCave.SCANS);
+    folderGroup("scan", CsCave.SCANS + "/",
+        scansFolder === null ? [] : PackageCave.filesIn(scansFolder), "scan",
+        { sanitized: false, full: true },
+        function(path, size) {
+            return qsTr("sketch — may carry access notes — %1").arg(size);
+        });
+
+    folderGroup("image", CsCave.IMAGES + "/",
+        CsCave.imageFiles(record.folder), "image",
+        { sanitized: false, full: true },
+        function(path, size) {
+            return qsTr("photograph — re-encoded, EXIF removed — %1").arg(size);
+        });
+
+    return groups;
+};
+
+/**
+ * Asks what kind of package this is, and exactly what goes in it.
+ *
+ * The list is a TREE of the cave's own files, not a row of categories:
+ * "include the scans" is a decision somebody can make without looking,
+ * but "include THIS photograph" is the decision they actually want when
+ * a folder holds an entrance shot they would rather not hand out.
+ *
+ * Built from checkboxes in a scroll area rather than a QTreeWidget,
+ * which this bridge generates as a wrapper-only class -- `new
+ * QTreeWidget()` warns and hands back an object with nothing behind it
+ * (see CaveShelf.js, where the same trap ate the cave list).
+ *
+ * The mode drives the defaults: switching to a full archive ticks the
+ * sketches and photographs, switching back unticks them -- but only for
+ * entries nobody has touched, because a person who ticked one
+ * photograph on purpose should not have it silently untick.
+ *
+ * \return {full, destination, items: [entry]} or null.
+ */
+PackageCave.ask = function(parent, record) {
+    var groups = PackageCave.contentsOf(record);
+
     var dialog = new QDialog(parent);
     dialog.windowTitle = qsTr("Package Cave Project");
+    dialog.setMinimumSize(new QSize(620, 560));
 
     var layout = new QVBoxLayout();
 
@@ -160,48 +279,112 @@ PackageCave.ask = function(parent, record, counts) {
     kind.setLayout(kindLayout);
     layout.addWidget(kind, 0, 0);
 
-    var includes = new QGroupBox(qsTr("Include"));
-    var includeLayout = new QVBoxLayout();
-    var pdfs = new QCheckBox(qsTr("Maps from PDF/ (%1)").arg(counts.pdfs));
-    pdfs.checked = counts.pdfs > 0;
-    pdfs.enabled = counts.pdfs > 0;
-    var data = new QCheckBox(qsTr("Survey data — Compass, Survex, CSV"));
-    data.checked = true;
-    var scans = new QCheckBox(qsTr("Hand sketches from scans/ (%1)")
-        .arg(counts.scans));
-    scans.checked = false;
-    scans.enabled = counts.scans > 0;
-    scans.toolTip = qsTr("Sketches often carry access notes, parking and " +
-        "landowner names.");
-    var images = new QCheckBox(qsTr("Photographs from images/ (%1)")
-        .arg(counts.images));
-    images.checked = false;
-    images.enabled = counts.images > 0;
-    images.toolTip = qsTr("An entrance photograph shows where the entrance " +
-        "is, and phones write the coordinates into the file. Nothing here " +
-        "strips them.");
-    includeLayout.addWidget(pdfs, 0, 0);
-    includeLayout.addWidget(data, 0, 0);
-    includeLayout.addWidget(scans, 0, 0);
-    includeLayout.addWidget(images, 0, 0);
-    includes.setLayout(includeLayout);
-    layout.addWidget(includes, 0, 0);
+    layout.addWidget(new QLabel(qsTr("Contents")), 0, 0);
 
-    // The mode carries the sketches with it, until the user says
-    // otherwise -- after which their choice stands.
-    var scansTouched = { yes: false };
-    var imagesTouched = { yes: false };
-    scans.clicked.connect(function() { scansTouched.yes = true; });
-    images.clicked.connect(function() { imagesTouched.yes = true; });
-    var followMode = function() {
-        if (!scansTouched.yes && scans.enabled) {
-            scans.checked = full.checked === true;
-        }
-        if (!imagesTouched.yes && images.enabled) {
-            images.checked = full.checked === true;
-        }
+    var host = new QWidget();
+    var hostLayout = new QVBoxLayout();
+    var area = new QScrollArea();
+    area.widgetResizable = true;
+
+    // Every checkbox, with the entry it stands for, so reading the
+    // answer back is a walk over one list.
+    var rows = [];
+    var touched = {};
+    var loading = { yes: true };
+
+    var makeRow = function(entry, indent, parentBox) {
+        var box = new QCheckBox(entry.label);
+        box.toolTip = entry.detail;
+        var line = new QHBoxLayout();
+        line.setContentsMargins(indent, 0, 0, 0);
+        line.addWidget(box, 0, 0);
+        var detail = new QLabel(entry.detail);
+        detail.enabled = false;
+        line.addWidget(detail, 1, 0);
+        hostLayout.addLayout(line, 0);
+
+        var row = { entry: entry, box: box, parentBox: parentBox };
+        rows.push(row);
+
+        box.stateChanged.connect(function() {
+            if (loading.yes === true) { return; }
+            touched[entry.key] = true;
+            if (parentBox !== null) { PackageCave.syncParent(rows, parentBox); }
+        });
+        return row;
     };
-    full.toggled.connect(followMode);
+
+    for (var g = 0; g < groups.length; g++) {
+        var group = groups[g];
+        var groupBox = null;
+
+        if (group.label !== "") {
+            groupBox = new QCheckBox(group.label);
+            groupBox.setTristate(true);
+            var groupLine = new QHBoxLayout();
+            groupLine.setContentsMargins(0, 8, 0, 0);
+            groupLine.addWidget(groupBox, 1, 0);
+            hostLayout.addLayout(groupLine, 0);
+
+            (function(box, key) {
+                box.clicked.connect(function() {
+                    // A folder's own box is the blunt instrument: it sets
+                    // every file under it, and that counts as touching
+                    // each of them.
+                    var want = box.checkState() !== Qt.Unchecked;
+                    box.setCheckState(want ? Qt.Checked : Qt.Unchecked);
+                    for (var r = 0; r < rows.length; r++) {
+                        if (rows[r].parentBox !== box) { continue; }
+                        if (!rows[r].box.enabled) { continue; }
+                        rows[r].box.checked = want;
+                        touched[rows[r].entry.key] = true;
+                    }
+                });
+            }(groupBox, group.key));
+        }
+
+        for (var c = 0; c < group.children.length; c++) {
+            makeRow(group.children[c], groupBox === null ? 0 : 22, groupBox);
+        }
+    }
+
+    hostLayout.addStretch(1);
+    host.setLayout(hostLayout);
+    area.setWidget(host);
+    layout.addWidget(area, 1, 0);
+
+    // ---- defaults, and what the mode does to them ---------------------
+    var applyDefaults = function() {
+        loading.yes = true;
+        var isFull = full.checked === true;
+        for (var r = 0; r < rows.length; r++) {
+            var entry = rows[r].entry;
+            var box = rows[r].box;
+
+            if (entry.forced === true) {
+                box.checked = true;
+                box.enabled = false;
+                box.toolTip = qsTr("Always included.");
+                continue;
+            }
+            if (!isFull && entry.sanitizedAllowed === false) {
+                box.checked = false;
+                box.enabled = false;
+                box.toolTip = qsTr("Never in a sanitized package: this is " +
+                    "the cave's location.");
+                continue;
+            }
+            box.enabled = true;
+            box.toolTip = entry.detail;
+            if (touched[entry.key] !== true) {
+                box.checked = isFull ? entry.full : entry.sanitized;
+            }
+        }
+        loading.yes = false;
+        PackageCave.syncAllParents(rows);
+    };
+
+    full.toggled.connect(applyDefaults);
 
     var destination = CsPackage.depotFor(QDir.homePath());
     var whereLabel = new QLabel("");
@@ -212,7 +395,6 @@ PackageCave.ask = function(parent, record, counts) {
                 full.checked === true);
     };
     full.toggled.connect(updateWhere);
-    updateWhere();
     layout.addWidget(whereLabel, 0, 0);
 
     var buttons = new QHBoxLayout();
@@ -238,20 +420,48 @@ PackageCave.ask = function(parent, record, counts) {
     okButton.clicked.connect(function() { dialog.accept(); });
     cancelButton.clicked.connect(function() { dialog.reject(); });
 
+    applyDefaults();
+    updateWhere();
+
     var answer = dialog.exec();
     var options = null;
     if (answer !== 0) {
+        var items = [];
+        for (var i = 0; i < rows.length; i++) {
+            if (rows[i].box.checked === true) { items.push(rows[i].entry); }
+        }
         options = {
             full: full.checked === true,
-            pdfs: pdfs.checked === true,
-            data: data.checked === true,
-            scans: scans.checked === true,
-            images: images.checked === true,
-            destination: destination
+            destination: destination,
+            items: items
         };
     }
     destrDialog(dialog);
     return options;
+};
+
+/** Sets a folder's box from the files under it: all, none, or some. */
+PackageCave.syncParent = function(rows, parentBox) {
+    var total = 0;
+    var checked = 0;
+    for (var i = 0; i < rows.length; i++) {
+        if (rows[i].parentBox !== parentBox) { continue; }
+        total++;
+        if (rows[i].box.checked === true) { checked++; }
+    }
+    if (total === 0) { return; }
+    parentBox.setCheckState(checked === 0 ? Qt.Unchecked :
+        (checked === total ? Qt.Checked : Qt.PartiallyChecked));
+};
+
+PackageCave.syncAllParents = function(rows) {
+    var seen = [];
+    for (var i = 0; i < rows.length; i++) {
+        var box = rows[i].parentBox;
+        if (box === null || seen.indexOf(box) !== -1) { continue; }
+        seen.push(box);
+        PackageCave.syncParent(rows, box);
+    }
 };
 
 /** Today, as the file names and the manifest write it. */
@@ -513,9 +723,29 @@ PackageCave.build = function(record, options) {
     // ---- the survey, read once and used twice -------------------------
     var read = CaveShelfReadForPackage(record);
 
-    // ---- maps ---------------------------------------------------------
-    if (options.pdfs) {
-        var pdfs = CsCave.pdfFiles(caveFolder);
+    // ---- whatever was ticked, by kind ---------------------------------
+    var chosen = function(kind) {
+        var out = [];
+        var items = (Object.prototype.toString.call(options.items) ===
+            "[object Array]") ? options.items : [];
+        for (var i = 0; i < items.length; i++) {
+            if (items[i].kind === kind && items[i].path !== "") {
+                out.push(items[i].path);
+            }
+        }
+        return out;
+    };
+    var wants = function(kind) {
+        var items = (Object.prototype.toString.call(options.items) ===
+            "[object Array]") ? options.items : [];
+        for (var i = 0; i < items.length; i++) {
+            if (items[i].kind === kind) { return true; }
+        }
+        return false;
+    };
+
+    var pdfs = chosen("pdf");
+    if (pdfs.length > 0) {
         var pdfCount = PackageCave.copyInto(pdfs, staging + "/" + CsCave.PDF);
         if (pdfCount > 0) {
             contents.push({ path: CsCave.PDF + "/ (" + pdfCount + ")",
@@ -523,21 +753,18 @@ PackageCave.build = function(record, options) {
         }
     }
 
-    // ---- sketches -----------------------------------------------------
-    if (options.scans) {
-        var scansFolder = CsCave.findSubfolder(caveFolder, CsCave.SCANS);
-        var scanCount = scansFolder === null ? 0 :
-            PackageCave.copyInto(PackageCave.filesIn(scansFolder),
-                staging + "/" + CsCave.SCANS);
+    var scans = chosen("scan");
+    if (scans.length > 0) {
+        var scanCount = PackageCave.copyInto(scans,
+            staging + "/" + CsCave.SCANS);
         if (scanCount > 0) {
             contents.push({ path: CsCave.SCANS + "/ (" + scanCount + ")",
                 note: "hand sketches" });
         }
     }
 
-    // ---- photographs ---------------------------------------------------
-    if (options.images) {
-        var photos = CsCave.imageFiles(caveFolder);
+    var photos = chosen("image");
+    if (photos.length > 0) {
         var photoResult = PackageCave.copyPhotosStripped(photos,
             staging + "/" + CsCave.IMAGES);
         if (photoResult.copied > 0) {
@@ -556,20 +783,22 @@ PackageCave.build = function(record, options) {
         }
     }
 
-    // ---- the aerial photograph, full archives only ---------------------
-    if (options.full) {
-        var aerial = CsGeoProject.imagePathFor(record.drawing);
-        if (aerial !== null && (new QFileInfo(aerial)).exists()) {
-            if ((new QFile(aerial)).copy(staging + "/" +
-                    CsShelf.basename(aerial))) {
-                contents.push({ path: CsShelf.basename(aerial),
+    // The aerial photograph can only have been ticked in a full archive
+    // -- the dialog refuses it otherwise -- but check the mode here too,
+    // because this function is callable without that dialog.
+    var aerials = chosen("aerial");
+    if (options.full && aerials.length > 0) {
+        for (var a = 0; a < aerials.length; a++) {
+            if ((new QFile(aerials[a])).copy(staging + "/" +
+                    CsShelf.basename(aerials[a]))) {
+                contents.push({ path: CsShelf.basename(aerials[a]),
                     note: "aerial basemap — SHOWS THE SURFACE LOCATION" });
             }
         }
     }
 
     // ---- interchange formats -------------------------------------------
-    if (options.data && read !== null && read.survey !== null) {
+    if (wants("data") && read !== null && read.survey !== null) {
         var written = PackageCave.stageData(read.survey, staging, record.name);
         if (written.length > 0) {
             contents.push({ path: "data/ (" + written.length + ")",
@@ -719,18 +948,7 @@ PackageCave.forRecord = function(record) {
         return false;
     }
 
-    var appWin = RMainWindowQt.getMainWindow();
-    var scansFolder = CsCave.findSubfolder(record.folder, CsCave.SCANS);
-    var counts = {
-        pdfs: CsCave.pdfFiles(record.folder).length,
-        scans: scansFolder === null ? 0 :
-            PackageCave.filesIn(scansFolder).length,
-        // The generated map preview is not a photograph and never
-        // travels: the drawing it pictures is already in the package.
-        images: CsCave.imageFiles(record.folder).length
-    };
-
-    var options = PackageCave.ask(appWin, record, counts);
+    var options = PackageCave.ask(RMainWindowQt.getMainWindow(), record);
     if (options === null) { return false; }
 
     return PackageCave.build(record, options);

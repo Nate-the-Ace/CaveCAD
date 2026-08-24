@@ -235,6 +235,39 @@ eqs(packedImage.width(), 16, "same width as the original");
 eqs(packedImage.height(), 16, "same height as the original");
 
 // ---------------------------------------------------------------------
+// The contents tree the dialog is built from.
+// ---------------------------------------------------------------------
+
+// An aerial stand-in, so the entry that must never reach a sanitized
+// package is present to check.
+writeTextFile(CsGeoProject.imagePathFor(drawingPath), "aerial stand-in");
+
+var tree = PackageCave.contentsOf(record);
+var byKey = {};
+var groupKeys = [];
+for (var gi = 0; gi < tree.length; gi++) {
+    groupKeys.push(tree[gi].key);
+    for (var ci = 0; ci < tree[gi].children.length; ci++) {
+        byKey[tree[gi].children[ci].kind] = tree[gi].children[ci];
+    }
+}
+eqs(groupKeys.join(","), "root,pdf,scan,image",
+    "the tree is the drawing and then one group per project folder");
+ok(byKey.drawing !== undefined && byKey.drawing.forced === true,
+    "the drawing is always in the package");
+ok(byKey.manifest !== undefined && byKey.manifest.forced === true,
+    "so is the manifest");
+ok(byKey.data !== undefined && byKey.data.forced !== true,
+    "the interchange exports are optional");
+ok(byKey.aerial !== undefined, "the aerial photograph is listed");
+eqs(byKey.aerial.sanitizedAllowed, false,
+    "and can never be ticked into a sanitized package");
+eqs(byKey.scan.sanitized, false, "sketches start off when sanitizing");
+eqs(byKey.scan.full, true, "and on for a full archive");
+eqs(byKey.pdf.sanitized, true, "plotted maps travel either way");
+eqs(byKey.image.sanitized, false, "photographs start off when sanitizing");
+
+// ---------------------------------------------------------------------
 // The platform's own zip program really makes an archive.
 // ---------------------------------------------------------------------
 
