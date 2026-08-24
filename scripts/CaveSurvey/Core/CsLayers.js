@@ -79,6 +79,7 @@ CsLayers.NOTES_EQUIPMENT = "NOTES-EQUIPMENT";
 CsLayers.NOTES_NAME = "NOTES-NAME";
 CsLayers.NOTES_ELEVATION = "NOTES-ELEVATION";
 CsLayers.NOTES_ELEVATION_LINE = "NOTES-ELEVATION-LINE";
+CsLayers.NOTES_ANNOTATION = "NOTES-ANNOTATION";
 
 // Feature layers the tools write to.
 CsLayers.WALLS_SURVEYED = "WALLS-SURVEYED";
@@ -166,7 +167,12 @@ CsLayers.DEFAULTS = {
     "NOTES-EQUIPMENT": ["cyan", "CONTINUOUS", "Weight018"],
     "NOTES-NAME": ["white", "CONTINUOUS", "Weight018"],
     "NOTES-ELEVATION": ["white", "CONTINUOUS", "Weight018"],
-    "NOTES-ELEVATION-LINE": ["gray", "DASHED", "Weight009"]
+    "NOTES-ELEVATION-LINE": ["gray", "DASHED", "Weight009"],
+    // Generated note labels. Same appearance as a hand-placed name note
+    // -- a reader should not be able to tell which notes the suite drew
+    // and which the caver placed -- but its own layer, so a regenerate
+    // can clear it without touching hand work.
+    "NOTES-ANNOTATION": ["white", "CONTINUOUS", "Weight018"]
 };
 
 // Layers that belong to the SHEET rather than to either view: one
@@ -397,4 +403,5 @@ CsLayers.ensureCalloutLayers = function(doc, di) {
     CsLayers.ensure(doc, di, CsLayers.NOTES_NAME);
     CsLayers.ensure(doc, di, CsLayers.NOTES_ELEVATION);
     CsLayers.ensure(doc, di, CsLayers.NOTES_ELEVATION_LINE);
+    CsLayers.ensure(doc, di, CsLayers.NOTES_ANNOTATION);
 };

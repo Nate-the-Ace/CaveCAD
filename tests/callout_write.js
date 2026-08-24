@@ -199,6 +199,30 @@ eqs(CalloutWrite.members(doc, id).leaders.length, leadersBeforeGroup,
     "... and after that undo, members() still finds the ORIGINAL " +
     "number of leaders BY TAG (not just the same entity count)");
 
+// --- ONE GESTURE, ONE UNDO ------------------------------------------
+// create() builds text and every leader into a SINGLE operation, so a
+// freshly placed callout comes back out on one Ctrl+Z. The previous
+// version applied the text in its own operation and then each leader in
+// another, which took as many presses as the callout had arrows.
+(function() {
+    var before = doc.queryAllEntities(false, true).length;
+    var uid = CalloutWrite.create(doc, di, {
+        text: "one undo", position: { x: 500, y: 500 },
+        tips: [{ x: 460, y: 490 }, { x: 470, y: 520 }, { x: 480, y: 470 }],
+        style: "name", kind: CsCallout.KIND_TEXT,
+        height: CalloutWrite.textHeight(doc)
+    });
+    eqs(doc.queryAllEntities(false, true).length, before + 4,
+        "a 3-arrow callout adds 4 entities: one text and three leaders");
+    ok(CalloutWrite.members(doc, uid).text !== null, "and it is findable");
+
+    di.undo();
+    eqs(doc.queryAllEntities(false, true).length, before,
+        "ONE undo removes the text AND all three leaders together");
+    eqs(CalloutWrite.members(doc, uid).text, null,
+        "nothing of the callout is left behind by that single undo");
+})();
+
 // --- THE FLIP: the note grows AWAY from the arrow -------------------
 // An arrow to the RIGHT of the pick must push the text LEFT, so the
 // text's near edge is on the pick and the leader never crosses its own

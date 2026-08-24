@@ -51,7 +51,30 @@ CsCallout.STYLES = {
     "equipment": "NOTES-EQUIPMENT",
     "name": "NOTES-NAME",
     "elevation": "NOTES-ELEVATION",
-    "elevation-line": "NOTES-ELEVATION-LINE"
+    "elevation-line": "NOTES-ELEVATION-LINE",
+    // Generated note labels -- the ones the suite draws itself from a
+    // station's Note, not ones a caver places by hand. Its own layer so
+    // regenerating the map can clear and redraw them without touching a
+    // single hand-placed callout, and so a caver can turn the whole
+    // generated layer off in one click. Kept OUT of the style picker
+    // (see GENERATED_STYLES): offering it by hand would put a note on
+    // the layer the next regenerate is entitled to wipe.
+    "annotation": "NOTES-ANNOTATION"
+};
+
+/** Styles the suite generates and a caver must not pick by hand. */
+CsCallout.GENERATED_STYLES = { "annotation": true };
+
+/** The styles a human may choose, in picker order. */
+CsCallout.pickableStyles = function() {
+    var out = [];
+    for (var name in CsCallout.STYLES) {
+        if (CsCallout.STYLES.hasOwnProperty(name) &&
+                !CsCallout.GENERATED_STYLES.hasOwnProperty(name)) {
+            out.push(name);
+        }
+    }
+    return out;
 };
 
 CsCallout.STYLE_DEFAULT = "name";

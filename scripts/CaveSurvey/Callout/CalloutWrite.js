@@ -94,86 +94,80 @@ CalloutWrite.newIds = function(doc, before) {
     return out;
 };
 
+/** A plain {x1,y1,x2,y2} from a text's DATA, before it is added. */
+CalloutWrite.boxOfData = function(textData) {
+    var b = textData.getBoundingBox();
+    var c1 = b.getCorner1();
+    var c2 = b.getCorner2();
+    return {
+        x1: Math.min(c1.x, c2.x), y1: Math.min(c1.y, c2.y),
+        x2: Math.max(c1.x, c2.x), y2: Math.max(c1.y, c2.y)
+    };
+};
+
 /**
- * Place a new callout. Returns its id.
+ * Build the WHOLE callout -- text and every leader -- into ONE
+ * operation, without applying it. Returns {op, id, box, side}.
  *
- * \param spec {text, position: {x,y}, tips: [{x,y}], style, kind,
- *              height, tags: {extra XDATA} }
+ * ONE operation matters twice over.
+ *
+ * UNDO: the previous version applied the text in its own operation and
+ * then each leader in another, so undoing a freshly placed callout took
+ * as many presses as it had arrows. One operation is one undo, which is
+ * what a caver expects from one gesture.
+ *
+ * PREVIEW: an operation that has not been applied can be handed to
+ * di.previewOperation(), so the live preview is the REAL text in the
+ * REAL font at the REAL size with its REAL leaders -- not an
+ * approximation that then disagrees with what lands.
+ *
+ * What makes both possible: a text's bounding box is available BEFORE it
+ * is added to a document. Measured -- getBoundingBox() pre-add returns
+ * x 100.00..115.22 for a note whose post-add box is identical, and it
+ * already honours the alignment. So the leaders can be solved against
+ * the real box with no document round trip.
  */
-CalloutWrite.create = function(doc, di, spec) {
+CalloutWrite.buildOp = function(doc, spec) {
     var style = spec.style || CsCallout.STYLE_DEFAULT;
-    var layerName = CsCallout.STYLES[style] || CsCallout.STYLES[
-        CsCallout.STYLE_DEFAULT];
-    CsLayers.ensure(doc, di, layerName);
-
-    // A UUID, so no scan of the drawing and no collision with a
-    // pasted or merged-in callout. See CsCallout.newId.
+    var layerName = CsCallout.STYLES[style] ||
+        CsCallout.STYLES[CsCallout.STYLE_DEFAULT];
+    var shape = spec.leader || CsCallout.LEADER_DEFAULT;
     var id = CsCallout.newId();
+    var layerId = doc.getLayerId(layerName);
+    var op = new RAddObjectsOperation();
 
-    // --- the text ----------------------------------------------------
-    // Built with the FULL RTextData constructor, position and alignment
-    // point both, exactly as CsDraw.addText does (CsDraw.js:55). Not
-    // with setters.
-    //
-    // setPosition() ALONE IS A LIE: it reads back whatever you gave it
-    // while getAlignmentPoint() stays 0,0, and the entity RENDERS at the
-    // alignment point -- so the text lands on the origin. Measured:
-    // setPosition(100,50) alone gives a bounding box of
-    // (0,-4)..(16.78,0). That shipped once, and it also dragged the
-    // leaders with it, because CalloutWrite.boxOf feeds the same box to
-    // CsCallout.reflow. Passing both points to the constructor makes the
-    // mistake structurally impossible rather than merely fixed.
-    //
-    // VAlignMiddle so the pick point is the note's vertical MIDDLE:
-    // reflow attaches the landing at the box's vertical middle too, so
-    // the arrow leaves at exactly the height the caver clicked.
-    //
-    // Not CsDraw.caps(): station labels are capitalised by convention,
-    // but a caver's own note is theirs as typed.
     var at = new RVector(spec.position.x, spec.position.y);
 
-    // THE FLIP. The note grows AWAY from the arrow, so its near edge
-    // sits exactly on the pick point and the leader never crosses its
-    // own text.
-    //
-    // Arrow to the LEFT of the pick  -> text extends right -> HAlignLeft
-    // Arrow to the RIGHT of the pick -> text extends left  -> HAlignRight
-    //
-    // Measured: with the pick at x=100 and a 15-unit note, HAlignLeft
-    // gives a box of 100..115 and HAlignRight gives 84.78..100. Either
-    // way the edge on the arrow's side is x=100, which is where reflow
-    // then puts the landing.
-    //
-    // The side is decided from the PICK POINT here, not from a text box,
-    // because the text does not exist yet and its width is unknown.
-    // CsCallout.sideFor is shared with reflow so the two cannot drift.
+    // THE FLIP: the note grows AWAY from the arrow, so its near edge is
+    // the pick point and the leader never crosses its own letters.
+    // Measured: pick at x=100 with a 15-unit note boxes 100..115 under
+    // HAlignLeft and 84.78..100 under HAlignRight -- either way the edge
+    // facing the arrow IS the pick. The side comes from the pick point
+    // because the text does not exist yet; CsCallout.sideFor is shared
+    // with reflow so the two rules cannot drift.
     var side = CsCallout.sideFor(spec.tips, spec.position.x);
     var halign = (side === "left") ? RS.HAlignLeft : RS.HAlignRight;
 
+    // Position AND alignment point, via the full constructor, as
+    // CsDraw.addText does. setPosition() alone reads back correctly
+    // while the entity renders at the ORIGIN -- that shipped once.
     var textData = new RTextData(at, at, spec.height, 100.0,
         RS.VAlignMiddle, halign, RS.LeftToRight, RS.Exact,
         1.0, spec.text, "standard", false, false, 0.0, false);
-    var textEntity = new RTextEntity(doc, textData);
-    textEntity.setLayerId(doc.getLayerId(layerName));
 
-    // Tag BEFORE adding, not with a follow-up CsTags.commit.
-    // CsDraw.js's own header names this the working pattern in this
-    // bridge: setCustomProperty on the script-side entity, THEN
-    // op.addObject(entity, false), so the tags land as part of the
-    // SAME operation as the add. CsTags.commit is the wrong tool for a
-    // brand-new entity -- it applies its OWN, separate, UNGROUPED
-    // RModifyObjectsOperation after the add, which is exactly what
-    // made a grouped reflow non-atomic (see writeLeaders below, where
-    // this was a real, reproduced bug: undoing a transaction group
-    // reverted the add but not the follow-up tagging modify, leaving
-    // an untagged leader that members() could no longer see).
+    var textEntity = new RTextEntity(doc, textData);
+    textEntity.setLayerId(layerId);
+
+    // Tag BEFORE adding (CsDraw.js:10), so the tags land in the SAME
+    // operation as the geometry. CsTags.commit applies its own separate
+    // ungrouped modify, which broke atomicity once already.
     var tags = {};
     tags[CsCallout.KEY.ID] = id;
     tags[CsCallout.KEY.ROLE] = CsCallout.ROLE_TEXT;
     tags[CsCallout.KEY.KIND] = spec.kind || CsCallout.KIND_TEXT;
     tags[CsCallout.KEY.STYLE] = style;
     tags[CsCallout.KEY.SIDE] = "auto";
-    tags[CsCallout.KEY.LEADER] = spec.leader || CsCallout.LEADER_DEFAULT;
+    tags[CsCallout.KEY.LEADER] = shape;
     if (spec.tags) {
         for (var k in spec.tags) {
             if (spec.tags.hasOwnProperty(k)) {
@@ -186,28 +180,70 @@ CalloutWrite.create = function(doc, di, spec) {
             CsTags.set(textEntity, tk, tags[tk]);
         }
     }
+    op.addObject(textEntity, false);
 
-    // idSet/newIds is now VERIFICATION ONLY -- the entity is already
-    // tagged, so nothing here needs to look it up by id. The hazard it
-    // guards stays real: an operation can "succeed" and add nothing at
-    // all (a LOCKED or FROZEN layer refuses silently, and withLayerOn
-    // covers OFF only), so this still throws rather than returning a
-    // half-built callout.
-    var before = CalloutWrite.idSet(doc);
-    CsLayers.withLayerOn(doc, di, layerName, function() {
-        var op = new RAddObjectsOperation();
-        op.addObject(textEntity, false);
-        di.applyOperation(op);
+    var box = CalloutWrite.boxOfData(textData);
+    var geom = CsCallout.reflow(box, spec.tips, {
+        side: "auto",
+        leader: shape,
+        // Not DIMASZ/DIMSCALE: measured at 0.0833 in a real drawing,
+        // a shoulder too short to see on a half-unit note. reflow falls
+        // back to half the text height, right at every scale because it
+        // is expressed in the note's own size.
+        dimasz: null,
+        dimscale: null
     });
-    if (CalloutWrite.newIds(doc, before).length !== 1) {
-        throw new Error("callout text was not added -- layer " +
-            layerName + " may be locked or frozen");
+
+    for (var b = 0; b < geom.branches.length; b++) {
+        var pl = new RPolyline();
+        var pts = geom.branches[b];
+        for (var v = 0; v < pts.length; v++) {
+            // Second argument is the BULGE, which in QCAD belongs to the
+            // vertex a segment STARTS at. A curved leader carries its arc
+            // on the tip; the shoulder stays straight.
+            pl.appendVertex(new RVector(pts[v].x, pts[v].y),
+                pts[v].bulge || 0.0);
+        }
+        var ent = new RLeaderEntity(doc, new RLeaderData(pl, true));
+        ent.setLayerId(layerId);
+        CsTags.set(ent, CsCallout.KEY.ID, id);
+        CsTags.set(ent, CsCallout.KEY.ROLE, CsCallout.ROLE_LEADER);
+        CsTags.set(ent, CsCallout.KEY.STYLE, style);
+        op.addObject(ent, false);
     }
 
-    // --- the leaders -------------------------------------------------
-    CalloutWrite.writeLeaders(doc, di, id, spec.tips, style, layerName, null);
+    return { op: op, id: id, box: box, side: geom.side };
+};
 
-    return id;
+/**
+ * Place a new callout, in a single operation. Returns its id.
+ *
+ * \param spec {text, position: {x,y}, tips: [{x,y}], style, leader,
+ *              kind, height, tags: {extra XDATA}}
+ */
+CalloutWrite.create = function(doc, di, spec) {
+    var style = spec.style || CsCallout.STYLE_DEFAULT;
+    var layerName = CsCallout.STYLES[style] ||
+        CsCallout.STYLES[CsCallout.STYLE_DEFAULT];
+    CsLayers.ensure(doc, di, layerName);
+
+    var built = CalloutWrite.buildOp(doc, spec);
+    CsLayers.withLayerOn(doc, di, layerName, function() {
+        di.applyOperation(built.op);
+    });
+
+    // An operation that "succeeded" may have added nothing: LOCKED and
+    // FROZEN layers refuse silently, withLayerOn covers OFF only, and
+    // applyOperation reports nothing useful either way. Read the callout
+    // back rather than trusting the call.
+    var m = CalloutWrite.members(doc, built.id);
+    if (m.text === null || m.leaders.length !== spec.tips.length) {
+        throw new Error("callout did not land on layer " + layerName +
+            " -- it may be locked or frozen (text=" +
+            (m.text === null ? "missing" : "ok") + ", leaders=" +
+            m.leaders.length + " of " + spec.tips.length + ")");
+    }
+    return built.id;
 };
 
 /**

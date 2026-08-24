@@ -16702,6 +16702,26 @@ if (!IS_NODE) {
     eqs(typeof CsLayers.ensureCalloutLayers, "function",
         "CsLayers.ensureCalloutLayers exists");
 
+    // The generated-note style exists and has a layer like any other...
+    ok(CsCallout.STYLES.hasOwnProperty("annotation"),
+        "the generated-note style exists");
+    eqs(CsCallout.STYLES["annotation"], "NOTES-ANNOTATION",
+        "and has its own layer, separate from every hand-placed note");
+    // ...but must NEVER be offered to a human: a regenerate is entitled
+    // to clear that layer, and a hand-placed note there would go too.
+    var pickable = CsCallout.pickableStyles();
+    ok(pickable.length > 0, "there are styles a human can pick");
+    var offered = false;
+    for (var pi = 0; pi < pickable.length; pi++) {
+        if (pickable[pi] === "annotation") { offered = true; }
+    }
+    eqs(offered, false,
+        "the generated-note style is NOT in the style picker");
+    eqs(pickable.length,
+        (function() { var n = 0; for (var q in CsCallout.STYLES) {
+            if (CsCallout.STYLES.hasOwnProperty(q)) { n++; } } return n; })() - 1,
+        "the picker offers every style except the one generated style");
+
     // The fallback style must differ visibly from the real one: a
     // line-basis elevation label that looks identical to a floor label
     // is the whole failure this design set out to avoid.

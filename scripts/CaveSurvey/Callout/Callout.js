@@ -30,6 +30,9 @@ include(includeBasePath + "/CalloutWrite.js");
 function Callout(guiAction) {
     EAction.call(this, guiAction);
     this.tips = [];             // [{x,y}] one per branch, in pick order
+    this.noteText = undefined;  // collected between the two picks
+    this.leader = CsCallout.LEADER_DEFAULT;
+    this.previewPos = undefined;
     this.position = null;       // {x,y} chosen note position, or null
     this.previewPos = undefined; // last mouse position while picking it
     this.style = CsCallout.STYLE_DEFAULT;
@@ -42,23 +45,6 @@ Callout.State = {
     PickingPosition: 1
 };
 
-/**
- * Half the width of the placeholder box used to preview reflow before
- * a real text entity exists (as a multiple of the text height).
- *
- * The live preview (see getAuxPreview below) needs SOME box to hand
- * CsCallout.reflow -- reflow only ever reads the box to find its
- * centre (for the auto side choice) and its two edges (for where the
- * landing sits), so an approximate box is enough to show which side
- * the leader will leave from and roughly how far the landing sits
- * from the pick point. The box is centred ON the candidate position,
- * so its centre -- and therefore the side choice -- does not depend
- * on this guessed width at all; only how far the landing marker sits
- * from the cursor does. Once the real text exists, CalloutWrite.create
- * reflows against its ACTUAL bounding box, so this number only ever
- * affects the preview, never the placed callout.
- */
-Callout.PreviewHalfWidthFactor = 3.0;
 
 Callout.prototype.beginEvent = function() {
     EAction.prototype.beginEvent.call(this);
@@ -106,8 +92,8 @@ Callout.prototype.initState = function() {
         break;
 
     case Callout.State.PickingPosition:
-        this.setCommandPrompt(qsTr("Pick where the note text goes"));
-        this.setLeftMouseTip(qsTr("Position of the note text"));
+        this.setCommandPrompt(qsTr("Pick where the note goes"));
+        this.setLeftMouseTip(qsTr("Position of the note"));
         this.setRightMouseTip(EAction.trBack);
         EAction.showSnapTools();
         break;
@@ -154,6 +140,11 @@ Callout.prototype.pickCoordinate = function(event, preview) {
     switch (this.state) {
     case Callout.State.PickingTip:
         if (!preview) {
+            // Ask for the note HERE, between the two picks, so the
+            // position pick can preview the real thing. That is the whole
+            // reason the dialog moved: a preview of a placeholder box is
+            // a guess, and a guess that disagrees with what lands is
+            // worse than no preview at all.
             // ONE arrow, then straight on to the text position. The
             // repeatable multi-tip pick (and its Enter-to-continue) was
             // the caver's own call to drop: picking one target and then
@@ -166,12 +157,24 @@ Callout.prototype.pickCoordinate = function(event, preview) {
             // gesture that is single-shot.
             this.tips = [{ x: pos.x, y: pos.y }];
             di.setRelativeZero(pos);
+
+            var asked = Callout.askForNote(this.style, this.leader,
+                this.noteText);
+            if (asked === null) {
+                // cancelled at the dialog: nothing was ever added
+                this.terminate();
+                return;
+            }
+            this.noteText = asked.text;
+            this.style = asked.style;
+            this.leader = asked.leader;
+
             this.setState(Callout.State.PickingPosition);
         }
         break;
 
     case Callout.State.PickingPosition:
-        this.previewPos = pos;
+        this.previewPos = { x: pos.x, y: pos.y };
         if (preview) {
             this.updatePreview();
         } else {
@@ -205,87 +208,85 @@ Callout.prototype.pickCoordinate = function(event, preview) {
  * this runs on every mouse move, and a broken preview must degrade to
  * no preview, never abort the pick.
  */
-Callout.prototype.getAuxPreview = function() {
-    if (this.state !== Callout.State.PickingPosition ||
-            isNull(this.previewPos) || this.tips.length === 0) {
+/**
+ * The live preview, and it is the REAL callout.
+ *
+ * EAction.updatePreview() calls getOperation(true) and hands the result
+ * to di.previewOperation(), so returning the very operation that would
+ * be applied means the caver sees the actual note -- real text, real
+ * font, real size, real leader, curved or straight -- moving with the
+ * cursor. Not a placeholder rectangle that then disagrees with what
+ * lands.
+ *
+ * Returns undefined for the non-preview call on purpose. The real write
+ * goes through CalloutWrite.create, which ensures the layer, wraps the
+ * write in withLayerOn and VERIFIES the entities actually landed. An op
+ * applied straight from here would skip all three, and a locked layer
+ * would swallow the callout in silence.
+ */
+Callout.prototype.getOperation = function(preview) {
+    if (!preview) {
         return undefined;
     }
-
     var doc = this.getDocument();
-    if (isNull(doc)) {
+    if (isNull(doc) || this.tips.length === 0 ||
+            this.noteText === undefined || this.noteText === null ||
+            this.previewPos === undefined || this.previewPos === null) {
         return undefined;
     }
-
+    var built;
     try {
-        var height = CalloutWrite.textHeight(doc);
-        var halfW = height * Callout.PreviewHalfWidthFactor;
-        var pos = this.previewPos;
-        var box = {
-            x1: pos.x - halfW, y1: pos.y - height / 2.0,
-            x2: pos.x + halfW, y2: pos.y + height / 2.0
-        };
-
-        var geom = CsCallout.reflow(box, this.tips, {
-            side: "auto",
-            dimasz: CalloutWrite.dimVar(doc, RS.DIMASZ),
-            dimscale: CalloutWrite.dimVar(doc, RS.DIMSCALE)
+        built = CalloutWrite.buildOp(doc, {
+            text: this.noteText,
+            position: this.previewPos,
+            tips: this.tips,
+            style: this.style,
+            leader: this.leader,
+            kind: CsCallout.KIND_TEXT,
+            height: CalloutWrite.textHeight(doc)
         });
-
-        var shapes = [];
-        for (var b = 0; b < geom.branches.length; b++) {
-            var pts = geom.branches[b];
-            // tip -> elbow -> landing, as two segments, exactly the
-            // vertices CalloutWrite.writeLeaders will give the real
-            // leader once the text exists.
-            shapes.push(new RLine(
-                new RVector(pts[0].x, pts[0].y),
-                new RVector(pts[1].x, pts[1].y)));
-            shapes.push(new RLine(
-                new RVector(pts[1].x, pts[1].y),
-                new RVector(pts[2].x, pts[2].y)));
-        }
-        return shapes;
-    } catch (ePreview) {
+    } catch (e) {
+        // A preview must never take the tool down with it.
         return undefined;
     }
+    return built.op;
 };
 
 /** Ask for the note text and the style, then write the callout. */
 Callout.prototype.finish = function() {
     var di = this.getDocumentInterface();
-    if (isNull(di)) {
-        this.terminate();
-        return;
-    }
-
-    var asked = Callout.askForNote(this.style);
-    if (isNull(asked)) {
-        this.terminate();
-        return;
-    }
-
-    // Re-resolve the document AFTER the modal dialog returns.
-    // askForNote's dlg.exec() runs a nested Qt event loop; a document
-    // handle captured before that must never be trusted afterwards --
-    // a freed RDocument cannot be detected from script and touching one
-    // SEGFAULTS. this.getDocument() re-resolves through EAction rather
-    // than relying on a variable this closure would otherwise hold
-    // across the dialog.
     var doc = this.getDocument();
-    if (isNull(doc)) {
+    if (isNull(doc) || isNull(di)) {
         this.terminate();
         return;
     }
 
-    CalloutWrite.create(doc, di, {
-        text: asked.text,
-        position: this.position,
-        tips: this.tips,
-        style: asked.style,
-        kind: CsCallout.KIND_TEXT,
-        height: CalloutWrite.textHeight(doc)
-    });
-
+    // The note was collected between the two picks, so there is nothing
+    // to ask here -- just write what the caver has been looking at.
+    try {
+        CalloutWrite.create(doc, di, {
+            text: this.noteText,
+            position: this.position,
+            tips: this.tips,
+            style: this.style,
+            leader: this.leader,
+            kind: CsCallout.KIND_TEXT,
+            height: CalloutWrite.textHeight(doc)
+        });
+    } catch (e) {
+        // create() throws when the target layer refused the write --
+        // LOCKED and FROZEN layers refuse SILENTLY in this build, so the
+        // alternative is a command that appears to work and draws
+        // nothing. QMessageBox because handleUserMessage cannot show
+        // multi-line text.
+        try {
+            QMessageBox.information(RMainWindowQt.getMainWindow(),
+                qsTr("Callout"),
+                qsTr("The callout could not be drawn.\n\n") + e);
+        } catch (eMsg) {
+            EAction.handleUserWarning(String(e));
+        }
+    }
     this.terminate();
 };
 
@@ -306,16 +307,15 @@ Callout.prototype.finish = function() {
  * Note the addWidget(w, 0, 0) / addLayout(l, 0) arity -- this bridge
  * wants the extra arguments.
  */
-Callout.askForNote = function(currentStyle) {
-    var styleNames = [];
-    for (var sn in CsCallout.STYLES) {
-        if (CsCallout.STYLES.hasOwnProperty(sn)) {
-            styleNames.push(sn);
-        }
-    }
+Callout.askForNote = function(currentStyle, currentLeader, currentText) {
+    // Only what a human may choose: the generated-note style is not on
+    // offer, because the next map regenerate is entitled to clear its
+    // layer and a hand-placed note there would go with it.
+    var styleNames = CsCallout.pickableStyles();
 
     var edit = null;
     var combo = null;
+    var shapeCombo = null;
 
     try {
         var dlg = new QDialog(getMainWindow());
@@ -327,6 +327,16 @@ Callout.askForNote = function(currentStyle) {
             "edit it later by double-clicking it.")), 0, 0);
 
         edit = new QLineEdit();
+        if (currentText !== undefined && currentText !== null) {
+            // Escaping back to re-pick the arrow must not cost the caver
+            // their typing.
+            try {
+                edit.text = String(currentText);
+                edit.selectAll();
+            } catch (eTxt) {
+                // an un-prefilled field is a nuisance, not a failure
+            }
+        }
         layout.addWidget(edit, 0, 0);
 
         // A COMBO BOX, not a row of checkable buttons.
@@ -361,6 +371,23 @@ Callout.askForNote = function(currentStyle) {
             }
         }
         layout.addWidget(combo, 0, 0);
+
+        // Leader SHAPE: a separate axis from the style above. Same combo
+        // reasoning -- it always has a value and it is read off the
+        // widget after exec(), never accumulated from click events.
+        layout.addWidget(new QLabel(qsTr("Leader:")), 0, 0);
+        shapeCombo = new QComboBox();
+        shapeCombo.addItem(CsCallout.LEADER_STRAIGHT);
+        shapeCombo.addItem(CsCallout.LEADER_CURVED);
+        var wantShape = currentLeader || CsCallout.LEADER_DEFAULT;
+        if (wantShape === CsCallout.LEADER_CURVED) {
+            try {
+                shapeCombo.currentIndex = 1;
+            } catch (eSh) {
+                // cosmetic: the caver can still pick from the list
+            }
+        }
+        layout.addWidget(shapeCombo, 0, 0);
 
         var bar = new QHBoxLayout();
         var okBtn = new QPushButton(qsTr("Place"));
@@ -405,21 +432,29 @@ Callout.askForNote = function(currentStyle) {
             return null;
         }
         var style = String(combo.currentText);
-        if (!CsCallout.STYLES.hasOwnProperty(style)) {
+        if (!CsCallout.STYLES.hasOwnProperty(style) ||
+                CsCallout.GENERATED_STYLES.hasOwnProperty(style)) {
             style = CsCallout.STYLE_DEFAULT;
         }
-        return { text: String(typed), style: style };
+        var shape = String(shapeCombo.currentText);
+        if (shape !== CsCallout.LEADER_CURVED) {
+            shape = CsCallout.LEADER_STRAIGHT;
+        }
+        return { text: String(typed), style: style, leader: shape };
     } catch (eDlg) {
         // No usable dialog in this bridge. The text is the half that
         // cannot be done any other way, so ask for that much and take
         // the style the caller came in with.
         try {
             var typed2 = QInputDialog.getText(null, qsTr("Callout"),
-                qsTr("Note text:"));
+                qsTr("Note text:"), QLineEdit.Normal,
+                (currentText === undefined || currentText === null) ?
+                    "" : String(currentText));
             if (typed2 !== null && typed2 !== undefined &&
                     String(typed2).length > 0) {
                 return { text: String(typed2),
-                         style: currentStyle || CsCallout.STYLE_DEFAULT };
+                         style: currentStyle || CsCallout.STYLE_DEFAULT,
+                         leader: currentLeader || CsCallout.LEADER_DEFAULT };
             }
         } catch (eIn) {
             // nothing available: place nothing rather than place junk
