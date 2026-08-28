@@ -556,6 +556,13 @@ FeatureTrace.buildDock = function(appWin) {
             runRow.addWidget(
                 new QLabel(qsTr("Work on Which Profile Run? :")), 0, 0);
             w.runCombo = new QComboBox();
+            // Seeded in the same order refreshRuns() repopulates it:
+            // refreshRuns' first call preserves "the prior selection" if
+            // it still exists in the new list, and a bootstrap of
+            // RUN_SHARED alone made that prior selection RUN_SHARED --
+            // permanently defeating the documented AUTO-first default on
+            // every dock's first population.
+            w.runCombo.addItem(FeatureTrace.RUN_AUTO);
             w.runCombo.addItem(FeatureTrace.RUN_SHARED);
             w.runCombo.toolTip = qsTr("Which survey run the profile " +
                 "features below belong to. Each run is drawn as its own " +
