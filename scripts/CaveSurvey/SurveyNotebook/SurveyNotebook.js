@@ -2866,8 +2866,9 @@ SurveyNotebook.buildDock = function(appWin) {
         "bar above it to resize).";
     w.clearButton = new QPushButton("Clear");
     w.clearButton.toolTip = "Empty the page for the next survey. The " +
-        "trip header (name, date, team, declination) is kept; nothing " +
-        "in the drawing is touched.";
+        "team clears too; the rest of the header (name, date, " +
+        "declination, instruments) is kept. Nothing in the drawing is " +
+        "touched.";
     w.loadDrawingButton = new QPushButton("Load from drawing");
     w.loadDrawingButton.toolTip = "Fill the page from a trip already in " +
         "the drawing, so this page becomes that trip's revision sheet. " +
@@ -2997,11 +2998,17 @@ SurveyNotebook.buildDock = function(appWin) {
     }, "New Trip button", w.problems);
     SurveyNotebook.safeConnect(w.clearButton.clicked, function() {
         var sure = QMessageBox.question(null, "Survey Notebook",
-            "Clear the page? The trip header stays; the drawing is " +
-            "not touched.", QMessageBox.Yes | QMessageBox.No);
+            "Clear the page? The team clears with it; the rest of the " +
+            "header stays and the drawing is not touched.",
+            QMessageBox.Yes | QMessageBox.No);
         if (sure !== QMessageBox.Yes) {
             return;
         }
+        // The team clears with the page: the next page is usually a
+        // different crew, and a stale team quietly becomes a wrong trip
+        // fingerprint. Name/date/decl/instruments stay -- same cave,
+        // same field, and date is usually today's either way.
+        w.teamEdit.text = "";
         SurveyNotebook.clearLadder(w);
         SurveyNotebook.addStationRow(w, "A1");
         SurveyNotebook.addStationRow(w, "A2");
