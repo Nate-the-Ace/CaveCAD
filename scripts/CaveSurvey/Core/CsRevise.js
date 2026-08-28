@@ -2005,6 +2005,20 @@ CsRevise.apply = function(doc, di, recon, newSurvey) {
                     CsTags.remove(e, "RevisionLog");
                 }
 
+                // The geo anchor's PIN follows the station the rigid
+                // transform just moved -- its real-world coordinate did
+                // not change, so without this the ground-window tools
+                // would read the revision as "the entrance was dragged
+                // over the imagery" and offer a bogus recompute. The
+                // script-side entity already carries its transformed
+                // position here.
+                if (CsTags.get(e, "GeoLat") !== "" &&
+                        typeof e.getPosition === "function") {
+                    var gpin = e.getPosition();
+                    CsTags.set(e, "GeoDrawX", gpin.x);
+                    CsTags.set(e, "GeoDrawY", gpin.y);
+                }
+
                 op.addObject(e, false);
             }
             di.applyOperation(op);
@@ -2057,11 +2071,23 @@ CsRevise.apply = function(doc, di, recon, newSurvey) {
         if (geoAnchor !== null) {
             var newGeoEntity = findStationEntity(geoAnchor.station);
             if (newGeoEntity !== null) {
-                CsTags.commit(di, newGeoEntity, {
+                var geoTags = {
                     GeoLat: geoAnchor.lat,
                     GeoLon: geoAnchor.lon,
                     GeoStation: geoAnchor.station
-                });
+                };
+                // Re-PIN at the redrawn position: the revision moved
+                // the station but its real-world coordinate did not
+                // change, so the pin follows the station -- otherwise
+                // the ground-window tools would read a survey re-solve
+                // as "the entrance was dragged over the imagery" and
+                // offer a bogus recompute.
+                if (typeof newGeoEntity.getPosition === "function") {
+                    var gpos = newGeoEntity.getPosition();
+                    geoTags.GeoDrawX = gpos.x;
+                    geoTags.GeoDrawY = gpos.y;
+                }
+                CsTags.commit(di, newGeoEntity, geoTags);
             } else {
                 // the anchored station didn't survive this revision --
                 // the user deleted that leg. There is no honest

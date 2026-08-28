@@ -127,6 +127,28 @@ CsGeoProject.anchorGridCoord = function(bbox, w, h, anchorLat, anchorLon) {
 };
 
 /**
+ * The latitude/longitude a DRAWING POINT sits at, through a pinned
+ * georeference frame -- the exact inverse of the placement math
+ * gridTransform runs, so a point picked off georeferenced imagery
+ * converts back to the world coordinate the imagery was placed by.
+ *
+ * \param point    {x, y} in drawing units.
+ * \param frame    {lat, lon, x, y}: the anchor's world coordinate and
+ *                 the DRAWING position it was pinned at (GeoDrawX/Y).
+ * \param unitName CsUnits.FEET or CsUnits.METERS.
+ */
+CsGeoProject.latLonAtDrawingPoint = function(point, frame, unitName) {
+    var am = CsGeoProject.toMercator(frame.lat, frame.lon);
+    // ground metres inflate by 1/cos(lat) on the way into Mercator
+    var inflate = 1.0 / Math.cos(frame.lat * Math.PI / 180.0);
+    var mx = am.x + CsUnits.convert(point.x - frame.x, unitName,
+        CsUnits.METERS) * inflate;
+    var my = am.y + CsUnits.convert(point.y - frame.y, unitName,
+        CsUnits.METERS) * inflate;
+    return CsGeoProject.fromMercator(mx, my);
+};
+
+/**
  * Latitude/longitude in degrees -> EPSG:3857 metres.
  */
 CsGeoProject.toMercator = function(lat, lon) {

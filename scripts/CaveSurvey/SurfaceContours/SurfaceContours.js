@@ -55,11 +55,21 @@ function surfaceContoursRun() {
         CsTags.commit(di, anchor.entity, {
             GeoLat: coord.lat,
             GeoLon: coord.lon,
-            GeoStation: anchor.name !== "" ? anchor.name : "anchor"
+            GeoStation: anchor.name !== "" ? anchor.name : "anchor",
+            // pin WHERE the coordinate was declared, so a later move of
+            // the station over the imagery is detectable and revisable
+            GeoDrawX: anchor.pos.x,
+            GeoDrawY: anchor.pos.y
         });
         CsLocationPick.remember(coord);
         anchor.lat = coord.lat;
         anchor.lon = coord.lon;
+    } else {
+        // the entrance may have been dragged to its true spot over the
+        // last run's imagery: offer to recompute its coordinate from
+        // where it now sits (and pin pre-pin drawings either way)
+        CsLocationPick.resolveMovedAnchor(doc, di, anchor,
+            "Surface Contours");
     }
 
     // 2. Ground window: the survey's extent plus margin, like the

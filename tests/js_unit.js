@@ -13655,6 +13655,95 @@ if (!IS_NODE) {
         near(CsDraw.planDataBox(docG).maxX, 160, 1e-9,
             "planDataBox: real plan linework still grows the box");
 
+        // -- the moved-entrance recompute ----------------------------
+        // Anchor pinned at (0,0) as 37.187,-86.101; the station then
+        // moves 100 ft east. entranceCoord must answer the coordinate
+        // 100 ft east THROUGH the pinned frame, and resolveMovedAnchor
+        // must commit it on Yes and keep the stored one on No -- both
+        // re-pinning so the question is asked once per move.
+        loadRepoScript("scripts/CaveSurvey/Core/CsGeoProject.js");
+        loadRepoScript("scripts/CaveSurvey/Core/CsLocationPick.js");
+        var docM = new RDocument(new RMemoryStorage(),
+            new RSpatialIndexNavel());
+        var diM = new RDocumentInterface(docM);
+        CsLayers.ensure(docM, diM, CsLayers.STATIONS);
+        var stPt = new RPointEntity(docM, new RPointData(new RVector(0, 0)));
+        stPt.setLayerId(docM.getLayerId(CsLayers.STATIONS));
+        CsTags.set(stPt, "Station", "A1");
+        var opM = new RAddObjectsOperation();
+        opM.addObject(stPt, false);
+        diM.applyOperation(opM);
+        CsTags.commit(diM, stPt, { GeoLat: 37.187, GeoLon: -86.101,
+            GeoStation: "A1", GeoDrawX: 0, GeoDrawY: 0 });
+
+        var ec0 = CsLocationPick.entranceCoord(docM);
+        ok(ec0 !== null && ec0.moved === false &&
+            Math.abs(ec0.lat - 37.187) < 1e-9,
+            "entranceCoord: unmoved station answers the stored coordinate");
+
+        // move the station 100 units east
+        var opMove = new RModifyObjectsOperation();
+        stPt.move(new RVector(100, 0));
+        opMove.addObject(stPt, false);
+        diM.applyOperation(opMove);
+
+        var unitM = CsUnits.fromDrawingUnit(docM.getUnit(), RS);
+        var expect = CsGeoProject.latLonAtDrawingPoint({ x: 100, y: 0 },
+            { lat: 37.187, lon: -86.101, x: 0, y: 0 }, unitM);
+        var ec1 = CsLocationPick.entranceCoord(docM);
+        ok(ec1 !== null && ec1.moved === true,
+            "entranceCoord: a moved station reports moved");
+        near(ec1.lon, expect.lon, 1e-9,
+            "entranceCoord: the moved coordinate goes east with the station");
+        near(ec1.lat, expect.lat, 1e-9,
+            "entranceCoord: and holds its latitude on a pure-east move");
+        ok(ec1.lon > -86.101,
+            "entranceCoord: east means a larger longitude");
+
+        // resolveMovedAnchor, No: stored coordinate stays, pin follows
+        var realBoxM = (typeof QMessageBox !== "undefined") ?
+            QMessageBox : undefined;
+        QMessageBox = { question: function() { return realBoxM.No; },
+            Yes: realBoxM.Yes, No: realBoxM.No,
+            information: function() {}, warning: function() {} };
+        QMessageBox.question = function() { return realBoxM.No; };
+        try {
+            CsLocationPick.resolveMovedAnchor(docM, diM, null, "test");
+        } finally {
+            QMessageBox = realBoxM;
+        }
+        var recNo = CsLocationPick.anchorRecord(docM);
+        near(recNo.lat, 37.187, 1e-9,
+            "resolveMovedAnchor(No): the stored coordinate stands");
+        near(recNo.pinX, 100, 1e-9,
+            "resolveMovedAnchor(No): the pin follows the station anyway");
+        ok(CsLocationPick.entranceCoord(docM).moved === false,
+            "resolveMovedAnchor(No): re-pinned, so no longer 'moved'");
+
+        // move again, resolve with Yes: coordinate recomputed + re-pinned
+        var opMove2 = new RModifyObjectsOperation();
+        stPt.move(new RVector(0, 200));
+        opMove2.addObject(stPt, false);
+        diM.applyOperation(opMove2);
+        var expect2 = CsGeoProject.latLonAtDrawingPoint({ x: 100, y: 200 },
+            { lat: 37.187, lon: -86.101, x: 100, y: 200 - 200 }, unitM);
+        QMessageBox = { question: function() { return realBoxM.Yes; },
+            Yes: realBoxM.Yes, No: realBoxM.No,
+            information: function() {}, warning: function() {} };
+        try {
+            CsLocationPick.resolveMovedAnchor(docM, diM, null, "test");
+        } finally {
+            QMessageBox = realBoxM;
+        }
+        var recYes = CsLocationPick.anchorRecord(docM);
+        near(recYes.lat, expect2.lat, 1e-9,
+            "resolveMovedAnchor(Yes): the coordinate is recomputed " +
+            "through the pinned frame");
+        near(recYes.pinY, 200, 1e-9,
+            "resolveMovedAnchor(Yes): and the pin follows");
+        ok(CsLocationPick.entranceCoord(docM).moved === false,
+            "resolveMovedAnchor(Yes): settled -- no longer 'moved'");
+
         // -- an empty drawing has no region at all -------------------
         var docA = new RDocument(new RMemoryStorage(), new RSpatialIndexNavel());
         ok(CsTrace.profileRegion(docA) === null,
@@ -17226,6 +17315,25 @@ function syntheticTiff(w, h, floats) {
         CsUnits.FEET);
     near(q.x - p.x, perPx, 1e-6, "gridTransform: pixel step is uniform");
     near(q.y, p.y, 1e-9, "gridTransform: eastward step keeps y");
+
+    // latLonAtDrawingPoint inverts the placement: a drawing point made
+    // by gridTransform converts back to the very Mercator coordinate
+    // its pixel center owns in the fetch bbox
+    var frame = { lat: anchor.lat, lon: anchor.lon,
+        x: anchor.pos.x, y: anchor.pos.y };
+    var ll = CsGeoProject.latLonAtDrawingPoint(q, frame, CsUnits.FEET);
+    var mBack = CsGeoProject.toMercator(ll.lat, ll.lon);
+    var psx = (bbox.xmax - bbox.xmin) / 200;
+    var psy = (bbox.ymax - bbox.ymin) / 152;
+    near(mBack.x, bbox.xmin + (at.col + 1 + 0.5) * psx, 1e-4,
+        "latLonAtDrawingPoint: inverts x to the pixel's own Mercator");
+    near(mBack.y, bbox.ymax - (at.row + 0.5) * psy, 1e-4,
+        "latLonAtDrawingPoint: inverts y to the pixel's own Mercator");
+    // and the anchor's own point answers the anchor's own coordinate
+    var llA = CsGeoProject.latLonAtDrawingPoint(
+        { x: anchor.pos.x, y: anchor.pos.y }, frame, CsUnits.FEET);
+    near(llA.lat, anchor.lat, 1e-9, "latLonAtDrawingPoint: fixed point lat");
+    near(llA.lon, anchor.lon, 1e-9, "latLonAtDrawingPoint: fixed point lon");
 })();
 
 (function() {

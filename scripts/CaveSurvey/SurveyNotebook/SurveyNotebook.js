@@ -1657,11 +1657,20 @@ SurveyNotebook.offerGeoAnchor = function(doc, coord) {
         // property writes fail silently in this bridge, which is why
         // CsTags.commit exists. Same three tags, same mechanism as
         // GeoReference.js used, so every existing reader finds it.
-        CsTags.commit(getDocumentInterface(), carrier, {
+        var geoTags = {
             GeoLat: coord.lat,
             GeoLon: coord.lon,
             GeoStation: stationName !== "" ? stationName : "anchor"
-        });
+        };
+        // pin WHERE the coordinate was declared -- what lets the
+        // ground-window tools detect a later deliberate move of the
+        // station over imagery (CsLocationPick.resolveMovedAnchor)
+        if (typeof carrier.getPosition === "function") {
+            var cpos = carrier.getPosition();
+            geoTags.GeoDrawX = cpos.x;
+            geoTags.GeoDrawY = cpos.y;
+        }
+        CsTags.commit(getDocumentInterface(), carrier, geoTags);
         CsLocationPick.remember(coord);
     } catch (eW) {
         QMessageBox.warning(null, "Survey Notebook",

@@ -69,6 +69,136 @@ CsLocationPick.getShared = function(doc) {
     return null;
 };
 
+// How far (drawing units) the geo station may sit from where its
+// coordinate was pinned before it counts as MOVED. Snap jitter and
+// float noise stay under this; a deliberate drag is far over it.
+CsLocationPick.MOVE_EPS = 0.05;
+
+/**
+ * The drawing's geo anchor as a full record -- {entity, station, lat,
+ * lon, pos, pinX, pinY} -- or null when the drawing has none. pinX/Y
+ * are the DRAWING position the coordinate was pinned at (GeoDrawX/Y
+ * tags), null on drawings georeferenced before those tags existed.
+ */
+CsLocationPick.anchorRecord = function(doc) {
+    if (doc === undefined || doc === null) {
+        return null;
+    }
+    var ids = doc.queryAllEntities(false, false);
+    for (var i = 0; i < ids.length; i++) {
+        var e = doc.queryEntity(ids[i]);
+        if (isNull(e)) {
+            continue;
+        }
+        var lat = CsTags.getNumber(e, "GeoLat");
+        var lon = CsTags.getNumber(e, "GeoLon");
+        if (lat === null || lon === null) {
+            continue;
+        }
+        var pos = (typeof e.getPosition === "function") ?
+            e.getPosition() : null;
+        return {
+            entity: e,
+            station: CsTags.get(e, "GeoStation"),
+            lat: lat, lon: lon,
+            pos: pos,
+            pinX: CsTags.getNumber(e, "GeoDrawX"),
+            pinY: CsTags.getNumber(e, "GeoDrawY")
+        };
+    }
+    return null;
+};
+
+/**
+ * The geo station's CURRENT best coordinate: recomputed through the
+ * pinned frame when the station has moved since its coordinate was
+ * pinned (the workflow this exists for: the entrance dragged to its
+ * true spot over freshly fetched imagery), the stored coordinate
+ * otherwise. \return {lat, lon, moved} or null (no anchor).
+ */
+CsLocationPick.entranceCoord = function(doc) {
+    var a = CsLocationPick.anchorRecord(doc);
+    if (a === null) {
+        return null;
+    }
+    if (a.pos !== null && a.pinX !== null && a.pinY !== null) {
+        var dx = a.pos.x - a.pinX, dy = a.pos.y - a.pinY;
+        if (Math.sqrt(dx * dx + dy * dy) > CsLocationPick.MOVE_EPS) {
+            var unit = CsUnits.fromDrawingUnit(doc.getUnit(),
+                typeof RS !== "undefined" ? RS : undefined);
+            var ll = CsGeoProject.latLonAtDrawingPoint(a.pos,
+                { lat: a.lat, lon: a.lon, x: a.pinX, y: a.pinY }, unit);
+            return { lat: ll.lat, lon: ll.lon, moved: true };
+        }
+    }
+    return { lat: a.lat, lon: a.lon, moved: false };
+};
+
+/**
+ * For the ground-window tools, before they fetch against an EXISTING
+ * anchor: when the geo station has moved since its coordinate was
+ * pinned, asks which is the truth -- the position over the imagery
+ * (recompute the coordinate through the pinned frame) or the stored
+ * coordinate (keep it) -- and re-pins either way so the question is
+ * asked once per move, not once per run. Mutates `anchor` ({entity,
+ * name, pos, lat, lon}) in place when the user recomputes.
+ *
+ * Deliberate act by explicit question: the standing rule that nothing
+ * silently relocates an anchor holds.
+ */
+CsLocationPick.resolveMovedAnchor = function(doc, di, anchor, title) {
+    var rec = CsLocationPick.anchorRecord(doc);
+    if (rec === null || rec.pos === null) {
+        return;
+    }
+    if (rec.pinX === null || rec.pinY === null) {
+        // pre-pin drawing: pin the frame HERE, at fetch time -- from
+        // this run on, a move of the station is detectable
+        CsTags.commit(di, rec.entity,
+            { GeoDrawX: rec.pos.x, GeoDrawY: rec.pos.y });
+        return;
+    }
+    var dx = rec.pos.x - rec.pinX, dy = rec.pos.y - rec.pinY;
+    var dist = Math.sqrt(dx * dx + dy * dy);
+    if (dist <= CsLocationPick.MOVE_EPS) {
+        return;
+    }
+    var unit = CsUnits.fromDrawingUnit(doc.getUnit(),
+        typeof RS !== "undefined" ? RS : undefined);
+    var ll = CsGeoProject.latLonAtDrawingPoint(rec.pos,
+        { lat: rec.lat, lon: rec.lon, x: rec.pinX, y: rec.pinY }, unit);
+    var name = rec.station !== "" ? rec.station : "the geo station";
+    // getMainWindow is a GUI global -- absent in the headless harness
+    var win = (typeof getMainWindow === "function") ? getMainWindow() : null;
+    var answer = QMessageBox.question(win, title,
+        name + " has moved " + (Math.round(dist * 100) / 100) + " " +
+        unit + " since its location was pinned.\n\n" +
+        "Recompute its latitude/longitude from where it now sits over " +
+        "the georeferenced imagery?\n\n" +
+        "Yes: where it sits is the truth -- the coordinate becomes " +
+        ll.lat.toFixed(6) + ", " + ll.lon.toFixed(6) + ".\n" +
+        "No: the stored coordinate (" + rec.lat.toFixed(6) + ", " +
+        rec.lon.toFixed(6) + ") stays the truth for the new position.",
+        QMessageBox.Yes | QMessageBox.No);
+    if (answer === QMessageBox.Yes) {
+        CsTags.commit(di, rec.entity, {
+            GeoLat: ll.lat,
+            GeoLon: ll.lon,
+            GeoDrawX: rec.pos.x,
+            GeoDrawY: rec.pos.y
+        });
+        CsLocationPick.remember(ll);
+        if (anchor !== undefined && anchor !== null) {
+            anchor.lat = ll.lat;
+            anchor.lon = ll.lon;
+        }
+    } else {
+        // the stored coordinate now belongs to the new position
+        CsTags.commit(di, rec.entity,
+            { GeoDrawX: rec.pos.x, GeoDrawY: rec.pos.y });
+    }
+};
+
 /**
  * Asks for a location, offering the browser map first.
  *
@@ -103,8 +233,8 @@ CsLocationPick.ask = function(title, defaultText) {
             "like 40 30'15.0\"N 90 15'30.0\"W):";
     }
 
-    var text = getText(title, prompt, defaultText || "");
-    if (text === undefined || text === "") {
+    var text = CsLocationPick.askText(title, prompt, defaultText || "");
+    if (text === undefined || text === null || text === "") {
         return null;
     }
     var coord = CsAngles.parseLatLon(text);
@@ -115,6 +245,71 @@ CsLocationPick.ask = function(title, defaultText) {
     // a declared location is trusted -- share it with every tool
     CsLocationPick.remember(coord);
     return coord;
+};
+
+/**
+ * The coordinate entry itself: a line edit with a From Entrance
+ * button that reads the geo station's CURRENT best coordinate into
+ * the field (recomputed through the pinned frame when the station has
+ * been moved over the imagery -- see entranceCoord). Nathan's ask,
+ * 2026-08-27. Falls back to the plain getText prompt on a bridge that
+ * refuses the dialog.
+ *
+ * \return the typed text, or null (cancelled).
+ */
+CsLocationPick.askText = function(title, prompt, preset) {
+    try {
+        var dlg = new QDialog(getMainWindow());
+        dlg.windowTitle = title;
+        var layout = new QVBoxLayout();
+        layout.addWidget(new QLabel(prompt), 0, 0);
+        var edit = new QLineEdit();
+        edit.text = preset || "";
+        layout.addWidget(edit, 0, 0);
+
+        var bar = new QHBoxLayout();
+        var fromBtn = new QPushButton("From Entrance");
+        fromBtn.toolTip = "Read the geo station's coordinate into the " +
+            "field. If the station has been moved since imagery was " +
+            "fetched, this is its NEW location, computed from where it " +
+            "now sits over that imagery.";
+        var okBtn = new QPushButton("OK");
+        var cancelBtn = new QPushButton("Cancel");
+        try {
+            okBtn["default"] = true;
+        } catch (eDef) {
+        }
+        bar.addWidget(fromBtn, 0, 0);
+        bar.addStretch(1);
+        bar.addWidget(okBtn, 0, 0);
+        bar.addWidget(cancelBtn, 0, 0);
+        layout.addLayout(bar, 0);
+        dlg.setLayout(layout);
+
+        fromBtn.clicked.connect(function() {
+            var doc = (typeof getDocument === "function") ?
+                getDocument() : null;
+            var best = (doc !== null && doc !== undefined) ?
+                CsLocationPick.entranceCoord(doc) : null;
+            if (best === null) {
+                QMessageBox.information(getMainWindow(), title,
+                    "No geo station in this drawing yet -- there is " +
+                    "no entrance coordinate to read. Pick or type one.");
+                return;
+            }
+            edit.text = best.lat.toFixed(6) + ", " + best.lon.toFixed(6);
+        });
+        okBtn.clicked.connect(function() { dlg.accept(); });
+        cancelBtn.clicked.connect(function() { dlg.reject(); });
+
+        var answer = dlg.exec();
+        var text = (answer === 0) ? null : String(edit.text);
+        destrDialog(dlg);
+        return text;
+    } catch (e) {
+        var t = getText(title, prompt, preset || "");
+        return (t === undefined || t === "") ? null : t;
+    }
 };
 
 /** Writes the map page and opens it. Returns false on any failure. */

@@ -92,11 +92,21 @@ function aerialBasemapRun() {
         CsTags.commit(di, anchor.entity, {
             GeoLat: coord.lat,
             GeoLon: coord.lon,
-            GeoStation: anchor.name !== "" ? anchor.name : "anchor"
+            GeoStation: anchor.name !== "" ? anchor.name : "anchor",
+            // pin WHERE the coordinate was declared -- see
+            // CsLocationPick.resolveMovedAnchor
+            GeoDrawX: anchor.pos.x,
+            GeoDrawY: anchor.pos.y
         });
         CsLocationPick.remember(coord);
         anchor.lat = coord.lat;
         anchor.lon = coord.lon;
+    } else {
+        // the entrance may have been dragged to its true spot over the
+        // imagery: offer to recompute its coordinate from where it now
+        // sits (and pin pre-pin drawings either way)
+        CsLocationPick.resolveMovedAnchor(doc, di, anchor,
+            "Aerial Basemap");
     }
 
     // 3. Ground window: the drawing's extent plus a margin, floored so
