@@ -238,7 +238,12 @@ SketchScans.buildDock = function(appWin) {
                 !isNaN(splitSizes[0]) && !isNaN(splitSizes[1])) {
             w.splitter.setSizes(splitSizes);
         } else {
-            w.splitter.setSizes([10000, SketchScans.DOCK_PREVIEW_H]);
+            // setSizes distributes PROPORTIONALLY when the panel is
+            // smaller than the request -- [10000, 240] squeezed the
+            // preview to its 40px floor. 3:1 keeps the preview about a
+            // quarter of the panel at any size.
+            w.splitter.setSizes([3 * SketchScans.DOCK_PREVIEW_H,
+                SketchScans.DOCK_PREVIEW_H]);
         }
         w.splitter.splitterMoved.connect(function() {
             try {
@@ -437,6 +442,10 @@ SketchScans.refresh = function() {
 
     w.scans = message === null ? scans : null;
     w.ready = message === null;
+    // What this panel was built FROM -- the staleness listeners compare
+    // against it and rebuild only when the answer would differ.
+    w.stamp = (isNull(doc) ? "" : String(doc.getFileName())) + "|" +
+        (scans === null ? "" : scans);
     w.alignButton.enabled = w.ready;
     w.insertButton.enabled = w.ready;
 
@@ -508,6 +517,72 @@ SketchScans.applyHidden = function() {
         }
     } catch (eHide) {
         // an engine without setRowHidden shows the list flat
+    }
+};
+
+// Rebuilds the panel ONLY when the active drawing (and with it the
+// scans folder) is no longer the one the panel was built from -- the
+// cheap fingerprint compare runs on every transaction and mouse move,
+// the disk never gets touched until the answer would change.
+SketchScans.refreshIfStale = function() {
+    var w = SketchScans.w;
+    if (w === undefined || w === null) { return; }
+    if (csSketchScansDock === undefined || csSketchScansDock === null ||
+            !csSketchScansDock.visible) {
+        return;
+    }
+    var doc = EAction.getDocument();
+    var scans = null;
+    if (!isNull(doc)) {
+        var folder = CsCave.folderOf(doc.getFileName());
+        scans = folder === null ? null :
+            CsCave.findSubfolder(folder, CsCave.SCANS);
+    }
+    var stamp = (isNull(doc) ? "" : String(doc.getFileName())) + "|" +
+        (scans === null ? "" : scans);
+    if (stamp !== w.stamp) {
+        SketchScans.refresh();
+    }
+};
+
+/**
+ * Watches the application so a visible panel follows the active
+ * drawing: a cave opened from the shelf, a tab switch, a first save.
+ * Guarded to a fingerprint compare while hidden or unchanged -- a
+ * dock must not make every transaction pay for a folder scan
+ * (FeatureTrace's rule). Idempotent.
+ */
+SketchScans.installListener = function(appWin) {
+    if (SketchScans.listener !== undefined) {
+        return;
+    }
+    try {
+        var adapter = new RTransactionListenerAdapter();
+        appWin.addTransactionListener(adapter);
+        adapter.transactionUpdated.connect(function(document, transaction) {
+            try {
+                SketchScans.refreshIfStale();
+            } catch (eInner) {
+                // a listener must never throw into the application
+            }
+        });
+        SketchScans.listener = adapter;
+
+        // Transactions alone miss a plain tab switch; the first mouse
+        // move over the newly active drawing catches it.
+        var coord = new RCoordinateListenerAdapter();
+        appWin.addCoordinateListener(coord);
+        coord.coordinateUpdated.connect(function(docIface) {
+            try {
+                SketchScans.refreshIfStale();
+            } catch (eCoord) {
+                // as above
+            }
+        });
+        SketchScans.coordListener = coord;
+    } catch (e) {
+        SketchScans.listener = null;
+        // without listeners the Refresh button and re-toggling cover it
     }
 };
 
@@ -677,6 +752,7 @@ SketchScans.init = function(basePath) {
     try {
         var dock = SketchScans.ensureDock();
         dock.visible = false;
+        SketchScans.installListener(RMainWindowQt.getMainWindow());
     } catch (eInit) {
         csSketchScansDock = undefined;
         warning("Sketch Scans: could not build the panel at startup (" +
