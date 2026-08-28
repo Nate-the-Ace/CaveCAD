@@ -1401,6 +1401,47 @@ CsRevise.trip0Anchor = function(doc) {
 };
 
 /**
+ * The drawing's survey, reconstructed EXACTLY and resolved IN THE
+ * DRAWING'S OWN FRAME: anchored at the recorded trip-0 anchor position
+ * and elevation, adjusted under the drawing's own recorded options --
+ * so resolved coordinates agree with the drawn geometry, loop legs and
+ * branches included, and the vertical datum is the drawing's own (the
+ * elevation-datum rule).
+ *
+ * THE ONE READ PATH for every tool that reports on or samples an
+ * existing drawing (Survey Stats, the elevation callouts, Generate
+ * Profile). Each of these used CsTags.surveyFromDocument -- the
+ * chain-guess reader -- whose fabricated topology gave Survey Stats
+ * zero loops and an inflated length, offered the callouts phantom legs
+ * to sample, and fed the profile a shot list with a fake leg across
+ * every branch boundary (2026-08-28, from Truitt's F survey). A
+ * pre-v3 drawing still falls back to the chain guess inside
+ * surveyFromDocument, exactly as those tools behaved before.
+ *
+ * 
+eturn {survey, resolved, legacy}, or null when the drawing holds
+ *         no readable survey.
+ */
+CsRevise.resolveAsDrawn = function(doc) {
+    var recon = CsRevise.surveyFromDocument(doc);
+    var survey = recon.survey;
+    if (survey === null || survey === undefined ||
+            survey.shots.length === 0) {
+        return null;
+    }
+    var resolveOpts = {};
+    if (recon.anchorName !== "" && recon.anchorPos !== null &&
+            recon.anchorPos !== undefined) {
+        resolveOpts.anchor = { name: recon.anchorName,
+            x: recon.anchorPos.x, y: recon.anchorPos.y,
+            z: recon.anchorZ };
+    }
+    var resolved = CsAdjust.resolveAndAdjust(survey, resolveOpts,
+        CsAdjust.optionsFromTags(recon.adjustTags));
+    return { survey: survey, resolved: resolved, legacy: recon.legacy };
+};
+
+/**
  * The adjustment record carried by one entity -- the trip-0 anchor --
  * as {Adjustment, SigmaTape, SigmaAngle}, shaped for
  * CsAdjust.optionsFromTags. A null or untagged entity yields "" in

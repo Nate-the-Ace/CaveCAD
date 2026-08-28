@@ -78,12 +78,35 @@ function generateProfileCountDrawnSplays(doc) {
     return count;
 }
 
-/** How many splay shots the rebuilt `survey` itself carries. Pure. */
+/**
+ * How many splay shots the rebuilt `survey` carries THAT CAN ACTUALLY
+ * HANG ON A STATION. Pure.
+ *
+ * The station-exists filter is load-bearing: the exact reader
+ * (CsRevise) recovers an orphaned splay's DATA from its own tags even
+ * when its base station is gone from the survey -- recovered as a
+ * record, still unplaceable as geometry. Counting it as "rebuilt"
+ * would silence the loss warning below for exactly the case it exists
+ * to report.
+ */
 function generateProfileCountRecoveredSplays(survey) {
+    // LEG endpoints only -- CsModel.stationNames would count the
+    // orphan splay's own From, naming its missing station into
+    // existence and silencing the very warning this feeds
+    var names = {};
+    for (var si = 0; si < survey.shots.length; si++) {
+        var sh = survey.shots[si];
+        if (sh.splay || sh.excludeFromAll ||
+                sh.from === "" || sh.to === "") {
+            continue;
+        }
+        names[sh.from] = true;
+        names[sh.to] = true;
+    }
     var byStation = CsLrud.splaysByStation(survey);
     var count = 0;
     for (var k in byStation) {
-        if (byStation.hasOwnProperty(k)) {
+        if (byStation.hasOwnProperty(k) && names[k] === true) {
             count += byStation[k].length;
         }
     }
@@ -145,45 +168,26 @@ function generateProfileRun() {
     // included (CsTags.collectSplays). See this file's own header
     // comment for the two residual gaps that rebuilding from tags
     // still has, and where each one is reported.
-    var survey = CsTags.surveyFromDocument(doc);
-    if (survey.shots.length === 0) {
+    // CsRevise.resolveAsDrawn: the exact reconstruction (real branch
+    // topology, closure legs included), resolved in the drawing's own
+    // frame at the drawing's own datum, under its recorded adjustment.
+    // The chain-guess reader this used to run handed the profile a
+    // shot list with a FABRICATED leg across every branch boundary --
+    // the bands drew a passage nobody surveyed -- and no closure leg
+    // at all. Its geometry looked right only because that reader pins
+    // every station into survey.fixed; the exact reconstruction gets
+    // the same frame honestly, from the recorded anchor. A pre-v3
+    // drawing still falls back to the chain guess inside
+    // surveyFromDocument, as before.
+    var asDrawn = CsRevise.resolveAsDrawn(doc);
+    if (asDrawn === null) {
         generateProfileRefuse("no tagged survey stations found.\n" +
             "Run Azimuth Traverse, Import Cave Survey or the Survey " +
             "Notebook first");
         return;
     }
-
-    // Resolve-and-adjust under THIS DRAWING's own recorded adjustment --
-    // SurveyStats.js follows the identical rule, for the identical
-    // reason: this tool reports on and redraws EXISTING geometry rather
-    // than creating it, so it has to reproduce whatever already solved
-    // the sheet on screen, not re-solve under today's global setting.
-    //
-    // WHY resolveAndAdjust AND NOT A BARE CsNetwork.resolve, MEASURED,
-    // NOT ASSUMED: an earlier version of this comment claimed a bare
-    // resolve() would "disagree with the automatically drawn one on any
-    // survey with loop closures" -- checked against a real loop-closing
-    // survey (a 3-unit misclosure, a real Adjustment=lsq tag) and that
-    // claim is FALSE: max plan shift 0, max Z shift 0, bare resolve() and
-    // resolveAndAdjust produce IDENTICAL coordinates. The reason is
-    // CsTags.surveyFromDocument itself: it puts EVERY station it reads
-    // into survey.fixed (Critical C's own finding, one review round
-    // later), so CsNetwork.resolve finds the whole network already
-    // pinned before it ever walks a shot -- every leg comes back kind
-    // "tie", nothing is left for a solve to move, and the tags already
-    // carry whatever coordinates the LAST adjustment (by whoever drew
-    // this sheet) actually produced. resolveAndAdjust is still the right
-    // call, for two reasons that have nothing to do with the false claim
-    // above: it matches SurveyStats.js's own rule (one convention for
-    // "reporting on an existing drawing," not two), and it is
-    // future-proof against a later change to surveyFromDocument that
-    // recovers less than 100% of the tags as `fixed` (at which point a
-    // bare resolve() really could disagree with the plan, and this call
-    // would already be doing the right thing without anyone having to
-    // remember to fix it).
-    var resolved = CsAdjust.resolveAndAdjust(survey, {},
-        CsAdjust.optionsFromTags(
-            CsRevise.adjustTagsOn(CsRevise.trip0Anchor(doc))));
+    var survey = asDrawn.survey;
+    var resolved = asDrawn.resolved;
 
     // BOTH of CsDraw.profile's own gates (ProfileAuto, size) are bypassed
     // on purpose -- forcing past both is the entire point of a manual

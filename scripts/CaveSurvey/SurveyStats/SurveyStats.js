@@ -28,21 +28,20 @@ function surveyStatsRun() {
         return;
     }
 
-    // The EXACT reconstruction (leg tags), not CsTags.surveyFromDocument:
-    // that reader CHAINS stations in Seq order, which fabricates a leg
-    // across every branch boundary (inflating the length) and never
-    // produces a closure leg at all -- so a real loop (Truitt's F
-    // survey, D15-F1..F4-D17, found 2026-08-27) counted as zero loops
-    // and the grade could never see a closure. CsRevise falls back to
-    // the chain guess itself on a pre-v3 drawing, so legacy behavior
-    // is unchanged.
-    var survey = CsRevise.surveyFromDocument(doc).survey;
-    if (survey.shots.length === 0) {
+    // CsRevise.resolveAsDrawn: the exact reconstruction, resolved in
+    // the drawing's own frame under its recorded adjustment -- the one
+    // read path every reporting tool shares. The chain-guess reader
+    // this used to run fabricated a leg across every branch boundary
+    // (inflating the length) and could never produce a closure, so a
+    // real loop (Truitt's F survey, 2026-08-27) counted as zero.
+    var asDrawn = CsRevise.resolveAsDrawn(doc);
+    if (asDrawn === null) {
         warning("Survey Stats: no tagged survey stations found.\n" +
             "Run Azimuth Traverse, Import Cave Survey or the Survey " +
             "Notebook first.");
         return;
     }
+    var survey = asDrawn.survey;
     survey.distanceUnit = CsUnits.fromDrawingUnit(doc.getUnit(), RS);
 
     // Resolve-and-adjust, like every other tool -- and under THIS
@@ -58,9 +57,7 @@ function surveyStatsRun() {
     // stay AS-SURVEYED either way: CsAdjust copies them through
     // untouched, which is its honesty rule and the reason this line is
     // safe to change at all.
-    var resolved = CsAdjust.resolveAndAdjust(survey, {},
-        CsAdjust.optionsFromTags(
-            CsRevise.adjustTagsOn(CsRevise.trip0Anchor(doc))));
+    var resolved = asDrawn.resolved;
     var stats = CsStats.compute(survey, resolved, CsTraverse.SLOPE);
     var grade = CsGrade.compute(survey, resolved, stats);
 

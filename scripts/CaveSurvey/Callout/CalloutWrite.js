@@ -515,9 +515,16 @@ CalloutWrite.sampleElevationAt = function(doc, point) {
     }
     var sample;
     try {
-        var survey = CsTags.surveyFromDocument(doc);
-        var resolved = CsNetwork.resolve(survey, {});
-        sample = CsElevation.sampleFloor(survey, resolved,
+        // resolveAsDrawn: exact legs in the drawing's own frame. The
+        // chain-guess reader this used to run offered PHANTOM legs
+        // (one fabricated across every branch boundary) as sampling
+        // candidates -- a point near a junction could take its floor
+        // from a passage that does not exist.
+        var asDrawn = CsRevise.resolveAsDrawn(doc);
+        if (asDrawn === null) {
+            return null;
+        }
+        sample = CsElevation.sampleFloor(asDrawn.survey, asDrawn.resolved,
             { x: point.x, y: point.y }, {});
     } catch (e) {
         return null;
@@ -573,17 +580,18 @@ CalloutWrite.refreshElevationsFromDocument = function(doc, di) {
     if (isNull(doc) || isNull(di)) {
         return null;
     }
-    var survey, resolved;
+    var asDrawn;
     try {
-        survey = CsTags.surveyFromDocument(doc);
-        resolved = CsNetwork.resolve(survey, {});
+        // exact reconstruction, drawing frame -- see sampleElevationAt
+        asDrawn = CsRevise.resolveAsDrawn(doc);
     } catch (e) {
         return null;
     }
-    if (isNull(survey) || isNull(resolved)) {
+    if (asDrawn === null) {
         return null;
     }
-    return CalloutWrite.refreshElevations(doc, di, survey, resolved);
+    return CalloutWrite.refreshElevations(doc, di, asDrawn.survey,
+        asDrawn.resolved);
 };
 
 /**

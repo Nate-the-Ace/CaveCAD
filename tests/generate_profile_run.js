@@ -267,6 +267,16 @@ function withSpies(fn) {
         spy.capturedSurvey = s;
         return s;
     };
+    // The tool reads through CsRevise.resolveAsDrawn now (the exact
+    // reconstruction; the chain-guess spy above still fires on the
+    // legacy fallback inside it). Captured the same way so every claim
+    // below keeps reading spy.capturedSurvey.
+    var savedResolveAsDrawn = CsRevise.resolveAsDrawn;
+    CsRevise.resolveAsDrawn = function(doc) {
+        var r = savedResolveAsDrawn(doc);
+        spy.capturedSurvey = (r === null) ? null : r.survey;
+        return r;
+    };
     CsProfileDraw.render = function(doc, di, built, opts) {
         spy.capturedBuilt = built;
         var counts = savedRender(doc, di, built, opts);
@@ -286,6 +296,7 @@ function withSpies(fn) {
         fn(spy);
     } finally {
         CsTags.surveyFromDocument = savedSurveyFromDocument;
+        CsRevise.resolveAsDrawn = savedResolveAsDrawn;
         CsProfileDraw.render = savedRender;
         QMessageBox.information = savedInformation;
         EAction.handleUserMessage = savedHandleUserMessage;
@@ -319,9 +330,9 @@ fixtureDoc.setFileName(planPathA);
         // ---- claim 1: rebuilt from CsTags.surveyFromDocument, not a
         // notebook, and not zero stations -----------------------------
         ok(spy.capturedSurvey !== null,
-            "generateProfileRun() called CsTags.surveyFromDocument to " +
-            "rebuild the survey (a tool that read a notebook, a cache, " +
-            "or nothing at all would leave this null)");
+            "generateProfileRun() rebuilt the survey from the drawing " +
+            "(CsRevise.resolveAsDrawn; a tool that read a notebook, a " +
+            "cache, or nothing at all would leave this null)");
         // SPLAY SHOTS ARE SKIPPED HERE, and that is not a workaround:
         // the rebuild now recovers them (see the splay claims below),
         // a splay has no TO station by definition, and counting its
@@ -669,6 +680,12 @@ withSpies(function(spy) {
             ghostRetagged++;
         } else if (CsTags.get(ge, "Splay") !== "") {
             CsTags.set(ge, "Splay", "GONE.1");
+            // The DATA has to be orphaned too: the exact reader
+            // (CsRevise.resolveAsDrawn) recovers a splay from the ray's
+            // own From tag, so renaming only the display tags leaves a
+            // splay that correctly re-hangs on G2 -- which is the
+            // reader being RIGHT, not this scenario firing.
+            CsTags.set(ge, "From", "GONE");
             ghostOp.addObject(ge, false);
             ghostRetagged++;
         }
