@@ -21,6 +21,10 @@ include(includeBasePath + "/CsCave.js");
 // After CsCave: the shelf reads CsCave.SCANS/PDF when it scans a cave
 // folder, and CsCave.driveRoots when a save registers itself.
 include(includeBasePath + "/CsShelf.js");
+// Pure tree model over CsCave.filesUnder's relative paths -- the
+// folder rows, collapse rules and collapsed-state settings format
+// behind Sketch Scans' list.
+include(includeBasePath + "/CsScanTree.js");
 include(includeBasePath + "/CsPackage.js");
 include(includeBasePath + "/CsGeoProject.js");
 include(includeBasePath + "/CsContour.js");

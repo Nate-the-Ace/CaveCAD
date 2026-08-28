@@ -113,6 +113,7 @@ var CORE_FILES = [
     "scripts/CaveSurvey/Core/CsUnits.js",
     "scripts/CaveSurvey/Core/CsCave.js",
     "scripts/CaveSurvey/Core/CsShelf.js",
+    "scripts/CaveSurvey/Core/CsScanTree.js",
     "scripts/CaveSurvey/Core/CsPackage.js",
     "scripts/CaveSurvey/Core/CsGeoProject.js",
     "scripts/CaveSurvey/Core/CsContour.js",
@@ -9311,6 +9312,112 @@ if (!IS_NODE) {
         root.rmpath("cs_unit_filesunder/.hidden");
     }());
 }
+
+// ---------------------------------------------------------------------
+// CsScanTree -- the folder tree Sketch Scans draws over filesUnder's
+// relative paths. Pure, so it runs under node too.
+// ---------------------------------------------------------------------
+
+(function() {
+    var files = [
+        "2025 Scans/2-2 Trip/pageA.jpg",
+        "2025 Scans/2-2 Trip/pageB.jpg",
+        "2025 Scans/9-7 Trip/pageC.jpg",
+        "2026 Scans/pageD.jpg",
+        "top.jpg"
+    ];
+    var rows = CsScanTree.rowsOf(files);
+
+    function sig(r) {
+        return (r.kind === "folder" ? "D" : "F") + r.depth + ":" + r.rel;
+    }
+    eqs(rows.map(sig).join(","),
+        "D0:2025 Scans," +
+        "D1:2025 Scans/2-2 Trip," +
+        "F2:2025 Scans/2-2 Trip/pageA.jpg," +
+        "F2:2025 Scans/2-2 Trip/pageB.jpg," +
+        "D1:2025 Scans/9-7 Trip," +
+        "F2:2025 Scans/9-7 Trip/pageC.jpg," +
+        "D0:2026 Scans," +
+        "F1:2026 Scans/pageD.jpg," +
+        "F0:top.jpg",
+        "rowsOf: folder rows appear once, before their files, at the " +
+        "right depths, display order preserved");
+    eqs(rows[0].label, "2025 Scans", "rowsOf: folder label is the segment");
+    eqs(rows[2].label, "pageA.jpg", "rowsOf: file label is the filename");
+
+    eqs(CsScanTree.rowsOf(["a.jpg", "b.jpg"]).map(sig).join(","),
+        "F0:a.jpg,F0:b.jpg",
+        "rowsOf: a flat folder makes no folder rows");
+    eqs(CsScanTree.rowsOf([]).length, 0, "rowsOf: no files, no rows");
+
+    eqs(CsScanTree.ancestorsOf("a/b/c.jpg").join(","), "a,a/b",
+        "ancestorsOf: every folder prefix, in order");
+    eqs(CsScanTree.ancestorsOf("x.jpg").length, 0,
+        "ancestorsOf: a top-level file has none");
+
+    function visible(rows, collapsed) {
+        var out = [];
+        for (var i = 0; i < rows.length; i++) {
+            if (!CsScanTree.isHidden(rows[i], collapsed)) {
+                out.push(sig(rows[i]));
+            }
+        }
+        return out.join(",");
+    }
+
+    eqs(visible(rows, {}), rows.map(sig).join(","),
+        "isHidden: nothing collapsed, nothing hidden");
+    eqs(visible(rows, {"2025 Scans": true}),
+        "D0:2025 Scans,D0:2026 Scans,F1:2026 Scans/pageD.jpg,F0:top.jpg",
+        "isHidden: collapsing a year hides its trips and files but " +
+        "not the year row itself or its siblings");
+    eqs(visible(rows, {"2025 Scans/2-2 Trip": true}),
+        "D0:2025 Scans," +
+        "D1:2025 Scans/2-2 Trip," +
+        "D1:2025 Scans/9-7 Trip," +
+        "F2:2025 Scans/9-7 Trip/pageC.jpg," +
+        "D0:2026 Scans,F1:2026 Scans/pageD.jpg,F0:top.jpg",
+        "isHidden: collapsing one trip hides only that trip's files");
+    // The standard-tree rule: expanding the year must NOT reveal what
+    // a still-collapsed trip owns.
+    eqs(visible(rows, {"2025 Scans/2-2 Trip": true, "2026 Scans": true}),
+        "D0:2025 Scans," +
+        "D1:2025 Scans/2-2 Trip," +
+        "D1:2025 Scans/9-7 Trip," +
+        "F2:2025 Scans/9-7 Trip/pageC.jpg," +
+        "D0:2026 Scans,F0:top.jpg",
+        "isHidden: independent collapsed folders each hold their own");
+
+    // Collapsed-state settings value: one JSON object mapping the
+    // scans folder's absolute path to its collapsed relative paths.
+    var map = CsScanTree.parseCollapsed("not json at all");
+    ok(typeof map === "object" && map !== null &&
+       Object.keys(map).length === 0,
+        "parseCollapsed: garbage reads as empty, never throws");
+    map = CsScanTree.parseCollapsed("");
+    ok(Object.keys(map).length === 0, "parseCollapsed: empty string too");
+
+    map = {};
+    CsScanTree.recordCollapsed(map, "/drive/Cave/scans",
+        {"2025 Scans": true, "Gone Trip": true},
+        ["2025 Scans", "2025 Scans/2-2 Trip"]);
+    var back = CsScanTree.parseCollapsed(
+        CsScanTree.serializeCollapsed(map));
+    eqs(back["/drive/Cave/scans"].join(","), "2025 Scans",
+        "recordCollapsed: survives the round trip and drops folders " +
+        "that no longer exist");
+    eqs(CsScanTree.collapsedSetFor(back, "/drive/Cave/scans")["2025 Scans"],
+        true, "collapsedSetFor: hands the set back");
+    ok(Object.keys(CsScanTree.collapsedSetFor(back, "/other/scans"))
+        .length === 0,
+        "collapsedSetFor: an unknown cave starts fully expanded");
+
+    CsScanTree.recordCollapsed(map, "/drive/Cave/scans", {},
+        ["2025 Scans"]);
+    ok(map["/drive/Cave/scans"] === undefined,
+        "recordCollapsed: nothing collapsed removes the cave's entry");
+}());
 
 // ---------------------------------------------------------------------
 // CsProfile -- name parsing and run grouping

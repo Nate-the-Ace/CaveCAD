@@ -12,6 +12,13 @@
 // hovering any row pops the same picture as a tooltip (Qt rich-text
 // tooltips render <img>).
 //
+// The list is a folder TREE, simulated on a QTableWidget (QTreeWidget
+// is not constructible in this bridge -- see CaveShelf.js): bold
+// folder rows with ▾/▸ glyphs, one plain click folds a folder by
+// hiding its rows, and the collapsed set is remembered per cave in
+// settings (CsScanTree.SETTING) because the dialog closes after every
+// insert. The model behind it is Core/CsScanTree.js.
+//
 // Inserting is ADDITIVE -- several scans commonly underlie one map, so
 // re-running never erases previous scans (unlike the basemap and the
 // contours, which replace themselves). Each image is tagged
@@ -117,16 +124,63 @@ SketchScans.imageFiles = function(folder) {
 SketchScans.PREVIEW_W = 420;
 SketchScans.PREVIEW_H = 340;
 
+// The collapsed set for one cave's scans folder, from settings.
+// A bridge without RSettings starts fully expanded.
+SketchScans.loadCollapsed = function(scans) {
+    try {
+        var map = CsScanTree.parseCollapsed(
+            RSettings.getStringValue(CsScanTree.SETTING, ""));
+        return CsScanTree.collapsedSetFor(map, scans);
+    } catch (e) {
+        return {};
+    }
+};
+
+// Writes the collapsed set back, keeping only folders the dialog
+// actually showed -- renamed or deleted trip folders fall out.
+SketchScans.saveCollapsed = function(scans, collapsed, rows) {
+    try {
+        var map = CsScanTree.parseCollapsed(
+            RSettings.getStringValue(CsScanTree.SETTING, ""));
+        var valid = [];
+        for (var i = 0; i < rows.length; i++) {
+            if (rows[i].kind === "folder") { valid.push(rows[i].rel); }
+        }
+        CsScanTree.recordCollapsed(map, scans, collapsed, valid);
+        RSettings.setValue(CsScanTree.SETTING,
+            CsScanTree.serializeCollapsed(map));
+    } catch (e) {
+        // a bridge without RSettings just forgets the collapse state
+    }
+};
+
+// The text of one row: indentation by depth, a disclosure glyph on
+// folder rows, a glyph-wide gap on file rows so labels at one depth
+// line up across kinds.
+SketchScans.rowText = function(row, collapsed) {
+    var indent = new Array(row.depth + 1).join("  ");
+    if (row.kind === "folder") {
+        return indent +
+            (collapsed[row.rel] === true ? "▸ " : "▾ ") +
+            row.label;
+    }
+    return indent + "  " + row.label;
+};
+
 /** The browse dialog. */
 SketchScans.dialog = function(doc, di, scans, files) {
+    var rows = CsScanTree.rowsOf(files);
+    var collapsed = SketchScans.loadCollapsed(scans);
+
     var appWin = RMainWindowQt.getMainWindow();
     var dlg = new QDialog(appWin);
     dlg.windowTitle = "Sketch Scans";
     var layout = new QVBoxLayout();
 
     layout.addWidget(new QLabel(scans + "  —  " + files.length +
-        " scan" + (files.length === 1 ? "" : "s") + ". Hover a row " +
-        "for a preview; double-click inserts and aligns."), 0, 0);
+        " scan" + (files.length === 1 ? "" : "s") + ". Hover a scan " +
+        "for a preview; double-click inserts and aligns; click a " +
+        "folder to collapse it."), 0, 0);
 
     var main = new QHBoxLayout();
 
@@ -140,17 +194,47 @@ SketchScans.dialog = function(doc, di, scans, files) {
         list.minimumWidth = 240;
     } catch (eList) {
     }
-    list.setRowCount(files.length);
-    for (var i = 0; i < files.length; i++) {
-        var item = new QTableWidgetItem(files[i]);
-        try {
-            item.setToolTip("<img src=\"" + scans + "/" + files[i] +
-                "\" width=\"" + SketchScans.PREVIEW_W + "\">");
-        } catch (eTip) {
-            // no hover preview on this bridge; the pane still works
+    list.setRowCount(rows.length);
+    for (var i = 0; i < rows.length; i++) {
+        var item = new QTableWidgetItem(
+            SketchScans.rowText(rows[i], collapsed));
+        if (rows[i].kind === "folder") {
+            // Bold, clickable, but never SELECTED -- the selection
+            // (and with it the preview pane) stays on a scan while
+            // folders fold and unfold around it.
+            try {
+                var bold = item.font();
+                bold.setBold(true);
+                item.setFont(bold);
+            } catch (eBold) {
+            }
+            try {
+                item.setFlags(Qt.ItemIsEnabled);
+            } catch (eFlags) {
+            }
+        } else {
+            try {
+                item.setToolTip("<img src=\"" + scans + "/" +
+                    rows[i].rel + "\" width=\"" +
+                    SketchScans.PREVIEW_W + "\">");
+            } catch (eTip) {
+                // no hover preview on this bridge; the pane still works
+            }
         }
         list.setItem(i, 0, item);
     }
+
+    var applyHidden = function() {
+        try {
+            for (var r = 0; r < rows.length; r++) {
+                list.setRowHidden(r,
+                    CsScanTree.isHidden(rows[r], collapsed));
+            }
+        } catch (eHide) {
+            // an engine without setRowHidden shows the list flat
+        }
+    };
+    applyHidden();
     main.addWidget(list, 0, 0);
 
     var preview = new QLabel("");
@@ -183,7 +267,25 @@ SketchScans.dialog = function(doc, di, scans, files) {
 
     var selectedFile = function() {
         var row = list.currentRow();
-        return (row >= 0 && row < files.length) ? files[row] : null;
+        if (row < 0 || row >= rows.length) { return null; }
+        return rows[row].kind === "file" ? rows[row].rel : null;
+    };
+
+    var toggleFolder = function(rowIdx) {
+        var row = rows[rowIdx];
+        if (row === undefined || row.kind !== "folder") { return; }
+        if (collapsed[row.rel] === true) {
+            delete collapsed[row.rel];
+        } else {
+            collapsed[row.rel] = true;
+        }
+        try {
+            list.item(rowIdx, 0).setText(
+                SketchScans.rowText(row, collapsed));
+        } catch (eGlyph) {
+            // a stale glyph is cosmetic; the rows still fold
+        }
+        applyHidden();
     };
 
     var showPreview = function() {
@@ -224,16 +326,27 @@ SketchScans.dialog = function(doc, di, scans, files) {
     };
 
     list.itemSelectionChanged.connect(showPreview);
+    // Folder rows fold on a plain click; they are not selectable, so
+    // the double-click below can only ever land on a scan.
+    list.cellClicked.connect(function(row, col) { toggleFolder(row); });
     list.itemDoubleClicked.connect(function() { choose(true); });
     alignButton.clicked.connect(function() { choose(true); });
     insertButton.clicked.connect(function() { choose(false); });
     closeButton.clicked.connect(function() { dlg.reject(); });
 
-    list.selectRow(0);
+    // Initial selection: the first visible scan, not a folder row.
+    for (var s = 0; s < rows.length; s++) {
+        if (rows[s].kind === "file" &&
+                !CsScanTree.isHidden(rows[s], collapsed)) {
+            list.selectRow(s);
+            break;
+        }
+    }
     showPreview();
 
     dlg.exec();
     destrDialog(dlg);
+    SketchScans.saveCollapsed(scans, collapsed, rows);
 
     if (chosen.file === null) {
         return;
