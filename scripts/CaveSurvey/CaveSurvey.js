@@ -116,6 +116,20 @@ CaveSurvey.init = function(basePath, splash) {
         // degrade to the manual sync path
     }
 
+    // Keep shaped-line decoration (ledge ticks, scallops) on its spine
+    // while the caver edits with QCAD's own tools -- the same
+    // arrangement as the callout listener above, for the same reason.
+    // Without it, shaped lines still work; they just need Sync Shaped
+    // Lines run by hand.
+    try {
+        include(includeBasePath + "/ShapedLines/ShapedLinesListener.js");
+        if (typeof ShapedLinesListener !== "undefined") {
+            ShapedLinesListener.install();
+        }
+    } catch (eShaped) {
+        // degrade to the manual sync path
+    }
+
     // Keep the previous version of a drawing beside it on every save.
     // A redraw is erase-then-draw across two operations, so a draw that
     // fails after the erase has landed leaves the drawing gutted -- and

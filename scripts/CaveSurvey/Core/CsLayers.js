@@ -106,6 +106,16 @@ CsLayers.TEXT_LABELS = "TEXT-LABELS";
 CsLayers.TEXT_NOTES = "TEXT-NOTES";
 CsLayers.ENTRANCE = "ENTRANCE";
 
+// Shaped Lines feature layers (spine + decoration both land here), and
+// the hidden skeleton layer for the decor-only styles: a flowstone
+// edge's spine is scaffolding, not map ink, so it lives on a CTRL layer
+// that is OFF by default -- switch it on to grab and reshape the edge.
+CsLayers.LEDGE_FLOOR = "LEDGE-FLOOR";
+CsLayers.LEDGE_CEILING = "LEDGE-CEILING";
+CsLayers.FLOWSTONE = "FLOWSTONE";
+CsLayers.RIMSTONE = "RIMSTONE";
+CsLayers.SHAPE_SPINE = "CTRL-SHAPE-SPINE";
+
 // Defaults for creating a layer that is missing from the drawing
 // (someone working without the template still gets sane colors).
 // name -> [colorName, linetype, lineweightKey]
@@ -165,6 +175,17 @@ CsLayers.DEFAULTS = {
     "TEXT-LABELS": ["white", "CONTINUOUS", "Weight018"],
     "TEXT-NOTES": ["white", "CONTINUOUS", "Weight009"],
     "ENTRANCE": ["white", "CONTINUOUS", "Weight035"],
+    // Shaped Lines. The ceiling ledge is DASHED at the layer, which is
+    // what makes the spine itself print as the NSS dashed ledge line --
+    // the ticks are separate entities and inherit the same layer, but a
+    // tick is too short for a dash to land visibly. CTRL-SHAPE-SPINE is
+    // the invisible skeleton under flowstone/rimstone decor: gray,
+    // dashed, hairline, and created OFF (see CsLayers.OFF below).
+    "LEDGE-FLOOR": ["white", "CONTINUOUS", "Weight035"],
+    "LEDGE-CEILING": ["white", "DASHED", "Weight025"],
+    "FLOWSTONE": ["white", "CONTINUOUS", "Weight025"],
+    "RIMSTONE": ["white", "CONTINUOUS", "Weight025"],
+    "CTRL-SHAPE-SPINE": ["gray", "DASHED", "Weight000"],
     "CTRL-DATA": ["gray", "CONTINUOUS", "Weight000"],
     // Callout layers. Hazard is red because it is the one a caver must
     // not miss. Every color and weight below is one already proven
@@ -243,7 +264,8 @@ CsLayers.frameOf = function(layerName) {
 // nothing can be drawn onto these layers while they are off: a
 // writer must wrap its add operation in CsLayers.withLayerOn below,
 // which flips the layer visible for the write and restores it after.
-CsLayers.OFF = { "CTRL-DATA": true, "CTRL-HIDDEN": true, "CTRL-RAW": true };
+CsLayers.OFF = { "CTRL-DATA": true, "CTRL-HIDDEN": true, "CTRL-RAW": true,
+    "CTRL-SHAPE-SPINE": true };
 
 /**
  * True when this layer will SILENTLY REFUSE edits -- adds, deletes and

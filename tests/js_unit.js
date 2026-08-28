@@ -17432,6 +17432,339 @@ function syntheticTiff(w, h, floats) {
 })();
 
 // ---------------------------------------------------------------------
+// CsShapeLine -- shaped-line decoration math (pure half).
+// ---------------------------------------------------------------------
+
+(function() {
+    loadRepoScript("scripts/CaveSurvey/Core/CsLayers.js");
+    loadRepoScript("scripts/CaveSurvey/Core/CsShapeLine.js");
+
+    // The styles table must name real registry layers -- a literal here
+    // is how a decorated line lands on a layer no template carries.
+    for (var key in CsShapeLine.STYLES) {
+        if (!CsShapeLine.STYLES.hasOwnProperty(key)) {
+            continue;
+        }
+        var spec = CsShapeLine.STYLES[key];
+        ok(CsLayers.DEFAULTS[spec.spineLayer] !== undefined,
+            "STYLES." + key + ".spineLayer is a registry layer");
+        ok(CsLayers.DEFAULTS[spec.decorLayer] !== undefined,
+            "STYLES." + key + ".decorLayer is a registry layer");
+        ok(spec.kind === "ticks" || spec.kind === "scallops",
+            "STYLES." + key + " kind is known");
+    }
+    ok(CsShapeLine.STYLES["flowstone"].spineLayer === "CTRL-SHAPE-SPINE",
+        "flowstone spine hides on CTRL-SHAPE-SPINE");
+    ok(CsLayers.OFF["CTRL-SHAPE-SPINE"] === true,
+        "CTRL-SHAPE-SPINE is created switched off");
+
+    // Stations along a straight run: centred, evenly spaced.
+    var line = [{ x: 0, y: 0 }, { x: 10, y: 0 }];
+    var st = CsShapeLine.stations(line, false, 2);
+    ok(st.length === 5, "stations: 10 units at spacing 2 gives 5, got " +
+        st.length);
+    near(st[0].x, 1, 1e-9, "stations: first inset half a spacing");
+    near(st[4].x, 9, 1e-9, "stations: last inset from the far end");
+    near(st[0].tx, 1, 1e-9, "stations: tangent follows travel (x)");
+    near(st[0].ty, 0, 1e-9, "stations: tangent follows travel (y)");
+
+    // Tick handedness: side +1 is the RIGHT of travel. Travelling +x,
+    // right is -y.
+    var tk = CsShapeLine.ticks(line, false, 5, 2, 1);
+    ok(tk.length === 2, "ticks: count from spacing");
+    near(tk[0][1].y, -2, 1e-9, "ticks: side +1 falls right of travel");
+    var tkL = CsShapeLine.ticks(line, false, 5, 2, -1);
+    near(tkL[0][1].y, 2, 1e-9, "ticks: side -1 falls left of travel");
+    near(tk[0][0].y, 0, 1e-9, "ticks: tick starts ON the spine");
+
+    // Closed path: even division, no ragged seam, inward known by the
+    // shoelace. A CCW square's interior is LEFT of travel.
+    var sq = [{ x: 0, y: 0 }, { x: 10, y: 0 },
+              { x: 10, y: 10 }, { x: 0, y: 10 }];
+    ok(CsShapeLine.inwardSide(sq) === -1, "inwardSide: CCW loop is left");
+    ok(CsShapeLine.inwardSide(sq.slice().reverse()) === 1,
+        "inwardSide: CW loop is right");
+    var stc = CsShapeLine.stations(sq, true, 3);
+    ok(stc.length === Math.round(40 / 3),
+        "stations: closed perimeter divides evenly, got " + stc.length);
+    var inward = CsShapeLine.ticks(sq, true, 3, 2, CsShapeLine.inwardSide(sq));
+    var allInside = true;
+    for (var ti = 0; ti < inward.length; ti++) {
+        var tip = inward[ti][1];
+        if (tip.x < -1e-9 || tip.x > 10 + 1e-9 ||
+                tip.y < -1e-9 || tip.y > 10 + 1e-9) {
+            allInside = false;
+        }
+    }
+    ok(allInside, "ticks: inward side keeps every tip inside the loop");
+
+    // Scallops: chord walk, bulges bow to the chosen side, the last
+    // vertex of an open chain starts no segment.
+    var sc = CsShapeLine.scallops(
+        [{ x: 0, y: 0 }, { x: 12, y: 0 }], false, 4, 0.5, 1);
+    ok(sc.points.length === 4, "scallops: 12 units at chord 4 gives 3 arcs");
+    // Positive DXF bulge bows RIGHT of travel (probed against
+    // RPolyline.getSegmentAt), so side +1 is the positive bulge.
+    near(sc.bulges[0], 0.5, 1e-9, "scallops: side +1 bows right (positive bulge)");
+    near(sc.bulges[sc.bulges.length - 1], 0, 1e-9,
+        "scallops: open chain's last vertex carries no bulge");
+    var scc = CsShapeLine.scallops(sq, true, 4, 0.5, -1);
+    ok(scc.closed === true, "scallops: closed path gives a closed chain");
+    near(scc.bulges[scc.bulges.length - 1], -0.5, 1e-9,
+        "scallops: closed chain's last segment still bulges");
+
+    // The signature: stable, sensitive at 0.001 units, blind below the
+    // rounding -- the listener's no-op guard depends on both halves.
+    var sigA = CsShapeLine.signature(line, false);
+    ok(sigA === CsShapeLine.signature(
+        [{ x: 0, y: 0 }, { x: 10, y: 0 }], false),
+        "signature: deterministic");
+    ok(sigA !== CsShapeLine.signature(
+        [{ x: 0, y: 0 }, { x: 10, y: 0.01 }], false),
+        "signature: a hundredth moves it");
+    ok(sigA === CsShapeLine.signature(
+        [{ x: 0, y: 0 }, { x: 10, y: 0.0001 }], false),
+        "signature: float noise below the rounding does not");
+    ok(sigA !== CsShapeLine.signature(line, true),
+        "signature: closedness is part of the geometry");
+
+    // prims routes by kind and counts what decorate() will add.
+    var pt = CsShapeLine.prims(line, false, CsShapeLine.STYLES["floorledge"],
+        1, 2, 1);
+    ok(pt.lines.length === 5 && pt.polylines.length === 0,
+        "prims: a ticks style makes lines only");
+    ok(CsShapeLine.primCount(pt) === 5, "primCount: counts the lines");
+    var ps = CsShapeLine.prims(line, false, CsShapeLine.STYLES["flowstone"],
+        1, 4, 0);
+    ok(ps.lines.length === 0 && ps.polylines.length === 1,
+        "prims: a scallop style makes one polyline");
+    ok(CsShapeLine.primCount(ps) === 1, "primCount: counts the chain");
+})();
+
+// ---------------------------------------------------------------------
+// CsShapeLine -- engine half: sampling every entity type, decorate,
+// reconcile. QCAD only (RDocument fixtures).
+// ---------------------------------------------------------------------
+
+if (!IS_NODE) {
+    (function() {
+        loadRepoScript("scripts/CaveSurvey/Core/CsUuid.js");
+        loadRepoScript("scripts/CaveSurvey/Core/CsUnits.js");
+        loadRepoScript("scripts/CaveSurvey/Core/CsLayers.js");
+        loadRepoScript("scripts/CaveSurvey/Core/CsTrace.js");
+        loadRepoScript("scripts/CaveSurvey/Core/CsStore.js");
+        loadRepoScript("scripts/CaveSurvey/Core/CsTags.js");
+        loadRepoScript("scripts/CaveSurvey/Core/CsShapeLine.js");
+
+        var doc = new RDocument(new RMemoryStorage(),
+            new RSpatialIndexNavel());
+        var di = new RDocumentInterface(doc);
+        getDocument = function() { return doc; };
+        getDocumentInterface = function() { return di; };
+
+        // --- sampleEntity across all five supported types ---
+
+        var lineEnt = new RLineEntity(doc, new RLineData(
+            new RVector(0, 0), new RVector(10, 0)));
+        var s = CsShapeLine.sampleEntity(lineEnt, 1);
+        ok(s !== null && s.closed === false, "sample: line is open");
+        near(s.points[0].x, 0, 1e-9, "sample: line starts at its start");
+        near(s.points[s.points.length - 1].x, 10, 1e-9,
+            "sample: line ends at its end");
+
+        var arcEnt = new RArcEntity(doc, new RArcData(
+            new RVector(0, 0), 5, 0, Math.PI, false));
+        s = CsShapeLine.sampleEntity(arcEnt, 0.5);
+        ok(s !== null && s.closed === false, "sample: arc is open");
+        near(s.points[0].x, 5, 1e-6, "sample: arc starts on its start angle");
+        near(s.points[s.points.length - 1].x, -5, 1e-6,
+            "sample: arc ends on its end angle");
+        var mid = s.points[Math.floor(s.points.length / 2)];
+        ok(mid.y > 4, "sample: a CCW upper arc passes over the top");
+
+        var circEnt = new RCircleEntity(doc, new RCircleData(
+            new RVector(2, 3), 5));
+        s = CsShapeLine.sampleEntity(circEnt, 0.5);
+        ok(s !== null && s.closed === true, "sample: circle is closed");
+        var rOk = true;
+        for (var ci = 0; ci < s.points.length; ci++) {
+            var dr = Math.sqrt(
+                Math.pow(s.points[ci].x - 2, 2) +
+                Math.pow(s.points[ci].y - 3, 2));
+            if (Math.abs(dr - 5) > 1e-6) {
+                rOk = false;
+            }
+        }
+        ok(rOk, "sample: every circle sample sits on the circle");
+
+        var pl = new RPolyline();
+        pl.appendVertex(new RVector(0, 0), 0.5);   // bulged first segment
+        pl.appendVertex(new RVector(10, 0), 0);
+        pl.appendVertex(new RVector(20, 0), 0);
+        var plEnt = new RPolylineEntity(doc, new RPolylineData(pl));
+        s = CsShapeLine.sampleEntity(plEnt, 0.5);
+        ok(s !== null && s.closed === false, "sample: open polyline");
+        // Engine truth: a +0.5 bulge from (0,0) to (10,0) has its middle
+        // point at (5,-2.5) -- positive bulge bows RIGHT of travel.
+        var dipped = false;
+        for (var pi = 0; pi < s.points.length; pi++) {
+            if (s.points[pi].y < -1) {
+                dipped = true;
+            }
+        }
+        ok(dipped, "sample: a positive bulge bows the walk right of travel");
+        near(s.points[s.points.length - 1].x, 20, 1e-9,
+            "sample: polyline walk reaches the last vertex");
+
+        var sqp = new RPolyline();
+        sqp.appendVertex(new RVector(0, 0), 0);
+        sqp.appendVertex(new RVector(10, 0), 0);
+        sqp.appendVertex(new RVector(10, 10), 0);
+        sqp.appendVertex(new RVector(0, 10), 0);
+        sqp.setClosed(true);
+        var sqEnt = new RPolylineEntity(doc, new RPolylineData(sqp));
+        s = CsShapeLine.sampleEntity(sqEnt, 1);
+        ok(s !== null && s.closed === true, "sample: closed polyline closed");
+        var first = s.points[0], last = s.points[s.points.length - 1];
+        ok(Math.abs(first.x - last.x) > 1e-9 ||
+           Math.abs(first.y - last.y) > 1e-9,
+            "sample: closed walk does not duplicate its seam point");
+
+        var spEnt = CsTrace.fitSpline(doc, [
+            { x: 0, y: 0 }, { x: 5, y: 5 }, { x: 10, y: -5 },
+            { x: 15, y: 0 }]);
+        s = CsShapeLine.sampleEntity(spEnt, 0.5);
+        ok(s !== null && s.points.length >= 4, "sample: spline samples");
+        near(s.points[0].x, 0, 1e-6, "sample: spline starts at its start");
+        near(s.points[s.points.length - 1].x, 15, 1e-6,
+            "sample: spline ends at its end");
+
+        ok(CsShapeLine.isSupported(lineEnt) &&
+           CsShapeLine.isSupported(arcEnt) &&
+           CsShapeLine.isSupported(circEnt) &&
+           CsShapeLine.isSupported(plEnt) &&
+           CsShapeLine.isSupported(spEnt),
+            "isSupported: all five types");
+
+        // --- decorate / reconcile on a real document ---
+
+        CsLayers.ensure(doc, di, CsLayers.LEDGE_FLOOR);
+        var spine = new RLineEntity(doc, new RLineData(
+            new RVector(0, 0), new RVector(30, 0)));
+        spine.setLayerId(doc.getLayerId(CsLayers.LEDGE_FLOOR));
+        var sid = CsUuid.v4();
+        CsTags.set(spine, CsShapeLine.KEY.ID, sid);
+        CsTags.set(spine, CsShapeLine.KEY.STYLE, "floorledge");
+        CsTags.set(spine, CsShapeLine.KEY.SIDE, "1");
+        CsTags.set(spine, CsShapeLine.KEY.SCALE, "1");
+        var addOp = new RAddObjectsOperation();
+        addOp.addObject(spine, false);
+        di.applyOperation(addOp);
+
+        var r = CsShapeLine.decorate(doc, di, spine, null);
+        ok(r === "decorated", "decorate: first pass decorates, got " + r);
+        var decor = CsShapeLine.decorOf(doc, sid);
+        ok(decor.length > 0, "decorate: decor entities exist");
+        var tickTip = decor[0].getData().getEndPoint();
+        ok(tickTip.y < 0, "decorate: side +1 ticks fall right of travel");
+        var decorLayerOk = true;
+        for (var di2 = 0; di2 < decor.length; di2++) {
+            if (doc.getLayerName(decor[di2].getLayerId()) !==
+                    CsLayers.LEDGE_FLOOR) {
+                decorLayerOk = false;
+            }
+        }
+        ok(decorLayerOk, "decorate: decor lands on the style's layer");
+
+        // Second pass with unchanged geometry: NOT a write.
+        var spine2 = CsShapeLine.spineOf(doc, sid);
+        var countBefore = CsShapeLine.decorOf(doc, sid).length;
+        r = CsShapeLine.decorate(doc, di, spine2, null);
+        ok(r === "unchanged", "decorate: unchanged spine is a no-op, got " + r);
+        ok(CsShapeLine.decorOf(doc, sid).length === countBefore,
+            "decorate: no-op adds nothing");
+
+        // Flip the side: signature is side-blind, so the SIG must be
+        // cleared for the rebuild to happen -- the ShapedFlip contract.
+        CsTags.set(spine2, CsShapeLine.KEY.SIDE, "-1");
+        CsTags.remove(spine2, CsShapeLine.KEY.SIG);
+        var modOp = new RModifyObjectsOperation();
+        modOp.addObject(spine2, false);
+        di.applyOperation(modOp);
+        var spine3 = CsShapeLine.spineOf(doc, sid);
+        r = CsShapeLine.decorate(doc, di, spine3, null);
+        ok(r === "decorated", "decorate: cleared SIG rebuilds, got " + r);
+        var flipped = CsShapeLine.decorOf(doc, sid);
+        ok(flipped.length === countBefore,
+            "decorate: rebuild REPLACES rather than accumulates");
+        var flippedTip = flipped[0].getData().getEndPoint();
+        ok(flippedTip.y > 0, "decorate: side -1 mirrors the ticks");
+
+        // reconcile: all decor deleted by hand -> the spine survives as
+        // an ordinary line, tags stripped.
+        var delDecor = new RDeleteObjectsOperation();
+        for (var dd = 0; dd < flipped.length; dd++) {
+            delDecor.deleteObject(flipped[dd]);
+        }
+        di.applyOperation(delDecor);
+        r = CsShapeLine.reconcile(doc, di, sid, null);
+        ok(r === "unlinked", "reconcile: decor gone unlinks, got " + r);
+        var stripped = CsShapeLine.spineOf(doc, sid);
+        ok(stripped === null, "reconcile: unlinked spine sheds its id");
+
+        // reconcile: spine deleted -> orphaned decor removed.
+        var spineB = new RLineEntity(doc, new RLineData(
+            new RVector(0, 20), new RVector(30, 20)));
+        spineB.setLayerId(doc.getLayerId(CsLayers.LEDGE_FLOOR));
+        var sidB = CsUuid.v4();
+        CsTags.set(spineB, CsShapeLine.KEY.ID, sidB);
+        CsTags.set(spineB, CsShapeLine.KEY.STYLE, "floorledge");
+        CsTags.set(spineB, CsShapeLine.KEY.SIDE, "1");
+        var addB = new RAddObjectsOperation();
+        addB.addObject(spineB, false);
+        di.applyOperation(addB);
+        ok(CsShapeLine.decorate(doc, di, spineB, null) === "decorated",
+            "reconcile fixture: second spine decorated");
+        ok(CsShapeLine.decorOf(doc, sidB).length > 0,
+            "reconcile fixture: second spine has decor");
+        var delSpine = new RDeleteObjectsOperation();
+        delSpine.deleteObject(CsShapeLine.spineOf(doc, sidB));
+        di.applyOperation(delSpine);
+        r = CsShapeLine.reconcile(doc, di, sidB, null);
+        ok(r === "orphans-removed",
+            "reconcile: spine gone removes orphans, got " + r);
+        ok(CsShapeLine.decorOf(doc, sidB).length === 0,
+            "reconcile: no orphan decor survives");
+
+        // A scallop style produces ONE closed-form polyline entity with
+        // bulges, on ITS decor layer -- and the spine's own layer is
+        // wherever the caver's entity already was (decorate never moves
+        // the spine).
+        CsLayers.ensure(doc, di, CsLayers.FLOWSTONE);
+        var spineC = new RLineEntity(doc, new RLineData(
+            new RVector(0, 40), new RVector(30, 40)));
+        spineC.setLayerId(doc.getLayerId(CsLayers.LEDGE_FLOOR));
+        var sidC = CsUuid.v4();
+        CsTags.set(spineC, CsShapeLine.KEY.ID, sidC);
+        CsTags.set(spineC, CsShapeLine.KEY.STYLE, "flowstone");
+        CsTags.set(spineC, CsShapeLine.KEY.SIDE, "1");
+        var addC = new RAddObjectsOperation();
+        addC.addObject(spineC, false);
+        di.applyOperation(addC);
+        ok(CsShapeLine.decorate(doc, di, spineC, null) === "decorated",
+            "decorate: scallop style decorates");
+        var decorC = CsShapeLine.decorOf(doc, sidC);
+        ok(decorC.length === 1, "decorate: scallops are ONE chain entity");
+        ok(decorC[0].getType() === RS.EntityPolyline,
+            "decorate: the chain is a polyline");
+        ok(doc.getLayerName(decorC[0].getLayerId()) === CsLayers.FLOWSTONE,
+            "decorate: the chain lands on FLOWSTONE");
+        ok(Math.abs(decorC[0].getData().getBulgeAt(0) - 0.5) < 1e-9,
+            "decorate: the chain carries the style's bulge");
+    })();
+}
+
+// ---------------------------------------------------------------------
 // Report.
 // ---------------------------------------------------------------------
 
