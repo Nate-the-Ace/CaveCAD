@@ -9314,6 +9314,42 @@ if (!IS_NODE) {
 }
 
 // ---------------------------------------------------------------------
+// CsCave.compareNatural -- the ordering behind the scans tree. Pure.
+//
+// Surveyors name trip folders by date, "4-6-24 Survey Scans", and a
+// plain string sort put November ("11-...") before April ("4-...") on
+// the shelf of every real cave. Digit runs compare as NUMBERS.
+// ---------------------------------------------------------------------
+
+(function() {
+    function sorted(names) {
+        var copy = names.slice();
+        copy.sort(CsCave.compareNatural);
+        return copy.join(",");
+    }
+
+    // The exact folder names off Truitt's 2024 shelf.
+    eqs(sorted(["11-03-24 Survey Notes", "12-1-24 Survey Notes",
+            "4-6-24 Survey Scans", "6-2-2024", "7-7-24 Survey notes",
+            "9-1-24 Survey notes"]),
+        "4-6-24 Survey Scans,6-2-2024,7-7-24 Survey notes," +
+        "9-1-24 Survey notes,11-03-24 Survey Notes,12-1-24 Survey Notes",
+        "compareNatural: month-day-year folder names land in date order");
+
+    eqs(sorted(["Page_10.jpg", "Page_2.jpg", "Page_1.jpg"]),
+        "Page_1.jpg,Page_2.jpg,Page_10.jpg",
+        "compareNatural: page 10 comes after page 2, not before");
+
+    eqs(sorted(["b.jpg", "A.jpg"]), "A.jpg,b.jpg",
+        "compareNatural: case does not split the alphabet");
+    eqs(sorted(["03", "3"]), "03,3",
+        "compareNatural: equal numbers fall back to the shorter text " +
+        "first, deterministically");
+    ok(CsCave.compareNatural("same", "same") === 0,
+        "compareNatural: equal strings compare equal");
+}());
+
+// ---------------------------------------------------------------------
 // CsScanTree -- the folder tree Sketch Scans draws over filesUnder's
 // relative paths. Pure, so it runs under node too.
 // ---------------------------------------------------------------------

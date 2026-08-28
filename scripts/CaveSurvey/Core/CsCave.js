@@ -229,8 +229,43 @@ CsCave.pdfFolderOf = function(folder) {
     return CsCave.findSubfolder(folder, CsCave.PDF);
 };
 
+// Natural, case-insensitive ordering: digit runs compare as NUMBERS,
+// everything else as lowercased text. Surveyors name trip folders by
+// date -- "4-6-24 Survey Scans" -- and scanners number pages --
+// "Page_10.jpg" -- and a plain string sort puts November before April
+// and page 10 before page 2. Ties on equal numbers ("03" vs "3") fall
+// back to plain string order so the ordering stays total and
+// deterministic.
+CsCave.compareNatural = function(a, b) {
+    var sa = String(a), sb = String(b);
+    var la = sa.toLowerCase(), lb = sb.toLowerCase();
+    var ia = 0, ib = 0;
+    var digits = /[0-9]/;
+    while (ia < la.length && ib < lb.length) {
+        var ca = la.charAt(ia), cb = lb.charAt(ib);
+        if (digits.test(ca) && digits.test(cb)) {
+            var ja = ia, jb = ib;
+            while (ja < la.length && digits.test(la.charAt(ja))) { ja++; }
+            while (jb < lb.length && digits.test(lb.charAt(jb))) { jb++; }
+            var na = parseInt(la.substring(ia, ja), 10);
+            var nb = parseInt(lb.substring(ib, jb), 10);
+            if (na !== nb) { return na < nb ? -1 : 1; }
+            ia = ja; ib = jb;
+            continue;
+        }
+        if (ca !== cb) { return ca < cb ? -1 : 1; }
+        ia++; ib++;
+    }
+    // one ran out: the shorter (a prefix of the longer) comes first
+    var restA = la.length - ia, restB = lb.length - ib;
+    if (restA !== restB) { return restA < restB ? -1 : 1; }
+    // numerically equal all the way through ("03" vs "3"): plain order
+    return sa < sb ? -1 : (sa > sb ? 1 : 0);
+};
+
 // Every file under `folder` matching the QDir name filters, as paths
-// RELATIVE to `folder`, sorted case-insensitively. Recurses into
+// RELATIVE to `folder`, sorted naturally (dates and page numbers in
+// human order -- see compareNatural). Recurses into
 // subfolders down to `maxDepth` levels (0 = the folder itself only),
 // skipping hidden ones. Surveyors keep scans in per-trip subfolders
 // ("scans/2025 Scans/9-7-25 Survey Scans/..."), so a flat listing of
@@ -262,10 +297,7 @@ CsCave.filesUnder = function(folder, filters, maxDepth) {
     } catch (e) {
         // an unreadable folder reads as empty
     }
-    out.sort(function(a, b) {
-        var la = a.toLowerCase(), lb = b.toLowerCase();
-        return la < lb ? -1 : (la > lb ? 1 : 0);
-    });
+    out.sort(CsCave.compareNatural);
     return out;
 };
 
