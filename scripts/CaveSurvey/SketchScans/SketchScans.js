@@ -1,52 +1,53 @@
 // SketchScans.js
 //
-// QCAD add-on tool: browse the cave's scans/ folder -- including the
-// per-trip subfolders surveyors actually keep scans in -- preview each
-// sketch large enough to tell the right one from the rest, and insert
-// it into the drawing -- straight into the Align Image tool, so a scan
-// goes from folder to aligned underlay in one motion.
+// QCAD add-on tool: a DOCKABLE panel that browses the cave's scans/
+// folder -- including the per-trip subfolders surveyors actually keep
+// scans in -- previews each sketch large enough to tell the right one
+// from the rest, and inserts it into the drawing, straight into the
+// Align Image tool, so a scan goes from folder to aligned underlay in
+// one motion. Docked (right area, tabbed beside Feature Trace and the
+// Survey Notebook) rather than modal: several scans commonly underlie
+// one map, and the panel stays put between inserts.
 //
 // The preview is the point of the tool. A trip's scans have names like
 // "IMG_4021.jpeg"; picking the wrong one costs a whole tracing session.
-// So the list shows a live preview pane for the selected file, and
-// hovering any row pops the same picture as a tooltip (Qt rich-text
-// tooltips render <img>).
+// So the list shows a live preview pane under it for the selected
+// file, and hovering any row pops a bigger picture as a tooltip (Qt
+// rich-text tooltips render <img>).
 //
 // The list is a folder TREE, simulated on a QTableWidget (QTreeWidget
 // is not constructible in this bridge -- see CaveShelf.js): bold
 // folder rows with ▾/▸ glyphs, one plain click folds a folder by
 // hiding its rows, and the collapsed set is remembered per cave in
-// settings (CsScanTree.SETTING) because the dialog closes after every
-// insert. The model behind it is Core/CsScanTree.js.
+// settings (CsScanTree.SETTING). The model behind it is
+// Core/CsScanTree.js.
 //
-// Inserting is ADDITIVE -- several scans commonly underlie one map, so
-// re-running never erases previous scans (unlike the basemap and the
-// contours, which replace themselves). Each image is tagged
-// SketchScan=<path relative to scans/> and lands on CTRL-SCAN, scaled to sit over
-// the survey at a sensible size, on TOP of the draw order -- an
-// underlay being aligned needs to be visible; send it to back with
-// Modify > Draw Order once traced.
+// Inserting is ADDITIVE -- re-running never erases previous scans
+// (unlike the basemap and the contours, which replace themselves).
+// Each image is tagged SketchScan=<path relative to scans/> and lands
+// on CTRL-SCAN, scaled to sit over the survey at a sensible size, on
+// TOP of the draw order -- an underlay being aligned needs to be
+// visible; send it to back with Modify > Draw Order once traced.
 //
 // "Insert & Align" hands the freshly inserted image, selected, to the
 // Align Image tool -- deferred through a zero-delay timer, because
-// starting another action from inside this one's own lifecycle event
-// is the documented hard-crash trap.
+// starting another action from inside a widget event is the documented
+// hard-crash trap.
 //
 // USAGE:
 //   Cave Survey > Sketch Scans   (or "sketchscans" / "ss")
+//   -- toggles the panel.
 
 include("scripts/EAction.js");
 include("scripts/simple.js");
 include(includeBasePath + "/../Core/CsAll.js");
 include(includeBasePath + "/../AlignImage/AlignImage.js");
 
+// The panel, built once per session (FeatureTrace's pattern).
+var csSketchScansDock;
+
+/** Toggles the panel; a fresh refresh every time it shows. */
 function sketchScansRun() {
-    var doc = getDocument();
-    var di = getDocumentInterface();
-    if (doc === undefined || doc === null) {
-        warning("Sketch Scans: no active drawing document.");
-        return;
-    }
     if (typeof RImageData === "undefined" ||
             typeof RImageEntity === "undefined") {
         warning("Sketch Scans: this build's script engine has no image " +
@@ -54,36 +55,24 @@ function sketchScansRun() {
             "platform.");
         return;
     }
-
-    var docPath = doc.getFileName();
-    var folder = CsCave.folderOf(docPath);
-    if (folder === null) {
-        warning("Sketch Scans: save the drawing first.\n" +
-            "The scans live in the cave project's scans/ folder, which " +
-            "sits beside the drawing file.");
-        return;
+    try {
+        var existed = (csSketchScansDock !== undefined &&
+            csSketchScansDock !== null);
+        var dock = SketchScans.ensureDock();
+        dock.visible = existed ? !dock.visible : true;
+        if (dock.visible) {
+            SketchScans.refresh();
+            try {
+                dock.raise();
+            } catch (eRaise) {
+                // tabbed dock that cannot front itself still shows
+            }
+        }
+    } catch (e) {
+        csSketchScansDock = undefined;
+        warning("Sketch Scans: this CaveCAD build refused the docked " +
+            "panel (" + e + ") -- please report this.");
     }
-
-    // The folder as it exists on disk, whatever its casing.
-    var scans = CsCave.findSubfolder(folder, CsCave.SCANS);
-    if (scans === null) {
-        scans = CsCave.scansDir(docPath);
-    }
-    if (scans === null || !(new QDir(scans)).exists()) {
-        warning("Sketch Scans: this cave has no scans/ folder yet.\n" +
-            "Put the sketch scans in " + CsCave.scansDir(docPath) +
-            " and run this again.");
-        return;
-    }
-
-    var files = SketchScans.imageFiles(scans);
-    if (files.length === 0) {
-        warning("Sketch Scans: nothing in " + scans + " reads as an " +
-            "image.\nScans in JPEG, PNG, TIFF or HEIC all work.");
-        return;
-    }
-
-    SketchScans.dialog(doc, di, scans, files);
 }
 
 // How deep below scans/ to look. Real caves nest scans in per-trip
@@ -120,9 +109,9 @@ SketchScans.imageFiles = function(folder) {
     return out;
 };
 
-// Preview pane size. Tooltip previews use the same width.
+// Hover-tooltip preview width; the in-dock pane scales to the panel.
 SketchScans.PREVIEW_W = 420;
-SketchScans.PREVIEW_H = 340;
+SketchScans.DOCK_PREVIEW_H = 240;
 
 // The collapsed set for one cave's scans folder, from settings.
 // A bridge without RSettings starts fully expanded.
@@ -136,8 +125,9 @@ SketchScans.loadCollapsed = function(scans) {
     }
 };
 
-// Writes the collapsed set back, keeping only folders the dialog
-// actually showed -- renamed or deleted trip folders fall out.
+// Writes the collapsed set back, keeping only folders the panel
+// actually showed -- renamed or deleted trip folders fall out. Called
+// on every fold/unfold: a dock has no closing moment to save on.
 SketchScans.saveCollapsed = function(scans, collapsed, rows) {
     try {
         var map = CsScanTree.parseCollapsed(
@@ -167,38 +157,269 @@ SketchScans.rowText = function(row, collapsed) {
     return indent + "  " + row.label;
 };
 
-/** The browse dialog. */
-SketchScans.dialog = function(doc, di, scans, files) {
-    var rows = CsScanTree.rowsOf(files);
-    var collapsed = SketchScans.loadCollapsed(scans);
-
+/** Builds the dock and hands it to the main window. Idempotent. */
+SketchScans.ensureDock = function() {
+    if (csSketchScansDock !== undefined && csSketchScansDock !== null) {
+        return csSketchScansDock;
+    }
     var appWin = RMainWindowQt.getMainWindow();
-    var dlg = new QDialog(appWin);
-    dlg.windowTitle = "Sketch Scans";
+    csSketchScansDock = SketchScans.buildDock(appWin);
+    appWin.addDockWidget(Qt.RightDockWidgetArea, csSketchScansDock);
+    return csSketchScansDock;
+};
+
+SketchScans.buildDock = function(appWin) {
+    var dock = new QDockWidget(qsTr("Sketch Scans"), appWin);
+    // Without an objectName restoreState() cannot identify the dock and
+    // silently forgets where it was.
+    dock.objectName = "CaveSurveySketchScansDock";
+
+    // Everything refresh() and the handlers need, in one place.
+    var w = {
+        rows: [],           // CsScanTree rows behind the table indices
+        collapsed: {},      // this cave's collapsed set
+        scans: null,        // the scans folder the table was built from
+        ready: false        // false while the panel shows a message
+    };
+
+    var body = new QWidget(dock);
     var layout = new QVBoxLayout();
 
-    layout.addWidget(new QLabel(scans + "  —  " + files.length +
-        " scan" + (files.length === 1 ? "" : "s") + ". Hover a scan " +
-        "for a preview; double-click inserts and aligns; click a " +
-        "folder to collapse it."), 0, 0);
-
-    var main = new QHBoxLayout();
-
-    var list = new QTableWidget(0, 1);
+    w.header = new QLabel("");
     try {
-        list.horizontalHeader().visible = false;
-        list.verticalHeader().visible = false;
-        list.horizontalHeader().stretchLastSection = true;
-        list.selectionBehavior = QAbstractItemView.SelectRows;
-        list.editTriggers = QAbstractItemView.NoEditTriggers;
-        list.minimumWidth = 240;
+        w.header.wordWrap = true;
+    } catch (eWrap) {
+    }
+    layout.addWidget(w.header, 0, 0);
+
+    w.list = new QTableWidget(0, 1);
+    try {
+        w.list.horizontalHeader().visible = false;
+        w.list.verticalHeader().visible = false;
+        w.list.horizontalHeader().stretchLastSection = true;
+        w.list.selectionBehavior = QAbstractItemView.SelectRows;
+        w.list.editTriggers = QAbstractItemView.NoEditTriggers;
     } catch (eList) {
     }
-    list.setRowCount(rows.length);
-    for (var i = 0; i < rows.length; i++) {
+    layout.addWidget(w.list, 1, 0);
+
+    w.preview = new QLabel("");
+    try {
+        w.preview.minimumHeight = SketchScans.DOCK_PREVIEW_H;
+        w.preview.maximumHeight = SketchScans.DOCK_PREVIEW_H;
+        w.preview.alignment = Qt.AlignCenter;
+    } catch (ePrev) {
+    }
+    layout.addWidget(w.preview, 0, 0);
+
+    var buttons = new QHBoxLayout();
+    w.refreshButton = new QPushButton(qsTr("Refresh"));
+    w.refreshButton.toolTip = qsTr("Re-read the scans folder -- new " +
+        "scans appear here once Drive has synced them.");
+    w.alignButton = new QPushButton(qsTr("Insert && Align"));
+    w.alignButton.toolTip = qsTr("Insert the selected scan over the " +
+        "survey and start Align Image on it: pick two points on the " +
+        "scan and their true positions, and it fits.");
+    w.insertButton = new QPushButton(qsTr("Insert"));
+    w.insertButton.toolTip = qsTr("Insert the selected scan over the " +
+        "survey, unaligned.");
+    buttons.addWidget(w.refreshButton, 0, 0);
+    buttons.addStretch(1);
+    buttons.addWidget(w.alignButton, 0, 0);
+    buttons.addWidget(w.insertButton, 0, 0);
+    layout.addLayout(buttons, 0);
+
+    body.setLayout(layout);
+    dock.setWidget(body);
+    SketchScans.w = w;
+
+    var selectedFile = function() {
+        var row = w.list.currentRow();
+        if (row < 0 || row >= w.rows.length) { return null; }
+        return w.rows[row].kind === "file" ? w.rows[row].rel : null;
+    };
+
+    var showPreview = function() {
+        var rel = selectedFile();
+        w.preview.text = "";
+        try {
+            w.preview.setPixmap(new QPixmap());
+        } catch (eClear) {
+        }
+        if (rel === null || w.scans === null) {
+            return;
+        }
+        try {
+            var pixmap = new QPixmap(w.scans + "/" + rel);
+            if (pixmap.isNull()) {
+                w.preview.text = qsTr("unreadable image");
+                return;
+            }
+            // Scale to the panel's actual width -- a dock is narrower
+            // than the old dialog, and the user resizes it at will.
+            var paneW = Math.max(120, w.preview.width - 8);
+            w.preview.setPixmap(pixmap.scaled(paneW,
+                SketchScans.DOCK_PREVIEW_H - 8, Qt.KeepAspectRatio,
+                Qt.SmoothTransformation));
+        } catch (e) {
+            w.preview.text = qsTr("unreadable image");
+        }
+    };
+
+    var toggleFolder = function(rowIdx) {
+        var row = w.rows[rowIdx];
+        if (row === undefined || row.kind !== "folder") { return; }
+        if (w.collapsed[row.rel] === true) {
+            delete w.collapsed[row.rel];
+        } else {
+            w.collapsed[row.rel] = true;
+        }
+        try {
+            w.list.item(rowIdx, 0).setText(
+                SketchScans.rowText(row, w.collapsed));
+        } catch (eGlyph) {
+            // a stale glyph is cosmetic; the rows still fold
+        }
+        SketchScans.applyHidden();
+        SketchScans.saveCollapsed(w.scans, w.collapsed, w.rows);
+    };
+
+    var chooseInsert = function(align) {
+        var rel = selectedFile();
+        if (rel === null || w.scans === null) { return; }
+        var di = EAction.getDocumentInterface();
+        var doc = EAction.getDocument();
+        if (isNull(di) || isNull(doc)) { return; }
+        // The active drawing can change under a dock. If it did, the
+        // list belongs to some other cave: rebuild instead of dropping
+        // one cave's sketch into another cave's map.
+        var folder = CsCave.folderOf(doc.getFileName());
+        var scansNow = folder === null ? null :
+            CsCave.findSubfolder(folder, CsCave.SCANS);
+        if (scansNow !== w.scans) {
+            SketchScans.refresh();
+            return;
+        }
+        var placed = SketchScans.insert(doc, di, w.scans + "/" + rel, rel);
+        if (placed === null) {
+            return;                 // insert already explained why
+        }
+        if (align) {
+            SketchScans.alignSoon(placed);
+        } else {
+            EAction.handleUserMessage(rel + " inserted on " +
+                CsLayers.SCAN + ". Align Image fits it to the survey.");
+        }
+    };
+
+    w.list.itemSelectionChanged.connect(showPreview);
+    // Folder rows fold on a plain click.
+    w.list.cellClicked.connect(function(row, col) { toggleFolder(row); });
+    // Double-click by ROW: on a scan it inserts and aligns; on a folder
+    // it does nothing more (the first click already toggled it) --
+    // itemDoubleClicked alone would read the SELECTION and insert the
+    // selected scan when a folder row was the thing double-clicked.
+    try {
+        w.list.cellDoubleClicked.connect(function(row, col) {
+            if (w.rows[row] !== undefined && w.rows[row].kind === "file") {
+                chooseInsert(true);
+            }
+        });
+    } catch (eDbl) {
+        // no row-aware double-click on this bridge; the buttons cover it
+    }
+    w.refreshButton.clicked.connect(function() { SketchScans.refresh(); });
+    w.alignButton.clicked.connect(function() { chooseInsert(true); });
+    w.insertButton.clicked.connect(function() { chooseInsert(false); });
+
+    // A re-shown dock re-reads the folder -- scans may have synced in
+    // while it was hidden. Wrapped: not every bridge has the signal,
+    // and without it the Refresh button covers the same ground.
+    try {
+        dock.visibilityChanged.connect(function(visible) {
+            if (visible === true) {
+                SketchScans.refresh();
+            }
+        });
+    } catch (eVis) {
+    }
+
+    SketchScans.showPreview = showPreview;
+    return dock;
+};
+
+// Everything between "panel is up" and "these are the scans": reads
+// the ACTIVE drawing's cave folder and rebuilds the tree. Message
+// states (no drawing, unsaved, no scans folder, nothing readable) land
+// in the header label with the list empty and inserts disabled.
+SketchScans.refresh = function() {
+    var w = SketchScans.w;
+    if (w === undefined || w === null) { return; }
+
+    var message = null;
+    var doc = EAction.getDocument();
+    var scans = null;
+
+    if (isNull(doc)) {
+        message = qsTr("No drawing open.");
+    } else {
+        var folder = CsCave.folderOf(doc.getFileName());
+        if (folder === null) {
+            message = qsTr("Save the drawing first.\nThe scans live in " +
+                "the cave project's scans/ folder, which sits beside " +
+                "the drawing file.");
+        } else {
+            scans = CsCave.findSubfolder(folder, CsCave.SCANS);
+            if (scans === null) {
+                scans = CsCave.scansDir(doc.getFileName());
+            }
+            if (scans === null || !(new QDir(scans)).exists()) {
+                message = qsTr("This cave has no scans/ folder yet.\n" +
+                    "Put the sketch scans in ") +
+                    CsCave.scansDir(doc.getFileName()) +
+                    qsTr(" and press Refresh.");
+                scans = null;
+            }
+        }
+    }
+
+    var files = [];
+    if (message === null) {
+        files = SketchScans.imageFiles(scans);
+        if (files.length === 0) {
+            message = qsTr("Nothing in ") + scans +
+                qsTr(" reads as an image.\nScans in JPEG, PNG, TIFF " +
+                "or HEIC all work.");
+        }
+    }
+
+    w.scans = message === null ? scans : null;
+    w.ready = message === null;
+    w.alignButton.enabled = w.ready;
+    w.insertButton.enabled = w.ready;
+
+    if (!w.ready) {
+        w.header.text = message;
+        w.rows = [];
+        w.collapsed = {};
+        w.list.setRowCount(0);
+        SketchScans.showPreview();
+        return;
+    }
+
+    w.header.text = scans + "  —  " + files.length + " scan" +
+        (files.length === 1 ? "" : "s") + qsTr(". Hover a scan for a " +
+        "preview; double-click inserts and aligns; click a folder to " +
+        "collapse it.");
+
+    w.rows = CsScanTree.rowsOf(files);
+    w.collapsed = SketchScans.loadCollapsed(scans);
+
+    w.list.setRowCount(w.rows.length);
+    for (var i = 0; i < w.rows.length; i++) {
         var item = new QTableWidgetItem(
-            SketchScans.rowText(rows[i], collapsed));
-        if (rows[i].kind === "folder") {
+            SketchScans.rowText(w.rows[i], w.collapsed));
+        if (w.rows[i].kind === "folder") {
             // Bold, clickable, but never SELECTED -- the selection
             // (and with it the preview pane) stays on a scan while
             // folders fold and unfold around it.
@@ -215,152 +436,36 @@ SketchScans.dialog = function(doc, di, scans, files) {
         } else {
             try {
                 item.setToolTip("<img src=\"" + scans + "/" +
-                    rows[i].rel + "\" width=\"" +
+                    w.rows[i].rel + "\" width=\"" +
                     SketchScans.PREVIEW_W + "\">");
             } catch (eTip) {
                 // no hover preview on this bridge; the pane still works
             }
         }
-        list.setItem(i, 0, item);
+        w.list.setItem(i, 0, item);
     }
-
-    var applyHidden = function() {
-        try {
-            for (var r = 0; r < rows.length; r++) {
-                list.setRowHidden(r,
-                    CsScanTree.isHidden(rows[r], collapsed));
-            }
-        } catch (eHide) {
-            // an engine without setRowHidden shows the list flat
-        }
-    };
-    applyHidden();
-    main.addWidget(list, 0, 0);
-
-    var preview = new QLabel("");
-    preview.setFixedSize(new QSize(SketchScans.PREVIEW_W,
-        SketchScans.PREVIEW_H));
-    preview.alignment = Qt.AlignCenter;
-    main.addWidget(preview, 1);
-    layout.addLayout(main, 1);
-
-    var buttons = new QHBoxLayout();
-    buttons.addStretch(1);
-    var alignButton = new QPushButton("Insert && Align");
-    alignButton.toolTip = "Insert the selected scan over the survey " +
-        "and start Align Image on it: pick two points on the scan and " +
-        "their true positions, and it fits.";
-    var insertButton = new QPushButton("Insert");
-    insertButton.toolTip = "Insert the selected scan over the survey, " +
-        "unaligned.";
-    var closeButton = new QPushButton("Close");
-    try {
-        alignButton["default"] = true;
-    } catch (eDef) {
-    }
-    buttons.addWidget(alignButton, 0, 0);
-    buttons.addWidget(insertButton, 0, 0);
-    buttons.addWidget(closeButton, 0, 0);
-    layout.addLayout(buttons, 0);
-
-    dlg.setLayout(layout);
-
-    var selectedFile = function() {
-        var row = list.currentRow();
-        if (row < 0 || row >= rows.length) { return null; }
-        return rows[row].kind === "file" ? rows[row].rel : null;
-    };
-
-    var toggleFolder = function(rowIdx) {
-        var row = rows[rowIdx];
-        if (row === undefined || row.kind !== "folder") { return; }
-        if (collapsed[row.rel] === true) {
-            delete collapsed[row.rel];
-        } else {
-            collapsed[row.rel] = true;
-        }
-        try {
-            list.item(rowIdx, 0).setText(
-                SketchScans.rowText(row, collapsed));
-        } catch (eGlyph) {
-            // a stale glyph is cosmetic; the rows still fold
-        }
-        applyHidden();
-    };
-
-    var showPreview = function() {
-        var name = selectedFile();
-        preview.text = "";
-        try {
-            preview.setPixmap(new QPixmap());
-        } catch (eClear) {
-        }
-        if (name === null) {
-            return;
-        }
-        try {
-            var pixmap = new QPixmap(scans + "/" + name);
-            if (pixmap.isNull()) {
-                preview.text = "unreadable image";
-                return;
-            }
-            preview.setPixmap(pixmap.scaled(SketchScans.PREVIEW_W,
-                SketchScans.PREVIEW_H, Qt.KeepAspectRatio,
-                Qt.SmoothTransformation));
-        } catch (e) {
-            preview.text = "unreadable image";
-        }
-    };
-
-    // 0 = closed, then the chosen work happens after exec() returns --
-    // decisions after the widgets are done, like every dialog here.
-    var chosen = { file: null, align: false };
-    var choose = function(align) {
-        var name = selectedFile();
-        if (name === null) {
-            return;
-        }
-        chosen.file = name;
-        chosen.align = align;
-        dlg.accept();
-    };
-
-    list.itemSelectionChanged.connect(showPreview);
-    // Folder rows fold on a plain click; they are not selectable, so
-    // the double-click below can only ever land on a scan.
-    list.cellClicked.connect(function(row, col) { toggleFolder(row); });
-    list.itemDoubleClicked.connect(function() { choose(true); });
-    alignButton.clicked.connect(function() { choose(true); });
-    insertButton.clicked.connect(function() { choose(false); });
-    closeButton.clicked.connect(function() { dlg.reject(); });
+    SketchScans.applyHidden();
 
     // Initial selection: the first visible scan, not a folder row.
-    for (var s = 0; s < rows.length; s++) {
-        if (rows[s].kind === "file" &&
-                !CsScanTree.isHidden(rows[s], collapsed)) {
-            list.selectRow(s);
+    for (var s = 0; s < w.rows.length; s++) {
+        if (w.rows[s].kind === "file" &&
+                !CsScanTree.isHidden(w.rows[s], w.collapsed)) {
+            w.list.selectRow(s);
             break;
         }
     }
-    showPreview();
+    SketchScans.showPreview();
+};
 
-    dlg.exec();
-    destrDialog(dlg);
-    SketchScans.saveCollapsed(scans, collapsed, rows);
-
-    if (chosen.file === null) {
-        return;
-    }
-    var placed = SketchScans.insert(doc, di, scans + "/" + chosen.file,
-        chosen.file);
-    if (placed === null) {
-        return;                     // insert already explained why
-    }
-    if (chosen.align) {
-        SketchScans.alignSoon(placed);
-    } else {
-        EAction.handleUserMessage(chosen.file + " inserted on " +
-            CsLayers.SCAN + ". Align Image fits it to the survey.");
+SketchScans.applyHidden = function() {
+    var w = SketchScans.w;
+    try {
+        for (var r = 0; r < w.rows.length; r++) {
+            w.list.setRowHidden(r,
+                CsScanTree.isHidden(w.rows[r], w.collapsed));
+        }
+    } catch (eHide) {
+        // an engine without setRowHidden shows the list flat
     }
 };
 
@@ -449,12 +554,12 @@ SketchScans.insert = function(doc, di, path, name) {
 };
 
 /**
- * Starts Align Image on the entity AFTER this action has fully
- * terminated: selects it (selection does not dirty the document), then
- * a zero-delay timer -- outside the action lifecycle, the same reason
- * FeatureTrace's dock buttons defer -- makes Align Image the current
- * action. With a selection standing, Align Image skips its own
- * entity-picking state and goes straight to the source point.
+ * Starts Align Image on the entity AFTER the click that asked for it
+ * has fully unwound: selects it (selection does not dirty the
+ * document), then a zero-delay timer -- outside the widget event, the
+ * same reason FeatureTrace's dock buttons defer -- makes Align Image
+ * the current action. With a selection standing, Align Image skips its
+ * own entity-picking state and goes straight to the source point.
  */
 SketchScans.alignSoon = function(entityId) {
     if (entityId === null || entityId === undefined) {
@@ -514,10 +619,25 @@ SketchScans.init = function(basePath) {
     action.setRequiresDocument(true);
     action.setScriptFile(basePath + "/SketchScans.js");
     action.setIcon(basePath + "/SketchScans.svg");
-    action.setStatusTip(qsTr("Browse the cave's scanned sketches with " +
-        "previews, insert one and align it to the survey"));
+    action.setStatusTip(qsTr("Toggle the Sketch Scans panel: browse the " +
+        "cave's scanned sketches with previews, insert one and align it " +
+        "to the survey"));
     action.setDefaultCommands(["sketchscans", "ss"]);
     action.setGroupSortOrder(450);
     action.setSortOrder(56);
     action.setWidgetNames(["CaveSurveyMenu", "CaveSurveyToolBar"]);
+
+    // Build the dock NOW, during add-on init: the main window's
+    // readSettings()/restoreState() runs after init and can only place
+    // (and re-show) a dock that already exists. Created hidden; the
+    // saved window state decides whether it opens, exactly like QCAD's
+    // own docks. First-ever run: stays hidden until the action shows it.
+    try {
+        var dock = SketchScans.ensureDock();
+        dock.visible = false;
+    } catch (eInit) {
+        csSketchScansDock = undefined;
+        warning("Sketch Scans: could not build the panel at startup (" +
+            eInit + "); the menu entry will try again.");
+    }
 };
