@@ -32,6 +32,9 @@ CsLayers.AERIAL = "CTRL-AERIAL";
 // CTRL- keeps them out of CsBind's reach, like every generated layer.
 CsLayers.CONTOUR = "CTRL-CONTOUR";
 CsLayers.CONTOUR_MAJOR = "CTRL-CONTOUR-MAJOR";
+// Inserted sketch scans -- tracing sources, not map art. CTRL- keeps
+// them out of CsBind's reach like every other suite-managed layer.
+CsLayers.SCAN = "CTRL-SCAN";
 
 // The profile frame's own control layers. EVERY ONE BEGINS "CTRL-",
 // and that is load-bearing rather than cosmetic: CsBind's
@@ -145,6 +148,7 @@ CsLayers.DEFAULTS = {
     // stay within the set already proven elsewhere in this table).
     "CTRL-CONTOUR": ["gray", "CONTINUOUS", "Weight000"],
     "CTRL-CONTOUR-MAJOR": ["gray", "CONTINUOUS", "Weight025"],
+    "CTRL-SCAN": ["gray", "CONTINUOUS", "Weight000"],
     // Matches the plan template's own CTRL-GRID record (light gray,
     // continuous, 0.13mm) so a drawing without the template gets the
     // same grid rather than the fallback appearance.

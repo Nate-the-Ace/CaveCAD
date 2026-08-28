@@ -24,6 +24,7 @@ Each appears in the **Cave Survey** menu and as a command:
 | Rebuild Survey Data | `rsd` | Re-derive the survey model from what the drawing already holds, and upgrade a legacy drawing's tags to the current schema. |
 | Aerial Basemap | `ab` | Place georeferenced aerial imagery under the map, anchored to the drawing's geo station. |
 | Surface Contours | `sc` | Draw surface topo contours over the survey from public USGS 3DEP elevation data, labeled in the drawing's unit. |
+| Sketch Scans | `ss` | Browse the cave's scanned sketches with hover previews, insert one over the survey and align it in one motion. |
 | Import Cave Survey | `ics` | Import Compass `.dat`, Walls `.srv`, Survex `.svx` or CSV -- the format is detected for you. |
 | Scatter Breakdown | `scb` | Fill closed `BREAKDOWN-BOUNDARY` polylines with breakdown symbols, per boundary. |
 | Align Image | `ali` | Fit a scanned map onto known stations (move/rotate/scale, warp with 3+ points) for wall tracing. |
