@@ -230,89 +230,31 @@ AerialBasemap.findAnchor = function(doc) {
 };
 
 /**
- * The SURVEY's extent, in drawing units, as {width, height, centerX,
- * centerY}. Falls back to a zero-size box at the anchor when there is
- * no usable extent -- groundExtent's floor then decides the window.
+ * The CAVE PLAN DATA's extent, in drawing units, as {width, height,
+ * centerX, centerY}. Falls back to a zero-size box at the anchor when
+ * there is no usable extent -- groundExtent's floor then decides the
+ * window.
  *
- * NOT doc.getBoundingBox(true, true): that measures the whole
- * document, and after a first run the document also contains the
- * basemap image itself, which groundExtent deliberately makes 25%
- * larger than the survey it was fetched for. Measuring the document
- * therefore measures a box that already includes the last photo, so
- * a second run fetches a wider window, a third wider still --
- * 1.25x, 1.5625x, 1.953x... compounding forever, exactly the case
- * "re-run to widen coverage" is supposed to be the SURVEY growing,
- * not the tool's own output feeding itself. This instead unions each
- * kept entity's own bounding box by hand (there is no document-wide
- * "bbox excluding these" call), skipping the basemap image.
- *
- * Skipped by TAG, not by layer: CTRL-AERIAL is where this tool puts
- * its image, but it is an ordinary visible CTRL- layer (deliberately
- * not in CsLayers.OFF -- see CsLayers.js -- so it plots), and nothing
- * stops a user parking their own content there too. AerialBasemap=1
- * is this tool's own marker, set BEFORE the image is ever added (see
- * place() below), so every basemap it creates carries it and nothing
- * else ever could -- the same reasoning eraseExisting already relies
- * on. A layer-based skip would also throw away any such user content
- * when measuring the survey.
- *
- * Hidden/off layers (CTRL-DATA, the legacy tag store; CTRL-HIDDEN,
- * legs kept for data integrity but never meant to plot -- see
- * CsLayers.OFF) are excluded too, via entity.isVisible(). That matches
- * the ignoreHiddenLayers=true behaviour the old whole-document call
- * already had: data nobody ever sees shouldn't decide how wide a
- * photograph gets fetched.
+ * CsDraw.planDataBox is the one definition of what counts (Nathan,
+ * 2026-08-27): plan-frame entities only -- never the profile region,
+ * the sheet furniture, this tool's own previous photo, the surface
+ * contours or an inserted scan. Before that shared box existed, a
+ * drawn profile inflated the fetch window and the photo compounded
+ * itself 25% wider on every re-run.
  */
 AerialBasemap.surveyBox = function(doc, anchorPos) {
-    var box = null;
-    var ids = doc.queryAllEntities(false, false);
-    for (var i = 0; i < ids.length; i++) {
-        var e = doc.queryEntity(ids[i]);
-        if (isNull(e)) {
-            continue;
-        }
-        if (typeof e.isVisible === "function" && !e.isVisible()) {
-            continue;                       // off/frozen layer, or hidden
-        }
-        if (CsTags.get(e, "AerialBasemap") === "1") {
-            continue;                       // the basemap image itself
-        }
-        var eb;
-        try {
-            eb = e.getBoundingBox();
-        } catch (err) {
-            continue;                       // no geometry to measure
-        }
-        if (isNull(eb) || typeof eb.isSane !== "function" || !eb.isSane()) {
-            continue;
-        }
-        if (box === null) {
-            box = eb;
-        } else {
-            box.growToInclude(eb);
-        }
-    }
-
+    var box = CsDraw.planDataBox(doc);
     if (box === null) {
         return {
             width: 0, height: 0,
             centerX: anchorPos.x, centerY: anchorPos.y
         };
     }
-    var min = box.getMinimum();
-    var max = box.getMaximum();
-    if (!isNumber(min.x) || !isNumber(max.x) ||
-        max.x < min.x || max.y < min.y) {
-        return {
-            width: 0, height: 0,
-            centerX: anchorPos.x, centerY: anchorPos.y
-        };
-    }
     return {
-        width: max.x - min.x,
-        height: max.y - min.y,
-        centerX: (min.x + max.x) / 2.0,
-        centerY: (min.y + max.y) / 2.0
+        width: box.maxX - box.minX,
+        height: box.maxY - box.minY,
+        centerX: (box.minX + box.maxX) / 2.0,
+        centerY: (box.minY + box.maxY) / 2.0
     };
 };
 
@@ -415,12 +357,23 @@ AerialBasemap.place = function(doc, di, path, bbox, size, unitsPerPixel,
     // failure leaves the drawing exactly as it was.
     var entity;
     try {
-        entity = new RImageEntity(doc, new RImageData(
+        var data = new RImageData(
             path,
             new RVector(originX, originY),
             new RVector(unitsPerPixel, 0),     // u: one pixel across
             new RVector(0, unitsPerPixel),     // v: one pixel up
-            size.w, size.h, 0));
+            size.w, size.h, 0);
+        // Faded to half strength: the photo is CONTEXT under the map,
+        // and at full strength it out-shouts the linework it sits
+        // beneath. Fade survives the DXF round trip (probed
+        // 2026-08-27), and the property editor can still change it per
+        // drawing.
+        try {
+            data.setFade(AerialBasemap.FADE_PERCENT);
+        } catch (eFade) {
+            // an engine without setFade gets a full-strength photo
+        }
+        entity = new RImageEntity(doc, data);
     } catch (e) {
         return "Creating the image entity failed: " + e;
     }
@@ -523,6 +476,11 @@ AerialBasemap.eraseExisting = function(doc, di) {
 // property on the tool object (not a bare global) so it can't collide
 // with anything else the engine loads into the global scope.
 AerialBasemap.TIMEOUT_S = 60;
+
+// The photo's fade, percent (0 = full strength, 100 = invisible).
+// Half strength keeps the imagery as background context under the
+// linework (Nathan, 2026-08-27).
+AerialBasemap.FADE_PERCENT = 50;
 
 function AerialBasemap(guiAction) {
     EAction.call(this, guiAction);

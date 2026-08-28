@@ -2212,20 +2212,34 @@ function drawPlanSurvey(doc, di, resolved, names) {
     ok(originBefore !== null,
         "the drawing records where the profile region was put");
 
-    // THE GUTTER ITSELF. Nothing asserted this before, so the constant
-    // could have been deleted -- or quietly halved -- with the suite
-    // still green. The elevation's TOP edge must sit exactly
-    // REGION_GUTTER below the plan's southern edge: that is the whole
-    // job of the number, and it is the thing a user notices when the
-    // two views crowd each other.
-    var planX = CsProfileDraw.planExtents(dO);
+    // THE GUTTER PLUS THE GROUND-WINDOW PAD. The elevation's TOP edge
+    // must sit exactly REGION_GUTTER below the SOUTH edge of the
+    // imagery window the basemap/contour tools would fetch -- which is
+    // groundWindowPad below the plan itself -- so imagery fetched
+    // later never lands on the region (Nathan, 2026-08-27). The pad is
+    // asserted against the same window math the fetch runs, and must
+    // be REAL here: this small fixture is floor-dominated, so the
+    // window overhangs the plan on every side.
+    var planX = CsDraw.planDataBox(dO);
     var regionB = CsProfileDraw.regionBounds(CsProfile.build(svO, resO, {}));
     ok(planX !== null && regionB !== null,
         "the fixture has both plan geometry and a region to place");
+    var padUnit = CsUnits.fromDrawingUnit(dO.getUnit(), RS);
+    var pad = CsProfileDraw.groundWindowPad(dO, planX);
+    var expectedPadM = Math.max(0, (CsGeoProject.groundExtent(
+        { width: planX.maxX - planX.minX,
+          height: planX.maxY - planX.minY }, padUnit).height -
+        CsUnits.convert(planX.maxY - planX.minY, padUnit,
+            CsUnits.METERS)) / 2.0);
+    near(pad, CsUnits.convert(expectedPadM, CsUnits.METERS, padUnit), 1e-9,
+        "the pad is the fetch window's own south overhang");
+    ok(pad > 0,
+        "the pad is real on this fixture, so the assertion below cannot "
+        + "collapse into the plain-gutter case");
     near(planX.minY - (originBefore.y + regionB.maxY),
-        CsProfileDraw.REGION_GUTTER, 1e-9,
-        "the elevation's top edge sits exactly REGION_GUTTER below the "
-        + "plan's southern edge");
+        CsProfileDraw.REGION_GUTTER + pad, 1e-9,
+        "the elevation's top edge sits REGION_GUTTER below the imagery "
+        + "window's south edge, not merely below the plan");
     ok(CsProfileDraw.REGION_GUTTER >= 30.0,
         "the gutter is at least 30 drawing units -- raised from 20 on the "
         + "drawing evidence that the two views read as one crowded block");

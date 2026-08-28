@@ -204,52 +204,22 @@ SurfaceContours.findAnchor = function(doc) {
 };
 
 /**
- * The survey's extent -- AerialBasemap.surveyBox's rule, additionally
- * skipping this tool's own previous output, so re-runs measure the
- * SURVEY and never their own last answer.
+ * The cave plan data's extent -- CsDraw.planDataBox, the same box the
+ * basemap fetches against, so photo and contours always cover the same
+ * ground and neither ever measures the profile region, the sheet
+ * furniture or the tools' own previous output.
  */
 SurfaceContours.surveyBox = function(doc, anchorPos) {
-    var box = null;
-    var ids = doc.queryAllEntities(false, false);
-    for (var i = 0; i < ids.length; i++) {
-        var e = doc.queryEntity(ids[i]);
-        if (isNull(e)) {
-            continue;
-        }
-        if (typeof e.isVisible === "function" && !e.isVisible()) {
-            continue;
-        }
-        if (CsTags.get(e, "AerialBasemap") === "1" ||
-                CsTags.get(e, "SurfaceContours") === "1") {
-            continue;
-        }
-        var eb;
-        try {
-            eb = e.getBoundingBox();
-        } catch (err) {
-            continue;
-        }
-        if (isNull(eb) || typeof eb.isSane !== "function" || !eb.isSane()) {
-            continue;
-        }
-        if (box === null) { box = eb; } else { box.growToInclude(eb); }
-    }
+    var box = CsDraw.planDataBox(doc);
     if (box === null) {
         return { width: 0, height: 0,
             centerX: anchorPos.x, centerY: anchorPos.y };
     }
-    var min = box.getMinimum();
-    var max = box.getMaximum();
-    if (!isNumber(min.x) || !isNumber(max.x) ||
-            max.x < min.x || max.y < min.y) {
-        return { width: 0, height: 0,
-            centerX: anchorPos.x, centerY: anchorPos.y };
-    }
     return {
-        width: max.x - min.x,
-        height: max.y - min.y,
-        centerX: (min.x + max.x) / 2.0,
-        centerY: (min.y + max.y) / 2.0
+        width: box.maxX - box.minX,
+        height: box.maxY - box.minY,
+        centerX: (box.minX + box.maxX) / 2.0,
+        centerY: (box.minY + box.maxY) / 2.0
     };
 };
 

@@ -905,13 +905,48 @@ CsProfileDraw.regionBounds = function(profile) {
  * and the band coordinates are the drawing's coordinates.
  */
 CsProfileDraw.computeOrigin = function(doc, profile) {
-    var plan = CsProfileDraw.planExtents(doc);
+    // CsDraw.planDataBox, NOT planExtents: the frame union counts the
+    // aerial basemap and the surface contours, which are deliberately
+    // bigger than the survey -- placing against them would walk the
+    // region south on every imagery re-run, the same feedback
+    // frameExtents' own docblock warns about for the region itself.
+    var plan = CsDraw.planDataBox(doc);
     var bounds = CsProfileDraw.regionBounds(profile);
     if (plan === null || bounds === null) {
         return new RVector(0, 0);
     }
     return new RVector(plan.minX - bounds.minX,
-        plan.minY - CsProfileDraw.REGION_GUTTER - bounds.maxY);
+        plan.minY - CsProfileDraw.groundWindowPad(doc, plan) -
+            CsProfileDraw.REGION_GUTTER - bounds.maxY);
+};
+
+/**
+ * How far the ground-window tools' fetch area (Aerial Basemap, Surface
+ * Contours) overhangs the plan's SOUTH edge, in drawing units -- the
+ * same window math CsGeoProject.groundExtent runs for the fetch,
+ * answered from the same plan-data box, so the profile region lands
+ * BELOW the imagery instead of inside its margin (Nathan, 2026-08-27:
+ * profiles were getting crowded out). Computed whether or not a
+ * basemap is drawn yet: the space is reserved so fetching one later
+ * never lands on the region.
+ *
+ * 0 when the conversion cannot be made (an unknown drawing unit, an
+ * engine without doc.getUnit) -- the region then sits one plain gutter
+ * down, exactly as before this existed.
+ */
+CsProfileDraw.groundWindowPad = function(doc, plan) {
+    try {
+        var unit = CsUnits.fromDrawingUnit(doc.getUnit(), RS);
+        var hU = plan.maxY - plan.minY;
+        var extent = CsGeoProject.groundExtent(
+            { width: plan.maxX - plan.minX, height: hU }, unit,
+            CsGeoProject.MARGIN, CsGeoProject.FLOOR_M);
+        var hM = CsUnits.convert(hU, unit, CsUnits.METERS);
+        var padM = Math.max(0, (extent.height - hM) / 2.0);
+        return CsUnits.convert(padM, CsUnits.METERS, unit);
+    } catch (e) {
+        return 0;
+    }
 };
 
 /**

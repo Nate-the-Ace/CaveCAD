@@ -95,6 +95,78 @@ CsDraw.addPoint = function(doc, op, layerName, pos) {
 };
 
 /**
+ * The bounding box of the CAVE PLAN DATA alone, as {minX, minY, maxX,
+ * maxY}, or null when the drawing holds none.
+ *
+ * "Plan data" means: visible entities whose layer is in the PLAN frame
+ * (CsLayers.frameOf -- so the profile region and the sheet furniture
+ * never count), excluding the suite's own generated underlays: the
+ * aerial basemap, the surface contours and inserted sketch scans, each
+ * recognised by the tag its tool stamps before adding.
+ *
+ * THE ONE DEFINITION, by request (Nathan, 2026-08-27): this box is what
+ * the ground-window tools (Aerial Basemap, Surface Contours) size their
+ * fetch against, and what profile placement pads away from. Before it
+ * existed each tool unioned the whole visible document, so a drawn
+ * profile inflated the imagery window and the imagery in turn crowded
+ * the profile -- the two feeding each other forever.
+ */
+CsDraw.planDataBox = function(doc) {
+    var ids = doc.queryAllEntities(false, false);
+    var out = null;
+    for (var i = 0; i < ids.length; i++) {
+        var e = doc.queryEntity(ids[i]);
+        if (isNull(e)) {
+            continue;
+        }
+        if (typeof e.isVisible === "function" && !e.isVisible()) {
+            continue;                       // off/frozen layer, or hidden
+        }
+        if (CsTags.get(e, "AerialBasemap") === "1" ||
+                CsTags.get(e, "SurfaceContours") === "1" ||
+                CsTags.get(e, "SketchScan") !== "") {
+            continue;                       // generated underlay
+        }
+        var lname;
+        try {
+            lname = doc.getLayerName(e.getLayerId());
+        } catch (eLayer) {
+            continue;
+        }
+        if (CsLayers.frameOf(lname) !== "plan") {
+            continue;                       // profile region, sheet
+        }
+        var box;
+        try {
+            box = e.getBoundingBox();
+        } catch (eBox) {
+            continue;
+        }
+        if (isNull(box) || typeof box.isSane !== "function" ||
+                !box.isSane()) {
+            continue;
+        }
+        var min = box.getMinimum(), max = box.getMaximum();
+        // plain typeof, not library.js's isNumber: this file loads in
+        // the headless harness, where library.js does not
+        if (typeof min.x !== "number" || typeof max.x !== "number" ||
+                isNaN(min.x) || isNaN(max.x) ||
+                max.x < min.x || max.y < min.y) {
+            continue;
+        }
+        if (out === null) {
+            out = { minX: min.x, minY: min.y, maxX: max.x, maxY: max.y };
+        } else {
+            out.minX = Math.min(out.minX, min.x);
+            out.minY = Math.min(out.minY, min.y);
+            out.maxX = Math.max(out.maxX, max.x);
+            out.maxY = Math.max(out.maxY, max.y);
+        }
+    }
+    return out;
+};
+
+/**
  * Draws one station: tagged point on CTRL-STATIONS, label on
  * CTRL-STATION-LABELS. Returns the point entity (already added).
  */

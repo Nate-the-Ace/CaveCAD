@@ -13619,6 +13619,42 @@ if (!IS_NODE) {
         near(CsProfileDraw.planExtents(docG).maxY, planBox.maxY, 1e-9,
             "planExtents: still answers exactly what frameExtents does");
 
+        // -- planDataBox: the CAVE PLAN DATA alone -------------------
+        // The fetch/placement box must ignore the profile region, the
+        // sheet furniture and the suite's own generated underlays --
+        // each verified by ADDING one and watching the box not move.
+        loadRepoScript("scripts/CaveSurvey/Core/CsDraw.js");
+        var tight = CsDraw.planDataBox(docG);
+        ok(tight !== null && Math.abs(tight.maxX - 100) < 1e-9 &&
+            Math.abs(tight.maxY - 50) < 1e-9,
+            "planDataBox: starts as the plan linework's own box");
+        lineOn(docG, diG, CsLayers.PROFILE_TRACED_CEILING,
+            0, -500, 400, -480);
+        lineOn(docG, diG, CsLayers.TITLE_BLOCK, -300, -300, 900, 700);
+        var tagged = lineOn(docG, diG, CsLayers.AERIAL, -200, -200, 600, 600);
+        CsTags.set(tagged, "AerialBasemap", "1");
+        var opT = new RModifyObjectsOperation();
+        opT.addObject(tagged, false);
+        diG.applyOperation(opT);
+        var scan = lineOn(docG, diG, CsLayers.SCAN, -50, -50, 500, 500);
+        CsTags.set(scan, "SketchScan", "page3.jpg");
+        var opS = new RModifyObjectsOperation();
+        opS.addObject(scan, false);
+        diG.applyOperation(opS);
+        var still = CsDraw.planDataBox(docG);
+        ok(still !== null &&
+            Math.abs(still.minX - tight.minX) < 1e-9 &&
+            Math.abs(still.minY - tight.minY) < 1e-9 &&
+            Math.abs(still.maxX - tight.maxX) < 1e-9 &&
+            Math.abs(still.maxY - tight.maxY) < 1e-9,
+            "planDataBox: profile tracing, sheet furniture, a basemap " +
+            "and a scan all leave the box exactly where it was, got " +
+            JSON.stringify(still));
+        // but a user's own plan-layer linework DOES count
+        lineOn(docG, diG, CsLayers.WALLS_INFERRED, 0, 0, 160, 50);
+        near(CsDraw.planDataBox(docG).maxX, 160, 1e-9,
+            "planDataBox: real plan linework still grows the box");
+
         // -- an empty drawing has no region at all -------------------
         var docA = new RDocument(new RMemoryStorage(), new RSpatialIndexNavel());
         ok(CsTrace.profileRegion(docA) === null,
