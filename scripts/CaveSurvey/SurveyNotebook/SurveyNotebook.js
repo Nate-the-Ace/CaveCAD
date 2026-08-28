@@ -1359,6 +1359,14 @@ SurveyNotebook.drawMergedSurvey = function(w, doc, survey, recon) {
     var tripNames = CsRevise.tripStationNames(recon.survey);
     var bindPlan = CsBind.planAutoBind(doc, tripNames);
 
+    // The geo anchor rides a station POINT the erase below deletes.
+    // CsRevise.apply already snapshots and recommits it; this path
+    // did not, so a plain notebook Draw silently destroyed the
+    // drawing's georeference -- found live on Truitt Cave
+    // (2026-08-27), whose contours were anchored and whose anchor
+    // was gone.
+    var geoBefore = CsLocationPick.anchorRecord(doc);
+
     var replaced = CsLayers.withLayerOn(doc, di, CsLayers.HIDDEN,
         function() {
             return CsDraw.eraseStations(doc, eraseNames);
@@ -1402,6 +1410,36 @@ SurveyNotebook.drawMergedSurvey = function(w, doc, survey, recon) {
         ("\n\n" + CsRevise.lineworkSummary(lw.moved, lw.unmoved,
             lwBound).join("\n"));
 
+    // -- the georeference survives the redraw --------------------------
+    // Recommitted onto whichever point now carries the anchored station
+    // name, re-PINNED at its redrawn position (the survey moved, the
+    // world coordinate did not -- same rule CsRevise.apply follows).
+    var geoLine = "";
+    if (geoBefore !== null) {
+        var geoHome = null;
+        var redrawnStations = CsTags.collectStations(doc);
+        for (var gi = 0; gi < redrawnStations.length; gi++) {
+            if (redrawnStations[gi].name === geoBefore.station) {
+                geoHome = redrawnStations[gi];
+                break;
+            }
+        }
+        if (geoHome !== null) {
+            CsTags.commit(di, geoHome.entity, {
+                GeoLat: geoBefore.lat,
+                GeoLon: geoBefore.lon,
+                GeoStation: geoBefore.station,
+                GeoDrawX: geoHome.pos.x,
+                GeoDrawY: geoHome.pos.y
+            });
+        } else {
+            geoLine = "\n\nThe geo anchor was on station " +
+                geoBefore.station + ", which this page no longer " +
+                "draws -- the georeference is LOST. Re-anchor before " +
+                "fetching imagery again.";
+        }
+    }
+
     var fp = CsModel.tripFingerprint(merged.trips[merge.tripId]);
     var tripLine = merge.replaced ?
         ("Replaced trip " + merge.tripId + " (" + fp + ") with this " +
@@ -1441,13 +1479,14 @@ SurveyNotebook.drawMergedSurvey = function(w, doc, survey, recon) {
             "held: " + carryBits.join("; ") + ".");
 
     EAction.handleUserMessage("Survey Notebook: " + tripLine + carryLine +
-        lwLine);
+        lwLine + geoLine);
     QMessageBox.information(null, "Survey Notebook",
         tripLine + carryLine + "\n\n" +
         (replaced > 0 ? ("Replaced " + replaced + " previously drawn " +
             "mark" + (replaced === 1 ? "" : "s") + " (undo twice to " +
             "restore them).\n\n") : "") +
         CsReport.drawSummary(merged, resolved, drawn, findings) + lwLine +
+        geoLine +
         "\n\nDrawn as one undo step" +
         (replaced > 0 ? " after the replace" : "") +
         // said out loud because it changes what one undo does: the

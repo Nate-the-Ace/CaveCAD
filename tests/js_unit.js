@@ -7408,6 +7408,11 @@ if (!IS_NODE) {
     // Keyed on getId() throughout: entity query order is NOT stable.
     // -----------------------------------------------------------------
     loadRepoScript("scripts/CaveSurvey/Core/CsPick.js");
+    // drawMergedSurvey carries the geo anchor across its erase, so the
+    // notebook now needs the location helpers loaded (CsAll does this
+    // in the real app)
+    loadRepoScript("scripts/CaveSurvey/Core/CsGeoProject.js");
+    loadRepoScript("scripts/CaveSurvey/Core/CsLocationPick.js");
     loadRepoScript("scripts/CaveSurvey/SurveyNotebook/SurveyNotebook.js");
     (function() {
         var doc = new RDocument(new RMemoryStorage(), new RSpatialIndexNavel());
@@ -8316,6 +8321,39 @@ if (!IS_NODE) {
             var rec = CsRevise.surveyFromDocument(doc);
             near(rec.survey.trips[0].declination, -3.25, 1e-9,
                 "no-log: the declination revision itself still applied");
+
+            // -- the georeference survives a notebook Draw ------------
+            // Anchor L2, then Draw again: the erase deletes L2's point,
+            // and before 2026-08-27 the anchor died with it (found live
+            // on Truitt Cave). It must come back on the redrawn L2,
+            // re-pinned at that station's new position.
+            var geoSt = null;
+            var gsts = CsTags.collectStations(doc);
+            for (var gg = 0; gg < gsts.length; gg++) {
+                if (gsts[gg].name === "L2") { geoSt = gsts[gg]; }
+            }
+            ok(geoSt !== null, "geo-carry: fixture still has L2");
+            CsTags.commit(di, geoSt.entity, { GeoLat: 37.187,
+                GeoLon: -86.101, GeoStation: "L2",
+                GeoDrawX: geoSt.pos.x, GeoDrawY: geoSt.pos.y });
+
+            drawWithDecl(-2.5);
+
+            var geoRec = CsLocationPick.anchorRecord(doc);
+            ok(geoRec !== null,
+                "geo-carry: the anchor survived the notebook Draw");
+            if (geoRec !== null) {
+                ok(geoRec.station === "L2",
+                    "geo-carry: still on its own station, got '" +
+                    geoRec.station + "'");
+                near(geoRec.lat, 37.187, 1e-9,
+                    "geo-carry: the coordinate is untouched");
+                ok(geoRec.pos !== null && geoRec.pinX !== null &&
+                    Math.abs(geoRec.pos.x - geoRec.pinX) < 1e-6 &&
+                    Math.abs(geoRec.pos.y - geoRec.pinY) < 1e-6,
+                    "geo-carry: re-pinned at the redrawn position, so " +
+                    "the revision never reads as a dragged entrance");
+            }
         } finally {
             QMessageBox = realBox;
         }

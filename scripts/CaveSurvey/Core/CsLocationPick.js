@@ -217,21 +217,13 @@ CsLocationPick.ask = function(title, defaultText) {
         }
     }
 
-    var useMap = QMessageBox.question(getMainWindow(), title,
-        "Pick the location on a map?\n\n" +
-        "Yes opens a map in your browser: click the spot, the\n" +
-        "coordinate is copied, paste it into the next prompt.\n" +
-        "No goes straight to typing coordinates.",
-        QMessageBox.Yes | QMessageBox.No);
-
-    var prompt;
-    if (useMap === QMessageBox.Yes && CsLocationPick.openMap()) {
-        prompt = "Paste the coordinate from the map page\n" +
-            "(or type one: decimal like 40.5042, -90.2583 or DMS):";
-    } else {
-        prompt = "Cave location (decimal like 40.5042, -90.2583 or DMS " +
-            "like 40 30'15.0\"N 90 15'30.0\"W):";
-    }
+    // ONE dialog, no pre-question (screenshot feedback, 2026-08-27):
+    // Map... opens the browser map and leaves the field waiting for the
+    // paste; From Entrance reads the geo station; or just type it.
+    var prompt = "Cave location: decimal like 40.5042, -90.2583 or DMS " +
+        "like 40 30'15.0\"N 90 15'30.0\"W.\n" +
+        "Map... opens a browser map -- click the spot, the coordinate " +
+        "is copied, paste it here.";
 
     var text = CsLocationPick.askText(title, prompt, defaultText || "");
     if (text === undefined || text === null || text === "") {
@@ -268,6 +260,10 @@ CsLocationPick.askText = function(title, prompt, preset) {
         layout.addWidget(edit, 0, 0);
 
         var bar = new QHBoxLayout();
+        var mapBtn = new QPushButton("Map...");
+        mapBtn.toolTip = "Open a browser map. Click the spot; the " +
+            "coordinate is copied to the clipboard -- paste it into " +
+            "the field here.";
         var fromBtn = new QPushButton("From Entrance");
         fromBtn.toolTip = "Read the geo station's coordinate into the " +
             "field. If the station has been moved since imagery was " +
@@ -279,6 +275,7 @@ CsLocationPick.askText = function(title, prompt, preset) {
             okBtn["default"] = true;
         } catch (eDef) {
         }
+        bar.addWidget(mapBtn, 0, 0);
         bar.addWidget(fromBtn, 0, 0);
         bar.addStretch(1);
         bar.addWidget(okBtn, 0, 0);
@@ -286,6 +283,13 @@ CsLocationPick.askText = function(title, prompt, preset) {
         layout.addLayout(bar, 0);
         dlg.setLayout(layout);
 
+        mapBtn.clicked.connect(function() {
+            if (!CsLocationPick.openMap()) {
+                QMessageBox.information(getMainWindow(), title,
+                    "The map page could not be opened. Type the " +
+                    "coordinate, or use From Entrance.");
+            }
+        });
         fromBtn.clicked.connect(function() {
             var doc = (typeof getDocument === "function") ?
                 getDocument() : null;
