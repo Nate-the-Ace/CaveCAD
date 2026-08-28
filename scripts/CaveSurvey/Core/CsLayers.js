@@ -27,6 +27,11 @@ CsLayers.PROFILE_FLOOR = "CTRL-PROFILE-FLOOR";
 CsLayers.PROFILE_CEILING = "CTRL-PROFILE-CEILING";
 CsLayers.GRID = "CTRL-GRID";
 CsLayers.AERIAL = "CTRL-AERIAL";
+// Surface contours derived from public elevation data -- background
+// context like CTRL-AERIAL, generated and erased by their own tool.
+// CTRL- keeps them out of CsBind's reach, like every generated layer.
+CsLayers.CONTOUR = "CTRL-CONTOUR";
+CsLayers.CONTOUR_MAJOR = "CTRL-CONTOUR-MAJOR";
 
 // The profile frame's own control layers. EVERY ONE BEGINS "CTRL-",
 // and that is load-bearing rather than cosmetic: CsBind's
@@ -135,6 +140,11 @@ CsLayers.DEFAULTS = {
     "PROFILE-BREAKDOWN": ["white", "CONTINUOUS", "Weight000"],
     "PROFILE-ENTRANCE": ["white", "CONTINUOUS", "Weight035"],
     "CTRL-AERIAL": ["gray", "CONTINUOUS", "Weight000"],
+    // Contours are background context: muted like the aerial they
+    // usually sit on, majors told apart by weight alone (colors here
+    // stay within the set already proven elsewhere in this table).
+    "CTRL-CONTOUR": ["gray", "CONTINUOUS", "Weight000"],
+    "CTRL-CONTOUR-MAJOR": ["gray", "CONTINUOUS", "Weight025"],
     // Matches the plan template's own CTRL-GRID record (light gray,
     // continuous, 0.13mm) so a drawing without the template gets the
     // same grid rather than the fallback appearance.

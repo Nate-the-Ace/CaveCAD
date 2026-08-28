@@ -58,6 +58,74 @@ CsGeoProject.MARGIN = 0.25;
 // or no extent at all.
 CsGeoProject.FLOOR_M = 150;
 
+// The USGS 3DEP elevation service -- same National Map family as NAIP,
+// public domain, keyless. Native ~1 m where lidar exists. Extent from
+// the service's ?f=json (2026-08-27): effectively worldwide-bbox (it
+// spans the dateline for Alaska), so no coverage pre-check is useful --
+// a location with no data comes back as a no-data grid instead.
+CsGeoProject.DEM_URL =
+    "https://elevation.nationalmap.gov/arcgis/rest/services/" +
+    "3DEPElevation/ImageServer/exportImage";
+CsGeoProject.DEM_NATIVE_RES_M = 1.0;
+// Contours don't need imagery-grade resolution, and marching squares
+// over the grid runs in script: 512x512 is plenty and stays fast.
+CsGeoProject.DEM_MAX_PX = 512;
+CsGeoProject.DEM_MIN_PX = 64;
+
+/**
+ * The exportImage request for a float32 elevation grid.
+ */
+CsGeoProject.demUrl = function(bbox, size) {
+    return CsGeoProject.DEM_URL +
+        "?bbox=" + bbox.xmin.toFixed(3) + "," + bbox.ymin.toFixed(3) + "," +
+        bbox.xmax.toFixed(3) + "," + bbox.ymax.toFixed(3) +
+        "&bboxSR=3857" +
+        "&imageSR=3857" +
+        "&size=" + size.w + "," + size.h +
+        "&format=tiff" +
+        "&pixelType=F32" +
+        "&f=image";
+};
+
+/**
+ * A function mapping DEM grid coordinates (col, row; row 0 the top,
+ * pixel CENTERS) to drawing coordinates, through the same anchor the
+ * basemap placement uses.
+ *
+ * \param anchor {lat, lon, pos:{x,y}} -- the drawing's geo station.
+ */
+CsGeoProject.gridTransform = function(bbox, w, h, anchor, unitName) {
+    var psx = (bbox.xmax - bbox.xmin) / w;
+    var psy = (bbox.ymax - bbox.ymin) / h;
+    var am = CsGeoProject.toMercator(anchor.lat, anchor.lon);
+    var cosLat = Math.cos(anchor.lat * Math.PI / 180.0);
+    return function(col, row) {
+        var mx = bbox.xmin + (col + 0.5) * psx;
+        var my = bbox.ymax - (row + 0.5) * psy;
+        return {
+            x: anchor.pos.x + CsUnits.convert((mx - am.x) * cosLat,
+                CsUnits.METERS, unitName),
+            y: anchor.pos.y + CsUnits.convert((my - am.y) * cosLat,
+                CsUnits.METERS, unitName)
+        };
+    };
+};
+
+/**
+ * Where the anchor's own coordinate falls in the DEM grid, as
+ * fractional (col, row) -- for sampling the surface elevation at the
+ * geo station.
+ */
+CsGeoProject.anchorGridCoord = function(bbox, w, h, anchorLat, anchorLon) {
+    var am = CsGeoProject.toMercator(anchorLat, anchorLon);
+    var psx = (bbox.xmax - bbox.xmin) / w;
+    var psy = (bbox.ymax - bbox.ymin) / h;
+    return {
+        col: (am.x - bbox.xmin) / psx - 0.5,
+        row: (bbox.ymax - am.y) / psy - 0.5
+    };
+};
+
 /**
  * Latitude/longitude in degrees -> EPSG:3857 metres.
  */
