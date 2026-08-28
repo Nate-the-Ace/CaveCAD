@@ -67,8 +67,10 @@ and out, testable under node and under the engine identically).
 CsWarp.mlsSimilarity(point, controlPairs) -> { x, y, angle, factor }
 ```
 
-- `controlPairs`: `[{old: {x, y}, new: {x, y}}, ...]` — an entity's bound stations' old and
+- `controlPairs`: `[{old: {x, y}, nu: {x, y}}, ...]` — an entity's bound stations' old and
   new positions, exactly what `moveLinework` already assembles today for its rigid fit.
+  `nu`, not `new`: matches `CsRevise.similarityFit`'s existing pair shape exactly (found
+  during planning), not a fresh naming choice this doc needs to get right.
 - Weight per control point: `1 / distance(point, old)^2`, with a small epsilon guard so a
   vertex that coincides with a station (the common case for snapped tracing) doesn't divide
   by zero — it takes that station's transform exactly, which is also the mathematically
