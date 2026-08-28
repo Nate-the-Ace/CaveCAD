@@ -64,6 +64,10 @@ CsLayers.PROFILE_LRUD = "CTRL-PROFILE-LRUD";
 // traced vocabulary. A test now asserts every layer in
 // CsProfileDraw.LAYERS() is CTRL-, so this cannot drift back.
 CsLayers.PROFILE_BAND_LABELS = "CTRL-PROFILE-TEXT-LABELS";
+// The generated bounding box around each profile band, plus its name
+// text. LOCKED (see CsLayers.LOCKED): the boxes are the suite's frame
+// bookkeeping, not linework -- a caver never edits one.
+CsLayers.PROFILE_BOX = "CTRL-PROFILE-BOX";
 
 // The profile frame's traceable layers -- what a caver draws on an
 // elevation. These must NOT begin "CTRL-", for the mirror of the
@@ -143,6 +147,9 @@ CsLayers.DEFAULTS = {
     "CTRL-PROFILE-SPLAYS": ["gray", "CONTINUOUS", "Weight000"],
     "CTRL-PROFILE-LRUD": ["pink", "CONTINUOUS", "Weight025"],
     "CTRL-PROFILE-TEXT-LABELS": ["red", "CONTINUOUS", "Weight018"],
+    // Band bounding boxes: visible but recessive -- a frame around the
+    // work, never competing with it.
+    "CTRL-PROFILE-BOX": ["gray", "CONTINUOUS", "Weight000"],
     // and the traceable ones mirror the plan feature layer a caver
     // would reach for to draw the same thing. Ceiling and floor are
     // the elevation's wall lines, hence WALLS-SURVEYED's weight.
@@ -271,6 +278,15 @@ CsLayers.frameOf = function(layerName) {
 CsLayers.OFF = { "CTRL-DATA": true, "CTRL-HIDDEN": true, "CTRL-RAW": true,
     "CTRL-SHAPE-SPINE": true };
 
+// Layers created LOCKED: suite-owned bookkeeping a caver must see but
+// never edit. Every write the suite itself makes to one of these must
+// go through CsLayers.withLayerUnlocked below -- locked layers refuse
+// adds, deletes AND modifies silently in this build, exactly like off
+// ones. Locks a CAVER placed on ordinary layers stay sacred (see
+// withLayerOn's docblock); this set is different because the suite
+// placed the lock itself, on layers it owns outright.
+CsLayers.LOCKED = { "CTRL-PROFILE-BOX": true };
+
 /**
  * True when this layer will SILENTLY REFUSE edits -- adds, deletes and
  * modifies alike. Off or frozen.
@@ -394,6 +410,58 @@ CsLayers.withLayerOn = function(doc, di, layerName, fn) {
 };
 
 /**
+ * Runs fn with the named layer UNLOCKED, then restores the lock, even
+ * when fn throws. The counterpart to withLayerOn for the
+ * CsLayers.LOCKED set: those locks are the SUITE'S own (placed at
+ * creation so a caver cannot edit the bookkeeping), so the suite may
+ * lift them for the length of its own write. NEVER use this to write
+ * past a lock a caver placed -- that is the line withLayerOn's docblock
+ * draws, and it still stands. QCAD context only.
+ *
+ * \return whatever fn returns
+ */
+CsLayers.withLayerUnlocked = function(doc, di, layerName, fn) {
+    var wasLocked = false;
+    try {
+        var lay = doc.queryLayer(layerName);
+        if (!isNull(lay) && lay.isLocked() === true) {
+            lay.setLocked(false);
+            wasLocked = true;
+            var opUnlock = new RModifyObjectsOperation();
+            opUnlock.addObject(lay, false);
+            di.applyOperation(opUnlock);
+        }
+    } catch (e) {
+        wasLocked = false;   // could not toggle; fn still runs
+    }
+    var result, thrown = null, didThrow = false;
+    try {
+        result = fn();
+    } catch (e2) {
+        thrown = e2;
+        didThrow = true;
+    }
+    if (wasLocked) {
+        try {
+            var layBack = doc.queryLayer(layerName);
+            if (!isNull(layBack)) {
+                layBack.setLocked(true);
+                var opLock = new RModifyObjectsOperation();
+                opLock.addObject(layBack, false);
+                di.applyOperation(opLock);
+            }
+        } catch (e3) {
+            // restoring the lock is protection, not data; the write
+            // itself already landed
+        }
+    }
+    if (didThrow) {
+        throw thrown;
+    }
+    return result;
+};
+
+/**
  * Ensures a layer exists, creating it with its registry defaults if
  * not. Direct RLayer construction -- simple.js's addLayer relies on
  * current-layer plumbing that fails silently in the QJS bridge.
@@ -419,7 +487,8 @@ CsLayers.ensure = function(doc, di, name) {
     if (isNull(d)) {
         d = ["white", "CONTINUOUS", "Weight025"];
     }
-    var layer = new RLayer(doc, name, false, false,
+    var layer = new RLayer(doc, name, false,
+        CsLayers.LOCKED[name] === true,
         new RColor(d[0]), doc.getLinetypeId(d[1]),
         RLineweight[d[2]], CsLayers.OFF[name] === true);
     var op = new RAddObjectsOperation();

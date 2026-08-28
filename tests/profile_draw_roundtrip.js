@@ -122,7 +122,8 @@ function shotOf(from, to, d, az, inc, u, dn) {
 // HAND with the table in CsProfileDraw.js's own file banner.
 var KNOWN_PROFILE_TAGS = ["ProfileRun", "ProfileStation", "ProfileShot",
     "ProfileSplay", "ProfileFloorRun", "ProfileCeilingRun",
-    "ProfileBandLabel", "ProfileZOffset"];
+    "ProfileBandLabel", "ProfileZOffset",
+    "ProfileBox", "ProfileBoxLabel"];
 
 /** Every Profile*-tagged entity in the doc, as
  *  {id, entity, layer, tags: {key: value}}. */
@@ -351,6 +352,99 @@ if (bandALabel !== null) {
             "the band caption's Y offset above the band's reference " +
             "height is exactly TEXT_HEIGHT * 4.0");
     }
+}
+
+// =======================================================================
+// 1b. The band bounding boxes (Nathan, 2026-08-28): one locked frame
+//     per band, name in the top-left corner, boxes disjoint, replaced
+//     -- never stacked -- by a redraw. The redraw claims above already
+//     proved the counts stay level ACROSS renders; these prove the
+//     boxes themselves are right.
+// =======================================================================
+
+eqs(second.boxesDrawn, 2, "a box was drawn for each band");
+
+var boxLayer = doc.queryLayer(CsLayers.PROFILE_BOX);
+ok(!isNull(boxLayer), "the box layer exists");
+ok(boxLayer.isLocked() === true,
+    "THE BOX LAYER IS LOCKED -- boxes are readable, never editable");
+
+var boxRects = [], boxLabels = [];
+var scannedBx = scanProfileEntities(doc);
+for (var bxi = 0; bxi < scannedBx.length; bxi++) {
+    if (scannedBx[bxi].tags.ProfileBox !== undefined) {
+        boxRects.push(scannedBx[bxi]);
+    }
+    if (scannedBx[bxi].tags.ProfileBoxLabel !== undefined) {
+        boxLabels.push(scannedBx[bxi]);
+    }
+}
+eqs(boxRects.length, 2, "two box rectangles in the drawing");
+eqs(boxLabels.length, 2, "two box name labels in the drawing");
+for (var bxj = 0; bxj < boxRects.length; bxj++) {
+    eqs(boxRects[bxj].layer, CsLayers.PROFILE_BOX,
+        "box rectangle lands on CTRL-PROFILE-BOX");
+    ok(boxRects[bxj].tags.ProfileRun !== undefined,
+        "box rectangle carries ProfileRun");
+}
+
+// every band's geometry sits INSIDE its own box, and the two boxes are
+// disjoint -- the whole point of the frame is that location answers
+// "which band", so an overlap would make the answer ambiguous.
+function rectBoundsOf(scannedEntity) {
+    scannedEntity.entity.update();
+    var bb = scannedEntity.entity.getBoundingBox();
+    return { minX: bb.getMinimum().x, minY: bb.getMinimum().y,
+             maxX: bb.getMaximum().x, maxY: bb.getMaximum().y };
+}
+var rectA = null, rectSpur = null;
+for (var bxk = 0; bxk < boxRects.length; bxk++) {
+    if (boxRects[bxk].tags.ProfileBox === "A") {
+        rectA = rectBoundsOf(boxRects[bxk]);
+    } else {
+        rectSpur = rectBoundsOf(boxRects[bxk]);
+    }
+}
+ok(rectA !== null && rectSpur !== null,
+    "both bands' boxes were told apart by their ProfileBox tag");
+if (rectA !== null && rectSpur !== null) {
+    var disjoint = rectA.minY >= rectSpur.maxY ||
+        rectA.maxY <= rectSpur.minY ||
+        rectA.minX >= rectSpur.maxX || rectA.maxX <= rectSpur.minX;
+    ok(disjoint, "THE TWO BOXES ARE DISJOINT (A: y " +
+        rectA.minY.toFixed(1) + ".." + rectA.maxY.toFixed(1) +
+        ", spur: y " + rectSpur.minY.toFixed(1) + ".." +
+        rectSpur.maxY.toFixed(1) + ")");
+    // band A's own geometry inside band A's box
+    var a1p = null;
+    for (var bxm = 0; bxm < scannedBx.length; bxm++) {
+        if (scannedBx[bxm].tags.ProfileStation === "A1" &&
+                isPointEntity(scannedBx[bxm].entity)) {
+            a1p = scannedBx[bxm].entity.getPosition();
+        }
+    }
+    ok(a1p !== null && a1p.x > rectA.minX && a1p.x < rectA.maxX &&
+        a1p.y > rectA.minY && a1p.y < rectA.maxY,
+        "station A1 sits inside band A's box");
+}
+
+// the name text: top-left corner, inset one text height, saying the
+// band's key so a reader knows which frame they are looking at
+var labelA = null;
+for (var bxl = 0; bxl < boxLabels.length; bxl++) {
+    if (boxLabels[bxl].tags.ProfileBoxLabel === "A") {
+        labelA = boxLabels[bxl];
+    }
+}
+ok(labelA !== null, "band A's box has a name label");
+if (labelA !== null && rectA !== null) {
+    eqs(labelA.layer, CsLayers.PROFILE_BOX,
+        "the box name label lands on CTRL-PROFILE-BOX");
+    var lp = labelA.entity.getPosition();
+    near(lp.x, rectA.minX + CsDraw.TEXT_HEIGHT, 1e-6,
+        "the name sits one text height in from the box's left edge");
+    near(lp.y, rectA.maxY - CsDraw.TEXT_HEIGHT * 1.5, 1e-6,
+        "the name sits just under the box's top edge");
 }
 
 assertGeneratedStaysInFrame(doc, "the base fixture");

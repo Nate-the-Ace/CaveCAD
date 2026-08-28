@@ -17572,6 +17572,92 @@ function syntheticTiff(w, h, floats) {
 })();
 
 // ---------------------------------------------------------------------
+// CsProfileDraw.bandBox / boxesFor -- the band bounding boxes, pure
+// half. The engine claims (locked layer, replace-not-stack, real
+// entities) live in tests/profile_draw_roundtrip.js.
+// ---------------------------------------------------------------------
+
+(function() {
+    loadRepoScript("scripts/CaveSurvey/Core/CsDraw.js");
+    loadRepoScript("scripts/CaveSurvey/Core/CsProfileDraw.js");
+
+    var th = CsDraw.TEXT_HEIGHT;
+    var mkBand = function(key, y, dz) {
+        return {
+            key: key, zOffset: dz || 0, tie: null,
+            stations: [{ name: key + "1", x: 0, y: y },
+                       { name: key + "2", x: 30, y: y + 2 }],
+            legs: [{ from: key + "1", to: key + "2",
+                     fromX: 0, fromY: y, toX: 30, toY: y + 2 }],
+            ceiling: [[{ x: 0, y: y + 4 }, { x: 30, y: y + 6 }]],
+            floor: [[{ x: 0, y: y - 2 }, { x: 30, y: y - 1 }]],
+            flat: []
+        };
+    };
+
+    // bandBox: walls included (the ceiling pokes above every station),
+    // caption included (it hangs 4 text heights over the first station
+    // and extends right), zOffset applied throughout.
+    var band = mkBand("A", 10, 0);
+    var bb = CsProfileDraw.bandBox(band);
+    ok(bb !== null, "bandBox: a band with content has a box");
+    near(bb.minY, 8, 1e-9, "bandBox: the floor run is the bottom");
+    ok(bb.maxY >= 10 + th * 5.0,
+        "bandBox: the caption's headroom is inside the box");
+    ok(bb.maxX >= CsProfileDraw.labelText(band).length * th * 0.8,
+        "bandBox: the caption's width is inside the box");
+    var shifted = CsProfileDraw.bandBox(mkBand("A", 10, -50));
+    near(shifted.minY, bb.minY - 50, 1e-9,
+        "bandBox: zOffset moves the whole box");
+
+    // boxesFor: margin all around; two well-separated bands keep their
+    // full margins and stay disjoint.
+    var wide = {
+        bands: [mkBand("A", 100, 0), mkBand("B", 0, 0)]
+    };
+    var boxes = CsProfileDraw.boxesFor(wide, 5);
+    ok(boxes.length === 2, "boxesFor: one box per band");
+    ok(boxes[0].key === "A" && boxes[1].key === "B",
+        "boxesFor: top band first");
+    var contentA = CsProfileDraw.bandBox(wide.bands[0]);
+    near(boxes[0].minX, contentA.minX - 5, 1e-9,
+        "boxesFor: margin on the left");
+    near(boxes[0].maxY, contentA.maxY + 5, 1e-9,
+        "boxesFor: margin on top");
+    ok(boxes[0].minY > boxes[1].maxY,
+        "boxesFor: distant bands' boxes are disjoint with full margins");
+
+    // Two bands whose margined boxes would overlap: the boxes give
+    // ground at the midline of the CONTENT gap -- the bands themselves
+    // never move -- and stay visibly separated.
+    var closeGap = 4;   // content gap smaller than 2 * margin
+    var top = mkBand("A", 0, 0);
+    var topBox = CsProfileDraw.bandBox(top);
+    var bot = mkBand("B", 0, 0);
+    var botBox = CsProfileDraw.bandBox(bot);
+    // place B so its CONTENT top sits `closeGap` under A's content
+    // bottom (mkBand's y only shifts, never reshapes)
+    var drop = (botBox.maxY - topBox.minY) + closeGap;
+    var tight = { bands: [top, mkBand("B", -drop, 0)] };
+    var tightBoxes = CsProfileDraw.boxesFor(tight, 5);
+    ok(tightBoxes[0].minY > tightBoxes[1].maxY,
+        "boxesFor: crowded boxes stay separated (top edge " +
+        tightBoxes[0].minY.toFixed(2) + " above bottom box's " +
+        tightBoxes[1].maxY.toFixed(2) + ")");
+    var contentTop = CsProfileDraw.bandBox(tight.bands[0]);
+    ok(tightBoxes[0].minY <= contentTop.minY,
+        "boxesFor: a squeezed box never cuts into its own content");
+
+    // Interleaved content (both at true elevation, spans overlapping):
+    // no honest line exists, so the boxes are left overlapping rather
+    // than slicing through a band's geometry.
+    var tangled = { bands: [mkBand("A", 0, 0), mkBand("B", 1, 0)] };
+    var tangledBoxes = CsProfileDraw.boxesFor(tangled, 5);
+    ok(tangledBoxes[0].minY < tangledBoxes[1].maxY,
+        "boxesFor: interleaved bands keep overlapping boxes");
+})();
+
+// ---------------------------------------------------------------------
 // CsShapeLine -- engine half: sampling every entity type, decorate,
 // reconcile. QCAD only (RDocument fixtures).
 // ---------------------------------------------------------------------

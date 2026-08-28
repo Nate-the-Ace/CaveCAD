@@ -118,6 +118,34 @@ function initNewFile(mdiChild) {
             // visible scaffolding is a nuisance, not a failure
         }
 
+        // Same round-trip loss, same cure, for the suite's LOCKED
+        // layers (CTRL-PROFILE-BOX): the lock does not survive the
+        // template's DXF either, so re-place it right after the pour.
+        try {
+            if (typeof CsLayers === "undefined") {
+                throw new Error("CsLayers not loaded");
+            }
+            var doc2 = di.getDocument();
+            for (var lockName in CsLayers.LOCKED) {
+                if (!CsLayers.LOCKED.hasOwnProperty(lockName) ||
+                        CsLayers.LOCKED[lockName] !== true) {
+                    continue;
+                }
+                var lay2 = doc2.queryLayer(lockName);
+                if (lay2 === undefined || lay2 === null ||
+                        typeof lay2.isLocked !== "function" ||
+                        lay2.isLocked() !== false) {
+                    continue;   // absent, unreadable, or already locked
+                }
+                lay2.setLocked(true);
+                var lockOp = new RModifyObjectsOperation();
+                lockOp.addObject(lay2);
+                di.applyOperation(lockOp);
+            }
+        } catch (eLock) {
+            // an unlocked bookkeeping layer is a nuisance, not a failure
+        }
+
         try {
             di.autoZoom();
         } catch (eZoom) {

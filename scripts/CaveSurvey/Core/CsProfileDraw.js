@@ -44,7 +44,7 @@ var CsProfileDraw = {};
 CsProfileDraw.TAGS = ["ProfileRun", "ProfileStation", "ProfileShot",
     "ProfileSplay", "ProfileFloorRun", "ProfileCeilingRun",
     "ProfileBandLabel", "ProfileZOffset", "ProfileOrigin",
-    "ProfileExaggerationStamp"];
+    "ProfileExaggerationStamp", "ProfileBox", "ProfileBoxLabel"];
 
 /** Layers the profile writes to, created if the drawing lacks them.
  *  CTRL-PROFILE-LRUD is NOT here -- see the TAGS docblock above;
@@ -54,7 +54,7 @@ CsProfileDraw.LAYERS = function() {
     return [CsLayers.PROFILE_SHOTS, CsLayers.PROFILE_STATIONS,
         CsLayers.PROFILE_STATION_LABELS, CsLayers.PROFILE_SPLAYS,
         CsLayers.PROFILE_FLOOR, CsLayers.PROFILE_CEILING,
-        CsLayers.PROFILE_BAND_LABELS];
+        CsLayers.PROFILE_BAND_LABELS, CsLayers.PROFILE_BOX];
 };
 
 /**
@@ -451,7 +451,13 @@ CsProfileDraw.erase = function(doc, di, runKey) {
         }
     }
     CsProfileDraw.withOwnLayersOn(doc, di, function() {
-        di.applyOperation(op);
+        // the box layer ships LOCKED, and locked refuses deletes as
+        // silently as off does -- without this, stale boxes survive
+        // every redraw and stack up
+        CsLayers.withLayerUnlocked(doc, di, CsLayers.PROFILE_BOX,
+            function() {
+                di.applyOperation(op);
+            });
     });
     return victims.length;
 };
@@ -888,6 +894,138 @@ CsProfileDraw.regionBounds = function(profile) {
     return out;
 };
 
+/** The box margin around a band's content, in FEET -- converted per
+ *  drawing unit at draw time so it means the same thing in a metre
+ *  drawing (the suite convention). */
+CsProfileDraw.BOX_MARGIN_FEET = 5.0;
+
+/**
+ * One band's content bounds, {minX, minY, maxX, maxY} or null -- the
+ * band's OWN coordinates plus its zOffset, exactly what at() draws
+ * minus the region origin. Pure.
+ *
+ * Unlike regionBounds this DOES walk the wall runs and flat ticks: a
+ * bounding box that a ceiling line pokes out of is not a bounding box.
+ * It also covers the two text entities the band draws -- the caption
+ * (labelText at labelY0 + 4 text heights, extending right) and the
+ * station name labels (1.5 text heights above each station) -- using
+ * the same width estimate the rest of the suite draws by: about 0.8
+ * text heights per character at CsDraw.TEXT_HEIGHT.
+ */
+CsProfileDraw.bandBox = function(band) {
+    var dz = band.zOffset || 0.0;
+    var th = CsDraw.TEXT_HEIGHT;
+    var out = null;
+    var see = function(x, y) {
+        if (out === null) {
+            out = { minX: x, minY: y, maxX: x, maxY: y };
+            return;
+        }
+        out.minX = Math.min(out.minX, x);
+        out.minY = Math.min(out.minY, y);
+        out.maxX = Math.max(out.maxX, x);
+        out.maxY = Math.max(out.maxY, y);
+    };
+    var i, k, run;
+    for (i = 0; i < band.stations.length; i++) {
+        see(band.stations[i].x, band.stations[i].y + dz);
+        // the station's name label floats 1.5 text heights above the
+        // point, half a height tall either side of its middle
+        see(band.stations[i].x, band.stations[i].y + dz + th * 2.0);
+    }
+    for (i = 0; i < band.legs.length; i++) {
+        see(band.legs[i].fromX, band.legs[i].fromY + dz);
+        see(band.legs[i].toX, band.legs[i].toY + dz);
+    }
+    for (i = 0; i < band.ceiling.length; i++) {
+        run = band.ceiling[i];
+        for (k = 0; k < run.length; k++) {
+            see(run[k].x, run[k].y + dz);
+        }
+    }
+    for (i = 0; i < band.floor.length; i++) {
+        run = band.floor[i];
+        for (k = 0; k < run.length; k++) {
+            see(run[k].x, run[k].y + dz);
+        }
+    }
+    for (i = 0; i < band.flat.length; i++) {
+        see(band.flat[i].x, band.flat[i].y + dz - th);
+        see(band.flat[i].x, band.flat[i].y + dz + th);
+    }
+    if (out === null) {
+        return null;   // the band drew nothing boxable
+    }
+    // the caption: HAlignLeft from x=0, VAlignMiddle at y0 + 4 heights
+    var y0 = CsProfileDraw.labelY0(band) + dz;
+    var caption = CsProfileDraw.labelText(band);
+    see(0, y0 + th * 3.0);
+    see(caption.length * th * 0.8, y0 + th * 5.0);
+    return out;
+};
+
+/**
+ * The bounding box drawn around every band: content bounds plus the
+ * margin, SEPARATED where two margined boxes would meet. Pure; band
+ * coordinates (the caller adds the region origin when drawing).
+ *
+ * Separation never moves a band -- a displaced band no longer reads at
+ * true elevation, the one property the layout above refuses to spend
+ * (see CsProfile.layout). Instead the BOXES give ground: where two
+ * margined boxes overlap vertically, the shared edge is pulled back to
+ * the midline of the gap between the two bands' CONTENT, less a tenth
+ * of that gap each side so the boxes stay visibly apart. Two bands
+ * whose content itself interleaves (possible at true elevation) keep
+ * overlapping boxes -- there is no honest line between them, and
+ * cutting through a band's own geometry to pretend otherwise would be
+ * worse.
+ *
+ * Returns [{key, minX, minY, maxX, maxY}], top band first.
+ */
+CsProfileDraw.boxesFor = function(profile, margin) {
+    var bands = (profile && profile.bands) ? profile.bands : [];
+    var m = (margin === undefined || margin === null) ? 0 : margin;
+    var boxes = [];
+    var i;
+    for (i = 0; i < bands.length; i++) {
+        var content = CsProfileDraw.bandBox(bands[i]);
+        if (content === null) {
+            continue;
+        }
+        boxes.push({
+            key: bands[i].key,
+            content: content,
+            minX: content.minX - m, minY: content.minY - m,
+            maxX: content.maxX + m, maxY: content.maxY + m
+        });
+    }
+    // top first: bands stack downward, so sorting by content top gives
+    // the adjacency the separation pass below walks
+    boxes.sort(function(a, b) { return b.content.maxY - a.content.maxY; });
+    for (i = 0; i + 1 < boxes.length; i++) {
+        var a = boxes[i], b = boxes[i + 1];   // a above b
+        if (a.minY >= b.maxY) {
+            continue;   // already separated
+        }
+        if (a.content.minY <= b.content.maxY) {
+            continue;   // contents interleave: no honest line to draw
+        }
+        var gap = a.content.minY - b.content.maxY;
+        var mid = (a.content.minY + b.content.maxY) / 2;
+        a.minY = mid + gap * 0.1;
+        b.maxY = mid - gap * 0.1;
+    }
+    // the working copies leaked content for the separation pass; strip
+    // it so the return shape is exactly what a drawer needs
+    var out = [];
+    for (i = 0; i < boxes.length; i++) {
+        out.push({ key: boxes[i].key,
+            minX: boxes[i].minX, minY: boxes[i].minY,
+            maxX: boxes[i].maxX, maxY: boxes[i].maxY });
+    }
+    return out;
+};
+
 /**
  * Where to put the region THIS time: the offset added to every band
  * coordinate so the elevation lands below the plan, left edges lined
@@ -1040,7 +1178,12 @@ CsProfileDraw.translateRegion = function(doc, di, dx, dy) {
     }
     if (moved > 0) {
         CsRevise.withOffLayersOn(doc, di, function() {
-            di.applyOperation(op);
+            // the band boxes live on the LOCKED box layer and must
+            // travel with the region like everything else here
+            CsLayers.withLayerUnlocked(doc, di, CsLayers.PROFILE_BOX,
+                function() {
+                    di.applyOperation(op);
+                });
         });
     }
     return moved;
@@ -1094,6 +1237,24 @@ CsProfileDraw.render = function(doc, di, profile, opts) {
     var layers = CsProfileDraw.LAYERS();
     for (var l = 0; l < layers.length; l++) {
         CsLayers.ensure(doc, di, layers[l]);
+    }
+
+    // Re-place the box layer's lock. ensure() only creates; a DROPPED
+    // lock arrives with every reopened drawing, because a layer's lock
+    // state does not survive a DXF round trip in this build (same loss
+    // as the off state -- see CaveTemplateApply's post-pour pass). The
+    // profile redraw is the natural healing point: it runs on every
+    // notebook Draw, so the bookkeeping never stays editable for long.
+    try {
+        var boxLay = doc.queryLayer(CsLayers.PROFILE_BOX);
+        if (!isNull(boxLay) && boxLay.isLocked() === false) {
+            boxLay.setLocked(true);
+            var lockOp = new RModifyObjectsOperation();
+            lockOp.addObject(boxLay, false);
+            di.applyOperation(lockOp);
+        }
+    } catch (eLock) {
+        // an unlocked bookkeeping layer is a nuisance, not a failure
     }
 
     // WHERE THE REGION GOES THIS TIME, and the move that gets the
@@ -1168,6 +1329,51 @@ CsProfileDraw.render = function(doc, di, profile, opts) {
     CsProfileDraw.stamp(doc, op, profile, origin,
         CsProfileDraw.regionBounds(profile));
 
+    // The bounding box around each band, with the band's name in its
+    // top-left corner -- Nathan's frame bookkeeping (2026-08-28): a
+    // future drawing tool can decide which band a stroke belongs to by
+    // WHERE it lands instead of by which per-frame button was pressed.
+    // Locked layer (CsLayers.LOCKED), so the boxes are readable but
+    // never editable; the apply below runs inside withLayerUnlocked.
+    var boxMargin;
+    try {
+        var boxUnit = CsUnits.fromDrawingUnit(doc.getUnit(), RS);
+        boxMargin = CsUnits.convert(CsProfileDraw.BOX_MARGIN_FEET,
+            CsUnits.FEET, boxUnit);
+    } catch (eMargin) {
+        boxMargin = CsProfileDraw.BOX_MARGIN_FEET;
+    }
+    var boxes = CsProfileDraw.boxesFor(profile, boxMargin);
+    counts.boxesDrawn = 0;
+    for (var bx = 0; bx < boxes.length; bx++) {
+        var box = boxes[bx];
+        var rect = new RPolyline();
+        rect.appendVertex(new RVector(origin.x + box.minX,
+            origin.y + box.minY), 0.0);
+        rect.appendVertex(new RVector(origin.x + box.maxX,
+            origin.y + box.minY), 0.0);
+        rect.appendVertex(new RVector(origin.x + box.maxX,
+            origin.y + box.maxY), 0.0);
+        rect.appendVertex(new RVector(origin.x + box.minX,
+            origin.y + box.maxY), 0.0);
+        rect.setClosed(true);
+        var rectEnt = new RPolylineEntity(doc, new RPolylineData(rect));
+        rectEnt.setLayerId(doc.getLayerId(CsLayers.PROFILE_BOX));
+        CsTags.set(rectEnt, "ProfileBox", box.key);
+        CsTags.set(rectEnt, "ProfileRun", box.key);
+        op.addObject(rectEnt, false);
+
+        // the name, top-left corner, inset one text height -- so a
+        // reader knows which band's frame they are looking at
+        var boxLabel = CsDraw.addText(doc, op, CsLayers.PROFILE_BOX,
+            box.key,
+            new RVector(origin.x + box.minX + CsDraw.TEXT_HEIGHT,
+                origin.y + box.maxY - CsDraw.TEXT_HEIGHT * 1.5),
+            RS.HAlignLeft, "ProfileBoxLabel", box.key);
+        CsTags.set(boxLabel, "ProfileRun", box.key);
+        counts.boxesDrawn++;
+    }
+
     // The marker that lets the NEXT draw know where this one put the
     // region, so it can translate the user's tracing by the difference.
     // Written last, into the same operation as the geometry it belongs
@@ -1183,9 +1389,13 @@ CsProfileDraw.render = function(doc, di, profile, opts) {
     // reason: any layer in CsProfileDraw.LAYERS() may be off by the
     // time this runs (a user's own choice, not a template default --
     // see CsProfileDraw.withOwnLayersOn), and this build drops adds to
-    // an off layer with no error at all.
+    // an off layer with no error at all. The box layer additionally
+    // ships LOCKED, and locked refuses adds just as silently.
     CsProfileDraw.withOwnLayersOn(doc, di, function() {
-        di.applyOperation(op);
+        CsLayers.withLayerUnlocked(doc, di, CsLayers.PROFILE_BOX,
+            function() {
+                di.applyOperation(op);
+            });
     });
 
     counts.claimed = claimed;
