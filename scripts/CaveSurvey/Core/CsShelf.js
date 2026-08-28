@@ -68,7 +68,8 @@ CsShelf.normalize = function(record) {
     return {
         name: name,
         folder: folder,
-        drawing: CsShelf.clean(record.drawing)
+        drawing: CsShelf.clean(record.drawing),
+        favorite: record.favorite === true
     };
 };
 
@@ -276,7 +277,9 @@ CsShelf.put = function(records, record) {
     list[at] = {
         name: incoming.name !== "" ? incoming.name : existing.name,
         folder: incoming.folder,
-        drawing: incoming.drawing !== "" ? incoming.drawing : existing.drawing
+        drawing: incoming.drawing !== "" ? incoming.drawing : existing.drawing,
+        // a refresh never unstars: unfavoriting is setFavorite's job
+        favorite: incoming.favorite === true || existing.favorite === true
     };
     return list;
 };
@@ -289,13 +292,18 @@ CsShelf.remove = function(records, folder) {
     return true;
 };
 
-/** Records sorted the way the launcher lists them: by cave name. */
+/**
+ * Records sorted the way the launcher lists them: favorites first,
+ * by cave name within each group.
+ */
 CsShelf.sorted = function(records) {
     var list = [];
     if (Object.prototype.toString.call(records) === "[object Array]") {
         for (var i = 0; i < records.length; i++) { list.push(records[i]); }
     }
     list.sort(function(a, b) {
+        var fa = a.favorite === true, fb = b.favorite === true;
+        if (fa !== fb) { return fa ? -1 : 1; }
         var x = CsShelf.clean(a.name).toLowerCase();
         var y = CsShelf.clean(b.name).toLowerCase();
         return x < y ? -1 : (x > y ? 1 : 0);
@@ -336,6 +344,15 @@ CsShelf.save = function(records) {
 CsShelf.register = function(record) {
     var list = CsShelf.list();
     CsShelf.put(list, record);
+    return CsShelf.save(list);
+};
+
+/** Stars or unstars one cave. True if the record was found and saved. */
+CsShelf.setFavorite = function(folder, on) {
+    var list = CsShelf.list();
+    var at = CsShelf.indexOfFolder(list, folder);
+    if (at === -1) { return false; }
+    list[at].favorite = on === true;
     return CsShelf.save(list);
 };
 

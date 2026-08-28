@@ -727,6 +727,7 @@ CsDraw.survey = function(survey, resolved, originStation, originPos, seqBase) {
         CsTags.set(anchorPt, "TripName", trip.name);
         CsTags.set(anchorPt, "TripDate", trip.date);
         CsTags.set(anchorPt, "TripTeam", trip.team);
+        CsTags.set(anchorPt, "TripInstruments", trip.instruments || "");
         CsTags.set(anchorPt, "TripDeclination", trip.declination);
         CsTags.set(anchorPt, "TripDeclinationSource", trip.declinationSource);
         CsTags.set(anchorPt, "TripDistanceUnit", trip.distanceUnit);

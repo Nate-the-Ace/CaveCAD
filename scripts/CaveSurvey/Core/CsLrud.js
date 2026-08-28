@@ -306,6 +306,52 @@ CsLrud.wallRuns = function(survey, resolved, tapeMode) {
         }
     };
 
+    // The very first station: no shot arrives at it, so lrudForStation
+    // cannot see it -- its LRUD lives in survey.startLrud, oriented by
+    // the leg that leaves it (the same rule CsDraw.survey uses for its
+    // tick).
+    var firstFrom = null;
+    for (var f = 0; f < resolved.legs.length; f++) {
+        if (resolved.legs[f].kind !== "closure") {
+            firstFrom = resolved.legs[f].from;
+            break;
+        }
+    }
+
+    // Wall evidence at the station a run BEGINS at. Every other station
+    // enters the walk as some leg's arrival (leg.to below); the station
+    // that OPENS a run never does, so without this the survey's first
+    // wall segment starts one station late -- A1's tick and splays were
+    // simply never visited. A junction still ends runs rather than
+    // seeding them.
+    var seedRunStart = function(leg) {
+        var name = leg.from;
+        if (counts[name] > 2) {
+            return;
+        }
+        var passageAz = CsTraverse.effectiveAzimuth(leg.shot);
+        var lrud = CsModel.lrudForStation(survey, name);
+        if ((lrud === null || lrud === undefined) && name === firstFrom &&
+                survey.startLrud !== null &&
+                survey.startLrud !== undefined) {
+            lrud = {
+                left: survey.startLrud.left,
+                right: survey.startLrud.right,
+                up: survey.startLrud.up,
+                down: survey.startLrud.down,
+                leftAll: survey.startLrud.leftAll || null,
+                rightAll: survey.startLrud.rightAll || null,
+                upAll: survey.startLrud.upAll || null,
+                downAll: survey.startLrud.downAll || null,
+                azimuth: passageAz
+            };
+        }
+        append(left, pointsFor(name, "L", lrud, passageAz),
+            leftNames, leftSeen, name);
+        append(right, pointsFor(name, "R", lrud, passageAz),
+            rightNames, rightSeen, name);
+    };
+
     // The arrival station of the previous leg walked into the CURRENT
     // buffer (not the run's start, and not touched by a flush() that
     // happened for junction/no-evidence reasons within the same leg --
@@ -321,6 +367,7 @@ CsLrud.wallRuns = function(survey, resolved, tapeMode) {
             prevTo = null;
             continue;
         }
+        var opensRun = (prevTo === null);
         if (prevTo !== null && leg.from !== prevTo) {
             // This leg does not continue from where the buffered run
             // left off -- e.g. a second branch off the same junction
@@ -329,6 +376,10 @@ CsLrud.wallRuns = function(survey, resolved, tapeMode) {
             // continuous run; what is about to be appended is not
             // part of it.
             flush();
+            opensRun = true;
+        }
+        if (opensRun) {
+            seedRunStart(leg);
         }
         // The leg reached a new station (leg.to for forward legs).
         var name = leg.to;

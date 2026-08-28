@@ -1996,6 +1996,17 @@ CsProfile.bandWallRuns = function(band, survey, resolved, opts) {
         }
     }
 
+    // The survey's very first station, for the startLrud substitution
+    // below: the from end of the first drawn non-splay shot.
+    var firstStationName = null;
+    for (var fi = 0; fi < survey.shots.length; fi++) {
+        var fsh = survey.shots[fi];
+        if (!fsh.splay && !fsh.excludeFromAll) {
+            firstStationName = fsh.from;
+            break;
+        }
+    }
+
     for (var i = 0; i < band.stations.length; i++) {
         var st = band.stations[i];
 
@@ -2011,6 +2022,16 @@ CsProfile.bandWallRuns = function(band, survey, resolved, opts) {
         }
 
         var lrud = CsModel.lrudForStation(survey, st.name);
+        if ((lrud === null || lrud === undefined) &&
+                st.name === firstStationName &&
+                survey.startLrud !== null &&
+                survey.startLrud !== undefined) {
+            // the survey's first station: no shot arrives at it, so
+            // lrudForStation cannot see it -- its U/D live in
+            // survey.startLrud (same substitution CsDraw.survey and
+            // CsLrud.wallRuns make)
+            lrud = survey.startLrud;
+        }
         var hasDir = (azAt[st.name] !== undefined);
         var alongX = 0.0, alongY = 0.0;
         if (hasDir) {

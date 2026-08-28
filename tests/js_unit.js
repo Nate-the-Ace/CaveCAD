@@ -26,6 +26,7 @@ var IS_NODE = (typeof process !== "undefined" && process.versions &&
 
 var repoRoot;
 var readTextFile;
+var readBinaryFile;   // file -> latin1 string: charCodeAt(i) === byte i
 
 if (IS_NODE) {
     var nodeFs = require("fs");
@@ -33,6 +34,9 @@ if (IS_NODE) {
     repoRoot = nodePath.resolve(__dirname, "..");
     readTextFile = function(path) {
         return nodeFs.readFileSync(path, "utf8");
+    };
+    readBinaryFile = function(path) {
+        return nodeFs.readFileSync(path, "latin1");
     };
 } else {
     var args = RSettings.getOriginalArguments();
@@ -46,6 +50,19 @@ if (IS_NODE) {
         var content = stream.readAll();
         file.close();
         return content;
+    };
+    readBinaryFile = function(path) {
+        var file = new QFile(path);
+        if (!file.open(QIODevice.ReadOnly)) {
+            throw new Error("cannot open " + path);
+        }
+        var stream = new QTextStream(file);
+        // Latin1 maps all 256 byte values 1:1 onto code points, so the
+        // string IS the bytes (probed 2026-08-27; see CsContour.js).
+        stream.setEncoding(QStringConverter.Latin1);
+        var content = stream.readAll();
+        file.close();
+        return String(content);
     };
 }
 
@@ -98,6 +115,7 @@ var CORE_FILES = [
     "scripts/CaveSurvey/Core/CsShelf.js",
     "scripts/CaveSurvey/Core/CsPackage.js",
     "scripts/CaveSurvey/Core/CsGeoProject.js",
+    "scripts/CaveSurvey/Core/CsContour.js",
     "scripts/CaveSurvey/Core/CsAngles.js",
     "scripts/CaveSurvey/Core/CsIgrfCoeffs.js",
     "scripts/CaveSurvey/Core/CsGeomag.js",
@@ -2558,6 +2576,52 @@ function splayFixture() {
     var w = CsLrud.wallRuns(sv, CsNetwork.resolve(sv, {}));
     eqs(w.skipped, 2,
         "wallRuns: both unmeasurable splays are counted as skipped");
+})();
+
+// ---------------------------------------------------------------------
+// The survey's FIRST station carries wall evidence too. No shot arrives
+// at it -- its LRUD lives in survey.startLrud and its splays hang off
+// its name -- so a walk that only visits leg.to stations starts every
+// wall one station late ("A1-A2 LRUDs not drawing", 2026-08-27). The
+// first leg's azimuth orients the start station's tick, same rule
+// CsDraw.survey already uses.
+// ---------------------------------------------------------------------
+(function() {
+    // startLrud seeds the run: walls begin at A1, not A2
+    var sv = splayFixture();          // A1->A2->A3 due north, LRUD at A2
+    sv.startLrud = { left: 2, right: 3, up: null, down: null,
+        leftAll: null, rightAll: null, upAll: null, downAll: null };
+    var w = CsLrud.wallRuns(sv, CsNetwork.resolve(sv, {}));
+    eqs(w.left.length, 1, "first-station walls: one left run");
+    eqs(w.right.length, 1, "first-station walls: one right run");
+    if (w.left.length === 1) {
+        near(w.left[0].points[0].x, -2, 1e-9,
+            "first-station walls: left run starts at A1's left tick");
+        near(w.left[0].points[0].y, 0, 1e-9,
+            "first-station walls: A1's left tick sits at the start");
+        eqs(w.left[0].stations[0], "A1",
+            "first-station walls: the run knows it starts at A1");
+    }
+    if (w.right.length === 1) {
+        near(w.right[0].points[0].x, 3, 1e-9,
+            "first-station walls: right run starts at A1's right tick");
+        near(w.right[0].points[0].y, 0, 1e-9,
+            "first-station walls: A1's right tick sits at the start");
+    }
+})();
+
+(function() {
+    // splays from the first station join the run even without startLrud
+    var sv = splayFixture();
+    sv.shots.push(splayOf("A1", 4, 270));    // west splay at A1
+    var w = CsLrud.wallRuns(sv, CsNetwork.resolve(sv, {}));
+    eqs(w.left.length, 1, "first-station splays: one left run");
+    if (w.left.length === 1) {
+        near(w.left[0].points[0].x, -4, 1e-9,
+            "first-station splays: A1's splay tip opens the left wall");
+        eqs(w.left[0].stations.join(","), "A1,A2",
+            "first-station splays: run stations begin at A1");
+    }
 })();
 
 // ---------------------------------------------------------------------
@@ -5577,6 +5641,7 @@ if (!IS_NODE) {
         vsv.name = "ENT";
         vsv.date = "2020-01-01";
         vsv.team = "Alice";
+        vsv.instruments = "SUUNTO KB-14, FIBERGLASS TAPE";
         vsv.declination = 2.5;
         vsv.declinationSource = "user";
         vsv.distanceUnit = "ft";
@@ -5587,6 +5652,7 @@ if (!IS_NODE) {
         vt1.name = "UPPER";
         vt1.date = "2021-05-05";
         vt1.team = "Bob";
+        vt1.instruments = "DISTOX2 #4721";
         vt1.declination = 3.0;
         vt1.declinationSource = "igrf";
         vt1.distanceUnit = "ft";
@@ -5745,6 +5811,11 @@ if (!IS_NODE) {
             CsTags.get(a1, "TripDate") === "2021-05-05" &&
             CsTags.get(a1, "TripDeclination") === "3",
             "v3: trip 1 anchor metadata");
+        ok(a0 !== undefined && CsTags.get(a0, "TripInstruments") ===
+            "SUUNTO KB-14, FIBERGLASS TAPE" &&
+            a1 !== undefined && CsTags.get(a1, "TripInstruments") ===
+            "DISTOX2 #4721",
+            "v3: trip anchors carry the instruments");
 
         // ExcludedShots round-trips through parseShotRow. Row format is
         // "tripId TAB shotSeq TAB shotRow" -- split properly instead of
@@ -5943,6 +6014,7 @@ if (!IS_NODE) {
         S.name = "ENT";
         S.date = "2020-01-01";
         S.team = "Alice";
+        S.instruments = "SUUNTO KB-14, FIBERGLASS TAPE";
         S.declination = 2.5;
         S.declinationSource = "user";
         S.distanceUnit = "ft";
@@ -5954,6 +6026,7 @@ if (!IS_NODE) {
         gt1.name = "UPPER";
         gt1.date = "2021-05-05";
         gt1.team = "Bob";
+        gt1.instruments = "DISTOX2 #4721";
         gt1.declination = 3.0;
         gt1.declinationSource = "igrf";
         gt1.distanceUnit = "ft";
@@ -11307,6 +11380,33 @@ var PROFILE_GEOMETRY_BEFORE_INDEX = [
     var w = CsProfile.bandWallRuns(band, sv, r, {});
     near(w.ceiling[0][0].y, 0, 1e-9, "U of 0 is a ceiling point at the station");
     ok(w.floor.length === 0, "null D draws no floor at all");
+}());
+
+(function() {
+    // the survey's first station: its U/D live in startLrud (no shot
+    // arrives at it), and the profile band must start there, not one
+    // station late -- plan walls had the same gap ("A1-A2 LRUDs not
+    // drawing", 2026-08-27)
+    var sv = CsModel.newSurvey();
+    var s1 = shotOf("A1", "A2", 10, 0, 0);
+    s1.up = 4; s1.down = 2;
+    var s2 = shotOf("A2", "A3", 10, 0, 0);
+    s2.up = 4; s2.down = 2;
+    sv.shots = [s1, s2];
+    sv.startLrud = { left: null, right: null, up: 3, down: 1,
+        leftAll: null, rightAll: null, upAll: null, downAll: null };
+    var r = CsNetwork.resolve(sv, {});
+    var g = CsProfile.groupRuns(r);
+    var band = CsProfile.unrollBand(g.runs["A"], null, r,
+        CsProfile.hierarchy(g, r), {});
+    var w = CsProfile.bandWallRuns(band, sv, r, {});
+    ok(w.ceiling.length === 1, "startLrud: still one ceiling run");
+    near(w.ceiling[0][0].x, band.stations[0].x, 1e-9,
+        "startLrud: ceiling run opens at the first station");
+    near(w.ceiling[0][0].y, 3, 1e-9,
+        "startLrud: first ceiling point sits startLrud.up above A1");
+    near(w.floor[0][0].y, -1, 1e-9,
+        "startLrud: first floor point sits startLrud.down below A1");
 }());
 
 (function() {
@@ -16827,6 +16927,28 @@ eqs(shelfList.length, 0, "forgetting removes the record");
 eqs(CsShelf.sorted([{ name: "Zed", folder: "/z" }, { name: "abc", folder: "/a" }])[0].name,
     "abc", "the shelf lists caves by name");
 
+// Favorites: the star survives normalize, the settings round trip, and
+// a save's refresh; favorites list ahead of everything else.
+ok(CsShelf.normalize({ folder: "/d/BC Pit", favorite: true }).favorite === true,
+    "a favorite survives normalize");
+ok(CsShelf.normalize({ folder: "/d/BC Pit" }).favorite === false,
+    "no flag means not a favorite");
+var favBack = CsShelf.parse(CsShelf.serialize(
+    [{ name: "BC Pit", folder: "/d/BC Pit", favorite: true }]));
+ok(favBack[0].favorite === true, "a favorite survives the settings round trip");
+var favList = [];
+CsShelf.put(favList, { name: "BC Pit", folder: "/d/BC Pit", favorite: true });
+CsShelf.put(favList, { name: "BC Pit", folder: "/d/bc pit/" });
+ok(favList[0].favorite === true, "a refresh does not unstar a favorite");
+eqs(CsShelf.sorted([
+    { name: "abc", folder: "/a" },
+    { name: "Zed", folder: "/z", favorite: true }
+])[0].name, "Zed", "favorites list ahead of the alphabet");
+eqs(CsShelf.sorted([
+    { name: "Zed", folder: "/z", favorite: true },
+    { name: "abc", folder: "/a", favorite: true }
+])[0].name, "abc", "favorites sort by name among themselves");
+
 // ---------------------------------------------------------------------
 // Rescaling a whole survey between units
 // ---------------------------------------------------------------------
@@ -17102,6 +17224,181 @@ eqs(CsFrontier.openEnds(frChain)[0].hasLrud, false, "no LRUD recorded");
 // Junk in, empty out -- never a throw.
 eqs(CsFrontier.openEnds(null).length, 0, "null survey yields no ends");
 eqs(CsFrontier.openEnds(frontierSurvey([])).length, 0, "empty survey yields no ends");
+
+// ---------------------------------------------------------------------
+// CsContour: float TIFF reading and marching squares.
+// ---------------------------------------------------------------------
+
+// Little-endian float32 encoder for building synthetic TIFFs. Test
+// values are integers and halves, so the round trip is exact.
+function tiffF32Bytes(v) {
+    var sign = v < 0 ? 1 : 0;
+    v = Math.abs(v);
+    var exp, man;
+    if (v === 0) {
+        exp = 0; man = 0;
+    } else {
+        exp = Math.floor(Math.log(v) / Math.LN2);
+        if (v / Math.pow(2, exp) < 1) { exp--; }
+        if (v / Math.pow(2, exp) >= 2) { exp++; }
+        man = Math.round((v / Math.pow(2, exp) - 1) * 8388608);
+        if (man === 8388608) { man = 0; exp++; }
+        exp += 127;
+    }
+    var bits = ((sign << 31) | (exp << 23) | man) >>> 0;
+    return [bits & 0xff, (bits >>> 8) & 0xff,
+        (bits >>> 16) & 0xff, (bits >>> 24) & 0xff];
+}
+
+// A minimal stripped little-endian float32 TIFF around a grid.
+function syntheticTiff(w, h, floats) {
+    var b = [];
+    var p16 = function(v) { b.push(v & 0xff, (v >> 8) & 0xff); };
+    var p32 = function(v) {
+        b.push(v & 0xff, (v >>> 8) & 0xff, (v >>> 16) & 0xff,
+            (v >>> 24) & 0xff);
+    };
+    var entries = 9;
+    var dataOff = 8 + 2 + entries * 12 + 4;
+    b.push(0x49, 0x49); p16(42); p32(8);
+    p16(entries);
+    var entry = function(tag, type, count, val) {
+        p16(tag); p16(type); p32(count);
+        if (type === 3) { p16(val); p16(0); } else { p32(val); }
+    };
+    entry(256, 3, 1, w);
+    entry(257, 3, 1, h);
+    entry(258, 3, 1, 32);
+    entry(259, 3, 1, 1);
+    entry(273, 4, 1, dataOff);
+    entry(277, 3, 1, 1);
+    entry(278, 3, 1, h);
+    entry(279, 4, 1, 4 * w * h);
+    entry(339, 3, 1, 3);
+    p32(0);
+    for (var i = 0; i < floats.length; i++) {
+        var fb = tiffF32Bytes(floats[i]);
+        b.push(fb[0], fb[1], fb[2], fb[3]);
+    }
+    var s = "";
+    for (i = 0; i < b.length; i++) {
+        s += String.fromCharCode(b[i]);
+    }
+    return s;
+}
+
+(function() {
+    // synthetic stripped TIFF round-trips exactly
+    var vals = [0, 1.5, 2, 3, 10.25, 5, 6, 7, 8];
+    var g = CsContour.parseFloatTiff(syntheticTiff(3, 3, vals));
+    eqs(g.width, 3, "contour tiff: synthetic width");
+    eqs(g.height, 3, "contour tiff: synthetic height");
+    var same = true;
+    for (var i = 0; i < vals.length; i++) {
+        if (g.values[i] !== vals[i]) { same = false; }
+    }
+    ok(same, "contour tiff: synthetic values round-trip exactly");
+
+    // corrupt input names its reason instead of returning a wrong grid
+    var threw = "";
+    try { CsContour.parseFloatTiff("not a tiff at all"); }
+    catch (e1) { threw = String(e1); }
+    ok(threw.indexOf("byte-order") !== -1,
+        "contour tiff: junk input throws, not parses");
+})();
+
+(function() {
+    // the real 3DEP fixture: 64x64 tiled float32, Mammoth Cave NP area
+    // (a public location, not a project cave). Values checked against
+    // an independent Python struct parse of the same file (2026-08-27).
+    var bytes = readBinaryFile(repoRoot + "/testdata/Elevation_3DEP_64.tif");
+    eqs(bytes.length, 66682, "3DEP fixture: binary read is byte-exact");
+    var g = CsContour.parseFloatTiff(bytes);
+    eqs(g.width, 64, "3DEP fixture: width");
+    eqs(g.height, 64, "3DEP fixture: height");
+    near(g.values[0], 228.41928100585938, 1e-6, "3DEP fixture: first value");
+    var r = CsContour.range(g.values);
+    near(r.min, 186.6383819580078, 1e-6, "3DEP fixture: min elevation");
+    near(r.max, 232.01087951660156, 1e-6, "3DEP fixture: max elevation");
+    eqs(r.noData, 0, "3DEP fixture: no holes");
+})();
+
+(function() {
+    var lv = CsContour.levels(186.6, 232.0, 10);
+    eqs(lv.join(","), "190,200,210,220,230", "contour levels: multiples inside");
+    eqs(CsContour.levels(5, 5, 10).length, 0, "contour levels: empty range");
+    eqs(CsContour.levels(0, 100, 0).length, 0, "contour levels: zero interval");
+})();
+
+(function() {
+    // a plane rising eastward: value = column. Level 0.5 must come back
+    // as ONE open polyline standing at x = 0.5 for the grid's full
+    // height.
+    var vals = [0, 1, 2, 0, 1, 2, 0, 1, 2];
+    var runs = CsContour.lines(vals, 3, 3, 0.5);
+    eqs(runs.length, 1, "marching squares: ramp yields one line");
+    ok(runs[0].closed === false, "marching squares: ramp line is open");
+    eqs(runs[0].points.length, 3, "marching squares: ramp line stitched");
+    var xOk = true, minY = 99, maxY = -99;
+    for (var i = 0; i < runs[0].points.length; i++) {
+        if (Math.abs(runs[0].points[i].x - 0.5) > 1e-9) { xOk = false; }
+        minY = Math.min(minY, runs[0].points[i].y);
+        maxY = Math.max(maxY, runs[0].points[i].y);
+    }
+    ok(xOk, "marching squares: crossing interpolates to x=0.5");
+    ok(minY === 0 && maxY === 2, "marching squares: spans the grid");
+})();
+
+(function() {
+    // a peak in the middle: the contour around it closes
+    var vals = [0, 0, 0, 0, 0,
+                0, 1, 1, 1, 0,
+                0, 1, 4, 1, 0,
+                0, 1, 1, 1, 0,
+                0, 0, 0, 0, 0];
+    var runs = CsContour.lines(vals, 5, 5, 2.0);
+    eqs(runs.length, 1, "marching squares: peak yields one ring");
+    ok(runs[0].closed === true, "marching squares: the ring closes");
+
+    // a no-data corner poisons only the cells that touch it
+    vals[0] = -999999;
+    var holed = CsContour.lines(vals, 5, 5, 0.5);
+    ok(holed.length >= 1, "marching squares: no-data corner never throws");
+})();
+
+(function() {
+    // grid -> drawing transform inverts anchorGridCoord: the anchor's
+    // own grid coordinate lands exactly on the anchor's drawing point
+    var anchor = { lat: 37.187, lon: -86.101, pos: { x: 120, y: -45 } };
+    var bbox = CsGeoProject.mercatorBbox(anchor.lat, anchor.lon,
+        { width: 500, height: 380 }, { x: 60, y: -25 });
+    var toDrawing = CsGeoProject.gridTransform(bbox, 200, 152, anchor,
+        CsUnits.FEET);
+    var at = CsGeoProject.anchorGridCoord(bbox, 200, 152,
+        anchor.lat, anchor.lon);
+    var p = toDrawing(at.col, at.row);
+    near(p.x, anchor.pos.x, 1e-6, "gridTransform: anchor round-trips x");
+    near(p.y, anchor.pos.y, 1e-6, "gridTransform: anchor round-trips y");
+
+    // one pixel east moves east by one ground pixel in drawing units
+    var q = toDrawing(at.col + 1, at.row);
+    var perPx = CsGeoProject.drawingUnitsPerPixel(bbox, 200, anchor.lat,
+        CsUnits.FEET);
+    near(q.x - p.x, perPx, 1e-6, "gridTransform: pixel step is uniform");
+    near(q.y, p.y, 1e-9, "gridTransform: eastward step keeps y");
+})();
+
+(function() {
+    var vals = [0, 1, 2, 3];
+    near(CsContour.sampleAt(vals, 2, 2, 0.5, 0.5), 1.5, 1e-9,
+        "sampleAt: bilinear centre");
+    near(CsContour.sampleAt(vals, 2, 2, 0, 0), 0, 1e-9,
+        "sampleAt: exact corner");
+    ok(CsContour.sampleAt(vals, 2, 2, 5, 0) === null,
+        "sampleAt: outside the grid is null");
+    ok(CsContour.sampleAt([0, NaN, 2, 3], 2, 2, 0.5, 0.5) === null,
+        "sampleAt: a no-data neighbour is null, not a guess");
+})();
 
 // ---------------------------------------------------------------------
 // Report.

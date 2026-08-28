@@ -182,6 +182,7 @@ CsRevise.surveyFromDocument = function(doc) {
                 trip.name = CsTags.get(e, "TripName");
                 trip.date = CsTags.get(e, "TripDate");
                 trip.team = CsTags.get(e, "TripTeam");
+                trip.instruments = CsTags.get(e, "TripInstruments");
                 var td = CsTags.getNumber(e, "TripDeclination");
                 trip.declination = td === null ? 0.0 : td;
                 trip.declinationSource =

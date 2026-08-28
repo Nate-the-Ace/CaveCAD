@@ -550,12 +550,8 @@ CaveShelf.show = function() {
     var addFolderButton = new QPushButton(qsTr("Import Folder..."));
     addFolderButton.toolTip = qsTr("From a folder: one cave project, or a " +
         "folder holding several -- a survey group's shared folder, say.");
-    var forgetButton = new QPushButton(qsTr("Forget"));
-    forgetButton.toolTip = qsTr("Removes the cave from this list. " +
-        "Nothing on disk is touched.");
     leftButtons.addWidget(addButton, 1, 0);
     leftButtons.addWidget(addFolderButton, 0, 0);
-    leftButtons.addWidget(forgetButton, 0, 0);
     left.addLayout(leftButtons, 0);
     main.addLayout(left, 0);
 
@@ -612,18 +608,9 @@ CaveShelf.show = function() {
     frontier.wordWrap = true;
     right.addWidget(frontier, 0, 0);
 
-    // The cave's own actions sit with the cave; the window's actions
-    // (new cave, close) stay in the footer.
-    var caveActions = new QHBoxLayout();
-    var revealButton = new QPushButton(qsTr("Open Project Folder"));
-    revealButton.toolTip = qsTr("This cave's folder, with its drawing, " +
-        "scans/, PDF/ and images/ inside it.");
-    var packageButton = new QPushButton(qsTr("Package..."));
-    caveActions.addWidget(revealButton, 0, 0);
-    caveActions.addWidget(packageButton, 0, 0);
-    caveActions.addStretch(1);
-    right.addLayout(caveActions, 0);
-
+    // The cave's own actions live in the list's right-click menu
+    // (favorite, open folder, package, forget); the window's actions
+    // (new cave, open, trip, close) stay in the footer.
     main.addLayout(right, 1);
     outer.addLayout(main, 1);
 
@@ -668,7 +655,8 @@ CaveShelf.show = function() {
             state.records.push(record);
             list.setRowCount(state.records.length);
             list.setItem(state.records.length - 1, 0,
-                new QTableWidgetItem(record.name));
+                new QTableWidgetItem((record.favorite === true ? "★ " : "") +
+                    record.name));
         }
         if (state.records.length === 0) {
             return;
@@ -703,8 +691,7 @@ CaveShelf.show = function() {
                     "drawing under your drive adds it here by itself.") : "";
             frontier.text = "";
             state.read = null;
-            CaveShelf.updateButtons(state, openButton, tripButton, forgetButton,
-                revealButton, packageButton);
+            CaveShelf.updateButtons(state, openButton, tripButton);
             return;
         }
 
@@ -720,8 +707,7 @@ CaveShelf.show = function() {
         if (!read.ok) {
             subtitle.text = where + "\n" + read.error;
             frontier.text = "";
-            CaveShelf.updateButtons(state, openButton, tripButton, forgetButton,
-                revealButton, packageButton);
+            CaveShelf.updateButtons(state, openButton, tripButton);
             return;
         }
 
@@ -765,8 +751,105 @@ CaveShelf.show = function() {
         health.text = CsShelf.healthText(read.stats, read.grade, read.unit) +
             CaveShelf.driftText(read.drift);
         frontier.text = CaveShelf.frontierText(read);
-        CaveShelf.updateButtons(state, openButton, tripButton, forgetButton,
-            revealButton, packageButton);
+        CaveShelf.updateButtons(state, openButton, tripButton);
+    };
+
+    // ---- what the actions do (buttons and the right-click menu) -------
+
+    var doOpen = function() {
+        if (CaveShelf.openRecord(state.record)) { dialog.accept(); }
+    };
+
+    var doTrip = function() {
+        if (CaveShelf.startTrip(state)) { dialog.accept(); }
+    };
+
+    var doReveal = function() {
+        if (state.record !== null) { CaveShelf.reveal(state.record.folder); }
+    };
+
+    var doPackage = function() {
+        if (state.record === null) { return; }
+        if (typeof PackageCave === "undefined") {
+            EAction.handleUserWarning(qsTr("Package Cave Project is not " +
+                "installed."));
+            return;
+        }
+        PackageCave.forRecord(state.record, dialog);
+    };
+
+    var doForget = function() {
+        if (state.record === null) { return; }
+        var answer = CaveShelf.confirm(dialog, qsTr("Forget Cave"),
+            qsTr("Take %1 off the shelf?\n\nThe folder and everything in " +
+                "it stays exactly where it is.").arg(state.record.name));
+        if (answer) {
+            CsShelf.forget(state.record.folder);
+            fillList();
+            showDetail();
+        }
+    };
+
+    var doToggleFavorite = function() {
+        if (state.record === null) { return; }
+        CsShelf.setFavorite(state.record.folder,
+            !(state.record.favorite === true));
+        fillList(state.record.folder);
+        showDetail();
+    };
+
+    // The cave's own actions: right-click a cave in the list.
+    var showListMenu = function() {
+        var record = state.record;
+        var hasDrawing = record !== null &&
+            CsShelf.clean(record.drawing) !== "";
+        var isDwg = hasDrawing &&
+            CsShelf.extension(record.drawing) === "dwg";
+
+        var menu = new QMenu(list);
+
+        var openAct = menu.addAction(qsTr("Open Drawing"));
+        openAct.enabled = hasDrawing && !isDwg;
+        openAct.triggered.connect(doOpen);
+
+        var tripAct = menu.addAction(state.station === "" ?
+            qsTr("New Trip") :
+            qsTr("New Trip from %1").arg(state.station));
+        tripAct.enabled = record !== null && !isDwg &&
+            (openAct.enabled || state.needsDrawing === true);
+        tripAct.triggered.connect(doTrip);
+
+        menu.addSeparator();
+
+        var favAct = menu.addAction(record !== null &&
+            record.favorite === true ?
+            qsTr("Unfavorite") : qsTr("Favorite") + " ★");
+        favAct.enabled = record !== null;
+        favAct.triggered.connect(doToggleFavorite);
+
+        // A folder can always be opened, even for a cave with nothing
+        // in it yet -- that is often exactly when somebody wants to
+        // look. Packaging needs something to package.
+        var revealAct = menu.addAction(qsTr("Open Project Folder"));
+        revealAct.enabled = record !== null;
+        revealAct.triggered.connect(doReveal);
+
+        var packageAct = menu.addAction(qsTr("Package..."));
+        packageAct.enabled = hasDrawing && !isDwg;
+        packageAct.triggered.connect(doPackage);
+
+        menu.addSeparator();
+
+        var forgetAct = menu.addAction(qsTr("Forget..."));
+        forgetAct.enabled = record !== null;
+        forgetAct.triggered.connect(doForget);
+
+        menu.exec(QCursor.pos());
+        try {
+            menu.deleteLater();
+        } catch (eDel) {
+            // a leaked popup menu is cosmetic
+        }
     };
 
     // ---- wiring -------------------------------------------------------
@@ -774,17 +857,34 @@ CaveShelf.show = function() {
     search.textChanged.connect(function() { fillList(); });
     list.itemSelectionChanged.connect(showDetail);
 
-    list.itemDoubleClicked.connect(function() {
-        if (CaveShelf.openRecord(state.record)) { dialog.accept(); }
-    });
+    list.itemDoubleClicked.connect(doOpen);
+
+    try {
+        list.contextMenuPolicy = Qt.CustomContextMenu;
+        list.customContextMenuRequested.connect(function(pos) {
+            // right-click selects what it lands on, so the menu and the
+            // detail pane agree about which cave is meant
+            try {
+                var row = list.rowAt(pos.y());
+                if (row >= 0 && row !== list.currentRow()) {
+                    list.selectRow(row);
+                }
+            } catch (eRow) {
+                // selection stays where it was
+            }
+            showListMenu();
+        });
+    } catch (eMenu) {
+        // no custom menu on this bridge: double-click and the footer
+        // buttons still cover open/trip
+    }
 
     table.itemSelectionChanged.connect(function() {
         state.trip = table.currentRow();
         if (state.read !== null) {
             frontier.text = CaveShelf.frontierText(state.read, state.trip);
         }
-        CaveShelf.updateButtons(state, openButton, tripButton, forgetButton,
-            revealButton, packageButton);
+        CaveShelf.updateButtons(state, openButton, tripButton);
     });
 
     addButton.clicked.connect(function() {
@@ -797,44 +897,14 @@ CaveShelf.show = function() {
         if (count > 0) { fillList(); showDetail(); }
     });
 
-    revealButton.clicked.connect(function() {
-        if (state.record !== null) { CaveShelf.reveal(state.record.folder); }
-    });
-
-    packageButton.clicked.connect(function() {
-        if (state.record === null) { return; }
-        if (typeof PackageCave === "undefined") {
-            EAction.handleUserWarning(qsTr("Package Cave Project is not " +
-                "installed."));
-            return;
-        }
-        PackageCave.forRecord(state.record, dialog);
-    });
-
-    forgetButton.clicked.connect(function() {
-        if (state.record === null) { return; }
-        var answer = CaveShelf.confirm(dialog, qsTr("Forget Cave"),
-            qsTr("Take %1 off the shelf?\n\nThe folder and everything in " +
-                "it stays exactly where it is.").arg(state.record.name));
-        if (answer) {
-            CsShelf.forget(state.record.folder);
-            fillList();
-            showDetail();
-        }
-    });
-
     newCaveButton.clicked.connect(function() {
         var created = CaveShelf.newCave(dialog);
         if (created !== null) { dialog.accept(); }
     });
 
-    openButton.clicked.connect(function() {
-        if (CaveShelf.openRecord(state.record)) { dialog.accept(); }
-    });
+    openButton.clicked.connect(doOpen);
 
-    tripButton.clicked.connect(function() {
-        if (CaveShelf.startTrip(state)) { dialog.accept(); }
-    });
+    tripButton.clicked.connect(doTrip);
 
     closeButton.clicked.connect(function() { dialog.reject(); });
 
@@ -888,14 +958,12 @@ CaveShelf.frontierText = function(read, tripRow) {
  * drawing CaveCAD cannot open -- a DWG -- because guessing what to do
  * beside somebody's DWG is not this button's business.
  */
-CaveShelf.updateButtons = function(state, openButton, tripButton, forgetButton,
-        revealButton, packageButton) {
+CaveShelf.updateButtons = function(state, openButton, tripButton) {
     var record = state.record;
     var read = state.read;
     var hasDrawing = record !== null && CsShelf.clean(record.drawing) !== "";
     var isDwg = hasDrawing && CsShelf.extension(record.drawing) === "dwg";
 
-    forgetButton.enabled = record !== null;
     openButton.enabled = hasDrawing && !isDwg;
 
     var station = "";
@@ -913,14 +981,6 @@ CaveShelf.updateButtons = function(state, openButton, tripButton, forgetButton,
 
     tripButton.enabled = record !== null && !isDwg &&
         (openButton.enabled || state.needsDrawing);
-
-    if (revealButton !== undefined) {
-        // A folder can always be opened, even for a cave with nothing in
-        // it yet -- that is often exactly when somebody wants to look.
-        revealButton.enabled = record !== null;
-        // Packaging needs something to package.
-        packageButton.enabled = hasDrawing && !isDwg;
-    }
 
     // Always "New Trip". Making the drawing when a cave has none is
     // what starting a trip MEANS for a cave nobody has surveyed yet --
@@ -1328,13 +1388,12 @@ CaveShelf.choose = function(parent, title, label, items) {
 
 /** True for yes. */
 CaveShelf.confirm = function(parent, title, text) {
-    var box = new QMessageBox(parent);
-    box.windowTitle = title;
-    box.setText(text);
-    box.setStandardButtons(QMessageBox.Yes | QMessageBox.No);
-    var answer = CaveShelf.runOnTop(box);
-    destrDialog(box);
-    return answer;
+    // Static question(), parented to the main window: an instance box's
+    // exec() code compared loosely (or not at all) confirms every answer,
+    // including No. Working pattern: SurveyStats.js, CsLocationPick.js.
+    var answer = QMessageBox.question(RMainWindowQt.getMainWindow(),
+        title, text, QMessageBox.Yes | QMessageBox.No);
+    return answer === QMessageBox.Yes;
 };
 
 /** Says something and waits for OK. */

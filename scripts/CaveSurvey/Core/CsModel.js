@@ -124,6 +124,9 @@ CsModel.newSurvey = function() {
         caveName: "",
         date: "",
         team: "",
+        // the instruments the readings were taken with ("SUUNTO KB-14,
+        // FIBERGLASS TAPE", "DISTOX2 #4721") -- free text, per trip
+        instruments: "",
         declination: 0.0,
         declinationSource: "",
         distanceUnit: "ft",
@@ -183,6 +186,7 @@ CsModel.newTrip = function() {
         name: "",
         date: "",
         team: "",
+        instruments: "",
         declination: 0.0,
         declinationSource: "",
         distanceUnit: "ft",
@@ -335,6 +339,7 @@ CsModel.ensureTrips = function(survey) {
         t.name = survey.name;
         t.date = survey.date;
         t.team = survey.team;
+        t.instruments = survey.instruments || "";
         t.declination = survey.declination;
         t.declinationSource = survey.declinationSource;
         t.distanceUnit = survey.distanceUnit;
@@ -352,6 +357,7 @@ CsModel.ensureTrips = function(survey) {
     survey.name = t0.name;
     survey.date = t0.date;
     survey.team = t0.team;
+    survey.instruments = t0.instruments || "";
     survey.declination = t0.declination;
     survey.declinationSource = t0.declinationSource;
     survey.distanceUnit = t0.distanceUnit;

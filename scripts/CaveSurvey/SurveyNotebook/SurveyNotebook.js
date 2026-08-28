@@ -130,6 +130,7 @@ SurveyNotebook.sheetSurvey = function(w) {
     survey.name = String(w.nameEdit.text);
     survey.date = String(w.dateEdit.text);
     survey.team = String(w.teamEdit.text);
+    survey.instruments = String(w.instrEdit.text);
     survey.declination = parseFloat(w.declEdit.text) || 0.0;
     survey.declinationSource = w.declSource;
     survey.distanceUnit = w.unit;
@@ -233,6 +234,7 @@ SurveyNotebook.setSurvey = function(w, survey) {
     w.nameEdit.text = survey.name;
     w.dateEdit.text = survey.date;
     w.teamEdit.text = survey.team;
+    w.instrEdit.text = survey.instruments || "";
     w.declEdit.text = String(survey.declination || 0);
     w.declSource = survey.declinationSource || "user";
     w.unit = survey.distanceUnit;
@@ -350,6 +352,35 @@ SurveyNotebook.upperCase = function(w, edit) {
     return edit;
 };
 
+/**
+ * Same ALL CAPS rule for a QPlainTextEdit (the notes boxes).
+ * QPlainTextEdit has no textEdited, only textChanged -- which also
+ * fires on the programmatic write-back, so the no-change early return
+ * is what breaks the loop.
+ */
+SurveyNotebook.upperCasePlain = function(w, edit) {
+    SurveyNotebook.safeConnect(edit.textChanged, function() {
+        var t = String(edit.toPlainText());
+        var u = t.toUpperCase();
+        if (u === t) {
+            return;
+        }
+        try {
+            var cur = edit.textCursor();
+            var pos = cur.position();
+            edit.setPlainText(u);
+            var back = edit.textCursor();
+            back.setPosition(Math.min(pos, u.length));
+            edit.setTextCursor(back);
+        } catch (e) {
+            // bridge without a workable QTextCursor: caps still land,
+            // the cursor jump to the end is cosmetic
+            edit.setPlainText(u);
+        }
+    }, "caps", w.problems);
+    return edit;
+};
+
 SurveyNotebook.makeCell = function(w, width) {
     var e = SurveyNotebook.styleCell(new QLineEdit());
     e.maximumWidth = width || SurveyNotebook.EDIT_WIDTH;
@@ -378,7 +409,7 @@ SurveyNotebook.addStationRow = function(w, stationName) {
         r: SurveyNotebook.makeCell(w, 48),
         u: SurveyNotebook.makeCell(w, 48),
         d: SurveyNotebook.makeCell(w, 48),
-        notes: new QPlainTextEdit(),
+        notes: SurveyNotebook.upperCasePlain(w, new QPlainTextEdit()),
         widgets: []
     };
     row.name.toolTip = "Station name. Blank line = separator: the " +
@@ -782,6 +813,7 @@ SurveyNotebook.tripSurvey = function(survey, tripId) {
     out.caveName = survey.caveName;
     out.date = trip.date;
     out.team = trip.team;
+    out.instruments = trip.instruments || "";
     out.declination = trip.declination;
     out.declinationSource = trip.declinationSource;
     out.distanceUnit = trip.distanceUnit;
@@ -917,6 +949,7 @@ SurveyNotebook.tripRecordOf = function(survey) {
     trip.name = survey.name;
     trip.date = survey.date;
     trip.team = survey.team;
+    trip.instruments = survey.instruments || "";
     trip.declination = survey.declination;
     trip.declinationSource = survey.declinationSource;
     trip.distanceUnit = survey.distanceUnit;
@@ -1609,7 +1642,7 @@ SurveyNotebook.drawMergedSurvey = function(w, doc, survey, recon) {
 SurveyNotebook.importFile = function(w) {
     var fileName = QFileDialog.getOpenFileName(null,
         "Import survey file", "", CsFormatRegistry.combinedFileFilter());
-    if (!fileName) {
+    if (isNull(fileName) || String(fileName) === "") {
         return;
     }
     var f = new QFile(fileName);
@@ -1659,7 +1692,7 @@ SurveyNotebook.exportFile = function(w) {
     }
     var fileName = QFileDialog.getSaveFileName(null,
         "Export " + format.label, "", format.fileFilter);
-    if (!fileName) {
+    if (isNull(fileName) || String(fileName) === "") {
         return;
     }
     var content = format.write(survey);
@@ -2177,12 +2210,13 @@ SurveyNotebook.tripDeclinationDialog = function(doc, recon) {
             edit.text = CsRevise.declText(trip.declination);
             grid.addWidget(edit, gridRow, 2);
 
-            var row = { tripId: t, recorded: trip.declination,
-                edit: edit, igrfText: "" };
-            rows.push(row);
-
             var igrfBtn = new QPushButton("IGRF");
             var tripDate = CsRevise.parseIsoDate(trip.date);
+
+            var row = { tripId: t, recorded: trip.declination,
+                edit: edit, igrfText: "", date: tripDate,
+                tripDateText: trip.date };
+            rows.push(row);
 
             // The handler re-checks every precondition itself, on the
             // live 'geo'/'tripDate' values, and is wired UNCONDITIONALLY
@@ -2252,12 +2286,60 @@ SurveyNotebook.tripDeclinationDialog = function(doc, recon) {
         layout.addLayout(grid, 0);
 
         var buttons = new QHBoxLayout();
+        // The whole cave in one pass: every trip's estimate from the
+        // drawing's geo reference and that trip's own date. Only FILLS
+        // the fields -- the recorded-vs-estimate rows stay reviewable,
+        // and nothing rotates until Apply.
+        var igrfAllBtn = new QPushButton("IGRF All");
+        igrfAllBtn.toolTip = "Fill every trip's declination estimate " +
+            "from the drawing's geo reference and each trip's own " +
+            "date. Review the rows, then Apply revises them together.";
+        buttons.addWidget(igrfAllBtn, 0, 0);
         buttons.addStretch(1);
         var applyBtn = new QPushButton("Apply");
         var cancelBtn = new QPushButton("Cancel");
         buttons.addWidget(applyBtn, 0, 0);
         buttons.addWidget(cancelBtn, 0, 0);
         layout.addLayout(buttons, 0);
+
+        connectOk(igrfAllBtn.clicked, function() {
+            if (geo === null) {
+                QMessageBox.warning(null, "Survey Notebook",
+                    "No geo reference in this drawing -- pin a station " +
+                    "to a latitude/longitude first, then IGRF can fill " +
+                    "from it.");
+                return;
+            }
+            var filled = 0;
+            var skipped = [];
+            for (var fi = 0; fi < rows.length; fi++) {
+                var fr = rows[fi];
+                if (fr.date === null) {
+                    skipped.push("Trip " + fr.tripId + ": date \"" +
+                        fr.tripDateText + "\" isn't YYYY-MM-DD");
+                    continue;
+                }
+                var res = CsGeomag.declination(geo.lat, geo.lon, fr.date);
+                if (res === null) {
+                    skipped.push("Trip " + fr.tripId + ": " +
+                        fr.date.year + " is before 1900, outside IGRF");
+                    continue;
+                }
+                // same 2-decimal convention as the per-row button and
+                // the header's Infer
+                var txt = res.declination.toFixed(2);
+                fr.edit.text = txt;
+                fr.igrfText = txt;
+                filled++;
+            }
+            if (skipped.length > 0) {
+                QMessageBox.warning(null, "Survey Notebook",
+                    filled + " of " + rows.length + " trips filled " +
+                    "from IGRF. Not filled:\n\n" + skipped.join("\n") +
+                    "\n\nThose rows keep their recorded value; fix the " +
+                    "trip date and run IGRF All again, or type a value.");
+            }
+        });
 
         dlg.setLayout(layout);
 
@@ -2788,6 +2870,12 @@ SurveyNotebook.buildDock = function(appWin) {
         "and logs the revision.";
     head2.addWidget(w.declEdit, 0, 0);
     w.inferButton = new QPushButton("Infer");
+    var head3 = new QHBoxLayout();
+    head3.addWidget(new QLabel("Instr"), 0, 0);
+    w.instrEdit = SurveyNotebook.upperCase(w, new QLineEdit());
+    w.instrEdit.placeholderText = "COMPASS, TAPE, CLINO...";
+    w.instrEdit.toolTip = "The instruments this page's readings were " +
+        "taken with (model, serial -- free text). Stored with the trip.";
     w.inferButton.toolTip =
         "Estimate declination from the survey date and the cave's " +
         "location (IGRF model, 1900 to present). Always editable.\n" +
@@ -2795,6 +2883,8 @@ SurveyNotebook.buildDock = function(appWin) {
         "location as the drawing's geo anchor.";
     head2.addWidget(w.inferButton, 0, 0);
     layout.addLayout(head2, 0);
+    head3.addWidget(w.instrEdit, 1, 0);
+    layout.addLayout(head3, 0);
 
     var columnHelp =
         "The notes page: shots are written between the stations they " +
@@ -2943,6 +3033,10 @@ SurveyNotebook.buildDock = function(appWin) {
     var actions = new QHBoxLayout();
     w.drawButton = new QPushButton("Draw");
     w.drawButton.toolTip = "Draw the survey into the drawing, one undo step.";
+    w.newTripButton = new QPushButton("New Trip");
+    w.newTripButton.toolTip = "Start the next trip's page: pick the " +
+        "station it ties into (open ends suggested), header prefilled " +
+        "from the drawing. The drawing is not touched.";
     w.importButton = new QPushButton("Import File...");
     w.exportButton = new QPushButton("Export File...");
     w.statusButton = new QPushButton("Status");
@@ -2972,6 +3066,7 @@ SurveyNotebook.buildDock = function(appWin) {
         // not checkable here: the label carries the state on its own
     }
     actions.addWidget(w.drawButton, 0, 0);
+    actions.addWidget(w.newTripButton, 0, 0);
     actions.addWidget(w.importButton, 0, 0);
     actions.addWidget(w.exportButton, 0, 0);
     actions.addWidget(w.statusButton, 0, 0);
@@ -3075,6 +3170,9 @@ SurveyNotebook.buildDock = function(appWin) {
         RSettings.setValue("CaveSurvey/NotebookStatusVisible",
             w.statusLabel.visible);
     }, "Status button", w.problems);
+    SurveyNotebook.safeConnect(w.newTripButton.clicked, function() {
+        SurveyNotebook.newTrip(w);
+    }, "New Trip button", w.problems);
     SurveyNotebook.safeConnect(w.clearButton.clicked, function() {
         var sure = QMessageBox.question(null, "Survey Notebook",
             "Clear the page? The trip header stays; the drawing is " +
@@ -3171,6 +3269,44 @@ SurveyNotebook.ensureDock = function() {
  * \param station the station the new trip ties into.
  * \return true if the page was seeded.
  */
+/**
+ * What the open drawing already knows about the NEXT trip: the last
+ * trip's team and declination (the crew and the field the new page
+ * most likely shares), and the cave's open ends, newest trip first.
+ * Everything stays editable -- these are prefills, not facts about
+ * the page. Empty-handed (never throwing) for a legacy or absent
+ * drawing.
+ */
+SurveyNotebook.tripDefaults = function() {
+    var out = { team: "", instruments: "", declination: null, ends: [] };
+    try {
+        var doc = getDocument();
+        if (doc === undefined || doc === null) { return out; }
+        var recon = CsRevise.surveyFromDocument(doc);
+        if (recon.legacy === true) { return out; }
+        var sv = recon.survey;
+        if (sv.trips !== undefined && sv.trips !== null &&
+                sv.trips.length > 0) {
+            var t = sv.trips[sv.trips.length - 1];
+            out.team = t.team || "";
+            out.instruments = t.instruments || "";
+            out.declination = (t.declination === undefined ||
+                t.declination === null) ? null : t.declination;
+        } else {
+            out.team = sv.team || "";
+            out.instruments = sv.instruments || "";
+            out.declination = sv.declination;
+        }
+        var ends = CsFrontier.openEnds(sv, {});
+        for (var i = 0; i < ends.length; i++) {
+            out.ends.push(ends[i].station);
+        }
+    } catch (e) {
+        // nothing to prefill is a fine answer
+    }
+    return out;
+};
+
 SurveyNotebook.startTripAt = function(station) {
     var w = SurveyNotebook.page;
     if (w === undefined || w === null) { return false; }
@@ -3181,10 +3317,20 @@ SurveyNotebook.startTripAt = function(station) {
     try {
         w.loading = true;
         w.nameEdit.text = "";
-        w.teamEdit.text = "";
         if (typeof CsPackage !== "undefined") {
             // CsPackage.todayText, not QDate: this bridge has no QDate.
             w.dateEdit.text = CsPackage.todayText();
+        }
+        // the drawing already knows the crew and the declination the
+        // last trip ran under -- prefill, keep editable
+        var defaults = SurveyNotebook.tripDefaults();
+        w.teamEdit.text = defaults.team;
+        w.instrEdit.text = defaults.instruments;
+        if (defaults.declination !== null) {
+            w.declEdit.text = (typeof CsRevise !== "undefined" &&
+                typeof CsRevise.declText === "function") ?
+                CsRevise.declText(defaults.declination) :
+                String(defaults.declination);
         }
         SurveyNotebook.clearLadder(w);
         // The tie-in, then the row its first shot arrives at.
@@ -3197,6 +3343,58 @@ SurveyNotebook.startTripAt = function(station) {
         w.loading = false;
         return false;
     }
+};
+
+/**
+ * The notebook's own way into the next trip: pick the tie-in station
+ * (prefilled with the newest open end), then seed a fresh page on it
+ * -- the same page the Cave Shelf's New Trip seeds, without leaving
+ * the notebook.
+ */
+SurveyNotebook.newTrip = function(w) {
+    var doc = getDocument();
+    if (doc === undefined || doc === null) {
+        QMessageBox.warning(null, "Survey Notebook", "No drawing is open.");
+        return;
+    }
+
+    // a page with measurements on it is about to be replaced
+    var dirty = false;
+    for (var i = 0; i < w.rows.length; i++) {
+        if (String(w.rows[i].dist.text) !== "" ||
+                String(w.rows[i].az.text) !== "") {
+            dirty = true;
+            break;
+        }
+    }
+    if (dirty) {
+        var sure = QMessageBox.question(null, "Survey Notebook",
+            "Start a new trip? This page's entries are cleared; the " +
+            "drawing is not touched.", QMessageBox.Yes | QMessageBox.No);
+        if (sure !== QMessageBox.Yes) {
+            return;
+        }
+    }
+
+    var defaults = SurveyNotebook.tripDefaults();
+    var label = "Tie the new trip into station:";
+    if (defaults.ends.length > 0) {
+        var shown = defaults.ends.slice(0, 6).join(", ");
+        if (defaults.ends.length > 6) { shown += ", ..."; }
+        label += "\nOpen ends: " + shown;
+    }
+    var dialog = new QInputDialog(RMainWindowQt.getMainWindow());
+    dialog.windowTitle = "New Trip";
+    dialog.setInputMode(QInputDialog.TextInput);
+    dialog.setLabelText(label);
+    dialog.setTextValue(defaults.ends.length > 0 ? defaults.ends[0] : "A1");
+    var answer = dialog.exec();
+    var typed = (answer === 0) ? null : String(dialog.textValue());
+    destrDialog(dialog);
+    if (typed === null) { return; }
+    typed = typed.replace(/^\s+|\s+$/g, "").toUpperCase();
+    if (typed === "") { return; }
+    SurveyNotebook.startTripAt(typed);
 };
 
 SurveyNotebook.prototype.beginEvent = function() {
