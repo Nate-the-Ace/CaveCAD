@@ -25,9 +25,10 @@
 // Inserting is ADDITIVE -- re-running never erases previous scans
 // (unlike the basemap and the contours, which replace themselves).
 // Each image is tagged SketchScan=<path relative to scans/> and lands
-// on CTRL-SCAN, scaled to sit over the survey at a sensible size, on
-// TOP of the draw order -- an underlay being aligned needs to be
-// visible; send it to back with Modify > Draw Order once traced.
+// on CTRL-SCAN, scaled to sit over the survey at a sensible size,
+// HALF FADED and at the BACK of the draw order, the basemap's
+// treatment: the scan is an underlay to trace over, and at full
+// strength on top it hid the very linework being drawn.
 //
 // "Insert & Align" hands the freshly inserted image, selected, to the
 // Align Image tool -- deferred through a zero-delay timer, because
@@ -111,6 +112,9 @@ SketchScans.imageFiles = function(folder) {
 
 // Hover-tooltip preview width; the in-dock pane scales to itself.
 SketchScans.PREVIEW_W = 420;
+// The inserted scan's fade, percent (0 = full strength). Half, the
+// basemap's value: an underlay must not out-shout the linework.
+SketchScans.FADE_PERCENT = 50;
 // The preview pane's STARTING height -- the user drags the splitter
 // for more or less, and the drag is remembered here:
 SketchScans.DOCK_PREVIEW_H = 240;
@@ -626,23 +630,39 @@ SketchScans.insert = function(doc, di, path, name) {
 
     var entity;
     try {
-        entity = new RImageEntity(doc, new RImageData(
+        var data = new RImageData(
             path,
             new RVector(centerX - (pxW * unitsPerPixel) / 2.0,
                 centerY - (pxH * unitsPerPixel) / 2.0),
             new RVector(unitsPerPixel, 0),
             new RVector(0, unitsPerPixel),
-            pxW, pxH, 0));
+            pxW, pxH, 0);
+        // Half faded, the basemap's treatment: at full strength the
+        // scan out-shouts the linework being traced over it. Fade
+        // survives the DXF round trip, and the property editor can
+        // still change it per image.
+        try {
+            data.setFade(SketchScans.FADE_PERCENT);
+        } catch (eFade) {
+            // an engine without setFade gets a full-strength scan
+        }
+        entity = new RImageEntity(doc, data);
     } catch (e) {
         warning("Sketch Scans: creating the image entity failed: " + e);
         return null;
     }
 
     CsLayers.ensure(doc, di, CsLayers.SCAN);
-    // Layer and tag BEFORE adding -- post-add writes fail silently in
-    // this bridge (see CsDraw.js's header).
+    // Layer, tag and draw order BEFORE adding -- post-add writes fail
+    // silently in this bridge (see CsDraw.js's header).
     entity.setLayerId(doc.getLayerId(CsLayers.SCAN));
     CsTags.set(entity, "SketchScan", name);
+    // To the very back, under the survey linework -- the basemap's
+    // call, one below getMinDrawOrder() because THIS entity is not in
+    // storage yet and a tie at the minimum is not documented to
+    // resolve in its favour. Without this the add operation's default
+    // lands new entities ON TOP of everything (verified live).
+    entity.setDrawOrder(doc.getStorage().getMinDrawOrder() - 1);
 
     // The new entity's id by set difference: queryAllEntities is not
     // insertion-ordered, and the script-side object is not guaranteed
