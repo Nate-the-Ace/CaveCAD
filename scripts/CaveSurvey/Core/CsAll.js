@@ -25,6 +25,9 @@ include(includeBasePath + "/CsShelf.js");
 // folder rows, collapse rules and collapsed-state settings format
 // behind Sketch Scans' list.
 include(includeBasePath + "/CsScanTree.js");
+// Pure walk-order + assigned-stations logic behind Align Image's
+// station assumption. Needs only a CsModel-shaped survey at call time.
+include(includeBasePath + "/CsStationOrder.js");
 include(includeBasePath + "/CsPackage.js");
 include(includeBasePath + "/CsGeoProject.js");
 include(includeBasePath + "/CsContour.js");

@@ -28,7 +28,15 @@
 //      A survey station you can also find in the drawing.
 //   3. "Click where STATION 1 goes in the drawing"
 //      The matching real station. You can also type coordinates
-//      (e.g. 152.4,300.2) and press Enter.
+//      (e.g. 152.4,300.2) and press Enter -- or type the station's
+//      NAME ("B1"): the point comes from the drawing's own plotted
+//      station, no click needed. From then on the tool ASSUMES the
+//      next station in survey order (branches follow their tie-in) --
+//      the prompt reads "STATION 2 = B2 -- Enter accepts, type
+//      another station name, or click in the drawing". Stations that
+//      already have a point on this scan (recorded on the image, tag
+//      AlignedStations) are skipped, so a half-aligned scan resumes
+//      where it left off.
 //   4. "Click STATION 2 on the image", then where it goes.
 //      As far from station 1 as you can manage: the farther apart, the
 //      more accurate the fit.
@@ -129,9 +137,10 @@
 // per-entity work, previews and undo.
 
 include("scripts/Modify/Transform.js");
-// CsLayers.frameOf: which view a layer belongs to. This tool warps a
-// PLAN onto a scan, and the elevation now lives in the same drawing.
-include(includeBasePath + "/../Core/CsLayers.js");
+// The whole Core: CsLayers.frameOf (which view a layer belongs to),
+// and for the station assumption CsTags.collectStations,
+// CsRevise.resolveAsDrawn and CsStationOrder.
+include(includeBasePath + "/../Core/CsAll.js");
 
 /**
  * \class AlignImage
@@ -156,6 +165,24 @@ function AlignImage(guiAction) {
     // objects this tool picked itself, so cancelling can un-pick them:
     this.pickedIds = [];
     this.hadSelection = false;
+
+    // Station assumption ("when I click, ask, but assume the next
+    // unentered station"): built lazily by stationContext() the first
+    // time a station name is typed. undefined = not tried yet,
+    // null = this drawing cannot support it (no tagged stations, or
+    // reconstruction failed) -- the tool is then exactly the manual
+    // tool it always was.
+    //   order    station names in survey walk order (CsStationOrder)
+    //   plotted  name -> RVector of the drawn station point
+    //   used     names already assigned -- the scan's AlignedStations
+    //            tag plus every pair completed this run
+    //   last     the most recent name-resolved station, the cursor the
+    //            walk advances from (manual clicks do not move it)
+    this.stationCtx = undefined;
+    // a name typed at the source prompt, overriding the next assumption:
+    this.assumeOverride = undefined;
+    // names resolved THIS run, for the AlignedStations tag on apply:
+    this.namedThisRun = [];
 }
 
 AlignImage.prototype = new Transform();
@@ -532,6 +559,107 @@ AlignImage.prototype.beginEvent = function() {
     }
 };
 
+/**
+ * The station-assumption context, built once per run and only when
+ * asked for. null when this drawing cannot support it -- no tagged
+ * station points, or the survey would not reconstruct (a legacy
+ * drawing) -- and every caller then falls back to the manual flow.
+ */
+AlignImage.prototype.stationContext = function() {
+    if (this.stationCtx !== undefined) {
+        return this.stationCtx;
+    }
+    this.stationCtx = null;
+    var doc = this.getDocument();
+    if (isNull(doc)) {
+        return null;
+    }
+    try {
+        var stations = CsTags.collectStations(doc);
+        if (stations.length === 0) {
+            return null;
+        }
+        var plotted = {};
+        for (var i = 0; i < stations.length; i++) {
+            plotted[stations[i].name] = stations[i].pos;
+        }
+        // The drawing's own survey, in notebook order -- the
+        // "fingerprint". This is what makes the walk follow a branch
+        // to its tie-in instead of counting on through the run.
+        var order = CsStationOrder.walkOrder(
+            CsRevise.resolveAsDrawn(doc).survey);
+        if (order.length === 0) {
+            return null;
+        }
+        var used = {};
+        var image = this.getSingleImage();
+        if (!isNull(image)) {
+            var assigned = CsStationOrder.parseAssigned(
+                CsTags.get(image, CsStationOrder.TAG));
+            for (var k = 0; k < assigned.length; k++) {
+                used[assigned[k]] = true;
+            }
+        }
+        this.stationCtx = {
+            order: order, plotted: plotted, used: used, last: null
+        };
+    } catch (e) {
+        this.stationCtx = null;
+    }
+    return this.stationCtx;
+};
+
+/**
+ * The station the NEXT pair should assume, or null: the typed override
+ * first, otherwise the walk's next unassigned plotted station.
+ */
+AlignImage.prototype.assumedStation = function() {
+    var ctx = this.stationContext();
+    if (ctx === null) {
+        return null;
+    }
+    if (this.assumeOverride !== undefined &&
+            ctx.used[this.assumeOverride] !== true) {
+        return this.assumeOverride;
+    }
+    var plottedNames = {};
+    for (var name in ctx.plotted) {
+        plottedNames[name] = true;
+    }
+    return CsStationOrder.nextUnassigned(
+        ctx.order, ctx.last, ctx.used, plottedNames);
+};
+
+/**
+ * Completes the pending pair at a NAMED station's plotted point --
+ * typed or assumed, this is the one way a name becomes a target. Moves
+ * the walk cursor to it.
+ */
+AlignImage.prototype.acceptStation = function(name) {
+    var ctx = this.stationContext();
+    if (ctx === null || isNull(this.pendingSource)) {
+        return false;
+    }
+    var pos = ctx.plotted[name];
+    if (pos === undefined) {
+        return false;
+    }
+    var di = this.getDocumentInterface();
+    this.pairs.push({ source: this.pendingSource, dest: pos });
+    this.pendingSource = undefined;
+    ctx.used[name] = true;
+    ctx.last = name;
+    this.assumeOverride = undefined;
+    this.namedThisRun.push(name);
+    if (!isNull(di)) {
+        di.setRelativeZero(pos);
+    }
+    EAction.handleUserMessage(
+        qsTr("Station %1 placed at its plotted point").arg(name));
+    this.setState(AlignImage.State.SettingSourcePoint);
+    return true;
+};
+
 AlignImage.prototype.initState = function() {
     var di = this.getDocumentInterface();
     if (isNull(di)) {
@@ -575,7 +703,22 @@ AlignImage.prototype.initState = function() {
     case AlignImage.State.SettingDestPoint:
         di.setClickMode(RAction.PickCoordinate);
         this.setAutoSnap();
-        this.setCommandPrompt(qsTr("Click where STATION %1 goes in the drawing").arg(station));
+        // With a walk standing, ask -- but assume the next unentered
+        // station. Assumptions only ever start once a first name has
+        // been typed (the seed), so a manual-only alignment never sees
+        // this prompt.
+        var assumed = (this.stationCtx !== undefined &&
+            this.stationCtx !== null) ? this.assumedStation() : null;
+        if (assumed !== null) {
+            this.setCommandPrompt(
+                qsTr("STATION %1 = %2 -- Enter accepts, type another " +
+                     "station name, or click in the drawing")
+                    .arg(station).arg(assumed));
+        } else {
+            this.setCommandPrompt(
+                qsTr("Click where STATION %1 goes in the drawing (or type its station name)")
+                    .arg(station));
+        }
         this.setLeftMouseTip(qsTr("Where station %1 goes").arg(station));
         this.setRightMouseTip(EAction.trBack);
         EAction.showSnapTools();
@@ -666,8 +809,15 @@ AlignImage.prototype.enterEvent = function() {
         break;
 
     case AlignImage.State.SettingDestPoint:
+        // Enter accepts the standing assumption, when there is one.
+        if (this.stationCtx !== undefined && this.stationCtx !== null) {
+            var assumed = this.assumedStation();
+            if (assumed !== null && this.acceptStation(assumed)) {
+                return;
+            }
+        }
         EAction.handleUserWarning(
-            qsTr("Click where that station goes in the drawing, or press Escape to take it back"));
+            qsTr("Click where that station goes in the drawing (or type its station name), or press Escape to take it back"));
         break;
 
     default:
@@ -682,6 +832,47 @@ AlignImage.prototype.enterEvent = function() {
  */
 AlignImage.prototype.commandEvent = function(event) {
     var cmd = event.getCommand().toLowerCase();
+
+    // An EXACT station name wins over everything -- typed at the
+    // target prompt it completes the pair at that station's plotted
+    // point; typed at the image prompt it seeds or re-aims the next
+    // assumption ("type it once, then auto-advance").
+    if (cmd.length > 0 &&
+            this.state !== AlignImage.State.SelectingEntities) {
+        var ctx = this.stationContext();
+        if (ctx !== null) {
+            var typedRaw = event.getCommand();
+            var match = null;
+            for (var name in ctx.plotted) {
+                if (name === typedRaw || name.toLowerCase() === cmd) {
+                    match = name;
+                    if (name === typedRaw) { break; }
+                }
+            }
+            if (match !== null) {
+                if (this.state === AlignImage.State.SettingDestPoint) {
+                    if (ctx.used[match] === true) {
+                        EAction.handleUserWarning(
+                            qsTr("Station %1 already has a point on this scan").arg(match));
+                        event.accept();
+                        return;
+                    }
+                    if (this.acceptStation(match)) {
+                        event.accept();
+                        return;
+                    }
+                }
+                else {
+                    this.assumeOverride = match;
+                    ctx.last = null;   // the override seeds the walk
+                    EAction.handleUserMessage(
+                        qsTr("Next station: %1").arg(match));
+                    event.accept();
+                    return;
+                }
+            }
+        }
+    }
 
     if (cmd.length > 0) {
         if (qsTr("noscale").startsWith(cmd)) {
@@ -998,9 +1189,60 @@ AlignImage.prototype.applyAlign = function() {
         return;
     }
 
+    // Resolve the image BEFORE the transform applies -- the operation
+    // can drop the selection, and the tag write below re-queries by id.
+    var imageForTag = this.getSingleImage();
+
     di.applyOperation(op);
+    this.recordAssignedStations(di,
+        isNull(imageForTag) ? RObject.INVALID_ID : imageForTag.getId());
     this.reportResult(fit);
     this.terminate();
+};
+
+/**
+ * Unions the stations name-resolved this run into the scan's
+ * AlignedStations tag, so a later session resumes the walk past them
+ * ("the next station WITHOUT an assigned point on the survey scan").
+ * Only an aligned image is tagged -- aligning plain linework leaves no
+ * record. A separate small operation AFTER the transform: the
+ * transform op came from stock Transform machinery, and the tag write
+ * must not depend on its internals.
+ */
+AlignImage.prototype.recordAssignedStations = function(di, imageId) {
+    if (this.namedThisRun.length === 0 ||
+            imageId === RObject.INVALID_ID) {
+        return;
+    }
+    try {
+        var image = this.getDocument().queryEntity(imageId);
+        if (isNull(image)) {
+            return;
+        }
+        var names = CsStationOrder.parseAssigned(
+            CsTags.get(image, CsStationOrder.TAG));
+        var seen = {};
+        var i;
+        for (i = 0; i < names.length; i++) {
+            seen[names[i]] = true;
+        }
+        for (i = 0; i < this.namedThisRun.length; i++) {
+            if (seen[this.namedThisRun[i]] !== true) {
+                seen[this.namedThisRun[i]] = true;
+                names.push(this.namedThisRun[i]);
+            }
+        }
+        CsTags.set(image, CsStationOrder.TAG,
+            CsStationOrder.serializeAssigned(names));
+        var op = new RModifyObjectsOperation();
+        op.setText("Record aligned stations");
+        // false: keeps the entity on the layer it is already on
+        op.addObject(image, false);
+        di.applyOperation(op);
+    } catch (e) {
+        // the alignment itself succeeded; losing the record only means
+        // the walk offers those stations again next time
+    }
 };
 
 /**

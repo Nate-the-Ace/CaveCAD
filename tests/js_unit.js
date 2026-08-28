@@ -114,6 +114,7 @@ var CORE_FILES = [
     "scripts/CaveSurvey/Core/CsCave.js",
     "scripts/CaveSurvey/Core/CsShelf.js",
     "scripts/CaveSurvey/Core/CsScanTree.js",
+    "scripts/CaveSurvey/Core/CsStationOrder.js",
     "scripts/CaveSurvey/Core/CsPackage.js",
     "scripts/CaveSurvey/Core/CsGeoProject.js",
     "scripts/CaveSurvey/Core/CsContour.js",
@@ -9347,6 +9348,72 @@ if (!IS_NODE) {
         "first, deterministically");
     ok(CsCave.compareNatural("same", "same") === 0,
         "compareNatural: equal strings compare equal");
+}());
+
+// ---------------------------------------------------------------------
+// CsStationOrder -- the walk order behind Align Image's station
+// assumption. Pure, so it runs under node too.
+//
+// The survey's own shot order IS the order stations get visited in --
+// name sequence (B4 -> B5) walks straight past the tie-in where a
+// branch run starts. First-appearance over the legs follows the
+// notebook: after B4 comes C1 exactly when the survey went there next.
+// ---------------------------------------------------------------------
+
+(function() {
+    // A-run, then a C-run TYING IN at A2 -- the branch case Nathan
+    // called out -- plus a splay that must not become a station.
+    var sv = CsModel.newSurvey();
+    sv.shots.push(shotOf("A1", "A2", 10, 0));
+    sv.shots.push(shotOf("A2", "A3", 10, 0));
+    var splay = shotOf("A3", "", 3, 90);
+    splay.splay = true;
+    sv.shots.push(splay);
+    sv.shots.push(shotOf("A2", "C1", 8, 90));   // the tie-in
+    sv.shots.push(shotOf("C1", "C2", 8, 90));
+
+    var order = CsStationOrder.walkOrder(sv);
+    eqs(order.join(","), "A1,A2,A3,C1,C2",
+        "walkOrder: first-appearance over legs, splays skipped, the " +
+        "branch follows its tie-in");
+
+    var plotted = { A1: true, A2: true, A3: true, C1: true, C2: true };
+
+    eqs(CsStationOrder.nextUnassigned(order, "A1", {}, plotted), "A2",
+        "nextUnassigned: the plain next station");
+    eqs(CsStationOrder.nextUnassigned(order, "A3", {}, plotted), "C1",
+        "nextUnassigned: after the run's last station comes the branch");
+    eqs(CsStationOrder.nextUnassigned(order, "A1", { A2: true, A3: true },
+            plotted), "C1",
+        "nextUnassigned: already-assigned stations are skipped");
+    eqs(CsStationOrder.nextUnassigned(order, "A1", {},
+            { A1: true, A3: true }), "A3",
+        "nextUnassigned: a station with no plotted point cannot be a " +
+        "target");
+    ok(CsStationOrder.nextUnassigned(order, "C2", {}, plotted) === null,
+        "nextUnassigned: the walk runs dry at the end");
+    eqs(CsStationOrder.nextUnassigned(order, null, {}, plotted), "A1",
+        "nextUnassigned: no seed starts at the beginning");
+    ok(CsStationOrder.nextUnassigned(order, "nowhere", {}, plotted) === null,
+        "nextUnassigned: an unknown seed matches nothing");
+
+    // The AlignedStations tag: bounded, round-trips, drops OLDEST on
+    // overflow (dxflib's 1024 chars/line -- no unbounded tag, ever).
+    var back = CsStationOrder.parseAssigned(
+        CsStationOrder.serializeAssigned(["A1", "A2", "C1"]));
+    eqs(back.join(","), "A1,A2,C1", "assigned tag round-trips");
+    ok(CsStationOrder.parseAssigned("").length === 0 &&
+       CsStationOrder.parseAssigned(null).length === 0,
+        "no tag reads as nothing assigned");
+
+    var many = [];
+    for (var i = 0; i < 400; i++) { many.push("STN" + i); }
+    var capped = CsStationOrder.serializeAssigned(many);
+    ok(capped.length <= 800,
+        "assigned tag serializes under the 800-char cap");
+    var kept = CsStationOrder.parseAssigned(capped);
+    eqs(kept[kept.length - 1], "STN399",
+        "the cap drops the OLDEST names, never the newest");
 }());
 
 // ---------------------------------------------------------------------
