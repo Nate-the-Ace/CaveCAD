@@ -109,9 +109,12 @@ SketchScans.imageFiles = function(folder) {
     return out;
 };
 
-// Hover-tooltip preview width; the in-dock pane scales to the panel.
+// Hover-tooltip preview width; the in-dock pane scales to itself.
 SketchScans.PREVIEW_W = 420;
+// The preview pane's STARTING height -- the user drags the splitter
+// for more or less, and the drag is remembered here:
 SketchScans.DOCK_PREVIEW_H = 240;
+SketchScans.SETTING_SPLIT = "CaveSurvey/SketchScansSplitterSizes";
 
 // The collapsed set for one cave's scans folder, from settings.
 // A bridge without RSettings starts fully expanded.
@@ -201,16 +204,55 @@ SketchScans.buildDock = function(appWin) {
         w.list.editTriggers = QAbstractItemView.NoEditTriggers;
     } catch (eList) {
     }
-    layout.addWidget(w.list, 1, 0);
 
     w.preview = new QLabel("");
     try {
-        w.preview.minimumHeight = SketchScans.DOCK_PREVIEW_H;
-        w.preview.maximumHeight = SketchScans.DOCK_PREVIEW_H;
+        w.preview.minimumHeight = 40;
         w.preview.alignment = Qt.AlignCenter;
     } catch (ePrev) {
     }
-    layout.addWidget(w.preview, 0, 0);
+
+    // List over preview on a draggable splitter, so the preview is
+    // whatever size the user wants it -- the drag is remembered, the
+    // same way the Survey Notebook remembers its page/status split.
+    w.splitter = new QSplitter(Qt.Vertical);
+    w.splitter.addWidget(w.list);
+    w.splitter.addWidget(w.preview);
+    try {
+        w.splitter.setStretchFactor(0, 3); // the list gets the growth
+        w.splitter.setStretchFactor(1, 1);
+    } catch (eSf) {
+        // cosmetic
+    }
+    try {
+        var savedSplit = RSettings.getStringValue(
+            SketchScans.SETTING_SPLIT, "");
+        var splitSizes = [];
+        if (savedSplit.length > 0) {
+            var splitParts = savedSplit.split(",");
+            for (var si = 0; si < splitParts.length; si++) {
+                splitSizes.push(parseInt(splitParts[si], 10));
+            }
+        }
+        if (splitSizes.length === 2 &&
+                !isNaN(splitSizes[0]) && !isNaN(splitSizes[1])) {
+            w.splitter.setSizes(splitSizes);
+        } else {
+            w.splitter.setSizes([10000, SketchScans.DOCK_PREVIEW_H]);
+        }
+        w.splitter.splitterMoved.connect(function() {
+            try {
+                RSettings.setValue(SketchScans.SETTING_SPLIT,
+                    w.splitter.sizes().join(","));
+            } catch (eSave) {
+            }
+            // the pane changed size under the picture: rescale it
+            SketchScans.showPreview();
+        });
+    } catch (eSplit) {
+        // bridge without sizes()/setSizes(): stretch factors stand
+    }
+    layout.addWidget(w.splitter, 1, 0);
 
     var buttons = new QHBoxLayout();
     w.refreshButton = new QPushButton(qsTr("Refresh"));
@@ -255,12 +297,12 @@ SketchScans.buildDock = function(appWin) {
                 w.preview.text = qsTr("unreadable image");
                 return;
             }
-            // Scale to the panel's actual width -- a dock is narrower
-            // than the old dialog, and the user resizes it at will.
+            // Scale to the pane's ACTUAL size -- the user sets it with
+            // the splitter handle and by resizing the dock.
             var paneW = Math.max(120, w.preview.width - 8);
-            w.preview.setPixmap(pixmap.scaled(paneW,
-                SketchScans.DOCK_PREVIEW_H - 8, Qt.KeepAspectRatio,
-                Qt.SmoothTransformation));
+            var paneH = Math.max(32, w.preview.height - 8);
+            w.preview.setPixmap(pixmap.scaled(paneW, paneH,
+                Qt.KeepAspectRatio, Qt.SmoothTransformation));
         } catch (e) {
             w.preview.text = qsTr("unreadable image");
         }
