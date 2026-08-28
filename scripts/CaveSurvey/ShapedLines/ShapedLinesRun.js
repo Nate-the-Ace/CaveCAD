@@ -199,18 +199,20 @@ ShapedLinesRun.prototype.commit = function() {
         return;
     }
 
-    // Plan frame only -- the five layers are plan linework, and a ledge
-    // drawn up in the elevation would land on a plan layer and pollute
-    // the plan's data window (planDataBox). Same refusal FeatureTrace
-    // gives, same reason.
+    // ONE button, both views: the stroke's LOCATION decides whether
+    // this is plan or elevation linework (the band bounding boxes'
+    // whole purpose -- see CsProfileBox), and the layers route to the
+    // frame's own family so a ledge drawn in the elevation never
+    // counts toward the plan's data window. Only a stroke CROSSING
+    // between the frames is refused -- it describes nothing in either.
     var pathFrame = CsTrace.pathFrame(this.region, this.samples);
-    if (pathFrame !== "plan") {
-        EAction.handleUserMessage(qsTr("%1 draws in the PLAN view; that " +
-            "stroke was in the %2 frame. Nothing was drawn.")
-            .arg(spec.label).arg(pathFrame === null ? qsTr("crossing")
-                : pathFrame));
+    if (pathFrame === null) {
+        EAction.handleUserMessage(qsTr("%1: that stroke crossed between " +
+            "the plan and the elevation. Nothing was drawn -- draw " +
+            "within one view.").arg(spec.label));
         return;
     }
+    var frameLayers = CsShapeLine.layersFor(spec, pathFrame);
 
     var perFoot = CsShapeLine.perFoot(doc);
     var spacing = perFoot * ShapedLinesRun.INTERVAL_FEET;
@@ -251,17 +253,20 @@ ShapedLinesRun.prototype.commit = function() {
         }
     }
 
-    CsLayers.ensure(doc, di, spec.spineLayer);
-    CsLayers.ensure(doc, di, spec.decorLayer);
-    spine.setLayerId(doc.getLayerId(spec.spineLayer));
+    CsLayers.ensure(doc, di, frameLayers.spine);
+    CsLayers.ensure(doc, di, frameLayers.decor);
+    spine.setLayerId(doc.getLayerId(frameLayers.spine));
 
     // Tag BEFORE adding (the CalloutWrite lesson: the add is then the
     // ONLY operation that writes this entity, tags included, so undo
-    // is atomic and nothing survives half-tagged).
+    // is atomic and nothing survives half-tagged). The frame rides on
+    // the spine so every regeneration keeps drawing into the family
+    // the stroke chose, even after the spine is dragged around.
     CsTags.set(spine, CsShapeLine.KEY.ID, CsUuid.v4());
     CsTags.set(spine, CsShapeLine.KEY.STYLE, this.styleKey);
     CsTags.set(spine, CsShapeLine.KEY.SIDE, String(side));
     CsTags.set(spine, CsShapeLine.KEY.SCALE, "1");
+    CsTags.set(spine, CsShapeLine.KEY.FRAME, pathFrame);
 
     var built = CsShapeLine.buildDecor(doc, spine);
     if (isNull(built)) {
@@ -273,8 +278,8 @@ ShapedLinesRun.prototype.commit = function() {
 
     var before = doc.queryAllEntities(false, true).length;
     var that = this;
-    CsLayers.withLayerOn(doc, di, spec.spineLayer, function() {
-        CsLayers.withLayerOn(doc, di, spec.decorLayer, function() {
+    CsLayers.withLayerOn(doc, di, frameLayers.spine, function() {
+        CsLayers.withLayerOn(doc, di, frameLayers.decor, function() {
             var op = new RAddObjectsOperation();
             op.setText(spec.label);
             op.addObject(spine, false);
@@ -289,7 +294,7 @@ ShapedLinesRun.prototype.commit = function() {
     if (after <= before) {
         EAction.handleUserMessage(qsTr("Nothing was drawn: layer %1 or " +
             "%2 refused the add (locked or frozen?).")
-            .arg(spec.spineLayer).arg(spec.decorLayer));
+            .arg(frameLayers.spine).arg(frameLayers.decor));
         return;
     }
     EAction.handleUserMessage(qsTr("%1: %2 decoration entities along " +

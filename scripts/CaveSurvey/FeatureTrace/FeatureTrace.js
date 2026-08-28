@@ -198,7 +198,20 @@ FeatureTrace.toleranceFraction = function() {
 /** The combo entry meaning "no run: use the shared layer". */
 FeatureTrace.RUN_SHARED = "(all runs)";
 
+/** The combo entry meaning "read the run off WHERE the stroke lies" --
+ *  the band bounding boxes (CsProfileBox) answer at commit time. The
+ *  DEFAULT since the boxes exist: the caver traces inside the band
+ *  they are working on anyway, so asking them to also say so in a
+ *  combo was a second statement of the same fact. */
+FeatureTrace.RUN_AUTO = "(by location)";
+
 /** The run token the panel has selected, or null for the shared layer.
+ *
+ *  AUTO also answers null here, deliberately: every existing caller of
+ *  this function (variant resolution at arm time, isolation) wants "a
+ *  specific run the caver named", and in auto mode there is none until
+ *  a stroke exists -- FeatureTraceRun.commit resolves it then, from
+ *  the stroke itself.
  *
  *  Sanitised on the way out so the panel and the layer name can never
  *  disagree about what run "a" means. */
@@ -209,12 +222,28 @@ FeatureTrace.runToken = function() {
     }
     try {
         var text = String(w.runCombo.currentText);
-        if (text === FeatureTrace.RUN_SHARED) {
+        if (text === FeatureTrace.RUN_SHARED ||
+                text === FeatureTrace.RUN_AUTO) {
             return null;
         }
         return CsLayerVariants.sanitize(text);
     } catch (e) {
         return null;
+    }
+};
+
+/** True when the run should be read off the stroke's location. Also
+ *  true with NO PANEL AT ALL: a drag action running standalone has
+ *  nobody to name a run, and location is the only voice left. */
+FeatureTrace.runIsAuto = function() {
+    var w = FeatureTrace.widgets;
+    if (isNull(w) || isNull(w.runCombo)) {
+        return true;
+    }
+    try {
+        return String(w.runCombo.currentText) === FeatureTrace.RUN_AUTO;
+    } catch (e) {
+        return true;
     }
 };
 
@@ -347,6 +376,9 @@ FeatureTrace.refreshRuns = function(docIn) {
         var runs = isNull(doc) ? [] : CsProfileDraw.runsIn(doc);
         var was = String(w.runCombo.currentText);
         w.runCombo.clear();
+        // AUTO first, so index 0 -- the default a fresh combo lands
+        // on -- is "read the run off the stroke's location".
+        w.runCombo.addItem(FeatureTrace.RUN_AUTO);
         w.runCombo.addItem(FeatureTrace.RUN_SHARED);
         for (var i = 0; i < runs.length; i++) {
             w.runCombo.addItem(runs[i]);

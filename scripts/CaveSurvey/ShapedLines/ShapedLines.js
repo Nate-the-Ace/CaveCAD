@@ -136,10 +136,20 @@ ShapedLines.dressOne = function(doc, di, entity, opts, group) {
         side = CsShapeLine.inwardSide(probe.points) * (opts.side === -1 ? -1 : 1);
     }
 
+    // Which FRAME the entity's geometry sits in decides which layer
+    // family the decoration joins -- the caver's entity itself stays
+    // where it is, so its layer name proves nothing (a profile sketch
+    // on layer "0" is ordinary). Location is the evidence: the band
+    // boxes first, the derived region as the fallback (opts.region is
+    // the caller's cached CsTrace.profileRegion).
+    var mid = probe.points[Math.floor(probe.points.length / 2)];
+    var frame = CsProfileBox.frameAt(doc, opts.region || null, mid);
+
     CsTags.set(entity, CsShapeLine.KEY.ID, CsUuid.v4());
     CsTags.set(entity, CsShapeLine.KEY.STYLE, opts.styleKey);
     CsTags.set(entity, CsShapeLine.KEY.SIDE, String(side));
     CsTags.set(entity, CsShapeLine.KEY.SCALE, String(opts.scale));
+    CsTags.set(entity, CsShapeLine.KEY.FRAME, frame);
     var mod = new RModifyObjectsOperation();
     mod.addObject(entity, false);
     if (group >= 0) {
@@ -191,6 +201,13 @@ ShapedLines.prototype.beginEvent = function() {
     if (opts === null) {
         this.terminate();
         return;
+    }
+    // Cached once for the whole selection: profileRegion walks every
+    // entity in the drawing, and dressOne asks per entity.
+    try {
+        opts.region = CsTrace.profileRegion(doc);
+    } catch (eRegion) {
+        opts.region = null;
     }
 
     var group = doc.getTransactionGroup() + 1;

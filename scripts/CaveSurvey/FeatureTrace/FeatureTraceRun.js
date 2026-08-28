@@ -125,6 +125,17 @@ FeatureTraceRun.runToken = function() {
     return null;
 };
 
+/** Whether the run should come from the stroke's location -- the
+ *  panel's combo says, and NO panel at all means auto (a standalone
+ *  drag has nobody else to name a run). */
+FeatureTraceRun.runIsAuto = function() {
+    if (typeof FeatureTrace !== "undefined" &&
+            !isNull(FeatureTrace.runIsAuto)) {
+        return FeatureTrace.runIsAuto();
+    }
+    return true;
+};
+
 /** The panel's sample interval in feet, or 1.0 without a panel.
  *  Every panel read goes through a helper like this so the drag action
  *  works standalone -- it is usable before the panel exists and if the
@@ -368,6 +379,35 @@ FeatureTraceRun.prototype.commit = function() {
                 "that run is in the %3 frame. Nothing was drawn.")
                 .arg(layerName).arg(wantFrame).arg(pathFrame));
             return;
+        }
+    }
+
+    // In auto mode the RUN is read off the stroke itself: every sample
+    // inside one band's bounding box names that band's run, and the
+    // trace lands on that run's variant layer -- the combo's manual
+    // choice already happened inside targetLayer above when the caver
+    // named a run instead. A stroke outside every box (or crossing
+    // between boxes) stays on the shared base layer rather than
+    // guessing. The CURRENT_LAYER escape hatch is exempt exactly as it
+    // is from the frame guard: its layer is whatever the caver chose.
+    if (pathFrame === "profile" &&
+            CsLayers.frameOf(layerName) === "profile" &&
+            FeatureTraceRun.runIsAuto() &&
+            (typeof FeatureTrace === "undefined" ||
+                FeatureTrace.target !== FeatureTrace.CURRENT_LAYER)) {
+        try {
+            var autoRun = CsProfileBox.runForPath(
+                CsProfileBox.boxes(doc), this.samples);
+            if (autoRun !== null) {
+                var autoVariant = CsLayerVariants.nameFor(layerName,
+                    autoRun);
+                if (autoVariant !== null) {
+                    layerName = autoVariant;
+                }
+            }
+        } catch (eAuto) {
+            // location could not answer: the shared layer is always a
+            // safe place for the work to land
         }
     }
 

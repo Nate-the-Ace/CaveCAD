@@ -64,6 +64,8 @@ include(includeBasePath + "/CsTags.js");
 // After CsLayers (STYLES reads layer constants at eval time), CsTrace
 // (spacingFor) and CsTags (spine/decor tag IO).
 include(includeBasePath + "/CsShapeLine.js");
+// After CsTags (reads ProfileBox tags) and CsTrace (region fallback).
+include(includeBasePath + "/CsProfileBox.js");
 // CsBind before CsDraw: eraseStations calls CsBind's suffix strippers,
 // so the erase rules and the binding index cannot disagree about which
 // station a tip name belongs to.

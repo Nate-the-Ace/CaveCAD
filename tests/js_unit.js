@@ -14540,22 +14540,40 @@ if (!IS_NODE) {
             FeatureTrace.widgets = { runCombo: combo };
 
             FeatureTrace.refreshRuns(d);
-            eqs(items.length, 4,
-                "FeatureTrace.refreshRuns: the shared entry plus three runs");
-            eqs(items[0], FeatureTrace.RUN_SHARED,
-                "FeatureTrace.refreshRuns: shared entry first");
-            eqs(items[1], "A", "FeatureTrace.refreshRuns: A listed");
-            eqs(items[2], "M", "FeatureTrace.refreshRuns: M listed");
-            eqs(items[3], "SINK",
+            eqs(items.length, 5,
+                "FeatureTrace.refreshRuns: auto + shared + three runs");
+            eqs(items[0], FeatureTrace.RUN_AUTO,
+                "FeatureTrace.refreshRuns: auto entry first -- the default " +
+                "a fresh combo lands on is by-location");
+            eqs(items[1], FeatureTrace.RUN_SHARED,
+                "FeatureTrace.refreshRuns: shared entry second");
+            eqs(items[2], "A", "FeatureTrace.refreshRuns: A listed");
+            eqs(items[3], "M", "FeatureTrace.refreshRuns: M listed");
+            eqs(items[4], "SINK",
                 "FeatureTrace.refreshRuns: a multi-letter run listed too");
 
             // Selection survives a refresh, so re-scanning cannot
             // silently re-aim a caver mid-job.
             combo.currentText = "M";
             FeatureTrace.refreshRuns(d);
-            eqs(combo.currentIndex, 2,
+            eqs(combo.currentIndex, 3,
                 "FeatureTrace.refreshRuns: the chosen run stays chosen");
+
+            // The auto entry: runToken answers null (no run NAMED),
+            // runIsAuto answers true -- and a manual run answers false.
+            combo.currentText = FeatureTrace.RUN_AUTO;
+            ok(FeatureTrace.runToken() === null,
+                "FeatureTrace.runToken: auto names no run");
+            ok(FeatureTrace.runIsAuto() === true,
+                "FeatureTrace.runIsAuto: auto mode reads true");
+            combo.currentText = "M";
+            ok(FeatureTrace.runIsAuto() === false,
+                "FeatureTrace.runIsAuto: a named run reads false");
+            ok(FeatureTrace.runToken() === "M",
+                "FeatureTrace.runToken: a named run still resolves");
             FeatureTrace.widgets = undefined;
+            ok(FeatureTrace.runIsAuto() === true,
+                "FeatureTrace.runIsAuto: no panel at all defaults to auto");
         }());
 
         // -- changing the run hot-swaps an isolated view -------------
@@ -17658,6 +17676,69 @@ function syntheticTiff(w, h, floats) {
 })();
 
 // ---------------------------------------------------------------------
+// Step 2 of the bounding-box plan: frame/run by LOCATION. Pure halves
+// of CsProfileBox, and CsShapeLine's frame-aware layer routing.
+// ---------------------------------------------------------------------
+
+(function() {
+    loadRepoScript("scripts/CaveSurvey/Core/CsLayers.js");
+    loadRepoScript("scripts/CaveSurvey/Core/CsShapeLine.js");
+    loadRepoScript("scripts/CaveSurvey/Core/CsProfileBox.js");
+
+    // Every layer a style names has a profile twin, every twin is a
+    // registry layer, and every twin classifies as PROFILE frame --
+    // the whole point is that elevation ink never counts as plan ink.
+    for (var key in CsShapeLine.STYLES) {
+        if (!CsShapeLine.STYLES.hasOwnProperty(key)) {
+            continue;
+        }
+        var spec = CsShapeLine.STYLES[key];
+        var twins = CsShapeLine.layersFor(spec, "profile");
+        ok(twins.spine !== spec.spineLayer || twins.decor !== spec.decorLayer,
+            "layersFor: " + key + " has a distinct profile family");
+        ok(CsLayers.DEFAULTS[twins.spine] !== undefined,
+            "layersFor: " + key + "'s profile spine layer is registered");
+        ok(CsLayers.DEFAULTS[twins.decor] !== undefined,
+            "layersFor: " + key + "'s profile decor layer is registered");
+        ok(CsLayers.frameOf(twins.spine) === "profile",
+            "layersFor: " + key + "'s profile spine classifies as profile");
+        ok(CsLayers.frameOf(twins.decor) === "profile",
+            "layersFor: " + key + "'s profile decor classifies as profile");
+        var plan = CsShapeLine.layersFor(spec, "plan");
+        ok(plan.spine === spec.spineLayer && plan.decor === spec.decorLayer,
+            "layersFor: " + key + "'s plan family is the STYLES entry itself");
+    }
+    ok(CsLayers.OFF["CTRL-PROFILE-SHAPE-SPINE"] === true,
+        "the profile spine skeleton is created switched off, like the plan one");
+
+    // CsProfileBox point tests are pure given a boxes array.
+    var boxes = [
+        { key: "A", minX: 0, minY: 100, maxX: 200, maxY: 160 },
+        { key: "B", minX: 0, minY: 0, maxX: 200, maxY: 80 }
+    ];
+    ok(CsProfileBox.at(boxes, { x: 50, y: 130 }) === "A",
+        "at: a point inside A's box answers A");
+    ok(CsProfileBox.at(boxes, { x: 50, y: 40 }) === "B",
+        "at: a point inside B's box answers B");
+    ok(CsProfileBox.at(boxes, { x: 50, y: 90 }) === null,
+        "at: the space between boxes answers null");
+    ok(CsProfileBox.at(boxes, { x: 200, y: 40 }) === "B",
+        "at: a point exactly on the edge is inside");
+
+    ok(CsProfileBox.runForPath(boxes,
+        [{ x: 10, y: 120 }, { x: 100, y: 150 }, { x: 190, y: 110 }]) === "A",
+        "runForPath: a stroke wholly inside one box names its run");
+    ok(CsProfileBox.runForPath(boxes,
+        [{ x: 10, y: 120 }, { x: 10, y: 40 }]) === null,
+        "runForPath: a stroke crossing two boxes names nothing");
+    ok(CsProfileBox.runForPath(boxes,
+        [{ x: 10, y: 120 }, { x: 10, y: 90 }]) === null,
+        "runForPath: a stroke leaving every box names nothing");
+    ok(CsProfileBox.runForPath(boxes, []) === null,
+        "runForPath: an empty path names nothing");
+})();
+
+// ---------------------------------------------------------------------
 // CsShapeLine -- engine half: sampling every entity type, decorate,
 // reconcile. QCAD only (RDocument fixtures).
 // ---------------------------------------------------------------------
@@ -17877,6 +17958,53 @@ if (!IS_NODE) {
             "decorate: the chain lands on FLOWSTONE");
         ok(Math.abs(decorC[0].getData().getBulgeAt(0) - 0.5) < 1e-9,
             "decorate: the chain carries the style's bulge");
+
+        // --- step 2: ShapeFrame routes the decor's layer family ---
+        loadRepoScript("scripts/CaveSurvey/Core/CsProfileBox.js");
+
+        CsLayers.ensure(doc, di, CsLayers.PROFILE_FLOWSTONE);
+        var spineP = new RLineEntity(doc, new RLineData(
+            new RVector(0, -100), new RVector(30, -100)));
+        spineP.setLayerId(doc.getLayerId(CsLayers.LEDGE_FLOOR));
+        var sidP = CsUuid.v4();
+        CsTags.set(spineP, CsShapeLine.KEY.ID, sidP);
+        CsTags.set(spineP, CsShapeLine.KEY.STYLE, "flowstone");
+        CsTags.set(spineP, CsShapeLine.KEY.SIDE, "1");
+        CsTags.set(spineP, CsShapeLine.KEY.FRAME, "profile");
+        var addP = new RAddObjectsOperation();
+        addP.addObject(spineP, false);
+        di.applyOperation(addP);
+        ok(CsShapeLine.decorate(doc, di, spineP, null) === "decorated",
+            "decorate: a profile-frame spine decorates");
+        var decorP = CsShapeLine.decorOf(doc, sidP);
+        ok(decorP.length === 1 &&
+           doc.getLayerName(decorP[0].getLayerId()) ===
+               CsLayers.PROFILE_FLOWSTONE,
+            "decorate: ShapeFrame=profile lands the chain on " +
+            "PROFILE-FLOWSTONE, not the plan layer");
+
+        // --- step 2: CsProfileBox.boxes reads the drawn rectangles ---
+        var boxPl = new RPolyline();
+        boxPl.appendVertex(new RVector(0, -220), 0);
+        boxPl.appendVertex(new RVector(100, -220), 0);
+        boxPl.appendVertex(new RVector(100, -180), 0);
+        boxPl.appendVertex(new RVector(0, -180), 0);
+        boxPl.setClosed(true);
+        var boxEnt = new RPolylineEntity(doc, new RPolylineData(boxPl));
+        boxEnt.setLayerId(doc.getLayerId("0"));
+        CsTags.set(boxEnt, "ProfileBox", "Q");
+        var addBox = new RAddObjectsOperation();
+        addBox.addObject(boxEnt, false);
+        di.applyOperation(addBox);
+        var readBoxes = CsProfileBox.boxes(doc);
+        ok(readBoxes.length === 1 && readBoxes[0].key === "Q" &&
+           Math.abs(readBoxes[0].minY + 220) < 1e-9,
+            "CsProfileBox.boxes: reads a tagged rectangle back with " +
+            "its key and bounds");
+        ok(CsProfileBox.frameAt(doc, null, { x: 50, y: -200 }) === "profile",
+            "frameAt: inside a band box is the profile frame");
+        ok(CsProfileBox.frameAt(doc, null, { x: 50, y: 500 }) === "plan",
+            "frameAt: outside every box with no region falls back to plan");
     })();
 }
 

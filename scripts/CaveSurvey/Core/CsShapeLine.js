@@ -33,7 +33,49 @@ CsShapeLine.KEY = {
     SIDE: "ShapeSide",
     SCALE: "ShapeScale",
     SIG: "ShapeSig",
-    DECOR: "ShapeDecor"
+    DECOR: "ShapeDecor",
+    FRAME: "ShapeFrame"
+};
+
+/**
+ * The profile-frame twin of every layer a style names. ONE mapping,
+ * consulted by layersFor below -- the same buttons draw both views,
+ * and which family a feature belongs to is decided by WHERE the stroke
+ * landed (CsProfileBox), recorded on the spine as ShapeFrame so a
+ * regeneration never re-litigates it from geometry that may since
+ * have been dragged.
+ */
+CsShapeLine.PROFILE_TWIN = {};
+CsShapeLine.PROFILE_TWIN[CsLayers.LEDGE_FLOOR] = CsLayers.PROFILE_LEDGE_FLOOR;
+CsShapeLine.PROFILE_TWIN[CsLayers.LEDGE_CEILING] =
+    CsLayers.PROFILE_LEDGE_CEILING;
+CsShapeLine.PROFILE_TWIN[CsLayers.FLOWSTONE] = CsLayers.PROFILE_FLOWSTONE;
+CsShapeLine.PROFILE_TWIN[CsLayers.RIMSTONE] = CsLayers.PROFILE_RIMSTONE;
+CsShapeLine.PROFILE_TWIN[CsLayers.SLOPE] = CsLayers.PROFILE_SLOPE;
+CsShapeLine.PROFILE_TWIN[CsLayers.SHAPE_SPINE] =
+    CsLayers.PROFILE_SHAPE_SPINE;
+
+/** A style's spine/decor layers for a frame: the STYLES entry's own
+ *  layers in the plan, their PROFILE_TWIN in the elevation. */
+CsShapeLine.layersFor = function(spec, frame) {
+    if (frame === "profile") {
+        return {
+            spine: CsShapeLine.PROFILE_TWIN[spec.spineLayer] ||
+                spec.spineLayer,
+            decor: CsShapeLine.PROFILE_TWIN[spec.decorLayer] ||
+                spec.decorLayer
+        };
+    }
+    return { spine: spec.spineLayer, decor: spec.decorLayer };
+};
+
+/** The frame a spine was created in, off its ShapeFrame tag. A spine
+ *  from before the tag existed answers "plan" -- exactly what every
+ *  such spine is, because the draw tools refused profile strokes
+ *  until the tag shipped. */
+CsShapeLine.frameOfSpine = function(spine) {
+    return (CsTags.get(spine, CsShapeLine.KEY.FRAME) === "profile")
+        ? "profile" : "plan";
 };
 
 /**
@@ -653,7 +695,9 @@ CsShapeLine.buildDecor = function(doc, spine) {
     var prims = CsShapeLine.prims(sample.points, sample.closed, spec,
         side, spacing, size);
     var sid = CsTags.get(spine, CsShapeLine.KEY.ID);
-    var layerId = doc.getLayerId(spec.decorLayer);
+    var decorLayer = CsShapeLine.layersFor(spec,
+        CsShapeLine.frameOfSpine(spine)).decor;
+    var layerId = doc.getLayerId(decorLayer);
 
     var entities = [];
     var i;
@@ -686,7 +730,7 @@ CsShapeLine.buildDecor = function(doc, spine) {
         entities: entities,
         sig: CsShapeLine.signature(sample.points, sample.closed),
         count: entities.length,
-        decorLayer: spec.decorLayer
+        decorLayer: decorLayer
     };
 };
 

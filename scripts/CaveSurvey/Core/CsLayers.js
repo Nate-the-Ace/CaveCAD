@@ -120,6 +120,17 @@ CsLayers.FLOWSTONE = "FLOWSTONE";
 CsLayers.RIMSTONE = "RIMSTONE";
 CsLayers.SLOPE = "SLOPE";
 CsLayers.SHAPE_SPINE = "CTRL-SHAPE-SPINE";
+// The profile-frame twins: the SAME shaped-line buttons draw these
+// when the stroke lands in the elevation (decided by location -- see
+// CsProfileBox), because frameOf classifies by the PROFILE- prefix and
+// a ledge drawn in the elevation on a plan-frame layer would count
+// toward the plan's data window.
+CsLayers.PROFILE_LEDGE_FLOOR = "PROFILE-LEDGE-FLOOR";
+CsLayers.PROFILE_LEDGE_CEILING = "PROFILE-LEDGE-CEILING";
+CsLayers.PROFILE_FLOWSTONE = "PROFILE-FLOWSTONE";
+CsLayers.PROFILE_RIMSTONE = "PROFILE-RIMSTONE";
+CsLayers.PROFILE_SLOPE = "PROFILE-SLOPE";
+CsLayers.PROFILE_SHAPE_SPINE = "CTRL-PROFILE-SHAPE-SPINE";
 
 // Defaults for creating a layer that is missing from the drawing
 // (someone working without the template still gets sane colors).
@@ -197,6 +208,14 @@ CsLayers.DEFAULTS = {
     // never reads heavier than the wall beside it.
     "SLOPE": ["white", "CONTINUOUS", "Weight000"],
     "CTRL-SHAPE-SPINE": ["gray", "DASHED", "Weight000"],
+    // profile twins mirror their plan layers' appearance, the same
+    // principle the generated CTRL-PROFILE-* family follows
+    "PROFILE-LEDGE-FLOOR": ["white", "CONTINUOUS", "Weight035"],
+    "PROFILE-LEDGE-CEILING": ["white", "DASHED", "Weight025"],
+    "PROFILE-FLOWSTONE": ["white", "CONTINUOUS", "Weight025"],
+    "PROFILE-RIMSTONE": ["white", "CONTINUOUS", "Weight025"],
+    "PROFILE-SLOPE": ["white", "CONTINUOUS", "Weight000"],
+    "CTRL-PROFILE-SHAPE-SPINE": ["gray", "DASHED", "Weight000"],
     "CTRL-DATA": ["gray", "CONTINUOUS", "Weight000"],
     // Callout layers. Hazard is red because it is the one a caver must
     // not miss. Every color and weight below is one already proven
@@ -276,7 +295,7 @@ CsLayers.frameOf = function(layerName) {
 // writer must wrap its add operation in CsLayers.withLayerOn below,
 // which flips the layer visible for the write and restores it after.
 CsLayers.OFF = { "CTRL-DATA": true, "CTRL-HIDDEN": true, "CTRL-RAW": true,
-    "CTRL-SHAPE-SPINE": true };
+    "CTRL-SHAPE-SPINE": true, "CTRL-PROFILE-SHAPE-SPINE": true };
 
 // Layers created LOCKED: suite-owned bookkeeping a caver must see but
 // never edit. Every write the suite itself makes to one of these must
