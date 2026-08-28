@@ -6113,6 +6113,51 @@ if (!IS_NODE) {
     })();
 
     // -----------------------------------------------------------------
+    // The stats pipeline over a DRAWN loop: draw -> exact reconstruction
+    // -> resolve -> CsStats must count the loop. This is the pipeline
+    // Survey Stats runs; it used to run the chain-guess reader instead,
+    // which fabricates a leg across every branch boundary and can never
+    // produce a closure -- Truitt's F-survey loop reported as "no loops"
+    // in the summary (2026-08-27).
+    // -----------------------------------------------------------------
+    (function() {
+        var doc = new RDocument(new RMemoryStorage(), new RSpatialIndexNavel());
+        var di = new RDocumentInterface(doc);
+        getDocument = function() { return doc; };
+        getDocumentInterface = function() { return di; };
+
+        // a ring with a side branch: L1-L2-L3-L4 back to L1, spur off L2
+        var S = CsModel.newSurvey();
+        S.date = "2026-08-27"; S.team = "LOOP";
+        var r1 = shotOf("L1", "L2", 10, 0);
+        var r2 = shotOf("L2", "L3", 10, 90);
+        var r3 = shotOf("L3", "L4", 10, 180);
+        var r4 = shotOf("L4", "L1", 10.3, 270);   // closure, small misclose
+        var b1 = shotOf("L2", "B1", 6, 45);       // branch
+        S.shots.push(r1); S.shots.push(r2); S.shots.push(r3);
+        S.shots.push(r4); S.shots.push(b1);
+        CsDraw.survey(S, CsNetwork.resolve(S, {}));
+
+        var recon = CsRevise.surveyFromDocument(doc);
+        ok(recon.legacy === false, "stats-loop: exact reconstruction");
+        var resolved = CsNetwork.resolve(recon.survey, {});
+        var st = CsStats.compute(recon.survey, resolved, CsTraverse.SLOPE);
+        eqs(st.loopCount, 1,
+            "stats-loop: the drawn loop is counted by the stats pipeline");
+        near(st.surveyedLength, 46.3, 1e-6,
+            "stats-loop: length is the real legs only -- no phantom " +
+            "chain leg across the branch boundary");
+
+        // the OLD reader really would have missed it -- pinned so the
+        // difference this fix exists for stays visible
+        var guessed = CsTags.surveyFromDocument(doc);
+        var gRes = CsNetwork.resolve(guessed, {});
+        eqs(CsStats.compute(guessed, gRes, CsTraverse.SLOPE).loopCount, 0,
+            "stats-loop: the chain-guess reader cannot see a loop (why " +
+            "Survey Stats must never use it on a v3 drawing)");
+    })();
+
+    // -----------------------------------------------------------------
     // Legacy fallback: a drawing with tagged station points but not a
     // single Distance-tagged leg is pre-v3 -- CsRevise hands it to the
     // legacy chain-guesser and flags it.

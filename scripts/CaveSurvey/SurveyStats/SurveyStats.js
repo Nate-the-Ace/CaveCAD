@@ -28,7 +28,15 @@ function surveyStatsRun() {
         return;
     }
 
-    var survey = CsTags.surveyFromDocument(doc);
+    // The EXACT reconstruction (leg tags), not CsTags.surveyFromDocument:
+    // that reader CHAINS stations in Seq order, which fabricates a leg
+    // across every branch boundary (inflating the length) and never
+    // produces a closure leg at all -- so a real loop (Truitt's F
+    // survey, D15-F1..F4-D17, found 2026-08-27) counted as zero loops
+    // and the grade could never see a closure. CsRevise falls back to
+    // the chain guess itself on a pre-v3 drawing, so legacy behavior
+    // is unchanged.
+    var survey = CsRevise.surveyFromDocument(doc).survey;
     if (survey.shots.length === 0) {
         warning("Survey Stats: no tagged survey stations found.\n" +
             "Run Azimuth Traverse, Import Cave Survey or the Survey " +
