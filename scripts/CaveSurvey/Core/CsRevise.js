@@ -1440,12 +1440,24 @@ CsRevise.adjustTagsOn = function(entity) {
  * it: months later, reading down a mixed history trying to work out
  * when the geometry moved.
  *
- * The old log is carried over verbatim and NEVER rewritten. History is
- * append-only here: a revision may add to the record, not edit it. No
- * lines to add hands the previous log straight back, which is how a
- * caller says "this changed nothing" without special-casing its own
- * commit -- the value simply does not differ, so there is nothing to
- * write.
+ * The log is append-only in SPIRIT but CAPPED in SIZE: new entries go
+ * under the old ones and existing lines are never edited, but once the
+ * whole log would serialize past CsRevise.LOG_BUDGET, the OLDEST lines
+ * roll off. The cap exists because the log is one XDATA value, which
+ * the DXF writer emits as ONE line ("RevisionLog=" + the log with each
+ * newline escaped to two characters) -- and dxflib's reader has a hard
+ * 1024-character line buffer (DL_DXF_MAXLINE). Truitt Cave proved it
+ * the hard way (2026-08-27): nine trips of history made a 1070-char
+ * line, and the drawing reopened as ONE entity out of 682 -- a save
+ * from that state would have emptied the file. The full history lives
+ * in Drive's version history (Nathan's call); this tag is only the
+ * recent tail.
+ *
+ * No lines to add hands the previous log straight back UNCAPPED, which
+ * is how a caller says "this changed nothing" without special-casing
+ * its own commit -- the value simply does not differ, so there is
+ * nothing to write (and an already-oversized log on disk is not
+ * rewritten by a no-op).
  *
  * Deliberately unstamped. The existing lines carry no timestamp and
  * this codebase keeps Date out of the Core so the tests stay
@@ -1462,7 +1474,41 @@ CsRevise.appendLog = function(prevLog, lines) {
     if (add.length === 0) {
         return prev;
     }
-    return (prev !== "" ? prev + "\n" : "") + add.join("\n");
+    var full = (prev !== "" ? prev + "\n" : "") + add.join("\n");
+    return CsRevise.cappedLog(full);
+};
+
+// The largest RAW log value appendLog will return. Headroom math:
+// the serialized line is "RevisionLog=" (12) plus the value with every
+// newline escaped from one character to two. A raw value of 800 with
+// every character a newline (the impossible worst case) serializes to
+// 12 + 1600 -- still no; the REAL bound that matters is entries of
+// ~60-140 characters, giving at most ~6 extra characters per entry, so
+// 800 raw stays under ~900 serialized: comfortably inside dxflib's
+// 1024 even alongside other tags' worst cases. Tested against the
+// serialized form, not this constant, so the margin is what is pinned.
+CsRevise.LOG_BUDGET = 800;
+
+/**
+ * The newest tail of a log that fits the budget: whole lines dropped
+ * from the FRONT (oldest first); a single line larger than the whole
+ * budget keeps its newest tail characters.
+ */
+CsRevise.cappedLog = function(text) {
+    var t = (text === undefined || text === null) ? "" : String(text);
+    if (t.length <= CsRevise.LOG_BUDGET) {
+        return t;
+    }
+    var parts = t.split("\n");
+    while (parts.length > 1 &&
+            parts.join("\n").length > CsRevise.LOG_BUDGET) {
+        parts.shift();
+    }
+    var out = parts.join("\n");
+    if (out.length > CsRevise.LOG_BUDGET) {
+        out = out.substring(out.length - CsRevise.LOG_BUDGET);
+    }
+    return out;
 };
 
 /**

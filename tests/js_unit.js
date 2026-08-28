@@ -4204,6 +4204,46 @@ if (teamBoundaryRt.trips.length === 2) {
         "appendLog: missing arguments are not a reason to throw");
 })();
 
+// The log is CAPPED: dxflib's reader dies at 1024 characters on one
+// line, and the whole log serializes as ONE XDATA line ("RevisionLog="
+// plus the log with newlines escaped to two characters). Truitt Cave
+// hit this for real (2026-08-27): 9 trips of history made a 1070-char
+// line and the drawing reopened as one entity. Oldest entries roll
+// off; Drive's version history is the full record (Nathan's call).
+(function() {
+    var entry = function(n) {
+        var s = "trip " + n + " (2024-01-0" + (n % 9) +
+            "|SOMEBODY, SOMEBODY ELSE) added from the notebook page, " +
+            n + " shots";
+        return s;
+    };
+    var log = "";
+    var worst = 0;
+    for (var i = 0; i < 40; i++) {
+        log = CsRevise.appendLog(log, [entry(i)]);
+        var escaped = "RevisionLog=" + log.replace(/\n/g, "@@");
+        if (escaped.length > worst) { worst = escaped.length; }
+    }
+    ok(worst <= 1000,
+        "appendLog cap: the serialized line never crosses the reader's " +
+        "buffer (worst " + worst + " chars over 40 revisions)");
+    // the NEWEST entry always survives the cap
+    ok(log.indexOf(entry(39)) !== -1,
+        "appendLog cap: the newest entry is always kept");
+    // oldest rolled off
+    ok(log.indexOf(entry(0)) === -1,
+        "appendLog cap: the oldest entries roll off");
+    // a single monster line cannot break the cap either
+    var monster = "";
+    for (var m = 0; m < 200; m++) { monster += "0123456789"; }
+    var capped = CsRevise.appendLog("", [monster]);
+    ok(capped.length <= CsRevise.LOG_BUDGET,
+        "appendLog cap: one oversized entry is cut to the budget");
+    // under the cap, behavior is byte-identical to before
+    ok(CsRevise.appendLog("a\nb", ["c"]) === "a\nb\nc",
+        "appendLog cap: short logs append exactly as they always did");
+})();
+
 // --- the argument prep moveLinework's two callers share --------------
 (function() {
     near(CsRevise.positionsExtent({ A: { x: 0, y: 0, z: 0 },
