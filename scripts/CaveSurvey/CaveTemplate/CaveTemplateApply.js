@@ -83,6 +83,41 @@ function initNewFile(mdiChild) {
             // unit stays at the application default
         }
 
+        // Switch the registry's hidden layers OFF. The template cannot
+        // carry this itself: a layer's off state does not survive a DXF
+        // round trip in this build (probed 2026-08-28 -- exported off,
+        // reimported ON), so every CTRL-RAW / CTRL-HIDDEN / CTRL-DATA /
+        // CTRL-SHAPE-SPINE arrived VISIBLE in template-poured drawings.
+        // Only here, at document creation -- a caver who switches
+        // CTRL-RAW on in a real drawing and saves must keep that choice.
+        try {
+            if (typeof CsLayers === "undefined") {
+                throw new Error("CsLayers not loaded");
+            }
+            var doc = di.getDocument();
+            for (var offName in CsLayers.OFF) {
+                if (!CsLayers.OFF.hasOwnProperty(offName) ||
+                        CsLayers.OFF[offName] !== true) {
+                    continue;
+                }
+                var lay = doc.queryLayer(offName);
+                // A missing layer can come back NULL-WRAPPED (truthy,
+                // every method undefined), so detect by demanding a real
+                // boolean -- the CsMcpBridge.mainWindow pattern.
+                if (lay === undefined || lay === null ||
+                        typeof lay.isOff !== "function" ||
+                        lay.isOff() !== false) {
+                    continue;   // absent, unreadable, or already off
+                }
+                lay.setOff(true);
+                var offOp = new RModifyObjectsOperation();
+                offOp.addObject(lay);
+                di.applyOperation(offOp);
+            }
+        } catch (eOff) {
+            // visible scaffolding is a nuisance, not a failure
+        }
+
         try {
             di.autoZoom();
         } catch (eZoom) {

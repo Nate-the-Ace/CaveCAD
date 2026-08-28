@@ -17450,7 +17450,8 @@ function syntheticTiff(w, h, floats) {
             "STYLES." + key + ".spineLayer is a registry layer");
         ok(CsLayers.DEFAULTS[spec.decorLayer] !== undefined,
             "STYLES." + key + ".decorLayer is a registry layer");
-        ok(spec.kind === "ticks" || spec.kind === "scallops",
+        ok(spec.kind === "ticks" || spec.kind === "scallops" ||
+           spec.kind === "fans",
             "STYLES." + key + " kind is known");
     }
     ok(CsShapeLine.STYLES["flowstone"].spineLayer === "CTRL-SHAPE-SPINE",
@@ -17512,6 +17513,35 @@ function syntheticTiff(w, h, floats) {
     ok(scc.closed === true, "scallops: closed path gives a closed chain");
     near(scc.bulges[scc.bulges.length - 1], -0.5, 1e-9,
         "scallops: closed chain's last segment still bulges");
+
+    // Slope fans: three lines per station, all rooted ON the spine,
+    // center along the normal at full length, flanks splayed and a
+    // touch shorter -- and the whole cluster on the chosen side.
+    var fans = CsShapeLine.fans(line, false, 5, 3, 1, 22);
+    ok(fans.length === 6, "fans: three lines per station, got " + fans.length);
+    near(fans[0][0].y, 0, 1e-9, "fans: lines root on the spine");
+    near(fans[1][1].y, -3, 1e-9, "fans: center line runs the normal full length");
+    near(fans[1][1].x, fans[1][0].x, 1e-9, "fans: center line is unsplayed");
+    var flankLen = Math.sqrt(
+        Math.pow(fans[0][1].x - fans[0][0].x, 2) +
+        Math.pow(fans[0][1].y - fans[0][0].y, 2));
+    near(flankLen, 3 * CsShapeLine.FAN_FLANK, 1e-9,
+        "fans: flanks run shorter than the center");
+    ok(fans[0][1].x !== fans[2][1].x,
+        "fans: the two flanks splay to opposite sides of the center");
+    var allDown = true;
+    for (var fi = 0; fi < fans.length; fi++) {
+        if (fans[fi][1].y >= 0) { allDown = false; }
+    }
+    ok(allDown, "fans: every line hangs on the SIDE side");
+    var fansUp = CsShapeLine.fans(line, false, 5, 3, -1, 22);
+    ok(fansUp[1][1].y > 0, "fans: side -1 mirrors the cluster");
+
+    var pf = CsShapeLine.prims(line, false, CsShapeLine.STYLES["slope"],
+        1, 6, 3);
+    ok(pf.polylines.length === 0 && pf.lines.length > 0 &&
+       pf.lines.length % 3 === 0,
+        "prims: the slope style makes line triples");
 
     // The signature: stable, sensitive at 0.001 units, blind below the
     // rounding -- the listener's no-op guard depends on both halves.

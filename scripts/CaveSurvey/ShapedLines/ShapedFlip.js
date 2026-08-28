@@ -96,6 +96,6 @@ ShapedFlip.init = function(basePath) {
         "ticks or scallops to the other side of its spine"));
     flipAction.setDefaultCommands(["shapedflip", "shf"]);
     flipAction.setGroupSortOrder(450);
-    flipAction.setSortOrder(36);
+    flipAction.setSortOrder(37);
     flipAction.setWidgetNames(["CaveLinesToolBar"]);
 };

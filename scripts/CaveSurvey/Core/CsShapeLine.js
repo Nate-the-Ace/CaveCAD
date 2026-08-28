@@ -48,6 +48,11 @@ CsShapeLine.KEY = {
  *                  bowing to the SIDE side. The spine under a scallop
  *                  style is scaffolding, not map ink -- it lives on
  *                  CTRL-SHAPE-SPINE, which is created OFF.
+ * kind "fans":     a splayed cluster of short lines every spacingFeet,
+ *                  radiating to the SIDE side -- the NSS slope symbol
+ *                  ("lines splay down"). The spine is the slope BREAK
+ *                  (the top edge); like the scallop styles it is
+ *                  scaffolding and hides on CTRL-SHAPE-SPINE.
  *
  * Every layer here must be a CsLayers constant, never a literal --
  * a unit test walks this table against the registry.
@@ -81,6 +86,13 @@ CsShapeLine.STYLES = {
         label: "Rimstone Dam",
         kind: "scallops", spacingFeet: 2.0, bulge: 0.62,
         spineLayer: CsLayers.SHAPE_SPINE, decorLayer: CsLayers.RIMSTONE,
+        close: false
+    },
+    "slope": {
+        label: "Slope",
+        kind: "fans", spacingFeet: 6.0, sizeFeet: 3.0,
+        splayDeg: 22,
+        spineLayer: CsLayers.SHAPE_SPINE, decorLayer: CsLayers.SLOPE,
         close: false
     }
 };
@@ -192,6 +204,35 @@ CsShapeLine.ticks = function(pts, closed, spacing, len, side) {
 };
 
 /**
+ * Slope fans: at every station, a splayed cluster of three short lines
+ * radiating to the SIDE side -- the NSS slope symbol, whose one rule is
+ * "lines splay down". The center line runs along the normal at full
+ * length; the flanks rotate +/- splayDeg off it and run a touch
+ * shorter, which is what makes the cluster read as a splay rather than
+ * a comb. Lines start ON the spine (the slope break) and hang
+ * downhill. Returns [[p,q], ...] like ticks.
+ */
+CsShapeLine.FAN_FLANK = 0.82;
+
+CsShapeLine.fans = function(pts, closed, spacing, len, side, splayDeg) {
+    var st = CsShapeLine.stations(pts, closed, spacing);
+    var splay = (splayDeg || 22) * Math.PI / 180;
+    var out = [];
+    for (var i = 0; i < st.length; i++) {
+        var nx = st[i].ty * side, ny = -st[i].tx * side;
+        var angles = [-splay, 0, splay];
+        for (var a = 0; a < angles.length; a++) {
+            var ca = Math.cos(angles[a]), sa = Math.sin(angles[a]);
+            var dx = nx * ca - ny * sa, dy = nx * sa + ny * ca;
+            var l = (angles[a] === 0) ? len : len * CsShapeLine.FAN_FLANK;
+            out.push([{ x: st[i].x, y: st[i].y },
+                      { x: st[i].x + dx * l, y: st[i].y + dy * l }]);
+        }
+    }
+    return out;
+};
+
+/**
  * Scallop chain: vertices along the path at (roughly) chord spacing,
  * every segment bulged toward SIDE. A POSITIVE DXF bulge bows RIGHT of
  * travel -- probed against RPolyline.getSegmentAt, whose +0.5 bulge
@@ -272,6 +313,9 @@ CsShapeLine.prims = function(pts, closed, spec, side, spacing, size) {
     var out = { lines: [], polylines: [] };
     if (spec.kind === "ticks") {
         out.lines = CsShapeLine.ticks(pts, closed, spacing, size, side);
+    } else if (spec.kind === "fans") {
+        out.lines = CsShapeLine.fans(pts, closed, spacing, size, side,
+            spec.splayDeg);
     } else if (spec.kind === "scallops") {
         var s = CsShapeLine.scallops(pts, closed, spacing, spec.bulge, side);
         if (s.points.length >= 2) {

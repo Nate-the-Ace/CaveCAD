@@ -98,6 +98,6 @@ ShapedSync.init = function(basePath) {
         "shaped lines, or on every one in the drawing"));
     syncAction.setDefaultCommands(["shapedsync", "shs"]);
     syncAction.setGroupSortOrder(450);
-    syncAction.setSortOrder(37);
+    syncAction.setSortOrder(38);
     syncAction.setWidgetNames(["CaveLinesToolBar"]);
 };

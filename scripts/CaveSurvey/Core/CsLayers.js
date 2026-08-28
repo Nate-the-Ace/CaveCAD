@@ -114,6 +114,7 @@ CsLayers.LEDGE_FLOOR = "LEDGE-FLOOR";
 CsLayers.LEDGE_CEILING = "LEDGE-CEILING";
 CsLayers.FLOWSTONE = "FLOWSTONE";
 CsLayers.RIMSTONE = "RIMSTONE";
+CsLayers.SLOPE = "SLOPE";
 CsLayers.SHAPE_SPINE = "CTRL-SHAPE-SPINE";
 
 // Defaults for creating a layer that is missing from the drawing
@@ -185,6 +186,9 @@ CsLayers.DEFAULTS = {
     "LEDGE-CEILING": ["white", "DASHED", "Weight025"],
     "FLOWSTONE": ["white", "CONTINUOUS", "Weight025"],
     "RIMSTONE": ["white", "CONTINUOUS", "Weight025"],
+    // Slope fans are texture, not boundary -- hairline, so a slope
+    // never reads heavier than the wall beside it.
+    "SLOPE": ["white", "CONTINUOUS", "Weight000"],
     "CTRL-SHAPE-SPINE": ["gray", "DASHED", "Weight000"],
     "CTRL-DATA": ["gray", "CONTINUOUS", "Weight000"],
     // Callout layers. Hazard is red because it is the one a caver must

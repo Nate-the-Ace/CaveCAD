@@ -30,6 +30,7 @@ include(includeBasePath + "/LedgeCeilingDraw.js");
 include(includeBasePath + "/PitDraw.js");
 include(includeBasePath + "/FlowstoneDraw.js");
 include(includeBasePath + "/RimstoneDraw.js");
+include(includeBasePath + "/SlopeDraw.js");
 include(includeBasePath + "/ShapedFlip.js");
 include(includeBasePath + "/ShapedSync.js");
 
@@ -42,7 +43,7 @@ ShapedLines.prototype = new EAction();
 /** Style keys in the order the dialog offers them -- the draw-button
  *  order, so the two lists read the same. */
 ShapedLines.STYLE_ORDER = ["floorledge", "ceilingledge", "pit",
-    "flowstone", "rimstone"];
+    "flowstone", "rimstone", "slope"];
 
 /**
  * Ask which style/side/scale to dress the selection in.
@@ -131,7 +132,7 @@ ShapedLines.dressOne = function(doc, di, entity, opts, group) {
     if (isNull(probe) || probe.points.length < 2) {
         return false;
     }
-    if (probe.closed && spec.kind === "ticks") {
+    if (probe.closed && spec.kind !== "scallops") {
         side = CsShapeLine.inwardSide(probe.points) * (opts.side === -1 ? -1 : 1);
     }
 
@@ -245,6 +246,7 @@ ShapedLines.init = function(basePath) {
     PitDraw.init(basePath);
     FlowstoneDraw.init(basePath);
     RimstoneDraw.init(basePath);
+    SlopeDraw.init(basePath);
     ShapedFlip.init(basePath);
     ShapedSync.init(basePath);
 };
