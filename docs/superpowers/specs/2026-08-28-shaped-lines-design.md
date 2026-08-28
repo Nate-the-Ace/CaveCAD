@@ -121,14 +121,28 @@ Sort orders 30–37 (free window), group 450, widgets
 
 | Action file | Menu label | Commands | sortOrder |
 |---|---|---|---|
-| LedgeFloorDraw.js | Floor Ledge | `ledgefloor`, `lgf` | 30 |
-| LedgeCeilingDraw.js | Ceiling Ledge | `ledgeceiling`, `lgc` | 31 |
-| PitDraw.js | Pit | `pitedge`, `pte` | 32 |
-| FlowstoneDraw.js | Flowstone | `flowstone`, `fst` | 33 |
-| RimstoneDraw.js | Rimstone Dam | `rimstone`, `rst` | 34 |
-| ShapedApply.js | Decorate Selection | `shapedapply`, `sha` | 35 |
+| ShapedLines.js (folder file) | Decorate Selection | `shapedlines`, `shl` | 30 |
+| LedgeFloorDraw.js | Floor Ledge | `ledgefloor`, `lgf` | 31 |
+| LedgeCeilingDraw.js | Ceiling Ledge | `ledgeceiling`, `lgc` | 32 |
+| PitDraw.js | Pit | `pitedge`, `pte` | 33 |
+| FlowstoneDraw.js | Flowstone | `flowstone`, `fst` | 34 |
+| RimstoneDraw.js | Rimstone Dam | `rimstone`, `rst` | 35 |
 | ShapedFlip.js | Flip Shaped Side | `shapedflip`, `shf` | 36 |
 | ShapedSync.js | Sync Shaped Lines | `shapedsync`, `shs` | 37 |
+
+Decorate Selection is the FOLDER-NAMED tool (the structural tests pin
+the README table to folder-file commands), and it alone also sits on
+the main Cave Survey menu/toolbar; the other seven live on the Cave
+Lines toolbar only, reachable by command everywhere.
+
+As built, two engine truths moved the math (probed, pinned in tests):
+a positive DXF bulge bows RIGHT of travel (center on the LEFT of the
+chord -- RPolyline.getSegmentAt on bulge +0.5 from (0,0)-(10,0) answers
+center (5,3.75), middle point (5,-2.5)); and a never-added spline's
+getLength() answers NaN on the FIRST call and the real length on the
+second (getData().castToShape(), ask twice). Circles return no point
+from getPointsWithDistanceToEnd and polylines return points from BOTH
+ends, so both sample closed-form in JS.
 
 The five draw actions subclass one `ShapedLinesRun` (freehand
 press-drag-release lifted from FeatureTraceRun: screen-space sampling,
