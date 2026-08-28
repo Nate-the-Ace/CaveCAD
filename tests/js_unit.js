@@ -415,9 +415,9 @@ ok(CsModel.tripFingerprint({}) === "|",
 // trips[0] -- so a survey with no metadata and no shots gets a blank
 // record standing in for a trip nobody has entered yet. That slot is
 // the ABSENCE of a trip, and tripIdFor must OCCUPY it rather than
-// number past it: a drawing numbered from 1 has no trip-0 anchor, and
-// the RevisionLog lives on the trip-0 anchor by schema, so such a
-// drawing could never carry a revision history at all.
+// number past it: a drawing numbered from 1 has no trip-0 anchor for
+// the drawing-level tags (Declination mirror, ExcludedShots, the
+// adjustment record) to live on.
 // ---------------------------------------------------------------------
 var ph = CsModel.newSurvey();
 CsModel.ensureTrips(ph);
@@ -4173,77 +4173,6 @@ if (teamBoundaryRt.trips.length === 2) {
         "stationsMoved");
 })();
 
-// --- ONE shape for the RevisionLog, two writers ----------------------
-// CsRevise.apply and the Survey Notebook's Draw both append to the same
-// log on the same anchor. The rules asserted here are what make a mixed
-// history readable months later: entries are separated by exactly one
-// newline, the earlier log is carried over VERBATIM, and nothing to say
-// leaves the value untouched -- which is also how a caller signals "no
-// op" to itself, since the value it would commit simply does not differ.
-(function() {
-    ok(CsRevise.appendLog("", ["a"]) === "a",
-        "appendLog: the first entry has nothing to sit under, got '" +
-        CsRevise.appendLog("", ["a"]) + "'");
-    ok(CsRevise.appendLog("a", ["b"]) === "a\nb",
-        "appendLog: one newline between entries, got '" +
-        CsRevise.appendLog("a", ["b"]) + "'");
-    ok(CsRevise.appendLog("a\nb", ["c", "  d"]) === "a\nb\nc\n  d",
-        "appendLog: several new lines land in order under the old ones");
-    // append-only: history can be added to, never edited
-    var old = "trip 0 declination 2 -> 6 (igrf)\ntrip 1 was here";
-    ok(CsRevise.appendLog(old, ["new"]).indexOf(old) === 0,
-        "appendLog: the existing log is preserved byte for byte, never " +
-        "replaced, got '" + CsRevise.appendLog(old, ["new"]) + "'");
-    // nothing to say -> nothing changes, so there is nothing to commit
-    ok(CsRevise.appendLog(old, []) === old,
-        "appendLog: no lines returns the old log unchanged (a no-op Draw " +
-        "writes nothing)");
-    ok(CsRevise.appendLog("", []) === "",
-        "appendLog: no history and no lines is still no log");
-    ok(CsRevise.appendLog(null, null) === "",
-        "appendLog: missing arguments are not a reason to throw");
-})();
-
-// The log is CAPPED: dxflib's reader dies at 1024 characters on one
-// line, and the whole log serializes as ONE XDATA line ("RevisionLog="
-// plus the log with newlines escaped to two characters). Truitt Cave
-// hit this for real (2026-08-27): 9 trips of history made a 1070-char
-// line and the drawing reopened as one entity. Oldest entries roll
-// off; Drive's version history is the full record (Nathan's call).
-(function() {
-    var entry = function(n) {
-        var s = "trip " + n + " (2024-01-0" + (n % 9) +
-            "|SOMEBODY, SOMEBODY ELSE) added from the notebook page, " +
-            n + " shots";
-        return s;
-    };
-    var log = "";
-    var worst = 0;
-    for (var i = 0; i < 40; i++) {
-        log = CsRevise.appendLog(log, [entry(i)]);
-        var escaped = "RevisionLog=" + log.replace(/\n/g, "@@");
-        if (escaped.length > worst) { worst = escaped.length; }
-    }
-    ok(worst <= 1000,
-        "appendLog cap: the serialized line never crosses the reader's " +
-        "buffer (worst " + worst + " chars over 40 revisions)");
-    // the NEWEST entry always survives the cap
-    ok(log.indexOf(entry(39)) !== -1,
-        "appendLog cap: the newest entry is always kept");
-    // oldest rolled off
-    ok(log.indexOf(entry(0)) === -1,
-        "appendLog cap: the oldest entries roll off");
-    // a single monster line cannot break the cap either
-    var monster = "";
-    for (var m = 0; m < 200; m++) { monster += "0123456789"; }
-    var capped = CsRevise.appendLog("", [monster]);
-    ok(capped.length <= CsRevise.LOG_BUDGET,
-        "appendLog cap: one oversized entry is cut to the budget");
-    // under the cap, behavior is byte-identical to before
-    ok(CsRevise.appendLog("a\nb", ["c"]) === "a\nb\nc",
-        "appendLog cap: short logs append exactly as they always did");
-})();
-
 // --- the argument prep moveLinework's two callers share --------------
 (function() {
     near(CsRevise.positionsExtent({ A: { x: 0, y: 0, z: 0 },
@@ -6360,9 +6289,11 @@ if (!IS_NODE) {
             CsTags.get(a0, "TripDeclinationSource") + "'");
         near(CsTags.getNumber(a0, "Declination"), 6.0, 1e-9,
             "apply-rigid: legacy Declination mirror updated");
-        var log = CsTags.get(a0, "RevisionLog");
-        ok(log.indexOf("trip 0 declination 2 -> 6 (igrf)") >= 0,
-            "apply-rigid: RevisionLog line appended, got '" + log + "'");
+        // the tag is retired (2026-08-27): a revision writes NO log,
+        // and strips a stale one -- see the pre-seeded check below
+        ok(CsTags.get(a0, "RevisionLog") === "",
+            "apply-rigid: no RevisionLog is written, got '" +
+            CsTags.get(a0, "RevisionLog") + "'");
 
         var summary = CsReport.revisionSummary(report);
         ok(summary.indexOf("rigid") >= 0 &&
@@ -6409,7 +6340,7 @@ if (!IS_NODE) {
     // CsRevise.apply, NON-RIGID path: revising one trip of two bends
     // the survey, so the marks are erased and redrawn. Trip-0 stations
     // must not move; the redrawn drawing must reconstruct to exactly
-    // the revised survey; the RevisionLog must ride the NEW anchor.
+    // the revised survey; no RevisionLog may ride the new anchor.
     // -----------------------------------------------------------------
     (function() {
         var doc = new RDocument(new RMemoryStorage(), new RSpatialIndexNavel());
@@ -6507,7 +6438,7 @@ if (!IS_NODE) {
             }
         }
 
-        // RevisionLog carried onto the NEW trip-0 anchor
+        // NO RevisionLog on the new trip-0 anchor -- the tag is retired
         var newAnchor = null;
         var ids = doc.queryAllEntities(false, false);
         for (i = 0; i < ids.length; i++) {
@@ -6525,8 +6456,8 @@ if (!IS_NODE) {
         ok(newAnchor !== null, "apply-redraw: new trip-0 anchor found");
         var log = newAnchor !== null ?
             CsTags.get(newAnchor, "RevisionLog") : "";
-        ok(log.indexOf("trip 1 declination 1 -> 11 (user)") >= 0,
-            "apply-redraw: RevisionLog on the new anchor, got '" +
+        ok(log === "",
+            "apply-redraw: no RevisionLog on the new anchor, got '" +
             log + "'");
 
         var summary = CsReport.revisionSummary(report);
@@ -8267,83 +8198,12 @@ if (!IS_NODE) {
     })();
 
     // -----------------------------------------------------------------
-    // The Draw path writes the RevisionLog.
-    //
-    // Editing the header Decl and pressing Draw REPLACES the trip and
-    // rotates its azimuths -- declination came out of the fingerprint,
-    // so the page still matches the trip it was loaded from. Nathan hit
-    // exactly that on a real drawing: the geometry moved, the linework
-    // followed, and nothing recorded that it had happened. A drawing
-    // that cannot explain its own geometry six months later is the
-    // failure this logs against.
-    //
-    // The wording is asserted on the pure builder first, then the whole
-    // Draw is run twice over a real document to prove the log
-    // ACCUMULATES -- the entry the first Draw wrote has to survive the
-    // second, whose erase deletes the very point that carried it.
+    // The RevisionLog is RETIRED (Nathan, 2026-08-27): Drive's version
+    // history is the record, and the unbounded tag line is what bricked
+    // Truitt Cave's reopen (dxflib reads at most 1024 chars per line).
+    // What is asserted now is the ABSENCE: no revision path writes the
+    // tag, and a stale one from an older build is shed.
     // -----------------------------------------------------------------
-    (function() {
-        var lines = function(over) {
-            var info = { tripId: 1, fingerprint: "2002-02-02|UPPER TEAM",
-                replaced: true, oldDeclination: -4.5, newDeclination: -4.5,
-                declinationSource: "user", oldShots: 4, newShots: 4,
-                stationsMoved: 0, lineworkMoved: 0, lineworkUnmoved: 0,
-                lineworkBound: 0 };
-            for (var k in over) {
-                if (over.hasOwnProperty(k)) {
-                    info[k] = over[k];
-                }
-            }
-            return SurveyNotebook.revisionLogLines(info).join("\n");
-        };
-
-        // (a) the declination case, in apply's own vocabulary
-        var decl = lines({ newDeclination: -3.25, stationsMoved: 3 });
-        ok(decl === "trip 1 (2002-02-02|UPPER TEAM) redrawn from the " +
-            "notebook page: declination -4.5 -> -3.25 (user), 4 shots " +
-            "replaced, 3 stations moved",
-            "notebook-log: a declination change names the trip and BOTH " +
-            "values, got '" + decl + "'");
-        ok(decl.indexOf("declination -4.5 -> -3.25 (user)") >= 0,
-            "notebook-log: the old -> new phrasing matches the lines " +
-            "CsRevise.apply writes, so one log reads as one history");
-
-        // (b) a new trip: "where did trip 2 come from" answered
-        var added = lines({ replaced: false, tripId: 2, oldShots: 0,
-            newShots: 1 });
-        ok(added === "trip 2 (2002-02-02|UPPER TEAM) added from the " +
-            "notebook page, 1 shot",
-            "notebook-log: an added trip says so in one line, singular " +
-            "shot count included, got '" + added + "'");
-
-        // (c) a Draw that changed nothing writes nothing. An audit trail
-        //     that grows on every no-op is one nobody reads.
-        ok(lines({}) === "",
-            "notebook-log: an unchanged redraw appends nothing, got '" +
-            lines({}) + "'");
-        ok(lines({ lineworkMoved: 6, lineworkBound: 2 }) === "",
-            "notebook-log: and not even the linework counts can make a " +
-            "no-op write a line");
-
-        // (d) the three independent signals. A shot deleted off the END
-        //     of the page moves no SHARED station, so a shot-count
-        //     change has to count on its own.
-        ok(lines({ stationsMoved: 2 }).indexOf("2 stations moved") >= 0,
-            "notebook-log: moved stations alone are worth recording");
-        ok(lines({ newShots: 3 }).indexOf("3 shots replaced") >= 0 &&
-            lines({ newShots: 3 }).indexOf("no station moved") >= 0,
-            "notebook-log: a dropped shot that moved nothing shared is " +
-            "still recorded, got '" + lines({ newShots: 3 }) + "'");
-
-        // (e) linework on a following line, from the counts already held
-        var lw = lines({ newDeclination: -3.25, stationsMoved: 3,
-            lineworkMoved: 5, lineworkUnmoved: 1, lineworkBound: 2 });
-        ok(lw.indexOf("\n  linework: 5 moved, 1 left behind, " +
-            "2 bound automatically") > 0,
-            "notebook-log: linework follows on its own line, and the " +
-            "automatic claim is named apart, got '" + lw + "'");
-    })();
-
     (function() {
         var doc = new RDocument(new RMemoryStorage(),
             new RSpatialIndexNavel());
@@ -8423,89 +8283,39 @@ if (!IS_NODE) {
 
         try {
             ok(logNow() === "",
-                "notebook-log-doc: a freshly drawn survey has no history " +
-                "yet, got '" + logNow() + "'");
+                "no-log: a freshly drawn survey carries no RevisionLog, " +
+                "got '" + logNow() + "'");
 
-            // -- first revision: -4.5 -> -3.25 ------------------------
+            // seed a STALE log the way an older build would have left
+            // one, then revise: the Draw's erase-and-redraw must shed it
+            CsTags.commit(di, CsRevise.trip0Anchor(doc),
+                { RevisionLog: "trip 0 (old build) redrawn" });
+            ok(logNow() !== "",
+                "no-log: the stale tag really was seeded before the Draw");
+
             drawWithDecl(-3.25);
-            var log1 = logNow();
-            ok(log1.indexOf("trip 0 (1998-07-04|NS/JB) redrawn from " +
-                "the notebook page:") === 0,
-                "notebook-log-doc: the first entry names the trip and " +
-                "its fingerprint, got '" + log1 + "'");
-            ok(log1.indexOf("declination -4.5 -> -3.25 (user)") > 0,
-                "notebook-log-doc: and the declination change he would " +
-                "come looking for, got '" + log1 + "'");
-            ok(log1.indexOf("3 shots replaced") > 0,
-                "notebook-log-doc: and how many shots the page replaced");
-            ok(log1.indexOf("stations moved") > 0,
-                "notebook-log-doc: and that stations moved, got '" +
-                log1 + "'");
-            ok(log1.indexOf("\n  linework:") > 0 &&
-                log1.indexOf("moved") > 0,
-                "notebook-log-doc: and the linework that followed, got '" +
-                log1 + "'");
-            ok(boxText.indexOf("revision-log write") > 0,
-                "notebook-log-doc: the extra undo step is said out loud, " +
-                "got '" + boxText + "'");
+            ok(logNow() === "",
+                "no-log: a revision writes no RevisionLog and sheds a " +
+                "stale one, got '" + logNow() + "'");
 
-            // -- second revision: -3.25 -> -1.75 ----------------------
-            // The erase deletes the point that carried log1, so this is
-            // the assertion that the read happens BEFORE the erase: read
-            // after, and log1 would be gone.
-            drawWithDecl(-1.75);
-            var log2 = logNow();
-            ok(log2.indexOf(log1) === 0,
-                "notebook-log-doc: the first entry survived the second " +
-                "revision's erase, byte for byte and still first -- " +
-                "got '" + log2 + "'");
-            ok(log2.indexOf("declination -3.25 -> -1.75 (user)") > 0,
-                "notebook-log-doc: the second change is recorded too, " +
-                "got '" + log2 + "'");
-            ok(log2.indexOf("declination -4.5 -> -3.25 (user)") <
-                log2.indexOf("declination -3.25 -> -1.75 (user)"),
-                "notebook-log-doc: in the order they happened -- the log " +
-                "carries no timestamp, so order IS the chronology");
-            var entries = log2.split("\n");
-            var heads = 0;
-            for (i = 0; i < entries.length; i++) {
-                if (entries[i].indexOf("trip 0 (") === 0) {
-                    heads++;
+            // and nothing else picked it up: zero carriers anywhere
+            var carriers = 0;
+            var eids = doc.queryAllEntities(false, false);
+            for (var q = 0; q < eids.length; q++) {
+                var ee = doc.queryEntity(eids[q]);
+                if (!isNull(ee) && CsTags.get(ee, "RevisionLog") !== "") {
+                    carriers++;
                 }
             }
-            ok(heads === 2,
-                "notebook-log-doc: two revisions, two entries -- not one " +
-                "overwritten and not three, got " + heads + " in '" +
-                log2 + "'");
+            ok(carriers === 0,
+                "no-log: no entity anywhere carries a RevisionLog after " +
+                "the Draw, got " + carriers);
 
-            // -- a Draw that changes nothing ---------------------------
-            // Two facts in one assertion, and the second is the one
-            // that bit: nothing is APPENDED, and the log that was
-            // already there still survives. Every Draw erases the point
-            // the log lives on, so "write nothing" cannot mean "commit
-            // nothing" -- a plain Draw used to destroy the whole audit
-            // trail on its way past.
-            drawWithDecl(-1.75);
-            ok(logNow() === log2,
-                "notebook-log-doc: redrawing the same page appends " +
-                "nothing and destroys nothing, got '" + logNow() + "'");
-
-            // -- a page whose fingerprint matches nothing --------------
-            var recon = CsRevise.surveyFromDocument(doc);
-            var fresh = SurveyNotebook.tripSurvey(recon.survey, 0);
-            fresh.date = "2010-10-10";
-            fresh.team = "SOLO";
-            fresh.shots = [shotOf("Q1", "Q2", 12, 200)];
-            fresh.shots[0].trip = 0;
-            SurveyNotebook.drawMergedSurvey(null, doc, fresh, recon);
-            var log3 = logNow();
-            ok(log3.indexOf(log2) === 0,
-                "notebook-log-doc: the replacement history is still " +
-                "intact under the new trip's entry");
-            ok(log3.indexOf("trip 1 (2010-10-10|SOLO) added from the " +
-                "notebook page, 1 shot") > 0,
-                "notebook-log-doc: 'where did trip 1 come from' is " +
-                "answered in the log, got '" + log3 + "'");
+            // the revision itself still happened: the trip's stored
+            // declination moved to the page's new header value
+            var rec = CsRevise.surveyFromDocument(doc);
+            near(rec.survey.trips[0].declination, -3.25, 1e-9,
+                "no-log: the declination revision itself still applied");
         } finally {
             QMessageBox = realBox;
         }
@@ -8513,32 +8323,16 @@ if (!IS_NODE) {
 
     // -----------------------------------------------------------------
     // A FIRST Draw into an EMPTY drawing, then a revision of it -- the
-    // whole life of a survey Nathan typed himself, which is the case
-    // that used to carry no history at all.
+    // whole life of a survey Nathan typed himself.
     //
-    // The old behaviour: an empty document reconstructs to one BLANK
-    // trip 0, the page's fingerprint matched it no better than any
-    // other, so the page landed past it and the drawing ended up with
-    // no trip-0 anchor -- every hand-typed survey started at trip 1 for
-    // no reason a user could explain, and the log was DROPPED, silently,
-    // on every revision, forever. CsRevise.trip0Anchor's lowest-anchor
-    // fallback is what kept such a drawing's log alive despite that, and
-    // it still exists for the drawings already out in Nathan's cave
-    // files -- but SurveyNotebook.mergeTripIntoSurvey now OCCUPIES the
-    // blank placeholder trip 0 (CsModel.isPlaceholderTrip) instead of
-    // appending past it, so a NEWLY typed page anchors at trip 0
-    // directly and the fallback below is never the one doing the work.
-    //
-    // Four things have to hold:
-    //   1. reading a log off a drawing with no anchor at all must not
-    //      throw. Nothing to read is not an error.
-    //   2. the first Draw writes its entry, and onto trip 0's own
-    //      anchor, not a fallback.
-    //   3. a SECOND Draw finds that entry again across its own
-    //      erase-and-redraw and appends to it. A home the next
-    //      revision cannot find is no better than no home.
-    //   4. a THIRD, genuinely different page does not displace trip 0
-    //      -- it appends as trip 1, and trip 0's history is untouched.
+    // The trip-0 OCCUPANCY rules asserted here predate the RevisionLog
+    // and outlive it: an empty document reconstructs to one BLANK trip
+    // 0, and SurveyNotebook.mergeTripIntoSurvey OCCUPIES that
+    // placeholder (CsModel.isPlaceholderTrip) rather than appending
+    // past it, so a hand-typed survey numbers from 0 and the
+    // drawing-level tags have a trip-0 anchor to live on. A genuinely
+    // different second page must append as trip 1, never displace trip
+    // 0. And no step of any of it writes a RevisionLog.
     // -----------------------------------------------------------------
     (function() {
         var doc = new RDocument(new RMemoryStorage(),
@@ -8547,7 +8341,7 @@ if (!IS_NODE) {
         getDocument = function() { return doc; };
         getDocumentInterface = function() { return di; };
         ok(CsRevise.trip0Anchor(doc) === null,
-            "notebook-log-empty: an empty drawing has no anchor to read");
+            "notebook-first-draw: an empty drawing has no anchor to read");
 
         var page = CsModel.newSurvey();
         page.date = "2026-01-01";
@@ -8573,10 +8367,10 @@ if (!IS_NODE) {
             QMessageBox = realBox;
         }
         ok(threw === null,
-            "notebook-log-empty: a first Draw with no anchor to read does " +
+            "notebook-first-draw: a first Draw with no anchor to read does " +
             "not throw, got " + threw);
         ok(CsTags.collectStations(doc).length === 3,
-            "notebook-log-empty: and it still drew the page -- the log is " +
+            "notebook-first-draw: and it still drew the page -- the log is " +
             "never allowed to cost the user their survey");
 
         // keyed on getId(): entity query order in this build is NOT
@@ -8590,7 +8384,7 @@ if (!IS_NODE) {
             return a === null ? null : CsTags.getNumber(a, "Trip");
         };
         ok(CsRevise.trip0Anchor(doc) !== null,
-            "notebook-log-empty: a typed page gives the drawing an anchor " +
+            "notebook-first-draw: a typed page gives the drawing an anchor " +
             "the log can live on");
         // Not just "an anchor" -- TRIP 0's anchor, occupied directly by
         // mergeTripIntoSurvey rather than reached through
@@ -8598,37 +8392,12 @@ if (!IS_NODE) {
         // drawings that already shipped without a trip 0, not a
         // standing crutch for brand-new ones).
         ok(anchorTrip() === 0,
-            "notebook-log-empty: a page typed into an untagged drawing " +
+            "notebook-first-draw: a page typed into an untagged drawing " +
             "lands as trip 0, not appended past it -- got trip " +
             anchorTrip());
-        var elog1 = logNow();
-        ok(elog1.indexOf("(2026-01-01|FIRST) added from the notebook " +
-            "page, 2 shots") > 0,
-            "notebook-log-empty: the first Draw is recorded, not dropped, " +
-            "got '" + elog1 + "'");
-        // The entry names a trip id, and the log has to sit on THAT
-        // trip's anchor -- the entry and its home disagreeing is how a
-        // reader ends up looking in the wrong place.
-        ok(elog1.indexOf("trip 0 (") === 0,
-            "notebook-log-empty: the entry sits on trip 0's own anchor, " +
-            "got '" + elog1 + "'");
-        // exactly one entity carries the log: parking a second copy
-        // anywhere would give the next revision two histories to pick
-        // from
-        var carriers = 0;
-        var eids = doc.queryAllEntities(false, false);
-        for (var q = 0; q < eids.length; q++) {
-            var ee = doc.queryEntity(eids[q]);
-            if (isNull(ee)) {
-                continue;
-            }
-            if (CsTags.get(ee, "RevisionLog") !== "") {
-                carriers++;
-            }
-        }
-        ok(carriers === 1,
-            "notebook-log-empty: the log has exactly one home, got " +
-            carriers);
+        ok(logNow() === "",
+            "notebook-first-draw: no RevisionLog is written by a first " +
+            "Draw, got '" + logNow() + "'");
 
         // -- and now revise it: the case Nathan asked the log FOR ------
         // Retype the header declination and Draw again. The Az cells are
@@ -8656,16 +8425,15 @@ if (!IS_NODE) {
         } finally {
             QMessageBox = realBox;
         }
-        var elog2 = logNow();
-        ok(elog2 !== null && elog2.indexOf(elog1) === 0,
-            "notebook-log-empty: the first entry survived the revision's " +
-            "erase -- trip 0's own anchor is a STABLE home, got '" +
-            elog2 + "'");
-        ok(elog2.indexOf("declination 0 -> -3.75 (user)") > 0,
-            "notebook-log-empty: and the declination change is named, " +
-            "which is what the log is for, got '" + elog2 + "'");
+        ok(logNow() === "",
+            "notebook-first-draw: a revision writes no RevisionLog, " +
+            "got '" + logNow() + "'");
+        var rec2b = CsRevise.surveyFromDocument(doc);
+        near(rec2b.survey.trips[0].declination, -3.75, 1e-9,
+            "notebook-first-draw: the declination revision itself " +
+            "still applied");
         ok(anchorTrip() === 0,
-            "notebook-log-empty: the revision stayed on trip 0, got trip " +
+            "notebook-first-draw: the revision stayed on trip 0, got trip " +
             anchorTrip());
 
         // -- a THIRD, genuinely different page: must NOT displace trip 0 --
@@ -8694,13 +8462,9 @@ if (!IS_NODE) {
         } finally {
             QMessageBox = realBox;
         }
-        var elog3 = logNow();
         ok(anchorTrip() === 0,
-            "notebook-log-empty: trip 0's anchor is still trip 0 after a " +
+            "notebook-first-draw: trip 0's anchor is still trip 0 after a " +
             "second page arrives -- got trip " + anchorTrip());
-        ok(elog3 !== null && elog3.indexOf(elog2) === 0,
-            "notebook-log-empty: trip 0's history is untouched by a " +
-            "second, unrelated page -- got '" + elog3 + "'");
         var tripsSeen = {};
         var eids3 = doc.queryAllEntities(false, false);
         for (var r = 0; r < eids3.length; r++) {
@@ -8712,24 +8476,23 @@ if (!IS_NODE) {
             tripsSeen[CsTags.getNumber(er, "Trip")] = true;
         }
         ok(tripsSeen[0] === true && tripsSeen[1] === true,
-            "notebook-log-empty: the second page appended as trip 1 " +
+            "notebook-first-draw: the second page appended as trip 1 " +
             "alongside trip 0, not merged into it");
         ok(CsTags.collectStations(doc).length === 4,
-            "notebook-log-empty: both trips' stations are present -- " +
+            "notebook-first-draw: both trips' stations are present -- " +
             "A1-A3 kept, B1 added, got " +
             CsTags.collectStations(doc).length);
-        ok(elog3.indexOf("trip 1 (2026-03-03|SECOND) added from the " +
-            "notebook page, 1 shot") > 0,
-            "notebook-log-empty: the log names where trip 1 came from, " +
-            "got '" + elog3 + "'");
+        ok(logNow() === "",
+            "notebook-first-draw: still no RevisionLog after a second " +
+            "page, got '" + logNow() + "'");
     })();
 
     // -----------------------------------------------------------------
     // A drawing whose lowest trip is 1, built directly to model the
-    // state the shipped defect already left in Nathan's cave files:
-    // trips numbered from 1, no trip-0 anchor anywhere. Such a drawing
-    // still has to get a working log, which is the whole reason
-    // trip0Anchor falls back to the lowest anchor present.
+    // state a shipped defect left in Nathan's older cave files: trips
+    // numbered from 1, no trip-0 anchor anywhere. trip0Anchor's
+    // lowest-anchor fallback keeps the drawing-level bookkeeping (the
+    // stats stamp, revision anchoring) working on such a drawing.
     //
     // CsDraw tags one anchor per trip that has a resolved station, so a
     // survey whose trip 0 owns no shots simply produces no Trip=0 tag.
@@ -8774,19 +8537,20 @@ if (!IS_NODE) {
             "present, got " + (fb === null ? "null" :
                 CsTags.getNumber(fb, "Trip")));
 
-        // and a real revision through it lands and reads back
+        // and a real revision through such a drawing still lands: the
+        // trip's stored declination moves, and no RevisionLog appears
         var recon = CsRevise.surveyFromDocument(doc);
         var newSurvey = CsRevise.surveyFromDocument(doc).survey;
         CsRevise.reviseDeclination(newSurvey, 1, -4.0, "igrf");
         CsRevise.apply(doc, di, recon, newSurvey);
-        var fbLog = CsTags.get(CsRevise.trip0Anchor(doc), "RevisionLog");
-        ok(fbLog.indexOf("trip 1 declination -1 -> -4 (igrf)") >= 0,
-            "log-fallback: a trip-1-only drawing carries its revision " +
-            "after all, got '" + fbLog + "'");
+        var recBack = CsRevise.surveyFromDocument(doc);
+        near(recBack.survey.trips[1].declination, -4.0, 1e-9,
+            "log-fallback: a trip-1-only drawing takes the revision");
+        ok(CsTags.get(CsRevise.trip0Anchor(doc), "RevisionLog") === "",
+            "log-fallback: and no RevisionLog is written anywhere");
 
         // Preference unchanged: once the drawing HAS a trip 0, that is
-        // where the log lives. The fallback is for drawings that lack
-        // one, not a new home for the ones that don't.
+        // the anchor. The fallback is for drawings that lack one.
         var S2 = CsModel.newSurvey();
         S2.date = "2026-03-03"; S2.team = "HEALTHY";
         CsModel.ensureTrips(S2);

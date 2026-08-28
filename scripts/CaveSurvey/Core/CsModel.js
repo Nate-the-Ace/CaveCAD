@@ -421,9 +421,9 @@ CsModel.isPlaceholderTrip = function(survey, index) {
  * survey with no metadata and no shots -- an empty drawing about to
  * receive its first typed page -- that invention is blank. Appending
  * past it left such drawings numbered from 1 with no trip 0 at all,
- * which reads as arbitrary to a user and, worse, silently costs them
- * the RevisionLog: the log lives on the trip-0 anchor by schema, so a
- * drawing with no trip 0 has nowhere to keep its history.
+ * which reads as arbitrary to a user and leaves the drawing-level tags
+ * (the Declination mirror, ExcludedShots/UnplacedShots, the adjustment
+ * record) with no trip-0 anchor to live on.
  */
 CsModel.tripIdFor = function(survey, tripRecord) {
     CsModel.ensureTrips(survey);

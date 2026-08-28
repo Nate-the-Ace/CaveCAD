@@ -750,8 +750,8 @@ CsRevise.parseTripEdits = function(rows) {
         // declination carrying more precision than that can never
         // round-trip a raw comparison: reopening this dialog and
         // pressing Apply with no edits would manufacture a ~1e-5 deg
-        // "revision", append a junk RevisionLog line, and downgrade
-        // the trip's declinationSource from igrf to user. Compare at
+        // "revision" and downgrade the trip's declinationSource from
+        // igrf to user. Compare at
         // the precision the dialog actually shows -- both revision
         // tools apply IGRF at 2 decimals, well inside it.
         var shown = CsRevise.declText(r.recorded);
@@ -1342,36 +1342,35 @@ CsRevise.lineworkSummary = function(moved, unmoved, bound, stationsMoved) {
 };
 
 /**
- * The anchor point the drawing's RevisionLog lives on, or null when the
- * drawing has no anchors at all. Anchor points are the only entities
+ * The drawing's trip-0 anchor point, or null when the drawing has no
+ * anchors at all -- the point the drawing-level tags (Declination
+ * mirror, ExcludedShots/UnplacedShots, adjustment record) ride on.
+ * Anchor points are the only entities
  * carrying BOTH a Station tag and a Trip tag -- legs carry Trip too,
  * but never Station -- and CsDraw tags exactly one per trip id, so the
  * scan below cannot be thrown off by the query order.
  *
- * Trip 0 when it is there: that is where the schema puts the log, and
- * a healthy drawing must not have its history wander between
- * revisions.
+ * Trip 0 when it is there: that is where the schema puts the
+ * drawing-level tags, and a healthy drawing must not have them wander
+ * between revisions.
  *
  * FALLBACK -- the LOWEST-numbered anchor present when there is no trip
  * 0. Drawings exist whose trips start at 1: CsModel.tripIdFor used to
  * append the first typed page past ensureTrips' blank placeholder
  * instead of occupying it, so every survey hand-entered in the
  * notebook before that was fixed came out with no trip 0 whatsoever.
- * Those drawings could not carry a log at all -- neither revision path
- * had anywhere to write it, and the entry was dropped in silence. The
- * lowest anchor is a stable home for one: it is the same point on
- * every revision, and it survives an erase-and-redraw the same way
- * trip 0's does.
+ * Those drawings had no home for the drawing-level tags at all. The
+ * lowest anchor is a stable one: it is the same point on every
+ * revision, and it survives an erase-and-redraw the same way trip 0's
+ * does.
  *
  * Newly built drawings should never reach the fallback --
  * CsModel.isPlaceholderTrip sees to it that a first page lands as trip
  * 0. It is here for the drawings already out in Nathan's cave files.
  *
- * Shared because every revision path needs this same point twice: once
- * BEFORE the erase, to read the RevisionLog off the entity the erase is
- * about to delete, and once after the redraw, to put the appended log
- * back on. Two hand-rolled copies of one scan is how one of them
- * drifts.
+ * Shared because more than one caller needs this same point (the
+ * stats stamp, the declination revision's anchor bookkeeping). Two
+ * hand-rolled copies of one scan is how one of them drifts.
  */
 CsRevise.trip0Anchor = function(doc) {
     var ids = doc.queryAllEntities(false, false);
@@ -1426,89 +1425,6 @@ CsRevise.adjustTagsOn = function(entity) {
     };
     return { Adjustment: get("Adjustment"), SigmaTape: get("SigmaTape"),
         SigmaAngle: get("SigmaAngle") };
-};
-
-/**
- * The RevisionLog a drawing should carry after a revision: the log it
- * already had, with these lines appended under it.
- *
- * The one home for the log's SHAPE, for the same reason
- * CsRevise.lineworkSummary is the one home for the linework sentences.
- * TWO paths revise a trip in place -- CsRevise.apply and the Survey
- * Notebook's Draw -- and a log whose separator or carry-over rule
- * differed between them would be unreadable exactly when someone needs
- * it: months later, reading down a mixed history trying to work out
- * when the geometry moved.
- *
- * The log is append-only in SPIRIT but CAPPED in SIZE: new entries go
- * under the old ones and existing lines are never edited, but once the
- * whole log would serialize past CsRevise.LOG_BUDGET, the OLDEST lines
- * roll off. The cap exists because the log is one XDATA value, which
- * the DXF writer emits as ONE line ("RevisionLog=" + the log with each
- * newline escaped to two characters) -- and dxflib's reader has a hard
- * 1024-character line buffer (DL_DXF_MAXLINE). Truitt Cave proved it
- * the hard way (2026-08-27): nine trips of history made a 1070-char
- * line, and the drawing reopened as ONE entity out of 682 -- a save
- * from that state would have emptied the file. The full history lives
- * in Drive's version history (Nathan's call); this tag is only the
- * recent tail.
- *
- * No lines to add hands the previous log straight back UNCAPPED, which
- * is how a caller says "this changed nothing" without special-casing
- * its own commit -- the value simply does not differ, so there is
- * nothing to write (and an already-oversized log on disk is not
- * rewritten by a no-op).
- *
- * Deliberately unstamped. The existing lines carry no timestamp and
- * this codebase keeps Date out of the Core so the tests stay
- * deterministic; order down the log is the ordering information.
- *
- * \param prevLog the log read off the OLD trip-0 anchor, or ""
- * \param lines   the entries this revision wants to add
- * \return the log value to commit
- */
-CsRevise.appendLog = function(prevLog, lines) {
-    var prev = (prevLog === undefined || prevLog === null) ? "" :
-        String(prevLog);
-    var add = (lines === undefined || lines === null) ? [] : lines;
-    if (add.length === 0) {
-        return prev;
-    }
-    var full = (prev !== "" ? prev + "\n" : "") + add.join("\n");
-    return CsRevise.cappedLog(full);
-};
-
-// The largest RAW log value appendLog will return. Headroom math:
-// the serialized line is "RevisionLog=" (12) plus the value with every
-// newline escaped from one character to two. A raw value of 800 with
-// every character a newline (the impossible worst case) serializes to
-// 12 + 1600 -- still no; the REAL bound that matters is entries of
-// ~60-140 characters, giving at most ~6 extra characters per entry, so
-// 800 raw stays under ~900 serialized: comfortably inside dxflib's
-// 1024 even alongside other tags' worst cases. Tested against the
-// serialized form, not this constant, so the margin is what is pinned.
-CsRevise.LOG_BUDGET = 800;
-
-/**
- * The newest tail of a log that fits the budget: whole lines dropped
- * from the FRONT (oldest first); a single line larger than the whole
- * budget keeps its newest tail characters.
- */
-CsRevise.cappedLog = function(text) {
-    var t = (text === undefined || text === null) ? "" : String(text);
-    if (t.length <= CsRevise.LOG_BUDGET) {
-        return t;
-    }
-    var parts = t.split("\n");
-    while (parts.length > 1 &&
-            parts.join("\n").length > CsRevise.LOG_BUDGET) {
-        parts.shift();
-    }
-    var out = parts.join("\n");
-    if (out.length > CsRevise.LOG_BUDGET) {
-        out = out.substring(out.length - CsRevise.LOG_BUDGET);
-    }
-    return out;
 };
 
 /**
@@ -1582,19 +1498,17 @@ CsRevise.cappedLog = function(text) {
  *                         DistanceUnit mirror, the regenerated
  *                         ExcludedShots/UnplacedShots row blobs (their
  *                         rows carry revised distances and azimuths of
- *                         their own), and an appended RevisionLog line
- *                         per changed trip.
+ *                         their own). A stale RevisionLog from an older
+ *                         build is stripped in passing.
  *           Station-point Azimuth and LRUD tags stay as-is (accepted
  *           stale -- the leg tags are canonical, and no reader takes
  *           shot data off a station point on a v3 drawing).
  *
  *   NOT     the survey genuinely changed shape: erase every station's
  *           marks (CsDraw.eraseStations) and redraw the revised survey
- *           in place (CsDraw.survey), which rewrites all v3 tags; the
- *           RevisionLog (with the old log carried over) is then
- *           committed onto the new log anchor (CsRevise.trip0Anchor --
- *           trip 0's point, or the lowest trip's on a drawing that has
- *           no trip 0). The GeoLat/GeoLon/
+ *           in place (CsDraw.survey), which rewrites all v3 tags (and
+ *           writes no RevisionLog -- the tag is retired; a stale one
+ *           dies with the erased anchor). The GeoLat/GeoLon/
  *           GeoStation georeference anchor gets the same treatment --
  *           read off its station before the erase (CsDraw.survey has
  *           no field for it; see the module header) and recommitted
@@ -1853,44 +1767,13 @@ CsRevise.apply = function(doc, di, recon, newSurvey) {
         }
     }
 
-    // -- RevisionLog: one line per trip whose declination changed ----
-    var logLines = [];
-    var tripCount = Math.max(recon.survey.trips.length,
-        newSurvey.trips.length);
-    for (var ti = 0; ti < tripCount; ti++) {
-        var oldTrip = recon.survey.trips[ti];
-        var newTrip = newSurvey.trips[ti];
-        if (oldTrip === undefined || newTrip === undefined) {
-            continue;
-        }
-        if (oldTrip.declination !== newTrip.declination) {
-            logLines.push("trip " + ti + " declination " +
-                oldTrip.declination + " -> " + newTrip.declination +
-                " (" + (newTrip.declinationSource || "unknown") + ")");
-        }
-    }
-
-    // the OLD trip-0 anchor: previous RevisionLog rides on it, and the
-    // rigid path writes the appended log back onto the same point. Read
-    // HERE, before the non-rigid branch's erase deletes that point --
-    // read it after and the drawing's whole history comes back empty
-    // and this one entry overwrites it.
-    var findAnchor0 = function() {
-        return CsRevise.trip0Anchor(doc);
-    };
-    var oldAnchor0 = findAnchor0();
-    var prevLog = oldAnchor0 !== null ?
-        CsTags.get(oldAnchor0, "RevisionLog") : "";
-    var newLog = CsRevise.appendLog(prevLog, logLines);
-    // Which entity the rigid path below writes the log back onto, by
-    // id -- entity query order in this build is not deterministic, so
-    // the entity found here has to be recognized again by identity
-    // rather than re-derived from its tags. On a healthy drawing this
-    // IS the trip-0 anchor; on a drawing whose trips start at 1 it is
-    // trip0Anchor's fallback, and asking trip0Anchor rather than
-    // testing "Trip == 0" inline is what keeps the read and the write
-    // pointing at the same point (see trip0Anchor).
-    var logAnchorId = oldAnchor0 !== null ? oldAnchor0.getId() : null;
+    // No RevisionLog is kept anymore (Nathan, 2026-08-27): the tag was
+    // one unbounded XDATA line, dxflib's reader dies at 1024 characters
+    // on a line (Truitt Cave reopened as ONE entity of 682 over it),
+    // and Drive's version history is the actual record. The rigid path
+    // below STRIPS a stale tag when it meets one, so drawings written
+    // by older builds shed theirs on their next revision; the non-rigid
+    // path's erase-and-redraw drops it by construction.
 
     // the redrawn point carrying Station = name, or null -- same
     // lookup livePosOf uses above, but returning the entity itself
@@ -2092,10 +1975,6 @@ CsRevise.apply = function(doc, di, recon, newSurvey) {
 
                 // trip anchor points: revised trip metadata; the trip-0
                 // anchor also the legacy mirror and the serialized rows.
-                // The RevisionLog is written separately below -- it
-                // follows trip0Anchor's choice, which is the trip-0
-                // anchor here but the lowest one on a drawing that has
-                // no trip 0.
                 if (stName !== "" && CsTags.get(e, "Trip") !== "") {
                     var aTrip = CsTags.getNumber(e, "Trip");
                     aTrip = aTrip === null ? 0 : aTrip;
@@ -2118,13 +1997,12 @@ CsRevise.apply = function(doc, di, recon, newSurvey) {
                         CsTags.set(e, "UnplacedShots", unRows.join("\n"));
                     }
                 }
-                // The log goes back exactly where it was read from, so
-                // the next revision finds it. Unconditional on there
-                // being new lines: appendLog hands the old log straight
-                // back when this revision added nothing, and rewriting
-                // it unchanged is how the point keeps its history.
-                if (logAnchorId !== null && e.getId() === logAnchorId) {
-                    CsTags.set(e, "RevisionLog", newLog);
+                // Strip a stale RevisionLog written by an older build:
+                // the tag is gone from the schema (see the note where
+                // the log used to be composed, above), and an unbounded
+                // one is what bricked Truitt Cave's reopen.
+                if (CsTags.get(e, "RevisionLog") !== "") {
+                    CsTags.remove(e, "RevisionLog");
                 }
 
                 op.addObject(e, false);
@@ -2168,16 +2046,9 @@ CsRevise.apply = function(doc, di, recon, newSurvey) {
         });
         profileOutcome = CsDraw.survey(newSurvey, newResolved, anchorName,
             anchorPos).profile;
-        // the redraw wrote fresh v3 tags but knows nothing of history:
-        // carry the appended RevisionLog onto the new log anchor --
-        // findAnchor0 again, so the point written to is the one the
-        // next revision's read will find
-        if (newLog !== "") {
-            var newAnchor0 = findAnchor0();
-            if (newAnchor0 !== null) {
-                CsTags.commit(di, newAnchor0, { RevisionLog: newLog });
-            }
-        }
+        // (No RevisionLog to carry across: the erase deleted the point
+        // any stale one lived on, and the redraw writes none -- which
+        // is the removal working, not history being lost.)
         // Same problem, same shape: GeoLat/GeoLon/GeoStation rode on a
         // station point that eraseStations just erased, and
         // CsDraw.survey has no field to have put it back into (see the
