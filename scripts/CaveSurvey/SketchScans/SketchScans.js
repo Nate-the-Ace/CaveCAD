@@ -1,6 +1,7 @@
 // SketchScans.js
 //
-// QCAD add-on tool: browse the cave's scans/ folder, preview each
+// QCAD add-on tool: browse the cave's scans/ folder -- including the
+// per-trip subfolders surveyors actually keep scans in -- preview each
 // sketch large enough to tell the right one from the rest, and insert
 // it into the drawing -- straight into the Align Image tool, so a scan
 // goes from folder to aligned underlay in one motion.
@@ -14,7 +15,7 @@
 // Inserting is ADDITIVE -- several scans commonly underlie one map, so
 // re-running never erases previous scans (unlike the basemap and the
 // contours, which replace themselves). Each image is tagged
-// SketchScan=<file name> and lands on CTRL-SCAN, scaled to sit over
+// SketchScan=<path relative to scans/> and lands on CTRL-SCAN, scaled to sit over
 // the survey at a sensible size, on TOP of the draw order -- an
 // underlay being aligned needs to be visible; send it to back with
 // Modify > Draw Order once traced.
@@ -78,7 +79,15 @@ function sketchScansRun() {
     SketchScans.dialog(doc, di, scans, files);
 }
 
-/** Image files in a folder, name-sorted, by the formats QImage reads. */
+// How deep below scans/ to look. Real caves nest scans in per-trip
+// subfolders ("scans/2025 Scans/9-7-25 Survey Scans/..."), so a
+// top-level-only listing sees an empty folder on every real cave.
+SketchScans.DEPTH = 4;
+
+/**
+ * Image files under a scans folder, RECURSIVE, as paths relative to it,
+ * name-sorted, by the formats QImage reads.
+ */
 SketchScans.imageFiles = function(folder) {
     var filters = [];
     try {
@@ -90,20 +99,16 @@ SketchScans.imageFiles = function(folder) {
         filters = ["*.png", "*.jpg", "*.jpeg", "*.tif", "*.tiff",
             "*.bmp", "*.gif"];
     }
+    var names = CsCave.filesUnder(folder, filters, SketchScans.DEPTH);
     var out = [];
-    try {
-        var dir = new QDir(folder);
-        var names = dir.entryList(filters, QDir.Files, QDir.Name);
-        for (var k = 0; k < names.length; k++) {
-            var name = String(names[k]);
-            // the map's own generated preview is not a sketch
-            if (CsCave.isPreviewName && CsCave.isPreviewName(name)) {
-                continue;
-            }
-            out.push(name);
+    for (var k = 0; k < names.length; k++) {
+        var name = names[k];
+        var base = name.substring(name.lastIndexOf("/") + 1);
+        // the map's own generated preview is not a sketch
+        if (CsCave.isPreviewName && CsCave.isPreviewName(base)) {
+            continue;
         }
-    } catch (e2) {
-        // unreadable folder reads as empty
+        out.push(name);
     }
     return out;
 };

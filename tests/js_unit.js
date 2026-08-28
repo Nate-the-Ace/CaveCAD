@@ -9257,6 +9257,61 @@ if (!IS_NODE) {
         "and neither does an unsaved one");
 }
 
+// filesUnder: the recursive listing behind Sketch Scans. Real caves
+// keep their scans in per-trip subfolders ("scans/2025 Scans/9-7-25
+// Survey Scans/..."), so a top-level-only listing sees an empty folder
+// -- the bug that made the tool report "nothing reads as an image" on
+// every real cave it was pointed at.
+if (!IS_NODE) {
+    (function() {
+        function write(path) {
+            var f = new QFile(path);
+            if (!f.open(QIODevice.WriteOnly | QIODevice.Truncate)) {
+                return false;
+            }
+            new QTextStream(f).writeString("x");
+            f.close();
+            return true;
+        }
+
+        var base = QDir.tempPath() + "/cs_unit_filesunder";
+        var root = new QDir(QDir.tempPath());
+        root.mkpath("cs_unit_filesunder/2025 Scans/9-7 Trip");
+        root.mkpath("cs_unit_filesunder/.hidden");
+        ok(write(base + "/top.png") &&
+           write(base + "/notes.txt") &&
+           write(base + "/2025 Scans/9-7 Trip/page1.png") &&
+           write(base + "/2025 Scans/9-7 Trip/page2.png") &&
+           write(base + "/.hidden/ghost.png"),
+            "filesUnder: fixture files written");
+
+        var found = CsCave.filesUnder(base, ["*.png"], 4);
+        eqs(found.join(","),
+            "2025 Scans/9-7 Trip/page1.png," +
+            "2025 Scans/9-7 Trip/page2.png," +
+            "top.png",
+            "filesUnder: nested files come back as sorted relative " +
+            "paths, filters hold, hidden folders are skipped");
+
+        ok(CsCave.filesUnder(base, ["*.png"], 0).join(",") === "top.png",
+            "filesUnder: depth 0 is the old top-level-only view");
+        ok(CsCave.filesUnder(base + "/nowhere", ["*.png"], 4).length === 0,
+            "filesUnder: a missing folder reads as empty");
+        ok(CsCave.filesUnder("", ["*.png"], 4).length === 0 &&
+           CsCave.filesUnder(null, ["*.png"], 4).length === 0,
+            "filesUnder: no folder, no files");
+
+        // fixture teardown -- the temp folder does not accrete
+        new QFile(base + "/top.png").remove();
+        new QFile(base + "/notes.txt").remove();
+        new QFile(base + "/2025 Scans/9-7 Trip/page1.png").remove();
+        new QFile(base + "/2025 Scans/9-7 Trip/page2.png").remove();
+        new QFile(base + "/.hidden/ghost.png").remove();
+        root.rmpath("cs_unit_filesunder/2025 Scans/9-7 Trip");
+        root.rmpath("cs_unit_filesunder/.hidden");
+    }());
+}
+
 // ---------------------------------------------------------------------
 // CsProfile -- name parsing and run grouping
 // ---------------------------------------------------------------------

@@ -229,6 +229,46 @@ CsCave.pdfFolderOf = function(folder) {
     return CsCave.findSubfolder(folder, CsCave.PDF);
 };
 
+// Every file under `folder` matching the QDir name filters, as paths
+// RELATIVE to `folder`, sorted case-insensitively. Recurses into
+// subfolders down to `maxDepth` levels (0 = the folder itself only),
+// skipping hidden ones. Surveyors keep scans in per-trip subfolders
+// ("scans/2025 Scans/9-7-25 Survey Scans/..."), so a flat listing of
+// scans/ itself sees nothing.
+CsCave.filesUnder = function(folder, filters, maxDepth) {
+    if (typeof QDir === "undefined") { return []; }
+    if (typeof folder !== "string" || folder === "") { return []; }
+    if (typeof maxDepth !== "number" || maxDepth < 0) { maxDepth = 4; }
+    var out = [];
+    var walk = function(abs, rel, depth) {
+        var dir = new QDir(abs);
+        if (!dir.exists()) { return; }
+        var files = dir.entryList(filters, QDir.Files, QDir.Name);
+        var i;
+        for (i = 0; i < files.length; i++) {
+            out.push(rel + String(files[i]));
+        }
+        if (depth >= maxDepth) { return; }
+        var subs = dir.entryList([], QDir.Dirs | QDir.NoDotAndDotDot,
+            QDir.Name);
+        for (i = 0; i < subs.length; i++) {
+            var name = String(subs[i]);
+            if (name.charAt(0) === ".") { continue; }
+            walk(abs + "/" + name, rel + name + "/", depth + 1);
+        }
+    };
+    try {
+        walk(folder, "", 0);
+    } catch (e) {
+        // an unreadable folder reads as empty
+    }
+    out.sort(function(a, b) {
+        var la = a.toLowerCase(), lb = b.toLowerCase();
+        return la < lb ? -1 : (la > lb ? 1 : 0);
+    });
+    return out;
+};
+
 // The photographs in a cave's images folder -- everything except the
 // preview this suite generates. Name-sorted, full paths.
 CsCave.imageFiles = function(folder, includePreview) {
