@@ -43,6 +43,7 @@ include("scripts/EAction.js");
 include("scripts/simple.js");
 include(includeBasePath + "/../Core/CsAll.js");
 include(includeBasePath + "/../AlignImage/AlignImage.js");
+include(includeBasePath + "/ScanView.js");
 
 // The panel, built once per session (FeatureTrace's pattern).
 var csSketchScansDock;
@@ -255,6 +256,10 @@ SketchScans.buildDock = function(appWin) {
     } catch (eList) {
     }
 
+    // The preview: a real CAD view over a scratch document holding just
+    // the scan, so it zooms and pans (see ScanView.js). The old QLabel
+    // stays as the fallback for a build that cannot embed a view, and
+    // as the place messages go either way.
     w.preview = new QLabel("");
     try {
         w.preview.minimumHeight = 40;
@@ -262,12 +267,52 @@ SketchScans.buildDock = function(appWin) {
     } catch (ePrev) {
     }
 
+    w.previewPane = new QWidget();
+    var previewLayout = new QVBoxLayout();
+    try {
+        previewLayout.setContentsMargins(0, 0, 0, 0);
+    } catch (eMargins) {
+    }
+    w.scanView = CsScanPreview.build(w.previewPane);
+    if (w.scanView !== null) {
+        previewLayout.addWidget(w.scanView.view, 1, 0);
+        var zoomRow = new QHBoxLayout();
+        w.fitButton = new QPushButton(qsTr("Fit"));
+        w.fitButton.toolTip = qsTr("Fit the whole scan in the pane.");
+        w.zoomInButton = new QPushButton("+");
+        w.zoomOutButton = new QPushButton("\u2212");
+        try {
+            w.zoomInButton.maximumWidth = 34;
+            w.zoomOutButton.maximumWidth = 34;
+            w.fitButton.maximumWidth = 50;
+        } catch (eZw) {
+        }
+        zoomRow.addWidget(w.fitButton, 0, 0);
+        zoomRow.addWidget(w.zoomOutButton, 0, 0);
+        zoomRow.addWidget(w.zoomInButton, 0, 0);
+        zoomRow.addStretch(1);
+        previewLayout.addLayout(zoomRow, 0);
+        w.fitButton.clicked.connect(function() {
+            CsScanPreview.fit(w.scanView);
+        });
+        w.zoomInButton.clicked.connect(function() {
+            CsScanPreview.zoom(w.scanView, 1.4);
+        });
+        w.zoomOutButton.clicked.connect(function() {
+            CsScanPreview.zoom(w.scanView, 1 / 1.4);
+        });
+        // the label is only for messages now
+        w.preview.visible = false;
+    }
+    previewLayout.addWidget(w.preview, w.scanView === null ? 1 : 0, 0);
+    w.previewPane.setLayout(previewLayout);
+
     // List over preview on a draggable splitter, so the preview is
     // whatever size the user wants it -- the drag is remembered, the
     // same way the Survey Notebook remembers its page/status split.
     w.splitter = new QSplitter(Qt.Vertical);
     w.splitter.addWidget(w.list);
-    w.splitter.addWidget(w.preview);
+    w.splitter.addWidget(w.previewPane);
     try {
         w.splitter.setStretchFactor(0, 3); // the list gets the growth
         w.splitter.setStretchFactor(1, 1);
@@ -301,8 +346,13 @@ SketchScans.buildDock = function(appWin) {
                     w.splitter.sizes().join(","));
             } catch (eSave) {
             }
-            // the pane changed size under the picture: rescale it
-            SketchScans.showPreview();
+            // The pane changed size under the picture. The LABEL path
+            // needs a rescale; the view path does not, and re-showing
+            // would throw away the zoom the caver had just set.
+            if (SketchScans.w !== undefined && SketchScans.w !== null &&
+                    SketchScans.w.scanView === null) {
+                SketchScans.showPreview();
+            }
         });
     } catch (eSplit) {
         // bridge without sizes()/setSizes(): stretch factors stand
@@ -346,20 +396,44 @@ SketchScans.buildDock = function(appWin) {
         return w.rows[row].kind === "file" ? w.rows[row].rel : null;
     };
 
+    var showMessage = function(text) {
+        w.preview.text = text;
+        try {
+            w.preview.visible = (text !== "");
+        } catch (eVis) {
+        }
+    };
+
     var showPreview = function() {
         var rel = selectedFile();
-        w.preview.text = "";
+        showMessage("");
         try {
             w.preview.setPixmap(new QPixmap());
         } catch (eClear) {
         }
+
+        if (w.scanView !== null) {
+            if (rel === null || w.scans === null) {
+                try {
+                    w.scanView.di.clear();
+                } catch (eEmpty) {
+                }
+                return;
+            }
+            if (!CsScanPreview.show(w.scanView, w.scans + "/" + rel)) {
+                showMessage(qsTr("unreadable image"));
+            }
+            return;
+        }
+
+        // No embeddable view in this build: the scaled pixmap, as before.
         if (rel === null || w.scans === null) {
             return;
         }
         try {
             var pixmap = new QPixmap(w.scans + "/" + rel);
             if (pixmap.isNull()) {
-                w.preview.text = qsTr("unreadable image");
+                showMessage(qsTr("unreadable image"));
                 return;
             }
             // Scale to the pane's ACTUAL size -- the user sets it with
@@ -369,7 +443,7 @@ SketchScans.buildDock = function(appWin) {
             w.preview.setPixmap(pixmap.scaled(paneW, paneH,
                 Qt.KeepAspectRatio, Qt.SmoothTransformation));
         } catch (e) {
-            w.preview.text = qsTr("unreadable image");
+            showMessage(qsTr("unreadable image"));
         }
     };
 
