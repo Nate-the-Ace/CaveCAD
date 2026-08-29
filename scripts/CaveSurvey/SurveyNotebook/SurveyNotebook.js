@@ -1408,7 +1408,7 @@ SurveyNotebook.drawMergedSurvey = function(w, doc, survey, recon) {
     }
     var lwLine = lw === null ? "" :
         ("\n\n" + CsRevise.lineworkSummary(lw.moved, lw.unmoved,
-            lwBound).join("\n"));
+            lwBound, true, lw.warped).join("\n"));
 
     // -- the georeference survives the redraw --------------------------
     // Recommitted onto whichever point now carries the anchored station
@@ -1495,7 +1495,7 @@ SurveyNotebook.drawMergedSurvey = function(w, doc, survey, recon) {
         // one in front of it, which is why the count is named here
         (lwBound > 0 ? "; binding " + lwBound + " untagged item" +
             (lwBound === 1 ? "" : "s") + " was a further one" : "") +
-        (lw !== null && lw.moved > 0 ?
+        (lw !== null && (lw.moved > 0 || lw.warped > 0) ?
             "; the linework move is a further one" : "") +
         // and the log write is the last one, for the same reason: a
         // user undoing back past the redraw needs to know how many

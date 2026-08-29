@@ -2011,6 +2011,22 @@ var ABANDONED_TRACING_WARNING =
 //    sketch genuinely failed to follow (same shape as fixture 9's
 //    incoherent-movement refusal) -- the warning MUST still fire, or
 //    11a/11b's fix has been over-applied into silence.
+//
+//    Task 3 note: this used to trace a POLYLINE onto A1/A3/A5, the same
+//    shape fixture 9 above builds. Task 2 (commit 52a4905) made
+//    polylines warp per-vertex instead of refusing on an incoherent
+//    bound-station set -- fixture 9 was updated for that (it now
+//    proves the warp), but this fixture's whole POINT is the OTHER
+//    half of the contract: proving the warning still fires when
+//    something genuinely does NOT follow. A polyline can no longer
+//    reach that outcome (moved 0 there now means "bent", not
+//    "refused"), so this fixture traces an RTextEntity instead -- a
+//    type moveLinework's docblock explicitly keeps on the old
+//    rigid-fit-with-refusal path -- tagged directly with the same
+//    incoherent A1/A3/A5 station set fixture 9 uses, bypassing
+//    CsProfileBind.claim's proximity search (a single text anchor
+//    point cannot bind to three stations by distance the way a
+//    3-vertex polyline can).
 (function() {
     var svI = CsModel.newSurvey();
     svI.shots = [
@@ -2039,12 +2055,14 @@ var ABANDONED_TRACING_WARNING =
     if (i1 !== null && i3 !== null && i5 !== null) {
         CsLayers.ensure(dI, iI, "PROFILE-CEILING");
         var opI = new RAddObjectsOperation();
-        var dataI = new RPolylineData();
-        dataI.appendVertex(new RVector(i1.x, i1.y));
-        dataI.appendVertex(new RVector(i3.x, i3.y));
-        dataI.appendVertex(new RVector(i5.x, i5.y));
-        var tracedI = new RPolylineEntity(dI, dataI);
+        var at = new RVector(i3.x, i3.y);
+        var tdI = new RTextData(at, at, 2.0, 100.0,
+            RS.VAlignMiddle, RS.HAlignLeft, RS.LeftToRight, RS.Exact,
+            1.0, "trace note", "standard", false, false, 0.0, false);
+        var tracedI = new RTextEntity(dI, tdI);
         tracedI.setLayerId(dI.getLayerId("PROFILE-CEILING"));
+        CsTags.set(tracedI, CsBind.STATIONS_TAG,
+            CsBind.encodeStations(["A1", "A3", "A5"]));
         opI.addObject(tracedI, false);
         iI.applyOperation(opI);
 
@@ -2056,6 +2074,13 @@ var ABANDONED_TRACING_WARNING =
         eqs(countsI.linework.moved, 0,
             "sanity: the incoherent sketch is refused (moved 0), same as " +
             "fixture 9 above");
+        eqs(countsI.linework.warped, 0,
+            "sanity: a text entity has no per-vertex structure to warp " +
+            "-- it is refused outright, not bent, got " +
+            JSON.stringify(countsI.linework));
+        eqs(countsI.linework.unmoved.length, 1,
+            "sanity: the text entity itself is the one refusal, got " +
+            JSON.stringify(countsI.linework));
         ok(countsI.stationsMoved === true,
             "sanity: render() recognises that stations DID genuinely " +
             "move this time -- the refusal below is real, not a no-op " +

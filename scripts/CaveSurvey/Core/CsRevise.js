@@ -1471,6 +1471,9 @@ CsRevise.lineworkClaimLine = function(bound) {
  *
  * \param bound         optional -- entities this revision bound by
  *                       itself
+ * \param warped        optional -- of `moved`'s entities, how many
+ *                       actually bent (per-vertex disagreement) rather
+ *                       than moving as one rigid piece. Defaults to 0.
  * \param stationsMoved optional, defaults to true (every existing
  *                       caller reaches this function only after a real
  *                       change: CsRevise.apply's non-rigid branch only
@@ -1490,13 +1493,16 @@ CsRevise.lineworkClaimLine = function(bound) {
  *                       genuine refusal -- see CsReport.profileSummary.
  * \return array of lines
  */
-CsRevise.lineworkSummary = function(moved, unmoved, bound, stationsMoved) {
+CsRevise.lineworkSummary = function(moved, unmoved, bound, stationsMoved,
+        warped) {
     var n = (moved === undefined || moved === null) ? 0 : moved;
+    var w = (warped === undefined || warped === null) ? 0 : warped;
     var list = (unmoved === undefined || unmoved === null) ? [] : unmoved;
     var didStationsMove = (stationsMoved === undefined ||
         stationsMoved === null) ? true : !!stationsMoved;
     var lines = [];
-    lines.push("Traced linework moved with its stations: " + n);
+    lines.push("Traced linework moved with its stations: " + n +
+        (w > 0 ? " (" + w + " warped to follow a bend)" : ""));
     var claim = CsRevise.lineworkClaimLine(bound);
     if (claim !== "") {
         lines.push(claim);
@@ -1521,7 +1527,7 @@ CsRevise.lineworkSummary = function(moved, unmoved, bound, stationsMoved) {
             lines.push("  ... and " + (list.length - cap) + " more");
         }
     }
-    if (n === 0 && didStationsMove) {
+    if (n === 0 && w === 0 && didStationsMove) {
         // Nothing was bound, so nothing could follow -- and an unbound
         // trace is invisible to us, which is why this stays a warning
         // even when the unmoved list above is empty. But this is only
@@ -1530,7 +1536,11 @@ CsRevise.lineworkSummary = function(moved, unmoved, bound, stationsMoved) {
         // because there was NOTHING for a sketch to follow yet, not
         // because a sketch failed to follow it -- didStationsMove=false
         // says so, and the warning would otherwise fire on every clean
-        // run of a feature that draws on every plan draw.
+        // run of a feature that draws on every plan draw. A warped
+        // entity followed the revision just as much as a rigidly-moved
+        // one did -- moved===0 with warped>0 means everything that
+        // could follow, did, just by bending rather than sliding as one
+        // piece, so this warning must not fire on that case either.
         lines.push("");
         lines.push("WARNING -- hand-drawn linework that is not bound " +
             "to the survey did NOT move with it; re-trace walls and " +
@@ -1802,6 +1812,10 @@ CsRevise.adjustTagsOn = function(entity) {
  *   lineworkMoved   how many traced entities followed their own
  *                   stations. 0 on the rigid path, where the single
  *                   whole-drawing transform carried them all already
+ *   lineworkWarped  of lineworkMoved's own count on the non-rigid
+ *                   path, how many actually bent per-vertex rather
+ *                   than moving as one rigid piece. Always 0 on the
+ *                   rigid path
  *   lineworkUnmoved ["LAYER #id"] the traced entities that had no
  *                   surviving station to follow, or whose stations
  *                   moved too incoherently for one rigid move to
@@ -2041,6 +2055,7 @@ CsRevise.apply = function(doc, di, recon, newSurvey) {
     // transform already carried every traced entity with it and there
     // is nothing per-entity to count.
     var lineworkMoved = 0;
+    var lineworkWarped = 0;
     var lineworkUnmoved = [];
     var lineworkBound = 0;
 
@@ -2370,6 +2385,7 @@ CsRevise.apply = function(doc, di, recon, newSurvey) {
             var lw = CsRevise.moveLinework(doc, di, oldPos, newPos,
                 tripNames, extent);
             lineworkMoved = lw.moved;
+            lineworkWarped = lw.warped;
             lineworkUnmoved = lw.unmoved;
         });
     }
@@ -2397,6 +2413,7 @@ CsRevise.apply = function(doc, di, recon, newSurvey) {
         anchorMissing: anchorMissing,
         anchorUsed: { name: anchorName, source: anchorSource },
         lineworkMoved: lineworkMoved,
+        lineworkWarped: lineworkWarped,
         lineworkUnmoved: lineworkUnmoved,
         lineworkBound: lineworkBound
     };

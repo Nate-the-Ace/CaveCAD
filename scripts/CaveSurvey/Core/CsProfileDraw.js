@@ -1399,7 +1399,7 @@ CsProfileDraw.render = function(doc, di, profile, opts) {
     });
 
     counts.claimed = claimed;
-    counts.linework = { moved: 0, unmoved: [] };
+    counts.linework = { moved: 0, warped: 0, unmoved: [] };
     // Recorded BEFORE moveLinework runs (and kept even if moveLinework
     // then throws, below): CsReport.profileSummary needs to tell "no
     // station moved, so there was nothing for a sketch to follow" apart
@@ -1447,7 +1447,8 @@ CsProfileDraw.render = function(doc, di, profile, opts) {
             });
         }
     } catch (eMove) {
-        counts.linework = { moved: 0, unmoved: ["move failed: " + eMove] };
+        counts.linework = { moved: 0, warped: 0,
+            unmoved: ["move failed: " + eMove] };
     }
 
     // An entity claim() could bind to NO station at all never gets a
