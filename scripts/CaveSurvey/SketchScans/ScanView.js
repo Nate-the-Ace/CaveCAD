@@ -65,7 +65,6 @@ CsScanView.prototype.resizeEvent = function(event) {
  * to carry and nothing to convert at the far end.
  */
 CsScanView.prototype.mousePressEvent = function(event) {
-    CsScanView.callBase(this, "mousePressEvent", event);
     var at = CsScanView.eventPos(event);
     var button = 0;
     try {
@@ -78,8 +77,13 @@ CsScanView.prototype.mousePressEvent = function(event) {
     // here, so either spelling is the same test.
     if (button === Qt.MidButton) {
         this.panFrom = at;
+        // Deliberately WITHOUT chaining: the navigation action installed
+        // for the wheel would otherwise start its own pan on the same
+        // drag and the scan would move twice as far as the mouse.
         return;
     }
+    // every other button goes on to the view's own handling
+    CsScanView.callBase(this, "mousePressEvent", event);
     if (button !== Qt.LeftButton || typeof this.onScanPick !== "function" ||
             at === null) {
         return;
@@ -146,48 +150,11 @@ CsScanView.eventPos = function(event) {
     return null;
 };
 
-/** How much a wheel notch turned, whichever API this Qt offers. */
-CsScanView.wheelSteps = function(event) {
-    try {
-        if (typeof event.angleDelta === "function") {
-            var d = event.angleDelta();
-            var dy = (typeof d.y === "function") ? d.y() : d.y;
-            return dy / 120.0;
-        }
-        if (typeof event.delta === "function") {
-            return event.delta() / 120.0;
-        }
-    } catch (e) {
-    }
-    return 0;
-};
-
-/** Zoom step per wheel notch. */
-CsScanView.WHEEL_FACTOR = 1.25;
-
-/**
- * The wheel zooms ABOUT THE CURSOR, the way every map and every CAD
- * view does: the point under the pointer stays under the pointer.
- * RGraphicsView.zoom takes its centre in MODEL coordinates, which is
- * what mapFromView answers.
- */
-CsScanView.prototype.wheelEvent = function(event) {
-    var steps = CsScanView.wheelSteps(event);
-    if (steps === 0) {
-        CsScanView.callBase(this, "wheelEvent", event);
-        return;
-    }
-    try {
-        var iv = this.getImageView();
-        var at = CsScanView.eventPos(event);
-        var centre = (at === null) ?
-            iv.mapFromView(new RVector(iv.getWidth() / 2, iv.getHeight() / 2)) :
-            iv.mapFromView(new RVector(at.x, at.y));
-        iv.zoom(centre, Math.pow(CsScanView.WHEEL_FACTOR, steps));
-    } catch (e) {
-        CsScanView.callBase(this, "wheelEvent", event);
-    }
-};
+// NO wheelEvent OVERRIDE. qcadjsapi's generated wrapper has no
+// wheelEvent -- QWheelEvent is not a wrapped type -- so the wheel never
+// reaches script at all and an override of it is dead code that looks
+// alive. Wheel zoom comes from the DefaultNavigation action installed
+// in CsScanPreview.build instead.
 
 /**
  * MIDDLE-DRAG PANS, the same gesture QCAD's own views use, which
@@ -195,10 +162,11 @@ CsScanView.prototype.wheelEvent = function(event) {
  * pan() takes a delta in VIEW pixels and flips y itself.
  */
 CsScanView.prototype.mouseMoveEvent = function(event) {
-    CsScanView.callBase(this, "mouseMoveEvent", event);
     if (this.panFrom === undefined || this.panFrom === null) {
+        CsScanView.callBase(this, "mouseMoveEvent", event);
         return;
     }
+    // mid-drag: ours alone, for the reason in mousePressEvent
     try {
         var at = CsScanView.eventPos(event);
         if (at === null) {
@@ -241,6 +209,26 @@ CsScanPreview.build = function(parent) {
         imageView.setPaintOrigin(false);
         imageView.setScene(new RGraphicsSceneQt(di));
         imageView.setMargin(10);
+
+        // THE WHEEL NEEDS A NAVIGATION ACTION. A script override cannot
+        // do it: qcadjsapi's generated wrapper has no wheelEvent at all
+        // (QWheelEvent is not a wrapped type), so the wheel never
+        // reaches script -- which is why an override of it did nothing
+        // while the mouse overrides worked.
+        //
+        // QCAD's own embedded view does exactly this: see
+        // scripts/Widgets/ViewportWidget/ViewportWidget.js, which hands
+        // its image view a DefaultNavigation. That is where wheel zoom
+        // lives.
+        try {
+            include("scripts/Navigation/DefaultNavigation/DefaultNavigation.js");
+            if (typeof DefaultNavigation !== "undefined") {
+                imageView.setNavigationAction(new DefaultNavigation(view));
+            }
+        } catch (eNav) {
+            // no navigation action here: the Fit and +/- buttons still
+            // zoom, and the middle-drag pan below is unaffected
+        }
         return { view: view, di: di, doc: doc, imageView: imageView };
     } catch (e) {
         return null;

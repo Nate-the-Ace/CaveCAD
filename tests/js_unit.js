@@ -15732,24 +15732,6 @@ if (!IS_NODE) {
             ok(CsScanView.eventPos({}) === null,
                 "eventPos: an event with neither answers null, not a throw");
 
-            // Wheel notches, whichever API this Qt offers: 120 units is
-            // one notch either way.
-            near(CsScanView.wheelSteps({ angleDelta: function() {
-                    return { x: 0, y: 240 }; } }), 2, 1e-9,
-                "wheelSteps: two notches from angleDelta");
-            near(CsScanView.wheelSteps({ delta: function() {
-                    return -120; } }), -1, 1e-9,
-                "wheelSteps: one notch back from delta");
-            eqs(CsScanView.wheelSteps({}), 0,
-                "wheelSteps: an event with neither scrolls nothing");
-
-            // THE BUG THAT MADE THE VIEWER IGNORE EVERYTHING. Only
-            // resizeEvent is exposed on RGraphicsViewQt.prototype in
-            // this bridge; mousePressEvent, mouseMoveEvent,
-            // mouseReleaseEvent and wheelEvent are all undefined. An
-            // unguarded base call threw a TypeError on the handler's
-            // FIRST line, so clicks, the wheel and the middle button
-            // all did nothing while the code read correctly.
             // THE BASE IS ON THE INSTANCE, UNDER A "Super" NAME. The
             // prototype carries no mousePressEvent at all, so chaining
             // through it throws on the override's first line and kills
