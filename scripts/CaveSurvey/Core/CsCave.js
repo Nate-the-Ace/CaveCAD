@@ -487,7 +487,26 @@ CsCave.pointAtScans = function(docPath) {
     }
 };
 
-// Runs pointAtScans after every successful save.
+// Runs pointAtScans after every successful save -- OR IT WOULD, IF IT
+// RAN AT ALL.
+//
+// MEASURED INERT, 2026-08-29. probe/CsSaveProbe wrapped this same
+// prototype on top of this hook and watched a real GUI save of Truitt
+// Cave: armed 08:15:43, drawing written 08:15:56, nothing fired. QCAD
+// builds its actions in their own script context
+// (RScriptHandlerJs::createActionDocumentLevel), so the prototype
+// patched here is not the prototype the Save action uses -- exactly what
+// CsBackup predicted and left unconfirmed. So NONE of the work below has
+// ever happened on a save: the scans folder is not pointed at, the cave
+// is not registered on the shelf, the project folders (including
+// backup/) are not created, and no preview is written from here. The
+// preview that does exist comes from CaveShelf.captureThumbnailSoon,
+// which is on its own timer and unrelated.
+//
+// Left installed rather than deleted, because deleting it would also
+// delete the record of what should happen on save -- and that list is
+// the specification for the fork patch that will do it properly. Do not
+// add anything new here expecting it to run.
 //
 // Wrapping the prototype rather than asking each caller to opt in: a
 // hook you have to remember to call is a hook that is off on the

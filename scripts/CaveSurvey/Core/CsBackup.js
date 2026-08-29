@@ -383,8 +383,16 @@ CsBackup.prune = function(path) {
  *     and never runs. QCAD builds an action in its own script context
  *     (RScriptHandlerJs::createActionDocumentLevel), so the prototype
  *     patched from add-on init is not the prototype the action uses.
- *     CsCave.installSaveHook uses the same mechanism and is very likely
- *     just as inert.
+ *     CONFIRMED 2026-08-29 with probe/CsSaveProbe against a real GUI
+ *     save of Truitt Cave: probe armed 08:15:43, drawing written
+ *     08:15:56, and the probe log did not grow. Neither
+ *     Save.prototype.save nor SaveAs.prototype.save nor even the JS
+ *     binding RDocumentInterface.prototype.exportFile was traversed.
+ *     CsCave.installSaveHook uses the same mechanism and is therefore
+ *     inert too -- everything it does on save (pointAtScans,
+ *     CsShelf.registerSaved, ensureProjectFolders, writePreview) has
+ *     never run. Anything that must happen on save belongs in a fork
+ *     patch to scripts/File/Save/Save.js, the shape patch 0005 uses.
  *   - RExportListenerAdapter's preExport/postExport/endOfExport fire
  *     ZERO times for RDocumentInterface::exportFile, which is what a
  *     save actually calls. Those signals belong to the graphics-export

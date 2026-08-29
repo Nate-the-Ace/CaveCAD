@@ -456,18 +456,23 @@ files are additive and cost little. Windows waits for an installer.
 
 ## Open questions
 
-1. **Does `CsCave.installSaveHook` actually fire?** Still unmeasured.
-   `CsBackup.js` says a `Save.prototype` patch from add-on init "installs
-   cleanly, reports success, and never runs", and suspects
-   `installSaveHook` is inert for the same reason. I tried to settle it
-   from disk and could not: the thumbnail cache looked like proof until
-   `RDocumentInterface.cpp:1435` turned out to call `updateThumbnail()`
-   in C++ anyway, and `Image/Path` points at a real cave's scans folder
-   that also contains a hand-insertable image. The decisive test needs
-   the GUI: with CaveCAD running, install a probe wrapper that writes a
-   settings key, save once, read the key back. It changes the mechanism
-   only, not the design — the fork patch is on the critical path either
-   way.
+1. ~~**Does `CsCave.installSaveHook` actually fire?**~~ **ANSWERED
+   2026-08-29: no.** `probe/CsSaveProbe` wrapped `Save.prototype.save`,
+   `SaveAs.prototype.save` and `RDocumentInterface.prototype.exportFile`
+   on top of the suite's own hook and watched a real GUI save of Truitt
+   Cave. Probe armed 08:15:43; the drawing was written 08:15:56; the
+   probe log did not grow. Nothing fired — not even the JS binding for
+   `exportFile`, so the save does not traverse that binding from the
+   action's context either. `CsBackup`'s prediction was right and
+   `installSaveHook` is inert, which means everything it does on save has
+   never run: `pointAtScans`, `CsShelf.registerSaved`,
+   `ensureProjectFolders` (so `backup/` never appears on save) and
+   `writePreview`. The preview files that do exist come from
+   `CaveShelf.captureThumbnailSoon`, on its own timer.
+
+   So the companion's on-save write is a fork patch, not a question. So
+   is `backup/`, and so are the other four.
+
 2. **Should `.dxf` also be claimed on macOS?** See above; it is a
    desktop-wide decision, not a feature decision.
 3. **Revision history.** A sidecar has no tag-length ceiling, so the
