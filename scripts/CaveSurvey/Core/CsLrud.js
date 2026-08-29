@@ -193,6 +193,109 @@ CsLrud.stationWallPoints = function(st, passageAz, lrud, splays, side,
 };
 
 /**
+ * The 3D sibling of stationWallPoints: the SAME measured wall points,
+ * with the elevation kept.
+ *
+ * The 2D function drops dz because the plan view has no use for it.
+ * That is correct there and wrong for a cross section, which is exactly
+ * the view that needs it. Side assignment, the dead zone, the ordering
+ * and the stats accounting are all the 2D function's -- this differs in
+ * what it KEEPS, not in what it decides. Keep the two in step: a rule
+ * changed in one and not the other is a section that disagrees with the
+ * plan about which wall a splay hit.
+ *
+ * \return [{x, y, z}] in along-passage order, possibly empty
+ */
+CsLrud.stationWallPoints3D = function(st, passageAz, lrud, splays, side,
+        tapeMode, stats) {
+    var entries = [];
+    var z0 = (st.z === undefined || st.z === null) ? 0 : st.z;
+    var i;
+
+    if (lrud !== null && lrud !== undefined) {
+        var len = (side === "L") ? lrud.left : lrud.right;
+        if (len !== null && len !== undefined) {
+            // 0 means the wall is AT the station: a wall point, no tick
+            var p = (len === 0) ? { x: st.x, y: st.y } :
+                CsLrud.tickEnd(st, lrud.azimuth, side, len);
+            if (p !== null) {
+                // L and R are measured horizontally, so they sit at the
+                // station's own elevation.
+                entries.push({ p: { x: p.x, y: p.y, z: z0 },
+                               t: 0.0, order: -1 });
+            }
+        }
+    }
+
+    if (splays !== undefined && splays !== null) {
+        var azRad = passageAz * Math.PI / 180.0;
+        var alongX = Math.sin(azRad), alongY = Math.cos(azRad);
+        for (i = 0; i < splays.length; i++) {
+            var sp = splays[i];
+            var rel = CsLrud.relativeBearing(passageAz,
+                CsTraverse.effectiveAzimuth(sp));
+            // exactly along the axis: on the centerline, neither wall
+            if (rel === 0.0 || rel === 180.0 || rel === -180.0) {
+                continue;
+            }
+            var onRight = (rel > 0.0);
+            if ((side === "R") !== onRight) {
+                continue;
+            }
+            var o = CsTraverse.offset(sp, tapeMode);
+            if (o === null) {
+                // as in the 2D sibling: a splay with nothing on record
+                // contributes NOTHING rather than a fabricated point
+                if (stats !== undefined && stats !== null) {
+                    stats.skipped++;
+                }
+                continue;
+            }
+            // THE WHOLE POINT OF THIS FUNCTION: dz is kept.
+            entries.push({
+                p: { x: st.x + o.dx, y: st.y + o.dy, z: z0 + o.dz },
+                t: o.dx * alongX + o.dy * alongY,
+                order: i
+            });
+        }
+    }
+
+    entries.sort(function(a, b) {
+        if (a.t < b.t) { return -1; }
+        if (a.t > b.t) { return 1; }
+        return a.order - b.order;
+    });
+
+    var out = [];
+    for (i = 0; i < entries.length; i++) {
+        out.push(entries[i].p);
+    }
+    return out;
+};
+
+/**
+ * The ceiling and floor points a station's U and D give, in 3D.
+ *
+ * null for a side with no measurement -- NOT a point at the station,
+ * which would assert a wall nobody measured. 0 IS a measurement: the
+ * ceiling is at the station.
+ */
+CsLrud.stationCeilingFloor3D = function(st, lrud) {
+    var z0 = (st.z === undefined || st.z === null) ? 0 : st.z;
+    var out = { ceiling: null, floor: null };
+    if (lrud === null || lrud === undefined) {
+        return out;
+    }
+    if (lrud.up !== null && lrud.up !== undefined) {
+        out.ceiling = { x: st.x, y: st.y, z: z0 + lrud.up };
+    }
+    if (lrud.down !== null && lrud.down !== undefined) {
+        out.floor = { x: st.x, y: st.y, z: z0 - lrud.down };
+    }
+    return out;
+};
+
+/**
  * Wall polylines for a resolved survey.
  *
  * Walks the legs in resolution order, collecting each side's wall

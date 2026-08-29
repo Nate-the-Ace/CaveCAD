@@ -2530,6 +2530,49 @@ function splayFixture() {
     eqs(CsLrud.stationWallPoints({ x: 0, y: 10 }, 0, null, [ghost], "R",
         CsTraverse.SLOPE).length, 0,
         "stationWallPoints: an unmeasurable splay contributes zero points");
+    // the 3D sibling refuses on exactly the same evidence
+    eqs(CsLrud.stationWallPoints3D({ x: 0, y: 10, z: 100 }, 0, null,
+        [ghost], "R", CsTraverse.SLOPE).length, 0,
+        "stationWallPoints3D: an unmeasurable splay contributes zero points");
+})();
+
+(function() {
+    // CsLrud.stationWallPoints3D -- the same measured points, with the
+    // elevation kept. The 2D sibling drops dz because the plan has no
+    // use for it; a cross section is the view that does.
+    var st = { x: 0, y: 0, z: 100 };
+    var lrud = { left: 3, right: 5, up: 4, down: 6, azimuth: 90 };
+
+    var left = CsLrud.stationWallPoints3D(st, 90, lrud, [], "L",
+        CsTraverse.SLOPE, null);
+    eqs(left.length, 1, "stationWallPoints3D: L gives one wall point");
+    near(left[0].z, 100, 1e-9,
+        "stationWallPoints3D: a left wall point sits at the station's z");
+
+    // A splay 90 degrees right of a passage running east, thrown 30
+    // degrees UP over 10 feet: dz = 10 sin 30 = 5, so the wall point
+    // sits 5 above the station. This is the value the 2D sibling drops.
+    var up30 = { from: "A1", to: null, distance: 10, azimuth: 180,
+                 inclination: 30, splay: true };
+    var right = CsLrud.stationWallPoints3D(st, 90, null, [up30], "R",
+        CsTraverse.SLOPE, null);
+    eqs(right.length, 1, "stationWallPoints3D: the splay hits the right wall");
+    near(right[0].z, 105, 1e-9,
+        "stationWallPoints3D: and keeps its inclination -- z = 100 + 10 sin 30");
+
+    var ud = CsLrud.stationCeilingFloor3D(st, lrud);
+    near(ud.ceiling.z, 104, 1e-9, "stationCeilingFloor3D: U is z + up");
+    near(ud.floor.z, 94, 1e-9, "stationCeilingFloor3D: D is z - down");
+    near(ud.ceiling.x, 0, 1e-9, "stationCeilingFloor3D: straight up, not offset");
+
+    // A side with no measurement is null, NOT a point at the station:
+    // that would assert a wall nobody measured. 0 IS a measurement.
+    var noUp = CsLrud.stationCeilingFloor3D(st,
+        { left: 1, right: 1, up: null, down: 0, azimuth: 90 });
+    ok(noUp.ceiling === null,
+        "stationCeilingFloor3D: no U measured means no ceiling point");
+    near(noUp.floor.z, 100, 1e-9,
+        "stationCeilingFloor3D: D = 0 IS a measurement -- floor at the station");
 })();
 
 (function() {
