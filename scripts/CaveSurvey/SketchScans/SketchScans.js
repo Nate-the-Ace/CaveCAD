@@ -378,15 +378,6 @@ SketchScans.buildDock = function(appWin) {
     layout.addWidget(w.splitter, 1, 0);
 
     var buttons = new QHBoxLayout();
-    w.bookmarkButton = new QPushButton(SketchScans.BOOKMARK);
-    w.bookmarkButton.toolTip = qsTr("Bookmark the selected scan, so the " +
-        "panel opens on it again. A bookmark inside a collapsed folder " +
-        "puts the star on the folder instead.");
-    try {
-        w.bookmarkButton.maximumWidth = 34;
-    } catch (eBw) {
-        // a bridge that will not size it gets a wider button
-    }
     w.refreshButton = new QPushButton(qsTr("Refresh"));
     w.refreshButton.toolTip = qsTr("Re-read the scans folder -- new " +
         "scans appear here once Drive has synced them.");
@@ -397,7 +388,6 @@ SketchScans.buildDock = function(appWin) {
     w.insertButton = new QPushButton(qsTr("Insert"));
     w.insertButton.toolTip = qsTr("Insert the selected scan over the " +
         "survey, unaligned.");
-    buttons.addWidget(w.bookmarkButton, 0, 0);
     buttons.addWidget(w.refreshButton, 0, 0);
     buttons.addStretch(1);
     buttons.addWidget(w.alignButton, 0, 0);
@@ -531,12 +521,15 @@ SketchScans.buildDock = function(appWin) {
     } catch (eDbl) {
         // no row-aware double-click on this bridge; the buttons cover it
     }
-    var toggleBookmark = function() {
-        var rel = selectedFile();
-        if (rel === null || w.scans === null) {
+    var toggleBookmark = function(row) {
+        if (row === undefined || row === null) {
+            row = w.list.currentRow();
+        }
+        if (row < 0 || row >= w.rows.length ||
+                w.rows[row].kind !== "file" || w.scans === null) {
             return;
         }
-        var row = w.list.currentRow();
+        var rel = w.rows[row].rel;
         if (w.bookmarks[rel] === true) {
             delete w.bookmarks[rel];
         } else {
@@ -558,7 +551,55 @@ SketchScans.buildDock = function(appWin) {
             w.list.selectRow(row);
         }
     };
-    w.bookmarkButton.clicked.connect(toggleBookmark);
+    // The bookmark lives on the RIGHT-CLICK now, not on a button: it is
+    // a per-scan action and it belongs on the scan, not in a row of
+    // controls that apply to the panel.
+    //
+    // The menu acts on the row that was RIGHT-CLICKED, which is
+    // selected first. Acting on the current selection instead would
+    // bookmark whatever happened to be highlighted when the caver
+    // right-clicked somewhere else -- silently, and on the wrong scan.
+    try {
+        w.list.contextMenuPolicy = Qt.CustomContextMenu;
+        w.list.customContextMenuRequested.connect(function(pos) {
+            try {
+                // QPoint's x and y are FUNCTIONS in this bridge, not
+                // properties (probed 2026-08-29). Reading pos.y would
+                // hand rowAt a function object, and the menu would
+                // silently never find a row.
+                var py = (typeof pos.y === "function") ? pos.y() : pos.y;
+                var row = w.list.rowAt(py);
+                if (row === undefined || row === null || row < 0 ||
+                        row >= w.rows.length ||
+                        w.rows[row].kind !== "file") {
+                    return;          // a folder row has nothing to bookmark
+                }
+                w.list.selectRow(row);
+                var rel = w.rows[row].rel;
+                var marked = w.bookmarks[rel] === true;
+                // Kept on `w` so it is not collected while it is open --
+                // popup() returns immediately, unlike exec().
+                w.scanMenu = new QMenu();
+                var act = w.scanMenu.addAction(marked ?
+                    qsTr("Remove bookmark") :
+                    qsTr("Bookmark this scan"));
+                try {
+                    act.checkable = true;
+                    act.checked = marked;
+                } catch (eChk) {
+                }
+                act.triggered.connect(function() {
+                    toggleBookmark(row);
+                });
+                w.scanMenu.popup(w.list.viewport().mapToGlobal(pos));
+            } catch (eMenu) {
+                // no context menu on this bridge: the scan is still
+                // selectable and insertable, only the bookmark is out
+                // of reach
+            }
+        });
+    } catch (eCtx) {
+    }
     w.refreshButton.clicked.connect(function() { SketchScans.refresh(); });
     w.alignButton.clicked.connect(function() { chooseInsert(true); });
     w.insertButton.clicked.connect(function() { chooseInsert(false); });
