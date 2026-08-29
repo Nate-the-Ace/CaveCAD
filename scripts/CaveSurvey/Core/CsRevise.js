@@ -954,7 +954,13 @@ CsRevise.LINEWORK_RESIDUAL_FRACTION = 1e-3;
  *                        two-vertex polyline.
  *   Arc / Circle          the center warps through CsWarp.mlsSimilarity;
  *                        the radius scales by that call's local
- *                        `factor`.
+ *                        `factor`; and the entity is then rotated about
+ *                        its NEW center by that call's local `angle`,
+ *                        so an arc's start/end angles follow the local
+ *                        rotation and its endpoints stay on the walls
+ *                        they were snapped to. (A circle is
+ *                        rotationally symmetric, so the rotation is a
+ *                        no-op for it -- this matters to arcs.)
  *   anything else         (block references, text, ...) keeps the
  *                        ORIGINAL whole-entity rigid similarity fit,
  *                        residual-checked against
@@ -1129,6 +1135,21 @@ CsRevise.moveLinework = function(doc, di, oldPos, newPos, tripStations,
             }
             ent.move(new RVector(cw.x - oldCenter.x, cw.y - oldCenter.y));
             ent.setRadius(oldRadius * cw.factor);
+            // The center is only two thirds of an arc: its ENDPOINTS
+            // are where it meets the walls it was snapped to, and those
+            // are start/end ANGLE, which neither move() nor setRadius()
+            // touches. Without this, an arc under a locally-rotating
+            // adjustment keeps its original absolute orientation while
+            // its center slides -- endpoints off by 2r*sin(theta/2),
+            // reported as a success. Rotating about the NEW center
+            // (placed by the move above) turns the start/end angles by
+            // the local rotation without disturbing that center. The
+            // pre-warp code did this as ent.rotate(fit.theta, origin)
+            // for every entity type; the per-vertex types below get the
+            // same effect for free from moving their vertices
+            // individually, but a center-plus-radius entity does not.
+            // Harmless for a circle, which is rotationally symmetric.
+            ent.rotate(cw.angle, new RVector(cw.x, cw.y));
             op.addObject(ent, false);
             anyMoved = true;
             result.moved++; // a single point has nothing to disagree with
@@ -1511,10 +1532,19 @@ CsRevise.lineworkSummary = function(moved, unmoved, bound, stationsMoved,
     }
     if (list.length > 0) {
         lines.push("");
+        // Four distinct causes land an entity in `unmoved`, and only
+        // the first is "no station": no resolvable station pairs at
+        // all; an incoherent rigid fit on text/blocks (residual past
+        // LINEWORK_RESIDUAL_FRACTION); a degenerate radius factor on an
+        // arc/circle; and a fit-point-only spline with no control
+        // points to warp. Three of the four DO have surviving stations,
+        // so wording this as "no surviving station" alone told the user
+        // something untrue about most refusals. The remedy is the same
+        // in all four cases, which is why they share one warning.
         lines.push("WARNING -- " + list.length + " traced item" +
             (list.length === 1 ? "" : "s") + " had no surviving " +
-            "station to follow and did NOT move; re-trace walls and " +
-            "detail there:");
+            "station to follow, or could not be moved honestly, and " +
+            "did NOT move; re-trace walls and detail there:");
         // capped: this is a summary a beginner reads, not a manifest.
         // Soft read of the cap so this module stays loadable without
         // CsReport (the whole Core is loaded as separate files).
@@ -1771,8 +1801,10 @@ CsRevise.adjustTagsOn = function(entity) {
  *           Traced linework then follows the stations it was traced
  *           against, entity by entity (CsRevise.moveLinework): a wall
  *           over a corrected shot moves, one far away barely does.
- *           Anything with no surviving station to follow is left alone
- *           and named in report.lineworkUnmoved -- the re-trace warning
+ *           Anything with no surviving station to follow -- or that
+ *           moveLinework can find no honest answer for; see its own
+ *           docblock for the other three causes -- is left alone and
+ *           named in report.lineworkUnmoved, and the re-trace warning
  *           is now that honest fallback rather than the default.
  *           UNTAGGED linework is bound first (CsBind.planAutoBind,
  *           before the erase, while the station index is still the

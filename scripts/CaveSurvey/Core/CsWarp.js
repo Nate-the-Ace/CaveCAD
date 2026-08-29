@@ -48,8 +48,11 @@ CsWarp.EPS = 1e-9;
  *         translation) for exactly 1 pair; otherwise {x, y, angle,
  *         factor} -- angle/factor are the LOCAL rotation and uniform
  *         scale this point's neighbourhood implies, needed by callers
- *         that warp a circle/arc's radius rather than a set of
- *         vertices.
+ *         that warp an entity described by a center rather than by a
+ *         set of vertices: CsRevise.moveLinework's arc/circle branch
+ *         scales the radius by `factor` and rotates the entity about
+ *         its new center by `angle`, which is what carries an arc's
+ *         start/end angles along with the local rotation.
  */
 CsWarp.mlsSimilarity = function(point, controlPairs) {
     if (controlPairs === undefined || controlPairs === null ||

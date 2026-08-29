@@ -2501,9 +2501,9 @@ var ABANDONED_TRACING_WARNING =
 //    common +10y shift -- confirmed by fixture 12a's own sanity check
 //    to be non-degenerate for a center warp, and hand-verified against
 //    CsRevise.similarityFit's unweighted centroid formula to carry a
-//    residual near 10 drawing units -- far past
-//    CsRevise.LINEWORK_RESIDUAL_FRACTION's tol of 0.1 at extent 100, so
-//    the rigid-fallback entity below is genuinely refused, not
+//    maxResidual of exactly 3.333333 (theta 0.244979, scale 1.030776)
+//    -- 33x CsRevise.LINEWORK_RESIDUAL_FRACTION's tol of 0.1 at extent
+//    100, so the rigid-fallback entity below is genuinely refused, not
 //    coincidentally so), bound to three entities that each take a
 //    different branch of moveLinework's dispatch:
 //
@@ -2522,13 +2522,25 @@ var ABANDONED_TRACING_WARNING =
 //                 above regardless of where the text sits
 //
 //    Then CsRevise.lineworkSummary is called with the REAL counts this
-//    one call returned (not hand-typed numbers), proving Task 3's fix
-//    end to end against a genuine moveLinework result: the headline
-//    number is moved+warped, "warped" appears, and the false "did NOT
-//    move with it" warning -- which only ever fires when NOTHING moved
-//    or warped at all (CsRevise.js's own n===0 && w===0 guard) -- does
-//    not fire even though one of the three entities really was
-//    refused, because something else plainly did move and warp.
+//    one call returned (not hand-typed numbers). What that proves, and
+//    what it does NOT, is worth being exact about:
+//
+//      PROVES Task 3's fix end to end -- the headline number is
+//      moved+warped against a genuine moveLinework result, not a
+//      hand-typed pair. Revert the headline to `n` alone and this
+//      fixture reports 1 where it must report 2, and fails.
+//
+//      Does NOT isolate Task 3 -- the "did NOT move with it" assertion
+//      below is a guard on the abandoned-tracing warning staying quiet
+//      on a MIXED result, which is worth having, but it is not
+//      sensitive to Task 3: the suppression condition is
+//      n === 0 && w === 0 && stationsMoved, and this fixture has
+//      moved === 1 (the circle), so moved alone already suppresses the
+//      warning and the assertion still passes with Task 3's w === 0
+//      clause reverted. The isolating case -- moved === 0 with
+//      warped > 0, where ONLY the new clause suppresses the warning --
+//      lives in tests/js_unit.js, at the
+//      CsRevise.lineworkSummary(0, [], 0, true, 3) assertions.
 // =======================================================================
 
 (function() {
@@ -2633,19 +2645,261 @@ var ABANDONED_TRACING_WARNING =
         counts16.unmoved, 0, true, counts16.warped).join("\n");
     ok(summary16.indexOf("warped") >= 0,
         "16: the summary text mentions the warp, got:\n" + summary16);
+    // NOT a Task 3 guard: moved === 1 here, and the suppression
+    // condition is n === 0 && w === 0 && stationsMoved, so moved alone
+    // already keeps this warning quiet -- this passes with Task 3's
+    // w === 0 clause reverted. The isolating moved === 0, warped > 0
+    // case is in tests/js_unit.js's lineworkSummary(0, [], 0, true, 3)
+    // assertions. What this DOES guard is the mixed result: one
+    // entity really was refused, and that must not be reported as the
+    // whole tracing having been abandoned.
     ok(summary16.indexOf("did NOT move with it") < 0,
-        "16: TASK 3'S FIX, PROVEN END TO END -- something plainly DID " +
-        "move (the circle) and warp (the polyline), so the false " +
+        "16: the abandoned-tracing warning does not fire on a mixed " +
+        "moved/warped/refused result -- something plainly DID move " +
+        "(the circle) and warp (the polyline), so the false " +
         "'abandoned tracing' warning must not fire even though one " +
         "entity really was refused, got:\n" + summary16);
+    // THIS is the Task 3 guard: revert the headline to `n` alone and
+    // it reads 1 where it must read 2, and this assertion fails.
     ok(summary16.indexOf(
         "Traced linework moved with its stations: " +
         (counts16.moved + counts16.warped)) === 0,
-        "16: TASK 3'S FIX -- the headline number is moved+warped (" +
-        (counts16.moved + counts16.warped) + "), not moved alone, got:\n" +
-        summary16);
+        "16: TASK 3'S FIX, PROVEN END TO END -- the headline number is " +
+        "moved+warped (" + (counts16.moved + counts16.warped) + "), " +
+        "not moved alone, against a genuine moveLinework result rather " +
+        "than hand-typed counts, got:\n" + summary16);
 
     destr(i16);
+}());
+
+// =======================================================================
+// 17. FINAL WHOLE-FEATURE REVIEW, IMPORTANT #1 -- an arc has a SWEEP,
+//    and until this fixture nothing exercised RArcEntity through
+//    CsRevise.moveLinework at all. That gap hid a real regression:
+//    the arc/circle branch consumed CsWarp.mlsSimilarity's `x`, `y` and
+//    `factor` and DISCARDED its `angle`. Neither RArcEntity.move() nor
+//    setRadius() touches startAngle/endAngle, so an arc under a
+//    locally-rotating adjustment had its center placed correctly and
+//    then kept its original ABSOLUTE orientation -- endpoints off by
+//    2r*sin(theta/2), detached from the walls they were snapped to, and
+//    counted as `moved` with no warning. The pre-warp code got this
+//    right for free (ent.rotate(fit.theta, origin) applied to every
+//    entity type); the per-vertex types keep getting it right for free
+//    by moving their vertices individually; a center-plus-radius entity
+//    is the one shape that needs the rotation applied explicitly.
+//    Circles are immune -- rotationally symmetric -- which is exactly
+//    why fixture 12a's circle coverage did not catch this.
+//
+//    17a uses a PURE RIGID ROTATION of the station set rather than the
+//    incoherent P1/P3/P5 shape fixtures 12-16 share, deliberately: MLS
+//    similarity reproduces an exact similarity transform exactly, so
+//    the rigid-correct answer for every point is computable by hand
+//    from the rotation alone, and the assertions below can be written
+//    against that instead of against the same warp code under test.
+//
+//    17b closes the other missing-coverage half the same review found:
+//    every existing RLineEntity fixture moves rigidly, so the NEW warp
+//    branch's news[0]/news[1] indexing -- which assumes
+//    getReferencePoints() returns exactly the two endpoints in start,
+//    end order -- has never been exercised live.
+// =======================================================================
+
+// -- 17a. an arc under a pure rigid rotation: center, START POINT and
+//    END POINT must all land where the rotation puts them --------------
+(function() {
+    var d17 = new RDocument(new RMemoryStorage(), createSpatialIndex());
+    var i17 = new RDocumentInterface(d17);
+    CsLayers.ensure(d17, i17, CsLayers.PROFILE_TRACED_CEILING);
+
+    // 30 degrees about the drawing origin, no translation, no scale.
+    var THETA = Math.PI / 6;
+    var rot = function(x, y) {
+        return new RVector(x * Math.cos(THETA) - y * Math.sin(THETA),
+                           x * Math.sin(THETA) + y * Math.cos(THETA));
+    };
+
+    // P1 (0,0) -> (0,0); P3 (20,0) -> (17.320508, 10);
+    // P5 (40,0) -> (34.641016, 20). One rigid rotation describes the
+    // whole set exactly -- unlike fixtures 12-16, nothing here is
+    // incoherent, on purpose.
+    var oldPos = {
+        P1: { x: 0, y: 0 }, P3: { x: 20, y: 0 }, P5: { x: 40, y: 0 }
+    };
+    var r3 = rot(20, 0), r5 = rot(40, 0);
+    var newPos = {
+        P1: { x: 0, y: 0 },
+        P3: { x: r3.x, y: r3.y },
+        P5: { x: r5.x, y: r5.y }
+    };
+
+    var op = new RAddObjectsOperation();
+    // center (10,10), radius 5, a quarter sweep from angle 0 to PI/2:
+    // start point (15,10), end point (10,15).
+    var oldCenter17 = new RVector(10, 10), oldRadius17 = 5;
+    var arc17 = new RArcEntity(d17, new RArcData(
+        oldCenter17, oldRadius17, 0.0, Math.PI / 2, false));
+    arc17.setLayerId(d17.getLayerId(CsLayers.PROFILE_TRACED_CEILING));
+    CsTags.set(arc17, CsBind.STATIONS_TAG,
+        CsBind.encodeStations(["P1", "P3", "P5"]));
+    op.addObject(arc17, false);
+    i17.applyOperation(op);
+    var arcId17 = arc17.getId();
+
+    // The rigid-correct answers, computed from the ROTATION directly --
+    // never from CsWarp, which is the code under test:
+    //   center      rot(10,10) = ( 3.660254, 13.660254)
+    //   start point rot(15,10) = ( 7.990381, 16.160254)
+    //   end point   rot(10,15) = ( 1.160254, 17.990381)
+    var wantCenter17 = rot(10, 10);
+    var wantStart17 = rot(15, 10);
+    var wantEnd17 = rot(10, 15);
+
+    var pairs17 = [
+        { old: oldPos.P1, nu: newPos.P1 },
+        { old: oldPos.P3, nu: newPos.P3 },
+        { old: oldPos.P5, nu: newPos.P5 }
+    ];
+    var cw17 = CsWarp.mlsSimilarity(
+        { x: oldCenter17.x, y: oldCenter17.y }, pairs17);
+    near(cw17.angle, THETA, 1e-9,
+        "sanity: this scenario's own local angle at the arc's center " +
+        "really is the full 30-degree rotation (" + cw17.angle + "), " +
+        "so 17a genuinely exercises the branch's use of `angle` -- a " +
+        "scenario with angle 0 would pass with or without the fix");
+    near(cw17.factor, 1.0, 1e-9,
+        "sanity: the rotation is RIGID -- local factor is 1 (" +
+        cw17.factor + "), so any radius change below would be a bug, " +
+        "not the scenario");
+    // The buggy answer, stated explicitly: center placed correctly but
+    // startAngle left at 0, putting the start point at center + (r, 0).
+    // If this were within tolerance of the right answer the fixture
+    // would be worthless, so assert the two really are far apart --
+    // 2r*sin(theta/2) = 10*sin(15deg) = 2.588190 units.
+    var naiveStart17 = new RVector(wantCenter17.x + oldRadius17,
+        wantCenter17.y);
+    ok(naiveStart17.getDistanceTo(wantStart17) > 2.5,
+        "sanity: discarding `angle` would put the start point " +
+        naiveStart17.getDistanceTo(wantStart17) + " units from the " +
+        "rigid-correct one, so the start/end assertions below have " +
+        "real teeth");
+
+    var counts17 = CsRevise.moveLinework(d17, i17, oldPos, newPos, {}, 100);
+    eqs(counts17.unmoved.length, 0,
+        "17a: a clean rigid rotation refuses nothing (" +
+        JSON.stringify(counts17) + ")");
+    eqs(counts17.moved, 1,
+        "17a: the arc lands in moved -- a single center point has " +
+        "nothing to disagree with (" + JSON.stringify(counts17) + ")");
+
+    var after17 = d17.queryEntity(arcId17);
+    ok(!isNull(after17), "17a: the arc still exists");
+    if (!isNull(after17)) {
+        var c17 = after17.getCenter();
+        near(c17.x, wantCenter17.x, 1e-6,
+            "17a: center x is where the rotation puts it (expected " +
+            wantCenter17.x + ", got " + c17.x + ")");
+        near(c17.y, wantCenter17.y, 1e-6,
+            "17a: center y is where the rotation puts it (expected " +
+            wantCenter17.y + ", got " + c17.y + ")");
+        near(after17.getRadius(), oldRadius17, 1e-6,
+            "17a: radius unchanged under a rigid rotation (expected " +
+            oldRadius17 + ", got " + after17.getRadius() + ")");
+
+        // THE ASSERTIONS THAT CATCH THE BUG. An arc's endpoints are
+        // where it meets the walls it was traced against, and they live
+        // in start/end ANGLE, which move() and setRadius() do not
+        // touch. Without the rotate() the center below is still right
+        // and these two are ~2.59 units out.
+        var sp17 = after17.getStartPoint();
+        var ep17 = after17.getEndPoint();
+        near(sp17.x, wantStart17.x, 1e-6,
+            "17a: THE ARC'S SWEEP FOLLOWS THE ROTATION -- start point " +
+            "x (expected " + wantStart17.x + ", got " + sp17.x + "); " +
+            "this fails if the branch discards CsWarp's `angle`");
+        near(sp17.y, wantStart17.y, 1e-6,
+            "17a: THE ARC'S SWEEP FOLLOWS THE ROTATION -- start point " +
+            "y (expected " + wantStart17.y + ", got " + sp17.y + ")");
+        near(ep17.x, wantEnd17.x, 1e-6,
+            "17a: THE ARC'S SWEEP FOLLOWS THE ROTATION -- end point " +
+            "x (expected " + wantEnd17.x + ", got " + ep17.x + ")");
+        near(ep17.y, wantEnd17.y, 1e-6,
+            "17a: THE ARC'S SWEEP FOLLOWS THE ROTATION -- end point " +
+            "y (expected " + wantEnd17.y + ", got " + ep17.y + ")");
+    }
+    destr(i17);
+}());
+
+// -- 17b. a LINE through the new per-vertex warp branch: both endpoints
+//    warp INDIVIDUALLY, and news[0]/news[1] really are start/end -------
+(function() {
+    var d17b = new RDocument(new RMemoryStorage(), createSpatialIndex());
+    var i17b = new RDocumentInterface(d17b);
+    CsLayers.ensure(d17b, i17b, CsLayers.PROFILE_TRACED_CEILING);
+
+    // back to the incoherent P1/P3/P5 shape fixtures 12-16 share: a
+    // line only takes the WARP path when its two ends see genuinely
+    // different local transforms, which a rigid station set can never
+    // produce.
+    var oldPos = {
+        P1: { x: 0, y: 0 }, P3: { x: 20, y: 0 }, P5: { x: 40, y: 0 }
+    };
+    var newPos = {
+        P1: { x: 0, y: 0 }, P3: { x: 20, y: 10 }, P5: { x: 40, y: 10 }
+    };
+
+    var op = new RAddObjectsOperation();
+    var oldStart17b = new RVector(0, 5), oldEnd17b = new RVector(60, 20);
+    var line17b = new RLineEntity(d17b,
+        new RLineData(oldStart17b, oldEnd17b));
+    line17b.setLayerId(d17b.getLayerId(CsLayers.PROFILE_TRACED_CEILING));
+    CsTags.set(line17b, CsBind.STATIONS_TAG,
+        CsBind.encodeStations(["P1", "P3", "P5"]));
+    op.addObject(line17b, false);
+    i17b.applyOperation(op);
+    var lineId17b = line17b.getId();
+
+    var pairs17b = [
+        { old: oldPos.P1, nu: newPos.P1 },
+        { old: oldPos.P3, nu: newPos.P3 },
+        { old: oldPos.P5, nu: newPos.P5 }
+    ];
+    var wantS = CsWarp.mlsSimilarity(
+        { x: oldStart17b.x, y: oldStart17b.y }, pairs17b);
+    var wantE = CsWarp.mlsSimilarity(
+        { x: oldEnd17b.x, y: oldEnd17b.y }, pairs17b);
+    ok(Math.abs(wantS.angle - wantE.angle) > 1e-6,
+        "sanity: the two endpoints' local angles genuinely disagree (" +
+        wantS.angle + " vs " + wantE.angle + "), so this line really " +
+        "takes the WARP branch and not the everything-agrees rigid one");
+    ok(Math.abs(wantS.x - wantE.x) > 1 || Math.abs(wantS.y - wantE.y) > 1,
+        "sanity: the two warped endpoints are far apart, so swapping " +
+        "news[0]/news[1] would be caught by the assertions below");
+
+    var counts17b = CsRevise.moveLinework(d17b, i17b, oldPos, newPos,
+        {}, 100);
+    eqs(counts17b.warped, 1,
+        "17b: the line lands in warped, not moved -- its two ends saw " +
+        "different local transforms (" + JSON.stringify(counts17b) + ")");
+    eqs(counts17b.unmoved.length, 0,
+        "17b: nothing is refused (" + JSON.stringify(counts17b) + ")");
+
+    var after17b = d17b.queryEntity(lineId17b);
+    ok(!isNull(after17b), "17b: the line still exists");
+    if (!isNull(after17b)) {
+        var sp = after17b.getStartPoint(), ep = after17b.getEndPoint();
+        near(sp.x, wantS.x, 1e-6,
+            "17b: START point got the warp CsWarp computes for the " +
+            "START point -- news[0] really is getReferencePoints()[0] " +
+            "(x)");
+        near(sp.y, wantS.y, 1e-6,
+            "17b: START point got its own warp (y)");
+        near(ep.x, wantE.x, 1e-6,
+            "17b: END point got the warp CsWarp computes for the END " +
+            "point -- news[1] really is getReferencePoints()[1] (x)");
+        near(ep.y, wantE.y, 1e-6,
+            "17b: END point got its own warp (y)");
+    }
+    destr(i17b);
 }());
 
 // =======================================================================
