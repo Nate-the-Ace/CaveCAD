@@ -643,10 +643,11 @@ FeatureTrace.buildDock = function(appWin) {
 
     // -- the frame groups, side by side ------------------------------
     //
-    // Plan left, Profile right, Cross Section under Profile: the groups
-    // are themselves a grid, so a fourth frame would append to the next
-    // cell the way a new feature appends to the next tile. Stacked full
-    // width, three groups made a column longer than the dock.
+    // Plan left, Profile right, Cross Section under Plan: the groups are
+    // themselves a grid, filled left to right, so a fourth frame appends
+    // to the next cell the way a new feature appends to the next tile.
+    // Stacked full width, three groups made a column longer than the
+    // dock.
     try {
         var groups = new QGridLayout();
 
@@ -724,7 +725,7 @@ FeatureTrace.buildDock = function(appWin) {
         // day it fills up.
         w.sectionGroup = FeatureTrace.buildGroup(w, body, "section",
             qsTr("Cross Section"));
-        groups.addWidget(w.sectionGroup, 1, 1);
+        groups.addWidget(w.sectionGroup, 1, 0);
 
         try {
             // Equal halves: the split lands on the widget's midpoint
