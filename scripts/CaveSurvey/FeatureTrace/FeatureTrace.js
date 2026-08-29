@@ -477,10 +477,23 @@ FeatureTrace.wrapLabel = function(text, budget) {
  *  a grid of fixed-size tiles. Rows are selected by asking
  *  CsLayers.frameOf, so the group a button sits in and the frame its
  *  layer belongs to cannot disagree. */
-FeatureTrace.buildGroup = function(w, parent, frame, title) {
+FeatureTrace.buildGroup = function(w, parent, frame, title, header) {
     var box = new QGroupBox(title, parent);
     var inner = new QGridLayout();
     var cell = 0;
+    // A header belonging to THIS frame (the profile run selector) sits
+    // inside the box, spanning its columns, above the tiles -- so a
+    // control that governs one frame cannot read as governing the
+    // other now that the two boxes sit side by side.
+    var firstRow = 0;
+    if (header !== undefined && header !== null) {
+        try {
+            inner.addLayout(header, 0, 0, 1, FeatureTrace.GRID_COLUMNS);
+            firstRow = 1;
+        } catch (eHeader) {
+            w.problems.push(title + " header (" + eHeader + ")");
+        }
+    }
 
     for (var i = 0; i < FeatureTrace.ROWS.length; i++) {
         var row = FeatureTrace.ROWS[i];
@@ -501,12 +514,28 @@ FeatureTrace.buildGroup = function(w, parent, frame, title) {
             }
             FeatureTrace.connectRow(button, row);
             inner.addWidget(button,
-                Math.floor(cell / FeatureTrace.GRID_COLUMNS),
+                firstRow + Math.floor(cell / FeatureTrace.GRID_COLUMNS),
                 cell % FeatureTrace.GRID_COLUMNS);
             cell++;
             w.buttons.push({ button: button, row: row });
         } catch (e) {
             w.problems.push(row.layer + " (" + e + ")");
+        }
+    }
+
+    if (cell === 0) {
+        // A frame with no features yet still gets its cell in the grid,
+        // so the layout does not rearrange itself the day it gains one.
+        // It says why it is empty rather than looking broken.
+        try {
+            var empty = new QLabel(FeatureTrace.EMPTY_TEXT[frame] ||
+                qsTr("Nothing to trace in this view yet."));
+            empty.wordWrap = true;
+            empty.enabled = false;
+            inner.addWidget(empty, firstRow, 0, 1,
+                FeatureTrace.GRID_COLUMNS);
+        } catch (eEmpty) {
+            w.problems.push(title + " placeholder (" + eEmpty + ")");
         }
     }
 
@@ -520,6 +549,12 @@ FeatureTrace.buildGroup = function(w, parent, frame, title) {
 
     box.setLayout(inner);
     return box;
+};
+
+/** What an empty frame group says instead of showing no tiles. */
+FeatureTrace.EMPTY_TEXT = {
+    section: "No cross-section layers in this drawing yet. Sections " +
+        "get their tiles here once the cross-section tool draws them."
 };
 
 /** Arms the row and starts a trace. Its own function so the closure
@@ -606,18 +641,26 @@ FeatureTrace.buildDock = function(appWin) {
         w.problems.push("current-layer button (" + eCur + ")");
     }
 
-    // -- the two frame groups ----------------------------------------
+    // -- the frame groups, side by side ------------------------------
+    //
+    // Plan left, Profile right, Cross Section under Profile: the groups
+    // are themselves a grid, so a fourth frame would append to the next
+    // cell the way a new feature appends to the next tile. Stacked full
+    // width, three groups made a column longer than the dock.
     try {
+        var groups = new QGridLayout();
+
         w.planGroup = FeatureTrace.buildGroup(w, body, "plan", qsTr("Plan"));
-        layout.addWidget(w.planGroup, 0, 0);
-        // The run selector sits HERE, directly above the group it
-        // governs: it applies to profile features and to nothing else,
-        // and a control at the top of the panel read as though it
-        // applied to the plan rows too.
+        groups.addWidget(w.planGroup, 0, 0);
+
+        // The run selector sits INSIDE the Profile box, above its tiles:
+        // it applies to profile features and to nothing else, and with
+        // the two boxes side by side a control between them would read
+        // as governing both.
+        var runRow = null;
         try {
-            var runRow = new QHBoxLayout();
-            runRow.addWidget(
-                new QLabel(qsTr("Work on Which Profile Run? :")), 0, 0);
+            runRow = new QHBoxLayout();
+            runRow.addWidget(new QLabel(qsTr("Run")), 0, 0);
             w.runCombo = new QComboBox();
             // Seeded in the same order refreshRuns() repopulates it:
             // refreshRuns' first call preserves "the prior selection" if
@@ -630,7 +673,7 @@ FeatureTrace.buildDock = function(appWin) {
             w.runCombo.toolTip = qsTr("Which survey run the profile " +
                 "features below belong to. Each run is drawn as its own " +
                 "band and the bands never overlap, so its walls get their " +
-                "own layers. The plan rows above ignore this -- the plan " +
+                "own layers. The Plan group ignores this -- the plan " +
                 "is one continuous map.");
             // `activated`, not currentIndexChanged: it fires only on a
             // real user choice, so refreshRuns' clear/repopulate cannot
@@ -665,15 +708,32 @@ FeatureTrace.buildDock = function(appWin) {
                 FeatureTrace.showAllRuns();
             });
             runRow.addWidget(w.showAllButton, 0, 0);
-
-            layout.addLayout(runRow, 0);
         } catch (eRun) {
             w.problems.push("run selector (" + eRun + ")");
+            runRow = null;
         }
 
         w.profileGroup = FeatureTrace.buildGroup(w, body, "profile",
-            qsTr("Profile"));
-        layout.addWidget(w.profileGroup, 0, 0);
+            qsTr("Profile"), runRow);
+        groups.addWidget(w.profileGroup, 0, 1);
+
+        // Cross sections have no tracing layers yet -- CsLayers.frameOf
+        // does not answer "section" until the cross-section work lands,
+        // so this group is correctly empty and says so. Its CELL is
+        // claimed now, which is the point: the layout does not move the
+        // day it fills up.
+        w.sectionGroup = FeatureTrace.buildGroup(w, body, "section",
+            qsTr("Cross Section"));
+        groups.addWidget(w.sectionGroup, 1, 1);
+
+        try {
+            // Equal halves: the split lands on the widget's midpoint
+            // whatever the dock's width.
+            groups.setColumnStretch(0, 1);
+            groups.setColumnStretch(1, 1);
+        } catch (eCols) {
+        }
+        layout.addLayout(groups, 0);
     } catch (eGroups) {
         w.problems.push("feature groups (" + eGroups + ")");
     }
