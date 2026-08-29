@@ -301,6 +301,24 @@ SketchScans.buildDock = function(appWin) {
         w.zoomOutButton.clicked.connect(function() {
             CsScanPreview.zoom(w.scanView, 1 / 1.4);
         });
+        // A click in the scan reports the pixel it landed on. This is
+        // the groundwork for picking alignment stations off the scan
+        // instead of off the drawing; for now it proves the click
+        // arrives and says where.
+        w.pickLabel = new QLabel("");
+        try {
+            w.pickLabel.toolTip = qsTr("The pixel last clicked on the " +
+                "scan. Zoom in for a finer pick.");
+        } catch (ePl) {
+        }
+        zoomRow.addWidget(w.pickLabel, 0, 0);
+        w.scanView.view.onScanPick = function(point) {
+            try {
+                w.pickLabel.text = CsScanPreview.pixelText(point,
+                    w.scanView.heightPx);
+            } catch (ePick) {
+            }
+        };
         // the label is only for messages now
         w.preview.visible = false;
     }
@@ -419,6 +437,10 @@ SketchScans.buildDock = function(appWin) {
                 } catch (eEmpty) {
                 }
                 return;
+            }
+            try {
+                w.pickLabel.text = "";
+            } catch (eClearPick) {
             }
             if (!CsScanPreview.show(w.scanView, w.scans + "/" + rel)) {
                 showMessage(qsTr("unreadable image"));

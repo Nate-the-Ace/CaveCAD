@@ -23,7 +23,9 @@
  * resize, so a dock the caver drags wider would throw away the zoom
  * they had just set. This one fits ONCE, when a new scan is loaded.
  */
-include("scripts/Widgets/AutoZoomView/AutoZoomView.js");
+// NO include of AutoZoomView: this subclasses RGraphicsViewQt directly,
+// for the reason in the docblock above -- AutoZoomView re-fits on every
+// resize and would throw away the caver's zoom.
 
 function CsScanView(parent) {
     RGraphicsViewQt.call(this, parent, false);
@@ -42,6 +44,50 @@ CsScanView.prototype.resizeEvent = function(event) {
         } catch (e) {
             // an unzoomable view still shows the scan at its own scale
         }
+    }
+};
+
+/**
+ * A click in the view, reported as a point ON THE SCAN.
+ *
+ * PROVEN BY THE BINDING, not by hope: the generated shell class
+ * (src/scripting/ecmaapi/generated/REcmaShellGraphicsViewQt.cpp) looks
+ * up a script property named "mousePressEvent" and, when it is a
+ * function, calls THAT in place of RGraphicsViewQt's own. An object
+ * built from script -- new CsScanView(...) -- is a shell instance, so
+ * this override is what Qt dispatches to.
+ *
+ * The base is still called first: panning, gestures and the view's own
+ * navigation must keep working. This only listens.
+ *
+ * The scan is placed at ONE DRAWING UNIT PER PIXEL (CsScanPreview.show),
+ * so the mapped model point IS the pixel under the cursor -- no scale
+ * to carry and nothing to convert at the far end.
+ */
+CsScanView.prototype.mousePressEvent = function(event) {
+    RGraphicsViewQt.prototype.mousePressEvent.call(this, event);
+    if (typeof this.onScanPick !== "function") {
+        return;
+    }
+    try {
+        var iv = this.getImageView();
+        var x, y;
+        // Qt exposes the position either way depending on build; take
+        // whichever this one answers rather than assuming.
+        if (typeof event.x === "function") {
+            x = event.x();
+            y = event.y();
+        } else if (typeof event.pos === "function") {
+            var pos = event.pos();
+            x = pos.x();
+            y = pos.y();
+        } else {
+            return;
+        }
+        var model = iv.mapFromView(new RVector(x, y));
+        this.onScanPick({ x: model.x, y: model.y });
+    } catch (e) {
+        // a listener must never throw into the view's own event handling
     }
 };
 
@@ -99,6 +145,8 @@ CsScanPreview.show = function(preview, path) {
         var entity = new RImageEntity(preview.doc, data);
         var op = new RAddObjectOperation(entity, false);
         preview.di.applyOperation(op);
+        preview.heightPx = pxH;
+        preview.widthPx = pxW;
         preview.view.fitPending = true;
         preview.di.autoZoom();
         preview.view.fitPending = false;
@@ -106,6 +154,19 @@ CsScanPreview.show = function(preview, path) {
     } catch (e) {
         return false;
     }
+};
+
+/** The pixel a click landed on, formatted for a readout. The scan's
+ *  own top-left is (0, height) in model space because a drawing's Y
+ *  runs up and an image's rows run down, so the row is reported from
+ *  the top the way an image viewer states it. Pure. */
+CsScanPreview.pixelText = function(point, heightPx) {
+    if (point === null || point === undefined) {
+        return "";
+    }
+    var col = Math.round(point.x);
+    var row = Math.round(heightPx - point.y);
+    return col + ", " + row + " px";
 };
 
 /** Fit the whole scan back into the pane. */

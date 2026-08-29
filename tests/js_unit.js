@@ -15618,6 +15618,30 @@ if (!IS_NODE) {
     (function() {
         loadRepoScript("scripts/CaveSurvey/Core/CsLayers.js");
         loadRepoScript("scripts/CaveSurvey/Core/CsTrace.js");
+        // ScanView.js subclasses RGraphicsViewQt at load time, so it
+        // cannot be loaded under node -- but pixelText itself is pure.
+        loadRepoScript("scripts/CaveSurvey/SketchScans/ScanView.js");
+        // ---------------------------------------------------------------------
+        // CsScanPreview.pixelText -- a click reported as a pixel on the scan.
+        // ---------------------------------------------------------------------
+
+        (function() {
+            // The scan is placed one drawing unit per pixel, so a model point
+            // IS a pixel -- but a drawing's Y runs UP while an image's rows run
+            // DOWN, so the row is reported from the top the way an image viewer
+            // states it. A 1000-tall scan clicked at model y=1000 is row 0.
+            eqs(CsScanPreview.pixelText({ x: 0, y: 1000 }, 1000), "0, 0 px",
+                "pixelText: the top-left corner reads 0, 0");
+            eqs(CsScanPreview.pixelText({ x: 250, y: 750 }, 1000), "250, 250 px",
+                "pixelText: a quarter in and a quarter down");
+            eqs(CsScanPreview.pixelText({ x: 999, y: 0 }, 1000), "999, 1000 px",
+                "pixelText: the bottom-right corner");
+            eqs(CsScanPreview.pixelText({ x: 12.4, y: 999.6 }, 1000), "12, 0 px",
+                "pixelText: rounded to whole pixels");
+            eqs(CsScanPreview.pixelText(null, 1000), "",
+                "pixelText: no pick, nothing to say");
+        }());
+
         loadRepoScript("scripts/CaveSurvey/FeatureTrace/FeatureTraceRun.js");
 
         function pt(x, y) { return { x: x, y: y }; }
