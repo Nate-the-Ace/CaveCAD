@@ -108,6 +108,20 @@ CsBind.isLineworkLayer = function(layerName) {
             return false;
         }
     }
+    // SECTIONS DO NOT BIND YET, and that is a deliberate hold rather
+    // than an oversight. CsBind.indexStations takes a FRAME and indexes
+    // its station CHAIN; a section frame has one station and no chain,
+    // so there is nothing here for the existing maths to bind against.
+    // Returning true would not leave section tracing alone -- it would
+    // move it by whatever correction the passage got, which is worse
+    // than not moving it at all. Remove this the day sections have a
+    // binding rule of their own, together with its tests.
+    if (typeof CsLayers !== "undefined" &&
+            typeof CsLayers.frameOf === "function" &&
+            CsLayers.frameOf(name) === "section") {
+        return false;
+    }
+
     // soft: honors a widened WORLD_FIXED_LAYERS without a second edit
     if (typeof CsRevise !== "undefined" &&
             typeof CsRevise.isWorldFixedLayer === "function" &&

@@ -4852,6 +4852,18 @@ if (teamBoundaryRt.trips.length === 2) {
         "gate: generated wall runs are never linework");
     ok(CsBind.isLineworkLayer("TB_BORDER") === false,
         "gate: TB_ sheet furniture is never linework");
+    // SECTIONS DO NOT BIND YET. Not an oversight -- see the gate's own
+    // comment: indexStations indexes a frame's station CHAIN and a
+    // section frame has one station, so binding section tracing today
+    // would move it by a correction that has nothing to do with it.
+    ok(CsBind.isLineworkLayer("SECTION-WALLS") === false,
+        "gate: section linework is held out until sections have a rule");
+    ok(CsBind.isLineworkLayer("SECTION-BREAKDOWN") === false,
+        "gate: and so is section breakdown");
+    ok(CsBind.isLineworkLayer("CTRL-SECTION-OUTLINE") === false,
+        "gate: generated section geometry is out by its CTRL- prefix");
+    ok(CsBind.isLineworkLayer("PROFILE-CEILING") === true,
+        "gate: the profile frame still binds");
     // The sheet furniture the NSS template names WITHOUT a TB_ prefix.
     // NORTH-ARROW is the one that must never be got wrong: a
     // declination revision rotates the cave relative to true north, so
