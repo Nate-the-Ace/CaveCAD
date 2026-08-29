@@ -10268,6 +10268,26 @@ if (!IS_NODE) {
     near(sidePt.x, 40, 1e-9, "CsSectionDraw.pointOf: theta = pi/2 is across, at +X");
     near(sidePt.y, 0, 1e-9, "CsSectionDraw.pointOf: and not up");
 
+    // The counts reach a READER. Both drawn.elevations and
+    // drawn.sections were fields nothing printed -- the same defect
+    // drawn.profile already had and had fixed.
+    eqs(CsReport.refreshLine("Cross sections",
+            { updated: 4, frozen: 1, lost: 1, refused: 0 },
+            ["updated", "frozen", "lost", "refused"]),
+        "Cross sections: 4 re-derived, 1 frozen, 1 whose basis is gone.",
+        "CsReport.refreshLine: says what the refresh did");
+    ok(CsReport.refreshLine("Cross sections",
+            { updated: 0, frozen: 0, lost: 0, refused: 0 },
+            ["updated", "frozen", "lost", "refused"]) === null,
+        "CsReport.refreshLine: a pass that did nothing stays quiet");
+    ok(CsReport.refreshLine("Cross sections", null,
+            ["updated"]) === null,
+        "CsReport.refreshLine: no counts at all says nothing");
+    eqs(CsReport.refreshLine("Cross sections", { refused: 2 },
+            ["updated", "frozen", "lost", "refused"]),
+        "Cross sections: 2 no longer cuttable.",
+        "CsReport.refreshLine: a refusal is never swallowed");
+
     eqs(CsSectionDraw.scaleText(4), "4:1",
         "CsSectionDraw.scaleText: an enlargement reads 4:1");
     eqs(CsSectionDraw.scaleText(1), "1:1",

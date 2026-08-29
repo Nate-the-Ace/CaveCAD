@@ -77,6 +77,24 @@ CsReport.drawSummary = function(survey, resolved, drawn, findings) {
             drawn.profile.skipped) {
         lines.push("Profile: not written -- " + drawn.profile.reason + ".");
     }
+    // THE SAME DEFECT, TWICE MORE. `drawn.elevations` was a real field
+    // on CsDraw.survey's return that nothing shipped ever read -- a
+    // spot elevation whose leg had vanished was counted `lost` and the
+    // count went nowhere. `drawn.sections` arrived with the cross
+    // sections and would have gone the same way. Both are printed here,
+    // and only when there is something to say: a draw that re-derived
+    // nothing stays quiet.
+    var elevLine = CsReport.refreshLine("Elevation labels",
+        drawn.elevations, ["updated", "upgraded", "downgraded", "lost"]);
+    if (elevLine !== null) {
+        lines.push(elevLine);
+    }
+    var sectionLine = CsReport.refreshLine("Cross sections",
+        drawn.sections, ["updated", "frozen", "lost", "refused"]);
+    if (sectionLine !== null) {
+        lines.push(sectionLine);
+    }
+
     if (survey.declination !== 0 && survey.declinationSource !== "") {
         var srcWord = { file: "from the file", user: "entered by hand",
             igrf: "IGRF estimate" }[survey.declinationSource] ||
@@ -212,6 +230,42 @@ CsReport.drawSummary = function(survey, resolved, drawn, findings) {
 };
 
 /** Summary block for Survey Stats. */
+/**
+ * One line for a refresh pass's counts, or null when it did nothing
+ * worth saying.
+ *
+ * `frozen`, `lost` and `refused` are the ones that MATTER: a stale
+ * section on a plotted map is the failure the whole refresh exists to
+ * prevent, so a count of them is never swallowed.
+ *
+ * \param counts an object of name -> number, or null
+ * \param keys   which counts to report, in the order to report them
+ */
+CsReport.refreshLine = function(label, counts, keys) {
+    if (counts === undefined || counts === null) {
+        return null;
+    }
+    var words = {
+        updated: "re-derived", upgraded: "upgraded",
+        downgraded: "downgraded", unchanged: "unchanged",
+        frozen: "frozen", lost: "whose basis is gone",
+        refused: "no longer cuttable"
+    };
+    var parts = [];
+    for (var i = 0; i < keys.length; i++) {
+        var k = keys[i];
+        var n = counts[k];
+        if (n === undefined || n === null || n === 0) {
+            continue;
+        }
+        parts.push(n + " " + (words[k] || k));
+    }
+    if (parts.length === 0) {
+        return null;
+    }
+    return label + ": " + parts.join(", ") + ".";
+};
+
 CsReport.statsSummary = function(survey, stats, grade) {
     var unit = survey.distanceUnit;
     var lines = [];

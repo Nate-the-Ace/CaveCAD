@@ -774,6 +774,29 @@ CalloutWrite.refreshElevations = function(doc, di, survey, resolved) {
  * the next person who greps for it.
  */
 /**
+ * refreshSections against the survey the DRAWING itself carries -- the
+ * same reason refreshElevationsFromDocument re-reads it rather than
+ * reusing a caller's: SurveyNotebook draws one page at a time, and a
+ * section cut on another page would be reported lost against it.
+ */
+CalloutWrite.refreshSectionsFromDocument = function(doc, di) {
+    if (isNull(doc) || isNull(di)) {
+        return null;
+    }
+    var asDrawn;
+    try {
+        asDrawn = CsRevise.resolveAsDrawn(doc);
+    } catch (e) {
+        return null;
+    }
+    if (asDrawn === null) {
+        return null;
+    }
+    return CalloutWrite.refreshSections(doc, di, asDrawn.survey,
+        asDrawn.resolved);
+};
+
+/**
  * Place a cross-section callout: a leader from the cut point to a BLOCK
  * holding the section.
  *

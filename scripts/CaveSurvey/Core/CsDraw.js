@@ -1052,6 +1052,20 @@ CsDraw.survey = function(survey, resolved, originStation, originPos, seqBase) {
         }
     }
 
+    // The cross sections, on the same terms and for the same reasons as
+    // the elevation labels above: soft dependency, re-read from the
+    // drawing, and a failure here must never take the map down.
+    var sectionRefresh = null;
+    if (typeof CalloutWrite !== "undefined" &&
+            typeof CalloutWrite.refreshSectionsFromDocument === "function") {
+        try {
+            sectionRefresh =
+                CalloutWrite.refreshSectionsFromDocument(doc, di);
+        } catch (eSection) {
+            sectionRefresh = null;
+        }
+    }
+
     return {
         stationsDrawn: stationsDrawn,
         shotsDrawn: shotsDrawn,
@@ -1086,7 +1100,13 @@ CsDraw.survey = function(survey, resolved, originStation, originPos, seqBase) {
         // re-deriving elevation callouts, or null if the callout tools
         // are not loaded. Additive: no existing caller iterates these
         // keys or reads them positionally.
-        elevations: elevationRefresh
+        elevations: elevationRefresh,
+        // {updated, unchanged, frozen, lost, refused} from re-deriving
+        // the cross sections, or null when the callout tools are not
+        // loaded. Additive, like `elevations` before it -- and PRINTED
+        // by CsReport: this suite's recurring defect is a value computed
+        // and then surfaced to nobody.
+        sections: sectionRefresh
     };
 };
 
