@@ -147,6 +147,9 @@ var CORE_FILES = [
     "scripts/CaveSurvey/Core/Format/CsSurvex.js",
     "scripts/CaveSurvey/Core/Format/CsCsv.js",
     "scripts/CaveSurvey/Core/Format/CsRegistry.js",
+    // before CsRevise: moveLinework's per-vertex dispatch calls
+    // CsWarp.mlsSimilarity when it runs
+    "scripts/CaveSurvey/Core/CsWarp.js",
     "scripts/CaveSurvey/Core/CsRevise.js",
     // after CsRevise: CsBind's layer gate consults
     // CsRevise.isWorldFixedLayer when it is loaded

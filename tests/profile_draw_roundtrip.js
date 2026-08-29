@@ -72,6 +72,9 @@ var CORE = ["CsUnits", "CsCave", "CsGeoProject", "CsAngles", "CsIgrfCoeffs",
     "CsValidate", "CsStats", "CsGrade", "CsTags", "CsStore", "CsLayers",
     "CsDraw",
     "CsProfile", "CsProfileDraw",
+    // CsWarp before CsRevise -- moveLinework's per-vertex dispatch
+    // calls CsWarp.mlsSimilarity when it runs.
+    "CsWarp",
     // CsRevise before CsBind -- CsBind's layer gate consults
     // CsRevise.isWorldFixedLayer when it is loaded.
     "CsRevise", "CsBind", "CsProfileBind",

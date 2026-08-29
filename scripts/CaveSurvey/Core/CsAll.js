@@ -86,6 +86,7 @@ include(includeBasePath + "/CsBind.js");
 // the library would delete a guard on live code.
 include(includeBasePath + "/CsFocus.js");
 include(includeBasePath + "/CsDraw.js");
+include(includeBasePath + "/CsWarp.js");
 include(includeBasePath + "/CsRevise.js");
 // After both CsBind and CsRevise: CsProfileBind calls into each.
 include(includeBasePath + "/CsProfileBind.js");
