@@ -10214,6 +10214,29 @@ if (!IS_NODE) {
     ok(String(refused.reason).indexOf("B3") >= 0,
         "CsSectionCut.cut: and the refusal names the station");
 
+    // The pick snaps to a LEG and a fraction along it. The fixture
+    // runs due north from A1 at the origin, ten feet a leg.
+    var near1 = CsSectionCut.nearestLeg(res, { x: 1, y: 5 });
+    eqs(near1.from + "->" + near1.to, "A1->A2",
+        "CsSectionCut.nearestLeg: a pick beside the first leg means it");
+    near(near1.t, 0.5, 1e-9,
+        "CsSectionCut.nearestLeg: halfway along it");
+    near(near1.distance, 1, 1e-9,
+        "CsSectionCut.nearestLeg: one foot off the line");
+
+    var near2 = CsSectionCut.nearestLeg(res, { x: 0, y: 22 });
+    eqs(near2.from + "->" + near2.to, "A3->A4",
+        "CsSectionCut.nearestLeg: further along picks the next leg");
+
+    // Past the end of a leg the foot CLAMPS rather than running off it.
+    var clamped = CsSectionCut.nearestLeg(res, { x: 0, y: -50 });
+    ok(clamped === null || clamped.t === 0,
+        "CsSectionCut.nearestLeg: the foot clamps to the leg's own ends");
+
+    // Nothing near enough means nothing, not the least-bad guess.
+    ok(CsSectionCut.nearestLeg(res, { x: 500, y: 500 }) === null,
+        "CsSectionCut.nearestLeg: a pick in open space means no leg");
+
     // A leg that is not in the survey at all.
     var gone = CsSectionCut.cut(sv, res, "Z1", "Z2", 0.5, {});
     ok(gone.refused === true, "CsSectionCut.cut: a missing leg is refused");

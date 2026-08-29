@@ -438,3 +438,50 @@ CsSectionCut.cut = function(survey, resolved, from, to, t, opts) {
         reseeded: step.reseeded
     };
 };
+
+/** How far from a leg a pick may land and still mean that leg, as a
+ *  MULTIPLE of the leg's own length. Relative, so it means the same
+ *  thing in a passage of ten-foot shots and one of hundred-foot shots. */
+CsSectionCut.PICK_TOLERANCE = 0.75;
+
+/**
+ * The leg a pick means, and how far along it: the perpendicular foot,
+ * clamped to the leg's ends.
+ *
+ * PLAN DISTANCE ONLY. The pick comes from a click in the plan view,
+ * where the reader has no z to give -- comparing in 3D would make a
+ * deep leg under a shallow one win or lose by its depth, which is not
+ * what the click meant.
+ *
+ * \return {from, to, t, distance} or null when nothing is near enough
+ */
+CsSectionCut.nearestLeg = function(resolved, point, tolerance) {
+    var best = null;
+    var tol = (tolerance === undefined || tolerance === null) ?
+        CsSectionCut.PICK_TOLERANCE : tolerance;
+    for (var i = 0; i < resolved.legs.length; i++) {
+        var leg = resolved.legs[i];
+        var a = resolved.stations[leg.from];
+        var b = resolved.stations[leg.to];
+        if (a === undefined || b === undefined) {
+            continue;
+        }
+        var ex = b.x - a.x, ey = b.y - a.y;
+        var len2 = ex * ex + ey * ey;
+        if (len2 < CsSectionCut.EPS) {
+            continue;                        // a leg with no length
+        }
+        var t = ((point.x - a.x) * ex + (point.y - a.y) * ey) / len2;
+        if (t < 0) { t = 0; } else if (t > 1) { t = 1; }
+        var fx = a.x + ex * t, fy = a.y + ey * t;
+        var dx = point.x - fx, dy = point.y - fy;
+        var dist = Math.sqrt(dx * dx + dy * dy);
+        if (dist > Math.sqrt(len2) * tol) {
+            continue;                        // too far to mean this leg
+        }
+        if (best === null || dist < best.distance) {
+            best = { from: leg.from, to: leg.to, t: t, distance: dist };
+        }
+    }
+    return best;
+};
