@@ -569,7 +569,7 @@ Callout.init = function(basePath) {
     action.setIcon(basePath + "/Callout.svg");
     action.setStatusTip(qsTr("A note bound to one or more arrows, " +
         "which stays bound when you edit or move the text"));
-    action.setDefaultCommands(["cscallout", "cscal"]);
+    action.setDefaultCommands(["callout", "cal", "cscallout", "cscal"]);
     action.setGroupSortOrder(450);
     action.setSortOrder(88);
     action.setWidgetNames(["CaveSurveyMenu", "CaveSurveyToolBar"]);

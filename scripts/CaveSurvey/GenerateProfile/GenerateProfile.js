@@ -255,7 +255,7 @@ GenerateProfile.init = function(basePath) {
     action.setScriptFile(basePath + "/GenerateProfile.js");
     action.setIcon(basePath + "/GenerateProfile.svg");
     action.setStatusTip(qsTr("Rebuild the extended elevation and show what it could not draw"));
-    action.setDefaultCommands(["genprofile", "gp"]);
+    action.setDefaultCommands(["generateprofile", "gp", "genprofile"]);
     action.setGroupSortOrder(450);
     action.setSortOrder(75);
     action.setWidgetNames(["CaveSurveyMenu", "CaveSurveyToolBar"]);

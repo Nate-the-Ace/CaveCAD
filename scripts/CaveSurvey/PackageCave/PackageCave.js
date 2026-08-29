@@ -74,7 +74,7 @@ PackageCave.init = function(basePath) {
     action.setIcon(basePath + "/PackageCave.svg");
     action.setStatusTip(qsTr("Assemble a cave project into one zip: " +
         "sanitized to share, or a full archive to keep"));
-    action.setDefaultCommands(["packagecave", "pkgcave"]);
+    action.setDefaultCommands(["packagecave", "pc", "pkgcave"]);
     action.setGroupSortOrder(450);
     action.setSortOrder(95); // housekeeping, so: last
     action.setWidgetNames(["CaveSurveyMenu", "CaveSurveyToolBar"]);
