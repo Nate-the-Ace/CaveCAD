@@ -128,6 +128,7 @@ var CORE_FILES = [
     "scripts/CaveSurvey/Core/CsNetwork.js",
     "scripts/CaveSurvey/Core/CsAdjust.js",
     "scripts/CaveSurvey/Core/CsLrud.js",
+    "scripts/CaveSurvey/Core/CsSectionCut.js",
     "scripts/CaveSurvey/Core/CsProfile.js",
     // CsProfileDraw is QCAD-context for render()/erase()/band()/run()/
     // label() (RVector, RLineEntity, ...), but CsProfileDraw.labelText
@@ -9994,6 +9995,76 @@ if (!IS_NODE) {
     var kept = CsStationOrder.parseAssigned(capped);
     eqs(kept[kept.length - 1], "STN399",
         "the cap drops the OLDEST names, never the newest");
+}());
+
+// ---------------------------------------------------------------------
+// CsSectionCut -- frames. A leg is STRAIGHT, so there is no twist
+// within one; these carry theta = 0 from leg to leg so sections do not
+// spin where world up degenerates (a pitch).
+// ---------------------------------------------------------------------
+
+(function() {
+    var east = { x: 1, y: 0, z: 0 };
+    var f = CsSectionCut.seedFrame(east);
+    ok(f !== null, "CsSectionCut.seedFrame: a level leg seeds");
+    near(f.r.z, 1, 1e-9, "CsSectionCut.seedFrame: r is world up on a level leg");
+    near(CsSectionCut.dot(f.r, f.d), 0, 1e-9,
+        "CsSectionCut.seedFrame: r is perpendicular to d");
+    near(CsSectionCut.length(f.s), 1, 1e-9,
+        "CsSectionCut.seedFrame: s is a unit vector");
+
+    // A pitch: world up lies along the leg, so seeding must refuse.
+    ok(CsSectionCut.seedFrame({ x: 0, y: 0, z: 1 }) === null,
+        "CsSectionCut.seedFrame: a vertical leg cannot seed from up");
+
+    // Two vertical legs in a row: the carry must hold r steady. This is
+    // the anti-spin assertion -- the whole reason double reflection is
+    // here rather than "project world up and hope".
+    var down1 = { x: 0, y: 0, z: -1 };
+    var seeded = CsSectionCut.seedFrame({ x: 1, y: 0, z: 0 });
+    var v1 = CsSectionCut.carryFrame(seeded,
+        { x: 0, y: 0, z: 0 }, { x: 0, y: 0, z: -10 }, down1);
+    var v2 = CsSectionCut.carryFrame(v1,
+        { x: 0, y: 0, z: -10 }, { x: 0, y: 0, z: -20 }, down1);
+    near(v1.r.x, v2.r.x, 1e-9, "CsSectionCut.carryFrame: r.x steady down a pitch");
+    near(v1.r.y, v2.r.y, 1e-9, "CsSectionCut.carryFrame: r.y steady down a pitch");
+    near(v1.r.z, v2.r.z, 1e-9, "CsSectionCut.carryFrame: r.z steady down a pitch");
+    near(CsSectionCut.dot(v2.r, down1), 0, 1e-9,
+        "CsSectionCut.carryFrame: r stays perpendicular to the new leg");
+    near(CsSectionCut.length(v2.r), 1, 1e-9,
+        "CsSectionCut.carryFrame: and stays a unit vector");
+
+    // HAND-WORKED double reflection, and the assertion that actually
+    // discriminates. A leg running NORTH with r = up, turning down a
+    // pitch, carries to r = (0, 1, 0):
+    //   v1 = (0,10,0), c1 = 100
+    //   rL = (0,0,1) unchanged (v1 . r0 = 0)
+    //   dL = (0,1,0) - 2(10/100)(0,10,0) = (0,-1,0)
+    //   v2 = (0,0,-1) - (0,-1,0) = (0,1,-1), c2 = 2
+    //   r1 = (0,0,1) - 2(-1/2)(0,1,-1) = (0,1,0)
+    // The steadiness checks above CANNOT catch a frame that ignores the
+    // carry and returns a constant -- a constant is trivially steady.
+    // This can: the answer differs from any fixed vector, and a naive
+    // implementation lands somewhere else.
+    var north = CsSectionCut.seedFrame({ x: 0, y: 1, z: 0 });
+    var turned = CsSectionCut.carryFrame(north,
+        { x: 0, y: 0, z: 0 }, { x: 0, y: 10, z: 0 }, down1);
+    near(turned.r.x, 0, 1e-9, "CsSectionCut.carryFrame: hand-worked r.x");
+    near(turned.r.y, 1, 1e-9, "CsSectionCut.carryFrame: hand-worked r.y");
+    near(turned.r.z, 0, 1e-9, "CsSectionCut.carryFrame: hand-worked r.z");
+
+    // frameFor: a level leg following a level leg does NOT re-seed.
+    var lvl = CsSectionCut.frameFor(seeded, { x: 0, y: 0, z: 0 },
+        { x: 10, y: 0, z: 0 }, { x: 0, y: 1, z: 0 });
+    ok(lvl.reseeded === false,
+        "CsSectionCut.frameFor: a level corner does not re-seed");
+    // and a run that OPENS on a pitch says its theta = 0 was arbitrary
+    var opened = CsSectionCut.frameFor(null, { x: 0, y: 0, z: 0 },
+        { x: 0, y: 0, z: -10 }, { x: 0, y: 0, z: -1 });
+    ok(opened.reseeded === true,
+        "CsSectionCut.frameFor: opening on a pitch reports an arbitrary theta=0");
+    near(CsSectionCut.dot(opened.frame.r, opened.frame.d), 0, 1e-9,
+        "CsSectionCut.frameFor: even then the frame is orthogonal");
 }());
 
 // ---------------------------------------------------------------------

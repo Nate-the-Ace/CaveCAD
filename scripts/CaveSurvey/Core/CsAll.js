@@ -40,6 +40,7 @@ include(includeBasePath + "/CsTraverse.js");
 include(includeBasePath + "/CsNetwork.js");
 include(includeBasePath + "/CsAdjust.js");
 include(includeBasePath + "/CsLrud.js");
+include(includeBasePath + "/CsSectionCut.js");
 // The extended elevation: CsProfile (pure geometry) needs CsLrud above
 // for splaysByStation/legCounts; CsProfileDraw needs CsLayers/CsTags/
 // CsDraw, but only inside function BODIES (RVector, RLineEntity, ...),
