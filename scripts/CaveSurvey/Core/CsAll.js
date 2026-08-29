@@ -40,6 +40,7 @@ include(includeBasePath + "/CsTraverse.js");
 include(includeBasePath + "/CsNetwork.js");
 include(includeBasePath + "/CsAdjust.js");
 include(includeBasePath + "/CsLrud.js");
+include(includeBasePath + "/CsScanFit.js");
 include(includeBasePath + "/CsSectionCut.js");
 include(includeBasePath + "/CsSectionDraw.js");
 // The extended elevation: CsProfile (pure geometry) needs CsLrud above

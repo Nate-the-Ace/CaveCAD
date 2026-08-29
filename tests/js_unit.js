@@ -128,6 +128,7 @@ var CORE_FILES = [
     "scripts/CaveSurvey/Core/CsNetwork.js",
     "scripts/CaveSurvey/Core/CsAdjust.js",
     "scripts/CaveSurvey/Core/CsLrud.js",
+    "scripts/CaveSurvey/Core/CsScanFit.js",
     "scripts/CaveSurvey/Core/CsSectionCut.js",
     // pure helpers only (captionText/scaleText); its document functions
     // reference QCAD symbols but are never CALLED here -- same reason
@@ -10066,6 +10067,79 @@ if (!IS_NODE) {
     // A tag with no alias is unaffected.
     eqs(CsTags.get(fake, "Station"), "",
         "CsTags.get: a tag with no alias still answers empty");
+}());
+
+// ---------------------------------------------------------------------
+// CsScanFit -- fitting a scan onto stations BEFORE it is placed.
+// ---------------------------------------------------------------------
+
+(function() {
+    // Two stations 100 px apart on the scan that are 10 units apart in
+    // the drawing: a tenth scale, no rotation.
+    var two = [
+        { source: { x: 0, y: 0 },   dest: { x: 0, y: 0 } },
+        { source: { x: 100, y: 0 }, dest: { x: 10, y: 0 } }
+    ];
+    var fit = CsScanFit.fit(two);
+    eqs(fit.kind, "similarity", "CsScanFit.fit: two pairs keep the shape");
+    var mid = CsScanFit.apply(fit.matrix, { x: 50, y: 0 });
+    near(mid.x, 5, 1e-9, "CsScanFit: halfway lands halfway");
+    // shape KEPT: the across and down scales are equal
+    near(fit.matrix.a, 0.1, 1e-9, "CsScanFit: a tenth across");
+    near(fit.matrix.e, 0.1, 1e-9, "CsScanFit: and a tenth down");
+
+    // A quarter turn: the scan's +x runs north in the drawing.
+    var turned = CsScanFit.fit([
+        { source: { x: 0, y: 0 },   dest: { x: 0, y: 0 } },
+        { source: { x: 100, y: 0 }, dest: { x: 0, y: 100 } }
+    ]);
+    var p = CsScanFit.apply(turned.matrix, { x: 100, y: 0 });
+    near(p.x, 0, 1e-9, "CsScanFit: a quarter turn, x");
+    near(p.y, 100, 1e-9, "CsScanFit: a quarter turn, y");
+
+    // Three pairs stretching differently across and down -- the scanner
+    // distortion two points cannot express.
+    var stretched = CsScanFit.fit([
+        { source: { x: 0, y: 0 },   dest: { x: 0, y: 0 } },
+        { source: { x: 100, y: 0 }, dest: { x: 10, y: 0 } },
+        { source: { x: 0, y: 100 }, dest: { x: 0, y: 30 } }
+    ]);
+    eqs(stretched.kind, "affine", "CsScanFit.fit: three pairs allow a stretch");
+    near(stretched.matrix.a, 0.1, 1e-9, "CsScanFit: a tenth across");
+    near(stretched.matrix.e, 0.3, 1e-9, "CsScanFit: three tenths down");
+
+    // Collinear sources say nothing about the direction across the line,
+    // so the fit falls back to the first two rather than inventing one.
+    var line = CsScanFit.fit([
+        { source: { x: 0, y: 0 },   dest: { x: 0, y: 0 } },
+        { source: { x: 10, y: 0 },  dest: { x: 1, y: 0 } },
+        { source: { x: 20, y: 0 },  dest: { x: 2, y: 0 } }
+    ]);
+    eqs(line.kind, "similarity",
+        "CsScanFit.fit: collinear picks fall back to the two-point fit");
+
+    ok(CsScanFit.fit([two[0]]) === null,
+        "CsScanFit.fit: one pair is not a fit");
+    ok(CsScanFit.similarityFrom({x:5,y:5}, {x:0,y:0}, {x:5,y:5},
+        {x:9,y:9}) === null,
+        "CsScanFit: two picks on the same spot say nothing");
+
+    // The image vectors: a 200x100 scan at a tenth scale, unrotated,
+    // is placed from its TOP-LEFT with v stepping DOWN the drawing --
+    // an image's rows run down while the preview's y ran up.
+    var v = CsScanFit.imageVectors(fit.matrix, 100);
+    near(v.position.x, 0, 1e-9, "imageVectors: top-left x");
+    near(v.position.y, 10, 1e-9, "imageVectors: top-left y is the scan's top");
+    near(v.u.x, 0.1, 1e-9, "imageVectors: one pixel across is a tenth");
+    near(v.u.y, 0, 1e-9, "imageVectors: and level");
+    near(v.v.y, -0.1, 1e-9, "imageVectors: one pixel down goes DOWN");
+
+    var res = CsScanFit.residuals(two, fit.matrix);
+    near(res.worst, 0, 1e-9, "CsScanFit.residuals: an exact fit misses by nothing");
+    var off = [two[0], two[1],
+        { source: { x: 0, y: 100 }, dest: { x: 0, y: 99 } }];
+    var bad = CsScanFit.residuals(off, fit.matrix);
+    eqs(bad.worstIndex, 3, "CsScanFit.residuals: names the worst pick");
 }());
 
 // ---------------------------------------------------------------------

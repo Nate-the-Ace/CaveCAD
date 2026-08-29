@@ -232,6 +232,7 @@ SketchScans.buildDock = function(appWin) {
         rows: [],           // CsScanTree rows behind the table indices
         collapsed: {},      // this cave's collapsed set
         bookmarks: {},      // this cave's bookmarked scans
+        picking: null,      // an alignment in progress: {pairs, rel}
         scans: null,        // the scans folder the table was built from
         ready: false        // false while the panel shows a message
     };
@@ -314,8 +315,7 @@ SketchScans.buildDock = function(appWin) {
         zoomRow.addWidget(w.pickLabel, 0, 0);
         w.scanView.view.onScanPick = function(point) {
             try {
-                w.pickLabel.text = CsScanPreview.pixelText(point,
-                    w.scanView.heightPx);
+                SketchScans.takePick(point);
             } catch (ePick) {
             }
         };
@@ -381,6 +381,14 @@ SketchScans.buildDock = function(appWin) {
     w.refreshButton = new QPushButton(qsTr("Refresh"));
     w.refreshButton.toolTip = qsTr("Re-read the scans folder -- new " +
         "scans appear here once Drive has synced them.");
+    // ALIGN FIRST, THEN INSERT. The stations are picked on the scan in
+    // the viewer above, so the fit is known before the image is placed
+    // -- the caver never inserts a scan and then hunts for it in the
+    // drawing to align it.
+    w.pickAlignButton = new QPushButton(qsTr("Align on Scan"));
+    w.pickAlignButton.toolTip = qsTr("Pick stations on the scan itself, " +
+        "then place it already fitted. Zoom in first -- the fit is only " +
+        "as good as the picks.");
     w.alignButton = new QPushButton(qsTr("Insert && Align"));
     w.alignButton.toolTip = qsTr("Insert the selected scan over the " +
         "survey and start Align Image on it: pick two points on the " +
@@ -390,6 +398,7 @@ SketchScans.buildDock = function(appWin) {
         "survey, unaligned.");
     buttons.addWidget(w.refreshButton, 0, 0);
     buttons.addStretch(1);
+    buttons.addWidget(w.pickAlignButton, 0, 0);
     buttons.addWidget(w.alignButton, 0, 0);
     buttons.addWidget(w.insertButton, 0, 0);
     layout.addLayout(buttons, 0);
@@ -431,6 +440,11 @@ SketchScans.buildDock = function(appWin) {
             try {
                 w.pickLabel.text = "";
             } catch (eClearPick) {
+            }
+            if (w.picking !== null && w.picking.rel !== rel) {
+                // another scan: the picks belonged to the old one
+                w.picking = null;
+                w.pickAlignButton.text = qsTr("Align on Scan");
             }
             if (!CsScanPreview.show(w.scanView, w.scans + "/" + rel)) {
                 showMessage(qsTr("unreadable image"));
@@ -504,6 +518,165 @@ SketchScans.buildDock = function(appWin) {
                 CsLayers.CTRL_SCAN + ". Align Image fits it to the survey.");
         }
     };
+
+    /** The drawing's plotted stations, and the order to walk them. */
+    var stationsNow = function() {
+        var doc = EAction.getDocument();
+        if (isNull(doc)) {
+            return null;
+        }
+        try {
+            var stations = CsTags.collectStations(doc);
+            if (stations.length === 0) {
+                return null;
+            }
+            var plotted = {}, names = [];
+            for (var i = 0; i < stations.length; i++) {
+                plotted[stations[i].name] = stations[i].pos;
+                names.push(stations[i].name);
+            }
+            return { plotted: plotted, names: names };
+        } catch (e) {
+            return null;
+        }
+    };
+
+    var pickStatus = function(text) {
+        try {
+            w.pickLabel.text = text;
+        } catch (e) {
+        }
+    };
+
+    /** Every pick so far, and what to do next. */
+    var refreshPickState = function() {
+        if (w.picking === null) {
+            w.pickAlignButton.text = qsTr("Align on Scan");
+            return;
+        }
+        var n = w.picking.pairs.length;
+        w.pickAlignButton.text = (n >= 2) ?
+            qsTr("Place (%1 stations)").arg(n) : qsTr("Cancel Align");
+        pickStatus(n === 0 ?
+            qsTr("Click station 1 on the scan") :
+            qsTr("%1 picked -- click another, or Place").arg(n));
+    };
+
+    /** A left-click on the scan while an alignment is running. */
+    var takePick = function(point) {
+        if (w.picking === null) {
+            // not aligning: the click is just a readout
+            pickStatus(CsScanPreview.pixelText(point, w.scanView.heightPx));
+            return;
+        }
+        var ctx = stationsNow();
+        if (ctx === null) {
+            warning("Sketch Scans: this drawing has no plotted stations " +
+                "to align to.");
+            w.picking = null;
+            refreshPickState();
+            return;
+        }
+        var used = {};
+        for (var i = 0; i < w.picking.pairs.length; i++) {
+            used[w.picking.pairs[i].name] = true;
+        }
+        var offer = [];
+        for (var k = 0; k < ctx.names.length; k++) {
+            if (used[ctx.names[k]] !== true) {
+                offer.push(ctx.names[k]);
+            }
+        }
+        if (offer.length === 0) {
+            warning("Sketch Scans: every plotted station is already on " +
+                "this scan.");
+            return;
+        }
+        var chosen = null;
+        try {
+            // The station list itself, so a name cannot be mistyped and
+            // one already used cannot be picked twice.
+            chosen = QInputDialog.getItem(RMainWindowQt.getMainWindow(),
+                qsTr("Align on Scan"),
+                qsTr("Which station did you just click?"),
+                offer, 0, false);
+        } catch (eDlg) {
+            chosen = null;
+        }
+        if (chosen === null || chosen === undefined || chosen === "") {
+            return;                       // cancelled: the pick is dropped
+        }
+        var dest = ctx.plotted[String(chosen)];
+        if (dest === undefined) {
+            return;
+        }
+        w.picking.pairs.push({
+            name: String(chosen),
+            source: { x: point.x, y: point.y },
+            dest: { x: dest.x, y: dest.y }
+        });
+        refreshPickState();
+    };
+
+    /** Place the scan using the picks. */
+    var placeAligned = function() {
+        var di = EAction.getDocumentInterface();
+        var doc = EAction.getDocument();
+        if (isNull(doc) || isNull(di) || w.picking === null) {
+            return;
+        }
+        var fit = CsScanFit.fit(w.picking.pairs);
+        if (fit === null) {
+            warning("Sketch Scans: those picks do not describe a fit -- " +
+                "two stations in different places on the scan are the " +
+                "least it takes.");
+            return;
+        }
+        // Read the residuals BEFORE clearing the picks -- they are the
+        // only report the caver gets on whether the fit is any good.
+        var pairs = w.picking.pairs;
+        var rel = w.picking.rel;
+        var res = CsScanFit.residuals(pairs, fit.matrix);
+        var placed = SketchScans.insertFitted(doc, di,
+            w.scans + "/" + rel, rel, fit, w.scanView.heightPx, pairs);
+        w.picking = null;
+        refreshPickState();
+        pickStatus("");
+        if (placed !== null) {
+            var how = (fit.kind === "affine") ?
+                qsTr("stretched to fit") : qsTr("moved and resized");
+            EAction.handleUserMessage(rel + qsTr(" placed on ") +
+                CsLayers.CTRL_SCAN + qsTr(" from %1 stations, %2. ")
+                    .arg(pairs.length).arg(how) +
+                qsTr("Worst station is off by %1; the average is %2.")
+                    .arg(Math.round(res.worst * 100) / 100)
+                    .arg(Math.round(res.average * 100) / 100));
+        }
+    };
+
+    w.pickAlignButton.clicked.connect(function() {
+        if (w.picking !== null) {
+            if (w.picking.pairs.length >= 2) {
+                placeAligned();
+            } else {
+                w.picking = null;
+                refreshPickState();
+                pickStatus("");
+            }
+            return;
+        }
+        var rel = selectedFile();
+        if (rel === null || w.scans === null || w.scanView === null) {
+            return;
+        }
+        if (stationsNow() === null) {
+            warning("Sketch Scans: this drawing has no plotted stations " +
+                "to align to. Draw the survey first.");
+            return;
+        }
+        w.picking = { pairs: [], rel: rel };
+        refreshPickState();
+    });
 
     w.list.itemSelectionChanged.connect(showPreview);
     // Folder rows fold on a plain click.
@@ -617,6 +790,7 @@ SketchScans.buildDock = function(appWin) {
     }
 
     SketchScans.showPreview = showPreview;
+    SketchScans.takePick = takePick;
     return dock;
 };
 
@@ -923,6 +1097,90 @@ SketchScans.insert = function(doc, di, path, name) {
         }
     }
     warning("Sketch Scans: the insert operation added nothing -- the " +
+        CsLayers.CTRL_SCAN + " layer may be locked or frozen.");
+    return null;
+};
+
+/**
+ * Inserts a scan ALREADY FITTED to the stations picked on it.
+ *
+ * The ordinary insert drops the scan over the survey at a guessed size
+ * for Align Image to fix afterwards. This one knows the answer first:
+ * the fit came from stations picked on the scan itself, so the image is
+ * placed by the three vectors that fit describes and never has to be
+ * moved again.
+ *
+ * \return the entity id, or null (a message has been shown).
+ */
+SketchScans.insertFitted = function(doc, di, path, name, fit, heightPx,
+        pairs) {
+    var image = new QImage(path);
+    if (image.isNull()) {
+        warning("Sketch Scans: " + name + " could not be read as an image.");
+        return null;
+    }
+    var pxW = image.width(), pxH = image.height();
+    if (pxW < 1 || pxH < 1) {
+        warning("Sketch Scans: " + name + " has no size.");
+        return null;
+    }
+
+    var v = CsScanFit.imageVectors(fit.matrix, heightPx);
+    var entity;
+    try {
+        var data = new RImageData(path,
+            new RVector(v.position.x, v.position.y),
+            new RVector(v.u.x, v.u.y),
+            new RVector(v.v.x, v.v.y),
+            pxW, pxH, 0);
+        try {
+            data.setFade(SketchScans.FADE_PERCENT);
+        } catch (eFade) {
+        }
+        entity = new RImageEntity(doc, data);
+    } catch (e) {
+        warning("Sketch Scans: creating the image entity failed: " + e);
+        return null;
+    }
+
+    CsLayers.ensure(doc, di, CsLayers.CTRL_SCAN);
+    // Layer, tags and draw order BEFORE adding -- post-add writes fail
+    // silently in this bridge (see CsDraw.js's header).
+    entity.setLayerId(doc.getLayerId(CsLayers.CTRL_SCAN));
+    CsTags.set(entity, "SketchScan", name);
+    // The stations it was fitted to, in the same tag Align Image uses,
+    // so re-aligning this scan later resumes past them rather than
+    // offering them again.
+    try {
+        var names = [];
+        for (var n = 0; n < pairs.length; n++) {
+            names.push(pairs[n].name);
+        }
+        CsTags.set(entity, CsStationOrder.TAG,
+            CsStationOrder.serializeAssigned(names));
+    } catch (eTag) {
+        // the scan is placed either way; only the resume list is lost
+    }
+    entity.setDrawOrder(doc.getStorage().getMinDrawOrder() - 1);
+
+    var beforeIds = {};
+    var ids = doc.queryAllEntities(false, false);
+    var i;
+    for (i = 0; i < ids.length; i++) {
+        beforeIds[ids[i]] = true;
+    }
+    var op = new RAddObjectsOperation();
+    op.setText("Place aligned sketch scan");
+    op.addObject(entity, false);
+    di.applyOperation(op);
+
+    ids = doc.queryAllEntities(false, false);
+    for (i = 0; i < ids.length; i++) {
+        if (beforeIds[ids[i]] !== true) {
+            return ids[i];
+        }
+    }
+    warning("Sketch Scans: the insert added nothing -- the " +
         CsLayers.CTRL_SCAN + " layer may be locked or frozen.");
     return null;
 };
