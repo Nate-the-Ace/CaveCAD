@@ -10234,6 +10234,17 @@ if (!IS_NODE) {
 
     // The scale a section states is the one a reader can act on: a
     // section drawn four times survey size is 4:1, never 1:0.25.
+    // UP IS UP ON THE SHEET. theta is measured from world up in the
+    // cut, so the block must map it to +Y -- mapping it to +X draws
+    // every section lying on its side, which is what the first smoke
+    // test against a real document showed.
+    var upPt = CsSectionDraw.pointOf({ theta: 0, radius: 10 }, 4);
+    near(upPt.y, 40, 1e-9, "CsSectionDraw.pointOf: theta = 0 is UP, at +Y");
+    near(upPt.x, 0, 1e-9, "CsSectionDraw.pointOf: and not across");
+    var sidePt = CsSectionDraw.pointOf({ theta: Math.PI / 2, radius: 10 }, 4);
+    near(sidePt.x, 40, 1e-9, "CsSectionDraw.pointOf: theta = pi/2 is across, at +X");
+    near(sidePt.y, 0, 1e-9, "CsSectionDraw.pointOf: and not up");
+
     eqs(CsSectionDraw.scaleText(4), "4:1",
         "CsSectionDraw.scaleText: an enlargement reads 4:1");
     eqs(CsSectionDraw.scaleText(1), "1:1",

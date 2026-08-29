@@ -32,13 +32,31 @@ CsCallout.KEY = {
     ELEV_TO: "ElevTo",
     ELEV_FRACTION: "ElevFraction",
     ELEV_VALUE: "ElevValue",
-    ELEV_MULTI: "ElevMulti"
+    ELEV_MULTI: "ElevMulti",
+    // A cross section's provenance -- which leg it was cut on and how
+    // far along it, so a Draw can re-derive the whole thing. The same
+    // idea as ELEV_FROM/ELEV_TO/ELEV_FRACTION one kind over.
+    SECTION_FROM: "SectionFrom",
+    SECTION_TO: "SectionTo",
+    SECTION_FRACTION: "SectionFraction",
+    SECTION_SCALE: "SectionScale",
+    SECTION_ANGLES: "SectionAngles",
+    SECTION_NEAREST: "SectionNearest",
+    // Set by the caver: this section's geometry is theirs now, and
+    // regeneration must leave it alone. A regenerated BLOCK cannot be
+    // compared against "what it would have drawn" the way a text label
+    // can, so the hand-edit guard is explicit rather than inferred.
+    SECTION_FROZEN: "SectionFrozen"
 };
 
 CsCallout.ROLE_TEXT = "text";
 CsCallout.ROLE_LEADER = "leader";
+// A section's content is a BLOCK REFERENCE, not text: one definition
+// per section so it can be edited individually and dragged as a unit.
+CsCallout.ROLE_BLOCK = "block";
 CsCallout.KIND_TEXT = "text";
 CsCallout.KIND_ELEV = "elev";
+CsCallout.KIND_SECTION = "section";
 CsCallout.BASIS_FLOOR = "floor";
 CsCallout.BASIS_LINE = "line";
 

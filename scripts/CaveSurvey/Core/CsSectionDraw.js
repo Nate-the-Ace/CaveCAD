@@ -57,10 +57,29 @@ CsSectionDraw.scaleOf = function() {
     }
 };
 
-/** A polygon point in block-local drawing coordinates. */
+/**
+ * A polygon point in block-local drawing coordinates.
+ *
+ * THE AXIS SWAP IS DELIBERATE. In the cut, theta is measured from the
+ * frame's r -- which is WORLD UP -- toward s, the horizontal across the
+ * passage. On the sheet up must be up, so r maps to +Y and s to +X:
+ *   x = sin(theta) * radius   (across the passage)
+ *   y = cos(theta) * radius   (up)
+ * Mapping theta to x directly draws every section on its side, which is
+ * what the first smoke test against a real document showed.
+ *
+ * With s = d x r, +X is the right-hand side looking ALONG the passage
+ * direction -- the convention a section is read in.
+ */
 CsSectionDraw.pointOf = function(sample, scale) {
-    return new RVector(Math.cos(sample.theta) * sample.radius * scale,
-                       Math.sin(sample.theta) * sample.radius * scale);
+    return { x: Math.sin(sample.theta) * sample.radius * scale,
+             y: Math.cos(sample.theta) * sample.radius * scale };
+};
+
+/** pointOf as the RVector the drawing calls want. QCAD only. */
+CsSectionDraw.vectorOf = function(sample, scale) {
+    var p = CsSectionDraw.pointOf(sample, scale);
+    return new RVector(p.x, p.y);
 };
 
 /** One entity into the block definition, layered and tagged. Layer and
@@ -164,7 +183,7 @@ CsSectionDraw.define = function(doc, di, sectionId, cut, opts) {
     if (cut.outline.length >= 3) {
         var pl = new RPolyline();
         for (i = 0; i < cut.outline.length; i++) {
-            pl.appendVertex(CsSectionDraw.pointOf(cut.outline[i], scale));
+            pl.appendVertex(CsSectionDraw.vectorOf(cut.outline[i], scale));
         }
         pl.setClosed(true);
         CsSectionDraw.addToBlock(doc, op, blockId,
@@ -177,7 +196,7 @@ CsSectionDraw.define = function(doc, di, sectionId, cut, opts) {
     for (i = 0; i < cut.outline.length; i++) {
         CsSectionDraw.addToBlock(doc, op, blockId,
             new RLineEntity(doc, new RLineData(new RVector(0, 0),
-                CsSectionDraw.pointOf(cut.outline[i], scale))),
+                CsSectionDraw.vectorOf(cut.outline[i], scale))),
             CsLayers.SECTION_SPLAYS, sectionId);
     }
 
@@ -195,22 +214,55 @@ CsSectionDraw.define = function(doc, di, sectionId, cut, opts) {
     // The caption, under the section.
     var lowest = 0;
     for (i = 0; i < cut.outline.length; i++) {
-        var y = Math.sin(cut.outline[i].theta) * cut.outline[i].radius * scale;
+        var y = Math.cos(cut.outline[i].theta) * cut.outline[i].radius * scale;
         if (y < lowest) { lowest = y; }
     }
     var height = CsSectionDraw.textHeight(doc);
     var caption = CsSectionDraw.captionText(o.from || "?", o.to || "?",
         (o.t === undefined ? 0 : o.t), cut, scale);
     var pos = new RVector(0, lowest - height * 1.5);
-    var td = new RTextData(pos, pos, height, 0.0,
-        RS.VAlignTop, RS.HAlignCenter, RS.LeftToRight, RS.Exact, 1.0,
-        caption, "standard", false, 0.0, false);
+    // The FULL constructor, with position AND alignment point, in the
+    // exact argument shape CalloutWrite.buildOp already proves against
+    // this bridge. setPosition() alone reads back correctly while the
+    // entity renders at the ORIGIN -- that shipped once.
+    var td = new RTextData(pos, pos, height, 100.0,
+        RS.VAlignTop, RS.HAlignCenter, RS.LeftToRight, RS.Exact,
+        1.0, caption, "standard", false, false, 0.0, false);
     CsSectionDraw.addToBlock(doc, op, blockId,
         new RTextEntity(doc, td),
         CsLayers.SECTION_TEXT_LABELS, sectionId);
 
     di.applyOperation(op);
     return blockId;
+};
+
+/**
+ * The section's own extent in BLOCK-LOCAL coordinates, worked out from
+ * the cut rather than measured off the drawing.
+ *
+ * Analytic on purpose. A block reference's bounding box is CACHED and a
+ * redefine does not invalidate it (CalloutWrite.boxOf's docblock records
+ * what that cost once already), so a leader solved against a freshly
+ * placed reference would be solved against a stale box. Computing the
+ * box from the same numbers that drew the geometry cannot be stale, and
+ * it lets the reference and its leaders land in ONE operation.
+ *
+ * \return {x1, y1, x2, y2}
+ */
+CsSectionDraw.localBox = function(cut, scale, height) {
+    var x1 = 0, y1 = 0, x2 = 0, y2 = 0;
+    for (var i = 0; i < cut.outline.length; i++) {
+        // the same mapping pointOf uses -- up is +Y
+        var x = Math.sin(cut.outline[i].theta) * cut.outline[i].radius * scale;
+        var y = Math.cos(cut.outline[i].theta) * cut.outline[i].radius * scale;
+        if (x < x1) { x1 = x; }
+        if (x > x2) { x2 = x; }
+        if (y < y1) { y1 = y; }
+        if (y > y2) { y2 = y; }
+    }
+    // the caption hangs below, where define() puts it
+    y1 -= height * 2.5;
+    return { x1: x1, y1: y1, x2: x2, y2: y2 };
 };
 
 /** The drawing's own text height, the same source the callouts use. */

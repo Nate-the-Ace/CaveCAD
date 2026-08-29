@@ -37,7 +37,7 @@ CalloutWrite.existingIds = function(doc) {
 /** The members of one callout: {text: entity|null, leaders: [entity]}. */
 CalloutWrite.members = function(doc, id) {
     var want = String(id);
-    var res = { text: null, leaders: [] };
+    var res = { text: null, block: null, leaders: [] };
     var ids = doc.queryAllEntities(false, true);
     for (var i = 0; i < ids.length; i++) {
         var e = doc.queryEntity(ids[i]);
@@ -47,11 +47,27 @@ CalloutWrite.members = function(doc, id) {
         var role = CsTags.get(e, CsCallout.KEY.ROLE);
         if (role === CsCallout.ROLE_TEXT) {
             res.text = e;
+        } else if (role === CsCallout.ROLE_BLOCK) {
+            res.block = e;
         } else if (role === CsCallout.ROLE_LEADER) {
             res.leaders.push(e);
         }
     }
     return res;
+};
+
+/**
+ * The member a callout's leaders point AT: its text, or -- for a cross
+ * section -- its block reference.
+ *
+ * Every leader rule in this file was written against m.text because
+ * text was the only content there had ever been. A section's content is
+ * a block, and reflow needs a BOX rather than a string, so the rules
+ * hold unchanged once they ask for the content member instead of the
+ * text member.
+ */
+CalloutWrite.contentOf = function(m) {
+    return m.text !== null ? m.text : m.block;
 };
 
 /**
@@ -329,15 +345,16 @@ CalloutWrite.signatureOfLeaders = function(leaders) {
 CalloutWrite.writeLeaders = function(doc, di, id, tips, style, layerName,
         group) {
     var m = CalloutWrite.members(doc, id);
-    if (m.text === null) {
+    var content = CalloutWrite.contentOf(m);
+    if (content === null) {
         return;
     }
 
-    var side = CsTags.get(m.text, CsCallout.KEY.SIDE);
-    // The leader SHAPE is read back off the text, not passed in, so a
-    // reflow after a move or an edit keeps the curve the caver chose.
-    var shape = CsTags.get(m.text, CsCallout.KEY.LEADER);
-    var geom = CsCallout.reflow(CalloutWrite.boxOf(m.text), tips, {
+    var side = CsTags.get(content, CsCallout.KEY.SIDE);
+    // The leader SHAPE is read back off the content, not passed in, so
+    // a reflow after a move or an edit keeps the curve the caver chose.
+    var shape = CsTags.get(content, CsCallout.KEY.LEADER);
+    var geom = CsCallout.reflow(CalloutWrite.boxOf(content), tips, {
         leader: (shape === "" ? CsCallout.LEADER_DEFAULT : shape),
         side: (side === "" ? "auto" : side),
         // NOT DIMASZ/DIMSCALE. Measured in a real drawing they are
@@ -446,10 +463,11 @@ CalloutWrite.writeLeaders = function(doc, di, id, tips, style, layerName,
  */
 CalloutWrite.applyReflow = function(doc, di, id, group) {
     var m = CalloutWrite.members(doc, id);
-    if (m.text === null || m.leaders.length === 0) {
+    var content = CalloutWrite.contentOf(m);
+    if (content === null || m.leaders.length === 0) {
         return;
     }
-    var style = CsTags.get(m.text, CsCallout.KEY.STYLE) ||
+    var style = CsTags.get(content, CsCallout.KEY.STYLE) ||
         CsCallout.STYLE_DEFAULT;
     var layerName = CsCallout.STYLES[style] ||
         CsCallout.STYLES[CsCallout.STYLE_DEFAULT];
@@ -755,6 +773,173 @@ CalloutWrite.refreshElevations = function(doc, di, survey, resolved) {
  * CalloutStyle or CalloutLeader is litter that reads as meaningful to
  * the next person who greps for it.
  */
+/**
+ * Place a cross-section callout: a leader from the cut point to a BLOCK
+ * holding the section.
+ *
+ * One block DEFINITION per section (CsSectionDraw.blockName), so a
+ * caver can edit one without touching any other and the whole section
+ * drags as a unit.
+ *
+ * \param spec {cut, from, to, t, position: {x,y}, tips: [{x,y}],
+ *              style, leader, scale}
+ * \return the callout id, or null
+ */
+CalloutWrite.createSection = function(doc, di, spec) {
+    var style = spec.style || "annotation";
+    var layerName = CsCallout.STYLES[style] ||
+        CsCallout.STYLES[CsCallout.STYLE_DEFAULT];
+    CsLayers.ensure(doc, di, layerName);
+
+    var id = CsCallout.newId();
+    var scale = (spec.scale === undefined || spec.scale === null) ?
+        CsSectionDraw.scaleOf() : spec.scale;
+
+    // The definition first: the reference cannot exist without a block
+    // id to point at.
+    var blockId = CsSectionDraw.define(doc, di, id, spec.cut,
+        { from: spec.from, to: spec.to, t: spec.t, scale: scale });
+    if (blockId === null) {
+        return null;
+    }
+
+    var at = new RVector(spec.position.x, spec.position.y);
+    var ref = new RBlockReferenceEntity(doc,
+        new RBlockReferenceData(blockId, at, new RVector(1, 1), 0.0));
+    ref.setLayerId(doc.getLayerId(layerName));
+
+    var shape = spec.leader || CsCallout.LEADER_DEFAULT;
+    // Tag BEFORE adding, so the tags land in the SAME operation as the
+    // geometry (CsDraw.js:10).
+    CsTags.set(ref, CsCallout.KEY.ID, id);
+    CsTags.set(ref, CsCallout.KEY.ROLE, CsCallout.ROLE_BLOCK);
+    CsTags.set(ref, CsCallout.KEY.KIND, CsCallout.KIND_SECTION);
+    CsTags.set(ref, CsCallout.KEY.STYLE, style);
+    CsTags.set(ref, CsCallout.KEY.SIDE, "auto");
+    CsTags.set(ref, CsCallout.KEY.LEADER, shape);
+    CsTags.set(ref, CsCallout.KEY.SECTION_FROM, spec.from);
+    CsTags.set(ref, CsCallout.KEY.SECTION_TO, spec.to);
+    CsTags.set(ref, CsCallout.KEY.SECTION_FRACTION, String(spec.t));
+    CsTags.set(ref, CsCallout.KEY.SECTION_SCALE, String(scale));
+    CsTags.set(ref, CsCallout.KEY.SECTION_NEAREST,
+        String(spec.cut.nearest));
+
+    var op = new RAddObjectsOperation();
+    op.setText("Place cross section");
+    op.addObject(ref, false);
+
+    // The box comes from the CUT, not from the placed reference: a
+    // block reference's bounding box is cached and a redefine does not
+    // invalidate it, so measuring here would solve the leaders against
+    // a stale box.
+    var local = CsSectionDraw.localBox(spec.cut, scale,
+        CsSectionDraw.textHeight(doc));
+    var box = { x1: local.x1 + at.x, y1: local.y1 + at.y,
+                x2: local.x2 + at.x, y2: local.y2 + at.y };
+    var geom = CsCallout.reflow(box, spec.tips, {
+        side: "auto", leader: shape, dimasz: null, dimscale: null
+    });
+    for (var b = 0; b < geom.branches.length; b++) {
+        var pl = new RPolyline();
+        var pts = geom.branches[b];
+        for (var v = 0; v < pts.length; v++) {
+            pl.appendVertex(new RVector(pts[v].x, pts[v].y),
+                pts[v].bulge || 0.0);
+        }
+        var ent = new RLeaderEntity(doc, new RLeaderData(pl, true));
+        ent.setLayerId(doc.getLayerId(layerName));
+        CsTags.set(ent, CsCallout.KEY.ID, id);
+        CsTags.set(ent, CsCallout.KEY.ROLE, CsCallout.ROLE_LEADER);
+        CsTags.set(ent, CsCallout.KEY.STYLE, style);
+        op.addObject(ent, false);
+    }
+    di.applyOperation(op);
+    return id;
+};
+
+/**
+ * Re-derive every cross section in the drawing and redefine its block.
+ *
+ * The shape refreshElevations established one kind over: provenance off
+ * the entity, the guard, and a LOST count for a basis that has gone --
+ * never a silent delete.
+ *
+ * What this never writes is the block REFERENCE. Position, scale and
+ * rotation are the caver's; only the definition is the tool's.
+ *
+ * \return {updated, unchanged, frozen, lost, refused}
+ */
+CalloutWrite.refreshSections = function(doc, di, survey, resolved) {
+    var out = { updated: 0, unchanged: 0, frozen: 0, lost: 0, refused: 0 };
+    if (isNull(doc) || isNull(di) || isNull(survey) || isNull(resolved)) {
+        return out;
+    }
+    var ids = CalloutWrite.existingIds(doc);
+    var byStation = CsLrud.splaysByStation(survey);
+
+    for (var i = 0; i < ids.length; i++) {
+        var m = CalloutWrite.members(doc, ids[i]);
+        if (m.block === null) {
+            continue;
+        }
+        if (CsTags.get(m.block, CsCallout.KEY.KIND) !==
+                CsCallout.KIND_SECTION) {
+            continue;
+        }
+        // The caver owns this one's geometry now. Counted, never
+        // silently skipped: a stale section on a plotted map is exactly
+        // the failure this refresh exists to prevent.
+        if (CsTags.get(m.block, CsCallout.KEY.SECTION_FROZEN) === "1") {
+            out.frozen++;
+            continue;
+        }
+
+        var from = CsTags.get(m.block, CsCallout.KEY.SECTION_FROM);
+        var to = CsTags.get(m.block, CsCallout.KEY.SECTION_TO);
+        var t = parseFloat(CsTags.get(m.block,
+            CsCallout.KEY.SECTION_FRACTION));
+        if (from === "" || to === "" || isNaN(t)) {
+            out.lost++;
+            continue;
+        }
+        if (resolved.stations[from] === undefined ||
+                resolved.stations[to] === undefined) {
+            // The leg this section was cut on is gone from the survey.
+            // Left alone and COUNTED -- a section whose basis has
+            // vanished is what a caver needs told, not deleted.
+            out.lost++;
+            continue;
+        }
+
+        var scale = parseFloat(CsTags.get(m.block,
+            CsCallout.KEY.SECTION_SCALE));
+        if (isNaN(scale) || scale <= 0) {
+            scale = CsSectionDraw.scaleOf();
+        }
+        var cut = CsSectionCut.cut(survey, resolved, from, to, t,
+            { splaysByStation: byStation });
+        if (cut.refused === true) {
+            out.refused++;
+            continue;
+        }
+        CsSectionDraw.define(doc, di, ids[i], cut,
+            { from: from, to: to, t: t, scale: scale });
+        try {
+            CsTags.set(m.block, CsCallout.KEY.SECTION_NEAREST,
+                String(cut.nearest));
+            var mop = new RModifyObjectsOperation();
+            mop.setText("Record section provenance");
+            mop.addObject(m.block, false);
+            di.applyOperation(mop);
+        } catch (eTag) {
+            // the section itself redrew; only its recorded distance is
+            // stale, and the caption inside the block carries the value
+        }
+        out.updated++;
+    }
+    return out;
+};
+
 CalloutWrite.unlink = function(di, entity) {
     if (isNull(entity)) {
         return;
