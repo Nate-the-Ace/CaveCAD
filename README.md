@@ -49,6 +49,22 @@ a line to edit it, drag it where you want it, delete the lines this map does
 not use. Survey Stats can still stamp length, depth and grade into their
 lines, which it finds by a hidden field tag rather than by position.
 
+## Which format to hand someone
+
+Every supported format carries the shape of the cave faithfully -- all
+141 shots of the PITFALL CAVE fixture come back within rounding, and no
+station moves more than 0.005 ft. What differs is everything around the
+shape: trips, teams, the cave name, flags, LRUD grouping, and the
+elevation datum.
+
+**[docs/format-fidelity.md](docs/format-fidelity.md)** measures it rather
+than asserting it, and `node tools/format_fidelity.js` reproduces the
+measurement. The short version: Therion `.th` is the highest-fidelity
+export, Compass `.dat` is the only one that keeps every flag and the only
+one that **loses the elevation datum** (it has no fix directive, so the
+cave rebases to zero), and CSV keeps the geometry exactly and almost no
+context.
+
 ## A note on privacy
 
 This repository is public and that is deliberate: it is GPLv3 code, and its test

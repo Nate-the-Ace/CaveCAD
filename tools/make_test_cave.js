@@ -112,6 +112,7 @@ var CORE_FILES = [
     "scripts/CaveSurvey/Core/Format/CsWalls.js",
     "scripts/CaveSurvey/Core/Format/CsSurvex.js",
     "scripts/CaveSurvey/Core/Format/CsCsv.js",
+    "scripts/CaveSurvey/Core/Format/CsTherion.js",
     "scripts/CaveSurvey/Core/Format/CsRegistry.js"
 ];
 for (var ci = 0; ci < CORE_FILES.length; ci++) {

@@ -83,6 +83,16 @@ CsFormatSurvex.parse = function(content) {
     // below) instead of the next *team lines appending onto the
     // previous trip's crew.
     var teamDirty = false;
+    // The running trip, kept HERE rather than on survey.date/survey.team.
+    // Those two are not safe to use as running state: CsModel.tripIdFor
+    // calls ensureTrips, and ensureTrips unconditionally mirrors
+    // trips[0] back onto them -- so the first leg of a new trip used to
+    // create that trip correctly and, in the same call, reset the
+    // running state to trip 0's, sending every following leg back into
+    // trip 0. The trip LIST stayed perfect, which is why nothing caught
+    // it: 137 of PITFALL CAVE's 141 legs came back on the entrance trip.
+    var curDate = "";
+    var curTeam = "";
 
     var intoSurveyUnit = function(v) {
         if (survey.distanceUnit === null) {
@@ -167,6 +177,7 @@ CsFormatSurvex.parse = function(content) {
                 // "Alice, Bob" for the date-B trip. Not fixed here --
                 // just documented.
                 if (teamDirty) {
+                    curTeam = "";
                     survey.team = "";
                     teamDirty = false;
                 }
@@ -175,12 +186,13 @@ CsFormatSurvex.parse = function(content) {
                     tokens.length > 2) ? tokens[2] : tokens[1];
                 var dm = /^(\d{4})[.-](\d{1,2})[.-](\d{1,2})/.exec(dtok);
                 if (dm !== null) {
-                    survey.date = dm[1] + "-" +
+                    curDate = dm[1] + "-" +
                         (dm[2].length < 2 ? "0" : "") + dm[2] + "-" +
                         (dm[3].length < 2 ? "0" : "") + dm[3];
                 } else {
-                    survey.date = dtok.replace(/\./g, "-");
+                    curDate = dtok.replace(/\./g, "-");
                 }
+                survey.date = curDate;
             } else if (cmd === "*team" && tokens.length > 1) {
                 // '*team "Nick Proctor" compass clino' -- name, then roles
                 var member = "";
@@ -197,8 +209,11 @@ CsFormatSurvex.parse = function(content) {
                     }
                 }
                 if (member !== "") {
-                    survey.team = survey.team === "" ?
-                        member : survey.team + ", " + member;
+                    // Appended onto the RUNNING team, not onto
+                    // survey.team, which ensureTrips may have replaced
+                    // with trip 0's since the last *team line.
+                    curTeam = curTeam === "" ? member : curTeam + ", " + member;
+                    survey.team = curTeam;
                 }
             } else if (cmd === "*flags") {
                 var negate = false;
@@ -425,8 +440,8 @@ CsFormatSurvex.parse = function(content) {
             // declination it was read under and (above) that
             // declination itself.
             var legTrip = CsModel.newTrip();
-            legTrip.date = survey.date;
-            legTrip.team = survey.team;
+            legTrip.date = curDate;
+            legTrip.team = curTeam;
             legTrip.declination = declination;
             shot.trip = CsModel.tripIdFor(survey, legTrip);
             // A leg has now been recorded against the current team;

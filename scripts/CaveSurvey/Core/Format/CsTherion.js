@@ -269,6 +269,12 @@ CsFormatTherion.parse = function(content) {
     var inCentreline = false;
     var skipDepth = 0;       // inside scrap/map/other drawing data
     var teamDirty = false;
+    // The running trip, kept here and not on survey.date/survey.team --
+    // see the same note in CsSurvex.parse: ensureTrips mirrors trips[0]
+    // onto those fields from inside tripIdFor, which turns them into a
+    // trap for any reader using them as running state.
+    var curDate = "";
+    var curTeam = "";
     var reportedInput = false;
     var reportedEquate = false;
     var reportedStyle = {};
@@ -422,6 +428,7 @@ CsFormatTherion.parse = function(content) {
             // been recorded starts a new trip, so the running team is
             // cleared rather than appended to.
             if (teamDirty) {
+                curTeam = "";
                 survey.team = "";
                 teamDirty = false;
             }
@@ -430,12 +437,13 @@ CsFormatTherion.parse = function(content) {
             var dtok = tokens[1];
             var dm = /^(\d{4})[.\-\/](\d{1,2})[.\-\/](\d{1,2})/.exec(dtok);
             if (dm !== null) {
-                survey.date = dm[1] + "-" +
+                curDate = dm[1] + "-" +
                     (dm[2].length < 2 ? "0" : "") + dm[2] + "-" +
                     (dm[3].length < 2 ? "0" : "") + dm[3];
             } else {
-                survey.date = dtok.replace(/\./g, "-");
+                curDate = dtok.replace(/\./g, "-");
             }
+            survey.date = curDate;
             continue;
         }
         if ((cmd === "team" || cmd === "explo-team") && tokens.length > 1) {
@@ -461,8 +469,8 @@ CsFormatTherion.parse = function(content) {
                 }
             }
             if (member !== "") {
-                survey.team = survey.team === "" ? member :
-                    survey.team + ", " + member;
+                curTeam = curTeam === "" ? member : curTeam + ", " + member;
+                survey.team = curTeam;
             }
             continue;
         }
@@ -699,8 +707,8 @@ CsFormatTherion.parse = function(content) {
             shot.notes = notes;
 
             var legTrip = CsModel.newTrip();
-            legTrip.date = survey.date;
-            legTrip.team = survey.team;
+            legTrip.date = curDate;
+            legTrip.team = curTeam;
             legTrip.declination = declination;
             shot.trip = CsModel.tripIdFor(survey, legTrip);
             teamDirty = true;
@@ -846,15 +854,45 @@ CsFormatTherion.write = function(survey) {
 
     // Trips in the order their first leg appears, so the file reads in
     // survey order rather than trip-record order.
-    var emittedTrip = {};
+    // The trip whose header is currently in force. NOT a "have I
+    // emitted this trip yet" set: this writer keeps the survey's own
+    // shot order (which is the notebook's row order, and what
+    // CsRevise sorts by), so a trip can be left and RETURNED TO -- as
+    // PITFALL CAVE's MAIN TRUNK does, its last two legs sitting at the
+    // end of the file. Emitting each trip's header only once left
+    // those legs under whichever trip happened to be open, and they
+    // read back on the wrong trip. Re-emitted on every change instead.
+    // (CsFormatSurvex avoids this differently, by grouping shots into
+    // per-trip blocks -- correct too, at the cost of the row order.)
+    var lastTripIndex = -1;
     var emittedDecl = null;
-    var lastFlagSplay = false;
+    // Running flag state, emitted only where it CHANGES, the way a
+    // Therion file is actually written.
+    var flagState = { splay: false, duplicate: false, surface: false };
 
     for (i = 0; i < survey.shots.length; i++) {
         s = survey.shots[i];
+
+        // A shot flagged "ignore entirely" (Compass #|X#) has no
+        // Therion representation: the format's flags say how to TREAT a
+        // leg, never that it is not one. Written as a comment, which is
+        // what CsFormatSurvex does with it and for the same reason --
+        // the alternative measured here (tools/format_fidelity.js) is
+        // worse than losing it, because an excluded leg written as an
+        // ordinary one comes back as REAL survey, adding a station the
+        // surveyor had struck out and changing the shape of the cave.
+        if (s.excludeFromAll) {
+            out.push("    # excluded shot (no Therion equivalent): " +
+                s.from + " " + (s.to === "" ? "-" : s.to) + " " +
+                s.distance.toFixed(2) + " " + s.azimuth.toFixed(2) + " " +
+                s.inclination.toFixed(2) +
+                (s.notes ? "  " + s.notes : ""));
+            continue;
+        }
+
         var tripIndex = s.trip || 0;
-        if (!emittedTrip.hasOwnProperty(tripIndex)) {
-            emittedTrip[tripIndex] = true;
+        if (tripIndex !== lastTripIndex) {
+            lastTripIndex = tripIndex;
             var trip = CsModel.tripOf(survey, s);
             if (trip !== null && trip !== undefined) {
                 if (trip.date) {
@@ -883,9 +921,21 @@ CsFormatTherion.write = function(survey) {
         // declination above when it reads this file back.
         var magAz = CsAngles.normalizeAzimuth(s.azimuth - decl);
 
-        if (s.splay !== lastFlagSplay) {
-            out.push("    flags " + (s.splay ? "splay" : "not splay"));
-            lastFlagSplay = s.splay;
+        // excludeFromPlot is Therion's "surface"; excludeFromLength on
+        // its own is "duplicate". The reader sets BOTH for a surface
+        // leg (a surface shot does not count toward length either), so
+        // surface is tested first or every surface leg would go back out
+        // as a duplicate.
+        var want = { splay: !!s.splay,
+            surface: !!s.excludeFromPlot,
+            duplicate: !s.excludeFromPlot && !!s.excludeFromLength };
+        var flagNames = ["splay", "duplicate", "surface"];
+        for (var fx = 0; fx < flagNames.length; fx++) {
+            var fn = flagNames[fx];
+            if (want[fn] !== flagState[fn]) {
+                out.push("    flags " + (want[fn] ? "" : "not ") + fn);
+                flagState[fn] = want[fn];
+            }
         }
 
         var toName = s.splay || s.to === "" ? "-" : s.to;

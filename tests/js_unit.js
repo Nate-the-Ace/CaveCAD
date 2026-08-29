@@ -3712,6 +3712,85 @@ shotsMatch(thN, thNestRt, "Therion nested round trip");
 var thTwoRt = CsFormatTherion.parse(CsFormatTherion.write(th2));
 shotsMatch(th2, thTwoRt, "Therion multi-survey round trip");
 
+// Writer gaps found by tools/format_fidelity.js, each one a round trip
+// that changed the cave rather than merely shortening the file.
+
+// 1. Flags. Therion HAS duplicate and surface, and this reader already
+// read them; the writer emitted only the splay flag, so a duplicate or
+// surface leg came back as ordinary survey -- counting toward length,
+// and in the surface case getting drawn.
+var thFlagRt = CsModel.newSurvey();
+thFlagRt.caveName = "Flag Cave";
+thFlagRt.distanceUnit = "ft";
+var thFlagShot = function(from, to, opts) {
+    var s = CsModel.newShot();
+    s.from = from; s.to = to;
+    s.distance = 10.0; s.azimuth = 0.0; s.inclination = 0.0;
+    for (var k in opts) {
+        if (opts.hasOwnProperty(k)) { s[k] = opts[k]; }
+    }
+    return s;
+};
+thFlagRt.shots.push(thFlagShot("A", "B", {}));
+thFlagRt.shots.push(thFlagShot("B", "C", { excludeFromLength: true }));
+thFlagRt.shots.push(thFlagShot("C", "D", { excludeFromPlot: true,
+    excludeFromLength: true }));
+thFlagRt.shots.push(thFlagShot("D", "E", {}));
+var thFlagBack = CsFormatTherion.parse(CsFormatTherion.write(thFlagRt));
+eqs(thFlagBack.shots.length, 4, "every flagged leg still round trips");
+eqs(thFlagBack.shots[0].excludeFromLength, false, "an ordinary leg stays ordinary");
+eqs(thFlagBack.shots[1].excludeFromLength, true, "a duplicate leg stays duplicate");
+eqs(thFlagBack.shots[1].excludeFromPlot, false, "and is not mistaken for surface");
+eqs(thFlagBack.shots[2].excludeFromPlot, true, "a surface leg stays surface");
+eqs(thFlagBack.shots[3].excludeFromLength, false,
+    "and the flag is turned back off for the leg after it");
+
+// 2. An excluded shot (Compass #|X#) has no Therion equivalent. It must
+// leave as a COMMENT, never as an ordinary leg: written as a leg it
+// comes back as real survey, adding a station the surveyor struck out.
+var thExcl = CsModel.newSurvey();
+thExcl.distanceUnit = "ft";
+thExcl.shots.push(thFlagShot("A", "B", {}));
+thExcl.shots.push(thFlagShot("B", "BX", { excludeFromAll: true }));
+var thExclText = CsFormatTherion.write(thExcl);
+ok(thExclText.indexOf("# excluded shot") !== -1,
+    "an excluded shot is written as a comment saying so");
+var thExclBack = CsFormatTherion.parse(thExclText);
+eqs(thExclBack.shots.length, 1, "and does not come back as a leg");
+eqs(CsModel.stationNames(thExclBack).indexOf("BX"), -1,
+    "so its station never joins the cave");
+
+// 3. A trip left and returned to. The writer keeps the survey's own
+// shot order, so a trip header emitted only once left the returning
+// legs under whichever trip was open at the time.
+var thReturn = CsModel.newSurvey();
+thReturn.distanceUnit = "ft";
+thReturn.trips = [];
+var mkTrip = function(date, team) {
+    var t = CsModel.newTrip();
+    t.date = date; t.team = team; t.distanceUnit = "ft";
+    thReturn.trips.push(t);
+    return thReturn.trips.length - 1;
+};
+var tripOne = mkTrip("2026-01-02", "Ann");
+var tripTwo = mkTrip("2026-03-04", "Bob");
+var thPush = function(from, to, trip) {
+    var s = thFlagShot(from, to, {});
+    s.trip = trip;
+    thReturn.shots.push(s);
+};
+thPush("A1", "A2", tripOne);
+thPush("B1", "B2", tripTwo);
+thPush("A2", "A3", tripOne);   // trip one, returned to at the end
+var thReturnBack = CsFormatTherion.parse(CsFormatTherion.write(thReturn));
+eqs(thReturnBack.shots.length, 3, "all three legs survive");
+eqs(CsModel.tripFingerprint(CsModel.tripOf(thReturnBack,
+        thReturnBack.shots[2])), "2026-01-02|Ann",
+    "a leg returning to an earlier trip goes back to THAT trip");
+eqs(CsModel.tripFingerprint(CsModel.tripOf(thReturnBack,
+        thReturnBack.shots[1])), "2026-03-04|Bob",
+    "and the middle leg keeps its own");
+
 // Cross-format: a Therion file exports as Survex and reads back the
 // same. The two formats are close, and this is the claim that they
 // meet in the model rather than by accident.
@@ -3731,6 +3810,121 @@ ok(CsFormatRegistry.detect("x.csv", csvText).id === "csv",
 ok(CsFormatRegistry.combinedFileFilter().indexOf("*.th") !== -1,
     "the combined file filter offers .th");
 ok(CsFormatRegistry.byId("therion") !== null, "the registry knows therion by id");
+
+
+// ---------------------------------------------------------------------
+// Trip MEMBERSHIP, not just the trip list.
+//
+// Every reader that tracks the running trip in survey.date/survey.team
+// had a hole under it: CsModel.tripIdFor calls ensureTrips, and
+// ensureTrips unconditionally mirrors trips[0] back onto those very
+// fields. So the FIRST leg of a new trip built its record from correct
+// running state, created the trip, and the mirror then reset the
+// running state to trip 0's -- every following leg fingerprinted as
+// trip 0 again. The trip LIST came out perfect (which is all anything
+// asserted), while 137 of PITFALL CAVE's 141 legs came back attributed
+// to the entrance trip.
+//
+// The readers now keep their own running state. These tests assert
+// MEMBERSHIP, because the count was never the thing that broke.
+// ---------------------------------------------------------------------
+
+function tripHistogram(survey) {
+    var h = {};
+    for (var i = 0; i < survey.shots.length; i++) {
+        var t = survey.shots[i].trip || 0;
+        h[t] = (h[t] || 0) + 1;
+    }
+    return h;
+}
+
+var twoTripSvx =
+    "*data normal from to tape compass clino\n" +
+    "*date 2026-01-02\n" +
+    "*team \"Ann\"\n" +
+    "A1 A2 10.00 0.00 0.00\n" +
+    "A2 A3 10.00 0.00 0.00\n" +
+    "A3 A4 10.00 0.00 0.00\n" +
+    "*date 2026-03-04\n" +
+    "*team \"Bob\"\n" +
+    "B1 B2 10.00 0.00 0.00\n" +
+    "B2 B3 10.00 0.00 0.00\n" +
+    "B3 B4 10.00 0.00 0.00\n";
+var twoTrip = CsFormatSurvex.parse(twoTripSvx);
+eqs(twoTrip.trips.length, 2, "two dated blocks are two trips");
+var twoTripHist = tripHistogram(twoTrip);
+eqs(twoTripHist[0], 3, "every leg of the first trip belongs to it");
+eqs(twoTripHist[1], 3,
+    "and every leg of the second belongs to the SECOND -- not just its first");
+eqs(CsModel.tripFingerprint(CsModel.tripOf(twoTrip, twoTrip.shots[5])),
+    "2026-03-04|Bob", "the last leg's trip record is the right one");
+
+var twoTripTh =
+    "survey t\n" +
+    "  centreline\n" +
+    "    data normal from to length compass clino\n" +
+    "    date 2026.01.02\n" +
+    "    team \"Ann\"\n" +
+    "    A1 A2 10.00 0.00 0.00\n" +
+    "    A2 A3 10.00 0.00 0.00\n" +
+    "    A3 A4 10.00 0.00 0.00\n" +
+    "    date 2026.03.04\n" +
+    "    team \"Bob\"\n" +
+    "    B1 B2 10.00 0.00 0.00\n" +
+    "    B2 B3 10.00 0.00 0.00\n" +
+    "    B3 B4 10.00 0.00 0.00\n" +
+    "  endcentreline\n" +
+    "endsurvey\n";
+var twoTripT = CsFormatTherion.parse(twoTripTh);
+var twoTripTHist = tripHistogram(twoTripT);
+eqs(twoTripT.trips.length, 2, "Therion reads two trips too");
+eqs(twoTripTHist[0], 3, "Therion: the first trip keeps all its legs");
+eqs(twoTripTHist[1], 3, "Therion: so does the second");
+
+// The strongest available check, and the one that would have caught
+// this years earlier: testdata/PitfallCave.svx and PitfallCave.dat are
+// the SAME survey written by two writers, so their trip attribution
+// has to agree leg for leg. Compass tracks its trips per block and was
+// always right; Survex is the one that was not.
+var pitSvx = CsFormatSurvex.parse(
+    readTextFile(repoRoot + "/testdata/PitfallCave.svx"));
+var pitDat = CsFormatCompass.parse(
+    readTextFile(repoRoot + "/testdata/PitfallCave.dat"));
+eqs(pitSvx.trips.length, 4, "PITFALL CAVE reads as four trips from .svx");
+eqs(pitDat.trips.length, 4, "and four from .dat");
+
+// Compared by FINGERPRINT rather than index: the two writers are free
+// to emit trips in different orders, and only identity is the claim.
+// \param skipExcluded leave out shots flagged excludeFromAll. Survex
+//        has no way to say "ignore this leg entirely" -- CsFormatSurvex
+//        writes such a shot as a comment, which is a real and documented
+//        loss (see tools/format_fidelity.js) and not a trip-attribution
+//        failure. Counting it on the Compass side would make this
+//        assertion fail for the wrong reason.
+function tripSizesByFingerprint(survey, skipExcluded) {
+    var sizes = {};
+    for (var i = 0; i < survey.shots.length; i++) {
+        if (skipExcluded && survey.shots[i].excludeFromAll) {
+            continue;
+        }
+        var t = CsModel.tripOf(survey, survey.shots[i]);
+        var fp = (t === null || t === undefined) ? "" :
+            CsModel.tripFingerprint(t);
+        sizes[fp] = (sizes[fp] || 0) + 1;
+    }
+    return sizes;
+}
+var svxSizes = tripSizesByFingerprint(pitSvx, false);
+var datSizes = tripSizesByFingerprint(pitDat, true);
+var svxKeys = Object.keys(svxSizes).sort();
+var datKeys = Object.keys(datSizes).sort();
+eqs(svxKeys.join(" / "), datKeys.join(" / "),
+    "both writers name the same four trips");
+for (var pk = 0; pk < datKeys.length; pk++) {
+    eqs(svxSizes[datKeys[pk]], datSizes[datKeys[pk]],
+        "PITFALL CAVE trip \"" + datKeys[pk] +
+        "\" has the same number of legs read either way");
+}
 
 // ---------------------------------------------------------------------
 // Registry detection.
