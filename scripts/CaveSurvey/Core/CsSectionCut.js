@@ -329,7 +329,22 @@ CsSectionCut.boundaryHits = function(polygon, theta) {
         }
     }
     out.sort(function(p, q) { return p - q; });
-    return out;
+
+    // COLLAPSE DUPLICATE CROSSINGS. A ray through a VERTEX meets both
+    // segments that share it -- u = 1 on one and u = 0 on the next --
+    // and that is one crossing, not two. It matters because the sampled
+    // angles land exactly on the vertex angles of the commonest section
+    // there is: a four-point LRUD diamond has vertices at 0, +/-pi/2
+    // and pi, and the default 32 angles include every one. Counted
+    // naively, every LRUD-only section reported itself re-entrant.
+    var merged = [];
+    for (var k = 0; k < out.length; k++) {
+        if (merged.length === 0 ||
+                Math.abs(out[k] - merged[merged.length - 1]) > 1e-9) {
+            merged.push(out[k]);
+        }
+    }
+    return merged;
 };
 
 /**

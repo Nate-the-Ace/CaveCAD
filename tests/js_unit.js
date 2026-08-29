@@ -129,6 +129,10 @@ var CORE_FILES = [
     "scripts/CaveSurvey/Core/CsAdjust.js",
     "scripts/CaveSurvey/Core/CsLrud.js",
     "scripts/CaveSurvey/Core/CsSectionCut.js",
+    // pure helpers only (captionText/scaleText); its document functions
+    // reference QCAD symbols but are never CALLED here -- same reason
+    // CsProfileDraw is loadable under node.
+    "scripts/CaveSurvey/Core/CsSectionDraw.js",
     "scripts/CaveSurvey/Core/CsProfile.js",
     // CsProfileDraw is QCAD-context for render()/erase()/band()/run()/
     // label() (RVector, RLineEntity, ...), but CsProfileDraw.labelText
@@ -10213,6 +10217,35 @@ if (!IS_NODE) {
     // A leg that is not in the survey at all.
     var gone = CsSectionCut.cut(sv, res, "Z1", "Z2", 0.5, {});
     ok(gone.refused === true, "CsSectionCut.cut: a missing leg is refused");
+
+    // A PLAIN LRUD DIAMOND IS CONVEX AND MUST NOT REPORT ITSELF
+    // RE-ENTRANT. Found by a smoke test against a real document, not by
+    // any assertion here: the default 32 sampled angles land exactly on
+    // -pi, -pi/2, 0 and pi/2, which ARE the diamond's vertex angles, and
+    // a ray through a vertex meets both segments sharing it. Counted
+    // naively that is two crossings, so every LRUD-only section in the
+    // suite would have been captioned "re-entrant simplified".
+    ok(even.reentrant === false,
+        "CsSectionCut.cut: a convex LRUD diamond is not re-entrant");
+    eqs(CsSectionCut.boundaryHits(pa, 0).length, 1,
+        "CsSectionCut.boundaryHits: a ray through a VERTEX is one crossing");
+    eqs(CsSectionCut.boundaryHits(pa, Math.PI / 4).length, 1,
+        "CsSectionCut.boundaryHits: and so is a ray through an edge");
+
+    // The scale a section states is the one a reader can act on: a
+    // section drawn four times survey size is 4:1, never 1:0.25.
+    eqs(CsSectionDraw.scaleText(4), "4:1",
+        "CsSectionDraw.scaleText: an enlargement reads 4:1");
+    eqs(CsSectionDraw.scaleText(1), "1:1",
+        "CsSectionDraw.scaleText: life size reads 1:1");
+    eqs(CsSectionDraw.scaleText(0.5), "1:2",
+        "CsSectionDraw.scaleText: a reduction reads 1:2");
+    ok(String(CsSectionDraw.captionText("A2", "A3", 0.5, even, 4))
+            .indexOf("4:1") >= 0,
+        "CsSectionDraw.captionText: the caption carries the scale");
+    ok(String(CsSectionDraw.captionText("A2", "A3", 0.5, even, 4))
+            .indexOf("re-entrant") < 0,
+        "CsSectionDraw.captionText: and says nothing about a re-entrant here");
 }());
 
 // ---------------------------------------------------------------------

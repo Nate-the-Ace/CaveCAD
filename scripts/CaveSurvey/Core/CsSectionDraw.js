@@ -1,0 +1,226 @@
+// CsSectionDraw.js -- putting a cut cross section into a drawing, as a
+// BLOCK.
+//
+// Part of the Cave Survey Core library. QCAD context only: every
+// function here takes the document and interface EXPLICITLY, the rule
+// CsProfileDraw already follows.
+//
+// ONE BLOCK DEFINITION PER SECTION, named CS_<CalloutId>. Not a shared
+// definition, and that is Nathan's requirement rather than an
+// implementation taste: "make each a block so that I can edit them
+// individually and have them move as a unit rather than loose
+// linework". A shared definition would make editing any section edit
+// every section.
+//
+// WHAT REGENERATION TOUCHES, AND WHAT IT NEVER TOUCHES:
+//   * the DEFINITION is the tool's. Every Draw clears it and redraws
+//     it, so a section follows the survey.
+//   * the REFERENCE -- position, scale, rotation -- is the caver's.
+//     Nothing here writes it. Probed 2026-08-29: redefining moved a
+//     placed instance's bounding box from 100,100->110,100 to
+//     100,100->100,140 while its insertion point stayed at 100,100.
+//
+// A caver who wants to keep hand edits to the geometry sets
+// SectionFrozen on the reference; the refresh then skips it and COUNTS
+// it, so a frozen section is never silently stale. Exploding the block
+// is the hard exit -- it drops the tags and leaves regeneration behind.
+//
+// BLOCK-LOCAL COORDINATES. The definition is drawn about its own
+// origin: the centreline point of the cut. So the reference's insertion
+// point IS where the centreline sits on the sheet, and the caver drags
+// the whole section by dragging that.
+
+var CsSectionDraw = {};
+
+/** Drawing units per survey unit inside a section. A section drawn at
+ *  plan scale is a smudge -- a three-metre passage on a 1:500 sheet --
+ *  so a section carries its OWN scale and says so in its caption. */
+CsSectionDraw.SCALE = 4.0;
+CsSectionDraw.SETTING_SCALE = "CaveSurvey/SectionScale";
+
+/** The tag every generated member of a section carries. */
+CsSectionDraw.TAG = "Section";
+
+/** The block definition's name for a callout id. One per section. */
+CsSectionDraw.blockName = function(calloutId) {
+    return "CS_" + String(calloutId);
+};
+
+/** The scale a drawing uses for its sections. */
+CsSectionDraw.scaleOf = function() {
+    try {
+        var v = RSettings.getDoubleValue(CsSectionDraw.SETTING_SCALE,
+            CsSectionDraw.SCALE);
+        return (v > 0) ? v : CsSectionDraw.SCALE;
+    } catch (e) {
+        return CsSectionDraw.SCALE;
+    }
+};
+
+/** A polygon point in block-local drawing coordinates. */
+CsSectionDraw.pointOf = function(sample, scale) {
+    return new RVector(Math.cos(sample.theta) * sample.radius * scale,
+                       Math.sin(sample.theta) * sample.radius * scale);
+};
+
+/** One entity into the block definition, layered and tagged. Layer and
+ *  tags BEFORE the add -- post-add writes fail silently in this bridge
+ *  (see CsDraw.js's header). */
+CsSectionDraw.addToBlock = function(doc, op, blockId, entity, layerName,
+        sectionId) {
+    entity.setLayerId(doc.getLayerId(layerName));
+    entity.setBlockId(blockId);
+    CsTags.set(entity, CsSectionDraw.TAG, sectionId);
+    op.addObject(entity, false);
+    return entity;
+};
+
+/** The caption a section carries: what it is, and how far it is from
+ *  the evidence. */
+CsSectionDraw.captionText = function(from, to, t, cut, scale) {
+    var pct = Math.round(t * 100);
+    var text = from + "->" + to + " " + pct + "%  " +
+        CsSectionDraw.scaleText(scale);
+    // The honesty gradient, stated rather than implied: a cut beside a
+    // station is nearly a measurement, one midway between distant
+    // stations is a guess.
+    text += "  (" + CsSectionDraw.round1(cut.nearest) + " from nearest)";
+    if (cut.reentrant === true) {
+        text += "  re-entrant simplified";
+    }
+    if (cut.reseeded === true) {
+        text += "  rotated";
+    }
+    return text;
+};
+
+CsSectionDraw.round1 = function(v) {
+    return Math.round(v * 10) / 10;
+};
+
+/** The scale as a ratio a reader can act on: a section drawn FOUR
+ *  times survey size reads "4:1", not "1:0.25". */
+CsSectionDraw.scaleText = function(scale) {
+    if (scale >= 1) {
+        return CsSectionDraw.ratioPart(scale) + ":1";
+    }
+    return "1:" + CsSectionDraw.ratioPart(1.0 / scale);
+};
+
+CsSectionDraw.ratioPart = function(v) {
+    return (Math.abs(v - Math.round(v)) < 1e-9) ?
+        String(Math.round(v)) : String(CsSectionDraw.round1(v));
+};
+
+/**
+ * Create or REDEFINE the block for one section.
+ *
+ * Everything goes into ONE operation, so a redefine is one undo step
+ * and a Draw that regenerates many sections does not leave the drawing
+ * half-updated.
+ *
+ * \param cut  a CsSectionCut.cut result (not a refusal)
+ * \return the block id, or null when the block could not be made
+ */
+CsSectionDraw.define = function(doc, di, sectionId, cut, opts) {
+    var o = opts || {};
+    var scale = (o.scale === undefined || o.scale === null) ?
+        CsSectionDraw.scaleOf() : o.scale;
+    var name = CsSectionDraw.blockName(sectionId);
+    var i;
+
+    var blockId = doc.getBlockId(name);
+    if (blockId === RBlock.INVALID_ID || blockId === undefined ||
+            blockId === null || blockId < 0) {
+        var block = new RBlock(doc, name, new RVector(0, 0));
+        di.applyOperation(new RAddObjectOperation(block, false));
+        blockId = doc.getBlockId(name);
+    }
+    if (blockId === RBlock.INVALID_ID || blockId < 0) {
+        return null;
+    }
+
+    CsLayers.ensure(doc, di, CsLayers.SECTION_OUTLINE);
+    CsLayers.ensure(doc, di, CsLayers.SECTION_SPLAYS);
+    CsLayers.ensure(doc, di, CsLayers.SECTION_STATIONS);
+    CsLayers.ensure(doc, di, CsLayers.SECTION_TEXT_LABELS);
+
+    var op = new RAddObjectsOperation();
+    op.setText("Draw cross section");
+
+    // Clear what the generator drew last time. The block holds ONLY
+    // generated content -- a caver who wants to keep their own edits
+    // freezes the section or explodes the block, both of which take it
+    // out of this path entirely.
+    var existing = doc.queryBlockEntities(blockId);
+    for (i = 0; i < existing.length; i++) {
+        var old = doc.queryEntity(existing[i]);
+        if (!isNull(old)) {
+            op.deleteObject(old);
+        }
+    }
+
+    // The outline, closed, through the sampled points.
+    if (cut.outline.length >= 3) {
+        var pl = new RPolyline();
+        for (i = 0; i < cut.outline.length; i++) {
+            pl.appendVertex(CsSectionDraw.pointOf(cut.outline[i], scale));
+        }
+        pl.setClosed(true);
+        CsSectionDraw.addToBlock(doc, op, blockId,
+            new RPolylineEntity(doc, new RPolylineData(pl)),
+            CsLayers.SECTION_OUTLINE, sectionId);
+    }
+
+    // The evidence, faint: a ray to every sampled point. A section built
+    // from LRUD alone shows four; a splayed one shows what was shot.
+    for (i = 0; i < cut.outline.length; i++) {
+        CsSectionDraw.addToBlock(doc, op, blockId,
+            new RLineEntity(doc, new RLineData(new RVector(0, 0),
+                CsSectionDraw.pointOf(cut.outline[i], scale))),
+            CsLayers.SECTION_SPLAYS, sectionId);
+    }
+
+    // The centreline mark: a small cross at the cut point itself.
+    var tick = Math.max(0.5, scale * 0.5);
+    CsSectionDraw.addToBlock(doc, op, blockId,
+        new RLineEntity(doc, new RLineData(new RVector(-tick, 0),
+            new RVector(tick, 0))),
+        CsLayers.SECTION_STATIONS, sectionId);
+    CsSectionDraw.addToBlock(doc, op, blockId,
+        new RLineEntity(doc, new RLineData(new RVector(0, -tick),
+            new RVector(0, tick))),
+        CsLayers.SECTION_STATIONS, sectionId);
+
+    // The caption, under the section.
+    var lowest = 0;
+    for (i = 0; i < cut.outline.length; i++) {
+        var y = Math.sin(cut.outline[i].theta) * cut.outline[i].radius * scale;
+        if (y < lowest) { lowest = y; }
+    }
+    var height = CsSectionDraw.textHeight(doc);
+    var caption = CsSectionDraw.captionText(o.from || "?", o.to || "?",
+        (o.t === undefined ? 0 : o.t), cut, scale);
+    var pos = new RVector(0, lowest - height * 1.5);
+    var td = new RTextData(pos, pos, height, 0.0,
+        RS.VAlignTop, RS.HAlignCenter, RS.LeftToRight, RS.Exact, 1.0,
+        caption, "standard", false, 0.0, false);
+    CsSectionDraw.addToBlock(doc, op, blockId,
+        new RTextEntity(doc, td),
+        CsLayers.SECTION_TEXT_LABELS, sectionId);
+
+    di.applyOperation(op);
+    return blockId;
+};
+
+/** The drawing's own text height, the same source the callouts use. */
+CsSectionDraw.textHeight = function(doc) {
+    try {
+        if (typeof CalloutWrite !== "undefined" &&
+                typeof CalloutWrite.textHeight === "function") {
+            return CalloutWrite.textHeight(doc);
+        }
+    } catch (e) {
+    }
+    return 2.5;
+};
