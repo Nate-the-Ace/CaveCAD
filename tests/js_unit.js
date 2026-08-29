@@ -15742,6 +15742,28 @@ if (!IS_NODE) {
                 "wheelSteps: one notch back from delta");
             eqs(CsScanView.wheelSteps({}), 0,
                 "wheelSteps: an event with neither scrolls nothing");
+
+            // THE BUG THAT MADE THE VIEWER IGNORE EVERYTHING. Only
+            // resizeEvent is exposed on RGraphicsViewQt.prototype in
+            // this bridge; mousePressEvent, mouseMoveEvent,
+            // mouseReleaseEvent and wheelEvent are all undefined. An
+            // unguarded base call threw a TypeError on the handler's
+            // FIRST line, so clicks, the wheel and the middle button
+            // all did nothing while the code read correctly.
+            eqs(typeof RGraphicsViewQt.prototype.mousePressEvent,
+                "undefined",
+                "the bridge exposes no base mousePressEvent to chain to");
+            eqs(typeof RGraphicsViewQt.prototype.resizeEvent, "function",
+                "but it does expose resizeEvent -- hence AutoZoomView");
+            var reached = false;
+            CsScanView.callBase({ mark: function() { reached = true; } },
+                "mousePressEvent", {});
+            ok(reached === false && true,
+                "callBase: a missing base handler is a no-op, not a throw");
+            var ranResize = false;
+            var stub = { getImageView: function() { throw new Error("x"); } };
+            CsScanView.callBase(stub, "resizeEvent", {});
+            ok(true, "callBase: a base that throws does not take the caller down");
         }());
 
         loadRepoScript("scripts/CaveSurvey/FeatureTrace/FeatureTraceRun.js");

@@ -36,7 +36,7 @@ CsScanView.prototype = new RGraphicsViewQt();
 
 /** Fit once per loaded scan, then leave the caver's zoom alone. */
 CsScanView.prototype.resizeEvent = function(event) {
-    RGraphicsViewQt.prototype.resizeEvent.call(this, event);
+    CsScanView.callBase(this, "resizeEvent", event);
     if (this.fitPending === true) {
         try {
             this.getImageView().autoZoom();
@@ -65,7 +65,7 @@ CsScanView.prototype.resizeEvent = function(event) {
  * to carry and nothing to convert at the far end.
  */
 CsScanView.prototype.mousePressEvent = function(event) {
-    RGraphicsViewQt.prototype.mousePressEvent.call(this, event);
+    CsScanView.callBase(this, "mousePressEvent", event);
     var at = CsScanView.eventPos(event);
     var button = 0;
     try {
@@ -90,6 +90,36 @@ CsScanView.prototype.mousePressEvent = function(event) {
         this.onScanPick({ x: model.x, y: model.y });
     } catch (e) {
         // a listener must never throw into the view's own event handling
+    }
+};
+
+/**
+ * Call RGraphicsViewQt's own handler for `name`, IF THIS BRIDGE HAS ONE.
+ *
+ * It mostly does not. Probed 2026-08-29:
+ *   resizeEvent        -> function   (which is why AutoZoomView works)
+ *   mousePressEvent    -> undefined
+ *   mouseMoveEvent     -> undefined
+ *   mouseReleaseEvent  -> undefined
+ *   wheelEvent         -> undefined
+ * Those four are protected virtuals the generator did not expose. An
+ * unguarded RGraphicsViewQt.prototype.mousePressEvent.call(this, event)
+ * therefore throws a TypeError on its first line and takes the WHOLE
+ * handler down with it -- which is exactly what made the viewer ignore
+ * clicks, the wheel and the middle button while looking correct.
+ *
+ * The shell still dispatches to the script override (it looks the
+ * property up by name), so not chaining costs only the base behaviour,
+ * which this viewer implements itself anyway.
+ */
+CsScanView.callBase = function(self, name, event) {
+    try {
+        var base = RGraphicsViewQt.prototype[name];
+        if (typeof base === "function") {
+            base.call(self, event);
+        }
+    } catch (e) {
+        // a base that refuses must not take the override with it
     }
 };
 
@@ -139,7 +169,7 @@ CsScanView.WHEEL_FACTOR = 1.25;
 CsScanView.prototype.wheelEvent = function(event) {
     var steps = CsScanView.wheelSteps(event);
     if (steps === 0) {
-        RGraphicsViewQt.prototype.wheelEvent.call(this, event);
+        CsScanView.callBase(this, "wheelEvent", event);
         return;
     }
     try {
@@ -150,7 +180,7 @@ CsScanView.prototype.wheelEvent = function(event) {
             iv.mapFromView(new RVector(at.x, at.y));
         iv.zoom(centre, Math.pow(CsScanView.WHEEL_FACTOR, steps));
     } catch (e) {
-        RGraphicsViewQt.prototype.wheelEvent.call(this, event);
+        CsScanView.callBase(this, "wheelEvent", event);
     }
 };
 
@@ -160,7 +190,7 @@ CsScanView.prototype.wheelEvent = function(event) {
  * pan() takes a delta in VIEW pixels and flips y itself.
  */
 CsScanView.prototype.mouseMoveEvent = function(event) {
-    RGraphicsViewQt.prototype.mouseMoveEvent.call(this, event);
+    CsScanView.callBase(this, "mouseMoveEvent", event);
     if (this.panFrom === undefined || this.panFrom === null) {
         return;
     }
@@ -178,7 +208,7 @@ CsScanView.prototype.mouseMoveEvent = function(event) {
 };
 
 CsScanView.prototype.mouseReleaseEvent = function(event) {
-    RGraphicsViewQt.prototype.mouseReleaseEvent.call(this, event);
+    CsScanView.callBase(this, "mouseReleaseEvent", event);
     this.panFrom = null;
 };
 
