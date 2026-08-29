@@ -4,8 +4,8 @@ A single JSON file written beside every cave drawing, carrying the whole
 survey and the whole of what the drawing knows *about* the survey, at
 full precision and with no length limits.
 
-Proposed extension **`.cave`**, so `PITFALL CAVE.dxf` is accompanied by
-`PITFALL CAVE.cave`. Nothing here is built. Written for review.
+Extension **`.cavecad`** (Nathan, 2026-08-29), so `PITFALL CAVE.dxf` is
+accompanied by `PITFALL CAVE.cavecad`. Nothing here is built.
 
 ## Why a new file at all
 
@@ -264,19 +264,84 @@ staged rollout.
 
 ## When it is written
 
-Three ways, in order of how much they need deciding:
+**On every save** (Nathan, 2026-08-29), plus by hand and into a package.
 
-1. **`Write Companion File`** — an explicit tool, `cavecompanion`. Never
-   surprising. This is the minimum.
-2. **Package Cave Project** stages one into the zip, sanitized or full
-   with everything else. Free once (1) exists.
-3. **On save**, beside the drawing, via the same mechanism
-   `CsCave.installSaveHook` already uses. This is the one that makes the
-   file trustworthy — a companion written by hand is a companion that is
-   three weeks stale when it matters — and also the one with a real cost:
-   every save writes a second file, and a save that fails halfway leaves
-   a mismatched pair. `pairing` exists to make that detectable.
-   **Nathan's call**; the format does not depend on it.
+### The sequence, and why it is in this order
+
+A save produces two files, and the companion must describe the drawing
+that was actually written — so it is written *after* the DXF, from the
+final corrected filename:
+
+1. The DXF is written (`di.exportFile`). If that fails, nothing else
+   happens: a companion describing a drawing that was not saved is worse
+   than no companion.
+2. `NAME.cavecad` -> `NAME.cavecad.bak`, one generation, replacing any
+   previous `.bak`.
+3. The new companion is written to `NAME.cavecad.tmp`, then renamed over
+   `NAME.cavecad`.
+
+Step 3 is a rename rather than a direct write so that a crash or a full
+disk mid-write cannot destroy both generations at once: the old file
+stays whole until the new one is complete on disk, and a leftover
+`.tmp` is a visible symptom rather than a truncated companion that
+parses to half a cave.
+
+### The `.bak`, and where it departs from `CsBackup`
+
+The naming follows `CsBackup.SUFFIX` exactly — suffix appended to the
+whole name, so `PITFALL CAVE.cavecad.bak` sits beside
+`PITFALL CAVE.dxf.bak` and sorts with it. One generation, same as the
+drawing's: a second bad save overwrites the good backup, which is the
+known and accepted limit of that scheme.
+
+**One deliberate departure: this `.bak` is written inside Google Drive
+too.** `CsBackup` skips Drive by decision, on the grounds that Drive
+keeps its own version history and a `.bak` beside a synced multi-megabyte
+drawing is clutter. Two things make the companion different, and both
+cut the same way:
+
+- The user never *looks* at this file, so a wrong one produces no
+  visible symptom. A gutted drawing is obvious on screen; a companion
+  written from that same gutted drawing is silent until the day it is
+  needed. Drive's history is a manual rollback through a web UI, bounded
+  to 100 revisions or 30 days — fine as a backstop, useless as the only
+  guard against a failure nobody noticed.
+- It is kilobytes of JSON, not megabytes of DXF. The clutter and churn
+  argument that justified skipping Drive for drawings does not survive
+  the size difference.
+
+Flagged because it diverges from an existing decision, and reversing it
+is a one-line change if the reasoning does not hold.
+
+### The mechanism
+
+**A fork patch to `scripts/File/Save/Save.js` and `SaveAs/SaveAs.js`**,
+in the shape patch 0005 already established — it edits both files for
+exactly this kind of reason.
+
+Not the add-on's own `Save.prototype` wrapper, for a reason recorded in
+this repo: `CsBackup.js` measured that patching `Save.prototype.save`
+from add-on init "installs cleanly, reports success, and never runs",
+because QCAD builds its actions in a separate script context
+(`RScriptHandlerJs::createActionDocumentLevel`), and it explicitly notes
+that `CsCave.installSaveHook` "uses the same mechanism and is very
+likely just as inert". Whether that suspicion is true is **still
+unmeasured** (see the open questions) — but the fork has to change for
+the file association anyway, and patching the save script directly is
+reliable whichever way that measurement lands.
+
+The patch calls one add-on entry point and nothing more:
+`CsCompanion.writeBeside(fileName)`, guarded so that a failure to write
+the companion never fails the save, and reported once per session if it
+does — the same "a broken guard says so without nagging" rule
+`CsBackup.warnedThisSession` already follows.
+
+### Also written by
+
+- **`Write Companion File`** (`cavecompanion`), an explicit tool, so the
+  file can be regenerated without saving.
+- **Package Cave Project**, staged into the zip, sanitized or full with
+  everything else.
 
 ## Tests
 
@@ -297,22 +362,117 @@ Three ways, in order of how much they need deciding:
   the whole format, and the reason to build it on top of a harness that
   already knows how to find losses.
 
+## Registering `.cavecad` with the OS
+
+Asked for on 2026-08-29: double-clicking a `.cavecad` should open
+CaveCAD. Surveyed against the fork source; nothing below is built.
+
+### What the app claims today: nothing, on macOS
+
+`src/run/Info.plist` has **no `CFBundleDocumentTypes` and no
+`UTExportedTypeDeclarations`**. CaveCAD claims no file type at all on
+macOS today — not even `.dxf`. Linux is the only platform where an
+association already exists: `cavecad.desktop` carries
+`MimeType=application/dxf;image/vnd.dxf;`. No Windows installer exists in
+the repo (no `.iss`, `.nsi`, or `.wxs`), so there is nothing to add a
+registration to yet.
+
+### macOS
+
+1. **Declare the type.** `UTExportedTypeDeclarations` with identifier
+   `org.cavecad.companion` (matching the existing bundle id
+   `org.cavecad.CaveCAD`), conforming to `public.json` and `public.data`,
+   with `UTTypeTagSpecification` -> `public.filename-extension` =
+   `cavecad`. Exported rather than imported: this type is ours.
+2. **Claim it.** A `CFBundleDocumentTypes` entry naming
+   `LSItemContentTypes = org.cavecad.companion`, `CFBundleTypeRole =
+   Editor`, `LSHandlerRank = Owner`, and an icon in `Resources`.
+3. **Wire the build.** The bundle currently uses Qt's stock plist
+   template (`src/run/.qt/info_plist/CaveCAD/Info.plist`, full of
+   `${MACOSX_BUNDLE_*}` substitutions). Adding types means shipping our
+   own `Info.plist.in` and pointing `MACOSX_BUNDLE_INFO_PLIST` at it from
+   `src/run/CMakeLists.txt`, keeping every existing substitution.
+4. **Register.** Launch Services picks it up when the bundle is in
+   `/Applications`; force with
+   `/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister -f /Applications/CaveCAD.app`.
+
+Editing `Info.plist` invalidates any code signature. Local unsigned
+builds are unaffected; a signed distribution has to sign after the edit,
+not before.
+
+**Claiming `.dxf` as well is available in the same block and deliberately
+not proposed here.** Becoming the system handler for DXF would take that
+association away from whatever holds it now, on every machine that
+installs CaveCAD. That is a decision about someone's whole desktop, not
+about this feature.
+
+### Linux
+
+Add a shared-mime-info package —
+`support/org.cavecad.CaveCAD.mime.xml` — declaring
+`application/vnd.cavecad+json` with a `<glob pattern="*.cavecad"/>` and a
+`<magic>` match on the `"format"` key, installed to
+`/usr/share/mime/packages` with `update-mime-database` run afterward.
+Then append that type to `cavecad.desktop`'s existing `MimeType=` line,
+and ship an icon named after the MIME type.
+
+### Windows
+
+Nothing to do until an installer exists. When one does:
+`HKCR\.cavecad` -> a ProgID, and `HKCR\CaveCAD.Companion\shell\open\command`
+-> `"path\to\cavecad.exe" "%1"`, plus `DefaultIcon`.
+
+### Making the open actually do something
+
+A registration only tells the OS which app to launch. What CaveCAD does
+with the path is a second, smaller change — and the companion is not a
+drawing, so the sensible behaviour is: **opening `X.cavecad` opens
+`X.dxf` beside it.**
+
+Every path a file can arrive by — the command line, a macOS double-click
+(`QFileOpenEvent`, `AutoStart.js:183` and `:764`), and a message from a
+second instance — funnels into one function: `openFiles()` in
+`scripts/library.js:3397`. A redirect there is roughly ten lines: for any
+argument ending in `.cavecad`, substitute the sibling `.dxf` when it
+exists, and warn plainly when it does not ("this is a survey companion
+file; its drawing is missing") rather than handing a JSON file to the DXF
+importer.
+
+That redirect has to live in the fork, because `library.js` is
+application source. **So the fork changes for this feature regardless of
+how the save hook question below resolves** — which is why the save call
+belongs in the same patch rather than in a wrapper whose reliability our
+own source disputes.
+
+### Effort
+
+One patch to the fork (plist template + CMake wiring + the `openFiles`
+redirect + the save call), a rebuild, and `lsregister -f`. The Linux MIME
+files are additive and cost little. Windows waits for an installer.
+
 ## Open questions
 
-1. **Extension.** `.cave` reads well beside `.dxf` and is unclaimed as
-   far as I know. Alternatives: `.cavecad`, or `.cave.json` (uglier, but
-   every editor and every Drive preview knows what to do with it).
-2. **Write on save, or only on demand?** See above — my recommendation
-   is on save, because the value of this file is proportional to how
-   current it is, but it is a real behaviour change to every save.
+1. **Does `CsCave.installSaveHook` actually fire?** Still unmeasured.
+   `CsBackup.js` says a `Save.prototype` patch from add-on init "installs
+   cleanly, reports success, and never runs", and suspects
+   `installSaveHook` is inert for the same reason. I tried to settle it
+   from disk and could not: the thumbnail cache looked like proof until
+   `RDocumentInterface.cpp:1435` turned out to call `updateThumbnail()`
+   in C++ anyway, and `Image/Path` points at a real cave's scans folder
+   that also contains a hand-insertable image. The decisive test needs
+   the GUI: with CaveCAD running, install a probe wrapper that writes a
+   settings key, save once, read the key back. It changes the mechanism
+   only, not the design — the fork patch is on the critical path either
+   way.
+2. **Should `.dxf` also be claimed on macOS?** See above; it is a
+   desktop-wide decision, not a feature decision.
 3. **Revision history.** A sidecar has no tag-length ceiling, so the
    history retired with `RevisionLog` on 2026-08-27 could live here at
-   full length: what each revision moved, when, and under which trip.
-   That was retired for a storage reason that no longer applies, but it
-   was still your decision to retire it, so it is not in the shape above
-   — say the word and it becomes a `revisions` array.
+   full length. That was retired for a storage reason that no longer
+   applies, but it was still your decision, so it is not in the shape
+   above — say the word and it becomes a `revisions` array.
 4. **Does `drawing.linework` earn its geometry key?** It is the only
    fuzzy thing in an otherwise exact file. Dropping it costs the
-   linework-to-trip binding *only* in the case where the DXF's own tags
-   were destroyed by a foreign save — which is the case this file exists
-   for, so I have kept it. Worth a second opinion.
+   linework-to-trip binding *only* where the DXF's own tags were
+   destroyed by a foreign save — which is the case this file exists for,
+   so I have kept it. Worth a second opinion.
