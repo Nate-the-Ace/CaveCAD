@@ -67,7 +67,7 @@ FeatureTrace.ROWS = [
     { label: "Inferred Walls", layer: CsLayers.PROFILE_WALLS_INFERRED },
     { label: "Breakdown", layer: CsLayers.PROFILE_BREAKDOWN },
     { label: "Entrance", layer: CsLayers.PROFILE_ENTRANCE },
-    { label: "Walls", layer: CsLayers.SECTION_WALLS },
+    { label: "Walls", layer: CsLayers.SECTION_WALLS_SURVEYED },
     { label: "Inferred Walls", layer: CsLayers.SECTION_WALLS_INFERRED },
     { label: "Ceiling", layer: CsLayers.SECTION_CEILING },
     { label: "Floor", layer: CsLayers.SECTION_FLOOR },

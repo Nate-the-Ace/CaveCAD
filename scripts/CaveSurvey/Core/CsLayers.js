@@ -99,7 +99,7 @@ CsLayers.SECTION_BOX = "CTRL-SECTION-BOX";
 CsLayers.SECTION_OUTLINE = "CTRL-SECTION-OUTLINE";
 CsLayers.SECTION_SPLAYS = "CTRL-SECTION-SPLAYS";
 CsLayers.SECTION_STATIONS = "CTRL-SECTION-STATIONS";
-CsLayers.SECTION_TEXT_LABELS = "CTRL-SECTION-TEXT-LABELS";
+CsLayers.SECTION_CTRL_TEXT_LABELS = "CTRL-SECTION-TEXT-LABELS";
 CsLayers.SECTION_SCAN = "CTRL-SECTION-SCAN";
 
 // The section frame's traceable layers -- what a caver draws in a
@@ -108,7 +108,7 @@ CsLayers.SECTION_SCAN = "CTRL-SECTION-SCAN";
 // sections learn to bind. Until then CsBind holds them out explicitly,
 // because binding them with plan or profile logic would move them by a
 // correction that has nothing to do with them.
-CsLayers.SECTION_WALLS = "SECTION-WALLS";
+CsLayers.SECTION_WALLS_SURVEYED = "SECTION-WALLS-SURVEYED";
 CsLayers.SECTION_WALLS_INFERRED = "SECTION-WALLS-INFERRED";
 CsLayers.SECTION_CEILING = "SECTION-CEILING";
 CsLayers.SECTION_FLOOR = "SECTION-FLOOR";
@@ -171,6 +171,52 @@ CsLayers.PROFILE_SHAPE_SPINE = "CTRL-PROFILE-SHAPE-SPINE";
 // lineweightKey is resolved against RLineweight at ensure() time so
 // this table stays loadable outside QCAD.
 CsLayers.DEFAULTS = {
+    "PROFILE-BREAKDOWN-BOUNDARY": ["cyan", "DASHED", "Weight000"],
+    "SECTION-BREAKDOWN-BOUNDARY": ["cyan", "DASHED", "Weight000"],
+    "CEILING": ["white", "CONTINUOUS", "Weight050"],
+    "CTRL-BOX": ["gray", "CONTINUOUS", "Weight000"],
+    "CTRL-CEILING": ["gray", "DASHED", "Weight000"],
+    "CTRL-SECTION-CEILING": ["gray", "DASHED", "Weight000"],
+    "CTRL-FLOOR": ["gray", "DASHED", "Weight000"],
+    "CTRL-SECTION-FLOOR": ["gray", "DASHED", "Weight000"],
+    "CTRL-SECTION-LRUD": ["pink", "CONTINUOUS", "Weight025"],
+    "CTRL-PROFILE-LRUD-WALL-LEFT": ["gray", "DASHED", "Weight000"],
+    "CTRL-SECTION-LRUD-WALL-LEFT": ["gray", "DASHED", "Weight000"],
+    "CTRL-PROFILE-LRUD-WALL-RIGHT": ["gray", "DASHED", "Weight000"],
+    "CTRL-SECTION-LRUD-WALL-RIGHT": ["gray", "DASHED", "Weight000"],
+    "CTRL-OUTLINE": ["gray", "CONTINUOUS", "Weight025"],
+    "CTRL-PROFILE-OUTLINE": ["gray", "CONTINUOUS", "Weight025"],
+    "CTRL-PROFILE-SCAN": ["gray", "CONTINUOUS", "Weight000"],
+    "CTRL-SECTION-SHAPE-SPINE": ["gray", "DASHED", "Weight000"],
+    "CTRL-SECTION-SHOTS": ["gray", "CONTINUOUS", "Weight025"],
+    "CTRL-SECTION-STATION-LABELS": ["red", "CONTINUOUS", "Weight025"],
+    "CTRL-TEXT-LABELS": ["red", "CONTINUOUS", "Weight018"],
+    "SECTION-ENTRANCE": ["white", "CONTINUOUS", "Weight035"],
+    "FLOOR": ["white", "CONTINUOUS", "Weight050"],
+    "SECTION-FLOWSTONE": ["white", "CONTINUOUS", "Weight025"],
+    "SECTION-LEDGE-CEILING": ["white", "DASHED", "Weight025"],
+    "SECTION-LEDGE-FLOOR": ["white", "CONTINUOUS", "Weight035"],
+    "PROFILE-NOTES-ANNOTATION": ["white", "CONTINUOUS", "Weight000"],
+    "SECTION-NOTES-ANNOTATION": ["white", "CONTINUOUS", "Weight000"],
+    "PROFILE-NOTES-DIG": ["pink", "CONTINUOUS", "Weight018"],
+    "SECTION-NOTES-DIG": ["pink", "CONTINUOUS", "Weight018"],
+    "PROFILE-NOTES-ELEVATION": ["white", "CONTINUOUS", "Weight018"],
+    "SECTION-NOTES-ELEVATION": ["white", "CONTINUOUS", "Weight018"],
+    "PROFILE-NOTES-ELEVATION-LINE": ["gray", "DASHED", "Weight009"],
+    "SECTION-NOTES-ELEVATION-LINE": ["gray", "DASHED", "Weight009"],
+    "PROFILE-NOTES-EQUIPMENT": ["cyan", "CONTINUOUS", "Weight018"],
+    "SECTION-NOTES-EQUIPMENT": ["cyan", "CONTINUOUS", "Weight018"],
+    "PROFILE-NOTES-GENERAL": ["white", "CONTINUOUS", "Weight018"],
+    "SECTION-NOTES-GENERAL": ["white", "CONTINUOUS", "Weight018"],
+    "PROFILE-NOTES-HAZARD": ["red", "CONTINUOUS", "Weight025"],
+    "SECTION-NOTES-HAZARD": ["red", "CONTINUOUS", "Weight025"],
+    "PROFILE-NOTES-NAME": ["white", "CONTINUOUS", "Weight018"],
+    "SECTION-NOTES-NAME": ["white", "CONTINUOUS", "Weight018"],
+    "SECTION-RIMSTONE": ["white", "CONTINUOUS", "Weight025"],
+    "SECTION-SLOPE": ["white", "CONTINUOUS", "Weight000"],
+    "SECTION-TEXT-LABELS": ["white", "CONTINUOUS", "Weight018"],
+    "SECTION-TEXT-NOTES": ["white", "CONTINUOUS", "Weight009"],
+    "PROFILE-WALLS-SURVEYED": ["white", "CONTINUOUS", "Weight050"],
     "CTRL-SHOTS": ["gray", "CONTINUOUS", "Weight025"],
     "CTRL-STATIONS": ["red", "CONTINUOUS", "Weight025"],
     "CTRL-STATION-LABELS": ["red", "CONTINUOUS", "Weight025"],
@@ -210,7 +256,7 @@ CsLayers.DEFAULTS = {
     "CTRL-SECTION-STATIONS": ["red", "CONTINUOUS", "Weight025"],
     "CTRL-SECTION-TEXT-LABELS": ["red", "CONTINUOUS", "Weight025"],
     "CTRL-SECTION-SCAN": ["gray", "CONTINUOUS", "Weight000"],
-    "SECTION-WALLS": ["white", "CONTINUOUS", "Weight035"],
+    "SECTION-WALLS-SURVEYED": ["white", "CONTINUOUS", "Weight035"],
     "SECTION-WALLS-INFERRED": ["white", "DASHED", "Weight025"],
     "SECTION-CEILING": ["white", "CONTINUOUS", "Weight025"],
     "SECTION-FLOOR": ["white", "CONTINUOUS", "Weight025"],
@@ -333,6 +379,79 @@ CsLayers.frameOf = function(layerName) {
     }
     return "plan";
 };
+
+
+// ---------------------------------------------------------------------
+// FRAME PARITY -- every per-frame element, in every frame.
+//
+// Nathan, 2026-08-29: "for each segment of a full drawing, plan,
+// profile, and section views, we need dedicated layer for all the
+// common elements so that we can more effectively target tools towards
+// specific segments." A tool routes by CsLayers.frameOf, so an element
+// present in one frame and absent in another is a tool that cannot be
+// pointed at that frame at all -- Shaped Lines could not run in a
+// section because a section had nowhere to put a ledge.
+//
+// PLAN STAYS UNPREFIXED. frameOf treats plan as the default frame and
+// anything unrecognised falls to it, which is what stops a stray layer
+// being swept up by a profile-scoped sweep. Renaming the plan set to
+// PLAN-* would be symmetric and would break every drawing in existence.
+//
+// SOME OF THESE ARE DELIBERATELY DEAD, and that was a decision rather
+// than an oversight. A generated (CTRL-) layer only fills when a
+// generator writes to it, and nothing draws shots inside a section or a
+// ceiling run in plan. They are registered for the symmetry asked for,
+// and so a future generator finds its layer waiting instead of
+// inventing one at runtime. If that ever reads as clutter, delete the
+// constant AND the template row together -- one without the other is
+// how a layer goes missing from the template.
+// ---------------------------------------------------------------------
+CsLayers.PROFILE_BREAKDOWN_BOUNDARY = "PROFILE-BREAKDOWN-BOUNDARY";
+CsLayers.SECTION_BREAKDOWN_BOUNDARY = "SECTION-BREAKDOWN-BOUNDARY";
+CsLayers.CEILING = "CEILING";
+CsLayers.CTRL_BOX = "CTRL-BOX";
+CsLayers.CTRL_CEILING = "CTRL-CEILING";
+CsLayers.SECTION_CTRL_CEILING = "CTRL-SECTION-CEILING";
+CsLayers.CTRL_FLOOR = "CTRL-FLOOR";
+CsLayers.SECTION_CTRL_FLOOR = "CTRL-SECTION-FLOOR";
+CsLayers.SECTION_CTRL_LRUD = "CTRL-SECTION-LRUD";
+CsLayers.PROFILE_CTRL_LRUD_WALL_LEFT = "CTRL-PROFILE-LRUD-WALL-LEFT";
+CsLayers.SECTION_CTRL_LRUD_WALL_LEFT = "CTRL-SECTION-LRUD-WALL-LEFT";
+CsLayers.PROFILE_CTRL_LRUD_WALL_RIGHT = "CTRL-PROFILE-LRUD-WALL-RIGHT";
+CsLayers.SECTION_CTRL_LRUD_WALL_RIGHT = "CTRL-SECTION-LRUD-WALL-RIGHT";
+CsLayers.CTRL_OUTLINE = "CTRL-OUTLINE";
+CsLayers.PROFILE_CTRL_OUTLINE = "CTRL-PROFILE-OUTLINE";
+CsLayers.PROFILE_CTRL_SCAN = "CTRL-PROFILE-SCAN";
+CsLayers.SECTION_CTRL_SHAPE_SPINE = "CTRL-SECTION-SHAPE-SPINE";
+CsLayers.SECTION_CTRL_SHOTS = "CTRL-SECTION-SHOTS";
+CsLayers.SECTION_CTRL_STATION_LABELS = "CTRL-SECTION-STATION-LABELS";
+CsLayers.CTRL_TEXT_LABELS = "CTRL-TEXT-LABELS";
+CsLayers.SECTION_ENTRANCE = "SECTION-ENTRANCE";
+CsLayers.FLOOR = "FLOOR";
+CsLayers.SECTION_FLOWSTONE = "SECTION-FLOWSTONE";
+CsLayers.SECTION_LEDGE_CEILING = "SECTION-LEDGE-CEILING";
+CsLayers.SECTION_LEDGE_FLOOR = "SECTION-LEDGE-FLOOR";
+CsLayers.PROFILE_NOTES_ANNOTATION = "PROFILE-NOTES-ANNOTATION";
+CsLayers.SECTION_NOTES_ANNOTATION = "SECTION-NOTES-ANNOTATION";
+CsLayers.PROFILE_NOTES_DIG = "PROFILE-NOTES-DIG";
+CsLayers.SECTION_NOTES_DIG = "SECTION-NOTES-DIG";
+CsLayers.PROFILE_NOTES_ELEVATION = "PROFILE-NOTES-ELEVATION";
+CsLayers.SECTION_NOTES_ELEVATION = "SECTION-NOTES-ELEVATION";
+CsLayers.PROFILE_NOTES_ELEVATION_LINE = "PROFILE-NOTES-ELEVATION-LINE";
+CsLayers.SECTION_NOTES_ELEVATION_LINE = "SECTION-NOTES-ELEVATION-LINE";
+CsLayers.PROFILE_NOTES_EQUIPMENT = "PROFILE-NOTES-EQUIPMENT";
+CsLayers.SECTION_NOTES_EQUIPMENT = "SECTION-NOTES-EQUIPMENT";
+CsLayers.PROFILE_NOTES_GENERAL = "PROFILE-NOTES-GENERAL";
+CsLayers.SECTION_NOTES_GENERAL = "SECTION-NOTES-GENERAL";
+CsLayers.PROFILE_NOTES_HAZARD = "PROFILE-NOTES-HAZARD";
+CsLayers.SECTION_NOTES_HAZARD = "SECTION-NOTES-HAZARD";
+CsLayers.PROFILE_NOTES_NAME = "PROFILE-NOTES-NAME";
+CsLayers.SECTION_NOTES_NAME = "SECTION-NOTES-NAME";
+CsLayers.SECTION_RIMSTONE = "SECTION-RIMSTONE";
+CsLayers.SECTION_SLOPE = "SECTION-SLOPE";
+CsLayers.SECTION_TEXT_LABELS = "SECTION-TEXT-LABELS";
+CsLayers.SECTION_TEXT_NOTES = "SECTION-TEXT-NOTES";
+CsLayers.PROFILE_WALLS_SURVEYED = "PROFILE-WALLS-SURVEYED";
 
 // Layers created switched OFF (invisible): the data store, CTRL-HIDDEN
 // for legs that must persist but never plot, and CTRL-RAW, the

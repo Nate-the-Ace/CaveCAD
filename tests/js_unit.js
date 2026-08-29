@@ -14729,8 +14729,8 @@ if (!IS_NODE) {
         "CTRL-SECTION-OUTLINE is section");
     eqs(CsLayers.frameOf(CsLayers.SECTION_BOX), "section",
         "CTRL-SECTION-BOX is section");
-    eqs(CsLayers.frameOf(CsLayers.SECTION_WALLS), "section",
-        "SECTION-WALLS is section");
+    eqs(CsLayers.frameOf(CsLayers.SECTION_WALLS_SURVEYED), "section",
+        "SECTION-WALLS-SURVEYED is section");
     eqs(CsLayers.frameOf("SECTION-BREAKDOWN"), "section",
         "hand-traced section linework is section");
     // The cut mark lives IN THE PLAN. It survives the section prefix

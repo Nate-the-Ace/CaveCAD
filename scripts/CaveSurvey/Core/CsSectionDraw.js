@@ -234,7 +234,7 @@ CsSectionDraw.define = function(doc, di, sectionId, cut, opts) {
     // for the day a splay overlay is wanted deliberately.
     CsLayers.ensure(doc, di, CsLayers.SECTION_OUTLINE);
     CsLayers.ensure(doc, di, CsLayers.SECTION_STATIONS);
-    CsLayers.ensure(doc, di, CsLayers.SECTION_TEXT_LABELS);
+    CsLayers.ensure(doc, di, CsLayers.SECTION_CTRL_TEXT_LABELS);
 
     var op = new RAddObjectsOperation();
     op.setText("Draw cross section");
@@ -293,7 +293,7 @@ CsSectionDraw.define = function(doc, di, sectionId, cut, opts) {
         1.0, caption, "standard", false, false, 0.0, false);
     CsSectionDraw.addToBlock(doc, op, blockId,
         new RTextEntity(doc, td),
-        CsLayers.SECTION_TEXT_LABELS, sectionId);
+        CsLayers.SECTION_CTRL_TEXT_LABELS, sectionId);
 
     di.applyOperation(op);
     return blockId;
