@@ -16812,6 +16812,22 @@ eqs(CsBackup.prunable(bkNames, "Cave.dxf", 1).join(","),
     "Cave.dxf.2026-08-27_090000.bak,Cave.dxf.2026-08-28_120000.bak",
     "pruning returns oldest first, and never another file's backups");
 eqs(CsBackup.prunable([], "Cave.dxf", 5).length, 0, "nothing in, nothing out");
+// Five previous generations by default (Nathan, 2026-08-29). Asserted
+// rather than left implicit: it is a data-retention promise, and a
+// silent change to it would quietly throw away versions someone was
+// relying on.
+eqs(CsBackup.KEEP_DEFAULT, 5, "five generations are kept by default");
+var bkSix = [];
+for (var bkI = 1; bkI <= 6; bkI++) {
+    bkSix.push("Cave.dxf.2026-08-0" + bkI + "_090000.bak");
+}
+eqs(CsBackup.prunable(bkSix, "Cave.dxf", CsBackup.KEEP_DEFAULT).join(","),
+    "Cave.dxf.2026-08-01_090000.bak",
+    "a sixth generation prunes the oldest, and only the oldest");
+eqs(CsBackup.prunable(bkSix.slice(0, 5), "Cave.dxf",
+        CsBackup.KEEP_DEFAULT).length, 0,
+    "five generations prune nothing");
+
 eqs(CsBackup.prunable(null, "Cave.dxf", 5).length, 0, "junk in, empty out");
 
 if (!IS_NODE) {

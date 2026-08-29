@@ -75,9 +75,18 @@ CsBackup.lastBackedUp = null;
  *  backup nobody remembers to use. */
 CsBackup.SUFFIX = ".bak";
 
-/** How many generations of one file to keep. Overridable per machine. */
+/**
+ * How many previous generations of one file to keep. Overridable per
+ * machine through the setting.
+ *
+ * Five (Nathan, 2026-08-29). A cave drawing is most of a megabyte and
+ * lives on a synced drive, so every generation is upload traffic as
+ * well as disk; five covers "undo the last few sessions", which is what
+ * rolling back is actually for, and duplicates no longer consume a slot
+ * (see copyPrevious), so five real versions is what it means.
+ */
 CsBackup.KEEP_SETTING = "CaveSurvey/BackupKeep";
-CsBackup.KEEP_DEFAULT = 20;
+CsBackup.KEEP_DEFAULT = 5;
 
 /**
  * A sortable stamp, "YYYY-MM-DD_HHMMSS".

@@ -67,8 +67,10 @@ Pitfall Cave/
 `Pitfall Cave.dxf.2026-08-29_041200.bak`. The stamp sorts, so rolling
 back is a matter of reading the folder and copying the one you want over
 the drawing -- and each backup keeps the modification time of the
-version it holds. The newest 20 generations are kept
-(`CaveSurvey/BackupKeep`); older ones are pruned oldest-first.
+version it holds. The five most recent generations are kept
+(`CaveSurvey/BackupKeep`); older ones are pruned oldest-first. A cave
+drawing is most of a megabyte and usually lives on a synced drive, so
+each generation costs upload traffic as well as disk.
 
 A save that changes nothing costs no generation: the drawing is compared
 against the newest backup first, and an identical one is not copied
