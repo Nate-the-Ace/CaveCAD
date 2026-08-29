@@ -61,6 +61,7 @@ include(includeBasePath + "/Format/CsCompass.js");
 include(includeBasePath + "/Format/CsWalls.js");
 include(includeBasePath + "/Format/CsSurvex.js");
 include(includeBasePath + "/Format/CsCsv.js");
+include(includeBasePath + "/Format/CsTherion.js");
 include(includeBasePath + "/Format/CsRegistry.js");
 include(includeBasePath + "/CsLayers.js");
 include(includeBasePath + "/CsLayerVariants.js");

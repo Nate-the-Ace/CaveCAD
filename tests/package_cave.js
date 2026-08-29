@@ -52,6 +52,16 @@ var FILES = [
     "scripts/CaveSurvey/Core/CsGeoProject.js",
     "scripts/CaveSurvey/Core/CsTags.js",
     "scripts/CaveSurvey/Core/CsStore.js",
+    // The survey model and the writers: stageData exports through the
+    // format registry, so the data/ checks below need the real ones.
+    "scripts/CaveSurvey/Core/CsAngles.js",
+    "scripts/CaveSurvey/Core/CsModel.js",
+    "scripts/CaveSurvey/Core/Format/CsCompass.js",
+    "scripts/CaveSurvey/Core/Format/CsWalls.js",
+    "scripts/CaveSurvey/Core/Format/CsSurvex.js",
+    "scripts/CaveSurvey/Core/Format/CsCsv.js",
+    "scripts/CaveSurvey/Core/Format/CsTherion.js",
+    "scripts/CaveSurvey/Core/Format/CsRegistry.js",
     "scripts/CaveSurvey/PackageCave/PackageCave.js"
 ];
 for (var fi = 0; fi < FILES.length; fi++) {
@@ -233,6 +243,72 @@ ok(!isNull(packedImage) && !packedImage.isNull(),
     "the packaged photograph is still a readable image");
 eqs(packedImage.width(), 16, "same width as the original");
 eqs(packedImage.height(), 16, "same height as the original");
+
+// ---------------------------------------------------------------------
+// data/ -- the third route the entrance takes out of a drawing.
+//
+// The geo tags are stripped from the drawing and the aerial never
+// travels, but the survey model carries the same secret in
+// survey.fixed: the #Fix / *fix control of the file it was imported
+// from, which on the ordinary import IS the entrance in UTM. Three of
+// the four writers emit it.
+// ---------------------------------------------------------------------
+
+var dataSurvey = CsModel.newSurvey();
+dataSurvey.caveName = "PITFALL CAVE";
+dataSurvey.distanceUnit = "ft";
+var dataShot = CsModel.newShot();
+dataShot.from = "A1"; dataShot.to = "A2";
+dataShot.distance = 30.0; dataShot.azimuth = 90.0; dataShot.inclination = -5.0;
+dataSurvey.shots.push(dataShot);
+dataSurvey.fixed["A1"] = { x: 512345.67, y: 4287654.32, z: 1250.0 };
+
+var dataSan = root + "/staging-data-san";
+var dataFull = root + "/staging-data-full";
+ok((new QDir()).mkpath(dataSan), "made a staging folder for sanitized data");
+ok((new QDir()).mkpath(dataFull), "made a staging folder for full data");
+
+var sanWritten = PackageCave.stageData(dataSurvey, dataSan, "PITFALL CAVE", false);
+eqs(sanWritten.length, CsFormatRegistry.FORMATS.length,
+    "a sanitized package still exports every format");
+
+var fullWritten = PackageCave.stageData(dataSurvey, dataFull, "PITFALL CAVE", true);
+eqs(fullWritten.length, CsFormatRegistry.FORMATS.length,
+    "so does a full archive");
+// Named rather than counted as well, so that a format silently failing
+// to stage (stageData swallows one writer's refusal on purpose) cannot
+// leave this file green with a shorter list than the registry holds.
+eqs(sanWritten.join(","),
+    "pitfall-cave.dat,pitfall-cave.srv,pitfall-cave.svx," +
+    "pitfall-cave.th,pitfall-cave.csv",
+    "every registered format really reached data/");
+
+// The fixture must carry what we are about to strip, or this proves
+// nothing -- the same rule the geo-tag test above keeps.
+ok(fileHas(dataFull + "/data/pitfall-cave.srv", "512345.67"),
+    "the full archive's Walls file really does carry the control");
+ok(fileHas(dataFull + "/data/pitfall-cave.svx", "512345.67"),
+    "and so does its Survex file");
+ok(fileHas(dataFull + "/data/pitfall-cave.th", "512345.67"),
+    "and its Therion file");
+
+for (var dfi = 0; dfi < sanWritten.length; dfi++) {
+    var sanFile = dataSan + "/data/" + sanWritten[dfi];
+    ok((new QFileInfo(sanFile)).exists(), sanWritten[dfi] + " was written");
+    ok(!fileHas(sanFile, "512345"),
+        sanWritten[dfi] + " carries no easting in a sanitized package");
+    ok(!fileHas(sanFile, "4287654"),
+        sanWritten[dfi] + " carries no northing in a sanitized package");
+}
+
+// Sanitized, not gutted: the cave's shape still travels.
+ok(fileHas(dataSan + "/data/pitfall-cave.svx", "A1"),
+    "the sanitized Survex file still carries the survey");
+
+// And the caller's own survey is untouched, because a full archive of
+// the same cave is written from it a moment later.
+ok(dataSurvey.fixed.hasOwnProperty("A1"),
+    "staging sanitized data leaves the survey it was given alone");
 
 // ---------------------------------------------------------------------
 // The contents tree the dialog is built from.
