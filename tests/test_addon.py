@@ -435,6 +435,30 @@ class TestLayerVocabulary(unittest.TestCase):
         match = re.search(r"2\nLAYER\n(.*?)\n  0\nENDTAB", content, re.S)
         return set(re.findall(r"^  2\n(.+)$", match.group(1), re.M))
 
+    def test_registry_defines_section_layers(self):
+        """Same mutation gap as the profile control layers: the registry
+        comparison never asserts a constant EXISTS, so deleting one
+        shrinks both sides of it and passes. These are the layers the
+        section tool draws on and the caver traces in; a missing one
+        means a section lands somewhere nobody looks.
+        """
+        with open(os.path.join(ADDON, "Core", "CsLayers.js")) as fh:
+            source = fh.read()
+        for constant, layer in [
+                ("SECTION_BOX", "CTRL-SECTION-BOX"),
+                ("SECTION_OUTLINE", "CTRL-SECTION-OUTLINE"),
+                ("SECTION_SPLAYS", "CTRL-SECTION-SPLAYS"),
+                ("SECTION_STATIONS", "CTRL-SECTION-STATIONS"),
+                ("SECTION_TEXT_LABELS", "CTRL-SECTION-TEXT-LABELS"),
+                ("SECTION_SCAN", "CTRL-SECTION-SCAN"),
+                ("SECTION_WALLS", "SECTION-WALLS"),
+                ("SECTION_WALLS_INFERRED", "SECTION-WALLS-INFERRED"),
+                ("SECTION_CEILING", "SECTION-CEILING"),
+                ("SECTION_FLOOR", "SECTION-FLOOR"),
+                ("SECTION_BREAKDOWN", "SECTION-BREAKDOWN")]:
+            self.assertIn('CsLayers.%s = "%s";' % (constant, layer), source)
+            self.assertIn('"%s": [' % layer, source)
+
     def test_registry_layers_exist_in_plan_template(self):
         """EVERY registry layer, with no exemptions. The wall run layers
         used to be exempted here as "created on demand", and they were

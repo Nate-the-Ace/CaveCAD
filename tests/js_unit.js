@@ -14321,6 +14321,30 @@ if (!IS_NODE) {
         "an unknown layer defaults to plan, never profile");
     eqs(CsLayers.frameOf(""), "plan", "an empty name defaults to plan");
     eqs(CsLayers.frameOf(null), "plan", "null defaults to plan");
+
+    // The section frame, both spellings.
+    eqs(CsLayers.frameOf(CsLayers.SECTION_OUTLINE), "section",
+        "CTRL-SECTION-OUTLINE is section");
+    eqs(CsLayers.frameOf(CsLayers.SECTION_BOX), "section",
+        "CTRL-SECTION-BOX is section");
+    eqs(CsLayers.frameOf(CsLayers.SECTION_WALLS), "section",
+        "SECTION-WALLS is section");
+    eqs(CsLayers.frameOf("SECTION-BREAKDOWN"), "section",
+        "hand-traced section linework is section");
+    // The cut mark lives IN THE PLAN. It survives the section prefix
+    // test only because its name begins CROSS-, so a layer later named
+    // SECTION-MARKERS would change frames with no other edit -- which
+    // is exactly why this is asserted rather than assumed.
+    eqs(CsLayers.frameOf(CsLayers.CROSS_SECTION_MARKERS), "plan",
+        "CROSS-SECTION-MARKERS stays plan-framed");
+    // and the other two frames are untouched by the third
+    eqs(CsLayers.frameOf("PROFILE-CEILING"), "profile",
+        "the profile frame is unchanged by the section frame");
+    eqs(CsLayers.frameOf("WALLS-SURVEYED"), "plan",
+        "the plan frame is unchanged by the section frame");
+
+    ok(CsLayers.LOCKED["CTRL-SECTION-BOX"] === true,
+        "the section box is created locked, like the profile box");
 }());
 
 (function() {
@@ -14365,7 +14389,8 @@ if (!IS_NODE) {
         }
         var name = CsLayers[k];
         var f = CsLayers.frameOf(name);
-        if (f !== "plan" && f !== "profile" && f !== "sheet") {
+        if (f !== "plan" && f !== "profile" && f !== "sheet" &&
+                f !== "section") {
             bad.push(name + "=" + f);
         }
         if (seen.hasOwnProperty(name) && seen[name] !== f) {

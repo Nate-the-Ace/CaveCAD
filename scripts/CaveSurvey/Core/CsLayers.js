@@ -81,6 +81,39 @@ CsLayers.PROFILE_TEXT_LABELS = "PROFILE-TEXT-LABELS";
 CsLayers.PROFILE_BREAKDOWN = "PROFILE-BREAKDOWN";
 CsLayers.PROFILE_ENTRANCE = "PROFILE-ENTRANCE";
 
+// ---------------------------------------------------------------------
+// THE SECTION FRAME -- cross sections, the suite's third view.
+//
+// Same split as the profile frame, for the same reasons: the CTRL- half
+// is generated, owned by the section tool, erased and redrawn on every
+// rebuild; the unprefixed half is the caver's own tracing and is never
+// touched. Getting a layer on the wrong side of that line is what the
+// NAMING TRAP note above is about.
+//
+// CROSS-SECTION-MARKERS is deliberately NOT here. It is the mark in the
+// PLAN saying where a section was cut, so it belongs to the plan frame,
+// and its name not starting "SECTION-" is the only thing keeping it
+// there -- asserted in tests/js_unit.js rather than left to luck.
+// ---------------------------------------------------------------------
+CsLayers.SECTION_BOX = "CTRL-SECTION-BOX";
+CsLayers.SECTION_OUTLINE = "CTRL-SECTION-OUTLINE";
+CsLayers.SECTION_SPLAYS = "CTRL-SECTION-SPLAYS";
+CsLayers.SECTION_STATIONS = "CTRL-SECTION-STATIONS";
+CsLayers.SECTION_TEXT_LABELS = "CTRL-SECTION-TEXT-LABELS";
+CsLayers.SECTION_SCAN = "CTRL-SECTION-SCAN";
+
+// The section frame's traceable layers -- what a caver draws in a
+// section. NOT "CTRL-" prefixed, for the mirror of the reason above:
+// hand-traced section linework has to stay eligible for binding the day
+// sections learn to bind. Until then CsBind holds them out explicitly,
+// because binding them with plan or profile logic would move them by a
+// correction that has nothing to do with them.
+CsLayers.SECTION_WALLS = "SECTION-WALLS";
+CsLayers.SECTION_WALLS_INFERRED = "SECTION-WALLS-INFERRED";
+CsLayers.SECTION_CEILING = "SECTION-CEILING";
+CsLayers.SECTION_FLOOR = "SECTION-FLOOR";
+CsLayers.SECTION_BREAKDOWN = "SECTION-BREAKDOWN";
+
 // Callout (multileader) layers, one per CsCallout style. Callout
 // members go here and never on the current layer -- a note drawn onto
 // WALLS-SURVEYED becomes wall linework the next time anything works by
@@ -171,6 +204,17 @@ CsLayers.DEFAULTS = {
     "PROFILE-TEXT-LABELS": ["white", "CONTINUOUS", "Weight018"],
     "PROFILE-BREAKDOWN": ["white", "CONTINUOUS", "Weight000"],
     "PROFILE-ENTRANCE": ["white", "CONTINUOUS", "Weight035"],
+    "CTRL-SECTION-BOX": ["gray", "CONTINUOUS", "Weight000"],
+    "CTRL-SECTION-OUTLINE": ["gray", "CONTINUOUS", "Weight025"],
+    "CTRL-SECTION-SPLAYS": ["gray", "CONTINUOUS", "Weight000"],
+    "CTRL-SECTION-STATIONS": ["red", "CONTINUOUS", "Weight025"],
+    "CTRL-SECTION-TEXT-LABELS": ["red", "CONTINUOUS", "Weight025"],
+    "CTRL-SECTION-SCAN": ["gray", "CONTINUOUS", "Weight000"],
+    "SECTION-WALLS": ["white", "CONTINUOUS", "Weight035"],
+    "SECTION-WALLS-INFERRED": ["white", "DASHED", "Weight025"],
+    "SECTION-CEILING": ["white", "CONTINUOUS", "Weight025"],
+    "SECTION-FLOOR": ["white", "CONTINUOUS", "Weight025"],
+    "SECTION-BREAKDOWN": ["white", "CONTINUOUS", "Weight000"],
     "CTRL-AERIAL": ["gray", "CONTINUOUS", "Weight000"],
     // Contours are background context: muted like the aerial they
     // usually sit on, majors told apart by weight alone (colors here
@@ -281,6 +325,12 @@ CsLayers.frameOf = function(layerName) {
     if (name.indexOf("CTRL-PROFILE-") === 0 || name.indexOf("PROFILE-") === 0) {
         return "profile";
     }
+    // The section frame, both spellings, the same way. CROSS-SECTION-
+    // MARKERS matches NEITHER prefix and stays with the plan, which is
+    // where the cut mark belongs.
+    if (name.indexOf("CTRL-SECTION-") === 0 || name.indexOf("SECTION-") === 0) {
+        return "section";
+    }
     return "plan";
 };
 
@@ -304,7 +354,8 @@ CsLayers.OFF = { "CTRL-DATA": true, "CTRL-HIDDEN": true, "CTRL-RAW": true,
 // ones. Locks a CAVER placed on ordinary layers stay sacred (see
 // withLayerOn's docblock); this set is different because the suite
 // placed the lock itself, on layers it owns outright.
-CsLayers.LOCKED = { "CTRL-PROFILE-BOX": true };
+CsLayers.LOCKED = { "CTRL-PROFILE-BOX": true,
+    "CTRL-SECTION-BOX": true };
 
 /**
  * True when this layer will SILENTLY REFUSE edits -- adds, deletes and
