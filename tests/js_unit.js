@@ -16933,6 +16933,47 @@ if (!IS_NODE) {
             }
         }());
 
+        // -- and from an ordinary SAVE, through CsCave.beforeSave -----
+        // The entry point the application's own Save.js calls
+        // immediately before di.exportFile (fork patch 0006). The moment
+        // is the whole point: after the export the previous version is
+        // gone, so no after-save hook could take this backup.
+        (function() {
+            loadRepoScript("scripts/CaveSurvey/Core/CsCave.js");
+            var saveDir = QDir.tempPath() + "/cs-beforesave";
+            (new QDir(saveDir)).removeRecursively();
+            (new QDir()).mkpath(saveDir);
+            var doc4 = saveDir + "/Some Cave.dxf";
+
+            ok(CsCave.beforeSave(doc4) === false,
+                "CsCave.beforeSave: nothing to keep before the first save");
+
+            ok(write(doc4, "SAVE-ONE"), "beforeSave fixture: a saved drawing");
+            CsBackup.lastBackedUp = null;   // fresh: this is a new file
+            ok(CsCave.beforeSave(doc4) === true,
+                "CsCave.beforeSave: the version about to be overwritten is kept");
+            eqs(CsBackup.generations(doc4).length, 1,
+                "CsCave.beforeSave: one generation in backup/");
+            eqs(read(CsBackup.backupFolderFor(doc4) + "/" +
+                    CsBackup.generations(doc4)[0]), "SAVE-ONE",
+                "CsCave.beforeSave: holding the PREVIOUS bytes");
+
+            // Junk in, false out -- it runs inside a save and may never
+            // throw.
+            ok(CsCave.beforeSave("") === false, "CsCave.beforeSave: empty path");
+            ok(CsCave.beforeSave(null) === false, "CsCave.beforeSave: null path");
+
+            // afterSave is all convenience and must survive nonsense too.
+            var didNothing = CsCave.afterSave("", null);
+            ok(Object.prototype.toString.call(didNothing) === "[object Array]",
+                "CsCave.afterSave: always answers a list");
+            eqs(didNothing.length, 0, "CsCave.afterSave: and does nothing with nothing");
+            ok(CsCave.afterSave(doc4, null).length >= 0,
+                "CsCave.afterSave: a real path with no document interface is fine");
+
+            (new QDir(saveDir)).removeRecursively();
+        }());
+
         // -- the backup fires from the destructive operation ---------
         // The real integration: eraseStations backs the file up before
         // it removes anything. No "on save" hook exists -- see CsBackup

@@ -488,6 +488,36 @@ CsCave.pointAtScans = function(docPath) {
 };
 
 /**
+ * Keeps the version about to be overwritten.
+ *
+ * THE OTHER ENTRY POINT THE APPLICATION CALLS, from
+ * scripts/File/Save/Save.js immediately before di.exportFile (fork
+ * patch 0006). The moment matters and cannot be moved: once the export
+ * has run, the previous version is gone, so an "after save" hook can
+ * never take this backup. That is why the fork calls twice.
+ *
+ * CsBackup already fires before this suite's own destructive
+ * operations, which covers a redraw that guts a drawing. It did NOT
+ * cover an ordinary save, which is the other way a good drawing gets
+ * overwritten by a bad one -- by hand, or by any tool that never
+ * announced itself as destructive.
+ *
+ * \param path the file about to be written.
+ * \return true when a backup now holds the previous version.
+ */
+CsCave.beforeSave = function(path) {
+    try {
+        if (typeof CsBackup === "undefined" || typeof path !== "string" ||
+                path === "") {
+            return false;
+        }
+        return CsBackup.beforeWrite(path);
+    } catch (e) {
+        return false;   // never the reason a save does not happen
+    }
+};
+
+/**
  * Everything this suite wants to happen after a drawing is saved.
  *
  * THE ONE ENTRY POINT THE APPLICATION CALLS. CaveCAD's own
