@@ -42,7 +42,12 @@ CsCave.PDF = "PDF";
 CsCave.IMAGES = "images";
 
 // The folders a cave project keeps beside its drawing.
-CsCave.SUBFOLDERS = [CsCave.SCANS, CsCave.PDF, CsCave.IMAGES];
+// Where CsBackup keeps previous versions, datestamped. Part of the
+// standard structure so a cave folder has one whether or not a backup
+// has been taken yet -- an empty backup/ says the guard exists; a
+// missing one says nothing.
+CsCave.BACKUP = "backup";
+CsCave.SUBFOLDERS = [CsCave.SCANS, CsCave.PDF, CsCave.IMAGES, CsCave.BACKUP];
 
 // The map's own preview lives in images/ with the photographs, under a
 // name derived from the drawing, so a person looking in that folder can

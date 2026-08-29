@@ -17,7 +17,7 @@ Each appears in the **Cave Survey** menu and as a command:
 
 | Tool | Command | What it does |
 | --- | --- | --- |
-| Caves | `caves` | The window CaveCAD opens on: the caves registered on this machine, each one's trips with date, team, shot count and the stations it stopped at, plus survey health (depth, stations, loops, UIS grade) and warnings worth acting on -- a bad loop closure, a trip whose declination IGRF disagrees with, legacy tags, unbound linework. Import Cave... reads a survey file (Compass, Survex, Walls, CSV) and builds the whole project from it -- folder, scans/PDF/images, a drawing on the NSS template with the survey drawn in -- or adopts an existing DXF; Import Folder... takes a cave folder or a folder of them. From here: open the drawing, start a trip tied into an open end, package the project, or open its project folder. Switch it off in its own footer, or with the setting `Startup/ShowCaveLauncher`. |
+| Caves | `caves` | The window CaveCAD opens on: the caves registered on this machine, each one's trips with date, team, shot count and the stations it stopped at, plus survey health (depth, stations, loops, UIS grade) and warnings worth acting on -- a bad loop closure, a trip whose declination IGRF disagrees with, legacy tags, unbound linework. Import Cave... reads a survey file (Compass, Survex, Walls, CSV) and builds the whole project from it -- folder, scans/PDF/images/backup, a drawing on the NSS template with the survey drawn in -- or adopts an existing DXF; Import Folder... takes a cave folder or a folder of them. From here: open the drawing, start a trip tied into an open end, package the project, or open its project folder. Switch it off in its own footer, or with the setting `Startup/ShowCaveLauncher`. |
 | Package Cave Project | `pkgcave` | Assembles a cave project into one zip in `~/Documents/Cave/depot`: the drawing, the maps already in `PDF/`, the survey in every interchange format (Compass, Walls, Survex, Therion, CSV), and a MANIFEST anyone can read without CaveCAD. Sanitized by default -- the copied drawing loses its geographic anchor and no aerial photograph travels with it; a full archive keeps both, says so in its file name, and is meant for your own storage or for handing a project to the next cartographer. Never plots a PDF, and never touches the original drawing. |
 | Survey Notebook | `snb` | A docked survey notes page: type or import shots, watch closures/stats/warnings live, draw in one undo step, export to any format. Also owns declination: estimate it from the survey date and the cave's location (IGRF), pin that location to a station as the drawing's geo anchor, and correct a trip's declination after the fact -- the drawing rotates around the fix. The walls you trace are tied to the trip they belong to automatically, so they follow it through a revision instead of being left behind -- nothing to switch on, and a revision claims work drawn before this existed. |
 | New Cave Map | `ncm` | Start a sheet from the NSS template, already carrying the control layers and symbol blocks. |
@@ -48,6 +48,31 @@ The title block is **ordinary text** on the `TITLE-BLOCK` layer: double-click
 a line to edit it, drag it where you want it, delete the lines this map does
 not use. Survey Stats can still stamp length, depth and grade into their
 lines, which it finds by a hidden field tag rather than by position.
+
+## A cave project folder
+
+A cave folder gets the same four subfolders wherever the suite makes or
+adopts one:
+
+```
+Pitfall Cave/
+  Pitfall Cave.dxf        the drawing -- the record
+  scans/                  photographed or scanned sketch pages
+  PDF/                    plotted maps, exactly as they were plotted
+  images/                 photographs, and the drawing's preview
+  backup/                 previous versions of the drawing, datestamped
+```
+
+`backup/` holds one file per save that overwrote something:
+`Pitfall Cave.dxf.2026-08-29_041200.bak`. The stamp sorts, so rolling
+back is a matter of reading the folder and copying the one you want over
+the drawing. The newest 20 generations are kept
+(`CaveSurvey/BackupKeep`); older ones are pruned oldest-first.
+
+A backup is taken immediately before any of this suite's destructive
+operations -- not on save. See `Core/CsBackup.js` for why that is the
+better moment, and for the two "on save" hooks that were tried and
+measured inert.
 
 ## Which format to hand someone
 

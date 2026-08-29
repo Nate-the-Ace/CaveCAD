@@ -286,19 +286,23 @@ stays whole until the new one is complete on disk, and a leftover
 `.tmp` is a visible symptom rather than a truncated companion that
 parses to half a cave.
 
-### The `.bak`, and where it departs from `CsBackup`
+### The `.bak`
 
-The naming follows `CsBackup.SUFFIX` exactly — suffix appended to the
-whole name, so `PITFALL CAVE.cavecad.bak` sits beside
-`PITFALL CAVE.dxf.bak` and sorts with it. One generation, same as the
-drawing's: a second bad save overwrites the good backup, which is the
-known and accepted limit of that scheme.
+Straight into `CsBackup`, which as of 2026-08-29 keeps datestamped
+generations in the cave project's own `backup/` folder:
 
-**One deliberate departure: this `.bak` is written inside Google Drive
-too.** `CsBackup` skips Drive by decision, on the grounds that Drive
-keeps its own version history and a `.bak` beside a synced multi-megabyte
-drawing is clutter. Two things make the companion different, and both
-cut the same way:
+```
+Pitfall Cave/backup/Pitfall Cave.cavecad.2026-08-29_041200.bak
+```
+
+beside the drawing's own generations, pruned by the same keep count.
+`CsBackup.backupNameFor` already handles any extension, so the companion
+needs no scheme of its own — it calls `CsBackup.copyPrevious(path)` and
+gets the whole thing.
+
+The Drive exemption that used to sit in `CsBackup` is gone as of the
+same change, so nothing special is needed here either. The reasoning
+that removed it applies doubly to this file:
 
 - The user never *looks* at this file, so a wrong one produces no
   visible symptom. A gutted drawing is obvious on screen; a companion
@@ -310,8 +314,8 @@ cut the same way:
   argument that justified skipping Drive for drawings does not survive
   the size difference.
 
-Flagged because it diverges from an existing decision, and reversing it
-is a one-line change if the reasoning does not hold.
+Both were argued when the exemption was dropped; the second one is the
+companion's specifically.
 
 ### The mechanism
 

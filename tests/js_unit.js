@@ -113,6 +113,7 @@ var CORE_FILES = [
     "scripts/CaveSurvey/Core/CsUnits.js",
     "scripts/CaveSurvey/Core/CsCave.js",
     "scripts/CaveSurvey/Core/CsShelf.js",
+    "scripts/CaveSurvey/Core/CsBackup.js",
     "scripts/CaveSurvey/Core/CsScanTree.js",
     "scripts/CaveSurvey/Core/CsStationOrder.js",
     "scripts/CaveSurvey/Core/CsPackage.js",
@@ -16741,15 +16742,96 @@ if (!IS_NODE) {
 })();
 
 // ---------------------------------------------------------------------
-// CsBackup -- the previous version, kept beside the drawing
+// CsBackup -- the previous version, kept in the cave's backup folder
 // ---------------------------------------------------------------------
+// ---------------------------------------------------------------------
+// CsBackup -- the pure half: where a backup goes, what it is called,
+// and which ones are pruned.
+//
+// Backups live in the cave project's own backup/ folder, datestamped,
+// several generations deep, so a bad save can be rolled back to a
+// chosen point rather than only to "the one before". These functions
+// touch no files, so they run under node.
+// ---------------------------------------------------------------------
+
+// The stamp is built from a JS Date on purpose: this bridge has no
+// QDate at all, and QDateTime.currentDateTime().toString(format)
+// ignores the format and answers Qt's default text -- neither can
+// produce a sortable stamp (the same trap CsPackage.todayText documents).
+eqs(CsBackup.stampText(new Date(2026, 7, 29, 4, 12, 0)), "2026-08-29_041200",
+    "the stamp is sortable, to the second");
+eqs(CsBackup.stampText(new Date(2026, 11, 31, 23, 59, 59)), "2026-12-31_235959",
+    "and pads every field");
+
+eqs(CsBackup.backupFolderFor("/caves/Pitfall Cave/Pitfall Cave.dxf"),
+    "/caves/Pitfall Cave/" + CsCave.BACKUP,
+    "backups go in the cave project's own backup folder");
+eqs(CsBackup.backupFolderFor("nofolder.dxf"), null,
+    "a path with no folder has nowhere to put one");
+
+eqs(CsBackup.backupNameFor("/caves/Pitfall Cave/Pitfall Cave.dxf",
+        "2026-08-29_041200"),
+    "Pitfall Cave.dxf.2026-08-29_041200.bak",
+    "the name keeps the original in full, then the stamp, then .bak");
+eqs(CsBackup.backupNameFor("/c/x/Survey.cavecad", "2026-08-29_041200"),
+    "Survey.cavecad.2026-08-29_041200.bak",
+    "the companion file backs up under the same rule");
+
+// Which backups belong to which original. Two files in one cave whose
+// names share a prefix must not claim each other's history -- "Cave.dxf"
+// and "Cave.dxf.cavecad" would, on a careless prefix test.
+ok(CsBackup.isBackupOf("Cave.dxf.2026-08-29_041200.bak", "Cave.dxf"),
+    "a stamped backup belongs to its original");
+ok(!CsBackup.isBackupOf("Cave.dxf.2026-08-29_041200.bak", "Cave"),
+    "and not to a shorter name that merely prefixes it");
+ok(!CsBackup.isBackupOf("Other.dxf.2026-08-29_041200.bak", "Cave.dxf"),
+    "nor to an unrelated file");
+ok(!CsBackup.isBackupOf("Cave.dxf.bak", "Cave.dxf"),
+    "an unstamped .bak from the old scheme is not claimed either");
+ok(!CsBackup.isBackupOf("Cave.dxf.2026-08-29_041200.bak.txt", "Cave.dxf"),
+    "and something merely ending near it is not a backup");
+
+// Pruning: keep the newest N, name the rest. Sorted by the STAMP, which
+// is why the stamp is sortable -- not by filesystem order, which is not
+// guaranteed to be anything.
+var bkNames = [
+    "Cave.dxf.2026-08-29_041200.bak",
+    "Cave.dxf.2026-08-27_090000.bak",
+    "Cave.dxf.2026-08-28_120000.bak",
+    "Other.dxf.2026-08-29_041200.bak",
+    "notabackup.txt"
+];
+var bkPrune = CsBackup.prunable(bkNames, "Cave.dxf", 2);
+eqs(bkPrune.length, 1, "keeping two of three prunes exactly one");
+eqs(bkPrune[0], "Cave.dxf.2026-08-27_090000.bak", "and it is the oldest");
+eqs(CsBackup.prunable(bkNames, "Cave.dxf", 3).length, 0,
+    "keeping three of three prunes nothing");
+eqs(CsBackup.prunable(bkNames, "Cave.dxf", 0).length, 3,
+    "keeping none prunes every generation");
+eqs(CsBackup.prunable(bkNames, "Cave.dxf", 1).join(","),
+    "Cave.dxf.2026-08-27_090000.bak,Cave.dxf.2026-08-28_120000.bak",
+    "pruning returns oldest first, and never another file's backups");
+eqs(CsBackup.prunable([], "Cave.dxf", 5).length, 0, "nothing in, nothing out");
+eqs(CsBackup.prunable(null, "Cave.dxf", 5).length, 0, "junk in, empty out");
+
 if (!IS_NODE) {
     (function() {
         loadRepoScript("scripts/CaveSurvey/Core/CsBackup.js");
 
-        var dir = QDir.tempPath();
+        // A folder of its own, so the backup/ subfolder this now writes
+        // into cannot collide with anything else in the temp directory.
+        var dir = QDir.tempPath() + "/cs-backup-probe";
+        (new QDir(dir)).removeRecursively();
+        (new QDir()).mkpath(dir);
         var target = dir + "/cs-backup-probe.dxf";
-        var bak = target + CsBackup.SUFFIX;
+        var bakFolder = CsBackup.backupFolderFor(target);
+
+        // The newest generation's full path, or null when there is none.
+        function newestBak() {
+            var gens = CsBackup.generations(target);
+            return gens.length === 0 ? null :
+                bakFolder + "/" + gens[gens.length - 1];
+        }
 
         function write(path, text) {
             var f = new QFile(path);
@@ -16771,40 +16853,85 @@ if (!IS_NODE) {
             f.close();
             return text;
         }
-        new QFile(target).remove();
-        new QFile(bak).remove();
-
         // Nothing to preserve yet: a first save must not fabricate one.
         ok(CsBackup.copyPrevious(target) === false,
             "CsBackup: no file yet means no backup");
-        ok(!new QFileInfo(bak).exists(),
+        eqs(CsBackup.generations(target).length, 0,
             "CsBackup: and nothing is created");
 
+        // Stamps are passed in rather than taken from the clock: three
+        // saves inside one test second would otherwise collapse onto one
+        // generation, which is real behaviour but not what is under test
+        // here.
+        var t1 = new Date(2026, 7, 29, 9, 0, 0);
+        var t2 = new Date(2026, 7, 29, 9, 0, 1);
+        var t3 = new Date(2026, 7, 29, 9, 0, 2);
+
         ok(write(target, "VERSION-ONE"), "CsBackup fixture: wrote version one");
-        ok(CsBackup.copyPrevious(target) === true,
+        ok(CsBackup.copyPrevious(target, t1) === true,
             "CsBackup: an existing drawing is backed up");
-        eqs(read(bak), "VERSION-ONE",
+        ok((new QFileInfo(bakFolder)).exists(),
+            "CsBackup: the backup folder is created when first needed");
+        eqs(read(newestBak()), "VERSION-ONE",
             "CsBackup: the backup holds the previous bytes");
+        eqs(CsBackup.generations(target)[0],
+            "cs-backup-probe.dxf.2026-08-29_090000.bak",
+            "CsBackup: named for the original and stamped");
 
         // The point of the whole thing: the backup keeps the PREVIOUS
         // version while the drawing itself moves on.
         ok(write(target, "VERSION-TWO-GUTTED"), "CsBackup fixture: overwrote it");
-        eqs(read(bak), "VERSION-ONE",
+        eqs(read(newestBak()), "VERSION-ONE",
             "CsBackup: the backup still holds version one, not the new bytes");
 
-        // Second save: the backup advances by exactly one generation.
-        ok(CsBackup.copyPrevious(target) === true,
+        // Second save: a NEW generation, and the first one stays. This
+        // is the change -- a second bad save used to eat the only good
+        // copy.
+        ok(CsBackup.copyPrevious(target, t2) === true,
             "CsBackup: a second save backs up again");
-        eqs(read(bak), "VERSION-TWO-GUTTED",
-            "CsBackup: one generation only -- version one is gone now");
+        eqs(CsBackup.generations(target).length, 2,
+            "CsBackup: two generations now exist");
+        eqs(read(newestBak()), "VERSION-TWO-GUTTED",
+            "CsBackup: the newest holds what was just overwritten");
+        eqs(read(bakFolder + "/" + CsBackup.generations(target)[0]),
+            "VERSION-ONE",
+            "CsBackup: and version one is STILL there to roll back to");
 
-        // An EMPTY file must never replace a good backup with nothing:
-        // that would be this feature losing the data it exists to keep.
+        // An EMPTY file must never become a backup: that would be this
+        // feature losing the data it exists to keep.
         ok(write(target, ""), "CsBackup fixture: truncated the drawing");
-        ok(CsBackup.copyPrevious(target) === false,
+        ok(CsBackup.copyPrevious(target, t3) === false,
             "CsBackup: an empty file is not worth keeping");
-        eqs(read(bak), "VERSION-TWO-GUTTED",
-            "CsBackup: so the existing backup survives untouched");
+        eqs(CsBackup.generations(target).length, 2,
+            "CsBackup: so no third generation appears");
+        eqs(read(bakFolder + "/" + CsBackup.generations(target)[0]),
+            "VERSION-ONE",
+            "CsBackup: and both existing generations survive untouched");
+
+        // Pruning, against real files.
+        (function() {
+            var pruneKeep = 2;
+            ok(write(target, "VERSION-THREE"), "prune fixture: a third version");
+            ok(CsBackup.copyPrevious(target,
+                new Date(2026, 7, 29, 9, 0, 3)) === true,
+                "prune fixture: backed up a third generation");
+            eqs(CsBackup.generations(target).length, 3,
+                "prune fixture: three generations before pruning");
+            var savedKeep = RSettings.getIntValue(CsBackup.KEEP_SETTING,
+                CsBackup.KEEP_DEFAULT);
+            RSettings.setValue(CsBackup.KEEP_SETTING, pruneKeep);
+            try {
+                eqs(CsBackup.prune(target), 1,
+                    "prune: one generation over the keep count is removed");
+                eqs(CsBackup.generations(target).length, pruneKeep,
+                    "prune: the keep count is what remains");
+                eqs(read(bakFolder + "/" + CsBackup.generations(target)[0]),
+                    "VERSION-TWO-GUTTED",
+                    "prune: the OLDEST went, not an arbitrary one");
+            } finally {
+                RSettings.setValue(CsBackup.KEEP_SETTING, savedKeep);
+            }
+        }());
 
         // -- the backup fires from the destructive operation ---------
         // The real integration: eraseStations backs the file up before
@@ -16814,10 +16941,10 @@ if (!IS_NODE) {
             var d2 = new RDocument(new RMemoryStorage(),
                 new RSpatialIndexNavel());
             var i6 = new RDocumentInterface(d2);
-            var live = QDir.tempPath() + "/cs-erase-backup.dxf";
-            var liveBak = live + CsBackup.SUFFIX;
-            new QFile(live).remove();
-            new QFile(liveBak).remove();
+            var liveDir = QDir.tempPath() + "/cs-erase-backup";
+            (new QDir(liveDir)).removeRecursively();
+            (new QDir()).mkpath(liveDir);
+            var live = liveDir + "/cs-erase-backup.dxf";
 
             CsLayers.ensure(d2, i6, CsLayers.STATIONS);
             var pt6 = new RPointEntity(d2, new RPointData(new RVector(0, 0)));
@@ -16831,10 +16958,10 @@ if (!IS_NODE) {
                 "erase-backup fixture: a saved drawing exists on disk");
             d2.setFileName(live);
 
-            ok(!new QFileInfo(liveBak).exists(),
+            eqs(CsBackup.generations(live).length, 0,
                 "erase-backup: no backup before the destructive call");
             CsDraw.eraseStations(d2, ["A1"]);
-            ok(new QFileInfo(liveBak).exists(),
+            eqs(CsBackup.generations(live).length, 1,
                 "eraseStations: the last saved version is kept BEFORE it erases");
 
             // A single Draw runs both destructive operations, so the
@@ -16847,18 +16974,38 @@ if (!IS_NODE) {
             eqs(CsBackup.lastBackedUp, stampAfter,
                 "CsBackup.beforeWrite: and does not re-copy unchanged bytes");
 
-            // A deleted .bak is remade, not skipped because we remember.
-            new QFile(liveBak).remove();
+            // A deleted backup is remade, not skipped because we
+            // remember making one once.
+            var liveGens = CsBackup.generations(live);
+            new QFile(CsBackup.backupFolderFor(live) + "/" +
+                liveGens[0]).remove();
+            eqs(CsBackup.generations(live).length, 0,
+                "CsBackup fixture: the backup really was removed");
             ok(CsBackup.beforeWrite(live) === true,
                 "CsBackup.beforeWrite: remakes a backup that went missing");
-            ok(new QFileInfo(liveBak).exists(),
+            eqs(CsBackup.generations(live).length, 1,
                 "CsBackup.beforeWrite: the file is back");
 
-            new QFile(live).remove();
-            new QFile(liveBak).remove();
+            (new QDir(liveDir)).removeRecursively();
         }());
 
-        // -- inside Google Drive, Drive's own history is trusted -----
+        // -- Google Drive is no longer exempt (2026-08-29) -----------
+        // driveRoots/inGoogleDrive stay: CsCave and CsShelf both use the
+        // same discovery, and the answer is still worth being correct.
+        // What changed is that CsBackup no longer ACTS on it.
+        (function() {
+            var driveRoots = CsBackup.driveRoots();
+            if (driveRoots.length === 0) {
+                ok(true, "no Drive on this machine to check the exemption against");
+                return;
+            }
+            var src = CsBackup.copyPrevious.toString();
+            ok(src.indexOf("inGoogleDrive") === -1,
+                "CsBackup.copyPrevious no longer skips Google Drive");
+            ok(CsBackup.beforeWrite.toString().indexOf("inGoogleDrive") === -1,
+                "and neither does beforeWrite");
+        }());
+
         var roots = CsBackup.driveRoots();
         ok(roots.length >= 0, "CsBackup.driveRoots: answers without throwing");
         ok(CsBackup.inGoogleDrive(target) === false,
@@ -16874,8 +17021,7 @@ if (!IS_NODE) {
             ok(true, "CsBackup.inGoogleDrive: no Drive on this machine to check");
         }
 
-        new QFile(target).remove();
-        new QFile(bak).remove();
+        (new QDir(dir)).removeRecursively();
     }());
 }
 
@@ -17997,8 +18143,9 @@ ok(!CsCave.isPreviewName("entrance.jpg"),
     "somebody's photograph is not the preview");
 ok(!CsCave.isPreviewName("preview.png"),
     "a bare preview.png is a photograph somebody named that");
-eqs(CsCave.SUBFOLDERS.join(","), "scans,PDF,images",
-    "a cave project keeps sketches, maps and pictures");
+eqs(CsCave.SUBFOLDERS.join(","), "scans,PDF,images,backup",
+    "a cave project keeps sketches, maps, pictures and previous versions");
+eqs(CsCave.BACKUP, "backup", "the backup folder is named plainly");
 
 // ---------------------------------------------------------------------
 // Shelf triage -- health, badges, declination drift
