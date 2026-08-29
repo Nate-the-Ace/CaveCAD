@@ -66,29 +66,120 @@ CsScanView.prototype.resizeEvent = function(event) {
  */
 CsScanView.prototype.mousePressEvent = function(event) {
     RGraphicsViewQt.prototype.mousePressEvent.call(this, event);
-    if (typeof this.onScanPick !== "function") {
+    var at = CsScanView.eventPos(event);
+    var button = 0;
+    try {
+        button = (typeof event.button === "function") ?
+            event.button() : event.button;
+    } catch (eBtn) {
+    }
+
+    // Middle starts a pan. Qt.MidButton and Qt.MiddleButton are both 4
+    // here, so either spelling is the same test.
+    if (button === Qt.MidButton) {
+        this.panFrom = at;
+        return;
+    }
+    if (button !== Qt.LeftButton || typeof this.onScanPick !== "function" ||
+            at === null) {
         return;
     }
     try {
-        var iv = this.getImageView();
-        var x, y;
-        // Qt exposes the position either way depending on build; take
-        // whichever this one answers rather than assuming.
-        if (typeof event.x === "function") {
-            x = event.x();
-            y = event.y();
-        } else if (typeof event.pos === "function") {
-            var pos = event.pos();
-            x = pos.x();
-            y = pos.y();
-        } else {
-            return;
-        }
-        var model = iv.mapFromView(new RVector(x, y));
+        var model = this.getImageView().mapFromView(
+            new RVector(at.x, at.y));
         this.onScanPick({ x: model.x, y: model.y });
     } catch (e) {
         // a listener must never throw into the view's own event handling
     }
+};
+
+/** A widget position off a mouse event, whichever way this bridge
+ *  spells it. QPoint's x and y are FUNCTIONS here, not properties, and
+ *  reading them as properties fails silently (probed 2026-08-29). */
+CsScanView.eventPos = function(event) {
+    try {
+        if (typeof event.x === "function") {
+            return { x: event.x(), y: event.y() };
+        }
+        if (typeof event.pos === "function") {
+            var p = event.pos();
+            return { x: (typeof p.x === "function") ? p.x() : p.x,
+                     y: (typeof p.y === "function") ? p.y() : p.y };
+        }
+    } catch (e) {
+    }
+    return null;
+};
+
+/** How much a wheel notch turned, whichever API this Qt offers. */
+CsScanView.wheelSteps = function(event) {
+    try {
+        if (typeof event.angleDelta === "function") {
+            var d = event.angleDelta();
+            var dy = (typeof d.y === "function") ? d.y() : d.y;
+            return dy / 120.0;
+        }
+        if (typeof event.delta === "function") {
+            return event.delta() / 120.0;
+        }
+    } catch (e) {
+    }
+    return 0;
+};
+
+/** Zoom step per wheel notch. */
+CsScanView.WHEEL_FACTOR = 1.25;
+
+/**
+ * The wheel zooms ABOUT THE CURSOR, the way every map and every CAD
+ * view does: the point under the pointer stays under the pointer.
+ * RGraphicsView.zoom takes its centre in MODEL coordinates, which is
+ * what mapFromView answers.
+ */
+CsScanView.prototype.wheelEvent = function(event) {
+    var steps = CsScanView.wheelSteps(event);
+    if (steps === 0) {
+        RGraphicsViewQt.prototype.wheelEvent.call(this, event);
+        return;
+    }
+    try {
+        var iv = this.getImageView();
+        var at = CsScanView.eventPos(event);
+        var centre = (at === null) ?
+            iv.mapFromView(new RVector(iv.getWidth() / 2, iv.getHeight() / 2)) :
+            iv.mapFromView(new RVector(at.x, at.y));
+        iv.zoom(centre, Math.pow(CsScanView.WHEEL_FACTOR, steps));
+    } catch (e) {
+        RGraphicsViewQt.prototype.wheelEvent.call(this, event);
+    }
+};
+
+/**
+ * MIDDLE-DRAG PANS, the same gesture QCAD's own views use, which
+ * leaves the left button free for picking a station off the scan.
+ * pan() takes a delta in VIEW pixels and flips y itself.
+ */
+CsScanView.prototype.mouseMoveEvent = function(event) {
+    RGraphicsViewQt.prototype.mouseMoveEvent.call(this, event);
+    if (this.panFrom === undefined || this.panFrom === null) {
+        return;
+    }
+    try {
+        var at = CsScanView.eventPos(event);
+        if (at === null) {
+            return;
+        }
+        this.getImageView().pan(
+            new RVector(at.x - this.panFrom.x, at.y - this.panFrom.y), true);
+        this.panFrom = at;
+    } catch (e) {
+        this.panFrom = null;
+    }
+};
+
+CsScanView.prototype.mouseReleaseEvent = function(event) {
+    RGraphicsViewQt.prototype.mouseReleaseEvent.call(this, event);
+    this.panFrom = null;
 };
 
 var CsScanPreview = {};

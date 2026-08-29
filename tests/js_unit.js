@@ -15640,6 +15640,34 @@ if (!IS_NODE) {
                 "pixelText: rounded to whole pixels");
             eqs(CsScanPreview.pixelText(null, 1000), "",
                 "pixelText: no pick, nothing to say");
+
+            // Reading a position off an event: QPoint's x and y are
+            // FUNCTIONS in this bridge, and a build that spells the
+            // event the other way must not silently give up.
+            var asMethods = { x: function() { return 12; },
+                              y: function() { return 34; } };
+            var got = CsScanView.eventPos(asMethods);
+            eqs(got.x + "," + got.y, "12,34",
+                "eventPos: x() and y() straight off the event");
+            var asPos = { pos: function() {
+                return { x: function() { return 5; },
+                         y: function() { return 6; } }; } };
+            got = CsScanView.eventPos(asPos);
+            eqs(got.x + "," + got.y, "5,6",
+                "eventPos: or through pos()");
+            ok(CsScanView.eventPos({}) === null,
+                "eventPos: an event with neither answers null, not a throw");
+
+            // Wheel notches, whichever API this Qt offers: 120 units is
+            // one notch either way.
+            near(CsScanView.wheelSteps({ angleDelta: function() {
+                    return { x: 0, y: 240 }; } }), 2, 1e-9,
+                "wheelSteps: two notches from angleDelta");
+            near(CsScanView.wheelSteps({ delta: function() {
+                    return -120; } }), -1, 1e-9,
+                "wheelSteps: one notch back from delta");
+            eqs(CsScanView.wheelSteps({}), 0,
+                "wheelSteps: an event with neither scrolls nothing");
         }());
 
         loadRepoScript("scripts/CaveSurvey/FeatureTrace/FeatureTraceRun.js");
