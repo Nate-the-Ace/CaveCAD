@@ -30,6 +30,7 @@ handicapped original.
 | Fixed station control | ❌ none | ✅ | ✅ | ✅ | ✅ |
 | Cave name | ✅ | ❌ | ❌ | ✅ | ❌ |
 | LRUD | ⚠ per station | ✅ | ⚠ per station | ✅ | ⚠ one case |
+| LRUD all-readings (`5/10`) | ❌ | ❌ | ❌ | ❌ | ✅ |
 | Duplicate / surface flags | ✅ | ❌ | ✅ | ✅ | ❌ |
 | Held-fixed flag (`#\|C#`) | ✅ | ❌ | ❌ | ❌ | ❌ |
 | Struck-out shot (`#\|X#`) | ✅ | ✅ | ❌ dropped | ❌ dropped | ✅ |
@@ -119,6 +120,11 @@ which no other format manages. Everything around them is thin: one trip
 instead of four, one date, one team, no cave name, and no per-shot
 declination at all — the azimuths are true bearings either way, so the
 map is right, but the record of what each leg was read under is gone.
+
+One thing CSV alone keeps: the several readings behind a `5/10` LRUD
+entry (`leftAll` and its siblings). Its notebook shorthand is the only
+column in any supported format with room for a second number — Compass,
+Walls, Survex and Therion all drop back to one reading.
 
 Good for getting numbers into a spreadsheet. Not a survey archive.
 

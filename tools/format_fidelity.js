@@ -147,6 +147,18 @@ var SHOT_FIELDS = [
     { key: "right", label: "LRUD", get: function(s) { return s.right; }, num: true },
     { key: "up", label: "LRUD", get: function(s) { return s.up; }, num: true },
     { key: "down", label: "LRUD", get: function(s) { return s.down; }, num: true },
+    // The several readings behind one "5/10" LRUD entry. Only the
+    // suite's own CSV dialect has anywhere to put a second number, so
+    // this row is expected to be empty for four of the five -- but
+    // expected is not measured, and it was not measured until now.
+    { key: "leftAll", label: "LRUD all-readings",
+      get: function(s) { return (s.leftAll || []).join("/"); } },
+    { key: "rightAll", label: "LRUD all-readings",
+      get: function(s) { return (s.rightAll || []).join("/"); } },
+    { key: "upAll", label: "LRUD all-readings",
+      get: function(s) { return (s.upAll || []).join("/"); } },
+    { key: "downAll", label: "LRUD all-readings",
+      get: function(s) { return (s.downAll || []).join("/"); } },
     { key: "splay", label: "splay flag", get: function(s) { return s.splay; } },
     { key: "excludeFromPlot", label: "surface flag",
       get: function(s) { return !!s.excludeFromPlot; } },
