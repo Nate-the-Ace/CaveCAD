@@ -27,11 +27,11 @@
     {
       "id": 3,
       "subject": "Task 4: Engine-only integration test + run_all.sh wiring",
-      "status": "pending",
+      "status": "completed",
       "blockedBy": [2],
       "description": "**Goal:** Prove the whole pipeline against REAL RDocument/RPolylineEntity/RLineEntity/RArcEntity/RCircleEntity/RSplineEntity/RTextEntity objects inside the actual CaveCAD engine, and wire it into tests/run_all.sh.\n\n**Files:**\n- Create: tests/linework_warp.js\n- Modify: tests/run_all.sh (new numbered step, renumber existing 9 steps' N/9 labels to N/10)\n\n**Acceptance Criteria:**\n- [ ] A 3-vertex polyline near 3 non-rigidly-moving stations ends up with each vertex independently matching CsWarp.mlsSimilarity's own prediction -- not a single whole-entity transform\n- [ ] The polyline's bulge is numerically unchanged after the move\n- [ ] Line/arc/circle/spline bound to the same stations all move/warp without throwing; arc/circle radius scales by a measurably different amount than a rigid move would (proves local factor used, not 1.0)\n- [ ] A text entity bound to stations that moved far from rigid still lands in unmoved -- unchanged old refusal behavior\n- [ ] moveLinework's returned {moved, warped, unmoved} counts match the test setup exactly (1 warped, 4 moved, 1 unmoved)\n- [ ] lineworkSummary's output text contains \"warped to follow a bend\" when called with these counts\n- [ ] tests/run_all.sh runs this file as a new step and fails the whole run if it fails\n\n**Verify:** \"$QCAD\" -no-dock-icon -no-gui -allow-multiple-instances -autostart tests/linework_warp.js \"$PWD\" -> ### LINEWORK WARP OK; then bash tests/run_all.sh -> ALL TESTS PASSED including the new step\n\n**Steps:** Full tests/linework_warp.js source is written out verbatim in the plan doc (Task 4, Step 1), plus the exact run_all.sh insertion (Step 3, after renumbering the 9 existing N/9 labels to N/10). Copy exactly, run standalone against the installed CaveCAD, then run the whole suite, commit.\n\n```json:metadata\n{\"files\": [\"tests/linework_warp.js\", \"tests/run_all.sh\"], \"verifyCommand\": \"bash tests/run_all.sh\", \"acceptanceCriteria\": [\"polyline vertices independently match CsWarp predictions\", \"bulge unchanged\", \"arc/circle radius scaled by local factor, measurably non-rigid\", \"text entity still refused (unmoved)\", \"counts match: warped=1 moved=4 unmoved=1\", \"summary text mentions warped\", \"run_all.sh reports ALL TESTS PASSED\"], \"modelTier\": \"standard\"}\n```",
       "activeForm": "Writing the engine-only integration test and wiring it into run_all.sh"
     }
   ],
-  "lastUpdated": "2026-08-28T01:00:00Z"
+  "lastUpdated": "2026-08-29T00:00:00Z"
 }
