@@ -381,6 +381,34 @@ SurveyNotebook.upperCasePlain = function(w, edit) {
     return edit;
 };
 
+/**
+ * A small, flat button for the action row -- QToolButton with autoRaise,
+ * so it reads as secondary beside the full-size Draw and New Trip and
+ * takes about half the width of a QPushButton carrying the same word.
+ *
+ * The action row sets this dock's minimum width, and that width is map
+ * space, so every full-size button in it has to earn its place.
+ */
+SurveyNotebook.smallButton = function(text, toolTip) {
+    var b = new QToolButton();
+    b.text = text;
+    if (toolTip !== undefined && toolTip !== null && toolTip !== "") {
+        b.toolTip = toolTip;
+    }
+    try {
+        b.autoRaise = true;
+    } catch (eRaise) {
+        // a bridge without autoRaise gets an ordinary-looking button
+    }
+    try {
+        // 2 = Qt::ToolButtonTextOnly. These carry no icon, and the
+        // default style leaves room for one.
+        b.toolButtonStyle = 2;
+    } catch (eStyle) {
+    }
+    return b;
+};
+
 SurveyNotebook.makeCell = function(w, width) {
     var e = SurveyNotebook.styleCell(new QLineEdit());
     e.maximumWidth = width || SurveyNotebook.EDIT_WIDTH;
@@ -2907,44 +2935,78 @@ SurveyNotebook.buildDock = function(appWin) {
     w.newTripButton.toolTip = "Start the next trip's page: pick the " +
         "station it ties into (open ends suggested), header prefilled " +
         "from the drawing. The drawing is not touched.";
-    w.importButton = new QPushButton("Import File...");
-    w.exportButton = new QPushButton("Export File...");
-    w.statusButton = new QPushButton("Status");
-    w.statusButton.toolTip = "Show/hide the live status box (drag the " +
-        "bar above it to resize).";
-    w.clearButton = new QPushButton("Clear");
-    w.clearButton.toolTip = "Empty the page for the next survey. The " +
-        "team clears too; the rest of the header (name, date, " +
-        "declination, instruments) is kept. Nothing in the drawing is " +
-        "touched.";
-    w.loadDrawingButton = new QPushButton("Load from drawing");
-    w.loadDrawingButton.toolTip = "Fill the page from a trip already in " +
+    // THE ACTION ROW SETS THIS DOCK'S MINIMUM WIDTH, and the dock's
+    // width is map space the caver does not get. Nine full buttons
+    // wanted roughly 1000px; the two pressed every session stay full,
+    // the two that report STATE stay visible as small toggles, and the
+    // five that are occasional errands live under a menu. The floor is
+    // then the shot ladder (name + 7 x EDIT_WIDTH + notes), which is
+    // the next thing to shrink if more room is wanted.
+    w.statusButton = SurveyNotebook.smallButton("Status",
+        "Show/hide the live status box (drag the bar above it to " +
+        "resize).");
+    try {
+        w.statusButton.checkable = true;
+        w.statusButton.checked = w.statusLabel.visible;
+    } catch (eStatusChk) {
+        // not checkable here: the box's own visibility is the state
+    }
+    w.moreButton = new QToolButton();
+    w.moreButton.text = "\u22ef";
+    w.moreButton.toolTip = "Import, export, clear the page, load a trip " +
+        "from the drawing, revise declinations.";
+    try {
+        w.moreButton.autoRaise = true;
+    } catch (eRaise) {
+    }
+    w.moreMenu = new QMenu();
+    w.importAction = w.moreMenu.addAction("Import File...");
+    w.exportAction = w.moreMenu.addAction("Export File...");
+    w.moreMenu.addSeparator();
+    w.loadDrawingAction = w.moreMenu.addAction("Load from drawing");
+    w.loadDrawingAction.toolTip = "Fill the page from a trip already in " +
         "the drawing, so this page becomes that trip's revision sheet. " +
         "Edit and Draw to replace it in place.";
-    w.declReviseButton = new QPushButton("Declination...");
-    w.declReviseButton.toolTip = "Correct the declination of the trips " +
+    w.declReviseAction = w.moreMenu.addAction("Declination...");
+    w.declReviseAction.toolTip = "Correct the declination of the trips " +
         "already in the drawing: one row per trip, IGRF on tap, and the " +
         "drawing turns by the difference. Not the same as the header's " +
         "Decl, which is what this page's own readings were taken under.";
-    // One entry for the switch and for Adopt, and the entry itself shows
-    // when binding has been switched OFF -- see the section comment
-    // above lineworkDialog. Checkable so that off state also reads as a
-    // pressed button where this bridge supports it.
-    w.lineworkButton = new QPushButton("Linework...");
+    w.moreMenu.addSeparator();
+    // The tracing itself lives in Feature Trace now, but the BINDING
+    // SWITCH does not: this entry is still the only way to turn
+    // automatic linework binding off, and the only way to reach Adopt.
+    // Checkable so the menu shows a mark when binding is switched off
+    // -- state that used to be a pressed button in the row.
+    w.lineworkButton = w.moreMenu.addAction("Linework...");
     try {
         w.lineworkButton.checkable = true;
     } catch (eChk) {
         // not checkable here: the label carries the state on its own
     }
+    w.moreMenu.addSeparator();
+    w.clearAction = w.moreMenu.addAction("Clear");
+    w.clearAction.toolTip = "Empty the page for the next survey. The " +
+        "team clears too; the rest of the header (name, date, " +
+        "declination, instruments) is kept. Nothing in the drawing is " +
+        "touched.";
+    w.moreButton.setMenu(w.moreMenu);
+    // 2 = QToolButton::InstantPopup, WRITTEN AS A NUMBER ON PURPOSE.
+    // QToolButton.InstantPopup is UNDEFINED in this bridge (probed
+    // 2026-08-29), so the named form assigns undefined and silently
+    // leaves the mode at 0 -- press-and-hold, which reads as a menu
+    // that does not open.
+    try {
+        w.moreButton.popupMode = 2;
+    } catch (ePopup) {
+        // a bridge without popupMode still opens the menu on a hold
+    }
+
     actions.addWidget(w.drawButton, 0, 0);
     actions.addWidget(w.newTripButton, 0, 0);
-    actions.addWidget(w.importButton, 0, 0);
-    actions.addWidget(w.exportButton, 0, 0);
+    actions.addStretch(1);
     actions.addWidget(w.statusButton, 0, 0);
-    actions.addWidget(w.clearButton, 0, 0);
-    actions.addWidget(w.loadDrawingButton, 0, 0);
-    actions.addWidget(w.declReviseButton, 0, 0);
-    actions.addWidget(w.lineworkButton, 0, 0);
+    actions.addWidget(w.moreButton, 0, 0);
     layout.addLayout(actions, 0);
 
     body.setLayout(layout);
@@ -3027,10 +3089,10 @@ SurveyNotebook.buildDock = function(appWin) {
     SurveyNotebook.safeConnect(w.drawButton.clicked, function() {
         SurveyNotebook.drawSurvey(w);
     }, "Draw button", w.problems);
-    SurveyNotebook.safeConnect(w.importButton.clicked, function() {
+    SurveyNotebook.safeConnect(w.importAction.triggered, function() {
         SurveyNotebook.importFile(w);
     }, "Import button", w.problems);
-    SurveyNotebook.safeConnect(w.exportButton.clicked, function() {
+    SurveyNotebook.safeConnect(w.exportAction.triggered, function() {
         SurveyNotebook.exportFile(w);
     }, "Export button", w.problems);
     SurveyNotebook.safeConnect(w.inferButton.clicked, function() {
@@ -3040,11 +3102,18 @@ SurveyNotebook.buildDock = function(appWin) {
         w.statusLabel.visible = !w.statusLabel.visible;
         RSettings.setValue("CaveSurvey/NotebookStatusVisible",
             w.statusLabel.visible);
+        try {
+            // A checkable button toggles ITSELF on click, so this only
+            // re-asserts the truth -- and keeps the two in step on a
+            // bridge where the click did not toggle it.
+            w.statusButton.checked = w.statusLabel.visible;
+        } catch (eStatusSync) {
+        }
     }, "Status button", w.problems);
     SurveyNotebook.safeConnect(w.newTripButton.clicked, function() {
         SurveyNotebook.newTrip(w);
     }, "New Trip button", w.problems);
-    SurveyNotebook.safeConnect(w.clearButton.clicked, function() {
+    SurveyNotebook.safeConnect(w.clearAction.triggered, function() {
         var sure = QMessageBox.question(null, "Survey Notebook",
             "Clear the page? The team clears with it; the rest of the " +
             "header stays and the drawing is not touched.",
@@ -3062,13 +3131,13 @@ SurveyNotebook.buildDock = function(appWin) {
         SurveyNotebook.addStationRow(w, "A2");
         SurveyNotebook.refresh(w);
     }, "Clear button", w.problems);
-    SurveyNotebook.safeConnect(w.loadDrawingButton.clicked, function() {
+    SurveyNotebook.safeConnect(w.loadDrawingAction.triggered, function() {
         SurveyNotebook.loadFromDrawing(w);
     }, "Load from drawing button", w.problems);
-    SurveyNotebook.safeConnect(w.declReviseButton.clicked, function() {
+    SurveyNotebook.safeConnect(w.declReviseAction.triggered, function() {
         SurveyNotebook.reviseDeclinations(w);
     }, "Declination button", w.problems);
-    SurveyNotebook.safeConnect(w.lineworkButton.clicked, function() {
+    SurveyNotebook.safeConnect(w.lineworkButton.triggered, function() {
         // Any failure in here must be SEEN, not swallowed -- and a
         // checkable button that toggled itself must not be left
         // showing a state the switch is not in.
