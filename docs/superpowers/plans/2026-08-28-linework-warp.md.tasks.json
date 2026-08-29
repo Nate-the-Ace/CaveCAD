@@ -4,7 +4,7 @@
     {
       "id": 0,
       "subject": "Task 1: Core/CsWarp.js -- MLS deformation, pure and tested",
-      "status": "pending",
+      "status": "completed",
       "description": "**Goal:** A pure function that warps one point given a set of old->new control-point pairs, using inverse-square-distance-weighted Moving Least Squares similarity, with node-level tests proving it reproduces control points exactly, matches the existing rigid fit when the data truly is rigid, and blends smoothly across a genuinely non-rigid case.\n\n**Files:**\n- Create: scripts/CaveSurvey/Core/CsWarp.js\n- Test: tests/js_unit.js (new block inserted right after the existing pure CsTrace block ending at line 13931 with `}());`, before the `// CsTrace -- the point-to-frame region test` comment)\n\n**Acceptance Criteria:**\n- [ ] CsWarp.mlsSimilarity(point, controlPairs) returns null for 0 pairs, a pure translation for 1 pair, {x,y,angle,factor} for 2+\n- [ ] A point at a control pair's old position warps to within 1e-6 of its nu position, regardless of other pairs\n- [ ] Matches CsRevise.applyFit(CsRevise.similarityFit(pairs), point) to within 1e-9 for genuinely rigid data (2-pair and 4-pair cases)\n- [ ] A genuinely non-rigid two-cluster case produces different output near each cluster and a smooth blend between them\n- [ ] node tests/js_unit.js passes with the new assertions counted\n\n**Verify:** node tests/js_unit.js -> ### UNIT OK <N> assertions, N greater than pre-task count\n\n**Steps:** Full CsWarp.js source and full js_unit.js test block are written out verbatim in the plan doc (Task 1, Steps 1-2) -- copy them exactly, run node tests/js_unit.js, commit.\n\n```json:metadata\n{\"files\": [\"scripts/CaveSurvey/Core/CsWarp.js\", \"tests/js_unit.js\"], \"verifyCommand\": \"node tests/js_unit.js\", \"acceptanceCriteria\": [\"mlsSimilarity handles 0/1/2+ pair cases correctly\", \"exact reproduction at control points within 1e-6\", \"matches similarityFit exactly for rigid data within 1e-9\", \"non-rigid two-cluster case blends smoothly\", \"node tests/js_unit.js reports UNIT OK\"], \"modelTier\": \"standard\"}\n```",
       "activeForm": "Writing Core/CsWarp.js and its node tests"
     },
@@ -33,5 +33,5 @@
       "activeForm": "Writing the engine-only integration test and wiring it into run_all.sh"
     }
   ],
-  "lastUpdated": "2026-08-28T00:00:00Z"
+  "lastUpdated": "2026-08-28T01:00:00Z"
 }
