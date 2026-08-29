@@ -136,6 +136,22 @@ var placedAt = m.block.getData().getPosition();
 checkClose("the reference sits where it was placed (x)", placedAt.x, 200);
 checkClose("the reference sits where it was placed (y)", placedAt.y, 200);
 
+// No evidence rays: the block holds the outline, the centre cross and
+// the caption, and nothing else.
+var blockEnts = doc.queryBlockEntities(
+    doc.getBlockId(CsSectionDraw.blockName(id)));
+check("the block holds only outline, centre cross and caption",
+    blockEnts.length === 4);
+var rays = 0;
+for (var bi = 0; bi < blockEnts.length; bi++) {
+    var be = doc.queryEntity(blockEnts[bi]);
+    if (!isNull(be) &&
+            doc.getLayerName(be.getLayerId()) === CsLayers.SECTION_SPLAYS) {
+        rays++;
+    }
+}
+check("no ray is drawn on the splay layer", rays === 0);
+
 m.block.update();
 var boxBefore = m.block.getBoundingBox();
 var widthBefore = boxBefore.getMaximum().x - boxBefore.getMinimum().x;

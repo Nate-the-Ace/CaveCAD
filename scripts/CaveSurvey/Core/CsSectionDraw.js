@@ -226,8 +226,13 @@ CsSectionDraw.define = function(doc, di, sectionId, cut, opts) {
         return null;
     }
 
+    // NOT SECTION_SPLAYS. An earlier draft drew a ray from the centre
+    // to every sampled point as visible evidence of what was measured.
+    // Nathan's call: they are not wanted on the drawing. The outline
+    // and the caption's measured-point counts carry the same
+    // information without the clutter, and the layer stays registered
+    // for the day a splay overlay is wanted deliberately.
     CsLayers.ensure(doc, di, CsLayers.SECTION_OUTLINE);
-    CsLayers.ensure(doc, di, CsLayers.SECTION_SPLAYS);
     CsLayers.ensure(doc, di, CsLayers.SECTION_STATIONS);
     CsLayers.ensure(doc, di, CsLayers.SECTION_TEXT_LABELS);
 
@@ -256,15 +261,6 @@ CsSectionDraw.define = function(doc, di, sectionId, cut, opts) {
         CsSectionDraw.addToBlock(doc, op, blockId,
             new RPolylineEntity(doc, new RPolylineData(pl)),
             CsLayers.SECTION_OUTLINE, sectionId);
-    }
-
-    // The evidence, faint: a ray to every sampled point. A section built
-    // from LRUD alone shows four; a splayed one shows what was shot.
-    for (i = 0; i < cut.outline.length; i++) {
-        CsSectionDraw.addToBlock(doc, op, blockId,
-            new RLineEntity(doc, new RLineData(new RVector(0, 0),
-                CsSectionDraw.vectorOf(cut.outline[i], scale))),
-            CsLayers.SECTION_SPLAYS, sectionId);
     }
 
     // The centreline mark: a small cross at the cut point itself.
