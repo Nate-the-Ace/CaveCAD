@@ -1,0 +1,91 @@
+From 6e5cc0314f9b9ff9fee22e1fbd9606b450720191 Mon Sep 17 00:00:00 2001
+From: Nathan Schonegg <ndschonegg@gmail.com>
+Date: Sat, 29 Aug 2026 08:31:15 -0400
+Subject: [PATCH] Call the Cave Survey add-on after a successful save
+
+An add-on cannot hook a save in this application, and that is measured
+rather than assumed (2026-08-29, probe/CsSaveProbe in cavecad-tools,
+against two real GUI saves of a real cave): a wrapper installed on
+Save.prototype.save from add-on init never fires.
+
+The mechanism is more specific than "a separate script context". Every
+open document gets its OWN script handler and therefore its own script
+engine (RDocumentInterface::scriptHandlers, RDocumentInterface.cpp:202).
+Add-ons are initialised in the application-level engine; this action
+runs in the document's. So the prototype the add-on patched is not this
+one, and the add-on's globals are not defined here at all -- which is
+also why every Cave Survey tool re-includes Core/CsAll.js at its own
+top rather than trusting it to be loaded.
+
+Hence both halves of the block: the add-on's absolute path comes from a
+setting it writes in the engine that knows it (an include() written
+relative to the scripts root resolves only against the application
+bundle, never against the per-user install where the add-on actually
+lives), and the include pulls the library into this engine. include()
+is per-engine and guarded by basename, so it costs one load per
+document, not one per save.
+
+Everything CsCave.afterSave does is a convenience -- project folders
+(including backup/), the scans path, the launcher shelf, the drawing's
+preview. None of it may cost a caver their save, so the whole block is
+swallowed and only warns to the log.
+
+SaveAs needs no separate patch: it calls this.save() and inherits from
+Save.
+
+Co-Authored-By: Claude Opus 5 <noreply@anthropic.com>
+---
+ scripts/File/Save/Save.js | 37 +++++++++++++++++++++++++++++++++++++
+ 1 file changed, 37 insertions(+)
+
+diff --git a/scripts/File/Save/Save.js b/scripts/File/Save/Save.js
+index 4054b0e4..d9ff457e 100644
+--- a/scripts/File/Save/Save.js
++++ b/scripts/File/Save/Save.js
+@@ -184,6 +184,43 @@ Save.prototype.save = function(fileName, fileVersion, overwriteWarning) {
+     }
+     RSettings.addRecentFile(fileName, di.getThumbnail());
+ 
++    // CaveCAD: the Cave Survey add-on's one chance to run on a save.
++    //
++    // It cannot hook this itself, and that is measured, not assumed
++    // (2026-08-29, probe/CsSaveProbe in cavecad-tools, against two real
++    // GUI saves): a wrapper installed on Save.prototype.save from add-on
++    // init never fires. Every open document has its OWN script engine
++    // (RDocumentInterface::scriptHandlers), the add-on is initialised in
++    // the application-level engine, and this action runs in the
++    // document's -- so the prototype the add-on patched is not this one,
++    // and the add-on's globals are not defined here at all. That is also
++    // why every Cave Survey tool re-includes Core/CsAll.js at its own
++    // top rather than trusting it to be loaded.
++    //
++    // Hence both halves below: the path comes from a setting the add-on
++    // writes in the engine that knows it (an include() written relative
++    // to the scripts root resolves only against the application bundle,
++    // never against the per-user install where the add-on actually
++    // lives), and the include pulls the library into THIS engine.
++    // include() is per-engine and guarded by basename, so this costs one
++    // load per document, not one per save.
++    //
++    // Everything after a successful write is a convenience -- project
++    // folders, the scans path, the launcher shelf, the preview. None of
++    // it may cost the caver their save, so the whole block is swallowed.
++    try {
++        var csAddOn = RSettings.getStringValue("CaveSurvey/AddOnPath", "");
++        if (csAddOn.length!==0) {
++            include(csAddOn + "/Core/CsAll.js");
++            if (typeof CsCave!=="undefined" && isFunction(CsCave.afterSave)) {
++                CsCave.afterSave(fileName, di);
++            }
++        }
++    }
++    catch (eCaveSurvey) {
++        qWarning("CaveCAD: after-save work failed: " + eCaveSurvey);
++    }
++
+     appWin.handleUserMessage(qsTr("Saved file:") + " " + fileName);
+     if (fileVersion.length!==0) {
+         appWin.handleUserMessage(qsTr("Format:") + " " + fileVersion);
+-- 
+2.54.0 (Apple Git-157)
+

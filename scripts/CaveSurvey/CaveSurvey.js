@@ -92,6 +92,20 @@ CaveSurvey.init = function(basePath, splash) {
         CsCave.installSaveHook();
     }
 
+    // Where this add-on lives, so the application's own Save.js can
+    // find it (fork patch 0006). It cannot be discovered from there:
+    // every open document has its OWN script engine
+    // (RDocumentInterface::scriptHandlers), the add-on's globals are not
+    // in it, and an include() written relative to the scripts root
+    // resolves only against the application bundle -- never against a
+    // per-user install, which is where this actually lives. So the
+    // absolute path is handed over here, in the one engine that knows
+    // it. A missing setting simply means no after-save work happens.
+    try {
+        RSettings.setValue("CaveSurvey/AddOnPath", basePath);
+    } catch (ePath) {
+    }
+
     // Keep callout arrows on their notes while the caver edits with
     // QCAD's own tools. No menu entry: this is not a tool, it is what
     // makes a callout stay a callout after it is placed.

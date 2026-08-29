@@ -487,6 +487,66 @@ CsCave.pointAtScans = function(docPath) {
     }
 };
 
+/**
+ * Everything this suite wants to happen after a drawing is saved.
+ *
+ * THE ONE ENTRY POINT THE APPLICATION CALLS. CaveCAD's own
+ * scripts/File/Save/Save.js calls this after a successful export (fork
+ * patch 0006), because an add-on cannot reach a save any other way --
+ * see installSaveHook below for the measurement that proves it.
+ *
+ * Everything here is a convenience. Every one of them is wrapped, and a
+ * failure in any of them is swallowed: a caver's save must never fail
+ * because a folder could not be made or a thumbnail could not be drawn.
+ *
+ * \param savedPath the file that was just written.
+ * \param di the document interface, for the preview. Optional.
+ * \return a short list of what was done, for tests and for the probe.
+ */
+CsCave.afterSave = function(savedPath, di) {
+    var did = [];
+    if (typeof savedPath !== "string" || savedPath === "") {
+        return did;
+    }
+    try {
+        if (CsCave.pointAtScans(savedPath) !== null) {
+            did.push("scans");
+        }
+    } catch (e1) {
+    }
+    try {
+        // A cave saved under a drive root puts itself on the launcher's
+        // shelf, so the list fills from ordinary work rather than from
+        // the Add Cave button.
+        if (typeof CsShelf !== "undefined" &&
+                CsShelf.registerSaved(savedPath)) {
+            did.push("shelf");
+        }
+    } catch (e2) {
+    }
+    try {
+        var made = CsCave.ensureProjectFolders(CsCave.folderOf(savedPath));
+        if (made !== null && made.length > 0) {
+            did.push("folders:" + made.length);
+        }
+    } catch (e3) {
+    }
+    try {
+        // The stock save hands di.getThumbnail() to
+        // RSettings.addRecentFile; keeping the same picture in the
+        // cave's own images/ folder is what the shelf reads.
+        if (!isNull(di) && isFunction(di.updateThumbnail) &&
+                isFunction(di.getThumbnail)) {
+            di.updateThumbnail();
+            if (CsCave.writePreview(savedPath, di.getThumbnail())) {
+                did.push("preview");
+            }
+        }
+    } catch (e4) {
+    }
+    return did;
+};
+
 // Runs pointAtScans after every successful save -- OR IT WOULD, IF IT
 // RAN AT ALL.
 //
