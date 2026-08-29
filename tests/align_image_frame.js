@@ -86,8 +86,8 @@ var doc = new RDocument(new RMemoryStorage(), createSpatialIndex());
 var di = new RDocumentInterface(doc);
 
 CsLayers.ensure(doc, di, CsLayers.WALLS_SURVEYED);
-CsLayers.ensure(doc, di, CsLayers.PROFILE_TRACED_CEILING);
-CsLayers.ensure(doc, di, CsLayers.PROFILE_SHOTS);
+CsLayers.ensure(doc, di, CsLayers.PROFILE_CEILING);
+CsLayers.ensure(doc, di, CsLayers.CTRL_PROFILE_SHOTS);
 
 var addOp = new RAddObjectsOperation();
 
@@ -100,8 +100,8 @@ function addLine(layerName, x1, y1, x2, y2) {
 }
 
 var planWall = addLine(CsLayers.WALLS_SURVEYED, 0, 0, 10, 0);
-var tracedCeiling = addLine(CsLayers.PROFILE_TRACED_CEILING, 0, -50, 10, -48);
-var generatedLeg = addLine(CsLayers.PROFILE_SHOTS, 0, -60, 10, -60);
+var tracedCeiling = addLine(CsLayers.PROFILE_CEILING, 0, -50, 10, -48);
+var generatedLeg = addLine(CsLayers.CTRL_PROFILE_SHOTS, 0, -60, 10, -60);
 di.applyOperation(addOp);
 
 var planId = planWall.getId();

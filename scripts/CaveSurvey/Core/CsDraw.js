@@ -171,7 +171,7 @@ CsDraw.planDataBox = function(doc) {
  * CTRL-STATION-LABELS. Returns the point entity (already added).
  */
 CsDraw.station = function(doc, op, pos, data) {
-    var pt = CsDraw.addPoint(doc, op, CsLayers.STATIONS, pos);
+    var pt = CsDraw.addPoint(doc, op, CsLayers.CTRL_STATIONS, pos);
     CsTags.tagStation(pt, data);
     op.addObject(pt, false);
 
@@ -183,7 +183,7 @@ CsDraw.station = function(doc, op, pos, data) {
         var rad = (data.azimuth === undefined || data.azimuth === null) ?
             (Math.PI / 4.0) : ((data.azimuth - 90.0) * Math.PI / 180.0);
         var off = CsDraw.TEXT_HEIGHT * 1.5;
-        CsDraw.addText(doc, op, CsLayers.STATION_LABELS, label,
+        CsDraw.addText(doc, op, CsLayers.CTRL_STATION_LABELS, label,
             new RVector(pos.x + off * Math.sin(rad), pos.y + off * Math.cos(rad)),
             RS.HAlignRight, "StationLabel", data.name);
     }
@@ -200,7 +200,7 @@ CsDraw.shotLine = function(doc, op, fromPos, toPos, fromName, toName,
         fromName !== "" && toName !== "") ? (fromName + "->" + toName) : "";
     return CsDraw.addLine(doc, op,
         (layerName === undefined || layerName === null) ?
-            CsLayers.SHOTS : layerName,
+            CsLayers.CTRL_SHOTS : layerName,
         fromPos, toPos, "Shot", tag, extraTags);
 };
 
@@ -240,11 +240,11 @@ CsDraw.lrud = function(doc, op, pos, name, azimuthDeg, left, right, up, down, al
             } else {
                 var end = CsLrud.tickEnd(pos, azimuthDeg, side, len);
                 tipPos = new RVector(end.x, end.y);
-                CsDraw.addLine(doc, op, CsLayers.LRUD, pos, tipPos,
+                CsDraw.addLine(doc, op, CsLayers.CTRL_LRUD, pos, tipPos,
                     "LRUDLine", name !== "" ? (name + "." + suffix) : "");
             }
             if (name !== undefined && name !== "") {
-                var tip = CsDraw.addPoint(doc, op, CsLayers.LRUD, tipPos);
+                var tip = CsDraw.addPoint(doc, op, CsLayers.CTRL_LRUD, tipPos);
                 CsTags.set(tip, "LRUDName", name + "." + suffix);
                 op.addObject(tip, false);
             }
@@ -265,7 +265,7 @@ CsDraw.lrud = function(doc, op, pos, name, azimuthDeg, left, right, up, down, al
         var text = "U" + upText + " D" + downText;
         var rad = (azimuthDeg + 90.0) * Math.PI / 180.0;
         var off = CsDraw.TEXT_HEIGHT * 1.5;
-        CsDraw.addText(doc, op, CsLayers.STATION_LABELS, text,
+        CsDraw.addText(doc, op, CsLayers.CTRL_STATION_LABELS, text,
             new RVector(pos.x + off * Math.sin(rad), pos.y + off * Math.cos(rad)),
             RS.HAlignLeft, "LRUDNote", name);
     }
@@ -653,7 +653,7 @@ CsDraw.survey = function(survey, resolved, originStation, originPos, seqBase) {
             continue;
         }
         CsDraw.shotLine(doc, op, at(leg.from), at(leg.to), leg.from, leg.to,
-            CsLayers.SHOTS, legTags(leg.shot));
+            CsLayers.CTRL_SHOTS, legTags(leg.shot));
         // The three leg kinds CsNetwork produces, counted apart because
         // they mean different things to a surveyor. "new" extends the
         // traverse. "closure" arrives back at a station already placed
@@ -709,16 +709,16 @@ CsDraw.survey = function(survey, resolved, originStation, originPos, seqBase) {
         var sEnd = new RVector(sPos.x + so.dx, sPos.y + so.dy);
         // the ray carries its readings too (v3): Trip/ShotSeq/Distance/
         // Azimuth/Inclination/Note, so the splay reconstructs from tags
-        CsDraw.addLine(doc, op, CsLayers.SPLAYS, sPos, sEnd,
+        CsDraw.addLine(doc, op, CsLayers.CTRL_SPLAYS, sPos, sEnd,
             "Splay", splayName, legTags(sp));
-        var sTip = CsDraw.addPoint(doc, op, CsLayers.SPLAYS, sEnd);
+        var sTip = CsDraw.addPoint(doc, op, CsLayers.CTRL_SPLAYS, sEnd);
         CsTags.set(sTip, "SplayName", splayName);
         op.addObject(sTip, false);
         // the tip's name, just past the tip so the ray stays clear
         var sLen = Math.sqrt(so.dx * so.dx + so.dy * so.dy);
         var ux = sLen > 1e-9 ? so.dx / sLen : 1.0;
         var uy = sLen > 1e-9 ? so.dy / sLen : 0.0;
-        CsDraw.addText(doc, op, CsLayers.SPLAYS, splayName,
+        CsDraw.addText(doc, op, CsLayers.CTRL_SPLAYS, splayName,
             new RVector(sEnd.x + ux * CsDraw.TEXT_HEIGHT * 0.8,
                 sEnd.y + uy * CsDraw.TEXT_HEIGHT * 0.8),
             ux >= 0 ? RS.HAlignLeft : RS.HAlignRight,
@@ -743,8 +743,8 @@ CsDraw.survey = function(survey, resolved, originStation, originPos, seqBase) {
     var runs = CsLrud.wallRuns(survey, resolved);
     var wallPointsSkipped = runs.skipped;
     if (runs.left.length > 0 || runs.right.length > 0) {
-        CsLayers.ensure(doc, di, CsLayers.LRUD_WALL_LEFT);
-        CsLayers.ensure(doc, di, CsLayers.LRUD_WALL_RIGHT);
+        CsLayers.ensure(doc, di, CsLayers.CTRL_LRUD_WALL_LEFT);
+        CsLayers.ensure(doc, di, CsLayers.CTRL_LRUD_WALL_RIGHT);
         var drawRuns = function(runList, layerName) {
             for (var ri = 0; ri < runList.length; ri++) {
                 var run = runList[ri];
@@ -782,8 +782,8 @@ CsDraw.survey = function(survey, resolved, originStation, originPos, seqBase) {
                 wallsDrawn++;
             }
         };
-        drawRuns(runs.left, CsLayers.LRUD_WALL_LEFT);
-        drawRuns(runs.right, CsLayers.LRUD_WALL_RIGHT);
+        drawRuns(runs.left, CsLayers.CTRL_LRUD_WALL_LEFT);
+        drawRuns(runs.right, CsLayers.CTRL_LRUD_WALL_RIGHT);
     }
 
     // Per-trip anchor tags: each trip's metadata rides on its first
@@ -887,13 +887,13 @@ CsDraw.survey = function(survey, resolved, originStation, originPos, seqBase) {
     // this one operation and back off after (see CsLayers.OFF).
     var hiddenDrawn = 0;
     if (hiddenLegs.length > 0) {
-        CsLayers.withLayerOn(doc, di, CsLayers.HIDDEN, function() {
+        CsLayers.withLayerOn(doc, di, CsLayers.CTRL_HIDDEN, function() {
             var hop = new RAddObjectsOperation();
             hop.setText("Draw hidden survey legs");
             for (var hi = 0; hi < hiddenLegs.length; hi++) {
                 var hLeg = hiddenLegs[hi];
                 CsDraw.shotLine(doc, hop, at(hLeg.from), at(hLeg.to),
-                    hLeg.from, hLeg.to, CsLayers.HIDDEN,
+                    hLeg.from, hLeg.to, CsLayers.CTRL_HIDDEN,
                     legTags(hLeg.shot));
                 hiddenDrawn++;
             }
@@ -942,13 +942,13 @@ CsDraw.survey = function(survey, resolved, originStation, originPos, seqBase) {
         // below sits inside withLayerOn -- this build's
         // RAddObjectsOperation drops adds to an off layer without a
         // word, so getting this wrong yields no geometry and no error.
-        CsLayers.ensure(doc, di, CsLayers.RAW);
+        CsLayers.ensure(doc, di, CsLayers.CTRL_RAW);
         var rawLegs = rawResolved.legs || [];
         var rawAt = function(stationName) {
             var rst = rawResolved.stations[stationName];
             return new RVector(rst.x + offX, rst.y + offY);
         };
-        CsLayers.withLayerOn(doc, di, CsLayers.RAW, function() {
+        CsLayers.withLayerOn(doc, di, CsLayers.CTRL_RAW, function() {
             var gop = new RAddObjectsOperation();
             gop.setText("Draw as-surveyed ghost");
             for (var gi = 0; gi < rawLegs.length; gi++) {
@@ -962,7 +962,7 @@ CsDraw.survey = function(survey, resolved, originStation, originPos, seqBase) {
                         !rawResolved.stations.hasOwnProperty(gLeg.to)) {
                     continue;
                 }
-                CsDraw.addLine(doc, gop, CsLayers.RAW,
+                CsDraw.addLine(doc, gop, CsLayers.CTRL_RAW,
                     rawAt(gLeg.from), rawAt(gLeg.to),
                     "RawShot", gLeg.from + "->" + gLeg.to);
                 ghostDrawn++;
@@ -972,7 +972,7 @@ CsDraw.survey = function(survey, resolved, originStation, originPos, seqBase) {
                     continue;
                 }
                 // same shape a splay tip takes: tag the point, THEN add
-                var gPt = CsDraw.addPoint(doc, gop, CsLayers.RAW,
+                var gPt = CsDraw.addPoint(doc, gop, CsLayers.CTRL_RAW,
                     rawAt(gName));
                 CsTags.set(gPt, "RawStation", gName);
                 gop.addObject(gPt, false);

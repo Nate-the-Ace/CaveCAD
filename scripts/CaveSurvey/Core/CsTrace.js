@@ -462,7 +462,7 @@ CsTrace.TIE_FEET = 1.0;
  */
 CsTrace.TIE_LAYERS = function() {
     return [CsLayers.WALLS_SURVEYED, CsLayers.WALLS_INFERRED,
-        CsLayers.PROFILE_TRACED_CEILING, CsLayers.PROFILE_TRACED_FLOOR,
+        CsLayers.PROFILE_CEILING, CsLayers.PROFILE_FLOOR,
         CsLayers.PROFILE_WALLS_INFERRED];
 };
 

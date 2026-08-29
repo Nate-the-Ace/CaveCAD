@@ -1395,7 +1395,7 @@ SurveyNotebook.drawMergedSurvey = function(w, doc, survey, recon) {
     // was gone.
     var geoBefore = CsLocationPick.anchorRecord(doc);
 
-    var replaced = CsLayers.withLayerOn(doc, di, CsLayers.HIDDEN,
+    var replaced = CsLayers.withLayerOn(doc, di, CsLayers.CTRL_HIDDEN,
         function() {
             return CsDraw.eraseStations(doc, eraseNames);
         });

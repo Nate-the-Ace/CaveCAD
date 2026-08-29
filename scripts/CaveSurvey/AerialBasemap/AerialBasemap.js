@@ -394,7 +394,7 @@ AerialBasemap.place = function(doc, di, path, bbox, size, unitsPerPixel,
     // entity (already built and known-good above) is ready to go in
     // immediately after.
     AerialBasemap.eraseExisting(doc, di);
-    CsLayers.ensure(doc, di, CsLayers.AERIAL);
+    CsLayers.ensure(doc, di, CsLayers.CTRL_AERIAL);
 
     // Layer, tag AND draw order BEFORE adding -- see the file header.
     // A modify operation on an already-added entity is what Geo
@@ -422,7 +422,7 @@ AerialBasemap.place = function(doc, di, path, bbox, size, unitsPerPixel,
     // own default puts new entities -- which verified live in this
     // engine is ABOVE everything already there, i.e. on top of the
     // survey it is supposed to sit under.
-    entity.setLayerId(doc.getLayerId(CsLayers.AERIAL));
+    entity.setLayerId(doc.getLayerId(CsLayers.CTRL_AERIAL));
     CsTags.set(entity, "AerialBasemap", "1");
     entity.setDrawOrder(doc.getStorage().getMinDrawOrder() - 1);
 

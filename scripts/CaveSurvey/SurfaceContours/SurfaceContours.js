@@ -341,7 +341,7 @@ SurfaceContours.draw = function(doc, di, grid, levels, interval, bbox,
         var levelU = levels[li];
         var levelM = CsUnits.convert(levelU, unit, CsUnits.METERS);
         var isMajor = Math.round(levelU / interval) % 5 === 0;
-        var layer = isMajor ? CsLayers.CONTOUR_MAJOR : CsLayers.CONTOUR;
+        var layer = isMajor ? CsLayers.CTRL_CONTOUR_MAJOR : CsLayers.CTRL_CONTOUR;
         var runs = CsContour.lines(grid.values, grid.width, grid.height,
             levelM);
         for (var ri = 0; ri < runs.length; ri++) {
@@ -388,8 +388,8 @@ SurfaceContours.draw = function(doc, di, grid, levels, interval, bbox,
     // present, is pushed one step further down so the stack stays
     // photo < contours < survey.
     SurfaceContours.eraseExisting(doc, di);
-    CsLayers.ensure(doc, di, CsLayers.CONTOUR);
-    CsLayers.ensure(doc, di, CsLayers.CONTOUR_MAJOR);
+    CsLayers.ensure(doc, di, CsLayers.CTRL_CONTOUR);
+    CsLayers.ensure(doc, di, CsLayers.CTRL_CONTOUR_MAJOR);
 
     var floor = doc.getStorage().getMinDrawOrder() - 1;
     var basemaps = (typeof AerialBasemap !== "undefined" &&

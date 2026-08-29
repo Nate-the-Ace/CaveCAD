@@ -232,9 +232,9 @@ CsSectionDraw.define = function(doc, di, sectionId, cut, opts) {
     // and the caption's measured-point counts carry the same
     // information without the clutter, and the layer stays registered
     // for the day a splay overlay is wanted deliberately.
-    CsLayers.ensure(doc, di, CsLayers.SECTION_OUTLINE);
-    CsLayers.ensure(doc, di, CsLayers.SECTION_STATIONS);
-    CsLayers.ensure(doc, di, CsLayers.SECTION_CTRL_TEXT_LABELS);
+    CsLayers.ensure(doc, di, CsLayers.CTRL_SECTION_OUTLINE);
+    CsLayers.ensure(doc, di, CsLayers.CTRL_SECTION_STATIONS);
+    CsLayers.ensure(doc, di, CsLayers.CTRL_SECTION_TEXT_LABELS);
 
     var op = new RAddObjectsOperation();
     op.setText("Draw cross section");
@@ -260,7 +260,7 @@ CsSectionDraw.define = function(doc, di, sectionId, cut, opts) {
         pl.setClosed(true);
         CsSectionDraw.addToBlock(doc, op, blockId,
             new RPolylineEntity(doc, new RPolylineData(pl)),
-            CsLayers.SECTION_OUTLINE, sectionId);
+            CsLayers.CTRL_SECTION_OUTLINE, sectionId);
     }
 
     // The centreline mark: a small cross at the cut point itself.
@@ -268,11 +268,11 @@ CsSectionDraw.define = function(doc, di, sectionId, cut, opts) {
     CsSectionDraw.addToBlock(doc, op, blockId,
         new RLineEntity(doc, new RLineData(new RVector(-tick, 0),
             new RVector(tick, 0))),
-        CsLayers.SECTION_STATIONS, sectionId);
+        CsLayers.CTRL_SECTION_STATIONS, sectionId);
     CsSectionDraw.addToBlock(doc, op, blockId,
         new RLineEntity(doc, new RLineData(new RVector(0, -tick),
             new RVector(0, tick))),
-        CsLayers.SECTION_STATIONS, sectionId);
+        CsLayers.CTRL_SECTION_STATIONS, sectionId);
 
     // The caption, under the section.
     var lowest = 0;
@@ -293,7 +293,7 @@ CsSectionDraw.define = function(doc, di, sectionId, cut, opts) {
         1.0, caption, "standard", false, false, 0.0, false);
     CsSectionDraw.addToBlock(doc, op, blockId,
         new RTextEntity(doc, td),
-        CsLayers.SECTION_CTRL_TEXT_LABELS, sectionId);
+        CsLayers.CTRL_SECTION_TEXT_LABELS, sectionId);
 
     di.applyOperation(op);
     return blockId;

@@ -42,8 +42,8 @@ FeatureTrace.CURRENT_LAYER = "\u0000CURRENT-LAYER";
 /**
  * The ten traceable features, plan frame first.
  *
- * Layer CONSTANTS, never literals. CsLayers.PROFILE_FLOOR is the
- * GENERATED CTRL-PROFILE-FLOOR and CsLayers.PROFILE_TRACED_FLOOR is the
+ * Layer CONSTANTS, never literals. CsLayers.CTRL_PROFILE_FLOOR is the
+ * GENERATED CTRL-PROFILE-FLOOR and CsLayers.PROFILE_FLOOR is the
  * hand-traced PROFILE-FLOOR: one word apart, opposite meanings, and
  * tracing onto the generated one would look fine until the next redraw
  * erased the work. A test asserts every row here is a linework layer,
@@ -62,8 +62,8 @@ FeatureTrace.ROWS = [
     { label: "Breakdown", layer: CsLayers.BREAKDOWN },
     { label: "Breakdown Boundary", layer: CsLayers.BREAKDOWN_BOUNDARY },
     { label: "Entrance", layer: CsLayers.ENTRANCE },
-    { label: "Ceiling", layer: CsLayers.PROFILE_TRACED_CEILING },
-    { label: "Floor", layer: CsLayers.PROFILE_TRACED_FLOOR },
+    { label: "Ceiling", layer: CsLayers.PROFILE_CEILING },
+    { label: "Floor", layer: CsLayers.PROFILE_FLOOR },
     { label: "Inferred Walls", layer: CsLayers.PROFILE_WALLS_INFERRED },
     { label: "Breakdown", layer: CsLayers.PROFILE_BREAKDOWN },
     { label: "Entrance", layer: CsLayers.PROFILE_ENTRANCE },

@@ -52,8 +52,8 @@ CsShapeLine.PROFILE_TWIN[CsLayers.LEDGE_CEILING] =
 CsShapeLine.PROFILE_TWIN[CsLayers.FLOWSTONE] = CsLayers.PROFILE_FLOWSTONE;
 CsShapeLine.PROFILE_TWIN[CsLayers.RIMSTONE] = CsLayers.PROFILE_RIMSTONE;
 CsShapeLine.PROFILE_TWIN[CsLayers.SLOPE] = CsLayers.PROFILE_SLOPE;
-CsShapeLine.PROFILE_TWIN[CsLayers.SHAPE_SPINE] =
-    CsLayers.PROFILE_SHAPE_SPINE;
+CsShapeLine.PROFILE_TWIN[CsLayers.CTRL_SHAPE_SPINE] =
+    CsLayers.CTRL_PROFILE_SHAPE_SPINE;
 
 /** A style's spine/decor layers for a frame: the STYLES entry's own
  *  layers in the plan, their PROFILE_TWIN in the elevation. */
@@ -121,20 +121,20 @@ CsShapeLine.STYLES = {
     "flowstone": {
         label: "Flowstone",
         kind: "scallops", spacingFeet: 3.0, bulge: 0.5,
-        spineLayer: CsLayers.SHAPE_SPINE, decorLayer: CsLayers.FLOWSTONE,
+        spineLayer: CsLayers.CTRL_SHAPE_SPINE, decorLayer: CsLayers.FLOWSTONE,
         close: false
     },
     "rimstone": {
         label: "Rimstone Dam",
         kind: "scallops", spacingFeet: 2.0, bulge: 0.62,
-        spineLayer: CsLayers.SHAPE_SPINE, decorLayer: CsLayers.RIMSTONE,
+        spineLayer: CsLayers.CTRL_SHAPE_SPINE, decorLayer: CsLayers.RIMSTONE,
         close: false
     },
     "slope": {
         label: "Slope",
         kind: "fans", spacingFeet: 6.0, sizeFeet: 3.0,
         splayDeg: 22,
-        spineLayer: CsLayers.SHAPE_SPINE, decorLayer: CsLayers.SLOPE,
+        spineLayer: CsLayers.CTRL_SHAPE_SPINE, decorLayer: CsLayers.SLOPE,
         close: false
     }
 };

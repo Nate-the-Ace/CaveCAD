@@ -302,11 +302,11 @@ for (var a1j = 0; a1j < a1Entities.length; a1j++) {
 ok(a1Point !== null && a1Label !== null,
     "sanity: A1's point and label were told apart");
 if (a1Point !== null) {
-    eqs(a1Point.layer, CsLayers.PROFILE_STATIONS,
+    eqs(a1Point.layer, CsLayers.CTRL_PROFILE_STATIONS,
         "the station POINT lands on CTRL-PROFILE-STATIONS");
 }
 if (a1Label !== null) {
-    eqs(a1Label.layer, CsLayers.PROFILE_STATION_LABELS,
+    eqs(a1Label.layer, CsLayers.CTRL_PROFILE_STATION_LABELS,
         "the station LABEL lands on CTRL-PROFILE-STATION-LABELS, a " +
         "different layer from its own point");
 }
@@ -328,7 +328,7 @@ for (var a1k = 0; a1k < scanned1.length; a1k++) {
 }
 ok(a1a2Leg !== null, "sanity: found the A1->A2 leg");
 if (a1a2Leg !== null) {
-    eqs(a1a2Leg.layer, CsLayers.PROFILE_SHOTS,
+    eqs(a1a2Leg.layer, CsLayers.CTRL_PROFILE_SHOTS,
         "a centerline leg lands on CTRL-PROFILE-SHOTS");
 }
 ok(bandALabel !== null, "sanity: found band A's caption");
@@ -338,7 +338,7 @@ if (bandALabel !== null) {
     // namespace, and made captions bindable linework as far as CsBind
     // was concerned -- and per-run variants turned that into a whole
     // family of generator-owned traced layers.
-    eqs(bandALabel.layer, CsLayers.PROFILE_BAND_LABELS,
+    eqs(bandALabel.layer, CsLayers.CTRL_PROFILE_TEXT_LABELS,
         "a band caption lands on CTRL-PROFILE-TEXT-LABELS");
     ok(bandALabel.layer !== CsLayers.PROFILE_TEXT_LABELS,
         "a band caption stays OUT of the caver's text layer");
@@ -367,7 +367,7 @@ if (bandALabel !== null) {
 
 eqs(second.boxesDrawn, 2, "a box was drawn for each band");
 
-var boxLayer = doc.queryLayer(CsLayers.PROFILE_BOX);
+var boxLayer = doc.queryLayer(CsLayers.CTRL_PROFILE_BOX);
 ok(!isNull(boxLayer), "the box layer exists");
 ok(boxLayer.isLocked() === true,
     "THE BOX LAYER IS LOCKED -- boxes are readable, never editable");
@@ -385,7 +385,7 @@ for (var bxi = 0; bxi < scannedBx.length; bxi++) {
 eqs(boxRects.length, 2, "two box rectangles in the drawing");
 eqs(boxLabels.length, 2, "two box name labels in the drawing");
 for (var bxj = 0; bxj < boxRects.length; bxj++) {
-    eqs(boxRects[bxj].layer, CsLayers.PROFILE_BOX,
+    eqs(boxRects[bxj].layer, CsLayers.CTRL_PROFILE_BOX,
         "box rectangle lands on CTRL-PROFILE-BOX");
     ok(boxRects[bxj].tags.ProfileRun !== undefined,
         "box rectangle carries ProfileRun");
@@ -441,7 +441,7 @@ for (var bxl = 0; bxl < boxLabels.length; bxl++) {
 }
 ok(labelA !== null, "band A's box has a name label");
 if (labelA !== null && rectA !== null) {
-    eqs(labelA.layer, CsLayers.PROFILE_BOX,
+    eqs(labelA.layer, CsLayers.CTRL_PROFILE_BOX,
         "the box name label lands on CTRL-PROFILE-BOX");
     var lp = labelA.entity.getPosition();
     near(lp.x, rectA.minX + CsDraw.TEXT_HEIGHT, 1e-6,
@@ -530,7 +530,7 @@ eqs(missingRunC, 0,
 
 // property 2 (Task 6's whole payload): the ceiling/floor/flat layer
 // split is otherwise unasserted anywhere in this file -- drawing every
-// ceiling run onto CsLayers.PROFILE_FLOOR instead would leave every
+// ceiling run onto CsLayers.CTRL_PROFILE_FLOOR instead would leave every
 // count and tag assertion above green.
 var ceilingEnt = null, floorEnt = null, flatEnt = null;
 for (var lci = 0; lci < scannedC1.length; lci++) {
@@ -541,16 +541,16 @@ for (var lci = 0; lci < scannedC1.length; lci++) {
 ok(ceilingEnt !== null && floorEnt !== null && flatEnt !== null,
     "sanity: found the ceiling run, floor run, and flat tick");
 if (ceilingEnt !== null) {
-    eqs(ceilingEnt.layer, CsLayers.PROFILE_CEILING,
+    eqs(ceilingEnt.layer, CsLayers.CTRL_PROFILE_CEILING,
         "the ceiling run lands on CTRL-PROFILE-CEILING");
 }
 if (floorEnt !== null) {
-    eqs(floorEnt.layer, CsLayers.PROFILE_FLOOR,
+    eqs(floorEnt.layer, CsLayers.CTRL_PROFILE_FLOOR,
         "the floor run lands on CTRL-PROFILE-FLOOR, not the ceiling's " +
         "layer -- the whole point of Task 6's layer split");
 }
 if (flatEnt !== null) {
-    eqs(flatEnt.layer, CsLayers.PROFILE_SPLAYS,
+    eqs(flatEnt.layer, CsLayers.CTRL_PROFILE_SPLAYS,
         "the flat splay tick lands on CTRL-PROFILE-SPLAYS");
     // minor: the tick's own length. half = CsDraw.TEXT_HEIGHT, drawn
     // from (f.x, f.y-half) to (f.x, f.y+half), so its length is
@@ -579,13 +579,13 @@ ok(oldCeilingId !== null, "sanity: found the ceiling run's id");
 // low-level toggle CsLayers.withLayerOn itself uses, applied directly
 // here so this test does not depend on the function under test to set
 // up its own precondition.
-var ceilingLayer = docC.queryLayer(CsLayers.PROFILE_CEILING);
+var ceilingLayer = docC.queryLayer(CsLayers.CTRL_PROFILE_CEILING);
 ok(!isNull(ceilingLayer), "sanity: CTRL-PROFILE-CEILING exists");
 ceilingLayer.setOff(true);
 var offOp = new RModifyObjectsOperation();
 offOp.addObject(ceilingLayer, false);
 diC.applyOperation(offOp);
-ok(docC.queryLayer(CsLayers.PROFILE_CEILING).isOff(),
+ok(docC.queryLayer(CsLayers.CTRL_PROFILE_CEILING).isOff(),
     "sanity: CTRL-PROFILE-CEILING is now off");
 
 CsProfileDraw.render(docC, diC, profileC, {});
@@ -609,7 +609,7 @@ eqs(countByTag(scannedC2, "ProfileFloorRun", "C.1"), 1,
 eqs(countByTag(scannedC2, "ProfileSplay", "C2.1"), 1,
     "the flat splay tick is singular too, not doubled by the redraw");
 
-ok(docC.queryLayer(CsLayers.PROFILE_CEILING).isOff(),
+ok(docC.queryLayer(CsLayers.CTRL_PROFILE_CEILING).isOff(),
     "CsLayers.withLayerOn restored the user's own off choice afterward " +
     "-- the redraw did not leave their layer visible");
 
@@ -642,7 +642,7 @@ if (promoted !== null) {
     // back on first, the ordinary way a person would before touching
     // anything on it, so this is a layer CHANGE, not another off-layer
     // scenario layered on top of the one already covered.
-    CsLayers.withLayerOn(docC, diC, CsLayers.PROFILE_CEILING, function() {
+    CsLayers.withLayerOn(docC, diC, CsLayers.CTRL_PROFILE_CEILING, function() {
         var promoteOp = new RModifyObjectsOperation();
         promotedEnt.setLayerId(docC.getLayerId("PROFILE-CEILING"));
         promoteOp.addObject(promotedEnt, false);
@@ -677,7 +677,7 @@ if (promoted !== null) {
     var freshOnOwnLayer = 0;
     for (var pcj = 0; pcj < scannedC3.length; pcj++) {
         if (scannedC3[pcj].tags.ProfileCeilingRun === "C.1" &&
-                scannedC3[pcj].layer === CsLayers.PROFILE_CEILING) {
+                scannedC3[pcj].layer === CsLayers.CTRL_PROFILE_CEILING) {
             freshOnOwnLayer++;
         }
     }
@@ -2128,7 +2128,7 @@ var ABANDONED_TRACING_WARNING =
 (function() {
     var d12a = new RDocument(new RMemoryStorage(), createSpatialIndex());
     var i12a = new RDocumentInterface(d12a);
-    CsLayers.ensure(d12a, i12a, CsLayers.PROFILE_TRACED_CEILING);
+    CsLayers.ensure(d12a, i12a, CsLayers.PROFILE_CEILING);
 
     var oldPos = {
         P1: { x: 0, y: 0 }, P3: { x: 20, y: 0 }, P5: { x: 40, y: 0 }
@@ -2141,7 +2141,7 @@ var ABANDONED_TRACING_WARNING =
     var oldCenter = new RVector(100, 50), oldRadius = 8;
     var circ = new RCircleEntity(d12a,
         new RCircleData(oldCenter, oldRadius));
-    circ.setLayerId(d12a.getLayerId(CsLayers.PROFILE_TRACED_CEILING));
+    circ.setLayerId(d12a.getLayerId(CsLayers.PROFILE_CEILING));
     CsTags.set(circ, CsBind.STATIONS_TAG,
         CsBind.encodeStations(["P1", "P3", "P5"]));
     op.addObject(circ, false);
@@ -2194,7 +2194,7 @@ var ABANDONED_TRACING_WARNING =
 (function() {
     var d12b = new RDocument(new RMemoryStorage(), createSpatialIndex());
     var i12b = new RDocumentInterface(d12b);
-    CsLayers.ensure(d12b, i12b, CsLayers.PROFILE_TRACED_CEILING);
+    CsLayers.ensure(d12b, i12b, CsLayers.PROFILE_CEILING);
 
     // Q1 and Q2 start 100 units apart (s2 is nowhere near
     // CsWarp.EPS-scale zero -- the OLD guard's own degeneracy test
@@ -2209,7 +2209,7 @@ var ABANDONED_TRACING_WARNING =
     var oldCenter = new RVector(100, 50), oldRadius = 8;
     var circ = new RCircleEntity(d12b,
         new RCircleData(oldCenter, oldRadius));
-    circ.setLayerId(d12b.getLayerId(CsLayers.PROFILE_TRACED_CEILING));
+    circ.setLayerId(d12b.getLayerId(CsLayers.PROFILE_CEILING));
     CsTags.set(circ, CsBind.STATIONS_TAG,
         CsBind.encodeStations(["Q1", "Q2"]));
     op.addObject(circ, false);
@@ -2265,7 +2265,7 @@ var ABANDONED_TRACING_WARNING =
 (function() {
     var d13 = new RDocument(new RMemoryStorage(), createSpatialIndex());
     var i13 = new RDocumentInterface(d13);
-    CsLayers.ensure(d13, i13, CsLayers.PROFILE_TRACED_CEILING);
+    CsLayers.ensure(d13, i13, CsLayers.PROFILE_CEILING);
 
     // same incoherent station shape as fixture 9: P1 stays exactly
     // where it is, P3 and P5 share one common nonzero shift -- no
@@ -2290,7 +2290,7 @@ var ABANDONED_TRACING_WARNING =
 
     var op = new RAddObjectsOperation();
     var spl = new RSplineEntity(d13, sd);
-    spl.setLayerId(d13.getLayerId(CsLayers.PROFILE_TRACED_CEILING));
+    spl.setLayerId(d13.getLayerId(CsLayers.PROFILE_CEILING));
     CsTags.set(spl, CsBind.STATIONS_TAG,
         CsBind.encodeStations(["P1", "P3", "P5"]));
     op.addObject(spl, false);
@@ -2348,7 +2348,7 @@ var ABANDONED_TRACING_WARNING =
 (function() {
     var d14 = new RDocument(new RMemoryStorage(), createSpatialIndex());
     var i14 = new RDocumentInterface(d14);
-    CsLayers.ensure(d14, i14, CsLayers.PROFILE_TRACED_CEILING);
+    CsLayers.ensure(d14, i14, CsLayers.PROFILE_CEILING);
 
     // same incoherent shape as fixture 13, so this move genuinely
     // warps (lands in counts.warped) rather than moving as one rigid
@@ -2368,7 +2368,7 @@ var ABANDONED_TRACING_WARNING =
 
     var op = new RAddObjectsOperation();
     var poly = new RPolylineEntity(d14, pd);
-    poly.setLayerId(d14.getLayerId(CsLayers.PROFILE_TRACED_CEILING));
+    poly.setLayerId(d14.getLayerId(CsLayers.PROFILE_CEILING));
     CsTags.set(poly, CsBind.STATIONS_TAG,
         CsBind.encodeStations(["P1", "P3", "P5"]));
     op.addObject(poly, false);
@@ -2426,7 +2426,7 @@ var ABANDONED_TRACING_WARNING =
 (function() {
     var d15 = new RDocument(new RMemoryStorage(), createSpatialIndex());
     var i15 = new RDocumentInterface(d15);
-    CsLayers.ensure(d15, i15, CsLayers.PROFILE_TRACED_CEILING);
+    CsLayers.ensure(d15, i15, CsLayers.PROFILE_CEILING);
 
     var oldPos = {
         P1: { x: 0, y: 0 }, P3: { x: 20, y: 0 }, P5: { x: 40, y: 0 }
@@ -2442,7 +2442,7 @@ var ABANDONED_TRACING_WARNING =
 
     var op = new RAddObjectsOperation();
     var spl = new RSplineEntity(d15, fp);
-    spl.setLayerId(d15.getLayerId(CsLayers.PROFILE_TRACED_CEILING));
+    spl.setLayerId(d15.getLayerId(CsLayers.PROFILE_CEILING));
     CsTags.set(spl, CsBind.STATIONS_TAG,
         CsBind.encodeStations(["P1", "P3", "P5"]));
     op.addObject(spl, false);
@@ -2546,7 +2546,7 @@ var ABANDONED_TRACING_WARNING =
 (function() {
     var d16 = new RDocument(new RMemoryStorage(), createSpatialIndex());
     var i16 = new RDocumentInterface(d16);
-    CsLayers.ensure(d16, i16, CsLayers.PROFILE_TRACED_CEILING);
+    CsLayers.ensure(d16, i16, CsLayers.PROFILE_CEILING);
 
     // same incoherent station shape as fixtures 12-15: P1 stays exactly
     // where it is, P3 and P5 share one common nonzero shift -- no
@@ -2568,7 +2568,7 @@ var ABANDONED_TRACING_WARNING =
     pd16.appendVertex(new RVector(30, -5));
     pd16.appendVertex(new RVector(60, 20));
     var poly16 = new RPolylineEntity(d16, pd16);
-    poly16.setLayerId(d16.getLayerId(CsLayers.PROFILE_TRACED_CEILING));
+    poly16.setLayerId(d16.getLayerId(CsLayers.PROFILE_CEILING));
     CsTags.set(poly16, CsBind.STATIONS_TAG,
         CsBind.encodeStations(["P1", "P3", "P5"]));
     op.addObject(poly16, false);
@@ -2582,7 +2582,7 @@ var ABANDONED_TRACING_WARNING =
     var oldCenter16 = new RVector(100, 50), oldRadius16 = 8;
     var circ16 = new RCircleEntity(d16,
         new RCircleData(oldCenter16, oldRadius16));
-    circ16.setLayerId(d16.getLayerId(CsLayers.PROFILE_TRACED_CEILING));
+    circ16.setLayerId(d16.getLayerId(CsLayers.PROFILE_CEILING));
     CsTags.set(circ16, CsBind.STATIONS_TAG,
         CsBind.encodeStations(["P1", "P3", "P5"]));
     op.addObject(circ16, false);
@@ -2598,7 +2598,7 @@ var ABANDONED_TRACING_WARNING =
         RS.VAlignMiddle, RS.HAlignLeft, RS.LeftToRight, RS.Exact,
         1.0, "trace note", "standard", false, false, 0.0, false);
     var text16 = new RTextEntity(d16, td16);
-    text16.setLayerId(d16.getLayerId(CsLayers.PROFILE_TRACED_CEILING));
+    text16.setLayerId(d16.getLayerId(CsLayers.PROFILE_CEILING));
     CsTags.set(text16, CsBind.STATIONS_TAG,
         CsBind.encodeStations(["P1", "P3", "P5"]));
     op.addObject(text16, false);
@@ -2709,7 +2709,7 @@ var ABANDONED_TRACING_WARNING =
 (function() {
     var d17 = new RDocument(new RMemoryStorage(), createSpatialIndex());
     var i17 = new RDocumentInterface(d17);
-    CsLayers.ensure(d17, i17, CsLayers.PROFILE_TRACED_CEILING);
+    CsLayers.ensure(d17, i17, CsLayers.PROFILE_CEILING);
 
     // 30 degrees about the drawing origin, no translation, no scale.
     var THETA = Math.PI / 6;
@@ -2738,7 +2738,7 @@ var ABANDONED_TRACING_WARNING =
     var oldCenter17 = new RVector(10, 10), oldRadius17 = 5;
     var arc17 = new RArcEntity(d17, new RArcData(
         oldCenter17, oldRadius17, 0.0, Math.PI / 2, false));
-    arc17.setLayerId(d17.getLayerId(CsLayers.PROFILE_TRACED_CEILING));
+    arc17.setLayerId(d17.getLayerId(CsLayers.PROFILE_CEILING));
     CsTags.set(arc17, CsBind.STATIONS_TAG,
         CsBind.encodeStations(["P1", "P3", "P5"]));
     op.addObject(arc17, false);
@@ -2834,7 +2834,7 @@ var ABANDONED_TRACING_WARNING =
 (function() {
     var d17b = new RDocument(new RMemoryStorage(), createSpatialIndex());
     var i17b = new RDocumentInterface(d17b);
-    CsLayers.ensure(d17b, i17b, CsLayers.PROFILE_TRACED_CEILING);
+    CsLayers.ensure(d17b, i17b, CsLayers.PROFILE_CEILING);
 
     // back to the incoherent P1/P3/P5 shape fixtures 12-16 share: a
     // line only takes the WARP path when its two ends see genuinely
@@ -2851,7 +2851,7 @@ var ABANDONED_TRACING_WARNING =
     var oldStart17b = new RVector(0, 5), oldEnd17b = new RVector(60, 20);
     var line17b = new RLineEntity(d17b,
         new RLineData(oldStart17b, oldEnd17b));
-    line17b.setLayerId(d17b.getLayerId(CsLayers.PROFILE_TRACED_CEILING));
+    line17b.setLayerId(d17b.getLayerId(CsLayers.PROFILE_CEILING));
     CsTags.set(line17b, CsBind.STATIONS_TAG,
         CsBind.encodeStations(["P1", "P3", "P5"]));
     op.addObject(line17b, false);
@@ -2924,21 +2924,21 @@ var ABANDONED_TRACING_WARNING =
     var iF = new RDocumentInterface(dF);
     var op = new RAddObjectsOperation();
 
-    CsLayers.ensure(dF, iF, CsLayers.STATIONS);
-    CsLayers.ensure(dF, iF, CsLayers.PROFILE_STATIONS);
+    CsLayers.ensure(dF, iF, CsLayers.CTRL_STATIONS);
+    CsLayers.ensure(dF, iF, CsLayers.CTRL_PROFILE_STATIONS);
     CsLayers.ensure(dF, iF, CsLayers.WALLS_SURVEYED);
-    CsLayers.ensure(dF, iF, CsLayers.PROFILE_TRACED_CEILING);
+    CsLayers.ensure(dF, iF, CsLayers.PROFILE_CEILING);
 
-    var planPt = CsDraw.addPoint(dF, op, CsLayers.STATIONS,
+    var planPt = CsDraw.addPoint(dF, op, CsLayers.CTRL_STATIONS,
         new RVector(100, 100));
     CsTags.set(planPt, "Station", "P1");
     op.addObject(planPt, false);
-    var planPt2 = CsDraw.addPoint(dF, op, CsLayers.STATIONS,
+    var planPt2 = CsDraw.addPoint(dF, op, CsLayers.CTRL_STATIONS,
         new RVector(112, 106));
     CsTags.set(planPt2, "Station", "P2");
     op.addObject(planPt2, false);
 
-    var profPt = CsDraw.addPoint(dF, op, CsLayers.PROFILE_STATIONS,
+    var profPt = CsDraw.addPoint(dF, op, CsLayers.CTRL_PROFILE_STATIONS,
         new RVector(103, 100));
     CsTags.set(profPt, "ProfileStation", "Q1");
     CsTags.set(profPt, "ProfileRun", "Q");
@@ -2950,7 +2950,7 @@ var ABANDONED_TRACING_WARNING =
     // copy keeps every tag it had. Its coordinates mean along-passage
     // distance now, so the plan index must not contain it -- the tag
     // says plan, the layer says profile, and the LAYER is what decides.
-    var strayPt = CsDraw.addPoint(dF, op, CsLayers.PROFILE_STATIONS,
+    var strayPt = CsDraw.addPoint(dF, op, CsLayers.CTRL_PROFILE_STATIONS,
         new RVector(104, 101));
     CsTags.set(strayPt, "Station", "P9");
     op.addObject(strayPt, false);
@@ -2963,7 +2963,7 @@ var ABANDONED_TRACING_WARNING =
 
     var profLine = new RLineEntity(dF, new RLineData(
         new RVector(99, 99.5), new RVector(110, 104.5)));
-    profLine.setLayerId(dF.getLayerId(CsLayers.PROFILE_TRACED_CEILING));
+    profLine.setLayerId(dF.getLayerId(CsLayers.PROFILE_CEILING));
     op.addObject(profLine, false);
     iF.applyOperation(op);
 
@@ -3089,23 +3089,23 @@ function countProfileFrameEntities(doc) {
  */
 function drawPlanSurvey(doc, di, resolved, names) {
     var op = new RAddObjectsOperation();
-    CsLayers.ensure(doc, di, CsLayers.STATIONS);
-    CsLayers.ensure(doc, di, CsLayers.STATION_LABELS);
-    CsLayers.ensure(doc, di, CsLayers.SHOTS);
+    CsLayers.ensure(doc, di, CsLayers.CTRL_STATIONS);
+    CsLayers.ensure(doc, di, CsLayers.CTRL_STATION_LABELS);
+    CsLayers.ensure(doc, di, CsLayers.CTRL_SHOTS);
     var i, st, pt, label, prev = null;
     for (i = 0; i < names.length; i++) {
         st = resolved.stations[names[i]];
-        pt = CsDraw.addPoint(doc, op, CsLayers.STATIONS,
+        pt = CsDraw.addPoint(doc, op, CsLayers.CTRL_STATIONS,
             new RVector(st.x, st.y));
         CsTags.set(pt, "Station", names[i]);
         CsTags.set(pt, "Seq", i);
         op.addObject(pt, false);
-        label = CsDraw.addText(doc, op, CsLayers.STATION_LABELS, names[i],
+        label = CsDraw.addText(doc, op, CsLayers.CTRL_STATION_LABELS, names[i],
             new RVector(st.x + 1, st.y + 1));
         CsTags.set(label, "StationLabel", names[i]);
         op.addObject(label, false);
         if (prev !== null) {
-            CsDraw.addLine(doc, op, CsLayers.SHOTS,
+            CsDraw.addLine(doc, op, CsLayers.CTRL_SHOTS,
                 new RVector(prev.x, prev.y), new RVector(st.x, st.y),
                 "Shot", names[i - 1] + "->" + names[i]);
         }
@@ -3235,12 +3235,12 @@ function drawPlanSurvey(doc, di, resolved, names) {
         + "drawing evidence that the two views read as one crowded block");
 
     // a sketch traced on the elevation, in the region's own coordinates
-    CsLayers.ensure(dO, iO, CsLayers.PROFILE_TRACED_CEILING);
+    CsLayers.ensure(dO, iO, CsLayers.PROFILE_CEILING);
     var opO = new RAddObjectsOperation();
     var sketch = new RLineEntity(dO, new RLineData(
         new RVector(originBefore.x + 5, originBefore.y + 3),
         new RVector(originBefore.x + 15, originBefore.y + 4)));
-    sketch.setLayerId(dO.getLayerId(CsLayers.PROFILE_TRACED_CEILING));
+    sketch.setLayerId(dO.getLayerId(CsLayers.PROFILE_CEILING));
     opO.addObject(sketch, false);
     iO.applyOperation(opO);
     var sketchId = sketch.getId();
@@ -3257,7 +3257,7 @@ function drawPlanSurvey(doc, di, resolved, names) {
     var farSketch = new RLineEntity(dO, new RLineData(
         new RVector(originBefore.x + 900, originBefore.y + 700),
         new RVector(originBefore.x + 910, originBefore.y + 701)));
-    farSketch.setLayerId(dO.getLayerId(CsLayers.PROFILE_TRACED_CEILING));
+    farSketch.setLayerId(dO.getLayerId(CsLayers.PROFILE_CEILING));
     opFar.addObject(farSketch, false);
     iO.applyOperation(opFar);
     var farId = farSketch.getId();
@@ -3270,14 +3270,14 @@ function drawPlanSurvey(doc, di, resolved, names) {
     // with no error at all, so a translation that runs outside
     // CsRevise.withOffLayersOn leaves every hidden sketch behind while
     // moving everything visible.
-    var tracingLayer = dO.queryLayer(CsLayers.PROFILE_TRACED_CEILING);
+    var tracingLayer = dO.queryLayer(CsLayers.PROFILE_CEILING);
     ok(!isNull(tracingLayer), "sanity: the tracing layer exists to hide");
     if (!isNull(tracingLayer)) {
         tracingLayer.setOff(true);
         var opOff = new RModifyObjectsOperation();
         opOff.addObject(tracingLayer, false);
         iO.applyOperation(opOff);
-        ok(dO.queryLayer(CsLayers.PROFILE_TRACED_CEILING).isOff(),
+        ok(dO.queryLayer(CsLayers.PROFILE_CEILING).isOff(),
             "sanity: the tracing layer really is off for the redraw");
     }
 
@@ -3401,7 +3401,7 @@ function drawAtExaggeration(exag) {
             "VERTICAL EXAGGERATION 2X -- NOT TO SHEET SCALE",
             "the stamp reads exactly this, a whole factor as 2x");
         eqs(two.doc.getLayerName(stamps2[0].getLayerId()),
-            CsLayers.PROFILE_BAND_LABELS,
+            CsLayers.CTRL_PROFILE_TEXT_LABELS,
             "the stamp lands on CTRL-PROFILE-TEXT-LABELS");
         eqs(String(CsProfileBind.isProfileGeometry(stamps2[0])), "true",
             "and it is generator-owned, so the next redraw erases it " +

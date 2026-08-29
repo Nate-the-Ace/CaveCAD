@@ -415,7 +415,7 @@ SketchScans.buildDock = function(appWin) {
             SketchScans.alignSoon(placed);
         } else {
             EAction.handleUserMessage(rel + " inserted on " +
-                CsLayers.SCAN + ". Align Image fits it to the survey.");
+                CsLayers.CTRL_SCAN + ". Align Image fits it to the survey.");
         }
     };
 
@@ -752,10 +752,10 @@ SketchScans.insert = function(doc, di, path, name) {
         return null;
     }
 
-    CsLayers.ensure(doc, di, CsLayers.SCAN);
+    CsLayers.ensure(doc, di, CsLayers.CTRL_SCAN);
     // Layer, tag and draw order BEFORE adding -- post-add writes fail
     // silently in this bridge (see CsDraw.js's header).
-    entity.setLayerId(doc.getLayerId(CsLayers.SCAN));
+    entity.setLayerId(doc.getLayerId(CsLayers.CTRL_SCAN));
     CsTags.set(entity, "SketchScan", name);
     // To the very back, under the survey linework -- the basemap's
     // call, one below getMinDrawOrder() because THIS entity is not in
@@ -786,7 +786,7 @@ SketchScans.insert = function(doc, di, path, name) {
         }
     }
     warning("Sketch Scans: the insert operation added nothing -- the " +
-        CsLayers.SCAN + " layer may be locked or frozen.");
+        CsLayers.CTRL_SCAN + " layer may be locked or frozen.");
     return null;
 };
 

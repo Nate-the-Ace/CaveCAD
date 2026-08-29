@@ -445,12 +445,12 @@ class TestLayerVocabulary(unittest.TestCase):
         with open(os.path.join(ADDON, "Core", "CsLayers.js")) as fh:
             source = fh.read()
         for constant, layer in [
-                ("SECTION_BOX", "CTRL-SECTION-BOX"),
-                ("SECTION_OUTLINE", "CTRL-SECTION-OUTLINE"),
-                ("SECTION_SPLAYS", "CTRL-SECTION-SPLAYS"),
-                ("SECTION_STATIONS", "CTRL-SECTION-STATIONS"),
-                ("SECTION_CTRL_TEXT_LABELS", "CTRL-SECTION-TEXT-LABELS"),
-                ("SECTION_SCAN", "CTRL-SECTION-SCAN"),
+                ("CTRL_SECTION_BOX", "CTRL-SECTION-BOX"),
+                ("CTRL_SECTION_OUTLINE", "CTRL-SECTION-OUTLINE"),
+                ("CTRL_SECTION_SPLAYS", "CTRL-SECTION-SPLAYS"),
+                ("CTRL_SECTION_STATIONS", "CTRL-SECTION-STATIONS"),
+                ("CTRL_SECTION_TEXT_LABELS", "CTRL-SECTION-TEXT-LABELS"),
+                ("CTRL_SECTION_SCAN", "CTRL-SECTION-SCAN"),
                 ("SECTION_WALLS_SURVEYED", "SECTION-WALLS-SURVEYED"),
                 ("SECTION_WALLS_INFERRED", "SECTION-WALLS-INFERRED"),
                 ("SECTION_CEILING", "SECTION-CEILING"),
@@ -458,6 +458,33 @@ class TestLayerVocabulary(unittest.TestCase):
                 ("SECTION_BREAKDOWN", "SECTION-BREAKDOWN")]:
             self.assertIn('CsLayers.%s = "%s";' % (constant, layer), source)
             self.assertIn('"%s": [' % layer, source)
+
+    def test_layer_constant_matches_its_layer_name(self):
+        """THE ONE NAMING RULE: a layer constant IS its layer name with
+        dashes turned into underscores. CsLayers.CTRL_PROFILE_FLOOR is
+        "CTRL-PROFILE-FLOOR"; CsLayers.PROFILE_FLOOR is "PROFILE-FLOOR".
+
+        This exists because three conventions had grown side by side --
+        30 generated layers whose constant did not say they were
+        generated, 18 that did, and 2 traced ones marked _TRACED_ that
+        70 others were not. Worse, the SAME constant shape meant
+        different KINDS in different frames: PROFILE_FLOOR was the
+        generated CTRL-PROFILE-FLOOR while SECTION_FLOOR was the traced
+        SECTION-FLOOR, so a reader assuming symmetry got the wrong
+        layer. FeatureTrace's own ROWS test still carries a comment
+        about that slip costing an hour of tracing.
+
+        A rule a machine can check is the only kind that survives.
+        """
+        with open(os.path.join(ADDON, "Core", "CsLayers.js")) as fh:
+            source = fh.read()
+        pairs = re.findall(r'^CsLayers\.([A-Z_0-9]+) = "([^"]+)";',
+                           source, re.M)
+        self.assertGreater(len(pairs), 100, "the registry should be here")
+        wrong = [(c, n) for c, n in pairs if c != n.replace("-", "_")]
+        self.assertEqual(wrong, [],
+                         "layer constants that do not match their own "
+                         "layer name: %s" % wrong)
 
     def test_registry_layers_exist_in_plan_template(self):
         """EVERY registry layer, with no exemptions. The wall run layers
@@ -495,8 +522,8 @@ class TestLayerVocabulary(unittest.TestCase):
                          "template: %s" % sorted(missing))
 
     def test_registry_defines_profile_control_layers(self):
-        """Mutation-tested gap: deleting CsLayers.PROFILE_FLOOR and
-        CsLayers.PROFILE_CEILING left the whole suite green, because
+        """Mutation-tested gap: deleting CsLayers.CTRL_PROFILE_FLOOR and
+        CsLayers.CTRL_PROFILE_CEILING left the whole suite green, because
         test_registry_layers_exist_in_plan_template only ever compares
         the registry against the template -- it never asserts a
         particular constant exists at all, so deleting one shrinks both
@@ -509,9 +536,9 @@ class TestLayerVocabulary(unittest.TestCase):
         """
         with open(os.path.join(ADDON, "Core", "CsLayers.js")) as fh:
             source = fh.read()
-        self.assertIn('CsLayers.PROFILE_FLOOR = "CTRL-PROFILE-FLOOR";',
+        self.assertIn('CsLayers.CTRL_PROFILE_FLOOR = "CTRL-PROFILE-FLOOR";',
                      source)
-        self.assertIn('CsLayers.PROFILE_CEILING = "CTRL-PROFILE-CEILING";',
+        self.assertIn('CsLayers.CTRL_PROFILE_CEILING = "CTRL-PROFILE-CEILING";',
                      source)
         defaults = parse_defaults_table()
         self.assertEqual(defaults.get("CTRL-PROFILE-FLOOR"),
@@ -532,9 +559,9 @@ class TestLayerVocabulary(unittest.TestCase):
         """
         with open(os.path.join(ADDON, "Core", "CsLayers.js")) as fh:
             source = fh.read()
-        self.assertIn('CsLayers.LRUD_WALL_LEFT = "CTRL-LRUD-WALL-LEFT";',
+        self.assertIn('CsLayers.CTRL_LRUD_WALL_LEFT = "CTRL-LRUD-WALL-LEFT";',
                       source)
-        self.assertIn('CsLayers.LRUD_WALL_RIGHT = "CTRL-LRUD-WALL-RIGHT";',
+        self.assertIn('CsLayers.CTRL_LRUD_WALL_RIGHT = "CTRL-LRUD-WALL-RIGHT";',
                       source)
         defaults = parse_defaults_table()
         for name in self.WALL_RUN_LAYERS:
@@ -821,7 +848,7 @@ class TestSyncTemplateLayersTool(unittest.TestCase):
             os.makedirs(core)
             with open(os.path.join(core, "CsLayers.js"), "w") as fh:
                 fh.write('var CsLayers = {};\n'
-                         'CsLayers.SHOTS = "CTRL-SHOTS";\n')
+                         'CsLayers.CTRL_SHOTS = "CTRL-SHOTS";\n')
             os.mkdir(os.path.join(tmp, "templates"))
             plan = os.path.join(tmp, "templates",
                                 "NSS_Cave_Template_PLAN.dxf")

@@ -14,27 +14,27 @@
 var CsLayers = {};
 
 // Control layers -- survey data, not map art.
-CsLayers.SHOTS = "CTRL-SHOTS";
-CsLayers.STATIONS = "CTRL-STATIONS";
-CsLayers.STATION_LABELS = "CTRL-STATION-LABELS";
-CsLayers.LRUD = "CTRL-LRUD";
-CsLayers.SPLAYS = "CTRL-SPLAYS";
-CsLayers.HIDDEN = "CTRL-HIDDEN";
-CsLayers.RAW = "CTRL-RAW";
-CsLayers.LRUD_WALL_LEFT = "CTRL-LRUD-WALL-LEFT";
-CsLayers.LRUD_WALL_RIGHT = "CTRL-LRUD-WALL-RIGHT";
-CsLayers.PROFILE_FLOOR = "CTRL-PROFILE-FLOOR";
-CsLayers.PROFILE_CEILING = "CTRL-PROFILE-CEILING";
-CsLayers.GRID = "CTRL-GRID";
-CsLayers.AERIAL = "CTRL-AERIAL";
+CsLayers.CTRL_SHOTS = "CTRL-SHOTS";
+CsLayers.CTRL_STATIONS = "CTRL-STATIONS";
+CsLayers.CTRL_STATION_LABELS = "CTRL-STATION-LABELS";
+CsLayers.CTRL_LRUD = "CTRL-LRUD";
+CsLayers.CTRL_SPLAYS = "CTRL-SPLAYS";
+CsLayers.CTRL_HIDDEN = "CTRL-HIDDEN";
+CsLayers.CTRL_RAW = "CTRL-RAW";
+CsLayers.CTRL_LRUD_WALL_LEFT = "CTRL-LRUD-WALL-LEFT";
+CsLayers.CTRL_LRUD_WALL_RIGHT = "CTRL-LRUD-WALL-RIGHT";
+CsLayers.CTRL_PROFILE_FLOOR = "CTRL-PROFILE-FLOOR";
+CsLayers.CTRL_PROFILE_CEILING = "CTRL-PROFILE-CEILING";
+CsLayers.CTRL_GRID = "CTRL-GRID";
+CsLayers.CTRL_AERIAL = "CTRL-AERIAL";
 // Surface contours derived from public elevation data -- background
 // context like CTRL-AERIAL, generated and erased by their own tool.
 // CTRL- keeps them out of CsBind's reach, like every generated layer.
-CsLayers.CONTOUR = "CTRL-CONTOUR";
-CsLayers.CONTOUR_MAJOR = "CTRL-CONTOUR-MAJOR";
+CsLayers.CTRL_CONTOUR = "CTRL-CONTOUR";
+CsLayers.CTRL_CONTOUR_MAJOR = "CTRL-CONTOUR-MAJOR";
 // Inserted sketch scans -- tracing sources, not map art. CTRL- keeps
 // them out of CsBind's reach like every other suite-managed layer.
-CsLayers.SCAN = "CTRL-SCAN";
+CsLayers.CTRL_SCAN = "CTRL-SCAN";
 
 // The profile frame's own control layers. EVERY ONE BEGINS "CTRL-",
 // and that is load-bearing rather than cosmetic: CsBind's
@@ -43,17 +43,17 @@ CsLayers.SCAN = "CTRL-SCAN";
 // change to CsBind at all. Drop the prefix and the generator's own
 // output becomes bindable -- a test in js_unit.js asserts this.
 //
-// NAMING TRAP, READ BEFORE USING EITHER: CsLayers.PROFILE_CEILING is
+// NAMING TRAP, READ BEFORE USING EITHER: CsLayers.CTRL_PROFILE_CEILING is
 // the GENERATED layer CTRL-PROFILE-CEILING, which the generator owns
-// and ERASES on every redraw. CsLayers.PROFILE_TRACED_CEILING is the
+// and ERASES on every redraw. CsLayers.PROFILE_CEILING is the
 // hand-traced PROFILE-CEILING, which is the user's own work and must
 // NEVER be erased. The two constants are one word apart and mean
 // opposite things. Same for floor.
-CsLayers.PROFILE_SHOTS = "CTRL-PROFILE-SHOTS";
-CsLayers.PROFILE_STATIONS = "CTRL-PROFILE-STATIONS";
-CsLayers.PROFILE_STATION_LABELS = "CTRL-PROFILE-STATION-LABELS";
-CsLayers.PROFILE_SPLAYS = "CTRL-PROFILE-SPLAYS";
-CsLayers.PROFILE_LRUD = "CTRL-PROFILE-LRUD";
+CsLayers.CTRL_PROFILE_SHOTS = "CTRL-PROFILE-SHOTS";
+CsLayers.CTRL_PROFILE_STATIONS = "CTRL-PROFILE-STATIONS";
+CsLayers.CTRL_PROFILE_STATION_LABELS = "CTRL-PROFILE-STATION-LABELS";
+CsLayers.CTRL_PROFILE_SPLAYS = "CTRL-PROFILE-SPLAYS";
+CsLayers.CTRL_PROFILE_LRUD = "CTRL-PROFILE-LRUD";
 // The generator's own band captions and its exaggeration stamp.
 //
 // CTRL-, like every other layer the generator owns. They used to share
@@ -63,18 +63,18 @@ CsLayers.PROFILE_LRUD = "CTRL-PROFILE-LRUD";
 // that: PROFILE-TEXT-LABELS-A was a generator-owned layer sitting in the
 // traced vocabulary. A test now asserts every layer in
 // CsProfileDraw.LAYERS() is CTRL-, so this cannot drift back.
-CsLayers.PROFILE_BAND_LABELS = "CTRL-PROFILE-TEXT-LABELS";
+CsLayers.CTRL_PROFILE_TEXT_LABELS = "CTRL-PROFILE-TEXT-LABELS";
 // The generated bounding box around each profile band, plus its name
 // text. LOCKED (see CsLayers.LOCKED): the boxes are the suite's frame
 // bookkeeping, not linework -- a caver never edits one.
-CsLayers.PROFILE_BOX = "CTRL-PROFILE-BOX";
+CsLayers.CTRL_PROFILE_BOX = "CTRL-PROFILE-BOX";
 
 // The profile frame's traceable layers -- what a caver draws on an
 // elevation. These must NOT begin "CTRL-", for the mirror of the
 // reason above: hand-traced profile linework has to stay bindable so
 // it moves when the survey does.
-CsLayers.PROFILE_TRACED_CEILING = "PROFILE-CEILING";
-CsLayers.PROFILE_TRACED_FLOOR = "PROFILE-FLOOR";
+CsLayers.PROFILE_CEILING = "PROFILE-CEILING";
+CsLayers.PROFILE_FLOOR = "PROFILE-FLOOR";
 CsLayers.PROFILE_WALLS_INFERRED = "PROFILE-WALLS-INFERRED";
 CsLayers.PROFILE_TEXT_NOTES = "PROFILE-TEXT-NOTES";
 CsLayers.PROFILE_TEXT_LABELS = "PROFILE-TEXT-LABELS";
@@ -95,12 +95,12 @@ CsLayers.PROFILE_ENTRANCE = "PROFILE-ENTRANCE";
 // and its name not starting "SECTION-" is the only thing keeping it
 // there -- asserted in tests/js_unit.js rather than left to luck.
 // ---------------------------------------------------------------------
-CsLayers.SECTION_BOX = "CTRL-SECTION-BOX";
-CsLayers.SECTION_OUTLINE = "CTRL-SECTION-OUTLINE";
-CsLayers.SECTION_SPLAYS = "CTRL-SECTION-SPLAYS";
-CsLayers.SECTION_STATIONS = "CTRL-SECTION-STATIONS";
-CsLayers.SECTION_CTRL_TEXT_LABELS = "CTRL-SECTION-TEXT-LABELS";
-CsLayers.SECTION_SCAN = "CTRL-SECTION-SCAN";
+CsLayers.CTRL_SECTION_BOX = "CTRL-SECTION-BOX";
+CsLayers.CTRL_SECTION_OUTLINE = "CTRL-SECTION-OUTLINE";
+CsLayers.CTRL_SECTION_SPLAYS = "CTRL-SECTION-SPLAYS";
+CsLayers.CTRL_SECTION_STATIONS = "CTRL-SECTION-STATIONS";
+CsLayers.CTRL_SECTION_TEXT_LABELS = "CTRL-SECTION-TEXT-LABELS";
+CsLayers.CTRL_SECTION_SCAN = "CTRL-SECTION-SCAN";
 
 // The section frame's traceable layers -- what a caver draws in a
 // section. NOT "CTRL-" prefixed, for the mirror of the reason above:
@@ -152,7 +152,7 @@ CsLayers.LEDGE_CEILING = "LEDGE-CEILING";
 CsLayers.FLOWSTONE = "FLOWSTONE";
 CsLayers.RIMSTONE = "RIMSTONE";
 CsLayers.SLOPE = "SLOPE";
-CsLayers.SHAPE_SPINE = "CTRL-SHAPE-SPINE";
+CsLayers.CTRL_SHAPE_SPINE = "CTRL-SHAPE-SPINE";
 // The profile-frame twins: the SAME shaped-line buttons draw these
 // when the stroke lands in the elevation (decided by location -- see
 // CsProfileBox), because frameOf classifies by the PROFILE- prefix and
@@ -163,7 +163,7 @@ CsLayers.PROFILE_LEDGE_CEILING = "PROFILE-LEDGE-CEILING";
 CsLayers.PROFILE_FLOWSTONE = "PROFILE-FLOWSTONE";
 CsLayers.PROFILE_RIMSTONE = "PROFILE-RIMSTONE";
 CsLayers.PROFILE_SLOPE = "PROFILE-SLOPE";
-CsLayers.PROFILE_SHAPE_SPINE = "CTRL-PROFILE-SHAPE-SPINE";
+CsLayers.CTRL_PROFILE_SHAPE_SPINE = "CTRL-PROFILE-SHAPE-SPINE";
 
 // Defaults for creating a layer that is missing from the drawing
 // (someone working without the template still gets sane colors).
@@ -411,20 +411,20 @@ CsLayers.SECTION_BREAKDOWN_BOUNDARY = "SECTION-BREAKDOWN-BOUNDARY";
 CsLayers.CEILING = "CEILING";
 CsLayers.CTRL_BOX = "CTRL-BOX";
 CsLayers.CTRL_CEILING = "CTRL-CEILING";
-CsLayers.SECTION_CTRL_CEILING = "CTRL-SECTION-CEILING";
+CsLayers.CTRL_SECTION_CEILING = "CTRL-SECTION-CEILING";
 CsLayers.CTRL_FLOOR = "CTRL-FLOOR";
-CsLayers.SECTION_CTRL_FLOOR = "CTRL-SECTION-FLOOR";
-CsLayers.SECTION_CTRL_LRUD = "CTRL-SECTION-LRUD";
-CsLayers.PROFILE_CTRL_LRUD_WALL_LEFT = "CTRL-PROFILE-LRUD-WALL-LEFT";
-CsLayers.SECTION_CTRL_LRUD_WALL_LEFT = "CTRL-SECTION-LRUD-WALL-LEFT";
-CsLayers.PROFILE_CTRL_LRUD_WALL_RIGHT = "CTRL-PROFILE-LRUD-WALL-RIGHT";
-CsLayers.SECTION_CTRL_LRUD_WALL_RIGHT = "CTRL-SECTION-LRUD-WALL-RIGHT";
+CsLayers.CTRL_SECTION_FLOOR = "CTRL-SECTION-FLOOR";
+CsLayers.CTRL_SECTION_LRUD = "CTRL-SECTION-LRUD";
+CsLayers.CTRL_PROFILE_LRUD_WALL_LEFT = "CTRL-PROFILE-LRUD-WALL-LEFT";
+CsLayers.CTRL_SECTION_LRUD_WALL_LEFT = "CTRL-SECTION-LRUD-WALL-LEFT";
+CsLayers.CTRL_PROFILE_LRUD_WALL_RIGHT = "CTRL-PROFILE-LRUD-WALL-RIGHT";
+CsLayers.CTRL_SECTION_LRUD_WALL_RIGHT = "CTRL-SECTION-LRUD-WALL-RIGHT";
 CsLayers.CTRL_OUTLINE = "CTRL-OUTLINE";
-CsLayers.PROFILE_CTRL_OUTLINE = "CTRL-PROFILE-OUTLINE";
-CsLayers.PROFILE_CTRL_SCAN = "CTRL-PROFILE-SCAN";
-CsLayers.SECTION_CTRL_SHAPE_SPINE = "CTRL-SECTION-SHAPE-SPINE";
-CsLayers.SECTION_CTRL_SHOTS = "CTRL-SECTION-SHOTS";
-CsLayers.SECTION_CTRL_STATION_LABELS = "CTRL-SECTION-STATION-LABELS";
+CsLayers.CTRL_PROFILE_OUTLINE = "CTRL-PROFILE-OUTLINE";
+CsLayers.CTRL_PROFILE_SCAN = "CTRL-PROFILE-SCAN";
+CsLayers.CTRL_SECTION_SHAPE_SPINE = "CTRL-SECTION-SHAPE-SPINE";
+CsLayers.CTRL_SECTION_SHOTS = "CTRL-SECTION-SHOTS";
+CsLayers.CTRL_SECTION_STATION_LABELS = "CTRL-SECTION-STATION-LABELS";
 CsLayers.CTRL_TEXT_LABELS = "CTRL-TEXT-LABELS";
 CsLayers.SECTION_ENTRANCE = "SECTION-ENTRANCE";
 CsLayers.FLOOR = "FLOOR";
@@ -687,13 +687,13 @@ CsLayers.ensure = function(doc, di, name) {
 
 /** Ensures the layers every survey-drawing tool relies on. */
 CsLayers.ensureSurveyLayers = function(doc, di) {
-    CsLayers.ensure(doc, di, CsLayers.SHOTS);
-    CsLayers.ensure(doc, di, CsLayers.STATIONS);
-    CsLayers.ensure(doc, di, CsLayers.STATION_LABELS);
-    CsLayers.ensure(doc, di, CsLayers.LRUD);
-    CsLayers.ensure(doc, di, CsLayers.SPLAYS);
-    CsLayers.ensure(doc, di, CsLayers.HIDDEN);
-    CsLayers.ensure(doc, di, CsLayers.AERIAL);
+    CsLayers.ensure(doc, di, CsLayers.CTRL_SHOTS);
+    CsLayers.ensure(doc, di, CsLayers.CTRL_STATIONS);
+    CsLayers.ensure(doc, di, CsLayers.CTRL_STATION_LABELS);
+    CsLayers.ensure(doc, di, CsLayers.CTRL_LRUD);
+    CsLayers.ensure(doc, di, CsLayers.CTRL_SPLAYS);
+    CsLayers.ensure(doc, di, CsLayers.CTRL_HIDDEN);
+    CsLayers.ensure(doc, di, CsLayers.CTRL_AERIAL);
 };
 
 /** Ensure every callout style layer exists. Called by each callout

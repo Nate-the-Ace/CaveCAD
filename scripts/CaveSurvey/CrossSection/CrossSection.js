@@ -52,7 +52,7 @@ CrossSection.prototype.beginEvent = function() {
         this.terminate();
         return;
     }
-    CsLayers.ensure(doc, di, CsLayers.SECTION_OUTLINE);
+    CsLayers.ensure(doc, di, CsLayers.CTRL_SECTION_OUTLINE);
     this.setState(CrossSection.State.PickingCut);
 };
 

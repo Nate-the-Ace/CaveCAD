@@ -146,7 +146,7 @@ var rays = 0;
 for (var bi = 0; bi < blockEnts.length; bi++) {
     var be = doc.queryEntity(blockEnts[bi]);
     if (!isNull(be) &&
-            doc.getLayerName(be.getLayerId()) === CsLayers.SECTION_SPLAYS) {
+            doc.getLayerName(be.getLayerId()) === CsLayers.CTRL_SECTION_SPLAYS) {
         rays++;
     }
 }

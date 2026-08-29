@@ -51,10 +51,10 @@ CsProfileDraw.TAGS = ["ProfileRun", "ProfileStation", "ProfileShot",
  *  this module never draws a separate LRUD tick, so ensuring it would
  *  promise geometry that never lands on it. */
 CsProfileDraw.LAYERS = function() {
-    return [CsLayers.PROFILE_SHOTS, CsLayers.PROFILE_STATIONS,
-        CsLayers.PROFILE_STATION_LABELS, CsLayers.PROFILE_SPLAYS,
-        CsLayers.PROFILE_FLOOR, CsLayers.PROFILE_CEILING,
-        CsLayers.PROFILE_BAND_LABELS, CsLayers.PROFILE_BOX];
+    return [CsLayers.CTRL_PROFILE_SHOTS, CsLayers.CTRL_PROFILE_STATIONS,
+        CsLayers.CTRL_PROFILE_STATION_LABELS, CsLayers.CTRL_PROFILE_SPLAYS,
+        CsLayers.CTRL_PROFILE_FLOOR, CsLayers.CTRL_PROFILE_CEILING,
+        CsLayers.CTRL_PROFILE_TEXT_LABELS, CsLayers.CTRL_PROFILE_BOX];
 };
 
 /**
@@ -454,7 +454,7 @@ CsProfileDraw.erase = function(doc, di, runKey) {
         // the box layer ships LOCKED, and locked refuses deletes as
         // silently as off does -- without this, stale boxes survive
         // every redraw and stack up
-        CsLayers.withLayerUnlocked(doc, di, CsLayers.PROFILE_BOX,
+        CsLayers.withLayerUnlocked(doc, di, CsLayers.CTRL_PROFILE_BOX,
             function() {
                 di.applyOperation(op);
             });
@@ -542,7 +542,7 @@ CsProfileDraw.label = function(doc, di, op, band, at) {
     var text = CsProfileDraw.labelText(band);
     var y = CsProfileDraw.labelY0(band);
     var label = CsDraw.addText(doc, op,
-        CsProfileDraw.layerFor(doc, di, CsLayers.PROFILE_BAND_LABELS, band),
+        CsProfileDraw.layerFor(doc, di, CsLayers.CTRL_PROFILE_TEXT_LABELS, band),
         text, at(0, y + CsDraw.TEXT_HEIGHT * 4.0), RS.HAlignLeft,
         "ProfileBandLabel", band.key);
     // CsDraw.addText already queued `label` into `op` via its own
@@ -586,16 +586,16 @@ CsProfileDraw.band = function(doc, di, op, band, counts, origin) {
     // returns the band's own run variant and creates it on demand. Not
     // pre-created for every run up front: a band that draws no splays
     // should not leave an empty splay layer behind for its run.
-    var lyShots = CsProfileDraw.layerFor(doc, di, CsLayers.PROFILE_SHOTS, band);
+    var lyShots = CsProfileDraw.layerFor(doc, di, CsLayers.CTRL_PROFILE_SHOTS, band);
     var lyStations = CsProfileDraw.layerFor(doc, di,
-        CsLayers.PROFILE_STATIONS, band);
+        CsLayers.CTRL_PROFILE_STATIONS, band);
     var lyLabels = CsProfileDraw.layerFor(doc, di,
-        CsLayers.PROFILE_STATION_LABELS, band);
+        CsLayers.CTRL_PROFILE_STATION_LABELS, band);
     var lyCeiling = CsProfileDraw.layerFor(doc, di,
-        CsLayers.PROFILE_CEILING, band);
-    var lyFloor = CsProfileDraw.layerFor(doc, di, CsLayers.PROFILE_FLOOR, band);
+        CsLayers.CTRL_PROFILE_CEILING, band);
+    var lyFloor = CsProfileDraw.layerFor(doc, di, CsLayers.CTRL_PROFILE_FLOOR, band);
     var lySplays = CsProfileDraw.layerFor(doc, di,
-        CsLayers.PROFILE_SPLAYS, band);
+        CsLayers.CTRL_PROFILE_SPLAYS, band);
     var dz = band.zOffset || 0.0;
     // TWO offsets, and they are not the same thing. dz is the band's
     // own displacement, part of what the elevation SAYS (a spur shown
@@ -769,7 +769,7 @@ CsProfileDraw.stamp = function(doc, op, profile, origin, bounds) {
     // caption (which sits TEXT_HEIGHT * 4 above its band).
     var pos = new RVector(ox + bounds.minX,
         oy + bounds.maxY + CsDraw.TEXT_HEIGHT * 7.0);
-    return CsDraw.addText(doc, op, CsLayers.PROFILE_BAND_LABELS, text, pos,
+    return CsDraw.addText(doc, op, CsLayers.CTRL_PROFILE_TEXT_LABELS, text, pos,
         RS.HAlignLeft, "ProfileExaggerationStamp", text);
 };
 
@@ -1180,7 +1180,7 @@ CsProfileDraw.translateRegion = function(doc, di, dx, dy) {
         CsRevise.withOffLayersOn(doc, di, function() {
             // the band boxes live on the LOCKED box layer and must
             // travel with the region like everything else here
-            CsLayers.withLayerUnlocked(doc, di, CsLayers.PROFILE_BOX,
+            CsLayers.withLayerUnlocked(doc, di, CsLayers.CTRL_PROFILE_BOX,
                 function() {
                     di.applyOperation(op);
                 });
@@ -1247,7 +1247,7 @@ CsProfileDraw.render = function(doc, di, profile, opts) {
     // profile redraw is the natural healing point: it runs on every
     // notebook Draw, so the bookkeeping never stays editable for long.
     try {
-        var boxLay = doc.queryLayer(CsLayers.PROFILE_BOX);
+        var boxLay = doc.queryLayer(CsLayers.CTRL_PROFILE_BOX);
         if (!isNull(boxLay) && boxLay.isLocked() === false) {
             boxLay.setLocked(true);
             var lockOp = new RModifyObjectsOperation();
@@ -1359,14 +1359,14 @@ CsProfileDraw.render = function(doc, di, profile, opts) {
             origin.y + box.maxY), 0.0);
         rect.setClosed(true);
         var rectEnt = new RPolylineEntity(doc, new RPolylineData(rect));
-        rectEnt.setLayerId(doc.getLayerId(CsLayers.PROFILE_BOX));
+        rectEnt.setLayerId(doc.getLayerId(CsLayers.CTRL_PROFILE_BOX));
         CsTags.set(rectEnt, "ProfileBox", box.key);
         CsTags.set(rectEnt, "ProfileRun", box.key);
         op.addObject(rectEnt, false);
 
         // the name, top-left corner, inset one text height -- so a
         // reader knows which band's frame they are looking at
-        var boxLabel = CsDraw.addText(doc, op, CsLayers.PROFILE_BOX,
+        var boxLabel = CsDraw.addText(doc, op, CsLayers.CTRL_PROFILE_BOX,
             box.key,
             new RVector(origin.x + box.minX + CsDraw.TEXT_HEIGHT,
                 origin.y + box.maxY - CsDraw.TEXT_HEIGHT * 1.5),
@@ -1380,7 +1380,7 @@ CsProfileDraw.render = function(doc, di, profile, opts) {
     // Written last, into the same operation as the geometry it belongs
     // with, and erased by the next erase() like every other tagged
     // thing this module owns.
-    var marker = CsDraw.addPoint(doc, op, CsLayers.PROFILE_STATIONS,
+    var marker = CsDraw.addPoint(doc, op, CsLayers.CTRL_PROFILE_STATIONS,
         new RVector(origin.x, origin.y));
     CsTags.set(marker, "ProfileOrigin", origin.x + "," + origin.y);
     op.addObject(marker, false);
@@ -1393,7 +1393,7 @@ CsProfileDraw.render = function(doc, di, profile, opts) {
     // an off layer with no error at all. The box layer additionally
     // ships LOCKED, and locked refuses adds just as silently.
     CsProfileDraw.withOwnLayersOn(doc, di, function() {
-        CsLayers.withLayerUnlocked(doc, di, CsLayers.PROFILE_BOX,
+        CsLayers.withLayerUnlocked(doc, di, CsLayers.CTRL_PROFILE_BOX,
             function() {
                 di.applyOperation(op);
             });

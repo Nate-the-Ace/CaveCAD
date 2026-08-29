@@ -437,8 +437,8 @@ RebuildSurveyData.fromGeometry = function(doc, di, report) {
     var LABEL_RADIUS = CsDraw.TEXT_HEIGHT * 6;   // label sits ~0.75 from point
     var LRUD_RADIUS = 1000000;                    // tips matched to NEAREST station
 
-    if (!doc.hasLayer(CsLayers.STATIONS)) {
-        report.warning = "Rebuild Survey Data: no " + CsLayers.STATIONS +
+    if (!doc.hasLayer(CsLayers.CTRL_STATIONS)) {
+        report.warning = "Rebuild Survey Data: no " + CsLayers.CTRL_STATIONS +
             " layer -- nothing to recover.";
         return report;
     }
@@ -449,13 +449,13 @@ RebuildSurveyData.fromGeometry = function(doc, di, report) {
     var lrudTips = [];     // {entity, pos, tagged}
     var shotLines = [];    // {a, b}
 
-    var stLayer = doc.getLayerId(CsLayers.STATIONS);
-    var lbLayer = doc.hasLayer(CsLayers.STATION_LABELS) ?
-        doc.getLayerId(CsLayers.STATION_LABELS) : -1;
-    var lrLayer = doc.hasLayer(CsLayers.LRUD) ?
-        doc.getLayerId(CsLayers.LRUD) : -1;
-    var shLayer = doc.hasLayer(CsLayers.SHOTS) ?
-        doc.getLayerId(CsLayers.SHOTS) : -1;
+    var stLayer = doc.getLayerId(CsLayers.CTRL_STATIONS);
+    var lbLayer = doc.hasLayer(CsLayers.CTRL_STATION_LABELS) ?
+        doc.getLayerId(CsLayers.CTRL_STATION_LABELS) : -1;
+    var lrLayer = doc.hasLayer(CsLayers.CTRL_LRUD) ?
+        doc.getLayerId(CsLayers.CTRL_LRUD) : -1;
+    var shLayer = doc.hasLayer(CsLayers.CTRL_SHOTS) ?
+        doc.getLayerId(CsLayers.CTRL_SHOTS) : -1;
 
     var i, k;
     var ids = doc.queryAllEntities(false, true);
@@ -490,7 +490,7 @@ RebuildSurveyData.fromGeometry = function(doc, di, report) {
 
     if (stationPts.length === 0) {
         report.warning = "Rebuild Survey Data: no station points found on " +
-            CsLayers.STATIONS + ".";
+            CsLayers.CTRL_STATIONS + ".";
         return report;
     }
 

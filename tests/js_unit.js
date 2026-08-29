@@ -5190,7 +5190,7 @@ if (teamBoundaryRt.trips.length === 2) {
 (function() {
     loadRepoScript("scripts/CaveSurvey/Core/CsLayers.js");
 
-    ok(CsLayers.RAW === "CTRL-RAW", "the as-surveyed ghost layer is CTRL-RAW");
+    ok(CsLayers.CTRL_RAW === "CTRL-RAW", "the as-surveyed ghost layer is CTRL-RAW");
     ok(CsLayers.DEFAULTS["CTRL-RAW"][1] === "DASHED",
         "CTRL-RAW is dashed -- it is not the survey, it is where the survey was");
     ok(CsLayers.OFF["CTRL-RAW"] === true, "CTRL-RAW is created switched off");
@@ -6800,11 +6800,11 @@ if (!IS_NODE) {
 
         CsLayers.ensureSurveyLayers(doc, di);
         var op = new RAddObjectsOperation();
-        var p1 = CsDraw.addPoint(doc, op, CsLayers.STATIONS,
+        var p1 = CsDraw.addPoint(doc, op, CsLayers.CTRL_STATIONS,
             new RVector(0, 0));
         CsTags.tagStation(p1, { name: "L1", seq: 0, azimuth: 0 });
         op.addObject(p1, false);
-        var p2 = CsDraw.addPoint(doc, op, CsLayers.STATIONS,
+        var p2 = CsDraw.addPoint(doc, op, CsLayers.CTRL_STATIONS,
             new RVector(0, 10));
         CsTags.tagStation(p2, { name: "L2", seq: 1, azimuth: 0 });
         op.addObject(p2, false);
@@ -7271,7 +7271,7 @@ if (!IS_NODE) {
         var plan = 10.0 * Math.cos(INC * Math.PI / 180.0);
         CsLayers.ensureSurveyLayers(doc, di);
         var op = new RAddObjectsOperation();
-        var q1 = CsDraw.addPoint(doc, op, CsLayers.STATIONS,
+        var q1 = CsDraw.addPoint(doc, op, CsLayers.CTRL_STATIONS,
             new RVector(0, 0));
         CsTags.tagStation(q1, { name: "Q1", seq: 0, azimuth: 0,
             inclination: 0, z: 0, note: "entrance" });
@@ -7282,12 +7282,12 @@ if (!IS_NODE) {
         CsTags.set(q1, "DeclinationSource", "user");
         CsTags.set(q1, "DistanceUnit", "ft");
         op.addObject(q1, false);
-        var q2 = CsDraw.addPoint(doc, op, CsLayers.STATIONS,
+        var q2 = CsDraw.addPoint(doc, op, CsLayers.CTRL_STATIONS,
             new RVector(0, 10));
         CsTags.tagStation(q2, { name: "Q2", seq: 1, azimuth: 0,
             inclination: 0, z: 0, left: 2, right: 3 });
         op.addObject(q2, false);
-        var q3 = CsDraw.addPoint(doc, op, CsLayers.STATIONS,
+        var q3 = CsDraw.addPoint(doc, op, CsLayers.CTRL_STATIONS,
             new RVector(plan, 10));
         CsTags.tagStation(q3, { name: "Q3", seq: 2, azimuth: 90,
             inclination: INC, z: 10.0 * Math.sin(INC * Math.PI / 180.0) });
@@ -7298,7 +7298,7 @@ if (!IS_NODE) {
         // no inclination, so the redraw cannot put it back and the run
         // has to SAY so instead of losing it silently (which is what
         // happened before the reader could see splays at all).
-        var qs = CsDraw.addPoint(doc, op, CsLayers.SPLAYS,
+        var qs = CsDraw.addPoint(doc, op, CsLayers.CTRL_SPLAYS,
             new RVector(3, 14));
         CsTags.set(qs, "SplayName", "Q2.1");
         op.addObject(qs, false);
@@ -14294,7 +14294,7 @@ if (!IS_NODE) {
         // one station point, hand-tagged, for the fixtures below that
         // need a shape CsDraw.survey would never draw
         function spStation(doc, op, name, seq, x, y) {
-            var pt = CsDraw.addPoint(doc, op, CsLayers.STATIONS,
+            var pt = CsDraw.addPoint(doc, op, CsLayers.CTRL_STATIONS,
                 new RVector(x, y));
             CsTags.tagStation(pt, { name: name, seq: seq, azimuth: 0,
                 inclination: 0, z: 0 });
@@ -14304,7 +14304,7 @@ if (!IS_NODE) {
 
         // one splay TIP point and nothing else: no ray, so no shot tags
         function spTip(doc, op, name, x, y) {
-            var pt = CsDraw.addPoint(doc, op, CsLayers.SPLAYS,
+            var pt = CsDraw.addPoint(doc, op, CsLayers.CTRL_SPLAYS,
                 new RVector(x, y));
             CsTags.set(pt, "SplayName", name);
             op.addObject(pt, false);
@@ -14627,7 +14627,7 @@ if (!IS_NODE) {
             spStation(f9.doc, op9, "C.2", 1, 0, 10);
             // a v3 splay ray with NO From tag -- what an early v3 build
             // wrote, and the branch CsRevise's Splay-tag fallback is for
-            CsDraw.addLine(f9.doc, op9, CsLayers.SPLAYS,
+            CsDraw.addLine(f9.doc, op9, CsLayers.CTRL_SPLAYS,
                 new RVector(0, 0), new RVector(4, 0),
                 "Splay", "C.1.2",
                 { Distance: 4, Azimuth: 90, Inclination: 20 });
@@ -14667,7 +14667,7 @@ if (!IS_NODE) {
             var op10 = new RAddObjectsOperation();
             spStation(f10.doc, op10, "V1", 0, 0, 0);
             spStation(f10.doc, op10, "V2", 1, 0, 10);
-            CsDraw.addLine(f10.doc, op10, CsLayers.SPLAYS,
+            CsDraw.addLine(f10.doc, op10, CsLayers.CTRL_SPLAYS,
                 new RVector(0, 10), new RVector(4, 10),
                 "Splay", "V2.1",
                 { From: "V2", To: "V9", Distance: 4, Azimuth: 90,
@@ -14702,11 +14702,11 @@ if (!IS_NODE) {
 // ---------------------------------------------------------------------
 
 (function() {
-    eqs(CsLayers.frameOf(CsLayers.SHOTS), "plan", "CTRL-SHOTS is plan");
+    eqs(CsLayers.frameOf(CsLayers.CTRL_SHOTS), "plan", "CTRL-SHOTS is plan");
     eqs(CsLayers.frameOf(CsLayers.WALLS_SURVEYED), "plan", "WALLS-SURVEYED is plan");
-    eqs(CsLayers.frameOf(CsLayers.PROFILE_FLOOR), "profile",
+    eqs(CsLayers.frameOf(CsLayers.CTRL_PROFILE_FLOOR), "profile",
         "CTRL-PROFILE-FLOOR is profile");
-    eqs(CsLayers.frameOf(CsLayers.PROFILE_SHOTS), "profile",
+    eqs(CsLayers.frameOf(CsLayers.CTRL_PROFILE_SHOTS), "profile",
         "CTRL-PROFILE-SHOTS is profile");
     eqs(CsLayers.frameOf("PROFILE-CEILING"), "profile",
         "the traced ceiling layer is profile");
@@ -14725,9 +14725,9 @@ if (!IS_NODE) {
     eqs(CsLayers.frameOf(null), "plan", "null defaults to plan");
 
     // The section frame, both spellings.
-    eqs(CsLayers.frameOf(CsLayers.SECTION_OUTLINE), "section",
+    eqs(CsLayers.frameOf(CsLayers.CTRL_SECTION_OUTLINE), "section",
         "CTRL-SECTION-OUTLINE is section");
-    eqs(CsLayers.frameOf(CsLayers.SECTION_BOX), "section",
+    eqs(CsLayers.frameOf(CsLayers.CTRL_SECTION_BOX), "section",
         "CTRL-SECTION-BOX is section");
     eqs(CsLayers.frameOf(CsLayers.SECTION_WALLS_SURVEYED), "section",
         "SECTION-WALLS-SURVEYED is section");
@@ -14755,10 +14755,10 @@ if (!IS_NODE) {
     // name begins CTRL-. If a rename ever drops that prefix, the
     // generator's own output becomes bindable and movable, and this
     // assertion is what says so.
-    var generated = [CsLayers.PROFILE_FLOOR, CsLayers.PROFILE_CEILING,
-        CsLayers.PROFILE_SHOTS, CsLayers.PROFILE_STATIONS,
-        CsLayers.PROFILE_STATION_LABELS, CsLayers.PROFILE_SPLAYS,
-        CsLayers.PROFILE_LRUD];
+    var generated = [CsLayers.CTRL_PROFILE_FLOOR, CsLayers.CTRL_PROFILE_CEILING,
+        CsLayers.CTRL_PROFILE_SHOTS, CsLayers.CTRL_PROFILE_STATIONS,
+        CsLayers.CTRL_PROFILE_STATION_LABELS, CsLayers.CTRL_PROFILE_SPLAYS,
+        CsLayers.CTRL_PROFILE_LRUD];
     var i;
     for (i = 0; i < generated.length; i++) {
         ok(generated[i].indexOf("CTRL-") === 0,
@@ -15119,15 +15119,15 @@ if (!IS_NODE) {
         ok(tight !== null && Math.abs(tight.maxX - 100) < 1e-9 &&
             Math.abs(tight.maxY - 50) < 1e-9,
             "planDataBox: starts as the plan linework's own box");
-        lineOn(docG, diG, CsLayers.PROFILE_TRACED_CEILING,
+        lineOn(docG, diG, CsLayers.PROFILE_CEILING,
             0, -500, 400, -480);
         lineOn(docG, diG, CsLayers.TITLE_BLOCK, -300, -300, 900, 700);
-        var tagged = lineOn(docG, diG, CsLayers.AERIAL, -200, -200, 600, 600);
+        var tagged = lineOn(docG, diG, CsLayers.CTRL_AERIAL, -200, -200, 600, 600);
         CsTags.set(tagged, "AerialBasemap", "1");
         var opT = new RModifyObjectsOperation();
         opT.addObject(tagged, false);
         diG.applyOperation(opT);
-        var scan = lineOn(docG, diG, CsLayers.SCAN, -50, -50, 500, 500);
+        var scan = lineOn(docG, diG, CsLayers.CTRL_SCAN, -50, -50, 500, 500);
         CsTags.set(scan, "SketchScan", "page3.jpg");
         var opS = new RModifyObjectsOperation();
         opS.addObject(scan, false);
@@ -15157,9 +15157,9 @@ if (!IS_NODE) {
         var docM = new RDocument(new RMemoryStorage(),
             new RSpatialIndexNavel());
         var diM = new RDocumentInterface(docM);
-        CsLayers.ensure(docM, diM, CsLayers.STATIONS);
+        CsLayers.ensure(docM, diM, CsLayers.CTRL_STATIONS);
         var stPt = new RPointEntity(docM, new RPointData(new RVector(0, 0)));
-        stPt.setLayerId(docM.getLayerId(CsLayers.STATIONS));
+        stPt.setLayerId(docM.getLayerId(CsLayers.CTRL_STATIONS));
         CsTags.set(stPt, "Station", "A1");
         var opM = new RAddObjectsOperation();
         opM.addObject(stPt, false);
@@ -15246,7 +15246,7 @@ if (!IS_NODE) {
         var docB = new RDocument(new RMemoryStorage(), new RSpatialIndexNavel());
         var diB = new RDocumentInterface(docB);
         lineOn(docB, diB, CsLayers.WALLS_SURVEYED, 0, 0, 100, 50);
-        lineOn(docB, diB, CsLayers.PROFILE_TRACED_CEILING, 0, -200, 100, -180);
+        lineOn(docB, diB, CsLayers.PROFILE_CEILING, 0, -200, 100, -180);
 
         var region = CsTrace.profileRegion(docB);
         ok(region !== null, "CsTrace.profileRegion: profile geometry makes a region");
@@ -15261,7 +15261,7 @@ if (!IS_NODE) {
             "CsTrace.frameAt: a point in the gutter is plan, not profile");
 
         // -- hand-traced linework grows the region -------------------
-        lineOn(docB, diB, CsLayers.PROFILE_TRACED_FLOOR, 0, -400, 100, -390);
+        lineOn(docB, diB, CsLayers.PROFILE_FLOOR, 0, -400, 100, -390);
         eqs(CsTrace.frameAt(docB, { x: 50, y: -395 }), "profile",
             "CsTrace.frameAt: hand-traced profile linework extends the region");
 
@@ -15271,7 +15271,7 @@ if (!IS_NODE) {
         // answer profile, and a plan line there must still answer plan.
         var docC = new RDocument(new RMemoryStorage(), new RSpatialIndexNavel());
         var diC = new RDocumentInterface(docC);
-        lineOn(docC, diC, CsLayers.PROFILE_TRACED_CEILING, 0, 0, 100, 10);
+        lineOn(docC, diC, CsLayers.PROFILE_CEILING, 0, 0, 100, 10);
         eqs(CsTrace.frameAt(docC, { x: 50, y: 5 }), "profile",
             "CsTrace.frameAt: a profile region at the origin is still profile");
 
@@ -15433,21 +15433,21 @@ if (!IS_NODE) {
         // is the workflow this tool exists for.
         var doc2 = new RDocument(new RMemoryStorage(), new RSpatialIndexNavel());
         var di2 = new RDocumentInterface(doc2);
-        CsLayers.ensure(doc2, di2, CsLayers.PROFILE_TRACED_CEILING);
-        var lay = doc2.queryLayer(CsLayers.PROFILE_TRACED_CEILING);
+        CsLayers.ensure(doc2, di2, CsLayers.PROFILE_CEILING);
+        var lay = doc2.queryLayer(CsLayers.PROFILE_CEILING);
         lay.setOff(true);
         var opOff = new RModifyObjectsOperation();
         opOff.addObject(lay, false);
         di2.applyOperation(opOff);
-        ok(doc2.queryLayer(CsLayers.PROFILE_TRACED_CEILING).isOff(),
+        ok(doc2.queryLayer(CsLayers.PROFILE_CEILING).isOff(),
             "CsTrace.emit fixture: the target layer starts off");
 
         var offBefore = doc2.queryAllEntities(false, false).length;
-        CsTrace.emit(doc2, di2, CsLayers.PROFILE_TRACED_CEILING,
+        CsTrace.emit(doc2, di2, CsLayers.PROFILE_CEILING,
             [pt(0, -100), pt(10, -100), pt(20, -95)], 1.0, 0.01);
         eqs(doc2.queryAllEntities(false, false).length, offBefore + 1,
             "CsTrace.emit: the spline lands even though the layer is off");
-        ok(doc2.queryLayer(CsLayers.PROFILE_TRACED_CEILING).isOff(),
+        ok(doc2.queryLayer(CsLayers.PROFILE_CEILING).isOff(),
             "CsTrace.emit: the layer is switched back off afterwards");
 
         // -- LOCKED and FROZEN refuse the add, and emit says so -----
@@ -15526,39 +15526,39 @@ if (!IS_NODE) {
             var dFz = new RDocument(new RMemoryStorage(),
                 new RSpatialIndexNavel());
             var iFz = new RDocumentInterface(dFz);
-            CsLayers.ensure(dFz, iFz, CsLayers.RAW);
+            CsLayers.ensure(dFz, iFz, CsLayers.CTRL_RAW);
             var ghost = new RLineEntity(dFz, new RLineData(
                 new RVector(0, 0), new RVector(10, 0)));
-            ghost.setLayerId(dFz.getLayerId(CsLayers.RAW));
+            ghost.setLayerId(dFz.getLayerId(CsLayers.CTRL_RAW));
             // CTRL-RAW ships OFF (CsLayers.OFF), so even the fixture's
             // own add has to go through the wrapper.
-            CsLayers.withLayerOn(dFz, iFz, CsLayers.RAW, function() {
+            CsLayers.withLayerOn(dFz, iFz, CsLayers.CTRL_RAW, function() {
                 var aop = new RAddObjectsOperation();
                 aop.addObject(ghost, false);
                 iFz.applyOperation(aop);
             });
-            eqs(dFz.queryLayerEntities(dFz.getLayerId(CsLayers.RAW),
+            eqs(dFz.queryLayerEntities(dFz.getLayerId(CsLayers.CTRL_RAW),
                 true).length, 1, "frozen-delete fixture: one ghost present");
 
-            var rawLay = dFz.queryLayer(CsLayers.RAW);
+            var rawLay = dFz.queryLayer(CsLayers.CTRL_RAW);
             rawLay.setFrozen(true);
             var fop = new RModifyObjectsOperation();
             fop.addObject(rawLay, false);
             iFz.applyOperation(fop);
-            ok(dFz.queryLayer(CsLayers.RAW).isFrozen(),
+            ok(dFz.queryLayer(CsLayers.CTRL_RAW).isFrozen(),
                 "frozen-delete fixture: the layer is frozen");
 
             var victim = dFz.queryEntity(dFz.queryLayerEntities(
-                dFz.getLayerId(CsLayers.RAW), true)[0]);
+                dFz.getLayerId(CsLayers.CTRL_RAW), true)[0]);
             CsRevise.withOffLayersOn(dFz, iFz, function() {
                 var dop = new RDeleteObjectsOperation();
                 dop.deleteObject(victim);
                 iFz.applyOperation(dop);
             });
-            eqs(dFz.queryLayerEntities(dFz.getLayerId(CsLayers.RAW),
+            eqs(dFz.queryLayerEntities(dFz.getLayerId(CsLayers.CTRL_RAW),
                 true).length, 0,
                 "withOffLayersOn: a delete on a FROZEN layer actually lands");
-            ok(dFz.queryLayer(CsLayers.RAW).isFrozen(),
+            ok(dFz.queryLayer(CsLayers.CTRL_RAW).isFrozen(),
                 "withOffLayersOn: and the layer is frozen again afterwards");
 
             // LOCKED is left alone on purpose: protection, not visibility.
@@ -15580,7 +15580,7 @@ if (!IS_NODE) {
 
         // -- no binding tag ----------------------------------------
         var onCeiling = doc2.queryLayerEntities(
-            doc2.getLayerId(CsLayers.PROFILE_TRACED_CEILING), true);
+            doc2.getLayerId(CsLayers.PROFILE_CEILING), true);
         var traced = doc2.queryEntity(onCeiling[0]);
         ok(!CsBind.hasLineworkTags(traced),
             "CsTrace.emit: leaves binding to the CsBind sweep, tags nothing");
@@ -15601,10 +15601,10 @@ if (!IS_NODE) {
         var doc = new RDocument(new RMemoryStorage(), new RSpatialIndexNavel());
         var di = new RDocumentInterface(doc);
 
-        CsLayers.ensure(doc, di, CsLayers.PROFILE_TRACED_CEILING);
+        CsLayers.ensure(doc, di, CsLayers.PROFILE_CEILING);
         var band = new RLineEntity(doc, new RLineData(
             new RVector(0, -200), new RVector(100, -180)));
-        band.setLayerId(doc.getLayerId(CsLayers.PROFILE_TRACED_CEILING));
+        band.setLayerId(doc.getLayerId(CsLayers.PROFILE_CEILING));
         var op = new RAddObjectsOperation();
         op.addObject(band, false);
         di.applyOperation(op);
@@ -15612,7 +15612,7 @@ if (!IS_NODE) {
         var box = CsTrace.profileRegion(doc);
 
         // -- in frame, both ways ------------------------------------
-        ok(FeatureTraceRun.frameGuard(box, CsLayers.PROFILE_TRACED_CEILING,
+        ok(FeatureTraceRun.frameGuard(box, CsLayers.PROFILE_CEILING,
             pt(50, -190)) === null,
             "frameGuard: a profile layer traced inside the region is allowed");
         ok(FeatureTraceRun.frameGuard(box, CsLayers.WALLS_SURVEYED,
@@ -15621,7 +15621,7 @@ if (!IS_NODE) {
 
         // -- out of frame, both ways --------------------------------
         var up = FeatureTraceRun.frameGuard(box,
-            CsLayers.PROFILE_TRACED_CEILING, pt(50, 500));
+            CsLayers.PROFILE_CEILING, pt(50, 500));
         ok(up !== null,
             "frameGuard: a profile layer traced up in the plan is refused");
         ok(String(up).indexOf("profile") >= 0,
@@ -15640,8 +15640,8 @@ if (!IS_NODE) {
         eqs(FeatureTraceRun.targetLayer(), CsLayers.WALLS_SURVEYED,
             "FeatureTraceRun.targetLayer: falls back to surveyed walls unarmed");
 
-        FeatureTrace = { target: CsLayers.PROFILE_TRACED_FLOOR };
-        eqs(FeatureTraceRun.targetLayer(), CsLayers.PROFILE_TRACED_FLOOR,
+        FeatureTrace = { target: CsLayers.PROFILE_FLOOR };
+        eqs(FeatureTraceRun.targetLayer(), CsLayers.PROFILE_FLOOR,
             "FeatureTraceRun.targetLayer: an armed target is what gets traced");
         FeatureTrace = { target: undefined };
         eqs(FeatureTraceRun.targetLayer(), CsLayers.WALLS_SURVEYED,
@@ -15697,7 +15697,7 @@ if (!IS_NODE) {
         for (i = 0; i < FeatureTrace.ROWS.length; i++) {
             var row = FeatureTrace.ROWS[i];
 
-            // The one-word slip this kills: CsLayers.PROFILE_FLOOR is the
+            // The one-word slip this kills: CsLayers.CTRL_PROFILE_FLOOR is the
             // GENERATED CTRL-PROFILE-FLOOR, which erase() owns and clears.
             // A row naming the generated twin fails HERE instead of
             // losing an hour of tracing at the next redraw.
@@ -15748,10 +15748,10 @@ if (!IS_NODE) {
 
         // -- arming is what FeatureTraceRun reads -------------------
         FeatureTrace.target = undefined;
-        FeatureTrace.armLayer(CsLayers.PROFILE_TRACED_FLOOR);
-        eqs(FeatureTrace.target, CsLayers.PROFILE_TRACED_FLOOR,
+        FeatureTrace.armLayer(CsLayers.PROFILE_FLOOR);
+        eqs(FeatureTrace.target, CsLayers.PROFILE_FLOOR,
             "FeatureTrace.armLayer: sets the target the drag reads");
-        eqs(FeatureTraceRun.targetLayer(), CsLayers.PROFILE_TRACED_FLOOR,
+        eqs(FeatureTraceRun.targetLayer(), CsLayers.PROFILE_FLOOR,
             "FeatureTrace.armLayer: the drag traces what the panel armed");
 
         // -- the smoothing table ------------------------------------
@@ -15841,7 +15841,7 @@ if (!IS_NODE) {
 
         ok(CsTrace.tiesOn(CsLayers.WALLS_SURVEYED),
             "CsTrace.tiesOn: surveyed walls tie");
-        ok(CsTrace.tiesOn(CsLayers.PROFILE_TRACED_FLOOR),
+        ok(CsTrace.tiesOn(CsLayers.PROFILE_FLOOR),
             "CsTrace.tiesOn: the elevation's floor is a wall, so it ties");
         ok(!CsTrace.tiesOn(CsLayers.BREAKDOWN_BOUNDARY),
             "CsTrace.tiesOn: a breakdown boundary does NOT weld to walls");
@@ -15940,13 +15940,13 @@ if (!IS_NODE) {
             var d = new RDocument(new RMemoryStorage(),
                 new RSpatialIndexNavel());
             var di2 = new RDocumentInterface(d);
-            CsLayers.ensure(d, di2, CsLayers.STATIONS);
+            CsLayers.ensure(d, di2, CsLayers.CTRL_STATIONS);
             var op3 = new RAddObjectsOperation();
             var nms = ["A1", "M4", "SINK2"];
             for (var q = 0; q < nms.length; q++) {
                 var p3 = new RPointEntity(d,
                     new RPointData(new RVector(q * 3, 0)));
-                p3.setLayerId(d.getLayerId(CsLayers.STATIONS));
+                p3.setLayerId(d.getLayerId(CsLayers.CTRL_STATIONS));
                 CsTags.set(p3, "Station", nms[q]);
                 op3.addObject(p3, false);
             }
@@ -16063,7 +16063,7 @@ if (!IS_NODE) {
                 buttons: [
                     { button: ceilingBtn,
                       row: { label: "Ceiling",
-                             layer: CsLayers.PROFILE_TRACED_CEILING } },
+                             layer: CsLayers.PROFILE_CEILING } },
                     { button: wallsBtn,
                       row: { label: "Surveyed Walls",
                              layer: CsLayers.WALLS_SURVEYED } }
@@ -16081,10 +16081,10 @@ if (!IS_NODE) {
                 "FeatureTrace.refresh: and the tooltip says what to do");
 
             // Give it a band, and the group opens up.
-            CsLayers.ensure(d, di3, CsLayers.PROFILE_SHOTS);
+            CsLayers.ensure(d, di3, CsLayers.CTRL_PROFILE_SHOTS);
             var band = new RLineEntity(d, new RLineData(
                 new RVector(0, -200), new RVector(50, -190)));
-            band.setLayerId(d.getLayerId(CsLayers.PROFILE_SHOTS));
+            band.setLayerId(d.getLayerId(CsLayers.CTRL_PROFILE_SHOTS));
             var bop = new RAddObjectsOperation();
             bop.addObject(band, false);
             di3.applyOperation(bop);
@@ -16095,7 +16095,7 @@ if (!IS_NODE) {
             // The marker follows the SELECTED RUN's layer, since that is
             // what a click would actually draw to.
             CsLayerVariants.ensureProfile(d, di3,
-                CsLayers.PROFILE_TRACED_CEILING, "A");
+                CsLayers.PROFILE_CEILING, "A");
             // The wrapper itself: a label that fits is untouched, one
             // that does not is broken on a space, and a single word
             // longer than the budget is left whole rather than cut
@@ -16151,7 +16151,7 @@ if (!IS_NODE) {
         // a wall runs straight through survey boundaries.
         FeatureTrace.widgets = { runCombo: { currentText: "A" } };
 
-        FeatureTrace.target = CsLayers.PROFILE_TRACED_CEILING;
+        FeatureTrace.target = CsLayers.PROFILE_CEILING;
         eqs(FeatureTraceRun.targetLayer(null), "PROFILE-CEILING-A",
             "run selector: a profile feature goes to its run's layer");
 
@@ -16168,8 +16168,8 @@ if (!IS_NODE) {
 
         // "(all runs)" means the shared layer, not a run called that.
         FeatureTrace.widgets = { runCombo: { currentText: FeatureTrace.RUN_SHARED } };
-        FeatureTrace.target = CsLayers.PROFILE_TRACED_CEILING;
-        eqs(FeatureTraceRun.targetLayer(null), CsLayers.PROFILE_TRACED_CEILING,
+        FeatureTrace.target = CsLayers.PROFILE_CEILING;
+        eqs(FeatureTraceRun.targetLayer(null), CsLayers.PROFILE_CEILING,
             "run selector: the shared entry means the shared layer");
 
         // Lower case from the combo must resolve to the same layer.
@@ -16179,7 +16179,7 @@ if (!IS_NODE) {
 
         // No panel, no run: the drag still works standalone.
         FeatureTrace.widgets = undefined;
-        eqs(FeatureTraceRun.targetLayer(null), CsLayers.PROFILE_TRACED_CEILING,
+        eqs(FeatureTraceRun.targetLayer(null), CsLayers.PROFILE_CEILING,
             "run selector: with no panel a profile feature uses the shared layer");
         ok(FeatureTraceRun.runToken() === null,
             "run selector: no panel means no run");
@@ -16240,15 +16240,15 @@ if (!IS_NODE) {
         "CsLayerVariants.sanitize: null is null, not a throw");
 
     // -- nameFor ----------------------------------------------------
-    eqs(CsLayerVariants.nameFor(CsLayers.PROFILE_TRACED_CEILING, "A"),
+    eqs(CsLayerVariants.nameFor(CsLayers.PROFILE_CEILING, "A"),
         "PROFILE-CEILING-A",
         "CsLayerVariants.nameFor: the token goes last");
-    eqs(CsLayerVariants.nameFor(CsLayers.PROFILE_SHOTS, "B"),
+    eqs(CsLayerVariants.nameFor(CsLayers.CTRL_PROFILE_SHOTS, "B"),
         "CTRL-PROFILE-SHOTS-B",
         "CsLayerVariants.nameFor: a generated base keeps its CTRL- prefix");
     ok(CsLayerVariants.nameFor("NOT-A-REGISTRY-LAYER", "A") === null,
         "CsLayerVariants.nameFor: refuses a base with no appearance to inherit");
-    ok(CsLayerVariants.nameFor(CsLayers.PROFILE_TRACED_CEILING, "") === null,
+    ok(CsLayerVariants.nameFor(CsLayers.PROFILE_CEILING, "") === null,
         "CsLayerVariants.nameFor: refuses an empty token");
 
     // -- the frame and linework rules survive, which is why token-last
@@ -16292,9 +16292,9 @@ if (!IS_NODE) {
         "CsLayerVariants.baseOf: an unknown name has no base");
 
     // -- round trip -------------------------------------------------
-    var bases = [CsLayers.PROFILE_TRACED_CEILING, CsLayers.PROFILE_TRACED_FLOOR,
+    var bases = [CsLayers.PROFILE_CEILING, CsLayers.PROFILE_FLOOR,
         CsLayers.PROFILE_WALLS_INFERRED, CsLayers.PROFILE_BREAKDOWN,
-        CsLayers.PROFILE_ENTRANCE, CsLayers.PROFILE_SHOTS,
+        CsLayers.PROFILE_ENTRANCE, CsLayers.CTRL_PROFILE_SHOTS,
         CsLayers.WALLS_SURVEYED, CsLayers.BREAKDOWN_BOUNDARY];
     for (var bi = 0; bi < bases.length; bi++) {
         var nm = CsLayerVariants.nameFor(bases[bi], "G");
@@ -16331,7 +16331,7 @@ if (!IS_NODE) {
             "variant fixture: a fresh drawing has no variant layers");
 
         var made = CsLayerVariants.ensure(doc, di,
-            CsLayers.PROFILE_TRACED_CEILING, "A");
+            CsLayers.PROFILE_CEILING, "A");
         eqs(made, "PROFILE-CEILING-A",
             "CsLayerVariants.ensure: returns the name it made");
         ok(doc.hasLayer("PROFILE-CEILING-A"),
@@ -16341,8 +16341,8 @@ if (!IS_NODE) {
         // The whole point. Without the baseOf hook in CsLayers.ensure a
         // variant silently takes the white/CONTINUOUS/Weight025 fallback
         // and looks nothing like the layer it varies.
-        CsLayers.ensure(doc, di, CsLayers.PROFILE_TRACED_CEILING);
-        var baseLay = doc.queryLayer(CsLayers.PROFILE_TRACED_CEILING);
+        CsLayers.ensure(doc, di, CsLayers.PROFILE_CEILING);
+        var baseLay = doc.queryLayer(CsLayers.PROFILE_CEILING);
         var varLay = doc.queryLayer("PROFILE-CEILING-A");
         eqs(String(varLay.getColor().toString()),
             String(baseLay.getColor().toString()),
@@ -16376,7 +16376,7 @@ if (!IS_NODE) {
         // only ties within a layer. The elevation is already drawn one
         // band per run, so there the division is real.
         eqs(CsLayerVariants.ensureProfile(doc, di,
-                CsLayers.PROFILE_TRACED_FLOOR, "C"), "PROFILE-FLOOR-C",
+                CsLayers.PROFILE_FLOOR, "C"), "PROFILE-FLOOR-C",
             "ensureProfile: a profile base is allowed");
         ok(CsLayerVariants.ensureProfile(doc, di,
                 CsLayers.WALLS_SURVEYED, "C") === null,
@@ -16386,7 +16386,7 @@ if (!IS_NODE) {
         ok(CsLayerVariants.ensureProfile(doc, di, CsLayers.BORDER, "C") === null,
             "ensureProfile: a SHEET base is refused too");
         ok(CsLayerVariants.ensureProfile(doc, di,
-                CsLayers.PROFILE_SHOTS, "C") !== null,
+                CsLayers.CTRL_PROFILE_SHOTS, "C") !== null,
             "ensureProfile: a GENERATED profile base is allowed");
 
         // The general ensure() stays general: the library serves other
@@ -16401,11 +16401,11 @@ if (!IS_NODE) {
             "CsLayerVariants.ensure: and creates nothing when it refuses");
 
         // -- queries -------------------------------------------------
-        CsLayerVariants.ensure(doc, di, CsLayers.PROFILE_TRACED_CEILING, "B");
-        CsLayerVariants.ensure(doc, di, CsLayers.PROFILE_TRACED_FLOOR, "A");
-        CsLayerVariants.ensure(doc, di, CsLayers.PROFILE_SHOTS, "A");
+        CsLayerVariants.ensure(doc, di, CsLayers.PROFILE_CEILING, "B");
+        CsLayerVariants.ensure(doc, di, CsLayers.PROFILE_FLOOR, "A");
+        CsLayerVariants.ensure(doc, di, CsLayers.CTRL_PROFILE_SHOTS, "A");
 
-        var toks = CsLayerVariants.tokensIn(doc, CsLayers.PROFILE_TRACED_CEILING);
+        var toks = CsLayerVariants.tokensIn(doc, CsLayers.PROFILE_CEILING);
         eqs(toks.length, 2, "CsLayerVariants.tokensIn: finds both runs");
         eqs(toks[0], "A", "CsLayerVariants.tokensIn: sorted, A first");
         eqs(toks[1], "B", "CsLayerVariants.tokensIn: sorted, B second");
@@ -16428,7 +16428,7 @@ if (!IS_NODE) {
         // trip BELONGS in a layer name is a separate question -- see the
         // plan -- but the mechanism is here.
         var comp = CsLayerVariants.ensure(doc, di,
-            CsLayers.PROFILE_TRACED_CEILING, "B-4");
+            CsLayers.PROFILE_CEILING, "B-4");
         eqs(comp, "PROFILE-CEILING-B_4",
             "CsLayerVariants: a composite token stays parseable");
         var compBack = CsLayerVariants.split(comp);
@@ -16471,13 +16471,13 @@ if (!IS_NODE) {
             var d = new RDocument(new RMemoryStorage(),
                 new RSpatialIndexNavel());
             var i2 = new RDocumentInterface(d);
-            CsLayers.ensure(d, i2, CsLayers.STATIONS);
+            CsLayers.ensure(d, i2, CsLayers.CTRL_STATIONS);
             var names = ["A1", "A2", "B1", "G7"];
             var op2 = new RAddObjectsOperation();
             for (var n = 0; n < names.length; n++) {
                 var pt2 = new RPointEntity(d,
                     new RPointData(new RVector(n * 5, 0)));
-                pt2.setLayerId(d.getLayerId(CsLayers.STATIONS));
+                pt2.setLayerId(d.getLayerId(CsLayers.CTRL_STATIONS));
                 CsTags.set(pt2, "Station", names[n]);
                 op2.addObject(pt2, false);
             }
@@ -16497,7 +16497,7 @@ if (!IS_NODE) {
             // A run whose survey is gone but whose linework remains must
             // still be reachable from the panel that made it.
             CsLayerVariants.ensureProfile(d, i2,
-                CsLayers.PROFILE_TRACED_CEILING, "Z");
+                CsLayers.PROFILE_CEILING, "Z");
             var withOrphan = CsProfileDraw.runsIn(d);
             var sawZ = false;
             for (var z = 0; z < withOrphan.length; z++) {
@@ -16517,11 +16517,11 @@ if (!IS_NODE) {
                 new RSpatialIndexNavel());
             var i3 = new RDocumentInterface(d);
             // Two runs, each with a generated band layer and a traced one.
-            CsLayerVariants.ensureProfile(d, i3, CsLayers.PROFILE_SHOTS, "A");
+            CsLayerVariants.ensureProfile(d, i3, CsLayers.CTRL_PROFILE_SHOTS, "A");
             CsLayerVariants.ensureProfile(d, i3,
-                CsLayers.PROFILE_TRACED_CEILING, "A");
-            CsLayerVariants.ensureProfile(d, i3, CsLayers.PROFILE_SHOTS, "B");
-            CsLayers.ensure(d, i3, CsLayers.PROFILE_SHOTS);   // shared
+                CsLayers.PROFILE_CEILING, "A");
+            CsLayerVariants.ensureProfile(d, i3, CsLayers.CTRL_PROFILE_SHOTS, "B");
+            CsLayers.ensure(d, i3, CsLayers.CTRL_PROFILE_SHOTS);   // shared
             CsLayers.ensure(d, i3, CsLayers.WALLS_SURVEYED);  // plan
 
             eqs(CsProfileDraw.profileVariantLayers(d).length, 3,
@@ -16535,7 +16535,7 @@ if (!IS_NODE) {
                 "isolateRun: run A's TRACED work stays visible too");
             ok(d.queryLayer("CTRL-PROFILE-SHOTS-B").isOff(),
                 "isolateRun: run B is hidden");
-            ok(!d.queryLayer(CsLayers.PROFILE_SHOTS).isOff(),
+            ok(!d.queryLayer(CsLayers.CTRL_PROFILE_SHOTS).isOff(),
                 "isolateRun: the SHARED profile layer is left alone");
             ok(!d.queryLayer(CsLayers.WALLS_SURVEYED).isOff(),
                 "isolateRun: plan layers are never touched");
@@ -16586,20 +16586,20 @@ if (!IS_NODE) {
         // -- layerFor ensures and returns the variant ----------------
         var c0 = docWith();
         var got = CsProfileDraw.layerFor(c0.doc, c0.di,
-            CsLayers.PROFILE_SHOTS, { key: "A" });
+            CsLayers.CTRL_PROFILE_SHOTS, { key: "A" });
         eqs(got, "CTRL-PROFILE-SHOTS-A",
             "CsProfileDraw.layerFor: a band draws to its own run's layer");
         ok(c0.doc.hasLayer("CTRL-PROFILE-SHOTS-A"),
             "CsProfileDraw.layerFor: and creates it on demand");
-        eqs(CsProfileDraw.layerFor(c0.doc, c0.di, CsLayers.PROFILE_SHOTS, null),
-            CsLayers.PROFILE_SHOTS,
+        eqs(CsProfileDraw.layerFor(c0.doc, c0.di, CsLayers.CTRL_PROFILE_SHOTS, null),
+            CsLayers.CTRL_PROFILE_SHOTS,
             "CsProfileDraw.layerFor: no band means the shared base layer");
 
         // -- ownLayerNames sees variants of owned bases only ---------
         var own = CsProfileDraw.ownLayerNames(c0.doc);
         var hasVariant = false, hasStrayVariant = false;
         CsLayerVariants.ensureProfile(c0.doc, c0.di,
-            CsLayers.PROFILE_TRACED_CEILING, "A");   // NOT an owned base
+            CsLayers.PROFILE_CEILING, "A");   // NOT an owned base
         own = CsProfileDraw.ownLayerNames(c0.doc);
         for (var oi = 0; oi < own.length; oi++) {
             if (own[oi] === "CTRL-PROFILE-SHOTS-A") { hasVariant = true; }
@@ -16674,14 +16674,14 @@ if (!IS_NODE) {
             // The shared layer must keep working, for drawings that
             // predate segregation.
             var cShr = docWith();
-            stationOn(cShr, CsLayers.PROFILE_STATIONS, "A2", 0, -200);
+            stationOn(cShr, CsLayers.CTRL_PROFILE_STATIONS, "A2", 0, -200);
             eqs(CsProfileBind.stationIndex(cShr.doc).length, 1,
                 "CsProfileBind.stationIndex: a shared-layer station still counts");
 
             // And a station on a layer that is NOT ours is still ignored,
             // which is the ownership property the base test protected.
             var cAlien = docWith();
-            stationOn(cAlien, CsLayers.PROFILE_TRACED_CEILING, "A2", 0, -200);
+            stationOn(cAlien, CsLayers.PROFILE_CEILING, "A2", 0, -200);
             eqs(CsProfileBind.stationIndex(cAlien.doc).length, 0,
                 "CsProfileBind.stationIndex: a point on a TRACED layer is not a station of ours");
         }());
@@ -16723,7 +16723,7 @@ if (!IS_NODE) {
 
             // Traced 500 units above the band: nowhere near any station.
             var traced = CsLayerVariants.ensureProfile(ctx.doc, ctx.di,
-                CsLayers.PROFILE_TRACED_CEILING, "A");
+                CsLayers.PROFILE_CEILING, "A");
             var sp5 = new RSpline();
             sp5.setDegree(1);
             sp5.appendControlPoint(new RVector(0, 300));
@@ -16764,13 +16764,13 @@ if (!IS_NODE) {
         // the shared bases -- this is what pins that, since dropping the
         // bases from ownLayerNames would silently orphan all of it.
         var cShared = docWith();
-        generated(cShared, CsLayers.PROFILE_SHOTS, "A");
-        generated(cShared, CsLayers.PROFILE_STATIONS, "B");
+        generated(cShared, CsLayers.CTRL_PROFILE_SHOTS, "A");
+        generated(cShared, CsLayers.CTRL_PROFILE_STATIONS, "B");
         generated(cShared, "CTRL-PROFILE-SHOTS-A", "A");
         eqs(CsProfileDraw.erase(cShared.doc, cShared.di), 3,
             "erase unscoped: clears the SHARED layers as well as the variants");
         eqs(cShared.doc.queryLayerEntities(
-                cShared.doc.getLayerId(CsLayers.PROFILE_SHOTS), true).length, 0,
+                cShared.doc.getLayerId(CsLayers.CTRL_PROFILE_SHOTS), true).length, 0,
             "erase unscoped: no pre-segregation geometry is left behind");
 
         var ownNames = CsProfileDraw.ownLayerNames(cShared.doc);
@@ -16788,7 +16788,7 @@ if (!IS_NODE) {
         // Scoping reads the ProfileRun TAG, not the layer's token, so
         // output drawn before layers were segregated is still cleaned.
         var cOld = docWith();
-        generated(cOld, CsLayers.PROFILE_SHOTS, "A");
+        generated(cOld, CsLayers.CTRL_PROFILE_SHOTS, "A");
         eqs(CsProfileDraw.erase(cOld.doc, cOld.di, "A"), 1,
             "CsProfileDraw.erase: scoped erase still finds pre-segregation output");
 
@@ -17535,9 +17535,9 @@ if (!IS_NODE) {
             (new QDir()).mkpath(liveDir);
             var live = liveDir + "/cs-erase-backup.dxf";
 
-            CsLayers.ensure(d2, i6, CsLayers.STATIONS);
+            CsLayers.ensure(d2, i6, CsLayers.CTRL_STATIONS);
             var pt6 = new RPointEntity(d2, new RPointData(new RVector(0, 0)));
-            pt6.setLayerId(d2.getLayerId(CsLayers.STATIONS));
+            pt6.setLayerId(d2.getLayerId(CsLayers.CTRL_STATIONS));
             CsTags.set(pt6, "Station", "A1");
             var o6 = new RAddObjectsOperation();
             o6.addObject(pt6, false);
