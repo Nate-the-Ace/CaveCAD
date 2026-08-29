@@ -1,6 +1,6 @@
 # Tests
 
-Nine stages, cheapest first, all driven by one script:
+Eleven stages, cheapest first, all driven by one script:
 
     ./tests/run_all.sh             what has to pass while developing
     ./tests/run_all.sh --publish   also what has to pass before releasing
@@ -75,6 +75,8 @@ elevation binds to elevation stations rather than to the plan stations a
 few units away in absolute coordinates.
 
 ## Stage 5/9 -- `generate_profile_run.js`
+
+`tests/cross_section_run.js` -- the cross-section lifecycle against a real document: cut a section on a fixture survey, place it as a block on a leader, change the survey and assert the block DEFINITION followed while the REFERENCE stayed put, then assert a frozen section is skipped and counted and a section whose leg is gone is counted lost and left in the drawing. Needs the real engine: every bug this feature shipped (a false re-entrant on every LRUD diamond, an inverted scale caption, sections drawn on their side) was invisible to the pure tests and obvious the first time the code met an RDocument.
 
 Drives the Generate Profile TOOL's own entry point (not just the Core
 library it calls) through the real `include()` chain, against a real
