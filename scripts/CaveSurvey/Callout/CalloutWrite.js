@@ -851,24 +851,43 @@ CalloutWrite.createSection = function(doc, di, spec) {
     op.setText("Place cross section");
     op.addObject(ref, false);
 
-    // The box comes from the CUT, not from the placed reference: a
-    // block reference's bounding box is cached and a redefine does not
-    // invalidate it, so measuring here would solve the leaders against
-    // a stale box.
-    var local = CsSectionDraw.localBox(spec.cut, scale,
-        CsSectionDraw.textHeight(doc));
-    var box = { x1: local.x1 + at.x, y1: local.y1 + at.y,
-                x2: local.x2 + at.x, y2: local.y2 + at.y };
-    var geom = CsCallout.reflow(box, spec.tips, {
-        side: "auto", leader: shape, dimasz: null, dimscale: null
-    });
-    for (var b = 0; b < geom.branches.length; b++) {
-        var pl = new RPolyline();
-        var pts = geom.branches[b];
-        for (var v = 0; v < pts.length; v++) {
-            pl.appendVertex(new RVector(pts[v].x, pts[v].y),
-                pts[v].bulge || 0.0);
+    CalloutWrite.addSectionLeaders(doc, op, id, spec.cut, scale, at,
+        spec.tips, style, layerName);
+    di.applyOperation(op);
+    return id;
+};
+
+/**
+ * The leaders for a section: one straight line from each picked point
+ * to where it FIRST meets the section's own linework, aimed at the
+ * section's centroid.
+ *
+ * Not CsCallout.reflow, which lands on a bounding BOX with a shoulder.
+ * A section is a shape, not a block of text, and a leader that stops on
+ * the outline it points at reads as pointing at the passage rather than
+ * at the rectangle around it. Nathan's call, and the reason the shape
+ * is available here at all is that the cut is passed in rather than
+ * measured off the placed block.
+ *
+ * A pick INSIDE the section gets no leader: there is nothing to stop at
+ * and a zero-length leader is just an arrowhead in the middle of the
+ * drawing.
+ */
+CalloutWrite.addSectionLeaders = function(doc, op, id, cut, scale, at,
+        tips, style, layerName) {
+    var points = CsSectionDraw.localPoints(cut, scale);
+    for (var i = 0; i < tips.length; i++) {
+        var localTip = { x: tips[i].x - at.x, y: tips[i].y - at.y };
+        var stop = CsSectionDraw.leaderStop(points, localTip);
+        if (stop === null) {
+            continue;
         }
+        var pl = new RPolyline();
+        // The tip FIRST: RLeaderData puts its arrowhead on the first
+        // vertex, and the arrow belongs at the passage, not at the
+        // section.
+        pl.appendVertex(new RVector(tips[i].x, tips[i].y));
+        pl.appendVertex(new RVector(at.x + stop.x, at.y + stop.y));
         var ent = new RLeaderEntity(doc, new RLeaderData(pl, true));
         ent.setLayerId(doc.getLayerId(layerName));
         CsTags.set(ent, CsCallout.KEY.ID, id);
@@ -876,8 +895,6 @@ CalloutWrite.createSection = function(doc, di, spec) {
         CsTags.set(ent, CsCallout.KEY.STYLE, style);
         op.addObject(ent, false);
     }
-    di.applyOperation(op);
-    return id;
 };
 
 /**
@@ -947,6 +964,37 @@ CalloutWrite.refreshSections = function(doc, di, survey, resolved) {
         }
         CsSectionDraw.define(doc, di, ids[i], cut,
             { from: from, to: to, t: t, scale: scale });
+
+        // The outline moved, so where each leader STOPS moved with it.
+        // Rebuild them from their own tips -- the picked points, which
+        // are the one thing about a leader that is the caver's.
+        try {
+            var at = m.block.getData().getPosition();
+            var tips = [];
+            var li;
+            for (li = 0; li < m.leaders.length; li++) {
+                var v0 = m.leaders[li].getData().getVertexAt(0);
+                tips.push({ x: v0.x, y: v0.y });
+            }
+            if (tips.length > 0) {
+                var lop = new RAddObjectsOperation();
+                lop.setText("Re-aim cross section leaders");
+                for (li = 0; li < m.leaders.length; li++) {
+                    lop.deleteObject(m.leaders[li]);
+                }
+                var lstyle = CsTags.get(m.block, CsCallout.KEY.STYLE) ||
+                    CsCallout.STYLE_DEFAULT;
+                CalloutWrite.addSectionLeaders(doc, lop, ids[i], cut,
+                    scale, at, tips, lstyle,
+                    CsCallout.STYLES[lstyle] ||
+                        CsCallout.STYLES[CsCallout.STYLE_DEFAULT]);
+                di.applyOperation(lop);
+            }
+        } catch (eLead) {
+            // the section itself redrew; a leader left pointing at the
+            // old edge is wrong but visible, which beats losing it
+        }
+
         try {
             CsTags.set(m.block, CsCallout.KEY.SECTION_NEAREST,
                 String(cut.nearest));

@@ -10341,6 +10341,37 @@ if (!IS_NODE) {
         "Cross sections: 2 no longer cuttable.",
         "CsReport.refreshLine: a refusal is never swallowed");
 
+    // THE LEADER STOPS ON THE SECTION'S OWN LINEWORK. A square outline
+    // 10 wide about the origin, approached from x = -50: the leader
+    // aims at the centroid (the origin) and must stop at x = -10, on
+    // the edge, not run to the middle.
+    var square = [{ x: -10, y: -10 }, { x: -10, y: 10 },
+                  { x: 10, y: 10 }, { x: 10, y: -10 }];
+    var stop = CsSectionDraw.leaderStop(square, { x: -50, y: 0 });
+    ok(stop !== null, "CsSectionDraw.leaderStop: the leader meets the outline");
+    near(stop.x, -10, 1e-9, "CsSectionDraw.leaderStop: it stops on the edge");
+    near(stop.y, 0, 1e-9, "CsSectionDraw.leaderStop: on the line to the centroid");
+
+    // From below, it stops on the bottom edge -- the FIRST crossing,
+    // never the far side.
+    var below = CsSectionDraw.leaderStop(square, { x: 0, y: -50 });
+    near(below.y, -10, 1e-9,
+        "CsSectionDraw.leaderStop: the first crossing, not the far edge");
+
+    // A pick INSIDE the section has nothing to stop at.
+    ok(CsSectionDraw.leaderStop(square, { x: 1, y: 1 }) === null,
+        "CsSectionDraw.leaderStop: a pick inside draws no leader");
+
+    var off = [{ x: 0, y: 0 }, { x: 4, y: 0 }, { x: 4, y: 4 }, { x: 0, y: 4 }];
+    var c = CsSectionDraw.centroidOf(off);
+    near(c.x, 2, 1e-9, "CsSectionDraw.centroidOf: x");
+    near(c.y, 2, 1e-9, "CsSectionDraw.centroidOf: y");
+
+    eqs(CsSectionDraw.scaleText(2), "2:1",
+        "CsSectionDraw.scaleText: the default reads 2:1");
+    eqs(CsSectionDraw.SCALE, 2.0,
+        "CsSectionDraw.SCALE: sections draw at 2:1 by default");
+
     eqs(CsSectionDraw.scaleText(4), "4:1",
         "CsSectionDraw.scaleText: an enlargement reads 4:1");
     eqs(CsSectionDraw.scaleText(1), "1:1",

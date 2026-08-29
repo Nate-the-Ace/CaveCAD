@@ -118,6 +118,20 @@ check("the block is this section's own definition",
     doc.getBlockId(CsSectionDraw.blockName(id)) ===
         m.block.getData().getReferencedBlockId());
 
+// The leader runs from the PICKED POINT to the section's own outline,
+// not to a bounding box: it must start at the tip and end on the
+// linework, short of the centroid.
+var lead = m.leaders[0].getData();
+var v0 = lead.getVertexAt(0);
+var v1 = lead.getVertexAt(1);
+checkClose("the leader starts at the picked point (x)", v0.x, 0);
+checkClose("the leader starts at the picked point (y)", v0.y, 15);
+check("the leader ends short of the section's centre",
+    Math.sqrt((v1.x - 200) * (v1.x - 200) +
+              (v1.y - 200) * (v1.y - 200)) > 1);
+check("and it ends INSIDE the section's own extent",
+    Math.abs(v1.x - 200) <= 40.001 && Math.abs(v1.y - 200) <= 40.001);
+
 var placedAt = m.block.getData().getPosition();
 checkClose("the reference sits where it was placed (x)", placedAt.x, 200);
 checkClose("the reference sits where it was placed (y)", placedAt.y, 200);
@@ -145,6 +159,11 @@ check("the DEFINITION followed the survey -- the section got wider",
 var stillAt = m2.block.getData().getPosition();
 checkClose("and the REFERENCE did not move (x)", stillAt.x, 200);
 checkClose("and the REFERENCE did not move (y)", stillAt.y, 200);
+
+// The leader was RE-AIMED at the new outline, not left on the old edge.
+var m2lead = m2.leaders[0].getData();
+var w0 = m2lead.getVertexAt(0);
+checkClose("the re-aimed leader still starts at the picked point", w0.x, 0);
 
 // ---- frozen sections are left alone, and counted ---------------------
 CsTags.set(m2.block, CsCallout.KEY.SECTION_FROZEN, "1");

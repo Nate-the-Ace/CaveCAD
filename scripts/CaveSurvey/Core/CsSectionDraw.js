@@ -35,7 +35,7 @@ var CsSectionDraw = {};
 /** Drawing units per survey unit inside a section. A section drawn at
  *  plan scale is a smudge -- a three-metre passage on a 1:500 sheet --
  *  so a section carries its OWN scale and says so in its caption. */
-CsSectionDraw.SCALE = 4.0;
+CsSectionDraw.SCALE = 2.0;
 CsSectionDraw.SETTING_SCALE = "CaveSurvey/SectionScale";
 
 /** The tag every generated member of a section carries. */
@@ -80,6 +80,73 @@ CsSectionDraw.pointOf = function(sample, scale) {
 CsSectionDraw.vectorOf = function(sample, scale) {
     var p = CsSectionDraw.pointOf(sample, scale);
     return new RVector(p.x, p.y);
+};
+
+/** The outline as plain block-local points. Pure, so the leader maths
+ *  below is testable under node. */
+CsSectionDraw.localPoints = function(cut, scale) {
+    var out = [];
+    for (var i = 0; i < cut.outline.length; i++) {
+        out.push(CsSectionDraw.pointOf(cut.outline[i], scale));
+    }
+    return out;
+};
+
+/** The centroid of the section's own outline -- what a leader aims at.
+ *  The vertex mean, not the area centroid: the outline is sampled at
+ *  even angles, so the two agree closely and this one cannot divide by
+ *  a zero area on a degenerate cut. */
+CsSectionDraw.centroidOf = function(points) {
+    if (points.length === 0) {
+        return { x: 0, y: 0 };
+    }
+    var sx = 0, sy = 0;
+    for (var i = 0; i < points.length; i++) {
+        sx += points[i].x;
+        sy += points[i].y;
+    }
+    return { x: sx / points.length, y: sy / points.length };
+};
+
+/**
+ * Where a leader aimed at the section's centroid FIRST meets the
+ * section's own linework -- the point the leader should stop at, so it
+ * touches the outline rather than burying its head inside the drawing.
+ *
+ * Everything is block-local. `from` is the picked point expressed in
+ * the block's own frame (world tip minus the block's insertion point).
+ *
+ * \return {x, y}, or null when the segment never crosses the outline
+ *         (the pick is INSIDE the section, where there is nothing to
+ *         stop at and the caller draws no leader at all)
+ */
+CsSectionDraw.leaderStop = function(points, from) {
+    if (points.length < 3) {
+        return null;
+    }
+    var to = CsSectionDraw.centroidOf(points);
+    var dx = to.x - from.x, dy = to.y - from.y;
+    var bestT = null;
+    for (var i = 0; i < points.length; i++) {
+        var a = points[i], b = points[(i + 1) % points.length];
+        var ex = b.x - a.x, ey = b.y - a.y;
+        var den = dx * ey - dy * ex;
+        if (Math.abs(den) < 1e-12) {
+            continue;                       // parallel
+        }
+        // t along from->to, u along the outline segment
+        var t = ((a.x - from.x) * ey - (a.y - from.y) * ex) / den;
+        var u = ((a.x - from.x) * dy - (a.y - from.y) * dx) / den;
+        if (t >= 0 && t <= 1 && u >= 0 && u <= 1) {
+            if (bestT === null || t < bestT) {
+                bestT = t;
+            }
+        }
+    }
+    if (bestT === null) {
+        return null;
+    }
+    return { x: from.x + dx * bestT, y: from.y + dy * bestT };
 };
 
 /** One entity into the block definition, layered and tagged. Layer and
