@@ -15299,27 +15299,45 @@ if (!IS_NODE) {
         loadRepoScript("scripts/CaveSurvey/FeatureTrace/FeatureTraceRun.js");
         loadRepoScript("scripts/CaveSurvey/FeatureTrace/FeatureTrace.js");
 
-        eqs(FeatureTrace.ROWS.length, 10,
-            "FeatureTrace.ROWS: ten traceable features");
+        eqs(FeatureTrace.ROWS.length, 15,
+            "FeatureTrace.ROWS: fifteen traceable features");
 
-        var planCount = 0, profileCount = 0, i;
+        var planCount = 0, profileCount = 0, sectionCount = 0, i;
         var seen = {};
         for (i = 0; i < FeatureTrace.ROWS.length; i++) {
             var row = FeatureTrace.ROWS[i];
 
             // The one-word slip this kills: CsLayers.PROFILE_FLOOR is the
             // GENERATED CTRL-PROFILE-FLOOR, which erase() owns and clears.
-            // isLineworkLayer is false for anything CTRL-, so a row naming
-            // the generated twin fails HERE instead of losing an hour of
-            // tracing at the next redraw.
-            ok(CsBind.isLineworkLayer(row.layer),
+            // A row naming the generated twin fails HERE instead of
+            // losing an hour of tracing at the next redraw.
+            //
+            // This used to be asserted through CsBind.isLineworkLayer,
+            // which was a PROXY for "does not begin CTRL-". That proxy
+            // stopped meaning it when section layers were deliberately
+            // held out of binding (see the gate in CsBind): a section
+            // row is traceable and correctly NOT bindable. So the check
+            // now states the actual rule, and binding is asserted for
+            // the two frames that do bind.
+            ok(String(row.layer).indexOf("CTRL-") !== 0,
                 "FeatureTrace.ROWS: " + row.layer +
-                    " is a linework layer, not a generated CTRL- one");
+                    " is a traced layer, not a generated CTRL- one");
 
             var frame = CsLayers.frameOf(row.layer);
-            ok(frame === "plan" || frame === "profile",
+            ok(frame === "plan" || frame === "profile" || frame === "section",
                 "FeatureTrace.ROWS: " + row.layer + " is in a view frame");
-            if (frame === "plan") { planCount++; } else { profileCount++; }
+            if (frame === "plan") {
+                planCount++;
+            } else if (frame === "profile") {
+                profileCount++;
+            } else {
+                sectionCount++;
+            }
+            if (frame !== "section") {
+                ok(CsBind.isLineworkLayer(row.layer),
+                    "FeatureTrace.ROWS: " + row.layer +
+                        " is bindable linework -- it is traced by hand");
+            }
 
             ok(!isNull(row.label) && row.label.length > 0,
                 "FeatureTrace.ROWS: " + row.layer + " has a label");
@@ -15336,6 +15354,7 @@ if (!IS_NODE) {
         }
         eqs(planCount, 5, "FeatureTrace.ROWS: five plan rows");
         eqs(profileCount, 5, "FeatureTrace.ROWS: five profile rows");
+        eqs(sectionCount, 5, "FeatureTrace.ROWS: five section rows");
 
         // -- arming is what FeatureTraceRun reads -------------------
         FeatureTrace.target = undefined;
