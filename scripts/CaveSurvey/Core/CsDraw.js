@@ -412,7 +412,7 @@ CsDraw.noteLeader = function(doc, op, pos, name, note, azimuthDeg, lrud) {
  * scheme's collision; station-level Azimuth etc. remain but legs are
  * canonical). Each trip's first resolved station anchors that trip's
  * metadata (Trip* tags); the trip-0 anchor additionally carries
- * StartNote/StartLrud, the legacy Survey* block, the adjustment record
+ * StartNote/StartLRUD, the legacy Survey* block, the adjustment record
  * (Adjustment/SigmaTape/SigmaAngle -- what this drawing's geometry was
  * solved with, so a redraw reproduces it instead of re-solving under
  * today's settings), and the shots the drawing can't show as geometry
@@ -819,7 +819,7 @@ CsDraw.survey = function(survey, resolved, originStation, originPos, seqBase) {
         CsTags.set(anchor0, "DistanceUnit", survey.distanceUnit);
         // v3: the first station's own data (no arriving shot carries it)
         CsTags.set(anchor0, "StartNote", survey.startNote);
-        CsTags.set(anchor0, "StartLrud",
+        CsTags.set(anchor0, "StartLRUD",
             CsModel.startLrudText(survey.startLrud));
         // WHAT THIS DRAWING WAS ADJUSTED WITH, so reopening it and
         // pressing Draw reproduces the geometry it already has instead

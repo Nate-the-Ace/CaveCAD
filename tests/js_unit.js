@@ -6398,8 +6398,8 @@ if (!IS_NODE) {
             CsTags.get(a0, "TripDistanceUnit") === "ft",
             "v3: trip 0 anchor declination/unit");
         ok(a0 !== undefined && CsTags.get(a0, "StartNote") === "rig here" &&
-            CsTags.get(a0, "StartLrud") === "1,2,3,4",
-            "v3: trip 0 anchor StartNote/StartLrud");
+            CsTags.get(a0, "StartLRUD") === "1,2,3,4",
+            "v3: trip 0 anchor StartNote/StartLRUD");
         ok(a0 !== undefined && CsTags.get(a0, "SurveyName") === "TEST CAVE" &&
             CsTags.get(a0, "SurveyDate") === "2020-01-01" &&
             CsTags.get(a0, "SurveyTeam") === "Alice",
@@ -10042,6 +10042,30 @@ if (!IS_NODE) {
     var kept = CsStationOrder.parseAssigned(capped);
     eqs(kept[kept.length - 1], "STN399",
         "the cap drops the OLDEST names, never the newest");
+}());
+
+// ---------------------------------------------------------------------
+// CsTags.ALIASES -- a renamed tag still reads from an old drawing.
+// ---------------------------------------------------------------------
+
+(function() {
+    var fake = {
+        props: { "StartLrud": "1,2,3,4" },
+        getCustomProperty: function(group, key, dflt) {
+            return this.props.hasOwnProperty(key) ? this.props[key] : dflt;
+        }
+    };
+    eqs(CsTags.get(fake, "StartLRUD"), "1,2,3,4",
+        "CsTags.get: the new name reads a drawing written under the old one");
+
+    // A drawing carrying BOTH answers with the current spelling.
+    fake.props["StartLRUD"] = "9,9,9,9";
+    eqs(CsTags.get(fake, "StartLRUD"), "9,9,9,9",
+        "CsTags.get: the canonical name wins when both are present");
+
+    // A tag with no alias is unaffected.
+    eqs(CsTags.get(fake, "Station"), "",
+        "CsTags.get: a tag with no alias still answers empty");
 }());
 
 // ---------------------------------------------------------------------

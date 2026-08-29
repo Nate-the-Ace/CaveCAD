@@ -108,6 +108,26 @@ CsTags.commit = function(di, entity, keyValues) {
  *  legacy survey data store (CsStore) for drawings saved by early
  *  builds, whose tags live only in the store text until a modifying
  *  tool migrates them onto the entities. */
+/**
+ * Tags renamed after drawings were already carrying the old name.
+ *
+ * canonical -> [older spellings, newest first]
+ *
+ * READ-ONLY COMPATIBILITY. Nothing here rewrites a drawing: the new
+ * name is what gets WRITTEN from now on, and CsTags.get falls back
+ * through this table so a cave surveyed under the old name keeps
+ * answering. A rename that orphaned live XDATA would trade a tidy
+ * vocabulary for somebody's survey, which is not a trade this suite
+ * makes.
+ *
+ * StartLRUD: the acronym is LRUD everywhere else it appears -- LRUDLine,
+ * LRUDName, LRUDNote -- and StartLrud was the one place it was title
+ * case.
+ */
+CsTags.ALIASES = {
+    "StartLRUD": ["StartLrud"]
+};
+
 CsTags.get = function(entity, key) {
     if (entity === undefined || entity === null) {
         return "";
@@ -123,6 +143,25 @@ CsTags.get = function(entity, key) {
     }
     if (v === "" && typeof CsStore !== "undefined") {
         v = CsStore.lookup(entity, key);
+    }
+    // An older spelling of the same tag, for a drawing written before
+    // the rename. Tried only when the canonical name found nothing, so
+    // a drawing carrying both answers with the current one.
+    if (v === "" && CsTags.ALIASES.hasOwnProperty(key)) {
+        var older = CsTags.ALIASES[key];
+        for (var i = 0; i < older.length && v === ""; i++) {
+            if (typeof entity.getCustomProperty === "function") {
+                try {
+                    v = entity.getCustomProperty(CsTags.GROUP, older[i], "");
+                    v = (v === undefined || v === null) ? "" : String(v);
+                } catch (eOld) {
+                    v = "";
+                }
+            }
+            if (v === "" && typeof CsStore !== "undefined") {
+                v = CsStore.lookup(entity, older[i]);
+            }
+        }
     }
     // undo the newline escaping applied in CsTags.set
     return v.replace(/\\n/g, "\n").replace(/\\\\/g, "\\");

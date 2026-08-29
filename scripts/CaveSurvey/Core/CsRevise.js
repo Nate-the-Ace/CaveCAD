@@ -94,7 +94,7 @@ CsRevise.shotFromEntity = function(e) {
  *   station points   position; Elevation -> the recorded elevation;
  *                    Fixed -> survey.fixed; trip-anchor
  *                    tags -> trip records; the trip-0 anchor also
- *                    StartNote/StartLrud, the legacy SurveyName
+ *                    StartNote/StartLRUD, the legacy SurveyName
  *                    (which stored caveName||name -- the ambiguity is
  *                    accepted, it becomes caveName), and the
  *                    ExcludedShots/UnplacedShots row blobs
@@ -199,7 +199,7 @@ CsRevise.surveyFromDocument = function(doc) {
                     anchorStation = st;
                     trip.startNote = CsTags.get(e, "StartNote");
                     trip.startLrud =
-                        CsModel.parseStartLrud(CsTags.get(e, "StartLrud"));
+                        CsModel.parseStartLrud(CsTags.get(e, "StartLRUD"));
                 }
             }
             // legacy survey block: SurveyName stored caveName||name --
