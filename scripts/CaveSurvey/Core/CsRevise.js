@@ -903,16 +903,18 @@ CsRevise.isWorldFixedLayer = function(layerName) {
 // basis classifyChange uses -- a cave in feet and the same cave in
 // metres must decide identically).
 //
-// WHY IT IS 1000x LOOSER THAN THE RIGIDITY EPS: classifyChange's
-// 1e-6 * extent asks "did ANYTHING change at all", an exactness test.
-// This asks a different question -- is "the entity moved as one rigid
-// piece" an honest description of what happened to ITS stations. A
-// residual of a tenth of a percent of the drawing diagonal is 0.5 mm
-// on a 1:200 sheet of a 100 m cave: thinner than the line itself, and
-// far finer than a hand-traced wall can express in the first place.
-// Above that the passage genuinely bent underneath the entity, no
-// single rigid move describes it, and the spec is explicit that we do
-// not rubber-sheet: the entity is left alone and REPORTED.
+// SCOPE, NARROWED: this only gates the entity types that have no
+// per-vertex structure to warp -- block references, text, anything
+// else CsBind.isLineworkLayer/hasLineworkTags accepts that is not a
+// polyline, line, arc, circle or spline. Those five types are warped
+// per-vertex/per-center by CsWarp.mlsSimilarity instead (see
+// moveLinework below), which always has a locally sensible answer and
+// never refuses. For the remaining types, a residual of a tenth of a
+// percent of the drawing diagonal is 0.5 mm on a 1:200 sheet of a
+// 100 m cave -- thinner than the line itself. Above that, no single
+// rigid move honestly describes what happened to a block/text
+// reference's control points, and the entity is left alone and
+// REPORTED rather than guessed at.
 //
 // A fit over exactly two stations always has residual 0 -- a plane
 // similarity has four degrees of freedom and two points supply four
@@ -926,25 +928,56 @@ CsRevise.LINEWORK_RESIDUAL_FRACTION = 1e-3;
  * against. QCAD context only.
  *
  * Called by every path that erases the survey marks and redraws them
- * from revised data -- CsRevise.apply's non-rigid branch, and the
- * Survey Notebook's Draw when the page revises a trip already in the
- * drawing -- and by NO path that transforms the drawing whole. The
- * rigid branch of apply already carries every traced entity along in
- * its single whole-drawing operation, so running this there would move
- * the same entity twice. The two erase-and-redraw paths are mutually
- * exclusive (Draw never reaches apply), so nothing calls this twice
- * for one user action.
+ * from revised data -- CsRevise.apply's non-rigid branch, the Survey
+ * Notebook's Draw when the page revises a trip already in the drawing,
+ * and CsProfileDraw.render for the profile side -- and by NO path that
+ * transforms the drawing whole. The rigid branch of apply already
+ * carries every traced entity along in its single whole-drawing
+ * operation, so running this there would move the same entity twice.
  *
  * Every entity on a linework layer (CsBind.isLineworkLayer is the one
  * gate; it consults WORLD_FIXED_LAYERS above, so sheet furniture is
  * excluded from here for free) carrying either linework tag gets a
- * similarity fit over its own stations' old -> new positions, applied
- * with the same rotate/scale/move idiom the rigid path uses. The order
- * of preference, per the spec:
+ * control-point set: its own bound stations' old -> new positions, per
+ * the order of preference below. What happens with that set depends on
+ * the entity's type:
+ *
+ *   Polyline / Spline   every vertex / control point warps
+ *                        INDIVIDUALLY through CsWarp.mlsSimilarity, so
+ *                        one entity can bend along its length. Bulges
+ *                        are left as-is -- a documented approximation
+ *                        when the two vertices either side of a bulge
+ *                        warp by slightly different local
+ *                        rotation/scale, not expected to be visible at
+ *                        normal trace density.
+ *   Line                 both endpoints warp individually, same as a
+ *                        two-vertex polyline.
+ *   Arc / Circle          the center warps through CsWarp.mlsSimilarity;
+ *                        the radius scales by that call's local
+ *                        `factor`; and the entity is then rotated about
+ *                        its NEW center by that call's local `angle`,
+ *                        so an arc's start/end angles follow the local
+ *                        rotation and its endpoints stay on the walls
+ *                        they were snapped to. (A circle is
+ *                        rotationally symmetric, so the rotation is a
+ *                        no-op for it -- this matters to arcs.)
+ *   anything else         (block references, text, ...) keeps the
+ *                        ORIGINAL whole-entity rigid similarity fit,
+ *                        residual-checked against
+ *                        CsRevise.LINEWORK_RESIDUAL_FRACTION exactly as
+ *                        before -- the approved design for this feature
+ *                        covers the five types above explicitly and
+ *                        does not extend to these, so their behavior is
+ *                        unchanged rather than guessed at.
+ *
+ * Its control-point set, in order of preference, per the original
+ * binding spec:
  *
  *   its listed stations   LineworkStations, those still resolvable in
  *                         both frames. One station gives a pure
- *                         translation (similarityFit's 1-pair case).
+ *                         translation (CsWarp.mlsSimilarity's 1-pair
+ *                         case, or similarityFit's for the fallback
+ *                         path).
  *   its trip's stations   nothing listed survived -- fit over every
  *                         station of its LineworkTrip instead, so the
  *                         entity at least follows the passage it
@@ -965,13 +998,15 @@ CsRevise.LINEWORK_RESIDUAL_FRACTION = 1e-3;
  *                      revision -- the frame the tracing was drawn in
  * \param newPos        {name: {x, y}} station positions AFTER it
  * \param tripStations  {tripId: [names]} for the fallback
- * \param extent        drawing extent for the residual threshold
- * \return { moved, unmoved } -- moved is a count, unmoved a list of
- *         "LAYER #id" labels for the report
+ * \param extent        drawing extent for the fallback path's residual
+ *                      threshold
+ * \return { moved, warped, unmoved } -- moved and warped are counts
+ *         (an entity is one or the other, never both), unmoved a list
+ *         of "LAYER #id" labels for the report
  */
 CsRevise.moveLinework = function(doc, di, oldPos, newPos, tripStations,
         extent) {
-    var result = { moved: 0, unmoved: [] };
+    var result = { moved: 0, warped: 0, unmoved: [] };
     // Soft dependency, the mirror of CsBind's on this module: nothing
     // else in CsRevise needs CsBind, and a caller that loaded only
     // half the Core should get "no linework" rather than a throw.
@@ -1001,9 +1036,45 @@ CsRevise.moveLinework = function(doc, di, oldPos, newPos, tripStations,
         return pairs;
     };
 
+    /** Every vertex a warpable entity type exposes, as plain RVector --
+     *  the ORIGINAL (pre-warp) positions CsWarp.mlsSimilarity is
+     *  evaluated at, one call per point, before any of them are written
+     *  back (see the apply loop below for why: writing them back one at
+     *  a time is unsafe).
+     *  Polyline: real vertices only, NOT getReferencePoints() -- that
+     *  also returns synthetic bulge-midpoint handles, and warping one of
+     *  those would reshape the bulge instead of relocating a vertex
+     *  (probed live: a 3-vertex polyline with one bulge answers 5
+     *  reference points). Line and Spline: getReferencePoints() IS
+     *  exactly their real points (2 endpoints; every control point
+     *  respectively), no synthetic extras, probed live the same way. */
+    var warpableVertices = function(ent) {
+        if (ent instanceof RPolylineEntity) {
+            var pts = [];
+            for (var i = 0; i < ent.countVertices(); i++) {
+                var v = ent.getVertexAt(i);
+                pts.push(new RVector(v.x, v.y));
+            }
+            return pts;
+        }
+        if (ent instanceof RSplineEntity) {
+            var spts = [];
+            for (var j = 0; j < ent.countControlPoints(); j++) {
+                var cp = ent.getControlPointAt(j);
+                spts.push(new RVector(cp.x, cp.y));
+            }
+            return spts;
+        }
+        if (ent instanceof RLineEntity) {
+            return ent.getReferencePoints();
+        }
+        return null;
+    };
+
     var origin = new RVector(0, 0);
     var op = new RModifyObjectsOperation();
     op.setText("Move traced linework");
+    // every op.addObject(ent, false) below: false keeps its own layer
     var anyMoved = false;
     var ids = doc.queryAllEntities(false, false);
     for (var i = 0; i < ids.length; i++) {
@@ -1040,7 +1111,156 @@ CsRevise.moveLinework = function(doc, di, oldPos, newPos, tripStations,
                 pairs = pairsFor(tripStations[trip]);
             }
         }
-        var fit = pairs.length === 0 ? null : CsRevise.similarityFit(pairs);
+        if (pairs.length === 0) {
+            result.unmoved.push(label);
+            continue;
+        }
+
+        if (ent instanceof RArcEntity || ent instanceof RCircleEntity) {
+            var oldCenter = ent.getCenter();
+            var oldRadius = ent.getRadius();
+            var cw = CsWarp.mlsSimilarity(
+                { x: oldCenter.x, y: oldCenter.y }, pairs);
+            // A non-finite factor, or one so close to zero the radius it
+            // would produce is effectively zero, is mlsSimilarity's
+            // honest answer when this control-point layout leaves the
+            // local scale untrustworthy -- the same "no honest answer,
+            // leave it and report" outcome the pairs.length === 0 case
+            // above already uses, rather than collapsing (or
+            // ballooning) the radius on a guess.
+            if (!isFinite(cw.factor) ||
+                    cw.factor * oldRadius <= 1e-6 * oldRadius) {
+                result.unmoved.push(label);
+                continue;
+            }
+            ent.move(new RVector(cw.x - oldCenter.x, cw.y - oldCenter.y));
+            ent.setRadius(oldRadius * cw.factor);
+            // The center is only two thirds of an arc: its ENDPOINTS
+            // are where it meets the walls it was snapped to, and those
+            // are start/end ANGLE, which neither move() nor setRadius()
+            // touches. Without this, an arc under a locally-rotating
+            // adjustment keeps its original absolute orientation while
+            // its center slides -- endpoints off by 2r*sin(theta/2),
+            // reported as a success. Rotating about the NEW center
+            // (placed by the move above) turns the start/end angles by
+            // the local rotation without disturbing that center. The
+            // pre-warp code did this as ent.rotate(fit.theta, origin)
+            // for every entity type; the per-vertex types below get the
+            // same effect for free from moving their vertices
+            // individually, but a center-plus-radius entity does not.
+            // Harmless for a circle, which is rotationally symmetric.
+            ent.rotate(cw.angle, new RVector(cw.x, cw.y));
+            op.addObject(ent, false);
+            anyMoved = true;
+            result.moved++; // a single point has nothing to disagree with
+            continue;
+        }
+
+        var verts = warpableVertices(ent);
+        // An empty (but non-null) result is a fit-point-only spline
+        // (countControlPoints() === 0, real for one authored by
+        // clicking through points rather than via control points) --
+        // no honest answer either, same as pairs.length === 0 above:
+        // the rebuild loop below would run zero times and install a
+        // fresh, EMPTY RSplineData via setShape, corrupting the
+        // entity. Leave it and report instead of attempting a move.
+        if (verts !== null && verts.length === 0) {
+            result.unmoved.push(label);
+            continue;
+        }
+        if (verts !== null) {
+            var angles = [], factors = [], news = [];
+            for (var vi = 0; vi < verts.length; vi++) {
+                var oldV = verts[vi];
+                var vw = CsWarp.mlsSimilarity({ x: oldV.x, y: oldV.y },
+                    pairs);
+                news.push(new RVector(vw.x, vw.y));
+                angles.push(vw.angle);
+                factors.push(vw.factor);
+            }
+            // Apply every new position in one pass, addressed by INDEX
+            // or ROLE rather than by moveReferencePoint's VALUE search.
+            // Confirmed against this engine's own source
+            // (RLineData/RPolylineData/RSplineData::moveReferencePoint,
+            // src/entity/*.cpp): each one moves EVERY current point
+            // that fuzzy-equals the given old point, not just one. On a
+            // real cave survey, stations are often evenly spaced, so a
+            // warped vertex's NEW position routinely lands exactly on
+            // another not-yet-warped vertex's OLD position -- probed
+            // live with a straight two-station profile line (10 ft
+            // spacing, uniform +10 ft shift): moving vertex 0 first
+            // left it sitting on vertex 1's untouched old value, so the
+            // second moveReferencePoint(oldV1, newV1) call matched BOTH
+            // points and dragged vertex 0 along a second time,
+            // collapsing the whole line onto vertex 1's new position.
+            //
+            // getData() returns a COPY in this engine's script binding
+            // (probed live: mutating it through RPolylineData.setVertexAt
+            // or RSplineData.setControlPoints never reaches the entity
+            // actually in the document), so every replacement below goes
+            // through an ENTITY-level method instead -- the same family
+            // as the rotate/move/scale the fallback path already uses,
+            // confirmed live to persist through a modify operation.
+            if (ent instanceof RPolylineEntity) {
+                // No entity-level setVertexAt in this build (only
+                // RPolylineData has one, and getData() doesn't write
+                // back -- see above), so rebuild wholesale: clear()
+                // does not touch isClosed (probed live), and reading
+                // each bulge before clearing and re-appending it keeps
+                // bulges byte-identical, same as the old whole-entity
+                // path never touched them at all.
+                var bulges = [];
+                for (var bi = 0; bi < news.length; bi++) {
+                    bulges.push(ent.getBulgeAt(bi));
+                }
+                ent.clear();
+                for (var ai = 0; ai < news.length; ai++) {
+                    ent.appendVertex(news[ai], bulges[ai]);
+                }
+            } else if (ent instanceof RLineEntity) {
+                ent.setStartPoint(news[0]);
+                ent.setEndPoint(news[1]);
+            } else if (ent instanceof RSplineEntity) {
+                // Same getData()-doesn't-write-back trap as the
+                // polyline above; setShape (confirmed live to persist)
+                // takes a whole new shape, so build one and swap it in
+                // rather than mutating in place. Scope matches this
+                // feature's own: a control-point spline, degree and
+                // periodic state preserved; a fit-point-only spline
+                // (countControlPoints() === 0) never reaches this
+                // branch as a real warp in the first place -- see
+                // warpableVertices above.
+                var newSpline = new RSplineData();
+                for (var si = 0; si < news.length; si++) {
+                    newSpline.appendControlPoint(news[si]);
+                }
+                newSpline.setDegree(ent.getDegree());
+                if (ent.isPeriodic()) {
+                    newSpline.setPeriodic(true);
+                }
+                newSpline.update();
+                ent.setShape(newSpline);
+            }
+            op.addObject(ent, false);
+            anyMoved = true;
+            var minA = Math.min.apply(null, angles),
+                maxA = Math.max.apply(null, angles);
+            var minF = Math.min.apply(null, factors),
+                maxF = Math.max.apply(null, factors);
+            var bent = (maxA - minA > 1e-6) ||
+                (Math.abs(maxF - minF) > 1e-6 * Math.max(1, maxF));
+            if (bent) {
+                result.warped++;
+            } else {
+                result.moved++;
+            }
+            continue;
+        }
+
+        // anything else (blocks, text, ...): unchanged whole-entity
+        // rigid path, residual refusal included -- see this function's
+        // docblock for why this boundary exists.
+        var fit = CsRevise.similarityFit(pairs);
         // Infinity is similarityFit's honest answer when the old points
         // all coincide and the rotation is underdetermined -- exactly
         // the case where a fit must not be trusted.
@@ -1054,7 +1274,7 @@ CsRevise.moveLinework = function(doc, di, oldPos, newPos, tripStations,
             ent.scale(fit.scale, origin);
         }
         ent.move(new RVector(fit.tx, fit.ty));
-        op.addObject(ent, false); // false: keeps its own layer
+        op.addObject(ent, false);
         anyMoved = true;
         result.moved++;
     }
@@ -1272,6 +1492,11 @@ CsRevise.lineworkClaimLine = function(bound) {
  *
  * \param bound         optional -- entities this revision bound by
  *                       itself
+ * \param warped        optional -- of the traced entities that followed
+ *                       the revision at all, how many did so by bending
+ *                       per-vertex rather than moving as one rigid piece
+ *                       -- disjoint from `moved`, never both (an entity
+ *                       is one or the other). Defaults to 0.
  * \param stationsMoved optional, defaults to true (every existing
  *                       caller reaches this function only after a real
  *                       change: CsRevise.apply's non-rigid branch only
@@ -1291,23 +1516,35 @@ CsRevise.lineworkClaimLine = function(bound) {
  *                       genuine refusal -- see CsReport.profileSummary.
  * \return array of lines
  */
-CsRevise.lineworkSummary = function(moved, unmoved, bound, stationsMoved) {
+CsRevise.lineworkSummary = function(moved, unmoved, bound, stationsMoved,
+        warped) {
     var n = (moved === undefined || moved === null) ? 0 : moved;
+    var w = (warped === undefined || warped === null) ? 0 : warped;
     var list = (unmoved === undefined || unmoved === null) ? [] : unmoved;
     var didStationsMove = (stationsMoved === undefined ||
         stationsMoved === null) ? true : !!stationsMoved;
     var lines = [];
-    lines.push("Traced linework moved with its stations: " + n);
+    lines.push("Traced linework moved with its stations: " + (n + w) +
+        (w > 0 ? " (" + w + " warped to follow a bend)" : ""));
     var claim = CsRevise.lineworkClaimLine(bound);
     if (claim !== "") {
         lines.push(claim);
     }
     if (list.length > 0) {
         lines.push("");
+        // Four distinct causes land an entity in `unmoved`, and only
+        // the first is "no station": no resolvable station pairs at
+        // all; an incoherent rigid fit on text/blocks (residual past
+        // LINEWORK_RESIDUAL_FRACTION); a degenerate radius factor on an
+        // arc/circle; and a fit-point-only spline with no control
+        // points to warp. Three of the four DO have surviving stations,
+        // so wording this as "no surviving station" alone told the user
+        // something untrue about most refusals. The remedy is the same
+        // in all four cases, which is why they share one warning.
         lines.push("WARNING -- " + list.length + " traced item" +
             (list.length === 1 ? "" : "s") + " had no surviving " +
-            "station to follow and did NOT move; re-trace walls and " +
-            "detail there:");
+            "station to follow, or could not be moved honestly, and " +
+            "did NOT move; re-trace walls and detail there:");
         // capped: this is a summary a beginner reads, not a manifest.
         // Soft read of the cap so this module stays loadable without
         // CsReport (the whole Core is loaded as separate files).
@@ -1322,7 +1559,7 @@ CsRevise.lineworkSummary = function(moved, unmoved, bound, stationsMoved) {
             lines.push("  ... and " + (list.length - cap) + " more");
         }
     }
-    if (n === 0 && didStationsMove) {
+    if (n === 0 && w === 0 && didStationsMove) {
         // Nothing was bound, so nothing could follow -- and an unbound
         // trace is invisible to us, which is why this stays a warning
         // even when the unmoved list above is empty. But this is only
@@ -1331,7 +1568,11 @@ CsRevise.lineworkSummary = function(moved, unmoved, bound, stationsMoved) {
         // because there was NOTHING for a sketch to follow yet, not
         // because a sketch failed to follow it -- didStationsMove=false
         // says so, and the warning would otherwise fire on every clean
-        // run of a feature that draws on every plan draw.
+        // run of a feature that draws on every plan draw. A warped
+        // entity followed the revision just as much as a rigidly-moved
+        // one did -- moved===0 with warped>0 means everything that
+        // could follow, did, just by bending rather than sliding as one
+        // piece, so this warning must not fire on that case either.
         lines.push("");
         lines.push("WARNING -- hand-drawn linework that is not bound " +
             "to the survey did NOT move with it; re-trace walls and " +
@@ -1560,8 +1801,10 @@ CsRevise.adjustTagsOn = function(entity) {
  *           Traced linework then follows the stations it was traced
  *           against, entity by entity (CsRevise.moveLinework): a wall
  *           over a corrected shot moves, one far away barely does.
- *           Anything with no surviving station to follow is left alone
- *           and named in report.lineworkUnmoved -- the re-trace warning
+ *           Anything with no surviving station to follow -- or that
+ *           moveLinework can find no honest answer for; see its own
+ *           docblock for the other three causes -- is left alone and
+ *           named in report.lineworkUnmoved, and the re-trace warning
  *           is now that honest fallback rather than the default.
  *           UNTAGGED linework is bound first (CsBind.planAutoBind,
  *           before the erase, while the station index is still the
@@ -1603,6 +1846,11 @@ CsRevise.adjustTagsOn = function(entity) {
  *   lineworkMoved   how many traced entities followed their own
  *                   stations. 0 on the rigid path, where the single
  *                   whole-drawing transform carried them all already
+ *   lineworkWarped  of the traced entities that followed the revision
+ *                   on the non-rigid path, how many did so by bending
+ *                   per-vertex rather than moving as one rigid piece --
+ *                   disjoint from lineworkMoved, never both. Always 0
+ *                   on the rigid path
  *   lineworkUnmoved ["LAYER #id"] the traced entities that had no
  *                   surviving station to follow, or whose stations
  *                   moved too incoherently for one rigid move to
@@ -1842,6 +2090,7 @@ CsRevise.apply = function(doc, di, recon, newSurvey) {
     // transform already carried every traced entity with it and there
     // is nothing per-entity to count.
     var lineworkMoved = 0;
+    var lineworkWarped = 0;
     var lineworkUnmoved = [];
     var lineworkBound = 0;
 
@@ -2171,6 +2420,7 @@ CsRevise.apply = function(doc, di, recon, newSurvey) {
             var lw = CsRevise.moveLinework(doc, di, oldPos, newPos,
                 tripNames, extent);
             lineworkMoved = lw.moved;
+            lineworkWarped = lw.warped;
             lineworkUnmoved = lw.unmoved;
         });
     }
@@ -2198,6 +2448,7 @@ CsRevise.apply = function(doc, di, recon, newSurvey) {
         anchorMissing: anchorMissing,
         anchorUsed: { name: anchorName, source: anchorSource },
         lineworkMoved: lineworkMoved,
+        lineworkWarped: lineworkWarped,
         lineworkUnmoved: lineworkUnmoved,
         lineworkBound: lineworkBound
     };

@@ -1205,7 +1205,8 @@ CsProfileDraw.translateRegion = function(doc, di, dx, dy) {
  *          stationsMoved} --
  *          claimed and linework are CsProfileBind.claim's own result
  *          and CsRevise.moveLinework's own result (or this function's
- *          {error: ...} / {moved: 0, unmoved: ["move failed: ..."]}
+ *          {error: ...} / {moved: 0, warped: 0,
+ *          unmoved: ["move failed: ..."]}
  *          stand-ins when either step threw); CsReport.profileSummary
  *          is what turns both into the words a user actually reads --
  *          see that function for why neither may be dropped silently.
@@ -1399,7 +1400,7 @@ CsProfileDraw.render = function(doc, di, profile, opts) {
     });
 
     counts.claimed = claimed;
-    counts.linework = { moved: 0, unmoved: [] };
+    counts.linework = { moved: 0, warped: 0, unmoved: [] };
     // Recorded BEFORE moveLinework runs (and kept even if moveLinework
     // then throws, below): CsReport.profileSummary needs to tell "no
     // station moved, so there was nothing for a sketch to follow" apart
@@ -1447,7 +1448,8 @@ CsProfileDraw.render = function(doc, di, profile, opts) {
             });
         }
     } catch (eMove) {
-        counts.linework = { moved: 0, unmoved: ["move failed: " + eMove] };
+        counts.linework = { moved: 0, warped: 0,
+            unmoved: ["move failed: " + eMove] };
     }
 
     // An entity claim() could bind to NO station at all never gets a

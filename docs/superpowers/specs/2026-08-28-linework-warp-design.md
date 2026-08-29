@@ -92,9 +92,17 @@ set is in hand:
 - **0 control points:** unchanged — left alone, reported (still the only case with nothing
   to warp against).
 - **1+ control points:** walk every vertex/control-point of the entity (see per-type
-  handling below) and call `CsWarp.mlsSimilarity` per vertex. `CsRevise.
-  LINEWORK_RESIDUAL_FRACTION` and the whole-entity residual check are removed — there is no
-  more "too large, refuse" branch for anything with at least one control point.
+  handling below) and call `CsWarp.mlsSimilarity` per vertex.
+
+  **Narrowed as built** — the code is right, this bullet was over-broad.
+  `CsRevise.LINEWORK_RESIDUAL_FRACTION` and the whole-entity residual check are NOT removed
+  outright; they are scoped down to the entity types with no per-vertex structure to warp:
+  block references, text, and anything else the linework gate accepts that is not one of
+  the five warpable types. For those, no single rigid move honestly describes what happened
+  to their control points, so the "too large, refuse" branch is still the right answer and
+  is kept. It is removed only for polyline, line, arc, circle and spline, which always have
+  a locally sensible per-point answer and never refuse on residual. See the "SCOPE,
+  NARROWED" comment above `CsRevise.LINEWORK_RESIDUAL_FRACTION` in `CsRevise.js`.
 
 ### Per-entity-type vertex handling
 
@@ -104,7 +112,12 @@ set is in hand:
   two ends see different local control, unlike today's single rigid move).
 - **Arc / circle:** warp the center point through `CsWarp.mlsSimilarity`, and scale the
   radius by the `factor` that call returns for that center — the local uniform-scale part of
-  its per-point transform.
+  its per-point transform. Then rotate the entity about its **new** center by that call's
+  `angle` — the local-rotation part. An arc's endpoints live in its start/end angles, which
+  neither the center move nor the radius scale touches, so without this rotation an arc
+  under a locally-rotating adjustment keeps its original absolute orientation and its
+  endpoints detach from the walls they were snapped to. (No-op for a circle, which is
+  rotationally symmetric.)
 - **Bulge on a polyline arc segment:** left untouched, as today. Two vertices of one bulged
   segment can now move by slightly different local amounts (rotation and/or scale), so the
   arc between them (inferred purely from the bulge ratio) is a documented approximation, not

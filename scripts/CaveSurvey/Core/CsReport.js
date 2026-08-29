@@ -321,7 +321,8 @@ CsReport.revisionSummary = function(report) {
         // Missing fields are handled there -- absent reads as
         // "nothing bound" -- so hand them over as they are.
         var linework = CsRevise.lineworkSummary(report.lineworkMoved,
-            report.lineworkUnmoved, report.lineworkBound);
+            report.lineworkUnmoved, report.lineworkBound, undefined,
+            report.lineworkWarped);
         for (i = 0; i < linework.length; i++) {
             lines.push(linework[i]);
         }
@@ -444,7 +445,7 @@ CsReport.profileSummary = function(profile, outcome) {
     if (c.linework !== undefined) {
         var pLines = CsRevise.lineworkSummary(c.linework.moved,
             c.linework.unmoved, c.claimed ? c.claimed.tagged : 0,
-            c.stationsMoved);
+            c.stationsMoved, c.linework.warped);
         for (var pi = 0; pi < pLines.length; pi++) {
             // Not "  " + pLines[pi] unconditionally: lineworkSummary
             // inserts a deliberate BLANK line as a separator before its

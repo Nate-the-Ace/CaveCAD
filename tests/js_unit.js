@@ -147,6 +147,9 @@ var CORE_FILES = [
     "scripts/CaveSurvey/Core/Format/CsSurvex.js",
     "scripts/CaveSurvey/Core/Format/CsCsv.js",
     "scripts/CaveSurvey/Core/Format/CsRegistry.js",
+    // before CsRevise: moveLinework's per-vertex dispatch calls
+    // CsWarp.mlsSimilarity when it runs
+    "scripts/CaveSurvey/Core/CsWarp.js",
     "scripts/CaveSurvey/Core/CsRevise.js",
     // after CsRevise: CsBind's layer gate consults
     // CsRevise.isWorldFixedLayer when it is loaded
@@ -4173,6 +4176,35 @@ if (teamBoundaryRt.trips.length === 2) {
         CsRevise.lineworkSummary(3, [], 0, true).indexOf(ABANDONED) < 0,
         "lineworkSummary: moved > 0 never warns, regardless of " +
         "stationsMoved");
+
+    // The exact false-positive this task fixes: moved===0 but warped>0
+    // means everything that could follow the revision did -- just by
+    // bending rather than sliding as one rigid piece. Before this fix,
+    // lineworkSummary only looked at moved when deciding whether to warn,
+    // so a profile where every entity warped (moved===0, warped>0) still
+    // printed the "did NOT move with it" abandonment warning even though
+    // nothing was actually abandoned. moved and warped are disjoint
+    // counts (see moveLinework's own docblock), so this is a real gap,
+    // not a redundant case of the moved>0 check above.
+    var noWarpArg = CsRevise.lineworkSummary(0, [], 0, true);
+    ok(noWarpArg.indexOf(ABANDONED) >= 0,
+        "lineworkSummary: moved=0, warped omitted -- still warns (the " +
+        "bug this task fixes), got '" + noWarpArg.join(" / ") + "'");
+
+    var warpedOnly = CsRevise.lineworkSummary(0, [], 0, true, 3);
+    ok(warpedOnly.indexOf(ABANDONED) < 0,
+        "lineworkSummary: moved=0, warped=3 -- must NOT warn, everything " +
+        "that could follow did, just by bending; got '" +
+        warpedOnly.join(" / ") + "'");
+    ok(warpedOnly.join("\n").indexOf("warped") >= 0,
+        "lineworkSummary: moved=0, warped=3 -- the lines mention " +
+        "warping, got '" + warpedOnly.join(" / ") + "'");
+    ok(warpedOnly.indexOf(
+        "Traced linework moved with its stations: 3 " +
+        "(3 warped to follow a bend)") >= 0,
+        "lineworkSummary: moved=0, warped=3 -- headline number is the " +
+        "TOTAL that followed (moved+warped), not the raw moved count, " +
+        "got '" + warpedOnly.join(" / ") + "'");
 })();
 
 // --- the argument prep moveLinework's two callers share --------------
@@ -13932,6 +13964,154 @@ if (!IS_NODE) {
     var reduceSource = [pt(0, 0), pt(1, 0), pt(2, 0)];
     CsTrace.reduce(reduceSource, 0.01);
     eqs(reduceSource.length, 3, "CsTrace.reduce: the caller's array is untouched");
+}());
+
+// ---------------------------------------------------------------------
+// CsWarp -- per-point MLS similarity deformation
+// ---------------------------------------------------------------------
+(function() {
+    loadRepoScript("scripts/CaveSurvey/Core/CsRevise.js");
+    loadRepoScript("scripts/CaveSurvey/Core/CsWarp.js");
+
+    function pt(x, y) { return { x: x, y: y }; }
+    function pair(ox, oy, nx, ny) {
+        return { old: pt(ox, oy), nu: pt(nx, ny) };
+    }
+
+    // -- degenerate counts -------------------------------------------
+    eqs(CsWarp.mlsSimilarity(pt(0, 0), []), null,
+        "CsWarp.mlsSimilarity: no control pairs -> null");
+
+    var oneUp = CsWarp.mlsSimilarity(pt(5, 5),
+        [pair(0, 0, 3, 4)]);
+    near(oneUp.x, 8, 1e-9, "CsWarp.mlsSimilarity: one pair, x translated");
+    near(oneUp.y, 9, 1e-9, "CsWarp.mlsSimilarity: one pair, y translated");
+    eqs(oneUp.angle, 0, "CsWarp.mlsSimilarity: one pair, no rotation info");
+    eqs(oneUp.factor, 1, "CsWarp.mlsSimilarity: one pair, no scale info");
+
+    // -- exact reproduction at a control point, whatever else is near --
+    var controls = [
+        pair(0, 0, 0, 0),
+        pair(100, 0, 100, 0),
+        pair(0, 100, 5, 95)  // this one drags the fit off pure identity
+    ];
+    var atThird = CsWarp.mlsSimilarity(pt(0, 100), controls);
+    near(atThird.x, 5, 1e-6,
+        "CsWarp.mlsSimilarity: exact at its own control point (x)");
+    near(atThird.y, 95, 1e-6,
+        "CsWarp.mlsSimilarity: exact at its own control point (y)");
+
+    // -- rigid-case regression: must match CsRevise.similarityFit -----
+    function rigidPairs(n, thetaDeg, scale, tx, ty) {
+        var th = thetaDeg * Math.PI / 180;
+        var c = Math.cos(th), s = Math.sin(th);
+        var out = [];
+        for (var i = 0; i < n; i++) {
+            var ox = i * 17.0, oy = (i % 2) * 9.0; // scattered, not collinear
+            out.push(pair(ox, oy,
+                scale * (c * ox - s * oy) + tx,
+                scale * (s * ox + c * oy) + ty));
+        }
+        return out;
+    }
+    function checkRigidMatch(n, thetaDeg, scale, tx, ty, label) {
+        var pairs = rigidPairs(n, thetaDeg, scale, tx, ty);
+        var fit = CsRevise.similarityFit(pairs);
+        var samplePoints = [pt(37, -12), pt(-5, 5), pt(200, 200)];
+        for (var i = 0; i < samplePoints.length; i++) {
+            var expected = CsRevise.applyFit(fit, samplePoints[i]);
+            var got = CsWarp.mlsSimilarity(samplePoints[i], pairs);
+            near(got.x, expected.x, 1e-6,
+                label + ": matches similarityFit at sample " + i + " (x)");
+            near(got.y, expected.y, 1e-6,
+                label + ": matches similarityFit at sample " + i + " (y)");
+        }
+    }
+    checkRigidMatch(2, 10, 1.0, 3, -2, "CsWarp.mlsSimilarity rigid/2pt");
+    checkRigidMatch(4, 25, 1.4, -8, 6, "CsWarp.mlsSimilarity rigid/4pt");
+
+    // -- genuinely non-rigid: two clusters disagree, blend between ----
+    // Cluster A (near x=0) rotates 20 degrees about its own centroid;
+    // cluster B (near x=1000) only translates. A real network can do
+    // this: one sub-loop rotates under adjustment while a distant part
+    // barely moves.
+    var thA = 20 * Math.PI / 180;
+    var clusterA = [
+        pair(-5, -5, Math.cos(thA) * -5 - Math.sin(thA) * -5,
+            Math.sin(thA) * -5 + Math.cos(thA) * -5),
+        pair(5, -5, Math.cos(thA) * 5 - Math.sin(thA) * -5,
+            Math.sin(thA) * 5 + Math.cos(thA) * -5),
+        pair(0, 5, Math.cos(thA) * 0 - Math.sin(thA) * 5,
+            Math.sin(thA) * 0 + Math.cos(thA) * 5)
+    ];
+    var clusterB = [
+        pair(995, -5, 995 + 40, -5 + 2),
+        pair(1005, -5, 1005 + 40, -5 + 2),
+        pair(1000, 5, 1000 + 40, 5 + 2)
+    ];
+    var bothClusters = clusterA.concat(clusterB);
+
+    var nearA = CsWarp.mlsSimilarity(pt(0, -4), bothClusters);
+    var nearB = CsWarp.mlsSimilarity(pt(1000, -4), bothClusters);
+    var mid = CsWarp.mlsSimilarity(pt(500, -4), bothClusters);
+
+    // near A: dominated by A's rotation, barely any of B's +40
+    // translation should leak in
+    ok(nearA.x < 20,
+        "CsWarp.mlsSimilarity: near cluster A, barely feels B's +40 shift, got " +
+        nearA.x);
+    // near B: dominated by B's +40 translation
+    near(nearB.x, 1040, 5,
+        "CsWarp.mlsSimilarity: near cluster B, follows its +40 shift");
+    // midpoint: neither extreme -- strictly between the two influences,
+    // proving a smooth blend rather than a hard snap to one side
+    ok(mid.x > nearA.x && mid.x < nearB.x,
+        "CsWarp.mlsSimilarity: midpoint blends strictly between the two " +
+        "clusters' influence, got " + mid.x + " (A " + nearA.x + ", B " +
+        nearB.x + ")");
+    // The x-only checks above would also pass for a cruder inverse-
+    // distance-weighted average of raw deltas (no rotation term at
+    // all) -- these angle/factor checks are what actually distinguish
+    // MLS similarity blending from that: near A, the LOCAL fit must
+    // recover A's own 20-degree rotation (cluster A is an exact pure
+    // rotation among its own three pairs); near B, the local fit must
+    // recover B's zero rotation (cluster B is an exact pure
+    // translation among its own three pairs).
+    // NOT a tight match to thA: cluster B's weight here is minuscule
+    // (~1e-6 vs cluster A's ~0.09, from 1/distSq to the query point),
+    // but a weighted-similarity fit's LEVERAGE on rotation/scale scales
+    // with weight TIMES squared-distance-from-centroid -- and B sits
+    // ~1000 units from the mostly-A-weighted centroid, so its tiny
+    // weight times a huge squared distance is NOT negligible (probed:
+    // cluster A alone recovers angle=thA to full float precision;
+    // mixed with B, it drops to roughly half). That is a genuine
+    // property of the math, not a bug -- the assertions below bound it
+    // loosely enough to be robust while still proving the local fit
+    // recovers REAL rotation near A and REAL near-zero rotation near
+    // B, which no naive IDW-of-raw-deltas approach (no rotation
+    // concept at all) could reproduce.
+    ok(nearA.angle > thA * 0.3 && nearA.angle < thA,
+        "CsWarp.mlsSimilarity: near cluster A, local angle is a real " +
+        "fraction of its own 20-degree rotation, not ~0, got " +
+        nearA.angle);
+    ok(Math.abs(nearB.angle) < 0.02,
+        "CsWarp.mlsSimilarity: near cluster B, local angle stays near " +
+        "0 (cluster B is a pure translation), got " + nearB.angle);
+
+    // -- all control points' OLD positions coincide: rotation/scale is
+    // underdetermined, falls back to the weighted nu-centroid translation
+    var collapsed = CsWarp.mlsSimilarity(pt(100, 100),
+        [pair(5, 5, 5, 5), pair(5, 5, 7, 9), pair(5, 5, 3, 1)]);
+    near(collapsed.x, 5, 1e-9,
+        "CsWarp.mlsSimilarity: collapsed old points fall back to the nu " +
+        "centroid (x)");
+    near(collapsed.y, 5, 1e-9,
+        "CsWarp.mlsSimilarity: collapsed old points fall back to the nu " +
+        "centroid (y)");
+    eqs(collapsed.angle, 0,
+        "CsWarp.mlsSimilarity: collapsed old points -> no rotation info");
+    eqs(collapsed.factor, 1,
+        "CsWarp.mlsSimilarity: collapsed old points -> no scale info");
 }());
 
 // ---------------------------------------------------------------------
