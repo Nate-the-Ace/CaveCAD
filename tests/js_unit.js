@@ -14037,6 +14037,49 @@ if (!IS_NODE) {
         "CsWarp.mlsSimilarity: midpoint blends strictly between the two " +
         "clusters' influence, got " + mid.x + " (A " + nearA.x + ", B " +
         nearB.x + ")");
+    // The x-only checks above would also pass for a cruder inverse-
+    // distance-weighted average of raw deltas (no rotation term at
+    // all) -- these angle/factor checks are what actually distinguish
+    // MLS similarity blending from that: near A, the LOCAL fit must
+    // recover A's own 20-degree rotation (cluster A is an exact pure
+    // rotation among its own three pairs); near B, the local fit must
+    // recover B's zero rotation (cluster B is an exact pure
+    // translation among its own three pairs).
+    // NOT a tight match to thA: cluster B's weight here is minuscule
+    // (~1e-6 vs cluster A's ~0.09, from 1/distSq to the query point),
+    // but a weighted-similarity fit's LEVERAGE on rotation/scale scales
+    // with weight TIMES squared-distance-from-centroid -- and B sits
+    // ~1000 units from the mostly-A-weighted centroid, so its tiny
+    // weight times a huge squared distance is NOT negligible (probed:
+    // cluster A alone recovers angle=thA to full float precision;
+    // mixed with B, it drops to roughly half). That is a genuine
+    // property of the math, not a bug -- the assertions below bound it
+    // loosely enough to be robust while still proving the local fit
+    // recovers REAL rotation near A and REAL near-zero rotation near
+    // B, which no naive IDW-of-raw-deltas approach (no rotation
+    // concept at all) could reproduce.
+    ok(nearA.angle > thA * 0.3 && nearA.angle < thA,
+        "CsWarp.mlsSimilarity: near cluster A, local angle is a real " +
+        "fraction of its own 20-degree rotation, not ~0, got " +
+        nearA.angle);
+    ok(Math.abs(nearB.angle) < 0.02,
+        "CsWarp.mlsSimilarity: near cluster B, local angle stays near " +
+        "0 (cluster B is a pure translation), got " + nearB.angle);
+
+    // -- all control points' OLD positions coincide: rotation/scale is
+    // underdetermined, falls back to the weighted nu-centroid translation
+    var collapsed = CsWarp.mlsSimilarity(pt(100, 100),
+        [pair(5, 5, 5, 5), pair(5, 5, 7, 9), pair(5, 5, 3, 1)]);
+    near(collapsed.x, 5, 1e-9,
+        "CsWarp.mlsSimilarity: collapsed old points fall back to the nu " +
+        "centroid (x)");
+    near(collapsed.y, 5, 1e-9,
+        "CsWarp.mlsSimilarity: collapsed old points fall back to the nu " +
+        "centroid (y)");
+    eqs(collapsed.angle, 0,
+        "CsWarp.mlsSimilarity: collapsed old points -> no rotation info");
+    eqs(collapsed.factor, 1,
+        "CsWarp.mlsSimilarity: collapsed old points -> no scale info");
 }());
 
 // ---------------------------------------------------------------------
