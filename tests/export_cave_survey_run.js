@@ -254,6 +254,25 @@ ok(!fileHas(srvPath, "#Fix"), "a declined Walls export writes no #Fix");
 ok(fileHas(srvPath, "A1"), "the Walls export still carries the survey");
 
 // ---------------------------------------------------------------------
+// Therion: the newest writer, and therefore the newest way to leak.
+// It reaches the same gate as the two older ones.
+// ---------------------------------------------------------------------
+
+var thPath = outDir + "/export-test.th";
+var thRun = runExport(thPath, false);
+eqs(thRun.questions.length, 1, "a Therion export is asked about the control");
+ok(fileExists(thPath), "the Therion file was written");
+ok(!fileHas(thPath, EAST), "a declined Therion export carries no easting");
+ok(!fileHas(thPath, "fix "), "a declined Therion export writes no fix line");
+ok(fileHas(thPath, "A1"), "the Therion export still carries the survey");
+
+var thFullPath = outDir + "/export-test-full.th";
+runExport(thFullPath, true);
+ok(fileHas(thFullPath, EAST),
+    "and an accepted Therion export does carry it -- so the check above " +
+    "is not passing because nothing was ever written");
+
+// ---------------------------------------------------------------------
 // Compass: no fix directive exists in the format, so the question is
 // never asked -- and the report says why rather than going quiet.
 // ---------------------------------------------------------------------

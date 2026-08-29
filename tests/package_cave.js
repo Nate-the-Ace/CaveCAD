@@ -60,6 +60,7 @@ var FILES = [
     "scripts/CaveSurvey/Core/Format/CsWalls.js",
     "scripts/CaveSurvey/Core/Format/CsSurvex.js",
     "scripts/CaveSurvey/Core/Format/CsCsv.js",
+    "scripts/CaveSurvey/Core/Format/CsTherion.js",
     "scripts/CaveSurvey/Core/Format/CsRegistry.js",
     "scripts/CaveSurvey/PackageCave/PackageCave.js"
 ];
@@ -268,10 +269,19 @@ ok((new QDir()).mkpath(dataSan), "made a staging folder for sanitized data");
 ok((new QDir()).mkpath(dataFull), "made a staging folder for full data");
 
 var sanWritten = PackageCave.stageData(dataSurvey, dataSan, "PITFALL CAVE", false);
-eqs(sanWritten.length, 4, "a sanitized package still exports every format");
+eqs(sanWritten.length, CsFormatRegistry.FORMATS.length,
+    "a sanitized package still exports every format");
 
 var fullWritten = PackageCave.stageData(dataSurvey, dataFull, "PITFALL CAVE", true);
-eqs(fullWritten.length, 4, "so does a full archive");
+eqs(fullWritten.length, CsFormatRegistry.FORMATS.length,
+    "so does a full archive");
+// Named rather than counted as well, so that a format silently failing
+// to stage (stageData swallows one writer's refusal on purpose) cannot
+// leave this file green with a shorter list than the registry holds.
+eqs(sanWritten.join(","),
+    "pitfall-cave.dat,pitfall-cave.srv,pitfall-cave.svx," +
+    "pitfall-cave.th,pitfall-cave.csv",
+    "every registered format really reached data/");
 
 // The fixture must carry what we are about to strip, or this proves
 // nothing -- the same rule the geo-tag test above keeps.
@@ -279,6 +289,8 @@ ok(fileHas(dataFull + "/data/pitfall-cave.srv", "512345.67"),
     "the full archive's Walls file really does carry the control");
 ok(fileHas(dataFull + "/data/pitfall-cave.svx", "512345.67"),
     "and so does its Survex file");
+ok(fileHas(dataFull + "/data/pitfall-cave.th", "512345.67"),
+    "and its Therion file");
 
 for (var dfi = 0; dfi < sanWritten.length; dfi++) {
     var sanFile = dataSan + "/data/" + sanWritten[dfi];

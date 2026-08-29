@@ -146,6 +146,7 @@ var CORE_FILES = [
     "scripts/CaveSurvey/Core/Format/CsWalls.js",
     "scripts/CaveSurvey/Core/Format/CsSurvex.js",
     "scripts/CaveSurvey/Core/Format/CsCsv.js",
+    "scripts/CaveSurvey/Core/Format/CsTherion.js",
     "scripts/CaveSurvey/Core/Format/CsRegistry.js",
     // before CsRevise: moveLinework's per-vertex dispatch calls
     // CsWarp.mlsSimilarity when it runs
@@ -3390,6 +3391,346 @@ near(svxRt.shots[1].left, 0.4, 1e-9, "Survex round trip passage LRUD");
 
 var csvRt = CsFormatCsv.parse(CsFormatCsv.write(csv));
 shotsMatch(csv, csvRt, "CSV round trip");
+
+
+// ---------------------------------------------------------------------
+// Therion (.th) -- the format TopoDroid and PocketTopo both export,
+// and therefore the door all three walk through.
+// ---------------------------------------------------------------------
+
+// A file in the shape TopoDroid writes one: metres by default, LRUD on
+// the leg, a quoted team, a declination, and a comment column.
+var thBasic =
+    "encoding utf-8\n" +
+    "survey mainpassage -title \"Test Cave\"\n" +
+    "\n" +
+    "  centreline\n" +
+    "    date 2026.08.29\n" +
+    "    team \"Ann Bell\" compass clino\n" +
+    "    team \"Cal Dee\" notes\n" +
+    "    declination 2.50 degrees\n" +
+    "    data normal from to length compass clino left right up down\n" +
+    "    1 2 10.00 90.00 -5.00 1.0 2.0 3.0 4.0 # wide bit\n" +
+    "    2 3 12.50 45.00 0.00 - - - -\n" +
+    "  endcentreline\n" +
+    "endsurvey\n";
+
+var th = CsFormatTherion.parse(thBasic);
+eqs(th.shots.length, 2, "Therion reads both legs");
+eqs(th.distanceUnit, "m", "Therion defaults to metres");
+eqs(th.shots[0].from, "1",
+    "the file's only top-level survey does not prefix its stations");
+eqs(th.shots[0].to, "2", "the to station either");
+near(th.shots[0].distance, 10.0, 1e-9, "Therion tape");
+near(th.shots[0].azimuth, 92.5, 1e-9, "Therion applies declination east-positive");
+near(th.shots[0].inclination, -5.0, 1e-9, "Therion clino");
+near(th.shots[0].declination, 2.5, 1e-9, "the leg records the declination applied to it");
+near(th.shots[0].left, 1.0, 1e-9, "LRUD on the leg: left");
+near(th.shots[0].right, 2.0, 1e-9, "LRUD on the leg: right");
+near(th.shots[0].up, 3.0, 1e-9, "LRUD on the leg: up");
+near(th.shots[0].down, 4.0, 1e-9, "LRUD on the leg: down");
+eqs(th.shots[1].left, null, "a dash is not a measurement");
+eqs(th.shots[0].notes, "wide bit", "the # comment becomes the shot's note");
+eqs(th.date, "2026-08-29", "Therion's dotted date becomes ISO");
+eqs(th.team, "Ann Bell, Cal Dee", "quoted team members, roles dropped");
+eqs(th.caveName, "Test Cave", "-title becomes the cave name");
+near(th.declination, 2.5, 1e-9, "the survey records the declination");
+eqs(th.declinationSource, "file", "and where it came from");
+
+// Feet, and the American spelling of the block.
+var thFeet =
+    "survey f\n" +
+    "  centerline\n" +
+    "    units length feet\n" +
+    "    data normal from to length compass clino\n" +
+    "    A B 30.00 0.00 0.00\n" +
+    "  endcenterline\n" +
+    "endsurvey\n";
+var thF = CsFormatTherion.parse(thFeet);
+eqs(thF.distanceUnit, "ft", "units length feet");
+near(thF.shots[0].distance, 30.0, 1e-9, "a foot stays a foot");
+eqs(thF.shots.length, 1, "centerline spelled the American way still reads");
+
+// Grads and percent, the two unit traps.
+var thGrad =
+    "survey g\n" +
+    "  centreline\n" +
+    "    units compass grads\n" +
+    "    units clino percent\n" +
+    "    data normal from to length compass clino\n" +
+    "    A B 10.00 100.00 100.00\n" +
+    "  endcentreline\n" +
+    "endsurvey\n";
+var thG = CsFormatTherion.parse(thGrad);
+near(thG.shots[0].azimuth, 90.0, 1e-9, "400 grads to 360 degrees");
+near(thG.shots[0].inclination, 45.0, 1e-9, "100 percent grade is 45 degrees");
+
+// Plumbs: the compass is legally omitted, and a bare "-" to-station is
+// a splay.
+var thPlumb =
+    "survey p\n" +
+    "  centreline\n" +
+    "    data normal from to length compass clino\n" +
+    "    A B 12.00 - down\n" +
+    "    B - 3.00 180.00 0.00\n" +
+    "  endcentreline\n" +
+    "endsurvey\n";
+var thP = CsFormatTherion.parse(thPlumb);
+eqs(thP.shots.length, 2, "a plumb and a splay both read");
+near(thP.shots[0].inclination, -90.0, 1e-9, "clino keyword down is -90");
+eqs(thP.shots[0].splay, false, "a plumbed leg is not a splay");
+eqs(thP.shots[1].splay, true, "a dash to-station is a splay");
+eqs(thP.shots[1].to, "", "and carries no to-station name");
+
+// Flags, including the "not" form.
+var thFlags =
+    "survey fl\n" +
+    "  centreline\n" +
+    "    data normal from to length compass clino\n" +
+    "    flags duplicate\n" +
+    "    A B 10.00 0.00 0.00\n" +
+    "    flags not duplicate\n" +
+    "    flags surface\n" +
+    "    B C 10.00 0.00 0.00\n" +
+    "    flags not surface\n" +
+    "    C D 10.00 0.00 0.00\n" +
+    "  endcentreline\n" +
+    "endsurvey\n";
+var thFl = CsFormatTherion.parse(thFlags);
+eqs(thFl.shots[0].excludeFromLength, true, "duplicate legs leave the length alone");
+eqs(thFl.shots[1].excludeFromPlot, true, "surface legs are positioned, not drawn");
+eqs(thFl.shots[2].excludeFromLength, false, "\"not\" clears a flag again");
+eqs(thFl.shots[2].excludeFromPlot, false, "for both flags");
+
+// fix -- the entrance control, which the export path then has to
+// decide about (see CsPackage.sanitizeSurvey).
+var thFix =
+    "survey x\n" +
+    "  centreline\n" +
+    "    units length metres\n" +
+    "    fix ENT 512345.67 4287654.32 1250.00\n" +
+    "    data normal from to length compass clino\n" +
+    "    ENT A 10.00 0.00 0.00\n" +
+    "  endcentreline\n" +
+    "endsurvey\n";
+var thX = CsFormatTherion.parse(thFix);
+ok(thX.fixed.hasOwnProperty("ENT"), "fix lands in survey.fixed under its station name");
+near(thX.fixed["ENT"].x, 512345.67, 1e-6, "fix easting");
+near(thX.fixed["ENT"].z, 1250.00, 1e-6, "fix elevation");
+
+// Drawing data must never be read as survey data. A scrap's own line
+// records begin with two tokens that look exactly like a station pair.
+var thScrap =
+    "survey s\n" +
+    "  centreline\n" +
+    "    data normal from to length compass clino\n" +
+    "    A B 10.00 0.00 0.00\n" +
+    "  endcentreline\n" +
+    "\n" +
+    "  scrap s1 -projection plan\n" +
+    "    line wall\n" +
+    "      100 200 300 400 500 600\n" +
+    "      800 900 1000 1100 1200 1300\n" +
+    "    endline\n" +
+    "  endscrap\n" +
+    "endsurvey\n";
+var thS = CsFormatTherion.parse(thScrap);
+eqs(thS.shots.length, 1, "a scrap's drawing records are not shots");
+
+// Nested surveys: names get their own prefix, and a unit set inside one
+// does not leak out of it.
+var thNest =
+    "survey outer\n" +
+    "  centreline\n" +
+    "    data normal from to length compass clino\n" +
+    "    A B 10.00 0.00 0.00\n" +
+    "  endcentreline\n" +
+    "  survey inner\n" +
+    "    centreline\n" +
+    "      units length feet\n" +
+    "      data normal from to length compass clino\n" +
+    "      C D 10.00 0.00 0.00\n" +
+    "    endcentreline\n" +
+    "  endsurvey\n" +
+    "  centreline\n" +
+    "    data normal from to length compass clino\n" +
+    "    E F 10.00 0.00 0.00\n" +
+    "  endcentreline\n" +
+    "endsurvey\n";
+var thN = CsFormatTherion.parse(thNest);
+eqs(thN.shots.length, 3, "every nested centreline is read");
+eqs(thN.shots[0].from, "A", "the sole outer survey still does not prefix");
+eqs(thN.shots[1].from, "inner.C", "a nested survey DOES prefix -- it distinguishes");
+eqs(thN.shots[2].from, "E", "and the nested prefix is popped again on endsurvey");
+// The whole survey is stored in ONE unit (the first one seen), so the
+// inner block's feet are converted rather than kept as a second unit.
+eqs(thN.distanceUnit, "m", "the survey keeps the unit its first leg set");
+near(thN.shots[2].distance, 10.0, 1e-9, "and a later metric leg is unconverted");
+near(thN.shots[1].distance, CsUnits.convert(10.0, "ft", "m"), 1e-9,
+    "while the inner block's feet are converted into it");
+
+// data dimensions: LRUD per station rather than per leg, plus the
+// first station's own reading, which has no arriving shot to ride on.
+var thDim =
+    "survey d\n" +
+    "  centreline\n" +
+    "    data normal from to length compass clino\n" +
+    "    A B 10.00 0.00 0.00\n" +
+    "    B C 10.00 0.00 0.00\n" +
+    "    data dimensions station left right up down\n" +
+    "    A 1.0 2.0 3.0 4.0\n" +
+    "    B 5.0 6.0 7.0 8.0\n" +
+    "  endcentreline\n" +
+    "endsurvey\n";
+var thD = CsFormatTherion.parse(thDim);
+near(thD.shots[0].left, 5.0, 1e-9, "a dimensions row lands on the shot INTO that station");
+near(thD.shots[0].down, 8.0, 1e-9, "all four sides of it");
+ok(thD.startLrud !== null, "the first station's reading becomes startLrud");
+near(thD.startLrud.left, 1.0, 1e-9, "and carries its own left");
+near(thD.trips[0].startLrud.up, 3.0, 1e-9, "written onto trip 0, where readers look");
+
+// Several top-level surveys: now the outermost name is the only thing
+// telling one cave's station 1 from the next, so every prefix is kept.
+var thTwo =
+    "survey alpha\n" +
+    "  centreline\n" +
+    "    data normal from to length compass clino\n" +
+    "    1 2 10.00 0.00 0.00\n" +
+    "  endcentreline\n" +
+    "endsurvey\n" +
+    "survey beta\n" +
+    "  centreline\n" +
+    "    data normal from to length compass clino\n" +
+    "    1 2 10.00 0.00 0.00\n" +
+    "  endcentreline\n" +
+    "endsurvey\n";
+var th2 = CsFormatTherion.parse(thTwo);
+eqs(th2.shots.length, 2, "both top-level surveys are read");
+eqs(th2.shots[0].from, "alpha.1",
+    "two top-level surveys keep their prefixes");
+eqs(th2.shots[1].from, "beta.1", "so their station 1s stay distinct");
+eqs(CsFormatTherion.topLevelSurveys(
+        CsFormatTherion.logicalLines(thTwo)), 2,
+    "the pre-scan counts both");
+eqs(CsFormatTherion.topLevelSurveys(
+        CsFormatTherion.logicalLines(thNest)), 1,
+    "and counts a nested file as one");
+
+// Two dates, two trips.
+var thTrips =
+    "survey t\n" +
+    "  centreline\n" +
+    "    data normal from to length compass clino\n" +
+    "    date 2026.01.02\n" +
+    "    team \"Ann\"\n" +
+    "    A B 10.00 0.00 0.00\n" +
+    "    date 2026.03.04\n" +
+    "    team \"Bob\"\n" +
+    "    B C 10.00 0.00 0.00\n" +
+    "  endcentreline\n" +
+    "endsurvey\n";
+var thT = CsFormatTherion.parse(thTrips);
+eqs(thT.trips.length, 2, "two dated blocks are two trips");
+eqs(thT.shots[0].trip, 0, "the first leg belongs to the first trip");
+eqs(thT.shots[1].trip, 1, "the second to the second");
+eqs(thT.trips[1].team, "Bob",
+    "a new date clears the running team instead of appending to it");
+
+// Continuation lines and quoted strings containing a hash.
+var thCont =
+    "survey c\n" +
+    "  centreline\n" +
+    "    team \"Ann # Bell\"\n" +
+    "    data normal from to \\\n" +
+    "         length compass clino\n" +
+    "    A B 10.00 0.00 0.00\n" +
+    "  endcentreline\n" +
+    "endsurvey\n";
+var thC = CsFormatTherion.parse(thCont);
+eqs(thC.shots.length, 1, "a backslash-continued data line still declares its fields");
+eqs(thC.team, "Ann # Bell", "a hash inside quotes is not a comment");
+
+// What is NOT supported has to say so out loud.
+var thInput =
+    "encoding utf-8\n" +
+    "input other.th\n" +
+    "survey i\n" +
+    "  centreline\n" +
+    "    data normal from to length compass clino\n" +
+    "    A B 10.00 0.00 0.00\n" +
+    "  endcentreline\n" +
+    "endsurvey\n";
+var thI = CsFormatTherion.parse(thInput);
+var thIFindings = CsModel.parseFindings(thI);
+ok(thIFindings.length >= 1, "an unfollowed input is reported, not swallowed");
+ok(thIFindings[0].message.indexOf("input") !== -1,
+    "and the message names what was skipped");
+eqs(thI.shots.length, 1, "the passages that ARE in the file still import");
+
+var thEquate =
+    "survey e\n" +
+    "  centreline\n" +
+    "    data normal from to length compass clino\n" +
+    "    A B 10.00 0.00 0.00\n" +
+    "    equate B 1@other\n" +
+    "  endcentreline\n" +
+    "endsurvey\n";
+var thEFindings = CsModel.parseFindings(CsFormatTherion.parse(thEquate));
+ok(thEFindings.length >= 1, "an unapplied equate is reported");
+
+var thDiving =
+    "survey dv\n" +
+    "  centreline\n" +
+    "    data diving from to length compass depthchange\n" +
+    "    A B 10.00 0.00 1.00\n" +
+    "  endcentreline\n" +
+    "endsurvey\n";
+var thDv = CsFormatTherion.parse(thDiving);
+eqs(thDv.shots.length, 0, "a data style this reader cannot do is skipped");
+ok(CsModel.parseFindings(thDv).length >= 1, "and said so");
+
+// Round trip.
+var thRt = CsFormatTherion.parse(CsFormatTherion.write(th));
+shotsMatch(th, thRt, "Therion round trip");
+near(thRt.shots[0].left, th.shots[0].left, 0.01, "Therion round trip keeps LRUD");
+eqs(thRt.date, th.date, "Therion round trip keeps the date");
+near(thRt.declination, th.declination, 0.01,
+    "Therion round trip keeps the declination");
+
+// A splay survives the round trip as a splay, not as a station named
+// "-".
+var thSplayRt = CsFormatTherion.parse(CsFormatTherion.write(thP));
+eqs(thSplayRt.shots.length, 2, "the round trip keeps both legs");
+eqs(thSplayRt.shots[1].splay, true, "and the splay is still a splay");
+
+// The nested and multi-cave shapes round trip too -- the writer emits
+// one survey block, and the reader's own prefix rule has to give back
+// exactly the names that went in, or a second export renames the cave
+// again every time.
+var thNestRt = CsFormatTherion.parse(CsFormatTherion.write(thN));
+shotsMatch(thN, thNestRt, "Therion nested round trip");
+var thTwoRt = CsFormatTherion.parse(CsFormatTherion.write(th2));
+shotsMatch(th2, thTwoRt, "Therion multi-survey round trip");
+
+// Cross-format: a Therion file exports as Survex and reads back the
+// same. The two formats are close, and this is the claim that they
+// meet in the model rather than by accident.
+var thToSvx = CsFormatSurvex.parse(CsFormatSurvex.write(th));
+shotsMatch(th, thToSvx, "Therion into Survex and back");
+
+// Registry.
+ok(CsFormatRegistry.detect("x.th", thBasic).id === "therion", "detect .th");
+ok(CsFormatRegistry.detect("", thBasic).id === "therion",
+    "detect Therion by content");
+ok(CsFormatRegistry.detect("", thPlumb).id === "therion",
+    "a file with no encoding line is still detected by its survey block");
+ok(CsFormatRegistry.detect("x.svx", svxContent).id === "survex",
+    "adding Therion did not break Survex detection");
+ok(CsFormatRegistry.detect("x.csv", csvText).id === "csv",
+    "nor CSV detection");
+ok(CsFormatRegistry.combinedFileFilter().indexOf("*.th") !== -1,
+    "the combined file filter offers .th");
+ok(CsFormatRegistry.byId("therion") !== null, "the registry knows therion by id");
 
 // ---------------------------------------------------------------------
 // Registry detection.

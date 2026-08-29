@@ -1,8 +1,9 @@
 // ImportCaveSurvey.js
 //
 // QCAD add-on tool: import a cave survey file -- Compass (.dat),
-// Walls (.srv), Survex (.svx) or CSV -- and draw the centerline,
-// stations and LRUD ticks.
+// Walls (.srv), Survex (.svx), Therion (.th) or CSV -- and draw the
+// centerline, stations and LRUD ticks. A Therion file is also how
+// TopoDroid and PocketTopo hand their data over.
 //
 // You pick a FILE, not a format: the format is detected from the
 // extension and the content, and only asked about when genuinely
@@ -187,7 +188,7 @@ ImportCaveSurvey.init = function(basePath) {
     action.setRequiresDocument(true);
     action.setScriptFile(basePath + "/ImportCaveSurvey.js");
     action.setIcon(basePath + "/ImportCaveSurvey.svg");
-    action.setStatusTip(qsTr("Import a Compass, Walls, Survex or CSV survey file -- the format is detected for you"));
+    action.setStatusTip(qsTr("Import a Compass, Walls, Survex, Therion or CSV survey file -- the format is detected for you"));
     action.setDefaultCommands(["importcavesurvey", "ics"]);
     action.setGroupSortOrder(450);
     action.setSortOrder(20);

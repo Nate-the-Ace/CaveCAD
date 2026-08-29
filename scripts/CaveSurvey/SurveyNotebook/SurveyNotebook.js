@@ -27,7 +27,7 @@
 // [+ Station] grows the page as the survey expands; totals, loop
 // closures, the honest grade and any warnings update as you type.
 // Draw plots the survey in ONE undo step. Import fills the page from
-// any supported file; Export writes Compass/Walls/Survex/CSV.
+// any supported file; Export writes Compass/Walls/Survex/Therion/CSV.
 //
 // BRANCHES AND SPLAYS live on the ladder too -- there is no other
 // mode, and the conventions are the paper ones. A BLANK station line

@@ -1,7 +1,7 @@
 // ExportCaveSurvey.js
 //
 // QCAD add-on tool: write the drawing's survey back out as a Compass
-// (.dat), Walls (.srv), Survex (.svx) or CSV file.
+// (.dat), Walls (.srv), Survex (.svx), Therion (.th) or CSV file.
 //
 // The other half of Import Cave Survey, and the missing third door on
 // to writers that have existed in Core/Format since the importers did.
@@ -26,8 +26,9 @@
 //
 // THE ENTRANCE. survey.fixed is the #Fix / *fix control the survey was
 // imported with, and on the ordinary import those coordinates ARE the
-// cave's location (see CsPackage.sanitizeSurvey). Walls, Survex and
-// CSV all write it back out. So a survey with control is exported
+// cave's location (see CsPackage.sanitizeSurvey). Every writer except
+// Compass -- Walls, Survex, Therion and CSV -- puts it back in the
+// file. So a survey with control is exported
 // WITHOUT it unless you say otherwise, and the report says which you
 // got. A file with no fix line is still a complete survey -- the shape
 // of the cave is not the secret.
@@ -241,7 +242,7 @@ ExportCaveSurvey.init = function(basePath) {
     action.setRequiresDocument(true);
     action.setScriptFile(basePath + "/ExportCaveSurvey.js");
     action.setIcon(basePath + "/ExportCaveSurvey.svg");
-    action.setStatusTip(qsTr("Write the drawing's survey out as a Compass, Walls, Survex or CSV file -- without the cave's location unless you ask"));
+    action.setStatusTip(qsTr("Write the drawing's survey out as a Compass, Walls, Survex, Therion or CSV file -- without the cave's location unless you ask"));
     action.setDefaultCommands(["exportcavesurvey", "ecs"]);
     action.setGroupSortOrder(450);
     action.setSortOrder(21);

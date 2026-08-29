@@ -35,6 +35,14 @@ CsFormatRegistry.FORMATS = [
         write: function(s) { return CsFormatSurvex.write(s); }
     },
     {
+        id: "therion",
+        label: "Therion (.th)",
+        extensions: ["th"],
+        fileFilter: "Therion Files (*.th)",
+        parse: function(c) { return CsFormatTherion.parse(c); },
+        write: function(s) { return CsFormatTherion.write(s); }
+    },
+    {
         id: "csv",
         label: "CSV (.csv)",
         extensions: ["csv", "txt"],
@@ -55,7 +63,7 @@ CsFormatRegistry.byId = function(id) {
 
 /** One combined file dialog filter string for all formats. */
 CsFormatRegistry.combinedFileFilter = function() {
-    var all = "Cave Survey Files (*.dat *.srv *.svx *.csv)";
+    var all = "Cave Survey Files (*.dat *.srv *.svx *.th *.csv)";
     var parts = [all];
     for (var i = 0; i < CsFormatRegistry.FORMATS.length; i++) {
         parts.push(CsFormatRegistry.FORMATS[i].fileFilter);
@@ -112,6 +120,14 @@ CsFormatRegistry.detectByContent = function(content) {
     // Compass: the header trio is always present.
     if (/SURVEY NAME:/i.test(head) && /DECLINATION:/i.test(head)) {
         return CsFormatRegistry.byId("compass");
+    }
+    // Therion: its block keywords, which carry no leading * or #.
+    // Checked after Survex and Walls -- a .th holds no star or hash
+    // directives, so nothing above can claim one -- and before CSV,
+    // whose own marker is a header row this cannot resemble.
+    if (/^\s*(survey|centreline|centerline)\s+\S/im.test(head) ||
+            /^\s*encoding\s+\S/im.test(head)) {
+        return CsFormatRegistry.byId("therion");
     }
     // CSV with our header row.
     if (/^\s*from\s*,\s*to\s*,\s*distance/im.test(head)) {

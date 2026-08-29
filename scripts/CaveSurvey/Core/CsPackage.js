@@ -37,8 +37,9 @@ CsPackage.GEO_TAGS = ["GeoLat", "GeoLon", "GeoStation"];
  * CsDraw records them in a Fixed tag, and CsRevise reads them straight
  * back, so the cave is drawn in the control's own frame and those
  * numbers ARE the entrance: a UTM easting and northing, and an
- * absolute datum elevation. CsFormatWalls, CsFormatSurvex and
- * CsFormatCsv all write them back out. An interchange file bound for a
+ * absolute datum elevation. Every writer except Compass --
+ * CsFormatWalls, CsFormatSurvex, CsFormatTherion and CsFormatCsv --
+ * writes them back out. An interchange file bound for a
  * sanitized package therefore has to be written from THIS copy, or the
  * package leaks in data/ exactly what its own MANIFEST promises it
  * does not carry.
