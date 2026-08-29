@@ -431,12 +431,56 @@ FeatureTrace.showCursorFrame = function(frame) {
     }
 };
 
-/** One group box holding every row whose layer belongs to `frame`.
- *  Rows are selected by asking CsLayers.frameOf, so the group a button
- *  sits in and the frame its layer belongs to cannot disagree. */
+// THE FEATURE TILES ARE A GRID, NOT A LIST.
+//
+// One full-width button per feature made a column that grew every time
+// a feature was added, until telling one entry from the next meant
+// reading the whole stack -- and the buttons set the dock's width while
+// they were at it. Fixed-size tiles in a grid mean a new feature is
+// APPENDED to the next free cell: the panel grows a row for every
+// GRID_COLUMNS features rather than for every one, and the shape stays
+// scannable.
+FeatureTrace.GRID_COLUMNS = 2;
+FeatureTrace.CELL_W = 104;
+FeatureTrace.CELL_H = 56;
+/** Roughly how many characters fit on one line of a tile. Used only to
+ *  break the label -- QPushButton renders "\n" but will not wrap for
+ *  itself (probed 2026-08-29). */
+FeatureTrace.CELL_CHARS = 12;
+
+/**
+ * A label broken over as many lines as it takes, greedily, on spaces.
+ * A single word longer than the budget is left alone: a mid-word break
+ * is harder to read than an overhang.
+ */
+FeatureTrace.wrapLabel = function(text, budget) {
+    var words = String(text).split(" ");
+    var lines = [];
+    var line = "";
+    for (var i = 0; i < words.length; i++) {
+        if (line.length === 0) {
+            line = words[i];
+        } else if (line.length + 1 + words[i].length <= budget) {
+            line += " " + words[i];
+        } else {
+            lines.push(line);
+            line = words[i];
+        }
+    }
+    if (line.length > 0) {
+        lines.push(line);
+    }
+    return lines.join("\n");
+};
+
+/** One group box holding every row whose layer belongs to `frame`, as
+ *  a grid of fixed-size tiles. Rows are selected by asking
+ *  CsLayers.frameOf, so the group a button sits in and the frame its
+ *  layer belongs to cannot disagree. */
 FeatureTrace.buildGroup = function(w, parent, frame, title) {
     var box = new QGroupBox(title, parent);
-    var inner = new QVBoxLayout();
+    var inner = new QGridLayout();
+    var cell = 0;
 
     for (var i = 0; i < FeatureTrace.ROWS.length; i++) {
         var row = FeatureTrace.ROWS[i];
@@ -444,15 +488,34 @@ FeatureTrace.buildGroup = function(w, parent, frame, title) {
             continue;
         }
         try {
-            var button = new QPushButton(row.label);
+            var button = new QPushButton(
+                FeatureTrace.wrapLabel(row.label, FeatureTrace.CELL_CHARS));
             button.checkable = true;
             button.toolTip = row.layer;
+            try {
+                button.setFixedSize(FeatureTrace.CELL_W,
+                    FeatureTrace.CELL_H);
+            } catch (eSize) {
+                // a bridge without setFixedSize gets tiles that stretch;
+                // the grid still reads as a grid
+            }
             FeatureTrace.connectRow(button, row);
-            inner.addWidget(button, 0, 0);
+            inner.addWidget(button,
+                Math.floor(cell / FeatureTrace.GRID_COLUMNS),
+                cell % FeatureTrace.GRID_COLUMNS);
+            cell++;
             w.buttons.push({ button: button, row: row });
         } catch (e) {
             w.problems.push(row.layer + " (" + e + ")");
         }
+    }
+
+    try {
+        // Fixed-size tiles in a stretching grid would drift apart as the
+        // dock widens; the stretch goes to a column PAST the last one,
+        // so the tiles stay packed at the left in a steady grid.
+        inner.setColumnStretch(FeatureTrace.GRID_COLUMNS, 1);
+    } catch (eStretch) {
     }
 
     box.setLayout(inner);
@@ -763,8 +826,14 @@ FeatureTrace.refresh = function(docIn, regionIn) {
                     // just as invisible either way.
                     off = CsLayers.refusesEdits(lay);
                 }
-                entry.button.text = off ?
-                    entry.row.label + "   (hidden)" : entry.row.label;
+                // Re-wrapped, not re-set: a tile's label is broken over
+                // lines by FeatureTrace.wrapLabel, and writing the flat
+                // label back here would undo that on the first refresh.
+                // "(hidden)" gets a line of its own rather than a budget
+                // it would not fit in.
+                entry.button.text = FeatureTrace.wrapLabel(
+                    entry.row.label, FeatureTrace.CELL_CHARS) +
+                    (off ? "\n(hidden)" : "");
                 entry.button.toolTip = off ?
                     layerName + " is switched OFF -- a trace will land on " +
                         "it but you will not see it" : layerName;

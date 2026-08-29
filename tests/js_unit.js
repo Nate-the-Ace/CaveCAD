@@ -15650,8 +15650,21 @@ if (!IS_NODE) {
             // what a click would actually draw to.
             CsLayerVariants.ensureProfile(d, di3,
                 CsLayers.PROFILE_TRACED_CEILING, "A");
+            // The wrapper itself: a label that fits is untouched, one
+            // that does not is broken on a space, and a single word
+            // longer than the budget is left whole rather than cut
+            // mid-word.
+            eqs(FeatureTrace.wrapLabel("Entrance", 12), "Entrance",
+                "FeatureTrace.wrapLabel: a short label is untouched");
+            eqs(FeatureTrace.wrapLabel("Breakdown Boundary", 12),
+                "Breakdown\nBoundary",
+                "FeatureTrace.wrapLabel: a long label breaks on the space");
+            eqs(FeatureTrace.wrapLabel("Unbreakablewordhere", 12),
+                "Unbreakablewordhere",
+                "FeatureTrace.wrapLabel: one long word is left whole");
             FeatureTrace.refresh(d, CsTrace.profileRegion(d));
-            eqs(ceilingBtn.text, "Ceiling",
+            eqs(ceilingBtn.text,
+                FeatureTrace.wrapLabel("Ceiling", FeatureTrace.CELL_CHARS),
                 "FeatureTrace.refresh: a visible layer shows a plain label");
             eqs(ceilingBtn.toolTip, "PROFILE-CEILING-A",
                 "FeatureTrace.refresh: the tooltip names the run's layer");
@@ -15671,7 +15684,15 @@ if (!IS_NODE) {
             // A plan row ignores the run entirely.
             eqs(wallsBtn.toolTip, CsLayers.WALLS_SURVEYED,
                 "FeatureTrace.refresh: a plan row is never run-qualified");
-            eqs(wallsBtn.text, "Surveyed Walls",
+            // The tiles carry their labels broken over lines (the grid
+            // in FeatureTrace.buildGroup), so the assertion is against
+            // the wrapper's own output rather than the flat label -- a
+            // refresh that wrote the flat label back would flatten
+            // every tile on the first update, which is what this
+            // caught when the grid landed.
+            eqs(wallsBtn.text,
+                FeatureTrace.wrapLabel("Surveyed Walls",
+                    FeatureTrace.CELL_CHARS),
                 "FeatureTrace.refresh: and is unmarked while its layer is on");
 
             FeatureTrace.widgets = undefined;
