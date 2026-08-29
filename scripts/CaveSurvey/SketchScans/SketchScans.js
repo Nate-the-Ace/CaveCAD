@@ -535,7 +535,22 @@ SketchScans.buildDock = function(appWin) {
                 plotted[stations[i].name] = stations[i].pos;
                 names.push(stations[i].name);
             }
-            return { plotted: plotted, names: names };
+            // SURVEY ORDER where the drawing can supply it, natural
+            // name order otherwise. collectStations sorts by Seq, which
+            // is SEEDING order for anchored stations rather than walk
+            // order -- so it is not the order a caver is working
+            // through, and a picker listing it is a hunt.
+            var walk = null;
+            try {
+                var asDrawn = CsRevise.resolveAsDrawn(doc);
+                if (asDrawn !== null) {
+                    walk = CsStationOrder.walkOrder(asDrawn.survey);
+                }
+            } catch (eWalk) {
+                walk = null;
+            }
+            return { plotted: plotted,
+                     names: CsStationOrder.pickOrder(names, walk) };
         } catch (e) {
             return null;
         }
@@ -1125,7 +1140,7 @@ SketchScans.insertFitted = function(doc, di, path, name, fit, heightPx,
         return null;
     }
 
-    var v = CsScanFit.imageVectors(fit.matrix, heightPx);
+    var v = CsScanFit.imageVectors(fit.matrix);
     var entity;
     try {
         var data = new RImageData(path,

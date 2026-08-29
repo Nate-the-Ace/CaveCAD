@@ -10070,6 +10070,37 @@ if (!IS_NODE) {
 }());
 
 // ---------------------------------------------------------------------
+// CsStationOrder.pickOrder -- the order a station picker offers names.
+// ---------------------------------------------------------------------
+
+(function() {
+    // Plain string order puts A10 between A1 and A2, which turns a
+    // picker into a hunt.
+    var names = ["A10", "A2", "A1", "B1", "A9"];
+    var natural = names.slice().sort(CsStationOrder.naturalCompare);
+    eqs(natural.join(","), "A1,A2,A9,A10,B1",
+        "naturalCompare: A2 before A10, and B after A");
+    eqs(["A1", "a2"].sort(CsStationOrder.naturalCompare).join(","), "A1,a2",
+        "naturalCompare: case does not reorder");
+
+    // Survey order wins where the drawing supplies it: it follows a
+    // branch to its tie-in rather than counting through the alphabet.
+    var walk = ["A1", "A2", "B1", "A9", "A10"];
+    eqs(CsStationOrder.pickOrder(names, walk).join(","),
+        "A1,A2,B1,A9,A10",
+        "pickOrder: survey order beats any sort");
+
+    // A station the walk never mentions is still on the sheet: it is
+    // appended in natural order, never dropped.
+    eqs(CsStationOrder.pickOrder(["A1", "Z9", "A2"], ["A1", "A2"]).join(","),
+        "A1,A2,Z9",
+        "pickOrder: names outside the walk are appended, not lost");
+    eqs(CsStationOrder.pickOrder(names, null).join(","),
+        "A1,A2,A9,A10,B1",
+        "pickOrder: with no walk at all it falls back to natural order");
+}());
+
+// ---------------------------------------------------------------------
 // CsScanFit -- fitting a scan onto stations BEFORE it is placed.
 // ---------------------------------------------------------------------
 
@@ -10124,15 +10155,25 @@ if (!IS_NODE) {
         {x:9,y:9}) === null,
         "CsScanFit: two picks on the same spot say nothing");
 
-    // The image vectors: a 200x100 scan at a tenth scale, unrotated,
-    // is placed from its TOP-LEFT with v stepping DOWN the drawing --
-    // an image's rows run down while the preview's y ran up.
-    var v = CsScanFit.imageVectors(fit.matrix, 100);
-    near(v.position.x, 0, 1e-9, "imageVectors: top-left x");
-    near(v.position.y, 10, 1e-9, "imageVectors: top-left y is the scan's top");
+    // The image vectors: QCAD places an image from its BOTTOM-LEFT with
+    // v pointing UP, which is also how the preview document inserts the
+    // scan -- and the source coordinates ARE the preview's, so y
+    // already runs up. Deriving from the top with v down flipped every
+    // placed scan, which is what the first version of this did.
+    var v = CsScanFit.imageVectors(fit.matrix);
+    near(v.position.x, 0, 1e-9, "imageVectors: bottom-left x");
+    near(v.position.y, 0, 1e-9, "imageVectors: bottom-left y");
     near(v.u.x, 0.1, 1e-9, "imageVectors: one pixel across is a tenth");
     near(v.u.y, 0, 1e-9, "imageVectors: and level");
-    near(v.v.y, -0.1, 1e-9, "imageVectors: one pixel down goes DOWN");
+    near(v.v.y, 0.1, 1e-9, "imageVectors: one pixel up goes UP");
+    near(v.v.x, 0, 1e-9, "imageVectors: and not sideways");
+
+    // Under a quarter turn the vectors turn with it: the scan's +x runs
+    // north, so u points north and v points west.
+    var tv = CsScanFit.imageVectors(turned.matrix);
+    near(tv.u.x, 0, 1e-9, "imageVectors: a turned scan's u is not east");
+    near(tv.u.y, 1, 1e-9, "imageVectors: a turned scan's u runs north");
+    near(tv.v.x, -1, 1e-9, "imageVectors: and its v runs west");
 
     var res = CsScanFit.residuals(two, fit.matrix);
     near(res.worst, 0, 1e-9, "CsScanFit.residuals: an exact fit misses by nothing");

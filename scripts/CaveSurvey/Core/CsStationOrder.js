@@ -80,6 +80,68 @@ CsStationOrder.nextUnassigned = function(order, lastName, usedSet, plotted) {
 };
 
 /** The AlignedStations tag value, parsed. Anything odd reads as []. */
+/**
+ * Compare two station names the way a caver reads them: A2 before A10,
+ * not after it.
+ *
+ * Plain string order puts A10 between A1 and A2, which turns a picker
+ * listing a trip's stations into a hunt. Names are compared in chunks
+ * -- letters against letters, numbers against numbers as NUMBERS -- so
+ * A9, A10, A11 and B1 land in the order they were surveyed in.
+ *
+ * Pure.
+ */
+CsStationOrder.naturalCompare = function(a, b) {
+    var ax = String(a).match(/(\d+|\D+)/g) || [];
+    var bx = String(b).match(/(\d+|\D+)/g) || [];
+    for (var i = 0; i < Math.min(ax.length, bx.length); i++) {
+        var an = parseInt(ax[i], 10), bn = parseInt(bx[i], 10);
+        if (!isNaN(an) && !isNaN(bn)) {
+            if (an !== bn) {
+                return an - bn;
+            }
+        } else {
+            var au = ax[i].toUpperCase(), bu = bx[i].toUpperCase();
+            if (au !== bu) {
+                return au < bu ? -1 : 1;
+            }
+        }
+    }
+    return ax.length - bx.length;
+};
+
+/**
+ * Station names in the order a picker should offer them: SURVEY ORDER
+ * where the drawing can supply it, and natural name order otherwise.
+ *
+ * Survey order is what a caver is actually working through -- it
+ * follows a branch to its tie-in rather than counting on through the
+ * alphabet -- so it beats any sort when it is available. Names the walk
+ * does not mention are appended in natural order rather than dropped:
+ * a station the walk cannot reach is still a station on the sheet.
+ */
+CsStationOrder.pickOrder = function(names, walk) {
+    var rank = {}, i;
+    if (walk !== null && walk !== undefined) {
+        for (i = 0; i < walk.length; i++) {
+            if (rank[walk[i]] === undefined) {
+                rank[walk[i]] = i;
+            }
+        }
+    }
+    var known = [], unknown = [];
+    for (i = 0; i < names.length; i++) {
+        if (rank[names[i]] === undefined) {
+            unknown.push(names[i]);
+        } else {
+            known.push(names[i]);
+        }
+    }
+    known.sort(function(x, y) { return rank[x] - rank[y]; });
+    unknown.sort(CsStationOrder.naturalCompare);
+    return known.concat(unknown);
+};
+
 CsStationOrder.parseAssigned = function(value) {
     if (typeof value !== "string" || value === "") { return []; }
     var out = [];

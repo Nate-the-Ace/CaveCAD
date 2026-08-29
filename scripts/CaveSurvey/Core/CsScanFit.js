@@ -135,19 +135,29 @@ CsScanFit.fit = function(pairs) {
  * space, so the answer falls straight out of where the unit square
  * lands: the origin, and the two unit steps from it.
  *
- * \param heightPx the scan's height, because an image's rows run DOWN
- *        from its top-left while the preview's y ran UP from the
- *        bottom -- the v vector is the step to the row BELOW.
+ * THE INSERTION POINT IS THE BOTTOM-LEFT, AND v POINTS UP. That is the
+ * convention QCAD places an image by, and the same one the preview
+ * document itself uses: it inserts the scan at (0, 0) with u = (1, 0)
+ * and v = (0, 1) and the image occupies 0..width by 0..height, growing
+ * UPWARD from the insertion point.
+ *
+ * An earlier version of this derived the placement from the image's TOP
+ * left with v stepping DOWN, on the reasoning that an image's rows run
+ * downward. That is true of the pixels and irrelevant here: the source
+ * coordinates ARE the preview's model coordinates, where y already runs
+ * up from the bottom. Deriving from the top flipped every placed scan
+ * vertically -- and once a rotation was in the fit, flipped and turned.
+ *
  * \return {position, u, v} in world coordinates
  */
-CsScanFit.imageVectors = function(m, heightPx) {
-    var topLeft = CsScanFit.apply(m, { x: 0, y: heightPx });
-    var right = CsScanFit.apply(m, { x: 1, y: heightPx });
-    var below = CsScanFit.apply(m, { x: 0, y: heightPx - 1 });
+CsScanFit.imageVectors = function(m) {
+    var origin = CsScanFit.apply(m, { x: 0, y: 0 });
+    var right = CsScanFit.apply(m, { x: 1, y: 0 });
+    var up = CsScanFit.apply(m, { x: 0, y: 1 });
     return {
-        position: topLeft,
-        u: { x: right.x - topLeft.x, y: right.y - topLeft.y },
-        v: { x: below.x - topLeft.x, y: below.y - topLeft.y }
+        position: origin,
+        u: { x: right.x - origin.x, y: right.y - origin.y },
+        v: { x: up.x - origin.x, y: up.y - origin.y }
     };
 };
 
