@@ -1619,15 +1619,35 @@ destr(diD);
 }());
 
 // =======================================================================
-// 9. IMPORTANT #5b -- THE RESIDUAL-REFUSAL TOLERANCE, exercised for
+// 9. IMPORTANT #5b -- WAS the residual-refusal tolerance, exercised for
 //    real: a sketch spanning stations that move INCOHERENTLY (one stays
 //    exactly still, two others share one nonzero shift -- no single
-//    rigid transform describes both at once) is refused and left EXACTLY
-//    where it was, and named in counts.linework.unmoved --
-//    CsRevise.moveLinework's own "refuse and report rather than mangle"
-//    property, otherwise never exercised for the profile side at all
-//    (every other fixture in this file that moves a sketch keeps its
-//    bound stations moving as one rigid piece).
+//    rigid transform describes both at once) used to be refused and
+//    left EXACTLY where it was, named in counts.linework.unmoved --
+//    CsRevise.moveLinework's old "refuse and report rather than mangle"
+//    property for a whole-entity rigid fit, otherwise never exercised
+//    for the profile side at all (every other fixture in this file that
+//    moves a sketch keeps its bound stations moving as one rigid
+//    piece).
+//
+//    That refusal was the OLD contract for a polyline specifically, and
+//    this feature's approved design (see
+//    docs/superpowers/specs/2026-08-28-linework-warp-design.md)
+//    deliberately overturns it: CsRevise.moveLinework now warps a
+//    polyline's vertices INDIVIDUALLY through CsWarp.mlsSimilarity
+//    instead of fitting one whole-entity rigid transform, so there is
+//    no "residual too large" outcome left for a polyline to hit at all
+//    -- an incoherent bound-station set is exactly the case a per-vertex
+//    warp exists for (the sketch BENDS along its length) rather than a
+//    case to refuse. This fixture is kept (not deleted) as the one
+//    place in this file that ever fed moveLinework a genuinely
+//    non-rigid station set: it now proves the OTHER half of the same
+//    contract change -- that the incoherent sketch WARPS, per vertex,
+//    matching CsWarp.mlsSimilarity's own prediction for each vertex
+//    exactly, and does NOT move as one rigid piece (the interior/end
+//    vertices, sitting on stations that shared one nonzero shift, move
+//    together; the first vertex, sitting on the station that did not
+//    move at all, does not follow them).
 // =======================================================================
 
 (function() {
@@ -1679,38 +1699,82 @@ destr(diD);
         // A2->A3, and then carries forward unchanged through A4 and
         // A5) -- so the bound set is A1 (shift zero) plus two points
         // sharing one nonzero shift, a shape no single
-        // rotate+scale+translate can reproduce for a real passage
+        // rotate+scale+translate can reproduce for a real passage. That
+        // is no longer a problem for a polyline: it is precisely the
+        // shape a per-vertex warp handles by bending, so this fixture
+        // now checks for a bend instead of a refusal.
         svH.shots[1].distance = 20;
         var resH2 = CsNetwork.resolve(svH, {});
         var rebuiltH = CsProfile.build(svH, resH2, {});
         var countsH = CsProfileDraw.render(dH, iH, rebuiltH, {});
 
         ok(countsH.claimed.tagged >= 1, "sanity: the sketch got claimed");
-        eqs(countsH.linework.moved, 0,
-            "THE INCOHERENT SKETCH IS REFUSED, NOT MANGLED (got " +
+        eqs(countsH.linework.unmoved.length, 0,
+            "THE INCOHERENT SKETCH IS NO LONGER REFUSED -- a polyline " +
+            "has no residual-too-large outcome left (got " +
             JSON.stringify(countsH.linework) + ")");
-        var foundLabel = false;
-        for (var li = 0; li < countsH.linework.unmoved.length; li++) {
-            if (countsH.linework.unmoved[li].indexOf("#" + tracedHId) >= 0) {
-                foundLabel = true;
-            }
+        eqs(countsH.linework.warped, 1,
+            "the incoherent sketch WARPS (per-vertex MLS, not a single " +
+            "rigid transform), got " + JSON.stringify(countsH.linework));
+        eqs(countsH.linework.moved, 0,
+            "and does not land in the plain 'moved' bucket, since its " +
+            "vertices' local angle/factor genuinely differ, got " +
+            JSON.stringify(countsH.linework));
+
+        // the new station positions (A1 unmoved, A3/A5 sharing one
+        // nonzero shift) -- the same control-point set moveLinework
+        // itself built out of oldPos/newPos, reconstructed here so this
+        // fixture can predict each vertex's warped position
+        // independently via CsWarp.mlsSimilarity, the exact function
+        // moveLinework calls
+        var bandAH2 = rebuiltH.bands[0];
+        var n1 = null, n3 = null, n5 = null;
+        for (var ni = 0; ni < bandAH2.stations.length; ni++) {
+            var stH2 = bandAH2.stations[ni];
+            if (stH2.name === "A1") { n1 = stH2; }
+            if (stH2.name === "A3") { n3 = stH2; }
+            if (stH2.name === "A5") { n5 = stH2; }
         }
-        ok(foundLabel,
-            "the refused sketch is NAMED in counts.linework.unmoved (" +
-            JSON.stringify(countsH.linework.unmoved) + ")");
+        ok(n1 !== null && n3 !== null && n5 !== null,
+            "sanity: found A1, A3 and A5 in the REBUILT profile too");
 
         var afterH = dH.queryEntity(tracedHId);
-        ok(!isNull(afterH), "the refused sketch still exists");
-        if (!isNull(afterH)) {
+        ok(!isNull(afterH), "the warped sketch still exists");
+        if (!isNull(afterH) && n1 !== null && n3 !== null && n5 !== null) {
+            var warpPairs = [
+                { old: { x: h1.x, y: h1.y }, nu: { x: n1.x, y: n1.y } },
+                { old: { x: h3.x, y: h3.y }, nu: { x: n3.x, y: n3.y } },
+                { old: { x: h5.x, y: h5.y }, nu: { x: n5.x, y: n5.y } }
+            ];
             for (var vi = 0; vi < 3; vi++) {
                 var bv = beforeVerts[vi], av = afterH.getVertexAt(vi);
-                near(av.x, bv.x, 1e-9,
-                    "vertex " + vi + " x is BYTE-IDENTICAL to before " +
-                    "the refused move (left exactly where it was)");
-                near(av.y, bv.y, 1e-9,
-                    "vertex " + vi + " y is BYTE-IDENTICAL to before " +
-                    "the refused move");
+                var expect = CsWarp.mlsSimilarity(
+                    { x: bv.x, y: bv.y }, warpPairs);
+                near(av.x, expect.x, 1e-6,
+                    "vertex " + vi + " x matches CsWarp.mlsSimilarity's " +
+                    "own prediction for that vertex (got " + av.x +
+                    ", expected " + expect.x + ")");
+                near(av.y, expect.y, 1e-6,
+                    "vertex " + vi + " y matches CsWarp.mlsSimilarity's " +
+                    "own prediction for that vertex (got " + av.y +
+                    ", expected " + expect.y + ")");
             }
+            // and NOT a single whole-entity transform: vertex 0 sits
+            // exactly on A1, which did not move at all, while vertex 1
+            // sits exactly on A3, which shifted by a real, nonzero
+            // amount -- a rigid fit would have moved both by the same
+            // offset, so a big gap between how far each one actually
+            // travelled proves the warp is genuinely per-vertex
+            var av0 = afterH.getVertexAt(0), av1 = afterH.getVertexAt(1);
+            var d0 = Math.sqrt(Math.pow(av0.x - beforeVerts[0].x, 2) +
+                Math.pow(av0.y - beforeVerts[0].y, 2));
+            var d1 = Math.sqrt(Math.pow(av1.x - beforeVerts[1].x, 2) +
+                Math.pow(av1.y - beforeVerts[1].y, 2));
+            ok(Math.abs(d1 - d0) > 5,
+                "vertex 0 (on the unmoved station) and vertex 1 (on a " +
+                "shifted station) travelled clearly different " +
+                "distances, not the identical offset a rigid move " +
+                "would have produced (got d0=" + d0 + " d1=" + d1 + ")");
         }
         destr(iH);
     }
