@@ -181,3 +181,245 @@ CsSectionCut.frameFor = function(prev, x0, x1, d1) {
     }
     return { frame: carried, reseeded: false };
 };
+
+// ---------------------------------------------------------------------
+// THE CUT
+// ---------------------------------------------------------------------
+
+/** How many angles a section is sampled at. 32 is fine for a printed
+ *  section, and it makes a four-point LRUD diamond a 32-vertex
+ *  near-diamond -- more vertices than there is evidence for, which is
+ *  why the count is settable and why the report states how many
+ *  MEASURED points each end actually contributed. */
+CsSectionCut.ANGLES = 32;
+
+/** Under three wall points cannot make a boundary. */
+CsSectionCut.MIN_POINTS = 3;
+
+/**
+ * The frame for one leg, with theta = 0 carried from the legs before
+ * it in resolution order.
+ *
+ * Walking from the start matters on a PITCH: a leg whose own seed is
+ * refused takes its reference from its predecessor, and a cut taken on
+ * it must use the same theta = 0 the neighbouring sections used or it
+ * reads as rotated for no reason.
+ *
+ * \return {frame, reseeded} or {frame: null} when the leg is not in the
+ *         resolved survey.
+ */
+CsSectionCut.frameForLeg = function(resolved, from, to) {
+    var prev = null, prevStart = null;
+    var out = { frame: null, reseeded: false };
+    for (var i = 0; i < resolved.legs.length; i++) {
+        var leg = resolved.legs[i];
+        var a = resolved.stations[leg.from];
+        var b = resolved.stations[leg.to];
+        if (a === undefined || b === undefined) {
+            continue;
+        }
+        var d = CsSectionCut.sub(b, a);
+        var step = CsSectionCut.frameFor(prev,
+            prevStart === null ? a : prevStart, a, d);
+        if (step.frame === null) {
+            continue;                 // a zero-length leg carries nothing
+        }
+        if (leg.from === from && leg.to === to) {
+            return step;
+        }
+        prev = step.frame;
+        prevStart = a;
+    }
+    return out;
+};
+
+/**
+ * One station's measured wall points, projected into the section plane.
+ *
+ * Projecting ALONG the leg is what makes an obliquely shot splay
+ * contribute its PERPENDICULAR distance -- which is what a section
+ * wants -- at the cost of discarding where along the passage it was
+ * shot. That trade is the section's to make, and the caption says so.
+ *
+ * \return {points: [{theta, radius}] in angle order, measured: n}, or
+ *         null when the station is not in the resolved survey.
+ */
+CsSectionCut.polygonAt = function(survey, resolved, stationName, frame,
+        opts) {
+    var st = resolved.stations[stationName];
+    if (st === undefined || st === null || frame === null) {
+        return null;
+    }
+    var o = opts || {};
+    var lrud = CsModel.lrudForStation(survey, stationName);
+    var byStation = o.splaysByStation || CsLrud.splaysByStation(survey);
+    var splays = byStation[stationName] || [];
+    var tapeMode = o.tapeMode || CsTraverse.SLOPE;
+    // The LRUD's own azimuth where there is one -- the same value
+    // tickEnd is given by the plan -- so a section and the plan walls
+    // cannot disagree about which way the passage runs here.
+    var passageAz = (lrud !== null && lrud !== undefined &&
+        lrud.azimuth !== undefined && lrud.azimuth !== null) ?
+        lrud.azimuth : 0;
+
+    var raw = [], i;
+    var sides = ["L", "R"];
+    for (i = 0; i < sides.length; i++) {
+        var pts = CsLrud.stationWallPoints3D(st, passageAz, lrud, splays,
+            sides[i], tapeMode, null);
+        for (var j = 0; j < pts.length; j++) {
+            raw.push(pts[j]);
+        }
+    }
+    var ud = CsLrud.stationCeilingFloor3D(st, lrud);
+    if (ud.ceiling !== null) { raw.push(ud.ceiling); }
+    if (ud.floor !== null) { raw.push(ud.floor); }
+
+    var points = [];
+    for (i = 0; i < raw.length; i++) {
+        var rel = CsSectionCut.sub(raw[i], st);
+        var perp = CsSectionCut.sub(rel,
+            CsSectionCut.scale(frame.d, CsSectionCut.dot(rel, frame.d)));
+        var radius = CsSectionCut.length(perp);
+        if (radius < CsSectionCut.EPS) {
+            continue;                 // the wall is at the station
+        }
+        points.push({
+            theta: Math.atan2(CsSectionCut.dot(perp, frame.s),
+                              CsSectionCut.dot(perp, frame.r)),
+            radius: radius
+        });
+    }
+    // CaveCAD's Array.prototype.sort is UNSTABLE, so never return 0 for
+    // two distinct entries -- tie-break on radius.
+    points.sort(function(a, b) {
+        if (a.theta !== b.theta) { return a.theta - b.theta; }
+        return a.radius - b.radius;
+    });
+    return { points: points, measured: points.length };
+};
+
+/**
+ * Every crossing of the polygon boundary along `theta`, nearest first.
+ * More than one means a RE-ENTRANT, which the caller reports rather
+ * than hides.
+ */
+CsSectionCut.boundaryHits = function(polygon, theta) {
+    var out = [];
+    if (polygon === null || polygon.points.length < CsSectionCut.MIN_POINTS) {
+        return out;
+    }
+    var pts = polygon.points;
+    var dx = Math.cos(theta), dy = Math.sin(theta);
+    for (var i = 0; i < pts.length; i++) {
+        var a = pts[i], b = pts[(i + 1) % pts.length];
+        var ax = a.radius * Math.cos(a.theta);
+        var ay = a.radius * Math.sin(a.theta);
+        var bx = b.radius * Math.cos(b.theta);
+        var by = b.radius * Math.sin(b.theta);
+        var ex = bx - ax, ey = by - ay;
+        var den = dx * ey - dy * ex;
+        if (Math.abs(den) < CsSectionCut.EPS) {
+            continue;                              // parallel
+        }
+        var s = (ax * ey - ay * ex) / den;         // along the ray
+        var u = (ax * dy - ay * dx) / den;         // along the segment
+        if (s > 0 && u >= 0 && u <= 1) {
+            out.push(s);
+        }
+    }
+    out.sort(function(p, q) { return p - q; });
+    return out;
+};
+
+/**
+ * The distance from the centre to the polygon BOUNDARY along `theta`.
+ *
+ * Sampling the BOUNDARY and not the vertices is load-bearing: a
+ * four-point LRUD diamond sampled at its vertices reads as a four-spoke
+ * star, which is not what anybody measured.
+ *
+ * \return the radius, or null when the ray crosses nothing.
+ */
+CsSectionCut.radiusAt = function(polygon, theta) {
+    var hits = CsSectionCut.boundaryHits(polygon, theta);
+    return hits.length === 0 ? null : hits[0];
+};
+
+/**
+ * A rough cross section anywhere along one leg.
+ *
+ * \param t 0 at `from`, 1 at `to`
+ * \return {outline: [{theta, radius}], polygon, measuredFrom, measuredTo,
+ *          nearest, reentrant, reseeded}
+ *         or {refused: true, reason: "..."} -- refused is never drawn
+ *         from two points and a hope.
+ */
+CsSectionCut.cut = function(survey, resolved, from, to, t, opts) {
+    var o = opts || {};
+    var a = resolved.stations[from], b = resolved.stations[to];
+    if (a === undefined || b === undefined) {
+        return { refused: true,
+                 reason: "the leg " + from + "->" + to +
+                     " is not in the drawing's survey" };
+    }
+    var step = CsSectionCut.frameForLeg(resolved, from, to);
+    if (step.frame === null) {
+        return { refused: true,
+                 reason: "no section plane could be worked out for " +
+                     from + "->" + to };
+    }
+    var frame = step.frame;
+    var byStation = o.splaysByStation || CsLrud.splaysByStation(survey);
+    var inner = { splaysByStation: byStation, tapeMode: o.tapeMode };
+
+    var pa = CsSectionCut.polygonAt(survey, resolved, from, frame, inner);
+    var pb = CsSectionCut.polygonAt(survey, resolved, to, frame, inner);
+    var thin = null;
+    if (pa === null || pa.measured < CsSectionCut.MIN_POINTS) {
+        thin = from;
+    } else if (pb === null || pb.measured < CsSectionCut.MIN_POINTS) {
+        thin = to;
+    }
+    if (thin !== null) {
+        return { refused: true,
+                 reason: "station " + thin + " has fewer than " +
+                     CsSectionCut.MIN_POINTS + " measured wall points, " +
+                     "so there is no outline to cut" };
+    }
+
+    var angles = (o.angles === undefined || o.angles === null) ?
+        CsSectionCut.ANGLES : o.angles;
+    var outline = [], reentrant = false;
+    for (var i = 0; i < angles; i++) {
+        var theta = -Math.PI + (2 * Math.PI * i) / angles;
+        var ha = CsSectionCut.boundaryHits(pa, theta);
+        var hb = CsSectionCut.boundaryHits(pb, theta);
+        if (ha.length > 1 || hb.length > 1) {
+            // A ray crossing twice means an undercut. Radial sampling
+            // takes the NEAR crossing and so cuts the corner off it --
+            // simplified, and said, never silently.
+            reentrant = true;
+        }
+        if (ha.length === 0 || hb.length === 0) {
+            continue;
+        }
+        outline.push({ theta: theta,
+                       radius: (1 - t) * ha[0] + t * hb[0] });
+    }
+
+    var legLen = CsSectionCut.length(CsSectionCut.sub(b, a));
+    return {
+        outline: outline,
+        polygon: { points: outline, measured: outline.length },
+        measuredFrom: pa.measured,
+        measuredTo: pb.measured,
+        // How far the cut is from the nearer station that fed it. A cut
+        // beside a station is nearly a measurement; one midway between
+        // stations thirty feet apart is a guess, and the reader is told
+        // which they are looking at.
+        nearest: Math.min(t, 1 - t) * legLen,
+        reentrant: reentrant,
+        reseeded: step.reseeded
+    };
+};

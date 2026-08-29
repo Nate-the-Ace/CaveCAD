@@ -10111,6 +10111,111 @@ if (!IS_NODE) {
 }());
 
 // ---------------------------------------------------------------------
+// CsSectionCut -- the cut itself. Numbers worked by hand.
+// ---------------------------------------------------------------------
+
+(function() {
+    // A2 and A3 both 10 all round; A4 and A5 open from 10 to 20 on the
+    // left; A6 has almost no evidence. Legs run due north so the
+    // section plane is the east/vertical plane and theta = 0 is up.
+    function lrudShot(from, to, d, az, l, r, u, dn) {
+        var sh = shotOf(from, to, d, az);
+        sh.left = l; sh.right = r; sh.up = u; sh.down = dn;
+        return sh;
+    }
+    var sv = CsModel.newSurvey();
+    sv.shots.push(lrudShot("A1", "A2", 10, 0, 10, 10, 10, 10));
+    sv.shots.push(lrudShot("A2", "A3", 10, 0, 10, 10, 10, 10));
+    sv.shots.push(lrudShot("A3", "A4", 10, 0, 10, 20, 10, 10));
+    sv.shots.push(lrudShot("A4", "A5", 10, 0, 10, 10, 10, 10));
+    var res = CsNetwork.resolve(sv, {});
+
+    var even = CsSectionCut.cut(sv, res, "A2", "A3", 0.5, {});
+    ok(even.refused === undefined, "CsSectionCut.cut: an even leg cuts");
+    eqs(even.outline.length, 32,
+        "CsSectionCut.cut: 32 sampled angles by default");
+    var worst = 0;
+    for (var i = 0; i < even.outline.length; i++) {
+        worst = Math.max(worst, Math.abs(even.outline[i].radius - 10));
+    }
+    // A 10-all-round station is a DIAMOND, not a circle: its boundary
+    // between the four measured points is closer to the centre than 10.
+    // What must hold is that the section is that diamond's boundary at
+    // every angle, so a radius can never EXCEED the measured 10.
+    ok(worst > 0.1,
+        "CsSectionCut.cut: an LRUD diamond is not a circle");
+    var over = 0;
+    for (i = 0; i < even.outline.length; i++) {
+        if (even.outline[i].radius > 10 + 1e-9) { over++; }
+    }
+    eqs(over, 0,
+        "CsSectionCut.cut: no sampled radius exceeds what was measured");
+
+    // The four MEASURED directions must come back exactly. Up is
+    // theta = 0 on a level leg (r = world up).
+    var pa = CsSectionCut.polygonAt(sv, res, "A2",
+        CsSectionCut.frameForLeg(res, "A2", "A3").frame, {});
+    near(CsSectionCut.radiusAt(pa, 0), 10, 1e-9,
+        "CsSectionCut: the measured U comes back exactly at theta = 0");
+    near(CsSectionCut.radiusAt(pa, Math.PI), 10, 1e-9,
+        "CsSectionCut: and the measured D at theta = pi");
+    // THE BOUNDARY-NOT-VERTEX ASSERTION. Between two measured points
+    // the diamond's edge is nearer the centre than either of them: the
+    // vertices sit at (10,0), (0,10), (-10,0), (0,-10), so the edge is
+    // the line x + y = 10 and a ray at 45 degrees meets it at
+    // 10/sqrt(2) = 7.0711, NOT at 10.
+    //
+    // This is the only assertion that can tell boundary sampling from
+    // nearest-vertex sampling, and it exists because the mutation check
+    // found the others could not: they read cut()'s outline, which
+    // calls boundaryHits directly and never goes through radiusAt.
+    near(CsSectionCut.radiusAt(pa, Math.PI / 4), 10 / Math.sqrt(2), 1e-9,
+        "CsSectionCut.radiusAt: samples the BOUNDARY, not the nearest vertex");
+
+    // R goes 10 -> 20 along A3->A4, so the cut lerps the RIGHT side.
+    var frame34 = CsSectionCut.frameForLeg(res, "A3", "A4").frame;
+    var p3 = CsSectionCut.polygonAt(sv, res, "A3", frame34, {});
+    var p4 = CsSectionCut.polygonAt(sv, res, "A4", frame34, {});
+    var rightTheta = null, best = 1e9;
+    for (i = 0; i < p4.points.length; i++) {
+        var d3 = Math.abs(p4.points[i].radius - 20);
+        if (d3 < best) { best = d3; rightTheta = p4.points[i].theta; }
+    }
+    near(CsSectionCut.radiusAt(p3, rightTheta), 10, 1e-9,
+        "CsSectionCut: R is 10 at A3");
+    near(CsSectionCut.radiusAt(p4, rightTheta), 20, 1e-9,
+        "CsSectionCut: and 20 at A4");
+    var half = CsSectionCut.cut(sv, res, "A3", "A4", 0.5, {});
+    var fifth = CsSectionCut.cut(sv, res, "A3", "A4", 0.2, {});
+    near(CsSectionCut.radiusAt(half.polygon, rightTheta), 15, 1e-6,
+        "CsSectionCut.cut: 10 and 20 lerp to 15 at t = 0.5");
+    near(CsSectionCut.radiusAt(fifth.polygon, rightTheta), 12, 1e-6,
+        "CsSectionCut.cut: and to 12 at t = 0.2");
+
+    // The honesty gradient: how far the cut is from the nearer station.
+    near(half.nearest, 5, 1e-9,
+        "CsSectionCut.cut: a mid-leg cut is half a leg from either end");
+    near(fifth.nearest, 2, 1e-9,
+        "CsSectionCut.cut: and t = 0.2 is two feet from the near one");
+
+    // An end with almost no evidence is REFUSED, by name.
+    var thinSv = CsModel.newSurvey();
+    thinSv.shots.push(lrudShot("B1", "B2", 10, 0, 10, 10, 10, 10));
+    var only = lrudShot("B2", "B3", 10, 0, 5, null, null, null);
+    thinSv.shots.push(only);
+    var thinRes = CsNetwork.resolve(thinSv, {});
+    var refused = CsSectionCut.cut(thinSv, thinRes, "B2", "B3", 0.5, {});
+    ok(refused.refused === true,
+        "CsSectionCut.cut: one wall point cannot make a boundary");
+    ok(String(refused.reason).indexOf("B3") >= 0,
+        "CsSectionCut.cut: and the refusal names the station");
+
+    // A leg that is not in the survey at all.
+    var gone = CsSectionCut.cut(sv, res, "Z1", "Z2", 0.5, {});
+    ok(gone.refused === true, "CsSectionCut.cut: a missing leg is refused");
+}());
+
+// ---------------------------------------------------------------------
 // CsScanTree -- the folder tree Sketch Scans draws over filesUnder's
 // relative paths. Pure, so it runs under node too.
 // ---------------------------------------------------------------------
