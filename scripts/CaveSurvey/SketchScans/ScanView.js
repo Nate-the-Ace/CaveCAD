@@ -172,8 +172,19 @@ CsScanView.prototype.mouseMoveEvent = function(event) {
         if (at === null) {
             return;
         }
-        this.getImageView().pan(
-            new RVector(at.x - this.panFrom.x, at.y - this.panFrom.y), true);
+        var dx = at.x - this.panFrom.x, dy = at.y - this.panFrom.y;
+        // A THRESHOLD, the way QCAD's own DefaultNavigation has one.
+        // Every pan step regenerates the view, and regenerating a
+        // 4000-pixel scan is not cheap -- so a drag that reports a
+        // pixel at a time should not buy a full regeneration for each
+        // of them. Sub-threshold movement is ACCUMULATED rather than
+        // dropped, so the pan still tracks the mouse exactly; it just
+        // arrives in slightly coarser steps.
+        if (Math.abs(dx) < CsScanView.PAN_THRESHOLD &&
+                Math.abs(dy) < CsScanView.PAN_THRESHOLD) {
+            return;
+        }
+        this.getImageView().pan(new RVector(dx, dy), true);
         this.panFrom = at;
     } catch (e) {
         this.panFrom = null;
@@ -184,6 +195,17 @@ CsScanView.prototype.mouseReleaseEvent = function(event) {
     CsScanView.callBase(this, "mouseReleaseEvent", event);
     this.panFrom = null;
 };
+
+/** Pixels of movement before a pan step is worth a regeneration.
+ *  QCAD's own navigation uses 4 (GraphicsViewNavigation/PanThreshold);
+ *  the same number here, read from the same setting so one place tunes
+ *  both. */
+CsScanView.PAN_THRESHOLD = 4;
+try {
+    CsScanView.PAN_THRESHOLD = RSettings.getDoubleValue(
+        "GraphicsViewNavigation/PanThreshold", 4);
+} catch (e) {
+}
 
 var CsScanPreview = {};
 
