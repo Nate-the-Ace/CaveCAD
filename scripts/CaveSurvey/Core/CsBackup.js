@@ -9,7 +9,18 @@
 //
 // Several generations deep (CsBackup.KEEP_DEFAULT, overridable per
 // machine), oldest pruned first. The stamp sorts, so "which one was
-// before lunch" is answerable by reading the folder.
+// before lunch" is answerable by reading the folder, and QFile.copy
+// preserves the source's modification time, so each backup's own mtime
+// says when THAT version was written.
+//
+// A save that changes nothing costs no generation. This build's DXF
+// writer is deterministic -- saving an unedited drawing produces
+// byte-identical output (measured on Truitt Cave, 2026-08-29: two saves
+// seconds apart wrote the same bytes) -- and mtime changes every time
+// regardless, so the (path, size, mtime) fingerprint below cannot see
+// it. The file is compared against the newest generation first: size
+// settles it for free almost always, and the bytes are read only when
+// two files are the same length.
 //
 // WHY THIS EXISTS. A Survey Notebook redraw is erase-then-draw across
 // two separate operations. If the draw fails after the erase has landed,
@@ -267,6 +278,78 @@ CsBackup.worthKeeping = function(path) {
     }
 };
 
+/**
+ * A file's bytes as a LATIN1 string -- one byte per character -- or null
+ * when it cannot be read. QCAD only.
+ *
+ * The one faithful, fast binary path this script bridge has, and the
+ * same one CsContour reads elevation TIFFs through: QTextStream with
+ * QStringConverter.Latin1 maps all 256 byte values 1:1 onto code points
+ * and reads about 200 KB in 2 ms. QFile.readAll() is NOT usable here --
+ * it hands this engine a QByteArray whose size() is 0 (the trap
+ * tests/package_cave.js documents), and a byte search written that way
+ * silently answers "found" for everything.
+ */
+CsBackup.readBytes = function(path) {
+    try {
+        var f = new QFile(String(path));
+        if (!f.open(QIODevice.ReadOnly)) {
+            return null;
+        }
+        var stream = new QTextStream(f);
+        stream.setEncoding(QStringConverter.Latin1);
+        var text = String(stream.readAll());
+        f.close();
+        return text;
+    } catch (e) {
+        return null;
+    }
+};
+
+/**
+ * How large a file this will read to compare. Beyond it, copying is
+ * cheaper than being sure, and a wasted generation costs less than
+ * holding two copies of a very large drawing in the engine at once.
+ */
+CsBackup.MAX_COMPARE_BYTES = 20 * 1024 * 1024;
+
+/**
+ * Whether two files hold the same bytes.
+ *
+ * \return true, false, or NULL when it could not be determined (a file
+ * that will not open, or one too large to compare). Null is not false:
+ * the caller must copy when it cannot tell, because the whole point is
+ * never to skip a backup that was actually needed.
+ *
+ * Size is checked first and settles almost every call for free. The
+ * read only happens when two files are the same length, which is the
+ * one case a size check gets wrong.
+ */
+CsBackup.sameContents = function(a, b) {
+    try {
+        var ia = new QFileInfo(String(a));
+        var ib = new QFileInfo(String(b));
+        if (!ia.exists() || !ib.exists()) {
+            return null;
+        }
+        var sa = ia.size();
+        if (sa !== ib.size()) {
+            return false;
+        }
+        if (sa > CsBackup.MAX_COMPARE_BYTES) {
+            return null;
+        }
+        var ba = CsBackup.readBytes(a);
+        var bb = CsBackup.readBytes(b);
+        if (ba === null || bb === null) {
+            return null;
+        }
+        return ba === bb;
+    } catch (e) {
+        return null;
+    }
+};
+
 /** The backup file names present for `path`, newest last. QCAD only. */
 CsBackup.generations = function(path) {
     var out = [];
@@ -324,6 +407,27 @@ CsBackup.copyPrevious = function(path, now) {
         if (!(new QDir(folder)).exists() && !(new QDir()).mkpath(folder)) {
             return false;
         }
+
+        // Already have these exact bytes? Then the previous version IS
+        // kept, and copying again would spend a generation on a
+        // duplicate. This build's DXF writer is deterministic, so saving
+        // an unedited drawing writes byte-identical output with a new
+        // mtime -- which the (path, size, mtime) fingerprint in
+        // beforeWrite cannot see through. Without this, twenty idle
+        // saves would fill every generation with one version and push
+        // out the ones worth going back to.
+        //
+        // Only the NEWEST generation is compared: backups are taken in
+        // order, so an older duplicate means the content came back,
+        // which is a real version worth keeping.
+        var existing = CsBackup.generations(path);
+        if (existing.length > 0) {
+            var newest = folder + "/" + existing[existing.length - 1];
+            if (CsBackup.sameContents(path, newest) === true) {
+                return true;   // a backup holds these bytes: contract met
+            }
+        }
+
         var name = CsBackup.backupNameFor(path, CsBackup.stampText(now));
         var bak = folder + "/" + name;
 

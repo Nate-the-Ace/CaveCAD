@@ -16908,6 +16908,59 @@ if (!IS_NODE) {
             "VERSION-ONE",
             "CsBackup: and both existing generations survive untouched");
 
+        // -- an identical save does not consume a generation ---------
+        // This build's DXF writer is deterministic: saving an unedited
+        // drawing produces byte-identical output. Measured on Truitt
+        // Cave (2026-08-29) -- two saves seconds apart wrote the same
+        // bytes. The dedup fingerprint is (path, size, mtime) and mtime
+        // changes on every save, so without a content check twenty idle
+        // Cmd-S presses would fill all twenty generations with one
+        // version and push out the ones worth keeping.
+        (function() {
+            var idDir = QDir.tempPath() + "/cs-backup-identical";
+            (new QDir(idDir)).removeRecursively();
+            (new QDir()).mkpath(idDir);
+            var idDoc = idDir + "/Same Cave.dxf";
+
+            ok(write(idDoc, "CONTENT-ONE"), "identical fixture: first version");
+            ok(CsBackup.copyPrevious(idDoc, new Date(2026, 7, 29, 10, 0, 0)),
+                "identical: the first version is kept");
+            eqs(CsBackup.generations(idDoc).length, 1, "identical: one generation");
+
+            // Same bytes, new mtime -- exactly what an unedited save
+            // produces.
+            ok(write(idDoc, "CONTENT-ONE"), "identical fixture: rewrote the same bytes");
+            ok(CsBackup.copyPrevious(idDoc, new Date(2026, 7, 29, 10, 0, 1)) === true,
+                "identical: reports the previous version IS kept");
+            eqs(CsBackup.generations(idDoc).length, 1,
+                "identical: but no second generation is made");
+
+            // Different LENGTH: the cheap path, no content read at all.
+            ok(write(idDoc, "CONTENT-TWO-LONGER"), "identical fixture: a longer version");
+            ok(CsBackup.copyPrevious(idDoc, new Date(2026, 7, 29, 10, 0, 2)),
+                "a differently sized version is kept");
+            eqs(CsBackup.generations(idDoc).length, 2, "and makes a generation");
+
+            // Same LENGTH, different bytes: the case a size check alone
+            // would get wrong.
+            ok(write(idDoc, "CONTENT-TWO-L0NGER"), "identical fixture: same length, one byte different");
+            ok(CsBackup.copyPrevious(idDoc, new Date(2026, 7, 29, 10, 0, 3)),
+                "a same-length but different version is kept");
+            eqs(CsBackup.generations(idDoc).length, 3,
+                "and is NOT mistaken for a duplicate");
+
+            // The comparison itself, directly.
+            var idGens = CsBackup.generations(idDoc);
+            var idNewest = CsBackup.backupFolderFor(idDoc) + "/" +
+                idGens[idGens.length - 1];
+            eqs(CsBackup.sameContents(idDoc, idNewest), true,
+                "sameContents: a file matches the copy just taken of it");
+            eqs(CsBackup.sameContents(idDoc, idDir + "/nothing-here.dxf"), null,
+                "sameContents: an unreadable side answers null, not false");
+
+            (new QDir(idDir)).removeRecursively();
+        }());
+
         // Pruning, against real files.
         (function() {
             var pruneKeep = 2;

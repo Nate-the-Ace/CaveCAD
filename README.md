@@ -66,8 +66,13 @@ Pitfall Cave/
 `backup/` holds one file per save that overwrote something:
 `Pitfall Cave.dxf.2026-08-29_041200.bak`. The stamp sorts, so rolling
 back is a matter of reading the folder and copying the one you want over
-the drawing. The newest 20 generations are kept
+the drawing -- and each backup keeps the modification time of the
+version it holds. The newest 20 generations are kept
 (`CaveSurvey/BackupKeep`); older ones are pruned oldest-first.
+
+A save that changes nothing costs no generation: the drawing is compared
+against the newest backup first, and an identical one is not copied
+again.
 
 A backup is taken immediately before any of this suite's destructive
 operations -- not on save. See `Core/CsBackup.js` for why that is the
