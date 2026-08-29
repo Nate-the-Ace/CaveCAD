@@ -73,31 +73,26 @@ scatter of separate lines, which is a real regression against a block.
 section itself drawn elsewhere. This is what the layer already exists
 for.
 
-## The tension worth settling before anything is built
+## The tension is settled: no grid
 
-Two requirements from this session pull opposite ways:
+An earlier decision this session put cross sections in a grid under the
+elevation. **Nathan dropped it (2026-08-29): "we're giving up on the
+cross section grid, forget that i wanted it. the cross section callout
+is a much better solution."**
 
-1. "place them in a grid under the profiles"
-2. "a leader that points to a station … displays them as a block that
-   the leader is attached to"
+The two could never have coexisted anyway -- a leader cannot span from a
+station in the plan to a cell below the elevation and stay readable.
+The callout wins on its merits: the section sits beside the passage it
+describes, at the point it describes, which is where a reader looking at
+that passage already is.
 
-A leader cannot span from a station in the plan to a cell in a grid
-below the elevation and stay readable — that is a line across the whole
-sheet. Whichever way this resolves, it is a choice, not a detail:
-
-- **In-plan callouts.** The LRUD block sits beside its station with a
-  short leader. Nothing goes in a grid; the grid idea is dropped for
-  this feature.
-- **Both, as different artifacts.** The grid under the profiles holds
-  full generated cross sections (the C5 tool, with outline, splays and
-  its own scale); the LRUD callout is a lighter in-plan annotation
-  showing that station's L/R/U/D and wall lines where the station is.
-  Two products, no leader spanning the sheet.
-- **Grid only.** Sections live in the grid, and the plan side gets the
-  marker-and-letter convention rather than a leader.
-
-The second reads as what the two requests were each reaching for, but it
-is Nathan's call.
+Consequences:
+- Open question 2 of the cross-section design ("where should a section
+  land on the sheet?") is ANSWERED: beside its station, on a leader.
+- `CsProfile`'s reserved band gaps are no longer needed for sections.
+  They still hold notes; nothing to undo.
+- Nothing needs a per-cell grid layout, a `SectionSeq`, or a
+  reflow-on-append rule. All of that was grid bookkeeping.
 
 ## What is already decided and unaffected
 

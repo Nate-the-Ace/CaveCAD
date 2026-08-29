@@ -11,7 +11,7 @@
 **User decisions (already made):**
 - "we just added cross sections, so we need to make a plan to add them to the dxf template and get standardized leyers for anything we'd need for cross section support." — this plan.
 - "Cross Section should go on the left" — the Feature Trace group's cell, already shipped (`aabc2df`). This plan fills that group.
-- "place them in a grid pattern underneath all the profiles" — where section FRAMES go on the sheet. Not this plan's job; recorded so the layer set matches what that geometry will need.
+- "we're giving up on the cross section grid, forget that i wanted it. the cross section callout is a much better solution." — SUPERSEDES the earlier grid decision from the same session. Sections are placed on a leader beside their station, not in a grid under the elevation. Does not change this plan: the layer set is the same either way, and `CTRL-SECTION-BOX` is still the frame a callout's block occupies.
 
 **Specs:** `docs/superpowers/specs/2026-08-29-cross-section-design.md` (the generator; unapproved, and this plan deliberately does not depend on its open questions) and `docs/superpowers/specs/2026-08-29-frame-aware-scan-shelf-design.md` (whose Task 3 also wanted `CTRL-SECTION-SCAN` — see Coordination below).
 
