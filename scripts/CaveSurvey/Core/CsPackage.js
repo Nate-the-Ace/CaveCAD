@@ -23,6 +23,79 @@ var CsPackage = {};
 // The tags that ARE the entrance location.
 CsPackage.GEO_TAGS = ["GeoLat", "GeoLon", "GeoStation"];
 
+/**
+ * A copy of a survey with the cave's location taken out of it.
+ *
+ * The drawing carries the entrance three ways and PackageCave already
+ * handles two: the GeoLat/GeoLon/GeoStation tags (stripGeoTags) and
+ * the aerial photograph (never staged unless the archive is full). The
+ * survey MODEL is the third, and it was the one nothing watched.
+ *
+ * survey.fixed is the #Fix / *fix control an imported file declared.
+ * On the ordinary import -- a file opened with no station selected --
+ * CsNetwork.resolve seeds that station at its control coordinates,
+ * CsDraw records them in a Fixed tag, and CsRevise reads them straight
+ * back, so the cave is drawn in the control's own frame and those
+ * numbers ARE the entrance: a UTM easting and northing, and an
+ * absolute datum elevation. CsFormatWalls, CsFormatSurvex and
+ * CsFormatCsv all write them back out. An interchange file bound for a
+ * sanitized package therefore has to be written from THIS copy, or the
+ * package leaks in data/ exactly what its own MANIFEST promises it
+ * does not carry.
+ *
+ * The original is left untouched: the caller is usually still holding
+ * the survey the drawing was reconstructed from, and a full archive
+ * writes the very same survey out complete a moment later.
+ *
+ * Containers are copied one level deep rather than shared, because the
+ * writers call CsModel.ensureTrips, which WRITES survey.trips -- a
+ * copy sharing its arrays would hand that write back to the caller.
+ *
+ * \return a new survey, or null when given nothing.
+ */
+CsPackage.sanitizeSurvey = function(survey) {
+    if (survey === null || survey === undefined) {
+        return null;
+    }
+    var copy = {};
+    for (var key in survey) {
+        if (survey.hasOwnProperty(key)) {
+            copy[key] = survey[key];
+        }
+    }
+    // The location itself: gone, not blanked. A station named here
+    // with zeroed coordinates would be a control claim of its own --
+    // it would pin the cave to the origin on the next read.
+    copy.fixed = {};
+
+    var copyEach = function(list) {
+        var out = [];
+        if (Object.prototype.toString.call(list) !== "[object Array]") {
+            return out;
+        }
+        for (var i = 0; i < list.length; i++) {
+            var item = list[i];
+            if (item === null || typeof item !== "object") {
+                out.push(item);
+                continue;
+            }
+            var c = {};
+            for (var k in item) {
+                if (item.hasOwnProperty(k)) {
+                    c[k] = item[k];
+                }
+            }
+            out.push(c);
+        }
+        return out;
+    };
+    copy.shots = copyEach(survey.shots);
+    if (survey.trips !== undefined && survey.trips !== null) {
+        copy.trips = copyEach(survey.trips);
+    }
+    return copy;
+};
+
 // Where packages are written: not the synced drive folder, so a full
 // archive cannot sync itself to the whole group by accident.
 CsPackage.DEPOT = "Documents/Cave/depot";
@@ -222,7 +295,8 @@ CsPackage.manifest = function(info) {
     if (i.full === true) {
         lines.push("THIS IS A FULL ARCHIVE");
         lines.push("  It carries the cave's location: the drawing's geographic");
-        lines.push("  anchor tags, and the aerial basemap if one was fetched.");
+        lines.push("  anchor tags, the survey's own fixed station control in");
+        lines.push("  data/, and the aerial basemap if one was fetched.");
         lines.push("  It is meant for the survey group's own storage and for");
         lines.push("  handing a project to the next cartographer -- not for");
         lines.push("  general distribution.");
@@ -231,6 +305,9 @@ CsPackage.manifest = function(info) {
         lines.push("SANITIZED");
         lines.push("  The drawing in this package carries no geographic anchor,");
         lines.push("  and no aerial photograph of the surface travels with it.");
+        lines.push("  The survey files in data/ carry no fixed station");
+        lines.push("  coordinates: the cave's shape is all of it, tied to");
+        lines.push("  nothing on the surface.");
         lines.push("  Any PDF included is exactly as it was plotted -- a map");
         lines.push("  shows whatever its cartographer chose to show.");
     }

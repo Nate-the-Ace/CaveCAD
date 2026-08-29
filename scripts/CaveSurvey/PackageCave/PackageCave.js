@@ -670,10 +670,23 @@ PackageCave.stripGeoTags = function(doc, di) {
     return stripped;
 };
 
-/** Writes the survey out in every interchange format, into data/. */
-PackageCave.stageData = function(survey, stagingFolder, caveName) {
+/**
+ * Writes the survey out in every interchange format, into data/.
+ *
+ * Sanitized unless the archive is full: survey.fixed is the imported
+ * #Fix / *fix control, three of the four writers emit it, and on the
+ * ordinary import those coordinates ARE the entrance. See
+ * CsPackage.sanitizeSurvey -- this is the third route the location
+ * takes out of a drawing, beside the geo tags and the aerial
+ * photograph, and the only one that used to travel in a package
+ * whose MANIFEST said it did not.
+ */
+PackageCave.stageData = function(survey, stagingFolder, caveName, full) {
     var written = [];
     if (survey === null || survey === undefined) { return written; }
+    if (full !== true) {
+        survey = CsPackage.sanitizeSurvey(survey);
+    }
     var folder = stagingFolder + "/data";
     if (!(new QDir()).mkpath(folder)) { return written; }
 
@@ -809,10 +822,13 @@ PackageCave.build = function(record, options) {
 
     // ---- interchange formats -------------------------------------------
     if (wants("data") && read !== null && read.survey !== null) {
-        var written = PackageCave.stageData(read.survey, staging, record.name);
+        var written = PackageCave.stageData(read.survey, staging, record.name,
+            options.full);
         if (written.length > 0) {
             contents.push({ path: "data/ (" + written.length + ")",
-                note: written.join(", ") });
+                note: written.join(", ") +
+                    (options.full ? " — includes the survey's fixed control" :
+                        " — no fixed station coordinates") });
         }
     }
 

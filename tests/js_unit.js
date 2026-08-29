@@ -17604,6 +17604,99 @@ ok(CsPackage.manifest({ full: true }).indexOf("FULL ARCHIVE") !== -1,
 ok(CsPackage.manifest({}).length > 0, "an empty package still gets a manifest");
 
 // ---------------------------------------------------------------------
+// Package -- sanitizing the survey itself, not just the drawing
+//
+// A #Fix / *fix line in an interchange file IS the entrance location
+// whenever the cave was drawn in its control's own frame (the ordinary
+// import with nothing selected: CsNetwork.resolve seeds the fixed
+// station at its control coordinates, CsDraw records them in a Fixed
+// tag, and CsRevise reads them straight back). Three of the four
+// writers emit that line, so a sanitized package's data/ folder used
+// to carry the coordinate its own MANIFEST promised it did not.
+// ---------------------------------------------------------------------
+
+function sanSurvey() {
+    var s = CsModel.newSurvey();
+    s.caveName = "Sanitize Test Cave";
+    s.distanceUnit = "ft";
+    var a = CsModel.newShot();
+    a.from = "ENT"; a.to = "A1";
+    a.distance = 30.0; a.azimuth = 90.0; a.inclination = -5.0;
+    s.shots.push(a);
+    var b = CsModel.newShot();
+    b.from = "A1"; b.to = "A2";
+    b.distance = 22.0; b.azimuth = 45.0; b.inclination = 0.0;
+    s.shots.push(b);
+    // A real-world control: UTM easting/northing and an absolute datum.
+    s.fixed["ENT"] = { x: 512345.67, y: 4287654.32, z: 1250.0 };
+    return s;
+}
+
+// The leak this guards against, stated as a fact about the writers:
+// given a fixed station, they write its coordinates out.
+var sanRaw = sanSurvey();
+ok(CsFormatWalls.write(sanRaw).indexOf("512345.67") !== -1,
+    "Walls writes a fixed station's coordinates");
+ok(CsFormatSurvex.write(sanRaw).indexOf("512345.67") !== -1,
+    "Survex writes a fixed station's coordinates");
+ok(CsFormatCsv.write(sanRaw).indexOf("512345.67") !== -1,
+    "CSV writes a fixed station's coordinates");
+
+var sanClean = CsPackage.sanitizeSurvey(sanRaw);
+
+// The original is left alone: the caller may still be holding the
+// survey the drawing was reconstructed from.
+ok(sanRaw.fixed.hasOwnProperty("ENT"),
+    "sanitizeSurvey does not mutate the survey it was given");
+eqs(CsFormatWalls.write(sanRaw).indexOf("512345.67") !== -1, true,
+    "the original survey still writes its control after sanitizing a copy");
+
+// The copy carries no station control at all.
+eqs(Object.keys(sanClean.fixed).length, 0,
+    "the sanitized copy has no fixed stations");
+
+// And no writer can find one to emit.
+for (var sanI = 0; sanI < CsFormatRegistry.FORMATS.length; sanI++) {
+    var sanFmt = CsFormatRegistry.FORMATS[sanI];
+    var sanText = sanFmt.write(sanClean);
+    ok(sanText.indexOf("512345") === -1,
+        sanFmt.id + " writes no easting after sanitizing");
+    ok(sanText.indexOf("4287654") === -1,
+        sanFmt.id + " writes no northing after sanitizing");
+    ok(!/^\s*[#*]\s*fix/im.test(sanText),
+        sanFmt.id + " writes no fix directive after sanitizing");
+}
+
+// The survey itself survives: sanitizing removes the location, not
+// the cave. A package whose data/ files lost their shots would be
+// worse than one that leaked.
+eqs(sanClean.shots.length, 2, "sanitizing keeps every shot");
+eqs(sanClean.shots[0].from, "ENT", "sanitizing keeps station names");
+near(sanClean.shots[0].distance, 30.0, 1e-9, "sanitizing keeps the tape");
+near(sanClean.shots[1].azimuth, 45.0, 1e-9, "sanitizing keeps the azimuth");
+eqs(sanClean.caveName, "Sanitize Test Cave", "sanitizing keeps the cave name");
+eqs(sanClean.distanceUnit, "ft", "sanitizing keeps the unit");
+ok(CsFormatSurvex.write(sanClean).indexOf("ENT") !== -1,
+    "the sanitized survey still writes its stations");
+
+// A survey with nothing to hide sanitizes to an equal survey.
+var sanNoFix = sanSurvey();
+sanNoFix.fixed = {};
+eqs(CsFormatSurvex.write(CsPackage.sanitizeSurvey(sanNoFix)),
+    CsFormatSurvex.write(sanNoFix),
+    "a survey with no control is unchanged by sanitizing");
+
+// Junk in, empty out -- the same contract every other Cs* pure
+// function in this file keeps.
+ok(CsPackage.sanitizeSurvey(null) === null, "sanitizeSurvey(null) is null");
+
+// The manifest says which of the two it is, about data/ as well.
+ok(CsPackage.manifest({}).indexOf("no fixed station") !== -1,
+    "a sanitized manifest says data/ carries no station control");
+ok(CsPackage.manifest({ full: true }).indexOf("fixed station control") !== -1,
+    "a full manifest warns that data/ carries the control");
+
+// ---------------------------------------------------------------------
 // Frontier -- where the survey stopped
 // ---------------------------------------------------------------------
 
