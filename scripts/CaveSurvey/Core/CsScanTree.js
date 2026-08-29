@@ -16,9 +16,13 @@ var CsScanTree = {};
 // paths inside it -- per cave by construction, one key overall.
 CsScanTree.SETTING = "CaveSurvey/SketchScansCollapsed";
 
-// Bookmarks -- the scans a caver has flagged to find again in a long
-// list. Same storage shape, its own key: an absolute scans path mapping
-// to the list of bookmarked RELATIVE file paths inside it.
+// COMPLETE -- the scans a caver has finished with. Same storage shape,
+// its own key: an absolute scans path mapping to the list of completed
+// RELATIVE file paths inside it.
+//
+// The setting KEY still says Bookmarks. It was a bookmark first, and
+// renaming the key would throw away every mark already made for the
+// sake of a word nobody sees.
 //
 // THE FOUR FUNCTIONS BELOW ARE GENERIC, whatever their names say.
 // parseCollapsed / serializeCollapsed / collapsedSetFor /
@@ -91,33 +95,45 @@ CsScanTree.isHidden = function(row, collapsedSet) {
     return false;
 };
 
-// True when a FOLDER holds a bookmarked file anywhere beneath it.
+// True when EVERY scan beneath a folder is complete.
 //
-// What this is for: a bookmark inside a collapsed folder is invisible,
-// which is precisely when a caver most needs to know where their place
-// was. The folder row carries the mark instead, so a collapsed year of
-// trips still says "your scan is in here".
-CsScanTree.folderHoldsBookmark = function(folderRel, bookmarks) {
-    if (bookmarks === null || bookmarks === undefined) {
+// Not "holds a completed one", which was the rule when this marked a
+// bookmark and is nearly useless now: a trip folder of forty pages with
+// one page done would wear the same tick as one that is finished. A
+// collapsed folder should say "this trip is done", and that is only
+// true when nothing inside it is outstanding. A folder with no scans in
+// it at all is not complete -- there is nothing to have finished.
+CsScanTree.folderComplete = function(folderRel, rows, complete) {
+    if (rows === null || rows === undefined) {
         return false;
     }
     var prefix = folderRel + "/";
-    for (var rel in bookmarks) {
-        if (!bookmarks.hasOwnProperty(rel) || bookmarks[rel] !== true) {
+    var found = false;
+    for (var i = 0; i < rows.length; i++) {
+        if (rows[i].kind !== "file" || rows[i].rel.indexOf(prefix) !== 0) {
             continue;
         }
-        if (rel.indexOf(prefix) === 0) {
-            return true;
+        found = true;
+        if (complete === null || complete === undefined ||
+                complete[rows[i].rel] !== true) {
+            return false;
         }
     }
-    return false;
+    return found;
 };
 
-// The first bookmarked row that is actually VISIBLE, or -1: where the
-// panel puts the caver back when it opens. A bookmark hidden inside a
-// collapsed folder is deliberately not jumped to -- expanding folders
-// the caver collapsed would trade one remembered thing for another.
-CsScanTree.firstBookmarkRow = function(rows, bookmarks, collapsedSet) {
+// The first visible scan NOT yet complete, or -1: where the panel puts
+// the caver when it opens.
+//
+// The opposite of what this did as a bookmark, and deliberately. A mark
+// meaning "finished" is not a place to return to -- returning to the
+// last thing you finished is the one scan you have no more work on. The
+// useful landing is the next one still to do.
+//
+// A row hidden inside a collapsed folder is not jumped to: expanding
+// folders the caver collapsed would trade one remembered thing for
+// another.
+CsScanTree.firstIncompleteRow = function(rows, complete, collapsedSet) {
     if (rows === null || rows === undefined) {
         return -1;
     }
@@ -125,8 +141,8 @@ CsScanTree.firstBookmarkRow = function(rows, bookmarks, collapsedSet) {
         if (rows[i].kind !== "file") {
             continue;
         }
-        if (bookmarks === null || bookmarks === undefined ||
-                bookmarks[rows[i].rel] !== true) {
+        if (complete !== null && complete !== undefined &&
+                complete[rows[i].rel] === true) {
             continue;
         }
         if (CsScanTree.isHidden(rows[i], collapsedSet)) {

@@ -10184,7 +10184,7 @@ if (!IS_NODE) {
 }());
 
 // ---------------------------------------------------------------------
-// CsScanTree bookmarks -- saving a place in a long list of scans.
+// CsScanTree "Complete" -- which scans are finished with.
 // ---------------------------------------------------------------------
 
 (function() {
@@ -10195,35 +10195,53 @@ if (!IS_NODE) {
         "loose.jpg"
     ];
     var rows = CsScanTree.rowsOf(files);
-    var marks = { "2025 Scans/9-7 Trip/pageC.jpg": true };
 
-    ok(CsScanTree.folderHoldsBookmark("2025 Scans", marks) === true,
-        "folderHoldsBookmark: an ancestor folder holds it");
-    ok(CsScanTree.folderHoldsBookmark("2025 Scans/9-7 Trip", marks) === true,
-        "folderHoldsBookmark: and so does its own folder");
-    ok(CsScanTree.folderHoldsBookmark("2025 Scans/2-2 Trip", marks) === false,
-        "folderHoldsBookmark: a sibling folder does not");
-    ok(CsScanTree.folderHoldsBookmark("2025", marks) === false,
-        "folderHoldsBookmark: a PREFIX of a folder name is not a folder");
+    // A FOLDER IS TICKED ONLY WHEN EVERYTHING IN IT IS DONE. Ticking a
+    // folder that merely CONTAINS a finished page would mark a trip
+    // with one page done the same as one with forty.
+    var partly = { "2025 Scans/2-2 Trip/pageA.jpg": true };
+    ok(CsScanTree.folderComplete("2025 Scans/2-2 Trip", rows, partly) === false,
+        "folderComplete: one page of two is not a finished trip");
+    var trip = { "2025 Scans/2-2 Trip/pageA.jpg": true,
+                 "2025 Scans/2-2 Trip/pageB.jpg": true };
+    ok(CsScanTree.folderComplete("2025 Scans/2-2 Trip", rows, trip) === true,
+        "folderComplete: both pages done IS a finished trip");
+    ok(CsScanTree.folderComplete("2025 Scans", rows, trip) === false,
+        "folderComplete: the year is not done while another trip is open");
+    ok(CsScanTree.folderComplete("2025 Scans/nothing", rows, trip) === false,
+        "folderComplete: a folder with no scans has finished nothing");
 
-    // Nothing collapsed: the bookmarked row is where the panel goes.
-    var at = CsScanTree.firstBookmarkRow(rows, marks, {});
-    ok(at >= 0, "firstBookmarkRow: a visible bookmark is found");
-    eqs(rows[at].rel, "2025 Scans/9-7 Trip/pageC.jpg",
-        "firstBookmarkRow: and it is the bookmarked one");
+    // The panel lands on the first scan STILL TO DO -- the opposite of
+    // a bookmark, and the point of the mark.
+    var done = { "2025 Scans/2-2 Trip/pageA.jpg": true };
+    var at = CsScanTree.firstIncompleteRow(rows, done, {});
+    eqs(rows[at].rel, "2025 Scans/2-2 Trip/pageB.jpg",
+        "firstIncompleteRow: skips what is finished");
+    eqs(rows[CsScanTree.firstIncompleteRow(rows, {}, {})].rel,
+        "2025 Scans/2-2 Trip/pageA.jpg",
+        "firstIncompleteRow: nothing done yet means the first scan");
 
-    // Collapsed above it: NOT jumped to. Expanding a folder the caver
-    // collapsed would trade one remembered thing for another; the
-    // folder row carries the mark instead.
-    eqs(CsScanTree.firstBookmarkRow(rows, marks, { "2025 Scans": true }), -1,
-        "firstBookmarkRow: a hidden bookmark is not jumped to");
+    // Hidden inside a collapsed folder is not jumped to: expanding a
+    // folder the caver collapsed trades one remembered thing for
+    // another.
+    var allButLoose = {
+        "2025 Scans/2-2 Trip/pageA.jpg": true,
+        "2025 Scans/2-2 Trip/pageB.jpg": true
+    };
+    var skipped = CsScanTree.firstIncompleteRow(rows, allButLoose,
+        { "2025 Scans": true });
+    eqs(rows[skipped].rel, "loose.jpg",
+        "firstIncompleteRow: skips past a collapsed folder's contents");
+    ok(CsScanTree.isHidden(rows[skipped], { "2025 Scans": true }) === false,
+        "firstIncompleteRow: and never lands on a hidden row");
 
-    eqs(CsScanTree.firstBookmarkRow(rows, {}, {}), -1,
-        "firstBookmarkRow: no bookmarks, nowhere to go");
-    eqs(CsScanTree.firstBookmarkRow(rows, null, {}), -1,
-        "firstBookmarkRow: and null is not a throw");
+    // Everything done: nowhere left to land.
+    var everything = {};
+    for (var f = 0; f < files.length; f++) { everything[files[f]] = true; }
+    eqs(CsScanTree.firstIncompleteRow(rows, everything, {}), -1,
+        "firstIncompleteRow: all finished means no landing row");
 
-    // The store is the collapsed store, used as-is.
+    // The store is the collapsed set's own, used as it stands.
     var map = CsScanTree.parseCollapsed("");
     CsScanTree.recordCollapsed(map, "/caves/X/scans",
         { "a.jpg": true }, ["a.jpg", "b.jpg"]);
@@ -10231,9 +10249,9 @@ if (!IS_NODE) {
         CsScanTree.parseCollapsed(CsScanTree.serializeCollapsed(map)),
         "/caves/X/scans");
     ok(back["a.jpg"] === true,
-        "bookmark store: a bookmark round trips through the settings form");
+        "complete store: a mark round trips through the settings form");
     ok(back["b.jpg"] === undefined,
-        "bookmark store: and an unbookmarked scan does not");
+        "complete store: and an unmarked scan does not");
 }());
 
 // ---------------------------------------------------------------------

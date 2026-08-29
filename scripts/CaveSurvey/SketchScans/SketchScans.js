@@ -120,10 +120,10 @@ SketchScans.FADE_PERCENT = 50;
 // for more or less, and the drag is remembered here:
 SketchScans.DOCK_PREVIEW_H = 240;
 SketchScans.SETTING_SPLIT = "CaveSurvey/SketchScansSplitterSizes";
-// The bookmark glyph. A trip's scans run to dozens of IMG_4021-shaped
-// names and the panel re-reads the folder every time it is shown, so
-// "where was I" is a real question with no other answer.
-SketchScans.BOOKMARK = "\u2605";
+// The COMPLETE tick. A trip's scans run to dozens of IMG_4021-shaped
+// names, so "which of these have I already done" is a real question
+// with no other answer.
+SketchScans.COMPLETE = "\u2713";
 
 // The collapsed set for one cave's scans folder, from settings.
 // A bridge without RSettings starts fully expanded.
@@ -191,23 +191,22 @@ SketchScans.saveBookmarks = function(scans, bookmarks, rows) {
 // The text of one row: indentation by depth, a disclosure glyph on
 // folder rows, a glyph-wide gap on file rows so labels at one depth
 // line up across kinds.
-SketchScans.rowText = function(row, collapsed, bookmarks) {
+SketchScans.rowText = function(row, collapsed, bookmarks, rows) {
     var indent = new Array(row.depth + 1).join("  ");
     var marks = bookmarks || {};
     if (row.kind === "folder") {
         var folded = collapsed[row.rel] === true;
-        // A COLLAPSED FOLDER CARRIES THE STAR of any bookmark inside
-        // it. That is the case the mark is most needed in -- a bookmark
-        // you cannot see is no use for finding your place -- and it
-        // costs nothing while the folder is open, where the scan's own
-        // row shows it instead.
-        var buried = folded &&
-            CsScanTree.folderHoldsBookmark(row.rel, marks);
+        // A FOLDER IS TICKED WHEN EVERYTHING IN IT IS DONE -- open or
+        // collapsed, since "this trip is finished" is worth seeing
+        // either way. Ticking a folder that merely CONTAINS a finished
+        // page would put the same mark on a trip with one page done as
+        // on one with forty.
+        var done = CsScanTree.folderComplete(row.rel, rows || [], marks);
         return indent + (folded ? "▸ " : "▾ ") + row.label +
-            (buried ? "  " + SketchScans.BOOKMARK : "");
+            (done ? "  " + SketchScans.COMPLETE : "");
     }
     return indent + (marks[row.rel] === true ?
-        SketchScans.BOOKMARK + " " : "  ") + row.label;
+        SketchScans.COMPLETE + " " : "  ") + row.label;
 };
 
 /** Builds the dock and hands it to the main window. Idempotent. */
@@ -231,7 +230,7 @@ SketchScans.buildDock = function(appWin) {
     var w = {
         rows: [],           // CsScanTree rows behind the table indices
         collapsed: {},      // this cave's collapsed set
-        bookmarks: {},      // this cave's bookmarked scans
+        bookmarks: {},      // this cave's COMPLETED scans
         picking: null,      // an alignment in progress: {pairs, rel}
         scans: null,        // the scans folder the table was built from
         ready: false        // false while the panel shows a message
@@ -483,7 +482,7 @@ SketchScans.buildDock = function(appWin) {
         }
         try {
             w.list.item(rowIdx, 0).setText(
-                SketchScans.rowText(row, w.collapsed, w.bookmarks));
+                SketchScans.rowText(row, w.collapsed, w.bookmarks, w.rows));
         } catch (eGlyph) {
             // a stale glyph is cosmetic; the rows still fold
         }
@@ -751,7 +750,7 @@ SketchScans.buildDock = function(appWin) {
         for (var r = 0; r < w.rows.length; r++) {
             try {
                 w.list.item(r, 0).setText(
-                    SketchScans.rowText(w.rows[r], w.collapsed, w.bookmarks));
+                    SketchScans.rowText(w.rows[r], w.collapsed, w.bookmarks, w.rows));
             } catch (eText) {
                 // a stale glyph is cosmetic; the bookmark still stands
             }
@@ -791,8 +790,8 @@ SketchScans.buildDock = function(appWin) {
                 // popup() returns immediately, unlike exec().
                 w.scanMenu = new QMenu();
                 var act = w.scanMenu.addAction(marked ?
-                    qsTr("Remove bookmark") :
-                    qsTr("Bookmark this scan"));
+                    qsTr("Mark Incomplete") :
+                    qsTr("Mark Complete"));
                 try {
                     act.checkable = true;
                     act.checked = marked;
@@ -906,7 +905,7 @@ SketchScans.refresh = function() {
     w.list.setRowCount(w.rows.length);
     for (var i = 0; i < w.rows.length; i++) {
         var item = new QTableWidgetItem(
-            SketchScans.rowText(w.rows[i], w.collapsed, w.bookmarks));
+            SketchScans.rowText(w.rows[i], w.collapsed, w.bookmarks, w.rows));
         if (w.rows[i].kind === "folder") {
             // Bold, clickable, but never SELECTED -- the selection
             // (and with it the preview pane) stays on a scan while
@@ -934,9 +933,10 @@ SketchScans.refresh = function() {
     }
     SketchScans.applyHidden();
 
-    // Initial selection: the bookmark if there is a visible one -- that
-    // is the whole point of it -- and otherwise the first visible scan.
-    var landing = CsScanTree.firstBookmarkRow(w.rows, w.bookmarks,
+    // Initial selection: the first scan still to do. A mark meaning
+    // "finished" is not a place to return to -- the last thing you
+    // finished is the one scan with no work left on it.
+    var landing = CsScanTree.firstIncompleteRow(w.rows, w.bookmarks,
         w.collapsed);
     if (landing < 0) {
         for (var s = 0; s < w.rows.length; s++) {
