@@ -111,35 +111,20 @@ CsStationOrder.naturalCompare = function(a, b) {
 };
 
 /**
- * Station names in the order a picker should offer them: SURVEY ORDER
- * where the drawing can supply it, and natural name order otherwise.
+ * Station names in the order a picker should offer them: NATURAL NAME
+ * ORDER -- A1, A2, A9, A10, B1 -- so a name can be found by reading.
  *
- * Survey order is what a caver is actually working through -- it
- * follows a branch to its tie-in rather than counting on through the
- * alphabet -- so it beats any sort when it is available. Names the walk
- * does not mention are appended in natural order rather than dropped:
- * a station the walk cannot reach is still a station on the sheet.
+ * NOT survey walk order, which was the first attempt and was wrong for
+ * this job. The walk follows a branch to its tie-in, so a cave whose E
+ * and F spurs hang off the middle of the D run lists
+ * D13, E1, E2, D14 ... D22, F1, F2, D23. That is a true account of how
+ * the cave was surveyed and useless for finding "D16" in a list of a
+ * hundred: the eye expects the alphabet.
+ *
+ * `walk` is still accepted and ignored, so callers need not change.
  */
 CsStationOrder.pickOrder = function(names, walk) {
-    var rank = {}, i;
-    if (walk !== null && walk !== undefined) {
-        for (i = 0; i < walk.length; i++) {
-            if (rank[walk[i]] === undefined) {
-                rank[walk[i]] = i;
-            }
-        }
-    }
-    var known = [], unknown = [];
-    for (i = 0; i < names.length; i++) {
-        if (rank[names[i]] === undefined) {
-            unknown.push(names[i]);
-        } else {
-            known.push(names[i]);
-        }
-    }
-    known.sort(function(x, y) { return rank[x] - rank[y]; });
-    unknown.sort(CsStationOrder.naturalCompare);
-    return known.concat(unknown);
+    return names.slice().sort(CsStationOrder.naturalCompare);
 };
 
 CsStationOrder.parseAssigned = function(value) {

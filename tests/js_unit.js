@@ -10083,21 +10083,21 @@ if (!IS_NODE) {
     eqs(["A1", "a2"].sort(CsStationOrder.naturalCompare).join(","), "A1,a2",
         "naturalCompare: case does not reorder");
 
-    // Survey order wins where the drawing supplies it: it follows a
-    // branch to its tie-in rather than counting through the alphabet.
+    // NATURAL ORDER, NOT WALK ORDER. The walk follows a branch to its
+    // tie-in, so a cave whose E and F spurs hang off the middle of the
+    // D run lists D13, E1, E2, D14 ... D22, F1, F2, D23 -- a true
+    // account of the survey and useless for finding D16 by eye.
     var walk = ["A1", "A2", "B1", "A9", "A10"];
     eqs(CsStationOrder.pickOrder(names, walk).join(","),
-        "A1,A2,B1,A9,A10",
-        "pickOrder: survey order beats any sort");
-
-    // A station the walk never mentions is still on the sheet: it is
-    // appended in natural order, never dropped.
-    eqs(CsStationOrder.pickOrder(["A1", "Z9", "A2"], ["A1", "A2"]).join(","),
-        "A1,A2,Z9",
-        "pickOrder: names outside the walk are appended, not lost");
+        "A1,A2,A9,A10,B1",
+        "pickOrder: reading order, even when a walk is offered");
+    eqs(CsStationOrder.pickOrder(["D13", "E1", "D14", "F1", "D2"],
+        ["D13", "E1", "D14", "F1", "D2"]).join(","),
+        "D2,D13,D14,E1,F1",
+        "pickOrder: spurs do not interleave into the run they tie into");
     eqs(CsStationOrder.pickOrder(names, null).join(","),
         "A1,A2,A9,A10,B1",
-        "pickOrder: with no walk at all it falls back to natural order");
+        "pickOrder: and with no walk at all, the same answer");
 }());
 
 // ---------------------------------------------------------------------
