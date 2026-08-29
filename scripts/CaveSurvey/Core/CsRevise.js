@@ -1814,10 +1814,11 @@ CsRevise.adjustTagsOn = function(entity) {
  *   lineworkMoved   how many traced entities followed their own
  *                   stations. 0 on the rigid path, where the single
  *                   whole-drawing transform carried them all already
- *   lineworkWarped  of lineworkMoved's own count on the non-rigid
- *                   path, how many actually bent per-vertex rather
- *                   than moving as one rigid piece. Always 0 on the
- *                   rigid path
+ *   lineworkWarped  of the traced entities that followed the revision
+ *                   on the non-rigid path, how many did so by bending
+ *                   per-vertex rather than moving as one rigid piece --
+ *                   disjoint from lineworkMoved, never both. Always 0
+ *                   on the rigid path
  *   lineworkUnmoved ["LAYER #id"] the traced entities that had no
  *                   surviving station to follow, or whose stations
  *                   moved too incoherently for one rigid move to
