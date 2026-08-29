@@ -4176,6 +4176,35 @@ if (teamBoundaryRt.trips.length === 2) {
         CsRevise.lineworkSummary(3, [], 0, true).indexOf(ABANDONED) < 0,
         "lineworkSummary: moved > 0 never warns, regardless of " +
         "stationsMoved");
+
+    // The exact false-positive this task fixes: moved===0 but warped>0
+    // means everything that could follow the revision did -- just by
+    // bending rather than sliding as one rigid piece. Before this fix,
+    // lineworkSummary only looked at moved when deciding whether to warn,
+    // so a profile where every entity warped (moved===0, warped>0) still
+    // printed the "did NOT move with it" abandonment warning even though
+    // nothing was actually abandoned. moved and warped are disjoint
+    // counts (see moveLinework's own docblock), so this is a real gap,
+    // not a redundant case of the moved>0 check above.
+    var noWarpArg = CsRevise.lineworkSummary(0, [], 0, true);
+    ok(noWarpArg.indexOf(ABANDONED) >= 0,
+        "lineworkSummary: moved=0, warped omitted -- still warns (the " +
+        "bug this task fixes), got '" + noWarpArg.join(" / ") + "'");
+
+    var warpedOnly = CsRevise.lineworkSummary(0, [], 0, true, 3);
+    ok(warpedOnly.indexOf(ABANDONED) < 0,
+        "lineworkSummary: moved=0, warped=3 -- must NOT warn, everything " +
+        "that could follow did, just by bending; got '" +
+        warpedOnly.join(" / ") + "'");
+    ok(warpedOnly.join("\n").indexOf("warped") >= 0,
+        "lineworkSummary: moved=0, warped=3 -- the lines mention " +
+        "warping, got '" + warpedOnly.join(" / ") + "'");
+    ok(warpedOnly.indexOf(
+        "Traced linework moved with its stations: 3 " +
+        "(3 warped to follow a bend)") >= 0,
+        "lineworkSummary: moved=0, warped=3 -- headline number is the " +
+        "TOTAL that followed (moved+warped), not the raw moved count, " +
+        "got '" + warpedOnly.join(" / ") + "'");
 })();
 
 // --- the argument prep moveLinework's two callers share --------------

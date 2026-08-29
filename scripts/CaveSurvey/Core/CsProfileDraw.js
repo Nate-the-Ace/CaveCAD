@@ -1205,7 +1205,8 @@ CsProfileDraw.translateRegion = function(doc, di, dx, dy) {
  *          stationsMoved} --
  *          claimed and linework are CsProfileBind.claim's own result
  *          and CsRevise.moveLinework's own result (or this function's
- *          {error: ...} / {moved: 0, unmoved: ["move failed: ..."]}
+ *          {error: ...} / {moved: 0, warped: 0,
+ *          unmoved: ["move failed: ..."]}
  *          stand-ins when either step threw); CsReport.profileSummary
  *          is what turns both into the words a user actually reads --
  *          see that function for why neither may be dropped silently.

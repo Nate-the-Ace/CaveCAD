@@ -1471,9 +1471,11 @@ CsRevise.lineworkClaimLine = function(bound) {
  *
  * \param bound         optional -- entities this revision bound by
  *                       itself
- * \param warped        optional -- of `moved`'s entities, how many
- *                       actually bent (per-vertex disagreement) rather
- *                       than moving as one rigid piece. Defaults to 0.
+ * \param warped        optional -- of the traced entities that followed
+ *                       the revision at all, how many did so by bending
+ *                       per-vertex rather than moving as one rigid piece
+ *                       -- disjoint from `moved`, never both (an entity
+ *                       is one or the other). Defaults to 0.
  * \param stationsMoved optional, defaults to true (every existing
  *                       caller reaches this function only after a real
  *                       change: CsRevise.apply's non-rigid branch only
@@ -1501,7 +1503,7 @@ CsRevise.lineworkSummary = function(moved, unmoved, bound, stationsMoved,
     var didStationsMove = (stationsMoved === undefined ||
         stationsMoved === null) ? true : !!stationsMoved;
     var lines = [];
-    lines.push("Traced linework moved with its stations: " + n +
+    lines.push("Traced linework moved with its stations: " + (n + w) +
         (w > 0 ? " (" + w + " warped to follow a bend)" : ""));
     var claim = CsRevise.lineworkClaimLine(bound);
     if (claim !== "") {
