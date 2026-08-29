@@ -26,6 +26,23 @@ if ! grep -q "READY" "$LOG"; then
     exit 0
 fi
 
+SAVES=$(grep -c "^.*  SAVE     " "$LOG" || true)
+if [ "${SAVES:-0}" -gt 0 ]; then
+    echo "$SAVES save(s) recorded through the real save path (patch 0006)."
+    echo
+    echo "Backups:"
+    grep "  SAVE     " "$LOG" | sed 's/^/  /' | tail -20
+    echo
+    echo "After-save work:"
+    grep "  AFTER    " "$LOG" | sed 's/^/  /' | tail -20
+    echo
+    echo "A \"backup=already current\" line means the drawing was byte-"
+    echo "identical to the newest backup, so no generation was spent."
+    echo "\"did=(nothing)\" means the cave is outside every drive root --"
+    echo "project folders and the shelf only apply under one."
+    echo
+fi
+
 if grep -q "FIRED    Save.prototype.save" "$LOG"; then
     if grep -q "FIRED    Save.prototype.save.*identity=same-prototype" "$LOG"; then
         echo "The wrapper FIRED, on the same prototype it was installed on."
@@ -43,8 +60,14 @@ elif grep -q "FIRED    RDocumentInterface.exportFile" "$LOG"; then
     echo "confirmed: the action uses a prototype the add-on cannot reach, so"
     echo "anything that must run on save belongs in a fork patch to"
     echo "scripts/File/Save/Save.js (the shape patch 0005 already uses)."
+elif [ "${SAVES:-0}" -gt 0 ]; then
+    echo "The Save.prototype wrapper did not fire, which is EXPECTED now:"
+    echo "patch 0006 puts its calls INSIDE Save.prototype.save rather than"
+    echo "wrapping it, so the add-on-installed wrapper is still bypassed."
+    echo "The SAVE/AFTER lines above are the real signal."
 else
-    echo "Nothing fired at all. Either no save happened since the restart,"
-    echo "or the save path avoids both JS entry points entirely. Check that"
-    echo "the log shows a READY line from THIS session, then save again."
+    echo "Nothing recorded. Either no save happened since the restart, or"
+    echo "the add-on is not being reached at all -- check that"
+    echo "CaveSurvey/AddOnPath is set and the bundle's Save.js carries"
+    echo "patch 0006."
 fi

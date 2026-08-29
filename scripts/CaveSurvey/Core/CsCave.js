@@ -505,13 +505,102 @@ CsCave.pointAtScans = function(docPath) {
  * \param path the file about to be written.
  * \return true when a backup now holds the previous version.
  */
+// ---------------------------------------------------------------------
+// The save journal -- dogfooding instrumentation, off unless asked for.
+// ---------------------------------------------------------------------
+
+// The flag file that turns the journal on, and the log it appends to:
+// the SAME pair probe/CsSaveProbe uses, so probe/read.sh shows one
+// story rather than two.
+CsCave.JOURNAL_FLAG = "CsSaveProbe.enabled";
+CsCave.JOURNAL_LOG = "CsSaveProbe.log";
+
+/**
+ * The edition directory -- the folder holding the per-user "scripts"
+ * folder, e.g. ~/Library/Application Support/QCAD/CaveCAD.
+ *
+ * Derived from the add-on's own recorded path (CaveSurvey/AddOnPath,
+ * written by CaveSurvey.init) rather than guessed: this runs in a
+ * DOCUMENT's script engine, where includeBasePath is whatever last
+ * included something and the add-on's own basePath was never in scope.
+ *
+ * \return the folder, or null when the setting is missing.
+ */
+CsCave.editionDir = function() {
+    try {
+        if (typeof RSettings === "undefined") {
+            return null;
+        }
+        var addOn = String(RSettings.getStringValue("CaveSurvey/AddOnPath", ""));
+        if (addOn === "") {
+            return null;
+        }
+        // <edition>/scripts/CaveSurvey -> <edition>
+        var dir = new QDir(addOn);
+        dir.cdUp();
+        dir.cdUp();
+        return String(dir.absolutePath());
+    } catch (e) {
+        return null;
+    }
+};
+
+/**
+ * Appends one line to the save journal, if the journal is switched on.
+ *
+ * Silent and cheap when off -- one settings read and one file-exists
+ * check, both of which a save already affords. Never throws: this is
+ * instrumentation, and instrumentation that can break a save is worse
+ * than no instrumentation.
+ */
+CsCave.journal = function(line) {
+    try {
+        var dir = CsCave.editionDir();
+        if (dir === null) {
+            return false;
+        }
+        if (!(new QFileInfo(dir + "/" + CsCave.JOURNAL_FLAG)).exists()) {
+            return false;
+        }
+        var f = new QFile(dir + "/" + CsCave.JOURNAL_LOG);
+        if (!f.open(QIODevice.WriteOnly | QIODevice.Append | QIODevice.Text)) {
+            return false;
+        }
+        var d = new Date();
+        var p2 = function(n) { return (n < 10 ? "0" : "") + n; };
+        var stamp = d.getFullYear() + "-" + p2(d.getMonth() + 1) + "-" +
+            p2(d.getDate()) + " " + p2(d.getHours()) + ":" +
+            p2(d.getMinutes()) + ":" + p2(d.getSeconds());
+        var out = new QTextStream(f);
+        out.writeString(stamp + "  " + line + "\n");
+        f.close();
+        return true;
+    } catch (e) {
+        return false;
+    }
+};
+
+/** The file's own name, for a journal line that stays readable. */
+CsCave.shortName = function(path) {
+    var p = String(path);
+    var slash = p.lastIndexOf("/");
+    return slash === -1 ? p : p.substring(slash + 1);
+};
+
 CsCave.beforeSave = function(path) {
     try {
         if (typeof CsBackup === "undefined" || typeof path !== "string" ||
                 path === "") {
             return false;
         }
-        return CsBackup.beforeWrite(path);
+        var before = CsBackup.generations(path).length;
+        var kept = CsBackup.beforeWrite(path);
+        var after = CsBackup.generations(path).length;
+        CsCave.journal("SAVE     " + CsCave.shortName(path) +
+            "  backup=" + (kept ? (after > before ? "new generation" :
+                "already current") : "none") +
+            "  generations=" + after);
+        return kept;
     } catch (e) {
         return false;   // never the reason a save does not happen
     }
@@ -574,6 +663,8 @@ CsCave.afterSave = function(savedPath, di) {
         }
     } catch (e4) {
     }
+    CsCave.journal("AFTER    " + CsCave.shortName(savedPath) + "  did=" +
+        (did.length === 0 ? "(nothing)" : did.join(",")));
     return did;
 };
 

@@ -17027,6 +17027,18 @@ if (!IS_NODE) {
                     CsBackup.generations(doc4)[0]), "SAVE-ONE",
                 "CsCave.beforeSave: holding the PREVIOUS bytes");
 
+            // The journal writes only when the probe flag is present,
+            // and never throws either way. Asserted because it now runs
+            // on every real save: instrumentation that can break a save
+            // is worse than none.
+            ok(CsCave.journal("test line") === false ||
+                CsCave.journal("test line") === true,
+                "CsCave.journal: answers rather than throwing");
+            ok(CsCave.shortName("/a/b/Some Cave.dxf") === "Some Cave.dxf",
+                "CsCave.shortName: the file's own name");
+            ok(CsCave.shortName("bare.dxf") === "bare.dxf",
+                "CsCave.shortName: a bare name is already short");
+
             // Junk in, false out -- it runs inside a save and may never
             // throw.
             ok(CsCave.beforeSave("") === false, "CsCave.beforeSave: empty path");
