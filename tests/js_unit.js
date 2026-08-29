@@ -15750,19 +15750,28 @@ if (!IS_NODE) {
             // unguarded base call threw a TypeError on the handler's
             // FIRST line, so clicks, the wheel and the middle button
             // all did nothing while the code read correctly.
+            // THE BASE IS ON THE INSTANCE, UNDER A "Super" NAME. The
+            // prototype carries no mousePressEvent at all, so chaining
+            // through it throws on the override's first line and kills
+            // the handler -- which is what once made this viewer ignore
+            // every click, wheel and drag while reading correctly.
             eqs(typeof RGraphicsViewQt.prototype.mousePressEvent,
                 "undefined",
-                "the bridge exposes no base mousePressEvent to chain to");
-            eqs(typeof RGraphicsViewQt.prototype.resizeEvent, "function",
-                "but it does expose resizeEvent -- hence AutoZoomView");
-            var reached = false;
-            CsScanView.callBase({ mark: function() { reached = true; } },
-                "mousePressEvent", {});
-            ok(reached === false && true,
-                "callBase: a missing base handler is a no-op, not a throw");
-            var ranResize = false;
-            var stub = { getImageView: function() { throw new Error("x"); } };
-            CsScanView.callBase(stub, "resizeEvent", {});
+                "the prototype has no base handler to chain through");
+            var live = new RGraphicsViewQt(null, false);
+            eqs(typeof live.mousePressEventSuper, "function",
+                "but the instance carries mousePressEventSuper");
+            eqs(typeof live.wheelEventSuper, "undefined",
+                "the wheel has no Super -- this view zooms on its own");
+
+            var chained = 0;
+            CsScanView.callBase({ mousePressEventSuper: function() {
+                chained++; } }, "mousePressEvent", {});
+            eqs(chained, 1, "callBase: chains through the Super name");
+            CsScanView.callBase({}, "mousePressEvent", {});
+            ok(true, "callBase: a missing Super is a no-op, not a throw");
+            CsScanView.callBase({ resizeEventSuper: function() {
+                throw new Error("refused"); } }, "resizeEvent", {});
             ok(true, "callBase: a base that throws does not take the caller down");
         }());
 

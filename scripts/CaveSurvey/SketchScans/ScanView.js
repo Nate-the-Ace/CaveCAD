@@ -94,27 +94,32 @@ CsScanView.prototype.mousePressEvent = function(event) {
 };
 
 /**
- * Call RGraphicsViewQt's own handler for `name`, IF THIS BRIDGE HAS ONE.
+ * Call the view's own handler for `name` -- QCAD's behaviour, under the
+ * override.
  *
- * It mostly does not. Probed 2026-08-29:
- *   resizeEvent        -> function   (which is why AutoZoomView works)
- *   mousePressEvent    -> undefined
- *   mouseMoveEvent     -> undefined
- *   mouseReleaseEvent  -> undefined
- *   wheelEvent         -> undefined
- * Those four are protected virtuals the generator did not expose. An
- * unguarded RGraphicsViewQt.prototype.mousePressEvent.call(this, event)
- * therefore throws a TypeError on its first line and takes the WHOLE
- * handler down with it -- which is exactly what made the viewer ignore
- * clicks, the wheel and the middle button while looking correct.
+ * NOT RGraphicsViewQt.prototype[name]. Those are protected virtuals and
+ * the prototype does not carry them: chaining that way throws a
+ * TypeError on the override's first line and silently kills the whole
+ * handler, which is what once made this viewer ignore every click,
+ * wheel turn and drag while looking correct.
  *
- * The shell still dispatches to the script override (it looks the
- * property up by name), so not chaining costs only the base behaviour,
- * which this viewer implements itself anyway.
+ * The live binding (qcadjsapi) exposes the base under a "Super" name ON
+ * THE INSTANCE instead, and says so in its own generated comment:
+ * "function is protected, this function can be called from JS
+ * implementation to call implementation of super class". Probed on the
+ * shipping build:
+ *   mousePressEventSuper    function
+ *   mouseMoveEventSuper     function
+ *   mouseReleaseEventSuper  function
+ *   resizeEventSuper        function
+ *   wheelEventSuper         UNDEFINED -- the wheel has no base to call,
+ *                           which is harmless here because this view
+ *                           implements zoom itself.
+ * Still guarded: a name without a Super is a no-op, never a throw.
  */
 CsScanView.callBase = function(self, name, event) {
     try {
-        var base = RGraphicsViewQt.prototype[name];
+        var base = self[name + "Super"];
         if (typeof base === "function") {
             base.call(self, event);
         }
