@@ -10045,6 +10045,59 @@ if (!IS_NODE) {
 }());
 
 // ---------------------------------------------------------------------
+// CsScanTree bookmarks -- saving a place in a long list of scans.
+// ---------------------------------------------------------------------
+
+(function() {
+    var files = [
+        "2025 Scans/2-2 Trip/pageA.jpg",
+        "2025 Scans/2-2 Trip/pageB.jpg",
+        "2025 Scans/9-7 Trip/pageC.jpg",
+        "loose.jpg"
+    ];
+    var rows = CsScanTree.rowsOf(files);
+    var marks = { "2025 Scans/9-7 Trip/pageC.jpg": true };
+
+    ok(CsScanTree.folderHoldsBookmark("2025 Scans", marks) === true,
+        "folderHoldsBookmark: an ancestor folder holds it");
+    ok(CsScanTree.folderHoldsBookmark("2025 Scans/9-7 Trip", marks) === true,
+        "folderHoldsBookmark: and so does its own folder");
+    ok(CsScanTree.folderHoldsBookmark("2025 Scans/2-2 Trip", marks) === false,
+        "folderHoldsBookmark: a sibling folder does not");
+    ok(CsScanTree.folderHoldsBookmark("2025", marks) === false,
+        "folderHoldsBookmark: a PREFIX of a folder name is not a folder");
+
+    // Nothing collapsed: the bookmarked row is where the panel goes.
+    var at = CsScanTree.firstBookmarkRow(rows, marks, {});
+    ok(at >= 0, "firstBookmarkRow: a visible bookmark is found");
+    eqs(rows[at].rel, "2025 Scans/9-7 Trip/pageC.jpg",
+        "firstBookmarkRow: and it is the bookmarked one");
+
+    // Collapsed above it: NOT jumped to. Expanding a folder the caver
+    // collapsed would trade one remembered thing for another; the
+    // folder row carries the mark instead.
+    eqs(CsScanTree.firstBookmarkRow(rows, marks, { "2025 Scans": true }), -1,
+        "firstBookmarkRow: a hidden bookmark is not jumped to");
+
+    eqs(CsScanTree.firstBookmarkRow(rows, {}, {}), -1,
+        "firstBookmarkRow: no bookmarks, nowhere to go");
+    eqs(CsScanTree.firstBookmarkRow(rows, null, {}), -1,
+        "firstBookmarkRow: and null is not a throw");
+
+    // The store is the collapsed store, used as-is.
+    var map = CsScanTree.parseCollapsed("");
+    CsScanTree.recordCollapsed(map, "/caves/X/scans",
+        { "a.jpg": true }, ["a.jpg", "b.jpg"]);
+    var back = CsScanTree.collapsedSetFor(
+        CsScanTree.parseCollapsed(CsScanTree.serializeCollapsed(map)),
+        "/caves/X/scans");
+    ok(back["a.jpg"] === true,
+        "bookmark store: a bookmark round trips through the settings form");
+    ok(back["b.jpg"] === undefined,
+        "bookmark store: and an unbookmarked scan does not");
+}());
+
+// ---------------------------------------------------------------------
 // CsSectionCut -- frames. A leg is STRAIGHT, so there is no twist
 // within one; these carry theta = 0 from leg to leg so sections do not
 // spin where world up degenerates (a pitch).

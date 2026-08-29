@@ -119,6 +119,10 @@ SketchScans.FADE_PERCENT = 50;
 // for more or less, and the drag is remembered here:
 SketchScans.DOCK_PREVIEW_H = 240;
 SketchScans.SETTING_SPLIT = "CaveSurvey/SketchScansSplitterSizes";
+// The bookmark glyph. A trip's scans run to dozens of IMG_4021-shaped
+// names and the panel re-reads the folder every time it is shown, so
+// "where was I" is a real question with no other answer.
+SketchScans.BOOKMARK = "\u2605";
 
 // The collapsed set for one cave's scans folder, from settings.
 // A bridge without RSettings starts fully expanded.
@@ -151,17 +155,58 @@ SketchScans.saveCollapsed = function(scans, collapsed, rows) {
     }
 };
 
+// This cave's bookmarks, from settings. Stored exactly like the
+// collapsed set -- see CsScanTree.SETTING_BOOKMARKS for why those
+// helpers are shared rather than copied.
+SketchScans.loadBookmarks = function(scans) {
+    try {
+        var map = CsScanTree.parseCollapsed(
+            RSettings.getStringValue(CsScanTree.SETTING_BOOKMARKS, ""));
+        return CsScanTree.collapsedSetFor(map, scans);
+    } catch (e) {
+        return {};
+    }
+};
+
+// Writes them back, keeping only scans the panel actually listed -- a
+// bookmark on a scan that has been deleted or renamed falls out
+// instead of accreting forever.
+SketchScans.saveBookmarks = function(scans, bookmarks, rows) {
+    try {
+        var map = CsScanTree.parseCollapsed(
+            RSettings.getStringValue(CsScanTree.SETTING_BOOKMARKS, ""));
+        var valid = [];
+        for (var i = 0; i < rows.length; i++) {
+            if (rows[i].kind === "file") { valid.push(rows[i].rel); }
+        }
+        CsScanTree.recordCollapsed(map, scans, bookmarks, valid);
+        RSettings.setValue(CsScanTree.SETTING_BOOKMARKS,
+            CsScanTree.serializeCollapsed(map));
+    } catch (e) {
+        // a bridge without RSettings just forgets the bookmarks
+    }
+};
+
 // The text of one row: indentation by depth, a disclosure glyph on
 // folder rows, a glyph-wide gap on file rows so labels at one depth
 // line up across kinds.
-SketchScans.rowText = function(row, collapsed) {
+SketchScans.rowText = function(row, collapsed, bookmarks) {
     var indent = new Array(row.depth + 1).join("  ");
+    var marks = bookmarks || {};
     if (row.kind === "folder") {
-        return indent +
-            (collapsed[row.rel] === true ? "▸ " : "▾ ") +
-            row.label;
+        var folded = collapsed[row.rel] === true;
+        // A COLLAPSED FOLDER CARRIES THE STAR of any bookmark inside
+        // it. That is the case the mark is most needed in -- a bookmark
+        // you cannot see is no use for finding your place -- and it
+        // costs nothing while the folder is open, where the scan's own
+        // row shows it instead.
+        var buried = folded &&
+            CsScanTree.folderHoldsBookmark(row.rel, marks);
+        return indent + (folded ? "▸ " : "▾ ") + row.label +
+            (buried ? "  " + SketchScans.BOOKMARK : "");
     }
-    return indent + "  " + row.label;
+    return indent + (marks[row.rel] === true ?
+        SketchScans.BOOKMARK + " " : "  ") + row.label;
 };
 
 /** Builds the dock and hands it to the main window. Idempotent. */
@@ -185,6 +230,7 @@ SketchScans.buildDock = function(appWin) {
     var w = {
         rows: [],           // CsScanTree rows behind the table indices
         collapsed: {},      // this cave's collapsed set
+        bookmarks: {},      // this cave's bookmarked scans
         scans: null,        // the scans folder the table was built from
         ready: false        // false while the panel shows a message
     };
@@ -264,6 +310,15 @@ SketchScans.buildDock = function(appWin) {
     layout.addWidget(w.splitter, 1, 0);
 
     var buttons = new QHBoxLayout();
+    w.bookmarkButton = new QPushButton(SketchScans.BOOKMARK);
+    w.bookmarkButton.toolTip = qsTr("Bookmark the selected scan, so the " +
+        "panel opens on it again. A bookmark inside a collapsed folder " +
+        "puts the star on the folder instead.");
+    try {
+        w.bookmarkButton.maximumWidth = 34;
+    } catch (eBw) {
+        // a bridge that will not size it gets a wider button
+    }
     w.refreshButton = new QPushButton(qsTr("Refresh"));
     w.refreshButton.toolTip = qsTr("Re-read the scans folder -- new " +
         "scans appear here once Drive has synced them.");
@@ -274,6 +329,7 @@ SketchScans.buildDock = function(appWin) {
     w.insertButton = new QPushButton(qsTr("Insert"));
     w.insertButton.toolTip = qsTr("Insert the selected scan over the " +
         "survey, unaligned.");
+    buttons.addWidget(w.bookmarkButton, 0, 0);
     buttons.addWidget(w.refreshButton, 0, 0);
     buttons.addStretch(1);
     buttons.addWidget(w.alignButton, 0, 0);
@@ -327,7 +383,7 @@ SketchScans.buildDock = function(appWin) {
         }
         try {
             w.list.item(rowIdx, 0).setText(
-                SketchScans.rowText(row, w.collapsed));
+                SketchScans.rowText(row, w.collapsed, w.bookmarks));
         } catch (eGlyph) {
             // a stale glyph is cosmetic; the rows still fold
         }
@@ -379,6 +435,34 @@ SketchScans.buildDock = function(appWin) {
     } catch (eDbl) {
         // no row-aware double-click on this bridge; the buttons cover it
     }
+    var toggleBookmark = function() {
+        var rel = selectedFile();
+        if (rel === null || w.scans === null) {
+            return;
+        }
+        var row = w.list.currentRow();
+        if (w.bookmarks[rel] === true) {
+            delete w.bookmarks[rel];
+        } else {
+            w.bookmarks[rel] = true;
+        }
+        // Repaint every row, not just this one: a folder row's star
+        // depends on what is bookmarked BENEATH it, so bookmarking a
+        // scan can change an ancestor's text as well as its own.
+        for (var r = 0; r < w.rows.length; r++) {
+            try {
+                w.list.item(r, 0).setText(
+                    SketchScans.rowText(w.rows[r], w.collapsed, w.bookmarks));
+            } catch (eText) {
+                // a stale glyph is cosmetic; the bookmark still stands
+            }
+        }
+        SketchScans.saveBookmarks(w.scans, w.bookmarks, w.rows);
+        if (row >= 0) {
+            w.list.selectRow(row);
+        }
+    };
+    w.bookmarkButton.clicked.connect(toggleBookmark);
     w.refreshButton.clicked.connect(function() { SketchScans.refresh(); });
     w.alignButton.clicked.connect(function() { chooseInsert(true); });
     w.insertButton.clicked.connect(function() { chooseInsert(false); });
@@ -469,11 +553,12 @@ SketchScans.refresh = function() {
 
     w.rows = CsScanTree.rowsOf(files);
     w.collapsed = SketchScans.loadCollapsed(scans);
+    w.bookmarks = SketchScans.loadBookmarks(scans);
 
     w.list.setRowCount(w.rows.length);
     for (var i = 0; i < w.rows.length; i++) {
         var item = new QTableWidgetItem(
-            SketchScans.rowText(w.rows[i], w.collapsed));
+            SketchScans.rowText(w.rows[i], w.collapsed, w.bookmarks));
         if (w.rows[i].kind === "folder") {
             // Bold, clickable, but never SELECTED -- the selection
             // (and with it the preview pane) stays on a scan while
@@ -501,12 +586,27 @@ SketchScans.refresh = function() {
     }
     SketchScans.applyHidden();
 
-    // Initial selection: the first visible scan, not a folder row.
-    for (var s = 0; s < w.rows.length; s++) {
-        if (w.rows[s].kind === "file" &&
-                !CsScanTree.isHidden(w.rows[s], w.collapsed)) {
-            w.list.selectRow(s);
-            break;
+    // Initial selection: the bookmark if there is a visible one -- that
+    // is the whole point of it -- and otherwise the first visible scan.
+    var landing = CsScanTree.firstBookmarkRow(w.rows, w.bookmarks,
+        w.collapsed);
+    if (landing < 0) {
+        for (var s = 0; s < w.rows.length; s++) {
+            if (w.rows[s].kind === "file" &&
+                    !CsScanTree.isHidden(w.rows[s], w.collapsed)) {
+                landing = s;
+                break;
+            }
+        }
+    }
+    if (landing >= 0) {
+        w.list.selectRow(landing);
+        try {
+            // selectRow alone does not bring a row into view in a long
+            // list, which is exactly the list a bookmark exists for.
+            w.list.scrollToItem(w.list.item(landing, 0));
+        } catch (eScroll) {
+            // no scrollToItem here: the row is still selected
         }
     }
     SketchScans.showPreview();

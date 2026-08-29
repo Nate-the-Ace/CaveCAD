@@ -16,6 +16,18 @@ var CsScanTree = {};
 // paths inside it -- per cave by construction, one key overall.
 CsScanTree.SETTING = "CaveSurvey/SketchScansCollapsed";
 
+// Bookmarks -- the scans a caver has flagged to find again in a long
+// list. Same storage shape, its own key: an absolute scans path mapping
+// to the list of bookmarked RELATIVE file paths inside it.
+//
+// THE FOUR FUNCTIONS BELOW ARE GENERIC, whatever their names say.
+// parseCollapsed / serializeCollapsed / collapsedSetFor /
+// recordCollapsed are a per-cave string-set store and nothing about
+// them knows what a collapsed folder is; bookmarks use them as they
+// are rather than growing a second copy that could drift. If a third
+// use ever appears, that is the moment to rename them.
+CsScanTree.SETTING_BOOKMARKS = "CaveSurvey/SketchScansBookmarks";
+
 // Display rows for a list of relative file paths (sorted, the shape
 // CsCave.filesUnder answers): {kind: "folder"|"file", rel, depth,
 // label}. A folder row is emitted the first time any path passes
@@ -77,6 +89,52 @@ CsScanTree.isHidden = function(row, collapsedSet) {
         if (collapsedSet[ancestors[i]] === true) { return true; }
     }
     return false;
+};
+
+// True when a FOLDER holds a bookmarked file anywhere beneath it.
+//
+// What this is for: a bookmark inside a collapsed folder is invisible,
+// which is precisely when a caver most needs to know where their place
+// was. The folder row carries the mark instead, so a collapsed year of
+// trips still says "your scan is in here".
+CsScanTree.folderHoldsBookmark = function(folderRel, bookmarks) {
+    if (bookmarks === null || bookmarks === undefined) {
+        return false;
+    }
+    var prefix = folderRel + "/";
+    for (var rel in bookmarks) {
+        if (!bookmarks.hasOwnProperty(rel) || bookmarks[rel] !== true) {
+            continue;
+        }
+        if (rel.indexOf(prefix) === 0) {
+            return true;
+        }
+    }
+    return false;
+};
+
+// The first bookmarked row that is actually VISIBLE, or -1: where the
+// panel puts the caver back when it opens. A bookmark hidden inside a
+// collapsed folder is deliberately not jumped to -- expanding folders
+// the caver collapsed would trade one remembered thing for another.
+CsScanTree.firstBookmarkRow = function(rows, bookmarks, collapsedSet) {
+    if (rows === null || rows === undefined) {
+        return -1;
+    }
+    for (var i = 0; i < rows.length; i++) {
+        if (rows[i].kind !== "file") {
+            continue;
+        }
+        if (bookmarks === null || bookmarks === undefined ||
+                bookmarks[rows[i].rel] !== true) {
+            continue;
+        }
+        if (CsScanTree.isHidden(rows[i], collapsedSet)) {
+            continue;
+        }
+        return i;
+    }
+    return -1;
 };
 
 // The stored JSON, parsed defensively: anything unreadable is an empty
