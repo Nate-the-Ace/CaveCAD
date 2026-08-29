@@ -2074,6 +2074,387 @@ var ABANDONED_TRACING_WARNING =
 }());
 
 // =======================================================================
+// 12. Task 2 code-quality review, IMPORTANT #1 -- CsRevise.moveLinework's
+//    arc/circle branch scales its radius by CsWarp.mlsSimilarity's
+//    `factor` with no bound. `factor` is never negative by construction,
+//    but a control-point layout that puts the fit's numerator near zero
+//    against a non-degenerate denominator can still collapse the radius
+//    toward zero silently. These two fixtures call
+//    CsRevise.moveLinework DIRECTLY -- not through CsProfileDraw.render
+//    -- against a hand-tagged entity, the same shape as the FRAME
+//    CROSSING fixture below builds its stations, so each one controls
+//    its own oldPos/newPos pairs exactly rather than depending on
+//    auto-bind's proximity/snap rules to land on the right ones.
+//
+//    12a proves the new guard does NOT fire on an ordinary, non-
+//    degenerate warp: the radius scales by the SAME factor
+//    CsWarp.mlsSimilarity independently computes for that center.
+//    12b constructs the guard's own trigger cheaply: two bound
+//    stations whose NEW positions coincide exactly, which zeroes
+//    mlsSimilarity's fit numerator (a and b both 0, since the two
+//    "new" points collapse to one weighted centroid) against a
+//    denominator that is nowhere near CsWarp's own existing
+//    s2 <= 1e-20 full-degeneracy threshold -- exactly the gap the
+//    review flagged. The entity must come out UNTOUCHED and reported,
+//    not shrunk to a near-zero radius.
+// =======================================================================
+
+// -- 12a. ordinary warp: factor guard must not fire --------------------
+(function() {
+    var d12a = new RDocument(new RMemoryStorage(), createSpatialIndex());
+    var i12a = new RDocumentInterface(d12a);
+    CsLayers.ensure(d12a, i12a, CsLayers.PROFILE_TRACED_CEILING);
+
+    var oldPos = {
+        P1: { x: 0, y: 0 }, P3: { x: 20, y: 0 }, P5: { x: 40, y: 0 }
+    };
+    var newPos = {
+        P1: { x: 0, y: 0 }, P3: { x: 20, y: 10 }, P5: { x: 40, y: 10 }
+    };
+
+    var op = new RAddObjectsOperation();
+    var oldCenter = new RVector(100, 50), oldRadius = 8;
+    var circ = new RCircleEntity(d12a,
+        new RCircleData(oldCenter, oldRadius));
+    circ.setLayerId(d12a.getLayerId(CsLayers.PROFILE_TRACED_CEILING));
+    CsTags.set(circ, CsBind.STATIONS_TAG,
+        CsBind.encodeStations(["P1", "P3", "P5"]));
+    op.addObject(circ, false);
+    i12a.applyOperation(op);
+    var circId = circ.getId();
+
+    var pairs = [
+        { old: oldPos.P1, nu: newPos.P1 },
+        { old: oldPos.P3, nu: newPos.P3 },
+        { old: oldPos.P5, nu: newPos.P5 }
+    ];
+    var expect = CsWarp.mlsSimilarity(
+        { x: oldCenter.x, y: oldCenter.y }, pairs);
+    ok(expect.factor > 1e-3 && isFinite(expect.factor),
+        "sanity: this scenario's own factor is a normal, non-degenerate " +
+        "number (got " + expect.factor + "), so 12a actually exercises " +
+        "the guard's PASS-THROUGH path");
+
+    var counts = CsRevise.moveLinework(d12a, i12a, oldPos, newPos, {}, 100);
+    eqs(counts.unmoved.length, 0,
+        "12a: an ordinary warp does not get refused (" +
+        JSON.stringify(counts) + ")");
+    eqs(counts.moved, 1,
+        "12a: lands in moved -- a single center point has nothing to " +
+        "disagree with (" + JSON.stringify(counts) + ")");
+
+    var after = d12a.queryEntity(circId);
+    ok(!isNull(after), "12a: the circle still exists");
+    if (!isNull(after)) {
+        var c = after.getCenter();
+        near(c.x, expect.x, 1e-6,
+            "12a: center x matches CsWarp.mlsSimilarity's own " +
+            "prediction for this center");
+        near(c.y, expect.y, 1e-6,
+            "12a: center y matches CsWarp.mlsSimilarity's own " +
+            "prediction for this center");
+        near(after.getRadius(), oldRadius * expect.factor, 1e-6,
+            "12a: radius scaled by the SAME local factor " +
+            "mlsSimilarity independently computes (got " +
+            after.getRadius() + ", expected " +
+            (oldRadius * expect.factor) + ")");
+    }
+    destr(i12a);
+}());
+
+// -- 12b. degenerate factor: two bound stations' NEW positions coincide,
+//    zeroing the fit numerator against a non-degenerate denominator --
+//    the exact gap the review found in the old unbounded
+//    `ent.setRadius(ent.getRadius() * cw.factor)` -----------------------
+(function() {
+    var d12b = new RDocument(new RMemoryStorage(), createSpatialIndex());
+    var i12b = new RDocumentInterface(d12b);
+    CsLayers.ensure(d12b, i12b, CsLayers.PROFILE_TRACED_CEILING);
+
+    // Q1 and Q2 start 100 units apart (s2 is nowhere near
+    // CsWarp.EPS-scale zero -- the OLD guard's own degeneracy test
+    // would not catch this), but Q2 lands exactly on top of Q1: the
+    // fit's new-side spread collapses to a single point, zeroing the
+    // numerator (a === 0, b === 0) while the denominator stays
+    // ordinary. mlsSimilarity's honest answer is factor === 0.
+    var oldPos = { Q1: { x: 0, y: 0 }, Q2: { x: 100, y: 0 } };
+    var newPos = { Q1: { x: 0, y: 0 }, Q2: { x: 0, y: 0 } };
+
+    var op = new RAddObjectsOperation();
+    var oldCenter = new RVector(100, 50), oldRadius = 8;
+    var circ = new RCircleEntity(d12b,
+        new RCircleData(oldCenter, oldRadius));
+    circ.setLayerId(d12b.getLayerId(CsLayers.PROFILE_TRACED_CEILING));
+    CsTags.set(circ, CsBind.STATIONS_TAG,
+        CsBind.encodeStations(["Q1", "Q2"]));
+    op.addObject(circ, false);
+    i12b.applyOperation(op);
+    var circId = circ.getId();
+
+    var pairs = [
+        { old: oldPos.Q1, nu: newPos.Q1 },
+        { old: oldPos.Q2, nu: newPos.Q2 }
+    ];
+    var expect = CsWarp.mlsSimilarity(
+        { x: oldCenter.x, y: oldCenter.y }, pairs);
+    eqs(expect.factor, 0,
+        "sanity: this scenario's own factor really is (effectively) " +
+        "zero, so 12b actually exercises the guard's REFUSAL path, " +
+        "got " + expect.factor);
+
+    var counts = CsRevise.moveLinework(d12b, i12b, oldPos, newPos, {}, 100);
+    eqs(counts.moved, 0,
+        "12b: a near-zero factor does NOT land in moved (" +
+        JSON.stringify(counts) + ")");
+    eqs(counts.unmoved.length, 1,
+        "12b: FIX #2's OWN CASE -- the degenerate factor is refused " +
+        "and reported instead of collapsing the radius (" +
+        JSON.stringify(counts) + ")");
+
+    var after = d12b.queryEntity(circId);
+    ok(!isNull(after), "12b: the circle still exists");
+    if (!isNull(after)) {
+        var c = after.getCenter();
+        eqs(c.x, oldCenter.x, "12b: center x UNTOUCHED, not moved on a " +
+            "guess");
+        eqs(c.y, oldCenter.y, "12b: center y UNTOUCHED, not moved on a " +
+            "guess");
+        eqs(after.getRadius(), oldRadius,
+            "12b: radius UNTOUCHED -- not collapsed toward zero (got " +
+            after.getRadius() + ")");
+    }
+    destr(i12b);
+}());
+
+// =======================================================================
+// 13. Task 2 code-quality review -- MISSING LIVE COVERAGE. A control-
+//    point RSplineEntity has zero live coverage through
+//    CsRevise.moveLinework before this fixture: every control point
+//    must warp INDIVIDUALLY, the same property fixture 9 proves for a
+//    polyline's vertices, through the entity actually installed by
+//    ent.setShape() (not just the RSplineData this function builds in
+//    memory -- see moveLinework's own "getData() doesn't write back"
+//    trap documented at its RSplineEntity branch).
+// =======================================================================
+
+(function() {
+    var d13 = new RDocument(new RMemoryStorage(), createSpatialIndex());
+    var i13 = new RDocumentInterface(d13);
+    CsLayers.ensure(d13, i13, CsLayers.PROFILE_TRACED_CEILING);
+
+    // same incoherent station shape as fixture 9: P1 stays exactly
+    // where it is, P3 and P5 share one common nonzero shift -- no
+    // single rigid transform describes it, so each control point's
+    // local fit genuinely differs from the others'.
+    var oldPos = {
+        P1: { x: 0, y: 0 }, P3: { x: 20, y: 0 }, P5: { x: 40, y: 0 }
+    };
+    var newPos = {
+        P1: { x: 0, y: 0 }, P3: { x: 20, y: 10 }, P5: { x: 40, y: 10 }
+    };
+
+    var origCps = [
+        { x: 0, y: 5 }, { x: 30, y: -5 }, { x: 60, y: 20 }
+    ];
+    var sd = new RSplineData();
+    for (var pi = 0; pi < origCps.length; pi++) {
+        sd.appendControlPoint(new RVector(origCps[pi].x, origCps[pi].y));
+    }
+    sd.setDegree(2); // 3 control points: CsTrace's own degreeFor(3)
+    sd.update();
+
+    var op = new RAddObjectsOperation();
+    var spl = new RSplineEntity(d13, sd);
+    spl.setLayerId(d13.getLayerId(CsLayers.PROFILE_TRACED_CEILING));
+    CsTags.set(spl, CsBind.STATIONS_TAG,
+        CsBind.encodeStations(["P1", "P3", "P5"]));
+    op.addObject(spl, false);
+    i13.applyOperation(op);
+    var splId = spl.getId();
+
+    var counts = CsRevise.moveLinework(d13, i13, oldPos, newPos, {}, 100);
+    eqs(counts.unmoved.length, 0,
+        "13: the spline is not refused (" + JSON.stringify(counts) + ")");
+    eqs(counts.warped, 1,
+        "13: THIS INCOHERENT STATION SET BENDS THE SPLINE, per control " +
+        "point, same shape as fixture 9's polyline (" +
+        JSON.stringify(counts) + ")");
+
+    var after = d13.queryEntity(splId);
+    ok(!isNull(after), "13: the spline still exists");
+    if (!isNull(after)) {
+        eqs(after.countControlPoints(), 3,
+            "13: still exactly 3 control points -- setShape rebuilt " +
+            "the same count, not more or fewer");
+        eqs(after.getDegree(), 2, "13: degree preserved across rebuild");
+        var pairs = [
+            { old: oldPos.P1, nu: newPos.P1 },
+            { old: oldPos.P3, nu: newPos.P3 },
+            { old: oldPos.P5, nu: newPos.P5 }
+        ];
+        for (var vi = 0; vi < 3; vi++) {
+            var cp = after.getControlPointAt(vi);
+            var expect = CsWarp.mlsSimilarity(origCps[vi], pairs);
+            near(cp.x, expect.x, 1e-6,
+                "13: control point " + vi + " x matches " +
+                "CsWarp.mlsSimilarity's own prediction for that point " +
+                "(got " + cp.x + ", expected " + expect.x + ")");
+            near(cp.y, expect.y, 1e-6,
+                "13: control point " + vi + " y matches " +
+                "CsWarp.mlsSimilarity's own prediction for that point " +
+                "(got " + cp.y + ", expected " + expect.y + ")");
+        }
+    }
+    destr(i13);
+}());
+
+// =======================================================================
+// 14. Task 2 code-quality review -- MISSING LIVE COVERAGE. Every
+//    polyline fixture that reaches moveLinework live so far (fixture 9
+//    included) uses all-zero-bulge vertices, so the "read every bulge
+//    BEFORE clear(), re-append after" order of operations that keeps
+//    bulges byte-identical (see moveLinework's own RPolylineEntity
+//    branch comment) has never been proven against a REAL nonzero
+//    value -- a bug that flips or drops a bulge would read as zero
+//    either way and pass silently. This fixture pins one nonzero bulge
+//    through a genuine (non-rigid, warped) move.
+// =======================================================================
+
+(function() {
+    var d14 = new RDocument(new RMemoryStorage(), createSpatialIndex());
+    var i14 = new RDocumentInterface(d14);
+    CsLayers.ensure(d14, i14, CsLayers.PROFILE_TRACED_CEILING);
+
+    // same incoherent shape as fixture 13, so this move genuinely
+    // warps (lands in counts.warped) rather than moving as one rigid
+    // piece -- the bulge must survive a REAL per-vertex warp, not
+    // merely a translate.
+    var oldPos = {
+        P1: { x: 0, y: 0 }, P3: { x: 20, y: 0 }, P5: { x: 40, y: 0 }
+    };
+    var newPos = {
+        P1: { x: 0, y: 0 }, P3: { x: 20, y: 10 }, P5: { x: 40, y: 10 }
+    };
+
+    var pd = new RPolylineData();
+    pd.appendVertex(new RVector(0, 5), 0.53125); // nonzero, exact in fp2
+    pd.appendVertex(new RVector(30, -5), 0);
+    pd.appendVertex(new RVector(60, 20), 0);
+
+    var op = new RAddObjectsOperation();
+    var poly = new RPolylineEntity(d14, pd);
+    poly.setLayerId(d14.getLayerId(CsLayers.PROFILE_TRACED_CEILING));
+    CsTags.set(poly, CsBind.STATIONS_TAG,
+        CsBind.encodeStations(["P1", "P3", "P5"]));
+    op.addObject(poly, false);
+    i14.applyOperation(op);
+    var polyId = poly.getId();
+
+    eqs(poly.getBulgeAt(0), 0.53125, "sanity: the traced bulge is real " +
+        "before any move at all");
+
+    var counts = CsRevise.moveLinework(d14, i14, oldPos, newPos, {}, 100);
+    eqs(counts.unmoved.length, 0,
+        "14: the polyline is not refused (" + JSON.stringify(counts) +
+        ")");
+    eqs(counts.warped, 1,
+        "14: THIS IS A GENUINE WARP, not a rigid move -- the bulge " +
+        "round trip below is exercised through the real per-vertex " +
+        "rebuild path (" + JSON.stringify(counts) + ")");
+
+    var after = d14.queryEntity(polyId);
+    ok(!isNull(after), "14: the polyline still exists");
+    if (!isNull(after)) {
+        eqs(after.getBulgeAt(0), 0.53125,
+            "14: FIX/PROOF -- the nonzero bulge is BYTE-IDENTICAL after " +
+            "a genuine warp (got " + after.getBulgeAt(0) + ")");
+        eqs(after.getBulgeAt(1), 0,
+            "14: the untouched second segment's bulge is still exactly " +
+            "0 (got " + after.getBulgeAt(1) + ")");
+    }
+    destr(i14);
+}());
+
+// =======================================================================
+// 15. Task 2 code-quality review, IMPORTANT #1 -- a fit-point-only
+//    RSplineEntity (countControlPoints() === 0: this build has no
+//    interpolation engine to turn fit points into control points --
+//    see CsTrace.fitSpline's own docblock) used to slip past
+//    warpableVertices' "verts !== null" dispatch guard as an empty
+//    ARRAY, not null, reach the RSplineEntity rebuild branch, run its
+//    control-point loop zero times, and install a fresh, EMPTY
+//    RSplineData via ent.setShape() -- corrupting the entity's actual
+//    geometry (its fit points) in place. The fix routes this case to
+//    the same "no honest answer, leave it and report" outcome
+//    pairs.length === 0 already uses.
+//
+//    Tagged directly (CsBind.STATIONS_TAG set by hand) rather than
+//    relying on CsBind's auto-bind: probed live, a fit-point-only
+//    spline's getStartPoint()/getEndPoint() both come back invalid
+//    (RVector.valid === false), so CsBind.pointsOf finds nothing to
+//    snap or box-proximity against and auto-bind would never even
+//    reach moveLinework's dispatch -- it would land in "unmoved" for
+//    an unrelated reason (no bound stations at all) instead of
+//    exercising THIS guard specifically.
+// =======================================================================
+
+(function() {
+    var d15 = new RDocument(new RMemoryStorage(), createSpatialIndex());
+    var i15 = new RDocumentInterface(d15);
+    CsLayers.ensure(d15, i15, CsLayers.PROFILE_TRACED_CEILING);
+
+    var oldPos = {
+        P1: { x: 0, y: 0 }, P3: { x: 20, y: 0 }, P5: { x: 40, y: 0 }
+    };
+    var newPos = {
+        P1: { x: 0, y: 0 }, P3: { x: 20, y: 10 }, P5: { x: 40, y: 10 }
+    };
+
+    var fp = new RSplineData();
+    fp.appendFitPoint(new RVector(0, 0));
+    fp.appendFitPoint(new RVector(10, 5));
+    fp.appendFitPoint(new RVector(20, 0));
+
+    var op = new RAddObjectsOperation();
+    var spl = new RSplineEntity(d15, fp);
+    spl.setLayerId(d15.getLayerId(CsLayers.PROFILE_TRACED_CEILING));
+    CsTags.set(spl, CsBind.STATIONS_TAG,
+        CsBind.encodeStations(["P1", "P3", "P5"]));
+    op.addObject(spl, false);
+    i15.applyOperation(op);
+    var splId = spl.getId();
+
+    eqs(spl.countControlPoints(), 0,
+        "sanity: this build never turns fit points into control " +
+        "points, so this is a real 0-control-point spline before any " +
+        "move at all");
+    eqs(spl.countFitPoints(), 3, "sanity: its 3 fit points are real");
+
+    var counts = CsRevise.moveLinework(d15, i15, oldPos, newPos, {}, 100);
+    eqs(counts.moved, 0,
+        "15: FIX #1's OWN CASE -- a 0-control-point spline does not " +
+        "land in moved (" + JSON.stringify(counts) + ")");
+    eqs(counts.warped, 0,
+        "15: nor in warped (" + JSON.stringify(counts) + ")");
+    eqs(counts.unmoved.length, 1,
+        "15: it is refused and reported instead (" +
+        JSON.stringify(counts) + ")");
+
+    var after = d15.queryEntity(splId);
+    ok(!isNull(after), "15: the spline still exists");
+    if (!isNull(after)) {
+        eqs(after.countControlPoints(), 0,
+            "15: still 0 control points -- no empty RSplineData was " +
+            "installed over it");
+        eqs(after.countFitPoints(), 3,
+            "15: its fit points are UNCHANGED, not wiped out by a " +
+            "corrupting setShape() (got " + after.countFitPoints() +
+            ")");
+    }
+    destr(i15);
+}());
+
+// =======================================================================
 // FRAME CROSSING: the hazard sharing one drawing introduces.
 //
 // A plan station and a profile station three units apart in ABSOLUTE

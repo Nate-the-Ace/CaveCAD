@@ -1068,6 +1068,7 @@ CsRevise.moveLinework = function(doc, di, oldPos, newPos, tripStations,
     var origin = new RVector(0, 0);
     var op = new RModifyObjectsOperation();
     op.setText("Move traced linework");
+    // every op.addObject(ent, false) below: false keeps its own layer
     var anyMoved = false;
     var ids = doc.queryAllEntities(false, false);
     for (var i = 0; i < ids.length; i++) {
@@ -1111,10 +1112,23 @@ CsRevise.moveLinework = function(doc, di, oldPos, newPos, tripStations,
 
         if (ent instanceof RArcEntity || ent instanceof RCircleEntity) {
             var oldCenter = ent.getCenter();
+            var oldRadius = ent.getRadius();
             var cw = CsWarp.mlsSimilarity(
                 { x: oldCenter.x, y: oldCenter.y }, pairs);
+            // A non-finite factor, or one so close to zero the radius it
+            // would produce is effectively zero, is mlsSimilarity's
+            // honest answer when this control-point layout leaves the
+            // local scale untrustworthy -- the same "no honest answer,
+            // leave it and report" outcome the pairs.length === 0 case
+            // above already uses, rather than collapsing (or
+            // ballooning) the radius on a guess.
+            if (!isFinite(cw.factor) ||
+                    cw.factor * oldRadius <= 1e-6 * oldRadius) {
+                result.unmoved.push(label);
+                continue;
+            }
             ent.move(new RVector(cw.x - oldCenter.x, cw.y - oldCenter.y));
-            ent.setRadius(ent.getRadius() * cw.factor);
+            ent.setRadius(oldRadius * cw.factor);
             op.addObject(ent, false);
             anyMoved = true;
             result.moved++; // a single point has nothing to disagree with
@@ -1122,6 +1136,17 @@ CsRevise.moveLinework = function(doc, di, oldPos, newPos, tripStations,
         }
 
         var verts = warpableVertices(ent);
+        // An empty (but non-null) result is a fit-point-only spline
+        // (countControlPoints() === 0, real for one authored by
+        // clicking through points rather than via control points) --
+        // no honest answer either, same as pairs.length === 0 above:
+        // the rebuild loop below would run zero times and install a
+        // fresh, EMPTY RSplineData via setShape, corrupting the
+        // entity. Leave it and report instead of attempting a move.
+        if (verts !== null && verts.length === 0) {
+            result.unmoved.push(label);
+            continue;
+        }
         if (verts !== null) {
             var angles = [], factors = [], news = [];
             for (var vi = 0; vi < verts.length; vi++) {
