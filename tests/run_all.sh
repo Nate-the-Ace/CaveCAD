@@ -77,7 +77,7 @@ fi
 
 echo
 echo "=============================================================="
-echo " 4/9  Profile draw round trip (inside CaveCAD's own script engine)"
+echo " 4/9  Profile draw round trip & linework regression (inside CaveCAD's own script engine)"
 echo "=============================================================="
 if [ -e "$QCAD" ]; then
     output=$("$QCAD" -no-dock-icon -no-gui -allow-multiple-instances \

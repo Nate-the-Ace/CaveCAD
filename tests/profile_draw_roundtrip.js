@@ -2480,6 +2480,175 @@ var ABANDONED_TRACING_WARNING =
 }());
 
 // =======================================================================
+// 16. Task 4 (revised) -- ONE moveLinework CALL, THREE ENTITY TYPES, ONE
+//    COHERENT PIPELINE. Every fixture above proves one entity type
+//    against one outcome at a time: 9/13/14 a polyline/spline warps,
+//    12a a circle moves, 11c/15 something is refused. This fixture
+//    proves all three outcomes happen TOGETHER, from a SINGLE
+//    CsRevise.moveLinework call against the same revision -- Task 2's
+//    per-type dispatch and Task 3's report threading, exercised as one
+//    system instead of as separately-tested pieces. (The plan's
+//    original Task 4 asked for a whole new tests/linework_warp.js
+//    engine-only file duplicating this coverage from scratch; by the
+//    time Task 2/3's own code-quality review cycles landed, fixtures
+//    9/11c/12/13/14/15 already covered every individual entity type
+//    live in this file, so a second file would only have restated them
+//    -- this one fixture, added here, is what was actually still
+//    missing: proof that the pieces cooperate.)
+//
+//    Reuses the same incoherent P1/P3/P5 station shape fixtures 12-15
+//    already established (P1 stays exactly still, P3 and P5 share one
+//    common +10y shift -- confirmed by fixture 12a's own sanity check
+//    to be non-degenerate for a center warp, and hand-verified against
+//    CsRevise.similarityFit's unweighted centroid formula to carry a
+//    residual near 10 drawing units -- far past
+//    CsRevise.LINEWORK_RESIDUAL_FRACTION's tol of 0.1 at extent 100, so
+//    the rigid-fallback entity below is genuinely refused, not
+//    coincidentally so), bound to three entities that each take a
+//    different branch of moveLinework's dispatch:
+//
+//      polyline   per-vertex warp (WARPS: same vertex layout as
+//                 fixture 14's proven-warping case, so its own
+//                 vertices' local angle/factor genuinely disagree)
+//      circle     per-center warp (MOVES: a single point has nothing
+//                 to disagree with -- see moveLinework's own comment
+//                 at its arc/circle branch; same center fixture 12a
+//                 already proved gives a non-degenerate factor)
+//      text       no per-vertex structure at all -- the OLD rigid-fit
+//                 path, same type fixture 11c already proves goes
+//                 through it, refused because the fit is computed from
+//                 the STATION pairs alone (not the entity's own
+//                 position), and those pairs are the incoherent set
+//                 above regardless of where the text sits
+//
+//    Then CsRevise.lineworkSummary is called with the REAL counts this
+//    one call returned (not hand-typed numbers), proving Task 3's fix
+//    end to end against a genuine moveLinework result: the headline
+//    number is moved+warped, "warped" appears, and the false "did NOT
+//    move with it" warning -- which only ever fires when NOTHING moved
+//    or warped at all (CsRevise.js's own n===0 && w===0 guard) -- does
+//    not fire even though one of the three entities really was
+//    refused, because something else plainly did move and warp.
+// =======================================================================
+
+(function() {
+    var d16 = new RDocument(new RMemoryStorage(), createSpatialIndex());
+    var i16 = new RDocumentInterface(d16);
+    CsLayers.ensure(d16, i16, CsLayers.PROFILE_TRACED_CEILING);
+
+    // same incoherent station shape as fixtures 12-15: P1 stays exactly
+    // where it is, P3 and P5 share one common nonzero shift -- no
+    // single rigid transform describes it.
+    var oldPos = {
+        P1: { x: 0, y: 0 }, P3: { x: 20, y: 0 }, P5: { x: 40, y: 0 }
+    };
+    var newPos = {
+        P1: { x: 0, y: 0 }, P3: { x: 20, y: 10 }, P5: { x: 40, y: 10 }
+    };
+
+    var op = new RAddObjectsOperation();
+
+    // -- the entity that WARPS: a 3-vertex polyline, the exact vertex
+    // layout fixture 14 already proves lands in warped for this same
+    // station shape -----------------------------------------------------
+    var pd16 = new RPolylineData();
+    pd16.appendVertex(new RVector(0, 5));
+    pd16.appendVertex(new RVector(30, -5));
+    pd16.appendVertex(new RVector(60, 20));
+    var poly16 = new RPolylineEntity(d16, pd16);
+    poly16.setLayerId(d16.getLayerId(CsLayers.PROFILE_TRACED_CEILING));
+    CsTags.set(poly16, CsBind.STATIONS_TAG,
+        CsBind.encodeStations(["P1", "P3", "P5"]));
+    op.addObject(poly16, false);
+
+    // -- the entity that MOVES: a circle, bound to the SAME three
+    // stations, the exact center fixture 12a already proves gives a
+    // non-degenerate factor -- its single center point has nothing to
+    // disagree with, so it always lands in moved regardless of how
+    // incoherent its bound stations are (see moveLinework's own
+    // arc/circle branch comment) -----------------------------------------
+    var oldCenter16 = new RVector(100, 50), oldRadius16 = 8;
+    var circ16 = new RCircleEntity(d16,
+        new RCircleData(oldCenter16, oldRadius16));
+    circ16.setLayerId(d16.getLayerId(CsLayers.PROFILE_TRACED_CEILING));
+    CsTags.set(circ16, CsBind.STATIONS_TAG,
+        CsBind.encodeStations(["P1", "P3", "P5"]));
+    op.addObject(circ16, false);
+
+    // -- the entity that is REFUSED: a text entity, the same "no
+    // per-vertex structure" type fixture 11c already proves goes
+    // through the OLD rigid-fit-with-refusal path -- this station
+    // shape's residual is far past CsRevise.LINEWORK_RESIDUAL_FRACTION,
+    // and that refusal depends only on the station pairs, not on where
+    // this text happens to sit --------------------------------------------
+    var textAt16 = new RVector(20, 8);
+    var td16 = new RTextData(textAt16, textAt16, 2.0, 100.0,
+        RS.VAlignMiddle, RS.HAlignLeft, RS.LeftToRight, RS.Exact,
+        1.0, "trace note", "standard", false, false, 0.0, false);
+    var text16 = new RTextEntity(d16, td16);
+    text16.setLayerId(d16.getLayerId(CsLayers.PROFILE_TRACED_CEILING));
+    CsTags.set(text16, CsBind.STATIONS_TAG,
+        CsBind.encodeStations(["P1", "P3", "P5"]));
+    op.addObject(text16, false);
+
+    i16.applyOperation(op);
+    var polyId16 = poly16.getId(), circId16 = circ16.getId(),
+        textId16 = text16.getId();
+
+    // -- ONE call, three entities, three different dispatch outcomes --
+    var counts16 = CsRevise.moveLinework(d16, i16, oldPos, newPos, {}, 100);
+
+    eqs(counts16.warped, 1, "16: exactly the polyline warps (" +
+        JSON.stringify(counts16) + ")");
+    eqs(counts16.moved, 1, "16: exactly the circle moves rigidly (" +
+        JSON.stringify(counts16) + ")");
+    eqs(counts16.unmoved.length, 1, "16: exactly the text is refused (" +
+        JSON.stringify(counts16) + ")");
+    ok(counts16.unmoved[0].indexOf("#" + textId16) >= 0,
+        "16: the refused entity is the text entity, got " +
+        counts16.unmoved[0]);
+
+    var afterPoly16 = d16.queryEntity(polyId16);
+    var afterCirc16 = d16.queryEntity(circId16);
+    var afterText16 = d16.queryEntity(textId16);
+    ok(!isNull(afterPoly16) && !isNull(afterCirc16) && !isNull(afterText16),
+        "16: all three entities still exist");
+    if (!isNull(afterCirc16)) {
+        ok(Math.abs(afterCirc16.getRadius() - oldRadius16) > 1e-9,
+            "16: the circle's radius actually changed (a real warp " +
+            "happened, not a no-op), before=" + oldRadius16 + " after=" +
+            afterCirc16.getRadius());
+    }
+    if (!isNull(afterText16)) {
+        var tp16 = afterText16.getPosition();
+        eqs(tp16.x, textAt16.x, "16: the refused text's position is " +
+            "UNTOUCHED (x)");
+        eqs(tp16.y, textAt16.y, "16: the refused text's position is " +
+            "UNTOUCHED (y)");
+    }
+
+    // -- the pipeline's OTHER half: the report text, built from the
+    // REAL counts this call returned, not hand-typed numbers ----------
+    var summary16 = CsRevise.lineworkSummary(counts16.moved,
+        counts16.unmoved, 0, true, counts16.warped).join("\n");
+    ok(summary16.indexOf("warped") >= 0,
+        "16: the summary text mentions the warp, got:\n" + summary16);
+    ok(summary16.indexOf("did NOT move with it") < 0,
+        "16: TASK 3'S FIX, PROVEN END TO END -- something plainly DID " +
+        "move (the circle) and warp (the polyline), so the false " +
+        "'abandoned tracing' warning must not fire even though one " +
+        "entity really was refused, got:\n" + summary16);
+    ok(summary16.indexOf(
+        "Traced linework moved with its stations: " +
+        (counts16.moved + counts16.warped)) === 0,
+        "16: TASK 3'S FIX -- the headline number is moved+warped (" +
+        (counts16.moved + counts16.warped) + "), not moved alone, got:\n" +
+        summary16);
+
+    destr(i16);
+}());
+
+// =======================================================================
 // FRAME CROSSING: the hazard sharing one drawing introduces.
 //
 // A plan station and a profile station three units apart in ABSOLUTE
