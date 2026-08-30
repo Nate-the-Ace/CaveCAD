@@ -8090,6 +8090,55 @@ if (!IS_NODE) {
     loadRepoScript("scripts/CaveSurvey/Core/CsGeoProject.js");
     loadRepoScript("scripts/CaveSurvey/Core/CsLocationPick.js");
     loadRepoScript("scripts/CaveSurvey/SurveyNotebook/SurveyNotebook.js");
+
+    // -----------------------------------------------------------------
+    // The trip chooser reads as a STATION RANGE: a caver picking a page
+    // thinks "the D15 to D22 trip", not "the one with Laura on it".
+    // -----------------------------------------------------------------
+    (function() {
+        function tripShot(from, to, trip) {
+            var sh = CsModel.newShot();
+            sh.from = from; sh.to = to; sh.distance = 10; sh.azimuth = 0;
+            sh.trip = trip;
+            return sh;
+        }
+        var sv = CsModel.newSurvey();
+        CsModel.ensureTrips(sv);
+        sv.shots.push(tripShot("D15", "D16", 0));
+        sv.shots.push(tripShot("D16", "D17", 0));
+        sv.shots.push(tripShot("D17", "D22", 0));
+        // a splay LAST in the trip: it has no `to`, and a range that
+        // read it would end nowhere
+        var splay = tripShot("D22", "", 0);
+        splay.splay = true;
+        sv.shots.push(splay);
+        sv.shots.push(tripShot("F1", "F2", 1));
+
+        var r0 = SurveyNotebook.tripStationRange(sv, 0);
+        eqs(r0.from + "-" + r0.to, "D15-D22",
+            "tripStationRange: first station to last, splays skipped");
+        var r1 = SurveyNotebook.tripStationRange(sv, 1);
+        eqs(r1.from + "-" + r1.to, "F1-F2",
+            "tripStationRange: each trip reads its own range");
+        var none = SurveyNotebook.tripStationRange(sv, 7);
+        eqs(none.from + "-" + none.to, "-",
+            "tripStationRange: a trip with no shots has no range");
+
+        var trip = { name: "TRUITT CAVE", date: "2024-06-02",
+                     team: "LAURA DEMAREST, JEANNE PARK", declination: 0 };
+        eqs(SurveyNotebook.tripChoiceLabel(3, trip, 9, r0),
+            "Trip 3: D15 - D22 (9 shots)",
+            "tripChoiceLabel: the range IS the label");
+        // no range to read: the date is what still tells trips apart
+        eqs(SurveyNotebook.tripChoiceLabel(3, trip, 9, none),
+            "Trip 3: 2024-06-02 (9 shots)",
+            "tripChoiceLabel: falls back to the date when there is no range");
+        // the separator getItem splits on must never survive into a label
+        ok(String(SurveyNotebook.tripChoiceLabel(3,
+            { name: "A|B", date: "", team: "", declination: 0 }, 1, none))
+            .indexOf("|") < 0,
+            "tripChoiceLabel: the pipe separator is flattened out");
+    }());
     (function() {
         var doc = new RDocument(new RMemoryStorage(), new RSpatialIndexNavel());
         var di = new RDocumentInterface(doc);

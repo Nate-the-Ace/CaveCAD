@@ -1107,34 +1107,67 @@ SurveyNotebook.mergeTripIntoSurvey = function(reconSurvey, tripRecord, shots) {
  *  the same way in both places -- and, since the id is unique per
  *  trip, it is what the caller resolves the user's pick back to a
  *  trip BY, rather than re-matching the whole label string. The
- *  declination is included because it is the one field that can
- *  legitimately be the only difference between two trips sharing a
- *  date and team -- a resurvey redone to correct a bad declination
- *  reading, exactly what the revision framework exists for -- so
- *  leaving it out of the label is how two otherwise-identical trips
- *  read as indistinguishable to the person choosing between them.
+ *  THE LABEL IS THE STATION RANGE, at Nathan's asking: a caver picking
+ *  a page thinks "the D15 to D22 trip", not "the one with Laura and
+ *  Peter on it". Team, declination and the trip name are dropped.
+ *
+ *  Two resurveys of the same passage therefore read alike apart from
+ *  their trip number -- which is a real cost, and not a functional one:
+ *  the id prefix is unique and is what the pick resolves BY, so the
+ *  wrong trip cannot be loaded, only the wrong one chosen by eye. The
+ *  date comes back as the label when a trip has no ordinary shots to
+ *  read a range from.
  *  "|" is getItem's separator, so it is flattened out of the free
  *  text. Pure. */
-SurveyNotebook.tripChoiceLabel = function(tripId, trip, shotCount) {
+/**
+ * The first and last station of one trip, in notebook order.
+ *
+ * SPLAYS ARE SKIPPED: a splay has no `to` station, and a trip that
+ * happens to end on one would otherwise report its range as ending
+ * nowhere. Pure.
+ *
+ * \return {from, to} -- either may be "" when the trip has no ordinary
+ *         shots to read a range from.
+ */
+SurveyNotebook.tripStationRange = function(survey, tripId) {
+    var out = { from: "", to: "" };
+    if (survey === null || survey === undefined) {
+        return out;
+    }
+    for (var i = 0; i < survey.shots.length; i++) {
+        var sh = survey.shots[i];
+        if ((sh.trip || 0) !== tripId || sh.splay) {
+            continue;
+        }
+        var f = String(sh.from === undefined || sh.from === null ? "" : sh.from);
+        var t = String(sh.to === undefined || sh.to === null ? "" : sh.to);
+        if (out.from === "" && f !== "") {
+            out.from = f;
+        }
+        if (t !== "") {
+            out.to = t;
+        }
+    }
+    return out;
+};
+
+SurveyNotebook.tripChoiceLabel = function(tripId, trip, shotCount, range) {
     var clean = function(v) {
         return String(v === undefined || v === null ? "" : v)
             .replace(/\|/g, "/").replace(/^\s+|\s+$/g, "");
     };
-    var decl = Number(trip.declination);
-    if (isNaN(decl)) {
-        decl = 0.0;
-    }
     var parts = ["Trip " + tripId + ":"];
-    if (clean(trip.name) !== "") {
-        parts.push(clean(trip.name));
-    }
-    if (clean(trip.date) !== "") {
+    var f = clean(range === undefined || range === null ? "" : range.from);
+    var t = clean(range === undefined || range === null ? "" : range.to);
+    if (f !== "" && t !== "") {
+        parts.push(f + " - " + t);
+    } else if (f !== "" || t !== "") {
+        parts.push(f !== "" ? f : t);
+    } else if (clean(trip.date) !== "") {
+        // no ordinary shots to read a range from: fall back to the one
+        // field that still tells the trips apart
         parts.push(clean(trip.date));
     }
-    if (clean(trip.team) !== "") {
-        parts.push(clean(trip.team));
-    }
-    parts.push("decl " + decl.toFixed(2));
     parts.push("(" + shotCount + " shot" +
         (shotCount === 1 ? "" : "s") + ")");
     return parts.join(" ");
@@ -1203,7 +1236,9 @@ SurveyNotebook.loadFromDrawing = function(w) {
         var labels = [];
         for (i = 0; i < withShots.length; i++) {
             labels.push(SurveyNotebook.tripChoiceLabel(withShots[i],
-                recon.survey.trips[withShots[i]], counts[withShots[i]]));
+                recon.survey.trips[withShots[i]], counts[withShots[i]],
+                SurveyNotebook.tripStationRange(recon.survey,
+                    withShots[i])));
         }
         var choice = getItem("Survey Notebook",
             "This drawing holds " + withShots.length + " trips -- one " +
