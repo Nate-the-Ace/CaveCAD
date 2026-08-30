@@ -43,6 +43,7 @@ include("scripts/EAction.js");
 include("scripts/simple.js");
 include(includeBasePath + "/../Core/CsAll.js");
 include(includeBasePath + "/../AlignImage/AlignImage.js");
+include(includeBasePath + "/../SketchSection/SketchSection.js");
 include(includeBasePath + "/ScanView.js");
 
 // The panel, built once per session (FeatureTrace's pattern).
@@ -404,6 +405,16 @@ SketchScans.buildDock = function(appWin) {
         "redrawn. Cross Section assigns to the PLAN's stations -- a " +
         "section is cut at a plan station, not its own -- and lands on " +
         "CTRL-SECTION-SCAN.");
+    // `activated`, not currentIndexChanged -- FeatureTrace's run combo
+    // draws the same line for the same reason: currentIndexChanged
+    // fires on a PROGRAMMATIC change too, and this handler must only
+    // react to the caver actually choosing something.
+    w.frameCombo.activated.connect(function() {
+        try {
+            w.sketchButton.enabled = (frameNow() === "section");
+        } catch (e) {
+        }
+    });
     w.alignButton = new QPushButton(qsTr("Insert && Align"));
     w.alignButton.toolTip = qsTr("Insert the selected scan over the " +
         "survey and start Align Image on it: pick two points on the " +
@@ -411,12 +422,27 @@ SketchScans.buildDock = function(appWin) {
     w.insertButton = new QPushButton(qsTr("Insert"));
     w.insertButton.toolTip = qsTr("Insert the selected scan over the " +
         "survey, unaligned.");
+    // SKETCH SECTION IS GATED ON THE COMBO, not on the selected file --
+    // a plan or profile scan has no ghost to trace onto, so the button
+    // stays off until "Cross Section" is chosen, exactly the state the
+    // combo starts in.
+    w.sketchButton = new QPushButton(qsTr("Sketch Section"));
+    w.sketchButton.enabled = false;
+    w.sketchButton.toolTip = qsTr("Open a staging bay for the selected " +
+        "scan: the computed cross section at a chosen plan station, " +
+        "dashed, to scale the scan onto and trace by hand.");
+    w.sketchButton.clicked.connect(function() {
+        var rel = selectedFile();
+        if (rel === null || w.scans === null) { return; }
+        SketchScans.sketchSoon(w.scans + "/" + rel);
+    });
     buttons.addWidget(w.refreshButton, 0, 0);
     buttons.addStretch(1);
     buttons.addWidget(w.frameCombo, 0, 0);
     buttons.addWidget(w.pickAlignButton, 0, 0);
     buttons.addWidget(w.alignButton, 0, 0);
     buttons.addWidget(w.insertButton, 0, 0);
+    buttons.addWidget(w.sketchButton, 0, 0);
     layout.addLayout(buttons, 0);
 
     body.setLayout(layout);
@@ -1515,6 +1541,29 @@ SketchScans.alignSoon = function(entityId) {
             EAction.handleUserWarning("Sketch Scans: the scan is " +
                 "inserted and selected, but Align Image would not " +
                 "start (" + eAct + "). Run Align Image from the menu.");
+        }
+    });
+    timer.start(0);
+};
+
+/**
+ * Hand a scan to the Sketch Section tool, DEFERRED.
+ *
+ * Starting an action from inside a widget event is the documented
+ * hard-crash trap: triggering makes QCAD build a new action, and
+ * setCurrentAction then runs deleteTerminatedActions(), which frees the
+ * action still executing this very handler. The zero-delay timer puts
+ * the start on the next event loop turn, out of that handler -- the
+ * same shape alignSoon above uses, for the same reason.
+ */
+SketchScans.sketchSoon = function(path) {
+    var timer = new QTimer(RMainWindowQt.getMainWindow());
+    timer.singleShot = true;
+    timer.timeout.connect(function() {
+        try {
+            SketchSection.run(path, null);
+        } catch (e) {
+            EAction.handleUserWarning("Sketch Section: " + e);
         }
     });
     timer.start(0);

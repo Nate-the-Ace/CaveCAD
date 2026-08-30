@@ -47,6 +47,17 @@ CsCallout.KEY = {
     // compared against "what it would have drawn" the way a text label
     // can, so the hand-edit guard is explicit rather than inferred.
     SECTION_FROZEN: "SectionFrozen"
+    ,
+    // A section TRACED from a scan rather than computed from LRUD.
+    // SOURCE is the regeneration gate: refreshSections must never
+    // redraw over hand tracing. The other three are what it takes to
+    // reopen the bay and carry on tracing -- the revision framework's
+    // rule, one kind over: the drawing is reconstructible from what is
+    // stored on it.
+    SECTION_SOURCE: "SectionSource",
+    SECTION_SCAN: "SectionScan",
+    SECTION_FIT: "SectionBayFit",
+    SECTION_STATION: "SectionStationRef"
 };
 
 CsCallout.ROLE_TEXT = "text";
@@ -57,6 +68,10 @@ CsCallout.ROLE_BLOCK = "block";
 CsCallout.KIND_TEXT = "text";
 CsCallout.KIND_ELEV = "elev";
 CsCallout.KIND_SECTION = "section";
+/** The value of SECTION_SOURCE for a traced section. Absent means
+ *  computed, so every section drawn before this existed keeps
+ *  regenerating exactly as it did. */
+CsCallout.SOURCE_SKETCH = "sketch";
 CsCallout.BASIS_FLOOR = "floor";
 CsCallout.BASIS_LINE = "line";
 
