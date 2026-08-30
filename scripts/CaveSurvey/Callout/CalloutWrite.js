@@ -858,6 +858,29 @@ CalloutWrite.createSection = function(doc, di, spec) {
 };
 
 /**
+ * One straight two-vertex leader entity, tagged and queued in `op`. The
+ * entity-construction step every section leader shares -- what differs
+ * between callers is only where the far end lands: addSectionLeaders
+ * stops it short of the section's own outline, while a sketch has no
+ * outline to stop at and runs straight to `to`.
+ *
+ * `from` FIRST: RLeaderData puts its arrowhead on the first vertex.
+ */
+CalloutWrite.oneLeader = function(doc, op, id, from, to, style,
+        layerName) {
+    var pl = new RPolyline();
+    pl.appendVertex(new RVector(from.x, from.y));
+    pl.appendVertex(new RVector(to.x, to.y));
+    var ent = new RLeaderEntity(doc, new RLeaderData(pl, true));
+    ent.setLayerId(doc.getLayerId(layerName));
+    CsTags.set(ent, CsCallout.KEY.ID, id);
+    CsTags.set(ent, CsCallout.KEY.ROLE, CsCallout.ROLE_LEADER);
+    CsTags.set(ent, CsCallout.KEY.STYLE, style);
+    op.addObject(ent, false);
+    return ent;
+};
+
+/**
  * The leaders for a section: one straight line from each picked point
  * to where it FIRST meets the section's own linework, aimed at the
  * section's centroid.
@@ -882,19 +905,44 @@ CalloutWrite.addSectionLeaders = function(doc, op, id, cut, scale, at,
         if (stop === null) {
             continue;
         }
-        var pl = new RPolyline();
-        // The tip FIRST: RLeaderData puts its arrowhead on the first
-        // vertex, and the arrow belongs at the passage, not at the
-        // section.
-        pl.appendVertex(new RVector(tips[i].x, tips[i].y));
-        pl.appendVertex(new RVector(at.x + stop.x, at.y + stop.y));
-        var ent = new RLeaderEntity(doc, new RLeaderData(pl, true));
-        ent.setLayerId(doc.getLayerId(layerName));
-        CsTags.set(ent, CsCallout.KEY.ID, id);
-        CsTags.set(ent, CsCallout.KEY.ROLE, CsCallout.ROLE_LEADER);
-        CsTags.set(ent, CsCallout.KEY.STYLE, style);
-        op.addObject(ent, false);
+        CalloutWrite.oneLeader(doc, op, id, tips[i],
+            { x: at.x + stop.x, y: at.y + stop.y }, style, layerName);
     }
+};
+
+/**
+ * Move a sketch's leader to run from the station's CURRENT position to
+ * the block reference's CURRENT position, straight.
+ *
+ * NOTHING TO DO IS NOT A WRITE -- writeLeaders' own guard (above),
+ * reused rather than re-invented: signatureOfLeaders/geometrySignature
+ * already know how to tell "this leader already ends here" from "it
+ * doesn't", and that comparison is what stopped CaveCAD freezing once
+ * before. An unmoved station reproduces the same two points on every
+ * pass; rewriting them anyway is a transaction the callout listener
+ * hears regardless, and the listener's re-entrancy guard does not save
+ * it -- a queued signal still arrives after the guard has cleared.
+ */
+CalloutWrite.reanchorSketchLeader = function(doc, di, id, m, stationAt) {
+    var refAt = m.block.getData().getPosition();
+    var branch = [ { x: stationAt.x, y: stationAt.y },
+        { x: refAt.x, y: refAt.y } ];
+    if (CalloutWrite.signatureOfLeaders(m.leaders) ===
+            CalloutWrite.geometrySignature([branch])) {
+        return;
+    }
+    var style = CsTags.get(m.block, CsCallout.KEY.STYLE) ||
+        CsCallout.STYLE_DEFAULT;
+    var layerName = CsCallout.STYLES[style] ||
+        CsCallout.STYLES[CsCallout.STYLE_DEFAULT];
+    var op = new RAddObjectsOperation();
+    op.setText("Re-anchor sketched section leader");
+    for (var i = 0; i < m.leaders.length; i++) {
+        op.deleteObject(m.leaders[i]);
+    }
+    CalloutWrite.oneLeader(doc, op, id, stationAt, refAt, style,
+        layerName);
+    di.applyOperation(op);
 };
 
 /**
@@ -933,8 +981,32 @@ CalloutWrite.refreshSections = function(doc, di, survey, resolved) {
         // Left alone and COUNTED, the same treatment SECTION_FROZEN
         // already gets below -- it was just never generated in the
         // first place, so there is no "frozen" state to enter.
+        //
+        // The LEADER is a different story. It points at a STATION, and
+        // loop closure moves stations by real distances -- a leader
+        // left where the station USED TO BE is wrong on a plotted map,
+        // silently. So the block stays untouched but the leader still
+        // follows, same as a computed section's leader does below.
         if (CsTags.get(m.block, CsCallout.KEY.SECTION_SOURCE) ===
                 CsCallout.SOURCE_SKETCH) {
+            var station = CsTags.get(m.block, CsCallout.KEY.SECTION_STATION);
+            var stationAt = resolved.stations[station];
+            if (station === "" || stationAt === undefined) {
+                // The station this sketch is leadered to is gone from
+                // the survey. Same treatment as a computed section's
+                // vanished leg below: left alone and counted lost,
+                // never deleted.
+                out.lost++;
+                continue;
+            }
+            try {
+                CalloutWrite.reanchorSketchLeader(doc, di, ids[i], m,
+                    { x: stationAt.x, y: stationAt.y });
+            } catch (eSketchLead) {
+                // the block itself is untouched either way; a leader
+                // left on its old spot is wrong but visible, which
+                // beats a half-applied operation
+            }
             out.sketched++;
             continue;
         }
