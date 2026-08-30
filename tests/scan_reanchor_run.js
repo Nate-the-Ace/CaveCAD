@@ -40,7 +40,7 @@ function loadRepoScript(rel) {
 }
 ["CsUuid", "CsUnits", "CsAngles", "CsModel", "CsTraverse", "CsNetwork",
  "CsLrud", "CsScanFit", "CsStore", "CsTags", "CsLayers", "CsStationOrder",
- "CsScanReanchor"].forEach(function(m) {
+ "CsScanFrame", "CsScanReanchor"].forEach(function(m) {
     loadRepoScript("scripts/CaveSurvey/Core/" + m + ".js");
 });
 
@@ -142,6 +142,59 @@ checkClose("the recovered A1 pixel is the one picked (x)",
     recovered[0].u, pickA.x, 0.5);
 checkClose("the recovered A1 pixel is the one picked (y)",
     recovered[0].v, pickA.y, 0.5);
+
+// ---- A PROFILE SCAN FOLLOWS ITS BAND, not the plan -------------------
+// Same names, different places: the elevation carries ProfileStation
+// points, and a profile scan must be re-fitted against those rather
+// than against the plan stations of the same name.
+CsLayers.ensure(doc, di, CsLayers.CTRL_PROFILE_SCAN);
+function putProfileStation(name, run, x, y) {
+    var p = new RPointEntity(doc, new RPointData(new RVector(x, y)));
+    p.setLayerId(doc.getLayerId(CsLayers.CTRL_STATIONS));
+    CsTags.set(p, "ProfileStation", name);
+    CsTags.set(p, "ProfileRun", run);
+    di.applyOperation(new RAddObjectOperation(p, false));
+    return p;
+}
+putProfileStation("A1", "A", 1000, 50);
+var pb = putProfileStation("A2", "A", 1100, 70);
+
+var pfit = CsScanFit.fit([
+    { source: pickA, dest: { x: 1000, y: 50 } },
+    { source: pickB, dest: { x: 1100, y: 70 } }
+]);
+var pv = CsScanFit.imageVectors(pfit.matrix);
+var pscan = new RImageEntity(doc, new RImageData(scanPath,
+    new RVector(pv.position.x, pv.position.y),
+    new RVector(pv.u.x, pv.u.y), new RVector(pv.v.x, pv.v.y), W, H, 0));
+pscan.setLayerId(doc.getLayerId(CsLayers.CTRL_PROFILE_SCAN));
+CsTags.set(pscan, "SketchScan", "profile.jpg");
+CsTags.set(pscan, "ScanFrame", "profile");
+CsTags.set(pscan, "ScanFrameKey", "A");
+CsTags.set(pscan, "ScanAnchors", CsScanFit.serializeAnchors([
+    { name: "A1", u: pickA.x, v: pickA.y },
+    { name: "A2", u: pickB.x, v: pickB.y }
+]));
+di.applyOperation(new RAddObjectOperation(pscan, false));
+
+// move the BAND's A2, leaving the plan's A2 alone
+var movedP = doc.queryEntity(pb.getId());
+movedP.move(new RVector(-40, 15));
+var pop = new RModifyObjectsOperation();
+pop.addObject(movedP, false);
+di.applyOperation(pop);
+
+var pafter = CsScanReanchor.run(doc, di);
+check("the profile scan followed its band", pafter.moved === 1);
+check("and the plan scan, already in place, did not move",
+    pafter.matched >= 1);
+var pplaced = doc.queryEntity(pscan.getId()).getData();
+var pAtB = pplaced.mapFromImage(new RVector(pickB.x, pickB.y));
+checkClose("the profile pick landed on the elevation's A2 (x)", pAtB.x, 1060);
+checkClose("the profile pick landed on the elevation's A2 (y)", pAtB.y, 85);
+// and it did NOT chase the plan station of the same name
+check("it did not chase the plan station of the same name",
+    Math.abs(pAtB.x - 230) > 1);
 
 // ---- a scan whose stations are gone is left alone, not mangled -------
 var gone = new RDocument(new RMemoryStorage(), new RSpatialIndexNavel());

@@ -129,6 +129,7 @@ var CORE_FILES = [
     "scripts/CaveSurvey/Core/CsAdjust.js",
     "scripts/CaveSurvey/Core/CsLrud.js",
     "scripts/CaveSurvey/Core/CsScanFit.js",
+    "scripts/CaveSurvey/Core/CsScanFrame.js",
     "scripts/CaveSurvey/Core/CsSectionCut.js",
     // pure helpers only (captionText/scaleText); its document functions
     // reference QCAD symbols but are never CALLED here -- same reason
@@ -10337,6 +10338,63 @@ if (!IS_NODE) {
         { source: { x: 0, y: 100 }, dest: { x: 0, y: 99 } }];
     var bad = CsScanFit.residuals(off, fit.matrix);
     eqs(bad.worstIndex, 3, "CsScanFit.residuals: names the worst pick");
+}());
+
+// ---------------------------------------------------------------------
+// CsScanFrame -- which view a scan belongs to.
+// ---------------------------------------------------------------------
+
+(function() {
+    eqs(CsScanFrame.KINDS.length, 3, "CsScanFrame: three views");
+    eqs(CsScanFrame.normaliseKind("PROFILE"), "profile",
+        "normaliseKind: case folded");
+    eqs(CsScanFrame.normaliseKind("nonsense"), "plan",
+        "normaliseKind: an unknown frame is plan, never a throw");
+    eqs(CsScanFrame.normaliseKind(null), "plan",
+        "normaliseKind: and so is nothing at all");
+
+    eqs(CsScanFrame.layerFor("plan"), "CTRL-SCAN", "layerFor: plan");
+    eqs(CsScanFrame.layerFor("profile"), "CTRL-PROFILE-SCAN",
+        "layerFor: profile sketches keep off the plan's scan layer");
+    eqs(CsScanFrame.layerFor("section"), "CTRL-SECTION-SCAN",
+        "layerFor: and so do section sketches");
+
+    eqs(CsScanFrame.stationTagFor("plan"), "Station", "stationTagFor: plan");
+    eqs(CsScanFrame.stationTagFor("profile"), "ProfileStation",
+        "stationTagFor: the elevation's own namespace");
+    eqs(CsScanFrame.runTagFor("profile"), "ProfileRun",
+        "runTagFor: the elevation has bands");
+    ok(CsScanFrame.runTagFor("plan") === null,
+        "runTagFor: the plan does not");
+
+    // A NAME IS NOT AN ADDRESS IN THE ELEVATION. The same station
+    // appears in every band it ties into, so a picker offering bare
+    // names would make the caver choose blind.
+    var counts = { "D22": 1, "D15": 2 };
+    eqs(CsScanFrame.labelFor("D22", "D", counts), "D22",
+        "labelFor: a name in one band only is just the name");
+    eqs(CsScanFrame.labelFor("D15", "D", counts), "D15 (D)",
+        "labelFor: a name in two bands says which");
+    eqs(CsScanFrame.labelFor("D15", "E", counts), "D15 (E)",
+        "labelFor: and the other one says so too");
+    eqs(CsScanFrame.labelFor("D22", "", counts), "D22",
+        "labelFor: no run, no qualifier");
+
+    // The band is a HINT: a renamed run must not strand a scan.
+    var places = [
+        { name: "D15", run: "D", pos: { x: 1, y: 2 } },
+        { name: "D15", run: "E", pos: { x: 9, y: 9 } },
+        { name: "D22", run: "D", pos: { x: 3, y: 4 } }
+    ];
+    var inD = CsScanFrame.placeOf(places, "D15", "D");
+    eqs(inD.x + "," + inD.y, "1,2", "placeOf: the named band wins");
+    var inE = CsScanFrame.placeOf(places, "D15", "E");
+    eqs(inE.x + "," + inE.y, "9,9", "placeOf: and so does the other one");
+    var renamed = CsScanFrame.placeOf(places, "D22", "GONE");
+    eqs(renamed.x + "," + renamed.y, "3,4",
+        "placeOf: a band that no longer exists falls back to the name");
+    ok(CsScanFrame.placeOf(places, "Z9", "D") === null,
+        "placeOf: a name that is nowhere answers null");
 }());
 
 // ---------------------------------------------------------------------

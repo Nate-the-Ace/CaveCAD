@@ -1,0 +1,157 @@
+// CsScanFrame.js -- which view a scan belongs to, and what stations it
+// can be aligned to.
+//
+// Part of the Cave Survey Core library. The vocabulary at the top is
+// pure; everything taking a `doc` is QCAD-only and takes it explicitly.
+//
+// All three views live in ONE drawing -- the elevation is a region of
+// the plan drawing and the sections sit with it -- so the frame is a
+// CHOICE the caver makes on the Scan Shelf, recorded on the image as
+// ScanFrame, and not something derivable from which file is open.
+//
+// WHY THE STATION TABLE IS SCOPED. Plan stations carry Station;
+// elevation stations carry ProfileStation, a deliberately separate
+// namespace so plan-side scanners can never mistake an elevation for a
+// plan. Within the elevation a station appears once per BAND it ties
+// into, so a name alone is not an address there -- which is why this
+// answers a list of PLACES, each carrying its own position and run,
+// rather than a name -> position map that would silently keep whichever
+// band it read last.
+
+var CsScanFrame = {};
+
+CsScanFrame.KINDS = ["plan", "profile", "section"];
+
+/** The tag an aligned scan carries to say which view it belongs to. */
+CsScanFrame.TAG = "ScanFrame";
+/** The band or section it was aligned within, where that matters. */
+CsScanFrame.KEY_TAG = "ScanFrameKey";
+
+/** A frame name from a tag or a combo, defaulting to plan. Never
+ *  throws: this value comes off a drawing a user can edit. */
+CsScanFrame.normaliseKind = function(kind) {
+    if (kind === undefined || kind === null) {
+        return "plan";
+    }
+    var name = String(kind).toLowerCase().replace(/^\s+|\s+$/g, "");
+    for (var i = 0; i < CsScanFrame.KINDS.length; i++) {
+        if (CsScanFrame.KINDS[i] === name) {
+            return name;
+        }
+    }
+    return "plan";
+};
+
+/** The scan layer for a frame -- the twin-layer split that keeps a
+ *  profile sketch out of reach of a plan-scoped sweep. */
+CsScanFrame.layerFor = function(kind) {
+    switch (CsScanFrame.normaliseKind(kind)) {
+    case "profile": return CsLayers.CTRL_PROFILE_SCAN;
+    case "section": return CsLayers.CTRL_SECTION_SCAN;
+    default:        return CsLayers.CTRL_SCAN;
+    }
+};
+
+/** The XDATA tag that frame's station points carry. */
+CsScanFrame.stationTagFor = function(kind) {
+    switch (CsScanFrame.normaliseKind(kind)) {
+    case "profile": return "ProfileStation";
+    case "section": return "SectionStation";
+    default:        return "Station";
+    }
+};
+
+/** The tag carrying which band a frame's point belongs to, or null when
+ *  the frame has no bands. */
+CsScanFrame.runTagFor = function(kind) {
+    return CsScanFrame.normaliseKind(kind) === "profile" ?
+        "ProfileRun" : null;
+};
+
+/**
+ * How a place should read in the picker.
+ *
+ * A plan station is its own name. An elevation station is its name too
+ * -- until the SAME name appears in more than one band, which happens
+ * at every tie-in, and then it has to say which band or the caver is
+ * choosing blind.
+ *
+ * \param counts name -> how many places carry that name
+ * Pure.
+ */
+CsScanFrame.labelFor = function(name, run, counts) {
+    if (run === null || run === undefined || run === "" ||
+            counts === undefined || counts === null ||
+            (counts[name] || 0) <= 1) {
+        return name;
+    }
+    return name + " (" + run + ")";
+};
+
+/**
+ * Every place a scan in this frame could be aligned to.
+ *
+ * \return [{name, run, pos, label}] -- a LIST, not a map: in the
+ *         elevation one name can be two places, and a map would keep
+ *         whichever it read last without saying so. QCAD only.
+ */
+CsScanFrame.placesIn = function(doc, kind) {
+    var out = [];
+    if (isNull(doc)) {
+        return out;
+    }
+    var frame = CsScanFrame.normaliseKind(kind);
+    var tag = CsScanFrame.stationTagFor(frame);
+    var runTag = CsScanFrame.runTagFor(frame);
+    var counts = {};
+    var found = [];
+
+    var ids = doc.queryAllEntities(false, true);
+    for (var i = 0; i < ids.length; i++) {
+        var e = doc.queryEntity(ids[i]);
+        if (isNull(e) || typeof e.getPosition !== "function") {
+            continue;
+        }
+        var name = CsTags.get(e, tag);
+        if (name === "") {
+            continue;
+        }
+        var run = (runTag === null) ? "" : CsTags.get(e, runTag);
+        var p = e.getPosition();
+        counts[name] = (counts[name] || 0) + 1;
+        found.push({ name: name, run: run, pos: { x: p.x, y: p.y } });
+    }
+    for (var k = 0; k < found.length; k++) {
+        found[k].label = CsScanFrame.labelFor(found[k].name, found[k].run,
+            counts);
+        out.push(found[k]);
+    }
+    return out;
+};
+
+/**
+ * The place one anchor names, within a frame and (where it matters) a
+ * band.
+ *
+ * The band is a HINT, not a requirement: a renamed run must not strand
+ * a scan, so a name that matches nothing in the given band is looked
+ * for across the frame before giving up.
+ *
+ * \return {x, y} or null
+ */
+CsScanFrame.placeOf = function(places, name, run) {
+    var i;
+    if (run !== null && run !== undefined && run !== "") {
+        for (i = 0; i < places.length; i++) {
+            if (places[i].name === name && places[i].run === run) {
+                return places[i].pos;
+            }
+        }
+    }
+    for (i = 0; i < places.length; i++) {
+        if (places[i].name === name) {
+            return places[i].pos;
+        }
+    }
+    return null;
+};

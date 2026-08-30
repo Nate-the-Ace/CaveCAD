@@ -384,10 +384,20 @@ SketchScans.buildDock = function(appWin) {
     // the viewer above, so the fit is known before the image is placed
     // -- the caver never inserts a scan and then hunts for it in the
     // drawing to align it.
-    w.pickAlignButton = new QPushButton(qsTr("Align on Scan"));
-    w.pickAlignButton.toolTip = qsTr("Pick stations on the scan itself, " +
-        "then place it already fitted. Zoom in first -- the fit is only " +
-        "as good as the picks.");
+    w.pickAlignButton = new QPushButton(qsTr("Assign Stations to Scans"));
+    w.pickAlignButton.toolTip = qsTr("Click each station on the scan " +
+        "itself and say which station it is; the scan is then placed " +
+        "already fitted. Zoom in first -- the fit is only as good as " +
+        "the picks.");
+    // ONE FRAME AT A TIME. Offering the plan's stations and the
+    // elevation's in one list would double a list that is already long
+    // enough to hunt through, which is why this is a switch rather than
+    // a longer menu.
+    w.profileCheck = new QCheckBox(qsTr("Profile Stations"));
+    w.profileCheck.toolTip = qsTr("Assign this scan to the ELEVATION's " +
+        "stations instead of the plan's. A profile sketch lands on " +
+        "CTRL-PROFILE-SCAN and follows its band when the elevation is " +
+        "redrawn.");
     w.alignButton = new QPushButton(qsTr("Insert && Align"));
     w.alignButton.toolTip = qsTr("Insert the selected scan over the " +
         "survey and start Align Image on it: pick two points on the " +
@@ -397,6 +407,7 @@ SketchScans.buildDock = function(appWin) {
         "survey, unaligned.");
     buttons.addWidget(w.refreshButton, 0, 0);
     buttons.addStretch(1);
+    buttons.addWidget(w.profileCheck, 0, 0);
     buttons.addWidget(w.pickAlignButton, 0, 0);
     buttons.addWidget(w.alignButton, 0, 0);
     buttons.addWidget(w.insertButton, 0, 0);
@@ -443,7 +454,7 @@ SketchScans.buildDock = function(appWin) {
             if (w.picking !== null && w.picking.rel !== rel) {
                 // another scan: the picks belonged to the old one
                 w.picking = null;
-                w.pickAlignButton.text = qsTr("Align on Scan");
+                w.pickAlignButton.text = qsTr("Assign Stations to Scans");
             }
             if (!CsScanPreview.show(w.scanView, w.scans + "/" + rel)) {
                 showMessage(qsTr("unreadable image"));
@@ -519,40 +530,55 @@ SketchScans.buildDock = function(appWin) {
     };
 
     /** The drawing's plotted stations, and the order to walk them. */
+    /** Which view the picks are being taken in: the checkbox decides.
+     *  ONE FRAME AT A TIME, deliberately -- offering the plan's
+     *  stations and the elevation's together would double a list that
+     *  is already long enough to hunt through, which is the whole
+     *  reason this is a switch and not a longer menu. */
+    var frameNow = function() {
+        try {
+            return (w.profileCheck !== undefined &&
+                w.profileCheck !== null && w.profileCheck.checked) ?
+                "profile" : "plan";
+        } catch (e) {
+            return "plan";
+        }
+    };
+
+    /** The places pickable in the current frame, in reading order. */
     var stationsNow = function() {
         var doc = EAction.getDocument();
         if (isNull(doc)) {
             return null;
         }
         try {
-            var stations = CsTags.collectStations(doc);
-            if (stations.length === 0) {
+            var places = CsScanFrame.placesIn(doc, frameNow());
+            if (places.length === 0) {
                 return null;
             }
-            var plotted = {}, names = [];
-            for (var i = 0; i < stations.length; i++) {
-                plotted[stations[i].name] = stations[i].pos;
-                names.push(stations[i].name);
+            // Reading order -- A1, A2, A9, A10 -- so a name is found by
+            // reading rather than hunted for.
+            places.sort(function(a, b) {
+                return CsStationOrder.naturalCompare(a.label, b.label);
+            });
+            var labels = [];
+            for (var i = 0; i < places.length; i++) {
+                labels.push(places[i].label);
             }
-            // SURVEY ORDER where the drawing can supply it, natural
-            // name order otherwise. collectStations sorts by Seq, which
-            // is SEEDING order for anchored stations rather than walk
-            // order -- so it is not the order a caver is working
-            // through, and a picker listing it is a hunt.
-            var walk = null;
-            try {
-                var asDrawn = CsRevise.resolveAsDrawn(doc);
-                if (asDrawn !== null) {
-                    walk = CsStationOrder.walkOrder(asDrawn.survey);
-                }
-            } catch (eWalk) {
-                walk = null;
-            }
-            return { plotted: plotted,
-                     names: CsStationOrder.pickOrder(names, walk) };
+            return { places: places, names: labels };
         } catch (e) {
             return null;
         }
+    };
+
+    /** The place one offered label belongs to. */
+    var placeOfLabel = function(ctx, label) {
+        for (var i = 0; i < ctx.places.length; i++) {
+            if (ctx.places[i].label === label) {
+                return ctx.places[i];
+            }
+        }
+        return null;
     };
 
     var pickStatus = function(text) {
@@ -565,12 +591,12 @@ SketchScans.buildDock = function(appWin) {
     /** Every pick so far, and what to do next. */
     var refreshPickState = function() {
         if (w.picking === null) {
-            w.pickAlignButton.text = qsTr("Align on Scan");
+            w.pickAlignButton.text = qsTr("Assign Stations to Scans");
             return;
         }
         var n = w.picking.pairs.length;
         w.pickAlignButton.text = (n >= 2) ?
-            qsTr("Place (%1 stations)").arg(n) : qsTr("Cancel Align");
+            qsTr("Place (%1 stations)").arg(n) : qsTr("Cancel");
         pickStatus(n === 0 ?
             qsTr("Click station 1 on the scan") :
             qsTr("%1 picked -- click another, or Place").arg(n));
@@ -585,15 +611,18 @@ SketchScans.buildDock = function(appWin) {
         }
         var ctx = stationsNow();
         if (ctx === null) {
-            warning("Sketch Scans: this drawing has no plotted stations " +
-                "to align to.");
+            warning("Sketch Scans: this drawing has no " +
+                (frameNow() === "profile" ? "elevation stations" :
+                    "plotted stations") + " to assign.");
             w.picking = null;
             refreshPickState();
             return;
         }
+        // used by LABEL, not name: in the elevation the same name is a
+        // different place in each band it ties into
         var used = {};
         for (var i = 0; i < w.picking.pairs.length; i++) {
-            used[w.picking.pairs[i].name] = true;
+            used[w.picking.pairs[i].label] = true;
         }
         var offer = [];
         for (var k = 0; k < ctx.names.length; k++) {
@@ -612,7 +641,7 @@ SketchScans.buildDock = function(appWin) {
         // one picked, in the same reading order the list is offered in.
         var start = 0;
         if (w.picking.pairs.length > 0) {
-            var last = w.picking.pairs[w.picking.pairs.length - 1].name;
+            var last = w.picking.pairs[w.picking.pairs.length - 1].label;
             var from = -1;
             for (var f = 0; f < ctx.names.length; f++) {
                 if (ctx.names[f] === last) { from = f; break; }
@@ -637,7 +666,7 @@ SketchScans.buildDock = function(appWin) {
         var chosen = null;
         try {
             var dlg = new QInputDialog(RMainWindowQt.getMainWindow());
-            dlg.windowTitle = qsTr("Align on Scan");
+            dlg.windowTitle = qsTr("Assign Stations to Scans");
             dlg.setLabelText(qsTr("Which station did you just click?"));
             // The station list itself, so a name cannot be mistyped and
             // one already used cannot be offered twice.
@@ -656,15 +685,22 @@ SketchScans.buildDock = function(appWin) {
         if (chosen === null || chosen === undefined || chosen === "") {
             return;                       // nothing chosen, nothing recorded
         }
-        var dest = ctx.plotted[String(chosen)];
-        if (dest === undefined) {
+        var place = placeOfLabel(ctx, String(chosen));
+        if (place === null) {
             return;
         }
         w.picking.pairs.push({
-            name: String(chosen),
+            name: place.name,
+            label: place.label,
+            run: place.run,
             source: { x: point.x, y: point.y },
-            dest: { x: dest.x, y: dest.y }
+            dest: { x: place.pos.x, y: place.pos.y }
         });
+        // The frame is fixed by the FIRST pick, so a scan cannot end up
+        // fitted to half a plan and half an elevation.
+        if (w.picking.frame === undefined || w.picking.frame === null) {
+            w.picking.frame = frameNow();
+        }
         refreshPickState();
     };
 
@@ -712,6 +748,7 @@ SketchScans.buildDock = function(appWin) {
         // only report the caver gets on whether the fit is any good.
         var pairs = w.picking.pairs;
         var rel = w.picking.rel;
+        var frame = CsScanFrame.normaliseKind(w.picking.frame);
         var res = CsScanFit.residuals(pairs, fit.matrix);
         // BEFORE placing: once the new scan is in, it would be counted
         // among the neighbours it is being judged against.
@@ -719,8 +756,13 @@ SketchScans.buildDock = function(appWin) {
         var scale = CsScanFit.scaleOutlier(
             CsScanFit.describe(fit.matrix).unitsPerPixel, neighbours);
         var placed = SketchScans.insertFitted(doc, di,
-            w.scans + "/" + rel, rel, fit, w.scanView.heightPx, pairs);
+            w.scans + "/" + rel, rel, fit, w.scanView.heightPx, pairs,
+            frame);
         w.picking = null;
+        try {
+            w.profileCheck.enabled = true;
+        } catch (eUnlock) {
+        }
         refreshPickState();
         pickStatus("");
         if (placed !== null) {
@@ -806,7 +848,7 @@ SketchScans.buildDock = function(appWin) {
                     .arg(pairs.length));
             }
             EAction.handleUserMessage(rel + qsTr(" placed on ") +
-                CsLayers.CTRL_SCAN + qsTr(" from %1 stations, %2. ")
+                CsScanFrame.layerFor(frame) + qsTr(" from %1 stations, %2. ")
                     .arg(pairs.length).arg(how) +
                 qsTr("Worst station is off by %1; the average is %2.")
                     .arg(Math.round(res.worst * 100) / 100)
@@ -834,7 +876,13 @@ SketchScans.buildDock = function(appWin) {
                 "to align to. Draw the survey first.");
             return;
         }
-        w.picking = { pairs: [], rel: rel };
+        w.picking = { pairs: [], rel: rel, frame: null };
+        try {
+            // locked while picks are being taken: the frame belongs to
+            // the set of picks, not to whatever the box says later
+            w.profileCheck.enabled = false;
+        } catch (eLock) {
+        }
         refreshPickState();
     });
 
@@ -1307,7 +1355,7 @@ SketchScans.placedScales = function(doc) {
  * \return the entity id, or null (a message has been shown).
  */
 SketchScans.insertFitted = function(doc, di, path, name, fit, heightPx,
-        pairs) {
+        pairs, frame) {
     var image = new QImage(path);
     if (image.isNull()) {
         warning("Sketch Scans: " + name + " could not be read as an image.");
@@ -1337,11 +1385,27 @@ SketchScans.insertFitted = function(doc, di, path, name, fit, heightPx,
         return null;
     }
 
-    CsLayers.ensure(doc, di, CsLayers.CTRL_SCAN);
+    // The frame's OWN scan layer. A profile sketch on CTRL-SCAN would
+    // read as plan content to CsLayers.frameOf, so a plan-wide warp
+    // would drag it and it would swell the plan's data window.
+    var kind = CsScanFrame.normaliseKind(frame);
+    var layer = CsScanFrame.layerFor(kind);
+    CsLayers.ensure(doc, di, layer);
     // Layer, tags and draw order BEFORE adding -- post-add writes fail
     // silently in this bridge (see CsDraw.js's header).
-    entity.setLayerId(doc.getLayerId(CsLayers.CTRL_SCAN));
+    entity.setLayerId(doc.getLayerId(layer));
     CsTags.set(entity, "SketchScan", name);
+    CsTags.set(entity, CsScanFrame.TAG, kind);
+    // The band it was assigned within, where the frame has bands. A
+    // HINT for re-fitting, never trusted over the station names: a
+    // renamed run must not strand a scan.
+    try {
+        if (pairs.length > 0 && pairs[0].run !== undefined &&
+                pairs[0].run !== null && pairs[0].run !== "") {
+            CsTags.set(entity, CsScanFrame.KEY_TAG, pairs[0].run);
+        }
+    } catch (eRun) {
+    }
     // The stations it was fitted to, in the same tag Align Image uses,
     // so re-aligning this scan later resumes past them rather than
     // offering them again.
@@ -1393,7 +1457,7 @@ SketchScans.insertFitted = function(doc, di, path, name, fit, heightPx,
         }
     }
     warning("Sketch Scans: the insert added nothing -- the " +
-        CsLayers.CTRL_SCAN + " layer may be locked or frozen.");
+        layer + " layer may be locked or frozen.");
     return null;
 };
 

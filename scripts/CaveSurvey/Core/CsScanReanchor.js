@@ -57,14 +57,24 @@ CsScanReanchor.scans = function(doc) {
     return out;
 };
 
-/** The drawing's plotted stations as {name: {x, y}}. */
-CsScanReanchor.plotted = function(doc) {
-    var out = {};
-    var stations = CsTags.collectStations(doc);
-    for (var i = 0; i < stations.length; i++) {
-        out[stations[i].name] = { x: stations[i].pos.x, y: stations[i].pos.y };
+/** The frame one scan belongs to, from its own tag. */
+CsScanReanchor.frameOf = function(image) {
+    return CsScanFrame.normaliseKind(CsTags.get(image, CsScanFrame.TAG));
+};
+
+/** The band it was assigned within, or "" -- a hint, never trusted over
+ *  the station names. */
+CsScanReanchor.runOf = function(image) {
+    return CsTags.get(image, CsScanFrame.KEY_TAG);
+};
+
+/** The places of one frame, cached per run so a drawing full of scans
+ *  does not re-scan the entities once per scan. */
+CsScanReanchor.placesFor = function(doc, cache, frame) {
+    if (cache[frame] === undefined) {
+        cache[frame] = CsScanFrame.placesIn(doc, frame);
     }
-    return out;
+    return cache[frame];
 };
 
 /**
@@ -77,7 +87,7 @@ CsScanReanchor.plotted = function(doc) {
  *
  * \return true when anchors were written
  */
-CsScanReanchor.backfillOne = function(doc, op, image, plotted) {
+CsScanReanchor.backfillOne = function(doc, op, image, places) {
     if (CsTags.get(image, CsScanReanchor.TAG) !== "") {
         return false;                       // already has them
     }
@@ -86,10 +96,11 @@ CsScanReanchor.backfillOne = function(doc, op, image, plotted) {
     if (names.length < 2) {
         return false;                       // never aligned to stations
     }
+    var run = CsScanReanchor.runOf(image);
     var anchors = [];
     for (var i = 0; i < names.length; i++) {
-        var pos = plotted[names[i]];
-        if (pos === undefined) {
+        var pos = CsScanFrame.placeOf(places, names[i], run);
+        if (pos === null) {
             return false;                   // basis gone; nothing to read
         }
         var px = image.getData().mapToImage(new RVector(pos.x, pos.y));
@@ -110,13 +121,15 @@ CsScanReanchor.backfill = function(doc, di) {
     if (scans.length === 0) {
         return 0;
     }
-    var plotted = CsScanReanchor.plotted(doc);
+    var cache = {};
     var op = new RModifyObjectsOperation();
     op.setText("Record scan anchors");
     var n = 0;
     for (var i = 0; i < scans.length; i++) {
         try {
-            if (CsScanReanchor.backfillOne(doc, op, scans[i], plotted)) {
+            var places = CsScanReanchor.placesFor(doc, cache,
+                CsScanReanchor.frameOf(scans[i]));
+            if (CsScanReanchor.backfillOne(doc, op, scans[i], places)) {
                 n++;
             }
         } catch (e) {
@@ -146,7 +159,7 @@ CsScanReanchor.run = function(doc, di) {
     if (scans.length === 0) {
         return out;
     }
-    var plotted = CsScanReanchor.plotted(doc);
+    var cache = {};
     var op = new RModifyObjectsOperation();
     op.setText("Move scans with the survey");
     var any = false;
@@ -159,10 +172,13 @@ CsScanReanchor.run = function(doc, di) {
             if (anchors.length < 2) {
                 continue;                   // not an aligned scan
             }
+            var places = CsScanReanchor.placesFor(doc, cache,
+                CsScanReanchor.frameOf(image));
+            var run = CsScanReanchor.runOf(image);
             var pairs = [], gone = 0;
             for (var a = 0; a < anchors.length; a++) {
-                var dest = plotted[anchors[a].name];
-                if (dest === undefined) {
+                var dest = CsScanFrame.placeOf(places, anchors[a].name, run);
+                if (dest === null) {
                     gone++;
                     out.missing.push(anchors[a].name);
                     continue;
