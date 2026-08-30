@@ -626,19 +626,35 @@ SketchScans.buildDock = function(appWin) {
                 }
             }
         }
+        // A DIALOG INSTANCE, NOT QInputDialog.getItem. The static
+        // convenience function's C++ signature reports Cancel through an
+        // `ok` OUT-PARAMETER, and this binding drops it -- so Cancel
+        // returned the selected station exactly as OK did, and there was
+        // no way to tell the two apart. Cancel simply did not work.
+        //
+        // An instance carries the answer in its own result: exec()
+        // returns QDialog.Accepted only when the caver pressed OK.
         var chosen = null;
         try {
+            var dlg = new QInputDialog(RMainWindowQt.getMainWindow());
+            dlg.windowTitle = qsTr("Align on Scan");
+            dlg.setLabelText(qsTr("Which station did you just click?"));
             // The station list itself, so a name cannot be mistyped and
-            // one already used cannot be picked twice.
-            chosen = QInputDialog.getItem(RMainWindowQt.getMainWindow(),
-                qsTr("Align on Scan"),
-                qsTr("Which station did you just click?"),
-                offer, start, false);
+            // one already used cannot be offered twice.
+            dlg.setComboBoxEditable(false);
+            dlg.setComboBoxItems(offer);
+            if (start >= 0 && start < offer.length) {
+                dlg.setTextValue(offer[start]);
+            }
+            if (dlg.exec() !== QDialog.Accepted) {
+                return;                   // cancelled: the pick is dropped
+            }
+            chosen = dlg.textValue();
         } catch (eDlg) {
             chosen = null;
         }
         if (chosen === null || chosen === undefined || chosen === "") {
-            return;                       // cancelled: the pick is dropped
+            return;                       // nothing chosen, nothing recorded
         }
         var dest = ctx.plotted[String(chosen)];
         if (dest === undefined) {
