@@ -1,6 +1,6 @@
 # Tests
 
-Eleven stages, cheapest first, all driven by one script:
+Thirteen stages, cheapest first, all driven by one script:
 
     ./tests/run_all.sh             what has to pass while developing
     ./tests/run_all.sh --publish   also what has to pass before releasing
@@ -77,6 +77,24 @@ few units away in absolute coordinates.
 ## Stage 5/9 -- `generate_profile_run.js`
 
 `tests/cross_section_run.js` -- the cross-section lifecycle against a real document: cut a section on a fixture survey, place it as a block on a leader, change the survey and assert the block DEFINITION followed while the REFERENCE stayed put, then assert a frozen section is skipped and counted and a section whose leg is gone is counted lost and left in the drawing. Needs the real engine: every bug this feature shipped (a false re-entrant on every LRUD diamond, an inverted scale caption, sections drawn on their side) was invisible to the pure tests and obvious the first time the code met an RDocument.
+
+`tests/section_sketch_run.js` -- the SKETCHED cross-section lifecycle against a
+real document, end to end: Sketch Section opens a bay over a real scan and a
+real computed ghost, a line is traced inside the frame, Capture Section sweeps
+it (and not the frame, the ghost or the scan) into a `CS_<CalloutId>` block,
+leaders it to its station and marches it clear of a wall deliberately placed in
+its way, then the bay is torn down, Draw counts it `sketched` without touching
+it, the whole thing survives a DXF round trip with all eleven tags, and Edit
+Sketch puts the linework back out into a fresh bay and deletes the emptied
+block definition. Two of its assertions are mutation-tested and the file says
+so: removing the block-local `move` from Capture, and removing the locked-layer
+unwrap from the teardown, each turn it red. Absence is asserted through
+`queryAllEntities(false, true)` rather than `isNull()` -- measured in this
+build, `queryEntity()` on a deleted id hands the entity back with
+`isUndone() === true`, so an `isNull()` teardown check passes whether or not
+the delete landed. Loads Core by reading `Core/CsAll.js`'s own include list
+rather than a hand-written array, so a Core file the tools reach for can never
+be silently `undefined` here.
 
 Drives the Generate Profile TOOL's own entry point (not just the Core
 library it calls) through the real `include()` chain, against a real
