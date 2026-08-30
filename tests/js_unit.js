@@ -10315,6 +10315,22 @@ if (!IS_NODE) {
     ok(CsScanFit.scaleOutlier(0.1, []).outlier === false,
         "scaleOutlier: the first scan in a drawing has nothing to fail");
 
+    // Anchors: where each station was picked, in the scan's own pixels,
+    // so a placement can be CHECKED after the fact.
+    var text = CsScanFit.serializeAnchors([
+        { name: "D22", u: 100.5, v: 250.25 },
+        { name: "D23", u: 700, v: 80 }
+    ]);
+    var back = CsScanFit.parseAnchors(text);
+    eqs(back.length, 2, "parseAnchors: both anchors round trip");
+    eqs(back[0].name, "D22", "parseAnchors: the name survives");
+    near(back[0].u, 100.5, 1e-9, "parseAnchors: and the pixel column");
+    near(back[1].v, 80, 1e-9, "parseAnchors: and the pixel row");
+    eqs(CsScanFit.parseAnchors("").length, 0,
+        "parseAnchors: empty text is no anchors, not a throw");
+    eqs(CsScanFit.parseAnchors("D22@junk;@1,2;D23@3").length, 0,
+        "parseAnchors: malformed entries are dropped");
+
     var res = CsScanFit.residuals(two, fit.matrix);
     near(res.worst, 0, 1e-9, "CsScanFit.residuals: an exact fit misses by nothing");
     var off = [two[0], two[1],

@@ -312,6 +312,48 @@ CsScanFit.scaleOutlier = function(perPixel, others, factor) {
              median: median, ratio: ratio };
 };
 
+/** [{name, u, v}] -> "NAME@u,v;NAME@u,v". Two decimals: these are
+ *  PIXELS on a scan, and a hundredth of a pixel is already finer than
+ *  anyone can click. */
+CsScanFit.serializeAnchors = function(anchors) {
+    var out = [];
+    for (var i = 0; i < anchors.length; i++) {
+        out.push(anchors[i].name + "@" + anchors[i].u.toFixed(2) + "," +
+            anchors[i].v.toFixed(2));
+    }
+    return out.join(";");
+};
+
+/** The inverse. Malformed entries are DROPPED, never thrown: this text
+ *  comes off a drawing a user can edit. */
+CsScanFit.parseAnchors = function(text) {
+    var out = [];
+    if (text === undefined || text === null) {
+        return out;
+    }
+    var parts = String(text).split(";");
+    for (var i = 0; i < parts.length; i++) {
+        var part = parts[i].replace(/^\s+|\s+$/g, "");
+        if (part.length === 0) {
+            continue;
+        }
+        var at = part.lastIndexOf("@");
+        if (at <= 0) {
+            continue;
+        }
+        var coords = part.substring(at + 1).split(",");
+        if (coords.length !== 2) {
+            continue;
+        }
+        var u = parseFloat(coords[0]), v = parseFloat(coords[1]);
+        if (isNaN(u) || isNaN(v)) {
+            continue;
+        }
+        out.push({ name: part.substring(0, at), u: u, v: v });
+    }
+    return out;
+};
+
 /** How far each pair's mapped source misses its target.
  *  \return {average, worst, worstIndex} -- worstIndex counted from 1. */
 CsScanFit.residuals = function(pairs, m) {

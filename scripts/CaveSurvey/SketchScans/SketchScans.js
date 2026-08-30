@@ -732,6 +732,46 @@ SketchScans.buildDock = function(appWin) {
             // exactly, whichever station was called which. "Off by 0"
             // there is arithmetic, not evidence. What CAN be checked is
             // the shape of the answer.
+            // THE PLACEMENT, CHECKED AGAINST QCAD'S OWN MAPPING. Every
+            // anchor is run back through the placed image's
+            // mapFromImage and compared with the station it was picked
+            // for. This is the one measurement that separates "the
+            // picks were wrong" from "the placement is wrong": if the
+            // picks land on their stations, the tool did what it was
+            // told and the picks are the thing to look at.
+            try {
+                var back = doc.queryEntity(placed);
+                var worstBack = 0, worstName = "";
+                if (!isNull(back)) {
+                    var bd = back.getData();
+                    for (var b = 0; b < pairs.length; b++) {
+                        var got = bd.mapFromImage(new RVector(
+                            pairs[b].source.x, pairs[b].source.y));
+                        var ex = got.x - pairs[b].dest.x;
+                        var ey = got.y - pairs[b].dest.y;
+                        var miss = Math.sqrt(ex * ex + ey * ey);
+                        if (miss > worstBack) {
+                            worstBack = miss;
+                            worstName = pairs[b].name;
+                        }
+                    }
+                    if (worstBack > 0.01) {
+                        warning("Sketch Scans: the placed scan does not " +
+                            "put " + worstName + " where the drawing has " +
+                            "it -- out by " +
+                            (Math.round(worstBack * 100) / 100) +
+                            ". That is a placement fault, not a bad pick; " +
+                            "please report it.");
+                    } else {
+                        EAction.handleUserMessage(qsTr("Placement " +
+                            "verified: every picked station lands on its " +
+                            "own point in the drawing."));
+                    }
+                }
+            } catch (eVerify) {
+                // the check is a courtesy; a scan that placed is placed
+            }
+
             var d = CsScanFit.describe(fit.matrix);
             var turn = Math.round(d.turnDeg * 10) / 10;
             EAction.handleUserMessage("Cross-check: " +
@@ -1314,6 +1354,24 @@ SketchScans.insertFitted = function(doc, di, path, name, fit, heightPx,
             CsStationOrder.serializeAssigned(names));
     } catch (eTag) {
         // the scan is placed either way; only the resume list is lost
+    }
+    // AND WHERE ON THE PAGE each of them was picked, in the scan's own
+    // pixels. Written for two reasons. It makes a placement CHECKABLE
+    // after the fact -- run each anchor through the placed image's own
+    // mapFromImage and it must land on that station -- which is the
+    // difference between "it looks offset" and a number. And it is what
+    // a later redraw would need to re-fit the scan when the survey
+    // moves under it, instead of leaving it stranded.
+    try {
+        var anchors = [];
+        for (var q = 0; q < pairs.length; q++) {
+            anchors.push({ name: pairs[q].name,
+                           u: pairs[q].source.x, v: pairs[q].source.y });
+        }
+        CsTags.set(entity, "ScanAnchors",
+            CsScanFit.serializeAnchors(anchors));
+    } catch (eAnchor) {
+        // placement stands; only the record of where it was picked is lost
     }
     entity.setDrawOrder(doc.getStorage().getMinDrawOrder() - 1);
 
