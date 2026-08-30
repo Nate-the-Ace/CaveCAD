@@ -131,8 +131,8 @@ CsScanReanchor.backfill = function(doc, di) {
             // stationFrameFor redirects the lookup there rather than at
             // "SectionStation", a tag nothing writes. frameOf itself is
             // still the scan's own frame; only the STATION TABLE this
-            // reads from is different, the same distinction stationsNow
-            // and SketchScans.insert both had to make.
+            // reads from is different -- the same redirect
+            // SketchScans.stationsNow already makes for the picker.
             var places = CsScanReanchor.placesFor(doc, cache,
                 CsScanFrame.stationFrameFor(CsScanReanchor.frameOf(scans[i])));
             if (CsScanReanchor.backfillOne(doc, op, scans[i], places)) {
@@ -182,8 +182,8 @@ CsScanReanchor.run = function(doc, di) {
             // stationFrameFor redirects the lookup there rather than at
             // "SectionStation", a tag nothing writes. frameOf itself is
             // still the scan's own frame; only the STATION TABLE this
-            // reads from is different, the same distinction stationsNow
-            // and SketchScans.insert both had to make.
+            // reads from is different -- the same redirect
+            // SketchScans.stationsNow already makes for the picker.
             var places = CsScanReanchor.placesFor(doc, cache,
                 CsScanFrame.stationFrameFor(CsScanReanchor.frameOf(image)));
             var run = CsScanReanchor.runOf(image);
