@@ -10225,6 +10225,23 @@ if (!IS_NODE) {
     near(mres.worst, 0, 1e-9,
         "and the residuals CANNOT see it -- three pairs fit exactly");
 
+    // A MIRRORED FIT WITH THREE PICKS CANNOT NAME ITS CULPRIT: any of
+    // the three could be the wrong one, and dropping one leaves a
+    // similarity, which is never mirrored by construction. The honest
+    // answer is to say the set is inconsistent, not to accuse a name.
+    // From four picks up the RESIDUALS do the naming instead, because a
+    // fourth pick is the first one the fit can disagree with.
+    var badTri = [
+        { name: "D22", source: { x: 0, y: 0 },    dest: { x: 0, y: 0 } },
+        { name: "D23", source: { x: 100, y: 0 },  dest: { x: 10, y: 0 } },
+        { name: "D24", source: { x: 0, y: 100 },  dest: { x: 0, y: -10 } }
+    ];
+    ok(CsScanFit.isMirrored(CsScanFit.fit(badTri).matrix) === true,
+        "three inconsistent picks give a mirrored fit");
+    near(CsScanFit.residuals(badTri, CsScanFit.fit(badTri).matrix).worst,
+        0, 1e-9,
+        "and the residuals still read zero -- three picks always fit");
+
     var d = CsScanFit.describe(turned.matrix);
     near(d.turnDeg, 90, 1e-9, "describe: a quarter turn reads 90 degrees");
     near(d.stretch, 1, 1e-9, "describe: a similarity keeps its shape");

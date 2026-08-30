@@ -666,6 +666,32 @@ SketchScans.buildDock = function(appWin) {
                 "least it takes.");
             return;
         }
+        // A MIRRORED FIT IS NOT PLACED AT ALL. It lays the scan down
+        // backwards, and it is never what a caver meant: the picks wind
+        // one way on the scan and the other way in the drawing, so at
+        // least one is on the wrong mark or carries the wrong name.
+        // This used to warn and then place it anyway, which left the
+        // caver to undo a scan the tool already knew was wrong.
+        if (CsScanFit.isMirrored(fit.matrix)) {
+            var which = "";
+            if (w.picking.pairs.length >= 4) {
+                var mres = CsScanFit.residuals(w.picking.pairs, fit.matrix);
+                which = "\n\nThe worst-fitting pick is " +
+                    w.picking.pairs[mres.worstIndex - 1].name + ".";
+            } else {
+                which = "\n\nWith " + w.picking.pairs.length +
+                    " picks the fit passes through all of them exactly, " +
+                    "so it cannot say WHICH one is wrong. A fourth " +
+                    "station is the first one it can disagree with.";
+            }
+            warning("Sketch Scans: these picks would lay the scan down " +
+                "MIRRORED -- backwards, as if read through the paper." +
+                "\n\nThey wind one way on the scan and the other way in " +
+                "the drawing, so at least one is on the wrong mark or " +
+                "has the wrong name." + which +
+                "\n\nNothing has been placed. Cancel Align and re-pick.");
+            return;
+        }
         // Read the residuals BEFORE clearing the picks -- they are the
         // only report the caver gets on whether the fit is any good.
         var pairs = w.picking.pairs;
@@ -697,14 +723,7 @@ SketchScans.buildDock = function(appWin) {
                 " units per pixel, turned " + turn + " degrees" +
                 (fit.kind === "affine" ? (", stretch " +
                     (Math.round(d.stretch * 100) / 100)) : "") + ".");
-            if (d.mirrored) {
-                warning("Sketch Scans: THIS FIT IS MIRRORED -- the scan " +
-                    "has been laid down backwards, as if read through " +
-                    "the paper.\n\nThat is almost always two station " +
-                    "names swapped between picks. Undo, and re-pick " +
-                    "checking each name against where it sits on the " +
-                    "sheet.");
-            } else if (scale.outlier === true) {
+            if (scale.outlier === true) {
                 warning("Sketch Scans: this scan has landed " +
                     (scale.ratio > 1 ?
                         (Math.round(scale.ratio * 10) / 10) + " times LARGER" :
