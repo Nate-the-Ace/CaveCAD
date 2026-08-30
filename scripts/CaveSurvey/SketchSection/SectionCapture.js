@@ -49,6 +49,7 @@ include("scripts/simple.js");
 include(includeBasePath + "/../Core/CsAll.js");
 include(includeBasePath + "/../Callout/CalloutWrite.js");
 include(includeBasePath + "/SketchSection.js");
+include(includeBasePath + "/SectionEdit.js");
 
 function SectionCapture(guiAction) {
     EAction.call(this, guiAction);
@@ -58,6 +59,12 @@ function SectionCapture(guiAction) {
 }
 
 SectionCapture.prototype = new EAction();
+
+/** Set by findBay when it refuses because more than one bay is open --
+ *  read here rather than passed as a second return value, since every
+ *  other caller (the headless test included) only wants the bay-or-null
+ *  shape. Cleared at the top of every findBay call. */
+SectionCapture.findBayError = null;
 
 SectionCapture.prototype.beginEvent = function() {
     EAction.prototype.beginEvent.call(this);
@@ -69,8 +76,10 @@ SectionCapture.prototype.beginEvent = function() {
     }
     this.bay = SectionCapture.findBay(doc);
     if (this.bay === null) {
-        SketchSection.say(qsTr("There is no open section bay in this " +
-            "drawing.\n\nSketch Section opens one."));
+        SketchSection.say(SectionCapture.findBayError !== null ?
+            SectionCapture.findBayError :
+            qsTr("There is no open section bay in this drawing.\n\n" +
+                "Sketch Section opens one."));
         this.terminate();
         return;
     }
@@ -124,11 +133,21 @@ SectionCapture.prototype.pickCoordinate = function(event, preview) {
  * The id set is DIFFED rather than ordered -- queryAllEntities is not
  * insertion-ordered, so "the last entity" means nothing here.
  *
+ * TWO OPEN BAYS ARE REFUSED, NOT MERGED. A first pass finds every FRAME
+ * before touching ghost or scan at all: with two bays open,
+ * queryAllEntities' lack of order means a single combined pass could
+ * bind bay A's frame to bay B's ghost and scan (wrong block origin,
+ * wrong furniture torn down) with nothing to say so. More than one
+ * frame is therefore a refusal, not a coin flip -- SectionCapture.
+ * findBayError carries why, since this function's return type is
+ * already "the bay, or null" and cannot also carry an explanation.
+ *
  * \return {id, rect, station, frame, ghost, scan, traced: [ids]} or null
  */
 SectionCapture.findBay = function(doc) {
+    SectionCapture.findBayError = null;
     var ids = doc.queryAllEntities(false, true);
-    var frame = null, ghost = null, scan = null, bayId = null;
+    var frame = null, bayId = null, frameCount = 0;
     var i, e;
     for (i = 0; i < ids.length; i++) {
         e = doc.queryEntity(ids[i]);
@@ -139,18 +158,38 @@ SectionCapture.findBay = function(doc) {
         if (tag === "") {
             continue;
         }
-        var role = CsTags.get(e, "SectionBayRole");
-        if (role === SketchSection.ROLE_FRAME) {
+        if (CsTags.get(e, "SectionBayRole") === SketchSection.ROLE_FRAME) {
+            frameCount++;
             frame = e;
             bayId = tag;
-        } else if (role === SketchSection.ROLE_GHOST) {
+        }
+    }
+    if (frameCount === 0) {
+        return null;
+    }
+    if (frameCount > 1) {
+        SectionCapture.findBayError = qsTr("There is more than one open " +
+            "section bay in this drawing.\n\nClose all but the one you " +
+            "mean to capture -- Capture cannot tell them apart.");
+        return null;
+    }
+
+    // Ghost and scan are matched to THIS frame's bayId, not taken from
+    // just any tagged entity -- with two bays that used to be able to
+    // pair bay A's frame with bay B's furniture. SectionEdit.bayOriginOf
+    // does the same match for the same reason; keep them agreeing.
+    var ghost = null, scan = null;
+    for (i = 0; i < ids.length; i++) {
+        e = doc.queryEntity(ids[i]);
+        if (isNull(e) || CsTags.get(e, SketchSection.TAG_BAY) !== bayId) {
+            continue;
+        }
+        var role = CsTags.get(e, "SectionBayRole");
+        if (role === SketchSection.ROLE_GHOST) {
             ghost = e;
         } else if (role === SketchSection.ROLE_SCAN) {
             scan = e;
         }
-    }
-    if (frame === null) {
-        return null;
     }
     // The frame may have been dragged since it was drawn, and a
     // bounding box is CACHED across a modify -- read it only after an
@@ -330,6 +369,16 @@ SectionCapture.prototype.finish = function(position) {
  * \return the callout id, or null
  */
 SectionCapture.capture = function(doc, di, bay, position) {
+    // NOTHING TRACED, NOTHING TO CAPTURE. beginEvent already refuses
+    // this before the GUI ever gets here, but capture() is the reusable
+    // entry point -- the headless test drives it directly, and so could
+    // any future caller -- and this guard has to hold even when nothing
+    // upstream checked first. Returning here, before the block name is
+    // even minted, means an empty sweep never defines a block at all.
+    if (isNull(bay) || isNull(bay.traced) || bay.traced.length === 0) {
+        return null;
+    }
+
     var origin = SectionCapture.originOf(bay);
     var scale = CsSectionDraw.scaleOf();
     var id = CsCallout.newId();
@@ -353,12 +402,27 @@ SectionCapture.capture = function(doc, di, bay, position) {
 
     var op = new RAddObjectsOperation();
     op.setText("Capture sketched section");
+
+    // Every layer this single operation touches besides the three bay
+    // layers below -- the annotation layer the reference and leader
+    // land on, plus whatever SECTION-* layer(s) the caver actually
+    // traced on. None of these are suite-LOCKED, but any of them could
+    // be OFF or FROZEN by the caver's own choice, and an OFF/FROZEN
+    // layer refuses an add/modify SILENTLY while the rest of this mixed
+    // operation still commits -- which is exactly how a hidden
+    // annotation layer used to swallow the reference while the tracing
+    // still vanished into the block and the bay still tore down: no
+    // error, no reference, the caver's work gone. Collected here, while
+    // the traced entities' layers are still their ORIGINAL ones (the
+    // move below relocates the entities, never their layerId).
+    var layerNames = [];
     var i, e;
     for (i = 0; i < bay.traced.length; i++) {
         e = doc.queryEntity(bay.traced[i]);
         if (isNull(e)) {
             continue;
         }
+        layerNames.push(doc.getLayerName(e.getLayerId()));
         // MOVED into the block, not cloned -- see the file header. The
         // entity that was loose tracing a moment ago simply becomes the
         // block's content; nothing is duplicated and nothing needs a
@@ -371,6 +435,10 @@ SectionCapture.capture = function(doc, di, bay, position) {
     var layerName = CsCallout.STYLES["annotation"] ||
         CsCallout.STYLES[CsCallout.STYLE_DEFAULT];
     CsLayers.ensure(doc, di, layerName);
+    layerNames.push(layerName);
+    layerNames.push(CsLayers.CTRL_SECTION_GHOST);
+    layerNames.push(CsLayers.CTRL_SECTION_SCAN);
+
     var at = new RVector(position.x, position.y);
     var ref = new RBlockReferenceEntity(doc,
         new RBlockReferenceData(blockId, at, new RVector(1, 1), 0.0));
@@ -395,6 +463,11 @@ SectionCapture.capture = function(doc, di, bay, position) {
     }
     op.addObject(ref, false);
 
+    // The leader, queued into this SAME operation -- see addLeader's own
+    // comment for why this stopped being a second applyOperation.
+    SectionCapture.addLeader(doc, op, id, bay.station, position,
+        "annotation", layerName);
+
     // The bay's furniture, gone in the same operation -- one undo. The
     // frame's own layer, CTRL-SECTION-BOX, ships LOCKED (a caver's
     // protection against dragging the boundary the sweep was measured
@@ -404,7 +477,7 @@ SectionCapture.capture = function(doc, di, bay, position) {
     // exactly as SketchSection.addFrame nests them for the ADD.
     // CTRL-SECTION-GHOST and CTRL-SECTION-SCAN are not suite-locked,
     // but a caver may have switched either off since the bay opened, so
-    // both still need withLayerOn around this same single commit or a
+    // both still need guarding around this same single commit or a
     // hidden ghost or scan silently survives teardown and is swept into
     // the NEXT section. The ghost lives on its own layer rather than
     // CTRL-SECTION-OUTLINE (see SketchSection.addGhost) precisely so it
@@ -415,28 +488,46 @@ SectionCapture.capture = function(doc, di, bay, position) {
     if (bay.ghost !== null) { op.deleteObject(bay.ghost); }
     if (bay.scan !== null) { op.deleteObject(bay.scan); }
 
-    CsLayers.withLayerOn(doc, di, CsLayers.CTRL_SECTION_BOX, function() {
-        CsLayers.withLayerUnlocked(doc, di, CsLayers.CTRL_SECTION_BOX,
-            function() {
-                CsLayers.withLayerOn(doc, di, CsLayers.CTRL_SECTION_GHOST,
-                    function() {
-                        CsLayers.withLayerOn(doc, di,
-                            CsLayers.CTRL_SECTION_SCAN, function() {
-                                di.applyOperation(op);
-                            });
-                    });
-            });
+    // SectionEdit.withLayersOn nests CsLayers.withLayerOn for however
+    // many distinct OFF/FROZEN-only layers a single capture happens to
+    // touch (annotation, ghost, scan, every traced layer) -- reused
+    // rather than re-copied, since SectionEdit's own reopen already had
+    // to solve exactly this for an unpredictable set of layers. Only
+    // CTRL-SECTION-BOX needs more than that (it is LOCKED, not just
+    // possibly off), so it keeps its own withLayerOn+withLayerUnlocked
+    // pairing nested inside.
+    SectionEdit.withLayersOn(doc, di, layerNames, function() {
+        CsLayers.withLayerOn(doc, di, CsLayers.CTRL_SECTION_BOX, function() {
+            CsLayers.withLayerUnlocked(doc, di, CsLayers.CTRL_SECTION_BOX,
+                function() {
+                    di.applyOperation(op);
+                });
+        });
     });
 
-    SectionCapture.addLeader(doc, di, id, bay.station, position, layerName);
     SectionCapture.restoreSnap(di, snapClass);
     return id;
 };
 
-/** One straight leader from the station to the section. Straight, not
- *  curved: a DXF LEADER record has no bulge, and an arc leader loses
- *  its arrow tip on a round trip. */
-SectionCapture.addLeader = function(doc, di, id, station, position,
+/**
+ * One straight leader from the station to the section, queued into
+ * `op` -- the SAME operation the rest of the capture commits, rather
+ * than a second di.applyOperation of its own. Two reasons: a Capture
+ * used to be two undo steps for what the rest of this suite treats as
+ * one phase, and a hidden annotation layer could drop the leader
+ * silently while the section itself still landed (the op it used to run
+ * through had no layer guard around it at all). Built through
+ * CalloutWrite.oneLeader, the entity-construction step every section
+ * leader in this suite now shares, so a sketched section's leader
+ * carries the Style tag exactly as a computed section's does.
+ *
+ * Straight, not curved: a DXF LEADER record has no bulge, and an arc
+ * leader loses its arrow tip on a round trip.
+ *
+ * \return the leader entity queued, or null if the station cannot be
+ *         found
+ */
+SectionCapture.addLeader = function(doc, op, id, station, position, style,
         layerName) {
     var stations = CsTags.collectStations(doc);
     var tip = null;
@@ -447,22 +538,15 @@ SectionCapture.addLeader = function(doc, di, id, station, position,
         }
     }
     if (tip === null) {
-        return;
+        return null;
     }
-    var pl = new RPolyline();
     // The tip FIRST: RLeaderData puts its arrowhead on the first vertex
-    // (CalloutWrite.addSectionLeaders proves the same shape against this
-    // bridge), and the arrow belongs at the station, not at the section.
-    pl.appendVertex(new RVector(tip.x, tip.y));
-    pl.appendVertex(new RVector(position.x, position.y));
-    var leader = new RLeaderEntity(doc, new RLeaderData(pl, true));
-    leader.setLayerId(doc.getLayerId(layerName));
-    CsTags.set(leader, CsCallout.KEY.ID, id);
-    CsTags.set(leader, CsCallout.KEY.ROLE, CsCallout.ROLE_LEADER);
-    var op = new RAddObjectsOperation();
-    op.setText("Leader a sketched section");
-    op.addObject(leader, false);
-    di.applyOperation(op);
+    // (CalloutWrite.oneLeader's own comment proves the same shape
+    // against this bridge), and the arrow belongs at the station, not
+    // at the section.
+    return CalloutWrite.oneLeader(doc, op, id,
+        { x: tip.x, y: tip.y }, { x: position.x, y: position.y },
+        style, layerName);
 };
 
 /** Every snap class SketchSection might have tagged the frame with, by

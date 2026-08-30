@@ -666,6 +666,172 @@ check("10: the emptied block definition is gone, not left as dead weight",
     goneBlockId === RBlock.INVALID_ID || goneBlockId < 0 ||
     isNull(doc.queryBlock(goneBlockId)));
 
+// ---------------------------------------------------------------------
+// FIXTURE: claim 10 (Edit Sketch) left a bay open and never re-captured
+// it. F2 below asserts that Capture REFUSES when more than one bay is
+// open -- which means a leftover open bay here would corrupt every
+// section below it, not just F2's own. Closed the same way a caver
+// would: SectionCapture.capture on the bay findBay hands back.
+// ---------------------------------------------------------------------
+(function() {
+    var leftover = SectionCapture.findBay(doc);
+    check("fixture: claim 10's reopened bay is found so it can be closed " +
+        "before F1/F2/F3", leftover !== null);
+    if (leftover !== null) {
+        var leftoverAt = SectionCapture.proposePosition(doc, leftover);
+        if (leftoverAt === null) {
+            leftoverAt = { x: leftover.rect.x2 + 20, y: leftover.rect.y1 };
+        }
+        var closedId = SectionCapture.capture(doc, di, leftover, leftoverAt);
+        check("fixture: and it closes", closedId !== null);
+    }
+    check("fixture: no bay is open going into F1/F2/F3",
+        SectionCapture.findBay(doc) === null &&
+        SectionCapture.findBayError === null);
+})();
+
+// ---------------------------------------------------------------------
+// F1 (review finding, data loss): capture() must not lose the block
+// reference (or strand the tracing in an unreferenced block) when the
+// annotation layer -- CsCallout.STYLES["annotation"], where the
+// reference and its leader land -- happens to be OFF.
+//
+// Before the fix, SectionCapture.capture's applyOperation was wrapped
+// in CsLayers.withLayerOn only for CTRL-SECTION-BOX/GHOST/SCAN. An OFF
+// layer refuses an add SILENTLY in this build while the REST of a mixed
+// operation still commits: the tracing still moved into the block, the
+// bay's furniture still tore down, capture() still returned a fresh
+// id -- and the reference that was supposed to point at the block
+// simply never existed. Nothing said so.
+//
+// Asserted via CalloutWrite.members(), never isNull() -- see this
+// file's header for why an isNull() check cannot see a silently
+// refused add (or a silently refused delete) in this build.
+// ---------------------------------------------------------------------
+(function() {
+    var annotationLayerName = CsCallout.STYLES["annotation"];
+    var annotationLayer = doc.queryLayer(annotationLayerName);
+    check("F1: fixture: the annotation layer exists (an earlier capture " +
+        "already created it)", !isNull(annotationLayer));
+    if (!isNull(annotationLayer)) {
+        annotationLayer.setOff(true);
+        var offOp = new RModifyObjectsOperation();
+        offOp.addObject(annotationLayer, false);
+        di.applyOperation(offOp);
+    }
+    check("F1: fixture: the annotation layer is off going into the capture",
+        !isNull(doc.queryLayer(annotationLayerName)) &&
+        doc.queryLayer(annotationLayerName).isOff());
+
+    var f1BayId = SketchSection.run(scanPath, "A1");
+    check("F1: fixture: a bay opens for this claim", f1BayId !== null);
+
+    var f1Bay0 = SectionCapture.findBay(doc);
+    check("F1: fixture: it is found", f1Bay0 !== null);
+
+    if (f1Bay0 !== null) {
+        var f1Centre = SectionCapture.originOf(f1Bay0);
+        var f1Traced = new RLineEntity(doc, new RLineData(
+            new RVector(f1Centre.x - 2, f1Centre.y - 2),
+            new RVector(f1Centre.x + 2, f1Centre.y + 2)));
+        f1Traced.setLayerId(doc.getLayerId(CsLayers.SECTION_WALLS_SURVEYED));
+        var f1TraceOp = new RAddObjectsOperation();
+        f1TraceOp.addObject(f1Traced, false);
+        di.applyOperation(f1TraceOp);
+        var f1TracedId = f1Traced.getId();
+
+        var f1Bay1 = SectionCapture.findBay(doc);
+        check("F1: fixture: the tracing is swept",
+            f1Bay1 !== null && f1Bay1.traced.length === 1);
+
+        var f1At = (f1Bay1 === null) ? null :
+            SectionCapture.proposePosition(doc, f1Bay1);
+        check("F1: fixture: a position is proposed", f1At !== null);
+
+        var f1Id = (f1Bay1 === null || f1At === null) ? null :
+            SectionCapture.capture(doc, di, f1Bay1, f1At);
+
+        var f1Members = CalloutWrite.members(doc, f1Id);
+        check("F1: the reference lands even though its own layer was " +
+            "off -- the annotation-layer add is no longer unguarded",
+            f1Members.block !== null);
+        check("F1: and its leader lands with it",
+            f1Members.leaders.length === 1);
+
+        // NOT STRANDED: the tracing belongs to the SAME block the
+        // (landed) reference points at, rather than an orphaned
+        // definition nothing refers to.
+        if (f1Members.block !== null) {
+            var f1BlockId = f1Members.block.getData()
+                .getReferencedBlockId();
+            var f1InBlock = doc.queryBlockEntities(f1BlockId);
+            check("F1: the tracing is not stranded -- it is IN the " +
+                "reference's own block, not an unreferenced one",
+                f1InBlock.length === 1 &&
+                String(f1InBlock[0]) === String(f1TracedId));
+        } else {
+            check("F1: the tracing is not stranded", false);
+        }
+    } else {
+        check("F1: the reference lands even though its own layer was off",
+            false);
+        check("F1: and its leader lands with it", false);
+        check("F1: the tracing is not stranded", false);
+    }
+})();
+
+// ---------------------------------------------------------------------
+// F2 (review finding, correctness): findBay must REFUSE when more than
+// one section bay is open, rather than binding one bay's frame to
+// another bay's ghost and scan. queryAllEntities is not
+// insertion-ordered, so a single combined pass had no way to keep two
+// open bays' furniture apart.
+// ---------------------------------------------------------------------
+(function() {
+    var f2First = SketchSection.run(scanPath, "A0");
+    check("F2: fixture: the first bay opens", f2First !== null);
+    var f2Second = SketchSection.run(scanPath, "A3");
+    check("F2: fixture: the second bay opens", f2Second !== null);
+    check("F2: fixture: they are two distinct bays",
+        f2First !== null && f2Second !== null && f2First !== f2Second);
+
+    var f2Result = SectionCapture.findBay(doc);
+    check("F2: Capture refuses rather than mixing two open bays together",
+        f2Result === null);
+    check("F2: and says why", SectionCapture.findBayError !== null);
+})();
+
+// ---------------------------------------------------------------------
+// F3 (review finding, correctness): the static capture() entry point --
+// which the headless test drives directly, and which is the reusable
+// API SketchSection's own beginEvent is just one caller of -- must
+// refuse an empty sweep ON ITS OWN, not rely on beginEvent's guard
+// having run first. CsCallout.newId() is spied on rather than counting
+// blocks afterward: the guard's whole point is that it returns before
+// a block is ever minted, so "newId was never called" is the more
+// direct proof than "no block happens to exist by this name".
+// ---------------------------------------------------------------------
+(function() {
+    var newIdCalls = 0;
+    var origNewId = CsCallout.newId;
+    CsCallout.newId = function() {
+        newIdCalls++;
+        return origNewId();
+    };
+    var f3Result;
+    try {
+        f3Result = SectionCapture.capture(doc, di, { traced: [] },
+            { x: 0, y: 0 });
+    } finally {
+        CsCallout.newId = origNewId;
+    }
+    check("F3: SectionCapture.capture() itself refuses an empty traced " +
+        "list and returns null", f3Result === null);
+    check("F3: and it defines no block for it -- the guard returns " +
+        "before a block id is ever minted",
+        newIdCalls === 0);
+})();
+
 if (failures.length === 0) {
     print("### SECTION SKETCH OK " + checks);
 } else {
