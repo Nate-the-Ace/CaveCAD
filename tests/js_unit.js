@@ -10487,6 +10487,15 @@ if (!IS_NODE) {
     ok(text.length < 200,
         "serializeFit: stays far under the dxflib per-line limit");
 
+    // A degenerate box (NaN in, e.g. an entity whose extent has not
+    // been computed yet) must not hand the caller a NaN transform --
+    // that NaN would ride silently into every insertion downstream.
+    var badFit = CsSectionBay.fitTransform(
+        { x1: NaN, y1: 0, x2: 200, y2: 100 },
+        { x1: -5, y1: -5, x2: 5, y2: 5 });
+    ok(!isNaN(badFit.sx) && !isNaN(badFit.tx) && !isNaN(badFit.ty),
+        "fitTransform: a NaN box yields a defined fit, never a NaN one");
+
     // --- where the block lands ----------------------------------------
     // A wall dead ahead: the march must step PAST it, not stop short.
     var blockBox = { x1: -2, y1: -2, x2: 2, y2: 2 };
@@ -10506,6 +10515,14 @@ if (!IS_NODE) {
     var perp = CsSectionBay.perpOf({ x: 1, y: 0 });
     near(Math.abs(perp.y), 1, 1e-9, "perpOf: perpendicular to the leg");
     near(perp.x, 0, 1e-9, "perpOf: and unit length");
+
+    // A NaN direction (e.g. a zero-length leg divided by its own
+    // length upstream) must land on the SAME fallback as a zero-length
+    // one -- every comparison against a NaN is false, so a guard
+    // written as `len < EPS` lets NaN slip past it and divide anyway.
+    var perpNaN = CsSectionBay.perpOf({ x: NaN, y: NaN });
+    ok(!isNaN(perpNaN.x) && !isNaN(perpNaN.y),
+        "perpOf: a NaN direction still answers a real perpendicular");
 
     eqs(CsSectionBay.clearerSide({ x: 0, y: 0 }, { x: 0, y: 1 },
         [{ x1: -5, y1: 1, x2: 5, y2: 5 }], 20), -1,

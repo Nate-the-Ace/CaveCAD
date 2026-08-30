@@ -107,6 +107,13 @@ CsSectionBay.sweepOf = function(items, rect, excludeIds) {
  * a squashed passage still looks like a passage. Scaled to the ghost's
  * WIDTH and centred; the caver adjusts from there.
  *
+ * A NaN anywhere in either box (an entity whose extent has not been
+ * computed yet is the recurring source) must not ride through into
+ * tx/ty -- a NaN transform still LOOKS like a transform to the caller,
+ * which would insert the scan at an unreachable point with no error.
+ * Caught at the boundary, once, on the finished numbers, rather than
+ * validating every input field individually.
+ *
  * \return {sx, sy, rot, tx, ty}. Pure.
  */
 CsSectionBay.fitTransform = function(scanBox, ghostBox) {
@@ -116,8 +123,12 @@ CsSectionBay.fitTransform = function(scanBox, ghostBox) {
     var cx = (ghostBox.x1 + ghostBox.x2) / 2;
     var cy = (ghostBox.y1 + ghostBox.y2) / 2;
     var sh = (scanBox.y2 - scanBox.y1) * k;
-    return { sx: k, sy: k, rot: 0,
-             tx: cx - (sw * k) / 2, ty: cy - sh / 2 };
+    var fit = { sx: k, sy: k, rot: 0,
+                tx: cx - (sw * k) / 2, ty: cy - sh / 2 };
+    if (isNaN(fit.sx) || isNaN(fit.sy) || isNaN(fit.tx) || isNaN(fit.ty)) {
+        return { sx: 1, sy: 1, rot: 0, tx: 0, ty: 0 };
+    }
+    return fit;
 };
 
 /** The fit as a tag value. Fixed precision and five fields, so the
@@ -203,10 +214,18 @@ CsSectionBay.marchOut = function(origin, dir, blockBox, obstacles, margin,
     return null;
 };
 
-/** The unit perpendicular of a direction. Pure. */
+/** The unit perpendicular of a direction. Pure.
+ *
+ * `!(len >= 1e-12)`, not `len < 1e-12` -- every comparison against a
+ * NaN is false, including `NaN < 1e-12`, so a NaN length (a zero-length
+ * leg divided by its own length somewhere upstream) would slip past a
+ * `<` guard, divide anyway, and hand marchOut a NaN direction that
+ * "succeeds" at every candidate point. Negating `>=` instead of testing
+ * `< || isNaN(...)` catches NaN and the too-short case in one
+ * comparison, since NaN fails every ordering. */
 CsSectionBay.perpOf = function(d) {
     var len = Math.sqrt(d.x * d.x + d.y * d.y);
-    if (len < 1e-12) {
+    if (!(len >= 1e-12)) {
         return { x: 0, y: 1 };
     }
     return { x: -d.y / len, y: d.x / len };
