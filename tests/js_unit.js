@@ -10175,6 +10175,32 @@ if (!IS_NODE) {
     near(tv.u.y, 1, 1e-9, "imageVectors: a turned scan's u runs north");
     near(tv.v.x, -1, 1e-9, "imageVectors: and its v runs west");
 
+    // A MIRRORED FIT: the scan laid down backwards. Two stations named
+    // the wrong way round produce exactly this -- an EXACT fit through
+    // every point, and a scan reading through the paper.
+    var mirrored = CsScanFit.fit([
+        { source: { x: 0, y: 0 },   dest: { x: 0, y: 0 } },
+        { source: { x: 10, y: 0 },  dest: { x: 10, y: 0 } },
+        { source: { x: 0, y: 10 },  dest: { x: 0, y: -10 } }
+    ]);
+    ok(CsScanFit.isMirrored(mirrored.matrix) === true,
+        "isMirrored: a flipped fit is caught");
+    ok(CsScanFit.isMirrored(fit.matrix) === false,
+        "isMirrored: an ordinary fit is not");
+    var mres = CsScanFit.residuals([
+        { source: { x: 0, y: 0 },   dest: { x: 0, y: 0 } },
+        { source: { x: 10, y: 0 },  dest: { x: 10, y: 0 } },
+        { source: { x: 0, y: 10 },  dest: { x: 0, y: -10 } }
+    ], mirrored.matrix);
+    near(mres.worst, 0, 1e-9,
+        "and the residuals CANNOT see it -- three pairs fit exactly");
+
+    var d = CsScanFit.describe(turned.matrix);
+    near(d.turnDeg, 90, 1e-9, "describe: a quarter turn reads 90 degrees");
+    near(d.stretch, 1, 1e-9, "describe: a similarity keeps its shape");
+    var ds = CsScanFit.describe(stretched.matrix);
+    near(ds.stretch, 3, 1e-9, "describe: three-tenths against one-tenth is 3");
+
     var res = CsScanFit.residuals(two, fit.matrix);
     near(res.worst, 0, 1e-9, "CsScanFit.residuals: an exact fit misses by nothing");
     var off = [two[0], two[1],

@@ -657,30 +657,34 @@ SketchScans.buildDock = function(appWin) {
         refreshPickState();
         pickStatus("");
         if (placed !== null) {
-            // WHAT THE FIT ACTUALLY DID, in numbers. A scan that lands
-            // wrong is either a bad pick or a bad fit, and only the
-            // scale and turn can tell those apart: a plausible scale
-            // with a wild rotation means a mis-identified station,
-            // while a scale nothing like the sheet's means the picks
-            // were not where the caver thought they were.
-            var vec = CsScanFit.imageVectors(fit.matrix);
-            var perPixel = Math.sqrt(vec.u.x * vec.u.x + vec.u.y * vec.u.y);
-            var turnDeg = Math.round(
-                Math.atan2(vec.u.y, vec.u.x) * 180 / Math.PI * 10) / 10;
-            var report = [];
-            for (var q = 0; q < pairs.length; q++) {
-                var got = CsScanFit.apply(fit.matrix, pairs[q].source);
-                var dxq = got.x - pairs[q].dest.x;
-                var dyq = got.y - pairs[q].dest.y;
-                report.push(pairs[q].name + " off by " +
-                    (Math.round(Math.sqrt(dxq * dxq + dyq * dyq) * 100) / 100));
-            }
+            // WHAT THE FIT ACTUALLY DID, in numbers -- and a warning
+            // when the numbers say it cannot be right.
+            //
+            // THE RESIDUALS PROVE NOTHING at two or three picks: two
+            // pairs fit a similarity exactly and three fit an affine
+            // exactly, whichever station was called which. "Off by 0"
+            // there is arithmetic, not evidence. What CAN be checked is
+            // the shape of the answer.
+            var d = CsScanFit.describe(fit.matrix);
+            var turn = Math.round(d.turnDeg * 10) / 10;
             EAction.handleUserMessage("Cross-check: " +
-                (Math.round(perPixel * 10000) / 10000) +
-                " units per pixel, turned " + turnDeg + " degrees. " +
-                report.join("; ") + ".");
-            var how = (fit.kind === "affine") ?
-                qsTr("stretched to fit") : qsTr("moved and resized");
+                (Math.round(d.unitsPerPixel * 10000) / 10000) +
+                " units per pixel, turned " + turn + " degrees" +
+                (fit.kind === "affine" ? (", stretch " +
+                    (Math.round(d.stretch * 100) / 100)) : "") + ".");
+            if (d.mirrored) {
+                warning("Sketch Scans: THIS FIT IS MIRRORED -- the scan " +
+                    "has been laid down backwards, as if read through " +
+                    "the paper.\n\nThat is almost always two station " +
+                    "names swapped between picks. Undo, and re-pick " +
+                    "checking each name against where it sits on the " +
+                    "sheet.");
+            } else if (pairs.length <= 3) {
+                EAction.handleUserMessage(qsTr("Note: %1 picks always " +
+                    "fit exactly, so a zero miss proves nothing. Add a " +
+                    "fourth station to have the fit check itself.")
+                    .arg(pairs.length));
+            }
             EAction.handleUserMessage(rel + qsTr(" placed on ") +
                 CsLayers.CTRL_SCAN + qsTr(" from %1 stations, %2. ")
                     .arg(pairs.length).arg(how) +

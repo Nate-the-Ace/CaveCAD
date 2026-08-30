@@ -161,6 +161,46 @@ CsScanFit.imageVectors = function(m) {
     };
 };
 
+/**
+ * Is the fit MIRRORED -- does it turn the scan over?
+ *
+ * A negative determinant means the transform flips handedness: the
+ * placed scan reads backwards, as if seen through the paper. That is
+ * essentially never what a caver wants from a sketch, and it is what a
+ * pick set with two station names swapped produces -- an EXACT fit
+ * through every point, and a scan laid down mirrored.
+ *
+ * Worth its own test because the residuals cannot see it: two pairs fit
+ * a similarity exactly and three fit an affine exactly, no matter which
+ * station was called which, so "off by 0" says nothing at all about
+ * whether the answer is right.
+ */
+CsScanFit.isMirrored = function(m) {
+    return (m.a * m.e - m.b * m.d) < 0;
+};
+
+/**
+ * What the fit does to the scan, for a caver to sanity-check: the size
+ * of one pixel, the turn in degrees, and whether it is mirrored.
+ *
+ * \return {unitsPerPixel, turnDeg, mirrored, stretch}
+ *         `stretch` is the ratio of the two axis scales -- 1 means the
+ *         scan kept its shape, and far from 1 means the fit stretched
+ *         it hard, which a real scanner does not do.
+ */
+CsScanFit.describe = function(m) {
+    var ux = m.a, uy = m.d;         // where one pixel across lands
+    var vx = m.b, vy = m.e;         // where one pixel up lands
+    var uLen = Math.sqrt(ux * ux + uy * uy);
+    var vLen = Math.sqrt(vx * vx + vy * vy);
+    return {
+        unitsPerPixel: uLen,
+        turnDeg: Math.atan2(uy, ux) * 180 / Math.PI,
+        mirrored: CsScanFit.isMirrored(m),
+        stretch: uLen < CsScanFit.TOLERANCE ? 0 : (vLen / uLen)
+    };
+};
+
 /** How far each pair's mapped source misses its target.
  *  \return {average, worst, worstIndex} -- worstIndex counted from 1. */
 CsScanFit.residuals = function(pairs, m) {
