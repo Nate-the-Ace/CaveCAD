@@ -10380,6 +10380,29 @@ if (!IS_NODE) {
     eqs(CsScanFrame.labelFor("D22", "", counts), "D22",
         "labelFor: no run, no qualifier");
 
+    // THE ELEVATION TAGS BOTH THE POINT AND ITS LABEL, so a naive read
+    // lists every station twice -- and the label sits above the point,
+    // so whichever is met first decides the position. A point always
+    // wins.
+    var doubled = [
+        { name: "B1", run: "B", pos: { x: 10, y: 25 }, isPoint: false },
+        { name: "B1", run: "B", pos: { x: 10, y: 20 }, isPoint: true },
+        { name: "B2", run: "B", pos: { x: 30, y: 20 }, isPoint: true },
+        { name: "B2", run: "B", pos: { x: 30, y: 25 }, isPoint: false }
+    ];
+    var once = CsScanFrame.dedupePlaces(doubled);
+    eqs(once.length, 2, "dedupePlaces: each station appears once");
+    near(once[0].pos.y, 20, 1e-9,
+        "dedupePlaces: the POINT wins, whichever came first");
+    near(once[1].pos.y, 20, 1e-9,
+        "dedupePlaces: and again when the point came first");
+    // a station genuinely in two bands is still two places
+    eqs(CsScanFrame.dedupePlaces([
+        { name: "D15", run: "D", pos: { x: 1, y: 1 }, isPoint: true },
+        { name: "D15", run: "E", pos: { x: 9, y: 9 }, isPoint: true }
+    ]).length, 2,
+        "dedupePlaces: two BANDS are two places, not a duplicate");
+
     // The band is a HINT: a renamed run must not strand a scan.
     var places = [
         { name: "D15", run: "D", pos: { x: 1, y: 2 } },

@@ -89,6 +89,43 @@ CsScanFrame.labelFor = function(name, run, counts) {
 };
 
 /**
+ * One place per station, from candidates that may contain the same
+ * station twice.
+ *
+ * THE ELEVATION TAGS BOTH THE POINT AND ITS LABEL. CsProfileDraw writes
+ * ProfileStation (and ProfileRun) onto the station point AND onto the
+ * text label beside it -- deliberately, so every entity of a band
+ * carries its run. Read naively that makes every station appear twice
+ * in a picker, and worse: the label sits one and a half text heights
+ * ABOVE the point, so whichever of the two is met first decides the
+ * position, and a label winning that race shifts the whole fit.
+ *
+ * So a point beats a label, always. Ties are broken toward the first
+ * seen, which keeps the answer stable between runs.
+ *
+ * \param candidates [{name, run, pos, isPoint}]
+ * \return one entry per name+run, points preferred. Pure.
+ */
+CsScanFrame.dedupePlaces = function(candidates) {
+    var byKey = {}, order = [];
+    for (var i = 0; i < candidates.length; i++) {
+        var c = candidates[i];
+        var key = c.name + "\u0000" + (c.run || "");
+        if (!byKey.hasOwnProperty(key)) {
+            byKey[key] = c;
+            order.push(key);
+        } else if (c.isPoint === true && byKey[key].isPoint !== true) {
+            byKey[key] = c;          // the point outranks the label
+        }
+    }
+    var out = [];
+    for (var k = 0; k < order.length; k++) {
+        out.push(byKey[order[k]]);
+    }
+    return out;
+};
+
+/**
  * Every place a scan in this frame could be aligned to.
  *
  * \return [{name, run, pos, label}] -- a LIST, not a map: in the
@@ -103,9 +140,7 @@ CsScanFrame.placesIn = function(doc, kind) {
     var frame = CsScanFrame.normaliseKind(kind);
     var tag = CsScanFrame.stationTagFor(frame);
     var runTag = CsScanFrame.runTagFor(frame);
-    var counts = {};
-    var found = [];
-
+    var candidates = [];
     var ids = doc.queryAllEntities(false, true);
     for (var i = 0; i < ids.length; i++) {
         var e = doc.queryEntity(ids[i]);
@@ -116,10 +151,24 @@ CsScanFrame.placesIn = function(doc, kind) {
         if (name === "") {
             continue;
         }
+        var isPoint = false;
+        try {
+            isPoint = (e.getType() === RS.EntityPoint);
+        } catch (eType) {
+        }
         var run = (runTag === null) ? "" : CsTags.get(e, runTag);
         var p = e.getPosition();
-        counts[name] = (counts[name] || 0) + 1;
-        found.push({ name: name, run: run, pos: { x: p.x, y: p.y } });
+        candidates.push({ name: name, run: run,
+                          pos: { x: p.x, y: p.y }, isPoint: isPoint });
+    }
+
+    var found = CsScanFrame.dedupePlaces(candidates);
+    // Counts AFTER the dedupe, or a station tagged twice would look
+    // like a station in two bands and wear a qualifier it has not
+    // earned.
+    var counts = {};
+    for (var c = 0; c < found.length; c++) {
+        counts[found[c].name] = (counts[found[c].name] || 0) + 1;
     }
     for (var k = 0; k < found.length; k++) {
         found[k].label = CsScanFrame.labelFor(found[k].name, found[k].run,
