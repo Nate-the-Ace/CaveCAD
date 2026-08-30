@@ -181,7 +181,18 @@ var di = new RDocumentInterface(doc);
 global.gDocumentInterface = di;
 getDocument = function() { return doc; };
 getDocumentInterface = function() { return di; };
-doc.setFileName(QDir.tempPath() + "/cs_section_sketch_run.dxf");
+// A REAL CAVE FOLDER, WITH A REAL scans/ UNDER IT.
+//
+// The drawing used to live in a bare temp directory, which made the
+// relative-scan-path claim untestable: a drawing stores its scan path
+// relative to the cave's scans/ folder, and CsCave.findSubfolder only
+// ever answers about a folder that EXISTS on disk. With no scans/ to be
+// relative to, every path stays absolute and R2 below would pass while
+// proving nothing.
+var caveDir = QDir.tempPath() + "/cs_section_cave";
+var scansDir = caveDir + "/scans";
+(new QDir()).mkpath(scansDir);
+doc.setFileName(caveDir + "/cs_section_sketch_run.dxf");
 
 // Every "Sketch Section: ..." message, captured rather than shown -- a
 // modal dialog in a headless run is a hang, and the messages are
@@ -261,10 +272,20 @@ var blockerBox = {
 
 // A real raster the engine can actually read, so the scan is a real
 // RImageEntity and not a silently skipped one -- the same trick
-// tests/scan_reanchor_run.js uses.
-var scanPath = repoRoot + "/scripts/CaveSurvey/SketchSection/SketchSection.svg";
+// tests/scan_reanchor_run.js uses. Copied INTO the cave's scans/ folder
+// rather than pointed at in the checkout, so the path a capture stores
+// is genuinely relativisable (R2).
+var scanRel = "section.svg";
+var scanPath = scansDir + "/" + scanRel;
+(new QFile(scanPath)).remove();
+check("fixture: the scan copies into the cave's scans/ folder",
+    (new QFile(repoRoot +
+        "/scripts/CaveSurvey/SketchSection/SketchSection.svg")).copy(scanPath));
 check("fixture: the scan file this run underlays is readable",
     !(new QImage(scanPath)).isNull());
+check("fixture: and the suite agrees that is where this cave's scans " +
+    "live -- R2's relative path is measured against this",
+    SketchSection.scansFolderOf(doc) === scansDir);
 
 var asDrawn = CsRevise.resolveAsDrawn(doc);
 check("fixture: the drawing's own tags rebuild the survey",
@@ -333,6 +354,60 @@ check("2: the scan is NOT swept",
     sweptIds[String(bay1.scan.getId())] !== true);
 
 // ---------------------------------------------------------------------
+// THE CAVER FITS THE SCAN. This is the workflow, not a variation on it:
+// a scan has no scale and no up, so scaling, turning and nudging it
+// onto the ghost is the entire reason the ghost is drawn. Everything
+// from here down therefore runs against a scan that is NOT where the
+// auto-fit put it -- which is what makes R1's claims below able to
+// fail. Before this, every assertion about the stored fit was measured
+// on a scan nobody had touched, where the auto-fit and the actual
+// placement are the same numbers and a tool reading the wrong one of
+// the two looks perfect.
+//
+// Scaled AND rotated AND moved, all three, because the fit this
+// replaced could not express any of them: it stored sx/sy/rot with rot
+// hard-written 0, and rebuilt u = (sx, 0), v = (0, sy) on the way back.
+// ---------------------------------------------------------------------
+var autoFit = SectionCapture.fitOfScan(bay1.scan,
+    SectionCapture.originOf(bay1));
+check("fixture: the auto-fit the bay opened at is readable off the scan",
+    autoFit !== null);
+check("fixture: and it is square -- an auto-fit has no rotation in it, " +
+    "so any rotation below is the caver's",
+    autoFit !== null && autoFit.uy === 0 && autoFit.vx === 0);
+
+(function() {
+    var about = SectionCapture.originOf(bay1);
+    var s = doc.queryEntity(bay1.scan.getId());
+    s.scale(1.7, new RVector(about.x, about.y));
+    s.rotate(Math.PI / 7, new RVector(about.x, about.y));
+    s.move(new RVector(2.5, -1.5));
+    var fitOp = new RModifyObjectsOperation();
+    fitOp.addObject(s, false);
+    CsLayers.withLayerOn(doc, di, CsLayers.CTRL_SECTION_SCAN, function() {
+        di.applyOperation(fitOp);
+    });
+})();
+
+// Re-read the bay: bay1's `scan` is a script-side copy from before the
+// modify, and every claim from here on must be measuring the scan as
+// the document now holds it.
+bay1 = SectionCapture.findBay(doc);
+check("fixture: the bay is still there after the scan was fitted",
+    bay1 !== null && bay1.scan !== null && bay1.traced.length === 1);
+
+var fittedFit = SectionCapture.fitOfScan(bay1.scan,
+    SectionCapture.originOf(bay1));
+check("fixture: the fitted scan really did move off its auto-fit",
+    fittedFit !== null && autoFit !== null &&
+    CsSectionBay.serializeFit(fittedFit) !==
+        CsSectionBay.serializeFit(autoFit));
+check("fixture: and it really is rotated -- the cross terms are no " +
+    "longer zero",
+    fittedFit !== null && Math.abs(fittedFit.uy) > 1e-6 &&
+    Math.abs(fittedFit.vx) > 1e-6);
+
+// ---------------------------------------------------------------------
 // CLAIM 6 (measured before the capture, which tears the bay down): the
 // proposed spot clears every plan-frame obstacle by CsSectionBay.MARGIN,
 // and the wall really was in the way.
@@ -393,10 +468,35 @@ var frameId = bay1.frame.getId();
 var ghostId = bay1.ghost.getId();
 var scanId = bay1.scan.getId();
 var storedScan = CsTags.get(bay1.scan, CsCallout.KEY.SECTION_SCAN);
-var storedFit = CsTags.get(bay1.scan, CsCallout.KEY.SECTION_FIT);
 check("4: fixture: the bay's scan carries the path it was placed from",
     storedScan === scanPath);
-check("4: fixture: and the fit it was placed at", storedFit !== "");
+// NO FIT TAG ON THE BAY'S SCAN, and that absence is the fix for R1.
+// SketchSection used to tag the scan with its AUTO-fit, and Capture
+// copied that tag onto the finished section -- so a caver's own
+// scaling and turning was recorded as the fitting they never chose.
+// The tag is gone; the fit is read off the scan entity instead.
+check("4: fixture: the bay's scan carries NO fit tag -- the stale tag " +
+    "that used to overwrite the caver's own fitting is not written",
+    CsTags.get(bay1.scan, CsCallout.KEY.SECTION_FIT) === "");
+// What the fit SHOULD be, measured off the scan while the bay still
+// exists: capture is about to delete it.
+//
+// READ STRAIGHT OFF THE RImageData, deliberately NOT through
+// SectionCapture.fitOfScan. Using the tool's own reader as the oracle
+// for the tool's own output makes the comparison self-confirming: a
+// fitOfScan that dropped the rotation would produce a stored fit that
+// still matched its own expectation exactly. These six numbers come
+// from the engine.
+var expectFit = (function() {
+    var d = bay1.scan.getData();
+    var ip = d.getInsertionPoint();
+    var u = d.getUVector();
+    var v = d.getVVector();
+    var o = SectionCapture.originOf(bay1);
+    return CsSectionBay.serializeFit({
+        ux: u.x, uy: u.y, vx: v.x, vy: v.y,
+        tx: ip.x - o.x, ty: ip.y - o.y });
+})();
 
 var id = SectionCapture.capture(doc, di, bay1, at);
 check("3: the section is captured", id !== null && id !== undefined);
@@ -451,13 +551,75 @@ check("4: carrying its station",
 check("4: carrying its scale",
     parseFloat(CsTags.get(members.block, CsCallout.KEY.SECTION_SCALE)) ===
         CsSectionDraw.scaleOf());
-check("4: carrying the scan it was traced from",
-    CsTags.get(members.block, CsCallout.KEY.SECTION_SCAN) === scanPath);
-check("4: carrying the bay fit the scan was placed at",
-    CsTags.get(members.block, CsCallout.KEY.SECTION_FIT) === storedFit);
 check("4: and the fit reads back as a fit, not as a corrupt tag",
     CsSectionBay.parseFit(
         CsTags.get(members.block, CsCallout.KEY.SECTION_FIT)) !== null);
+
+// ---------------------------------------------------------------------
+// R1 (review finding, DATA LOSS): the fit stored on the section is the
+// scan's ACTUAL placement -- the one the caver fitted -- and not the
+// auto-fit SketchSection wrote into a tag when the bay opened.
+//
+// Before the fix, SectionCapture copied the scan's SectionBayFit TAG
+// onto the reference. That tag was written ONCE, by addScan, at
+// auto-fit time, and nothing ever updated it -- so scaling and turning
+// the scan onto the ghost, which is the whole workflow, was recorded
+// nowhere. Edit Sketch then restored the scan at the auto-fit and the
+// caver's fitting was gone. Rotation could not survive at all: the fit
+// wrote rot as 0 every time and rebuilt u = (sx, 0), v = (0, sy),
+// which has nowhere to put an angle.
+//
+// Measured against the scan's own placement, NOT merely "not empty"
+// and NOT merely "parses": both of those stayed green throughout the
+// entire defect.
+// ---------------------------------------------------------------------
+var storedFit = CsTags.get(members.block, CsCallout.KEY.SECTION_FIT);
+check("R1: the stored fit is the scan's ACTUAL placement, the one the " +
+    "caver fitted" +
+    (storedFit === expectFit ? "" :
+        " (expected " + expectFit + ", got " + storedFit + ")"),
+    storedFit === expectFit);
+check("R1: and it is NOT the auto-fit the bay opened at -- the stale " +
+    "tag is not what gets recorded",
+    autoFit !== null && storedFit !== CsSectionBay.serializeFit(autoFit));
+var storedParsed = CsSectionBay.parseFit(storedFit);
+check("R1: the caver's ROTATION is in there -- a fit of the old shape " +
+    "could not carry one at all",
+    storedParsed !== null && Math.abs(storedParsed.uy) > 1e-6 &&
+    Math.abs(storedParsed.vx) > 1e-6);
+checkClose("R1: and the caver's SCALE, not the auto-fit's",
+    storedParsed === null ? 0 :
+        Math.sqrt(storedParsed.ux * storedParsed.ux +
+                  storedParsed.uy * storedParsed.uy),
+    Math.sqrt(autoFit.ux * autoFit.ux + autoFit.uy * autoFit.uy) * 1.7,
+    1e-5);
+
+// ---------------------------------------------------------------------
+// R2 (review finding, portability): the scan path is stored RELATIVE to
+// the cave's scans/ folder.
+//
+// It used to be absolute (SketchScans.sketchSoon hands SketchSection an
+// absolute path and it was tagged straight through), which is only true
+// on the machine that wrote it. Cave projects live on a shared drive,
+// get renamed and get opened by whoever was on the trip -- an absolute
+// path makes every Edit Sketch elsewhere report a missing scan. The
+// design spec's tag table says "relative to scans/" and SketchScans
+// already tags its own inserted images that way.
+// ---------------------------------------------------------------------
+var storedPath = CsTags.get(members.block, CsCallout.KEY.SECTION_SCAN);
+check("R2: the stored scan path is RELATIVE to scans/" +
+    " (got \"" + storedPath + "\")", storedPath === scanRel);
+check("R2: which is to say NOT the absolute path this machine happens " +
+    "to have the file at", storedPath !== scanPath);
+check("R2: and nothing absolute survives in the drawing at all",
+    storedPath.charAt(0) !== "/" && storedPath.indexOf(":") === -1 &&
+    storedPath.indexOf(String(QDir.tempPath())) === -1);
+// The bay's own scan keeps the ABSOLUTE path: it is a live image entity
+// and has to be constructible from what it carries. Relative is the
+// DRAWING's storage convention, not the scan entity's.
+check("R2: the bay's own scan still carries the absolute path it was " +
+    "built from -- only the section's record goes relative",
+    storedScan === scanPath);
 check("4: it is a section callout, by role and kind",
     CsTags.get(members.block, CsCallout.KEY.KIND) === CsCallout.KIND_SECTION &&
     CsTags.get(members.block, CsCallout.KEY.ROLE) === CsCallout.ROLE_BLOCK);
@@ -633,6 +795,10 @@ check("10: fixture: the section is selected for Edit Sketch",
 
 said = [];
 SectionEdit.run();
+// LOAD-BEARING FOR R2. The stored path is relative now, so if the
+// reopen failed to resolve it against this cave's scans/ folder, this
+// is where it says so: SectionEdit.run reports a scan it cannot find
+// through SketchSection.say before the bay is even opened.
 check("10: Edit Sketch reopened without complaint" +
     (said.length === 0 ? "" : " (said: " + said.join(" | ") + ")"),
     said.length === 0);
@@ -647,6 +813,67 @@ check("10: with the scan back under it", reopened !== null &&
 check("10: and the linework loose inside it, ready to trace over",
     reopened !== null && reopened.traced.length === 1 &&
     String(reopened.traced[0]) === String(tracedId));
+
+// ---------------------------------------------------------------------
+// R2, the other half: the RELATIVE path stored on the drawing resolved
+// back to the file on this machine. The check above already reads the
+// reopened scan's tag as the absolute path; this names why that is the
+// claim -- the drawing never held that string.
+// ---------------------------------------------------------------------
+check("R2: the reopen RESOLVED the relative path -- the drawing stored " +
+    "\"" + storedPath + "\" and the bay came back with the real file",
+    reopened !== null && reopened.scan !== null &&
+    CsTags.get(reopened.scan, CsCallout.KEY.SECTION_SCAN) === scanPath &&
+    storedPath !== scanPath);
+
+// ---------------------------------------------------------------------
+// R1, the other half: the reopened scan is back AT THE CAVER'S OWN
+// FITTING, not at a fresh auto-fit.
+//
+// Measured off the reopened scan entity the same way capture measured
+// it, so the two ends of the round trip are compared in the same terms:
+// u and v exactly as they were, and the insertion point back at the
+// same offset from the section's origin (the bay itself parks against
+// the CURRENT plan extents and generally lands somewhere new, which is
+// why the stored offset is relative and not absolute).
+//
+// This is the assertion the whole defect hid behind. Before the fix the
+// reopened scan came back square and at the auto-fit's scale, and
+// nothing in the drawing disagreed.
+// ---------------------------------------------------------------------
+(function() {
+    if (reopened === null || reopened.scan === null || storedParsed === null) {
+        check("R1: the reopened scan is back at the caver's own fitting",
+            false);
+        return;
+    }
+    var restored = SectionCapture.fitOfScan(reopened.scan,
+        SectionCapture.originOf(reopened));
+    if (restored === null) {
+        check("R1: the reopened scan is back at the caver's own fitting",
+            false);
+        return;
+    }
+    checkClose("R1: the reopened scan keeps the caver's u vector (x)",
+        restored.ux, storedParsed.ux, 1e-5);
+    checkClose("R1: and its cross term -- the ROTATION survived the " +
+        "round trip", restored.uy, storedParsed.uy, 1e-5);
+    checkClose("R1: and the v vector's cross term with it",
+        restored.vx, storedParsed.vx, 1e-5);
+    checkClose("R1: and the v scale", restored.vy, storedParsed.vy, 1e-5);
+    checkClose("R1: and the offset from the section's own origin (x)",
+        restored.tx, storedParsed.tx, 1e-5);
+    checkClose("R1: and (y)", restored.ty, storedParsed.ty, 1e-5);
+    // NAMED SEPARATELY, because every one of the checks above would
+    // also pass if the caver had never touched the scan: the point is
+    // that this is NOT what SketchSection.addScan would have placed.
+    var wouldAutoFit = CsSectionBay.fitTransform(
+        { x1: 0, y1: 0, x2: 24, y2: 24 },
+        SectionEdit.bayBoxOf(doc, reopened.id));
+    check("R1: and that is NOT the auto-fit a fresh bay would have " +
+        "used -- the caver's fitting was restored, not recomputed",
+        Math.abs(restored.uy) > 1e-6 && wouldAutoFit.uy === 0);
+})();
 
 var back = doc.queryEntity(tracedId);
 check("10: the linework is out of the block and back in model space",
@@ -685,9 +912,322 @@ check("10: the emptied block definition is gone, not left as dead weight",
         var closedId = SectionCapture.capture(doc, di, leftover, leftoverAt);
         check("fixture: and it closes", closedId !== null);
     }
-    check("fixture: no bay is open going into F1/F2/F3",
+    check("fixture: no bay is open going into R3/R4/F1/F2/F3",
         SectionCapture.findBay(doc) === null &&
         SectionCapture.findBayError === null);
+})();
+
+// ---------------------------------------------------------------------
+// One sketched section, start to finish, for the claims below to work
+// on: open a bay, trace one line in it, capture it where the march
+// proposes (or clear of the bay when the march is boxed in -- the same
+// fallback the leftover-closing fixture above uses).
+//
+// \return {id, tracedId} or null
+// ---------------------------------------------------------------------
+function sketchOne(station, label) {
+    var openedId = SketchSection.run(scanPath, station);
+    check(label + ": fixture: a bay opens at " + station, openedId !== null);
+    var b0 = SectionCapture.findBay(doc);
+    check(label + ": fixture: it is found", b0 !== null);
+    if (b0 === null) {
+        return null;
+    }
+    var c = SectionCapture.originOf(b0);
+    var line = new RLineEntity(doc, new RLineData(
+        new RVector(c.x - 2, c.y - 2), new RVector(c.x + 2, c.y + 2)));
+    line.setLayerId(doc.getLayerId(CsLayers.SECTION_WALLS_SURVEYED));
+    var lop = new RAddObjectsOperation();
+    lop.addObject(line, false);
+    di.applyOperation(lop);
+
+    var b1 = SectionCapture.findBay(doc);
+    check(label + ": fixture: the tracing is swept",
+        b1 !== null && b1.traced.length === 1);
+    if (b1 === null) {
+        return null;
+    }
+    var spot = SectionCapture.proposePosition(doc, b1);
+    if (spot === null) {
+        spot = { x: b1.rect.x2 + 20, y: b1.rect.y1 };
+    }
+    var newId = SectionCapture.capture(doc, di, b1, spot);
+    check(label + ": fixture: it captures", newId !== null);
+    return (newId === null) ? null : { id: newId, tracedId: line.getId() };
+}
+
+/** Select exactly one entity, with nothing else left over from an
+ *  earlier claim -- SectionEdit.selectedSection takes the FIRST
+ *  selected section it finds, and by this point in the run there are
+ *  several placed sections that could be it. */
+function selectOnly(entityId) {
+    try {
+        di.clearSelection();
+    } catch (eSel) {
+        // a build without clearSelection still has the add-select below
+    }
+    di.selectEntity(entityId, true);
+}
+
+// ---------------------------------------------------------------------
+// R3 (review finding, silent data loss): a caver who scaled and turned
+// a placed section gets it back scaled and turned after an edit round
+// trip.
+//
+// CalloutWrite.refreshSections' own contract is that a section's
+// position, scale and rotation are the CAVER'S -- that is why a
+// sketched section is never regenerated. But reopening DELETES the
+// reference (the section must exist in exactly one place at a time),
+// which threw away the only record of both, and the re-capture built a
+// fresh reference at RVector(1,1) and 0.0 unconditionally. One edit
+// silently undid the caver's own scaling and rotation, and nothing on
+// the drawing said so.
+//
+// The values ride on the BAY'S FRAME between the two halves -- the one
+// piece of bay furniture guaranteed to outlive the whole bay, which is
+// why the pre-bay snap class already rides there.
+//
+// NOT ASSERTED AS "the reference exists": that stayed green for the
+// entire defect. The numbers themselves are the claim.
+// ---------------------------------------------------------------------
+(function() {
+    // A2, the station claim 1 proved has a real cuttable LRUD. NOT A1:
+    // the leg a cut at A1 is taken on runs back to A0, which is first
+    // in the chain and therefore has no LRUD of its own, so the cut is
+    // refused and the bay opens with no ghost -- which would make the
+    // "back in the bay at 1:1" check below measure against the frame's
+    // centre instead of the ghost's.
+    var made = sketchOne("A2", "R3");
+    if (made === null) {
+        check("R3: a non-default scale and rotation survive an edit", false);
+        return;
+    }
+    var placed = CalloutWrite.members(doc, made.id).block;
+    if (placed === null) {
+        check("R3: a non-default scale and rotation survive an edit", false);
+        return;
+    }
+
+    // The caver scales and turns the placed section on the sheet.
+    var wasAt = placed.getData().getPosition();
+    var live = doc.queryEntity(placed.getId());
+    live.scale(1.5, new RVector(wasAt.x, wasAt.y));
+    live.rotate(0.4, new RVector(wasAt.x, wasAt.y));
+    var mop = new RModifyObjectsOperation();
+    mop.addObject(live, false);
+    di.applyOperation(mop);
+
+    var before = CalloutWrite.members(doc, made.id).block;
+    var beforeScale = before.getData().getScaleFactors();
+    var beforeRot = before.getData().getRotation();
+    checkClose("R3: fixture: the caver's scale really is on the " +
+        "reference", beforeScale.x, 1.5, 1e-6);
+    checkClose("R3: fixture: and the caver's rotation", beforeRot, 0.4, 1e-6);
+
+    // Edit Sketch: the reference is deleted and the bay comes back.
+    said = [];
+    selectOnly(before.getId());
+    SectionEdit.run();
+    check("R3: Edit Sketch reopened without complaint" +
+        (said.length === 0 ? "" : " (said: " + said.join(" | ") + ")"),
+        said.length === 0);
+
+    var bay = SectionCapture.findBay(doc);
+    check("R3: a bay is open again", bay !== null);
+    if (bay === null) {
+        check("R3: a non-default scale and rotation survive an edit", false);
+        return;
+    }
+    check("R3: the reference is really gone, so the frame is the only " +
+        "place its placement can be",
+        CalloutWrite.members(doc, made.id).block === null);
+    // The record, on the frame, on the drawing -- not merely in a
+    // variable that happened to survive inside this process.
+    checkClose("R3: the frame carries the caver's scale across the reopen",
+        SectionCapture.scaleTagOf(bay.frame).x, 1.5, 1e-5);
+    checkClose("R3: and the caver's rotation",
+        SectionCapture.rotTagOf(bay.frame), 0.4, 1e-5);
+    checkClose("R3: and findBay hands it to the capture (scale)",
+        bay.refScale.x, 1.5, 1e-5);
+    checkClose("R3: and findBay hands it to the capture (rotation)",
+        bay.refRot, 0.4, 1e-5);
+
+    // THE TRACING ITSELF COMES BACK 1:1. The ghost is a ruler at the
+    // section's own scale, so a bay holding linework at the sheet's
+    // presentation scale would be measuring against the wrong stick.
+    var backIn = doc.queryEntity(made.tracedId);
+    backIn.update();
+    var bb = backIn.getBoundingBox();
+    checkClose("R3: the tracing is back in the bay at 1:1, not at the " +
+        "reference's scale",
+        bb.getMaximum().x - bb.getMinimum().x, 4, 1e-5);
+
+    // Re-capture, and the placement must come back with it.
+    var spot = SectionCapture.proposePosition(doc, bay);
+    if (spot === null) {
+        spot = { x: bay.rect.x2 + 20, y: bay.rect.y1 };
+    }
+    var againId = SectionCapture.capture(doc, di, bay, spot);
+    check("R3: it captures again", againId !== null);
+    var again = (againId === null) ? null :
+        CalloutWrite.members(doc, againId).block;
+    check("R3: and there is a placed reference to look at", again !== null);
+    if (again === null) {
+        check("R3: a non-default scale and rotation survive an edit", false);
+        return;
+    }
+    var againScale = again.getData().getScaleFactors();
+    checkClose("R3: the caver's SCALE survived the round trip (x)",
+        againScale.x, 1.5, 1e-5);
+    checkClose("R3: the caver's SCALE survived the round trip (y)",
+        againScale.y, 1.5, 1e-5);
+    checkClose("R3: the caver's ROTATION survived the round trip",
+        again.getData().getRotation(), 0.4, 1e-5);
+})();
+
+// ---------------------------------------------------------------------
+// R4: a section captured BEFORE the fit carried rotation still reopens.
+//
+// The old fit was five numbers (sx, sy, rot, tx, ty) where six are now
+// read, and its tx/ty were ABSOLUTE coordinates in a bay that no longer
+// exists -- so CsSectionBay.parseFit returns null for it rather than
+// reading five numbers as if they meant what six mean. Null must not
+// mean "throw" and must not mean "no underlay": the scan is placed
+// auto-fitted to the current ghost, which is the fitting those older
+// sections were being restored at anyway.
+//
+// Simulated by writing an old-format tag onto a real captured section,
+// which is exactly what a drawing saved by the previous build holds.
+// ---------------------------------------------------------------------
+(function() {
+    check("R4: an old five-field fit parses as null, never as a fit " +
+        "whose numbers mean something else",
+        CsSectionBay.parseFit("0.050000,0.050000,0.000000,-5.000000," +
+            "-2.500000") === null);
+
+    var made = sketchOne("A3", "R4");
+    if (made === null) {
+        check("R4: a section with an old-format fit still reopens", false);
+        return;
+    }
+    var placed = CalloutWrite.members(doc, made.id).block;
+    if (placed === null) {
+        check("R4: a section with an old-format fit still reopens", false);
+        return;
+    }
+    // Downgrade its fit tag to the format the previous build wrote.
+    var live = doc.queryEntity(placed.getId());
+    CsTags.set(live, CsCallout.KEY.SECTION_FIT,
+        "0.050000,0.050000,0.000000,-5.000000,-2.500000");
+    var mop = new RModifyObjectsOperation();
+    mop.addObject(live, false);
+    di.applyOperation(mop);
+    var stale = CalloutWrite.members(doc, made.id).block;
+    check("R4: fixture: the section now carries an old-format fit, and " +
+        "the parser refuses it",
+        CsSectionBay.parseFit(
+            CsTags.get(stale, CsCallout.KEY.SECTION_FIT)) === null);
+
+    said = [];
+    var threw = null;
+    selectOnly(stale.getId());
+    try {
+        SectionEdit.run();
+    } catch (e) {
+        threw = String(e);
+    }
+    check("R4: reopening it does not throw" +
+        (threw === null ? "" : " (threw " + threw + ")"), threw === null);
+    check("R4: and it does not complain either" +
+        (said.length === 0 ? "" : " (said: " + said.join(" | ") + ")"),
+        said.length === 0);
+
+    var bay = SectionCapture.findBay(doc);
+    check("R4: the bay opened", bay !== null);
+    check("R4: WITH the scan under it -- an unreadable fit costs the " +
+        "caver the fitting, never the underlay",
+        bay !== null && bay.scan !== null);
+    if (bay !== null && bay.scan !== null) {
+        var fallback = SectionCapture.fitOfScan(bay.scan,
+            SectionCapture.originOf(bay));
+        check("R4: and the scan is auto-fitted to the current ghost, " +
+            "square, exactly as a brand-new bay would place it",
+            fallback !== null && fallback.uy === 0 && fallback.vx === 0 &&
+            fallback.ux > 0);
+    } else {
+        check("R4: and the scan is auto-fitted to the current ghost", false);
+    }
+
+    // Closed, so the two-open-bays claim below still measures what it
+    // says it measures.
+    if (bay !== null) {
+        var spot = SectionCapture.proposePosition(doc, bay);
+        if (spot === null) {
+            spot = { x: bay.rect.x2 + 20, y: bay.rect.y1 };
+        }
+        check("R4: and it closes again",
+            SectionCapture.capture(doc, di, bay, spot) !== null);
+    }
+    check("R4: no bay is left open", SectionCapture.findBay(doc) === null);
+})();
+
+// ---------------------------------------------------------------------
+// R5 (review finding, D4): the proposed placement is DRAWN, not merely
+// computed. SectionCapture.pickCoordinate used to store previewPos and
+// return -- there was no getOperation, no previewOperation call, and
+// previewPos was read nowhere at all, while the design spec's D4 and
+// the command prompt both promise a live preview.
+//
+// The preview is GUI-only, so what is asserted here is the piece that
+// is not: the operation the preview draws. Built through the same
+// static entry point prototype.getOperation calls.
+// ---------------------------------------------------------------------
+(function() {
+    var openedId = SketchSection.run(scanPath, "A2");
+    check("R5: fixture: a bay opens", openedId !== null);
+    var b0 = SectionCapture.findBay(doc);
+    check("R5: fixture: it is found", b0 !== null);
+    if (b0 === null) {
+        check("R5: a proposed placement has something to draw", false);
+        return;
+    }
+    check("R5: nothing traced, nothing to preview -- an empty bay draws " +
+        "no ghost section",
+        SectionCapture.previewOp(doc, b0, { x: 0, y: 0 }) === undefined);
+
+    var c = SectionCapture.originOf(b0);
+    var line = new RLineEntity(doc, new RLineData(
+        new RVector(c.x - 2, c.y - 2), new RVector(c.x + 2, c.y + 2)));
+    line.setLayerId(doc.getLayerId(CsLayers.SECTION_WALLS_SURVEYED));
+    var lop = new RAddObjectsOperation();
+    lop.addObject(line, false);
+    di.applyOperation(lop);
+    var b1 = SectionCapture.findBay(doc);
+
+    var op = SectionCapture.previewOp(doc, b1, { x: 200, y: 200 });
+    check("R5: a traced bay previews its proposed placement",
+        op !== undefined && op !== null);
+
+    // THE ORIGINALS STAY PUT. The preview clones; moving the entities
+    // themselves would drag the caver's tracing out of the bay on every
+    // mouse move, and the bay would empty as they looked for a spot.
+    var stillThere = doc.queryEntity(line.getId());
+    stillThere.update();
+    var sb = stillThere.getBoundingBox();
+    checkClose("R5: and the tracing it previewed has NOT moved out of " +
+        "the bay (x)", sb.getMinimum().x, c.x - 2, 1e-6);
+    checkClose("R5: nor (y)", sb.getMinimum().y, c.y - 2, 1e-6);
+    var b2 = SectionCapture.findBay(doc);
+    check("R5: and it is still swept as part of the bay",
+        b2 !== null && b2.traced.length === 1);
+
+    // Closed again, so the two-open-bays claim below still holds.
+    var spot = SectionCapture.proposePosition(doc, b2);
+    if (spot === null) {
+        spot = { x: b2.rect.x2 + 20, y: b2.rect.y1 };
+    }
+    check("R5: and the bay closes",
+        SectionCapture.capture(doc, di, b2, spot) !== null);
 })();
 
 // ---------------------------------------------------------------------

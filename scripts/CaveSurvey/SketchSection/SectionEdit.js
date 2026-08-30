@@ -37,17 +37,39 @@
  * whole reopen. The entities already moved out are untouched by it --
  * confirmed by the same probe, run both as two operations and as one.
  *
- * THE SCAN COMES BACK AT ITS STORED SCALE, NOT A FRESH GUESS. SketchSection.
- * addScan auto-fits a scan to the CURRENT ghost, but a sketch's tracing
- * never regenerates (SOURCE_SKETCH is refreshSections' gate) while the
- * survey underneath it can still drift, so "the current ghost" and "the
- * ghost this tracing was drawn against" are not always the same shape.
- * This tool never hands SketchSection.run a scan path at all; it places
- * the scan itself afterward, from the fit STORED on the reference
- * (SECTION_FIT), scaled exactly as recorded and simply re-centred on
- * wherever this bay landed -- frameRectFor parks against the CURRENT
- * plan extents, so the bay itself can move even when the ghost does
- * not.
+ * THE SCAN COMES BACK WHERE THE CAVER LEFT IT, NOT AT A FRESH GUESS.
+ * SketchSection.addScan auto-fits a scan to the CURRENT ghost, but a
+ * sketch's tracing never regenerates (SOURCE_SKETCH is refreshSections'
+ * gate) while the survey underneath it can still drift, so "the current
+ * ghost" and "the ghost this tracing was drawn against" are not always
+ * the same shape. This tool never hands SketchSection.run a scan path
+ * at all; it places the scan itself afterward, from the fit STORED on
+ * the reference (SECTION_FIT) -- which SectionCapture read off the scan
+ * entity's own u/v vectors and insertion point, so it carries the
+ * scale AND the rotation the caver actually fitted, not the auto-fit
+ * the bay opened at. The stored insertion point is relative to the
+ * section's own origin and is re-based onto THIS bay's origin, because
+ * frameRectFor parks against the CURRENT plan extents and the bay can
+ * land somewhere new even when the ghost does not move.
+ *
+ * A FIT THAT WILL NOT PARSE STILL OPENS A USABLE BAY. A section
+ * captured before the fit carried rotation stored five numbers where
+ * six are now read, so CsSectionBay.parseFit returns null for it (and
+ * for any corrupt tag). Null is not "no underlay" here -- the scan is
+ * placed auto-fitted to the current ghost, exactly as it would be in a
+ * brand-new bay, which is the fitting those older sections were being
+ * restored at anyway.
+ *
+ * THE PLACED REFERENCE'S SCALE AND ROTATION SURVIVE THE ROUND TRIP.
+ * Reopening deletes the reference, and with it the only record of what
+ * the caver had scaled and turned it to; a re-capture then built a
+ * fresh reference at (1,1) and 0, silently resetting both. Both are
+ * parked on the bay's frame for the bay's lifetime instead
+ * (SketchSection.TAG_REF_SCALE / TAG_REF_ROT) and read back by
+ * SectionCapture.findBay. The tracing itself comes back into the bay
+ * UNSCALED and UNTURNED, at the ghost's own 1:1, which is the only
+ * scale the ghost is a ruler for -- the reference's scale and rotation
+ * are a sheet-presentation choice laid back on top at capture.
  *
  * USAGE:
  *   select a sketched section, then
@@ -92,8 +114,16 @@ SectionEdit.run = function() {
     }
 
     var station = CsTags.get(ref, CsCallout.KEY.SECTION_STATION);
-    var scan = CsTags.get(ref, CsCallout.KEY.SECTION_SCAN);
     var fit = CsSectionBay.parseFit(CsTags.get(ref, CsCallout.KEY.SECTION_FIT));
+
+    // THE STORED PATH IS RELATIVE TO scans/ -- resolved HERE, against
+    // this machine's own copy of the cave, which is the whole point of
+    // storing it relative. A path stored absolute by a build before
+    // that convention comes back unchanged (CsCave.resolveUnderScans),
+    // so an already-captured section still reopens.
+    var stored = CsTags.get(ref, CsCallout.KEY.SECTION_SCAN);
+    var scan = CsCave.resolveUnderScans(SketchSection.scansFolderOf(doc),
+        stored);
 
     // Checked BEFORE the bay opens, and the path is never handed to
     // SketchSection.run -- that function's own addScan would show its
@@ -113,13 +143,17 @@ SectionEdit.run = function() {
         return;
     }
 
-    if (scanExists && fit !== null) {
-        var origin = SectionEdit.bayOriginOf(doc, bayId);
-        // origin === null here would mean the bay this line just opened
+    // A NULL FIT STILL GETS AN UNDERLAY. See the file header: an old
+    // five-number fit (and any corrupt tag) parses as null, and the
+    // honest answer is the auto-fit a brand-new bay would have used,
+    // not a bay with the tracing and no scan under it.
+    if (scanExists) {
+        var box = SectionEdit.bayBoxOf(doc, bayId);
+        // box === null here would mean the bay this line just opened
         // cannot be found -- nothing safe to place a scan against, and
         // explodeInto below will hit the same wall and quietly give up.
-        if (origin !== null) {
-            SectionEdit.reopenScan(doc, di, scan, fit, origin, bayId);
+        if (box !== null) {
+            SectionEdit.reopenScan(doc, di, scan, fit, box, bayId);
         }
     }
 
@@ -206,9 +240,66 @@ SectionEdit.explodeInto = function(doc, di, ref, bayId) {
         op.deleteObject(blockObj);
     }
 
+    // THE CAVER'S OWN SCALE AND ROTATION, PARKED ON THE FRAME before
+    // the reference carrying them is deleted two statements up. Without
+    // this the re-capture has nothing to read and rebuilds the
+    // reference square and 1:1 -- see the file header. Queued into this
+    // SAME operation, so a reopen stays one undo step.
+    SectionEdit.parkPlacement(doc, bayId, ref, op);
+
     SectionEdit.withLayersOn(doc, di, layerNames, function() {
-        di.applyOperation(op);
+        // CTRL-SECTION-BOX, the frame's layer, ships LOCKED -- and a
+        // locked layer refuses a modify exactly as silently as an off
+        // one does, which would drop the parked placement while the
+        // rest of the reopen still committed. withLayerOn alone only
+        // clears off/frozen; the lock needs withLayerUnlocked nested
+        // inside it, the pairing SketchSection.addFrame and
+        // SectionCapture.capture already use on this same layer.
+        CsLayers.withLayerOn(doc, di, CsLayers.CTRL_SECTION_BOX, function() {
+            CsLayers.withLayerUnlocked(doc, di, CsLayers.CTRL_SECTION_BOX,
+                function() {
+                    di.applyOperation(op);
+                });
+        });
     });
+};
+
+/**
+ * Write the reference's scale and rotation onto the bay's frame, queued
+ * into `op`.
+ *
+ * ON THE FRAME because it is the one piece of bay furniture guaranteed
+ * to live as long as the bay does -- the same reason TAG_SNAP is
+ * already there. Written even when they are the defaults: an explicit
+ * "1,1" and "0" on the drawing is a record, and the absent-tag branch
+ * in SectionCapture.scaleTagOf then only has to cover bays that Sketch
+ * Section opened from nothing.
+ */
+SectionEdit.parkPlacement = function(doc, bayId, ref, op) {
+    var frame = SectionEdit.bayFrameOf(doc, bayId);
+    if (frame === null) {
+        return;
+    }
+    var sx = 1, sy = 1, rot = 0;
+    try {
+        var d = ref.getData();
+        var sf = d.getScaleFactors();
+        sx = sf.x;
+        sy = sf.y;
+        rot = d.getRotation();
+    } catch (e) {
+        return;                    // no placement to carry is not a crash
+    }
+    if (isNaN(sx) || isNaN(sy) || sx === 0 || sy === 0) {
+        sx = 1; sy = 1;
+    }
+    if (isNaN(rot)) {
+        rot = 0;
+    }
+    CsTags.set(frame, SketchSection.TAG_REF_SCALE,
+        sx.toFixed(6) + "," + sy.toFixed(6));
+    CsTags.set(frame, SketchSection.TAG_REF_ROT, rot.toFixed(6));
+    op.addObject(frame, false);
 };
 
 /**
@@ -224,6 +315,18 @@ SectionEdit.explodeInto = function(doc, di, ref, bayId) {
  * and a reopened bay's origin drift apart on every round trip.
  */
 SectionEdit.bayOriginOf = function(doc, bayId) {
+    var b = SectionEdit.bayBoxOf(doc, bayId);
+    if (b === null) {
+        return null;
+    }
+    return { x: (b.x1 + b.x2) / 2, y: (b.y1 + b.y2) / 2 };
+};
+
+/** The extent bayOriginOf takes its centre from: the ghost's box when
+ *  there is a ghost, the frame's otherwise. Wanted whole (not just as a
+ *  centre) by reopenScan's auto-fit fallback, which has to fit a scan
+ *  to the ghost the same way a brand-new bay does. */
+SectionEdit.bayBoxOf = function(doc, bayId) {
     var ids = doc.queryAllEntities(false, true);
     var frame = null, ghost = null;
     for (var i = 0; i < ids.length; i++) {
@@ -247,27 +350,63 @@ SectionEdit.bayOriginOf = function(doc, bayId) {
     // has shipped before, so update() runs even here.
     target.update();
     var b = target.getBoundingBox();
-    return { x: (b.getMinimum().x + b.getMaximum().x) / 2,
-             y: (b.getMinimum().y + b.getMaximum().y) / 2 };
+    return { x1: b.getMinimum().x, y1: b.getMinimum().y,
+             x2: b.getMaximum().x, y2: b.getMaximum().y };
+};
+
+/** The frame of an open bay, by bay id, or null. */
+SectionEdit.bayFrameOf = function(doc, bayId) {
+    var ids = doc.queryAllEntities(false, true);
+    for (var i = 0; i < ids.length; i++) {
+        var e = doc.queryEntity(ids[i]);
+        if (isNull(e) || CsTags.get(e, SketchSection.TAG_BAY) !== bayId) {
+            continue;
+        }
+        if (CsTags.get(e, "SectionBayRole") === SketchSection.ROLE_FRAME) {
+            return e;
+        }
+    }
+    return null;
+};
+
+/**
+ * Where a stored fit puts the scan in THIS bay: the caver's own u and v
+ * vectors as recorded, and the recorded insertion point re-based from
+ * the section's origin onto this bay's own.
+ *
+ * A NULL FIT AUTO-FITS instead, exactly as SketchSection.addScan does
+ * for a brand-new bay -- the fallback for an old five-number tag or a
+ * corrupt one. See the file header.
+ *
+ * \param fit a parsed fit, or null
+ * \param box this bay's ghost (or frame) extent, {x1,y1,x2,y2}
+ * \return a fit in THIS bay's absolute coordinates. Pure.
+ */
+SectionEdit.placementIn = function(fit, box, pxW, pxH) {
+    if (fit === null || fit === undefined) {
+        return CsSectionBay.fitTransform({ x1: 0, y1: 0, x2: pxW, y2: pxH },
+            box);
+    }
+    return { ux: fit.ux, uy: fit.uy, vx: fit.vx, vy: fit.vy,
+             tx: (box.x1 + box.x2) / 2 + fit.tx,
+             ty: (box.y1 + box.y2) / 2 + fit.ty };
 };
 
 /**
  * Place the scan into a freshly opened bay at the fit STORED on the
- * reference, recentred on THIS bay's own origin. See the file header
- * for why the scale is taken from storage while the position is not:
- * the scale is what the caver's tracing was drawn against and must
- * survive any drift in the survey since; the position has to follow
- * the bay, which can land somewhere new every time (frameRectFor parks
- * against the CURRENT plan extents).
+ * reference, re-based onto THIS bay. See the file header for why the
+ * fitting is taken from storage while the position is not: the fitting
+ * -- scale AND rotation, carried in the u/v vectors -- is what the
+ * caver's tracing was drawn against and must survive any drift in the
+ * survey since; the position has to follow the bay, which can land
+ * somewhere new every time (frameRectFor parks against the CURRENT plan
+ * extents).
  *
- * Built the same RImageData-BY-CONSTRUCTOR way SketchSection.addScan
- * is (see that file's own comment): setters on an already-placed
- * RImageData are not what any working image insert in this suite
- * trusts, so this never edits a placed image -- it only ever builds a
- * fresh one, exactly as addScan does, just from a caller-supplied fit
- * instead of one computed by CsSectionBay.fitTransform.
+ * Built through SketchSection.imageEntity, the one place in this
+ * feature that constructs an RImageData -- so a reopened scan and a
+ * freshly opened one cannot be placed two different ways.
  */
-SectionEdit.reopenScan = function(doc, di, path, fit, origin, bayId) {
+SectionEdit.reopenScan = function(doc, di, path, fit, box, bayId) {
     var img = new QImage(path);
     if (img.isNull()) {
         SketchSection.say(qsTr("The scan could not be read: ") + path);
@@ -278,24 +417,9 @@ SectionEdit.reopenScan = function(doc, di, path, fit, origin, bayId) {
         SketchSection.say(qsTr("The scan has no size: ") + path);
         return;
     }
-    var tx = origin.x - (pxW * fit.sx) / 2;
-    var ty = origin.y - (pxH * fit.sy) / 2;
-
-    var entity;
-    try {
-        var data = new RImageData(path,
-            new RVector(tx, ty),
-            new RVector(fit.sx, 0),
-            new RVector(0, fit.sy),
-            pxW, pxH, 0);
-        try {
-            data.setFade(50);
-        } catch (eFade) {
-            // an engine without setFade gets a full-strength scan
-        }
-        entity = new RImageEntity(doc, data);
-    } catch (e) {
-        SketchSection.say(qsTr("The scan could not be placed: ") + e);
+    var here = SectionEdit.placementIn(fit, box, pxW, pxH);
+    var entity = SketchSection.imageEntity(doc, path, here, pxW, pxH);
+    if (entity === null) {
         return;
     }
     entity.setLayerId(doc.getLayerId(CsLayers.CTRL_SECTION_SCAN));
@@ -304,10 +428,14 @@ SectionEdit.reopenScan = function(doc, di, path, fit, origin, bayId) {
     // excludes this scan exactly as it would one SketchSection placed.
     CsTags.set(entity, SketchSection.TAG_BAY, bayId);
     CsTags.set(entity, "SectionBayRole", SketchSection.ROLE_SCAN);
+    // The ABSOLUTE path, as resolved on this machine: this tag is what
+    // the next Capture reads to build the scan's record, and the image
+    // entity itself has to be constructible from it. Capture is where
+    // it goes back to being relative to scans/.
     CsTags.set(entity, CsCallout.KEY.SECTION_SCAN, path);
-    CsTags.set(entity, CsCallout.KEY.SECTION_FIT,
-        CsSectionBay.serializeFit({ sx: fit.sx, sy: fit.sy, rot: 0,
-            tx: tx, ty: ty }));
+    // NO SectionBayFit TAG, the same reason SketchSection.addScan no
+    // longer writes one: the caver is about to move this scan, and the
+    // next Capture reads the entity's live placement, never a tag.
     // To the back, under whatever the caver traces over it -- the same
     // underlay treatment every scan in this suite gets.
     entity.setDrawOrder(doc.getStorage().getMinDrawOrder() - 1);

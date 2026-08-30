@@ -75,6 +75,24 @@ SketchSection.ROLE_SCAN = "scan";
  *  it is rebuilt. */
 SketchSection.TAG_SNAP = "SectionBaySnap";
 
+/** The placed reference's own scale and rotation, parked on the FRAME
+ *  while its bay is open.
+ *
+ *  A reopen DELETES the block reference (the section must exist in
+ *  exactly one place at a time), and with it the only record of the
+ *  scale and rotation the caver gave it -- CalloutWrite.refreshSections'
+ *  contract is that position, scale and rotation are the caver's, and a
+ *  re-capture that rebuilt the reference at (1,1) and 0 silently reset
+ *  both on every edit. The frame is where they wait: it is the one piece
+ *  of bay furniture guaranteed to exist for the bay's whole lifetime,
+ *  which is exactly why TAG_SNAP already lives there.
+ *
+ *  Written by SectionEdit.explodeInto, read by SectionCapture.findBay.
+ *  ABSENT means the defaults -- a bay opened by Sketch Section rather
+ *  than reopened by Edit Sketch has no earlier reference to carry. */
+SketchSection.TAG_REF_SCALE = "SectionBayRefScale";
+SketchSection.TAG_REF_ROT = "SectionBayRefRot";
+
 SketchSection.prototype.beginEvent = function() {
     EAction.prototype.beginEvent.call(this);
     SketchSection.run(null, null);
@@ -326,38 +344,25 @@ SketchSection.addScan = function(doc, di, path, ghostBox, rect, bayId) {
     var ghostHere = { x1: cx + ghostBox.x1, y1: cy + ghostBox.y1,
                       x2: cx + ghostBox.x2, y2: cy + ghostBox.y2 };
     var fit = CsSectionBay.fitTransform(scanBox, ghostHere);
-
-    // RImageData BY CONSTRUCTOR, not by setFileName/setInsertionPoint/
-    // setUVector/setVVector. Probed 2026-08-29: those setters exist and
-    // do not throw, but every WORKING image insert in this suite
-    // (SketchScans.insert, SketchScans.insertFitted, ScanView.js,
-    // AerialBasemap.js) builds RImageData through the seven-argument
-    // constructor and never through setters -- so the constructor form
-    // is what is trusted to actually place a readable image, and this
-    // follows it rather than a shape that merely accepts calls.
-    var entity;
-    try {
-        var data = new RImageData(path,
-            new RVector(fit.tx, fit.ty),
-            new RVector(fit.sx, 0),
-            new RVector(0, fit.sy),
-            pxW, pxH, 0);
-        try {
-            data.setFade(50);
-        } catch (eFade) {
-            // an engine without setFade gets a full-strength scan
-        }
-        entity = new RImageEntity(doc, data);
-    } catch (e) {
-        SketchSection.say(qsTr("The scan could not be placed: ") + e);
+    var entity = SketchSection.imageEntity(doc, path, fit, pxW, pxH);
+    if (entity === null) {
         return;
     }
     entity.setLayerId(doc.getLayerId(CsLayers.CTRL_SECTION_SCAN));
     CsTags.set(entity, SketchSection.TAG_BAY, bayId);
     CsTags.set(entity, "SectionBayRole", SketchSection.ROLE_SCAN);
     CsTags.set(entity, CsCallout.KEY.SECTION_SCAN, path);
-    CsTags.set(entity, CsCallout.KEY.SECTION_FIT,
-        CsSectionBay.serializeFit(fit));
+    // NO SectionBayFit TAG HERE, deliberately. This function's auto-fit
+    // is true for exactly as long as it takes the caver to grab the
+    // scan -- and scaling and rotating the scan onto the ghost IS the
+    // workflow, so it is stale within seconds and stays stale forever
+    // (nothing updates it as the caver drags). SectionCapture used to
+    // copy this tag onto the finished section, which is how a caver's
+    // own fitting came back thrown away on the next Edit Sketch. Capture
+    // now reads the scan ENTITY's live insertion point and u/v vectors
+    // instead (SectionCapture.fitOfScan), so the only fit ever recorded
+    // is the one the caver actually left the scan at. A tag here would
+    // be a second, wrong answer waiting to be picked up again.
     // To the back, under whatever the caver traces over it -- the same
     // underlay treatment every scan in this suite gets (SketchScans.
     // insert), one below getMinDrawOrder() because this entity is not
@@ -370,6 +375,70 @@ SketchSection.addScan = function(doc, di, path, ghostBox, rect, bayId) {
         function() {
             di.applyOperation(op);
         });
+};
+
+/**
+ * A faded RImageEntity for `path`, placed at `fit`, or null.
+ *
+ * SHARED with SectionEdit.reopenScan, which places the very same scan
+ * back into a reopened bay -- one construction, so the two cannot drift
+ * into placing an image two different ways.
+ *
+ * RImageData BY CONSTRUCTOR, not by setFileName/setInsertionPoint/
+ * setUVector/setVVector. Probed 2026-08-29: those setters exist and do
+ * not throw, but every WORKING image insert in this suite
+ * (SketchScans.insert, SketchScans.insertFitted, ScanView.js,
+ * AerialBasemap.js) builds RImageData through the seven-argument
+ * constructor and never through setters -- so the constructor form is
+ * what is trusted to actually place a readable image, and this follows
+ * it rather than a shape that merely accepts calls.
+ *
+ * THE FIT'S u AND v GO IN WHOLE. They are the image's own per-pixel
+ * edge vectors, which is what this constructor's third and fourth
+ * arguments are; rebuilding them as (sx, 0) and (0, sy) from a
+ * decomposed scale -- what this used to do -- silently drops any
+ * rotation the caver put on the scan.
+ */
+SketchSection.imageEntity = function(doc, path, fit, pxW, pxH) {
+    try {
+        var data = new RImageData(path,
+            new RVector(fit.tx, fit.ty),
+            new RVector(fit.ux, fit.uy),
+            new RVector(fit.vx, fit.vy),
+            pxW, pxH, 0);
+        try {
+            data.setFade(50);
+        } catch (eFade) {
+            // an engine without setFade gets a full-strength scan
+        }
+        return new RImageEntity(doc, data);
+    } catch (e) {
+        SketchSection.say(qsTr("The scan could not be placed: ") + e);
+        return null;
+    }
+};
+
+/**
+ * This cave's scans/ folder as it exists on disk, or null.
+ *
+ * The folder as it is CASED on disk when there is one (real cave
+ * folders in the wild carry "Scans" as often as "scans"), falling back
+ * to the conventional spelling so a stored relative path still resolves
+ * on a machine where the folder has not synced down yet. Read-only:
+ * this never creates anything.
+ */
+SketchSection.scansFolderOf = function(doc) {
+    try {
+        var docPath = String(doc.getFileName());
+        var folder = CsCave.folderOf(docPath);
+        if (folder === null) {
+            return null;
+        }
+        var found = CsCave.findSubfolder(folder, CsCave.SCANS);
+        return (found !== null) ? found : CsCave.scansDir(docPath);
+    } catch (e) {
+        return null;
+    }
 };
 
 /** Zoom the view to the bay, so the caver is looking at it. */

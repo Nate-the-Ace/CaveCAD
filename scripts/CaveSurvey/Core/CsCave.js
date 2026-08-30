@@ -129,6 +129,65 @@ CsCave.pdfDir = function(docPath) {
     return folder === null ? null : folder + "/" + CsCave.PDF;
 };
 
+// Is this an absolute path? "/..." everywhere this add-on runs, plus
+// "C:/..." and "C:\..." on Windows. Used to tell a path STORED in a
+// drawing (relative to scans/, the suite's convention) from one an
+// older build stored absolute.
+CsCave.isAbsolutePath = function(p) {
+    if (typeof p !== "string" || p.length === 0) { return false; }
+    if (p.charAt(0) === "/" || p.charAt(0) === "\\") { return true; }
+    return /^[A-Za-z]:[\/\\]/.test(p);
+};
+
+// A scan's path AS A DRAWING SHOULD STORE IT: relative to the cave's
+// scans/ folder.
+//
+// WHY RELATIVE. An absolute path is only true on the machine that wrote
+// it. Cave projects live on a shared drive, get renamed, and get opened
+// by whoever is on the trip -- an absolute path makes every reopen on
+// any other machine report a missing scan. SketchScans already tags its
+// own inserted images with the relative path for exactly this reason.
+//
+// A path that is NOT under this cave's scans/ (a scan the caver picked
+// from somewhere else entirely, or a cave with no scans/ folder at all)
+// comes back UNCHANGED, still absolute: a wrong relative path would
+// resolve to a file that does not exist, which is worse than an honest
+// absolute one. Case-insensitive, because real cave folders in the wild
+// carry "Scans" as often as "scans" and macOS does not care which.
+// Pure.
+CsCave.relativeToScans = function(scansFolder, absPath) {
+    if (typeof absPath !== "string" || absPath.length === 0) { return ""; }
+    if (typeof scansFolder !== "string" || scansFolder.length === 0) {
+        return absPath;
+    }
+    var prefix = scansFolder;
+    if (prefix.charAt(prefix.length - 1) !== "/") { prefix = prefix + "/"; }
+    if (absPath.length <= prefix.length) { return absPath; }
+    if (absPath.substring(0, prefix.length).toLowerCase() !==
+            prefix.toLowerCase()) {
+        return absPath;
+    }
+    return absPath.substring(prefix.length);
+};
+
+// The other direction: what a stored scan path means on THIS machine.
+// A relative one is joined onto the cave's scans/ folder; an absolute
+// one (what builds before the relative convention wrote) is handed back
+// as it stands, so a section captured by an older build still reopens.
+// Pure.
+CsCave.resolveUnderScans = function(scansFolder, stored) {
+    if (typeof stored !== "string" || stored.length === 0) { return ""; }
+    if (CsCave.isAbsolutePath(stored)) { return stored; }
+    if (typeof scansFolder !== "string" || scansFolder.length === 0) {
+        return stored;
+    }
+    var base = scansFolder;
+    if (base.charAt(base.length - 1) === "/") {
+        base = base.substring(0, base.length - 1);
+    }
+    return base + "/" + stored;
+};
+
 // Is this file name a PDF? Extension only, case-insensitive -- the
 // packager trusts the folder, not the bytes.
 CsCave.isPdfName = function(name) {

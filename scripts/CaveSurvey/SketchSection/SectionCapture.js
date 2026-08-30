@@ -27,10 +27,31 @@
  * the centreline on the sheet, exactly as a computed section's is --
  * the two kinds drag, snap and leader identically.
  *
- * PLACEMENT IS PROPOSED, NOT IMPOSED. The march is a good guess: Enter
- * takes it, a click puts it somewhere else. A march that finds nowhere
- * clear inside its cap hands the placement over rather than flinging the
- * section off-sheet.
+ * PLACEMENT IS PROPOSED, NOT IMPOSED, AND THE PROPOSAL IS DRAWN. The
+ * march is a good guess, shown as a live preview -- the caver's own
+ * tracing and its leader, at the proposed spot, from the moment the
+ * command starts and following the cursor after that. Enter takes what
+ * is on screen, a click puts it somewhere else. A march that finds
+ * nowhere clear inside its cap hands the placement over rather than
+ * flinging the section off-sheet.
+ *
+ * THE PREVIEW IS THE REAL LINEWORK, cloned and moved, not a placeholder
+ * box -- the same rule Callout.getOperation follows and the same
+ * clone-and-transform shape QCAD's own Modify/Transform.js previews
+ * with (probed 2026-08-30: entity.clone() + op.addObject(clone,
+ * RAddObjectsOperation.ForceNew) + di.previewOperation is accepted
+ * here). Cloning is safe HERE and nowhere else in this file: a preview
+ * operation is never applied, so no source entity is ever deleted out
+ * from under a clone -- which is the trap that ate a whole tracing when
+ * the block build was written that way (see the paragraph above).
+ *
+ * THE SCAN'S FIT IS READ OFF THE SCAN ITSELF, at capture time, not
+ * copied from the SectionBayFit tag SketchSection wrote when the bay
+ * opened. That tag records the AUTO-fit, and scaling and rotating the
+ * scan onto the ghost is the entire workflow -- so it is wrong the
+ * moment the caver touches the scan, and Edit Sketch used to restore
+ * the scan at the auto-fit, throwing the caver's own fitting away.
+ * SketchSection no longer writes that tag at all.
  *
  * TEARDOWN RESTORES THE SNAP. SketchSection tags the bay's own frame
  * with the snap class the caver was using before the bay switched it to
@@ -108,6 +129,13 @@ SectionCapture.prototype.beginEvent = function() {
     EAction.showSnapTools();
     this.setCrosshairCursor();
     di.setClickMode(RAction.PickCoordinate);
+    // THE PROPOSAL IS ON SCREEN BEFORE THE MOUSE MOVES. "Enter to
+    // accept the proposed spot" is a prompt about something the caver
+    // cannot see until the first mouse-move preview fires -- and Enter
+    // is answerable without ever moving the mouse. Seeded here so the
+    // proposal is drawn the instant the command starts.
+    this.previewPos = { x: this.proposed.x, y: this.proposed.y };
+    this.updatePreview();
 };
 
 /** Enter takes the proposal. */
@@ -119,11 +147,99 @@ SectionCapture.prototype.enterEvent = function() {
 
 SectionCapture.prototype.pickCoordinate = function(event, preview) {
     var pos = event.getModelPosition();
+    this.previewPos = { x: pos.x, y: pos.y };
     if (preview) {
-        this.previewPos = { x: pos.x, y: pos.y };
+        // EAction.updatePreview() calls getOperation(true) and hands
+        // the result to di.previewOperation() -- the same path Callout
+        // and CalloutElev preview through. Without this call previewPos
+        // was written on every mouse move and read by nothing at all.
+        this.updatePreview();
         return;
     }
     this.finish({ x: pos.x, y: pos.y });
+};
+
+/**
+ * The live preview, and it is the REAL tracing.
+ *
+ * Returns undefined for the non-preview call on purpose: the actual
+ * write goes through SectionCapture.capture, which mints the block,
+ * guards every layer it touches and tears the bay down. An operation
+ * applied straight from here would skip all of that.
+ */
+SectionCapture.prototype.getOperation = function(preview) {
+    if (!preview) {
+        return undefined;
+    }
+    var doc = this.getDocument();
+    if (isNull(doc) || this.bay === null ||
+            this.previewPos === undefined || this.previewPos === null) {
+        return undefined;
+    }
+    return SectionCapture.previewOp(doc, this.bay, this.previewPos);
+};
+
+/**
+ * What the section would look like at `position`: the traced linework,
+ * cloned and moved out of the bay, plus the leader that would run back
+ * to the station.
+ *
+ * CLONED, not moved. Everywhere else in this file the originals are
+ * moved and never cloned -- clone()+delete-the-source loses the clone
+ * silently (see the file header). Neither half of that applies to a
+ * preview: nothing is committed and nothing is deleted, and cloning is
+ * how QCAD's own Modify/Transform.js previews a transform. Moving the
+ * originals here would drag the caver's tracing out of the bay on every
+ * mouse move.
+ *
+ * ForceNew, so the clones render as new entities rather than as
+ * modifications of the entities they were cloned from -- otherwise the
+ * tracing appears to jump out of the bay instead of being echoed at the
+ * candidate spot.
+ *
+ * A preview must never take the tool down: every failure here returns
+ * undefined and the caver simply sees no preview.
+ *
+ * \return an RAddObjectsOperation, or undefined
+ */
+SectionCapture.previewOp = function(doc, bay, position) {
+    try {
+        if (isNull(bay) || isNull(bay.traced) || bay.traced.length === 0) {
+            return undefined;
+        }
+        var origin = SectionCapture.originOf(bay);
+        var delta = new RVector(position.x - origin.x, position.y - origin.y);
+        var op = new RAddObjectsOperation();
+        var drew = false;
+        var i;
+        for (i = 0; i < bay.traced.length; i++) {
+            var e = doc.queryEntity(bay.traced[i]);
+            if (isNull(e)) {
+                continue;
+            }
+            var ghosted = e.clone();
+            ghosted.move(delta);
+            op.addObject(ghosted, RAddObjectsOperation.ForceNew);
+            drew = true;
+        }
+        if (!drew) {
+            return undefined;
+        }
+        // The leader too -- D4's "with the leader attached". Built by
+        // the same CalloutWrite.oneLeader the real capture uses, so
+        // what is previewed is the leader that lands, arrowhead at the
+        // station and all. NO CALLOUT ID: minting one per mouse move
+        // would be a fresh UUID per frame for an entity that is never
+        // committed, and CsTags.set no-ops on "" by design, so the
+        // preview leader simply carries no CalloutId.
+        var layerName = CsCallout.STYLES["annotation"] ||
+            CsCallout.STYLES[CsCallout.STYLE_DEFAULT];
+        SectionCapture.addLeader(doc, op, "", bay.station,
+            position, "annotation", layerName);
+        return op;
+    } catch (ePrev) {
+        return undefined;
+    }
 };
 
 /**
@@ -223,8 +339,91 @@ SectionCapture.findBay = function(doc) {
         frame: frame,
         ghost: ghost,
         scan: scan,
+        // The placement an EARLIER reference had, if this bay was
+        // reopened from one -- see SketchSection.TAG_REF_SCALE. Always
+        // defined, so capture() never has to ask whether this bay came
+        // from a reopen.
+        refScale: SectionCapture.scaleTagOf(frame),
+        refRot: SectionCapture.rotTagOf(frame),
         traced: CsSectionBay.sweepOf(items, rect, exclude)
     };
+};
+
+/** The reference scale parked on the frame ("sx,sy"), or (1,1). A tag
+ *  that is absent, malformed or degenerate (a zero factor collapses the
+ *  section to nothing) falls back to the identity rather than to a
+ *  number that would make the section vanish. */
+SectionCapture.scaleTagOf = function(frame) {
+    var one = { x: 1, y: 1 };
+    if (frame === null || isNull(frame)) {
+        return one;
+    }
+    var raw = CsTags.get(frame, SketchSection.TAG_REF_SCALE);
+    if (raw === "") {
+        return one;
+    }
+    var parts = String(raw).split(",");
+    if (parts.length !== 2) {
+        return one;
+    }
+    var sx = parseFloat(parts[0]);
+    var sy = parseFloat(parts[1]);
+    if (isNaN(sx) || isNaN(sy) || sx === 0 || sy === 0) {
+        return one;
+    }
+    return { x: sx, y: sy };
+};
+
+/** The reference rotation parked on the frame, in radians, or 0. */
+SectionCapture.rotTagOf = function(frame) {
+    if (frame === null || isNull(frame)) {
+        return 0;
+    }
+    var raw = CsTags.get(frame, SketchSection.TAG_REF_ROT);
+    if (raw === "") {
+        return 0;
+    }
+    var rot = parseFloat(raw);
+    return isNaN(rot) ? 0 : rot;
+};
+
+/**
+ * The fit of a bay's scan, read off THE SCAN ITSELF: its live insertion
+ * point and its u/v vectors, with the insertion point expressed
+ * relative to `origin` (the section's own centre, which becomes the
+ * block's 0,0).
+ *
+ * THIS IS THE WHOLE POINT OF F1. The scan's u and v vectors carry every
+ * scale and every rotation the caver applied while fitting it over the
+ * ghost -- probed 2026-08-30 against a real RImageEntity: a scale(2) +
+ * rotate(30 degrees) turns u=(0.5,0) into u=(0.866,0.5). Copying
+ * SketchSection's SectionBayFit tag instead read back the AUTO-fit the
+ * bay opened at and discarded the fitting entirely.
+ *
+ * \return a fit for CsSectionBay.serializeFit, or null
+ */
+SectionCapture.fitOfScan = function(scan, origin) {
+    try {
+        if (scan === null || isNull(scan)) {
+            return null;
+        }
+        var d = scan.getData();
+        var ip = d.getInsertionPoint();
+        var u = d.getUVector();
+        var v = d.getVVector();
+        var fit = { ux: u.x, uy: u.y, vx: v.x, vy: v.y,
+                    tx: ip.x - origin.x, ty: ip.y - origin.y };
+        // A NaN anywhere would serialize as 0.000000 and place the scan
+        // somewhere arbitrary on reopen. No fit at all is honest; a
+        // wrong one is not.
+        if (isNaN(fit.ux) || isNaN(fit.uy) || isNaN(fit.vx) ||
+                isNaN(fit.vy) || isNaN(fit.tx) || isNaN(fit.ty)) {
+            return null;
+        }
+        return fit;
+    } catch (e) {
+        return null;
+    }
 };
 
 /** The bay's origin: the ghost's centre, or the frame's if there is no
@@ -439,9 +638,22 @@ SectionCapture.capture = function(doc, di, bay, position) {
     layerNames.push(CsLayers.CTRL_SECTION_GHOST);
     layerNames.push(CsLayers.CTRL_SECTION_SCAN);
 
+    // THE SCALE AND ROTATION ARE CARRIED, NOT RESET. A fresh capture
+    // has no earlier reference and gets the identity; a re-capture
+    // after Edit Sketch gets back whatever the caver had given the
+    // reference before the reopen deleted it, parked on the frame in
+    // the meantime (SketchSection.TAG_REF_SCALE). Hard-coding
+    // RVector(1,1) and 0.0 here is what silently undid a caver's own
+    // scaling and rotation on every single edit round trip, against
+    // CalloutWrite.refreshSections' stated contract that position,
+    // scale and rotation are theirs.
+    var refScale = bay.refScale || { x: 1, y: 1 };
+    var refRot = (typeof bay.refRot === "number" && !isNaN(bay.refRot)) ?
+        bay.refRot : 0;
     var at = new RVector(position.x, position.y);
     var ref = new RBlockReferenceEntity(doc,
-        new RBlockReferenceData(blockId, at, new RVector(1, 1), 0.0));
+        new RBlockReferenceData(blockId, at,
+            new RVector(refScale.x, refScale.y), refRot));
     ref.setLayerId(doc.getLayerId(layerName));
 
     // Tag BEFORE adding, so the tags land in the SAME operation as the
@@ -456,10 +668,28 @@ SectionCapture.capture = function(doc, di, bay, position) {
     CsTags.set(ref, CsCallout.KEY.SECTION_STATION, bay.station);
     CsTags.set(ref, CsCallout.KEY.SECTION_SCALE, String(scale));
     if (bay.scan !== null) {
+        // THE PATH GOES IN RELATIVE TO scans/. An absolute path is only
+        // true on the machine that wrote it, and cave projects live on
+        // a shared drive, get renamed, and get opened by whoever was on
+        // the trip -- an absolute path makes every Edit Sketch on any
+        // other machine report a missing scan. The design spec's tag
+        // table says "relative to scans/" and SketchScans already tags
+        // its own inserted images that way. A scan from outside this
+        // cave's scans/ folder stays absolute (CsCave.relativeToScans),
+        // because a wrong relative path resolves to nothing at all.
         var path = CsTags.get(bay.scan, CsCallout.KEY.SECTION_SCAN);
-        var fit = CsTags.get(bay.scan, CsCallout.KEY.SECTION_FIT);
-        if (path !== "") { CsTags.set(ref, CsCallout.KEY.SECTION_SCAN, path); }
-        if (fit !== "") { CsTags.set(ref, CsCallout.KEY.SECTION_FIT, fit); }
+        if (path !== "") {
+            CsTags.set(ref, CsCallout.KEY.SECTION_SCAN,
+                CsCave.relativeToScans(SketchSection.scansFolderOf(doc),
+                    path));
+        }
+        // THE FIT COMES OFF THE SCAN ENTITY, not off its tag -- see
+        // SectionCapture.fitOfScan and the file header.
+        var fit = SectionCapture.fitOfScan(bay.scan, origin);
+        if (fit !== null) {
+            CsTags.set(ref, CsCallout.KEY.SECTION_FIT,
+                CsSectionBay.serializeFit(fit));
+        }
     }
     op.addObject(ref, false);
 

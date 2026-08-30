@@ -9928,6 +9928,65 @@ ok(CsCave.isUnderDrive(CSCAVE_DOC, ["", "  "]) === false,
     "an empty root never matches everything -- the bug that would put " +
     "scans/ beside every drawing on the machine");
 
+// --- a scan path as a DRAWING stores it -----------------------------
+//
+// Relative to the cave's scans/ folder, because an absolute path is
+// only true on the machine that wrote it: cave projects live on a
+// shared drive, get renamed, and get opened by whoever was on the trip.
+// A sketched section used to store the absolute path, so every Edit
+// Sketch on any other machine reported a missing scan.
+var CSSCANS = "/u/Drive/ALL DAY CAVE/scans";
+eqs(CsCave.relativeToScans(CSSCANS, CSSCANS + "/9-7-25/IMG_4021.jpg"),
+    "9-7-25/IMG_4021.jpg",
+    "relativeToScans: a scan under scans/ stores relative, subfolder and all");
+eqs(CsCave.relativeToScans(CSSCANS + "/", CSSCANS + "/x.jpg"), "x.jpg",
+    "relativeToScans: a trailing slash on the folder changes nothing");
+// Real cave folders in the wild carry "Scans" as often as "scans", and
+// macOS does not care which -- a case-sensitive compare here would
+// leave half the caves on absolute paths without saying so.
+eqs(CsCave.relativeToScans("/u/Drive/ALL DAY CAVE/Scans",
+    "/u/Drive/ALL DAY CAVE/Scans/x.jpg"), "x.jpg",
+    "relativeToScans: and it does not care how the folder is cased");
+// A scan from outside this cave stays ABSOLUTE. A wrong relative path
+// resolves to a file that does not exist, which is worse than an
+// honest absolute one.
+eqs(CsCave.relativeToScans(CSSCANS, "/somewhere/else/x.jpg"),
+    "/somewhere/else/x.jpg",
+    "relativeToScans: a scan from outside scans/ stays absolute");
+eqs(CsCave.relativeToScans(null, "/a/b.jpg"), "/a/b.jpg",
+    "relativeToScans: no scans folder means nothing to be relative to");
+eqs(CsCave.relativeToScans(CSSCANS, ""), "",
+    "relativeToScans: nothing in, nothing out");
+
+eqs(CsCave.resolveUnderScans(CSSCANS, "9-7-25/IMG_4021.jpg"),
+    CSSCANS + "/9-7-25/IMG_4021.jpg",
+    "resolveUnderScans: a stored relative path resolves against this cave");
+// THE OLD ABSOLUTE PATHS STILL WORK. Sections captured before the
+// relative convention hold an absolute path, and they have to keep
+// reopening -- silently turning one into scans/<absolute> would break
+// every section already in the wild.
+eqs(CsCave.resolveUnderScans(CSSCANS, "/old/build/wrote/this.jpg"),
+    "/old/build/wrote/this.jpg",
+    "resolveUnderScans: an absolute path stored by an older build is " +
+    "handed back untouched");
+eqs(CsCave.resolveUnderScans(CSSCANS + "/", "x.jpg"), CSSCANS + "/x.jpg",
+    "resolveUnderScans: and a trailing slash never doubles up");
+eqs(CsCave.resolveUnderScans(null, "x.jpg"), "x.jpg",
+    "resolveUnderScans: with no scans folder the stored path is all there is");
+eqs(CsCave.resolveUnderScans(CSSCANS, ""), "",
+    "resolveUnderScans: nothing in, nothing out");
+ok(CsCave.isAbsolutePath("/a/b") === true &&
+   CsCave.isAbsolutePath("C:/a/b") === true &&
+   CsCave.isAbsolutePath("C:\\a\\b") === true &&
+   CsCave.isAbsolutePath("a/b") === false &&
+   CsCave.isAbsolutePath("") === false,
+    "isAbsolutePath: posix, both Windows spellings, and neither");
+// The round trip is the whole point: what capture stores, reopen reads.
+eqs(CsCave.resolveUnderScans(CSSCANS,
+    CsCave.relativeToScans(CSSCANS, CSSCANS + "/9-7-25/IMG_4021.jpg")),
+    CSSCANS + "/9-7-25/IMG_4021.jpg",
+    "a scan path round trips through storage and back to the same file");
+
 // Engine-only: the two halves that touch QDir and RSettings.
 if (!IS_NODE) {
     var cscaveRoots = CsCave.driveRoots();
@@ -10485,13 +10544,15 @@ if (!IS_NODE) {
     var fit = CsSectionBay.fitTransform(
         { x1: 0, y1: 0, x2: 200, y2: 100 },   // the scan as inserted
         { x1: -5, y1: -5, x2: 5, y2: 5 });    // the ghost
-    near(fit.sx, 0.05, 1e-9, "fitTransform: uniform scale to the ghost width");
-    eqs(fit.sx, fit.sy, "fitTransform: uniform -- never squashed");
+    near(fit.ux, 0.05, 1e-9, "fitTransform: uniform scale to the ghost width");
+    eqs(fit.ux, fit.vy, "fitTransform: uniform -- never squashed");
     near(fit.tx, -5, 1e-9, "fitTransform: and centred on the ghost");
+    ok(fit.uy === 0 && fit.vx === 0,
+        "fitTransform: an auto-fit is axis-aligned -- no rotation in it");
 
     var text = CsSectionBay.serializeFit(fit);
     var back = CsSectionBay.parseFit(text);
-    near(back.sx, fit.sx, 1e-9, "parseFit: round trips the scale");
+    near(back.ux, fit.ux, 1e-9, "parseFit: round trips the scale");
     near(back.tx, fit.tx, 1e-9, "parseFit: and the offset");
     ok(CsSectionBay.parseFit("nonsense") === null,
         "parseFit: junk is null, never a throw");
@@ -10500,13 +10561,41 @@ if (!IS_NODE) {
     ok(text.length < 200,
         "serializeFit: stays far under the dxflib per-line limit");
 
+    // ROTATION IS THE WHOLE REASON THE FIT IS TWO VECTORS. The caver
+    // turns the scan onto the ghost -- that IS the workflow -- and the
+    // fit this replaced stored sx/sy/rot and rebuilt u = (sx, 0),
+    // v = (0, sy), a shape with nowhere to put an angle. A turned scan
+    // came back square, silently, and the caver's fitting was gone.
+    // 30 degrees at scale 2: u = (2cos30, 2sin30), v = (-2sin30, 2cos30).
+    var turned = { ux: 2 * Math.cos(Math.PI / 6), uy: 2 * Math.sin(Math.PI / 6),
+                   vx: -2 * Math.sin(Math.PI / 6), vy: 2 * Math.cos(Math.PI / 6),
+                   tx: 3, ty: -4 };
+    var turnedBack = CsSectionBay.parseFit(CsSectionBay.serializeFit(turned));
+    near(turnedBack.ux, turned.ux, 1e-6, "parseFit: a rotated fit survives (ux)");
+    near(turnedBack.uy, turned.uy, 1e-6, "parseFit: and its cross term (uy)");
+    near(turnedBack.vx, turned.vx, 1e-6, "parseFit: and the other one (vx)");
+    near(turnedBack.vy, turned.vy, 1e-6, "parseFit: and the v scale (vy)");
+    near(turnedBack.ty, turned.ty, 1e-6, "parseFit: and the offset with it");
+    ok(turnedBack.uy !== 0 && turnedBack.vx !== 0,
+        "parseFit: the rotation is still IN there, not flattened to square");
+
+    // THE OLD FIVE-NUMBER FORMAT READS AS NULL, not as a fit whose
+    // numbers mean something else. Its tx/ty were absolute world
+    // coordinates in a bay that no longer exists; read as this format
+    // they would place the scan hundreds of units off the reopened bay.
+    // Null sends SectionEdit down its auto-fit fallback instead.
+    ok(CsSectionBay.parseFit("0.05,0.05,0.000000,-5.0,-2.5") === null,
+        "parseFit: a pre-rotation five-field fit is null, never misread");
+    ok(CsSectionBay.parseFit("1,2,3,4,5,6,7") === null,
+        "parseFit: and so is one field too many");
+
     // A degenerate box (NaN in, e.g. an entity whose extent has not
     // been computed yet) must not hand the caller a NaN transform --
     // that NaN would ride silently into every insertion downstream.
     var badFit = CsSectionBay.fitTransform(
         { x1: NaN, y1: 0, x2: 200, y2: 100 },
         { x1: -5, y1: -5, x2: 5, y2: 5 });
-    ok(!isNaN(badFit.sx) && !isNaN(badFit.tx) && !isNaN(badFit.ty),
+    ok(!isNaN(badFit.ux) && !isNaN(badFit.tx) && !isNaN(badFit.ty),
         "fitTransform: a NaN box yields a defined fit, never a NaN one");
 
     // --- where the block lands ----------------------------------------

@@ -114,7 +114,8 @@ CsSectionBay.sweepOf = function(items, rect, excludeIds) {
  * Caught at the boundary, once, on the finished numbers, rather than
  * validating every input field individually.
  *
- * \return {sx, sy, rot, tx, ty}. Pure.
+ * \return a fit: {ux, uy, vx, vy, tx, ty}. Pure. See serializeFit for
+ *         what the six numbers mean.
  */
 CsSectionBay.fitTransform = function(scanBox, ghostBox) {
     var sw = scanBox.x2 - scanBox.x1;
@@ -123,45 +124,77 @@ CsSectionBay.fitTransform = function(scanBox, ghostBox) {
     var cx = (ghostBox.x1 + ghostBox.x2) / 2;
     var cy = (ghostBox.y1 + ghostBox.y2) / 2;
     var sh = (scanBox.y2 - scanBox.y1) * k;
-    var fit = { sx: k, sy: k, rot: 0,
+    // Axis-aligned, because an auto-fit has no rotation to express:
+    // u runs along +x at the fitted scale, v along +y.
+    var fit = { ux: k, uy: 0, vx: 0, vy: k,
                 tx: cx - (sw * k) / 2, ty: cy - sh / 2 };
-    if (isNaN(fit.sx) || isNaN(fit.sy) || isNaN(fit.tx) || isNaN(fit.ty)) {
-        return { sx: 1, sy: 1, rot: 0, tx: 0, ty: 0 };
+    if (isNaN(fit.ux) || isNaN(fit.vy) || isNaN(fit.tx) || isNaN(fit.ty)) {
+        return { ux: 1, uy: 0, vx: 0, vy: 1, tx: 0, ty: 0 };
     }
     return fit;
 };
 
-/** The fit as a tag value. Fixed precision and five fields, so the
- *  serialized length is bounded by construction -- no tag in this
- *  suite is ever allowed to grow without a limit. */
+/**
+ * The fit as a tag value.
+ *
+ * THE TWO VECTORS, NOT A DECOMPOSITION. `u` and `v` are the image's own
+ * per-pixel edge vectors -- exactly what `RImageData` carries and
+ * exactly what an `RImageData` constructor takes back -- so they hold
+ * scale AND rotation together with nothing to decompose and nothing to
+ * recompose. The fit this replaced stored `sx, sy, rot` and rebuilt
+ * `u = (sx, 0)`, `v = (0, sy)`, a shape that cannot express a rotation
+ * at all: a caver who turned the scan onto the ghost got it back
+ * square, and `rot` was written 0 every time regardless.
+ *
+ * `tx, ty` are the insertion point RELATIVE TO THE SECTION'S OWN
+ * ORIGIN (the ghost centre, which is also the block's 0,0). Absolute
+ * coordinates would be meaningless on reopen: the bay parks against the
+ * CURRENT plan extents and lands somewhere new every time.
+ *
+ * Fixed precision and six fields, so the serialized length is bounded
+ * by construction -- no tag in this suite is ever allowed to grow
+ * without a limit.
+ */
 CsSectionBay.serializeFit = function(fit) {
     var n = function(v) {
         return (isNaN(v) ? 0 : v).toFixed(6);
     };
-    return [n(fit.sx), n(fit.sy), n(fit.rot), n(fit.tx), n(fit.ty)].join(",");
+    return [n(fit.ux), n(fit.uy), n(fit.vx), n(fit.vy),
+            n(fit.tx), n(fit.ty)].join(",");
 };
 
-/** The fit back from a tag value, or NULL when it is not one. Never
- *  throws: a corrupt tag must reopen the bay without an underlay, not
- *  take the tool down. */
+/**
+ * The fit back from a tag value, or NULL when it is not one. Never
+ * throws: a corrupt tag must reopen the bay without an underlay, not
+ * take the tool down.
+ *
+ * THE OLD FIVE-FIELD FORMAT (`sx,sy,rot,tx,ty`) READS AS NULL, on
+ * purpose. Its numbers do not mean what these six mean -- its `tx,ty`
+ * were absolute world coordinates in a bay that no longer exists -- so
+ * reading it as if it were this format would place the scan at a point
+ * hundreds of units off the reopened bay. Null instead sends the caller
+ * down its own fallback (SectionEdit auto-fits the scan to the ghost,
+ * exactly as SketchSection does when a bay first opens), which is what
+ * a pre-change section was getting anyway.
+ */
 CsSectionBay.parseFit = function(text) {
     if (text === null || text === undefined || String(text) === "") {
         return null;
     }
     var parts = String(text).split(",");
-    if (parts.length !== 5) {
+    if (parts.length !== 6) {
         return null;
     }
     var nums = [];
-    for (var i = 0; i < 5; i++) {
+    for (var i = 0; i < 6; i++) {
         var v = parseFloat(parts[i]);
         if (isNaN(v)) {
             return null;
         }
         nums.push(v);
     }
-    return { sx: nums[0], sy: nums[1], rot: nums[2],
-             tx: nums[3], ty: nums[4] };
+    return { ux: nums[0], uy: nums[1], vx: nums[2], vy: nums[3],
+             tx: nums[4], ty: nums[5] };
 };
 
 /** Two boxes overlapping, once one is grown by a margin. Pure. */
