@@ -45,6 +45,7 @@ include(includeBasePath + "/CsScanFrame.js");
 include(includeBasePath + "/CsScanReanchor.js");
 include(includeBasePath + "/CsSectionCut.js");
 include(includeBasePath + "/CsSectionDraw.js");
+include(includeBasePath + "/CsSectionBay.js");
 // The extended elevation: CsProfile (pure geometry) needs CsLrud above
 // for splaysByStation/legCounts; CsProfileDraw needs CsLayers/CsTags/
 // CsDraw, but only inside function BODIES (RVector, RLineEntity, ...),

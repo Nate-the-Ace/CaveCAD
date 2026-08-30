@@ -135,6 +135,7 @@ var CORE_FILES = [
     // reference QCAD symbols but are never CALLED here -- same reason
     // CsProfileDraw is loadable under node.
     "scripts/CaveSurvey/Core/CsSectionDraw.js",
+    "scripts/CaveSurvey/Core/CsSectionBay.js",
     "scripts/CaveSurvey/Core/CsProfile.js",
     // CsProfileDraw is QCAD-context for render()/erase()/band()/run()/
     // label() (RVector, RLineEntity, ...), but CsProfileDraw.labelText
@@ -10418,6 +10419,99 @@ if (!IS_NODE) {
         "placeOf: a band that no longer exists falls back to the name");
     ok(CsScanFrame.placeOf(places, "Z9", "D") === null,
         "placeOf: a name that is nowhere answers null");
+}());
+
+// ---------------------------------------------------------------------
+// CsSectionBay -- where the bay goes, what is inside it, and where the
+// finished section lands.
+// ---------------------------------------------------------------------
+
+(function() {
+    // --- where the bay parks ------------------------------------------
+    var plan = { x1: 0, y1: 0, x2: 100, y2: 60 };
+    var bay = CsSectionBay.frameRectFor(plan, { w: 40, h: 40 }, null);
+    ok(bay.x1 >= plan.x2 || bay.x2 <= plan.x1 ||
+       bay.y1 >= plan.y2 || bay.y2 <= plan.y1,
+        "frameRectFor: the bay does not overlap the plan");
+    eqs(bay.x2 - bay.x1, 40, "frameRectFor: the bay is the size asked for");
+    eqs(bay.y2 - bay.y1, 40, "frameRectFor: in both directions");
+
+    var remembered = CsSectionBay.frameRectFor(plan, { w: 40, h: 40 },
+        { x: -500, y: -500 });
+    eqs(remembered.x1, -500, "frameRectFor: a remembered corner wins");
+    eqs(remembered.y1, -500, "frameRectFor: in both directions");
+
+    // AN EMPTY DRAWING HAS NO EXTENT. Parking relative to nothing must
+    // not produce NaN -- that lands the bay at an unreachable point and
+    // the caver sees an empty screen with no error.
+    var virgin = CsSectionBay.frameRectFor(null, { w: 40, h: 40 }, null);
+    ok(!isNaN(virgin.x1) && !isNaN(virgin.y1),
+        "frameRectFor: an empty drawing still gets a real rectangle");
+
+    // --- what is inside it --------------------------------------------
+    var rect = { x1: 0, y1: 0, x2: 10, y2: 10 };
+    ok(CsSectionBay.contains(rect, { x1: 1, y1: 1, x2: 9, y2: 9 }),
+        "contains: wholly inside");
+    ok(!CsSectionBay.contains(rect, { x1: -1, y1: 1, x2: 9, y2: 9 }),
+        "contains: crossing the edge is OUT, never half-captured");
+    ok(!CsSectionBay.contains(rect, { x1: 20, y1: 20, x2: 30, y2: 30 }),
+        "contains: wholly outside");
+    ok(CsSectionBay.contains(rect, { x1: 0, y1: 0, x2: 10, y2: 10 }),
+        "contains: flush with the frame counts as in");
+
+    var items = [
+        { id: 1, box: { x1: 1, y1: 1, x2: 2, y2: 2 } },   // in
+        { id: 2, box: { x1: 3, y1: 3, x2: 4, y2: 4 } },   // in, excluded
+        { id: 3, box: { x1: 50, y1: 50, x2: 51, y2: 51 } } // out
+    ];
+    var swept = CsSectionBay.sweepOf(items, rect, [2]);
+    eqs(swept.length, 1, "sweepOf: one entity survives");
+    eqs(swept[0], 1, "sweepOf: and it is the un-excluded inside one");
+
+    // --- the scan over the ghost --------------------------------------
+    var fit = CsSectionBay.fitTransform(
+        { x1: 0, y1: 0, x2: 200, y2: 100 },   // the scan as inserted
+        { x1: -5, y1: -5, x2: 5, y2: 5 });    // the ghost
+    near(fit.sx, 0.05, 1e-9, "fitTransform: uniform scale to the ghost width");
+    eqs(fit.sx, fit.sy, "fitTransform: uniform -- never squashed");
+    near(fit.tx, -5, 1e-9, "fitTransform: and centred on the ghost");
+
+    var text = CsSectionBay.serializeFit(fit);
+    var back = CsSectionBay.parseFit(text);
+    near(back.sx, fit.sx, 1e-9, "parseFit: round trips the scale");
+    near(back.tx, fit.tx, 1e-9, "parseFit: and the offset");
+    ok(CsSectionBay.parseFit("nonsense") === null,
+        "parseFit: junk is null, never a throw");
+    ok(CsSectionBay.parseFit("") === null,
+        "parseFit: and so is nothing at all");
+    ok(text.length < 200,
+        "serializeFit: stays far under the dxflib per-line limit");
+
+    // --- where the block lands ----------------------------------------
+    // A wall dead ahead: the march must step PAST it, not stop short.
+    var blockBox = { x1: -2, y1: -2, x2: 2, y2: 2 };
+    var walls = [{ x1: 5, y1: -20, x2: 6, y2: 20 }];
+    var spot = CsSectionBay.marchOut({ x: 0, y: 0 }, { x: 1, y: 0 },
+        blockBox, walls, 1, 100);
+    ok(spot !== null, "marchOut: finds a spot past the wall");
+    ok(spot.x - 2 > 6 + 1,
+        "marchOut: clear of the wall by at least the margin");
+
+    var boxedIn = CsSectionBay.marchOut({ x: 0, y: 0 }, { x: 1, y: 0 },
+        blockBox, [{ x1: -1000, y1: -1000, x2: 1000, y2: 1000 }], 1, 20);
+    ok(boxedIn === null,
+        "marchOut: nowhere clear inside the cap is null, not a wild guess");
+
+    // --- which way is out ---------------------------------------------
+    var perp = CsSectionBay.perpOf({ x: 1, y: 0 });
+    near(Math.abs(perp.y), 1, 1e-9, "perpOf: perpendicular to the leg");
+    near(perp.x, 0, 1e-9, "perpOf: and unit length");
+
+    eqs(CsSectionBay.clearerSide({ x: 0, y: 0 }, { x: 0, y: 1 },
+        [{ x1: -5, y1: 1, x2: 5, y2: 5 }], 20), -1,
+        "clearerSide: away from the crowded side");
+    eqs(CsSectionBay.clearerSide({ x: 0, y: 0 }, { x: 0, y: 1 }, [], 20), 1,
+        "clearerSide: a tie goes positive, so the answer is stable");
 }());
 
 // ---------------------------------------------------------------------
