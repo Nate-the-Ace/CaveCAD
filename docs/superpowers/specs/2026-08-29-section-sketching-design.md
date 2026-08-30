@@ -94,8 +94,9 @@ and a visible check of the tracing against the measurements. It is
 deleted at Capture and never reaches the block.
 
 Where the station has no usable LRUD, no ghost is drawn and the bay
-falls back to a two-click distance calibration (pick two points on the
-scan, type the real distance).
+says so. *As built:* the fallback is a message telling the caver to
+scale against a line of known length they draw themselves, not the
+two-click calibration tool described here. See "As built" below.
 
 ### D3 — Capture is geometric containment
 
@@ -131,7 +132,10 @@ follows the survey exactly like a computed one.
 Revision is by **reopening the bay**, not by editing the block in place:
 the scan path and the bay fit are stored on the reference, so Edit
 Sketch restores the scan at the same scale with the tracing back inside
-the frame. Re-Capture redefines the block; the reference does not move.
+the frame. *As built:* Re-Capture builds a NEW reference under a new
+callout id rather than redefining in place, so the reference does move —
+its scale and rotation are carried across the reopen on the bay frame,
+but its position is re-proposed. See "As built" below.
 
 This is the revision framework's own rule — the drawing is
 reconstructible from what is stored on it.
@@ -158,6 +162,10 @@ side with the most empty space. Once the caver moves it, the position is
 remembered per cave in settings, so a session of ten sections opens the
 bay in the same place every time.
 
+*As built: neither half shipped.* The bay always parks to the right of
+the plan extents, and nothing writes the remembered corner — the read
+path exists and is dead. See "As built" below.
+
 ## Architecture
 
 ### New pure Core — `Core/CsSectionBay.js`
@@ -170,12 +178,15 @@ it under node.
   capture set, by containment.
 - `fitTransform(scanBox, ghostBox)` — the initial scan placement over
   the ghost, and `serializeFit` / `parseFit` for the tag
-  (`sx,sy,rot,tx,ty`, comma-joined, capped well under the dxflib
-  1024-per-line rule).
+  (as built `ux,uy,vx,vy,tx,ty` — the image's own u and v vectors,
+  which carry scale AND rotation together; comma-joined, capped well
+  under the dxflib 1024-per-line rule).
 - `marchOut(origin, direction, blockBox, obstacles, margin, cap)` — the
   placement search of D4, returning a point or null.
-- `axisAt(resolved, stationName)` — the outward direction: perpendicular
-  to the local leg tangent, sign toward the clearer side.
+- `perpOf(d)` and `clearerSide(origin, perp, obstacles, probe)` — the
+  outward direction: perpendicular to the local leg tangent, sign toward
+  the clearer side. (Shipped as this pair rather than one `axisAt`, so
+  each half is testable alone.)
 
 ### New tool — `SketchSection/`
 
@@ -225,7 +236,7 @@ On the block reference:
 |---|---|
 | `SectionSource` | `sketch` — the regeneration gate (D5) |
 | `SectionScan` | scan path relative to `scans/` |
-| `SectionBayFit` | `sx,sy,rot,tx,ty` of the scan over the ghost |
+| `SectionBayFit` | `ux,uy,vx,vy,tx,ty` — the scan's actual placement, read off the image at capture, not the auto-fit |
 | `SectionStationRef` | the plan station the section is cut at |
 | `SectionScale` | drawing units per survey unit in the block |
 
@@ -234,8 +245,8 @@ returns early on empty and cannot unset.
 
 ## Error handling
 
-- **No usable LRUD at the station** — no ghost, two-click calibration
-  instead (D2), and the bay says so.
+- **No usable LRUD at the station** — no ghost; the bay says so and
+  asks the caver to scale against a line of known length (D2 as built).
 - **March finds nowhere clear** — capped; falls back to plain
   click-to-place rather than flinging the block into empty space.
 - **Empty sweep** — Capture refuses and explains, rather than defining
@@ -304,3 +315,91 @@ sides can disagree.
   computed where splays are dense, sketched where the field book is
   better.
 - A producer for `SectionStation`. Reserved, not built.
+
+## As built — 2026-08-30
+
+Shipped at 0.9.38.0 across sixteen commits. The decisions above are the
+record of what was decided; this section records where the build
+diverged, and why. Everything not listed here shipped as designed.
+
+**Delivered as designed:** D1 (the bay), D3 (containment sweep), D4
+(auto-propose, live preview, Enter or click), D6 (one scan browser), D7
+(the frame combo). D2's ghost shipped, on its own dashed layer
+`CTRL-SECTION-GHOST` rather than on `CTRL-SECTION-OUTLINE` — sharing the
+outline layer made the provisional ghost render pixel-identical to a
+finished section, since that layer is `CONTINUOUS` and this suite has no
+precedent for per-entity linetypes.
+
+**D2's fallback is weaker than promised.** Where a station has no
+cuttable LRUD there is no two-click calibration tool; the bay opens
+without a ghost and tells the caver to scale against a line of known
+length they draw themselves.
+
+**D5's "the reference does not move" is not true.** Edit Sketch deletes
+the reference and its leaders; Capture then builds a new one under a new
+callout id. Scale and rotation survive — they are parked on the bay
+frame (`SectionBayRefScale` / `SectionBayRefRot`) across the reopen, the
+same place the pre-bay snap class rides — but the position is
+re-proposed by the march. A caver who dragged a section somewhere
+deliberate will have to drag it again after an edit.
+
+**D5's leader promise needed building.** The re-anchor described here did
+not follow from the gate: `refreshSections` skipped a sketched section
+before reaching its leader-aiming code, exactly as it does for a frozen
+one. `reanchorSketchLeader` now re-aims it, guarded by the existing
+`signatureOfLeaders` no-op check so an unmoved station writes no
+transaction at all — a refresh that rewrites unchanged geometry is what
+froze CaveCAD once before.
+
+**D8 shipped neither half.** The bay always parks to the right of the
+plan extents, not on the side with the most space, and nothing writes
+the remembered corner — `SketchSection.rememberedCorner` reads a setting
+no code sets. Deliberate: noticing the frame has been dragged needs a
+transaction listener, and a listener firing on a no-op write is the
+freeze above. The read path is in place for whoever picks it up.
+
+**`SectionBayFit` changed shape.** It is `ux,uy,vx,vy,tx,ty` — the
+image's own vectors, read off the placed scan at capture — not
+`sx,sy,rot,tx,ty` derived from the auto-fit. The original could not
+express rotation at all, and being written once at insert time it threw
+away the scaling and rotating the caver did to match the ghost, which is
+the whole D2 workflow. A five-field tag from before this change parses
+as `null` and reopens auto-fitted rather than throwing.
+
+**`SectionScan` is stored relative to the cave's `scans/` folder**, as
+the tag table says. It was briefly absolute, which would have broken
+every reopen on a moved, renamed or shared cave folder. An absolute path
+stored by that build still resolves.
+
+### Defects found in the suite while building this
+
+Four pre-existing bugs, each fixed and regression-tested:
+
+1. `SketchScans.insert` hardcoded `CTRL-SCAN`, so the plain Insert button
+   put a **profile** scan on the plan's scan layer, where `frameOf`
+   classifies it as plan content and a plan-wide warp can drag it.
+   Scans placed that way in existing drawings are still stranded — a
+   migration is owed.
+2. `CsScanReanchor` looked section scans up against `SectionStation`, the
+   tag nothing writes, so every section scan would have reported stale
+   and refused a backfill on every draw.
+3. `SectionCapture` and `SectionEdit` were never registered with QCAD —
+   `AddOn` loads only `<Dir>/<Dir>.js` — so the bay could be opened and
+   never closed. Wiring them at file top level then turned out to
+   recurse until the stack died, because `include()`'s dedupe registers
+   a file only once its own load returns; the includes are deferred into
+   `init()`. A new structural test covers every sibling tool in the
+   suite.
+4. The `isNull()` shim copied across the engine test files cannot detect
+   a deleted entity in this build, so any "this was deleted" assertion
+   passed regardless. Absence is now asserted through
+   `queryAllEntities(false, true)`.
+
+### Verification
+
+`./tests/run_all.sh --publish` — 13/13 green including publish checks.
+`tests/section_sketch_run.js` carries 176 assertions over the full
+lifecycle: open, trace, capture, refresh, DXF round trip, reopen,
+re-capture. The load-bearing ones were mutation-tested — including one
+that was found to be self-confirming (it used the function under test as
+its own oracle) and rewritten to read the numbers off the entity.
