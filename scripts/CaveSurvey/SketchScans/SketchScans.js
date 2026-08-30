@@ -671,6 +671,11 @@ SketchScans.buildDock = function(appWin) {
         var pairs = w.picking.pairs;
         var rel = w.picking.rel;
         var res = CsScanFit.residuals(pairs, fit.matrix);
+        // BEFORE placing: once the new scan is in, it would be counted
+        // among the neighbours it is being judged against.
+        var neighbours = SketchScans.placedScales(doc);
+        var scale = CsScanFit.scaleOutlier(
+            CsScanFit.describe(fit.matrix).unitsPerPixel, neighbours);
         var placed = SketchScans.insertFitted(doc, di,
             w.scans + "/" + rel, rel, fit, w.scanView.heightPx, pairs);
         w.picking = null;
@@ -699,6 +704,16 @@ SketchScans.buildDock = function(appWin) {
                     "names swapped between picks. Undo, and re-pick " +
                     "checking each name against where it sits on the " +
                     "sheet.");
+            } else if (scale.outlier === true) {
+                warning("Sketch Scans: this scan has landed " +
+                    (scale.ratio > 1 ?
+                        (Math.round(scale.ratio * 10) / 10) + " times LARGER" :
+                        (Math.round(10 / scale.ratio) / 10) + " times SMALLER") +
+                    " than the scans already in this drawing.\n\nOne " +
+                    "cave's sketches are drawn at one or two scales, so " +
+                    "that usually means a station was picked in the " +
+                    "wrong place or named as the wrong station. Undo and " +
+                    "check the picks.");
             } else if (fit.thin === true) {
                 warning("Sketch Scans: those stations lie too close to a " +
                     "straight line for a stretch-and-skew fit to mean " +
@@ -1170,6 +1185,39 @@ SketchScans.insert = function(doc, di, path, name) {
     warning("Sketch Scans: the insert operation added nothing -- the " +
         CsLayers.CTRL_SCAN + " layer may be locked or frozen.");
     return null;
+};
+
+/**
+ * The units-per-pixel of every scan already placed in the drawing.
+ *
+ * An image's u vector IS its units per pixel, so this is a read rather
+ * than a calculation. Used to judge whether a new scan's scale is in
+ * step with its neighbours -- see CsScanFit.scaleOutlier.
+ */
+SketchScans.placedScales = function(doc) {
+    var out = [];
+    if (isNull(doc)) {
+        return out;
+    }
+    try {
+        var ids = doc.queryAllEntities(false, true);
+        for (var i = 0; i < ids.length; i++) {
+            var e = doc.queryEntity(ids[i]);
+            if (isNull(e) || !isImageEntity(e)) {
+                continue;
+            }
+            if (CsTags.get(e, "SketchScan") === "") {
+                continue;          // not one of ours
+            }
+            var u = e.getUVector();
+            var m = Math.sqrt(u.x * u.x + u.y * u.y);
+            if (m > 0) {
+                out.push(m);
+            }
+        }
+    } catch (eScan) {
+    }
+    return out;
 };
 
 /**

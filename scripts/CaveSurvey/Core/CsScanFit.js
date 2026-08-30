@@ -274,6 +274,44 @@ CsScanFit.describe = function(m) {
     };
 };
 
+/**
+ * Is this scan's scale out of step with the scans already placed?
+ *
+ * Sketches of one cave are drawn at one or two scales -- a page is
+ * 1:20, maybe 1:50 -- so a new scan landing ten times the size of every
+ * other one is not a new convention, it is a bad pick. The residuals
+ * cannot see this either: a wrong-but-exact fit is wrong at ANY scale.
+ *
+ * The MEDIAN, not the mean: one already-bad scan in the drawing should
+ * not drag the standard it is judged against.
+ *
+ * \param perPixel   the new scan's units per pixel
+ * \param others     the units per pixel of the scans already placed
+ * \param factor     how far out is too far (default 4x either way)
+ * \return {outlier, median, ratio} -- ratio above 1 means the new scan
+ *         is LARGER than its neighbours. outlier is false when there is
+ *         nothing to compare against.
+ */
+CsScanFit.scaleOutlier = function(perPixel, others, factor) {
+    var f = (factor === undefined || factor === null) ? 4 : factor;
+    var clean = [];
+    for (var i = 0; i < others.length; i++) {
+        if (others[i] > CsScanFit.TOLERANCE && isFinite(others[i])) {
+            clean.push(others[i]);
+        }
+    }
+    if (clean.length === 0 || perPixel <= CsScanFit.TOLERANCE) {
+        return { outlier: false, median: null, ratio: 1 };
+    }
+    clean.sort(function(a, b) { return a - b; });
+    var mid = Math.floor(clean.length / 2);
+    var median = (clean.length % 2 === 1) ? clean[mid] :
+        (clean[mid - 1] + clean[mid]) / 2;
+    var ratio = perPixel / median;
+    return { outlier: (ratio > f || ratio < 1 / f),
+             median: median, ratio: ratio };
+};
+
 /** How far each pair's mapped source misses its target.
  *  \return {average, worst, worstIndex} -- worstIndex counted from 1. */
 CsScanFit.residuals = function(pairs, m) {

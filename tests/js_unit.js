@@ -10231,6 +10231,24 @@ if (!IS_NODE) {
     var ds = CsScanFit.describe(stretched.matrix);
     near(ds.stretch, 3, 1e-9, "describe: three-tenths against one-tenth is 3");
 
+    // A NEW SCAN WILDLY OUT OF SCALE with the ones already placed is a
+    // bad pick, not a new convention -- and the residuals cannot see it
+    // either, since a wrong-but-exact fit is wrong at any scale.
+    var placedScales = [0.1, 0.11, 0.09, 0.1];
+    ok(CsScanFit.scaleOutlier(0.105, placedScales).outlier === false,
+        "scaleOutlier: a scan in step with the others passes");
+    ok(CsScanFit.scaleOutlier(1.2, placedScales).outlier === true,
+        "scaleOutlier: ten times the size is caught");
+    ok(CsScanFit.scaleOutlier(0.01, placedScales).outlier === true,
+        "scaleOutlier: a tenth the size is caught too");
+    near(CsScanFit.scaleOutlier(0.2, placedScales).ratio, 2, 1e-9,
+        "scaleOutlier: the ratio says how far out it is");
+    // The MEDIAN, so one already-bad scan cannot move the standard.
+    near(CsScanFit.scaleOutlier(0.1, [0.1, 0.1, 0.1, 99]).median, 0.1, 1e-9,
+        "scaleOutlier: one wild scan does not drag the median");
+    ok(CsScanFit.scaleOutlier(0.1, []).outlier === false,
+        "scaleOutlier: the first scan in a drawing has nothing to fail");
+
     var res = CsScanFit.residuals(two, fit.matrix);
     near(res.worst, 0, 1e-9, "CsScanFit.residuals: an exact fit misses by nothing");
     var off = [two[0], two[1],
