@@ -127,8 +127,14 @@ CsScanReanchor.backfill = function(doc, di) {
     var n = 0;
     for (var i = 0; i < scans.length; i++) {
         try {
+            // A SECTION IS CUT AT A PLAN STATION, not one of its own --
+            // stationFrameFor redirects the lookup there rather than at
+            // "SectionStation", a tag nothing writes. frameOf itself is
+            // still the scan's own frame; only the STATION TABLE this
+            // reads from is different, the same distinction stationsNow
+            // and SketchScans.insert both had to make.
             var places = CsScanReanchor.placesFor(doc, cache,
-                CsScanReanchor.frameOf(scans[i]));
+                CsScanFrame.stationFrameFor(CsScanReanchor.frameOf(scans[i])));
             if (CsScanReanchor.backfillOne(doc, op, scans[i], places)) {
                 n++;
             }
@@ -172,8 +178,14 @@ CsScanReanchor.run = function(doc, di) {
             if (anchors.length < 2) {
                 continue;                   // not an aligned scan
             }
+            // A SECTION IS CUT AT A PLAN STATION, not one of its own --
+            // stationFrameFor redirects the lookup there rather than at
+            // "SectionStation", a tag nothing writes. frameOf itself is
+            // still the scan's own frame; only the STATION TABLE this
+            // reads from is different, the same distinction stationsNow
+            // and SketchScans.insert both had to make.
             var places = CsScanReanchor.placesFor(doc, cache,
-                CsScanReanchor.frameOf(image));
+                CsScanFrame.stationFrameFor(CsScanReanchor.frameOf(image)));
             var run = CsScanReanchor.runOf(image);
             var pairs = [], gone = 0;
             for (var a = 0; a < anchors.length; a++) {

@@ -196,6 +196,84 @@ checkClose("the profile pick landed on the elevation's A2 (y)", pAtB.y, 85);
 check("it did not chase the plan station of the same name",
     Math.abs(pAtB.x - 230) > 1);
 
+// ---- A SECTION SCAN IS CUT AT A PLAN STATION, not one of its own -----
+// stationTagFor("section") names "SectionStation", a tag nothing in
+// this suite writes -- so a section scan's anchors must be read and
+// re-fit against PLAN stations, exactly like a plain plan scan's are.
+// A1 is currently at (100,100); A2 was moved earlier to (230,115).
+CsLayers.ensure(doc, di, CsLayers.CTRL_SECTION_SCAN);
+var sfit = CsScanFit.fit([
+    { source: pickA, dest: { x: 100, y: 100 } },
+    { source: pickB, dest: { x: 230, y: 115 } }
+]);
+var sv = CsScanFit.imageVectors(sfit.matrix);
+var sscan = new RImageEntity(doc, new RImageData(scanPath,
+    new RVector(sv.position.x, sv.position.y),
+    new RVector(sv.u.x, sv.u.y), new RVector(sv.v.x, sv.v.y), W, H, 0));
+sscan.setLayerId(doc.getLayerId(CsLayers.CTRL_SECTION_SCAN));
+CsTags.set(sscan, "SketchScan", "section.jpg");
+CsTags.set(sscan, "ScanFrame", "section");
+CsTags.set(sscan, "ScanAnchors", CsScanFit.serializeAnchors([
+    { name: "A1", u: pickA.x, v: pickA.y },
+    { name: "A2", u: pickB.x, v: pickB.y }
+]));
+di.applyOperation(new RAddObjectOperation(sscan, false));
+
+// move the PLAN's A1: the section scan is cut at it, so it must follow
+var movedA1 = doc.queryEntity(a.getId());
+movedA1.move(new RVector(15, 20));
+var sop = new RModifyObjectsOperation();
+sop.addObject(movedA1, false);
+di.applyOperation(sop);
+
+var safter = CsScanReanchor.run(doc, di);
+check("a section scan is not reported stale when its plan station moves",
+    safter.stale === 0);
+check("a section scan's anchors are not reported missing",
+    safter.missing.length === 0);
+var splaced = doc.queryEntity(sscan.getId()).getData();
+var sAtA = splaced.mapFromImage(new RVector(pickA.x, pickA.y));
+checkClose("the section scan's pick followed the moved plan station (x)",
+    sAtA.x, 115);
+checkClose("the section scan's pick followed the moved plan station (y)",
+    sAtA.y, 120);
+
+// ---- and a LEGACY section scan backfills from plan stations too ------
+// Same trap at the other call site (CsScanReanchor.backfill): a legacy
+// scan with names but no anchors reads its pixels back through the
+// stations it was named to -- which, for a section, are plan stations.
+var lfit = CsScanFit.fit([
+    { source: pickA, dest: { x: 115, y: 120 } },
+    { source: pickB, dest: { x: 230, y: 115 } }
+]);
+var lv = CsScanFit.imageVectors(lfit.matrix);
+var lscan = new RImageEntity(doc, new RImageData(scanPath,
+    new RVector(lv.position.x, lv.position.y),
+    new RVector(lv.u.x, lv.u.y), new RVector(lv.v.x, lv.v.y), W, H, 0));
+lscan.setLayerId(doc.getLayerId(CsLayers.CTRL_SECTION_SCAN));
+CsTags.set(lscan, "SketchScan", "section-legacy.jpg");
+CsTags.set(lscan, "ScanFrame", "section");
+CsTags.set(lscan, CsStationOrder.TAG,
+    CsStationOrder.serializeAssigned(["A1", "A2"]));
+di.applyOperation(new RAddObjectOperation(lscan, false));
+
+var sectionFilled = CsScanReanchor.backfill(doc, di);
+check("a legacy section scan is backfilled from plan stations, " +
+    "not refused as basis-gone", sectionFilled === 1);
+var lrecovered = CsScanFit.parseAnchors(
+    CsTags.get(doc.queryEntity(lscan.getId()), "ScanAnchors"));
+check("the legacy section scan recovered both anchors",
+    lrecovered.length === 2);
+// guarded: with the bug, nothing was recovered at all -- indexing a
+// pixel out of an empty result would crash the run before it can
+// print what else failed, which is not evidence of anything new.
+if (lrecovered.length === 2) {
+    checkClose("the recovered section A1 pixel is the one picked (x)",
+        lrecovered[0].u, pickA.x, 0.5);
+    checkClose("the recovered section A1 pixel is the one picked (y)",
+        lrecovered[0].v, pickA.y, 0.5);
+}
+
 // ---- a scan whose stations are gone is left alone, not mangled -------
 var gone = new RDocument(new RMemoryStorage(), new RSpatialIndexNavel());
 var gdi = new RDocumentInterface(gone);
