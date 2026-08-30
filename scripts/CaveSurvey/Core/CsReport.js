@@ -94,6 +94,14 @@ CsReport.drawSummary = function(survey, resolved, drawn, findings) {
     if (sectionLine !== null) {
         lines.push(sectionLine);
     }
+    // Scans that followed the survey -- or could not. A scan left
+    // behind by a correction is exactly the kind of stale thing that
+    // reaches a plotted map unnoticed.
+    var scanLine = CsReport.refreshLine("Aligned scans", drawn.scans,
+        ["moved", "stale", "refused", "backfilled"]);
+    if (scanLine !== null) {
+        lines.push(scanLine);
+    }
 
     if (survey.declination !== 0 && survey.declinationSource !== "") {
         var srcWord = { file: "from the file", user: "entered by hand",
@@ -246,6 +254,9 @@ CsReport.refreshLine = function(label, counts, keys) {
         return null;
     }
     var words = {
+        moved: "re-fitted to the moved survey",
+        matched: "already in place",
+        backfilled: "given anchors for the first time",
         updated: "re-derived", upgraded: "upgraded",
         downgraded: "downgraded", unchanged: "unchanged",
         frozen: "frozen", lost: "whose basis is gone",

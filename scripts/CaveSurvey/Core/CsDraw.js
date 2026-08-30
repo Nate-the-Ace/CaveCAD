@@ -442,6 +442,20 @@ CsDraw.survey = function(survey, resolved, originStation, originPos, seqBase) {
     CsLayers.ensureSurveyLayers(doc, di);
     CsModel.ensureTrips(survey);
 
+    // BEFORE ANYTHING MOVES: give any scan aligned before anchors
+    // existed its anchors, read out of where it sits right now. That
+    // reading is only correct while the scan and the survey still
+    // agree, so it cannot wait until after the redraw -- afterwards it
+    // would record the wrong pixels and make the error permanent.
+    var scanBackfill = 0;
+    if (typeof CsScanReanchor !== "undefined") {
+        try {
+            scanBackfill = CsScanReanchor.backfill(doc, di);
+        } catch (eBackfill) {
+            scanBackfill = 0;
+        }
+    }
+
     // per-trip shot sequence: shotSeqOf[i] = index of survey.shots[i]
     // within its own trip, in survey.shots order -- what reconstruction
     // sorts by to restore notebook order inside each trip.
@@ -1052,6 +1066,26 @@ CsDraw.survey = function(survey, resolved, originStation, originPos, seqBase) {
         }
     }
 
+    // THE ALIGNED SCANS FOLLOW THE SURVEY. Correct a bad azimuth and
+    // every station downstream of it moves; a scan fitted to those
+    // stations would otherwise stay exactly where it was put, which
+    // looks like the scan warping and is really the scan being left
+    // behind. Its anchors are pixels on the paper, which do not move,
+    // so it is simply re-fitted. A scan already on its stations is left
+    // untouched -- a redraw that changed nothing must not churn every
+    // scan in the drawing.
+    var scanRefresh = null;
+    if (typeof CsScanReanchor !== "undefined") {
+        try {
+            scanRefresh = CsScanReanchor.run(doc, di);
+            if (scanBackfill > 0 && scanRefresh !== null) {
+                scanRefresh.backfilled = scanBackfill;
+            }
+        } catch (eScans) {
+            scanRefresh = null;
+        }
+    }
+
     // The cross sections, on the same terms and for the same reasons as
     // the elevation labels above: soft dependency, re-read from the
     // drawing, and a failure here must never take the map down.
@@ -1106,7 +1140,10 @@ CsDraw.survey = function(survey, resolved, originStation, originPos, seqBase) {
         // loaded. Additive, like `elevations` before it -- and PRINTED
         // by CsReport: this suite's recurring defect is a value computed
         // and then surfaced to nobody.
-        sections: sectionRefresh
+        sections: sectionRefresh,
+        // {moved, matched, stale, refused, missing} from re-fitting the
+        // aligned scans. Printed by CsReport for the same reason.
+        scans: scanRefresh
     };
 };
 
