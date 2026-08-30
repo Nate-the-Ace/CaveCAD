@@ -389,15 +389,21 @@ SketchScans.buildDock = function(appWin) {
         "itself and say which station it is; the scan is then placed " +
         "already fitted. Zoom in first -- the fit is only as good as " +
         "the picks.");
-    // ONE FRAME AT A TIME. Offering the plan's stations and the
-    // elevation's in one list would double a list that is already long
-    // enough to hunt through, which is why this is a switch rather than
-    // a longer menu.
-    w.profileCheck = new QCheckBox(qsTr("Profile Stations"));
-    w.profileCheck.toolTip = qsTr("Assign this scan to the ELEVATION's " +
-        "stations instead of the plan's. A profile sketch lands on " +
-        "CTRL-PROFILE-SCAN and follows its band when the elevation is " +
-        "redrawn.");
+    // THREE FRAMES, ONE CONTROL. A checkbox could say plan-or-profile
+    // and nothing more; sections make that a third state, and a combo
+    // always has a value to read rather than a click history to
+    // reconstruct.
+    w.frameCombo = new QComboBox();
+    w.frameCombo.addItem(qsTr("Plan"));
+    w.frameCombo.addItem(qsTr("Profile"));
+    w.frameCombo.addItem(qsTr("Cross Section"));
+    w.frameCombo.currentIndex = 0;
+    w.frameCombo.toolTip = qsTr("Which view this scan is assigned to. " +
+        "Profile assigns to the ELEVATION's own stations, on " +
+        "CTRL-PROFILE-SCAN, following its band when the elevation is " +
+        "redrawn. Cross Section assigns to the PLAN's stations -- a " +
+        "section is cut at a plan station, not its own -- and lands on " +
+        "CTRL-SECTION-SCAN.");
     w.alignButton = new QPushButton(qsTr("Insert && Align"));
     w.alignButton.toolTip = qsTr("Insert the selected scan over the " +
         "survey and start Align Image on it: pick two points on the " +
@@ -407,7 +413,7 @@ SketchScans.buildDock = function(appWin) {
         "survey, unaligned.");
     buttons.addWidget(w.refreshButton, 0, 0);
     buttons.addStretch(1);
-    buttons.addWidget(w.profileCheck, 0, 0);
+    buttons.addWidget(w.frameCombo, 0, 0);
     buttons.addWidget(w.pickAlignButton, 0, 0);
     buttons.addWidget(w.alignButton, 0, 0);
     buttons.addWidget(w.insertButton, 0, 0);
@@ -530,16 +536,20 @@ SketchScans.buildDock = function(appWin) {
     };
 
     /** The drawing's plotted stations, and the order to walk them. */
-    /** Which view the picks are being taken in: the checkbox decides.
+    /** Which view the picks are being taken in: the combo decides.
      *  ONE FRAME AT A TIME, deliberately -- offering the plan's
      *  stations and the elevation's together would double a list that
-     *  is already long enough to hunt through, which is the whole
-     *  reason this is a switch and not a longer menu. */
+     *  is already long enough to hunt through. */
     var frameNow = function() {
         try {
-            return (w.profileCheck !== undefined &&
-                w.profileCheck !== null && w.profileCheck.checked) ?
-                "profile" : "plan";
+            if (w.frameCombo === undefined || w.frameCombo === null) {
+                return "plan";
+            }
+            switch (w.frameCombo.currentIndex) {
+            case 1:  return "profile";
+            case 2:  return "section";
+            default: return "plan";
+            }
         } catch (e) {
             return "plan";
         }
@@ -552,7 +562,8 @@ SketchScans.buildDock = function(appWin) {
             return null;
         }
         try {
-            var places = CsScanFrame.placesIn(doc, frameNow());
+            var places = CsScanFrame.placesIn(doc,
+                CsScanFrame.stationFrameFor(frameNow()));
             if (places.length === 0) {
                 return null;
             }
@@ -760,7 +771,7 @@ SketchScans.buildDock = function(appWin) {
             frame);
         w.picking = null;
         try {
-            w.profileCheck.enabled = true;
+            w.frameCombo.enabled = true;
         } catch (eUnlock) {
         }
         refreshPickState();
@@ -879,8 +890,8 @@ SketchScans.buildDock = function(appWin) {
         w.picking = { pairs: [], rel: rel, frame: null };
         try {
             // locked while picks are being taken: the frame belongs to
-            // the set of picks, not to whatever the box says later
-            w.profileCheck.enabled = false;
+            // the set of picks, not to whatever the combo says later
+            w.frameCombo.enabled = false;
         } catch (eLock) {
         }
         refreshPickState();

@@ -69,6 +69,23 @@ CsScanFrame.runTagFor = function(kind) {
 };
 
 /**
+ * The frame whose station points a scan of this kind is picked against.
+ *
+ * NOT always the scan's own frame. A cross section is CUT AT a plan
+ * station: the drawing has no section station points, and
+ * stationTagFor("section") names a tag ("SectionStation") that nothing
+ * in this suite writes. A picker built on that answers an empty list
+ * and explains nothing, which is exactly how this would have shipped.
+ *
+ * SectionStation stays reserved for a frame that one day plots its own
+ * station points. Until something writes it, nothing may read it.
+ */
+CsScanFrame.stationFrameFor = function(kind) {
+    return CsScanFrame.normaliseKind(kind) === "profile" ?
+        "profile" : "plan";
+};
+
+/**
  * How a place should read in the picker.
  *
  * A plan station is its own name. An elevation station is its name too

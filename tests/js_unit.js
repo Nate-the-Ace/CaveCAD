@@ -10419,6 +10419,19 @@ if (!IS_NODE) {
         "placeOf: a band that no longer exists falls back to the name");
     ok(CsScanFrame.placeOf(places, "Z9", "D") === null,
         "placeOf: a name that is nowhere answers null");
+
+    // A SECTION IS CUT AT A PLAN STATION. stationTagFor("section")
+    // answers "SectionStation" -- a tag NOTHING in this suite writes --
+    // so a picker built on it offers an empty list and says nothing.
+    // The frame a scan is PICKED AGAINST is not always its own frame.
+    eqs(CsScanFrame.stationFrameFor("section"), "plan",
+        "stationFrameFor: a section is picked against plan stations");
+    eqs(CsScanFrame.stationFrameFor("profile"), "profile",
+        "stationFrameFor: the elevation is picked against its own");
+    eqs(CsScanFrame.stationFrameFor("plan"), "plan",
+        "stationFrameFor: and the plan against itself");
+    eqs(CsScanFrame.stationFrameFor("nonsense"), "plan",
+        "stationFrameFor: an unknown frame is plan, never a throw");
 }());
 
 // ---------------------------------------------------------------------
