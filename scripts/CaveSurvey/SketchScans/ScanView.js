@@ -89,8 +89,12 @@ CsScanView.prototype.mousePressEvent = function(event) {
         return;
     }
     try {
-        var model = this.getImageView().mapFromView(
-            new RVector(at.x, at.y));
+        var iv = this.getImageView();
+        var vp = CsScanView.viewPos(iv, event);
+        if (vp === null) {
+            return;
+        }
+        var model = iv.mapFromView(new RVector(vp.x, vp.y));
         this.onScanPick({ x: model.x, y: model.y });
     } catch (e) {
         // a listener must never throw into the view's own event handling
@@ -206,6 +210,38 @@ try {
         "GraphicsViewNavigation/PanThreshold", 4);
 } catch (e) {
 }
+
+/**
+ * A mouse event's position in the coordinates mapFromView expects.
+ *
+ * QT REPORTS A CLICK IN LOGICAL PIXELS; THE VIEW WORKS IN DEVICE ONES.
+ * On a Retina screen those differ by a factor of two, and QCAD's own
+ * code says so plainly -- RGraphicsViewQt builds its mouse events as
+ *   RMouseEvent e(*event, *s, *imageView, imageView->getDevicePixelRatio())
+ * and RInputEvent stores  screenPosition = position * devicePixelRatio.
+ *
+ * Passing the raw logical position to mapFromView therefore lands every
+ * pick at HALF its true place in the view -- pulled toward the top-left
+ * corner, and with the fitted scale inflated to match. That is exactly
+ * the offset-and-oversized placement this viewer was producing, and it
+ * is invisible headlessly because an off-screen view reports a ratio
+ * of 1.
+ */
+CsScanView.viewPos = function(imageView, event) {
+    var at = CsScanView.eventPos(event);
+    if (at === null) {
+        return null;
+    }
+    var dpr = 1;
+    try {
+        var r = imageView.getDevicePixelRatio();
+        if (r > 0) {
+            dpr = r;
+        }
+    } catch (e) {
+    }
+    return { x: at.x * dpr, y: at.y * dpr };
+};
 
 var CsScanPreview = {};
 

@@ -15882,6 +15882,25 @@ if (!IS_NODE) {
             ok(CsScanView.eventPos({}) === null,
                 "eventPos: an event with neither answers null, not a throw");
 
+            // A CLICK IS REPORTED IN LOGICAL PIXELS AND THE VIEW WORKS
+            // IN DEVICE ONES. QCAD's own views multiply by the ratio
+            // (RInputEvent: screenPosition = position * dpr); passing
+            // the raw position lands every pick at half its true place
+            // on a Retina screen.
+            var ev = { x: function() { return 100; },
+                       y: function() { return 50; } };
+            var retina = { getDevicePixelRatio: function() { return 2; } };
+            var vp = CsScanView.viewPos(retina, ev);
+            eqs(vp.x + "," + vp.y, "200,100",
+                "viewPos: a click is scaled by the device pixel ratio");
+            var plain = { getDevicePixelRatio: function() { return 1; } };
+            eqs(CsScanView.viewPos(plain, ev).x, 100,
+                "viewPos: an ordinary screen is unchanged");
+            var broken = { getDevicePixelRatio: function() {
+                throw new Error("no screen"); } };
+            eqs(CsScanView.viewPos(broken, ev).x, 100,
+                "viewPos: a view that cannot say falls back to 1, not zero");
+
             // THE BASE IS ON THE INSTANCE, UNDER A "Super" NAME. The
             // prototype carries no mousePressEvent at all, so chaining
             // through it throws on the override's first line and kills
