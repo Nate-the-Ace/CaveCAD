@@ -10140,7 +10140,8 @@ if (!IS_NODE) {
     near(stretched.matrix.e, 0.3, 1e-9, "CsScanFit: three tenths down");
 
     // Collinear sources say nothing about the direction across the line,
-    // so the fit falls back to the first two rather than inventing one.
+    // so the fit falls back to the two-point fit rather than inventing
+    // one.
     var line = CsScanFit.fit([
         { source: { x: 0, y: 0 },   dest: { x: 0, y: 0 } },
         { source: { x: 10, y: 0 },  dest: { x: 1, y: 0 } },
@@ -10148,6 +10149,35 @@ if (!IS_NODE) {
     ]);
     eqs(line.kind, "similarity",
         "CsScanFit.fit: collinear picks fall back to the two-point fit");
+
+    // NEAR-collinear is the real case and the one that shipped wrong:
+    // three consecutive stations down a passage, a hair off a line. The
+    // determinant clears any tolerance, the affine solves exactly, and
+    // the across-the-line direction is guesswork -- which came back as
+    // a 156-degree turn squashed to a third of its height.
+    var nearly = [
+        { source: { x: 0, y: 0 },    dest: { x: 0, y: 0 } },
+        { source: { x: 100, y: 2 },  dest: { x: 10, y: 0.2 } },
+        { source: { x: 200, y: 1 },  dest: { x: 20, y: 0.1 } }
+    ];
+    ok(CsScanFit.spreadRatio(nearly) < CsScanFit.MIN_SPREAD,
+        "spreadRatio: three stations down a passage read as a line");
+    var nearFit = CsScanFit.fit(nearly);
+    eqs(nearFit.kind, "similarity",
+        "CsScanFit.fit: and near-collinear picks do NOT get an affine");
+    ok(nearFit.thin === true,
+        "CsScanFit.fit: the fallback is reported, not silent");
+    var nd = CsScanFit.describe(nearFit.matrix);
+    near(nd.stretch, 1, 1e-9,
+        "CsScanFit.fit: the fallback keeps the scan's shape");
+
+    // A genuine spread still earns its affine.
+    ok(CsScanFit.spreadRatio([
+        { source: { x: 0, y: 0 },   dest: { x: 0, y: 0 } },
+        { source: { x: 100, y: 0 }, dest: { x: 10, y: 0 } },
+        { source: { x: 0, y: 80 },  dest: { x: 0, y: 8 } }
+    ]) > CsScanFit.MIN_SPREAD,
+        "spreadRatio: a well-spread set is not a line");
 
     ok(CsScanFit.fit([two[0]]) === null,
         "CsScanFit.fit: one pair is not a fit");

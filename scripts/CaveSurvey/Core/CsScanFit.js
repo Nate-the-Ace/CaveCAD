@@ -105,6 +105,55 @@ CsScanFit.affineFrom = function(pairs) {
 };
 
 /**
+ * How far the source picks are from lying in a LINE: the spread across
+ * their own long axis, as a fraction of the spread along it.
+ *
+ * 0 is a perfect line; 1 is a round blob. This is the number that
+ * decides whether an affine is worth solving at all.
+ *
+ * WHY A RATIO AND NOT A DETERMINANT. The first version of this tested
+ * the normal-equation determinant against a tolerance, which catches
+ * only EXACT collinearity. Three consecutive stations down a passage
+ * are near-collinear, not exactly so: the determinant clears the
+ * tolerance, the affine solves, it passes through all three points
+ * exactly -- and the direction across the line is almost unconstrained,
+ * so the answer comes back turned 156 degrees and squashed to a third
+ * of its height. Which is precisely the failure this now prevents.
+ */
+CsScanFit.spreadRatio = function(pairs) {
+    var n = pairs.length, i;
+    if (n < 3) {
+        return 0;
+    }
+    var cx = 0, cy = 0;
+    for (i = 0; i < n; i++) {
+        cx += pairs[i].source.x; cy += pairs[i].source.y;
+    }
+    cx /= n; cy /= n;
+    // covariance of the source points
+    var sxx = 0, sxy = 0, syy = 0;
+    for (i = 0; i < n; i++) {
+        var dx = pairs[i].source.x - cx, dy = pairs[i].source.y - cy;
+        sxx += dx * dx; sxy += dx * dy; syy += dy * dy;
+    }
+    sxx /= n; sxy /= n; syy /= n;
+    // eigenvalues of the 2x2 covariance: the spread along each axis
+    var tr = sxx + syy;
+    var det = sxx * syy - sxy * sxy;
+    var disc = Math.sqrt(Math.max(0, tr * tr / 4 - det));
+    var big = tr / 2 + disc, small = tr / 2 - disc;
+    if (big < CsScanFit.TOLERANCE) {
+        return 0;
+    }
+    return Math.sqrt(Math.max(0, small) / big);
+};
+
+/** Below this the picks are too close to a line for an affine to mean
+ *  anything: the across-the-line direction is guesswork. Three points
+ *  in a passage typically sit around 0.02-0.05. */
+CsScanFit.MIN_SPREAD = 0.12;
+
+/**
  * The best fit the given pairs support: two pairs keep the scan's
  * shape, three or more allow the stretch and skew that takes a
  * scanner's distortion out. Three points in a LINE say nothing about
@@ -116,15 +165,39 @@ CsScanFit.fit = function(pairs) {
     if (pairs === undefined || pairs === null || pairs.length < 2) {
         return null;
     }
+    var thin = false;
     if (pairs.length >= 3) {
-        var affine = CsScanFit.affineFrom(pairs);
-        if (affine !== null) {
-            return { matrix: affine, kind: "affine" };
+        if (CsScanFit.spreadRatio(pairs) < CsScanFit.MIN_SPREAD) {
+            // Too close to a line: an affine through them is exact and
+            // meaningless. Fall back rather than return a confident
+            // wrong answer, and SAY so -- the caller warns.
+            thin = true;
+        } else {
+            var affine = CsScanFit.affineFrom(pairs);
+            if (affine !== null) {
+                return { matrix: affine, kind: "affine" };
+            }
+            thin = true;
         }
     }
-    var sim = CsScanFit.similarityFrom(pairs[0].source, pairs[0].dest,
-        pairs[1].source, pairs[1].dest);
-    return sim === null ? null : { matrix: sim, kind: "similarity" };
+    // The two picks FURTHEST APART carry the least angular error, which
+    // matters most when the rest are strung out along a line.
+    var best = [0, 1], bestD = -1;
+    for (var i = 0; i < pairs.length; i++) {
+        for (var j = i + 1; j < pairs.length; j++) {
+            var dx = pairs[i].source.x - pairs[j].source.x;
+            var dy = pairs[i].source.y - pairs[j].source.y;
+            var d2 = dx * dx + dy * dy;
+            if (d2 > bestD) { bestD = d2; best = [i, j]; }
+        }
+    }
+    var sim = CsScanFit.similarityFrom(
+        pairs[best[0]].source, pairs[best[0]].dest,
+        pairs[best[1]].source, pairs[best[1]].dest);
+    if (sim === null) {
+        return null;
+    }
+    return { matrix: sim, kind: "similarity", thin: thin };
 };
 
 /**

@@ -606,6 +606,26 @@ SketchScans.buildDock = function(appWin) {
                 "this scan.");
             return;
         }
+        // THE NEXT STATION IN ORDER IS ALREADY SELECTED, so a run down
+        // a passage is Enter, Enter, Enter and only the exceptions cost
+        // a choice. "Next" means the first unused name after the last
+        // one picked, in the same reading order the list is offered in.
+        var start = 0;
+        if (w.picking.pairs.length > 0) {
+            var last = w.picking.pairs[w.picking.pairs.length - 1].name;
+            var from = -1;
+            for (var f = 0; f < ctx.names.length; f++) {
+                if (ctx.names[f] === last) { from = f; break; }
+            }
+            for (var g = from + 1; g < ctx.names.length; g++) {
+                if (used[ctx.names[g]] !== true) {
+                    for (var h = 0; h < offer.length; h++) {
+                        if (offer[h] === ctx.names[g]) { start = h; break; }
+                    }
+                    break;
+                }
+            }
+        }
         var chosen = null;
         try {
             // The station list itself, so a name cannot be mistyped and
@@ -613,7 +633,7 @@ SketchScans.buildDock = function(appWin) {
             chosen = QInputDialog.getItem(RMainWindowQt.getMainWindow(),
                 qsTr("Align on Scan"),
                 qsTr("Which station did you just click?"),
-                offer, 0, false);
+                offer, start, false);
         } catch (eDlg) {
             chosen = null;
         }
@@ -679,6 +699,16 @@ SketchScans.buildDock = function(appWin) {
                     "names swapped between picks. Undo, and re-pick " +
                     "checking each name against where it sits on the " +
                     "sheet.");
+            } else if (fit.thin === true) {
+                warning("Sketch Scans: those stations lie too close to a " +
+                    "straight line for a stretch-and-skew fit to mean " +
+                    "anything -- across the line it would be guessing, " +
+                    "and guessing there is what turns a scan sideways." +
+                    "\n\nThe scan has been moved, turned and resized to " +
+                    "the two furthest-apart picks instead, keeping its " +
+                    "shape. For a fit that can correct a scanner's " +
+                    "stretch, pick a station well OFF the line of the " +
+                    "others.");
             } else if (pairs.length <= 3) {
                 EAction.handleUserMessage(qsTr("Note: %1 picks always " +
                     "fit exactly, so a zero miss proves nothing. Add a " +
