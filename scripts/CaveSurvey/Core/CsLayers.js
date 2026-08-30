@@ -97,6 +97,17 @@ CsLayers.PROFILE_ENTRANCE = "PROFILE-ENTRANCE";
 // ---------------------------------------------------------------------
 CsLayers.CTRL_SECTION_BOX = "CTRL-SECTION-BOX";
 CsLayers.CTRL_SECTION_OUTLINE = "CTRL-SECTION-OUTLINE";
+// The sketch bay's reference outline, NOT the same layer as the real
+// computed section above. SketchSection.addGhost draws the LRUD-derived
+// outline a caver traces against; CsSectionDraw.define draws the real,
+// FINAL outline once a section is placed. Both used to live on
+// CTRL-SECTION-OUTLINE, which meant a ghost -- deleted the moment
+// Capture runs, never meant to be mistaken for a finished section --
+// rendered pixel-identical to one. A dedicated layer is what makes the
+// ghost look provisional (DASHED, see DEFAULTS below) and gives a caver
+// a switch to hide every open bay's scratch outline without touching
+// real section geometry.
+CsLayers.CTRL_SECTION_GHOST = "CTRL-SECTION-GHOST";
 CsLayers.CTRL_SECTION_SPLAYS = "CTRL-SECTION-SPLAYS";
 CsLayers.CTRL_SECTION_STATIONS = "CTRL-SECTION-STATIONS";
 CsLayers.CTRL_SECTION_TEXT_LABELS = "CTRL-SECTION-TEXT-LABELS";
@@ -252,6 +263,10 @@ CsLayers.DEFAULTS = {
     "PROFILE-ENTRANCE": ["white", "CONTINUOUS", "Weight035"],
     "CTRL-SECTION-BOX": ["gray", "CONTINUOUS", "Weight000"],
     "CTRL-SECTION-OUTLINE": ["gray", "CONTINUOUS", "Weight025"],
+    // DASHED, hairline, same style family as CTRL-RAW: a ghost is
+    // reference to check work against, not linework anyone would
+    // mistake for the finished, CONTINUOUS outline one row up.
+    "CTRL-SECTION-GHOST": ["gray", "DASHED", "Weight000"],
     "CTRL-SECTION-SPLAYS": ["gray", "CONTINUOUS", "Weight000"],
     "CTRL-SECTION-STATIONS": ["red", "CONTINUOUS", "Weight025"],
     "CTRL-SECTION-TEXT-LABELS": ["red", "CONTINUOUS", "Weight025"],

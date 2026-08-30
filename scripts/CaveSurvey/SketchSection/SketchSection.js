@@ -120,7 +120,7 @@ SketchSection.run = function(scanPath, station) {
     // all. CsLayers.ensure() is a no-op once the template already has
     // the layer, so calling it every time costs nothing.
     CsLayers.ensure(doc, di, CsLayers.CTRL_SECTION_BOX);
-    CsLayers.ensure(doc, di, CsLayers.CTRL_SECTION_OUTLINE);
+    CsLayers.ensure(doc, di, CsLayers.CTRL_SECTION_GHOST);
     CsLayers.ensure(doc, di, CsLayers.CTRL_SECTION_SCAN);
 
     SketchSection.addFrame(doc, di, rect, bayId, name, priorSnapClass);
@@ -238,7 +238,16 @@ SketchSection.addFrame = function(doc, di, rect, bayId, station,
     });
 };
 
-/** The ghost: the computed outline, dashed, centred in the bay. */
+/** The ghost: the computed outline, dashed, centred in the bay.
+ *
+ * ON ITS OWN LAYER, CTRL-SECTION-GHOST, NOT CTRL-SECTION-OUTLINE.
+ * CTRL-SECTION-OUTLINE is where CsSectionDraw.define draws the REAL,
+ * FINAL computed outline once a section is placed -- solid, meant to
+ * stay in the drawing. This ghost is scratch: a reference to scale and
+ * check a tracing against, gone the moment SectionCapture tears the bay
+ * down. Sharing a layer with the real thing made a ghost that had not
+ * been captured yet render pixel-identical to a finished section, so it
+ * gets its own DASHED layer instead -- see CsLayers.DEFAULTS. */
 SketchSection.addGhost = function(doc, di, cut, scale, rect, bayId) {
     var pts = CsSectionDraw.localPoints(cut, scale);
     if (pts.length < 3) {
@@ -252,17 +261,17 @@ SketchSection.addGhost = function(doc, di, cut, scale, rect, bayId) {
     }
     pl.setClosed(true);
     var e = new RPolylineEntity(doc, new RPolylineData(pl));
-    e.setLayerId(doc.getLayerId(CsLayers.CTRL_SECTION_OUTLINE));
+    e.setLayerId(doc.getLayerId(CsLayers.CTRL_SECTION_GHOST));
     CsTags.set(e, SketchSection.TAG_BAY, bayId);
     CsTags.set(e, "SectionBayRole", SketchSection.ROLE_GHOST);
     var op = new RAddObjectsOperation();
     op.setText("Draw section ghost");
     op.addObject(e, false);
     // OFF layers refuse adds SILENTLY in this build -- CTRL-SECTION-
-    // OUTLINE ships visible, but a caver may since have switched it
-    // off, and the bay must not open with a missing ghost and nothing
-    // to say why.
-    CsLayers.withLayerOn(doc, di, CsLayers.CTRL_SECTION_OUTLINE,
+    // GHOST ships visible, but a caver may since have switched it off,
+    // and the bay must not open with a missing ghost and nothing to
+    // say why.
+    CsLayers.withLayerOn(doc, di, CsLayers.CTRL_SECTION_GHOST,
         function() {
             di.applyOperation(op);
         });

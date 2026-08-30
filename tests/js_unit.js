@@ -15247,6 +15247,12 @@ if (!IS_NODE) {
         "CTRL-SECTION-OUTLINE is section");
     eqs(CsLayers.frameOf(CsLayers.CTRL_SECTION_BOX), "section",
         "CTRL-SECTION-BOX is section");
+    // The sketch bay's ghost outline, on its own layer so it cannot be
+    // mistaken for the real, placed one (see SketchSection.addGhost) --
+    // still has to answer "section" by the same CTRL-SECTION- prefix,
+    // or a plan-wide sweep or warp could reach into an open bay.
+    eqs(CsLayers.frameOf(CsLayers.CTRL_SECTION_GHOST), "section",
+        "CTRL-SECTION-GHOST is section");
     eqs(CsLayers.frameOf(CsLayers.SECTION_WALLS_SURVEYED), "section",
         "SECTION-WALLS-SURVEYED is section");
     eqs(CsLayers.frameOf("SECTION-BREAKDOWN"), "section",

@@ -402,11 +402,15 @@ SectionCapture.capture = function(doc, di, bay, position) {
     // as an off one does. withLayerOn alone only clears off/frozen, so
     // the frame's delete additionally needs withLayerUnlocked, nested
     // exactly as SketchSection.addFrame nests them for the ADD.
-    // CTRL-SECTION-OUTLINE and CTRL-SECTION-SCAN are not suite-locked,
+    // CTRL-SECTION-GHOST and CTRL-SECTION-SCAN are not suite-locked,
     // but a caver may have switched either off since the bay opened, so
     // both still need withLayerOn around this same single commit or a
     // hidden ghost or scan silently survives teardown and is swept into
-    // the NEXT section.
+    // the NEXT section. The ghost lives on its own layer rather than
+    // CTRL-SECTION-OUTLINE (see SketchSection.addGhost) precisely so it
+    // can be told apart from a real, placed section outline -- which
+    // means its delete has to be unwrapped by that same layer's name,
+    // not the outline's.
     if (bay.frame !== null) { op.deleteObject(bay.frame); }
     if (bay.ghost !== null) { op.deleteObject(bay.ghost); }
     if (bay.scan !== null) { op.deleteObject(bay.scan); }
@@ -414,7 +418,7 @@ SectionCapture.capture = function(doc, di, bay, position) {
     CsLayers.withLayerOn(doc, di, CsLayers.CTRL_SECTION_BOX, function() {
         CsLayers.withLayerUnlocked(doc, di, CsLayers.CTRL_SECTION_BOX,
             function() {
-                CsLayers.withLayerOn(doc, di, CsLayers.CTRL_SECTION_OUTLINE,
+                CsLayers.withLayerOn(doc, di, CsLayers.CTRL_SECTION_GHOST,
                     function() {
                         CsLayers.withLayerOn(doc, di,
                             CsLayers.CTRL_SECTION_SCAN, function() {
