@@ -217,6 +217,78 @@ var again = CalloutWrite.refreshSections(doc, di, shrunk, res3);
 check("a second pass reports the same loss", again.lost === 1);
 check("and still re-derives nothing", again.updated === 0);
 
+// ---- a SKETCHED section is never regenerated -------------------------
+// The gate that makes hand tracing possible at all. A computed section
+// re-derives from the survey; a traced one has no survey to re-derive
+// from and must be left exactly alone -- but COUNTED, because a stale
+// section on a plotted map is the failure this refresh exists to
+// prevent.
+var sketchId = CsCallout.newId();
+var sketchName = CsSectionDraw.blockName(sketchId);
+var sketchBlock = new RBlock(doc, sketchName, new RVector(0, 0));
+di.applyOperation(new RAddObjectOperation(sketchBlock, false));
+var sketchBlockId = doc.getBlockId(sketchName);
+
+var traced = new RLineEntity(doc,
+    new RLineData(new RVector(-3, -3), new RVector(3, 3)));
+traced.setBlockId(sketchBlockId);
+var sop = new RAddObjectsOperation();
+sop.addObject(traced, false);
+
+var sketchRef = new RBlockReferenceEntity(doc,
+    new RBlockReferenceData(sketchBlockId, new RVector(200, 200),
+        new RVector(1, 1), 0.0));
+CsTags.set(sketchRef, CsCallout.KEY.ID, sketchId);
+CsTags.set(sketchRef, CsCallout.KEY.ROLE, CsCallout.ROLE_BLOCK);
+CsTags.set(sketchRef, CsCallout.KEY.KIND, CsCallout.KIND_SECTION);
+CsTags.set(sketchRef, CsCallout.KEY.SECTION_SOURCE,
+    CsCallout.SOURCE_SKETCH);
+CsTags.set(sketchRef, CsCallout.KEY.SECTION_STATION, "A1");
+sop.addObject(sketchRef, false);
+di.applyOperation(sop);
+
+// THE TRAP: CsTags.set returns early on an empty/null value and cannot
+// clear a tag. If the tag above did not actually take, the gate below
+// would pass for the wrong reason (falling through as a bare block with
+// no KIND, never reaching the sketch check at all). Read it back before
+// trusting the fixture.
+check("fixture setup: the sketch tag actually took",
+    CsTags.get(sketchRef, CsCallout.KEY.SECTION_SOURCE) ===
+        CsCallout.SOURCE_SKETCH);
+
+var tracedId = traced.getId();
+var beforeCount = doc.queryBlockEntities(sketchBlockId).length;
+
+var sketchReport = CalloutWrite.refreshSections(doc, di, sv, res2);
+check("a sketched section is counted, not skipped in silence",
+    sketchReport !== null && sketchReport.sketched === 1);
+check("a computed section beside it still regenerates in the same pass",
+    sketchReport.updated === 1);
+check("a sketched section is never re-derived",
+    doc.queryBlockEntities(sketchBlockId).length === beforeCount);
+
+var stillTraced = doc.queryEntity(tracedId);
+check("the traced line itself is still there, same entity",
+    !isNull(stillTraced));
+if (!isNull(stillTraced)) {
+    var tp0 = stillTraced.getData().getStartPoint();
+    checkClose("and its geometry is untouched (x)", tp0.x, -3);
+}
+
+var stillThere = doc.queryEntity(sketchRef.getId());
+check("and its reference is left exactly where it was",
+    !isNull(stillThere) &&
+    stillThere.getData().getPosition().x === 200);
+
+// A second pass must report the same thing: a sketch that quietly
+// stopped being counted on the next pass would mean the gate was
+// keyed off something other than the tag itself.
+var sketchAgain = CalloutWrite.refreshSections(doc, di, sv, res2);
+check("a second pass counts the sketch the same way",
+    sketchAgain.sketched === 1);
+check("and still regenerates the computed section beside it",
+    sketchAgain.updated === 1);
+
 if (failures.length === 0) {
     print("### CROSS SECTION OK " + checks);
 } else {

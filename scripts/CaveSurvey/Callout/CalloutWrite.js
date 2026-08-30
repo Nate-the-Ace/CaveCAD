@@ -907,10 +907,11 @@ CalloutWrite.addSectionLeaders = function(doc, op, id, cut, scale, at,
  * What this never writes is the block REFERENCE. Position, scale and
  * rotation are the caver's; only the definition is the tool's.
  *
- * \return {updated, unchanged, frozen, lost, refused}
+ * \return {updated, unchanged, frozen, lost, refused, sketched}
  */
 CalloutWrite.refreshSections = function(doc, di, survey, resolved) {
-    var out = { updated: 0, unchanged: 0, frozen: 0, lost: 0, refused: 0 };
+    var out = { updated: 0, unchanged: 0, frozen: 0, lost: 0, refused: 0,
+        sketched: 0 };
     if (isNull(doc) || isNull(di) || isNull(survey) || isNull(resolved)) {
         return out;
     }
@@ -924,6 +925,17 @@ CalloutWrite.refreshSections = function(doc, di, survey, resolved) {
         }
         if (CsTags.get(m.block, CsCallout.KEY.KIND) !==
                 CsCallout.KIND_SECTION) {
+            continue;
+        }
+        // TRACED BY HAND, from a scan. There is nothing to re-derive:
+        // the geometry never came from the survey, so "refreshing" it
+        // would mean replacing a caver's tracing with an LRUD box.
+        // Left alone and COUNTED, the same treatment SECTION_FROZEN
+        // already gets below -- it was just never generated in the
+        // first place, so there is no "frozen" state to enter.
+        if (CsTags.get(m.block, CsCallout.KEY.SECTION_SOURCE) ===
+                CsCallout.SOURCE_SKETCH) {
+            out.sketched++;
             continue;
         }
         // The caver owns this one's geometry now. Counted, never
