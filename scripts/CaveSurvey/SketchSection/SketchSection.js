@@ -20,6 +20,32 @@
  *
  * USAGE:
  *   Cave Survey > Sketch Section   (or "sketchsection" / "sks")
+ *
+ * QCAD only ever finds <dir>/<dir>.js on its own (AddOn.getAddOns), so
+ * init() below also registers the two siblings that close and reopen
+ * the bay -- SectionCapture and SectionEdit -- the ShapedLines
+ * precedent. Without this, the bay can be opened but never closed:
+ * no menu entry, no toolbar button, no "skc"/"ske" command exists in
+ * the running application even though the files are on disk.
+ *
+ * UNLIKE SHAPEDLINES' SIBLINGS, SectionCapture.js and SectionEdit.js
+ * each already include THIS file back (they call SketchSection.run/
+ * TAG_BAY/etc.), so their include(includeBasePath + "/SketchSection.js")
+ * line has been there since the bay was first built. include()'s
+ * basename dedupe only registers a file once its OWN include() call has
+ * returned -- it does not guard a file against being re-entered while
+ * still mid-load -- so including them from up here, before this file's
+ * own load has returned, is a genuine circular include: SketchSection
+ * -> SectionCapture -> SketchSection -> SectionCapture -> ..., which
+ * blew the engine's call stack ("Maximum call stack size exceeded")
+ * when this was tried and run for real. Deferring the include()+init()
+ * pair to INSIDE SketchSection.init (below) sidesteps it: AddOn loads
+ * every add-on's main file first and only calls every add-on's init()
+ * in a later pass (see AddOn.js/autostart.js), so by the time init()
+ * runs here, this file's own load has already completed and its
+ * basename is already in the dedupe table -- SectionCapture.js's and
+ * SectionEdit.js's own include of SketchSection.js then resolves to a
+ * no-op instead of reopening this file.
  */
 include("scripts/EAction.js");
 include("scripts/simple.js");
@@ -469,4 +495,16 @@ SketchSection.init = function(basePath) {
     action.setGroupSortOrder(450);
     action.setSortOrder(47);
     action.setWidgetNames(["CaveSurveyMenu", "CaveSurveyToolBar"]);
+
+    // The bay's teardown and reopen tools live in sibling files QCAD
+    // cannot discover on its own. include()d HERE, inside init(), not
+    // up in this file's header alongside CsAll.js -- see the header
+    // comment's "UNLIKE SHAPEDLINES' SIBLINGS" note for why: both
+    // siblings include this file back, and including them before this
+    // file's own load has returned is a circular include that crashes
+    // the engine.
+    include(includeBasePath + "/SectionCapture.js");
+    include(includeBasePath + "/SectionEdit.js");
+    SectionCapture.init(basePath);
+    SectionEdit.init(basePath);
 };

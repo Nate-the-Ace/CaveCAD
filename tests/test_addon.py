@@ -68,6 +68,73 @@ def tool_source(name):
         return fh.read()
 
 
+def live_init_definition(source):
+    """The object name X for a live (non-commented) "X.init = function"
+    assignment in source, or None. Parsed line-by-line rather than
+    grepped for the substring, same reason as
+    test_every_core_file_is_included_by_csall below: a commented-out
+    definition must not count as a tool registering itself."""
+    for line in source.splitlines():
+        stripped = line.strip()
+        if stripped.startswith("//"):
+            continue
+        match = re.match(r'([A-Za-z_][A-Za-z0-9_]*)\.init\s*=\s*function',
+                         stripped)
+        if match:
+            return match.group(1)
+    return None
+
+
+def live_includes(source):
+    """Basenames of every live include(includeBasePath + "/...") target
+    in source. Same live-line filtering as live_init_definition."""
+    found = set()
+    for line in source.splitlines():
+        stripped = line.strip()
+        if stripped.startswith("//"):
+            continue
+        match = re.search(r'include\(includeBasePath \+ "([^"]+)"\)',
+                          stripped)
+        if match:
+            found.add(os.path.basename(match.group(1)))
+    return found
+
+
+def live_init_calls(source):
+    """Object names X for every live "X.init(basePath)" call in source."""
+    found = set()
+    for line in source.splitlines():
+        stripped = line.strip()
+        if stripped.startswith("//"):
+            continue
+        for match in re.finditer(
+                r'([A-Za-z_][A-Za-z0-9_]*)\.init\(basePath\)', stripped):
+            found.add(match.group(1))
+    return found
+
+
+def sibling_tool_files(name):
+    """(filename, initObjectName) for every .js file in a tool's own
+    folder, other than <name>.js itself, that defines its own
+    "<X>.init = function" -- i.e. registers its own RGuiAction and is
+    therefore a second tool riding along in the same folder (ShapedLines'
+    draw buttons, SketchSection's Capture/Edit companions), not a plain
+    library (CalloutWrite.js, ScanView.js, ...) that <name>.js merely
+    calls into. Only these have a menu entry, toolbar button or command
+    to lose if the folder's main file forgets to wire them up."""
+    folder = os.path.join(ADDON, name)
+    out = []
+    for filename in sorted(os.listdir(folder)):
+        if not filename.endswith(".js") or filename == name + ".js":
+            continue
+        with open(os.path.join(folder, filename)) as fh:
+            source = fh.read()
+        obj = live_init_definition(source)
+        if obj is not None:
+            out.append((filename, obj))
+    return out
+
+
 def find_int(source, call):
     match = re.search(re.escape(call) + r"\((\d+)\)", source)
     return int(match.group(1)) if match else None
@@ -416,6 +483,57 @@ class TestBasenameCollisions(unittest.TestCase):
                             "%s: Core basenames must start with Cs -- "
                             "include() dedupes by basename and stock "
                             "QCAD's own scripts win" % filename)
+
+
+class TestSiblingToolsAreWired(unittest.TestCase):
+    """QCAD's AddOn.getAddOns (see AddOn.js, around line 545) only ever
+    loads <Dir>/<Dir>.js on its own -- it never looks at any other file
+    in a tool's folder. A folder can still hold more than one RGuiAction
+    (ShapedLines' per-style draw buttons, SketchSection's Capture/Edit
+    companions): the ONLY reason those work is that <Dir>.js explicitly
+    includes each sibling and calls its init(basePath) itself, the
+    pattern documented in ShapedLines.js's own header comment ("sibling
+    files QCAD cannot discover on its own").
+
+    SketchSection shipped without doing this for SectionCapture.js and
+    SectionEdit.js: both files existed, both passed every file-existence
+    and file-shape check in this suite, and neither was reachable from
+    the running application -- no menu entry, no toolbar button, no
+    "skc"/"ske" command. tests/section_sketch_run.js still passed
+    because it loads all three files by hand with loadRepoScript,
+    bypassing exactly the discovery path this test checks.
+
+    Note this is deliberately narrower than "every sibling file must be
+    included": a sibling with no init() of its own is a plain library
+    (CalloutWrite.js, ScanView.js, CaveTemplateApply.js, ...) that its
+    folder's tool merely calls into on its own terms, sometimes not even
+    via include()+init() at all (CaveTemplateApply.js is registered
+    through NewFile.addPostNewAction instead). Only a sibling that
+    registers its OWN RGuiAction via its own init() has a menu entry to
+    lose.
+    """
+
+    def test_every_sibling_tool_is_included_and_initialised(self):
+        for name in tool_dirs():
+            siblings = sibling_tool_files(name)
+            if not siblings:
+                continue
+            main_source = tool_source(name)
+            included = live_includes(main_source)
+            called = live_init_calls(main_source)
+            for filename, obj in siblings:
+                with self.subTest(tool=name, sibling=filename):
+                    self.assertIn(
+                        filename, included,
+                        "%s/%s.js does not include sibling %s -- %s.%s "
+                        "would be undefined at runtime" %
+                        (name, name, filename, obj, "init"))
+                    self.assertIn(
+                        obj, called,
+                        "%s/%s.js never calls %s.init(basePath) -- %s "
+                        "has no menu entry, toolbar button or command "
+                        "in the running application" %
+                        (name, name, obj, filename))
 
 
 class TestLayerVocabulary(unittest.TestCase):
