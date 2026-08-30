@@ -523,7 +523,8 @@ SketchScans.buildDock = function(appWin) {
             SketchScans.refresh();
             return;
         }
-        var placed = SketchScans.insert(doc, di, w.scans + "/" + rel, rel);
+        var placed = SketchScans.insert(doc, di, w.scans + "/" + rel, rel,
+            frameNow());
         if (placed === null) {
             return;                 // insert already explained why
         }
@@ -531,7 +532,8 @@ SketchScans.buildDock = function(appWin) {
             SketchScans.alignSoon(placed);
         } else {
             EAction.handleUserMessage(rel + " inserted on " +
-                CsLayers.CTRL_SCAN + ". Align Image fits it to the survey.");
+                CsScanFrame.layerFor(frameNow()) +
+                ". Align Image fits it to the survey.");
         }
     };
 
@@ -1224,12 +1226,15 @@ SketchScans.installListener = function(appWin) {
 /**
  * Inserts one scan over the survey: centered on the drawing's extent,
  * scaled so its width spans about that extent (or 150 units for an
- * empty drawing), tagged, on CTRL-SCAN, on top -- an underlay about to
- * be aligned needs to be seen.
+ * empty drawing), tagged with the frame it belongs to, on that frame's
+ * own scan layer, on top -- an underlay about to be aligned needs to be
+ * seen.
  *
+ * \param frame which view this scan belongs to; defaults to "plan"
+ *        when absent, same as CsScanFrame.normaliseKind.
  * \return the entity id, or null (a message has been shown).
  */
-SketchScans.insert = function(doc, di, path, name) {
+SketchScans.insert = function(doc, di, path, name, frame) {
     var image = new QImage(path);
     if (image.isNull()) {
         warning("Sketch Scans: " + name + " could not be read as an " +
@@ -1283,11 +1288,17 @@ SketchScans.insert = function(doc, di, path, name) {
         return null;
     }
 
-    CsLayers.ensure(doc, di, CsLayers.CTRL_SCAN);
-    // Layer, tag and draw order BEFORE adding -- post-add writes fail
+    // The frame's OWN scan layer. A profile sketch on CTRL-SCAN would
+    // read as plan content to CsLayers.frameOf, so a plan-wide warp
+    // would drag it and it would swell the plan's data window.
+    var kind = CsScanFrame.normaliseKind(frame);
+    var layer = CsScanFrame.layerFor(kind);
+    CsLayers.ensure(doc, di, layer);
+    // Layer, tags and draw order BEFORE adding -- post-add writes fail
     // silently in this bridge (see CsDraw.js's header).
-    entity.setLayerId(doc.getLayerId(CsLayers.CTRL_SCAN));
+    entity.setLayerId(doc.getLayerId(layer));
     CsTags.set(entity, "SketchScan", name);
+    CsTags.set(entity, CsScanFrame.TAG, kind);
     // To the very back, under the survey linework -- the basemap's
     // call, one below getMinDrawOrder() because THIS entity is not in
     // storage yet and a tie at the minimum is not documented to
@@ -1317,7 +1328,7 @@ SketchScans.insert = function(doc, di, path, name) {
         }
     }
     warning("Sketch Scans: the insert operation added nothing -- the " +
-        CsLayers.CTRL_SCAN + " layer may be locked or frozen.");
+        layer + " layer may be locked or frozen.");
     return null;
 };
 
