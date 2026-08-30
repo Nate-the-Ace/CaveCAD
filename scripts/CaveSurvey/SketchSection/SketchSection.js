@@ -27,7 +27,6 @@ include(includeBasePath + "/../Core/CsAll.js");
 
 function SketchSection(guiAction) {
     EAction.call(this, guiAction);
-    this.priorSnap = null;
 }
 
 SketchSection.prototype = new EAction();
@@ -41,6 +40,14 @@ SketchSection.TAG_BAY = "SectionBay";
 SketchSection.ROLE_FRAME = "frame";
 SketchSection.ROLE_GHOST = "ghost";
 SketchSection.ROLE_SCAN = "scan";
+
+/** The snap class the caver was using before the bay switched to free,
+ *  so SectionCapture's teardown can put it back. Carried on the FRAME,
+ *  the one piece of bay furniture guaranteed to exist for the bay's
+ *  whole lifetime -- see SketchSection.currentSnapClassName, where
+ *  SketchSection.run reads it, and SectionCapture.restoreSnap, where
+ *  it is rebuilt. */
+SketchSection.TAG_SNAP = "SectionBaySnap";
 
 SketchSection.prototype.beginEvent = function() {
     EAction.prototype.beginEvent.call(this);
@@ -100,6 +107,14 @@ SketchSection.run = function(scanPath, station) {
 
     var bayId = CsUuid.v4();
 
+    // Read the CURRENT snap's class BEFORE anything below switches it to
+    // free -- di.getSnap() after the switch would just read back "free".
+    // Tagged onto the frame in the SAME add below, so SectionCapture's
+    // teardown can rebuild and restore it later without ever holding the
+    // snap object itself across the bay's lifetime (di.setSnap() takes
+    // ownership -- see SectionCapture.restoreSnap).
+    var priorSnapClass = SketchSection.currentSnapClassName(di);
+
     // Every layer this bay writes to must exist before doc.getLayerId
     // is asked for it, or the entity lands on layer 0 with no error at
     // all. CsLayers.ensure() is a no-op once the template already has
@@ -108,7 +123,7 @@ SketchSection.run = function(scanPath, station) {
     CsLayers.ensure(doc, di, CsLayers.CTRL_SECTION_OUTLINE);
     CsLayers.ensure(doc, di, CsLayers.CTRL_SECTION_SCAN);
 
-    SketchSection.addFrame(doc, di, rect, bayId, name);
+    SketchSection.addFrame(doc, di, rect, bayId, name, priorSnapClass);
     if (cut !== null) {
         SketchSection.addGhost(doc, di, cut, scale, rect, bayId);
     }
@@ -182,8 +197,12 @@ SketchSection.rememberedCorner = function(doc) {
 
 /** The frame: a closed polyline, tagged, and LOCKED so a rubber-band
  *  selection over the tracing cannot drag the boundary the sweep is
- *  measured against. */
-SketchSection.addFrame = function(doc, di, rect, bayId, station) {
+ *  measured against. Also carries the snap class the caver was using
+ *  before the bay switched to free, so SectionCapture can put it back
+ *  at teardown -- the frame is the one bit of furniture guaranteed to
+ *  outlive the whole bay. */
+SketchSection.addFrame = function(doc, di, rect, bayId, station,
+        priorSnapClass) {
     var pl = new RPolyline();
     pl.appendVertex(new RVector(rect.x1, rect.y1));
     pl.appendVertex(new RVector(rect.x2, rect.y1));
@@ -197,6 +216,11 @@ SketchSection.addFrame = function(doc, di, rect, bayId, station) {
     CsTags.set(e, SketchSection.TAG_BAY, bayId);
     CsTags.set(e, "SectionBayRole", SketchSection.ROLE_FRAME);
     CsTags.set(e, "SectionBayStation", station);
+    // CsTags.set no-ops on null/undefined/"" by design (see CsTags.js),
+    // so a snap this build could not name just leaves the tag absent --
+    // SectionCapture.restoreSnap already treats an absent tag as "leave
+    // the snap alone" rather than guessing.
+    CsTags.set(e, SketchSection.TAG_SNAP, priorSnapClass);
     var op = new RAddObjectsOperation();
     op.setText("Open section bay");
     op.addObject(e, false);
@@ -332,12 +356,36 @@ SketchSection.zoomTo = function(di, rect) {
  * curve reduction. Set through di, NOT by triggering the snap action --
  * triggering from inside an action lifecycle event frees the action
  * still running and takes the process with it.
+ *
+ * NOT restored here. This action terminates the instant the bay is
+ * open (see beginEvent), so undoing the switch on its own finish would
+ * take the free snap away before the caver has drawn a single point.
+ * The snap comes back at TEARDOWN instead -- SectionCapture.capture --
+ * from the class name SketchSection.run already read via
+ * currentSnapClassName and tagged onto the frame, before this function
+ * ran.
  */
 SketchSection.snapFree = function(di) {
     try {
         di.setSnap(new RSnapFree());
     } catch (e) {
         // no snap change is survivable; a crash is not
+    }
+};
+
+/** The current snap's class name -- "RSnapGrid", not "RSnapGrid [JS]" --
+ *  or null when it cannot be read. Probed 2026-08-30: di.getSnap()
+ *  String()s as "<ClassName> [JS]"; the base "RSnap" (no concrete snap
+ *  ever set) and anything unreadable both come back null rather than a
+ *  name nothing can rebuild. */
+SketchSection.currentSnapClassName = function(di) {
+    try {
+        var s = String(di.getSnap());
+        var i = s.indexOf(" ");
+        var name = (i < 0) ? s : s.substring(0, i);
+        return (name === "" || name === "RSnap") ? null : name;
+    } catch (e) {
+        return null;
     }
 };
 
