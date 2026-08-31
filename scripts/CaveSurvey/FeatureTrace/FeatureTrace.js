@@ -774,6 +774,13 @@ FeatureTrace.buildDock = function(appWin) {
  *  transaction, which is when the region can actually change. */
 FeatureTrace.regionBox = null;
 
+/** The open section bays' rectangles, cached for the same reason and on
+ *  the same refresh. The readout has to know them or it reports PLAN
+ *  for a cursor sitting inside a bay -- the frame whose tiles the caver
+ *  is about to arm. Opening and capturing a bay are both transactions,
+ *  so flush() sees every change to this list. */
+FeatureTrace.bayRects = [];
+
 /** Debounce for the panel's own rescans. See markDirty. */
 FeatureTrace.dirtyTimer = null;
 
@@ -839,6 +846,12 @@ FeatureTrace.flush = function() {
             CsTrace.profileRegion(doc);
     } catch (eBox) {
         FeatureTrace.regionBox = null;
+    }
+    try {
+        FeatureTrace.bayRects = isNull(doc) ? [] :
+            CsTrace.sectionBays(doc);
+    } catch (eBays) {
+        FeatureTrace.bayRects = [];
     }
     FeatureTrace.refreshRuns(doc);
     FeatureTrace.refresh(doc, FeatureTrace.regionBox);
@@ -996,7 +1009,8 @@ FeatureTrace.installListener = function(appWin) {
                     return;
                 }
                 FeatureTrace.showCursorFrame(CsTrace.frameIn(
-                    FeatureTrace.regionBox, { x: pos.x, y: pos.y }));
+                    FeatureTrace.regionBox, { x: pos.x, y: pos.y },
+                    FeatureTrace.bayRects));
             } catch (eCoord) {
                 // a listener must never throw into the application
             }

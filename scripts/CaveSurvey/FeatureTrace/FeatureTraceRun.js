@@ -19,6 +19,7 @@ function FeatureTraceRun(guiAction) {
 
     this.samples = [];      // {x, y} in drawing coordinates
     this.region = null;     // cached profile-frame box; see refreshRegion
+    this.bays = [];         // cached open section-bay rects; same refresh
     this.savedSnap = null;  // snap CLASS NAME to restore on exit
 }
 
@@ -170,15 +171,50 @@ FeatureTraceRun.toleranceFraction = function() {
  * floor depending on what the caver meant, and a guess would write real
  * geometry from an assumption. A refusal costs one re-arm.
  */
-FeatureTraceRun.frameGuard = function(box, layerName, point) {
+FeatureTraceRun.frameGuard = function(box, layerName, point, bays) {
     var want = CsLayers.frameOf(layerName);
-    var got = CsTrace.frameIn(box, point);
+    var got = CsTrace.frameIn(box, point, bays);
     if (want === got) {
         return null;
+    }
+    var section = FeatureTraceRun.sectionRefusal(layerName, want, bays,
+        qsTr("the cursor is"));
+    if (section !== null) {
+        return section;
     }
     return qsTr("%1 belongs to the %2 frame, but the cursor is in the %3 " +
         "frame. Arm the %3 row instead, or move to the %2 view.")
         .arg(layerName).arg(want).arg(got);
+};
+
+/**
+ * Why a SECTION layer could not be traced, or null when the refusal is
+ * not about the section frame.
+ *
+ * The generic refusal names the frame the point turned out to be in,
+ * and for a section layer that is always "plan" -- which is true and
+ * useless. Outside a bay there is no section frame anywhere on the
+ * sheet, so "you are in the plan frame, move to the section view" sends
+ * the caver looking for a view that does not exist. The real answer is
+ * either "no bay is open" or "you are outside the one that is", and
+ * both name the thing to do about it.
+ *
+ * `where` is the clause naming what was out of frame -- the cursor at
+ * press time, the run at release -- so one explanation serves both
+ * checks without either inventing its own wording.
+ */
+FeatureTraceRun.sectionRefusal = function(layerName, want, bays, where) {
+    if (want !== "section") {
+        return null;
+    }
+    if (isNull(bays) || bays.length === 0) {
+        return qsTr("%1 belongs to the section frame, and no section bay " +
+            "is open. Sketch Section opens one, and a cross section is " +
+            "traced inside it.").arg(layerName);
+    }
+    return qsTr("%1 belongs to the section frame, but %2 outside every " +
+        "open section bay. Trace inside the bay's frame.")
+        .arg(layerName).arg(where);
 };
 
 FeatureTraceRun.prototype.beginEvent = function() {
@@ -232,19 +268,25 @@ FeatureTraceRun.prototype.setState = function(state) {
 };
 
 /**
- * Recomputes the cached profile region.
+ * Recomputes the cached profile region and the open section bays.
  *
- * Called when the action starts and again after every committed trace:
- * a trace onto a profile layer GROWS the region, so a stale box would
- * refuse the next stroke just past the previous one.
+ * Called when the action starts, at the top of every press, and again
+ * after every committed trace: a trace onto a profile layer GROWS the
+ * region, so a stale box would refuse the next stroke just past the
+ * previous one -- and a bay can be OPENED (Sketch Section) or CAPTURED
+ * (Capture Section) between one stroke and the next, which would leave
+ * a stale bay list refusing every section stroke, or accepting strokes
+ * into a bay that is no longer there.
  *
- * Cached at all because CsTrace.profileRegion walks EVERY entity in the
+ * Cached at all because each of these walks EVERY entity in the
  * drawing, and the cursor readout asks per mouse-move event. On a real
- * cave that is thousands of entities per mouse move.
+ * cave that is thousands of entities per mouse move. Once per press is
+ * the same cost the post-commit refresh already pays.
  */
 FeatureTraceRun.prototype.refreshRegion = function() {
     var doc = this.getDocument();
     this.region = isNull(doc) ? null : CsTrace.profileRegion(doc);
+    this.bays = isNull(doc) ? [] : CsTrace.sectionBays(doc);
 };
 
 /** SAMPLE_PIXELS converted to drawing units at the current zoom.
@@ -290,8 +332,14 @@ FeatureTraceRun.prototype.mousePressEvent = function(event) {
     var p = event.getModelPosition();
     var here = { x: p.x, y: p.y };
 
+    // Once per stroke, before the guard reads them: Sketch Section and
+    // Capture Section can open and close a bay while this action is
+    // still armed, and the guard is the thing that would then be
+    // answering from a bay list that no longer describes the drawing.
+    this.refreshRegion();
+
     var refusal = FeatureTraceRun.frameGuard(this.region,
-        FeatureTraceRun.targetLayer(this.getDocument()), here);
+        FeatureTraceRun.targetLayer(this.getDocument()), here, this.bays);
     if (refusal !== null) {
         EAction.handleUserMessage(refusal);
         return;   // nothing captured, nothing to undo
@@ -311,7 +359,8 @@ FeatureTraceRun.prototype.mouseMoveEvent = function(event) {
         // change the caver's mind before the press.
         if (typeof FeatureTrace !== "undefined" &&
                 !isNull(FeatureTrace.showCursorFrame)) {
-            FeatureTrace.showCursorFrame(CsTrace.frameIn(this.region, here));
+            FeatureTrace.showCursorFrame(CsTrace.frameIn(this.region, here,
+                this.bays));
         }
         return;
     }
@@ -353,11 +402,11 @@ FeatureTraceRun.prototype.commit = function() {
     // The press was in frame; the RELEASE is what proves the whole path
     // was. A wall crossing the gutter describes nothing in either view.
     var layerName = FeatureTraceRun.targetLayer(doc);
-    var pathFrame = CsTrace.pathFrame(this.region, this.samples);
+    var pathFrame = CsTrace.pathFrame(this.region, this.samples, this.bays);
 
     if (pathFrame === null) {
-        EAction.handleUserMessage(qsTr("That run crossed between the plan " +
-            "and the elevation. Nothing was drawn -- trace within one view."));
+        EAction.handleUserMessage(qsTr("That run crossed from one view " +
+            "into another. Nothing was drawn -- trace within one view."));
         return;
     }
 
@@ -375,9 +424,13 @@ FeatureTraceRun.prototype.commit = function() {
     if (FeatureTrace.target !== FeatureTrace.CURRENT_LAYER) {
         var wantFrame = CsLayers.frameOf(layerName);
         if (wantFrame !== pathFrame) {
-            EAction.handleUserMessage(qsTr("%1 belongs to the %2 frame, but " +
-                "that run is in the %3 frame. Nothing was drawn.")
-                .arg(layerName).arg(wantFrame).arg(pathFrame));
+            var sectionWhy = FeatureTraceRun.sectionRefusal(layerName,
+                wantFrame, this.bays, qsTr("that run is"));
+            EAction.handleUserMessage(sectionWhy !== null ?
+                sectionWhy + qsTr(" Nothing was drawn.") :
+                qsTr("%1 belongs to the %2 frame, but that run is in the " +
+                    "%3 frame. Nothing was drawn.")
+                    .arg(layerName).arg(wantFrame).arg(pathFrame));
             return;
         }
     }
@@ -448,7 +501,11 @@ FeatureTraceRun.prototype.commit = function() {
         }
     }
 
-    // A trace onto a profile layer grew the region.
+    // A trace onto a profile layer grew the region. (Section linework
+    // does not: profileRegion unions only profile-frame layers, so a
+    // stroke inside a bay leaves the elevation's extent alone -- which
+    // is what keeps a sketched section from dragging the profile frame
+    // out across the sheet to meet it.)
     this.refreshRegion();
 };
 

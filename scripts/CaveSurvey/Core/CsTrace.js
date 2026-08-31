@@ -229,22 +229,115 @@ CsTrace.profileRegion = function(doc) {
 };
 
 /**
- * Which view a POINT falls in, given a region box: "profile" inside it,
- * "plan" everywhere else.
+ * The rectangle of every OPEN section sketching bay, as
+ * [{minX, minY, maxX, maxY}].
  *
- * Pure -- a box and a point, no document -- so node tests it and, more
- * importantly, so a caller can compute the box ONCE and ask this many
- * times. The cursor readout asks per mouse-move event, and the box
- * costs a walk of every entity in the drawing.
+ * A bay is the section frame. Unlike the plan and the elevation, the
+ * section view has no standing ground in the drawing at all: a captured
+ * section is a block reference, and the only place section linework is
+ * ever loose is inside a bay that SketchSection opened and
+ * SectionCapture will tear down. So "am I in the section frame" is
+ * exactly "am I inside an open bay", and outside every bay there is no
+ * section frame to be in.
  *
- * "plan" is the answer for anything outside the region, INCLUDING the
- * gutter between the two views and every point in a drawing with no
- * elevation yet. That matches CsLayers.frameOf's own deliberate
- * default: the dangerous mistake is a profile-scoped operation claiming
- * ground it does not own, so unclaimed ground belongs to the frame that
- * owns the drawing's origin.
+ * The tag names are SketchSection.TAG_BAY and its "frame" role, spelled
+ * as LITERALS here because Core cannot include an add-on -- the same
+ * arrangement CsProfileBox.boxes has with CsProfileDraw's "ProfileBox".
+ * If either name changes there, it changes here.
+ *
+ * e.update() before the bounding box, because the caver can DRAG a bay
+ * across the sheet and a cached box answers where it used to be -- the
+ * trap SectionCapture.findBay records for the same rectangle.
+ *
+ * QCAD only.
  */
-CsTrace.frameIn = function(box, point) {
+CsTrace.sectionBays = function(doc) {
+    var out = [];
+    if (isNull(doc)) {
+        return out;
+    }
+    var ids = doc.queryAllEntities(false, true);
+    for (var i = 0; i < ids.length; i++) {
+        var e = doc.queryEntity(ids[i]);
+        if (isNull(e)) {
+            continue;
+        }
+        if (CsTags.get(e, "SectionBay") === "" ||
+                CsTags.get(e, "SectionBayRole") !== "frame") {
+            continue;
+        }
+        try {
+            e.update();
+            var bb = e.getBoundingBox();
+            out.push({
+                minX: bb.getMinimum().x, minY: bb.getMinimum().y,
+                maxX: bb.getMaximum().x, maxY: bb.getMaximum().y });
+        } catch (eBox) {
+            // an unreadable frame answers nothing rather than wrongly
+        }
+    }
+    return out;
+};
+
+/** A hair of tolerance on a frame edge: a stroke laid exactly along a
+ *  bay's boundary is inside the bay, which is also what the capture
+ *  sweep decides about it (CsSectionBay: "flush with the frame counts
+ *  as IN"). Matches CsProfileBox.EDGE_EPS. */
+CsTrace.EDGE_EPS = 1e-6;
+
+/** True when `point` is inside one of `rects` (edge counts as inside).
+ *  Pure. */
+CsTrace.inAnyRect = function(rects, point) {
+    if (isNull(rects)) {
+        return false;
+    }
+    var eps = CsTrace.EDGE_EPS;
+    for (var i = 0; i < rects.length; i++) {
+        var r = rects[i];
+        if (point.x >= r.minX - eps && point.x <= r.maxX + eps &&
+                point.y >= r.minY - eps && point.y <= r.maxY + eps) {
+            return true;
+        }
+    }
+    return false;
+};
+
+/**
+ * Which view a POINT falls in: "section" inside an open bay, "profile"
+ * inside the region box, "plan" everywhere else.
+ *
+ * Pure -- boxes and a point, no document -- so node tests it and, more
+ * importantly, so a caller can compute the boxes ONCE and ask this many
+ * times. The cursor readout asks per mouse-move event, and each of the
+ * two collections costs a walk of every entity in the drawing.
+ *
+ * SECTION WINS WHEN A POINT IS IN BOTH. A bay is parked wherever the
+ * caver last left it (SketchSection.rememberedCorner), so nothing stops
+ * one landing over ground the elevation already claims -- and the
+ * derived profile region GROWS with every profile trace, so a bay that
+ * was clear when it opened can be swallowed later. A bay is the
+ * explicit, deliberate, short-lived record of "I am sketching a section
+ * HERE", where the region is a union inferred from whatever happens to
+ * be drawn; deferring to the region would make the section tiles go
+ * inert exactly where the bay happened to land, which is the failure
+ * this precedence exists to prevent. The same reasoning CsProfileBox
+ * states as "boxes first (the explicit record)".
+ *
+ * "plan" is the answer for anything outside both, INCLUDING the gutter
+ * between the views and every point in a drawing with no elevation and
+ * no open bay. That matches CsLayers.frameOf's own deliberate default:
+ * the dangerous mistake is a frame-scoped operation claiming ground it
+ * does not own, so unclaimed ground belongs to the frame that owns the
+ * drawing's origin.
+ *
+ * `bays` is optional. Omitting it answers as this function did before
+ * the section frame existed, which is what a caller with no bays to
+ * offer means.
+ */
+CsTrace.frameIn = function(box, point, bays) {
+    if (CsTrace.inAnyRect(bays, point)) {
+        return "section";
+    }
     if (isNull(box) || box === null) {
         return "plan";
     }
@@ -256,14 +349,16 @@ CsTrace.frameIn = function(box, point) {
 };
 
 /**
- * frameIn against the region this document happens to have right now.
+ * frameIn against the region and the bays this document happens to have
+ * right now.
  *
  * Convenience only, and NOT for use per mouse-move event: it walks
- * every entity in the drawing. Anything asking repeatedly must call
- * profileRegion once, hold the box, and use frameIn.
+ * every entity in the drawing twice. Anything asking repeatedly must
+ * call profileRegion and sectionBays once, hold both, and use frameIn.
  */
 CsTrace.frameAt = function(doc, point) {
-    return CsTrace.frameIn(CsTrace.profileRegion(doc), point);
+    return CsTrace.frameIn(CsTrace.profileRegion(doc), point,
+        CsTrace.sectionBays(doc));
 };
 
 /**
@@ -275,16 +370,17 @@ CsTrace.frameAt = function(doc, point) {
  * in either view, and letting it land would put linework into a
  * drawing whose whole binding model assumes frames do not mix.
  *
- * Takes the BOX, not the document: once per drag instead of once per
- * point keeps this O(points) rather than O(points x entities).
+ * Takes the BOX and the bay rects, not the document: once per drag
+ * instead of once per point keeps this O(points) rather than
+ * O(points x entities).
  */
-CsTrace.pathFrame = function(box, points) {
+CsTrace.pathFrame = function(box, points, bays) {
     if (isNull(points) || points.length === 0) {
         return null;
     }
-    var first = CsTrace.frameIn(box, points[0]);
+    var first = CsTrace.frameIn(box, points[0], bays);
     for (var i = 1; i < points.length; i++) {
-        if (CsTrace.frameIn(box, points[i]) !== first) {
+        if (CsTrace.frameIn(box, points[i], bays) !== first) {
             return null;
         }
     }

@@ -15691,6 +15691,88 @@ if (!IS_NODE) {
 }());
 
 // ---------------------------------------------------------------------
+// CsTrace.frameIn -- three frames, from boxes alone (pure; runs in node)
+//
+// The section frame is the reason this block exists. frameIn used to
+// answer only "plan" or "profile", so CsLayers.frameOf("SECTION-...")
+// -> "section" could never match what frameIn returned, and every
+// Cross Section tile in Feature Trace was inert by construction: the
+// guard refused a stroke it had no vocabulary to accept.
+// ---------------------------------------------------------------------
+(function() {
+    loadRepoScript("scripts/CaveSurvey/Core/CsTrace.js");
+
+    var profile = { minX: 0, minY: -300, maxX: 100, maxY: -100 };
+    var bay = { minX: 200, minY: 0, maxX: 240, maxY: 40 };
+
+    eqs(CsTrace.frameIn(profile, { x: 220, y: 20 }, [bay]), "section",
+        "CsTrace.frameIn: a point inside an open bay is the section frame");
+    eqs(CsTrace.frameIn(profile, { x: 50, y: -200 }, [bay]), "profile",
+        "CsTrace.frameIn: a point inside the region is still profile");
+    eqs(CsTrace.frameIn(profile, { x: 50, y: 500 }, [bay]), "plan",
+        "CsTrace.frameIn: a point outside both is plan");
+    eqs(CsTrace.frameIn(null, { x: 220, y: 20 }, [bay]), "section",
+        "CsTrace.frameIn: a bay answers section in a drawing with no " +
+        "elevation at all -- the commonest case, and the one the caver hit");
+    eqs(CsTrace.frameIn(profile, { x: 220, y: 20 }, []), "plan",
+        "CsTrace.frameIn: with no bay open there is no section frame " +
+        "anywhere -- the bay's own ground goes back to plan");
+    eqs(CsTrace.frameIn(profile, { x: 50, y: -200 }), "profile",
+        "CsTrace.frameIn: omitting the bays answers exactly as before " +
+        "the section frame existed");
+
+    // Edges count as inside, both frames: a caver who traces right up
+    // to a bay's boundary meant to, which is also what the capture
+    // sweep decides about that stroke (CsSectionBay.contains).
+    eqs(CsTrace.frameIn(profile, { x: 200, y: 40 }, [bay]), "section",
+        "CsTrace.frameIn: a point exactly on a bay corner is inside it");
+
+    // BOTH AT ONCE. A bay is parked where the caver last left it and
+    // the profile region grows with every profile trace, so overlap is
+    // reachable without anyone doing anything wrong. Section wins --
+    // the explicit, deliberate, short-lived record beats the union
+    // inferred from whatever happens to be drawn.
+    var over = { minX: 0, minY: 0, maxX: 500, maxY: 500 };
+    eqs(CsTrace.frameIn(over, { x: 220, y: 20 }, [bay]), "section",
+        "CsTrace.frameIn: a bay sitting inside the profile region is " +
+        "still the section frame -- the bay is the explicit record");
+
+    // Several bays open at once: each is its own section ground, and
+    // the space between them is not.
+    var bay2 = { minX: 300, minY: 0, maxX: 340, maxY: 40 };
+    eqs(CsTrace.frameIn(null, { x: 320, y: 20 }, [bay, bay2]), "section",
+        "CsTrace.frameIn: the second of two open bays is section too");
+    eqs(CsTrace.frameIn(null, { x: 270, y: 20 }, [bay, bay2]), "plan",
+        "CsTrace.frameIn: the gap between two bays is not section");
+
+    eqs(CsTrace.pathFrame(null, [{ x: 210, y: 10 }, { x: 230, y: 30 }],
+        [bay]), "section",
+        "CsTrace.pathFrame: a stroke wholly inside one bay is section");
+    // A stroke running from one bay into another answers "section",
+    // NOT null: pathFrame compares frames, and both ends are in the
+    // section frame. Deliberately not tightened to per-bay identity --
+    // SectionCapture.findBay already refuses outright while two bays
+    // are open, so nothing downstream can act on such a stroke, and a
+    // frame test that secretly answered about bay identity would be a
+    // second, differently-shaped rule for callers to get wrong.
+    eqs(CsTrace.pathFrame(null, [{ x: 210, y: 10 }, { x: 320, y: 20 }],
+        [bay, bay2]), "section",
+        "CsTrace.pathFrame: bay to bay is one frame -- pathFrame is " +
+        "about frames, not about which bay");
+    ok(CsTrace.pathFrame(null, [{ x: 210, y: 10 }, { x: 270, y: 20 }],
+        [bay, bay2]) === null,
+        "CsTrace.pathFrame: a stroke leaving a bay for the gap between " +
+        "bays has no single frame");
+    ok(CsTrace.pathFrame(profile, [{ x: 210, y: 10 }, { x: 50, y: -200 }],
+        [bay]) === null,
+        "CsTrace.pathFrame: a stroke leaving a bay for the elevation is " +
+        "refused");
+
+    ok(CsTrace.inAnyRect(null, { x: 0, y: 0 }) === false,
+        "CsTrace.inAnyRect: no bay list at all contains nothing");
+}());
+
+// ---------------------------------------------------------------------
 // CsTrace -- the point-to-frame region test (QCAD only: needs RDocument)
 // ---------------------------------------------------------------------
 if (!IS_NODE) {
@@ -16329,6 +16411,66 @@ if (!IS_NODE) {
         ok(FeatureTraceRun.frameGuard(box, CsLayers.WALLS_SURVEYED,
             pt(50, -190)) !== null,
             "frameGuard: a plan layer traced down in the region is refused");
+
+        // -- the SECTION frame, which is an open bay and nothing else --
+        // Before the bay rects reached frameIn, CsLayers.frameOf said
+        // "section" and frameIn could only ever say "plan" or
+        // "profile", so this first assertion was unsatisfiable and
+        // every Cross Section tile in the panel was inert.
+        CsLayers.ensure(doc, di, CsLayers.CTRL_SECTION_BOX);
+        var bayPl = new RPolyline();
+        bayPl.appendVertex(new RVector(200, 0));
+        bayPl.appendVertex(new RVector(240, 0));
+        bayPl.appendVertex(new RVector(240, 40));
+        bayPl.appendVertex(new RVector(200, 40));
+        bayPl.setClosed(true);
+        var bayE = new RPolylineEntity(doc, new RPolylineData(bayPl));
+        bayE.setLayerId(doc.getLayerId(CsLayers.CTRL_SECTION_BOX));
+        CsTags.set(bayE, "SectionBay", "bay-1");
+        CsTags.set(bayE, "SectionBayRole", "frame");
+        var bayOp = new RAddObjectsOperation();
+        bayOp.addObject(bayE, false);
+        // CTRL-SECTION-BOX ships LOCKED, and locked refuses an add as
+        // silently as off does -- the same pairing SketchSection.
+        // addFrame needs to get the frame into the drawing at all.
+        CsLayers.withLayerOn(doc, di, CsLayers.CTRL_SECTION_BOX, function() {
+            CsLayers.withLayerUnlocked(doc, di, CsLayers.CTRL_SECTION_BOX,
+                function() {
+                    di.applyOperation(bayOp);
+                });
+        });
+
+        var bays = CsTrace.sectionBays(doc);
+        eqs(bays.length, 1,
+            "CsTrace.sectionBays: the tagged bay frame is found in the drawing");
+        ok(FeatureTraceRun.frameGuard(box, CsLayers.SECTION_WALLS_SURVEYED,
+            pt(220, 20), bays) === null,
+            "frameGuard: a section layer traced inside an open bay is " +
+            "ALLOWED -- the assertion the inert cross-section tiles failed");
+        ok(FeatureTraceRun.frameGuard(box, CsLayers.WALLS_SURVEYED,
+            pt(220, 20), bays) !== null,
+            "frameGuard: a plan layer traced inside a bay is refused");
+
+        // The refusal has to say the true reason. A caver who arms a
+        // Cross Section tile with no bay open is not "in the plan
+        // frame" in any way they can act on -- there is no section view
+        // to move to until Sketch Section makes one.
+        var noBay = FeatureTraceRun.frameGuard(box,
+            CsLayers.SECTION_WALLS_SURVEYED, pt(220, 20), []);
+        ok(noBay !== null,
+            "frameGuard: a section layer with no bay open is refused");
+        ok(String(noBay).indexOf("no section bay is open") >= 0,
+            "frameGuard: and the refusal says THAT, not 'you are in the " +
+            "plan frame'");
+        ok(String(noBay).indexOf("Sketch Section") >= 0,
+            "frameGuard: and names the tool that opens one");
+
+        var outside = FeatureTraceRun.frameGuard(box,
+            CsLayers.SECTION_WALLS_SURVEYED, pt(500, 500), bays);
+        ok(outside !== null,
+            "frameGuard: a section layer traced outside the open bay is refused");
+        ok(String(outside).indexOf("outside every open section bay") >= 0,
+            "frameGuard: and that refusal says the cursor is outside the bay");
 
         // -- targetLayer: fallback AND the armed case ---------------
         // Both halves, because a test of only the fallback passes even

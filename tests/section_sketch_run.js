@@ -111,6 +111,12 @@ loadRepoScript("scripts/CaveSurvey/Callout/CalloutWrite.js");
 loadRepoScript("scripts/CaveSurvey/SketchSection/SketchSection.js");
 loadRepoScript("scripts/CaveSurvey/SketchSection/SectionCapture.js");
 loadRepoScript("scripts/CaveSurvey/SketchSection/SectionEdit.js");
+// Feature Trace, because the bay is only worth opening if the suite's
+// own tracing tools will actually draw into it -- see claim FT. The
+// panel file comes too: FeatureTraceRun.commit reads FeatureTrace.target
+// without a typeof guard, so a stub here would be testing the stub.
+loadRepoScript("scripts/CaveSurvey/FeatureTrace/FeatureTrace.js");
+loadRepoScript("scripts/CaveSurvey/FeatureTrace/FeatureTraceRun.js");
 
 var failures = [];
 var checks = 0;
@@ -1318,6 +1324,106 @@ function selectOnly(entityId) {
         check("F1: and its leader lands with it", false);
         check("F1: the tracing is not stranded", false);
     }
+})();
+
+// ---------------------------------------------------------------------
+// CLAIM FT: a Cross Section tile actually draws into an open bay.
+//
+// THE BUG THIS EXISTS FOR. Every Cross Section tile in Feature Trace
+// was inert. CsLayers.frameOf("SECTION-WALLS-SURVEYED") answers
+// "section", CsTrace.frameIn could only ever answer "plan" or
+// "profile", and FeatureTraceRun.frameGuard refuses whenever the two
+// disagree -- so the guard refused every section stroke there was, and
+// the caver's first real cross-section sketching session drew nothing
+// at all. A bay is now the section frame, and this claim is the one
+// that says so in linework rather than in a return value.
+//
+// DRIVEN THROUGH commit() ON A STAND-IN `this`, not through a mouse.
+// The drag capture is mouse-only, but everything the refusal lived in
+// -- the whole-path frame test, the armed layer's frame, the emit --
+// is in commit(), and commit only ever reaches the action through
+// getDocument/getDocumentInterface/samples/region/bays/refreshRegion.
+//
+// MUTATION-TESTED. Deleting the section case from CsTrace.frameIn (the
+// `if (CsTrace.inAnyRect(bays, point)) return "section";` line) turns
+// the landing claim red with "FT: the stroke LANDS on the armed
+// section layer -- expected 1, got 0".
+//
+// Runs where no bay is open (F1 captured its own), so it opens its own
+// and leaves it: F2 below opens two more and only asserts that Capture
+// refuses to guess among them, which more bays cannot falsify.
+// ---------------------------------------------------------------------
+(function() {
+    var ftBayId = SketchSection.run(scanPath, "A1");
+    check("FT: fixture: a bay opens for the trace", ftBayId !== null);
+    var ftBay = SectionCapture.findBay(doc);
+    check("FT: fixture: and it is the only one open", ftBay !== null);
+    if (ftBay === null) {
+        check("FT: the stroke LANDS on the armed section layer", false);
+        return;
+    }
+
+    // Every refusal captured rather than printed: a refusal is the
+    // failure mode under test, so its text is evidence.
+    var ftSaid = [];
+    var realMessage = EAction.handleUserMessage;
+    EAction.handleUserMessage = function(text) { ftSaid.push(String(text)); };
+
+    var ftLayerId = doc.getLayerId(CsLayers.SECTION_WALLS_SURVEYED);
+    var ftBefore = doc.queryLayerEntities(ftLayerId, true).length;
+
+    // Armed the way the panel arms it, so this cannot pass with a
+    // target the real dock would never set.
+    FeatureTrace.armLayer(CsLayers.SECTION_WALLS_SURVEYED);
+    check("FT: fixture: the Cross Section walls tile is armed",
+        FeatureTraceRun.targetLayer(doc) === CsLayers.SECTION_WALLS_SURVEYED);
+
+    var ftCentre = SectionCapture.originOf(ftBay);
+    var ftSamples = [];
+    for (var si = 0; si <= 8; si++) {
+        ftSamples.push({ x: ftCentre.x - 2 + si * 0.5,
+                         y: ftCentre.y - 2 + si * 0.4 });
+    }
+    var ftAction = {
+        getDocument: function() { return doc; },
+        getDocumentInterface: function() { return di; },
+        samples: ftSamples,
+        region: null,
+        bays: [],
+        refreshRegion: FeatureTraceRun.prototype.refreshRegion
+    };
+    // As beginEvent does: the caches the guard reads are filled from
+    // the document before the stroke is judged.
+    ftAction.refreshRegion();
+    check("FT: fixture: the open bay is seen as section-frame ground",
+        ftAction.bays.length === 1 &&
+        CsTrace.frameIn(ftAction.region, ftCentre, ftAction.bays) ===
+            "section");
+
+    try {
+        FeatureTraceRun.prototype.commit.call(ftAction);
+    } finally {
+        EAction.handleUserMessage = realMessage;
+        FeatureTrace.target = undefined;
+    }
+
+    var ftAfter = doc.queryLayerEntities(ftLayerId, true).length;
+    check("FT: the stroke LANDS on the armed section layer -- expected " +
+        (ftBefore + 1) + ", got " + ftAfter +
+        (ftSaid.length === 0 ? "" : " (said: " + ftSaid.join(" | ") + ")"),
+        ftAfter === ftBefore + 1);
+    check("FT: and nothing was refused" +
+        (ftSaid.length === 0 ? "" : " (said: " + ftSaid.join(" | ") + ")"),
+        ftSaid.length === 1 && ftSaid[0].indexOf("sampled") >= 0);
+
+    // Inside the BAY, not merely on the layer: a section layer is
+    // global, so landing on it proves nothing about where the linework
+    // went. The capture sweep is geometric, and only what is inside the
+    // frame becomes the block.
+    var ftBay2 = SectionCapture.findBay(doc);
+    check("FT: and the capture sweep picks it up -- it is inside the " +
+        "frame, which is what makes it part of the section",
+        ftBay2 !== null && ftBay2.traced.length === 1);
 })();
 
 // ---------------------------------------------------------------------
