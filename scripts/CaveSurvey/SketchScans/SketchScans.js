@@ -242,6 +242,10 @@ SketchScans.buildDock = function(appWin) {
         collapsed: {},      // this cave's collapsed set
         bookmarks: {},      // this cave's COMPLETED scans
         picking: null,      // an alignment in progress: {pairs, rel}
+        trim: null,         // the trim choice for the selected scan:
+                            // {rel, rect, path, chosen}; null before
+                            // anything is selected
+
         calibrating: null,  // a section scale being set in the preview:
                             // {path, rel, station, lrud, from, to,
                             //  forced, cal}
@@ -305,6 +309,35 @@ SketchScans.buildDock = function(appWin) {
         zoomRow.addWidget(w.zoomInButton, 0, 0);
         zoomRow.addStretch(1);
         previewLayout.addLayout(zoomRow, 0);
+        // THE TRIM BAR. Not an optional extra button: a scan is not
+        // placeable until the caver has said which part of it they
+        // mean. A page with one sketch on it costs one click ("Use
+        // whole page") and nothing else; a page with three costs a
+        // drag.
+        var trimRow = new QHBoxLayout();
+        w.trimLabel = new QLabel(qsTr("Trim: drag a box"));
+        try {
+            w.trimLabel.toolTip = qsTr("Drag a box round the sketch you " +
+                "want. Only that part of the page is placed, so the " +
+                "other sketches on it stay out of the drawing.");
+        } catch (eTt) {
+        }
+        w.trimWholeButton = new QPushButton(qsTr("Use whole page"));
+        w.trimWholeButton.toolTip = qsTr("Place the entire scanned " +
+            "page, as before. Nothing is written to disk.");
+        w.trimRedoButton = new QPushButton(qsTr("Redo box"));
+        w.trimRedoButton.toolTip = qsTr("Forget this box and draw " +
+            "another one.");
+        trimRow.addWidget(w.trimLabel, 1, 0);
+        trimRow.addWidget(w.trimWholeButton, 0, 0);
+        trimRow.addWidget(w.trimRedoButton, 0, 0);
+        previewLayout.addLayout(trimRow, 0);
+        w.trimWholeButton.clicked.connect(function() {
+            SketchScans.chooseWholePage();
+        });
+        w.trimRedoButton.clicked.connect(function() {
+            SketchScans.resetTrim(true);
+        });
         w.fitButton.clicked.connect(function() {
             CsScanPreview.fit(w.scanView);
         });
@@ -422,10 +455,10 @@ SketchScans.buildDock = function(appWin) {
     // fires on a PROGRAMMATIC change too, and this handler must only
     // react to the caver actually choosing something.
     w.frameCombo.activated.connect(function() {
-        try {
-            w.sketchButton.enabled = (frameNow() === "section");
-        } catch (e) {
-        }
+        // THE GATE OWNS THIS BUTTON NOW. Sketch Section needs a cross
+        // section AND a trim choice; setting enabled here directly
+        // would switch it on for an untrimmed scan.
+        SketchScans.updateTrimGate();
     });
     w.alignButton = new QPushButton(qsTr("Insert && Align"));
     w.alignButton.toolTip = qsTr("Insert the selected scan over the " +
@@ -507,12 +540,18 @@ SketchScans.buildDock = function(appWin) {
     body.setLayout(layout);
     dock.setWidget(body);
     SketchScans.w = w;
+    // Nothing is selected yet, so nothing is placeable yet.
+    SketchScans.updateTrimGate();
 
     var selectedFile = function() {
         var row = w.list.currentRow();
         if (row < 0 || row >= w.rows.length) { return null; }
         return w.rows[row].kind === "file" ? w.rows[row].rel : null;
     };
+    // The trim functions live on SketchScans rather than in this
+    // closure -- the buttons above are connected before they exist --
+    // so they reach the selection through here.
+    SketchScans.selectedRel = selectedFile;
 
     var showMessage = function(text) {
         w.preview.text = text;
@@ -534,8 +573,11 @@ SketchScans.buildDock = function(appWin) {
             if (rel === null || w.scans === null) {
                 try {
                     w.scanView.di.clear();
+                    w.scanView.band = null;
                 } catch (eEmpty) {
                 }
+                SketchScans.w.trim = null;
+                SketchScans.updateTrimGate();
                 return;
             }
             try {
@@ -556,7 +598,16 @@ SketchScans.buildDock = function(appWin) {
             }
             if (!CsScanPreview.show(w.scanView, w.scans + "/" + rel)) {
                 showMessage(qsTr("unreadable image"));
+                SketchScans.w.trim = null;
+                SketchScans.updateTrimGate();
+                return;
             }
+            // A NEW SCAN IS A NEW CHOICE. Carrying the last scan's box
+            // onto this one would trim a different page to a rectangle
+            // that meant something only on the old one.
+            SketchScans.w.trim = { rel: rel, rect: null, path: null,
+                                   chosen: false };
+            SketchScans.resetTrim(false);
             return;
         }
 
@@ -615,8 +666,10 @@ SketchScans.buildDock = function(appWin) {
             SketchScans.refresh();
             return;
         }
-        var placed = SketchScans.insert(doc, di, w.scans + "/" + rel, rel,
-            frameNow());
+        var eff = SketchScans.effectivePath(rel);
+        if (eff === null) { return; }
+        var placed = SketchScans.insert(doc, di, eff.path, rel,
+            frameNow(), eff.rect);
         if (placed === null) {
             return;                 // insert already explained why
         }
@@ -753,11 +806,13 @@ SketchScans.buildDock = function(appWin) {
         if (c === null) {
             try {
                 w.sketchButton.text = qsTr("Sketch Section");
-                w.sketchButton.enabled = (frameNow() === "section");
-                w.pickAlignButton.enabled = true;
                 w.frameCombo.enabled = true;
             } catch (eIdle) {
             }
+            // THE GATE HAS THE LAST WORD on the placement buttons: an
+            // idle calibration is not a reason to offer a placement for
+            // a scan nobody has trimmed yet.
+            SketchScans.updateTrimGate();
             return;
         }
         // Locked for the same reason the alignment locks them: the
@@ -900,7 +955,11 @@ SketchScans.buildDock = function(appWin) {
         if (rel === null || w.scans === null) {
             return;
         }
-        var path = w.scans + "/" + rel;
+        var effSketch = SketchScans.effectivePath(rel);
+        if (effSketch === null) {
+            return;
+        }
+        var path = effSketch.path;
         // NO PREVIEW VIEW, NO CALIBRATION. A build that could not embed
         // the CAD view (CsScanPreview.build returned null) has nowhere
         // to take the two clicks, and the bay is still worth opening --
@@ -1097,9 +1156,15 @@ SketchScans.buildDock = function(appWin) {
         var neighbours = SketchScans.placedScales(doc);
         var scale = CsScanFit.scaleOutlier(
             CsScanFit.describe(fit.matrix).unitsPerPixel, neighbours);
+        // THE PREVIEW IS WHAT WAS PICKED ON. Once a box is set the
+        // preview holds the DERIVATIVE, so the picked pixels and
+        // heightPx are already in the crop's own space and the fit
+        // needs no adjustment -- only the rect has to be recorded.
+        var effFit = SketchScans.effectivePath(rel);
+        if (effFit === null) { return; }
         var placed = SketchScans.insertFitted(doc, di,
-            w.scans + "/" + rel, rel, fit, w.scanView.heightPx, pairs,
-            frame);
+            effFit.path, rel, fit, w.scanView.heightPx, pairs,
+            frame, effFit.rect);
         w.picking = null;
         try {
             w.frameCombo.enabled = true;
@@ -1401,8 +1466,14 @@ SketchScans.refresh = function() {
     // against it and rebuild only when the answer would differ.
     w.stamp = (isNull(doc) ? "" : String(doc.getFileName())) + "|" +
         (scans === null ? "" : scans);
-    w.alignButton.enabled = w.ready;
-    w.insertButton.enabled = w.ready;
+    w.alignButton.enabled = false;
+    w.insertButton.enabled = false;
+    // A REBUILT PANEL HAS NO SELECTION, so it has no trim choice
+    // either; the gate turns the placement buttons back on when one is
+    // made. Setting them from w.ready alone would offer a placement for
+    // whatever row the table happens to restore.
+    w.trim = null;
+    SketchScans.updateTrimGate();
 
     if (!w.ready) {
         w.header.text = message;
@@ -1555,6 +1626,162 @@ SketchScans.installListener = function(appWin) {
     } catch (e) {
         SketchScans.listener = null;
         // without listeners the Refresh button and re-toggling cover it
+    }
+};
+
+/**
+ * WHICH FILE THE PLACEMENT ACTUALLY USES.
+ *
+ * The one accessor every placement path goes through -- Insert,
+ * Insert & Align, Assign Stations to Scans and Sketch Section. A path
+ * built by hand anywhere else is a path that will still place the whole
+ * page after the caver drew a box.
+ *
+ * \return { path: <absolute>, rel: <page-relative>, rect: <box|null> },
+ *         or null when nothing is selected.
+ */
+SketchScans.effectivePath = function(rel) {
+    var w = SketchScans.w;
+    if (w === undefined || w === null || w.scans === null ||
+            rel === null || rel === undefined) {
+        return null;
+    }
+    if (w.trim !== null && w.trim !== undefined && w.trim.rel === rel &&
+            w.trim.rect !== null && w.trim.rect !== undefined &&
+            w.trim.path !== null && w.trim.path !== undefined) {
+        return { path: w.trim.path, rel: rel, rect: w.trim.rect };
+    }
+    return { path: w.scans + "/" + rel, rel: rel, rect: null };
+};
+
+/**
+ * Back to "no choice made yet" for the selected scan: the page in the
+ * preview, the band gone, the box armed and the placement buttons off.
+ *
+ * \param reload true when the preview is showing a derivative and has
+ *        to go back to the page.
+ */
+SketchScans.resetTrim = function(reload) {
+    var w = SketchScans.w;
+    if (w === undefined || w === null) {
+        return;
+    }
+    var rel = (w.trim !== null && w.trim !== undefined) ? w.trim.rel :
+        SketchScans.selectedRel();
+    w.trim = (rel === null || rel === undefined) ? null :
+        { rel: rel, rect: null, path: null, chosen: false };
+    try {
+        if (reload === true && rel !== null && rel !== undefined &&
+                w.scans !== null && w.scanView !== null) {
+            CsScanPreview.show(w.scanView, w.scans + "/" + rel);
+        }
+        if (w.scanView !== null) {
+            CsScanPreview.armBox(w.scanView, function(box) {
+                SketchScans.boxDrawn(box);
+            });
+        }
+        w.trimLabel.text = qsTr("Trim: drag a box");
+    } catch (e) {
+        // a bridge that cannot relabel still gates on the state below
+    }
+    SketchScans.updateTrimGate();
+};
+
+/** The whole page, deliberately -- no file written, the original path
+ *  used, exactly what this tool did before trimming existed. */
+SketchScans.chooseWholePage = function() {
+    var w = SketchScans.w;
+    if (w === undefined || w === null) {
+        return;
+    }
+    var rel = SketchScans.selectedRel();
+    if (rel === null || rel === undefined) {
+        return;
+    }
+    w.trim = { rel: rel, rect: null, path: null, chosen: true };
+    try {
+        CsScanPreview.armBox(w.scanView, null);
+        w.trimLabel.text = qsTr("Trim: whole page");
+    } catch (e) {
+    }
+    SketchScans.updateTrimGate();
+};
+
+/**
+ * A finished drag: normalise it, write the derivative, and show it.
+ *
+ * A FAILED WRITE LEAVES THE BUTTONS OFF. Falling back to the page here
+ * would place the very clutter the caver just boxed away, without
+ * saying so.
+ */
+SketchScans.boxDrawn = function(box) {
+    var w = SketchScans.w;
+    if (w === undefined || w === null || w.scanView === null) {
+        return;
+    }
+    var rel = SketchScans.selectedRel();
+    if (rel === null || rel === undefined || w.scans === null) {
+        return;
+    }
+    var rect = CsScanTrim.rectFromPicks(box.a, box.b,
+        w.scanView.widthPx, w.scanView.heightPx);
+    if (rect === null) {
+        try {
+            CsScanPreview.clearBand(w.scanView);
+            w.trimLabel.text = qsTr("Trim: that box is too small -- " +
+                "drag a bigger one");
+        } catch (eSmall) {
+        }
+        return;
+    }
+    // A box round the whole page is not a crop. Writing a byte-for-byte
+    // copy of the scan and placing that would leave a derivative behind
+    // for nothing.
+    if (CsScanTrim.isWholePage(rect, w.scanView.widthPx,
+            w.scanView.heightPx)) {
+        SketchScans.chooseWholePage();
+        return;
+    }
+    var res = CsScanTrim.write(w.scans, rel, rect);
+    if (res.path === null) {
+        try {
+            w.trimLabel.text = qsTr("Trim failed");
+        } catch (eLbl) {
+        }
+        warning("Sketch Scans: " + res.error);
+        return;
+    }
+    w.trim = { rel: rel, rect: rect, path: res.path, chosen: true };
+    try {
+        CsScanPreview.armBox(w.scanView, null);
+        CsScanPreview.show(w.scanView, res.path);
+        w.trimLabel.text = qsTr("Trim: ") + rect.w + " \u00d7 " +
+            rect.h + qsTr(" px");
+    } catch (eShow) {
+    }
+    SketchScans.updateTrimGate();
+};
+
+/** The placement controls follow the trim choice. Sketch Section keeps
+ *  its own extra condition: a plan or profile scan has no ghost to
+ *  trace onto. */
+SketchScans.updateTrimGate = function() {
+    var w = SketchScans.w;
+    if (w === undefined || w === null) {
+        return;
+    }
+    var chosen = (w.trim !== null && w.trim !== undefined &&
+        w.trim.chosen === true);
+    try {
+        w.pickAlignButton.enabled = chosen;
+        w.alignButton.enabled = chosen;
+        w.insertButton.enabled = chosen;
+        w.trimRedoButton.enabled = chosen;
+        w.sketchButton.enabled = chosen &&
+            (w.frameCombo.currentIndex === 2);
+    } catch (e) {
+        // a bridge that cannot disable them leaves the old behaviour,
+        // which is placing the whole page -- never a wrong crop
     }
 };
 
