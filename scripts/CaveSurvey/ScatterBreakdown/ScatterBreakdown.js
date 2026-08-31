@@ -24,6 +24,11 @@ include(includeBasePath + "/../Core/CsAll.js");
 // ---- tunables --------------------------------------------------------
 
 var SB_VARIANTS = ["SYM_BREAKDOWN", "SYM_BREAKDOWN_B", "SYM_BREAKDOWN_C"];
+// The views this tool draws in. One button set serves all three: the
+// zone's LOCATION picks the view (CsProfileBox.frameAt), and
+// CsLayers.twinFor turns the plan layer into that view's twin. Nothing
+// here is a second button or a second layer to remember.
+var SB_FRAMES = ["plan", "profile", "section"];
 var SB_DENSITY = 16;       // boulder clusters per 100 sq drawing units
 var SB_SCALE_MIN = 0.7;
 var SB_SCALE_MAX = 1.5;
@@ -69,6 +74,42 @@ function sbCleanRing(verts) {
     return verts;
 }
 
+/**
+ * A point inside-ish the ring, for asking WHICH VIEW this zone is in.
+ *
+ * The average of the vertices, not the area centroid: a concave ring
+ * can put either one outside itself, and the question here is not
+ * "where exactly" but "which band box, if any, is this zone sitting
+ * in" -- boxes are whole elevation bands and a breakdown zone is small
+ * against one. A zone straddling the edge of a box is a drawing to fix,
+ * not a case to model.
+ */
+function sbRingCentre(verts) {
+    var sx = 0, sy = 0;
+    for (var i = 0; i < verts.length; i++) {
+        sx += verts[i].x;
+        sy += verts[i].y;
+    }
+    return new RVector(sx / verts.length, sy / verts.length);
+}
+
+/** " (2 in the elevation)" and the like -- named only when a zone
+ *  landed somewhere other than the plan, so the ordinary plan-only run
+ *  reads exactly as it did before. */
+function sbFramesPhrase(used) {
+    var words = { profile: "in the elevation", section: "in a cross section" };
+    var parts = [];
+    for (var key in words) {
+        if (words.hasOwnProperty(key) && used[key] > 0) {
+            parts.push(used[key] + " " + words[key]);
+        }
+    }
+    if (parts.length === 0) {
+        return "";
+    }
+    return " (" + parts.join(", ") + ")";
+}
+
 // ---- main --------------------------------------------------------------
 
 function scatterBreakdownRun() {
@@ -79,16 +120,52 @@ function scatterBreakdownRun() {
     }
     var di = getDocumentInterface();
 
-    if (!doc.hasLayer(CsLayers.BREAKDOWN_BOUNDARY)) {
+    // The boundary can be drawn on the plan layer or on either frame
+    // twin -- whichever the caver happened to have current. Which one
+    // it is does NOT decide the view: location does, below. Accepting
+    // all three is only about FINDING the rings.
+    var boundaryLayers = [CsLayers.BREAKDOWN_BOUNDARY];
+    var fr, twin;
+    for (fr = 0; fr < SB_FRAMES.length; fr++) {
+        twin = CsLayers.twinFor(CsLayers.BREAKDOWN_BOUNDARY, SB_FRAMES[fr]);
+        if (twin !== null && boundaryLayers.indexOf(twin) < 0) {
+            boundaryLayers.push(twin);
+        }
+    }
+    var boundaryLayerIds = {};
+    var anyBoundaryLayer = false;
+    for (fr = 0; fr < boundaryLayers.length; fr++) {
+        if (doc.hasLayer(boundaryLayers[fr])) {
+            boundaryLayerIds[String(doc.getLayerId(boundaryLayers[fr]))] = true;
+            anyBoundaryLayer = true;
+        }
+    }
+    if (!anyBoundaryLayer) {
         warning("Scatter Breakdown: draw a closed polyline on the " +
             CsLayers.BREAKDOWN_BOUNDARY + " layer around the breakdown " +
             "area first.");
         return;
     }
-    CsLayers.ensure(doc, getDocumentInterface(), CsLayers.BREAKDOWN);
 
-    var boundaryLayerId = doc.getLayerId(CsLayers.BREAKDOWN_BOUNDARY);
-    var targetLayerId = doc.getLayerId(CsLayers.BREAKDOWN);
+    // One target layer per view. They are ensured up front rather than
+    // per boundary so that clearing a previous scatter can look at all
+    // three, whichever view the zone has since been moved into.
+    var targetLayers = {};
+    var targetLayerIds = {};
+    for (fr = 0; fr < SB_FRAMES.length; fr++) {
+        twin = CsLayers.twinFor(CsLayers.BREAKDOWN, SB_FRAMES[fr]);
+        if (twin === null) {
+            continue;
+        }
+        CsLayers.ensure(doc, di, twin);
+        targetLayers[SB_FRAMES[fr]] = twin;
+        targetLayerIds[String(doc.getLayerId(twin))] = true;
+    }
+
+    // Both walk every entity, so they are read ONCE here and handed to
+    // every frameAt call -- the contract CsProfileBox.frameAt states.
+    var sbRegion = CsTrace.profileRegion(doc);
+    var sbBays = CsTrace.sectionBays(doc);
 
     // Selected boundaries only, if any are selected; else every closed
     // boundary on the layer.
@@ -99,7 +176,8 @@ function scatterBreakdownRun() {
     var boundaries = [];
     for (var i = 0; i < candidateIds.length; i++) {
         var e = doc.queryEntity(candidateIds[i]);
-        if (isNull(e) || e.getLayerId() !== boundaryLayerId) {
+        if (isNull(e) ||
+                boundaryLayerIds[String(e.getLayerId())] !== true) {
             continue;
         }
         if (typeof e.isGeometricallyClosed !== "function" ||
@@ -129,7 +207,8 @@ function scatterBreakdownRun() {
     var removed = 0;
     for (i = 0; i < refIds.length; i++) {
         var ref = doc.queryEntity(refIds[i]);
-        if (isNull(ref) || ref.getLayerId() !== targetLayerId) {
+        if (isNull(ref) ||
+                targetLayerIds[String(ref.getLayerId())] !== true) {
             continue;
         }
         var owner = CsTags.get(ref, "BoundaryId");
@@ -154,6 +233,7 @@ function scatterBreakdownRun() {
 
     var totalPlaced = 0;
     var missingBlocks = false;
+    var framesUsed = {};
 
     for (b = 0; b < boundaries.length; b++) {
         var poly = boundaries[b];
@@ -161,6 +241,23 @@ function scatterBreakdownRun() {
         if (verts.length < 3) {
             continue;
         }
+
+        // WHICH VIEW is this zone in? By where it lands, not by the
+        // layer it was drawn on -- a boundary on layer 0 inside an
+        // elevation band is an ordinary thing to have drawn, and its
+        // layer name proves nothing. Same evidence Shaped Lines uses
+        // for a stroke: an open section bay first, then the band
+        // boxes, then the derived region.
+        var frame = CsProfileBox.frameAt(doc, sbRegion, sbRingCentre(verts),
+            sbBays);
+        var placeLayer = targetLayers[frame];
+        if (placeLayer === undefined) {
+            // A frame with no breakdown twin (should not happen for
+            // BREAKDOWN, which twins into both) -- draw in the plan
+            // rather than silently dropping the zone.
+            placeLayer = CsLayers.BREAKDOWN;
+        }
+        var placeLayerId = doc.getLayerId(placeLayer);
 
         var area = sbPolygonArea(verts);
         var targetCount = Math.max(1, Math.round(area / 100.0 * SB_DENSITY));
@@ -208,6 +305,13 @@ function scatterBreakdownRun() {
                 missingBlocks = true;
                 continue;
             }
+            // CsSymbols.insert puts a symbol on its CATALOG layer,
+            // which is the plan one. The catalog is right about which
+            // FAMILY the symbol belongs to; only the view is decided
+            // here, so the layer is retargeted rather than the catalog
+            // being taught about frames.
+            blockRef.setLayerId(placeLayerId);
+            framesUsed[frame] = (framesUsed[frame] || 0) + 1;
             CsTags.set(blockRef, "BoundaryId", String(poly.getId()));
             op.addObject(blockRef, false);
             totalPlaced++;
@@ -219,6 +323,7 @@ function scatterBreakdownRun() {
     var msg = "Scatter Breakdown: " + boundaries.length + " boundar" +
         (boundaries.length === 1 ? "y" : "ies") + ", " + totalPlaced +
         " boulders placed" +
+        sbFramesPhrase(framesUsed) +
         (removed > 0 ? " (" + removed + " previous cleared from those boundaries only)" : "") +
         ". Other breakdown zones were not touched.";
     if (missingBlocks) {
@@ -249,7 +354,7 @@ ScatterBreakdown.init = function(basePath) {
     action.setRequiresDocument(true);
     action.setScriptFile(basePath + "/ScatterBreakdown.js");
     action.setIcon(basePath + "/ScatterBreakdown.svg");
-    action.setStatusTip(qsTr("Fill closed BREAKDOWN-BOUNDARY polylines with breakdown symbols, one zone at a time"));
+    action.setStatusTip(qsTr("Fill closed BREAKDOWN-BOUNDARY polylines with breakdown symbols, one zone at a time -- in the plan, an elevation band or a section, by where the zone is"));
     action.setDefaultCommands(["scatterbreakdown", "scb"]);
     action.setGroupSortOrder(450);
     action.setSortOrder(40);

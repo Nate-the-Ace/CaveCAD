@@ -21611,6 +21611,64 @@ for (var zwi = 0; zwi < zWriters.length; zwi++) {
 }
 
 // ---------------------------------------------------------------------
+// CsLayers.twinFor -- the forward direction of planBaseOf.
+//
+// This is what lets a tool serve every view without a hand-written twin
+// table of its own (the tables in CsShapeLine predate it). It must
+// refuse rather than guess: a twin of a twin, a sheet layer, or a layer
+// NO_TWIN excludes on purpose all answer null, because routing to a
+// layer the registry has no appearance for is how geometry ends up
+// looking almost right.
+// ---------------------------------------------------------------------
+
+eqs(CsLayers.twinFor("BREAKDOWN", "profile"), "PROFILE-BREAKDOWN",
+    "twinFor: the profile twin of a plan layer");
+eqs(CsLayers.twinFor("BREAKDOWN", "section"), "SECTION-BREAKDOWN",
+    "twinFor: the section twin of a plan layer");
+eqs(CsLayers.twinFor("CTRL-SHOTS", "profile"), "CTRL-PROFILE-SHOTS",
+    "twinFor: a CTRL- layer keeps its prefix in front");
+eqs(CsLayers.twinFor("CTRL-SHOTS", "section"), "CTRL-SECTION-SHOTS",
+    "twinFor: the CTRL- section twin");
+eqs(CsLayers.twinFor("BREAKDOWN", "plan"), "BREAKDOWN",
+    "twinFor: the plan frame is the name itself, so a caller can pass " +
+    "a computed frame straight through");
+eqs(CsLayers.twinFor("PROFILE-BREAKDOWN", "profile"), null,
+    "twinFor: refuses to twin a twin");
+eqs(CsLayers.twinFor("SECTION-BREAKDOWN", "profile"), null,
+    "twinFor: refuses to cross one frame's layer into another");
+eqs(CsLayers.twinFor("BORDER", "profile"), null,
+    "twinFor: a sheet layer has no view twin");
+eqs(CsLayers.twinFor("CTRL-AERIAL", "profile"), null,
+    "twinFor: a NO_TWIN layer stays untwinned");
+eqs(CsLayers.twinFor("BREAKDOWN", "sheet"), null,
+    "twinFor: sheet is not a view to draw a twin in");
+eqs(CsLayers.twinFor("BREAKDOWN", "nonsense"), null,
+    "twinFor: an unknown frame word answers null, never a guess");
+eqs(CsLayers.twinFor(null, "profile"), null, "twinFor: no layer at all");
+
+// Round trip against the reverse direction, over the whole registry:
+// whatever twinFor builds, planBaseOf must take back to where it came
+// from. The two used to be able to disagree because only one existed.
+var twinFrames = ["profile", "section"];
+for (var tlName in CsLayers.DEFAULTS) {
+    if (!CsLayers.DEFAULTS.hasOwnProperty(tlName)) {
+        continue;
+    }
+    for (var tfi = 0; tfi < twinFrames.length; tfi++) {
+        var tw = CsLayers.twinFor(tlName, twinFrames[tfi]);
+        if (tw === null) {
+            continue;
+        }
+        eqs(CsLayers.planBaseOf(tw), tlName,
+            "twinFor/planBaseOf round trip for " + tlName + " (" +
+            twinFrames[tfi] + ")");
+        eqs(CsLayers.frameOf(tw), twinFrames[tfi],
+            "twinFor puts " + tlName + " in the " + twinFrames[tfi] +
+            " frame");
+    }
+}
+
+// ---------------------------------------------------------------------
 // Symbol catalog.
 //
 // CsSymbols.insert() takes the target layer FROM THE CATALOG, not from

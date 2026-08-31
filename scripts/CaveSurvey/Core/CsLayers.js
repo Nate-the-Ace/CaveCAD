@@ -873,6 +873,59 @@ CsLayers.NO_TWIN = {
 };
 
 /**
+ * The frame twin of a PLAN layer: BREAKDOWN -> PROFILE-BREAKDOWN,
+ * CTRL-SHOTS -> CTRL-SECTION-SHOTS. The forward direction of
+ * planBaseOf below, and the reason a tool no longer needs its own
+ * hand-written twin table to work in more than one view.
+ *
+ * Answers null rather than guessing whenever the twin would be a
+ * fiction: a name that is already frame-prefixed (twinning a twin), a
+ * sheet layer, a layer NO_TWIN excludes on purpose, and any frame word
+ * that is not plan/profile/section. Callers treat null as "this tool
+ * has nothing to draw in that frame" -- which is a real answer, not a
+ * failure, and much safer than routing to a layer the registry has no
+ * appearance for.
+ *
+ * frame "plan" answers the name unchanged, so a caller can pass the
+ * frame it computed straight through without a special case.
+ *
+ * Pure.
+ */
+CsLayers.twinFor = function(name, frame) {
+    if (isNull(name)) {
+        return null;
+    }
+    var s = String(name);
+    if (frame === "plan") {
+        return s;
+    }
+    var column = frame === "profile" ? 1 : (frame === "section" ? 2 : -1);
+    if (column < 0) {
+        return null;
+    }
+    // Twinning an already-twinned name would build PROFILE-PROFILE-*.
+    if (CsLayers.frameOf(s) !== "plan") {
+        return null;
+    }
+    if (CsLayers.NO_TWIN[s] === true) {
+        return null;
+    }
+    // Sheet layers need no check of their own: frameOf answers "sheet"
+    // for every one of them, so the guard above has already refused.
+    var i, row;
+    for (i = 0; i < CsLayers.TWIN_PREFIXES.length; i++) {
+        row = CsLayers.TWIN_PREFIXES[i];
+        // The CTRL- row is tested first for the same reason planBaseOf
+        // tests it first: the second row's plan prefix is empty and
+        // therefore matches everything.
+        if (row[0] === "" || s.indexOf(row[0]) === 0) {
+            return row[column] + s.substring(row[0].length);
+        }
+    }
+    return null;
+};
+
+/**
  * The plan-frame layer a frame-prefixed name derives from, or null when
  * the name is not frame-prefixed (or has no plan counterpart).
  *
