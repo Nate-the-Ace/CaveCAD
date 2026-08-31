@@ -84,10 +84,10 @@ CsScanView.prototype.mousePressEvent = function(event) {
     }
     // every other button goes on to the view's own handling
     CsScanView.callBase(this, "mousePressEvent", event);
-    if (button !== Qt.LeftButton || typeof this.onScanPick !== "function" ||
-            at === null) {
+    if (button !== Qt.LeftButton || at === null) {
         return;
     }
+    var picked = null;
     try {
         var iv = this.getImageView();
         var vp = CsScanView.viewPos(iv, event);
@@ -95,9 +95,25 @@ CsScanView.prototype.mousePressEvent = function(event) {
             return;
         }
         var model = iv.mapFromView(new RVector(vp.x, vp.y));
-        this.onScanPick({ x: model.x, y: model.y });
+        picked = { x: model.x, y: model.y };
     } catch (e) {
         // a listener must never throw into the view's own event handling
+        return;
+    }
+    // BOXING TAKES THE LEFT BUTTON. A caver drawing a trim box must not
+    // also be assigning a station with the same drag, and the two are
+    // never both wanted at once -- the box is chosen before any
+    // placement control is even enabled.
+    if (this.boxing === true) {
+        this.boxFrom = picked;
+        this.boxTo = null;
+        return;
+    }
+    if (typeof this.onScanPick === "function") {
+        try {
+            this.onScanPick(picked);
+        } catch (ePick) {
+        }
     }
 };
 
@@ -166,6 +182,24 @@ CsScanView.eventPos = function(event) {
  * pan() takes a delta in VIEW pixels and flips y itself.
  */
 CsScanView.prototype.mouseMoveEvent = function(event) {
+    // A BOX IN PROGRESS OWNS THE DRAG. No pan, and no base handling
+    // either: the navigation action would start its own pan on the same
+    // drag and the scan would slide out from under the box being drawn.
+    if (this.boxFrom !== undefined && this.boxFrom !== null) {
+        try {
+            var ivB = this.getImageView();
+            var vpB = CsScanView.viewPos(ivB, event);
+            if (vpB !== null) {
+                var mB = ivB.mapFromView(new RVector(vpB.x, vpB.y));
+                this.boxTo = { x: mB.x, y: mB.y };
+                if (typeof this.onBandChanged === "function") {
+                    this.onBandChanged(this.boxFrom, this.boxTo);
+                }
+            }
+        } catch (eBox) {
+        }
+        return;
+    }
     if (this.panFrom === undefined || this.panFrom === null) {
         CsScanView.callBase(this, "mouseMoveEvent", event);
         return;
@@ -198,6 +232,19 @@ CsScanView.prototype.mouseMoveEvent = function(event) {
 CsScanView.prototype.mouseReleaseEvent = function(event) {
     CsScanView.callBase(this, "mouseReleaseEvent", event);
     this.panFrom = null;
+    var from = this.boxFrom, to = this.boxTo;
+    this.boxFrom = null;
+    this.boxTo = null;
+    if (from === null || from === undefined || to === null ||
+            to === undefined) {
+        return;                 // a bare click is not a box
+    }
+    if (typeof this.onScanBox === "function") {
+        try {
+            this.onScanBox({ a: from, b: to });
+        } catch (e) {
+        }
+    }
 };
 
 /** Pixels of movement before a pan step is worth a regeneration.
@@ -287,7 +334,12 @@ CsScanPreview.build = function(parent) {
             // no navigation action here: the Fit and +/- buttons still
             // zoom, and the middle-drag pan below is unaffected
         }
-        return { view: view, di: di, doc: doc, imageView: imageView };
+        var preview = { view: view, di: di, doc: doc,
+                        imageView: imageView, band: null };
+        view.onBandChanged = function(a, b) {
+            CsScanPreview.showBand(preview, a, b);
+        };
+        return preview;
     } catch (e) {
         return null;
     }
@@ -300,6 +352,7 @@ CsScanPreview.show = function(preview, path) {
     }
     try {
         preview.di.clear();
+        preview.band = null;    // di.clear() already took it with the scan
         var image = new QImage(path);
         if (image.isNull()) {
             return false;
@@ -362,5 +415,79 @@ CsScanPreview.zoom = function(preview, factor) {
             else { preview.imageView.zoomOut(); }
         } catch (e2) {
         }
+    }
+};
+
+/**
+ * Put the view in boxing mode, or take it out of it.
+ *
+ * `onBox` is called with { a: <model point>, b: <model point> } when a
+ * left drag finishes. Pass null to disarm.
+ */
+CsScanPreview.armBox = function(preview, onBox) {
+    if (preview === null || preview === undefined) {
+        return;
+    }
+    try {
+        preview.view.onScanBox = (typeof onBox === "function") ? onBox : null;
+        preview.view.boxing = (typeof onBox === "function");
+        CsScanPreview.clearBand(preview);
+    } catch (e) {
+    }
+};
+
+/**
+ * Draw (or move) the rubber band between two model points.
+ *
+ * A REAL ENTITY IN THE SCRATCH DOCUMENT, not a preview overlay: this
+ * view is not an EAction, so it has no preview machinery of its own.
+ * The document holds one image and at most this rectangle and is thrown
+ * away with the panel, so the cost of delete-and-re-add per mouse move
+ * is one polyline.
+ *
+ * The old band is deleted through the ENTITY OBJECT rather than its id
+ * -- RDeleteObjectOperation takes an object, the way DrawPolyline's own
+ * preview does it.
+ */
+CsScanPreview.showBand = function(preview, a, b) {
+    if (preview === null || preview === undefined) {
+        return;
+    }
+    try {
+        CsScanPreview.clearBand(preview);
+        var pl = new RPolyline();
+        pl.appendVertex(new RVector(a.x, a.y));
+        pl.appendVertex(new RVector(b.x, a.y));
+        pl.appendVertex(new RVector(b.x, b.y));
+        pl.appendVertex(new RVector(a.x, b.y));
+        pl.setClosed(true);
+        var entity = new RPolylineEntity(preview.doc, new RPolylineData(pl));
+        // Red and on top: the band has to read against a grey pencil
+        // sketch, which is most of what it will ever be drawn over.
+        entity.setColor(new RColor(255, 0, 0));
+        try {
+            entity.setDrawOrder(
+                preview.doc.getStorage().getMaxDrawOrder() + 1);
+        } catch (eOrder) {
+        }
+        preview.di.applyOperation(new RAddObjectOperation(entity, false));
+        preview.band = entity;
+    } catch (e) {
+        // a band that will not draw must not stop the box being picked
+    }
+};
+
+/** Remove the rubber band, if there is one. */
+CsScanPreview.clearBand = function(preview) {
+    try {
+        if (preview.band !== undefined && preview.band !== null) {
+            preview.di.applyOperation(
+                new RDeleteObjectOperation(preview.band, false));
+        }
+    } catch (e) {
+    }
+    try {
+        preview.band = null;
+    } catch (e2) {
     }
 };
