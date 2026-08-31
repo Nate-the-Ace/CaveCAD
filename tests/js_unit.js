@@ -11432,8 +11432,8 @@ if (!IS_NODE) {
     // afterwards by scaling its block reference, so the enlargement is
     // a property the caver sets and can see rather than a factor baked
     // in at capture. See the constant's own docblock.
-    eqs(CsSectionDraw.SCALE, 0.5,
-        "CsSectionDraw.SCALE: sections are captured at half plan scale");
+    eqs(CsSectionDraw.SCALE, 1.0,
+        "CsSectionDraw.SCALE: sections are captured 1:1");
 
     eqs(CsSectionDraw.scaleText(4), "4:1",
         "CsSectionDraw.scaleText: an enlargement reads 4:1");
@@ -17070,12 +17070,17 @@ if (!IS_NODE) {
             "FeatureTrace.SMOOTHING: even Coarse is under half the interval");
         near(FeatureTrace.smoothingFraction("nonsense"), 0.05, 1e-9,
             "FeatureTrace.smoothingFraction: an unknown name falls back to the default");
-        eqs(FeatureTrace.DEFAULT_SMOOTHING, "Fine",
-            "FeatureTrace: the default is Fine, not Medium");
+        eqs(FeatureTrace.DEFAULT_SMOOTHING, "No Smoothing",
+            "FeatureTrace: the panel starts on No Smoothing");
+        near(FeatureTrace.smoothingFraction(FeatureTrace.DEFAULT_SMOOTHING),
+            0.0, 1e-9,
+            "FeatureTrace: and that IS a tolerance of zero, deliberately");
 
-        // The invariant that fallback relies on.
-        ok(FeatureTrace.smoothingFraction(FeatureTrace.DEFAULT_SMOOTHING) > 0,
-            "FeatureTrace: DEFAULT_SMOOTHING is a name that is in SMOOTHING");
+        // The invariant that fallback relies on -- which is why the
+        // fallback is its own constant now: the panel's starting row is
+        // allowed to be zero, the fallback is not.
+        ok(FeatureTrace.smoothingFraction(FeatureTrace.FALLBACK_SMOOTHING) > 0,
+            "FeatureTrace: FALLBACK_SMOOTHING is a name that is in SMOOTHING");
 
         // And the last-ditch constant, which is only reachable if that
         // invariant is broken. Untested it was dead code a mutation
@@ -17083,11 +17088,11 @@ if (!IS_NODE) {
         // undefined, making the tolerance NaN -- and a NaN tolerance
         // keeps EVERY sampled point, which is the 400-fit-point spline
         // the whole reduction exists to avoid.
-        var savedDefault = FeatureTrace.DEFAULT_SMOOTHING;
-        FeatureTrace.DEFAULT_SMOOTHING = "Misspelled";
+        var savedFallback = FeatureTrace.FALLBACK_SMOOTHING;
+        FeatureTrace.FALLBACK_SMOOTHING = "Misspelled";
         near(FeatureTrace.smoothingFraction("also nonsense"), 0.15, 1e-9,
-            "FeatureTrace.smoothingFraction: a broken default still yields a usable tolerance");
-        FeatureTrace.DEFAULT_SMOOTHING = savedDefault;
+            "FeatureTrace.smoothingFraction: a broken fallback still yields a usable tolerance");
+        FeatureTrace.FALLBACK_SMOOTHING = savedFallback;
 
         // -- panel reads degrade to defaults without widgets --------
         // The drag action must work standalone: before the panel is
@@ -17095,11 +17100,15 @@ if (!IS_NODE) {
         FeatureTrace.widgets = undefined;
         near(FeatureTrace.intervalFeet(), 1.0, 1e-9,
             "FeatureTrace.intervalFeet: no panel means one foot");
-        near(FeatureTrace.toleranceFraction(), 0.05, 1e-9,
-            "FeatureTrace.toleranceFraction: no panel means the default, Fine");
+        // ZERO, and that is the point: no panel must mean exactly what
+        // the panel's own starting row means, or a trace taken before
+        // the dock is built would be thinned differently from one taken
+        // after it.
+        near(FeatureTrace.toleranceFraction(), 0.0, 1e-9,
+            "FeatureTrace.toleranceFraction: no panel means the default, No Smoothing");
         near(FeatureTraceRun.intervalFeet(), 1.0, 1e-9,
             "FeatureTraceRun.intervalFeet: reads through to the default");
-        near(FeatureTraceRun.toleranceFraction(), 0.05, 1e-9,
+        near(FeatureTraceRun.toleranceFraction(), 0.0, 1e-9,
             "FeatureTraceRun.toleranceFraction: reads through to the default");
 
         // -- and they read the panel when it IS there ---------------

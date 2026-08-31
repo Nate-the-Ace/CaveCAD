@@ -103,12 +103,34 @@ FeatureTrace.SMOOTHING = [
     { label: "Coarse", fraction: 0.35 }
 ];
 
-FeatureTrace.DEFAULT_SMOOTHING = "Fine";
+/**
+ * The row the panel starts on.
+ *
+ * NO SMOOTHING, Nathan's call: a caver tracing a wall off a scan is
+ * copying a line someone already drew, and thinning it is the tool
+ * second-guessing a measurement. Anyone who wants it thinned picks a
+ * row.
+ *
+ * DELIBERATELY NOT the fallback below. This is a starting CHOICE and
+ * is allowed to be a tolerance of zero; the fallback is what an
+ * unrecognised name lands on, and zero would be wrong there -- see
+ * FALLBACK_SMOOTHING.
+ */
+FeatureTrace.DEFAULT_SMOOTHING = "No Smoothing";
 
-/** The fraction for a smoothing name, defaulting to Medium. An
- *  unrecognised name must not become a tolerance of zero -- that keeps
- *  every sampled point and produces the 400-fit-point spline this whole
- *  reduction exists to avoid. */
+/**
+ * Where an unrecognised smoothing name lands.
+ *
+ * SEPARATE FROM DEFAULT_SMOOTHING since the panel's starting row became
+ * a zero tolerance. Folding the two together would make a misspelled or
+ * stale name silently mean "keep every sampled point" -- the
+ * 400-fit-point spline this whole reduction exists to avoid -- which is
+ * exactly the failure the fallback was written to stop.
+ */
+FeatureTrace.FALLBACK_SMOOTHING = "Fine";
+
+/** The fraction for a smoothing name. An unrecognised name falls back
+ *  to FALLBACK_SMOOTHING, never to a tolerance of zero. */
 FeatureTrace.smoothingFraction = function(name) {
     var i;
     for (i = 0; i < FeatureTrace.SMOOTHING.length; i++) {
@@ -117,7 +139,8 @@ FeatureTrace.smoothingFraction = function(name) {
         }
     }
     for (i = 0; i < FeatureTrace.SMOOTHING.length; i++) {
-        if (FeatureTrace.SMOOTHING[i].label === FeatureTrace.DEFAULT_SMOOTHING) {
+        if (FeatureTrace.SMOOTHING[i].label ===
+                FeatureTrace.FALLBACK_SMOOTHING) {
             return FeatureTrace.SMOOTHING[i].fraction;
         }
     }
