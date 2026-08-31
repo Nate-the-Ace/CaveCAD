@@ -1398,6 +1398,233 @@ function selectOnly(entityId) {
 })();
 
 // ---------------------------------------------------------------------
+// BAY (found by the user, in their own cave): the frame must CONTAIN
+// the scan.
+//
+// MEASURED IN THEIR DRAWING: a frame 30.00 x 30.00 around a scan
+// 192.19 x 268.65 -- the scan six to nine times the bay it is supposed
+// to sit inside. The scan itself was right (u = v = 0.1292 units per
+// pixel, aspect preserved); the frame was sized from the GHOST alone
+// and never looked at how big the scan would be.
+//
+// IT IS NOT A COSMETIC FAULT. Capture sweeps what is geometrically
+// INSIDE the frame, so a caver tracing over the eight-ninths of the
+// scan hanging outside loses that work at capture, in silence. This is
+// the assertion that would have caught it: the frame as the drawing
+// holds it, against the scan's own bounding box as the drawing holds
+// THAT -- neither one recomputed from the maths under test.
+//
+// A REAL PAGE, at a real page's pixel count. The suite's other claims
+// underlay a 24 x 24 icon, which auto-fits to the ghost and can never
+// overflow anything: no existing fixture here could have failed.
+// ---------------------------------------------------------------------
+(function() {
+    var pagePath = scansDir + "/fieldbook_page.png";
+    (new QFile(pagePath)).remove();
+    var page = new QImage(1488, 2080, QImage.Format_RGB32);
+    page.fill(new QColor(250, 248, 240));
+    // save() needs its format NAMED on this build -- probed 2026-08-30:
+    // the one-argument form returns false and writes nothing, so a
+    // fixture that trusted it would leave every claim below measuring
+    // an unreadable file.
+    check("BAY: fixture: a page-sized scan is written into the cave's " +
+        "scans/ folder", page.save(pagePath, "PNG") === true);
+    var pageBack = new QImage(pagePath);
+    check("BAY: fixture: and it reads back at a real page's pixel count",
+        !pageBack.isNull() && pageBack.width() === 1488 &&
+        pageBack.height() === 2080);
+
+    // The user's own calibration: 0.1292 drawing units per pixel, which
+    // makes this page 192 x 269 units of drawing.
+    var bigId = SketchSection.run(pagePath, "A2",
+        { unitsPerPixel: 0.1292 });
+    check("BAY: a bay opens for a page-sized scan", bigId !== null);
+    var big = SectionCapture.findBay(doc);
+    check("BAY: it is found, with its scan and its ghost",
+        big !== null && big.scan !== null && big.ghost !== null);
+    if (big === null || big.scan === null) {
+        check("BAY: the frame CONTAINS the scan", false);
+        return;
+    }
+
+    // Bounding boxes are CACHED in this engine: update() before reading
+    // one back off an entity that was placed this run.
+    big.scan.update();
+    var sbb = big.scan.getBoundingBox();
+    var scanBox = { x1: sbb.getMinimum().x, y1: sbb.getMinimum().y,
+                    x2: sbb.getMaximum().x, y2: sbb.getMaximum().y };
+    var scanW = scanBox.x2 - scanBox.x1, scanH = scanBox.y2 - scanBox.y1;
+    var frameW = big.rect.x2 - big.rect.x1, frameH = big.rect.y2 - big.rect.y1;
+    checkClose("BAY: fixture: the scan really is placed at the " +
+        "calibrated scale -- 1488 px at 0.1292", scanW, 192.2496, 1e-3);
+    checkClose("BAY: fixture: and 2080 px tall with it", scanH, 268.736,
+        1e-3);
+    check("BAY: fixture: which is far bigger than the ghost, so this " +
+        "claim can fail (scan " + scanW + " vs ghost " +
+        (big.ghost.getBoundingBox().getMaximum().x -
+         big.ghost.getBoundingBox().getMinimum().x) + ")",
+        scanW > 100);
+
+    check("BAY: THE FRAME CONTAINS THE SCAN -- the whole of it, which " +
+        "is the whole of what Capture will sweep (frame " + frameW +
+        " x " + frameH + ", scan " + scanW + " x " + scanH + ")",
+        CsSectionBay.contains(big.rect, scanBox));
+
+    // AND STILL CONTAINS THE GHOST. Sizing to the scan alone would
+    // pass the claim above and lose the outline the scan is scaled
+    // against.
+    big.ghost.update();
+    var gbb = big.ghost.getBoundingBox();
+    check("BAY: and the ghost with it",
+        CsSectionBay.contains(big.rect,
+            { x1: gbb.getMinimum().x, y1: gbb.getMinimum().y,
+              x2: gbb.getMaximum().x, y2: gbb.getMaximum().y }));
+
+    // A TRACING OVER THE FAR CORNER OF THE SCAN IS SWEPT. The
+    // containment above is the cause; this is the consequence the
+    // caver actually loses -- work traced over the part of the scan
+    // that used to hang outside the frame.
+    var far = new RLineEntity(doc, new RLineData(
+        new RVector(scanBox.x2 - 4, scanBox.y2 - 4),
+        new RVector(scanBox.x2 - 1, scanBox.y2 - 1)));
+    far.setLayerId(doc.getLayerId(CsLayers.SECTION_WALLS_SURVEYED));
+    var farOp = new RAddObjectsOperation();
+    farOp.addObject(far, false);
+    di.applyOperation(farOp);
+    var bigTraced = SectionCapture.findBay(doc);
+    check("BAY: a tracing over the FAR corner of the scan is swept, " +
+        "rather than dropped for being outside the frame",
+        bigTraced !== null && bigTraced.traced.length === 1);
+
+    // Closed again, so the two-open-bays claim further down still holds.
+    var bigAt = (bigTraced === null) ? null :
+        SectionCapture.proposePosition(doc, bigTraced);
+    if (bigAt === null && bigTraced !== null) {
+        bigAt = { x: bigTraced.rect.x2 + 20, y: bigTraced.rect.y1 };
+    }
+    var bigCallout = (bigTraced === null) ? null :
+        SectionCapture.capture(doc, di, bigTraced, bigAt);
+    check("BAY: and the bay closes", bigCallout !== null);
+
+    // ---- REOPENED, the frame still has to contain the scan ----------
+    // Edit Sketch opens its bay with NO path (it places the scan itself,
+    // at the fit stored on the section), so a frame sized from the
+    // ghost alone overflows on the SECOND open exactly as it did on the
+    // first -- and a caver reopening a sketch to add detail is the case
+    // where there is already work to lose.
+    var bigRef = (bigCallout === null) ? null :
+        CalloutWrite.members(doc, bigCallout).block;
+    if (bigRef === null || isNull(bigRef)) {
+        check("BAY: reopened, the frame still contains the scan", false);
+        return;
+    }
+    di.clearSelection();
+    di.selectEntity(bigRef.getId(), true);
+    said = [];
+    SectionEdit.run();
+    check("BAY: fixture: Edit Sketch reopens the page-sized sketch" +
+        (said.length === 0 ? "" : " (said: " + said.join(" | ") + ")"),
+        said.length === 0);
+    var reBay = SectionCapture.findBay(doc);
+    check("BAY: fixture: the reopened bay is found, with its scan",
+        reBay !== null && reBay.scan !== null);
+    if (reBay !== null && reBay.scan !== null) {
+        reBay.scan.update();
+        var rbb = reBay.scan.getBoundingBox();
+        var reBox = { x1: rbb.getMinimum().x, y1: rbb.getMinimum().y,
+                      x2: rbb.getMaximum().x, y2: rbb.getMaximum().y };
+        checkClose("BAY: fixture: the reopened scan is back at the size " +
+            "it was captured at", reBox.x2 - reBox.x1, 192.2496, 1e-3);
+        check("BAY: reopened, the frame still contains the scan " +
+            "(frame " + (reBay.rect.x2 - reBay.rect.x1) + " x " +
+            (reBay.rect.y2 - reBay.rect.y1) + ")",
+            CsSectionBay.contains(reBay.rect, reBox));
+
+        // Closed again, so the two-open-bays claim further down holds.
+        var reAt = SectionCapture.proposePosition(doc, reBay);
+        if (reAt === null) {
+            reAt = { x: reBay.rect.x2 + 20, y: reBay.rect.y1 };
+        }
+        check("BAY: and the reopened bay closes",
+            SectionCapture.capture(doc, di, reBay, reAt) !== null);
+    } else {
+        check("BAY: reopened, the frame still contains the scan", false);
+        check("BAY: and the reopened bay closes", false);
+    }
+})();
+
+// ---------------------------------------------------------------------
+// NBR: a section AT a station is not refused for its NEIGHBOUR's
+// missing LRUD.
+//
+// A0 is the first station of this chain, so it has no LRUD of its own
+// -- LRUD is recorded with the shot INTO a station, and nothing shoots
+// into the first one. A section at A1 is taken on the leg A0->A1 at
+// t = 1, where A0's outline is weighted zero and contributes nothing.
+// It used to be required anyway, and the refusal came back in A0's
+// name for a section the caver asked for at A1.
+//
+// This is why the fixture at the top of this file has FOUR stations:
+// A0 exists only so that A1's own neighbour is not the thin one. That
+// workaround is what made the defect invisible here.
+// ---------------------------------------------------------------------
+(function() {
+    var nbr = CsRevise.resolveAsDrawn(doc);
+    var leg = CsSectionCut.nearestLeg(nbr.resolved, { x: -10, y: 0 });
+    check("NBR: fixture: a section at A1 is taken on the leg from A0",
+        leg !== null && leg.from === "A0" && leg.to === "A1");
+    checkClose("NBR: fixture: and exactly AT A1, which is why the far " +
+        "end contributes nothing to it", leg === null ? -1 : leg.t, 1,
+        1e-12);
+    var frameA = CsSectionCut.frameForLeg(nbr.resolved, "A0", "A1").frame;
+    var poly0 = CsSectionCut.polygonAt(nbr.survey, nbr.resolved, "A0",
+        frameA, {});
+    check("NBR: fixture: A0 really has too few wall points to cut -- " +
+        "otherwise this claim proves nothing",
+        poly0 === null || poly0.measured < CsSectionCut.MIN_POINTS);
+
+    var cutA1 = CsSectionCut.cut(nbr.survey, nbr.resolved, "A0", "A1",
+        leg === null ? 1 : leg.t, {});
+    check("NBR: the cut at A1 succeeds anyway" +
+        (cutA1.refused === true ? " (refused: " + cutA1.reason + ")" : ""),
+        cutA1.refused === undefined);
+
+    var saidBefore = said.length;
+    var nbrId = SketchSection.run(scanPath, "A1");
+    check("NBR: a bay opens at A1", nbrId !== null);
+    check("NBR: with no complaint about a station the caver did not " +
+        "pick" + (said.length === saidBefore ? "" :
+            " (said: " + said[said.length - 1] + ")"),
+        said.length === saidBefore);
+    var nbrBay = SectionCapture.findBay(doc);
+    check("NBR: and it has a real computed ghost, which is the whole " +
+        "point of the bay", nbrBay !== null && nbrBay.ghost !== null);
+
+    // Closed again, so the two-open-bays claim further down still holds.
+    if (nbrBay !== null) {
+        var nbrCentre = SectionCapture.originOf(nbrBay);
+        var nbrLine = new RLineEntity(doc, new RLineData(
+            new RVector(nbrCentre.x - 2, nbrCentre.y - 2),
+            new RVector(nbrCentre.x + 2, nbrCentre.y + 2)));
+        nbrLine.setLayerId(doc.getLayerId(CsLayers.SECTION_WALLS_SURVEYED));
+        var nbrOp = new RAddObjectsOperation();
+        nbrOp.addObject(nbrLine, false);
+        di.applyOperation(nbrOp);
+        var nbrBay2 = SectionCapture.findBay(doc);
+        var nbrAt = (nbrBay2 === null) ? null :
+            SectionCapture.proposePosition(doc, nbrBay2);
+        if (nbrAt === null && nbrBay2 !== null) {
+            nbrAt = { x: nbrBay2.rect.x2 + 20, y: nbrBay2.rect.y1 };
+        }
+        check("NBR: and the bay closes",
+            nbrBay2 !== null &&
+            SectionCapture.capture(doc, di, nbrBay2, nbrAt) !== null);
+    } else {
+        check("NBR: and the bay closes", false);
+    }
+})();
+
+// ---------------------------------------------------------------------
 // F1 (review finding, data loss): capture() must not lose the block
 // reference (or strand the tracing in an unreferenced block) when the
 // annotation layer -- CsCallout.STYLES["annotation"], where the

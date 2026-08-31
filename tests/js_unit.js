@@ -10615,6 +10615,101 @@ if (!IS_NODE) {
         "fitAtScale: a zero scale falls back to 1, not to a scan " +
         "collapsed into a point");
 
+    // --- how big the scan will be, before it is placed ----------------
+    // A CALIBRATED SCALE IS USED AS GIVEN. The numbers are the user's
+    // real failure: a 1488 x 2080 field-book page at 0.1292 drawing
+    // units per pixel, which is 192 x 269 units of drawing.
+    var page = CsSectionBay.placedScanSize(1488, 2080,
+        { x1: -5, y1: -7, x2: 5, y2: 7 }, { unitsPerPixel: 0.1292 });
+    eqs(page.k, 0.1292, "placedScanSize: a calibrated scale is used as given");
+    near(page.w, 192.2496, 1e-9,
+        "placedScanSize: 1488 px at 0.1292 is 192.25 units across");
+    near(page.h, 268.736, 1e-9, "placedScanSize: and 2080 px is 268.74 tall");
+
+    // With no calibration it is the auto-fit to the ghost's WIDTH --
+    // the same number fitTransform derives, spelled out here so the
+    // frame and the placement cannot be sized from two different
+    // scales. Worked by hand: a 10-wide ghost over 200 px is 0.05.
+    var autoSize = CsSectionBay.placedScanSize(200, 100,
+        { x1: -5, y1: -5, x2: 5, y2: 5 }, null);
+    eqs(autoSize.k, 0.05, "placedScanSize: no calibration auto-fits to " +
+        "the ghost's width");
+    near(autoSize.w, 10, 1e-9, "placedScanSize: which makes the scan the " +
+        "ghost's own width");
+    near(autoSize.h, 5, 1e-9, "placedScanSize: uniform, so half as tall");
+    eqs(CsSectionBay.placedScanSize(200, 100,
+        { x1: -5, y1: -5, x2: 5, y2: 5 }, { unitsPerPixel: 0 }).k, 0.05,
+        "placedScanSize: a zero calibration is no calibration, not a " +
+        "scan collapsed into a point");
+
+    // --- and how big the bay has to be to hold it ---------------------
+    // THE ASSERTION THE USER'S DRAWING WOULD HAVE FAILED. Their bay
+    // came out 30 x 30 around a 192 x 269 scan -- six to nine times
+    // the frame it was supposed to sit inside, and Capture sweeps only
+    // what is INSIDE the frame, so the tracing over the overflow was
+    // being dropped in silence.
+    var ghost10 = { x1: -5, y1: -7, x2: 5, y2: 7 };
+    var bigBay = CsSectionBay.baySizeFor(ghost10,
+        { w: 192.2496, h: 268.736 });
+    // Worked by hand, not read back from the function under test: the
+    // scan is centred, so its reach from the centre is half its width,
+    // and SCAN_ROOM (1.1) leaves a tenth of that clear around it.
+    near(bigBay.w, 211.47456, 1e-6,
+        "baySizeFor: a scan far bigger than the ghost sizes the bay");
+    near(bigBay.h, 295.6096, 1e-6, "baySizeFor: in both directions");
+    ok(bigBay.w > 192.2496 && bigBay.h > 268.736,
+        "baySizeFor: which is to say the bay CONTAINS the scan, with " +
+        "room -- the 30 x 30 bay round a 192 x 269 scan is the defect");
+
+    // The containment, stated where a bay really is: parked against a
+    // plan, measured against the frame the caller then draws.
+    var bigRect = CsSectionBay.frameRectFor({ x1: 0, y1: 0, x2: 100, y2: 60 },
+        bigBay, null);
+    var bigCx = (bigRect.x1 + bigRect.x2) / 2;
+    var bigCy = (bigRect.y1 + bigRect.y2) / 2;
+    ok(CsSectionBay.contains(bigRect,
+        { x1: bigCx - 96.1248, y1: bigCy - 134.368,
+          x2: bigCx + 96.1248, y2: bigCy + 134.368 }),
+        "baySizeFor: the frame drawn at that size contains the scan's " +
+        "own box");
+    ok(CsSectionBay.contains(bigRect,
+        { x1: bigCx - 5, y1: bigCy - 7, x2: bigCx + 5, y2: bigCy + 7 }),
+        "baySizeFor: and the ghost, which is the point of the bay");
+
+    // NO SCAN CHANGES NOTHING. A bay opened without one is the bay it
+    // has always been: three times the ghost.
+    eqs(CsSectionBay.baySizeFor(ghost10, null).w, 30,
+        "baySizeFor: with no scan the bay is three times the ghost");
+    eqs(CsSectionBay.baySizeFor(ghost10, null).h, 42,
+        "baySizeFor: in both directions");
+    eqs(CsSectionBay.baySizeFor(ghost10, { w: 10, h: 14 }).w, 30,
+        "baySizeFor: and a scan that already fits does not shrink it");
+
+    // A LOPSIDED GHOST IS MEASURED FROM THE BAY'S CENTRE, not by its
+    // width: everything in a bay is placed about that centre, so a
+    // ghost reaching 10 one way needs 30 that way. Width times three
+    // would be 30 TOTAL -- 15 each side -- and the ghost's own far
+    // edge would fall outside the frame that is supposed to sweep it.
+    var lopsided = CsSectionBay.baySizeFor(
+        { x1: 0, y1: 0, x2: 10, y2: 10 }, null);
+    eqs(lopsided.w, 60, "baySizeFor: a lopsided ghost is sized from its " +
+        "furthest corner, so it cannot fall outside its own frame");
+
+    // NO GHOST AT ALL. The +/-5 stand-in a ghostless bay uses is
+    // meaningless against a page 1488 px tall, so the scan sizes the
+    // bay on its own.
+    var ghostless = CsSectionBay.baySizeFor(null,
+        { w: 192.2496, h: 268.736 });
+    near(ghostless.w, 211.47456, 1e-6,
+        "baySizeFor: with no ghost the scan alone sizes the bay");
+    ok(ghostless.h > 268.736,
+        "baySizeFor: and it still contains it in both directions");
+    eqs(CsSectionBay.baySizeFor(null, null).w, 40,
+        "baySizeFor: with neither, a real rectangle rather than nothing");
+    eqs(CsSectionBay.baySizeFor({ x1: NaN, y1: 0, x2: 5, y2: 5 }, null).w, 40,
+        "baySizeFor: a NaN extent falls back rather than sizing a bay " +
+        "nobody can find");
+
     // --- which LRUD did the caver just touch? -------------------------
     // UP IS UP. A cross section is scanned with the page's up as the
     // cave's up, so the direction of the second click IS the letter --
@@ -11009,6 +11104,88 @@ if (!IS_NODE) {
         "CsSectionCut.cut: a mid-leg cut is half a leg from either end");
     near(fifth.nearest, 2, 1e-9,
         "CsSectionCut.cut: and t = 0.2 is two feet from the near one");
+
+    // -----------------------------------------------------------------
+    // A CUT AT A STATION IS NOT A LOFT. At t = 0 or t = 1 the far end
+    // is weighted zero and contributes nothing to a single radius, so
+    // requiring wall points there refused sections the chosen station
+    // had every measurement for -- and refused them in the NEIGHBOUR's
+    // name. Every cut the sketching workflow makes is one of these,
+    // because the caver picks a station.
+    //
+    // A1 is the fixture's first station and has no LRUD of its own,
+    // which is not a gap in the data: LRUD arrives with the shot INTO
+    // a station, so the first of a chain never has any.
+    // -----------------------------------------------------------------
+    var atA2 = CsSectionCut.cut(sv, res, "A1", "A2", 1, {});
+    ok(atA2.refused === undefined,
+        "CsSectionCut.cut: a cut AT A2 does not need A1's wall points");
+    // The outline is A2's OWN, not a lerp with an absent neighbour:
+    // A2 is 10 all round, worked by hand. Guarded, so a build that
+    // refuses this cut fails the claim ABOVE by name rather than
+    // throwing on a refusal's absent polygon and taking the run with
+    // it -- which is what the mutation check found it doing.
+    near((atA2.refused === undefined) ?
+        CsSectionCut.radiusAt(atA2.polygon, 0) : -1, 10, 1e-9,
+        "CsSectionCut.cut: and the outline is that station's own");
+    eqs(atA2.measuredFrom, 0,
+        "CsSectionCut.cut: the far end is credited nothing, because it " +
+        "contributed nothing");
+    eqs(atA2.measuredTo, 4,
+        "CsSectionCut.cut: and the station cut at is credited its four");
+    near(atA2.nearest, 0, 1e-9,
+        "CsSectionCut.cut: a cut at a station is no distance from one");
+
+    // t = 0 is the same rule at the other end -- and A1 really has
+    // nothing, so this one is still refused.
+    var atA1 = CsSectionCut.cut(sv, res, "A1", "A2", 0, {});
+    ok(atA1.refused === true,
+        "CsSectionCut.cut: a cut AT a station with no LRUD of its own " +
+        "is still refused");
+    ok(String(atA1.reason).indexOf("A1") >= 0 &&
+       String(atA1.reason).indexOf("A2") < 0,
+        "CsSectionCut.cut: and the refusal names the station the caver " +
+        "chose, never its neighbour");
+    ok(String(atA1.reason).indexOf("shot INTO a station") >= 0,
+        "CsSectionCut.cut: saying where LRUD comes from, which is the " +
+        "only thing that makes a first-in-chain refusal actionable");
+
+    // STRICTLY BETWEEN, IT REALLY IS A LOFT and both ends are required
+    // exactly as they always were.
+    var between = CsSectionCut.cut(sv, res, "A1", "A2", 0.5, {});
+    ok(between.refused === true,
+        "CsSectionCut.cut: a cut BETWEEN stations still needs both ends");
+    ok(String(between.reason).indexOf("A1") >= 0,
+        "CsSectionCut.cut: naming the end that is short");
+
+    // THE TOLERANCE BOUNDARY, both sides of it. AT_STATION_T is a
+    // fraction of the leg, and inside it the far end's share is under a
+    // millionth -- finer than the line the section is drawn with.
+    ok(CsSectionCut.cut(sv, res, "A1", "A2",
+        1 - CsSectionCut.AT_STATION_T, {}).refused === undefined,
+        "CsSectionCut.cut: the tolerance boundary itself counts as AT " +
+        "the station");
+    ok(CsSectionCut.cut(sv, res, "A1", "A2",
+        1 - CsSectionCut.AT_STATION_T * 10, {}).refused === true,
+        "CsSectionCut.cut: ten times outside it is a loft again, and " +
+        "needs both ends");
+    ok(CsSectionCut.cut(sv, res, "A1", "A2",
+        CsSectionCut.AT_STATION_T / 2, {}).refused === true,
+        "CsSectionCut.cut: and the tolerance at t = 0 is the same " +
+        "tolerance -- A1 has nothing either way");
+
+    // A STATION WITH SOME EVIDENCE, BUT NOT ENOUGH, SAYS SO. Two wall
+    // points is a different problem from none and reads as one.
+    var twoSv = CsModel.newSurvey();
+    twoSv.shots.push(lrudShot("C1", "C2", 10, 0, 5, 5, null, null));
+    var twoRes = CsNetwork.resolve(twoSv, {});
+    var twoRefused = CsSectionCut.cut(twoSv, twoRes, "C1", "C2", 1, {});
+    ok(twoRefused.refused === true,
+        "CsSectionCut.cut: two wall points cannot make a boundary either");
+    ok(String(twoRefused.reason).indexOf("C2") >= 0 &&
+       String(twoRefused.reason).indexOf("only 2") >= 0,
+        "CsSectionCut.cut: and the refusal says how short it is, by " +
+        "name (got: " + twoRefused.reason + ")");
 
     // An end with almost no evidence is REFUSED, by name.
     var thinSv = CsModel.newSurvey();

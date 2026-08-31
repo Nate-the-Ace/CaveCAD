@@ -138,7 +138,16 @@ SectionEdit.run = function() {
             .arg(scan));
     }
 
-    var bayId = SketchSection.run(null, station);
+    // THE BAY HAS TO BE SIZED FOR THE SCAN THIS TOOL IS ABOUT TO PLACE.
+    // SketchSection.run is handed no path here (this tool places the
+    // scan itself, at the STORED fit, which run() knows nothing about),
+    // so without this the bay would be sized from the ghost alone --
+    // and a field-book page fitted at its real scale is many times the
+    // ghost. A scan hanging out of its own frame is not just untidy:
+    // Capture sweeps by containment, so anything traced over the
+    // overflow is dropped silently at the next capture.
+    var bayId = SketchSection.run(null, station, null,
+        scanExists ? SectionEdit.placedSizeOf(scan, fit) : null);
     if (bayId === null) {
         return;
     }
@@ -158,6 +167,43 @@ SectionEdit.run = function() {
     }
 
     SectionEdit.explodeInto(doc, di, ref, bayId);
+};
+
+/**
+ * How much room the stored scan will take in the reopened bay, or null
+ * when that cannot be known yet.
+ *
+ * THE ROTATED EXTENT, not width times scale. The caver may have turned
+ * the scan onto the ghost, and the fit carries that rotation in its u
+ * and v vectors; the space it occupies is the parallelogram's
+ * axis-aligned box, which is wider than the page itself once it is at
+ * an angle.
+ *
+ * NULL FOR A NULL FIT, deliberately: that is the auto-fit fallback
+ * (an old five-number tag, or a corrupt one), which sizes the scan to
+ * the ghost that does not exist yet -- so the ghost is what sizes the
+ * bay, exactly as it did before there was a scan to consider.
+ *
+ * \return {w, h} in drawing units, or null
+ */
+SectionEdit.placedSizeOf = function(path, fit) {
+    if (fit === null || fit === undefined) {
+        return null;
+    }
+    var img = new QImage(path);
+    if (img.isNull()) {
+        return null;
+    }
+    // width()/height() are METHODS on this build's QImage, not
+    // properties -- reading them as properties yields a function object
+    // and a NaN size, which baySizeFor would then fall back on without
+    // anything saying so.
+    var pxW = img.width(), pxH = img.height();
+    if (pxW < 1 || pxH < 1) {
+        return null;
+    }
+    return { w: Math.abs(fit.ux * pxW) + Math.abs(fit.vx * pxH),
+             h: Math.abs(fit.uy * pxW) + Math.abs(fit.vy * pxH) };
 };
 
 /** The one selected block reference that is a section, or null. */

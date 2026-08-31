@@ -160,6 +160,104 @@ CsSectionBay.fitAtScale = function(scanBox, ghostBox, k) {
     return fit;
 };
 
+/** How much bigger than the ghost the bay opens: the elbow room a
+ *  caver traces in, and what sizes the bay when the scan is small. */
+CsSectionBay.GHOST_ROOM = 3;
+
+/** How much clear paper the scan gets around it, as a multiple of its
+ *  own half-extent. PROPORTIONAL, not a fixed number of units: a bay is
+ *  measured in whatever units this cave is surveyed in and has to hold
+ *  anything from a two-foot crawl to a scanned page two hundred units
+ *  across, so a constant margin is either invisible or the whole bay. */
+CsSectionBay.SCAN_ROOM = 1.1;
+
+/**
+ * How big the scan will be once it is placed, and at what scale.
+ *
+ * SEPARATE FROM PLACING IT, because the frame has to be sized before
+ * the scan exists and the answer must be the SAME answer. The bay used
+ * to be sized from the ghost alone and the scan placed afterwards at
+ * whatever scale it happened to want; a calibrated scan of a
+ * field-book page then opened six to nine times the bay it was
+ * supposed to sit inside -- and since Capture sweeps only what is
+ * INSIDE the frame, a caver tracing over the overflow lost the work
+ * silently at capture. One function answers "how big", the caller
+ * asks it once, and the frame and the placement cannot disagree.
+ *
+ * `k` is DRAWING UNITS PER IMAGE PIXEL -- the same number fitAtScale
+ * takes, and the same number an RImageData u/v vector carries.
+ * Calibrated where the caver measured one, and otherwise the auto-fit
+ * to the ghost's width that fitTransform derives, spelled out here so
+ * the two paths cannot drift apart.
+ *
+ * \return {k, w, h}. Pure.
+ */
+CsSectionBay.placedScanSize = function(pxW, pxH, ghostBox, calibration) {
+    var k = (calibration !== null && calibration !== undefined &&
+        calibration.unitsPerPixel > 0) ? calibration.unitsPerPixel : null;
+    if (k === null) {
+        var gw = (ghostBox === null || ghostBox === undefined) ? 0 :
+            (ghostBox.x2 - ghostBox.x1);
+        k = (pxW > 0 && gw > 0) ? (gw / pxW) : 1;
+    }
+    // The same floor fitAtScale applies, for the same reason: a scale
+    // that is not positive would place the scan as a point or mirrored,
+    // and 0 is not NaN so nothing downstream would call it wrong.
+    if (!(k > 0)) {
+        k = 1;
+    }
+    return { k: k, w: pxW * k, h: pxH * k };
+};
+
+/**
+ * How big the bay has to be to hold the ghost AND the scan.
+ *
+ * SYMMETRIC ABOUT THE BAY'S CENTRE, because everything in a bay is
+ * placed from that centre: the ghost is drawn about it and the scan is
+ * centred on the ghost. So what the size has to cover is the furthest
+ * either of them reaches from the centre, doubled -- not the union of
+ * two boxes, which would only be right if the frame could then be
+ * moved off-centre to suit, and it cannot.
+ *
+ * THE GHOST'S SHARE IS ITS FURTHEST CORNER, not its width. For a
+ * ghost centred on the origin (which is what a section's own local box
+ * is) that is exactly the three-times-the-ghost bay this tool has
+ * always opened. For a lopsided one it is bigger -- and the old
+ * width-times-three could put the ghost's own far side outside the
+ * frame, where Capture would not sweep it.
+ *
+ * A NULL OR ZERO SCAN LEAVES THE GHOST'S SIZE ALONE, so a bay opened
+ * with no scan at all is the bay it always was.
+ *
+ * \param ghostBox {x1,y1,x2,y2} local to the bay centre, or null
+ * \param scanSize {w, h} in drawing units from placedScanSize, or null
+ * \return {w, h}. Pure.
+ */
+CsSectionBay.baySizeFor = function(ghostBox, scanSize) {
+    var g = (ghostBox === null || ghostBox === undefined) ?
+        { x1: 0, y1: 0, x2: 0, y2: 0 } : ghostBox;
+    var halfX = CsSectionBay.GHOST_ROOM *
+        Math.max(Math.abs(g.x1), Math.abs(g.x2));
+    var halfY = CsSectionBay.GHOST_ROOM *
+        Math.max(Math.abs(g.y1), Math.abs(g.y2));
+    if (scanSize !== null && scanSize !== undefined &&
+            scanSize.w > 0 && scanSize.h > 0) {
+        // The scan is centred on the GHOST's centre, not the bay's, so
+        // an off-centre ghost carries the scan off-centre with it and
+        // the offset is part of the reach.
+        var cx = (g.x1 + g.x2) / 2, cy = (g.y1 + g.y2) / 2;
+        halfX = Math.max(halfX,
+            CsSectionBay.SCAN_ROOM * (Math.abs(cx) + scanSize.w / 2));
+        halfY = Math.max(halfY,
+            CsSectionBay.SCAN_ROOM * (Math.abs(cy) + scanSize.h / 2));
+    }
+    var w = 2 * halfX, h = 2 * halfY;
+    // Negated comparisons, so a NaN out of an un-computed extent falls
+    // to the default rather than riding through as a NaN rectangle --
+    // frameRectFor's own fallback, and the same size.
+    return { w: (w > 0) ? w : 40, h: (h > 0) ? h : 40 };
+};
+
 /** The four letters, in the order a caver reads them off a page. */
 CsSectionBay.LRUD_LETTERS = ["L", "R", "U", "D"];
 

@@ -197,6 +197,58 @@ CsSectionCut.ANGLES = 32;
 CsSectionCut.MIN_POINTS = 3;
 
 /**
+ * How near an end of a leg a cut counts as being AT that station.
+ *
+ * A FRACTION OF THE LEG, not a distance, so it means the same thing on
+ * a hundred-foot shot as on a five-foot one -- the same reason
+ * PICK_TOLERANCE is relative.
+ *
+ * WHY THERE IS A TOLERANCE AT ALL. A cut at a station comes from
+ * nearestLeg's perpendicular foot computed on that station's own
+ * coordinates, which lands on exactly 0 or exactly 1; the tolerance is
+ * there so a t that has been through a round trip -- a tag, a
+ * serialized pick, an adjustment -- is still the station's own section
+ * rather than a loft with a weight of 1e-15 on the far end.
+ *
+ * WHY IT IS THIS SMALL. Inside it the far end's contribution is under
+ * a millionth of the leg, which on any survey leg is far finer than
+ * the line the section is drawn with -- so calling the cut "at" the
+ * station changes nothing anyone can see. Anything looser would start
+ * throwing away a real fraction of a real loft.
+ */
+CsSectionCut.AT_STATION_T = 1e-6;
+
+/**
+ * Why a station cannot be cut, in words a caver can act on.
+ *
+ * NAMES THE STATION THE CUT IS AT. For a cut at a station -- which is
+ * every cut the sketching workflow makes, because the caver picks a
+ * station -- that is the station they themselves chose. The refusal
+ * used to be able to name the OTHER end of whichever leg the pick
+ * happened to snap to: ask for a section at A2, be told about A1,
+ * which is an implementation detail of the pick and not something
+ * anybody can go and fix.
+ *
+ * AND SAYS WHERE LRUD COMES FROM when there is none at all, because
+ * that refusal is otherwise unactionable. LRUD is recorded with the
+ * shot INTO a station, so the first station of a survey chain never
+ * has any of its own -- correct data, not a gap to go and fill.
+ *
+ * Pure.
+ */
+CsSectionCut.thinReason = function(station, measured) {
+    if (!(measured > 0)) {
+        return "station " + station + " has no measured wall points of " +
+            "its own, so there is no outline to cut -- LRUD is recorded " +
+            "with the shot INTO a station, so the first station of a " +
+            "survey chain has none";
+    }
+    return "station " + station + " has only " + measured +
+        " measured wall point" + (measured === 1 ? "" : "s") + ", and " +
+        CsSectionCut.MIN_POINTS + " are needed to make an outline";
+};
+
+/**
  * The frame for one leg, with theta = 0 carried from the legs before
  * it in resolution order.
  *
@@ -364,6 +416,14 @@ CsSectionCut.radiusAt = function(polygon, theta) {
 /**
  * A rough cross section anywhere along one leg.
  *
+ * A CUT AT AN END OF THE LEG IS NOT A LOFT. At t = 0 the far station's
+ * outline is weighted zero: it contributes nothing to a single radius,
+ * and every cut this suite's sketching workflow makes is one of these,
+ * because the caver picks a STATION. Requiring wall points at the far
+ * end there refused sections that the chosen station had every
+ * measurement for -- and refused them in the neighbour's name. So both
+ * ends are required only where the cut really is between them.
+ *
  * \param t 0 at `from`, 1 at `to`
  * \return {outline: [{theta, radius}], polygon, measuredFrom, measuredTo,
  *          nearest, reentrant, reseeded}
@@ -388,19 +448,31 @@ CsSectionCut.cut = function(survey, resolved, from, to, t, opts) {
     var byStation = o.splaysByStation || CsLrud.splaysByStation(survey);
     var inner = { splaysByStation: byStation, tapeMode: o.tapeMode };
 
-    var pa = CsSectionCut.polygonAt(survey, resolved, from, frame, inner);
-    var pb = CsSectionCut.polygonAt(survey, resolved, to, frame, inner);
-    var thin = null;
-    if (pa === null || pa.measured < CsSectionCut.MIN_POINTS) {
+    // Which ends the cut is actually made of. `!(t > x)` rather than
+    // `t <= x` so a NaN t -- which is not at either end and not
+    // anywhere else either -- falls through to the strict two-ended
+    // case it always took, instead of being read as "at the start".
+    var atFrom = !(t > CsSectionCut.AT_STATION_T);
+    var atTo = (t >= 1 - CsSectionCut.AT_STATION_T);
+    var useFrom = !atTo;
+    var useTo = !atFrom;
+
+    var pa = useFrom ?
+        CsSectionCut.polygonAt(survey, resolved, from, frame, inner) : null;
+    var pb = useTo ?
+        CsSectionCut.polygonAt(survey, resolved, to, frame, inner) : null;
+    var thin = null, thinPoly = null;
+    if (useFrom && (pa === null || pa.measured < CsSectionCut.MIN_POINTS)) {
         thin = from;
-    } else if (pb === null || pb.measured < CsSectionCut.MIN_POINTS) {
+        thinPoly = pa;
+    } else if (useTo && (pb === null || pb.measured < CsSectionCut.MIN_POINTS)) {
         thin = to;
+        thinPoly = pb;
     }
     if (thin !== null) {
         return { refused: true,
-                 reason: "station " + thin + " has fewer than " +
-                     CsSectionCut.MIN_POINTS + " measured wall points, " +
-                     "so there is no outline to cut" };
+                 reason: CsSectionCut.thinReason(thin,
+                     (thinPoly === null) ? 0 : thinPoly.measured) };
     }
 
     var angles = (o.angles === undefined || o.angles === null) ?
@@ -408,27 +480,38 @@ CsSectionCut.cut = function(survey, resolved, from, to, t, opts) {
     var outline = [], reentrant = false;
     for (var i = 0; i < angles; i++) {
         var theta = -Math.PI + (2 * Math.PI * i) / angles;
-        var ha = CsSectionCut.boundaryHits(pa, theta);
-        var hb = CsSectionCut.boundaryHits(pb, theta);
-        if (ha.length > 1 || hb.length > 1) {
+        var ha = (pa === null) ? null : CsSectionCut.boundaryHits(pa, theta);
+        var hb = (pb === null) ? null : CsSectionCut.boundaryHits(pb, theta);
+        if ((ha !== null && ha.length > 1) ||
+                (hb !== null && hb.length > 1)) {
             // A ray crossing twice means an undercut. Radial sampling
             // takes the NEAR crossing and so cuts the corner off it --
             // simplified, and said, never silently.
             reentrant = true;
         }
-        if (ha.length === 0 || hb.length === 0) {
+        if ((ha !== null && ha.length === 0) ||
+                (hb !== null && hb.length === 0)) {
             continue;
         }
-        outline.push({ theta: theta,
-                       radius: (1 - t) * ha[0] + t * hb[0] });
+        var radius;
+        if (ha === null) {
+            radius = hb[0];
+        } else if (hb === null) {
+            radius = ha[0];
+        } else {
+            radius = (1 - t) * ha[0] + t * hb[0];
+        }
+        outline.push({ theta: theta, radius: radius });
     }
 
     var legLen = CsSectionCut.length(CsSectionCut.sub(b, a));
     return {
         outline: outline,
         polygon: { points: outline, measured: outline.length },
-        measuredFrom: pa.measured,
-        measuredTo: pb.measured,
+        // 0 for an end the cut is not made of, so a caption cannot
+        // credit a station that contributed nothing to the outline.
+        measuredFrom: (pa === null) ? 0 : pa.measured,
+        measuredTo: (pb === null) ? 0 : pb.measured,
         // How far the cut is from the nearer station that fed it. A cut
         // beside a station is nearly a measurement; one midway between
         // stations thirty feet apart is a guess, and the reader is told

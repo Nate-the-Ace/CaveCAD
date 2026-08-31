@@ -119,9 +119,14 @@ SketchSection.say = function(text) {
  *        done. OPTIONAL on purpose: a caver who skips or cancels the
  *        calibration must still get a bay, because scaling the scan by
  *        hand onto the ghost is a workflow that already works.
+ * \param scanSize {w, h} in drawing units for a scan the CALLER will
+ *        place itself, or null. Only SectionEdit uses it: it reopens a
+ *        bay with no path (it has a stored fit to honour, which this
+ *        function knows nothing about) and the frame still has to be
+ *        big enough for what it is about to put in there.
  * \return the bay id, or null
  */
-SketchSection.run = function(scanPath, station, calibration) {
+SketchSection.run = function(scanPath, station, calibration, scanSize) {
     var doc = EAction.getDocument();
     var di = EAction.getDocumentInterface();
     if (isNull(doc) || isNull(di)) {
@@ -143,15 +148,33 @@ SketchSection.run = function(scanPath, station, calibration) {
         asDrawn = null;
     }
 
-    var cut = SketchSection.cutAt(asDrawn, name);
+    var refusal = SketchSection.cutAt(asDrawn, name);
+    var cut = (refusal !== null && refusal.refused === true) ? null : refusal;
+    if (cut !== null) {
+        refusal = null;
+    }
     var scale = CsSectionDraw.scaleOf();
+    // THE +/-5 STAND-IN IS A FLOOR, NOT A SIZE. With no ghost there is
+    // nothing to auto-fit the scan to either, so the box still has to
+    // be some size for that -- but it stops deciding how big the bay
+    // is: baySizeFor takes the scan's real extent as well, and a
+    // scanned page is hundreds of units wide where this box is ten.
     var ghostBox = (cut === null) ? { x1: -5, y1: -5, x2: 5, y2: 5 } :
         CsSectionDraw.localBox(cut, scale, CsSectionDraw.textHeight(doc));
 
-    var size = { w: (ghostBox.x2 - ghostBox.x1) * 3,
-                 h: (ghostBox.y2 - ghostBox.y1) * 3 };
+    // MEASURE THE SCAN BEFORE THE FRAME IS SIZED. The frame used to be
+    // sized from the ghost alone and the scan placed into it
+    // afterwards, at whatever scale the scan wanted -- so a calibrated
+    // field-book page opened many times the bay it was supposed to sit
+    // inside. That is not only untidy: Capture sweeps what is INSIDE
+    // the frame, so a caver tracing over the overflow lost the work
+    // silently. The scan's placed extent is knowable here (pixels
+    // times units-per-pixel), so it is known here.
+    var scan = SketchSection.scanPlan(scanPath, ghostBox, calibration);
     var rect = CsSectionBay.frameRectFor(
-        SketchSection.planBoxOf(doc), size,
+        SketchSection.planBoxOf(doc),
+        CsSectionBay.baySizeFor(ghostBox,
+            (scan === null) ? scanSize : scan),
         SketchSection.rememberedCorner(doc));
 
     var bayId = CsUuid.v4();
@@ -176,24 +199,37 @@ SketchSection.run = function(scanPath, station, calibration) {
     if (cut !== null) {
         SketchSection.addGhost(doc, di, cut, scale, rect, bayId);
     }
-    if (scanPath !== null && scanPath !== undefined && scanPath !== "") {
-        SketchSection.addScan(doc, di, scanPath, ghostBox, rect, bayId,
-            calibration);
+    if (scan !== null) {
+        SketchSection.addScan(doc, di, scan, ghostBox, rect, bayId);
     }
 
     SketchSection.zoomTo(di, rect);
     SketchSection.snapFree(di);
 
     if (cut === null) {
+        // The cut's own reason where there is one -- it names the
+        // station the caver picked and says what is short about it,
+        // which "no cuttable LRUD" alone does not.
         SketchSection.say(qsTr("No cuttable LRUD at %1, so the bay has " +
-            "no outline to scale the scan against.\n\nScale the scan by " +
-            "hand: draw a line of a known length inside the frame and " +
-            "match the scan to it.").arg(name));
+            "no outline to scale the scan against.").arg(name) +
+            (refusal === null ? "" : "\n\n" + refusal.reason + ".") +
+            qsTr("\n\nScale the scan by hand: draw a line of a known " +
+                "length inside the frame and match the scan to it."));
     }
     return bayId;
 };
 
-/** The section the drawing would compute at this station, or null. */
+/**
+ * The section the drawing would compute at this station.
+ *
+ * \return the cut, or CsSectionCut.cut's own {refused, reason} so the
+ *         caller can SAY why there is no ghost, or null when there is
+ *         no survey or no leg to cut on at all. A refusal that reached
+ *         the caller as a bare null used to be reported as "no cuttable
+ *         LRUD" and nothing else, which is true of a station with three
+ *         wall points and a first-in-chain neighbour and useless to the
+ *         caver looking at it.
+ */
 SketchSection.cutAt = function(asDrawn, station) {
     if (asDrawn === null || isNull(asDrawn.resolved)) {
         return null;
@@ -207,9 +243,8 @@ SketchSection.cutAt = function(asDrawn, station) {
     if (leg === null) {
         return null;
     }
-    var cut = CsSectionCut.cut(asDrawn.survey, asDrawn.resolved,
+    return CsSectionCut.cut(asDrawn.survey, asDrawn.resolved,
         leg.from, leg.to, leg.t, {});
-    return (cut.refused === true) ? null : cut;
 };
 
 /**
@@ -362,6 +397,50 @@ SketchSection.addGhost = function(doc, di, cut, scale, rect, bayId) {
 };
 
 /**
+ * How big the scan will be once it is placed, read BEFORE the bay is
+ * drawn.
+ *
+ * THE ORDER IS THE FIX. Nothing here is new work -- the image was
+ * always opened and its pixels always multiplied by a scale -- it is
+ * only that it used to happen after the frame had already been sized
+ * from the ghost, so the frame could not take the scan into account and
+ * did not. Sized first, and the same numbers are then handed to
+ * addScan, so the frame and the placement are one decision.
+ *
+ * The two "this scan is unusable" messages live here rather than in
+ * addScan for the same reason: by the time addScan runs the frame has
+ * been drawn to fit a scan, and the caver has to be told before that,
+ * not after.
+ *
+ * \return {path, pxW, pxH, k, w, h} in drawing units, or null when
+ *         there is no scan (which is a supported way to open a bay).
+ */
+SketchSection.scanPlan = function(path, ghostBox, calibration) {
+    if (path === null || path === undefined || path === "") {
+        return null;
+    }
+    var img = new QImage(path);
+    if (img.isNull()) {
+        SketchSection.say(qsTr("The scan could not be read: ") + path);
+        return null;
+    }
+    // width()/height() are METHODS on this build's QImage, not
+    // properties -- probed 2026-08-29 (js.width returns "function").
+    // Reading them as properties would hand the fit maths a function
+    // object instead of a pixel count and produce a NaN transform with
+    // no error.
+    var pxW = img.width(), pxH = img.height();
+    if (pxW < 1 || pxH < 1) {
+        SketchSection.say(qsTr("The scan has no size: ") + path);
+        return null;
+    }
+    var placed = CsSectionBay.placedScanSize(pxW, pxH, ghostBox,
+        calibration);
+    return { path: path, pxW: pxW, pxH: pxH, k: placed.k,
+             w: placed.w, h: placed.h };
+};
+
+/**
  * The scan, scaled onto the ghost, faded, at the back.
  *
  * AT THE CALIBRATED SCALE WHEN THERE IS ONE. Without a calibration the
@@ -377,35 +456,23 @@ SketchSection.addGhost = function(doc, di, cut, scale, rect, bayId) {
  * scan somewhere that depends on where in the outline the caver
  * happened to click first, and a scan that opens off-centre in its own
  * bay reads as a fault.
+ *
+ * \param scan a SketchSection.scanPlan result -- the pixels and the
+ *        scale the FRAME was already sized from.
  */
-SketchSection.addScan = function(doc, di, path, ghostBox, rect, bayId,
-        calibration) {
-    var img = new QImage(path);
-    if (img.isNull()) {
-        SketchSection.say(qsTr("The scan could not be read: ") + path);
-        return;
-    }
-    // width()/height() are METHODS on this build's QImage, not
-    // properties -- probed 2026-08-29 (js.width returns "function").
-    // Reading them as properties would hand the fit maths a function
-    // object instead of a pixel count and produce a NaN transform with
-    // no error.
-    var pxW = img.width(), pxH = img.height();
-    if (pxW < 1 || pxH < 1) {
-        SketchSection.say(qsTr("The scan has no size: ") + path);
-        return;
-    }
+SketchSection.addScan = function(doc, di, scan, ghostBox, rect, bayId) {
+    var path = scan.path;
+    var pxW = scan.pxW, pxH = scan.pxH;
     var cx = (rect.x1 + rect.x2) / 2;
     var cy = (rect.y1 + rect.y2) / 2;
     var scanBox = { x1: 0, y1: 0, x2: pxW, y2: pxH };
     var ghostHere = { x1: cx + ghostBox.x1, y1: cy + ghostBox.y1,
                       x2: cx + ghostBox.x2, y2: cy + ghostBox.y2 };
-    var calibrated = (calibration !== null && calibration !== undefined &&
-        calibration.unitsPerPixel > 0);
-    var fit = calibrated ?
-        CsSectionBay.fitAtScale(scanBox, ghostHere,
-            calibration.unitsPerPixel) :
-        CsSectionBay.fitTransform(scanBox, ghostHere);
+    // THE SCALE COMES FROM THE PLAN, always -- the same number the
+    // frame was sized from a few lines earlier in run(). Deciding it
+    // twice, once for the frame and once here, is exactly how a frame
+    // and the thing it is supposed to contain get to disagree.
+    var fit = CsSectionBay.fitAtScale(scanBox, ghostHere, scan.k);
     var entity = SketchSection.imageEntity(doc, path, fit, pxW, pxH);
     if (entity === null) {
         return;
