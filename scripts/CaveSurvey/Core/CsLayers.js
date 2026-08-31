@@ -478,8 +478,14 @@ CsLayers.PROFILE_WALLS_SURVEYED = "PROFILE-WALLS-SURVEYED";
 // nothing can be drawn onto these layers while they are off: a
 // writer must wrap its add operation in CsLayers.withLayerOn below,
 // which flips the layer visible for the write and restores it after.
+// The section spine skeleton joins its plan and profile twins here.
+// A shaped line's spine is scaffolding the caver never wants to see,
+// and the section's was the one frame where it would have shown --
+// worse, inside a sketching bay, where the capture sweep is geometric
+// and would have swept the visible skeleton into the block.
 CsLayers.OFF = { "CTRL-DATA": true, "CTRL-HIDDEN": true, "CTRL-RAW": true,
-    "CTRL-SHAPE-SPINE": true, "CTRL-PROFILE-SHAPE-SPINE": true };
+    "CTRL-SHAPE-SPINE": true, "CTRL-PROFILE-SHAPE-SPINE": true,
+    "CTRL-SECTION-SHAPE-SPINE": true };
 
 // Layers created LOCKED: suite-owned bookkeeping a caver must see but
 // never edit. Every write the suite itself makes to one of these must

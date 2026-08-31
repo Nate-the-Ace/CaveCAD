@@ -22,6 +22,7 @@ function ShapedLinesRun(guiAction) {
 
     this.samples = [];      // {x, y} in drawing coordinates
     this.region = null;     // cached profile-frame box
+    this.bays = [];         // cached open section-bay rects
     this.savedSnap = null;  // snap CLASS NAME to restore on exit
 }
 
@@ -49,8 +50,7 @@ ShapedLinesRun.TOLERANCE_FRACTION = 0.05;
 ShapedLinesRun.prototype.beginEvent = function() {
     EAction.prototype.beginEvent.call(this);
     this.setState(ShapedLinesRun.State.Idle);
-    var doc = this.getDocument();
-    this.region = isNull(doc) ? null : CsTrace.profileRegion(doc);
+    this.refreshFrames();
 
     // Grid snap staircases a freehand drag; suspend, restore in
     // finishEvent whatever way the action ends.
@@ -90,6 +90,22 @@ ShapedLinesRun.prototype.setState = function(state) {
     }
 };
 
+/**
+ * Recomputes the cached profile region and the open section bays.
+ *
+ * Both walk EVERY entity in the drawing, which is why they are cached
+ * at all. Refreshed at the start of the action and again at the top of
+ * every press, because Sketch Section and Capture Section can open and
+ * close a bay while this action is still armed -- a stale bay list
+ * would route a section stroke to the plan family, or a plan stroke to
+ * a bay that is no longer there.
+ */
+ShapedLinesRun.prototype.refreshFrames = function() {
+    var doc = this.getDocument();
+    this.region = isNull(doc) ? null : CsTrace.profileRegion(doc);
+    this.bays = isNull(doc) ? [] : CsTrace.sectionBays(doc);
+};
+
 /** SAMPLE_PIXELS at the current zoom, in drawing units. */
 ShapedLinesRun.prototype.sampleThreshold = function() {
     try {
@@ -125,6 +141,9 @@ ShapedLinesRun.prototype.mousePressEvent = function(event) {
         return;
     }
     var p = event.getModelPosition();
+    // Once per stroke, before the frame that routes this feature's
+    // layers is decided from it. See refreshFrames.
+    this.refreshFrames();
     this.setState(ShapedLinesRun.State.Drawing);
     this.samples = [{ x: p.x, y: p.y }];
 };
@@ -199,17 +218,21 @@ ShapedLinesRun.prototype.commit = function() {
         return;
     }
 
-    // ONE button, both views: the stroke's LOCATION decides whether
-    // this is plan or elevation linework (the band bounding boxes'
-    // whole purpose -- see CsProfileBox), and the layers route to the
-    // frame's own family so a ledge drawn in the elevation never
-    // counts toward the plan's data window. Only a stroke CROSSING
-    // between the frames is refused -- it describes nothing in either.
-    var pathFrame = CsTrace.pathFrame(this.region, this.samples);
+    // ONE button, ALL THREE views: the stroke's LOCATION decides
+    // whether this is plan, elevation or cross-section linework (an
+    // open bay for the section, the band bounding boxes for the
+    // elevation -- see CsTrace.frameIn and CsProfileBox), and the
+    // layers route to the frame's own family so a ledge drawn in the
+    // elevation never counts toward the plan's data window, and one
+    // drawn inside a sketching bay lands on SECTION-LEDGE-FLOOR rather
+    // than being swept into the block as plan ink. Only a stroke
+    // CROSSING between frames is refused -- it describes nothing in
+    // any of them.
+    var pathFrame = CsTrace.pathFrame(this.region, this.samples, this.bays);
     if (pathFrame === null) {
-        EAction.handleUserMessage(qsTr("%1: that stroke crossed between " +
-            "the plan and the elevation. Nothing was drawn -- draw " +
-            "within one view.").arg(spec.label));
+        EAction.handleUserMessage(qsTr("%1: that stroke crossed from one " +
+            "view into another. Nothing was drawn -- draw within one " +
+            "view.").arg(spec.label));
         return;
     }
     var frameLayers = CsShapeLine.layersFor(spec, pathFrame);

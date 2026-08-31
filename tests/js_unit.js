@@ -20355,9 +20355,54 @@ function syntheticTiff(w, h, floats) {
         var plan = CsShapeLine.layersFor(spec, "plan");
         ok(plan.spine === spec.spineLayer && plan.decor === spec.decorLayer,
             "layersFor: " + key + "'s plan family is the STYLES entry itself");
+
+        // THE SAME FOUR CLAIMS FOR THE SECTION FAMILY. There was no
+        // section entry at all, so layersFor fell through to the plan
+        // family and a ledge drawn inside a sketching bay landed on
+        // LEDGE-FLOOR -- visible, plausible, and counted as plan ink.
+        var sect = CsShapeLine.layersFor(spec, "section");
+        ok(sect.spine !== spec.spineLayer || sect.decor !== spec.decorLayer,
+            "layersFor: " + key + " has a distinct section family");
+        ok(sect.spine !== twins.spine || sect.decor !== twins.decor,
+            "layersFor: " + key + "'s section family is not the profile one");
+        ok(CsLayers.DEFAULTS[sect.spine] !== undefined,
+            "layersFor: " + key + "'s section spine layer is registered");
+        ok(CsLayers.DEFAULTS[sect.decor] !== undefined,
+            "layersFor: " + key + "'s section decor layer is registered");
+        ok(CsLayers.frameOf(sect.spine) === "section",
+            "layersFor: " + key + "'s section spine classifies as section");
+        ok(CsLayers.frameOf(sect.decor) === "section",
+            "layersFor: " + key + "'s section decor classifies as section");
     }
     ok(CsLayers.OFF["CTRL-PROFILE-SHAPE-SPINE"] === true,
         "the profile spine skeleton is created switched off, like the plan one");
+    ok(CsLayers.OFF["CTRL-SECTION-SHAPE-SPINE"] === true,
+        "and so is the section one -- a visible skeleton inside a bay " +
+        "would be swept into the block by the geometric capture");
+
+    // frameOfSpine is what every REGENERATION routes through, not just
+    // the first draw. It used to collapse anything that was not
+    // "profile" to "plan", so a correctly-drawn section feature had its
+    // ornament rebuilt onto the plan family the next time the caver
+    // nudged the spine.
+    var fakeSpine = { frame: "section" };
+    var realGet = CsTags.get;
+    CsTags.get = function(e, key) {
+        return (key === CsShapeLine.KEY.FRAME) ? e.frame : "";
+    };
+    try {
+        eqs(CsShapeLine.frameOfSpine({ frame: "section" }), "section",
+            "frameOfSpine: a section spine stays section across a rebuild");
+        eqs(CsShapeLine.frameOfSpine({ frame: "profile" }), "profile",
+            "frameOfSpine: a profile spine stays profile");
+        eqs(CsShapeLine.frameOfSpine({ frame: "" }), "plan",
+            "frameOfSpine: an untagged spine is plan, as it always was");
+        eqs(CsShapeLine.frameOfSpine({ frame: "nonsense" }), "plan",
+            "frameOfSpine: an unrecognised frame falls back to plan");
+    } finally {
+        CsTags.get = realGet;
+    }
+    ok(fakeSpine.frame === "section", "frameOfSpine: fixture intact");
 
     // CsProfileBox point tests are pure given a boxes array.
     var boxes = [

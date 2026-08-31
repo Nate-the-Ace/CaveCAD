@@ -139,11 +139,13 @@ ShapedLines.dressOne = function(doc, di, entity, opts, group) {
     // Which FRAME the entity's geometry sits in decides which layer
     // family the decoration joins -- the caver's entity itself stays
     // where it is, so its layer name proves nothing (a profile sketch
-    // on layer "0" is ordinary). Location is the evidence: the band
-    // boxes first, the derived region as the fallback (opts.region is
-    // the caller's cached CsTrace.profileRegion).
+    // on layer "0" is ordinary). Location is the evidence: an open
+    // section bay first, then the band boxes, then the derived region
+    // as the fallback (opts.region and opts.bays are the caller's
+    // cached CsTrace.profileRegion and CsTrace.sectionBays).
     var mid = probe.points[Math.floor(probe.points.length / 2)];
-    var frame = CsProfileBox.frameAt(doc, opts.region || null, mid);
+    var frame = CsProfileBox.frameAt(doc, opts.region || null, mid,
+        opts.bays || []);
 
     CsTags.set(entity, CsShapeLine.KEY.ID, CsUuid.v4());
     CsTags.set(entity, CsShapeLine.KEY.STYLE, opts.styleKey);
@@ -202,12 +204,17 @@ ShapedLines.prototype.beginEvent = function() {
         this.terminate();
         return;
     }
-    // Cached once for the whole selection: profileRegion walks every
+    // Cached once for the whole selection: each of these walks every
     // entity in the drawing, and dressOne asks per entity.
     try {
         opts.region = CsTrace.profileRegion(doc);
     } catch (eRegion) {
         opts.region = null;
+    }
+    try {
+        opts.bays = CsTrace.sectionBays(doc);
+    } catch (eBays) {
+        opts.bays = [];
     }
 
     var group = doc.getTransactionGroup() + 1;

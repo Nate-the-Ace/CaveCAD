@@ -55,15 +55,42 @@ CsShapeLine.PROFILE_TWIN[CsLayers.SLOPE] = CsLayers.PROFILE_SLOPE;
 CsShapeLine.PROFILE_TWIN[CsLayers.CTRL_SHAPE_SPINE] =
     CsLayers.CTRL_PROFILE_SHAPE_SPINE;
 
+/**
+ * The SECTION-frame twin of every layer a style names, exactly as
+ * PROFILE_TWIN above and for the same reason.
+ *
+ * Missing until now, and that was the whole of the cross-section bug on
+ * this side of the suite: with no section entry, layersFor fell through
+ * to the plan family, so a ledge drawn inside a sketching bay landed on
+ * LEDGE-FLOOR. It LOOKED right -- the ornament appeared under the
+ * cursor -- while counting toward the plan's data window, and the
+ * capture sweep is geometric, so the plan-layer linework was then
+ * swept into the section block.
+ */
+CsShapeLine.SECTION_TWIN = {};
+CsShapeLine.SECTION_TWIN[CsLayers.LEDGE_FLOOR] = CsLayers.SECTION_LEDGE_FLOOR;
+CsShapeLine.SECTION_TWIN[CsLayers.LEDGE_CEILING] =
+    CsLayers.SECTION_LEDGE_CEILING;
+CsShapeLine.SECTION_TWIN[CsLayers.FLOWSTONE] = CsLayers.SECTION_FLOWSTONE;
+CsShapeLine.SECTION_TWIN[CsLayers.RIMSTONE] = CsLayers.SECTION_RIMSTONE;
+CsShapeLine.SECTION_TWIN[CsLayers.SLOPE] = CsLayers.SECTION_SLOPE;
+CsShapeLine.SECTION_TWIN[CsLayers.CTRL_SHAPE_SPINE] =
+    CsLayers.CTRL_SECTION_SHAPE_SPINE;
+
 /** A style's spine/decor layers for a frame: the STYLES entry's own
- *  layers in the plan, their PROFILE_TWIN in the elevation. */
+ *  layers in the plan, their PROFILE_TWIN in the elevation, their
+ *  SECTION_TWIN in a cross section. */
 CsShapeLine.layersFor = function(spec, frame) {
+    var twin = null;
     if (frame === "profile") {
+        twin = CsShapeLine.PROFILE_TWIN;
+    } else if (frame === "section") {
+        twin = CsShapeLine.SECTION_TWIN;
+    }
+    if (twin !== null) {
         return {
-            spine: CsShapeLine.PROFILE_TWIN[spec.spineLayer] ||
-                spec.spineLayer,
-            decor: CsShapeLine.PROFILE_TWIN[spec.decorLayer] ||
-                spec.decorLayer
+            spine: twin[spec.spineLayer] || spec.spineLayer,
+            decor: twin[spec.decorLayer] || spec.decorLayer
         };
     }
     return { spine: spec.spineLayer, decor: spec.decorLayer };
@@ -72,10 +99,19 @@ CsShapeLine.layersFor = function(spec, frame) {
 /** The frame a spine was created in, off its ShapeFrame tag. A spine
  *  from before the tag existed answers "plan" -- exactly what every
  *  such spine is, because the draw tools refused profile strokes
- *  until the tag shipped. */
+ *  until the tag shipped.
+ *
+ *  This is what every REGENERATION routes through (buildDecor below),
+ *  not just the first draw: a section spine whose tag collapsed back to
+ *  "plan" here would have its ornament rebuilt onto the plan family the
+ *  next time the caver dragged it, silently undoing a correct first
+ *  draw. */
 CsShapeLine.frameOfSpine = function(spine) {
-    return (CsTags.get(spine, CsShapeLine.KEY.FRAME) === "profile")
-        ? "profile" : "plan";
+    var tag = CsTags.get(spine, CsShapeLine.KEY.FRAME);
+    if (tag === "profile" || tag === "section") {
+        return tag;
+    }
+    return "plan";
 };
 
 /**

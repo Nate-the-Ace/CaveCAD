@@ -117,6 +117,9 @@ loadRepoScript("scripts/CaveSurvey/SketchSection/SectionEdit.js");
 // without a typeof guard, so a stub here would be testing the stub.
 loadRepoScript("scripts/CaveSurvey/FeatureTrace/FeatureTrace.js");
 loadRepoScript("scripts/CaveSurvey/FeatureTrace/FeatureTraceRun.js");
+// Shaped Lines, for claim SL: the symbology tools have to work in a
+// bay too, and their bug was a different one -- see that claim.
+loadRepoScript("scripts/CaveSurvey/ShapedLines/ShapedLinesRun.js");
 
 var failures = [];
 var checks = 0;
@@ -1424,6 +1427,186 @@ function selectOnly(entityId) {
     check("FT: and the capture sweep picks it up -- it is inside the " +
         "frame, which is what makes it part of the section",
         ftBay2 !== null && ftBay2.traced.length === 1);
+
+    // Tear the bay down again, so the next claim starts from "no bay
+    // open" rather than inheriting this one. findBay refuses outright
+    // while two bays are open, so a claim that left its bay behind
+    // would break the next one's fixture rather than its subject.
+    if (ftBay2 !== null) {
+        var ftAt = SectionCapture.proposePosition(doc, ftBay2);
+        SectionCapture.capture(doc, di, ftBay2,
+            ftAt === null ? { x: 0, y: -80 } : ftAt);
+    }
+    check("FT: fixture: the bay is closed again for the next claim",
+        SectionCapture.findBay(doc) === null);
+})();
+
+// ---------------------------------------------------------------------
+// CLAIM SL: a Shaped Lines symbol drawn in a bay is SECTION linework.
+//
+// A DIFFERENT BUG FROM CLAIM FT'S, with a worse failure mode. Shaped
+// Lines never had a frame guard to refuse anything -- it routes by
+// LOCATION, one button serving every view. So a ledge drawn inside a
+// bay was not refused: CsTrace.pathFrame answered "plan" (no bays in
+// the frame test) and CsShapeLine.layersFor had no section entry at
+// all, so the feature landed on LEDGE-FLOOR and was tagged
+// ShapeFrame=plan. It LOOKED correct -- the hachures appeared under
+// the cursor -- while being plan ink inside a section bay, counted in
+// the plan's data window, and swept into the block by a capture that
+// selects geometrically rather than by layer.
+//
+// So the claim is not "something was drawn". It is "what was drawn is
+// on the SECTION family", which is the assertion the old code fails
+// while still drawing a perfectly good-looking ledge.
+//
+// MUTATION-TESTED, twice, because there are two independent halves and
+// either one alone leaves the bug half-fixed:
+//   * dropping `this.bays` from ShapedLinesRun.commit's pathFrame call
+//     -> "SL: the SPINE lands on the section family -- expected
+//        SECTION-LEDGE-FLOOR, got LEDGE-FLOOR"
+//   * deleting the SECTION_TWIN branch from CsShapeLine.layersFor
+//     -> "SL: the SPINE lands on the section family -- expected
+//        SECTION-LEDGE-FLOOR, got LEDGE-FLOOR"
+//
+// That second mutation is why the expected layer names below are
+// LITERALS. Asked of layersFor instead, the expectation moved with the
+// bug and the whole claim stayed green through it.
+//
+// THE REGENERATION IS PROVEN, NOT ASSUMED. CsShapeLine.reconcile is
+// the exact function ShapedLinesListener calls on every transaction
+// that touches a shaped line; only the transaction plumbing differs.
+// Calling it directly after moving the spine (which changes the
+// signature, so decorate() cannot short-circuit as "unchanged") proves
+// the REBUILT ornament still lands on the section family -- the half
+// that lives in CsShapeLine.frameOfSpine rather than in the draw tool.
+// ---------------------------------------------------------------------
+(function() {
+    var slBayId = SketchSection.run(scanPath, "A2");
+    check("SL: fixture: a bay opens for the symbol", slBayId !== null);
+    var slBay = SectionCapture.findBay(doc);
+    check("SL: fixture: and it is the only one open", slBay !== null);
+    if (slBay === null) {
+        check("SL: the SPINE lands on the section family", false);
+        check("SL: the DECOR lands on the section family", false);
+        check("SL: the regenerated decor stays on the section family", false);
+        return;
+    }
+
+    var slSaid = [];
+    var realMessage = EAction.handleUserMessage;
+    EAction.handleUserMessage = function(text) { slSaid.push(String(text)); };
+
+    var slCentre = SectionCapture.originOf(slBay);
+    var slSamples = [];
+    for (var sj = 0; sj <= 12; sj++) {
+        slSamples.push({ x: slCentre.x - 3 + sj * 0.5, y: slCentre.y + 1 });
+    }
+    var slAction = {
+        styleKey: "floorledge",
+        getDocument: function() { return doc; },
+        getDocumentInterface: function() { return di; },
+        samples: slSamples,
+        region: null,
+        bays: [],
+        refreshFrames: ShapedLinesRun.prototype.refreshFrames
+    };
+    slAction.refreshFrames();
+    check("SL: fixture: the bay is seen as section-frame ground",
+        slAction.bays.length === 1 &&
+        CsTrace.pathFrame(slAction.region, slSamples, slAction.bays) ===
+            "section");
+
+    try {
+        ShapedLinesRun.prototype.commit.call(slAction);
+    } finally {
+        EAction.handleUserMessage = realMessage;
+    }
+
+    // Find the spine this stroke made: the newest entity carrying a
+    // ShapeStyle tag. queryAllEntities is NOT insertion-ordered, so
+    // "newest" is by id, not by position in the array.
+    var slSpine = null;
+    var slIds = doc.queryAllEntities(false, true);
+    for (var si2 = 0; si2 < slIds.length; si2++) {
+        var cand = doc.queryEntity(slIds[si2]);
+        if (isNull(cand) ||
+                CsTags.get(cand, CsShapeLine.KEY.STYLE) !== "floorledge") {
+            continue;
+        }
+        if (slSpine === null ||
+                Number(cand.getId()) > Number(slSpine.getId())) {
+            slSpine = cand;
+        }
+    }
+    check("SL: fixture: the stroke produced a spine at all" +
+        (slSaid.length === 0 ? "" : " (said: " + slSaid.join(" | ") + ")"),
+        slSpine !== null);
+    if (slSpine === null) {
+        check("SL: the SPINE lands on the section family", false);
+        check("SL: the DECOR lands on the section family", false);
+        check("SL: the regenerated decor stays on the section family", false);
+        return;
+    }
+
+    // THE EXPECTED LAYERS ARE NAMED OUTRIGHT, not asked of
+    // CsShapeLine.layersFor. Deriving them from the function under
+    // test is exactly how an assertion passes while the thing it names
+    // is broken: with the SECTION_TWIN branch deleted, layersFor
+    // answers LEDGE-FLOOR and a derived expectation moves to
+    // LEDGE-FLOOR with it. Measured -- that mutation left this whole
+    // claim GREEN until these two lines became literals.
+    var slWant = { spine: CsLayers.SECTION_LEDGE_FLOOR,
+                   decor: CsLayers.SECTION_LEDGE_FLOOR };
+    var slSpineLayer = doc.getLayerName(slSpine.getLayerId());
+    check("SL: the SPINE lands on the section family -- expected " +
+        slWant.spine + ", got " + slSpineLayer,
+        slSpineLayer === slWant.spine);
+    check("SL: and the spine is tagged as section, which is what every " +
+        "later rebuild reads",
+        CsShapeLine.frameOfSpine(slSpine) === "section");
+
+    var slId = CsTags.get(slSpine, CsShapeLine.KEY.ID);
+    var slDecor = CsShapeLine.decorOf(doc, slId);
+    check("SL: fixture: the stroke was decorated", slDecor.length > 0);
+    var slDecorWrong = null;
+    for (var di2 = 0; di2 < slDecor.length; di2++) {
+        var dl = doc.getLayerName(slDecor[di2].getLayerId());
+        if (dl !== slWant.decor) {
+            slDecorWrong = dl;
+        }
+    }
+    check("SL: the DECOR lands on the section family -- expected " +
+        slWant.decor + ", got " +
+        (slDecorWrong === null ? slWant.decor : slDecorWrong),
+        slDecor.length > 0 && slDecorWrong === null);
+
+    // And it is really IN the bay, so the capture sweep owns it --
+    // landing on a section layer proves nothing about where it went.
+    var slBay2 = SectionCapture.findBay(doc);
+    check("SL: the capture sweep picks the whole feature up",
+        slBay2 !== null && slBay2.traced.length === 1 + slDecor.length);
+
+    // -- THE REGENERATION, through the listener's own function --------
+    slSpine.move(new RVector(0, 0.5));
+    var slMove = new RModifyObjectsOperation();
+    slMove.addObject(slSpine, false);
+    di.applyOperation(slMove);
+    var slResult = CsShapeLine.reconcile(doc, di, slId, -1);
+    check("SL: fixture: moving the spine really does force a rebuild " +
+        "(got '" + slResult + "')", slResult === "reflowed");
+
+    var slAfter = CsShapeLine.decorOf(doc, slId);
+    var slAfterWrong = null;
+    for (var dk = 0; dk < slAfter.length; dk++) {
+        var al = doc.getLayerName(slAfter[dk].getLayerId());
+        if (al !== slWant.decor) {
+            slAfterWrong = al;
+        }
+    }
+    check("SL: the regenerated decor stays on the section family -- " +
+        "expected " + slWant.decor + ", got " +
+        (slAfterWrong === null ? slWant.decor : slAfterWrong),
+        slAfter.length > 0 && slAfterWrong === null);
 })();
 
 // ---------------------------------------------------------------------

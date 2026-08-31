@@ -101,14 +101,28 @@ CsProfileBox.runForPath = function(boxes, points) {
 };
 
 /**
- * "plan" or "profile" for a point, by location. Boxes first (the
- * explicit record); the derived region as the fallback for drawings
- * whose profile predates them. `region` is the caller's CACHED
- * CsTrace.profileRegion(doc) box (or null) -- computing it walks every
- * entity, so this function never computes it itself: the tools that
- * ask per-stroke already hold one. QCAD only.
+ * "section", "plan" or "profile" for a point, by location. An open
+ * section bay first, then the band boxes (the explicit record), then
+ * the derived region as the fallback for drawings whose profile
+ * predates the boxes.
+ *
+ * `region` is the caller's CACHED CsTrace.profileRegion(doc) box (or
+ * null) and `bays` its CACHED CsTrace.sectionBays(doc) -- computing
+ * either walks every entity, so this function never computes them
+ * itself: the tools that ask per-stroke or per-selected-entity already
+ * hold both.
+ *
+ * A BAY OUTRANKS A BAND BOX for the reason CsTrace.frameIn gives at
+ * length: the bay is the explicit, short-lived record of where the
+ * caver is sketching a section, and a bay is parked wherever they last
+ * left it -- including, legitimately, on top of the elevation.
+ *
+ * QCAD only.
  */
-CsProfileBox.frameAt = function(doc, region, point) {
+CsProfileBox.frameAt = function(doc, region, point, bays) {
+    if (CsTrace.inAnyRect(bays, point)) {
+        return "section";
+    }
     var boxes = CsProfileBox.boxes(doc);
     if (boxes.length > 0 && CsProfileBox.at(boxes, point) !== null) {
         return "profile";
