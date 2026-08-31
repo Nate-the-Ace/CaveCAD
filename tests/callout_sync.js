@@ -374,6 +374,62 @@ var id = CalloutWrite.create(doc, di, {
         height: CalloutWrite.textHeight(doc)
     });
     // an id nothing carries
+// --- a SECTION's content is a BLOCK, not text ------------------------
+// The regression this file exists to keep closed. reconcile used to ask
+// "is m.text null?" to decide whether the leaders were orphans. A cross
+// section has no text -- its content is a block reference -- so every
+// sketched section read as a note whose words had been deleted, and the
+// listener removed the leader Capture had just written. Silently:
+// section placed, leader gone, no message. Found in a caver's drawing,
+// where the section block still carried its CalloutId and nothing else
+// in the file did.
+(function() {
+    var sid = CsUuid.v4();
+    var blockName = "CS_" + sid;
+    var block = new RBlock(doc, blockName, new RVector(0, 0));
+    di.applyOperation(new RAddObjectOperation(block, false));
+    var blockId = doc.getBlockId(blockName);
+
+    var op = new RAddObjectsOperation();
+    var ref = new RBlockReferenceEntity(doc,
+        new RBlockReferenceData(blockId, new RVector(2800, 100),
+            new RVector(1, 1), 0));
+    CsTags.set(ref, CsCallout.KEY.ID, sid);
+    CsTags.set(ref, CsCallout.KEY.ROLE, CsCallout.ROLE_BLOCK);
+    CsTags.set(ref, CsCallout.KEY.KIND, CsCallout.KIND_SECTION);
+    CsTags.set(ref, CsCallout.KEY.STYLE, "annotation");
+    CsTags.set(ref, CsCallout.KEY.SECTION_SOURCE, CsCallout.SOURCE_SKETCH);
+    CsTags.set(ref, CsCallout.KEY.SECTION_STATION, "A4");
+    op.addObject(ref, false);
+    CalloutWrite.oneLeader(doc, op, sid,
+        { x: 2760, y: 90 }, { x: 2800, y: 100 }, "annotation",
+        CsCallout.STYLES["annotation"]);
+    di.applyOperation(op);
+
+    var sm = CalloutWrite.members(doc, sid);
+    eqs(sm.text, null, "fixture: a section callout has no text member");
+    ok(sm.block !== null, "fixture: it has a block member");
+    eqs(sm.leaders.length, 1, "fixture: and one leader");
+
+    eqs(CalloutListener.reconcile(doc, di, sid, -1), "reflowed",
+        "reconcile treats a section's block as its content");
+    eqs(CalloutWrite.members(doc, sid).leaders.length, 1,
+        "and the section's leader SURVIVES -- it is not an orphan");
+
+    // The other half of the asymmetry: a section whose last leader is
+    // deleted keeps its tags. Unlinking it would strip SectionSource
+    // and SectionStation, which Edit Sketch and regeneration read.
+    var sm2 = CalloutWrite.members(doc, sid);
+    var del2 = new RDeleteObjectsOperation();
+    del2.deleteObject(sm2.leaders[0]);
+    di.applyOperation(del2);
+    eqs(CalloutListener.reconcile(doc, di, sid, -1), "nothing",
+        "a section with no leader is left alone, not unlinked");
+    eqs(CsTags.get(CalloutWrite.members(doc, sid).block,
+        CsCallout.KEY.SECTION_SOURCE), CsCallout.SOURCE_SKETCH,
+        "and it keeps the provenance regeneration needs");
+})();
+
     eqs(CalloutListener.reconcile(doc, di, CsUuid.v4(), -1), "nothing",
         "reconcile on an id no entity carries does nothing at all");
     ok(CalloutWrite.members(doc, lid).text !== null,

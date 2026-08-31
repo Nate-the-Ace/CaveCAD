@@ -186,7 +186,15 @@ CalloutListener.onTransaction = function(document, transaction) {
 CalloutListener.reconcile = function(doc, di, id, group) {
     var m = CalloutWrite.members(doc, id);
 
-    if (m.text === null) {
+    // CONTENT, NOT TEXT. A cross section's content is a BLOCK
+    // REFERENCE, not text -- CalloutWrite.contentOf exists for exactly
+    // this, and applyReflow below already asks through it. This test
+    // did not, so every sketched section looked like a note whose text
+    // had been deleted, and the listener removed the leader Capture had
+    // just written: block placed, leader silently gone, no message.
+    // Confirmed in a caver's drawing -- the section block survived with
+    // its CalloutId and no leader carried that id.
+    if (CalloutWrite.contentOf(m) === null) {
         if (m.leaders.length === 0) {
             return "nothing";
         }
@@ -205,6 +213,15 @@ CalloutListener.reconcile = function(doc, di, id, group) {
     }
 
     if (m.leaders.length === 0) {
+        // ONLY TEXT GETS UNLINKED. A note without an arrow is still a
+        // note, so it keeps its words and loses its callout tags. A
+        // SECTION without an arrow is still a section, and stripping
+        // its tags would take SectionSource, SectionScan and the rest
+        // with them -- the provenance Edit Sketch and regeneration both
+        // read. It keeps everything and simply has no leader.
+        if (m.text === null) {
+            return "nothing";
+        }
         CalloutWrite.unlink(di, m.text);
         return "unlinked";
     }

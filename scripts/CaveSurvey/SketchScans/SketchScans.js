@@ -948,6 +948,13 @@ SketchScans.buildDock = function(appWin) {
             openCalibratedBay();
             return;
         }
+        // A BAY IS OPEN: this button is Capture, per updateTrimGate.
+        // Checked here rather than trusted from the label, so a stale
+        // label can never run the wrong half.
+        if (SketchScans.bayOpen(EAction.getDocument())) {
+            SketchScans.captureSoon();
+            return;
+        }
         if (w.picking !== null) {
             return;               // an alignment owns the clicks already
         }
@@ -1585,7 +1592,14 @@ SketchScans.refreshIfStale = function() {
         (scans === null ? "" : scans);
     if (stamp !== w.stamp) {
         SketchScans.refresh();
+        return;              // refresh runs the gate itself
     }
+    // SAME DRAWING, POSSIBLY A DIFFERENT BAY. Opening a bay and
+    // capturing one both change the drawing without changing its file
+    // name, so the stamp above cannot see them -- and the Sketch/
+    // Capture button has to follow that state or it offers the wrong
+    // half of the workflow.
+    SketchScans.updateTrimGate();
 };
 
 /**
@@ -1777,8 +1791,27 @@ SketchScans.updateTrimGate = function() {
         w.alignButton.enabled = chosen;
         w.insertButton.enabled = chosen;
         w.trimRedoButton.enabled = chosen;
-        w.sketchButton.enabled = chosen &&
-            (w.frameCombo.currentIndex === 2);
+        // ONE BUTTON, TWO HALVES OF ONE WORKFLOW. Capture is the last
+        // step of sketching a section and had no entry point anywhere
+        // near the panel that starts it -- it lives on the Cave Survey
+        // menu, which is not where a caver who just finished tracing is
+        // looking. While a bay is open this button IS the capture, and
+        // it does not wait on a trim choice: the scan's part is over.
+        if (SketchScans.bayOpen(EAction.getDocument())) {
+            w.sketchButton.text = qsTr("Capture Section");
+            w.sketchButton.toolTip = qsTr("Place what you traced in the " +
+                "open bay as a section block, with a leader back to its " +
+                "station, and tear the bay down.");
+            w.sketchButton.enabled = true;
+        } else {
+            w.sketchButton.text = qsTr("Sketch Section");
+            w.sketchButton.toolTip = qsTr("Open a staging bay for the " +
+                "selected scan: the computed cross section at a chosen " +
+                "plan station, dashed, to scale the scan onto and trace " +
+                "by hand.");
+            w.sketchButton.enabled = chosen &&
+                (w.frameCombo.currentIndex === 2);
+        }
     } catch (e) {
         // a bridge that cannot disable them leaves the old behaviour,
         // which is placing the whole page -- never a wrong crop
@@ -2134,6 +2167,84 @@ SketchScans.sketchSoon = function(path, station, calibration) {
             SketchSection.run(path, name, cal);
         } catch (e) {
             EAction.handleUserWarning("Sketch Section: " + e);
+        }
+    });
+    timer.start(0);
+};
+
+/**
+ * Is a section bay open in this drawing?
+ *
+ * CHEAP ON PURPOSE. This is asked every time the gate runs, which is on
+ * every selection change and every panel rebuild, so it reads ONE
+ * layer's entities (bay frames live on CTRL-SECTION-BOX and nothing
+ * else does) rather than sweeping the drawing. A build without
+ * queryLayerEntities falls back to the full sweep rather than to a
+ * wrong answer.
+ */
+SketchScans.bayOpen = function(doc) {
+    if (isNull(doc)) {
+        return false;
+    }
+    try {
+        var layerId = doc.getLayerId(CsLayers.CTRL_SECTION_BOX);
+        var ids;
+        if (layerId !== undefined && layerId !== null && layerId >= 0 &&
+                typeof doc.queryLayerEntities === "function") {
+            ids = doc.queryLayerEntities(layerId, false);
+        } else {
+            ids = doc.queryAllEntities(false, false);
+        }
+        for (var i = 0; i < ids.length; i++) {
+            var e = doc.queryEntity(ids[i]);
+            if (isNull(e)) {
+                continue;
+            }
+            if (CsTags.get(e, SketchSection.TAG_BAY) !== "" &&
+                    CsTags.get(e, "SectionBayRole") ===
+                        SketchSection.ROLE_FRAME) {
+                return true;
+            }
+        }
+    } catch (e) {
+        // an unreadable drawing is not an open bay
+    }
+    return false;
+};
+
+/** Capture Section's registered script path, from this tool's own. */
+SketchScans.captureScriptPath = function() {
+    var base = SketchScans.basePath || "";
+    return base.replace(/\/SketchScans$/, "/SketchSection") +
+        "/SectionCapture.js";
+};
+
+/**
+ * Run Capture Section, DEFERRED past the click that asked for it --
+ * the same reason alignSoon defers, so the capture action becomes the
+ * current action rather than being replaced by the dock's own.
+ *
+ * TRIGGERED THROUGH ITS GUI ACTION rather than constructed here: this
+ * file does not include SectionCapture.js and must not, since
+ * SectionCapture includes SketchSection which this file already has --
+ * and the registered action is what the menu entry runs too, so the
+ * button and the menu cannot drift apart.
+ */
+SketchScans.captureSoon = function() {
+    var timer = new QTimer(RMainWindowQt.getMainWindow());
+    timer.singleShot = true;
+    timer.timeout.connect(function() {
+        try {
+            var guiAction = RGuiAction.getByScriptFile(
+                SketchScans.captureScriptPath());
+            if (guiAction === undefined || guiAction === null) {
+                throw new Error("no registered action");
+            }
+            guiAction.slotTrigger();
+        } catch (e) {
+            EAction.handleUserWarning("Sketch Scans: Capture Section " +
+                "would not start (" + e + "). Run Capture Section from " +
+                "the Cave Survey menu.");
         }
     });
     timer.start(0);
