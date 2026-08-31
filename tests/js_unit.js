@@ -130,6 +130,7 @@ var CORE_FILES = [
     "scripts/CaveSurvey/Core/CsLrud.js",
     "scripts/CaveSurvey/Core/CsScanFit.js",
     "scripts/CaveSurvey/Core/CsScanFrame.js",
+    "scripts/CaveSurvey/Core/CsScanTrim.js",
     "scripts/CaveSurvey/Core/CsSectionCut.js",
     // pure helpers only (captionText/scaleText); its document functions
     // reference QCAD symbols but are never CALLED here -- same reason
@@ -21162,6 +21163,72 @@ if (!IS_NODE) {
             "frameAt: outside every box with no region falls back to plan");
     })();
 }
+
+// ---------------------------------------------------------------------
+// CsScanTrim
+// ---------------------------------------------------------------------
+
+// A page 1000 wide and 800 tall. Model space has y running UP from the
+// image's bottom-left, so a box whose top edge is model y=700 starts at
+// image row 100.
+var trimRect = CsScanTrim.rectFromPicks(
+    { x: 120.4, y: 700.2 }, { x: 1020.7, y: 60.1 }, 1000, 800);
+eqs(trimRect.x, 120, "rectFromPicks x");
+eqs(trimRect.y, 100, "rectFromPicks y is a row from the TOP");
+eqs(trimRect.w, 880, "rectFromPicks w is clamped to the page");
+eqs(trimRect.h, 640, "rectFromPicks h");
+
+// The corners may be dragged in any direction.
+var trimBack = CsScanTrim.rectFromPicks(
+    { x: 1020.7, y: 60.1 }, { x: 120.4, y: 700.2 }, 1000, 800);
+eqs(trimBack.x, trimRect.x, "drag direction does not matter (x)");
+eqs(trimBack.h, trimRect.h, "drag direction does not matter (h)");
+
+// Wholly off the page.
+eqs(CsScanTrim.rectFromPicks(
+    { x: -50, y: 900 }, { x: -10, y: 850 }, 1000, 800), null,
+    "a box entirely off the page is no box");
+
+// The minimum.
+eqs(CsScanTrim.normalise({ x: 10, y: 10, w: 19, h: 400 }, 1000, 800),
+    null, "a box under 20px wide is a stray click");
+eqs(CsScanTrim.normalise({ x: 10, y: 10, w: 20, h: 20 }, 1000, 800).w,
+    20, "exactly 20px is accepted");
+
+// Whole page.
+ok(CsScanTrim.isWholePage({ x: 0, y: 0, w: 1000, h: 800 }, 1000, 800),
+    "a box covering the page is the whole page");
+ok(!CsScanTrim.isWholePage({ x: 1, y: 0, w: 999, h: 800 }, 1000, 800),
+    "one column short is not");
+
+// Names.
+var trimName = CsScanTrim.fileName("Trip3/IMG_4021.JPG",
+    { x: 120, y: 88, w: 900, h: 640 });
+eqs(trimName, "IMG_4021__TRIMMED_x120_y88_w900_h640.png",
+    "fileName drops the folder and the extension");
+var trimParsed = CsScanTrim.parseName(trimName);
+eqs(trimParsed.x, 120, "parseName x");
+eqs(trimParsed.h, 640, "parseName h");
+eqs(CsScanTrim.parseName("IMG_4021.JPG"), null,
+    "an ordinary page name parses as no rect");
+
+// A page name with characters that must not build a path.
+eqs(CsScanTrim.fileName("a/b c/we:ird.png", { x: 0, y: 0, w: 20, h: 20 }),
+    "we_ird__TRIMMED_x0_y0_w20_h20.png",
+    "fileName sanitises the base");
+
+// The shelf filter.
+ok(CsScanTrim.isTrimPath("Trimmed/x.png"), "top-level Trimmed");
+ok(CsScanTrim.isTrimPath("Trip3/Trimmed/x.png"), "nested Trimmed");
+ok(!CsScanTrim.isTrimPath("Trimmed_notes/x.png"),
+    "a folder merely starting with Trimmed is a real folder");
+ok(!CsScanTrim.isTrimPath("Trip3/IMG_4021.JPG"), "an ordinary page");
+
+// The tag.
+eqs(CsScanTrim.serialize({ x: 120, y: 88, w: 900, h: 640 }),
+    "120,88,900,640", "serialize");
+eqs(CsScanTrim.parse("120,88,900,640").w, 900, "parse w");
+eqs(CsScanTrim.parse("nonsense"), null, "parse rejects rubbish");
 
 // ---------------------------------------------------------------------
 // Report.
