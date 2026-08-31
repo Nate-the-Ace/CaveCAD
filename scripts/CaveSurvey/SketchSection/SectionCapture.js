@@ -426,6 +426,32 @@ SectionCapture.fitOfScan = function(scan, origin) {
     }
 };
 
+/**
+ * Is this entity a station label this tool wrote into an earlier
+ * capture of the same section?
+ *
+ * BOTH TESTS MATTER. The layer alone would claim a caver's own note
+ * that happens to sit on the label layer; the tag alone would claim
+ * every piece of a computed section's block, all of which carry it.
+ * A miss here costs a duplicate label, never anyone's work: the only
+ * thing done with the answer is to regenerate the same text.
+ */
+SectionCapture.isStationLabel = function(doc, e) {
+    try {
+        if (isNull(e) || typeof e.getType !== "function" ||
+                e.getType() !== RS.EntityText) {
+            return false;
+        }
+        if (CsTags.get(e, CsSectionDraw.TAG) === "") {
+            return false;
+        }
+        return doc.getLayerName(e.getLayerId()) ===
+            CsLayers.CTRL_SECTION_TEXT_LABELS;
+    } catch (eLbl) {
+        return false;
+    }
+};
+
 /** The bay's origin: the ghost's centre, or the frame's if there is no
  *  ghost. This becomes the block's 0,0 and therefore the centreline. */
 SectionCapture.originOf = function(bay) {
@@ -614,6 +640,13 @@ SectionCapture.capture = function(doc, di, bay, position) {
     // error, no reference, the caver's work gone. Collected here, while
     // the traced entities' layers are still their ORIGINAL ones (the
     // move below relocates the entities, never their layerId).
+    // THE EXTENT BEFORE THE MOVE. localBoxOf measures world bounding
+    // boxes and subtracts `origin`; once the loop below has moved the
+    // entities by -origin they are ALREADY block-local, and asking
+    // again would subtract the origin a second time. Read here, used
+    // for the station label after the move.
+    var localBox = SectionCapture.localBoxOf(doc, bay, origin);
+
     var layerNames = [];
     var i, e;
     for (i = 0; i < bay.traced.length; i++) {
@@ -622,6 +655,17 @@ SectionCapture.capture = function(doc, di, bay, position) {
             continue;
         }
         layerNames.push(doc.getLayerName(e.getLayerId()));
+        // A LABEL FROM AN EARLIER CAPTURE IS NOT TRACING. Edit Sketch
+        // explodes a section back into a bay, so the station label this
+        // function wrote last time comes back as loose content and
+        // would be swept in beside the fresh one -- two labels, one on
+        // top of the other, more of them every round trip. Dropped
+        // instead: it is regenerated below from the bay's own station,
+        // which is the only thing it ever said.
+        if (SectionCapture.isStationLabel(doc, e)) {
+            op.deleteObject(e);
+            continue;
+        }
         // MOVED into the block, not cloned -- see the file header. The
         // entity that was loose tracing a moment ago simply becomes the
         // block's content; nothing is duplicated and nothing needs a
@@ -629,6 +673,38 @@ SectionCapture.capture = function(doc, di, bay, position) {
         e.setBlockId(blockId);
         e.move(new RVector(-origin.x, -origin.y));
         op.addObject(e, false);
+    }
+
+    // WHICH STATION THIS IS, INSIDE THE BLOCK.
+    //
+    // A computed section gets a caption under it from
+    // CsSectionDraw.define; a sketched one is a block minted here and
+    // filled with the caver's own tracing, so nothing said what it was
+    // -- a page of captured sections was a page of anonymous outlines.
+    //
+    // AT THE CENTROID, not under the outline like the computed
+    // caption: Nathan's call. It rides inside the block, so it moves,
+    // scales and rotates with the section rather than having to be
+    // kept in step with it.
+    if (bay.station !== null && bay.station !== undefined &&
+            bay.station !== "") {
+        CsLayers.ensure(doc, di, CsLayers.CTRL_SECTION_TEXT_LABELS);
+        layerNames.push(CsLayers.CTRL_SECTION_TEXT_LABELS);
+        var cx = (localBox.x1 + localBox.x2) / 2;
+        var cy = (localBox.y1 + localBox.y2) / 2;
+        var lpos = new RVector(cx, cy);
+        // The FULL constructor, with position AND alignment point --
+        // setPosition() alone reads back correctly while the entity
+        // renders at the ORIGIN, which shipped once already. Middle and
+        // centre so the centroid is the text's own middle, not the
+        // corner it starts at.
+        var ltd = new RTextData(lpos, lpos,
+            CsSectionDraw.textHeight(doc), 100.0,
+            RS.VAlignMiddle, RS.HAlignCenter, RS.LeftToRight, RS.Exact,
+            1.0, bay.station, "standard", false, false, 0.0, false);
+        CsSectionDraw.addToBlock(doc, op, blockId,
+            new RTextEntity(doc, ltd),
+            CsLayers.CTRL_SECTION_TEXT_LABELS, id);
     }
 
     var layerName = CsCallout.STYLES["annotation"] ||

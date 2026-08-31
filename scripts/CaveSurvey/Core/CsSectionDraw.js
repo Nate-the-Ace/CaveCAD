@@ -35,12 +35,14 @@ var CsSectionDraw = {};
 /**
  * Drawing units per survey unit inside a section.
  *
- * ONE, deliberately -- a section is BORN AT PLAN SCALE and enlarged
+ * HALF, deliberately -- a section is born SMALL and enlarged
  * afterwards by scaling the block reference, which is Nathan's call:
  * "if sections are drawn as blocks, then we can manually scale them
- * later, upon creation, make them 1:1".
+ * later, upon creation, make them 1:1", and then, having seen one at
+ * 1:1: "the scale of the block was still too big, so make it half the
+ * size of what we had".
  *
- * The old default was 2.0, on the reasoning that a section drawn at
+ * The original default was 2.0, on the reasoning that a section drawn at
  * plan scale is a smudge -- a three-metre passage on a 1:500 sheet --
  * so a section should carry its own scale and say so in its caption.
  * That reasoning is about the FINISHED sheet, and it was being applied
@@ -58,7 +60,7 @@ var CsSectionDraw = {};
  * back here only when the tag is missing or unreadable -- so sections
  * captured at 2.0 keep being drawn at 2.0.
  */
-CsSectionDraw.SCALE = 1.0;
+CsSectionDraw.SCALE = 0.5;
 CsSectionDraw.SETTING_SCALE = "CaveSurvey/SectionScale";
 
 /** The tag every generated member of a section carries. */

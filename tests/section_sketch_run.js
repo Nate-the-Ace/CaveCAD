@@ -519,11 +519,52 @@ check("3: and it is this section's own definition, CS_<CalloutId>",
     members.block !== null && blockId === members.block.getData()
         .getReferencedBlockId());
 
-var inBlock = doc.queryBlockEntities(blockId);
+// A captured block holds the tracing PLUS one station label, so every
+// count below asks for the tracing specifically. Splitting by entity
+// type rather than by id keeps these assertions about what the block
+// holds, not about which particular ids this fixture happened to mint.
+function blockTracing(d, bid) {
+    var all = d.queryBlockEntities(bid), out = [];
+    for (var bi = 0; bi < all.length; bi++) {
+        var be = d.queryEntity(all[bi]);
+        if (isNull(be) || be.getType() === RS.EntityText) { continue; }
+        out.push(all[bi]);
+    }
+    return out;
+}
+function blockLabels(d, bid) {
+    var all = d.queryBlockEntities(bid), out = [];
+    for (var li = 0; li < all.length; li++) {
+        var le = d.queryEntity(all[li]);
+        if (!isNull(le) && le.getType() === RS.EntityText) { out.push(le); }
+    }
+    return out;
+}
+
+var inBlock = blockTracing(doc, blockId);
 check("3: the block holds the tracing, and only the tracing",
     inBlock.length === 1);
 check("3: and it is the very entity that was traced, moved not copied",
     inBlock.length === 1 && String(inBlock[0]) === String(tracedId));
+
+// ---- the station label ---------------------------------------------
+// A page of captured sections used to be a page of anonymous outlines.
+var labels = blockLabels(doc, blockId);
+check("3: the block carries exactly one station label",
+    labels.length === 1);
+if (labels.length === 1) {
+    check("3: and it says which station this is",
+        String(labels[0].getData().getText()) === bay1.station);
+    // AT THE CENTROID of the tracing, in block-local coordinates. The
+    // tracing runs -3..+3 about the ghost centre, so the centroid is
+    // the block's own origin.
+    var lp = labels[0].getData().getPosition();
+    checkClose("3: the label sits at the tracing's centroid (x)", lp.x, 0);
+    checkClose("3: the label sits at the tracing's centroid (y)", lp.y, 0);
+    check("3: on the section label layer",
+        doc.getLayerName(labels[0].getLayerId()) ===
+        CsLayers.CTRL_SECTION_TEXT_LABELS);
+}
 
 // BLOCK-LOCAL. The tracing ran from centre-3 to centre+3 in world
 // coordinates, where centre is the GHOST's centre; inside the block it
@@ -700,7 +741,7 @@ check("7: the tracing is no longer loose -- it belongs to the block",
 // ---------------------------------------------------------------------
 // CLAIM 8: Draw counts it and leaves it alone.
 // ---------------------------------------------------------------------
-var beforeIds = doc.queryBlockEntities(blockId);
+var beforeIds = blockTracing(doc, blockId);
 var beforeRefId = members.block.getId();
 var beforePos = members.block.getData().getPosition();
 
@@ -709,7 +750,7 @@ check("8: a refresh counts it as sketched",
     report !== null && report.sketched === 1);
 check("8: and never re-derives it", report !== null && report.updated === 0);
 
-var afterIds = doc.queryBlockEntities(blockId);
+var afterIds = blockTracing(doc, blockId);
 check("8: the block still holds exactly what it held",
     afterIds.length === beforeIds.length && afterIds.length === 1);
 // IDENTITY, not a count: a regenerate that deleted the tracing and drew
@@ -766,7 +807,10 @@ check("8: a second pass counts it the same way",
     var rtBlockId = rt.block.getData().getReferencedBlockId();
     check("9: the block definition survives under its own name",
         rtDoc.getBlockId(blockName) === rtBlockId);
-    check("9: holding the tracing", rtDoc.queryBlockEntities(rtBlockId).length === 1);
+    check("9: holding the tracing",
+        blockTracing(rtDoc, rtBlockId).length === 1);
+    check("9: and the station label with it",
+        blockLabels(rtDoc, rtBlockId).length === 1);
     checkClose("9: the reference is still where it was placed (x)",
         rt.block.getData().getPosition().x, at.x, 1e-4);
     checkClose("9: the reference is still where it was placed (y)",
@@ -819,9 +863,37 @@ check("10: at the same station",
 check("10: with the scan back under it", reopened !== null &&
     reopened.scan !== null &&
     CsTags.get(reopened.scan, CsCallout.KEY.SECTION_SCAN) === scanPath);
+// The station label comes back loose too -- it was block content like
+// the tracing. It is NOT swept into the next capture: capture drops it
+// (SectionCapture.isStationLabel) and writes a fresh one, or a round
+// trip would stack a label per edit.
+var reopenedTraced = [], reopenedLabels = 0, rl;
+if (reopened !== null) {
+    for (rl = 0; rl < reopened.traced.length; rl++) {
+        var rle = doc.queryEntity(reopened.traced[rl]);
+        if (!isNull(rle) && rle.getType() === RS.EntityText) {
+            reopenedLabels++;
+        } else {
+            reopenedTraced.push(reopened.traced[rl]);
+        }
+    }
+}
 check("10: and the linework loose inside it, ready to trace over",
-    reopened !== null && reopened.traced.length === 1 &&
-    String(reopened.traced[0]) === String(tracedId));
+    reopenedTraced.length === 1 &&
+    String(reopenedTraced[0]) === String(tracedId));
+check("10: with the station label back too", reopenedLabels === 1);
+
+// AND THE NEXT CAPTURE WILL DROP IT rather than sweep it in beside a
+// fresh one -- without that, every Edit Sketch round trip would leave
+// another copy of the same station name at the same spot.
+(function() {
+    var seen = false;
+    for (var q = 0; q < reopened.traced.length; q++) {
+        var qe = doc.queryEntity(reopened.traced[q]);
+        if (SectionCapture.isStationLabel(doc, qe)) { seen = true; }
+    }
+    check("10: and capture recognises it as a label to regenerate", seen);
+})();
 
 // ---------------------------------------------------------------------
 // R2, the other half: the RELATIVE path stored on the drawing resolved
@@ -1698,7 +1770,7 @@ function selectOnly(entityId) {
         if (f1Members.block !== null) {
             var f1BlockId = f1Members.block.getData()
                 .getReferencedBlockId();
-            var f1InBlock = doc.queryBlockEntities(f1BlockId);
+            var f1InBlock = blockTracing(doc, f1BlockId);
             check("F1: the tracing is not stranded -- it is IN the " +
                 "reference's own block, not an unreferenced one",
                 f1InBlock.length === 1 &&

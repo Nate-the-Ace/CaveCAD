@@ -11432,8 +11432,8 @@ if (!IS_NODE) {
     // afterwards by scaling its block reference, so the enlargement is
     // a property the caver sets and can see rather than a factor baked
     // in at capture. See the constant's own docblock.
-    eqs(CsSectionDraw.SCALE, 1.0,
-        "CsSectionDraw.SCALE: sections are captured 1:1");
+    eqs(CsSectionDraw.SCALE, 0.5,
+        "CsSectionDraw.SCALE: sections are captured at half plan scale");
 
     eqs(CsSectionDraw.scaleText(4), "4:1",
         "CsSectionDraw.scaleText: an enlargement reads 4:1");
