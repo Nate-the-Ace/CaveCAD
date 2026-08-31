@@ -107,6 +107,15 @@ SketchScans.imageFiles = function(folder) {
         if (CsCave.isPreviewName && CsCave.isPreviewName(base)) {
             continue;
         }
+        // NOR IS A TRIMMED DERIVATIVE. It is a crop of a page already
+        // in this list; showing both would offer the same sketch twice
+        // and make the shelf grow with every trim. The filter belongs
+        // HERE and not in CsCave.filesUnder, which the photo tools
+        // share and which has no business knowing about this suite's
+        // derivatives.
+        if (CsScanTrim.isTrimPath(name)) {
+            continue;
+        }
         out.push(name);
     }
     return out;
@@ -1558,9 +1567,12 @@ SketchScans.installListener = function(appWin) {
  *
  * \param frame which view this scan belongs to; defaults to "plan"
  *        when absent, same as CsScanFrame.normaliseKind.
+ * \param trimRect the box on the ORIGINAL page that `path` is a crop
+ *        of, or null/absent when `path` IS the page. Recorded, never
+ *        applied: the cropping already happened on disk.
  * \return the entity id, or null (a message has been shown).
  */
-SketchScans.insert = function(doc, di, path, name, frame) {
+SketchScans.insert = function(doc, di, path, name, frame, trimRect) {
     var image = new QImage(path);
     if (image.isNull()) {
         warning("Sketch Scans: " + name + " could not be read as an " +
@@ -1625,6 +1637,15 @@ SketchScans.insert = function(doc, di, path, name, frame) {
     entity.setLayerId(doc.getLayerId(layer));
     CsTags.set(entity, "SketchScan", name);
     CsTags.set(entity, CsScanFrame.TAG, kind);
+    // WHICH PART OF THE PAGE THIS IS. `name` deliberately stays the
+    // page's own relative path -- the shelf's completion ticks and
+    // placedScales both find our images by that tag -- so this is the
+    // only record that the placed file is a crop, and the only thing
+    // that can map an anchor picked in trimmed pixels back onto the
+    // page it came from.
+    if (trimRect !== undefined && trimRect !== null) {
+        CsTags.set(entity, CsScanTrim.TAG, CsScanTrim.serialize(trimRect));
+    }
     // To the very back, under the survey linework -- the basemap's
     // call, one below getMinDrawOrder() because THIS entity is not in
     // storage yet and a tie at the minimum is not documented to
@@ -1703,7 +1724,7 @@ SketchScans.placedScales = function(doc) {
  * \return the entity id, or null (a message has been shown).
  */
 SketchScans.insertFitted = function(doc, di, path, name, fit, heightPx,
-        pairs, frame) {
+        pairs, frame, trimRect) {
     var image = new QImage(path);
     if (image.isNull()) {
         warning("Sketch Scans: " + name + " could not be read as an image.");
@@ -1744,6 +1765,15 @@ SketchScans.insertFitted = function(doc, di, path, name, fit, heightPx,
     entity.setLayerId(doc.getLayerId(layer));
     CsTags.set(entity, "SketchScan", name);
     CsTags.set(entity, CsScanFrame.TAG, kind);
+    // WHICH PART OF THE PAGE THIS IS. `name` deliberately stays the
+    // page's own relative path -- the shelf's completion ticks and
+    // placedScales both find our images by that tag -- so this is the
+    // only record that the placed file is a crop, and the only thing
+    // that can map an anchor picked in trimmed pixels back onto the
+    // page it came from.
+    if (trimRect !== undefined && trimRect !== null) {
+        CsTags.set(entity, CsScanTrim.TAG, CsScanTrim.serialize(trimRect));
+    }
     // The band it was assigned within, where the frame has bands. A
     // HINT for re-fitting, never trusted over the station names: a
     // renamed run must not strand a scan.
@@ -1774,6 +1804,13 @@ SketchScans.insertFitted = function(doc, di, path, name, fit, heightPx,
     // difference between "it looks offset" and a number. And it is what
     // a later redraw would need to re-fit the scan when the survey
     // moves under it, instead of leaving it stranded.
+    //
+    // AND NOTE ON TRIMMING. These are in the PLACED image's pixels,
+    // which for a trimmed placement is the crop's own space, not the
+    // page's. ScanTrim above is what rebases them:
+    //   page_u = anchor_u + trim.x,  page_v = anchor_v + trim.y
+    // Nothing here does that rebasing; the tag exists so a later
+    // reader CAN.
     try {
         var anchors = [];
         for (var q = 0; q < pairs.length; q++) {

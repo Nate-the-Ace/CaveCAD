@@ -32,7 +32,7 @@ PY="python3"
 status=0
 
 echo "=============================================================="
-echo " 1/13 Structural tests (add-on layout, includes, layers)"
+echo " 1/14 Structural tests (add-on layout, includes, layers)"
 echo "=============================================================="
 "$PY" -m unittest discover -s tests -v || status=1
 
@@ -40,7 +40,7 @@ QCAD="/Applications/CaveCAD.app/Contents/MacOS/CaveCAD"
 
 echo
 echo "=============================================================="
-echo " 2/13 Add-on syntax check (inside CaveCAD's own script engine)"
+echo " 2/14 Add-on syntax check (inside CaveCAD's own script engine)"
 echo "=============================================================="
 if [ -e "$QCAD" ]; then
     output=$("$QCAD" -no-dock-icon -no-gui -allow-multiple-instances \
@@ -56,7 +56,7 @@ fi
 
 echo
 echo "=============================================================="
-echo " 3/13 Core unit tests (inside CaveCAD's own script engine)"
+echo " 3/14 Core unit tests (inside CaveCAD's own script engine)"
 echo "=============================================================="
 if [ -e "$QCAD" ]; then
     output=$("$QCAD" -no-dock-icon -no-gui -allow-multiple-instances \
@@ -77,7 +77,7 @@ fi
 
 echo
 echo "=============================================================="
-echo " 4/13 Profile draw round trip & linework regression (inside CaveCAD's own script engine)"
+echo " 4/14 Profile draw round trip & linework regression (inside CaveCAD's own script engine)"
 echo "=============================================================="
 if [ -e "$QCAD" ]; then
     output=$("$QCAD" -no-dock-icon -no-gui -allow-multiple-instances \
@@ -95,7 +95,7 @@ fi
 
 echo
 echo "=============================================================="
-echo " 5/13 Generate Profile tool, driven headlessly (inside CaveCAD's own script engine)"
+echo " 5/14 Generate Profile tool, driven headlessly (inside CaveCAD's own script engine)"
 echo "=============================================================="
 if [ -e "$QCAD" ]; then
     output=$("$QCAD" -no-dock-icon -no-gui -allow-multiple-instances \
@@ -113,7 +113,7 @@ fi
 
 echo
 echo "=============================================================="
-echo " 6/13 AlignImage stays in the plan frame (inside CaveCAD's own script engine)"
+echo " 6/14 AlignImage stays in the plan frame (inside CaveCAD's own script engine)"
 echo "=============================================================="
 if [ -e "$QCAD" ]; then
     output=$("$QCAD" -no-dock-icon -no-gui -allow-multiple-instances \
@@ -131,7 +131,7 @@ fi
 
 echo
 echo "=============================================================="
-echo " 7/13 CalloutWrite (inside CaveCAD's own script engine)"
+echo " 7/14 CalloutWrite (inside CaveCAD's own script engine)"
 echo "=============================================================="
 if [ -e "$QCAD" ]; then
     output=$("$QCAD" -no-dock-icon -no-gui -allow-multiple-instances \
@@ -148,7 +148,7 @@ fi
 
 echo
 echo "=============================================================="
-echo " 8/13 CalloutSync (inside CaveCAD's own script engine)"
+echo " 8/14 CalloutSync (inside CaveCAD's own script engine)"
 echo "=============================================================="
 if [ -e "$QCAD" ]; then
     output=$("$QCAD" -no-dock-icon -no-gui -allow-multiple-instances \
@@ -165,7 +165,7 @@ fi
 
 echo
 echo "=============================================================="
-echo " 9/13 Package Cave Project (inside CaveCAD's own script engine)"
+echo " 9/14 Package Cave Project (inside CaveCAD's own script engine)"
 echo "=============================================================="
 if [ -e "$QCAD" ]; then
     output=$("$QCAD" -no-dock-icon -no-gui -allow-multiple-instances \
@@ -183,7 +183,7 @@ fi
 
 echo
 echo "=============================================================="
-echo " 10/13 Export Cave Survey, driven headlessly (inside CaveCAD's own script engine)"
+echo " 10/14 Export Cave Survey, driven headlessly (inside CaveCAD's own script engine)"
 echo "=============================================================="
 if [ -e "$QCAD" ]; then
     output=$("$QCAD" -no-dock-icon -no-gui -allow-multiple-instances \
@@ -201,7 +201,7 @@ fi
 
 echo
 echo "=============================================================="
-echo " 11/13 Cross sections (inside CaveCAD's own script engine)"
+echo " 11/14 Cross sections (inside CaveCAD's own script engine)"
 echo "=============================================================="
 if [ -e "$QCAD" ]; then
     output=$("$QCAD" -no-dock-icon -no-gui -allow-multiple-instances \
@@ -218,7 +218,7 @@ fi
 
 echo
 echo "=============================================================="
-echo " 12/13 Sketched cross sections (inside CaveCAD's own script engine)"
+echo " 12/14 Sketched cross sections (inside CaveCAD's own script engine)"
 echo "=============================================================="
 if [ -e "$QCAD" ]; then
     output=$("$QCAD" -no-dock-icon -no-gui -allow-multiple-instances \
@@ -236,7 +236,7 @@ fi
 
 echo
 echo "=============================================================="
-echo " 13/13 Aligned scans follow the survey (inside CaveCAD's own script engine)"
+echo " 13/14 Aligned scans follow the survey (inside CaveCAD's own script engine)"
 echo "=============================================================="
 if [ -e "$QCAD" ]; then
     output=$("$QCAD" -no-dock-icon -no-gui -allow-multiple-instances \
@@ -249,6 +249,22 @@ if [ -e "$QCAD" ]; then
 else
     echo "SKIP: CaveCAD not found -- this places real image entities and" \
          "reads QCAD's own image mapping back, and cannot run under node."
+fi
+
+echo
+echo "=============================================================="
+echo " 14/14 Trimming a scanned page (inside CaveCAD's own script engine)"
+echo "=============================================================="
+if [ -e "$QCAD" ]; then
+    output=$("$QCAD" -no-dock-icon -no-gui -allow-multiple-instances \
+                 -autostart tests/scan_trim_run.js "$PWD" 2>/dev/null)
+    echo "$output"
+    case "$output" in
+        *"### SCAN TRIM OK"*) ;;
+        *) echo "Scan trim tests did not pass."; status=1 ;;
+    esac
+else
+    echo "SKIP: CaveCAD not found at $QCAD"
 fi
 
 echo
