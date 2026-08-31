@@ -128,14 +128,20 @@ The shelf keeps listing pages, one row per page, exactly as before.
 Everything else on the entity -- frame tag, frame key, station order,
 layer, fade, draw order -- is written exactly as today.
 
-## Both placement paths
+## Every placement path
 
-- "Insert & Align" (`SketchScans.insert`, then Align Image) is handed
-  the trimmed path.
-- "Assign Stations to Scans" picks stations on the preview and places
+Four controls consume the selected scan's path, and all four are gated
+on the trim choice and read it through ONE accessor,
+`SketchScans.effectivePath(rel)`. A path built by hand anywhere else is
+a path that will still place the whole page after the caver drew a box.
+
+- `Insert` and `Insert & Align` (`SketchScans.insert`, then Align Image
+  for the second) are handed the trimmed path and the rect.
+- `Assign Stations to Scans` picks stations on the preview and places
   through `SketchScans.insertFitted`. Because the preview shows the
   trimmed image once a box is set, the picked pixel coordinates are
   already in trimmed space and the fit needs no adjustment.
+- `Sketch Section` stages the trimmed image in its bay.
 
 The preview reloads from the trimmed file as soon as a box is set, so
 what the caver picks on is always what gets placed.
