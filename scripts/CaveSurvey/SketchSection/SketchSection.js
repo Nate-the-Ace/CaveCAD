@@ -114,9 +114,14 @@ SketchSection.say = function(text) {
  *
  * \param scanPath absolute path to the scan, or null to ask
  * \param station station name, or null to ask
+ * \param calibration {unitsPerPixel} from Sketch Scans' preview-pane
+ *        calibration, or null for the auto-fit this tool has always
+ *        done. OPTIONAL on purpose: a caver who skips or cancels the
+ *        calibration must still get a bay, because scaling the scan by
+ *        hand onto the ghost is a workflow that already works.
  * \return the bay id, or null
  */
-SketchSection.run = function(scanPath, station) {
+SketchSection.run = function(scanPath, station, calibration) {
     var doc = EAction.getDocument();
     var di = EAction.getDocumentInterface();
     if (isNull(doc) || isNull(di)) {
@@ -172,7 +177,8 @@ SketchSection.run = function(scanPath, station) {
         SketchSection.addGhost(doc, di, cut, scale, rect, bayId);
     }
     if (scanPath !== null && scanPath !== undefined && scanPath !== "") {
-        SketchSection.addScan(doc, di, scanPath, ghostBox, rect, bayId);
+        SketchSection.addScan(doc, di, scanPath, ghostBox, rect, bayId,
+            calibration);
     }
 
     SketchSection.zoomTo(di, rect);
@@ -204,6 +210,40 @@ SketchSection.cutAt = function(asDrawn, station) {
     var cut = CsSectionCut.cut(asDrawn.survey, asDrawn.resolved,
         leg.from, leg.to, leg.t, {});
     return (cut.refused === true) ? null : cut;
+};
+
+/**
+ * The station's own measured LRUD, or null.
+ *
+ * THE SAME SOURCE THE GHOST IS CUT FROM -- CsRevise.resolveAsDrawn,
+ * exactly as SketchSection.run resolves it for cutAt. Sketch Scans'
+ * calibration is measured against the ghost's own numbers, so reading
+ * the LRUD from anywhere else (the notebook file, a cached survey)
+ * would let the scale be calibrated against a survey the ghost was not
+ * drawn from -- and the disagreement would show up as a scan that is
+ * subtly the wrong size, with nothing on screen to say why.
+ *
+ * Lives here rather than in the panel so the panel does not have to
+ * know how a drawing becomes a survey.
+ *
+ * \return {left, right, up, down, azimuth} or null. Never throws: a
+ *         drawing that cannot be resolved has no calibration to offer,
+ *         which is a fallback, not a failure.
+ */
+SketchSection.lrudAt = function(doc, station) {
+    if (isNull(doc) || station === null || station === undefined ||
+            station === "") {
+        return null;
+    }
+    try {
+        var asDrawn = CsRevise.resolveAsDrawn(doc);
+        if (asDrawn === null || isNull(asDrawn.survey)) {
+            return null;
+        }
+        return CsModel.lrudForStation(asDrawn.survey, String(station));
+    } catch (e) {
+        return null;
+    }
 };
 
 /** The plan's own extent, or null when the drawing is empty. */
@@ -321,8 +361,25 @@ SketchSection.addGhost = function(doc, di, cut, scale, rect, bayId) {
         });
 };
 
-/** The scan, scaled onto the ghost, faded, at the back. */
-SketchSection.addScan = function(doc, di, path, ghostBox, rect, bayId) {
+/**
+ * The scan, scaled onto the ghost, faded, at the back.
+ *
+ * AT THE CALIBRATED SCALE WHEN THERE IS ONE. Without a calibration the
+ * scan is auto-fitted to the ghost's WIDTH, which is a guess that is
+ * wrong by whatever the sketch's own margins happen to be -- fine as a
+ * starting point, and the reason the caver then rescales by hand. A
+ * calibration from Sketch Scans' preview pane (two clicks against one
+ * known LRUD) is a measurement instead, so it is used as given and the
+ * scan opens already the right size.
+ *
+ * CENTRED EITHER WAY. Calibration answers "how big", never "where":
+ * inferring a position from the station click as well would put the
+ * scan somewhere that depends on where in the outline the caver
+ * happened to click first, and a scan that opens off-centre in its own
+ * bay reads as a fault.
+ */
+SketchSection.addScan = function(doc, di, path, ghostBox, rect, bayId,
+        calibration) {
     var img = new QImage(path);
     if (img.isNull()) {
         SketchSection.say(qsTr("The scan could not be read: ") + path);
@@ -343,7 +400,12 @@ SketchSection.addScan = function(doc, di, path, ghostBox, rect, bayId) {
     var scanBox = { x1: 0, y1: 0, x2: pxW, y2: pxH };
     var ghostHere = { x1: cx + ghostBox.x1, y1: cy + ghostBox.y1,
                       x2: cx + ghostBox.x2, y2: cy + ghostBox.y2 };
-    var fit = CsSectionBay.fitTransform(scanBox, ghostHere);
+    var calibrated = (calibration !== null && calibration !== undefined &&
+        calibration.unitsPerPixel > 0);
+    var fit = calibrated ?
+        CsSectionBay.fitAtScale(scanBox, ghostHere,
+            calibration.unitsPerPixel) :
+        CsSectionBay.fitTransform(scanBox, ghostHere);
     var entity = SketchSection.imageEntity(doc, path, fit, pxW, pxH);
     if (entity === null) {
         return;
@@ -363,6 +425,13 @@ SketchSection.addScan = function(doc, di, path, ghostBox, rect, bayId) {
     // instead (SectionCapture.fitOfScan), so the only fit ever recorded
     // is the one the caver actually left the scan at. A tag here would
     // be a second, wrong answer waiting to be picked up again.
+    //
+    // A CALIBRATED SCALE CHANGES NONE OF THAT. It is a better starting
+    // point, not a final answer -- the caver still nudges and may still
+    // turn the scan -- so the SectionBayFit that SectionEdit reads back
+    // on reopen must still be measured off the entity at capture time,
+    // not written here from the calibration. It reaches the tag because
+    // it reaches the ENTITY.
     // To the back, under whatever the caver traces over it -- the same
     // underlay treatment every scan in this suite gets (SketchScans.
     // insert), one below getMinDrawOrder() because this entity is not

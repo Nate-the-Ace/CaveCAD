@@ -1240,6 +1240,164 @@ function selectOnly(entityId) {
 })();
 
 // ---------------------------------------------------------------------
+// CAL: a bay opened with a scale calibrated in the Sketch Scans preview
+// places the scan AT THAT SCALE, and the SectionBayFit that SectionEdit
+// reads back on reopen carries the same scale.
+//
+// THE SCALE IS THE WHOLE FEATURE. The caver clicks the station and a
+// wall in the preview pane, the tool divides the station's own LRUD by
+// the pixels between the clicks, and the bay opens the right size
+// instead of auto-fitted to the ghost's width. Everything upstream of
+// SketchSection.run is GUI (two clicks in a dock), so what is asserted
+// here is the piece that is not: that a supplied scale reaches the
+// placed image, and survives capture into the tag.
+//
+// READ STRAIGHT OFF THE RImageData, never through
+// CsSectionBay.fitAtScale or SectionCapture.fitOfScan. Using the
+// feature's own maths as the oracle for the feature's own output is
+// self-confirming -- a fitAtScale that halved every scale would produce
+// an expectation that halved with it and stayed green. The expected
+// numbers below are LITERALS.
+// ---------------------------------------------------------------------
+(function() {
+    // The fixture's stations all carry LRUD { l:4, r:4, u:3, d:2 }.
+    // 3 units up, 150 px up the page, at section scale 2:
+    // 3 * 2 / 150 = 0.04 drawing units per pixel.
+    var calLrud = SketchSection.lrudAt(doc, "A2");
+    check("CAL: fixture: the station's own LRUD is readable from the " +
+        "drawing, which is where the known distance comes from",
+        calLrud !== null && calLrud.up === 3);
+
+    var cal = CsSectionBay.calibrationFrom({ x: 400, y: 200 },
+        { x: 400, y: 350 }, calLrud, 2, null);
+    check("CAL: fixture: an upward pair infers U", cal.letter === "U");
+    checkClose("CAL: fixture: and comes to 0.04 units per pixel",
+        cal.unitsPerPixel, 0.04, 1e-12);
+
+    var calBayId = SketchSection.run(scanPath, "A2",
+        { unitsPerPixel: cal.unitsPerPixel });
+    check("CAL: a bay opens with a calibrated scale", calBayId !== null);
+    var calBay = SectionCapture.findBay(doc);
+    check("CAL: it is found, and it has a scan",
+        calBay !== null && calBay.scan !== null);
+
+    if (calBay === null || calBay.scan === null) {
+        check("CAL: the scan is placed at the calibrated scale", false);
+        check("CAL: and the stored SectionBayFit carries it", false);
+        return;
+    }
+
+    // THE u AND v VECTORS ARE DRAWING UNITS PER IMAGE PIXEL -- that is
+    // what RImageData carries and what makes this comparison direct.
+    var calData = calBay.scan.getData();
+    var calU = calData.getUVector();
+    var calV = calData.getVVector();
+    checkClose("CAL: the scan is placed at the calibrated scale (u.x)",
+        calU.x, 0.04, 1e-9);
+    checkClose("CAL: uniform, never squashed (v.y)", calV.y, 0.04, 1e-9);
+    check("CAL: and axis-aligned -- this workflow has no rotation to " +
+        "solve, because a section is scanned with up as up",
+        Math.abs(calU.y) < 1e-9 && Math.abs(calV.x) < 1e-9);
+
+    // AND IT IS NOT WHAT THE AUTO-FIT WOULD HAVE DONE. Without this,
+    // the claim above would pass on a build that ignored the
+    // calibration entirely, if the auto-fit happened to land nearby.
+    var calGhostBox = calBay.ghost.getBoundingBox();
+    var autoK = (calGhostBox.getMaximum().x - calGhostBox.getMinimum().x) /
+        (new QImage(scanPath)).width();
+    check("CAL: fixture: the auto-fit would have used a DIFFERENT scale " +
+        "(" + autoK + " vs 0.04), so the claim above can fail",
+        Math.abs(autoK - 0.04) > 1e-3);
+
+    // The fit reaches the TAG by reaching the entity: SectionCapture
+    // measures the scan as the caver left it, and SketchSection writes
+    // no fit tag of its own (see claim 4).
+    check("CAL: the bay's scan still carries NO fit tag -- a calibration " +
+        "is a better starting point, not a final answer",
+        CsTags.get(calBay.scan, CsCallout.KEY.SECTION_FIT) === "");
+
+    var calCentre = SectionCapture.originOf(calBay);
+    var calLine = new RLineEntity(doc, new RLineData(
+        new RVector(calCentre.x - 2, calCentre.y - 2),
+        new RVector(calCentre.x + 2, calCentre.y + 2)));
+    calLine.setLayerId(doc.getLayerId(CsLayers.SECTION_WALLS_SURVEYED));
+    var calTraceOp = new RAddObjectsOperation();
+    calTraceOp.addObject(calLine, false);
+    di.applyOperation(calTraceOp);
+
+    var calBay2 = SectionCapture.findBay(doc);
+    check("CAL: fixture: the tracing is swept",
+        calBay2 !== null && calBay2.traced.length === 1);
+    var calAt = (calBay2 === null) ? null :
+        SectionCapture.proposePosition(doc, calBay2);
+    if (calAt === null && calBay2 !== null) {
+        calAt = { x: calBay2.rect.x2 + 20, y: calBay2.rect.y1 };
+    }
+    var calCallout = (calBay2 === null) ? null :
+        SectionCapture.capture(doc, di, calBay2, calAt);
+    check("CAL: fixture: the bay captures", calCallout !== null);
+
+    var calMembers = (calCallout === null) ? null :
+        CalloutWrite.members(doc, calCallout);
+    var calStored = (calMembers === null || isNull(calMembers.block)) ?
+        null : CsSectionBay.parseFit(
+            CsTags.get(calMembers.block, CsCallout.KEY.SECTION_FIT));
+    check("CAL: the captured section stores a SectionBayFit",
+        calStored !== null);
+    checkClose("CAL: and it is the CALIBRATED scale, so a reopened " +
+        "sketch comes back the size the caver measured (ux)",
+        calStored === null ? -1 : calStored.ux, 0.04, 1e-6);
+    checkClose("CAL: in both axes (vy)",
+        calStored === null ? -1 : calStored.vy, 0.04, 1e-6);
+})();
+
+// ---------------------------------------------------------------------
+// CAL2: WITHOUT a calibration, nothing changes. Skipping or cancelling
+// the calibration is a supported way to open a bay -- scaling the scan
+// by hand over the ghost is a workflow that already works -- so the
+// auto-fit must still be exactly the auto-fit.
+// ---------------------------------------------------------------------
+(function() {
+    var plainId = SketchSection.run(scanPath, "A2", null);
+    check("CAL2: a bay opens with no calibration at all", plainId !== null);
+    var plainBay = SectionCapture.findBay(doc);
+    check("CAL2: it is found, and it has a scan",
+        plainBay !== null && plainBay.scan !== null);
+    if (plainBay === null || plainBay.scan === null) {
+        check("CAL2: the scan is auto-fitted to the ghost's width", false);
+        return;
+    }
+    var plainGhost = plainBay.ghost.getBoundingBox();
+    var plainWidth = plainGhost.getMaximum().x - plainGhost.getMinimum().x;
+    var plainK = plainWidth / (new QImage(scanPath)).width();
+    var plainU = plainBay.scan.getData().getUVector();
+    checkClose("CAL2: the scan is auto-fitted to the ghost's WIDTH, " +
+        "exactly as before", plainU.x, plainK, 1e-9);
+    check("CAL2: and that is not the calibrated scale, so the two " +
+        "paths really are different",
+        Math.abs(plainU.x - 0.04) > 1e-3);
+
+    // Closed again, so the two-open-bays claim below still holds.
+    var plainCentre = SectionCapture.originOf(plainBay);
+    var plainLine = new RLineEntity(doc, new RLineData(
+        new RVector(plainCentre.x - 2, plainCentre.y - 2),
+        new RVector(plainCentre.x + 2, plainCentre.y + 2)));
+    plainLine.setLayerId(doc.getLayerId(CsLayers.SECTION_WALLS_SURVEYED));
+    var plainOp = new RAddObjectsOperation();
+    plainOp.addObject(plainLine, false);
+    di.applyOperation(plainOp);
+    var plainBay2 = SectionCapture.findBay(doc);
+    var plainAt = (plainBay2 === null) ? null :
+        SectionCapture.proposePosition(doc, plainBay2);
+    if (plainAt === null && plainBay2 !== null) {
+        plainAt = { x: plainBay2.rect.x2 + 20, y: plainBay2.rect.y1 };
+    }
+    check("CAL2: and the bay closes",
+        plainBay2 !== null &&
+        SectionCapture.capture(doc, di, plainBay2, plainAt) !== null);
+})();
+
+// ---------------------------------------------------------------------
 // F1 (review finding, data loss): capture() must not lose the block
 // reference (or strand the tracing in an unreferenced block) when the
 // annotation layer -- CsCallout.STYLES["annotation"], where the

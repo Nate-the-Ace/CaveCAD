@@ -10598,6 +10598,154 @@ if (!IS_NODE) {
     ok(!isNaN(badFit.ux) && !isNaN(badFit.tx) && !isNaN(badFit.ty),
         "fitTransform: a NaN box yields a defined fit, never a NaN one");
 
+    // --- the scan at a scale the caller already knows ------------------
+    // Same centring as the auto-fit; only where `k` comes from differs.
+    var atScale = CsSectionBay.fitAtScale(
+        { x1: 0, y1: 0, x2: 200, y2: 100 },
+        { x1: -5, y1: -5, x2: 5, y2: 5 }, 0.25);
+    eqs(atScale.ux, 0.25, "fitAtScale: the scale is used as given");
+    eqs(atScale.vy, 0.25, "fitAtScale: uniform, both axes");
+    near(atScale.tx, -25, 1e-9,
+        "fitAtScale: 200 px at 0.25 is 50 wide, centred on x = 0");
+    near(atScale.ty, -12.5, 1e-9, "fitAtScale: and 100 px is 25 tall");
+    var zeroScale = CsSectionBay.fitAtScale(
+        { x1: 0, y1: 0, x2: 200, y2: 100 },
+        { x1: -5, y1: -5, x2: 5, y2: 5 }, 0);
+    eqs(zeroScale.ux, 1,
+        "fitAtScale: a zero scale falls back to 1, not to a scan " +
+        "collapsed into a point");
+
+    // --- which LRUD did the caver just touch? -------------------------
+    // UP IS UP. A cross section is scanned with the page's up as the
+    // cave's up, so the direction of the second click IS the letter --
+    // there is no rotation to solve. The points are in a +y-is-up
+    // frame, which is what the preview pane hands back.
+    var origin0 = { x: 100, y: 100 };
+    eqs(CsSectionBay.inferLrudLetter(origin0, { x: 100, y: 300 }), "U",
+        "inferLrudLetter: up the page is U");
+    eqs(CsSectionBay.inferLrudLetter(origin0, { x: 100, y: -50 }), "D",
+        "inferLrudLetter: down the page is D");
+    eqs(CsSectionBay.inferLrudLetter(origin0, { x: 10, y: 100 }), "L",
+        "inferLrudLetter: left is L");
+    eqs(CsSectionBay.inferLrudLetter(origin0, { x: 400, y: 100 }), "R",
+        "inferLrudLetter: right is R");
+    // Off-axis but not ambiguous: the bigger component decides, so a
+    // wall clicked high and a little to the side still reads as U.
+    eqs(CsSectionBay.inferLrudLetter(origin0, { x: 130, y: 300 }), "U",
+        "inferLrudLetter: mostly up is still U");
+    eqs(CsSectionBay.inferLrudLetter(origin0, { x: 400, y: 160 }), "R",
+        "inferLrudLetter: mostly right is still R");
+
+    // AN EXACT DIAGONAL IS GENUINELY AMBIGUOUS and no measurement can
+    // break it. The only requirement is that it answer the SAME way
+    // every time rather than flickering between L and U on one pixel of
+    // mouse movement -- so the tie goes VERTICAL, the axis "up is up"
+    // actually anchors. The caver corrects the letter in the panel
+    // without re-picking either way. Asserted as a literal, not as
+    // "whatever the function says": this is the decision, not an
+    // observation of it.
+    eqs(CsSectionBay.inferLrudLetter({ x: 0, y: 0 }, { x: 50, y: 50 }), "U",
+        "inferLrudLetter: an exact up-right diagonal ties to U");
+    eqs(CsSectionBay.inferLrudLetter({ x: 0, y: 0 }, { x: -50, y: 50 }), "U",
+        "inferLrudLetter: and an up-left one ties to U, not L");
+    eqs(CsSectionBay.inferLrudLetter({ x: 0, y: 0 }, { x: 50, y: -50 }), "D",
+        "inferLrudLetter: a down-right diagonal ties to D");
+    eqs(CsSectionBay.inferLrudLetter({ x: 0, y: 0 }, { x: -50, y: -50 }), "D",
+        "inferLrudLetter: and a down-left one ties to D");
+
+    // A double-click on one spot is not a direction. Null, not a
+    // default letter: a default would hand the caver a confident wrong
+    // answer and an infinite scale behind it.
+    ok(CsSectionBay.inferLrudLetter({ x: 7, y: 7 }, { x: 7, y: 7 }) === null,
+        "inferLrudLetter: the same point twice is null, not a guess");
+    ok(CsSectionBay.inferLrudLetter({ x: 0, y: 0 }, { x: NaN, y: 0 }) === null,
+        "inferLrudLetter: a NaN click is null, never a letter");
+    ok(CsSectionBay.inferLrudLetter(null, { x: 1, y: 1 }) === null,
+        "inferLrudLetter: a missing point is null, never a throw");
+
+    // --- one known distance over the pixels it covers -----------------
+    var lrud = { left: 4, right: 3, up: 11, down: 2, azimuth: 0 };
+    eqs(CsSectionBay.lrudDistance(lrud, "U"), 11, "lrudDistance: U");
+    eqs(CsSectionBay.lrudDistance(lrud, "l"), 4,
+        "lrudDistance: the letter's case does not matter");
+    ok(CsSectionBay.lrudDistance(lrud, "X") === null,
+        "lrudDistance: a letter that is not an LRUD is null");
+    ok(CsSectionBay.lrudDistance({ up: 0 }, "U") === null,
+        "lrudDistance: a recorded zero is a real measurement but not a " +
+        "scale, so it reads as null rather than dividing to infinity");
+    ok(CsSectionBay.lrudDistance(null, "U") === null,
+        "lrudDistance: no LRUD at all is null, never a throw");
+
+    // 11 units up, 220 pixels up the page, at a section scale of 2
+    // drawing units per survey unit: 11 * 2 / 220 = 0.1 units per pixel.
+    // The numbers are chosen so the answer is exact and can be written
+    // as a LITERAL -- calling calibrationFrom to compute its own
+    // expectation would move with any bug in it and stay green.
+    var cal = CsSectionBay.calibrationFrom({ x: 300, y: 400 },
+        { x: 300, y: 620 }, lrud, 2, null);
+    eqs(cal.letter, "U", "calibrationFrom: the letter it inferred");
+    eqs(cal.distance, 11, "calibrationFrom: the station's own U");
+    near(cal.pixels, 220, 1e-9, "calibrationFrom: the pixels between clicks");
+    near(cal.unitsPerPixel, 0.1, 1e-12,
+        "calibrationFrom: 11 units at section scale 2 over 220 px is " +
+        "0.1 drawing units per pixel");
+    ok(cal.refused === undefined,
+        "calibrationFrom: a good pair refuses nothing");
+    ok(cal.inferred === true,
+        "calibrationFrom: and it says the letter was its own guess");
+
+    // THE SECTION SCALE IS PART OF THE ARITHMETIC. Without it the scan
+    // is placed at survey units per pixel and lands at the PLAN's
+    // scale, which is the whole reason a section carries its own.
+    var calScaled = CsSectionBay.calibrationFrom({ x: 300, y: 400 },
+        { x: 300, y: 620 }, lrud, 5, null);
+    near(calScaled.unitsPerPixel, 0.25, 1e-12,
+        "calibrationFrom: the same clicks at section scale 5 are 0.25");
+
+    // THE CORRECTION: the same two clicks, read as a different
+    // measurement. 4 * 2 / 220.
+    var corrected = CsSectionBay.calibrationFrom({ x: 300, y: 400 },
+        { x: 300, y: 620 }, lrud, 2, "L");
+    eqs(corrected.letter, "L", "calibrationFrom: a forced letter wins");
+    near(corrected.unitsPerPixel, 4 * 2 / 220, 1e-12,
+        "calibrationFrom: and the scale is re-read against L, on the " +
+        "same clicks -- no re-pick");
+    ok(corrected.inferred === false,
+        "calibrationFrom: which it reports as a correction");
+    var agreeing = CsSectionBay.calibrationFrom({ x: 300, y: 400 },
+        { x: 300, y: 620 }, lrud, 2, "U");
+    ok(agreeing.inferred === true,
+        "calibrationFrom: a forced letter that AGREES is not a " +
+        "correction -- the caver confirmed the guess");
+
+    // A MISSING LRUD MUST SAY SO, not divide by nothing. This is the
+    // case that sends the panel back to today's auto-fit.
+    var noUp = CsSectionBay.calibrationFrom({ x: 300, y: 400 },
+        { x: 300, y: 620 }, { left: 4, right: 3, up: null, down: 2 },
+        2, null);
+    eqs(noUp.refused, "nolrud",
+        "calibrationFrom: an unmeasured letter is refused, not divided");
+    eqs(noUp.letter, "U",
+        "calibrationFrom: and it names the letter, so the panel can " +
+        "say which one is missing");
+    ok(noUp.unitsPerPixel === undefined,
+        "calibrationFrom: a refusal carries no scale to be used by " +
+        "accident");
+    ok(CsSectionBay.calibrationFrom({ x: 300, y: 400 },
+        { x: 300, y: 620 }, null, 2, null).refused === "nolrud",
+        "calibrationFrom: no LRUD at all is the same refusal");
+
+    var samePoint = CsSectionBay.calibrationFrom({ x: 9, y: 9 },
+        { x: 9, y: 9 }, lrud, 2, null);
+    eqs(samePoint.refused, "nodirection",
+        "calibrationFrom: two clicks on one point are refused");
+    ok(samePoint.unitsPerPixel === undefined,
+        "calibrationFrom: with no scale behind the refusal");
+    eqs(CsSectionBay.calibrationFrom({ x: 9, y: 9 }, { x: 9, y: 9 },
+        lrud, 2, "U").refused, "nodirection",
+        "calibrationFrom: and a forced letter cannot rescue a pair " +
+        "with no pixels between it");
+
     // --- where the block lands ----------------------------------------
     // A wall dead ahead: the march must step PAST it, not stop short.
     var blockBox = { x1: -2, y1: -2, x2: 2, y2: 2 };

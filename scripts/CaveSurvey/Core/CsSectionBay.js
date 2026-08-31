@@ -120,18 +120,176 @@ CsSectionBay.sweepOf = function(items, rect, excludeIds) {
 CsSectionBay.fitTransform = function(scanBox, ghostBox) {
     var sw = scanBox.x2 - scanBox.x1;
     var gw = ghostBox.x2 - ghostBox.x1;
-    var k = (sw > 0 && gw > 0) ? (gw / sw) : 1;
+    return CsSectionBay.fitAtScale(scanBox, ghostBox,
+        (sw > 0 && gw > 0) ? (gw / sw) : 1);
+};
+
+/**
+ * The same placement at a scale the CALLER already knows.
+ *
+ * Split out of fitTransform rather than written beside it, so a
+ * calibrated bay and an auto-fitted one cannot drift into centring the
+ * scan two different ways -- the only thing calibration changes is
+ * where `k` comes from. fitTransform derives it from the ghost's width;
+ * a calibrated bay derives it from two clicks on the scan and one LRUD
+ * measurement (calibrationFrom, below).
+ *
+ * `k` is DRAWING UNITS PER IMAGE PIXEL, which is exactly what an
+ * RImageData u/v vector carries -- nothing to convert at the far end.
+ *
+ * A k that is not a positive number falls back to 1 rather than
+ * placing a zero-sized or mirrored image: 0 is not NaN, so the NaN
+ * guard below would let a zero scale through as a "valid" transform and
+ * the scan would vanish into a point with no error anywhere.
+ */
+CsSectionBay.fitAtScale = function(scanBox, ghostBox, k) {
+    var scale = (k > 0) ? k : 1;
+    var sw = scanBox.x2 - scanBox.x1;
     var cx = (ghostBox.x1 + ghostBox.x2) / 2;
     var cy = (ghostBox.y1 + ghostBox.y2) / 2;
-    var sh = (scanBox.y2 - scanBox.y1) * k;
-    // Axis-aligned, because an auto-fit has no rotation to express:
-    // u runs along +x at the fitted scale, v along +y.
-    var fit = { ux: k, uy: 0, vx: 0, vy: k,
-                tx: cx - (sw * k) / 2, ty: cy - sh / 2 };
+    var sh = (scanBox.y2 - scanBox.y1) * scale;
+    // Axis-aligned, because neither an auto-fit nor this workflow has a
+    // rotation to express -- a cross section is scanned with up as up
+    // (see inferLrudLetter): u runs along +x at the fitted scale, v
+    // along +y.
+    var fit = { ux: scale, uy: 0, vx: 0, vy: scale,
+                tx: cx - (sw * scale) / 2, ty: cy - sh / 2 };
     if (isNaN(fit.ux) || isNaN(fit.vy) || isNaN(fit.tx) || isNaN(fit.ty)) {
         return { ux: 1, uy: 0, vx: 0, vy: 1, tx: 0, ty: 0 };
     }
     return fit;
+};
+
+/** The four letters, in the order a caver reads them off a page. */
+CsSectionBay.LRUD_LETTERS = ["L", "R", "U", "D"];
+
+/**
+ * Which LRUD the caver just touched, from the direction of the second
+ * click relative to the first.
+ *
+ * WHY A DIRECTION IS ENOUGH. A cross section is always scanned with up
+ * as up -- that is the one thing a field book guarantees about a
+ * section -- so the page's axes ARE the station's axes and there is no
+ * rotation to solve. The caver clicks the station, then any wall point
+ * on the outline; whichever way they went is which measurement they
+ * touched.
+ *
+ * BOTH POINTS ARE IN A +Y-IS-UP FRAME, which is the frame the preview
+ * hands back: the scan sits at one drawing unit per pixel in a scratch
+ * document, so a picked point is already a pixel with the drawing's own
+ * Y direction. A caller working in image ROWS (Y down) must flip before
+ * calling, or every U comes back a D.
+ *
+ * THE TIE GOES VERTICAL, deliberately. An exactly diagonal pair --
+ * |dx| === |dy| -- is genuinely ambiguous and there is no measurement
+ * that can break it, so the only requirement is that it answer the SAME
+ * way every time rather than flickering between L and U on a pixel. It
+ * answers U or D because up is the axis this workflow actually anchors:
+ * "up is up" is a promise about the page's vertical, while left and
+ * right depend on which way the caver was facing when they drew it. The
+ * caver corrects the letter in the panel either way, without re-picking.
+ *
+ * \return "L", "R", "U", "D", or null when the two clicks are the same
+ *         point (or a NaN got in) and there is no direction at all.
+ *         Pure.
+ */
+CsSectionBay.inferLrudLetter = function(from, to) {
+    if (from === null || from === undefined || to === null ||
+            to === undefined) {
+        return null;
+    }
+    var dx = to.x - from.x;
+    var dy = to.y - from.y;
+    // `!(... > 0)`, not `=== 0`: a NaN fails every ordering, so this one
+    // comparison catches the zero-length pair and the NaN together --
+    // the same shape perpOf uses above, for the same reason.
+    if (!(dx * dx + dy * dy > 0)) {
+        return null;
+    }
+    if (Math.abs(dx) > Math.abs(dy)) {
+        return (dx > 0) ? "R" : "L";
+    }
+    return (dy > 0) ? "U" : "D";
+};
+
+/**
+ * The station's measured distance for one letter, or null.
+ *
+ * A RECORDED ZERO READS AS NULL. It is a real measurement -- a crawl
+ * with the ceiling on your back has U = 0 -- but it is not a distance a
+ * scale can be divided out of, and the honest answer there is "not this
+ * letter", not an infinite scale. Pure.
+ */
+CsSectionBay.lrudDistance = function(lrud, letter) {
+    if (lrud === null || lrud === undefined || letter === null) {
+        return null;
+    }
+    var key = { L: "left", R: "right", U: "up", D: "down" }[
+        String(letter).toUpperCase()];
+    if (key === undefined) {
+        return null;
+    }
+    var v = lrud[key];
+    if (v === null || v === undefined) {
+        return null;
+    }
+    var n = parseFloat(v);
+    return (n > 0) ? n : null;
+};
+
+/**
+ * The scale two clicks and one LRUD measurement describe.
+ *
+ * The caver clicks the station point on the scan, then a wall point on
+ * the outline. The direction names the letter (inferLrudLetter); the
+ * station's own survey supplies how far that letter really is; the
+ * pixels between the clicks supply how far it is on the page. What
+ * falls out is drawing units per image pixel, which is what places the
+ * scan.
+ *
+ * `sectionScale` is CsSectionDraw.scaleOf() -- drawing units per SURVEY
+ * unit inside a section. Without it the scan would be placed at survey
+ * units per pixel and land at the plan's scale rather than the
+ * section's, which is the whole reason a section carries its own.
+ *
+ * `forcedLetter` is the caver's correction: the same two clicks read as
+ * a different measurement, so a wrong guess costs a combo box and not
+ * a re-pick.
+ *
+ * ALWAYS AN OBJECT, never null, and a `refused` reason rather than a
+ * thrown error or a NaN scale -- the caller has a real fallback to take
+ * (today's auto-fit) and needs to be able to SAY why it took it.
+ *
+ * \return {letter, distance, pixels, unitsPerPixel, inferred} on
+ *         success, or {refused, letter} where refused is
+ *         "nodirection" (the clicks are the same point) or "nolrud"
+ *         (that letter was never measured here). Pure.
+ */
+CsSectionBay.calibrationFrom = function(from, to, lrud, sectionScale,
+        forcedLetter) {
+    var forced = (forcedLetter === null || forcedLetter === undefined ||
+        forcedLetter === "") ? null : String(forcedLetter).toUpperCase();
+    var inferredLetter = CsSectionBay.inferLrudLetter(from, to);
+    if (inferredLetter === null) {
+        // No direction means no pixel distance either, so a forced
+        // letter cannot rescue this pair -- there is nothing to divide.
+        return { refused: "nodirection", letter: forced };
+    }
+    var letter = (forced === null) ? inferredLetter : forced;
+    var dx = to.x - from.x, dy = to.y - from.y;
+    var pixels = Math.sqrt(dx * dx + dy * dy);
+    var distance = CsSectionBay.lrudDistance(lrud, letter);
+    if (distance === null) {
+        return { refused: "nolrud", letter: letter, pixels: pixels };
+    }
+    var scale = (sectionScale > 0) ? sectionScale : 1;
+    var unitsPerPixel = (distance * scale) / pixels;
+    if (!(unitsPerPixel > 0)) {
+        return { refused: "nolrud", letter: letter, pixels: pixels };
+    }
+    return { letter: letter, distance: distance, pixels: pixels,
+             unitsPerPixel: unitsPerPixel,
+             inferred: (forced === null || forced === inferredLetter) };
 };
 
 /**

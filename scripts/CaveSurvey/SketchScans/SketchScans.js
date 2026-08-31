@@ -233,6 +233,9 @@ SketchScans.buildDock = function(appWin) {
         collapsed: {},      // this cave's collapsed set
         bookmarks: {},      // this cave's COMPLETED scans
         picking: null,      // an alignment in progress: {pairs, rel}
+        calibrating: null,  // a section scale being set in the preview:
+                            // {path, rel, station, lrud, from, to,
+                            //  forced, cal}
         scans: null,        // the scans folder the table was built from
         ready: false        // false while the panel shows a message
     };
@@ -431,10 +434,55 @@ SketchScans.buildDock = function(appWin) {
     w.sketchButton.toolTip = qsTr("Open a staging bay for the selected " +
         "scan: the computed cross section at a chosen plan station, " +
         "dashed, to scale the scan onto and trace by hand.");
+    // THE CORRECTION, AS A COMBO RATHER THAN A RE-PICK. The letter is
+    // INFERRED from the direction of the second click, and an inference
+    // is occasionally wrong -- a wall that leans, a station drawn low in
+    // its own outline. Making the caver re-click for that would punish
+    // them for the tool's guess; the two clicks are still perfectly
+    // good measurements of a pixel distance, and only the NAME attached
+    // to that distance is in doubt. So the letter is the one thing that
+    // can be changed after the fact, and changing it re-reads the same
+    // two clicks against a different measurement.
+    //
+    // Hidden until there are two clicks to correct: an L/R/U/D combo
+    // sitting there before anything is picked invites the caver to
+    // choose a letter FIRST, which is a different (and worse) workflow
+    // -- it would mean promising to click that particular wall.
+    w.lrudCombo = new QComboBox();
+    for (var li = 0; li < CsSectionBay.LRUD_LETTERS.length; li++) {
+        w.lrudCombo.addItem(CsSectionBay.LRUD_LETTERS[li]);
+    }
+    w.lrudCombo.toolTip = qsTr("Which measurement the second click " +
+        "touched. Change it if the guess was wrong -- the two clicks " +
+        "stand, only the letter is re-read.");
+    w.calibCancelButton = new QPushButton(qsTr("Cancel"));
+    w.calibCancelButton.toolTip = qsTr("Abandon this calibration " +
+        "without opening a bay.");
+    try {
+        w.lrudCombo.maximumWidth = 60;
+        w.lrudCombo.visible = false;
+        w.calibCancelButton.visible = false;
+    } catch (eCalibHide) {
+        // a bridge that cannot hide them shows two extra idle controls;
+        // both are inert until a calibration is running
+    }
+    try {
+        w.lrudCombo.activated.connect(function() {
+            SketchScans.correctLetter();
+        });
+    } catch (eLrudConn) {
+        // no correction on this bridge: the inferred letter stands, and
+        // the caver can still open the bay unscaled and scale by hand
+    }
+    try {
+        w.calibCancelButton.clicked.connect(function() {
+            SketchScans.endCalibration();
+        });
+    } catch (eCancelConn) {
+    }
+
     w.sketchButton.clicked.connect(function() {
-        var rel = selectedFile();
-        if (rel === null || w.scans === null) { return; }
-        SketchScans.sketchSoon(w.scans + "/" + rel);
+        SketchScans.sketchClicked();
     });
     buttons.addWidget(w.refreshButton, 0, 0);
     buttons.addStretch(1);
@@ -442,6 +490,8 @@ SketchScans.buildDock = function(appWin) {
     buttons.addWidget(w.pickAlignButton, 0, 0);
     buttons.addWidget(w.alignButton, 0, 0);
     buttons.addWidget(w.insertButton, 0, 0);
+    buttons.addWidget(w.lrudCombo, 0, 0);
+    buttons.addWidget(w.calibCancelButton, 0, 0);
     buttons.addWidget(w.sketchButton, 0, 0);
     layout.addLayout(buttons, 0);
 
@@ -487,6 +537,13 @@ SketchScans.buildDock = function(appWin) {
                 // another scan: the picks belonged to the old one
                 w.picking = null;
                 w.pickAlignButton.text = qsTr("Assign Stations to Scans");
+            }
+            // Likewise for a calibration: the two clicks are pixels on
+            // ONE scan, and carrying them onto another would scale the
+            // new sketch by the old one's page -- silently, and
+            // plausibly enough to be traced before anyone noticed.
+            if (w.calibrating !== null && w.calibrating.rel !== rel) {
+                SketchScans.endCalibration();
             }
             if (!CsScanPreview.show(w.scanView, w.scans + "/" + rel)) {
                 showMessage(qsTr("unreadable image"));
@@ -641,8 +698,245 @@ SketchScans.buildDock = function(appWin) {
             qsTr("%1 picked -- click another, or Place").arg(n));
     };
 
+    // =================================================================
+    // SETTING A SECTION'S SCALE IN THE PREVIEW.
+    //
+    // A cross-section scan has no scale. The station it is cut at DOES:
+    // its LRUD says how far the wall, floor and ceiling really are. So
+    // the scale is one division -- a known distance over the pixels it
+    // covers on the page -- and both halves are available here, before
+    // anything is placed in the drawing.
+    //
+    // WHY IN THE DOCK RATHER THAN IN THE CAD VIEW. The bay used to open
+    // auto-fitted to the ghost's width and the caver rescaled the scan
+    // by hand over the outline. That is fitting by eye against a
+    // reference, over a faded image, with the mouse -- and it is the
+    // step of this workflow that takes longest and is easiest to get
+    // wrong. Two clicks on the scan itself, at whatever zoom makes the
+    // marks readable, is the same information measured instead of
+    // judged. The station must be chosen FIRST, because the station is
+    // where the known distance comes from.
+    // =================================================================
+
+    /** The station's LRUD read as the caver would say it, for a
+     *  readout: "L 4.5  R 3  U 11  D 2", or "" when nothing is known. */
+    var lrudText = function(lrud) {
+        var parts = [];
+        for (var i = 0; i < CsSectionBay.LRUD_LETTERS.length; i++) {
+            var letter = CsSectionBay.LRUD_LETTERS[i];
+            var d = CsSectionBay.lrudDistance(lrud, letter);
+            if (d !== null) {
+                parts.push(letter + " " + (Math.round(d * 100) / 100));
+            }
+        }
+        return parts.join("  ");
+    };
+
+    /** What the panel says about the calibration as it stands, and what
+     *  the Sketch Section button offers to do next. */
+    var refreshCalibState = function() {
+        var c = w.calibrating;
+        try {
+            w.lrudCombo.visible = (c !== null && c.to !== null);
+            w.calibCancelButton.visible = (c !== null);
+        } catch (eVis) {
+        }
+        if (c === null) {
+            try {
+                w.sketchButton.text = qsTr("Sketch Section");
+                w.sketchButton.enabled = (frameNow() === "section");
+                w.pickAlignButton.enabled = true;
+                w.frameCombo.enabled = true;
+            } catch (eIdle) {
+            }
+            return;
+        }
+        // Locked for the same reason the alignment locks them: the
+        // station and the frame belong to THIS calibration, not to
+        // whatever the panel is set to by the time the bay opens.
+        try {
+            w.pickAlignButton.enabled = false;
+            w.frameCombo.enabled = false;
+            w.sketchButton.enabled = true;
+        } catch (eLock) {
+        }
+        var known = lrudText(c.lrud);
+        if (c.from === null) {
+            pickStatus(qsTr("%1: click the STATION point on the scan")
+                .arg(c.station) + (known === "" ? "" : "  (" + known + ")"));
+        } else if (c.to === null) {
+            pickStatus(qsTr("Now click a wall on the outline -- above " +
+                "for U, below for D, left for L, right for R"));
+        } else if (c.cal !== null && c.cal.refused === "nolrud") {
+            pickStatus(qsTr("%1 has no %2 measured, so it cannot set a " +
+                "scale. Pick another letter, or open the bay unscaled.")
+                .arg(c.station).arg(String(c.cal.letter)) +
+                (known === "" ? "" : "  (" + known + ")"));
+        } else if (c.cal !== null && c.cal.refused !== undefined) {
+            pickStatus(qsTr("Those two clicks are the same point -- " +
+                "click the station, then a wall."));
+        } else if (c.cal !== null) {
+            // WHAT IT MEASURED AND WHAT FELL OUT OF IT, both. The
+            // distance alone does not say whether the pick was any
+            // good; the units-per-pixel is the number that is about to
+            // place the scan, so it is the one the caver can sanity-
+            // check against the other scans in this cave.
+            pickStatus(qsTr("%1 = %2 over %3 px  --  %4 units/pixel")
+                .arg(String(c.cal.letter))
+                .arg(Math.round(c.cal.distance * 100) / 100)
+                .arg(Math.round(c.cal.pixels))
+                .arg(Math.round(c.cal.unitsPerPixel * 100000) / 100000) +
+                (c.cal.inferred === true ? "" : qsTr("  (corrected)")));
+        }
+        try {
+            w.sketchButton.text = (c.cal !== null &&
+                c.cal.refused === undefined) ?
+                qsTr("Open Bay (scaled)") : qsTr("Open Bay (unscaled)");
+        } catch (eText) {
+        }
+    };
+
+    /** Re-read the two clicks, against the letter now in force. */
+    var recalibrate = function() {
+        var c = w.calibrating;
+        if (c === null || c.from === null || c.to === null) {
+            return;
+        }
+        c.cal = CsSectionBay.calibrationFrom(c.from, c.to, c.lrud,
+            CsSectionDraw.scaleOf(), c.forced);
+        // The combo follows the letter in force, so the caver is
+        // correcting FROM the guess rather than from whatever the combo
+        // happened to be left on.
+        try {
+            var letter = String(c.cal.letter);
+            for (var i = 0; i < CsSectionBay.LRUD_LETTERS.length; i++) {
+                if (CsSectionBay.LRUD_LETTERS[i] === letter) {
+                    w.lrudCombo.currentIndex = i;
+                }
+            }
+        } catch (eSync) {
+        }
+    };
+
+    /** A left-click on the scan while a calibration is running. */
+    var takeCalibrationPick = function(point) {
+        var c = w.calibrating;
+        // A THIRD CLICK STARTS OVER rather than being ignored. Once
+        // there is a readout the caver can see whether the pair was any
+        // good, and "click the station again" is the obvious way to
+        // redo it -- there is no other gesture that would mean anything
+        // at that moment.
+        if (c.from === null || c.to !== null) {
+            c.from = { x: point.x, y: point.y };
+            c.to = null;
+            c.cal = null;
+            c.forced = null;
+        } else {
+            c.to = { x: point.x, y: point.y };
+            recalibrate();
+        }
+        refreshCalibState();
+    };
+
+    /** The caver disagrees with the inferred letter. */
+    var correctLetter = function() {
+        if (w.calibrating === null) {
+            return;
+        }
+        try {
+            w.calibrating.forced =
+                CsSectionBay.LRUD_LETTERS[w.lrudCombo.currentIndex];
+        } catch (e) {
+            return;
+        }
+        recalibrate();
+        refreshCalibState();
+    };
+
+    /** Put the panel back to idle, calibrated or not. */
+    var endCalibration = function() {
+        w.calibrating = null;
+        refreshCalibState();
+        pickStatus("");
+    };
+
+    /** Open the bay with whatever the calibration came to. */
+    var openCalibratedBay = function() {
+        var c = w.calibrating;
+        if (c === null) {
+            return;
+        }
+        // A REFUSED CALIBRATION IS NOT A FAILURE, it is the old
+        // behaviour: null here means SketchSection auto-fits exactly as
+        // it always did, and the caver scales by hand over the ghost.
+        var cal = (c.cal !== null && c.cal !== undefined &&
+            c.cal.refused === undefined && c.cal.unitsPerPixel > 0) ?
+            { unitsPerPixel: c.cal.unitsPerPixel } : null;
+        var path = c.path;
+        var station = c.station;
+        endCalibration();
+        SketchScans.sketchSoon(path, station, cal);
+    };
+
+    /** The Sketch Section button: start a calibration, or finish one. */
+    var sketchClicked = function() {
+        if (w.calibrating !== null) {
+            openCalibratedBay();
+            return;
+        }
+        if (w.picking !== null) {
+            return;               // an alignment owns the clicks already
+        }
+        var rel = selectedFile();
+        if (rel === null || w.scans === null) {
+            return;
+        }
+        var path = w.scans + "/" + rel;
+        // NO PREVIEW VIEW, NO CALIBRATION. A build that could not embed
+        // the CAD view (CsScanPreview.build returned null) has nowhere
+        // to take the two clicks, and the bay is still worth opening --
+        // so it opens the way it always has rather than not at all.
+        if (w.scanView === null) {
+            SketchScans.sketchSoon(path);
+            return;
+        }
+        var doc = EAction.getDocument();
+        if (isNull(doc)) {
+            return;
+        }
+        // THE STATION FIRST, always. The whole calibration is one
+        // division by the station's own LRUD, so there is nothing to
+        // measure until it is known which station that is -- and
+        // choosing it afterwards would let the caver take two careful
+        // clicks and then find the station has no measurement for them.
+        var station = SketchSection.askStation(doc);
+        if (station === null) {
+            return;                       // cancelled: nothing starts
+        }
+        var lrud = SketchSection.lrudAt(doc, station);
+        if (lrud === null) {
+            // Nothing to calibrate against. Said out loud rather than
+            // silently skipped: the caver is about to be handed the
+            // hand-scaling workflow and should know why.
+            warning("Sketch Scans: " + station + " has no LRUD in this " +
+                "drawing's survey, so there is no known distance to set " +
+                "a scale from. The bay opens auto-fitted; scale the scan " +
+                "by hand over the ghost.");
+            SketchScans.sketchSoon(path, station, null);
+            return;
+        }
+        w.calibrating = { path: path, rel: rel, station: station,
+                          lrud: lrud, from: null, to: null,
+                          forced: null, cal: null };
+        refreshCalibState();
+    };
+
     /** A left-click on the scan while an alignment is running. */
     var takePick = function(point) {
+        if (w.calibrating !== null) {
+            takeCalibrationPick(point);
+            return;
+        }
         if (w.picking === null) {
             // not aligning: the click is just a readout
             pickStatus(CsScanPreview.pixelText(point, w.scanView.heightPx));
@@ -896,6 +1190,9 @@ SketchScans.buildDock = function(appWin) {
     };
 
     w.pickAlignButton.clicked.connect(function() {
+        if (w.calibrating !== null) {
+            return;               // a calibration owns the clicks already
+        }
         if (w.picking !== null) {
             if (w.picking.pairs.length >= 2) {
                 placeAligned();
@@ -1038,6 +1335,9 @@ SketchScans.buildDock = function(appWin) {
 
     SketchScans.showPreview = showPreview;
     SketchScans.takePick = takePick;
+    SketchScans.sketchClicked = sketchClicked;
+    SketchScans.correctLetter = correctLetter;
+    SketchScans.endCalibration = endCalibration;
     return dock;
 };
 
@@ -1556,12 +1856,18 @@ SketchScans.alignSoon = function(entityId) {
  * the start on the next event loop turn, out of that handler -- the
  * same shape alignSoon above uses, for the same reason.
  */
-SketchScans.sketchSoon = function(path) {
+SketchScans.sketchSoon = function(path, station, calibration) {
+    // Normalised here rather than at every call site: an omitted
+    // argument is `undefined`, and SketchSection.run's own "was I given
+    // a station?" test reads "" and null, not undefined.
+    var name = (station === undefined || station === null ||
+        station === "") ? null : station;
+    var cal = (calibration === undefined) ? null : calibration;
     var timer = new QTimer(RMainWindowQt.getMainWindow());
     timer.singleShot = true;
     timer.timeout.connect(function() {
         try {
-            SketchSection.run(path, null);
+            SketchSection.run(path, name, cal);
         } catch (e) {
             EAction.handleUserWarning("Sketch Section: " + e);
         }
