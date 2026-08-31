@@ -102,7 +102,7 @@ fingerprint rather than inventing a fifth.
 | 38 | flag scope across begin/end | dialects, *flags blocks | flags never leak past their block |
 | 39 | `*fix ... reference` | dialects, E1 | the optional keyword sits AFTER the station name; skipped, coordinates still read |
 | 40 | quoted `*team` with roles | dialects | member name kept, role words dropped |
-| 41 | two `*date`s, no leg between, a `*team` on each | dialects, end of file | the date-B trip is `J. PARK` ALONE. Was a known gap (the previous crew leaked in, crediting someone with a trip they were not on); fixed 2026-08-31 -- a change of DATE now clears the crew, while two `*date` lines carrying the SAME date still accumulate their `*team`s as one trip |
+| 41 | two `*date`s, no leg between, a `*team` on each | dialects, end of file | the date-B trip is `J. PARK` ALONE. Was a known gap (the previous crew leaked in, crediting someone with a trip they were not on); fixed 2026-08-31 -- a change of DATE clears the crew, while two `*date` lines carrying the SAME date still accumulate their `*team`s as one trip |
 | 42 | self-loop | broken, X3->X3 | ERROR `self-loop` |
 | 43 | zero distance | broken, X2->X3 | ERROR `bad-distance` |
 | 44 | clino out of range | broken, X3->X4 (95) | ERROR `inclination-range` |
@@ -152,7 +152,7 @@ PITFALL CAVE fixtures written to testdata/
 == as built (model, before any file round trip)
    trips 4   shots 141 (splays 65)   stations 71   unit ft
    resolved stations 71   loops 5   ties 1   anchors 2   unresolved 0
-   surveyed 2457.7 ft   plan 2327.1   depth 142.7
+   surveyed 2406.3 ft   plan 2276.1   depth 142.7
    loop A14..B4  1.22 off over 332.2 = 0.37%
    loop B10..B11  6.05 off over 58.0 = 10.43%
    loop B18..B17  69.96 off over 70.0 = 99.94%
@@ -171,7 +171,7 @@ PITFALL CAVE fixtures written to testdata/
 == Survex round trip (PitfallCave.svx)
    trips 4   shots 140 (splays 65)   stations 71   unit ft
    resolved stations 71   loops 5   ties 1   anchors 2   unresolved 0
-   surveyed 2457.7 ft   plan 2327.1   depth 142.7
+   surveyed 2406.3 ft   plan 2276.1   depth 142.7
    loop A14..B4  1.22 off over 332.2 = 0.37%
    loop B10..B11  6.05 off over 58.0 = 10.43%
    loop B18..B17  69.96 off over 70.0 = 99.94%
@@ -189,7 +189,7 @@ PITFALL CAVE fixtures written to testdata/
 == Compass round trip (PitfallCave.dat)
    trips 4   shots 141 (splays 65)   stations 71   unit ft
    resolved stations 71   loops 5   ties 0   anchors 1   unresolved 0
-   surveyed 2457.7 ft   plan 2327.1   depth 142.7
+   surveyed 2406.3 ft   plan 2276.1   depth 142.7
    loop A14..B4  1.22 off over 332.2 = 0.37%
    loop B10..B11  6.05 off over 58.0 = 10.43%
    loop B18..B17  69.96 off over 70.0 = 99.94%
@@ -205,7 +205,7 @@ PITFALL CAVE fixtures written to testdata/
 == CSV round trip (PitfallCave.csv)
    trips 1   shots 141 (splays 65)   stations 71   unit ft
    resolved stations 71   loops 5   ties 1   anchors 2   unresolved 0
-   surveyed 2457.7 ft   plan 2327.1   depth 142.7
+   surveyed 2406.3 ft   plan 2276.1   depth 142.7
    loop A14..B4  1.22 off over 332.2 = 0.37%
    loop B10..B11  6.05 off over 58.0 = 10.43%
    loop B18..B17  69.96 off over 70.0 = 99.94%
@@ -234,7 +234,7 @@ PITFALL CAVE fixtures written to testdata/
 == dialect fixture (PitfallCave_Dialects.svx)
    trips 3   shots 23 (splays 5)   stations 20   unit ft
    resolved stations 20   loops 0   ties 0   anchors 2   unresolved 0
-   surveyed 1070.0 ft   plan 953.1   depth 527.6
+   surveyed 920.0 ft   plan 803.1   depth 527.6
    finding fsbs-azimuth-disagree x1
    finding fsbs-inclination-disagree x1
    finding near-plumb x3

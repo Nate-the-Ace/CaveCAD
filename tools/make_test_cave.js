@@ -917,13 +917,16 @@ var DIALECT_SVX =
 "S1 S2 40.00 90.00 0.00\n" +
 "*end SIDE\n" +
 "\n" +
-"; --- 12. the KNOWN teamDirty GAP, documented in CsSurvex.parse: two\n" +
-"; *date lines with NO leg between them leave the previous team's\n" +
-"; members appended to the new trip. The fixture pins the current\n" +
-"; behaviour so a fix shows up as a CHANGE rather than a surprise:\n" +
-"; the trip below should be J. PARK alone, and today reads as the\n" +
-"; running team plus J. PARK.\n" +
+"; --- 12. two *date lines with NO leg between them, each with its own\n" +
+"; *team. This used to credit T. FIRST with J. PARK's trip: the\n" +
+"; previous crew was cleared only when a LEG had been recorded since\n" +
+"; the last *date, and here there is none between them. A change of\n" +
+"; DATE now clears the crew on its own, so the trip below must read\n" +
+"; J. PARK alone. (The *team line between the two dates is what makes\n" +
+"; this a real reproduction -- without it the earlier crew is already\n" +
+"; cleared by the leg above and the trap never fires.)\n" +
 "*date 2026-07-06\n" +
+"*team \"T. FIRST\" notes\n" +
 "*date 2026-07-07\n" +
 "*team \"J. PARK\" notes\n" +
 "K2 P1 20.00 270.00 0.00\n" +
@@ -1366,7 +1369,7 @@ var MANIFEST = [
 "| 38 | flag scope across begin/end | dialects, *flags blocks | flags never leak past their block |",
 "| 39 | `*fix ... reference` | dialects, E1 | the optional keyword sits AFTER the station name; skipped, coordinates still read |",
 "| 40 | quoted `*team` with roles | dialects | member name kept, role words dropped |",
-"| 41 | KNOWN GAP: two `*date`s, no leg between | dialects, end of file | today the previous team leaks into the new trip -- pinned, not fixed |",
+"| 41 | two `*date`s, no leg between, a `*team` on each | dialects, end of file | the date-B trip is `J. PARK` ALONE. Was a known gap (the previous crew leaked in, crediting someone with a trip they were not on); fixed 2026-08-31 -- a change of DATE clears the crew, while two `*date` lines carrying the SAME date still accumulate their `*team`s as one trip |",
 "| 42 | self-loop | broken, X3->X3 | ERROR `self-loop` |",
 "| 43 | zero distance | broken, X2->X3 | ERROR `bad-distance` |",
 "| 44 | clino out of range | broken, X3->X4 (95) | ERROR `inclination-range` |",
