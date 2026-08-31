@@ -128,13 +128,16 @@ E4 0.0 0.0 30.0 2.0
 S1 S2 40.00 90.00 0.00
 *end SIDE
 
-; --- 12. the KNOWN teamDirty GAP, documented in CsSurvex.parse: two
-; *date lines with NO leg between them leave the previous team's
-; members appended to the new trip. The fixture pins the current
-; behaviour so a fix shows up as a CHANGE rather than a surprise:
-; the trip below should be J. PARK alone, and today reads as the
-; running team plus J. PARK.
+; --- 12. two *date lines with NO leg between them, each with its own
+; *team. This used to credit T. FIRST with J. PARK's trip: the
+; previous crew was cleared only when a LEG had been recorded since
+; the last *date, and here there is none between them. A change of
+; DATE now clears the crew on its own, so the trip below must read
+; J. PARK alone. (The *team line between the two dates is what makes
+; this a real reproduction -- without it the earlier crew is already
+; cleared by the leg above and the trap never fires.)
 *date 2026-07-06
+*team "T. FIRST" notes
 *date 2026-07-07
 *team "J. PARK" notes
 K2 P1 20.00 270.00 0.00

@@ -167,31 +167,43 @@ CsFormatSurvex.parse = function(content) {
                 // and only then *team lines is unaffected -- teamDirty
                 // is still false at that point.
                 //
-                // KNOWN GAP: this heuristic only fires when a leg sits
-                // between the two *date lines (that's what sets
-                // teamDirty). Two *date lines with NO leg in between
-                // ("*date A / *team Alice / *date B / *team Bob / leg")
-                // never see teamDirty go true before the second *date,
-                // so the reset above does not run and Bob's *team line
-                // appends onto Alice's, wrongly producing team
-                // "Alice, Bob" for the date-B trip. Not fixed here --
-                // just documented.
-                if (teamDirty) {
-                    curTeam = "";
-                    survey.team = "";
-                    teamDirty = false;
-                }
+                // The gap this used to leave open (pitfall 41): the
+                // heuristic fired only when a LEG sat between the two
+                // *date lines, because a leg is what sets teamDirty.
+                // "*date A / *team Alice / *date B / *team Bob / leg"
+                // never saw teamDirty go true before the second *date,
+                // so Bob's *team line appended onto Alice's and the
+                // date-B trip came back crewed "Alice, Bob" -- a
+                // person credited with a trip they were not on, which
+                // is worse than a missing name.
+                //
+                // A CHANGE OF DATE now clears the crew on its own. That
+                // is the real signal: two *date lines carrying the same
+                // date are one trip whose *team lines must accumulate
+                // (which is why the comparison is against the date
+                // VALUE and not merely "a *date was seen"), and a
+                // different date is a different trip whoever wrote it.
+                // teamDirty is kept for the case it always covered --
+                // the same date re-declared after legs -- since a file
+                // may legitimately repeat a date to reopen a trip.
                 // "*date surveyed 1987-07-11", ranges: keep the first date
                 var dtok = (/^(surveyed|explored)$/i.test(tokens[1]) &&
                     tokens.length > 2) ? tokens[2] : tokens[1];
                 var dm = /^(\d{4})[.-](\d{1,2})[.-](\d{1,2})/.exec(dtok);
+                var newDate = null;
                 if (dm !== null) {
-                    curDate = dm[1] + "-" +
+                    newDate = dm[1] + "-" +
                         (dm[2].length < 2 ? "0" : "") + dm[2] + "-" +
                         (dm[3].length < 2 ? "0" : "") + dm[3];
-                } else {
-                    curDate = dtok.replace(/\./g, "-");
                 }
+                if (teamDirty || (newDate !== null && curDate !== "" &&
+                        newDate !== curDate)) {
+                    curTeam = "";
+                    survey.team = "";
+                    teamDirty = false;
+                }
+                curDate = (newDate !== null) ? newDate :
+                    dtok.replace(/\./g, "-");
                 survey.date = curDate;
             } else if (cmd === "*team" && tokens.length > 1) {
                 // '*team "Nick Proctor" compass clino' -- name, then roles

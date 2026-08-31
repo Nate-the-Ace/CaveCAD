@@ -102,7 +102,7 @@ fingerprint rather than inventing a fifth.
 | 38 | flag scope across begin/end | dialects, *flags blocks | flags never leak past their block |
 | 39 | `*fix ... reference` | dialects, E1 | the optional keyword sits AFTER the station name; skipped, coordinates still read |
 | 40 | quoted `*team` with roles | dialects | member name kept, role words dropped |
-| 41 | KNOWN GAP: two `*date`s, no leg between | dialects, end of file | today the previous team leaks into the new trip -- pinned, not fixed |
+| 41 | two `*date`s, no leg between, a `*team` on each | dialects, end of file | the date-B trip is `J. PARK` ALONE. Was a known gap (the previous crew leaked in, crediting someone with a trip they were not on); fixed 2026-08-31 -- a change of DATE now clears the crew, while two `*date` lines carrying the SAME date still accumulate their `*team`s as one trip |
 | 42 | self-loop | broken, X3->X3 | ERROR `self-loop` |
 | 43 | zero distance | broken, X2->X3 | ERROR `bad-distance` |
 | 44 | clino out of range | broken, X3->X4 (95) | ERROR `inclination-range` |

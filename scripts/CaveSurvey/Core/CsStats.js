@@ -8,7 +8,10 @@ var CsStats = {};
  * \param survey the CsModel survey
  * \param resolved CsNetwork.resolve() result
  * \return {
- *   surveyedLength   sum of tape lengths of drawn, non-splay shots
+ *   surveyedLength   sum of tape lengths of the shots that count for
+ *                    length -- see CsStats.countsForLength, which
+ *                    excludes duplicates and surface legs as well as
+ *                    splays
  *   planLength       same shots projected to plan
  *   stationCount
  *   shotCount
@@ -18,6 +21,30 @@ var CsStats = {};
  *   worstLoop        the loop with the largest percent error, or null
  * } -- lengths in survey.distanceUnit.
  */
+/**
+ * True when a shot's tape belongs in the cave's LENGTH.
+ *
+ * THE ONE RULE, so CsStats and CsContrib cannot disagree in front of a
+ * reader looking at a title block and a contributions window side by
+ * side.
+ *
+ * excludeFromLength is what makes this more than a copy of "is it
+ * drawn": a duplicate leg (Compass L, Survex *flags duplicate, CSV
+ * flag L) and a surface leg are both PLOTTED and both out of the
+ * length, which is exactly the distinction a caver means by re-shooting
+ * a passage. Counting them inflates the one number a cave is quoted by
+ * -- Pitfall Cave over-reported by 51.40 ft in 2457.71, and nothing in
+ * the suite noticed until the fixture's own manifest was made
+ * executable (tests/pitfall_audit.js, pitfalls 21 and 22).
+ *
+ * A splay has no length of its own, a shot with no far end never
+ * happened, and excludeFromAll is out of the survey entirely.
+ */
+CsStats.countsForLength = function(shot) {
+    return !(shot.excludeFromAll || shot.excludeFromLength || shot.splay ||
+        shot.from === "" || shot.to === "");
+};
+
 CsStats.compute = function(survey, resolved, tapeMode) {
     var surveyed = 0.0;
     var plan = 0.0;
@@ -25,7 +52,7 @@ CsStats.compute = function(survey, resolved, tapeMode) {
 
     for (var i = 0; i < survey.shots.length; i++) {
         var s = survey.shots[i];
-        if (s.excludeFromAll || s.splay || s.from === "" || s.to === "") {
+        if (!CsStats.countsForLength(s)) {
             continue;
         }
         shotCount++;

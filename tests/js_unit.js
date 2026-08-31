@@ -21611,6 +21611,105 @@ for (var zwi = 0; zwi < zWriters.length; zwi++) {
 }
 
 // ---------------------------------------------------------------------
+// A CHANGE OF DATE ends a trip's crew, whether or not a leg came first.
+//
+// The old rule cleared the running team only when a LEG had been
+// recorded since the last *date. "*date A / *team Alice / *date B /
+// *team Bob / leg" therefore appended Bob onto Alice and credited
+// Alice with a trip she was not on -- worse than a missing name,
+// because it reads as evidence. Two *date lines carrying the SAME date
+// are still one trip whose *team lines accumulate, which is why the
+// comparison is against the date value rather than "a *date was seen".
+// ---------------------------------------------------------------------
+
+function svxTeams(lines) {
+    var parsed = CsFormatSurvex.parse(lines.join("\n"));
+    var out = [];
+    for (var i = 0; i < parsed.trips.length; i++) {
+        out.push(parsed.trips[i].date + "=" + parsed.trips[i].team);
+    }
+    return out.join(" | ");
+}
+var svxHead = ["*begin G", "*data normal from to tape compass clino"];
+
+eqs(svxTeams(svxHead.concat([
+        "*date 2026-01-01", "*team \"Alice\"",
+        "*date 2026-01-02", "*team \"Bob\"",
+        "G1 G2 10 0 0", "*end G"])),
+    "2026-01-02=Bob",
+    "two dates with no leg between them: the second trip is Bob alone");
+
+eqs(svxTeams(svxHead.concat([
+        "*date 2026-01-01", "*team \"Alice\"",
+        "*date 2026-01-01", "*team \"Bob\"",
+        "G1 G2 10 0 0", "*end G"])),
+    "2026-01-01=Alice, Bob",
+    "the SAME date twice is one trip, and its teams accumulate");
+
+eqs(svxTeams(svxHead.concat([
+        "*date 2026-01-01", "*team \"Alice\"", "*team \"Bob\"",
+        "G1 G2 10 0 0", "*end G"])),
+    "2026-01-01=Alice, Bob",
+    "the ordinary two-member crew is untouched");
+
+eqs(svxTeams(svxHead.concat([
+        "*date 2026-01-01", "*team \"Alice\"", "G1 G2 10 0 0",
+        "*date 2026-01-02", "*team \"Bob\"", "G2 G3 10 0 0", "*end G"])),
+    "2026-01-01=Alice | 2026-01-02=Bob",
+    "two real trips still split, one crew each");
+
+// ---------------------------------------------------------------------
+// A duplicate or surface leg is PLOTTED but out of the LENGTH.
+//
+// The one number a cave is quoted by. Re-shooting a passage (Compass L,
+// Survex *flags duplicate, the CSV flag column) and walking a surface
+// leg between entrances both draw and both must be out of the total --
+// otherwise the map claims passage that was surveyed once and counted
+// twice. CsStats counted them until pitfalls 21/22 were made
+// executable; CsContrib inherited the same gap by copying the rule, so
+// both now go through CsStats.countsForLength.
+// ---------------------------------------------------------------------
+
+var lenSv = CsModel.newSurvey();
+lenSv.shots = [
+    shotOf("L1", "L2", 100, 0, 0),
+    shotOf("L2", "L3", 50, 0, 0),
+    shotOf("L2", "L3", 50, 0, 0),      // the re-shoot
+    shotOf("L3", "L4", 25, 90, 0)      // the surface walk
+];
+lenSv.shots[2].excludeFromLength = true;
+lenSv.shots[3].excludeFromLength = true;
+lenSv.shots[3].excludeFromPlot = true;
+var lenRes = CsNetwork.resolve(lenSv, {});
+var lenStats = CsStats.compute(lenSv, lenRes, CsTraverse.SLOPE);
+near(lenStats.surveyedLength, 150, 1e-9,
+    "surveyed length leaves out the duplicate and the surface leg");
+
+ok(CsStats.countsForLength(lenSv.shots[0]) === true,
+    "countsForLength: an ordinary leg counts");
+ok(CsStats.countsForLength(lenSv.shots[2]) === false,
+    "countsForLength: a duplicate does not");
+ok(CsStats.countsForLength(lenSv.shots[3]) === false,
+    "countsForLength: nor does a surface leg");
+
+// The duplicate is still DRAWN -- excluding it from the length must not
+// quietly take it off the map, which is a different flag entirely.
+ok(lenSv.shots[2].excludeFromPlot === false,
+    "the duplicate leg is still plotted");
+
+// CsContrib's rows have to sum to the same number the title block
+// prints, so it must apply the identical rule rather than its own copy.
+if (typeof CsContrib !== "undefined") {
+    var lenTrips = CsContrib.byTrip(lenSv, lenRes, CsTraverse.SLOPE);
+    var lenSum = 0;
+    for (var lti = 0; lti < lenTrips.length; lti++) {
+        lenSum += lenTrips[lti].distance;
+    }
+    near(lenSum, lenStats.surveyedLength, 1e-9,
+        "CsContrib's rows still sum to the title block's Length");
+}
+
+// ---------------------------------------------------------------------
 // CsLayers.twinFor -- the forward direction of planBaseOf.
 //
 // This is what lets a tool serve every view without a hand-written twin

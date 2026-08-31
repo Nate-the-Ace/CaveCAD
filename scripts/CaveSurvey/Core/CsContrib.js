@@ -9,12 +9,13 @@
 // (see ensureTrips' own docblock).
 //
 // WHAT COUNTS. Exactly the shots CsStats.compute counts: not splays,
-// not excludeFromAll, nothing missing an end. That is copied
-// deliberately rather than reinvented -- the rows have to sum to the
-// Length printed on the title block, or the window and the sheet
-// disagree in front of the reader. It inherits CsStats' known gap
-// (excludeFromLength is not honoured); closing that is a CsStats change
-// and belongs with the task already spawned for it, not here.
+// not excludeFromAll, not excludeFromLength, nothing missing an end.
+// DELEGATED rather than reinvented -- CsStats.countsForLength is the
+// one rule both call, because the rows have to sum to the Length
+// printed on the title block or the window and the sheet disagree in
+// front of the reader. (The excludeFromLength half of that rule was
+// the gap this comment used to describe as known and open; it closed
+// with pitfalls 21 and 22.)
 //
 // One more divergence from CsStats, and this one is deliberate rather
 // than inherited: byTrip and byRun both skip a shot whose CsTraverse.
@@ -276,8 +277,7 @@ CsContrib.people = function(teamText) {
 /** True when a shot contributes to surveyed length. The one rule, so
  *  every row type agrees and the total matches CsStats. */
 CsContrib.counts = function(shot) {
-    return !(shot.excludeFromAll || shot.splay ||
-        shot.from === "" || shot.to === "");
+    return CsStats.countsForLength(shot);
 };
 
 /** percent of total, 0 (not NaN, not Infinity) when there is no total
