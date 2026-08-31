@@ -1352,17 +1352,24 @@ class TestEngineTestsLoadEveryCoreFile(unittest.TestCase):
             if stripped.startswith("//"):
                 continue
             found.extend(re.findall(
-                r'"(scripts/CaveSurvey/Core/[A-Za-z0-9_/]+\.js)"', stripped))
+                r'"scripts/CaveSurvey/Core/([A-Za-z0-9_/]+\.js)"', stripped))
         return found
 
     def _on_disk(self):
+        """Core files, named the way js_unit.js names them: relative to
+        Core/ itself (CsUuid.js, Format/CsCsv.js).
+
+        Relative to CORE and not to REPO on purpose -- tools/publish.sh
+        runs this suite against a STAGED COPY via CAVESURVEY_ADDON, so
+        repo-relative paths would not match the source strings there and
+        every Core file would read as unaccounted for."""
         paths = set()
         for dirpath, _dirnames, filenames in os.walk(self.core):
             for filename in filenames:
                 if not filename.endswith(".js"):
                     continue
                 full = os.path.join(dirpath, filename)
-                paths.add(os.path.relpath(full, REPO).replace(os.sep, "/"))
+                paths.add(os.path.relpath(full, self.core).replace(os.sep, "/"))
         return paths
 
     def test_every_core_file_is_loaded_or_explicitly_excluded(self):
