@@ -15877,6 +15877,288 @@ if (!IS_NODE) {
 }());
 
 // ---------------------------------------------------------------------
+// Frame twin derivation -- a ceiling looks the same in all three views.
+//
+// The whole point of the derivation loop at the bottom of CsLayers.js.
+// Before it, the twins were hand-copied rows and had drifted in ways
+// nothing caught: SECTION-WALLS-SURVEYED at Weight035 against plan's
+// Weight050, SECTION-CEILING and SECTION-FLOOR at Weight025 against
+// Weight050, SECTION-WALLS-INFERRED white against plan's gray. Every
+// one of those is a section that reads lighter than the same passage in
+// plan for no reason a cartographer chose.
+// ---------------------------------------------------------------------
+
+(function() {
+    loadRepoScript("scripts/CaveSurvey/Core/CsLayers.js");
+
+    // planBaseOf: the CTRL- pair must be tested before the bare one, or
+    // the empty plan prefix (which matches everything) claims every
+    // CTRL-SECTION-* name as its own plan layer.
+    eqs(CsLayers.planBaseOf("CTRL-PROFILE-SHOTS"), "CTRL-SHOTS",
+        "planBaseOf: CTRL-PROFILE-SHOTS -> CTRL-SHOTS");
+    eqs(CsLayers.planBaseOf("CTRL-SECTION-BOX"), "CTRL-BOX",
+        "planBaseOf: CTRL-SECTION-BOX -> CTRL-BOX, not itself");
+    eqs(CsLayers.planBaseOf("SECTION-CEILING"), "CEILING",
+        "planBaseOf: SECTION-CEILING -> CEILING");
+    eqs(CsLayers.planBaseOf("PROFILE-WALLS-INFERRED"), "WALLS-INFERRED",
+        "planBaseOf: PROFILE-WALLS-INFERRED -> WALLS-INFERRED");
+    ok(CsLayers.planBaseOf("WALLS-SURVEYED") === null,
+        "planBaseOf: a plan layer has no plan base");
+    ok(CsLayers.planBaseOf(null) === null, "planBaseOf: null is not a crash");
+
+    // EVERY twin is byte-identical to its plan row, on all three axes.
+    var wrong = [], orphan = [], name, base, a, b;
+    for (name in CsLayers.DEFAULTS) {
+        if (!CsLayers.DEFAULTS.hasOwnProperty(name)) {
+            continue;
+        }
+        base = CsLayers.planBaseOf(name);
+        if (base === null) {
+            continue;
+        }
+        b = CsLayers.DEFAULTS[base];
+        if (isNull(b)) {
+            // CTRL-SECTION-GHOST is the one documented exception: a
+            // section-only layer with no plan twin to derive from.
+            if (name !== "CTRL-SECTION-GHOST") {
+                orphan.push(name);
+            }
+            continue;
+        }
+        a = CsLayers.DEFAULTS[name];
+        if (a[0] !== b[0] || a[1] !== b[1] || a[2] !== b[2]) {
+            wrong.push(name + " != " + base);
+        }
+    }
+    eqs(wrong.join(","), "",
+        "every frame twin's appearance is its plan row's, exactly");
+    eqs(orphan.join(","), "",
+        "no frame-prefixed layer exists without a plan row behind it");
+
+    // Spot checks naming the four rows that were actually wrong before,
+    // so a regression says WHICH one rather than only "some twin".
+    eqs(CsLayers.DEFAULTS["SECTION-WALLS-SURVEYED"][2], "Weight050",
+        "section walls are as heavy as plan walls");
+    eqs(CsLayers.DEFAULTS["SECTION-CEILING"][2], "Weight050",
+        "a section ceiling is as heavy as a plan ceiling");
+    eqs(CsLayers.DEFAULTS["SECTION-WALLS-INFERRED"][0], "gray",
+        "an inferred wall is gray in a section too -- white would make " +
+        "it identical to a surveyed one");
+    eqs(CsLayers.DEFAULTS["CTRL-SECTION-TEXT-LABELS"][2],
+        CsLayers.DEFAULTS["CTRL-TEXT-LABELS"][2],
+        "section control labels weigh what plan control labels weigh");
+
+    // NO_TWIN is honoured. An elevation of an aerial photograph, a
+    // second north arrow, or a cut mark inside its own cut are all
+    // meaningless -- and the cut mark is the one a prefix rule would
+    // most easily get wrong.
+    var mustNot = ["PROFILE-CTRL-AERIAL", "CTRL-PROFILE-AERIAL",
+        "CTRL-SECTION-AERIAL", "CTRL-PROFILE-GRID", "CTRL-SECTION-GRID",
+        "PROFILE-NORTH-ARROW", "SECTION-NORTH-ARROW",
+        "PROFILE-CROSS-SECTION-MARKERS", "SECTION-CROSS-SECTION-MARKERS",
+        "CTRL-PROFILE-RAW", "CTRL-SECTION-HIDDEN", "CTRL-PROFILE-DATA"];
+    var made = [];
+    for (var i = 0; i < mustNot.length; i++) {
+        if (!isNull(CsLayers.DEFAULTS[mustNot[i]])) {
+            made.push(mustNot[i]);
+        }
+    }
+    eqs(made.join(","), "", "NO_TWIN layers gained no frame twin");
+
+    // Sheet layers belong to the printed page, not to a view.
+    for (i = 0; i < CsLayers.SHEET_LAYERS.length; i++) {
+        ok(isNull(CsLayers.DEFAULTS["PROFILE-" + CsLayers.SHEET_LAYERS[i]]),
+            "sheet layer " + CsLayers.SHEET_LAYERS[i] + " gained no twin");
+    }
+
+    // The twins are real CONSTANTS, not only table rows. This is what
+    // tools/sync_template_layers.js enumerates -- it walks CsLayers'
+    // string properties -- so a twin that is only a DEFAULTS row never
+    // reaches the shipped template at all.
+    var consts = {};
+    for (var k in CsLayers) {
+        if (CsLayers.hasOwnProperty(k) && typeof CsLayers[k] === "string") {
+            consts[CsLayers[k]] = k;
+        }
+    }
+    ok(consts["SECTION-WATER-PERENNIAL"] === "SECTION_WATER_PERENNIAL",
+        "a derived twin is a constant under its dashes-to-underscores name");
+    ok(consts["PROFILE-FLOWSTONE"] === "PROFILE_FLOWSTONE",
+        "a hand-written twin constant keeps its own name, not a second one");
+
+    // The NSS symbol layers reach every frame. They shipped in the
+    // template for a year with no registry row at all, which meant no
+    // considered appearance outside a template-born drawing AND no way
+    // to draw water or flowstone in an elevation.
+    var symbols = ["WATER-PERENNIAL", "WATER-SIPHON", "FORMATIONS-DRAPERY",
+        "SEDIMENT-CLAY-MUD", "GUANO", "BIOLOGY", "ARCHAEOLOGY",
+        "GEOLOGY-JOINTS-FRACTURES", "ANCHORS-BOLTS", "CLIMBS-CHIMNEYS",
+        "PITS-DOMES", "OVERHANG-LEDGE", "CEILING-HEIGHT", "DRIPLINE"];
+    var gaps = [];
+    for (i = 0; i < symbols.length; i++) {
+        if (isNull(CsLayers.DEFAULTS[symbols[i]])) {
+            gaps.push(symbols[i]);
+        }
+        if (isNull(CsLayers.DEFAULTS["PROFILE-" + symbols[i]])) {
+            gaps.push("PROFILE-" + symbols[i]);
+        }
+        if (isNull(CsLayers.DEFAULTS["SECTION-" + symbols[i]])) {
+            gaps.push("SECTION-" + symbols[i]);
+        }
+    }
+    eqs(gaps.join(","), "", "every NSS symbol layer exists in all three frames");
+
+    // A row naming an NSS_* linetype MUST carry a fallback: those
+    // patterns exist only in the template's LTYPE table, and a drawing
+    // without them would otherwise take an invalid linetype id silently.
+    var noFallback = [];
+    for (name in CsLayers.DEFAULTS) {
+        if (!CsLayers.DEFAULTS.hasOwnProperty(name)) {
+            continue;
+        }
+        a = CsLayers.DEFAULTS[name];
+        if (String(a[1]).indexOf("NSS_") === 0 && a.length < 4) {
+            noFallback.push(name);
+        }
+    }
+    eqs(noFallback.join(","), "",
+        "every NSS_* linetype row names a fallback for drawings without it");
+
+    // The directed pair, still directed. A test that only checks the two
+    // DIFFER passes with them inverted -- which is how they shipped
+    // inverted once already.
+    eqs(CsLayers.DEFAULTS["NOTES-ELEVATION-LINE"][1], "DASHED",
+        "the unmeasured elevation fallback is dashed");
+    eqs(CsLayers.DEFAULTS["NOTES-ELEVATION"][1], "CONTINUOUS",
+        "the real elevation reading is continuous");
+    ok(CsLayers.DEFAULTS["NOTES-ELEVATION-LINE"][0] === "gray" &&
+        CsLayers.DEFAULTS["NOTES-ELEVATION"][0] === "white",
+        "the fallback is the muted one of the pair, not the reading");
+
+    // styleOf resolves through all three routes.
+    eqs(CsLayers.styleOf("CEILING")[0], "magenta", "styleOf: a literal row");
+    eqs(CsLayers.styleOf("SECTION-CEILING")[0], "magenta",
+        "styleOf: a derived twin");
+    eqs(CsLayers.styleOf("NOT-A-CAVE-SURVEY-LAYER")[0], "white",
+        "styleOf: an unknown layer takes the fallback, never undefined");
+    eqs(CsLayers.styleOf("NOT-A-CAVE-SURVEY-LAYER")[2], "Weight025",
+        "styleOf: the fallback carries a weight too");
+})();
+
+// ---------------------------------------------------------------------
+// CsRestyle -- QCAD engine only (node has no R* classes).
+//
+// The repair path for every drawing already in existence: CsLayers.ensure
+// resolves appearance at CREATION and never again, so a cave keeps the
+// palette it was born with. This is also what tools/
+// sync_template_layers.js now calls, and the reason the shipped template
+// can finally be asserted to MATCH the registry.
+// ---------------------------------------------------------------------
+
+if (!IS_NODE) {
+    (function() {
+        loadRepoScript("scripts/CaveSurvey/Core/CsLayers.js");
+        loadRepoScript("scripts/CaveSurvey/Core/CsLayerVariants.js");
+        loadRepoScript("scripts/CaveSurvey/Core/CsRestyle.js");
+
+        var doc = new RDocument(new RMemoryStorage(), new RSpatialIndexNavel());
+        var di = new RDocumentInterface(doc);
+
+        // A layer deliberately created WRONG: white and hairline where
+        // the registry says magenta at 0.50.
+        var wrong = new RLayer(doc, "CEILING", false, false,
+            new RColor("white"), doc.getLinetypeId("CONTINUOUS"),
+            RLineweight.Weight000, false);
+        var opAdd = new RAddObjectsOperation();
+        opAdd.addObject(wrong);
+        di.applyOperation(opAdd);
+
+        // ...and one a caver owns, which must survive untouched.
+        var mine = new RLayer(doc, "NATHANS-OWN-LAYER", false, false,
+            new RColor("white"), doc.getLinetypeId("CONTINUOUS"),
+            RLineweight.Weight000, false);
+        var opMine = new RAddObjectsOperation();
+        opMine.addObject(mine);
+        di.applyOperation(opMine);
+
+        ok(CsRestyle.matches(doc, doc.queryLayer("CEILING"),
+            CsLayers.styleOf("CEILING")) === false,
+            "matches: a wrong layer reports wrong");
+
+        var res = CsRestyle.apply(doc, di);
+        var lay = doc.queryLayer("CEILING");
+        eqs(lay.getColor().name(), new RColor("magenta").name(),
+            "restyle: CEILING took the registry colour");
+        ok(lay.getLineweight() === RLineweight.Weight050,
+            "restyle: CEILING took the registry lineweight");
+        ok(res.changed.length === 1 && res.changed[0] === "CEILING",
+            "restyle: reported exactly the layer it changed, got " +
+            res.changed.join(","));
+
+        var untouched = doc.queryLayer("NATHANS-OWN-LAYER");
+        ok(untouched.getLineweight() === RLineweight.Weight000,
+            "restyle: a layer the registry does not own is left alone");
+
+        // IDEMPOTENCE. This is not a nicety: matches() written with the
+        // wrong accessor spelling (getRed() rather than red()) throws
+        // into its own catch and answers false forever, so every layer
+        // is "changed" on every run and the sync tool rewrites the
+        // shipped template every time it is invoked. That shipped, and
+        // only the second run gave it away.
+        var again = CsRestyle.apply(doc, di);
+        eqs(again.changed.join(","), "",
+            "restyle: a second sweep changes nothing");
+
+        // ensureAndApply adds what is missing as well.
+        var full = CsRestyle.ensureAndApply(doc, di);
+        ok(full.added > 100,
+            "ensureAndApply: created the registry layers this drawing " +
+            "lacked, got " + full.added);
+        ok(doc.hasLayer("SECTION-WATER-PERENNIAL"),
+            "ensureAndApply: the derived twins are real layers");
+        ok(!doc.hasLayer("CTRL-DATA"),
+            "ensureAndApply: the retired data-store layer is not poured in");
+        var third = CsRestyle.apply(doc, di);
+        eqs(third.changed.join(","), "",
+            "restyle: everything ensureAndApply created is already correct");
+
+        // A LOCKED suite layer is restyled and re-locked. The suite's own
+        // locks stop a caver dragging bookkeeping geometry, not the
+        // palette that owns its appearance.
+        var box = doc.queryLayer("CTRL-PROFILE-BOX");
+        ok(!isNull(box) && box.isLocked() === true,
+            "CTRL-PROFILE-BOX is created locked");
+        CsLayers.withLayerUnlocked(doc, di, "CTRL-PROFILE-BOX", function() {
+            var b = doc.queryLayer("CTRL-PROFILE-BOX");
+            b.setLineweight(RLineweight.Weight050);
+            var op = new RModifyObjectsOperation();
+            op.addObject(b, false);
+            di.applyOperation(op);
+        });
+        var locked = CsRestyle.apply(doc, di);
+        eqs(locked.changed.join(","), "CTRL-PROFILE-BOX",
+            "restyle: a locked suite layer is restyled, not skipped");
+        box = doc.queryLayer("CTRL-PROFILE-BOX");
+        ok(box.getLineweight() === RLineweight.Weight000,
+            "restyle: the locked layer took the registry weight back");
+        ok(box.isLocked() === true,
+            "restyle: the lock is put back afterwards");
+
+        // linetypeIdFor falls back rather than returning an invalid id.
+        // This document has no NSS_INFERRED -- only the template does.
+        var lt = CsLayers.linetypeIdFor(doc,
+            ["gray", "NSS_INFERRED", "Weight035", "DASHED"]);
+        ok(lt === doc.getLinetypeId("DASHED"),
+            "linetypeIdFor: an absent NSS pattern falls back to its stand-in");
+        ok(CsLayers.linetypeIdFor(doc,
+            ["gray", "NO_SUCH_LINETYPE_AT_ALL", "Weight000"]) ===
+            doc.getLinetypeId("CONTINUOUS"),
+            "linetypeIdFor: with no fallback named, CONTINUOUS -- which " +
+            "always exists");
+    }());
+}
+
+// ---------------------------------------------------------------------
 // CsBind.inFrame -- the pure half of the cross-frame refusal
 // ---------------------------------------------------------------------
 

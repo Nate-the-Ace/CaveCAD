@@ -72,6 +72,10 @@ include(includeBasePath + "/Format/CsTherion.js");
 include(includeBasePath + "/Format/CsRegistry.js");
 include(includeBasePath + "/CsLayers.js");
 include(includeBasePath + "/CsLayerVariants.js");
+// After CsLayers and CsLayerVariants: CsRestyle re-applies
+// CsLayers.styleOf to layers that already exist, and resolves variant
+// layers through CsLayerVariants.baseOf.
+include(includeBasePath + "/CsRestyle.js");
 include(includeBasePath + "/CsBackup.js");
 include(includeBasePath + "/CsTrace.js");
 include(includeBasePath + "/CsStore.js");

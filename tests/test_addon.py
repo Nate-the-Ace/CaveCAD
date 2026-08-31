@@ -155,32 +155,34 @@ def parse_layer_registry():
     to its string."""
     with open(os.path.join(ADDON, "Core", "CsLayers.js")) as fh:
         source = fh.read()
-    return dict(re.findall(r'CsLayers\.([A-Z_]+) = "([^"]+)"', source))
-
-
-def parse_defaults_table():
-    """name -> (colorName, linetype, lineweightKey) for every row of
-    CsLayers.DEFAULTS in Core/CsLayers.js. Source-scraped rather than
-    imported (this is a QCAD-context .js file, not something Python can
-    execute) so a test comparing against it tracks edits automatically."""
-    with open(os.path.join(ADDON, "Core", "CsLayers.js")) as fh:
-        source = fh.read()
-    match = re.search(r"CsLayers\.DEFAULTS = \{(.*?)\n\};", source, re.S)
-    assert match is not None, ("CsLayers.DEFAULTS table not found -- did "
-                               "its opening/closing syntax change?")
-    entries = re.findall(
-        r'"([^"]+)":\s*\[\s*"([^"]+)",\s*"([^"]+)",\s*"([^"]+)"\s*\]',
-        match.group(1))
-    return dict((name, (color, linetype, weight))
-                for name, color, linetype, weight in entries)
+    consts = dict(re.findall(r'CsLayers\.([A-Z_]+) = "([^"]+)"', source))
+    # The derived twin constants. CsLayers defines these at load time
+    # (see the derivation loop at the bottom of that file) rather than
+    # spelling out 100 more assignments, so they exist for every caller
+    # -- tools/sync_template_layers.js enumerates the registry by walking
+    # CsLayers' string properties -- but appear nowhere in the source
+    # text for the regex above to find.
+    for name in list(consts.values()):
+        for twin in frame_twins(name):
+            consts[twin.replace("-", "_")] = twin
+    return consts
 
 
 SHEET_LAYERS = {"0", "Defpoints", "BORDER", "TITLE-BLOCK", "LEGEND",
                 "SCALE-BAR"}
 
+# The plan-frame layers CsLayers.NO_TWIN excludes from frame twinning.
+# A SECOND copy of that set, written from the JS rather than scraped, on
+# the same principle as frame_of below: if the two drift, the twin tests
+# disagree with the registry and say so.
+NO_TWIN = {"CTRL-AERIAL", "CTRL-CONTOUR", "CTRL-CONTOUR-MAJOR",
+           "CTRL-GRID", "CTRL-DATA", "CTRL-HIDDEN", "CTRL-RAW",
+           "CROSS-SECTION-MARKERS", "NORTH-ARROW"}
+
 
 def frame_of(name):
-    """Which view a layer belongs to: "plan", "profile" or "sheet".
+    """Which view a layer belongs to: "plan", "profile", "section" or
+    "sheet".
 
     DELIBERATELY A SECOND IMPLEMENTATION of CsLayers.frameOf, written
     from its rules rather than scraped from its source: if either one
@@ -192,7 +194,58 @@ def frame_of(name):
         return "sheet"
     if name.startswith("CTRL-PROFILE-") or name.startswith("PROFILE-"):
         return "profile"
+    if name.startswith("CTRL-SECTION-") or name.startswith("SECTION-"):
+        return "section"
     return "plan"
+
+
+def frame_twins(name):
+    """The PROFILE and SECTION twin names a plan-frame layer derives, or
+    () when it derives none.
+
+    The Python side of the derivation loop at the bottom of
+    Core/CsLayers.js -- again a second implementation, so a change to the
+    twinning rule has to be made in both places deliberately."""
+    if name in SHEET_LAYERS or name in NO_TWIN or frame_of(name) != "plan":
+        return ()
+    if name.startswith("CTRL-"):
+        stem = name[len("CTRL-"):]
+        return ("CTRL-PROFILE-" + stem, "CTRL-SECTION-" + stem)
+    return ("PROFILE-" + name, "SECTION-" + name)
+
+
+def parse_defaults_table():
+    """name -> (colorName, linetype, lineweightKey) for every layer the
+    registry styles: the literal rows of CsLayers.DEFAULTS in
+    Core/CsLayers.js, PLUS the frame twins that file derives from them at
+    load time.
+
+    Source-scraped rather than imported (this is a QCAD-context .js file,
+    not something Python can execute) so a test comparing against it
+    tracks edits automatically. The derived half has to be recomputed
+    here for the same reason -- the twins exist only after the JS has
+    run, and no PROFILE- or SECTION- row appears in the source text at
+    all.
+
+    The optional 4th element of a row (the linetype fallback for drawings
+    with no NSS_* pattern) is deliberately dropped: it names what to use
+    when the real linetype is ABSENT, so it is never the appearance a
+    template -- which defines every NSS_* pattern -- actually carries."""
+    with open(os.path.join(ADDON, "Core", "CsLayers.js")) as fh:
+        source = fh.read()
+    match = re.search(r"CsLayers\.DEFAULTS = \{(.*?)\n\};", source, re.S)
+    assert match is not None, ("CsLayers.DEFAULTS table not found -- did "
+                               "its opening/closing syntax change?")
+    entries = re.findall(
+        r'"([^"]+)":\s*\[\s*"([^"]+)",\s*"([^"]+)",\s*"([^"]+)"'
+        r'(?:,\s*"[^"]+")?\s*\]',
+        match.group(1))
+    table = dict((name, (color, linetype, weight))
+                 for name, color, linetype, weight in entries)
+    for name in list(table):
+        for twin in frame_twins(name):
+            table[twin] = table[name]
+    return table
 
 
 # Standard SVG/CSS extended colour keywords, as Qt's QColor(name)
@@ -206,9 +259,15 @@ def frame_of(name):
 # DEFAULTS row starts using a new one.
 SVG_TRUE_COLOR = {
     "cyan": 0x00FFFF,
+    "deepskyblue": 0x00BFFF,
+    "gold": 0xFFD700,
     "gray": 0x808080,
+    "limegreen": 0x32CD32,
+    "magenta": 0xFF00FF,
+    "peru": 0xCD853F,
     "pink": 0xFFC0CB,
     "red": 0xFF0000,
+    "slateblue": 0x6A5ACD,
     "white": 0xFFFFFF,
 }
 
@@ -562,6 +621,13 @@ class TestLayerVocabulary(unittest.TestCase):
         """
         with open(os.path.join(ADDON, "Core", "CsLayers.js")) as fh:
             source = fh.read()
+        # The APPEARANCE half is no longer a literal row in the source:
+        # every SECTION- layer below derives its style from its plan twin
+        # (see the derivation loop at the bottom of CsLayers.js), so what
+        # has to be asserted is that the resolved table has an entry --
+        # grepping the source for '"SECTION-CEILING": [' would now fail
+        # on a registry that is perfectly correct.
+        defaults = parse_defaults_table()
         for constant, layer in [
                 ("CTRL_SECTION_BOX", "CTRL-SECTION-BOX"),
                 ("CTRL_SECTION_OUTLINE", "CTRL-SECTION-OUTLINE"),
@@ -575,7 +641,10 @@ class TestLayerVocabulary(unittest.TestCase):
                 ("SECTION_FLOOR", "SECTION-FLOOR"),
                 ("SECTION_BREAKDOWN", "SECTION-BREAKDOWN")]:
             self.assertIn('CsLayers.%s = "%s";' % (constant, layer), source)
-            self.assertIn('"%s": [' % layer, source)
+            self.assertIn(layer, defaults,
+                          "%s has no resolved appearance -- neither a "
+                          "literal DEFAULTS row nor a derivable plan twin"
+                          % layer)
 
     def test_layer_constant_matches_its_layer_name(self):
         """THE ONE NAMING RULE: a layer constant IS its layer name with
@@ -820,10 +889,17 @@ class TestSyncTemplateLayersTool(unittest.TestCase):
             self.shipped("NSS_Cave_Template_PLAN.dxf"),
             self.STRIPPED).encode("utf-8")
 
-    def expected_ok_line(self, plan):
-        return ("ok    %s -- %d layer(s) added: %s"
-                % (plan, len(self.STRIPPED),
-                   ", ".join(sorted(self.STRIPPED))))
+    def expected_ok_lines(self, plan):
+        """The two lines the ADD path prints: the summary, then the list.
+
+        The tool restyles as well as adds now, so the summary carries a
+        restyle count too -- and over a fixture whose only fault is
+        MISSING layers that count is zero, which is itself worth
+        asserting: a restyle sweep that "fixed" layers already correct
+        would rewrite the shipped template on every run."""
+        return ["ok    %s -- %d layer(s) added, 0 of %d restyled"
+                % (plan, len(self.STRIPPED), len(parse_defaults_table()) - 1),
+                "      added:    " + ", ".join(sorted(self.STRIPPED))]
 
     def test_add_path_then_idempotence(self):
         defaults = parse_defaults_table()
@@ -833,10 +909,11 @@ class TestSyncTemplateLayersTool(unittest.TestCase):
 
             first = self.run_tool(tmp)
             lines = first.splitlines()
-            self.assertIn(
-                self.expected_ok_line(plan), lines,
-                "the add path did not report the exact expected line -- "
-                "got: %r" % first)
+            for expected in self.expected_ok_lines(plan):
+                self.assertIn(
+                    expected, lines,
+                    "the add path did not report the exact expected line "
+                    "-- got: %r" % first)
             self.assertIn("### SYNC TEMPLATE LAYERS OK", lines)
 
             with open(plan, "rb") as fh:
@@ -871,7 +948,8 @@ class TestSyncTemplateLayersTool(unittest.TestCase):
 
             second = self.run_tool(tmp)
             self.assertIn(
-                "skip  %s -- every registry layer already present" % plan,
+                "skip  %s -- every registry layer already present and "
+                "correct" % plan,
                 second.splitlines(),
                 "second run did not report the exact expected skip line "
                 "-- got: %r" % second)
@@ -895,7 +973,8 @@ class TestSyncTemplateLayersTool(unittest.TestCase):
                 .encode("utf-8"))
             output = self.run_tool(tmp)
             self.assertIn(
-                "skip  %s -- every registry layer already present" % plan,
+                "skip  %s -- every registry layer already present and "
+                "correct" % plan,
                 output.splitlines(),
                 "the shipped template is missing a registry layer -- "
                 "re-run tools/sync_template_layers.js. Got: %r" % output)
@@ -1090,70 +1169,37 @@ class TestReadmeToolTable(unittest.TestCase):
 # (test_registry_layers_exist_in_plan_template) and a sync-tool test
 # that compares DEFAULTS against itself.
 #
-# THE DRIFT THAT EXISTS TODAY IS RECORDED, NOT FIXED. Sixteen of the
-# forty-five registry layers already disagree with the template, and
-# resolving them is a cartographic decision, not a test's business:
-# some are pure representation (0x7f7f7f vs 0x808080 -- two spellings
-# of "gray"), some are real (ENTRANCE is red in the template and white
-# in the registry), and in two cases THE TEMPLATE IS THE BETTER ONE --
-# it uses the real NSS cave linetypes where the registry says plain
-# DASHED. Recording each divergence as the template's ACTUAL value
-# means this test fails on any NEW drift, and also fails if a recorded
-# drift is RESOLVED, which forces this table to stay honest instead of
-# quietly rotting.
+# THE DRIFT IS GONE, 2026-08-31. It used to be recorded here rather than
+# fixed -- sixteen of the registry's layers disagreed with the template,
+# and the note said resolving them was deferred until "a layer rewrite
+# [that] is coming and will need to touch all of it anyway". That rewrite
+# happened: the palette in CsLayers.DEFAULTS was rebuilt on one colour/
+# weight/linetype scheme, every PROFILE- and SECTION- twin became a
+# DERIVED copy of its plan row instead of a hand-written one, and
+# tools/sync_template_layers.js learned to RESTYLE the layers it finds
+# and not only the ones it creates -- which is the mechanism that had
+# made the drift unfixable in the first place.
 #
-# STATUS, 2026-08-24: the owner has DEFERRED resolving this drift -- a
-# layer rewrite is coming and will need to touch all of it anyway. So
-# this table is deliberately a record of the status quo, not a to-do
-# list being worked down. Its job until that rewrite is to stop NEW
-# drift appearing while the old drift stands. When the rewrite happens,
-# the entries flagged "REAL disagreement" below are the ones that need a
-# decision, and WALLS-INFERRED is the one that matters most.
+# Each recorded divergence was decided rather than split: ENTRANCE kept
+# the template's red at 0.50 (NSS convention, and the registry's white
+# was the accident); CROSS-SECTION-MARKERS moved to red with the rest of
+# the reference family; WALLS-INFERRED kept the template's NSS_INFERRED
+# linetype -- the template WAS right about that -- and took the
+# registry's gray, because a white inferred wall renders identically to a
+# surveyed one; BREAKDOWN-BOUNDARY likewise kept NSS_DOTTED and went
+# gray; the 0x7f7f7f/0x808080 grey spellings collapsed onto SVG gray.
+#
+# The table stays, empty, and so do both tests. Emptying it is not the
+# same as deleting it: an entry here is how a FUTURE deliberate
+# divergence gets recorded, and the stale-entry test is what stops one
+# rotting. An empty table plus a green suite is the strongest statement
+# available -- the shipped template and the registry agree on colour,
+# linetype and lineweight for all 196 layers, and any new disagreement
+# fails immediately.
 #
 # name -> {"color": truecolor, "linetype": str, "lineweight": int}
 # Only the keys that actually diverge are listed per layer.
-TEMPLATE_APPEARANCE_DRIFT = {
-    # -- "gray" spelled 0x7f7f7f (the ACI-8 grey the template was
-    #    authored with) where the registry means SVG 0x808080. Same
-    #    intent, one bit apart; harmless, and not worth rewriting the
-    #    shipped template over.
-    "CTRL-AERIAL": {"color": 0x7F7F7F},
-    "CTRL-HIDDEN": {"color": 0x7F7F7F},
-    "CTRL-RAW": {"color": 0x7F7F7F},
-    "CTRL-SPLAYS": {"color": 0x7F7F7F},
-    "CTRL-SHOTS": {"color": 0x7F7F7F, "lineweight": 9},
-    "BREAKDOWN": {"color": 0x7F7F7F, "lineweight": 18},
-    "TEXT-NOTES": {"color": 0x7F7F7F, "lineweight": 0},
-    # -- CTRL-GRID is a lighter grey than the registry's. The DEFAULTS
-    #    comment claims it "matches the plan template's own CTRL-GRID
-    #    record"; it does not, and that comment is wrong.
-    "CTRL-GRID": {"color": 0xBFBFBF},
-    # -- REAL disagreements. Someone has to choose; nobody has.
-    #    ENTRANCE: red in the template, white in the registry.
-    "ENTRANCE": {"color": 0xFF0000, "lineweight": 50},
-    #    CROSS-SECTION-MARKERS: green in the template, white in the
-    #    registry.
-    "CROSS-SECTION-MARKERS": {"color": 0x00FF00, "lineweight": 18},
-    #    WALLS-INFERRED is the one that matters most. In the template it
-    #    is WHITE and NSS_INFERRED; the registry says gray and DASHED.
-    #    White makes an INFERRED wall render identically to a SURVEYED
-    #    one in any template-born drawing -- the same class of mistake as
-    #    the ELEVATION/ELEVATION-LINE inversion. The linetype, though, is
-    #    the template being RIGHT: NSS_INFERRED is the real cave
-    #    cartography linetype and DASHED is a generic stand-in.
-    "WALLS-INFERRED": {"color": 0xFFFFFF, "linetype": "NSS_INFERRED",
-                       "lineweight": 35},
-    #    BREAKDOWN-BOUNDARY, same shape: template linetype NSS_DOTTED is
-    #    better than the registry's DASHED; its colour is a light grey
-    #    where the registry says cyan.
-    "BREAKDOWN-BOUNDARY": {"color": 0xBABABA, "linetype": "NSS_DOTTED",
-                           "lineweight": 9},
-    # -- lineweight-only drift.
-    "CTRL-LRUD": {"lineweight": 9},
-    "CTRL-STATIONS": {"lineweight": 18},
-    "CTRL-STATION-LABELS": {"lineweight": 0},
-    "TEXT-LABELS": {"lineweight": 0},
-}
+TEMPLATE_APPEARANCE_DRIFT = {}
 
 
 class TestTemplateMatchesRegistry(unittest.TestCase):

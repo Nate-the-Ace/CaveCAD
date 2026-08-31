@@ -38,6 +38,8 @@ if (typeof isNull === "undefined") {
 
 includeBasePath = core;
 include(core + "/CsLayers.js");
+include(core + "/CsLayerVariants.js");
+include(core + "/CsRestyle.js");
 
 /**
  * Every layer name the registry declares as a constant, sorted.
@@ -80,7 +82,21 @@ function dxfLibFilter() {
 }
 
 /**
- * Adds whatever the template is missing, and rewrites it only then.
+ * Adds whatever the template is missing, RESTYLES what it already has,
+ * and rewrites it only if either changed something.
+ *
+ * THE RESTYLE HALF IS THE POINT, and it was missing for a year. This
+ * tool used to call CsLayers.ensure and nothing else, and ensure
+ * resolves appearance AT CREATION -- so a layer already in the template
+ * kept whatever colour, linetype and weight it was first written with,
+ * no matter what CsLayers.DEFAULTS said afterwards. That is how the
+ * shipped template came to carry ENTRANCE red/0.50 against a registry
+ * saying white/0.35, BREAKDOWN-BOUNDARY in a third appearance again, and
+ * CTRL-SHOTS at 0.09 against a registry saying 0.25 -- every one of them
+ * invisible to a test suite that only ever checked layers this tool had
+ * CREATED. CsRestyle.apply closes it: after this runs, the template
+ * agrees with the registry on all three axes, for every layer, or the
+ * run fails.
  *
  * \param path the template to bring up to date
  * \return true on success
@@ -102,8 +118,11 @@ function syncLayers(path, wanted) {
         added.push(wanted[i]);
     }
 
-    if (added.length === 0) {
-        print("skip  " + path + " -- every registry layer already present");
+    var res = CsRestyle.apply(doc, di);
+
+    if (added.length === 0 && res.changed.length === 0) {
+        print("skip  " + path +
+            " -- every registry layer already present and correct");
         return true;
     }
 
@@ -111,8 +130,14 @@ function syncLayers(path, wanted) {
         print("FAIL  cannot write " + path);
         return false;
     }
-    print("ok    " + path + " -- " + added.length + " layer(s) added: " +
-        added.join(", "));
+    print("ok    " + path + " -- " + added.length + " layer(s) added, " +
+        res.changed.length + " of " + res.total + " restyled");
+    if (added.length > 0) {
+        print("      added:    " + added.join(", "));
+    }
+    if (res.changed.length > 0) {
+        print("      restyled: " + res.changed.join(", "));
+    }
     return true;
 }
 

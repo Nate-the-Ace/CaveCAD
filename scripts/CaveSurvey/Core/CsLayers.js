@@ -176,156 +176,197 @@ CsLayers.PROFILE_RIMSTONE = "PROFILE-RIMSTONE";
 CsLayers.PROFILE_SLOPE = "PROFILE-SLOPE";
 CsLayers.CTRL_PROFILE_SHAPE_SPINE = "CTRL-PROFILE-SHAPE-SPINE";
 
+// ---------------------------------------------------------------------
+// THE NSS SYMBOL LAYERS -- the plan template's feature vocabulary.
+//
+// These 25 shipped in NSS_Cave_Template_PLAN.dxf from the beginning and
+// were never registry constants, which had two consequences worth
+// stating because both were silent: a drawing that never saw the
+// template got them from CsLayers.ensure's white/CONTINUOUS/0.25
+// FALLBACK rather than from any considered appearance, and they had no
+// PROFILE- or SECTION- twin, so a caver could not draw water or
+// flowstone in an elevation or a section at all. Registered here, they
+// get both -- the twins come from the derivation at the bottom of this
+// file, not from 50 more hand-written lines.
+// ---------------------------------------------------------------------
+CsLayers.WATER_PERENNIAL = "WATER-PERENNIAL";
+CsLayers.WATER_INTERMITTENT = "WATER-INTERMITTENT";
+CsLayers.WATER_POOL_SUMP = "WATER-POOL-SUMP";
+CsLayers.WATER_SIPHON = "WATER-SIPHON";
+CsLayers.WATER_SPRING_RESURGENCE = "WATER-SPRING-RESURGENCE";
+CsLayers.WATER_DRIP_SEEP = "WATER-DRIP-SEEP";
+CsLayers.WATER_FLOW_ARROWS = "WATER-FLOW-ARROWS";
+CsLayers.DRIPLINE = "DRIPLINE";
+CsLayers.FORMATIONS_FLOWSTONE = "FORMATIONS-FLOWSTONE";
+CsLayers.FORMATIONS_RIMSTONE = "FORMATIONS-RIMSTONE";
+CsLayers.FORMATIONS_DRAPERY = "FORMATIONS-DRAPERY";
+CsLayers.FORMATIONS_DRIP = "FORMATIONS-DRIP";
+CsLayers.FORMATIONS_MOONMILK_POPCORN = "FORMATIONS-MOONMILK-POPCORN";
+CsLayers.SEDIMENT_SAND_GRAVEL = "SEDIMENT-SAND-GRAVEL";
+CsLayers.SEDIMENT_CLAY_MUD = "SEDIMENT-CLAY-MUD";
+CsLayers.GUANO = "GUANO";
+CsLayers.BIOLOGY = "BIOLOGY";
+CsLayers.ARCHAEOLOGY = "ARCHAEOLOGY";
+CsLayers.GEOLOGY_JOINTS_FRACTURES = "GEOLOGY-JOINTS-FRACTURES";
+CsLayers.ANCHORS_BOLTS = "ANCHORS-BOLTS";
+CsLayers.CLIMBS_CHIMNEYS = "CLIMBS-CHIMNEYS";
+CsLayers.PITS_DOMES = "PITS-DOMES";
+CsLayers.OVERHANG_LEDGE = "OVERHANG-LEDGE";
+CsLayers.CEILING_HEIGHT = "CEILING-HEIGHT";
+CsLayers.FLOOR_SLOPE = "FLOOR-SLOPE";
+
+// ---------------------------------------------------------------------
+// THE PALETTE -- what a layer looks like, and why.
+//
 // Defaults for creating a layer that is missing from the drawing
-// (someone working without the template still gets sane colors).
-// name -> [colorName, linetype, lineweightKey]
+// (someone working without the template still gets sane colors), AND --
+// since tools/sync_template_layers.js reads this table -- the appearance
+// the shipped template itself carries. One table, both jobs.
+//
+// name -> [colorName, linetype, lineweightKey, linetypeFallback?]
 // lineweightKey is resolved against RLineweight at ensure() time so
-// this table stays loadable outside QCAD.
+// this table stays loadable outside QCAD. The optional 4th element is
+// the linetype to use when the drawing has no LTYPE record for the 3rd
+// -- every NSS_* pattern lives in the template's linetype table and in
+// no other drawing, so a row naming one without a fallback would have
+// created layers with an invalid linetype id. See CsLayers.linetypeIdFor.
+//
+// THREE AXES, EACH CARRYING EXACTLY ONE MEANING. Mixing them is how the
+// old table ended up with every traced layer white and section walls
+// lighter than plan walls for no reason anyone could state:
+//
+//   COLOUR says WHAT THE THING IS. One hue per feature family:
+//     white        surveyed rock boundary, sheet furniture
+//     gray         uncertain, bulk fill, and every CTRL- layer
+//     magenta      the CEILING family -- ceiling, ceiling ledge,
+//                  overhang, ceiling-height traverse
+//     peru         the FLOOR family -- floor, floor ledge, slope,
+//                  pits/domes, sediment
+//     deepskyblue  water, in every form, dripline included
+//     gold         formations -- flowstone, rimstone, drapery, drip,
+//                  moonmilk
+//     limegreen    life and culture -- biology, archaeology, guano
+//     cyan         rigging and gear -- anchors, climbs, equipment notes
+//     slateblue    geology -- joints and fracture trends
+//     red          danger and reference -- entrance, hazard notes,
+//                  stations, station labels, section cut marks
+//     pink         dig notes, and the LRUD control fans
+//
+//   LINEWEIGHT says HOW IMPORTANT, and nothing else:
+//     Weight050  primary rock boundary (walls surveyed, ceiling, floor,
+//                entrance)
+//     Weight035  secondary boundary (walls inferred, floor ledge,
+//                pits/domes, overhang)
+//     Weight025  feature linework (flowstone, rimstone, ceiling ledge,
+//                water edges, cut marks)
+//     Weight018  annotation, text, symbols, callouts
+//     Weight009  texture and fill (slope fans, sediment, breakdown
+//                boundary, joints, dripline) and the few CTRL- layers
+//                that need to be told apart from each other
+//     Weight000  everything else CTRL-
+//
+//   LINETYPE says HOW CERTAIN: CONTINUOUS is measured, DASHED and the
+//   NSS_* patterns are inferred, provisional or symbolic.
+//
+// CTRL- LAYERS WERE DELIBERATELY LIGHTENED. They used to sit at
+// Weight025 -- the same weight as real feature linework -- so the survey
+// scaffolding competed with the map drawn over it. Survey data is
+// reference; it now reads underneath the sketch rather than through it.
+//
+// THE FRAME NEVER CHANGES THE APPEARANCE. There are no PROFILE-,
+// SECTION-, CTRL-PROFILE- or CTRL-SECTION- rows in this table on
+// purpose: every one of them is DERIVED from its plan row by the loop at
+// the bottom of this file. A ceiling looks the same in plan, profile and
+// section because there is only one row saying what a ceiling looks
+// like. Before that, the twins were hand-copied and had drifted --
+// section walls were 0.35 against plan's 0.50, SECTION-WALLS-INFERRED
+// was white against plan's gray, and nothing failed.
+//
+// The one exception, CTRL-SECTION-GHOST, is listed below with its reason.
 CsLayers.DEFAULTS = {
-    "PROFILE-BREAKDOWN-BOUNDARY": ["cyan", "DASHED", "Weight000"],
-    "SECTION-BREAKDOWN-BOUNDARY": ["cyan", "DASHED", "Weight000"],
-    "CEILING": ["white", "CONTINUOUS", "Weight050"],
-    "CTRL-BOX": ["gray", "CONTINUOUS", "Weight000"],
-    "CTRL-CEILING": ["gray", "DASHED", "Weight000"],
-    "CTRL-SECTION-CEILING": ["gray", "DASHED", "Weight000"],
-    "CTRL-FLOOR": ["gray", "DASHED", "Weight000"],
-    "CTRL-SECTION-FLOOR": ["gray", "DASHED", "Weight000"],
-    "CTRL-SECTION-LRUD": ["pink", "CONTINUOUS", "Weight025"],
-    "CTRL-PROFILE-LRUD-WALL-LEFT": ["gray", "DASHED", "Weight000"],
-    "CTRL-SECTION-LRUD-WALL-LEFT": ["gray", "DASHED", "Weight000"],
-    "CTRL-PROFILE-LRUD-WALL-RIGHT": ["gray", "DASHED", "Weight000"],
-    "CTRL-SECTION-LRUD-WALL-RIGHT": ["gray", "DASHED", "Weight000"],
-    "CTRL-OUTLINE": ["gray", "CONTINUOUS", "Weight025"],
-    "CTRL-PROFILE-OUTLINE": ["gray", "CONTINUOUS", "Weight025"],
-    "CTRL-PROFILE-SCAN": ["gray", "CONTINUOUS", "Weight000"],
-    "CTRL-SECTION-SHAPE-SPINE": ["gray", "DASHED", "Weight000"],
-    "CTRL-SECTION-SHOTS": ["gray", "CONTINUOUS", "Weight025"],
-    "CTRL-SECTION-STATION-LABELS": ["red", "CONTINUOUS", "Weight025"],
-    "CTRL-TEXT-LABELS": ["red", "CONTINUOUS", "Weight018"],
-    "SECTION-ENTRANCE": ["white", "CONTINUOUS", "Weight035"],
-    "FLOOR": ["white", "CONTINUOUS", "Weight050"],
-    "SECTION-FLOWSTONE": ["white", "CONTINUOUS", "Weight025"],
-    "SECTION-LEDGE-CEILING": ["white", "DASHED", "Weight025"],
-    "SECTION-LEDGE-FLOOR": ["white", "CONTINUOUS", "Weight035"],
-    "PROFILE-NOTES-ANNOTATION": ["white", "CONTINUOUS", "Weight000"],
-    "SECTION-NOTES-ANNOTATION": ["white", "CONTINUOUS", "Weight000"],
-    "PROFILE-NOTES-DIG": ["pink", "CONTINUOUS", "Weight018"],
-    "SECTION-NOTES-DIG": ["pink", "CONTINUOUS", "Weight018"],
-    "PROFILE-NOTES-ELEVATION": ["white", "CONTINUOUS", "Weight018"],
-    "SECTION-NOTES-ELEVATION": ["white", "CONTINUOUS", "Weight018"],
-    "PROFILE-NOTES-ELEVATION-LINE": ["gray", "DASHED", "Weight009"],
-    "SECTION-NOTES-ELEVATION-LINE": ["gray", "DASHED", "Weight009"],
-    "PROFILE-NOTES-EQUIPMENT": ["cyan", "CONTINUOUS", "Weight018"],
-    "SECTION-NOTES-EQUIPMENT": ["cyan", "CONTINUOUS", "Weight018"],
-    "PROFILE-NOTES-GENERAL": ["white", "CONTINUOUS", "Weight018"],
-    "SECTION-NOTES-GENERAL": ["white", "CONTINUOUS", "Weight018"],
-    "PROFILE-NOTES-HAZARD": ["red", "CONTINUOUS", "Weight025"],
-    "SECTION-NOTES-HAZARD": ["red", "CONTINUOUS", "Weight025"],
-    "PROFILE-NOTES-NAME": ["white", "CONTINUOUS", "Weight018"],
-    "SECTION-NOTES-NAME": ["white", "CONTINUOUS", "Weight018"],
-    "SECTION-RIMSTONE": ["white", "CONTINUOUS", "Weight025"],
-    "SECTION-SLOPE": ["white", "CONTINUOUS", "Weight000"],
-    "SECTION-TEXT-LABELS": ["white", "CONTINUOUS", "Weight018"],
-    "SECTION-TEXT-NOTES": ["white", "CONTINUOUS", "Weight009"],
-    "PROFILE-WALLS-SURVEYED": ["white", "CONTINUOUS", "Weight050"],
-    "CTRL-SHOTS": ["gray", "CONTINUOUS", "Weight025"],
-    "CTRL-STATIONS": ["red", "CONTINUOUS", "Weight025"],
-    "CTRL-STATION-LABELS": ["red", "CONTINUOUS", "Weight025"],
-    "CTRL-LRUD": ["pink", "CONTINUOUS", "Weight025"],
-    "CTRL-SPLAYS": ["gray", "CONTINUOUS", "Weight000"],
-    "CTRL-HIDDEN": ["gray", "CONTINUOUS", "Weight000"],
-    "CTRL-RAW": ["gray", "DASHED", "Weight000"],
-    "CTRL-LRUD-WALL-LEFT": ["gray", "DASHED", "Weight000"],
-    "CTRL-LRUD-WALL-RIGHT": ["gray", "DASHED", "Weight000"],
-    "CTRL-PROFILE-FLOOR": ["gray", "DASHED", "Weight000"],
-    "CTRL-PROFILE-CEILING": ["gray", "DASHED", "Weight000"],
-    // The profile frame's generated layers mirror their plan twins'
-    // appearance, so the same kind of geometry reads the same in both
-    // views of one sheet.
-    "CTRL-PROFILE-SHOTS": ["gray", "CONTINUOUS", "Weight025"],
-    "CTRL-PROFILE-STATIONS": ["red", "CONTINUOUS", "Weight025"],
-    "CTRL-PROFILE-STATION-LABELS": ["red", "CONTINUOUS", "Weight025"],
-    "CTRL-PROFILE-SPLAYS": ["gray", "CONTINUOUS", "Weight000"],
-    "CTRL-PROFILE-LRUD": ["pink", "CONTINUOUS", "Weight025"],
-    "CTRL-PROFILE-TEXT-LABELS": ["red", "CONTINUOUS", "Weight018"],
-    // Band bounding boxes: visible but recessive -- a frame around the
-    // work, never competing with it.
-    "CTRL-PROFILE-BOX": ["gray", "CONTINUOUS", "Weight000"],
-    // and the traceable ones mirror the plan feature layer a caver
-    // would reach for to draw the same thing. Ceiling and floor are
-    // the elevation's wall lines, hence WALLS-SURVEYED's weight.
-    "PROFILE-CEILING": ["white", "CONTINUOUS", "Weight050"],
-    "PROFILE-FLOOR": ["white", "CONTINUOUS", "Weight050"],
-    "PROFILE-WALLS-INFERRED": ["gray", "DASHED", "Weight025"],
-    "PROFILE-TEXT-NOTES": ["white", "CONTINUOUS", "Weight009"],
-    "PROFILE-TEXT-LABELS": ["white", "CONTINUOUS", "Weight018"],
-    "PROFILE-BREAKDOWN": ["white", "CONTINUOUS", "Weight000"],
-    "PROFILE-ENTRANCE": ["white", "CONTINUOUS", "Weight035"],
-    "CTRL-SECTION-BOX": ["gray", "CONTINUOUS", "Weight000"],
-    "CTRL-SECTION-OUTLINE": ["gray", "CONTINUOUS", "Weight025"],
-    // DASHED, hairline, same style family as CTRL-RAW: a ghost is
-    // reference to check work against, not linework anyone would
-    // mistake for the finished, CONTINUOUS outline one row up.
-    "CTRL-SECTION-GHOST": ["gray", "DASHED", "Weight000"],
-    "CTRL-SECTION-SPLAYS": ["gray", "CONTINUOUS", "Weight000"],
-    "CTRL-SECTION-STATIONS": ["red", "CONTINUOUS", "Weight025"],
-    "CTRL-SECTION-TEXT-LABELS": ["red", "CONTINUOUS", "Weight025"],
-    "CTRL-SECTION-SCAN": ["gray", "CONTINUOUS", "Weight000"],
-    "SECTION-WALLS-SURVEYED": ["white", "CONTINUOUS", "Weight035"],
-    "SECTION-WALLS-INFERRED": ["white", "DASHED", "Weight025"],
-    "SECTION-CEILING": ["white", "CONTINUOUS", "Weight025"],
-    "SECTION-FLOOR": ["white", "CONTINUOUS", "Weight025"],
-    "SECTION-BREAKDOWN": ["white", "CONTINUOUS", "Weight000"],
-    "CTRL-AERIAL": ["gray", "CONTINUOUS", "Weight000"],
-    // Contours are background context: muted like the aerial they
-    // usually sit on, majors told apart by weight alone (colors here
-    // stay within the set already proven elsewhere in this table).
-    "CTRL-CONTOUR": ["gray", "CONTINUOUS", "Weight000"],
-    "CTRL-CONTOUR-MAJOR": ["gray", "CONTINUOUS", "Weight025"],
-    "CTRL-SCAN": ["gray", "CONTINUOUS", "Weight000"],
-    // Matches the plan template's own CTRL-GRID record (light gray,
-    // continuous, 0.13mm) so a drawing without the template gets the
-    // same grid rather than the fallback appearance.
-    "CTRL-GRID": ["gray", "CONTINUOUS", "Weight013"],
+    // ---- rock boundaries: the map's primary linework ----------------
     "WALLS-SURVEYED": ["white", "CONTINUOUS", "Weight050"],
-    "WALLS-INFERRED": ["gray", "DASHED", "Weight025"],
-    "BREAKDOWN": ["white", "CONTINUOUS", "Weight000"],
-    "BREAKDOWN-BOUNDARY": ["cyan", "DASHED", "Weight000"],
-    "CROSS-SECTION-MARKERS": ["white", "CONTINUOUS", "Weight035"],
+    "WALLS-INFERRED": ["gray", "NSS_INFERRED", "Weight035", "DASHED"],
+    "ENTRANCE": ["red", "CONTINUOUS", "Weight050"],
+    "CEILING": ["magenta", "CONTINUOUS", "Weight050"],
+    "FLOOR": ["peru", "CONTINUOUS", "Weight050"],
+    // Ceiling and floor detail. LEDGE-CEILING is DASHED at the LAYER,
+    // which is what makes a Shaped Lines spine print as the NSS dashed
+    // ledge line -- the ticks are separate entities on the same layer
+    // and a tick is too short for a dash to land visibly.
+    "LEDGE-CEILING": ["magenta", "DASHED", "Weight025"],
+    "LEDGE-FLOOR": ["peru", "CONTINUOUS", "Weight035"],
+    "OVERHANG-LEDGE": ["magenta", "NSS_OVERHANG", "Weight035", "DASHED"],
+    "CEILING-HEIGHT": ["magenta", "NSS_DOTTED", "Weight018", "DASHED"],
+    "PITS-DOMES": ["peru", "CONTINUOUS", "Weight035"],
+    // Slope fans are texture, not boundary -- hairline, so a slope never
+    // reads heavier than the wall beside it.
+    "SLOPE": ["peru", "CONTINUOUS", "Weight009"],
+    "FLOOR-SLOPE": ["peru", "CONTINUOUS", "Weight009"],
+    // Breakdown is bulk, not boundary: gray so a room full of it does
+    // not shout over the walls containing it.
+    "BREAKDOWN": ["gray", "CONTINUOUS", "Weight018"],
+    "BREAKDOWN-BOUNDARY": ["gray", "NSS_DOTTED", "Weight009", "DASHED"],
+
+    // ---- water ------------------------------------------------------
+    "WATER-PERENNIAL": ["deepskyblue", "CONTINUOUS", "Weight025"],
+    "WATER-INTERMITTENT": ["deepskyblue", "NSS_WATER_INTERMITTENT",
+        "Weight018", "DASHED"],
+    "WATER-POOL-SUMP": ["deepskyblue", "CONTINUOUS", "Weight018"],
+    "WATER-SIPHON": ["deepskyblue", "CONTINUOUS", "Weight025"],
+    "WATER-SPRING-RESURGENCE": ["deepskyblue", "CONTINUOUS", "Weight025"],
+    "WATER-DRIP-SEEP": ["deepskyblue", "CONTINUOUS", "Weight009"],
+    "WATER-FLOW-ARROWS": ["deepskyblue", "CONTINUOUS", "Weight018"],
+    // A dripline is where water enters, so it belongs to the water
+    // family rather than to the entrance it is usually drawn near.
+    "DRIPLINE": ["deepskyblue", "NSS_DRIPLINE", "Weight009", "DASHED"],
+
+    // ---- formations -------------------------------------------------
+    // FLOWSTONE/RIMSTONE are the Shaped Lines layers (real generated
+    // geometry); the FORMATIONS-* pair are the hand-placed symbol
+    // layers. Same hue on purpose -- a reader should not have to know
+    // which tool drew a formation -- with the symbols one step lighter.
+    "FLOWSTONE": ["gold", "CONTINUOUS", "Weight025"],
+    "RIMSTONE": ["gold", "CONTINUOUS", "Weight025"],
+    "FORMATIONS-FLOWSTONE": ["gold", "CONTINUOUS", "Weight018"],
+    "FORMATIONS-RIMSTONE": ["gold", "CONTINUOUS", "Weight018"],
+    "FORMATIONS-DRAPERY": ["gold", "CONTINUOUS", "Weight018"],
+    "FORMATIONS-DRIP": ["gold", "CONTINUOUS", "Weight018"],
+    "FORMATIONS-MOONMILK-POPCORN": ["gold", "CONTINUOUS", "Weight009"],
+
+    // ---- sediment, life, geology, rigging ---------------------------
+    "SEDIMENT-SAND-GRAVEL": ["peru", "CONTINUOUS", "Weight009"],
+    "SEDIMENT-CLAY-MUD": ["peru", "CONTINUOUS", "Weight009"],
+    // Guano is a bat deposit before it is a sediment, so it reads with
+    // biology rather than with the mud it lies on.
+    "GUANO": ["limegreen", "CONTINUOUS", "Weight009"],
+    "BIOLOGY": ["limegreen", "CONTINUOUS", "Weight018"],
+    "ARCHAEOLOGY": ["limegreen", "CONTINUOUS", "Weight018"],
+    "GEOLOGY-JOINTS-FRACTURES": ["slateblue", "NSS_JOINT", "Weight009",
+        "DASHED"],
+    "ANCHORS-BOLTS": ["cyan", "CONTINUOUS", "Weight018"],
+    "CLIMBS-CHIMNEYS": ["cyan", "NSS_CLIMB", "Weight018", "DASHED"],
+
+    // ---- reference marks and sheet furniture ------------------------
+    // The mark in the PLAN saying where a section was cut. Red with the
+    // rest of the reference family, and NOT twinned (see NO_TWIN): a cut
+    // mark exists in the view being cut, never inside the cut.
+    "CROSS-SECTION-MARKERS": ["red", "CONTINUOUS", "Weight025"],
     "NORTH-ARROW": ["white", "CONTINUOUS", "Weight025"],
     "SCALE-BAR": ["white", "CONTINUOUS", "Weight025"],
     "TITLE-BLOCK": ["white", "CONTINUOUS", "Weight025"],
+    "BORDER": ["white", "CONTINUOUS", "Weight050"],
     "LEGEND": ["white", "CONTINUOUS", "Weight018"],
+
+    // ---- text -------------------------------------------------------
     "TEXT-LABELS": ["white", "CONTINUOUS", "Weight018"],
-    "TEXT-NOTES": ["white", "CONTINUOUS", "Weight009"],
-    "ENTRANCE": ["white", "CONTINUOUS", "Weight035"],
-    // Shaped Lines. The ceiling ledge is DASHED at the layer, which is
-    // what makes the spine itself print as the NSS dashed ledge line --
-    // the ticks are separate entities and inherit the same layer, but a
-    // tick is too short for a dash to land visibly. CTRL-SHAPE-SPINE is
-    // the invisible skeleton under flowstone/rimstone decor: gray,
-    // dashed, hairline, and created OFF (see CsLayers.OFF below).
-    "LEDGE-FLOOR": ["white", "CONTINUOUS", "Weight035"],
-    "LEDGE-CEILING": ["white", "DASHED", "Weight025"],
-    "FLOWSTONE": ["white", "CONTINUOUS", "Weight025"],
-    "RIMSTONE": ["white", "CONTINUOUS", "Weight025"],
-    // Slope fans are texture, not boundary -- hairline, so a slope
-    // never reads heavier than the wall beside it.
-    "SLOPE": ["white", "CONTINUOUS", "Weight000"],
-    "CTRL-SHAPE-SPINE": ["gray", "DASHED", "Weight000"],
-    // profile twins mirror their plan layers' appearance, the same
-    // principle the generated CTRL-PROFILE-* family follows
-    "PROFILE-LEDGE-FLOOR": ["white", "CONTINUOUS", "Weight035"],
-    "PROFILE-LEDGE-CEILING": ["white", "DASHED", "Weight025"],
-    "PROFILE-FLOWSTONE": ["white", "CONTINUOUS", "Weight025"],
-    "PROFILE-RIMSTONE": ["white", "CONTINUOUS", "Weight025"],
-    "PROFILE-SLOPE": ["white", "CONTINUOUS", "Weight000"],
-    "CTRL-PROFILE-SHAPE-SPINE": ["gray", "DASHED", "Weight000"],
-    "CTRL-DATA": ["gray", "CONTINUOUS", "Weight000"],
-    // Callout layers. Hazard is red because it is the one a caver must
-    // not miss. Every color and weight below is one already proven
-    // elsewhere in this table -- "yellow" and "green" do not appear
-    // anywhere else in CsLayers.DEFAULTS, so they are not used here.
+    // Notes are subordinate to labels: gray and lighter, so a page of
+    // marginalia does not read as loudly as the names on the map.
+    "TEXT-NOTES": ["gray", "CONTINUOUS", "Weight009"],
+
+    // ---- callout (multileader) layers, one per CsCallout style ------
+    // Hazard is red because it is the one a caver must not miss.
+    //
     // ELEVATION vs ELEVATION-LINE is a DIRECTED pair, not merely two
     // different colours. ELEVATION-LINE carries a survey-line elevation
     // standing in for a floor nobody measured, so it must read as
@@ -334,8 +375,6 @@ CsLayers.DEFAULTS = {
     // passes a "the two differ" test while making the fallback OUTSHINE
     // the measurement -- the exact misreading this pair exists to stop.
     // Do not reverse them.
-    // The plain note: the default style, so it reads like ordinary map
-    // lettering rather than announcing itself.
     "NOTES-GENERAL": ["white", "CONTINUOUS", "Weight018"],
     "NOTES-HAZARD": ["red", "CONTINUOUS", "Weight025"],
     "NOTES-DIG": ["pink", "CONTINUOUS", "Weight018"],
@@ -347,7 +386,42 @@ CsLayers.DEFAULTS = {
     // -- a reader should not be able to tell which notes the suite drew
     // and which the caver placed -- but its own layer, so a regenerate
     // can clear it without touching hand work.
-    "NOTES-ANNOTATION": ["white", "CONTINUOUS", "Weight018"]
+    "NOTES-ANNOTATION": ["white", "CONTINUOUS", "Weight018"],
+
+    // ---- control layers: survey data, not map art -------------------
+    // Weight009 where a family needs internal contrast (a shot line
+    // against its splays, a major contour against its minors),
+    // Weight000 everywhere else.
+    "CTRL-SHOTS": ["gray", "CONTINUOUS", "Weight009"],
+    "CTRL-STATIONS": ["red", "CONTINUOUS", "Weight009"],
+    "CTRL-STATION-LABELS": ["red", "CONTINUOUS", "Weight000"],
+    "CTRL-TEXT-LABELS": ["red", "CONTINUOUS", "Weight000"],
+    "CTRL-LRUD": ["pink", "CONTINUOUS", "Weight009"],
+    "CTRL-LRUD-WALL-LEFT": ["gray", "DASHED", "Weight000"],
+    "CTRL-LRUD-WALL-RIGHT": ["gray", "DASHED", "Weight000"],
+    "CTRL-SPLAYS": ["gray", "CONTINUOUS", "Weight000"],
+    "CTRL-CEILING": ["gray", "DASHED", "Weight000"],
+    "CTRL-FLOOR": ["gray", "DASHED", "Weight000"],
+    "CTRL-OUTLINE": ["gray", "CONTINUOUS", "Weight009"],
+    "CTRL-BOX": ["gray", "CONTINUOUS", "Weight000"],
+    "CTRL-SCAN": ["gray", "CONTINUOUS", "Weight000"],
+    "CTRL-SHAPE-SPINE": ["gray", "DASHED", "Weight000"],
+    "CTRL-HIDDEN": ["gray", "CONTINUOUS", "Weight000"],
+    "CTRL-RAW": ["gray", "DASHED", "Weight000"],
+    "CTRL-AERIAL": ["gray", "CONTINUOUS", "Weight000"],
+    // Contours are background context: muted like the aerial they
+    // usually sit on, majors told apart by weight alone.
+    "CTRL-CONTOUR": ["gray", "CONTINUOUS", "Weight000"],
+    "CTRL-CONTOUR-MAJOR": ["gray", "CONTINUOUS", "Weight009"],
+    "CTRL-GRID": ["gray", "CONTINUOUS", "Weight000"],
+    "CTRL-DATA": ["gray", "CONTINUOUS", "Weight000"],
+    // THE ONE FRAME-PREFIXED ROW IN THIS TABLE, and it is here because
+    // it has no plan twin to derive from: the sketch bay's reference
+    // outline exists only inside a section. DASHED and hairline, the
+    // same style family as CTRL-RAW -- a ghost is reference to check
+    // work against, never to be mistaken for the finished, CONTINUOUS
+    // CTRL-SECTION-OUTLINE it sits under.
+    "CTRL-SECTION-GHOST": ["gray", "DASHED", "Weight000"]
 };
 
 // Layers that belong to the SHEET rather than to either view: one
@@ -687,19 +761,10 @@ CsLayers.ensure = function(doc, di, name) {
     // un-registered PROFILE-CEILING got the wrong lineweight before.
     // Guarded by typeof so CsLayers still loads standalone, which the
     // one-shot template tools rely on.
-    var d = CsLayers.DEFAULTS[name];
-    if (isNull(d) && typeof CsLayerVariants !== "undefined") {
-        var base = CsLayerVariants.baseOf(name);
-        if (!isNull(base)) {
-            d = CsLayers.DEFAULTS[base];
-        }
-    }
-    if (isNull(d)) {
-        d = ["white", "CONTINUOUS", "Weight025"];
-    }
+    var d = CsLayers.styleOf(name);
     var layer = new RLayer(doc, name, false,
         CsLayers.LOCKED[name] === true,
-        new RColor(d[0]), doc.getLinetypeId(d[1]),
+        new RColor(d[0]), CsLayers.linetypeIdFor(doc, d),
         RLineweight[d[2]], CsLayers.OFF[name] === true);
     var op = new RAddObjectsOperation();
     op.addObject(layer);
@@ -730,3 +795,227 @@ CsLayers.ensureCalloutLayers = function(doc, di) {
     CsLayers.ensure(doc, di, CsLayers.NOTES_ELEVATION_LINE);
     CsLayers.ensure(doc, di, CsLayers.NOTES_ANNOTATION);
 };
+
+
+// =====================================================================
+// FRAME TWIN DERIVATION -- one plan row, three frames.
+//
+// Runs once, at load, and is the reason CsLayers.DEFAULTS above holds
+// no PROFILE-, SECTION-, CTRL-PROFILE- or CTRL-SECTION- row (bar the
+// one documented exception). For every plan-frame layer that is twinned
+// it writes the twin's DEFAULTS entry as a COPY of the plan row, and
+// defines the twin's CsLayers constant when no hand-written one exists.
+//
+// WHY DERIVE RATHER THAN LIST. The twins were listed by hand for a year
+// and had drifted in ways nothing caught: SECTION-WALLS-SURVEYED was
+// Weight035 against plan's Weight050, SECTION-CEILING and SECTION-FLOOR
+// were Weight025 against Weight050, SECTION-WALLS-INFERRED was white
+// against gray, CTRL-SECTION-TEXT-LABELS was Weight025 against
+// Weight018. Every one of those is a section that reads lighter than the
+// same passage in plan for no reason a cartographer chose. A copy cannot
+// drift.
+//
+// WHY THE CONSTANTS ARE GENERATED. tools/sync_template_layers.js
+// enumerates the registry by walking CsLayers' own string properties, so
+// a twin only reaches the shipped template if it is a property. Writing
+// 50 more assignments by hand for the NSS symbol layers alone would
+// re-create exactly the hand-maintained list this block exists to
+// delete. The hand-written twin constants (CsLayers.PROFILE_CEILING and
+// friends) are LEFT IN PLACE -- code refers to them by name and grep
+// must keep finding them -- and this loop simply does not redefine a
+// property that already exists.
+//
+// The DEFAULTS row is overwritten either way, hand-written constant or
+// not: the constant is a name, the row is the appearance, and appearance
+// has exactly one source.
+// =====================================================================
+
+/** The frame prefix pairs: [plan prefix, profile prefix, section prefix].
+ *  A CTRL- layer twins into CTRL-PROFILE-/CTRL-SECTION-, everything else
+ *  into PROFILE-/SECTION-, which is the vocabulary frameOf reads. */
+CsLayers.TWIN_PREFIXES = [
+    ["CTRL-", "CTRL-PROFILE-", "CTRL-SECTION-"],
+    ["", "PROFILE-", "SECTION-"]
+];
+
+/**
+ * Plan-frame layers that get NO twin, with the reason each is here.
+ * Everything else in DEFAULTS that frameOf calls "plan" is twinned.
+ *
+ * Sheet layers are excluded separately, via CsLayers.SHEET_LAYERS: a
+ * sheet layer belongs to the printed page, not to a view, so a
+ * PROFILE-BORDER would be a second border on the same sheet.
+ */
+CsLayers.NO_TWIN = {
+    // Georeferenced background context. There is one ground surface and
+    // it is in plan; an elevation of an aerial photograph is nothing.
+    "CTRL-AERIAL": true,
+    "CTRL-CONTOUR": true,
+    "CTRL-CONTOUR-MAJOR": true,
+    // The sheet grid, drawn once over the whole drawing.
+    "CTRL-GRID": true,
+    // The retired data-store layer. No template should gain it (the
+    // sync tool skips it because it is not a constant) and it certainly
+    // should not gain two more of it.
+    "CTRL-DATA": true,
+    // Import scaffolding and the as-surveyed ghost: both are plan-space
+    // survey mechanics, not per-view elements.
+    "CTRL-HIDDEN": true,
+    "CTRL-RAW": true,
+    // The mark saying where a section was CUT. It lives in the view
+    // being cut -- a cut mark inside its own section is meaningless.
+    // frameOf keeping this name in the plan frame is asserted in
+    // tests/js_unit.js; this row is the appearance half of the same
+    // decision.
+    "CROSS-SECTION-MARKERS": true,
+    // The north arrow orients a plan. An elevation has no north.
+    "NORTH-ARROW": true
+};
+
+/**
+ * The plan-frame layer a frame-prefixed name derives from, or null when
+ * the name is not frame-prefixed (or has no plan counterpart).
+ *
+ * CTRL-PROFILE-SHOTS -> CTRL-SHOTS, SECTION-CEILING -> CEILING.
+ * The CTRL- pair is tested FIRST: "CTRL-PROFILE-SHOTS" also begins with
+ * neither plan prefix in the second pair, but a name like
+ * "CTRL-SECTION-BOX" must not be read as the plan layer
+ * "CTRL-SECTION-BOX" simply because the empty plan prefix matches
+ * everything.
+ */
+CsLayers.planBaseOf = function(name) {
+    if (isNull(name)) {
+        return null;
+    }
+    var s = String(name), i, row, f;
+    for (i = 0; i < CsLayers.TWIN_PREFIXES.length; i++) {
+        row = CsLayers.TWIN_PREFIXES[i];
+        for (f = 1; f <= 2; f++) {
+            if (s.indexOf(row[f]) === 0) {
+                return row[0] + s.substring(row[f].length);
+            }
+        }
+    }
+    return null;
+};
+
+/**
+ * The [colour, linetype, weight, fallback?] a layer is drawn with:
+ * its own row, its plan twin's row, its variant base's row, or the
+ * fallback -- in that order, first hit wins.
+ *
+ * THE ONE PLACE appearance is resolved. CsLayers.ensure creates through
+ * it and CsRestyle repairs through it, so a layer created before a
+ * palette change and one created after cannot disagree.
+ */
+CsLayers.styleOf = function(name) {
+    var d = CsLayers.DEFAULTS[name];
+    if (!isNull(d)) {
+        return d;
+    }
+    // A VARIANT layer (PROFILE-CEILING-A) inherits its base layer's
+    // appearance. Without this it takes the fallback below and looks
+    // nothing like the layer it varies -- silently, which is how the
+    // un-registered PROFILE-CEILING got the wrong lineweight before.
+    // Guarded by typeof so CsLayers still loads standalone, which the
+    // one-shot template tools rely on.
+    if (typeof CsLayerVariants !== "undefined") {
+        var base = CsLayerVariants.baseOf(name);
+        if (!isNull(base)) {
+            d = CsLayers.DEFAULTS[base];
+            if (!isNull(d)) {
+                return d;
+            }
+        }
+    }
+    return ["white", "CONTINUOUS", "Weight025"];
+};
+
+/**
+ * The linetype id for a style row, falling back when the drawing has no
+ * such pattern. QCAD context only.
+ *
+ * Every NSS_* pattern is defined in the LTYPE table of
+ * templates/NSS_Cave_Template_PLAN.dxf and in no other drawing. A layer
+ * created in a drawing that never saw the template would otherwise get
+ * an INVALID linetype id from getLinetypeId -- accepted without
+ * complaint, and rendered as nothing anybody chose. The 4th element of
+ * the style row names what to use instead; CONTINUOUS is the last
+ * resort, because it always exists.
+ */
+CsLayers.linetypeIdFor = function(doc, style) {
+    var names = [style[1]];
+    if (style.length > 3 && !isNull(style[3])) {
+        names.push(style[3]);
+    }
+    names.push("CONTINUOUS");
+    for (var i = 0; i < names.length; i++) {
+        try {
+            var id = doc.getLinetypeId(names[i]);
+            if (!isNull(id) && id !== RObject.INVALID_ID) {
+                return id;
+            }
+        } catch (e) {
+            // an engine without this linetype: try the next name
+        }
+    }
+    return doc.getLinetypeId("CONTINUOUS");
+};
+
+(function deriveFrameTwins() {
+    var sheet = {}, i, f, name, base, row, twin;
+    for (i = 0; i < CsLayers.SHEET_LAYERS.length; i++) {
+        sheet[CsLayers.SHEET_LAYERS[i]] = true;
+    }
+    // Snapshot the plan rows before writing: the loop adds keys to the
+    // very table it reads, and a for-in over a table being extended is
+    // not defined to be stable in this engine.
+    var bases = [];
+    for (name in CsLayers.DEFAULTS) {
+        if (!CsLayers.DEFAULTS.hasOwnProperty(name)) {
+            continue;
+        }
+        if (sheet[name] === true || CsLayers.NO_TWIN[name] === true) {
+            continue;
+        }
+        if (CsLayers.frameOf(name) !== "plan") {
+            continue;   // CTRL-SECTION-GHOST, the documented exception
+        }
+        bases.push(name);
+    }
+    // A name -> constant lookup, so an already-hand-written twin
+    // constant is not defined a second time under a generated key.
+    var defined = {};
+    for (var k in CsLayers) {
+        if (CsLayers.hasOwnProperty(k) && typeof CsLayers[k] === "string") {
+            defined[CsLayers[k]] = true;
+        }
+    }
+    for (i = 0; i < bases.length; i++) {
+        base = bases[i];
+        row = CsLayers.DEFAULTS[base];
+        for (var p = 0; p < CsLayers.TWIN_PREFIXES.length; p++) {
+            var pref = CsLayers.TWIN_PREFIXES[p];
+            if (pref[0].length > 0) {
+                if (base.indexOf(pref[0]) !== 0) {
+                    continue;   // not a CTRL- layer
+                }
+            } else if (base.indexOf("CTRL-") === 0) {
+                continue;       // CTRL- handled by the pair above
+            }
+            var stem = base.substring(pref[0].length);
+            for (f = 1; f <= 2; f++) {
+                twin = pref[f] + stem;
+                // The copy. slice() so a caller mutating one row (nothing
+                // does, but the table is public) cannot silently restyle
+                // the other two frames with it.
+                CsLayers.DEFAULTS[twin] = row.slice(0);
+                if (defined[twin] !== true) {
+                    CsLayers[twin.replace(/-/g, "_")] = twin;
+                    defined[twin] = true;
+                }
+            }
+            break;
+        }
+    }
+})();
