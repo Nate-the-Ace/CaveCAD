@@ -21611,6 +21611,85 @@ for (var zwi = 0; zwi < zWriters.length; zwi++) {
 }
 
 // ---------------------------------------------------------------------
+// CsContour.stitch and isNoData -- the two contour functions with no
+// tests.
+//
+// stitch is where marching squares becomes drawable geometry, and it is
+// the classic bug site of the pair: every loose segment must be used
+// exactly once, a ring must come back CLOSED without repeating its
+// first point, and an open line must keep both of its ends. Getting any
+// of that wrong draws contours that look almost right -- a ring with a
+// hairline gap, or a duplicated vertex that a later offset trips over.
+// ---------------------------------------------------------------------
+
+// isNoData: a DEM's hole marker is a very negative sentinel, not a
+// plausible elevation. -12000 ft is below any land surface and above
+// any sentinel, which is the line this draws.
+ok(CsContour.isNoData(null), "isNoData: null");
+ok(CsContour.isNoData(undefined), "isNoData: undefined");
+ok(CsContour.isNoData(NaN), "isNoData: NaN");
+ok(CsContour.isNoData(-Infinity), "isNoData: -Infinity");
+ok(CsContour.isNoData(-3.4028234663852886e+38),
+    "isNoData: the usual float32 DEM sentinel");
+ok(!CsContour.isNoData(0), "isNoData: 0 is a real elevation (sea level)");
+ok(!CsContour.isNoData(-500), "isNoData: -500 is a real elevation");
+ok(!CsContour.isNoData(812.4), "isNoData: an ordinary upland elevation");
+
+// A three-segment open chain, deliberately shuffled and with two of the
+// segments written back-to-front: stitch must not depend on input order
+// or on which end of a segment it meets first.
+var stOpen = CsContour.stitch([
+    [1, 0, 2, 0],       // middle
+    [3, 0, 2, 0],       // right, reversed
+    [1, 0, 0, 0]        // left, reversed
+]);
+eqs(stOpen.length, 1, "stitch: three touching segments make ONE chain");
+eqs(stOpen[0].closed, false, "stitch: an open chain is not closed");
+eqs(stOpen[0].points.length, 4, "stitch: an open chain keeps all 4 points");
+var stEnds = [stOpen[0].points[0].x,
+    stOpen[0].points[stOpen[0].points.length - 1].x].sort(
+    function(a, b) { return a - b; });
+eqs(stEnds.join(","), "0,3",
+    "stitch: the chain runs between the two loose ends");
+
+// A closed square. The last point must NOT repeat the first -- a
+// polyline flagged closed and carrying a duplicate vertex draws a
+// zero-length segment at the seam.
+var stRing = CsContour.stitch([
+    [0, 0, 1, 0],
+    [1, 0, 1, 1],
+    [1, 1, 0, 1],
+    [0, 1, 0, 0]
+]);
+eqs(stRing.length, 1, "stitch: four segments make one ring");
+eqs(stRing[0].closed, true, "stitch: and it is closed");
+eqs(stRing[0].points.length, 4,
+    "stitch: a closed ring drops the repeated first point");
+
+// Two separate features in one level must not be joined to each other.
+var stTwo = CsContour.stitch([
+    [0, 0, 1, 0],
+    [1, 0, 2, 0],
+    [10, 10, 11, 10]
+]);
+eqs(stTwo.length, 2, "stitch: disjoint segments stay separate chains");
+
+// Every input segment is used exactly once -- the count of output
+// points has to account for all of them, or a contour silently loses a
+// piece of itself.
+var stTotal = 0;
+for (var sti = 0; sti < stTwo.length; sti++) {
+    stTotal += stTwo[sti].points.length - (stTwo[sti].closed ? 0 : 1);
+}
+eqs(stTotal, 3, "stitch: every segment is consumed exactly once");
+
+eqs(CsContour.stitch([]).length, 0, "stitch: nothing in, nothing out");
+eqs(CsContour.stitch([[0, 0, 1, 1]]).length, 1,
+    "stitch: a lone segment is a chain of its own");
+eqs(CsContour.stitch([[0, 0, 1, 1]])[0].closed, false,
+    "stitch: and it is not closed");
+
+// ---------------------------------------------------------------------
 // The validator's thresholds, pinned AT THE BOUNDARY.
 //
 // What a suite warns about is exactly the kind of thing that drifts
