@@ -209,7 +209,13 @@ CsFormatCsv.write = function(survey) {
     for (var fname in survey.fixed) {
         if (survey.fixed.hasOwnProperty(fname)) {
             var f = survey.fixed[fname];
-            out.push("# fix: " + fname + " " + f.x + " " + f.y + " " + (f.z || 0));
+            // See CsModel.fixedZ -- an absent elevation is not a zero one.
+            var fz = CsModel.fixedZ(f);
+            if (fz === null) {
+                out.push("# " + ("elevation UNKNOWN for " + fname + " -- written as 0.00 to keep this file valid; it is NOT a surveyed datum"));
+            }
+            out.push("# fix: " + fname + " " + f.x + " " + f.y + " " +
+                (fz === null ? 0 : fz));
         }
     }
     if (survey.startLrud !== null && survey.startLrud !== undefined) {

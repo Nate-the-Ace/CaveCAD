@@ -152,6 +152,10 @@ var CORE_FILES = [
     "scripts/CaveSurvey/Core/CsValidate.js",
     "scripts/CaveSurvey/Core/CsStats.js",
     "scripts/CaveSurvey/Core/CsGrade.js",
+    // Pure data catalog plus byBlock/categories; insert() is the only
+    // document function and is never CALLED here -- same reason
+    // CsProfileDraw is loadable under node.
+    "scripts/CaveSurvey/Core/CsSymbols.js",
     "scripts/CaveSurvey/Core/Format/CsCompass.js",
     "scripts/CaveSurvey/Core/Format/CsWalls.js",
     "scripts/CaveSurvey/Core/Format/CsSurvex.js",
@@ -170,6 +174,26 @@ var CORE_FILES = [
 for (var ci = 0; ci < CORE_FILES.length; ci++) {
     loadRepoScript(CORE_FILES[ci]);
 }
+
+// Core files this suite deliberately does NOT load, and why.
+//
+// tests/test_addon.py's TestEngineTestsLoadEveryCoreFile fails on any
+// file in Core/ that appears in neither CORE_FILES above, nor a
+// loadRepoScript call further down, nor this list -- and equally on a
+// stale entry here naming a file that IS loaded or no longer exists.
+// The point is that adding a Core file cannot leave this suite quietly
+// testing a library that does not contain it: the decision has to be
+// written down either way. See the harness-traps note.
+var CORE_FILES_NOT_LOADED = [
+    // The include manifest itself -- it is the list, not a member of
+    // it, and loadRepoScript strips the include() lines that are its
+    // entire content.
+    "scripts/CaveSurvey/Core/CsAll.js",
+    // Every function takes a real RDocument/RDocumentInterface and
+    // reads QCAD's own image mapping back; there is nothing pure to
+    // call from here. Covered by tests/scan_reanchor_run.js.
+    "scripts/CaveSurvey/Core/CsScanReanchor.js"
+];
 
 // ---------------------------------------------------------------------
 // Tiny assertion kit
@@ -21524,6 +21548,129 @@ eqs(CsScanTrim.serialize({ x: 120, y: 88, w: 900, h: 640 }),
     "120,88,900,640", "serialize");
 eqs(CsScanTrim.parse("120,88,900,640").w, 900, "parse w");
 eqs(CsScanTrim.parse("nonsense"), null, "parse rejects rubbish");
+
+// ---------------------------------------------------------------------
+// The eighth elevation-datum door: exporting a fix with no elevation.
+//
+// CsTags.surveyFromDocument hands back a real null z for a station with
+// no (or a garbled) Elevation tag -- the seventh door's fix. Every
+// format writer then printed `(f.z || 0).toFixed(2)`, so that station
+// left the program fixed at 0.00 in a file another program will trust:
+// a cave on a 1200 m datum re-exported onto sea level, silently.
+//
+// A real 0 must stay a real 0, with no note. Only an absent or
+// non-finite elevation is annotated.
+// ---------------------------------------------------------------------
+
+eqs(CsModel.fixedZ({ x: 1, y: 2, z: 0 }), 0,
+    "fixedZ: a real zero elevation is a real elevation");
+eqs(CsModel.fixedZ({ x: 1, y: 2, z: -37.5 }), -37.5,
+    "fixedZ: a negative elevation passes through");
+eqs(CsModel.fixedZ({ x: 1, y: 2, z: null }), null,
+    "fixedZ: null is not zero");
+eqs(CsModel.fixedZ({ x: 1, y: 2 }), null,
+    "fixedZ: an absent z is not zero");
+eqs(CsModel.fixedZ({ x: 1, y: 2, z: NaN }), null,
+    "fixedZ: NaN is not zero");
+eqs(CsModel.fixedZ({ x: 1, y: 2, z: Infinity }), null,
+    "fixedZ: a non-finite z is not zero");
+eqs(CsModel.fixedZ({ x: 1, y: 2, z: "300" }), null,
+    "fixedZ: an unparsed string is not an elevation");
+eqs(CsModel.fixedZ(null), null, "fixedZ: no station at all");
+
+var zUnknownSurvey = {
+    name: "DatumTrip", shots: [], distanceUnit: "m",
+    fixed: { ZQ: { x: 100, y: 200, z: null } }
+};
+var zRealZeroSurvey = {
+    name: "DatumTrip", shots: [], distanceUnit: "m",
+    fixed: { ZQ: { x: 100, y: 200, z: 0 } }
+};
+// The note wording is deliberately not asserted verbatim -- what has to
+// hold is that an unknown elevation is CALLED OUT in the file and a
+// real one is not, in every format that can carry a fix.
+var zWriters = [
+    { name: "survex", write: function(sv) { return CsFormatSurvex.write(sv); } },
+    { name: "walls", write: function(sv) { return CsFormatWalls.write(sv); } },
+    { name: "therion", write: function(sv) { return CsFormatTherion.write(sv); } },
+    { name: "csv", write: function(sv) { return CsFormatCsv.write(sv); } }
+];
+for (var zwi = 0; zwi < zWriters.length; zwi++) {
+    var zw = zWriters[zwi];
+    var unknownOut = zw.write(zUnknownSurvey);
+    var zeroOut = zw.write(zRealZeroSurvey);
+    ok(unknownOut.indexOf("UNKNOWN") >= 0,
+        zw.name + ": an unknown elevation is called out in the file, " +
+        "not exported as a surveyed 0.00");
+    ok(unknownOut.indexOf("ZQ") >= 0,
+        zw.name + ": the fix itself still ships (dropping it would " +
+        "lose the georeference entirely)");
+    ok(zeroOut.indexOf("UNKNOWN") < 0,
+        zw.name + ": a station fixed AT elevation 0 is not annotated " +
+        "-- a real zero is a real elevation");
+}
+
+// ---------------------------------------------------------------------
+// Symbol catalog.
+//
+// CsSymbols.insert() takes the target layer FROM THE CATALOG, not from
+// the user or the current layer -- that is the whole point of routing
+// symbol placement through it. So a catalog entry naming a layer the
+// registry does not define does not fail loudly: CsLayers.ensure would
+// create a layer with no registered style, and the symbol lands on an
+// unstyled layer that looks almost right. Nothing else in the suite
+// loads this file, so nothing else can see that.
+// ---------------------------------------------------------------------
+
+loadRepoScript("scripts/CaveSurvey/Core/CsLayers.js");
+
+ok(CsSymbols.CATALOG.length > 0, "the symbol catalog is not empty");
+
+var symSeenBlock = {};
+for (var syi = 0; syi < CsSymbols.CATALOG.length; syi++) {
+    var sym = CsSymbols.CATALOG[syi];
+    var symWhere = "catalog entry " + syi + " (" + sym.block + ")";
+    ok(typeof sym.block === "string" && sym.block.length > 0,
+        symWhere + " has a block name");
+    ok(typeof sym.nss === "string" && sym.nss.length > 0,
+        symWhere + " has an NSS name");
+    ok(typeof sym.uis === "string" && sym.uis.length > 0,
+        symWhere + " has a UIS alias");
+    ok(typeof sym.category === "string" && sym.category.length > 0,
+        symWhere + " has a category");
+    // Duplicate block names: byBlock returns the FIRST match, so the
+    // second entry is unreachable and its layer/category never apply.
+    ok(symSeenBlock[sym.block] === undefined,
+        symWhere + " has a unique block name");
+    symSeenBlock[sym.block] = true;
+    // The one that matters: the home layer must be registry vocabulary.
+    ok(CsLayers.DEFAULTS[sym.layer] !== undefined,
+        symWhere + " names a layer the registry defines, got " +
+        sym.layer);
+}
+
+// byBlock is the lookup every placement goes through.
+var symFirst = CsSymbols.CATALOG[0];
+eqs(CsSymbols.byBlock(symFirst.block), symFirst,
+    "byBlock finds a catalog entry");
+eqs(CsSymbols.byBlock("SYM_NOT_A_REAL_SYMBOL"), null,
+    "byBlock returns null for an unknown block");
+
+// categories() drives the picker's grouping: every catalog category
+// must appear exactly once, and nothing invented.
+var symCats = CsSymbols.categories();
+var symCatSeen = {};
+for (var sci = 0; sci < symCats.length; sci++) {
+    ok(symCatSeen[symCats[sci]] === undefined,
+        "categories() lists " + symCats[sci] + " once");
+    symCatSeen[symCats[sci]] = true;
+}
+for (var scj = 0; scj < CsSymbols.CATALOG.length; scj++) {
+    ok(symCatSeen[CsSymbols.CATALOG[scj].category] === true,
+        "categories() includes " + CsSymbols.CATALOG[scj].category);
+}
+eqs(symCats.length, Object.keys(symCatSeen).length,
+    "categories() invents no category the catalog does not use");
 
 // ---------------------------------------------------------------------
 // Report.

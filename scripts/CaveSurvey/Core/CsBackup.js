@@ -501,11 +501,12 @@ CsBackup.prune = function(path) {
  *     08:15:56, and the probe log did not grow. Neither
  *     Save.prototype.save nor SaveAs.prototype.save nor even the JS
  *     binding RDocumentInterface.prototype.exportFile was traversed.
- *     CsCave.installSaveHook uses the same mechanism and is therefore
- *     inert too -- everything it does on save (pointAtScans,
- *     CsShelf.registerSaved, ensureProjectFolders, writePreview) has
- *     never run. Anything that must happen on save belongs in a fork
- *     patch to scripts/File/Save/Save.js, the shape patch 0005 uses.
+ *     CsCave.installSaveHook used the same mechanism and was inert
+ *     for the same reason; it was removed 2026-08-31. Anything that
+ *     must happen on save belongs in a fork patch to
+ *     scripts/File/Save/Save.js -- which is where the work it wanted
+ *     to do (pointAtScans, CsShelf.registerSaved, ensureProjectFolders,
+ *     writePreview) now runs, as CsCave.afterSave, via patch 0006.
  *   - RExportListenerAdapter's preExport/postExport/endOfExport fire
  *     ZERO times for RDocumentInterface::exportFile, which is what a
  *     save actually calls. Those signals belong to the graphics-export

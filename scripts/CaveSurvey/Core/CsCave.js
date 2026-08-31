@@ -671,7 +671,8 @@ CsCave.beforeSave = function(path) {
  * THE ONE ENTRY POINT THE APPLICATION CALLS. CaveCAD's own
  * scripts/File/Save/Save.js calls this after a successful export (fork
  * patch 0006), because an add-on cannot reach a save any other way --
- * see installSaveHook below for the measurement that proves it.
+ * see the "no save hook here" note below for the measurement that
+ * proves it.
  *
  * Everything here is a convenience. Every one of them is wrapped, and a
  * failure in any of them is swallowed: a caver's save must never fail
@@ -752,66 +753,25 @@ CsCave.afterSave = function(savedPath, di) {
 // hook you have to remember to call is a hook that is off on the
 // machine that needed it. Idempotent by marker, because init() can run
 // more than once and a wrapper that wraps itself does its work twice.
-CsCave.installSaveHook = function() {
-    if (typeof Save === "undefined") {
-        if (typeof include === "function") {
-            try { include("scripts/File/Save/Save.js"); } catch (e) {}
-        }
-    }
-    if (typeof Save === "undefined" || !Save.prototype ||
-            typeof Save.prototype.save !== "function") {
-        return false;
-    }
-    if (Save.prototype.save.csCaveWrapped === true) { return true; }
-    var stock = Save.prototype.save;
-    var wrapped = function() {
-        // Refresh the drawing's thumbnail from the view BEFORE the save
-        // runs. The stock save hands di.getThumbnail() to
-        // RSettings.addRecentFile, which is what writes the PNG into
-        // the cache -- but NOTHING in the application ever calls
-        // updateThumbnail(), so the image handed over is empty and the
-        // cache stays empty with it. One call here gives every saved
-        // cave a picture, and the cave shelf shows it.
-        var thumbDi = null;
-        try {
-            thumbDi = EAction.getDocumentInterface();
-            if (!isNull(thumbDi) && isFunction(thumbDi.updateThumbnail)) {
-                thumbDi.updateThumbnail();
-            }
-        } catch (eThumb) {
-            // A picture is never a reason a save fails.
-        }
-
-        var result = stock.apply(this, arguments);
-        if (result === false) { return result; }
-        try {
-            if (typeof EAction !== "undefined") {
-                var doc = EAction.getDocument();
-                if (!isNull(doc)) {
-                    var savedPath = doc.getFileName();
-                    CsCave.pointAtScans(savedPath);
-                    // A cave saved under a drive root puts itself on the
-                    // launcher's shelf, so the list fills from ordinary
-                    // work rather than from the Add Cave button, and
-                    // gains the folders a cave project keeps.
-                    if (typeof CsShelf !== "undefined") {
-                        CsShelf.registerSaved(savedPath);
-                    }
-                    CsCave.ensureProjectFolders(CsCave.folderOf(savedPath));
-                    // The picture refreshed above, kept where the cave
-                    // keeps its images rather than only in this
-                    // machine's cache.
-                    if (!isNull(thumbDi) && isFunction(thumbDi.getThumbnail)) {
-                        CsCave.writePreview(savedPath, thumbDi.getThumbnail());
-                    }
-                }
-            }
-        } catch (e) {
-            // A folder convenience never breaks a save.
-        }
-        return result;
-    };
-    wrapped.csCaveWrapped = true;
-    Save.prototype.save = wrapped;
-    return true;
-};
+/**
+ * THERE IS DELIBERATELY NO SAVE HOOK HERE. Do not add one back.
+ *
+ * Wrapping Save.prototype.save from add-on init installs cleanly,
+ * reports success, and never runs: QCAD builds actions in their own
+ * script context (RScriptHandlerJs::createActionDocumentLevel), so the
+ * patched prototype is not the one the action uses.
+ *
+ * MEASURED, not inferred (2026-08-29, probe/CsSaveProbe, against a real
+ * GUI save of Truitt Cave): probe armed 08:15:43, drawing written
+ * 08:15:56, probe log never grew. Save.prototype.save,
+ * SaveAs.prototype.save and even the JS binding
+ * RDocumentInterface.prototype.exportFile were all untraversed. The
+ * wrapper that used to live here (CsCave.installSaveHook, removed
+ * 2026-08-31) therefore never ran once in its whole life, while
+ * reporting true to its caller -- which is why it survived so long.
+ *
+ * The working mechanism is CsCave.afterSave above, called directly by
+ * the fork's own scripts/File/Save/Save.js (patch 0006).
+ * TestAddonDoesNotPatchStockPrototypes in tests/test_addon.py keeps the
+ * inert shape from coming back.
+ */

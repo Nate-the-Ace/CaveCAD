@@ -422,8 +422,14 @@ CsFormatWalls.write = function(survey) {
     for (var fname in survey.fixed) {
         if (survey.fixed.hasOwnProperty(fname)) {
             var f = survey.fixed[fname];
+            // See CsModel.fixedZ -- an absent elevation is not a zero
+            // one, and this format cannot say "unknown" either.
+            var fz = CsModel.fixedZ(f);
+            if (fz === null) {
+                out.push("; " + ("elevation UNKNOWN for " + fname + " -- written as 0.00 to keep this file valid; it is NOT a surveyed datum"));
+            }
             out.push("#Fix " + fname + " " + f.x.toFixed(2) + " " +
-                f.y.toFixed(2) + " " + (f.z || 0).toFixed(2));
+                f.y.toFixed(2) + " " + (fz === null ? 0 : fz).toFixed(2));
         }
     }
 

@@ -707,6 +707,37 @@ CsModel.flagsText = function(shot) {
  * false). Mutates shot in place and returns it, matching parseFlags'
  * cousins elsewhere in the Core (e.g. parseLrudEntry's callers).
  */
+/**
+ * The elevation of a fixed station, or null when it does not have one.
+ *
+ * EIGHTH DOOR in the elevation-datum-trap family (see CsTraverse.offset
+ * and CsNetwork.seedFixed for the first seven). Every format writer
+ * used to print `(f.z || 0).toFixed(2)`, which cannot tell a station
+ * fixed AT elevation 0 from a station whose elevation is unknown --
+ * and CsTags.surveyFromDocument hands back a real null for a station
+ * with no (or a garbled) Elevation tag, so the second case is reachable
+ * from any drawing. The exported file then carried 0.00 as though it
+ * were surveyed: a cave on a 1200 m datum re-exported onto sea level,
+ * silently, in a file another program will trust.
+ *
+ * A real 0 is a real elevation and survives untouched. Only absent or
+ * non-finite z answers null -- the same "cannot function as part of a
+ * real measurement" line CsTraverse.unusable draws. Lives here rather
+ * than in CsTraverse because the format writers must not depend on the
+ * traverse engine: several test harnesses load Format/ without it.
+ */
+CsModel.fixedZ = function(f) {
+    if (f === null || f === undefined) {
+        return null;
+    }
+    var z = f.z;
+    if (z === null || z === undefined || typeof z !== "number" ||
+        !isFinite(z)) {
+        return null;
+    }
+    return z;
+};
+
 CsModel.parseFlags = function(text, shot) {
     var t = text || "";
     shot.excludeFromPlot = t.indexOf("P") >= 0;

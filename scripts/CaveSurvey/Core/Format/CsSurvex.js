@@ -547,8 +547,17 @@ CsFormatSurvex.write = function(survey) {
     for (var fname in survey.fixed) {
         if (survey.fixed.hasOwnProperty(fname)) {
             var f = survey.fixed[fname];
+            // See CsModel.fixedZ: an absent elevation is not a zero
+            // one. Neither this format nor its own reader above can
+            // express "unknown" (a two-token *fix reads back as 0.0),
+            // so the file says so in a comment rather than passing 0.00
+            // off as surveyed.
+            var fz = CsModel.fixedZ(f);
+            if (fz === null) {
+                out.push("; " + ("elevation UNKNOWN for " + fname + " -- written as 0.00 to keep this file valid; it is NOT a surveyed datum"));
+            }
             out.push("*fix " + fname + " " + f.x.toFixed(2) + " " +
-                f.y.toFixed(2) + " " + (f.z || 0).toFixed(2));
+                f.y.toFixed(2) + " " + (fz === null ? 0 : fz).toFixed(2));
         }
     }
 

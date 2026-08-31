@@ -38,6 +38,27 @@ echo "=============================================================="
 
 QCAD="/Applications/CaveCAD.app/Contents/MacOS/CaveCAD"
 
+# 13 of the 14 suites need the real engine and print SKIP without it --
+# which used to leave "ALL TESTS PASSED" standing on a machine where
+# only the structural tests actually ran. Skipping is fine while
+# developing without CaveCAD installed; it is not fine as release
+# evidence, so --publish turns a missing engine into a failure, and an
+# ordinary run says plainly what the pass does and does not cover.
+engine=1
+if [ ! -e "$QCAD" ]; then
+    engine=0
+    echo
+    if [ -n "${CAVESURVEY_PUBLISH_CHECK:-}" ]; then
+        echo "FAIL: CaveCAD not found at $QCAD -- publish checks are"
+        echo "      release evidence and the structural tests alone"
+        echo "      cannot give it."
+        status=1
+    else
+        echo "NOTE: CaveCAD not found at $QCAD -- the 13 engine suites"
+        echo "      below will SKIP."
+    fi
+fi
+
 echo
 echo "=============================================================="
 echo " 2/14 Add-on syntax check (inside CaveCAD's own script engine)"
@@ -269,7 +290,10 @@ fi
 
 echo
 if [ "$status" -eq 0 ]; then
-    if [ -n "${CAVESURVEY_PUBLISH_CHECK:-}" ]; then
+    if [ "$engine" -eq 0 ]; then
+        echo "STRUCTURAL TESTS PASSED -- the 13 engine suites were SKIPPED"
+        echo "(CaveCAD not installed). This is NOT a full pass."
+    elif [ -n "${CAVESURVEY_PUBLISH_CHECK:-}" ]; then
         echo "ALL TESTS PASSED -- including publish checks"
     else
         echo "ALL TESTS PASSED (publish checks not run; use --publish)"

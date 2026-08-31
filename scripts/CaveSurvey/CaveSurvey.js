@@ -83,14 +83,12 @@ CaveSurvey.init = function(basePath, splash) {
     CaveSurvey.getMenu();
     CaveSurvey.getToolBar();
 
-    // Cave folders on the shared drive: after a save, make sure this
-    // cave's scans/ folder exists and point the image picker at it, so
-    // Draw > Image opens on the sketches for the cave in front of you.
-    // No menu entry -- a convenience you have to switch on is one that
-    // is off on the machine that needed it. See CsCave.js.
-    if (typeof CsCave !== "undefined") {
-        CsCave.installSaveHook();
-    }
+    // Nothing to install for save-time work: an add-on physically
+    // cannot hook a save (measured -- see the note in CsCave.js). The
+    // fork's own Save.js calls CsCave.afterSave directly, which is
+    // what makes this cave's scans/ folder, registers it on the shelf
+    // and writes its preview. All this init still owes that path is
+    // the add-on's location, set just below.
 
     // Where this add-on lives, so the application's own Save.js can
     // find it (fork patch 0006). It cannot be discovered from there:

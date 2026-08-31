@@ -1304,5 +1304,146 @@ class TestTemplateMatchesRegistry(unittest.TestCase):
             "correct these entries: %s" % stale)
 
 
+class TestEngineTestsLoadEveryCoreFile(unittest.TestCase):
+    """tests/js_unit.js loads Core files by a hand-written list, not by
+    scanning the folder. Adding a Core file and registering it only in
+    CsAll.js leaves this suite exercising a library that does not
+    contain it -- and because callers wrap format writers and other
+    optional work in deliberate try/catch blocks, the missing global
+    surfaces as a quiet no-op rather than an error. That is how
+    Format/CsTherion.js reached a green suite while doing nothing.
+
+    So every Core file must be either loaded by js_unit.js or named in
+    its CORE_FILES_NOT_LOADED list with a reason. Both directions are
+    checked: an unaccounted-for file fails, and so does a stale
+    exclusion."""
+
+    CORE = None
+
+    def setUp(self):
+        self.core = os.path.join(ADDON, "Core")
+        with open(os.path.join(REPO, "tests", "js_unit.js")) as handle:
+            self.source = handle.read()
+
+    def _excluded(self):
+        """The CORE_FILES_NOT_LOADED entries, and the span they occupy."""
+        start = self.source.find("var CORE_FILES_NOT_LOADED = [")
+        self.assertNotEqual(
+            start, -1,
+            "tests/js_unit.js no longer declares CORE_FILES_NOT_LOADED; "
+            "this test cannot tell a deliberate omission from an "
+            "accident without it")
+        end = self.source.find("];", start)
+        self.assertNotEqual(end, -1, "CORE_FILES_NOT_LOADED is unterminated")
+        span = self.source[start:end]
+        return set(self._live_paths(span)), (start, end)
+
+    @staticmethod
+    def _live_paths(text):
+        """Core paths on lines that are not commented out.
+
+        Parsing live lines rather than grepping the whole file is the
+        same precaution TestBasenameCollisions takes: a path inside a
+        comment (and every list here carries long explanatory comments)
+        would otherwise satisfy the check with the load disabled."""
+        found = []
+        for line in text.splitlines():
+            stripped = line.strip()
+            if stripped.startswith("//"):
+                continue
+            found.extend(re.findall(
+                r'"(scripts/CaveSurvey/Core/[A-Za-z0-9_/]+\.js)"', stripped))
+        return found
+
+    def _on_disk(self):
+        paths = set()
+        for dirpath, _dirnames, filenames in os.walk(self.core):
+            for filename in filenames:
+                if not filename.endswith(".js"):
+                    continue
+                full = os.path.join(dirpath, filename)
+                paths.add(os.path.relpath(full, REPO).replace(os.sep, "/"))
+        return paths
+
+    def test_every_core_file_is_loaded_or_explicitly_excluded(self):
+        excluded, (start, end) = self._excluded()
+        # Everything OUTSIDE the exclusion list: CORE_FILES plus every
+        # loadRepoScript call further down the file.
+        rest = self.source[:start] + self.source[end:]
+        loaded = set(self._live_paths(rest))
+        unaccounted = sorted(self._on_disk() - loaded - excluded)
+        self.assertEqual(
+            unaccounted, [],
+            "these Core files are neither loaded by tests/js_unit.js nor "
+            "listed in its CORE_FILES_NOT_LOADED: %s -- add them to "
+            "CORE_FILES, or to CORE_FILES_NOT_LOADED with the reason "
+            "they cannot be loaded there" % unaccounted)
+
+    def test_no_stale_exclusions(self):
+        excluded, (start, end) = self._excluded()
+        on_disk = self._on_disk()
+        gone = sorted(entry for entry in excluded if entry not in on_disk)
+        self.assertEqual(
+            gone, [],
+            "CORE_FILES_NOT_LOADED names files that no longer exist: "
+            "%s" % gone)
+        rest = self.source[:start] + self.source[end:]
+        loaded = set(self._live_paths(rest))
+        both = sorted(excluded & loaded)
+        self.assertEqual(
+            both, [],
+            "these files are listed as NOT loaded but tests/js_unit.js "
+            "loads them anyway: %s -- drop the stale exclusion" % both)
+
+
+
+class TestAddonDoesNotPatchStockPrototypes(unittest.TestCase):
+    """An add-on cannot hook a save by wrapping a stock action.
+
+    QCAD builds actions in their own script context
+    (RScriptHandlerJs::createActionDocumentLevel), so a prototype
+    patched from add-on init is never the prototype the action uses.
+    The wrapper installs, reports success, and does nothing -- measured
+    2026-08-29 with probe/CsSaveProbe against a real GUI save: armed
+    08:15:43, drawing written 08:15:56, probe log never grew.
+
+    CsCave.installSaveHook lived on that mistake for months while
+    looking alive, so the failure mode is not "it breaks", it is "it
+    silently never runs". The working path is the fork's own Save.js
+    calling CsCave.afterSave (patch 0006). This test exists so the
+    inert shape cannot come back."""
+
+    PATCH = re.compile(
+        r'\b(Save|SaveAs|File|Open|Export)\s*\.\s*prototype\s*\.\s*'
+        r'[A-Za-z_]\w*\s*=')
+
+    def test_no_stock_action_prototype_is_reassigned(self):
+        offenders = []
+        for dirpath, _dirnames, filenames in os.walk(ADDON):
+            for filename in sorted(filenames):
+                if not filename.endswith(".js"):
+                    continue
+                full = os.path.join(dirpath, filename)
+                with open(full) as handle:
+                    for number, line in enumerate(handle, 1):
+                        stripped = line.strip()
+                        # Comments describe the trap on purpose -- the
+                        # note in CsCave.js names the very assignment
+                        # this test forbids.
+                        if stripped.startswith("//") or \
+                                stripped.startswith("*"):
+                            continue
+                        if self.PATCH.search(stripped):
+                            offenders.append("%s:%d" % (
+                                os.path.relpath(full, REPO), number))
+        self.assertEqual(
+            offenders, [],
+            "these lines wrap a stock action prototype, which an add-on "
+            "cannot make fire: %s -- put the work in a fork patch and "
+            "call into the add-on from there, the way Save.js calls "
+            "CsCave.afterSave" % offenders)
+
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

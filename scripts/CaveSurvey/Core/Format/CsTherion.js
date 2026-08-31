@@ -819,8 +819,14 @@ CsFormatTherion.write = function(survey) {
     for (var fname in survey.fixed) {
         if (survey.fixed.hasOwnProperty(fname)) {
             var f = survey.fixed[fname];
+            // See CsModel.fixedZ -- an absent elevation is not a zero
+            // one, and therion's fix takes three coordinates or none.
+            var fz = CsModel.fixedZ(f);
+            if (fz === null) {
+                out.push("    # " + ("elevation UNKNOWN for " + fname + " -- written as 0.00 to keep this file valid; it is NOT a surveyed datum"));
+            }
             out.push("    fix " + fname + " " + f.x.toFixed(2) + " " +
-                f.y.toFixed(2) + " " + (f.z || 0).toFixed(2));
+                f.y.toFixed(2) + " " + (fz === null ? 0 : fz).toFixed(2));
         }
     }
 
