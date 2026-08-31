@@ -21611,6 +21611,99 @@ for (var zwi = 0; zwi < zWriters.length; zwi++) {
 }
 
 // ---------------------------------------------------------------------
+// The validator's thresholds, pinned AT THE BOUNDARY.
+//
+// What a suite warns about is exactly the kind of thing that drifts
+// without anyone deciding it should: a number nudged inline in a
+// comparison changes every future survey's blunder report and nothing
+// goes red. Each threshold is now a named constant and each is checked
+// just under and just over.
+// ---------------------------------------------------------------------
+
+function findingsFor(sv) {
+    return CsValidate.check(sv, CsNetwork.resolve(sv, {}));
+}
+function hasCode(list, code) {
+    for (var i = 0; i < list.length; i++) {
+        if (list[i].code === code) { return true; }
+    }
+    return false;
+}
+
+// fs/bs compass: the difference is against the REVERSED backsight.
+function fsbsAzSurvey(backAzimuth) {
+    var sv = CsModel.newSurvey();
+    var sh = shotOf("F1", "F2", 10, 90, 0);
+    sh.backAzimuth = backAzimuth;
+    sv.shots = [sh];
+    return sv;
+}
+ok(!hasCode(findingsFor(fsbsAzSurvey(270 + 2.9)), "fsbs-azimuth-disagree"),
+    "fs/bs compass: 2.9 deg apart is inside the tolerance");
+ok(hasCode(findingsFor(fsbsAzSurvey(270 + 3.1)), "fsbs-azimuth-disagree"),
+    "fs/bs compass: 3.1 deg apart is not");
+eqs(CsValidate.FSBS_TOLERANCE_DEG, 3.0,
+    "the fs/bs tolerance is still 3 degrees");
+
+function fsbsIncSurvey(backInclination) {
+    var sv = CsModel.newSurvey();
+    var sh = shotOf("F1", "F2", 10, 90, 5);
+    sh.backInclination = backInclination;
+    sv.shots = [sh];
+    return sv;
+}
+ok(!hasCode(findingsFor(fsbsIncSurvey(-5 - 2.9)), "fsbs-inclination-disagree"),
+    "fs/bs clino: 2.9 deg apart is inside the tolerance");
+ok(hasCode(findingsFor(fsbsIncSurvey(-5 - 3.1)), "fsbs-inclination-disagree"),
+    "fs/bs clino: 3.1 deg apart is not");
+
+// near-plumb
+function plumbSurvey(inclination) {
+    var sv = CsModel.newSurvey();
+    sv.shots = [shotOf("P1", "P2", 10, 0, inclination)];
+    return sv;
+}
+ok(!hasCode(findingsFor(plumbSurvey(85)), "near-plumb"),
+    "85 degrees is not yet near-plumb (the test is strictly greater)");
+ok(hasCode(findingsFor(plumbSurvey(85.1)), "near-plumb"),
+    "85.1 degrees is");
+ok(hasCode(findingsFor(plumbSurvey(-90)), "near-plumb"),
+    "a DECLARED plumb is flagged too -- the warning says vertical, " +
+    "which is true either way");
+eqs(CsValidate.NEAR_PLUMB_DEG, 85, "the near-plumb threshold is still 85");
+
+// duplicate readings: agreeing pairs say nothing, disagreeing ones do.
+function dupSurvey(secondAzimuth, secondDistance) {
+    var sv = CsModel.newSurvey();
+    sv.shots = [shotOf("D1", "D2", 100, 90, 0),
+        shotOf("D1", "D2", secondDistance, secondAzimuth, 0)];
+    return sv;
+}
+ok(!hasCode(findingsFor(dupSurvey(94.9, 104.9)), "duplicate-disagrees"),
+    "two readings 4.9 deg and 4.9% apart are an ordinary agreeing pair");
+ok(hasCode(findingsFor(dupSurvey(95.1, 100)), "duplicate-disagrees"),
+    "5.1 deg apart is a disagreement");
+// The distance window is a fraction of the LARGER reading, so 105.1
+// against 100 is 5.1 apart against a 5.255 window -- still agreeing.
+ok(!hasCode(findingsFor(dupSurvey(90, 105.1)), "duplicate-disagrees"),
+    "the distance window is measured against the LARGER reading");
+ok(hasCode(findingsFor(dupSurvey(90, 108)), "duplicate-disagrees"),
+    "8 apart against a 5.4 window is a disagreement");
+eqs(CsValidate.DUPLICATE_AZIMUTH_DEG, 5.0,
+    "the duplicate azimuth window is still 5 degrees");
+eqs(CsValidate.DUPLICATE_DISTANCE_FRACTION, 0.05,
+    "and the distance window still 5%");
+
+// A reading that is about 180 deg from its twin is a backsight in the
+// foresight column, which is a DIFFERENT finding from a disagreement.
+var flipped = findingsFor(dupSurvey(270, 100));
+ok(hasCode(flipped, "backsight-as-foresight"),
+    "a reading 180 deg from its twin is called out as a backsight");
+ok(!hasCode(flipped, "duplicate-disagrees"),
+    "and not ALSO reported as an ordinary disagreement -- naming the " +
+    "cause is the whole point of the separate code");
+
+// ---------------------------------------------------------------------
 // azimuth-range: the validator rule nothing exercised.
 //
 // Found by making the Pitfall Cave manifest executable (pitfall 45).

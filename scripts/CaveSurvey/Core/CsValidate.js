@@ -20,6 +20,29 @@ var CsValidate = {};
 
 CsValidate.CLOSURE_WARN_PERCENT = 2.0; // BCRA grade 3 expects 1-5%
 
+// The rest of this module's thresholds, named for the same reason
+// CLOSURE_WARN_PERCENT is: a number sitting inline in a comparison can
+// be nudged in a hurry, and what a suite warns about is exactly the
+// kind of thing that drifts without anyone deciding it should. Each is
+// pinned at its boundary in tests/js_unit.js.
+
+/** Degrees of foresight/backsight disagreement tolerated before the
+ *  instrument check speaks. Both compass and clino: the same eye and
+ *  the same pair of instruments produce both. */
+CsValidate.FSBS_TOLERANCE_DEG = 3.0;
+
+/** Past this inclination a shot is called nearly plumb. Common in
+ *  vertical caves and equally a classic sign-flip site, so it is a
+ *  gentle warning rather than an error -- and a DECLARED plumb (+/-90)
+ *  is past it too, on purpose: the flag says "this is vertical", which
+ *  is true either way. */
+CsValidate.NEAR_PLUMB_DEG = 85;
+
+/** Two readings of the same pair agree when they are within this many
+ *  degrees AND within DUPLICATE_DISTANCE_FRACTION of each other. */
+CsValidate.DUPLICATE_AZIMUTH_DEG = 5.0;
+CsValidate.DUPLICATE_DISTANCE_FRACTION = 0.05;
+
 /** True when any finding is an error (vs merely a warning). */
 CsValidate.checkHasErrors = function(findings) {
     for (var i = 0; i < findings.length; i++) {
@@ -83,29 +106,32 @@ CsValidate.check = function(survey, resolved) {
         if (s.backAzimuth !== null && s.backAzimuth !== undefined) {
             var bsDiff = CsAngles.azimuthDifference(
                 s.azimuth, s.backAzimuth + 180.0);
-            if (bsDiff > 3.0) {
+            if (bsDiff > CsValidate.FSBS_TOLERANCE_DEG) {
                 findings.push({ severity: "warning", shotIndex: i,
                     code: "fsbs-azimuth-disagree",
                     message: "Shot " + s.from + " to " + s.to +
                         ": foresight and backsight compass disagree by " +
-                        bsDiff.toFixed(1) + " deg (over 3) -- re-read, or " +
+                        bsDiff.toFixed(1) + " deg (over " +
+                        CsValidate.FSBS_TOLERANCE_DEG + ") -- re-read, or " +
                         "one instrument needs calibrating." });
             }
         }
         if (s.backInclination !== null && s.backInclination !== undefined) {
             var incDiff = Math.abs(s.inclination - (-s.backInclination));
-            if (incDiff > 3.0) {
+            if (incDiff > CsValidate.FSBS_TOLERANCE_DEG) {
                 findings.push({ severity: "warning", shotIndex: i,
                     code: "fsbs-inclination-disagree",
                     message: "Shot " + s.from + " to " + s.to +
                         ": foresight and backsight clino disagree by " +
-                        incDiff.toFixed(1) + " deg (over 3)." });
+                        incDiff.toFixed(1) + " deg (over " +
+                        CsValidate.FSBS_TOLERANCE_DEG + ")." });
             }
         }
 
         // Nearly plumb shots are common in vertical caves but also a
         // classic sign-flip/typo site -- flag once, gently.
-        if (Math.abs(s.inclination) > 85 && s.distance > 0) {
+        if (Math.abs(s.inclination) > CsValidate.NEAR_PLUMB_DEG &&
+                s.distance > 0) {
             findings.push({ severity: "warning", shotIndex: i, code: "near-plumb",
                 message: "Inclination " + s.inclination +
                     " is nearly plumb; fine if this was a plumbed pitch." });
@@ -135,15 +161,16 @@ CsValidate.check = function(survey, resolved) {
                 var azDiff = CsAngles.azimuthDifference(expected, b.azimuth);
                 var distDiff = Math.abs(a.distance - b.distance);
 
-                if (azDiff < 5.0 &&
-                    distDiff < Math.max(a.distance, b.distance) * 0.05) {
+                if (azDiff < CsValidate.DUPLICATE_AZIMUTH_DEG &&
+                    distDiff < Math.max(a.distance, b.distance) *
+                        CsValidate.DUPLICATE_DISTANCE_FRACTION) {
                     // agreeing duplicate / backsight pair: normal
                     // practice, say nothing
                     continue;
                 }
                 var flippedDiff = CsAngles.azimuthDifference(
                     expected + 180.0, b.azimuth);
-                if (flippedDiff < 5.0) {
+                if (flippedDiff < CsValidate.DUPLICATE_AZIMUTH_DEG) {
                     findings.push({ severity: "warning", shotIndex: idxs[j],
                         code: "backsight-as-foresight",
                         message: "Shot " + b.from + " to " + b.to +
