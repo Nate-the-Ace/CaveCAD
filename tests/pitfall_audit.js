@@ -831,9 +831,12 @@ check(45, "an azimuth out of range", function() {
             "unnormalised and the check fired" };
     }
     return { manual: "every reader NORMALISES an out-of-range azimuth, so " +
-        "the check can only fire on model data typed into SurveyNotebook. " +
-        "The raw 372 is present in the fixture; exercising it needs the " +
-        "GUI." };
+        "the check cannot fire through a FILE at all -- it fires on model " +
+        "data, which is what SurveyNotebook hands it when a bearing is " +
+        "typed or pasted. The rule itself is now covered directly in " +
+        "tests/js_unit.js (it had no test anywhere until this audit asked); " +
+        "what remains manual is only the fixture's own path through the " +
+        "GUI. The raw 372 is still in PitfallCave_Broken.csv line 12." };
 });
 
 check(46, "an unconnected component is an ERROR", function() {

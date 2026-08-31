@@ -21611,6 +21611,43 @@ for (var zwi = 0; zwi < zWriters.length; zwi++) {
 }
 
 // ---------------------------------------------------------------------
+// azimuth-range: the validator rule nothing exercised.
+//
+// Found by making the Pitfall Cave manifest executable (pitfall 45).
+// Every READER normalises an out-of-range bearing on the way in, so no
+// fixture can reach this rule through a file -- it fires on model data,
+// which is what SurveyNotebook hands it when a bearing is typed or
+// pasted. That is also why it had no test at all: the one path to it
+// does not go through a parser.
+//
+// It is a WARNING, not an error, and deliberately: the value is
+// wrapped, not refused, so a 372 still plots where 12 would.
+// ---------------------------------------------------------------------
+
+function azFindingsFor(azimuth) {
+    var sv = CsModel.newSurvey();
+    sv.shots = [shotOf("Z1", "Z2", 10, azimuth, 0)];
+    var found = CsValidate.check(sv, CsNetwork.resolve(sv, {}));
+    var out = [];
+    for (var i = 0; i < found.length; i++) {
+        if (found[i].code === "azimuth-range") { out.push(found[i]); }
+    }
+    return out;
+}
+
+eqs(azFindingsFor(372).length, 1,
+    "azimuth-range fires on a bearing past 360");
+eqs(azFindingsFor(372)[0].severity, "warning",
+    "azimuth-range is a warning -- the value is wrapped, not refused");
+eqs(azFindingsFor(-5).length, 1,
+    "azimuth-range fires on a negative bearing");
+eqs(azFindingsFor(0).length, 0, "0 is in range");
+eqs(azFindingsFor(359.99).length, 0, "359.99 is in range");
+eqs(azFindingsFor(360).length, 1,
+    "360 is OUT of range: it is the same direction as 0, and a survey " +
+    "that stores both cannot be compared on the number");
+
+// ---------------------------------------------------------------------
 // A CHANGE OF DATE ends a trip's crew, whether or not a leg came first.
 //
 // The old rule cleared the running team only when a LEG had been
