@@ -421,3 +421,22 @@ inherits that. Probed rather than reasoned about.
 No guard was added against a scan drawn the other way round. Nathan's
 call: a backward page is a mistake at the source, and the ghost sitting
 under the scan is already a visual check against it.
+
+### A P side leaves the ghost closed
+
+Nathan, 2026-08-31: "It's fine if our ghost lines close when the real
+wall may have a Passage, once inserted properly, the cross section
+sketch will show the real passage."
+
+An earlier answer had the outline breaking open where a side is written
+`P`. It does not, and should not. The ghost is a ruler — it exists to
+scale a scanned page against and to check the tracing, and it is deleted
+at Capture. What a reader finally sees is the caver's tracing, drawn
+from a field book on which the open passage was already drawn. So the
+closure costs nothing and buys a simpler contract: `cut()` always
+returns a closed ring, and `boundaryHits`, `radiusAt`, `leaderStop`,
+`centroidOf` and `CsSectionDraw.localBox` can all keep assuming one.
+
+Recorded because the opposite was specified first, and because the gap's
+angular width is not recoverable from LRUD in any case — `P` says "no
+wall measured in this direction", never "no wall across this span".

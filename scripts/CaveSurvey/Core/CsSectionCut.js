@@ -285,11 +285,27 @@ CsSectionCut.frameForLeg = function(resolved, from, to) {
     return out;
 };
 
-// P (open passage) AND THE OUTLINE'S CLOSURE -- investigated, not
-// built. Nathan's call for a side written "P" is that the outline
-// should NOT close there -- an open gap where the passage continues,
-// rather than the boundary pretending the nearest measured points
-// connect straight across empty space. That is not this fix: `P`
+// P (open passage) AND THE OUTLINE'S CLOSURE -- SETTLED, closed is
+// correct. Nathan, 2026-08-31: "It's fine if our ghost lines close
+// when the real wall may have a Passage, once inserted properly, the
+// cross section sketch will show the real passage."
+//
+// That is the whole argument. This outline is a GHOST -- a ruler the
+// caver scales a scanned field-book page against, and a check on their
+// tracing. It is deleted at Capture and never reaches the drawing. The
+// passage a reader ends up looking at is the one the caver TRACED, and
+// a surveyor who wrote "P" drew what was actually there on the page.
+// So a closed ghost costs nothing: it never claims to be the passage,
+// and the thing that does claim to be the passage is hand-drawn from
+// the field book.
+//
+// An earlier draft of this comment recorded the open gap as a
+// follow-on design task. It is not owed. Do not build it without
+// Nathan asking again -- the reasoning below is why it would be
+// expensive AND why it would be inventing data, and both still hold.
+// Kept because it is the argument for leaving this alone.
+//
+// The mechanics, for whoever reads this next: `P`
 // parses to value:null (see CsModel.parseLrudEntry), so today a "P"
 // side simply contributes no point, same as a blank cell always has,
 // and boundaryHits below still closes the polygon across whatever gap
@@ -313,10 +329,9 @@ CsSectionCut.frameForLeg = function(resolved, from, to) {
 //     draw path, which then has to be re-threaded through
 //     `leaderStop`/`centroidOf` (both assume a full loop) and through
 //     `CsSectionDraw.localBox`.
-// So: STOPPED here rather than picking an arbitrary width and drawing
-// a gap the data does not actually support. The zero-vs-P distinction
-// above stands on its own and is what rescues the refusals a real 0
-// used to cause; the open-gap outline is a follow-on design task.
+// So: closed, deliberately, and not for want of trying. The zero-vs-P
+// distinction above is the part that mattered -- it is what rescues the
+// refusals a real 0 used to cause, and it stands on its own.
 
 /**
  * One station's measured wall points, projected into the section plane.
