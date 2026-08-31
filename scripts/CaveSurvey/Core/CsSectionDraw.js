@@ -32,10 +32,33 @@
 
 var CsSectionDraw = {};
 
-/** Drawing units per survey unit inside a section. A section drawn at
- *  plan scale is a smudge -- a three-metre passage on a 1:500 sheet --
- *  so a section carries its OWN scale and says so in its caption. */
-CsSectionDraw.SCALE = 2.0;
+/**
+ * Drawing units per survey unit inside a section.
+ *
+ * ONE, deliberately -- a section is BORN AT PLAN SCALE and enlarged
+ * afterwards by scaling the block reference, which is Nathan's call:
+ * "if sections are drawn as blocks, then we can manually scale them
+ * later, upon creation, make them 1:1".
+ *
+ * The old default was 2.0, on the reasoning that a section drawn at
+ * plan scale is a smudge -- a three-metre passage on a 1:500 sheet --
+ * so a section should carry its own scale and say so in its caption.
+ * That reasoning is about the FINISHED sheet, and it was being applied
+ * at the wrong moment: baking 2x in at capture makes the enlargement
+ * invisible and un-undoable, and it silently doubled a hand-traced
+ * sketch against the survey it was traced from.
+ *
+ * A block reference carries scale of its own, so the enlargement is a
+ * property the caver sets and can see. Capture already preserves it
+ * across an Edit Sketch round trip (SectionCapture's refScale), so a
+ * section scaled by hand stays scaled.
+ *
+ * NOT retroactive. A section already in a drawing carries its own
+ * SECTION_SCALE tag and CalloutWrite regenerates from THAT, falling
+ * back here only when the tag is missing or unreadable -- so sections
+ * captured at 2.0 keep being drawn at 2.0.
+ */
+CsSectionDraw.SCALE = 1.0;
 CsSectionDraw.SETTING_SCALE = "CaveSurvey/SectionScale";
 
 /** The tag every generated member of a section carries. */

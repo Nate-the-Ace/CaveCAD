@@ -11428,8 +11428,12 @@ if (!IS_NODE) {
 
     eqs(CsSectionDraw.scaleText(2), "2:1",
         "CsSectionDraw.scaleText: the default reads 2:1");
-    eqs(CsSectionDraw.SCALE, 2.0,
-        "CsSectionDraw.SCALE: sections draw at 2:1 by default");
+    // ONE, not two. A section is born at plan scale and enlarged
+    // afterwards by scaling its block reference, so the enlargement is
+    // a property the caver sets and can see rather than a factor baked
+    // in at capture. See the constant's own docblock.
+    eqs(CsSectionDraw.SCALE, 1.0,
+        "CsSectionDraw.SCALE: sections are captured 1:1");
 
     eqs(CsSectionDraw.scaleText(4), "4:1",
         "CsSectionDraw.scaleText: an enlargement reads 4:1");
