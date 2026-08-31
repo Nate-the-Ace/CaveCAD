@@ -285,6 +285,39 @@ CsSectionCut.frameForLeg = function(resolved, from, to) {
     return out;
 };
 
+// P (open passage) AND THE OUTLINE'S CLOSURE -- investigated, not
+// built. Nathan's call for a side written "P" is that the outline
+// should NOT close there -- an open gap where the passage continues,
+// rather than the boundary pretending the nearest measured points
+// connect straight across empty space. That is not this fix: `P`
+// parses to value:null (see CsModel.parseLrudEntry), so today a "P"
+// side simply contributes no point, same as a blank cell always has,
+// and boundaryHits below still closes the polygon across whatever gap
+// that leaves -- IDENTICAL to today's behaviour for a station nobody
+// ever measured that side of. No new wall is invented; nothing
+// regresses. But it is also not the open gap Nathan asked for, and
+// getting there is a real redesign, not a bug fix:
+//   * theta for an open side IS knowable without a length -- L/R/up/
+//     down are directions, not just distances, so the gap's CENTER
+//     angle can be computed the same way tickEnd's perpendicular is.
+//   * the gap's WIDTH is not knowable. LRUD records "no wall in this
+//     exact direction", never "the wall is absent across this whole
+//     angular span" -- inventing a width (a fixed angle either side of
+//     center? out to the neighbouring measured points?) asserts survey
+//     data that was never taken, exactly the kind of fabrication this
+//     whole fix exists to stop doing.
+//   * even with a width chosen, `boundaryHits`/`radiusAt` assume a
+//     closed ring (every ray crosses an even number of times) and
+//     `CsSectionDraw.define` draws one closed RPolyline; an open arc
+//     needs a different return contract from `cut()` and a different
+//     draw path, which then has to be re-threaded through
+//     `leaderStop`/`centroidOf` (both assume a full loop) and through
+//     `CsSectionDraw.localBox`.
+// So: STOPPED here rather than picking an arbitrary width and drawing
+// a gap the data does not actually support. The zero-vs-P distinction
+// above stands on its own and is what rescues the refusals a real 0
+// used to cause; the open-gap outline is a follow-on design task.
+
 /**
  * One station's measured wall points, projected into the section plane.
  *
@@ -333,8 +366,22 @@ CsSectionCut.polygonAt = function(survey, resolved, stationName, frame,
         var perp = CsSectionCut.sub(rel,
             CsSectionCut.scale(frame.d, CsSectionCut.dot(rel, frame.d)));
         var radius = CsSectionCut.length(perp);
-        if (radius < CsSectionCut.EPS) {
-            continue;                 // the wall is at the station
+        if (radius < CsSectionCut.EPS && !raw[i].atStation) {
+            // A raw point that projects to (near) zero in THIS plane
+            // usually means no wall evidence -- a splay that happened
+            // to land dead-center contributes nothing. But `atStation`
+            // marks a DIFFERENT case: an LRUD side that read exactly 0
+            // (CsLrud.tickEnd/stationCeilingFloor3D), where the raw
+            // point IS the station itself and so is EXACTLY zero in
+            // every frame, not almost. That is real evidence -- "the
+            // wall is right here" -- and dropping it is the defect
+            // this function used to have: a station with, say, L 0
+            // lost its left wall point outright, sometimes taking the
+            // whole cut below CsSectionCut.MIN_POINTS with it. theta
+            // for a zero-radius vertex is atan2(0,0) = 0, deterministic
+            // in this engine, so it sorts and re-visits like any other
+            // point at theta 0.
+            continue;
         }
         points.push({
             theta: Math.atan2(CsSectionCut.dot(perp, frame.s),

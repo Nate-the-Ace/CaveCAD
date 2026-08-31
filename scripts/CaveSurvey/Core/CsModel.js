@@ -45,8 +45,17 @@
 //     azimuth         degrees clockwise from north, TRUE bearing
 //     inclination     degrees, positive up
 //     left,right,up,down  LRUD at the TO station, facing travel;
-//                     null = not measured (distinct from 0 = wall at
-//                     the station)
+//                     null = not measured (distinct from 0 = wall AT
+//                     the station -- the wall passes through the
+//                     survey point itself, still a real measurement)
+//     leftOpen,rightOpen,upOpen,downOpen  boolean, true when that side
+//                     was written "P" (open passage -- no wall that
+//                     direction at all, not merely unmeasured). The
+//                     paired value is null whenever its Open flag is
+//                     true; a side can be a number, null-and-not-open
+//                     (not measured), or null-and-open (P). See
+//                     parseLrudEntry for how "5/P" (a ledge with the
+//                     passage open beyond it) resolves.
 //     splay           boolean: no named TO station, geometry only
 //     excludeFromPlot boolean: position stations but draw nothing
 //                     (Compass #|P#, Survex *flags surface)
@@ -90,7 +99,17 @@
 // keeps Traverse's fore/back averaging inside one frame.
 //
 // LRUD nulls: parsers map "missing" markers (negative values in
-// Compass, "--" in Walls, blank in CSV) to null, never to 0.
+// Compass, "--" in Walls, blank in CSV) to null, never to 0. "P"
+// (open passage -- no wall that direction) is ALSO null, but with its
+// side's Open flag set, so it stays distinguishable from a genuinely
+// unmeasured side; a measured 0 (wall at the station) keeps the
+// number 0 and its Open flag false. Compass/Walls/Survex/Therion have
+// no native token for "open" -- their own grammars only have a
+// number or "not measured" -- so a P written to one of those foreign
+// formats degrades to "not measured" on export, same as any other
+// null. CsModel's own row/tag encodings (shotRowText, CsTags,
+// CsCsv) are not so constrained and round-trip P (and "5/P")
+// exactly, because this Core controls their grammar.
 //
 // Trip identity: two trip records are "the same trip" when their
 // fingerprint -- date + "|" + team -- is equal. A trip IS a party
@@ -161,6 +180,14 @@ CsModel.newShot = function() {
         rightAll: null,
         upAll: null,
         downAll: null,
+        // true when the side was written "P" (open passage) rather
+        // than measured -- see the Shot shape comment at the top of
+        // this file. Always false/false/false/false alongside a real
+        // number; a side is never both.
+        leftOpen: false,
+        rightOpen: false,
+        upOpen: false,
+        downOpen: false,
         splay: false,
         excludeFromPlot: false,
         excludeFromAll: false,
@@ -461,12 +488,20 @@ CsModel.lrudForStation = function(survey, stationName) {
         if (s.excludeFromAll || s.splay) {
             continue;
         }
+        // "has evidence" has to include the Open flags, not just the
+        // numeric sides -- a shot recorded "P P P P" (checked every
+        // direction, found the passage open all around) is a real
+        // reading and must not lose out to a stale earlier shot just
+        // because none of its four sides is a number.
         if (s.to === stationName &&
-            (s.left !== null || s.right !== null || s.up !== null || s.down !== null)) {
+            (s.left !== null || s.right !== null || s.up !== null || s.down !== null ||
+             s.leftOpen || s.rightOpen || s.upOpen || s.downOpen)) {
             found = {
                 left: s.left, right: s.right, up: s.up, down: s.down,
                 leftAll: s.leftAll, rightAll: s.rightAll,
                 upAll: s.upAll, downAll: s.downAll,
+                leftOpen: !!s.leftOpen, rightOpen: !!s.rightOpen,
+                upOpen: !!s.upOpen, downOpen: !!s.downOpen,
                 azimuth: s.azimuth
             };
         }
@@ -520,30 +555,47 @@ CsModel.nextStationName = function(prevName) {
 /**
  * Parses one LRUD cell the way survey notes are written:
  *   "3.5"   one reading
- *   "P"     passage -- no wall that way; recorded as 0 by convention
+ *   "0"     the station is ON the wall -- a real measurement, distinct
+ *           from "P" below even though both are written short
+ *   "P"     open passage -- no wall that way at all; NOT the same as
+ *           "0" (wall at the station) and NOT the same as a blank
+ *           cell (nobody looked). Returns value:null like a blank
+ *           does -- so any caller that has not been taught about
+ *           `open` degrades safely to "nothing measured" -- but sets
+ *           `open` true so a caller that HAS been taught can tell the
+ *           two apart.
+ *   "5/P"   a ledge measured at 5, with the passage open beyond it --
+ *           no true outer wall. `value` is the ledge (5, still a real
+ *           measurement to draw), `open` is true (nothing closes past
+ *           it). "P" contributes no number of its own either way.
  *   "5/10"  multiple readings (ledge + outer wall): ALL are drawn;
  *           the LARGEST is the primary value -- the outer wall is
  *           what wall runs, stats and native-format exports use
  *   ""      not measured
  *
  * \return { value: Number|null primary, all: [Number]|null every
- *          reading when more than one, raw: String as entered }
+ *          reading when more than one, raw: String as entered,
+ *          open: Boolean true when any "P" was present }
  */
 CsModel.parseLrudEntry = function(text) {
     var raw = (text === undefined || text === null) ? "" :
         String(text).replace(/^\s+|\s+$/g, "");
     if (raw === "" || raw === "--") {
-        return { value: null, all: null, raw: raw };
+        return { value: null, all: null, raw: raw, open: false };
     }
     var parts = raw.split("/");
     var values = [];
+    var open = false;
     for (var i = 0; i < parts.length; i++) {
         var pTrim = parts[i].replace(/^\s+|\s+$/g, "");
         if (pTrim === "") {
             continue;
         }
         if (/^[Pp]$/.test(pTrim)) {
-            values.push(0);
+            // Open passage carries no length of its own -- it is a
+            // FLAG, not a value of 0 (see this function's docblock:
+            // that conflation is the whole defect being fixed here).
+            open = true;
             continue;
         }
         var n = parseFloat(pTrim);
@@ -552,7 +604,7 @@ CsModel.parseLrudEntry = function(text) {
         }
     }
     if (values.length === 0) {
-        return { value: null, all: null, raw: raw };
+        return { value: null, all: null, raw: raw, open: open };
     }
     var primary = values[0];
     for (i = 1; i < values.length; i++) {
@@ -563,16 +615,28 @@ CsModel.parseLrudEntry = function(text) {
     return {
         value: primary,
         all: values.length > 1 ? values : null,
-        raw: raw
+        raw: raw,
+        open: open
     };
 };
 
-/** The cell text for a stored LRUD field ("5/10" round-trips). */
-CsModel.lrudEntryText = function(value, all) {
+/**
+ * The cell text for a stored LRUD field ("5/10" round-trips, and so
+ * does "P" / "5/P" -- `open` re-appends the "P" a caller's `all`/
+ * `value` can no longer carry on their own now that it is not folded
+ * into a fake 0).
+ */
+CsModel.lrudEntryText = function(value, all, open) {
+    var numText;
     if (all !== null && all !== undefined && all.length > 1) {
-        return all.join("/");
+        numText = all.join("/");
+    } else {
+        numText = (value === null || value === undefined) ? "" : String(value);
     }
-    return (value === null || value === undefined) ? "" : String(value);
+    if (!open) {
+        return numText;
+    }
+    return (numText === "") ? "P" : (numText + "/P");
 };
 
 // ---------------------------------------------------------------------
@@ -709,10 +773,10 @@ CsModel.shotRowText = function(shot) {
         numText(shot.inclination),
         numText(shot.backAzimuth),
         numText(shot.backInclination),
-        CsModel.lrudEntryText(shot.left, shot.leftAll),
-        CsModel.lrudEntryText(shot.right, shot.rightAll),
-        CsModel.lrudEntryText(shot.up, shot.upAll),
-        CsModel.lrudEntryText(shot.down, shot.downAll),
+        CsModel.lrudEntryText(shot.left, shot.leftAll, shot.leftOpen),
+        CsModel.lrudEntryText(shot.right, shot.rightAll, shot.rightOpen),
+        CsModel.lrudEntryText(shot.up, shot.upAll, shot.upOpen),
+        CsModel.lrudEntryText(shot.down, shot.downAll, shot.downOpen),
         CsModel.flagsText(shot),
         note,
         numText(shot.declination)
@@ -746,6 +810,7 @@ CsModel.parseShotRow = function(text) {
         var e = CsModel.parseLrudEntry(f[sides[i][1]] || "");
         shot[sides[i][0]] = e.value;
         shot[sides[i][0] + "All"] = e.all;
+        shot[sides[i][0] + "Open"] = e.open;
     }
     CsModel.parseFlags(f[11] || "", shot);
     // The note runs from field 12 to the last field the declination
@@ -781,17 +846,22 @@ CsModel.startLrudText = function(lrud) {
     if (lrud === null || lrud === undefined) {
         return "";
     }
-    var side = function(value, all) {
-        if (value === null || value === undefined) {
+    var side = function(value, all, open) {
+        // "-" means "not measured"; a side that is null but Open (a
+        // "P") is NOT that -- it is a real recorded reading, and
+        // lrudEntryText already renders it as "P", which can never
+        // collide with "-" or with a real 0 (see this function's own
+        // docblock).
+        if ((value === null || value === undefined) && !open) {
             return "-";
         }
-        return CsModel.lrudEntryText(value, all);
+        return CsModel.lrudEntryText(value, all, open);
     };
     return [
-        side(lrud.left, lrud.leftAll),
-        side(lrud.right, lrud.rightAll),
-        side(lrud.up, lrud.upAll),
-        side(lrud.down, lrud.downAll)
+        side(lrud.left, lrud.leftAll, lrud.leftOpen),
+        side(lrud.right, lrud.rightAll, lrud.rightOpen),
+        side(lrud.up, lrud.upAll, lrud.upOpen),
+        side(lrud.down, lrud.downAll, lrud.downOpen)
     ].join(",");
 };
 
@@ -803,7 +873,8 @@ CsModel.parseStartLrud = function(text) {
     var f = text.split(",");
     var out = {
         left: null, right: null, up: null, down: null,
-        leftAll: null, rightAll: null, upAll: null, downAll: null
+        leftAll: null, rightAll: null, upAll: null, downAll: null,
+        leftOpen: false, rightOpen: false, upOpen: false, downOpen: false
     };
     var names = ["left", "right", "up", "down"];
     for (var i = 0; i < names.length; i++) {
@@ -813,6 +884,7 @@ CsModel.parseStartLrud = function(text) {
         var e = CsModel.parseLrudEntry(f[i]);
         out[names[i]] = e.value;
         out[names[i] + "All"] = e.all;
+        out[names[i] + "Open"] = e.open;
     }
     return out;
 };

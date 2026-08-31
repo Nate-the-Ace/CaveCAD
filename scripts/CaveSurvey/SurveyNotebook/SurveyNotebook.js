@@ -167,12 +167,15 @@ SurveyNotebook.sheetSurvey = function(w) {
                 var s0U = CsModel.parseLrudEntry(rows[i].u.text);
                 var s0D = CsModel.parseLrudEntry(rows[i].d.text);
                 if (s0L.value !== null || s0R.value !== null ||
-                    s0U.value !== null || s0D.value !== null) {
+                    s0U.value !== null || s0D.value !== null ||
+                    s0L.open || s0R.open || s0U.open || s0D.open) {
                     survey.startLrud = {
                         left: s0L.value, right: s0R.value,
                         up: s0U.value, down: s0D.value,
                         leftAll: s0L.all, rightAll: s0R.all,
-                        upAll: s0U.all, downAll: s0D.all
+                        upAll: s0U.all, downAll: s0D.all,
+                        leftOpen: s0L.open, rightOpen: s0R.open,
+                        upOpen: s0U.open, downOpen: s0D.open
                     };
                 }
                 survey.startNote = String(rows[i].notes.toPlainText())
@@ -201,17 +204,18 @@ SurveyNotebook.sheetSurvey = function(w) {
         var inc = num(rows[i].inc);
         shot.inclination = inc === null ? 0.0 : inc;
         // backsights live in the scanned notes, not on this page
-        // LRUD cells speak notes shorthand: "P" = passage (0),
-        // "5/10" = both readings (both are drawn; the larger is the
-        // wall). See CsModel.parseLrudEntry.
+        // LRUD cells speak notes shorthand: "0" = wall at the station,
+        // "P" = open passage (no wall that way -- NOT the same as
+        // "0"), "5/10" = both readings (both are drawn; the larger is
+        // the wall). See CsModel.parseLrudEntry.
         var eL = CsModel.parseLrudEntry(rows[i].l.text);
         var eR = CsModel.parseLrudEntry(rows[i].r.text);
         var eU = CsModel.parseLrudEntry(rows[i].u.text);
         var eD = CsModel.parseLrudEntry(rows[i].d.text);
-        shot.left = eL.value; shot.leftAll = eL.all;
-        shot.right = eR.value; shot.rightAll = eR.all;
-        shot.up = eU.value; shot.upAll = eU.all;
-        shot.down = eD.value; shot.downAll = eD.all;
+        shot.left = eL.value; shot.leftAll = eL.all; shot.leftOpen = eL.open;
+        shot.right = eR.value; shot.rightAll = eR.all; shot.rightOpen = eR.open;
+        shot.up = eU.value; shot.upAll = eU.all; shot.upOpen = eU.open;
+        shot.down = eD.value; shot.downAll = eD.all; shot.downOpen = eD.open;
         shot.notes = String(rows[i].notes.toPlainText()).replace(/^\s+|\s+$/g, "");
         survey.shots.push(shot);
         if (!splay) {
@@ -257,10 +261,15 @@ SurveyNotebook.setSurvey = function(w, survey) {
     // first row: the start station, carrying the survey's start LRUD
     var first = SurveyNotebook.addStationRow(w, survey.shots[0].from);
     if (survey.startLrud) {
-        put(first.l, survey.startLrud.left);
-        put(first.r, survey.startLrud.right);
-        put(first.u, survey.startLrud.up);
-        put(first.d, survey.startLrud.down);
+        var sl0 = survey.startLrud;
+        // Through lrudEntryText, not a raw put of the number: a "P"
+        // side has value:null and would otherwise redisplay as a
+        // blank cell, silently forgetting that it was ever open
+        // passage rather than simply unmeasured.
+        put(first.l, CsModel.lrudEntryText(sl0.left, sl0.leftAll, sl0.leftOpen));
+        put(first.r, CsModel.lrudEntryText(sl0.right, sl0.rightAll, sl0.rightOpen));
+        put(first.u, CsModel.lrudEntryText(sl0.up, sl0.upAll, sl0.upOpen));
+        put(first.d, CsModel.lrudEntryText(sl0.down, sl0.downAll, sl0.downOpen));
     }
     first.notes.setPlainText(survey.startNote === undefined ||
         survey.startNote === null ? "" : String(survey.startNote));
@@ -290,10 +299,10 @@ SurveyNotebook.setSurvey = function(w, survey) {
         put(row.az, CsAngles.normalizeAzimuth(
             shot.azimuth - (survey.declination || 0)).toFixed(2));
         put(row.inc, shot.inclination);
-        put(row.l, CsModel.lrudEntryText(shot.left, shot.leftAll));
-        put(row.r, CsModel.lrudEntryText(shot.right, shot.rightAll));
-        put(row.u, CsModel.lrudEntryText(shot.up, shot.upAll));
-        put(row.d, CsModel.lrudEntryText(shot.down, shot.downAll));
+        put(row.l, CsModel.lrudEntryText(shot.left, shot.leftAll, shot.leftOpen));
+        put(row.r, CsModel.lrudEntryText(shot.right, shot.rightAll, shot.rightOpen));
+        put(row.u, CsModel.lrudEntryText(shot.up, shot.upAll, shot.upOpen));
+        put(row.d, CsModel.lrudEntryText(shot.down, shot.downAll, shot.downOpen));
         row.notes.setPlainText(shot.notes === undefined ||
             shot.notes === null ? "" : String(shot.notes));
         if (!shot.splay && shot.to !== "") {

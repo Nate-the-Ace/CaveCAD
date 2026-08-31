@@ -12,7 +12,9 @@
 // Everything after inclination is optional, and notes is always the
 // LAST column so embedded commas survive. Blank LRUD cells mean "not
 // measured" (null); LRUD cells speak the notebook shorthand ("5/10"
-// keeps both readings, "P" is passage = 0). Flags letters: X = exclude
+// keeps both readings, "0" means the wall is at the station, "P"
+// means open passage -- no wall that direction at all, NOT the same
+// as "0" -- see CsModel.parseLrudEntry). Flags letters: X = exclude
 // entirely, P = don't plot, L = exclude from length, C = don't adjust.
 //
 // CSV has no native survey header, so what the columns can't carry
@@ -93,7 +95,9 @@ CsFormatCsv.parse = function(content) {
                         left: seL.value, right: seR.value,
                         up: seU.value, down: seD.value,
                         leftAll: seL.all, rightAll: seR.all,
-                        upAll: seU.all, downAll: seD.all
+                        upAll: seU.all, downAll: seD.all,
+                        leftOpen: seL.open, rightOpen: seR.open,
+                        upOpen: seU.open, downOpen: seD.open
                     };
                 } else if (key === "startnote") {
                     survey.startNote = val;
@@ -154,10 +158,10 @@ CsFormatCsv.parse = function(content) {
         shot.inclination = inc === null ? 0.0 : inc;
         var eL = lrudCell(rec.left), eR = lrudCell(rec.right);
         var eU = lrudCell(rec.up), eD = lrudCell(rec.down);
-        shot.left = eL.value; shot.leftAll = eL.all;
-        shot.right = eR.value; shot.rightAll = eR.all;
-        shot.up = eU.value; shot.upAll = eU.all;
-        shot.down = eD.value; shot.downAll = eD.all;
+        shot.left = eL.value; shot.leftAll = eL.all; shot.leftOpen = eL.open;
+        shot.right = eR.value; shot.rightAll = eR.all; shot.rightOpen = eR.open;
+        shot.up = eU.value; shot.upAll = eU.all; shot.upOpen = eU.open;
+        shot.down = eD.value; shot.downAll = eD.all; shot.downOpen = eD.open;
         shot.backAzimuth = opt(rec.backazimuth);
         shot.backInclination = opt(rec.backinclination);
         if (rec.flags !== undefined) {
@@ -184,8 +188,8 @@ CsFormatCsv.parse = function(content) {
 
 CsFormatCsv.write = function(survey) {
     var out = [];
-    var lrudText = function(v, all) {
-        return CsModel.lrudEntryText(v, all);
+    var lrudText = function(v, all, open) {
+        return CsModel.lrudEntryText(v, all, open);
     };
     // Prefer the drawing-level cave name (Compass import etc.) over
     // the trip name for this header comment.
@@ -211,10 +215,10 @@ CsFormatCsv.write = function(survey) {
     if (survey.startLrud !== null && survey.startLrud !== undefined) {
         var sl = survey.startLrud;
         out.push("# startlrud: " +
-            lrudText(sl.left, sl.leftAll) + "," +
-            lrudText(sl.right, sl.rightAll) + "," +
-            lrudText(sl.up, sl.upAll) + "," +
-            lrudText(sl.down, sl.downAll));
+            lrudText(sl.left, sl.leftAll, sl.leftOpen) + "," +
+            lrudText(sl.right, sl.rightAll, sl.rightOpen) + "," +
+            lrudText(sl.up, sl.upAll, sl.upOpen) + "," +
+            lrudText(sl.down, sl.downAll, sl.downOpen));
     }
     if (survey.startNote) {
         out.push("# startnote: " + survey.startNote);
@@ -234,8 +238,10 @@ CsFormatCsv.write = function(survey) {
         // notes is the last column, so its commas are safe as-is
         out.push([s.from, s.splay ? "" : s.to, s.distance, s.azimuth,
             s.inclination,
-            lrudText(s.left, s.leftAll), lrudText(s.right, s.rightAll),
-            lrudText(s.up, s.upAll), lrudText(s.down, s.downAll),
+            lrudText(s.left, s.leftAll, s.leftOpen),
+            lrudText(s.right, s.rightAll, s.rightOpen),
+            lrudText(s.up, s.upAll, s.upOpen),
+            lrudText(s.down, s.downAll, s.downOpen),
             fmt(s.backAzimuth), fmt(s.backInclination), flags,
             s.notes || ""].join(","));
     }

@@ -74,6 +74,7 @@ CsRevise.shotFromEntity = function(e) {
         var entry = CsModel.parseLrudEntry(CsTags.get(e, sides[i][1]));
         shot[sides[i][0]] = entry.value;
         shot[sides[i][0] + "All"] = entry.all;
+        shot[sides[i][0] + "Open"] = entry.open;
     }
     CsModel.parseFlags(CsTags.get(e, "Flags"), shot);
     shot.notes = CsTags.get(e, "Note");
@@ -2231,14 +2232,17 @@ CsRevise.apply = function(doc, di, recon, newSurvey) {
                             CsTags.set(e, "Declination", match.declination);
                         }
                         CsTags.set(e, "Left",
-                            CsModel.lrudEntryText(match.left, match.leftAll));
+                            CsModel.lrudEntryText(match.left, match.leftAll,
+                                match.leftOpen));
                         CsTags.set(e, "Right",
                             CsModel.lrudEntryText(match.right,
-                                match.rightAll));
+                                match.rightAll, match.rightOpen));
                         CsTags.set(e, "Up",
-                            CsModel.lrudEntryText(match.up, match.upAll));
+                            CsModel.lrudEntryText(match.up, match.upAll,
+                                match.upOpen));
                         CsTags.set(e, "Down",
-                            CsModel.lrudEntryText(match.down, match.downAll));
+                            CsModel.lrudEntryText(match.down, match.downAll,
+                                match.downOpen));
                     }
                 }
 

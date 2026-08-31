@@ -264,26 +264,55 @@ ok(CsModel.nextStationName("A09") === "A10", "next name zero padding");
 ok(CsModel.nextStationName("") === "A1", "next name from nothing");
 ok(CsModel.nextStationName("LEAD") === "LEAD1", "next name no digits");
 
-// LRUD notes shorthand
+// LRUD notes shorthand -- three distinct states: blank (not measured),
+// "0" (wall AT the station -- a real measurement), "P" (open passage,
+// no wall that way at all). P used to be folded into 0 by convention;
+// that conflation is the defect this suite fixes, so these are the
+// tests that would have caught it.
 var pe = CsModel.parseLrudEntry("P");
-ok(pe.value === 0 && pe.all === null, "P parses as passage = 0");
+ok(pe.value === null && pe.all === null && pe.open === true,
+    "P parses as open passage: value null, open true -- NOT 0");
+pe = CsModel.parseLrudEntry("p");
+ok(pe.value === null && pe.open === true, "lowercase p is the same as P");
+pe = CsModel.parseLrudEntry("0");
+ok(pe.value === 0 && pe.open === false,
+    "0 parses as a real measurement (wall at the station), not open");
 pe = CsModel.parseLrudEntry("5/10");
-ok(pe.value === 10, "5/10: primary is the outer wall (10)");
+ok(pe.value === 10 && pe.open === false, "5/10: primary is the outer wall (10)");
 ok(pe.all !== null && pe.all.length === 2 && pe.all[0] === 5,
     "5/10: both readings kept");
 pe = CsModel.parseLrudEntry("10/5");
 ok(pe.value === 10, "10/5: primary still the larger");
 pe = CsModel.parseLrudEntry("3.5");
-ok(pe.value === 3.5 && pe.all === null, "single reading unchanged");
-pe = CsModel.parseLrudEntry("p/4");
-ok(pe.value === 4 && pe.all.length === 2 && pe.all[0] === 0,
-    "p/4: passage plus reading");
+ok(pe.value === 3.5 && pe.all === null && pe.open === false,
+    "single reading unchanged");
+pe = CsModel.parseLrudEntry("5/P");
+ok(pe.value === 5 && pe.all === null && pe.open === true,
+    "5/P: a ledge measured at 5, open beyond it -- the ledge still draws");
+pe = CsModel.parseLrudEntry("P/5");
+ok(pe.value === 5 && pe.open === true, "P/5: same meaning, either order");
 pe = CsModel.parseLrudEntry("");
-ok(pe.value === null, "blank = not measured");
+ok(pe.value === null && pe.open === false, "blank = not measured, not open");
 pe = CsModel.parseLrudEntry("junk");
-ok(pe.value === null, "junk = not measured");
+ok(pe.value === null && pe.open === false, "junk = not measured, not open");
 ok(CsModel.lrudEntryText(10, [5, 10]) === "5/10", "entry text round-trips multi");
 ok(CsModel.lrudEntryText(3.5, null) === "3.5", "entry text single");
+ok(CsModel.lrudEntryText(null, null, true) === "P",
+    "entry text: open with no number round-trips to bare P");
+ok(CsModel.lrudEntryText(5, null, true) === "5/P",
+    "entry text: open with a number round-trips to \"5/P\"");
+ok(CsModel.lrudEntryText(0, null, false) === "0",
+    "entry text: a real 0 round-trips to the digit 0, never to P");
+// full round trip through parse -> text -> parse for all three states
+var rtP = CsModel.parseLrudEntry(
+    CsModel.lrudEntryText(null, null, true));
+ok(rtP.value === null && rtP.open === true, "P round-trips through text");
+var rt0 = CsModel.parseLrudEntry(
+    CsModel.lrudEntryText(0, null, false));
+ok(rt0.value === 0 && rt0.open === false, "0 round-trips through text");
+var rt5P = CsModel.parseLrudEntry(
+    CsModel.lrudEntryText(5, null, true));
+ok(rt5P.value === 5 && rt5P.open === true, "5/P round-trips through text");
 
 // ---------------------------------------------------------------------
 // Trips + revision serialization
@@ -2298,10 +2327,34 @@ if (runs.right.length === 1) {
         "wallRuns: the right run's stations agree with the left run's");
 }
 
+// stationWallPoints: 0 and P must NOT look alike. Same station,
+// same azimuth -- only the value differs.
+var wpZero = CsLrud.stationWallPoints({ x: 0, y: 0 }, 0,
+    { left: 0, right: null, azimuth: 0 }, null, "L");
+ok(wpZero.length === 1 && wpZero[0].x === 0 && wpZero[0].y === 0,
+    "stationWallPoints: L 0 gives one point, at the station");
+var wpOpen = CsLrud.stationWallPoints({ x: 0, y: 0 }, 0,
+    { left: null, right: null, azimuth: 0 }, null, "L");
+ok(wpOpen.length === 0,
+    "stationWallPoints: L P (parses to null) gives NO point -- open passage");
+
 var tick = CsLrud.tickEnd({ x: 0, y: 0 }, 0, "R", 2);
 near(tick.x, 2, 1e-9, "right tick at az 0 points east");
-ok(CsLrud.tickEnd({ x: 0, y: 0 }, 0, "L", null) === null, "null LRUD no tick");
-ok(CsLrud.tickEnd({ x: 0, y: 0 }, 0, "L", 0) === null, "zero LRUD no tick");
+ok(CsLrud.tickEnd({ x: 0, y: 0 }, 0, "L", null) === null,
+    "null (not measured, or P after parseLrudEntry) -- no point");
+// A real 0 is a MEASUREMENT: the wall is AT the station, so tickEnd
+// must return the station's own point, not null. This is the exact
+// bug this whole task exists to fix -- MUTATION TEST: reverting
+// CsLrud.tickEnd to `if (length === null || length === undefined ||
+// length === 0) return null;` (its state before this fix) turns this
+// assertion red with "TypeError: Cannot read properties of null" at
+// the .x access below, because tickEnd(...,"L",0) goes back to
+// returning null instead of {x:0,y:0}. Confirmed by hand, reverted
+// back to the fix -- see the report for the quoted failure text.
+var zeroTick = CsLrud.tickEnd({ x: 5, y: 7 }, 0, "L", 0);
+ok(zeroTick !== null, "zero LRUD returns a point (wall at the station)");
+near(zeroTick.x, 5, 1e-9, "zero tick sits at the station's own x");
+near(zeroTick.y, 7, 1e-9, "zero tick sits at the station's own y");
 
 // ---------------------------------------------------------------------
 // Splays feed the walls too. A splay tip IS a measured wall hit; before
@@ -2580,6 +2633,11 @@ function splayFixture() {
         "stationCeilingFloor3D: no U measured means no ceiling point");
     near(noUp.floor.z, 100, 1e-9,
         "stationCeilingFloor3D: D = 0 IS a measurement -- floor at the station");
+    ok(noUp.floor.atStation === true,
+        "stationCeilingFloor3D: a D-0 floor point is tagged atStation, " +
+        "so CsSectionCut.polygonAt knows to keep it despite its zero radius");
+    ok(ud.floor.atStation === false || ud.floor.atStation === undefined,
+        "stationCeilingFloor3D: a real (non-zero) D is not tagged atStation");
 })();
 
 (function() {
@@ -11187,6 +11245,74 @@ if (!IS_NODE) {
         "CsSectionCut.cut: and the refusal says how short it is, by " +
         "name (got: " + twoRefused.reason + ")");
 
+    // THE RESCUE. Same station, same two real readings (L 5, R 5) --
+    // but its remaining two sides are ZEROS (the station sits on the
+    // ceiling and the floor) rather than unmeasured. Before this fix
+    // parseLrudEntry never produced this shape (a zero could only
+    // arrive via "P", which collapsed to 0 too), and even once shot.up
+    // === 0 got there, CsSectionCut.polygonAt's `radius < EPS` filter
+    // silently dropped every zero-radius point -- so a station like
+    // this looked exactly like C2 above and was refused for the same
+    // "only 2" reason, in the neighbour's name if cut from the far
+    // end. Now the two zeros each contribute a real vertex (radius 0,
+    // at the station), reaching the 3-point minimum, so the cut MUST
+    // succeed. This is the shape of the real cave's D2/D11/D13/F4
+    // refusals -- each had exactly two non-zero readings and the rest
+    // recorded as 0 rather than left blank.
+    var zeroSv = CsModel.newSurvey();
+    zeroSv.shots.push(lrudShot("D1", "D2", 10, 0, 5, 5, 0, 0));
+    var zeroRes = CsNetwork.resolve(zeroSv, {});
+    var zeroCut = CsSectionCut.cut(zeroSv, zeroRes, "D1", "D2", 1, {});
+    ok(zeroCut.refused === undefined,
+        "CsSectionCut.cut: two real readings PLUS two zeros is cuttable " +
+        "-- the zeros are measurements, not gaps (refused: " +
+        (zeroCut.refused ? zeroCut.reason : "none") + ")");
+    eqs(zeroCut.measuredTo, 4,
+        "CsSectionCut.cut: all four sides count -- two numbers, two zeros");
+
+    // THE SAME STATION WRITTEN WITH TWO "P"s INSTEAD OF TWO ZEROS MUST
+    // STILL BE REFUSED -- P contributes no point at all, so this is
+    // the same "only 2" shape as twoRefused above, not the zeroCut
+    // rescue. Proves the fix does not also rescue the case it must not.
+    var openSv = CsModel.newSurvey();
+    var openShot = shotOf("E1", "E2", 10, 0);
+    var oe = CsModel.parseLrudEntry("P");
+    openShot.left = 5; openShot.right = 5;
+    openShot.up = oe.value; openShot.upOpen = oe.open;
+    openShot.down = oe.value; openShot.downOpen = oe.open;
+    openSv.shots.push(openShot);
+    var openRes = CsNetwork.resolve(openSv, {});
+    var openCut = CsSectionCut.cut(openSv, openRes, "E1", "E2", 1, {});
+    ok(openCut.refused === true,
+        "CsSectionCut.cut: two real readings plus two P's is STILL " +
+        "only 2 measured points -- P is not a wall point");
+
+    // polygonAt directly: the zero contributes exactly one point, at
+    // radius 0. MUTATION TEST -- reverting the `!raw[i].atStation`
+    // clause in CsSectionCut.polygonAt (so it reads plain
+    // `if (radius < CsSectionCut.EPS) continue;`, its state before
+    // this fix) turns `zeroPoly.measured` from 4 to 2 and this
+    // assertion red. Confirmed by hand, reverted back -- see the
+    // report for the quoted failure text.
+    var zeroFrame = CsSectionCut.frameForLeg(zeroRes, "D1", "D2").frame;
+    var zeroPoly = CsSectionCut.polygonAt(zeroSv, zeroRes, "D2", zeroFrame, {});
+    eqs(zeroPoly.measured, 4,
+        "CsSectionCut.polygonAt: L 5, R 5, U 0, D 0 is FOUR measured " +
+        "points, not two -- the zeros count");
+    var zeroCount = 0;
+    for (i = 0; i < zeroPoly.points.length; i++) {
+        if (zeroPoly.points[i].radius < CsSectionCut.EPS) { zeroCount++; }
+    }
+    eqs(zeroCount, 2,
+        "CsSectionCut.polygonAt: exactly the two zero sides land at " +
+        "radius 0 -- the two real readings do not");
+
+    var openFrame = CsSectionCut.frameForLeg(openRes, "E1", "E2").frame;
+    var openPoly = CsSectionCut.polygonAt(openSv, openRes, "E2", openFrame, {});
+    eqs(openPoly.measured, 2,
+        "CsSectionCut.polygonAt: L 5, R 5, U P, D P is TWO measured " +
+        "points -- P contributes nothing, unlike a zero");
+
     // An end with almost no evidence is REFUSED, by name.
     var thinSv = CsModel.newSurvey();
     thinSv.shots.push(lrudShot("B1", "B2", 10, 0, 10, 10, 10, 10));
@@ -19515,8 +19641,19 @@ if (!IS_NODE) {
         "floorWalkable: the order in the cell does not matter");
     eqs(CsElevation.floorWalkable(CsModel.parseLrudEntry("3")), 3,
         "floorWalkable: a single reading is itself");
-    eqs(CsElevation.floorWalkable(CsModel.parseLrudEntry("P")), 0,
-        "floorWalkable: P is a REAL zero -- floor at the survey line");
+    // A bare P has no number at all -- open passage, floor location
+    // unknown -- so it degrades to null, the same safe "unmeasured"
+    // answer any caller not taught about `open` already gives it. It
+    // is NOT the same as a real 0 (floor at the survey line): that
+    // conflation, via parseLrudEntry mapping P to the number 0, is
+    // the defect this whole task exists to fix.
+    eqs(CsElevation.floorWalkable(CsModel.parseLrudEntry("P")), null,
+        "floorWalkable: a bare P is UNKNOWN -- it is not a real zero");
+    eqs(CsElevation.floorWalkable(CsModel.parseLrudEntry("0")), 0,
+        "floorWalkable: a REAL 0 is walkable at the survey line");
+    eqs(CsElevation.floorWalkable(CsModel.parseLrudEntry("5/P")), 5,
+        "floorWalkable: a ledge measured at 5 with the passage open " +
+        "beyond it is still walkable at 5 -- the number survives");
     eqs(CsElevation.floorWalkable(CsModel.parseLrudEntry("")), null,
         "floorWalkable: an empty cell is UNKNOWN, not zero");
     eqs(CsElevation.floorWalkable(CsModel.parseLrudEntry("--")), null,

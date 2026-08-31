@@ -183,10 +183,14 @@ CsTags.tagStation = function(entity, data) {
     CsTags.set(entity, "Seq", data.seq);
     CsTags.set(entity, "Azimuth", data.azimuth);
     CsTags.set(entity, "Inclination", data.inclination);
-    CsTags.set(entity, "Left", CsModel.lrudEntryText(data.left, data.leftAll));
-    CsTags.set(entity, "Right", CsModel.lrudEntryText(data.right, data.rightAll));
-    CsTags.set(entity, "Up", CsModel.lrudEntryText(data.up, data.upAll));
-    CsTags.set(entity, "Down", CsModel.lrudEntryText(data.down, data.downAll));
+    CsTags.set(entity, "Left",
+        CsModel.lrudEntryText(data.left, data.leftAll, data.leftOpen));
+    CsTags.set(entity, "Right",
+        CsModel.lrudEntryText(data.right, data.rightAll, data.rightOpen));
+    CsTags.set(entity, "Up",
+        CsModel.lrudEntryText(data.up, data.upAll, data.upOpen));
+    CsTags.set(entity, "Down",
+        CsModel.lrudEntryText(data.down, data.downAll, data.downOpen));
     CsTags.set(entity, "Elevation", data.z);
     CsTags.set(entity, "Note", data.note);
 };
@@ -483,10 +487,10 @@ CsTags.surveyFromDocument = function(doc) {
             };
             var eL = lrudTag("Left"), eR = lrudTag("Right");
             var eU = lrudTag("Up"), eD = lrudTag("Down");
-            shot.left = eL.value; shot.leftAll = eL.all;
-            shot.right = eR.value; shot.rightAll = eR.all;
-            shot.up = eU.value; shot.upAll = eU.all;
-            shot.down = eD.value; shot.downAll = eD.all;
+            shot.left = eL.value; shot.leftAll = eL.all; shot.leftOpen = eL.open;
+            shot.right = eR.value; shot.rightAll = eR.all; shot.rightOpen = eR.open;
+            shot.up = eU.value; shot.upAll = eU.all; shot.upOpen = eU.open;
+            shot.down = eD.value; shot.downAll = eD.all; shot.downOpen = eD.open;
             shot.notes = CsTags.get(st.entity, "Note");
             survey.shots.push(shot);
         }

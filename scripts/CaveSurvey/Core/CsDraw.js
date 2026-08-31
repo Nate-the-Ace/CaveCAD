@@ -505,10 +505,10 @@ CsDraw.survey = function(survey, resolved, originStation, originPos, seqBase) {
             Distance: shot.distance,
             Azimuth: shot.azimuth,
             Inclination: shot.inclination,
-            Left: CsModel.lrudEntryText(shot.left, shot.leftAll),
-            Right: CsModel.lrudEntryText(shot.right, shot.rightAll),
-            Up: CsModel.lrudEntryText(shot.up, shot.upAll),
-            Down: CsModel.lrudEntryText(shot.down, shot.downAll),
+            Left: CsModel.lrudEntryText(shot.left, shot.leftAll, shot.leftOpen),
+            Right: CsModel.lrudEntryText(shot.right, shot.rightAll, shot.rightOpen),
+            Up: CsModel.lrudEntryText(shot.up, shot.upAll, shot.upOpen),
+            Down: CsModel.lrudEntryText(shot.down, shot.downAll, shot.downOpen),
             BackAzimuth: shot.backAzimuth,
             BackInclination: shot.backInclination,
             Flags: CsModel.flagsText(shot),
@@ -588,6 +588,10 @@ CsDraw.survey = function(survey, resolved, originStation, originPos, seqBase) {
                 rightAll: survey.startLrud.rightAll || null,
                 upAll: survey.startLrud.upAll || null,
                 downAll: survey.startLrud.downAll || null,
+                leftOpen: !!survey.startLrud.leftOpen,
+                rightOpen: !!survey.startLrud.rightOpen,
+                upOpen: !!survey.startLrud.upOpen,
+                downOpen: !!survey.startLrud.downOpen,
                 azimuth: firstLegAzimuth
             };
         }
@@ -601,6 +605,10 @@ CsDraw.survey = function(survey, resolved, originStation, originPos, seqBase) {
             right: lrud !== null ? lrud.right : undefined,
             up: lrud !== null ? lrud.up : undefined,
             down: lrud !== null ? lrud.down : undefined,
+            leftOpen: lrud !== null ? lrud.leftOpen : undefined,
+            rightOpen: lrud !== null ? lrud.rightOpen : undefined,
+            upOpen: lrud !== null ? lrud.upOpen : undefined,
+            downOpen: lrud !== null ? lrud.downOpen : undefined,
             z: resolved.stations[name].z,
             note: noteText
         });

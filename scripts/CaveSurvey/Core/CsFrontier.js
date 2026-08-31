@@ -126,10 +126,18 @@ CsFrontier.hasLrud = function(survey, station) {
     if (name === "" || survey === undefined || survey === null) { return false; }
 
     var any = function(shot) {
+        // A side written "P" (open passage) is a recorded reading --
+        // the party looked and found nothing there -- not an omission,
+        // so it counts as evidence the same as a number does. Missing
+        // this used to mean a station read "P P P P" (checked all four
+        // ways, wide open) looked exactly like one nobody measured at
+        // all, which is the one case this flag exists to catch.
         return shot.left !== null && shot.left !== undefined ||
             shot.right !== null && shot.right !== undefined ||
             shot.up !== null && shot.up !== undefined ||
-            shot.down !== null && shot.down !== undefined;
+            shot.down !== null && shot.down !== undefined ||
+            shot.leftOpen || shot.rightOpen ||
+            shot.upOpen || shot.downOpen;
     };
 
     if (Object.prototype.toString.call(survey.shots) === "[object Array]") {
@@ -147,7 +155,9 @@ CsFrontier.hasLrud = function(survey, station) {
             (start.left !== null && start.left !== undefined ||
              start.right !== null && start.right !== undefined ||
              start.up !== null && start.up !== undefined ||
-             start.down !== null && start.down !== undefined);
+             start.down !== null && start.down !== undefined ||
+             start.leftOpen || start.rightOpen ||
+             start.upOpen || start.downOpen);
     }
     return false;
 };

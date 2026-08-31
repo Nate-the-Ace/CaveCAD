@@ -43,10 +43,17 @@ CsElevation.DEFAULT_TOLERANCE = 10.0;
  * plan-versus-elevation dead zone (see its docblock), and the same
  * instruction: do not make them agree.
  *
- * null in, null out. An absent reading is UNKNOWN, not zero. `P` parses
- * to a real 0 and stays 0, meaning the floor is at the survey line --
- * CsLrud.tickEnd already draws that same null-versus-0 distinction and
- * this honours it.
+ * null in, null out. An absent reading is UNKNOWN, not zero. A bare
+ * `P` (open passage, no floor measurement at all) parses to
+ * value:null (CsModel.parseLrudEntry), so it lands here too and reads
+ * as "unknown" -- the honest answer, since nobody recorded where the
+ * floor actually is. `P` alongside a number ("5/P": a floor measured
+ * at 5, open below/beyond it) keeps that number as `entry.value` --
+ * see parseLrudEntry's own docblock -- so the walkable floor still
+ * resolves; only a side with no number at all degrades to null here.
+ * A genuine 0 stays 0, meaning the floor IS the survey line --
+ * CsLrud.tickEnd draws that same null-versus-0 distinction and this
+ * honours it.
  *
  * \param entry a CsModel.parseLrudEntry result for the Down field
  * \return number, or null when nothing was measured

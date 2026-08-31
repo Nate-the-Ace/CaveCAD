@@ -38,8 +38,18 @@ var CsLrud = {};
  * \param side "L" or "R"
  */
 CsLrud.tickEnd = function(station, azimuthDeg, side, length) {
-    if (length === null || length === undefined || length === 0) {
+    if (length === null || length === undefined) {
         return null;
+    }
+    if (length === 0) {
+        // The wall passes through the station -- a real measurement,
+        // not "nothing to draw". This used to be dead code (every
+        // caller special-cased 0 before ever reaching here), which is
+        // exactly how the docblock above and the behaviour drifted
+        // apart; fixed at the source so a new caller gets it right by
+        // just calling tickEnd instead of having to know to re-derive
+        // this special case itself.
+        return { x: station.x, y: station.y };
     }
     var perp = (side === "R") ? azimuthDeg + 90.0 : azimuthDeg - 90.0;
     var rad = perp * Math.PI / 180.0;
@@ -128,15 +138,13 @@ CsLrud.stationWallPoints = function(st, passageAz, lrud, splays, side,
 
     if (lrud !== null && lrud !== undefined) {
         var len = (side === "L") ? lrud.left : lrud.right;
-        if (len !== null && len !== undefined) {
-            // 0 means the wall is AT the station: a wall point, no tick
-            var p = (len === 0) ? { x: st.x, y: st.y } :
-                CsLrud.tickEnd(st, lrud.azimuth, side, len);
-            if (p !== null) {
-                // the tick is perpendicular to the passage, so it sits
-                // at along-passage 0 and leads its ties
-                entries.push({ p: p, t: 0.0, order: -1 });
-            }
+        // tickEnd itself now returns a point AT the station for 0 and
+        // null for not-measured/open ("P") -- see its own docblock.
+        var p = CsLrud.tickEnd(st, lrud.azimuth, side, len);
+        if (p !== null) {
+            // the tick is perpendicular to the passage, so it sits
+            // at along-passage 0 and leads its ties
+            entries.push({ p: p, t: 0.0, order: -1 });
         }
     }
 
@@ -214,16 +222,19 @@ CsLrud.stationWallPoints3D = function(st, passageAz, lrud, splays, side,
 
     if (lrud !== null && lrud !== undefined) {
         var len = (side === "L") ? lrud.left : lrud.right;
-        if (len !== null && len !== undefined) {
-            // 0 means the wall is AT the station: a wall point, no tick
-            var p = (len === 0) ? { x: st.x, y: st.y } :
-                CsLrud.tickEnd(st, lrud.azimuth, side, len);
-            if (p !== null) {
-                // L and R are measured horizontally, so they sit at the
-                // station's own elevation.
-                entries.push({ p: { x: p.x, y: p.y, z: z0 },
-                               t: 0.0, order: -1 });
-            }
+        // tickEnd itself now returns a point AT the station for 0 and
+        // null for not-measured/open ("P") -- see its own docblock.
+        var p = CsLrud.tickEnd(st, lrud.azimuth, side, len);
+        if (p !== null) {
+            // L and R are measured horizontally, so they sit at the
+            // station's own elevation. `atStation` is carried through
+            // to the raw point so CsSectionCut.polygonAt can tell a
+            // genuine zero-radius wall vertex apart from an unrelated
+            // splay that happened to land dead-center -- see its own
+            // comment at the filter that reads this.
+            entries.push({ p: { x: p.x, y: p.y, z: z0,
+                                 atStation: (len === 0) },
+                           t: 0.0, order: -1 });
         }
     }
 
@@ -287,10 +298,12 @@ CsLrud.stationCeilingFloor3D = function(st, lrud) {
         return out;
     }
     if (lrud.up !== null && lrud.up !== undefined) {
-        out.ceiling = { x: st.x, y: st.y, z: z0 + lrud.up };
+        out.ceiling = { x: st.x, y: st.y, z: z0 + lrud.up,
+                         atStation: (lrud.up === 0) };
     }
     if (lrud.down !== null && lrud.down !== undefined) {
-        out.floor = { x: st.x, y: st.y, z: z0 - lrud.down };
+        out.floor = { x: st.x, y: st.y, z: z0 - lrud.down,
+                       atStation: (lrud.down === 0) };
     }
     return out;
 };
