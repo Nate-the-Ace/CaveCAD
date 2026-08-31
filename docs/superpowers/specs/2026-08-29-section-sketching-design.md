@@ -403,3 +403,21 @@ lifecycle: open, trace, capture, refresh, DXF round trip, reopen,
 re-capture. The load-bearing ones were mutation-tested — including one
 that was found to be self-confirming (it used the function under test as
 its own oracle) and rewritten to read the numbers off the entity.
+
+### Cross sections face forward along the alignment
+
+Nathan, 2026-08-30: "Cross sectional facing is always forward on the
+survey alignment." Recorded because it is a convention of the craft, not
+a consequence of anything in the code, and because a mirrored section is
+an error that survives to print.
+
+Verified the same day that the generated sections already honour it:
+`CsSectionCut.seedFrame` builds `s = d x r`, which for a leg heading east
+answers `(0,-1,0)` — south, and therefore right-of-travel for a viewer
+facing the direction of travel — and `CsSectionDraw.pointOf` maps `+s` to
+`+x`. So right of travel is drawn right of the page, and the bay's ghost
+inherits that. Probed rather than reasoned about.
+
+No guard was added against a scan drawn the other way round. Nathan's
+call: a backward page is a mistake at the source, and the ghost sitting
+under the scan is already a visual check against it.

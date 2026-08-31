@@ -184,10 +184,21 @@ CsSectionBay.LRUD_LETTERS = ["L", "R", "U", "D"];
  * |dx| === |dy| -- is genuinely ambiguous and there is no measurement
  * that can break it, so the only requirement is that it answer the SAME
  * way every time rather than flickering between L and U on a pixel. It
- * answers U or D because up is the axis this workflow actually anchors:
- * "up is up" is a promise about the page's vertical, while left and
- * right depend on which way the caver was facing when they drew it. The
- * caver corrects the letter in the panel either way, without re-picking.
+ * answers U or D because up is the axis this workflow anchors hardest:
+ * "up is up" is a promise about the page, made once and never revisited.
+ *
+ * IT IS NOT because left and right are uncertain -- they are not. A
+ * cross section always faces FORWARD along the survey alignment
+ * (Nathan, 2026-08-30), and the generated frame already honours that:
+ * CsSectionCut.seedFrame's s = d x r is right-of-travel, and
+ * CsSectionDraw.pointOf maps +s to +x, so right of travel is drawn
+ * right of the page. Probed, not reasoned. An earlier draft of this
+ * comment justified the tie by claiming the facing was unknown, which
+ * would have licensed exactly the kind of mirroring this convention
+ * rules out.
+ *
+ * The caver corrects the letter in the panel either way, without
+ * re-picking.
  *
  * \return "L", "R", "U", "D", or null when the two clicks are the same
  *         point (or a NaN got in) and there is no direction at all.
