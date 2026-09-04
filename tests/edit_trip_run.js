@@ -278,6 +278,153 @@ eqs(ghost.missing.length, 1, "and is reported as missing");
 eqs(ghost.missing[0], 7, "by its trip id");
 
 // ---------------------------------------------------------------------
+// Deleting a trip.
+//
+// The dangerous part is not the removal, it is the RENUMBERING: trip
+// ids are array indices, stamped into XDATA on legs, splays, trip
+// anchors and the surveyor's own traced linework. Delete trip 1 of
+// three and the old trip 2 must come back as trip 1, everywhere.
+// ---------------------------------------------------------------------
+
+var delDoc = new RDocument(new RMemoryStorage(), createSpatialIndex());
+var delDi = new RDocumentInterface(delDoc);
+getDocument = function() { return delDoc; };
+getDocumentInterface = function() { return delDi; };
+
+var delSurvey = CsModel.newSurvey();
+delSurvey.caveName = "DELETE TEST CAVE";
+delSurvey.distanceUnit = "ft";
+delSurvey.trips = [CsModel.newTrip(), CsModel.newTrip(), CsModel.newTrip()];
+var delNames = ["FIRST", "MIDDLE", "LAST"];
+for (var dt = 0; dt < 3; dt++) {
+    delSurvey.trips[dt].name = delNames[dt];
+    delSurvey.trips[dt].date = "2026-0" + (dt + 1) + "-05";
+    delSurvey.trips[dt].team = "CREW " + dt;
+    delSurvey.trips[dt].declination = 2.0;
+}
+// Trip 0 is the trunk; trips 1 and 2 each BRANCH off one of its
+// stations, which is what a real cave looks like and what makes
+// deleting a middle trip legal at all -- a trip nothing else stands on.
+var delPrev = "ENT";
+for (var ds = 0; ds < 3; ds++) {
+    var dnm = "D0S" + ds;
+    delSurvey.shots.push(shotOf(delPrev, dnm, 20, (ds * 20) % 360, 0, 0));
+    delPrev = dnm;
+}
+for (dt = 1; dt < 3; dt++) {
+    var branchFrom = "D0S" + dt;   // trip 1 off D0S1, trip 2 off D0S2
+    for (ds = 0; ds < 3; ds++) {
+        var bnm = "D" + dt + "S" + ds;
+        delSurvey.shots.push(shotOf(branchFrom, bnm, 20,
+            (dt * 50 + ds * 20) % 360, 0, dt));
+        branchFrom = bnm;
+    }
+}
+CsDraw.survey(delSurvey, CsNetwork.resolve(delSurvey, {}));
+
+// A piece of "traced linework" on each of trips 1 and 2, tagged the way
+// CsBind tags the real thing.
+function fakeLinework(tripId, stationName, x, y) {
+    var op = new RAddObjectsOperation();
+    var line = new RLineEntity(delDoc,
+        new RLineData(new RVector(x, y), new RVector(x + 5, y + 5)));
+    CsTags.set(line, CsBind.TRIP_TAG, tripId);
+    CsTags.set(line, CsBind.STATIONS_TAG, CsBind.encodeStations([stationName]));
+    op.addObject(line, false);
+    delDi.applyOperation(op);
+}
+fakeLinework(1, "D1S0", 500, 500);
+fakeLinework(2, "D2S0", 600, 600);
+
+var delRecon = CsRevise.surveyFromDocument(delDoc);
+eqs(delRecon.survey.trips.length, 3, "the delete fixture has three trips");
+eqs(delRecon.survey.shots.length, 9, "and nine shots");
+
+var delRes = CsTripEdit.deleteTrip(delDoc, delDi, delRecon, 1,
+    { keepLinework: true });
+ok(delRes.ok === true, "deleteTrip reports success");
+eqs(delRes.removedShots, 3, "trip 1's three shots were removed");
+
+var afterDel = CsRevise.surveyFromDocument(delDoc);
+eqs(afterDel.survey.trips.length, 2, "two trips are left");
+eqs(afterDel.survey.shots.length, 6, "six shots are left");
+eqs(afterDel.survey.trips[0].name, "FIRST", "trip 0 is untouched");
+eqs(afterDel.survey.trips[1].name, "LAST",
+    "the old trip 2 came back as trip 1");
+eqs(afterDel.survey.trips[1].team, "CREW 2",
+    "and kept its own team, not the deleted trip's");
+
+// Its SHOTS were renumbered with it -- the failure that would leave a
+// trip record and its shots pointing at different ids.
+var lastTripShots = 0;
+for (var dsi = 0; dsi < afterDel.survey.shots.length; dsi++) {
+    if ((afterDel.survey.shots[dsi].trip || 0) === 1) { lastTripShots++; }
+}
+eqs(lastTripShots, 3, "the surviving trip's shots carry its new id");
+
+// Nothing the deleted trip drew is left behind -- including the tie-in
+// leg from trip 0's last station, whose far end is now gone.
+var strayNames = 0, strayLegs = 0;
+var delIds = delDoc.queryAllEntities(false, false);
+for (var di2 = 0; di2 < delIds.length; di2++) {
+    var de = delDoc.queryEntity(delIds[di2]);
+    if (isNull(de)) { continue; }
+    var dn = CsTags.get(de, "Station");
+    if (dn !== "" && /^D1S/.test(dn)) { strayNames++; }
+    var dsh = CsTags.get(de, "Shot");
+    if (dsh !== "" && /D1S/.test(dsh)) { strayLegs++; }
+}
+eqs(strayNames, 0, "no station of the deleted trip survives");
+eqs(strayLegs, 0, "and no leg of it either, tie-in leg included");
+
+// The linework: the deleted trip's is KEPT and unbound; the later
+// trip's is re-keyed from 2 to 1.
+var kept = 0, rekeyed = 0, stillTrip2 = 0;
+for (di2 = 0; di2 < delIds.length; di2++) {
+    de = delDoc.queryEntity(delIds[di2]);
+    if (isNull(de) || !/RLineEntity/.test(String(de))) { continue; }
+    var lt = CsTags.getNumber(de, CsBind.TRIP_TAG);
+    var ls = CsTags.get(de, CsBind.STATIONS_TAG);
+    if (lt === null && ls === "" &&
+            Math.abs(de.getStartPoint().x - 500) < 1e-6) {
+        kept++;
+    }
+    if (lt === 1 && Math.abs(de.getStartPoint().x - 600) < 1e-6) {
+        rekeyed++;
+    }
+    if (lt === 2) { stillTrip2++; }
+}
+eqs(kept, 1, "the deleted trip's tracing is kept, and unbound");
+eqs(rekeyed, 1, "the later trip's tracing was re-keyed to its new id");
+eqs(stillTrip2, 0, "nothing still claims the old trip id 2");
+
+// A trip another trip STANDS ON cannot be deleted out from under it:
+// the dependent's shots would survive pointing at a station that is
+// gone, and a whole trip would quietly leave the map.
+var chain = CsModel.newSurvey();
+chain.trips = [CsModel.newTrip(), CsModel.newTrip()];
+chain.shots = [shotOf("A1", "A2", 10, 0, 0, 0),
+    shotOf("A2", "B1", 10, 90, 0, 1)];
+var standing = CsTripEdit.tripsStandingOn(chain, 0);
+eqs(standing.length, 1, "trip 1 is seen standing on trip 0");
+eqs(standing[0].tripId, 1, "and is named");
+eqs(CsTripEdit.tripsStandingOn(chain, 1).length, 0,
+    "nothing stands on the last trip in a chain");
+var blocked = CsTripEdit.deleteTrip(delDoc, delDi,
+    { survey: chain, anchorName: "", adjustTags: {} }, 0, {});
+ok(blocked.ok === false && /tie/.test(blocked.error),
+    "deleting a trip another trip ties into is refused, by name");
+
+// Refusals.
+var lastOne = CsModel.newSurvey();
+lastOne.trips = [CsModel.newTrip()];
+lastOne.shots = [shotOf("A1", "A2", 10, 0, 0, 0)];
+var refuse = CsTripEdit.deleteTrip(delDoc, delDi,
+    { survey: lastOne, anchorName: "", adjustTags: {} }, 0, {});
+ok(refuse.ok === false && /only one trip/.test(refuse.error),
+    "deleting the last trip in a drawing is refused");
+
+// ---------------------------------------------------------------------
 // Report.
 // ---------------------------------------------------------------------
 

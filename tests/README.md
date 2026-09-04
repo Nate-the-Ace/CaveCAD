@@ -204,6 +204,14 @@ trip 0 carries the legacy `SurveyDate`/`SurveyTeam` mirror with it, and that a
 trip with no anchor point in the drawing is reported rather than silently
 dropped.
 
+It also covers deletion, where the dangerous part is the RENUMBERING: trip ids
+are array indices stamped into XDATA on legs, splays, trip anchors and the
+surveyor's own traced linework, so deleting trip 1 of three must bring the old
+trip 2 back as trip 1 everywhere at once -- record, shots, tags and linework.
+The fixture branches its trips off a trunk rather than chaining them, because
+that is the shape in which deleting a middle trip is legal at all; the chained
+shape is covered too, as the refusal it has to produce.
+
 ## `notebook_partial_draw_run.js`
 
 Survey Notebook's incremental Draw, against real documents. The claim is an

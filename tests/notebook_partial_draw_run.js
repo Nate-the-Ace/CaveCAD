@@ -282,6 +282,60 @@ eqs(digestOf(mover.doc).tripCount, 3,
     "and the revision replaced its trip rather than adding one");
 
 // ---------------------------------------------------------------------
+// A LOADED trip is revised by identity, not by fingerprint.
+//
+// The fork this closes, reported live on Truitt Cave: load trip 2,
+// correct its date and team on the page, press Draw -- and the page no
+// longer matched any trip's fingerprint, so it landed as a NEW trip
+// while the original stayed behind with its old shots.
+// ---------------------------------------------------------------------
+
+var revise = freshDrawing();
+getDocument = function() { return revise.doc; };
+getDocumentInterface = function() { return revise.di; };
+messages = [];
+
+var reconRevise = CsRevise.surveyFromDocument(revise.doc);
+eqs(reconRevise.survey.trips.length, 3, "the fixture has three trips");
+
+// The page, as Load from drawing would fill it -- then edited: a new
+// date, a new team, and one shot's distance changed.
+var loaded = SurveyNotebook.tripSurvey(reconRevise.survey, 1);
+loaded.date = "2026-11-11";
+loaded.team = "CORRECTED CREW";
+loaded.shots[0].distance = 33.3;
+var pageW = { loadedTripId: 1 };
+
+SurveyNotebook.drawMergedSurvey(pageW, revise.doc, loaded, reconRevise,
+    true);
+
+var afterRevise = CsRevise.surveyFromDocument(revise.doc);
+eqs(afterRevise.survey.trips.length, 3,
+    "correcting a loaded trip's date and team does NOT fork it");
+eqs(afterRevise.survey.trips[1].date, "2026-11-11",
+    "trip 1 carries the corrected date");
+eqs(afterRevise.survey.trips[1].team, "CORRECTED CREW",
+    "trip 1 carries the corrected team");
+var reviseCount = 0;
+for (var ri = 0; ri < afterRevise.survey.shots.length; ri++) {
+    if ((afterRevise.survey.shots[ri].trip || 0) === 1) { reviseCount++; }
+}
+eqs(reviseCount, 5, "trip 1 still holds its own five shots, not ten");
+
+// The same page WITHOUT the loaded id -- a typed page -- appends,
+// which is the behaviour a page nobody loaded should still have.
+var typed = freshDrawing();
+getDocument = function() { return typed.doc; };
+getDocumentInterface = function() { return typed.di; };
+var reconTyped = CsRevise.surveyFromDocument(typed.doc);
+var typedPage = SurveyNotebook.tripSurvey(reconTyped.survey, 1);
+typedPage.date = "2026-11-11";
+typedPage.team = "CORRECTED CREW";
+SurveyNotebook.drawMergedSurvey({}, typed.doc, typedPage, reconTyped, true);
+eqs(CsRevise.surveyFromDocument(typed.doc).survey.trips.length, 4,
+    "a page nobody loaded still appends as a new trip");
+
+// ---------------------------------------------------------------------
 // Report.
 // ---------------------------------------------------------------------
 

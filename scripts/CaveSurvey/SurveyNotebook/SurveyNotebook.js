@@ -235,6 +235,10 @@ SurveyNotebook.setSurvey = function(w, survey) {
     // tracing binds to, so which trip this page is showing has no
     // bearing on it.
     w.loading = true;
+    // A page refilled from anywhere is no longer a revision of a
+    // particular trip -- loadFromDrawing re-sets this immediately
+    // afterwards, and nothing else does.
+    w.loadedTripId = null;
     w.nameEdit.text = survey.name;
     w.dateEdit.text = survey.date;
     w.teamEdit.text = survey.team;
@@ -999,7 +1003,20 @@ SurveyNotebook.tripRecordOf = function(survey) {
 /**
  * The merge decision: given the RECONSTRUCTED survey (the whole
  * drawing), the page's trip record and the page's shots, builds the
- * merged survey the drawing should now hold. A trip whose fingerprint
+ * merged survey the drawing should now hold.
+ *
+ * WHICH trip the page replaces is decided by IDENTITY when the page
+ * knows it -- `loadedTripId`, set when Load from drawing filled the
+ * page from that trip. Fingerprint matching is the fallback, for a page
+ * that was typed rather than loaded.
+ *
+ * That distinction is the whole point of the parameter. Fingerprint
+ * alone meant that correcting a loaded trip's date or team stopped it
+ * matching anything, so the page landed as a NEW trip and the original
+ * stayed behind with its old shots -- typing a fix forked the cave.
+ * Reported live on Truitt Cave, 2026-09-05.
+ *
+ * A trip whose fingerprint
  * (date | team -- CsModel.tripFingerprint) matches the
  * page is REPLACED: its old shots drop out, the page's shots take its
  * trip id, and its trip record is overwritten by the page's (name and
@@ -1029,7 +1046,8 @@ SurveyNotebook.tripRecordOf = function(survey) {
  *              has no old shots to carry from)
  * }
  */
-SurveyNotebook.mergeTripIntoSurvey = function(reconSurvey, tripRecord, shots) {
+SurveyNotebook.mergeTripIntoSurvey = function(reconSurvey, tripRecord,
+        shots, loadedTripId) {
     CsModel.ensureTrips(reconSurvey);
     var merged = CsModel.newSurvey();
     merged.caveName = reconSurvey.caveName;
@@ -1043,10 +1061,19 @@ SurveyNotebook.mergeTripIntoSurvey = function(reconSurvey, tripRecord, shots) {
 
     var fp = CsModel.tripFingerprint(tripRecord);
     var tripId = -1;
-    for (var t = 0; t < merged.trips.length; t++) {
+    // IDENTITY FIRST. A page loaded from trip 9 revises trip 9, whatever
+    // its date and team now say -- that is what makes correcting them
+    // possible at all. Guarded: a drawing edited since the load (a trip
+    // deleted, say) may no longer have that slot, and the page then
+    // falls back to matching like any typed page rather than writing
+    // over whatever now sits at that index.
+    if (typeof loadedTripId === "number" && loadedTripId >= 0 &&
+            loadedTripId < merged.trips.length) {
+        tripId = loadedTripId;
+    }
+    for (var t = 0; tripId < 0 && t < merged.trips.length; t++) {
         if (CsModel.tripFingerprint(merged.trips[t]) === fp) {
             tripId = t;
-            break;
         }
     }
     var replaced = tripId >= 0;
@@ -1279,6 +1306,12 @@ SurveyNotebook.loadFromDrawing = function(w) {
 
     SurveyNotebook.setSurvey(w,
         SurveyNotebook.tripSurvey(recon.survey, tripId));
+    // WHICH TRIP THIS PAGE IS. Set after setSurvey, which clears it:
+    // from here until the page is cleared or a new trip is started,
+    // Draw revises THIS trip -- by id, not by what the header says.
+    // Without it, correcting the date or team you just loaded forked
+    // the trip into a duplicate instead of revising it.
+    w.loadedTripId = tripId;
     EAction.handleUserMessage("Survey Notebook: loaded trip " + tripId +
         " (" + counts[tripId] + " shot" +
         (counts[tripId] === 1 ? "" : "s") + ") from the drawing. Edit " +
@@ -1421,8 +1454,10 @@ SurveyNotebook.drawPartial = function(w, doc, di, merged, resolved,
 SurveyNotebook.drawMergedSurvey = function(w, doc, survey, recon,
         forceFull) {
     var tripRecord = SurveyNotebook.tripRecordOf(survey);
+    var loadedTripId = (w !== null && w !== undefined &&
+        typeof w.loadedTripId === "number") ? w.loadedTripId : null;
     var merge = SurveyNotebook.mergeTripIntoSurvey(recon.survey,
-        tripRecord, survey.shots);
+        tripRecord, survey.shots, loadedTripId);
     var merged = merge.survey;
 
     // Anchor: hold the drawing WHERE IT STANDS. The reconstruction's
@@ -3322,6 +3357,10 @@ SurveyNotebook.buildDock = function(appWin) {
         // fingerprint. Name/date/decl/instruments stay -- same cave,
         // same field, and date is usually today's either way.
         w.teamEdit.text = "";
+        // and it stops being a revision of whatever trip it was loaded
+        // from: the next Draw appends, it does not overwrite trip 9
+        // with a blank page.
+        w.loadedTripId = null;
         SurveyNotebook.clearLadder(w);
         SurveyNotebook.addStationRow(w, "A1");
         SurveyNotebook.addStationRow(w, "A2");
@@ -3461,6 +3500,10 @@ SurveyNotebook.startTripAt = function(station) {
 
     try {
         w.loading = true;
+        // A NEW trip, so the page stops being a revision of the trip it
+        // may have been loaded from -- otherwise Draw would overwrite
+        // that trip with this new one's shots.
+        w.loadedTripId = null;
         w.nameEdit.text = "";
         if (typeof CsPackage !== "undefined") {
             // CsPackage.todayText, not QDate: this bridge has no QDate.

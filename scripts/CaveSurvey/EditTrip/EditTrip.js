@@ -19,6 +19,13 @@
 // azimuth and moves the whole plan, and it already has an editor with
 // the IGRF wiring: Survey Notebook's Declination dialog.
 //
+// Each row also carries a Delete button, and that one IS destructive:
+// it removes the trip's shots, its drawn marks and its legs, renumbers
+// every later trip (ids are array indices, stamped into XDATA), and
+// redraws the cave without it. It asks first, by name, and it asks
+// separately about any hand-traced linework bound to that trip --
+// tracing is never thrown away on a default.
+//
 // USAGE:
 //   Cave Survey > Edit Trip   (or type "et")
 
@@ -132,6 +139,93 @@ EditTrip.reportText = function(changes, res) {
     return msg;
 };
 
+/**
+ * The destructive half: confirm, ask about the tracing, delete.
+ *
+ * Two questions, never merged into one. The first is "is this the trip
+ * you meant" -- named, dated, with its shot count, because a trip id is
+ * not something anyone recognises. The second is only asked when there
+ * IS hand-traced linework bound to it, and it has no default: keeping
+ * hours of tracing or deleting it is the caver's call, not a checkbox
+ * they might not have read.
+ */
+EditTrip.deleteTrip = function(doc, di, read, request) {
+    var tripId = request.tripId;
+    var recon;
+    try {
+        // Re-read: the dialog's survey has been through planEdits and
+        // may carry uncommitted edits, and a delete must act on what
+        // the DRAWING says.
+        recon = CsRevise.surveyFromDocument(doc);
+    } catch (eRe) {
+        QMessageBox.warning(null, "Edit Trip",
+            "Couldn't re-read the drawing (" + eRe + "). Nothing was " +
+            "deleted.");
+        return;
+    }
+
+    var bound = CsTripEdit.lineworkOfTrip(doc, tripId, {}).owned.length;
+    var sure = QMessageBox.question(null, "Edit Trip",
+        "Delete " + request.label + " from this drawing?\n\n" +
+        "Its " + request.shots + " shot" +
+        (request.shots === 1 ? "" : "s") + ", the stations only it " +
+        "reaches and everything drawn for them go. Every trip after " +
+        "it is renumbered. The cave redraws without it, and the " +
+        "previous version of the drawing is kept beside it first.",
+        QMessageBox.Yes | QMessageBox.No);
+    if (sure !== QMessageBox.Yes) {
+        return;
+    }
+
+    // No default. A caver who does not answer this keeps their tracing.
+    var keepLinework = true;
+    if (bound > 0) {
+        var answer = QMessageBox.question(null, "Edit Trip",
+            bound + " piece" + (bound === 1 ? "" : "s") + " of traced " +
+            "linework " + (bound === 1 ? "is" : "are") + " bound to " +
+            "this trip.\n\nKeep the tracing (it stays in the drawing, " +
+            "no longer claimed by any trip), or delete it with the " +
+            "trip?\n\nYes keeps it. No deletes it.",
+            QMessageBox.Yes | QMessageBox.No | QMessageBox.Cancel);
+        if (answer === QMessageBox.Cancel) {
+            return;
+        }
+        keepLinework = (answer === QMessageBox.Yes);
+    }
+
+    var res = CsTripEdit.deleteTrip(doc, di, recon, tripId,
+        { keepLinework: keepLinework });
+    if (!res.ok) {
+        QMessageBox.warning(null, "Edit Trip", res.error);
+        return;
+    }
+
+    var msg = "Edit Trip: deleted " + request.label + " -- " +
+        res.removedShots + " shot" + (res.removedShots === 1 ? "" : "s") +
+        " gone, " + res.trips + " trip" + (res.trips === 1 ? "" : "s") +
+        " left, renumbered from " + tripId + " on.";
+    if (res.linework.unbound > 0) {
+        msg += " " + res.linework.unbound + " traced item" +
+            (res.linework.unbound === 1 ? "" : "s") + " kept and " +
+            "unbound.";
+    }
+    if (res.linework.deleted > 0) {
+        msg += " " + res.linework.deleted + " traced item" +
+            (res.linework.deleted === 1 ? "" : "s") + " deleted with it.";
+    }
+    if (res.linework.renumbered > 0) {
+        msg += " " + res.linework.renumbered + " re-keyed to " +
+            "the trip's new id.";
+    }
+    if (res.moved > 0) {
+        msg += " The delete re-solved the survey: " + res.moved +
+            " station" + (res.moved === 1 ? "" : "s") + " moved, and " +
+            "the tracing bound to them followed.";
+    }
+    EAction.handleUserMessage(msg);
+    QMessageBox.information(null, "Edit Trip", msg);
+};
+
 function editTripRun() {
     var doc = getDocument();
     if (doc === undefined || doc === null) {
@@ -161,12 +255,16 @@ function editTripRun() {
     var host = new QWidget();
     var grid = new QGridLayout();
     var head = ["Trip", "Shots", "Declination", "Name", "Date (YYYY-MM-DD)",
-        "Team", "Instruments"];
+        "Team", "Instruments", ""];
     for (var h = 0; h < head.length; h++) {
         grid.addWidget(new QLabel(head[h]), 0, h);
     }
 
     var fields = []; // {tripId, name, date, team, instruments}
+    // Set by a row's Delete button, which then closes the dialog: the
+    // delete runs after exec() returns, never inside a row handler
+    // while the dialog it belongs to is still on screen.
+    var deleteRequest = { tripId: -1, label: "", shots: 0 };
     for (var r = 0; r < read.rows.length; r++) {
         var row = read.rows[r];
         var g = r + 1;
@@ -207,7 +305,7 @@ function editTripRun() {
         var nameEdit = mk(row.name, true, 150);
         var dateEdit = mk(row.date, false, 120);
         var teamEdit = mk(row.team, true, 240);
-        var instrEdit = mk(row.instruments, true, 180);
+        var instrEdit = mk(row.instruments, true, 150);
         grid.addWidget(nameEdit, g, 3);
         grid.addWidget(dateEdit, g, 4);
         grid.addWidget(teamEdit, g, 5);
@@ -220,8 +318,29 @@ function editTripRun() {
             var why = new QLabel("no station in the drawing carries " +
                 "this trip's tags");
             why.enabled = false;
-            grid.addWidget(why, g, 7);
+            grid.addWidget(why, g, 8);
         }
+
+        // Delete lives on the row so it is unambiguous WHICH trip goes.
+        // It closes the dialog: the trip list it is showing stops being
+        // true the moment a delete renumbers everything after it.
+        var delButton = new QPushButton(qsTr("Delete..."));
+        delButton.toolTip = qsTr("Remove this trip from the drawing: " +
+            "its shots, its marks and its legs, with every later trip " +
+            "renumbered.");
+        grid.addWidget(delButton, g, 7);
+        (function(target) {
+            try {
+                delButton.clicked.connect(function() {
+                    deleteRequest.tripId = target.tripId;
+                    deleteRequest.label = target.label;
+                    deleteRequest.shots = target.shots;
+                    dlg.accept();
+                });
+            } catch (eDel) {
+                delButton.enabled = false;
+            }
+        })(row);
     }
     host.setLayout(grid);
 
@@ -246,7 +365,7 @@ function editTripRun() {
     // take over from there -- vertically for a cave with many trips,
     // horizontally on a small screen.
     try {
-        dlg.resize(1040, Math.min(620, 220 + read.rows.length * 46));
+        dlg.resize(1180, Math.min(620, 220 + read.rows.length * 46));
     } catch (eSize) {
         // the layout's own size stands; the columns scroll
     }
@@ -306,6 +425,10 @@ function editTripRun() {
 
     dlg.exec();
 
+    if (deleteRequest.tripId >= 0) {
+        EditTrip.deleteTrip(doc, di, read, deleteRequest);
+        return;
+    }
     if (!applied.done) {
         return; // cancelled
     }

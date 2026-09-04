@@ -405,3 +405,365 @@ CsTripEdit.dateChanged = function(changes) {
     }
     return false;
 };
+
+// =====================================================================
+// Removing a trip.
+//
+// A trip is not a row in a list: it owns shots, stations, drawn marks,
+// wall runs and -- through CsBind's LineworkTrip -- possibly hours of
+// the surveyor's own tracing. And trip ids are ARRAY INDICES, stamped
+// into XDATA on legs, splays, trip anchors and linework, so removing
+// trip 9 renumbers 10 into 9 and every one of those tags has to follow.
+//
+// The shape below is deliberately the same one a revision takes: build
+// the survey the drawing SHOULD hold, erase, redraw the whole cave from
+// it, and let the ordinary machinery regenerate every tag. Trying to
+// surgically unpick one trip's entities and renumber the survivors in
+// place means hand-maintaining the excluded-shot blobs, the wall runs
+// and the profile bands -- five places that already know how to rebuild
+// themselves from a model.
+// =====================================================================
+
+/**
+ * The survey a drawing should hold once one trip is gone.
+ *
+ * Pure. Shots belonging to the trip drop out; every surviving shot and
+ * trip record with a HIGHER id shifts down one, so the ids stay a dense
+ * 0..n-1 range -- which is what they are, an index into survey.trips.
+ *
+ * \return {survey, removedShots, renumber: {oldId: newId}}
+ */
+CsTripEdit.surveyWithoutTrip = function(survey, tripId) {
+    CsModel.ensureTrips(survey);
+    var out = CsModel.newSurvey();
+    out.caveName = survey.caveName;
+    out.name = survey.name;
+    out.distanceUnit = survey.distanceUnit;
+    out.fixed = {};
+    for (var fn in survey.fixed) {
+        if (survey.fixed.hasOwnProperty(fn)) {
+            out.fixed[fn] = survey.fixed[fn];
+        }
+    }
+    // newSurvey() has no trips array -- ensureTrips builds one, and it
+    // would build it from the top-level mirror fields, which is exactly
+    // the wrong shape here. Start it empty and fill it below.
+    out.trips = [];
+    var renumber = {};
+    for (var t = 0; t < survey.trips.length; t++) {
+        if (t === tripId) {
+            continue;
+        }
+        renumber[t] = out.trips.length;
+        out.trips.push(survey.trips[t]);
+    }
+    var removedShots = 0;
+    for (var i = 0; i < survey.shots.length; i++) {
+        var sh = survey.shots[i];
+        var old = sh.trip || 0;
+        if (old === tripId) {
+            removedShots++;
+            continue;
+        }
+        sh.trip = renumber[old] === undefined ? 0 : renumber[old];
+        out.shots.push(sh);
+    }
+    // Trip 0 is the authority over the survey-level mirror, and after a
+    // delete it may be a DIFFERENT trip than it was.
+    CsModel.ensureTrips(out);
+    return { survey: out, removedShots: removedShots,
+        renumber: renumber };
+};
+
+/**
+ * The traced linework bound to a trip, and to every trip after it.
+ *
+ * Returned together because a delete has to deal with both halves in
+ * one pass: the deleted trip's own linework is kept-and-unbound or
+ * deleted (the caller decides, and the caller asks the user), and every
+ * LATER trip's linework has to be renumbered or it silently starts
+ * claiming to belong to whichever trip inherited its old id.
+ *
+ * \return {owned: [entity], renumber: [{entity, from, to}]}
+ */
+CsTripEdit.lineworkOfTrip = function(doc, tripId, renumber) {
+    var owned = [], shift = [];
+    var ids = doc.queryAllEntities(false, false);
+    for (var i = 0; i < ids.length; i++) {
+        var e = doc.queryEntity(ids[i]);
+        if (isNull(e)) {
+            continue;
+        }
+        var t = CsTags.getNumber(e, CsBind.TRIP_TAG);
+        if (t === null) {
+            continue;
+        }
+        if (t === tripId) {
+            owned.push(e);
+        } else if (renumber[t] !== undefined && renumber[t] !== t) {
+            shift.push({ entity: e, from: t, to: renumber[t] });
+        }
+    }
+    return { owned: owned, renumber: shift };
+};
+
+/**
+ * Applies the linework half of a delete, in ONE operation.
+ *
+ * `keep` true unbinds the deleted trip's tracing -- the geometry stays,
+ * its LineworkTrip and LineworkStations go, so nothing claims it and
+ * the next binding pass can adopt it honestly. `keep` false deletes it
+ * with the trip. Hours of tracing are never thrown away by default:
+ * the caller asks, every time.
+ *
+ * \return {unbound, deleted, renumbered}
+ */
+CsTripEdit.applyLinework = function(doc, di, plan, keep) {
+    var out = { unbound: 0, deleted: 0, renumbered: 0 };
+    var run = function() {
+        var op = new RModifyObjectsOperation();
+        op.setText("Re-key linework");
+        var i;
+        for (i = 0; i < plan.renumber.length; i++) {
+            CsTags.set(plan.renumber[i].entity, CsBind.TRIP_TAG,
+                plan.renumber[i].to);
+            op.addObject(plan.renumber[i].entity, false);
+            out.renumbered++;
+        }
+        if (keep) {
+            for (i = 0; i < plan.owned.length; i++) {
+                CsTags.remove(plan.owned[i], CsBind.TRIP_TAG);
+                CsTags.remove(plan.owned[i], CsBind.STATIONS_TAG);
+                op.addObject(plan.owned[i], false);
+                out.unbound++;
+            }
+        }
+        di.applyOperation(op);
+
+        if (!keep && plan.owned.length > 0) {
+            var del = new RDeleteObjectsOperation();
+            for (i = 0; i < plan.owned.length; i++) {
+                del.deleteObject(plan.owned[i]);
+                out.deleted++;
+            }
+            di.applyOperation(del);
+        }
+        return out;
+    };
+    if (typeof CsRevise !== "undefined" &&
+            typeof CsRevise.withOffLayersOn === "function") {
+        return CsRevise.withOffLayersOn(doc, di, run);
+    }
+    return run();
+};
+
+/**
+ * Every entity a trip drew that erasing its STATIONS would leave
+ * behind: the legs and splays it owns.
+ *
+ * CsDraw.eraseStations kills a leg only when BOTH its ends are in the
+ * kill set, which is right for a redraw and wrong here -- the tie-in
+ * leg from an older trip's station into this one has one end outside
+ * the set, and would survive as a line to a station that no longer
+ * exists. Keyed on the Trip tag, which is exactly who drew it.
+ */
+CsTripEdit.strayEntitiesOfTrip = function(doc, tripId) {
+    var out = [];
+    var ids = doc.queryAllEntities(false, false);
+    for (var i = 0; i < ids.length; i++) {
+        var e = doc.queryEntity(ids[i]);
+        if (isNull(e) || CsBind.hasLineworkTags(e)) {
+            continue;   // never the surveyor's own tracing
+        }
+        if (CsTags.get(e, "Station") !== "") {
+            continue;   // station marks are the erase's own business
+        }
+        if (CsTags.getNumber(e, "Trip") === tripId) {
+            out.push(e);
+        }
+    }
+    return out;
+};
+
+/**
+ * The trips that would be cut adrift by deleting one.
+ *
+ * A trip OWNS the stations it reached first (CsDelta.stationTrips'
+ * rule, and CsDraw's). Another trip that starts from one of those
+ * stations depends on it: delete the owner and the dependent's shots
+ * point at a station that is not in the drawing any more.
+ *
+ * \return [{tripId, station}] -- one entry per dependent trip, naming
+ *         the first station it stands on
+ */
+CsTripEdit.tripsStandingOn = function(survey, tripId) {
+    CsModel.ensureTrips(survey);
+    var owner = {};
+    var i, sh;
+    for (i = 0; i < survey.shots.length; i++) {
+        sh = survey.shots[i];
+        if (sh.excludeFromAll) {
+            continue;
+        }
+        var t = sh.trip || 0;
+        if (sh.from !== "" && owner[sh.from] === undefined) {
+            owner[sh.from] = t;
+        }
+        if (!sh.splay && sh.to !== "" && owner[sh.to] === undefined) {
+            owner[sh.to] = t;
+        }
+    }
+    var out = [], seen = {};
+    for (i = 0; i < survey.shots.length; i++) {
+        sh = survey.shots[i];
+        var mine = sh.trip || 0;
+        if (mine === tripId || sh.excludeFromAll) {
+            continue;
+        }
+        var ends = sh.splay ? [sh.from] : [sh.from, sh.to];
+        for (var e = 0; e < ends.length; e++) {
+            if (ends[e] === "" || owner[ends[e]] !== tripId ||
+                    seen[mine] === true) {
+                continue;
+            }
+            seen[mine] = true;
+            out.push({ tripId: mine, station: ends[e] });
+        }
+    }
+    out.sort(function(a, b) { return a.tripId - b.tripId; });
+    return out;
+};
+
+/**
+ * Removes a trip from a drawing, geometry and all.
+ *
+ * The sequence, and why each step is where it is:
+ *
+ *   1. BACKUP. This is the one destructive operation in the tool. The
+ *      copy is taken before a single entity goes (CsBackup.beforeWrite,
+ *      the same guard every redraw takes).
+ *   2. LINEWORK FIRST, while the drawing still says which tracing
+ *      belongs to whom. Unbound or deleted per the caller's answer, and
+ *      every LATER trip's LineworkTrip renumbered in the same pass --
+ *      miss that and a wall silently starts claiming the trip that
+ *      inherited its old id.
+ *   3. The trip's own legs and splays, which erasing its stations would
+ *      leave dangling (see strayEntitiesOfTrip).
+ *   4. Erase every station of the OLD survey and redraw the whole cave
+ *      from the renumbered model. Not surgery on the survivors: the
+ *      excluded-shot blobs, the wall runs, the trip anchors and the
+ *      profile bands all carry trip ids, and all four already know how
+ *      to rebuild themselves from a survey.
+ *   5. If that redraw MOVED anything -- deleting a trip that closed a
+ *      loop changes the adjustment for the rest of the cave -- the
+ *      surviving tracing is carried along, exactly as a revision does.
+ *
+ * \param opts {keepLinework: bool} -- true keeps the deleted trip's
+ *             tracing and unbinds it, false deletes it with the trip.
+ *             The caller asks the user; there is no default here.
+ * \return {ok, error, removedShots, stationsErased, linework, moved}
+ */
+CsTripEdit.deleteTrip = function(doc, di, recon, tripId, opts) {
+    var survey = recon.survey;
+    CsModel.ensureTrips(survey);
+    if (tripId < 0 || tripId >= survey.trips.length) {
+        return { ok: false, error: "No trip " + tripId + " in this drawing." };
+    }
+    if (survey.trips.length <= 1) {
+        return { ok: false, error: "This drawing holds only one trip. " +
+            "Deleting it would leave a drawing with a survey's marks " +
+            "and no survey -- start a new drawing instead." };
+    }
+
+    // WHO ELSE STANDS ON THIS TRIP'S STATIONS. A later trip that tied
+    // into a station only this trip reaches loses its own anchor when
+    // this one goes: its shots survive with a `from` that no longer
+    // exists, the network cannot place them, and they end up in the
+    // UnplacedShots blob -- a whole trip silently off the map. Refused
+    // rather than warned: the caver can delete the dependent trips
+    // first, in the order that keeps the cave connected, and that
+    // order is theirs to choose.
+    var dependents = CsTripEdit.tripsStandingOn(survey, tripId);
+    if (dependents.length > 0) {
+        var names = [];
+        for (var d = 0; d < dependents.length; d++) {
+            names.push("trip " + dependents[d].tripId + " (" +
+                dependents[d].station + ")");
+        }
+        return { ok: false, error: "Can't delete trip " + tripId +
+            " yet: " + names.join(", ") + " tie" +
+            (dependents.length === 1 ? "s" : "") + " into a station " +
+            "only this trip reaches, and would be left with nowhere " +
+            "to start. Delete those first, or re-survey their tie-in." };
+    }
+
+    try {
+        if (typeof CsBackup !== "undefined") {
+            CsBackup.beforeWrite(doc.getFileName());
+        }
+    } catch (eBak) {
+        // a backup is protection, never a precondition
+    }
+
+    var oldNames = CsModel.stationNames(survey);
+    var oldPos = CsRevise.stationPositions(doc);
+    var extent = CsRevise.positionsExtent(oldPos);
+
+    var plan = CsTripEdit.surveyWithoutTrip(survey, tripId);
+    var lwPlan = CsTripEdit.lineworkOfTrip(doc, tripId, plan.renumber);
+    var lw = CsTripEdit.applyLinework(doc, di, lwPlan,
+        opts !== undefined && opts !== null && opts.keepLinework === true);
+
+    // The trip's own legs and splays, by tag. Deleted before the
+    // station erase so nothing depends on the order of the two.
+    var strays = CsTripEdit.strayEntitiesOfTrip(doc, tripId);
+    if (strays.length > 0) {
+        CsRevise.withOffLayersOn(doc, di, function() {
+            var del = new RDeleteObjectsOperation();
+            for (var i = 0; i < strays.length; i++) {
+                del.deleteObject(strays[i]);
+            }
+            di.applyOperation(del);
+        });
+    }
+
+    var erased = CsLayers.withLayerOn(doc, di, CsLayers.CTRL_HIDDEN,
+        function() {
+            return CsDraw.eraseStations(doc, oldNames);
+        });
+
+    // Anchored where the drawing already stands, the same rule the
+    // notebook's own redraw follows: the anchor may have BEEN this
+    // trip's station, in which case any surviving drawn station does.
+    var anchor = null;
+    for (var i = 0; i < plan.survey.shots.length && anchor === null; i++) {
+        var cand = [plan.survey.shots[i].from, plan.survey.shots[i].to];
+        for (var c = 0; c < cand.length; c++) {
+            if (cand[c] !== "" && oldPos.hasOwnProperty(cand[c])) {
+                anchor = { name: cand[c], x: oldPos[cand[c]].x,
+                    y: oldPos[cand[c]].y,
+                    z: CsRevise.anchorZOf(recon, cand[c]) };
+                break;
+            }
+        }
+    }
+    var resolved = CsAdjust.resolveAndAdjust(plan.survey,
+        anchor === null ? {} : { anchor: anchor },
+        CsAdjust.optionsFromTags(recon.adjustTags || {}));
+    var drawn = CsDraw.survey(plan.survey, resolved);
+
+    // Deleting a trip that closed a loop re-solves the rest of the
+    // cave; the tracing that survived has to come with it.
+    var newPos = CsRevise.stationPositions(doc);
+    var moved = CsRevise.positionsMoved(oldPos, newPos, extent);
+    if (moved > 0) {
+        CsRevise.withOffLayersOn(doc, di, function() {
+            return CsRevise.moveLinework(doc, di, oldPos, newPos,
+                CsRevise.tripStationNames(plan.survey), extent);
+        });
+    }
+
+    return { ok: true, error: "", removedShots: plan.removedShots,
+        stationsErased: erased, linework: lw, moved: moved,
+        drawn: drawn, trips: plan.survey.trips.length };
+};
