@@ -433,9 +433,31 @@ CsDraw.noteLeader = function(doc, op, pos, name, note, azimuthDeg, lrud) {
  *          azimuth/inclination), named apart from `skipped` (excluded,
  *          or never connected) so a report never conflates the two
  */
-CsDraw.survey = function(survey, resolved, originStation, originPos, seqBase) {
+CsDraw.survey = function(survey, resolved, originStation, originPos,
+        seqBase, options) {
     if (seqBase === undefined || seqBase === null) {
         seqBase = 0;
+    }
+    if (options === undefined || options === null) {
+        options = {};
+    }
+    // PARTIAL: this draw covers part of a drawing that already holds
+    // the rest of the cave (Survey Notebook's incremental Draw). It
+    // changes what is written ABOUT the drawing as a whole -- see the
+    // two guards below -- and nothing about the geometry.
+    var partial = options.partial === true;
+    // Stations whose POSITION this draw needs but whose marks it must
+    // not draw: the station a page ties into is already in the drawing,
+    // with its own LRUD and its own trip's tags, and drawing it again
+    // from a survey that holds only the page's shots would replace a
+    // full station with a bare one. Its position is still needed -- the
+    // page's first leg starts there.
+    var omit = {};
+    if (options.omitStations !== undefined &&
+            options.omitStations !== null) {
+        for (var oi = 0; oi < options.omitStations.length; oi++) {
+            omit[options.omitStations[oi]] = true;
+        }
     }
     var doc = getDocument();
     var di = getDocumentInterface();
@@ -576,6 +598,9 @@ CsDraw.survey = function(survey, resolved, originStation, originPos, seqBase) {
     var tripAnchor = {}; // trip index -> that trip's anchor point entity
     for (var i = 0; i < names.length; i++) {
         var name = names[i];
+        if (omit[name] === true) {
+            continue; // already drawn, by the trip it belongs to
+        }
         var lrud = CsModel.lrudForStation(survey, name);
         if (lrud === null && i === 0 && survey.startLrud !== null &&
             survey.startLrud !== undefined && firstLegAzimuth !== undefined) {
@@ -827,7 +852,17 @@ CsDraw.survey = function(survey, resolved, originStation, originPos, seqBase) {
         CsTags.set(anchorPt, "TripDistanceUnit", trip.distanceUnit);
     }
 
-    var anchor0 = tripAnchor[0] !== undefined ? tripAnchor[0] : firstPoint;
+    // The drawing-level record rides trip 0's anchor, falling back to
+    // the first station drawn -- which is right for a draw that IS the
+    // whole drawing, and wrong for a partial one: the page's first
+    // station would claim to be the trip-0 anchor and the drawing would
+    // then have two, one of them carrying a whole-cave record derived
+    // from a single page. A partial draw that does not contain trip 0's
+    // own anchor therefore writes nothing here; the anchor it belongs
+    // on is still in the drawing, untouched, with the record it already
+    // had.
+    var anchor0 = tripAnchor[0] !== undefined ? tripAnchor[0] :
+        (partial ? undefined : firstPoint);
     if (anchor0 !== undefined) {
         // Legacy survey-level block, kept for pre-trip readers. The
         // name restores its pre-trip-split meaning: the drawing-level
@@ -1012,9 +1047,21 @@ CsDraw.survey = function(survey, resolved, originStation, originPos, seqBase) {
     // be written must never take the plan draw down with it -- the plan
     // is the drawing the user is looking at, and everything above this
     // point has already committed real geometry to it.
+    //
+    // A PARTIAL draw builds it from the WHOLE cave (options.profileSurvey
+    // / profileResolved), never from the page: the elevation is a
+    // whole-cave product, and rebuilding it from one page would erase
+    // every other band. A partial caller that supplies neither falls
+    // back to its own page, which is only correct when the page is all
+    // there is -- so callers pass them.
     var profileOutcome = { skipped: true, reason: "profile pass not run" };
+    var profileSurvey = (options.profileSurvey === undefined ||
+        options.profileSurvey === null) ? survey : options.profileSurvey;
+    var profileResolved = (options.profileResolved === undefined ||
+        options.profileResolved === null) ? resolved :
+        options.profileResolved;
     try {
-        profileOutcome = CsDraw.profile(survey, resolved);
+        profileOutcome = CsDraw.profile(profileSurvey, profileResolved);
     } catch (eProfile) {
         // Building the reason string is ITSELF not safe to trust: string
         // concatenation calls eProfile.toString(), and an exception whose

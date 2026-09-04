@@ -1341,15 +1341,10 @@ CsRevise.withOffLayersOn = function(doc, di, fn) {
             // operation may still land
         }
     }
-    var nest = function(idx) {
-        if (idx >= offLayers.length) {
-            return fn();
-        }
-        return CsLayers.withLayerOn(doc, di, offLayers[idx], function() {
-            return nest(idx + 1);
-        });
-    };
-    return nest(0);
+    // ONE operation each way. The recursion this replaces cost two
+    // applyOperation calls per off layer, and in the GUI each of those
+    // refreshes the layer list and regenerates the view.
+    return CsLayers.withLayersOn(doc, di, offLayers, fn);
 };
 
 /**

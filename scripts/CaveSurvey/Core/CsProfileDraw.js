@@ -330,16 +330,12 @@ CsProfileDraw.withOwnLayersOn = function(doc, di, fn) {
     // ownLayerNames, not LAYERS(): a variant layer the caver switched
     // off refuses deletes as silently as a base one, and erase() failing
     // on it means the next render draws a duplicate beside the survivor.
-    var layers = CsProfileDraw.ownLayerNames(doc);
-    var wrapped = fn;
-    for (var i = 0; i < layers.length; i++) {
-        wrapped = (function(layerName, inner) {
-            return function() {
-                return CsLayers.withLayerOn(doc, di, layerName, inner);
-            };
-        })(layers[i], wrapped);
-    }
-    return wrapped();
+    // ONE operation each way, not one per layer: a profile render
+    // toggles dozens of run-variant layers, and in the GUI every
+    // applyOperation refreshes the layer list and regenerates the view
+    // (measured: 87 toggles in a single render of a 24-station cave).
+    return CsLayers.withLayersOn(doc, di,
+        CsProfileDraw.ownLayerNames(doc), fn);
 };
 
 /**

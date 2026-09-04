@@ -169,6 +169,12 @@ var CORE_FILES = [
     // after CsRevise: CsBind's layer gate consults
     // CsRevise.isWorldFixedLayer when it is loaded
     "scripts/CaveSurvey/Core/CsBind.js",
+    // after CsRevise: writeTags borrows CsRevise.withOffLayersOn when
+    // it runs. Its pure half (normalizeDate/planEdits/applyToSurvey)
+    // is what is tested here.
+    "scripts/CaveSurvey/Core/CsTripEdit.js",
+    // pure: the incremental-Draw gate and the resolve subset
+    "scripts/CaveSurvey/Core/CsDelta.js",
     "scripts/CaveSurvey/Core/CsReport.js"
 ];
 for (var ci = 0; ci < CORE_FILES.length; ci++) {
@@ -17045,11 +17051,19 @@ if (!IS_NODE) {
 }
 
 // ---------------------------------------------------------------------
-// FeatureTraceRun -- the frame guard, and the drag maths without a mouse
+// FeatureTraceRun -- routing a stroke to a layer by WHERE it was drawn,
+// and the drag maths without a mouse
 // ---------------------------------------------------------------------
 if (!IS_NODE) {
     (function() {
         loadRepoScript("scripts/CaveSurvey/Core/CsLayers.js");
+        // Named one by one, and every one this block touches: the
+        // harness's loader swallows a missing file, so a Core library
+        // left off this list does not fail -- it makes the assertions
+        // that needed it quietly stop meaning anything.
+        loadRepoScript("scripts/CaveSurvey/Core/CsTags.js");
+        loadRepoScript("scripts/CaveSurvey/Core/CsLayerVariants.js");
+        loadRepoScript("scripts/CaveSurvey/Core/CsProfileBox.js");
         loadRepoScript("scripts/CaveSurvey/Core/CsTrace.js");
         // ScanView.js subclasses RGraphicsViewQt at load time, so it
         // cannot be loaded under node -- but pixelText itself is pure.
@@ -17152,33 +17166,9 @@ if (!IS_NODE) {
 
         var box = CsTrace.profileRegion(doc);
 
-        // -- in frame, both ways ------------------------------------
-        ok(FeatureTraceRun.frameGuard(box, CsLayers.PROFILE_CEILING,
-            pt(50, -190)) === null,
-            "frameGuard: a profile layer traced inside the region is allowed");
-        ok(FeatureTraceRun.frameGuard(box, CsLayers.WALLS_SURVEYED,
-            pt(50, 500)) === null,
-            "frameGuard: a plan layer traced outside the region is allowed");
-
-        // -- out of frame, both ways --------------------------------
-        var up = FeatureTraceRun.frameGuard(box,
-            CsLayers.PROFILE_CEILING, pt(50, 500));
-        ok(up !== null,
-            "frameGuard: a profile layer traced up in the plan is refused");
-        ok(String(up).indexOf("profile") >= 0,
-            "frameGuard: the refusal names the layer's frame");
-        ok(String(up).indexOf("plan") >= 0,
-            "frameGuard: the refusal names the frame the cursor was in");
-
-        ok(FeatureTraceRun.frameGuard(box, CsLayers.WALLS_SURVEYED,
-            pt(50, -190)) !== null,
-            "frameGuard: a plan layer traced down in the region is refused");
-
-        // -- the SECTION frame, which is an open bay and nothing else --
-        // Before the bay rects reached frameIn, CsLayers.frameOf said
-        // "section" and frameIn could only ever say "plan" or
-        // "profile", so this first assertion was unsatisfiable and
-        // every Cross Section tile in the panel was inert.
+        // -- the bay, which is what the section frame IS ------------
+        // A bay is the only place section linework is ever loose, so
+        // "am I in the section frame" is "am I inside an open bay".
         CsLayers.ensure(doc, di, CsLayers.CTRL_SECTION_BOX);
         var bayPl = new RPolyline();
         bayPl.appendVertex(new RVector(200, 0));
@@ -17190,6 +17180,7 @@ if (!IS_NODE) {
         bayE.setLayerId(doc.getLayerId(CsLayers.CTRL_SECTION_BOX));
         CsTags.set(bayE, "SectionBay", "bay-1");
         CsTags.set(bayE, "SectionBayRole", "frame");
+        CsTags.set(bayE, "SectionBayStation", "A4");
         var bayOp = new RAddObjectsOperation();
         bayOp.addObject(bayE, false);
         // CTRL-SECTION-BOX ships LOCKED, and locked refuses an add as
@@ -17205,48 +17196,99 @@ if (!IS_NODE) {
         var bays = CsTrace.sectionBays(doc);
         eqs(bays.length, 1,
             "CsTrace.sectionBays: the tagged bay frame is found in the drawing");
-        ok(FeatureTraceRun.frameGuard(box, CsLayers.SECTION_WALLS_SURVEYED,
-            pt(220, 20), bays) === null,
-            "frameGuard: a section layer traced inside an open bay is " +
-            "ALLOWED -- the assertion the inert cross-section tiles failed");
-        ok(FeatureTraceRun.frameGuard(box, CsLayers.WALLS_SURVEYED,
-            pt(220, 20), bays) !== null,
-            "frameGuard: a plan layer traced inside a bay is refused");
+        // The bay's IDENTITY rides along with its rectangle. Without it
+        // a tool that has already located a stroke inside a bay would
+        // have to walk the whole drawing again to ask which station
+        // that bay is a section of -- and section linework has no other
+        // way to learn its station: CsBind refuses the section frame,
+        // and Capture tears the bay down.
+        eqs(bays[0].bay, "bay-1",
+            "CsTrace.sectionBays: the bay carries its own id");
+        eqs(bays[0].station, "A4",
+            "CsTrace.sectionBays: and the station it is a section of");
 
-        // The refusal has to say the true reason. A caver who arms a
-        // Cross Section tile with no bay open is not "in the plan
-        // frame" in any way they can act on -- there is no section view
-        // to move to until Sketch Section makes one.
-        var noBay = FeatureTraceRun.frameGuard(box,
-            CsLayers.SECTION_WALLS_SURVEYED, pt(220, 20), []);
-        ok(noBay !== null,
-            "frameGuard: a section layer with no bay open is refused");
-        ok(String(noBay).indexOf("no section bay is open") >= 0,
-            "frameGuard: and the refusal says THAT, not 'you are in the " +
-            "plan frame'");
-        ok(String(noBay).indexOf("Sketch Section") >= 0,
-            "frameGuard: and names the tool that opens one");
+        // -- routing by location: the whole second design -----------
+        // There is no per-view button any more, so nothing to refuse.
+        // The armed FEATURE plus the view the stroke landed in name the
+        // layer, and CsLayers.twinFor is the one table that derives it.
+        FeatureTrace = { target: CsLayers.WALLS_SURVEYED,
+                         CURRENT_LAYER: "\u0000CURRENT-LAYER" };
+        eqs(FeatureTraceRun.targetLayer(doc, "plan"),
+            CsLayers.WALLS_SURVEYED,
+            "targetLayer: a stroke in the plan lands on the plan layer");
+        eqs(FeatureTraceRun.targetLayer(doc, "profile"),
+            CsLayers.PROFILE_WALLS_SURVEYED,
+            "targetLayer: the SAME armed feature, traced in the elevation, " +
+            "lands on the profile twin");
+        eqs(FeatureTraceRun.targetLayer(doc, "section"),
+            CsLayers.SECTION_WALLS_SURVEYED,
+            "targetLayer: and inside a bay, on the section twin");
 
-        var outside = FeatureTraceRun.frameGuard(box,
-            CsLayers.SECTION_WALLS_SURVEYED, pt(500, 500), bays);
-        ok(outside !== null,
-            "frameGuard: a section layer traced outside the open bay is refused");
-        ok(String(outside).indexOf("outside every open section bay") >= 0,
-            "frameGuard: and that refusal says the cursor is outside the bay");
+        // A feature the registry refuses to twin has nowhere to land,
+        // and says so rather than inventing a layer.
+        FeatureTrace = { target: CsLayers.NORTH_ARROW,
+                         CURRENT_LAYER: "\u0000CURRENT-LAYER" };
+        ok(FeatureTraceRun.targetLayer(doc, "profile") === null,
+            "targetLayer: a NO_TWIN feature answers null for a view it " +
+            "has no layer in");
+        ok(String(FeatureTraceRun.noLayerReason(CsLayers.NORTH_ARROW,
+                "profile")).indexOf("no layer in the profile view") >= 0,
+            "noLayerReason: and the refusal says which view it was");
 
-        // -- targetLayer: fallback AND the armed case ---------------
-        // Both halves, because a test of only the fallback passes even
-        // if targetLayer ignores the armed target entirely -- which is
-        // the whole mechanism the panel drives it through.
+        // A frame-prefixed target is folded back to the feature it
+        // names, so an older per-view name still arms that feature
+        // rather than twinning into PROFILE-PROFILE-*.
+        FeatureTrace = { target: CsLayers.PROFILE_FLOOR,
+                         CURRENT_LAYER: "\u0000CURRENT-LAYER" };
+        eqs(FeatureTraceRun.baseLayer(doc), CsLayers.FLOOR,
+            "baseLayer: a per-view target folds back to its plan base");
+        eqs(FeatureTraceRun.targetLayer(doc, "section"),
+            CsLayers.SECTION_FLOOR,
+            "targetLayer: and then routes like any other feature");
+
+        // The escape hatch keeps its layer exactly as the caver set it,
+        // in every view -- sheet layers included.
+        FeatureTrace = { target: "\u0000CURRENT-LAYER",
+                         CURRENT_LAYER: "\u0000CURRENT-LAYER" };
+        eqs(FeatureTraceRun.targetLayer(doc, "profile"),
+            doc.getLayerName(doc.getCurrentLayerId()),
+            "targetLayer: the current-layer hatch is never twinned");
+
+        // -- the run, read off the stroke ---------------------------
+        // Boxes are passed in rather than drawn: this is the routing
+        // decision, not CsProfileBox's own arithmetic, which has its
+        // own tests.
+        FeatureTrace = { target: CsLayers.WALLS_SURVEYED,
+                         CURRENT_LAYER: "\u0000CURRENT-LAYER" };
+        var boxes = [{ key: "A", minX: 0, minY: -200, maxX: 100, maxY: -100 }];
+        var inBand = [pt(10, -150), pt(20, -150)];
+        eqs(FeatureTraceRun.targetLayer(doc, "profile", inBand, boxes),
+            CsLayerVariants.nameFor(CsLayers.PROFILE_WALLS_SURVEYED, "A"),
+            "targetLayer: a stroke inside a band's box lands on that run");
+        var strayed = [pt(10, -150), pt(400, -150)];
+        eqs(FeatureTraceRun.targetLayer(doc, "profile", strayed, boxes),
+            CsLayers.PROFILE_WALLS_SURVEYED,
+            "targetLayer: a stroke that leaves every box stays on the " +
+            "shared layer rather than guessing a run");
+
+        // -- which bay owns a stroke --------------------------------
+        eqs(CsTrace.bayForPath(bays, [pt(210, 10), pt(230, 30)]).station,
+            "A4",
+            "CsTrace.bayForPath: a stroke inside one bay names that bay");
+        ok(CsTrace.bayForPath(bays, [pt(210, 10), pt(500, 500)]) === null,
+            "CsTrace.bayForPath: a stroke that leaves the bay names none");
+        ok(CsTrace.bayForPath(bays, []) === null,
+            "CsTrace.bayForPath: an empty path names none");
+
+        // -- targetLayer with nothing armed and nothing said --------
+        // A drag action running standalone -- no panel, no frame, no
+        // samples -- still has to answer something drawable.
+        FeatureTrace = { target: undefined,
+                         CURRENT_LAYER: "\u0000CURRENT-LAYER" };
         eqs(FeatureTraceRun.targetLayer(), CsLayers.WALLS_SURVEYED,
             "FeatureTraceRun.targetLayer: falls back to surveyed walls unarmed");
-
-        FeatureTrace = { target: CsLayers.PROFILE_FLOOR };
-        eqs(FeatureTraceRun.targetLayer(), CsLayers.PROFILE_FLOOR,
-            "FeatureTraceRun.targetLayer: an armed target is what gets traced");
-        FeatureTrace = { target: undefined };
-        eqs(FeatureTraceRun.targetLayer(), CsLayers.WALLS_SURVEYED,
-            "FeatureTraceRun.targetLayer: disarming falls back again");
+        eqs(FeatureTraceRun.targetLayer(doc), CsLayers.WALLS_SURVEYED,
+            "FeatureTraceRun.targetLayer: no frame given reads as the plan");
 
         // -- the drag maths, without a mouse ------------------------
         // A live drag is mouse-only, but what it DOES with the samples
@@ -17290,10 +17332,10 @@ if (!IS_NODE) {
         loadRepoScript("scripts/CaveSurvey/FeatureTrace/FeatureTraceRun.js");
         loadRepoScript("scripts/CaveSurvey/FeatureTrace/FeatureTrace.js");
 
-        eqs(FeatureTrace.ROWS.length, 15,
-            "FeatureTrace.ROWS: fifteen traceable features");
+        eqs(FeatureTrace.ROWS.length, 7,
+            "FeatureTrace.ROWS: seven traceable features");
 
-        var planCount = 0, profileCount = 0, sectionCount = 0, i;
+        var i;
         var seen = {};
         for (i = 0; i < FeatureTrace.ROWS.length; i++) {
             var row = FeatureTrace.ROWS[i];
@@ -17314,21 +17356,31 @@ if (!IS_NODE) {
                 "FeatureTrace.ROWS: " + row.layer +
                     " is a traced layer, not a generated CTRL- one");
 
-            var frame = CsLayers.frameOf(row.layer);
-            ok(frame === "plan" || frame === "profile" || frame === "section",
-                "FeatureTrace.ROWS: " + row.layer + " is in a view frame");
-            if (frame === "plan") {
-                planCount++;
-            } else if (frame === "profile") {
-                profileCount++;
-            } else {
-                sectionCount++;
-            }
-            if (frame !== "section") {
-                ok(CsBind.isLineworkLayer(row.layer),
-                    "FeatureTrace.ROWS: " + row.layer +
-                        " is bindable linework -- it is traced by hand");
-            }
+            // EVERY ROW IS PLAN-FRAME, and that is the design rather
+            // than an accident of which layers were listed. The row
+            // names the FEATURE; CsLayers.twinFor derives the profile
+            // and section destinations from it at trace time. A
+            // frame-prefixed row here would be a second, hand-written
+            // copy of that derivation -- and twinFor answers null for a
+            // name that is already twinned, so such a row could only
+            // ever be traced in the plan.
+            eqs(CsLayers.frameOf(row.layer), "plan",
+                "FeatureTrace.ROWS: " + row.layer + " is the plan-frame " +
+                    "base the twins derive from");
+            ok(CsBind.isLineworkLayer(row.layer),
+                "FeatureTrace.ROWS: " + row.layer +
+                    " is bindable linework -- it is traced by hand");
+
+            // Both twins have to exist, or the tile is a button that
+            // silently does nothing in two of the three views.
+            var prof = CsLayers.twinFor(row.layer, "profile");
+            var sect = CsLayers.twinFor(row.layer, "section");
+            ok(prof !== null && !isNull(CsLayers.DEFAULTS[prof]),
+                "FeatureTrace.ROWS: " + row.layer +
+                    " has a registered profile twin to route into");
+            ok(sect !== null && !isNull(CsLayers.DEFAULTS[sect]),
+                "FeatureTrace.ROWS: " + row.layer +
+                    " has a registered section twin to route into");
 
             ok(!isNull(row.label) && row.label.length > 0,
                 "FeatureTrace.ROWS: " + row.layer + " has a label");
@@ -17343,17 +17395,26 @@ if (!IS_NODE) {
             ok(!isNull(CsLayers.DEFAULTS[row.layer]),
                 "FeatureTrace.ROWS: " + row.layer + " has a DEFAULTS entry");
         }
-        eqs(planCount, 5, "FeatureTrace.ROWS: five plan rows");
-        eqs(profileCount, 5, "FeatureTrace.ROWS: five profile rows");
-        eqs(sectionCount, 5, "FeatureTrace.ROWS: five section rows");
-
         // -- arming is what FeatureTraceRun reads -------------------
         FeatureTrace.target = undefined;
-        FeatureTrace.armLayer(CsLayers.PROFILE_FLOOR);
-        eqs(FeatureTrace.target, CsLayers.PROFILE_FLOOR,
+        FeatureTrace.armLayer(CsLayers.FLOOR);
+        eqs(FeatureTrace.target, CsLayers.FLOOR,
             "FeatureTrace.armLayer: sets the target the drag reads");
-        eqs(FeatureTraceRun.targetLayer(), CsLayers.PROFILE_FLOOR,
+        eqs(FeatureTraceRun.targetLayer(null, "plan"), CsLayers.FLOOR,
             "FeatureTrace.armLayer: the drag traces what the panel armed");
+        eqs(FeatureTraceRun.targetLayer(null, "section"),
+            CsLayers.SECTION_FLOOR,
+            "FeatureTrace.armLayer: one arming, and the view picks the twin");
+
+        // -- one tile, every layer it can reach ---------------------
+        // The tooltip and the "(hidden)" marker both read this, so it
+        // is built once rather than derived twice.
+        var dests = FeatureTrace.destinationsOf(CsLayers.BREAKDOWN);
+        eqs(dests.join(","), [CsLayers.BREAKDOWN,
+            CsLayers.PROFILE_BREAKDOWN, CsLayers.SECTION_BREAKDOWN].join(","),
+            "FeatureTrace.destinationsOf: the plan layer and both twins");
+        ok(FeatureTrace.destinationsOf(CsLayers.NORTH_ARROW).length === 1,
+            "FeatureTrace.destinationsOf: a NO_TWIN layer reaches one view");
 
         // -- the smoothing table ------------------------------------
         // Tolerance is a FRACTION of the sample spacing, so it means the
@@ -17655,7 +17716,7 @@ if (!IS_NODE) {
             FeatureTrace.widgets = undefined;
         }());
 
-        // -- refresh: hidden-layer markers and the profile gate ------
+        // -- refresh: hidden-layer markers, across all three views ---
         (function() {
             var d = new RDocument(new RMemoryStorage(),
                 new RSpatialIndexNavel());
@@ -17669,11 +17730,10 @@ if (!IS_NODE) {
             var group = { enabled: true, toolTip: "" };
             FeatureTrace.widgets = {
                 runCombo: { currentText: "A" },
-                profileGroup: group,
+                featureGroup: group,
                 buttons: [
                     { button: ceilingBtn,
-                      row: { label: "Ceiling",
-                             layer: CsLayers.PROFILE_CEILING } },
+                      row: { label: "Ceiling", layer: CsLayers.CEILING } },
                     { button: wallsBtn,
                       row: { label: "Surveyed Walls",
                              layer: CsLayers.WALLS_SURVEYED } }
@@ -17683,12 +17743,16 @@ if (!IS_NODE) {
             // The region is passed in: flush() computes it once per
             // repaint, because profileRegion walks every entity and the
             // panel used to recompute it on every notification.
-            // No elevation yet: the Profile group is gated off and says why.
+            // NEVER DISABLED. The group used to grey out until the
+            // drawing had an elevation and a run was named; the same
+            // tiles now draw the plan and the sections, so locking them
+            // would lock tracing out of a drawing that has no elevation
+            // at all. It says what is missing instead.
             FeatureTrace.refresh(d, CsTrace.profileRegion(d));
-            ok(group.enabled === false,
-                "FeatureTrace.refresh: no elevation disables the Profile group");
+            ok(group.enabled === true,
+                "FeatureTrace.refresh: no elevation still leaves the tiles usable");
             ok(String(group.toolTip).indexOf("Generate Profile") >= 0,
-                "FeatureTrace.refresh: and the tooltip says what to do");
+                "FeatureTrace.refresh: and the tooltip says what is missing");
 
             // Give it a band, and the group opens up.
             CsLayers.ensure(d, di3, CsLayers.CTRL_PROFILE_SHOTS);
@@ -17700,10 +17764,11 @@ if (!IS_NODE) {
             di3.applyOperation(bop);
             FeatureTrace.refresh(d, CsTrace.profileRegion(d));
             ok(group.enabled === true,
-                "FeatureTrace.refresh: an elevation enables the Profile group");
+                "FeatureTrace.refresh: an elevation leaves them usable too");
 
-            // The marker follows the SELECTED RUN's layer, since that is
-            // what a click would actually draw to.
+            // The marker covers EVERY layer the tile can reach -- one
+            // tile, three destinations -- because the hidden one is
+            // exactly the view the caver may be about to draw in.
             CsLayerVariants.ensureProfile(d, di3,
                 CsLayers.PROFILE_CEILING, "A");
             // The wrapper itself: a label that fits is untouched, one
@@ -17722,8 +17787,12 @@ if (!IS_NODE) {
             eqs(ceilingBtn.text,
                 FeatureTrace.wrapLabel("Ceiling", FeatureTrace.CELL_CHARS),
                 "FeatureTrace.refresh: a visible layer shows a plain label");
-            eqs(ceilingBtn.toolTip, "PROFILE-CEILING-A",
+            ok(String(ceilingBtn.toolTip).indexOf("PROFILE-CEILING-A") >= 0,
                 "FeatureTrace.refresh: the tooltip names the run's layer");
+            ok(String(ceilingBtn.toolTip).indexOf(CsLayers.SECTION_CEILING)
+                    >= 0,
+                "FeatureTrace.refresh: and the section layer the same tile " +
+                "reaches");
 
             var lay = d.queryLayer("PROFILE-CEILING-A");
             lay.setOff(true);
@@ -17737,9 +17806,15 @@ if (!IS_NODE) {
             ok(String(ceilingBtn.toolTip).indexOf("switched OFF") >= 0,
                 "FeatureTrace.refresh: and the tooltip explains the risk");
 
-            // A plan row ignores the run entirely.
-            eqs(wallsBtn.toolTip, CsLayers.WALLS_SURVEYED,
-                "FeatureTrace.refresh: a plan row is never run-qualified");
+            // The plan destination is never run-qualified: the plan is
+            // one continuous map and a wall runs straight through
+            // survey boundaries.
+            eqs(FeatureTrace.destinationsOf(CsLayers.WALLS_SURVEYED)[0],
+                CsLayers.WALLS_SURVEYED,
+                "FeatureTrace.refresh: the plan destination is never " +
+                "run-qualified");
+            ok(String(wallsBtn.toolTip).indexOf("hidden") < 0,
+                "FeatureTrace.refresh: an all-visible tile carries no warning");
             // The tiles carry their labels broken over lines (the grid
             // in FeatureTrace.buildGroup), so the assertion is against
             // the wrapper's own output rather than the flat label -- a
@@ -17754,43 +17829,55 @@ if (!IS_NODE) {
             FeatureTrace.widgets = undefined;
         }());
 
-        // -- the run selector: profile features only ----------------
+        // -- the run selector: profile strokes only -----------------
         // Each run is drawn as its own band and CsProfile lays bands out
         // so they never overlap, so a profile feature belongs to exactly
         // one run. The plan is one continuous map and must NOT be split:
-        // a wall runs straight through survey boundaries.
+        // a wall runs straight through survey boundaries. The FRAME is
+        // the second argument now -- it is where the stroke landed, not
+        // which button was pressed.
         FeatureTrace.widgets = { runCombo: { currentText: "A" } };
 
-        FeatureTrace.target = CsLayers.PROFILE_CEILING;
-        eqs(FeatureTraceRun.targetLayer(null), "PROFILE-CEILING-A",
-            "run selector: a profile feature goes to its run's layer");
+        FeatureTrace.target = CsLayers.CEILING;
+        eqs(FeatureTraceRun.targetLayer(null, "profile"), "PROFILE-CEILING-A",
+            "run selector: a stroke in the elevation goes to its run's layer");
 
-        FeatureTrace.target = CsLayers.PROFILE_WALLS_INFERRED;
-        eqs(FeatureTraceRun.targetLayer(null), "PROFILE-WALLS-INFERRED-A",
+        FeatureTrace.target = CsLayers.WALLS_INFERRED;
+        eqs(FeatureTraceRun.targetLayer(null, "profile"),
+            "PROFILE-WALLS-INFERRED-A",
             "run selector: a multi-word profile base still varies");
 
         FeatureTrace.target = CsLayers.WALLS_SURVEYED;
-        eqs(FeatureTraceRun.targetLayer(null), CsLayers.WALLS_SURVEYED,
-            "run selector: a PLAN feature is never split by run");
+        eqs(FeatureTraceRun.targetLayer(null, "plan"), CsLayers.WALLS_SURVEYED,
+            "run selector: a stroke in the PLAN is never split by run");
         FeatureTrace.target = CsLayers.BREAKDOWN_BOUNDARY;
-        eqs(FeatureTraceRun.targetLayer(null), CsLayers.BREAKDOWN_BOUNDARY,
+        eqs(FeatureTraceRun.targetLayer(null, "plan"),
+            CsLayers.BREAKDOWN_BOUNDARY,
             "run selector: nor is a plan breakdown boundary");
+        // A section stroke is not run-qualified either: a section
+        // belongs to the one station its bay was opened at, which is
+        // recorded on the line rather than in its layer name.
+        eqs(FeatureTraceRun.targetLayer(null, "section"),
+            CsLayers.SECTION_BREAKDOWN_BOUNDARY,
+            "run selector: nor is a section stroke");
 
         // "(all runs)" means the shared layer, not a run called that.
         FeatureTrace.widgets = { runCombo: { currentText: FeatureTrace.RUN_SHARED } };
-        FeatureTrace.target = CsLayers.PROFILE_CEILING;
-        eqs(FeatureTraceRun.targetLayer(null), CsLayers.PROFILE_CEILING,
+        FeatureTrace.target = CsLayers.CEILING;
+        eqs(FeatureTraceRun.targetLayer(null, "profile"),
+            CsLayers.PROFILE_CEILING,
             "run selector: the shared entry means the shared layer");
 
         // Lower case from the combo must resolve to the same layer.
         FeatureTrace.widgets = { runCombo: { currentText: "g" } };
-        eqs(FeatureTraceRun.targetLayer(null), "PROFILE-CEILING-G",
+        eqs(FeatureTraceRun.targetLayer(null, "profile"), "PROFILE-CEILING-G",
             "run selector: the run token is sanitised, so g and G are one run");
 
         // No panel, no run: the drag still works standalone.
         FeatureTrace.widgets = undefined;
-        eqs(FeatureTraceRun.targetLayer(null), CsLayers.PROFILE_CEILING,
-            "run selector: with no panel a profile feature uses the shared layer");
+        eqs(FeatureTraceRun.targetLayer(null, "profile"),
+            CsLayers.PROFILE_CEILING,
+            "run selector: with no panel a profile stroke uses the shared layer");
         ok(FeatureTraceRun.runToken() === null,
             "run selector: no panel means no run");
         FeatureTrace.target = undefined;
@@ -17812,6 +17899,14 @@ if (!IS_NODE) {
             "targetLayer: the sentinel follows a change of current layer");
         eqs(FeatureTraceRun.targetLayer(undefined), CsLayers.WALLS_SURVEYED,
             "targetLayer: the sentinel without a document falls back");
+        // And it is never twinned, whichever view the stroke landed in:
+        // the hatch exists for layers the feature list does not cover,
+        // sheet layers included, and rewriting one to a twin would
+        // defeat the button.
+        scratch.setCurrentLayer(CsLayers.TEXT_NOTES);
+        eqs(FeatureTraceRun.targetLayer(scratch, "section"),
+            CsLayers.TEXT_NOTES,
+            "targetLayer: the sentinel is exempt from frame routing");
         ok(FeatureTrace.CURRENT_LAYER !== CsLayers.WALLS_SURVEYED,
             "FeatureTrace.CURRENT_LAYER: the sentinel is not a real layer name");
         var sentinelIsARow = false;
@@ -22037,6 +22132,275 @@ for (var scj = 0; scj < CsSymbols.CATALOG.length; scj++) {
 }
 eqs(symCats.length, Object.keys(symCatSeen).length,
     "categories() invents no category the catalog does not use");
+
+// ---------------------------------------------------------------------
+// CsTripEdit -- correcting a trip's metadata after it was drawn.
+// ---------------------------------------------------------------------
+
+// normalizeDate: the stored form, the typed form, blank, and the
+// dates that must be refused rather than stored (the shelf's drift
+// check and the IGRF estimate both parse this field).
+var nd = CsTripEdit.normalizeDate("2026-08-14");
+ok(nd.ok === true && nd.value === "2026-08-14", "normalizeDate ISO");
+nd = CsTripEdit.normalizeDate("  2026-8-4 ");
+ok(nd.ok === true && nd.value === "2026-08-04",
+    "normalizeDate pads and trims");
+nd = CsTripEdit.normalizeDate("8/14/2026");
+ok(nd.ok === true && nd.value === "2026-08-14",
+    "normalizeDate converts M/D/YYYY");
+nd = CsTripEdit.normalizeDate("");
+ok(nd.ok === true && nd.value === "", "normalizeDate accepts blank");
+nd = CsTripEdit.normalizeDate("last tuesday");
+ok(nd.ok === false, "normalizeDate refuses prose");
+nd = CsTripEdit.normalizeDate("2026-02-30");
+ok(nd.ok === false, "normalizeDate refuses a day February has not");
+nd = CsTripEdit.normalizeDate("2024-02-29");
+ok(nd.ok === true && nd.value === "2024-02-29",
+    "normalizeDate accepts a real leap day");
+nd = CsTripEdit.normalizeDate("2026-13-01");
+ok(nd.ok === false, "normalizeDate refuses month 13");
+
+// A two-trip survey to edit.
+var teSurvey = CsModel.newSurvey();
+teSurvey.caveName = "TRUITT CAVE";
+teSurvey.trips = [CsModel.newTrip(), CsModel.newTrip()];
+teSurvey.trips[0].name = "ENTRANCE";
+teSurvey.trips[0].date = "2026-08-01";
+teSurvey.trips[0].team = "NDS, JB";
+teSurvey.trips[1].date = "2026-08-08";
+teSurvey.trips[1].team = "NDS, RM";
+var teShot = function(from, to, trip) {
+    var sh = CsModel.newShot();
+    sh.from = from;
+    sh.to = to;
+    sh.distance = 10;
+    sh.trip = trip;
+    return sh;
+};
+teSurvey.shots = [teShot("A1", "A2", 0), teShot("A2", "A3", 0),
+    teShot("A3", "B1", 1)];
+
+var teRows = CsTripEdit.rows(teSurvey);
+eqs(teRows.length, 2, "rows(): one row per trip");
+eqs(teRows[0].shots, 2, "rows(): trip 0 shot count");
+eqs(teRows[1].shots, 1, "rows(): trip 1 shot count");
+eqs(teRows[0].label, "Trip 0 — ENTRANCE", "rows(): named trip label");
+eqs(teRows[1].label, "Trip 1", "rows(): unnamed trip label");
+
+// planEdits: trims, normalizes, and reports only what differs.
+var tePlan = CsTripEdit.planEdits(teSurvey, [
+    { tripId: 0, name: "ENTRANCE", date: "2026-08-01", team: "NDS, JB",
+      instruments: "" },
+    { tripId: 1, name: "  UPPER MAZE ", date: "8/9/2026",
+      team: "NDS, RM", instruments: "DISTOX2" }
+]);
+ok(tePlan.error === undefined, "planEdits: clean input has no error");
+eqs(tePlan.changes.length, 1, "planEdits: only the edited trip changes");
+eqs(tePlan.changes[0].tripId, 1, "planEdits: names the edited trip");
+eqs(tePlan.changes[0].after.name, "UPPER MAZE", "planEdits: trims");
+eqs(tePlan.changes[0].after.date, "2026-08-09", "planEdits: normalizes");
+eqs(tePlan.changes[0].before.date, "2026-08-08",
+    "planEdits: keeps the old value for the report");
+
+// A bad date stops EVERYTHING -- half an edit is worse than none.
+var teBad = CsTripEdit.planEdits(teSurvey, [
+    { tripId: 1, name: "", date: "2026-06-31", team: "", instruments: "" }
+]);
+ok(teBad.error !== undefined && /Trip 1/.test(teBad.error),
+    "planEdits: a bad date is refused and names its trip");
+ok(teBad.changes === undefined,
+    "planEdits: a refusal carries no changes to apply");
+
+// The fork this whole tool exists to prevent, from the other side:
+// two trips must not be edited into the same identity.
+var teClash = CsTripEdit.planEdits(teSurvey, [
+    { tripId: 1, name: "", date: "2026-08-01", team: "NDS, JB",
+      instruments: "" }
+]);
+ok(teClash.error !== undefined && /same trip/.test(teClash.error),
+    "planEdits: refuses an edit that would merge two trips");
+
+// ...but a drawing whose trips ALREADY share a fingerprint (an import
+// with no per-trip metadata) must still be editable, or the one tool
+// that can fill those fields in refuses to open the drawings that need
+// it.
+var teBlank = CsModel.newSurvey();
+teBlank.trips = [CsModel.newTrip(), CsModel.newTrip()];
+teBlank.shots = [teShot("A1", "A2", 0), teShot("A2", "A3", 1)];
+var teBlankPlan = CsTripEdit.planEdits(teBlank, [
+    { tripId: 0, name: "FIRST", date: "", team: "", instruments: "" }
+]);
+ok(teBlankPlan.error === undefined,
+    "planEdits: a pre-existing fingerprint clash is not this edit's fault");
+eqs(teBlankPlan.changes.length, 1,
+    "planEdits: the blank-metadata drawing still edits");
+
+// applyToSurvey: writes the fields, and re-mirrors trip 0 onto the
+// survey's top-level fields (everything that has not heard of trips
+// reads those).
+CsTripEdit.applyToSurvey(teSurvey, tePlan.changes);
+eqs(teSurvey.trips[1].date, "2026-08-09", "applyToSurvey: date written");
+eqs(teSurvey.trips[1].name, "UPPER MAZE", "applyToSurvey: name written");
+eqs(teSurvey.trips[1].instruments, "DISTOX2",
+    "applyToSurvey: instruments written");
+eqs(teSurvey.trips[0].date, "2026-08-01",
+    "applyToSurvey: untouched trip untouched");
+var tePlan0 = CsTripEdit.planEdits(teSurvey, [
+    { tripId: 0, name: "ENTRANCE", date: "2026-07-31", team: "NDS, JB",
+      instruments: "" }
+]);
+CsTripEdit.applyToSurvey(teSurvey, tePlan0.changes);
+eqs(teSurvey.date, "2026-07-31",
+    "applyToSurvey: trip 0 re-mirrors onto survey.date");
+eqs(teSurvey.team, "NDS, JB",
+    "applyToSurvey: trip 0 re-mirrors onto survey.team");
+
+// tagPlan: a field the caver EMPTIED must be REMOVED, not set --
+// CsTags.set returns early on "" by design, so "set it to empty" is
+// silently no change at all.
+var teTags = CsTripEdit.tagPlan(1,
+    { name: "UPPER MAZE", date: "2026-08-09", team: "", instruments: "" },
+    false, "TRUITT CAVE");
+eqs(teTags.set.TripName, "UPPER MAZE", "tagPlan: sets a filled field");
+eqs(teTags.set.Trip, 1, "tagPlan: re-declares the trip id");
+ok(teTags.remove.indexOf("TripTeam") >= 0,
+    "tagPlan: removes an emptied field");
+ok(teTags.remove.indexOf("TripInstruments") >= 0,
+    "tagPlan: removes emptied instruments");
+ok(teTags.set.SurveyDate === undefined,
+    "tagPlan: a non-zero trip writes no legacy mirror");
+
+// Trip 0 also carries the pre-trip drawing-level mirror.
+var teTags0 = CsTripEdit.tagPlan(0,
+    { name: "ENTRANCE", date: "2026-07-31", team: "NDS, JB",
+      instruments: "" },
+    true, "TRUITT CAVE");
+eqs(teTags0.set.SurveyDate, "2026-07-31", "tagPlan: trip 0 legacy date");
+eqs(teTags0.set.SurveyTeam, "NDS, JB", "tagPlan: trip 0 legacy team");
+eqs(teTags0.set.SurveyName, "TRUITT CAVE",
+    "tagPlan: the cave name owns SurveyName");
+var teTagsNoCave = CsTripEdit.tagPlan(0,
+    { name: "ENTRANCE", date: "", team: "", instruments: "" }, true, "");
+eqs(teTagsNoCave.set.SurveyName, "ENTRANCE",
+    "tagPlan: with no cave name, the trip name stands in");
+
+ok(CsTripEdit.dateChanged(tePlan.changes) === true,
+    "dateChanged: sees a changed date");
+ok(CsTripEdit.dateChanged([{ tripId: 0,
+    before: { date: "2026-08-01" }, after: { date: "2026-08-01" } }]) === false,
+    "dateChanged: ignores an unchanged date");
+
+// ---------------------------------------------------------------------
+// CsDelta -- the gate behind Survey Notebook's incremental Draw.
+// ---------------------------------------------------------------------
+
+var cdShot = function(from, to, trip, splay) {
+    var s = CsModel.newShot();
+    s.from = from;
+    s.to = to;
+    s.distance = 10;
+    s.trip = trip;
+    s.splay = splay === true;
+    return s;
+};
+
+// Station ownership: the trip of the FIRST shot to touch a station, the
+// same rule CsDraw uses to pick a trip's anchor. The station a new trip
+// ties into belongs to the OLDER trip and must be left alone.
+var cdSurvey = CsModel.newSurvey();
+cdSurvey.trips = [CsModel.newTrip(), CsModel.newTrip()];
+cdSurvey.shots = [cdShot("A1", "A2", 0), cdShot("A2", "A3", 0),
+    cdShot("A3", "B1", 1), cdShot("B1", "B2", 1),
+    cdShot("B2", "", 1, true)];
+var cdOwner = CsDelta.stationTrips(cdSurvey);
+eqs(cdOwner["A1"], 0, "stationTrips: A1 belongs to trip 0");
+eqs(cdOwner["A3"], 0, "stationTrips: the tie-in station keeps trip 0");
+eqs(cdOwner["B1"], 1, "stationTrips: B1 belongs to trip 1");
+
+var cdSplit = CsDelta.pageStations(cdSurvey, 1);
+eqs(cdSplit.page.join(","), "B1,B2",
+    "pageStations: trip 1 owns B1 and B2");
+eqs(cdSplit.tie.join(","), "A3",
+    "pageStations: A3 is a tie-in, not the page's to redraw");
+
+// movedStations: at the suite's own rigidity epsilon.
+var cdDrawn = { A1: {x: 0, y: 0}, A2: {x: 10, y: 0}, A3: {x: 20, y: 0} };
+var cdSame = { A1: {x: 0, y: 0}, A2: {x: 10, y: 0}, A3: {x: 20, y: 0},
+    B1: {x: 30, y: 0} };
+eqs(CsDelta.movedStations(cdDrawn, cdSame, 100).length, 0,
+    "movedStations: an added trip moves nothing");
+var cdShifted = { A1: {x: 0, y: 0}, A2: {x: 10, y: 0},
+    A3: {x: 20.5, y: 0} };
+eqs(CsDelta.movedStations(cdDrawn, cdShifted, 100).join(","), "A3",
+    "movedStations: a real shift is seen");
+eqs(CsDelta.movedStations(cdDrawn,
+    { A1: {x: 1e-9, y: 0}, A2: {x: 10, y: 0}, A3: {x: 20, y: 0} },
+    100).length, 0,
+    "movedStations: float noise is not a move");
+
+// decide: the fast path is for a page that disturbs nothing else.
+var cdGate = CsDelta.decide({ drawn: cdDrawn, stations: cdSame,
+    extent: 100, pageNames: ["B1", "B2"], dropped: [],
+    anchorName: "A1" });
+ok(cdGate.fast === true, "decide: an added trip takes the fast path");
+
+cdGate = CsDelta.decide({ drawn: cdDrawn, stations: cdShifted,
+    extent: 100, pageNames: ["B1", "B2"], dropped: [],
+    anchorName: "A1" });
+ok(cdGate.fast === false && /moves 1/.test(cdGate.reason),
+    "decide: a page that moves the survey does not");
+
+cdGate = CsDelta.decide({ drawn: cdDrawn, stations: cdSame, extent: 100,
+    pageNames: ["A1", "A2"], dropped: [], anchorName: "A1" });
+ok(cdGate.fast === false && /trip-0 anchor/.test(cdGate.reason),
+    "decide: a page that redraws the trip-0 anchor does not");
+
+cdGate = CsDelta.decide({ drawn: cdDrawn, stations: cdSame, extent: 100,
+    pageNames: ["B1"], dropped: ["A9"], anchorName: "A1" });
+ok(cdGate.fast === false && /dropped/.test(cdGate.reason),
+    "decide: a revision that drops a station does not");
+
+// A page station is allowed to move -- it is being erased and redrawn
+// either way. This is what makes a trip REVISION eligible.
+cdGate = CsDelta.decide({ drawn: { B1: {x: 0, y: 0} },
+    stations: { B1: {x: 9, y: 0} }, extent: 100, pageNames: ["B1"],
+    dropped: [], anchorName: "A1" });
+ok(cdGate.fast === true,
+    "decide: the page's own stations may move");
+
+// subsetResolved: the page's legs, by trip, at the merged solve's own
+// coordinates.
+var cdResolved = {
+    stations: { A3: {x: 20, y: 0, z: 0, seq: 2},
+        B1: {x: 30, y: 0, z: 0, seq: 3},
+        B2: {x: 40, y: 0, z: 0, seq: 4},
+        A1: {x: 0, y: 0, z: 0, seq: 0} },
+    legs: [{ shot: cdSurvey.shots[0], from: "A1", to: "A2", kind: "new" },
+        { shot: cdSurvey.shots[2], from: "A3", to: "B1", kind: "new" },
+        { shot: cdSurvey.shots[3], from: "B1", to: "B2", kind: "new" }],
+    unresolved: [],
+    skipped: [cdSurvey.shots[4]],
+    adjusted: false,
+    summary: { sigmaTape: 0.1, sigmaAngle: 1.0 }
+};
+var cdSub = CsDelta.subsetResolved(cdResolved, ["A3", "B1", "B2"], 1);
+eqs(Object.keys(cdSub.stations).sort().join(","), "A3,B1,B2",
+    "subsetResolved: only the named stations");
+eqs(cdSub.legs.length, 2, "subsetResolved: only trip 1's legs");
+eqs(cdSub.legs[0].from, "A3",
+    "subsetResolved: the tie-in leg comes across");
+eqs(cdSub.stations["B1"].x, 30,
+    "subsetResolved: coordinates are the merged solve's own");
+eqs(cdSub.skipped.length, 1, "subsetResolved: trip 1's skipped shot");
+ok(cdSub.summary === cdResolved.summary,
+    "subsetResolved: the solve's summary describes the solve, not the subset");
+
+// pageSurvey: the MERGED trip list rides along, or the page's stations
+// would be tagged Trip=0 and the drawing would have two trip 0s.
+var cdPage = CsDelta.pageSurvey(cdSurvey, [cdSurvey.shots[2]]);
+eqs(cdPage.trips.length, 2, "pageSurvey: carries every trip");
+eqs(cdPage.shots.length, 1, "pageSurvey: carries only the page's shots");
+eqs(cdPage.caveName, cdSurvey.caveName, "pageSurvey: keeps the cave name");
 
 // ---------------------------------------------------------------------
 // Report.

@@ -989,17 +989,11 @@ CsBind.tagEntities = function(doc, di, entries) {
         return n;
     };
 
-    // nest one withLayerOn per off layer -- the same recursion
-    // CsRevise.apply uses for the same reason
-    var withOffLayersOn = function(idx, fn) {
-        if (idx >= offLayers.length) {
-            return fn();
-        }
-        return CsLayers.withLayerOn(doc, di, offLayers[idx], function() {
-            return withOffLayersOn(idx + 1, fn);
-        });
-    };
-    return withOffLayersOn(0, write);
+    // One operation each way for the whole set -- the same batching
+    // CsRevise.withOffLayersOn uses, for the same reason: in the GUI an
+    // applyOperation per layer is a layer-list refresh and a view
+    // regeneration per layer.
+    return CsLayers.withLayersOn(doc, di, offLayers, write);
 };
 
 /**

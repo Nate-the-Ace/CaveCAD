@@ -39,34 +39,35 @@ FeatureTraceRun.State = {
  *  later, by CsTrace.resample, where it means a foot of cave. */
 FeatureTraceRun.SAMPLE_PIXELS = 6;
 
-/** The armed layer. Module state on FeatureTrace, set by the panel.
- *  Falls back to WALLS-SURVEYED so this action works before the panel
- *  exists, and if the panel ever fails to build. */
-FeatureTraceRun.targetLayer = function(doc) {
+/** True when the escape hatch is armed: trace onto whatever layer the
+ *  drawing is set to, whichever view that turns out to be in. */
+FeatureTraceRun.isCurrentLayer = function() {
+    return typeof FeatureTrace !== "undefined" &&
+        FeatureTrace.target === FeatureTrace.CURRENT_LAYER;
+};
+
+/**
+ * The armed FEATURE, as its plan-frame layer name.
+ *
+ * The panel arms a feature, not a view: WALLS-SURVEYED means "surveyed
+ * walls", and which of WALLS-SURVEYED / PROFILE-WALLS-SURVEYED /
+ * SECTION-WALLS-SURVEYED it becomes is decided by where the stroke
+ * lands (targetLayer below). The plan name is the base the whole
+ * registry derives its twins from -- see CsLayers.twinFor -- so it is
+ * the natural spelling for "the feature itself".
+ *
+ * A frame-prefixed target is folded back to its plan base rather than
+ * refused, so a caller holding an older per-view name still arms the
+ * feature that name describes.
+ *
+ * Falls back to WALLS-SURVEYED so this action works before the panel
+ * exists, and if the panel ever fails to build.
+ */
+FeatureTraceRun.baseLayer = function(doc) {
     if (typeof FeatureTrace === "undefined" || isNull(FeatureTrace.target)) {
         return CsLayers.WALLS_SURVEYED;
     }
-    if (FeatureTrace.target !== FeatureTrace.CURRENT_LAYER) {
-        // A profile feature belongs to ONE survey run: each run is drawn
-        // as its own band, and CsProfile lays bands out so they never
-        // overlap, so nothing traced along one run can meet anything
-        // traced along another. Segregating them also stops the no-gap
-        // tie-in welding one band's ceiling to the next band's floor
-        // when the two happen to be laid out within a foot of each
-        // other. Plan features are untouched: the plan is one
-        // continuous map and a wall runs straight through survey
-        // boundaries.
-        var run = FeatureTraceRun.runToken();
-        if (run !== null &&
-                CsLayers.frameOf(FeatureTrace.target) === "profile") {
-            var variant = CsLayerVariants.nameFor(FeatureTrace.target, run);
-            if (variant !== null) {
-                return variant;
-            }
-        }
-        return FeatureTrace.target;
-    }
-    if (FeatureTrace.target === FeatureTrace.CURRENT_LAYER) {
+    if (FeatureTraceRun.isCurrentLayer()) {
         // Resolved HERE and not when the button was clicked: the current
         // layer can change between arming and drawing, and the caver
         // means the layer that is current when the line is drawn.
@@ -79,7 +80,77 @@ FeatureTraceRun.targetLayer = function(doc) {
         }
         return name;
     }
-    return FeatureTrace.target;
+    var target = FeatureTrace.target;
+    if (CsLayers.frameOf(target) === "plan") {
+        return target;
+    }
+    var plan = CsLayers.planBaseOf(target);
+    return plan === null ? target : plan;
+};
+
+/**
+ * The layer a stroke in `frame` actually lands on, or null when the
+ * armed feature has no layer in that view.
+ *
+ * THIS IS THE WHOLE POINT OF THE TOOL'S SECOND DESIGN. There used to be
+ * one button per feature PER VIEW, and pressing the wrong one was
+ * refused at the cursor. The refusal was the tool asking the caver to
+ * re-state, in a button, a fact the drawing already knew: the bay
+ * boxes and the profile band boxes say which view a point is in, so
+ * the view a stroke is drawn in IS the answer. One button per feature,
+ * and location routes it.
+ *
+ * The current-layer escape hatch is exempt from all of it: its layer is
+ * whatever the caver chose, sheet layers included, and rewriting that
+ * to a twin would defeat the button.
+ *
+ * `points` and `boxes` are the profile-run half of the same idea and
+ * are optional: with a path in hand, a stroke drawn inside one band's
+ * bounding box lands on that band's run variant. Without one (the
+ * prompt, the panel's readout) the shared layer is the honest answer,
+ * because no stroke exists yet to read a run off.
+ */
+FeatureTraceRun.targetLayer = function(doc, frame, points, boxes) {
+    var base = FeatureTraceRun.baseLayer(doc);
+    if (FeatureTraceRun.isCurrentLayer()) {
+        return base;
+    }
+
+    var layer = CsLayers.twinFor(base, isNull(frame) ? "plan" : frame);
+    if (layer === null) {
+        return null;
+    }
+    if (CsLayers.frameOf(layer) !== "profile") {
+        return layer;
+    }
+
+    // A profile feature belongs to ONE survey run: each run is drawn as
+    // its own band, and CsProfile lays bands out so they never overlap,
+    // so nothing traced along one run can meet anything traced along
+    // another. Segregating them also stops the no-gap tie-in welding
+    // one band's ceiling to the next band's floor when the two happen
+    // to be laid out within a foot of each other. Plan features are
+    // untouched: the plan is one continuous map and a wall runs
+    // straight through survey boundaries.
+    var run = FeatureTraceRun.runToken();
+    if (run === null && FeatureTraceRun.runIsAuto() && !isNull(points) &&
+            !isNull(doc)) {
+        try {
+            run = CsProfileBox.runForPath(
+                isNull(boxes) ? CsProfileBox.boxes(doc) : boxes, points);
+        } catch (eAuto) {
+            // location could not answer: the shared layer is always a
+            // safe place for the work to land
+            run = null;
+        }
+    }
+    if (run !== null) {
+        var variant = CsLayerVariants.nameFor(layer, run);
+        if (variant !== null) {
+            return variant;
+        }
+    }
+    return layer;
 };
 
 /**
@@ -159,62 +230,22 @@ FeatureTraceRun.toleranceFraction = function() {
 };
 
 /**
- * null when `layerName` may be traced at `point`, otherwise the reason
- * it may not.
+ * Why the armed feature has no layer in `frame`, as a sentence.
  *
- * Takes the cached region BOX, not the document: this runs on every
- * press and, via the cursor readout, every mouse move -- and
- * CsTrace.profileRegion walks every entity in the drawing.
+ * The only surviving refusal about frames, and it is about the REGISTRY
+ * rather than about the caver: CsLayers.twinFor answers null for a
+ * plan layer the registry deliberately does not twin (CsLayers.NO_TWIN
+ * -- the north arrow, the aerial, the cut mark). Nothing in the panel's
+ * feature list is one of those today; this speaks if one is ever added,
+ * instead of the trace vanishing onto a layer nobody registered.
  *
- * REFUSES rather than correcting. There is no unambiguous counterpart to
- * correct to: plan WALLS-SURVEYED maps to the elevation's ceiling or its
- * floor depending on what the caver meant, and a guess would write real
- * geometry from an assumption. A refusal costs one re-arm.
+ * The old press-time frame guard lived here and is deliberately gone.
+ * It refused a stroke whose view disagreed with the armed BUTTON, and
+ * there is no longer a per-view button to disagree with.
  */
-FeatureTraceRun.frameGuard = function(box, layerName, point, bays) {
-    var want = CsLayers.frameOf(layerName);
-    var got = CsTrace.frameIn(box, point, bays);
-    if (want === got) {
-        return null;
-    }
-    var section = FeatureTraceRun.sectionRefusal(layerName, want, bays,
-        qsTr("the cursor is"));
-    if (section !== null) {
-        return section;
-    }
-    return qsTr("%1 belongs to the %2 frame, but the cursor is in the %3 " +
-        "frame. Arm the %3 row instead, or move to the %2 view.")
-        .arg(layerName).arg(want).arg(got);
-};
-
-/**
- * Why a SECTION layer could not be traced, or null when the refusal is
- * not about the section frame.
- *
- * The generic refusal names the frame the point turned out to be in,
- * and for a section layer that is always "plan" -- which is true and
- * useless. Outside a bay there is no section frame anywhere on the
- * sheet, so "you are in the plan frame, move to the section view" sends
- * the caver looking for a view that does not exist. The real answer is
- * either "no bay is open" or "you are outside the one that is", and
- * both name the thing to do about it.
- *
- * `where` is the clause naming what was out of frame -- the cursor at
- * press time, the run at release -- so one explanation serves both
- * checks without either inventing its own wording.
- */
-FeatureTraceRun.sectionRefusal = function(layerName, want, bays, where) {
-    if (want !== "section") {
-        return null;
-    }
-    if (isNull(bays) || bays.length === 0) {
-        return qsTr("%1 belongs to the section frame, and no section bay " +
-            "is open. Sketch Section opens one, and a cross section is " +
-            "traced inside it.").arg(layerName);
-    }
-    return qsTr("%1 belongs to the section frame, but %2 outside every " +
-        "open section bay. Trace inside the bay's frame.")
-        .arg(layerName).arg(where);
+FeatureTraceRun.noLayerReason = function(base, frame) {
+    return qsTr("%1 has no layer in the %2 view, so there is nowhere for " +
+        "that trace to land. Nothing was drawn.").arg(base).arg(frame);
 };
 
 FeatureTraceRun.prototype.beginEvent = function() {
@@ -250,8 +281,11 @@ FeatureTraceRun.prototype.setState = function(state) {
 
     switch (this.state) {
     case FeatureTraceRun.State.Idle:
-        var trStart = qsTr("Press and drag to trace %1")
-            .arg(FeatureTraceRun.targetLayer(this.getDocument()));
+        // The FEATURE, not a layer: the layer is not known until the
+        // stroke exists, because the view it is drawn in chooses it.
+        var trStart = qsTr("Press and drag to trace %1 -- the view you " +
+            "draw in picks the layer")
+            .arg(FeatureTraceRun.baseLayer(this.getDocument()));
         this.setCommandPrompt(trStart);
         this.setLeftMouseTip(trStart);
         this.setRightMouseTip(EAction.trCancel);
@@ -332,18 +366,16 @@ FeatureTraceRun.prototype.mousePressEvent = function(event) {
     var p = event.getModelPosition();
     var here = { x: p.x, y: p.y };
 
-    // Once per stroke, before the guard reads them: Sketch Section and
-    // Capture Section can open and close a bay while this action is
-    // still armed, and the guard is the thing that would then be
-    // answering from a bay list that no longer describes the drawing.
+    // Once per stroke: Sketch Section and Capture Section can open and
+    // close a bay while this action is still armed, and commit() routes
+    // the finished stroke from this list -- a stale one would file the
+    // work under a bay that is no longer there.
+    //
+    // NO PRESS-TIME REFUSAL any more. Every press is in some view, and
+    // every view has a layer for the armed feature, so there is nothing
+    // left for a press to be wrong about. The readout still says which
+    // view the cursor is in, and now which layer that means.
     this.refreshRegion();
-
-    var refusal = FeatureTraceRun.frameGuard(this.region,
-        FeatureTraceRun.targetLayer(this.getDocument()), here, this.bays);
-    if (refusal !== null) {
-        EAction.handleUserMessage(refusal);
-        return;   // nothing captured, nothing to undo
-    }
 
     this.setState(FeatureTraceRun.State.Drawing);
     this.samples = [here];
@@ -359,8 +391,13 @@ FeatureTraceRun.prototype.mouseMoveEvent = function(event) {
         // change the caver's mind before the press.
         if (typeof FeatureTrace !== "undefined" &&
                 !isNull(FeatureTrace.showCursorFrame)) {
-            FeatureTrace.showCursorFrame(CsTrace.frameIn(this.region, here,
-                this.bays));
+            var over = CsTrace.frameIn(this.region, here, this.bays);
+            // The LAYER as well as the view, because the layer is what
+            // the caver is choosing now that no button states it. No
+            // points are passed: there is no stroke yet, so this names
+            // the shared profile layer where a run would refine it.
+            FeatureTrace.showCursorFrame(over,
+                FeatureTraceRun.targetLayer(this.getDocument(), over));
         }
         return;
     }
@@ -399,9 +436,9 @@ FeatureTraceRun.prototype.commit = function() {
         return;
     }
 
-    // The press was in frame; the RELEASE is what proves the whole path
-    // was. A wall crossing the gutter describes nothing in either view.
-    var layerName = FeatureTraceRun.targetLayer(doc);
+    // WHERE THE STROKE IS decides which view it belongs to, and the view
+    // decides the layer. The whole path has to agree on one view: a wall
+    // crossing the gutter describes nothing in either of them.
     var pathFrame = CsTrace.pathFrame(this.region, this.samples, this.bays);
 
     if (pathFrame === null) {
@@ -410,58 +447,15 @@ FeatureTraceRun.prototype.commit = function() {
         return;
     }
 
-    // The press-time guard checked the FIRST point only. A drag that
-    // starts outside the region and ends deep inside it has a single
-    // frame for its whole path, so pathFrame above is happy -- but that
-    // frame can still be the wrong one for the armed layer. Without this
-    // second check a profile row traced entirely up in the plan lands
-    // there, which a headless probe of commit() caught doing exactly
-    // that.
-    //
-    // The current-layer escape hatch is exempt on purpose: its layer is
-    // whatever the caver chose, "sheet" frame layers included, and
-    // refusing those would defeat the point of the button.
-    if (FeatureTrace.target !== FeatureTrace.CURRENT_LAYER) {
-        var wantFrame = CsLayers.frameOf(layerName);
-        if (wantFrame !== pathFrame) {
-            var sectionWhy = FeatureTraceRun.sectionRefusal(layerName,
-                wantFrame, this.bays, qsTr("that run is"));
-            EAction.handleUserMessage(sectionWhy !== null ?
-                sectionWhy + qsTr(" Nothing was drawn.") :
-                qsTr("%1 belongs to the %2 frame, but that run is in the " +
-                    "%3 frame. Nothing was drawn.")
-                    .arg(layerName).arg(wantFrame).arg(pathFrame));
-            return;
-        }
-    }
-
-    // In auto mode the RUN is read off the stroke itself: every sample
-    // inside one band's bounding box names that band's run, and the
-    // trace lands on that run's variant layer -- the combo's manual
-    // choice already happened inside targetLayer above when the caver
-    // named a run instead. A stroke outside every box (or crossing
-    // between boxes) stays on the shared base layer rather than
-    // guessing. The CURRENT_LAYER escape hatch is exempt exactly as it
-    // is from the frame guard: its layer is whatever the caver chose.
-    if (pathFrame === "profile" &&
-            CsLayers.frameOf(layerName) === "profile" &&
-            FeatureTraceRun.runIsAuto() &&
-            (typeof FeatureTrace === "undefined" ||
-                FeatureTrace.target !== FeatureTrace.CURRENT_LAYER)) {
-        try {
-            var autoRun = CsProfileBox.runForPath(
-                CsProfileBox.boxes(doc), this.samples);
-            if (autoRun !== null) {
-                var autoVariant = CsLayerVariants.nameFor(layerName,
-                    autoRun);
-                if (autoVariant !== null) {
-                    layerName = autoVariant;
-                }
-            }
-        } catch (eAuto) {
-            // location could not answer: the shared layer is always a
-            // safe place for the work to land
-        }
+    // The samples go in, so a profile stroke picks up its band's run
+    // from the same call. The current-layer escape hatch comes back out
+    // of here untouched, by targetLayer's own first guard.
+    var layerName = FeatureTraceRun.targetLayer(doc, pathFrame,
+        this.samples);
+    if (layerName === null) {
+        EAction.handleUserMessage(FeatureTraceRun.noLayerReason(
+            FeatureTraceRun.baseLayer(doc), pathFrame));
+        return;
     }
 
     var unit = CsUnits.fromDrawingUnit(doc.getUnit(), RS);
@@ -493,12 +487,19 @@ FeatureTraceRun.prototype.commit = function() {
         return;
     }
     if (result.added) {
+        // The layer is NAMED in the message, every time. With no
+        // per-view button to arm, this line is the caver's confirmation
+        // that the view they drew in was the view they meant -- an
+        // elevation wall traced a foot outside the band boxes says
+        // WALLS-SURVEYED here, and one undo puts it right.
         EAction.handleUserMessage(qsTr("%1: %2 sampled, %3 kept")
             .arg(layerName).arg(result.sampled).arg(result.kept));
         if (typeof FeatureTrace !== "undefined" &&
                 !isNull(FeatureTrace.reportTrace)) {
             FeatureTrace.reportTrace(layerName, result);
         }
+        this.stampSection(doc, di, pathFrame, result.id);
+        this.warnUnclaimedProfile(pathFrame, layerName);
     }
 
     // A trace onto a profile layer grew the region. (Section linework
@@ -507,6 +508,84 @@ FeatureTraceRun.prototype.commit = function() {
     // is what keeps a sketched section from dragging the profile frame
     // out across the sheet to meet it.)
     this.refreshRegion();
+};
+
+/** The tags a section trace carries: which bay it was drawn in, and the
+ *  station that bay is a section OF.
+ *
+ *  Their own names rather than SketchSection's SectionBay/
+ *  SectionBayRole pair, deliberately. Those two mark the bay's own
+ *  FURNITURE -- the frame, the ghost, the scan -- and SectionCapture
+ *  and SectionEdit both walk the drawing looking for them. Traced
+ *  linework wearing the same tag with no role would sit inside those
+ *  sweeps as a permanent "what is this?", and the day one of them stops
+ *  checking the role it would be swept up as furniture. */
+FeatureTraceRun.BAY_TAG = "SectionTraceBay";
+FeatureTraceRun.STATION_TAG = "SectionTraceStation";
+
+/**
+ * Stamps a section trace with the station its bay belongs to.
+ *
+ * WHY AT TRACE TIME. A section's station is not derivable from the
+ * linework later: CsBind refuses the section frame outright (one
+ * station, no chain, nothing for its maths to bind against), and the
+ * bay that knew the answer is TORN DOWN by Capture. Between tracing and
+ * capturing -- which can be days, and may never happen at all for a
+ * sketch left open -- the drawing had no record of which station the
+ * work described. It does now.
+ *
+ * Silent about everything: a missing id, a stroke that wandered out of
+ * its bay, a bay with no station tag. A stamp is provenance, and
+ * failing to add provenance must never cost the caver the line they
+ * just drew.
+ */
+FeatureTraceRun.prototype.stampSection = function(doc, di, frame, id) {
+    if (frame !== "section" || isNull(id) || isNull(doc) || isNull(di)) {
+        return;
+    }
+    try {
+        var bay = CsTrace.bayForPath(this.bays, this.samples);
+        if (bay === null || isNull(bay.station) || bay.station === "") {
+            return;
+        }
+        var e = doc.queryEntity(id);
+        if (isNull(e)) {
+            return;
+        }
+        CsTags.set(e, FeatureTraceRun.BAY_TAG, bay.bay);
+        CsTags.set(e, FeatureTraceRun.STATION_TAG, bay.station);
+        var op = new RModifyObjectsOperation();
+        op.addObject(e, false);
+        di.applyOperation(op);
+    } catch (eStamp) {
+        // provenance is a nicety; the line is already drawn
+    }
+};
+
+/**
+ * Says so when a profile trace landed on the SHARED layer.
+ *
+ * A profile feature that belongs to no run is the one quiet way this
+ * tool can still cost work. CsProfileBind moves traced linework by the
+ * run its layer names; on the shared layer there is no run, so binding
+ * falls back to guessing by distance and silently skips anything traced
+ * far from its stations -- and a revision then tears the sketch off the
+ * passage. The old panel prevented it by DISABLING the profile group
+ * until a run was chosen. There is no profile group any more, and the
+ * information is better as an answer than as a locked door: it names
+ * what happened, after the line is safely drawn.
+ */
+FeatureTraceRun.prototype.warnUnclaimedProfile = function(frame, layerName) {
+    if (frame !== "profile" || FeatureTraceRun.isCurrentLayer()) {
+        return;
+    }
+    if (CsLayerVariants.split(layerName) !== null) {
+        return;   // it landed on a run's layer; nothing to say
+    }
+    EAction.handleUserMessage(qsTr("That line is on the shared %1 -- no " +
+        "band's box claims where it was drawn, so it belongs to no survey " +
+        "run and will not move with a band when the survey is revised. " +
+        "Trace inside a band, or pick the run above.").arg(layerName));
 };
 
 /** The preview is the CAPTURED path, not the fitted spline.

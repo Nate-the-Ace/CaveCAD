@@ -229,8 +229,17 @@ CsTrace.profileRegion = function(doc) {
 };
 
 /**
- * The rectangle of every OPEN section sketching bay, as
- * [{minX, minY, maxX, maxY}].
+ * Every OPEN section sketching bay, as
+ * [{bay, station, minX, minY, maxX, maxY}].
+ *
+ * `bay` and `station` come from the frame's own SectionBay and
+ * SectionBayStation tags -- the same two SectionCapture reads when it
+ * turns a bay into a block. They ride along here so a tool that has
+ * already located a stroke inside a bay can say WHICH station that
+ * stroke belongs to without a second walk of the drawing.
+ *
+ * Every caller that predates them reads only the four bounds, so the
+ * extra fields cost nothing and break nothing.
  *
  * A bay is the section frame. Unlike the plan and the elevation, the
  * section view has no standing ground in the drawing at all: a captured
@@ -262,7 +271,8 @@ CsTrace.sectionBays = function(doc) {
         if (isNull(e)) {
             continue;
         }
-        if (CsTags.get(e, "SectionBay") === "" ||
+        var bayId = CsTags.get(e, "SectionBay");
+        if (bayId === "" ||
                 CsTags.get(e, "SectionBayRole") !== "frame") {
             continue;
         }
@@ -270,6 +280,8 @@ CsTrace.sectionBays = function(doc) {
             e.update();
             var bb = e.getBoundingBox();
             out.push({
+                bay: bayId,
+                station: CsTags.get(e, "SectionBayStation"),
                 minX: bb.getMinimum().x, minY: bb.getMinimum().y,
                 maxX: bb.getMaximum().x, maxY: bb.getMaximum().y });
         } catch (eBox) {
@@ -300,6 +312,55 @@ CsTrace.inAnyRect = function(rects, point) {
         }
     }
     return false;
+};
+
+/** The bay containing `point`, or null. The first match wins: bays are
+ *  disjoint in practice (each is parked somewhere clear) and nothing
+ *  enforces it, so "the first bay that claims this point" is as honest
+ *  as the geometry allows -- CsProfileBox.at's rule, for its reasons. */
+CsTrace.bayAt = function(bays, point) {
+    if (isNull(bays)) {
+        return null;
+    }
+    var eps = CsTrace.EDGE_EPS;
+    for (var i = 0; i < bays.length; i++) {
+        var r = bays[i];
+        if (point.x >= r.minX - eps && point.x <= r.maxX + eps &&
+                point.y >= r.minY - eps && point.y <= r.maxY + eps) {
+            return r;
+        }
+    }
+    return null;
+};
+
+/**
+ * The ONE bay that owns a whole path, or null: every point inside the
+ * same bay. A path that leaves the bay, or crosses from one into
+ * another, answers null -- the caller then knows nothing about which
+ * station the work belongs to, which is the honest answer and better
+ * than stamping it with a guess.
+ *
+ * The section counterpart of CsProfileBox.runForPath, deliberately the
+ * same shape: both answer "which container owns this stroke", both
+ * refuse a stroke that wanders, and a caller reads them the same way.
+ */
+CsTrace.bayForPath = function(bays, points) {
+    if (isNull(points) || points.length === 0) {
+        return null;
+    }
+    var bay = null;
+    for (var i = 0; i < points.length; i++) {
+        var here = CsTrace.bayAt(bays, points[i]);
+        if (here === null) {
+            return null;
+        }
+        if (bay === null) {
+            bay = here;
+        } else if (bay !== here) {
+            return null;   // crossed into another bay
+        }
+    }
+    return bay;
 };
 
 /**
@@ -667,14 +728,25 @@ CsTrace.tieEnds = function(doc, points, layerName, tolerance) {
  * CsBind.tagEntities sweep picks up new linework on a bindable layer
  * already; tagging here would bind it twice.
  *
- * \return {added: bool, sampled: int, kept: int}
+ * `id` is the entity that landed, found by DIFFING the layer's contents
+ * across the add rather than read off the spline object: this build
+ * assigns the id inside applyOperation and the object handed in is not
+ * reliably the one that ends up in the document. Callers that want to
+ * tag what they just drew (the section station stamp) need it; callers
+ * that do not can ignore it. null when nothing landed, and null rather
+ * than a guess if more than one entity appeared -- something else wrote
+ * to the layer during the add, and tagging the wrong entity is worse
+ * than tagging none.
+ *
+ * \return {added: bool, sampled: int, kept: int, id: id|null}
  */
 CsTrace.emit = function(doc, di, layerName, points, spacing, tolerance) {
     var spaced = CsTrace.resample(points, spacing);
     var kept = CsTrace.reduce(spaced, tolerance);
     var spline = CsTrace.fitSpline(doc, kept);
     if (spline === null) {
-        return { added: false, sampled: spaced.length, kept: kept.length };
+        return { added: false, sampled: spaced.length, kept: kept.length,
+            id: null };
     }
 
     CsLayers.ensure(doc, di, layerName);
@@ -686,7 +758,7 @@ CsTrace.emit = function(doc, di, layerName, points, spacing, tolerance) {
     // "44 sampled, 10 kept" for a trace that never reached the drawing
     // -- this build refuses adds silently in more ways than one, and a
     // report that cannot be wrong is worth the extra query.
-    var before = doc.queryLayerEntities(layerId, true).length;
+    var before = doc.queryLayerEntities(layerId, true);
 
     CsLayers.withLayerOn(doc, di, layerName, function() {
         var op = new RAddObjectsOperation();
@@ -694,10 +766,22 @@ CsTrace.emit = function(doc, di, layerName, points, spacing, tolerance) {
         di.applyOperation(op);
     });
 
-    var after = doc.queryLayerEntities(layerId, true).length;
+    var after = doc.queryLayerEntities(layerId, true);
+    var was = {};
+    var i;
+    for (i = 0; i < before.length; i++) {
+        was[before[i]] = true;
+    }
+    var fresh = [];
+    for (i = 0; i < after.length; i++) {
+        if (was[after[i]] !== true) {
+            fresh.push(after[i]);
+        }
+    }
     return {
-        added: (after > before),
+        added: (after.length > before.length),
         sampled: spaced.length,
-        kept: kept.length
+        kept: kept.length,
+        id: (fresh.length === 1) ? fresh[0] : null
     };
 };

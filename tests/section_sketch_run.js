@@ -1787,16 +1787,25 @@ function selectOnly(entityId) {
 })();
 
 // ---------------------------------------------------------------------
-// CLAIM FT: a Cross Section tile actually draws into an open bay.
+// CLAIM FT: a Feature Trace tile ROUTES ITSELF into an open bay.
 //
-// THE BUG THIS EXISTS FOR. Every Cross Section tile in Feature Trace
-// was inert. CsLayers.frameOf("SECTION-WALLS-SURVEYED") answers
-// "section", CsTrace.frameIn could only ever answer "plan" or
-// "profile", and FeatureTraceRun.frameGuard refuses whenever the two
-// disagree -- so the guard refused every section stroke there was, and
-// the caver's first real cross-section sketching session drew nothing
-// at all. A bay is now the section frame, and this claim is the one
-// that says so in linework rather than in a return value.
+// THE BUG THIS EXISTS FOR, in its first form: every Cross Section tile
+// in Feature Trace was inert. CsLayers.frameOf("SECTION-WALLS-SURVEYED")
+// answers "section", CsTrace.frameIn could only ever answer "plan" or
+// "profile", and the old FeatureTraceRun.frameGuard refused whenever
+// the two disagreed -- so the guard refused every section stroke there
+// was, and the caver's first real cross-section sketching session drew
+// nothing at all.
+//
+// The tiles are per-FEATURE now and there is no guard left to refuse
+// anything, so the claim has grown a second half. It is no longer "the
+// section tile is allowed to draw here": it is that the PLAN tile,
+// dragged inside a bay, lands on SECTION-WALLS-SURVEYED by itself --
+// the routing this tool's second design rests on, asserted in linework
+// rather than in a return value. And that the line it draws knows
+// which station it is a section of, which nothing else can tell it
+// later: CsBind refuses the section frame, and Capture tears the bay
+// down.
 //
 // DRIVEN THROUGH commit() ON A STAND-IN `this`, not through a mouse.
 // The drag capture is mouse-only, but everything the refusal lived in
@@ -1830,13 +1839,25 @@ function selectOnly(entityId) {
     EAction.handleUserMessage = function(text) { ftSaid.push(String(text)); };
 
     var ftLayerId = doc.getLayerId(CsLayers.SECTION_WALLS_SURVEYED);
-    var ftBefore = doc.queryLayerEntities(ftLayerId, true).length;
+    // The IDS, not just the count: earlier claims have left their own
+    // section walls on this layer, so "the last one" is whichever the
+    // index happens to hand back. The stroke this claim draws is the
+    // one that was not there a moment ago.
+    var ftWas = {};
+    var ftPrior = doc.queryLayerEntities(ftLayerId, true);
+    for (var pi = 0; pi < ftPrior.length; pi++) {
+        ftWas[ftPrior[pi]] = true;
+    }
+    var ftBefore = ftPrior.length;
 
     // Armed the way the panel arms it, so this cannot pass with a
-    // target the real dock would never set.
-    FeatureTrace.armLayer(CsLayers.SECTION_WALLS_SURVEYED);
-    check("FT: fixture: the Cross Section walls tile is armed",
-        FeatureTraceRun.targetLayer(doc) === CsLayers.SECTION_WALLS_SURVEYED);
+    // target the real dock would never set -- and the panel only ever
+    // arms the PLAN-frame base now. Nothing here mentions the section
+    // layer the stroke has to reach; commit() derives it from where the
+    // samples land, which is the point.
+    FeatureTrace.armLayer(CsLayers.WALLS_SURVEYED);
+    check("FT: fixture: the Surveyed Walls tile is armed, plan-frame",
+        FeatureTraceRun.baseLayer(doc) === CsLayers.WALLS_SURVEYED);
 
     var ftCentre = SectionCapture.originOf(ftBay);
     var ftSamples = [];
@@ -1850,7 +1871,13 @@ function selectOnly(entityId) {
         samples: ftSamples,
         region: null,
         bays: [],
-        refreshRegion: FeatureTraceRun.prototype.refreshRegion
+        refreshRegion: FeatureTraceRun.prototype.refreshRegion,
+        // commit() calls both of these on `this` after a successful
+        // emit. Listed rather than inherited, so a stand-in that has
+        // gone stale against the real action fails HERE, loudly, rather
+        // than turning a routing claim into a "not a function" throw.
+        stampSection: FeatureTraceRun.prototype.stampSection,
+        warnUnclaimedProfile: FeatureTraceRun.prototype.warnUnclaimedProfile
     };
     // As beginEvent does: the caches the guard reads are filled from
     // the document before the stroke is judged.
@@ -1884,6 +1911,23 @@ function selectOnly(entityId) {
     check("FT: and the capture sweep picks it up -- it is inside the " +
         "frame, which is what makes it part of the section",
         ftBay2 !== null && ftBay2.traced.length === 1);
+
+    // The STATION stamp. Between tracing and capturing -- which can be
+    // days, and may never happen -- this tag is the drawing's only
+    // record of which station the linework describes.
+    var ftLanded = doc.queryLayerEntities(ftLayerId, true);
+    var ftStamped = null;
+    for (var li = 0; li < ftLanded.length; li++) {
+        if (ftWas[ftLanded[li]] !== true) {
+            ftStamped = doc.queryEntity(ftLanded[li]);
+        }
+    }
+    check("FT: the traced line carries the station its bay was opened at",
+        ftStamped !== null &&
+        CsTags.get(ftStamped, FeatureTraceRun.STATION_TAG) === "A1");
+    check("FT: and the bay it was drawn in",
+        ftStamped !== null &&
+        CsTags.get(ftStamped, FeatureTraceRun.BAY_TAG) === ftBayId);
 
     // Tear the bay down again, so the next claim starts from "no bay
     // open" rather than inheriting this one. findBay refuses outright

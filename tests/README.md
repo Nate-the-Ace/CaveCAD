@@ -189,3 +189,30 @@ drawing keeps its station and loses all three geo tags, the full one keeps
 everything, and the original on disk is untouched. Then it runs the platform's
 own zip program (`ditto`, `zip`, or `Compress-Archive`) and checks an archive
 actually appeared -- none of which can be faked under node.
+
+## `edit_trip_run.js`
+
+Edit Trip against a real document. Draws a two-trip cave, corrects trip 1's
+date, team and name, and reads the drawing back through
+`CsRevise.surveyFromDocument` -- the reader every other tool uses. The
+assertion that matters is the trip COUNT: Survey Notebook's own edit path
+matches a page to a trip by fingerprint (`date | team`), so correcting a date
+there forked the trip into a duplicate and left the original standing. This
+stage also proves nothing moved, that a cleared field is really cleared
+(`CsTags.set` cannot clear a tag -- only `CsTags.remove` can), that an edit to
+trip 0 carries the legacy `SurveyDate`/`SurveyTeam` mirror with it, and that a
+trip with no anchor point in the drawing is reported rather than silently
+dropped.
+
+## `notebook_partial_draw_run.js`
+
+Survey Notebook's incremental Draw, against real documents. The claim is an
+equivalence and cannot be made any other way: the same page is drawn into two
+identical fixture drawings, one forced down the whole-cave path
+(`Redraw All`), one left to `CsDelta.decide`, and the two drawings must
+reconstruct to the same survey with every station in the same place -- and with
+exactly ONE anchor carrying the drawing-level record, which is the failure a
+partial draw invites, since the page it draws does not start at trip 0. The
+second half proves the gate refuses: a page that revises an earlier trip under a
+different declination turns the survey, so it must take the full path, where the
+linework mover runs.

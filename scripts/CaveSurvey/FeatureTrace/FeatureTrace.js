@@ -40,21 +40,29 @@ FeatureTrace.target = undefined;
 FeatureTrace.CURRENT_LAYER = "\u0000CURRENT-LAYER";
 
 /**
- * The ten traceable features, plan frame first.
+ * The seven traceable features. ONE ROW PER FEATURE, not per view.
  *
- * Layer CONSTANTS, never literals. CsLayers.CTRL_PROFILE_FLOOR is the
- * GENERATED CTRL-PROFILE-FLOOR and CsLayers.PROFILE_FLOOR is the
- * hand-traced PROFILE-FLOOR: one word apart, opposite meanings, and
- * tracing onto the generated one would look fine until the next redraw
- * erased the work. A test asserts every row here is a linework layer,
- * which is false for anything CTRL-.
+ * The panel used to hold fifteen rows -- every feature once for each of
+ * plan, profile and section -- inside three group boxes, and pressing
+ * the wrong group's button was refused at the cursor. That refusal was
+ * the tool asking the caver to say in a button what the drawing already
+ * knew: a section bay's frame and a profile band's bounding box both
+ * state, in the drawing, exactly which view a point belongs to. So the
+ * view is READ from where the stroke lands (FeatureTraceRun.targetLayer)
+ * and a feature needs one button.
  *
- * No `frame` field. The frame is DERIVED from CsLayers.frameOf, the one
- * place that question is answered; a second spelling here is how the
- * two would come to disagree.
+ * The `layer` is the PLAN-FRAME name, and it is the feature's identity
+ * rather than its destination: CsLayers.twinFor turns BREAKDOWN into
+ * PROFILE-BREAKDOWN or SECTION-BREAKDOWN at trace time, from the one
+ * table that already derives every twin in the registry. A per-view
+ * name spelled here would be a second copy of that derivation, free to
+ * disagree with it.
  *
- * Labels are bare because the group header already says which view they
- * belong to. The layer names and the README keep the PROFILE- wording.
+ * Layer CONSTANTS, never literals. CsLayers.CTRL_FLOOR is the GENERATED
+ * layer and CsLayers.FLOOR the hand-traced one: one word apart,
+ * opposite meanings, and tracing onto the generated one would look fine
+ * until the next redraw erased the work. A test asserts every row here
+ * is a plan-frame linework layer, which is false for anything CTRL-.
  */
 FeatureTrace.ROWS = [
     { label: "Surveyed Walls", layer: CsLayers.WALLS_SURVEYED },
@@ -62,16 +70,8 @@ FeatureTrace.ROWS = [
     { label: "Breakdown", layer: CsLayers.BREAKDOWN },
     { label: "Breakdown Boundary", layer: CsLayers.BREAKDOWN_BOUNDARY },
     { label: "Entrance", layer: CsLayers.ENTRANCE },
-    { label: "Ceiling", layer: CsLayers.PROFILE_CEILING },
-    { label: "Floor", layer: CsLayers.PROFILE_FLOOR },
-    { label: "Inferred Walls", layer: CsLayers.PROFILE_WALLS_INFERRED },
-    { label: "Breakdown", layer: CsLayers.PROFILE_BREAKDOWN },
-    { label: "Entrance", layer: CsLayers.PROFILE_ENTRANCE },
-    { label: "Walls", layer: CsLayers.SECTION_WALLS_SURVEYED },
-    { label: "Inferred Walls", layer: CsLayers.SECTION_WALLS_INFERRED },
-    { label: "Ceiling", layer: CsLayers.SECTION_CEILING },
-    { label: "Floor", layer: CsLayers.SECTION_FLOOR },
-    { label: "Breakdown", layer: CsLayers.SECTION_BREAKDOWN }
+    { label: "Ceiling", layer: CsLayers.CEILING },
+    { label: "Floor", layer: CsLayers.FLOOR }
 ];
 
 /**
@@ -445,15 +445,32 @@ FeatureTrace.reportTrace = function(layerName, result) {
     }
 };
 
-/** Writes the cursor's frame into the panel. Defensive and silent. */
-FeatureTrace.showCursorFrame = function(frame) {
+/**
+ * Writes the cursor's view -- and the layer that view means -- into the
+ * panel. Defensive and silent.
+ *
+ * THE LAYER HALF IS THE SAFETY RAIL. With no per-view buttons, nothing
+ * refuses a stroke for being in the wrong view: an elevation wall
+ * traced a foot outside the profile region is a perfectly good PLAN
+ * wall, and it lands silently. This readout is what makes that visible
+ * BEFORE the press -- it changes as the cursor crosses a boundary, so
+ * the caver sees WALLS-SURVEYED where they expected
+ * PROFILE-WALLS-SURVEYED-A while there is still nothing to undo.
+ *
+ * `layer` is optional: a caller with no armed feature to resolve (or
+ * one that predates this) still gets the view on its own.
+ */
+FeatureTrace.showCursorFrame = function(frame, layer) {
     var w = FeatureTrace.widgets;
     if (isNull(w) || isNull(w.frameLabel)) {
         return;
     }
     try {
-        w.frameLabel.text = qsTr("Cursor frame:  %1")
-            .arg(String(frame).toUpperCase());
+        var text = qsTr("Cursor:  %1").arg(String(frame).toUpperCase());
+        if (!isNull(layer) && String(layer).length > 0) {
+            text += "  --  " + String(layer);
+        }
+        w.frameLabel.text = text;
     } catch (e) {
         // as above
     }
@@ -501,18 +518,17 @@ FeatureTrace.wrapLabel = function(text, budget) {
     return lines.join("\n");
 };
 
-/** One group box holding every row whose layer belongs to `frame`, as
- *  a grid of fixed-size tiles. Rows are selected by asking
- *  CsLayers.frameOf, so the group a button sits in and the frame its
- *  layer belongs to cannot disagree. */
-FeatureTrace.buildGroup = function(w, parent, frame, title, header) {
+/** The one group box: every feature, as a grid of fixed-size tiles.
+ *
+ *  No frame filter and no per-view groups. A tile is a FEATURE, and the
+ *  view it draws into is decided by where the caver drags -- see
+ *  FeatureTrace.ROWS. `header` is the profile run selector, which sits
+ *  inside the box above the tiles because it refines what a profile
+ *  stroke lands on rather than choosing it. */
+FeatureTrace.buildGroup = function(w, parent, title, header) {
     var box = new QGroupBox(title, parent);
     var inner = new QGridLayout();
     var cell = 0;
-    // A header belonging to THIS frame (the profile run selector) sits
-    // inside the box, spanning its columns, above the tiles -- so a
-    // control that governs one frame cannot read as governing the
-    // other now that the two boxes sit side by side.
     var firstRow = 0;
     if (header !== undefined && header !== null) {
         try {
@@ -525,9 +541,6 @@ FeatureTrace.buildGroup = function(w, parent, frame, title, header) {
 
     for (var i = 0; i < FeatureTrace.ROWS.length; i++) {
         var row = FeatureTrace.ROWS[i];
-        if (CsLayers.frameOf(row.layer) !== frame) {
-            continue;
-        }
         try {
             var button = new QPushButton(
                 FeatureTrace.wrapLabel(row.label, FeatureTrace.CELL_CHARS));
@@ -551,22 +564,6 @@ FeatureTrace.buildGroup = function(w, parent, frame, title, header) {
         }
     }
 
-    if (cell === 0) {
-        // A frame with no features yet still gets its cell in the grid,
-        // so the layout does not rearrange itself the day it gains one.
-        // It says why it is empty rather than looking broken.
-        try {
-            var empty = new QLabel(FeatureTrace.EMPTY_TEXT[frame] ||
-                qsTr("Nothing to trace in this view yet."));
-            empty.wordWrap = true;
-            empty.enabled = false;
-            inner.addWidget(empty, firstRow, 0, 1,
-                FeatureTrace.GRID_COLUMNS);
-        } catch (eEmpty) {
-            w.problems.push(title + " placeholder (" + eEmpty + ")");
-        }
-    }
-
     try {
         // Fixed-size tiles in a stretching grid would drift apart as the
         // dock widens; the stretch goes to a column PAST the last one,
@@ -579,10 +576,37 @@ FeatureTrace.buildGroup = function(w, parent, frame, title, header) {
     return box;
 };
 
-/** What an empty frame group says instead of showing no tiles. */
-FeatureTrace.EMPTY_TEXT = {
-    section: "No cross-section layers in this drawing yet. Sections " +
-        "get their tiles here once the cross-section tool draws them."
+/**
+ * Every layer a feature can land on: its plan name and its two twins,
+ * refined by the selected run where a run is selected.
+ *
+ * One tile, three destinations -- that IS the tool now, and this is the
+ * one place that list is built, so the tooltip, the "(hidden)" marker
+ * and anything added later cannot each derive it slightly differently.
+ * The frames come from CsLayers.twinFor, which skips a twin the
+ * registry refuses (CsLayers.NO_TWIN), so a feature with no section
+ * counterpart simply lists two.
+ *
+ * Pure apart from the run combo read.
+ */
+FeatureTrace.destinationsOf = function(base) {
+    var frames = ["plan", "profile", "section"];
+    var run = FeatureTrace.runToken();
+    var out = [];
+    for (var i = 0; i < frames.length; i++) {
+        var name = CsLayers.twinFor(base, frames[i]);
+        if (name === null) {
+            continue;
+        }
+        if (frames[i] === "profile" && run !== null) {
+            var v = CsLayerVariants.nameFor(name, run);
+            if (v !== null) {
+                name = v;
+            }
+        }
+        out.push(name);
+    }
+    return out;
 };
 
 /** Arms the row and starts a trace. Its own function so the closure
@@ -606,7 +630,7 @@ FeatureTrace.buildDock = function(appWin) {
 
     // -- cursor frame readout ----------------------------------------
     try {
-        w.frameLabel = new QLabel(qsTr("Cursor frame:  --"));
+        w.frameLabel = new QLabel(qsTr("Cursor:  --"));
         layout.addWidget(w.frameLabel, 0, 0);
     } catch (eFrame) {
         w.problems.push("cursor frame readout (" + eFrame + ")");
@@ -669,23 +693,17 @@ FeatureTrace.buildDock = function(appWin) {
         w.problems.push("current-layer button (" + eCur + ")");
     }
 
-    // -- the frame groups, side by side ------------------------------
+    // -- the features ------------------------------------------------
     //
-    // Plan left, Profile right, Cross Section under Plan: the groups are
-    // themselves a grid, filled left to right, so a fourth frame appends
-    // to the next cell the way a new feature appends to the next tile.
-    // Stacked full width, three groups made a column longer than the
-    // dock.
+    // ONE group. There were three -- Plan, Profile, Cross Section --
+    // and picking the right one was the caver restating which view they
+    // were already looking at. The view is read from the stroke now, so
+    // the groups had nothing left to divide.
     try {
-        var groups = new QGridLayout();
-
-        w.planGroup = FeatureTrace.buildGroup(w, body, "plan", qsTr("Plan"));
-        groups.addWidget(w.planGroup, 0, 0);
-
-        // The run selector sits INSIDE the Profile box, above its tiles:
-        // it applies to profile features and to nothing else, and with
-        // the two boxes side by side a control between them would read
-        // as governing both.
+        // The run selector sits INSIDE the box, above the tiles: it does
+        // not choose a feature or a view, it refines which BAND a
+        // profile stroke is filed under, and its default reads that off
+        // the stroke as well.
         var runRow = null;
         try {
             runRow = new QHBoxLayout();
@@ -699,11 +717,14 @@ FeatureTrace.buildDock = function(appWin) {
             // every dock's first population.
             w.runCombo.addItem(FeatureTrace.RUN_AUTO);
             w.runCombo.addItem(FeatureTrace.RUN_SHARED);
-            w.runCombo.toolTip = qsTr("Which survey run the profile " +
-                "features below belong to. Each run is drawn as its own " +
+            w.runCombo.toolTip = qsTr("Which survey run a trace drawn in " +
+                "the ELEVATION belongs to. Each run is drawn as its own " +
                 "band and the bands never overlap, so its walls get their " +
-                "own layers. The Plan group ignores this -- the plan " +
-                "is one continuous map.");
+                "own layers. \"(by location)\" reads it off the band box " +
+                "the stroke lies in, which is why it is the default. " +
+                "Traces in the plan and in a section ignore this -- the " +
+                "plan is one continuous map, and a section belongs to " +
+                "the station its bay was opened at.");
             // `activated`, not currentIndexChanged: it fires only on a
             // real user choice, so refreshRuns' clear/repopulate cannot
             // trigger a spurious hot-swap.
@@ -742,29 +763,11 @@ FeatureTrace.buildDock = function(appWin) {
             runRow = null;
         }
 
-        w.profileGroup = FeatureTrace.buildGroup(w, body, "profile",
-            qsTr("Profile"), runRow);
-        groups.addWidget(w.profileGroup, 0, 1);
-
-        // Cross sections have no tracing layers yet -- CsLayers.frameOf
-        // does not answer "section" until the cross-section work lands,
-        // so this group is correctly empty and says so. Its CELL is
-        // claimed now, which is the point: the layout does not move the
-        // day it fills up.
-        w.sectionGroup = FeatureTrace.buildGroup(w, body, "section",
-            qsTr("Cross Section"));
-        groups.addWidget(w.sectionGroup, 1, 0);
-
-        try {
-            // Equal halves: the split lands on the widget's midpoint
-            // whatever the dock's width.
-            groups.setColumnStretch(0, 1);
-            groups.setColumnStretch(1, 1);
-        } catch (eCols) {
-        }
-        layout.addLayout(groups, 0);
+        w.featureGroup = FeatureTrace.buildGroup(w, body,
+            qsTr("Feature"), runRow);
+        layout.addWidget(w.featureGroup, 0, 0);
     } catch (eGroups) {
-        w.problems.push("feature groups (" + eGroups + ")");
+        w.problems.push("feature group (" + eGroups + ")");
     }
 
     // -- what the last trace cost ------------------------------------
@@ -909,25 +912,26 @@ FeatureTrace.refresh = function(docIn, regionIn) {
         for (var i = 0; i < w.buttons.length; i++) {
             var entry = w.buttons[i];
             try {
-                // The row's layer for the CURRENTLY selected run: that is
-                // what a click would actually draw to, so that is the
-                // layer whose state the caver needs to know about.
-                var layerName = entry.row.layer;
-                var run = FeatureTrace.runToken();
-                if (run !== null &&
-                        CsLayers.frameOf(layerName) === "profile") {
-                    var v = CsLayerVariants.nameFor(layerName, run);
-                    if (v !== null) {
-                        layerName = v;
+                // A feature now has THREE possible destinations and the
+                // stroke chooses between them, so "is the layer hidden"
+                // has three answers. The tile reports the worst case:
+                // hidden in ANY view is worth saying, because the view
+                // it is hidden in is exactly the one the caver may be
+                // about to draw in, and the point of the marker is that
+                // an off layer swallows a trace in silence.
+                var dests = FeatureTrace.destinationsOf(entry.row.layer);
+                var hidden = [];
+                for (var d = 0; d < dests.length; d++) {
+                    if (!isNull(doc) && doc.hasLayer(dests[d])) {
+                        // frozen counts as hidden: the trace lands and
+                        // is just as invisible either way.
+                        if (CsLayers.refusesEdits(
+                                doc.queryLayer(dests[d]))) {
+                            hidden.push(dests[d]);
+                        }
                     }
                 }
-                var off = false;
-                if (!isNull(doc) && doc.hasLayer(layerName)) {
-                    var lay = doc.queryLayer(layerName);
-                    // frozen counts as hidden: the trace lands and is
-                    // just as invisible either way.
-                    off = CsLayers.refusesEdits(lay);
-                }
+                var off = hidden.length > 0;
                 // Re-wrapped, not re-set: a tile's label is broken over
                 // lines by FeatureTrace.wrapLabel, and writing the flat
                 // label back here would undo that on the first refresh.
@@ -937,8 +941,9 @@ FeatureTrace.refresh = function(docIn, regionIn) {
                     entry.row.label, FeatureTrace.CELL_CHARS) +
                     (off ? "\n(hidden)" : "");
                 entry.button.toolTip = off ?
-                    layerName + " is switched OFF -- a trace will land on " +
-                        "it but you will not see it" : layerName;
+                    hidden.join(", ") + " switched OFF -- a trace into " +
+                        "that view will land but you will not see it" :
+                    dests.join("\n");
             } catch (e) {
                 // an unreadable button is still armable; only its label
                 // goes stale, and that must never stop a trace
@@ -947,34 +952,33 @@ FeatureTrace.refresh = function(docIn, regionIn) {
     }
 
     try {
-        if (!isNull(w.profileGroup)) {
+        if (!isNull(w.featureGroup)) {
+            // THE GROUP IS NEVER DISABLED. It used to be: the Profile
+            // box greyed out until the drawing had an elevation AND the
+            // caver had named a run, because a profile line with no run
+            // is one CsProfileBind cannot move with its band. Those same
+            // tiles now draw the plan and the sections too, so locking
+            // them would lock tracing itself out of a drawing that has
+            // no elevation -- and the run question is answered by the
+            // stroke's location, then said out loud by
+            // FeatureTraceRun.warnUnclaimedProfile when location cannot
+            // answer it. Information after the fact beats a locked door
+            // in front of work that was never wrong.
+            //
             // The region is PASSED IN, computed once per repaint by
             // flush(). Recomputing it here would double the cost of
             // every repaint, and CsTrace.profileRegion walks every
             // entity in the drawing.
             var region = (regionIn === undefined) ?
                 FeatureTrace.regionBox : regionIn;
-            var hasRegion = !isNull(region);
-            // A RUN IS REQUIRED, not optional. Every traced profile line
-            // then lives on a run's layer, which is what states which
-            // band it belongs to -- and that is what CsProfileBind uses
-            // to decide which stations it must move with. Left on the
-            // shared layer it has no run, and binding falls back to
-            // guessing by distance, which silently skips anything traced
-            // far from its stations.
-            var hasRun = FeatureTrace.runToken() !== null;
-            w.profileGroup.enabled = hasRegion && hasRun;
-            w.profileGroup.toolTip = !hasRegion ?
-                qsTr("This drawing has no elevation yet -- run Generate " +
-                    "Profile first.") :
-                (!hasRun ? qsTr("Choose which run you are working on " +
-                    "above. A profile feature has to belong to one, so " +
-                    "that it moves with that band when the survey is " +
-                    "revised.") : "");
+            w.featureGroup.toolTip = isNull(region) ?
+                qsTr("This drawing has no elevation yet, so every trace " +
+                    "lands in the plan. Generate Profile builds one.") :
+                qsTr("The view you drag in decides the layer: the plan, " +
+                    "a profile band's box, or an open section bay.");
         }
     } catch (e2) {
-        // leave the group as it is: a wrongly-enabled row still refuses
-        // an out-of-frame press via frameGuard
+        // a stale tooltip is cosmetic; the routing does not read it
     }
 };
 
@@ -1031,9 +1035,21 @@ FeatureTrace.installListener = function(appWin) {
                 if (isNull(pos)) {
                     return;
                 }
-                FeatureTrace.showCursorFrame(CsTrace.frameIn(
-                    FeatureTrace.regionBox, { x: pos.x, y: pos.y },
-                    FeatureTrace.bayRects));
+                var over = CsTrace.frameIn(FeatureTrace.regionBox,
+                    { x: pos.x, y: pos.y }, FeatureTrace.bayRects);
+                // The destination LAYER as well, resolved from the view
+                // under the cursor -- the readout's whole job now that
+                // no button states which view a trace is bound for.
+                // Cheap: no points are passed, so nothing walks the
+                // drawing (CsLayers.twinFor is a string operation).
+                var doc = null;
+                try {
+                    doc = docIface.getDocument();
+                } catch (eDocOf) {
+                    doc = null;
+                }
+                FeatureTrace.showCursorFrame(over,
+                    FeatureTraceRun.targetLayer(doc, over));
             } catch (eCoord) {
                 // a listener must never throw into the application
             }

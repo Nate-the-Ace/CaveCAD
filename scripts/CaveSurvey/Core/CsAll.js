@@ -100,6 +100,13 @@ include(includeBasePath + "/CsFocus.js");
 include(includeBasePath + "/CsDraw.js");
 include(includeBasePath + "/CsWarp.js");
 include(includeBasePath + "/CsRevise.js");
+// After CsRevise (it borrows withOffLayersOn) and CsModel/CsTags: the
+// per-trip metadata editor, which retags trip anchors and touches no
+// geometry at all.
+include(includeBasePath + "/CsTripEdit.js");
+// After CsModel and CsRevise (it shares their epsilon and their survey
+// shape): the gate behind Survey Notebook's incremental Draw.
+include(includeBasePath + "/CsDelta.js");
 // After both CsBind and CsRevise: CsProfileBind calls into each.
 include(includeBasePath + "/CsProfileBind.js");
 include(includeBasePath + "/CsPick.js");

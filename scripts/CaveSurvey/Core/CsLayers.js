@@ -627,6 +627,110 @@ CsLayers.refusesEdits = function(lay) {
  *
  * \return whatever fn returns
  */
+/**
+ * withLayerOn for MANY layers, in ONE operation each way.
+ *
+ * The recursive one-at-a-time nesting this replaces costs two
+ * applyOperation calls PER LAYER, and in the GUI an applyOperation is
+ * not free: every one of them refreshes the layer list widget and
+ * regenerates the view. Measured on CaveCAD with a 24-station cave, a
+ * single profile render made 87 withLayerOn calls -- and the whole
+ * redraw took seconds where the same work headless takes tenths. The
+ * layers being toggled are known up front, so there is no reason to
+ * pay per layer.
+ *
+ * Same contract as CsLayers.withLayerOn: OFF and FROZEN are both
+ * cleared (both refuse operations, silently), restored afterwards, and
+ * restored even when fn throws -- the exception is re-thrown after the
+ * restore. A layer that could not be toggled is simply left alone; fn
+ * runs either way, exactly as before.
+ *
+ * \param names [layerName]
+ * \return whatever fn returns
+ */
+CsLayers.withLayersOn = function(doc, di, names, fn) {
+    var restore = [];   // {name, wasOff, wasFrozen}
+    var opOn = null;
+    for (var i = 0; i < names.length; i++) {
+        try {
+            var lay = doc.queryLayer(names[i]);
+            if (isNull(lay)) {
+                continue;
+            }
+            var wasOff = false, wasFrozen = false;
+            if (lay.isOff()) {
+                lay.setOff(false);
+                wasOff = true;
+            }
+            try {
+                if (lay.isFrozen()) {
+                    lay.setFrozen(false);
+                    wasFrozen = true;
+                }
+            } catch (eFrozen) {
+                wasFrozen = false;   // no frozen concept in this build
+            }
+            if (wasOff || wasFrozen) {
+                if (opOn === null) {
+                    opOn = new RModifyObjectsOperation();
+                }
+                opOn.addObject(lay, false);
+                restore.push({ name: names[i], wasOff: wasOff,
+                    wasFrozen: wasFrozen });
+            }
+        } catch (e) {
+            // could not toggle this one; fn still runs
+        }
+    }
+    if (opOn !== null) {
+        try {
+            di.applyOperation(opOn);
+        } catch (eOn) {
+            restore = []; // nothing landed, so there is nothing to undo
+        }
+    }
+
+    var result, thrown = null, didThrow = false;
+    try {
+        result = fn();
+    } catch (e2) {
+        thrown = e2;
+        didThrow = true;
+    }
+
+    if (restore.length > 0) {
+        try {
+            var opOff = new RModifyObjectsOperation();
+            var any = false;
+            for (i = 0; i < restore.length; i++) {
+                var r = restore[i];
+                var back = doc.queryLayer(r.name);
+                if (isNull(back)) {
+                    continue;
+                }
+                if (r.wasOff) {
+                    back.setOff(true);
+                }
+                if (r.wasFrozen) {
+                    back.setFrozen(true);
+                }
+                opOff.addObject(back, false);
+                any = true;
+            }
+            if (any) {
+                di.applyOperation(opOff);
+            }
+        } catch (e3) {
+            // restoring visibility is a nicety; the data already landed
+        }
+    }
+
+    if (didThrow) {
+        throw thrown;
+    }
+    return result;
+};
+
 CsLayers.withLayerOn = function(doc, di, layerName, fn) {
     var wasOff = false;
     var wasFrozen = false;

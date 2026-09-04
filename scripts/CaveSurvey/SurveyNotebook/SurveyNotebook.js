@@ -700,10 +700,10 @@ SurveyNotebook.refresh = function(w) {
 // absolute-datum cave to sea level. Import Cave Survey needed the same
 // answer, and two readers of one tag are two readers that drift.
 
-SurveyNotebook.drawSurvey = function(w) {
+SurveyNotebook.drawSurvey = function(w, forceFull) {
     // Any failure in here must be SEEN, not swallowed by the engine.
     try {
-        SurveyNotebook.drawSurveyInner(w);
+        SurveyNotebook.drawSurveyInner(w, forceFull === true);
     } catch (e) {
         QMessageBox.warning(null, "Survey Notebook",
             "Draw failed inside this build's bridge:\n\n" + e +
@@ -712,7 +712,7 @@ SurveyNotebook.drawSurvey = function(w) {
     }
 };
 
-SurveyNotebook.drawSurveyInner = function(w) {
+SurveyNotebook.drawSurveyInner = function(w, forceFull) {
     var doc = getDocument();
     if (doc === undefined || doc === null) {
         QMessageBox.warning(null, "Survey Notebook", "No drawing is open.");
@@ -737,7 +737,8 @@ SurveyNotebook.drawSurveyInner = function(w) {
     }
     if (recon !== null && recon.legacy !== true &&
             recon.survey.shots.length > 0) {
-        SurveyNotebook.drawMergedSurvey(w, doc, survey, recon);
+        SurveyNotebook.drawMergedSurvey(w, doc, survey, recon,
+            forceFull === true);
         return;
     }
 
@@ -1302,7 +1303,123 @@ SurveyNotebook.loadFromDrawing = function(w) {
  * (CsRevise.moveLinework). It never reaches CsRevise.apply itself, so
  * nothing is moved twice.
  */
-SurveyNotebook.drawMergedSurvey = function(w, doc, survey, recon) {
+/**
+ * Draw ONE trip into a drawing that already holds the rest of the cave.
+ *
+ * Reached only through CsDelta.decide: the merged solve has already
+ * been shown to move nothing that is already drawn, so every station
+ * outside this trip is exactly where the drawing has it and there is
+ * nothing for a whole-cave redraw to do.
+ *
+ * What this skips, and why it is safe to skip:
+ *
+ *   CsBind.planAutoBind / CsRevise.moveLinework   both exist to carry
+ *       traced linework along when the survey MOVES. Nothing moved.
+ *   the second stationPositions pass               it exists to answer
+ *       "did it move", which the gate has already answered.
+ *   the whole-cave erase                           only this trip's own
+ *       stations are erased, so every other trip's marks, wall runs and
+ *       LRUD survive untouched.
+ *
+ * What it still does in full: the extended elevation, which is a
+ * whole-cave product and is rebuilt from the merged survey (see
+ * CsDraw.survey's `partial` option), and the geo anchor, which is
+ * recommitted when -- and only when -- this trip's own erase took the
+ * point it rides on.
+ *
+ * \param split CsDelta.pageStations(merged, tripId): page = the
+ *              stations this trip owns and this draw replaces; tie =
+ *              the stations its shots touch that another trip owns,
+ *              needed for position and left alone otherwise
+ */
+SurveyNotebook.drawPartial = function(w, doc, di, merged, resolved,
+        findings, merge, split) {
+    var tripId = merge.tripId;
+    var onPage = {};
+    for (var i = 0; i < split.page.length; i++) {
+        onPage[split.page[i]] = true;
+    }
+
+    // The geo anchor rides a station POINT. It is only at risk when
+    // THIS trip's erase deletes that point -- which happens when the
+    // page is a revision of a trip that owns the anchored station.
+    var geoBefore = CsLocationPick.anchorRecord(doc);
+    var geoAtRisk = geoBefore !== null && onPage[geoBefore.station] === true;
+
+    var replaced = CsLayers.withLayerOn(doc, di, CsLayers.CTRL_HIDDEN,
+        function() {
+            return CsDraw.eraseStations(doc, split.page);
+        });
+
+    var pageShots = [];
+    for (i = 0; i < merged.shots.length; i++) {
+        if ((merged.shots[i].trip || 0) === tripId) {
+            pageShots.push(merged.shots[i]);
+        }
+    }
+    var seqBase = CsTags.collectStations(doc).length;
+    var pageSurvey = CsDelta.pageSurvey(merged, pageShots);
+    var pageResolved = CsDelta.subsetResolved(resolved,
+        split.page.concat(split.tie), tripId);
+
+    var drawn = CsDraw.survey(pageSurvey, pageResolved, undefined,
+        undefined, seqBase, {
+            partial: true,
+            omitStations: split.tie,
+            // the elevation is a whole-cave product: never build it
+            // from one page, or the other bands go with it
+            profileSurvey: merged,
+            profileResolved: resolved
+        });
+    CsDraw.zoomToSurvey(merged, resolved);
+
+    var geoLine = "";
+    if (geoAtRisk) {
+        var geoHome = null;
+        var redrawn = CsTags.collectStations(doc);
+        for (var gi = 0; gi < redrawn.length; gi++) {
+            if (redrawn[gi].name === geoBefore.station) {
+                geoHome = redrawn[gi];
+                break;
+            }
+        }
+        if (geoHome !== null) {
+            CsTags.commit(di, geoHome.entity, {
+                GeoLat: geoBefore.lat,
+                GeoLon: geoBefore.lon,
+                GeoStation: geoBefore.station,
+                GeoDrawX: geoHome.pos.x,
+                GeoDrawY: geoHome.pos.y
+            });
+        } else {
+            geoLine = "\n\nThe geo anchor was on station " +
+                geoBefore.station + ", which this page no longer " +
+                "draws -- the georeference is LOST. Re-anchor before " +
+                "fetching imagery again.";
+        }
+    }
+
+    var fp = CsModel.tripFingerprint(merged.trips[tripId]);
+    var tripLine = (merge.replaced ?
+        ("Replaced trip " + tripId + " (" + fp + ") with this page's " +
+            "shots.") :
+        ("Added this page as new trip " + tripId + " (" + fp + ").")) +
+        " Nothing else moved, so only this trip was redrawn -- use " +
+        "Redraw All in the ... menu to redraw the whole cave.";
+
+    EAction.handleUserMessage("Survey Notebook: " + tripLine + geoLine);
+    QMessageBox.information(null, "Survey Notebook",
+        tripLine + "\n\n" +
+        (replaced > 0 ? ("Replaced " + replaced + " previously drawn " +
+            "mark" + (replaced === 1 ? "" : "s") + " for this trip " +
+            "(undo twice to restore them).\n\n") : "") +
+        CsReport.drawSummary(merged, resolved, drawn, findings) + geoLine +
+        "\n\nDrawn as one undo step" +
+        (replaced > 0 ? " after the replace" : "") + ".");
+};
+
+SurveyNotebook.drawMergedSurvey = function(w, doc, survey, recon,
+        forceFull) {
     var tripRecord = SurveyNotebook.tripRecordOf(survey);
     var merge = SurveyNotebook.mergeTripIntoSurvey(recon.survey,
         tripRecord, survey.shots);
@@ -1420,6 +1537,35 @@ SurveyNotebook.drawMergedSurvey = function(w, doc, survey, recon) {
     // frame off the pre-revision resolve instead; this path has no
     // such resolve, so the drawing is both the source and the truth.)
     var oldPos = CsRevise.stationPositions(doc);
+
+    // -- CAN THIS DRAW SKIP THE REST OF THE CAVE? ---------------------
+    //
+    // Adding a trip that ties into one station and closes no new loop
+    // leaves every existing station exactly where it already is, and
+    // the whole-cave erase-and-redraw below is then pure cost -- ~6 s
+    // on an 800-station cave, headless, before any repaint. The gate
+    // (CsDelta.decide) takes the fast path ONLY when the merged solve
+    // moves nothing already drawn; everything else -- a corrected
+    // declination, a re-closed loop, a dropped station, a page that
+    // redraws the trip-0 anchor -- falls through to the path this tool
+    // has always taken. "Redraw All" in the ... menu forces that path
+    // on demand, which is also how the two documented cosmetic
+    // divergences get reconciled (see CsDelta's header and the design
+    // note).
+    var lwExtentEarly = CsRevise.positionsExtent(oldPos);
+    var split = CsDelta.pageStations(merged, merge.tripId);
+    var gate = forceFull === true ?
+        { fast: false, reason: "Redraw All" } :
+        CsDelta.decide({ drawn: oldPos, stations: resolved.stations,
+            extent: lwExtentEarly, pageNames: split.page,
+            dropped: merge.droppedStationNames,
+            anchorName: recon.anchorName });
+
+    if (gate.fast) {
+        SurveyNotebook.drawPartial(w, doc, di, merged, resolved, findings,
+            merge, split);
+        return;
+    }
 
     // The same moment is the last moment to work out what the user's
     // UNTAGGED linework was drawn against, and for the same reason:
@@ -3011,6 +3157,12 @@ SurveyNotebook.buildDock = function(appWin) {
     w.loadDrawingAction.toolTip = "Fill the page from a trip already in " +
         "the drawing, so this page becomes that trip's revision sheet. " +
         "Edit and Draw to replace it in place.";
+    w.redrawAllAction = w.moreMenu.addAction("Redraw All");
+    w.redrawAllAction.toolTip = "Redraw the WHOLE cave from the drawing's " +
+        "own data, not just this page's trip. Draw normally redraws only " +
+        "the trip you typed when nothing else moved; this forces the full " +
+        "redraw, which is what re-splits a wall run at a new junction and " +
+        "re-orients a tie-in station's LRUD.";
     w.declReviseAction = w.moreMenu.addAction("Declination...");
     w.declReviseAction.toolTip = "Correct the declination of the trips " +
         "already in the drawing: one row per trip, IGRF on tap, and the " +
@@ -3178,6 +3330,9 @@ SurveyNotebook.buildDock = function(appWin) {
     SurveyNotebook.safeConnect(w.loadDrawingAction.triggered, function() {
         SurveyNotebook.loadFromDrawing(w);
     }, "Load from drawing button", w.problems);
+    SurveyNotebook.safeConnect(w.redrawAllAction.triggered, function() {
+        SurveyNotebook.drawSurvey(w, true);
+    }, "Redraw All button", w.problems);
     SurveyNotebook.safeConnect(w.declReviseAction.triggered, function() {
         SurveyNotebook.reviseDeclinations(w);
     }, "Declination button", w.problems);
