@@ -1451,6 +1451,79 @@ class TestAddonDoesNotPatchStockPrototypes(unittest.TestCase):
             "CsCave.afterSave" % offenders)
 
 
+# The menu, as one table. Every tool's stage (groupSortOrder), position
+# within the stage (sortOrder) and typed commands. A merge is meant to
+# edit THIS and the tool together; a merge that edits only the tool
+# fails here, which is the point.
+MENU = {
+    "CaveShelf":         (450, 1,  ["caveshelf", "caves"]),
+    "CaveTemplate":      (450, 5,  ["newcavemap", "ncm"]),
+    "SurveyNotebook":    (450, 15, ["surveynotebook", "snb"]),
+    "EditTrip":          (450, 16, ["edittrip", "et"]),
+    "ImportCaveSurvey":  (450, 20, ["importcavesurvey", "ics"]),
+    "ExportCaveSurvey":  (450, 21, ["exportcavesurvey", "ecs"]),
+    "ShapedLines":       (450, 30, ["shapedlines", "shl"]),
+    "ScatterBreakdown":  (450, 40, ["scatterbreakdown", "scb"]),
+    "FeatureTrace":      (450, 45, ["featuretrace", "ft"]),
+    "CrossSection":      (450, 46, ["crosssection", "cxs"]),
+    "SketchSection":     (450, 47, ["sketchsection", "sks"]),
+    "AerialBasemap":     (450, 52, ["aerialbasemap", "ab"]),
+    "SurfaceContours":   (450, 54, ["surfacecontours", "sc"]),
+    "SketchScans":       (450, 56, ["sketchscans", "ss"]),
+    "AlignImage":        (450, 60, ["alignimage", "ali"]),
+    "SurveyStats":       (450, 70, ["surveystats", "sst"]),
+    "GenerateProfile":   (450, 75, ["generateprofile", "gp", "genprofile"]),
+    "BuildLegend":       (450, 78, ["buildlegend", "bl"]),
+    "RebuildSurveyData": (450, 85, ["rebuildsurveydata", "rsd"]),
+    "Callout":           (450, 88, ["callout", "cal", "cscallout", "cscal"]),
+    "CalloutElev":       (450, 90, ["calloutelev", "cel", "cscalloutelev", "cselev"]),
+    "CalloutSync":       (450, 92, ["calloutsync", "csync", "cscalloutsync", "cscsync"]),
+    "RestyleLayers":     (450, 94, ["restylelayers", "rsl"]),
+    "PackageCave":       (450, 95, ["packagecave", "pc", "pkgcave"]),
+}
+
+
+class TestMenuTable(unittest.TestCase):
+    """The menu is a table, and the table is the spec.
+
+    24 tools share one groupSortOrder today, so the menu is a flat list
+    ordered only by sortOrder. Later work groups that into stages and
+    merges some tools together; each of those changes should be a
+    deliberate edit to MENU and the tool together. Before that, this
+    just pins the menu as it stands so a drift -- a tool added without
+    a menu entry, a sortOrder collision, a command typo -- fails here
+    instead of silently in QCAD's menu.
+    """
+
+    def test_every_tool_is_in_the_table(self):
+        missing = sorted(set(tool_dirs()) - set(MENU))
+        self.assertEqual([], missing,
+                         "tool folder exists but is not in MENU: %s" % missing)
+
+    def test_table_names_no_tool_that_does_not_exist(self):
+        extra = sorted(set(MENU) - set(tool_dirs()))
+        self.assertEqual([], extra,
+                         "MENU names a tool that does not exist: %s" % extra)
+
+    def test_each_tool_registers_the_stage_and_position_in_the_table(self):
+        for name, (group, order, _cmds) in sorted(MENU.items()):
+            source = tool_source(name)
+            self.assertEqual(
+                group, find_int(source, "action.setGroupSortOrder"),
+                "%s is in the wrong menu stage" % name)
+            self.assertEqual(
+                order, find_int(source, "action.setSortOrder"),
+                "%s is in the wrong position within its stage" % name)
+
+    def test_each_tool_registers_the_commands_in_the_table(self):
+        for name, (_group, _order, cmds) in sorted(MENU.items()):
+            source = tool_source(name)
+            match = re.search(r"setDefaultCommands\(\[(.*?)\]\)", source, re.S)
+            self.assertIsNotNone(match, "%s sets no commands" % name)
+            found = re.findall(r'"([^"]+)"', match.group(1))
+            self.assertEqual(cmds, found,
+                             "%s registers the wrong commands" % name)
+
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)
