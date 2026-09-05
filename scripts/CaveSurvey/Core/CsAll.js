@@ -43,6 +43,7 @@ include(includeBasePath + "/CsLrud.js");
 include(includeBasePath + "/CsScanFit.js");
 include(includeBasePath + "/CsScanFrame.js");
 include(includeBasePath + "/CsScanTrim.js");
+include(includeBasePath + "/CsScanRotate.js");
 include(includeBasePath + "/CsScanReanchor.js");
 include(includeBasePath + "/CsSectionCut.js");
 include(includeBasePath + "/CsSectionDraw.js");

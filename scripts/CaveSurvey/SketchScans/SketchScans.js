@@ -45,6 +45,7 @@ include(includeBasePath + "/../Core/CsAll.js");
 include(includeBasePath + "/../AlignImage/AlignImage.js");
 include(includeBasePath + "/../SketchSection/SketchSection.js");
 include(includeBasePath + "/ScanView.js");
+include(includeBasePath + "/ScanTurn.js");
 
 // The panel, built once per session (FeatureTrace's pattern).
 var csSketchScansDock;
@@ -198,6 +199,35 @@ SketchScans.saveBookmarks = function(scans, bookmarks, rows) {
     }
 };
 
+// The scan this cave was left on, from settings, or null.
+SketchScans.loadSelected = function(scans) {
+    try {
+        var map = CsScanTree.parseCollapsed(
+            RSettings.getStringValue(CsScanTree.SETTING_SELECTED, ""));
+        return CsScanTree.selectedRelFor(map, scans);
+    } catch (e) {
+        return null;
+    }
+};
+
+// Writes it back. Called on every selection change: a dock has no
+// closing moment to save on, same as the collapsed set.
+SketchScans.saveSelected = function(scans, rel, rows) {
+    try {
+        var map = CsScanTree.parseCollapsed(
+            RSettings.getStringValue(CsScanTree.SETTING_SELECTED, ""));
+        var valid = [];
+        for (var i = 0; i < rows.length; i++) {
+            if (rows[i].kind === "file") { valid.push(rows[i].rel); }
+        }
+        CsScanTree.recordSelected(map, scans, rel, valid);
+        RSettings.setValue(CsScanTree.SETTING_SELECTED,
+            CsScanTree.serializeCollapsed(map));
+    } catch (e) {
+        // a bridge without RSettings just forgets where we were
+    }
+};
+
 // The text of one row: indentation by depth, a disclosure glyph on
 // folder rows, a glyph-wide gap on file rows so labels at one depth
 // line up across kinds.
@@ -298,15 +328,26 @@ SketchScans.buildDock = function(appWin) {
         w.fitButton.toolTip = qsTr("Fit the whole scan in the pane.");
         w.zoomInButton = new QPushButton("+");
         w.zoomOutButton = new QPushButton("\u2212");
+        // A PAGE THAT ARRIVED SIDEWAYS. Not a placement problem -- the
+        // pixels themselves are turned, and every tool downstream reads
+        // them off disk -- so the button rewrites the scan rather than
+        // carrying an angle beside it. It sits with the zoom controls
+        // because it belongs to LOOKING at the page, not to placing it.
+        w.rotateButton = new QPushButton("\u21BB");
+        w.rotateButton.toolTip = qsTr("Turn this scan a quarter turn " +
+            "clockwise AND SAVE IT BACK TO DISK, so every tool sees it " +
+            "the right way up. The file itself is rewritten.");
         try {
             w.zoomInButton.maximumWidth = 34;
             w.zoomOutButton.maximumWidth = 34;
+            w.rotateButton.maximumWidth = 34;
             w.fitButton.maximumWidth = 50;
         } catch (eZw) {
         }
         zoomRow.addWidget(w.fitButton, 0, 0);
         zoomRow.addWidget(w.zoomOutButton, 0, 0);
         zoomRow.addWidget(w.zoomInButton, 0, 0);
+        zoomRow.addWidget(w.rotateButton, 0, 0);
         zoomRow.addStretch(1);
         previewLayout.addLayout(zoomRow, 0);
         // THE TRIM BAR. Not an optional extra button: a scan is not
@@ -346,6 +387,9 @@ SketchScans.buildDock = function(appWin) {
         });
         w.zoomOutButton.clicked.connect(function() {
             CsScanPreview.zoom(w.scanView, 1 / 1.4);
+        });
+        w.rotateButton.clicked.connect(function() {
+            SketchScans.rotateSelected();
         });
         // A click in the scan reports the pixel it landed on. This is
         // the groundwork for picking alignment stations off the scan
@@ -464,9 +508,10 @@ SketchScans.buildDock = function(appWin) {
     w.alignButton.toolTip = qsTr("Insert the selected scan over the " +
         "survey and start Align Image on it: pick two points on the " +
         "scan and their true positions, and it fits.");
-    w.insertButton = new QPushButton(qsTr("Insert"));
-    w.insertButton.toolTip = qsTr("Insert the selected scan over the " +
-        "survey, unaligned.");
+    // THERE IS NO PLAIN "INSERT". A scan reaches this panel to be
+    // traced over, which means it has to sit where the survey says it
+    // sits; dropping one in unaligned only ever made a second step the
+    // caver had to remember. Insert & Align is the whole story.
     // SKETCH SECTION IS GATED ON THE COMBO, not on the selected file --
     // a plan or profile scan has no ghost to trace onto, so the button
     // stays off until "Cross Section" is chosen, exactly the state the
@@ -531,7 +576,6 @@ SketchScans.buildDock = function(appWin) {
     buttons.addWidget(w.frameCombo, 0, 0);
     buttons.addWidget(w.pickAlignButton, 0, 0);
     buttons.addWidget(w.alignButton, 0, 0);
-    buttons.addWidget(w.insertButton, 0, 0);
     buttons.addWidget(w.lrudCombo, 0, 0);
     buttons.addWidget(w.calibCancelButton, 0, 0);
     buttons.addWidget(w.sketchButton, 0, 0);
@@ -650,7 +694,7 @@ SketchScans.buildDock = function(appWin) {
         SketchScans.saveCollapsed(w.scans, w.collapsed, w.rows);
     };
 
-    var chooseInsert = function(align) {
+    var chooseInsert = function() {
         var rel = selectedFile();
         if (rel === null || w.scans === null) { return; }
         var di = EAction.getDocumentInterface();
@@ -673,13 +717,7 @@ SketchScans.buildDock = function(appWin) {
         if (placed === null) {
             return;                 // insert already explained why
         }
-        if (align) {
-            SketchScans.alignSoon(placed);
-        } else {
-            EAction.handleUserMessage(rel + " inserted on " +
-                CsScanFrame.layerFor(frameNow()) +
-                ". Align Image fits it to the survey.");
-        }
+        SketchScans.alignSoon(placed);
     };
 
     /** The drawing's plotted stations, and the order to walk them. */
@@ -753,11 +791,21 @@ SketchScans.buildDock = function(appWin) {
             return;
         }
         var n = w.picking.pairs.length;
+        // ONE STATION IS A PLACEMENT NOW, at the scale the scans
+        // already placed agree on -- so the button offers it, and says
+        // which kind of placement it would be. The wording matters: a
+        // one-station place is assumed north-up and borrowed-scale, and
+        // a caver who does not know that will not know to turn it.
         w.pickAlignButton.text = (n >= 2) ?
-            qsTr("Place (%1 stations)").arg(n) : qsTr("Cancel");
+            qsTr("Place (%1 stations)").arg(n) :
+            (n === 1 ? qsTr("Place (1 station, north-up)") :
+                qsTr("Cancel"));
         pickStatus(n === 0 ?
             qsTr("Click station 1 on the scan") :
-            qsTr("%1 picked -- click another, or Place").arg(n));
+            (n === 1 ?
+                qsTr("1 picked -- click another to fit properly, or " +
+                    "Place it north-up at the other scans' scale") :
+                qsTr("%1 picked -- click another, or Place").arg(n)));
     };
 
     // =================================================================
@@ -1112,11 +1160,93 @@ SketchScans.buildDock = function(appWin) {
         refreshPickState();
     };
 
+    /**
+     * Place a scan through a SINGLE station.
+     *
+     * Two stations measure a placement; one cannot, so the two numbers
+     * a placement needs come from elsewhere and are both stated out
+     * loud:
+     *
+     *   THE SCALE is the median units-per-pixel of the scans already
+     *   placed in this drawing. Pages of one survey are drawn at the
+     *   same one or two scales, so the neighbours are the best evidence
+     *   there is -- and with no neighbours there is no evidence at all,
+     *   which is the one case this refuses rather than guesses at.
+     *
+     *   THE TURN is north-up: the page's own up is the drawing's up.
+     *   That is a starting position, not a claim, so the scan is handed
+     *   straight to ScanTurn for the caver to swing round by hand with
+     *   the scale locked.
+     *
+     * The anchor lands exactly on its station either way.
+     */
+    var placeOneStation = function() {
+        var di = EAction.getDocumentInterface();
+        var doc = EAction.getDocument();
+        if (isNull(doc) || isNull(di) || w.picking === null ||
+                w.picking.pairs.length !== 1) {
+            return;
+        }
+        var neighbours = SketchScans.placedScales(doc);
+        var perPixel = CsScanFit.medianOf(neighbours);
+        if (perPixel === null) {
+            warning("Sketch Scans: there is no scan placed in this " +
+                "drawing yet, so there is no scale to borrow. Pick a " +
+                "second station on this scan -- the two of them " +
+                "measure the scale -- and every one-station sketch " +
+                "after it can lean on this one.");
+            return;
+        }
+        var pair = w.picking.pairs[0];
+        var matrix = CsScanFit.anchoredFit(pair, perPixel, 0);
+        if (matrix === null) {
+            warning("Sketch Scans: the borrowed scale is not a usable " +
+                "number.");
+            return;
+        }
+        var rel = w.picking.rel;
+        var frame = CsScanFrame.normaliseKind(w.picking.frame);
+        var effOne = SketchScans.effectivePath(rel);
+        if (effOne === null) { return; }
+        var placedOne = SketchScans.insertFitted(doc, di, effOne.path, rel,
+            { matrix: matrix, kind: "anchored" }, w.scanView.heightPx,
+            [pair], frame, effOne.rect);
+        w.picking = null;
+        try {
+            w.frameCombo.enabled = true;
+        } catch (eUnlock) {
+        }
+        refreshPickState();
+        pickStatus("");
+        if (placedOne === null) {
+            return;
+        }
+        EAction.handleUserMessage(rel + " placed on " + pair.name +
+            " north-up, at " + (Math.round(perPixel * 1000) / 1000) +
+            " units per pixel -- the middle of the " + neighbours.length +
+            " scan" + (neighbours.length === 1 ? "" : "s") +
+            " already placed. Nothing here measured the scale or the " +
+            "turn: turn it now, or align it to a second station later.");
+        // STRAIGHT INTO THE TURN. The placement is deliberately
+        // unfinished -- north-up is a starting position, not an answer
+        // -- so the tool asks the question rather than leaving a scan
+        // lying at an angle nobody chose.
+        SketchScans.turnSoon(placedOne, pair.dest, pair.name);
+    };
+
     /** Place the scan using the picks. */
     var placeAligned = function() {
         var di = EAction.getDocumentInterface();
         var doc = EAction.getDocument();
         if (isNull(doc) || isNull(di) || w.picking === null) {
+            return;
+        }
+        // ONE STATION: nothing is fitted, two things are BORROWED.
+        // The scale comes from the scans already in this drawing and
+        // the turn from the caver, in the drawing, straight after --
+        // see placeOneStation.
+        if (w.picking.pairs.length === 1) {
+            placeOneStation();
             return;
         }
         var fit = CsScanFit.fit(w.picking.pairs);
@@ -1275,7 +1405,7 @@ SketchScans.buildDock = function(appWin) {
             return;               // a calibration owns the clicks already
         }
         if (w.picking !== null) {
-            if (w.picking.pairs.length >= 2) {
+            if (w.picking.pairs.length >= 1) {
                 placeAligned();
             } else {
                 w.picking = null;
@@ -1304,6 +1434,17 @@ SketchScans.buildDock = function(appWin) {
     });
 
     w.list.itemSelectionChanged.connect(showPreview);
+    // Remember the page we are on, so reopening this cave lands back
+    // here instead of on the first scan still to do.
+    w.list.itemSelectionChanged.connect(function() {
+        // NOT WHILE THE TABLE IS BEING REBUILT: clearing and refilling
+        // rows fires this signal with nothing selected, which would
+        // erase the very memory the rebuild is about to land on.
+        if (w.building === true) { return; }
+        if (w.scans === null || w.scans === undefined) { return; }
+        SketchScans.saveSelected(w.scans, SketchScans.selectedRel(),
+            w.rows);
+    });
     // Folder rows fold on a plain click.
     w.list.cellClicked.connect(function(row, col) { toggleFolder(row); });
     // Double-click by ROW: on a scan it inserts and aligns; on a folder
@@ -1313,7 +1454,7 @@ SketchScans.buildDock = function(appWin) {
     try {
         w.list.cellDoubleClicked.connect(function(row, col) {
             if (w.rows[row] !== undefined && w.rows[row].kind === "file") {
-                chooseInsert(true);
+                chooseInsert();
             }
         });
     } catch (eDbl) {
@@ -1399,8 +1540,7 @@ SketchScans.buildDock = function(appWin) {
     } catch (eCtx) {
     }
     w.refreshButton.clicked.connect(function() { SketchScans.refresh(); });
-    w.alignButton.clicked.connect(function() { chooseInsert(true); });
-    w.insertButton.clicked.connect(function() { chooseInsert(false); });
+    w.alignButton.clicked.connect(function() { chooseInsert(); });
 
     // A re-shown dock re-reads the folder -- scans may have synced in
     // while it was hidden. Wrapped: not every bridge has the signal,
@@ -1429,6 +1569,20 @@ SketchScans.buildDock = function(appWin) {
 SketchScans.refresh = function() {
     var w = SketchScans.w;
     if (w === undefined || w === null) { return; }
+
+    w.building = true;
+    try {
+        SketchScans.rebuild();
+    } finally {
+        w.building = false;
+    }
+};
+
+// The rebuild itself, wrapped by refresh() so that the selection
+// signals it fires along the way cannot write over the remembered
+// scan.
+SketchScans.rebuild = function() {
+    var w = SketchScans.w;
 
     var message = null;
     var doc = EAction.getDocument();
@@ -1474,7 +1628,6 @@ SketchScans.refresh = function() {
     w.stamp = (isNull(doc) ? "" : String(doc.getFileName())) + "|" +
         (scans === null ? "" : scans);
     w.alignButton.enabled = false;
-    w.insertButton.enabled = false;
     // A REBUILT PANEL HAS NO SELECTION, so it has no trim choice
     // either; the gate turns the placement buttons back on when one is
     // made. Setting them from w.ready alone would offer a placement for
@@ -1531,11 +1684,18 @@ SketchScans.refresh = function() {
     }
     SketchScans.applyHidden();
 
-    // Initial selection: the first scan still to do. A mark meaning
-    // "finished" is not a place to return to -- the last thing you
-    // finished is the one scan with no work left on it.
-    var landing = CsScanTree.firstIncompleteRow(w.rows, w.bookmarks,
-        w.collapsed);
+    // Initial selection: the scan this cave was left on. Only when
+    // there is no memory of one -- a cave opened for the first time, a
+    // scan since deleted, a row now inside a collapsed folder -- does
+    // the panel guess, and its guess is the first scan still to do. A
+    // mark meaning "finished" is not a place to return to: the last
+    // thing you finished is the one scan with no work left on it.
+    var landing = CsScanTree.rowOfRel(w.rows,
+        SketchScans.loadSelected(scans), w.collapsed);
+    if (landing < 0) {
+        landing = CsScanTree.firstIncompleteRow(w.rows, w.bookmarks,
+            w.collapsed);
+    }
     if (landing < 0) {
         for (var s = 0; s < w.rows.length; s++) {
             if (w.rows[s].kind === "file" &&
@@ -1701,6 +1861,110 @@ SketchScans.resetTrim = function(reload) {
     SketchScans.updateTrimGate();
 };
 
+/** How many placed images in this drawing came from one scan. A
+ *  rotation turns their pixels under them, so the count is what the
+ *  confirmation warns with. */
+SketchScans.placedCountOf = function(doc, rel) {
+    var n = 0;
+    if (isNull(doc)) {
+        return 0;
+    }
+    try {
+        var ids = doc.queryAllEntities(false, true);
+        for (var i = 0; i < ids.length; i++) {
+            var e = doc.queryEntity(ids[i]);
+            if (!isNull(e) && isImageEntity(e) &&
+                    CsTags.get(e, "SketchScan") === rel) {
+                n++;
+            }
+        }
+    } catch (e) {
+        // an uncountable drawing just gets the shorter warning
+    }
+    return n;
+};
+
+/**
+ * A quarter turn clockwise, on the FILE.
+ *
+ * ASKS FIRST, ALWAYS. This is the one button in the panel that changes
+ * something outside the drawing: it re-encodes a survey page in the
+ * cave's own scans folder, which is usually a synced Drive folder, and
+ * there is no undo for it in CAD. The prompt names the file, the loss
+ * (a re-encode) and, when the scan is already placed, how many copies
+ * in this drawing are about to turn under their own alignment.
+ */
+SketchScans.rotateSelected = function() {
+    var w = SketchScans.w;
+    if (w === undefined || w === null || w.scans === null ||
+            w.scans === undefined) {
+        return;
+    }
+    var rel = SketchScans.selectedRel();
+    if (rel === null || rel === undefined) {
+        warning("Sketch Scans: select a scan to rotate.");
+        return;
+    }
+
+    var placed = SketchScans.placedCountOf(EAction.getDocument(), rel);
+    var text = qsTr("Rotate ") + rel + qsTr(" a quarter turn " +
+        "clockwise?\n\nThis rewrites the file in the cave's scans " +
+        "folder -- it is not an undoable drawing change, and a JPEG " +
+        "page is re-encoded.");
+    if (placed > 0) {
+        text += qsTr("\n\nThis scan is already placed in this drawing ") +
+            (placed === 1 ? qsTr("once") : (placed + qsTr(" times"))) +
+            qsTr(". Those placements keep their frames, so the sketch " +
+            "inside them will turn: re-align them afterwards.");
+    }
+    if (!SketchScans.confirm(qsTr("Rotate Scan"), text)) {
+        return;
+    }
+
+    var turned = CsScanRotate.turn(w.scans, rel);
+    if (turned.ok !== true) {
+        warning("Sketch Scans: " + turned.error);
+        return;
+    }
+    var dropped = turned.dropped;
+
+    // THE TRIM CHOICE DIES WITH THE OLD PIXELS. A box drawn on the page
+    // as it was is a box on a page that no longer exists, so the panel
+    // goes back to "no choice made yet" and reloads the preview from
+    // the rewritten file.
+    SketchScans.resetTrim(true);
+    EAction.handleUserMessage(rel + qsTr(" rotated clockwise -- now ") +
+        turned.w + " \u00d7 " + turned.h + qsTr(" pixels") +
+        (dropped > 0 ? qsTr(", and ") + dropped +
+            qsTr(" trimmed crop(s) of it were removed") : "") + ".");
+};
+
+/**
+ * A Yes/No prompt, parented to the MAIN WINDOW.
+ *
+ * `makeQMessageBoxStandardButtons` breaks this bridge -- the box comes
+ * up with unlabelled buttons and question() returns Yes immediately,
+ * confirming itself -- so the buttons are OR'd plainly, and the result
+ * is COMPARED to QMessageBox.Yes rather than truthy-tested: No is
+ * 65536, which is every bit as truthy as Yes.
+ */
+SketchScans.confirm = function(title, text) {
+    try {
+        // getMainWindow is a GUI global -- absent in the headless
+        // harness, which is where this returns false and no file is
+        // touched.
+        var parent = (typeof getMainWindow === "function") ?
+            getMainWindow() : null;
+        var answer = QMessageBox.question(parent, title, text,
+            QMessageBox.Yes | QMessageBox.No);
+        return answer === QMessageBox.Yes;
+    } catch (e) {
+        // No box means no consent: a file rewrite never proceeds on a
+        // failed prompt.
+        return false;
+    }
+};
+
 /** The whole page, deliberately -- no file written, the original path
  *  used, exactly what this tool did before trimming existed. */
 SketchScans.chooseWholePage = function() {
@@ -1789,7 +2053,6 @@ SketchScans.updateTrimGate = function() {
     try {
         w.pickAlignButton.enabled = chosen;
         w.alignButton.enabled = chosen;
-        w.insertButton.enabled = chosen;
         w.trimRedoButton.enabled = chosen;
         // ONE BUTTON, TWO HALVES OF ONE WORKFLOW. Capture is the last
         // step of sketching a section and had no entry point anywhere
@@ -2250,6 +2513,57 @@ SketchScans.captureSoon = function() {
     timer.start(0);
 };
 
+/**
+ * Hands the just-placed one-station scan to the turn action.
+ *
+ * DEFERRED THROUGH A TIMER, exactly as alignSoon is and for the same
+ * reason: this runs inside the panel's own click handler, and
+ * setCurrentAction tears down the action that is running -- QCAD frees
+ * it and the return lands in freed memory. A zero timer lets the click
+ * unwind first.
+ *
+ * The closure keeps only PLAIN JS -- an id, two numbers and a name.
+ * Holding a Qt wrapper across a deferred call is one of the ways this
+ * bridge crashes.
+ */
+SketchScans.turnSoon = function(entityId, center, station) {
+    if (entityId === null || entityId === undefined ||
+            center === null || center === undefined) {
+        return;
+    }
+    var cx = center.x, cy = center.y;
+    var name = String(station === undefined || station === null ?
+        "" : station);
+    var timer = new QTimer(RMainWindowQt.getMainWindow());
+    timer.singleShot = true;
+    timer.timeout.connect(function() {
+        var di = getDocumentInterface();
+        if (di === undefined || di === null) {
+            return;
+        }
+        try {
+            di.selectEntity(entityId, false);
+        } catch (eSel) {
+            return;      // nothing selected, nothing to turn
+        }
+        try {
+            var guiAction = RGuiAction.getByScriptFile(
+                SketchScans.basePath + "/ScanTurn.js");
+            var action = new ScanTurn(guiAction);
+            action.center = { x: cx, y: cy };
+            action.station = name;
+            di.setCurrentAction(action);
+        } catch (eAct) {
+            EAction.handleUserMessage("Sketch Scans: the scan is placed " +
+                "north-up and selected, but the turn tool would not " +
+                "start (" + eAct + "). Rotate it with the drawing's own " +
+                "Rotate command about " + (name === "" ? "its station" :
+                name) + ".");
+        }
+    });
+    timer.start(0);
+};
+
 /** Align Image's registered script path, from this tool's own. */
 SketchScans.alignScriptPath = function() {
     var base = SketchScans.basePath || "";
@@ -2274,6 +2588,14 @@ SketchScans.prototype.beginEvent = function() {
 
 SketchScans.init = function(basePath) {
     SketchScans.basePath = basePath;
+    // The turn action is not an add-on of its own -- QCAD never calls
+    // its init, so this does; see ScanTurn.js's header.
+    try {
+        ScanTurn.init(basePath);
+    } catch (eTurnInit) {
+        // no turn action: a one-station scan still lands north-up, it
+        // just cannot be turned from the panel
+    }
     var action = new RGuiAction(qsTr("Sketch Scans"),
         RMainWindowQt.getMainWindow());
     action.setRequiresDocument(true);

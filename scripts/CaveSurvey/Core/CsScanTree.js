@@ -32,6 +32,18 @@ CsScanTree.SETTING = "CaveSurvey/SketchScansCollapsed";
 // use ever appears, that is the moment to rename them.
 CsScanTree.SETTING_BOOKMARKS = "CaveSurvey/SketchScansBookmarks";
 
+// THE SELECTED SCAN -- which page the caver was on when the panel was
+// last built. Same per-cave shape as the two sets above, but ONE
+// relative path per scans folder rather than a list: an absolute scans
+// path maps to the rel of the scan that was selected there.
+//
+// Stored separately from the marks because it answers a different
+// question: "Complete" says a page is finished, the selection says
+// where the caver was. Landing on the first incomplete scan is only
+// right the FIRST time a cave is opened; after that the page you were
+// on beats any guess about the page you ought to be on.
+CsScanTree.SETTING_SELECTED = "CaveSurvey/SketchScansSelected";
+
 // Display rows for a list of relative file paths (sorted, the shape
 // CsCave.filesUnder answers): {kind: "folder"|"file", rel, depth,
 // label}. A folder row is emitted the first time any path passes
@@ -202,4 +214,48 @@ CsScanTree.recordCollapsed = function(map, scansPath, set, validRels) {
         map[scansPath] = keep;
     }
     return map;
+};
+
+// The remembered scan for one cave's scans folder, or null. Anything
+// that is not a string is no memory at all.
+CsScanTree.selectedRelFor = function(map, scansPath) {
+    var rel = map === null || map === undefined ? null : map[scansPath];
+    return typeof rel === "string" && rel !== "" ? rel : null;
+};
+
+// Writes one cave's remembered scan back into the map. A rel that is
+// not in validRels -- a scan since deleted, renamed or trimmed away --
+// drops the cave's entry rather than storing a path the panel can no
+// longer land on, and so does a null rel.
+CsScanTree.recordSelected = function(map, scansPath, rel, validRels) {
+    var ok = false;
+    if (typeof rel === "string" && rel !== "") {
+        for (var i = 0; i < validRels.length; i++) {
+            if (validRels[i] === rel) { ok = true; break; }
+        }
+    }
+    if (ok) {
+        map[scansPath] = rel;
+    } else {
+        delete map[scansPath];
+    }
+    return map;
+};
+
+// The row index of one relative file path, or -1 when it is gone or
+// sitting inside a collapsed folder. Hidden counts as gone for the
+// same reason firstIncompleteRow skips hidden rows: expanding a folder
+// the caver collapsed trades one remembered thing for another.
+CsScanTree.rowOfRel = function(rows, rel, collapsedSet) {
+    if (rows === null || rows === undefined ||
+            typeof rel !== "string" || rel === "") {
+        return -1;
+    }
+    for (var i = 0; i < rows.length; i++) {
+        if (rows[i].kind !== "file" || rows[i].rel !== rel) {
+            continue;
+        }
+        return CsScanTree.isHidden(rows[i], collapsedSet) ? -1 : i;
+    }
+    return -1;
 };

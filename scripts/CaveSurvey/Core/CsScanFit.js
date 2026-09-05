@@ -275,6 +275,84 @@ CsScanFit.describe = function(m) {
 };
 
 /**
+ * The MIDDLE of a set of scales, ignoring anything that is not a usable
+ * positive number.
+ *
+ * The median and not the mean, for the same reason scaleOutlier uses
+ * one: a single badly-placed scan in the drawing must not drag the
+ * standard every other scan is measured against -- nor the scale a new
+ * one is BORROWED from.
+ *
+ * \return the median, or null when nothing usable was given.
+ */
+CsScanFit.medianOf = function(values) {
+    var clean = [];
+    if (values === null || values === undefined) {
+        return null;
+    }
+    for (var i = 0; i < values.length; i++) {
+        if (values[i] > CsScanFit.TOLERANCE && isFinite(values[i])) {
+            clean.push(values[i]);
+        }
+    }
+    if (clean.length === 0) {
+        return null;
+    }
+    clean.sort(function(a, b) { return a - b; });
+    var mid = Math.floor(clean.length / 2);
+    return (clean.length % 2 === 1) ? clean[mid] :
+        (clean[mid - 1] + clean[mid]) / 2;
+};
+
+/**
+ * THE ONE-STATION PLACEMENT: a scan pinned through a single station, at
+ * a scale and a turn it was TOLD rather than ones it worked out.
+ *
+ * Two stations are what it takes to MEASURE a placement -- the distance
+ * between them gives the scale and the line between them gives the
+ * turn. One station measures neither, so both come from outside: the
+ * scale from the scans already placed in this drawing (they are pages
+ * of the same survey, drawn at the same one or two scales), and the
+ * turn from the caver, who either accepts north-up or turns the scan by
+ * hand afterwards.
+ *
+ * WHY IT IS WORTH HAVING ANYWAY. A great many sketches -- a cross
+ * section, a detail of one room, a plan of a side passage -- have
+ * exactly one station on them. Under a two-station rule those pages
+ * cannot be placed at all, and the caver ends up eyeballing them in
+ * with the mouse, which is worse than a known scale and an honest turn.
+ *
+ * The anchor lands EXACTLY on its station: everything else about the
+ * placement is assumed, but that one point is not.
+ *
+ * \param pair          {source: {x,y} scan pixels, dest: {x,y} world}
+ * \param unitsPerPixel the borrowed scale, drawing units per pixel
+ * \param turnDeg       clockwise turn of the scan, degrees (0 = the
+ *                      page's own up is the drawing's up, which for a
+ *                      plan is north)
+ * \return {a,b,c,d,e,f}, or null when the scale is not a usable number.
+ */
+CsScanFit.anchoredFit = function(pair, unitsPerPixel, turnDeg) {
+    if (pair === null || pair === undefined ||
+            !(unitsPerPixel > CsScanFit.TOLERANCE) ||
+            !isFinite(unitsPerPixel)) {
+        return null;
+    }
+    var deg = (turnDeg === undefined || turnDeg === null) ? 0 : turnDeg;
+    // CLOCKWISE on the page is NEGATIVE in a drawing whose y runs up,
+    // and the scan's pixels are already in that y-up preview space (see
+    // imageVectors). So the sign is flipped here rather than at every
+    // call site.
+    var t = -deg * Math.PI / 180;
+    var k = unitsPerPixel * Math.cos(t);
+    var h = unitsPerPixel * Math.sin(t);
+    return { a: k, b: -h,
+             c: pair.dest.x - (k * pair.source.x - h * pair.source.y),
+             d: h, e: k,
+             f: pair.dest.y - (h * pair.source.x + k * pair.source.y) };
+};
+
+/**
  * Is this scan's scale out of step with the scans already placed?
  *
  * Sketches of one cave are drawn at one or two scales -- a page is
@@ -294,19 +372,10 @@ CsScanFit.describe = function(m) {
  */
 CsScanFit.scaleOutlier = function(perPixel, others, factor) {
     var f = (factor === undefined || factor === null) ? 4 : factor;
-    var clean = [];
-    for (var i = 0; i < others.length; i++) {
-        if (others[i] > CsScanFit.TOLERANCE && isFinite(others[i])) {
-            clean.push(others[i]);
-        }
-    }
-    if (clean.length === 0 || perPixel <= CsScanFit.TOLERANCE) {
+    var median = CsScanFit.medianOf(others);
+    if (median === null || perPixel <= CsScanFit.TOLERANCE) {
         return { outlier: false, median: null, ratio: 1 };
     }
-    clean.sort(function(a, b) { return a - b; });
-    var mid = Math.floor(clean.length / 2);
-    var median = (clean.length % 2 === 1) ? clean[mid] :
-        (clean[mid - 1] + clean[mid]) / 2;
     var ratio = perPixel / median;
     return { outlier: (ratio > f || ratio < 1 / f),
              median: median, ratio: ratio };

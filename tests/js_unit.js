@@ -131,6 +131,7 @@ var CORE_FILES = [
     "scripts/CaveSurvey/Core/CsScanFit.js",
     "scripts/CaveSurvey/Core/CsScanFrame.js",
     "scripts/CaveSurvey/Core/CsScanTrim.js",
+    "scripts/CaveSurvey/Core/CsScanRotate.js",
     "scripts/CaveSurvey/Core/CsSectionCut.js",
     // pure helpers only (captionText/scaleText); its document functions
     // reference QCAD symbols but are never CALLED here -- same reason
@@ -11034,6 +11035,148 @@ if (!IS_NODE) {
         "complete store: a mark round trips through the settings form");
     ok(back["b.jpg"] === undefined,
         "complete store: and an unmarked scan does not");
+}());
+
+// ---------------------------------------------------------------------
+// CsScanFit -- the ONE-STATION placement: a borrowed scale and a stated
+// turn, anchored exactly on its station.
+(function () {
+    near(CsScanFit.medianOf([2, 8, 4]), 4, 1e-9,
+        "medianOf: the middle one");
+    near(CsScanFit.medianOf([1, 2, 3, 4]), 2.5, 1e-9,
+        "medianOf: the mean of the middle two when there is no middle");
+    near(CsScanFit.medianOf([0, -3, 5, NaN, 7]), 6, 1e-9,
+        "medianOf: zero, negative and NaN scales are not scales");
+    eqs(CsScanFit.medianOf([]), null, "medianOf: nothing usable, null");
+    eqs(CsScanFit.medianOf(null), null, "medianOf: no list, null");
+
+    var pair = { source: { x: 100, y: 50 }, dest: { x: 1000, y: 2000 } };
+    var m = CsScanFit.anchoredFit(pair, 0.25, 0);
+    var at = CsScanFit.apply(m, pair.source);
+    near(at.x, 1000, 1e-9, "anchoredFit: the anchor lands on its station");
+    near(at.y, 2000, 1e-9, "anchoredFit: in both axes");
+    var d = CsScanFit.describe(m);
+    near(d.unitsPerPixel, 0.25, 1e-9,
+        "anchoredFit: at exactly the scale it was handed");
+    near(d.turnDeg, 0, 1e-9, "anchoredFit: north-up is no turn at all");
+    near(d.stretch, 1, 1e-9, "anchoredFit: and the page keeps its shape");
+    ok(d.mirrored === false, "anchoredFit: never mirrored");
+    // The page's own UP is the drawing's up, which for a plan is north.
+    var above = CsScanFit.apply(m, { x: 100, y: 150 });
+    near(above.x, 1000, 1e-9, "anchoredFit: up the page is up the drawing");
+    near(above.y, 2025, 1e-9, "anchoredFit: 100 px up at 0.25 is 25 units");
+
+    // A stated turn is CLOCKWISE, the way a caver reads a bearing.
+    var turned = CsScanFit.anchoredFit(pair, 0.25, 90);
+    var right = CsScanFit.apply(turned, { x: 100, y: 150 });
+    near(right.x, 1025, 1e-9,
+        "anchoredFit: 90 degrees clockwise puts the page's up to the east");
+    near(right.y, 2000, 1e-9, "anchoredFit: and no longer north");
+    near(CsScanFit.describe(turned).unitsPerPixel, 0.25, 1e-9,
+        "anchoredFit: turning does not touch the scale");
+    var stillOn = CsScanFit.apply(turned, pair.source);
+    near(stillOn.x, 1000, 1e-9,
+        "anchoredFit: the anchor holds through the turn");
+    near(stillOn.y, 2000, 1e-9, "anchoredFit: in both axes");
+
+    eqs(CsScanFit.anchoredFit(pair, 0, 0), null,
+        "anchoredFit: no scale, no placement");
+    eqs(CsScanFit.anchoredFit(pair, NaN, 0), null,
+        "anchoredFit: and an unusable one is refused, not used");
+}());
+
+// ---------------------------------------------------------------------
+// CsScanRotate -- the pure half: which files this suite will rewrite,
+// and which crops a turn invalidates. The pixels themselves are
+// exercised in tests/scan_rotate_run.js, inside CaveCAD.
+(function () {
+    eqs(CsScanRotate.formatOf("Trip3/IMG_4021.JPG"), "JPEG",
+        "formatOf: the extension decides, whatever its case");
+    eqs(CsScanRotate.formatOf("a/b/page.tiff"), "TIFF",
+        "formatOf: tiff");
+    eqs(CsScanRotate.formatOf("page.heic"), "HEIC",
+        "formatOf: a phone-shot page is writable in this build");
+    eqs(CsScanRotate.formatOf("page.xcf"), null,
+        "formatOf: a format this suite will not write is null");
+    eqs(CsScanRotate.formatOf("noextension"), null,
+        "formatOf: no extension, no format");
+
+    var supported = ["png", "jpg", "tif", "bmp"];
+    ok(CsScanRotate.canWrite("PNG", supported), "canWrite: png");
+    ok(CsScanRotate.canWrite("JPEG", supported),
+        "canWrite: Qt says jpg where the format name says JPEG");
+    ok(CsScanRotate.canWrite("TIFF", supported),
+        "canWrite: and tif for TIFF");
+    ok(CsScanRotate.canWrite("HEIC", supported) === false,
+        "canWrite: a format this build cannot write is refused");
+    ok(CsScanRotate.canWrite(null, supported) === false,
+        "canWrite: no format, no write");
+    ok(CsScanRotate.canWrite("PNG", null) === false,
+        "canWrite: an unreadable format list refuses everything");
+
+    var sides = CsScanRotate.turnedSize(600, 400);
+    ok(sides.w === 400 && sides.h === 600,
+        "turnedSize: a quarter turn swaps the page's sides");
+
+    var names = [
+        "IMG_4021__TRIMMED_x10_y10_w100_h100.png",
+        "IMG_4021__TRIMMED_x0_y0_w20_h20.png",
+        "IMG_4022__TRIMMED_x1_y1_w2_h2.png",
+        "IMG_4021 notes.png"
+    ];
+    var stale = CsScanRotate.staleTrims("Trip3/IMG_4021.png", names);
+    eqs(stale.length, 2,
+        "staleTrims: every crop of THIS page, and no other page's");
+    eqs(stale.join(","),
+        "IMG_4021__TRIMMED_x10_y10_w100_h100.png," +
+        "IMG_4021__TRIMMED_x0_y0_w20_h20.png",
+        "staleTrims: named in the order the folder listed them");
+    eqs(CsScanRotate.staleTrims("Trip3/IMG_4021.png", null).length, 0,
+        "staleTrims: an unreadable listing drops nothing");
+}());
+
+// ---------------------------------------------------------------------
+// CsScanTree "Selected" -- the scan a cave was left on.
+(function () {
+    var files = [
+        "2025 Scans/2-2 Trip/IMG_0001.jpg",
+        "2025 Scans/2-2 Trip/IMG_0002.jpg",
+        "loose.jpg"
+    ];
+    var rows = CsScanTree.rowsOf(files);
+
+    eqs(rows[CsScanTree.rowOfRel(rows, "loose.jpg", {})].rel, "loose.jpg",
+        "rowOfRel: finds the file row for a remembered scan");
+    eqs(CsScanTree.rowOfRel(rows, "gone.jpg", {}), -1,
+        "rowOfRel: a scan that is no longer there has no row");
+    eqs(CsScanTree.rowOfRel(rows, "2025 Scans", {}), -1,
+        "rowOfRel: a folder rel is not a landing");
+    eqs(CsScanTree.rowOfRel(rows, null, {}), -1,
+        "rowOfRel: no memory, no row");
+    // Hidden counts as gone: the panel guesses again rather than
+    // expanding a folder the caver collapsed.
+    eqs(CsScanTree.rowOfRel(rows, "2025 Scans/2-2 Trip/IMG_0002.jpg",
+        { "2025 Scans": true }), -1,
+        "rowOfRel: a scan inside a collapsed folder is not landed on");
+
+    var map = CsScanTree.parseCollapsed("");
+    CsScanTree.recordSelected(map, "/caves/X/scans", "loose.jpg", files);
+    eqs(CsScanTree.selectedRelFor(
+        CsScanTree.parseCollapsed(CsScanTree.serializeCollapsed(map)),
+        "/caves/X/scans"), "loose.jpg",
+        "selected store: the scan round trips through the settings form");
+    eqs(CsScanTree.selectedRelFor(map, "/caves/Y/scans"), null,
+        "selected store: another cave has its own memory");
+
+    // A scan since deleted or renamed drops the entry rather than
+    // storing a path the panel could never land on.
+    CsScanTree.recordSelected(map, "/caves/X/scans", "gone.jpg", files);
+    eqs(CsScanTree.selectedRelFor(map, "/caves/X/scans"), null,
+        "selected store: a scan that is gone is not remembered");
+    CsScanTree.recordSelected(map, "/caves/X/scans", "loose.jpg", files);
+    CsScanTree.recordSelected(map, "/caves/X/scans", null, files);
+    eqs(CsScanTree.selectedRelFor(map, "/caves/X/scans"), null,
+        "selected store: no selection clears the cave's entry");
 }());
 
 // ---------------------------------------------------------------------
