@@ -4,7 +4,7 @@
     {
       "id": 0,
       "subject": "Task 1: Pin the menu as a test table",
-      "status": "pending",
+      "status": "completed",
       "description": "**Goal:** A structural test that asserts the exact menu -- every tool's stage, position and command names -- so every later task's menu change is a deliberate edit to one table.\n\n**Files:**\n- Modify: tests/test_addon.py (new TestMenuTable class + MENU dict)\n\n**Acceptance Criteria:**\n- [ ] MENU table lists all 24 current tools with current (groupSortOrder, sortOrder) and commands\n- [ ] Test fails if a tool folder exists that the table does not name, or vice versa\n- [ ] Test fails if any tool's registered stage/position/commands differ from the table\n- [ ] Suite green against today's tree, before any merge\n\n**Verify:** `python3 -m unittest tests.test_addon -v -k Menu` -> OK\n\n**Steps:**\n- [ ] Read the existing scrapers: grep -n \"def tool_names\\|def tool_source\\|def find_int\" tests/test_addon.py\n- [ ] Add MENU dict + TestMenuTable (4 tests) exactly as written in the plan doc\n- [ ] Run -k Menu: OK\n- [ ] Run full structural suite: python3 -m unittest discover -s tests -v | tail -5 -> OK\n- [ ] Commit: test: pin the Cave Survey menu as a table before consolidating it\n\n```json:metadata\n{\"files\": [\"tests/test_addon.py\"], \"verifyCommand\": \"python3 -m unittest tests.test_addon -v -k Menu\", \"acceptanceCriteria\": [\"MENU lists all 24 tools\", \"table/disk mismatch fails\", \"stage+position+commands asserted\", \"green on today's tree\"], \"modelTier\": \"standard\"}\n```"
     },
     {
@@ -107,5 +107,5 @@
       "description": "**Goal:** README, lessons and package agree with the shipped menu, and the suite goes out as one version.\n\n**Files:**\n- Modify: README.md, docs/LESSONS.md, tests/README.md, VERSION\n\n**Acceptance Criteria:**\n- [ ] README's six tables carry the final 18 entries; no cell mentions a deleted tool or command\n- [ ] tests/README.md stage count and list match run_all.sh\n- [ ] VERSION reads 0.9.52.0\n- [ ] ./tools/publish.sh installs and Help > About reports Cave Survey Tools 0.9.52.0\n\n**Verify:** ./tests/run_all.sh --publish -> ALL TESTS PASSED\n\n**Steps:**\n- [ ] grep the docs for every deleted tool name and command; rewrite each hit\n- [ ] echo 0.9.52.0 > VERSION (patch bump -- the suite holds at 0.9.X)\n- [ ] Run --publish: ALL TESTS PASSED\n- [ ] Publish, restart, cavecad_eval CaveSurvey.getVersion(...) -> 0.9.52.0\n- [ ] Commit\n\n```json:metadata\n{\"files\": [\"README.md\", \"docs/LESSONS.md\", \"tests/README.md\", \"VERSION\"], \"verifyCommand\": \"./tests/run_all.sh --publish\", \"acceptanceCriteria\": [\"no deleted names in docs\", \"test stage counts match\", \"VERSION 0.9.52.0\", \"About reports the version\"], \"modelTier\": \"mechanical\"}\n```"
     }
   ],
-  "lastUpdated": "2026-09-06T00:45:47.437314"
+  "lastUpdated": "2026-09-06T00:49:54.336283"
 }

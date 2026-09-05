@@ -230,7 +230,7 @@ Replace the `MENU` dict written in Task 1 with:
 ```python
 MENU = {
     # 450 -- start here
-    "CaveShelf":         (450, 20, ["caves"]),
+    "CaveShelf":         (450, 20, ["caveshelf", "caves"]),
     "CaveTemplate":      (450, 30, ["newcavemap", "ncm"]),
     # 451 -- survey data
     "SurveyNotebook":    (451, 10, ["surveynotebook", "snb"]),
@@ -250,7 +250,7 @@ MENU = {
     "SurfaceContours":   (453, 40, ["surfacecontours", "sc"]),
     # 454 -- finish the sheet
     "SurveyStats":       (454, 10, ["surveystats", "sst"]),
-    "GenerateProfile":   (454, 20, ["generateprofile", "gp"]),
+    "GenerateProfile":   (454, 20, ["generateprofile", "gp", "genprofile"]),
     "BuildLegend":       (454, 30, ["buildlegend", "bl"]),
     "Callout":           (454, 40, ["callout", "cal", "cscallout", "cscal"]),
     "CalloutElev":       (454, 50, ["calloutelev", "cel", "cscalloutelev", "cselev"]),
@@ -258,7 +258,7 @@ MENU = {
     "RebuildSurveyData": (455, 10, ["rebuildsurveydata", "rsd"]),
     "RestyleLayers":     (455, 20, ["restylelayers", "rsl"]),
     "CalloutSync":       (455, 30, ["calloutsync", "csync", "cscalloutsync", "cscsync"]),
-    "PackageCave":       (455, 40, ["packagecave", "pc"]),
+    "PackageCave":       (455, 40, ["packagecave", "pc", "pkgcave"]),
 }
 ```
 
@@ -609,7 +609,7 @@ In `tests/test_addon.py`, delete the `RebuildSurveyData`, `RestyleLayers` and `C
     "RepairDrawing":     (455, 10, ["repairdrawing", "rep"]),
 ```
 
-and renumber `PackageCave` to `(455, 20, ["packagecave", "pc"])`.
+and renumber `PackageCave` to `(455, 20, ["packagecave", "pc", "pkgcave"])`.
 
 - [ ] **Step 10: Repoint the existing callout-sync suite**
 
@@ -1944,4 +1944,5 @@ git commit -m "docs: sync the documentation to the consolidated menu, 0.9.52.0"
 - **Spec coverage.** Six merges: Tasks 3-8. Staged menu: Task 2, pinned by Task 1. Curriculum: Task 10. Demo cave: Task 9. In-app guided first run: Task 11. Hard removal of commands: verified in each merge task's live GUI step with the `RGuiAction.getByCommand` probe. Per-task gate of headless + live + student dry run: every merge task carries all three.
 - **Ordering.** Task 1 before everything (the menu table is what makes later diffs legible). Task 2 before the merges (a merge then only deletes a row from a stage). Tasks 9-11 last, because the curriculum and the guide name menu entries that only exist in their final form after Task 8.
 - **Known risk, called out rather than hidden.** Task 5 is the largest: `SketchSection` is 2169 lines against `CrossSection`'s 237, and the modeless bay panel is new UI. If it overruns, it can be split -- move the logic and delete the tool first, add the panel second -- but the commands stay removed either way, so a split leaves a version where capture is reachable only from the panel. Do not split it in a way that leaves no way to close a bay.
+- **Corrected in flight (Task 1).** Three command lists in the plan's tables were transcribed short. The real ones: `CaveShelf` also answers to `caveshelf`, `GenerateProfile` also to `genprofile`, `PackageCave` also to `pkgcave`. The Task 2 table above carries the corrections; the helper the tests use is `tool_dirs()`, not `tool_names()`.
 - **Assumption stated.** Several steps call functions by their likely names (`CsGeoProject.anchorOf`, `CsModel.tripsOf`, `CsLayers.WALL`, `CsLayers.LEGEND`). Each such step carries a `grep` to confirm the real name first. Substitute the real name; never add a shim to make the plan's guess true.
