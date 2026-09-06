@@ -256,3 +256,97 @@ widgets, method-vs-property, self-confirming message boxes).
 - Symbol scaling that follows sheet scale automatically
 - Replacing ScatterBreakdown's own placement path
 - Any change to how the built-in 28 are drawn
+
+---
+
+## As built (2026-09-06, `5797556`)
+
+Built as designed except where noted. Everything below is a deliberate
+divergence, not drift.
+
+**The editor's metadata fields are a dialog, not panel fields.** The
+design put name, category and home layer into the panel while it was in
+editor mode. They are a modal dialog raised by **Save Symbol** instead,
+and the panel's editor mode is two buttons and a line of text, both
+built at panel construction and hidden until needed. The reason is the
+bridge: widgets constructed while a panel is already live are the least
+reliable thing this add-on does, and this tool could not be dry-run in
+front of a person before shipping. A Save button that failed to
+construct would strand a caver with a drawing and no way to keep it. The
+fields ask the same four questions in the same order.
+
+**Custom symbols may still take a category of their own.** The category
+combo is editable, so a caver can type a category the catalogue has
+never seen and it becomes a group in the panel. The home layer combo is
+NOT editable, per the design.
+
+**The two section-bay tags moved into Core.** `FeatureTraceRun.BAY_TAG`
+and `STATION_TAG` are now aliases of `CsTrace.SECTION_BAY_TAG` and
+`SECTION_STATION_TAG`. Stamping a placed symbol with the tool file's own
+constants would have made the palette depend on Feature Trace being
+loaded -- which it is not, in the headless test that proves the stamp
+happens.
+
+**`publish.sh` now backs the live template up** into
+`templates_previous/` before overwriting it, with a line on the console
+saying so. The design recorded this as optional; a data-loss path that
+is silent is worse than one that is loud, and it cost four lines.
+
+### Engine truths found building this
+
+Each measured against the real engine on 2026-09-06, each of which
+produced a silent wrong result rather than an error:
+
+1. **An entity carried into another document keeps its object id**, and
+   `RTransaction` reads a set id as an edit to whatever that id names in
+   the destination -- "original object not found in storage", and the
+   copy lands nothing. `doc.getStorage().setObjectId(e, RObject.INVALID_ID)`
+   clears it; it is what QCAD's own clipboard copy does in C++.
+   `RObject::setId` is protected and not scriptable, and
+   `cloneToEntity` is not exposed to script, so the storage call is the
+   only route. `CsSymbolStore.adopt` is the one place it lives.
+2. **`RAddObjectOperation(obj)`'s `useCurrentAttributes` defaults to
+   TRUE**, and true means the drawing's current layer overwrites the
+   layer the entity was given. Every routed symbol landed on layer 0
+   while the tool cheerfully reported the layer it meant. Pass `false`.
+3. **An add onto an off, frozen or locked layer is dropped silently.**
+   The marker point's own home, `CTRL-HIDDEN`, is off in the registry,
+   so every custom symbol saved without `withLayerOn` came back from the
+   file anonymous -- geometry present, description gone. The save now
+   also verifies the marker is there before writing the file.
+4. **XDATA inside a block definition DOES survive a DXF round trip**
+   through the dxflib exporter, which is what makes the self-describing
+   block possible at all. It does not survive any other exporter, hence
+   `CsSymbolStore.dxfFilter`.
+
+### Known limitation, deliberately not fixed
+
+A symbol placed in an elevation or a section has its block REFERENCE on
+the view's twin layer, but the geometry inside the block still sits on
+the plan feature layer (`FORMATIONS-DRIP` and friends) -- that is how
+the shipped template's blocks are drawn. Two consequences: turning the
+plan layer off hides the symbol in every view, and the symbol renders in
+the plan layer's colour. The colour is a non-issue because a twin row is
+a copy of its plan row, so the two match by construction. The visibility
+coupling is real.
+
+The fix would be to flatten every `SYM_*` block's geometry onto layer 0
+with `ByBlock` colour, which is the standard symbol convention and would
+make the reference's layer govern completely. It is NOT taken here
+because Build Legend places its symbol references on the `LEGEND` layer:
+flattening would make the whole legend render in one colour and lose the
+per-feature colour that makes it readable. Fixing both means teaching
+Build Legend to place each row on its own feature layer, which is a
+change to a shipped output and belongs in its own piece of work.
+
+### Verification
+
+26/26 headless suites pass, including the new
+`tests/symbol_palette_run.js` (the file round trip, import-on-demand,
+plan/elevation/section routing, the station stamp, and the refusals) and
+24 new assertions in `tests/js_unit.js`. Structural and publish checks
+pass.
+
+NO live GUI check has been taken. The panel, the rendered previews, the
+drag-to-aim and the editor tab are unproven in front of a person; see
+`docs/superpowers/plans/2026-09-06-outstanding-dry-runs.md`.
