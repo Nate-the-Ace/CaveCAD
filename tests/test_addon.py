@@ -1502,9 +1502,8 @@ MENU = {
     "CrossSection/CrossSection.js":       (452, 40, ["crosssection", "cxs"]),
     # 453 -- put a reference under the map
     "SketchScans/SketchScans.js":         (453, 10, ["sketchscans", "ss"]),
-    "AlignImage/AlignImage.js":           (453, 20, ["alignimage", "ali"]),
-    "AerialBasemap/AerialBasemap.js":     (453, 30, ["aerialbasemap", "ab"]),
-    "SurfaceContours/SurfaceContours.js": (453, 40, ["surfacecontours", "sc"]),
+    "AerialBasemap/AerialBasemap.js":     (453, 20, ["aerialbasemap", "ab"]),
+    "SurfaceContours/SurfaceContours.js": (453, 30, ["surfacecontours", "sc"]),
     # 454 -- finish the sheet
     "SurveyStats/SurveyStats.js":         (454, 10, ["surveystats", "sst"]),
     "GenerateProfile/GenerateProfile.js": (454, 20, ["generateprofile", "gp", "genprofile"]),

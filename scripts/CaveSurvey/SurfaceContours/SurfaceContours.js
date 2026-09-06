@@ -478,6 +478,6 @@ SurfaceContours.init = function(basePath) {
         "survey from public USGS elevation data"));
     action.setDefaultCommands(["surfacecontours", "sc"]);
     action.setGroupSortOrder(453);
-    action.setSortOrder(40);
+    action.setSortOrder(30);
     action.setWidgetNames(["CaveSurveyMenu", "CaveSurveyToolBar"]);
 };

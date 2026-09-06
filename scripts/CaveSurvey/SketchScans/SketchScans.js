@@ -4,10 +4,15 @@
 // folder -- including the per-trip subfolders surveyors actually keep
 // scans in -- previews each sketch large enough to tell the right one
 // from the rest, and inserts it into the drawing, straight into the
-// Align Image tool, so a scan goes from folder to aligned underlay in
-// one motion. Docked (right area, tabbed beside Feature Trace and the
-// Survey Notebook) rather than modal: several scans commonly underlie
-// one map, and the panel stays put between inserts.
+// interactive align tool (ScanAlign.js, folded in from what used to be
+// its own menu entry, Align Image), so a scan goes from folder to
+// aligned underlay in one motion. A scan that lives outside the cave's
+// scans/ folder is the one thing the panel's own list cannot reach, so
+// its "Add a scan from elsewhere..." button file-picks one and runs the
+// same insert-then-align path. Docked (right area, tabbed beside
+// Feature Trace and the Survey Notebook) rather than modal: several
+// scans commonly underlie one map, and the panel stays put between
+// inserts.
 //
 // The preview is the point of the tool. A trip's scans have names like
 // "IMG_4021.jpeg"; picking the wrong one costs a whole tracing session.
@@ -31,9 +36,9 @@
 // strength on top it hid the very linework being drawn.
 //
 // "Insert & Align" hands the freshly inserted image, selected, to the
-// Align Image tool -- deferred through a zero-delay timer, because
-// starting another action from inside a widget event is the documented
-// hard-crash trap.
+// align tool (ScanAlign.js) -- deferred through a zero-delay timer,
+// because starting another action from inside a widget event is the
+// documented hard-crash trap.
 //
 // USAGE:
 //   Cave Survey > Sketch Scans   (or "sketchscans" / "ss")
@@ -42,7 +47,7 @@
 include("scripts/EAction.js");
 include("scripts/simple.js");
 include(includeBasePath + "/../Core/CsAll.js");
-include(includeBasePath + "/../AlignImage/AlignImage.js");
+include(includeBasePath + "/ScanAlign.js");
 // SectionBay and SectionCapture used to live in their own SketchSection/
 // folder with their own menu entries (Sketch Section / Capture Section)
 // -- both folded into Cross Section's own route dialog. This panel's
@@ -511,8 +516,18 @@ SketchScans.buildDock = function(appWin) {
     });
     w.alignButton = new QPushButton(qsTr("Insert && Align"));
     w.alignButton.toolTip = qsTr("Insert the selected scan over the " +
-        "survey and start Align Image on it: pick two points on the " +
+        "survey and start the align tool on it: pick two points on the " +
         "scan and their true positions, and it fits.");
+    // THE ONE THING THE PANEL'S OWN LIST CANNOT REACH: a scan that has
+    // not made it into the cave's scans/ folder yet -- a photo still on
+    // a phone, a page scanned straight to the Desktop. This button
+    // skips the list and file-picks instead, then runs through the
+    // same insertAndAlign the list-driven "Insert && Align" uses, so
+    // there is exactly one insert-then-align path in this file, not two.
+    w.elsewhereButton = new QPushButton(
+        qsTr("Add a scan from elsewhere..."));
+    w.elsewhereButton.toolTip = qsTr("Insert and fit a scan that is " +
+        "not in this cave's scans folder.");
     // THERE IS NO PLAIN "INSERT". A scan reaches this panel to be
     // traced over, which means it has to sit where the survey says it
     // sits; dropping one in unaligned only ever made a second step the
@@ -581,6 +596,7 @@ SketchScans.buildDock = function(appWin) {
     buttons.addWidget(w.frameCombo, 0, 0);
     buttons.addWidget(w.pickAlignButton, 0, 0);
     buttons.addWidget(w.alignButton, 0, 0);
+    buttons.addWidget(w.elsewhereButton, 0, 0);
     buttons.addWidget(w.lrudCombo, 0, 0);
     buttons.addWidget(w.calibCancelButton, 0, 0);
     buttons.addWidget(w.sketchButton, 0, 0);
@@ -699,12 +715,28 @@ SketchScans.buildDock = function(appWin) {
         SketchScans.saveCollapsed(w.scans, w.collapsed, w.rows);
     };
 
-    var chooseInsert = function() {
-        var rel = selectedFile();
-        if (rel === null || w.scans === null) { return; }
+    // THE ONE INSERT-THEN-ALIGN PATH. Both "Insert && Align" (a file
+    // already listed from the scans folder) and "Add a scan from
+    // elsewhere..." (a file picked from anywhere) end here, so there is
+    // exactly one place that inserts an image and hands it to the align
+    // tool -- see SketchScans.insert and SketchScans.alignSoon.
+    var insertAndAlign = function(path, name, trimRect) {
         var di = EAction.getDocumentInterface();
         var doc = EAction.getDocument();
         if (isNull(di) || isNull(doc)) { return; }
+        var placed = SketchScans.insert(doc, di, path, name,
+            frameNow(), trimRect);
+        if (placed === null) {
+            return;                 // insert already explained why
+        }
+        SketchScans.alignSoon(placed);
+    };
+
+    var chooseInsert = function() {
+        var rel = selectedFile();
+        if (rel === null || w.scans === null) { return; }
+        var doc = EAction.getDocument();
+        if (isNull(doc)) { return; }
         // The active drawing can change under a dock. If it did, the
         // list belongs to some other cave: rebuild instead of dropping
         // one cave's sketch into another cave's map.
@@ -717,12 +749,24 @@ SketchScans.buildDock = function(appWin) {
         }
         var eff = SketchScans.effectivePath(rel);
         if (eff === null) { return; }
-        var placed = SketchScans.insert(doc, di, eff.path, rel,
-            frameNow(), eff.rect);
-        if (placed === null) {
-            return;                 // insert already explained why
-        }
-        SketchScans.alignSoon(placed);
+        insertAndAlign(eff.path, rel, eff.rect);
+    };
+
+    // NO SCANS-FOLDER LIST BEHIND THIS ONE. A file picked from anywhere
+    // has no cave-relative name to tag it with, so the file's own base
+    // name stands in -- it never has to match anything in scans/, it is
+    // only ever read back by CsTags.get(entity, "SketchScan") for
+    // display and for placedCountOf's count of copies from one source.
+    var chooseElsewhere = function() {
+        var doc = EAction.getDocument();
+        if (isNull(doc)) { return; }
+        var path = QFileDialog.getOpenFileName(getMainWindow(),
+            qsTr("Select a scan to align"), "",
+            qsTr("Images (*.png *.jpg *.jpeg *.tif *.tiff *.bmp)"));
+        if (isNull(path) || String(path) === "") { return; }
+        path = String(path);
+        var name = new QFileInfo(path).fileName();
+        insertAndAlign(path, name, null);
     };
 
     /** The drawing's plotted stations, and the order to walk them. */
@@ -1546,6 +1590,7 @@ SketchScans.buildDock = function(appWin) {
     }
     w.refreshButton.clicked.connect(function() { SketchScans.refresh(); });
     w.alignButton.clicked.connect(function() { chooseInsert(); });
+    w.elsewhereButton.clicked.connect(function() { chooseElsewhere(); });
 
     // A re-shown dock re-reads the folder -- scans may have synced in
     // while it was hidden. Wrapped: not every bridge has the signal,
@@ -2375,12 +2420,12 @@ SketchScans.insertFitted = function(doc, di, path, name, fit, heightPx,
 };
 
 /**
- * Starts Align Image on the entity AFTER the click that asked for it
- * has fully unwound: selects it (selection does not dirty the
- * document), then a zero-delay timer -- outside the widget event, the
- * same reason FeatureTrace's dock buttons defer -- makes Align Image
- * the current action. With a selection standing, Align Image skips its
- * own entity-picking state and goes straight to the source point.
+ * Starts ScanAlign on the entity AFTER the click that asked for it has
+ * fully unwound: selects it (selection does not dirty the document),
+ * then a zero-delay timer -- outside the widget event, the same reason
+ * FeatureTrace's dock buttons defer -- makes ScanAlign the current
+ * action. With a selection standing, it skips its own entity-picking
+ * state and goes straight to the source point.
  */
 SketchScans.alignSoon = function(entityId) {
     if (entityId === null || entityId === undefined) {
@@ -2400,12 +2445,12 @@ SketchScans.alignSoon = function(entityId) {
         }
         try {
             var guiAction = RGuiAction.getByScriptFile(
-                SketchScans.alignScriptPath());
-            di.setCurrentAction(new AlignImage(guiAction));
+                ScanAlign.scriptPath);
+            di.setCurrentAction(new ScanAlign(guiAction));
         } catch (eAct) {
             EAction.handleUserWarning("Sketch Scans: the scan is " +
-                "inserted and selected, but Align Image would not " +
-                "start (" + eAct + "). Run Align Image from the menu.");
+                "inserted and selected, but the align tool would not " +
+                "start (" + eAct + ").");
         }
     });
     timer.start(0);
@@ -2553,12 +2598,6 @@ SketchScans.turnSoon = function(entityId, center, station) {
     timer.start(0);
 };
 
-/** Align Image's registered script path, from this tool's own. */
-SketchScans.alignScriptPath = function() {
-    var base = SketchScans.basePath || "";
-    return base.replace(/\/SketchScans$/, "/AlignImage") + "/AlignImage.js";
-};
-
 // ============================================================
 // Add-on wiring -- the standard pattern; see docs.
 // ============================================================
@@ -2584,6 +2623,16 @@ SketchScans.init = function(basePath) {
     } catch (eTurnInit) {
         // no turn action: a one-station scan still lands north-up, it
         // just cannot be turned from the panel
+    }
+    // Likewise ScanAlign: it used to be Align Image, its own menu entry.
+    // Folded in here, it is still a registered RGuiAction (alignSoon
+    // needs one to build the tool from) but with no widget names, no
+    // command and no icon, so it is reachable only from this panel.
+    try {
+        ScanAlign.init(basePath);
+    } catch (eAlignInit) {
+        // no align action: Insert & Align and "Add a scan from
+        // elsewhere..." will report the failure when clicked instead
     }
     var action = new RGuiAction(qsTr("Sketch Scans"),
         RMainWindowQt.getMainWindow());

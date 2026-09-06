@@ -7,11 +7,11 @@
 // Prints "### ALIGN IMAGE FRAME OK" on success, "### ALIGN IMAGE FRAME
 // FAIL" plus the failed assertions otherwise.
 //
-// WHY A DRIVER OF ITS OWN. AlignImage is a GUI tool derived from stock
+// WHY A DRIVER OF ITS OWN. ScanAlign is a GUI tool derived from stock
 // QCAD's Transform, which owns the only place entities are collected:
-// it walks the user's SELECTION and calls AlignImage.prototype.transform
+// it walks the user's SELECTION and calls ScanAlign.prototype.transform
 // once per entity. That per-entity call is the one hook this repo owns,
-// so this file loads AlignImage.js with a STUB Transform underneath it
+// so this file loads ScanAlign.js with a STUB Transform underneath it
 // and calls that method directly, against a real document -- the same
 // thing the tool does, minus the mouse.
 
@@ -61,14 +61,14 @@ for (var c = 0; c < CORE.length; c++) {
     loadRepoScript("scripts/CaveSurvey/Core/" + CORE[c] + ".js");
 }
 
-// The stub standing in for scripts/Modify/Transform.js. AlignImage.js
-// runs `AlignImage.prototype = new Transform()` at load, and this file
+// The stub standing in for scripts/Modify/Transform.js. ScanAlign.js
+// runs `ScanAlign.prototype = new Transform()` at load, and this file
 // only ever calls one method on the result, so an empty base is enough
 // -- and is honest about it: nothing here claims to test QCAD's own
 // selection handling, only what this repo does per entity.
 function Transform() {}
 
-loadRepoScript("scripts/CaveSurvey/AlignImage/AlignImage.js");
+loadRepoScript("scripts/CaveSurvey/SketchScans/ScanAlign.js");
 
 var failures = [];
 function ok(cond, what) {
@@ -134,7 +134,7 @@ var fit = {
     straightLine: false
 };
 
-// What Transform hands AlignImage.prototype.transform: the entity, its
+// What Transform hands ScanAlign.prototype.transform: the entity, its
 // index, the operation to add to, preview=false, and QCAD's own flags.
 var tool = {
     getFit: function() { return fit; },
@@ -144,7 +144,7 @@ var tool = {
 var op = new RModifyObjectsOperation();
 var ids = [planId, tracedId, generatedId];
 for (var i = 0; i < ids.length; i++) {
-    AlignImage.prototype.transform.call(tool, doc.queryEntity(ids[i]), i,
+    ScanAlign.prototype.transform.call(tool, doc.queryEntity(ids[i]), i,
         op, false, false);
 }
 di.applyOperation(op);
@@ -194,11 +194,11 @@ near(generatedAfter.e.y, generatedBefore.e.y, 1e-9,
     "the generated profile leg's end did not move in y");
 
 // ---- and the refusal is readable on its own ------------------------
-eqs(String(AlignImage.appliesTo(doc, doc.queryEntity(planId))), "true",
+eqs(String(ScanAlign.appliesTo(doc, doc.queryEntity(planId))), "true",
     "appliesTo says yes to a plan-frame entity");
-eqs(String(AlignImage.appliesTo(doc, doc.queryEntity(tracedId))), "false",
+eqs(String(ScanAlign.appliesTo(doc, doc.queryEntity(tracedId))), "false",
     "appliesTo says no to a traced profile-frame entity");
-eqs(String(AlignImage.appliesTo(doc, doc.queryEntity(generatedId))), "false",
+eqs(String(ScanAlign.appliesTo(doc, doc.queryEntity(generatedId))), "false",
     "appliesTo says no to a generated profile-frame entity");
 
 if (failures.length === 0) {

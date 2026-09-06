@@ -1,8 +1,18 @@
-// AlignImage.js
+// ScanAlign.js
 //
-// QCAD ECMAScript tool: ALIGN a scanned map (or any objects) onto the
-// drawing by matching up stations -- the same idea as the ALIGN command
-// in AutoCAD and Civil 3D, with a warp-to-fit option on top.
+// The interactive fit behind Sketch Scans' "Insert && Align" and "Add a
+// scan from elsewhere...": ALIGN a scanned map (or any objects) onto
+// the drawing by matching up stations -- the same idea as the ALIGN
+// command in AutoCAD and Civil 3D, with a warp-to-fit option on top.
+//
+// This used to be Align Image, its own menu entry and command ("ali").
+// It was folded into Sketch Scans because the two were the same job --
+// the panel already inserted a scan and handed it straight to this
+// tool -- and a beginner does not need two names for one step. The
+// panel is still the only way most cavers reach it; a scan that is not
+// in the cave's scans/ folder is the one case the panel cannot list, so
+// its "Add a scan from elsewhere..." button file-picks one and hands it
+// here the same way. See SketchScans.alignSoon and SketchScans.init.
 //
 // You scan a hand-drawn cave map or an old survey sheet, insert it into
 // QCAD (Draw > Image), and this tool moves, rotates and resizes the
@@ -15,7 +25,9 @@
 // right size, so you can trace passage walls straight off it.
 //
 // USAGE:
-//   Cave Survey > Align Image     (or type "ali" on the command line)
+//   Sketch Scans panel: "Insert && Align", or "Add a scan from
+//   elsewhere..." for a file outside the cave's scans/ folder. Not on
+//   the menu, the toolbar or the command line -- see ScanAlign.init.
 //
 //   Follow the prompts at the bottom of the QCAD window:
 //
@@ -126,11 +138,12 @@
 //   closely as they can instead, and the report says so.
 //
 // INSTALLATION:
-//   This folder (AlignImage) belongs beside the other Cave Survey
-//   tools:
-//     scripts/CaveSurvey/AlignImage/AlignImage.js
-//   Restart QCAD afterwards. See README.txt for the full path on each
-//   platform.
+//   This file lives beside Sketch Scans, which includes it directly:
+//     scripts/CaveSurvey/SketchScans/ScanAlign.js
+//   It is not a tool folder of its own -- AddOn.getAddOns only finds a
+//   tool at <dir>/<dir>.js, and this is <dir>/ScanAlign.js inside
+//   SketchScans/. Restart QCAD after installing. See README.txt for the
+//   full path on each platform.
 //
 // Derived from Transform (scripts/Modify/Transform.js), QCAD's own base
 // class for tools that move/rotate/scale a selection, which handles the
@@ -143,12 +156,12 @@ include("scripts/Modify/Transform.js");
 include(includeBasePath + "/../Core/CsAll.js");
 
 /**
- * \class AlignImage
+ * \class ScanAlign
  * \brief Moves, rotates, resizes and (with three or more stations)
  * warps the selected objects so that picked points on a scan land on
  * the matching points in the drawing.
  */
-function AlignImage(guiAction) {
+function ScanAlign(guiAction) {
     Transform.call(this, guiAction);
 
     // station pairs picked so far: [{source: RVector, dest: RVector}, ...]
@@ -185,26 +198,26 @@ function AlignImage(guiAction) {
     this.namedThisRun = [];
 }
 
-AlignImage.prototype = new Transform();
+ScanAlign.prototype = new Transform();
 
-AlignImage.State = {
+ScanAlign.State = {
     SelectingEntities : 0,
     SettingSourcePoint : 1,
     SettingDestPoint : 2
 };
 
 // two points closer together than this count as the same point:
-AlignImage.Tolerance = 1.0e-9;
+ScanAlign.Tolerance = 1.0e-9;
 
 // slack (in pixels) when testing whether a click is inside an image,
 // so rounding noise exactly on the edge still counts as inside:
-AlignImage.EdgeTolerance = 1.0e-6;
+ScanAlign.EdgeTolerance = 1.0e-6;
 
 // how far from a straight line three or more stations must be before a
 // warp can be worked out from them, relative to how spread out they
 // are. Stations in a line say nothing about the direction across that
 // line, so the warp would be a wild guess:
-AlignImage.CollinearTolerance = 1.0e-8;
+ScanAlign.CollinearTolerance = 1.0e-8;
 
 
 // =====================================================================
@@ -219,7 +232,7 @@ AlignImage.CollinearTolerance = 1.0e-8;
  * and so the one-or-two-station fit and the many-station fit describe
  * the same rotation the same way.
  */
-AlignImage.normalizeAngle = function(angle) {
+ScanAlign.normalizeAngle = function(angle) {
     var a = RMath.getNormalizedAngle(angle);   // 0 .. 2*pi
     if (a > Math.PI) {
         a -= 2 * Math.PI;
@@ -244,7 +257,7 @@ AlignImage.normalizeAngle = function(angle) {
  * \return {offset: RVector, angle: Number (radians), factor: Number},
  *         or undefined if the points are degenerate
  */
-AlignImage.computeTransform = function(s1, d1, s2, d2, scale) {
+ScanAlign.computeTransform = function(s1, d1, s2, d2, scale) {
     if (isNull(s1) || isNull(d1)) {
         return undefined;
     }
@@ -259,15 +272,15 @@ AlignImage.computeTransform = function(s1, d1, s2, d2, scale) {
 
         // the two stations on the image are the same point: no
         // direction to line up, and no distance to take a size from:
-        if (sourceDist < AlignImage.Tolerance) {
+        if (sourceDist < ScanAlign.Tolerance) {
             return undefined;
         }
         // the two targets are the same point:
-        if (destDist < AlignImage.Tolerance) {
+        if (destDist < ScanAlign.Tolerance) {
             return undefined;
         }
 
-        angle = AlignImage.normalizeAngle(d1.getAngleTo(d2) - s1.getAngleTo(s2));
+        angle = ScanAlign.normalizeAngle(d1.getAngleTo(d2) - s1.getAngleTo(s2));
 
         if (scale === true) {
             factor = destDist / sourceDist;
@@ -281,7 +294,7 @@ AlignImage.computeTransform = function(s1, d1, s2, d2, scale) {
  * Applies the result of computeTransform to a single point, in the same
  * order the entities are transformed in.
  */
-AlignImage.transformPoint = function(params, center, point) {
+ScanAlign.transformPoint = function(params, center, point) {
     var v = point.operator_subtract(center);
     var a = v.getAngle() + params.angle;
     var m = v.getMagnitude() * params.factor;
@@ -295,7 +308,7 @@ AlignImage.transformPoint = function(params, center, point) {
  * \return the average of the source points and the average of the
  * destination points of the given station pairs.
  */
-AlignImage.getCentroids = function(pairs) {
+ScanAlign.getCentroids = function(pairs) {
     var sx = 0.0, sy = 0.0, dx = 0.0, dy = 0.0;
     for (var i = 0; i < pairs.length; i++) {
         sx += pairs[i].source.x;
@@ -326,12 +339,12 @@ AlignImage.getCentroids = function(pairs) {
  *         Number} to be applied as: rotate and scale about 'center',
  *         then move by 'offset'. undefined if degenerate.
  */
-AlignImage.computeSimilarityFit = function(pairs) {
+ScanAlign.computeSimilarityFit = function(pairs) {
     if (isNull(pairs) || pairs.length < 2) {
         return undefined;
     }
 
-    var c = AlignImage.getCentroids(pairs);
+    var c = ScanAlign.getCentroids(pairs);
 
     // sums over the points measured from their own centroid:
     var aligned = 0.0;    // how much source and target agree in direction
@@ -351,14 +364,14 @@ AlignImage.computeSimilarityFit = function(pairs) {
     }
 
     // every station on the image is in the same spot:
-    if (spread < AlignImage.Tolerance) {
+    if (spread < ScanAlign.Tolerance) {
         return undefined;
     }
 
     var angle = Math.atan2(turned, aligned);
     var factor = Math.sqrt(aligned * aligned + turned * turned) / spread;
 
-    if (factor < AlignImage.Tolerance) {
+    if (factor < ScanAlign.Tolerance) {
         return undefined;
     }
 
@@ -384,12 +397,12 @@ AlignImage.computeSimilarityFit = function(pairs) {
  *         they lie in a straight line (which says nothing about the
  *         direction across that line)
  */
-AlignImage.computeAffineFit = function(pairs) {
+ScanAlign.computeAffineFit = function(pairs) {
     if (isNull(pairs) || pairs.length < 3) {
         return undefined;
     }
 
-    var c = AlignImage.getCentroids(pairs);
+    var c = ScanAlign.getCentroids(pairs);
 
     // Working from the centroids keeps the numbers small, which matters
     // when survey coordinates run to six or seven figures.
@@ -420,8 +433,8 @@ AlignImage.computeAffineFit = function(pairs) {
     // fixed number, so the test means the same thing whatever units and
     // coordinates the drawing uses.
     var spread = sxx + syy;
-    if (spread < AlignImage.Tolerance ||
-        Math.abs(det) < AlignImage.CollinearTolerance * spread * spread) {
+    if (spread < ScanAlign.Tolerance ||
+        Math.abs(det) < ScanAlign.CollinearTolerance * spread * spread) {
         return undefined;
     }
 
@@ -443,7 +456,7 @@ AlignImage.computeAffineFit = function(pairs) {
 /**
  * Applies a warp from computeAffineFit to a single point.
  */
-AlignImage.applyAffine = function(m, point) {
+ScanAlign.applyAffine = function(m, point) {
     return new RVector(
         m.a * point.x + m.b * point.y + m.c,
         m.d * point.x + m.e * point.y + m.f
@@ -459,7 +472,7 @@ AlignImage.applyAffine = function(m, point) {
  * \return {average: Number, worst: Number, worstStation: Number}, with
  *         worstStation counted from 1 for people rather than from 0
  */
-AlignImage.getResiduals = function(pairs, mapPoint) {
+ScanAlign.getResiduals = function(pairs, mapPoint) {
     var total = 0.0;
     var worst = 0.0;
     var worstStation = 0;
@@ -488,7 +501,7 @@ AlignImage.getResiduals = function(pairs, mapPoint) {
  * in the middle of a big scan picks nothing. This lets the tool accept
  * a click anywhere on the image instead.
  */
-AlignImage.isPointInImage = function(entity, pos) {
+ScanAlign.isPointInImage = function(entity, pos) {
     var origin = entity.getInsertionPoint();
     var u = entity.getUVector();
     var v = entity.getVVector();
@@ -496,7 +509,7 @@ AlignImage.isPointInImage = function(entity, pos) {
     // where the click falls in the image's own grid, in pixels: solve
     // pos = origin + alongU * u + alongV * v
     var det = u.x * v.y - u.y * v.x;
-    if (Math.abs(det) < AlignImage.Tolerance) {
+    if (Math.abs(det) < ScanAlign.Tolerance) {
         // the image has no area (it is edge-on or empty)
         return false;
     }
@@ -507,7 +520,7 @@ AlignImage.isPointInImage = function(entity, pos) {
     var alongU = (dx * v.y - dy * v.x) / det;
     var alongV = (u.x * dy - u.y * dx) / det;
 
-    var t = AlignImage.EdgeTolerance;
+    var t = ScanAlign.EdgeTolerance;
     return alongU >= -t && alongU <= entity.getPixelWidth() + t &&
            alongV >= -t && alongV <= entity.getPixelHeight() + t;
 };
@@ -519,7 +532,7 @@ AlignImage.isPointInImage = function(entity, pos) {
  * picture and one down it, so warping the vectors warps the picture.
  * Nothing is redrawn and the file on disk is untouched.
  */
-AlignImage.applyAffineToImage = function(entity, m) {
+ScanAlign.applyAffineToImage = function(entity, m) {
     var u = entity.getUVector();
     var v = entity.getVVector();
     var origin = entity.getInsertionPoint();
@@ -532,7 +545,7 @@ AlignImage.applyAffineToImage = function(entity, m) {
     entity.setProperty(RImageEntity.PropertyVY, m.d * v.x + m.e * v.y);
 
     // the corner the picture hangs from does move:
-    entity.move(AlignImage.applyAffine(m, origin).operator_subtract(origin));
+    entity.move(ScanAlign.applyAffine(m, origin).operator_subtract(origin));
 };
 
 
@@ -540,7 +553,7 @@ AlignImage.applyAffineToImage = function(entity, m) {
 // The tool itself.
 // =====================================================================
 
-AlignImage.prototype.beginEvent = function() {
+ScanAlign.prototype.beginEvent = function() {
     Transform.prototype.beginEvent.call(this);
 
     var di = this.getDocumentInterface();
@@ -552,10 +565,10 @@ AlignImage.prototype.beginEvent = function() {
     this.hadSelection = di.hasSelection();
 
     if (this.hadSelection) {
-        this.setState(AlignImage.State.SettingSourcePoint);
+        this.setState(ScanAlign.State.SettingSourcePoint);
     }
     else {
-        this.setState(AlignImage.State.SelectingEntities);
+        this.setState(ScanAlign.State.SelectingEntities);
     }
 };
 
@@ -565,7 +578,7 @@ AlignImage.prototype.beginEvent = function() {
  * station points, or the survey would not reconstruct (a legacy
  * drawing) -- and every caller then falls back to the manual flow.
  */
-AlignImage.prototype.stationContext = function() {
+ScanAlign.prototype.stationContext = function() {
     if (this.stationCtx !== undefined) {
         return this.stationCtx;
     }
@@ -613,7 +626,7 @@ AlignImage.prototype.stationContext = function() {
  * The station the NEXT pair should assume, or null: the typed override
  * first, otherwise the walk's next unassigned plotted station.
  */
-AlignImage.prototype.assumedStation = function() {
+ScanAlign.prototype.assumedStation = function() {
     var ctx = this.stationContext();
     if (ctx === null) {
         return null;
@@ -635,7 +648,7 @@ AlignImage.prototype.assumedStation = function() {
  * typed or assumed, this is the one way a name becomes a target. Moves
  * the walk cursor to it.
  */
-AlignImage.prototype.acceptStation = function(name) {
+ScanAlign.prototype.acceptStation = function(name) {
     var ctx = this.stationContext();
     if (ctx === null || isNull(this.pendingSource)) {
         return false;
@@ -656,11 +669,11 @@ AlignImage.prototype.acceptStation = function(name) {
     }
     EAction.handleUserMessage(
         qsTr("Station %1 placed at its plotted point").arg(name));
-    this.setState(AlignImage.State.SettingSourcePoint);
+    this.setState(ScanAlign.State.SettingSourcePoint);
     return true;
 };
 
-AlignImage.prototype.initState = function() {
+ScanAlign.prototype.initState = function() {
     var di = this.getDocumentInterface();
     if (isNull(di)) {
         return;
@@ -671,14 +684,14 @@ AlignImage.prototype.initState = function() {
     var station = this.pairs.length + 1;
 
     switch (this.state) {
-    case AlignImage.State.SelectingEntities:
+    case ScanAlign.State.SelectingEntities:
         di.setClickMode(RAction.PickEntity);
         this.setCommandPrompt(qsTr("Click the image to align, then press Enter"));
         this.setLeftMouseTip(qsTr("Pick object"));
         this.setRightMouseTip(EAction.trCancel);
         break;
 
-    case AlignImage.State.SettingSourcePoint:
+    case ScanAlign.State.SettingSourcePoint:
         di.setClickMode(RAction.PickCoordinate);
         this.setFreeSnap();
 
@@ -700,7 +713,7 @@ AlignImage.prototype.initState = function() {
         EAction.showSnapTools();
         break;
 
-    case AlignImage.State.SettingDestPoint:
+    case ScanAlign.State.SettingDestPoint:
         di.setClickMode(RAction.PickCoordinate);
         this.setAutoSnap();
         // With a walk standing, ask -- but assume the next unentered
@@ -731,7 +744,7 @@ AlignImage.prototype.initState = function() {
  * geometry to snap to. Goes through the snap tool's own button where
  * possible, so the snap tool bar shows what is going on.
  */
-AlignImage.prototype.setFreeSnap = function() {
+ScanAlign.prototype.setFreeSnap = function() {
     this.setSnapTool("scripts/Snap/SnapFree/SnapFree.js", new RSnapFree());
 };
 
@@ -739,11 +752,11 @@ AlignImage.prototype.setFreeSnap = function() {
  * Switches snapping back to "Auto" for clicks in the drawing, so they
  * land exactly on existing stations and line ends.
  */
-AlignImage.prototype.setAutoSnap = function() {
+ScanAlign.prototype.setAutoSnap = function() {
     this.setSnapTool("scripts/Snap/SnapAuto/SnapAuto.js", new RSnapAuto());
 };
 
-AlignImage.prototype.setSnapTool = function(scriptFile, snap) {
+ScanAlign.prototype.setSnapTool = function(scriptFile, snap) {
     var di = this.getDocumentInterface();
     if (isNull(di) || di.isSnapLocked()) {
         // the user locked the snap mode: leave their choice alone
@@ -757,14 +770,14 @@ AlignImage.prototype.setSnapTool = function(scriptFile, snap) {
     di.setSnap(snap);
 };
 
-AlignImage.prototype.escapeEvent = function() {
+ScanAlign.prototype.escapeEvent = function() {
     switch (this.state) {
-    case AlignImage.State.SelectingEntities:
+    case ScanAlign.State.SelectingEntities:
         this.deselectPicked();
         Transform.prototype.escapeEvent.call(this);
         break;
 
-    case AlignImage.State.SettingSourcePoint:
+    case ScanAlign.State.SettingSourcePoint:
         if (this.pairs.length === 0) {
             this.deselectPicked();
             Transform.prototype.escapeEvent.call(this);
@@ -773,13 +786,13 @@ AlignImage.prototype.escapeEvent = function() {
             // step back over the station finished last, so it can be
             // clicked again:
             this.pairs.pop();
-            this.setState(AlignImage.State.SettingSourcePoint);
+            this.setState(ScanAlign.State.SettingSourcePoint);
         }
         break;
 
-    case AlignImage.State.SettingDestPoint:
+    case ScanAlign.State.SettingDestPoint:
         this.pendingSource = undefined;
-        this.setState(AlignImage.State.SettingSourcePoint);
+        this.setState(ScanAlign.State.SettingSourcePoint);
         break;
     }
 };
@@ -788,19 +801,19 @@ AlignImage.prototype.escapeEvent = function() {
  * Enter: finish picking objects, or apply the fit made from the
  * stations picked so far.
  */
-AlignImage.prototype.enterEvent = function() {
+ScanAlign.prototype.enterEvent = function() {
     var di = this.getDocumentInterface();
 
     switch (this.state) {
-    case AlignImage.State.SelectingEntities:
+    case ScanAlign.State.SelectingEntities:
         if (isNull(di) || !di.hasSelection()) {
             EAction.handleUserWarning(qsTr("Nothing picked yet -- click the image first"));
             return;
         }
-        this.setState(AlignImage.State.SettingSourcePoint);
+        this.setState(ScanAlign.State.SettingSourcePoint);
         break;
 
-    case AlignImage.State.SettingSourcePoint:
+    case ScanAlign.State.SettingSourcePoint:
         if (this.pairs.length === 0) {
             EAction.handleUserWarning(qsTr("Click a station on the image first"));
             return;
@@ -808,7 +821,7 @@ AlignImage.prototype.enterEvent = function() {
         this.applyAlign();
         break;
 
-    case AlignImage.State.SettingDestPoint:
+    case ScanAlign.State.SettingDestPoint:
         // Enter accepts the standing assumption, when there is one.
         if (this.stationCtx !== undefined && this.stationCtx !== null) {
             var assumed = this.assumedStation();
@@ -830,7 +843,7 @@ AlignImage.prototype.enterEvent = function() {
  * Accepts "noscale" / "scale" typed at any prompt, to align without
  * resizing (for objects that are already at the right size).
  */
-AlignImage.prototype.commandEvent = function(event) {
+ScanAlign.prototype.commandEvent = function(event) {
     var cmd = event.getCommand().toLowerCase();
 
     // An EXACT station name wins over everything -- typed at the
@@ -838,7 +851,7 @@ AlignImage.prototype.commandEvent = function(event) {
     // point; typed at the image prompt it seeds or re-aims the next
     // assumption ("type it once, then auto-advance").
     if (cmd.length > 0 &&
-            this.state !== AlignImage.State.SelectingEntities) {
+            this.state !== ScanAlign.State.SelectingEntities) {
         var ctx = this.stationContext();
         if (ctx !== null) {
             var typedRaw = event.getCommand();
@@ -850,7 +863,7 @@ AlignImage.prototype.commandEvent = function(event) {
                 }
             }
             if (match !== null) {
-                if (this.state === AlignImage.State.SettingDestPoint) {
+                if (this.state === ScanAlign.State.SettingDestPoint) {
                     if (ctx.used[match] === true) {
                         EAction.handleUserWarning(
                             qsTr("Station %1 already has a point on this scan").arg(match));
@@ -892,8 +905,8 @@ AlignImage.prototype.commandEvent = function(event) {
     Transform.prototype.commandEvent.call(this, event);
 };
 
-AlignImage.prototype.pickEntity = function(event, preview) {
-    if (this.state !== AlignImage.State.SelectingEntities) {
+ScanAlign.prototype.pickEntity = function(event, preview) {
+    if (this.state !== ScanAlign.State.SelectingEntities) {
         return;
     }
 
@@ -950,7 +963,7 @@ AlignImage.prototype.pickEntity = function(event, preview) {
  * \return ID of the topmost image entity containing the given position,
  * or RObject.INVALID_ID if there is none.
  */
-AlignImage.prototype.getImageIdAt = function(pos) {
+ScanAlign.prototype.getImageIdAt = function(pos) {
     var doc = this.getDocument();
     if (isNull(doc) || isNull(pos)) {
         return RObject.INVALID_ID;
@@ -969,7 +982,7 @@ AlignImage.prototype.getImageIdAt = function(pos) {
         }
         // the search above works on bounding boxes: check the image's
         // real (possibly rotated) area:
-        if (!AlignImage.isPointInImage(entity, pos)) {
+        if (!ScanAlign.isPointInImage(entity, pos)) {
             continue;
         }
         // later entities are drawn on top of earlier ones:
@@ -981,7 +994,7 @@ AlignImage.prototype.getImageIdAt = function(pos) {
     return found;
 };
 
-AlignImage.prototype.pickCoordinate = function(event, preview) {
+ScanAlign.prototype.pickCoordinate = function(event, preview) {
     var di = this.getDocumentInterface();
     if (isNull(di)) {
         return;
@@ -990,15 +1003,15 @@ AlignImage.prototype.pickCoordinate = function(event, preview) {
     var pos = event.getModelPosition();
 
     switch (this.state) {
-    case AlignImage.State.SettingSourcePoint:
+    case ScanAlign.State.SettingSourcePoint:
         if (!preview) {
             this.pendingSource = pos;
             di.setRelativeZero(this.pendingSource);
-            this.setState(AlignImage.State.SettingDestPoint);
+            this.setState(ScanAlign.State.SettingDestPoint);
         }
         break;
 
-    case AlignImage.State.SettingDestPoint:
+    case ScanAlign.State.SettingDestPoint:
         if (isNull(this.pendingSource)) {
             return;
         }
@@ -1013,7 +1026,7 @@ AlignImage.prototype.pickCoordinate = function(event, preview) {
             this.pairs.push({ source: this.pendingSource, dest: pos });
             this.pendingSource = undefined;
             di.setRelativeZero(pos);
-            this.setState(AlignImage.State.SettingSourcePoint);
+            this.setState(ScanAlign.State.SettingSourcePoint);
         }
         break;
     }
@@ -1030,7 +1043,7 @@ AlignImage.prototype.pickCoordinate = function(event, preview) {
  * to use for objects that cannot be warped. 'affine' is present only
  * for type "affine".
  */
-AlignImage.prototype.getFit = function() {
+ScanAlign.prototype.getFit = function() {
     var n = this.pairs.length;
     if (n === 0) {
         return undefined;
@@ -1040,7 +1053,7 @@ AlignImage.prototype.getFit = function() {
 
     // one station: move it onto its target, nothing else.
     if (n === 1) {
-        var moveParams = AlignImage.computeTransform(first.source, first.dest);
+        var moveParams = ScanAlign.computeTransform(first.source, first.dest);
         if (isNull(moveParams)) {
             return undefined;
         }
@@ -1051,7 +1064,7 @@ AlignImage.prototype.getFit = function() {
     // two stations: the exact move / rotate / resize through both.
     if (n === 2) {
         var second = this.pairs[1];
-        var exact = AlignImage.computeTransform(
+        var exact = ScanAlign.computeTransform(
             first.source, first.dest, second.source, second.dest, this.scale);
         if (isNull(exact)) {
             return undefined;
@@ -1062,12 +1075,12 @@ AlignImage.prototype.getFit = function() {
 
     // three or more: warp to fit, and keep the closest move / rotate /
     // resize as well, for objects that cannot be warped.
-    var closest = AlignImage.computeSimilarityFit(this.pairs);
+    var closest = ScanAlign.computeSimilarityFit(this.pairs);
     if (isNull(closest)) {
         return undefined;
     }
 
-    var warp = AlignImage.computeAffineFit(this.pairs);
+    var warp = ScanAlign.computeAffineFit(this.pairs);
     if (isNull(warp)) {
         // stations in a straight line: a warp cannot be worked out
         return { type: "similarity", params: closest, straightLine: true };
@@ -1097,7 +1110,7 @@ AlignImage.prototype.getFit = function() {
  * unreadable layer name never silently drops a plan entity out of a
  * warp the user asked for.
  */
-AlignImage.appliesTo = function(doc, entity) {
+ScanAlign.appliesTo = function(doc, entity) {
     if (isNull(doc) || isNull(entity)) {
         return true;
     }
@@ -1118,7 +1131,7 @@ AlignImage.appliesTo = function(doc, entity) {
  * entity. So this is also the only place a frame test can go, and one
  * test here covers every fit the tool can produce.
  */
-AlignImage.prototype.transform = function(entity, k, op, preview, flags) {
+ScanAlign.prototype.transform = function(entity, k, op, preview, flags) {
     var fit = this.getFit();
     if (isNull(fit)) {
         return;
@@ -1128,12 +1141,12 @@ AlignImage.prototype.transform = function(entity, k, op, preview, flags) {
     // the entity is left exactly as it was rather than re-added
     // unchanged (which would still make it part of the undo step and
     // still mark the drawing modified).
-    if (!AlignImage.appliesTo(this.getDocument(), entity)) {
+    if (!ScanAlign.appliesTo(this.getDocument(), entity)) {
         return;
     }
 
     if (fit.type === "affine" && isImageEntity(entity)) {
-        AlignImage.applyAffineToImage(entity, fit.affine);
+        ScanAlign.applyAffineToImage(entity, fit.affine);
     }
     else {
         // objects that cannot be warped, and every object in a one or
@@ -1146,7 +1159,7 @@ AlignImage.prototype.transform = function(entity, k, op, preview, flags) {
     op.addObject(entity, flags);
 };
 
-AlignImage.prototype.getOperation = function(preview, selectResult) {
+ScanAlign.prototype.getOperation = function(preview, selectResult) {
     if (isNull(this.getFit())) {
         return undefined;
     }
@@ -1159,7 +1172,7 @@ AlignImage.prototype.getOperation = function(preview, selectResult) {
     return Transform.prototype.getOperation.call(this, preview, selectResult);
 };
 
-AlignImage.prototype.getCopies = function() {
+ScanAlign.prototype.getCopies = function() {
     // this tool always aligns the objects themselves, never a copy
     return 0;
 };
@@ -1167,7 +1180,7 @@ AlignImage.prototype.getCopies = function() {
 /**
  * Aligns the objects, reports what was done, and ends the tool.
  */
-AlignImage.prototype.applyAlign = function() {
+ScanAlign.prototype.applyAlign = function() {
     var di = this.getDocumentInterface();
     if (isNull(di)) {
         this.terminate();
@@ -1209,7 +1222,7 @@ AlignImage.prototype.applyAlign = function() {
  * transform op came from stock Transform machinery, and the tag write
  * must not depend on its internals.
  */
-AlignImage.prototype.recordAssignedStations = function(di, imageId) {
+ScanAlign.prototype.recordAssignedStations = function(di, imageId) {
     if (this.namedThisRun.length === 0 ||
             imageId === RObject.INVALID_ID) {
         return;
@@ -1248,13 +1261,13 @@ AlignImage.prototype.recordAssignedStations = function(di, imageId) {
 /**
  * Reports what the fit did, in the drawing's own units.
  */
-AlignImage.prototype.reportResult = function(fit) {
+ScanAlign.prototype.reportResult = function(fit) {
     var msg;
     var count = this.pairs.length;
 
     if (fit.type === "affine") {
-        var residuals = AlignImage.getResiduals(this.pairs, function(p) {
-            return AlignImage.applyAffine(fit.affine, p);
+        var residuals = ScanAlign.getResiduals(this.pairs, function(p) {
+            return ScanAlign.applyAffine(fit.affine, p);
         });
 
         msg = qsTr("Warped to fit %1 stations").arg(count);
@@ -1281,15 +1294,15 @@ AlignImage.prototype.reportResult = function(fit) {
         }
     }
     else {
-        var degrees = RMath.rad2deg(AlignImage.normalizeAngle(fit.params.angle));
+        var degrees = RMath.rad2deg(ScanAlign.normalizeAngle(fit.params.angle));
 
         msg = (fit.type === "move" ? qsTr("Moved") : qsTr("Aligned")) + ": " +
             qsTr("rotated") + " " + degrees.toFixed(4) + String.fromCharCode(0xb0) + ", " +
             qsTr("resized by") + " " + fit.params.factor.toFixed(6);
 
         if (count > 2) {
-            var simResiduals = AlignImage.getResiduals(this.pairs, function(p) {
-                return AlignImage.transformPoint(fit.params, fit.params.center, p);
+            var simResiduals = ScanAlign.getResiduals(this.pairs, function(p) {
+                return ScanAlign.transformPoint(fit.params, fit.params.center, p);
             });
             msg += ", " + qsTr("average miss") + " " + simResiduals.average.toFixed(4) +
                 ", " + qsTr("worst") + " " + simResiduals.worst.toFixed(4) +
@@ -1316,7 +1329,7 @@ AlignImage.prototype.reportResult = function(fit) {
  * picture now is, in degrees. undefined unless exactly one image is
  * selected.
  */
-AlignImage.prototype.getImageShape = function() {
+ScanAlign.prototype.getImageShape = function() {
     var image = this.getSingleImage();
     if (isNull(image)) {
         return undefined;
@@ -1340,7 +1353,7 @@ AlignImage.prototype.getImageShape = function() {
  * \return the selected image entity if exactly one image is selected,
  * otherwise undefined.
  */
-AlignImage.prototype.getSingleImage = function() {
+ScanAlign.prototype.getSingleImage = function() {
     var doc = this.getDocument();
     if (isNull(doc)) {
         return undefined;
@@ -1368,7 +1381,7 @@ AlignImage.prototype.getSingleImage = function() {
  * \return true if anything other than an image is selected -- those
  * objects cannot be warped.
  */
-AlignImage.prototype.hasNonImageEntities = function() {
+ScanAlign.prototype.hasNonImageEntities = function() {
     var doc = this.getDocument();
     if (isNull(doc)) {
         return false;
@@ -1389,7 +1402,7 @@ AlignImage.prototype.hasNonImageEntities = function() {
  * Un-picks objects this tool picked itself, so cancelling leaves the
  * drawing's selection as it was found.
  */
-AlignImage.prototype.deselectPicked = function() {
+ScanAlign.prototype.deselectPicked = function() {
     var di = this.getDocumentInterface();
     if (isNull(di) || this.hadSelection || this.pickedIds.length === 0) {
         return;
@@ -1398,19 +1411,27 @@ AlignImage.prototype.deselectPicked = function() {
     this.pickedIds = [];
 };
 
-// Called once by QCAD at startup to register the menu item / button.
-AlignImage.init = function(basePath) {
-    var action = new RGuiAction(qsTr("Align Image"), RMainWindowQt.getMainWindow());
+/** Where this file was installed, so getByScriptFile can find it. */
+ScanAlign.scriptPath = "";
+
+/**
+ * Registers the align action WITHOUT a menu entry, a toolbar entry or a
+ * command name.
+ *
+ * It needs to be a registered RGuiAction all the same: the interactive
+ * class is a Transform/EAction, and it wants the RGuiAction that owns
+ * its script file. Leaving out setWidgetNames, setDefaultCommands and
+ * setIcon is what keeps it off the menu, out of the command line and
+ * off the toolbar, which is the whole point of the merge -- reachable
+ * only from the Sketch Scans panel, exactly as SectionCapture's own
+ * merge into Cross Section did this first.
+ *
+ * Called by SketchScans.init, not by the add-on's own sibling sweep:
+ * this file no longer belongs to a tool of its own.
+ */
+ScanAlign.init = function(basePath) {
+    ScanAlign.scriptPath = basePath + "/ScanAlign.js";
+    var action = new RGuiAction(qsTr("Align Scan"), RMainWindowQt.getMainWindow());
     action.setRequiresDocument(true);
-    action.setScriptFile(basePath + "/AlignImage.js");
-    action.setIcon(basePath + "/AlignImage.svg");
-    action.setStatusTip(qsTr("Move, rotate, resize and warp a scanned map onto known stations"));
-    action.setDefaultCommands(["alignimage", "ali"]);
-    action.setGroupSortOrder(453);
-    // 60, after GeoAnchor's 50: the suite tools hold 10..50, and this one is
-    // maintained in a different repo, so it takes the next free slot rather
-    // than displacing them. The two "place it in real space" tools end up
-    // next to each other, which is also where this belongs by workflow.
-    action.setSortOrder(20);
-    action.setWidgetNames(["CaveSurveyMenu", "CaveSurveyToolBar"]);
+    action.setScriptFile(ScanAlign.scriptPath);
 };
