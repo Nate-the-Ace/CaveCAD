@@ -69,8 +69,7 @@ Stats, the profile, the legend and callouts that dress the finished map.
 | Survey Stats | `sst` | Length, depth, loop closures, and the honest BCRA/UIS grade, computed from the drawing. |
 | Generate Profile | `gp` | Rebuild the extended elevation beside the plan: one band per survey run, floor and ceiling lines from LRUD and splays. Normally happens on its own with every draw, from the notebook's own survey model; this forces it from the drawing's own tags instead and prints what it could not show. |
 | Build Legend | `bl` | Generate the legend from the symbols the map actually uses (NSS names, UIS aliases). |
-| Callout | `cal` | Place a text note bound to one or more leader arrows -- QCAD has no multileader, so this is a real text entity and a real leader per arrow, linked so the note stays text-editable and the arrows can be reflowed after a move. |
-| Elevation Callout | `cel` | Two clicks to place a spot FLOOR elevation: the point to take it at, then where the label goes. Reads the floor from the LRUD and splays, not the survey line, and says LINE on its face when it had to fall back. |
+| Callout | `cal` | Place a text note bound to one or more leader arrows -- QCAD has no multileader, so this is a real text entity and a real leader per arrow, linked so the note stays text-editable and the arrows can be reflowed after a move. Opens on a choice of where the text comes from: type it, or pick a point and let it read a spot FLOOR elevation off the LRUD and splays there (not the survey line), stamping LINE on its face when it had to fall back to the line for want of a measurement. |
 
 ### 6. Fix and share
 

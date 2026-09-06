@@ -1500,7 +1500,6 @@ MENU = {
     "GenerateProfile/GenerateProfile.js": (454, 20, ["generateprofile", "gp", "genprofile"]),
     "BuildLegend/BuildLegend.js":         (454, 30, ["buildlegend", "bl"]),
     "Callout/Callout.js":                 (454, 40, ["callout", "cal", "cscallout", "cscal"]),
-    "CalloutElev/CalloutElev.js":         (454, 50, ["calloutelev", "cel", "cscalloutelev", "cselev"]),
     # 455 -- fix and share
     "RepairDrawing/RepairDrawing.js":     (455, 10, ["repairdrawing", "rep"]),
     "PackageCave/PackageCave.js":         (455, 20, ["packagecave", "pc", "pkgcave"]),

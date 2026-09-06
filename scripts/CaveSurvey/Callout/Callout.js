@@ -38,6 +38,11 @@ function Callout(guiAction) {
     this.position = null;       // {x,y} chosen note position, or null
     this.previewPos = undefined; // last mouse position while picking it
     this.style = CsCallout.STYLE_DEFAULT;
+    // Chosen by the source dialog in beginEvent, before the first pick:
+    // true skips the typed-text dialog entirely and samples the floor
+    // on the click instead -- this used to be a second command
+    // (CalloutElev), folded in as Task 4 of the teachable consolidation.
+    this.elevationMode = false;
 }
 
 Callout.prototype = new EAction();
@@ -56,6 +61,39 @@ Callout.prototype.beginEvent = function() {
         this.terminate();
         return;
     }
+
+    // Which source the note's text comes from. Two clicks either way --
+    // this only decides whether the first click is a point to READ or a
+    // place to PUT the note. Asked up front, before either pick, because
+    // the elevation branch samples on the FIRST click (it needs the tip
+    // to know what to read) while the typed branch asks after it (it
+    // needs the tip to offer the arrow-sampled number as a fill-in) --
+    // there is no single moment after the first pick where both branches
+    // could still be offered this choice.
+    var sourceDlg = new QDialog(getMainWindow());
+    sourceDlg.windowTitle = qsTr("Callout");
+    var v = new QVBoxLayout();
+    var typed = new QRadioButton(qsTr("Type the note"));
+    var elev = new QRadioButton(qsTr("Floor elevation here"));
+    typed.checked = true;
+    v.addWidget(typed, 0, 0);
+    v.addWidget(elev, 0, 0);
+    var bb = new QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel);
+    // .accepted/.rejected are signals on the wrapper: connect, do not
+    // assign -- assigning silently does nothing, and every dialog in
+    // this suite that got that wrong shipped a Cancel button that
+    // couldn't cancel.
+    bb.accepted.connect(sourceDlg, "accept");
+    bb.rejected.connect(sourceDlg, "reject");
+    v.addWidget(bb, 0, 0);
+    sourceDlg.setLayout(v);
+    if (sourceDlg.exec() !== QDialog.Accepted) {
+        sourceDlg.destroy();
+        this.terminate();
+        return;
+    }
+    this.elevationMode = elev.checked;
+    sourceDlg.destroy();
 
     CsLayers.ensureCalloutLayers(doc, this.getDocumentInterface());
     this.setState(Callout.State.PickingTip);
@@ -84,7 +122,9 @@ Callout.prototype.initState = function() {
         di.clearPreview();
         di.repaintViews();
 
-        var tipMsg = qsTr("Pick what the arrow points at");
+        var tipMsg = this.elevationMode ?
+            qsTr("Pick the point to take the floor elevation at") :
+            qsTr("Pick what the arrow points at");
         this.setCommandPrompt(tipMsg);
         this.setLeftMouseTip(tipMsg);
         // A single tip, so this state is always the FIRST step: the
@@ -94,8 +134,12 @@ Callout.prototype.initState = function() {
         break;
 
     case Callout.State.PickingPosition:
-        this.setCommandPrompt(qsTr("Pick where the note goes"));
-        this.setLeftMouseTip(qsTr("Position of the note"));
+        this.setCommandPrompt(this.elevationMode ?
+            qsTr("Pick where the elevation label goes") :
+            qsTr("Pick where the note goes"));
+        this.setLeftMouseTip(this.elevationMode ?
+            qsTr("Position of the label") :
+            qsTr("Position of the note"));
         this.setRightMouseTip(EAction.trBack);
         EAction.showSnapTools();
         break;
@@ -161,18 +205,55 @@ Callout.prototype.pickCoordinate = function(event, preview) {
             this.tips = [{ x: pos.x, y: pos.y }];
             di.setRelativeZero(pos);
 
-            var asked = Callout.askForNote(this.style, this.leader,
-                this.noteText, Callout.elevProviderFor(doc, this.tips));
-            if (asked === null) {
-                // cancelled at the dialog: nothing was ever added
-                this.terminate();
-                return;
+            if (this.elevationMode) {
+                // Reproduces CalloutElev exactly: sample the floor NOW,
+                // on the click, so the second pick can preview the real
+                // label -- and skip the typed-text dialog altogether,
+                // because there is nothing to type. The number IS the
+                // note.
+                var got = CalloutWrite.sampleElevationAt(doc, this.tips[0]);
+                if (got === null) {
+                    // No leg near enough for an honest answer. Say why
+                    // and stop rather than inventing a number or
+                    // dropping an empty label -- the caver can still
+                    // re-run the command and choose "Type the note" if
+                    // they want a note there anyway.
+                    try {
+                        QMessageBox.information(RMainWindowQt.getMainWindow(),
+                            qsTr("Callout"),
+                            qsTr("No survey leg near that point, so no " +
+                                "floor elevation could be worked out." +
+                                "\n\nRun Callout again and choose " +
+                                "\"Type the note\" if you want to place " +
+                                "a note there anyway."));
+                    } catch (e) {
+                        EAction.handleUserWarning(
+                            qsTr("No survey leg near that point."));
+                    }
+                    this.terminate();
+                    return;
+                }
+                this.noteText = got.label;
+                // The style follows the BASIS, never a preference: a
+                // survey-line stand-in goes on the muted fallback layer
+                // so a plot cannot pass it off as a measurement.
+                this.style = CsCallout.elevStyle(got.sample);
+                this.kind = CsCallout.KIND_ELEV;
+                this.extraTags = CalloutWrite.elevTags(got.sample);
+            } else {
+                var asked = Callout.askForNote(this.style, this.leader,
+                    this.noteText, Callout.elevProviderFor(doc, this.tips));
+                if (asked === null) {
+                    // cancelled at the dialog: nothing was ever added
+                    this.terminate();
+                    return;
+                }
+                this.noteText = asked.text;
+                this.style = asked.style;
+                this.leader = asked.leader;
+                this.kind = asked.kind || CsCallout.KIND_TEXT;
+                this.extraTags = asked.tags || null;
             }
-            this.noteText = asked.text;
-            this.style = asked.style;
-            this.leader = asked.leader;
-            this.kind = asked.kind || CsCallout.KIND_TEXT;
-            this.extraTags = asked.tags || null;
 
             this.setState(Callout.State.PickingPosition);
         }
@@ -567,8 +648,9 @@ Callout.init = function(basePath) {
     action.setRequiresDocument(true);
     action.setScriptFile(basePath + "/Callout.js");
     action.setIcon(basePath + "/Callout.svg");
-    action.setStatusTip(qsTr("A note bound to one or more arrows, " +
-        "which stays bound when you edit or move the text"));
+    action.setStatusTip(qsTr("A note bound to one or more arrows -- " +
+        "typed, or a floor elevation read off the survey -- which " +
+        "stays bound when you edit or move the text"));
     action.setDefaultCommands(["callout", "cal", "cscallout", "cscal"]);
     action.setGroupSortOrder(454);
     action.setSortOrder(40);
