@@ -460,3 +460,47 @@ random 0.7-1.5 scale, which is the same 1 ft problem -- a scatter of
 foot-wide boulders. Changing it changes a shipped output that judged
 maps have been drawn with, so it is its own piece of work with its own
 dry run, not a side effect of this fix.
+
+
+## Addendum: the action's script context has no simple.js (2026-09-06)
+
+Reported, with a screenshot: pits placed with the mouse never appeared,
+and the command line read "Pit could not be placed: this drawing has no
+SYM_PIT block" -- while `SYM_PIT` was in the drawing, one of 28.
+
+`CsSymbols.insert` reached for the global `getDocumentInterface()`.
+**That global comes from `scripts/simple.js`, which the application
+loads into its own context. An interactive action is built in a
+SEPARATE script context** (`RScriptHandlerJs::createActionDocumentLevel`)
+whose includes are only what the action file itself pulls in -- and
+`EAction.js` includes `library.js`, not `simple.js`. So `getDocument`,
+`getDocumentInterface` and `warning` do not exist there. Every mouse
+placement threw a TypeError inside `insert`, the caller's catch turned
+it into the "no such block" sentence, and the caver went looking for a
+block that was never missing.
+
+Three changes:
+
+1. `CsSymbols.insert` takes the document interface as a parameter.
+   Callers in the application context may still omit it.
+2. The palette reports a thrown error and a missing block as DIFFERENT
+   things. A missing block is a drawing problem a caver can act on; a
+   thrown error is a bug in this tool. Saying the first about the second
+   is what made this cost a screenshot to find.
+3. Every bare `warning()` in the palette becomes
+   `EAction.handleUserWarning` -- another simple.js global, sitting in
+   every error path in the panel.
+
+### Why every test passed while this was broken
+
+A headless test file defines `getDocument` and `getDocumentInterface`
+itself, because it has no application to inherit them from -- so the
+suite was, by construction, the one context where this bug could not
+happen. `tests/symbol_palette_run.js` now deletes both and places a
+symbol without them; verified to fail against the old code with exactly
+the reported TypeError.
+
+**The rule this leaves behind: code reached from an interactive action
+may use only what `EAction.js` pulls in. A Core function that calls a
+simple.js global works everywhere except where the mouse is.** Worth an
+audit of the other Core functions the drawing tools call.
