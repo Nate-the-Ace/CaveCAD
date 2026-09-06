@@ -8,11 +8,12 @@
 // A caver drawing a symbol wants the tools they already know -- lines,
 // arcs, snapping, undo, zoom -- and every one of those is a CaveCAD
 // action that needs a document to act on. So the editor is a document:
-// an ordinary empty tab with an origin crosshair and a size reference
-// in it, and the only unusual thing about it is that Save Symbol writes
-// what it holds into the template instead of to a file.
+// an ordinary empty tab, opened centred on its origin with ten feet of
+// cave in the middle of the view, and the only unusual thing about it
+// is that Save Symbol writes what it holds into the template instead of
+// to a file.
 //
-// WHAT IS NOT SAVED. The crosshair and the reference circle are
+// WHAT IS NOT SAVED. The crosshair and the ten-foot working square are
 // FURNITURE, tagged as such (FURNITURE_TAG), and skipped when the
 // symbol is collected. A caver who deletes them still gets a symbol; a
 // caver who leaves them does not get a symbol with a target drawn on
@@ -32,15 +33,24 @@ SymbolPaletteEdit.FURNITURE_TAG = "SymbolEditorFurniture";
 SymbolPaletteEdit.FURNITURE_LAYER = "CTRL-HIDDEN";
 
 /**
- * The size the reference circle is drawn at, in drawing units.
+ * The side of the working square the editor draws around the origin,
+ * in FEET -- and the biggest a symbol is ever meant to be drawn.
  *
- * ONE FOOT, which is roughly what the shipped symbols measure -- a
- * stalactite in the template is half a unit across. It is a sense of
- * scale and nothing more: nothing measures a symbol against it, and a
- * symbol drawn twice its size is placed twice as big, which is what
- * the palette's Scale field is for.
+ * TEN FEET, Nathan's call (2026-09-06): "symbol features will never be
+ * larger, and if they are we scale it later". Drawn size is not the
+ * placed size any more -- the palette's Size field decides that -- so
+ * this is a working area rather than a limit, and nothing enforces it.
+ * What it does is give the caver a square to draw inside, at the scale
+ * of the grid, so two symbols drawn on different days come out the same
+ * size relative to each other.
  */
-SymbolPaletteEdit.REFERENCE_RADIUS = 0.5;
+SymbolPaletteEdit.WORKING_FEET = 10.0;
+
+/** How much cave is in view when the editor opens, in FEET: the
+ *  working square plus a margin either side, so the first grid lines
+ *  beyond it are visible and the square reads as a square rather than
+ *  as the edge of the world. */
+SymbolPaletteEdit.VIEW_FEET = 20.0;
 
 /**
  * The editing session, or null when no editor is open.
@@ -196,21 +206,90 @@ SymbolPaletteEdit.closeEditor = function(session) {
     }
 };
 
-/** Draws the origin crosshair and the size reference. */
+/**
+ * Puts the origin in the middle of the editor's view, with the working
+ * square and the grid lines just beyond it in sight.
+ *
+ * ZOOMED, NOT AUTO-ZOOMED. autoZoom frames whatever is in the drawing,
+ * which for a brand new editor is the furniture alone and for an edited
+ * symbol is the symbol alone -- either way the origin drifts off centre
+ * and the scale changes with the contents. A symbol is drawn against
+ * the CAVE's scale, so the view is set from the cave's own units and
+ * stays put: ten feet of working square in the middle, twenty feet of
+ * view around it.
+ *
+ * `extra` is an optional bounding box to keep in view as well -- an
+ * existing symbol bigger than the working square, which is allowed
+ * (nothing enforces the size) and must not open half off screen.
+ */
+SymbolPaletteEdit.frameEditor = function(di, doc, extra) {
+    var perFoot = 1.0;
+    try {
+        perFoot = CsTrace.spacingFor(CsUnits.fromDrawingUnit(doc.getUnit(), RS));
+    } catch (eUnit) {
+        perFoot = 1.0;
+    }
+    var half = (SymbolPaletteEdit.VIEW_FEET * perFoot) / 2;
+    var minX = -half, minY = -half, maxX = half, maxY = half;
+    if (!isNull(extra)) {
+        try {
+            var lo = extra.getMinimum(), hi = extra.getMaximum();
+            if (!isNaN(lo.x) && !isNaN(hi.x) && !isNaN(lo.y) && !isNaN(hi.y)) {
+                // A margin of one working square around whatever is
+                // there, so an oversized symbol is not flush to the edge.
+                var pad = (SymbolPaletteEdit.WORKING_FEET * perFoot) / 2;
+                minX = Math.min(minX, lo.x - pad);
+                minY = Math.min(minY, lo.y - pad);
+                maxX = Math.max(maxX, hi.x + pad);
+                maxY = Math.max(maxY, hi.y + pad);
+            }
+        } catch (eBox) {
+        }
+    }
+    try {
+        di.zoomTo(new RBox(new RVector(minX, minY), new RVector(maxX, maxY)));
+        di.repaintViews();
+        return true;
+    } catch (eZoom) {
+        // a document with no view yet (headless, or a tab that has not
+        // been shown): the framing is a convenience, never the work
+        return false;
+    }
+};
+
+/** Draws the origin crosshair and the working square. */
 SymbolPaletteEdit.addFurniture = function(doc, di) {
     try {
         CsLayers.ensure(doc, di, SymbolPaletteEdit.FURNITURE_LAYER);
     } catch (eEnsure) {
     }
-    var r = SymbolPaletteEdit.REFERENCE_RADIUS;
+    // The furniture is measured in FEET and drawn in the editor
+    // document's own units, so the square is ten feet of cave whether
+    // the drawing counts in feet or metres.
+    var perFoot = 1.0;
+    try {
+        perFoot = CsTrace.spacingFor(CsUnits.fromDrawingUnit(doc.getUnit(), RS));
+    } catch (eUnit) {
+        perFoot = 1.0;
+    }
+    var half = (SymbolPaletteEdit.WORKING_FEET * perFoot) / 2;
+    var arm = half * 1.15;   // the crosshair reaches just past the box
     var pieces = [];
     try {
         pieces.push(new RLineEntity(doc, new RLineData(
-            new RVector(-r * 1.4, 0), new RVector(r * 1.4, 0))));
+            new RVector(-arm, 0), new RVector(arm, 0))));
         pieces.push(new RLineEntity(doc, new RLineData(
-            new RVector(0, -r * 1.4), new RVector(0, r * 1.4))));
-        pieces.push(new RCircleEntity(doc, new RCircleData(
-            new RVector(0, 0), r)));
+            new RVector(0, -arm), new RVector(0, arm))));
+        // The working square, not a circle: it is the grid cell the
+        // symbol is drawn inside, and a square says "this much space"
+        // where a circle said "about this big".
+        var box = new RPolylineEntity(doc, new RPolylineData());
+        box.appendVertex(new RVector(-half, -half));
+        box.appendVertex(new RVector(half, -half));
+        box.appendVertex(new RVector(half, half));
+        box.appendVertex(new RVector(-half, half));
+        box.setClosed(true);
+        pieces.push(box);
     } catch (eMake) {
         return;
     }
@@ -233,17 +312,27 @@ SymbolPaletteEdit.addFurniture = function(doc, di) {
     }
     try {
         // The furniture layer is OFF in the registry (CsLayers.OFF keeps
-        // CTRL-HIDDEN off), and scaffolding a caver cannot see is
-        // scaffolding that does not help. withLayerOn adds it and leaves
-        // it visible for as long as this document exists -- which is
-        // only ever the editor.
+        // CTRL-HIDDEN off), and an add onto an off layer is dropped
+        // silently, so the add goes through withLayerOn.
         CsLayers.withLayerOn(doc, di, SymbolPaletteEdit.FURNITURE_LAYER,
             function() {
                 di.applyOperation(op);
             });
+        // AND THEN IT STAYS ON. withLayerOn puts the layer back the way
+        // it found it, which is exactly right in a cave map and exactly
+        // wrong here: the crosshair and the working square are the only
+        // thing in this drawing, and the first version of this shipped
+        // an editor that opened completely blank because they were
+        // added correctly and then hidden again (seen 2026-09-06). This
+        // document is a scratch editor and nothing else, so the layer is
+        // switched on for good.
         var lay = doc.queryLayer(SymbolPaletteEdit.FURNITURE_LAYER);
         if (!isNull(lay)) {
-            lay.setFrozen(false);
+            lay.setOff(false);
+            try {
+                lay.setFrozen(false);
+            } catch (eFrozen) {
+            }
             var lop = new RModifyObjectOperation(lay);
             di.applyOperation(lop);
         }
@@ -266,10 +355,12 @@ SymbolPaletteEdit.startNew = function() {
     }
     var di = opened.di;
     SymbolPaletteEdit.addFurniture(di.getDocument(), di);
+    SymbolPaletteEdit.frameEditor(di, di.getDocument(), null);
     SymbolPaletteEdit.session = { di: di, child: opened.child,
         block: null, meta: null };
-    SymbolPalette.enterEditorMode(qsTr("Draw the symbol around the " +
-        "crosshair, then press Save Symbol."));
+    SymbolPalette.enterEditorMode(qsTr("Draw the symbol inside the %1 ft " +
+        "square, then press Save Symbol.")
+        .arg(SymbolPaletteEdit.WORKING_FEET));
 };
 
 /**
@@ -345,10 +436,17 @@ SymbolPaletteEdit.startEdit = function(entry) {
         } catch (eApply) {
         }
     }
+    // The same framing as a new symbol, widened only if this one is
+    // bigger than the working square -- so editing an existing symbol
+    // shows it at the same scale it was drawn at rather than filling
+    // the window with it.
+    var extent = null;
     try {
-        di.autoZoom();
-    } catch (eZoom) {
+        extent = doc.getBoundingBox();
+    } catch (eExtent) {
+        extent = null;
     }
+    SymbolPaletteEdit.frameEditor(di, doc, extent);
 
     SymbolPaletteEdit.session = { di: di, child: opened.child,
         block: entry.block, meta: entry };
@@ -546,7 +644,7 @@ SymbolPaletteEdit.save = function() {
         QMessageBox.warning(RMainWindowQt.getMainWindow(),
             qsTr("Save Symbol"),
             qsTr("There is nothing to save: draw the symbol first. (The " +
-                "crosshair and the circle are guides, not geometry.)"));
+                "crosshair and the square are guides, not geometry.)"));
         return;
     }
 
