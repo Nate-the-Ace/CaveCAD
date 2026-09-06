@@ -1937,12 +1937,22 @@ SketchScans.placedCountOf = function(doc, rel) {
 /**
  * A quarter turn clockwise, on the FILE.
  *
- * ASKS FIRST, ALWAYS. This is the one button in the panel that changes
- * something outside the drawing: it re-encodes a survey page in the
- * cave's own scans folder, which is usually a synced Drive folder, and
- * there is no undo for it in CAD. The prompt names the file, the loss
- * (a re-encode) and, when the scan is already placed, how many copies
- * in this drawing are about to turn under their own alignment.
+ * NO LONGER ASKS FIRST (Nathan's call, 2026-09-07). It used to raise a
+ * Yes/No box every time, because this is the one button in the panel
+ * that changes something outside the drawing: it re-encodes a survey
+ * page in the cave's own scans folder, usually a synced Drive folder,
+ * and CAD's undo does not reach it. What that ignored is how the button
+ * is actually used -- a page comes off the scanner sideways and gets
+ * turned once, twice, three times, and a confirmation on each is a box
+ * to dismiss rather than a decision to make. A prompt answered by
+ * reflex protects nothing.
+ *
+ * THE FACTS STILL GET SAID, afterwards, in the message the turn
+ * reports: the file that was rewritten, its new size, any trimmed crops
+ * dropped with it, and -- the one that matters -- how many placements
+ * of this scan in this drawing just turned under their own alignment.
+ * Four more presses put a page back where it started; what a re-encode
+ * costs a JPEG cannot be undone by anything, prompt or no prompt.
  */
 SketchScans.rotateSelected = function() {
     var w = SketchScans.w;
@@ -1956,20 +1966,10 @@ SketchScans.rotateSelected = function() {
         return;
     }
 
+    // Counted BEFORE the turn, and reported after it: the placements
+    // are what a caver has to act on, and they are the same before and
+    // after -- the turn changes the pixels under them, not their number.
     var placed = SketchScans.placedCountOf(EAction.getDocument(), rel);
-    var text = qsTr("Rotate ") + rel + qsTr(" a quarter turn " +
-        "clockwise?\n\nThis rewrites the file in the cave's scans " +
-        "folder -- it is not an undoable drawing change, and a JPEG " +
-        "page is re-encoded.");
-    if (placed > 0) {
-        text += qsTr("\n\nThis scan is already placed in this drawing ") +
-            (placed === 1 ? qsTr("once") : (placed + qsTr(" times"))) +
-            qsTr(". Those placements keep their frames, so the sketch " +
-            "inside them will turn: re-align them afterwards.");
-    }
-    if (!SketchScans.confirm(qsTr("Rotate Scan"), text)) {
-        return;
-    }
 
     var turned = CsScanRotate.turn(w.scans, rel);
     if (turned.ok !== true) {
@@ -1983,37 +1983,31 @@ SketchScans.rotateSelected = function() {
     // goes back to "no choice made yet" and reloads the preview from
     // the rewritten file.
     SketchScans.resetTrim(true);
-    EAction.handleUserMessage(rel + qsTr(" rotated clockwise -- now ") +
+    var said = rel + qsTr(" rotated clockwise -- now ") +
         turned.w + " \u00d7 " + turned.h + qsTr(" pixels") +
         (dropped > 0 ? qsTr(", and ") + dropped +
-            qsTr(" trimmed crop(s) of it were removed") : "") + ".");
+            qsTr(" trimmed crop(s) of it were removed") : "") + ".";
+    // The placements are the part a caver has to do something about,
+    // so they are said every time rather than only when a box was
+    // dismissed.
+    if (placed > 0) {
+        said += qsTr(" It is placed in this drawing ") +
+            (placed === 1 ? qsTr("once") : (placed + qsTr(" times"))) +
+            qsTr("; those placements keep their frames, so the sketch " +
+            "inside them has turned -- re-align them.");
+    }
+    EAction.handleUserMessage(said);
 };
 
-/**
- * A Yes/No prompt, parented to the MAIN WINDOW.
- *
- * `makeQMessageBoxStandardButtons` breaks this bridge -- the box comes
- * up with unlabelled buttons and question() returns Yes immediately,
- * confirming itself -- so the buttons are OR'd plainly, and the result
- * is COMPARED to QMessageBox.Yes rather than truthy-tested: No is
- * 65536, which is every bit as truthy as Yes.
- */
-SketchScans.confirm = function(title, text) {
-    try {
-        // getMainWindow is a GUI global -- absent in the headless
-        // harness, which is where this returns false and no file is
-        // touched.
-        var parent = (typeof getMainWindow === "function") ?
-            getMainWindow() : null;
-        var answer = QMessageBox.question(parent, title, text,
-            QMessageBox.Yes | QMessageBox.No);
-        return answer === QMessageBox.Yes;
-    } catch (e) {
-        // No box means no consent: a file rewrite never proceeds on a
-        // failed prompt.
-        return false;
-    }
-};
+// SketchScans.confirm LIVED HERE and is gone with the rotation prompt,
+// its only caller. Two things it knew are worth keeping, because the
+// next Yes/No box in this suite will meet both:
+//
+//   - makeQMessageBoxStandardButtons breaks this bridge: the box comes
+//     up with unlabelled buttons and question() returns Yes
+//     immediately, confirming itself. OR the buttons plainly instead.
+//   - COMPARE the answer to QMessageBox.Yes, never truthy-test it. No
+//     is 65536, which is every bit as truthy as Yes.
 
 /** The whole page, deliberately -- no file written, the original path
  *  used, exactly what this tool did before trimming existed. */
