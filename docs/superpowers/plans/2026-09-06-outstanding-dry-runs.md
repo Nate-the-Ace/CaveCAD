@@ -10,4 +10,4 @@ the next task builds on it.
 
 | Task | Committed as | Dry run still owed |
 | --- | --- | --- |
-| 2 -- staged menu | `<sha>` | Open the Cave Survey menu cold and read it top to bottom. Does the order match the order you would teach in? Anything you would move? |
+| 2 -- staged menu | `6be9fab` | Open the Cave Survey menu cold and read it top to bottom. Does the order match the order you would teach in? Anything you would move? |
