@@ -431,3 +431,32 @@ here, with nothing of this add-on on the stack. Drive an action's own
 handlers with a stub event object instead (`button()`, `buttons()`,
 `modifiers()`, `getModelPosition()`); that exercises the same code
 against the same document and cannot take the app down.
+
+
+## Addendum: the size field is in feet (2026-09-06)
+
+Reported: "I cannot see the blocks that are inserted."
+
+They were being inserted. Measured in Truitt Cave through the live
+bridge: the reference landed at the click point, on `FORMATIONS-DRIP`,
+layer on and unfrozen, `isVisible()` true. It was 1 ft across in a cave
+1270 ft across.
+
+**The blocks are drawn about a foot wide.** A stalactite is 1 ft, a
+breakdown boulder 1.1 ft, an entrance 2.4 ft, a north arrow 3.3 ft. So a
+panel asking for a SCALE FACTOR was asking the wrong question twice
+over: "1.0" told nobody what size they would get, and the same factor
+was a different size on every symbol.
+
+The field is a size in FEET of cave now, default 5, converted for a
+metric drawing exactly as Feature Trace's interval is
+(`CsTrace.spacingFor`), and divided by each symbol's own radius --
+`scaleForSize(sizeFeet, radius, perFoot)`, pure and tested. One number
+in the box, one size on the sheet, whichever tile is armed. The drag
+still overrules it and writes its answer back in feet.
+
+**Scatter Breakdown was left alone.** It places the same blocks at a
+random 0.7-1.5 scale, which is the same 1 ft problem -- a scatter of
+foot-wide boulders. Changing it changes a shipped output that judged
+maps have been drawn with, so it is its own piece of work with its own
+dry run, not a side effect of this fix.
