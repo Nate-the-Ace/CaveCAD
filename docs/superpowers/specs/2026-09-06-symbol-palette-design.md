@@ -347,6 +347,36 @@ plan/elevation/section routing, the station stamp, and the refusals) and
 24 new assertions in `tests/js_unit.js`. Structural and publish checks
 pass.
 
-NO live GUI check has been taken. The panel, the rendered previews, the
-drag-to-aim and the editor tab are unproven in front of a person; see
+A live GUI check WAS then taken, through the MCP bridge against a
+running CaveCAD (2026-09-06). What it confirmed: the dock builds at
+startup with an empty `problems` list; 28 tiles in 8 groups; all 28
+previews rendered from block geometry (`iconFor` returned an icon for
+every one); **New Symbol...** opens a tab holding only the three
+furniture entities and two layers, so the template pour really is
+suppressed; a symbol drawn there saved into the live template, came back
+in the palette with its category and home layer, armed, enabled Edit and
+Delete, and deleted again cleanly; a shipped symbol leaves both buttons
+disabled; and the placement action installs as the current action.
+
+Two things the live check FOUND, both since fixed:
+
+1. **The tiles were `QPushButton`s**, which lay icon and text side by
+   side with no way to stack them -- so a 30px preview and the name
+   shared one line and the name was cut to "Entran" and "Dom". They are
+   `QToolButton`s with `ToolButtonTextUnderIcon` now.
+2. **`instanceof` cannot identify a running action from the panel.**
+   QCAD builds each action in its own script context and hands other
+   contexts an `RActionAdapter`, so `current instanceof SymbolPaletteRun`
+   is ALWAYS false -- which made the "do not restart the action that is
+   running this very click" guard permanently inert. It compares the
+   gui action's script file now. **Feature Trace's identical guard
+   (`FeatureTraceRun`) is inert for the same reason and was left
+   alone** -- it ships that way and changing it is its own piece of
+   work with its own dry run.
+
+What is STILL unproven, and needs a person: the actual mouse gestures.
+Nothing here clicked or dragged in the drawing, so the click-to-drop /
+press-drag-release-to-aim distinction, the cursor readout updating as
+the mouse moves, and the modal Save Symbol dialog (a bridge must never
+`exec()` one) have not been exercised. See
 `docs/superpowers/plans/2026-09-06-outstanding-dry-runs.md`.

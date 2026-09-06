@@ -57,12 +57,13 @@ SymbolPalette.entries = [];
 // a glossary; the tile is the symbol, at the size it will be placed,
 // with the name underneath.
 SymbolPalette.GRID_COLUMNS = 3;
-SymbolPalette.CELL = 62;
-SymbolPalette.ICON = 34;
+SymbolPalette.CELL_W = 84;
+SymbolPalette.CELL_H = 76;
+SymbolPalette.ICON = 30;
 
-/** Roughly how many characters fit on one line of a tile's label.
- *  QPushButton renders "\n" but will not wrap for itself. */
-SymbolPalette.CELL_CHARS = 9;
+/** Roughly how many characters fit on one line of a tile's label. The
+ *  tile does not wrap for itself, whichever widget it is. */
+SymbolPalette.CELL_CHARS = 11;
 
 /** A label broken over lines, greedily, on spaces. A single word longer
  *  than the budget is left alone: a mid-word break is harder to read
@@ -427,8 +428,22 @@ SymbolPalette.buildGroup = function(w, parent, group, shapes) {
     for (var i = 0; i < group.entries.length; i++) {
         var entry = group.entries[i];
         try {
-            var button = new QPushButton(
-                SymbolPalette.wrapLabel(entry.nss, SymbolPalette.CELL_CHARS));
+            // A TOOL BUTTON, not a push button. A QPushButton lays its
+            // icon and its text side by side and there is no way to
+            // stack them, so a 30px picture and a name shared one line
+            // and the name came out as "Entran" and "Dom" -- seen in
+            // the first live GUI check, 2026-09-06. QToolButton stacks
+            // them, which is what a palette tile has always looked
+            // like.
+            var button = new QToolButton();
+            button.text = SymbolPalette.wrapLabel(entry.nss,
+                SymbolPalette.CELL_CHARS);
+            try {
+                button.toolButtonStyle = Qt.ToolButtonTextUnderIcon;
+            } catch (eStyle) {
+                // a bridge without the enum gets a text-beside-icon
+                // tile, which is the old look and still usable
+            }
             button.checkable = true;
             var tip = entry.nss;
             if (!isNull(entry.uis) && entry.uis !== "" &&
@@ -453,7 +468,8 @@ SymbolPalette.buildGroup = function(w, parent, group, shapes) {
                 }
             }
             try {
-                button.setFixedSize(SymbolPalette.CELL, SymbolPalette.CELL);
+                button.setFixedSize(SymbolPalette.CELL_W,
+                    SymbolPalette.CELL_H);
             } catch (eSize) {
                 // a bridge without setFixedSize gets tiles that stretch;
                 // the grid still reads as a grid
@@ -873,15 +889,29 @@ SymbolPalette.startRun = function() {
     // Calling setCurrentAction again would make QCAD tear down the
     // action running this very click -- a hard SIGSEGV, and one this
     // suite has already paid for once.
+    //
+    // BY SCRIPT FILE, NOT instanceof. QCAD builds every action in its
+    // OWN script context, and what a panel sees through
+    // getCurrentAction is an RActionAdapter -- not the JS object, and
+    // never an instance of anything this file can name. `instanceof`
+    // is therefore always false here, which makes the guard above
+    // permanently inert (measured through the live bridge,
+    // 2026-09-06). The action's own gui action still knows which file
+    // it came from, and that is a fact both contexts share.
+    var runPath = SymbolPalette.basePath + "/SymbolPaletteRun.js";
     try {
         var current = di.getCurrentAction();
-        if (!isNull(current) && current instanceof SymbolPaletteRun) {
-            return;
+        if (!isNull(current)) {
+            var file = String(current.getGuiAction().getScriptFile());
+            if (file.length > 0 &&
+                    file.indexOf("SymbolPaletteRun.js") !== -1) {
+                return;
+            }
         }
     } catch (e) {
+        // no readable current action; starting one is the safe answer
     }
-    var runAction = RGuiAction.getByScriptFile(
-        SymbolPalette.basePath + "/SymbolPaletteRun.js");
+    var runAction = RGuiAction.getByScriptFile(runPath);
     di.setCurrentAction(new SymbolPaletteRun(runAction));
 };
 
