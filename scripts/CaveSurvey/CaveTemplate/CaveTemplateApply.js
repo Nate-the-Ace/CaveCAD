@@ -17,6 +17,19 @@
 
 function initNewFile(mdiChild) {
     // ---- gate -------------------------------------------------------
+    // A ONE-SHOT SUPPRESSION, and the only thing that beats every other
+    // gate below. Symbol Palette's editor opens an ordinary File > New
+    // to draw a symbol in, and a symbol editor that arrives as a
+    // complete NSS cave map with a title block in it is not an editor.
+    // Cleared whether or not the template would have been poured, so a
+    // caller that sets it and then fails to open a document cannot
+    // leave the next real File > New empty.
+    var skipOnce = RSettings.getBoolValue(
+        "CaveSurvey/TemplateOnNewSkipOnce", false);
+    if (skipOnce) {
+        RSettings.setValue("CaveSurvey/TemplateOnNewSkipOnce", false);
+        return;
+    }
     var once = RSettings.getBoolValue("CaveSurvey/TemplateOnNewOnce", false);
     if (once) {
         RSettings.setValue("CaveSurvey/TemplateOnNewOnce", false);

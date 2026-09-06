@@ -157,6 +157,13 @@ var CORE_FILES = [
     // document function and is never CALLED here -- same reason
     // CsProfileDraw is loadable under node.
     "scripts/CaveSurvey/Core/CsSymbols.js",
+    // After CsSymbols: merged()/saveBlock() both consult the shipped
+    // catalogue. Loadable here for the same reason -- every function
+    // that opens a template or touches a document does so inside its
+    // BODY, and the pure half (blockNameFor, the marker tag names) is
+    // what is tested. The document half is covered by
+    // tests/symbol_palette_run.js.
+    "scripts/CaveSurvey/Core/CsSymbolStore.js",
     "scripts/CaveSurvey/Core/Format/CsCompass.js",
     "scripts/CaveSurvey/Core/Format/CsWalls.js",
     "scripts/CaveSurvey/Core/Format/CsSurvex.js",
@@ -22561,6 +22568,123 @@ var cdPage = CsDelta.pageSurvey(cdSurvey, [cdSurvey.shots[2]]);
 eqs(cdPage.trips.length, 2, "pageSurvey: carries every trip");
 eqs(cdPage.shots.length, 1, "pageSurvey: carries only the page's shots");
 eqs(cdPage.caveName, cdSurvey.caveName, "pageSurvey: keeps the cave name");
+
+// ---------------------------------------------------------------------
+// CsSymbolStore / CsSymbols -- the catalogue as the palette sees it.
+// ---------------------------------------------------------------------
+
+// The block name a display name becomes. Lossy in the same direction
+// the shipped names are: "Rimstone dam" IS SYM_RIMSTONE_DAM, so a caver
+// who redraws a shipped symbol under its own name collides with it and
+// is told, rather than quietly creating a second one.
+eqs(CsSymbolStore.blockNameFor("Rimstone dam"), "SYM_RIMSTONE_DAM",
+    "blockNameFor: spaces become underscores, letters upper-case");
+eqs(CsSymbolStore.blockNameFor("bear  claw--marks"), "SYM_BEAR_CLAW_MARKS",
+    "blockNameFor: every run of punctuation collapses to one underscore");
+eqs(CsSymbolStore.blockNameFor("  gypsum flower  "), "SYM_GYPSUM_FLOWER",
+    "blockNameFor: leading and trailing junk is trimmed, not encoded");
+eqs(CsSymbolStore.blockNameFor("mud (2)"), "SYM_MUD_2",
+    "blockNameFor: digits survive");
+eqs(CsSymbolStore.blockNameFor("!!!"), null,
+    "blockNameFor: a name with nothing in it answers null rather than " +
+    "a block called SYM_");
+eqs(CsSymbolStore.blockNameFor(""), null,
+    "blockNameFor: so does an empty name");
+eqs(CsSymbolStore.blockNameFor(null), null,
+    "blockNameFor: and a missing one");
+
+// The merged catalogue: the shipped 28 plus whatever the template
+// carries, built-ins winning a collision. Stubbed rather than read off
+// the real template, so the test says the same thing on a machine with
+// no Cave folder as on one with a template full of a caver's own work.
+(function testMergedCatalog() {
+    var realList = CsSymbolStore.list;
+    CsSymbolStore.list = function() {
+        return { ok: true, error: "", entries: [
+            // A collision with a shipped symbol, deliberately wrong in
+            // every field: the shipped row must win outright.
+            { block: "SYM_PIT", nss: "Not a pit", uis: "", layer: "GUANO",
+                category: "Wrong", custom: true },
+            { block: "SYM_GYPSUM_FLOWER", nss: "Gypsum flower",
+                uis: "Gypsum", layer: "FORMATIONS-DRIP",
+                category: "Formations", custom: true },
+            { block: "SYM_BEAR_WALLOW", nss: "Bear wallow", uis: "",
+                layer: "BIOLOGY", category: "Sign", custom: true }
+        ] };
+    };
+    try {
+        var merged = CsSymbols.merged();
+        eqs(merged.ok, true, "merged: reports the store's own success");
+        eqs(merged.entries.length, CsSymbols.CATALOG.length + 2,
+            "merged: two customs join the catalogue and the colliding " +
+            "third does not");
+
+        var pit = null, flower = null, wallow = null;
+        for (var i = 0; i < merged.entries.length; i++) {
+            if (merged.entries[i].block === "SYM_PIT") { pit = merged.entries[i]; }
+            if (merged.entries[i].block === "SYM_GYPSUM_FLOWER") {
+                flower = merged.entries[i];
+            }
+            if (merged.entries[i].block === "SYM_BEAR_WALLOW") {
+                wallow = merged.entries[i];
+            }
+        }
+        ok(pit !== null && pit.nss === "Pit" && pit.layer === "PITS-DOMES",
+            "merged: the SHIPPED SYM_PIT wins the collision -- a template " +
+            "edited by hand cannot re-layer a symbol the legend describes");
+        ok(flower !== null && flower.custom === true,
+            "merged: a custom symbol arrives marked custom, which is what " +
+            "gates Edit and Delete");
+        eqs(wallow === null ? null : wallow.category, "Sign",
+            "merged: a custom symbol keeps its own category, new or not");
+
+        // The categories the panel groups by: catalogue order first,
+        // then any category only a custom symbol names.
+        var cats = CsSymbols.categoriesOf(merged.entries);
+        eqs(cats[0], CsSymbols.CATALOG[0].category,
+            "categoriesOf: the catalogue's own order leads");
+        eqs(cats[cats.length - 1], "Sign",
+            "categoriesOf: a category no shipped symbol uses joins the end");
+        eqs(CsSymbols.categoriesOf(CsSymbols.CATALOG).length,
+            CsSymbols.categories().length,
+            "categoriesOf: categories() is the same function on the " +
+            "shipped catalogue, not a second copy of it");
+    } finally {
+        CsSymbolStore.list = realList;
+    }
+})();
+
+// A store that cannot find the template still answers a usable
+// catalogue: the palette must open with the shipped 28 in it and the
+// reason showing, not empty.
+(function testMergedWithoutTemplate() {
+    var realList = CsSymbolStore.list;
+    CsSymbolStore.list = function() {
+        return { ok: false, entries: [], error: "no template here" };
+    };
+    try {
+        var merged = CsSymbols.merged();
+        eqs(merged.entries.length, CsSymbols.CATALOG.length,
+            "merged: a missing template still yields the shipped catalogue");
+        eqs(merged.ok, false, "merged: and reports that something failed");
+        eqs(merged.error, "no template here",
+            "merged: passing the store's reason through, for the panel to " +
+            "show");
+    } finally {
+        CsSymbolStore.list = realList;
+    }
+})();
+
+// The marker tag names are a WIRE FORMAT: they are written into
+// template files that outlive any one build, and renaming one would
+// make every custom symbol already saved anonymous.
+eqs(CsSymbolStore.MARKER_TAGS.nss, "SymbolNss", "marker tag: name");
+eqs(CsSymbolStore.MARKER_TAGS.uis, "SymbolUis", "marker tag: UIS alias");
+eqs(CsSymbolStore.MARKER_TAGS.category, "SymbolCategory",
+    "marker tag: category");
+eqs(CsSymbolStore.MARKER_TAGS.layer, "SymbolLayer", "marker tag: layer");
+eqs(CsSymbolStore.MARKER_TAGS.custom, "SymbolCustom", "marker tag: the flag");
+eqs(CsSymbolStore.PREFIX, "SYM_", "the symbol block prefix");
 
 // ---------------------------------------------------------------------
 // Report.

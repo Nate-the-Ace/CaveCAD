@@ -81,11 +81,56 @@ CsSymbols.byBlock = function(blockName) {
     return null;
 };
 
-CsSymbols.categories = function() {
+/**
+ * The catalogue as the PALETTE sees it: the shipped 28 plus every
+ * custom symbol the template carries.
+ *
+ * Built-ins win a name collision. A caver cannot create one through
+ * this suite -- CsSymbolStore.saveBlock refuses a shipped name -- but a
+ * template edited by hand can hold one, and the shipped row is the one
+ * the legend, the scatter tool and this file's own comments describe.
+ *
+ * Answers the built-in catalogue alone wherever the store is not
+ * loaded, so a caller in a headless or bare context still gets a
+ * usable list rather than an exception.
+ *
+ * \return { entries, ok, error } -- entries is always an array.
+ */
+CsSymbols.merged = function(path) {
+    var out = CsSymbols.CATALOG.slice(0);
+    if (typeof CsSymbolStore === "undefined") {
+        return { entries: out, ok: true, error: "" };
+    }
+    var listed = CsSymbolStore.list(path);
+    var seen = {};
+    for (var i = 0; i < out.length; i++) {
+        seen[out[i].block] = true;
+    }
+    for (var j = 0; j < listed.entries.length; j++) {
+        var entry = listed.entries[j];
+        if (seen[entry.block] === true) {
+            continue;
+        }
+        seen[entry.block] = true;
+        out.push(entry);
+    }
+    return { entries: out, ok: listed.ok, error: listed.error };
+};
+
+/**
+ * The categories of a given entry list, in first-appearance order.
+ *
+ * Takes the list rather than reading CATALOG directly, so the palette
+ * can group a merged list (custom symbols included) through the same
+ * function the shipped catalogue uses. No argument means the shipped
+ * catalogue, which is what every existing caller passes.
+ */
+CsSymbols.categoriesOf = function(entries) {
     var seen = {};
     var out = [];
-    for (var i = 0; i < CsSymbols.CATALOG.length; i++) {
-        var c = CsSymbols.CATALOG[i].category;
+    var list = isNull(entries) ? CsSymbols.CATALOG : entries;
+    for (var i = 0; i < list.length; i++) {
+        var c = list[i].category;
         if (!seen[c]) {
             seen[c] = true;
             out.push(c);
@@ -94,20 +139,35 @@ CsSymbols.categories = function() {
     return out;
 };
 
+CsSymbols.categories = function() {
+    return CsSymbols.categoriesOf(CsSymbols.CATALOG);
+};
+
 /**
- * Inserts one catalog symbol into the document at pos, on ITS layer,
- * inside the caller's transaction. QCAD context only.
+ * Inserts one catalog symbol into the document at pos, on ITS layer --
+ * or on `layerName` when the caller has already worked out which view
+ * the symbol belongs to -- inside the caller's transaction. QCAD
+ * context only.
  *
  * \return the block reference entity, or null when the block is
  *         missing from this drawing (i.e. not started from the
  *         template) -- callers report that in plain language.
  */
-CsSymbols.insert = function(doc, entry, pos, scale, rotationRad) {
+CsSymbols.insert = function(doc, entry, pos, scale, rotationRad, layerName) {
     var block = doc.queryBlock(entry.block);
     if (isNull(block)) {
         return null;
     }
-    CsLayers.ensure(doc, getDocumentInterface(), entry.layer);
+    // The catalogue layer unless the caller names another. A caller
+    // that has ROUTED the symbol -- the palette, deciding plan /
+    // profile / section from where the click landed -- hands the twin
+    // in here rather than retargeting the reference afterwards, so the
+    // layer is ensured and the reference created in one place. Callers
+    // that pass nothing behave exactly as before.
+    if (isNull(layerName) || layerName === "") {
+        layerName = entry.layer;
+    }
+    CsLayers.ensure(doc, getDocumentInterface(), layerName);
     if (scale === undefined) {
         scale = 1.0;
     }
@@ -117,6 +177,6 @@ CsSymbols.insert = function(doc, entry, pos, scale, rotationRad) {
     var data = new RBlockReferenceData(block.getId(), pos,
         new RVector(scale, scale), rotationRad, 1, 1, 1, 1);
     var ref = new RBlockReferenceEntity(doc, data);
-    ref.setLayerId(doc.getLayerId(entry.layer));
+    ref.setLayerId(doc.getLayerId(layerName));
     return ref;
 };

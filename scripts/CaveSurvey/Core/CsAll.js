@@ -121,6 +121,11 @@ include(includeBasePath + "/CsProfileBind.js");
 include(includeBasePath + "/CsPick.js");
 include(includeBasePath + "/CsLocationPick.js");
 include(includeBasePath + "/CsSymbols.js");
+// After CsSymbols (it answers with catalogue rows and refuses to
+// overwrite a shipped one), CsLayers (it ensures a symbol's home
+// layer in both directions) and CsTags (the marker point inside a
+// custom block is a property group).
+include(includeBasePath + "/CsSymbolStore.js");
 include(includeBasePath + "/CsSheet.js");
 include(includeBasePath + "/CsReport.js");
 // After CsModel, CsTraverse, CsProfile and (optionally) CsRevise --

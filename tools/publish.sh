@@ -124,6 +124,22 @@ DEST=$(echo "$SCRIPTS_DIRS" | head -n1)/CaveSurvey
 mkdir -p "$CAVE/releases"
 cp "$ZIP" "$CAVE/releases/$NAME.zip"
 
+# THE TEMPLATE IS NOW SOMETHING A CAVER CAN EDIT. Symbol Palette writes
+# a caver's own symbols INTO NSS_Cave_Template_PLAN.dxf (Nathan's call,
+# 2026-09-06), and the loop below deletes templates/ outright before
+# copying the shipped one over it. Losing those symbols on an upgrade
+# was accepted -- rebuilding them is a redraw, not a survey -- but
+# losing them SILENTLY was not the deal, so the live template is set
+# aside first and the caver is told where it went.
+if [ -f "$CAVE/templates/NSS_Cave_Template_PLAN.dxf" ]; then
+    mkdir -p "$CAVE/templates_previous"
+    cp "$CAVE/templates/NSS_Cave_Template_PLAN.dxf" \
+        "$CAVE/templates_previous/NSS_Cave_Template_PLAN-$(date -u "+%Y%m%d-%H%M%S").dxf"
+    echo "note: your existing template was copied to $CAVE/templates_previous"
+    echo "      before the shipped one replaced it -- any symbols you drew"
+    echo "      yourself are in that copy."
+fi
+
 for extra in templates examples docs INSTALL.txt README.txt LICENSE install.sh install.cmd; do
     rm -rf "$CAVE/$extra"
     [ -e "$STAGE/$extra" ] && cp -R "$STAGE/$extra" "$CAVE/$extra"

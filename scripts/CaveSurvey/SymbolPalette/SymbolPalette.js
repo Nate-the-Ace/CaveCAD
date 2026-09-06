@@ -1,0 +1,944 @@
+// SymbolPalette.js -- Symbol Palette: the menu entry and the docked
+// panel that arms which cave symbol the next click places.
+//
+// The click and the aim-drag live in SymbolPaletteRun.js beside this
+// file; drawing a new symbol lives in SymbolPaletteEdit.js. QCAD cannot
+// find either on its own -- AddOn.getAddOns only builds an add-on from
+// <dir>/<dir>.js -- so init() below registers both.
+//
+// Panel shape follows Feature Trace's dock, including the two details
+// that are load-bearing rather than stylistic: the dock is BUILT during
+// init() and left hidden (the main window's restoreState() runs after
+// add-on init and can only place a dock that already exists), and every
+// widget construction and connect is wrapped so a bridge refusal costs
+// one control rather than the whole panel.
+//
+// WHAT THE PANEL IS FOR. The suite has known its 28 symbols since the
+// beginning -- Core/CsSymbols.js names each one with its NSS name, its
+// UIS alias, its home layer and its category -- but the only ways to
+// put one on a map were to scatter breakdown or to print a legend. The
+// vocabulary was there and there was no way to speak it. This is the
+// front door: every symbol, grouped, with a picture of itself, one
+// click to arm and one click to place.
+
+include("scripts/EAction.js");
+include(includeBasePath + "/../Core/CsAll.js");
+include(includeBasePath + "/SymbolPaletteRun.js");
+include(includeBasePath + "/SymbolPaletteEdit.js");
+
+function SymbolPalette(guiAction) {
+    EAction.call(this, guiAction);
+}
+
+SymbolPalette.prototype = new EAction();
+
+/** The armed catalogue entry, read by SymbolPaletteRun.
+ *
+ *  Module state, which is only safe because the panel SHOWS which tile
+ *  is armed -- the same bargain Feature Trace makes. Undefined means
+ *  nothing is armed, and a click in the drawing says so rather than
+ *  guessing a symbol. */
+SymbolPalette.armed = undefined;
+
+/** The dock and the widgets the panel updates. Module-level singletons
+ *  because there is one panel per application window. */
+var csSymbolPaletteDock;
+SymbolPalette.widgets = undefined;
+
+/** The entries the panel last built itself from, in panel order.
+ *  Kept so Edit and Delete can act on the armed symbol without asking
+ *  the store again mid-click. */
+SymbolPalette.entries = [];
+
+// A GRID OF PICTURES, NOT A LIST OF NAMES.
+//
+// A symbol is a drawing, and a caver looking for the spring symbol is
+// looking for the picture of a spring. Names alone would make the panel
+// a glossary; the tile is the symbol, at the size it will be placed,
+// with the name underneath.
+SymbolPalette.GRID_COLUMNS = 3;
+SymbolPalette.CELL = 62;
+SymbolPalette.ICON = 34;
+
+/** Roughly how many characters fit on one line of a tile's label.
+ *  QPushButton renders "\n" but will not wrap for itself. */
+SymbolPalette.CELL_CHARS = 9;
+
+/** A label broken over lines, greedily, on spaces. A single word longer
+ *  than the budget is left alone: a mid-word break is harder to read
+ *  than an overhang. */
+SymbolPalette.wrapLabel = function(text, budget) {
+    var words = String(text).split(" ");
+    var lines = [];
+    var line = "";
+    for (var i = 0; i < words.length; i++) {
+        if (line.length === 0) {
+            line = words[i];
+        } else if (line.length + 1 + words[i].length <= budget) {
+            line += " " + words[i];
+        } else {
+            lines.push(line);
+            line = words[i];
+        }
+    }
+    if (line.length > 0) {
+        lines.push(line);
+    }
+    return lines.join("\n");
+};
+
+/**
+ * True when this entry matches the panel's search text.
+ *
+ * Matches the NSS name, the UIS alias AND the block name, all
+ * case-insensitively: a caver types "gour" (UIS) as readily as
+ * "rimstone" (NSS), and a symbol found by only one of its two names is
+ * a symbol that looks missing.
+ *
+ * Pure, so the unit tests can hold it to that.
+ */
+SymbolPalette.matches = function(entry, needle) {
+    if (isNull(needle) || String(needle).length === 0) {
+        return true;
+    }
+    var n = String(needle).toLowerCase();
+    var fields = [entry.nss, entry.uis, entry.block, entry.category];
+    for (var i = 0; i < fields.length; i++) {
+        if (isNull(fields[i])) {
+            continue;
+        }
+        if (String(fields[i]).toLowerCase().indexOf(n) !== -1) {
+            return true;
+        }
+    }
+    return false;
+};
+
+/**
+ * Groups entries by category, categories in first-appearance order.
+ *
+ * The shipped catalogue's order IS the grouping order, so the panel
+ * reads the way the catalogue does; a custom symbol's category joins
+ * the end if it is a new one, or its existing group if it is not.
+ *
+ * Pure.
+ */
+SymbolPalette.grouped = function(entries, needle) {
+    var order = [];
+    var byCategory = {};
+    for (var i = 0; i < entries.length; i++) {
+        var entry = entries[i];
+        if (!SymbolPalette.matches(entry, needle)) {
+            continue;
+        }
+        var c = entry.category;
+        if (!byCategory.hasOwnProperty(c)) {
+            byCategory[c] = [];
+            order.push(c);
+        }
+        byCategory[c].push(entry);
+    }
+    var out = [];
+    for (var j = 0; j < order.length; j++) {
+        out.push({ category: order[j], entries: byCategory[order[j]] });
+    }
+    return out;
+};
+
+/** The panel's scale, or 1.0 when the field holds nonsense. */
+SymbolPalette.scaleValue = function() {
+    var w = SymbolPalette.widgets;
+    if (isNull(w) || isNull(w.scaleEdit)) {
+        return 1.0;
+    }
+    try {
+        var v = parseFloat(w.scaleEdit.text);
+        if (isNaN(v) || v <= 0) {
+            return 1.0;
+        }
+        return v;
+    } catch (e) {
+        return 1.0;
+    }
+};
+
+/** The panel's angle in DEGREES, or 0. */
+SymbolPalette.angleValue = function() {
+    var w = SymbolPalette.widgets;
+    if (isNull(w) || isNull(w.angleEdit)) {
+        return 0.0;
+    }
+    try {
+        var v = parseFloat(w.angleEdit.text);
+        if (isNaN(v)) {
+            return 0.0;
+        }
+        return v;
+    } catch (e) {
+        return 0.0;
+    }
+};
+
+/**
+ * Arms an entry and makes the panel show which one.
+ *
+ * The showing is not decoration. With no per-symbol menu command, an
+ * entry held in module state is exactly the invisible mode a command
+ * would have prevented; the checked tile IS the indicator.
+ */
+SymbolPalette.arm = function(entry) {
+    SymbolPalette.armed = entry;
+    var w = SymbolPalette.widgets;
+    if (isNull(w) || isNull(w.buttons)) {
+        return;
+    }
+    for (var i = 0; i < w.buttons.length; i++) {
+        try {
+            w.buttons[i].button.checked =
+                (w.buttons[i].entry.block === entry.block);
+        } catch (e) {
+            // a button the bridge will not let us write back is still
+            // armed correctly; only its appearance is wrong
+        }
+    }
+    SymbolPalette.refreshCustomButtons();
+};
+
+/** Clears the armed symbol and every checked tile. */
+SymbolPalette.disarm = function() {
+    SymbolPalette.armed = undefined;
+    var w = SymbolPalette.widgets;
+    if (isNull(w) || isNull(w.buttons)) {
+        return;
+    }
+    for (var i = 0; i < w.buttons.length; i++) {
+        try {
+            w.buttons[i].button.checked = false;
+        } catch (e) {
+        }
+    }
+    SymbolPalette.refreshCustomButtons();
+};
+
+/** Edit and Delete act on the armed symbol, and only a CUSTOM symbol
+ *  can be either. The shipped 28 are code: an edited copy in the
+ *  template would be silently taken back by the next release. */
+SymbolPalette.refreshCustomButtons = function() {
+    var w = SymbolPalette.widgets;
+    if (isNull(w)) {
+        return;
+    }
+    var custom = !isNull(SymbolPalette.armed) &&
+        SymbolPalette.armed.custom === true;
+    try {
+        if (!isNull(w.editButton)) {
+            w.editButton.enabled = custom;
+        }
+        if (!isNull(w.deleteButton)) {
+            w.deleteButton.enabled = custom;
+        }
+    } catch (e) {
+    }
+};
+
+/** The cursor readout: which view the cursor is in, and the layer a
+ *  symbol dropped there would land on. Called from the run action's
+ *  mouse-move, so it must never throw. */
+SymbolPalette.showCursorFrame = function(frame, layer) {
+    var w = SymbolPalette.widgets;
+    if (isNull(w) || isNull(w.frameLabel)) {
+        return;
+    }
+    try {
+        var name = qsTr("plan");
+        if (frame === "profile") {
+            name = qsTr("elevation");
+        } else if (frame === "section") {
+            name = qsTr("cross section");
+        }
+        var text = qsTr("Cursor:  %1").arg(name);
+        if (!isNull(layer) && String(layer).length > 0) {
+            text += "  --  " + String(layer);
+        }
+        w.frameLabel.text = text;
+    } catch (e) {
+    }
+};
+
+// ---------------------------------------------------------------------
+// Previews
+// ---------------------------------------------------------------------
+
+/**
+ * An icon of one symbol, drawn from the block's own geometry.
+ *
+ * RENDERED AND NOT DRAWN BY HAND, so a symbol a caver invents this
+ * afternoon has a picture this afternoon, and so a preview can never
+ * drift from the block it names -- the two failures a folder of 28
+ * hand-authored SVGs would have guaranteed.
+ *
+ * Every shape is reduced to a point cloud (RShape.getPointCloud, which
+ * every shape type implements) and stroked as a polyline. That is
+ * coarse for a preview and exactly right for a tile 34 pixels across;
+ * it also means one code path covers lines, arcs, splines and
+ * polylines rather than four.
+ *
+ * \return a QIcon, or null when this build's painter refuses -- the
+ *         caller falls back to a text tile rather than to no tile.
+ */
+SymbolPalette.iconFor = function(shapes, size, penColor) {
+    if (isNull(shapes) || shapes.length === 0) {
+        return null;
+    }
+    // The drawing extent, so the symbol fills its tile whatever size it
+    // is in cave units -- a 20 ft pit and a 6 in stalactite both come
+    // out legible.
+    var minX = null, minY = null, maxX = null, maxY = null;
+    var clouds = [];
+    var i, j;
+    for (i = 0; i < shapes.length; i++) {
+        var pts = null;
+        try {
+            pts = shapes[i].getPointCloud(0.05);
+        } catch (eCloud) {
+            pts = null;
+        }
+        if (isNull(pts) || pts.length < 2) {
+            continue;
+        }
+        var cloud = [];
+        for (j = 0; j < pts.length; j++) {
+            var x = pts[j].x, y = pts[j].y;
+            cloud.push({ x: x, y: y });
+            if (minX === null || x < minX) { minX = x; }
+            if (maxX === null || x > maxX) { maxX = x; }
+            if (minY === null || y < minY) { minY = y; }
+            if (maxY === null || y > maxY) { maxY = y; }
+        }
+        clouds.push(cloud);
+    }
+    if (clouds.length === 0 || minX === null) {
+        return null;
+    }
+
+    var w = maxX - minX, h = maxY - minY;
+    var margin = 3;
+    var span = Math.max(w, h);
+    // A symbol that is a single horizontal or vertical stroke has one
+    // zero extent; scaling by it would be a division by zero and a
+    // blank tile.
+    var factor = (span <= 0) ? 1.0 : (size - 2 * margin) / span;
+    var cx = (minX + maxX) / 2, cy = (minY + maxY) / 2;
+
+    try {
+        var pixmap = new QPixmap(size, size);
+        pixmap.fill(new QColor(0, 0, 0, 0));
+        var painter = new QPainter();
+        painter.begin(pixmap);
+        try {
+            painter.setRenderHint(QPainter.Antialiasing, true);
+        } catch (eHint) {
+        }
+        var pen = new QPen(isNull(penColor) ? new QColor(30, 30, 30) :
+            penColor);
+        pen.setWidth(1);
+        painter.setPen(pen);
+        for (i = 0; i < clouds.length; i++) {
+            for (j = 0; j < clouds[i].length - 1; j++) {
+                var a = clouds[i][j], b = clouds[i][j + 1];
+                // y is flipped: drawing space counts up, a pixmap counts
+                // down, and a symbol drawn upside down is a different
+                // symbol (a stalactite is a stalagmite).
+                painter.drawLine(
+                    size / 2 + (a.x - cx) * factor,
+                    size / 2 - (a.y - cy) * factor,
+                    size / 2 + (b.x - cx) * factor,
+                    size / 2 - (b.y - cy) * factor);
+            }
+        }
+        painter.end();
+        return new QIcon(pixmap);
+    } catch (ePaint) {
+        return null;
+    }
+};
+
+/**
+ * Every symbol's shapes, read once out of the template.
+ *
+ * One open of the template for the whole panel rather than one per
+ * tile: the file is a full DXF import, and 28 of them would be felt.
+ *
+ * \return { byBlock: {name: [shapes]}, error }
+ */
+SymbolPalette.loadShapes = function() {
+    var out = { byBlock: {}, error: "" };
+    var path = CsSymbolStore.templatePath();
+    if (isNull(path)) {
+        out.error = "no template";
+        return out;
+    }
+    var di = CsSymbolStore.openOffscreen(path);
+    if (di === null) {
+        out.error = "template unreadable";
+        return out;
+    }
+    var doc = di.getDocument();
+    var names = doc.getBlockNames();
+    for (var i = 0; i < names.length; i++) {
+        var name = String(names[i]);
+        if (name.indexOf(CsSymbolStore.PREFIX) !== 0) {
+            continue;
+        }
+        var entities = CsSymbolStore.geometryOf(doc, name);
+        var shapes = [];
+        for (var j = 0; j < entities.length; j++) {
+            try {
+                var got = entities[j].getShapes();
+                for (var k = 0; k < got.length; k++) {
+                    shapes.push(got[k]);
+                }
+            } catch (eShape) {
+            }
+        }
+        out.byBlock[name] = shapes;
+    }
+    return out;
+};
+
+// ---------------------------------------------------------------------
+// The panel
+// ---------------------------------------------------------------------
+
+/** Arms an entry and starts the placement action. Its own function so
+ *  the closure captures ONE entry rather than the loop variable. */
+SymbolPalette.connectTile = function(button, entry) {
+    button.clicked.connect(function() {
+        SymbolPalette.arm(entry);
+        SymbolPalette.startRun();
+    });
+};
+
+/** One category, as a group box full of tiles. */
+SymbolPalette.buildGroup = function(w, parent, group, shapes) {
+    var box = new QGroupBox(group.category, parent);
+    var inner = new QGridLayout();
+    var cell = 0;
+    for (var i = 0; i < group.entries.length; i++) {
+        var entry = group.entries[i];
+        try {
+            var button = new QPushButton(
+                SymbolPalette.wrapLabel(entry.nss, SymbolPalette.CELL_CHARS));
+            button.checkable = true;
+            var tip = entry.nss;
+            if (!isNull(entry.uis) && entry.uis !== "" &&
+                    entry.uis !== entry.nss) {
+                tip += "  (UIS: " + entry.uis + ")";
+            }
+            tip += "\n" + entry.block + "  ->  " + entry.layer;
+            if (entry.custom === true) {
+                tip += "\n" + qsTr("Your own symbol -- Edit and Delete " +
+                    "work on this one.");
+            }
+            button.toolTip = tip;
+            var icon = SymbolPalette.iconFor(shapes[entry.block],
+                SymbolPalette.ICON, null);
+            if (icon !== null) {
+                try {
+                    button.icon = icon;
+                    button.iconSize = new QSize(SymbolPalette.ICON,
+                        SymbolPalette.ICON);
+                } catch (eIcon) {
+                    // a tile with no picture still says its name
+                }
+            }
+            try {
+                button.setFixedSize(SymbolPalette.CELL, SymbolPalette.CELL);
+            } catch (eSize) {
+                // a bridge without setFixedSize gets tiles that stretch;
+                // the grid still reads as a grid
+            }
+            SymbolPalette.connectTile(button, entry);
+            inner.addWidget(button,
+                Math.floor(cell / SymbolPalette.GRID_COLUMNS),
+                cell % SymbolPalette.GRID_COLUMNS);
+            cell++;
+            w.buttons.push({ button: button, entry: entry });
+        } catch (e) {
+            w.problems.push(entry.block + " (" + e + ")");
+        }
+    }
+    try {
+        // Fixed-size tiles in a stretching grid would drift apart as the
+        // dock widens; the stretch goes to a column PAST the last one.
+        inner.setColumnStretch(SymbolPalette.GRID_COLUMNS, 1);
+    } catch (eStretch) {
+    }
+    box.setLayout(inner);
+    return box;
+};
+
+/**
+ * Rebuilds the tiles from the current catalogue and search text.
+ *
+ * Tears the tile area down and builds it again rather than hiding
+ * rows: the merged catalogue can GAIN a symbol (a save) and LOSE one (a
+ * delete) while the panel is open, and a hide-only filter would leave a
+ * deleted symbol clickable.
+ */
+SymbolPalette.rebuildTiles = function() {
+    var w = SymbolPalette.widgets;
+    if (isNull(w) || isNull(w.tileHost)) {
+        return;
+    }
+    var armedBlock = isNull(SymbolPalette.armed) ? null :
+        SymbolPalette.armed.block;
+
+    try {
+        // Delete the old boxes. Reparenting to null and calling
+        // deleteLater is how a script drops a widget in this bridge;
+        // hiding them would leave their buttons connected and armable.
+        for (var i = 0; i < w.groupBoxes.length; i++) {
+            try {
+                w.groupBoxes[i].setParent(null);
+                w.groupBoxes[i].deleteLater();
+            } catch (eDel) {
+            }
+        }
+    } catch (eClear) {
+    }
+    w.groupBoxes = [];
+    w.buttons = [];
+
+    var merged = CsSymbols.merged();
+    SymbolPalette.entries = merged.entries;
+    if (!merged.ok && !isNull(w.problemLabel)) {
+        try {
+            w.problemLabel.text = merged.error;
+            w.problemLabel.visible = true;
+        } catch (eProb) {
+        }
+    } else if (!isNull(w.problemLabel)) {
+        try {
+            w.problemLabel.visible = false;
+        } catch (eProb2) {
+        }
+    }
+
+    var shapes = SymbolPalette.loadShapes().byBlock;
+    var needle = "";
+    try {
+        needle = isNull(w.searchEdit) ? "" : String(w.searchEdit.text);
+    } catch (eSearch) {
+    }
+
+    var groups = SymbolPalette.grouped(merged.entries, needle);
+    for (var g = 0; g < groups.length; g++) {
+        try {
+            var box = SymbolPalette.buildGroup(w, w.tileHost, groups[g],
+                shapes);
+            w.tileLayout.addWidget(box, 0, 0);
+            w.groupBoxes.push(box);
+        } catch (eGroup) {
+            w.problems.push(groups[g].category + " (" + eGroup + ")");
+        }
+    }
+
+    // Re-arm what was armed, if it is still in the list: a search that
+    // hides the armed tile must not silently disarm the tool mid-job.
+    if (armedBlock !== null) {
+        for (var b = 0; b < w.buttons.length; b++) {
+            if (w.buttons[b].entry.block === armedBlock) {
+                try {
+                    w.buttons[b].button.checked = true;
+                } catch (eRe) {
+                }
+            }
+        }
+    }
+    SymbolPalette.refreshCustomButtons();
+};
+
+SymbolPalette.buildDock = function(appWin) {
+    var dock = new QDockWidget(qsTr("Symbol Palette"), appWin);
+    // Without an objectName restoreState() cannot identify the dock and
+    // silently forgets where it was.
+    dock.objectName = "CaveSurveySymbolPaletteDock";
+
+    var w = { problems: [], buttons: [], groupBoxes: [] };
+    var body = new QWidget(dock);
+    var layout = new QVBoxLayout();
+
+    // -- cursor frame readout ----------------------------------------
+    try {
+        w.frameLabel = new QLabel(qsTr("Cursor:  --"));
+        layout.addWidget(w.frameLabel, 0, 0);
+    } catch (eFrame) {
+        w.problems.push("cursor frame readout (" + eFrame + ")");
+    }
+
+    // -- scale and angle ---------------------------------------------
+    try {
+        var settings = new QHBoxLayout();
+        settings.addWidget(new QLabel(qsTr("Scale")), 0, 0);
+        w.scaleEdit = new QLineEdit("1.0");
+        w.scaleEdit.maximumWidth = 50;
+        w.scaleEdit.toolTip = qsTr("How big the symbol is placed, as a " +
+            "multiple of its drawn size.");
+        settings.addWidget(w.scaleEdit, 0, 0);
+
+        settings.addWidget(new QLabel(qsTr("Angle")), 0, 0);
+        w.angleEdit = new QLineEdit("0");
+        w.angleEdit.maximumWidth = 50;
+        w.angleEdit.toolTip = qsTr("The angle a plain CLICK places at, in " +
+            "degrees. Dragging away from the click point aims the symbol " +
+            "instead and overrides this.");
+        settings.addWidget(w.angleEdit, 0, 0);
+        settings.addWidget(new QLabel(qsTr("deg")), 1, 0);
+        layout.addLayout(settings, 0);
+    } catch (eSettings) {
+        w.problems.push("scale/angle (" + eSettings + ")");
+    }
+
+    // -- search ------------------------------------------------------
+    try {
+        w.searchEdit = new QLineEdit("");
+        w.searchEdit.toolTip = qsTr("Filter by name. Both names are " +
+            "searched -- \"gour\" finds the rimstone dam as surely as " +
+            "\"rimstone\" does.");
+        try {
+            w.searchEdit.placeholderText = qsTr("Search symbols");
+        } catch (ePlace) {
+        }
+        w.searchEdit.textChanged.connect(function(text) {
+            try {
+                SymbolPalette.rebuildTiles();
+            } catch (eFilter) {
+                // never throw out of a signal handler
+            }
+        });
+        layout.addWidget(w.searchEdit, 0, 0);
+    } catch (eSearchBox) {
+        w.problems.push("search box (" + eSearchBox + ")");
+    }
+
+    // -- a place to say the template could not be read ---------------
+    try {
+        w.problemLabel = new QLabel("");
+        w.problemLabel.wordWrap = true;
+        w.problemLabel.visible = false;
+        layout.addWidget(w.problemLabel, 0, 0);
+    } catch (eProblem) {
+        w.problems.push("problem label (" + eProblem + ")");
+    }
+
+    // -- the tiles, in a scroll area ---------------------------------
+    //
+    // Scrolling and not a taller dock: 28 symbols in nine categories is
+    // longer than any screen, and a panel whose bottom half cannot be
+    // reached hides exactly the symbols nobody remembers the names of.
+    try {
+        w.tileHost = new QWidget();
+        w.tileLayout = new QVBoxLayout();
+        w.tileHost.setLayout(w.tileLayout);
+        var scroll = new QScrollArea();
+        scroll.setWidget(w.tileHost);
+        scroll.setWidgetResizable(true);
+        layout.addWidget(scroll, 1, 0);
+    } catch (eScroll) {
+        w.problems.push("symbol area (" + eScroll + ")");
+    }
+
+    // -- the caver's own symbols -------------------------------------
+    try {
+        var custom = new QHBoxLayout();
+        w.newButton = new QPushButton(qsTr("New Symbol..."));
+        w.newButton.toolTip = qsTr("Draw a symbol of your own. Opens a " +
+            "drawing to draw it in; saving adds it to this palette and to " +
+            "the cave template.");
+        w.newButton.clicked.connect(function() {
+            try {
+                SymbolPaletteEdit.startNew();
+            } catch (eNew) {
+                warning("Symbol Palette: could not open the symbol " +
+                    "editor (" + eNew + ").");
+            }
+        });
+        custom.addWidget(w.newButton, 1, 0);
+
+        w.editButton = new QPushButton(qsTr("Edit"));
+        w.editButton.enabled = false;
+        w.editButton.toolTip = qsTr("Reopen your own symbol to change it. " +
+            "The symbols the suite ships cannot be edited -- an edited " +
+            "copy would be replaced by the next CaveCAD update.");
+        w.editButton.clicked.connect(function() {
+            try {
+                SymbolPaletteEdit.startEdit(SymbolPalette.armed);
+            } catch (eEdit) {
+                warning("Symbol Palette: could not open that symbol (" +
+                    eEdit + ").");
+            }
+        });
+        custom.addWidget(w.editButton, 0, 0);
+
+        w.deleteButton = new QPushButton(qsTr("Delete"));
+        w.deleteButton.enabled = false;
+        w.deleteButton.toolTip = qsTr("Remove your own symbol from the " +
+            "template. Drawings that already use it keep their own copy.");
+        w.deleteButton.clicked.connect(function() {
+            try {
+                SymbolPalette.deleteArmed();
+            } catch (eDel) {
+                warning("Symbol Palette: could not delete that symbol (" +
+                    eDel + ").");
+            }
+        });
+        custom.addWidget(w.deleteButton, 0, 0);
+        layout.addLayout(custom, 0);
+    } catch (eCustom) {
+        w.problems.push("custom symbol buttons (" + eCustom + ")");
+    }
+
+    // -- the editor row ----------------------------------------------
+    //
+    // BUILT ONCE AND HIDDEN, never created on demand. Widgets made
+    // while the panel is already live are the shape this bridge is
+    // least reliable about, and an editor whose Save button failed to
+    // construct would strand a caver with a drawing and no way to keep
+    // it.
+    try {
+        w.editorLabel = new QLabel("");
+        w.editorLabel.wordWrap = true;
+        w.editorLabel.visible = false;
+        layout.addWidget(w.editorLabel, 0, 0);
+
+        var editorRow = new QHBoxLayout();
+        w.saveSymbolButton = new QPushButton(qsTr("Save Symbol"));
+        w.saveSymbolButton.toolTip = qsTr("Write what is in the symbol " +
+            "editor into the cave template, and add it to this palette.");
+        w.saveSymbolButton.visible = false;
+        w.saveSymbolButton.clicked.connect(function() {
+            try {
+                SymbolPaletteEdit.save();
+            } catch (eSave) {
+                warning("Symbol Palette: the symbol could not be saved (" +
+                    eSave + ").");
+            }
+        });
+        editorRow.addWidget(w.saveSymbolButton, 1, 0);
+
+        w.cancelSymbolButton = new QPushButton(qsTr("Cancel"));
+        w.cancelSymbolButton.toolTip = qsTr("Stop editing. The drawing " +
+            "stays open -- nothing you drew is thrown away.");
+        w.cancelSymbolButton.visible = false;
+        w.cancelSymbolButton.clicked.connect(function() {
+            try {
+                SymbolPaletteEdit.cancel();
+            } catch (eCancel) {
+            }
+        });
+        editorRow.addWidget(w.cancelSymbolButton, 0, 0);
+        layout.addLayout(editorRow, 0);
+    } catch (eEditor) {
+        w.problems.push("editor row (" + eEditor + ")");
+    }
+
+    body.setLayout(layout);
+    dock.setWidget(body);
+    SymbolPalette.widgets = w;
+
+    try {
+        SymbolPalette.rebuildTiles();
+    } catch (eBuild) {
+        w.problems.push("symbol tiles (" + eBuild + ")");
+    }
+
+    if (w.problems.length > 0) {
+        warning("Symbol Palette: this CaveCAD build refused part of the " +
+            "panel -- " + w.problems.join("; ") + ". Please report this.");
+    }
+    return dock;
+};
+
+/** Deletes the armed custom symbol, after asking. */
+SymbolPalette.deleteArmed = function() {
+    var entry = SymbolPalette.armed;
+    if (isNull(entry) || entry.custom !== true) {
+        return;
+    }
+    var answer = QMessageBox.question(
+        RMainWindowQt.getMainWindow(), qsTr("Delete Symbol"),
+        qsTr("Remove %1 from the cave template?\n\nDrawings that already " +
+            "use it keep their own copy of the symbol; new drawings will " +
+            "not have it.").arg(entry.nss),
+        QMessageBox.Yes | QMessageBox.No);
+    if (answer !== QMessageBox.Yes) {
+        return;
+    }
+    var res = CsSymbolStore.deleteBlock(null, entry.block);
+    if (!res.ok) {
+        QMessageBox.warning(RMainWindowQt.getMainWindow(),
+            qsTr("Delete Symbol"), res.error);
+        return;
+    }
+    SymbolPalette.disarm();
+    SymbolPalette.rebuildTiles();
+};
+
+/**
+ * Shows the Save Symbol / Cancel row and says what is being edited.
+ *
+ * The tiles stay where they are rather than being swapped out: a caver
+ * drawing a new drip symbol is helped by seeing the drip symbols that
+ * already exist, and a panel that empties itself mid-task looks broken.
+ */
+SymbolPalette.enterEditorMode = function(message) {
+    var w = SymbolPalette.widgets;
+    if (isNull(w)) {
+        return;
+    }
+    try {
+        if (!isNull(w.editorLabel)) {
+            w.editorLabel.text = message;
+            w.editorLabel.visible = true;
+        }
+        if (!isNull(w.saveSymbolButton)) {
+            w.saveSymbolButton.visible = true;
+        }
+        if (!isNull(w.cancelSymbolButton)) {
+            w.cancelSymbolButton.visible = true;
+        }
+        if (!isNull(w.newButton)) {
+            w.newButton.enabled = false;
+        }
+    } catch (e) {
+    }
+    try {
+        // The dock has to be VISIBLE for its Save button to be pressable,
+        // and New Symbol can be reached from a panel the caver then hides.
+        var dock = SymbolPalette.ensureDock();
+        dock.visible = true;
+    } catch (eShow) {
+    }
+};
+
+/** Puts the panel back into placing mode. */
+SymbolPalette.leaveEditorMode = function() {
+    var w = SymbolPalette.widgets;
+    if (isNull(w)) {
+        return;
+    }
+    try {
+        if (!isNull(w.editorLabel)) {
+            w.editorLabel.visible = false;
+        }
+        if (!isNull(w.saveSymbolButton)) {
+            w.saveSymbolButton.visible = false;
+        }
+        if (!isNull(w.cancelSymbolButton)) {
+            w.cancelSymbolButton.visible = false;
+        }
+        if (!isNull(w.newButton)) {
+            w.newButton.enabled = true;
+        }
+    } catch (e) {
+    }
+};
+
+/** Builds the dock and hands it to the main window. Idempotent. */
+SymbolPalette.ensureDock = function() {
+    if (csSymbolPaletteDock !== undefined && csSymbolPaletteDock !== null) {
+        return csSymbolPaletteDock;
+    }
+    var appWin = RMainWindowQt.getMainWindow();
+    csSymbolPaletteDock = SymbolPalette.buildDock(appWin);
+    appWin.addDockWidget(Qt.RightDockWidgetArea, csSymbolPaletteDock);
+    return csSymbolPaletteDock;
+};
+
+/**
+ * Hands control to the placement action.
+ *
+ * Looks the action up by script file and passes it in, rather than
+ * constructing with null: stock Print.js does exactly this, and
+ * EAction's null-guiAction paths are not exercised anywhere.
+ */
+SymbolPalette.startRun = function() {
+    var di = EAction.getDocumentInterface();
+    if (isNull(di)) {
+        return;
+    }
+    // If a placement is ALREADY the current action, leave it running:
+    // arm() has changed the symbol and the next click picks it up.
+    // Calling setCurrentAction again would make QCAD tear down the
+    // action running this very click -- a hard SIGSEGV, and one this
+    // suite has already paid for once.
+    try {
+        var current = di.getCurrentAction();
+        if (!isNull(current) && current instanceof SymbolPaletteRun) {
+            return;
+        }
+    } catch (e) {
+    }
+    var runAction = RGuiAction.getByScriptFile(
+        SymbolPalette.basePath + "/SymbolPaletteRun.js");
+    di.setCurrentAction(new SymbolPaletteRun(runAction));
+};
+
+SymbolPalette.prototype.beginEvent = function() {
+    EAction.prototype.beginEvent.call(this);
+
+    try {
+        var existed = (csSymbolPaletteDock !== undefined &&
+            csSymbolPaletteDock !== null);
+        var dock = SymbolPalette.ensureDock();
+        dock.visible = existed ? !dock.visible : true;
+        if (dock.visible) {
+            // The template may have gained or lost a symbol since last
+            // time -- another CaveCAD window, or a release.
+            CsSymbolStore.invalidate();
+            SymbolPalette.rebuildTiles();
+        }
+    } catch (e) {
+        csSymbolPaletteDock = undefined;
+        warning("Symbol Palette: this CaveCAD build refused the docked " +
+            "panel (" + e + ") -- please report this.");
+    }
+
+    this.terminate();
+};
+
+SymbolPalette.init = function(basePath) {
+    SymbolPalette.basePath = basePath;
+
+    var action = new RGuiAction(qsTr("Symbol Palette"),
+        RMainWindowQt.getMainWindow());
+    action.setRequiresDocument(true);
+    action.setScriptFile(basePath + "/SymbolPalette.js");
+    action.setIcon(basePath + "/SymbolPalette.svg");
+    action.setStatusTip(qsTr("Place cave symbols from a palette: pick one, " +
+        "click to drop it, drag to aim it"));
+    action.setDefaultCommands(["symbolpalette", "sym"]);
+    // 452 is "draw the map", beside Feature Trace, Shaped Lines,
+    // Scatter Breakdown and Cross Section; 50 puts it after Cross
+    // Section, which is the last of them.
+    action.setGroupSortOrder(452);
+    action.setSortOrder(50);
+    action.setWidgetNames(["CaveSurveyMenu", "CaveSurveyToolBar"]);
+
+    SymbolPaletteRun.init(basePath);
+    SymbolPaletteEdit.init(basePath);
+
+    // Build the dock NOW, during add-on init: the main window's
+    // readSettings()/restoreState() runs after init and can only place
+    // (and re-show) a dock that already exists. Created hidden; the
+    // saved window state decides whether it opens.
+    try {
+        var dock = SymbolPalette.ensureDock();
+        dock.visible = false;
+    } catch (eInit) {
+        csSymbolPaletteDock = undefined;
+        warning("Symbol Palette: could not build the panel at startup (" +
+            eInit + "); the menu entry will try again.");
+    }
+};

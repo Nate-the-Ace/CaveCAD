@@ -297,6 +297,27 @@ CsTrace.sectionBays = function(doc) {
  *  as IN"). Matches CsProfileBox.EDGE_EPS. */
 CsTrace.EDGE_EPS = 1e-6;
 
+/**
+ * The two tags a piece of work drawn INSIDE a section bay carries: the
+ * bay it was drawn in, and the station that bay is a section of.
+ *
+ * HERE, IN CORE, and not in whichever tool writes them. Feature Trace
+ * stamps traced linework with these and the Symbol Palette stamps
+ * placed symbols with the same two, because Capture sweeps both out of
+ * the same bay -- and two tools spelling "which bay this belongs to"
+ * two different ways would mean the sweep had to know about both.
+ * FeatureTraceRun.BAY_TAG / STATION_TAG are aliases of these and are
+ * what the existing tests and callers still name.
+ *
+ * Deliberately NOT the bay tool's own SectionBay/SectionBayRole pair:
+ * those two mark the bay's own FURNITURE -- the frame, the ghost, the
+ * scan -- and SectionCapture and SectionEdit both walk the drawing
+ * looking for them. Traced work wearing the same tag with no role would
+ * sit inside those sweeps as a permanent "what is this?".
+ */
+CsTrace.SECTION_BAY_TAG = "SectionTraceBay";
+CsTrace.SECTION_STATION_TAG = "SectionTraceStation";
+
 /** True when `point` is inside one of `rects` (edge counts as inside).
  *  Pure. */
 CsTrace.inAnyRect = function(rects, point) {

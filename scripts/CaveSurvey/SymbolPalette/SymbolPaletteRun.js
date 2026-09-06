@@ -1,0 +1,504 @@
+// SymbolPaletteRun.js -- the interactive half of Symbol Palette: the
+// click that drops a symbol, and the drag that aims it.
+//
+// NOT an add-on QCAD can find. AddOn.getAddOns only ever builds an
+// add-on from <dir>/<dir>.js, so this file's init() is never called by
+// QCAD and SymbolPalette.init() calls it instead.
+//
+// The press/move/release shape is FeatureTraceRun's, and the routing
+// decision is the same one: where the click lands says which view the
+// symbol belongs to, and the view says which layer. A stalactite
+// dropped in an elevation band goes on PROFILE-FORMATIONS-DRIP without
+// the caver arming anything, exactly as a traced wall does.
+
+include("scripts/EAction.js");
+include(includeBasePath + "/../Core/CsAll.js");
+
+function SymbolPaletteRun(guiAction) {
+    EAction.call(this, guiAction);
+
+    this.anchor = null;     // {x, y} press point, in drawing coordinates
+    this.angle = null;      // radians, from the drag; null until it turns
+    this.region = null;     // cached profile-frame box; see refreshRegion
+    this.bays = [];         // cached open section-bay rects; same refresh
+}
+
+SymbolPaletteRun.prototype = new EAction();
+
+SymbolPaletteRun.State = {
+    Idle: 0,
+    Placing: 1
+};
+
+/**
+ * How far the cursor must travel from the press point, in PIXELS,
+ * before the drag is treated as aiming rather than as a click.
+ *
+ * Screen space and not drawing space: the whole question is whether the
+ * caver MOVED the mouse, which is a hand movement, not a distance in
+ * the cave. In drawing units the same wobble would be an aim when
+ * zoomed in and a click when zoomed out.
+ *
+ * Under the threshold the panel's angle stands, so a plain click stays
+ * a plain click even from an unsteady hand.
+ */
+SymbolPaletteRun.AIM_PIXELS = 8;
+
+/** The armed catalogue entry, from the panel, or null.
+ *
+ *  Read at PLACEMENT time and not captured when the action started: a
+ *  caver can arm a different symbol from the panel without the action
+ *  restarting, and the symbol they can see armed is the one they mean. */
+SymbolPaletteRun.armedEntry = function() {
+    if (typeof SymbolPalette === "undefined") {
+        return null;
+    }
+    return isNull(SymbolPalette.armed) ? null : SymbolPalette.armed;
+};
+
+/** The panel's scale, or 1.0. A nonsense entry falls back rather than
+ *  refusing: a bad number in a spinbox must not cost a placement. */
+SymbolPaletteRun.scale = function() {
+    if (typeof SymbolPalette === "undefined") {
+        return 1.0;
+    }
+    return SymbolPalette.scaleValue();
+};
+
+/** The panel's angle in radians, the default a plain click uses. */
+SymbolPaletteRun.defaultAngle = function() {
+    if (typeof SymbolPalette === "undefined") {
+        return 0.0;
+    }
+    return RMath.deg2rad(SymbolPalette.angleValue());
+};
+
+/**
+ * The layer a symbol dropped at `point` in `frame` lands on, or null
+ * when the armed symbol has no layer in that view.
+ *
+ * The same three-step derivation Feature Trace uses, and deliberately
+ * not a second copy of the twin table: CsLayers.twinFor turns the
+ * catalogue's plan-frame layer into the view's twin, and
+ * CsLayerVariants.nameFor refines a profile twin down to the band's own
+ * run so a revision moves the symbol with its band.
+ *
+ * A symbol whose home layer has no twin in that view -- the north
+ * arrow, which is CsLayers.NO_TWIN because an elevation has no north --
+ * answers null, and the caller says so rather than putting it
+ * somewhere.
+ */
+SymbolPaletteRun.targetLayer = function(doc, entry, frame, point) {
+    if (isNull(entry)) {
+        return null;
+    }
+    var base = entry.layer;
+    var layer = CsLayers.twinFor(base, isNull(frame) ? "plan" : frame);
+    if (layer === null) {
+        return null;
+    }
+    if (CsLayers.frameOf(layer) !== "profile" || isNull(doc) ||
+            isNull(point)) {
+        return layer;
+    }
+    // A profile symbol belongs to ONE survey run, for the reason
+    // FeatureTraceRun.targetLayer states at length: the bands never
+    // overlap, and linework filed under no run is silently skipped when
+    // a revision moves the band it was drawn on.
+    try {
+        var run = CsProfileBox.runForPath(CsProfileBox.boxes(doc), [point]);
+        if (run !== null) {
+            var variant = CsLayerVariants.nameFor(layer, run);
+            if (variant !== null) {
+                return variant;
+            }
+        }
+    } catch (eRun) {
+        // location could not answer: the shared profile layer is a safe
+        // place for the symbol to land, and warnUnclaimed says so
+    }
+    return layer;
+};
+
+/** Why a symbol could not be placed in that view, as a sentence. */
+SymbolPaletteRun.noLayerReason = function(entry, frame) {
+    return qsTr("%1 has no layer in the %2 -- the registry gives that " +
+        "symbol no twin there. Place it in the plan instead.")
+        .arg(entry.nss).arg(frame === "section" ? qsTr("cross section") :
+            qsTr("elevation"));
+};
+
+/**
+ * Why an add was refused, as a sentence for the command line.
+ *
+ * Locked and frozen layers refuse adds SILENTLY in this build --
+ * FeatureTraceRun.refusalReason exists for the same reason -- so the
+ * state has to be read back to say which it was.
+ */
+SymbolPaletteRun.refusalReason = function(doc, layerName) {
+    var lay = null;
+    try {
+        lay = doc.queryLayer(layerName);
+    } catch (e) {
+        lay = null;
+    }
+    if (isNull(lay)) {
+        return qsTr("Nothing was placed: layer %1 could not be found or " +
+            "created.").arg(layerName);
+    }
+    var locked = false, frozen = false;
+    try {
+        locked = lay.isLocked();
+        frozen = lay.isFrozen();
+    } catch (eState) {
+    }
+    if (locked) {
+        return qsTr("Nothing was placed: layer %1 is locked. Unlock it " +
+            "and try again.").arg(layerName);
+    }
+    if (frozen) {
+        return qsTr("Nothing was placed: layer %1 is frozen. Thaw it and " +
+            "try again.").arg(layerName);
+    }
+    return qsTr("Nothing was placed on %1, and this build gave no reason.")
+        .arg(layerName);
+};
+
+SymbolPaletteRun.prototype.beginEvent = function() {
+    EAction.prototype.beginEvent.call(this);
+    this.refreshRegion();
+    this.setState(SymbolPaletteRun.State.Idle);
+};
+
+SymbolPaletteRun.prototype.setState = function(state) {
+    EAction.prototype.setState.call(this, state);
+    this.setCrosshairCursor();
+    this.getDocumentInterface().setClickMode(RAction.PickCoordinate);
+
+    switch (this.state) {
+    case SymbolPaletteRun.State.Idle:
+        var trPlace = qsTr("Click to place the symbol, or drag to aim it");
+        this.setCommandPrompt(trPlace);
+        this.setLeftMouseTip(trPlace);
+        this.setRightMouseTip(EAction.trCancel);
+        this.anchor = null;
+        this.angle = null;
+        break;
+
+    case SymbolPaletteRun.State.Placing:
+        var trAim = qsTr("Release to place; drag first to aim");
+        this.setCommandPrompt(trAim);
+        this.setLeftMouseTip(trAim);
+        this.setRightMouseTip("");
+        break;
+    }
+};
+
+/**
+ * Recomputes the cached profile region and the open section bays.
+ *
+ * Same cache and same reasons as FeatureTraceRun.refreshRegion: each
+ * walks EVERY entity in the drawing, the readout asks per mouse move,
+ * and both answers can change between one placement and the next
+ * (a profile redraw, a bay opened or captured).
+ */
+SymbolPaletteRun.prototype.refreshRegion = function() {
+    var doc = this.getDocument();
+    this.region = isNull(doc) ? null : CsTrace.profileRegion(doc);
+    this.bays = isNull(doc) ? [] : CsTrace.sectionBays(doc);
+};
+
+/** AIM_PIXELS converted to drawing units at the current zoom. A view we
+ *  cannot measure falls back to a threshold big enough that a wobble is
+ *  still a click. */
+SymbolPaletteRun.prototype.aimThreshold = function() {
+    try {
+        var view = this.getGraphicsView();
+        if (!isNull(view)) {
+            var factor = view.getFactor();
+            if (factor > 0) {
+                return SymbolPaletteRun.AIM_PIXELS / factor;
+            }
+        }
+    } catch (e) {
+    }
+    return 1.0;
+};
+
+SymbolPaletteRun.prototype.escapeEvent = function() {
+    if (this.state === SymbolPaletteRun.State.Placing) {
+        // Nothing is applied until release, so there is nothing to undo.
+        this.setState(SymbolPaletteRun.State.Idle);
+        return;
+    }
+    if (typeof SymbolPalette !== "undefined") {
+        try {
+            SymbolPalette.disarm();
+        } catch (eDis) {
+            // the panel showing an armed tile that is no longer running
+            // is untidy, never harmful
+        }
+    }
+    EAction.prototype.escapeEvent.call(this);
+};
+
+SymbolPaletteRun.prototype.mousePressEvent = function(event) {
+    if (event.button() !== Qt.LeftButton) {
+        return;
+    }
+    if (event.modifiers().valueOf() === Qt.ControlModifier.valueOf()) {
+        return;   // reserved, as in LineFreehand and Feature Trace
+    }
+    if (this.state !== SymbolPaletteRun.State.Idle) {
+        return;
+    }
+    if (SymbolPaletteRun.armedEntry() === null) {
+        EAction.handleUserMessage(qsTr("Pick a symbol in the Symbol " +
+            "Palette first."));
+        return;
+    }
+
+    // Once per placement, for the reason refreshRegion states: a bay
+    // can be opened or captured while this action is still armed.
+    this.refreshRegion();
+
+    var p = event.getModelPosition();
+    this.anchor = { x: p.x, y: p.y };
+    this.angle = null;
+    this.setState(SymbolPaletteRun.State.Placing);
+};
+
+SymbolPaletteRun.prototype.mouseMoveEvent = function(event) {
+    var p = event.getModelPosition();
+    var here = { x: p.x, y: p.y };
+
+    if (!(event.buttons().valueOf() & Qt.LeftButton.valueOf())) {
+        // Button up: say which view the cursor is over and which layer
+        // that means. The readout is the only thing that tells a caver,
+        // BEFORE the click, that the symbol is about to land in the
+        // elevation rather than the plan.
+        if (typeof SymbolPalette !== "undefined" &&
+                !isNull(SymbolPalette.showCursorFrame)) {
+            var over = CsTrace.frameIn(this.region, here, this.bays);
+            var entry = SymbolPaletteRun.armedEntry();
+            SymbolPalette.showCursorFrame(over, entry === null ? "" :
+                SymbolPaletteRun.targetLayer(this.getDocument(), entry,
+                    over, here));
+        }
+        return;
+    }
+    if (this.state !== SymbolPaletteRun.State.Placing || isNull(this.anchor)) {
+        return;
+    }
+
+    // THE AIM. Past the threshold the symbol faces the cursor; inside
+    // it the panel's angle stands and the placement is still a click.
+    // Once it HAS turned it keeps tracking, even if the cursor comes
+    // back inside the threshold -- otherwise a drag out and back would
+    // silently discard the aim the caver just made.
+    var d = CsTrace.distance(this.anchor, here);
+    if (this.angle !== null || d >= this.aimThreshold()) {
+        this.angle = Math.atan2(here.y - this.anchor.y,
+            here.x - this.anchor.x);
+    }
+    this.updatePreview();
+};
+
+SymbolPaletteRun.prototype.mouseReleaseEvent = function(event) {
+    if (event.button() !== Qt.LeftButton) {
+        return;
+    }
+    if (this.state !== SymbolPaletteRun.State.Placing) {
+        return;
+    }
+    this.commit();
+    // Still armed: a symbol is usually placed several times in a row,
+    // and re-picking the tile between every boulder is the tedium this
+    // panel exists to remove. Escape ends it.
+    this.setState(SymbolPaletteRun.State.Idle);
+};
+
+/** The angle this placement uses: the drag's, or the panel's. */
+SymbolPaletteRun.prototype.placementAngle = function() {
+    return this.angle === null ? SymbolPaletteRun.defaultAngle() : this.angle;
+};
+
+/** Places one symbol at the anchor. */
+SymbolPaletteRun.prototype.commit = function() {
+    var doc = this.getDocument();
+    var di = this.getDocumentInterface();
+    var entry = SymbolPaletteRun.armedEntry();
+    if (isNull(doc) || isNull(di) || isNull(this.anchor) || entry === null) {
+        return;
+    }
+
+    var frame = CsProfileBox.frameAt(doc, this.region,
+        new RVector(this.anchor.x, this.anchor.y), this.bays);
+    var layerName = SymbolPaletteRun.targetLayer(doc, entry, frame,
+        this.anchor);
+    if (layerName === null) {
+        EAction.handleUserMessage(
+            SymbolPaletteRun.noLayerReason(entry, frame));
+        return;
+    }
+
+    // The block may simply not be in this drawing: an older cave, or
+    // one that never met the template, or a symbol invented after the
+    // drawing was made. Fetch it rather than refusing -- that is the
+    // whole reason the palette can work outside a template drawing.
+    var ensured = CsSymbolStore.ensureBlock(doc, di, entry.block);
+    if (!ensured.ok) {
+        EAction.handleUserMessage(ensured.error);
+        return;
+    }
+
+    var ref = null;
+    try {
+        ref = CsSymbols.insert(doc, entry,
+            new RVector(this.anchor.x, this.anchor.y),
+            SymbolPaletteRun.scale(), this.placementAngle(), layerName);
+    } catch (eIns) {
+        ref = null;
+    }
+    if (isNull(ref)) {
+        EAction.handleUserMessage(qsTr("%1 could not be placed: this " +
+            "drawing has no %2 block.").arg(entry.nss).arg(entry.block));
+        return;
+    }
+
+    var added = false;
+    try {
+        // withLayerOn, not a bare add: an OFF layer accepts entities in
+        // this build and then hides them, so a symbol placed onto a
+        // layer the caver has turned off would be work they cannot see
+        // and did not know they made.
+        CsLayers.withLayerOn(doc, di, layerName, function() {
+            // useCurrentAttributes FALSE. It defaults to true, and true
+            // means the drawing's CURRENT layer overwrites the one the
+            // reference was given -- which put every routed symbol on
+            // layer 0 and made the whole plan/elevation/section routing
+            // silently ornamental (measured 2026-09-06).
+            var op = new RAddObjectOperation(ref, false);
+            di.applyOperation(op);
+        });
+        added = !isNull(ref.getId()) && ref.getId() !== RObject.INVALID_ID;
+    } catch (eAdd) {
+        added = false;
+    }
+    if (!added) {
+        EAction.handleUserMessage(
+            SymbolPaletteRun.refusalReason(doc, layerName));
+        return;
+    }
+
+    this.stampSection(doc, di, frame, ref.getId());
+
+    // The layer is NAMED every time, for Feature Trace's reason: with
+    // no per-view button, this line is the caver's confirmation that
+    // the view they clicked in was the view they meant.
+    EAction.handleUserMessage(qsTr("%1 placed on %2")
+        .arg(entry.nss).arg(layerName));
+    this.warnUnclaimedProfile(frame, layerName);
+
+    // A symbol on a profile layer grows the region the next placement
+    // is measured against.
+    this.refreshRegion();
+};
+
+/**
+ * Stamps a section symbol with the station its bay is a section of.
+ *
+ * The SAME two tags a section trace carries -- CsTrace.SECTION_BAY_TAG
+ * and SECTION_STATION_TAG, which is where they live precisely so that
+ * this tool and Feature Trace cannot drift apart: a captured section
+ * sweeps up traced linework and placed symbols together, and two
+ * vocabularies for "which bay this belongs to" would mean the sweep had
+ * to know about both.
+ *
+ * Silent about every failure. A stamp is provenance; failing to add it
+ * must never cost the caver the symbol they just placed.
+ */
+SymbolPaletteRun.prototype.stampSection = function(doc, di, frame, id) {
+    if (frame !== "section" || isNull(id) || isNull(doc) || isNull(di)) {
+        return;
+    }
+    try {
+        var bay = CsTrace.bayForPath(this.bays, [this.anchor]);
+        if (bay === null || isNull(bay.station) || bay.station === "") {
+            return;
+        }
+        var e = doc.queryEntity(id);
+        if (isNull(e)) {
+            return;
+        }
+        CsTags.set(e, CsTrace.SECTION_BAY_TAG, bay.bay);
+        CsTags.set(e, CsTrace.SECTION_STATION_TAG, bay.station);
+        var op = new RModifyObjectsOperation();
+        op.addObject(e, false);
+        di.applyOperation(op);
+    } catch (eStamp) {
+    }
+};
+
+/** Says so when a profile symbol landed on the SHARED layer, for the
+ *  reason FeatureTraceRun.warnUnclaimedProfile states: work filed under
+ *  no run is silently left behind when its band moves. */
+SymbolPaletteRun.prototype.warnUnclaimedProfile = function(frame, layerName) {
+    if (frame !== "profile") {
+        return;
+    }
+    if (CsLayerVariants.split(layerName) !== null) {
+        return;   // it landed on a run's layer; nothing to say
+    }
+    EAction.handleUserMessage(qsTr("That symbol is on the shared %1 -- no " +
+        "band's box claims where it was placed, so it belongs to no survey " +
+        "run and will not move with a band when the survey is revised.")
+        .arg(layerName));
+};
+
+/**
+ * The preview: the symbol itself, at the anchor, aimed where the drag
+ * is pointing.
+ *
+ * A real block reference and not a marker, because the aim is the thing
+ * being previewed -- a caver dragging a flow arrow round is watching
+ * the arrow, and an abstract cross would tell them nothing. Falls back
+ * to no preview when the block is not in the drawing yet: the import
+ * happens on release, and importing on a mouse move would write to the
+ * document during a preview.
+ */
+SymbolPaletteRun.prototype.getOperation = function(preview) {
+    var entry = SymbolPaletteRun.armedEntry();
+    var doc = this.getDocument();
+    if (entry === null || isNull(doc) || isNull(this.anchor)) {
+        return undefined;
+    }
+    var ref = null;
+    try {
+        ref = CsSymbols.insert(doc, entry,
+            new RVector(this.anchor.x, this.anchor.y),
+            SymbolPaletteRun.scale(), this.placementAngle(), entry.layer);
+    } catch (ePrev) {
+        return undefined;
+    }
+    if (isNull(ref)) {
+        return undefined;
+    }
+    var op = new RAddObjectsOperation();
+    op.setText(this.getToolTitle());
+    op.setLimitPreview(false);
+    op.addObject(ref, false);
+    return op;
+};
+
+SymbolPaletteRun.init = function(basePath) {
+    // No widget names, no sort order, no icon: this action is reached
+    // from the Symbol Palette panel and never from a menu. The variable
+    // is deliberately NOT called "action" -- test_sort_orders_are_unique
+    // reads "action.setSortOrder" out of the folder-named file, and a
+    // second match there would make which one it reads a coin flip.
+    var runAction = new RGuiAction(qsTr("Place Symbol"),
+        RMainWindowQt.getMainWindow());
+    runAction.setRequiresDocument(true);
+    runAction.setScriptFile(basePath + "/SymbolPaletteRun.js");
+};

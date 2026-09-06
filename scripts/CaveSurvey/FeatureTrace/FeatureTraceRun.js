@@ -520,8 +520,14 @@ FeatureTraceRun.prototype.commit = function() {
  *  linework wearing the same tag with no role would sit inside those
  *  sweeps as a permanent "what is this?", and the day one of them stops
  *  checking the role it would be swept up as furniture. */
-FeatureTraceRun.BAY_TAG = "SectionTraceBay";
-FeatureTraceRun.STATION_TAG = "SectionTraceStation";
+// The names themselves moved to Core (CsTrace.SECTION_BAY_TAG /
+// SECTION_STATION_TAG) when Symbol Palette began stamping placed
+// symbols with the same two: Capture sweeps traced linework and
+// symbols out of one bay, and two tools spelling the same fact
+// differently would make it know about both spellings. These stay as
+// the names this file and its tests already use.
+FeatureTraceRun.BAY_TAG = CsTrace.SECTION_BAY_TAG;
+FeatureTraceRun.STATION_TAG = CsTrace.SECTION_STATION_TAG;
 
 /**
  * Stamps a section trace with the station its bay belongs to.

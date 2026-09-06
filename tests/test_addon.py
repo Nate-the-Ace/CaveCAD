@@ -1500,6 +1500,7 @@ MENU = {
     "ShapedLines/ShapedLines.js":         (452, 20, ["shapedlines", "shl"]),
     "ScatterBreakdown/ScatterBreakdown.js": (452, 30, ["scatterbreakdown", "scb"]),
     "CrossSection/CrossSection.js":       (452, 40, ["crosssection", "cxs"]),
+    "SymbolPalette/SymbolPalette.js":     (452, 50, ["symbolpalette", "sym"]),
     # 453 -- put a reference under the map
     "SketchScans/SketchScans.js":         (453, 10, ["sketchscans", "ss"]),
     "SurfaceData/SurfaceData.js":         (453, 20, ["surfacedata", "sd"]),
