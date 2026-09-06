@@ -109,7 +109,9 @@ SymbolPaletteEdit.homeLayers = function() {
  * document, and a symbol editor that opens as a cave map with a title
  * block is not an editor.
  *
- * \return the new document interface, or null.
+ * \return { di, child } -- the child is kept because SAVING CLOSES THE
+ *         EDITOR, and closing needs the window, not the document.
+ *         Null when no editor could be opened.
  */
 SymbolPaletteEdit.openEditorDocument = function(title) {
     try {
@@ -122,11 +124,19 @@ SymbolPaletteEdit.openEditorDocument = function(title) {
     } catch (eNew) {
         child = null;
     }
+    // ALWAYS CLEARED, not only on failure. The flag lives in QSettings,
+    // so it outlives the application: set it, have CaveCAD die before
+    // the File > New that consumes it, and the caver's NEXT new drawing
+    // comes up empty instead of as a cave map. initNewFile has already
+    // consumed it by the time createMdiChild returns, so clearing here
+    // costs nothing and closes the window in which it can leak. (Seen
+    // for real: a headless template-pour test failed once because a
+    // stray flag was sitting in settings from an interrupted session.)
+    try {
+        RSettings.setValue("CaveSurvey/TemplateOnNewSkipOnce", false);
+    } catch (eClear) {
+    }
     if (isNull(child)) {
-        try {
-            RSettings.setValue("CaveSurvey/TemplateOnNewSkipOnce", false);
-        } catch (eClear) {
-        }
         return null;
     }
     var di = null;
@@ -146,7 +156,44 @@ SymbolPaletteEdit.openEditorDocument = function(title) {
         child.windowTitle = title;
     } catch (eTitle) {
     }
-    return di;
+    return { di: di, child: child };
+};
+
+/**
+ * Closes the editor drawing without asking to save it.
+ *
+ * WHY IT ASKS NOTHING. The editor is a means, not a document: its
+ * contents have just been written into the cave template, which is
+ * where a symbol lives. A "save changes to Untitled?" box at that
+ * moment asks the caver to make a decision about a file they never
+ * meant to have, right after they already saved the only thing they
+ * cared about -- and answering it wrongly leaves a stray DXF of one
+ * symbol somewhere. So the document is marked unmodified first and the
+ * window is closed under it.
+ *
+ * ONLY EVER AFTER A SUCCESSFUL SAVE. Cancel leaves the drawing open and
+ * modified, because then nothing has been kept anywhere and the caver's
+ * work is only in that window.
+ */
+SymbolPaletteEdit.closeEditor = function(session) {
+    if (isNull(session) || isNull(session.child)) {
+        return false;
+    }
+    try {
+        var doc = session.di.getDocument();
+        if (!isNull(doc)) {
+            doc.setModified(false);
+        }
+    } catch (eMod) {
+        // could not clear the flag: the close below may prompt, which
+        // is untidy but never destructive
+    }
+    try {
+        session.child.close();
+        return true;
+    } catch (eClose) {
+        return false;
+    }
 };
 
 /** Draws the origin crosshair and the size reference. */
@@ -211,14 +258,16 @@ SymbolPaletteEdit.startNew = function() {
             "Save or close it first."));
         return;
     }
-    var di = SymbolPaletteEdit.openEditorDocument(qsTr("New Symbol"));
-    if (isNull(di)) {
+    var opened = SymbolPaletteEdit.openEditorDocument(qsTr("New Symbol"));
+    if (isNull(opened)) {
         EAction.handleUserWarning("Symbol Palette: this CaveCAD build would not open a " +
             "drawing to draw the symbol in.");
         return;
     }
+    var di = opened.di;
     SymbolPaletteEdit.addFurniture(di.getDocument(), di);
-    SymbolPaletteEdit.session = { di: di, block: null, meta: null };
+    SymbolPaletteEdit.session = { di: di, child: opened.child,
+        block: null, meta: null };
     SymbolPalette.enterEditorMode(qsTr("Draw the symbol around the " +
         "crosshair, then press Save Symbol."));
 };
@@ -253,13 +302,14 @@ SymbolPaletteEdit.startEdit = function(entry) {
         return;
     }
 
-    var di = SymbolPaletteEdit.openEditorDocument(
+    var opened = SymbolPaletteEdit.openEditorDocument(
         qsTr("Symbol: %1").arg(entry.nss));
-    if (isNull(di)) {
+    if (isNull(opened)) {
         EAction.handleUserWarning("Symbol Palette: this CaveCAD build would not open a " +
             "drawing to edit the symbol in.");
         return;
     }
+    var di = opened.di;
     var doc = di.getDocument();
     SymbolPaletteEdit.addFurniture(doc, di);
 
@@ -300,7 +350,8 @@ SymbolPaletteEdit.startEdit = function(entry) {
     } catch (eZoom) {
     }
 
-    SymbolPaletteEdit.session = { di: di, block: entry.block, meta: entry };
+    SymbolPaletteEdit.session = { di: di, child: opened.child,
+        block: entry.block, meta: entry };
     SymbolPalette.enterEditorMode(qsTr("Editing %1. Press Save Symbol when " +
         "you are done.").arg(entry.nss));
 };
@@ -548,9 +599,18 @@ SymbolPaletteEdit.save = function() {
         return;
     }
 
-    EAction.handleUserMessage(qsTr("%1 saved to the cave template as %2.")
-        .arg(meta.nss).arg(blockName));
+    // THE EDITOR CLOSES ITSELF, and says nothing while doing it. The
+    // symbol is in the template now; the drawing it was drawn in has
+    // done its job, and asking "save changes to Untitled?" would ask
+    // the caver about a file they never meant to have.
+    var closed = SymbolPaletteEdit.closeEditor(session);
     SymbolPaletteEdit.finish();
+    EAction.handleUserMessage(closed ?
+        qsTr("%1 saved to the cave template as %2.")
+            .arg(meta.nss).arg(blockName) :
+        qsTr("%1 saved to the cave template as %2. The editor drawing " +
+            "could not be closed -- close it yourself; nothing in it is " +
+            "needed any more.").arg(meta.nss).arg(blockName));
 
     // The palette rebuilds from the template, so the new symbol appears
     // and is armed -- a caver who just drew a symbol wants to place it.
@@ -567,9 +627,12 @@ SymbolPaletteEdit.save = function() {
     }
 };
 
-/** Abandons the editing session. The editor DRAWING is left open: it
- *  may hold work, and closing a document out from under a caver to
- *  tidy up a panel is not a trade this tool gets to make. */
+/** Abandons the editing session. The editor DRAWING is left open, and
+ *  left MODIFIED: nothing has been written to the template, so whatever
+ *  was drawn exists only in that window. Closing it out from under the
+ *  caver -- or clearing its modified flag so it closes silently later
+ *  -- would be this tool deciding their work was worthless. Saving is
+ *  the only thing that closes the editor. */
 SymbolPaletteEdit.cancel = function() {
     SymbolPaletteEdit.finish();
 };
