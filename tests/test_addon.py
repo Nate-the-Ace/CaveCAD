@@ -1494,7 +1494,6 @@ MENU = {
     "SurveyNotebook/SurveyNotebook.js":   (451, 10, ["surveynotebook", "snb"]),
     "ImportCaveSurvey/ImportCaveSurvey.js": (451, 20, ["importcavesurvey", "ics"]),
     "ExportCaveSurvey/ExportCaveSurvey.js": (451, 30, ["exportcavesurvey", "ecs"]),
-    "EditTrip/EditTrip.js":               (451, 40, ["edittrip", "et"]),
     # 452 -- draw the map
     "FeatureTrace/FeatureTrace.js":       (452, 10, ["featuretrace", "ft"]),
     "ShapedLines/ShapedLines.js":         (452, 20, ["shapedlines", "shl"]),
@@ -1601,6 +1600,59 @@ class TestMenuTable(unittest.TestCase):
                 "%s and %s both claim stage %d position %d"
                 % (seen.get(key), rel, group, order))
             seen[key] = rel
+
+
+class TestNamespacesAreDeclared(unittest.TestCase):
+    """A file that assigns onto a namespace must create it first.
+
+    Twice now, folding a tool into another tool has deleted the
+    `function Foo(guiAction)` constructor the menu entry needed -- and
+    with it the object that every `Foo.bar = ...` in the file was
+    assigning onto. The first such assignment then throws a
+    ReferenceError at load time and takes the whole file with it,
+    silently: the tool's button does nothing and no test notices,
+    because the headless suites drive the Core engine directly and
+    never load the presenter.
+
+    So: for every `Foo.bar = function` in the add-on, the same file
+    must also declare Foo -- as `var Foo`, as `function Foo(`, or by
+    assigning it outright.
+    """
+
+    ASSIGN = re.compile(r"^([A-Z][A-Za-z0-9_]*)\.[A-Za-z0-9_]+\s*=", re.M)
+
+    def _declares(self, source, name):
+        patterns = (
+            r"^\s*var\s+%s\s*=" % name,
+            r"^\s*function\s+%s\s*\(" % name,
+            r"^\s*%s\s*=\s*\{" % name,
+        )
+        return any(re.search(p, source, re.M) for p in patterns)
+
+    def test_every_assigned_namespace_is_declared_in_its_file(self):
+        offenders = []
+        for folder, _subdirs, files in os.walk(ADDON):
+            for name in sorted(files):
+                if not name.endswith(".js"):
+                    continue
+                path = os.path.join(folder, name)
+                with open(path) as handle:
+                    source = handle.read()
+                rel = os.path.relpath(path, ADDON).replace(os.sep, "/")
+                for ns in sorted(set(self.ASSIGN.findall(source))):
+                    # Qt and QCAD globals are declared by the engine,
+                    # never by us; a file legitimately assigns onto them.
+                    if ns.startswith("Q") or ns.startswith("R"):
+                        continue
+                    if self._declares(source, ns):
+                        continue
+                    # An assignment onto a namespace another file owns is
+                    # fine as long as this file does not also OWN it --
+                    # the giveaway is assigning its own primary object.
+                    if ns == os.path.splitext(os.path.basename(rel))[0]:
+                        offenders.append("%s assigns %s.* but never "
+                                         "declares %s" % (rel, ns, ns))
+        self.assertEqual([], offenders, "\n".join(offenders))
 
 
 if __name__ == "__main__":

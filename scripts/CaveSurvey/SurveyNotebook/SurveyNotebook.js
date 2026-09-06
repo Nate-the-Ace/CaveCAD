@@ -90,6 +90,7 @@
 include("scripts/EAction.js");
 include("scripts/simple.js");
 include(includeBasePath + "/../Core/CsAll.js");
+include(includeBasePath + "/TripEdit.js");
 
 var csNotebookDock = csNotebookDock || undefined;
 
@@ -3179,7 +3180,7 @@ SurveyNotebook.buildDock = function(appWin) {
     w.moreButton = new QToolButton();
     w.moreButton.text = "\u22ef";
     w.moreButton.toolTip = "Import, export, clear the page, load a trip " +
-        "from the drawing, revise declinations.";
+        "from the drawing, revise declinations, edit or delete a trip.";
     try {
         w.moreButton.autoRaise = true;
     } catch (eRaise) {
@@ -3203,6 +3204,12 @@ SurveyNotebook.buildDock = function(appWin) {
         "already in the drawing: one row per trip, IGRF on tap, and the " +
         "drawing turns by the difference. Not the same as the header's " +
         "Decl, which is what this page's own readings were taken under.";
+    w.editTripAction = w.moreMenu.addAction("Edit this trip...");
+    w.editTripAction.toolTip = "Correct the loaded trip's name, date, " +
+        "team or instruments -- edits land on the trip itself, not a " +
+        "new copy of it, and nothing is moved or redrawn. With no trip " +
+        "loaded, every trip in the drawing is listed to pick from. " +
+        "Also where a trip is deleted outright.";
     w.moreMenu.addSeparator();
     // The tracing itself lives in Feature Trace now, but the BINDING
     // SWITCH does not: this entry is still the only way to turn
@@ -3375,6 +3382,9 @@ SurveyNotebook.buildDock = function(appWin) {
     SurveyNotebook.safeConnect(w.declReviseAction.triggered, function() {
         SurveyNotebook.reviseDeclinations(w);
     }, "Declination button", w.problems);
+    SurveyNotebook.safeConnect(w.editTripAction.triggered, function() {
+        TripEdit.open(w.loadedTripId);
+    }, "Edit this trip button", w.problems);
     SurveyNotebook.safeConnect(w.lineworkButton.triggered, function() {
         // Any failure in here must be SEEN, not swallowed -- and a
         // checkable button that toggled itself must not be left

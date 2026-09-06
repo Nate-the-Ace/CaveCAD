@@ -1,15 +1,24 @@
-// EditTrip.js
+// TripEdit.js
 //
-// QCAD add-on tool: correct a trip's name, date, team and instruments
-// after the trip has been drawn.
+// The trip metadata editor: correct a trip's name, date, team and
+// instruments after the trip has been drawn, or delete the trip
+// outright. It lives inside Survey Notebook now, opened from the
+// "..." menu's "Edit this trip..." entry -- it used to be its own
+// menu tool, called Edit Trip, and this file is that tool moved
+// wholesale rather than rewritten.
 //
-// Typed once in the Survey Notebook header, these four fields were
-// uncorrectable. The path that looks like it should work forks the
-// cave: Survey Notebook's "Load from drawing" replaces the trip whose
-// FINGERPRINT (date | team) matches the page, so editing either field
-// means nothing matches and the page lands as a brand new trip beside
-// the old one. This tool edits by TRIP ID instead, which is what makes
-// a typo fix a typo fix.
+// It moved because of WHERE trip metadata is displayed, not because
+// anything about the editing changed. Typed once in the Notebook
+// header, these four fields were uncorrectable there: the path that
+// looks like it should work forks the cave. "Load from drawing"
+// replaces the trip whose FINGERPRINT (date | team) matches the page,
+// so editing either field on the page means nothing matches on the
+// next Draw and the page lands as a brand new trip beside the old
+// one. This edits by TRIP ID instead, which is what makes a typo fix
+// a typo fix rather than a duplicate. When the Notebook already has a
+// trip loaded (TripEdit.open is called with its id), the edit lands
+// on THAT trip with no picking step; called with nothing, it shows
+// every trip in the drawing and the caver picks the row.
 //
 // It moves nothing. No geometry, elevation, LRUD, linework binding or
 // profile depends on these fields, so there is no redraw, no resolve
@@ -25,19 +34,27 @@
 // redraws the cave without it. It asks first, by name, and it asks
 // separately about any hand-traced linework bound to that trip --
 // tracing is never thrown away on a default.
-//
-// USAGE:
-//   Cave Survey > Edit Trip   (or type "et")
 
 include("scripts/EAction.js");
 include("scripts/simple.js");
 include(includeBasePath + "/../Core/CsAll.js");
 
+// The namespace, declared rather than inherited. This file used to be
+// the Edit Trip TOOL, and the object below was created as a side effect
+// of the `function EditTrip(guiAction)` constructor the menu entry
+// needed. Folding the tool into Survey Notebook removed the
+// constructor, which removed the object -- and then the very first
+// `TripEdit.read = ...` threw a ReferenceError at load time, silently,
+// taking the whole file with it. Nothing failed: the headless suite
+// drives Core/CsTripEdit.js directly and never loads this file, so
+// "Edit this trip..." simply did nothing in the running application.
+var TripEdit = {};
+
 /**
  * Reads the drawing's trips, or explains why it cannot.
  * \return {ok, rows, survey, error}
  */
-EditTrip.read = function(doc) {
+TripEdit.read = function(doc) {
     var recon;
     try {
         recon = CsRevise.surveyFromDocument(doc);
@@ -72,7 +89,7 @@ EditTrip.read = function(doc) {
 };
 
 /** Which trip ids actually have an anchor point to write onto. */
-EditTrip.anchoredTrips = function(doc) {
+TripEdit.anchoredTrips = function(doc) {
     var out = {};
     var ids = doc.queryAllEntities(false, false);
     for (var i = 0; i < ids.length; i++) {
@@ -92,7 +109,7 @@ EditTrip.anchoredTrips = function(doc) {
 /** Upper-cases as typed, the same as the Notebook's header fields --
  *  station names, teams and instruments are upper case throughout the
  *  suite, and a lower-case correction would stand out on the map. */
-EditTrip.upperCase = function(edit) {
+TripEdit.upperCase = function(edit) {
     try {
         edit.textEdited.connect(function() {
             var t = String(edit.text);
@@ -114,7 +131,7 @@ EditTrip.upperCase = function(edit) {
 };
 
 /** The summary line after a successful edit. */
-EditTrip.reportText = function(changes, res) {
+TripEdit.reportText = function(changes, res) {
     if (changes.length === 0) {
         return "Edit Trip: nothing changed.";
     }
@@ -149,7 +166,7 @@ EditTrip.reportText = function(changes, res) {
  * hours of tracing or deleting it is the caver's call, not a checkbox
  * they might not have read.
  */
-EditTrip.deleteTrip = function(doc, di, read, request) {
+TripEdit.deleteTrip = function(doc, di, read, request) {
     var tripId = request.tripId;
     var recon;
     try {
@@ -226,31 +243,68 @@ EditTrip.deleteTrip = function(doc, di, read, request) {
     QMessageBox.information(null, "Edit Trip", msg);
 };
 
-function editTripRun() {
+/**
+ * Opens the trip metadata editor.
+ *
+ * \param tripId The trip the Notebook already has loaded
+ *     (w.loadedTripId), or null/undefined when it has none. Given a
+ *     tripId, only that trip's row is shown and there is no picking
+ *     step -- the page on screen IS the trip being corrected. Given
+ *     nothing, every trip in the drawing is listed and the caver picks
+ *     the row, exactly as this dialog worked when it was its own menu
+ *     entry.
+ */
+TripEdit.open = function(tripId) {
     var doc = getDocument();
     if (doc === undefined || doc === null) {
-        warning("Edit Trip: no active drawing document.");
+        warning("Survey Notebook: no active drawing document.");
         return;
     }
     var di = getDocumentInterface();
 
-    var read = EditTrip.read(doc);
+    var read = TripEdit.read(doc);
     if (!read.ok) {
         EAction.handleUserMessage(read.error);
         return;
     }
-    var anchored = EditTrip.anchoredTrips(doc);
+    var anchored = TripEdit.anchoredTrips(doc);
+
+    // planEdits still needs read.survey WHOLE -- its fingerprint
+    // collision check has to see every trip, edited or not -- so only
+    // the ROWS SHOWN narrow to the one trip; nothing about what the
+    // edit is validated against changes.
+    var rows = read.rows;
+    var single = (typeof tripId === "number" && tripId >= 0);
+    if (single) {
+        rows = [];
+        for (var ri = 0; ri < read.rows.length; ri++) {
+            if (read.rows[ri].tripId === tripId) {
+                rows.push(read.rows[ri]);
+                break;
+            }
+        }
+        if (rows.length === 0) {
+            EAction.handleUserMessage("Survey Notebook: trip " + tripId +
+                " is no longer in the drawing.");
+            return;
+        }
+    }
 
     var dlg = new QDialog(getMainWindow());
     dlg.windowTitle = "Edit Trip";
     var layout = new QVBoxLayout();
 
-    layout.addWidget(new QLabel(
-        "The trips in this drawing. Correct a name, date, team or\n" +
+    layout.addWidget(new QLabel(single ?
+        ("Correct this trip's name, date, team or instrument list --\n" +
+        "the edit lands on the trip you loaded, not on a new copy of\n" +
+        "it, and nothing is moved or redrawn. Declination is not\n" +
+        "edited here: changing it rotates the plan, so it lives in\n" +
+        "Survey Notebook > Declination.") :
+        ("The trips in this drawing. Correct a name, date, team or\n" +
         "instrument list here -- the edit lands on the trip you edit,\n" +
         "not on a new copy of it, and nothing is moved or redrawn.\n" +
         "Declination is not edited here: changing it rotates the plan,\n" +
-        "so it lives in Survey Notebook > Declination."), 0, 0);
+        "so it lives in Survey Notebook > Declination.")), 0, 0);
 
     var host = new QWidget();
     var grid = new QGridLayout();
@@ -265,8 +319,8 @@ function editTripRun() {
     // delete runs after exec() returns, never inside a row handler
     // while the dialog it belongs to is still on screen.
     var deleteRequest = { tripId: -1, label: "", shots: 0 };
-    for (var r = 0; r < read.rows.length; r++) {
-        var row = read.rows[r];
+    for (var r = 0; r < rows.length; r++) {
+        var row = rows[r];
         var g = r + 1;
         grid.addWidget(new QLabel(row.label), g, 0);
         grid.addWidget(new QLabel(String(row.shots)), g, 1);
@@ -298,7 +352,7 @@ function editTripRun() {
                     // cosmetic only; the write is gated below anyway
                 }
             } else if (caps) {
-                EditTrip.upperCase(e);
+                TripEdit.upperCase(e);
             }
             return e;
         };
@@ -365,7 +419,7 @@ function editTripRun() {
     // take over from there -- vertically for a cave with many trips,
     // horizontally on a small screen.
     try {
-        dlg.resize(1180, Math.min(620, 220 + read.rows.length * 46));
+        dlg.resize(1180, Math.min(620, 220 + rows.length * 46));
     } catch (eSize) {
         // the layout's own size stands; the columns scroll
     }
@@ -426,7 +480,7 @@ function editTripRun() {
     dlg.exec();
 
     if (deleteRequest.tripId >= 0) {
-        EditTrip.deleteTrip(doc, di, read, deleteRequest);
+        TripEdit.deleteTrip(doc, di, read, deleteRequest);
         return;
     }
     if (!applied.done) {
@@ -437,33 +491,5 @@ function editTripRun() {
         return;
     }
     EAction.handleUserMessage(
-        EditTrip.reportText(applied.changes, applied.res));
-}
-
-// ============================================================
-// Add-on wiring -- the standard pattern; see docs.
-// ============================================================
-
-function EditTrip(guiAction) {
-    EAction.call(this, guiAction);
-}
-
-EditTrip.prototype = new EAction();
-
-EditTrip.prototype.beginEvent = function() {
-    EAction.prototype.beginEvent.call(this);
-    editTripRun();
-    this.terminate();
-};
-
-EditTrip.init = function(basePath) {
-    var action = new RGuiAction(qsTr("Edit Trip"), RMainWindowQt.getMainWindow());
-    action.setRequiresDocument(true);
-    action.setScriptFile(basePath + "/EditTrip.js");
-    action.setIcon(basePath + "/EditTrip.svg");
-    action.setStatusTip(qsTr("Correct a trip's name, date, team or instruments without redrawing anything"));
-    action.setDefaultCommands(["edittrip", "et"]);
-    action.setGroupSortOrder(451);
-    action.setSortOrder(40);
-    action.setWidgetNames(["CaveSurveyMenu", "CaveSurveyToolBar"]);
+        TripEdit.reportText(applied.changes, applied.res));
 };
