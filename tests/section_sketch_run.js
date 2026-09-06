@@ -1962,7 +1962,9 @@ function selectOnly(entityId) {
 //
 // MUTATION-TESTED, twice, because there are two independent halves and
 // either one alone leaves the bug half-fixed:
-//   * dropping `this.bays` from ShapedLinesRun.commit's pathFrame call
+//   * dropping `this.bays` from ShapedLinesRun.prepare's pathFrame call
+//     (it moved there when the side pick was added; commit now uses
+//     the frame prepare decided)
 //     -> "SL: the SPINE lands on the section family -- expected
 //        SECTION-LEDGE-FLOOR, got LEDGE-FLOOR"
 //   * deleting the SECTION_TWIN branch from CsShapeLine.layersFor
@@ -2002,14 +2004,24 @@ function selectOnly(entityId) {
     for (var sj = 0; sj <= 12; sj++) {
         slSamples.push({ x: slCentre.x - 3 + sj * 0.5, y: slCentre.y + 1 });
     }
+    // The draw action is now TWO steps: prepare() fits the spine and
+    // decides the view at the release, then the caver points at the low
+    // side and commit() places it. The stroke is driven through both,
+    // in that order, because that is the order the mouse drives them.
     var slAction = {
         styleKey: "floorledge",
         getDocument: function() { return doc; },
         getDocumentInterface: function() { return di; },
         samples: slSamples,
+        spinePts: null,
+        spineClosed: false,
+        side: 1,
+        pathFrame: null,
         region: null,
         bays: [],
-        refreshFrames: ShapedLinesRun.prototype.refreshFrames
+        refreshFrames: ShapedLinesRun.prototype.refreshFrames,
+        prepare: ShapedLinesRun.prototype.prepare,
+        buildSpine: ShapedLinesRun.prototype.buildSpine
     };
     slAction.refreshFrames();
     check("SL: fixture: the bay is seen as section-frame ground",
@@ -2018,6 +2030,24 @@ function selectOnly(entityId) {
             "section");
 
     try {
+        check("SL: fixture: the release prepared a feature",
+            slAction.prepare() === true);
+        // THE SIDE COMES FROM WHERE THE CAVER POINTS, not from which
+        // way they dragged. The stroke runs west to east at y+1 in the
+        // bay; pointing below it and above it must give opposite sides,
+        // and neither answer may depend on the drag direction.
+        var slBelow = CsShapeLine.sideForPoint(slAction.spinePts, false,
+            { x: slCentre.x, y: slCentre.y - 2 });
+        var slAbove = CsShapeLine.sideForPoint(slAction.spinePts, false,
+            { x: slCentre.x, y: slCentre.y + 4 });
+        check("SL: pointing below the stroke and above it give opposite " +
+            "sides", slBelow !== null && slAbove !== null &&
+            slBelow === -slAbove);
+        // The frame is decided at the RELEASE and carried, so pointing
+        // at the low side -- which happens outside the bay as often as
+        // inside it -- cannot turn section linework into plan linework.
+        check("SL: the view is decided by the STROKE, not by where the " +
+            "side was picked", slAction.pathFrame === "section");
         ShapedLinesRun.prototype.commit.call(slAction);
     } finally {
         EAction.handleUserMessage = realMessage;

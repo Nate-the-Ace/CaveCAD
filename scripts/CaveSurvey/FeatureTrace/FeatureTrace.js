@@ -15,6 +15,11 @@
 include("scripts/EAction.js");
 include(includeBasePath + "/../Core/CsAll.js");
 include(includeBasePath + "/FeatureTraceRun.js");
+// The shaped-line draw action, so this panel can arm a ledge or a
+// scallop as readily as a wall: same gesture, same freehand drag, same
+// view routing -- the only difference is that ornament comes with it.
+// See SHAPED_ROWS below.
+include(includeBasePath + "/../ShapedLines/ShapedLinesRun.js");
 
 function FeatureTrace(guiAction) {
     EAction.call(this, guiAction);
@@ -72,6 +77,30 @@ FeatureTrace.ROWS = [
     { label: "Entrance", layer: CsLayers.ENTRANCE },
     { label: "Ceiling", layer: CsLayers.CEILING },
     { label: "Floor", layer: CsLayers.FLOOR }
+];
+
+/**
+ * The shaped lines: the same freehand gesture, with NSS ornament
+ * generated along the stroke and kept in step with it afterwards.
+ *
+ * WHY THEY LIVE IN THIS PANEL (Nathan's call, 2026-09-07). They were a
+ * toolbar of their own, which made two front doors for one act: a caver
+ * tracing a cave draws walls, ledges and flowstone in the same breath,
+ * with the same drag, and had to know that six of those live somewhere
+ * else. A shaped line IS a traced feature -- it just brings hachures.
+ *
+ * `style` is the CsShapeLine.STYLES key, and it is what marks a row as
+ * shaped: armLayer starts the shaped action for these and the plain
+ * one for everything in ROWS. The layer is the STYLE's own spine layer,
+ * carried here only so the tile can paint itself in the right colour.
+ */
+FeatureTrace.SHAPED_ROWS = [
+    { label: "Floor Ledge", style: "floorledge" },
+    { label: "Ceiling Ledge", style: "ceilingledge" },
+    { label: "Pit", style: "pit" },
+    { label: "Flowstone", style: "flowstone" },
+    { label: "Rimstone Dam", style: "rimstone" },
+    { label: "Slope", style: "slope" }
 ];
 
 /**
@@ -162,6 +191,7 @@ FeatureTrace.widgets = undefined;
  */
 FeatureTrace.armLayer = function(layerName) {
     FeatureTrace.target = layerName;
+    FeatureTrace.clearShaped();
     FeatureTrace.refreshRuns();
     FeatureTrace.refresh();
 
@@ -542,13 +572,30 @@ FeatureTrace.buildGroup = function(w, parent, title, header) {
     for (var i = 0; i < FeatureTrace.ROWS.length; i++) {
         var row = FeatureTrace.ROWS[i];
         try {
-            var button = new QPushButton(
-                FeatureTrace.wrapLabel(row.label, FeatureTrace.CELL_CHARS));
+            // A TOOL button, not a push button: QPushButton lays icon
+            // and text side by side with no way to stack them, so the
+            // name ends up cut off next to the picture.
+            var button = new QToolButton();
+            button.text = FeatureTrace.wrapLabel(row.label,
+                FeatureTrace.CELL_CHARS);
+            try {
+                button.toolButtonStyle = Qt.ToolButtonTextUnderIcon;
+            } catch (eStyle) {
+            }
             button.checkable = true;
             button.toolTip = row.layer;
+            var icon = FeatureTrace.iconForLayer(row.layer);
+            if (icon !== null) {
+                try {
+                    button.icon = icon;
+                    button.iconSize = new QSize(FeatureTrace.ICON,
+                        FeatureTrace.ICON);
+                } catch (eIcon) {
+                }
+            }
             try {
-                button.setFixedSize(FeatureTrace.CELL_W,
-                    FeatureTrace.CELL_H);
+                button.setFixedSize(FeatureTrace.CELL_W + 20,
+                    FeatureTrace.CELL_H + 24);
             } catch (eSize) {
                 // a bridge without setFixedSize gets tiles that stretch;
                 // the grid still reads as a grid
@@ -618,13 +665,266 @@ FeatureTrace.connectRow = function(button, row) {
     });
 };
 
+/** The armed SHAPED style, or null when a plain feature is armed.
+ *  Read by nothing but this file -- the shaped action takes its style
+ *  from its own prototype, and startShaped sets that. */
+FeatureTrace.shapedStyle = undefined;
+
+/**
+ * Arms a shaped line and starts its draw action.
+ *
+ * The two kinds of tile are exclusive: arming one clears the other's
+ * checked mark, because exactly one thing happens when the caver drags.
+ */
+FeatureTrace.armShaped = function(styleKey) {
+    FeatureTrace.shapedStyle = styleKey;
+    FeatureTrace.target = undefined;
+    var w = FeatureTrace.widgets;
+    if (!isNull(w)) {
+        var i;
+        try {
+            if (!isNull(w.currentButton)) {
+                w.currentButton.checked = false;
+            }
+        } catch (eCur) {
+        }
+        for (i = 0; i < w.buttons.length; i++) {
+            try {
+                w.buttons[i].button.checked = false;
+            } catch (ePlain) {
+            }
+        }
+        for (i = 0; i < w.shapedButtons.length; i++) {
+            try {
+                w.shapedButtons[i].button.checked =
+                    (w.shapedButtons[i].row.style === styleKey);
+            } catch (eShaped) {
+            }
+        }
+    }
+    FeatureTrace.startShaped(styleKey);
+};
+
+/** Clears any armed shaped tile. Called when a plain feature is armed,
+ *  so the panel never shows two things armed at once. */
+FeatureTrace.clearShaped = function() {
+    FeatureTrace.shapedStyle = undefined;
+    var w = FeatureTrace.widgets;
+    if (isNull(w) || isNull(w.shapedButtons)) {
+        return;
+    }
+    for (var i = 0; i < w.shapedButtons.length; i++) {
+        try {
+            w.shapedButtons[i].button.checked = false;
+        } catch (e) {
+        }
+    }
+};
+
+/** Arms one shaped row. Its own function for connectRow's reason. */
+FeatureTrace.connectShapedRow = function(button, row) {
+    button.clicked.connect(function() {
+        FeatureTrace.armShaped(row.style);
+    });
+};
+
+/**
+ * Hands control to the SHAPED draw action, armed to one style.
+ *
+ * The per-style subclasses (LedgeFloorDraw and friends) exist so the
+ * old toolbar could have one button per style; from here the style is
+ * set on the instance instead, which is the same thing the subclass
+ * did in three lines. The typed commands still reach the subclasses.
+ */
+FeatureTrace.startShaped = function(styleKey) {
+    var di = EAction.getDocumentInterface();
+    if (isNull(di)) {
+        return;
+    }
+    // Already drawing a shaped line? Re-style the running action rather
+    // than replacing it: setCurrentAction on the action that is running
+    // this very click tears it down under itself, which is a SIGSEGV
+    // this suite has paid for once already.
+    try {
+        var current = di.getCurrentAction();
+        if (!isNull(current)) {
+            var file = String(current.getGuiAction().getScriptFile());
+            if (file.indexOf("ShapedLinesRun.js") !== -1 ||
+                    file.indexOf("Draw.js") !== -1) {
+                ShapedLinesRun.prototype.styleKey = styleKey;
+                return;
+            }
+        }
+    } catch (e) {
+    }
+    var runAction = RGuiAction.getByScriptFile(
+        FeatureTrace.basePath + "/../ShapedLines/ShapedLinesRun.js");
+    var action = new ShapedLinesRun(runAction);
+    action.styleKey = styleKey;
+    di.setCurrentAction(action);
+};
+
+/** Tile icon size, in pixels. Bigger than the Symbol Palette's: a
+ *  ledge tile has to show hachures ON one side of a line, which is
+ *  three strokes deep before it reads at all. */
+FeatureTrace.ICON = 34;
+
+/**
+ * The picture on a PLAIN feature's tile: a sample of the line that
+ * feature draws, in its own layer's colour and dashedness.
+ *
+ * The tile is then a legend entry you can draw from -- an inferred wall
+ * is dashed in the panel because it is dashed on the map -- and the
+ * colour comes from CsLayers.styleOf, the one place layer appearance is
+ * resolved, so a tile cannot quietly disagree with the drawing.
+ */
+FeatureTrace.iconForLayer = function(layerName) {
+    try {
+        var curve = CsTileArt.sampleCurve(10, 20);
+        return CsTileArt.iconOfClouds([curve], FeatureTrace.ICON,
+            CsTileArt.penForLayer(layerName));
+    } catch (e) {
+        return null;
+    }
+};
+
+/**
+ * The picture on a SHAPED tile: a sample stroke with the style's own
+ * ornament generated along it, by the same CsShapeLine.prims the
+ * drawing uses.
+ *
+ * GENERATED, NOT DRAWN. A hand-drawn icon of a ledge is a promise about
+ * what the tool does; this is the tool doing it, at tile size. Change
+ * the hachure spacing tomorrow and every tile changes with it.
+ */
+FeatureTrace.iconForStyle = function(styleKey) {
+    try {
+        var spec = CsShapeLine.STYLES[styleKey];
+        if (isNull(spec)) {
+            return null;
+        }
+        // The sample is as long as it needs to be to show FOUR of
+        // whatever this style repeats, at the style's OWN spacing. A
+        // fixed-length sample would have shown a 5 ft ceiling-ledge
+        // spacing as two lonely hachures and a 2 ft rimstone as a
+        // scribble; stretching the line instead of squeezing the
+        // ornament keeps the tile an honest picture of the spacing.
+        var feet = Math.max(10, spec.spacingFeet * 4);
+        var pts = spec.close === true ?
+            CsTileArt.sampleRing(feet, 20) : CsTileArt.sampleCurve(feet, 20);
+        var side = spec.close === true ?
+            CsShapeLine.inwardSide(pts) : 1;
+        // Spacing and size are the STYLE's, scaled to the sample: at
+        // true cave spacing a 10 ft sample carries three hachures,
+        // which is exactly what the tile should show.
+        var prims = CsShapeLine.prims(pts, spec.close === true, spec,
+            side, spec.spacingFeet,
+            isNull(spec.sizeFeet) ? 2 : spec.sizeFeet);
+        // prims answers { lines, polylines }: a line is a PAIR of
+        // points, and a scallop chain is one bulged polyline
+        // ({points, bulges, closed}) rather than a list of arcs.
+        var clouds = [pts.slice(0)];
+        if (spec.close === true) {
+            clouds[0].push(pts[0]);   // close the ring for painting
+        }
+        var i, j;
+        for (i = 0; i < prims.lines.length; i++) {
+            var seg = prims.lines[i];
+            if (!isNull(seg) && seg.length >= 2) {
+                clouds.push([seg[0], seg[1]]);
+            }
+        }
+        for (i = 0; i < prims.polylines.length; i++) {
+            var chain = prims.polylines[i];
+            if (isNull(chain) || chain.points.length < 2) {
+                continue;
+            }
+            // Each bulged segment sampled the way the drawing samples
+            // one, so a scallop in the tile is the curve it will be on
+            // the map rather than the chord across it.
+            var walk = [];
+            var lastIndex = chain.closed ? chain.points.length :
+                chain.points.length - 1;
+            for (j = 0; j < lastIndex; j++) {
+                var a = chain.points[j];
+                var b = chain.points[(j + 1) % chain.points.length];
+                CsShapeLine.sampleBulgeSeg(a, b, chain.bulges[j],
+                    spec.spacingFeet / 8, walk);
+            }
+            if (walk.length > 1) {
+                clouds.push(walk);
+            }
+        }
+        return CsTileArt.iconOfClouds(clouds, FeatureTrace.ICON,
+            CsTileArt.penForLayer(spec.decorLayer));
+    } catch (e) {
+        return null;
+    }
+};
+
+/**
+ * The shaped-line group: one tile per NSS line symbol, each showing its
+ * own ornament.
+ */
+FeatureTrace.buildShapedGroup = function(w, parent) {
+    var box = new QGroupBox(qsTr("Shaped Lines"), parent);
+    var inner = new QGridLayout();
+    var cell = 0;
+    for (var i = 0; i < FeatureTrace.SHAPED_ROWS.length; i++) {
+        var row = FeatureTrace.SHAPED_ROWS[i];
+        try {
+            var spec = CsShapeLine.STYLES[row.style];
+            var button = new QToolButton();
+            button.text = FeatureTrace.wrapLabel(row.label,
+                FeatureTrace.CELL_CHARS);
+            try {
+                button.toolButtonStyle = Qt.ToolButtonTextUnderIcon;
+            } catch (eStyle) {
+            }
+            button.checkable = true;
+            button.toolTip = row.label + "\n" +
+                (isNull(spec) ? "" : spec.decorLayer) + "\n" +
+                qsTr("Drag along the line, then point at the side the " +
+                    "ornament goes and click.");
+            var icon = FeatureTrace.iconForStyle(row.style);
+            if (icon !== null) {
+                try {
+                    button.icon = icon;
+                    button.iconSize = new QSize(FeatureTrace.ICON,
+                        FeatureTrace.ICON);
+                } catch (eIcon) {
+                }
+            }
+            try {
+                button.setFixedSize(FeatureTrace.CELL_W + 20,
+                    FeatureTrace.CELL_H + 24);
+            } catch (eSize) {
+            }
+            FeatureTrace.connectShapedRow(button, row);
+            inner.addWidget(button,
+                Math.floor(cell / FeatureTrace.GRID_COLUMNS),
+                cell % FeatureTrace.GRID_COLUMNS);
+            cell++;
+            w.shapedButtons.push({ button: button, row: row });
+        } catch (e) {
+            w.problems.push(row.style + " (" + e + ")");
+        }
+    }
+    try {
+        inner.setColumnStretch(FeatureTrace.GRID_COLUMNS, 1);
+    } catch (eStretch) {
+    }
+    box.setLayout(inner);
+    return box;
+};
+
 FeatureTrace.buildDock = function(appWin) {
     var dock = new QDockWidget(qsTr("Feature Trace"), appWin);
     // Without an objectName restoreState() cannot identify the dock and
     // silently forgets where it was.
     dock.objectName = "CaveSurveyFeatureTraceDock";
 
-    var w = { problems: [], buttons: [] };
+    var w = { problems: [], buttons: [], shapedButtons: [] };
     var body = new QWidget(dock);
     var layout = new QVBoxLayout();
 
@@ -768,6 +1068,18 @@ FeatureTrace.buildDock = function(appWin) {
         layout.addWidget(w.featureGroup, 0, 0);
     } catch (eGroups) {
         w.problems.push("feature group (" + eGroups + ")");
+    }
+
+    // -- the shaped lines --------------------------------------------
+    //
+    // A second group rather than more tiles in the first: they are the
+    // same gesture but not the same thing -- these bring ornament, and
+    // they ask one more question (which side) after the drag.
+    try {
+        w.shapedGroup = FeatureTrace.buildShapedGroup(w, body);
+        layout.addWidget(w.shapedGroup, 0, 0);
+    } catch (eShaped) {
+        w.problems.push("shaped lines group (" + eShaped + ")");
     }
 
     // -- what the last trace cost ------------------------------------

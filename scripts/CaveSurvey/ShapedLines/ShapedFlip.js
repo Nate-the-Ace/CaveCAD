@@ -97,5 +97,7 @@ ShapedFlip.init = function(basePath) {
     flipAction.setDefaultCommands(["shapedflip", "shf"]);
     flipAction.setGroupSortOrder(450);
     flipAction.setSortOrder(37);
-    flipAction.setWidgetNames(["CaveLinesToolBar"]);
+    // The Cave Lines toolbar is gone; this keeps its command and
+    // its place in the suite's own menu.
+    flipAction.setWidgetNames([]);
 };

@@ -387,6 +387,72 @@ CsShapeLine.inwardSide = function(pts) {
  * units (the caller applied perFoot and the feature's scale).
  * Returns {lines: [[p,q],...], polylines: [{points,bulges,closed}]}.
  */
+/**
+ * Which side of a path a point lies on: +1 (right of travel) or -1.
+ *
+ * THE POINT OF IT. The ornament's side used to be "right of the
+ * direction you dragged", which a caver cannot see and can only fix by
+ * flipping afterwards -- they know where the DROP is, not which way
+ * they happened to draw. This answers the question they can answer:
+ * point at the low side, and the side comes out of the geometry.
+ *
+ * The nearest sampled station wins, and the sign is the cross product
+ * of that station's tangent with the vector to the point. Nearest and
+ * not first: a hooked ledge doubles back, and the side is a local fact
+ * about the piece of line the cursor is beside.
+ *
+ * A CLOSED path (the pit) ignores the cursor's side entirely and always
+ * answers inward -- hachures on a pit point INTO the hole, and a caver
+ * hovering outside the loop means the same pit either way.
+ *
+ * Answers null when it cannot tell (too few points, a degenerate
+ * tangent, a point exactly on the line); callers keep whatever side
+ * they already had rather than flipping on a rounding error.
+ *
+ * Pure.
+ */
+CsShapeLine.sideForPoint = function(pts, closed, point) {
+    if (isNull(pts) || pts.length < 2 || isNull(point)) {
+        return null;
+    }
+    if (closed === true) {
+        return CsShapeLine.inwardSide(pts);
+    }
+    var best = null, bestD = null, i;
+    var last = pts.length - 1;
+    for (i = 0; i < last; i++) {
+        var a = pts[i], b = pts[i + 1];
+        var dx = b.x - a.x, dy = b.y - a.y;
+        var len2 = dx * dx + dy * dy;
+        if (!(len2 > 0)) {
+            continue;
+        }
+        // The nearest point ON THE SEGMENT, clamped to its ends, so a
+        // cursor beyond either end of the line still measures against
+        // the piece nearest it rather than against an infinite ray.
+        var t = ((point.x - a.x) * dx + (point.y - a.y) * dy) / len2;
+        if (t < 0) { t = 0; } else if (t > 1) { t = 1; }
+        var px = a.x + t * dx, py = a.y + t * dy;
+        var d = (point.x - px) * (point.x - px) +
+                (point.y - py) * (point.y - py);
+        if (bestD === null || d < bestD) {
+            bestD = d;
+            best = { dx: dx, dy: dy, px: px, py: py };
+        }
+    }
+    if (best === null) {
+        return null;
+    }
+    // cross(tangent, toPoint): positive means the point is LEFT of
+    // travel, and left of travel is side -1 -- ticks() takes the right
+    // normal (ty, -tx) for side +1.
+    var cross = best.dx * (point.y - best.py) - best.dy * (point.x - best.px);
+    if (cross === 0 || isNaN(cross)) {
+        return null;   // exactly on the line: no answer, keep the old one
+    }
+    return cross > 0 ? -1 : 1;
+};
+
 CsShapeLine.prims = function(pts, closed, spec, side, spacing, size) {
     var out = { lines: [], polylines: [] };
     if (spec.kind === "ticks") {

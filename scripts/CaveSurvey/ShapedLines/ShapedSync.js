@@ -99,5 +99,7 @@ ShapedSync.init = function(basePath) {
     syncAction.setDefaultCommands(["shapedsync", "shs"]);
     syncAction.setGroupSortOrder(450);
     syncAction.setSortOrder(38);
-    syncAction.setWidgetNames(["CaveLinesToolBar"]);
+    // The Cave Lines toolbar is gone; this keeps its command and
+    // its place in the suite's own menu.
+    syncAction.setWidgetNames([]);
 };

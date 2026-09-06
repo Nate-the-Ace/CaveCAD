@@ -245,9 +245,12 @@ ShapedLines.prototype.beginEvent = function() {
 };
 
 ShapedLines.init = function(basePath) {
-    // The dedicated toolbar, created BEFORE any button registers onto
-    // it -- same reason CaveSurvey.init builds the menu first.
-    EAction.getToolBar(qsTr("Cave Lines"), "CaveLinesToolBar");
+    // THE CAVE LINES TOOLBAR IS GONE (Nathan's call, 2026-09-07). Six
+    // buttons for six styles were a second front door onto one act: a
+    // caver tracing a cave draws walls and ledges with the same drag,
+    // and had to know that half of those lived on another bar. Feature
+    // Trace's panel carries them now, as tiles drawn from the real
+    // ornament, and every typed command below still works.
 
     var action = new RGuiAction(qsTr("Decorate Selection"),
         RMainWindowQt.getMainWindow());
@@ -259,8 +262,7 @@ ShapedLines.init = function(basePath) {
     action.setDefaultCommands(["shapedlines", "shl"]);
     action.setGroupSortOrder(452);
     action.setSortOrder(20);
-    action.setWidgetNames(["CaveSurveyMenu", "CaveSurveyToolBar",
-        "CaveLinesToolBar"]);
+    action.setWidgetNames(["CaveSurveyMenu", "CaveSurveyToolBar"]);
 
     // The draw buttons and companions live in sibling files QCAD cannot
     // discover on its own.

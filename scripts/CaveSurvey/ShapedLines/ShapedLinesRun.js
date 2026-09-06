@@ -21,9 +21,13 @@ function ShapedLinesRun(guiAction) {
     EAction.call(this, guiAction);
 
     this.samples = [];      // {x, y} in drawing coordinates
-    this.region = null;     // cached profile-frame box
-    this.bays = [];         // cached open section-bay rects
-    this.savedSnap = null;  // snap CLASS NAME to restore on exit
+    this.spinePts = null;    // the fitted spine, kept for the side pick
+    this.spineClosed = false;
+    this.side = 1;           // which way the ornament faces, live
+    this.pathFrame = null;   // plan / profile / section, decided at release
+    this.region = null;      // cached profile-frame box
+    this.bays = [];          // cached open section-bay rects
+    this.savedSnap = null;   // snap CLASS NAME to restore on exit
 }
 
 ShapedLinesRun.prototype = new EAction();
@@ -34,7 +38,8 @@ ShapedLinesRun.prototype.styleKey = "floorledge";
 
 ShapedLinesRun.State = {
     Idle: 0,
-    Drawing: 1
+    Drawing: 1,
+    PickingSide: 2
 };
 
 /** Screen pixels between kept samples -- FeatureTraceRun's value, for
@@ -82,10 +87,20 @@ ShapedLinesRun.prototype.setState = function(state) {
         break;
 
     case ShapedLinesRun.State.Drawing:
-        var trStop = qsTr("Release to finish");
+        var trStop = qsTr("Release where the line ends");
         this.setCommandPrompt(trStop);
         this.setLeftMouseTip(trStop);
         this.setRightMouseTip("");
+        break;
+
+    case ShapedLinesRun.State.PickingSide:
+        // The whole point of this state, said in the words a caver
+        // thinks in: the low side, not "side of travel".
+        var trSide = qsTr("%1: move to the side the ornament goes -- " +
+            "the low side -- and click").arg(label);
+        this.setCommandPrompt(trSide);
+        this.setLeftMouseTip(qsTr("Put the ornament here"));
+        this.setRightMouseTip(EAction.trCancel);
         break;
     }
 };
@@ -123,11 +138,29 @@ ShapedLinesRun.prototype.sampleThreshold = function() {
 };
 
 ShapedLinesRun.prototype.escapeEvent = function() {
-    if (this.state === ShapedLinesRun.State.Drawing) {
+    if (this.state === ShapedLinesRun.State.Drawing ||
+            this.state === ShapedLinesRun.State.PickingSide) {
+        // Nothing is applied until the side is picked, so an abandoned
+        // stroke leaves the drawing exactly as it was -- no undo step
+        // for the caver to notice or step over.
+        this.discard();
         this.setState(ShapedLinesRun.State.Idle);
         return;
     }
     EAction.prototype.escapeEvent.call(this);
+};
+
+/** Throws away a stroke in progress. */
+ShapedLinesRun.prototype.discard = function() {
+    this.samples = [];
+    this.spinePts = null;
+    this.spineClosed = false;
+    this.pathFrame = null;
+    try {
+        this.getDocumentInterface().clearPreview();
+        this.getDocumentInterface().repaintViews();
+    } catch (e) {
+    }
 };
 
 ShapedLinesRun.prototype.mousePressEvent = function(event) {
@@ -135,6 +168,16 @@ ShapedLinesRun.prototype.mousePressEvent = function(event) {
         return;
     }
     if (event.modifiers().valueOf() === Qt.ControlModifier.valueOf()) {
+        return;
+    }
+    // THE SECOND CLICK COMMITS. Between the release and this click the
+    // feature is only a preview, following the cursor from one side of
+    // the spine to the other; this is the caver saying "that side".
+    if (this.state === ShapedLinesRun.State.PickingSide) {
+        this.updateSide(event.getModelPosition());
+        this.commit();
+        this.discard();
+        this.setState(ShapedLinesRun.State.Idle);
         return;
     }
     if (this.state !== ShapedLinesRun.State.Idle) {
@@ -149,6 +192,15 @@ ShapedLinesRun.prototype.mousePressEvent = function(event) {
 };
 
 ShapedLinesRun.prototype.mouseMoveEvent = function(event) {
+    if (this.state === ShapedLinesRun.State.PickingSide) {
+        // Button UP: the ornament follows the cursor across the spine,
+        // so the answer is on screen before the click rather than after
+        // it. This is the step that replaces select-then-Flip.
+        if (this.updateSide(event.getModelPosition())) {
+            this.updatePreview();
+        }
+        return;
+    }
     if (!(event.buttons().valueOf() & Qt.LeftButton.valueOf())) {
         return;
     }
@@ -175,21 +227,171 @@ ShapedLinesRun.prototype.mouseReleaseEvent = function(event) {
     if (this.state !== ShapedLinesRun.State.Drawing) {
         return;
     }
-    this.commit();
-    this.setState(ShapedLinesRun.State.Idle);
+    // The stroke is finished; the FEATURE is not. Fit the spine now --
+    // resample, reduce, close a pit -- so the side pick has real
+    // geometry to measure the cursor against and the preview shows the
+    // line the caver will actually get.
+    if (!this.prepare()) {
+        this.discard();
+        this.setState(ShapedLinesRun.State.Idle);
+        return;
+    }
+    this.setState(ShapedLinesRun.State.PickingSide);
+    this.updatePreview();
 };
 
-/** The preview is the raw captured path -- FeatureTraceRun's choice,
- *  for its reason: refitting per mouse move buys nothing visible. */
+/**
+ * Turns the captured drag into the spine points this feature will
+ * have, and decides which view it belongs to. Everything up to the
+ * side, in other words.
+ *
+ * \return true when there is a feature to place.
+ */
+ShapedLinesRun.prototype.prepare = function() {
+    var doc = this.getDocument();
+    var spec = CsShapeLine.STYLES[this.styleKey];
+    if (isNull(doc) || isNull(spec) || this.samples.length < 2) {
+        return false;
+    }
+
+    // ONE button, ALL THREE views: the stroke's LOCATION decides
+    // whether this is plan, elevation or cross-section linework -- see
+    // the note in commit(). Decided HERE, at the release, because the
+    // side pick that follows moves the cursor away from the stroke and
+    // must not be able to change the answer.
+    this.pathFrame = CsTrace.pathFrame(this.region, this.samples, this.bays);
+    if (this.pathFrame === null) {
+        EAction.handleUserMessage(qsTr("%1: that stroke crossed from one " +
+            "view into another. Nothing was drawn -- draw within one " +
+            "view.").arg(spec.label));
+        return false;
+    }
+
+    var perFoot = CsShapeLine.perFoot(doc);
+    var spacing = perFoot * ShapedLinesRun.INTERVAL_FEET;
+    var kept = CsTrace.reduce(CsTrace.resample(this.samples, spacing),
+        spacing * ShapedLinesRun.TOLERANCE_FRACTION);
+    if (kept.length < 2) {
+        return false;
+    }
+
+    if (spec.close) {
+        // A pit is a CLOSED loop: weld the release point to the press
+        // point. See commit() for why the spine stays a polyline.
+        if (kept.length > 2 && CsShapeLine.dist(kept[0],
+                kept[kept.length - 1]) < spacing) {
+            kept.pop();
+        }
+        if (kept.length < 3) {
+            EAction.handleUserMessage(qsTr("A pit needs a loop -- drag " +
+                "around the edge and release near where you pressed."));
+            return false;
+        }
+        this.spineClosed = true;
+        // A pit's hachures point IN, and no cursor position changes
+        // that -- so it is decided once, here, and the side pick below
+        // simply confirms the feature.
+        this.side = CsShapeLine.inwardSide(kept);
+    } else {
+        this.spineClosed = false;
+        this.side = 1;
+    }
+    this.spinePts = kept;
+    return true;
+};
+
+/**
+ * Points the ornament at the cursor. Answers true when the side
+ * actually changed, so a mouse move that means nothing repaints
+ * nothing.
+ */
+ShapedLinesRun.prototype.updateSide = function(pos) {
+    if (isNull(this.spinePts) || isNull(pos)) {
+        return false;
+    }
+    var got = CsShapeLine.sideForPoint(this.spinePts, this.spineClosed,
+        { x: pos.x, y: pos.y });
+    if (got === null || got === this.side) {
+        return false;   // on the line, or no change: keep what we have
+    }
+    this.side = got;
+    return true;
+};
+
+/** The spine entity for a set of fitted points: a closed polyline for
+ *  a pit, a fitted spline for everything else. One place, so the
+ *  preview and the committed feature cannot be different shapes. */
+ShapedLinesRun.prototype.buildSpine = function(doc, kept, spec) {
+    if (spec.close) {
+        // A pit's spine stays an ordinary polyline: a periodic spline
+        // is a Pro feature and fails silently in this build.
+        var pl = new RPolyline();
+        for (var v = 0; v < kept.length; v++) {
+            pl.appendVertex(new RVector(kept[v].x, kept[v].y), 0.0);
+        }
+        pl.setClosed(true);
+        return new RPolylineEntity(doc, new RPolylineData(pl));
+    }
+    return CsTrace.fitSpline(doc, kept);
+};
+
+/**
+ * The preview.
+ *
+ * WHILE DRAGGING it is the raw captured path -- FeatureTraceRun's
+ * choice, for its reason: refitting per mouse move buys nothing a caver
+ * can see.
+ *
+ * WHILE PICKING THE SIDE it is the whole feature, ornament included,
+ * generated on the side the cursor is on. That is the entire point of
+ * the step: the answer is on screen before the click, so nobody has to
+ * draw it, look at it, and then reach for Flip.
+ */
 ShapedLinesRun.prototype.getOperation = function(preview) {
+    var doc = this.getDocument();
+    var op, i;
+
+    if (this.state === ShapedLinesRun.State.PickingSide &&
+            !isNull(this.spinePts)) {
+        var spec = CsShapeLine.STYLES[this.styleKey];
+        var spine = this.buildSpine(doc, this.spinePts, spec);
+        if (isNull(spine)) {
+            return undefined;
+        }
+        // Tagged the same way the committed feature is, because
+        // buildDecor reads the side, the style and the scale off the
+        // spine -- the preview is generated by the SAME code that
+        // generates the real thing, not by a sketch of it.
+        CsTags.set(spine, CsShapeLine.KEY.STYLE, this.styleKey);
+        CsTags.set(spine, CsShapeLine.KEY.SIDE, String(this.side));
+        CsTags.set(spine, CsShapeLine.KEY.SCALE, "1");
+        CsTags.set(spine, CsShapeLine.KEY.FRAME, this.pathFrame);
+        op = new RAddObjectsOperation();
+        op.setText(this.getToolTitle());
+        op.setLimitPreview(false);
+        op.addObject(spine, false);
+        var built = null;
+        try {
+            built = CsShapeLine.buildDecor(doc, spine);
+        } catch (eDecor) {
+            built = null;
+        }
+        if (!isNull(built)) {
+            for (i = 0; i < built.entities.length; i++) {
+                op.addObject(built.entities[i], false);
+            }
+        }
+        return op;
+    }
+
     if (this.samples.length < 2) {
         return undefined;
     }
-    var op = new RAddObjectsOperation();
+    op = new RAddObjectsOperation();
     op.setText(this.getToolTitle());
     op.setLimitPreview(false);
-    for (var i = 0; i < this.samples.length - 1; i++) {
-        op.addObject(new RLineEntity(this.getDocument(), new RLineData(
+    for (i = 0; i < this.samples.length - 1; i++) {
+        op.addObject(new RLineEntity(doc, new RLineData(
             new RVector(this.samples[i].x, this.samples[i].y),
             new RVector(this.samples[i + 1].x, this.samples[i + 1].y))),
             false);
@@ -209,7 +411,8 @@ ShapedLinesRun.prototype.getOperation = function(preview) {
 ShapedLinesRun.prototype.commit = function() {
     var doc = this.getDocument();
     var di = this.getDocumentInterface();
-    if (isNull(doc) || isNull(di) || this.samples.length < 2) {
+    if (isNull(doc) || isNull(di) || isNull(this.spinePts) ||
+            this.spinePts.length < 2) {
         return;
     }
 
@@ -218,62 +421,18 @@ ShapedLinesRun.prototype.commit = function() {
         return;
     }
 
-    // ONE button, ALL THREE views: the stroke's LOCATION decides
-    // whether this is plan, elevation or cross-section linework (an
-    // open bay for the section, the band bounding boxes for the
-    // elevation -- see CsTrace.frameIn and CsProfileBox), and the
-    // layers route to the frame's own family so a ledge drawn in the
-    // elevation never counts toward the plan's data window, and one
-    // drawn inside a sketching bay lands on SECTION-LEDGE-FLOOR rather
-    // than being swept into the block as plan ink. Only a stroke
-    // CROSSING between frames is refused -- it describes nothing in
-    // any of them.
-    var pathFrame = CsTrace.pathFrame(this.region, this.samples, this.bays);
-    if (pathFrame === null) {
-        EAction.handleUserMessage(qsTr("%1: that stroke crossed from one " +
-            "view into another. Nothing was drawn -- draw within one " +
-            "view.").arg(spec.label));
-        return;
-    }
+    // The view was decided at the release (prepare), not here: the side
+    // pick moves the cursor off the stroke, and a ledge drawn in the
+    // elevation must not become plan linework because the caver
+    // reached out of the band to point at its low side.
+    var pathFrame = this.pathFrame;
     var frameLayers = CsShapeLine.layersFor(spec, pathFrame);
+    var kept = this.spinePts;
+    var side = this.side;
 
-    var perFoot = CsShapeLine.perFoot(doc);
-    var spacing = perFoot * ShapedLinesRun.INTERVAL_FEET;
-    var tolerance = spacing * ShapedLinesRun.TOLERANCE_FRACTION;
-
-    var spaced = CsTrace.resample(this.samples, spacing);
-    var kept = CsTrace.reduce(spaced, tolerance);
-    if (kept.length < 2) {
+    var spine = this.buildSpine(doc, kept, spec);
+    if (spine === null) {
         return;
-    }
-
-    var spine;
-    var side = 1;   // right of travel; Flip Shaped Side is one command
-    if (spec.close) {
-        // A pit is a CLOSED loop: weld the release point to the press
-        // point and keep the spine an ordinary polyline -- a periodic
-        // spline is a Pro feature and fails silently in this build.
-        if (kept.length > 2 && CsShapeLine.dist(kept[0],
-                kept[kept.length - 1]) < spacing) {
-            kept.pop();
-        }
-        if (kept.length < 3) {
-            EAction.handleUserMessage(qsTr("A pit needs a loop -- drag " +
-                "around the edge and release near where you pressed."));
-            return;
-        }
-        var pl = new RPolyline();
-        for (var v = 0; v < kept.length; v++) {
-            pl.appendVertex(new RVector(kept[v].x, kept[v].y), 0.0);
-        }
-        pl.setClosed(true);
-        spine = new RPolylineEntity(doc, new RPolylineData(pl));
-        side = CsShapeLine.inwardSide(kept);   // hachures point IN
-    } else {
-        spine = CsTrace.fitSpline(doc, kept);
-        if (spine === null) {
-            return;
-        }
     }
 
     CsLayers.ensure(doc, di, frameLayers.spine);

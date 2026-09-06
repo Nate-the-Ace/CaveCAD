@@ -164,6 +164,10 @@ var CORE_FILES = [
     // what is tested. The document half is covered by
     // tests/symbol_palette_run.js.
     "scripts/CaveSurvey/Core/CsSymbolStore.js",
+    // Pure geometry (extents, fits, sample strokes) plus painters
+    // that only touch QPixmap inside their bodies -- the pure half
+    // is what is tested here.
+    "scripts/CaveSurvey/Core/CsTileArt.js",
     "scripts/CaveSurvey/Core/Format/CsCompass.js",
     "scripts/CaveSurvey/Core/Format/CsWalls.js",
     "scripts/CaveSurvey/Core/Format/CsSurvex.js",
@@ -22685,6 +22689,113 @@ eqs(CsSymbolStore.MARKER_TAGS.category, "SymbolCategory",
 eqs(CsSymbolStore.MARKER_TAGS.layer, "SymbolLayer", "marker tag: layer");
 eqs(CsSymbolStore.MARKER_TAGS.custom, "SymbolCustom", "marker tag: the flag");
 eqs(CsSymbolStore.PREFIX, "SYM_", "the symbol block prefix");
+
+// ---------------------------------------------------------------------
+// CsShapeLine.sideForPoint -- pointing at the low side.
+// ---------------------------------------------------------------------
+//
+// The ornament used to land "right of the direction you dragged", which
+// is a fact about the caver's hand, not about the cave. This turns the
+// question into one they can answer by pointing: the side is read from
+// where the cursor is relative to the line.
+
+(function testSideForPoint() {
+    // A straight line west to east. Travel is +x, so its right normal
+    // points at -y: a point BELOW the line is side +1.
+    var line = [{ x: 0, y: 0 }, { x: 10, y: 0 }];
+    eqs(CsShapeLine.sideForPoint(line, false, { x: 5, y: -3 }), 1,
+        "sideForPoint: below a west-to-east line is the right of travel");
+    eqs(CsShapeLine.sideForPoint(line, false, { x: 5, y: 3 }), -1,
+        "sideForPoint: above it is the left");
+    eqs(CsShapeLine.sideForPoint(line, false, { x: 5, y: 0 }), null,
+        "sideForPoint: exactly ON the line answers null, so a caver " +
+        "hovering the spine keeps the side they had rather than " +
+        "flipping on a rounding error");
+
+    // Drawn the other way, the same PLACE gives the opposite tag --
+    // which is the whole reason the tag alone was unusable, and why
+    // this function exists: the ornament still lands below either way.
+    var reversed = [{ x: 10, y: 0 }, { x: 0, y: 0 }];
+    eqs(CsShapeLine.sideForPoint(reversed, false, { x: 5, y: -3 }), -1,
+        "sideForPoint: the same point on a line drawn the other way is " +
+        "the other side of TRAVEL -- and the same side of the cave");
+
+    // Beyond the ends: measured against the nearest segment, not an
+    // infinite ray, so pointing past the end of a ledge still works.
+    eqs(CsShapeLine.sideForPoint(line, false, { x: 20, y: -3 }), 1,
+        "sideForPoint: past the end, the nearest segment still answers");
+
+    // A hooked line doubles back; the side is a LOCAL fact about the
+    // piece the cursor is beside.
+    var hook = [{ x: 0, y: 0 }, { x: 10, y: 0 }, { x: 10, y: 10 }];
+    eqs(CsShapeLine.sideForPoint(hook, false, { x: 13, y: 5 }), 1,
+        "sideForPoint: beside the second leg, the second leg decides");
+    eqs(CsShapeLine.sideForPoint(hook, false, { x: 5, y: -2 }), 1,
+        "sideForPoint: beside the first leg, the first leg decides");
+
+    // A closed pit ignores the cursor: hachures point INTO the hole
+    // whether the caver hovers inside the loop or outside it.
+    var loopCcw = [{ x: 0, y: 0 }, { x: 10, y: 0 }, { x: 10, y: 10 },
+        { x: 0, y: 10 }];
+    var inward = CsShapeLine.inwardSide(loopCcw);
+    eqs(CsShapeLine.sideForPoint(loopCcw, true, { x: 5, y: 5 }), inward,
+        "sideForPoint: inside a closed loop is inward");
+    eqs(CsShapeLine.sideForPoint(loopCcw, true, { x: 50, y: 50 }), inward,
+        "sideForPoint: and so is outside it -- a pit is a pit");
+
+    eqs(CsShapeLine.sideForPoint([{ x: 0, y: 0 }], false, { x: 1, y: 1 }),
+        null, "sideForPoint: one point is not a line");
+    eqs(CsShapeLine.sideForPoint(null, false, { x: 1, y: 1 }), null,
+        "sideForPoint: no path, no answer");
+})();
+
+// ---------------------------------------------------------------------
+// CsTileArt -- the pure half of a panel tile's picture.
+// ---------------------------------------------------------------------
+
+(function testTileArt() {
+    var clouds = [[{ x: 0, y: 0 }, { x: 10, y: 4 }],
+                  [{ x: -2, y: -1 }, { x: 3, y: 3 }]];
+    var extent = CsTileArt.extentOf(clouds);
+    eqs(extent.minX, -2, "extentOf: least x across every cloud");
+    eqs(extent.maxX, 10, "extentOf: greatest x");
+    eqs(extent.minY, -1, "extentOf: least y");
+    eqs(extent.maxY, 4, "extentOf: greatest y");
+    eqs(CsTileArt.extentOf([]), null, "extentOf: nothing has no extent");
+
+    // A tile fits the LARGER side, so a long thin ledge and a round pit
+    // both fill their tile instead of one of them being a dot.
+    var fit = CsTileArt.fitOf({ minX: 0, minY: 0, maxX: 12, maxY: 6 }, 30);
+    ok(Math.abs(fit.factor - (30 - 2 * CsTileArt.MARGIN) / 12) < 1e-9,
+        "fitOf: the larger side decides the scale");
+    eqs(fit.cx, 6, "fitOf: centred on the extent, x");
+    eqs(fit.cy, 3, "fitOf: centred on the extent, y");
+
+    // A single horizontal stroke has a zero vertical extent: scaling by
+    // it would divide by zero and paint an empty tile.
+    var flat = CsTileArt.fitOf({ minX: 0, minY: 5, maxX: 0, maxY: 5 }, 30);
+    eqs(flat.factor, 1.0, "fitOf: a shape with no extent at all is not " +
+        "scaled, rather than scaled by zero");
+
+    var curve = CsTileArt.sampleCurve(10, 12);
+    eqs(curve.length, 13, "sampleCurve: steps + 1 points");
+    ok(Math.abs(curve[0].x + 5) < 1e-9 &&
+        Math.abs(curve[curve.length - 1].x - 5) < 1e-9,
+        "sampleCurve: spans the width it was asked for, centred on zero");
+    var bent = false;
+    for (var i = 0; i < curve.length; i++) {
+        if (Math.abs(curve[i].y) > 0.1) { bent = true; }
+    }
+    ok(bent, "sampleCurve: actually curves -- a straight sample would " +
+        "hide which way the hachures point, which is what the tile is for");
+
+    var ring = CsTileArt.sampleRing(10, 16);
+    eqs(ring.length, 16, "sampleRing: one point per step, not repeated at " +
+        "the join -- the path is closed by its flag, not by a duplicate");
+    var ringExtent = CsTileArt.extentOf([ring]);
+    ok(Math.abs(ringExtent.maxX - 5) < 1e-9,
+        "sampleRing: spans the width it was asked for");
+})();
 
 // ---------------------------------------------------------------------
 // Report.

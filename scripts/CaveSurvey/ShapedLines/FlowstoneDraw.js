@@ -25,5 +25,8 @@ FlowstoneDraw.init = function(basePath) {
     drawAction.setDefaultCommands(["flowstone", "fst"]);
     drawAction.setGroupSortOrder(450);
     drawAction.setSortOrder(34);
-    drawAction.setWidgetNames(["CaveLinesToolBar"]);
+    // NO WIDGET NAMES: the Cave Lines toolbar is gone (2026-09-07) and
+    // this action is reached from Feature Trace's panel, which carries
+    // a tile per style. The command below still works and is the whole
+    // reason the action is still registered.
 };
