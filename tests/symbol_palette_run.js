@@ -279,16 +279,18 @@ function placeAt(x, y) {
     action.getDocumentInterface = function() { return di; };
     action.anchor = { x: x, y: y };
     action.angle = 0.0;
+    action.radius = CsSymbolStore.radiusOf(doc, entry.block);
+    action.unitsPerFoot = SymbolPaletteRun.perFoot(doc);
     action.refreshRegion();
     action.commit();
     return action;
 }
 
 // The panel is not loaded here (it builds widgets), so the armed entry
-// and the scale/angle come from these stubs -- the same three functions
+// and the size/angle come from these stubs -- the same three functions
 // the panel would answer.
 SymbolPaletteRun.armedEntry = function() { return entry; };
-SymbolPaletteRun.scale = function() { return 1.0; };
+SymbolPaletteRun.sizeFeet = function() { return 1.0; };
 SymbolPaletteRun.defaultAngle = function() { return 0.0; };
 
 /** Every block reference on a given layer. */
@@ -376,6 +378,33 @@ if (placedInBay.length === 1) {
         "and which bay it was drawn in");
 }
 
+// A plain click places at the SIZE the panel asks for, not at scale 1.
+(function clickTakesTheSizeField() {
+    SymbolPaletteRun.sizeFeet = function() { return 5.0; };
+    var x = planX + 120, y = planY + 120;
+    placeAt(x, y);
+    var placed = null;
+    var ids = doc.queryAllEntities(false, false, RS.EntityBlockRef);
+    for (var i = 0; i < ids.length; i++) {
+        var e = doc.queryEntity(ids[i]);
+        if (isNull(e)) { continue; }
+        var p = e.getPosition();
+        if (Math.abs(p.x - x) < 1e-6 && Math.abs(p.y - y) < 1e-6) { placed = e; }
+    }
+    ok(placed !== null, "the click placed a symbol (messages: " +
+        messages.join(" | ") + ")");
+    if (placed !== null) {
+        // the fixture stalactite is 1.0 units tall, so radius 0.5:
+        // 5 ft across in a foot drawing is scale 5.
+        var sx = placed.getScaleFactors().x;
+        ok(Math.abs(sx - 5.0) < 1e-9,
+            "and at the size the panel asked for, not at scale 1 -- a " +
+            "1 ft symbol in a 1000 ft cave is the bug this field exists " +
+            "for (expected scale 5, got " + sx + ")");
+    }
+    SymbolPaletteRun.sizeFeet = function() { return 1.0; };
+})();
+
 // -- a symbol with no twin in that view -------------------------------
 //
 // The north arrow orients a plan; an elevation has no north, so
@@ -420,6 +449,29 @@ eqs(SymbolPaletteRun.scaleForDrag(1e9, 0.5, 1.0, true),
     SymbolPaletteRun.MAX_SCALE,
     "scaleForDrag: and a drag across the county is capped");
 
+// The panel asks for FEET, and every symbol has to come out that size
+// whatever the block was drawn at -- the whole reason the field is not a
+// scale factor. A 1 ft stalactite asked to be 5 ft is scale 5; a 3.3 ft
+// north arrow asked for the same 5 ft is scale 1.5.
+eqs(SymbolPaletteRun.scaleForSize(5.0, 0.5, 1.0), 5.0,
+    "scaleForSize: a 1 ft symbol asked for 5 ft is scale 5");
+ok(Math.abs(SymbolPaletteRun.scaleForSize(5.0, 1.65, 1.0) - 1.51515) < 1e-4,
+    "scaleForSize: a 3.3 ft symbol asked for the same 5 ft is scale 1.5 " +
+    "-- one number in the field, one size on the sheet");
+ok(Math.abs(SymbolPaletteRun.scaleForSize(5.0, 0.5, 0.3048) - 1.524) < 1e-6,
+    "scaleForSize: a metric drawing gets the same 5 FEET, converted");
+eqs(SymbolPaletteRun.scaleForSize(5.0, 0, 1.0), 1.0,
+    "scaleForSize: an unknown radius falls back to scale 1 rather than " +
+    "dividing by zero");
+eqs(SymbolPaletteRun.scaleForSize(0, 0.5, 1.0), 1.0,
+    "scaleForSize: so does a size of nothing");
+ok(Math.abs(SymbolPaletteRun.sizeForScale(5.0, 0.5, 1.0) - 5.0) < 1e-9,
+    "sizeForScale: and back again, which is what the drag writes into " +
+    "the panel");
+eqs(SymbolPaletteRun.sizeForScale(5.0, 0, 1.0), null,
+    "sizeForScale: with no radius there is no answer, and the panel is " +
+    "left alone rather than filled with a wrong number");
+
 // The radius the mapping divides by, read off a real block.
 (function radiusFromTheBlock() {
     var probe = new RDocument(new RMemoryStorage(), createSpatialIndex());
@@ -447,6 +499,7 @@ eqs(SymbolPaletteRun.scaleForDrag(1e9, 0.5, 1.0, true),
     action.anchor = { x: x, y: y };
     action.refreshRegion();
     action.radius = CsSymbolStore.radiusOf(doc, entry.block);
+    action.unitsPerFoot = SymbolPaletteRun.perFoot(doc);
     ok(action.radius > 0, "the placement knows the symbol's own radius");
     // a drag of 2.0 units on a 0.5-unit radius: scale 4
     action.angle = 0.0;

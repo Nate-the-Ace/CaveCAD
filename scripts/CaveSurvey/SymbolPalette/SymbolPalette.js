@@ -146,20 +146,28 @@ SymbolPalette.grouped = function(entries, needle) {
     return out;
 };
 
-/** The panel's scale, or 1.0 when the field holds nonsense. */
-SymbolPalette.scaleValue = function() {
+/** The size the panel is asking for, in FEET of cave, or the default
+ *  when the field holds nonsense.
+ *
+ *  FEET AND NOT A SCALE FACTOR. The blocks are drawn about a foot
+ *  across and a cave map is a thousand feet across, so scale 1 is a
+ *  speck; worse, one multiplier means a different size on every symbol,
+ *  because the north arrow is three times the stalactite. Feet mean the
+ *  same thing on every tile, and the same thing in a metric drawing --
+ *  SymbolPaletteRun.perFoot converts. */
+SymbolPalette.sizeValue = function() {
     var w = SymbolPalette.widgets;
-    if (isNull(w) || isNull(w.scaleEdit)) {
-        return 1.0;
+    if (isNull(w) || isNull(w.sizeEdit)) {
+        return SymbolPaletteRun.DEFAULT_SIZE_FEET;
     }
     try {
-        var v = parseFloat(w.scaleEdit.text);
+        var v = parseFloat(w.sizeEdit.text);
         if (isNaN(v) || v <= 0) {
-            return 1.0;
+            return SymbolPaletteRun.DEFAULT_SIZE_FEET;
         }
         return v;
     } catch (e) {
-        return 1.0;
+        return SymbolPaletteRun.DEFAULT_SIZE_FEET;
     }
 };
 
@@ -200,20 +208,21 @@ SymbolPalette.dragScaleEnabled = function() {
  *
  * WRITTEN INTO THE FIELDS THEMSELVES, not into a separate readout. The
  * caver dragged a symbol out to a size and an angle; the two boxes that
- * name size and angle should then say what they placed it at, and the
- * next plain click uses exactly those numbers. A drag is a way of
- * typing in those fields with the mouse.
+ * name size and angle should then say what they placed it at, in the
+ * feet the field is labelled in, and the next plain click uses exactly
+ * those numbers. A drag is a way of typing in those fields with the
+ * mouse.
  *
  * Called from a mouse-move handler, so it never throws.
  */
-SymbolPalette.showDrag = function(scale, angleDeg) {
+SymbolPalette.showDrag = function(sizeFeet, angleDeg) {
     var w = SymbolPalette.widgets;
     if (isNull(w)) {
         return;
     }
     try {
-        if (!isNull(w.scaleEdit) && !isNull(scale)) {
-            w.scaleEdit.text = String(scale.toFixed(2));
+        if (!isNull(w.sizeEdit) && !isNull(sizeFeet)) {
+            w.sizeEdit.text = String(sizeFeet.toFixed(1));
         }
         if (!isNull(w.angleEdit) && !isNull(angleDeg)) {
             var deg = angleDeg % 360;
@@ -642,12 +651,18 @@ SymbolPalette.buildDock = function(appWin) {
     // -- scale and angle ---------------------------------------------
     try {
         var settings = new QHBoxLayout();
-        settings.addWidget(new QLabel(qsTr("Scale")), 0, 0);
-        w.scaleEdit = new QLineEdit("1.0");
-        w.scaleEdit.maximumWidth = 50;
-        w.scaleEdit.toolTip = qsTr("How big the symbol is placed, as a " +
-            "multiple of its drawn size.");
-        settings.addWidget(w.scaleEdit, 0, 0);
+        settings.addWidget(new QLabel(qsTr("Size")), 0, 0);
+        w.sizeEdit = new QLineEdit(
+            String(SymbolPaletteRun.DEFAULT_SIZE_FEET));
+        w.sizeEdit.maximumWidth = 50;
+        w.sizeEdit.toolTip = qsTr("How big the symbol is placed, across, " +
+            "in FEET of cave -- converted for a metric drawing. Feet " +
+            "rather than a scale factor because the blocks are drawn " +
+            "about a foot wide and a cave map is a thousand feet wide, so " +
+            "\"scale 1\" is a speck, and the same factor is a different " +
+            "size on every symbol.");
+        settings.addWidget(w.sizeEdit, 0, 0);
+        settings.addWidget(new QLabel(qsTr("ft")), 0, 0);
 
         settings.addWidget(new QLabel(qsTr("Angle")), 0, 0);
         w.angleEdit = new QLineEdit("0");
@@ -675,7 +690,7 @@ SymbolPalette.buildDock = function(appWin) {
         w.dragScaleCheck.toolTip = qsTr("While you drag, the distance " +
             "from where you pressed becomes the symbol's radius, so you " +
             "size and aim it in one gesture. Switch this off to aim only " +
-            "and keep the Scale above.");
+            "and keep the Size above.");
         layout.addWidget(w.dragScaleCheck, 0, 0);
     } catch (eDragScale) {
         w.problems.push("drag-sets-size box (" + eDragScale + ")");

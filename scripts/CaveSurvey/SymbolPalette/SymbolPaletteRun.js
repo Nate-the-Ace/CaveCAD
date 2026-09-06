@@ -21,6 +21,7 @@ function SymbolPaletteRun(guiAction) {
     this.angle = null;      // radians, from the drag; null until it turns
     this.dragScale = null;  // from the drag's LENGTH; null until it moves
     this.radius = 0;        // the armed symbol's own half-size at scale 1
+    this.unitsPerFoot = 1;  // this drawing's foot, cached per placement
     this.region = null;     // cached profile-frame box; see refreshRegion
     this.bays = [];         // cached open section-bay rects; same refresh
 }
@@ -46,6 +47,16 @@ SymbolPaletteRun.State = {
  */
 SymbolPaletteRun.AIM_PIXELS = 8;
 
+/**
+ * How big a symbol is placed when nobody has said otherwise, in FEET.
+ *
+ * Five feet, which is a symbol you can see at the zoom a passage is
+ * drawn at and one that does not swamp a narrow crawl. It is a starting
+ * point and nothing more -- the field is right there, and a drag
+ * overrules both.
+ */
+SymbolPaletteRun.DEFAULT_SIZE_FEET = 5.0;
+
 /** How small and how large a drag is allowed to make a symbol.
  *
  *  A floor rather than no floor because the drag distance IS the size:
@@ -56,6 +67,60 @@ SymbolPaletteRun.AIM_PIXELS = 8;
  *  anyone means, so neither is in the caver's way. */
 SymbolPaletteRun.MIN_SCALE = 0.05;
 SymbolPaletteRun.MAX_SCALE = 500.0;
+
+/**
+ * Drawing units per FOOT of cave.
+ *
+ * The panel asks for a size in feet and the drawing may be in metres,
+ * exactly as Feature Trace's interval does -- one field, one meaning,
+ * whatever the drawing was surveyed in.
+ */
+SymbolPaletteRun.perFoot = function(doc) {
+    try {
+        return CsTrace.spacingFor(CsUnits.fromDrawingUnit(doc.getUnit(), RS));
+    } catch (e) {
+        return 1.0;
+    }
+};
+
+/**
+ * The scale factor that makes a symbol `sizeFeet` across.
+ *
+ * WHY THE PANEL ASKS FOR FEET AND NOT A MULTIPLIER. The blocks are
+ * drawn about a foot across -- a stalactite is 1 ft wide at scale 1 --
+ * and a cave map is a thousand feet across, so scale 1 is a speck and
+ * nobody can guess from "1.0" what they will get. Worse, the same
+ * multiplier means a different size on every symbol: the north arrow is
+ * 3.3 ft at scale 1 and the stalactite 1 ft. A size in feet is the
+ * thing the caver actually wants to state, and it means the same on
+ * every symbol in the palette.
+ *
+ * Falls back to 1.0 for a symbol whose radius is unknown -- an empty or
+ * unreadable block -- rather than dividing by zero.
+ *
+ * Pure.
+ */
+SymbolPaletteRun.scaleForSize = function(sizeFeet, radius, perFoot) {
+    if (isNull(radius) || radius <= 0 || isNull(sizeFeet) ||
+            !(sizeFeet > 0)) {
+        return 1.0;
+    }
+    var scale = (sizeFeet * perFoot) / (2 * radius);
+    if (!(scale > 0) || isNaN(scale)) {
+        return 1.0;
+    }
+    return scale;
+};
+
+/** The size in FEET that a symbol of `radius` placed at `scale` comes
+ *  out. The inverse of scaleForSize, for writing a drag's answer back
+ *  into the panel's own field. Pure. */
+SymbolPaletteRun.sizeForScale = function(scale, radius, perFoot) {
+    if (isNull(radius) || radius <= 0 || isNull(perFoot) || perFoot <= 0) {
+        return null;
+    }
+    return (2 * radius * scale) / perFoot;
+};
 
 /**
  * The scale a drag of `distance` asks for, on a symbol whose own
@@ -106,13 +171,14 @@ SymbolPaletteRun.armedEntry = function() {
     return isNull(SymbolPalette.armed) ? null : SymbolPalette.armed;
 };
 
-/** The panel's scale, or 1.0. A nonsense entry falls back rather than
- *  refusing: a bad number in a spinbox must not cost a placement. */
-SymbolPaletteRun.scale = function() {
+/** The size the panel is asking for, in FEET of cave. A nonsense entry
+ *  falls back rather than refusing: a bad number in a text box must not
+ *  cost a placement. */
+SymbolPaletteRun.sizeFeet = function() {
     if (typeof SymbolPalette === "undefined") {
-        return 1.0;
+        return SymbolPaletteRun.DEFAULT_SIZE_FEET;
     }
-    return SymbolPalette.scaleValue();
+    return SymbolPalette.sizeValue();
 };
 
 /** True when a drag is allowed to set the symbol's SIZE as well as its
@@ -334,8 +400,9 @@ SymbolPaletteRun.prototype.mousePressEvent = function(event) {
         this.radius = CsSymbolStore.radiusOf(this.getDocument(),
             SymbolPaletteRun.armedEntry().block);
     } catch (eRadius) {
-        this.radius = 0;   // sizing falls back to the panel's field
+        this.radius = 0;   // sizing falls back to scale 1
     }
+    this.unitsPerFoot = SymbolPaletteRun.perFoot(this.getDocument());
     this.setState(SymbolPaletteRun.State.Placing);
 };
 
@@ -375,7 +442,7 @@ SymbolPaletteRun.prototype.mouseMoveEvent = function(event) {
         this.angle = Math.atan2(here.y - this.anchor.y,
             here.x - this.anchor.x);
         this.dragScale = SymbolPaletteRun.scaleForDrag(d, this.radius,
-            SymbolPaletteRun.scale(), SymbolPaletteRun.dragSetsScale());
+            this.clickScale(), SymbolPaletteRun.dragSetsScale());
     }
     this.showDragReadout();
     this.updatePreview();
@@ -400,10 +467,16 @@ SymbolPaletteRun.prototype.placementAngle = function() {
     return this.angle === null ? SymbolPaletteRun.defaultAngle() : this.angle;
 };
 
-/** The scale this placement uses: the drag's, or the panel's. */
+/** The scale a plain CLICK places at: whatever makes the symbol the
+ *  size the panel is asking for, in this drawing's units. */
+SymbolPaletteRun.prototype.clickScale = function() {
+    return SymbolPaletteRun.scaleForSize(SymbolPaletteRun.sizeFeet(),
+        this.radius, this.unitsPerFoot);
+};
+
+/** The scale this placement uses: the drag's, or the click's. */
 SymbolPaletteRun.prototype.placementScale = function() {
-    return this.dragScale === null ? SymbolPaletteRun.scale() :
-        this.dragScale;
+    return this.dragScale === null ? this.clickScale() : this.dragScale;
 };
 
 /** Says what the drag is asking for, in the panel, while it is being
@@ -416,7 +489,9 @@ SymbolPaletteRun.prototype.showDragReadout = function() {
         return;
     }
     try {
-        SymbolPalette.showDrag(this.placementScale(),
+        SymbolPalette.showDrag(
+            SymbolPaletteRun.sizeForScale(this.placementScale(), this.radius,
+                this.unitsPerFoot),
             RMath.rad2deg(this.placementAngle()));
     } catch (e) {
     }
@@ -502,9 +577,11 @@ SymbolPaletteRun.prototype.commit = function() {
         EAction.handleUserMessage(qsTr("%1 placed on %2")
             .arg(entry.nss).arg(layerName));
     } else {
-        EAction.handleUserMessage(qsTr("%1 placed on %2 at scale %3, %4 deg")
+        var feet = SymbolPaletteRun.sizeForScale(this.placementScale(),
+            this.radius, this.unitsPerFoot);
+        EAction.handleUserMessage(qsTr("%1 placed on %2 at %3 ft, %4 deg")
             .arg(entry.nss).arg(layerName)
-            .arg(this.placementScale().toFixed(2))
+            .arg(feet === null ? "?" : feet.toFixed(1))
             .arg(RMath.rad2deg(this.placementAngle()).toFixed(0)));
     }
     this.warnUnclaimedProfile(frame, layerName);
