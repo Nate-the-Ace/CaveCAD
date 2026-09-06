@@ -28,7 +28,7 @@
     {
       "id": 3,
       "subject": "Task 4: Fold Elevation Callout into Callout",
-      "status": "pending",
+      "status": "completed",
       "blockedBy": [
         2
       ],
@@ -107,5 +107,5 @@
       "description": "**Goal:** README, lessons and package agree with the shipped menu, and the suite goes out as one version.\n\n**Files:**\n- Modify: README.md, docs/LESSONS.md, tests/README.md, VERSION\n\n**Acceptance Criteria:**\n- [ ] README's six tables carry the final 18 entries; no cell mentions a deleted tool or command\n- [ ] tests/README.md stage count and list match run_all.sh\n- [ ] VERSION reads 0.9.52.0\n- [ ] ./tools/publish.sh installs and Help > About reports Cave Survey Tools 0.9.52.0\n\n**Verify:** ./tests/run_all.sh --publish -> ALL TESTS PASSED\n\n**Steps:**\n- [ ] grep the docs for every deleted tool name and command; rewrite each hit\n- [ ] echo 0.9.52.0 > VERSION (patch bump -- the suite holds at 0.9.X)\n- [ ] Run --publish: ALL TESTS PASSED\n- [ ] Publish, restart, cavecad_eval CaveSurvey.getVersion(...) -> 0.9.52.0\n- [ ] Commit\n\n```json:metadata\n{\"files\": [\"README.md\", \"docs/LESSONS.md\", \"tests/README.md\", \"VERSION\"], \"verifyCommand\": \"./tests/run_all.sh --publish\", \"acceptanceCriteria\": [\"no deleted names in docs\", \"test stage counts match\", \"VERSION 0.9.52.0\", \"About reports the version\"], \"modelTier\": \"mechanical\"}\n```"
     }
   ],
-  "lastUpdated": "2026-09-06T01:24:23.285144"
+  "lastUpdated": "2026-09-06T01:37:24.162583"
 }
