@@ -38,6 +38,7 @@ REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 # collides once AlignImage is present is exactly the kind of thing that has to fail
 # there rather than in the repo.
 ADDON = os.environ.get("CAVESURVEY_ADDON") or os.path.join(REPO, "scripts", "CaveSurvey")
+TESTDATA = os.path.join(REPO, "testdata")
 TEMPLATES = os.environ.get("CAVESURVEY_TEMPLATES") or os.path.join(REPO, "templates")
 
 # The menu/toolbar object names created by CaveSurvey.js. A tool that doesn't
@@ -1653,6 +1654,45 @@ class TestNamespacesAreDeclared(unittest.TestCase):
                         offenders.append("%s assigns %s.* but never "
                                          "declares %s" % (rel, ns, ns))
         self.assertEqual([], offenders, "\n".join(offenders))
+
+
+class TestLessonCave(unittest.TestCase):
+    """The lesson cave (Task 9): a small, invented cave the curriculum
+
+    (Task 10) and the guided first run (Task 11) are built against.
+    Regenerated with `tools/make_lesson_cave.js` -- see that file's own
+    run shape in its header comment -- these two files just have to
+    exist and the manifest has to say plainly, on its first line, that
+    the data is invented. Everything else about its shape (loop
+    misclosure, station count, open ends) is checked by the generator
+    itself when it runs, not re-derived here.
+    """
+
+    DAT_PATH = os.path.join(TESTDATA, "LessonCave.dat")
+    MANIFEST_PATH = os.path.join(TESTDATA, "LessonCave_MANIFEST.md")
+    REGEN_HINT = (
+        "regenerate with: CaveCAD -no-dock-icon -no-gui "
+        "-allow-multiple-instances -autostart tools/make_lesson_cave.js "
+        '"$PWD"'
+    )
+
+    def test_fixture_and_manifest_exist(self):
+        self.assertTrue(
+            os.path.isfile(self.DAT_PATH),
+            "testdata/LessonCave.dat is missing -- %s" % self.REGEN_HINT)
+        self.assertTrue(
+            os.path.isfile(self.MANIFEST_PATH),
+            "testdata/LessonCave_MANIFEST.md is missing -- %s" %
+            self.REGEN_HINT)
+
+    def test_manifest_declares_data_invented(self):
+        with open(self.MANIFEST_PATH) as handle:
+            first_line = handle.readline()
+        self.assertIn(
+            "invented", first_line.lower(),
+            "LessonCave_MANIFEST.md's first line must plainly declare "
+            "the data invented -- the project's first rule -- but reads: "
+            "%r" % first_line)
 
 
 if __name__ == "__main__":
