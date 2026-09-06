@@ -162,7 +162,7 @@ BuildLegend.init = function(basePath) {
     action.setIcon(basePath + "/BuildLegend.svg");
     action.setStatusTip(qsTr("Generate the legend from the symbols the map actually uses, NSS names with UIS aliases"));
     action.setDefaultCommands(["buildlegend", "bl"]);
-    action.setGroupSortOrder(450);
-    action.setSortOrder(78);
+    action.setGroupSortOrder(454);
+    action.setSortOrder(30);
     action.setWidgetNames(["CaveSurveyMenu", "CaveSurveyToolBar"]);
 };

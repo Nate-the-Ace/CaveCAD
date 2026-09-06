@@ -1406,11 +1406,11 @@ AlignImage.init = function(basePath) {
     action.setIcon(basePath + "/AlignImage.svg");
     action.setStatusTip(qsTr("Move, rotate, resize and warp a scanned map onto known stations"));
     action.setDefaultCommands(["alignimage", "ali"]);
-    action.setGroupSortOrder(450);
+    action.setGroupSortOrder(453);
     // 60, after GeoAnchor's 50: the suite tools hold 10..50, and this one is
     // maintained in a different repo, so it takes the next free slot rather
     // than displacing them. The two "place it in real space" tools end up
     // next to each other, which is also where this belongs by workflow.
-    action.setSortOrder(60);
+    action.setSortOrder(20);
     action.setWidgetNames(["CaveSurveyMenu", "CaveSurveyToolBar"]);
 };

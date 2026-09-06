@@ -1451,78 +1451,151 @@ class TestAddonDoesNotPatchStockPrototypes(unittest.TestCase):
             "CsCave.afterSave" % offenders)
 
 
-# The menu, as one table. Every tool's stage (groupSortOrder), position
-# within the stage (sortOrder) and typed commands. A merge is meant to
-# edit THIS and the tool together; a merge that edits only the tool
-# fails here, which is the point.
+# The menu, as one table. Every ACTION on the Cave Survey menu: which
+# file registers it, its stage (groupSortOrder), its position within the
+# stage (sortOrder) and its typed commands.
+#
+# Keyed by registering file, not by tool folder, and that distinction is
+# the whole reason this table earns its keep. Most tools register one
+# action from <Tool>/<Tool>.js, but a tool folder may hold sibling files
+# that register menu actions of their own -- SketchSection does, twice.
+# A table keyed by folder cannot see those, and the first version of it
+# did not: both siblings kept the old flat 450 and landed in "Start
+# here", where a beginner meets "Capture Section" before ever cutting a
+# section. Nothing failed. It was only visible in the running menu.
+#
+# The six stages, in the order a student works:
+#   450 start here            453 put a reference under the map
+#   451 survey data           454 finish the sheet
+#   452 draw the map          455 fix and share
+#
+# The engine draws the separators: RGuiAction::addToWidget inserts one
+# whenever an action arrives carrying a groupSortOrder the widget has
+# not seen, and fixSeparators hides the trailing one. So six stages
+# means five visible separators and no UI code of our own.
 MENU = {
-    "CaveShelf":         (450, 1,  ["caveshelf", "caves"]),
-    "CaveTemplate":      (450, 5,  ["newcavemap", "ncm"]),
-    "SurveyNotebook":    (450, 15, ["surveynotebook", "snb"]),
-    "EditTrip":          (450, 16, ["edittrip", "et"]),
-    "ImportCaveSurvey":  (450, 20, ["importcavesurvey", "ics"]),
-    "ExportCaveSurvey":  (450, 21, ["exportcavesurvey", "ecs"]),
-    "ShapedLines":       (450, 30, ["shapedlines", "shl"]),
-    "ScatterBreakdown":  (450, 40, ["scatterbreakdown", "scb"]),
-    "FeatureTrace":      (450, 45, ["featuretrace", "ft"]),
-    "CrossSection":      (450, 46, ["crosssection", "cxs"]),
-    "SketchSection":     (450, 47, ["sketchsection", "sks"]),
-    "AerialBasemap":     (450, 52, ["aerialbasemap", "ab"]),
-    "SurfaceContours":   (450, 54, ["surfacecontours", "sc"]),
-    "SketchScans":       (450, 56, ["sketchscans", "ss"]),
-    "AlignImage":        (450, 60, ["alignimage", "ali"]),
-    "SurveyStats":       (450, 70, ["surveystats", "sst"]),
-    "GenerateProfile":   (450, 75, ["generateprofile", "gp", "genprofile"]),
-    "BuildLegend":       (450, 78, ["buildlegend", "bl"]),
-    "RebuildSurveyData": (450, 85, ["rebuildsurveydata", "rsd"]),
-    "Callout":           (450, 88, ["callout", "cal", "cscallout", "cscal"]),
-    "CalloutElev":       (450, 90, ["calloutelev", "cel", "cscalloutelev", "cselev"]),
-    "CalloutSync":       (450, 92, ["calloutsync", "csync", "cscalloutsync", "cscsync"]),
-    "RestyleLayers":     (450, 94, ["restylelayers", "rsl"]),
-    "PackageCave":       (450, 95, ["packagecave", "pc", "pkgcave"]),
+    # 450 -- start here
+    "CaveShelf/CaveShelf.js":             (450, 20, ["caveshelf", "caves"]),
+    "CaveTemplate/CaveTemplate.js":       (450, 30, ["newcavemap", "ncm"]),
+    # 451 -- survey data
+    "SurveyNotebook/SurveyNotebook.js":   (451, 10, ["surveynotebook", "snb"]),
+    "ImportCaveSurvey/ImportCaveSurvey.js": (451, 20, ["importcavesurvey", "ics"]),
+    "ExportCaveSurvey/ExportCaveSurvey.js": (451, 30, ["exportcavesurvey", "ecs"]),
+    "EditTrip/EditTrip.js":               (451, 40, ["edittrip", "et"]),
+    # 452 -- draw the map
+    "FeatureTrace/FeatureTrace.js":       (452, 10, ["featuretrace", "ft"]),
+    "ShapedLines/ShapedLines.js":         (452, 20, ["shapedlines", "shl"]),
+    "ScatterBreakdown/ScatterBreakdown.js": (452, 30, ["scatterbreakdown", "scb"]),
+    "CrossSection/CrossSection.js":       (452, 40, ["crosssection", "cxs"]),
+    "SketchSection/SketchSection.js":     (452, 50, ["sketchsection", "sks"]),
+    "SketchSection/SectionCapture.js":    (452, 60, ["sectioncapture", "skc"]),
+    "SketchSection/SectionEdit.js":       (452, 70, ["sectionedit", "ske"]),
+    # 453 -- put a reference under the map
+    "SketchScans/SketchScans.js":         (453, 10, ["sketchscans", "ss"]),
+    "AlignImage/AlignImage.js":           (453, 20, ["alignimage", "ali"]),
+    "AerialBasemap/AerialBasemap.js":     (453, 30, ["aerialbasemap", "ab"]),
+    "SurfaceContours/SurfaceContours.js": (453, 40, ["surfacecontours", "sc"]),
+    # 454 -- finish the sheet
+    "SurveyStats/SurveyStats.js":         (454, 10, ["surveystats", "sst"]),
+    "GenerateProfile/GenerateProfile.js": (454, 20, ["generateprofile", "gp", "genprofile"]),
+    "BuildLegend/BuildLegend.js":         (454, 30, ["buildlegend", "bl"]),
+    "Callout/Callout.js":                 (454, 40, ["callout", "cal", "cscallout", "cscal"]),
+    "CalloutElev/CalloutElev.js":         (454, 50, ["calloutelev", "cel", "cscalloutelev", "cselev"]),
+    # 455 -- fix and share
+    "RebuildSurveyData/RebuildSurveyData.js": (455, 10, ["rebuildsurveydata", "rsd"]),
+    "RestyleLayers/RestyleLayers.js":     (455, 20, ["restylelayers", "rsl"]),
+    "CalloutSync/CalloutSync.js":         (455, 30, ["calloutsync", "csync", "cscalloutsync", "cscsync"]),
+    "PackageCave/PackageCave.js":         (455, 40, ["packagecave", "pc", "pkgcave"]),
 }
+
+
+def menu_registrars():
+    """Every add-on file that puts an action on the Cave Survey menu.
+
+    Found by what the file DOES -- naming CaveSurveyMenu in a
+    setWidgetNames call -- rather than by where it sits, so a sibling
+    file inside a tool folder counts exactly as much as the tool's own.
+    Paths are relative to the add-on root, with forward slashes on every
+    platform, because they are dictionary keys above.
+    """
+    out = []
+    for folder, _subdirs, files in os.walk(ADDON):
+        for name in files:
+            if not name.endswith(".js"):
+                continue
+            path = os.path.join(folder, name)
+            with open(path) as fh:
+                source = fh.read()
+            if "CaveSurveyMenu" not in source:
+                continue
+            if "setWidgetNames" not in source:
+                continue
+            rel = os.path.relpath(path, ADDON)
+            if rel == "CaveSurvey.js":
+                # The menu host. It CREATES the two widgets and shows
+                # the registration shape in its own comments; it puts
+                # nothing on the menu itself.
+                continue
+            out.append(rel.replace(os.sep, "/"))
+    return sorted(out)
+
+
+def registrar_source(rel):
+    with open(os.path.join(ADDON, *rel.split("/"))) as fh:
+        return fh.read()
 
 
 class TestMenuTable(unittest.TestCase):
     """The menu is a table, and the table is the spec.
 
-    24 tools share one groupSortOrder today, so the menu is a flat list
-    ordered only by sortOrder. Later work groups that into stages and
-    merges some tools together; each of those changes should be a
-    deliberate edit to MENU and the tool together. Before that, this
-    just pins the menu as it stands so a drift -- a tool added without
-    a menu entry, a sortOrder collision, a command typo -- fails here
-    instead of silently in QCAD's menu.
+    Every entry a caver sees under Cave Survey is one row here, carrying
+    the stage it belongs to and the commands that reach it. A tool that
+    moves stage, gains an alias or leaves the menu entirely is meant to
+    be an edit to this table AND to the tool; an edit to only one of the
+    two fails here, which is the point.
     """
 
-    def test_every_tool_is_in_the_table(self):
-        missing = sorted(set(tool_dirs()) - set(MENU))
+    def test_every_menu_action_is_in_the_table(self):
+        missing = sorted(set(menu_registrars()) - set(MENU))
         self.assertEqual([], missing,
-                         "tool folder exists but is not in MENU: %s" % missing)
+                         "file registers a menu action but is not in "
+                         "MENU: %s" % missing)
 
-    def test_table_names_no_tool_that_does_not_exist(self):
-        extra = sorted(set(MENU) - set(tool_dirs()))
+    def test_table_names_no_file_that_does_not_exist(self):
+        extra = sorted(set(MENU) - set(menu_registrars()))
         self.assertEqual([], extra,
-                         "MENU names a tool that does not exist: %s" % extra)
+                         "MENU names a file that registers no menu "
+                         "action: %s" % extra)
 
-    def test_each_tool_registers_the_stage_and_position_in_the_table(self):
-        for name, (group, order, _cmds) in sorted(MENU.items()):
-            source = tool_source(name)
+    def test_every_action_registers_the_stage_and_position(self):
+        for rel, (group, order, _cmds) in sorted(MENU.items()):
+            source = registrar_source(rel)
             self.assertEqual(
                 group, find_int(source, "action.setGroupSortOrder"),
-                "%s is in the wrong menu stage" % name)
+                "%s is in the wrong menu stage" % rel)
             self.assertEqual(
                 order, find_int(source, "action.setSortOrder"),
-                "%s is in the wrong position within its stage" % name)
+                "%s is in the wrong position within its stage" % rel)
 
-    def test_each_tool_registers_the_commands_in_the_table(self):
-        for name, (_group, _order, cmds) in sorted(MENU.items()):
-            source = tool_source(name)
+    def test_every_action_registers_the_commands_in_the_table(self):
+        for rel, (_group, _order, cmds) in sorted(MENU.items()):
+            source = registrar_source(rel)
             match = re.search(r"setDefaultCommands\(\[(.*?)\]\)", source, re.S)
-            self.assertIsNotNone(match, "%s sets no commands" % name)
+            self.assertIsNotNone(match, "%s sets no commands" % rel)
             found = re.findall(r'"([^"]+)"', match.group(1))
             self.assertEqual(cmds, found,
-                             "%s registers the wrong commands" % name)
+                             "%s registers the wrong commands" % rel)
+
+    def test_no_two_actions_share_a_stage_and_position(self):
+        """A collision means one entry silently displaces the other."""
+        seen = {}
+        for rel, (group, order, _cmds) in sorted(MENU.items()):
+            key = (group, order)
+            self.assertNotIn(
+                key, seen,
+                "%s and %s both claim stage %d position %d"
+                % (seen.get(key), rel, group, order))
+            seen[key] = rel
 
 
 if __name__ == "__main__":

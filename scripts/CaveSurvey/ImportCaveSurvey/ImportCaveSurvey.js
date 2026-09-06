@@ -190,7 +190,7 @@ ImportCaveSurvey.init = function(basePath) {
     action.setIcon(basePath + "/ImportCaveSurvey.svg");
     action.setStatusTip(qsTr("Import a Compass, Walls, Survex, Therion or CSV survey file -- the format is detected for you"));
     action.setDefaultCommands(["importcavesurvey", "ics"]);
-    action.setGroupSortOrder(450);
+    action.setGroupSortOrder(451);
     action.setSortOrder(20);
     action.setWidgetNames(["CaveSurveyMenu", "CaveSurveyToolBar"]);
 };

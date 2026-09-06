@@ -65,7 +65,7 @@ CaveTemplate.init = function(basePath) {
     action.setStatusTip(qsTr("Start a new map from the NSS template: layers, symbols, title block, border"));
     action.setDefaultCommands(["newcavemap", "ncm"]);
     action.setGroupSortOrder(450);
-    action.setSortOrder(5); // first thing in the Cave Survey menu
+    action.setSortOrder(30); // first thing in the Cave Survey menu
     action.setWidgetNames(["CaveSurveyMenu", "CaveSurveyToolBar"]);
 
     // every new document runs the apply script (it gates itself):

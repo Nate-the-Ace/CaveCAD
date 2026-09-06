@@ -78,7 +78,7 @@ RestyleLayers.init = function(basePath) {
     action.setIcon(basePath + "/RestyleLayers.svg");
     action.setStatusTip(qsTr("Apply the current layer palette to this drawing: add missing registry layers, restyle the rest"));
     action.setDefaultCommands(["restylelayers", "rsl"]);
-    action.setGroupSortOrder(450);
-    action.setSortOrder(94);
+    action.setGroupSortOrder(455);
+    action.setSortOrder(20);
     action.setWidgetNames(["CaveSurveyMenu", "CaveSurveyToolBar"]);
 };

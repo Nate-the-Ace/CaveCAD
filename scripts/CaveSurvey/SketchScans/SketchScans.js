@@ -2605,8 +2605,8 @@ SketchScans.init = function(basePath) {
         "cave's scanned sketches with previews, insert one and align it " +
         "to the survey"));
     action.setDefaultCommands(["sketchscans", "ss"]);
-    action.setGroupSortOrder(450);
-    action.setSortOrder(56);
+    action.setGroupSortOrder(453);
+    action.setSortOrder(10);
     action.setWidgetNames(["CaveSurveyMenu", "CaveSurveyToolBar"]);
 
     // Build the dock NOW, during add-on init: the main window's

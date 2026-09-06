@@ -226,7 +226,7 @@ CalloutElev.init = function(basePath) {
     action.setStatusTip(qsTr("Two clicks: the point to take the floor " +
         "elevation at, then where the label goes"));
     action.setDefaultCommands(["calloutelev", "cel", "cscalloutelev", "cselev"]);
-    action.setGroupSortOrder(450);
-    action.setSortOrder(90);
+    action.setGroupSortOrder(454);
+    action.setSortOrder(50);
     action.setWidgetNames(["CaveSurveyMenu", "CaveSurveyToolBar"]);
 };

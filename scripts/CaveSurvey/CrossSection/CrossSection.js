@@ -231,7 +231,7 @@ CrossSection.init = function(basePath) {
     action.setStatusTip(qsTr("Two clicks: a point on the passage to cut " +
         "a rough cross section at, then where the section goes"));
     action.setDefaultCommands(["crosssection", "cxs"]);
-    action.setGroupSortOrder(450);
-    action.setSortOrder(46);
+    action.setGroupSortOrder(452);
+    action.setSortOrder(40);
     action.setWidgetNames(["CaveSurveyMenu", "CaveSurveyToolBar"]);
 };

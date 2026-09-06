@@ -244,7 +244,7 @@ ExportCaveSurvey.init = function(basePath) {
     action.setIcon(basePath + "/ExportCaveSurvey.svg");
     action.setStatusTip(qsTr("Write the drawing's survey out as a Compass, Walls, Survex, Therion or CSV file -- without the cave's location unless you ask"));
     action.setDefaultCommands(["exportcavesurvey", "ecs"]);
-    action.setGroupSortOrder(450);
-    action.setSortOrder(21);
+    action.setGroupSortOrder(451);
+    action.setSortOrder(30);
     action.setWidgetNames(["CaveSurveyMenu", "CaveSurveyToolBar"]);
 };

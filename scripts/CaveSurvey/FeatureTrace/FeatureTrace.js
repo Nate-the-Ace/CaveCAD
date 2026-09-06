@@ -1159,11 +1159,11 @@ FeatureTrace.init = function(basePath) {
     action.setStatusTip(qsTr("Trace cave walls and other features freehand: " +
         "drag along the sketch and a smooth line follows"));
     action.setDefaultCommands(["featuretrace", "ft"]);
-    action.setGroupSortOrder(450);
+    action.setGroupSortOrder(452);
     // 45 puts this beside Scatter Breakdown (40), the other drawing
     // tool. 75 -- the number first proposed -- is Generate Profile's,
     // and a clash leaves menu order down to load sequence.
-    action.setSortOrder(45);
+    action.setSortOrder(10);
     action.setWidgetNames(["CaveSurveyMenu", "CaveSurveyToolBar"]);
 
     FeatureTraceRun.init(basePath);

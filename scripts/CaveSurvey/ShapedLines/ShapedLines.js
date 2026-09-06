@@ -257,8 +257,8 @@ ShapedLines.init = function(basePath) {
     action.setStatusTip(qsTr("Dress the selected line, polyline, arc, " +
         "circle or spline as a ledge, pit, flowstone or rimstone line"));
     action.setDefaultCommands(["shapedlines", "shl"]);
-    action.setGroupSortOrder(450);
-    action.setSortOrder(30);
+    action.setGroupSortOrder(452);
+    action.setSortOrder(20);
     action.setWidgetNames(["CaveSurveyMenu", "CaveSurveyToolBar",
         "CaveLinesToolBar"]);
 

@@ -463,7 +463,7 @@ EditTrip.init = function(basePath) {
     action.setIcon(basePath + "/EditTrip.svg");
     action.setStatusTip(qsTr("Correct a trip's name, date, team or instruments without redrawing anything"));
     action.setDefaultCommands(["edittrip", "et"]);
-    action.setGroupSortOrder(450);
-    action.setSortOrder(16);
+    action.setGroupSortOrder(451);
+    action.setSortOrder(40);
     action.setWidgetNames(["CaveSurveyMenu", "CaveSurveyToolBar"]);
 };

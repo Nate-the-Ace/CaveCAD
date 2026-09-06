@@ -356,7 +356,7 @@ ScatterBreakdown.init = function(basePath) {
     action.setIcon(basePath + "/ScatterBreakdown.svg");
     action.setStatusTip(qsTr("Fill closed BREAKDOWN-BOUNDARY polylines with breakdown symbols, one zone at a time -- in the plan, an elevation band or a section, by where the zone is"));
     action.setDefaultCommands(["scatterbreakdown", "scb"]);
-    action.setGroupSortOrder(450);
-    action.setSortOrder(40);
+    action.setGroupSortOrder(452);
+    action.setSortOrder(30);
     action.setWidgetNames(["CaveSurveyMenu", "CaveSurveyToolBar"]);
 };

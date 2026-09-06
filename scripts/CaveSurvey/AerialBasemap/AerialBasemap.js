@@ -513,7 +513,7 @@ AerialBasemap.init = function(basePath) {
     action.setStatusTip(qsTr("Put an aerial photograph of the surface " +
         "underneath the survey"));
     action.setDefaultCommands(["aerialbasemap", "ab"]);
-    action.setGroupSortOrder(450);
-    action.setSortOrder(52);
+    action.setGroupSortOrder(453);
+    action.setSortOrder(30);
     action.setWidgetNames(["CaveSurveyMenu", "CaveSurveyToolBar"]);
 };

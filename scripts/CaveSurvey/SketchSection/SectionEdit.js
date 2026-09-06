@@ -530,7 +530,7 @@ SectionEdit.init = function(basePath) {
     action.setStatusTip(qsTr("Reopen a traced cross section's bay, with " +
         "its scan, to carry on sketching"));
     action.setDefaultCommands(["sectionedit", "ske"]);
-    action.setGroupSortOrder(450);
-    action.setSortOrder(49);
+    action.setGroupSortOrder(452);
+    action.setSortOrder(70);
     action.setWidgetNames(["CaveSurveyMenu", "CaveSurveyToolBar"]);
 };

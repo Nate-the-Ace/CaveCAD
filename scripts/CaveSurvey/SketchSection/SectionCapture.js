@@ -912,7 +912,7 @@ SectionCapture.init = function(basePath) {
     action.setStatusTip(qsTr("Turn what is traced in the section bay " +
         "into a block, placed clear of the cave walls"));
     action.setDefaultCommands(["sectioncapture", "skc"]);
-    action.setGroupSortOrder(450);
-    action.setSortOrder(48);
+    action.setGroupSortOrder(452);
+    action.setSortOrder(60);
     action.setWidgetNames(["CaveSurveyMenu", "CaveSurveyToolBar"]);
 };

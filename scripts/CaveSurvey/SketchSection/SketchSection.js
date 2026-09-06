@@ -697,8 +697,8 @@ SketchSection.init = function(basePath) {
     action.setStatusTip(qsTr("Open a bay to trace a scanned cross " +
         "section in, over the station's own measured outline"));
     action.setDefaultCommands(["sketchsection", "sks"]);
-    action.setGroupSortOrder(450);
-    action.setSortOrder(47);
+    action.setGroupSortOrder(452);
+    action.setSortOrder(50);
     action.setWidgetNames(["CaveSurveyMenu", "CaveSurveyToolBar"]);
 
     // The bay's teardown and reopen tools live in sibling files QCAD

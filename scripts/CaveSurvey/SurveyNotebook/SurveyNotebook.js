@@ -3609,8 +3609,8 @@ SurveyNotebook.init = function(basePath) {
     action.setIcon(basePath + "/SurveyNotebook.svg");
     action.setStatusTip(qsTr("A docked survey notes page: stations down the side, shots between them, closures live"));
     action.setDefaultCommands(["surveynotebook", "snb"]);
-    action.setGroupSortOrder(450);
-    action.setSortOrder(15);
+    action.setGroupSortOrder(451);
+    action.setSortOrder(10);
     action.setWidgetNames(["CaveSurveyMenu", "CaveSurveyToolBar"]);
 
     // Build the dock NOW, during add-on init: the main window's

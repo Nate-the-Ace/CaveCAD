@@ -66,7 +66,7 @@ CaveShelf.init = function(basePath) {
     action.setStatusTip(qsTr("The caves on this machine: their trips, and where each one stopped"));
     action.setDefaultCommands(["caveshelf", "caves"]);
     action.setGroupSortOrder(450);
-    action.setSortOrder(1); // the way in, so: first
+    action.setSortOrder(20); // the way in, so: first
     action.setWidgetNames(["CaveSurveyMenu", "CaveSurveyToolBar"]);
 };
 

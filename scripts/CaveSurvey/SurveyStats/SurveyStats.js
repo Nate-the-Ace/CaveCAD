@@ -128,7 +128,7 @@ SurveyStats.init = function(basePath) {
     action.setIcon(basePath + "/SurveyStats.svg");
     action.setStatusTip(qsTr("Length, depth, loop closures and the honest survey grade, computed from the drawing"));
     action.setDefaultCommands(["surveystats", "sst"]);
-    action.setGroupSortOrder(450);
-    action.setSortOrder(70);
+    action.setGroupSortOrder(454);
+    action.setSortOrder(10);
     action.setWidgetNames(["CaveSurveyMenu", "CaveSurveyToolBar"]);
 };

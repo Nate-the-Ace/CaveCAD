@@ -369,7 +369,7 @@ CalloutSync.init = function(basePath) {
     action.setStatusTip(qsTr("Put every callout's arrows back on its " +
         "note, after the note has been moved or reworded"));
     action.setDefaultCommands(["calloutsync", "csync", "cscalloutsync", "cscsync"]);
-    action.setGroupSortOrder(450);
-    action.setSortOrder(92);
+    action.setGroupSortOrder(455);
+    action.setSortOrder(30);
     action.setWidgetNames(["CaveSurveyMenu", "CaveSurveyToolBar"]);
 };
