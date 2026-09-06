@@ -504,3 +504,42 @@ the reported TypeError.
 may use only what `EAction.js` pulls in. A Core function that calls a
 simple.js global works everywhere except where the mouse is.** Worth an
 audit of the other Core functions the drawing tools call.
+
+
+## Addendum: two dialog truths, and four other tools (2026-09-06)
+
+Reported: Save Symbol did nothing, command line reading
+`Function.prototype.connect: target is not a function`.
+
+1. **`signal.connect(receiver, "slotName")` throws in this build.** The
+   Qt Script idiom this suite used everywhere is not supported: the
+   engine's connect takes a function, or a receiver plus a function, and
+   never a string. It throws where the dialog is BUILT, so the tool dies
+   before anything is shown.
+2. **`widget.destroy()` throws too** -- "Invalid attempt to destroy() an
+   indestructible object" -- for a parented dialog and an unparented one
+   alike. It sat at the end of every dialog in the suite, AFTER the
+   caver had answered, so the answer went out with the exception.
+   `close()` then `deleteLater()` works; both are guarded anyway.
+
+**This was never only the palette.** The same two lines were in Cross
+Section, Callout, Repair Drawing and Surface Data. Every one of those
+dialogs was dead in this build, and each is now fixed the same way.
+Whether they broke in a CaveCAD/Qt upgrade or shipped that way is not
+established here; what is established is that they throw today and do
+not after this change.
+
+Both forms are now pinned by structural tests
+(`TestSignalsConnectToFunctions`, `TestNoWidgetDestroy`), because
+neither is reachable headlessly -- they need a real QDialog and the
+suite has no GUI. The guard was verified by reverting
+`CrossSection.js` and watching the test name its two lines.
+
+### The pattern behind all three GUI bugs in this tool
+
+The palette's placement bug (simple.js globals absent in an action
+context), the tile bug (QPushButton cannot stack icon over text), and
+these two are one failure mode: **the JS bridge accepts the call and
+then does not do what Qt would**. None can be caught by a headless
+suite. The cheap defence is a structural test naming the forbidden form,
+which is now the third one in `tests/test_addon.py`.
