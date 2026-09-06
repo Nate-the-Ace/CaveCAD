@@ -537,6 +537,58 @@ eqs(SymbolPaletteRun.sizeForScale(5.0, 0, 1.0), null,
 })();
 
 // ---------------------------------------------------------------------
+// 3c. A placement works with NO simple.js globals -- which is what an
+//     action's own script context actually looks like.
+// ---------------------------------------------------------------------
+//
+// THE BUG THIS EXISTS FOR. CsSymbols.insert used to reach for the
+// global getDocumentInterface(). That global comes from
+// scripts/simple.js, which the APPLICATION loads; an interactive action
+// runs in its own script context (RScriptHandlerJs::createActionDocumentLevel)
+// and never sees it. So every placement made with a mouse threw a
+// TypeError, the catch turned it into "this drawing has no SYM_PIT
+// block", and a caver went looking for a block that was in the drawing
+// all along. Every headless test passed throughout, because a test file
+// defines those globals itself -- so this one takes them away.
+
+(function withoutTheApplicationGlobals() {
+    var savedDoc = getDocument;
+    var savedDi = getDocumentInterface;
+    getDocument = undefined;
+    getDocumentInterface = undefined;
+    var thrown = "";
+    var x = planX + 180, y = planY + 180;
+    try {
+        var action = new SymbolPaletteRun(null);
+        action.getDocument = function() { return doc; };
+        action.getDocumentInterface = function() { return di; };
+        action.anchor = { x: x, y: y };
+        action.angle = 0.0;
+        action.radius = CsSymbolStore.radiusOf(doc, entry.block);
+        action.unitsPerFoot = 1.0;
+        action.refreshRegion();
+        action.commit();
+    } catch (e) {
+        thrown = String(e);
+    }
+    getDocument = savedDoc;
+    getDocumentInterface = savedDi;
+
+    eqs(thrown, "", "a placement in an action-shaped context threw nothing");
+    var found = false;
+    var ids = doc.queryAllEntities(false, false, RS.EntityBlockRef);
+    for (var i = 0; i < ids.length; i++) {
+        var e2 = doc.queryEntity(ids[i]);
+        if (isNull(e2)) { continue; }
+        var p = e2.getPosition();
+        if (Math.abs(p.x - x) < 1e-6 && Math.abs(p.y - y) < 1e-6) { found = true; }
+    }
+    ok(found, "and the symbol was placed -- with no getDocumentInterface() " +
+        "in sight, which is the context every mouse click runs in " +
+        "(messages: " + messages.join(" | ") + ")");
+})();
+
+// ---------------------------------------------------------------------
 // 4. The shipped symbols are not editable.
 // ---------------------------------------------------------------------
 

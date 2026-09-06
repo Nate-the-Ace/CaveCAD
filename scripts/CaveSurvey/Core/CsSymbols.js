@@ -153,10 +153,24 @@ CsSymbols.categories = function() {
  *         missing from this drawing (i.e. not started from the
  *         template) -- callers report that in plain language.
  */
-CsSymbols.insert = function(doc, entry, pos, scale, rotationRad, layerName) {
+CsSymbols.insert = function(doc, entry, pos, scale, rotationRad, layerName,
+        di) {
     var block = doc.queryBlock(entry.block);
     if (isNull(block)) {
         return null;
+    }
+    // THE DOCUMENT INTERFACE IS A PARAMETER NOW. It used to come from
+    // the global getDocumentInterface(), and that global is defined by
+    // scripts/simple.js in the APPLICATION's script context -- an
+    // interactive action runs in its OWN context, where it does not
+    // exist. So every placement from the Symbol Palette threw a
+    // TypeError inside this function, was caught by the caller, and was
+    // reported to the caver as "this drawing has no SYM_PIT block"
+    // while the block sat in the drawing the whole time (measured in
+    // the live GUI, 2026-09-06). Callers in the main context may still
+    // omit it and get the old behaviour.
+    if (isNull(di)) {
+        di = getDocumentInterface();
     }
     // The catalogue layer unless the caller names another. A caller
     // that has ROUTED the symbol -- the palette, deciding plan /
@@ -167,7 +181,7 @@ CsSymbols.insert = function(doc, entry, pos, scale, rotationRad, layerName) {
     if (isNull(layerName) || layerName === "") {
         layerName = entry.layer;
     }
-    CsLayers.ensure(doc, getDocumentInterface(), layerName);
+    CsLayers.ensure(doc, di, layerName);
     if (scale === undefined) {
         scale = 1.0;
     }

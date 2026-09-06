@@ -527,16 +527,30 @@ SymbolPaletteRun.prototype.commit = function() {
     }
 
     var ref = null;
+    var insertError = "";
     try {
+        // di HANDED IN, never read from a global: this runs in the
+        // action's own script context, which has no simple.js globals.
         ref = CsSymbols.insert(doc, entry,
             new RVector(this.anchor.x, this.anchor.y),
-            this.placementScale(), this.placementAngle(), layerName);
+            this.placementScale(), this.placementAngle(), layerName, di);
     } catch (eIns) {
         ref = null;
+        insertError = String(eIns);
     }
     if (isNull(ref)) {
-        EAction.handleUserMessage(qsTr("%1 could not be placed: this " +
-            "drawing has no %2 block.").arg(entry.nss).arg(entry.block));
+        // The two failures are DIFFERENT and used to be reported as the
+        // same sentence: a missing block is a drawing problem the caver
+        // can act on, and a thrown error is a bug in this tool. Saying
+        // "this drawing has no SYM_PIT block" about the second one sent
+        // a caver looking for a block that was sitting right there.
+        if (insertError !== "") {
+            EAction.handleUserMessage(qsTr("%1 could not be placed: %2")
+                .arg(entry.nss).arg(insertError));
+        } else {
+            EAction.handleUserMessage(qsTr("%1 could not be placed: this " +
+                "drawing has no %2 block.").arg(entry.nss).arg(entry.block));
+        }
         return;
     }
 
@@ -663,7 +677,8 @@ SymbolPaletteRun.prototype.getOperation = function(preview) {
     try {
         ref = CsSymbols.insert(doc, entry,
             new RVector(this.anchor.x, this.anchor.y),
-            this.placementScale(), this.placementAngle(), entry.layer);
+            this.placementScale(), this.placementAngle(), entry.layer,
+            this.getDocumentInterface());
     } catch (ePrev) {
         return undefined;
     }

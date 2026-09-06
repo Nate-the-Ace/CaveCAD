@@ -756,7 +756,7 @@ SymbolPalette.buildDock = function(appWin) {
             try {
                 SymbolPaletteEdit.startNew();
             } catch (eNew) {
-                warning("Symbol Palette: could not open the symbol " +
+                EAction.handleUserWarning("Symbol Palette: could not open the symbol " +
                     "editor (" + eNew + ").");
             }
         });
@@ -771,7 +771,7 @@ SymbolPalette.buildDock = function(appWin) {
             try {
                 SymbolPaletteEdit.startEdit(SymbolPalette.armed);
             } catch (eEdit) {
-                warning("Symbol Palette: could not open that symbol (" +
+                EAction.handleUserWarning("Symbol Palette: could not open that symbol (" +
                     eEdit + ").");
             }
         });
@@ -785,7 +785,7 @@ SymbolPalette.buildDock = function(appWin) {
             try {
                 SymbolPalette.deleteArmed();
             } catch (eDel) {
-                warning("Symbol Palette: could not delete that symbol (" +
+                EAction.handleUserWarning("Symbol Palette: could not delete that symbol (" +
                     eDel + ").");
             }
         });
@@ -817,7 +817,7 @@ SymbolPalette.buildDock = function(appWin) {
             try {
                 SymbolPaletteEdit.save();
             } catch (eSave) {
-                warning("Symbol Palette: the symbol could not be saved (" +
+                EAction.handleUserWarning("Symbol Palette: the symbol could not be saved (" +
                     eSave + ").");
             }
         });
@@ -850,7 +850,7 @@ SymbolPalette.buildDock = function(appWin) {
     }
 
     if (w.problems.length > 0) {
-        warning("Symbol Palette: this CaveCAD build refused part of the " +
+        EAction.handleUserWarning("Symbol Palette: this CaveCAD build refused part of the " +
             "panel -- " + w.problems.join("; ") + ". Please report this.");
     }
     return dock;
@@ -1011,7 +1011,7 @@ SymbolPalette.prototype.beginEvent = function() {
         }
     } catch (e) {
         csSymbolPaletteDock = undefined;
-        warning("Symbol Palette: this CaveCAD build refused the docked " +
+        EAction.handleUserWarning("Symbol Palette: this CaveCAD build refused the docked " +
             "panel (" + e + ") -- please report this.");
     }
 
@@ -1048,7 +1048,7 @@ SymbolPalette.init = function(basePath) {
         dock.visible = false;
     } catch (eInit) {
         csSymbolPaletteDock = undefined;
-        warning("Symbol Palette: could not build the panel at startup (" +
+        EAction.handleUserWarning("Symbol Palette: could not build the panel at startup (" +
             eInit + "); the menu entry will try again.");
     }
 };
