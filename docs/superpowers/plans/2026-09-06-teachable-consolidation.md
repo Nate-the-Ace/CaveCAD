@@ -865,6 +865,8 @@ git commit -m "feat: fold Elevation Callout into Callout as a text source"
 
 ---
 
+> **Revised 2026-09-06, before dispatch.** The plan assumed `SketchSection/` was one 2169-line file to be folded into `CrossSection.js`. It is three, with clean namespaces already: `SketchSection.js` (715, opens the bay), `SectionCapture.js` (918, closes it), `SectionEdit.js` (536, reopens a placed section). Merging them into one file would produce ~2400 lines and destroy a separation that is already correct. So the merge is at the MENU, not in the source: the three files move into `CrossSection/` as siblings, keep their namespaces (`SketchSection` renamed `SectionBay`, since it is no longer a tool), and lose only their three `init()` menu registrations. `CrossSection.js` grows a route dialog and the bay panel and stays under ~400 lines. Reopening a placed section becomes the dialog's third route rather than a hunt for the right click target.
+
 ### Task 5: Merge Sketch Section into Cross Section
 
 **Goal:** One `Cross Section` entry with two ways to get a section -- cut it from the survey, or trace a scanned one -- and a small modeless panel that appears while a tracing bay is open, so `Capture Section` and `Edit Sketch` stop being commands a student has to know exist.
