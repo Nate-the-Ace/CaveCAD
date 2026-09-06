@@ -69,6 +69,12 @@ CsSymbolStore.DEFAULT_CATEGORY = "Custom";
  *  this list on every rebuild. invalidate() drops it after a save. */
 CsSymbolStore.cache = {};
 
+/** Symbol radii, keyed by template path then block name, filled by
+ *  list() while it already has the template open. Dragging a symbol
+ *  out asks for one per placement, and reopening a DXF per mouse
+ *  gesture is not a thing this tool is allowed to do. */
+CsSymbolStore.radii = {};
+
 /**
  * The template file, or null when there is none.
  *
@@ -270,6 +276,7 @@ CsSymbolStore.list = function(path) {
     }
 
     var result = { ok: true, entries: [], error: "" };
+    var radii = {};
     try {
         var doc = di.getDocument();
         var names = doc.getBlockNames();
@@ -278,6 +285,8 @@ CsSymbolStore.list = function(path) {
             if (name.indexOf(CsSymbolStore.PREFIX) !== 0) {
                 continue;
             }
+            radii[name] = CsSymbolStore.radiusOfEntities(
+                CsSymbolStore.geometryOf(doc, name));
             var known = CsSymbols.byBlock(name);
             if (known !== null) {
                 result.entries.push(known);
@@ -309,6 +318,7 @@ CsSymbolStore.list = function(path) {
     }
 
     CsSymbolStore.cache[path] = result;
+    CsSymbolStore.radii[path] = radii;
     return result;
 };
 
@@ -317,10 +327,14 @@ CsSymbolStore.list = function(path) {
 CsSymbolStore.invalidate = function(path) {
     if (isNull(path)) {
         CsSymbolStore.cache = {};
+        CsSymbolStore.radii = {};
         return;
     }
     if (CsSymbolStore.cache.hasOwnProperty(path)) {
         delete CsSymbolStore.cache[path];
+    }
+    if (CsSymbolStore.radii.hasOwnProperty(path)) {
+        delete CsSymbolStore.radii[path];
     }
 };
 
@@ -366,6 +380,86 @@ CsSymbolStore.geometryOf = function(doc, blockName) {
         out.push(e);
     }
     return out;
+};
+
+/**
+ * How big a symbol is at scale 1: half the larger side of its own
+ * bounding box, in drawing units.
+ *
+ * WHAT IT IS FOR. Dragging a symbol out sets its SIZE as well as its
+ * angle, and "size" has to mean something the caver can see -- the
+ * distance from where they pressed to where the cursor is IS the
+ * symbol's radius. That only works if each symbol knows how big it
+ * draws itself: a stalactite half a unit across and a north arrow ten
+ * units across must both end up the size the drag asked for.
+ *
+ * Zero for a block with no geometry, and callers treat zero as "no
+ * answer" rather than dividing by it.
+ */
+CsSymbolStore.radiusOfEntities = function(entities) {
+    var minX = null, minY = null, maxX = null, maxY = null;
+    for (var i = 0; i < entities.length; i++) {
+        var bb = null;
+        try {
+            entities[i].update();
+            bb = entities[i].getBoundingBox();
+        } catch (eBox) {
+            continue;
+        }
+        if (isNull(bb)) {
+            continue;
+        }
+        try {
+            var lo = bb.getMinimum(), hi = bb.getMaximum();
+            if (isNaN(lo.x) || isNaN(hi.x) || isNaN(lo.y) || isNaN(hi.y)) {
+                continue;
+            }
+            if (minX === null || lo.x < minX) { minX = lo.x; }
+            if (minY === null || lo.y < minY) { minY = lo.y; }
+            if (maxX === null || hi.x > maxX) { maxX = hi.x; }
+            if (maxY === null || hi.y > maxY) { maxY = hi.y; }
+        } catch (eRead) {
+        }
+    }
+    if (minX === null) {
+        return 0;
+    }
+    var half = Math.max(maxX - minX, maxY - minY) / 2;
+    return (isNaN(half) || half <= 0) ? 0 : half;
+};
+
+/**
+ * The symbol's radius, from THIS drawing when it holds the block and
+ * from the template's cached listing otherwise.
+ *
+ * The drawing first, deliberately: a caver who redefined a block in
+ * their own drawing means the shape that is in front of them.
+ */
+CsSymbolStore.radiusOf = function(doc, blockName) {
+    if (!isNull(doc)) {
+        try {
+            if (!isNull(doc.queryBlock(blockName))) {
+                var here = CsSymbolStore.radiusOfEntities(
+                    CsSymbolStore.geometryOf(doc, blockName));
+                if (here > 0) {
+                    return here;
+                }
+            }
+        } catch (eDoc) {
+        }
+    }
+    // Filled by list(), which already has the template open -- asking
+    // here must never open the file a second time per placement.
+    var path = CsSymbolStore.templatePath();
+    if (isNull(path)) {
+        return 0;
+    }
+    CsSymbolStore.list(path);
+    var byPath = CsSymbolStore.radii[path];
+    if (isNull(byPath) || !byPath.hasOwnProperty(blockName)) {
+        return 0;
+    }
+    return byPath[blockName];
 };
 
 /**

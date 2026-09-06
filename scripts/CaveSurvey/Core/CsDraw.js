@@ -432,6 +432,14 @@ CsDraw.noteLeader = function(doc, op, pos, name, note, azimuthDeg, lrud) {
  *          splays CsTraverse.offset refused (no usable distance/
  *          azimuth/inclination), named apart from `skipped` (excluded,
  *          or never connected) so a report never conflates the two
+ *
+ * \param options Optional. `partial` and `omitStations` as described
+ *                above, `profileSurvey`/`profileResolved` for the
+ *                elevation pass, and `doc`/`di` -- THE DRAWING TO DRAW
+ *                INTO. Pass them whenever the caller already has a
+ *                document; only a call site that really means "the
+ *                drawing in front of the user" should let them default
+ *                to getDocument()/getDocumentInterface().
  */
 CsDraw.survey = function(survey, resolved, originStation, originPos,
         seqBase, options) {
@@ -459,8 +467,22 @@ CsDraw.survey = function(survey, resolved, originStation, originPos,
             omit[options.omitStations[oi]] = true;
         }
     }
-    var doc = getDocument();
-    var di = getDocumentInterface();
+    // THE DRAWING THIS DRAWS INTO. Handed in by every caller that
+    // already has one; the globals are the fallback for a call site
+    // that genuinely means "whatever is in front of the user". Reading
+    // the globals unconditionally was a latent trap, measured through
+    // the MCP bridge: driven against a document that was not the
+    // active one, this threw inside CsLayers ("Cannot call method
+    // 'hasLayer' of undefined") while its caller's other passes
+    // quietly succeeded against a DIFFERENT drawing.
+    var doc = options.doc;
+    if (doc === undefined || doc === null) {
+        doc = getDocument();
+    }
+    var di = options.di;
+    if (di === undefined || di === null) {
+        di = getDocumentInterface();
+    }
     CsLayers.ensureSurveyLayers(doc, di);
     CsModel.ensureTrips(survey);
 
@@ -1061,7 +1083,8 @@ CsDraw.survey = function(survey, resolved, originStation, originPos,
         options.profileResolved === null) ? resolved :
         options.profileResolved;
     try {
-        profileOutcome = CsDraw.profile(profileSurvey, profileResolved);
+        profileOutcome = CsDraw.profile(doc, di, profileSurvey,
+            profileResolved);
     } catch (eProfile) {
         // Building the reason string is ITSELF not safe to trust: string
         // concatenation calls eProfile.toString(), and an exception whose
@@ -1252,9 +1275,12 @@ CsDraw.survey = function(survey, resolved, originStation, originPos,
  * docblock carries the whole table, the per-function split, and the
  * scratch measurement of the change that would earn a higher ceiling.
  *
+ * Draws into the document it is GIVEN -- CsDraw.survey passes down the
+ * one it was handed, rather than this reaching for the active drawing.
+ *
  * \return {skipped, reason} or {path, created, counts, profile}
  */
-CsDraw.profile = function(survey, resolved) {
+CsDraw.profile = function(doc, di, survey, resolved) {
     var settings = CsProfile.settings();
     if (!settings.auto) {
         return { skipped: true,
@@ -1301,8 +1327,7 @@ CsDraw.profile = function(survey, resolved) {
                 "hand to build the profile anyway" };
     }
 
-    return CsDraw.profileNow(getDocument(), getDocumentInterface(),
-        survey, resolved, settings);
+    return CsDraw.profileNow(doc, di, survey, resolved, settings);
 };
 
 /**
@@ -1362,9 +1387,13 @@ CsDraw.profileNow = function(doc, di, survey, resolved, settings) {
  * this build refuses deletes there just as it refuses adds, so without
  * that the entities survive and a redraw doubles them.
  *
+ * \param di Optional RDocumentInterface for `doc`. Only the off-layer
+ *           delete path needs one; omitted, it falls back to the
+ *           GUI's active interface, which is right for every caller
+ *           whose doc IS the active drawing and wrong for any other.
  * \return number of entities removed
  */
-CsDraw.eraseStations = function(doc, stationNames) {
+CsDraw.eraseStations = function(doc, stationNames, di) {
     // Keep the last saved version beside the drawing BEFORE removing
     // anything. A redraw is erase-then-draw across two operations, and a
     // draw that fails after this has landed leaves the drawing gutted --
@@ -1547,7 +1576,13 @@ CsDraw.eraseStations = function(doc, stationNames) {
         }
     }
     if (removed > 0) {
-        var di2 = getDocumentInterface();
+        // Same rule as CsDraw.survey: the interface for the document
+        // we were HANDED, not for whatever is active. Optional, so the
+        // existing callers that only have a doc still work.
+        var di2 = di;
+        if (di2 === undefined || di2 === null) {
+            di2 = getDocumentInterface();
+        }
         // Switch every off layer the kill list touches on around the
         // ONE delete operation, then let withLayerOn put each back.
         // Built inside out so the operation runs with all of them on at

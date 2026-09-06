@@ -180,6 +180,52 @@ SymbolPalette.angleValue = function() {
     }
 };
 
+/** True when a drag sets the symbol's size as well as its angle.
+ *  A panel that failed to build its checkbox answers TRUE -- the
+ *  documented default -- rather than silently changing the gesture. */
+SymbolPalette.dragScaleEnabled = function() {
+    var w = SymbolPalette.widgets;
+    if (isNull(w) || isNull(w.dragScaleCheck)) {
+        return true;
+    }
+    try {
+        return w.dragScaleCheck.checked === true;
+    } catch (e) {
+        return true;
+    }
+};
+
+/**
+ * Shows what the drag in progress is asking for.
+ *
+ * WRITTEN INTO THE FIELDS THEMSELVES, not into a separate readout. The
+ * caver dragged a symbol out to a size and an angle; the two boxes that
+ * name size and angle should then say what they placed it at, and the
+ * next plain click uses exactly those numbers. A drag is a way of
+ * typing in those fields with the mouse.
+ *
+ * Called from a mouse-move handler, so it never throws.
+ */
+SymbolPalette.showDrag = function(scale, angleDeg) {
+    var w = SymbolPalette.widgets;
+    if (isNull(w)) {
+        return;
+    }
+    try {
+        if (!isNull(w.scaleEdit) && !isNull(scale)) {
+            w.scaleEdit.text = String(scale.toFixed(2));
+        }
+        if (!isNull(w.angleEdit) && !isNull(angleDeg)) {
+            var deg = angleDeg % 360;
+            if (deg < 0) {
+                deg += 360;
+            }
+            w.angleEdit.text = String(deg.toFixed(0));
+        }
+    } catch (e) {
+    }
+};
+
 /**
  * Arms an entry and makes the panel show which one.
  *
@@ -614,6 +660,25 @@ SymbolPalette.buildDock = function(appWin) {
         layout.addLayout(settings, 0);
     } catch (eSettings) {
         w.problems.push("scale/angle (" + eSettings + ")");
+    }
+
+    // -- what a drag sets ---------------------------------------------
+    //
+    // ON BY DEFAULT: dragging out from the press point sets the size as
+    // well as the angle, and the distance dragged IS the symbol's
+    // radius, so the cursor sits on the edge of what will be placed.
+    // Switching it off leaves the drag aiming only, which is what a row
+    // of flow arrows that must all stay one size needs.
+    try {
+        w.dragScaleCheck = new QCheckBox(qsTr("Drag sets size too"));
+        w.dragScaleCheck.checked = true;
+        w.dragScaleCheck.toolTip = qsTr("While you drag, the distance " +
+            "from where you pressed becomes the symbol's radius, so you " +
+            "size and aim it in one gesture. Switch this off to aim only " +
+            "and keep the Scale above.");
+        layout.addWidget(w.dragScaleCheck, 0, 0);
+    } catch (eDragScale) {
+        w.problems.push("drag-sets-size box (" + eDragScale + ")");
     }
 
     // -- search ------------------------------------------------------

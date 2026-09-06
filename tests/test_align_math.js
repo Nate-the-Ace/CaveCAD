@@ -1,23 +1,107 @@
-// test_align_math.js
+// scan_align_math_run.js -- the geometry behind ScanAlign.
 //
-// Headless tests for the geometry in ScanAlign.js. Run with:
-//   tests/run_tests.sh
+//   /Applications/CaveCAD.app/Contents/MacOS/CaveCAD -no-dock-icon \
+//       -no-gui -allow-multiple-instances -autostart \
+//       tests/test_align_math.js "$PWD"
 //
-// These run inside QCAD's own script engine, so they test the real
+// Prints "### ALIGN MATH OK" on success, "### ALIGN MATH FAIL" plus the
+// failed assertions otherwise.
+//
+// These run inside CaveCAD's own script engine, so they test the real
 // RVector / RImageEntity behaviour rather than a stand-in. Including
-// ScanAlign.js only defines the tool; nothing starts until QCAD calls
+// ScanAlign.js only defines the tool; nothing starts until CaveCAD calls
 // its init(), so it is safe to load here.
+//
+// WHY A GENERATED RASTER. Two of the checks below put the fit onto a
+// real RImageEntity, and an image entity's pixel size comes from a file
+// on disk -- there is nothing to divide by until one exists. The page is
+// written to a throwaway temp directory at startup rather than committed,
+// the same way scan_rotate_run.js and scan_trim_run.js make theirs, so
+// the suite carries no binary fixture that can drift from what it means.
 
-include(ALIGN_IMAGE_TEST_DIR + "/../SketchScans/ScanAlign.js");
+var args = RSettings.getOriginalArguments();
+var repoRoot = args[args.length - 1];
+
+if (typeof isNull === "undefined") {
+    isNull = function(v) {
+        if (v === undefined || v === null) { return true; }
+        try {
+            if (typeof v.isNull === "function") { return v.isNull(); }
+        } catch (e) {}
+        return false;
+    };
+}
+if (typeof createSpatialIndex === "undefined") {
+    createSpatialIndex = function() {
+        return new RSpatialIndexNavel();
+    };
+}
+if (typeof isImageEntity === "undefined") {
+    isImageEntity = function(entity) {
+        return !isNull(entity) && typeof entity.getType === "function" &&
+            entity.getType() === RS.EntityImage;
+    };
+}
+
+function loadRepoScript(scriptPath) {
+    var file = new QFile(repoRoot + "/" + scriptPath);
+    if (!file.open(QIODevice.ReadOnly | QIODevice.Text)) {
+        throw new Error("cannot open " + scriptPath);
+    }
+    var stream = new QTextStream(file);
+    var src = String(stream.readAll());
+    file.close();
+    // Strip include() lines: the Core files are loaded explicitly below,
+    // and CaveCAD's own include() would look in the installed script
+    // folders rather than this checkout. Same loader shape as
+    // tests/js_unit.js and tests/align_image_frame.js.
+    src = src.replace(/^\s*include\(.*\);\s*$/mg, "");
+    (0, eval)(src);
+}
+
+var CORE = ["CsUnits", "CsCave", "CsGeoProject", "CsAngles", "CsModel",
+    "CsTags", "CsLayers", "CsDraw"];
+for (var c = 0; c < CORE.length; c++) {
+    loadRepoScript("scripts/CaveSurvey/Core/" + CORE[c] + ".js");
+}
+
+// The stub standing in for scripts/Modify/Transform.js: ScanAlign.js runs
+// `ScanAlign.prototype = new Transform()` at load, and nothing in this
+// file touches the base class. See align_image_frame.js.
+function Transform() {}
+
+loadRepoScript("scripts/CaveSurvey/SketchScans/ScanAlign.js");
+
+// --- the throwaway page the image checks measure themselves against ---
+// Deliberately not square (120 x 80): a square page would let an across
+// scale and a down scale swap places unnoticed.
+var TEST_IMAGE_W = 120, TEST_IMAGE_H = 80;
+var tmpDir = String(QDir.tempPath()) + "/cs-align-math-" +
+    String(new Date().getTime());
+new QDir().mkpath(tmpDir);
+var TEST_IMAGE = tmpDir + "/test_image.png";
+(function() {
+    var page = new QImage(TEST_IMAGE_W, TEST_IMAGE_H, QImage.Format_RGB32);
+    page.fill(0xffffffff);
+    if (!page.save(TEST_IMAGE, "PNG")) {
+        print("FAIL: could not write the test page to " + TEST_IMAGE);
+        print("### ALIGN MATH FAIL");
+        throw new Error("no test page");
+    }
+})();
 
 var failures = 0;
 var checks = 0;
+
+function report(message) {
+    print(message);
+}
 
 function check(name, condition) {
     checks++;
     if (condition !== true) {
         failures++;
-        qDebug("FAIL: " + name);
+        report("FAIL: " + name);
     }
 }
 
@@ -27,7 +111,7 @@ function checkClose(name, actual, expected, tolerance) {
     }
     var ok = Math.abs(actual - expected) < tolerance;
     if (!ok) {
-        qDebug("FAIL: " + name + " -- expected " + expected + ", got " + actual);
+        report("FAIL: " + name + " -- expected " + expected + ", got " + actual);
         failures++;
     }
     checks++;
@@ -39,7 +123,7 @@ function checkPoint(name, actual, expected, tolerance) {
     }
     var ok = actual.getDistanceTo(expected) < tolerance;
     if (!ok) {
-        qDebug("FAIL: " + name + " -- expected (" + expected.x + "," + expected.y +
+        report("FAIL: " + name + " -- expected (" + expected.x + "," + expected.y +
                "), got (" + actual.x + "," + actual.y + ")");
         failures++;
     }
@@ -140,9 +224,9 @@ function checkPoint(name, actual, expected, tolerance) {
 // entity, so it checks that rotate/scale/move in that order really do
 // put the picked points onto their targets.
 (function() {
-    var doc = new RDocument(new RMemoryStorage(), new RSpatialIndexSimple());
+    var doc = new RDocument(new RMemoryStorage(), createSpatialIndex());
     var image = new RImageEntity(doc, new RImageData(
-        ALIGN_IMAGE_TEST_DIR + "/test_image.png",
+        TEST_IMAGE,
         new RVector(0, 0), new RVector(1, 0), new RVector(0, 1), 0, 0, 0));
 
     var pixelsWide = image.getPixelWidth();
@@ -178,10 +262,10 @@ function checkPoint(name, actual, expected, tolerance) {
 
 // --- clicking inside an image finds it ------------------------------
 (function() {
-    var doc = new RDocument(new RMemoryStorage(), new RSpatialIndexSimple());
+    var doc = new RDocument(new RMemoryStorage(), createSpatialIndex());
     // 10 drawing units per pixel, so the image spans 10*pixels units:
     var image = new RImageEntity(doc, new RImageData(
-        ALIGN_IMAGE_TEST_DIR + "/test_image.png",
+        TEST_IMAGE,
         new RVector(0, 0), new RVector(10, 0), new RVector(0, 10), 0, 0, 0));
     var w = image.getPixelWidth() * 10;
     var h = image.getPixelHeight() * 10;
@@ -358,11 +442,11 @@ function makePairs(sources, mapPoint) {
 // The end-to-end check: put three stations on an image, warp it, then
 // confirm the picture itself now has those stations on their targets.
 (function() {
-    var doc = new RDocument(new RMemoryStorage(), new RSpatialIndexSimple());
+    var doc = new RDocument(new RMemoryStorage(), createSpatialIndex());
     var scale = 4.0;      // drawing units per pixel to start with
     var origin = new RVector(0, 0);
     var image = new RImageEntity(doc, new RImageData(
-        ALIGN_IMAGE_TEST_DIR + "/test_image.png",
+        TEST_IMAGE,
         origin, new RVector(scale, 0), new RVector(0, scale), 0, 0, 0));
 
     var pw = image.getPixelWidth(), ph = image.getPixelHeight();
@@ -421,5 +505,12 @@ function makePairs(sources, mapPoint) {
           ScanAlign.isPointInImage(image, outside) === false);
 })();
 
-qDebug("RESULT: " + (checks - failures) + "/" + checks + " checks passed");
-qDebug(failures === 0 ? "ALL TESTS PASSED" : "TESTS FAILED: " + failures);
+// --- tidy up the throwaway page --------------------------------------
+new QFile(TEST_IMAGE).remove();
+new QDir().rmdir(tmpDir);
+
+if (failures === 0) {
+    print("### ALIGN MATH OK " + checks);
+} else {
+    print("### ALIGN MATH FAIL " + failures + " of " + checks);
+}

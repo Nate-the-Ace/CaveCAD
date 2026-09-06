@@ -13,16 +13,11 @@
 var CsRepair = {};
 
 /**
- * Needs an ACTIVE drawing, not merely the doc handed in. The restyle and
- * callout passes work on whatever doc/di they are given, but the rebuild
- * pass redraws through CsDraw.survey, and CsDraw.survey reads the GUI's
- * own getDocument()/getDocumentInterface() rather than taking a document
- * (CsDraw.js, in survey()). In the application the two are the same
- * drawing, so this costs nothing there -- but called against a document
- * that is not the active one, the rebuild pass throws inside CsLayers
- * and the other two passes quietly succeed against a different drawing.
- * Measured, not guessed. Do not "fix" it by passing doc further down:
- * CsDraw.survey's contract is shared with three other tools.
+ * All three passes work on the doc/di they are handed -- the rebuild
+ * pass included, since CsDraw.survey now takes its document through
+ * options.doc/options.di instead of reading the GUI's globals. Verified
+ * against a document that is NOT the active one: all three passes
+ * succeed on the drawing passed in.
  *
  * \param opts Object with boolean rebuild, restyle, callouts. A missing
  *             key means run that pass -- the dialog's default is all three.

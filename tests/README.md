@@ -264,3 +264,33 @@ partial draw invites, since the page it draws does not start at trip 0. The
 second half proves the gate refuses: a page that revises an earlier trip under a
 different declination turns the survey, so it must take the full path, where the
 linework mover runs.
+
+## `test_align_math.js`
+
+The geometry underneath `ScanAlign`, inside CaveCAD's own script engine so it
+runs against real `RVector` and `RImageEntity` behaviour rather than a stand-in.
+`align_image_frame.js` covers the frame gate and the per-entity hook; this file
+covers the arithmetic those depend on and nothing else covers: the exact
+two-point `computeTransform` (including its `noscale` mode and its refusals),
+the least-squares `computeSimilarityFit`, the affine `computeAffineFit` -- exact
+on three stations, least squares on more, and refusing to invent a warp from
+stations in a straight line -- and `getResiduals`, whose outlier case is checked
+against hand-computed numbers (an 8-unit mis-click on the middle of five
+stations leaves the four good ones 1.6 out and the bad one 6.4) so a fit that
+quietly dumped the error on one station, or ignored it, would fail here.
+
+The last two blocks put a fit onto a real image entity: one confirms
+rotate/scale/move in that order really do land the picked points on their
+targets with pixels still square, the other warps an image by a three-station
+affine fit and reads the stations back off the picture's own `u`/`v` vectors,
+then checks `isPointInImage` still finds a click in the middle of the warped,
+skewed page (which QCAD's own hit test, measuring to the border, does not).
+
+An image entity's pixel size comes from a file on disk, so the suite writes a
+120x80 PNG into a temp directory at startup and removes it at the end -- the
+same approach as `scan_rotate_run.js`, and the reason no binary fixture is
+committed. Deliberately not square, so an across scale and a down scale cannot
+swap places unnoticed.
+
+Prints `### ALIGN MATH OK <checks>`, or `### ALIGN MATH FAIL <n> of <checks>`
+with each failed assertion above it.

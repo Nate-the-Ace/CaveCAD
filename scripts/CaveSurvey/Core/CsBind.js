@@ -1300,14 +1300,16 @@ CsBind.withSuppressed = function(fn) {
 /**
  * Wraps one owner.name function so every call runs suppressed. Not
  * every caller can be trusted to remember: CsDraw.survey is called
- * from four places across three tools and CsRevise.apply from two,
+ * from eight places across six tools and CsRevise.apply from two,
  * and a caller that forgets does not fail loudly -- it silently tags
  * the suite's own geometry as the user's tracing. Wrapping the
  * function itself is the only version of this guard that cannot be
  * forgotten by the next call site someone adds.
  *
  * Idempotent (a flag on the wrapper), and transparent: same this,
- * same arguments, same return value.
+ * same arguments (forwarded through `arguments`, so a change to the
+ * wrapped function's signature needs nothing here), same return
+ * value.
  */
 CsBind.guardFunction = function(owner, name) {
     if (owner === undefined || owner === null ||

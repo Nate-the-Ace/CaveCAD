@@ -39,6 +39,7 @@ include(includeBasePath + "/../Core/CsAll.js");
 
 function importCaveSurvey() {
     var doc = getDocument();
+    var di = getDocumentInterface();
     if (doc === undefined || doc === null) {
         warning("Import Cave Survey: no active drawing document.");
         return;
@@ -149,7 +150,7 @@ function importCaveSurvey() {
     var findings = CsValidate.check(survey, resolved);
 
     var drawn = CsDraw.survey(survey, resolved, undefined, undefined,
-        CsTags.collectStations(doc).length);
+        CsTags.collectStations(doc).length, { doc: doc, di: di });
 
     if (drawn.stationsDrawn > 0) {
         CsDraw.zoomToSurvey(survey, resolved);

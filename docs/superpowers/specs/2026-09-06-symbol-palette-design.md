@@ -380,3 +380,54 @@ press-drag-release-to-aim distinction, the cursor readout updating as
 the mouse moves, and the modal Save Symbol dialog (a bridge must never
 `exec()` one) have not been exercised. See
 `docs/superpowers/plans/2026-09-06-outstanding-dry-runs.md`.
+
+
+## Addendum: the drag sets size as well as angle (2026-09-06)
+
+Nathan's request, after the first build: the drag should set the scale
+too, not only the rotation.
+
+**The distance dragged IS the symbol's radius.** Press where the symbol
+goes, drag to where its edge should be, release. That definition is what
+makes one gesture mean the same thing on a stalactite half a unit across
+and a north arrow ten units across, and it makes the preview under the
+cursor the answer rather than a hint about it. `CsSymbolStore.radiusOf`
+supplies each symbol's own half-size -- from the open drawing when it
+holds the block (a caver who redefined it means the shape in front of
+them), otherwise from a radius map `list()` fills while it already has
+the template open, because reopening a DXF per mouse gesture is not a
+thing this tool may do.
+
+`SymbolPaletteRun.scaleForDrag(distance, radius, panelScale, enabled)`
+is the whole mapping and is pure. It falls back to the panel's Scale
+field whenever the drag cannot mean anything -- sizing switched off, an
+unknown radius, a drag of no length -- which is what keeps a plain click
+a plain click. It is floored at 0.05 and capped at 500: the distance IS
+the size, so a release a pixel from the press point would otherwise
+place something too small to see or to find again.
+
+**A drag writes its result into the panel's own Scale and Angle
+fields.** Not a separate readout: the caver just set a size and an
+angle, the two boxes that name size and angle should say what they got,
+and the next plain click then places at exactly those numbers. A drag is
+a way of typing in those fields with the mouse.
+
+**`Drag sets size too` is a checkbox, on by default.** Off leaves the
+drag aiming only, which is what a row of flow arrows that must all stay
+one size needs.
+
+### Verified live
+
+Driven through the action's own press/move/release against a real
+template drawing in a running CaveCAD: a plain click placed at the
+panel's 1.0/0 deg; a 3-unit drag up-left on a 0.5-radius symbol placed
+it at scale 6, 135 deg; the same drag with the box unticked placed at
+scale 1, 135 deg. The panel's fields followed each drag.
+
+**A note on how NOT to test this.** Synthesising a `QMouseEvent` in
+script and pushing it in with `QCoreApplication.sendEvent` SIGSEGVs the
+application inside the wrapper's `sendEvent` -- crashed CaveCAD once
+here, with nothing of this add-on on the stack. Drive an action's own
+handlers with a stub event object instead (`button()`, `buttons()`,
+`modifiers()`, `getModelPosition()`); that exercises the same code
+against the same document and cannot take the app down.

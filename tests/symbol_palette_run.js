@@ -394,6 +394,96 @@ if (placedInBay.length === 1) {
 })();
 
 // ---------------------------------------------------------------------
+// 3b. The drag sets the size as well as the angle.
+// ---------------------------------------------------------------------
+
+// The mapping itself: the distance dragged IS the placed symbol's
+// radius, so one gesture means the same thing on a symbol half a unit
+// across and one ten units across.
+eqs(SymbolPaletteRun.scaleForDrag(2.0, 0.5, 1.0, true), 4.0,
+    "scaleForDrag: dragging to twice a 0.5-unit symbol's radius asks " +
+    "for scale 4");
+eqs(SymbolPaletteRun.scaleForDrag(5.0, 5.0, 1.0, true), 1.0,
+    "scaleForDrag: dragging to exactly the symbol's own radius is " +
+    "scale 1, whatever that radius is");
+eqs(SymbolPaletteRun.scaleForDrag(2.0, 0.5, 3.0, false), 3.0,
+    "scaleForDrag: with sizing switched off the panel's scale stands");
+eqs(SymbolPaletteRun.scaleForDrag(2.0, 0, 3.0, true), 3.0,
+    "scaleForDrag: a symbol whose radius is unknown falls back to the " +
+    "panel rather than dividing by zero");
+eqs(SymbolPaletteRun.scaleForDrag(0, 0.5, 2.5, true), 2.5,
+    "scaleForDrag: a drag of no length is a click, and takes the panel");
+eqs(SymbolPaletteRun.scaleForDrag(0.0001, 5.0, 1.0, true),
+    SymbolPaletteRun.MIN_SCALE,
+    "scaleForDrag: a hair of a drag is floored, not placed invisible");
+eqs(SymbolPaletteRun.scaleForDrag(1e9, 0.5, 1.0, true),
+    SymbolPaletteRun.MAX_SCALE,
+    "scaleForDrag: and a drag across the county is capped");
+
+// The radius the mapping divides by, read off a real block.
+(function radiusFromTheBlock() {
+    var probe = new RDocument(new RMemoryStorage(), createSpatialIndex());
+    var pdi = new RDocumentInterface(probe);
+    var got = CsSymbolStore.ensureBlock(probe, pdi, "SYM_STALACTITE",
+        templatePath);
+    ok(got.ok, "the radius fixture got its block (" + got.error + ")");
+    // The scratch template's stalactite spans 0.5 wide by 1.0 tall.
+    var r = CsSymbolStore.radiusOf(probe, "SYM_STALACTITE");
+    ok(Math.abs(r - 0.5) < 1e-9,
+        "radiusOf: half the LARGER side of the symbol's own box " +
+        "(expected 0.5, got " + r + ")");
+    eqs(CsSymbolStore.radiusOf(probe, "SYM_NOT_THERE_AT_ALL"), 0,
+        "radiusOf: a block nobody has answers 0, which callers read as " +
+        "'no answer' rather than dividing by it");
+})();
+
+// And the placement really uses it. Same commit path as every other
+// placement in this file, with a drag on it.
+(function placedAtTheDraggedSize() {
+    var action = new SymbolPaletteRun(null);
+    action.getDocument = function() { return doc; };
+    action.getDocumentInterface = function() { return di; };
+    var x = planX + 60, y = planY + 60;
+    action.anchor = { x: x, y: y };
+    action.refreshRegion();
+    action.radius = CsSymbolStore.radiusOf(doc, entry.block);
+    ok(action.radius > 0, "the placement knows the symbol's own radius");
+    // a drag of 2.0 units on a 0.5-unit radius: scale 4
+    action.angle = 0.0;
+    action.dragScale = SymbolPaletteRun.scaleForDrag(2.0, action.radius,
+        1.0, true);
+    eqs(action.placementScale(), 4.0,
+        "the placement takes the drag's scale over the panel's");
+    action.commit();
+
+    var placed = null;
+    var ids = doc.queryAllEntities(false, false, RS.EntityBlockRef);
+    for (var i = 0; i < ids.length; i++) {
+        var e = doc.queryEntity(ids[i]);
+        if (isNull(e)) { continue; }
+        var p = e.getPosition();
+        if (Math.abs(p.x - x) < 1e-6 && Math.abs(p.y - y) < 1e-6) {
+            placed = e;
+        }
+    }
+    ok(placed !== null, "the dragged-out symbol landed where it was " +
+        "pressed (messages: " + messages.join(" | ") + ")");
+    if (placed !== null) {
+        var sx = placed.getScaleFactors().x;
+        ok(Math.abs(sx - 4.0) < 1e-9,
+            "and carries the dragged scale, not the panel's (expected 4, " +
+            "got " + sx + ")");
+    }
+
+    // Sizing switched off: the drag still aims, the panel still sizes.
+    var aimOnly = new SymbolPaletteRun(null);
+    aimOnly.radius = 0.5;
+    aimOnly.dragScale = SymbolPaletteRun.scaleForDrag(2.0, 0.5, 1.0, false);
+    eqs(aimOnly.placementScale(), 1.0,
+        "with sizing off, a long drag places at the panel's scale");
+})();
+
+// ---------------------------------------------------------------------
 // 4. The shipped symbols are not editable.
 // ---------------------------------------------------------------------
 

@@ -2345,10 +2345,10 @@ CsRevise.apply = function(doc, di, recon, newSurvey) {
             CsBind.planAutoBind(doc, tripNames);
 
         withOffLayersOn(function() {
-            CsDraw.eraseStations(doc, oldNames);
+            CsDraw.eraseStations(doc, oldNames, di);
         });
         profileOutcome = CsDraw.survey(newSurvey, newResolved, anchorName,
-            anchorPos).profile;
+            anchorPos, undefined, { doc: doc, di: di }).profile;
         // (No RevisionLog to carry across: the erase deleted the point
         // any stale one lived on, and the redraw writes none -- which
         // is the removal working, not history being lost.)

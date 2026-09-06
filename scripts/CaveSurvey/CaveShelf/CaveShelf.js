@@ -1570,7 +1570,8 @@ CaveShelf.drawImportedSurvey = function(survey) {
 
         var resolved = CsAdjust.resolveAndAdjust(survey, {},
             CsAdjust.currentOptions());
-        CsDraw.survey(survey, resolved, undefined, undefined, 0);
+        CsDraw.survey(survey, resolved, undefined, undefined, 0,
+            { doc: doc, di: di });
 
         try {
             di.autoZoom();

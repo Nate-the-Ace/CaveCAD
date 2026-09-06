@@ -217,8 +217,9 @@ CsRebuild.redraw = function(doc, di, survey, anchorName, anchorPos,
             names.push(n);
         }
     }
-    var erased = CsDraw.eraseStations(doc, names);
-    var drawn = CsDraw.survey(survey, resolved, anchorName, anchorPos);
+    var erased = CsDraw.eraseStations(doc, names, di);
+    var drawn = CsDraw.survey(survey, resolved, anchorName, anchorPos,
+        undefined, { doc: doc, di: di });
     return { erased: erased, drawn: drawn, resolved: resolved };
 };
 

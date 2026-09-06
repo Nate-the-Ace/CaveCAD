@@ -719,6 +719,7 @@ SurveyNotebook.drawSurvey = function(w, forceFull) {
 
 SurveyNotebook.drawSurveyInner = function(w, forceFull) {
     var doc = getDocument();
+    var di = getDocumentInterface();
     if (doc === undefined || doc === null) {
         QMessageBox.warning(null, "Survey Notebook", "No drawing is open.");
         return;
@@ -802,9 +803,10 @@ SurveyNotebook.drawSurveyInner = function(w, forceFull) {
     // page). The erase is its own undo step before the draw.
     var seqBase = CsTags.collectStations(doc).length;
     var pageNames = CsModel.stationNames(survey);
-    var replaced = CsDraw.eraseStations(doc, pageNames);
+    var replaced = CsDraw.eraseStations(doc, pageNames, di);
 
-    var drawn = CsDraw.survey(survey, resolved, undefined, undefined, seqBase);
+    var drawn = CsDraw.survey(survey, resolved, undefined, undefined, seqBase,
+        { doc: doc, di: di });
     CsDraw.zoomToSurvey(survey, resolved);
 
     QMessageBox.information(null, "Survey Notebook",
@@ -1382,7 +1384,7 @@ SurveyNotebook.drawPartial = function(w, doc, di, merged, resolved,
 
     var replaced = CsLayers.withLayerOn(doc, di, CsLayers.CTRL_HIDDEN,
         function() {
-            return CsDraw.eraseStations(doc, split.page);
+            return CsDraw.eraseStations(doc, split.page, di);
         });
 
     var pageShots = [];
@@ -1398,6 +1400,8 @@ SurveyNotebook.drawPartial = function(w, doc, di, merged, resolved,
 
     var drawn = CsDraw.survey(pageSurvey, pageResolved, undefined,
         undefined, seqBase, {
+            doc: doc,
+            di: di,
             partial: true,
             omitStations: split.tie,
             // the elevation is a whole-cave product: never build it
@@ -1623,12 +1627,13 @@ SurveyNotebook.drawMergedSurvey = function(w, doc, survey, recon,
 
     var replaced = CsLayers.withLayerOn(doc, di, CsLayers.CTRL_HIDDEN,
         function() {
-            return CsDraw.eraseStations(doc, eraseNames);
+            return CsDraw.eraseStations(doc, eraseNames, di);
         });
 
     // fresh Seq numbering continues after whatever survived the erase
     var seqBase = CsTags.collectStations(doc).length;
-    var drawn = CsDraw.survey(merged, resolved, undefined, undefined, seqBase);
+    var drawn = CsDraw.survey(merged, resolved, undefined, undefined, seqBase,
+        { doc: doc, di: di });
     CsDraw.zoomToSurvey(merged, resolved);
 
     // -- traced linework follows its own stations ---------------------

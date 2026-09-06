@@ -729,7 +729,7 @@ CsTripEdit.deleteTrip = function(doc, di, recon, tripId, opts) {
 
     var erased = CsLayers.withLayerOn(doc, di, CsLayers.CTRL_HIDDEN,
         function() {
-            return CsDraw.eraseStations(doc, oldNames);
+            return CsDraw.eraseStations(doc, oldNames, di);
         });
 
     // Anchored where the drawing already stands, the same rule the
@@ -750,7 +750,8 @@ CsTripEdit.deleteTrip = function(doc, di, recon, tripId, opts) {
     var resolved = CsAdjust.resolveAndAdjust(plan.survey,
         anchor === null ? {} : { anchor: anchor },
         CsAdjust.optionsFromTags(recon.adjustTags || {}));
-    var drawn = CsDraw.survey(plan.survey, resolved);
+    var drawn = CsDraw.survey(plan.survey, resolved, undefined,
+        undefined, undefined, { doc: doc, di: di });
 
     // Deleting a trip that closed a loop re-solves the rest of the
     // cave; the tracing that survived has to come with it.

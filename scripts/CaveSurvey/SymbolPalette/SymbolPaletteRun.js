@@ -19,6 +19,8 @@ function SymbolPaletteRun(guiAction) {
 
     this.anchor = null;     // {x, y} press point, in drawing coordinates
     this.angle = null;      // radians, from the drag; null until it turns
+    this.dragScale = null;  // from the drag's LENGTH; null until it moves
+    this.radius = 0;        // the armed symbol's own half-size at scale 1
     this.region = null;     // cached profile-frame box; see refreshRegion
     this.bays = [];         // cached open section-bay rects; same refresh
 }
@@ -44,6 +46,54 @@ SymbolPaletteRun.State = {
  */
 SymbolPaletteRun.AIM_PIXELS = 8;
 
+/** How small and how large a drag is allowed to make a symbol.
+ *
+ *  A floor rather than no floor because the drag distance IS the size:
+ *  releasing a pixel from the press point would otherwise place a
+ *  symbol too small to see and too small to find again. A ceiling for
+ *  the mirror image -- a drag across a zoomed-out cave asking for a
+ *  stalactite the size of the passage. Both are far outside anything
+ *  anyone means, so neither is in the caver's way. */
+SymbolPaletteRun.MIN_SCALE = 0.05;
+SymbolPaletteRun.MAX_SCALE = 500.0;
+
+/**
+ * The scale a drag of `distance` asks for, on a symbol whose own
+ * half-size is `radius`.
+ *
+ * THE DISTANCE IS THE RADIUS. Press at the middle of where the symbol
+ * goes, drag to where its edge should be, and that is the size it is
+ * placed at -- so the gesture reads the same on a stalactite half a
+ * unit across and a north arrow ten units across, and the preview under
+ * the cursor is the answer rather than a hint about it.
+ *
+ * Falls back to the panel's Scale field whenever it cannot mean
+ * anything: sizing switched off, a symbol whose radius is unknown (an
+ * empty or unreadable block), or a drag that has not passed the aim
+ * threshold yet. That last one is what keeps a plain click a plain
+ * click.
+ *
+ * Pure.
+ */
+SymbolPaletteRun.scaleForDrag = function(distance, radius, panelScale,
+        enabled) {
+    if (enabled !== true || isNull(radius) || radius <= 0 ||
+            isNull(distance) || !(distance > 0)) {
+        return panelScale;
+    }
+    var scale = distance / radius;
+    if (!(scale > 0) || isNaN(scale)) {
+        return panelScale;
+    }
+    if (scale < SymbolPaletteRun.MIN_SCALE) {
+        return SymbolPaletteRun.MIN_SCALE;
+    }
+    if (scale > SymbolPaletteRun.MAX_SCALE) {
+        return SymbolPaletteRun.MAX_SCALE;
+    }
+    return scale;
+};
+
 /** The armed catalogue entry, from the panel, or null.
  *
  *  Read at PLACEMENT time and not captured when the action started: a
@@ -63,6 +113,16 @@ SymbolPaletteRun.scale = function() {
         return 1.0;
     }
     return SymbolPalette.scaleValue();
+};
+
+/** True when a drag is allowed to set the symbol's SIZE as well as its
+ *  angle. The panel's checkbox; on by default, and off is how a caver
+ *  aims a row of flow arrows that must all stay one size. */
+SymbolPaletteRun.dragSetsScale = function() {
+    if (typeof SymbolPalette === "undefined") {
+        return true;
+    }
+    return SymbolPalette.dragScaleEnabled();
 };
 
 /** The panel's angle in radians, the default a plain click uses. */
@@ -183,6 +243,7 @@ SymbolPaletteRun.prototype.setState = function(state) {
         this.setRightMouseTip(EAction.trCancel);
         this.anchor = null;
         this.angle = null;
+        this.dragScale = null;
         break;
 
     case SymbolPaletteRun.State.Placing:
@@ -265,6 +326,16 @@ SymbolPaletteRun.prototype.mousePressEvent = function(event) {
     var p = event.getModelPosition();
     this.anchor = { x: p.x, y: p.y };
     this.angle = null;
+    this.dragScale = null;
+    // Once per placement, not per mouse move: reading it walks a block
+    // definition, and a drag emits a move event per pixel.
+    this.radius = 0;
+    try {
+        this.radius = CsSymbolStore.radiusOf(this.getDocument(),
+            SymbolPaletteRun.armedEntry().block);
+    } catch (eRadius) {
+        this.radius = 0;   // sizing falls back to the panel's field
+    }
     this.setState(SymbolPaletteRun.State.Placing);
 };
 
@@ -291,16 +362,22 @@ SymbolPaletteRun.prototype.mouseMoveEvent = function(event) {
         return;
     }
 
-    // THE AIM. Past the threshold the symbol faces the cursor; inside
-    // it the panel's angle stands and the placement is still a click.
-    // Once it HAS turned it keeps tracking, even if the cursor comes
+    // THE AIM AND THE SIZE, from one gesture. Direction turns the
+    // symbol; distance IS its radius, so the cursor sits on the edge of
+    // what will be placed. Past the threshold both track; inside it the
+    // panel's angle and scale stand and the placement is still a click.
+    //
+    // Once it HAS engaged it keeps tracking, even if the cursor comes
     // back inside the threshold -- otherwise a drag out and back would
-    // silently discard the aim the caver just made.
+    // silently discard the aim and the size the caver just set.
     var d = CsTrace.distance(this.anchor, here);
     if (this.angle !== null || d >= this.aimThreshold()) {
         this.angle = Math.atan2(here.y - this.anchor.y,
             here.x - this.anchor.x);
+        this.dragScale = SymbolPaletteRun.scaleForDrag(d, this.radius,
+            SymbolPaletteRun.scale(), SymbolPaletteRun.dragSetsScale());
     }
+    this.showDragReadout();
     this.updatePreview();
 };
 
@@ -321,6 +398,28 @@ SymbolPaletteRun.prototype.mouseReleaseEvent = function(event) {
 /** The angle this placement uses: the drag's, or the panel's. */
 SymbolPaletteRun.prototype.placementAngle = function() {
     return this.angle === null ? SymbolPaletteRun.defaultAngle() : this.angle;
+};
+
+/** The scale this placement uses: the drag's, or the panel's. */
+SymbolPaletteRun.prototype.placementScale = function() {
+    return this.dragScale === null ? SymbolPaletteRun.scale() :
+        this.dragScale;
+};
+
+/** Says what the drag is asking for, in the panel, while it is being
+ *  made. The preview already shows it; the numbers say it exactly, and
+ *  a caver placing a scale bar or a north arrow wants the number. Must
+ *  never throw: this runs inside a mouse-move handler. */
+SymbolPaletteRun.prototype.showDragReadout = function() {
+    if (typeof SymbolPalette === "undefined" ||
+            isNull(SymbolPalette.showDrag)) {
+        return;
+    }
+    try {
+        SymbolPalette.showDrag(this.placementScale(),
+            RMath.rad2deg(this.placementAngle()));
+    } catch (e) {
+    }
 };
 
 /** Places one symbol at the anchor. */
@@ -356,7 +455,7 @@ SymbolPaletteRun.prototype.commit = function() {
     try {
         ref = CsSymbols.insert(doc, entry,
             new RVector(this.anchor.x, this.anchor.y),
-            SymbolPaletteRun.scale(), this.placementAngle(), layerName);
+            this.placementScale(), this.placementAngle(), layerName);
     } catch (eIns) {
         ref = null;
     }
@@ -396,8 +495,18 @@ SymbolPaletteRun.prototype.commit = function() {
     // The layer is NAMED every time, for Feature Trace's reason: with
     // no per-view button, this line is the caver's confirmation that
     // the view they clicked in was the view they meant.
-    EAction.handleUserMessage(qsTr("%1 placed on %2")
-        .arg(entry.nss).arg(layerName));
+    // The scale is in the message only when the DRAG chose it: a
+    // placement at the panel's own setting has nothing to report that
+    // the panel is not already showing.
+    if (this.dragScale === null) {
+        EAction.handleUserMessage(qsTr("%1 placed on %2")
+            .arg(entry.nss).arg(layerName));
+    } else {
+        EAction.handleUserMessage(qsTr("%1 placed on %2 at scale %3, %4 deg")
+            .arg(entry.nss).arg(layerName)
+            .arg(this.placementScale().toFixed(2))
+            .arg(RMath.rad2deg(this.placementAngle()).toFixed(0)));
+    }
     this.warnUnclaimedProfile(frame, layerName);
 
     // A symbol on a profile layer grows the region the next placement
@@ -477,7 +586,7 @@ SymbolPaletteRun.prototype.getOperation = function(preview) {
     try {
         ref = CsSymbols.insert(doc, entry,
             new RVector(this.anchor.x, this.anchor.y),
-            SymbolPaletteRun.scale(), this.placementAngle(), entry.layer);
+            this.placementScale(), this.placementAngle(), entry.layer);
     } catch (ePrev) {
         return undefined;
     }
