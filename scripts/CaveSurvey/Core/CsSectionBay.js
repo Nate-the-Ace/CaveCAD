@@ -441,7 +441,7 @@ CsSectionBay.serializeFit = function(fit) {
  * reading it as if it were this format would place the scan at a point
  * hundreds of units off the reopened bay. Null instead sends the caller
  * down its own fallback (SectionEdit auto-fits the scan to the ghost,
- * exactly as SketchSection does when a bay first opens), which is what
+ * exactly as SectionBay does when a bay first opens), which is what
  * a pre-change section was getting anyway.
  */
 CsSectionBay.parseFit = function(text) {

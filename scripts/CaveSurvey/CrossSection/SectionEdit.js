@@ -38,11 +38,11 @@
  * confirmed by the same probe, run both as two operations and as one.
  *
  * THE SCAN COMES BACK WHERE THE CAVER LEFT IT, NOT AT A FRESH GUESS.
- * SketchSection.addScan auto-fits a scan to the CURRENT ghost, but a
+ * SectionBay.addScan auto-fits a scan to the CURRENT ghost, but a
  * sketch's tracing never regenerates (SOURCE_SKETCH is refreshSections'
  * gate) while the survey underneath it can still drift, so "the current
  * ghost" and "the ghost this tracing was drawn against" are not always
- * the same shape. This tool never hands SketchSection.run a scan path
+ * the same shape. This tool never hands SectionBay.run a scan path
  * at all; it places the scan itself afterward, from the fit STORED on
  * the reference (SECTION_FIT) -- which SectionCapture read off the scan
  * entity's own u/v vectors and insertion point, so it carries the
@@ -65,21 +65,24 @@
  * the caver had scaled and turned it to; a re-capture then built a
  * fresh reference at (1,1) and 0, silently resetting both. Both are
  * parked on the bay's frame for the bay's lifetime instead
- * (SketchSection.TAG_REF_SCALE / TAG_REF_ROT) and read back by
+ * (SectionBay.TAG_REF_SCALE / TAG_REF_ROT) and read back by
  * SectionCapture.findBay. The tracing itself comes back into the bay
  * UNSCALED and UNTURNED, at the ghost's own 1:1, which is the only
  * scale the ghost is a ruler for -- the reference's scale and rotation
  * are a sheet-presentation choice laid back on top at capture.
  *
- * USAGE:
- *   select a sketched section, then
- *   Cave Survey > Edit Sketch   (or "sectionedit" / "ske")
+ * NO LONGER ITS OWN MENU ENTRY. "Edit Sketch" (`sectionedit`/`ske`) used
+ * to sit on the Cave Survey menu next to tools a beginner would reach
+ * for long before they had a sketched section to reopen. It is now the
+ * "reopen" branch of Cross Section's own route dialog: select the
+ * section, run Cross Section, choose "Reopen a section I already
+ * traced" -- which calls SectionEdit.run() below, unchanged.
  */
 include("scripts/EAction.js");
 include("scripts/simple.js");
 include(includeBasePath + "/../Core/CsAll.js");
 include(includeBasePath + "/../Callout/CalloutWrite.js");
-include(includeBasePath + "/SketchSection.js");
+include(includeBasePath + "/SectionBay.js");
 
 function SectionEdit(guiAction) {
     EAction.call(this, guiAction);
@@ -101,13 +104,13 @@ SectionEdit.run = function() {
     }
     var ref = SectionEdit.selectedSection(doc);
     if (ref === null) {
-        SketchSection.say(qsTr("Select the cross section to edit " +
+        SectionBay.say(qsTr("Select the cross section to edit " +
             "first -- click the section itself, not its leader."));
         return;
     }
     if (CsTags.get(ref, CsCallout.KEY.SECTION_SOURCE) !==
             CsCallout.SOURCE_SKETCH) {
-        SketchSection.say(qsTr("That section was computed from the " +
+        SectionBay.say(qsTr("That section was computed from the " +
             "survey's own LRUD, not traced, so there is no sketch to " +
             "reopen.\n\nDraw re-derives it whenever the survey changes."));
         return;
@@ -122,31 +125,31 @@ SectionEdit.run = function() {
     // that convention comes back unchanged (CsCave.resolveUnderScans),
     // so an already-captured section still reopens.
     var stored = CsTags.get(ref, CsCallout.KEY.SECTION_SCAN);
-    var scan = CsCave.resolveUnderScans(SketchSection.scansFolderOf(doc),
+    var scan = CsCave.resolveUnderScans(SectionBay.scansFolderOf(doc),
         stored);
 
     // Checked BEFORE the bay opens, and the path is never handed to
-    // SketchSection.run -- that function's own addScan would show its
+    // SectionBay.run -- that function's own addScan would show its
     // OWN "could not be read" message for exactly this case, and this
     // tool never delegates scan placement to it at all (see the file
     // header), so a bad path only ever produces ONE message, not two.
     var scanExists = scan !== "" && (new QFile(scan)).exists();
     if (scan !== "" && !scanExists) {
-        SketchSection.say(qsTr("The scan this section was traced from " +
+        SectionBay.say(qsTr("The scan this section was traced from " +
             "is not where it was:\n\n%1\n\nThe bay is open with the " +
             "tracing and the outline; the underlay is missing.")
             .arg(scan));
     }
 
     // THE BAY HAS TO BE SIZED FOR THE SCAN THIS TOOL IS ABOUT TO PLACE.
-    // SketchSection.run is handed no path here (this tool places the
+    // SectionBay.run is handed no path here (this tool places the
     // scan itself, at the STORED fit, which run() knows nothing about),
     // so without this the bay would be sized from the ghost alone --
     // and a field-book page fitted at its real scale is many times the
     // ghost. A scan hanging out of its own frame is not just untidy:
     // Capture sweeps by containment, so anything traced over the
     // overflow is dropped silently at the next capture.
-    var bayId = SketchSection.run(null, station, null,
+    var bayId = SectionBay.run(null, station, null,
         scanExists ? SectionEdit.placedSizeOf(scan, fit) : null);
     if (bayId === null) {
         return;
@@ -299,7 +302,7 @@ SectionEdit.explodeInto = function(doc, di, ref, bayId) {
         // one does, which would drop the parked placement while the
         // rest of the reopen still committed. withLayerOn alone only
         // clears off/frozen; the lock needs withLayerUnlocked nested
-        // inside it, the pairing SketchSection.addFrame and
+        // inside it, the pairing SectionBay.addFrame and
         // SectionCapture.capture already use on this same layer.
         CsLayers.withLayerOn(doc, di, CsLayers.CTRL_SECTION_BOX, function() {
             CsLayers.withLayerUnlocked(doc, di, CsLayers.CTRL_SECTION_BOX,
@@ -342,9 +345,9 @@ SectionEdit.parkPlacement = function(doc, bayId, ref, op) {
     if (isNaN(rot)) {
         rot = 0;
     }
-    CsTags.set(frame, SketchSection.TAG_REF_SCALE,
+    CsTags.set(frame, SectionBay.TAG_REF_SCALE,
         sx.toFixed(6) + "," + sy.toFixed(6));
-    CsTags.set(frame, SketchSection.TAG_REF_ROT, rot.toFixed(6));
+    CsTags.set(frame, SectionBay.TAG_REF_ROT, rot.toFixed(6));
     op.addObject(frame, false);
 };
 
@@ -354,7 +357,7 @@ SectionEdit.parkPlacement = function(doc, bayId, ref, op) {
  * This is the EXACT preference SectionCapture.originOf uses -- not
  * "whichever tagged entity turns up first" (queryAllEntities is not
  * insertion-ordered, so that would be a coin flip) -- because ghost and
- * frame do not generally share a centre: SketchSection.addGhost centres
+ * frame do not generally share a centre: SectionBay.addGhost centres
  * the GHOST SHAPE, which is rarely symmetric about the frame's own
  * middle, while the frame IS the rect. Capture and reopen must agree on
  * which one is "the origin," or a captured block's local coordinates
@@ -377,13 +380,13 @@ SectionEdit.bayBoxOf = function(doc, bayId) {
     var frame = null, ghost = null;
     for (var i = 0; i < ids.length; i++) {
         var e = doc.queryEntity(ids[i]);
-        if (isNull(e) || CsTags.get(e, SketchSection.TAG_BAY) !== bayId) {
+        if (isNull(e) || CsTags.get(e, SectionBay.TAG_BAY) !== bayId) {
             continue;
         }
         var role = CsTags.get(e, "SectionBayRole");
-        if (role === SketchSection.ROLE_FRAME) {
+        if (role === SectionBay.ROLE_FRAME) {
             frame = e;
-        } else if (role === SketchSection.ROLE_GHOST) {
+        } else if (role === SectionBay.ROLE_GHOST) {
             ghost = e;
         }
     }
@@ -405,10 +408,10 @@ SectionEdit.bayFrameOf = function(doc, bayId) {
     var ids = doc.queryAllEntities(false, true);
     for (var i = 0; i < ids.length; i++) {
         var e = doc.queryEntity(ids[i]);
-        if (isNull(e) || CsTags.get(e, SketchSection.TAG_BAY) !== bayId) {
+        if (isNull(e) || CsTags.get(e, SectionBay.TAG_BAY) !== bayId) {
             continue;
         }
-        if (CsTags.get(e, "SectionBayRole") === SketchSection.ROLE_FRAME) {
+        if (CsTags.get(e, "SectionBayRole") === SectionBay.ROLE_FRAME) {
             return e;
         }
     }
@@ -420,7 +423,7 @@ SectionEdit.bayFrameOf = function(doc, bayId) {
  * vectors as recorded, and the recorded insertion point re-based from
  * the section's origin onto this bay's own.
  *
- * A NULL FIT AUTO-FITS instead, exactly as SketchSection.addScan does
+ * A NULL FIT AUTO-FITS instead, exactly as SectionBay.addScan does
  * for a brand-new bay -- the fallback for an old five-number tag or a
  * corrupt one. See the file header.
  *
@@ -448,38 +451,38 @@ SectionEdit.placementIn = function(fit, box, pxW, pxH) {
  * somewhere new every time (frameRectFor parks against the CURRENT plan
  * extents).
  *
- * Built through SketchSection.imageEntity, the one place in this
+ * Built through SectionBay.imageEntity, the one place in this
  * feature that constructs an RImageData -- so a reopened scan and a
  * freshly opened one cannot be placed two different ways.
  */
 SectionEdit.reopenScan = function(doc, di, path, fit, box, bayId) {
     var img = new QImage(path);
     if (img.isNull()) {
-        SketchSection.say(qsTr("The scan could not be read: ") + path);
+        SectionBay.say(qsTr("The scan could not be read: ") + path);
         return;
     }
     var pxW = img.width(), pxH = img.height();
     if (pxW < 1 || pxH < 1) {
-        SketchSection.say(qsTr("The scan has no size: ") + path);
+        SectionBay.say(qsTr("The scan has no size: ") + path);
         return;
     }
     var here = SectionEdit.placementIn(fit, box, pxW, pxH);
-    var entity = SketchSection.imageEntity(doc, path, here, pxW, pxH);
+    var entity = SectionBay.imageEntity(doc, path, here, pxW, pxH);
     if (entity === null) {
         return;
     }
     entity.setLayerId(doc.getLayerId(CsLayers.CTRL_SECTION_SCAN));
     // Tag BEFORE adding, so the tags land in the SAME operation as the
     // geometry, and so a Capture run right after this reopen finds and
-    // excludes this scan exactly as it would one SketchSection placed.
-    CsTags.set(entity, SketchSection.TAG_BAY, bayId);
-    CsTags.set(entity, "SectionBayRole", SketchSection.ROLE_SCAN);
+    // excludes this scan exactly as it would one SectionBay placed.
+    CsTags.set(entity, SectionBay.TAG_BAY, bayId);
+    CsTags.set(entity, "SectionBayRole", SectionBay.ROLE_SCAN);
     // The ABSOLUTE path, as resolved on this machine: this tag is what
     // the next Capture reads to build the scan's record, and the image
     // entity itself has to be constructible from it. Capture is where
     // it goes back to being relative to scans/.
     CsTags.set(entity, CsCallout.KEY.SECTION_SCAN, path);
-    // NO SectionBayFit TAG, the same reason SketchSection.addScan no
+    // NO SectionBayFit TAG, the same reason SectionBay.addScan no
     // longer writes one: the caver is about to move this scan, and the
     // next Capture reads the entity's live placement, never a tag.
     // To the back, under whatever the caver traces over it -- the same
@@ -521,16 +524,3 @@ SectionEdit.withLayersOn = function(doc, di, names, fn) {
     return wrap(0);
 };
 
-SectionEdit.init = function(basePath) {
-    var action = new RGuiAction(qsTr("Edit Sketch"),
-                                RMainWindowQt.getMainWindow());
-    action.setRequiresDocument(true);
-    action.setScriptFile(basePath + "/SectionEdit.js");
-    action.setIcon(basePath + "/SectionEdit.svg");
-    action.setStatusTip(qsTr("Reopen a traced cross section's bay, with " +
-        "its scan, to carry on sketching"));
-    action.setDefaultCommands(["sectionedit", "ske"]);
-    action.setGroupSortOrder(452);
-    action.setSortOrder(70);
-    action.setWidgetNames(["CaveSurveyMenu", "CaveSurveyToolBar"]);
-};

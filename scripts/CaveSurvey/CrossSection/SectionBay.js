@@ -1,6 +1,14 @@
 /**
- * SketchSection -- open a staging bay to trace a scanned cross section
- * in.
+ * SectionBay -- open a staging bay to trace a scanned cross section in.
+ *
+ * ONE OF THREE ROUTES CrossSection.js OFFERS ("cut", "trace", "reopen"),
+ * this is "trace". It used to be its own menu entry, "Sketch Section"
+ * (`sketchsection`/`sks`) -- but a student met it, "Capture Section"
+ * and "Edit Sketch" as four separate commands before they had drawn a
+ * single section, with no way to tell from the menu that three of them
+ * are one workflow. The menu now asks once, up front, in CrossSection's
+ * own route dialog; this file supplies the "trace" branch and nothing
+ * about how it opens a bay has changed.
  *
  * The bay is a locked rectangle on CTRL-SECTION-BOX parked clear of the
  * plan, holding two things: the scan, and the COMPUTED section for the
@@ -18,62 +26,48 @@
  * frame is drawn by the caver with Feature Trace, Shaped Lines, arcs --
  * whatever the passage needs. SectionCapture turns that into a block.
  *
- * USAGE:
- *   Cave Survey > Sketch Section   (or "sketchsection" / "sks")
+ * WHILE A BAY IS OPEN, SectionBayPanel is the way out: CrossSection.js
+ * shows it the moment SectionBay.run succeeds, with Capture and Cancel
+ * -- the two things that used to be commands (`skc`/`ske`) a beginner
+ * had no reason to know existed. See SectionBayPanel.js.
  *
- * QCAD only ever finds <dir>/<dir>.js on its own (AddOn.getAddOns), so
- * init() below also registers the two siblings that close and reopen
- * the bay -- SectionCapture and SectionEdit -- the ShapedLines
- * precedent. Without this, the bay can be opened but never closed:
- * no menu entry, no toolbar button, no "skc"/"ske" command exists in
- * the running application even though the files are on disk.
- *
- * UNLIKE SHAPEDLINES' SIBLINGS, SectionCapture.js and SectionEdit.js
- * each already include THIS file back (they call SketchSection.run/
- * TAG_BAY/etc.), so their include(includeBasePath + "/SketchSection.js")
- * line has been there since the bay was first built. include()'s
- * basename dedupe only registers a file once its OWN include() call has
- * returned -- it does not guard a file against being re-entered while
- * still mid-load -- so including them from up here, before this file's
- * own load has returned, is a genuine circular include: SketchSection
- * -> SectionCapture -> SketchSection -> SectionCapture -> ..., which
- * blew the engine's call stack ("Maximum call stack size exceeded")
- * when this was tried and run for real. Deferring the include()+init()
- * pair to INSIDE SketchSection.init (below) sidesteps it: AddOn loads
- * every add-on's main file first and only calls every add-on's init()
- * in a later pass (see AddOn.js/autostart.js), so by the time init()
- * runs here, this file's own load has already completed and its
- * basename is already in the dedupe table -- SectionCapture.js's and
- * SectionEdit.js's own include of SketchSection.js then resolves to a
- * no-op instead of reopening this file.
+ * NO MORE init(), AND NO MORE CIRCULAR INCLUDE TO DODGE. This file, and
+ * SectionCapture.js and SectionEdit.js beside it, used to each register
+ * their own RGuiAction and needed a careful deferred include() dance to
+ * avoid including each other back into a stack overflow (AddOn.getAddOns
+ * only ever finds <dir>/<dir>.js on its own, so a sibling with its own
+ * menu entry had to be include()d and init()d by hand -- the ShapedLines
+ * precedent). None of the three has a menu entry of its own any more:
+ * CrossSection.js is the one file the menu discovers, it is never
+ * included BACK by anything it includes, and it includes this file,
+ * SectionCapture.js and SectionEdit.js at its own top level in that
+ * order -- a plain dependency chain, not a cycle.
  */
 include("scripts/EAction.js");
 include("scripts/simple.js");
 include(includeBasePath + "/../Core/CsAll.js");
 
-function SketchSection(guiAction) {
+function SectionBay(guiAction) {
     EAction.call(this, guiAction);
 }
 
-SketchSection.prototype = new EAction();
-
 /** The setting holding where the caver last left a bay, per cave. */
-SketchSection.SETTING_CORNER = "CaveSurvey/SectionBayCorner";
+SectionBay.SETTING_CORNER = "CaveSurvey/SectionBayCorner";
 
 /** Tags carried by the bay's own furniture, so Capture can tell the
  *  frame and the underlay from the tracing without guessing. */
-SketchSection.TAG_BAY = "SectionBay";
-SketchSection.ROLE_FRAME = "frame";
-SketchSection.ROLE_GHOST = "ghost";
-SketchSection.ROLE_SCAN = "scan";
+SectionBay.TAG_BAY = "SectionBay";
+SectionBay.ROLE_FRAME = "frame";
+SectionBay.ROLE_GHOST = "ghost";
+SectionBay.ROLE_SCAN = "scan";
 
 /** The snap class the caver was using before the bay switched to free,
  *  so SectionCapture's teardown can put it back. Carried on the FRAME,
  *  the one piece of bay furniture guaranteed to exist for the bay's
- *  whole lifetime -- see SketchSection.currentSnapClassName, where
- *  SketchSection.run reads it, and SectionCapture.restoreSnap, where
+ *  whole lifetime -- see SectionBay.currentSnapClassName, where
+ *  SectionBay.run reads it, and SectionCapture.restoreSnap, where
  *  it is rebuilt. */
-SketchSection.TAG_SNAP = "SectionBaySnap";
+SectionBay.TAG_SNAP = "SectionBaySnap";
 
 /** The placed reference's own scale and rotation, parked on the FRAME
  *  while its bay is open.
@@ -90,17 +84,11 @@ SketchSection.TAG_SNAP = "SectionBaySnap";
  *  Written by SectionEdit.explodeInto, read by SectionCapture.findBay.
  *  ABSENT means the defaults -- a bay opened by Sketch Section rather
  *  than reopened by Edit Sketch has no earlier reference to carry. */
-SketchSection.TAG_REF_SCALE = "SectionBayRefScale";
-SketchSection.TAG_REF_ROT = "SectionBayRefRot";
-
-SketchSection.prototype.beginEvent = function() {
-    EAction.prototype.beginEvent.call(this);
-    SketchSection.run(null, null);
-    this.terminate();
-};
+SectionBay.TAG_REF_SCALE = "SectionBayRefScale";
+SectionBay.TAG_REF_ROT = "SectionBayRefRot";
 
 /** One "Sketch Section: ..." message, however this build can show it. */
-SketchSection.say = function(text) {
+SectionBay.say = function(text) {
     try {
         QMessageBox.information(RMainWindowQt.getMainWindow(),
             qsTr("Sketch Section"), text);
@@ -126,7 +114,7 @@ SketchSection.say = function(text) {
  *        big enough for what it is about to put in there.
  * \return the bay id, or null
  */
-SketchSection.run = function(scanPath, station, calibration, scanSize) {
+SectionBay.run = function(scanPath, station, calibration, scanSize) {
     var doc = EAction.getDocument();
     var di = EAction.getDocumentInterface();
     if (isNull(doc) || isNull(di)) {
@@ -135,7 +123,7 @@ SketchSection.run = function(scanPath, station, calibration, scanSize) {
 
     var name = station;
     if (name === null || name === undefined || name === "") {
-        name = SketchSection.askStation(doc);
+        name = SectionBay.askStation(doc);
         if (name === null) {
             return null;                 // cancelled, silently
         }
@@ -148,7 +136,7 @@ SketchSection.run = function(scanPath, station, calibration, scanSize) {
         asDrawn = null;
     }
 
-    var refusal = SketchSection.cutAt(asDrawn, name);
+    var refusal = SectionBay.cutAt(asDrawn, name);
     var cut = (refusal !== null && refusal.refused === true) ? null : refusal;
     if (cut !== null) {
         refusal = null;
@@ -170,12 +158,12 @@ SketchSection.run = function(scanPath, station, calibration, scanSize) {
     // the frame, so a caver tracing over the overflow lost the work
     // silently. The scan's placed extent is knowable here (pixels
     // times units-per-pixel), so it is known here.
-    var scan = SketchSection.scanPlan(scanPath, ghostBox, calibration);
+    var scan = SectionBay.scanPlan(scanPath, ghostBox, calibration);
     var rect = CsSectionBay.frameRectFor(
-        SketchSection.planBoxOf(doc),
+        SectionBay.planBoxOf(doc),
         CsSectionBay.baySizeFor(ghostBox,
             (scan === null) ? scanSize : scan),
-        SketchSection.rememberedCorner(doc));
+        SectionBay.rememberedCorner(doc));
 
     var bayId = CsUuid.v4();
 
@@ -185,7 +173,7 @@ SketchSection.run = function(scanPath, station, calibration, scanSize) {
     // teardown can rebuild and restore it later without ever holding the
     // snap object itself across the bay's lifetime (di.setSnap() takes
     // ownership -- see SectionCapture.restoreSnap).
-    var priorSnapClass = SketchSection.currentSnapClassName(di);
+    var priorSnapClass = SectionBay.currentSnapClassName(di);
 
     // Every layer this bay writes to must exist before doc.getLayerId
     // is asked for it, or the entity lands on layer 0 with no error at
@@ -195,22 +183,22 @@ SketchSection.run = function(scanPath, station, calibration, scanSize) {
     CsLayers.ensure(doc, di, CsLayers.CTRL_SECTION_GHOST);
     CsLayers.ensure(doc, di, CsLayers.CTRL_SECTION_SCAN);
 
-    SketchSection.addFrame(doc, di, rect, bayId, name, priorSnapClass);
+    SectionBay.addFrame(doc, di, rect, bayId, name, priorSnapClass);
     if (cut !== null) {
-        SketchSection.addGhost(doc, di, cut, scale, rect, bayId);
+        SectionBay.addGhost(doc, di, cut, scale, rect, bayId);
     }
     if (scan !== null) {
-        SketchSection.addScan(doc, di, scan, ghostBox, rect, bayId);
+        SectionBay.addScan(doc, di, scan, ghostBox, rect, bayId);
     }
 
-    SketchSection.zoomTo(di, rect);
-    SketchSection.snapFree(di);
+    SectionBay.zoomTo(di, rect);
+    SectionBay.snapFree(di);
 
     if (cut === null) {
         // The cut's own reason where there is one -- it names the
         // station the caver picked and says what is short about it,
         // which "no cuttable LRUD" alone does not.
-        SketchSection.say(qsTr("No cuttable LRUD at %1, so the bay has " +
+        SectionBay.say(qsTr("No cuttable LRUD at %1, so the bay has " +
             "no outline to scale the scan against.").arg(name) +
             (refusal === null ? "" : "\n\n" + refusal.reason + ".") +
             qsTr("\n\nScale the scan by hand: draw a line of a known " +
@@ -230,7 +218,7 @@ SketchSection.run = function(scanPath, station, calibration, scanSize) {
  *         wall points and a first-in-chain neighbour and useless to the
  *         caver looking at it.
  */
-SketchSection.cutAt = function(asDrawn, station) {
+SectionBay.cutAt = function(asDrawn, station) {
     if (asDrawn === null || isNull(asDrawn.resolved)) {
         return null;
     }
@@ -251,7 +239,7 @@ SketchSection.cutAt = function(asDrawn, station) {
  * The station's own measured LRUD, or null.
  *
  * THE SAME SOURCE THE GHOST IS CUT FROM -- CsRevise.resolveAsDrawn,
- * exactly as SketchSection.run resolves it for cutAt. Sketch Scans'
+ * exactly as SectionBay.run resolves it for cutAt. Sketch Scans'
  * calibration is measured against the ghost's own numbers, so reading
  * the LRUD from anywhere else (the notebook file, a cached survey)
  * would let the scale be calibrated against a survey the ghost was not
@@ -265,7 +253,7 @@ SketchSection.cutAt = function(asDrawn, station) {
  *         drawing that cannot be resolved has no calibration to offer,
  *         which is a fallback, not a failure.
  */
-SketchSection.lrudAt = function(doc, station) {
+SectionBay.lrudAt = function(doc, station) {
     if (isNull(doc) || station === null || station === undefined ||
             station === "") {
         return null;
@@ -282,7 +270,7 @@ SketchSection.lrudAt = function(doc, station) {
 };
 
 /** The plan's own extent, or null when the drawing is empty. */
-SketchSection.planBoxOf = function(doc) {
+SectionBay.planBoxOf = function(doc) {
     try {
         var b = doc.getBoundingBox(true, true);
         if (isNull(b)) {
@@ -296,10 +284,10 @@ SketchSection.planBoxOf = function(doc) {
 };
 
 /** Where this cave's bay was last left, or null. */
-SketchSection.rememberedCorner = function(doc) {
+SectionBay.rememberedCorner = function(doc) {
     try {
         var raw = RSettings.getStringValue(
-            SketchSection.SETTING_CORNER, "");
+            SectionBay.SETTING_CORNER, "");
         if (raw === "") {
             return null;
         }
@@ -320,7 +308,7 @@ SketchSection.rememberedCorner = function(doc) {
  *  before the bay switched to free, so SectionCapture can put it back
  *  at teardown -- the frame is the one bit of furniture guaranteed to
  *  outlive the whole bay. */
-SketchSection.addFrame = function(doc, di, rect, bayId, station,
+SectionBay.addFrame = function(doc, di, rect, bayId, station,
         priorSnapClass) {
     var pl = new RPolyline();
     pl.appendVertex(new RVector(rect.x1, rect.y1));
@@ -332,14 +320,14 @@ SketchSection.addFrame = function(doc, di, rect, bayId, station,
     e.setLayerId(doc.getLayerId(CsLayers.CTRL_SECTION_BOX));
     // Tag BEFORE adding, so the tags land in the SAME operation as the
     // geometry.
-    CsTags.set(e, SketchSection.TAG_BAY, bayId);
-    CsTags.set(e, "SectionBayRole", SketchSection.ROLE_FRAME);
+    CsTags.set(e, SectionBay.TAG_BAY, bayId);
+    CsTags.set(e, "SectionBayRole", SectionBay.ROLE_FRAME);
     CsTags.set(e, "SectionBayStation", station);
     // CsTags.set no-ops on null/undefined/"" by design (see CsTags.js),
     // so a snap this build could not name just leaves the tag absent --
     // SectionCapture.restoreSnap already treats an absent tag as "leave
     // the snap alone" rather than guessing.
-    CsTags.set(e, SketchSection.TAG_SNAP, priorSnapClass);
+    CsTags.set(e, SectionBay.TAG_SNAP, priorSnapClass);
     var op = new RAddObjectsOperation();
     op.setText("Open section bay");
     op.addObject(e, false);
@@ -367,7 +355,7 @@ SketchSection.addFrame = function(doc, di, rect, bayId, station,
  * down. Sharing a layer with the real thing made a ghost that had not
  * been captured yet render pixel-identical to a finished section, so it
  * gets its own DASHED layer instead -- see CsLayers.DEFAULTS. */
-SketchSection.addGhost = function(doc, di, cut, scale, rect, bayId) {
+SectionBay.addGhost = function(doc, di, cut, scale, rect, bayId) {
     var pts = CsSectionDraw.localPoints(cut, scale);
     if (pts.length < 3) {
         return;
@@ -381,8 +369,8 @@ SketchSection.addGhost = function(doc, di, cut, scale, rect, bayId) {
     pl.setClosed(true);
     var e = new RPolylineEntity(doc, new RPolylineData(pl));
     e.setLayerId(doc.getLayerId(CsLayers.CTRL_SECTION_GHOST));
-    CsTags.set(e, SketchSection.TAG_BAY, bayId);
-    CsTags.set(e, "SectionBayRole", SketchSection.ROLE_GHOST);
+    CsTags.set(e, SectionBay.TAG_BAY, bayId);
+    CsTags.set(e, "SectionBayRole", SectionBay.ROLE_GHOST);
     var op = new RAddObjectsOperation();
     op.setText("Draw section ghost");
     op.addObject(e, false);
@@ -415,13 +403,13 @@ SketchSection.addGhost = function(doc, di, cut, scale, rect, bayId) {
  * \return {path, pxW, pxH, k, w, h} in drawing units, or null when
  *         there is no scan (which is a supported way to open a bay).
  */
-SketchSection.scanPlan = function(path, ghostBox, calibration) {
+SectionBay.scanPlan = function(path, ghostBox, calibration) {
     if (path === null || path === undefined || path === "") {
         return null;
     }
     var img = new QImage(path);
     if (img.isNull()) {
-        SketchSection.say(qsTr("The scan could not be read: ") + path);
+        SectionBay.say(qsTr("The scan could not be read: ") + path);
         return null;
     }
     // width()/height() are METHODS on this build's QImage, not
@@ -431,7 +419,7 @@ SketchSection.scanPlan = function(path, ghostBox, calibration) {
     // no error.
     var pxW = img.width(), pxH = img.height();
     if (pxW < 1 || pxH < 1) {
-        SketchSection.say(qsTr("The scan has no size: ") + path);
+        SectionBay.say(qsTr("The scan has no size: ") + path);
         return null;
     }
     var placed = CsSectionBay.placedScanSize(pxW, pxH, ghostBox,
@@ -457,10 +445,10 @@ SketchSection.scanPlan = function(path, ghostBox, calibration) {
  * happened to click first, and a scan that opens off-centre in its own
  * bay reads as a fault.
  *
- * \param scan a SketchSection.scanPlan result -- the pixels and the
+ * \param scan a SectionBay.scanPlan result -- the pixels and the
  *        scale the FRAME was already sized from.
  */
-SketchSection.addScan = function(doc, di, scan, ghostBox, rect, bayId) {
+SectionBay.addScan = function(doc, di, scan, ghostBox, rect, bayId) {
     var path = scan.path;
     var pxW = scan.pxW, pxH = scan.pxH;
     var cx = (rect.x1 + rect.x2) / 2;
@@ -473,13 +461,13 @@ SketchSection.addScan = function(doc, di, scan, ghostBox, rect, bayId) {
     // twice, once for the frame and once here, is exactly how a frame
     // and the thing it is supposed to contain get to disagree.
     var fit = CsSectionBay.fitAtScale(scanBox, ghostHere, scan.k);
-    var entity = SketchSection.imageEntity(doc, path, fit, pxW, pxH);
+    var entity = SectionBay.imageEntity(doc, path, fit, pxW, pxH);
     if (entity === null) {
         return;
     }
     entity.setLayerId(doc.getLayerId(CsLayers.CTRL_SECTION_SCAN));
-    CsTags.set(entity, SketchSection.TAG_BAY, bayId);
-    CsTags.set(entity, "SectionBayRole", SketchSection.ROLE_SCAN);
+    CsTags.set(entity, SectionBay.TAG_BAY, bayId);
+    CsTags.set(entity, "SectionBayRole", SectionBay.ROLE_SCAN);
     CsTags.set(entity, CsCallout.KEY.SECTION_SCAN, path);
     // NO SectionBayFit TAG HERE, deliberately. This function's auto-fit
     // is true for exactly as long as it takes the caver to grab the
@@ -535,7 +523,7 @@ SketchSection.addScan = function(doc, di, scan, ghostBox, rect, bayId) {
  * decomposed scale -- what this used to do -- silently drops any
  * rotation the caver put on the scan.
  */
-SketchSection.imageEntity = function(doc, path, fit, pxW, pxH) {
+SectionBay.imageEntity = function(doc, path, fit, pxW, pxH) {
     try {
         var data = new RImageData(path,
             new RVector(fit.tx, fit.ty),
@@ -549,7 +537,7 @@ SketchSection.imageEntity = function(doc, path, fit, pxW, pxH) {
         }
         return new RImageEntity(doc, data);
     } catch (e) {
-        SketchSection.say(qsTr("The scan could not be placed: ") + e);
+        SectionBay.say(qsTr("The scan could not be placed: ") + e);
         return null;
     }
 };
@@ -563,7 +551,7 @@ SketchSection.imageEntity = function(doc, path, fit, pxW, pxH) {
  * on a machine where the folder has not synced down yet. Read-only:
  * this never creates anything.
  */
-SketchSection.scansFolderOf = function(doc) {
+SectionBay.scansFolderOf = function(doc) {
     try {
         var docPath = String(doc.getFileName());
         var folder = CsCave.folderOf(docPath);
@@ -578,7 +566,7 @@ SketchSection.scansFolderOf = function(doc) {
 };
 
 /** Zoom the view to the bay, so the caver is looking at it. */
-SketchSection.zoomTo = function(di, rect) {
+SectionBay.zoomTo = function(di, rect) {
     try {
         var box = new RBox(new RVector(rect.x1, rect.y1),
                            new RVector(rect.x2, rect.y2));
@@ -601,11 +589,11 @@ SketchSection.zoomTo = function(di, rect) {
  * open (see beginEvent), so undoing the switch on its own finish would
  * take the free snap away before the caver has drawn a single point.
  * The snap comes back at TEARDOWN instead -- SectionCapture.capture --
- * from the class name SketchSection.run already read via
+ * from the class name SectionBay.run already read via
  * currentSnapClassName and tagged onto the frame, before this function
  * ran.
  */
-SketchSection.snapFree = function(di) {
+SectionBay.snapFree = function(di) {
     try {
         di.setSnap(new RSnapFree());
     } catch (e) {
@@ -618,7 +606,7 @@ SketchSection.snapFree = function(di) {
  *  String()s as "<ClassName> [JS]"; the base "RSnap" (no concrete snap
  *  ever set) and anything unreadable both come back null rather than a
  *  name nothing can rebuild. */
-SketchSection.currentSnapClassName = function(di) {
+SectionBay.currentSnapClassName = function(di) {
     try {
         var s = String(di.getSnap());
         var i = s.indexOf(" ");
@@ -632,10 +620,10 @@ SketchSection.currentSnapClassName = function(di) {
 /** Ask which station this section is cut at. Plan stations, in walk
  *  order -- the order the survey visited them, not name order, so a
  *  branch reads the way the notebook does. */
-SketchSection.askStation = function(doc) {
+SectionBay.askStation = function(doc) {
     var stations = CsTags.collectStations(doc);
     if (stations.length === 0) {
-        SketchSection.say(qsTr("This drawing has no plotted stations to " +
+        SectionBay.say(qsTr("This drawing has no plotted stations to " +
             "hang a section on."));
         return null;
     }
@@ -688,28 +676,54 @@ SketchSection.askStation = function(doc) {
     return String(chosen);
 };
 
-SketchSection.init = function(basePath) {
-    var action = new RGuiAction(qsTr("Sketch Section"),
-                                RMainWindowQt.getMainWindow());
-    action.setRequiresDocument(true);
-    action.setScriptFile(basePath + "/SketchSection.js");
-    action.setIcon(basePath + "/SketchSection.svg");
-    action.setStatusTip(qsTr("Open a bay to trace a scanned cross " +
-        "section in, over the station's own measured outline"));
-    action.setDefaultCommands(["sketchsection", "sks"]);
-    action.setGroupSortOrder(452);
-    action.setSortOrder(50);
-    action.setWidgetNames(["CaveSurveyMenu", "CaveSurveyToolBar"]);
-
-    // The bay's teardown and reopen tools live in sibling files QCAD
-    // cannot discover on its own. include()d HERE, inside init(), not
-    // up in this file's header alongside CsAll.js -- see the header
-    // comment's "UNLIKE SHAPEDLINES' SIBLINGS" note for why: both
-    // siblings include this file back, and including them before this
-    // file's own load has returned is a circular include that crashes
-    // the engine.
-    include(includeBasePath + "/SectionCapture.js");
-    include(includeBasePath + "/SectionEdit.js");
-    SectionCapture.init(basePath);
-    SectionEdit.init(basePath);
+/**
+ * Cancel an open bay: remove the frame, the ghost and the scan, in one
+ * transaction, and leave whatever the caver traced exactly where it is.
+ *
+ * BESIDE addFrame/addGhost/addScan ON PURPOSE -- this is the only other
+ * place that deletes the three things they create, so creation and
+ * removal read together. SectionCapture.capture has its OWN teardown of
+ * the same furniture, folded into the larger transaction that also
+ * mints the block; this is the "never mind" path, with no block and no
+ * leader, for SectionBayPanel's Cancel button.
+ *
+ * THE SNAP COMES BACK, exactly as a capture's teardown restores it --
+ * SectionCapture.restoreSnap, called here too rather than copied, so
+ * the two teardowns cannot drift into rebuilding the snap two different
+ * ways. Guarded by typeof: this file loads before SectionCapture.js in
+ * CrossSection.js's own include order, but a defensive caller (a future
+ * test, a future panel) that includes SectionBay.js alone should not
+ * crash for want of a sibling it never asked for.
+ *
+ * \param bay a SectionCapture.findBay result
+ */
+SectionBay.cancel = function(doc, di, bay) {
+    if (isNull(doc) || isNull(di) || bay === null || bay === undefined) {
+        return;
+    }
+    var snapClass = (bay.frame !== null && !isNull(bay.frame)) ?
+        CsTags.get(bay.frame, SectionBay.TAG_SNAP) : "";
+    var op = new RAddObjectsOperation();
+    op.setText("Cancel section bay");
+    if (bay.frame !== null) { op.deleteObject(bay.frame); }
+    if (bay.ghost !== null) { op.deleteObject(bay.ghost); }
+    if (bay.scan !== null) { op.deleteObject(bay.scan); }
+    // OFF/FROZEN layers refuse a delete SILENTLY, same trap as every
+    // other teardown in this feature -- CTRL-SECTION-BOX additionally
+    // ships LOCKED, so it alone needs withLayerUnlocked nested inside.
+    CsLayers.withLayerOn(doc, di, CsLayers.CTRL_SECTION_GHOST, function() {
+        CsLayers.withLayerOn(doc, di, CsLayers.CTRL_SECTION_SCAN, function() {
+            CsLayers.withLayerOn(doc, di, CsLayers.CTRL_SECTION_BOX,
+                function() {
+                    CsLayers.withLayerUnlocked(doc, di,
+                        CsLayers.CTRL_SECTION_BOX, function() {
+                            di.applyOperation(op);
+                        });
+                });
+        });
+    });
+    if (typeof SectionCapture !== "undefined" &&
+            typeof SectionCapture.restoreSnap === "function") {
+        SectionCapture.restoreSnap(di, snapClass);
+    }
 };

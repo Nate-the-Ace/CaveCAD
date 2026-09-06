@@ -15978,7 +15978,7 @@ if (!IS_NODE) {
     eqs(CsLayers.frameOf(CsLayers.CTRL_SECTION_BOX), "section",
         "CTRL-SECTION-BOX is section");
     // The sketch bay's ghost outline, on its own layer so it cannot be
-    // mistaken for the real, placed one (see SketchSection.addGhost) --
+    // mistaken for the real, placed one (see SectionBay.addGhost) --
     // still has to answer "section" by the same CTRL-SECTION- prefix,
     // or a plan-wide sweep or warp could reach into an open bay.
     eqs(CsLayers.frameOf(CsLayers.CTRL_SECTION_GHOST), "section",
@@ -17339,7 +17339,7 @@ if (!IS_NODE) {
         var bayOp = new RAddObjectsOperation();
         bayOp.addObject(bayE, false);
         // CTRL-SECTION-BOX ships LOCKED, and locked refuses an add as
-        // silently as off does -- the same pairing SketchSection.
+        // silently as off does -- the same pairing SectionBay.
         // addFrame needs to get the frame into the drawing at all.
         CsLayers.withLayerOn(doc, di, CsLayers.CTRL_SECTION_BOX, function() {
             CsLayers.withLayerUnlocked(doc, di, CsLayers.CTRL_SECTION_BOX,

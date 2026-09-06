@@ -513,8 +513,8 @@ FeatureTraceRun.prototype.commit = function() {
 /** The tags a section trace carries: which bay it was drawn in, and the
  *  station that bay is a section OF.
  *
- *  Their own names rather than SketchSection's SectionBay/
- *  SectionBayRole pair, deliberately. Those two mark the bay's own
+ *  Their own names rather than the bay tool's own SectionBay/
+ *  SectionBayRole tag pair, deliberately. Those two mark the bay's own
  *  FURNITURE -- the frame, the ghost, the scan -- and SectionCapture
  *  and SectionEdit both walk the drawing looking for them. Traced
  *  linework wearing the same tag with no role would sit inside those

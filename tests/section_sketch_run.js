@@ -108,9 +108,9 @@ include("scripts/simple.js");
 })();
 
 loadRepoScript("scripts/CaveSurvey/Callout/CalloutWrite.js");
-loadRepoScript("scripts/CaveSurvey/SketchSection/SketchSection.js");
-loadRepoScript("scripts/CaveSurvey/SketchSection/SectionCapture.js");
-loadRepoScript("scripts/CaveSurvey/SketchSection/SectionEdit.js");
+loadRepoScript("scripts/CaveSurvey/CrossSection/SectionBay.js");
+loadRepoScript("scripts/CaveSurvey/CrossSection/SectionCapture.js");
+loadRepoScript("scripts/CaveSurvey/CrossSection/SectionEdit.js");
 // Feature Trace, because the bay is only worth opening if the suite's
 // own tracing tools will actually draw into it -- see claim FT. The
 // panel file comes too: FeatureTraceRun.commit reads FeatureTrace.target
@@ -159,7 +159,7 @@ function checkClose(name, actual, expected, tol) {
         (missing.length === 0 ? "" : " (missing " + missing.join(", ") + ")"),
         missing.length === 0);
     check("the three tools under test are loaded",
-        typeof SketchSection === "function" &&
+        typeof SectionBay === "function" &&
         typeof SectionCapture === "function" &&
         typeof SectionEdit === "function");
 }).call(this);
@@ -168,7 +168,7 @@ function checkClose(name, actual, expected, tol) {
 // A document with a survey, walls, and a real scan on disk.
 //
 // The tools reach for the CURRENT document through EAction.getDocument()
-// (SketchSection.run, SectionEdit.run), which resolves through
+// (SectionBay.run, SectionEdit.run), which resolves through
 // global.gDocumentInterface before it ever asks the main window -- and
 // headless there IS no main window. So the fixture is installed there,
 // exactly as tests/generate_profile_run.js reassigns getDocument/
@@ -177,7 +177,7 @@ function checkClose(name, actual, expected, tol) {
 // THE SURVEY IS DRAWN INTO THE DRAWING, not just held in memory.
 // tests/cross_section_run.js hands CalloutWrite an already-computed cut
 // and never needs plotted stations; these three tools do not work that
-// way. SketchSection.run rebuilds the survey from the drawing's own
+// way. SectionBay.run rebuilds the survey from the drawing's own
 // tags (CsRevise.resolveAsDrawn) to compute the ghost, and
 // SectionCapture.proposePosition finds the station through
 // CsTags.collectStations(doc). A fixture with no plotted stations would
@@ -209,7 +209,7 @@ doc.setFileName(caveDir + "/cs_section_sketch_run.dxf");
 // the "no cuttable LRUD" complaint, which is how we know the ghost is
 // a real computed outline and not a fallback box).
 var said = [];
-SketchSection.say = function(text) { said.push(String(text)); };
+SectionBay.say = function(text) { said.push(String(text)); };
 
 CsLayers.ensure(doc, di, CsLayers.CTRL_STATIONS);
 CsLayers.ensure(doc, di, CsLayers.CTRL_SHOTS);
@@ -289,12 +289,12 @@ var scanPath = scansDir + "/" + scanRel;
 (new QFile(scanPath)).remove();
 check("fixture: the scan copies into the cave's scans/ folder",
     (new QFile(repoRoot +
-        "/scripts/CaveSurvey/SketchSection/SketchSection.svg")).copy(scanPath));
+        "/scripts/CaveSurvey/CrossSection/CrossSection.svg")).copy(scanPath));
 check("fixture: the scan file this run underlays is readable",
     !(new QImage(scanPath)).isNull());
 check("fixture: and the suite agrees that is where this cave's scans " +
     "live -- R2's relative path is measured against this",
-    SketchSection.scansFolderOf(doc) === scansDir);
+    SectionBay.scansFolderOf(doc) === scansDir);
 
 var asDrawn = CsRevise.resolveAsDrawn(doc);
 check("fixture: the drawing's own tags rebuild the survey",
@@ -304,7 +304,7 @@ check("fixture: the drawing's own tags rebuild the survey",
 // CLAIM 1: a bay opens, is found again by its frame, and sweeps nothing
 // while nothing is traced.
 // ---------------------------------------------------------------------
-var bayId = SketchSection.run(scanPath, "A2");
+var bayId = SectionBay.run(scanPath, "A2");
 check("1: a bay opens", bayId !== null && bayId !== undefined);
 check("1: and it opened with a real computed ghost, not the " +
     "no-cuttable-LRUD fallback", said.length === 0);
@@ -480,7 +480,7 @@ var storedScan = CsTags.get(bay1.scan, CsCallout.KEY.SECTION_SCAN);
 check("4: fixture: the bay's scan carries the path it was placed from",
     storedScan === scanPath);
 // NO FIT TAG ON THE BAY'S SCAN, and that absence is the fix for R1.
-// SketchSection used to tag the scan with its AUTO-fit, and Capture
+// SectionBay used to tag the scan with its AUTO-fit, and Capture
 // copied that tag onto the finished section -- so a caver's own
 // scaling and turning was recorded as the fitting they never chose.
 // The tag is gone; the fit is read off the scan entity instead.
@@ -608,7 +608,7 @@ check("4: and the fit reads back as a fit, not as a corrupt tag",
 // ---------------------------------------------------------------------
 // R1 (review finding, DATA LOSS): the fit stored on the section is the
 // scan's ACTUAL placement -- the one the caver fitted -- and not the
-// auto-fit SketchSection wrote into a tag when the bay opened.
+// auto-fit SectionBay wrote into a tag when the bay opened.
 //
 // Before the fix, SectionCapture copied the scan's SectionBayFit TAG
 // onto the reference. That tag was written ONCE, by addScan, at
@@ -648,7 +648,7 @@ checkClose("R1: and the caver's SCALE, not the auto-fit's",
 // R2 (review finding, portability): the scan path is stored RELATIVE to
 // the cave's scans/ folder.
 //
-// It used to be absolute (SketchScans.sketchSoon hands SketchSection an
+// It used to be absolute (SketchScans.sketchSoon hands SectionBay an
 // absolute path and it was tagged straight through), which is only true
 // on the machine that wrote it. Cave projects live on a shared drive,
 // get renamed and get opened by whoever was on the trip -- an absolute
@@ -713,7 +713,7 @@ function liveBayFurniture() {
         if (isNull(e)) {
             continue;
         }
-        if (CsTags.get(e, SketchSection.TAG_BAY) !== "") {
+        if (CsTags.get(e, SectionBay.TAG_BAY) !== "") {
             found.push(CsTags.get(e, "SectionBayRole") || "untagged-role");
         }
     }
@@ -851,7 +851,7 @@ SectionEdit.run();
 // LOAD-BEARING FOR R2. The stored path is relative now, so if the
 // reopen failed to resolve it against this cave's scans/ folder, this
 // is where it says so: SectionEdit.run reports a scan it cannot find
-// through SketchSection.say before the bay is even opened.
+// through SectionBay.say before the bay is even opened.
 check("10: Edit Sketch reopened without complaint" +
     (said.length === 0 ? "" : " (said: " + said.join(" | ") + ")"),
     said.length === 0);
@@ -947,7 +947,7 @@ check("R2: the reopen RESOLVED the relative path -- the drawing stored " +
     checkClose("R1: and (y)", restored.ty, storedParsed.ty, 1e-5);
     // NAMED SEPARATELY, because every one of the checks above would
     // also pass if the caver had never touched the scan: the point is
-    // that this is NOT what SketchSection.addScan would have placed.
+    // that this is NOT what SectionBay.addScan would have placed.
     var wouldAutoFit = CsSectionBay.fitTransform(
         { x1: 0, y1: 0, x2: 24, y2: 24 },
         SectionEdit.bayBoxOf(doc, reopened.id));
@@ -1007,7 +1007,7 @@ check("10: the emptied block definition is gone, not left as dead weight",
 // \return {id, tracedId} or null
 // ---------------------------------------------------------------------
 function sketchOne(station, label) {
-    var openedId = SketchSection.run(scanPath, station);
+    var openedId = SectionBay.run(scanPath, station);
     check(label + ": fixture: a bay opens at " + station, openedId !== null);
     var b0 = SectionCapture.findBay(doc);
     check(label + ": fixture: it is found", b0 !== null);
@@ -1264,7 +1264,7 @@ function selectOnly(entityId) {
 // static entry point prototype.getOperation calls.
 // ---------------------------------------------------------------------
 (function() {
-    var openedId = SketchSection.run(scanPath, "A2");
+    var openedId = SectionBay.run(scanPath, "A2");
     check("R5: fixture: a bay opens", openedId !== null);
     var b0 = SectionCapture.findBay(doc);
     check("R5: fixture: it is found", b0 !== null);
@@ -1320,7 +1320,7 @@ function selectOnly(entityId) {
 // wall in the preview pane, the tool divides the station's own LRUD by
 // the pixels between the clicks, and the bay opens the right size
 // instead of auto-fitted to the ghost's width. Everything upstream of
-// SketchSection.run is GUI (two clicks in a dock), so what is asserted
+// SectionBay.run is GUI (two clicks in a dock), so what is asserted
 // here is the piece that is not: that a supplied scale reaches the
 // placed image, and survives capture into the tag.
 //
@@ -1335,7 +1335,7 @@ function selectOnly(entityId) {
     // The fixture's stations all carry LRUD { l:4, r:4, u:3, d:2 }.
     // 3 units up, 150 px up the page, at section scale 2:
     // 3 * 2 / 150 = 0.04 drawing units per pixel.
-    var calLrud = SketchSection.lrudAt(doc, "A2");
+    var calLrud = SectionBay.lrudAt(doc, "A2");
     check("CAL: fixture: the station's own LRUD is readable from the " +
         "drawing, which is where the known distance comes from",
         calLrud !== null && calLrud.up === 3);
@@ -1346,7 +1346,7 @@ function selectOnly(entityId) {
     checkClose("CAL: fixture: and comes to 0.04 units per pixel",
         cal.unitsPerPixel, 0.04, 1e-12);
 
-    var calBayId = SketchSection.run(scanPath, "A2",
+    var calBayId = SectionBay.run(scanPath, "A2",
         { unitsPerPixel: cal.unitsPerPixel });
     check("CAL: a bay opens with a calibrated scale", calBayId !== null);
     var calBay = SectionCapture.findBay(doc);
@@ -1382,7 +1382,7 @@ function selectOnly(entityId) {
         Math.abs(autoK - 0.04) > 1e-3);
 
     // The fit reaches the TAG by reaching the entity: SectionCapture
-    // measures the scan as the caver left it, and SketchSection writes
+    // measures the scan as the caver left it, and SectionBay writes
     // no fit tag of its own (see claim 4).
     check("CAL: the bay's scan still carries NO fit tag -- a calibration " +
         "is a better starting point, not a final answer",
@@ -1430,7 +1430,7 @@ function selectOnly(entityId) {
 // auto-fit must still be exactly the auto-fit.
 // ---------------------------------------------------------------------
 (function() {
-    var plainId = SketchSection.run(scanPath, "A2", null);
+    var plainId = SectionBay.run(scanPath, "A2", null);
     check("CAL2: a bay opens with no calibration at all", plainId !== null);
     var plainBay = SectionCapture.findBay(doc);
     check("CAL2: it is found, and it has a scan",
@@ -1508,7 +1508,7 @@ function selectOnly(entityId) {
 
     // The user's own calibration: 0.1292 drawing units per pixel, which
     // makes this page 192 x 269 units of drawing.
-    var bigId = SketchSection.run(pagePath, "A2",
+    var bigId = SectionBay.run(pagePath, "A2",
         { unitsPerPixel: 0.1292 });
     check("BAY: a bay opens for a page-sized scan", bigId !== null);
     var big = SectionCapture.findBay(doc);
@@ -1662,7 +1662,7 @@ function selectOnly(entityId) {
         cutA1.refused === undefined);
 
     var saidBefore = said.length;
-    var nbrId = SketchSection.run(scanPath, "A1");
+    var nbrId = SectionBay.run(scanPath, "A1");
     check("NBR: a bay opens at A1", nbrId !== null);
     check("NBR: with no complaint about a station the caver did not " +
         "pick" + (said.length === saidBefore ? "" :
@@ -1729,7 +1729,7 @@ function selectOnly(entityId) {
         !isNull(doc.queryLayer(annotationLayerName)) &&
         doc.queryLayer(annotationLayerName).isOff());
 
-    var f1BayId = SketchSection.run(scanPath, "A1");
+    var f1BayId = SectionBay.run(scanPath, "A1");
     check("F1: fixture: a bay opens for this claim", f1BayId !== null);
 
     var f1Bay0 = SectionCapture.findBay(doc);
@@ -1823,7 +1823,7 @@ function selectOnly(entityId) {
 // refuses to guess among them, which more bays cannot falsify.
 // ---------------------------------------------------------------------
 (function() {
-    var ftBayId = SketchSection.run(scanPath, "A1");
+    var ftBayId = SectionBay.run(scanPath, "A1");
     check("FT: fixture: a bay opens for the trace", ftBayId !== null);
     var ftBay = SectionCapture.findBay(doc);
     check("FT: fixture: and it is the only one open", ftBay !== null);
@@ -1982,7 +1982,7 @@ function selectOnly(entityId) {
 // that lives in CsShapeLine.frameOfSpine rather than in the draw tool.
 // ---------------------------------------------------------------------
 (function() {
-    var slBayId = SketchSection.run(scanPath, "A2");
+    var slBayId = SectionBay.run(scanPath, "A2");
     check("SL: fixture: a bay opens for the symbol", slBayId !== null);
     var slBay = SectionCapture.findBay(doc);
     check("SL: fixture: and it is the only one open", slBay !== null);
@@ -2118,9 +2118,9 @@ function selectOnly(entityId) {
 // open bays' furniture apart.
 // ---------------------------------------------------------------------
 (function() {
-    var f2First = SketchSection.run(scanPath, "A0");
+    var f2First = SectionBay.run(scanPath, "A0");
     check("F2: fixture: the first bay opens", f2First !== null);
-    var f2Second = SketchSection.run(scanPath, "A3");
+    var f2Second = SectionBay.run(scanPath, "A3");
     check("F2: fixture: the second bay opens", f2Second !== null);
     check("F2: fixture: they are two distinct bays",
         f2First !== null && f2Second !== null && f2First !== f2Second);
@@ -2134,7 +2134,7 @@ function selectOnly(entityId) {
 // ---------------------------------------------------------------------
 // F3 (review finding, correctness): the static capture() entry point --
 // which the headless test drives directly, and which is the reusable
-// API SketchSection's own beginEvent is just one caller of -- must
+// API SectionBay's own beginEvent is just one caller of -- must
 // refuse an empty sweep ON ITS OWN, not rely on beginEvent's guard
 // having run first. CsCallout.newId() is spied on rather than counting
 // blocks afterward: the guard's whole point is that it returns before

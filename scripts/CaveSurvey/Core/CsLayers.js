@@ -98,7 +98,7 @@ CsLayers.PROFILE_ENTRANCE = "PROFILE-ENTRANCE";
 CsLayers.CTRL_SECTION_BOX = "CTRL-SECTION-BOX";
 CsLayers.CTRL_SECTION_OUTLINE = "CTRL-SECTION-OUTLINE";
 // The sketch bay's reference outline, NOT the same layer as the real
-// computed section above. SketchSection.addGhost draws the LRUD-derived
+// computed section above. SectionBay.addGhost draws the LRUD-derived
 // outline a caver traces against; CsSectionDraw.define draws the real,
 // FINAL outline once a section is placed. Both used to live on
 // CTRL-SECTION-OUTLINE, which meant a ghost -- deleted the moment

@@ -118,7 +118,10 @@ def sibling_tool_files(name):
     folder, other than <name>.js itself, that defines its own
     "<X>.init = function" -- i.e. registers its own RGuiAction and is
     therefore a second tool riding along in the same folder (ShapedLines'
-    draw buttons, SketchSection's Capture/Edit companions), not a plain
+    draw buttons are the live example; SketchSection's Capture/Edit
+    companions were the one that shipped broken -- see
+    TestSiblingToolsAreWired below -- before folding into CrossSection's
+    own route dialog retired the pattern for this folder), not a plain
     library (CalloutWrite.js, ScanView.js, ...) that <name>.js merely
     calls into. Only these have a menu entry, toolbar button or command
     to lose if the folder's main file forgets to wire them up."""
@@ -548,19 +551,24 @@ class TestSiblingToolsAreWired(unittest.TestCase):
     """QCAD's AddOn.getAddOns (see AddOn.js, around line 545) only ever
     loads <Dir>/<Dir>.js on its own -- it never looks at any other file
     in a tool's folder. A folder can still hold more than one RGuiAction
-    (ShapedLines' per-style draw buttons, SketchSection's Capture/Edit
-    companions): the ONLY reason those work is that <Dir>.js explicitly
-    includes each sibling and calls its init(basePath) itself, the
-    pattern documented in ShapedLines.js's own header comment ("sibling
-    files QCAD cannot discover on its own").
+    (ShapedLines' per-style draw buttons are the live example): the ONLY
+    reason those work is that <Dir>.js explicitly includes each sibling
+    and calls its init(basePath) itself, the pattern documented in
+    ShapedLines.js's own header comment ("sibling files QCAD cannot
+    discover on its own").
 
-    SketchSection shipped without doing this for SectionCapture.js and
-    SectionEdit.js: both files existed, both passed every file-existence
-    and file-shape check in this suite, and neither was reachable from
-    the running application -- no menu entry, no toolbar button, no
-    "skc"/"ske" command. tests/section_sketch_run.js still passed
-    because it loads all three files by hand with loadRepoScript,
-    bypassing exactly the discovery path this test checks.
+    SketchSection (now folded into CrossSection/ as SectionBay.js)
+    shipped without doing this for SectionCapture.js and SectionEdit.js:
+    both files existed, both passed every file-existence and file-shape
+    check in this suite, and neither was reachable from the running
+    application -- no menu entry, no toolbar button, no "skc"/"ske"
+    command. tests/section_sketch_run.js still passed because it loads
+    all three files by hand with loadRepoScript, bypassing exactly the
+    discovery path this test checks. Neither file registers its own
+    init() any more -- Capture and Reopen are routes in CrossSection's
+    own dialog and buttons on SectionBayPanel now, not menu entries --
+    so this test has nothing left to check in that folder; it stays for
+    the next tool that tries the ShapedLines pattern.
 
     Note this is deliberately narrower than "every sibling file must be
     included": a sibling with no init() of its own is a plain library
@@ -1458,11 +1466,16 @@ class TestAddonDoesNotPatchStockPrototypes(unittest.TestCase):
 # Keyed by registering file, not by tool folder, and that distinction is
 # the whole reason this table earns its keep. Most tools register one
 # action from <Tool>/<Tool>.js, but a tool folder may hold sibling files
-# that register menu actions of their own -- SketchSection does, twice.
-# A table keyed by folder cannot see those, and the first version of it
-# did not: both siblings kept the old flat 450 and landed in "Start
-# here", where a beginner meets "Capture Section" before ever cutting a
-# section. Nothing failed. It was only visible in the running menu.
+# that register menu actions of their own. SketchSection USED TO,
+# twice -- SectionCapture.js and SectionEdit.js each had their own menu
+# entry -- and a table keyed by folder could not see those: the first
+# version of it did not, both siblings kept the old flat 450 and landed
+# in "Start here", where a beginner met "Capture Section" before ever
+# cutting a section. Nothing failed. It was only visible in the running
+# menu. Both are gone from this table now, not moved: Capture and Reopen
+# are routes in CrossSection's own dialog and buttons on a dock panel,
+# not menu entries with a groupSortOrder/sortOrder of their own to get
+# wrong a second time.
 #
 # The six stages, in the order a student works:
 #   450 start here            453 put a reference under the map
@@ -1487,9 +1500,6 @@ MENU = {
     "ShapedLines/ShapedLines.js":         (452, 20, ["shapedlines", "shl"]),
     "ScatterBreakdown/ScatterBreakdown.js": (452, 30, ["scatterbreakdown", "scb"]),
     "CrossSection/CrossSection.js":       (452, 40, ["crosssection", "cxs"]),
-    "SketchSection/SketchSection.js":     (452, 50, ["sketchsection", "sks"]),
-    "SketchSection/SectionCapture.js":    (452, 60, ["sectioncapture", "skc"]),
-    "SketchSection/SectionEdit.js":       (452, 70, ["sectionedit", "ske"]),
     # 453 -- put a reference under the map
     "SketchScans/SketchScans.js":         (453, 10, ["sketchscans", "ss"]),
     "AlignImage/AlignImage.js":           (453, 20, ["alignimage", "ali"]),

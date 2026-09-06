@@ -244,12 +244,12 @@ CsTrace.profileRegion = function(doc) {
  * A bay is the section frame. Unlike the plan and the elevation, the
  * section view has no standing ground in the drawing at all: a captured
  * section is a block reference, and the only place section linework is
- * ever loose is inside a bay that SketchSection opened and
+ * ever loose is inside a bay that SectionBay opened and
  * SectionCapture will tear down. So "am I in the section frame" is
  * exactly "am I inside an open bay", and outside every bay there is no
  * section frame to be in.
  *
- * The tag names are SketchSection.TAG_BAY and its "frame" role, spelled
+ * The tag names are SectionBay.TAG_BAY and its "frame" role, spelled
  * as LITERALS here because Core cannot include an add-on -- the same
  * arrangement CsProfileBox.boxes has with CsProfileDraw's "ProfileBox".
  * If either name changes there, it changes here.
@@ -373,7 +373,7 @@ CsTrace.bayForPath = function(bays, points) {
  * two collections costs a walk of every entity in the drawing.
  *
  * SECTION WINS WHEN A POINT IS IN BOTH. A bay is parked wherever the
- * caver last left it (SketchSection.rememberedCorner), so nothing stops
+ * caver last left it (SectionBay.rememberedCorner), so nothing stops
  * one landing over ground the elevation already claims -- and the
  * derived profile region GROWS with every profile trace, so a bay that
  * was clear when it opened can be swallowed later. A bay is the

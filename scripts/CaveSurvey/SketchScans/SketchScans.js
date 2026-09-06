@@ -43,7 +43,12 @@ include("scripts/EAction.js");
 include("scripts/simple.js");
 include(includeBasePath + "/../Core/CsAll.js");
 include(includeBasePath + "/../AlignImage/AlignImage.js");
-include(includeBasePath + "/../SketchSection/SketchSection.js");
+// SectionBay and SectionCapture used to live in their own SketchSection/
+// folder with their own menu entries (Sketch Section / Capture Section)
+// -- both folded into Cross Section's own route dialog. This panel's
+// buttons still call straight into them; only the folder moved.
+include(includeBasePath + "/../CrossSection/SectionBay.js");
+include(includeBasePath + "/../CrossSection/SectionCapture.js");
 include(includeBasePath + "/ScanView.js");
 include(includeBasePath + "/ScanTurn.js");
 
@@ -979,7 +984,7 @@ SketchScans.buildDock = function(appWin) {
             return;
         }
         // A REFUSED CALIBRATION IS NOT A FAILURE, it is the old
-        // behaviour: null here means SketchSection auto-fits exactly as
+        // behaviour: null here means SectionBay auto-fits exactly as
         // it always did, and the caver scales by hand over the ghost.
         var cal = (c.cal !== null && c.cal !== undefined &&
             c.cal.refused === undefined && c.cal.unitsPerPixel > 0) ?
@@ -1032,11 +1037,11 @@ SketchScans.buildDock = function(appWin) {
         // measure until it is known which station that is -- and
         // choosing it afterwards would let the caver take two careful
         // clicks and then find the station has no measurement for them.
-        var station = SketchSection.askStation(doc);
+        var station = SectionBay.askStation(doc);
         if (station === null) {
             return;                       // cancelled: nothing starts
         }
-        var lrud = SketchSection.lrudAt(doc, station);
+        var lrud = SectionBay.lrudAt(doc, station);
         if (lrud === null) {
             // Nothing to calibrate against. Said out loud rather than
             // silently skipped: the caver is about to be handed the
@@ -2407,7 +2412,8 @@ SketchScans.alignSoon = function(entityId) {
 };
 
 /**
- * Hand a scan to the Sketch Section tool, DEFERRED.
+ * Hand a scan to the section bay (SectionBay.run, in CrossSection/),
+ * DEFERRED.
  *
  * Starting an action from inside a widget event is the documented
  * hard-crash trap: triggering makes QCAD build a new action, and
@@ -2418,7 +2424,7 @@ SketchScans.alignSoon = function(entityId) {
  */
 SketchScans.sketchSoon = function(path, station, calibration) {
     // Normalised here rather than at every call site: an omitted
-    // argument is `undefined`, and SketchSection.run's own "was I given
+    // argument is `undefined`, and SectionBay.run's own "was I given
     // a station?" test reads "" and null, not undefined.
     var name = (station === undefined || station === null ||
         station === "") ? null : station;
@@ -2427,7 +2433,7 @@ SketchScans.sketchSoon = function(path, station, calibration) {
     timer.singleShot = true;
     timer.timeout.connect(function() {
         try {
-            SketchSection.run(path, name, cal);
+            SectionBay.run(path, name, cal);
         } catch (e) {
             EAction.handleUserWarning("Sketch Section: " + e);
         }
@@ -2463,9 +2469,9 @@ SketchScans.bayOpen = function(doc) {
             if (isNull(e)) {
                 continue;
             }
-            if (CsTags.get(e, SketchSection.TAG_BAY) !== "" &&
+            if (CsTags.get(e, SectionBay.TAG_BAY) !== "" &&
                     CsTags.get(e, "SectionBayRole") ===
-                        SketchSection.ROLE_FRAME) {
+                        SectionBay.ROLE_FRAME) {
                 return true;
             }
         }
@@ -2475,42 +2481,25 @@ SketchScans.bayOpen = function(doc) {
     return false;
 };
 
-/** Capture Section's registered script path, from this tool's own. */
-SketchScans.captureScriptPath = function() {
-    var base = SketchScans.basePath || "";
-    return base.replace(/\/SketchScans$/, "/SketchSection") +
-        "/SectionCapture.js";
-};
-
 /**
- * Run Capture Section, DEFERRED past the click that asked for it --
- * the same reason alignSoon defers, so the capture action becomes the
- * current action rather than being replaced by the dock's own.
+ * Run Capture, DEFERRED past the click that asked for it -- the same
+ * reason alignSoon defers: this runs inside the panel's own click
+ * handler, and building a fresh action or applying an operation from
+ * inside that handler risks tearing down the very handler running it.
  *
- * TRIGGERED THROUGH ITS GUI ACTION rather than constructed here: this
- * file does not include SectionCapture.js and must not, since
- * SectionCapture includes SketchSection which this file already has --
- * and the registered action is what the menu entry runs too, so the
- * button and the menu cannot drift apart.
+ * "Capture Section" used to be its own menu entry, and this button used
+ * to reach it BY THAT ACTION rather than by including SectionCapture.js
+ * itself, specifically so the button and the menu entry could never
+ * drift apart. The menu entry is gone, but the action is not: it is
+ * still registered, just with no widget names and no command name, so
+ * it is reachable only from a panel. SectionCapture.startInteractive is
+ * the one entry point this button and Cross Section's own bay panel
+ * both go through, and that is what "cannot drift apart" means today.
+ *
+ * startInteractive does its own deferral, so there is no timer here.
  */
 SketchScans.captureSoon = function() {
-    var timer = new QTimer(RMainWindowQt.getMainWindow());
-    timer.singleShot = true;
-    timer.timeout.connect(function() {
-        try {
-            var guiAction = RGuiAction.getByScriptFile(
-                SketchScans.captureScriptPath());
-            if (guiAction === undefined || guiAction === null) {
-                throw new Error("no registered action");
-            }
-            guiAction.slotTrigger();
-        } catch (e) {
-            EAction.handleUserWarning("Sketch Scans: Capture Section " +
-                "would not start (" + e + "). Run Capture Section from " +
-                "the Cave Survey menu.");
-        }
-    });
-    timer.start(0);
+    SectionCapture.startInteractive();
 };
 
 /**

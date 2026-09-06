@@ -46,30 +46,36 @@
  * the block build was written that way (see the paragraph above).
  *
  * THE SCAN'S FIT IS READ OFF THE SCAN ITSELF, at capture time, not
- * copied from the SectionBayFit tag SketchSection wrote when the bay
+ * copied from the SectionBayFit tag SectionBay wrote when the bay
  * opened. That tag records the AUTO-fit, and scaling and rotating the
  * scan onto the ghost is the entire workflow -- so it is wrong the
  * moment the caver touches the scan, and Edit Sketch used to restore
  * the scan at the auto-fit, throwing the caver's own fitting away.
- * SketchSection no longer writes that tag at all.
+ * SectionBay no longer writes that tag at all.
  *
- * TEARDOWN RESTORES THE SNAP. SketchSection tags the bay's own frame
+ * TEARDOWN RESTORES THE SNAP. SectionBay tags the bay's own frame
  * with the snap class the caver was using before the bay switched it to
- * free (SketchSection.snapFree/recordSnap) -- restoring it THERE, on
+ * free (SectionBay.snapFree/recordSnap) -- restoring it THERE, on
  * open, would undo the free snap the instant the bay appeared, since
- * SketchSection's own action terminates right after opening it. This is
- * the bay's teardown, so this is where the snap comes back: a fresh
- * instance built from the tagged class name, never the old object
- * itself (di.setSnap() takes ownership -- see restoreSnap).
+ * opening a bay finishes as soon as it is open. This is the bay's
+ * teardown, so this is where the snap comes back: a fresh instance
+ * built from the tagged class name, never the old object itself
+ * (di.setSnap() takes ownership -- see restoreSnap).
  *
- * USAGE:
- *   Cave Survey > Capture Section   (or "sectioncapture" / "skc")
+ * NO LONGER ITS OWN MENU ENTRY. "Capture Section" (`sectioncapture`/
+ * `skc`) used to be reachable from the Cave Survey menu on its own,
+ * which put it in front of a student before they had anything traced
+ * to capture. The interactive click-to-place EAction below still
+ * exists and still works exactly as it did, but nothing registers it
+ * as an RGuiAction any more -- the only door in is
+ * SectionCapture.captureNow, which SectionBayPanel's Capture button
+ * (and Sketch Scans' own panel) call directly while a bay is open.
  */
 include("scripts/EAction.js");
 include("scripts/simple.js");
 include(includeBasePath + "/../Core/CsAll.js");
 include(includeBasePath + "/../Callout/CalloutWrite.js");
-include(includeBasePath + "/SketchSection.js");
+include(includeBasePath + "/SectionBay.js");
 include(includeBasePath + "/SectionEdit.js");
 
 function SectionCapture(guiAction) {
@@ -97,15 +103,16 @@ SectionCapture.prototype.beginEvent = function() {
     }
     this.bay = SectionCapture.findBay(doc);
     if (this.bay === null) {
-        SketchSection.say(SectionCapture.findBayError !== null ?
+        SectionBay.say(SectionCapture.findBayError !== null ?
             SectionCapture.findBayError :
             qsTr("There is no open section bay in this drawing.\n\n" +
-                "Sketch Section opens one."));
+                "Cross Section's \"Trace a scanned section\" route " +
+                "opens one."));
         this.terminate();
         return;
     }
     if (this.bay.traced.length === 0) {
-        SketchSection.say(qsTr("Nothing has been traced inside the bay " +
+        SectionBay.say(qsTr("Nothing has been traced inside the bay " +
             "yet, so there is no section to capture."));
         this.terminate();
         return;
@@ -270,11 +277,11 @@ SectionCapture.findBay = function(doc) {
         if (isNull(e)) {
             continue;
         }
-        var tag = CsTags.get(e, SketchSection.TAG_BAY);
+        var tag = CsTags.get(e, SectionBay.TAG_BAY);
         if (tag === "") {
             continue;
         }
-        if (CsTags.get(e, "SectionBayRole") === SketchSection.ROLE_FRAME) {
+        if (CsTags.get(e, "SectionBayRole") === SectionBay.ROLE_FRAME) {
             frameCount++;
             frame = e;
             bayId = tag;
@@ -297,13 +304,13 @@ SectionCapture.findBay = function(doc) {
     var ghost = null, scan = null;
     for (i = 0; i < ids.length; i++) {
         e = doc.queryEntity(ids[i]);
-        if (isNull(e) || CsTags.get(e, SketchSection.TAG_BAY) !== bayId) {
+        if (isNull(e) || CsTags.get(e, SectionBay.TAG_BAY) !== bayId) {
             continue;
         }
         var role = CsTags.get(e, "SectionBayRole");
-        if (role === SketchSection.ROLE_GHOST) {
+        if (role === SectionBay.ROLE_GHOST) {
             ghost = e;
-        } else if (role === SketchSection.ROLE_SCAN) {
+        } else if (role === SectionBay.ROLE_SCAN) {
             scan = e;
         }
     }
@@ -340,7 +347,7 @@ SectionCapture.findBay = function(doc) {
         ghost: ghost,
         scan: scan,
         // The placement an EARLIER reference had, if this bay was
-        // reopened from one -- see SketchSection.TAG_REF_SCALE. Always
+        // reopened from one -- see SectionBay.TAG_REF_SCALE. Always
         // defined, so capture() never has to ask whether this bay came
         // from a reopen.
         refScale: SectionCapture.scaleTagOf(frame),
@@ -358,7 +365,7 @@ SectionCapture.scaleTagOf = function(frame) {
     if (frame === null || isNull(frame)) {
         return one;
     }
-    var raw = CsTags.get(frame, SketchSection.TAG_REF_SCALE);
+    var raw = CsTags.get(frame, SectionBay.TAG_REF_SCALE);
     if (raw === "") {
         return one;
     }
@@ -379,7 +386,7 @@ SectionCapture.rotTagOf = function(frame) {
     if (frame === null || isNull(frame)) {
         return 0;
     }
-    var raw = CsTags.get(frame, SketchSection.TAG_REF_ROT);
+    var raw = CsTags.get(frame, SectionBay.TAG_REF_ROT);
     if (raw === "") {
         return 0;
     }
@@ -397,7 +404,7 @@ SectionCapture.rotTagOf = function(frame) {
  * scale and every rotation the caver applied while fitting it over the
  * ghost -- probed 2026-08-30 against a real RImageEntity: a scale(2) +
  * rotate(30 degrees) turns u=(0.5,0) into u=(0.866,0.5). Copying
- * SketchSection's SectionBayFit tag instead read back the AUTO-fit the
+ * SectionBay's SectionBayFit tag instead read back the AUTO-fit the
  * bay opened at and discarded the fitting entirely.
  *
  * \return a fit for CsSectionBay.serializeFit, or null
@@ -503,7 +510,7 @@ SectionCapture.obstaclesOf = function(doc, bay) {
         if (isNull(e)) {
             continue;
         }
-        if (CsTags.get(e, SketchSection.TAG_BAY) !== "") {
+        if (CsTags.get(e, SectionBay.TAG_BAY) !== "") {
             continue;                      // bay furniture
         }
         var layerName = doc.getLayerName(e.getLayerId());
@@ -571,20 +578,90 @@ SectionCapture.prototype.finish = function(position) {
     try {
         var id = SectionCapture.capture(doc, di, this.bay, position);
         if (id === null) {
-            SketchSection.say(qsTr("The section could not be placed -- " +
+            SectionBay.say(qsTr("The section could not be placed -- " +
                 "its block was refused by this drawing."));
         } else {
             EAction.handleUserMessage(
                 qsTr("Section at %1 captured from %2 traced entities")
                     .arg(this.bay.station).arg(this.bay.traced.length));
+            // The bay is closed, so the panel that offers to close it
+            // has nothing left to offer. Guarded: this action also runs
+            // where no panel was ever built.
+            if (typeof SectionBayPanel !== "undefined") {
+                SectionBayPanel.hide();
+            }
         }
     } catch (e) {
         // LOCKED and FROZEN layers refuse writes SILENTLY here, so the
         // alternative is a command that looks like it worked and drew
         // nothing.
-        SketchSection.say(qsTr("The section could not be placed.\n\n") + e);
+        SectionBay.say(qsTr("The section could not be placed.\n\n") + e);
     }
     this.terminate();
+};
+
+/**
+ * Capture the open bay right now, at a PROPOSED position, with no
+ * interactive re-pick -- the entry point for anything that is a button
+ * rather than a command: SectionBayPanel's Capture button, and Sketch
+ * Scans' own panel (SketchScans.captureSoon), neither of which can
+ * leave a click hanging the way the old `skc` EAction's
+ * enter-to-accept-or-click-elsewhere flow could.
+ *
+ * SAME REFUSALS AS `skc` HAD, in the same order: no open bay (with
+ * findBay's own reason when there is one -- two bays open, say), then
+ * nothing traced. Both are reported through EAction.handleUserMessage
+ * rather than a modal QMessageBox, because the caller is a dock panel
+ * that must stay on screen either way -- a refusal here is not a
+ * reason to close it.
+ *
+ * A BOXED-IN STATION FALLS BACK TO THE BAY'S OWN CENTRE rather than
+ * waiting for a click nothing here can ask for. `skc` handed the caver
+ * the cursor when proposePosition came back null; a button has no
+ * cursor to hand over, so the section lands at the bay's own origin
+ * instead -- clearly not final, and no worse than the section a caver
+ * would have dropped there by hand.
+ *
+ * \return the callout id, or null when nothing was captured
+ */
+SectionCapture.captureNow = function(doc, di) {
+    var bay = SectionCapture.findBay(doc);
+    if (bay === null) {
+        EAction.handleUserMessage(SectionCapture.findBayError !== null ?
+            SectionCapture.findBayError :
+            qsTr("There is no open section bay in this drawing.\n\n" +
+                "Cross Section's \"Trace a scanned section\" route opens " +
+                "one."));
+        return null;
+    }
+    if (bay.traced.length === 0) {
+        EAction.handleUserMessage(qsTr("Nothing has been traced inside " +
+            "the bay yet, so there is no section to capture."));
+        return null;
+    }
+    var position = SectionCapture.proposePosition(doc, bay);
+    if (position === null) {
+        position = SectionCapture.originOf(bay);
+    }
+    try {
+        var id = SectionCapture.capture(doc, di, bay, position);
+        if (id === null) {
+            EAction.handleUserMessage(qsTr("The section could not be " +
+                "placed -- its block was refused by this drawing."));
+        } else {
+            EAction.handleUserMessage(
+                qsTr("Section at %1 captured from %2 traced entities")
+                    .arg(bay.station).arg(bay.traced.length));
+        }
+        return id;
+    } catch (e) {
+        // LOCKED and FROZEN layers refuse writes SILENTLY here, so the
+        // alternative is a button that looks like it worked and drew
+        // nothing.
+        EAction.handleUserMessage(qsTr("The section could not be " +
+            "placed.\n\n") + e);
+        return null;
+    }
 };
 
 /**
@@ -612,7 +689,7 @@ SectionCapture.capture = function(doc, di, bay, position) {
     // Read the snap to restore BEFORE the frame that carries it is
     // queued for deletion below -- see the file header.
     var snapClass = (bay.frame !== null) ?
-        CsTags.get(bay.frame, SketchSection.TAG_SNAP) : "";
+        CsTags.get(bay.frame, SectionBay.TAG_SNAP) : "";
 
     var blockId = doc.getBlockId(name);
     if (blockId === RBlock.INVALID_ID || blockId === undefined ||
@@ -718,7 +795,7 @@ SectionCapture.capture = function(doc, di, bay, position) {
     // has no earlier reference and gets the identity; a re-capture
     // after Edit Sketch gets back whatever the caver had given the
     // reference before the reopen deleted it, parked on the frame in
-    // the meantime (SketchSection.TAG_REF_SCALE). Hard-coding
+    // the meantime (SectionBay.TAG_REF_SCALE). Hard-coding
     // RVector(1,1) and 0.0 here is what silently undid a caver's own
     // scaling and rotation on every single edit round trip, against
     // CalloutWrite.refreshSections' stated contract that position,
@@ -756,7 +833,7 @@ SectionCapture.capture = function(doc, di, bay, position) {
         var path = CsTags.get(bay.scan, CsCallout.KEY.SECTION_SCAN);
         if (path !== "") {
             CsTags.set(ref, CsCallout.KEY.SECTION_SCAN,
-                CsCave.relativeToScans(SketchSection.scansFolderOf(doc),
+                CsCave.relativeToScans(SectionBay.scansFolderOf(doc),
                     path));
         }
         // THE FIT COMES OFF THE SCAN ENTITY, not off its tag -- see
@@ -780,13 +857,13 @@ SectionCapture.capture = function(doc, di, bay, position) {
     // against) and a locked layer refuses a delete exactly as silently
     // as an off one does. withLayerOn alone only clears off/frozen, so
     // the frame's delete additionally needs withLayerUnlocked, nested
-    // exactly as SketchSection.addFrame nests them for the ADD.
+    // exactly as SectionBay.addFrame nests them for the ADD.
     // CTRL-SECTION-GHOST and CTRL-SECTION-SCAN are not suite-locked,
     // but a caver may have switched either off since the bay opened, so
     // both still need guarding around this same single commit or a
     // hidden ghost or scan silently survives teardown and is swept into
     // the NEXT section. The ghost lives on its own layer rather than
-    // CTRL-SECTION-OUTLINE (see SketchSection.addGhost) precisely so it
+    // CTRL-SECTION-OUTLINE (see SectionBay.addGhost) precisely so it
     // can be told apart from a real, placed section outline -- which
     // means its delete has to be unwrapped by that same layer's name,
     // not the outline's.
@@ -855,11 +932,11 @@ SectionCapture.addLeader = function(doc, op, id, station, position, style,
         style, layerName);
 };
 
-/** Every snap class SketchSection might have tagged the frame with, by
+/** Every snap class SectionBay might have tagged the frame with, by
  *  name. RSnapCoordinate does NOT exist in this build -- probed
  *  2026-08-30, ReferenceError on construction -- so it is deliberately
  *  absent here; a frame tagged with it (there will never be one, since
- *  SketchSection.recordSnap can only tag a name it actually read off a
+ *  SectionBay.recordSnap can only tag a name it actually read off a
  *  live snap) would just fall through restoreSnap's "unknown" branch. */
 SectionCapture.SNAP_CTORS = {
     "RSnapFree": function() { return new RSnapFree(); },
@@ -903,16 +980,65 @@ SectionCapture.restoreSnap = function(di, className) {
     }
 };
 
+
+
+/**
+ * Hand control to the interactive capture -- the placement flow with a
+ * live preview, "Enter to accept the proposed spot, or pick another",
+ * and the honest click-to-place fallback for a boxed-in station.
+ *
+ * This is what the Capture button must use. captureNow() below places
+ * at the proposal with no re-pick, which is right for a headless test
+ * and wrong for a caver: where a section sits on the sheet is a
+ * cartographer's decision, and Capture Section always let them make it.
+ *
+ * DEFERRED THROUGH A TIMER, exactly as SketchScans.alignSoon is and for
+ * the same reason: this runs inside a panel's own click handler, and
+ * setCurrentAction tears down the action that is running -- QCAD frees
+ * it and the return lands in freed memory. A zero timer lets the click
+ * unwind first. The closure holds no Qt wrapper, for the same reason.
+ */
+SectionCapture.startInteractive = function() {
+    var timer = new QTimer(RMainWindowQt.getMainWindow());
+    timer.singleShot = true;
+    timer.timeout.connect(function() {
+        var di = getDocumentInterface();
+        if (isNull(di)) {
+            return;
+        }
+        try {
+            var guiAction = RGuiAction.getByScriptFile(
+                SectionCapture.scriptPath);
+            di.setCurrentAction(new SectionCapture(guiAction));
+        } catch (e) {
+            EAction.handleUserWarning(qsTr("Capture would not start (") +
+                e + qsTr("). "));
+        }
+    });
+    timer.start(0);
+};
+
+/** Where this file was installed, so getByScriptFile can find it. */
+SectionCapture.scriptPath = "";
+
+/**
+ * Registers the capture action WITHOUT a menu entry, a toolbar entry or
+ * a command name.
+ *
+ * It needs to be a registered RGuiAction all the same: the interactive
+ * class is an EAction, and an EAction wants the RGuiAction that owns
+ * its script file. Leaving out setWidgetNames and setDefaultCommands is
+ * what keeps it off the menu and out of the command line, which is the
+ * whole point of the merge -- reachable only from the bay panel, which
+ * is only on screen while there is a bay to capture.
+ *
+ * Called by CrossSection.init, not by the add-on's own sibling sweep:
+ * this file no longer belongs to a tool of its own.
+ */
 SectionCapture.init = function(basePath) {
+    SectionCapture.scriptPath = basePath + "/SectionCapture.js";
     var action = new RGuiAction(qsTr("Capture Section"),
                                 RMainWindowQt.getMainWindow());
     action.setRequiresDocument(true);
-    action.setScriptFile(basePath + "/SectionCapture.js");
-    action.setIcon(basePath + "/SectionCapture.svg");
-    action.setStatusTip(qsTr("Turn what is traced in the section bay " +
-        "into a block, placed clear of the cave walls"));
-    action.setDefaultCommands(["sectioncapture", "skc"]);
-    action.setGroupSortOrder(452);
-    action.setSortOrder(60);
-    action.setWidgetNames(["CaveSurveyMenu", "CaveSurveyToolBar"]);
+    action.setScriptFile(SectionCapture.scriptPath);
 };
