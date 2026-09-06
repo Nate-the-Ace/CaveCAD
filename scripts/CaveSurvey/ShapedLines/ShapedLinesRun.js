@@ -24,6 +24,7 @@ function ShapedLinesRun(guiAction) {
     this.spinePts = null;    // the fitted spine, kept for the side pick
     this.spineClosed = false;
     this.side = 1;           // which way the ornament faces, live
+    this.previewSample = null;  // the spine walked once, reused per move
     this.pathFrame = null;   // plan / profile / section, decided at release
     this.region = null;      // cached profile-frame box
     this.bays = [];          // cached open section-bay rects
@@ -137,6 +138,36 @@ ShapedLinesRun.prototype.sampleThreshold = function() {
     return 1.0;
 };
 
+/**
+ * The colour the live side-pick preview is drawn in.
+ *
+ * QCAD's own measurement colour, so it matches the rest of the
+ * application's "this is not your drawing, this is the tool talking"
+ * vocabulary, and falls back to the same green it defaults to.
+ */
+ShapedLinesRun.previewColor = function() {
+    try {
+        return RSettings.getColor("GraphicsViewColors/MeasurementToolsColor",
+            new RColor(155, 220, 112));
+    } catch (e) {
+        return new RColor(155, 220, 112);
+    }
+};
+
+/** Draws one preview entity boldly: the tool's colour, at a weight that
+ *  reads over a scanned page. Each property is set on its own so a
+ *  bridge that refuses one still gets the others. */
+ShapedLinesRun.emphasize = function(entity) {
+    try {
+        entity.setColor(ShapedLinesRun.previewColor());
+    } catch (eColor) {
+    }
+    try {
+        entity.setLineweight(RLineweight.Weight050);
+    } catch (eWeight) {
+    }
+};
+
 ShapedLinesRun.prototype.escapeEvent = function() {
     if (this.state === ShapedLinesRun.State.Drawing ||
             this.state === ShapedLinesRun.State.PickingSide) {
@@ -153,6 +184,7 @@ ShapedLinesRun.prototype.escapeEvent = function() {
 /** Throws away a stroke in progress. */
 ShapedLinesRun.prototype.discard = function() {
     this.samples = [];
+    this.previewSample = null;
     this.spinePts = null;
     this.spineClosed = false;
     this.pathFrame = null;
@@ -196,9 +228,15 @@ ShapedLinesRun.prototype.mouseMoveEvent = function(event) {
         // Button UP: the ornament follows the cursor across the spine,
         // so the answer is on screen before the click rather than after
         // it. This is the step that replaces select-then-Flip.
-        if (this.updateSide(event.getModelPosition())) {
-            this.updatePreview();
-        }
+        //
+        // REDRAWN ON EVERY MOVE, not only when the side changes. QCAD
+        // CLEARS THE PREVIEW between mouse events, so an event that
+        // added nothing back left the feature invisible until the next
+        // one that did -- the preview flickered under the cursor even
+        // while it sat on one side, which is exactly when a caver is
+        // trying to look at it (reported 2026-09-07).
+        this.updateSide(event.getModelPosition());
+        this.updatePreview();
         return;
     }
     if (!(event.buttons().valueOf() & Qt.LeftButton.valueOf())) {
@@ -297,6 +335,7 @@ ShapedLinesRun.prototype.prepare = function() {
         this.side = 1;
     }
     this.spinePts = kept;
+    this.previewSample = null;   // a new stroke, a new spine to walk
     return true;
 };
 
@@ -336,6 +375,78 @@ ShapedLinesRun.prototype.buildSpine = function(doc, kept, spec) {
 };
 
 /**
+ * The entities the side-pick preview is made of, BUILT ONCE PER SIDE.
+ *
+ * REBUILT ON EVERY MOVE, AND THAT IS DELIBERATE. The preview has to be
+ * re-added on every mouse move -- QCAD clears it between events, and an
+ * event that adds nothing back leaves the feature blinking out from
+ * under the cursor, which is what the flicker was. Caching the built
+ * ENTITIES and re-adding those instead looks like the obvious fix and
+ * takes the application down: the first preview owns them, and the
+ * second SIGSEGVs inside RTransaction::addObject.
+ *
+ * What is cached is the SPINE SAMPLE, which is plain data and safe to
+ * hold: walking the spine is 20 ms of the 22 on a 400 ft ledge, and
+ * everything after it -- the ornament maths and the entities -- is 2.
+ * So the same feature is generated fresh every move, by the same
+ * CsShapeLine.buildDecor that commits the real thing, on a spine that
+ * is only walked once.
+ */
+ShapedLinesRun.prototype.previewEntities = function() {
+    var doc = this.getDocument();
+    var spec = CsShapeLine.STYLES[this.styleKey];
+    if (isNull(doc) || isNull(spec) || isNull(this.spinePts)) {
+        return null;
+    }
+    var spine = this.buildSpine(doc, this.spinePts, spec);
+    if (isNull(spine)) {
+        return null;
+    }
+    // Tagged the way the committed feature is, because buildDecor reads
+    // the side, the style and the scale off the spine.
+    CsTags.set(spine, CsShapeLine.KEY.STYLE, this.styleKey);
+    CsTags.set(spine, CsShapeLine.KEY.SIDE, String(this.side));
+    CsTags.set(spine, CsShapeLine.KEY.SCALE, "1");
+    CsTags.set(spine, CsShapeLine.KEY.FRAME, this.pathFrame);
+
+    var made = [spine];
+    var built = null;
+    try {
+        // The spine is the same one every time through this state, so
+        // its SAMPLE is taken once and handed back in on every later
+        // move. That is the whole optimisation: see the note above.
+        if (isNull(this.previewSample)) {
+            var spacing = spec.spacingFeet * CsShapeLine.perFoot(doc);
+            this.previewSample = CsShapeLine.sampleEntity(spine,
+                CsShapeLine.sampleStep(spacing));
+        }
+        built = CsShapeLine.buildDecor(doc, spine, this.previewSample);
+    } catch (eDecor) {
+        built = null;
+    }
+    if (!isNull(built)) {
+        for (var i = 0; i < built.entities.length; i++) {
+            made.push(built.entities[i]);
+        }
+    }
+    // BOLD, AND IN ONE COLOUR. A ledge previews in its layer's own peru
+    // on a white sheet over a grey scan, which is the moment a caver
+    // most needs to see which side the hachures went. The preview is
+    // not the drawing -- it is a question being asked -- so it is drawn
+    // in the tool colour at a weight that reads, and the committed
+    // feature keeps its proper layer appearance.
+    for (var j = 0; j < made.length; j++) {
+        ShapedLinesRun.emphasize(made[j]);
+    }
+    // FRESH ENTITIES EVERY TIME, never a cached set re-added.
+    // Previewing the same entity objects twice SIGSEGVs inside
+    // RTransaction::addObject -- the first preview takes ownership of
+    // them (measured 2026-09-07, and it took the application down).
+    // What is cached is the SAMPLE, which is data.
+    return made;
+};
+
+/**
  * The preview.
  *
  * WHILE DRAGGING it is the raw captured path -- FeatureTraceRun's
@@ -353,33 +464,15 @@ ShapedLinesRun.prototype.getOperation = function(preview) {
 
     if (this.state === ShapedLinesRun.State.PickingSide &&
             !isNull(this.spinePts)) {
-        var spec = CsShapeLine.STYLES[this.styleKey];
-        var spine = this.buildSpine(doc, this.spinePts, spec);
-        if (isNull(spine)) {
+        var made = this.previewEntities();
+        if (made === null) {
             return undefined;
         }
-        // Tagged the same way the committed feature is, because
-        // buildDecor reads the side, the style and the scale off the
-        // spine -- the preview is generated by the SAME code that
-        // generates the real thing, not by a sketch of it.
-        CsTags.set(spine, CsShapeLine.KEY.STYLE, this.styleKey);
-        CsTags.set(spine, CsShapeLine.KEY.SIDE, String(this.side));
-        CsTags.set(spine, CsShapeLine.KEY.SCALE, "1");
-        CsTags.set(spine, CsShapeLine.KEY.FRAME, this.pathFrame);
         op = new RAddObjectsOperation();
         op.setText(this.getToolTitle());
         op.setLimitPreview(false);
-        op.addObject(spine, false);
-        var built = null;
-        try {
-            built = CsShapeLine.buildDecor(doc, spine);
-        } catch (eDecor) {
-            built = null;
-        }
-        if (!isNull(built)) {
-            for (i = 0; i < built.entities.length; i++) {
-                op.addObject(built.entities[i], false);
-            }
+        for (i = 0; i < made.length; i++) {
+            op.addObject(made[i], false);
         }
         return op;
     }

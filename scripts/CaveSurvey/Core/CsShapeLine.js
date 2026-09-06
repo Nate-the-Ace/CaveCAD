@@ -776,7 +776,7 @@ CsShapeLine.scaleOf = function(spine) {
  * regeneration. Returns {entities, sig, count} or null when the spine
  * cannot be decorated (unknown style, degenerate geometry).
  */
-CsShapeLine.buildDecor = function(doc, spine) {
+CsShapeLine.buildDecor = function(doc, spine, sample) {
     var styleKey = CsTags.get(spine, CsShapeLine.KEY.STYLE);
     var spec = CsShapeLine.STYLES[styleKey];
     if (isNull(spec)) {
@@ -788,8 +788,17 @@ CsShapeLine.buildDecor = function(doc, spine) {
     var spacing = spec.spacingFeet * perFoot * scale;
     var size = (spec.sizeFeet || 0) * perFoot * scale;
 
-    var sample = CsShapeLine.sampleEntity(spine,
-        CsShapeLine.sampleStep(spacing));
+    // THE SAMPLE MAY BE HANDED IN. Walking the spine is most of what
+    // this function costs -- 20 ms on a 400 ft ledge, against 2 ms for
+    // everything else -- and the live side pick rebuilds the ornament
+    // on the same spine over and over as the cursor moves. A caller
+    // that already knows the spine has not changed passes the sample it
+    // took the first time. Nothing else about the answer changes: the
+    // ornament still comes out of the same maths on the same points.
+    if (isNull(sample)) {
+        sample = CsShapeLine.sampleEntity(spine,
+            CsShapeLine.sampleStep(spacing));
+    }
     if (isNull(sample) || sample.points.length < 2) {
         return null;
     }
