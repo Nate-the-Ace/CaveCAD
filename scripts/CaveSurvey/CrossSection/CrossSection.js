@@ -92,17 +92,44 @@ CrossSection.prototype.beginEvent = function() {
     v.addWidget(trace, 0, 0);
     v.addWidget(reopen, 0, 0);
     var bb = new QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel);
-    bb.accepted.connect(routeDlg, "accept");
-    bb.rejected.connect(routeDlg, "reject");
+    // CLOSURES, NOT SLOT NAMES. `signal.connect(dialog, "accept")` --
+    // the Qt Script idiom this suite used everywhere -- THROWS in this
+    // build: "Function.prototype.connect: target is not a function".
+    // The engine's connect takes a function, or a receiver plus a
+    // function, and never a slot name. It threw where the dialog was
+    // built, so the tool died before the dialog was ever shown.
+    // Measured against the running application, 2026-09-06.
+    bb.accepted.connect(function() { routeDlg.accept(); });
+    bb.rejected.connect(function() { routeDlg.reject(); });
     v.addWidget(bb, 0, 0);
     routeDlg.setLayout(v);
     if (routeDlg.exec() !== QDialog.Accepted) {
-        routeDlg.destroy();
+        // destroy() THROWS on every QDialog in this build --
+        // "Invalid attempt to destroy() an indestructible object",
+        // parented or not (measured 2026-09-06). The dialog is
+        // closed and handed to Qt to delete instead, and even that
+        // is guarded: tearing down a dialog must never cost the
+        // answer the caver just gave it.
+        try {
+            routeDlg.close();
+            routeDlg.deleteLater();
+        } catch (eClose) {
+        }
         this.terminate();
         return;
     }
     var route = cut.checked ? "cut" : (trace.checked ? "trace" : "reopen");
-    routeDlg.destroy();
+    // destroy() THROWS on every QDialog in this build --
+    // "Invalid attempt to destroy() an indestructible object",
+    // parented or not (measured 2026-09-06). The dialog is
+    // closed and handed to Qt to delete instead, and even that
+    // is guarded: tearing down a dialog must never cost the
+    // answer the caver just gave it.
+    try {
+        routeDlg.close();
+        routeDlg.deleteLater();
+    } catch (eClose) {
+    }
 
     if (route === "trace") {
         // Replaces the old "Sketch Section" command (`sketchsection`/

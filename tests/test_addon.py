@@ -1604,6 +1604,80 @@ class TestMenuTable(unittest.TestCase):
             seen[key] = rel
 
 
+class TestSignalsConnectToFunctions(unittest.TestCase):
+    """A signal is connected to a FUNCTION, never to a slot NAME.
+
+    `bb.accepted.connect(dlg, "accept")` is the Qt Script idiom, and it
+    THROWS in this build -- "Function.prototype.connect: target is not a
+    function" -- because the engine's connect takes a function, or a
+    receiver plus a function, and never a string. It throws where the
+    dialog is BUILT, so the tool dies before anything is shown, and the
+    caver sees a tool that does nothing.
+
+    Found 2026-09-06 when Symbol Palette's Save Symbol reported it; four
+    shipped tools (Cross Section, Callout, Repair Drawing, Surface Data)
+    carried the same line and were broken the same way. No headless test
+    can reach it -- it needs a real QDialog -- so it is pinned here as
+    source, which is the only place it can be caught cheaply.
+    """
+
+    SLOT_NAME = re.compile(r'\.connect\(\s*[A-Za-z_$][A-Za-z0-9_$]*\s*,\s*"')
+
+    def test_no_signal_connects_to_a_slot_name(self):
+        offenders = []
+        for dirpath, _dirnames, filenames in os.walk(ADDON):
+            for filename in sorted(filenames):
+                if not filename.endswith(".js"):
+                    continue
+                path = os.path.join(dirpath, filename)
+                with open(path) as handle:
+                    for number, line in enumerate(handle, 1):
+                        stripped = line.strip()
+                        if stripped.startswith("//") or stripped.startswith("*"):
+                            continue
+                        if self.SLOT_NAME.search(line):
+                            rel = os.path.relpath(path, ADDON)
+                            offenders.append("%s:%d" % (rel, number))
+        self.assertEqual(
+            [], offenders,
+            "these connect a signal to a slot NAME, which throws in this "
+            "build -- pass a function instead: %s" % offenders)
+
+
+class TestNoWidgetDestroy(unittest.TestCase):
+    """Nothing calls destroy() on a widget.
+
+    It THROWS in this build -- "Invalid attempt to destroy() an
+    indestructible object" -- for a parented dialog and an unparented
+    one alike, measured against the running application 2026-09-06. It
+    threw at the end of every dialog in the suite, AFTER the caver had
+    answered, so their answer was thrown away with the exception. Close
+    it and let Qt delete it.
+    """
+
+    DESTROY = re.compile(r"^[^/*]*\.destroy\(\)")
+
+    def test_no_widget_is_destroyed(self):
+        offenders = []
+        for dirpath, _dirnames, filenames in os.walk(ADDON):
+            for filename in sorted(filenames):
+                if not filename.endswith(".js"):
+                    continue
+                path = os.path.join(dirpath, filename)
+                with open(path) as handle:
+                    for number, line in enumerate(handle, 1):
+                        stripped = line.strip()
+                        if stripped.startswith("//") or stripped.startswith("*"):
+                            continue
+                        if self.DESTROY.search(line):
+                            rel = os.path.relpath(path, ADDON)
+                            offenders.append("%s:%d" % (rel, number))
+        self.assertEqual(
+            [], offenders,
+            "destroy() throws in this build; close() and deleteLater() "
+            "instead: %s" % offenders)
+
+
 class TestNamespacesAreDeclared(unittest.TestCase):
     """A file that assigns onto a namespace must create it first.
 

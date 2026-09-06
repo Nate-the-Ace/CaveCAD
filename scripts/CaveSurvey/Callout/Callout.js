@@ -83,17 +83,44 @@ Callout.prototype.beginEvent = function() {
     // assign -- assigning silently does nothing, and every dialog in
     // this suite that got that wrong shipped a Cancel button that
     // couldn't cancel.
-    bb.accepted.connect(sourceDlg, "accept");
-    bb.rejected.connect(sourceDlg, "reject");
+    // CLOSURES, NOT SLOT NAMES. `signal.connect(dialog, "accept")` --
+    // the Qt Script idiom this suite used everywhere -- THROWS in this
+    // build: "Function.prototype.connect: target is not a function".
+    // The engine's connect takes a function, or a receiver plus a
+    // function, and never a slot name. It threw where the dialog was
+    // built, so the tool died before the dialog was ever shown.
+    // Measured against the running application, 2026-09-06.
+    bb.accepted.connect(function() { sourceDlg.accept(); });
+    bb.rejected.connect(function() { sourceDlg.reject(); });
     v.addWidget(bb, 0, 0);
     sourceDlg.setLayout(v);
     if (sourceDlg.exec() !== QDialog.Accepted) {
-        sourceDlg.destroy();
+        // destroy() THROWS on every QDialog in this build --
+        // "Invalid attempt to destroy() an indestructible object",
+        // parented or not (measured 2026-09-06). The dialog is
+        // closed and handed to Qt to delete instead, and even that
+        // is guarded: tearing down a dialog must never cost the
+        // answer the caver just gave it.
+        try {
+            sourceDlg.close();
+            sourceDlg.deleteLater();
+        } catch (eClose) {
+        }
         this.terminate();
         return;
     }
     this.elevationMode = elev.checked;
-    sourceDlg.destroy();
+    // destroy() THROWS on every QDialog in this build --
+    // "Invalid attempt to destroy() an indestructible object",
+    // parented or not (measured 2026-09-06). The dialog is
+    // closed and handed to Qt to delete instead, and even that
+    // is guarded: tearing down a dialog must never cost the
+    // answer the caver just gave it.
+    try {
+        sourceDlg.close();
+        sourceDlg.deleteLater();
+    } catch (eClose) {
+    }
 
     CsLayers.ensureCalloutLayers(doc, this.getDocumentInterface());
     this.setState(Callout.State.PickingTip);

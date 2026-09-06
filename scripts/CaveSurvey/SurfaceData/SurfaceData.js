@@ -54,20 +54,47 @@ function surfaceDataRun() {
     var buttons = new QDialogButtonBox(QDialogButtonBox.Ok
                                      | QDialogButtonBox.Cancel);
     // .accepted/.rejected are signals on the wrapper: connect, do not assign.
-    buttons.accepted.connect(dlg, "accept");
-    buttons.rejected.connect(dlg, "reject");
+    // CLOSURES, NOT SLOT NAMES. `signal.connect(dialog, "accept")` --
+    // the Qt Script idiom this suite used everywhere -- THROWS in this
+    // build: "Function.prototype.connect: target is not a function".
+    // The engine's connect takes a function, or a receiver plus a
+    // function, and never a slot name. It threw where the dialog was
+    // built, so the tool died before the dialog was ever shown.
+    // Measured against the running application, 2026-09-06.
+    buttons.accepted.connect(function() { dlg.accept(); });
+    buttons.rejected.connect(function() { dlg.reject(); });
     layout.addWidget(buttons, 0, 0);
     dlg.setLayout(layout);
 
     if (dlg.exec() !== QDialog.Accepted) {
-        dlg.destroy();
+        // destroy() THROWS on every QDialog in this build --
+        // "Invalid attempt to destroy() an indestructible object",
+        // parented or not (measured 2026-09-06). The dialog is
+        // closed and handed to Qt to delete instead, and even that
+        // is guarded: tearing down a dialog must never cost the
+        // answer the caver just gave it.
+        try {
+            dlg.close();
+            dlg.deleteLater();
+        } catch (eClose) {
+        }
         return;
     }
     var opts = {
         imagery: cbAerial.checked,
         contours: cbContours.checked
     };
-    dlg.destroy();
+    // destroy() THROWS on every QDialog in this build --
+    // "Invalid attempt to destroy() an indestructible object",
+    // parented or not (measured 2026-09-06). The dialog is
+    // closed and handed to Qt to delete instead, and even that
+    // is guarded: tearing down a dialog must never cost the
+    // answer the caver just gave it.
+    try {
+        dlg.close();
+        dlg.deleteLater();
+    } catch (eClose) {
+    }
 
     var report = CsSurfaceData.run(doc, di, opts);
 
