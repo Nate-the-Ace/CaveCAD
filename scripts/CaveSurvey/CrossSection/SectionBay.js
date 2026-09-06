@@ -512,10 +512,11 @@ SectionBay.addScan = function(doc, di, scan, ghostBox, rect, bayId) {
  * setUVector/setVVector. Probed 2026-08-29: those setters exist and do
  * not throw, but every WORKING image insert in this suite
  * (SketchScans.insert, SketchScans.insertFitted, ScanView.js,
- * AerialBasemap.js) builds RImageData through the seven-argument
- * constructor and never through setters -- so the constructor form is
- * what is trusted to actually place a readable image, and this follows
- * it rather than a shape that merely accepts calls.
+ * Core/CsSurfaceData.js's basemap pass) builds RImageData through the
+ * seven-argument constructor and never through setters -- so the
+ * constructor form is what is trusted to actually place a readable
+ * image, and this follows it rather than a shape that merely accepts
+ * calls.
  *
  * THE FIT'S u AND v GO IN WHOLE. They are the image's own per-pixel
  * edge vectors, which is what this constructor's third and fourth

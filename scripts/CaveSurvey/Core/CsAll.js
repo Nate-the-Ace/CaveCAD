@@ -31,6 +31,10 @@ include(includeBasePath + "/CsStationOrder.js");
 include(includeBasePath + "/CsPackage.js");
 include(includeBasePath + "/CsGeoProject.js");
 include(includeBasePath + "/CsContour.js");
+// After CsGeoProject (ground-window and Mercator math) and CsContour
+// (marching squares over the elevation grid) -- CsSurfaceData's two
+// passes call straight into both.
+include(includeBasePath + "/CsSurfaceData.js");
 include(includeBasePath + "/CsAngles.js");
 include(includeBasePath + "/CsIgrfCoeffs.js");
 include(includeBasePath + "/CsGeomag.js");

@@ -208,7 +208,12 @@ var CORE_FILES_NOT_LOADED = [
     // Thin orchestration over CsRebuild/CsRestyle/CsCalloutSync, all
     // three of which need a real document. Covered by
     // tests/repair_drawing_run.js.
-    "scripts/CaveSurvey/Core/CsRepair.js"
+    "scripts/CaveSurvey/Core/CsRepair.js",
+    // Every pass takes a real RDocument/RDocumentInterface (anchor
+    // resolution reads and writes tags on real entities) and both
+    // fetch across the real network with curl -- nothing pure to call
+    // from here. Covered by tests/surface_data_run.js.
+    "scripts/CaveSurvey/Core/CsSurfaceData.js"
 ];
 
 // ---------------------------------------------------------------------

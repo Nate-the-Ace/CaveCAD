@@ -204,6 +204,22 @@ proves is that `CsRepair` drives all three in the order that matters
 why), that every pass reports a line whether it ran or was skipped, and
 that skipping every pass changes nothing.
 
+## `surface_data_run.js`
+
+`CsSurfaceData.run` against real documents -- the merge of the former Aerial
+Basemap and Surface Contours menu entries into one Surface Data entry. Both
+passes needed the same geo anchor and used to ask about (and fail on) a
+missing one separately; this stage proves the merged tool asks once, before
+either pass reaches for the network: a drawing with no anchor at all is
+refused with a single line naming where to fix it (an existing Geo
+Reference, station A1, a selected point, or Survey Notebook > Declination),
+and an anchored drawing with both passes switched off is accepted and
+reports both as skipped. Deliberately NOT covered here: either pass actually
+fetching imagery or elevation data, since both hit a real tile service over
+the network and a test suite must not depend on one being reachable -- the
+shared request math (ground windows, Mercator bboxes, pixel sizing) is
+covered headlessly instead, in `Core/CsGeoProject.js`'s own unit tests.
+
 ## Stage 11/11 -- `package_cave.js`
 
 Package Cave Project against real files in a temp cave folder. It writes a DXF

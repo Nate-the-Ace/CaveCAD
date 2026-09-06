@@ -601,10 +601,31 @@ PackageCave.stageDrawing = function(record, stagingFolder, full) {
         var doc = di.getDocument();
 
         result.stripped = PackageCave.stripGeoTags(doc, di);
-        if (typeof AerialBasemap !== "undefined" &&
-                isFunction(AerialBasemap.eraseExisting)) {
-            result.basemaps = AerialBasemap.eraseExisting(doc, di);
+        // A basemap image is georeferenced -- built from a real-world
+        // bounding box around the entrance -- so it carries the same
+        // location it took to fetch it. A sanitized copy strips the
+        // geo TAGS above; it has to erase the basemap IMAGE too, or
+        // the location the tags just hid is still sitting there in
+        // plain sight, geodata baked into the raster instead of into
+        // XDATA. (Formerly AerialBasemap.eraseExisting, from the
+        // standalone tool this merged into; see Core/CsSurfaceData.js.)
+        //
+        // A MISSING ERASER REFUSES THE WHOLE SANITIZED COPY. This used
+        // to be a quiet `if available` guard, and it silently stopped
+        // firing the moment the standalone tool it named was merged
+        // away -- which would have shipped georeferenced imagery inside
+        // a file whose entire promise is that the location is gone. A
+        // sanitized copy that cannot strip is not a sanitized copy, so
+        // it is not written at all.
+        if (typeof CsSurfaceData === "undefined" ||
+                !isFunction(CsSurfaceData.eraseExistingImagery)) {
+            result.error = "Cannot sanitize: the basemap eraser " +
+                "(CsSurfaceData.eraseExistingImagery) is missing, so " +
+                "aerial imagery could not be removed. No sanitized " +
+                "copy has been written.";
+            return result;
         }
+        result.basemaps = CsSurfaceData.eraseExistingImagery(doc, di);
 
         result.ok = di.exportFile(target, PackageCave.dxfFilter());
         if (!result.ok) {

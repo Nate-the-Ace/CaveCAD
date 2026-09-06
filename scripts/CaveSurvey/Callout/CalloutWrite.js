@@ -393,7 +393,7 @@ CalloutWrite.writeLeaders = function(doc, di, id, tips, style, layerName,
             for (var d = 0; d < m.leaders.length; d++) {
                 // ONE argument -- every other caller in this codebase
                 // (CsStore, CsProfileDraw, CsDraw, ScatterBreakdown,
-                // BuildLegend, AerialBasemap) agrees, and the engine
+                // BuildLegend, CsSurfaceData) agrees, and the engine
                 // itself warns "Too many arguments, ignoring 1" on the
                 // two-argument form the plan's draft called for.
                 del.deleteObject(m.leaders[d]);

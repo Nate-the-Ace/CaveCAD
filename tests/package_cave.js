@@ -62,6 +62,11 @@ var FILES = [
     "scripts/CaveSurvey/Core/Format/CsCsv.js",
     "scripts/CaveSurvey/Core/Format/CsTherion.js",
     "scripts/CaveSurvey/Core/Format/CsRegistry.js",
+    // The basemap eraser. stageDrawing REFUSES to write a sanitized
+    // copy without it -- deliberately, since a sanitized copy that
+    // cannot strip imagery is not sanitized -- so this suite has to
+    // load it or it is testing the refusal instead of the erase.
+    "scripts/CaveSurvey/Core/CsSurfaceData.js",
     "scripts/CaveSurvey/PackageCave/PackageCave.js"
 ];
 for (var fi = 0; fi < FILES.length; fi++) {
@@ -108,6 +113,25 @@ var addOp = new RAddObjectsOperation();
 addOp.addObject(station, false);
 di.applyOperation(addOp);
 
+// A georeferenced basemap image, tagged exactly as CsSurfaceData tags
+// one before it is ever added to a document. This is the entry that
+// must NOT survive sanitizing: the geo tags are stripped elsewhere, but
+// an aerial photograph carries the entrance location baked into the
+// raster itself, so a sanitized copy that keeps the image has hidden
+// nothing. Points at a real file in testdata so the entity is not a
+// dangling reference.
+var aerialFile = repoRoot + "/testdata/Elevation_3DEP_64.tif";
+var basemap = new RImageEntity(doc, new RImageData(
+    aerialFile,
+    new RVector(0, 0),
+    new RVector(1, 0),          // u: one pixel across
+    new RVector(0, 1),          // v: one pixel up
+    64, 64, 0));
+CsTags.set(basemap, "AerialBasemap", "1");
+var imgOp = new RAddObjectsOperation();
+imgOp.addObject(basemap, false);
+di.applyOperation(imgOp);
+
 var filter = PackageCave.dxfFilter();
 ok(filter !== "", "found the dxflib exporter, the one that writes XDATA");
 ok(di.exportFile(drawingPath, filter), "wrote the cave's drawing");
@@ -134,7 +158,7 @@ eqs(CsCave.pdfFiles(caveFolder).length, 1, "found the map in PDF/");
 function geoTagsIn(path) {
     var readDi = new RDocumentInterface(new RDocument(new RMemoryStorage(),
                                                       new RSpatialIndexNavel()));
-    var found = { geo: 0, stations: 0 };
+    var found = { geo: 0, stations: 0, basemaps: 0 };
     try {
         if (readDi.importFile(path, "", false) !==
                 RDocumentInterface.IoErrorNoError) {
@@ -145,8 +169,15 @@ function geoTagsIn(path) {
         for (var i = 0; i < ids.length; i++) {
             var e = readDoc.queryEntity(ids[i]);
             if (isNull(e)) { continue; }
-            if (CsTags.get(e, "Station") !== null &&
-                    CsTags.get(e, "Station") !== undefined) {
+            if (CsTags.get(e, "AerialBasemap") === "1") {
+                found.basemaps++;
+            }
+            // Non-EMPTY, not merely non-null: CsTags.get answers ""
+            // for an entity that carries no such tag, so the loose
+            // check counted the basemap image as a station the moment
+            // the fixture grew a second entity.
+            var stTag = CsTags.get(e, "Station");
+            if (stTag !== null && stTag !== undefined && stTag !== "") {
                 found.stations++;
             }
             for (var t = 0; t < CsPackage.GEO_TAGS.length; t++) {
@@ -165,6 +196,7 @@ function geoTagsIn(path) {
 var before = geoTagsIn(drawingPath);
 eqs(before.geo, 3, "the original drawing carries all three geo tags");
 eqs(before.stations, 1, "the original drawing carries its station");
+eqs(before.basemaps, 1, "the original drawing carries the aerial basemap");
 
 var sanitized = PackageCave.stageDrawing(record, stagingFolder, false);
 ok(sanitized.ok, "staged a sanitized drawing: " + sanitized.error);
@@ -172,6 +204,13 @@ eqs(sanitized.stripped, 1, "stripped the anchor from one station");
 var after = geoTagsIn(stagingFolder + "/Pitfall Cave.dxf");
 eqs(after.geo, 0, "the sanitized copy carries no geographic anchor");
 eqs(after.stations, 1, "the sanitized copy still carries the survey");
+// The reason this assertion exists: the erase used to run behind a
+// quiet "if the eraser is available" guard, which silently stopped
+// firing when the tool it named was merged away. Nothing failed. The
+// sanitized copy would simply have kept the photograph.
+eqs(after.basemaps, 0,
+    "the sanitized copy carries no aerial imagery");
+eqs(sanitized.basemaps, 1, "and says it erased the one it found");
 
 // The original is untouched -- the whole reason sanitizing happens on a
 // copy in memory.
@@ -183,6 +222,8 @@ var full = PackageCave.stageDrawing(record, fullFolder, true);
 ok(full.ok, "staged a full copy: " + full.error);
 eqs(geoTagsIn(fullFolder + "/Pitfall Cave.dxf").geo, 3,
     "the full archive keeps the anchor");
+eqs(geoTagsIn(fullFolder + "/Pitfall Cave.dxf").basemaps, 1,
+    "and keeps the aerial imagery it was told to keep");
 
 // ---------------------------------------------------------------------
 // Photographs: the metadata has to be gone, and the picture still there.

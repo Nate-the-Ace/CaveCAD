@@ -1,0 +1,97 @@
+/**
+ * SurfaceData.js
+ *
+ * One entry for everything that comes from ABOVE ground: an aerial
+ * photograph of the surface and its elevation contours, both anchored
+ * to the same geo station. The passes live in Core/CsSurfaceData.js;
+ * this is the dialog and the report -- the same split RepairDrawing.js
+ * uses for its own three passes.
+ *
+ * Formerly two menu entries, Aerial Basemap and Surface Contours, that
+ * asked the same "where is the ground?" question and failed in two
+ * separately worded ways when nobody had answered it yet.
+ */
+include("scripts/EAction.js");
+include(includeBasePath + "/../Core/CsAll.js");
+
+function SurfaceData(guiAction) {
+    EAction.call(this, guiAction);
+}
+
+SurfaceData.prototype = new EAction();
+
+SurfaceData.prototype.beginEvent = function() {
+    EAction.prototype.beginEvent.call(this);
+    surfaceDataRun();
+    this.terminate();
+};
+
+function surfaceDataRun() {
+    var doc = getDocument();
+    if (isNull(doc)) {
+        warning(qsTr("Surface Data: no active drawing document."));
+        return;
+    }
+    var di = getDocumentInterface();
+
+    var dlg = new QDialog(getMainWindow());
+    dlg.windowTitle = qsTr("Surface Data");
+    var layout = new QVBoxLayout();
+    layout.addWidget(new QLabel(
+        qsTr("Both need this drawing's geo anchor, and are asked for it "
+           + "only once.")),
+        0, 0);
+
+    var cbAerial = new QCheckBox(
+        qsTr("Aerial photograph of the surface"));
+    var cbContours = new QCheckBox(
+        qsTr("Surface elevation contours"));
+    cbAerial.checked = true;
+    cbContours.checked = true;
+    layout.addWidget(cbAerial, 0, 0);
+    layout.addWidget(cbContours, 0, 0);
+
+    var buttons = new QDialogButtonBox(QDialogButtonBox.Ok
+                                     | QDialogButtonBox.Cancel);
+    // .accepted/.rejected are signals on the wrapper: connect, do not assign.
+    buttons.accepted.connect(dlg, "accept");
+    buttons.rejected.connect(dlg, "reject");
+    layout.addWidget(buttons, 0, 0);
+    dlg.setLayout(layout);
+
+    if (dlg.exec() !== QDialog.Accepted) {
+        dlg.destroy();
+        return;
+    }
+    var opts = {
+        imagery: cbAerial.checked,
+        contours: cbContours.checked
+    };
+    dlg.destroy();
+
+    var report = CsSurfaceData.run(doc, di, opts);
+
+    // QMessageBox, not handleUserMessage: the command line escapes the
+    // text and wraps it in a <span>, so Qt reads it as rich text and
+    // every newline collapses to a space.
+    try {
+        QMessageBox.information(getMainWindow(), qsTr("Surface Data"),
+            report.lines.join("\n"));
+    } catch (e) {
+        EAction.handleUserMessage(report.lines[0]);
+    }
+}
+
+SurfaceData.init = function(basePath) {
+    var action = new RGuiAction(qsTr("Surface Data"),
+                                RMainWindowQt.getMainWindow());
+    action.setRequiresDocument(true);
+    action.setScriptFile(basePath + "/SurfaceData.js");
+    action.setIcon(basePath + "/SurfaceData.svg");
+    action.setStatusTip(qsTr("Put the surface above the cave into the "
+        + "drawing: aerial photograph, elevation contours, or both"));
+    action.setDefaultCommands(["surfacedata", "sd"]);
+    action.setGroupSortOrder(453);
+    action.setSortOrder(20);
+    action.setWidgetNames(["CaveSurveyMenu", "CaveSurveyToolBar"]);
+};
