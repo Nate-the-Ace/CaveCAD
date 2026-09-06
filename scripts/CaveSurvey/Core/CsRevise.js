@@ -2093,7 +2093,7 @@ CsRevise.apply = function(doc, di, recon, newSurvey) {
     // The profile pass's own outcome (CsDraw.survey's return value has
     // carried a `profile` field, {skipped, reason} or {path, created,
     // counts, profile}, since CsDraw.js's own profile-summary fix --
-    // ImportCaveSurvey.js, SurveyNotebook.js and RebuildSurveyData.js
+    // ImportCaveSurvey.js, SurveyNotebook.js and CsRebuild.js
     // all surface it, but this function used to call CsDraw.survey below
     // and DISCARD the return value outright, so "Revise a trip" -- the
     // flagship workflow this whole feature was built for -- was

@@ -1093,7 +1093,7 @@ CsDraw.survey = function(survey, resolved, originStation, originPos,
     // again.
     //
     // Here rather than in the notebook because EVERY draw path runs
-    // through this function -- SurveyNotebook twice, RebuildSurveyData,
+    // through this function -- SurveyNotebook twice, CsRebuild,
     // ImportCaveSurvey and CsRevise -- so one hook covers all five
     // instead of the one that happened to get mentioned.
     //
@@ -1180,7 +1180,7 @@ CsDraw.survey = function(survey, resolved, originStation, originPos,
         skipped: resolved.skipped.length - splaysDrawn - splaysSkipped,
         // {skipped, reason} or {path, created, counts, profile} -- see
         // CsDraw.profile. A NEW key on an object every existing caller
-        // already reads by name (RebuildSurveyData.js,
+        // already reads by name (CsRebuild.js,
         // ImportCaveSurvey.js, SurveyNotebook.js, CsRevise.js): none of
         // them destructure this return value positionally or iterate
         // its keys, so an additional one is additive, not breaking.

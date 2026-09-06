@@ -1,7 +1,7 @@
 // ShapedSync.js -- Sync Shaped Lines: regenerate decoration by hand.
 // The manual fallback for everything the listener normally does live
 // (headless edits, a listener that failed to install, a drawing edited
-// by an older build) -- the CalloutSync precedent, feature for feature.
+// by an older build) -- the CsCalloutSync precedent, feature for feature.
 //
 // Selection selected -> only those features. Nothing selected -> every
 // shaped line in the drawing, plus a sweep for orphaned decoration

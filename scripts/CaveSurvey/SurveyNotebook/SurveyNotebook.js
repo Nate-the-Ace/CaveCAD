@@ -1214,7 +1214,7 @@ SurveyNotebook.tripChoiceLabel = function(tripId, trip, shotCount, range) {
  * Load Drawing: reconstructs the survey from the open drawing and
  * fills the page from ONE of its trips -- the ladder becomes that
  * trip's revision UI. Multi-trip drawings get a chooser; legacy
- * (pre-v3) drawings are pointed at Rebuild Survey Data instead, since
+ * (pre-v3) drawings are pointed at Repair Drawing instead, since
  * a chain-guessed reconstruction is not safe to revise from.
  */
 SurveyNotebook.loadFromDrawing = function(w) {
@@ -1235,7 +1235,7 @@ SurveyNotebook.loadFromDrawing = function(w) {
         QMessageBox.information(null, "Survey Notebook",
             "This drawing's survey predates the exact tag schema, so " +
             "its shots can't be loaded back faithfully.\n\n" +
-            "Run Rebuild Survey Data (command: rebuildsurveydata) " +
+            "Run Repair Drawing (command: rep) " +
             "first -- it upgrades the tags in place -- then Load " +
             "Drawing again.");
         return;
@@ -2212,7 +2212,7 @@ SurveyNotebook.inferDeclination = function(w) {
  * Declination... : the guard rail in front of the dialog. A drawing
  * whose reconstruction is a guess (legacy pre-v3 tags) must not be
  * revised -- revising a guess is how drawings drift -- so it is sent
- * to Rebuild Survey Data instead.
+ * to Repair Drawing instead.
  */
 SurveyNotebook.reviseDeclinations = function(w) {
     // Any failure in here must be SEEN, not swallowed by the engine.
@@ -2245,7 +2245,7 @@ SurveyNotebook.reviseDeclinationsInner = function(w) {
         QMessageBox.information(null, "Survey Notebook",
             "This drawing's survey predates the exact tag schema, so " +
             "its shots can't be revised safely from what's stored.\n\n" +
-            "Run Rebuild Survey Data (command: rebuildsurveydata) " +
+            "Run Repair Drawing (command: rep) " +
             "first -- it upgrades the tags in place -- then revise the " +
             "declination per trip.");
         return;
@@ -2627,8 +2627,8 @@ SurveyNotebook.pageTrip = function(w) {
     if (recon.legacy === true) {
         return { error: "This drawing's survey predates the exact tag " +
             "schema, so its trips can't be identified reliably -- and " +
-            "linework has to be tied to a trip id.\n\nRun Rebuild " +
-            "Survey Data (command: rebuildsurveydata) first." };
+            "linework has to be tied to a trip id.\n\nRun Repair " +
+            "Drawing (command: rep) first." };
     }
     if (recon.survey.shots.length === 0) {
         return { error: "Nothing is drawn in this drawing yet. Draw " +

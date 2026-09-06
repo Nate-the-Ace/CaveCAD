@@ -433,7 +433,7 @@ CsLayers.SHEET_LAYERS = ["0", "Defpoints", "BORDER", "TITLE-BLOCK",
 /**
  * Which view a layer belongs to: "plan", "profile" or "sheet".
  *
- * THE ONLY PLACE THIS QUESTION IS ANSWERED. CsBind, RebuildSurveyData,
+ * THE ONLY PLACE THIS QUESTION IS ANSWERED. CsBind, CsRebuild,
  * eraseStations and the warp tools all ask here rather than each
  * matching a prefix their own way -- those are shipped plan-view files,
  * and a second spelling of "is this profile?" is how they start

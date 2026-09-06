@@ -10,7 +10,7 @@
 //
 // TAG NAMESPACE. Profile geometry carries Profile* tags, a namespace of
 // its own, so that plan-side scanners (CsDraw.eraseStations,
-// RebuildSurveyData, CsRevise) can never mistake an elevation for a
+// CsRebuild, CsRevise) can never mistake an elevation for a
 // plan even if the two drawings are one day merged. erase() keys on
 // BOTH this namespace AND layer membership (CsProfileDraw.LAYERS()) --
 // the tag alone is what THIS module writes, never a guarantee about

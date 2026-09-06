@@ -5,7 +5,7 @@
  * real RTextEntity plus one real RLeaderEntity per tip, joined by a
  * shared CalloutId in CsTags XDATA (see Core/CsCallout.js). The text
  * stays an ordinary text entity, so QCAD's native text editor, grips
- * and property editor keep working unchanged; CalloutSync (and later
+ * and property editor keep working unchanged; CsCalloutSync (and later
  * CalloutListener) is what keeps the arrows glued to it afterwards.
  *
  * SHAPE: this file follows AlignImage.js, the suite's reference
@@ -201,7 +201,7 @@ Callout.prototype.pickCoordinate = function(event, preview) {
  * this preview is where they earn their place: the caver sees, before
  * committing, which side of the note the arrows will leave from and
  * roughly where they will land, rather than finding out only after
- * placing the text and running CalloutSync. `side` is not drawn as its
+ * placing the text and running CsCalloutSync. `side` is not drawn as its
  * own shape -- it is implicit in which edge of the placeholder box the
  * landing (and therefore every branch's last segment) sits on -- but
  * without reflow returning it there would be no principled way to

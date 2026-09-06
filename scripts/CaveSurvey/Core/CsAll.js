@@ -77,6 +77,10 @@ include(includeBasePath + "/CsLayerVariants.js");
 // CsLayers.styleOf to layers that already exist, and resolves variant
 // layers through CsLayerVariants.baseOf.
 include(includeBasePath + "/CsRestyle.js");
+include(includeBasePath + "/CsRebuild.js");
+include(includeBasePath + "/CsCalloutSync.js");
+// After CsRebuild, CsCalloutSync and CsRestyle: CsRepair calls all three.
+include(includeBasePath + "/CsRepair.js");
 include(includeBasePath + "/CsBackup.js");
 include(includeBasePath + "/CsTrace.js");
 include(includeBasePath + "/CsStore.js");

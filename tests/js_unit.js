@@ -199,7 +199,16 @@ var CORE_FILES_NOT_LOADED = [
     // Every function takes a real RDocument/RDocumentInterface and
     // reads QCAD's own image mapping back; there is nothing pure to
     // call from here. Covered by tests/scan_reanchor_run.js.
-    "scripts/CaveSurvey/Core/CsScanReanchor.js"
+    "scripts/CaveSurvey/Core/CsScanReanchor.js",
+    // Every function takes a real RDocument/RDocumentInterface (reflow
+    // and rekey both write entities) and needs Callout/CalloutWrite.js,
+    // which this file's own loadRepoScript cannot pull in the same way
+    // CsAll.js's include() does. Covered by tests/callout_sync.js.
+    "scripts/CaveSurvey/Core/CsCalloutSync.js",
+    // Thin orchestration over CsRebuild/CsRestyle/CsCalloutSync, all
+    // three of which need a real document. Covered by
+    // tests/repair_drawing_run.js.
+    "scripts/CaveSurvey/Core/CsRepair.js"
 ];
 
 // ---------------------------------------------------------------------
@@ -7259,21 +7268,13 @@ if (!IS_NODE) {
     })();
 
     // -----------------------------------------------------------------
-    // RebuildSurveyData: upgrading a drawing to tag schema v3.
+    // CsRebuild: upgrading a drawing to tag schema v3.
     //
-    // The tool file is loaded like a Core file (loadRepoScript strips
-    // its include() lines); its wiring block runs at load and needs an
-    // EAction base class, which the headless engine has no GUI for --
-    // stub one if the real class isn't there.
+    // Lifted into Core (was RebuildSurveyData.js, the Rebuild Survey
+    // Data tool) so RepairDrawing/RepairDrawing.js and CsRepair can call
+    // it headlessly; loaded here the same way as any other Core file.
     // -----------------------------------------------------------------
-    if (typeof EAction === "undefined") {
-        EAction = function() {};
-        EAction.prototype.beginEvent = function() {};
-        EAction.prototype.terminate = function() {};
-        EAction.handleUserMessage = function() {};
-    }
-    loadRepoScript(
-        "scripts/CaveSurvey/RebuildSurveyData/RebuildSurveyData.js");
+    loadRepoScript("scripts/CaveSurvey/Core/CsRebuild.js");
 
     // every tagged station name -> its drawn position
     var rsdPositions = function(doc) {
@@ -7321,7 +7322,7 @@ if (!IS_NODE) {
         vsv.shots.push(vSteep);
         vsv.shots.push(vVert);
         vsv.shots.push(vNoInc);
-        var conv = RebuildSurveyData.toSlopeDistances(vsv);
+        var conv = CsRebuild.toSlopeDistances(vsv);
         ok(conv.scaled === 1, "rsd-slope: one shot rescaled, got " +
             conv.scaled);
         ok(conv.vertical === 1, "rsd-slope: one vertical shot skipped, " +
@@ -7340,11 +7341,11 @@ if (!IS_NODE) {
         // Task 5: control ties got their own counter, so the total the
         // rebuild reports has to count them. Missing tiesDrawn here
         // would under-report the shots a two-entrance cave carries.
-        ok(RebuildSurveyData.shotCount({ shotsDrawn: 2, closuresDrawn: 1,
+        ok(CsRebuild.shotCount({ shotsDrawn: 2, closuresDrawn: 1,
             tiesDrawn: 3, hiddenDrawn: 4, splaysDrawn: 5,
             ghostDrawn: 99 }) === 15,
             "rsd-count: ties count toward the drawn shot total and ghosts " +
-            "do not, got " + RebuildSurveyData.shotCount({ shotsDrawn: 2,
+            "do not, got " + CsRebuild.shotCount({ shotsDrawn: 2,
                 closuresDrawn: 1, tiesDrawn: 3, hiddenDrawn: 4,
                 splaysDrawn: 5, ghostDrawn: 99 }));
     })();
@@ -7411,7 +7412,7 @@ if (!IS_NODE) {
         RSettings.setValue("CaveSurvey/ProfileAuto", false);
         var rep;
         try {
-            rep = RebuildSurveyData.rebuild(doc, di);
+            rep = CsRebuild.rebuild(doc, di);
         } finally {
             RSettings.setValue("CaveSurvey/ProfileAuto", hadAutoRSD);
         }
@@ -7441,7 +7442,7 @@ if (!IS_NODE) {
             "inferred from geometry (slope = plan/cos(inclination))")
             >= 0, "rsd-upgrade: report says distances were inferred, got '" +
             rep.message + "'");
-        // CRITICAL 2: RebuildSurveyData.redraw's own CsDraw.survey call
+        // CRITICAL 2: CsRebuild.redraw's own CsDraw.survey call
         // runs a profile pass too -- before this fix the return value's
         // own .profile field was read only for shotCount(), so whatever
         // that pass did was completely silent. Same words as
@@ -7573,7 +7574,7 @@ if (!IS_NODE) {
         RSettings.setValue("CaveSurvey/ProfileAuto", false);
         var rep1;
         try {
-            rep1 = RebuildSurveyData.rebuild(doc, di);
+            rep1 = CsRebuild.rebuild(doc, di);
         } finally {
             RSettings.setValue("CaveSurvey/ProfileAuto", hadAutoRSD1);
         }
@@ -7593,7 +7594,7 @@ if (!IS_NODE) {
             "rsd-idem: CRITICAL 2 -- the heal path's skipped profile " +
             "pass reaches the report too, got '" + rep1.message + "'");
 
-        var rep2 = RebuildSurveyData.rebuild(doc, di);
+        var rep2 = CsRebuild.rebuild(doc, di);
         var count2 = countAt();
         var pos2 = rsdPositions(doc);
         ok(rep2.mode === "heal", "rsd-idem: run 2 mode 'heal', got '" +
@@ -8181,6 +8182,17 @@ if (!IS_NODE) {
     // in the real app)
     loadRepoScript("scripts/CaveSurvey/Core/CsGeoProject.js");
     loadRepoScript("scripts/CaveSurvey/Core/CsLocationPick.js");
+
+    // SurveyNotebook.js is a TOOL file: its wiring block runs
+    // `SurveyNotebook.prototype = new EAction();` at load, which the
+    // headless engine has no GUI to provide -- stub it if the real
+    // class isn't there.
+    if (typeof EAction === "undefined") {
+        EAction = function() {};
+        EAction.prototype.beginEvent = function() {};
+        EAction.prototype.terminate = function() {};
+        EAction.handleUserMessage = function() {};
+    }
     loadRepoScript("scripts/CaveSurvey/SurveyNotebook/SurveyNotebook.js");
 
     // -----------------------------------------------------------------
@@ -9522,7 +9534,7 @@ if (!IS_NODE) {
     // -----------------------------------------------------------------
     (function() {
         loadRepoScript(
-            "scripts/CaveSurvey/RebuildSurveyData/RebuildSurveyData.js");
+            "scripts/CaveSurvey/Core/CsRebuild.js");
         var doc = new RDocument(new RMemoryStorage(),
             new RSpatialIndexNavel());
         var di = new RDocumentInterface(doc);
@@ -9556,7 +9568,7 @@ if (!IS_NODE) {
             "rebuild-heal: the drawing really sits on adjusted, not " +
             "as-surveyed, coordinates -- gap " + rawGap);
 
-        var rep = RebuildSurveyData.rebuild(doc, di);
+        var rep = CsRebuild.rebuild(doc, di);
         ok(rep.mode === "heal",
             "rebuild-heal: took the heal path, got '" + rep.mode + "'");
         var posAfter = CsRevise.stationPositions(doc);

@@ -58,23 +58,21 @@ for (var fi = 0; fi < FILES.length; fi++) {
     loadRepoScript(FILES[fi]);
 }
 
-// CalloutSync.js is a COMMAND file: it include()s EAction and CsAll,
-// which the bare engine has no path for. Load only its static half by
-// stripping the includes and the EAction plumbing -- the functions under
-// test (run, rekeyDuplicates, targetIds, textsById, leaderDistanceTo)
-// touch none of it.
+// CsCalloutSync.js includes CalloutWrite.js itself (Core files normally
+// don't reach outside Core, but this engine has no other way to get the
+// QCAD-shaped writes it makes) -- the bare engine has no include(), and
+// CalloutWrite is already loaded above via FILES, so strip that one line
+// before eval rather than loading it a second time under a function that
+// doesn't exist here.
 (function() {
-    var file = new QFile(repoRoot + "/scripts/CaveSurvey/CalloutSync/CalloutSync.js");
+    var file = new QFile(repoRoot + "/scripts/CaveSurvey/Core/CsCalloutSync.js");
     if (!file.open(QIODevice.ReadOnly | QIODevice.Text)) {
-        throw new Error("cannot open CalloutSync.js");
+        throw new Error("cannot open CsCalloutSync.js");
     }
     var stream = new QTextStream(file);
     var src = stream.readAll();
     file.close();
     src = src.replace(/^include\(.*$/gm, "");
-    src = src.replace(/^CalloutSync\.prototype[\s\S]*?^};$/gm, "");
-    src = src.replace(/^function CalloutSync\(guiAction\) \{[\s\S]*?^\}$/m,
-        "function CalloutSync() {}");
     (0, eval)(src);
 })();
 
@@ -122,7 +120,7 @@ var id = CalloutWrite.create(doc, di, {
     mop.addObject(m.text, false);
     di.applyOperation(mop);
 
-    var report = CalloutSync.run(doc, di);
+    var report = CsCalloutSync.run(doc, di);
     ok(report.indexOf("Reflowed 1") >= 0,
         "run() reports one callout reflowed (got: " +
         report.split("\n")[0] + ")");
@@ -162,7 +160,7 @@ var id = CalloutWrite.create(doc, di, {
     });
     var vBefore = CalloutWrite.members(doc, cid).leaders[0]
         .getData().countVertices();
-    CalloutSync.run(doc, di);
+    CsCalloutSync.run(doc, di);
     var d = CalloutWrite.members(doc, cid).leaders[0].getData();
     // Curves are traced as SEGMENTS, not carried as a bulge: an arc is
     // destroyed by a DXF save (the exporter drops the arc's start vertex,
@@ -212,13 +210,13 @@ var id = CalloutWrite.create(doc, di, {
     op.addObject(l2, false);
     di.applyOperation(op);
 
-    eqs(CalloutSync.textsById(doc)[aId].length, 2,
+    eqs(CsCalloutSync.textsById(doc)[aId].length, 2,
         "the forged paste really does leave two texts on one id");
 
-    var rekeyed = CalloutSync.rekeyDuplicates(doc, di);
+    var rekeyed = CsCalloutSync.rekeyDuplicates(doc, di);
     eqs(rekeyed, 1, "rekeyDuplicates repairs exactly one of the pair");
 
-    var byId = CalloutSync.textsById(doc);
+    var byId = CsCalloutSync.textsById(doc);
     eqs(byId[aId].length, 1,
         "the ORIGINAL id is now held by exactly one text");
 
@@ -265,7 +263,7 @@ var id = CalloutWrite.create(doc, di, {
     lop.addObject(lay, false);
     di.applyOperation(lop);
 
-    var report = CalloutSync.run(doc, di);
+    var report = CsCalloutSync.run(doc, di);
     ok(report.indexOf("Could not update") >= 0,
         "a locked layer is named in the report, not silently skipped");
     ok(report.indexOf("LOCKED") >= 0,
@@ -507,7 +505,7 @@ var id = CalloutWrite.create(doc, di, {
 // A label is a snapshot of the floor at one point at one moment. Correct
 // a reading or add a D that was missing and the number on the map is a
 // lie still looking authoritative. Every draw re-derives them from the
-// leg and fraction each one stores; so does cscsync.
+// leg and fraction each one stores; so does CsCalloutSync.run.
 // ---------------------------------------------------------------------
 (function() {
     function shotOf(from, to, d, az, inc) {

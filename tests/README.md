@@ -1,6 +1,6 @@
 # Tests
 
-Thirteen stages, cheapest first, all driven by one script:
+Fourteen stages, cheapest first, all driven by one script:
 
     ./tests/run_all.sh             what has to pass while developing
     ./tests/run_all.sh --publish   also what has to pass before releasing
@@ -21,7 +21,7 @@ virtualenv, no `pip install`, nothing to skip cleanly if it's missing:
 `tests/test_addon.py` imports only `os`, `re`, `shutil`, `subprocess`,
 `tempfile`, `unittest` and `xml.etree.ElementTree`.
 
-## Stage 1/9 -- `test_addon.py` (structural tests)
+## Stage 1/10 -- `test_addon.py` (structural tests)
 
 Checks the add-on's structure without running any of it: every tool lives in
 a folder named after it, nothing loose sits beside `CaveSurvey.js`,
@@ -36,7 +36,7 @@ that no standalone `NSS_Cave_Template_PROFILE.dxf` has come back. These are the 
 otherwise show up as a tool mysteriously absent from the menu, or a layer
 silently missing from a fresh drawing.
 
-## Stage 2/9 -- `js_syntax.js` (add-on syntax check)
+## Stage 2/10 -- `js_syntax.js` (add-on syntax check)
 
 Parses every script under `scripts/CaveSurvey/` inside QCAD's own ECMAScript
 engine, by wrapping each in a function expression and `eval`-ing it -- which
@@ -44,7 +44,7 @@ parses without executing, so no dialog opens and `RMainWindowQt` is never
 touched. Catches a syntax error that would otherwise surface only as a tool
 silently missing from the menu at runtime.
 
-## Stage 3/9 -- `js_unit.js` (Core unit tests)
+## Stage 3/10 -- `js_unit.js` (Core unit tests)
 
 Unit tests for `scripts/CaveSurvey/Core/*.js` -- the pure survey engine
 (parsing, network resolution, LRUD, adjustment, the extended-elevation
@@ -61,7 +61,7 @@ return 0 for two distinct items produces different geometry in each. Every
 Core file loaded here must stay loadable under plain node: nothing may touch
 `R*`/`Q*` globals at file (as opposed to function-body) scope.
 
-## Stage 4/9 -- `profile_draw_roundtrip.js`
+## Stage 4/10 -- `profile_draw_roundtrip.js`
 
 QCAD-context only (real `RDocument`/`RDocumentInterface`), so it cannot run
 under node. Proves the drawing half (`Core/CsProfileDraw.js`): rendering a
@@ -74,7 +74,7 @@ extents and the user's tracing travels with it, and a line traced on the
 elevation binds to elevation stations rather than to the plan stations a
 few units away in absolute coordinates.
 
-## Stage 5/9 -- `generate_profile_run.js`
+## Stage 5/10 -- `generate_profile_run.js`
 
 `tests/cross_section_run.js` -- the cross-section lifecycle against a real document: cut a section on a fixture survey, place it as a block on a leader, change the survey and assert the block DEFINITION followed while the REFERENCE stayed put, then assert a frozen section is skipped and counted and a section whose leg is gone is counted lost and left in the drawing. Needs the real engine: every bug this feature shipped (a false re-entrant on every LRUD diamond, an inverted scale caption, sections drawn on their side) was invisible to the pure tests and obvious the first time the code met an RDocument.
 
@@ -103,7 +103,7 @@ included, the elevation is drawn into that same drawing, and the report
 reaches the user through `QMessageBox.information` with its newlines
 intact.
 
-## Stage 6/9 -- `align_image_frame.js`
+## Stage 6/10 -- `align_image_frame.js`
 
 Calls `AlignImage.prototype.transform` -- the one per-entity hook this repo
 owns, since stock QCAD's `Transform` owns the selection walk -- against a
@@ -175,12 +175,22 @@ All learned the hard way, and relevant to any new `-autostart` test script:
   exercised end-to-end by a headless script, only by hand in the real GUI or
   against injected fakes.
 
-## Stage 7/9 -- `callout_write.js`, Stage 8/9 -- `callout_sync.js`
+## Stage 7/10 -- `callout_write.js`, Stage 8/10 -- `callout_sync.js`
 
 The callout suite against a real document: what a note writes, and what a
 revision does to the notes already drawn.
 
-## Stage 9/9 -- `package_cave.js`
+## Stage 9/10 -- `repair_drawing_run.js`
+
+`CsRepair.run` against a real document -- the merge of the former Rebuild
+Survey Data, Restyle Layers and Callout Sync menu entries into one Repair
+Drawing entry. Each pass keeps its own engine coverage; what this stage
+proves is that `CsRepair` drives all three in the order that matters
+(survey data, then layers, then callouts -- see `Core/CsRepair.js` for
+why), that every pass reports a line whether it ran or was skipped, and
+that skipping every pass changes nothing.
+
+## Stage 10/10 -- `package_cave.js`
 
 Package Cave Project against real files in a temp cave folder. It writes a DXF
 carrying both survey tags and a geographic anchor, stages a sanitized copy and a

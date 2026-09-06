@@ -506,7 +506,7 @@ CalloutWrite.textHeight = function(doc) {
  * imperial drawing, " m" for a metric one -- CsCallout.elevLabel's own
  * `suffix` parameter. Off the drawing's own unit via CsUnits, never a
  * constant, so a metric survey does not get labelled in feet. Lives
- * here rather than on either CalloutElev or CalloutSync because BOTH
+ * here rather than on either CalloutElev or CsCalloutSync because BOTH
  * need it, and a command reaching into a sibling command's file for a
  * helper is how a silent include failure gets introduced.
  */

@@ -159,7 +159,7 @@ function scanProfileEntities(doc) {
 }
 
 /** True if entity is a plain point (RS.EntityPoint), the same getType()
- *  idiom RebuildSurveyData.js uses to tell entity kinds apart -- used
+ *  idiom CsRebuild.js uses to tell entity kinds apart -- used
  *  below to separate a station's POINT from its text LABEL, since both
  *  carry the identical ProfileStation tag. */
 function isPointEntity(entity) {
@@ -733,7 +733,7 @@ if (bandQ !== null && bandR !== null) {
     // Both the station POINT and its text LABEL carry ProfileStation --
     // that is what property 3 (every entity carries its own tag) above
     // already checks -- so this keeps only RS.EntityPoint (the same
-    // getType() idiom RebuildSurveyData.js already uses to tell entity
+    // getType() idiom CsRebuild.js already uses to tell entity
     // kinds apart) to compare the point's own, unadorned position; its
     // label sits TEXT_HEIGHT*1.5 above it on purpose and would throw
     // this comparison off by exactly that much.
@@ -3058,7 +3058,7 @@ var ABANDONED_TRACING_WARNING =
 // THE REBUILD AND THE ERASE BOTH IGNORE THE PROFILE FRAME.
 //
 // Neither needed a production change, and that is exactly why both are
-// pinned here. RebuildSurveyData recovers stations by the "Station"
+// pinned here. CsRebuild recovers stations by the "Station"
 // tag; CsDraw.eraseStations kills by "Station"/"LRUDName"/"SplayName".
 // Profile geometry carries the Profile* namespace on profile-frame
 // layers, so both walk past it -- for free, by naming, not by code. A

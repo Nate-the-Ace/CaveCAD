@@ -26,44 +26,25 @@
  * point -- a stale leader on a plotted map is the failure this tool
  * exists to prevent, and one that is silently skipped is worse than one
  * that was never attempted.
+ *
+ * Was the whole of the Callout Sync menu entry; lifted into Core so
+ * CsRepair can run it as the last of three passes (see CsRepair.js for
+ * why it has to run last -- a restyle can move a note's layer out from
+ * under its arrows). RepairDrawing/RepairDrawing.js is now the only
+ * presenter over CsCalloutSync.run.
+ *
+ * Needs Callout/CalloutWrite.js, which is outside Core -- included
+ * directly below rather than through CsAll.js, since Core files never
+ * reach outside Core and CalloutWrite is the one thing this engine
+ * cannot do its job without.
  */
-include("scripts/EAction.js");
-include(includeBasePath + "/../Core/CsAll.js");
 include(includeBasePath + "/../Callout/CalloutWrite.js");
 
-function CalloutSync(guiAction) {
-    EAction.call(this, guiAction);
-}
-
-CalloutSync.prototype = new EAction();
-
-CalloutSync.prototype.beginEvent = function() {
-    EAction.prototype.beginEvent.call(this);
-    var doc = this.getDocument();
-    var di = this.getDocumentInterface();
-    if (isNull(doc) || isNull(di)) {
-        this.terminate();
-        return;
-    }
-
-    var report = CalloutSync.run(doc, di);
-
-    // QMessageBox, not handleUserMessage: that cannot show multi-line
-    // text -- CommandLine escapes with RS.escape and wraps the result in
-    // a <span>, so Qt parses it as rich text and every newline collapses
-    // to a space.
-    try {
-        QMessageBox.information(RMainWindowQt.getMainWindow(),
-            qsTr("Callout Sync"), report);
-    } catch (e) {
-        EAction.handleUserMessage(report.split("\n")[0]);
-    }
-    this.terminate();
-};
+var CsCalloutSync = {};
 
 /** Distance from a leader's LANDING vertex to a text box's centre. Used
  *  only to break a duplicated id apart, so nearest-wins is enough. */
-CalloutSync.leaderDistanceTo = function(leaderEntity, box) {
+CsCalloutSync.leaderDistanceTo = function(leaderEntity, box) {
     var d = leaderEntity.getData();
     var n = d.countVertices();
     if (n === 0) {
@@ -80,7 +61,7 @@ CalloutSync.leaderDistanceTo = function(leaderEntity, box) {
  * Every text entity carrying each CalloutId: {id: [entity, ...]}.
  * More than one entry for an id means a copied callout.
  */
-CalloutSync.textsById = function(doc) {
+CsCalloutSync.textsById = function(doc) {
     var out = {};
     var ids = doc.queryAllEntities(false, true);
     for (var i = 0; i < ids.length; i++) {
@@ -115,8 +96,8 @@ CalloutSync.textsById = function(doc) {
  * insertion-ordered, so without it which of the pair keeps the id
  * varies from run to run.
  */
-CalloutSync.rekeyDuplicates = function(doc, di) {
-    var byId = CalloutSync.textsById(doc);
+CsCalloutSync.rekeyDuplicates = function(doc, di) {
+    var byId = CsCalloutSync.textsById(doc);
     var rekeyed = 0;
 
     for (var id in byId) {
@@ -158,9 +139,9 @@ CalloutSync.rekeyDuplicates = function(doc, di) {
 
             for (var l = 0; l < leaders.length; l++) {
                 var best = 0;
-                var bestD = CalloutSync.leaderDistanceTo(leaders[l], boxes[0]);
+                var bestD = CsCalloutSync.leaderDistanceTo(leaders[l], boxes[0]);
                 for (var b = 1; b < boxes.length; b++) {
-                    var dd = CalloutSync.leaderDistanceTo(leaders[l], boxes[b]);
+                    var dd = CsCalloutSync.leaderDistanceTo(leaders[l], boxes[b]);
                     if (dd < bestD) {
                         bestD = dd;
                         best = b;
@@ -190,7 +171,7 @@ CalloutSync.rekeyDuplicates = function(doc, di) {
  * precedent) rather than inventing a second vocabulary for the same
  * situation.
  */
-CalloutSync.refusalFor = function(doc, layerName) {
+CsCalloutSync.refusalFor = function(doc, layerName) {
     var lay = null;
     try {
         lay = doc.queryLayer(layerName);
@@ -217,7 +198,7 @@ CalloutSync.refusalFor = function(doc, layerName) {
 };
 
 /** Selected callout ids, or every id when nothing is selected. */
-CalloutSync.targetIds = function(doc) {
+CsCalloutSync.targetIds = function(doc) {
     var selected = doc.querySelectedEntities();
     if (selected.length === 0) {
         return CalloutWrite.existingIds(doc);
@@ -242,13 +223,13 @@ CalloutSync.targetIds = function(doc) {
  * Reflow the selected callouts, or every callout when nothing is
  * selected. Returns a human-readable multi-line report.
  */
-CalloutSync.run = function(doc, di) {
+CsCalloutSync.run = function(doc, di) {
     // Repair identity BEFORE reflowing: reflowing a duplicated id moves
     // the wrong arrows, so doing it in the other order would first make
     // the drawing worse.
-    var rekeyed = CalloutSync.rekeyDuplicates(doc, di);
+    var rekeyed = CsCalloutSync.rekeyDuplicates(doc, di);
 
-    var ids = CalloutSync.targetIds(doc);
+    var ids = CsCalloutSync.targetIds(doc);
     var done = 0;
     var unchanged = 0;
     var refused = [];
@@ -274,7 +255,7 @@ CalloutSync.run = function(doc, di) {
             CsCallout.STYLE_DEFAULT;
         var layerName = CsCallout.STYLES[style] ||
             CsCallout.STYLES[CsCallout.STYLE_DEFAULT];
-        var why = CalloutSync.refusalFor(doc, layerName);
+        var why = CsCalloutSync.refusalFor(doc, layerName);
         if (why !== null) {
             refused.push(id + " (" + why + ")");
             continue;
@@ -358,18 +339,4 @@ CalloutSync.run = function(doc, di) {
         }
     }
     return lines.join("\n");
-};
-
-CalloutSync.init = function(basePath) {
-    var action = new RGuiAction(qsTr("Callout Sync"),
-                                RMainWindowQt.getMainWindow());
-    action.setRequiresDocument(true);
-    action.setScriptFile(basePath + "/CalloutSync.js");
-    action.setIcon(basePath + "/CalloutSync.svg");
-    action.setStatusTip(qsTr("Put every callout's arrows back on its " +
-        "note, after the note has been moved or reworded"));
-    action.setDefaultCommands(["calloutsync", "csync", "cscalloutsync", "cscsync"]);
-    action.setGroupSortOrder(455);
-    action.setSortOrder(30);
-    action.setWidgetNames(["CaveSurveyMenu", "CaveSurveyToolBar"]);
 };

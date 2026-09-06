@@ -1502,10 +1502,8 @@ MENU = {
     "Callout/Callout.js":                 (454, 40, ["callout", "cal", "cscallout", "cscal"]),
     "CalloutElev/CalloutElev.js":         (454, 50, ["calloutelev", "cel", "cscalloutelev", "cselev"]),
     # 455 -- fix and share
-    "RebuildSurveyData/RebuildSurveyData.js": (455, 10, ["rebuildsurveydata", "rsd"]),
-    "RestyleLayers/RestyleLayers.js":     (455, 20, ["restylelayers", "rsl"]),
-    "CalloutSync/CalloutSync.js":         (455, 30, ["calloutsync", "csync", "cscalloutsync", "cscsync"]),
-    "PackageCave/PackageCave.js":         (455, 40, ["packagecave", "pc", "pkgcave"]),
+    "RepairDrawing/RepairDrawing.js":     (455, 10, ["repairdrawing", "rep"]),
+    "PackageCave/PackageCave.js":         (455, 20, ["packagecave", "pc", "pkgcave"]),
 }
 
 

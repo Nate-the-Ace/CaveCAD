@@ -76,7 +76,7 @@ PackageCave.init = function(basePath) {
         "sanitized to share, or a full archive to keep"));
     action.setDefaultCommands(["packagecave", "pc", "pkgcave"]);
     action.setGroupSortOrder(455);
-    action.setSortOrder(40); // housekeeping, so: last
+    action.setSortOrder(20); // housekeeping, so: last
     action.setWidgetNames(["CaveSurveyMenu", "CaveSurveyToolBar"]);
 };
 

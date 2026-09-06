@@ -1,7 +1,12 @@
-// RebuildSurveyData.js
+// CsRebuild.js
 //
-// QCAD add-on tool: bring an OLD drawing up to the current tag schema,
-// so every tool in the suite can read it.
+// Core engine: bring an OLD drawing up to the current tag schema, so
+// every tool in the suite can read it.
+//
+// Was the whole of the Rebuild Survey Data menu entry; lifted into Core
+// so CsRepair can run it as one pass of three (see CsRepair.js for why
+// rebuild has to run first). RepairDrawing/RepairDrawing.js is now the
+// only presenter over CsRebuild.rebuild.
 //
 // Three kinds of old drawing, handled in this order:
 //
@@ -57,21 +62,17 @@
 // Safe to re-run.
 //
 // USAGE:
-//   Cave Survey > Rebuild Survey Data   (or type "rsd")
+//   Cave Survey > Repair Drawing   (or type "rep") -- the "Survey data"
+//   pass, run first of three.
 
-include("scripts/EAction.js");
-include("scripts/simple.js");
-include(includeBasePath + "/../Core/CsAll.js");
+var CsRebuild = {};
 
 // ============================================================
 // Headless API.
 //
-// RebuildSurveyData.rebuild(doc, di) does the whole job and returns a
-// report; the EAction wiring below is a thin presenter over it, and the
-// unit tests drive it directly with no GUI at all. (The RebuildSurveyData
-// function itself is declared by the wiring block at the bottom of this
-// file -- function declarations hoist, so hanging properties off it up
-// here is safe.)
+// CsRebuild.rebuild(doc, di) does the whole job and returns a report;
+// RepairDrawing/RepairDrawing.js is a thin presenter over it, and the
+// unit tests drive it directly with no GUI at all.
 // ============================================================
 
 /**
@@ -80,7 +81,7 @@ include(includeBasePath + "/../Core/CsAll.js");
  * 1e-6 is within about 0.00006 degrees of straight up or down -- only
  * genuinely degenerate shots, never a steep-but-real one.
  */
-RebuildSurveyData.VERTICAL_COS_EPS = 1e-6;
+CsRebuild.VERTICAL_COS_EPS = 1e-6;
 
 /**
  * The legacy survey-level metadata block, written by pre-trip builds on
@@ -92,7 +93,7 @@ RebuildSurveyData.VERTICAL_COS_EPS = 1e-6;
  * \return {name, date, team, declination (null if absent),
  *          declinationSource, distanceUnit}
  */
-RebuildSurveyData.legacyMeta = function(doc) {
+CsRebuild.legacyMeta = function(doc) {
     var meta = { name: "", date: "", team: "", declination: null,
         declinationSource: "", distanceUnit: "" };
     var pairs = [["SurveyName", "name"], ["SurveyDate", "date"],
@@ -151,7 +152,7 @@ RebuildSurveyData.legacyMeta = function(doc) {
  * \return {scaled, vertical} how many shots were rescaled, and how
  *         many were left alone as near-vertical
  */
-RebuildSurveyData.toSlopeDistances = function(survey) {
+CsRebuild.toSlopeDistances = function(survey) {
     var scaled = 0, vertical = 0;
     for (var i = 0; i < survey.shots.length; i++) {
         var shot = survey.shots[i];
@@ -162,7 +163,7 @@ RebuildSurveyData.toSlopeDistances = function(survey) {
             continue;
         }
         var c = Math.cos(shot.inclination * Math.PI / 180.0);
-        if (Math.abs(c) < RebuildSurveyData.VERTICAL_COS_EPS) {
+        if (Math.abs(c) < CsRebuild.VERTICAL_COS_EPS) {
             vertical++;
             continue;
         }
@@ -200,7 +201,7 @@ RebuildSurveyData.toSlopeDistances = function(survey) {
  *
  * \return {erased, drawn, resolved}
  */
-RebuildSurveyData.redraw = function(doc, di, survey, anchorName, anchorPos,
+CsRebuild.redraw = function(doc, di, survey, anchorName, anchorPos,
         anchorZ, adjustOpts) {
     if (anchorZ === undefined || anchorZ === null || isNaN(anchorZ)) {
         anchorZ = 0;
@@ -231,7 +232,7 @@ RebuildSurveyData.redraw = function(doc, di, survey, anchorName, anchorPos,
  * counted: the CTRL-RAW ghost is a second picture of shots already
  * counted here, not more shots.
  */
-RebuildSurveyData.shotCount = function(drawn) {
+CsRebuild.shotCount = function(drawn) {
     return drawn.shotsDrawn + drawn.closuresDrawn + (drawn.tiesDrawn || 0) +
         drawn.hiddenDrawn + drawn.splaysDrawn;
 };
@@ -243,7 +244,7 @@ RebuildSurveyData.shotCount = function(drawn) {
  * use: this is a "something you expected did not happen" channel, not
  * the full counts/findings report GenerateProfile gives).
  *
- * `drawn` is CsDraw.survey's own return value (RebuildSurveyData.redraw
+ * `drawn` is CsDraw.survey's own return value (CsRebuild.redraw
  * hands it straight back as `.drawn`), which has carried a `.profile`
  * field ({skipped, reason} or {path, created, counts, profile}) since
  * CsDraw.js's own profile-summary fix -- ImportCaveSurvey.js,
@@ -258,7 +259,7 @@ RebuildSurveyData.shotCount = function(drawn) {
  *         existing message with one blank between sentences) and no
  *         trailing space, or "" when there is nothing to say
  */
-RebuildSurveyData.profileNote = function(drawn) {
+CsRebuild.profileNote = function(drawn) {
     if (drawn === undefined || drawn === null ||
             drawn.profile === undefined || drawn.profile === null ||
             !drawn.profile.skipped) {
@@ -289,7 +290,7 @@ RebuildSurveyData.profileNote = function(drawn) {
  *   warning   why nothing could be done ("" if all well)
  * }
  */
-RebuildSurveyData.rebuild = function(doc, di) {
+CsRebuild.rebuild = function(doc, di) {
     var report = { mode: "nothing", stations: 0, shots: 0, scaled: 0,
         vertical: 0, splaysUnplaceable: 0, inferred: false, erased: 0,
         tagsWritten: 0, lrudNamed: 0, hadStore: false, message: "",
@@ -308,7 +309,7 @@ RebuildSurveyData.rebuild = function(doc, di) {
     if (recon.legacy === true && haveAnchor) {
         // ---- pre-v3 tagged drawing: convert, then redraw as v3 ------
         var survey = recon.survey;
-        var meta = RebuildSurveyData.legacyMeta(doc);
+        var meta = CsRebuild.legacyMeta(doc);
         // SurveyName held caveName||name; CsRevise reads it back as the
         // cave name, so put it there (see CsRevise.surveyFromDocument).
         if (meta.name !== "") {
@@ -323,7 +324,7 @@ RebuildSurveyData.rebuild = function(doc, di) {
             survey.distanceUnit = meta.distanceUnit;
         }
 
-        var conv = RebuildSurveyData.toSlopeDistances(survey);
+        var conv = CsRebuild.toSlopeDistances(survey);
         report.scaled = conv.scaled;
         report.vertical = conv.vertical;
         report.inferred = true;
@@ -343,13 +344,13 @@ RebuildSurveyData.rebuild = function(doc, di) {
         // NaN anchor.z and propagate silently through the redraw.
         var anchorZ = CsRevise.anchorZOf(recon, recon.anchorName);
 
-        var up = RebuildSurveyData.redraw(doc, di, survey,
+        var up = CsRebuild.redraw(doc, di, survey,
             recon.anchorName, recon.anchorPos, anchorZ,
             CsAdjust.optionsFromTags(recon.adjustTags || {}));
         report.mode = "upgrade";
         report.erased = up.erased;
         report.stations = up.drawn.stationsDrawn;
-        report.shots = RebuildSurveyData.shotCount(up.drawn);
+        report.shots = CsRebuild.shotCount(up.drawn);
         // SPLAY LOSS ON THIS PATH, NAMED RATHER THAN SILENT. A pre-v3
         // splay ray carries only its name, so CsTags.collectSplays
         // recovers it from its TIP's position -- which gives a bearing
@@ -380,7 +381,7 @@ RebuildSurveyData.rebuild = function(doc, di) {
                 (report.splaysUnplaceable === 1 ? "" : "s") +
                 " had no inclination on record and could not be redrawn." :
                 "") +
-            RebuildSurveyData.profileNote(up.drawn);
+            CsRebuild.profileNote(up.drawn);
         return report;
     }
 
@@ -396,13 +397,13 @@ RebuildSurveyData.rebuild = function(doc, di) {
         // same loss the upgrade path above guards against, through the
         // same one answer.
         var healZ = CsRevise.anchorZOf(recon, recon.anchorName);
-        var heal = RebuildSurveyData.redraw(doc, di, recon.survey,
+        var heal = CsRebuild.redraw(doc, di, recon.survey,
             recon.anchorName, recon.anchorPos, healZ,
             CsAdjust.optionsFromTags(recon.adjustTags || {}));
         report.mode = "heal";
         report.erased = heal.erased;
         report.stations = heal.drawn.stationsDrawn;
-        report.shots = RebuildSurveyData.shotCount(heal.drawn);
+        report.shots = CsRebuild.shotCount(heal.drawn);
         report.splaysUnplaceable = heal.drawn.splaysSkipped || 0;
         report.message = "Rebuild Survey Data: redrew " + report.stations +
             " station" + (report.stations === 1 ? "" : "s") + " and " +
@@ -417,12 +418,12 @@ RebuildSurveyData.rebuild = function(doc, di) {
                 (report.splaysUnplaceable === 1 ? "" : "s") +
                 " had no inclination on record and could not be redrawn." :
                 "") +
-            RebuildSurveyData.profileNote(heal.drawn);
+            CsRebuild.profileNote(heal.drawn);
         return report;
     }
 
     // ---- no survey data at all: recover what the geometry carries ---
-    return RebuildSurveyData.fromGeometry(doc, di, report);
+    return CsRebuild.fromGeometry(doc, di, report);
 };
 
 /**
@@ -433,7 +434,7 @@ RebuildSurveyData.rebuild = function(doc, di) {
  *
  * Unchanged behaviour, moved here so rebuild() can fall through to it.
  */
-RebuildSurveyData.fromGeometry = function(doc, di, report) {
+CsRebuild.fromGeometry = function(doc, di, report) {
     var LABEL_RADIUS = CsDraw.TEXT_HEIGHT * 6;   // label sits ~0.75 from point
     var LRUD_RADIUS = 1000000;                    // tips matched to NEAREST station
 
@@ -645,51 +646,3 @@ RebuildSurveyData.fromGeometry = function(doc, di, report) {
     return report;
 };
 
-function rebuildSurveyDataRun() {
-    var doc = getDocument();
-    if (doc === undefined || doc === null) {
-        warning("Rebuild Survey Data: no active drawing document.");
-        return;
-    }
-    var di = getDocumentInterface();
-    var report = RebuildSurveyData.rebuild(doc, di);
-
-    if (report.warning !== "") {
-        warning(report.warning);
-        return;
-    }
-    if (report.dialog !== "") {
-        QMessageBox.information(getMainWindow(), "Rebuild Survey Data",
-            report.dialog);
-        return;
-    }
-    EAction.handleUserMessage(report.message);
-}
-
-// ============================================================
-// Add-on wiring -- the standard pattern; see docs.
-// ============================================================
-
-function RebuildSurveyData(guiAction) {
-    EAction.call(this, guiAction);
-}
-
-RebuildSurveyData.prototype = new EAction();
-
-RebuildSurveyData.prototype.beginEvent = function() {
-    EAction.prototype.beginEvent.call(this);
-    rebuildSurveyDataRun();
-    this.terminate();
-};
-
-RebuildSurveyData.init = function(basePath) {
-    var action = new RGuiAction(qsTr("Rebuild Survey Data"), RMainWindowQt.getMainWindow());
-    action.setRequiresDocument(true);
-    action.setScriptFile(basePath + "/RebuildSurveyData.js");
-    action.setIcon(basePath + "/RebuildSurveyData.svg");
-    action.setStatusTip(qsTr("Bring an old drawing up to date: upgrades legacy tags, recovers missing station data, and repairs a partly-deleted drawing"));
-    action.setDefaultCommands(["rebuildsurveydata", "rsd"]);
-    action.setGroupSortOrder(455);
-    action.setSortOrder(10);
-    action.setWidgetNames(["CaveSurveyMenu", "CaveSurveyToolBar"]);
-};
