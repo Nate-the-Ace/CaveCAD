@@ -106,3 +106,38 @@ answer, or like an extra click? The click was chosen over a modifier
 because it is visible -- the ornament is on screen, on that side, before
 anything is committed -- but only drawing a passage's worth of ledges
 says whether that trade is right.
+
+
+## Addendum: the preview flickered (0.9.63.0)
+
+Reported the same day: "the shaped line preview was flickering and was
+hard to see when trying to choose a side. it was flickering while i
+moved the mouse, even on the same side."
+
+**QCAD clears the preview between mouse events.** The move handler only
+re-added it when the side CHANGED, which meant a caver holding the
+cursor on one side -- exactly when they are trying to look at it -- got
+one frame of feature and then nothing until they crossed the line. Every
+move re-adds it now.
+
+**The obvious optimisation is a segfault.** Rebuilding the feature per
+move costs 20-25 ms on a 400 ft ledge, so the first fix cached the built
+ENTITIES and re-added those: 0.13 ms, and it killed the application on
+the second preview, inside `RTransaction::addObject`. The first preview
+takes ownership of the entities. This is now an engine truth worth
+carrying: **a preview operation consumes the entities you give it;
+never hand the same objects to two of them.**
+
+What is cached instead is the spine SAMPLE, which is plain data.
+Measured on a 188-point spine: walking the spine 20 ms, the ornament
+maths 0.3 ms, entity construction 1.5 ms, spline fit 1.1 ms. So
+`CsShapeLine.buildDecor` gained an optional `sample` argument, the pick
+state walks the spine once, and every move generates a fresh feature
+through the same function that commits the real one -- 3.5 ms per move
+at 57 spine points, 9 ms at 140.
+
+**Visibility.** The preview drew in the layer's own peru, on a white
+sheet, often over a grey scan. It draws in QCAD's measurement colour at
+`Weight050` now: the preview is a question being asked, not the drawing,
+and it should not have to compete with the map to be seen. The committed
+feature keeps its proper layer appearance.
