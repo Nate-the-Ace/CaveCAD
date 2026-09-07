@@ -492,9 +492,294 @@ SymbolPalette.connectTile = function(button, entry) {
     });
 };
 
+/**
+ * The right-click menu on a tile.
+ *
+ * WHAT IS ON IT, and why each earns its place:
+ *
+ *   Place            what a left-click does, said out loud -- a menu
+ *                    that cannot do the ordinary thing reads as a menu
+ *                    for exceptions only.
+ *   Edit...          the caver's own symbol, reopened for redrawing.
+ *   Rename...        its NAME, alias, category and home layer, without
+ *                    redrawing a line. A symbol saved into the wrong
+ *                    category used to mean drawing it again.
+ *   Duplicate...     copy ANY symbol -- the shipped 28 included -- into
+ *                    the library under a new name. This is the answer
+ *                    to "I want the stalactite, but mine": the shipped
+ *                    ones cannot be edited, and now they do not have to
+ *                    be redrawn from nothing either.
+ *   Delete...        the caver's own, gone from the library.
+ *
+ * A shipped symbol offers Place and Duplicate; the other three are
+ * disabled with the reason in their tooltip, rather than hidden, so the
+ * menu does not change shape under the cursor.
+ *
+ * popup(), never exec(): exec blocks, and a menu that owns the event
+ * loop while a caver is mid-gesture is how a panel hangs. The menu is
+ * kept on the widget bag so it is not collected while it is open --
+ * SketchScans learned that one first.
+ */
+SymbolPalette.connectTileMenu = function(button, entry) {
+    try {
+        button.contextMenuPolicy = Qt.CustomContextMenu;
+    } catch (ePolicy) {
+        return;
+    }
+    button.customContextMenuRequested.connect(function(pos) {
+        try {
+            var w = SymbolPalette.widgets;
+            var custom = (entry.custom === true);
+            var menu = new QMenu();
+
+            var place = menu.addAction(qsTr("Place"));
+            place.triggered.connect(function() {
+                SymbolPalette.arm(entry);
+                SymbolPalette.startRun();
+            });
+            menu.addSeparator();
+
+            var edit = menu.addAction(qsTr("Edit..."));
+            edit.enabled = custom;
+            edit.triggered.connect(function() {
+                SymbolPaletteEdit.startEdit(entry);
+            });
+
+            var rename = menu.addAction(qsTr("Rename / Recategorise..."));
+            rename.enabled = custom;
+            rename.triggered.connect(function() {
+                SymbolPalette.renameSymbol(entry);
+            });
+
+            var dup = menu.addAction(qsTr("Duplicate as New Symbol..."));
+            dup.triggered.connect(function() {
+                SymbolPalette.duplicateSymbol(entry);
+            });
+
+            menu.addSeparator();
+            var del = menu.addAction(qsTr("Delete..."));
+            del.enabled = custom;
+            del.triggered.connect(function() {
+                SymbolPalette.arm(entry);
+                SymbolPalette.deleteArmed();
+            });
+
+            if (!custom) {
+                try {
+                    var why = qsTr("%1 is one of the symbols CaveCAD " +
+                        "ships. Duplicate it to make your own version.")
+                        .arg(entry.nss);
+                    edit.toolTip = why;
+                    rename.toolTip = why;
+                    del.toolTip = why;
+                } catch (eTip) {
+                }
+            }
+
+            // Kept alive on the widget bag: popup() returns at once, and
+            // a menu the collector takes mid-display simply vanishes.
+            if (!isNull(w)) {
+                w.tileMenu = menu;
+            }
+            menu.popup(button.mapToGlobal(pos));
+        } catch (eMenu) {
+            // no context menu on this bridge: every one of these is
+            // still reachable from the buttons below the tiles
+        }
+    });
+};
+
+/**
+ * Renames a custom symbol, or moves it to another category or layer.
+ *
+ * The BLOCK NAME never changes -- every already-placed instance in
+ * every drawing points at it, and a rename that broke those would be a
+ * rename that eats work. What changes is the marker: the display name,
+ * the alias, the category and the home layer.
+ */
+SymbolPalette.renameSymbol = function(entry) {
+    if (isNull(entry) || entry.custom !== true) {
+        return;
+    }
+    var meta = SymbolPaletteEdit.askMeta(entry);
+    if (meta === null) {
+        return;
+    }
+    if (meta.nss === "") {
+        QMessageBox.warning(RMainWindowQt.getMainWindow(),
+            qsTr("Rename Symbol"), qsTr("A symbol needs a name."));
+        return;
+    }
+    var found = CsSymbolStore.geometryFor(entry.block);
+    if (found === null) {
+        QMessageBox.warning(RMainWindowQt.getMainWindow(),
+            qsTr("Rename Symbol"),
+            qsTr("%1's drawing could not be found, so it cannot be " +
+                "renamed.").arg(entry.nss));
+        return;
+    }
+    var res = CsSymbolStore.saveBlock(null, entry.block, found.doc,
+        found.entities, meta);
+    if (!res.ok) {
+        QMessageBox.warning(RMainWindowQt.getMainWindow(),
+            qsTr("Rename Symbol"), res.error);
+        return;
+    }
+    EAction.handleUserMessage(qsTr("%1 is now %2, in %3.")
+        .arg(entry.nss).arg(meta.nss).arg(meta.category));
+    CsSymbolStore.invalidate();
+    SymbolPalette.disarm();
+    SymbolPalette.rebuildTiles();
+};
+
+/**
+ * Copies a symbol into the library under a new name.
+ *
+ * THE WAY TO CHANGE A SHIPPED SYMBOL. The 28 cannot be edited -- the
+ * next release would take the change back -- which used to mean a
+ * caver who wanted "that, but with a longer tail" started from a blank
+ * editor. Now they start from the symbol.
+ */
+SymbolPalette.duplicateSymbol = function(entry) {
+    if (isNull(entry)) {
+        return;
+    }
+    var found = CsSymbolStore.geometryFor(entry.block);
+    if (found === null) {
+        QMessageBox.warning(RMainWindowQt.getMainWindow(),
+            qsTr("Duplicate Symbol"),
+            qsTr("%1's drawing could not be found, so there is nothing " +
+                "to copy.").arg(entry.nss));
+        return;
+    }
+    var seed = { nss: entry.nss + qsTr(" (mine)"), uis: entry.uis,
+        category: entry.category, layer: entry.layer };
+    var meta = SymbolPaletteEdit.askMeta(seed);
+    if (meta === null) {
+        return;
+    }
+    if (meta.nss === "") {
+        QMessageBox.warning(RMainWindowQt.getMainWindow(),
+            qsTr("Duplicate Symbol"), qsTr("A symbol needs a name."));
+        return;
+    }
+    var blockName = CsSymbolStore.blockNameFor(meta.nss);
+    if (blockName === null) {
+        QMessageBox.warning(RMainWindowQt.getMainWindow(),
+            qsTr("Duplicate Symbol"),
+            qsTr("That name has no letters or numbers in it, so it " +
+                "cannot become a block name. Try another."));
+        return;
+    }
+    var merged = CsSymbols.merged();
+    for (var i = 0; i < merged.entries.length; i++) {
+        if (merged.entries[i].block === blockName) {
+            QMessageBox.warning(RMainWindowQt.getMainWindow(),
+                qsTr("Duplicate Symbol"),
+                qsTr("There is already a symbol called %1 (%2). Give " +
+                    "this one a different name.")
+                    .arg(merged.entries[i].nss).arg(blockName));
+            return;
+        }
+    }
+    var res = CsSymbolStore.saveBlock(null, blockName, found.doc,
+        found.entities, meta);
+    if (!res.ok) {
+        QMessageBox.warning(RMainWindowQt.getMainWindow(),
+            qsTr("Duplicate Symbol"), res.error);
+        return;
+    }
+    EAction.handleUserMessage(qsTr("%1 copied to your library as %2 -- " +
+        "Edit it to make it yours.").arg(entry.nss).arg(meta.nss));
+    CsSymbolStore.invalidate();
+    SymbolPalette.rebuildTiles();
+    var listed = CsSymbols.merged();
+    for (i = 0; i < listed.entries.length; i++) {
+        if (listed.entries[i].block === blockName) {
+            SymbolPalette.arm(listed.entries[i]);
+        }
+    }
+};
+
 /** One category, as a group box full of tiles. */
-SymbolPalette.buildGroup = function(w, parent, group, shapes) {
+/** Where the collapsed categories are remembered between sessions. */
+SymbolPalette.COLLAPSED_SETTING = "CaveSurvey/SymbolPaletteCollapsed";
+
+/** The set of collapsed category names, from settings.
+ *
+ *  A plain comma-joined list rather than anything cleverer: category
+ *  names come from the catalogue and from what a caver types, and none
+ *  of them has ever had a comma in it. A name that did would collapse
+ *  the wrong group and nothing worse. */
+SymbolPalette.loadCollapsed = function() {
+    var set = {};
+    try {
+        var raw = RSettings.getStringValue(
+            SymbolPalette.COLLAPSED_SETTING, "");
+        if (raw !== "") {
+            var parts = String(raw).split(",");
+            for (var i = 0; i < parts.length; i++) {
+                var name = parts[i].trim();
+                if (name !== "") {
+                    set[name] = true;
+                }
+            }
+        }
+    } catch (e) {
+        // a bridge without settings just forgets between sessions
+    }
+    return set;
+};
+
+/** Records that a category is open or shut. */
+SymbolPalette.saveCollapsed = function(category, collapsed) {
+    try {
+        var set = SymbolPalette.loadCollapsed();
+        if (collapsed) {
+            set[category] = true;
+        } else if (set.hasOwnProperty(category)) {
+            delete set[category];
+        }
+        var names = [];
+        for (var name in set) {
+            if (set.hasOwnProperty(name)) {
+                names.push(name);
+            }
+        }
+        RSettings.setValue(SymbolPalette.COLLAPSED_SETTING, names.join(","));
+    } catch (e) {
+    }
+};
+
+/** Wires one group's checkbox to its tiles. Its own function so the
+ *  closure captures ONE category and host rather than the loop's. */
+SymbolPalette.connectCollapse = function(box, host, category) {
+    box.toggled.connect(function(open) {
+        try {
+            host.visible = open;
+        } catch (eVis) {
+        }
+        SymbolPalette.saveCollapsed(category, !open);
+    });
+};
+
+SymbolPalette.buildGroup = function(w, parent, group, shapes, collapsed) {
+    // CHECKABLE, which is Qt's own idiom for a collapsible section: the
+    // box title gets a tick, and unticking it hides the tiles. The
+    // TILES live in a host widget of their own because unchecking a
+    // group box only DISABLES its children -- greyed-out tiles still
+    // take the same room, which is the opposite of what a collapse is
+    // for. Hiding the host is what actually gives the space back.
     var box = new QGroupBox(group.category, parent);
+    var open = true;
+    try {
+        box.checkable = true;
+        open = !(collapsed && collapsed[group.category] === true);
+        box.checked = open;
+    } catch (eCheck) {
+        open = true;
+    }
+    var host = new QWidget(box);
     var inner = new QGridLayout();
     var cell = 0;
     for (var i = 0; i < group.entries.length; i++) {
@@ -547,6 +832,7 @@ SymbolPalette.buildGroup = function(w, parent, group, shapes) {
                 // the grid still reads as a grid
             }
             SymbolPalette.connectTile(button, entry);
+            SymbolPalette.connectTileMenu(button, entry);
             inner.addWidget(button,
                 Math.floor(cell / SymbolPalette.GRID_COLUMNS),
                 cell % SymbolPalette.GRID_COLUMNS);
@@ -562,7 +848,25 @@ SymbolPalette.buildGroup = function(w, parent, group, shapes) {
         inner.setColumnStretch(SymbolPalette.GRID_COLUMNS, 1);
     } catch (eStretch) {
     }
-    box.setLayout(inner);
+    host.setLayout(inner);
+    var outer = new QVBoxLayout();
+    try {
+        // No margins of its own: a COLLAPSED group should be a title
+        // and nothing else, and every pixel of padding left behind is a
+        // pixel of the panel a caver collapsed the group to reclaim.
+        outer.setContentsMargins(0, 0, 0, 0);
+        outer.setSpacing(0);
+        inner.setContentsMargins(2, 2, 2, 2);
+    } catch (eMargins) {
+    }
+    outer.addWidget(host, 0, 0);
+    box.setLayout(outer);
+    try {
+        host.visible = open;
+        SymbolPalette.connectCollapse(box, host, group.category);
+    } catch (eWire) {
+        w.problems.push(group.category + " collapse (" + eWire + ")");
+    }
     return box;
 };
 
@@ -638,10 +942,15 @@ SymbolPalette.rebuildTiles = function() {
     }
 
     var groups = SymbolPalette.grouped(merged.entries, needle);
+    // A SEARCH OPENS EVERYTHING. A caver typing "gour" wants to be
+    // shown it, not to be told it is inside a group they collapsed
+    // last week -- and the collapsed set is left alone, so clearing the
+    // search puts the panel back the way they had it.
+    var collapsed = (needle === "") ? SymbolPalette.loadCollapsed() : {};
     for (var g = 0; g < groups.length; g++) {
         try {
             var box = SymbolPalette.buildGroup(w, w.tileHost, groups[g],
-                shapes);
+                shapes, collapsed);
             w.tileLayout.addWidget(box, 0, 0);
             w.groupBoxes.push(box);
         } catch (eGroup) {

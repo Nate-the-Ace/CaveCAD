@@ -790,6 +790,98 @@ eqs(SymbolPaletteRun.sizeForScale(5.0, 0, 1.0), null,
 })();
 
 // ---------------------------------------------------------------------
+// 3f. Duplicate and rename: the two things the right-click menu does
+//     that nothing else could.
+// ---------------------------------------------------------------------
+//
+// DUPLICATE is the answer to "the shipped 28 cannot be edited": copy
+// one into the library under a new name and it is yours. RENAME changes
+// what a symbol IS CALLED and where it is filed without redrawing a
+// line -- and never changes the block name, because every placed
+// instance in every drawing points at that.
+
+(function duplicateAndRename() {
+    var libPath = scratchDir + "/CaveCustomSymbols.dxf";
+    if (new QFileInfo(libPath).exists()) {
+        new QFile(libPath).remove();
+    }
+    var realCustom = CsSymbolStore.customPath;
+    CsSymbolStore.customPath = function() { return libPath; };
+    try {
+        // Duplicating is geometryFor + saveBlock under a new name, which
+        // is what the menu item does with a dialog in front of it.
+        var found = CsSymbolStore.geometryFor("SYM_STALACTITE");
+        ok(found !== null, "the shipped symbol's drawing was found");
+        ok(found.path === templatePath,
+            "and it came from the template, since the library has no copy");
+
+        var dupName = CsSymbolStore.blockNameFor("Stalactite (mine)");
+        eqs(dupName, "SYM_STALACTITE_MINE", "the copy's block name");
+        var made = CsSymbolStore.saveBlock(null, dupName, found.doc,
+            found.entities, { nss: "Stalactite (mine)", uis: "",
+                category: "Formations", layer: CsLayers.FORMATIONS_DRIP });
+        ok(made.ok, "the copy saved (" + made.error + ")");
+
+        CsSymbolStore.invalidate();
+        var tpl = CsSymbolStore.list(templatePath);
+        var leaked = false;
+        for (var i = 0; i < tpl.entries.length; i++) {
+            if (tpl.entries[i].block === dupName) { leaked = true; }
+        }
+        eqs(leaked, false, "and it went to the library, NOT to the " +
+            "template -- copying a shipped symbol must not edit the " +
+            "shipped file");
+
+        var copy = null;
+        var lib = CsSymbolStore.list(libPath);
+        for (i = 0; i < lib.entries.length; i++) {
+            if (lib.entries[i].block === dupName) { copy = lib.entries[i]; }
+        }
+        ok(copy !== null, "the copy is in the library");
+        eqs(copy === null ? 0 :
+            CsSymbolStore.geometryFor(dupName).entities.length, 2,
+            "with the shipped symbol's geometry, both lines of it");
+        eqs(copy === null ? "" : copy.custom, true,
+            "and marked custom, so it can be edited and deleted -- which " +
+            "the symbol it was copied from cannot");
+
+        // RENAME: same block, different description.
+        var renamed = CsSymbolStore.saveBlock(null, dupName,
+            CsSymbolStore.geometryFor(dupName).doc,
+            CsSymbolStore.geometryFor(dupName).entities,
+            { nss: "My drip", uis: "", category: "Water",
+                layer: CsLayers.WATER_DRIP_SEEP });
+        ok(renamed.ok, "the rename saved (" + renamed.error + ")");
+        eqs(renamed.replaced, true, "as a replacement, not a second copy");
+
+        CsSymbolStore.invalidate();
+        var after = null;
+        lib = CsSymbolStore.list(libPath);
+        for (i = 0; i < lib.entries.length; i++) {
+            if (lib.entries[i].block === dupName) { after = lib.entries[i]; }
+        }
+        ok(after !== null, "the renamed symbol is still there");
+        if (after !== null) {
+            eqs(after.nss, "My drip", "under its new name");
+            eqs(after.category, "Water", "in its new category");
+            eqs(after.layer, CsLayers.WATER_DRIP_SEEP, "on its new layer");
+            eqs(after.block, dupName, "and under the SAME block name -- " +
+                "every instance already placed in a drawing points at " +
+                "that, and a rename that changed it would eat work");
+        }
+        eqs(CsSymbolStore.list(libPath).entries.length, 1,
+            "the library holds one symbol, not two: a rename replaced, " +
+            "it did not fork");
+    } finally {
+        CsSymbolStore.customPath = realCustom;
+        CsSymbolStore.invalidate();
+        if (new QFileInfo(libPath).exists()) {
+            new QFile(libPath).remove();
+        }
+    }
+})();
+
+// ---------------------------------------------------------------------
 // 4. The shipped symbols are not editable.
 // ---------------------------------------------------------------------
 

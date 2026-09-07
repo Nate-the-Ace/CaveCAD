@@ -22602,8 +22602,11 @@ eqs(CsSymbolStore.blockNameFor(null), null,
 // the real template, so the test says the same thing on a machine with
 // no Cave folder as on one with a template full of a caver's own work.
 (function testMergedCatalog() {
-    var realList = CsSymbolStore.list;
-    CsSymbolStore.list = function() {
+    // listAll, not list: merged() asks for EVERY file's symbols (the
+    // caver's library and the shipped template), and stubbing the
+    // single-file reader would let the real files leak into the fixture.
+    var realList = CsSymbolStore.listAll;
+    CsSymbolStore.listAll = function() {
         return { ok: true, error: "", entries: [
             // A collision with a shipped symbol, deliberately wrong in
             // every field: the shipped row must win outright.
@@ -22654,7 +22657,7 @@ eqs(CsSymbolStore.blockNameFor(null), null,
             "categoriesOf: categories() is the same function on the " +
             "shipped catalogue, not a second copy of it");
     } finally {
-        CsSymbolStore.list = realList;
+        CsSymbolStore.listAll = realList;
     }
 })();
 
@@ -22662,8 +22665,8 @@ eqs(CsSymbolStore.blockNameFor(null), null,
 // catalogue: the palette must open with the shipped 28 in it and the
 // reason showing, not empty.
 (function testMergedWithoutTemplate() {
-    var realList = CsSymbolStore.list;
-    CsSymbolStore.list = function() {
+    var realList = CsSymbolStore.listAll;
+    CsSymbolStore.listAll = function() {
         return { ok: false, entries: [], error: "no template here" };
     };
     try {
@@ -22675,7 +22678,7 @@ eqs(CsSymbolStore.blockNameFor(null), null,
             "merged: passing the store's reason through, for the panel to " +
             "show");
     } finally {
-        CsSymbolStore.list = realList;
+        CsSymbolStore.listAll = realList;
     }
 })();
 

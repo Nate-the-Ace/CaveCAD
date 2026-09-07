@@ -710,6 +710,47 @@ CsSymbolStore.withLayersWritable = function(doc, di, names, fn) {
 };
 
 /**
+ * A symbol's geometry, from whichever file holds it.
+ *
+ * The caver's library first, then the template -- the same order every
+ * other lookup uses, because a symbol in both is theirs.
+ *
+ * \return { entities, doc, path } (entities belong to doc, which the
+ *         caller must keep alive while it uses them), or null.
+ */
+CsSymbolStore.geometryFor = function(blockName) {
+    var places = [CsSymbolStore.customPath(), CsSymbolStore.templatePath()];
+    for (var i = 0; i < places.length; i++) {
+        if (isNull(places[i])) {
+            continue;
+        }
+        try {
+            if (!new QFileInfo(places[i]).exists()) {
+                continue;
+            }
+        } catch (eEx) {
+            continue;
+        }
+        var di = CsSymbolStore.openOffscreen(places[i]);
+        if (di === null) {
+            continue;
+        }
+        var doc = di.getDocument();
+        if (isNull(doc.queryBlock(blockName))) {
+            continue;
+        }
+        var entities = CsSymbolStore.geometryOf(doc, blockName);
+        if (entities.length === 0) {
+            continue;
+        }
+        // The interface is returned with it: dropping it would take the
+        // document -- and the entities -- with it.
+        return { entities: entities, doc: doc, di: di, path: places[i] };
+    }
+    return null;
+};
+
+/**
  * Copies a block definition from one document into another.
  *
  * WHY BY HAND AND NOT BY PASTE. RPasteOperation takes a whole source
