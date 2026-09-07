@@ -385,11 +385,31 @@ SymbolPaletteEdit.startEdit = function(entry) {
         return;
     }
 
-    var path = CsSymbolStore.templatePath();
-    var srcDi = isNull(path) ? null : CsSymbolStore.openOffscreen(path);
+    // The symbol may be in the caver's library or -- if it was drawn
+    // before the library existed -- still in the template.
+    var srcDi = null;
+    var places = [CsSymbolStore.customPath(), CsSymbolStore.templatePath()];
+    for (var pi = 0; pi < places.length && srcDi === null; pi++) {
+        if (isNull(places[pi])) {
+            continue;
+        }
+        try {
+            if (!new QFileInfo(places[pi]).exists()) {
+                continue;
+            }
+        } catch (eEx) {
+            continue;
+        }
+        var tryDi = CsSymbolStore.openOffscreen(places[pi]);
+        if (tryDi !== null &&
+                !isNull(tryDi.getDocument().queryBlock(entry.block))) {
+            srcDi = tryDi;
+        }
+    }
     if (srcDi === null) {
-        EAction.handleUserWarning("Symbol Palette: the cave template could not be read, so " +
-            entry.nss + " cannot be opened for editing.");
+        EAction.handleUserWarning("Symbol Palette: " + entry.nss +
+            " could not be found in your symbol library or in the cave " +
+            "template, so it cannot be opened for editing.");
         return;
     }
 

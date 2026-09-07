@@ -117,6 +117,72 @@ CsSymbolStore.templatePath = function() {
     return null;
 };
 
+/**
+ * The caver's OWN symbol library: the file their symbols live in.
+ *
+ * NOT THE TEMPLATE ANY MORE (Nathan's call, 2026-09-07). Symbols used
+ * to be written into NSS_Cave_Template_PLAN.dxf, which every release
+ * replaces wholesale -- a cost accepted on 2026-09-06 that destroyed a
+ * drawn-and-saved symbol within the day, because a development machine
+ * publishes many times an evening. publish.sh carries custom blocks
+ * across now, but a file no installer touches is the honest answer: a
+ * caver's own work should not depend on a merge step running.
+ *
+ * IN THE CAVE FOLDER, beside their caves, because that folder is the
+ * one that syncs and gets backed up -- a symbol drawn on one machine
+ * turns up on the next, and neither an upgrade nor a reinstall is a
+ * risk to it.
+ */
+CsSymbolStore.CUSTOM_NAME = "CaveCustomSymbols.dxf";
+
+CsSymbolStore.customPath = function() {
+    try {
+        var setting = RSettings.getStringValue("CaveSurvey/SymbolLibrary", "");
+        if (setting !== "") {
+            return setting;
+        }
+    } catch (eSet) {
+    }
+    try {
+        return QDir.homePath() + "/Documents/Cave/symbols/" +
+            CsSymbolStore.CUSTOM_NAME;
+    } catch (eHome) {
+        return null;
+    }
+};
+
+/**
+ * Makes sure the library file exists, creating an empty drawing the
+ * first time a caver saves a symbol.
+ *
+ * \return the path, or null when it could not be made.
+ */
+CsSymbolStore.ensureCustomFile = function() {
+    var path = CsSymbolStore.customPath();
+    if (isNull(path)) {
+        return null;
+    }
+    try {
+        if (new QFileInfo(path).exists()) {
+            return path;
+        }
+    } catch (eEx) {
+        return null;
+    }
+    try {
+        var dir = path.substring(0, path.lastIndexOf("/"));
+        new QDir().mkpath(dir);
+        var di = new RDocumentInterface(
+            new RDocument(new RMemoryStorage(), createSpatialIndex()));
+        if (!CsSymbolStore.write(di, path)) {
+            return null;
+        }
+    } catch (eMake) {
+        return null;
+    }
+    return path;
+};
+
 /** Every place templatePath() looked, for an error message that tells
  *  the caver where to put the file rather than only that it is absent. */
 CsSymbolStore.searchedPaths = function() {
@@ -322,6 +388,148 @@ CsSymbolStore.list = function(path) {
     return result;
 };
 
+/**
+ * Every symbol the caver can place: the shipped catalogue's blocks from
+ * the template, plus their own from the library.
+ *
+ * TWO FILES, ONE LIST. The template is the suite's vocabulary and is
+ * replaced by every release; the library is the caver's own and is
+ * touched by nothing but this tool. A symbol in both -- one drawn
+ * before the library existed, and carried across upgrades since -- is
+ * shown once, the LIBRARY's copy winning, because that is the one an
+ * upgrade cannot reach.
+ *
+ * \return { ok, entries, error } with entries always an array.
+ */
+CsSymbolStore.listAll = function() {
+    var out = { ok: true, entries: [], error: "" };
+    var seen = {};
+    var i;
+
+    var custom = { ok: true, entries: [], error: "" };
+    var customPath = CsSymbolStore.customPath();
+    if (!isNull(customPath) && new QFileInfo(customPath).exists()) {
+        custom = CsSymbolStore.list(customPath);
+    }
+    for (i = 0; i < custom.entries.length; i++) {
+        seen[custom.entries[i].block] = true;
+        out.entries.push(custom.entries[i]);
+    }
+
+    var tpl = CsSymbolStore.list(CsSymbolStore.templatePath());
+    for (i = 0; i < tpl.entries.length; i++) {
+        if (seen[tpl.entries[i].block] === true) {
+            continue;
+        }
+        seen[tpl.entries[i].block] = true;
+        out.entries.push(tpl.entries[i]);
+    }
+
+    // A failure in EITHER file is worth saying, but neither empties the
+    // list: a caver with an unreadable template still has their own
+    // symbols, and one with no library still has the shipped 28.
+    if (!tpl.ok) {
+        out.ok = false;
+        out.error = tpl.error;
+    }
+    if (!custom.ok) {
+        out.ok = false;
+        out.error = (out.error === "" ? "" : out.error + "\n") + custom.error;
+    }
+    return out;
+};
+
+/**
+ * Moves any symbol still living in the template into the library.
+ *
+ * For the caver who drew symbols before the library existed -- and for
+ * one whose template was carried across an upgrade with their blocks
+ * still in it. Copies first, verifies the copy reads back, and only
+ * then takes the template's copy away: a migration that loses work is
+ * worse than one that never runs.
+ *
+ * \return { moved: [names], error } -- moved is empty when there was
+ *         nothing to do, which is the ordinary case.
+ */
+CsSymbolStore.migrateFromTemplate = function() {
+    var out = { moved: [], error: "" };
+    var tplPath = CsSymbolStore.templatePath();
+    if (isNull(tplPath)) {
+        return out;
+    }
+    var tpl = CsSymbolStore.list(tplPath);
+    var strays = [];
+    for (var i = 0; i < tpl.entries.length; i++) {
+        var entry = tpl.entries[i];
+        if (CsSymbols.byBlock(entry.block) !== null) {
+            continue;   // one of the shipped 28: it belongs there
+        }
+        strays.push(entry);
+    }
+    if (strays.length === 0) {
+        return out;
+    }
+
+    var customPath = CsSymbolStore.ensureCustomFile();
+    if (isNull(customPath)) {
+        out.error = "The symbol library could not be created.";
+        return out;
+    }
+    var srcDi = CsSymbolStore.openOffscreen(tplPath);
+    if (srcDi === null) {
+        out.error = "The cave template could not be read.";
+        return out;
+    }
+    var srcDoc = srcDi.getDocument();
+
+    for (i = 0; i < strays.length; i++) {
+        var name = strays[i].block;
+        var already = CsSymbolStore.list(customPath);
+        var have = false;
+        for (var j = 0; j < already.entries.length; j++) {
+            if (already.entries[j].block === name) {
+                have = true;
+            }
+        }
+        if (!have) {
+            var entities = CsSymbolStore.geometryOf(srcDoc, name);
+            if (entities.length === 0) {
+                continue;
+            }
+            var meta = CsSymbolStore.metaOf(srcDoc, srcDoc.queryBlock(name));
+            if (isNull(meta)) {
+                meta = { nss: name, uis: "",
+                    category: CsSymbolStore.DEFAULT_CATEGORY,
+                    layer: CsLayers.WALLS_SURVEYED };
+            }
+            var res = CsSymbolStore.saveBlock(customPath, name, srcDoc,
+                entities, meta);
+            if (!res.ok) {
+                out.error = res.error;
+                continue;
+            }
+        }
+        // Only now, with the library's copy on disk and readable, is
+        // the template's copy removed.
+        CsSymbolStore.invalidate();
+        var check = CsSymbolStore.list(customPath);
+        var landed = false;
+        for (j = 0; j < check.entries.length; j++) {
+            if (check.entries[j].block === name) {
+                landed = true;
+            }
+        }
+        if (!landed) {
+            out.error = name + " could not be moved into the library.";
+            continue;
+        }
+        CsSymbolStore.deleteBlock(tplPath, name);
+        out.moved.push(name);
+    }
+    CsSymbolStore.invalidate();
+    return out;
+};
+
 /** Forgets the cached listing, so the next list() reads the file again.
  *  Called after any write; called with no path, forgets everything. */
 CsSymbolStore.invalidate = function(path) {
@@ -448,18 +656,29 @@ CsSymbolStore.radiusOf = function(doc, blockName) {
         } catch (eDoc) {
         }
     }
-    // Filled by list(), which already has the template open -- asking
-    // here must never open the file a second time per placement.
-    var path = CsSymbolStore.templatePath();
-    if (isNull(path)) {
-        return 0;
+    // Filled by list(), which already has the file open -- asking here
+    // must never open one a second time per placement. Both files are
+    // consulted, the caver's own first.
+    var places = [CsSymbolStore.customPath(), CsSymbolStore.templatePath()];
+    for (var p = 0; p < places.length; p++) {
+        if (isNull(places[p])) {
+            continue;
+        }
+        try {
+            if (!new QFileInfo(places[p]).exists()) {
+                continue;
+            }
+        } catch (eEx) {
+            continue;
+        }
+        CsSymbolStore.list(places[p]);
+        var byPath = CsSymbolStore.radii[places[p]];
+        if (!isNull(byPath) && byPath.hasOwnProperty(blockName) &&
+                byPath[blockName] > 0) {
+            return byPath[blockName];
+        }
     }
-    CsSymbolStore.list(path);
-    var byPath = CsSymbolStore.radii[path];
-    if (isNull(byPath) || !byPath.hasOwnProperty(blockName)) {
-        return 0;
-    }
-    return byPath[blockName];
+    return 0;
 };
 
 /**
@@ -644,22 +863,42 @@ CsSymbolStore.ensureBlock = function(doc, di, blockName, path) {
     } catch (eHas) {
     }
 
-    if (isNull(path)) {
-        path = CsSymbolStore.templatePath();
+    // EITHER FILE holds the answer: the caver's own library, or the
+    // template the suite ships. The library is asked first -- a symbol
+    // in both is theirs, and theirs is the copy an upgrade cannot
+    // reach.
+    var places = isNull(path) ?
+        [CsSymbolStore.customPath(), CsSymbolStore.templatePath()] : [path];
+    var lastError = "";
+    for (var p = 0; p < places.length; p++) {
+        if (isNull(places[p])) {
+            continue;
+        }
+        try {
+            if (!new QFileInfo(places[p]).exists()) {
+                continue;
+            }
+        } catch (eEx) {
+            continue;
+        }
+        var srcDi = CsSymbolStore.openOffscreen(places[p]);
+        if (srcDi === null) {
+            lastError = "Could not read " + places[p];
+            continue;
+        }
+        if (isNull(srcDi.getDocument().queryBlock(blockName))) {
+            continue;   // not in this one; try the next
+        }
+        var res = CsSymbolStore.copyBlock(srcDi.getDocument(), doc, di,
+            blockName);
+        if (res.ok) {
+            return { ok: true, imported: true, error: "" };
+        }
+        lastError = res.error;
     }
-    if (isNull(path)) {
-        return { ok: false, imported: false, error:
-            "This drawing does not have the " + blockName + " symbol and " +
-            "the cave template it would come from could not be found." };
-    }
-    var srcDi = CsSymbolStore.openOffscreen(path);
-    if (srcDi === null) {
-        return { ok: false, imported: false, error:
-            "This drawing does not have the " + blockName + " symbol and " +
-            "the cave template could not be read: " + path };
-    }
-    var res = CsSymbolStore.copyBlock(srcDi.getDocument(), doc, di, blockName);
-    return { ok: res.ok, imported: res.ok, error: res.error };
+    return { ok: false, imported: false, error: lastError !== "" ? lastError :
+        "This drawing does not have the " + blockName + " symbol, and " +
+        "neither your symbol library nor the cave template has it either." };
 };
 
 /**
@@ -702,13 +941,16 @@ CsSymbolStore.blockNameFor = function(displayName) {
  */
 CsSymbolStore.saveBlock = function(path, blockName, srcDoc, entities, meta) {
     if (isNull(path)) {
-        path = CsSymbolStore.templatePath();
+        // THE LIBRARY, not the template: a caver's own symbol goes in
+        // the file no installer touches. Callers may still name a file
+        // (the migration hands one in, and so do the tests).
+        path = CsSymbolStore.ensureCustomFile();
     }
     if (isNull(path)) {
         return { ok: false, replaced: false, error:
-            "The cave template could not be found, so there is nowhere to " +
-            "save the symbol. Looked in:\n  " +
-            CsSymbolStore.searchedPaths().join("\n  ") };
+            "Your symbol library could not be created at " +
+            CsSymbolStore.customPath() + ", so there is nowhere to save " +
+            "the symbol." };
     }
     if (isNull(blockName) || blockName.indexOf(CsSymbolStore.PREFIX) !== 0) {
         return { ok: false, replaced: false, error:
@@ -868,10 +1110,29 @@ CsSymbolStore.saveBlock = function(path, blockName, srcDoc, entities, meta) {
  */
 CsSymbolStore.deleteBlock = function(path, blockName) {
     if (isNull(path)) {
-        path = CsSymbolStore.templatePath();
-    }
-    if (isNull(path)) {
-        return { ok: false, error: "The cave template could not be found." };
+        // A symbol can live in either file: the library, or -- for one
+        // drawn before the library existed -- the template. Delete
+        // wherever it actually is, and from BOTH when it is in both, so
+        // a deleted symbol cannot come back on the next listing.
+        var done = false, trouble = "";
+        var places = [CsSymbolStore.customPath(),
+            CsSymbolStore.templatePath()];
+        for (var i = 0; i < places.length; i++) {
+            if (isNull(places[i]) ||
+                    !new QFileInfo(places[i]).exists()) {
+                continue;
+            }
+            var res = CsSymbolStore.deleteBlock(places[i], blockName);
+            if (res.ok) {
+                done = true;
+            } else {
+                trouble = res.error;
+            }
+        }
+        return done ? { ok: true, error: "" } :
+            { ok: false, error: trouble === "" ?
+                "There is nowhere to delete " + blockName + " from." :
+                trouble };
     }
     if (CsSymbols.byBlock(blockName) !== null) {
         return { ok: false, error: blockName + " is one of the symbols the " +

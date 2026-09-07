@@ -679,6 +679,117 @@ eqs(SymbolPaletteRun.sizeForScale(5.0, 0, 1.0), null,
 })();
 
 // ---------------------------------------------------------------------
+// 3e. A caver's symbols live in their OWN file, which no release
+//     touches, and old ones are moved there.
+// ---------------------------------------------------------------------
+//
+// The template is the suite's vocabulary and every release replaces it;
+// the library is the caver's and nothing but this tool writes to it.
+// Symbols drawn before the library existed are still in the template,
+// so opening the palette moves them across -- copy, verify, and only
+// then remove.
+
+(function theLibraryIsSeparateFromTheTemplate() {
+    var libPath = scratchDir + "/CaveCustomSymbols.dxf";
+    if (new QFileInfo(libPath).exists()) {
+        new QFile(libPath).remove();
+    }
+    var realCustom = CsSymbolStore.customPath;
+    CsSymbolStore.customPath = function() { return libPath; };
+    try {
+        // Saving with no path named goes to the LIBRARY, and creates it.
+        var scratch = new RDocument(new RMemoryStorage(), createSpatialIndex());
+        var res = CsSymbolStore.saveBlock(null, "SYM_BAT_ROOST", scratch,
+            [new RLineEntity(scratch, new RLineData(
+                new RVector(-0.3, 0), new RVector(0.3, 0.4)))],
+            { nss: "Bat roost", uis: "", category: "Biology",
+                layer: CsLayers.BIOLOGY });
+        ok(res.ok, "a symbol saved with no file named (" + res.error + ")");
+        ok(new QFileInfo(libPath).exists(),
+            "and the library file was created to hold it");
+
+        CsSymbolStore.invalidate();
+        var inTemplate = CsSymbolStore.list(templatePath);
+        var strayed = false;
+        for (var i = 0; i < inTemplate.entries.length; i++) {
+            if (inTemplate.entries[i].block === "SYM_BAT_ROOST") {
+                strayed = true;
+            }
+        }
+        eqs(strayed, false, "and NOTHING was written to the cave template " +
+            "-- which is the entire point: a release replaces that file");
+
+        // listAll shows both files as one palette.
+        var all = CsSymbolStore.listAll();
+        var sawLibrary = false, sawTemplate = false;
+        for (i = 0; i < all.entries.length; i++) {
+            if (all.entries[i].block === "SYM_BAT_ROOST") { sawLibrary = true; }
+            if (all.entries[i].block === "SYM_STALACTITE") { sawTemplate = true; }
+        }
+        ok(sawLibrary, "listAll shows the caver's own symbol");
+        ok(sawTemplate, "listAll shows the template's symbols too");
+
+        // A drawing can place a library symbol: the import looks in
+        // both files, the library first.
+        var doc2 = new RDocument(new RMemoryStorage(), createSpatialIndex());
+        var di2 = new RDocumentInterface(doc2);
+        var got = CsSymbolStore.ensureBlock(doc2, di2, "SYM_BAT_ROOST");
+        ok(got.ok, "a library symbol imports into a bare drawing (" +
+            got.error + ")");
+        ok(!isNull(doc2.queryBlock("SYM_BAT_ROOST")),
+            "and the block really arrived");
+
+        // MIGRATION: a symbol still in the template is moved across.
+        var mig = CsSymbolStore.saveBlock(templatePath, "SYM_OLD_HABIT",
+            scratch, [new RLineEntity(scratch, new RLineData(
+                new RVector(0, 0), new RVector(0.5, 0.5)))],
+            { nss: "Old habit", uis: "", category: "Floor",
+                layer: CsLayers.BREAKDOWN });
+        ok(mig.ok, "the fixture put a symbol in the template the old way");
+
+        CsSymbolStore.invalidate();
+        var moved = CsSymbolStore.migrateFromTemplate();
+        ok(moved.moved.length >= 1, "the migration moved it (" +
+            moved.error + ")");
+
+        CsSymbolStore.invalidate();
+        var libNow = CsSymbolStore.list(libPath);
+        var inLib = null;
+        for (i = 0; i < libNow.entries.length; i++) {
+            if (libNow.entries[i].block === "SYM_OLD_HABIT") {
+                inLib = libNow.entries[i];
+            }
+        }
+        ok(inLib !== null, "the moved symbol is in the library");
+        if (inLib !== null) {
+            eqs(inLib.nss, "Old habit", "with its name intact");
+            eqs(inLib.category, "Floor", "and its category");
+        }
+        var tplNow = CsSymbolStore.list(templatePath);
+        var stillThere = false;
+        for (i = 0; i < tplNow.entries.length; i++) {
+            if (tplNow.entries[i].block === "SYM_OLD_HABIT") {
+                stillThere = true;
+            }
+        }
+        eqs(stillThere, false, "and it is gone from the template, so an " +
+            "update has nothing of the caver's left to destroy");
+
+        // Running it again is a no-op, which is what makes it safe to
+        // call every time the panel opens.
+        CsSymbolStore.invalidate();
+        eqs(CsSymbolStore.migrateFromTemplate().moved.length, 0,
+            "a second migration moves nothing");
+    } finally {
+        CsSymbolStore.customPath = realCustom;
+        CsSymbolStore.invalidate();
+        if (new QFileInfo(libPath).exists()) {
+            new QFile(libPath).remove();
+        }
+    }
+})();
+
+// ---------------------------------------------------------------------
 // 4. The shipped symbols are not editable.
 // ---------------------------------------------------------------------
 

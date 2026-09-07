@@ -101,7 +101,11 @@ CsSymbols.merged = function(path) {
     if (typeof CsSymbolStore === "undefined") {
         return { entries: out, ok: true, error: "" };
     }
-    var listed = CsSymbolStore.list(path);
+    // BOTH FILES: the shipped template's blocks and the caver's own
+    // library. A path handed in names ONE file and is what the tests
+    // use; the ordinary call takes everything.
+    var listed = isNull(path) ? CsSymbolStore.listAll() :
+        CsSymbolStore.list(path);
     var seen = {};
     for (var i = 0; i < out.length; i++) {
         seen[out[i].block] = true;

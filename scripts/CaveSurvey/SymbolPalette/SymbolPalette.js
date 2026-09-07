@@ -429,35 +429,52 @@ SymbolPalette.iconFor = function(shapes, size, penColor) {
  */
 SymbolPalette.loadShapes = function() {
     var out = { byBlock: {}, error: "" };
-    var path = CsSymbolStore.templatePath();
-    if (isNull(path)) {
-        out.error = "no template";
-        return out;
-    }
-    var di = CsSymbolStore.openOffscreen(path);
-    if (di === null) {
-        out.error = "template unreadable";
-        return out;
-    }
-    var doc = di.getDocument();
-    var names = doc.getBlockNames();
-    for (var i = 0; i < names.length; i++) {
-        var name = String(names[i]);
-        if (name.indexOf(CsSymbolStore.PREFIX) !== 0) {
+    // BOTH FILES, the caver's library first so their own version of a
+    // symbol is the one pictured. One open each, for the whole panel.
+    var places = [CsSymbolStore.customPath(), CsSymbolStore.templatePath()];
+    var opened = 0;
+    for (var p = 0; p < places.length; p++) {
+        if (isNull(places[p])) {
             continue;
         }
-        var entities = CsSymbolStore.geometryOf(doc, name);
-        var shapes = [];
-        for (var j = 0; j < entities.length; j++) {
-            try {
-                var got = entities[j].getShapes();
-                for (var k = 0; k < got.length; k++) {
-                    shapes.push(got[k]);
-                }
-            } catch (eShape) {
+        try {
+            if (!new QFileInfo(places[p]).exists()) {
+                continue;
             }
+        } catch (eEx) {
+            continue;
         }
-        out.byBlock[name] = shapes;
+        var di = CsSymbolStore.openOffscreen(places[p]);
+        if (di === null) {
+            continue;
+        }
+        opened++;
+        var doc = di.getDocument();
+        var names = doc.getBlockNames();
+        for (var i = 0; i < names.length; i++) {
+            var name = String(names[i]);
+            if (name.indexOf(CsSymbolStore.PREFIX) !== 0) {
+                continue;
+            }
+            if (out.byBlock.hasOwnProperty(name)) {
+                continue;   // the library's copy already answered
+            }
+            var entities = CsSymbolStore.geometryOf(doc, name);
+            var shapes = [];
+            for (var j = 0; j < entities.length; j++) {
+                try {
+                    var got = entities[j].getShapes();
+                    for (var k = 0; k < got.length; k++) {
+                        shapes.push(got[k]);
+                    }
+                } catch (eShape) {
+                }
+            }
+            out.byBlock[name] = shapes;
+        }
+    }
+    if (opened === 0) {
+        out.error = "no symbol files could be read";
     }
     return out;
 };
@@ -580,6 +597,23 @@ SymbolPalette.rebuildTiles = function() {
     }
     w.groupBoxes = [];
     w.buttons = [];
+
+    // A symbol drawn before the library existed still lives in the
+    // template, where the next release will overwrite it. Moving it is
+    // safe to do here and costs nothing when there is nothing to move,
+    // which is every rebuild after the first.
+    try {
+        var moved = CsSymbolStore.migrateFromTemplate();
+        if (moved.moved.length > 0) {
+            EAction.handleUserMessage(qsTr("Moved %1 of your own symbols " +
+                "out of the cave template and into your symbol library, " +
+                "where a CaveCAD update cannot overwrite them: %2")
+                .arg(moved.moved.length).arg(moved.moved.join(", ")));
+        }
+    } catch (eMigrate) {
+        // a migration that cannot run leaves the symbols where they
+        // are, which is exactly where they were working from before
+    }
 
     var merged = CsSymbols.merged();
     SymbolPalette.entries = merged.entries;
