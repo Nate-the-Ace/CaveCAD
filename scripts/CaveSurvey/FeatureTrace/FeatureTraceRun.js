@@ -39,13 +39,6 @@ FeatureTraceRun.State = {
  *  later, by CsTrace.resample, where it means a foot of cave. */
 FeatureTraceRun.SAMPLE_PIXELS = 6;
 
-/** True when the escape hatch is armed: trace onto whatever layer the
- *  drawing is set to, whichever view that turns out to be in. */
-FeatureTraceRun.isCurrentLayer = function() {
-    return typeof FeatureTrace !== "undefined" &&
-        FeatureTrace.target === FeatureTrace.CURRENT_LAYER;
-};
-
 /**
  * The armed FEATURE, as its plan-frame layer name.
  *
@@ -67,19 +60,6 @@ FeatureTraceRun.baseLayer = function(doc) {
     if (typeof FeatureTrace === "undefined" || isNull(FeatureTrace.target)) {
         return CsLayers.WALLS_SURVEYED;
     }
-    if (FeatureTraceRun.isCurrentLayer()) {
-        // Resolved HERE and not when the button was clicked: the current
-        // layer can change between arming and drawing, and the caver
-        // means the layer that is current when the line is drawn.
-        if (isNull(doc)) {
-            return CsLayers.WALLS_SURVEYED;
-        }
-        var name = doc.getLayerName(doc.getCurrentLayerId());
-        if (isNull(name) || String(name).length === 0) {
-            return CsLayers.WALLS_SURVEYED;
-        }
-        return name;
-    }
     var target = FeatureTrace.target;
     if (CsLayers.frameOf(target) === "plan") {
         return target;
@@ -100,10 +80,6 @@ FeatureTraceRun.baseLayer = function(doc) {
  * the view a stroke is drawn in IS the answer. One button per feature,
  * and location routes it.
  *
- * The current-layer escape hatch is exempt from all of it: its layer is
- * whatever the caver chose, sheet layers included, and rewriting that
- * to a twin would defeat the button.
- *
  * `points` and `boxes` are the profile-run half of the same idea and
  * are optional: with a path in hand, a stroke drawn inside one band's
  * bounding box lands on that band's run variant. Without one (the
@@ -112,9 +88,6 @@ FeatureTraceRun.baseLayer = function(doc) {
  */
 FeatureTraceRun.targetLayer = function(doc, frame, points, boxes) {
     var base = FeatureTraceRun.baseLayer(doc);
-    if (FeatureTraceRun.isCurrentLayer()) {
-        return base;
-    }
 
     var layer = CsLayers.twinFor(base, isNull(frame) ? "plan" : frame);
     if (layer === null) {
@@ -582,7 +555,7 @@ FeatureTraceRun.prototype.stampSection = function(doc, di, frame, id) {
  * what happened, after the line is safely drawn.
  */
 FeatureTraceRun.prototype.warnUnclaimedProfile = function(frame, layerName) {
-    if (frame !== "profile" || FeatureTraceRun.isCurrentLayer()) {
+    if (frame !== "profile") {
         return;
     }
     if (CsLayerVariants.split(layerName) !== null) {

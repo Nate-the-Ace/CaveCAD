@@ -36,13 +36,11 @@ FeatureTrace.prototype = new EAction();
  *  targetLayer() falls back to WALLS-SURVEYED. */
 FeatureTrace.target = undefined;
 
-/** Sentinel target meaning "whatever layer the drawing is set to".
- *
- *  A sentinel rather than a layer name, resolved at trace time, because
- *  the current layer can change between arming the button and drawing.
- *  Deliberately NOT a member of ROWS: every row there must name a real
- *  registry layer, and a test asserts it. */
-FeatureTrace.CURRENT_LAYER = "\u0000CURRENT-LAYER";
+// THE CURRENT-LAYER ESCAPE HATCH IS GONE (2026-09-07). It armed a
+// sentinel that resolved to whatever layer the drawing was set to, and
+// it was removed at Nathan's asking: a panel of features whose last
+// button means "not one of these" is a panel arguing with itself, and
+// QCAD's own draw tools already trace onto the current layer.
 
 /**
  * The seven traceable features. ONE ROW PER FEATURE, not per view.
@@ -212,14 +210,6 @@ FeatureTrace.armLayer = function(layerName) {
     var w = FeatureTrace.widgets;
     if (isNull(w) || isNull(w.buttons)) {
         return;
-    }
-    try {
-        if (!isNull(w.currentButton)) {
-            w.currentButton.checked =
-                (layerName === FeatureTrace.CURRENT_LAYER);
-        }
-    } catch (eCur) {
-        // as below: armed correctly, only the display is wrong
     }
     for (var i = 0; i < w.buttons.length; i++) {
         try {
@@ -603,6 +593,7 @@ FeatureTrace.buildGroup = function(w, parent, title, header, collapsed) {
                 // the grid still reads as a grid
             }
             FeatureTrace.connectRow(button, row);
+            FeatureTrace.connectTileMenu(button, row);
             inner.addWidget(button,
                 firstRow + Math.floor(cell / FeatureTrace.GRID_COLUMNS),
                 cell % FeatureTrace.GRID_COLUMNS);
@@ -619,17 +610,6 @@ FeatureTrace.buildGroup = function(w, parent, title, header, collapsed) {
         // so the tiles stay packed at the left in a steady grid.
         inner.setColumnStretch(FeatureTrace.GRID_COLUMNS, 1);
     } catch (eStretch) {
-    }
-
-    // The escape hatch, under the tiles it is an alternative to.
-    if (!isNull(w.currentButton)) {
-        try {
-            inner.addWidget(w.currentButton,
-                firstRow + Math.ceil(cell / FeatureTrace.GRID_COLUMNS),
-                0, 1, FeatureTrace.GRID_COLUMNS);
-        } catch (eHatch) {
-            w.problems.push("current-layer button placement (" + eHatch + ")");
-        }
     }
 
     section.host.setLayout(inner);
@@ -669,6 +649,234 @@ FeatureTrace.destinationsOf = function(base) {
     return out;
 };
 
+/**
+ * Every layer one tile draws on: its plan-frame layer and both twins.
+ *
+ * A tile is a FEATURE, and a feature exists in three views; hiding "the
+ * breakdown" means hiding it in the plan, the elevation and the
+ * sections, because a caver asking to see less does not mean "less,
+ * except in the elevation".
+ *
+ * Shaped tiles carry two layers -- the spine and the ornament -- and
+ * for flowstone and friends those differ (the spine lives on a CTRL-
+ * layer). Both come, or hiding the feature would leave its skeleton on
+ * screen.
+ *
+ * Pure apart from the registry it reads.
+ */
+FeatureTrace.layersOfTile = function(entry) {
+    var bases = [];
+    if (!isNull(entry.style)) {
+        var spec = CsShapeLine.STYLES[entry.style];
+        if (!isNull(spec)) {
+            bases.push(spec.spineLayer);
+            if (spec.decorLayer !== spec.spineLayer) {
+                bases.push(spec.decorLayer);
+            }
+        }
+    } else if (!isNull(entry.layer)) {
+        bases.push(entry.layer);
+    }
+    var frames = ["plan", "profile", "section"];
+    var out = [], seen = {};
+    for (var i = 0; i < bases.length; i++) {
+        for (var f = 0; f < frames.length; f++) {
+            var name = CsLayers.twinFor(bases[i], frames[f]);
+            if (name === null || seen[name] === true) {
+                continue;
+            }
+            seen[name] = true;
+            out.push(name);
+        }
+    }
+    return out;
+};
+
+/** Every layer every tile in the panel draws on -- what "the rest" and
+ *  "all of them" mean in the tile menu. Bounded to this panel's own
+ *  features on purpose: a caver hiding things from here should not
+ *  find their stations or their scans gone too. */
+FeatureTrace.allTileLayers = function() {
+    var out = [], seen = {}, i, j;
+    var rows = FeatureTrace.ROWS.concat(FeatureTrace.SHAPED_ROWS);
+    for (i = 0; i < rows.length; i++) {
+        var names = FeatureTrace.layersOfTile(rows[i]);
+        for (j = 0; j < names.length; j++) {
+            if (seen[names[j]] !== true) {
+                seen[names[j]] = true;
+                out.push(names[j]);
+            }
+        }
+    }
+    return out;
+};
+
+/** True when every one of `names` that the drawing has is switched on. */
+FeatureTrace.layersAreOn = function(doc, names) {
+    if (isNull(doc)) {
+        return true;
+    }
+    for (var i = 0; i < names.length; i++) {
+        try {
+            var lay = doc.queryLayer(names[i]);
+            if (!isNull(lay) && lay.isOff()) {
+                return false;
+            }
+        } catch (e) {
+        }
+    }
+    return true;
+};
+
+/** Switches a set of layers on or off, in one undo step. */
+FeatureTrace.setLayersOn = function(names, on) {
+    var doc = null, di = null;
+    try {
+        doc = EAction.getDocument();
+        di = EAction.getDocumentInterface();
+    } catch (eEnv) {
+        return 0;
+    }
+    if (isNull(doc) || isNull(di)) {
+        return 0;
+    }
+    var op = new RModifyObjectsOperation();
+    var touched = 0;
+    for (var i = 0; i < names.length; i++) {
+        try {
+            var lay = doc.queryLayer(names[i]);
+            if (isNull(lay)) {
+                continue;   // a layer this drawing has never had
+            }
+            // ONLY THE ONES THAT HAVE TO CHANGE. Written the other way
+            // round at first -- it acted on layers already in the state
+            // being asked for, so Hide hid nothing and Show All
+            // reported 36 layers it had not touched (2026-09-07).
+            if (lay.isOff() === !on) {
+                continue;
+            }
+            lay.setOff(!on);
+            op.addObject(lay, false);
+            touched++;
+        } catch (e) {
+        }
+    }
+    if (touched > 0) {
+        try {
+            di.applyOperation(op);
+        } catch (eApply) {
+            return 0;
+        }
+    }
+    return touched;
+};
+
+/** Shows only this tile's layers, of the ones this panel draws on. */
+FeatureTrace.isolateTile = function(entry) {
+    var mine = FeatureTrace.layersOfTile(entry);
+    var keep = {};
+    var i;
+    for (i = 0; i < mine.length; i++) {
+        keep[mine[i]] = true;
+    }
+    var others = [];
+    var all = FeatureTrace.allTileLayers();
+    for (i = 0; i < all.length; i++) {
+        if (keep[all[i]] !== true) {
+            others.push(all[i]);
+        }
+    }
+    FeatureTrace.setLayersOn(mine, true);
+    var hidden = FeatureTrace.setLayersOn(others, false);
+    EAction.handleUserMessage(qsTr("Showing %1 only (%2 other feature " +
+        "layer(s) hidden). \"Show All Features\" brings them back.")
+        .arg(entry.label).arg(hidden));
+};
+
+/**
+ * The right-click menu on a feature tile.
+ *
+ * WHAT IT IS FOR. The Symbol Palette's tiles have had a menu since
+ * 0.9.67.0, and Nathan's standing ask is that a panel feature belongs
+ * in both panels. What a FEATURE tile can usefully offer is not
+ * editing -- these are registry layers, not drawings -- but seeing:
+ * a traced cave gets crowded, and the question "show me just the
+ * breakdown" was a trip to the layer list.
+ *
+ * Everything here acts on the tile's layers in ALL THREE VIEWS, and
+ * "the rest" means the other tiles in this panel -- never the whole
+ * drawing. A caver hiding features should not lose their stations.
+ */
+FeatureTrace.connectTileMenu = function(button, entry) {
+    try {
+        button.contextMenuPolicy = Qt.CustomContextMenu;
+    } catch (ePolicy) {
+        return;
+    }
+    button.customContextMenuRequested.connect(function(pos) {
+        try {
+            var doc = null;
+            try {
+                doc = EAction.getDocument();
+            } catch (eDoc) {
+                doc = null;
+            }
+            var mine = FeatureTrace.layersOfTile(entry);
+            var on = FeatureTrace.layersAreOn(doc, mine);
+            var menu = new QMenu();
+
+            var draw = menu.addAction(qsTr("Draw"));
+            draw.triggered.connect(function() {
+                if (isNull(entry.style)) {
+                    FeatureTrace.armLayer(entry.layer);
+                    FeatureTrace.startRun();
+                } else {
+                    FeatureTrace.armShaped(entry.style);
+                }
+            });
+            menu.addSeparator();
+
+            var toggle = menu.addAction(on ? qsTr("Hide This Feature") :
+                qsTr("Show This Feature"));
+            toggle.triggered.connect(function() {
+                var n = FeatureTrace.setLayersOn(mine, !on);
+                EAction.handleUserMessage(qsTr("%1: %2 layer(s) %3.")
+                    .arg(entry.label).arg(n)
+                    .arg(on ? qsTr("hidden") : qsTr("shown")));
+            });
+
+            var only = menu.addAction(qsTr("Show Only This Feature"));
+            only.triggered.connect(function() {
+                FeatureTrace.isolateTile(entry);
+            });
+
+            var all = menu.addAction(qsTr("Show All Features"));
+            all.triggered.connect(function() {
+                var n = FeatureTrace.setLayersOn(
+                    FeatureTrace.allTileLayers(), true);
+                EAction.handleUserMessage(qsTr("%1 feature layer(s) " +
+                    "brought back.").arg(n));
+            });
+
+            try {
+                var where = mine.join(", ");
+                toggle.toolTip = where;
+                only.toolTip = where;
+            } catch (eTip) {
+            }
+
+            // Kept alive: popup() returns at once and a collected menu
+            // vanishes mid-display.
+            if (!isNull(FeatureTrace.widgets)) {
+                FeatureTrace.widgets.tileMenu = menu;
+            }
+            menu.popup(button.mapToGlobal(pos));
+        } catch (eMenu) {
+            // no menu on this bridge: every tile still draws
+        }
+    });
+};
+
 /** Arms the row and starts a trace. Its own function so the closure
  *  captures ONE row rather than the loop variable. */
 FeatureTrace.connectRow = function(button, row) {
@@ -695,12 +903,6 @@ FeatureTrace.armShaped = function(styleKey) {
     var w = FeatureTrace.widgets;
     if (!isNull(w)) {
         var i;
-        try {
-            if (!isNull(w.currentButton)) {
-                w.currentButton.checked = false;
-            }
-        } catch (eCur) {
-        }
         for (i = 0; i < w.buttons.length; i++) {
             try {
                 w.buttons[i].button.checked = false;
@@ -928,6 +1130,7 @@ FeatureTrace.buildShapedGroup = function(w, parent, collapsed) {
             } catch (eSize) {
             }
             FeatureTrace.connectShapedRow(button, row);
+            FeatureTrace.connectTileMenu(button, row);
             inner.addWidget(button,
                 Math.floor(cell / FeatureTrace.GRID_COLUMNS),
                 cell % FeatureTrace.GRID_COLUMNS);
@@ -970,29 +1173,6 @@ FeatureTrace.buildDock = function(appWin) {
         layout.addWidget(w.frameLabel, 0, 0);
     } catch (eFrame) {
         w.problems.push("cursor frame readout (" + eFrame + ")");
-    }
-
-    // -- trace onto whatever layer the drawing is set to -------------
-    //
-    // The one control left from what used to be a settings section.
-    // Interval and Smoothing lived here and are now fixed at one foot
-    // and none (FeatureTrace.INTERVAL_FEET): two questions about
-    // fidelity, asked before the caver had chosen what to draw, whose
-    // answer never changed. This is not a setting -- it is a feature
-    // choice, for a layer the tile list does not cover -- so it sits
-    // with the tiles rather than above them.
-    try {
-        w.currentButton = new QPushButton(qsTr("Trace on Current Layer"));
-        w.currentButton.checkable = true;
-        w.currentButton.toolTip = qsTr("Trace onto whichever layer the " +
-            "drawing's current layer is, resolved when you draw. Use this " +
-            "for a layer the feature list does not cover.");
-        w.currentButton.clicked.connect(function() {
-            FeatureTrace.armLayer(FeatureTrace.CURRENT_LAYER);
-            FeatureTrace.startRun();
-        });
-    } catch (eCur) {
-        w.problems.push("current-layer button (" + eCur + ")");
     }
 
     // -- the features ------------------------------------------------

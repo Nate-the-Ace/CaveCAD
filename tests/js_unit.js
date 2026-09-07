@@ -17385,8 +17385,7 @@ if (!IS_NODE) {
         // There is no per-view button any more, so nothing to refuse.
         // The armed FEATURE plus the view the stroke landed in name the
         // layer, and CsLayers.twinFor is the one table that derives it.
-        FeatureTrace = { target: CsLayers.WALLS_SURVEYED,
-                         CURRENT_LAYER: "\u0000CURRENT-LAYER" };
+        FeatureTrace = { target: CsLayers.WALLS_SURVEYED };
         eqs(FeatureTraceRun.targetLayer(doc, "plan"),
             CsLayers.WALLS_SURVEYED,
             "targetLayer: a stroke in the plan lands on the plan layer");
@@ -17400,8 +17399,7 @@ if (!IS_NODE) {
 
         // A feature the registry refuses to twin has nowhere to land,
         // and says so rather than inventing a layer.
-        FeatureTrace = { target: CsLayers.NORTH_ARROW,
-                         CURRENT_LAYER: "\u0000CURRENT-LAYER" };
+        FeatureTrace = { target: CsLayers.NORTH_ARROW };
         ok(FeatureTraceRun.targetLayer(doc, "profile") === null,
             "targetLayer: a NO_TWIN feature answers null for a view it " +
             "has no layer in");
@@ -17412,28 +17410,18 @@ if (!IS_NODE) {
         // A frame-prefixed target is folded back to the feature it
         // names, so an older per-view name still arms that feature
         // rather than twinning into PROFILE-PROFILE-*.
-        FeatureTrace = { target: CsLayers.PROFILE_FLOOR,
-                         CURRENT_LAYER: "\u0000CURRENT-LAYER" };
+        FeatureTrace = { target: CsLayers.PROFILE_FLOOR };
         eqs(FeatureTraceRun.baseLayer(doc), CsLayers.FLOOR,
             "baseLayer: a per-view target folds back to its plan base");
         eqs(FeatureTraceRun.targetLayer(doc, "section"),
             CsLayers.SECTION_FLOOR,
             "targetLayer: and then routes like any other feature");
 
-        // The escape hatch keeps its layer exactly as the caver set it,
-        // in every view -- sheet layers included.
-        FeatureTrace = { target: "\u0000CURRENT-LAYER",
-                         CURRENT_LAYER: "\u0000CURRENT-LAYER" };
-        eqs(FeatureTraceRun.targetLayer(doc, "profile"),
-            doc.getLayerName(doc.getCurrentLayerId()),
-            "targetLayer: the current-layer hatch is never twinned");
-
         // -- the run, read off the stroke ---------------------------
         // Boxes are passed in rather than drawn: this is the routing
         // decision, not CsProfileBox's own arithmetic, which has its
         // own tests.
-        FeatureTrace = { target: CsLayers.WALLS_SURVEYED,
-                         CURRENT_LAYER: "\u0000CURRENT-LAYER" };
+        FeatureTrace = { target: CsLayers.WALLS_SURVEYED };
         var boxes = [{ key: "A", minX: 0, minY: -200, maxX: 100, maxY: -100 }];
         var inBand = [pt(10, -150), pt(20, -150)];
         eqs(FeatureTraceRun.targetLayer(doc, "profile", inBand, boxes),
@@ -17457,8 +17445,7 @@ if (!IS_NODE) {
         // -- targetLayer with nothing armed and nothing said --------
         // A drag action running standalone -- no panel, no frame, no
         // samples -- still has to answer something drawable.
-        FeatureTrace = { target: undefined,
-                         CURRENT_LAYER: "\u0000CURRENT-LAYER" };
+        FeatureTrace = { target: undefined };
         eqs(FeatureTraceRun.targetLayer(), CsLayers.WALLS_SURVEYED,
             "FeatureTraceRun.targetLayer: falls back to surveyed walls unarmed");
         eqs(FeatureTraceRun.targetLayer(doc), CsLayers.WALLS_SURVEYED,
@@ -18050,41 +18037,10 @@ if (!IS_NODE) {
             "run selector: no panel means no run");
         FeatureTrace.target = undefined;
 
-        // -- the current-layer escape hatch -------------------------
-        var scratch = new RDocument(new RMemoryStorage(),
-            new RSpatialIndexNavel());
-        var scratchDi = new RDocumentInterface(scratch);
-        CsLayers.ensure(scratch, scratchDi, CsLayers.TEXT_NOTES);
-        scratch.setCurrentLayer(CsLayers.TEXT_NOTES);
-
-        FeatureTrace.target = FeatureTrace.CURRENT_LAYER;
-        eqs(FeatureTraceRun.targetLayer(scratch), CsLayers.TEXT_NOTES,
-            "targetLayer: the current-layer sentinel resolves to the drawing's layer");
-        // Resolved at trace time, not when armed: switch the current
-        // layer and the same armed sentinel follows it.
-        scratch.setCurrentLayer("0");
-        eqs(FeatureTraceRun.targetLayer(scratch), "0",
-            "targetLayer: the sentinel follows a change of current layer");
-        eqs(FeatureTraceRun.targetLayer(undefined), CsLayers.WALLS_SURVEYED,
-            "targetLayer: the sentinel without a document falls back");
-        // And it is never twinned, whichever view the stroke landed in:
-        // the hatch exists for layers the feature list does not cover,
-        // sheet layers included, and rewriting one to a twin would
-        // defeat the button.
-        scratch.setCurrentLayer(CsLayers.TEXT_NOTES);
-        eqs(FeatureTraceRun.targetLayer(scratch, "section"),
-            CsLayers.TEXT_NOTES,
-            "targetLayer: the sentinel is exempt from frame routing");
-        ok(FeatureTrace.CURRENT_LAYER !== CsLayers.WALLS_SURVEYED,
-            "FeatureTrace.CURRENT_LAYER: the sentinel is not a real layer name");
-        var sentinelIsARow = false;
-        for (var ri = 0; ri < FeatureTrace.ROWS.length; ri++) {
-            if (FeatureTrace.ROWS[ri].layer === FeatureTrace.CURRENT_LAYER) {
-                sentinelIsARow = true;
-            }
-        }
-        ok(!sentinelIsARow,
-            "FeatureTrace.CURRENT_LAYER: never appears as a feature row");
+        // THE CURRENT-LAYER ESCAPE HATCH IS GONE (2026-09-07), and with
+        // it the sentinel these tests exercised. Feature Trace draws
+        // the features it names; QCAD's own tools draw on the current
+        // layer, which is what the hatch was standing in for.
         FeatureTrace.target = undefined;
     }());
 }
@@ -22840,6 +22796,67 @@ eqs(CsSymbolStore.PREFIX, "SYM_", "the symbol block prefix");
 
     eqs(CsPanel.orderedTitles([], ["Water"]).length, 0,
         "orderedTitles: no sections, no order");
+})();
+
+// ---------------------------------------------------------------------
+// FeatureTrace.layersOfTile -- what a tile's right-click menu acts on.
+// ---------------------------------------------------------------------
+//
+// A tile is a FEATURE, and a feature exists in three views. Hiding "the
+// breakdown" has to mean the plan, the elevation and the sections, or
+// a caver who asked to see less still sees it in two places.
+
+(function testLayersOfTile() {
+    var walls = FeatureTrace.layersOfTile({ layer: CsLayers.WALLS_SURVEYED });
+    ok(walls.indexOf(CsLayers.WALLS_SURVEYED) !== -1,
+        "layersOfTile: the plan layer");
+    ok(walls.indexOf(CsLayers.PROFILE_WALLS_SURVEYED) !== -1,
+        "layersOfTile: and its elevation twin");
+    ok(walls.indexOf(CsLayers.SECTION_WALLS_SURVEYED) !== -1,
+        "layersOfTile: and its section twin");
+
+    // A feature the registry refuses to twin contributes only what it
+    // has, rather than a made-up name.
+    var arrow = FeatureTrace.layersOfTile({ layer: CsLayers.NORTH_ARROW });
+    eqs(arrow.length, 1,
+        "layersOfTile: a NO_TWIN feature is one layer, not three");
+    eqs(arrow[0], CsLayers.NORTH_ARROW, "layersOfTile: and it is the right one");
+
+    // A SHAPED tile carries its spine AND its ornament: flowstone keeps
+    // its spine on a CTRL- layer, and hiding the feature without it
+    // would leave the skeleton on screen.
+    var flow = FeatureTrace.layersOfTile({ style: "flowstone" });
+    var spec = CsShapeLine.STYLES["flowstone"];
+    ok(flow.indexOf(spec.decorLayer) !== -1,
+        "layersOfTile: a shaped tile includes its ornament layer");
+    ok(flow.indexOf(spec.spineLayer) !== -1,
+        "layersOfTile: and its spine layer, which is a different one");
+
+    // A ledge draws spine and ornament on ONE layer; it must not be
+    // listed twice.
+    var ledge = FeatureTrace.layersOfTile({ style: "floorledge" });
+    var counts = {};
+    for (var i = 0; i < ledge.length; i++) {
+        counts[ledge[i]] = (counts[ledge[i]] || 0) + 1;
+    }
+    var dupe = false;
+    for (var k in counts) {
+        if (counts.hasOwnProperty(k) && counts[k] > 1) { dupe = true; }
+    }
+    ok(!dupe, "layersOfTile: no layer is listed twice");
+
+    // Every tile in the panel, which is what "the rest" and "all of
+    // them" mean in the menu -- and it stays inside this panel's own
+    // features: hiding features must not take a caver's stations with
+    // it.
+    var all = FeatureTrace.allTileLayers();
+    ok(all.length >= FeatureTrace.ROWS.length,
+        "allTileLayers: covers at least one layer per feature");
+    ok(all.indexOf(CsLayers.CTRL_STATIONS) === -1,
+        "allTileLayers: and never reaches outside the panel's features");
+    ok(all.indexOf(CsLayers.WALLS_SURVEYED) !== -1 &&
+        all.indexOf(CsLayers.LEDGE_FLOOR) !== -1,
+        "allTileLayers: both groups of tiles are in it");
 })();
 
 // ---------------------------------------------------------------------
