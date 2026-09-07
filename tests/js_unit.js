@@ -17757,119 +17757,12 @@ if (!IS_NODE) {
         eqs(CsTrace.snapNameOf(snapDi.getSnap()), "RSnapFree",
             "CsTrace.restoreSnap: a null name changes nothing");
 
-        // -- refreshRuns actually populates from a drawing ----------
-        // The logic, independent of what triggers it. (The bug in use was
-        // the TRIGGER: an already-open panel never refreshed for a
-        // drawing opened afterwards. A transaction listener covers that
-        // now; this locks the population itself.)
-        (function() {
-            var d = new RDocument(new RMemoryStorage(),
-                new RSpatialIndexNavel());
-            var di2 = new RDocumentInterface(d);
-            CsLayers.ensure(d, di2, CsLayers.CTRL_STATIONS);
-            var op3 = new RAddObjectsOperation();
-            var nms = ["A1", "M4", "SINK2"];
-            for (var q = 0; q < nms.length; q++) {
-                var p3 = new RPointEntity(d,
-                    new RPointData(new RVector(q * 3, 0)));
-                p3.setLayerId(d.getLayerId(CsLayers.CTRL_STATIONS));
-                CsTags.set(p3, "Station", nms[q]);
-                op3.addObject(p3, false);
-            }
-            di2.applyOperation(op3);
-
-            // A combo stub: only what refreshRuns actually touches.
-            var items = [];
-            var combo = {
-                currentText: FeatureTrace.RUN_SHARED,
-                currentIndex: 0,
-                clear: function() { items = []; },
-                addItem: function(t) { items.push(t); },
-                itemText: function(i) { return items[i]; }
-            };
-            Object.defineProperty(combo, "count", {
-                get: function() { return items.length; }
-            });
-            FeatureTrace.widgets = { runCombo: combo };
-
-            FeatureTrace.refreshRuns(d);
-            eqs(items.length, 5,
-                "FeatureTrace.refreshRuns: auto + shared + three runs");
-            eqs(items[0], FeatureTrace.RUN_AUTO,
-                "FeatureTrace.refreshRuns: auto entry first -- the default " +
-                "a fresh combo lands on is by-location");
-            eqs(items[1], FeatureTrace.RUN_SHARED,
-                "FeatureTrace.refreshRuns: shared entry second");
-            eqs(items[2], "A", "FeatureTrace.refreshRuns: A listed");
-            eqs(items[3], "M", "FeatureTrace.refreshRuns: M listed");
-            eqs(items[4], "SINK",
-                "FeatureTrace.refreshRuns: a multi-letter run listed too");
-
-            // Selection survives a refresh, so re-scanning cannot
-            // silently re-aim a caver mid-job.
-            combo.currentText = "M";
-            FeatureTrace.refreshRuns(d);
-            eqs(combo.currentIndex, 3,
-                "FeatureTrace.refreshRuns: the chosen run stays chosen");
-
-            // The auto entry: runToken answers null (no run NAMED),
-            // runIsAuto answers true -- and a manual run answers false.
-            combo.currentText = FeatureTrace.RUN_AUTO;
-            ok(FeatureTrace.runToken() === null,
-                "FeatureTrace.runToken: auto names no run");
-            ok(FeatureTrace.runIsAuto() === true,
-                "FeatureTrace.runIsAuto: auto mode reads true");
-            combo.currentText = "M";
-            ok(FeatureTrace.runIsAuto() === false,
-                "FeatureTrace.runIsAuto: a named run reads false");
-            ok(FeatureTrace.runToken() === "M",
-                "FeatureTrace.runToken: a named run still resolves");
-            FeatureTrace.widgets = undefined;
-            ok(FeatureTrace.runIsAuto() === true,
-                "FeatureTrace.runIsAuto: no panel at all defaults to auto");
-        }());
-
-        // -- changing the run hot-swaps an isolated view -------------
-        (function() {
-            // onRunChosen is a plain function precisely so this is
-            // testable without a live combo box.
-            var calls = [];
-            var realIsolate = FeatureTrace.isolateSelectedRun;
-            var realShowAll = FeatureTrace.showAllRuns;
-            FeatureTrace.isolateSelectedRun = function() {
-                calls.push("isolate:" + FeatureTrace.runToken());
-            };
-            FeatureTrace.showAllRuns = function() { calls.push("showAll"); };
-
-            // Not isolated: changing the run must NOT hide the rest of
-            // the cave just because the caver switched which run they
-            // are tracing.
-            FeatureTrace.isolatedRun = null;
-            FeatureTrace.widgets = { runCombo: { currentText: "B" } };
-            FeatureTrace.onRunChosen();
-            eqs(calls.length, 0,
-                "onRunChosen: no isolation active means no view change");
-
-            // Isolated on A, caver picks B: hot-swap to B.
-            FeatureTrace.isolatedRun = "A";
-            FeatureTrace.onRunChosen();
-            eqs(calls.length, 1, "onRunChosen: isolated, so the view swaps");
-            eqs(calls[0], "isolate:B",
-                "onRunChosen: it swaps to the NEWLY chosen run");
-
-            // Isolated, caver picks "(all runs)": show everything.
-            calls = [];
-            FeatureTrace.widgets = {
-                runCombo: { currentText: FeatureTrace.RUN_SHARED } };
-            FeatureTrace.onRunChosen();
-            eqs(calls[0], "showAll",
-                "onRunChosen: choosing (all runs) while isolated shows all");
-
-            FeatureTrace.isolateSelectedRun = realIsolate;
-            FeatureTrace.showAllRuns = realShowAll;
-            FeatureTrace.isolatedRun = null;
-            FeatureTrace.widgets = undefined;
-        }());
+        // THE RUN SELECTOR IS GONE (2026-09-08), and with it these
+        // tests: refreshRuns populating a combo, runToken reading it,
+        // and onRunChosen hot-swapping an isolated view. The run a
+        // stroke belongs to is read off the band box it lies in, which
+        // FeatureTraceRun.targetLayer does and which
+        // tests/section_sketch_run.js drives end to end.
 
         // -- refresh: hidden-layer markers, across all three views ---
         (function() {
@@ -17884,7 +17777,6 @@ if (!IS_NODE) {
             var wallsBtn = btn("Surveyed Walls");
             var group = { enabled: true, toolTip: "" };
             FeatureTrace.widgets = {
-                runCombo: { currentText: "A" },
                 featureGroup: group,
                 buttons: [
                     { button: ceilingBtn,
@@ -17942,14 +17834,23 @@ if (!IS_NODE) {
             eqs(ceilingBtn.text,
                 FeatureTrace.wrapLabel("Ceiling", FeatureTrace.CELL_CHARS),
                 "FeatureTrace.refresh: a visible layer shows a plain label");
-            ok(String(ceilingBtn.toolTip).indexOf("PROFILE-CEILING-A") >= 0,
-                "FeatureTrace.refresh: the tooltip names the run's layer");
+            // THE SHARED profile layer, not a band's own: which band a
+            // stroke lands in is decided by where it is drawn, and a
+            // tooltip cannot know that before the stroke exists.
+            ok(String(ceilingBtn.toolTip).indexOf(CsLayers.PROFILE_CEILING)
+                    >= 0,
+                "FeatureTrace.refresh: the tooltip names the elevation " +
+                "layer the feature reaches");
             ok(String(ceilingBtn.toolTip).indexOf(CsLayers.SECTION_CEILING)
                     >= 0,
                 "FeatureTrace.refresh: and the section layer the same tile " +
                 "reaches");
 
-            var lay = d.queryLayer("PROFILE-CEILING-A");
+            // The layer has to exist before it can be switched off; the
+            // run-qualified one this used to poke was created by the
+            // band fixture above, and the shared one is not.
+            CsLayers.ensure(d, di3, CsLayers.PROFILE_CEILING);
+            var lay = d.queryLayer(CsLayers.PROFILE_CEILING);
             lay.setOff(true);
             var mop = new RModifyObjectsOperation();
             mop.addObject(lay, false);
@@ -17984,57 +17885,53 @@ if (!IS_NODE) {
             FeatureTrace.widgets = undefined;
         }());
 
-        // -- the run selector: profile strokes only -----------------
+        // -- which band a profile stroke belongs to -----------------
         // Each run is drawn as its own band and CsProfile lays bands out
         // so they never overlap, so a profile feature belongs to exactly
-        // one run. The plan is one continuous map and must NOT be split:
-        // a wall runs straight through survey boundaries. The FRAME is
-        // the second argument now -- it is where the stroke landed, not
-        // which button was pressed.
-        FeatureTrace.widgets = { runCombo: { currentText: "A" } };
+        // one run -- and WHICH one is read off the band box the stroke
+        // lies in, never from a control. The plan is one continuous map
+        // and must NOT be split: a wall runs straight through survey
+        // boundaries. A section stroke is not run-qualified either; it
+        // belongs to the one station its bay was opened at, recorded on
+        // the line rather than in its layer name.
+        FeatureTrace.widgets = undefined;
 
         FeatureTrace.target = CsLayers.CEILING;
-        eqs(FeatureTraceRun.targetLayer(null, "profile"), "PROFILE-CEILING-A",
-            "run selector: a stroke in the elevation goes to its run's layer");
-
-        FeatureTrace.target = CsLayers.WALLS_INFERRED;
         eqs(FeatureTraceRun.targetLayer(null, "profile"),
-            "PROFILE-WALLS-INFERRED-A",
-            "run selector: a multi-word profile base still varies");
+            CsLayers.PROFILE_CEILING,
+            "bands: with no stroke to read, the shared profile layer");
 
         FeatureTrace.target = CsLayers.WALLS_SURVEYED;
         eqs(FeatureTraceRun.targetLayer(null, "plan"), CsLayers.WALLS_SURVEYED,
-            "run selector: a stroke in the PLAN is never split by run");
+            "bands: a stroke in the PLAN is never split by run");
         FeatureTrace.target = CsLayers.BREAKDOWN_BOUNDARY;
         eqs(FeatureTraceRun.targetLayer(null, "plan"),
             CsLayers.BREAKDOWN_BOUNDARY,
-            "run selector: nor is a plan breakdown boundary");
-        // A section stroke is not run-qualified either: a section
-        // belongs to the one station its bay was opened at, which is
-        // recorded on the line rather than in its layer name.
+            "bands: nor is a plan breakdown boundary");
         eqs(FeatureTraceRun.targetLayer(null, "section"),
             CsLayers.SECTION_BREAKDOWN_BOUNDARY,
-            "run selector: nor is a section stroke");
+            "bands: nor is a section stroke");
 
-        // "(all runs)" means the shared layer, not a run called that.
-        FeatureTrace.widgets = { runCombo: { currentText: FeatureTrace.RUN_SHARED } };
+        // THE STROKE'S OWN LOCATION names the band, which is the whole
+        // design: boxes and a path in, a run variant out. No panel is
+        // involved, and none can override it any more.
         FeatureTrace.target = CsLayers.CEILING;
-        eqs(FeatureTraceRun.targetLayer(null, "profile"),
+        var bandBoxes = [{ key: "A", minX: 0, minY: 0, maxX: 100, maxY: 50 },
+                         { key: "B", minX: 0, minY: 80, maxX: 100, maxY: 130 }];
+        var inA = [pt(10, 10), pt(20, 20)];
+        var inB = [pt(10, 90), pt(20, 100)];
+        var across = [pt(10, 10), pt(20, 100)];
+        eqs(FeatureTraceRun.targetLayer(null, "profile", inA, bandBoxes),
+            "PROFILE-CEILING-A",
+            "bands: a stroke inside band A lands on A's layer");
+        eqs(FeatureTraceRun.targetLayer(null, "profile", inB, bandBoxes),
+            "PROFILE-CEILING-B",
+            "bands: and one inside band B on B's -- nothing was chosen, " +
+            "the stroke said so");
+        eqs(FeatureTraceRun.targetLayer(null, "profile", across, bandBoxes),
             CsLayers.PROFILE_CEILING,
-            "run selector: the shared entry means the shared layer");
-
-        // Lower case from the combo must resolve to the same layer.
-        FeatureTrace.widgets = { runCombo: { currentText: "g" } };
-        eqs(FeatureTraceRun.targetLayer(null, "profile"), "PROFILE-CEILING-G",
-            "run selector: the run token is sanitised, so g and G are one run");
-
-        // No panel, no run: the drag still works standalone.
-        FeatureTrace.widgets = undefined;
-        eqs(FeatureTraceRun.targetLayer(null, "profile"),
-            CsLayers.PROFILE_CEILING,
-            "run selector: with no panel a profile stroke uses the shared layer");
-        ok(FeatureTraceRun.runToken() === null,
-            "run selector: no panel means no run");
+            "bands: a stroke claimed by no single band gets the shared " +
+            "layer, which warnUnclaimedProfile then says out loud");
         FeatureTrace.target = undefined;
 
         // THE CURRENT-LAYER ESCAPE HATCH IS GONE (2026-09-07), and with

@@ -204,7 +204,6 @@ FeatureTrace.widgets = undefined;
 FeatureTrace.armLayer = function(layerName) {
     FeatureTrace.target = layerName;
     FeatureTrace.clearShaped();
-    FeatureTrace.refreshRuns();
     FeatureTrace.refresh();
 
     var w = FeatureTrace.widgets;
@@ -244,211 +243,22 @@ FeatureTrace.toleranceFraction = function() {
     return FeatureTrace.smoothingFraction(FeatureTrace.DEFAULT_SMOOTHING);
 };
 
-FeatureTrace.RUN_SHARED = "Not tied to a band";
+// THE RUN SELECTOR IS GONE (2026-09-08). A combo offered "from the
+// band I draw in" (the default), "not tied to a band", or a named
+// band, with Isolate and Show All beside it -- and Nathan's answer was
+// that the first of those is the only one he ever meant: "I want
+// whatever feature I trace to be tied to the runs by whether they're
+// in the bounding box or not."
+//
+// That IS what the tool was designed to do. The band boxes already know
+// which run a stroke lies in (CsProfileBox), which is precisely the
+// fact the old per-view buttons were deleted for making a caver
+// restate; an override combo was the same mistake in different
+// clothes. FeatureTraceRun.targetLayer reads the run off the stroke,
+// always. A stroke inside no box lands on the shared layer and
+// warnUnclaimedProfile says so.
 
-/** The combo entry meaning "read the run off WHERE the stroke lies" --
- *  the band bounding boxes (CsProfileBox) answer at commit time. The
- *  DEFAULT since the boxes exist: the caver traces inside the band
- *  they are working on anyway, so asking them to also say so in a
- *  combo was a second statement of the same fact. */
-FeatureTrace.RUN_AUTO = "From the band I draw in";
 
-/** The run token the panel has selected, or null for the shared layer.
- *
- *  AUTO also answers null here, deliberately: every existing caller of
- *  this function (variant resolution at arm time, isolation) wants "a
- *  specific run the caver named", and in auto mode there is none until
- *  a stroke exists -- FeatureTraceRun.commit resolves it then, from
- *  the stroke itself.
- *
- *  Sanitised on the way out so the panel and the layer name can never
- *  disagree about what run "a" means. */
-FeatureTrace.runToken = function() {
-    var w = FeatureTrace.widgets;
-    if (isNull(w) || isNull(w.runCombo)) {
-        return null;
-    }
-    try {
-        var text = String(w.runCombo.currentText);
-        if (text === FeatureTrace.RUN_SHARED ||
-                text === FeatureTrace.RUN_AUTO) {
-            return null;
-        }
-        return CsLayerVariants.sanitize(text);
-    } catch (e) {
-        return null;
-    }
-};
-
-/** True when the run should be read off the stroke's location. Also
- *  true with NO PANEL AT ALL: a drag action running standalone has
- *  nobody to name a run, and location is the only voice left. */
-FeatureTrace.runIsAuto = function() {
-    var w = FeatureTrace.widgets;
-    if (isNull(w) || isNull(w.runCombo)) {
-        return true;
-    }
-    try {
-        return String(w.runCombo.currentText) === FeatureTrace.RUN_AUTO;
-    } catch (e) {
-        return true;
-    }
-};
-
-/** The run currently isolated, or null when every run is visible.
- *
- *  Held so that CHANGING the run hot-swaps the view instead of leaving
- *  the caver looking at the old run's band while tracing the new one --
- *  which is the invisible-work trap the Isolate button exists to avoid
- *  in the first place. */
-FeatureTrace.isolatedRun = null;
-
-/**
- * The run selection changed by hand. Hot-swaps the isolated view.
- *
- * A plain function rather than a closure in the signal wiring, so the
- * behaviour is testable without a live combo box.
- *
- * Only acts while something IS isolated: if the caver is looking at
- * every run, changing which run they trace should not suddenly hide the
- * rest of the cave.
- *
- * Wired to the combo's `activated`, which fires only on a real user
- * choice -- not on the programmatic clear/repopulate that refreshRuns
- * does. Using currentIndexChanged would have re-isolated mid-refresh,
- * against whatever selection existed for the instant after clear().
- */
-FeatureTrace.onRunChosen = function() {
-    // Always repaint: choosing a run enables the Profile group, and
-    // choosing "(all runs)" disables it again.
-    FeatureTrace.refresh();
-    if (FeatureTrace.isolatedRun === null) {
-        return;
-    }
-    var run = FeatureTrace.runToken();
-    if (run === null) {
-        // "(all runs)" chosen while isolated: they asked for all of it.
-        FeatureTrace.showAllRuns();
-        return;
-    }
-    FeatureTrace.isolateSelectedRun();
-};
-
-/** Shows only the selected run's profile layers.
- *
- *  Refuses with a message when no run is selected rather than quietly
- *  showing everything: "(all runs)" and "isolate" are opposite
- *  intentions, and guessing which was meant would hide or reveal work
- *  the caver did not ask about. */
-FeatureTrace.isolateSelectedRun = function() {
-    var run = FeatureTrace.runToken();
-    if (run === null) {
-        EAction.handleUserMessage(qsTr("Pick a run above first -- " +
-            "\"(all runs)\" has nothing to isolate."));
-        return;
-    }
-    var doc = null, di = null;
-    try {
-        doc = EAction.getDocument();
-        di = EAction.getDocumentInterface();
-    } catch (eEnv) {
-        return;
-    }
-    if (isNull(doc) || isNull(di)) {
-        return;
-    }
-    try {
-        var n = CsProfileDraw.isolateRun(doc, di, run);
-        FeatureTrace.isolatedRun = run;
-        FeatureTrace.refresh(doc);
-        EAction.handleUserMessage(qsTr("Showing run %1 only (%2 layer(s) " +
-            "hidden or shown).").arg(run).arg(n));
-    } catch (e) {
-        warning("Feature Trace: could not isolate run " + run + " (" + e + ")");
-    }
-};
-
-/** Brings every profile run back into view. */
-FeatureTrace.showAllRuns = function() {
-    var doc = null, di = null;
-    try {
-        doc = EAction.getDocument();
-        di = EAction.getDocumentInterface();
-    } catch (eEnv) {
-        return;
-    }
-    if (isNull(doc) || isNull(di)) {
-        return;
-    }
-    try {
-        var n = CsProfileDraw.showAllRuns(doc, di);
-        FeatureTrace.isolatedRun = null;
-        // The selector must say what the view shows, or the panel claims
-        // a run is in focus when every run is on screen.
-        try {
-            var w2 = FeatureTrace.widgets;
-            if (!isNull(w2) && !isNull(w2.runCombo)) {
-                for (var i2 = 0; i2 < w2.runCombo.count; i2++) {
-                    if (String(w2.runCombo.itemText(i2)) ===
-                            FeatureTrace.RUN_SHARED) {
-                        w2.runCombo.currentIndex = i2;
-                        break;
-                    }
-                }
-            }
-        } catch (eSel) {
-            // the readout is a nicety; the layers already changed
-        }
-        FeatureTrace.refresh(doc);
-        EAction.handleUserMessage(qsTr("Every profile run is visible " +
-            "again (%1 layer(s) changed).").arg(n));
-    } catch (e) {
-        warning("Feature Trace: could not show all runs (" + e + ")");
-    }
-};
-
-/** Repopulates the run list from the bands the drawing actually has.
- *
- *  From CsProfileDraw.runsIn, which reads the SURVEY -- a caver picks
- *  the run first and the tool second, so the list must be populated
- *  before any elevation has been generated. Keeps the current selection
- *  when it still exists, so refreshing does not silently re-aim a caver
- *  mid-job. */
-FeatureTrace.refreshRuns = function(docIn) {
-    var w = FeatureTrace.widgets;
-    if (isNull(w) || isNull(w.runCombo)) {
-        return;
-    }
-    try {
-        var doc = isNull(docIn) ? EAction.getDocument() : docIn;
-        var runs = isNull(doc) ? [] : CsProfileDraw.runsIn(doc);
-        var was = String(w.runCombo.currentText);
-        w.runCombo.clear();
-        // AUTO first, so index 0 -- the default a fresh combo lands
-        // on -- is "read the run off the stroke's location".
-        w.runCombo.addItem(FeatureTrace.RUN_AUTO);
-        w.runCombo.addItem(FeatureTrace.RUN_SHARED);
-        for (var i = 0; i < runs.length; i++) {
-            w.runCombo.addItem(runs[i]);
-        }
-        var found = false;
-        for (var k = 0; k < w.runCombo.count; k++) {
-            if (String(w.runCombo.itemText(k)) === was) {
-                w.runCombo.currentIndex = k;
-                found = true;
-                break;
-            }
-        }
-        // The isolated run has gone from the drawing -- its survey was
-        // deleted. Leaving it isolated would show an empty elevation
-        // with no way to tell why, so bring everything back.
-        if (!found && FeatureTrace.isolatedRun !== null) {
-            FeatureTrace.showAllRuns();
-        }
-    } catch (e) {
-        // a stale run list must never stop a trace
-    }
-};
 
 /** Reports what the last trace cost, so the caver can feel whether the
  *  smoothing suits the passage rather than guessing at a number. */
@@ -627,22 +437,20 @@ FeatureTrace.buildGroup = function(w, parent, title, header, collapsed) {
  * registry refuses (CsLayers.NO_TWIN), so a feature with no section
  * counterpart simply lists two.
  *
- * Pure apart from the run combo read.
+ * Pure.
+ *
+ * The ELEVATION entry is the shared profile layer, not a band's own:
+ * which band a stroke lands in is decided by where it is drawn, and
+ * nothing here knows where that will be. The tooltip this feeds says
+ * where a feature can go, not where the next stroke will end up.
  */
 FeatureTrace.destinationsOf = function(base) {
     var frames = ["plan", "profile", "section"];
-    var run = FeatureTrace.runToken();
     var out = [];
     for (var i = 0; i < frames.length; i++) {
         var name = CsLayers.twinFor(base, frames[i]);
         if (name === null) {
             continue;
-        }
-        if (frames[i] === "profile" && run !== null) {
-            var v = CsLayerVariants.nameFor(name, run);
-            if (v !== null) {
-                name = v;
-            }
         }
         out.push(name);
     }
@@ -989,7 +797,6 @@ FeatureTrace.COLLAPSED_SETTING = "CaveSurvey/FeatureTraceCollapsed";
 FeatureTrace.SEC_FEATURES = "Draw a feature";
 FeatureTrace.SEC_SHAPED = "Draw a shaped line";
 FeatureTrace.SEC_HOW = "How it draws";
-FeatureTrace.SEC_BANDS = "Elevation bands";
 
 /** Tile icon size, in pixels. Bigger than the Symbol Palette's: a
  *  ledge tile has to show hachures ON one side of a line, which is
@@ -1181,98 +988,6 @@ FeatureTrace.buildDock = function(appWin) {
     // and picking the right one was the caver restating which view they
     // were already looking at. The view is read from the stroke now, so
     // the groups had nothing left to divide.
-    try {
-        // THE RUN CONTROLS ARE THEIR OWN SECTION NOW, below the tiles.
-        // They sat inside the Feature box, above the tiles, where they
-        // read as something to answer before choosing a feature --
-        // Nathan, 2026-09-07: "What does the Run > By Location control
-        // do in this context? It is unclear." They have nothing to do
-        // with which feature is armed: they are about the ELEVATION,
-        // where each survey run is drawn as its own band, and they do
-        // nothing at all to a stroke in the plan.
-        var runRow = null;
-        try {
-            runRow = CsPanel.formGrid(2);
-            // What the section is for, in the panel rather than in a
-            // tooltip nobody hovers.
-            var bandsWhy = new QLabel(qsTr("Only affects strokes drawn " +
-                "in the elevation."));
-            bandsWhy.wordWrap = true;
-            try {
-                bandsWhy.setMinimumWidth(1);
-            } catch (eWide) {
-            }
-            runRow.addWidget(bandsWhy, 0, 0, 1, 2);
-            runRow.addWidget(new QLabel(qsTr("Band")), 1, 0);
-            w.runCombo = new QComboBox();
-            // Seeded in the same order refreshRuns() repopulates it:
-            // refreshRuns' first call preserves "the prior selection" if
-            // it still exists in the new list, and a bootstrap of
-            // RUN_SHARED alone made that prior selection RUN_SHARED --
-            // permanently defeating the documented AUTO-first default on
-            // every dock's first population.
-            w.runCombo.addItem(FeatureTrace.RUN_AUTO);
-            w.runCombo.addItem(FeatureTrace.RUN_SHARED);
-            w.runCombo.toolTip = qsTr("The extended elevation draws each " +
-                "survey run as its own BAND, and a line traced in a band " +
-                "belongs to that run -- so it moves with the band when " +
-                "the survey is revised, instead of being left behind.\n\n" +
-                "\"From the band I draw in\" reads that off the band you " +
-                "drew inside, which is why it is the default: you were " +
-                "already in the right band. Naming a band instead files " +
-                "every stroke under it wherever you draw. \"Not tied to " +
-                "a band\" uses the shared elevation layers, and a revision " +
-                "will not carry that work with any band.\n\nStrokes in " +
-                "the plan and in a cross section ignore this entirely.");
-            // `activated`, not currentIndexChanged: it fires only on a
-            // real user choice, so refreshRuns' clear/repopulate cannot
-            // trigger a spurious hot-swap.
-            w.runCombo.activated.connect(function(index) {
-                try {
-                    FeatureTrace.onRunChosen();
-                } catch (eSwap) {
-                    // never throw out of a signal handler
-                }
-            });
-            runRow.addWidget(w.runCombo, 1, 1);
-
-            // Isolate acts on the run the combo has SELECTED, so the
-            // visible run and the run being traced cannot drift apart.
-            // They must not: an off layer still accepts a trace (emit
-            // wraps the add in withLayerOn) and then hides it again, so
-            // tracing a run you cannot see lands work you cannot find.
-            w.isolateButton = new QPushButton(qsTr("Isolate"));
-            w.isolateButton.toolTip = qsTr("Show only the selected run's " +
-                "profile layers, band and traced work both. The shared " +
-                "profile layers and the whole plan are left alone.");
-            w.isolateButton.clicked.connect(function() {
-                FeatureTrace.isolateSelectedRun();
-            });
-            runRow.addWidget(w.isolateButton, 2, 0);
-
-            w.showAllButton = new QPushButton(qsTr("Show All"));
-            w.showAllButton.toolTip = qsTr("Bring every profile run back " +
-                "into view.");
-            w.showAllButton.clicked.connect(function() {
-                FeatureTrace.showAllRuns();
-            });
-            runRow.addWidget(w.showAllButton, 2, 1);
-        } catch (eRun) {
-            w.problems.push("run selector (" + eRun + ")");
-            runRow = null;
-        }
-
-        // The bands section: built here because the run controls were
-        // built above, added to the panel BELOW the tiles.
-        w.bandsSection = CsPanel.section(body, FeatureTrace.SEC_BANDS,
-            FeatureTrace.COLLAPSED_SETTING, collapsed);
-        if (runRow !== null) {
-            w.bandsSection.host.setLayout(runRow);
-        }
-    } catch (eGroups) {
-        w.problems.push("elevation bands (" + eGroups + ")");
-    }
-
     // -- what to draw, which is why the panel is open ----------------
     try {
         var featureSection = FeatureTrace.buildGroup(w, body,
@@ -1300,13 +1015,9 @@ FeatureTrace.buildDock = function(appWin) {
 
     // -- which elevation band a stroke belongs to --------------------
     try {
-        if (!isNull(w.bandsSection)) {
-            layout.addWidget(w.bandsSection.box, 0, 0);
-            CsPanel.stackAdd(stack, w.bandsSection, FeatureTrace.SEC_BANDS);
-        }
         CsPanel.applyOrder(stack);
-    } catch (eBands) {
-        w.problems.push("elevation bands placement (" + eBands + ")");
+    } catch (eOrder) {
+        w.problems.push("section order (" + eOrder + ")");
     }
 
     // -- what the last trace cost ------------------------------------
@@ -1418,7 +1129,6 @@ FeatureTrace.flush = function() {
     } catch (eBays) {
         FeatureTrace.bayRects = [];
     }
-    FeatureTrace.refreshRuns(doc);
     FeatureTrace.refresh(doc, FeatureTrace.regionBox);
 };
 
@@ -1671,8 +1381,6 @@ FeatureTrace.prototype.beginEvent = function() {
             csFeatureTraceDock !== null);
         var dock = FeatureTrace.ensureDock();
         dock.visible = existed ? !dock.visible : true;
-        // The drawing may have gained or lost bands since last time.
-        FeatureTrace.refreshRuns();
         try {
             FeatureTrace.flush();
         } catch (eShow) {

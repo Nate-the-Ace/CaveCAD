@@ -105,10 +105,22 @@ FeatureTraceRun.targetLayer = function(doc, frame, points, boxes) {
     // to be laid out within a foot of each other. Plan features are
     // untouched: the plan is one continuous map and a wall runs
     // straight through survey boundaries.
-    var run = FeatureTraceRun.runToken();
-    if (run === null && FeatureTraceRun.runIsAuto() && !isNull(points) &&
-            !isNull(doc)) {
+    //
+    // THE RUN COMES FROM THE STROKE, always. There used to be a combo
+    // in the panel that could override it -- name a band and every
+    // stroke was filed under that one wherever it was drawn -- and it
+    // was removed on 2026-09-08: the band boxes already know the
+    // answer, and asking a caver to also state it in a combo was the
+    // same second statement of the same fact that the per-view buttons
+    // were. A stroke outside every box still lands on the shared layer,
+    // and warnUnclaimedProfile says so.
+    var run = null;
+    if (!isNull(points) && (!isNull(boxes) || !isNull(doc))) {
         try {
+            // Boxes handed in win: a caller that already walked the
+            // drawing for them (the run action does, once per stroke)
+            // must not make this walk it again, and a test can hand in
+            // boxes with no document at all.
             run = CsProfileBox.runForPath(
                 isNull(boxes) ? CsProfileBox.boxes(doc) : boxes, points);
         } catch (eAuto) {
@@ -158,27 +170,6 @@ FeatureTraceRun.refusalReason = function(doc, layerName) {
     }
     return qsTr("Nothing was drawn: layer %1 refused the line, and this " +
         "build reports no reason. Please report this.").arg(layerName);
-};
-
-/** The survey run the panel has selected, or null for the shared layer.
- *  Read through a helper like the other panel values so the drag action
- *  still works with no panel at all. */
-FeatureTraceRun.runToken = function() {
-    if (typeof FeatureTrace !== "undefined" && !isNull(FeatureTrace.runToken)) {
-        return FeatureTrace.runToken();
-    }
-    return null;
-};
-
-/** Whether the run should come from the stroke's location -- the
- *  panel's combo says, and NO panel at all means auto (a standalone
- *  drag has nobody else to name a run). */
-FeatureTraceRun.runIsAuto = function() {
-    if (typeof FeatureTrace !== "undefined" &&
-            !isNull(FeatureTrace.runIsAuto)) {
-        return FeatureTrace.runIsAuto();
-    }
-    return true;
 };
 
 /** The panel's sample interval in feet, or 1.0 without a panel.
