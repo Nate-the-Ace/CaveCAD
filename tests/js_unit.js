@@ -22798,6 +22798,51 @@ eqs(CsSymbolStore.PREFIX, "SYM_", "the symbol block prefix");
 })();
 
 // ---------------------------------------------------------------------
+// CsPanel.orderedTitles -- a caver's own order of the panel sections.
+// ---------------------------------------------------------------------
+//
+// Sections cannot be DRAGGED: this bridge hands script mouse events for
+// four widget classes and a header button is none of them. They are
+// moved from the header's right-click menu instead, and the order is
+// remembered -- which means the saved order and the panel's own must be
+// reconciled every build, as categories come and go.
+
+(function testOrderedTitles() {
+    var titles = ["Structure", "Floor", "Formations", "Water"];
+
+    eqs(CsPanel.orderedTitles(titles, []).join(","),
+        "Structure,Floor,Formations,Water",
+        "orderedTitles: no saved order is the panel's own order");
+
+    eqs(CsPanel.orderedTitles(titles,
+        ["Water", "Floor", "Formations", "Structure"]).join(","),
+        "Water,Floor,Formations,Structure",
+        "orderedTitles: a full saved order is honoured exactly");
+
+    // A category the caver has never moved -- a brand new one, or one
+    // from a release that added it -- appears WHERE THE PANEL MEANT IT,
+    // after whichever of its neighbours is already placed, rather than
+    // being swept to the bottom of their arrangement.
+    eqs(CsPanel.orderedTitles(titles, ["Water", "Structure"]).join(","),
+        "Water,Structure,Floor,Formations",
+        "orderedTitles: an unsaved section follows the one it came after");
+
+    // A saved title the panel no longer has -- a category whose last
+    // symbol was deleted -- is simply dropped.
+    eqs(CsPanel.orderedTitles(["Floor", "Water"],
+        ["Water", "Sign", "Floor"]).join(","), "Water,Floor",
+        "orderedTitles: a section that no longer exists is dropped");
+
+    // A saved order naming the same title twice must not duplicate it.
+    eqs(CsPanel.orderedTitles(["Floor", "Water"],
+        ["Water", "Water", "Floor"]).join(","), "Water,Floor",
+        "orderedTitles: a repeated saved title appears once");
+
+    eqs(CsPanel.orderedTitles([], ["Water"]).length, 0,
+        "orderedTitles: no sections, no order");
+})();
+
+// ---------------------------------------------------------------------
 // Report.
 // ---------------------------------------------------------------------
 

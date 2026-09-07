@@ -633,7 +633,7 @@ FeatureTrace.buildGroup = function(w, parent, title, header, collapsed) {
     }
 
     section.host.setLayout(inner);
-    return box;
+    return section;
 };
 
 /**
@@ -942,7 +942,7 @@ FeatureTrace.buildShapedGroup = function(w, parent, collapsed) {
     } catch (eStretch) {
     }
     section.host.setLayout(inner);
-    return box;
+    return section;
 };
 
 FeatureTrace.buildDock = function(appWin) {
@@ -955,6 +955,14 @@ FeatureTrace.buildDock = function(appWin) {
     var body = new QWidget(dock);
     var layout = new QVBoxLayout();
     var collapsed = CsPanel.loadCollapsed(FeatureTrace.COLLAPSED_SETTING);
+    // The sections can be reordered from their own right-click menus;
+    // baseIndex 1 keeps the cursor readout pinned above them.
+    var stack = CsPanel.stack(layout, FeatureTrace.COLLAPSED_SETTING, 1,
+        function() {
+            EAction.handleUserMessage(qsTr("Section order reset -- reopen " +
+                "the panel to see it."));
+        });
+    w.stack = stack;
 
     // -- cursor frame readout ----------------------------------------
     try {
@@ -1087,9 +1095,11 @@ FeatureTrace.buildDock = function(appWin) {
 
     // -- what to draw, which is why the panel is open ----------------
     try {
-        w.featureGroup = FeatureTrace.buildGroup(w, body,
+        var featureSection = FeatureTrace.buildGroup(w, body,
             FeatureTrace.SEC_FEATURES, null, collapsed);
-        layout.addWidget(w.featureGroup, 0, 0);
+        w.featureGroup = featureSection.box;
+        layout.addWidget(featureSection.box, 0, 0);
+        CsPanel.stackAdd(stack, featureSection, FeatureTrace.SEC_FEATURES);
     } catch (eFeatures) {
         w.problems.push("feature group (" + eFeatures + ")");
     }
@@ -1100,8 +1110,10 @@ FeatureTrace.buildDock = function(appWin) {
     // same gesture but not the same thing -- these bring ornament, and
     // they ask one more question (which side) after the drag.
     try {
-        w.shapedGroup = FeatureTrace.buildShapedGroup(w, body, collapsed);
-        layout.addWidget(w.shapedGroup, 0, 0);
+        var shapedSection = FeatureTrace.buildShapedGroup(w, body, collapsed);
+        w.shapedGroup = shapedSection.box;
+        layout.addWidget(shapedSection.box, 0, 0);
+        CsPanel.stackAdd(stack, shapedSection, FeatureTrace.SEC_SHAPED);
     } catch (eShaped) {
         w.problems.push("shaped lines group (" + eShaped + ")");
     }
@@ -1110,7 +1122,9 @@ FeatureTrace.buildDock = function(appWin) {
     try {
         if (!isNull(w.bandsSection)) {
             layout.addWidget(w.bandsSection.box, 0, 0);
+            CsPanel.stackAdd(stack, w.bandsSection, FeatureTrace.SEC_BANDS);
         }
+        CsPanel.applyOrder(stack);
     } catch (eBands) {
         w.problems.push("elevation bands placement (" + eBands + ")");
     }

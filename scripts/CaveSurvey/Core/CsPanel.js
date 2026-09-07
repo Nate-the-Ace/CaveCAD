@@ -161,6 +161,239 @@ CsPanel.connectSection = function(header, host, title, settingKey) {
 };
 
 /**
+ * The saved order of a panel's sections: titles, in the order the caver
+ * put them. Unknown to the panel is fine -- see orderedTitles.
+ */
+CsPanel.loadOrder = function(settingKey) {
+    var out = [];
+    try {
+        var raw = RSettings.getStringValue(settingKey + "Order", "");
+        if (raw !== "") {
+            var parts = String(raw).split(",");
+            for (var i = 0; i < parts.length; i++) {
+                var name = parts[i].trim();
+                if (name !== "") {
+                    out.push(name);
+                }
+            }
+        }
+    } catch (e) {
+    }
+    return out;
+};
+
+/** Records the order a panel's sections are in. */
+CsPanel.saveOrder = function(settingKey, titles) {
+    try {
+        RSettings.setValue(settingKey + "Order", titles.join(","));
+    } catch (e) {
+    }
+};
+
+/**
+ * `titles` arranged by `saved`.
+ *
+ * A title the saved order does not mention keeps its place relative to
+ * the ones it came after -- so a new category, or a new section in a
+ * new release, appears where the panel meant to put it rather than
+ * being swept to the end of a caver's arrangement.
+ *
+ * A saved title the panel no longer has is dropped, which is what
+ * happens to a category whose last symbol was deleted.
+ *
+ * Pure.
+ */
+CsPanel.orderedTitles = function(titles, saved) {
+    if (isNull(saved) || saved.length === 0) {
+        return titles.slice(0);
+    }
+    var known = {};
+    var i;
+    for (i = 0; i < titles.length; i++) {
+        known[titles[i]] = true;
+    }
+    var out = [];
+    var placed = {};
+    for (i = 0; i < saved.length; i++) {
+        if (known[saved[i]] === true && placed[saved[i]] !== true) {
+            out.push(saved[i]);
+            placed[saved[i]] = true;
+        }
+    }
+    // The unmentioned ones, in the panel's own order, each inserted
+    // after whichever of its original predecessors is already placed.
+    for (i = 0; i < titles.length; i++) {
+        if (placed[titles[i]] === true) {
+            continue;
+        }
+        var at = out.length;
+        for (var j = i - 1; j >= 0; j--) {
+            var idx = out.indexOf(titles[j]);
+            if (idx !== -1) {
+                at = idx + 1;
+                break;
+            }
+        }
+        out.splice(at, 0, titles[i]);
+        placed[titles[i]] = true;
+    }
+    return out;
+};
+
+/**
+ * A stack of sections in one layout, which the caver can reorder.
+ *
+ * NOT BY DRAGGING, and not for want of trying: this bridge hands script
+ * mouse events for exactly four widget classes (RListView, RListWidget,
+ * RTreeWidget, RGraphicsViewQt -- the generated shells are the list),
+ * and a section header is none of them. A header cannot know it is
+ * being dragged. So the reordering is on the header's own right-click
+ * menu, which any widget can have.
+ *
+ * `baseIndex` is where the first section sits in the layout, so a panel
+ * can keep a readout or a search box above the stack and still let the
+ * sections below it be shuffled.
+ */
+CsPanel.stack = function(layout, settingKey, baseIndex, onChanged) {
+    return {
+        layout: layout,
+        settingKey: settingKey,
+        baseIndex: isNull(baseIndex) ? 0 : baseIndex,
+        onChanged: isNull(onChanged) ? null : onChanged,
+        sections: []
+    };
+};
+
+/** The titles currently in a stack, in their current order. */
+CsPanel.stackTitles = function(stack) {
+    var out = [];
+    for (var i = 0; i < stack.sections.length; i++) {
+        out.push(stack.sections[i].title);
+    }
+    return out;
+};
+
+/**
+ * Adds a section to a stack and gives its header the move menu.
+ *
+ * The caller still adds the box to the layout itself, in the order it
+ * wants; applyOrder below rearranges to the caver's saved order once
+ * everything is in.
+ */
+CsPanel.stackAdd = function(stack, section, title) {
+    section.title = title;
+    stack.sections.push(section);
+    if (isNull(section.header)) {
+        return;
+    }
+    try {
+        section.header.contextMenuPolicy = Qt.CustomContextMenu;
+        section.header.customContextMenuRequested.connect(function(pos) {
+            try {
+                var menu = new QMenu();
+                var up = menu.addAction(qsTr("Move Up"));
+                up.enabled = (CsPanel.indexOfSection(stack, section) > 0);
+                up.triggered.connect(function() {
+                    CsPanel.moveSection(stack, section, -1);
+                });
+                var down = menu.addAction(qsTr("Move Down"));
+                down.enabled = (CsPanel.indexOfSection(stack, section) <
+                    stack.sections.length - 1);
+                down.triggered.connect(function() {
+                    CsPanel.moveSection(stack, section, 1);
+                });
+                menu.addSeparator();
+                var reset = menu.addAction(qsTr("Reset Order"));
+                reset.triggered.connect(function() {
+                    CsPanel.resetOrder(stack);
+                });
+                // Kept alive: popup() returns at once and a collected
+                // menu simply vanishes mid-display.
+                stack.menu = menu;
+                menu.popup(section.header.mapToGlobal(pos));
+            } catch (eMenu) {
+                // no menu on this bridge: the sections keep the order
+                // the panel built them in, which is a working panel
+            }
+        });
+    } catch (ePolicy) {
+    }
+};
+
+/** Where a section sits in its stack, or -1. */
+CsPanel.indexOfSection = function(stack, section) {
+    for (var i = 0; i < stack.sections.length; i++) {
+        if (stack.sections[i] === section) {
+            return i;
+        }
+    }
+    return -1;
+};
+
+/** Moves one section up or down and remembers the new order. */
+CsPanel.moveSection = function(stack, section, delta) {
+    var at = CsPanel.indexOfSection(stack, section);
+    var to = at + delta;
+    if (at < 0 || to < 0 || to >= stack.sections.length) {
+        return;
+    }
+    stack.sections.splice(at, 1);
+    stack.sections.splice(to, 0, section);
+    CsPanel.relayout(stack);
+    CsPanel.saveOrder(stack.settingKey, CsPanel.stackTitles(stack));
+};
+
+/** Forgets the caver's order; the panel's own returns on next build. */
+CsPanel.resetOrder = function(stack) {
+    CsPanel.saveOrder(stack.settingKey, []);
+    if (typeof stack.onChanged === "function") {
+        stack.onChanged();
+    }
+};
+
+/** Rearranges a stack's boxes in the layout to match its own order. */
+CsPanel.relayout = function(stack) {
+    var i;
+    try {
+        for (i = 0; i < stack.sections.length; i++) {
+            stack.layout.removeWidget(stack.sections[i].box);
+        }
+        for (i = 0; i < stack.sections.length; i++) {
+            stack.layout.insertWidget(stack.baseIndex + i,
+                stack.sections[i].box, 0, 0);
+        }
+    } catch (e) {
+        // a bridge without insertWidget leaves the order alone, which
+        // is the panel's own order -- untidy, never broken
+    }
+};
+
+/** Puts a freshly built stack into the caver's saved order. */
+CsPanel.applyOrder = function(stack) {
+    var saved = CsPanel.loadOrder(stack.settingKey);
+    if (saved.length === 0) {
+        return;
+    }
+    var wanted = CsPanel.orderedTitles(CsPanel.stackTitles(stack), saved);
+    var byTitle = {};
+    var i;
+    for (i = 0; i < stack.sections.length; i++) {
+        byTitle[stack.sections[i].title] = stack.sections[i];
+    }
+    var reordered = [];
+    for (i = 0; i < wanted.length; i++) {
+        if (!isNull(byTitle[wanted[i]])) {
+            reordered.push(byTitle[wanted[i]]);
+        }
+    }
+    if (reordered.length !== stack.sections.length) {
+        return;   // something is missing; leave the panel as built
+    }
+    stack.sections = reordered;
+    CsPanel.relayout(stack);
+};
+
+/**
  * A grid laid out for a PANEL rather than for a page: labels at the
  * left at their natural width, fields beside them, and the slack given
  * to a column past the last one.

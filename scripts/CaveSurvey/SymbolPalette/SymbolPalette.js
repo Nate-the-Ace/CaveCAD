@@ -715,10 +715,10 @@ SymbolPalette.loadCollapsed = function() {
 };
 
 SymbolPalette.buildGroup = function(w, parent, group, shapes, collapsed) {
-    // The folding is CsPanel's, shared with Feature Trace.
+    // The folding -- and the right-click Move Up / Move Down on the
+    // header -- are CsPanel's, shared with Feature Trace.
     var section = CsPanel.section(parent, group.category,
         SymbolPalette.COLLAPSED_SETTING, collapsed);
-    var box = section.box;
     var inner = new QGridLayout();
     var cell = 0;
     for (var i = 0; i < group.entries.length; i++) {
@@ -792,7 +792,7 @@ SymbolPalette.buildGroup = function(w, parent, group, shapes, collapsed) {
     } catch (eMargins) {
     }
     section.host.setLayout(inner);
-    return box;
+    return section;
 };
 
 /**
@@ -867,6 +867,13 @@ SymbolPalette.rebuildTiles = function() {
     }
 
     var groups = SymbolPalette.grouped(merged.entries, needle);
+    // The caver's own order of the categories, when they have set one.
+    // A search does not reorder anything -- it filters -- so the stack
+    // is built either way and simply has fewer sections in it.
+    w.stack = CsPanel.stack(w.tileLayout,
+        SymbolPalette.COLLAPSED_SETTING, 0, function() {
+            SymbolPalette.rebuildTiles();
+        });
     // A SEARCH OPENS EVERYTHING. A caver typing "gour" wants to be
     // shown it, not to be told it is inside a group they collapsed
     // last week -- and the collapsed set is left alone, so clearing the
@@ -874,13 +881,19 @@ SymbolPalette.rebuildTiles = function() {
     var collapsed = (needle === "") ? SymbolPalette.loadCollapsed() : {};
     for (var g = 0; g < groups.length; g++) {
         try {
-            var box = SymbolPalette.buildGroup(w, w.tileHost, groups[g],
+            var section = SymbolPalette.buildGroup(w, w.tileHost, groups[g],
                 shapes, collapsed);
-            w.tileLayout.addWidget(box, 0, 0);
-            w.groupBoxes.push(box);
+            w.tileLayout.addWidget(section.box, 0, 0);
+            w.groupBoxes.push(section.box);
+            CsPanel.stackAdd(w.stack, section, groups[g].category);
         } catch (eGroup) {
             w.problems.push(groups[g].category + " (" + eGroup + ")");
         }
+    }
+    try {
+        CsPanel.applyOrder(w.stack);
+    } catch (eOrder) {
+        w.problems.push("category order (" + eOrder + ")");
     }
 
     // Re-arm what was armed, if it is still in the list: a search that
