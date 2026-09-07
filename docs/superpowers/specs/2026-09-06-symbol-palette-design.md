@@ -588,3 +588,43 @@ Caught by the new test in `tests/symbol_palette_run.js` (3d), which
 carries symbols between two real template files and then reads the
 carried one's name, category and home layer back off disk -- not by
 looking at it, which is how it would have shipped.
+
+
+## Addendum: the symbols moved out of the template (0.9.66.0)
+
+Nathan, after the mud slope was lost and recovered: "go ahead with that
+then, I'm fine with it."
+
+**Custom symbols now live in
+`~/Documents/Cave/symbols/CaveCustomSymbols.dxf`.** Beside the caves,
+because that folder is the one that syncs and gets backed up -- a symbol
+drawn on one machine turns up on the next -- and because no installer,
+release or template change touches it. This reverses the 2026-09-06
+decision, and it reverses it for the reason the original decision was
+made under: "a release overwrites them" was a rare event when it was
+agreed, and is a fifteen-times-an-evening event on a machine that is
+being developed on.
+
+The shape of it:
+
+- **Writes go to the library alone.** `saveBlock` with no path named
+  creates the library if it does not exist and writes there. A test
+  asserts the template is untouched afterwards, because that is the
+  whole claim.
+- **Reads take both files, the caver's own first.** `listAll` merges
+  them into one palette, previews come from either, `ensureBlock`
+  imports from whichever has the block, and Edit opens whichever holds
+  it. A symbol in both is theirs.
+- **Old symbols migrate when the palette opens.** Copy into the library,
+  read back to prove it landed, and only then remove the template's
+  copy. A migration that loses work is worse than one that never runs.
+  It is a no-op every time after the first, which is what makes it safe
+  to call on every rebuild.
+- **publish.sh still carries custom blocks across a template swap.** It
+  should now have nothing to carry. It stays as the net under a caver
+  whose symbols predate this, not as the mechanism.
+
+Verified live: the mud slope migrated out of the template into the
+library, the palette shows 29 tiles with it under Floor and its picture
+intact, three publishes in a row left the library byte-identical, and
+the template is back to the shipped 28.
