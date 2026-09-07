@@ -543,3 +543,48 @@ these two are one failure mode: **the JS bridge accepts the call and
 then does not do what Qt would**. None can be caught by a headless
 suite. The cheap defence is a structural test naming the forbidden form,
 which is now the third one in `tests/test_addon.py`.
+
+
+## Addendum: custom symbols now survive an upgrade (0.9.65.0)
+
+Reported: "my mud slope symbol was created and added, but upon
+reopening, it's gone from the palette."
+
+**The design's accepted cost came due within the day.** On 2026-09-06
+Nathan chose to keep custom symbols in the template and accept that a
+release overwrites them; `publish.sh` deletes `templates/` wholesale
+before copying the shipped file. On a development machine that runs
+maybe fifteen times an evening, and one of those runs took a symbol that
+had been drawn, named and saved twenty minutes earlier.
+
+It was recoverable only because the same decision came with a backup:
+`templates_previous/NSS_Cave_Template_PLAN-20260906-224143.dxf` still
+held `SYM_MUD_SLOPE`, and the store read its name, category and layer
+straight back out of the marker point inside the block -- which is
+exactly the property the self-describing block was built for.
+
+`tools/merge_custom_symbols.js` runs from `publish.sh` after the copy
+now. Every `SYM_` block the shipped catalogue does not name is carried
+from the outgoing template into the new one; the shipped 28 are never
+carried, because they are code and the new file's copies are current.
+The console says which symbols came across.
+
+### The silent-layer trap, for the third time
+
+`copyBlock` copied the geometry and left the marker behind, so a carried
+symbol arrived anonymous -- the right picture under the wrong name, on
+the wrong layer, in the "Custom" group. The cause is the one this suite
+keeps meeting: **an add onto an off, frozen or locked layer is dropped
+without a word**, and the marker lives on `CTRL-HIDDEN`, which the
+registry keeps off. `saveBlock` already went through `withLayerOn` for
+this reason; `copyBlock` did not.
+
+It now adds through every layer the block uses, on and unlocked
+(`CsSymbolStore.withLayersWritable`). Three separate functions in this
+tool have now been bitten by the same rule. **Anything that writes an
+entity in this suite should ask which layer it lands on first.**
+
+Caught by the new test in `tests/symbol_palette_run.js` (3d), which
+carries symbols between two real template files and then reads the
+carried one's name, category and home layer back off disk -- not by
+looking at it, which is how it would have shipped.
