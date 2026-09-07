@@ -168,6 +168,9 @@ var CORE_FILES = [
     // that only touch QPixmap inside their bodies -- the pure half
     // is what is tested here.
     "scripts/CaveSurvey/Core/CsTileArt.js",
+    // Collapsed-set parsing is pure; the widget half only touches
+    // Qt inside its bodies.
+    "scripts/CaveSurvey/Core/CsPanel.js",
     "scripts/CaveSurvey/Core/Format/CsCompass.js",
     "scripts/CaveSurvey/Core/Format/CsWalls.js",
     "scripts/CaveSurvey/Core/Format/CsSurvex.js",
@@ -17649,33 +17652,27 @@ if (!IS_NODE) {
         near(FeatureTraceRun.toleranceFraction(), 0.0, 1e-9,
             "FeatureTraceRun.toleranceFraction: reads through to the default");
 
-        // -- and they read the panel when it IS there ---------------
+        // -- AND THEY IGNORE THE PANEL, because there is nothing there
+        // to read any more. The Interval and Smoothing boxes were
+        // removed on 2026-09-07: two questions about fidelity, asked
+        // before the caver had chosen what to draw, whose answer never
+        // changed. A panel that somehow carries those widgets -- an old
+        // one, a future one -- must not be able to change the answer
+        // silently, which is what these assertions are for.
         FeatureTrace.widgets = {
             intervalEdit: { text: "2.5" },
             smoothingCombo: { currentText: "Coarse" }
         };
-        near(FeatureTrace.intervalFeet(), 2.5, 1e-9,
-            "FeatureTrace.intervalFeet: a typed interval is used");
-        near(FeatureTrace.toleranceFraction(), 0.35, 1e-9,
-            "FeatureTrace.toleranceFraction: the chosen smoothing is used");
-
-        // No Smoothing must survive the panel read as a real zero, not
-        // get treated as "unset" and replaced by a default.
-        FeatureTrace.widgets = { smoothingCombo: { currentText: "No Smoothing" } };
+        near(FeatureTrace.intervalFeet(), 1.0, 1e-9,
+            "FeatureTrace.intervalFeet: one foot, whatever a panel says");
         near(FeatureTrace.toleranceFraction(), 0.0, 1e-9,
-            "FeatureTrace.toleranceFraction: No Smoothing reads as zero, not unset");
-
-        // Junk in the box must not stop a trace, and must not become a
-        // spacing of zero -- CsTrace.resample would return the raw drag.
-        FeatureTrace.widgets = { intervalEdit: { text: "" } };
-        near(FeatureTrace.intervalFeet(), 1.0, 1e-9,
-            "FeatureTrace.intervalFeet: a blank field falls back to one foot");
-        FeatureTrace.widgets = { intervalEdit: { text: "-3" } };
-        near(FeatureTrace.intervalFeet(), 1.0, 1e-9,
-            "FeatureTrace.intervalFeet: a negative interval falls back");
-        FeatureTrace.widgets = { intervalEdit: { text: "banana" } };
-        near(FeatureTrace.intervalFeet(), 1.0, 1e-9,
-            "FeatureTrace.intervalFeet: nonsense falls back");
+            "FeatureTrace.toleranceFraction: no smoothing, whatever a " +
+            "panel says");
+        near(FeatureTrace.INTERVAL_FEET, 1.0, 1e-9,
+            "the fixed interval is a foot of cave");
+        eqs(FeatureTrace.DEFAULT_SMOOTHING, "No Smoothing",
+            "and the fixed smoothing is none -- thinning a traced wall " +
+            "is the tool second-guessing a measurement");
         FeatureTrace.widgets = undefined;
 
         // -- no-gap walls: ties to a nearby wall end ----------------

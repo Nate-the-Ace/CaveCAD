@@ -148,6 +148,20 @@ FeatureTrace.SMOOTHING = [
 FeatureTrace.DEFAULT_SMOOTHING = "No Smoothing";
 
 /**
+ * The sample interval, in FEET of cave. Fixed.
+ *
+ * IT USED TO BE A FIELD, and the field is gone (Nathan, 2026-09-07:
+ * "we can remove the interval setting and the smoothness, keep it at
+ * 1ft and no smoothing"). Both boxes sat at the top of the panel asking
+ * a caver to answer two questions about fidelity before they had chosen
+ * what they were drawing, and in practice the answer was always the one
+ * they are set to here. The values live on so the machinery below reads
+ * the same as it always did -- and so a future panel that wants them
+ * back has something to bind to.
+ */
+FeatureTrace.INTERVAL_FEET = 1.0;
+
+/**
  * Where an unrecognised smoothing name lands.
  *
  * SEPARATE FROM DEFAULT_SMOOTHING since the panel's starting row became
@@ -225,43 +239,29 @@ FeatureTrace.armLayer = function(layerName) {
  *  entry falls back rather than refusing: a bad number in a text box
  *  must not stop a caver mid-trace. */
 FeatureTrace.intervalFeet = function() {
-    var w = FeatureTrace.widgets;
-    if (isNull(w) || isNull(w.intervalEdit)) {
-        return 1.0;
-    }
-    try {
-        var typed = parseFloat(w.intervalEdit.text);
-        if (!isNaN(typed) && typed > 0) {
-            return typed;
-        }
-    } catch (e) {
-        // unreadable field; fall through
-    }
-    return 1.0;
+    return FeatureTrace.INTERVAL_FEET;
 };
 
-/** The reduce tolerance as a fraction of the spacing, from the panel. */
+/**
+ * How hard a trace is thinned: not at all.
+ *
+ * See INTERVAL_FEET. No Smoothing was already the panel's starting
+ * choice, on the grounds that thinning a traced wall is the tool
+ * second-guessing a measurement; with the control gone it is simply
+ * what the tool does.
+ */
 FeatureTrace.toleranceFraction = function() {
-    var w = FeatureTrace.widgets;
-    if (isNull(w) || isNull(w.smoothingCombo)) {
-        return FeatureTrace.smoothingFraction(FeatureTrace.DEFAULT_SMOOTHING);
-    }
-    try {
-        return FeatureTrace.smoothingFraction(w.smoothingCombo.currentText);
-    } catch (e) {
-        return FeatureTrace.smoothingFraction(FeatureTrace.DEFAULT_SMOOTHING);
-    }
+    return FeatureTrace.smoothingFraction(FeatureTrace.DEFAULT_SMOOTHING);
 };
 
-/** The combo entry meaning "no run: use the shared layer". */
-FeatureTrace.RUN_SHARED = "(all runs)";
+FeatureTrace.RUN_SHARED = "Not tied to a band";
 
 /** The combo entry meaning "read the run off WHERE the stroke lies" --
  *  the band bounding boxes (CsProfileBox) answer at commit time. The
  *  DEFAULT since the boxes exist: the caver traces inside the band
  *  they are working on anyway, so asking them to also say so in a
  *  combo was a second statement of the same fact. */
-FeatureTrace.RUN_AUTO = "(by location)";
+FeatureTrace.RUN_AUTO = "From the band I draw in";
 
 /** The run token the panel has selected, or null for the shared layer.
  *
@@ -555,8 +555,10 @@ FeatureTrace.wrapLabel = function(text, budget) {
  *  FeatureTrace.ROWS. `header` is the profile run selector, which sits
  *  inside the box above the tiles because it refines what a profile
  *  stroke lands on rather than choosing it. */
-FeatureTrace.buildGroup = function(w, parent, title, header) {
-    var box = new QGroupBox(title, parent);
+FeatureTrace.buildGroup = function(w, parent, title, header, collapsed) {
+    var section = CsPanel.section(parent, title,
+        FeatureTrace.COLLAPSED_SETTING, collapsed);
+    var box = section.box;
     var inner = new QGridLayout();
     var cell = 0;
     var firstRow = 0;
@@ -619,7 +621,18 @@ FeatureTrace.buildGroup = function(w, parent, title, header) {
     } catch (eStretch) {
     }
 
-    box.setLayout(inner);
+    // The escape hatch, under the tiles it is an alternative to.
+    if (!isNull(w.currentButton)) {
+        try {
+            inner.addWidget(w.currentButton,
+                firstRow + Math.ceil(cell / FeatureTrace.GRID_COLUMNS),
+                0, 1, FeatureTrace.GRID_COLUMNS);
+        } catch (eHatch) {
+            w.problems.push("current-layer button placement (" + eHatch + ")");
+        }
+    }
+
+    section.host.setLayout(inner);
     return box;
 };
 
@@ -764,6 +777,18 @@ FeatureTrace.startShaped = function(styleKey) {
     di.setCurrentAction(action);
 };
 
+/** Where this panel's collapsed sections are remembered. Its own key,
+ *  the Symbol Palette's its own -- one caver may want the shaped lines
+ *  shut and every symbol category open. */
+FeatureTrace.COLLAPSED_SETTING = "CaveSurvey/FeatureTraceCollapsed";
+
+/** The section titles, named once because they are BOTH the heading a
+ *  caver reads and the key their collapsed state is filed under. */
+FeatureTrace.SEC_FEATURES = "Draw a feature";
+FeatureTrace.SEC_SHAPED = "Draw a shaped line";
+FeatureTrace.SEC_HOW = "How it draws";
+FeatureTrace.SEC_BANDS = "Elevation bands";
+
 /** Tile icon size, in pixels. Bigger than the Symbol Palette's: a
  *  ledge tile has to show hachures ON one side of a line, which is
  *  three strokes deep before it reads at all. */
@@ -866,8 +891,10 @@ FeatureTrace.iconForStyle = function(styleKey) {
  * The shaped-line group: one tile per NSS line symbol, each showing its
  * own ornament.
  */
-FeatureTrace.buildShapedGroup = function(w, parent) {
-    var box = new QGroupBox(qsTr("Shaped Lines"), parent);
+FeatureTrace.buildShapedGroup = function(w, parent, collapsed) {
+    var section = CsPanel.section(parent, FeatureTrace.SEC_SHAPED,
+        FeatureTrace.COLLAPSED_SETTING, collapsed);
+    var box = section.box;
     var inner = new QGridLayout();
     var cell = 0;
     for (var i = 0; i < FeatureTrace.SHAPED_ROWS.length; i++) {
@@ -914,7 +941,7 @@ FeatureTrace.buildShapedGroup = function(w, parent) {
         inner.setColumnStretch(FeatureTrace.GRID_COLUMNS, 1);
     } catch (eStretch) {
     }
-    box.setLayout(inner);
+    section.host.setLayout(inner);
     return box;
 };
 
@@ -927,6 +954,7 @@ FeatureTrace.buildDock = function(appWin) {
     var w = { problems: [], buttons: [], shapedButtons: [] };
     var body = new QWidget(dock);
     var layout = new QVBoxLayout();
+    var collapsed = CsPanel.loadCollapsed(FeatureTrace.COLLAPSED_SETTING);
 
     // -- cursor frame readout ----------------------------------------
     try {
@@ -936,53 +964,15 @@ FeatureTrace.buildDock = function(appWin) {
         w.problems.push("cursor frame readout (" + eFrame + ")");
     }
 
-    // -- interval and smoothing --------------------------------------
-    try {
-        // TWO ROWS, NOT ONE. Interval, its unit and the smoothing combo
-        // side by side made this panel 386 pixels wide at its narrowest,
-        // and a side dock's minimum width is a direct subtraction from
-        // the drawing (measured 2026-09-07). Stacked, the panel narrows
-        // to the widest single control.
-        var settings = new QGridLayout();
-        settings.addWidget(new QLabel(qsTr("Interval")), 0, 0);
-        w.intervalEdit = new QLineEdit("1.0");
-        w.intervalEdit.maximumWidth = 60;
-        w.intervalEdit.toolTip = qsTr("Spacing between control points, in " +
-            "FEET of cave -- converted for a metric drawing. This is sheet " +
-            "smoothness, not a measurement: vertical exaggeration does not " +
-            "change it.");
-        settings.addWidget(w.intervalEdit, 0, 1);
-        settings.addWidget(new QLabel(qsTr("ft")), 0, 2);
-
-        settings.addWidget(new QLabel(qsTr("Smoothing")), 1, 0);
-        w.smoothingCombo = new QComboBox();
-        for (var si = 0; si < FeatureTrace.SMOOTHING.length; si++) {
-            w.smoothingCombo.addItem(FeatureTrace.SMOOTHING[si].label);
-        }
-        // Selected by NAME. A hardcoded index silently selects the
-        // wrong row the moment the table is reordered -- and it was.
-        for (var sd = 0; sd < FeatureTrace.SMOOTHING.length; sd++) {
-            if (FeatureTrace.SMOOTHING[sd].label ===
-                    FeatureTrace.DEFAULT_SMOOTHING) {
-                w.smoothingCombo.currentIndex = sd;
-                break;
-            }
-        }
-        w.smoothingCombo.toolTip = qsTr("How hard to thin the trace. " +
-            "No Smoothing keeps every point -- one control point per " +
-            "interval. Coarse keeps fewest. Detail is also capped by the " +
-            "Interval: nothing smaller than that survives, whatever this " +
-            "is set to.");
-        settings.addWidget(w.smoothingCombo, 1, 1, 1, 2);
-        layout.addLayout(settings, 0);
-    } catch (eSettings) {
-        w.problems.push("interval/smoothing (" + eSettings + ")");
-    }
-
-    // -- trace on whatever layer the drawing is set to ---------------
-    // Its own button above the groups, not a row: the groups are the
-    // registry's traceable features, and this is an escape hatch for
-    // any layer the registry does not know about.
+    // -- trace onto whatever layer the drawing is set to -------------
+    //
+    // The one control left from what used to be a settings section.
+    // Interval and Smoothing lived here and are now fixed at one foot
+    // and none (FeatureTrace.INTERVAL_FEET): two questions about
+    // fidelity, asked before the caver had chosen what to draw, whose
+    // answer never changed. This is not a setting -- it is a feature
+    // choice, for a layer the tile list does not cover -- so it sits
+    // with the tiles rather than above them.
     try {
         w.currentButton = new QPushButton(qsTr("Trace on Current Layer"));
         w.currentButton.checkable = true;
@@ -993,7 +983,6 @@ FeatureTrace.buildDock = function(appWin) {
             FeatureTrace.armLayer(FeatureTrace.CURRENT_LAYER);
             FeatureTrace.startRun();
         });
-        layout.addWidget(w.currentButton, 0, 0);
     } catch (eCur) {
         w.problems.push("current-layer button (" + eCur + ")");
     }
@@ -1005,17 +994,28 @@ FeatureTrace.buildDock = function(appWin) {
     // were already looking at. The view is read from the stroke now, so
     // the groups had nothing left to divide.
     try {
-        // The run selector sits INSIDE the box, above the tiles: it does
-        // not choose a feature or a view, it refines which BAND a
-        // profile stroke is filed under, and its default reads that off
-        // the stroke as well.
+        // THE RUN CONTROLS ARE THEIR OWN SECTION NOW, below the tiles.
+        // They sat inside the Feature box, above the tiles, where they
+        // read as something to answer before choosing a feature --
+        // Nathan, 2026-09-07: "What does the Run > By Location control
+        // do in this context? It is unclear." They have nothing to do
+        // with which feature is armed: they are about the ELEVATION,
+        // where each survey run is drawn as its own band, and they do
+        // nothing at all to a stroke in the plan.
         var runRow = null;
         try {
-            // A grid for the same reason the settings above are one:
-            // Run, its combo and two buttons in a line set a floor on
-            // how narrow this panel can be.
-            runRow = new QGridLayout();
-            runRow.addWidget(new QLabel(qsTr("Run")), 0, 0);
+            runRow = CsPanel.formGrid(2);
+            // What the section is for, in the panel rather than in a
+            // tooltip nobody hovers.
+            var bandsWhy = new QLabel(qsTr("Only affects strokes drawn " +
+                "in the elevation."));
+            bandsWhy.wordWrap = true;
+            try {
+                bandsWhy.setMinimumWidth(1);
+            } catch (eWide) {
+            }
+            runRow.addWidget(bandsWhy, 0, 0, 1, 2);
+            runRow.addWidget(new QLabel(qsTr("Band")), 1, 0);
             w.runCombo = new QComboBox();
             // Seeded in the same order refreshRuns() repopulates it:
             // refreshRuns' first call preserves "the prior selection" if
@@ -1025,14 +1025,17 @@ FeatureTrace.buildDock = function(appWin) {
             // every dock's first population.
             w.runCombo.addItem(FeatureTrace.RUN_AUTO);
             w.runCombo.addItem(FeatureTrace.RUN_SHARED);
-            w.runCombo.toolTip = qsTr("Which survey run a trace drawn in " +
-                "the ELEVATION belongs to. Each run is drawn as its own " +
-                "band and the bands never overlap, so its walls get their " +
-                "own layers. \"(by location)\" reads it off the band box " +
-                "the stroke lies in, which is why it is the default. " +
-                "Traces in the plan and in a section ignore this -- the " +
-                "plan is one continuous map, and a section belongs to " +
-                "the station its bay was opened at.");
+            w.runCombo.toolTip = qsTr("The extended elevation draws each " +
+                "survey run as its own BAND, and a line traced in a band " +
+                "belongs to that run -- so it moves with the band when " +
+                "the survey is revised, instead of being left behind.\n\n" +
+                "\"From the band I draw in\" reads that off the band you " +
+                "drew inside, which is why it is the default: you were " +
+                "already in the right band. Naming a band instead files " +
+                "every stroke under it wherever you draw. \"Not tied to " +
+                "a band\" uses the shared elevation layers, and a revision " +
+                "will not carry that work with any band.\n\nStrokes in " +
+                "the plan and in a cross section ignore this entirely.");
             // `activated`, not currentIndexChanged: it fires only on a
             // real user choice, so refreshRuns' clear/repopulate cannot
             // trigger a spurious hot-swap.
@@ -1043,7 +1046,7 @@ FeatureTrace.buildDock = function(appWin) {
                     // never throw out of a signal handler
                 }
             });
-            runRow.addWidget(w.runCombo, 0, 1);
+            runRow.addWidget(w.runCombo, 1, 1);
 
             // Isolate acts on the run the combo has SELECTED, so the
             // visible run and the run being traced cannot drift apart.
@@ -1057,7 +1060,7 @@ FeatureTrace.buildDock = function(appWin) {
             w.isolateButton.clicked.connect(function() {
                 FeatureTrace.isolateSelectedRun();
             });
-            runRow.addWidget(w.isolateButton, 1, 0);
+            runRow.addWidget(w.isolateButton, 2, 0);
 
             w.showAllButton = new QPushButton(qsTr("Show All"));
             w.showAllButton.toolTip = qsTr("Bring every profile run back " +
@@ -1065,17 +1068,30 @@ FeatureTrace.buildDock = function(appWin) {
             w.showAllButton.clicked.connect(function() {
                 FeatureTrace.showAllRuns();
             });
-            runRow.addWidget(w.showAllButton, 1, 1);
+            runRow.addWidget(w.showAllButton, 2, 1);
         } catch (eRun) {
             w.problems.push("run selector (" + eRun + ")");
             runRow = null;
         }
 
-        w.featureGroup = FeatureTrace.buildGroup(w, body,
-            qsTr("Feature"), runRow);
-        layout.addWidget(w.featureGroup, 0, 0);
+        // The bands section: built here because the run controls were
+        // built above, added to the panel BELOW the tiles.
+        w.bandsSection = CsPanel.section(body, FeatureTrace.SEC_BANDS,
+            FeatureTrace.COLLAPSED_SETTING, collapsed);
+        if (runRow !== null) {
+            w.bandsSection.host.setLayout(runRow);
+        }
     } catch (eGroups) {
-        w.problems.push("feature group (" + eGroups + ")");
+        w.problems.push("elevation bands (" + eGroups + ")");
+    }
+
+    // -- what to draw, which is why the panel is open ----------------
+    try {
+        w.featureGroup = FeatureTrace.buildGroup(w, body,
+            FeatureTrace.SEC_FEATURES, null, collapsed);
+        layout.addWidget(w.featureGroup, 0, 0);
+    } catch (eFeatures) {
+        w.problems.push("feature group (" + eFeatures + ")");
     }
 
     // -- the shaped lines --------------------------------------------
@@ -1084,10 +1100,19 @@ FeatureTrace.buildDock = function(appWin) {
     // same gesture but not the same thing -- these bring ornament, and
     // they ask one more question (which side) after the drag.
     try {
-        w.shapedGroup = FeatureTrace.buildShapedGroup(w, body);
+        w.shapedGroup = FeatureTrace.buildShapedGroup(w, body, collapsed);
         layout.addWidget(w.shapedGroup, 0, 0);
     } catch (eShaped) {
         w.problems.push("shaped lines group (" + eShaped + ")");
+    }
+
+    // -- which elevation band a stroke belongs to --------------------
+    try {
+        if (!isNull(w.bandsSection)) {
+            layout.addWidget(w.bandsSection.box, 0, 0);
+        }
+    } catch (eBands) {
+        w.problems.push("elevation bands placement (" + eBands + ")");
     }
 
     // -- what the last trace cost ------------------------------------

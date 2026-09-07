@@ -702,84 +702,23 @@ SymbolPalette.duplicateSymbol = function(entry) {
 };
 
 /** One category, as a group box full of tiles. */
-/** Where the collapsed categories are remembered between sessions. */
+/** Where the collapsed categories are remembered between sessions.
+ *  The FOLDING itself lives in Core/CsPanel.js, shared with Feature
+ *  Trace -- Nathan's standing ask (2026-09-07): a panel feature asked
+ *  for in one of these panels belongs in both, and the way to keep that
+ *  promise is one copy of the code rather than a good memory. */
 SymbolPalette.COLLAPSED_SETTING = "CaveSurvey/SymbolPaletteCollapsed";
 
-/** The set of collapsed category names, from settings.
- *
- *  A plain comma-joined list rather than anything cleverer: category
- *  names come from the catalogue and from what a caver types, and none
- *  of them has ever had a comma in it. A name that did would collapse
- *  the wrong group and nothing worse. */
+/** The collapsed set, through the shared helper. */
 SymbolPalette.loadCollapsed = function() {
-    var set = {};
-    try {
-        var raw = RSettings.getStringValue(
-            SymbolPalette.COLLAPSED_SETTING, "");
-        if (raw !== "") {
-            var parts = String(raw).split(",");
-            for (var i = 0; i < parts.length; i++) {
-                var name = parts[i].trim();
-                if (name !== "") {
-                    set[name] = true;
-                }
-            }
-        }
-    } catch (e) {
-        // a bridge without settings just forgets between sessions
-    }
-    return set;
-};
-
-/** Records that a category is open or shut. */
-SymbolPalette.saveCollapsed = function(category, collapsed) {
-    try {
-        var set = SymbolPalette.loadCollapsed();
-        if (collapsed) {
-            set[category] = true;
-        } else if (set.hasOwnProperty(category)) {
-            delete set[category];
-        }
-        var names = [];
-        for (var name in set) {
-            if (set.hasOwnProperty(name)) {
-                names.push(name);
-            }
-        }
-        RSettings.setValue(SymbolPalette.COLLAPSED_SETTING, names.join(","));
-    } catch (e) {
-    }
-};
-
-/** Wires one group's checkbox to its tiles. Its own function so the
- *  closure captures ONE category and host rather than the loop's. */
-SymbolPalette.connectCollapse = function(box, host, category) {
-    box.toggled.connect(function(open) {
-        try {
-            host.visible = open;
-        } catch (eVis) {
-        }
-        SymbolPalette.saveCollapsed(category, !open);
-    });
+    return CsPanel.loadCollapsed(SymbolPalette.COLLAPSED_SETTING);
 };
 
 SymbolPalette.buildGroup = function(w, parent, group, shapes, collapsed) {
-    // CHECKABLE, which is Qt's own idiom for a collapsible section: the
-    // box title gets a tick, and unticking it hides the tiles. The
-    // TILES live in a host widget of their own because unchecking a
-    // group box only DISABLES its children -- greyed-out tiles still
-    // take the same room, which is the opposite of what a collapse is
-    // for. Hiding the host is what actually gives the space back.
-    var box = new QGroupBox(group.category, parent);
-    var open = true;
-    try {
-        box.checkable = true;
-        open = !(collapsed && collapsed[group.category] === true);
-        box.checked = open;
-    } catch (eCheck) {
-        open = true;
-    }
-    var host = new QWidget(box);
+    // The folding is CsPanel's, shared with Feature Trace.
+    var section = CsPanel.section(parent, group.category,
+        SymbolPalette.COLLAPSED_SETTING, collapsed);
+    var box = section.box;
     var inner = new QGridLayout();
     var cell = 0;
     for (var i = 0; i < group.entries.length; i++) {
@@ -848,25 +787,11 @@ SymbolPalette.buildGroup = function(w, parent, group, shapes, collapsed) {
         inner.setColumnStretch(SymbolPalette.GRID_COLUMNS, 1);
     } catch (eStretch) {
     }
-    host.setLayout(inner);
-    var outer = new QVBoxLayout();
     try {
-        // No margins of its own: a COLLAPSED group should be a title
-        // and nothing else, and every pixel of padding left behind is a
-        // pixel of the panel a caver collapsed the group to reclaim.
-        outer.setContentsMargins(0, 0, 0, 0);
-        outer.setSpacing(0);
         inner.setContentsMargins(2, 2, 2, 2);
     } catch (eMargins) {
     }
-    outer.addWidget(host, 0, 0);
-    box.setLayout(outer);
-    try {
-        host.visible = open;
-        SymbolPalette.connectCollapse(box, host, group.category);
-    } catch (eWire) {
-        w.problems.push(group.category + " collapse (" + eWire + ")");
-    }
+    section.host.setLayout(inner);
     return box;
 };
 

@@ -129,6 +129,10 @@ include(includeBasePath + "/CsSymbolStore.js");
 // After CsLayers and CsShapeLine: panel tiles are painted from the
 // layer appearance one and the generated ornament of the other.
 include(includeBasePath + "/CsTileArt.js");
+// Panel furniture shared by every dock: collapsible sections and
+// the memory of which ones are shut. One copy, so a panel feature
+// asked for in one panel is a panel feature both have.
+include(includeBasePath + "/CsPanel.js");
 include(includeBasePath + "/CsSheet.js");
 include(includeBasePath + "/CsReport.js");
 // After CsModel, CsTraverse, CsProfile and (optionally) CsRevise --
