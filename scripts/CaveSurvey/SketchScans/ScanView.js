@@ -34,6 +34,108 @@ function CsScanView(parent) {
 
 CsScanView.prototype = new RGraphicsViewQt();
 
+/**
+ * Dropping image files onto the preview: what a caver reaches for
+ * first, and what this panel could not do until 2026-09-07.
+ *
+ * PROVEN BY THE BINDING, like every other override in this file:
+ * REcmaShellGraphicsViewQt looks up script properties named
+ * "dragEnterEvent" and "dropEvent" and calls those in place of the
+ * view's own. A plain QWidget cannot do this -- the bridge dispatches
+ * no events to one -- which is why the drop target is the preview pane
+ * and not the panel as a whole.
+ *
+ * The view has to be told it takes drops at all; Qt ignores drag events
+ * on a widget whose acceptDrops is false, and the shell never hears
+ * them. CsScanPreview.build does that.
+ *
+ * `CsScanView.onFilesDropped` is set by the panel, because THIS file
+ * knows about views and nothing about cave folders.
+ */
+CsScanView.onFilesDropped = null;
+
+/** Image files a drag is carrying, as local paths. Empty for a drag of
+ *  anything else -- text, a DXF, a folder -- which is then refused, so
+ *  the cursor says no before the caver lets go. */
+CsScanView.imagePathsIn = function(event) {
+    var out = [];
+    try {
+        var data = event.mimeData();
+        if (isNull(data) || !data.hasUrls()) {
+            return out;
+        }
+        var urls = data.urls();
+        for (var i = 0; i < urls.length; i++) {
+            var local = "";
+            try {
+                local = String(urls[i].toLocalFile());
+            } catch (eUrl) {
+                continue;
+            }
+            if (local === "") {
+                continue;
+            }
+            var lower = local.toLowerCase();
+            if (lower.indexOf(".png") === lower.length - 4 ||
+                    lower.indexOf(".jpg") === lower.length - 4 ||
+                    lower.indexOf(".bmp") === lower.length - 4 ||
+                    lower.indexOf(".jpeg") === lower.length - 5 ||
+                    lower.indexOf(".tif") === lower.length - 4 ||
+                    lower.indexOf(".tiff") === lower.length - 5) {
+                out.push(local);
+            }
+        }
+    } catch (e) {
+    }
+    return out;
+};
+
+CsScanView.prototype.dragEnterEvent = function(event) {
+    try {
+        if (CsScanView.imagePathsIn(event).length > 0) {
+            event.acceptProposedAction();
+            return;
+        }
+    } catch (e) {
+    }
+    CsScanView.callBase(this, "dragEnterEvent", event);
+};
+
+CsScanView.prototype.dragMoveEvent = function(event) {
+    try {
+        if (CsScanView.imagePathsIn(event).length > 0) {
+            event.acceptProposedAction();
+            return;
+        }
+    } catch (e) {
+    }
+    CsScanView.callBase(this, "dragMoveEvent", event);
+};
+
+CsScanView.prototype.dropEvent = function(event) {
+    var paths = [];
+    try {
+        paths = CsScanView.imagePathsIn(event);
+    } catch (e) {
+        paths = [];
+    }
+    if (paths.length === 0) {
+        CsScanView.callBase(this, "dropEvent", event);
+        return;
+    }
+    try {
+        event.acceptProposedAction();
+    } catch (eAccept) {
+    }
+    try {
+        if (typeof CsScanView.onFilesDropped === "function") {
+            CsScanView.onFilesDropped(paths);
+        }
+    } catch (eHandler) {
+        // a handler that throws must not take the view down with it
+    }
+};
+
 /** Fit once per loaded scan, then leave the caver's zoom alone. */
 CsScanView.prototype.resizeEvent = function(event) {
     CsScanView.callBase(this, "resizeEvent", event);
@@ -310,6 +412,12 @@ CsScanPreview.build = function(parent) {
         di.setNotifyListeners(false);
 
         var view = new CsScanView(parent);
+        try {
+            // Qt drops drag events on a widget that has not said it
+            // takes them, and the shell then never hears them at all.
+            view.setAcceptDrops(true);
+        } catch (eDrops) {
+        }
         var imageView = view.getImageView();
         imageView.setPaintOrigin(false);
         imageView.setScene(new RGraphicsSceneQt(di));

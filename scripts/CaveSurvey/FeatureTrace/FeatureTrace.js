@@ -938,7 +938,12 @@ FeatureTrace.buildDock = function(appWin) {
 
     // -- interval and smoothing --------------------------------------
     try {
-        var settings = new QHBoxLayout();
+        // TWO ROWS, NOT ONE. Interval, its unit and the smoothing combo
+        // side by side made this panel 386 pixels wide at its narrowest,
+        // and a side dock's minimum width is a direct subtraction from
+        // the drawing (measured 2026-09-07). Stacked, the panel narrows
+        // to the widest single control.
+        var settings = new QGridLayout();
         settings.addWidget(new QLabel(qsTr("Interval")), 0, 0);
         w.intervalEdit = new QLineEdit("1.0");
         w.intervalEdit.maximumWidth = 60;
@@ -946,10 +951,10 @@ FeatureTrace.buildDock = function(appWin) {
             "FEET of cave -- converted for a metric drawing. This is sheet " +
             "smoothness, not a measurement: vertical exaggeration does not " +
             "change it.");
-        settings.addWidget(w.intervalEdit, 0, 0);
-        settings.addWidget(new QLabel(qsTr("ft")), 0, 0);
+        settings.addWidget(w.intervalEdit, 0, 1);
+        settings.addWidget(new QLabel(qsTr("ft")), 0, 2);
 
-        settings.addWidget(new QLabel(qsTr("Smoothing")), 0, 0);
+        settings.addWidget(new QLabel(qsTr("Smoothing")), 1, 0);
         w.smoothingCombo = new QComboBox();
         for (var si = 0; si < FeatureTrace.SMOOTHING.length; si++) {
             w.smoothingCombo.addItem(FeatureTrace.SMOOTHING[si].label);
@@ -968,7 +973,7 @@ FeatureTrace.buildDock = function(appWin) {
             "interval. Coarse keeps fewest. Detail is also capped by the " +
             "Interval: nothing smaller than that survives, whatever this " +
             "is set to.");
-        settings.addWidget(w.smoothingCombo, 1, 0);
+        settings.addWidget(w.smoothingCombo, 1, 1, 1, 2);
         layout.addLayout(settings, 0);
     } catch (eSettings) {
         w.problems.push("interval/smoothing (" + eSettings + ")");
@@ -1006,7 +1011,10 @@ FeatureTrace.buildDock = function(appWin) {
         // the stroke as well.
         var runRow = null;
         try {
-            runRow = new QHBoxLayout();
+            // A grid for the same reason the settings above are one:
+            // Run, its combo and two buttons in a line set a floor on
+            // how narrow this panel can be.
+            runRow = new QGridLayout();
             runRow.addWidget(new QLabel(qsTr("Run")), 0, 0);
             w.runCombo = new QComboBox();
             // Seeded in the same order refreshRuns() repopulates it:
@@ -1035,7 +1043,7 @@ FeatureTrace.buildDock = function(appWin) {
                     // never throw out of a signal handler
                 }
             });
-            runRow.addWidget(w.runCombo, 1, 0);
+            runRow.addWidget(w.runCombo, 0, 1);
 
             // Isolate acts on the run the combo has SELECTED, so the
             // visible run and the run being traced cannot drift apart.
@@ -1049,7 +1057,7 @@ FeatureTrace.buildDock = function(appWin) {
             w.isolateButton.clicked.connect(function() {
                 FeatureTrace.isolateSelectedRun();
             });
-            runRow.addWidget(w.isolateButton, 0, 0);
+            runRow.addWidget(w.isolateButton, 1, 0);
 
             w.showAllButton = new QPushButton(qsTr("Show All"));
             w.showAllButton.toolTip = qsTr("Bring every profile run back " +
@@ -1057,7 +1065,7 @@ FeatureTrace.buildDock = function(appWin) {
             w.showAllButton.clicked.connect(function() {
                 FeatureTrace.showAllRuns();
             });
-            runRow.addWidget(w.showAllButton, 0, 0);
+            runRow.addWidget(w.showAllButton, 1, 1);
         } catch (eRun) {
             w.problems.push("run selector (" + eRun + ")");
             runRow = null;

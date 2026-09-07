@@ -146,6 +146,32 @@ SketchScans.SETTING_SPLIT = "CaveSurvey/SketchScansSplitterSizes";
 // with no other answer.
 SketchScans.COMPLETE = "\u2713";
 
+/**
+ * The header line: which folder, how many scans, and what to do.
+ *
+ * THE PATH IS SHORTENED, to the cave folder and the leaf. A synced
+ * Drive path is sixty characters of machinery -- CloudStorage,
+ * .shortcut-targets-by-id, a random id -- and none of it tells a caver
+ * anything they do not know. Worse, it is one unbroken WORD, and a
+ * wrapped label cannot be narrower than its longest word, so the full
+ * path was setting the panel's minimum width at half the window.
+ *
+ * Pure, so the width this panel can shrink to is a testable fact.
+ */
+SketchScans.headerText = function(scans, count) {
+    var shown = String(scans);
+    var parts = shown.split("/");
+    if (parts.length > 2) {
+        // The last two segments are the cave and its scans folder,
+        // which is the part a caver recognises.
+        shown = ".../" + parts[parts.length - 2] + "/" +
+            parts[parts.length - 1];
+    }
+    return shown + "  —  " + count + " scan" + (count === 1 ? "" : "s") +
+        qsTr(". Hover a scan for a preview; double-click inserts and " +
+        "aligns; click a folder to collapse it.");
+};
+
 // The collapsed set for one cave's scans folder, from settings.
 // A bridge without RSettings starts fully expanded.
 SketchScans.loadCollapsed = function(scans) {
@@ -296,9 +322,19 @@ SketchScans.buildDock = function(appWin) {
     var body = new QWidget(dock);
     var layout = new QVBoxLayout();
 
+    // THE HEADER SETS THE PANEL'S MINIMUM WIDTH, and it used to set it
+    // at 912 pixels -- half of a 1920-wide window, unshrinkable, with
+    // the drawing squeezed into what was left (measured 2026-09-07). A
+    // wrapped label cannot be narrower than its longest WORD, and the
+    // word here was a Google Drive path: sixty characters of
+    // /Users/.../.shortcut-targets-by-id/1vRG_mjAzh... with nothing to
+    // break at. So the label is told it may be narrow, and the path is
+    // shortened to fit (SketchScans.headerText); the whole path lives
+    // in the tooltip, where it costs no width at all.
     w.header = new QLabel("");
     try {
         w.header.wordWrap = true;
+        w.header.setMinimumWidth(1);
     } catch (eWrap) {
     }
     layout.addWidget(w.header, 0, 0);
@@ -476,7 +512,13 @@ SketchScans.buildDock = function(appWin) {
     }
     layout.addWidget(w.splitter, 1, 0);
 
-    var buttons = new QHBoxLayout();
+    // A GRID, NOT A ROW. Seven controls side by side cannot wrap, so
+    // their combined width WAS this panel's minimum -- 912 pixels of a
+    // 1920-wide window, leaving the drawing 894 (measured 2026-09-07,
+    // after Nathan asked what was eating the window). Two rows of four
+    // halve it, and the panel can then be dragged down to something a
+    // caver would choose.
+    var buttons = new QGridLayout();
     w.refreshButton = new QPushButton(qsTr("Refresh"));
     w.refreshButton.toolTip = qsTr("Re-read the scans folder -- new " +
         "scans appear here once Drive has synced them.");
@@ -591,15 +633,19 @@ SketchScans.buildDock = function(appWin) {
     w.sketchButton.clicked.connect(function() {
         SketchScans.sketchClicked();
     });
+    // TWO COLUMNS, in reading order: which folder and which view first,
+    // then the two ways to place a scan, then the section work. A side
+    // dock should be tall and narrow -- the widest row is what the
+    // panel can never be narrower than, so no row holds more than two
+    // controls, and the long-named ones get a row to themselves.
     buttons.addWidget(w.refreshButton, 0, 0);
-    buttons.addStretch(1);
-    buttons.addWidget(w.frameCombo, 0, 0);
-    buttons.addWidget(w.pickAlignButton, 0, 0);
-    buttons.addWidget(w.alignButton, 0, 0);
-    buttons.addWidget(w.elsewhereButton, 0, 0);
-    buttons.addWidget(w.lrudCombo, 0, 0);
-    buttons.addWidget(w.calibCancelButton, 0, 0);
-    buttons.addWidget(w.sketchButton, 0, 0);
+    buttons.addWidget(w.frameCombo, 0, 1);
+    buttons.addWidget(w.pickAlignButton, 1, 0);
+    buttons.addWidget(w.alignButton, 1, 1);
+    buttons.addWidget(w.elsewhereButton, 2, 0, 1, 2);
+    buttons.addWidget(w.lrudCombo, 3, 0);
+    buttons.addWidget(w.sketchButton, 3, 1);
+    buttons.addWidget(w.calibCancelButton, 4, 0, 1, 2);
     layout.addLayout(buttons, 0);
 
     body.setLayout(layout);
@@ -617,6 +663,112 @@ SketchScans.buildDock = function(appWin) {
     // closure -- the buttons above are connected before they exist --
     // so they reach the selection through here.
     SketchScans.selectedRel = selectedFile;
+
+    /** The folder a dropped scan lands in, RELATIVE to the scans root.
+     *
+     *  Whatever the caver is looking at: the selected folder row, or
+     *  the folder the selected page is in. A trip's pages belong
+     *  together, and someone who has just been browsing 12-1-24 and
+     *  drops three more photos means those three are 12-1-24's. With
+     *  nothing selected they go to the root, which is where a scans
+     *  folder starts anyway. */
+    SketchScans.dropFolder = function() {
+        try {
+            var row = w.list.currentRow();
+            if (row < 0 || row >= w.rows.length) {
+                return "";
+            }
+            var entry = w.rows[row];
+            if (entry.kind === "folder") {
+                return String(entry.rel);
+            }
+            var rel = String(entry.rel);
+            var cut = rel.lastIndexOf("/");
+            return cut <= 0 ? "" : rel.substring(0, cut);
+        } catch (e) {
+            return "";
+        }
+    };
+
+    /**
+     * Copies dropped image files into the cave's own scans folder.
+     *
+     * COPIES, never moves: the file a caver dragged is theirs and may
+     * be the only copy -- off a phone, out of a download folder, in a
+     * message thread. Taking it out from under them to tidy up a panel
+     * is not this tool's decision to make.
+     *
+     * A NAME ALREADY IN USE is not overwritten either. The new file
+     * gets " (2)", " (3)" and so on, because two pages photographed on
+     * different trips are called IMG_4021.jpg every bit as often as one
+     * page photographed twice.
+     */
+    SketchScans.acceptDroppedFiles = function(paths) {
+        if (isNull(w.scans) || w.scans === "" || isNull(paths) ||
+                paths.length === 0) {
+            EAction.handleUserMessage(qsTr("Open a cave first -- there is " +
+                "no scans folder to put those in yet."));
+            return;
+        }
+        var folder = SketchScans.dropFolder();
+        var dest = w.scans + (folder === "" ? "" : "/" + folder);
+        try {
+            new QDir().mkpath(dest);
+        } catch (eDir) {
+        }
+
+        var copied = [], refused = [];
+        for (var i = 0; i < paths.length; i++) {
+            var info = new QFileInfo(String(paths[i]));
+            var base = String(info.completeBaseName());
+            var suffix = String(info.suffix());
+            var target = dest + "/" + base + "." + suffix;
+            var n = 2;
+            while (new QFileInfo(target).exists()) {
+                target = dest + "/" + base + " (" + n + ")." + suffix;
+                n++;
+                if (n > 500) {
+                    break;   // something is very wrong; do not spin
+                }
+            }
+            var ok = false;
+            try {
+                ok = new QFile(String(paths[i])).copy(target) === true;
+            } catch (eCopy) {
+                ok = false;
+            }
+            if (ok) {
+                copied.push(new QFileInfo(target).fileName());
+            } else {
+                refused.push(info.fileName());
+            }
+        }
+
+        if (copied.length > 0) {
+            SketchScans.refresh();
+        }
+        var where = (folder === "" ? qsTr("the cave's scans folder") : folder);
+        if (copied.length > 0 && refused.length === 0) {
+            EAction.handleUserMessage(qsTr("Copied %1 into %2: %3")
+                .arg(copied.length).arg(where).arg(copied.join(", ")));
+        } else if (copied.length > 0) {
+            EAction.handleUserMessage(qsTr("Copied %1 into %2; could not " +
+                "copy %3").arg(copied.length).arg(where)
+                .arg(refused.join(", ")));
+        } else {
+            EAction.handleUserMessage(qsTr("None of those could be copied " +
+                "into %1.").arg(where));
+        }
+    };
+
+    // The view knows about views and nothing about cave folders, so the
+    // panel hands it the handler rather than the other way round.
+    try {
+        CsScanView.onFilesDropped = function(paths) {
+            SketchScans.acceptDroppedFiles(paths);
+        };
+    } catch (eDrop) {
+    }
 
     var showMessage = function(text) {
         w.preview.text = text;
@@ -1694,10 +1846,12 @@ SketchScans.rebuild = function() {
         return;
     }
 
-    w.header.text = scans + "  —  " + files.length + " scan" +
-        (files.length === 1 ? "" : "s") + qsTr(". Hover a scan for a " +
-        "preview; double-click inserts and aligns; click a folder to " +
-        "collapse it.");
+    w.header.text = SketchScans.headerText(scans, files.length);
+    try {
+        // The full path, where it does not cost the drawing any room.
+        w.header.toolTip = scans;
+    } catch (eTip) {
+    }
 
     w.rows = CsScanTree.rowsOf(files);
     w.collapsed = SketchScans.loadCollapsed(scans);
