@@ -1,9 +1,9 @@
 // CsPanel.js -- the parts every Cave Survey dock panel shares: sections
 // that fold away, and the memory of which ones a caver left shut.
 //
-// Part of the Cave Survey Core library. GUI context only (QGroupBox,
-// QWidget), but never an interactive ACTION's context -- panels call
-// this, actions do not.
+// Part of the Cave Survey Core library. GUI context only (QWidget,
+// QPushButton), but never an interactive ACTION's context -- panels
+// call this, actions do not.
 //
 // WHY IT EXISTS. Nathan, 2026-09-07: "can we keep Symbol and Trace
 // palettes in sync when it comes to controls? When I ask for an
@@ -13,9 +13,9 @@
 // code -- it is for there to be one copy. A panel feature that lives
 // here is a panel feature both panels have.
 //
-// Everything degrades: a bridge that refuses a checkable group box
-// gets a plain one, which is a panel that does not fold rather than a
-// panel that does not build.
+// Everything degrades: a bridge that refuses the header button gets a
+// section that never folds, which is a panel that does not fold rather
+// than a panel that does not build.
 
 var CsPanel = {};
 
@@ -63,61 +63,98 @@ CsPanel.saveCollapsed = function(settingKey, title, collapsed) {
     }
 };
 
+/** The chevron on a section header: pointing UP when the section is
+ *  open (click to fold it away), DOWN when it is shut.
+ *
+ *  NOT A CHECKBOX. A checkable group box was the first attempt, and it
+ *  reads as "switch this off", so a caver aims at the little box --
+ *  Nathan, 2026-09-07: "I keep clicking on the check box itself and it
+ *  doesn't work like that." A chevron says fold, and the whole header
+ *  is the target. */
+CsPanel.OPEN_MARK = "\u2303";     // up
+CsPanel.SHUT_MARK = "\u2304";     // down
+
+/** A section header's text: the chevron, then the title. */
+CsPanel.headerText = function(title, open) {
+    return (open ? CsPanel.OPEN_MARK : CsPanel.SHUT_MARK) + "  " + title;
+};
+
 /**
- * A section that folds away: a checkable group box whose contents live
- * in a host widget of their own.
+ * A section that folds away: a header you click, and a host widget
+ * holding whatever the caller puts in it.
  *
- * THE HOST IS THE POINT. Unchecking a QGroupBox only DISABLES its
- * children -- greyed-out controls take exactly the same room, which is
- * the opposite of what a caver collapsing a section wants. Hiding a
- * host widget is what gives the space back, and a group box cannot hide
- * its own layout.
+ * THE WHOLE HEADER IS THE TARGET, which is the point of the redesign.
+ * The header is a flat button spanning the panel, so there is no small
+ * thing to aim at and no state to misread.
  *
- * The caller fills `host` and is handed both back:
+ * THE HOST IS THE OTHER HALF. Hiding a widget is what gives the space
+ * back; a layout cannot hide itself, and disabling controls leaves them
+ * taking exactly the same room.
+ *
+ * The caller fills `host` and adds `box` to its layout:
  *
  *   var sec = CsPanel.section(parent, "Tracing", KEY, collapsed);
  *   sec.host.setLayout(myGrid);
  *   layout.addWidget(sec.box, 0, 0);
  *
- * \return { box, host, open }
+ * \return { box, host, header, open }
  */
 CsPanel.section = function(parent, title, settingKey, collapsedSet) {
-    var box = new QGroupBox(title, parent);
-    var open = true;
-    try {
-        box.checkable = true;
-        open = !(collapsedSet && collapsedSet[title] === true);
-        box.checked = open;
-    } catch (eCheckable) {
-        open = true;   // a plain box: it simply never folds
-    }
-    var host = new QWidget(box);
+    var open = !(collapsedSet && collapsedSet[title] === true);
+    var box = new QWidget(parent);
     var outer = new QVBoxLayout();
     try {
-        // No margins of its own: a COLLAPSED section should be a title
-        // and nothing else, and every pixel of padding left behind is a
-        // pixel the caver collapsed it to reclaim.
         outer.setContentsMargins(0, 0, 0, 0);
         outer.setSpacing(0);
     } catch (eMargins) {
     }
+
+    var header = null;
+    try {
+        header = new QPushButton(CsPanel.headerText(title, open));
+        header.flat = true;
+        header.toolTip = qsTr("Click to fold this section away");
+        try {
+            // Left-aligned like a heading rather than centred like a
+            // button: it names what is below it, it does not act.
+            header.styleSheet = "text-align: left; padding: 3px;";
+        } catch (eStyle) {
+        }
+        outer.addWidget(header, 0, 0);
+    } catch (eHeader) {
+        // No header: the section simply never folds, and everything in
+        // it still works.
+        header = null;
+    }
+
+    var host = new QWidget(box);
     outer.addWidget(host, 0, 0);
     box.setLayout(outer);
+
     try {
         host.visible = open;
-        CsPanel.connectSection(box, host, title, settingKey);
+        if (header !== null) {
+            CsPanel.connectSection(header, host, title, settingKey);
+        }
     } catch (eWire) {
     }
-    return { box: box, host: host, open: open };
+    return { box: box, host: host, header: header, open: open };
 };
 
-/** Wires one section's tick to its contents. Its own function so the
+/** Wires one section's header to its contents. Its own function so the
  *  closure captures ONE title and host rather than a loop's. */
-CsPanel.connectSection = function(box, host, title, settingKey) {
-    box.toggled.connect(function(open) {
+CsPanel.connectSection = function(header, host, title, settingKey) {
+    header.clicked.connect(function() {
+        var open = true;
         try {
+            open = !host.visible;
             host.visible = open;
         } catch (eVis) {
+            return;
+        }
+        try {
+            header.text = CsPanel.headerText(title, open);
+        } catch (eText) {
         }
         CsPanel.saveCollapsed(settingKey, title, !open);
     });
