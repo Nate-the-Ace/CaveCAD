@@ -124,26 +124,56 @@ DEST=$(echo "$SCRIPTS_DIRS" | head -n1)/CaveSurvey
 mkdir -p "$CAVE/releases"
 cp "$ZIP" "$CAVE/releases/$NAME.zip"
 
-# THE TEMPLATE IS NOW SOMETHING A CAVER CAN EDIT. Symbol Palette writes
-# a caver's own symbols INTO NSS_Cave_Template_PLAN.dxf (Nathan's call,
+# THE TEMPLATE IS SOMETHING A CAVER EDITS. Symbol Palette writes their
+# own symbols INTO NSS_Cave_Template_PLAN.dxf (Nathan's call,
 # 2026-09-06), and the loop below deletes templates/ outright before
-# copying the shipped one over it. Losing those symbols on an upgrade
-# was accepted -- rebuilding them is a redraw, not a survey -- but
-# losing them SILENTLY was not the deal, so the live template is set
-# aside first and the caver is told where it went.
+# copying the shipped one over it.
+#
+# Losing those symbols on an upgrade was accepted as a known cost that
+# day. It cost a real symbol -- a mud slope, drawn and saved -- within
+# hours, because a development machine publishes many times an evening
+# and every publish took the template with it. So the old template is
+# set aside AND its custom symbols are carried into the new one.
+PREV_TEMPLATE=""
 if [ -f "$CAVE/templates/NSS_Cave_Template_PLAN.dxf" ]; then
     mkdir -p "$CAVE/templates_previous"
-    cp "$CAVE/templates/NSS_Cave_Template_PLAN.dxf" \
-        "$CAVE/templates_previous/NSS_Cave_Template_PLAN-$(date -u "+%Y%m%d-%H%M%S").dxf"
-    echo "note: your existing template was copied to $CAVE/templates_previous"
-    echo "      before the shipped one replaced it -- any symbols you drew"
-    echo "      yourself are in that copy."
+    PREV_TEMPLATE="$CAVE/templates_previous/NSS_Cave_Template_PLAN-$(date -u "+%Y%m%d-%H%M%S").dxf"
+    cp "$CAVE/templates/NSS_Cave_Template_PLAN.dxf" "$PREV_TEMPLATE"
 fi
 
 for extra in templates examples docs INSTALL.txt README.txt LICENSE install.sh install.cmd; do
     rm -rf "$CAVE/$extra"
     [ -e "$STAGE/$extra" ] && cp -R "$STAGE/$extra" "$CAVE/$extra"
 done
+
+# ---- carry the caver's own symbols into the new template -------------
+# Only blocks the shipped catalogue has never heard of come across; the
+# 28 that ship are code, and the new file's copies are the current ones.
+if [ -n "$PREV_TEMPLATE" ] && [ -f "$CAVE/templates/NSS_Cave_Template_PLAN.dxf" ]; then
+    QCAD_APP="/Applications/CaveCAD.app/Contents/MacOS/CaveCAD"
+    if [ -e "$QCAD_APP" ]; then
+        MERGE_OUT=$("$QCAD_APP" -no-dock-icon -no-gui -allow-multiple-instances \
+            -autostart "$REPO/tools/merge_custom_symbols.js" "$REPO" \
+            "$CAVE/templates/NSS_Cave_Template_PLAN.dxf" "$PREV_TEMPLATE" \
+            2>/dev/null | grep "### MERGE" || true)
+        case "$MERGE_OUT" in
+            *"MERGE OK 0"*) ;;
+            *"MERGE OK"*)
+                echo "note: carried your own symbols into the new template:"
+                echo "      $(echo "$MERGE_OUT" | sed 's/^#* *MERGE OK [0-9]* *//')"
+                ;;
+            *)
+                echo "WARNING: could not carry your own symbols into the new"
+                echo "         template ($MERGE_OUT). The previous one is at"
+                echo "         $PREV_TEMPLATE"
+                ;;
+        esac
+    else
+        echo "WARNING: CaveCAD not found, so any symbols you drew yourself were"
+        echo "         NOT carried into the new template. They are still in"
+        echo "         $PREV_TEMPLATE"
+    fi
+fi
 
 COMMIT=$(git -C "$REPO" rev-parse --short HEAD 2>/dev/null || echo "an untracked working copy")
 git -C "$REPO" diff --quiet HEAD 2>/dev/null || COMMIT="$COMMIT (with uncommitted changes)"

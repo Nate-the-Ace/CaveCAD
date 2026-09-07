@@ -463,6 +463,34 @@ CsSymbolStore.radiusOf = function(doc, blockName) {
 };
 
 /**
+ * Runs `fn` with every named layer switched on and unlocked, and puts
+ * them all back afterwards.
+ *
+ * AN ADD ONTO AN OFF, FROZEN OR LOCKED LAYER IS DROPPED SILENTLY in
+ * this build. A symbol's own geometry is on a visible feature layer, but
+ * its marker point is on CTRL-HIDDEN, which the registry keeps off --
+ * so copying a block one entity at a time quietly left the description
+ * behind and the symbol arrived anonymous. Measured twice now: once
+ * when saving, once when carrying symbols across a template upgrade.
+ *
+ * Nested rather than looped because CsLayers gives one layer at a time;
+ * the recursion is at most as deep as a block has layers, which is one
+ * or two.
+ */
+CsSymbolStore.withLayersWritable = function(doc, di, names, fn) {
+    if (isNull(names) || names.length === 0) {
+        return fn();
+    }
+    var head = names[0];
+    var rest = names.slice(1);
+    return CsLayers.withLayerOn(doc, di, head, function() {
+        return CsLayers.withLayerUnlocked(doc, di, head, function() {
+            return CsSymbolStore.withLayersWritable(doc, di, rest, fn);
+        });
+    });
+};
+
+/**
  * Copies a block definition from one document into another.
  *
  * WHY BY HAND AND NOT BY PASTE. RPasteOperation takes a whole source
@@ -576,8 +604,21 @@ CsSymbolStore.copyBlock = function(srcDoc, doc, di, blockName) {
         return { ok: false, error: "The template's " + blockName +
             " holds no geometry to copy." };
     }
+    // THROUGH EVERY LAYER THE BLOCK USES, on and unlocked. The marker
+    // point lives on CTRL-HIDDEN, which is off in the registry, and an
+    // add onto an off layer is dropped without a word -- so this used
+    // to copy the drawing and leave the description behind, and the
+    // symbol arrived in its new home anonymous.
+    var involved = [];
+    for (var lname2 in layerNames) {
+        if (layerNames.hasOwnProperty(lname2)) {
+            involved.push(lname2);
+        }
+    }
     try {
-        di.applyOperation(op);
+        CsSymbolStore.withLayersWritable(doc, di, involved, function() {
+            di.applyOperation(op);
+        });
     } catch (eApply) {
         return { ok: false, error: "This drawing refused " + blockName +
             "'s geometry (" + eApply + ")." };

@@ -589,6 +589,96 @@ eqs(SymbolPaletteRun.sizeForScale(5.0, 0, 1.0), null,
 })();
 
 // ---------------------------------------------------------------------
+// 3d. A caver's own symbols survive a template upgrade.
+// ---------------------------------------------------------------------
+//
+// THE BUG THIS EXISTS FOR. publish.sh replaces the whole template on
+// every release, and a caver's own symbols live in it. Losing them was
+// accepted as a known cost on 2026-09-06; it cost a real symbol -- a
+// mud slope, drawn and saved -- within hours, because a development
+// machine publishes many times an evening. tools/merge_custom_symbols.js
+// carries them across now, and this is the claim it makes: the caver's
+// blocks come over with their names and categories, and the SHIPPED
+// ones do not (the new file's copies are the current ones).
+
+(function customSymbolsSurviveAnUpgrade() {
+    // The "old" template: the scratch one, which by now holds a custom
+    // symbol. Give it another, so the merge is not a single-case pass.
+    var scratchDoc = new RDocument(new RMemoryStorage(), createSpatialIndex());
+    var saved = CsSymbolStore.saveBlock(templatePath, "SYM_MUD_SLOPE",
+        scratchDoc, [new RLineEntity(scratchDoc, new RLineData(
+            new RVector(-0.5, 0), new RVector(0.5, 0.5)))],
+        { nss: "Mud Slope", uis: "", category: "Floor",
+            layer: CsLayers.FLOOR_SLOPE });
+    ok(saved.ok, "the fixture's second custom symbol saved (" +
+        saved.error + ")");
+
+    // The "new" template: a fresh shipped-shaped file with only the
+    // catalogued block in it, exactly as a release would install.
+    var upgradedPath = scratchDir + "/upgraded.dxf";
+    var newDoc = new RDocument(new RMemoryStorage(), createSpatialIndex());
+    var newDi = new RDocumentInterface(newDoc);
+    CsLayers.ensure(newDoc, newDi, CsLayers.FORMATIONS_DRIP);
+    var addOp = new RAddObjectsOperation();
+    addOp.addObject(new RBlock(newDoc, "SYM_STALACTITE", new RVector(0, 0)),
+        false);
+    newDi.applyOperation(addOp);
+    var shapeOp = new RAddObjectsOperation();
+    var freshSeg = new RLineEntity(newDoc, new RLineData(
+        new RVector(0, -0.5), new RVector(0, 0.5)));
+    freshSeg.setBlockId(newDoc.queryBlock("SYM_STALACTITE").getId());
+    shapeOp.addObject(freshSeg, false);
+    newDi.applyOperation(shapeOp);
+    ok(newDi.exportFile(upgradedPath, CsSymbolStore.dxfFilter()) === true,
+        "the fixture's upgraded template was written");
+
+    // The merge itself: every SYM_ block the CATALOGUE does not name.
+    var oldDi = CsSymbolStore.openOffscreen(templatePath);
+    var oldDoc = oldDi.getDocument();
+    var intoDi = CsSymbolStore.openOffscreen(upgradedPath);
+    var intoDoc = intoDi.getDocument();
+    var names = oldDoc.getBlockNames();
+    var carried = 0, skippedShipped = 0;
+    for (var i = 0; i < names.length; i++) {
+        var name = String(names[i]);
+        if (name.indexOf(CsSymbolStore.PREFIX) !== 0) {
+            continue;
+        }
+        if (CsSymbols.byBlock(name) !== null) {
+            skippedShipped++;
+            continue;
+        }
+        if (CsSymbolStore.copyBlock(oldDoc, intoDoc, intoDi, name).ok) {
+            carried++;
+        }
+    }
+    ok(carried >= 1, "at least one custom symbol was carried across");
+    ok(skippedShipped >= 1, "and a SHIPPED symbol was deliberately NOT " +
+        "carried -- the new template's copy is the current one");
+    ok(CsSymbolStore.write(intoDi, upgradedPath),
+        "the upgraded template was written back");
+
+    // Read it back off disk: the marker rides inside the block, so a
+    // carried symbol arrives still knowing what it is.
+    CsSymbolStore.invalidate();
+    var listed = CsSymbolStore.list(upgradedPath);
+    var mud = null;
+    for (var j = 0; j < listed.entries.length; j++) {
+        if (listed.entries[j].block === "SYM_MUD_SLOPE") {
+            mud = listed.entries[j];
+        }
+    }
+    ok(mud !== null, "the carried symbol is in the upgraded template");
+    if (mud !== null) {
+        eqs(mud.nss, "Mud Slope", "with its name");
+        eqs(mud.category, "Floor", "with its category");
+        eqs(mud.layer, CsLayers.FLOOR_SLOPE, "and with its home layer");
+    }
+    CsSymbolStore.invalidate();
+    new QFile(upgradedPath).remove();
+})();
+
+// ---------------------------------------------------------------------
 // 4. The shipped symbols are not editable.
 // ---------------------------------------------------------------------
 
