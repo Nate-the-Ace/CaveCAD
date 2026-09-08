@@ -279,7 +279,9 @@ FeatureTrace.reportTrace = function(layerName, result) {
         return;
     }
     try {
-        w.lastLabel.text = qsTr("Last: %1 -- %2 sampled, %3 kept")
+        w.lastLabel.text = (result.extended === true ?
+                qsTr("Last: %1 extended -- %2 sampled, %3 kept") :
+                qsTr("Last: %1 -- %2 sampled, %3 kept"))
             .arg(layerName).arg(result.sampled).arg(result.kept);
     } catch (e) {
         // a stale readout must never stop a trace

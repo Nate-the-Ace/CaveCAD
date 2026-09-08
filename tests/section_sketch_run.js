@@ -1877,7 +1877,10 @@ function selectOnly(entityId) {
         // gone stale against the real action fails HERE, loudly, rather
         // than turning a routing claim into a "not a function" throw.
         stampSection: FeatureTraceRun.prototype.stampSection,
-        warnUnclaimedProfile: FeatureTraceRun.prototype.warnUnclaimedProfile
+        warnUnclaimedProfile: FeatureTraceRun.prototype.warnUnclaimedProfile,
+        // commit() asks this before it draws, to decide whether the
+        // stroke grows a line already there or makes a new one.
+        extendTarget: FeatureTraceRun.prototype.extendTarget
     };
     // As beginEvent does: the caches the guard reads are filled from
     // the document before the stroke is judged.

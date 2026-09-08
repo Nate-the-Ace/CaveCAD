@@ -671,6 +671,20 @@ CsTrace.tiesOn = function(layerName) {
  * coordinates. QCAD context only.
  */
 CsTrace.nearestEnd = function(doc, point, layerName, tolerance) {
+    var hit = CsTrace.nearestEndHit(doc, point, layerName, tolerance);
+    return hit === null ? null : hit.point;
+};
+
+/**
+ * The same search, answering WHICH ENTITY that end belongs to as well
+ * as where it is: {point, id}, or null.
+ *
+ * Extending a line needs the entity, tying to one needs only the
+ * point, and they must never disagree about which end is nearest --
+ * two loops over the same layer, written twice, is exactly how they
+ * would come to. QCAD context only.
+ */
+CsTrace.nearestEndHit = function(doc, point, layerName, tolerance) {
     if (!(tolerance > 0) || !doc.hasLayer(layerName)) {
         return null;
     }
@@ -700,7 +714,7 @@ CsTrace.nearestEnd = function(doc, point, layerName, tolerance) {
             var d = CsTrace.distance(point, cand);
             if (d <= bestDist) {
                 bestDist = d;
-                best = cand;
+                best = { point: cand, id: ids[i] };
             }
         }
     }
@@ -732,6 +746,163 @@ CsTrace.tieEnds = function(doc, points, layerName, tolerance) {
         out[out.length - 1] = tail;
     }
     return out;
+};
+
+/**
+ * The control points of a traced curve, as [{x, y}, ...], or null when
+ * this entity is not one.
+ *
+ * A trace is a control-point spline (see fitSpline), so a line, an arc
+ * or a polyline drawn by some other tool answers null here and is left
+ * alone: extending one would mean turning it into a different kind of
+ * entity behind the caver's back.
+ *
+ * QCAD context only.
+ */
+CsTrace.controlPointsOf = function(entity) {
+    if (isNull(entity)) {
+        return null;
+    }
+    var raw = null;
+    try {
+        raw = entity.getControlPoints();
+    } catch (e) {
+        return null;
+    }
+    if (isNull(raw) || raw.length < 2) {
+        return null;
+    }
+    var out = [];
+    for (var i = 0; i < raw.length; i++) {
+        out.push({ x: raw[i].x, y: raw[i].y });
+    }
+    return out;
+};
+
+/**
+ * One point list from two, joined at whichever pair of ends is closest,
+ * or null when no pair is within `tolerance`.
+ *
+ * WHY FOUR CASES. A caver continuing a wall may set off from either end
+ * of it, and may drag towards the existing line or away from it. All
+ * four are the same intent -- "this is more of that wall" -- so all
+ * four join, and the caver never has to think about which direction the
+ * old line happens to run in.
+ *
+ * THE EXISTING LINE'S ENDPOINT WINS at the junction. The two ends are
+ * within a foot of each other by definition, and the near-duplicate is
+ * dropped from the NEW stroke: an extension must not shift the geometry
+ * that was already there, or every continuation would nudge the wall it
+ * continues.
+ *
+ * Pure. Returns a fresh array; neither input is touched.
+ */
+CsTrace.joinOrder = function(existing, added, tolerance) {
+    if (isNull(existing) || isNull(added) ||
+            existing.length < 2 || added.length < 2) {
+        return null;
+    }
+    var eStart = existing[0], eEnd = existing[existing.length - 1];
+    var aStart = added[0], aEnd = added[added.length - 1];
+    var rev = function(pts) { return CsTrace.copyOf(pts).reverse(); };
+
+    var cases = [
+        // the new stroke carries on from where the old line ended
+        { d: CsTrace.distance(eEnd, aStart),
+          build: function() { return existing.concat(added.slice(1)); } },
+        // ... drawn back towards it, so it arrives end-first
+        { d: CsTrace.distance(eEnd, aEnd),
+          build: function() { return existing.concat(rev(added).slice(1)); } },
+        // the new stroke sets off from the old line's START
+        { d: CsTrace.distance(eStart, aStart),
+          build: function() {
+              return rev(added).slice(0, -1).concat(existing);
+          } },
+        // ... and the same, drawn the other way round
+        { d: CsTrace.distance(eStart, aEnd),
+          build: function() { return added.slice(0, -1).concat(existing); } }
+    ];
+
+    var best = null;
+    for (var i = 0; i < cases.length; i++) {
+        if (!(cases[i].d <= tolerance)) {
+            continue;
+        }
+        if (best === null || cases[i].d < best.d) {
+            best = cases[i];
+        }
+    }
+    if (best === null) {
+        return null;
+    }
+    return CsTrace.copyOf(best.build());
+};
+
+/**
+ * Grows an existing traced curve by a new stroke, IN PLACE.
+ *
+ * WHY IN PLACE AND NOT DELETE-AND-ADD. The entity carries things that
+ * are not its geometry: the section station stamp, CsBind's tags, the
+ * shaped-line link, whatever a later tool adds. Replacing it would
+ * quietly drop all of that, and the loss would only show up a revision
+ * later. setShape keeps the same object, the same id and the same
+ * XDATA, and one modify says so.
+ *
+ * `points` is the raw captured drag; it is resampled and reduced here
+ * exactly as emit does it, so an extension is thinned the same way the
+ * stroke it continues was.
+ *
+ * Wrapped in CsLayers.withLayerOn for emit's reason: this build refuses
+ * writes to a layer that is off, silently, and tracing with the feature
+ * layer switched off to see the scan underneath is ordinary use.
+ *
+ * VERIFIED, NOT ASSUMED: the answer is read back off the document, so a
+ * refusal reports added:false and the caller can fall back to drawing a
+ * new line rather than losing the stroke.
+ *
+ * \return {added, extended, sampled, kept, id}
+ */
+CsTrace.extend = function(doc, di, id, points, spacing, tolerance, join) {
+    var spaced = CsTrace.resample(points, spacing);
+    var kept = CsTrace.reduce(spaced, tolerance);
+    var no = { added: false, extended: false, sampled: spaced.length,
+        kept: kept.length, id: null };
+    if (isNull(doc) || isNull(di)) {
+        return no;
+    }
+    var entity = doc.queryEntity(id);
+    var existing = CsTrace.controlPointsOf(entity);
+    if (existing === null) {
+        return no;
+    }
+    var combined = CsTrace.joinOrder(existing, kept, join);
+    if (combined === null) {
+        return no;
+    }
+
+    var spline = new RSpline();
+    spline.setDegree(CsTrace.degreeFor(combined.length));
+    spline.setPeriodic(false);
+    for (var i = 0; i < combined.length; i++) {
+        spline.appendControlPoint(new RVector(combined[i].x, combined[i].y));
+    }
+
+    var layerName = doc.getLayerName(entity.getLayerId());
+    CsLayers.withLayerOn(doc, di, layerName, function() {
+        try {
+            entity.setShape(spline);
+            var op = new RModifyObjectsOperation();
+            op.addObject(entity, false);
+            di.applyOperation(op);
+        } catch (eMod) {
+            // read back below; a refusal is a fallback, not a crash
+        }
+    });
+
+    var after = CsTrace.controlPointsOf(doc.queryEntity(id));
+    var grew = (after !== null && after.length === combined.length);
+    return { added: grew, extended: grew, sampled: spaced.length,
+        kept: kept.length, id: grew ? id : null };
 };
 
 /**

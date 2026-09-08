@@ -69,6 +69,29 @@ FeatureTraceRun.baseLayer = function(doc) {
 };
 
 /**
+ * The last stroke this tool committed: {id, layer, doc}.
+ *
+ * MODULE STATE ON PURPOSE. Arming a tile builds a NEW FeatureTraceRun,
+ * so anything remembered on the instance is forgotten every time the
+ * caver changes feature and comes back -- which is exactly the middle
+ * of tracing a passage. `doc` is the file name, so a stroke in one
+ * drawing can never continue a line in another that happens to share
+ * an id.
+ */
+FeatureTraceRun.lastTrace = null;
+
+/** A drawing's identity for the purpose above. Unsaved drawings all
+ *  answer "", which is correct: within one session there is only one
+ *  of them, and the id check does the rest. */
+FeatureTraceRun.docKey = function(doc) {
+    try {
+        return String(doc.getFileName());
+    } catch (e) {
+        return "";
+    }
+};
+
+/**
  * The layer a stroke in `frame` actually lands on, or null when the
  * armed feature has no layer in that view.
  *
@@ -330,6 +353,17 @@ FeatureTraceRun.prototype.mousePressEvent = function(event) {
     var p = event.getModelPosition();
     var here = { x: p.x, y: p.y };
 
+    // SHIFT MEANS "MORE OF THAT LINE". Read at the PRESS and kept for
+    // the stroke: a caver lets go of Shift somewhere in the middle of a
+    // long drag, and what they asked for at the start is what they
+    // meant. See extendTarget for what it widens.
+    this.extendForced = false;
+    try {
+        this.extendForced = (event.modifiers().valueOf() &
+            Qt.ShiftModifier.valueOf()) !== 0;
+    } catch (eMod) {
+    }
+
     // Once per stroke: Sketch Section and Capture Section can open and
     // close a bay while this action is still armed, and commit() routes
     // the finished stroke from this list -- a stale one would file the
@@ -439,7 +473,26 @@ FeatureTraceRun.prototype.commit = function() {
     var tied = CsTrace.tieEnds(doc, this.samples, layerName,
         perFoot * CsTrace.TIE_FEET);
 
-    var result = CsTrace.emit(doc, di, layerName, tied, spacing, tolerance);
+    // MORE OF THAT LINE, OR A NEW ONE. A wall traced in six passes was
+    // six splines: six things to warp, six ends to leave a hairline gap
+    // between, six rows in a revision. A stroke that carries on from
+    // one of these grows it instead -- see extendTarget for which ones
+    // qualify, and why a plain drag will not join two different walls
+    // that happen to meet at a corner.
+    var join = perFoot * CsTrace.TIE_FEET;
+    var grow = this.extendTarget(doc, layerName, tied, join);
+    var result = null;
+    if (grow !== null) {
+        result = CsTrace.extend(doc, di, grow, tied, spacing, tolerance,
+            join);
+    }
+    // A refused extension is not a lost stroke: fall through and draw
+    // it as its own line, which is what the tool did before extending
+    // existed. CsTrace.extend reads its answer back off the document,
+    // so this is reached on a real refusal rather than on a hope.
+    if (result === null || !result.added) {
+        result = CsTrace.emit(doc, di, layerName, tied, spacing, tolerance);
+    }
 
     if (!result.added) {
         // Something refused the add and this build raises no error for
@@ -456,7 +509,10 @@ FeatureTraceRun.prototype.commit = function() {
         // that the view they drew in was the view they meant -- an
         // elevation wall traced a foot outside the band boxes says
         // WALLS-SURVEYED here, and one undo puts it right.
-        EAction.handleUserMessage(qsTr("%1: %2 sampled, %3 kept")
+        EAction.handleUserMessage(
+            (result.extended === true ?
+                qsTr("%1: extended -- %2 sampled, %3 kept") :
+                qsTr("%1: %2 sampled, %3 kept"))
             .arg(layerName).arg(result.sampled).arg(result.kept));
         if (typeof FeatureTrace !== "undefined" &&
                 !isNull(FeatureTrace.reportTrace)) {
@@ -464,6 +520,9 @@ FeatureTraceRun.prototype.commit = function() {
         }
         this.stampSection(doc, di, pathFrame, result.id);
         this.warnUnclaimedProfile(pathFrame, layerName);
+        FeatureTraceRun.lastTrace = isNull(result.id) ? null : {
+            id: result.id, layer: layerName, doc: FeatureTraceRun.docKey(doc)
+        };
     }
 
     // A trace onto a profile layer grew the region. (Section linework
@@ -472,6 +531,76 @@ FeatureTraceRun.prototype.commit = function() {
     // is what keeps a sketched section from dragging the profile frame
     // out across the sheet to meet it.)
     this.refreshRegion();
+};
+
+/**
+ * The line this stroke should GROW, or null to draw a new one.
+ *
+ * TWO WAYS IN, AND THE DIFFERENCE MATTERS.
+ *
+ * A plain drag continues only the caver's OWN LAST STROKE on this exact
+ * layer -- the "I ran out of screen and lifted the mouse" case, which
+ * is what makes a wall six entities instead of one. Narrow on purpose:
+ * joining any end within a foot would fuse two DIFFERENT walls that
+ * meet at a corner into one curve, and a fitted curve through a corner
+ * rounds it off. Cave maps are full of corners that two strokes made.
+ *
+ * Holding SHIFT at the press widens it to the nearest end on the layer,
+ * whatever drew it and whenever -- the wall traced last week, the one
+ * someone else traced. That is the case where the caver has looked at
+ * the drawing and knows the two are one line, so the tool believes
+ * them.
+ *
+ * The layer is matched EXACTLY, which is what stops a plan stroke
+ * continuing a profile line, or a band-A ceiling continuing band B's:
+ * `layerName` is the fully routed destination, run variant and all.
+ */
+FeatureTraceRun.prototype.extendTarget = function(doc, layerName, points,
+        tolerance) {
+    if (isNull(doc) || isNull(points) || points.length < 2) {
+        return null;
+    }
+    var head = points[0];
+    var tail = points[points.length - 1];
+
+    if (this.extendForced === true) {
+        var hit = CsTrace.nearestEndHit(doc, head, layerName, tolerance);
+        if (hit === null) {
+            hit = CsTrace.nearestEndHit(doc, tail, layerName, tolerance);
+        }
+        return hit === null ? null : hit.id;
+    }
+
+    var last = FeatureTraceRun.lastTrace;
+    if (last === null || last.layer !== layerName ||
+            last.doc !== FeatureTraceRun.docKey(doc)) {
+        return null;
+    }
+    // Still there, still on that layer: the caver may have undone it,
+    // deleted it, or moved it to another layer since.
+    var entity = doc.queryEntity(last.id);
+    if (isNull(entity) ||
+            doc.getLayerName(entity.getLayerId()) !== layerName) {
+        FeatureTraceRun.lastTrace = null;
+        return null;
+    }
+    var ends;
+    try {
+        ends = [entity.getStartPoint(), entity.getEndPoint()];
+    } catch (eEnds) {
+        return null;
+    }
+    for (var i = 0; i < ends.length; i++) {
+        if (isNull(ends[i])) {
+            continue;
+        }
+        var end = { x: ends[i].x, y: ends[i].y };
+        if (CsTrace.distance(head, end) <= tolerance ||
+                CsTrace.distance(tail, end) <= tolerance) {
+            return last.id;
+        }
+    }
+    return null;
 };
 
 /** The tags a section trace carries: which bay it was drawn in, and the

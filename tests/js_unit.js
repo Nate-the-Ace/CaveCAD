@@ -17809,6 +17809,89 @@ if (!IS_NODE) {
         near(noTie[0].x, 10.35, 1e-9,
             "CsTrace.tieEnds: a non-wall layer is not tied");
 
+        // -- joining a stroke onto a line already drawn -------------
+        // Pure, and the whole geometry of "more of that wall". A caver
+        // sets off from either end of the old line and drags either
+        // way; all four are the same intent.
+        function xs(list) {
+            var out = [];
+            for (var q = 0; q < list.length; q++) { out.push(list[q].x); }
+            return out.join(",");
+        }
+        var oldLine = [pt(0, 0), pt(5, 0), pt(10, 0)];
+
+        eqs(xs(CsTrace.joinOrder(oldLine,
+            [pt(10.2, 0), pt(15, 0), pt(20, 0)], 1.0)), "0,5,10,15,20",
+            "CsTrace.joinOrder: carrying on from the old line's end");
+        eqs(xs(CsTrace.joinOrder(oldLine,
+            [pt(20, 0), pt(15, 0), pt(10.2, 0)], 1.0)), "0,5,10,15,20",
+            "CsTrace.joinOrder: the same stroke drawn back towards it");
+        eqs(xs(CsTrace.joinOrder(oldLine,
+            [pt(-0.2, 0), pt(-5, 0), pt(-10, 0)], 1.0)), "-10,-5,0,5,10",
+            "CsTrace.joinOrder: setting off from the old line's start");
+        eqs(xs(CsTrace.joinOrder(oldLine,
+            [pt(-10, 0), pt(-5, 0), pt(-0.2, 0)], 1.0)), "-10,-5,0,5,10",
+            "CsTrace.joinOrder: and that one drawn the other way round");
+
+        // THE OLD LINE'S ENDPOINT WINS. The near-duplicate dropped at
+        // the junction is the NEW stroke's, so continuing a wall cannot
+        // nudge the wall it continues -- do that on every pass of a long
+        // trace and the line walks.
+        var joined = CsTrace.joinOrder(oldLine,
+            [pt(10.4, 0.4), pt(15, 0)], 1.0);
+        eqs(joined.length, 4,
+            "CsTrace.joinOrder: the duplicate junction point is dropped");
+        near(joined[2].x, 10.0, 1e-9,
+            "CsTrace.joinOrder: and it is the NEW stroke's point that goes");
+        near(joined[2].y, 0.0, 1e-9,
+            "CsTrace.joinOrder: the old geometry does not move");
+
+        ok(CsTrace.joinOrder(oldLine, [pt(14, 0), pt(20, 0)], 1.0) === null,
+            "CsTrace.joinOrder: a stroke starting well clear joins nothing");
+        ok(CsTrace.joinOrder(oldLine, [pt(0, 0)], 1.0) === null,
+            "CsTrace.joinOrder: a single point is not a stroke");
+        ok(CsTrace.joinOrder(null, oldLine, 1.0) === null,
+            "CsTrace.joinOrder: nothing to join to is null, not a throw");
+
+        var srcJoin = [pt(10.2, 0), pt(15, 0)];
+        CsTrace.joinOrder(oldLine, srcJoin, 1.0);
+        near(srcJoin[0].x, 10.2, 1e-9,
+            "CsTrace.joinOrder: the caller's stroke is untouched");
+        near(oldLine[2].x, 10.0, 1e-9,
+            "CsTrace.joinOrder: and so is the line it joined");
+
+        // Whichever end is NEARER wins when a stroke could reach both --
+        // a short line whose two ends are within a foot of the same
+        // press must not join at the far one and double back.
+        var stub = [pt(0, 0), pt(0.5, 0)];
+        eqs(xs(CsTrace.joinOrder(stub, [pt(0.6, 0), pt(5, 0)], 1.0)),
+            "0,0.5,5",
+            "CsTrace.joinOrder: joins at the nearer of two reachable ends");
+
+        // -- nearestEndHit names the entity, and agrees with nearestEnd
+        var hit = CsTrace.nearestEndHit(tieDoc, pt(10.4, 0.3),
+            CsLayers.WALLS_SURVEYED, 1.0);
+        ok(hit !== null && !isNull(hit.id),
+            "CsTrace.nearestEndHit: says WHICH line that end belongs to");
+        near(hit.point.x, 10.0, 1e-6,
+            "CsTrace.nearestEndHit: and where it is");
+        ok(CsTrace.nearestEndHit(tieDoc, pt(14, 0),
+            CsLayers.WALLS_SURVEYED, 1.0) === null,
+            "CsTrace.nearestEndHit: out of reach is null");
+
+        // -- controlPointsOf only recognises a traced curve ----------
+        var tracedCurve = CsTrace.fitSpline(tieDoc,
+            [pt(0, 0), pt(5, 1), pt(10, 0)]);
+        var cps = CsTrace.controlPointsOf(tracedCurve);
+        ok(cps !== null && cps.length === 3,
+            "CsTrace.controlPointsOf: reads a traced spline's points");
+        ok(CsTrace.controlPointsOf(new RLineEntity(tieDoc,
+            new RLineData(new RVector(0, 0), new RVector(1, 0)))) === null,
+            "CsTrace.controlPointsOf: a plain line is not a trace, so " +
+                "extending never rewrites one into a spline");
+        ok(CsTrace.controlPointsOf(null) === null,
+            "CsTrace.controlPointsOf: null is null, not a throw");
+
         // -- snap suspend / restore, by NAME not by object ----------
         // The object would be a use-after-free: setSnap takes ownership,
         // so the snap we saved is freed when RSnapFree replaces it.
