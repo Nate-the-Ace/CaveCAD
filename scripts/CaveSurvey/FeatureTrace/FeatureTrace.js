@@ -68,13 +68,20 @@ FeatureTrace.target = undefined;
  * is a plan-frame linework layer, which is false for anything CTRL-.
  */
 FeatureTrace.ROWS = [
-    { label: "Surveyed Walls", layer: CsLayers.WALLS_SURVEYED },
-    { label: "Inferred Walls", layer: CsLayers.WALLS_INFERRED },
-    { label: "Breakdown", layer: CsLayers.BREAKDOWN },
-    { label: "Breakdown Boundary", layer: CsLayers.BREAKDOWN_BOUNDARY },
-    { label: "Entrance", layer: CsLayers.ENTRANCE },
-    { label: "Ceiling", layer: CsLayers.CEILING },
-    { label: "Floor", layer: CsLayers.FLOOR }
+    { label: "Surveyed Walls", layer: CsLayers.WALLS_SURVEYED,
+      alias: "solid known measured passage edge" },
+    { label: "Inferred Walls", layer: CsLayers.WALLS_INFERRED,
+      alias: "dashed uncertain guessed sketched edge" },
+    { label: "Breakdown", layer: CsLayers.BREAKDOWN,
+      alias: "rocks blocks boulders collapse rubble" },
+    { label: "Breakdown Boundary", layer: CsLayers.BREAKDOWN_BOUNDARY,
+      alias: "rubble field outline extent" },
+    { label: "Entrance", layer: CsLayers.ENTRANCE,
+      alias: "mouth sink opening" },
+    { label: "Ceiling", layer: CsLayers.CEILING,
+      alias: "roof overhead" },
+    { label: "Floor", layer: CsLayers.FLOOR,
+      alias: "sediment bottom" }
 ];
 
 /**
@@ -93,12 +100,16 @@ FeatureTrace.ROWS = [
  * carried here only so the tile can paint itself in the right colour.
  */
 FeatureTrace.SHAPED_ROWS = [
-    { label: "Floor Ledge", style: "floorledge" },
-    { label: "Ceiling Ledge", style: "ceilingledge" },
-    { label: "Pit", style: "pit" },
-    { label: "Flowstone", style: "flowstone" },
-    { label: "Rimstone Dam", style: "rimstone" },
-    { label: "Slope", style: "slope" }
+    { label: "Floor Ledge", style: "floorledge",
+      alias: "bench step down drop" },
+    { label: "Ceiling Ledge", style: "ceilingledge",
+      alias: "bench step up overhang" },
+    { label: "Pit", style: "pit", alias: "shaft drop hole domepit" },
+    { label: "Flowstone", style: "flowstone",
+      alias: "calcite drapery cascade" },
+    { label: "Rimstone Dam", style: "rimstone",
+      alias: "gour pool dam" },
+    { label: "Slope", style: "slope", alias: "ramp incline breakdown slope" }
 ];
 
 /**
@@ -348,6 +359,137 @@ FeatureTrace.wrapLabel = function(text, budget) {
     return lines.join("\n");
 };
 
+/**
+ * True when a row matches the panel's search text.
+ *
+ * Matches the LABEL, the layer or style name, and the row's `alias` --
+ * the words a caver would type that the label does not contain. A gour
+ * is a rimstone dam and a shaft is a pit, and a feature findable by
+ * only one of its names is a feature that looks missing. Same promise
+ * the Symbol Palette's search makes about NSS and UIS names.
+ *
+ * An empty needle matches everything, so no-search is not a special
+ * case anywhere else.
+ *
+ * Pure, so the unit tests can hold it to that.
+ */
+FeatureTrace.matches = function(row, needle) {
+    if (isNull(needle) || String(needle).length === 0) {
+        return true;
+    }
+    if (isNull(row)) {
+        return false;
+    }
+    var n = String(needle).toLowerCase();
+    var fields = [row.label, row.alias, row.layer, row.style];
+    for (var i = 0; i < fields.length; i++) {
+        if (isNull(fields[i])) {
+            continue;
+        }
+        if (String(fields[i]).toLowerCase().indexOf(n) !== -1) {
+            return true;
+        }
+    }
+    return false;
+};
+
+/**
+ * Re-packs a section's grid so the tiles still shown sit in the first
+ * cells, with no holes where a filtered-out tile used to be.
+ *
+ * HIDE-ONLY, NOT REBUILD. The Symbol Palette tears its tiles down and
+ * builds them again because its catalogue can gain and lose a symbol
+ * while the panel is open; this panel's tiles are ROWS and
+ * SHAPED_ROWS, two constants, so nothing can go stale behind a hidden
+ * button -- and hiding keeps the armed tile's connections and its
+ * checked mark intact through a search.
+ *
+ * `entry.shown === false` is the filtered-out mark. A bridge that
+ * refuses removeWidget gets holes in the grid, which reads worse but
+ * still filters; \return says which happened.
+ */
+FeatureTrace.reflow = function(grid, buttons, firstRow) {
+    if (isNull(grid) || isNull(buttons)) {
+        return false;
+    }
+    var shown = [];
+    var i;
+    for (i = 0; i < buttons.length; i++) {
+        if (buttons[i].shown !== false) {
+            shown.push(buttons[i].button);
+        }
+    }
+    try {
+        for (i = 0; i < buttons.length; i++) {
+            grid.removeWidget(buttons[i].button);
+        }
+        for (i = 0; i < shown.length; i++) {
+            grid.addWidget(shown[i],
+                firstRow + Math.floor(i / FeatureTrace.GRID_COLUMNS),
+                i % FeatureTrace.GRID_COLUMNS);
+        }
+    } catch (e) {
+        return false;
+    }
+    return true;
+};
+
+/**
+ * Shows the tiles matching the search box and hides the rest.
+ *
+ * A SECTION WITH NOTHING LEFT IN IT DISAPPEARS, header and all: an
+ * empty "Draw a shaped line" heading during a search for "floor" is a
+ * heading claiming there is nothing under it while taking the room to
+ * say so.
+ *
+ * A SEARCH OPENS EVERYTHING it does show, and clearing it restores the
+ * folds the caver had -- through CsPanel.setOpen, which deliberately
+ * does not write to the collapsed set.
+ */
+FeatureTrace.applyFilter = function() {
+    var w = FeatureTrace.widgets;
+    if (isNull(w) || isNull(w.sections)) {
+        return;
+    }
+    var needle = "";
+    try {
+        needle = isNull(w.searchEdit) ? "" : String(w.searchEdit.text).trim();
+    } catch (eText) {
+    }
+    var collapsed = (needle === "") ?
+        CsPanel.loadCollapsed(FeatureTrace.COLLAPSED_SETTING) : {};
+
+    for (var s = 0; s < w.sections.length; s++) {
+        var sec = w.sections[s];
+        var any = false;
+        var i;
+        for (i = 0; i < sec.buttons.length; i++) {
+            var hit = FeatureTrace.matches(sec.buttons[i].row, needle);
+            sec.buttons[i].shown = hit;
+            if (hit) {
+                any = true;
+            }
+        }
+        FeatureTrace.reflow(sec.grid, sec.buttons, sec.firstRow);
+        // Visibility AFTER the re-pack: removeWidget leaves a widget
+        // parented and visible where it was, so a hidden tile has to be
+        // hidden in its own right rather than by being dropped from the
+        // layout.
+        for (i = 0; i < sec.buttons.length; i++) {
+            try {
+                sec.buttons[i].button.visible = sec.buttons[i].shown;
+            } catch (eVis) {
+            }
+        }
+        try {
+            sec.section.box.visible = any;
+        } catch (eBox) {
+        }
+        CsPanel.setOpen(sec.section, sec.title,
+            needle === "" ? !(collapsed[sec.title] === true) : true);
+    }
+};
+
 /** The one group box: every feature, as a grid of fixed-size tiles.
  *
  *  No frame filter and no per-view groups. A tile is a FEATURE, and the
@@ -423,6 +565,10 @@ FeatureTrace.buildGroup = function(w, parent, title, header, collapsed) {
     }
 
     section.host.setLayout(inner);
+    // The grid and where its tiles start, so applyFilter can re-pack it
+    // without knowing how it was built.
+    section.grid = inner;
+    section.firstRow = firstRow;
     return section;
 };
 
@@ -952,6 +1098,8 @@ FeatureTrace.buildShapedGroup = function(w, parent, collapsed) {
     } catch (eStretch) {
     }
     section.host.setLayout(inner);
+    section.grid = inner;
+    section.firstRow = 0;
     return section;
 };
 
@@ -961,13 +1109,14 @@ FeatureTrace.buildDock = function(appWin) {
     // silently forgets where it was.
     dock.objectName = "CaveSurveyFeatureTraceDock";
 
-    var w = { problems: [], buttons: [], shapedButtons: [] };
+    var w = { problems: [], buttons: [], shapedButtons: [], sections: [] };
     var body = new QWidget(dock);
     var layout = new QVBoxLayout();
     var collapsed = CsPanel.loadCollapsed(FeatureTrace.COLLAPSED_SETTING);
     // The sections can be reordered from their own right-click menus;
-    // baseIndex 1 keeps the cursor readout pinned above them.
-    var stack = CsPanel.stack(layout, FeatureTrace.COLLAPSED_SETTING, 1,
+    // baseIndex 2 keeps the cursor readout and the search box pinned
+    // above them.
+    var stack = CsPanel.stack(layout, FeatureTrace.COLLAPSED_SETTING, 2,
         function() {
             EAction.handleUserMessage(qsTr("Section order reset -- reopen " +
                 "the panel to see it."));
@@ -980,6 +1129,34 @@ FeatureTrace.buildDock = function(appWin) {
         layout.addWidget(w.frameLabel, 0, 0);
     } catch (eFrame) {
         w.problems.push("cursor frame readout (" + eFrame + ")");
+    }
+
+    // -- search --------------------------------------------------------
+    //
+    // The Symbol Palette has had one since it shipped, and a caver who
+    // has learnt to type into one panel should not find the other one
+    // has nowhere to type. Thirteen tiles is few enough to scan, so
+    // this earns its place on the names rather than the count: "gour"
+    // finds the rimstone dam, "shaft" finds the pit.
+    try {
+        w.searchEdit = new QLineEdit("");
+        w.searchEdit.toolTip = qsTr("Filter the tiles by name. Common " +
+            "cave words are searched too -- \"gour\" finds the rimstone " +
+            "dam, \"shaft\" finds the pit.");
+        try {
+            w.searchEdit.placeholderText = qsTr("Search features");
+        } catch (ePlace) {
+        }
+        w.searchEdit.textChanged.connect(function(text) {
+            try {
+                FeatureTrace.applyFilter();
+            } catch (eFilter) {
+                // never throw out of a signal handler
+            }
+        });
+        layout.addWidget(w.searchEdit, 0, 0);
+    } catch (eSearchBox) {
+        w.problems.push("search box (" + eSearchBox + ")");
     }
 
     // -- the features ------------------------------------------------
@@ -995,6 +1172,9 @@ FeatureTrace.buildDock = function(appWin) {
         w.featureGroup = featureSection.box;
         layout.addWidget(featureSection.box, 0, 0);
         CsPanel.stackAdd(stack, featureSection, FeatureTrace.SEC_FEATURES);
+        w.sections.push({ section: featureSection,
+            title: FeatureTrace.SEC_FEATURES, buttons: w.buttons,
+            grid: featureSection.grid, firstRow: featureSection.firstRow });
     } catch (eFeatures) {
         w.problems.push("feature group (" + eFeatures + ")");
     }
@@ -1009,6 +1189,9 @@ FeatureTrace.buildDock = function(appWin) {
         w.shapedGroup = shapedSection.box;
         layout.addWidget(shapedSection.box, 0, 0);
         CsPanel.stackAdd(stack, shapedSection, FeatureTrace.SEC_SHAPED);
+        w.sections.push({ section: shapedSection,
+            title: FeatureTrace.SEC_SHAPED, buttons: w.shapedButtons,
+            grid: shapedSection.grid, firstRow: shapedSection.firstRow });
     } catch (eShaped) {
         w.problems.push("shaped lines group (" + eShaped + ")");
     }

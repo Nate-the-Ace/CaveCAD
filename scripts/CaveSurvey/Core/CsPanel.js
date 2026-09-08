@@ -161,6 +161,32 @@ CsPanel.connectSection = function(header, host, title, settingKey) {
 };
 
 /**
+ * Folds a section open or shut WITHOUT remembering it.
+ *
+ * WHAT A SEARCH NEEDS. Typing "gour" must show the rimstone dam even
+ * when its section was folded away last week, and clearing the search
+ * must put the panel back exactly as the caver left it. That only
+ * works if the search never writes to the collapsed set -- which is
+ * the whole difference between this and clicking the header.
+ */
+CsPanel.setOpen = function(section, title, open) {
+    if (isNull(section)) {
+        return;
+    }
+    try {
+        section.host.visible = open;
+    } catch (eVis) {
+        return;
+    }
+    try {
+        if (!isNull(section.header)) {
+            section.header.text = CsPanel.headerText(title, open);
+        }
+    } catch (eText) {
+    }
+};
+
+/**
  * The saved order of a panel's sections: titles, in the order the caver
  * put them. Unknown to the panel is fine -- see orderedTitles.
  */

@@ -17622,6 +17622,95 @@ if (!IS_NODE) {
             "FeatureTrace.smoothingFraction: a broken fallback still yields a usable tolerance");
         FeatureTrace.FALLBACK_SMOOTHING = savedFallback;
 
+        // -- the search box filters on names a caver would type -----
+        // Pure, and the whole reason the panel can filter without
+        // rebuilding: what a tile answers here decides only whether it
+        // is shown.
+        ok(FeatureTrace.matches({ label: "Pit", style: "pit" }, ""),
+            "FeatureTrace.matches: an empty search shows everything");
+        ok(FeatureTrace.matches({ label: "Pit", style: "pit" }, null),
+            "FeatureTrace.matches: so does no search at all");
+        ok(FeatureTrace.matches({ label: "Surveyed Walls",
+            layer: CsLayers.WALLS_SURVEYED }, "wall"),
+            "FeatureTrace.matches: finds a feature by its label");
+        ok(FeatureTrace.matches({ label: "Surveyed Walls",
+            layer: CsLayers.WALLS_SURVEYED }, "SURVEYED"),
+            "FeatureTrace.matches: case does not matter");
+        ok(FeatureTrace.matches({ label: "Ceiling",
+            layer: CsLayers.CEILING }, "CEILING"),
+            "FeatureTrace.matches: finds a feature by its layer name");
+        ok(!FeatureTrace.matches({ label: "Floor", layer: CsLayers.FLOOR },
+            "gour"),
+            "FeatureTrace.matches: and says no when nothing matches");
+
+        // THE ALIASES ARE THE POINT. Thirteen tiles are scannable; what
+        // is not scannable is knowing that the thing you call a gour is
+        // filed as a rimstone dam. Every row carries the other words
+        // for it, and a row without them is a row that cannot be found
+        // by the name half the cavers use.
+        var searchRows = FeatureTrace.ROWS.concat(FeatureTrace.SHAPED_ROWS);
+        for (i = 0; i < searchRows.length; i++) {
+            ok(!isNull(searchRows[i].alias) &&
+                    String(searchRows[i].alias).length > 0,
+                "FeatureTrace: " + searchRows[i].label +
+                    " carries the other words for it");
+        }
+        function findsOne(needle) {
+            var hits = [];
+            for (var r = 0; r < searchRows.length; r++) {
+                if (FeatureTrace.matches(searchRows[r], needle)) {
+                    hits.push(searchRows[r].label);
+                }
+            }
+            return hits.join(",");
+        }
+        eqs(findsOne("gour"), "Rimstone Dam",
+            "FeatureTrace.matches: \"gour\" finds the rimstone dam");
+        eqs(findsOne("shaft"), "Pit",
+            "FeatureTrace.matches: \"shaft\" finds the pit");
+        eqs(findsOne("boulders"), "Breakdown",
+            "FeatureTrace.matches: \"boulders\" finds breakdown");
+        ok(findsOne("dashed").indexOf("Inferred Walls") !== -1,
+            "FeatureTrace.matches: an inferred wall is findable as dashed");
+        eqs(findsOne("nothing-is-called-this"), "",
+            "FeatureTrace.matches: a search that matches nothing hides " +
+                "every tile, and applyFilter hides the empty sections");
+
+        // -- re-packing the grid leaves no holes --------------------
+        // Hidden tiles are still IN the list -- that is what keeps the
+        // armed tile armed through a search -- so the grid has to be
+        // told where the shown ones go.
+        var placed = [];
+        var fakeGrid = {
+            removeWidget: function(b) { },
+            addWidget: function(b, row, col) {
+                placed.push(b.name + "@" + row + "," + col);
+            }
+        };
+        var fakeButtons = [
+            { button: { name: "a" }, shown: true },
+            { button: { name: "b" }, shown: false },
+            { button: { name: "c" }, shown: true },
+            { button: { name: "d" }, shown: true }
+        ];
+        ok(FeatureTrace.reflow(fakeGrid, fakeButtons, 0),
+            "FeatureTrace.reflow: re-packs a filtered grid");
+        eqs(placed.join(" "), "a@0,0 c@0,1 d@1,0",
+            "FeatureTrace.reflow: the shown tiles fill the cells in order, " +
+                "with no gap where the hidden one was");
+
+        // A bridge that refuses removeWidget must not take the filter
+        // down with it: the tiles still hide, the grid just keeps its
+        // holes.
+        ok(!FeatureTrace.reflow({
+                removeWidget: function() { throw "no removeWidget here"; },
+                addWidget: function() { }
+            }, fakeButtons, 0),
+            "FeatureTrace.reflow: says so when the bridge refuses, " +
+                "rather than throwing into a signal handler");
+        ok(!FeatureTrace.reflow(null, fakeButtons, 0),
+            "FeatureTrace.reflow: no grid is not a crash");
+
         // -- panel reads degrade to defaults without widgets --------
         // The drag action must work standalone: before the panel is
         // built, and if the bridge refuses to build it at all.
