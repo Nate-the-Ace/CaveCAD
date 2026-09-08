@@ -749,6 +749,22 @@ CsTrace.tieEnds = function(doc, points, layerName, tolerance) {
 };
 
 /**
+ * A drawing's identity, for remembering which one a line was drawn in.
+ *
+ * Unsaved drawings all answer "", which is correct: within one session
+ * there is only one of them, and the id check the callers do does the
+ * rest. Shared so the plain trace and the shaped one cannot come to
+ * disagree about what "the same drawing" means.
+ */
+CsTrace.docKey = function(doc) {
+    try {
+        return String(doc.getFileName());
+    } catch (e) {
+        return "";
+    }
+};
+
+/**
  * The control points of a traced curve, as [{x, y}, ...], or null when
  * this entity is not one.
  *
@@ -865,8 +881,32 @@ CsTrace.joinOrder = function(existing, added, tolerance) {
 CsTrace.extend = function(doc, di, id, points, spacing, tolerance, join) {
     var spaced = CsTrace.resample(points, spacing);
     var kept = CsTrace.reduce(spaced, tolerance);
-    var no = { added: false, extended: false, sampled: spaced.length,
-        kept: kept.length, id: null };
+    var grown = CsTrace.growCurve(doc, di, id, kept, join);
+    return { added: grown.grown, extended: grown.grown,
+        sampled: spaced.length, kept: kept.length,
+        id: grown.grown ? id : null };
+};
+
+/**
+ * The write half of an extension: joins `kept` onto the curve `id`
+ * already holds and grows that entity in place.
+ *
+ * Split out from extend because a SHAPED line arrives here having
+ * already been resampled and reduced at its own spacing, by its own
+ * release handler -- putting it through extend's pipeline a second
+ * time would thin an already-thinned spine. Both callers must join and
+ * write the same way, so that half is here and is called twice rather
+ * than written twice.
+ *
+ * `group` is optional: pass a transaction group and the modify joins
+ * it, which is how a shaped line's regrowth and its ornament's
+ * regeneration come back on ONE undo.
+ *
+ * \return {grown: bool, points: int} -- points is the control-point
+ * count the curve ended up with, 0 when nothing was written.
+ */
+CsTrace.growCurve = function(doc, di, id, kept, join, group) {
+    var no = { grown: false, points: 0 };
     if (isNull(doc) || isNull(di)) {
         return no;
     }
@@ -893,6 +933,9 @@ CsTrace.extend = function(doc, di, id, points, spacing, tolerance, join) {
             entity.setShape(spline);
             var op = new RModifyObjectsOperation();
             op.addObject(entity, false);
+            if (group !== null && group !== undefined && group >= 0) {
+                op.setTransactionGroup(group);
+            }
             di.applyOperation(op);
         } catch (eMod) {
             // read back below; a refusal is a fallback, not a crash
@@ -901,8 +944,7 @@ CsTrace.extend = function(doc, di, id, points, spacing, tolerance, join) {
 
     var after = CsTrace.controlPointsOf(doc.queryEntity(id));
     var grew = (after !== null && after.length === combined.length);
-    return { added: grew, extended: grew, sampled: spaced.length,
-        kept: kept.length, id: grew ? id : null };
+    return { grown: grew, points: grew ? after.length : 0 };
 };
 
 /**

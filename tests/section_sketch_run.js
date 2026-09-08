@@ -2022,9 +2022,15 @@ function selectOnly(entityId) {
         pathFrame: null,
         region: null,
         bays: [],
+        growId: null,
+        extendForced: false,
         refreshFrames: ShapedLinesRun.prototype.refreshFrames,
         prepare: ShapedLinesRun.prototype.prepare,
-        buildSpine: ShapedLinesRun.prototype.buildSpine
+        buildSpine: ShapedLinesRun.prototype.buildSpine,
+        // commit() asks these two before it draws: whether this stroke
+        // continues a line already there, and how to grow it if so.
+        extendTarget: ShapedLinesRun.prototype.extendTarget,
+        growExisting: ShapedLinesRun.prototype.growExisting
     };
     slAction.refreshFrames();
     check("SL: fixture: the bay is seen as section-frame ground",

@@ -26,6 +26,8 @@ function ShapedLinesRun(guiAction) {
     this.side = 1;           // which way the ornament faces, live
     this.previewSample = null;  // the spine walked once, reused per move
     this.pathFrame = null;   // plan / profile / section, decided at release
+    this.growId = null;      // the spine this stroke continues, if any
+    this.extendForced = false;  // Shift was held at the press
     this.region = null;      // cached profile-frame box
     this.bays = [];          // cached open section-bay rects
     this.savedSnap = null;   // snap CLASS NAME to restore on exit
@@ -52,6 +54,16 @@ ShapedLinesRun.SAMPLE_PIXELS = 6;
  *  as a fraction of it. FeatureTrace's defaults (1 ft, Fine). */
 ShapedLinesRun.INTERVAL_FEET = 1.0;
 ShapedLinesRun.TOLERANCE_FRACTION = 0.05;
+
+/**
+ * The last shaped line this tool committed: {shapeId, layer, style, doc}.
+ *
+ * FeatureTraceRun.lastTrace's twin, and module state for its reason:
+ * arming another tile builds a new action, which is the middle of
+ * drawing a passage. The SHAPE ID rather than the entity id, because a
+ * spine is regrown in place and re-found by its tag.
+ */
+ShapedLinesRun.lastSpine = null;
 
 ShapedLinesRun.prototype.beginEvent = function() {
     EAction.prototype.beginEvent.call(this);
@@ -188,6 +200,7 @@ ShapedLinesRun.prototype.discard = function() {
     this.spinePts = null;
     this.spineClosed = false;
     this.pathFrame = null;
+    this.growId = null;
     try {
         this.getDocumentInterface().clearPreview();
         this.getDocumentInterface().repaintViews();
@@ -216,6 +229,16 @@ ShapedLinesRun.prototype.mousePressEvent = function(event) {
         return;
     }
     var p = event.getModelPosition();
+    // SHIFT MEANS "MORE OF THAT LINE", read at the press and kept for
+    // the stroke -- FeatureTraceRun's rule, the same words. See
+    // extendTarget.
+    this.extendForced = false;
+    try {
+        this.extendForced = (event.modifiers().valueOf() &
+            Qt.ShiftModifier.valueOf()) !== 0;
+    } catch (eMod) {
+    }
+    this.growId = null;
     // Once per stroke, before the frame that routes this feature's
     // layers is decided from it. See refreshFrames.
     this.refreshFrames();
@@ -274,8 +297,118 @@ ShapedLinesRun.prototype.mouseReleaseEvent = function(event) {
         this.setState(ShapedLinesRun.State.Idle);
         return;
     }
+
+    // AN EXTENSION IS NOT ASKED FOR A SIDE. The line being continued
+    // already has one, and it is the same line: asking again would let
+    // a caver put the hachures of one ledge on both sides of itself.
+    // So the stroke commits here, at the release, and the second click
+    // the side pick needs is never spent.
+    this.growId = this.extendTarget();
+    if (this.growId !== null) {
+        this.commit();
+        this.discard();
+        this.setState(ShapedLinesRun.State.Idle);
+        return;
+    }
+
     this.setState(ShapedLinesRun.State.PickingSide);
     this.updatePreview();
+};
+
+/**
+ * The SPINE this stroke should grow, as its entity id, or null to draw
+ * a new feature.
+ *
+ * FeatureTraceRun.extendTarget's rule, with two more conditions that
+ * only shaped lines have:
+ *
+ *   SAME STYLE. A ledge does not become more of a flowstone because it
+ *   started where one ended. The tiles are different features and the
+ *   ornament is what makes them so. NOT implied by the layer check:
+ *   flowstone, rimstone and slope share one spine layer.
+ *
+ *   NEVER A PIT, and with no guard of its own: a pit's spine is a
+ *   closed POLYLINE, CsTrace.growCurve refuses anything that is not a
+ *   control-point curve, and growExisting then falls through to
+ *   drawing a new feature. A closed loop has no end to carry on from
+ *   anyway, and its hachures point inward by definition. A guard here
+ *   as well would be a second rule saying the same thing, which no
+ *   test could tell from the first.
+ *
+ * Called at the release, so pathFrame and spinePts are decided: the
+ * layer compared is the one this stroke would actually land on, which
+ * is what stops an elevation ledge continuing a plan one.
+ */
+ShapedLinesRun.prototype.extendTarget = function() {
+    var doc = this.getDocument();
+    var spec = CsShapeLine.STYLES[this.styleKey];
+    if (isNull(doc) || isNull(spec) ||
+            isNull(this.spinePts) || this.spinePts.length < 2) {
+        return null;
+    }
+    var layerName = CsShapeLine.layersFor(spec, this.pathFrame).spine;
+    var perFoot = CsShapeLine.perFoot(doc);
+    var join = perFoot * CsTrace.TIE_FEET;
+    var head = this.spinePts[0];
+    var tail = this.spinePts[this.spinePts.length - 1];
+
+    var candidates = [];
+    if (this.extendForced === true) {
+        // Any shaped line of this style on this layer, whoever drew it
+        // and whenever.
+        // spines() answers {entity, id} PAIRS, not entities -- reading
+        // a tag off the pair answers "" and every candidate would
+        // silently drop out, which is a Shift that quietly does
+        // nothing.
+        var spines = CsShapeLine.spines(doc);
+        for (var i = 0; i < spines.length; i++) {
+            candidates.push(spines[i].entity);
+        }
+    } else {
+        var last = ShapedLinesRun.lastSpine;
+        if (last === null || last.style !== this.styleKey ||
+                last.layer !== layerName ||
+                last.doc !== CsTrace.docKey(doc)) {
+            return null;
+        }
+        var mine = CsShapeLine.spineOf(doc, last.shapeId);
+        if (isNull(mine)) {
+            ShapedLinesRun.lastSpine = null;   // undone, or deleted
+            return null;
+        }
+        candidates.push(mine);
+    }
+
+    var best = null;
+    var bestDist = join;
+    for (var c = 0; c < candidates.length; c++) {
+        var spine = candidates[c];
+        if (CsTags.get(spine, CsShapeLine.KEY.STYLE) !== this.styleKey) {
+            continue;
+        }
+        if (doc.getLayerName(spine.getLayerId()) !== layerName) {
+            continue;
+        }
+        var ends;
+        try {
+            ends = [spine.getStartPoint(), spine.getEndPoint()];
+        } catch (eEnds) {
+            continue;
+        }
+        for (var k = 0; k < ends.length; k++) {
+            if (isNull(ends[k])) {
+                continue;
+            }
+            var end = { x: ends[k].x, y: ends[k].y };
+            var d = Math.min(CsShapeLine.dist(head, end),
+                CsShapeLine.dist(tail, end));
+            if (d <= bestDist) {
+                bestDist = d;
+                best = spine.getId();
+            }
+        }
+    }
+    return best;
 };
 
 /**
@@ -514,6 +647,14 @@ ShapedLinesRun.prototype.commit = function() {
         return;
     }
 
+    // MORE OF THAT LINE. Decided at the release, before the side pick
+    // was skipped; if the growth is refused the stroke falls through
+    // and becomes its own feature, side pick and all -- except that the
+    // side pick is behind us, so it takes the side the preview had.
+    if (this.growId !== null && this.growExisting(doc, di, spec)) {
+        return;
+    }
+
     // The view was decided at the release (prepare), not here: the side
     // pick moves the cursor off the stroke, and a ledge drawn in the
     // elevation must not become plan linework because the caver
@@ -574,6 +715,90 @@ ShapedLinesRun.prototype.commit = function() {
     }
     EAction.handleUserMessage(qsTr("%1: %2 decoration entities along " +
         "%3 points").arg(spec.label).arg(built.count).arg(kept.length));
+
+    ShapedLinesRun.lastSpine = {
+        shapeId: CsTags.get(spine, CsShapeLine.KEY.ID),
+        layer: frameLayers.spine,
+        style: this.styleKey,
+        doc: CsTrace.docKey(doc)
+    };
+};
+
+/**
+ * Grows the spine this stroke continues and reflows its ornament.
+ *
+ * ONE TRANSACTION GROUP, so the caver's Ctrl+Z takes the growth and
+ * the regenerated hachures together -- a half-undone shaped line is a
+ * spine wearing the ornament of a shape it no longer has.
+ *
+ * THE LISTENER IS HELD OFF for the same reason ShapedFlip holds it
+ * off: it would hear the spine's modify, reconcile the feature
+ * mid-sequence, and then hear our own decor writes and do it again.
+ * Held off, this is one atomic edit from its point of view -- and the
+ * regeneration is done HERE rather than left to the listener, because
+ * headless there is no listener at all and a feature must not depend
+ * on a window for its ornament to match its spine.
+ *
+ * THE SIDE IS INHERITED, never re-asked: it rides on the spine's own
+ * SIDE tag, and joinOrder always keeps the existing spine's direction,
+ * so a tag that meant "low side is left" still means it.
+ *
+ * \return true when the feature grew; false to fall through and draw
+ * the stroke as a new one.
+ */
+ShapedLinesRun.prototype.growExisting = function(doc, di, spec) {
+    var spine = doc.queryEntity(this.growId);
+    if (isNull(spine)) {
+        return false;
+    }
+    var sid = CsTags.get(spine, CsShapeLine.KEY.ID);
+    if (sid === "") {
+        return false;
+    }
+    var join = CsShapeLine.perFoot(doc) * CsTrace.TIE_FEET;
+    var group = -1;
+    try {
+        group = doc.getTransactionGroup() + 1;
+    } catch (eGroup) {
+        group = -1;
+    }
+
+    var hadListener = (typeof ShapedLinesListener !== "undefined");
+    if (hadListener) {
+        ShapedLinesListener.busy = true;
+    }
+    var grown = { grown: false, points: 0 };
+    var reflowed = "failed";
+    try {
+        grown = CsTrace.growCurve(doc, di, this.growId, this.spinePts,
+            join, group);
+        if (grown.grown) {
+            // decorate() re-reads the spine's geometry, rebuilds the
+            // ornament along the WHOLE line and restamps the signature.
+            reflowed = CsShapeLine.decorate(doc, di,
+                doc.queryEntity(this.growId), group);
+        }
+    } finally {
+        if (hadListener) {
+            ShapedLinesListener.busy = false;
+        }
+    }
+    if (!grown.grown) {
+        return false;
+    }
+    if (reflowed === "failed") {
+        // The spine grew and the ornament did not. Say so rather than
+        // leaving a longer ledge wearing the old line's hachures --
+        // Sync Shaped Lines is the repair.
+        EAction.handleUserMessage(qsTr("%1: the line was extended but its " +
+            "ornament could not be rebuilt -- run Sync Shaped Lines.")
+            .arg(spec.label));
+        return true;
+    }
+
+    EAction.handleUserMessage(qsTr("%1: extended -- %2 points, ornament " +
+        "rebuilt along the whole line").arg(spec.label).arg(grown.points));
+    return true;
 };
 
 ShapedLinesRun.init = function(basePath) {

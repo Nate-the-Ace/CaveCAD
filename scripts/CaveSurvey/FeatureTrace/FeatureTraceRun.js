@@ -80,15 +80,11 @@ FeatureTraceRun.baseLayer = function(doc) {
  */
 FeatureTraceRun.lastTrace = null;
 
-/** A drawing's identity for the purpose above. Unsaved drawings all
- *  answer "", which is correct: within one session there is only one
- *  of them, and the id check does the rest. */
+/** A drawing's identity for the purpose above. The body is in Core
+ *  because the shaped-line action remembers its last spine the same
+ *  way, and two spellings of "the same drawing" is one too many. */
 FeatureTraceRun.docKey = function(doc) {
-    try {
-        return String(doc.getFileName());
-    } catch (e) {
-        return "";
-    }
+    return CsTrace.docKey(doc);
 };
 
 /**

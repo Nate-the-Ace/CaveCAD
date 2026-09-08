@@ -54,6 +54,8 @@ include(includeBasePath + "/CsAll.js");
 includeBasePath = repoRoot + "/scripts/CaveSurvey/FeatureTrace";
 include(includeBasePath + "/FeatureTraceRun.js");
 include(includeBasePath + "/FeatureTrace.js");
+includeBasePath = repoRoot + "/scripts/CaveSurvey/ShapedLines";
+include(includeBasePath + "/ShapedLinesRun.js");
 
 var failures = [];
 var checks = 0;
@@ -235,6 +237,160 @@ trace(walk(320.2, 300, 340, 300, 20), true);
 eqs(on(CsLayers.WALLS_SURVEYED).length, beforeFallback + 1,
     "a stroke aimed at something that is not a traced curve still lands, " +
         "as its own line");
+
+// ---------------------------------------------------------------------
+// Shaped lines grow too -- spine AND ornament.
+// ---------------------------------------------------------------------
+//
+// A ledge traced in two passes is one ledge: one spine, one ShapeId,
+// and hachures regenerated along the whole of it rather than two sets
+// meeting in the middle. The side is inherited, never re-asked -- the
+// second stroke does not even reach the side pick.
+
+function shaped(styleKey, pts, shift) {
+    var a = {
+        styleKey: styleKey,
+        getDocument: function() { return doc; },
+        getDocumentInterface: function() { return di; },
+        samples: pts,
+        spinePts: null, spineClosed: false, side: 1, pathFrame: null,
+        region: null, bays: [], growId: null,
+        extendForced: (shift === true),
+        refreshFrames: ShapedLinesRun.prototype.refreshFrames,
+        prepare: ShapedLinesRun.prototype.prepare,
+        buildSpine: ShapedLinesRun.prototype.buildSpine,
+        extendTarget: ShapedLinesRun.prototype.extendTarget,
+        growExisting: ShapedLinesRun.prototype.growExisting,
+        commit: ShapedLinesRun.prototype.commit
+    };
+    a.refreshFrames();
+    if (!a.prepare()) {
+        return null;
+    }
+    // What mouseReleaseEvent does: an extension commits at the release
+    // and never enters the side pick.
+    a.growId = a.extendTarget();
+    a.commit();
+    return a;
+}
+
+var ledgeSpec = CsShapeLine.STYLES.floorledge;
+var ledgeLayer = CsShapeLine.layersFor(ledgeSpec, "plan").spine;
+var decorLayer = CsShapeLine.layersFor(ledgeSpec, "plan").decor;
+
+shaped("floorledge", walk(500, 500, 520, 500, 20));
+// spines() answers {entity, id} pairs, not entities.
+var spines = CsShapeLine.spines(doc);
+eqs(spines.length, 1, "the first ledge stroke drew one spine");
+var shapeId = spines[0].id;
+ok(shapeId !== "", "and it carries a ShapeId");
+var decorFirst = CsShapeLine.decorOf(doc, shapeId).length;
+ok(decorFirst > 0, "with ornament along it");
+// Force the side to the NON-default one, so "the side is inherited"
+// is a claim about this feature's own side rather than about the value
+// a fresh draw would have picked anyway.
+var sideSpine = spines[0].entity;
+CsTags.set(sideSpine, CsShapeLine.KEY.SIDE, "-1");
+var sideOp = new RModifyObjectsOperation();
+sideOp.addObject(sideSpine, false);
+di.applyOperation(sideOp);
+var sideFirst = CsTags.get(CsShapeLine.spineOf(doc, shapeId),
+    CsShapeLine.KEY.SIDE);
+eqs(sideFirst, "-1", "fixture: the ledge's ornament is on the far side");
+
+shaped("floorledge", walk(520.2, 500, 545, 500, 25));
+eqs(CsShapeLine.spines(doc).length, 1,
+    "the second ledge stroke GREW the ledge rather than drawing a second");
+var grownSpine = CsShapeLine.spineOf(doc, shapeId);
+ok(!isNull(grownSpine),
+    "the same ShapeId still names it -- the feature kept its identity");
+var decorAfter = CsShapeLine.decorOf(doc, shapeId).length;
+ok(decorAfter > decorFirst,
+    "the ornament was rebuilt along the WHOLE line (was " + decorFirst +
+        ", now " + decorAfter + ")");
+eqs(CsTags.get(grownSpine, CsShapeLine.KEY.SIDE), sideFirst,
+    "and the side is inherited, not asked again -- a ledge cannot end " +
+        "up hachured on both sides of itself");
+
+// The rebuild REPLACES the old ornament rather than adding to it: a
+// stale tick left behind would sit on the map for ever, belonging to a
+// shape the spine no longer has.
+var rebuilt = CsShapeLine.buildDecor(doc, grownSpine);
+eqs(decorAfter, rebuilt.count,
+    "no stale ornament survived the regrowth");
+eqs(String(CsTags.get(grownSpine, CsShapeLine.KEY.SIG)), String(rebuilt.sig),
+    "and the signature stamp matches the geometry it was built from");
+
+// A DIFFERENT STYLE IS A DIFFERENT FEATURE. Flowstone starting where
+// the ledge stopped is flowstone, not more ledge -- WITH SHIFT HELD,
+// which is the path where the style has to be checked entity by
+// entity. (Without Shift the "my own last stroke" rule alone refuses
+// it, so an unshifted stroke would not test this at all.)
+shaped("flowstone", walk(545.2, 500, 560, 500, 15), true);
+eqs(CsShapeLine.spines(doc).length, 2,
+    "Shift or no Shift, a flowstone stroke at a ledge's end draws " +
+        "flowstone -- ornament is what makes them different features");
+
+// And the case the LAYER check cannot catch: flowstone, rimstone and
+// slope all keep their spines on the same CTRL-SHAPE-SPINE layer, so
+// only the style tells them apart. A rimstone dam starting at the
+// flowstone's end is a rimstone dam.
+shaped("rimstone", walk(560.2, 500, 575, 500, 15), true);
+eqs(CsShapeLine.spines(doc).length, 3,
+    "a rimstone stroke at a flowstone's end is its own feature, though " +
+        "the two share a spine layer");
+
+// A PIT HAS NO ENDS. Its spine is a closed loop and its hachures point
+// inward by definition, so it never joins anything.
+shaped("pit", [ { x: 600, y: 600 }, { x: 610, y: 600 },
+    { x: 610, y: 610 }, { x: 600, y: 610 }, { x: 600.2, y: 600.2 } ]);
+var pitCount = CsShapeLine.spines(doc).length;
+eqs(pitCount, 4, "the pit drew its own closed feature");
+shaped("pit", [ { x: 600, y: 600 }, { x: 590, y: 600 },
+    { x: 590, y: 590 }, { x: 600, y: 590 }, { x: 600.2, y: 600.2 } ], true);
+eqs(CsShapeLine.spines(doc).length, 5,
+    "and a second pit at its corner is a second pit, even with Shift " +
+        "held -- a closed loop has no end to carry on from");
+
+// Shift widens it to a ledge the caver did not just draw: the first one
+// again, whose far end is at x=500.
+var decorBeforeShift = CsShapeLine.decorOf(doc, shapeId).length;
+shaped("floorledge", walk(499.8, 500, 480, 500, 20), true);
+eqs(CsShapeLine.spineOf(doc, shapeId) === null, false,
+    "Shift continued the earlier ledge");
+ok(CsShapeLine.decorOf(doc, shapeId).length > decorBeforeShift,
+    "and its ornament grew with it");
+
+// NEVER ACROSS LAYERS, which for shaped lines means never across
+// frames or BANDS. Two profile bands sit as little as a foot apart on
+// the sheet, so band A's ledge and band B's can have ends within reach
+// of one another -- and joining them would file one band's linework
+// under another, which is exactly what a revision then moves to the
+// wrong place. Synthesised by moving a spine to the profile twin
+// layer: cheaper than laying out two bands, and it tests the same rule.
+var strayEntity = null;
+var strayList = CsShapeLine.spines(doc);
+for (i = 0; i < strayList.length; i++) {
+    if (CsTags.get(strayList[i].entity, CsShapeLine.KEY.STYLE) ===
+            "floorledge") {
+        strayEntity = strayList[i].entity;
+    }
+}
+ok(!isNull(strayEntity), "fixture: there is a ledge to move");
+var profileLedge = CsShapeLine.layersFor(ledgeSpec, "profile").spine;
+CsLayers.ensure(doc, di, profileLedge);
+var strayEnd = strayEntity.getEndPoint();
+strayEntity.setLayerId(doc.getLayerId(profileLedge));
+var moveOp = new RModifyObjectsOperation();
+moveOp.addObject(strayEntity, false);
+di.applyOperation(moveOp);
+var beforeStray = CsShapeLine.spines(doc).length;
+shaped("floorledge", walk(strayEnd.x + 0.2, strayEnd.y,
+    strayEnd.x + 20, strayEnd.y, 20), true);
+eqs(CsShapeLine.spines(doc).length, beforeStray + 1,
+    "a plan ledge does not continue a ledge on the profile twin layer, " +
+        "even with Shift held -- band A's linework stays band A's");
+
 
 // ---------------------------------------------------------------------
 // The caver is told which happened.

@@ -489,7 +489,7 @@ fi
 
 echo
 echo "=============================================================="
-echo " 27/27 One wall traced in three passes is one line (inside CaveCAD's own script engine)"
+echo " 27/27 Traced and shaped lines grow instead of piling up (inside CaveCAD's own script engine)"
 echo "=============================================================="
 if [ -e "$QCAD" ]; then
     output=$("$QCAD" -no-dock-icon -no-gui -allow-multiple-instances \
