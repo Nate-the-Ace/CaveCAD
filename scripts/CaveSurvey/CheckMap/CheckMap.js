@@ -212,11 +212,12 @@ CheckMap.setSelectedIgnored = function(on) {
     if (isNull(w) || finding === null) {
         return;
     }
-    w.ignored = CsCheck.setIgnored(w.ignored, finding.code, on);
+    w.ignored = CsCheck.setIgnored(w.ignored, finding.id, on);
     CheckMap.saveIgnored(w.path, w.ignored);
     EAction.handleUserMessage(on ?
-        ("Check Map: ignoring \"" + finding.title + "\" on this map. " +
-            "Right-click and Show Ignored to bring it back.") :
+        ("Check Map: ignoring \"" + finding.title + "\" -- this one " +
+            "finding, not others like it. Right-click and Show Ignored " +
+            "to bring it back.") :
         ("Check Map: no longer ignoring \"" + finding.title + "\"."));
     CheckMap.refresh();
 };
@@ -227,7 +228,7 @@ CheckMap.showListMenu = function() {
     var finding = CheckMap.selected();
     var menu = new QMenu(w.list);
 
-    var already = finding !== null && w.ignored[finding.code] === true;
+    var already = finding !== null && w.ignored[finding.id] === true;
     var ignoreAct = menu.addAction(already ?
         qsTr("Stop Ignoring This") : qsTr("Ignore This"));
     ignoreAct.enabled = (finding !== null) && (String(w.path) !== "");
@@ -310,7 +311,7 @@ CheckMap.refresh = function() {
     for (var i = 0; i < w.findings.length; i++) {
         w.list.setItem(i, 0, new QTableWidgetItem(
             CheckMap.rowText(w.findings[i],
-                w.ignored[w.findings[i].code] === true)));
+                w.ignored[w.findings[i].id] === true)));
     }
     var shownResult = { findings: split.shown, failed: result.failed,
         checked: result.checked,
@@ -353,7 +354,7 @@ CheckMap.showSelected = function() {
     if (finding.layer !== "") {
         text += "\n\nLayer: " + finding.layer;
     }
-    if (w.ignored[finding.code] === true) {
+    if (w.ignored[finding.id] === true) {
         text += "\n\n" + qsTr("Ignored on this map. Right-click for " +
             "Stop Ignoring This.");
     }

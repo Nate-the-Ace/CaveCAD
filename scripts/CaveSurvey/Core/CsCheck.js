@@ -91,17 +91,177 @@ CsCheck.LABEL = {
     "warning": "Probably not what you meant",
     "note": "Polish"
 };
+/**
+ * WHY EACH FAULT MATTERS. One paragraph per CODE, because the reason
+ * is a property of the KIND of fault -- a beginner needs the same
+ * explanation of what a scale bar is for whether the sheet is missing
+ * one or eight walls have gaps.
+ *
+ * The TITLE is per finding and is built where the finding is made:
+ * that half says which one this is.
+ */
+CsCheck.WHY = {
+    "sheet.scalebar":
+        "Without one, nothing on the map can be measured -- a reader " +
+        "cannot tell a 20 ft crawl from a 200 ft passage. A printed " +
+        "map is resized by every photocopier it meets, which is why " +
+        "the bar is drawn on the sheet rather than written as '1 inch " +
+        "= 50 feet'.",
+    "sheet.north":
+        "A cave map without one cannot be lined up with a compass, a " +
+        "surface map or the next cave over. Say WHICH north it is -- " +
+        "true or magnetic, with the declination used -- because a " +
+        "reader who assumes the wrong one is out by degrees.",
+    "sheet.titleblock":
+        "A map nobody can attribute or date is a map nobody can " +
+        "check, correct or build on. Who surveyed it and when is what " +
+        "lets the next party tell your work from theirs -- and it is " +
+        "the credit the people who carried the tape are owed.",
+    "sheet.legend":
+        "You know what every mark means today. A reader does not, and " +
+        "neither will you in five years. Build Legend generates one " +
+        "from the symbols this map actually uses, so it can never " +
+        "explain a symbol the map does not have.",
+    "layer.symbol":
+        "Layers are how a cave map is read, printed and switched off: " +
+        "a stalactite sitting on the water layer turns blue with the " +
+        "streams and vanishes when someone hides them. Placing a " +
+        "symbol from the Symbol Palette puts it on its own layer " +
+        "every time -- this happens when one is copied, or dragged " +
+        "from another drawing.",
+    "layer.stray":
+        "Everything the suite draws goes on a named layer, and the " +
+        "layer decides how it prints and whether Restyle Layers can " +
+        "reach it. Work on layer 0 -- what CAD gives you when nothing " +
+        "is chosen -- is invisible to every tool here and will not " +
+        "restyle, plot or export with the rest of the map.",
+    "layer.hidden":
+        "Work on a hidden layer is still in the drawing and still in " +
+        "the file -- it just does not print, and you cannot see that " +
+        "it is missing. This is worth a look before plotting: either " +
+        "it belongs on the map, or it should be deleted rather than " +
+        "left where the next person will find it.",
+    "walls.gap":
+        "A wall that stops just short of the next one leaves a hole " +
+        "the reader's eye falls through, and any tool that fills or " +
+        "measures an area will leak out of it. Continue the stroke " +
+        "instead: a trace that carries on from an existing end GROWS " +
+        "that line rather than starting a second one.",
+    "walls.orphan":
+        "Cave maps are drawn ON the survey: every wall is traced " +
+        "beside the stations that measured it. Linework this far from " +
+        "any station is either remembered rather than surveyed -- in " +
+        "which case it belongs on Inferred Walls, dashed, so the map " +
+        "says so -- or it was drawn in the wrong place entirely.",
+    "boundary.open":
+        "Scatter Breakdown fills CLOSED boundaries and skips open " +
+        "ones without complaining, so an open outline is a rubble " +
+        "field that silently never gets its blocks. Close the loop " +
+        "back onto its own start.",
+    "section.untied":
+        "A section is a statement about ONE place in the cave. With " +
+        "nothing tying it to a station, a reader cannot tell where " +
+        "the cut was taken, and a revision cannot move it when that " +
+        "part of the cave is resurveyed.",
+    "shape.stale":
+        "The hachures and scallops are generated along the line and " +
+        "normally follow it. One that has drifted usually means the " +
+        "line was edited while the suite was not watching -- Sync " +
+        "Shaped Lines rebuilds them.",
+    "ledge.uphill":
+        "Hachures go on the LOW side -- the side you would fall to. " +
+        "The floor levels nearest this one say the ornamented side is " +
+        "the HIGHER one, which reads as a drop going up. Worth " +
+        "looking at rather than trusting: this is judged from the " +
+        "nearest stations, not measured. Flip Shaped Side mirrors it.",
+    "survey.closure":
+        "A loop that comes back to its start off by this much has a " +
+        "reading in it that is wrong, and every wall traced off those " +
+        "stations inherits the error. Survey Notebook flags the " +
+        "suspect shots; fixing one bad backsight is worth more than " +
+        "any amount of redrawing.",
+    "check.more":
+        "The list is capped so it stays a list rather than a wall of " +
+        "text. Fix some of these and press Check Again -- the rest " +
+        "will appear. Ignoring this row hides only the count, never " +
+        "the findings themselves."
+};
+
+/**
+ * ONE FINDING'S IDENTITY, and the reason ignoring works per entry.
+ *
+ * NOT the code. Ignoring by code would mean that deciding one wall gap
+ * is deliberate silences every other gap on the map, including ones
+ * drawn tomorrow -- the exact fault of a checker that gets switched
+ * off wholesale, moved one level down.
+ *
+ * The identity is the code plus WHERE the fault is: the position
+ * rounded to the foot, or the layer for a fault that belongs to a
+ * layer rather than a point, or nothing at all for a sheet-wide fault
+ * (of which there is only ever one).
+ *
+ * ROUNDED TO THE FOOT, deliberately. Re-checking after moving anything
+ * else must give the same identity, or every ignore would evaporate on
+ * the next Check Again; and a fault that MOVES more than a foot really
+ * is a different fault, so it comes back and asks again. That is the
+ * honest trade, and it is the one place ignoring can surprise someone.
+ */
+CsCheck.idOf = function(code, at, layer) {
+    if (!isNull(at)) {
+        // COLON, NOT COMMA, between the coordinates: the ignore list is
+        // stored comma-separated, and an id holding a comma was split
+        // in half on the way back out -- so ignoring one gap ignored
+        // nothing at all. Caught by the unit test for exactly that.
+        return code + "@" + Math.round(at.x) + ":" + Math.round(at.y);
+    }
+    if (!isNull(layer) && layer !== "") {
+        return code + "@" + layer;
+    }
+    return code;
+};
 
 CsCheck.finding = function(code, severity, title, why, count, at, layer) {
+    var place = (at === undefined) ? null : at;
+    var on = (layer === undefined || layer === null) ? "" : layer;
     return {
         code: code,
+        // What the ignore list stores. One entry, not one kind.
+        id: CsCheck.idOf(code, place, on),
         severity: severity,
         title: title,
-        why: why,
+        why: isNull(why) ? (CsCheck.WHY[code] || "") : why,
         count: (count === undefined || count === null) ? 1 : count,
-        at: (at === undefined) ? null : at,
-        layer: (layer === undefined || layer === null) ? "" : layer
+        at: place,
+        layer: on
     };
+};
+
+/** Distances a caver reads: "3 ft", "74 ft". */
+CsCheck.feet = function(value) {
+    return Math.round(value) + " ft";
+};
+
+/**
+ * Caps one check's findings, adding a row that says how many were left
+ * out.
+ *
+ * A map with two hundred faults of one kind is a map whose panel would
+ * be unusable, and scrolling past 200 identical rows to reach the next
+ * KIND of fault is how a caver stops reading the list. The overflow row
+ * carries no place -- it is about the list, not about the cave.
+ */
+CsCheck.MAX_PER_CHECK = 40;
+
+CsCheck.capped = function(code, findings) {
+    if (findings.length <= CsCheck.MAX_PER_CHECK) {
+        return findings;
+    }
+    var out = findings.slice(0, CsCheck.MAX_PER_CHECK);
+    var rest = findings.length - CsCheck.MAX_PER_CHECK;
+    out.push(CsCheck.finding("check.more", findings[0].severity,
+        "and " + rest + " more like the " + CsCheck.MAX_PER_CHECK +
+            " above", null, rest, null, code));
+    return out;
 };
 
 // ---------------------------------------------------------------------
@@ -109,9 +269,20 @@ CsCheck.finding = function(code, severity, title, why, count, at, layer) {
 // empty when there is nothing to say, which is the ordinary case on a
 // finished map.
 //
-// One check, one fault, one entry in CsCheck.CHECKS. Adding a check is
-// adding a function and a row; nothing else in the file knows how many
-// there are.
+// ONE ROW PER FAULT, not one row per kind (Nathan, 2026-09-10: "do not
+// hide by kind, hide individual entries"). Eight wall gaps are eight
+// findings, each with its own place and its own ignore, so deciding
+// that the gap at the entrance is deliberate says nothing about the
+// seven others.
+//
+// The one deliberate exception is layer.stray, which is one row per
+// LAYER rather than one per entity: 232 identical rows saying "a line
+// on layer 0" is not a list, and "everything I left on layer 0" is the
+// decision a caver actually makes. Every other check is per occurrence.
+//
+// One check, one entry in CsCheck.CHECKS. Adding a check is adding a
+// function and a row; nothing else in the file knows how many there
+// are.
 // ---------------------------------------------------------------------
 
 /** A sheet with no scale bar is a picture, not a map. */
@@ -120,13 +291,7 @@ CsCheck.checkScaleBar = function(scan) {
         return [];
     }
     return [CsCheck.finding("sheet.scalebar", "error",
-        "No scale bar on the sheet",
-        "Without one, nothing on the map can be measured -- a reader " +
-        "cannot tell a 20 ft crawl from a 200 ft passage. A printed " +
-        "map is resized by every photocopier it meets, which is why " +
-        "the bar is drawn on the sheet rather than written as '1 inch " +
-        "= 50 feet'.",
-        1, null, "SCALE-BAR")];
+        "No scale bar on the sheet", null, 1, null, "SCALE-BAR")];
 };
 
 /** And no north arrow is a map that cannot be walked with. */
@@ -135,34 +300,29 @@ CsCheck.checkNorthArrow = function(scan) {
         return [];
     }
     return [CsCheck.finding("sheet.north", "error",
-        "No north arrow on the sheet",
-        "A cave map without one cannot be lined up with a compass, a " +
-        "surface map or the next cave over. Say WHICH north it is -- " +
-        "true or magnetic, with the declination used -- because a " +
-        "reader who assumes the wrong one is out by degrees.",
-        1, null, "NORTH-ARROW")];
+        "No north arrow on the sheet", null, 1, null, "NORTH-ARROW")];
 };
 
-/** The title block fields a judged map is required to carry. */
+/**
+ * The title block fields a judged map is required to carry.
+ *
+ * ONE ROW PER FIELD. They are filled in one at a time and a caver may
+ * genuinely not have one of them -- a sketch with no cartographer yet
+ * -- so each is its own decision, and a single row would make ignoring
+ * the missing date also ignore the missing cave name.
+ */
 CsCheck.checkTitleBlock = function(scan) {
-    var missing = [];
+    var out = [];
     for (var i = 0; i < scan.requiredFields.length; i++) {
         var field = scan.requiredFields[i];
         var value = scan.titleBlock[field.id];
         if (isNull(value) || String(value).replace(/\s/g, "") === "") {
-            missing.push(field.label);
+            out.push(CsCheck.finding("sheet.titleblock", "error",
+                "The title block does not say: " + field.label,
+                null, 1, null, "TITLE-BLOCK:" + field.id));
         }
     }
-    if (missing.length === 0) {
-        return [];
-    }
-    return [CsCheck.finding("sheet.titleblock", "error",
-        "The title block does not say: " + missing.join(", "),
-        "A map nobody can attribute or date is a map nobody can " +
-        "check, correct or build on. Who surveyed it and when is what " +
-        "lets the next party tell your work from theirs -- and it is " +
-        "the credit the people who carried the tape are owed.",
-        missing.length, null, "TITLE-BLOCK")];
+    return out;
 };
 
 /** Symbols on the map and no legend explaining them. */
@@ -172,83 +332,62 @@ CsCheck.checkLegend = function(scan) {
     }
     return [CsCheck.finding("sheet.legend", "warning",
         "Symbols are used but there is no legend",
-        "You know what every mark means today. A reader does not, and " +
-        "neither will you in five years. Build Legend generates one " +
-        "from the symbols this map actually uses, so it can never " +
-        "explain a symbol the map does not have.",
-        scan.symbolCount, null, "LEGEND")];
+        null, scan.symbolCount, null, "LEGEND")];
 };
 
-/** A symbol placed on a layer that is not its own. */
+/** A symbol placed on a layer that is not its own -- one row each. */
 CsCheck.checkSymbolLayers = function(scan) {
-    var wrong = [];
+    var out = [];
     for (var i = 0; i < scan.symbols.length; i++) {
         var sym = scan.symbols[i];
         if (sym.atHome !== false) {
             continue;
         }
-        wrong.push(sym);
+        var name = isNull(sym.name) || sym.name === "" ? sym.block : sym.name;
+        out.push(CsCheck.finding("layer.symbol", "error",
+            "A " + name + " is on " + sym.layer + ", not " + sym.home,
+            null, 1, sym.at, sym.layer));
     }
-    if (wrong.length === 0) {
-        return [];
-    }
-    return [CsCheck.finding("layer.symbol", "error",
-        wrong.length + " symbol" + (wrong.length === 1 ? " is" : "s are") +
-            " on the wrong layer",
-        "Layers are how a cave map is read, printed and switched off: " +
-        "a stalactite sitting on the water layer turns blue with the " +
-        "streams and vanishes when someone hides them. Placing a " +
-        "symbol from the Symbol Palette puts it on its own layer " +
-        "every time -- this happens when one is copied, or dragged " +
-        "from another drawing.",
-        wrong.length, wrong[0].at, wrong[0].layer)];
+    return CsCheck.capped("layer.symbol", out);
 };
 
-/** Drawing on layer 0, or on a layer the suite does not know. */
+/**
+ * Drawing on layer 0, or on a layer the suite does not know.
+ *
+ * PER LAYER, not per entity -- see the note at the top of this section.
+ */
 CsCheck.checkStrayLayers = function(scan) {
     var strays = {};
-    var first = null;
-    var total = 0;
+    var where = {};
+    var order = [];
     for (var i = 0; i < scan.entities.length; i++) {
         var e = scan.entities[i];
         if (e.registered === true) {
             continue;
         }
-        strays[e.layer] = (strays[e.layer] || 0) + 1;
-        total += 1;
-        if (first === null) {
-            first = e;
+        if (!strays.hasOwnProperty(e.layer)) {
+            strays[e.layer] = 0;
+            where[e.layer] = e.at;
+            order.push(e.layer);
+        }
+        strays[e.layer] += 1;
+        if (isNull(where[e.layer])) {
+            where[e.layer] = e.at;
         }
     }
-    if (total === 0) {
-        return [];
+    var out = [];
+    for (var n = 0; n < order.length; n++) {
+        var layer = order[n];
+        var count = strays[layer];
+        out.push(CsCheck.finding("layer.stray", "warning",
+            count + " thing" + (count === 1 ? "" : "s") + " drawn on " +
+                (layer === "0" ? "0 (the default layer)" : layer),
+            null, count, where[layer], layer));
     }
-    var names = [];
-    for (var name in strays) {
-        if (strays.hasOwnProperty(name)) {
-            names.push(name === "0" ? "0 (the default layer)" : name);
-        }
-    }
-    // NAMED, NOT LISTED. The first live run against a real cave put 48
-    // layer names in one row and the row could not be read. Three, then
-    // a count: the panel says what kind of fault it is, and Show Me
-    // takes you to an example.
-    var shown = names.slice(0, 3).join(", ");
-    if (names.length > 3) {
-        shown += " and " + (names.length - 3) + " more";
-    }
-    return [CsCheck.finding("layer.stray", "warning",
-        total + " thing" + (total === 1 ? "" : "s") + " drawn on " +
-            shown,
-        "Everything the suite draws goes on a named layer, and the " +
-        "layer decides how it prints and whether Restyle Layers can " +
-        "reach it. Work on layer 0 -- what CAD gives you when nothing " +
-        "is chosen -- is invisible to every tool here and will not " +
-        "restyle, plot or export with the rest of the map.",
-        total, first.at, first.layer)];
+    return CsCheck.capped("layer.stray", out);
 };
 
-/** Content on a layer that is switched off or frozen. */
+/** Content on a layer that is switched off or frozen -- one row each. */
 CsCheck.checkHiddenContent = function(scan) {
     var out = [];
     for (var i = 0; i < scan.layers.length; i++) {
@@ -259,23 +398,25 @@ CsCheck.checkHiddenContent = function(scan) {
         out.push(CsCheck.finding("layer.hidden", "warning",
             lay.count + " thing" + (lay.count === 1 ? "" : "s") +
                 " on " + lay.name + ", which is switched off",
-            "Work on a hidden layer is still in the drawing and still " +
-            "in the file -- it just does not print, and you cannot see " +
-            "that it is missing. This is worth a look before plotting: " +
-            "either it belongs on the map, or it should be deleted " +
-            "rather than left where the next person will find it.",
-            lay.count, null, lay.name));
+            null, lay.count, null, lay.name));
     }
-    return out;
+    return CsCheck.capped("layer.hidden", out);
 };
 
-/** Wall ends that nearly meet -- and the ones that truly do not are
- *  left alone, because a passage that carries on is not a fault. */
+/**
+ * Wall ends that nearly meet -- one row per HOLE.
+ *
+ * A gap is seen from both its ends. Reporting it twice would ask a
+ * caver to ignore the same hole twice, so the end that reports it is
+ * the one nearer the drawing origin -- an arbitrary rule, but a stable
+ * one, which is what matters when the identity has to survive a
+ * re-check.
+ */
 CsCheck.checkWallGaps = function(scan) {
     var ends = scan.wallEnds;
-    var gaps = [];
+    var out = [];
     for (var i = 0; i < ends.length; i++) {
-        var nearest = null;
+        var nearest = null, partner = null;
         for (var j = 0; j < ends.length; j++) {
             if (i === j || ends[i].entity === ends[j].entity) {
                 continue;
@@ -283,152 +424,111 @@ CsCheck.checkWallGaps = function(scan) {
             var d = CsCheck.distance(ends[i].at, ends[j].at);
             if (nearest === null || d < nearest) {
                 nearest = d;
+                partner = ends[j];
             }
+        }
+        if (nearest === null) {
+            continue;
         }
         // The ends are in DRAWING units (they are drawing coordinates,
         // and Show Me needs them that way); the thresholds are in feet,
         // so the comparison happens in feet.
         var feet = nearest / scan.perFoot;
-        if (feet <= CsCheck.GAP_JOINED_FEET) {
+        if (feet <= CsCheck.GAP_JOINED_FEET || feet > CsCheck.GAP_NOTICE_FEET) {
             continue;
         }
-        if (feet <= CsCheck.GAP_NOTICE_FEET) {
-            gaps.push({ at: ends[i].at, layer: ends[i].layer, gap: feet });
+        // Only the end nearer the origin speaks for the hole.
+        var mine = ends[i].at.x * ends[i].at.x + ends[i].at.y * ends[i].at.y;
+        var theirs = partner.at.x * partner.at.x + partner.at.y * partner.at.y;
+        if (theirs < mine) {
+            continue;
         }
+        out.push(CsCheck.finding("walls.gap", "warning",
+            "Two wall lines stop " + CsCheck.feet(feet) + " apart",
+            null, 1, ends[i].at, ends[i].layer));
     }
-    if (gaps.length === 0) {
-        return [];
-    }
-    // Each gap is seen from BOTH its ends, so the count is halved --
-    // reporting "8 gaps" for four holes in the wall would teach a
-    // student to distrust the number.
-    var count = Math.max(1, Math.round(gaps.length / 2));
-    return [CsCheck.finding("walls.gap", "warning",
-        count + " place" + (count === 1 ? "" : "s") +
-            " where two wall lines nearly meet but do not",
-        "A wall that stops just short of the next one leaves a hole " +
-        "the reader's eye falls through, and any tool that fills or " +
-        "measures an area will leak out of it. Continue the stroke " +
-        "instead: a trace that carries on from an existing end GROWS " +
-        "that line rather than starting a second one.",
-        count, gaps[0].at, gaps[0].layer)];
+    return CsCheck.capped("walls.gap", out);
 };
 
-/** Linework drawn where no survey reached. */
+/** Linework drawn where no survey reached -- one row per line. */
 CsCheck.checkOrphanLinework = function(scan) {
-    var far = [];
+    var out = [];
     for (var i = 0; i < scan.linework.length; i++) {
         var item = scan.linework[i];
-        if (item.nearestStation === null ||
-                item.nearestStation > CsCheck.ORPHAN_FEET) {
-            far.push(item);
+        if (item.nearestStation !== null &&
+                item.nearestStation <= CsCheck.ORPHAN_FEET) {
+            continue;
         }
+        out.push(CsCheck.finding("walls.orphan", "warning",
+            item.nearestStation === null ?
+                ("A line on " + item.layer + " with no station anywhere " +
+                    "in the drawing") :
+                ("A line on " + item.layer + " is " +
+                    CsCheck.feet(item.nearestStation) +
+                    " from the nearest station"),
+            null, 1, item.at, item.layer));
     }
-    if (far.length === 0) {
-        return [];
-    }
-    return [CsCheck.finding("walls.orphan", "warning",
-        far.length + " line" + (far.length === 1 ? "" : "s") +
-            " drawn well away from any station",
-        "Cave maps are drawn ON the survey: every wall is traced " +
-        "beside the stations that measured it. Linework this far from " +
-        "any station is either remembered rather than surveyed -- in " +
-        "which case it belongs on Inferred Walls, dashed, so the map " +
-        "says so -- or it was drawn in the wrong place entirely.",
-        far.length, far[0].at, far[0].layer)];
+    return CsCheck.capped("walls.orphan", out);
 };
 
-/** A breakdown boundary left open. */
+/** A breakdown boundary left open -- one row each. */
 CsCheck.checkOpenBoundaries = function(scan) {
-    var open = [];
+    var out = [];
     for (var i = 0; i < scan.boundaries.length; i++) {
-        if (scan.boundaries[i].closed !== true) {
-            open.push(scan.boundaries[i]);
+        if (scan.boundaries[i].closed === true) {
+            continue;
         }
+        out.push(CsCheck.finding("boundary.open", "warning",
+            "A breakdown boundary is not closed",
+            null, 1, scan.boundaries[i].at, scan.boundaries[i].layer));
     }
-    if (open.length === 0) {
-        return [];
-    }
-    return [CsCheck.finding("boundary.open", "warning",
-        open.length + " breakdown boundar" +
-            (open.length === 1 ? "y is" : "ies are") + " not closed",
-        "Scatter Breakdown fills CLOSED boundaries and skips open " +
-        "ones without complaining, so an open outline is a rubble " +
-        "field that silently never gets its blocks. Close the loop " +
-        "back onto its own start.",
-        open.length, open[0].at, open[0].layer)];
+    return CsCheck.capped("boundary.open", out);
 };
 
-/** A cross section nobody can find on the plan. */
+/** A cross section nobody can find on the plan -- one row each. */
 CsCheck.checkSectionTies = function(scan) {
-    var loose = [];
+    var out = [];
     for (var i = 0; i < scan.sections.length; i++) {
-        if (scan.sections[i].station === "") {
-            loose.push(scan.sections[i]);
+        if (scan.sections[i].station !== "") {
+            continue;
         }
+        out.push(CsCheck.finding("section.untied", "warning",
+            "A cross section is tied to no station",
+            null, 1, scan.sections[i].at, scan.sections[i].layer));
     }
-    if (loose.length === 0) {
-        return [];
-    }
-    return [CsCheck.finding("section.untied", "warning",
-        loose.length + " cross section" + (loose.length === 1 ? "" : "s") +
-            " with no station",
-        "A section is a statement about ONE place in the cave. With " +
-        "nothing tying it to a station, a reader cannot tell where " +
-        "the cut was taken, and a revision cannot move it when that " +
-        "part of the cave is resurveyed.",
-        loose.length, loose[0].at, loose[0].layer)];
+    return CsCheck.capped("section.untied", out);
 };
 
 /** A shaped line whose ornament no longer matches its spine. */
 CsCheck.checkStaleShapes = function(scan) {
-    var stale = [];
+    var out = [];
     for (var i = 0; i < scan.shapes.length; i++) {
-        if (scan.shapes[i].inSync !== true) {
-            stale.push(scan.shapes[i]);
+        if (scan.shapes[i].inSync === true) {
+            continue;
         }
+        out.push(CsCheck.finding("shape.stale", "note",
+            "A shaped line's ornament is out of step with its line",
+            null, 1, scan.shapes[i].at, scan.shapes[i].layer));
     }
-    if (stale.length === 0) {
-        return [];
-    }
-    return [CsCheck.finding("shape.stale", "note",
-        stale.length + " shaped line" + (stale.length === 1 ? "" : "s") +
-            " whose ornament is out of step with its line",
-        "The hachures and scallops are generated along the line and " +
-        "normally follow it. One that has drifted usually means the " +
-        "line was edited while the suite was not watching -- Sync " +
-        "Shaped Lines rebuilds them.",
-        stale.length, stale[0].at, stale[0].layer)];
+    return CsCheck.capped("shape.stale", out);
 };
 
 /** A ledge whose hachures point at the HIGH side. */
 CsCheck.checkLedgeSides = function(scan) {
-    var wrong = [];
+    var out = [];
     for (var i = 0; i < scan.ledges.length; i++) {
         var ledge = scan.ledges[i];
-        if (ledge.drop === null || !isFinite(ledge.drop)) {
+        if (ledge.drop === null || !isFinite(ledge.drop) ||
+                ledge.drop <= CsCheck.LEDGE_DROP_FEET) {
             continue;
         }
-        // Positive drop = the ornament side is HIGHER than the other,
-        // which is the ledge drawn backwards. Only past the threshold:
-        // floor levels read off neighbouring stations are not precise
-        // enough to argue over a foot.
-        if (ledge.drop > CsCheck.LEDGE_DROP_FEET) {
-            wrong.push(ledge);
-        }
+        out.push(CsCheck.finding("ledge.uphill", "note",
+            "A ledge's hachures may be on the high side -- the " +
+                "ornamented side reads " + CsCheck.feet(ledge.drop) +
+                " higher",
+            null, 1, ledge.at, ledge.layer));
     }
-    if (wrong.length === 0) {
-        return [];
-    }
-    return [CsCheck.finding("ledge.uphill", "note",
-        wrong.length + " ledge" + (wrong.length === 1 ? "" : "s") +
-            " whose hachures may be on the wrong side",
-        "Hachures go on the LOW side -- the side you would fall to. " +
-        "The floor levels nearest these say the ornamented side is " +
-        "the HIGHER one, which reads as a drop going up. Worth " +
-        "looking at rather than trusting: this is judged from the " +
-        "nearest stations, not measured. Flip Shaped Side mirrors one.",
-        wrong.length, wrong[0].at, wrong[0].layer)];
+    return CsCheck.capped("ledge.uphill", out);
 };
 
 /** The loop closure, said in the drawing rather than in a stats box. */
@@ -441,12 +541,7 @@ CsCheck.checkClosure = function(scan) {
         "The survey closes at " + scan.closurePercent.toFixed(1) +
             "%, over the " + scan.closureLimit.toFixed(1) + "% worth " +
             "questioning",
-        "A loop that comes back to its start off by this much has a " +
-        "reading in it that is wrong, and every wall traced off those " +
-        "stations inherits the error. Survey Notebook flags the " +
-        "suspect shots; fixing one bad backsight is worth more than " +
-        "any amount of redrawing.",
-        1, null, "")];
+        null, 1, null, "")];
 };
 
 /**
@@ -509,7 +604,13 @@ CsCheck.review = function(scan) {
     findings.sort(function(a, b) {
         var d = CsCheck.ORDER.indexOf(a.severity) -
             CsCheck.ORDER.indexOf(b.severity);
-        return d !== 0 ? d : (a.code < b.code ? -1 : (a.code > b.code ? 1 : 0));
+        if (d !== 0) {
+            return d;
+        }
+        // By ID rather than by code: several findings now share a code,
+        // and rows that swap places between two runs would move an
+        // ignore under the caver's cursor.
+        return a.id < b.id ? -1 : (a.id > b.id ? 1 : 0);
     });
     return {
         findings: findings,
@@ -529,10 +630,16 @@ CsCheck.review = function(scan) {
 // that gets read once and then ignored wholesale -- which loses the
 // findings that did matter along with the ones that did not.
 //
-// BY CODE, PER DRAWING. The row a caver right-clicks is already an
-// aggregate ("2 things drawn on 0"), so ignoring the row means ignoring
-// that KIND of finding for this map -- which is also what makes the
-// decision survive the next Check Again, when the count has changed.
+// BY ENTRY, PER DRAWING. Ignoring hides the ONE finding right-clicked
+// and nothing else: deciding that the wall gap at the entrance is
+// deliberate says nothing about the seven other gaps on the map. What
+// is stored is the finding's id (CsCheck.idOf) -- its code and where it
+// is, rounded to the foot -- so the decision survives the next Check
+// Again, and a fault that has genuinely MOVED comes back and asks.
+//
+// It was by code for one commit, and that was wrong for exactly the
+// reason the whole feature exists: an ignore that silences a kind is
+// how the findings that mattered get lost with the ones that did not.
 //
 // The list is kept in SETTINGS rather than in the drawing, which is a
 // real trade: this tool promises to change nothing, and writing an
@@ -589,6 +696,12 @@ CsCheck.parseIgnored = function(text) {
     return set;
 };
 
+/** True when a code can survive the round trip through the stored
+ *  list. A comma would be split back out as two ids -- see idOf. */
+CsCheck.storableId = function(id) {
+    return !isNull(id) && String(id) !== "" && String(id).indexOf(",") === -1;
+};
+
 /** The set back as one storable string, in a stable order. */
 CsCheck.serializeIgnored = function(set) {
     var codes = [];
@@ -601,7 +714,8 @@ CsCheck.serializeIgnored = function(set) {
     return codes.join(",");
 };
 
-/** Turns one code's ignore on or off, answering the changed set. */
+/** Turns one FINDING's ignore on or off, answering the changed set.
+ *  Takes the finding's id -- see CsCheck.idOf. */
 CsCheck.setIgnored = function(set, code, on) {
     var out = {};
     for (var key in set) {
@@ -609,7 +723,7 @@ CsCheck.setIgnored = function(set, code, on) {
             out[key] = true;
         }
     }
-    if (on === true && !isNull(code) && String(code) !== "") {
+    if (on === true && CsCheck.storableId(code)) {
         out[String(code)] = true;
     }
     return out;
@@ -626,7 +740,8 @@ CsCheck.setIgnored = function(set, code, on) {
 CsCheck.splitIgnored = function(findings, set) {
     var shown = [], ignored = [];
     for (var i = 0; i < findings.length; i++) {
-        if (!isNull(set) && set[findings[i].code] === true) {
+        // BY ID, not by code: one entry, not one kind. See CsCheck.idOf.
+        if (!isNull(set) && set[findings[i].id] === true) {
             ignored.push(findings[i]);
         } else {
             shown.push(findings[i]);
@@ -991,6 +1106,10 @@ CsCheck.scan = function(doc) {
                     var pos = e.getPosition();
                     scan.symbols.push({
                         block: entry.block, layer: layer,
+                        // The NSS name, so a finding can say "A
+                        // stalactite is on WATER-FLOW-ARROWS" rather
+                        // than naming a block nobody has seen.
+                        name: entry.nss,
                         home: entry.layer,
                         atHome: CsCheck.symbolAtHome(layer, entry.layer),
                         at: { x: pos.x, y: pos.y }

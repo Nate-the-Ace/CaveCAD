@@ -197,16 +197,46 @@ has(result, "walls.orphan",
 has(result, "boundary.open",
     "an open polyline reports itself open (found: " + codesOf(result) + ")");
 
-// The counts have to be believable, not merely non-zero: a gap seen
-// from both its ends must still be ONE hole.
-for (var i = 0; i < result.findings.length; i++) {
-    if (result.findings[i].code === "walls.gap") {
-        eqs(result.findings[i].count, 1, "one gap is reported once");
+// ONE ROW PER FAULT, and the counts believable: a gap seen from both
+// its ends must still be ONE row, and every row must have its own id
+// or ignoring one would silence another.
+function countCode(res, code) {
+    var n = 0;
+    for (var i = 0; i < res.findings.length; i++) {
+        if (res.findings[i].code === code) {
+            n += 1;
+        }
     }
-    if (result.findings[i].code === "walls.orphan") {
-        eqs(result.findings[i].count, 1, "one orphan line is reported once");
-    }
+    return n;
 }
+eqs(countCode(result, "walls.gap"), 1,
+    "the one hole in the wall is one row, not one per end");
+eqs(countCode(result, "walls.orphan"), 1,
+    "the one line away from the survey is one row");
+var seenIds = {};
+var duplicated = [];
+for (var di2 = 0; di2 < result.findings.length; di2++) {
+    var fid = result.findings[di2].id;
+    ok(String(fid).indexOf(",") === -1,
+        "an id holds no comma -- the stored ignore list is comma " +
+            "separated (" + fid + ")");
+    if (seenIds[fid] === true) {
+        duplicated.push(fid);
+    }
+    seenIds[fid] = true;
+}
+eqs(duplicated.length, 0,
+    "no two findings on a real drawing share an id (" +
+        duplicated.join(", ") + ")");
+
+// Ignoring ONE finding leaves everything else reported.
+var firstId = result.findings[0].id;
+var afterIgnore = CsCheck.splitIgnored(result.findings,
+    CsCheck.parseIgnored(firstId));
+eqs(afterIgnore.shown.length, result.findings.length - 1,
+    "ignoring one finding hides exactly one");
+eqs(afterIgnore.ignored.length, 1,
+    "and hands that one back rather than dropping it");
 
 ok(result.failed.length === 0,
     "no check threw on a real document (" + result.failed.join(", ") + ")");
@@ -240,24 +270,37 @@ eqs(orphanCount, 1,
     "a wall traced in the ELEVATION is not counted as drawn away " +
         "from the survey (only the plan-frame stray should count)");
 
-// 3. A stray finding names a few layers and then counts the rest --
-//    48 names in one row cannot be read.
+// 3. Strays get one ROW PER LAYER, each with its own id, so a caver
+//    can accept the scratch layer and still be told about layer 0.
+//    (This used to be one row naming every layer, which on Truitt was
+//    48 names in a row nobody could read.)
 var many = CsCheck.scan(doc);
 for (var mi = 0; mi < 6; mi++) {
-    many.entities.push({ layer: "MADE-UP-" + mi, at: { x: 0, y: 0 },
+    many.entities.push({ layer: "MADE-UP-" + mi, at: { x: mi, y: 0 },
         registered: false });
 }
 var manyResult = CsCheck.review(many);
+eqs(countCode(manyResult, "layer.stray"), 7,
+    "six made-up layers plus layer 0 are seven stray rows");
+var strayIds = {};
+var strayDupes = 0;
+var longest = 0;
 for (var mf = 0; mf < manyResult.findings.length; mf++) {
-    if (manyResult.findings[mf].code === "layer.stray") {
-        ok(manyResult.findings[mf].title.indexOf("more") > 0,
-            "a stray finding over many layers counts the rest rather " +
-                "than listing them");
-        ok(manyResult.findings[mf].title.length < 160,
-            "and the row stays short enough to read (" +
-                manyResult.findings[mf].title.length + " chars)");
+    var f2 = manyResult.findings[mf];
+    if (f2.code !== "layer.stray") {
+        continue;
+    }
+    if (strayIds[f2.id] === true) {
+        strayDupes += 1;
+    }
+    strayIds[f2.id] = true;
+    if (f2.title.length > longest) {
+        longest = f2.title.length;
     }
 }
+eqs(strayDupes, 0, "each stray layer has its own id to ignore");
+ok(longest < 90,
+    "and each row stays short enough to read (" + longest + " chars)");
 
 // ---------------------------------------------------------------------
 // And a drawing with none of that.

@@ -23001,6 +23001,21 @@ eqs(CsSymbolStore.PREFIX, "SYM_", "the symbol block prefix");
         return out;
     }
 
+    /** How many findings of one code came back. */
+    function countCode(result, code) {
+        var n = 0;
+        for (var i = 0; i < result.findings.length; i++) {
+            if (result.findings[i].code === code) {
+                n += 1;
+            }
+        }
+        return n;
+    }
+    function eqCount(result, code, want, what) {
+        var got = countCode(result, code);
+        ok(got === want, what + " (expected " + want + ", got " + got + ")");
+    }
+
     // -- the clean map says nothing -------------------------------
     var clean = CsCheck.review(cleanScan());
     ok(clean.clean === true,
@@ -23029,6 +23044,13 @@ eqs(CsSymbolStore.PREFIX, "SYM_", "the symbol block prefix");
         "CsCheck: whitespace is not a filled-in title block field");
     ok(tb.findings[0].title.indexOf("Surveyed by") >= 0,
         "CsCheck: and the finding names the field that is empty");
+    // ONE ROW PER FIELD: two empty fields are two decisions.
+    s.titleBlock.caveName = "";
+    var tb2 = CsCheck.review(s);
+    eqCount(tb2, "sheet.titleblock", 2,
+        "CsCheck: two empty title block fields are two findings");
+    ok(tb2.findings[0].id !== tb2.findings[1].id,
+        "CsCheck: with different ids, so one can be ignored alone");
 
     s = cleanScan();
     s.layers[2].count = 0;
@@ -23052,6 +23074,24 @@ eqs(CsSymbolStore.PREFIX, "SYM_", "the symbol block prefix");
         "CsCheck: work on layer 0 is caught");
     ok(stray.findings[0].title.indexOf("the default layer") >= 0,
         "CsCheck: and layer 0 is named in words, not as a bare zero");
+    // PER LAYER, deliberately: 232 rows saying "a line on layer 0" is
+    // not a list, and "everything I left on 0" is one decision.
+    s = cleanScan();
+    for (var sx = 0; sx < 5; sx++) {
+        s.entities.push({ layer: "0", at: { x: sx, y: 0 },
+            registered: false });
+    }
+    s.entities.push({ layer: "SCRATCH", at: { x: 9, y: 9 },
+        registered: false });
+    var strays = CsCheck.review(s);
+    eqCount(strays, "layer.stray", 2,
+        "CsCheck: strays are one finding per LAYER, not per entity");
+    for (var si = 0; si < strays.findings.length; si++) {
+        if (strays.findings[si].layer === "0") {
+            ok(strays.findings[si].count === 5,
+                "CsCheck: and the row still says how many are on it");
+        }
+    }
 
     s = cleanScan();
     s.layers[3].visible = false;
@@ -23069,10 +23109,37 @@ eqs(CsSymbolStore.PREFIX, "SYM_", "the symbol block prefix");
         { at: { x: 3, y: 0 }, layer: "WALLS-SURVEYED", entity: "2" }
     ];
     var gaps = CsCheck.review(s);
-    ok(codes(gaps).indexOf("walls.gap") >= 0,
-        "CsCheck: two wall ends 3 ft apart are a gap");
-    ok(gaps.findings[0].count === 1,
-        "CsCheck: and one hole is counted once, not once per end");
+    eqCount(gaps, "walls.gap", 1,
+        "CsCheck: two wall ends 3 ft apart are ONE gap, not one per end");
+
+    // Two separate holes are two rows with two ids -- the whole point
+    // of ignoring by entry.
+    s = cleanScan();
+    s.wallEnds = [
+        { at: { x: 0, y: 0 }, layer: "WALLS-SURVEYED", entity: "1" },
+        { at: { x: 3, y: 0 }, layer: "WALLS-SURVEYED", entity: "2" },
+        { at: { x: 0, y: 90 }, layer: "WALLS-SURVEYED", entity: "3" },
+        { at: { x: 3, y: 90 }, layer: "WALLS-SURVEYED", entity: "4" }
+    ];
+    var twoGaps = CsCheck.review(s);
+    eqCount(twoGaps, "walls.gap", 2,
+        "CsCheck: two holes in the wall are two findings");
+    var gapIds = {};
+    for (var gi = 0; gi < twoGaps.findings.length; gi++) {
+        gapIds[twoGaps.findings[gi].id] = true;
+    }
+    var gapIdCount = 0;
+    for (var gk in gapIds) {
+        if (gapIds.hasOwnProperty(gk)) {
+            gapIdCount += 1;
+        }
+    }
+    ok(gapIdCount === twoGaps.findings.length,
+        "CsCheck: every finding on one map has its own id");
+    var halfIgnored = CsCheck.splitIgnored(twoGaps.findings,
+        CsCheck.parseIgnored(twoGaps.findings[0].id));
+    eqCount({ findings: halfIgnored.shown }, "walls.gap", 1,
+        "CsCheck: ignoring ONE gap leaves the other one reported");
 
     s = cleanScan();
     s.wallEnds = [
@@ -23110,6 +23177,13 @@ eqs(CsSymbolStore.PREFIX, "SYM_", "the symbol block prefix");
     s.linework[0].nearestStation = null;
     ok(codes(CsCheck.review(s)).indexOf("walls.orphan") >= 0,
         "CsCheck: and so is linework in a drawing with no stations at all");
+    s = cleanScan();
+    s.linework = [
+        { layer: "WALLS-SURVEYED", at: { x: 400, y: 0 }, nearestStation: 500 },
+        { layer: "WALLS-SURVEYED", at: { x: 800, y: 0 }, nearestStation: 900 }
+    ];
+    eqCount(CsCheck.review(s), "walls.orphan", 2,
+        "CsCheck: two stray lines are two findings");
 
     // -- the rest -------------------------------------------------
     s = cleanScan();
@@ -23178,7 +23252,7 @@ eqs(CsSymbolStore.PREFIX, "SYM_", "the symbol block prefix");
 
     var added = CsCheck.setIgnored({}, "sheet.legend", true);
     ok(added["sheet.legend"] === true,
-        "CsCheck: a code can be ignored");
+        "CsCheck: a finding can be ignored");
     ok(CsCheck.serializeIgnored(
         CsCheck.setIgnored(added, "sheet.legend", false)) === "",
         "CsCheck: and un-ignored again");
@@ -23192,12 +23266,33 @@ eqs(CsSymbolStore.PREFIX, "SYM_", "the symbol block prefix");
     s.layers[0].count = 0;   // no scale bar
     s.layers[1].count = 0;   // no north arrow
     var both = CsCheck.review(s);
+    var northId = null;
+    for (var bi2 = 0; bi2 < both.findings.length; bi2++) {
+        if (both.findings[bi2].code === "sheet.north") {
+            northId = both.findings[bi2].id;
+        }
+    }
     var split = CsCheck.splitIgnored(both.findings,
-        CsCheck.parseIgnored("sheet.north"));
+        CsCheck.parseIgnored(northId));
     ok(split.shown.length === 1 && split.shown[0].code === "sheet.scalebar",
-        "CsCheck: an ignored code is held back");
+        "CsCheck: an ignored finding is held back");
     ok(split.ignored.length === 1 && split.ignored[0].code === "sheet.north",
         "CsCheck: and handed back separately rather than dropped");
+    ok(CsCheck.splitIgnored(both.findings,
+        CsCheck.parseIgnored("sheet.north")).shown.length === 2,
+        "CsCheck: the bare CODE ignores nothing -- ids are what count");
+
+    // An id must survive the trip through a comma-separated list.
+    var idWithPlace = CsCheck.idOf("walls.gap", { x: 12, y: -4 }, "W");
+    ok(idWithPlace.indexOf(",") === -1,
+        "CsCheck: an id holds no comma -- the stored list is comma " +
+            "separated and would split it in half (" + idWithPlace + ")");
+    ok(CsCheck.storableId(idWithPlace) === true,
+        "CsCheck: and is storable");
+    ok(CsCheck.serializeIgnored(
+        CsCheck.setIgnored({}, "bad,id", true)) === "",
+        "CsCheck: an id that would break the list is refused, not " +
+            "written and lost");
     ok(CsCheck.splitIgnored(both.findings, null).shown.length === 2,
         "CsCheck: no ignore list holds nothing back");
 
@@ -23256,9 +23351,19 @@ eqs(CsSymbolStore.PREFIX, "SYM_", "the symbol block prefix");
     ];
     everyFault.linework[0].nearestStation = 999;
     var all = CsCheck.review(everyFault);
-    ok(all.findings.length === CsCheck.CHECKS.length,
-        "CsCheck: a map with every fault reports every check (" +
-            all.findings.length + " of " + CsCheck.CHECKS.length + ")");
+    var seenCodes = {};
+    for (var ac = 0; ac < all.findings.length; ac++) {
+        seenCodes[all.findings[ac].code] = true;
+    }
+    var missingCodes = [];
+    for (var ck = 0; ck < CsCheck.CHECKS.length; ck++) {
+        if (seenCodes[CsCheck.CHECKS[ck].code] !== true) {
+            missingCodes.push(CsCheck.CHECKS[ck].code);
+        }
+    }
+    ok(missingCodes.length === 0,
+        "CsCheck: a map with every fault reports every check (silent: " +
+            missingCodes.join(", ") + ")");
     var explained = true;
     for (var fi2 = 0; fi2 < all.findings.length; fi2++) {
         var f = all.findings[fi2];
