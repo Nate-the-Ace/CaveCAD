@@ -1492,6 +1492,7 @@ MENU = {
     # 450 -- start here
     "CaveShelf/CaveShelf.js":             (450, 20, ["caveshelf", "caves"]),
     "CaveTemplate/CaveTemplate.js":       (450, 30, ["newcavemap", "ncm"]),
+    "TeachingCave/TeachingCave.js":       (450, 40, ["teachingcave", "teach"]),
     # 451 -- survey data
     "SurveyNotebook/SurveyNotebook.js":   (451, 10, ["surveynotebook", "snb"]),
     "ImportCaveSurvey/ImportCaveSurvey.js": (451, 20, ["importcavesurvey", "ics"]),
@@ -1735,201 +1736,62 @@ class TestNamespacesAreDeclared(unittest.TestCase):
         self.assertEqual([], offenders, "\n".join(offenders))
 
 
-class TestLessonCave(unittest.TestCase):
-    """The lesson cave (Task 9): a small, invented cave the curriculum
+class TestTeachingCave(unittest.TestCase):
+    """The teaching cave replaced the invented Lesson Cave.
 
-    (Task 10) and the guided first run (Task 11) are built against.
-    Regenerated with `tools/make_lesson_cave.js` -- see that file's own
-    run shape in its header comment -- these two files just have to
-    exist and the manifest has to say plainly, on its first line, that
-    the data is invented. Everything else about its shape (loop
-    misclosure, station count, open ends) is checked by the generator
-    itself when it runs, not re-derived here.
+    Lesson Cave was generated, deterministic and made up, and it existed
+    because of the suite's first rule: real cave entrances do not go in
+    test data. That was the right answer for a FIXTURE and the wrong one
+    for a CURRICULUM -- an invented cave closes perfectly because nobody
+    walked it, and a student who learns on it has never met the thing
+    the tools exist for. The rule is kept the other way now: the copy a
+    student works on is sanitized.
+
+    What is checked here is that the retirement was COMPLETE. A
+    half-retired fixture is worse than either state: the generator still
+    in the tree, quietly regenerating a cave nothing teaches from.
     """
 
-    DAT_PATH = os.path.join(TESTDATA, "LessonCave.dat")
-    MANIFEST_PATH = os.path.join(TESTDATA, "LessonCave_MANIFEST.md")
-    REGEN_HINT = (
-        "regenerate with: CaveCAD -no-dock-icon -no-gui "
-        "-allow-multiple-instances -autostart tools/make_lesson_cave.js "
-        '"$PWD"'
-    )
+    def test_the_lesson_cave_is_gone(self):
+        left = [rel for rel in ("tools/make_lesson_cave.js",
+                                "testdata/LessonCave.dat",
+                                "testdata/LessonCave_MANIFEST.md")
+                if os.path.exists(os.path.join(REPO, rel))]
+        self.assertEqual(
+            left, [],
+            "the invented Lesson Cave was retired in favour of a real, "
+            "sanitized teaching cave, but these are still in the tree: "
+            "%s" % left)
 
-    def test_fixture_and_manifest_exist(self):
-        self.assertTrue(
-            os.path.isfile(self.DAT_PATH),
-            "testdata/LessonCave.dat is missing -- %s" % self.REGEN_HINT)
-        self.assertTrue(
-            os.path.isfile(self.MANIFEST_PATH),
-            "testdata/LessonCave_MANIFEST.md is missing -- %s" %
-            self.REGEN_HINT)
-
-    def test_manifest_declares_data_invented(self):
-        with open(self.MANIFEST_PATH) as handle:
-            first_line = handle.readline()
+    def test_the_sanitizer_has_one_home(self):
+        """Two implementations of the suite's first rule is one that
+        will be updated and one that will not.
+        """
+        with open(os.path.join(ADDON, "PackageCave",
+                               "PackageCave.js")) as handle:
+            packager = handle.read()
         self.assertIn(
-            "invented", first_line.lower(),
-            "LessonCave_MANIFEST.md's first line must plainly declare "
-            "the data invented -- the project's first rule -- but reads: "
-            "%r" % first_line)
+            "CsSanitize.writeCopy", packager,
+            "Package Cave should delegate to Core/CsSanitize.js rather "
+            "than carrying its own copy of the sanitizer")
+        self.assertTrue(
+            os.path.isfile(os.path.join(ADDON, "Core", "CsSanitize.js")),
+            "Core/CsSanitize.js is where the sanitizer lives")
 
+    def test_the_teaching_copy_is_never_the_master(self):
+        """CsTeach refuses to build a master FROM a teaching copy.
 
-class TestHelpTextCoverage(unittest.TestCase):
-    """Core/CsHelp.js explains what each symbol and traced feature MEANS.
-
-    The panels read it by key. A key that is missing produces a tooltip
-    with a name and a layer and no explanation -- exactly the tooltip
-    the file was written to replace, and invisible in review because
-    nothing throws. So the coverage is asserted both ways: every
-    catalogue entry has help, and every help entry is pointed at by
-    something.
-    """
-
-    def source(self, *parts):
-        with open(os.path.join(ADDON, *parts)) as handle:
-            return handle.read()
-
-    def help_keys(self, table):
-        """The keys of one CsHelp table, in source order."""
-        source = self.source("Core", "CsHelp.js")
-        start = source.index("CsHelp.%s = {" % table)
-        end = source.index("\n};", start)
-        return re.findall(r'^    "([^"]+)": \{', source[start:end], re.M)
-
-    def help_entries(self, table):
-        """Each key's {means, rule} as raw source text."""
-        source = self.source("Core", "CsHelp.js")
-        start = source.index("CsHelp.%s = {" % table)
-        end = source.index("\n};", start)
-        body = source[start:end]
-        found = {}
-        # `label:` is optional and comes first: features carry one so
-        # the legend can name them, symbols get their name from the
-        # catalogue. Everything after it is the same for both.
-        for match in re.finditer(
-                r'^    "([^"]+)": \{\s*\n'
-                r'(?:\s*label: ".*?",\s*\n)?'
-                r'\s*means: (".*?"),\s*\n'
-                r'\s*rule: (".*?")\s*\n',
-                body, re.M | re.S):
-            found[match.group(1)] = (match.group(2), match.group(3))
-        return found
-
-    def test_every_shipped_symbol_has_help(self):
-        catalog = re.findall(r'block: "(SYM_[A-Z_0-9]+)"',
-                             self.source("Core", "CsSymbols.js"))
-        self.assertGreater(len(catalog), 20, "the catalogue should be here")
-        missing = [b for b in catalog if b not in self.help_keys("SYMBOL")]
-        self.assertEqual(missing, [],
-                         "symbols in CsSymbols.CATALOG with no CsHelp."
-                         "SYMBOL entry: %s" % missing)
-
-    def test_no_help_for_a_symbol_that_does_not_exist(self):
-        catalog = set(re.findall(r'block: "(SYM_[A-Z_0-9]+)"',
-                                 self.source("Core", "CsSymbols.js")))
-        orphans = [k for k in self.help_keys("SYMBOL") if k not in catalog]
-        self.assertEqual(orphans, [],
-                         "CsHelp.SYMBOL keys naming no catalogue symbol: "
-                         "%s" % orphans)
-
-    def feature_keys(self):
-        """The keys FeatureTrace's own tiles are looked up under.
-
-        Built the way CsHelp.forFeature builds them: "layer:" plus the
-        PLAN-FRAME layer for a plain row, "style:" plus the
-        CsShapeLine.STYLES key for a shaped one. The layer constants
-        resolve by THE ONE NAMING RULE -- a constant is its layer name
-        with the dashes turned into underscores -- which
-        test_layer_constant_matches_its_layer_name keeps true.
+        Sanitizing a student's folder back into the master would
+        enshrine whatever that student had done as the thing everyone
+        resets to -- silently, and only noticed weeks later.
         """
-        source = self.source("FeatureTrace", "FeatureTrace.js")
-        rows = source[source.index("FeatureTrace.ROWS = ["):
-                      source.index("FeatureTrace.SHAPED_ROWS = [")]
-        shaped = source[source.index("FeatureTrace.SHAPED_ROWS = ["):]
-        shaped = shaped[:shaped.index("\n];")]
-        keys = ["layer:" + c.replace("_", "-")
-                for c in re.findall(r'layer: CsLayers\.([A-Z_0-9]+)', rows)]
-        keys += ["style:" + s
-                 for s in re.findall(r'style: "([a-z]+)"', shaped)]
-        return keys
-
-    def test_every_traced_feature_has_help(self):
-        keys = self.feature_keys()
-        self.assertGreater(len(keys), 10, "both row tables should be here")
-        missing = [k for k in keys if k not in self.help_keys("FEATURE")]
-        self.assertEqual(missing, [],
-                         "FeatureTrace rows with no CsHelp.FEATURE "
-                         "entry: %s" % missing)
-
-    def test_no_help_for_a_feature_nothing_draws(self):
-        keys = set(self.feature_keys())
-        orphans = [k for k in self.help_keys("FEATURE") if k not in keys]
-        self.assertEqual(orphans, [],
-                         "CsHelp.FEATURE keys naming no FeatureTrace "
-                         "row: %s" % orphans)
-
-    def test_feature_labels_match_the_panel(self):
-        """A legend row is named the way its Feature Trace tile is.
-
-        CsHelp carries the label because Core cannot read a tool, and
-        the legend is drawn from Core. That leaves two copies of every
-        feature's name, one of which will drift -- so this holds them
-        in step rather than trusting anyone to copy them. A reader
-        holding the printed legend and a cartographer looking at the
-        panel have to be talking about the same thing.
-        """
-        panel = self.source("FeatureTrace", "FeatureTrace.js")
-        rows = panel[panel.index("FeatureTrace.ROWS = ["):
-                     panel.index("FeatureTrace.SHAPED_ROWS = [")]
-        shaped = panel[panel.index("FeatureTrace.SHAPED_ROWS = ["):]
-        shaped = shaped[:shaped.index("\n];")]
-
-        wanted = {}
-        for label, constant in re.findall(
-                r'label: "([^"]+)", layer: CsLayers\.([A-Z_0-9]+)', rows):
-            wanted["layer:" + constant.replace("_", "-")] = label
-        for label, style in re.findall(
-                r'label: "([^"]+)", style: "([a-z]+)"', shaped):
-            wanted["style:" + style] = label
-        self.assertGreater(len(wanted), 10,
-                           "both row tables should have been parsed")
-
-        source = self.source("Core", "CsHelp.js")
-        wrong = []
-        for key, label in sorted(wanted.items()):
-            block = '"%s": {\n        label: "%s",' % (key, label)
-            if block not in source:
-                wrong.append("%s should be labelled %r" % (key, label))
-        self.assertEqual(wrong, [],
-                         "CsHelp labels that disagree with the Feature "
-                         "Trace panel: %s" % wrong)
-
-    def test_every_entry_states_a_meaning(self):
-        """`means` is what the LEGEND prints, so an empty one would ship
-        a legend row with a name and a blank line beside it. `rule` may
-        be empty -- not every symbol has a convention worth stating --
-        but it has to be present, because a missing field and an
-        empty one look identical at the tooltip and only one of them
-        was a decision.
-        """
-        for table in ("SYMBOL", "FEATURE"):
-            entries = self.help_entries(table)
-            self.assertEqual(
-                sorted(entries), sorted(self.help_keys(table)),
-                "CsHelp.%s has an entry that is not {means, rule}" % table)
-            for key, (means, rule) in sorted(entries.items()):
-                self.assertGreater(
-                    len(means), 20,
-                    "CsHelp.%s['%s'].means says nothing: %s"
-                    % (table, key, means))
-                self.assertTrue(
-                    means.endswith('."'),
-                    "CsHelp.%s['%s'].means is a sentence and ends with a "
-                    "full stop: %s" % (table, key, means))
-                self.assertTrue(
-                    rule == '""' or rule.endswith('."'),
-                    "CsHelp.%s['%s'].rule is either empty or sentences: "
-                    "%s" % (table, key, rule))
+        with open(os.path.join(ADDON, "Core", "CsTeach.js")) as handle:
+            source = handle.read()
+        self.assertIn("sourceIsTeaching", source,
+                      "planMaster has to know whether its source is "
+                      "already a teaching copy")
+        self.assertIn("isTeaching", source,
+                      "and CsTeach has to be able to tell")
 
 
 if __name__ == "__main__":

@@ -91,9 +91,18 @@ function addSegment(layer, x1, y1, x2, y2) {
 addSegment(CsLayers.WALLS_SURVEYED, 0, 0, 1000, 0);
 addSegment(CsLayers.WALLS_SURVEYED, 0, 400, 1000, 400);
 
+// THE PLAN ONLY. The extended elevation is drawn below the plan in the
+// same drawing; measuring both sized the sheet for a column of views
+// and cost Truitt Cave a scale step (1" = 40 ft became 1" = 80).
+addSegment(CsLayers.PROFILE_WALLS_SURVEYED, 0, -4000, 3000, -4000);
+
 var caveBox = SheetSetup.caveBox(doc);
 ok(!isNull(caveBox), "the cave's extents are readable");
-near(caveBox.maxX - caveBox.minX, 1000, 0.01, "and are the cave's own");
+near(caveBox.maxX - caveBox.minX, 1000, 0.01,
+    "and are the PLAN's own -- a 3000 ft elevation band below it is " +
+        "not part of the map the sheet is laid out around");
+ok(caveBox.minY > -4000,
+    "the elevation is left out of the height too");
 
 var sheet = CsSheetSetup.sheetByName("ARCH D -- 36 x 24");
 var scale = 50;

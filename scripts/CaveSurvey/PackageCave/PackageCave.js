@@ -589,54 +589,11 @@ PackageCave.stageDrawing = function(record, stagingFolder, full) {
             error: copied ? "" : "Could not copy the drawing." };
     }
 
-    var di = new RDocumentInterface(
-        new RDocument(new RMemoryStorage(), createSpatialIndex()));
-    var result = { ok: false, stripped: 0, basemaps: 0, error: "" };
-    try {
-        if (di.importFile(record.drawing, "", false) !==
-                RDocumentInterface.IoErrorNoError) {
-            result.error = "Could not read the drawing.";
-            return result;
-        }
-        var doc = di.getDocument();
-
-        result.stripped = PackageCave.stripGeoTags(doc, di);
-        // A basemap image is georeferenced -- built from a real-world
-        // bounding box around the entrance -- so it carries the same
-        // location it took to fetch it. A sanitized copy strips the
-        // geo TAGS above; it has to erase the basemap IMAGE too, or
-        // the location the tags just hid is still sitting there in
-        // plain sight, geodata baked into the raster instead of into
-        // XDATA. (Formerly AerialBasemap.eraseExisting, from the
-        // standalone tool this merged into; see Core/CsSurfaceData.js.)
-        //
-        // A MISSING ERASER REFUSES THE WHOLE SANITIZED COPY. This used
-        // to be a quiet `if available` guard, and it silently stopped
-        // firing the moment the standalone tool it named was merged
-        // away -- which would have shipped georeferenced imagery inside
-        // a file whose entire promise is that the location is gone. A
-        // sanitized copy that cannot strip is not a sanitized copy, so
-        // it is not written at all.
-        if (typeof CsSurfaceData === "undefined" ||
-                !isFunction(CsSurfaceData.eraseExistingImagery)) {
-            result.error = "Cannot sanitize: the basemap eraser " +
-                "(CsSurfaceData.eraseExistingImagery) is missing, so " +
-                "aerial imagery could not be removed. No sanitized " +
-                "copy has been written.";
-            return result;
-        }
-        result.basemaps = CsSurfaceData.eraseExistingImagery(doc, di);
-
-        result.ok = di.exportFile(target, PackageCave.dxfFilter());
-        if (!result.ok) {
-            result.error = "Could not write the sanitized drawing.";
-        }
-    } catch (e) {
-        result.error = "Sanitizing failed: " + e;
-    } finally {
-        destr(di);
-    }
-    return result;
+    // ONE SANITIZER, in Core. This was the only copy of it while
+    // packaging was the only thing that shared a cave; the teaching
+    // cave shares one too, and two implementations of the suite's first
+    // rule is one that will be updated and one that will not.
+    return CsSanitize.writeCopy(record.drawing, target);
 };
 
 /**
@@ -662,33 +619,12 @@ PackageCave.dxfFilter = function() {
     return "";
 };
 
-/** Removes the geographic anchor from every entity carrying it. */
+/** Removes the geographic anchor from every entity carrying it.
+ *
+ *  Kept as a name because callers and tests know it; the work moved to
+ *  Core/CsSanitize.js when the teaching cave needed the same rule. */
 PackageCave.stripGeoTags = function(doc, di) {
-    var stripped = 0;
-    var ids = doc.queryAllEntities(false, false);
-    for (var i = 0; i < ids.length; i++) {
-        var e = doc.queryEntity(ids[i]);
-        if (isNull(e)) { continue; }
-
-        var carries = false;
-        for (var t = 0; t < CsPackage.GEO_TAGS.length; t++) {
-            if (CsTags.get(e, CsPackage.GEO_TAGS[t]) !== null &&
-                    CsTags.get(e, CsPackage.GEO_TAGS[t]) !== undefined &&
-                    CsTags.get(e, CsPackage.GEO_TAGS[t]) !== "") {
-                carries = true;
-            }
-        }
-        if (!carries) { continue; }
-
-        for (var r = 0; r < CsPackage.GEO_TAGS.length; r++) {
-            CsTags.remove(e, CsPackage.GEO_TAGS[r]);
-        }
-        var op = new RModifyObjectsOperation();
-        op.addObject(e, false);
-        di.applyOperation(op);
-        stripped++;
-    }
-    return stripped;
+    return CsSanitize.stripGeoTags(doc, di);
 };
 
 /**

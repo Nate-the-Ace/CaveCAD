@@ -208,7 +208,10 @@ var CORE_FILES = [
     "scripts/CaveSurvey/Core/CsSheetSetup.js",
     // Pure: exaggeration, colour bands, arrow geometry and the caption
     // that has to state the exaggeration.
-    "scripts/CaveSurvey/Core/CsClosure.js"
+    "scripts/CaveSurvey/Core/CsClosure.js",
+    // Pure path arithmetic and the plan of what a reset will do. The
+    // file work lives in the tool, where a filesystem exists.
+    "scripts/CaveSurvey/Core/CsTeach.js"
 ];
 for (var ci = 0; ci < CORE_FILES.length; ci++) {
     loadRepoScript(CORE_FILES[ci]);
@@ -251,7 +254,13 @@ var CORE_FILES_NOT_LOADED = [
     // real operation. The one piece that looks pure -- the last-drawn
     // record -- is keyed by CsTrace.docKey(doc), so even that needs a
     // document. Covered by tests/feature_erase_run.js.
-    "scripts/CaveSurvey/Core/CsErase.js"
+    "scripts/CaveSurvey/Core/CsErase.js",
+    // Opens a drawing into a memory document and exports it again --
+    // every line of it needs a real RDocumentInterface, and the one
+    // rule worth testing (a copy that cannot strip is not written) can
+    // only be proved against a real file. Covered by
+    // tests/package_cave.js and tests/teaching_cave_run.js.
+    "scripts/CaveSurvey/Core/CsSanitize.js"
 ];
 
 // ---------------------------------------------------------------------
@@ -24001,6 +24010,108 @@ eqs(CsSymbolStore.PREFIX, "SYM_", "the symbol block prefix");
     ok(CsClosure.loopLabel({ from: "A", to: "B", error: 1, 
         traverseLength: 10, percent: null }).indexOf("%") === -1,
         "CsClosure: a closure with no meaningful percentage claims none");
+})();
+
+// ---------------------------------------------------------------------
+// CsTeach -- where the teaching cave lives, and what a reset means.
+// The dangerous half of this tool is a recursive delete, so the
+// arithmetic that decides what it is aimed at is pinned here.
+// ---------------------------------------------------------------------
+(function() {
+    var root = CsTeach.caveRootFor("/Users/someone");
+    eqs(root, "/Users/someone/Documents/Cave",
+        "CsTeach: the Cave root hangs off home, spelled once");
+    eqs(CsTeach.rootFor(root), "/Users/someone/Documents/Cave/teaching",
+        "CsTeach: teaching lives under it");
+    eqs(CsTeach.masterFor(root, "Truitt Cave"),
+        "/Users/someone/Documents/Cave/teaching/master/Truitt Cave",
+        "CsTeach: the pristine copy is under master/");
+    eqs(CsTeach.workingFor(root, "Truitt Cave"),
+        "/Users/someone/Documents/Cave/teaching/Truitt Cave",
+        "CsTeach: and the student's copy is not");
+    ok(CsTeach.masterFor(root, "Truitt Cave") !==
+        CsTeach.workingFor(root, "Truitt Cave"),
+        "CsTeach: the two are never the same folder -- a teaching cave " +
+            "that resets to what a student edited is not a teaching cave");
+    eqs(CsTeach.drawingIn(CsTeach.workingFor(root, "Truitt Cave"),
+        "Truitt Cave"),
+        "/Users/someone/Documents/Cave/teaching/Truitt Cave/Truitt Cave.dxf",
+        "CsTeach: the drawing is named for the cave");
+    ok(CsTeach.masterFor(root, "Bat/Cave").indexOf("/master/") > 0,
+        "CsTeach: a cave name with a slash in it cannot climb out of " +
+            "the master folder (" + CsTeach.masterFor(root, "Bat/Cave") +
+            ")");
+
+    // -- the guard on the recursive delete --------------------------
+    ok(CsTeach.isTeaching(root, CsTeach.workingFor(root, "Truitt Cave")),
+        "CsTeach: the working copy is inside the teaching folder");
+    ok(CsTeach.isTeaching(root, CsTeach.masterFor(root, "Truitt Cave")),
+        "CsTeach: so is the master");
+    ok(!CsTeach.isTeaching(root, "/Volumes/Drive/Survey/Truitt Cave"),
+        "CsTeach: a real cave on a shared drive is NOT, which is what " +
+            "stops a reset ever being aimed at one");
+    ok(!CsTeach.isTeaching(root, null),
+        "CsTeach: and nothing is not either");
+
+    // -- what a reset will do ---------------------------------------
+    var none = CsTeach.planReset({ masterExists: false,
+        workingExists: false, caveName: "Truitt Cave" });
+    ok(none.can === false && none.reason.indexOf("pristine") > 0,
+        "CsTeach: with no master there is nothing to reset to, and the " +
+            "refusal says what to do about it");
+
+    var first = CsTeach.planReset({ masterExists: true,
+        workingExists: false, caveName: "Truitt Cave" });
+    ok(first.can === true && first.verb === "create" && first.warning === "",
+        "CsTeach: the first hand-out has nothing to lose and asks nothing");
+
+    var again = CsTeach.planReset({ masterExists: true,
+        workingExists: true, caveName: "Truitt Cave" });
+    ok(again.can === true && again.verb === "replace",
+        "CsTeach: a second reset replaces");
+    ok(again.warning.indexOf("gone") > 0,
+        "CsTeach: and says plainly that the student's work goes (" +
+            again.warning + ")");
+    ok(again.warning.indexOf("original") > 0,
+        "CsTeach: while saying the real cave is not touched");
+
+    // -- what making a master will do -------------------------------
+    var nothing = CsTeach.planMaster({ sourceDrawing: "", caveName: "x" });
+    ok(nothing.can === false,
+        "CsTeach: a master needs a cave to be made from");
+
+    var fromStudent = CsTeach.planMaster({
+        sourceDrawing: CsTeach.drawingIn(
+            CsTeach.workingFor(root, "Truitt Cave"), "Truitt Cave"),
+        caveName: "Truitt Cave", masterExists: true,
+        sourceIsTeaching: true });
+    ok(fromStudent.can === false,
+        "CsTeach: a master is NEVER made from a teaching copy");
+    ok(fromStudent.reason.indexOf("homework") > 0,
+        "CsTeach: because every reset after it would restore somebody's " +
+            "homework (" + fromStudent.reason + ")");
+
+    var fresh = CsTeach.planMaster({ sourceDrawing: "/real/Truitt.dxf",
+        caveName: "Truitt Cave", masterExists: false,
+        sourceIsTeaching: false });
+    ok(fresh.can === true && fresh.verb === "create" && fresh.warning === "",
+        "CsTeach: a first master is made without ceremony");
+
+    var refresh = CsTeach.planMaster({ sourceDrawing: "/real/Truitt.dxf",
+        caveName: "Truitt Cave", masterExists: true,
+        sourceIsTeaching: false });
+    ok(refresh.can === true && refresh.verb === "refresh" &&
+        refresh.warning.indexOf("replaces") > 0,
+        "CsTeach: refreshing an existing master asks first");
+
+    // -- what the student is told -----------------------------------
+    var told = CsTeach.doneText("Truitt Cave",
+        CsTeach.workingFor(root, "Truitt Cave"), "replace");
+    ok(told.indexOf("Truitt Cave") > 0 && told.indexOf("teaching") > 0,
+        "CsTeach: the student is told where their copy is");
+    ok(told.indexOf("location is not in this copy") > 0,
+        "CsTeach: and that its location was removed -- nobody should " +
+            "teach from it believing it is the cave's whole record");
 })();
 
 // ---------------------------------------------------------------------

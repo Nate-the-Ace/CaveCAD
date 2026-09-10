@@ -387,3 +387,29 @@ falsified map, and that an unadjusted drawing is told its arrows point
 the other way.
 
 Passes when the output contains `### LOOP ERRORS OK`.
+
+## `teaching_cave_run.js` -- the teaching cave hands out a sanitized copy
+
+`tests/js_unit.js` pins the path arithmetic and the plans. This stage
+moves real files, and two of the things it does are things you only get
+to be wrong about once.
+
+The master has to be SANITIZED: a teaching copy that still carries the
+entrance is the suite's first rule broken by the one tool whose whole
+job is handing a cave to strangers. So the fixture's drawing carries
+both a geo anchor and a georeferenced aerial image, and the test reads
+the master back OFF DISK and asserts neither survived -- stripping the
+tags alone would leave the entrance baked into a raster.
+
+Reset is a RECURSIVE DELETE. The test ruins the student's copy, leaves
+homework in it, resets, and checks the drawing came back byte for byte
+with the leftovers gone -- and then checks the REAL cave still carries
+its own location and its plotted map, because the teaching cave reads
+that folder once and never writes to it.
+
+It also holds the line about what travels: field sketches do, because
+tracing a real one is most of what a student is here to learn; plotted
+PDFs do not, because a title block carries a location somebody typed and
+this tool cannot strip that.
+
+Passes when the output contains `### TEACHING CAVE OK`.

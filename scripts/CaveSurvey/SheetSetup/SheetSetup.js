@@ -46,9 +46,21 @@ function SheetSetup(guiAction) {
 
 SheetSetup.prototype = new EAction();
 
-/** The cave's own extents, ignoring anything this tool drew and
- *  anything on a sheet layer -- otherwise the second run measures the
- *  first run's border and the sheet grows every time. */
+/**
+ * The PLAN's own extents.
+ *
+ * THE PLAN ONLY (Nathan, 2026-09-10). The extended elevation is drawn
+ * BELOW the plan in the same drawing and a section bay is parked clear
+ * of both, so measuring "everything in the document" measured a column
+ * of three views and sized the sheet for it -- which is why Truitt Cave
+ * wanted 1" = 80 ft for a plan that fits comfortably at 40. A sheet is
+ * laid out around the MAP, and the other views are placed onto it
+ * afterwards as elements, the way a legend or a cross section is.
+ *
+ * Ignores anything this tool drew and anything on a sheet layer too:
+ * otherwise the second run measures the first run's border and the
+ * sheet grows every time it is run.
+ */
 SheetSetup.caveBox = function(doc) {
     var box = null;
     var ids = doc.queryAllEntities(false, false);
@@ -58,8 +70,9 @@ SheetSetup.caveBox = function(doc) {
             continue;
         }
         var layer = CsBind.layerNameOf(doc, e);
-        if (CsLayers.frameOf(layer) === "sheet") {
-            continue;
+        var frame = CsLayers.frameOf(layer);
+        if (frame !== "plan") {
+            continue;   // sheet furniture, the elevation, a section bay
         }
         var b = null;
         try {

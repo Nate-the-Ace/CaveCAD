@@ -35,6 +35,15 @@ include(includeBasePath + "/CsContour.js");
 // (marching squares over the elevation grid) -- CsSurfaceData's two
 // passes call straight into both.
 include(includeBasePath + "/CsSurfaceData.js");
+// After CsPackage (whose GEO_TAGS it strips) and CsSurfaceData (whose
+// eraser it refuses to work without): writing a copy of a drawing with
+// the cave's location taken out. Package Cave and the teaching cave
+// share it -- two implementations of the suite's first rule is one
+// that will be updated and one that will not.
+include(includeBasePath + "/CsSanitize.js");
+// After CsPackage (safeName) and CsSanitize (which makes the pristine
+// copy): where the teaching cave lives and what resetting it means.
+include(includeBasePath + "/CsTeach.js");
 include(includeBasePath + "/CsAngles.js");
 include(includeBasePath + "/CsIgrfCoeffs.js");
 include(includeBasePath + "/CsGeomag.js");

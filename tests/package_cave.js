@@ -67,6 +67,15 @@ var FILES = [
     // cannot strip imagery is not sanitized -- so this suite has to
     // load it or it is testing the refusal instead of the erase.
     "scripts/CaveSurvey/Core/CsSurfaceData.js",
+    // The layer registry, because the sanitizer now reaches through
+    // layers that refuse edits -- an aerial photograph lives on one
+    // that is switched off, and without CsLayers the sanitizer threw
+    // and wrote nothing at all.
+    "scripts/CaveSurvey/Core/CsLayers.js",
+    "scripts/CaveSurvey/Core/CsLayerVariants.js",
+    // The sanitizer itself, which stageDrawing now delegates to: one
+    // copy of the suite's first rule, shared with the teaching cave.
+    "scripts/CaveSurvey/Core/CsSanitize.js",
     "scripts/CaveSurvey/PackageCave/PackageCave.js"
 ];
 for (var fi = 0; fi < FILES.length; fi++) {
