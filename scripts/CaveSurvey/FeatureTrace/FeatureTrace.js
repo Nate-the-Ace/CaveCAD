@@ -217,6 +217,11 @@ FeatureTrace.armLayer = function(layerName) {
     FeatureTrace.target = layerName;
     FeatureTrace.clearShaped();
     FeatureTrace.refresh();
+    // Here and not in the tile's own click handler, so a feature armed
+    // from the keyboard counts as used too -- the Recent row is about
+    // what the caver is drawing, not about which control they reached
+    // for.
+    FeatureTrace.noteRecent(FeatureTrace.rowForKey("layer:" + layerName));
 
     var w = FeatureTrace.widgets;
     if (isNull(w) || isNull(w.buttons)) {
@@ -519,35 +524,7 @@ FeatureTrace.buildGroup = function(w, parent, title, header, collapsed) {
     for (var i = 0; i < FeatureTrace.ROWS.length; i++) {
         var row = FeatureTrace.ROWS[i];
         try {
-            // A TOOL button, not a push button: QPushButton lays icon
-            // and text side by side with no way to stack them, so the
-            // name ends up cut off next to the picture.
-            var button = new QToolButton();
-            button.text = FeatureTrace.wrapLabel(row.label,
-                FeatureTrace.CELL_CHARS);
-            try {
-                button.toolButtonStyle = Qt.ToolButtonTextUnderIcon;
-            } catch (eStyle) {
-            }
-            button.checkable = true;
-            button.toolTip = row.layer;
-            var icon = FeatureTrace.iconForLayer(row.layer);
-            if (icon !== null) {
-                try {
-                    button.icon = icon;
-                    button.iconSize = new QSize(FeatureTrace.ICON,
-                        FeatureTrace.ICON);
-                } catch (eIcon) {
-                }
-            }
-            try {
-                button.setFixedSize(FeatureTrace.CELL_W + 20,
-                    FeatureTrace.CELL_H + 24);
-            } catch (eSize) {
-                // a bridge without setFixedSize gets tiles that stretch;
-                // the grid still reads as a grid
-            }
-            FeatureTrace.connectRow(button, row);
+            var button = FeatureTrace.tileFor(row, true);
             FeatureTrace.connectTileMenu(button, row);
             inner.addWidget(button,
                 firstRow + Math.floor(cell / FeatureTrace.GRID_COLUMNS),
@@ -995,6 +972,164 @@ FeatureTrace.disarmTiles = function() {
     }
 };
 
+/** The settings key holding the last few features armed. */
+FeatureTrace.RECENT_SETTING = "CaveSurvey/FeatureTraceRecent";
+
+/**
+ * One tile, built the same way wherever it appears.
+ *
+ * The sections and the Recent row draw the SAME tile -- same picture,
+ * same label, same size -- because a caver who has learnt to recognise
+ * the flowstone tile must recognise it in both places. Two builders
+ * would be two tiles that drift apart the first time one is adjusted.
+ *
+ * `checkable` is false for a Recent tile: the armed mark belongs to the
+ * tile in the section, and two lit copies of one feature would raise
+ * the question of which one is armed.
+ */
+FeatureTrace.tileFor = function(row, checkable, compact) {
+    // A TOOL button, not a push button: QPushButton lays icon and text
+    // side by side with no way to stack them, so the name ends up cut
+    // off next to the picture.
+    var button = new QToolButton();
+    if (compact !== true) {
+        button.text = FeatureTrace.wrapLabel(row.label,
+            FeatureTrace.CELL_CHARS);
+        try {
+            button.toolButtonStyle = Qt.ToolButtonTextUnderIcon;
+        } catch (eStyle) {
+        }
+    }
+    button.checkable = (checkable !== false);
+    var icon = null;
+    if (isNull(row.style)) {
+        // With no label under a compact tile, the name has to lead the
+        // tooltip -- the layer alone would leave the picture unnamed.
+        button.toolTip = (compact === true) ?
+            (row.label + "\n" + row.layer) : row.layer;
+        icon = FeatureTrace.iconForLayer(row.layer);
+    } else {
+        var spec = CsShapeLine.STYLES[row.style];
+        button.toolTip = row.label + "\n" +
+            (isNull(spec) ? "" : spec.decorLayer) + "\n" +
+            qsTr("Drag along the line, then point at the side the " +
+                "ornament goes and click.");
+        icon = FeatureTrace.iconForStyle(row.style);
+    }
+    if (icon !== null) {
+        try {
+            button.icon = icon;
+            button.iconSize = new QSize(FeatureTrace.ICON, FeatureTrace.ICON);
+        } catch (eIcon) {
+        }
+    }
+    try {
+        if (compact === true) {
+            // A COMPACT tile is the picture alone. Five full tiles side
+            // by side are twice the width of the dock a caver actually
+            // keeps open, and a Recent row you have to scroll sideways
+            // is not a shortcut. The name is a hover away, and the
+            // pictures are the panel's own claim: a tile is a picture
+            // of the line it draws.
+            button.setFixedSize(FeatureTrace.ICON + 14,
+                FeatureTrace.ICON + 14);
+        } else {
+            button.setFixedSize(FeatureTrace.CELL_W + 20,
+                FeatureTrace.CELL_H + 24);
+        }
+    } catch (eSize) {
+        // a bridge without setFixedSize gets tiles that stretch; the
+        // grid still reads as a grid
+    }
+    if (isNull(row.style)) {
+        FeatureTrace.connectRow(button, row);
+    } else {
+        FeatureTrace.connectShapedRow(button, row);
+    }
+    return button;
+};
+
+/** The row a recent KEY names, or null when the key names nothing this
+ *  panel still has -- a feature removed from ROWS between sessions. */
+FeatureTrace.rowForKey = function(key) {
+    var i;
+    for (i = 0; i < FeatureTrace.ROWS.length; i++) {
+        if ("layer:" + FeatureTrace.ROWS[i].layer === key) {
+            return FeatureTrace.ROWS[i];
+        }
+    }
+    for (i = 0; i < FeatureTrace.SHAPED_ROWS.length; i++) {
+        if ("style:" + FeatureTrace.SHAPED_ROWS[i].style === key) {
+            return FeatureTrace.SHAPED_ROWS[i];
+        }
+    }
+    return null;
+};
+
+/** The key a row is remembered under. Prefixed, because a layer name
+ *  and a style key are different namespaces and nothing stops one
+ *  gaining a value the other already has. */
+FeatureTrace.keyForRow = function(row) {
+    if (isNull(row)) {
+        return "";
+    }
+    return isNull(row.style) ? ("layer:" + row.layer) : ("style:" + row.style);
+};
+
+/**
+ * Rebuilds the Recent row from what has been armed lately.
+ *
+ * PINNED ABOVE THE SECTIONS and outside the foldable stack: it is a
+ * shortcut to what you are using now, and a shortcut you have to unfold
+ * first is not one. It is also not reorderable for the same reason --
+ * there is nothing to order, and the row's whole meaning is its order.
+ *
+ * The row hides itself when there is nothing in it, so a fresh install
+ * shows the panel it always showed rather than an empty heading.
+ */
+FeatureTrace.rebuildRecent = function() {
+    var w = FeatureTrace.widgets;
+    if (isNull(w) || isNull(w.recentRow)) {
+        return;
+    }
+    var keys = CsPanel.loadRecent(FeatureTrace.RECENT_SETTING);
+    CsPanel.clearLayout(w.recentRow);
+    var shown = 0;
+    for (var i = 0; i < keys.length; i++) {
+        var row = FeatureTrace.rowForKey(keys[i]);
+        if (row === null) {
+            continue;   // a feature that no longer exists
+        }
+        try {
+            w.recentRow.addWidget(
+                FeatureTrace.tileFor(row, false, true), 0, 0);
+            shown++;
+        } catch (eTile) {
+            // one tile that will not build must not cost the row
+        }
+    }
+    try {
+        w.recentRow.addStretch(1);
+    } catch (eStretch) {
+    }
+    var visible = (shown > 0);
+    try {
+        w.recentLabel.visible = visible;
+    } catch (eLabel) {
+    }
+};
+
+/** Notes a feature as just used, and repaints the Recent row. */
+FeatureTrace.noteRecent = function(row) {
+    try {
+        CsPanel.noteRecent(FeatureTrace.RECENT_SETTING,
+            FeatureTrace.keyForRow(row));
+        FeatureTrace.rebuildRecent();
+    } catch (e) {
+        // the Recent row is a convenience; arming must not depend on it
+    }
+};
+
 /** Arms the row and starts a trace. Its own function so the closure
  *  captures ONE row rather than the loop variable. */
 FeatureTrace.connectRow = function(button, row) {
@@ -1018,6 +1153,7 @@ FeatureTrace.shapedStyle = undefined;
 FeatureTrace.armShaped = function(styleKey) {
     FeatureTrace.shapedStyle = styleKey;
     FeatureTrace.target = undefined;
+    FeatureTrace.noteRecent(FeatureTrace.rowForKey("style:" + styleKey));
     var w = FeatureTrace.widgets;
     if (!isNull(w)) {
         var i;
@@ -1219,34 +1355,7 @@ FeatureTrace.buildShapedGroup = function(w, parent, collapsed) {
     for (var i = 0; i < FeatureTrace.SHAPED_ROWS.length; i++) {
         var row = FeatureTrace.SHAPED_ROWS[i];
         try {
-            var spec = CsShapeLine.STYLES[row.style];
-            var button = new QToolButton();
-            button.text = FeatureTrace.wrapLabel(row.label,
-                FeatureTrace.CELL_CHARS);
-            try {
-                button.toolButtonStyle = Qt.ToolButtonTextUnderIcon;
-            } catch (eStyle) {
-            }
-            button.checkable = true;
-            button.toolTip = row.label + "\n" +
-                (isNull(spec) ? "" : spec.decorLayer) + "\n" +
-                qsTr("Drag along the line, then point at the side the " +
-                    "ornament goes and click.");
-            var icon = FeatureTrace.iconForStyle(row.style);
-            if (icon !== null) {
-                try {
-                    button.icon = icon;
-                    button.iconSize = new QSize(FeatureTrace.ICON,
-                        FeatureTrace.ICON);
-                } catch (eIcon) {
-                }
-            }
-            try {
-                button.setFixedSize(FeatureTrace.CELL_W + 20,
-                    FeatureTrace.CELL_H + 24);
-            } catch (eSize) {
-            }
-            FeatureTrace.connectShapedRow(button, row);
+            var button = FeatureTrace.tileFor(row, true);
             FeatureTrace.connectTileMenu(button, row);
             inner.addWidget(button,
                 Math.floor(cell / FeatureTrace.GRID_COLUMNS),
@@ -1342,6 +1451,25 @@ FeatureTrace.buildDock = function(appWin) {
         w.problems.push("search box (" + eSearchBox + ")");
     }
 
+    // -- what you have been using ------------------------------------
+    //
+    // ABOVE the sections and outside the foldable stack: a shortcut you
+    // have to unfold first is not a shortcut.
+    try {
+        w.recentLabel = new QLabel(qsTr("Recent"));
+        w.recentLabel.visible = false;
+        layout.addWidget(w.recentLabel, 0, 0);
+        w.recentRow = new QHBoxLayout();
+        try {
+            w.recentRow.setContentsMargins(4, 0, 4, 2);
+            w.recentRow.setSpacing(4);
+        } catch (eMargins) {
+        }
+        layout.addLayout(w.recentRow, 0);
+    } catch (eRecent) {
+        w.problems.push("recent row (" + eRecent + ")");
+    }
+
     // -- the features ------------------------------------------------
     //
     // ONE group. There were three -- Plan, Profile, Cross Section --
@@ -1407,6 +1535,13 @@ FeatureTrace.buildDock = function(appWin) {
     layout.addStretch(1);
     body.setLayout(layout);
     dock.setWidget(body);
+
+    try {
+        FeatureTrace.widgets = w;   // rebuildRecent reads it
+        FeatureTrace.rebuildRecent();
+    } catch (eRecentFill) {
+        w.problems.push("recent row fill (" + eRecentFill + ")");
+    }
 
     if (w.problems.length > 0) {
         warning("Feature Trace: this CaveCAD build refused: " +

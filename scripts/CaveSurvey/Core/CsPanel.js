@@ -501,3 +501,95 @@ CsPanel.undoRow = function(parent, onDeleteLast, onErase) {
     out.row = row;
     return out;
 };
+
+/** How many tiles a Recent row keeps. Five, because cave work is a
+ *  handful of features repeated a thousand times -- and because a row
+ *  that scrolls is a second list to search rather than a shortcut. */
+CsPanel.RECENT_MAX = 5;
+
+/**
+ * The recently-used keys for a panel, most recent first.
+ *
+ * Stored as one settings string per panel -- the same shape as the
+ * collapsed-sections memory above, and for the same reason: a caver's
+ * six features are the same six tomorrow, so this is worth surviving a
+ * restart. Keys are opaque to this file; each panel decides what a key
+ * means (a layer name, a style, a block name) and how to draw it.
+ */
+CsPanel.loadRecent = function(settingKey) {
+    var out = [];
+    try {
+        var raw = RSettings.getStringValue(settingKey, "");
+        if (raw !== "") {
+            var parts = String(raw).split(",");
+            for (var i = 0; i < parts.length; i++) {
+                var key = parts[i].trim();
+                if (key !== "" && out.length < CsPanel.RECENT_MAX) {
+                    out.push(key);
+                }
+            }
+        }
+    } catch (e) {
+        // a bridge without settings forgets between sessions, which is
+        // a panel with no Recent row rather than a panel that fails
+    }
+    return out;
+};
+
+/**
+ * Notes that `key` was just used, and answers the new list.
+ *
+ * MOVE TO FRONT, not append: a caver who comes back to walls after four
+ * other features wants walls first, and a list that only grew would
+ * push it off the end while they were using it.
+ *
+ * A key with a comma in it would split into two on the way back and is
+ * refused rather than stored -- no layer name, style key or block name
+ * in this suite has one, and a key that did would quietly corrupt the
+ * whole row.
+ */
+CsPanel.noteRecent = function(settingKey, key) {
+    var current = CsPanel.loadRecent(settingKey);
+    if (key === null || key === undefined || String(key) === "" ||
+            String(key).indexOf(",") !== -1) {
+        return current;
+    }
+    var next = [String(key)];
+    for (var i = 0; i < current.length; i++) {
+        if (current[i] !== String(key) && next.length < CsPanel.RECENT_MAX) {
+            next.push(current[i]);
+        }
+    }
+    try {
+        RSettings.setValue(settingKey, next.join(","));
+    } catch (e) {
+        // not remembered across sessions; still right for this one
+    }
+    return next;
+};
+
+/** Empties a layout of its widgets, so a row can be rebuilt in place.
+ *  The widgets are hidden as well as removed: a bridge that keeps a
+ *  removed widget parented would otherwise leave it floating over the
+ *  panel. */
+CsPanel.clearLayout = function(layout) {
+    if (isNull(layout)) {
+        return;
+    }
+    try {
+        while (layout.count() > 0) {
+            var item = layout.takeAt(0);
+            if (isNull(item)) {
+                break;
+            }
+            var widget = item.widget();
+            if (!isNull(widget)) {
+                widget.visible = false;
+                widget.setParent(null);
+            }
+        }
+    } catch (e) {
+        // a bridge without takeAt keeps the old row; it is stale rather
+        // than wrong, and the tiles below it still work
+    }
+};

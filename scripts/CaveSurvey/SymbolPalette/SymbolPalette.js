@@ -249,6 +249,9 @@ SymbolPalette.showDrag = function(sizeFeet, angleDeg) {
  */
 SymbolPalette.arm = function(entry) {
     SymbolPalette.armed = entry;
+    // Here and not in the tile's click handler, so a symbol armed from
+    // the search box's Return counts as used too.
+    SymbolPalette.noteRecent(entry);
     var w = SymbolPalette.widgets;
     if (isNull(w) || isNull(w.buttons)) {
         return;
@@ -746,6 +749,140 @@ SymbolPalette.loadCollapsed = function() {
     return CsPanel.loadCollapsed(SymbolPalette.COLLAPSED_SETTING);
 };
 
+/** The settings key holding the last few symbols armed. */
+SymbolPalette.RECENT_SETTING = "CaveSurvey/SymbolPaletteRecent";
+
+/**
+ * One tile, built the same way wherever it appears -- in a category or
+ * in the Recent row. Feature Trace's FeatureTrace.tileFor is its twin,
+ * and for the same reason: a caver who has learnt to recognise a
+ * symbol's picture must recognise it in both places.
+ *
+ * `checkable` is false for a Recent tile: the armed mark belongs to the
+ * tile in its category, and two lit copies of one symbol would raise
+ * the question of which one is armed.
+ */
+SymbolPalette.tileFor = function(entry, shape, checkable, compact) {
+    // A TOOL BUTTON, not a push button. A QPushButton lays its icon and
+    // its text side by side and there is no way to stack them, so a
+    // 30px picture and a name shared one line and the name came out as
+    // "Entran" and "Dom" -- seen in the first live GUI check,
+    // 2026-09-06. QToolButton stacks them, which is what a palette tile
+    // has always looked like.
+    var button = new QToolButton();
+    if (compact !== true) {
+        button.text = SymbolPalette.wrapLabel(entry.nss,
+            SymbolPalette.CELL_CHARS);
+        try {
+            button.toolButtonStyle = Qt.ToolButtonTextUnderIcon;
+        } catch (eStyle) {
+            // a bridge without the enum gets a text-beside-icon tile,
+            // which is the old look and still usable
+        }
+    }
+    button.checkable = (checkable !== false);
+    var tip = entry.nss;
+    if (!isNull(entry.uis) && entry.uis !== "" && entry.uis !== entry.nss) {
+        tip += "  (UIS: " + entry.uis + ")";
+    }
+    tip += "\n" + entry.block + "  ->  " + entry.layer;
+    if (entry.custom === true) {
+        tip += "\n" + qsTr("Your own symbol -- Edit and Delete work on " +
+            "this one.");
+    }
+    button.toolTip = tip;
+    var icon = SymbolPalette.iconFor(shape, SymbolPalette.ICON, null);
+    if (icon !== null) {
+        try {
+            button.icon = icon;
+            button.iconSize = new QSize(SymbolPalette.ICON,
+                SymbolPalette.ICON);
+        } catch (eIcon) {
+            // a tile with no picture still says its name
+        }
+    }
+    try {
+        if (compact === true) {
+            // the picture alone -- see FeatureTrace.tileFor's own note:
+            // five full tiles are wider than the dock anyone keeps open
+            button.setFixedSize(SymbolPalette.ICON + 14,
+                SymbolPalette.ICON + 14);
+        } else {
+            button.setFixedSize(SymbolPalette.CELL_W, SymbolPalette.CELL_H);
+        }
+    } catch (eSize) {
+        // a bridge without setFixedSize gets tiles that stretch; the
+        // grid still reads as a grid
+    }
+    SymbolPalette.connectTile(button, entry);
+    return button;
+};
+
+/**
+ * Rebuilds the Recent row from the last few symbols armed.
+ *
+ * PINNED ABOVE THE CATEGORIES and outside the foldable stack, exactly
+ * as Feature Trace's is: a shortcut you have to unfold first is not a
+ * shortcut. It hides itself when empty, so a fresh install shows the
+ * palette it always showed.
+ *
+ * A key naming a symbol that is no longer in the library -- deleted, or
+ * a custom one from a library that has moved -- is skipped rather than
+ * drawn as a blank tile.
+ */
+SymbolPalette.rebuildRecent = function() {
+    var w = SymbolPalette.widgets;
+    if (isNull(w) || isNull(w.recentRow)) {
+        return;
+    }
+    var keys = CsPanel.loadRecent(SymbolPalette.RECENT_SETTING);
+    CsPanel.clearLayout(w.recentRow);
+    var shown = 0;
+    if (keys.length > 0) {
+        var shapes = SymbolPalette.loadShapes().byBlock;
+        for (var i = 0; i < keys.length; i++) {
+            var entry = null;
+            try {
+                entry = CsSymbols.byBlock(keys[i]);
+            } catch (eLookup) {
+                entry = null;
+            }
+            if (entry === null) {
+                continue;
+            }
+            try {
+                w.recentRow.addWidget(
+                    SymbolPalette.tileFor(entry, shapes[entry.block],
+                        false, true),
+                    0, 0);
+                shown++;
+            } catch (eTile) {
+            }
+        }
+    }
+    try {
+        w.recentRow.addStretch(1);
+    } catch (eStretch) {
+    }
+    try {
+        w.recentLabel.visible = (shown > 0);
+    } catch (eLabel) {
+    }
+};
+
+/** Notes a symbol as just used, and repaints the Recent row. */
+SymbolPalette.noteRecent = function(entry) {
+    if (isNull(entry)) {
+        return;
+    }
+    try {
+        CsPanel.noteRecent(SymbolPalette.RECENT_SETTING, entry.block);
+        SymbolPalette.rebuildRecent();
+    } catch (e) {
+        // the Recent row is a convenience; arming must not depend on it
+    }
+};
+
 SymbolPalette.buildGroup = function(w, parent, group, shapes, collapsed) {
     // The folding -- and the right-click Move Up / Move Down on the
     // header -- are CsPanel's, shared with Feature Trace.
@@ -756,53 +893,8 @@ SymbolPalette.buildGroup = function(w, parent, group, shapes, collapsed) {
     for (var i = 0; i < group.entries.length; i++) {
         var entry = group.entries[i];
         try {
-            // A TOOL BUTTON, not a push button. A QPushButton lays its
-            // icon and its text side by side and there is no way to
-            // stack them, so a 30px picture and a name shared one line
-            // and the name came out as "Entran" and "Dom" -- seen in
-            // the first live GUI check, 2026-09-06. QToolButton stacks
-            // them, which is what a palette tile has always looked
-            // like.
-            var button = new QToolButton();
-            button.text = SymbolPalette.wrapLabel(entry.nss,
-                SymbolPalette.CELL_CHARS);
-            try {
-                button.toolButtonStyle = Qt.ToolButtonTextUnderIcon;
-            } catch (eStyle) {
-                // a bridge without the enum gets a text-beside-icon
-                // tile, which is the old look and still usable
-            }
-            button.checkable = true;
-            var tip = entry.nss;
-            if (!isNull(entry.uis) && entry.uis !== "" &&
-                    entry.uis !== entry.nss) {
-                tip += "  (UIS: " + entry.uis + ")";
-            }
-            tip += "\n" + entry.block + "  ->  " + entry.layer;
-            if (entry.custom === true) {
-                tip += "\n" + qsTr("Your own symbol -- Edit and Delete " +
-                    "work on this one.");
-            }
-            button.toolTip = tip;
-            var icon = SymbolPalette.iconFor(shapes[entry.block],
-                SymbolPalette.ICON, null);
-            if (icon !== null) {
-                try {
-                    button.icon = icon;
-                    button.iconSize = new QSize(SymbolPalette.ICON,
-                        SymbolPalette.ICON);
-                } catch (eIcon) {
-                    // a tile with no picture still says its name
-                }
-            }
-            try {
-                button.setFixedSize(SymbolPalette.CELL_W,
-                    SymbolPalette.CELL_H);
-            } catch (eSize) {
-                // a bridge without setFixedSize gets tiles that stretch;
-                // the grid still reads as a grid
-            }
-            SymbolPalette.connectTile(button, entry);
+            var button = SymbolPalette.tileFor(entry,
+                shapes[entry.block], true);
             SymbolPalette.connectTileMenu(button, entry);
             inner.addWidget(button,
                 Math.floor(cell / SymbolPalette.GRID_COLUMNS),
@@ -1056,6 +1148,26 @@ SymbolPalette.buildDock = function(appWin) {
         w.problems.push("problem label (" + eProblem + ")");
     }
 
+    // -- what you have been using ------------------------------------
+    //
+    // ABOVE the categories and outside the foldable stack, and above the
+    // scroll area rather than inside it: the whole point is that it is
+    // there without scrolling or unfolding.
+    try {
+        w.recentLabel = new QLabel(qsTr("Recent"));
+        w.recentLabel.visible = false;
+        layout.addWidget(w.recentLabel, 0, 0);
+        w.recentRow = new QHBoxLayout();
+        try {
+            w.recentRow.setContentsMargins(4, 0, 4, 2);
+            w.recentRow.setSpacing(4);
+        } catch (eMargins) {
+        }
+        layout.addLayout(w.recentRow, 0);
+    } catch (eRecent) {
+        w.problems.push("recent row (" + eRecent + ")");
+    }
+
     // -- the tiles, in a scroll area ---------------------------------
     //
     // Scrolling and not a taller dock: 28 symbols in nine categories is
@@ -1180,6 +1292,12 @@ SymbolPalette.buildDock = function(appWin) {
     body.setLayout(layout);
     dock.setWidget(body);
     SymbolPalette.widgets = w;
+
+    try {
+        SymbolPalette.rebuildRecent();
+    } catch (eRecentFill) {
+        w.problems.push("recent row fill (" + eRecentFill + ")");
+    }
 
     try {
         SymbolPalette.rebuildTiles();
