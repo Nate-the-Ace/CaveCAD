@@ -1770,5 +1770,123 @@ class TestLessonCave(unittest.TestCase):
             "%r" % first_line)
 
 
+class TestHelpTextCoverage(unittest.TestCase):
+    """Core/CsHelp.js explains what each symbol and traced feature MEANS.
+
+    The panels read it by key. A key that is missing produces a tooltip
+    with a name and a layer and no explanation -- exactly the tooltip
+    the file was written to replace, and invisible in review because
+    nothing throws. So the coverage is asserted both ways: every
+    catalogue entry has help, and every help entry is pointed at by
+    something.
+    """
+
+    def source(self, *parts):
+        with open(os.path.join(ADDON, *parts)) as handle:
+            return handle.read()
+
+    def help_keys(self, table):
+        """The keys of one CsHelp table, in source order."""
+        source = self.source("Core", "CsHelp.js")
+        start = source.index("CsHelp.%s = {" % table)
+        end = source.index("\n};", start)
+        return re.findall(r'^    "([^"]+)": \{', source[start:end], re.M)
+
+    def help_entries(self, table):
+        """Each key's {means, rule} as raw source text."""
+        source = self.source("Core", "CsHelp.js")
+        start = source.index("CsHelp.%s = {" % table)
+        end = source.index("\n};", start)
+        body = source[start:end]
+        found = {}
+        for match in re.finditer(
+                r'^    "([^"]+)": \{\s*\n'
+                r'\s*means: (".*?"),\s*\n'
+                r'\s*rule: (".*?")\s*\n',
+                body, re.M | re.S):
+            found[match.group(1)] = (match.group(2), match.group(3))
+        return found
+
+    def test_every_shipped_symbol_has_help(self):
+        catalog = re.findall(r'block: "(SYM_[A-Z_0-9]+)"',
+                             self.source("Core", "CsSymbols.js"))
+        self.assertGreater(len(catalog), 20, "the catalogue should be here")
+        missing = [b for b in catalog if b not in self.help_keys("SYMBOL")]
+        self.assertEqual(missing, [],
+                         "symbols in CsSymbols.CATALOG with no CsHelp."
+                         "SYMBOL entry: %s" % missing)
+
+    def test_no_help_for_a_symbol_that_does_not_exist(self):
+        catalog = set(re.findall(r'block: "(SYM_[A-Z_0-9]+)"',
+                                 self.source("Core", "CsSymbols.js")))
+        orphans = [k for k in self.help_keys("SYMBOL") if k not in catalog]
+        self.assertEqual(orphans, [],
+                         "CsHelp.SYMBOL keys naming no catalogue symbol: "
+                         "%s" % orphans)
+
+    def feature_keys(self):
+        """The keys FeatureTrace's own tiles are looked up under.
+
+        Built the way CsHelp.forFeature builds them: "layer:" plus the
+        PLAN-FRAME layer for a plain row, "style:" plus the
+        CsShapeLine.STYLES key for a shaped one. The layer constants
+        resolve by THE ONE NAMING RULE -- a constant is its layer name
+        with the dashes turned into underscores -- which
+        test_layer_constant_matches_its_layer_name keeps true.
+        """
+        source = self.source("FeatureTrace", "FeatureTrace.js")
+        rows = source[source.index("FeatureTrace.ROWS = ["):
+                      source.index("FeatureTrace.SHAPED_ROWS = [")]
+        shaped = source[source.index("FeatureTrace.SHAPED_ROWS = ["):]
+        shaped = shaped[:shaped.index("\n];")]
+        keys = ["layer:" + c.replace("_", "-")
+                for c in re.findall(r'layer: CsLayers\.([A-Z_0-9]+)', rows)]
+        keys += ["style:" + s
+                 for s in re.findall(r'style: "([a-z]+)"', shaped)]
+        return keys
+
+    def test_every_traced_feature_has_help(self):
+        keys = self.feature_keys()
+        self.assertGreater(len(keys), 10, "both row tables should be here")
+        missing = [k for k in keys if k not in self.help_keys("FEATURE")]
+        self.assertEqual(missing, [],
+                         "FeatureTrace rows with no CsHelp.FEATURE "
+                         "entry: %s" % missing)
+
+    def test_no_help_for_a_feature_nothing_draws(self):
+        keys = set(self.feature_keys())
+        orphans = [k for k in self.help_keys("FEATURE") if k not in keys]
+        self.assertEqual(orphans, [],
+                         "CsHelp.FEATURE keys naming no FeatureTrace "
+                         "row: %s" % orphans)
+
+    def test_every_entry_states_a_meaning(self):
+        """`means` is what the LEGEND prints, so an empty one would ship
+        a legend row with a name and a blank line beside it. `rule` may
+        be empty -- not every symbol has a convention worth stating --
+        but it has to be present, because a missing field and an
+        empty one look identical at the tooltip and only one of them
+        was a decision.
+        """
+        for table in ("SYMBOL", "FEATURE"):
+            entries = self.help_entries(table)
+            self.assertEqual(
+                sorted(entries), sorted(self.help_keys(table)),
+                "CsHelp.%s has an entry that is not {means, rule}" % table)
+            for key, (means, rule) in sorted(entries.items()):
+                self.assertGreater(
+                    len(means), 20,
+                    "CsHelp.%s['%s'].means says nothing: %s"
+                    % (table, key, means))
+                self.assertTrue(
+                    means.endswith('."'),
+                    "CsHelp.%s['%s'].means is a sentence and ends with a "
+                    "full stop: %s" % (table, key, means))
+                self.assertTrue(
+                    rule == '""' or rule.endswith('."'),
+                    "CsHelp.%s['%s'].rule is either empty or sentences: "
+                    "%s" % (table, key, rule))
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

@@ -593,3 +593,112 @@ CsPanel.clearLayout = function(layout) {
         // than wrong, and the tiles below it still work
     }
 };
+
+// ---------------------------------------------------------------------
+// TILE TOOLTIPS -- the one place a beginner is told what a symbol or a
+// feature actually MEANS.
+//
+// Both palettes had mechanical tooltips: a name, a block, a layer.
+// True, and no use to anyone who does not already know the NSS set.
+// The prose lives in CsHelp; this is how a tile wears it, and it lives
+// here so the two panels cannot drift into two different tooltips.
+//
+// RICH TEXT, WITH OUR OWN WRAPPING. Qt renders a tooltip as HTML the
+// moment it contains a tag, which is what lets the rule stand out from
+// the description -- but an HTML tooltip is laid out on ONE line until
+// something breaks it, and Qt has no honoured width for a tooltip
+// (a CSS width on a <p> is ignored; the documented workaround is a
+// table, which then styles the whole thing). So the text is wrapped
+// here, by word, and the breaks are <br>. Cheap, and it looks the same
+// on every platform.
+// ---------------------------------------------------------------------
+
+/** How wide a wrapped tooltip line gets, in characters. Chosen so the
+ *  longest rule in CsHelp comes out three lines rather than five. */
+CsPanel.TIP_CHARS = 46;
+
+/** Wraps text to a character budget, returning the LINES. Same greedy
+ *  fill FeatureTrace.wrapLabel uses on a tile's own label; a word
+ *  longer than the budget gets a line of its own rather than being
+ *  cut. */
+CsPanel.wrapLines = function(text, budget) {
+    var words = String(text).split(" ");
+    var lines = [];
+    var line = "";
+    for (var i = 0; i < words.length; i++) {
+        if (words[i] === "") {
+            continue;
+        }
+        if (line.length === 0) {
+            line = words[i];
+        } else if (line.length + 1 + words[i].length <= budget) {
+            line += " " + words[i];
+        } else {
+            lines.push(line);
+            line = words[i];
+        }
+    }
+    if (line.length > 0) {
+        lines.push(line);
+    }
+    return lines;
+};
+
+/** The five characters that would otherwise be read as markup. Applied
+ *  to every piece of text that reaches the tooltip, including catalogue
+ *  names -- a caver may name their own symbol "<3". */
+CsPanel.escapeHtml = function(text) {
+    return String(text)
+        .replace(/&/g, "&amp;")
+        .replace(/</g, "&lt;")
+        .replace(/>/g, "&gt;")
+        .replace(/"/g, "&quot;")
+        .replace(/'/g, "&#39;");
+};
+
+/**
+ * One tile's tooltip.
+ *
+ *   title   the feature or symbol name -- bold, always present.
+ *   help    a CsHelp entry ({means, rule}) or null. Null is the custom
+ *           symbol case and simply leaves those lines out.
+ *   detail  the mechanical lines that were the whole tooltip before
+ *           this existed (block, layer, "your own symbol"), printed
+ *           small and last. An array; empty is fine.
+ *
+ * \return an HTML string for QWidget.toolTip.
+ */
+CsPanel.tipHtml = function(title, help, detail) {
+    var parts = ["<b>" + CsPanel.escapeHtml(title) + "</b>"];
+    var wrap = function(text) {
+        var lines = CsPanel.wrapLines(text, CsPanel.TIP_CHARS);
+        for (var i = 0; i < lines.length; i++) {
+            lines[i] = CsPanel.escapeHtml(lines[i]);
+        }
+        return lines.join("<br>");
+    };
+    if (!isNull(help)) {
+        if (!isNull(help.means) && help.means !== "") {
+            parts.push(wrap(help.means));
+        }
+        // The rule is the half that gets a map marked down, so it is
+        // the half that has to survive being skim-read.
+        if (!isNull(help.rule) && help.rule !== "") {
+            parts.push("<i>" + wrap(help.rule) + "</i>");
+        }
+    }
+    if (!isNull(detail)) {
+        var kept = [];
+        for (var d = 0; d < detail.length; d++) {
+            if (isNull(detail[d]) || String(detail[d]) === "") {
+                continue;
+            }
+            kept.push(wrap(detail[d]));
+        }
+        if (kept.length > 0) {
+            parts.push("<span style='color:gray'>" +
+                kept.join("<br>") + "</span>");
+        }
+    }
+    return parts.join("<br><br>");
+};

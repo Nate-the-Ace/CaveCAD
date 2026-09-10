@@ -874,16 +874,24 @@ SymbolPalette.tileFor = function(entry, shape, checkable, compact) {
         }
     }
     button.checkable = (checkable !== false);
-    var tip = entry.nss;
+    // The mechanical half -- the UIS alias, the block, the layer -- is
+    // still here, but it is now the SMALL print under what the symbol
+    // means. A beginner needs the meaning; a block name is for whoever
+    // is already inside the drawing.
+    var detail = [];
     if (!isNull(entry.uis) && entry.uis !== "" && entry.uis !== entry.nss) {
-        tip += "  (UIS: " + entry.uis + ")";
+        detail.push(qsTr("UIS: ") + entry.uis);
     }
-    tip += "\n" + entry.block + "  ->  " + entry.layer;
+    detail.push(entry.block + "  ->  " + entry.layer);
     if (entry.custom === true) {
-        tip += "\n" + qsTr("Your own symbol -- Edit and Delete work on " +
-            "this one.");
+        detail.push(qsTr("Your own symbol -- Edit and Delete work on " +
+            "this one."));
     }
-    button.toolTip = tip;
+    // Null for a custom symbol, which is the point: a caver's own
+    // drawing means whatever they drew it to mean, and the tile says
+    // no more about it than it ever did.
+    button.toolTip = CsPanel.tipHtml(entry.nss,
+        CsHelp.forSymbol(entry.block), detail);
     var icon = SymbolPalette.iconFor(shape, SymbolPalette.ICON, null);
     if (icon !== null) {
         try {

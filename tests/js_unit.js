@@ -156,6 +156,10 @@ var CORE_FILES = [
     // Pure data catalog plus byBlock/categories; insert() is the only
     // document function and is never CALLED here -- same reason
     // CsProfileDraw is loadable under node.
+    // Pure prose keyed by symbol block and feature row -- no
+    // document, no widget. Coverage against CsSymbols.CATALOG and
+    // FeatureTrace.ROWS is asserted in this file.
+    "scripts/CaveSurvey/Core/CsHelp.js",
     "scripts/CaveSurvey/Core/CsSymbols.js",
     // After CsSymbols: merged()/saveBlock() both consult the shipped
     // catalogue. Loadable here for the same reason -- every function

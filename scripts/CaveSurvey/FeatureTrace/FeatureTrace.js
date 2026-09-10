@@ -1099,20 +1099,22 @@ FeatureTrace.tileFor = function(row, checkable, compact) {
     }
     button.checkable = (checkable !== false);
     var icon = null;
+    // The NAME always leads, compact tile or not: it is what CsPanel's
+    // tooltip is built around, and a picture with no name under it was
+    // the one case the old mechanical tooltip had to special-case.
+    var detail = [];
     if (isNull(row.style)) {
-        // With no label under a compact tile, the name has to lead the
-        // tooltip -- the layer alone would leave the picture unnamed.
-        button.toolTip = (compact === true) ?
-            (row.label + "\n" + row.layer) : row.layer;
+        detail.push(row.layer);
         icon = FeatureTrace.iconForLayer(row.layer);
     } else {
         var spec = CsShapeLine.STYLES[row.style];
-        button.toolTip = row.label + "\n" +
-            (isNull(spec) ? "" : spec.decorLayer) + "\n" +
-            qsTr("Drag along the line, then point at the side the " +
-                "ornament goes and click.");
+        detail.push(isNull(spec) ? "" : spec.decorLayer);
+        detail.push(qsTr("Drag along the line, then point at the side " +
+            "the ornament goes and click."));
         icon = FeatureTrace.iconForStyle(row.style);
     }
+    button.toolTip = CsPanel.tipHtml(row.label, CsHelp.forFeature(row),
+        detail);
     if (icon !== null) {
         try {
             button.icon = icon;
@@ -1805,10 +1807,20 @@ FeatureTrace.refresh = function(docIn, regionIn) {
                 entry.button.text = FeatureTrace.wrapLabel(
                     entry.row.label, FeatureTrace.CELL_CHARS) +
                     (off ? "\n(hidden)" : "");
-                entry.button.toolTip = off ?
-                    hidden.join(", ") + " switched OFF -- a trace into " +
-                        "that view will land but you will not see it" :
-                    dests.join("\n");
+                // REBUILT, not overwritten. This used to assign the
+                // destination list straight to toolTip, which quietly
+                // threw away the plain-words help CsPanel.tipHtml had
+                // put there when the tile was made -- the shaped rows
+                // (not in this loop) kept theirs and the plain features
+                // lost theirs on the first refresh, which is a
+                // difference nobody would ever spot in the source.
+                var detail = off ?
+                    [hidden.join(", ") + qsTr(" switched OFF -- a trace " +
+                        "into that view will land but you will not see " +
+                        "it")] :
+                    dests;
+                entry.button.toolTip = CsPanel.tipHtml(entry.row.label,
+                    CsHelp.forFeature(entry.row), detail);
             } catch (e) {
                 // an unreadable button is still armable; only its label
                 // goes stale, and that must never stop a trace

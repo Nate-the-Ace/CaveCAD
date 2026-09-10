@@ -123,6 +123,10 @@ include(includeBasePath + "/CsDelta.js");
 include(includeBasePath + "/CsProfileBind.js");
 include(includeBasePath + "/CsPick.js");
 include(includeBasePath + "/CsLocationPick.js");
+// Pure prose: what each symbol and each traced feature MEANS, for
+// the panels' tooltips and the legend. Keyed by CsSymbols block
+// name and by FeatureTrace row, so it loads before both.
+include(includeBasePath + "/CsHelp.js");
 include(includeBasePath + "/CsSymbols.js");
 // After CsSymbols (it answers with catalogue rows and refuses to
 // overwrite a shipped one), CsLayers (it ensures a symbol's home
