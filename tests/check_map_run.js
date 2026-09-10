@@ -229,6 +229,28 @@ eqs(duplicated.length, 0,
     "no two findings on a real drawing share an id (" +
         duplicated.join(", ") + ")");
 
+// CLICKING A ROW PANS TO IT, which is only possible when the finding
+// carries a place. The pan itself needs a view and cannot run headless,
+// so what is guarded here is the half that breaks silently: a check
+// that forgets to pass `at` produces a row that looks ordinary and goes
+// nowhere when clicked.
+//
+// The placeless codes are listed rather than inferred, so ADDING one is
+// a deliberate act: a fault about the whole sheet has nowhere to pan to
+// (a missing scale bar is nowhere in particular), and a fault about a
+// place must say where.
+var PLACELESS = { "sheet.scalebar": true, "sheet.north": true,
+    "sheet.titleblock": true, "sheet.legend": true,
+    "survey.closure": true, "layer.hidden": true, "check.more": true };
+for (var pi = 0; pi < result.findings.length; pi++) {
+    var pf = result.findings[pi];
+    if (PLACELESS[pf.code] === true) {
+        continue;
+    }
+    ok(!isNull(pf.at) && isFinite(pf.at.x) && isFinite(pf.at.y),
+        pf.code + " carries a place to pan to (title: " + pf.title + ")");
+}
+
 // Ignoring ONE finding leaves everything else reported.
 var firstId = result.findings[0].id;
 var afterIgnore = CsCheck.splitIgnored(result.findings,

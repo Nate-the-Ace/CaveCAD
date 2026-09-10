@@ -51,7 +51,7 @@ CheckMap.buildDock = function(appWin) {
     // actually held back this pass -- kept so the panel can say how
     // many, and show them on request.
     var w = { findings: [], ignored: {}, ignoredFindings: [],
-        showIgnored: false, path: "" };
+        showIgnored: false, path: "", quiet: false };
     var body = new QWidget(dock);
     var layout = new QVBoxLayout();
 
@@ -105,10 +105,11 @@ CheckMap.buildDock = function(appWin) {
 
     var row = new QHBoxLayout();
     w.showButton = new QPushButton(qsTr("Show Me"));
-    w.showButton.toolTip = qsTr("Frame the drawing on this finding. " +
-        "Greyed out for a fault that belongs to the whole sheet rather " +
-        "than to one place -- a missing scale bar is nowhere in " +
-        "particular.");
+    w.showButton.toolTip = qsTr("Zoom in on this finding. Clicking a " +
+        "row already PANS to it at the magnification you are working " +
+        "at; this one reframes. Greyed out for a fault that belongs to " +
+        "the whole sheet rather than to one place -- a missing scale " +
+        "bar is nowhere in particular.");
     w.showButton.enabled = false;
     row.addWidget(w.showButton, 1, 0);
     w.againButton = new QPushButton(qsTr("Check Again"));
@@ -306,12 +307,17 @@ CheckMap.refresh = function() {
     w.findings = (w.showIgnored === true) ?
         split.shown.concat(split.ignored) : split.shown;
 
-    w.list.setRowCount(0);
-    w.list.setRowCount(w.findings.length);
-    for (var i = 0; i < w.findings.length; i++) {
-        w.list.setItem(i, 0, new QTableWidgetItem(
-            CheckMap.rowText(w.findings[i],
-                w.ignored[w.findings[i].id] === true)));
+    w.quiet = true;
+    try {
+        w.list.setRowCount(0);
+        w.list.setRowCount(w.findings.length);
+        for (var i = 0; i < w.findings.length; i++) {
+            w.list.setItem(i, 0, new QTableWidgetItem(
+                CheckMap.rowText(w.findings[i],
+                    w.ignored[w.findings[i].id] === true)));
+        }
+    } finally {
+        w.quiet = false;
     }
     var shownResult = { findings: split.shown, failed: result.failed,
         checked: result.checked,
@@ -360,9 +366,53 @@ CheckMap.showSelected = function() {
     }
     w.why.plainText = text;
     w.showButton.enabled = !isNull(finding.at);
+
+    // The click goes to the fault. Suppressed while refresh() is
+    // rebuilding the list: setting rows moves the selection, and a
+    // Check Again would otherwise throw the view at whatever landed
+    // under the cursor.
+    if (w.quiet !== true) {
+        CheckMap.panTo(finding.at);
+    }
 };
 
-/** Frame the drawing on the selected finding. */
+/**
+ * PAN to the selected finding, keeping the zoom the caver chose.
+ *
+ * This is what a plain CLICK does (Nathan, 2026-09-10: "when I click on
+ * it in the list, it needs to pan to it in the cad view"). Panning
+ * rather than zooming is the whole point of the distinction: clicking
+ * down a list of findings should walk the drawing under a steady
+ * magnification, not throw the view in and out on every row. Show Me
+ * is the one that reframes.
+ *
+ * A finding with no place -- a missing scale bar is nowhere in
+ * particular -- moves nothing, silently: the caver clicked a row, not
+ * a button, and a message about it on every such click would be noise.
+ */
+CheckMap.panTo = function(at) {
+    if (isNull(at)) {
+        return;
+    }
+    try {
+        var view = EAction.getDocumentInterface()
+            .getLastKnownViewWithFocus();
+        if (isNull(view)) {
+            return;
+        }
+        view.centerToPoint(new RVector(at.x, at.y));
+        try {
+            view.regenerate();
+        } catch (eRegen) {
+            // some views repaint on their own; a stale one is cosmetic
+        }
+    } catch (e) {
+        // A pan that cannot happen must never stop the list working --
+        // the why text is the half that always has to arrive.
+    }
+};
+
+/** Frame the drawing ON the selected finding, at a fixed reach. */
 CheckMap.showMe = function() {
     var finding = CheckMap.selected();
     if (finding === null || isNull(finding.at)) {
