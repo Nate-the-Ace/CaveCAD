@@ -179,165 +179,364 @@ SheetSetup.readSurvey = function(doc) {
     return out;
 };
 
-function sheetSetupRun() {
-    var doc = getDocument();
-    if (doc === undefined || doc === null) {
-        warning(qsTr("Sheet Setup: no active drawing document."));
+// ---------------------------------------------------------------------
+// THE PALETTE.
+//
+// A dock, not a dialog (Nathan, 2026-09-10). Choosing paper and scale
+// is not one question answered once: it is a handful of choices that
+// argue with each other -- bigger paper buys detail, a title block with
+// twenty-one surveyors on it takes a scale step, the elevation only
+// fits at all because it has its own sheet. A modal dialog makes each
+// of those a guess followed by a build followed by a look.
+//
+// So the panel shows the layout as it will be, roughly, and rebuilds
+// the picture as the choices change. Building the file is then the LAST
+// thing rather than the way to find out.
+// ---------------------------------------------------------------------
+
+var csSheetSetupDock;
+
+/** How the preview paints each kind of box. */
+SheetSetup.PREVIEW_STYLE = {
+    "sheet": { line: [70, 70, 70], fill: [255, 255, 255], width: 2 },
+    "elevation-sheet": { line: [70, 70, 70], fill: [255, 255, 255],
+        width: 2 },
+    "cave": { line: [40, 90, 190], fill: [40, 90, 190, 40], width: 1 },
+    "band": { line: [40, 90, 190], fill: [40, 90, 190, 40], width: 1 },
+    "title": { line: [150, 100, 30], fill: [220, 170, 70, 90], width: 1 },
+    "bar": { line: [60, 130, 60], fill: [90, 180, 90, 110], width: 1 },
+    "north": { line: [60, 130, 60], fill: [90, 180, 90, 110], width: 1 }
+};
+
+/** Paints one preview into a pixmap. Rough by design -- see
+ *  CsSheetSetup.preview. */
+SheetSetup.paintPreview = function(preview, width, height) {
+    try {
+        var pixmap = new QPixmap(width, height);
+        pixmap.fill(new QColor(245, 245, 245));
+        if (isNull(preview) || preview.bounds === null) {
+            return pixmap;
+        }
+        var painter = new QPainter();
+        painter.begin(pixmap);
+        try {
+            painter.setRenderHint(QPainter.Antialiasing, true);
+        } catch (eHint) {
+        }
+        var pad = 6;
+        var bw = preview.bounds.maxX - preview.bounds.minX;
+        var bh = preview.bounds.maxY - preview.bounds.minY;
+        var factor = Math.min((width - pad * 2) / (bw > 0 ? bw : 1),
+            (height - pad * 2) / (bh > 0 ? bh : 1));
+        var offX = pad + ((width - pad * 2) - bw * factor) / 2;
+        var offY = pad + ((height - pad * 2) - bh * factor) / 2;
+
+        for (var i = 0; i < preview.items.length; i++) {
+            var item = preview.items[i];
+            var style = SheetSetup.PREVIEW_STYLE[item.kind];
+            if (isNull(style)) {
+                continue;
+            }
+            var x = offX + (item.box.minX - preview.bounds.minX) * factor;
+            // Y IS FLIPPED: a drawing counts up, a pixmap counts down.
+            var y = offY + (preview.bounds.maxY - item.box.maxY) * factor;
+            var w = (item.box.maxX - item.box.minX) * factor;
+            var h = (item.box.maxY - item.box.minY) * factor;
+            var pen = new QPen(new QColor(style.line[0], style.line[1],
+                style.line[2]));
+            pen.setWidth(style.width);
+            painter.setPen(pen);
+            painter.setBrush(new QBrush(new QColor(style.fill[0],
+                style.fill[1], style.fill[2],
+                style.fill.length > 3 ? style.fill[3] : 255)));
+            painter.drawRect(x, y, Math.max(w, 1), Math.max(h, 1));
+        }
+        painter.end();
+        return pixmap;
+    } catch (ePaint) {
+        return null;
+    }
+};
+
+/** Everything the panel needs to know about the open drawing, read
+ *  once per refresh. */
+SheetSetup.readState = function(doc) {
+    var state = { ok: false, why: "", caveBox: null, caveW: 0, caveH: 0,
+        recordPath: "", hasElevation: false, bands: [], filled: {},
+        titleLines: [], footerInches: 0 };
+    if (isNull(doc)) {
+        state.why = "No drawing open.";
+        return state;
+    }
+    try {
+        state.recordPath = String(doc.getFileName());
+    } catch (ePath) {
+        state.recordPath = "";
+    }
+    state.caveBox = SheetSetup.caveBox(doc);
+    if (state.caveBox === null) {
+        state.why = "This drawing has nothing on it yet. Draw the cave " +
+            "first -- a sheet with nothing in it has no scale to be at.";
+        return state;
+    }
+    var perFoot = CsShapeLine.perFoot(doc);
+    state.caveW = (state.caveBox.maxX - state.caveBox.minX) / perFoot;
+    state.caveH = (state.caveBox.maxY - state.caveBox.minY) / perFoot;
+
+    var read = SheetSetup.readSurvey(doc);
+    state.survey = read.survey;
+    state.filled = CsSheetSetup.autoFill(read.survey, read.stats,
+        read.grade);
+    state.titleLines = CsSheetSetup.titleLines(
+        SheetSetup.titleValues(doc, state.filled));
+    state.footerInches = Math.max(
+        CsSheetSetup.linesHeight(state.titleLines) + 0.4,
+        CsSheetSetup.BAR.height + CsSheetSetup.TEXT.body * 4);
+    state.hasElevation = SheetSetup.hasElevation(doc);
+    if (state.hasElevation) {
+        try {
+            state.bands = CsProfileBox.boxes(doc);
+        } catch (eBands) {
+            state.bands = [];
+        }
+    }
+    state.ok = true;
+    return state;
+};
+
+SheetSetup.buildDock = function(appWin) {
+    var dock = new QDockWidget(qsTr("Sheet Setup"), appWin);
+    dock.objectName = "CaveSurveySheetSetupDock";
+
+    var w = { state: null, quiet: false };
+    var body = new QWidget(dock);
+    var layout = new QVBoxLayout();
+
+    // A GRID, not a QFormLayout: this bridge generates QFormLayout
+    // without addRow (probed live, 2026-09-10 -- the panel threw before
+    // it had built a single control). CsPanel.formGrid is the suite's
+    // own answer, already used by every other panel with fields on it.
+    var form = CsPanel.formGrid(1);
+    w.sheetCombo = new QComboBox();
+    for (var s = 0; s < CsSheetSetup.SHEETS.length; s++) {
+        w.sheetCombo.addItem(CsSheetSetup.SHEETS[s].name);
+        if (CsSheetSetup.SHEETS[s].name === CsSheetSetup.DEFAULT_SHEET) {
+            w.sheetCombo.currentIndex = s;
+        }
+    }
+    form.addWidget(new QLabel(qsTr("Paper:")), 0, 0);
+    form.addWidget(w.sheetCombo, 0, 1);
+
+    w.scaleCombo = new QComboBox();
+    for (var c = 0; c < CsSheetSetup.SCALES.length; c++) {
+        w.scaleCombo.addItem("1\" = " + CsSheetSetup.SCALES[c] + " ft");
+    }
+    form.addWidget(new QLabel(qsTr("Plot scale:")), 1, 0);
+    form.addWidget(w.scaleCombo, 1, 1);
+    layout.addLayout(form, 0);
+
+    w.fitLabel = new QLabel("");
+    w.fitLabel.wordWrap = true;
+    layout.addWidget(w.fitLabel, 0, 0);
+
+    w.preview = new QLabel("");
+    try {
+        w.preview.setMinimumHeight(150);
+        w.preview.alignment = Qt.AlignCenter;
+    } catch (ePrev) {
+    }
+    layout.addWidget(w.preview, 1, 0);
+
+    w.cbBorder = new QCheckBox(qsTr("Border"));
+    w.cbBar = new QCheckBox(qsTr("Scale bar"));
+    w.cbNorth = new QCheckBox(qsTr("North arrow"));
+    w.cbTitle = new QCheckBox(qsTr("Title block"));
+    w.cbElevation = new QCheckBox(qsTr("Elevation on its own sheet"));
+    w.cbBorder.checked = true;
+    w.cbBar.checked = true;
+    w.cbNorth.checked = true;
+    w.cbTitle.checked = true;
+    layout.addWidget(w.cbBorder, 0, 0);
+    layout.addWidget(w.cbBar, 0, 0);
+    layout.addWidget(w.cbNorth, 0, 0);
+    layout.addWidget(w.cbTitle, 0, 0);
+    layout.addWidget(w.cbElevation, 0, 0);
+
+    w.note = new QLabel("");
+    w.note.wordWrap = true;
+    layout.addWidget(w.note, 0, 0);
+
+    var row = new QHBoxLayout();
+    w.buildButton = new QPushButton(qsTr("Build Sheet"));
+    w.buildButton.toolTip = qsTr("Writes the sheet as its own file " +
+        "beside the cave and opens it. Your drawing is not touched.");
+    row.addWidget(w.buildButton, 1, 0);
+    w.refreshButton = new QPushButton(qsTr("Re-read Drawing"));
+    w.refreshButton.toolTip = qsTr("Measure the cave again -- after " +
+        "another trip, or after tracing more of it.");
+    row.addWidget(w.refreshButton, 0, 0);
+    layout.addLayout(row, 0);
+
+    body.setLayout(layout);
+    dock.setWidget(body);
+    SheetSetup.widgets = w;
+
+    var changed = function() {
+        if (w.quiet !== true) {
+            SheetSetup.repaint();
+        }
+    };
+    w.sheetCombo["currentIndexChanged(int)"].connect(function() {
+        // The paper changed, so the scale that fits probably did too.
+        SheetSetup.suggestScale();
+        changed();
+    });
+    w.scaleCombo["currentIndexChanged(int)"].connect(changed);
+    w.cbBorder.toggled.connect(changed);
+    w.cbBar.toggled.connect(changed);
+    w.cbNorth.toggled.connect(changed);
+    w.cbTitle.toggled.connect(changed);
+    w.cbElevation.toggled.connect(changed);
+    w.buildButton.clicked.connect(function() { SheetSetup.build(); });
+    w.refreshButton.clicked.connect(function() { SheetSetup.refresh(); });
+
+    return dock;
+};
+
+/** The paper's most detailed standard scale, chosen for the caver. */
+SheetSetup.suggestScale = function() {
+    var w = SheetSetup.widgets;
+    if (isNull(w) || isNull(w.state) || w.state.ok !== true) {
         return;
+    }
+    var sheet = CsSheetSetup.sheetByName(String(w.sheetCombo.currentText));
+    var fit = CsSheetSetup.fit(w.state.caveW, w.state.caveH, sheet,
+        w.state.footerInches);
+    var at = CsSheetSetup.SCALES.indexOf(fit.scale);
+    var was = w.quiet;
+    w.quiet = true;
+    w.scaleCombo.currentIndex = at < 0 ? 0 : at;
+    w.quiet = was;
+};
+
+/** Reads the drawing again and repaints. */
+SheetSetup.refresh = function() {
+    var w = SheetSetup.widgets;
+    if (isNull(w)) {
+        return;
+    }
+    var doc = null;
+    try {
+        doc = EAction.getDocument();
+    } catch (eDoc) {
+        doc = null;
+    }
+    w.state = SheetSetup.readState(doc);
+    w.quiet = true;
+    try {
+        w.cbElevation.enabled = w.state.hasElevation === true;
+        w.cbElevation.checked = w.state.hasElevation === true;
+    } finally {
+        w.quiet = false;
+    }
+    SheetSetup.suggestScale();
+    SheetSetup.repaint();
+};
+
+/** Redraws the picture and the words under it. */
+SheetSetup.repaint = function() {
+    var w = SheetSetup.widgets;
+    if (isNull(w) || isNull(w.state)) {
+        return;
+    }
+    if (w.state.ok !== true) {
+        w.fitLabel.text = w.state.why;
+        w.note.text = "";
+        w.buildButton.enabled = false;
+        return;
+    }
+    var sheet = CsSheetSetup.sheetByName(String(w.sheetCombo.currentText));
+    var scale = CsSheetSetup.SCALES[w.scaleCombo.currentIndex];
+    var fit = CsSheetSetup.fit(w.state.caveW, w.state.caveH, sheet,
+        w.state.footerInches);
+
+    var preview = CsSheetSetup.preview({
+        caveBox: w.state.caveBox, sheet: sheet, scale: scale,
+        turned: fit.turned, footerInches: w.state.footerInches,
+        wants: { border: w.cbBorder.checked, bar: w.cbBar.checked,
+            north: w.cbNorth.checked, title: w.cbTitle.checked },
+        elevation: w.cbElevation.checked === true,
+        bands: w.state.bands
+    });
+    var pixmap = SheetSetup.paintPreview(preview,
+        Math.max(200, w.preview.width - 8), 150);
+    if (pixmap !== null) {
+        w.preview.pixmap = pixmap;
     }
 
-    // THE RECORD IS READ, NEVER WRITTEN. Everything below happens in a
-    // copy: laying out a sheet moves the elevation and draws a border
-    // round the cave, and that is a decision about ONE presentation of
-    // the map, not something the cave's own record should carry.
-    var recordPath = "";
-    try {
-        recordPath = String(doc.getFileName());
-    } catch (ePath) {
-        recordPath = "";
+    var spill = CsSheetSetup.previewFits(preview);
+    w.fitLabel.text = qsTr("The plan measures %1 x %2 ft.")
+        .arg(Math.round(w.state.caveW)).arg(Math.round(w.state.caveH)) +
+        "  " + (fit.fits ?
+            qsTr("Fits at 1\" = %1 ft").arg(fit.scale) +
+                (fit.turned ? qsTr(", paper turned.") : ".") :
+            qsTr("It does not fit this paper at any standard scale."));
+    // THE SPILL IS THE POINT OF THE PICTURE. Everything else the panel
+    // says could be worked out; this is the one thing a caver would
+    // otherwise learn by building the file and looking at it.
+    w.note.text = spill.fits ?
+        qsTr("Everything sits on the paper.") :
+        qsTr("Off the paper: %1. Try a smaller scale or bigger paper.")
+            .arg(spill.spilling.join(", "));
+    w.buildButton.enabled = (w.state.recordPath !== "");
+    if (w.state.recordPath === "") {
+        w.buildButton.toolTip = qsTr("Save this drawing first -- the " +
+            "sheet is written beside it, and an unsaved drawing has " +
+            "nowhere to put one.");
     }
-    if (recordPath === "") {
-        warning(qsTr("Sheet Setup: save this drawing first.\n" +
-            "The sheet is built as a separate file beside the cave's " +
-            "own, and a drawing with no name yet has nowhere to put " +
-            "one."));
+};
+
+/** Builds the file. */
+SheetSetup.build = function() {
+    var w = SheetSetup.widgets;
+    if (isNull(w) || isNull(w.state) || w.state.ok !== true) {
         return;
     }
-    if (doc.isModified() === true) {
+    var doc = null;
+    try {
+        doc = EAction.getDocument();
+    } catch (eDoc) {
+        doc = null;
+    }
+    if (!isNull(doc) && doc.isModified() === true) {
         warning(qsTr("Sheet Setup: save this drawing first.\n" +
             "The sheet is built from the FILE on disk, so anything " +
             "not yet saved would be missing from it."));
         return;
     }
-
-    var caveBox = SheetSetup.caveBox(doc);
-    if (caveBox === null) {
-        warning(qsTr("Sheet Setup: this drawing has nothing on it yet.\n" +
-            "Draw the cave first -- the sheet is built around it, and " +
-            "a sheet with nothing in it has no scale to be at."));
-        return;
-    }
-    var perFoot = CsShapeLine.perFoot(doc);
-    var caveW = (caveBox.maxX - caveBox.minX) / perFoot;
-    var caveH = (caveBox.maxY - caveBox.minY) / perFoot;
-
-    var read = SheetSetup.readSurvey(doc);
-    var filled = CsSheetSetup.autoFill(read.survey, read.stats, read.grade);
-
-    // ---- ask ---------------------------------------------------------
-    var dlg = new QDialog(getMainWindow());
-    dlg.windowTitle = qsTr("Sheet Setup");
-    var layout = new QVBoxLayout();
-    layout.addWidget(new QLabel(qsTr(
-        "The cave measures %1 x %2 ft. Everything below is drawn at the " +
-        "plot scale, so it prints the size it should.")
-        .arg(Math.round(caveW)).arg(Math.round(caveH))), 0, 0);
-
-    var form = new QFormLayout();
-    var sheetCombo = new QComboBox();
-    var defaultRow = 0;
-    for (var s = 0; s < CsSheetSetup.SHEETS.length; s++) {
-        sheetCombo.addItem(CsSheetSetup.SHEETS[s].name);
-        if (CsSheetSetup.SHEETS[s].name === CsSheetSetup.DEFAULT_SHEET) {
-            defaultRow = s;
-        }
-    }
-    sheetCombo.currentIndex = defaultRow;
-    form.addRow(qsTr("Paper:"), sheetCombo);
-
-    var scaleCombo = new QComboBox();
-    for (var c = 0; c < CsSheetSetup.SCALES.length; c++) {
-        scaleCombo.addItem("1\" = " + CsSheetSetup.SCALES[c] + " ft");
-    }
-    form.addRow(qsTr("Plot scale:"), scaleCombo);
-
-    var fitLabel = new QLabel("");
-    fitLabel.wordWrap = true;
-    form.addRow("", fitLabel);
-    layout.addLayout(form, 0);
-
-    /** Re-picks the scale that fits whenever the paper changes, and
-     *  says what it chose. A caver who wants another scale overrides
-     *  it; one who does not now has a sheet that fits, which is the
-     *  question they could not have answered. */
-    var suggest = function() {
-        var sheet = CsSheetSetup.sheetByName(
-            String(sheetCombo.currentText));
-        var fit = CsSheetSetup.fit(caveW, caveH, sheet);
-        var at = CsSheetSetup.SCALES.indexOf(fit.scale);
-        scaleCombo.currentIndex = at < 0 ? 0 : at;
-        fitLabel.text = fit.fits ?
-            (qsTr("Fits at 1\" = %1 ft").arg(fit.scale) +
-                (fit.turned ? qsTr(", with the paper turned.") : ".")) :
-            qsTr("This cave does not fit on that paper at any standard " +
-                "scale -- pick bigger paper, or plot it in sections.");
-    };
-    suggest();
-    sheetCombo["currentIndexChanged(int)"].connect(suggest);
-
-    var cbBorder = new QCheckBox(qsTr("Border around the cave"));
-    var cbBar = new QCheckBox(qsTr("Scale bar"));
-    var cbNorth = new QCheckBox(qsTr("North arrow, with the declination"));
-    var cbTitle = new QCheckBox(qsTr("Title block, filled in from the survey"));
-    var hasElevation = SheetSetup.hasElevation(doc);
-    var cbElevation = new QCheckBox(hasElevation ?
-        qsTr("A second sheet for the extended elevation, at the same scale") :
-        qsTr("A second sheet for the extended elevation (this drawing " +
-            "has none yet)"));
-    cbElevation.enabled = hasElevation;
-    cbElevation.checked = hasElevation;
-    cbBorder.checked = true;
-    cbBar.checked = true;
-    cbNorth.checked = true;
-    cbTitle.checked = true;
-    layout.addWidget(cbBorder, 0, 0);
-    layout.addWidget(cbBar, 0, 0);
-    layout.addWidget(cbNorth, 0, 0);
-    layout.addWidget(cbTitle, 0, 0);
-    layout.addWidget(cbElevation, 0, 0);
-
-    var known = [];
-    for (var key in filled) {
-        if (filled.hasOwnProperty(key)) {
-            known.push(CsSheet.fieldById(key).label);
-        }
-    }
-    var note = new QLabel(known.length === 0 ?
-        qsTr("The drawing holds no survey to fill the title block from " +
-            "-- the lines are drawn empty for you to type into.") :
-        qsTr("From the survey: %1. The location is never filled in " +
-            "automatically -- type it yourself.").arg(known.join(", ")));
-    note.wordWrap = true;
-    layout.addWidget(note, 0, 0);
-
-    var buttons = new QDialogButtonBox(QDialogButtonBox.Ok |
-        QDialogButtonBox.Cancel);
-    // CLOSURES, NOT SLOT NAMES -- see RepairDrawing.js's note; this
-    // build's connect() throws on a slot name.
-    buttons.accepted.connect(function() { dlg.accept(); });
-    buttons.rejected.connect(function() { dlg.reject(); });
-    layout.addWidget(buttons, 0, 0);
-    dlg.setLayout(layout);
-
-    if (dlg.exec() !== QDialog.Accepted) {
-        return;
-    }
-    var sheet = CsSheetSetup.sheetByName(String(sheetCombo.currentText));
-    var scale = CsSheetSetup.SCALES[scaleCombo.currentIndex];
-    var wants = {
-        border: cbBorder.checked, bar: cbBar.checked,
-        north: cbNorth.checked, title: cbTitle.checked
-    };
-    var wantElevation = cbElevation.checked === true;
-
-    // ---- draw --------------------------------------------------------
-    var fit = CsSheetSetup.fit(caveW, caveH, sheet);
-    EAction.handleUserMessage(SheetSetup.intoCopy(recordPath, {
-        caveBox: caveBox, sheet: sheet, scale: scale,
-        turned: fit.turned, wants: wants, filled: filled,
-        survey: read.survey, elevation: wantElevation
+    var sheet = CsSheetSetup.sheetByName(String(w.sheetCombo.currentText));
+    var scale = CsSheetSetup.SCALES[w.scaleCombo.currentIndex];
+    var fit = CsSheetSetup.fit(w.state.caveW, w.state.caveH, sheet,
+        w.state.footerInches);
+    EAction.handleUserMessage(SheetSetup.intoCopy(w.state.recordPath, {
+        caveBox: w.state.caveBox, sheet: sheet, scale: scale,
+        turned: fit.turned,
+        wants: { border: w.cbBorder.checked, bar: w.cbBar.checked,
+            north: w.cbNorth.checked, title: w.cbTitle.checked },
+        filled: w.state.filled, survey: w.state.survey,
+        elevation: w.cbElevation.checked === true
     }));
-}
+};
+
+SheetSetup.ensureDock = function() {
+    if (csSheetSetupDock !== undefined && csSheetSetupDock !== null) {
+        return csSheetSetupDock;
+    }
+    var appWin = RMainWindowQt.getMainWindow();
+    csSheetSetupDock = SheetSetup.buildDock(appWin);
+    appWin.addDockWidget(Qt.RightDockWidgetArea, csSheetSetupDock);
+    return csSheetSetupDock;
+};
 
 /**
  * Builds the sheet in a COPY of the record and opens it.
@@ -725,7 +924,21 @@ SheetSetup.moveElevation = function(doc, di, sheetBox) {
 
 SheetSetup.prototype.beginEvent = function() {
     EAction.prototype.beginEvent.call(this);
-    sheetSetupRun();
+
+    try {
+        var dock = SheetSetup.ensureDock();
+        // Always opens and always re-reads: a caver reaching for this
+        // wants to look at the layout, and toggling it shut on a second
+        // press would make "show me again" a two-click gesture whose
+        // first click hides the answer. Same rule as Check Map.
+        dock.visible = true;
+        SheetSetup.refresh();
+    } catch (e) {
+        csSheetSetupDock = undefined;
+        warning("Sheet Setup: this CaveCAD build refused the docked " +
+            "panel (" + e + ") -- please report this.");
+    }
+
     this.terminate();
 };
 
@@ -738,10 +951,23 @@ SheetSetup.init = function(basePath) {
     action.setStatusTip(qsTr("Border, scale bar, north arrow and a " +
         "title block, all at the plot scale you choose"));
     action.setDefaultCommands(["sheetsetup", "sheet"]);
+    SheetSetup.basePath = basePath;
     // FIRST in stage 5: the sheet is what the rest of this stage
     // decorates, and a legend placed before there is a sheet to place
     // it on lands in the middle of the cave.
     action.setGroupSortOrder(454);
     action.setSortOrder(5);
     action.setWidgetNames(["CaveSurveyMenu", "CaveSurveyToolBar"]);
+
+    // Built during init like the suite's other docks: the main window's
+    // restoreState() runs after this and can only place a dock that
+    // already exists. Hidden until the menu entry shows it.
+    try {
+        var dock = SheetSetup.ensureDock();
+        dock.visible = false;
+    } catch (eInit) {
+        csSheetSetupDock = undefined;
+        warning("Sheet Setup: could not build the panel at startup (" +
+            eInit + "); the menu entry will try again.");
+    }
 };

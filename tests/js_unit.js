@@ -23846,6 +23846,85 @@ eqs(CsSymbolStore.PREFIX, "SYM_", "the symbol block prefix");
         "CsSheetSetup: the two sheets are told apart by kind, because " +
             "they do not carry the same furniture");
 
+    // -- the preview -----------------------------------------------
+    // Rough by design: where things go, not what they look like. What
+    // it has to get right is the one question it exists to answer --
+    // does this fit on this paper at this scale.
+    var previewState = {
+        caveBox: { minX: 0, minY: 0, maxX: 1000, maxY: 400 },
+        sheet: archD, scale: 50, turned: false, footerInches: 4.0,
+        wants: { border: true, bar: true, north: true, title: true },
+        elevation: false, bands: []
+    };
+    var pv = CsSheetSetup.preview(previewState);
+    var kinds = {};
+    for (i = 0; i < pv.items.length; i++) {
+        kinds[pv.items[i].kind] = (kinds[pv.items[i].kind] || 0) + 1;
+    }
+    ok(kinds["sheet"] === 1, "CsSheetSetup: the preview has a sheet");
+    ok(kinds["cave"] === 1, "CsSheetSetup: and the cave on it");
+    ok(kinds["title"] === 1 && kinds["bar"] === 1 && kinds["north"] === 1,
+        "CsSheetSetup: and each piece of furniture asked for");
+    ok(CsSheetSetup.previewFits(pv).fits === true,
+        "CsSheetSetup: a cave that fits is reported as fitting");
+
+    // Unticking a piece takes it out of the picture, which is the whole
+    // reason the picture redraws as the boxes are ticked.
+    previewState.wants.north = false;
+    var noNorth = CsSheetSetup.preview(previewState);
+    var hasNorth = false;
+    for (i = 0; i < noNorth.items.length; i++) {
+        if (noNorth.items[i].kind === "north") { hasNorth = true; }
+    }
+    ok(!hasNorth, "CsSheetSetup: what is not ticked is not previewed");
+    previewState.wants.north = true;
+
+    // A cave far too big for the paper SPILLS, and the preview says
+    // which part -- the one thing a caver would otherwise learn by
+    // building the file and looking at it.
+    var tooBig = CsSheetSetup.preview({
+        caveBox: { minX: 0, minY: 0, maxX: 100000, maxY: 100000 },
+        sheet: archD, scale: 50, turned: false, footerInches: 4.0,
+        wants: { border: true, bar: true, north: true, title: true },
+        elevation: false, bands: []
+    });
+    var spill = CsSheetSetup.previewFits(tooBig);
+    ok(spill.fits === false && spill.spilling.indexOf("cave") >= 0,
+        "CsSheetSetup: a cave off the paper is named as the thing off " +
+            "the paper (" + spill.spilling.join(", ") + ")");
+
+    // The elevation adds a second sheet, and its bands land on it.
+    var withBands = CsSheetSetup.preview({
+        caveBox: { minX: 0, minY: 0, maxX: 1000, maxY: 400 },
+        sheet: archD, scale: 50, turned: false, footerInches: 4.0,
+        wants: { border: true, bar: true, north: true, title: true },
+        elevation: true,
+        bands: [{ minX: 0, minY: -900, maxX: 800, maxY: -800 },
+                { minX: 0, minY: -1100, maxX: 600, maxY: -1000 }]
+    });
+    var sheetsSeen = 0, bandsSeen = 0, bandBox = null;
+    var elevBoxSeen = null;
+    for (i = 0; i < withBands.items.length; i++) {
+        if (withBands.items[i].kind === "elevation-sheet") {
+            sheetsSeen += 1;
+            elevBoxSeen = withBands.items[i].box;
+        }
+        if (withBands.items[i].kind === "band") {
+            bandsSeen += 1;
+            bandBox = withBands.items[i].box;
+        }
+    }
+    eqs(sheetsSeen, 1, "CsSheetSetup: the elevation gets one sheet");
+    eqs(bandsSeen, 2, "CsSheetSetup: with every band on it");
+    ok(bandBox.minX >= elevBoxSeen.minX && bandBox.maxX <= elevBoxSeen.maxX,
+        "CsSheetSetup: the bands are previewed where they will land, " +
+            "inside that sheet -- not where they sit in the drawing now");
+    ok(CsSheetSetup.previewFits(withBands).fits === true,
+        "CsSheetSetup: and they fit");
+
+    ok(CsSheetSetup.preview(null).items.length === 0,
+        "CsSheetSetup: nothing to preview previews nothing");
+
     // -- what the title block can be told --------------------------
     var survey = CsModel.newSurvey();
     survey.caveName = "Test Cave";

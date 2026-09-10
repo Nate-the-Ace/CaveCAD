@@ -375,6 +375,165 @@ CsSheetSetup.borderBox = function(caveBox, sheet, scale, turned,
 };
 
 // ---------------------------------------------------------------------
+// THE PREVIEW.
+//
+// Pure: it answers rectangles, and the panel paints them. A caver
+// choosing paper and scale is answering "will this fit, and where will
+// everything sit", and answering that by building the file and looking
+// is a slow way to find out you wanted the next size up.
+//
+// ROUGH ON PURPOSE. The boxes are where things go, not what they look
+// like: a title block is a block, the cave is its own footprint, the
+// elevation is its bands. A preview that tried to be the drawing would
+// be the drawing, slowly.
+// ---------------------------------------------------------------------
+
+/**
+ * Every rectangle a sheet layout puts on the paper, in DRAWING units.
+ *
+ * \param state {
+ *   caveBox      the plan's own extents
+ *   sheet        a row from CsSheetSetup.SHEETS
+ *   scale        feet per inch
+ *   turned       paper turned?
+ *   footerInches how tall the furniture band is
+ *   wants        {border, bar, north, title}
+ *   elevation    true to include the second sheet
+ *   bands        [{minX, minY, maxX, maxY}] the elevation's own boxes
+ * }
+ *
+ * \return { bounds: {minX, minY, maxX, maxY}, items: [{kind, box}] }
+ *
+ * `kind` is one of "sheet", "elevation-sheet", "cave", "title", "bar",
+ * "north", "band" -- the panel colours by it and the tests read it.
+ */
+CsSheetSetup.preview = function(state) {
+    var out = { bounds: null, items: [] };
+    if (isNull(state) || isNull(state.caveBox) || isNull(state.sheet)) {
+        return out;
+    }
+    var scale = state.scale;
+    var wants = isNull(state.wants) ? {} : state.wants;
+    var box = CsSheetSetup.borderBox(state.caveBox, state.sheet, scale,
+        state.turned === true, state.footerInches);
+
+    var add = function(kind, minX, minY, maxX, maxY) {
+        out.items.push({ kind: kind,
+            box: { minX: minX, minY: minY, maxX: maxX, maxY: maxY } });
+    };
+
+    add("sheet", box.minX, box.minY, box.maxX, box.maxY);
+    add("cave", state.caveBox.minX, state.caveBox.minY,
+        state.caveBox.maxX, state.caveBox.maxY);
+
+    var inch = function(v) { return v * scale; };
+    var foot = box.minY + box.margin * 0.55;
+
+    if (wants.title === true) {
+        var titleH = isNull(state.footerInches) ? 2 : state.footerInches;
+        add("title", box.minX + box.margin,
+            box.minY + box.margin * 0.35,
+            box.minX + box.margin + inch(CsSheetSetup.TITLE_INCHES),
+            box.minY + box.margin * 0.35 + inch(titleH));
+    }
+    if (wants.bar === true) {
+        var barX = box.minX + box.width * 0.45;
+        add("bar", barX, foot, barX + inch(CsSheetSetup.BAR.length),
+            foot + inch(CsSheetSetup.BAR.height * 3));
+    }
+    if (wants.north === true) {
+        var nx = box.maxX - box.margin;
+        add("north", nx - inch(0.2), foot, nx + inch(0.2),
+            foot + inch(1.4));
+    }
+
+    if (state.elevation === true) {
+        var second = CsSheetSetup.elevationSheetBox(box, scale);
+        add("elevation-sheet", second.minX, second.minY,
+            second.maxX, second.maxY);
+        var bands = isNull(state.bands) ? [] : state.bands;
+        if (bands.length > 0) {
+            // The bands as they will land: the region keeps its own
+            // stacking and is slid into the sheet's top-left inset,
+            // which is exactly what SheetSetup.moveElevation does.
+            var bMinX = null, bMaxY = null;
+            for (var i = 0; i < bands.length; i++) {
+                if (bMinX === null || bands[i].minX < bMinX) {
+                    bMinX = bands[i].minX;
+                }
+                if (bMaxY === null || bands[i].maxY > bMaxY) {
+                    bMaxY = bands[i].maxY;
+                }
+            }
+            var inset = (second.maxX - second.minX) *
+                CsSheetSetup.MARGIN_FRACTION;
+            var dx = (second.minX + inset) - bMinX;
+            var dy = (second.maxY - inset) - bMaxY;
+            for (i = 0; i < bands.length; i++) {
+                add("band", bands[i].minX + dx, bands[i].minY + dy,
+                    bands[i].maxX + dx, bands[i].maxY + dy);
+            }
+        }
+    }
+
+    for (var k = 0; k < out.items.length; k++) {
+        var b = out.items[k].box;
+        if (out.bounds === null) {
+            out.bounds = { minX: b.minX, minY: b.minY,
+                maxX: b.maxX, maxY: b.maxY };
+        } else {
+            out.bounds.minX = Math.min(out.bounds.minX, b.minX);
+            out.bounds.minY = Math.min(out.bounds.minY, b.minY);
+            out.bounds.maxX = Math.max(out.bounds.maxX, b.maxX);
+            out.bounds.maxY = Math.max(out.bounds.maxY, b.maxY);
+        }
+    }
+    return out;
+};
+
+/**
+ * Does everything the preview holds actually sit on its own paper?
+ *
+ * The one question a preview exists to answer before a file is built.
+ * A band hanging off the elevation sheet is the common way to be wrong:
+ * the elevation is drawn at the plan's scale and does not shrink to
+ * fit, so a long cave overruns and the answer is bigger paper.
+ */
+CsSheetSetup.previewFits = function(preview) {
+    var sheets = [];
+    var i, item;
+    for (i = 0; i < preview.items.length; i++) {
+        item = preview.items[i];
+        if (item.kind === "sheet" || item.kind === "elevation-sheet") {
+            sheets.push(item.box);
+        }
+    }
+    var out = { fits: true, spilling: [] };
+    for (i = 0; i < preview.items.length; i++) {
+        item = preview.items[i];
+        if (item.kind === "sheet" || item.kind === "elevation-sheet") {
+            continue;
+        }
+        var inside = false;
+        for (var s = 0; s < sheets.length; s++) {
+            if (item.box.minX >= sheets[s].minX - 0.001 &&
+                    item.box.maxX <= sheets[s].maxX + 0.001 &&
+                    item.box.minY >= sheets[s].minY - 0.001 &&
+                    item.box.maxY <= sheets[s].maxY + 0.001) {
+                inside = true;
+            }
+        }
+        if (!inside) {
+            out.fits = false;
+            if (out.spilling.indexOf(item.kind) === -1) {
+                out.spilling.push(item.kind);
+            }
+        }
+    }
+    return out;
+};
+
+// ---------------------------------------------------------------------
 // WHAT THE TITLE BLOCK CAN BE TOLD WITHOUT ASKING.
 //
 // Everything below reads the survey the drawing already holds. Nothing
