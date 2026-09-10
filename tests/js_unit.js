@@ -23165,6 +23165,67 @@ eqs(CsSymbolStore.PREFIX, "SYM_", "the symbol block prefix");
         "nothing to fix") >= 0,
         "CsCheck: a clean map is told so in words");
 
+    // -- ignoring a finding ---------------------------------------
+    var set = CsCheck.parseIgnored("sheet.north, survey.closure");
+    ok(set["sheet.north"] === true && set["survey.closure"] === true,
+        "CsCheck: an ignore list parses, whitespace and all");
+    ok(CsCheck.serializeIgnored(set) === "sheet.north,survey.closure",
+        "CsCheck: and comes back in a stable order");
+    ok(CsCheck.serializeIgnored(CsCheck.parseIgnored("")) === "",
+        "CsCheck: an empty list round-trips to empty");
+    ok(CsCheck.serializeIgnored(CsCheck.parseIgnored(null)) === "",
+        "CsCheck: and so does a setting that was never written");
+
+    var added = CsCheck.setIgnored({}, "sheet.legend", true);
+    ok(added["sheet.legend"] === true,
+        "CsCheck: a code can be ignored");
+    ok(CsCheck.serializeIgnored(
+        CsCheck.setIgnored(added, "sheet.legend", false)) === "",
+        "CsCheck: and un-ignored again");
+    ok(CsCheck.setIgnored(added, "sheet.legend", true)["sheet.legend"] ===
+        true && CsCheck.serializeIgnored(
+            CsCheck.setIgnored(added, "sheet.legend", true)) ===
+            "sheet.legend",
+        "CsCheck: ignoring the same code twice does not double it");
+
+    s = cleanScan();
+    s.layers[0].count = 0;   // no scale bar
+    s.layers[1].count = 0;   // no north arrow
+    var both = CsCheck.review(s);
+    var split = CsCheck.splitIgnored(both.findings,
+        CsCheck.parseIgnored("sheet.north"));
+    ok(split.shown.length === 1 && split.shown[0].code === "sheet.scalebar",
+        "CsCheck: an ignored code is held back");
+    ok(split.ignored.length === 1 && split.ignored[0].code === "sheet.north",
+        "CsCheck: and handed back separately rather than dropped");
+    ok(CsCheck.splitIgnored(both.findings, null).shown.length === 2,
+        "CsCheck: no ignore list holds nothing back");
+
+    // A silent ignore list is worse than none: the count is said.
+    var quiet = { findings: [], failed: [], checked: 14, clean: true };
+    ok(CsCheck.summary(quiet, 2).indexOf("2 ignored") > 0,
+        "CsCheck: a clean map still says how many findings are ignored");
+    ok(CsCheck.summary(quiet, 0).indexOf("ignored") === -1,
+        "CsCheck: and says nothing about ignoring when nothing is");
+    ok(CsCheck.summary(both, 3).indexOf("3 ignored") > 0,
+        "CsCheck: the same is true of a map with findings");
+
+    // Two caves that flatten to the same token must not share a list.
+    ok(CsCheck.pathToken("/caves/Bat Cave/Bat Cave.dxf") !==
+        CsCheck.pathToken("/caves/Bat/Cave/Bat Cave.dxf"),
+        "CsCheck: two paths that sanitize alike get different keys");
+    ok(CsCheck.pathToken("/a/b.dxf") === CsCheck.pathToken("/a/b.dxf"),
+        "CsCheck: and the same path always gets the same key");
+    ok(CsCheck.pathToken("/a/b.dxf").indexOf("/") === -1,
+        "CsCheck: a key holds no slash -- settings would read it as a " +
+            "group and never find the value again");
+    var longPath = "/very";
+    for (var lp = 0; lp < 40; lp++) {
+        longPath += "/directory" + lp;
+    }
+    ok(CsCheck.pathToken(longPath + "/Cave.dxf").length < 80,
+        "CsCheck: and a deep path still makes a readable key");
+
     // -- a check that throws does not take the others with it -----
     var saved = CsCheck.CHECKS[0].run;
     CsCheck.CHECKS[0].run = function() { throw "deliberate"; };

@@ -46,7 +46,12 @@ CheckMap.buildDock = function(appWin) {
     // silently forgets where it was.
     dock.objectName = "CaveSurveyCheckMapDock";
 
-    var w = { findings: [] };
+    // `findings` is what the LIST shows; `ignored` is the set of codes
+    // held back for this drawing, and `ignoredFindings` the ones it
+    // actually held back this pass -- kept so the panel can say how
+    // many, and show them on request.
+    var w = { findings: [], ignored: {}, ignoredFindings: [],
+        showIgnored: false, path: "" };
     var body = new QWidget(dock);
     var layout = new QVBoxLayout();
 
@@ -128,12 +133,140 @@ CheckMap.buildDock = function(appWin) {
     w.againButton.clicked.connect(function() {
         CheckMap.refresh();
     });
+
+    try {
+        w.list.contextMenuPolicy = Qt.CustomContextMenu;
+        w.list.customContextMenuRequested.connect(function(pos) {
+            // Right-click SELECTS what it lands on, so the menu and the
+            // why box agree about which finding is meant -- the same
+            // rule CaveShelf's list follows.
+            try {
+                var row = w.list.rowAt(pos.y());
+                if (row >= 0 && row !== w.list.currentRow()) {
+                    w.list.selectRow(row);
+                }
+            } catch (eRow) {
+                // selection stays where it was
+            }
+            CheckMap.showListMenu();
+        });
+    } catch (eMenu) {
+        // no custom menu on this bridge: every finding still shows,
+        // which is the safe way to fail for a checker
+    }
     return dock;
 };
 
-/** The row one finding gets: how bad, then what is wrong. */
-CheckMap.rowText = function(finding) {
-    return CsCheck.LABEL[finding.severity] + "  --  " + finding.title;
+/** The row one finding gets: how bad, then what is wrong. An ignored
+ *  one says so first -- it is only on screen because Show Ignored is
+ *  on, and a row that looks like every other row would read as a fault
+ *  that has come back. */
+CheckMap.rowText = function(finding, ignored) {
+    return (ignored === true ? "(ignored)  " : "") +
+        CsCheck.LABEL[finding.severity] + "  --  " + finding.title;
+};
+
+// ---------------------------------------------------------------------
+// The ignore list -- see Core/CsCheck.js for why it lives in settings
+// rather than in the drawing.
+// ---------------------------------------------------------------------
+
+/** The settings key this drawing's ignore list is kept under. */
+CheckMap.ignoreKey = function(path) {
+    return CsCheck.IGNORE_SETTING + "/" + CsCheck.pathToken(path);
+};
+
+/** Reads the ignore list for one drawing. A drawing never saved has no
+ *  path and gets an empty list every time -- nothing to key on, and
+ *  inventing a key would attach one caver's decisions to every unsaved
+ *  drawing they open. */
+CheckMap.loadIgnored = function(path) {
+    if (isNull(path) || String(path) === "") {
+        return {};
+    }
+    try {
+        return CsCheck.parseIgnored(
+            RSettings.getStringValue(CheckMap.ignoreKey(path), ""));
+    } catch (e) {
+        return {};
+    }
+};
+
+CheckMap.saveIgnored = function(path, set) {
+    if (isNull(path) || String(path) === "") {
+        return;
+    }
+    try {
+        RSettings.setValue(CheckMap.ignoreKey(path),
+            CsCheck.serializeIgnored(set));
+    } catch (e) {
+        EAction.handleUserMessage("Check Map: could not remember that " +
+            "(" + e + ") -- the finding will be back next time.");
+    }
+};
+
+/** Ignore, or stop ignoring, the selected finding. */
+CheckMap.setSelectedIgnored = function(on) {
+    var w = CheckMap.widgets;
+    var finding = CheckMap.selected();
+    if (isNull(w) || finding === null) {
+        return;
+    }
+    w.ignored = CsCheck.setIgnored(w.ignored, finding.code, on);
+    CheckMap.saveIgnored(w.path, w.ignored);
+    EAction.handleUserMessage(on ?
+        ("Check Map: ignoring \"" + finding.title + "\" on this map. " +
+            "Right-click and Show Ignored to bring it back.") :
+        ("Check Map: no longer ignoring \"" + finding.title + "\"."));
+    CheckMap.refresh();
+};
+
+/** Right-click on a finding. */
+CheckMap.showListMenu = function() {
+    var w = CheckMap.widgets;
+    var finding = CheckMap.selected();
+    var menu = new QMenu(w.list);
+
+    var already = finding !== null && w.ignored[finding.code] === true;
+    var ignoreAct = menu.addAction(already ?
+        qsTr("Stop Ignoring This") : qsTr("Ignore This"));
+    ignoreAct.enabled = (finding !== null) && (String(w.path) !== "");
+    if (finding !== null && String(w.path) === "") {
+        // Said, not silently greyed: a caver right-clicking a disabled
+        // menu item deserves the reason.
+        ignoreAct.toolTip = qsTr("Save the drawing first -- the ignore " +
+            "list is remembered per drawing, and an unsaved one has no " +
+            "name to remember it under.");
+    }
+    ignoreAct.triggered.connect(function() {
+        CheckMap.setSelectedIgnored(!already);
+    });
+
+    menu.addSeparator();
+
+    var showAct = menu.addAction(qsTr("Show Ignored"));
+    showAct.checkable = true;
+    showAct.checked = (w.showIgnored === true);
+    showAct.triggered.connect(function() {
+        w.showIgnored = !(w.showIgnored === true);
+        CheckMap.refresh();
+    });
+
+    var clearAct = menu.addAction(qsTr("Stop Ignoring Everything"));
+    clearAct.enabled = CsCheck.serializeIgnored(w.ignored) !== "";
+    clearAct.triggered.connect(function() {
+        w.ignored = {};
+        CheckMap.saveIgnored(w.path, w.ignored);
+        EAction.handleUserMessage("Check Map: every finding is back.");
+        CheckMap.refresh();
+    });
+
+    menu.exec(QCursor.pos());
+    try {
+        menu.deleteLater();
+    } catch (eDel) {
+        // a leaked popup menu is cosmetic
+    }
 };
 
 CheckMap.refresh = function() {
@@ -155,21 +288,41 @@ CheckMap.refresh = function() {
         return;
     }
 
-    var result = CsCheck.run(doc);
-    w.findings = result.findings;
-    w.list.setRowCount(0);
-    w.list.setRowCount(result.findings.length);
-    for (var i = 0; i < result.findings.length; i++) {
-        w.list.setItem(i, 0,
-            new QTableWidgetItem(CheckMap.rowText(result.findings[i])));
+    try {
+        w.path = String(doc.getFileName());
+    } catch (ePath) {
+        w.path = "";
     }
-    w.summary.text = CsCheck.summary(result);
-    w.why.plainText = result.clean ?
+    w.ignored = CheckMap.loadIgnored(w.path);
+
+    var result = CsCheck.run(doc);
+    var split = CsCheck.splitIgnored(result.findings, w.ignored);
+    w.ignoredFindings = split.ignored;
+    // What the LIST holds, in the order it holds it: the live findings,
+    // then the ignored ones when they are being shown. w.findings has
+    // to match the rows exactly -- CheckMap.selected() indexes one by
+    // the other.
+    w.findings = (w.showIgnored === true) ?
+        split.shown.concat(split.ignored) : split.shown;
+
+    w.list.setRowCount(0);
+    w.list.setRowCount(w.findings.length);
+    for (var i = 0; i < w.findings.length; i++) {
+        w.list.setItem(i, 0, new QTableWidgetItem(
+            CheckMap.rowText(w.findings[i],
+                w.ignored[w.findings[i].code] === true)));
+    }
+    var shownResult = { findings: split.shown, failed: result.failed,
+        checked: result.checked,
+        clean: split.shown.length === 0 && result.failed.length === 0 };
+    w.summary.text = CsCheck.summary(shownResult, split.ignored.length);
+    w.why.plainText = shownResult.clean ?
         qsTr("Nothing to fix. This map carries a scale bar, a north " +
             "arrow, a filled-in title block, and everything on it is " +
             "on a layer the suite knows.") : "";
     w.showButton.enabled = false;
-    EAction.handleUserMessage(CsCheck.summary(result));
+    EAction.handleUserMessage(
+        CsCheck.summary(shownResult, split.ignored.length));
 };
 
 /** The finding the list has selected, or null. */
@@ -199,6 +352,10 @@ CheckMap.showSelected = function() {
     var text = finding.title + "\n\n" + finding.why;
     if (finding.layer !== "") {
         text += "\n\nLayer: " + finding.layer;
+    }
+    if (w.ignored[finding.code] === true) {
+        text += "\n\n" + qsTr("Ignored on this map. Right-click for " +
+            "Stop Ignoring This.");
     }
     w.why.plainText = text;
     w.showButton.enabled = !isNull(finding.at);

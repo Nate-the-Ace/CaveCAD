@@ -519,6 +519,122 @@ CsCheck.review = function(scan) {
     };
 };
 
+// ---------------------------------------------------------------------
+// IGNORING A FINDING.
+//
+// Not every finding is a fault. A sketch map of one passage may have no
+// title block on purpose; a working copy may keep notes on layer 0
+// deliberately; a cave whose loop closes at 2.4% may have been argued
+// over and accepted. A checker that cannot be told "yes, I know" is one
+// that gets read once and then ignored wholesale -- which loses the
+// findings that did matter along with the ones that did not.
+//
+// BY CODE, PER DRAWING. The row a caver right-clicks is already an
+// aggregate ("2 things drawn on 0"), so ignoring the row means ignoring
+// that KIND of finding for this map -- which is also what makes the
+// decision survive the next Check Again, when the count has changed.
+//
+// The list is kept in SETTINGS rather than in the drawing, which is a
+// real trade: this tool promises to change nothing, and writing an
+// ignore list into the file would break that promise, dirty the
+// document and put a save between a caver and a right-click. The cost
+// is that the decision does not travel with the file -- a colleague
+// opening the same cave sees the finding again, which is arguably the
+// right answer anyway: it is YOUR judgement that this does not matter,
+// not the map's.
+// ---------------------------------------------------------------------
+
+CsCheck.IGNORE_SETTING = "CaveSurvey/CheckMap/Ignored";
+
+/**
+ * A settings-safe token for one drawing's path.
+ *
+ * QSettings reads "/" as a group separator, so a raw path would nest a
+ * folder per directory and never be found again. Everything outside
+ * [A-Za-z0-9._-] becomes "_", and a checksum of the ORIGINAL path is
+ * appended so two caves whose names flatten to the same token -- "Bat
+ * Cave" and "Bat/Cave" -- do not share an ignore list.
+ */
+CsCheck.pathToken = function(path) {
+    var text = String(isNull(path) ? "" : path);
+    var sum = 0;
+    for (var i = 0; i < text.length; i++) {
+        // A plain rolling sum, mod a large prime. Not cryptography --
+        // it only has to separate two paths a caver has open at once.
+        sum = (sum * 31 + text.charCodeAt(i)) % 1000000007;
+    }
+    var flat = text.replace(/[^A-Za-z0-9._-]/g, "_");
+    // Long paths make unreadable keys and settings files; the tail is
+    // the useful half (the cave's own folder and file name).
+    if (flat.length > 48) {
+        flat = flat.substring(flat.length - 48);
+    }
+    return flat + "-" + sum;
+};
+
+/** The stored ignore list as a set. Empty for anything unreadable: a
+ *  corrupt setting must never be the reason a fault goes unreported. */
+CsCheck.parseIgnored = function(text) {
+    var set = {};
+    if (isNull(text) || String(text) === "") {
+        return set;
+    }
+    var parts = String(text).split(",");
+    for (var i = 0; i < parts.length; i++) {
+        var code = parts[i].replace(/\s/g, "");
+        if (code !== "") {
+            set[code] = true;
+        }
+    }
+    return set;
+};
+
+/** The set back as one storable string, in a stable order. */
+CsCheck.serializeIgnored = function(set) {
+    var codes = [];
+    for (var code in set) {
+        if (set.hasOwnProperty(code) && set[code] === true) {
+            codes.push(code);
+        }
+    }
+    codes.sort();
+    return codes.join(",");
+};
+
+/** Turns one code's ignore on or off, answering the changed set. */
+CsCheck.setIgnored = function(set, code, on) {
+    var out = {};
+    for (var key in set) {
+        if (set.hasOwnProperty(key) && set[key] === true && key !== code) {
+            out[key] = true;
+        }
+    }
+    if (on === true && !isNull(code) && String(code) !== "") {
+        out[String(code)] = true;
+    }
+    return out;
+};
+
+/**
+ * Splits findings into the ones to show and the ones being ignored.
+ *
+ * BOTH ARE RETURNED, and the panel says how many were held back. An
+ * ignore list that becomes invisible is one nobody remembers setting,
+ * and the first time it hides something that mattered it will look
+ * like the checker missed it.
+ */
+CsCheck.splitIgnored = function(findings, set) {
+    var shown = [], ignored = [];
+    for (var i = 0; i < findings.length; i++) {
+        if (!isNull(set) && set[findings[i].code] === true) {
+            ignored.push(findings[i]);
+        } else {
+            shown.push(findings[i]);
+        }
+    }
+    return { shown: shown, ignored: ignored };
+};
+
 /** How many findings of one severity. */
 CsCheck.countOf = function(result, severity) {
     var n = 0;
@@ -530,11 +646,19 @@ CsCheck.countOf = function(result, severity) {
     return n;
 };
 
-/** One line for the command line, in the suite's own voice. */
-CsCheck.summary = function(result) {
+/** One line for the command line, in the suite's own voice.
+ *
+ *  `ignoredCount` is optional and is SAID OUT LOUD when it is not
+ *  zero -- see CsCheck.splitIgnored on why a silent ignore list is
+ *  worse than none. */
+CsCheck.summary = function(result, ignoredCount) {
     if (result.clean) {
-        return "Check Map: nothing to fix -- all " + result.checked +
+        var clean = "Check Map: nothing to fix -- all " + result.checked +
             " checks pass.";
+        if (!isNull(ignoredCount) && ignoredCount > 0) {
+            clean += " " + ignoredCount + " ignored.";
+        }
+        return clean;
     }
     var parts = [];
     for (var i = 0; i < CsCheck.ORDER.length; i++) {
@@ -544,6 +668,9 @@ CsCheck.summary = function(result) {
         }
     }
     var text = "Check Map: " + parts.join(", ") + ".";
+    if (!isNull(ignoredCount) && ignoredCount > 0) {
+        text += " " + ignoredCount + " ignored.";
+    }
     if (result.failed.length > 0) {
         text += " (" + result.failed.length + " check could not run: " +
             result.failed.join(", ") + ")";
