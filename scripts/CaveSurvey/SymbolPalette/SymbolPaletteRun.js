@@ -612,6 +612,18 @@ SymbolPaletteRun.prototype.commit = function() {
     // drew" is one fact from where they sit.
     CsErase.noteDrawn(doc, ref.getId(), entry.nss, "symbol", false);
 
+    // One more of that symbol in this view, so the tile's count is now
+    // one behind. Recounted HERE rather than on a document listener,
+    // which this panel does not have -- a placement and a view change
+    // are the two things that can move these numbers while the palette
+    // is open.
+    if (typeof SymbolPalette !== "undefined") {
+        try {
+            SymbolPalette.refreshCounts();
+        } catch (eCounts) {
+        }
+    }
+
     this.warnUnclaimedProfile(frame, layerName);
 
     // A symbol on a profile layer grows the region the next placement

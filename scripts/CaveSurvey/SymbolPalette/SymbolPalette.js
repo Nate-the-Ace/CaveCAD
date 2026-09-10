@@ -337,6 +337,17 @@ SymbolPalette.refreshCustomButtons = function() {
  *  mouse-move, so it must never throw. */
 SymbolPalette.showCursorFrame = function(frame, layer) {
     var w = SymbolPalette.widgets;
+    // The counts are per VIEW. Recounted only when the cursor CHANGES
+    // view: this is called on every mouse move, and a walk of the
+    // drawing's block references per move would make the application
+    // crawl on a real cave.
+    if (frame !== SymbolPalette.cursorFrame) {
+        SymbolPalette.cursorFrame = frame;
+        try {
+            SymbolPalette.refreshCounts();
+        } catch (eCounts) {
+        }
+    }
     if (isNull(w) || isNull(w.frameLabel)) {
         return;
     }
@@ -749,6 +760,88 @@ SymbolPalette.loadCollapsed = function() {
     return CsPanel.loadCollapsed(SymbolPalette.COLLAPSED_SETTING);
 };
 
+/** Which view the cursor was last in; the tiles' counts are of this
+ *  view, for FeatureTrace.cursorFrame's reason. */
+SymbolPalette.cursorFrame = "plan";
+
+/**
+ * How many of each symbol the current view holds -- {block: count}.
+ *
+ * ONE PASS over the drawing's block references, grouped by block name
+ * and filtered by the layer's frame. Per-block and not per-LAYER,
+ * unlike Feature Trace's counts, because several symbols share a home
+ * layer: stalactite and stalagmite both live on FORMATIONS-DRIP, and a
+ * per-layer count would report each of them as the sum of both.
+ */
+SymbolPalette.countsByBlock = function(doc, frame) {
+    var out = {};
+    if (isNull(doc)) {
+        return out;
+    }
+    var ids = [];
+    try {
+        ids = doc.queryAllEntities(false, false, RS.EntityBlockRef);
+    } catch (eQuery) {
+        return out;
+    }
+    for (var i = 0; i < ids.length; i++) {
+        var e = doc.queryEntity(ids[i]);
+        if (isNull(e)) {
+            continue;
+        }
+        var name = "";
+        var layerName = "";
+        try {
+            name = String(e.getReferencedBlockName());
+            layerName = String(doc.getLayerName(e.getLayerId()));
+        } catch (eRead) {
+            continue;
+        }
+        if (name === "" || CsLayers.frameOf(layerName) !== frame) {
+            continue;
+        }
+        out[name] = (out[name] || 0) + 1;
+    }
+    return out;
+};
+
+/**
+ * Writes the counts onto the tiles.
+ *
+ * Zero shows as a dash, not "0" -- a dash reads as "none yet", which is
+ * the truth about a symbol nobody has placed, where a 0 in a column of
+ * numbers reads as a measurement. Feature Trace does the same.
+ */
+SymbolPalette.refreshCounts = function() {
+    var w = SymbolPalette.widgets;
+    if (isNull(w) || isNull(w.buttons)) {
+        return;
+    }
+    var doc = null;
+    try {
+        doc = EAction.getDocument();
+    } catch (eDoc) {
+        doc = null;
+    }
+    var counts = {};
+    try {
+        counts = SymbolPalette.countsByBlock(doc, SymbolPalette.cursorFrame);
+    } catch (eCount) {
+        counts = {};
+    }
+    for (var i = 0; i < w.buttons.length; i++) {
+        var entry = w.buttons[i].entry;
+        var n = counts[entry.block] || 0;
+        try {
+            w.buttons[i].button.text =
+                SymbolPalette.wrapLabel(entry.nss,
+                    SymbolPalette.CELL_CHARS) +
+                "\n" + (n === 0 ? "--" : String(n));
+        } catch (eText) {
+        }
+    }
+};
+
 /** The settings key holding the last few symbols armed. */
 SymbolPalette.RECENT_SETTING = "CaveSurvey/SymbolPaletteRecent";
 
@@ -808,7 +901,10 @@ SymbolPalette.tileFor = function(entry, shape, checkable, compact) {
             button.setFixedSize(SymbolPalette.ICON + 14,
                 SymbolPalette.ICON + 14);
         } else {
-            button.setFixedSize(SymbolPalette.CELL_W, SymbolPalette.CELL_H);
+            // +14: the tile now carries a third line, the count,
+            // under a name that is often two lines already.
+            button.setFixedSize(SymbolPalette.CELL_W,
+                SymbolPalette.CELL_H + 14);
         }
     } catch (eSize) {
         // a bridge without setFixedSize gets tiles that stretch; the
@@ -1018,6 +1114,13 @@ SymbolPalette.rebuildTiles = function() {
         CsPanel.applyOrder(w.stack);
     } catch (eOrder) {
         w.problems.push("category order (" + eOrder + ")");
+    }
+
+    // The tiles are new objects, so the counts have to be written again.
+    try {
+        SymbolPalette.refreshCounts();
+    } catch (eCounts) {
+        w.problems.push("symbol counts (" + eCounts + ")");
     }
 
     // Re-arm what was armed, if it is still in the list: a search that

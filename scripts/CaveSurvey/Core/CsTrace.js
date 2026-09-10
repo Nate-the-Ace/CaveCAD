@@ -1020,6 +1020,47 @@ CsTrace.emit = function(doc, di, layerName, points, spacing, tolerance) {
     };
 };
 
+/**
+ * How many entities sit on each of `names` -- {layerName: count}.
+ *
+ * ONE PASS PER LAYER through the document's own layer index, not a walk
+ * of every entity per layer: a panel asks this for thirteen features in
+ * three views and a cave drawing holds thousands of entities.
+ *
+ * A layer that does not exist counts 0 rather than being absent, so a
+ * caller can read every name it asked about without checking first --
+ * and 0 is the true answer for a feature nothing has been drawn on yet,
+ * which is exactly what a completeness readout is for.
+ *
+ * QCAD only.
+ */
+CsTrace.countOnLayers = function(doc, names) {
+    var out = {};
+    if (isNull(names)) {
+        return out;
+    }
+    for (var i = 0; i < names.length; i++) {
+        var name = names[i];
+        if (name === null || name === undefined || name === "") {
+            continue;
+        }
+        if (out.hasOwnProperty(name)) {
+            continue;
+        }
+        var n = 0;
+        try {
+            if (!isNull(doc) && doc.hasLayer(name)) {
+                n = doc.queryLayerEntities(doc.getLayerId(name),
+                    false).length;
+            }
+        } catch (eCount) {
+            n = 0;
+        }
+        out[name] = n;
+    }
+    return out;
+};
+
 // ---------------------------------------------------------------------
 // WHICH TRIP DREW THIS. Traced linework and placed symbols carry the
 // trip whose survey they describe, the same way a section trace already

@@ -311,6 +311,18 @@ FeatureTrace.reportTrace = function(layerName, result) {
  */
 FeatureTrace.showCursorFrame = function(frame, layer) {
     var w = FeatureTrace.widgets;
+    // The counts are per VIEW, so they change when the cursor crosses
+    // into one. Only when it CHANGES: this is called on every mouse
+    // move, and counting thirteen layers per move would make the whole
+    // application crawl on a real cave -- the same lesson markDirty
+    // records about the region scans.
+    if (frame !== FeatureTrace.cursorFrame) {
+        FeatureTrace.cursorFrame = frame;
+        try {
+            FeatureTrace.refreshCounts();
+        } catch (eCounts) {
+        }
+    }
     if (isNull(w) || isNull(w.frameLabel)) {
         return;
     }
@@ -972,6 +984,91 @@ FeatureTrace.disarmTiles = function() {
     }
 };
 
+/** Which view the cursor was last in. The counts on the tiles are of
+ *  THIS view: a caver working in the elevation is owed the elevation's
+ *  numbers, and a single figure summed over all three would say a
+ *  passage is drawn when only its plan is. */
+FeatureTrace.cursorFrame = "plan";
+
+/**
+ * Re-reads how many of each feature the current view holds, and writes
+ * the numbers onto the tiles.
+ *
+ * WHY A COUNT AT ALL: it makes the panel a completeness check. A
+ * passage whose walls are traced and whose floor is not says so in the
+ * one place the caver is already looking, rather than after a print.
+ *
+ * Zero is shown as a dash and not as "0". A dash reads as "none yet",
+ * which is the truth about a feature nobody has drawn; a 0 in a column
+ * of numbers reads as a measurement.
+ *
+ * Silent throughout: a panel repaint must never throw into the
+ * application, and a count that cannot be taken is worth less than the
+ * tile it would break.
+ */
+FeatureTrace.refreshCounts = function() {
+    var w = FeatureTrace.widgets;
+    if (isNull(w) || isNull(w.buttons)) {
+        return;
+    }
+    var doc = null;
+    try {
+        doc = EAction.getDocument();
+    } catch (eDoc) {
+        doc = null;
+    }
+    var frame = FeatureTrace.cursorFrame;
+    var names = [];
+    var forRow = [];
+    var i;
+    var lists = [w.buttons, w.shapedButtons];
+    for (var l = 0; l < lists.length; l++) {
+        if (isNull(lists[l])) {
+            continue;
+        }
+        for (i = 0; i < lists[l].length; i++) {
+            var row = lists[l][i].row;
+            var name = null;
+            try {
+                if (isNull(row.style)) {
+                    name = CsLayers.twinFor(row.layer, frame);
+                } else {
+                    // A shaped line is counted by its SPINES, never by
+                    // its ornament: one ledge is one feature and forty
+                    // hachures, and counting the hachures would report
+                    // a passage forty times as drawn as it is.
+                    var spec = CsShapeLine.STYLES[row.style];
+                    name = isNull(spec) ? null :
+                        CsShapeLine.layersFor(spec, frame).spine;
+                }
+            } catch (eName) {
+                name = null;
+            }
+            forRow.push({ entry: lists[l][i], layer: name });
+            if (name !== null) {
+                names.push(name);
+            }
+        }
+    }
+    var counts = {};
+    try {
+        counts = CsTrace.countOnLayers(doc, names);
+    } catch (eCount) {
+        counts = {};
+    }
+    for (i = 0; i < forRow.length; i++) {
+        var n = (forRow[i].layer === null) ? 0 :
+            (counts[forRow[i].layer] || 0);
+        try {
+            forRow[i].entry.button.text =
+                FeatureTrace.wrapLabel(forRow[i].entry.row.label,
+                    FeatureTrace.CELL_CHARS) +
+                "\n" + (n === 0 ? "--" : String(n));
+        } catch (eText) {
+        }
+    }
+};
+
 /** The settings key holding the last few features armed. */
 FeatureTrace.RECENT_SETTING = "CaveSurvey/FeatureTraceRecent";
 
@@ -1034,8 +1131,10 @@ FeatureTrace.tileFor = function(row, checkable, compact) {
             button.setFixedSize(FeatureTrace.ICON + 14,
                 FeatureTrace.ICON + 14);
         } else {
+            // +38 rather than +24: the tile now carries a third line,
+            // the count, under a label that is often two lines already.
             button.setFixedSize(FeatureTrace.CELL_W + 20,
-                FeatureTrace.CELL_H + 24);
+                FeatureTrace.CELL_H + 38);
         }
     } catch (eSize) {
         // a bridge without setFixedSize gets tiles that stretch; the
@@ -1539,6 +1638,7 @@ FeatureTrace.buildDock = function(appWin) {
     try {
         FeatureTrace.widgets = w;   // rebuildRecent reads it
         FeatureTrace.rebuildRecent();
+        FeatureTrace.refreshCounts();
     } catch (eRecentFill) {
         w.problems.push("recent row fill (" + eRecentFill + ")");
     }
@@ -1641,6 +1741,11 @@ FeatureTrace.flush = function() {
         FeatureTrace.bayRects = [];
     }
     FeatureTrace.refresh(doc, FeatureTrace.regionBox);
+    try {
+        FeatureTrace.refreshCounts();
+    } catch (eCounts) {
+        // a repaint must never throw into the application
+    }
 };
 
 /**
