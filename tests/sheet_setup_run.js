@@ -107,6 +107,7 @@ ok(caveBox.minY > -4000,
 var sheet = CsSheetSetup.sheetByName("ARCH D -- 36 x 24");
 var scale = 50;
 var said = SheetSetup.draw(doc, di, {
+    elevation: false,
     caveBox: caveBox, sheet: sheet, scale: scale, turned: false,
     wants: { border: true, bar: true, north: true, title: true },
     filled: { caveName: "Test Cave",
@@ -255,7 +256,7 @@ near(againBox.maxX - againBox.minX, 1000, 0.01,
 SheetSetup.draw(doc, di, {
     caveBox: againBox, sheet: sheet, scale: scale, turned: false,
     wants: { border: true, bar: true, north: true, title: true },
-    filled: {}, survey: null
+    filled: {}, survey: null, elevation: false
 });
 eqs(pieces().length, drawn.length,
     "running it twice replaces the sheet rather than stacking one on it");
@@ -294,6 +295,67 @@ ok(creditWhole !== null && String(creditWhole).indexOf("ADAM STANICH") > 0,
         String(creditWhole).substring(0, 60) + ")");
 eqs(creditLines, 1,
     "and the last surveyor is still printed on the sheet");
+
+// ---------------------------------------------------------------------
+// THE SECOND SHEET.
+//
+// The elevation is drawn at the PLAN's scale -- a map carrying two
+// scales is a lie -- and a cave whose plan fills the paper has no room
+// left beside it, so the elevation gets its own sheet rather than a
+// scale step nobody asked for.
+// ---------------------------------------------------------------------
+
+var planBox = CsSheetSetup.borderBox(caveBox, sheet, scale, false, 4.0);
+var elevBox = CsSheetSetup.elevationSheetBox(planBox, scale);
+ok(elevBox.minX > planBox.maxX,
+    "the elevation sheet sits clear to the right of the plan's");
+near(elevBox.maxX - elevBox.minX, planBox.width, 0.0001,
+    "on the same paper");
+near(elevBox.minY, planBox.minY, 0.0001,
+    "with their feet lined up, the way two sheets on a table are");
+
+var withElevation = SheetSetup.draw(doc, di, {
+    caveBox: caveBox, sheet: sheet, scale: scale, turned: false,
+    wants: { border: true, bar: true, north: true, title: true },
+    filled: { caveName: "Test Cave" }, survey: null, elevation: true
+});
+ok(String(withElevation).indexOf("elevation sheet") > 0,
+    "it reports drawing one (" + withElevation + ")");
+
+var elevPieces = 0, northOnElevation = 0, elevBorder = null;
+var after2 = pieces();
+for (i = 0; i < after2.length; i++) {
+    if (CsTags.get(after2[i], "SheetPiece") !==
+            CsSheetSetup.ELEVATION_SHEET) {
+        continue;
+    }
+    elevPieces += 1;
+    if (CsBind.layerNameOf(doc, after2[i]) === CsLayers.NORTH_ARROW) {
+        northOnElevation += 1;
+    }
+    var eb = after2[i].getBoundingBox();
+    var emn = eb.getMinimum(), emx = eb.getMaximum();
+    if (elevBorder === null) {
+        elevBorder = { minX: emn.x, maxX: emx.x };
+    } else {
+        elevBorder.minX = Math.min(elevBorder.minX, emn.x);
+        elevBorder.maxX = Math.max(elevBorder.maxX, emx.x);
+    }
+}
+ok(elevPieces > 0, "the elevation sheet has pieces on it");
+eqs(northOnElevation, 0,
+    "and NO north arrow -- an elevation has no north, and an arrow " +
+        "there would be answering a question the drawing cannot be asked");
+ok(elevBorder !== null && elevBorder.minX > planBox.maxX,
+    "everything on it is clear of the plan sheet");
+
+// THE SHEET IS FOUND BY ITS BORDER, which is how CsProfileDraw learns
+// where to put the elevation region on the next regenerate. A stored
+// coordinate would go stale the first time the cave grew.
+var read = CsSheetSetup.sheetBoxOn(doc, CsSheetSetup.ELEVATION_SHEET);
+ok(read !== null, "the elevation sheet can be found again by its tag");
+ok(read.minX > planBox.maxX,
+    "and it is the one to the right, not the plan's");
 
 if (failures.length === 0) {
     print("### SHEET SETUP OK " + drawn.length + " pieces");

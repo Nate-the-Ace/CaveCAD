@@ -23799,6 +23799,27 @@ eqs(CsSymbolStore.PREFIX, "SYM_", "the symbol block prefix");
     ok(border.margin > 0 && border.margin < border.height / 2,
         "CsSheetSetup: and keeps a margin the furniture can live in");
 
+    // -- the second sheet ------------------------------------------
+    // The elevation is drawn at the PLAN's scale, so it gets its own
+    // sheet rather than a scale step nobody asked for.
+    var planSheet = CsSheetSetup.borderBox(caveBox, archD, 50, false, 4.0);
+    var elevSheet = CsSheetSetup.elevationSheetBox(planSheet, 50);
+    ok(elevSheet.minX > planSheet.maxX,
+        "CsSheetSetup: the elevation sheet is clear of the plan's");
+    near(elevSheet.minX - planSheet.maxX,
+        CsSheetSetup.SHEET_GUTTER * 50, 0.0001,
+        "CsSheetSetup: by a gutter measured in inches of paper, so it " +
+            "is the same gap at every scale");
+    near(elevSheet.width, planSheet.width, 0.0001,
+        "CsSheetSetup: the same paper");
+    near(elevSheet.height, planSheet.height, 0.0001,
+        "CsSheetSetup: in the same orientation");
+    near(elevSheet.minY, planSheet.minY, 0.0001,
+        "CsSheetSetup: with their feet lined up");
+    ok(CsSheetSetup.PLAN_SHEET !== CsSheetSetup.ELEVATION_SHEET,
+        "CsSheetSetup: the two sheets are told apart by kind, because " +
+            "they do not carry the same furniture");
+
     // -- what the title block can be told --------------------------
     var survey = CsModel.newSurvey();
     survey.caveName = "Test Cave";

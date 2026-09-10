@@ -304,6 +304,45 @@ CsSheetSetup.scaleText = function(scale) {
     return "SCALE:  1\" = " + scale + " FT";
 };
 
+/** How far apart two sheets sit in the drawing, in inches of paper.
+ *  Wide enough that nobody mistakes one border for the other's edge,
+ *  and that a plotter set to "window" cannot catch both. */
+CsSheetSetup.SHEET_GUTTER = 2.0;
+
+/** What the second sheet is for. Its own kind, because the two sheets
+ *  do not carry the same furniture: an elevation has no north. */
+CsSheetSetup.PLAN_SHEET = "plan";
+CsSheetSetup.ELEVATION_SHEET = "elevation";
+
+/**
+ * The elevation sheet's rectangle: the same paper, at the same scale,
+ * to the RIGHT of the plan's.
+ *
+ * TWO SHEETS, NOT ONE BIGGER ONE (Nathan, 2026-09-10). The elevation
+ * has to be drawn at the plan's scale -- a map carrying two scales is a
+ * lie -- and a cave whose plan fits ARCH D at 1" = 40 rarely has room
+ * left for eight elevation bands at the same scale. The alternatives
+ * were a scale step nobody asked for or paper nobody can print.
+ *
+ * To the right rather than below, because below is where the elevation
+ * already lives in the drawing: putting the second sheet there would
+ * make "which of these is the sheet and which is the working area"
+ * unanswerable at a glance.
+ */
+CsSheetSetup.elevationSheetBox = function(planBox, scale) {
+    var gutter = CsSheetSetup.SHEET_GUTTER * scale;
+    return {
+        minX: planBox.maxX + gutter,
+        maxX: planBox.maxX + gutter + planBox.width,
+        minY: planBox.minY,
+        maxY: planBox.maxY,
+        width: planBox.width,
+        height: planBox.height,
+        footer: planBox.footer,
+        margin: planBox.margin
+    };
+};
+
 /**
  * The sheet's own rectangle in DRAWING coordinates, centred on the
  * cave.
@@ -444,4 +483,56 @@ CsSheetSetup.autoFill = function(survey, stats, grade) {
         out.surveyCode = String(grade.uis);
     }
     return out;
+};
+
+// ---------------------------------------------------------------------
+// THE QCAD HALF. Everything above is pure and is where the arithmetic
+// lives; this is the one thing that has to read a document, and it is
+// here rather than in the tool because Core needs it too:
+// CsProfileDraw asks where the elevation sheet is every time it draws.
+// ---------------------------------------------------------------------
+
+/** The tag every generated sheet piece carries. Its VALUE says which
+ *  sheet the piece belongs to. */
+CsSheetSetup.TAG = "SheetPiece";
+
+/**
+ * The box of one sheet, read back off the drawing, or null.
+ *
+ * THE BORDER IS WHERE A SHEET'S POSITION LIVES. Not a stored
+ * coordinate, not a setting: the thing that is drawn. Sheet Setup
+ * recomputes the sheet from the plan every time it runs, so a
+ * remembered position would be stale the first time the cave grew --
+ * the same reasoning CsProfileDraw.computeOrigin gives for refusing to
+ * store its own anchor.
+ *
+ * QCAD only.
+ */
+CsSheetSetup.sheetBoxOn = function(doc, kind) {
+    if (isNull(doc)) {
+        return null;
+    }
+    var box = null;
+    try {
+        var ids = doc.queryAllEntities(false, false);
+        for (var i = 0; i < ids.length; i++) {
+            var e = doc.queryEntity(ids[i]);
+            if (isNull(e) || CsTags.get(e, CsSheetSetup.TAG) !== kind) {
+                continue;
+            }
+            var b = e.getBoundingBox();
+            var mn = b.getMinimum(), mx = b.getMaximum();
+            if (box === null) {
+                box = { minX: mn.x, minY: mn.y, maxX: mx.x, maxY: mx.y };
+            } else {
+                box.minX = Math.min(box.minX, mn.x);
+                box.minY = Math.min(box.minY, mn.y);
+                box.maxX = Math.max(box.maxX, mx.x);
+                box.maxY = Math.max(box.maxY, mx.y);
+            }
+        }
+    } catch (eBox) {
+        return null;
+    }
+    return box;
 };

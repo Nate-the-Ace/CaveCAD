@@ -1039,13 +1039,40 @@ CsProfileDraw.boxesFor = function(profile, margin) {
  * and the band coordinates are the drawing's coordinates.
  */
 CsProfileDraw.computeOrigin = function(doc, profile) {
+    var bounds = CsProfileDraw.regionBounds(profile);
+
+    // A SHEET WINS, when there is one. Sheet Setup lays the extended
+    // elevation its own sheet beside the plan's, and the region belongs
+    // inside it rather than a gutter below the plan -- otherwise the
+    // first regenerate after a caver laid out their sheets would drag
+    // the elevation straight back off the paper.
+    //
+    // Still not a stored anchor: the position is read off the sheet's
+    // own BORDER, which Sheet Setup recomputes from the plan every time
+    // it runs. Nothing here can go stale that the sheet has not already
+    // gone stale with.
+    if (typeof CsSheetSetup !== "undefined" && bounds !== null) {
+        try {
+            var sheet = CsSheetSetup.sheetBoxOn(doc,
+                CsSheetSetup.ELEVATION_SHEET);
+            if (sheet !== null) {
+                var inset = (sheet.maxX - sheet.minX) *
+                    CsSheetSetup.MARGIN_FRACTION;
+                return new RVector(sheet.minX + inset - bounds.minX,
+                    sheet.maxY - inset - bounds.maxY);
+            }
+        } catch (eSheet) {
+            // no sheet, or a document that will not answer: fall
+            // through to the gutter below the plan
+        }
+    }
+
     // CsDraw.planDataBox, NOT planExtents: the frame union counts the
     // aerial basemap and the surface contours, which are deliberately
     // bigger than the survey -- placing against them would walk the
     // region south on every imagery re-run, the same feedback
     // frameExtents' own docblock warns about for the region itself.
     var plan = CsDraw.planDataBox(doc);
-    var bounds = CsProfileDraw.regionBounds(profile);
     if (plan === null || bounds === null) {
         return new RVector(0, 0);
     }

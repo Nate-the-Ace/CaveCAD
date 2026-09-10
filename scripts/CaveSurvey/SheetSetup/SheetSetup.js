@@ -37,8 +37,10 @@ include("scripts/simple.js");
 include(includeBasePath + "/../Core/CsAll.js");
 
 /** The tag every generated sheet entity carries, so a re-run replaces
- *  what the last one drew instead of stacking a second sheet on it. */
-var SS_TAG = "SheetPiece";
+ *  what the last one drew instead of stacking a second sheet on it.
+ *  Lives in Core because CsProfileDraw reads it too -- it asks where
+ *  the elevation sheet is by finding that sheet's border. */
+var SS_TAG = CsSheetSetup.TAG;
 
 function SheetSetup(guiAction) {
     EAction.call(this, guiAction);
@@ -97,6 +99,15 @@ SheetSetup.caveBox = function(doc) {
         }
     }
     return box;
+};
+
+/** True when this drawing has an extended elevation to place. */
+SheetSetup.hasElevation = function(doc) {
+    try {
+        return CsProfileBox.boxes(doc).length > 0;
+    } catch (e) {
+        return false;
+    }
 };
 
 /** Every title block field's value: what the drawing already says,
@@ -245,6 +256,13 @@ function sheetSetupRun() {
     var cbBar = new QCheckBox(qsTr("Scale bar"));
     var cbNorth = new QCheckBox(qsTr("North arrow, with the declination"));
     var cbTitle = new QCheckBox(qsTr("Title block, filled in from the survey"));
+    var hasElevation = SheetSetup.hasElevation(doc);
+    var cbElevation = new QCheckBox(hasElevation ?
+        qsTr("A second sheet for the extended elevation, at the same scale") :
+        qsTr("A second sheet for the extended elevation (this drawing " +
+            "has none yet)"));
+    cbElevation.enabled = hasElevation;
+    cbElevation.checked = hasElevation;
     cbBorder.checked = true;
     cbBar.checked = true;
     cbNorth.checked = true;
@@ -253,6 +271,7 @@ function sheetSetupRun() {
     layout.addWidget(cbBar, 0, 0);
     layout.addWidget(cbNorth, 0, 0);
     layout.addWidget(cbTitle, 0, 0);
+    layout.addWidget(cbElevation, 0, 0);
 
     var known = [];
     for (var key in filled) {
@@ -286,13 +305,14 @@ function sheetSetupRun() {
         border: cbBorder.checked, bar: cbBar.checked,
         north: cbNorth.checked, title: cbTitle.checked
     };
+    var wantElevation = cbElevation.checked === true;
 
     // ---- draw --------------------------------------------------------
     var fit = CsSheetSetup.fit(caveW, caveH, sheet);
     EAction.handleUserMessage(SheetSetup.draw(doc, di, {
         caveBox: caveBox, sheet: sheet, scale: scale,
         turned: fit.turned, wants: wants, filled: filled,
-        survey: read.survey
+        survey: read.survey, elevation: wantElevation
     }));
 }
 
@@ -348,7 +368,7 @@ SheetSetup.draw = function(doc, di, opts) {
     var unit = function(inches) {
         return CsSheetSetup.atScale(inches, scale) * perFoot;
     };
-    var text = function(x, y, inches, label, layer) {
+    var text = function(x, y, inches, label, layer, kind) {
         var height = unit(inches);
         // The wrap width is generous on purpose: the lines are wrapped
         // by CsSheetSetup.titleLines before they get here, and a narrow
@@ -360,15 +380,19 @@ SheetSetup.draw = function(doc, di, opts) {
             RS.VAlignMiddle, RS.HAlignLeft, RS.LeftToRight, RS.Exact,
             1.0, CsDraw.caps(label), "standard", false, false, 0.0, false));
         e.setLayerId(doc.getLayerId(layer));
-        CsTags.set(e, SS_TAG, layer);
+        // The tag says which SHEET a piece belongs to as well as
+        // marking it generated: CsProfileDraw asks where sheet two is
+        // by looking for its border, so there has to be exactly one
+        // answer and it has to be drawn rather than stored.
+        CsTags.set(e, SS_TAG, isNull(kind) ? layer : kind);
         op.addObject(e, false);
         return e;
     };
-    var line = function(x1, y1, x2, y2, layer) {
+    var line = function(x1, y1, x2, y2, layer, kind) {
         var e = new RLineEntity(doc,
             new RLineData(new RVector(x1, y1), new RVector(x2, y2)));
         e.setLayerId(doc.getLayerId(layer));
-        CsTags.set(e, SS_TAG, layer);
+        CsTags.set(e, SS_TAG, isNull(kind) ? layer : kind);
         op.addObject(e, false);
         return e;
     };
@@ -478,14 +502,131 @@ SheetSetup.draw = function(doc, di, opts) {
         drew.push("a north arrow");
     }
 
+    // ---- sheet two: the extended elevation ---------------------------
+    //
+    // ITS OWN SHEET, at the SAME scale. A map carrying two scales is a
+    // lie, and a cave whose plan fits the paper at 1" = 40 rarely has
+    // room left for eight elevation bands beside it. See
+    // CsSheetSetup.elevationSheetBox for why the alternatives were
+    // rejected.
+    var elevation = null;
+    if (opts.elevation === true) {
+        elevation = CsSheetSetup.elevationSheetBox(box, scale);
+
+        line(elevation.minX, elevation.minY, elevation.maxX, elevation.minY,
+            CsLayers.BORDER, CsSheetSetup.ELEVATION_SHEET);
+        line(elevation.maxX, elevation.minY, elevation.maxX, elevation.maxY,
+            CsLayers.BORDER, CsSheetSetup.ELEVATION_SHEET);
+        line(elevation.maxX, elevation.maxY, elevation.minX, elevation.maxY,
+            CsLayers.BORDER, CsSheetSetup.ELEVATION_SHEET);
+        line(elevation.minX, elevation.maxY, elevation.minX, elevation.minY,
+            CsLayers.BORDER, CsSheetSetup.ELEVATION_SHEET);
+
+        var eLeft = elevation.minX + elevation.margin;
+        var eFoot = elevation.minY + elevation.margin * 0.55;
+
+        // The name, and what this sheet IS. A reader who picks up the
+        // second sheet on its own has to know which cave and which view
+        // without the first one in front of them.
+        var eName = isNull(values) || isNull(values.caveName) ? "" :
+            String(values.caveName);
+        text(eLeft, elevation.minY + elevation.margin * 0.95,
+            CsSheetSetup.TEXT.caveName,
+            eName === "" ? "CAVE NAME" : eName, CsLayers.TITLE_BLOCK,
+            CsSheetSetup.ELEVATION_SHEET);
+        text(eLeft, elevation.minY + elevation.margin * 0.95 -
+                unit(CsSheetSetup.TEXT.caveName *
+                    CsSheetSetup.LINE_SPACING),
+            CsSheetSetup.TEXT.heading, "EXTENDED ELEVATION",
+            CsLayers.TITLE_BLOCK, CsSheetSetup.ELEVATION_SHEET);
+
+        // The same bar as the plan's, because it is the same scale --
+        // and a sheet whose scale a reader has to go and look up on
+        // another sheet is a sheet that will be read wrong.
+        var eBar = CsSheetSetup.barFor(scale);
+        var eBarX = elevation.minX + elevation.width * 0.45;
+        var eBlockW = unit(CsSheetSetup.BAR.length) / eBar.blocks;
+        var eBarH = unit(CsSheetSetup.BAR.height);
+        for (var eb = 0; eb <= eBar.blocks; eb++) {
+            var ex = eBarX + eBlockW * eb;
+            line(ex, eFoot, ex, eFoot + eBarH, CsLayers.SCALE_BAR,
+                CsSheetSetup.ELEVATION_SHEET);
+            text(ex, eFoot - unit(CsSheetSetup.BAR.tick * 2),
+                CsSheetSetup.TEXT.small, String(eBar.perBlock * eb),
+                CsLayers.SCALE_BAR, CsSheetSetup.ELEVATION_SHEET);
+        }
+        line(eBarX, eFoot, eBarX + eBlockW * eBar.blocks, eFoot,
+            CsLayers.SCALE_BAR, CsSheetSetup.ELEVATION_SHEET);
+        line(eBarX, eFoot + eBarH, eBarX + eBlockW * eBar.blocks,
+            eFoot + eBarH, CsLayers.SCALE_BAR,
+            CsSheetSetup.ELEVATION_SHEET);
+        text(eBarX, eFoot + eBarH + unit(CsSheetSetup.TEXT.body),
+            CsSheetSetup.TEXT.body, CsSheetSetup.scaleText(scale),
+            CsLayers.SCALE_BAR, CsSheetSetup.ELEVATION_SHEET);
+
+        // NO NORTH ARROW. An elevation has no north -- the registry
+        // says so in its own way by refusing NORTH-ARROW a per-view
+        // twin -- and an arrow on this sheet would be answering a
+        // question the drawing cannot be asked.
+        drew.push("an elevation sheet");
+    }
+
     di.applyOperation(op);
+
+    // AND MOVE THE ELEVATION ONTO IT, now, rather than leaving a caver
+    // with an empty sheet and a note about regenerating. The region is
+    // translated as a unit -- CsProfileDraw.translateRegion takes the
+    // caver's own tracing with it -- and the next regenerate lands in
+    // the same place, because computeOrigin reads the border this run
+    // just drew.
+    var moved = 0;
+    if (elevation !== null) {
+        moved = SheetSetup.moveElevation(doc, di, elevation);
+    }
 
     return "Sheet Setup: " + drew.join(", ") +
         " at 1\" = " + scale + " ft on " + sheet.name +
         (fit.turned ? " (turned)" : "") +
         (cleared > 0 ? " -- the previous sheet was replaced" : "") +
-        ". Nothing was written into the location line; type that one " +
+        (moved > 0 ? (" The elevation moved onto its own sheet (" +
+            moved + " bands).") : "") +
+        " Nothing was written into the location line; type that one " +
         "yourself.";
+};
+
+/**
+ * Slides the whole extended elevation onto the elevation sheet.
+ *
+ * \return how many bands moved, or 0 when there was nothing to move.
+ */
+SheetSetup.moveElevation = function(doc, di, sheetBox) {
+    var boxes;
+    try {
+        boxes = CsProfileBox.boxes(doc);
+    } catch (eBoxes) {
+        return 0;
+    }
+    if (isNull(boxes) || boxes.length === 0) {
+        return 0;
+    }
+    var minX = null, maxY = null;
+    for (var i = 0; i < boxes.length; i++) {
+        if (minX === null || boxes[i].minX < minX) { minX = boxes[i].minX; }
+        if (maxY === null || boxes[i].maxY > maxY) { maxY = boxes[i].maxY; }
+    }
+    var inset = (sheetBox.maxX - sheetBox.minX) *
+        CsSheetSetup.MARGIN_FRACTION;
+    var dx = (sheetBox.minX + inset) - minX;
+    var dy = (sheetBox.maxY - inset) - maxY;
+    if (Math.abs(dx) < 0.0001 && Math.abs(dy) < 0.0001) {
+        return boxes.length;   // already there
+    }
+    try {
+        CsProfileDraw.translateRegion(doc, di, dx, dy);
+    } catch (eMove) {
+        return 0;
+    }
+    return boxes.length;
 };
 
 // ============================================================
