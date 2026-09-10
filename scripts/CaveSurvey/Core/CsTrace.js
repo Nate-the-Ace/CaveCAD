@@ -1019,3 +1019,270 @@ CsTrace.emit = function(doc, di, layerName, points, spacing, tolerance) {
         id: (fresh.length === 1) ? fresh[0] : null
     };
 };
+
+// ---------------------------------------------------------------------
+// WHICH TRIP DREW THIS. Traced linework and placed symbols carry the
+// trip whose survey they describe, the same way a section trace already
+// carries its bay and station.
+//
+// WHY IT IS DERIVED AND NOT PICKED. A trip is not a mode the caver is
+// in -- there is no "current trip" anywhere in this suite, and adding
+// one would mean a second place to be wrong, silently, for a whole
+// drafting session. Where the stroke IS answers the question the same
+// way it already answers plan-vs-profile-vs-section: the station
+// nearest the stroke belongs to a trip, and that is the trip whose
+// survey the stroke describes. Same rule for both panels.
+//
+// WHY THE TAG IS SPELLED "Trip". Leg and splay lines have carried a
+// numeric Trip since schema v3, and every reader of it -- CsRevise,
+// CsTripEdit, CsPackage -- reads that key. A second spelling for
+// linework would be a second thing to keep in step.
+//
+// WHAT IS NOT WRITTEN: the trip's date, name or team. Those live on the
+// trip's ANCHOR station point (CsDraw.survey writes them; CsTripEdit
+// corrects them there), and a copy on every traced wall would be a
+// hundred copies to correct when a team name is fixed -- the exact
+// fork CsTripEdit exists to prevent. The id resolves to all of them.
+//
+// NO DEFAULT. A stroke whose trip cannot be worked out is left UNTAGGED
+// rather than tagged 0. Trip 0 is a real trip -- the first one -- so a
+// fallback of 0 would not read as "unknown", it would read as a claim
+// that the cave's first trip drew this. That is the elevation-datum
+// mistake in another costume: a plausible zero standing in for a
+// missing reading.
+// ---------------------------------------------------------------------
+
+/** The tag every traced feature and placed symbol carries. The SAME key
+ *  leg lines have carried since schema v3 -- see the note above. */
+CsTrace.TRIP_TAG = "Trip";
+
+/** The station-name tag each frame's station points wear. Section bays
+ *  have no station points of their own; a section trace already knows
+ *  its station from its bay (CsTrace.SECTION_STATION_TAG), so it is
+ *  looked up by name instead of by distance. */
+CsTrace.STATION_TAG_FOR = {
+    plan: "Station",
+    profile: "ProfileStation"
+};
+
+/**
+ * Every station the drawing can name a trip for: station name -> trip id.
+ *
+ * Read off the LEG AND SPLAY LINES, which carry both the station names
+ * and the trip, rather than off station points, which carry a Trip tag
+ * only on the eight-or-so trip ANCHORS. Anchors would answer for one
+ * station per trip and null for every other station in the cave.
+ *
+ * FIRST SHOT WINS, in (trip, ShotSeq) order -- the same rule CsDraw's
+ * own `stationTrip` uses when it decides which trip a station belongs
+ * to, so a station's trip is the same fact here as it is there. A
+ * junction station reached again on a later trip stays with the trip
+ * that first reached it.
+ *
+ * QCAD only.
+ *
+ * \return {} station name -> trip id (a number), possibly empty
+ */
+CsTrace.tripByStation = function(doc) {
+    var out = {};
+    if (isNull(doc)) {
+        return out;
+    }
+    var rows = [];
+    var ids = doc.queryAllEntities(false, false);
+    for (var i = 0; i < ids.length; i++) {
+        var e = doc.queryEntity(ids[i]);
+        if (isNull(e)) {
+            continue;
+        }
+        if (CsTags.get(e, CsTrace.TRIP_TAG) === "") {
+            continue;
+        }
+        var from = CsTags.get(e, "From");
+        var to = CsTags.get(e, "To");
+        var splay = CsTags.get(e, "Splay");
+        if (from === "" && to === "" && splay === "") {
+            continue;   // a trip ANCHOR point, not a shot line
+        }
+        var trip = CsTags.getNumber(e, CsTrace.TRIP_TAG);
+        if (trip === null || trip < 0) {
+            continue;   // an unreadable Trip tag is not a trip number
+        }
+        var seq = CsTags.getNumber(e, "ShotSeq");
+        rows.push({
+            trip: trip,
+            seq: (seq === null ? 0 : seq),
+            from: from,
+            // a splay reaches no new station: its far end is a wall
+            // point, not a survey station, and CsDraw's stationTrip
+            // skips it for the same reason
+            to: (splay === "" ? to : "")
+        });
+    }
+    // A TOTAL order. CaveCAD's Array.prototype.sort is unstable where
+    // node's is stable (tests/README.md), so a comparator that can
+    // return 0 for two distinct shots would hand out different trips in
+    // each engine. `from`/`to` break the last tie.
+    rows.sort(function(a, b) {
+        if (a.trip !== b.trip) {
+            return a.trip - b.trip;
+        }
+        if (a.seq !== b.seq) {
+            return a.seq - b.seq;
+        }
+        if (a.from !== b.from) {
+            return a.from < b.from ? -1 : 1;
+        }
+        return a.to === b.to ? 0 : (a.to < b.to ? -1 : 1);
+    });
+    for (var r = 0; r < rows.length; r++) {
+        if (rows[r].from !== "" && out[rows[r].from] === undefined) {
+            out[rows[r].from] = rows[r].trip;
+        }
+        if (rows[r].to !== "" && out[rows[r].to] === undefined) {
+            out[rows[r].to] = rows[r].trip;
+        }
+    }
+    return out;
+};
+
+/**
+ * The station nearest any of `points`, among the station points of one
+ * frame -- {name, distance}, or null when that frame has none.
+ *
+ * NEAREST TO THE WHOLE STROKE, not to its midpoint: a wall traced along
+ * a passage runs PAST several stations, and its midpoint can easily sit
+ * further from all of them than either end does.
+ *
+ * NO DISTANCE CAP, deliberately. There is no honest number for "too far
+ * to mean anything" -- a big room's wall is legitimately a long way
+ * from the station that surveyed it, and a cap set by feel would drop
+ * exactly those. The caller decides what to do with a distant answer;
+ * today both callers stamp it, because a nearest-station answer is the
+ * same fallback CsProfileBind already binds linework by.
+ *
+ * QCAD only.
+ */
+CsTrace.nearestStation = function(doc, points, frame) {
+    var key = CsTrace.STATION_TAG_FOR[frame];
+    if (isNull(doc) || isNull(points) || points.length === 0 ||
+            key === undefined) {
+        return null;
+    }
+    var best = null;
+    var ids = doc.queryAllEntities(false, false);
+    for (var i = 0; i < ids.length; i++) {
+        var e = doc.queryEntity(ids[i]);
+        if (isNull(e) || typeof e.getPosition !== "function") {
+            continue;
+        }
+        var name = CsTags.get(e, key);
+        if (name === "") {
+            continue;
+        }
+        var pos = e.getPosition();
+        var at = { x: pos.x, y: pos.y };
+        for (var p = 0; p < points.length; p++) {
+            var d = CsTrace.distance(points[p], at);
+            if (best === null || d < best.distance) {
+                best = { name: name, distance: d };
+            }
+        }
+    }
+    return best;
+};
+
+/**
+ * The trip a stroke or symbol belongs to -- a number, or null when the
+ * drawing cannot say.
+ *
+ * `station` short-circuits the search and is how a SECTION trace
+ * answers: its bay already names the station it is a section of, and a
+ * bay sits wherever it was dropped on the sheet, so distance to plan
+ * stations would name whatever the bay happens to be parked next to.
+ *
+ * Null, never 0, when there is no answer -- see the header note.
+ *
+ * QCAD only.
+ */
+CsTrace.tripForPoints = function(doc, points, frame, station) {
+    if (isNull(doc)) {
+        return null;
+    }
+    var byStation = CsTrace.tripByStation(doc);
+    var name = (isNull(station) || station === "") ? null : station;
+    if (name === null) {
+        var near = CsTrace.nearestStation(doc, points, frame);
+        if (near === null) {
+            return null;
+        }
+        name = near.name;
+    }
+    var trip = byStation[name];
+    return (trip === undefined) ? null : trip;
+};
+
+/**
+ * The trip a stroke belongs to, resolving a section bay's station on
+ * the way -- the ONE call both panels make, so plan, elevation and
+ * section are answered the same way in each.
+ *
+ * A section trace answers by its BAY's station and never by distance: a
+ * bay sits wherever it was dropped on the sheet, so plan-station
+ * distance would name whatever the bay happens to be parked beside.
+ * A bay with no station tag names no trip.
+ *
+ * Null, never 0, when there is no answer -- see the header note.
+ *
+ * QCAD only.
+ */
+CsTrace.tripFor = function(doc, frame, points, bays) {
+    if (isNull(doc) || isNull(points) || points.length === 0) {
+        return null;
+    }
+    var station = null;
+    if (frame === "section") {
+        var bay = CsTrace.bayForPath(bays, points);
+        if (bay === null || isNull(bay.station) || bay.station === "") {
+            return null;
+        }
+        station = bay.station;
+    }
+    return CsTrace.tripForPoints(doc, points, frame, station);
+};
+
+/**
+ * Writes the trip tag onto an entity already in the document.
+ *
+ * Silent about everything, the way stampSection is: a stamp is
+ * provenance, and failing to add provenance must never cost the caver
+ * the line they just drew.
+ *
+ * NOT called for an EXTENSION. A stroke that grows an existing line
+ * keeps the trip that line already had -- the entity is the wall it
+ * always was, and rewriting its trip because a later trip's drafting
+ * added six more feet would quietly re-attribute the whole thing.
+ *
+ * QCAD only.
+ *
+ * \return true when the tag was written
+ */
+CsTrace.stampTrip = function(doc, di, id, trip) {
+    if (isNull(doc) || isNull(di) || isNull(id) || trip === null ||
+            trip === undefined) {
+        return false;
+    }
+    try {
+        var e = doc.queryEntity(id);
+        if (isNull(e)) {
+            return false;
+        }
+        CsTags.set(e, CsTrace.TRIP_TAG, trip);
+        var op = new RModifyObjectsOperation();
+        op.addObject(e, false);
+        di.applyOperation(op);
+        return true;
+    } catch (eStamp) {
+        return false;
+    }
+};

@@ -515,6 +515,27 @@ FeatureTraceRun.prototype.commit = function() {
             FeatureTrace.reportTrace(layerName, result);
         }
         this.stampSection(doc, di, pathFrame, result.id);
+        // WHICH TRIP DREW IT. The station nearest the stroke names the
+        // trip -- CsTrace.tripFor, and the header note on that half of
+        // CsTrace, which is also where the section bay's own rule
+        // lives. An EXTENSION keeps the trip the line already had:
+        // growing a wall by six feet does not make a later trip its
+        // author, so only a line that is new here is stamped.
+        //
+        // Called straight through to Core rather than through a method
+        // of this action, deliberately: every headless suite builds a
+        // FAKE action object listing the prototype methods commit()
+        // uses by hand, so a new method here is a new line four test
+        // files must grow or die with "is not a function".
+        if (result.extended !== true) {
+            try {
+                CsTrace.stampTrip(doc, di, result.id,
+                    CsTrace.tripFor(doc, pathFrame, this.samples,
+                        this.bays));
+            } catch (eTrip) {
+                // provenance is a nicety; the line is already drawn
+            }
+        }
         this.warnUnclaimedProfile(pathFrame, layerName);
         FeatureTraceRun.lastTrace = isNull(result.id) ? null : {
             id: result.id, layer: layerName, doc: FeatureTraceRun.docKey(doc)

@@ -683,6 +683,16 @@ ShapedLinesRun.prototype.commit = function() {
     CsTags.set(spine, CsShapeLine.KEY.SIDE, String(side));
     CsTags.set(spine, CsShapeLine.KEY.SCALE, "1");
     CsTags.set(spine, CsShapeLine.KEY.FRAME, pathFrame);
+    // Which trip's survey this ornament describes, by the same rule
+    // Feature Trace stamps a plain feature with -- and written HERE,
+    // before the add, so the tag arrives with the spine rather than in
+    // a second operation the caver would have to undo separately. The
+    // DECOR is deliberately left unstamped: it is regenerated from this
+    // spine on every change, and a copy on each hachure would be a
+    // hundred stale copies the moment the spine's trip was corrected.
+    // growExisting never reaches here, so a grown line keeps its trip.
+    CsTags.set(spine, CsTrace.TRIP_TAG,
+        CsTrace.tripFor(doc, pathFrame, this.samples, this.bays));
 
     var built = CsShapeLine.buildDecor(doc, spine);
     if (isNull(built)) {

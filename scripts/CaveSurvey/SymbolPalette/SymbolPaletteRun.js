@@ -580,6 +580,15 @@ SymbolPaletteRun.prototype.commit = function() {
     }
 
     this.stampSection(doc, di, frame, ref.getId());
+    // ...and which trip's survey it describes, by the rule Feature
+    // Trace stamps a traced feature with. A symbol is placed at ONE
+    // point, so that point is the whole path the trip is derived from.
+    try {
+        CsTrace.stampTrip(doc, di, ref.getId(),
+            CsTrace.tripFor(doc, frame, [this.anchor], this.bays));
+    } catch (eTrip) {
+        // provenance is a nicety; the symbol is already placed
+    }
 
     // The layer is NAMED every time, for Feature Trace's reason: with
     // no per-view button, this line is the caver's confirmation that
