@@ -342,3 +342,26 @@ the LEGEND layer so the legend hides and clears as one thing, and a
 second run replaces the first rather than stacking a copy on top.
 
 Passes when the output contains `### BUILD LEGEND OK`.
+
+## `sheet_setup_run.js` -- Sheet Setup builds a printable sheet
+
+`tests/js_unit.js` pins the arithmetic: what fits on what paper, how a
+scale bar divides into round steps, and what a title block can be told
+without asking. This stage proves the parts that only exist against a
+document.
+
+The sheet has to land AROUND the cave at the right size, and a second
+run has to measure the CAVE again rather than the first run's border --
+otherwise the sheet grows every time it is run.
+
+Text has to be drawn at the plot scale: a 0.14 inch title block line is
+7 ft tall at 1" = 50 ft. Get that wrong and the map plots with text
+either invisible or a foot high, which no test over numbers alone can
+watch happening to real entities.
+
+And two promises: a value a human typed is never replaced by a computed
+one on a re-run, and the LOCATION line is left holding nothing but its
+own label. That last one is the suite's first rule checked in the
+drawing rather than in the function that answers it.
+
+Passes when the output contains `### SHEET SETUP OK`.

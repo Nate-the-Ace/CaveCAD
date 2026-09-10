@@ -1505,6 +1505,7 @@ MENU = {
     "SketchScans/SketchScans.js":         (453, 10, ["sketchscans", "ss"]),
     "SurfaceData/SurfaceData.js":         (453, 20, ["surfacedata", "sd"]),
     # 454 -- finish the sheet
+    "SheetSetup/SheetSetup.js":           (454, 5, ["sheetsetup", "sheet"]),
     "SurveyStats/SurveyStats.js":         (454, 10, ["surveystats", "sst"]),
     "GenerateProfile/GenerateProfile.js": (454, 20, ["generateprofile", "gp", "genprofile"]),
     "BuildLegend/BuildLegend.js":         (454, 30, ["buildlegend", "bl"]),

@@ -202,7 +202,10 @@ var CORE_FILES = [
     // What a legend should say and in what order. rowsFor/wrap/
     // heightOf are pure and are what is tested here; usage() is the
     // QCAD half and is never CALLED from this file.
-    "scripts/CaveSurvey/Core/CsLegend.js"
+    "scripts/CaveSurvey/Core/CsLegend.js",
+    // Pure plot-scale arithmetic: what fits on what paper, how a scale
+    // bar divides, and what a title block can be told without asking.
+    "scripts/CaveSurvey/Core/CsSheetSetup.js"
 ];
 for (var ci = 0; ci < CORE_FILES.length; ci++) {
     loadRepoScript(CORE_FILES[ci]);
@@ -23569,6 +23572,268 @@ eqs(CsSymbolStore.PREFIX, "SYM_", "the symbol block prefix");
     ok(unlabelled.length === 0,
         "CsLegend: and every one has a name to print (" +
             unlabelled.join(", ") + ")");
+})();
+
+// ---------------------------------------------------------------------
+// CsSheetSetup -- the plot-scale arithmetic. This is the file that
+// decides whether a printed map can be measured, so every number in it
+// is pinned here rather than eyeballed on a plot.
+// ---------------------------------------------------------------------
+(function() {
+    var archD = CsSheetSetup.sheetByName("ARCH D -- 36 x 24");
+    ok(!isNull(archD) && archD.w === 36 && archD.h === 24,
+        "CsSheetSetup: the template's own sheet is in the list");
+    ok(isNull(CsSheetSetup.sheetByName("no such paper")),
+        "CsSheetSetup: and a paper nobody has is not");
+    ok(CsSheetSetup.sheetByName(CsSheetSetup.DEFAULT_SHEET) !== null,
+        "CsSheetSetup: the default names a sheet that exists");
+
+    // -- fitting ---------------------------------------------------
+    var margin = Math.min(archD.w, archD.h) * CsSheetSetup.MARGIN_FRACTION;
+    var usableW = archD.w - margin * 2;
+
+    // A cave that fits comfortably takes the SMALLEST scale that works,
+    // because smaller is more detail.
+    var small = CsSheetSetup.fit(100, 80, archD);
+    ok(small.fits === true && small.scale === CsSheetSetup.SCALES[0],
+        "CsSheetSetup: a small cave gets the most detailed scale (" +
+            small.scale + ")");
+
+    // A cave exactly as wide as the usable paper at 1" = 50 ft fits
+    // at 50 and not at anything smaller.
+    var exact = CsSheetSetup.fit(usableW * 50, 10, archD);
+    ok(exact.fits === true && exact.scale === 50,
+        "CsSheetSetup: a cave exactly filling the paper at 50 fits at " +
+            "50 (got " + exact.scale + ")");
+    var justOver = CsSheetSetup.fit(usableW * 50 * 1.02, 10, archD);
+    ok(justOver.scale > 50,
+        "CsSheetSetup: two percent wider needs the next scale up");
+
+    // A long thin cave may only fit with the paper turned, and it must
+    // SAY so rather than quietly turning it.
+    var turned = CsSheetSetup.fit(10, usableW * 40, archD);
+    ok(turned.fits === true && turned.turned === true,
+        "CsSheetSetup: a tall cave fits on turned paper, and says so");
+    ok(CsSheetSetup.fit(100, 80, archD).turned === false,
+        "CsSheetSetup: and a cave that fits either way is not turned");
+
+    // Nothing fits: answer the largest scale and admit it.
+    var huge = CsSheetSetup.fit(9000000, 9000000, archD);
+    ok(huge.fits === false &&
+        huge.scale === CsSheetSetup.SCALES[CsSheetSetup.SCALES.length - 1],
+        "CsSheetSetup: a cave that fits nowhere says so rather than " +
+            "answering a scale that does not work");
+
+    // Every scale offered is a scale a reader recognises.
+    var odd = [];
+    for (var i = 0; i < CsSheetSetup.SCALES.length; i++) {
+        if (CsSheetSetup.SCALES[i] !== Math.round(CsSheetSetup.SCALES[i])) {
+            odd.push(CsSheetSetup.SCALES[i]);
+        }
+        if (i > 0 && CsSheetSetup.SCALES[i] <= CsSheetSetup.SCALES[i - 1]) {
+            odd.push(CsSheetSetup.SCALES[i]);
+        }
+    }
+    ok(odd.length === 0,
+        "CsSheetSetup: the scales are whole numbers, ascending (" +
+            odd.join(", ") + ")");
+
+    // -- the scale bar ---------------------------------------------
+    var counted = [];
+    var round = [1, 2, 5, 10, 15, 20, 25, 50, 100, 200, 250, 500, 1000];
+    for (i = 0; i < CsSheetSetup.SCALES.length; i++) {
+        var bar = CsSheetSetup.barFor(CsSheetSetup.SCALES[i]);
+        if (bar.blocks < 2 || bar.blocks > 10) {
+            counted.push(CsSheetSetup.SCALES[i] + ": " + bar.blocks +
+                " blocks");
+        }
+        if (round.indexOf(bar.perBlock) === -1) {
+            counted.push(CsSheetSetup.SCALES[i] + ": " + bar.perBlock +
+                " ft steps");
+        }
+        if (bar.totalFeet !== bar.perBlock * bar.blocks) {
+            counted.push(CsSheetSetup.SCALES[i] + ": total disagrees");
+        }
+        // The bar must never claim more than three inches of paper.
+        if (bar.totalFeet > CsSheetSetup.BAR.length *
+                CsSheetSetup.SCALES[i] + 0.0001) {
+            counted.push(CsSheetSetup.SCALES[i] + ": bar overruns");
+        }
+    }
+    ok(counted.length === 0,
+        "CsSheetSetup: every scale gets a countable bar in round steps " +
+            "that fits the paper (" + counted.join("; ") + ")");
+    ok(CsSheetSetup.barFor(50).perBlock === 25,
+        "CsSheetSetup: 1\" = 50 ft divides into 25 ft steps (got " +
+            CsSheetSetup.barFor(50).perBlock + ")");
+
+    // -- inches of paper into feet of cave -------------------------
+    near(CsSheetSetup.atScale(0.14, 50), 7.0, 0.0001,
+        "CsSheetSetup: a 0.14 inch line is 7 ft of drawing at 1\" = 50");
+    near(CsSheetSetup.atScale(CsSheetSetup.TEXT.body, 20) / 20,
+        CsSheetSetup.TEXT.body, 0.0001,
+        "CsSheetSetup: and comes back to 0.14 inch when it is printed");
+    ok(CsSheetSetup.TEXT.caveName > CsSheetSetup.TEXT.heading &&
+        CsSheetSetup.TEXT.heading > CsSheetSetup.TEXT.body &&
+        CsSheetSetup.TEXT.body > CsSheetSetup.TEXT.small,
+        "CsSheetSetup: the text sizes are a hierarchy, largest first");
+    ok(CsSheetSetup.scaleText(50).indexOf("1\" = 50 FT") > 0,
+        "CsSheetSetup: the bar says the scale in words too");
+
+    // -- the title block, laid out as lines ------------------------
+    // Truitt Cave credits twenty-one surveyors. Unwrapped they came out
+    // as ONE text entity that wrapped inside itself and printed over
+    // the six lines below it, which is what this function exists to
+    // prevent.
+    var many = [];
+    for (i = 0; i < 21; i++) {
+        many.push("SURVEYOR NUMBER " + i);
+    }
+    var lines = CsSheetSetup.titleLines({
+        caveName: "Test Cave",
+        surveyedBy: many.join(", "),
+        location: "",
+        cartographyBy: "",
+        date: "2024-04-06"
+    });
+    ok(lines.length > 8,
+        "CsSheetSetup: a long credit list becomes many lines (" +
+            lines.length + ")");
+    var overLong = [];
+    for (i = 0; i < lines.length; i++) {
+        var budget = CsSheetSetup.charsPerLine(lines[i].inches);
+        // A single word longer than the budget keeps its own line; only
+        // a line of SEVERAL words may not overrun.
+        if (lines[i].text.length > budget &&
+                lines[i].text.indexOf(" ") >= 0) {
+            overLong.push(lines[i].text);
+        }
+    }
+    ok(overLong.length === 0,
+        "CsSheetSetup: and no line overruns the column (" +
+            overLong.join(" / ") + ")");
+
+    var tagged = 0;
+    for (i = 0; i < lines.length; i++) {
+        if (lines[i].fieldId === "surveyedBy") {
+            tagged += 1;
+        }
+    }
+    eqs(tagged, 1,
+        "CsSheetSetup: a field wrapped over many lines is tagged once, " +
+            "on its first line");
+
+    var ids = [];
+    for (i = 0; i < lines.length; i++) {
+        if (lines[i].fieldId !== "") {
+            ids.push(lines[i].fieldId);
+        }
+    }
+    ok(ids.indexOf("location") >= 0,
+        "CsSheetSetup: a REQUIRED field with nothing in it is still " +
+            "printed -- an empty line invites someone to type one");
+    ok(ids.indexOf("personnel") === -1,
+        "CsSheetSetup: an optional field with nothing in it is not");
+    ok(lines[0].inches === CsSheetSetup.TEXT.caveName,
+        "CsSheetSetup: the cave's name leads, at heading size");
+
+    ok(CsSheetSetup.linesHeight(lines) > 0,
+        "CsSheetSetup: the stack has a height the caller can place by");
+    near(CsSheetSetup.linesHeight([{ inches: 0.1 }, { inches: 0.1 }]),
+        0.2 * CsSheetSetup.LINE_SPACING, 0.0001,
+        "CsSheetSetup: and it is the lines plus their spacing");
+
+    ok(CsSheetSetup.wrapText("supercalifragilisticexpialidocious", 5)
+        .length === 1,
+        "CsSheetSetup: a surname is not divisible");
+    ok(CsSheetSetup.wrapText("", 20).length === 1,
+        "CsSheetSetup: an empty value still occupies its line");
+    ok(CsSheetSetup.charsPerLine(CsSheetSetup.TEXT.body) >
+        CsSheetSetup.charsPerLine(CsSheetSetup.TEXT.caveName),
+        "CsSheetSetup: smaller text fits more characters across");
+
+    // -- the border ------------------------------------------------
+    var caveBox = { minX: 0, minY: 0, maxX: 1000, maxY: 400 };
+    var border = CsSheetSetup.borderBox(caveBox, archD, 50, false);
+    near(border.width, 36 * 50, 0.0001,
+        "CsSheetSetup: the border is the paper at the plot scale");
+    near((border.minX + border.maxX) / 2, 500, 0.0001,
+        "CsSheetSetup: centred on the cave in x");
+    near((border.minY + border.maxY) / 2, 200, 0.0001,
+        "CsSheetSetup: and in y");
+    // A FOOTER moves the cave UP rather than being drawn over. The
+    // band the title block occupies is reserved, not shared.
+    var withFooter = CsSheetSetup.borderBox(caveBox, archD, 50, false, 4.0);
+    near(withFooter.footer, 4.0 * 50, 0.0001,
+        "CsSheetSetup: the footer band is reserved at the plot scale");
+    ok(withFooter.minY < border.minY,
+        "CsSheetSetup: the sheet drops below the cave to make room");
+    near(200 - (withFooter.minY + withFooter.maxY) / 2, 4.0 * 50 / 2,
+        0.0001,
+        "CsSheetSetup: and the cave sits centred above that band");
+    near((withFooter.minY + withFooter.footer +
+        (withFooter.maxY - withFooter.minY - withFooter.footer) / 2),
+        200, 0.0001,
+        "CsSheetSetup: which is to say the cave is centred in what is " +
+            "left of the sheet once the band is taken out");
+    var tighter = CsSheetSetup.fit(100, 21.12 * 50, archD, 4.0);
+    var looser = CsSheetSetup.fit(100, 21.12 * 50, archD);
+    ok(tighter.scale >= looser.scale,
+        "CsSheetSetup: reserving a footer never makes MORE room fit");
+
+    var sideways = CsSheetSetup.borderBox(caveBox, archD, 50, true);
+    near(sideways.width, 24 * 50, 0.0001,
+        "CsSheetSetup: turned paper swaps the border, not the cave");
+    ok(border.margin > 0 && border.margin < border.height / 2,
+        "CsSheetSetup: and keeps a margin the furniture can live in");
+
+    // -- what the title block can be told --------------------------
+    var survey = CsModel.newSurvey();
+    survey.caveName = "Test Cave";
+    survey.distanceUnit = "ft";
+    survey.trips = [
+        { name: "one", date: "2024-04-06", team: "ADRIA TOOLE, TIM HARRIS",
+          declination: 3.2 },
+        { name: "two", date: "2024-01-15", team: "TIM HARRIS, JEANNE PARK",
+          declination: 3.2 }
+    ];
+    eqs(CsSheetSetup.datesFor(survey), "2024-01-15 to 2024-04-06",
+        "CsSheetSetup: the date line is the range of the fieldwork");
+    eqs(CsSheetSetup.datesFor({ trips: [{ date: "2024-04-06" }] }),
+        "2024-04-06",
+        "CsSheetSetup: one trip gets one date, not a range of itself");
+    eqs(CsSheetSetup.datesFor({ trips: [] }), "",
+        "CsSheetSetup: and a survey with no dates says nothing");
+
+    var by = CsSheetSetup.surveyedByFor(survey);
+    ok(by.indexOf("ADRIA TOOLE") >= 0 && by.indexOf("TIM HARRIS") >= 0 &&
+        by.indexOf("JEANNE PARK") >= 0,
+        "CsSheetSetup: everyone on any trip is credited (" + by + ")");
+    ok(by.split("TIM HARRIS").length === 2,
+        "CsSheetSetup: and nobody is credited twice for two trips");
+    eqs(CsSheetSetup.surveyedByFor({ trips: [] }), "",
+        "CsSheetSetup: a survey with no teams credits nobody");
+
+    // THE PRIVACY RULE, in the one place most likely to break it.
+    eqs(CsSheetSetup.locationFor(), "",
+        "CsSheetSetup: the location line is NEVER filled in " +
+            "automatically -- a cave's entrance is not this tool's to " +
+            "publish");
+
+    var auto = CsSheetSetup.autoFill(survey,
+        { surveyedLength: 2154.0, depth: 22.0 }, { uis: "UISv2 3-c" });
+    eqs(auto.caveName, "Test Cave", "CsSheetSetup: the cave's own name");
+    ok(!isNull(auto.length) && auto.length.indexOf("ft") > 0,
+        "CsSheetSetup: the length, worded the way the suite words it");
+    eqs(auto.surveyCode, "UISv2 3-c",
+        "CsSheetSetup: and the grade the survey actually earns");
+    ok(isNull(auto.location),
+        "CsSheetSetup: with no location among the answers at all");
+    ok(isNull(auto.cartographyBy),
+        "CsSheetSetup: and no guess at who drew the map");
+    ok(isNull(CsSheetSetup.autoFill(null, null, null).caveName),
+        "CsSheetSetup: a drawing with no survey fills in nothing " +
+            "rather than filling in blanks");
 })();
 
 // ---------------------------------------------------------------------

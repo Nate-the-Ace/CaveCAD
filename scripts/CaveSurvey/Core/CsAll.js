@@ -150,6 +150,10 @@ include(includeBasePath + "/CsCheck.js");
 // CsLayers, CsShapeLine and CsBind -- the legend decides what a map
 // USES by reading all of them.
 include(includeBasePath + "/CsLegend.js");
+// After CsSheet (the title block's fields), CsStats/CsGrade (the
+// numbers it fills in) and CsReport (how a length is worded): the plot
+// scale arithmetic that turns inches of paper into feet of cave.
+include(includeBasePath + "/CsSheetSetup.js");
 
 // After CsModel, CsTraverse, CsProfile and (optionally) CsRevise --
 // CsContrib calls ensureTrips, offset, groupRuns and tripLabel.
