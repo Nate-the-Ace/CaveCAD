@@ -194,7 +194,11 @@ var CORE_FILES = [
     "scripts/CaveSurvey/Core/CsTripEdit.js",
     // pure: the incremental-Draw gate and the resolve subset
     "scripts/CaveSurvey/Core/CsDelta.js",
-    "scripts/CaveSurvey/Core/CsReport.js"
+    "scripts/CaveSurvey/Core/CsReport.js",
+    // The map proofreader. Every CHECK is pure -- it reads a plain
+    // `scan` object -- and those are what is tested here; CsCheck.scan
+    // is the QCAD half and is never CALLED from this file.
+    "scripts/CaveSurvey/Core/CsCheck.js"
 ];
 for (var ci = 0; ci < CORE_FILES.length; ci++) {
     loadRepoScript(CORE_FILES[ci]);
@@ -22936,6 +22940,275 @@ eqs(CsSymbolStore.PREFIX, "SYM_", "the symbol block prefix");
     ok(all.indexOf(CsLayers.WALLS_SURVEYED) !== -1 &&
         all.indexOf(CsLayers.LEDGE_FLOOR) !== -1,
         "allTileLayers: both groups of tiles are in it");
+})();
+
+// ---------------------------------------------------------------------
+// CsCheck -- the map proofreader. Every check is a pure function over a
+// `scan`, so each one is fed a literal here: a clean map that must stay
+// silent, and one fault at a time that must be caught.
+//
+// THE CLEAN CASE MATTERS MOST. A lint tool that cries on a finished map
+// is a lint tool a beginner switches off, and then never hears the one
+// finding that mattered. Every check below is run twice -- once over a
+// map with nothing wrong, once over the fault it exists for.
+// ---------------------------------------------------------------------
+(function() {
+    /** A map with nothing wrong with it. Each test spoils one thing. */
+    function cleanScan() {
+        return {
+            perFoot: 1.0,
+            layers: [
+                { name: "SCALE-BAR", count: 4, visible: true, control: false },
+                { name: "NORTH-ARROW", count: 1, visible: true, control: false },
+                { name: "LEGEND", count: 12, visible: true, control: false },
+                { name: "WALLS-SURVEYED", count: 6, visible: true, control: false },
+                { name: "CTRL-STATIONS", count: 40, visible: false, control: true }
+            ],
+            entities: [{ layer: "WALLS-SURVEYED", at: { x: 0, y: 0 },
+                registered: true }],
+            symbols: [{ block: "SYM_PIT", layer: "PITS-DOMES",
+                home: "PITS-DOMES", atHome: true, at: { x: 1, y: 1 } }],
+            linework: [{ layer: "WALLS-SURVEYED", at: { x: 0, y: 0 },
+                nearestStation: 8.0 }],
+            wallEnds: [],
+            boundaries: [{ layer: "BREAKDOWN-BOUNDARY", at: { x: 0, y: 0 },
+                closed: true }],
+            sections: [{ station: "A4", layer: "CROSS-SECTION-MARKERS",
+                at: { x: 2, y: 2 } }],
+            shapes: [{ layer: "LEDGE-FLOOR", at: { x: 0, y: 0 },
+                inSync: true }],
+            ledges: [{ layer: "LEDGE-FLOOR", at: { x: 0, y: 0 },
+                drop: -4.0 }],
+            titleBlock: { caveName: "Test Cave", location: "Somewhere, IN",
+                surveyedBy: "A team", surveyDate: "2026-01-01",
+                surveyCode: "UISv2 3-c", drawnBy: "Someone" },
+            requiredFields: [
+                { id: "caveName", label: "Cave name" },
+                { id: "location", label: "Geographic location" },
+                { id: "surveyedBy", label: "Surveyed by" }
+            ],
+            symbolCount: 3,
+            closurePercent: 0.8,
+            closureLimit: 2.0
+        };
+    }
+
+    function codes(result) {
+        var out = [];
+        for (var i = 0; i < result.findings.length; i++) {
+            out.push(result.findings[i].code);
+        }
+        return out;
+    }
+
+    // -- the clean map says nothing -------------------------------
+    var clean = CsCheck.review(cleanScan());
+    ok(clean.clean === true,
+        "CsCheck: a finished map produces no findings (got " +
+            codes(clean).join(", ") + ")");
+    ok(clean.failed.length === 0,
+        "CsCheck: and every check ran without throwing");
+    ok(clean.checked === CsCheck.CHECKS.length,
+        "CsCheck: the count reported is the number of checks");
+
+    // -- the sheet ------------------------------------------------
+    var s = cleanScan();
+    s.layers[0].count = 0;
+    ok(codes(CsCheck.review(s)).indexOf("sheet.scalebar") >= 0,
+        "CsCheck: an empty SCALE-BAR layer is a missing scale bar");
+
+    s = cleanScan();
+    s.layers[1].count = 0;
+    ok(codes(CsCheck.review(s)).indexOf("sheet.north") >= 0,
+        "CsCheck: an empty NORTH-ARROW layer is a missing north arrow");
+
+    s = cleanScan();
+    s.titleBlock.surveyedBy = "   ";
+    var tb = CsCheck.review(s);
+    ok(codes(tb).indexOf("sheet.titleblock") >= 0,
+        "CsCheck: whitespace is not a filled-in title block field");
+    ok(tb.findings[0].title.indexOf("Surveyed by") >= 0,
+        "CsCheck: and the finding names the field that is empty");
+
+    s = cleanScan();
+    s.layers[2].count = 0;
+    ok(codes(CsCheck.review(s)).indexOf("sheet.legend") >= 0,
+        "CsCheck: symbols with no legend is a finding");
+    s.symbolCount = 0;
+    ok(codes(CsCheck.review(s)).indexOf("sheet.legend") === -1,
+        "CsCheck: but a map using NO symbols needs no legend");
+
+    // -- layers ---------------------------------------------------
+    s = cleanScan();
+    s.symbols[0].atHome = false;
+    s.symbols[0].layer = "WATER-FLOW-ARROWS";
+    ok(codes(CsCheck.review(s)).indexOf("layer.symbol") >= 0,
+        "CsCheck: a symbol off its own layer is caught");
+
+    s = cleanScan();
+    s.entities.push({ layer: "0", at: { x: 5, y: 5 }, registered: false });
+    var stray = CsCheck.review(s);
+    ok(codes(stray).indexOf("layer.stray") >= 0,
+        "CsCheck: work on layer 0 is caught");
+    ok(stray.findings[0].title.indexOf("the default layer") >= 0,
+        "CsCheck: and layer 0 is named in words, not as a bare zero");
+
+    s = cleanScan();
+    s.layers[3].visible = false;
+    ok(codes(CsCheck.review(s)).indexOf("layer.hidden") >= 0,
+        "CsCheck: content on a switched-off layer is caught");
+    s = cleanScan();
+    ok(codes(CsCheck.review(s)).indexOf("layer.hidden") === -1,
+        "CsCheck: but a hidden CONTROL layer is the design, not a fault");
+
+    // -- walls ----------------------------------------------------
+    // Two ends 3 ft apart: past joined, inside noticing -- a gap.
+    s = cleanScan();
+    s.wallEnds = [
+        { at: { x: 0, y: 0 }, layer: "WALLS-SURVEYED", entity: "1" },
+        { at: { x: 3, y: 0 }, layer: "WALLS-SURVEYED", entity: "2" }
+    ];
+    var gaps = CsCheck.review(s);
+    ok(codes(gaps).indexOf("walls.gap") >= 0,
+        "CsCheck: two wall ends 3 ft apart are a gap");
+    ok(gaps.findings[0].count === 1,
+        "CsCheck: and one hole is counted once, not once per end");
+
+    s = cleanScan();
+    s.wallEnds = [
+        { at: { x: 0, y: 0 }, layer: "WALLS-SURVEYED", entity: "1" },
+        { at: { x: 0.2, y: 0 }, layer: "WALLS-SURVEYED", entity: "2" }
+    ];
+    ok(codes(CsCheck.review(s)).indexOf("walls.gap") === -1,
+        "CsCheck: ends within GAP_JOINED_FEET are joined, not a gap");
+
+    s = cleanScan();
+    s.wallEnds = [
+        { at: { x: 0, y: 0 }, layer: "WALLS-SURVEYED", entity: "1" },
+        { at: { x: 200, y: 0 }, layer: "WALLS-SURVEYED", entity: "2" }
+    ];
+    ok(codes(CsCheck.review(s)).indexOf("walls.gap") === -1,
+        "CsCheck: an end with nothing near it is a passage carrying " +
+            "on, never a gap");
+
+    // A metric drawing: the same 3-unit gap is 3 METRES, far past the
+    // 6 ft threshold, so perFoot has to be honoured or every metric
+    // map reports gaps that are not there.
+    s = cleanScan();
+    s.perFoot = 0.3048;   // one foot IS 0.3048 metric drawing units
+    s.wallEnds = [
+        { at: { x: 0, y: 0 }, layer: "WALLS-SURVEYED", entity: "1" },
+        { at: { x: 3, y: 0 }, layer: "WALLS-SURVEYED", entity: "2" }
+    ];
+    ok(codes(CsCheck.review(s)).indexOf("walls.gap") === -1,
+        "CsCheck: thresholds are in FEET -- 3 metres is not a gap");
+
+    s = cleanScan();
+    s.linework[0].nearestStation = CsCheck.ORPHAN_FEET + 1;
+    ok(codes(CsCheck.review(s)).indexOf("walls.orphan") >= 0,
+        "CsCheck: linework far from every station is caught");
+    s.linework[0].nearestStation = null;
+    ok(codes(CsCheck.review(s)).indexOf("walls.orphan") >= 0,
+        "CsCheck: and so is linework in a drawing with no stations at all");
+
+    // -- the rest -------------------------------------------------
+    s = cleanScan();
+    s.boundaries[0].closed = false;
+    ok(codes(CsCheck.review(s)).indexOf("boundary.open") >= 0,
+        "CsCheck: an open breakdown boundary is caught");
+
+    s = cleanScan();
+    s.sections[0].station = "";
+    ok(codes(CsCheck.review(s)).indexOf("section.untied") >= 0,
+        "CsCheck: a section tied to no station is caught");
+
+    s = cleanScan();
+    s.shapes[0].inSync = false;
+    ok(codes(CsCheck.review(s)).indexOf("shape.stale") >= 0,
+        "CsCheck: a shaped line out of step with its ornament is caught");
+
+    s = cleanScan();
+    s.ledges[0].drop = CsCheck.LEDGE_DROP_FEET + 1;
+    ok(codes(CsCheck.review(s)).indexOf("ledge.uphill") >= 0,
+        "CsCheck: hachures on the higher side are worth a look");
+    s.ledges[0].drop = CsCheck.LEDGE_DROP_FEET - 0.1;
+    ok(codes(CsCheck.review(s)).indexOf("ledge.uphill") === -1,
+        "CsCheck: a drop inside the threshold is not argued over");
+    s.ledges[0].drop = null;
+    ok(codes(CsCheck.review(s)).indexOf("ledge.uphill") === -1,
+        "CsCheck: and a ledge with no floor levels near it says nothing");
+
+    s = cleanScan();
+    s.closurePercent = 4.0;
+    ok(codes(CsCheck.review(s)).indexOf("survey.closure") >= 0,
+        "CsCheck: a loop closing at 4% is over the threshold");
+    s.closurePercent = null;
+    ok(codes(CsCheck.review(s)).indexOf("survey.closure") === -1,
+        "CsCheck: a survey that cannot be resolved is not accused");
+
+    // -- the shape of the result ----------------------------------
+    s = cleanScan();
+    s.layers[0].count = 0;          // error
+    s.boundaries[0].closed = false; // warning
+    s.shapes[0].inSync = false;     // note
+    var mixed = CsCheck.review(s);
+    ok(mixed.findings[0].severity === "error" &&
+        mixed.findings[mixed.findings.length - 1].severity === "note",
+        "CsCheck: findings come back worst first");
+    ok(CsCheck.countOf(mixed, "error") === 1 &&
+        CsCheck.countOf(mixed, "warning") === 1 &&
+        CsCheck.countOf(mixed, "note") === 1,
+        "CsCheck: and each severity is counted separately");
+    ok(CsCheck.summary(mixed).indexOf("Check Map:") === 0,
+        "CsCheck: the summary line names the tool");
+    ok(CsCheck.summary(CsCheck.review(cleanScan())).indexOf(
+        "nothing to fix") >= 0,
+        "CsCheck: a clean map is told so in words");
+
+    // -- a check that throws does not take the others with it -----
+    var saved = CsCheck.CHECKS[0].run;
+    CsCheck.CHECKS[0].run = function() { throw "deliberate"; };
+    var broken = CsCheck.review(cleanScan());
+    CsCheck.CHECKS[0].run = saved;
+    ok(broken.failed.length === 1 && broken.clean === false,
+        "CsCheck: a throwing check is reported rather than swallowed");
+    ok(CsCheck.summary(broken).indexOf("could not run") >= 0,
+        "CsCheck: and the summary says a check could not run");
+
+    // -- every finding is explained -------------------------------
+    var everyFault = cleanScan();
+    everyFault.layers[0].count = 0;
+    everyFault.layers[1].count = 0;
+    everyFault.layers[2].count = 0;
+    everyFault.titleBlock.caveName = "";
+    everyFault.symbols[0].atHome = false;
+    everyFault.entities.push({ layer: "0", at: null, registered: false });
+    everyFault.layers[3].visible = false;
+    everyFault.boundaries[0].closed = false;
+    everyFault.sections[0].station = "";
+    everyFault.shapes[0].inSync = false;
+    everyFault.ledges[0].drop = 99;
+    everyFault.closurePercent = 9.9;
+    everyFault.wallEnds = [
+        { at: { x: 0, y: 0 }, layer: "WALLS-SURVEYED", entity: "1" },
+        { at: { x: 3, y: 0 }, layer: "WALLS-SURVEYED", entity: "2" }
+    ];
+    everyFault.linework[0].nearestStation = 999;
+    var all = CsCheck.review(everyFault);
+    ok(all.findings.length === CsCheck.CHECKS.length,
+        "CsCheck: a map with every fault reports every check (" +
+            all.findings.length + " of " + CsCheck.CHECKS.length + ")");
+    var explained = true;
+    for (var fi2 = 0; fi2 < all.findings.length; fi2++) {
+        var f = all.findings[fi2];
+        if (f.why.length < 60 || f.title.length < 10 ||
+                isNull(CsCheck.LABEL[f.severity])) {
+            explained = false;
+        }
+    }
+    ok(explained,
+        "CsCheck: every finding carries a title, a severity with a " +
+            "label, and a why worth reading");
 })();
 
 // ---------------------------------------------------------------------

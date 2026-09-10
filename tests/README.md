@@ -294,3 +294,27 @@ swap places unnoticed.
 
 Prints `### ALIGN MATH OK <checks>`, or `### ALIGN MATH FAIL <n> of <checks>`
 with each failed assertion above it.
+
+## `check_map_run.js` -- Check Map reads a real drawing
+
+`tests/js_unit.js` runs all fourteen of `CsCheck`'s checks over literal
+`scan` objects, which is where the LOGIC is proved. This stage proves
+the other half: that `CsCheck.scan` turns a real document into one of
+those objects correctly.
+
+That is where a lint tool fails silently and expensively -- every check
+passes, the panel says "nothing to fix", and the reason is that the scan
+found nothing to check. So the fixture builds a drawing with known
+faults (two wall ends 3 ft apart, a line 900 ft from any station, work
+on layer 0, an open breakdown boundary, a stalactite on the water layer)
+and asserts each one is SEEN, then builds a clean drawing and asserts
+the panel stays quiet.
+
+It has already earned its place twice: it caught `CsCheck.scan` reading
+`station.position` where `CsTags.collectStations` writes `pos` -- which
+threw inside a guard, emptied the station index, and reported every line
+in the cave as drawn away from the survey -- and it caught the test's own
+`addLine` helper being clobbered by `scripts/simple.js`'s global of the
+same name.
+
+Passes when the output contains `### CHECK MAP OK`.

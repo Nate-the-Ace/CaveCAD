@@ -142,6 +142,11 @@ include(includeBasePath + "/CsTileArt.js");
 include(includeBasePath + "/CsPanel.js");
 include(includeBasePath + "/CsSheet.js");
 include(includeBasePath + "/CsReport.js");
+// After CsLayers, CsSymbols, CsSheet, CsShapeLine, CsStats and
+// CsRevise -- the map proofreader reads all of them, and its scan half
+// calls into each when it runs.
+include(includeBasePath + "/CsCheck.js");
+
 // After CsModel, CsTraverse, CsProfile and (optionally) CsRevise --
 // CsContrib calls ensureTrips, offset, groupRuns and tripLabel.
 include(includeBasePath + "/CsContrib.js");

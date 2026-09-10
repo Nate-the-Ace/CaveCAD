@@ -1510,6 +1510,7 @@ MENU = {
     "BuildLegend/BuildLegend.js":         (454, 30, ["buildlegend", "bl"]),
     "Callout/Callout.js":                 (454, 40, ["callout", "cal", "cscallout", "cscal"]),
     # 455 -- fix and share
+    "CheckMap/CheckMap.js":               (455, 5, ["checkmap", "chk"]),
     "RepairDrawing/RepairDrawing.js":     (455, 10, ["repairdrawing", "rep"]),
     "PackageCave/PackageCave.js":         (455, 20, ["packagecave", "pc", "pkgcave"]),
 }
