@@ -681,6 +681,27 @@ CsSheetSetup.sheetPathFor = function(caveFolder, caveName) {
         " Sheet.dxf";
 };
 
+/**
+ * The cave's own drawing, given one of its sheets. The inverse of
+ * sheetPathFor, and the reason a caver can press Build Sheet while
+ * looking AT a sheet: the record it was built from is one folder up,
+ * named after the cave.
+ *
+ * "" when the path is not a sheet path at all.
+ */
+CsSheetSetup.recordPathFor = function(sheetPath) {
+    var path = isNull(sheetPath) ? "" : String(sheetPath);
+    var marker = "/" + CsSheetSetup.SHEETS_FOLDER + "/";
+    var at = path.lastIndexOf(marker);
+    if (at < 0) {
+        return "";
+    }
+    var caveFolder = path.substring(0, at);
+    var slash = caveFolder.lastIndexOf("/");
+    var caveName = slash < 0 ? caveFolder : caveFolder.substring(slash + 1);
+    return caveFolder + "/" + caveName + ".dxf";
+};
+
 /** The tag every generated sheet piece carries. Its VALUE says which
  *  sheet the piece belongs to. */
 CsSheetSetup.TAG = "SheetPiece";

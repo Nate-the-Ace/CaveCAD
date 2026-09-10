@@ -378,6 +378,20 @@ try {
 ok((new QDir()).mkpath(caveFolder), "made a cave folder");
 
 var recordPath = caveFolder + "/Truitt Cave.dxf";
+// A scan in each frame, stored the way an aligned one is: an image on
+// that frame's own scan layer. A sheet is plotted, and a scan is what
+// you trace FROM -- so none of these may reach one.
+function addScan(layer, x, y) {
+    CsLayers.ensure(recordDoc, recordDi, layer);
+    var img = new RImageEntity(recordDoc, new RImageData(
+        repoRoot + "/testdata/Elevation_3DEP_64.tif",
+        new RVector(x, y), new RVector(1, 0), new RVector(0, 1),
+        64, 64, 0));
+    img.setLayerId(recordDoc.getLayerId(layer));
+    var op = new RAddObjectsOperation();
+    op.addObject(img, false);
+    recordDi.applyOperation(op);
+}
 var recordDi = new RDocumentInterface(
     new RDocument(new RMemoryStorage(), createSpatialIndex()));
 var recordDoc = recordDi.getDocument();
@@ -388,6 +402,13 @@ wall.setLayerId(recordDoc.getLayerId(CsLayers.WALLS_SURVEYED));
 var recOp = new RAddObjectsOperation();
 recOp.addObject(wall, false);
 recordDi.applyOperation(recOp);
+addScan(CsLayers.CTRL_SCAN, 10, 10);
+addScan(CsLayers.CTRL_PROFILE_SCAN, 10, -900);
+addScan(CsLayers.CTRL_SECTION_SCAN, 900, 10);
+// AND ONE ON LAYER 0, which is where two of Truitt Cave's forty-two
+// actually sit -- placed before the alignment tools existed, or
+// dragged in by hand. A rule that trusts the layer lets those through.
+addScan("0", 200, 200);
 ok(recordDi.exportFile(recordPath, CsSanitize.dxfFilter()),
     "wrote a cave record to disk");
 
@@ -446,6 +467,120 @@ for (i = 0; i < copyIds.length; i++) {
 ok(inCopy > 0, "the copy carries the sheet");
 ok(wallsInCopy > 0,
     "and the cave itself -- a sheet with no map on it is a border");
+
+// ---------------------------------------------------------------------
+// A SHEET IS MARKED, AND AN UNTICKED ELEVATION IS GONE FROM IT.
+// ---------------------------------------------------------------------
+
+var markedDi = new RDocumentInterface(
+    new RDocument(new RMemoryStorage(), createSpatialIndex()));
+markedDi.importFile(sheetPath, "", false);
+ok(CsSheetFile.isSheet(markedDi.getDocument()),
+    "the sheet that was built is marked as a sheet");
+
+// The MARK, not just the path: a sheet moved out of its folder is
+// still a sheet, and the mark is the half that travels with the file.
+var marks = 0;
+var markIds = markedDi.getDocument().queryAllEntities(false, true);
+for (i = 0; i < markIds.length; i++) {
+    var me = markedDi.getDocument().queryEntity(markIds[i]);
+    if (!isNull(me) && CsTags.get(me, CsSheetFile.TAG) !== "") {
+        marks += 1;
+    }
+}
+ok(marks >= 1,
+    "and carries the mark inside it, so moving the file out of the " +
+        "sheets folder does not make it editable again");
+
+// UNTICKED MEANS GONE. The copy comes from the record, so the elevation
+// is IN it -- a thousand feet below the plan, outside the border, on a
+// drawing whose whole promise is that it is what gets plotted.
+var elevDoc = new RDocumentInterface(
+    new RDocument(new RMemoryStorage(), createSpatialIndex()));
+elevDoc.importFile(sheetPath, "", false);
+var profileLeft = 0;
+var pIds = elevDoc.getDocument().queryAllEntities(false, true);
+for (i = 0; i < pIds.length; i++) {
+    var pe = elevDoc.getDocument().queryEntity(pIds[i]);
+    if (isNull(pe)) { continue; }
+    if (CsLayers.frameOf(CsBind.layerNameOf(elevDoc.getDocument(), pe)) ===
+            "profile") {
+        profileLeft += 1;
+    }
+}
+eqs(profileLeft, 0,
+    "with the elevation unticked, nothing profile-framed survives into " +
+        "the sheet -- a sheet that quietly carries a view nobody asked " +
+        "for is a sheet that plots one");
+
+// INCLUDING THE BAND BOXES, which live on a LOCKED layer. Off, frozen
+// and locked are three separate silent refusals, and clearing only the
+// first two left sixteen invisible boxes in a real sheet -- enough for
+// the next Generate Profile to think the elevation was still there.
+var boxesLeft = 0;
+for (i = 0; i < pIds.length; i++) {
+    var be = elevDoc.getDocument().queryEntity(pIds[i]);
+    if (!isNull(be) &&
+            CsBind.layerNameOf(elevDoc.getDocument(), be) ===
+                CsLayers.CTRL_PROFILE_BOX) {
+        boxesLeft += 1;
+    }
+}
+eqs(boxesLeft, 0, "the band boxes went too, locked layer and all");
+
+// AND NO SKETCH SCANS, in any frame, whatever else was ticked. A
+// scanned field book page is a tracing reference: it is under the
+// drawing so a cartographer can follow it, and everything worth
+// keeping off it has already been traced. On a sheet it is a
+// photograph of somebody's handwriting printed under the map -- on
+// Truitt Cave, forty-two of them.
+var scansLeft = [];
+for (i = 0; i < pIds.length; i++) {
+    var se = elevDoc.getDocument().queryEntity(pIds[i]);
+    if (isNull(se)) { continue; }
+    var sl = CsBind.layerNameOf(elevDoc.getDocument(), se);
+    if (sl === CsLayers.CTRL_SCAN || sl === CsLayers.CTRL_PROFILE_SCAN ||
+            sl === CsLayers.CTRL_SECTION_SCAN) {
+        scansLeft.push(sl);
+    }
+}
+eqs(scansLeft.length, 0,
+    "no sketch scan reaches a sheet, in any frame (" +
+        scansLeft.join(", ") + ")");
+
+// THE RULE IS THE ENTITY, not the layer: a sheet carries no raster at
+// all, wherever somebody put it.
+var rasters = 0;
+for (i = 0; i < pIds.length; i++) {
+    var ie = elevDoc.getDocument().queryEntity(pIds[i]);
+    if (!isNull(ie) && ie.getType() === RS.EntityImage) {
+        rasters += 1;
+    }
+}
+eqs(rasters, 0,
+    "and no image of any kind, on any layer -- including the one " +
+        "sitting on layer 0");
+
+// The record keeps its own, which is where they belong.
+var recScans = 0;
+var recCheck = new RDocumentInterface(
+    new RDocument(new RMemoryStorage(), createSpatialIndex()));
+recCheck.importFile(recordPath, "", false);
+var recIds2 = recCheck.getDocument().queryAllEntities(false, true);
+for (i = 0; i < recIds2.length; i++) {
+    var rse = recCheck.getDocument().queryEntity(recIds2[i]);
+    if (isNull(rse)) { continue; }
+    var rsl = CsBind.layerNameOf(recCheck.getDocument(), rse);
+    if (rsl === CsLayers.CTRL_SCAN ||
+            rsl === CsLayers.CTRL_PROFILE_SCAN ||
+            rsl === CsLayers.CTRL_SECTION_SCAN) {
+        recScans += 1;
+    }
+}
+eqs(recScans, 3,
+    "and the cave's own drawing still has all three of the framed " +
+        "ones, plus the stray on layer 0 -- the record keeps every " +
+        "scan, which is where they belong");
 
 try {
     (new QDir(QDir.tempPath() + "/CaveCADSheetTest")).removeRecursively();

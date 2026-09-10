@@ -161,6 +161,13 @@ function generateProfileRun() {
         generateProfileRefuse("no active drawing document");
         return;
     }
+    // A SHEET IS NOT A DRAWING TO WORK IN. It is rebuilt from the
+    // cave's record every time Build Sheet is pressed, so anything
+    // drawn here goes with it -- silently, weeks later. See
+    // Core/CsSheetFile.js.
+    if (CsSheetFile.blocks(doc, "Generate Profile")) {
+        return;
+    }
 
     // From the DRAWING, not a notebook that may not be open: the survey
     // model lives on the entities themselves, so a profile can be

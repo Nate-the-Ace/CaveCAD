@@ -211,7 +211,10 @@ var CORE_FILES = [
     "scripts/CaveSurvey/Core/CsClosure.js",
     // Pure path arithmetic and the plan of what a reset will do. The
     // file work lives in the tool, where a filesystem exists.
-    "scripts/CaveSurvey/Core/CsTeach.js"
+    "scripts/CaveSurvey/Core/CsTeach.js",
+    // The sheet mark. isSheet/mark need a document; the path rule and
+    // the refusal text are pure and are what is tested here.
+    "scripts/CaveSurvey/Core/CsSheetFile.js"
 ];
 for (var ci = 0; ci < CORE_FILES.length; ci++) {
     loadRepoScript(CORE_FILES[ci]);
@@ -23825,6 +23828,23 @@ eqs(CsSymbolStore.PREFIX, "SYM_", "the symbol block prefix");
     ok(CsSheetSetup.sheetPathFor("/caves/x", "").indexOf("Cave Sheet") > 0,
         "CsSheetSetup: a nameless cave still gets a file name");
 
+    // A SHEET REBUILDS ITSELF: pressing Build Sheet while looking at
+    // one asks for THIS sheet again, not a sheet of a sheet. The record
+    // is one folder up, named after the cave.
+    eqs(CsSheetSetup.recordPathFor(sheetPath),
+        "/caves/Truitt Cave/Truitt Cave.dxf",
+        "CsSheetSetup: a sheet knows the drawing it was built from");
+    eqs(CsSheetSetup.recordPathFor(
+        CsSheetSetup.sheetPathFor("/caves/Deep Hole", "Deep Hole")),
+        "/caves/Deep Hole/Deep Hole.dxf",
+        "CsSheetSetup: which is the inverse of where sheets are written");
+    eqs(CsSheetSetup.recordPathFor("/caves/Truitt Cave/Truitt Cave.dxf"),
+        "",
+        "CsSheetSetup: a drawing that is not a sheet has no record " +
+            "behind it");
+    eqs(CsSheetSetup.recordPathFor(""), "",
+        "CsSheetSetup: and neither has nothing");
+
     // -- the second sheet ------------------------------------------
     // The elevation is drawn at the PLAN's scale, so it gets its own
     // sheet rather than a scale step nobody asked for.
@@ -24238,6 +24258,41 @@ eqs(CsSymbolStore.PREFIX, "SYM_", "the symbol block prefix");
     ok(told.indexOf("location is not in this copy") > 0,
         "CsTeach: and that its location was removed -- nobody should " +
             "teach from it believing it is the cave's whole record");
+})();
+
+// ---------------------------------------------------------------------
+// CsSheetFile -- the mark that says a drawing is a SHEET.
+// ---------------------------------------------------------------------
+(function() {
+    // A drawing inside a cave's sheets/ folder is a sheet whatever its
+    // contents say: the mark is an entity, and an entity can be
+    // deleted by a tidy-up or a round trip through another program.
+    ok(CsSheetFile.pathIsSheet(
+        "/caves/Truitt Cave/sheets/Truitt Cave Sheet.dxf"),
+        "CsSheetFile: a drawing in the sheets folder is a sheet");
+    ok(!CsSheetFile.pathIsSheet("/caves/Truitt Cave/Truitt Cave.dxf"),
+        "CsSheetFile: the cave's own drawing beside it is not");
+    ok(!CsSheetFile.pathIsSheet(""),
+        "CsSheetFile: an unsaved drawing is not a sheet by its path");
+    ok(!CsSheetFile.pathIsSheet(null),
+        "CsSheetFile: and neither is nothing");
+    // The folder name is the one CsSheetSetup writes into -- the two
+    // cannot be allowed to disagree about where a sheet lives.
+    ok(CsSheetFile.pathIsSheet(
+        CsSheetSetup.sheetPathFor("/caves/x", "X")),
+        "CsSheetFile: the path Sheet Setup writes to is recognised as " +
+            "a sheet by the guard that reads it");
+
+    var refusal = CsSheetFile.refusal("Feature Trace");
+    ok(refusal.indexOf("Feature Trace") === 0,
+        "CsSheetFile: the refusal names the tool that refused");
+    ok(refusal.indexOf("SHEET") > 0,
+        "CsSheetFile: says what this drawing is");
+    ok(refusal.toLowerCase().indexOf("lost") > 0,
+        "CsSheetFile: and what would happen to work done here");
+    ok(refusal.toLowerCase().indexOf("open the cave") > 0,
+        "CsSheetFile: and answers the question actually being asked, " +
+            "which is where to do this instead");
 })();
 
 // ---------------------------------------------------------------------

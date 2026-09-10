@@ -118,6 +118,13 @@ function scatterBreakdownRun() {
         warning("Scatter Breakdown: no active drawing document.");
         return;
     }
+    // A SHEET IS NOT A DRAWING TO WORK IN. It is rebuilt from the
+    // cave's record every time Build Sheet is pressed, so anything
+    // drawn here goes with it -- silently, weeks later. See
+    // Core/CsSheetFile.js.
+    if (CsSheetFile.blocks(doc, "Scatter Breakdown")) {
+        return;
+    }
     var di = getDocumentInterface();
 
     // The boundary can be drawn on the plan layer or on either frame

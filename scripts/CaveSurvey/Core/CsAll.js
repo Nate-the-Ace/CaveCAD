@@ -166,6 +166,10 @@ include(includeBasePath + "/CsSheetSetup.js");
 // After CsAdjust (whose per-station shifts it draws) and CsNetwork
 // (whose loops it labels): turning a closure percentage into arrows.
 include(includeBasePath + "/CsClosure.js");
+// After CsSheetSetup (whose sheets/ folder name it recognises a sheet
+// by): the mark that says a drawing is a SHEET, and the refusal every
+// editing tool owes it.
+include(includeBasePath + "/CsSheetFile.js");
 
 // After CsModel, CsTraverse, CsProfile and (optionally) CsRevise --
 // CsContrib calls ensureTrips, offset, groupRuns and tripLabel.

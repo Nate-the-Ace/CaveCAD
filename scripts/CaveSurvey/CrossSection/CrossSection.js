@@ -76,6 +76,14 @@ CrossSection.prototype.beginEvent = function() {
         this.terminate();
         return;
     }
+    // A SHEET IS NOT A DRAWING TO WORK IN. It is rebuilt from the
+    // cave's record every time Build Sheet is pressed, so anything
+    // drawn here goes with it -- silently, weeks later. See
+    // Core/CsSheetFile.js.
+    if (CsSheetFile.blocks(doc, "Cross Section")) {
+        this.terminate();
+        return;
+    }
 
     // Three ways to get a section, asked once. The cut route is what a
     // caver reaches for most, so it is the default; the other two used

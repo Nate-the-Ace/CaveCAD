@@ -273,6 +273,39 @@ SheetSetup.readState = function(doc) {
     } catch (ePath) {
         state.recordPath = "";
     }
+    // A SHEET REBUILDS ITSELF (Nathan, 2026-09-10). Pressing Build
+    // Sheet while looking at a sheet is not a request for a sheet OF a
+    // sheet -- borders inside borders, a record two steps from the
+    // survey it claims to show. It is a request to build THIS sheet
+    // again: another trip has been surveyed, or the choices have
+    // changed. The record it came from is one folder up and named after
+    // the cave, so everything below measures THAT, and the build lands
+    // back in the file the caver is looking at.
+    if (CsSheetFile.isSheet(doc)) {
+        var back = CsSheetSetup.recordPathFor(state.recordPath);
+        var haveIt = false;
+        try {
+            haveIt = (back !== "") && (new QFileInfo(back)).exists();
+        } catch (eBack) {
+            haveIt = false;
+        }
+        if (!haveIt) {
+            state.why = "This is a sheet, and the cave's own drawing " +
+                "is not where a sheet is built from -- one folder up, " +
+                "named after the cave. Open that drawing to build a " +
+                "sheet from it.";
+            return state;
+        }
+        state.rebuilding = true;
+        state.recordPath = back;
+        doc = SheetSetup.readRecord(back);
+        if (isNull(doc)) {
+            state.why = "Could not read the cave's own drawing at " +
+                back + ".";
+            return state;
+        }
+        state.borrowed = true;
+    }
     state.caveBox = SheetSetup.caveBox(doc);
     if (state.caveBox === null) {
         state.why = "This drawing has nothing on it yet. Draw the cave " +
@@ -301,7 +334,42 @@ SheetSetup.readState = function(doc) {
         }
     }
     state.ok = true;
+    if (state.borrowed === true) {
+        // The record was opened only to be measured. Letting it go here
+        // rather than holding it means the panel never has a second
+        // document alive behind the caver's back.
+        SheetSetup.release();
+    }
     return state;
+};
+
+/** Opens a cave's record into a memory document, for measuring.
+ *  Null when it will not read. */
+SheetSetup.readRecord = function(path) {
+    try {
+        var di = new RDocumentInterface(
+            new RDocument(new RMemoryStorage(), createSpatialIndex()));
+        if (di.importFile(path, "", false) !==
+                RDocumentInterface.IoErrorNoError) {
+            return null;
+        }
+        SheetSetup.borrowedInterface = di;
+        return di.getDocument();
+    } catch (e) {
+        return null;
+    }
+};
+
+/** Lets a borrowed record go. */
+SheetSetup.release = function() {
+    try {
+        if (!isNull(SheetSetup.borrowedInterface) &&
+                typeof destr === "function") {
+            destr(SheetSetup.borrowedInterface);
+        }
+    } catch (e) {
+    }
+    SheetSetup.borrowedInterface = null;
 };
 
 SheetSetup.buildDock = function(appWin) {
@@ -475,7 +543,9 @@ SheetSetup.repaint = function() {
     }
 
     var spill = CsSheetSetup.previewFits(preview);
-    w.fitLabel.text = qsTr("The plan measures %1 x %2 ft.")
+    w.fitLabel.text = (w.state.rebuilding === true ?
+            qsTr("Rebuilding this sheet from the cave's drawing.  ") : "") +
+        qsTr("The plan measures %1 x %2 ft.")
         .arg(Math.round(w.state.caveW)).arg(Math.round(w.state.caveH)) +
         "  " + (fit.fits ?
             qsTr("Fits at 1\" = %1 ft").arg(fit.scale) +
@@ -489,6 +559,8 @@ SheetSetup.repaint = function() {
         qsTr("Off the paper: %1. Try a smaller scale or bigger paper.")
             .arg(spill.spilling.join(", "));
     w.buildButton.enabled = (w.state.recordPath !== "");
+    w.buildButton.text = (w.state.rebuilding === true) ?
+        qsTr("Rebuild This Sheet") : qsTr("Build Sheet");
     if (w.state.recordPath === "") {
         w.buildButton.toolTip = qsTr("Save this drawing first -- the " +
             "sheet is written beside it, and an unsaved drawing has " +
@@ -508,11 +580,26 @@ SheetSetup.build = function() {
     } catch (eDoc) {
         doc = null;
     }
-    if (!isNull(doc) && doc.isModified() === true) {
+    // Only the RECORD has to be saved. A sheet with unsaved changes in
+    // it is a caver who has drawn on a sheet, which is exactly what
+    // this rebuild is about to throw away -- and saying "save first"
+    // there would be advice to preserve the thing that cannot be kept.
+    if (w.state.rebuilding !== true && !isNull(doc) &&
+            doc.isModified() === true) {
         warning(qsTr("Sheet Setup: save this drawing first.\n" +
             "The sheet is built from the FILE on disk, so anything " +
             "not yet saved would be missing from it."));
         return;
+    }
+    if (w.state.rebuilding === true) {
+        var lost = !isNull(doc) && doc.isModified() === true;
+        if (lost && QMessageBox.question(getMainWindow(), "Sheet Setup",
+                qsTr("This sheet has unsaved changes, and rebuilding " +
+                    "replaces it from the cave's drawing -- they will " +
+                    "be gone.\n\nRebuild anyway?"),
+                QMessageBox.Yes | QMessageBox.No) !== QMessageBox.Yes) {
+            return;
+        }
     }
     var sheet = CsSheetSetup.sheetByName(String(w.sheetCombo.currentText));
     var scale = CsSheetSetup.SCALES[w.scaleCombo.currentIndex];
@@ -654,6 +741,7 @@ SheetSetup.draw = function(doc, di, opts) {
         }
     }
 
+    var erased = 0;
     var unit = function(inches) {
         return CsSheetSetup.atScale(inches, scale) * perFoot;
     };
@@ -687,6 +775,18 @@ SheetSetup.draw = function(doc, di, opts) {
     };
 
     var drew = [];
+
+    // THE SKETCH SCANS GO, ALWAYS. Not a checkbox: a scanned field
+    // book page is a tracing reference, and everything worth keeping
+    // off it has already been traced. See SheetSetup.eraseScans.
+    var scansGone = SheetSetup.eraseScans(doc, di);
+
+    // THE MARK GOES IN FIRST, in the same operation as everything else,
+    // so a sheet cannot exist unmarked -- see Core/CsSheetFile.js. A
+    // sheet is rebuilt from the record every time it is built, and the
+    // mark is what stops a caver drawing work into something with a
+    // demolition date on it.
+    CsSheetFile.mark(doc, di);
 
     if (wants.border === true) {
         line(box.minX, box.minY, box.maxX, box.minY, CsLayers.BORDER);
@@ -799,6 +899,18 @@ SheetSetup.draw = function(doc, di, opts) {
     // CsSheetSetup.elevationSheetBox for why the alternatives were
     // rejected.
     var elevation = null;
+    if (opts.elevation !== true) {
+        // UNTICKED MEANS GONE, not merely unplaced. The copy came from
+        // the record, so the elevation is IN it -- sitting a thousand
+        // feet below the plan, outside the border, on a sheet whose
+        // whole promise is that it is what gets plotted. A sheet that
+        // quietly carries a view nobody asked for is a sheet that plots
+        // one.
+        erased = SheetSetup.eraseElevation(doc, di);
+        if (erased > 0) {
+            drew.push("no elevation (" + erased + " removed)");
+        }
+    }
     if (opts.elevation === true) {
         elevation = CsSheetSetup.elevationSheetBox(box, scale);
 
@@ -879,8 +991,152 @@ SheetSetup.draw = function(doc, di, opts) {
         (cleared > 0 ? " -- the previous sheet was replaced" : "") +
         (moved > 0 ? (" The elevation moved onto its own sheet (" +
             moved + " bands).") : "") +
+        (scansGone > 0 ? (" " + scansGone + " image" +
+            (scansGone === 1 ? "" : "s") + " left out -- a sheet is " +
+            "plotted, and a scan is something you trace from.") : "") +
         " Nothing was written into the location line; type that one " +
         "yourself.";
+};
+
+/**
+ * Takes the sketch scans out of the sheet copy.
+ *
+ * SCANS NEVER REACH A SHEET (Nathan, 2026-09-10). A scanned field book
+ * page is a TRACING REFERENCE: it is under the drawing so a
+ * cartographer can follow it, and every line worth keeping has already
+ * been traced off it. On a sheet it is a photograph of somebody's
+ * handwriting printed under the map -- and on Truitt Cave that is
+ * forty-two of them, most of a megabyte of raster, in a file whose
+ * whole job is to be plotted.
+ *
+ * All three frames: the plan's scans, the elevation's, and the ones
+ * inside a section bay. The layer IS the definition -- CsScanFrame
+ * gives each frame its own scan layer precisely so a sweep like this
+ * can be exact -- so this takes everything on them rather than
+ * guessing at images by type. Anything a caver has put there is a scan
+ * or is on the wrong layer.
+ *
+ * \return how many entities went.
+ */
+SheetSetup.SCAN_LAYERS = function() {
+    return [CsLayers.CTRL_SCAN, CsLayers.CTRL_PROFILE_SCAN,
+        CsLayers.CTRL_SECTION_SCAN];
+};
+
+SheetSetup.eraseScans = function(doc, di) {
+    var layers = SheetSetup.SCAN_LAYERS();
+    var wanted = {};
+    for (var l = 0; l < layers.length; l++) {
+        wanted[layers[l]] = true;
+    }
+    var gone = 0;
+    // EVERY LAYER, because the scan layers are not enough. Two of
+    // Truitt Cave's forty-two scans sit on layer 0 -- placed before the
+    // suite's own alignment tools existed, or dragged in by hand -- and
+    // a rule that trusts the layer let exactly those two through onto
+    // the sheet. So the rule is the ENTITY: a sheet carries no raster
+    // at all.
+    //
+    // That takes the aerial photograph with them, which is right twice
+    // over: nobody asked a plotted cave map to carry surface imagery,
+    // and an aerial is georeferenced -- it is the cave's location baked
+    // into a picture, on a file made to be handed to people.
+    var everyLayer = [];
+    try {
+        var layerIds = doc.queryAllLayers();
+        for (var q = 0; q < layerIds.length; q++) {
+            var lay = doc.queryLayer(layerIds[q]);
+            if (!isNull(lay) && CsLayers.refusesEdits(lay)) {
+                everyLayer.push(String(lay.getName()));
+            }
+        }
+    } catch (eLayers) {
+        everyLayer = layers;
+    }
+    // A caver may well have switched a scan layer off to see the map
+    // underneath -- and an off layer refuses deletes in silence.
+    CsLayers.withLayersOn(doc, di, everyLayer, function() {
+        var op = new RDeleteObjectsOperation();
+        var ids = doc.queryAllEntities(false, true);
+        for (var i = 0; i < ids.length; i++) {
+            var e = doc.queryEntity(ids[i]);
+            if (isNull(e)) {
+                continue;
+            }
+            var isRaster = false;
+            try {
+                isRaster = (e.getType() === RS.EntityImage);
+            } catch (eType) {
+                isRaster = false;
+            }
+            if (!isRaster &&
+                    wanted[CsBind.layerNameOf(doc, e)] !== true) {
+                continue;
+            }
+            op.deleteObject(e);
+            gone += 1;
+        }
+        if (gone > 0) {
+            di.applyOperation(op);
+        }
+    });
+    return gone;
+};
+
+/**
+ * Takes the extended elevation out of the sheet copy entirely.
+ *
+ * EVERY profile-frame layer, plus the band boxes that describe them:
+ * what is left has to be a drawing of the plan, not a drawing of the
+ * plan with an elevation parked off the paper. Only ever called on the
+ * COPY -- the record keeps its elevation, which is where the elevation
+ * belongs.
+ *
+ * \return how many entities went.
+ */
+SheetSetup.eraseElevation = function(doc, di) {
+    var op = new RDeleteObjectsOperation();
+    var gone = 0;
+    var locked = [];
+    try {
+        var layerIds = doc.queryAllLayers();
+        for (var l = 0; l < layerIds.length; l++) {
+            var lay = doc.queryLayer(layerIds[l]);
+            if (!isNull(lay) && CsLayers.refusesEdits(lay)) {
+                locked.push(String(lay.getName()));
+            }
+        }
+    } catch (eLayers) {
+    }
+    // OFF, FROZEN **AND LOCKED**. Three separate ways a layer refuses
+    // an edit in silence, and the band boxes manage two of them: they
+    // live on CTRL-PROFILE-BOX, which the registry ships LOCKED, and
+    // the first version of this cleared only off and frozen. Sixteen
+    // band boxes survived into a sheet built with the elevation
+    // unticked -- invisible, on a hidden layer, and enough to make the
+    // next Generate Profile think the elevation was still there.
+    CsLayers.withLayersOn(doc, di, locked, function() {
+        CsLayers.withLayerUnlocked(doc, di, CsLayers.CTRL_PROFILE_BOX,
+                function() {
+            var ids = doc.queryAllEntities(false, true);
+            for (var i = 0; i < ids.length; i++) {
+                var e = doc.queryEntity(ids[i]);
+                if (isNull(e)) {
+                    continue;
+                }
+                var layer = CsBind.layerNameOf(doc, e);
+                if (CsLayers.frameOf(layer) !== "profile") {
+                    continue;
+                }
+                op.deleteObject(e);
+                gone += 1;
+            }
+            if (gone > 0) {
+                di.applyOperation(op);
+            }
+        });
+    });
+    return gone;
 };
 
 /**

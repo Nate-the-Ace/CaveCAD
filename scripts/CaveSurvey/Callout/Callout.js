@@ -61,6 +61,14 @@ Callout.prototype.beginEvent = function() {
         this.terminate();
         return;
     }
+    // A SHEET IS NOT A DRAWING TO WORK IN. It is rebuilt from the
+    // cave's record every time Build Sheet is pressed, so anything
+    // drawn here goes with it -- silently, weeks later. See
+    // Core/CsSheetFile.js.
+    if (CsSheetFile.blocks(doc, "Callout")) {
+        this.terminate();
+        return;
+    }
 
     // Which source the note's text comes from. Two clicks either way --
     // this only decides whether the first click is a point to READ or a

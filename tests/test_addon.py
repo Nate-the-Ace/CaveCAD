@@ -1736,6 +1736,91 @@ class TestNamespacesAreDeclared(unittest.TestCase):
         self.assertEqual([], offenders, "\n".join(offenders))
 
 
+class TestSheetFileGuard(unittest.TestCase):
+    """A sheet is not a drawing to work in.
+
+    Sheet Setup rebuilds a sheet from the cave's record every time it is
+    pressed, so anything drawn INTO a sheet is lost the next time
+    anybody builds one -- silently, weeks later, with no way back. Worse,
+    the loss is not obvious: a sheet still looks like the cave, has the
+    whole survey in it, and is an excellent thing to draw on.
+
+    So every tool that WRITES checks CsSheetFile.blocks first. The list
+    is written out rather than derived, on the same principle as the
+    MENU table: a tool that starts writing has to be added here
+    deliberately, and a tool that stops writing has to be taken out.
+    """
+
+    # Tools that modify the drawing, and so must refuse a sheet.
+    MUST_GUARD = [
+        "BuildLegend", "Callout", "CrossSection", "FeatureTrace",
+        "GenerateProfile", "ImportCaveSurvey", "LoopErrors",
+        "RepairDrawing", "ScatterBreakdown", "ShapedLines",
+        "SketchScans", "SurfaceData", "SurveyNotebook", "SymbolPalette",
+    ]
+
+    # Tools that only READ, and are welcome on a sheet: checking a sheet
+    # before plotting it is exactly what they are for. Listed with the
+    # reason, so moving one across is a decision rather than a drift.
+    READ_ONLY = {
+        "CheckMap": "reads the drawing and reports; changes nothing",
+        "SurveyStats": "computes length, depth and grade",
+        "ExportCaveSurvey": "writes a survey file, never the drawing",
+        "PackageCave": "copies a cave folder; never edits a drawing",
+        "CaveShelf": "opens drawings, does not edit them",
+        "CaveTemplate": "makes a NEW drawing from the template",
+        "TeachingCave": "copies files between folders",
+        "SheetSetup": "refuses a sheet in readState, with its own words",
+    }
+
+    def guarded(self, folder):
+        with open(os.path.join(ADDON, folder, folder + ".js")) as handle:
+            return "CsSheetFile.blocks" in handle.read()
+
+    def test_every_editing_tool_refuses_a_sheet(self):
+        missing = [name for name in self.MUST_GUARD
+                   if not self.guarded(name)]
+        self.assertEqual(
+            missing, [],
+            "these tools write to the drawing but do not refuse a "
+            "sheet: %s -- add CsSheetFile.blocks(doc, \"<Tool>\") to "
+            "each" % missing)
+
+    def test_the_two_lists_cover_every_tool(self):
+        """A tool in neither list is a tool nobody decided about."""
+        tools = sorted(
+            name for name in os.listdir(ADDON)
+            if os.path.isfile(os.path.join(ADDON, name, name + ".js")))
+        known = set(self.MUST_GUARD) | set(self.READ_ONLY)
+        undecided = [name for name in tools if name not in known]
+        self.assertEqual(
+            undecided, [],
+            "these tools are in neither the writing list nor the "
+            "read-only one: %s -- decide which, and say why in "
+            "READ_ONLY if it reads" % undecided)
+
+    def test_sheet_setup_refuses_to_build_a_sheet_of_a_sheet(self):
+        with open(os.path.join(ADDON, "SheetSetup",
+                               "SheetSetup.js")) as handle:
+            source = handle.read()
+        self.assertIn(
+            "CsSheetFile.isSheet", source,
+            "Sheet Setup has to refuse a sheet too -- a sheet of a "
+            "sheet is a record two steps from the survey it shows")
+
+    def test_a_sheet_is_known_two_ways(self):
+        """The mark is an entity and an entity can be deleted, so the
+        file's own path counts too.
+        """
+        with open(os.path.join(ADDON, "Core", "CsSheetFile.js")) as handle:
+            source = handle.read()
+        self.assertIn("pathIsSheet", source,
+                      "a drawing inside a cave's sheets/ folder is a "
+                      "sheet whatever its contents say")
+        self.assertIn("CsTags.get(e, CsSheetFile.TAG)", source,
+                      "and a marked drawing is a sheet wherever it sits")
+
+
 class TestTeachingCave(unittest.TestCase):
     """The teaching cave replaced the invented Lesson Cave.
 

@@ -39,6 +39,13 @@ include(includeBasePath + "/../Core/CsAll.js");
 
 function importCaveSurvey() {
     var doc = getDocument();
+    // A SHEET IS NOT A DRAWING TO WORK IN. It is rebuilt from the
+    // cave's record every time Build Sheet is pressed, so anything
+    // drawn here goes with it -- silently, weeks later. See
+    // Core/CsSheetFile.js.
+    if (CsSheetFile.blocks(doc, "Import Cave Survey")) {
+        return;
+    }
     var di = getDocumentInterface();
     if (doc === undefined || doc === null) {
         warning("Import Cave Survey: no active drawing document.");
