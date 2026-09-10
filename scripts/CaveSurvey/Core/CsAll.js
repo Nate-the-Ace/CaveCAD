@@ -146,6 +146,10 @@ include(includeBasePath + "/CsReport.js");
 // CsRevise -- the map proofreader reads all of them, and its scan half
 // calls into each when it runs.
 include(includeBasePath + "/CsCheck.js");
+// After CsHelp (the labels and sentences a legend prints), CsSymbols,
+// CsLayers, CsShapeLine and CsBind -- the legend decides what a map
+// USES by reading all of them.
+include(includeBasePath + "/CsLegend.js");
 
 // After CsModel, CsTraverse, CsProfile and (optionally) CsRevise --
 // CsContrib calls ensureTrips, offset, groupRuns and tripLabel.

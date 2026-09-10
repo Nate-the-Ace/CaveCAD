@@ -198,7 +198,11 @@ var CORE_FILES = [
     // The map proofreader. Every CHECK is pure -- it reads a plain
     // `scan` object -- and those are what is tested here; CsCheck.scan
     // is the QCAD half and is never CALLED from this file.
-    "scripts/CaveSurvey/Core/CsCheck.js"
+    "scripts/CaveSurvey/Core/CsCheck.js",
+    // What a legend should say and in what order. rowsFor/wrap/
+    // heightOf are pure and are what is tested here; usage() is the
+    // QCAD half and is never CALLED from this file.
+    "scripts/CaveSurvey/Core/CsLegend.js"
 ];
 for (var ci = 0; ci < CORE_FILES.length; ci++) {
     loadRepoScript(CORE_FILES[ci]);
@@ -23375,6 +23379,196 @@ eqs(CsSymbolStore.PREFIX, "SYM_", "the symbol block prefix");
     ok(explained,
         "CsCheck: every finding carries a title, a severity with a " +
             "label, and a why worth reading");
+})();
+
+// ---------------------------------------------------------------------
+// CsLegend -- what a legend says, and in what order. The row logic is
+// pure, so the usage object is handed in as a literal here; the half
+// that reads a document is covered by tests/build_legend_run.js.
+// ---------------------------------------------------------------------
+(function() {
+    function keysOf(rows) {
+        var out = [];
+        for (var i = 0; i < rows.length; i++) {
+            out.push(rows[i].kind === "heading" ?
+                ("#" + rows[i].label) : rows[i].key);
+        }
+        return out;
+    }
+
+    // -- nothing used, nothing said -------------------------------
+    ok(CsLegend.rowsFor({ features: {}, symbols: [] }).length === 0,
+        "CsLegend: a map that uses nothing gets no legend rows");
+    ok(CsLegend.rowsFor(null).length === 0,
+        "CsLegend: and neither does a caller with nothing to say");
+
+    // -- only what the map uses -----------------------------------
+    var rows = CsLegend.rowsFor({
+        features: { "layer:WALLS-SURVEYED": 4, "style:floorledge": 1 },
+        symbols: []
+    });
+    ok(keysOf(rows).join(",") === "layer:WALLS-SURVEYED,style:floorledge",
+        "CsLegend: only the features in use appear, in drawing order " +
+            "(" + keysOf(rows).join(",") + ")");
+    ok(rows[0].kind === "line" && rows[1].kind === "shape",
+        "CsLegend: a shaped line is its own kind of row");
+    ok(rows[0].layer === "WALLS-SURVEYED" && rows[1].style === "floorledge",
+        "CsLegend: each row carries what it needs to be drawn from");
+
+    // A feature used ZERO times is not a feature this map draws.
+    ok(CsLegend.rowsFor({ features: { "layer:CEILING": 0 },
+        symbols: [] }).length === 0,
+        "CsLegend: a layer with nothing on it is not in the legend");
+
+    // -- order: lines before symbols, walls before the rest -------
+    var mixed = CsLegend.rowsFor({
+        features: { "style:rimstone": 1, "layer:WALLS-INFERRED": 2,
+            "layer:WALLS-SURVEYED": 9 },
+        symbols: [{ block: "SYM_PIT", nss: "Pit", uis: "Pit / vertical drop",
+            layer: "PITS-DOMES" }]
+    });
+    var order = keysOf(mixed);
+    ok(order[0] === "#" + CsLegend.HEADING_LINES,
+        "CsLegend: with both halves present, the lines are headed");
+    ok(order.indexOf("layer:WALLS-SURVEYED") <
+        order.indexOf("layer:WALLS-INFERRED"),
+        "CsLegend: surveyed walls come before inferred ones");
+    ok(order.indexOf("style:rimstone") <
+        order.indexOf("#" + CsLegend.HEADING_SYMBOLS),
+        "CsLegend: every line comes before the symbols heading");
+    ok(order[order.length - 1] === "symbol:SYM_PIT",
+        "CsLegend: and the symbols come last");
+
+    // One half alone needs no headings -- a map with no symbols does
+    // not have to be told that its lines are lines.
+    var linesOnly = CsLegend.rowsFor({
+        features: { "layer:WALLS-SURVEYED": 1 }, symbols: [] });
+    ok(keysOf(linesOnly).join(",") === "layer:WALLS-SURVEYED",
+        "CsLegend: one half alone gets no headings");
+
+    // -- what each row says ---------------------------------------
+    ok(rows[0].label === "Surveyed Walls",
+        "CsLegend: a line row is named the way its Feature Trace tile is");
+    ok(rows[0].means.length > 20 &&
+        rows[0].means === CsHelp.FEATURE["layer:WALLS-SURVEYED"].means,
+        "CsLegend: and carries the same sentence the tooltip does");
+    ok(mixed[mixed.length - 1].label.indexOf("(UIS:") > 0,
+        "CsLegend: a symbol whose UIS name differs prints both");
+
+    // A custom symbol has no CsHelp entry and gets no sentence rather
+    // than an invented one.
+    var custom = CsLegend.rowsFor({ features: {}, symbols: [
+        { block: "SYM_MY_OWN", nss: "My Own", uis: "My Own",
+            layer: "NOTES-GENERAL", custom: true }] });
+    ok(custom.length === 1 && custom[0].means === "",
+        "CsLegend: a custom symbol is listed but not explained");
+    ok(custom[0].label === "My Own",
+        "CsLegend: with no UIS suffix when both names agree");
+
+    // -- the meanings column --------------------------------------
+    var wrapped = CsLegend.wrap(
+        "one two three four five six seven eight nine ten", 12);
+    ok(wrapped.length > 1 && wrapped[0].length <= 12,
+        "CsLegend: the sentence wraps to the budget");
+    ok(CsLegend.wrap("", 20).length === 0,
+        "CsLegend: and nothing wraps to nothing");
+    ok(CsLegend.wrap("supercalifragilistic", 5).length === 1,
+        "CsLegend: a word longer than the budget keeps its own line " +
+            "rather than being cut");
+
+    ok(CsLegend.explainLines(rows[0], false).length === 0,
+        "CsLegend: explaining off means no sentences");
+    ok(CsLegend.explainLines(rows[0], true).length >= 1,
+        "CsLegend: explaining on means at least one");
+    ok(CsLegend.explainLines(custom[0], true).length === 0,
+        "CsLegend: a row with no meaning prints none even when on");
+
+    // -- row heights ----------------------------------------------
+    ok(CsLegend.heightOf({ kind: "heading", label: "LINES" }, true) === 1.0,
+        "CsLegend: a heading is one row tall");
+    ok(CsLegend.heightOf(rows[0], false) === 1.0,
+        "CsLegend: an unexplained row is one row tall");
+    ok(CsLegend.heightOf(rows[0], true) > 1.0,
+        "CsLegend: an explained row grows to fit its sentence");
+    var tall = { kind: "line", key: "k", label: "L",
+        means: CsLegend.wrap("x", 5).join("") };
+    ok(CsLegend.heightOf(tall, true) < CsLegend.heightOf(rows[0], true) ||
+        CsLegend.heightOf(tall, true) <= CsLegend.heightOf(rows[0], true),
+        "CsLegend: a short sentence does not cost as much as a long one");
+
+    // -- a sample is long enough to read as a pattern -------------
+    // A ledge showing one hachure reads as a mistake, not a pattern.
+    var widest = 0;
+    for (var st in CsShapeLine.STYLES) {
+        if (CsShapeLine.STYLES.hasOwnProperty(st) &&
+                CsShapeLine.STYLES[st].spacingFeet > widest) {
+            widest = CsShapeLine.STYLES[st].spacingFeet;
+        }
+    }
+    ok(widest > 0, "CsLegend: the shaped-line styles were readable");
+    ok(CsLegend.SAMPLE_FEET >= widest * 2,
+        "CsLegend: a line sample clears twice the widest ornament " +
+            "spacing, so every shaped row shows a repeat (" +
+            CsLegend.SAMPLE_FEET + " ft against " + widest + " ft)");
+
+    // -- symbols are normalised to one legend size ----------------
+    // A custom symbol may be drawn anything up to the palette's 10 ft
+    // working square; at scale 1 Truitt Cave's mud slope came out
+    // taller than five rows of the legend above it.
+    var perFoot = 1.0;
+    var big = CsLegend.scaleForSize(CsLegend.SYMBOL_FEET, 5.0, perFoot);
+    var small = CsLegend.scaleForSize(CsLegend.SYMBOL_FEET, 0.5, perFoot);
+    near(5.0 * 2 * big, CsLegend.SYMBOL_FEET, 0.0001,
+        "CsLegend: a 10 ft symbol is scaled down to the legend size");
+    near(0.5 * 2 * small, CsLegend.SYMBOL_FEET, 0.0001,
+        "CsLegend: and a 1 ft one is scaled up to the same size");
+    ok(big < small,
+        "CsLegend: so the bigger symbol takes the smaller scale");
+    near(CsLegend.scaleForSize(CsLegend.SYMBOL_FEET, 5.0, 0.3048) * 2 * 5.0,
+        CsLegend.SYMBOL_FEET * 0.3048, 0.0001,
+        "CsLegend: a metric drawing measures the same size in its own " +
+            "units");
+    ok(CsLegend.scaleForSize(CsLegend.SYMBOL_FEET, 0, perFoot) === 1.0,
+        "CsLegend: a symbol whose size cannot be read is placed at its " +
+            "own scale, never at zero -- an invisible row reads as one " +
+            "that forgot its picture");
+    ok(CsLegend.scaleForSize(CsLegend.SYMBOL_FEET, null, perFoot) === 1.0,
+        "CsLegend: and so is one with no radius at all");
+
+    // -- every feature a legend can print IS printable -------------
+    // FEATURE_ORDER and CsHelp.FEATURE have to name the same things:
+    // a key in the order with no help is a row with no name, and a key
+    // in help that the order forgets never reaches a legend at all.
+    var missingHelp = [], missingOrder = [];
+    var inOrder = {};
+    for (var i = 0; i < CsLegend.FEATURE_ORDER.length; i++) {
+        inOrder[CsLegend.FEATURE_ORDER[i]] = true;
+        if (isNull(CsHelp.FEATURE[CsLegend.FEATURE_ORDER[i]])) {
+            missingHelp.push(CsLegend.FEATURE_ORDER[i]);
+        }
+    }
+    for (var key in CsHelp.FEATURE) {
+        if (CsHelp.FEATURE.hasOwnProperty(key) && inOrder[key] !== true) {
+            missingOrder.push(key);
+        }
+    }
+    ok(missingHelp.length === 0,
+        "CsLegend: every ordered feature has help to print (" +
+            missingHelp.join(", ") + ")");
+    ok(missingOrder.length === 0,
+        "CsLegend: and every explained feature can reach a legend (" +
+            missingOrder.join(", ") + ")");
+    var unlabelled = [];
+    for (key in CsHelp.FEATURE) {
+        if (CsHelp.FEATURE.hasOwnProperty(key) &&
+                (isNull(CsHelp.FEATURE[key].label) ||
+                 CsHelp.FEATURE[key].label === "")) {
+            unlabelled.push(key);
+        }
+    }
+    ok(unlabelled.length === 0,
+        "CsLegend: and every one has a name to print (" +
+            unlabelled.join(", ") + ")");
 })();
 
 // ---------------------------------------------------------------------

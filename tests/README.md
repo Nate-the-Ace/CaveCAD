@@ -318,3 +318,27 @@ in the cave as drawn away from the survey -- and it caught the test's own
 same name.
 
 Passes when the output contains `### CHECK MAP OK`.
+
+## `build_legend_run.js` -- Build Legend explains the lines too
+
+`tests/js_unit.js` proves `CsLegend`'s row logic over literal usage
+objects. This stage proves the two halves a literal cannot reach.
+
+`CsLegend.usage` has to recognise a drawing's linework as the feature it
+is -- including a feature traced only in the ELEVATION, which is still a
+feature the map draws. A usage scan that sees nothing produces an empty
+legend and no error, which is exactly the failure worth a test: it
+caught `planBaseOf` answering null for a layer already in the plan
+frame, so every plan-frame feature registered as `layer:null` and no
+legend would ever have mentioned the surveyed walls.
+
+The samples have to be real geometry: a line row draws a line wearing
+its layer's colour and dash pattern, and a shaped row draws its
+ornament. "Floor Ledge" in words teaches nobody which of the lines on
+the map is the ledge.
+
+It also holds two promises about rebuilding: everything drawn lands on
+the LEGEND layer so the legend hides and clears as one thing, and a
+second run replaces the first rather than stacking a copy on top.
+
+Passes when the output contains `### BUILD LEGEND OK`.

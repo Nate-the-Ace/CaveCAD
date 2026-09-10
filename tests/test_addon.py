@@ -1800,8 +1800,12 @@ class TestHelpTextCoverage(unittest.TestCase):
         end = source.index("\n};", start)
         body = source[start:end]
         found = {}
+        # `label:` is optional and comes first: features carry one so
+        # the legend can name them, symbols get their name from the
+        # catalogue. Everything after it is the same for both.
         for match in re.finditer(
                 r'^    "([^"]+)": \{\s*\n'
+                r'(?:\s*label: ".*?",\s*\n)?'
                 r'\s*means: (".*?"),\s*\n'
                 r'\s*rule: (".*?")\s*\n',
                 body, re.M | re.S):
@@ -1860,6 +1864,42 @@ class TestHelpTextCoverage(unittest.TestCase):
         self.assertEqual(orphans, [],
                          "CsHelp.FEATURE keys naming no FeatureTrace "
                          "row: %s" % orphans)
+
+    def test_feature_labels_match_the_panel(self):
+        """A legend row is named the way its Feature Trace tile is.
+
+        CsHelp carries the label because Core cannot read a tool, and
+        the legend is drawn from Core. That leaves two copies of every
+        feature's name, one of which will drift -- so this holds them
+        in step rather than trusting anyone to copy them. A reader
+        holding the printed legend and a cartographer looking at the
+        panel have to be talking about the same thing.
+        """
+        panel = self.source("FeatureTrace", "FeatureTrace.js")
+        rows = panel[panel.index("FeatureTrace.ROWS = ["):
+                     panel.index("FeatureTrace.SHAPED_ROWS = [")]
+        shaped = panel[panel.index("FeatureTrace.SHAPED_ROWS = ["):]
+        shaped = shaped[:shaped.index("\n];")]
+
+        wanted = {}
+        for label, constant in re.findall(
+                r'label: "([^"]+)", layer: CsLayers\.([A-Z_0-9]+)', rows):
+            wanted["layer:" + constant.replace("_", "-")] = label
+        for label, style in re.findall(
+                r'label: "([^"]+)", style: "([a-z]+)"', shaped):
+            wanted["style:" + style] = label
+        self.assertGreater(len(wanted), 10,
+                           "both row tables should have been parsed")
+
+        source = self.source("Core", "CsHelp.js")
+        wrong = []
+        for key, label in sorted(wanted.items()):
+            block = '"%s": {\n        label: "%s",' % (key, label)
+            if block not in source:
+                wrong.append("%s should be labelled %r" % (key, label))
+        self.assertEqual(wrong, [],
+                         "CsHelp labels that disagree with the Feature "
+                         "Trace panel: %s" % wrong)
 
     def test_every_entry_states_a_meaning(self):
         """`means` is what the LEGEND prints, so an empty one would ship

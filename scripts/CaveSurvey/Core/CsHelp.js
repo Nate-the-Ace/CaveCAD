@@ -14,6 +14,10 @@
 //
 // TWO FIELDS, deliberately:
 //
+//   label  what to CALL it (features only). The same words the Feature
+//          Trace tile carries, so the legend a reader holds and the
+//          panel the cartographer drew from agree; a test holds the two
+//          in step rather than trusting anyone to copy them.
 //   means  what the thing IS. One sentence, no jargon, present tense.
 //          The legend prints this and nothing else -- a legend is a
 //          statement about the map, not a tutorial.
@@ -168,54 +172,67 @@ CsHelp.SYMBOL = {
  */
 CsHelp.FEATURE = {
     "layer:WALLS-SURVEYED": {
+        label: "Surveyed Walls",
         means: "The edge of the passage where you measured it -- drawn solid.",
         rule: "Solid means MEASURED. Use it only where a tape, an LRUD or a splay actually reached the wall."
     },
     "layer:WALLS-INFERRED": {
+        label: "Inferred Walls",
         means: "The edge of the passage where you did not measure it -- drawn dashed.",
         rule: "Dashed means SKETCHED. Guessing is allowed and hiding the guess is not: the dashes are the map being honest."
     },
     "layer:BREAKDOWN": {
+        label: "Breakdown",
         means: "One block drawn to its real shape, rather than a scatter of symbols.",
         rule: "For a whole rubble field, outline it as a Breakdown Boundary and let Scatter Breakdown fill it."
     },
     "layer:BREAKDOWN-BOUNDARY": {
+        label: "Breakdown Boundary",
         means: "The extent of a rubble field.",
         rule: "CLOSE the loop -- Scatter Breakdown fills closed boundaries and skips open ones."
     },
     "layer:ENTRANCE": {
+        label: "Entrance",
         means: "The lip of the entrance itself, where the cave begins.",
         rule: ""
     },
     "layer:CEILING": {
+        label: "Ceiling",
         means: "A ceiling edge seen from below: an overhang, a roof channel, the lip of an alcove.",
         rule: "Ceiling detail belongs INSIDE the walls. Drawn out at the wall line it reads as a second wall."
     },
     "layer:FLOOR": {
+        label: "Floor",
         means: "Floor detail inside the walls: the edge of a mud bank, a sand ledge, a bedrock rib.",
         rule: "A floor line that steps DOWN is a ledge -- draw it as a Floor Ledge so the drop shows."
     },
     "style:floorledge": {
+        label: "Floor Ledge",
         means: "A step down in the floor you could climb.",
         rule: "The hachures go on the LOW side. Click that side after the drag -- the tool asks."
     },
     "style:ceilingledge": {
+        label: "Ceiling Ledge",
         means: "A step in the ceiling: an overhang, or where the roof jumps up.",
         rule: "The hachures go on the side the ceiling is LOWER, the same way a floor ledge marks its drop."
     },
     "style:pit": {
+        label: "Pit",
         means: "A drop too deep to climb, drawn as a closed outline round the hole.",
         rule: "The ring closes on itself, so it has no ends and cannot be extended -- draw the whole rim in one stroke."
     },
     "style:flowstone": {
+        label: "Flowstone",
         means: "The edge of a sheet of calcite flowing over the rock.",
         rule: "The scallops bow DOWNSLOPE, the way the water ran."
     },
     "style:rimstone": {
+        label: "Rimstone Dam",
         means: "A run of gour dams stepping down a slope.",
         rule: "The scallops bow DOWNSLOPE -- each dam bulges away from the water it holds back."
     },
     "style:slope": {
+        label: "Slope",
         means: "A floor tilting steeply enough to notice, but not a ledge.",
         rule: "The fans splay DOWNHILL. If the drop is a step rather than a ramp, it is a Floor Ledge."
     }
