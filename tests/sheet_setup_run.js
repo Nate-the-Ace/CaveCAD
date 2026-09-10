@@ -357,6 +357,101 @@ ok(read !== null, "the elevation sheet can be found again by its tag");
 ok(read.minX > planBox.maxX,
     "and it is the one to the right, not the plan's");
 
+// ---------------------------------------------------------------------
+// THE RECORD IS NEVER WRITTEN TO.
+//
+// Laying out a sheet moves the elevation and draws a border round the
+// cave. That is a decision about ONE presentation of the map at one
+// scale on one size of paper, and the cave's own record should not
+// carry it -- so the sheet is built in a copy and written to its own
+// file (Nathan, 2026-09-10: "do NOT modify the layout of the original
+// map file").
+// ---------------------------------------------------------------------
+
+var caveFolder = QDir.tempPath() + "/CaveCADSheetTest/TRUITT CAVE";
+try {
+    if ((new QDir(QDir.tempPath() + "/CaveCADSheetTest")).exists()) {
+        (new QDir(QDir.tempPath() + "/CaveCADSheetTest")).removeRecursively();
+    }
+} catch (eWipe) {
+}
+ok((new QDir()).mkpath(caveFolder), "made a cave folder");
+
+var recordPath = caveFolder + "/Truitt Cave.dxf";
+var recordDi = new RDocumentInterface(
+    new RDocument(new RMemoryStorage(), createSpatialIndex()));
+var recordDoc = recordDi.getDocument();
+CsLayers.ensure(recordDoc, recordDi, CsLayers.WALLS_SURVEYED);
+var wall = new RLineEntity(recordDoc,
+    new RLineData(new RVector(0, 0), new RVector(600, 300)));
+wall.setLayerId(recordDoc.getLayerId(CsLayers.WALLS_SURVEYED));
+var recOp = new RAddObjectsOperation();
+recOp.addObject(wall, false);
+recordDi.applyOperation(recOp);
+ok(recordDi.exportFile(recordPath, CsSanitize.dxfFilter()),
+    "wrote a cave record to disk");
+
+var beforeSize = (new QFileInfo(recordPath)).size();
+var beforeStamp = String((new QFileInfo(recordPath)).lastModified()
+    .toString());
+
+var reported = SheetSetup.intoCopy(recordPath, {
+    caveBox: { minX: 0, minY: 0, maxX: 600, maxY: 300 },
+    sheet: sheet, scale: 50, turned: false,
+    wants: { border: true, bar: true, north: true, title: true },
+    filled: { caveName: "Truitt Cave" }, survey: null, elevation: false
+});
+ok(String(reported).indexOf("Sheet Setup:") === 0,
+    "the copy path reports what it did (" + reported + ")");
+
+var sheetPath = CsSheetSetup.sheetPathFor(caveFolder, "Truitt Cave");
+ok((new QFileInfo(sheetPath)).exists(),
+    "the sheet was written to its own file at " + sheetPath);
+
+eqs((new QFileInfo(recordPath)).size(), beforeSize,
+    "and the cave's own record is exactly the size it was");
+eqs(String((new QFileInfo(recordPath)).lastModified().toString()),
+    beforeStamp,
+    "and was not written to at all");
+
+// The record still has no sheet in it; the copy does.
+var backDi = new RDocumentInterface(
+    new RDocument(new RMemoryStorage(), createSpatialIndex()));
+backDi.importFile(recordPath, "", false);
+var backDoc = backDi.getDocument();
+var inRecord = 0;
+var recIds = backDoc.queryAllEntities(false, false);
+for (i = 0; i < recIds.length; i++) {
+    var re = backDoc.queryEntity(recIds[i]);
+    if (!isNull(re) && CsTags.get(re, "SheetPiece") !== "") {
+        inRecord += 1;
+    }
+}
+eqs(inRecord, 0, "the record carries no sheet furniture");
+
+var copyDi = new RDocumentInterface(
+    new RDocument(new RMemoryStorage(), createSpatialIndex()));
+copyDi.importFile(sheetPath, "", false);
+var copyDoc = copyDi.getDocument();
+var inCopy = 0, wallsInCopy = 0;
+var copyIds = copyDoc.queryAllEntities(false, false);
+for (i = 0; i < copyIds.length; i++) {
+    var ce = copyDoc.queryEntity(copyIds[i]);
+    if (isNull(ce)) { continue; }
+    if (CsTags.get(ce, "SheetPiece") !== "") { inCopy += 1; }
+    if (CsBind.layerNameOf(copyDoc, ce) === CsLayers.WALLS_SURVEYED) {
+        wallsInCopy += 1;
+    }
+}
+ok(inCopy > 0, "the copy carries the sheet");
+ok(wallsInCopy > 0,
+    "and the cave itself -- a sheet with no map on it is a border");
+
+try {
+    (new QDir(QDir.tempPath() + "/CaveCADSheetTest")).removeRecursively();
+} catch (eClean) {
+}
+
 if (failures.length === 0) {
     print("### SHEET SETUP OK " + drawn.length + " pieces");
 } else {

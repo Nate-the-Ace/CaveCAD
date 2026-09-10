@@ -185,7 +185,30 @@ function sheetSetupRun() {
         warning(qsTr("Sheet Setup: no active drawing document."));
         return;
     }
-    var di = getDocumentInterface();
+
+    // THE RECORD IS READ, NEVER WRITTEN. Everything below happens in a
+    // copy: laying out a sheet moves the elevation and draws a border
+    // round the cave, and that is a decision about ONE presentation of
+    // the map, not something the cave's own record should carry.
+    var recordPath = "";
+    try {
+        recordPath = String(doc.getFileName());
+    } catch (ePath) {
+        recordPath = "";
+    }
+    if (recordPath === "") {
+        warning(qsTr("Sheet Setup: save this drawing first.\n" +
+            "The sheet is built as a separate file beside the cave's " +
+            "own, and a drawing with no name yet has nowhere to put " +
+            "one."));
+        return;
+    }
+    if (doc.isModified() === true) {
+        warning(qsTr("Sheet Setup: save this drawing first.\n" +
+            "The sheet is built from the FILE on disk, so anything " +
+            "not yet saved would be missing from it."));
+        return;
+    }
 
     var caveBox = SheetSetup.caveBox(doc);
     if (caveBox === null) {
@@ -309,12 +332,79 @@ function sheetSetupRun() {
 
     // ---- draw --------------------------------------------------------
     var fit = CsSheetSetup.fit(caveW, caveH, sheet);
-    EAction.handleUserMessage(SheetSetup.draw(doc, di, {
+    EAction.handleUserMessage(SheetSetup.intoCopy(recordPath, {
         caveBox: caveBox, sheet: sheet, scale: scale,
         turned: fit.turned, wants: wants, filled: filled,
         survey: read.survey, elevation: wantElevation
     }));
 }
+
+/**
+ * Builds the sheet in a COPY of the record and opens it.
+ *
+ * The record drawing is imported into a memory document, the sheet is
+ * drawn there, and that document is exported to the cave's sheets
+ * folder. The file the caver has open is never written to and never
+ * even modified in memory -- which is the whole point, and is why this
+ * does not simply draw and then "undo".
+ *
+ * \return the sentence the caver is told.
+ */
+SheetSetup.intoCopy = function(recordPath, opts) {
+    var folder = CsCave.folderOf(recordPath);
+    var caveName = CsCave.nameOf(recordPath);
+    if (isNull(folder) || folder === "") {
+        return "Sheet Setup: could not work out which folder " +
+            recordPath + " lives in, so there is nowhere to put the " +
+            "sheet.";
+    }
+    var target = CsSheetSetup.sheetPathFor(folder, caveName);
+    try {
+        (new QDir("/")).mkpath(folder + "/" +
+            CsSheetSetup.SHEETS_FOLDER);
+    } catch (eDir) {
+    }
+
+    var di = new RDocumentInterface(
+        new RDocument(new RMemoryStorage(), createSpatialIndex()));
+    var said = "";
+    try {
+        if (di.importFile(recordPath, "", false) !==
+                RDocumentInterface.IoErrorNoError) {
+            return "Sheet Setup: could not read " + recordPath + ".";
+        }
+        said = SheetSetup.draw(di.getDocument(), di, opts);
+        if (!di.exportFile(target, CsSanitize.dxfFilter())) {
+            return "Sheet Setup: could not write " + target + ".";
+        }
+    } catch (e) {
+        return "Sheet Setup: building the sheet failed (" + e + ").";
+    } finally {
+        try {
+            if (typeof destr === "function") {
+                destr(di);
+            }
+        } catch (eDestroy) {
+        }
+    }
+
+    try {
+        // Opened for the caver, because a sheet they cannot see is a
+        // sheet they will assume did not happen.
+        //
+        // openFiles(), the global QCAD itself opens drawings with --
+        // NOT mainWindow.openFile(), which does not exist in this
+        // build (probed live, 2026-09-10: every plausible spelling on
+        // the main window came back undefined). Cave Shelf opens a cave
+        // the same way.
+        openFiles([target], false);
+    } catch (eOpen) {
+        return said + " Written to " + target + " -- open it from " +
+            "there; your own drawing was not touched.";
+    }
+    return said + " Written to " + target + " -- your own drawing was " +
+        "not touched.";
+};
 
 /**
  * Draws the sheet. Separated from the dialog ON PURPOSE: everything

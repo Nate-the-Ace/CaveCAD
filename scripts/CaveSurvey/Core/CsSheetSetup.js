@@ -492,6 +492,36 @@ CsSheetSetup.autoFill = function(survey, stats, grade) {
 // CsProfileDraw asks where the elevation sheet is every time it draws.
 // ---------------------------------------------------------------------
 
+/** Where a cave's sheet drawings live, under the cave's own folder. */
+CsSheetSetup.SHEETS_FOLDER = "sheets";
+
+/**
+ * The file a cave's sheet is written to.
+ *
+ * A SEPARATE FILE, not the drawing (Nathan, 2026-09-10: "do NOT modify
+ * the layout of the original map file"). The record drawing is the
+ * cave: survey, trips, tracing, the elevation where the generator puts
+ * it. A sheet is a DECISION about how to present that on paper at one
+ * scale on one size of paper -- and laying one out moves the elevation
+ * and adds a border round everything, which is a layout nobody asked
+ * the record to carry.
+ *
+ * In its own subfolder rather than beside the drawing, because a second
+ * .dxf in a cave folder is a second candidate for "which file IS this
+ * cave" -- CsShelf.pickDrawing has to choose, and a generated sheet is
+ * the wrong answer.
+ */
+CsSheetSetup.sheetPathFor = function(caveFolder, caveName) {
+    var folder = isNull(caveFolder) ? "" :
+        String(caveFolder).replace(/\/+$/, "");
+    var name = CsPackage.safeName(isNull(caveName) ? "" : caveName);
+    if (name === "") {
+        name = "Cave";
+    }
+    return folder + "/" + CsSheetSetup.SHEETS_FOLDER + "/" + name +
+        " Sheet.dxf";
+};
+
 /** The tag every generated sheet piece carries. Its VALUE says which
  *  sheet the piece belongs to. */
 CsSheetSetup.TAG = "SheetPiece";

@@ -23799,6 +23799,32 @@ eqs(CsSymbolStore.PREFIX, "SYM_", "the symbol block prefix");
     ok(border.margin > 0 && border.margin < border.height / 2,
         "CsSheetSetup: and keeps a margin the furniture can live in");
 
+    // -- the sheet is its own FILE ---------------------------------
+    // The record drawing is the cave; a sheet is a decision about one
+    // presentation of it, and laying one out moves the elevation and
+    // draws a border round everything.
+    var sheetPath = CsSheetSetup.sheetPathFor("/caves/Truitt Cave",
+        "Truitt Cave");
+    eqs(sheetPath, "/caves/Truitt Cave/sheets/Truitt Cave Sheet.dxf",
+        "CsSheetSetup: the sheet is a separate file under the cave");
+    ok(sheetPath.indexOf("/" + CsSheetSetup.SHEETS_FOLDER + "/") > 0,
+        "CsSheetSetup: in its own subfolder -- a second .dxf beside the " +
+            "drawing is a second candidate for which file IS this cave");
+    eqs(CsSheetSetup.sheetPathFor("/caves/Truitt Cave/", "Truitt Cave"),
+        sheetPath,
+        "CsSheetSetup: a trailing slash on the folder changes nothing");
+    // CsPackage.safeName drops the slash rather than replacing it, so
+    // the name comes back "BatCave" -- what matters is that no separator
+    // survives into a path this builds.
+    ok(CsSheetSetup.sheetPathFor("/caves/x", "Bat/Cave")
+        .split("/").length ===
+        CsSheetSetup.sheetPathFor("/caves/x", "BatCave").split("/").length,
+        "CsSheetSetup: a cave name with a slash cannot climb out of the " +
+            "sheets folder (" +
+            CsSheetSetup.sheetPathFor("/caves/x", "Bat/Cave") + ")");
+    ok(CsSheetSetup.sheetPathFor("/caves/x", "").indexOf("Cave Sheet") > 0,
+        "CsSheetSetup: a nameless cave still gets a file name");
+
     // -- the second sheet ------------------------------------------
     // The elevation is drawn at the PLAN's scale, so it gets its own
     // sheet rather than a scale step nobody asked for.
