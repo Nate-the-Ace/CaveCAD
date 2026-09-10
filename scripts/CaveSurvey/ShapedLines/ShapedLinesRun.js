@@ -190,6 +190,15 @@ ShapedLinesRun.prototype.escapeEvent = function() {
         this.setState(ShapedLinesRun.State.Idle);
         return;
     }
+    // The panel's tile stops claiming to be armed -- see
+    // FeatureTraceRun.escapeEvent for why this is escapeEvent's job
+    // and not finishEvent's.
+    if (typeof FeatureTrace !== "undefined") {
+        try {
+            FeatureTrace.disarmTiles();
+        } catch (eDis) {
+        }
+    }
     EAction.prototype.escapeEvent.call(this);
 };
 

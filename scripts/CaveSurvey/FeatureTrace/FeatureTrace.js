@@ -920,6 +920,81 @@ FeatureTrace.eraseEnded = function() {
     }
 };
 
+/**
+ * Arms the ONE tile a search has left showing, and starts drawing with
+ * it. Says so when the search has not narrowed that far.
+ *
+ * Both kinds of tile: a search for "gour" leaves one shaped tile, and
+ * arming it has to start the shaped action rather than the plain one --
+ * which is armShaped's job, not a second copy of it here.
+ */
+FeatureTrace.armFiltered = function() {
+    var w = FeatureTrace.widgets;
+    if (isNull(w) || isNull(w.sections)) {
+        return;
+    }
+    var only = null;
+    var count = 0;
+    for (var s = 0; s < w.sections.length; s++) {
+        var buttons = w.sections[s].buttons;
+        for (var i = 0; i < buttons.length; i++) {
+            if (buttons[i].shown === false) {
+                continue;
+            }
+            count++;
+            only = buttons[i].row;
+        }
+    }
+    if (count !== 1 || only === null) {
+        EAction.handleUserMessage(count === 0 ?
+            qsTr("No feature matches that. Try a cave word -- \"gour\", " +
+                "\"shaft\", \"boulders\".") :
+            qsTr("%1 features still match. Type more of the name, then " +
+                "press Return.").arg(count));
+        return;
+    }
+    if (isNull(only.style)) {
+        FeatureTrace.armLayer(only.layer);
+        FeatureTrace.startRun();
+    } else {
+        FeatureTrace.armShaped(only.style);
+    }
+    EAction.handleUserMessage(qsTr("Armed %1. Drag in the drawing to " +
+        "trace it.").arg(only.label));
+};
+
+/**
+ * Clears every armed tile -- the panel's half of Escape.
+ *
+ * Escape already ends the drawing action; until this existed the tile
+ * it was drawing with stayed lit, which is a panel telling the caver
+ * they are still armed when they are not. Called from the action's own
+ * finishEvent, so it fires however the action ended.
+ *
+ * The armed TARGET is deliberately left alone. It is what the next
+ * press would draw, and the tools read it when they start again -- a
+ * caver who presses Escape and then drags again means the feature they
+ * were using, not whatever the panel defaults to.
+ */
+FeatureTrace.disarmTiles = function() {
+    var w = FeatureTrace.widgets;
+    if (isNull(w)) {
+        return;
+    }
+    var lists = [w.buttons, w.shapedButtons];
+    for (var l = 0; l < lists.length; l++) {
+        if (isNull(lists[l])) {
+            continue;
+        }
+        for (var i = 0; i < lists[l].length; i++) {
+            try {
+                lists[l][i].button.checked = false;
+            } catch (e) {
+            }
+        }
+    }
+};
+
 /** Arms the row and starts a trace. Its own function so the closure
  *  captures ONE row rather than the loop variable. */
 FeatureTrace.connectRow = function(button, row) {
@@ -1243,6 +1318,25 @@ FeatureTrace.buildDock = function(appWin) {
                 // never throw out of a signal handler
             }
         });
+        // ENTER ARMS what the search narrowed to. This is the panel's
+        // keyboard route: type three letters of the feature and press
+        // Return, without the hand leaving the keyboard for the mouse
+        // -- and without a key map to memorise, because the words are
+        // the ones already in the box's own tooltip.
+        //
+        // Only when ONE tile is left. Arming the first of four matches
+        // would be a coin flip dressed as a shortcut, and the caver
+        // cannot see which one it picked until they have drawn with it.
+        try {
+            w.searchEdit.returnPressed.connect(function() {
+                try {
+                    FeatureTrace.armFiltered();
+                } catch (eArm) {
+                }
+            });
+        } catch (eReturn) {
+            w.problems.push("search box Return (" + eReturn + ")");
+        }
         layout.addWidget(w.searchEdit, 0, 0);
     } catch (eSearchBox) {
         w.problems.push("search box (" + eSearchBox + ")");

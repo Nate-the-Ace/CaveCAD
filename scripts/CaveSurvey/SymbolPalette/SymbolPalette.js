@@ -266,6 +266,33 @@ SymbolPalette.arm = function(entry) {
 };
 
 /** Clears the armed symbol and every checked tile. */
+/**
+ * Arms the ONE symbol a search has left showing, and starts placing.
+ *
+ * Reads the TILES rather than re-running the filter: the tiles are what
+ * the caver can see, and a second filtering pass here could disagree
+ * with the one on screen -- which is how a shortcut arms something the
+ * panel is not showing.
+ */
+SymbolPalette.armFiltered = function() {
+    var w = SymbolPalette.widgets;
+    if (isNull(w) || isNull(w.buttons)) {
+        return;
+    }
+    if (w.buttons.length !== 1) {
+        EAction.handleUserMessage(w.buttons.length === 0 ?
+            qsTr("No symbol matches that.") :
+            qsTr("%1 symbols still match. Type more of the name, then " +
+                "press Return.").arg(w.buttons.length));
+        return;
+    }
+    var entry = w.buttons[0].entry;
+    SymbolPalette.arm(entry);
+    SymbolPalette.startRun();
+    EAction.handleUserMessage(qsTr("Armed %1. Click in the drawing to " +
+        "place it.").arg(entry.nss));
+};
+
 SymbolPalette.disarm = function() {
     SymbolPalette.armed = undefined;
     var w = SymbolPalette.widgets;
@@ -999,6 +1026,21 @@ SymbolPalette.buildDock = function(appWin) {
                 // never throw out of a signal handler
             }
         });
+        // ENTER ARMS what the search narrowed to -- the keyboard route
+        // into a palette of thirty-odd symbols, and Feature Trace's
+        // twin of the same thing. Only when ONE tile is left: arming
+        // the first of four matches is a coin flip dressed as a
+        // shortcut, and nothing on screen would say which it picked.
+        try {
+            w.searchEdit.returnPressed.connect(function() {
+                try {
+                    SymbolPalette.armFiltered();
+                } catch (eArm) {
+                }
+            });
+        } catch (eReturn) {
+            w.problems.push("search box Return (" + eReturn + ")");
+        }
         layout.addWidget(w.searchEdit, 0, 0);
     } catch (eSearchBox) {
         w.problems.push("search box (" + eSearchBox + ")");

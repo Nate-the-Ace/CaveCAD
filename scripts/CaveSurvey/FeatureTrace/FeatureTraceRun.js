@@ -332,6 +332,21 @@ FeatureTraceRun.prototype.escapeEvent = function() {
         this.setState(FeatureTraceRun.State.Idle);
         return;
     }
+    // A second Escape leaves the tool, so the panel must stop claiming
+    // a feature is armed -- the Symbol Palette has done this since it
+    // shipped (SymbolPaletteRun.escapeEvent), and a caver who learns
+    // that Escape puts one panel down should not find the other still
+    // lit. Here and not in finishEvent: an action ALSO finishes when
+    // another one takes over, and clearing there would un-light the
+    // tile the caver just armed, because this build tears the old
+    // action down a beat after the new one starts.
+    if (typeof FeatureTrace !== "undefined") {
+        try {
+            FeatureTrace.disarmTiles();
+        } catch (eDis) {
+            // a lit tile with nothing running is untidy, never harmful
+        }
+    }
     EAction.prototype.escapeEvent.call(this);
 };
 
