@@ -181,6 +181,7 @@ SHEET_LAYERS = {"0", "Defpoints", "BORDER", "TITLE-BLOCK", "LEGEND",
 # disagree with the registry and say so.
 NO_TWIN = {"CTRL-AERIAL", "CTRL-CONTOUR", "CTRL-CONTOUR-MAJOR",
            "CTRL-GRID", "CTRL-DATA", "CTRL-HIDDEN", "CTRL-RAW",
+           "CTRL-CLOSURE",
            "CROSS-SECTION-MARKERS", "NORTH-ARROW"}
 
 
@@ -1495,6 +1496,7 @@ MENU = {
     "SurveyNotebook/SurveyNotebook.js":   (451, 10, ["surveynotebook", "snb"]),
     "ImportCaveSurvey/ImportCaveSurvey.js": (451, 20, ["importcavesurvey", "ics"]),
     "ExportCaveSurvey/ExportCaveSurvey.js": (451, 30, ["exportcavesurvey", "ecs"]),
+    "LoopErrors/LoopErrors.js":           (451, 40, ["looperrors", "le"]),
     # 452 -- draw the map
     "FeatureTrace/FeatureTrace.js":       (452, 10, ["featuretrace", "ft"]),
     "ShapedLines/ShapedLines.js":         (452, 20, ["shapedlines", "shl"]),

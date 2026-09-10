@@ -365,3 +365,25 @@ own label. That last one is the suite's first rule checked in the
 drawing rather than in the function that answers it.
 
 Passes when the output contains `### SHEET SETUP OK`.
+
+## `loop_errors_run.js` -- Loop Errors draws the closure where it happened
+
+`tests/js_unit.js` pins the arithmetic: how far to exaggerate, the
+colour bands, and which end of the arrow sits on the station. This stage
+needs a real survey in a real document.
+
+The fixture is a square loop whose last leg is six feet short, so the
+adjustment has six feet to share out among four stations. What is
+checked is what would look plausible while being wrong: that the worst
+station's arrow actually REACHES that station (get the direction wrong
+and every arrow sits a whole shift away from the thing it describes),
+that everything lands on `CTRL-CLOSURE`, and that the layer -- which the
+registry ships switched OFF -- is switched on, since otherwise a caver
+runs the tool and sees nothing at all.
+
+It also reads the caption back out of the drawing and checks it states
+the exaggeration, because an exaggeration nobody is told about is a
+falsified map, and that an unadjusted drawing is told its arrows point
+the other way.
+
+Passes when the output contains `### LOOP ERRORS OK`.

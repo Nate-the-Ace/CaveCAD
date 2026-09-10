@@ -21,6 +21,11 @@ CsLayers.CTRL_LRUD = "CTRL-LRUD";
 CsLayers.CTRL_SPLAYS = "CTRL-SPLAYS";
 CsLayers.CTRL_HIDDEN = "CTRL-HIDDEN";
 CsLayers.CTRL_RAW = "CTRL-RAW";
+// Where the loop closure error went: one arrow per station the
+// adjustment moved, and a label per loop. Generated, plan-frame, and
+// OFF by default -- it is a diagnostic drawn over the map, not map ink,
+// and a plotted sheet must never carry it by accident.
+CsLayers.CTRL_CLOSURE = "CTRL-CLOSURE";
 CsLayers.CTRL_LRUD_WALL_LEFT = "CTRL-LRUD-WALL-LEFT";
 CsLayers.CTRL_LRUD_WALL_RIGHT = "CTRL-LRUD-WALL-RIGHT";
 CsLayers.CTRL_PROFILE_FLOOR = "CTRL-PROFILE-FLOOR";
@@ -408,6 +413,11 @@ CsLayers.DEFAULTS = {
     "CTRL-SHAPE-SPINE": ["gray", "DASHED", "Weight000"],
     "CTRL-HIDDEN": ["gray", "CONTINUOUS", "Weight000"],
     "CTRL-RAW": ["gray", "DASHED", "Weight000"],
+    // Magenta, because nothing else on a cave map is: a closure arrow
+    // has to be unmistakably NOT part of the drawing. The arrows
+    // themselves are recoloured per station by size, so this is the
+    // colour of the labels and the fallback.
+    "CTRL-CLOSURE": ["magenta", "CONTINUOUS", "Weight018"],
     "CTRL-AERIAL": ["gray", "CONTINUOUS", "Weight000"],
     // Contours are background context: muted like the aerial they
     // usually sit on, majors told apart by weight alone.
@@ -558,6 +568,7 @@ CsLayers.PROFILE_WALLS_SURVEYED = "PROFILE-WALLS-SURVEYED";
 // worse, inside a sketching bay, where the capture sweep is geometric
 // and would have swept the visible skeleton into the block.
 CsLayers.OFF = { "CTRL-DATA": true, "CTRL-HIDDEN": true, "CTRL-RAW": true,
+    "CTRL-CLOSURE": true,
     "CTRL-SHAPE-SPINE": true, "CTRL-PROFILE-SHAPE-SPINE": true,
     "CTRL-SECTION-SHAPE-SPINE": true };
 
@@ -966,6 +977,10 @@ CsLayers.NO_TWIN = {
     // survey mechanics, not per-view elements.
     "CTRL-HIDDEN": true,
     "CTRL-RAW": true,
+    // A loop closure is a fact about the survey NETWORK, not about a
+    // view of it. The same error would be drawn three times, saying the
+    // same thing, if this had per-view twins.
+    "CTRL-CLOSURE": true,
     // The mark saying where a section was CUT. It lives in the view
     // being cut -- a cut mark inside its own section is meaningless.
     // frameOf keeping this name in the plan frame is asserted in

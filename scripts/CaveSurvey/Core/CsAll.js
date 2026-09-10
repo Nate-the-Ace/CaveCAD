@@ -154,6 +154,9 @@ include(includeBasePath + "/CsLegend.js");
 // numbers it fills in) and CsReport (how a length is worded): the plot
 // scale arithmetic that turns inches of paper into feet of cave.
 include(includeBasePath + "/CsSheetSetup.js");
+// After CsAdjust (whose per-station shifts it draws) and CsNetwork
+// (whose loops it labels): turning a closure percentage into arrows.
+include(includeBasePath + "/CsClosure.js");
 
 // After CsModel, CsTraverse, CsProfile and (optionally) CsRevise --
 // CsContrib calls ensureTrips, offset, groupRuns and tripLabel.

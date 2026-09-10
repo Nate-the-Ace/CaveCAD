@@ -205,7 +205,10 @@ var CORE_FILES = [
     "scripts/CaveSurvey/Core/CsLegend.js",
     // Pure plot-scale arithmetic: what fits on what paper, how a scale
     // bar divides, and what a title block can be told without asking.
-    "scripts/CaveSurvey/Core/CsSheetSetup.js"
+    "scripts/CaveSurvey/Core/CsSheetSetup.js",
+    // Pure: exaggeration, colour bands, arrow geometry and the caption
+    // that has to state the exaggeration.
+    "scripts/CaveSurvey/Core/CsClosure.js"
 ];
 for (var ci = 0; ci < CORE_FILES.length; ci++) {
     loadRepoScript(CORE_FILES[ci]);
@@ -23834,6 +23837,170 @@ eqs(CsSymbolStore.PREFIX, "SYM_", "the symbol block prefix");
     ok(isNull(CsSheetSetup.autoFill(null, null, null).caveName),
         "CsSheetSetup: a drawing with no survey fills in nothing " +
             "rather than filling in blanks");
+})();
+
+// ---------------------------------------------------------------------
+// CsClosure -- turning a closure percentage into arrows. The
+// exaggeration is the honesty problem here, so it is what most of these
+// assertions are about.
+// ---------------------------------------------------------------------
+(function() {
+    // -- choosing the exaggeration ---------------------------------
+    // A 0.1 ft shift on a 1400 ft cave wants magnifying a long way; a
+    // 40 ft shift on the same cave wants none at all.
+    var big = CsClosure.factorFor(0.1, 1400);
+    ok(big > 100,
+        "CsClosure: a tenth of a foot on a big cave is magnified hard (" +
+            big + "x)");
+    ok(CsClosure.FACTORS.indexOf(big) >= 0,
+        "CsClosure: and the factor is one of the round ones offered");
+    ok(CsClosure.factorFor(40, 1400) === 1,
+        "CsClosure: an error already visible is never magnified");
+    ok(CsClosure.factorFor(400, 1400) === 1,
+        "CsClosure: and a huge one is never SHRUNK -- that would be the " +
+            "one lie worse than magnifying");
+    ok(CsClosure.factorFor(0, 1400) === 1,
+        "CsClosure: nothing to show is shown at true size");
+    ok(CsClosure.factorFor(0.1, 0) === 1,
+        "CsClosure: and a cave with no size gets no opinion");
+    // The chosen factor must not overshoot the target.
+    var f = CsClosure.factorFor(0.1, 1400);
+    ok(0.1 * f <= 1400 * CsClosure.TARGET_FRACTION + 0.0001,
+        "CsClosure: the worst arrow never exceeds the target fraction " +
+            "of the cave (" + (0.1 * f).toFixed(1) + " ft of 1400)");
+
+    // -- the bands -------------------------------------------------
+    ok(CsClosure.bandFor(0.2).colour === "green",
+        "CsClosure: a good tape read is green");
+    ok(CsClosure.bandFor(1.0).colour === "yellow",
+        "CsClosure: a foot is worth a look");
+    ok(CsClosure.bandFor(4.0).colour === "orange",
+        "CsClosure: four feet says a reading is wrong");
+    ok(CsClosure.bandFor(50).colour === "red",
+        "CsClosure: fifty feet says resurvey");
+    ok(CsClosure.bandFor(-3.0).colour === CsClosure.bandFor(3.0).colour,
+        "CsClosure: a band is about distance, not direction");
+    var rising = true;
+    for (var b = 1; b < CsClosure.BANDS.length; b++) {
+        var prev = CsClosure.BANDS[b - 1].upTo;
+        var here = CsClosure.BANDS[b].upTo;
+        if (here !== null && (prev === null || here <= prev)) {
+            rising = false;
+        }
+    }
+    ok(rising, "CsClosure: the bands ascend and the last one is open");
+
+    // -- the arrows ------------------------------------------------
+    var stations = { A1: { x: 0, y: 0 }, A2: { x: 100, y: 0 },
+        A3: { x: 100, y: 100 } };
+    var shifts = {
+        A1: { dx: 0, dy: 0, dz: 0, distance: 0 },
+        A2: { dx: 2, dy: 0, dz: 0, distance: 2 },
+        A3: { dx: 0, dy: -4, dz: 1, distance: 4.123 }
+    };
+    var arrows = CsClosure.arrowsFor(shifts, stations, 1, 1, 0.02, true);
+    eqs(arrows.length, 2,
+        "CsClosure: a station that did not move gets no arrow");
+    eqs(arrows[0].station, "A3",
+        "CsClosure: and the worst comes first, so the list is a ranking");
+
+    // ON AN ADJUSTED MAP the arrow ARRIVES at the station.
+    var a2 = arrows[1];
+    near(a2.head.x, 100, 0.0001,
+        "CsClosure: the arrow head sits on the station it is about");
+    near(a2.tail.x, 98, 0.0001,
+        "CsClosure: with its tail back where the raw survey put it");
+
+    // ON AN UNADJUSTED MAP it LEAVES the station: the drawing shows the
+    // raw position, so an arrow arriving there would sit a whole shift
+    // away from the station it describes.
+    var away = CsClosure.arrowsFor(shifts, stations, 1, 1, 0.02, false);
+    var awayA2 = null;
+    for (var i = 0; i < away.length; i++) {
+        if (away[i].station === "A2") {
+            awayA2 = away[i];
+        }
+    }
+    near(awayA2.tail.x, 100, 0.0001,
+        "CsClosure: unadjusted, the arrow starts at the station");
+    near(awayA2.head.x, 102, 0.0001,
+        "CsClosure: and points where it would move to");
+
+    // The exaggeration multiplies the arrow and nothing else.
+    var ten = CsClosure.arrowsFor(shifts, stations, 10, 1, 0.02, true);
+    var tenA2 = null;
+    for (i = 0; i < ten.length; i++) {
+        if (ten[i].station === "A2") { tenA2 = ten[i]; }
+    }
+    near(tenA2.tail.x, 80, 0.0001,
+        "CsClosure: ten times the factor is ten times the arrow");
+    near(tenA2.feet, 2.0, 0.0001,
+        "CsClosure: but the REPORTED distance is the real one -- the " +
+            "number a caver acts on is never exaggerated");
+
+    // A metric drawing measures its shifts in metres.
+    var metric = CsClosure.arrowsFor(
+        { A2: { dx: 2, dy: 0, dz: 0, distance: 2 } },
+        { A2: { x: 0, y: 0 } }, 1, 0.3048, 0.02, true);
+    near(metric[0].feet, 2 / 0.3048, 0.001,
+        "CsClosure: a shift is reported in FEET whatever the drawing " +
+            "is measured in");
+
+    // The floor drops the noise.
+    var noisy = CsClosure.arrowsFor(
+        { A2: { dx: 0.001, dy: 0, dz: 0, distance: 0.001 } },
+        { A2: { x: 0, y: 0 } }, 1, 1, 0.02, true);
+    eqs(noisy.length, 0,
+        "CsClosure: a station that barely moved is not one of three " +
+            "hundred arrows hiding the six that matter");
+
+    ok(CsClosure.arrowsFor(null, stations, 1, 1, 0, true).length === 0,
+        "CsClosure: nothing to draw from draws nothing");
+
+    // -- the arrow head --------------------------------------------
+    var barbs = CsClosure.headBarbs({ x: 0, y: 0 }, { x: 10, y: 0 }, 1);
+    eqs(barbs.length, 2, "CsClosure: an arrow head has two barbs");
+    ok(barbs[0].x < 10 && barbs[1].x < 10,
+        "CsClosure: both behind the point");
+    ok((barbs[0].y > 0) !== (barbs[1].y > 0),
+        "CsClosure: one either side of the shaft");
+    eqs(CsClosure.headBarbs({ x: 5, y: 5 }, { x: 5, y: 5 }, 1).length, 0,
+        "CsClosure: an arrow of no length has no head to draw");
+
+    // -- the caption -----------------------------------------------
+    // THE EXAGGERATION IS STATED FIRST. Everything else on this layer
+    // is only readable once a reader knows it.
+    var caption = CsClosure.caption(50, 0.4, "A7", 3);
+    ok(caption[0].indexOf("50x") > 0,
+        "CsClosure: the caption leads with the exaggeration (" +
+            caption[0] + ")");
+    ok(CsClosure.caption(1, 0.4, "A7", 3)[0].indexOf("TRUE SIZE") > 0,
+        "CsClosure: and says so plainly when there is none");
+    var joined = caption.join(" ");
+    ok(joined.indexOf("A7") > 0 && joined.indexOf("0.40") > 0,
+        "CsClosure: it names the worst station and how far it moved");
+    ok(joined.indexOf("3 loops") > 0,
+        "CsClosure: counts the loops");
+    ok(joined.toLowerCase().indexOf("plotting") > 0,
+        "CsClosure: and tells the caver to switch the layer off before " +
+            "plotting");
+
+    ok(CsClosure.tenseFor(true).indexOf("moved from") > 0,
+        "CsClosure: an adjusted map says where a station was moved FROM");
+    ok(CsClosure.tenseFor(false).indexOf("would move") > 0,
+        "CsClosure: an unadjusted one says where it WOULD move -- same " +
+            "geometry, opposite tense");
+
+    var label = CsClosure.loopLabel({ from: "A1", to: "A7",
+        error: 1.23, traverseLength: 512.0, percent: 0.24 });
+    ok(label.indexOf("A1") >= 0 && label.indexOf("A7") > 0 &&
+        label.indexOf("1.23") > 0 && label.indexOf("512") > 0 &&
+        label.indexOf("0.2%") > 0,
+        "CsClosure: a loop label names the ring, the miss, the walk " +
+            "and the percentage (" + label + ")");
+    ok(CsClosure.loopLabel({ from: "A", to: "B", error: 1, 
+        traverseLength: 10, percent: null }).indexOf("%") === -1,
+        "CsClosure: a closure with no meaningful percentage claims none");
 })();
 
 // ---------------------------------------------------------------------
