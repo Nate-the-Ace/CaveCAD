@@ -227,7 +227,13 @@ var CORE_FILES_NOT_LOADED = [
     // resolution reads and writes tags on real entities) and both
     // fetch across the real network with curl -- nothing pure to call
     // from here. Covered by tests/surface_data_run.js.
-    "scripts/CaveSurvey/Core/CsSurfaceData.js"
+    "scripts/CaveSurvey/Core/CsSurfaceData.js",
+    // Every function takes a real RDocument/RDocumentInterface: the
+    // pick measures distance to real geometry and the delete applies a
+    // real operation. The one piece that looks pure -- the last-drawn
+    // record -- is keyed by CsTrace.docKey(doc), so even that needs a
+    // document. Covered by tests/feature_erase_run.js.
+    "scripts/CaveSurvey/Core/CsErase.js"
 ];
 
 // ---------------------------------------------------------------------

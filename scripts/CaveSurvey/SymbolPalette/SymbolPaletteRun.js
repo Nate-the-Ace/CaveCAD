@@ -607,6 +607,11 @@ SymbolPaletteRun.prototype.commit = function() {
             .arg(feet === null ? "?" : feet.toFixed(1))
             .arg(RMath.rad2deg(this.placementAngle()).toFixed(0)));
     }
+    // What Delete Last would take back, in whichever panel the caver
+    // reaches for it: one record for both, because "the last thing I
+    // drew" is one fact from where they sit.
+    CsErase.noteDrawn(doc, ref.getId(), entry.nss, "symbol", false);
+
     this.warnUnclaimedProfile(frame, layerName);
 
     // A symbol on a profile layer grows the region the next placement
