@@ -150,8 +150,21 @@ SymbolPalette.grouped = function(entries, needle) {
     return out;
 };
 
-/** The size the panel is asking for, in FEET of cave, or the default
- *  when the field holds nonsense.
+/** What a DRAG last asked for, remembered so the next plain click
+ *  repeats it.
+ *
+ *  This used to be two typed boxes in the panel. They are gone: the
+ *  gesture sets both, and a caver who has just dragged a flow arrow
+ *  out to the size and bearing they wanted does not then read two
+ *  numbers back (Nathan, 2026-09-11). The MEMORY stays, because
+ *  placing six of the same arrow is one drag and five clicks.
+ *
+ *  Per session and per panel, not per drawing: it is the gesture's
+ *  echo, not a property of the cave. */
+SymbolPalette.lastSizeFeet = null;
+SymbolPalette.lastAngleDeg = null;
+
+/** The size to place at, in FEET of cave.
  *
  *  FEET AND NOT A SCALE FACTOR. The blocks are drawn about a foot
  *  across and a cave map is a thousand feet across, so scale 1 is a
@@ -160,36 +173,17 @@ SymbolPalette.grouped = function(entries, needle) {
  *  same thing on every tile, and the same thing in a metric drawing --
  *  SymbolPaletteRun.perFoot converts. */
 SymbolPalette.sizeValue = function() {
-    var w = SymbolPalette.widgets;
-    if (isNull(w) || isNull(w.sizeEdit)) {
+    var v = SymbolPalette.lastSizeFeet;
+    if (v === null || isNaN(v) || v <= 0) {
         return SymbolPaletteRun.DEFAULT_SIZE_FEET;
     }
-    try {
-        var v = parseFloat(w.sizeEdit.text);
-        if (isNaN(v) || v <= 0) {
-            return SymbolPaletteRun.DEFAULT_SIZE_FEET;
-        }
-        return v;
-    } catch (e) {
-        return SymbolPaletteRun.DEFAULT_SIZE_FEET;
-    }
+    return v;
 };
 
-/** The panel's angle in DEGREES, or 0. */
+/** The angle to place at, in DEGREES. */
 SymbolPalette.angleValue = function() {
-    var w = SymbolPalette.widgets;
-    if (isNull(w) || isNull(w.angleEdit)) {
-        return 0.0;
-    }
-    try {
-        var v = parseFloat(w.angleEdit.text);
-        if (isNaN(v)) {
-            return 0.0;
-        }
-        return v;
-    } catch (e) {
-        return 0.0;
-    }
+    var v = SymbolPalette.lastAngleDeg;
+    return (v === null || isNaN(v)) ? 0.0 : v;
 };
 
 /** True when a drag sets the symbol's size as well as its angle.
@@ -208,32 +202,22 @@ SymbolPalette.dragScaleEnabled = function() {
 };
 
 /**
- * Shows what the drag in progress is asking for.
- *
- * WRITTEN INTO THE FIELDS THEMSELVES, not into a separate readout. The
- * caver dragged a symbol out to a size and an angle; the two boxes that
- * name size and angle should then say what they placed it at, in the
- * feet the field is labelled in, and the next plain click uses exactly
- * those numbers. A drag is a way of typing in those fields with the
- * mouse.
+ * Remembers what the drag in progress is asking for, so the next plain
+ * click repeats it.
  *
  * Called from a mouse-move handler, so it never throws.
  */
 SymbolPalette.showDrag = function(sizeFeet, angleDeg) {
-    var w = SymbolPalette.widgets;
-    if (isNull(w)) {
-        return;
-    }
     try {
-        if (!isNull(w.sizeEdit) && !isNull(sizeFeet)) {
-            w.sizeEdit.text = String(sizeFeet.toFixed(1));
+        if (!isNull(sizeFeet)) {
+            SymbolPalette.lastSizeFeet = sizeFeet;
         }
-        if (!isNull(w.angleEdit) && !isNull(angleDeg)) {
+        if (!isNull(angleDeg)) {
             var deg = angleDeg % 360;
             if (deg < 0) {
                 deg += 360;
             }
-            w.angleEdit.text = String(deg.toFixed(0));
+            SymbolPalette.lastAngleDeg = deg;
         }
     } catch (e) {
     }
@@ -1160,35 +1144,6 @@ SymbolPalette.buildBody = function(parent) {
         w.problems.push("cursor frame readout (" + eFrame + ")");
     }
 
-    // -- scale and angle ---------------------------------------------
-    try {
-        var settings = new QHBoxLayout();
-        settings.addWidget(new QLabel(qsTr("Size")), 0, 0);
-        w.sizeEdit = new QLineEdit(
-            String(SymbolPaletteRun.DEFAULT_SIZE_FEET));
-        w.sizeEdit.maximumWidth = 50;
-        w.sizeEdit.toolTip = qsTr("How big the symbol is placed, across, " +
-            "in FEET of cave -- converted for a metric drawing. Feet " +
-            "rather than a scale factor because the blocks are drawn " +
-            "about a foot wide and a cave map is a thousand feet wide, so " +
-            "\"scale 1\" is a speck, and the same factor is a different " +
-            "size on every symbol.");
-        settings.addWidget(w.sizeEdit, 0, 0);
-        settings.addWidget(new QLabel(qsTr("ft")), 0, 0);
-
-        settings.addWidget(new QLabel(qsTr("Angle")), 0, 0);
-        w.angleEdit = new QLineEdit("0");
-        w.angleEdit.maximumWidth = 50;
-        w.angleEdit.toolTip = qsTr("The angle a plain CLICK places at, in " +
-            "degrees. Dragging away from the click point aims the symbol " +
-            "instead and overrides this.");
-        settings.addWidget(w.angleEdit, 0, 0);
-        settings.addWidget(new QLabel(qsTr("deg")), 1, 0);
-        layout.addLayout(settings, 0);
-    } catch (eSettings) {
-        w.problems.push("scale/angle (" + eSettings + ")");
-    }
-
     // -- what a drag sets ---------------------------------------------
     //
     // ON BY DEFAULT: dragging out from the press point sets the size as
@@ -1201,8 +1156,9 @@ SymbolPalette.buildBody = function(parent) {
         w.dragScaleCheck.checked = true;
         w.dragScaleCheck.toolTip = qsTr("While you drag, the distance " +
             "from where you pressed becomes the symbol's radius, so you " +
-            "size and aim it in one gesture. Switch this off to aim only " +
-            "and keep the Size above.");
+            "size and aim it in one gesture. Switch this off to aim " +
+            "only, which is what a row of flow arrows that must all " +
+            "stay one size needs.");
         layout.addWidget(w.dragScaleCheck, 0, 0);
     } catch (eDragScale) {
         w.problems.push("drag-sets-size box (" + eDragScale + ")");

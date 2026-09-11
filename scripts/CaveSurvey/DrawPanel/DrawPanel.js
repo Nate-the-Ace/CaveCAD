@@ -18,16 +18,19 @@
 // at before choosing what to draw, and on a laptop only one of them
 // fitted beside the drawing (Nathan, 2026-09-11).
 //
-// So Feature Trace and the Symbol Palette are two foldable sections of
-// one panel now. Both already knew how to fold, remember what a caver
-// left shut, and reorder from their own right-click menus -- this is
-// CsPanel's stack doing what it was written for, one level up.
+// So Feature Trace and the Symbol Palette are two foldable COLUMNS of
+// one panel now -- tracing on the left, symbols on the right. Both
+// already knew how to fold and remember what a caver left shut; this
+// is CsPanel's section doing what it was written for, one level up.
 //
-// SECTIONS AND NOT TABS, deliberately. Tabs would put a wall and a
+// TWO COLUMNS, NOT TABS AND NOT A STACK. Tabs would put a wall and a
 // symbol on opposite sides of a click, and tracing a passage means
-// reaching for both in the same breath; they would also throw away the
-// folding both panels already have. A section you never use folds to
-// one line and stays there.
+// reaching for both in the same breath. Stacked, the second half sat
+// below the fold of a dock already 1500 pixels tall. Side by side --
+// tracing LEFT, symbols RIGHT, always those sides -- both are in view
+// at once and each column gets the dock's full height, which is the
+// dimension a wall of tiles actually needs. Fold a column by its
+// header and it shrinks to a strip, handing its width to the other.
 //
 // ONE BODY, ONE OWNER. Neither panel builds a dock of its own any
 // more, and that is not tidiness: each of them keeps its widgets in a
@@ -70,18 +73,16 @@ DrawPanel.buildDock = function(appWin) {
     dock.objectName = "CaveSurveyDrawDock";
 
     var body = new QWidget(dock);
-    var layout = new QVBoxLayout();
+    // HORIZONTAL. The order of this list is the order of the columns,
+    // and there is no reorder menu: left is tracing and right is
+    // symbols, which is a thing a caver's hand learns once.
+    var layout = new QHBoxLayout();
     var collapsed = CsPanel.loadCollapsed(DrawPanel.COLLAPSED_SETTING);
-    var stack = CsPanel.stack(layout, DrawPanel.COLLAPSED_SETTING, 0,
-        function() {
-            EAction.handleUserMessage(qsTr("Section order reset -- " +
-                "reopen the panel to see it."));
-        });
 
-    // EACH PANEL BUILDS ITS OWN BODY, into this one's section. Nothing
-    // is reimplemented here: the tiles, the search, the recent strip,
-    // the undo row and every trap they cost are the ones those two
-    // files already carry.
+    // EACH PANEL BUILDS ITS OWN BODY, into this one's column. Nothing
+    // is reimplemented here: the tiles, the search, the recent strip
+    // and every trap they cost are the ones those two files already
+    // carry.
     var sections = [
         { title: DrawPanel.SEC_TRACE,
           build: function(parent) { return FeatureTrace.buildBody(parent); } },
@@ -100,24 +101,16 @@ DrawPanel.buildDock = function(appWin) {
             }
             inner.addWidget(sections[i].build(section.host), 1, 0);
             section.host.setLayout(inner);
-            // THE CALLER ADDS THE BOX. CsPanel.stackAdd only registers
-            // the section for the reorder menu -- leaving this out
-            // builds every widget correctly, parents them to the body,
-            // and shows a 46-pixel-tall empty panel.
+            // THE CALLER ADDS THE BOX. Leaving this out builds every
+            // widget correctly, parents them to the body, and shows a
+            // 46-pixel-tall empty panel.
             layout.addWidget(section.box, 1, 0);
-            CsPanel.stackAdd(stack, section, sections[i].title);
             DrawPanel.sections[sections[i].title] = section;
         } catch (eSection) {
-            // ONE SECTION REFUSED IS NOT A PANEL REFUSED. A caver whose
+            // ONE COLUMN REFUSED IS NOT A PANEL REFUSED. A caver whose
             // symbol palette will not build still needs to trace.
             problems.push(sections[i].title + " (" + eSection + ")");
         }
-    }
-
-    // The caver's saved section order, applied once everything is in.
-    try {
-        CsPanel.applyOrder(stack);
-    } catch (eOrder) {
     }
 
     body.setLayout(layout);
