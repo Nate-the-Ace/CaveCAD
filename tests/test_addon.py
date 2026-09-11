@@ -48,7 +48,14 @@ WIDGET_NAMES = ["CaveSurveyMenu", "CaveSurveyToolBar"]
 
 # A folder is a TOOL if and only if it contains <Folder>.js. Folders
 # without one are libraries (Core/) and are never init'd by QCAD.
-LIBRARY_DIRS = {"Core", "Templates"}
+#
+# AreaFill is temporarily here too: Task 6 of the area-fill plan adds
+# AreaFill/AreaFillRun.js (the stroke action) and Task 7 will add
+# AreaFillListener.js, but the panel that makes this a real TOOL --
+# AreaFill/AreaFill.js -- does not land until Task 10. Remove this
+# entry when that file exists; until then the folder is honestly a
+# library, not a mistyped tool.
+LIBRARY_DIRS = {"Core", "Templates", "AreaFill"}
 
 
 def all_dirs():
