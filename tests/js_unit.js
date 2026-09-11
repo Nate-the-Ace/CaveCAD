@@ -24517,6 +24517,48 @@ eqs(CsSymbolStore.PREFIX, "SYM_", "the symbol block prefix");
     }
     eqs(bad.join(", "), "",
         "CsArea.CATALOG: every layer named is a layer the registry has");
+
+    var square = [{x:0,y:0},{x:10,y:0},{x:10,y:10},{x:0,y:10}];
+    var ell = [{x:0,y:0},{x:10,y:0},{x:10,y:4},{x:4,y:4},{x:4,y:10},{x:0,y:10}];
+    ok(CsArea.pointInPolygon(5, 5, square), "pointInPolygon: centre is in");
+    ok(!CsArea.pointInPolygon(15, 5, square), "pointInPolygon: outside is out");
+    ok(CsArea.pointInPolygon(2, 8, ell), "pointInPolygon: the arm is in");
+    ok(!CsArea.pointInPolygon(8, 8, ell), "pointInPolygon: the notch is out");
+    near(CsArea.polygonArea(square), 100, 1e-9, "polygonArea: 10x10 is 100");
+    var reversed = square.slice().reverse();
+    near(CsArea.polygonArea(reversed), 100, 1e-9,
+        "polygonArea: winding does not change the area");
+
+    var entry = CsArea.CATALOG.SAND;
+    var p1 = CsArea.placements(square, entry, 42, 1.0, 1.0);
+    var p2 = CsArea.placements(square, entry, 42, 1.0, 1.0);
+    var p3 = CsArea.placements(square, entry, 43, 1.0, 1.0);
+    ok(p1.length > 0, "CsArea.placements: a 100-unit square gets elements");
+    eqs(JSON.stringify(p1), JSON.stringify(p2),
+        "CsArea.placements: the same seed places the same elements");
+    ok(JSON.stringify(p1) !== JSON.stringify(p3),
+        "CsArea.placements: a different seed places different elements");
+    var outside = 0, badScale = 0;
+    for (var q = 0; q < p1.length; q++) {
+        if (!CsArea.pointInPolygon(p1[q].x, p1[q].y, square)) { outside++; }
+        if (p1[q].scale < entry.scaleMin || p1[q].scale > entry.scaleMax) {
+            badScale++;
+        }
+    }
+    eqs(outside, 0, "CsArea.placements: every element is inside the boundary");
+    eqs(badScale, 0, "CsArea.placements: every scale is inside the jitter");
+    var expected = (CsArea.polygonArea(square) / 100) * entry.density;
+    ok(p1.length >= expected * 0.6 && p1.length <= expected * 1.4,
+        "CsArea.placements: the count follows area times density");
+
+    var filled = CsArea.placements(square, CsArea.CATALOG.WATER, 42, 1.0, 1.0);
+    eqs(filled.length, 0,
+        "CsArea.placements: a filled pattern is a hatch, not scattered");
+
+    var noBlocks = { engine: "scatter", blocks: [], density: 16,
+        scaleMin: 0.7, scaleMax: 1.5, rotate: true };
+    eqs(CsArea.placements(square, noBlocks, 42, 1.0, 1.0).length, 0,
+        "CsArea.placements: an entry with no blocks places nothing");
 })();
 
 // ---------------------------------------------------------------------

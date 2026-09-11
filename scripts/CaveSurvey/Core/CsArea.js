@@ -111,3 +111,118 @@ CsArea.entryFor = function(key) {
     }
     return null;
 };
+
+/** Even-odd point in polygon. A self-intersecting boundary is answered
+ *  by this rule and not repaired -- a figure-eight fills its lobes. */
+CsArea.pointInPolygon = function(px, py, verts) {
+    var inside = false;
+    var n = verts.length;
+    if (n < 3) {
+        return false;
+    }
+    var x1 = verts[0].x, y1 = verts[0].y;
+    for (var i = 1; i <= n; i++) {
+        var x2 = verts[i % n].x, y2 = verts[i % n].y;
+        if ((y1 > py) !== (y2 > py)) {
+            var xInt = (x2 - x1) * (py - y1) / (y2 - y1) + x1;
+            if (px < xInt) {
+                inside = !inside;
+            }
+        }
+        x1 = x2;
+        y1 = y2;
+    }
+    return inside;
+};
+
+/**
+ * Unsigned area of a polygon, via the signed shoelace sum.
+ *
+ * Self-intersecting boundaries are not repaired in v1 (see
+ * pointInPolygon above): a figure-eight's two lobes wind opposite ways,
+ * so THIS sum cancels them rather than adding them, even though
+ * pointInPolygon fills both lobes. The area a figure-eight is scattered
+ * against is therefore smaller than its visible footprint, and it
+ * comes out sparser than it looks -- a known, accepted v1 gap, not a
+ * bug to chase here.
+ */
+CsArea.polygonArea = function(verts) {
+    var a = 0;
+    for (var i = 0; i < verts.length; i++) {
+        var p1 = verts[i], p2 = verts[(i + 1) % verts.length];
+        a += p1.x * p2.y - p2.x * p1.y;
+    }
+    return Math.abs(a) / 2;
+};
+
+/** The bounding box of a polygon: {minX, minY, maxX, maxY}, or null for
+ *  an empty vertex list -- every current caller already guards against
+ *  fewer than 3 verts, but this is exported and must not throw. */
+CsArea.bounds = function(verts) {
+    if (verts.length === 0) {
+        return null;
+    }
+    var b = { minX: verts[0].x, minY: verts[0].y,
+              maxX: verts[0].x, maxY: verts[0].y };
+    for (var i = 1; i < verts.length; i++) {
+        b.minX = Math.min(b.minX, verts[i].x);
+        b.minY = Math.min(b.minY, verts[i].y);
+        b.maxX = Math.max(b.maxX, verts[i].x);
+        b.maxY = Math.max(b.maxY, verts[i].y);
+    }
+    return b;
+};
+
+/**
+ * Where a scattered pattern's elements go.
+ *
+ * Rejection sampling inside the bounding box, with a cap so a boundary
+ * that is nearly all box -- a long thin passage cutting a diagonal --
+ * cannot spin. The cap is generous: a 10% hit rate still fills.
+ *
+ * \return [{x, y, block, scale, angle}, ...]
+ */
+CsArea.placements = function(verts, entry, seed, scale, density) {
+    var out = [];
+    if (verts.length < 3 || entry.engine !== "scatter" ||
+        isNull(entry.blocks) || entry.blocks.length === 0) {
+        return out;
+    }
+    var area = CsArea.polygonArea(verts);
+    var want = Math.round((area / 100) * entry.density *
+        (isNull(density) ? 1.0 : density));
+    if (want <= 0) {
+        return out;
+    }
+    var b = CsArea.bounds(verts);
+    var w = b.maxX - b.minX, h = b.maxY - b.minY;
+    var rand = CsArea.rng(seed);
+    var tries = 0, cap = want * 60 + 500;
+    var mul = isNull(scale) ? 1.0 : scale;
+    while (out.length < want && tries < cap) {
+        tries++;
+        // These draws happen BEFORE the inside test, every attempt, hit
+        // or miss. That is what makes the sequence depend only on the
+        // seed and the geometry -- never on how many points happened to
+        // land outside -- so the same seed always reproduces the same
+        // placements. Reordering "to save a draw on a miss" breaks that.
+        var x = b.minX + rand() * w;
+        var y = b.minY + rand() * h;
+        var pickBlock = rand();
+        var pickScale = rand();
+        var pickAngle = rand();
+        if (!CsArea.pointInPolygon(x, y, verts)) {
+            continue;
+        }
+        var blockIndex = Math.min(entry.blocks.length - 1,
+            Math.floor(pickBlock * entry.blocks.length));
+        out.push({
+            x: x, y: y,
+            block: entry.blocks[blockIndex],
+            scale: mul * (entry.scaleMin +
+                pickScale * (entry.scaleMax - entry.scaleMin)),
+            angle: entry.rotate ? pickAngle * 2 * Math.PI : 0.0
+        });
+    }
+    return out;
+};
