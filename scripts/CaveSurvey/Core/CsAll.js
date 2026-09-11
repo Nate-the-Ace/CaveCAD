@@ -158,6 +158,7 @@ include(includeBasePath + "/CsScanView.js");
 // from it and the Survey Notebook types from it -- two browsers over
 // one folder would be two answers to "which have I done".
 include(includeBasePath + "/CsScanList.js");
+include(includeBasePath + "/CsScanBrowser.js");
 include(includeBasePath + "/CsSheet.js");
 include(includeBasePath + "/CsReport.js");
 // After CsLayers, CsSymbols, CsSheet, CsShapeLine, CsStats and

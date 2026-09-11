@@ -261,7 +261,11 @@ var CORE_FILES_NOT_LOADED = [
     // A QTableWidget renderer: every function takes a live table. The
     // model it draws -- rows, folds, which folders count as complete --
     // is CsScanTree, which IS exercised here.
-    "scripts/CaveSurvey/Core/CsScanList.js"
+    "scripts/CaveSurvey/Core/CsScanList.js",
+    // Builds QSplitter/QWidget/QPushButton and embeds a CsScanView,
+    // none of which node has. What it decides that is not a widget --
+    // the tree:page ratio -- is two constants.
+    "scripts/CaveSurvey/Core/CsScanBrowser.js"
 ];
 
 // ---------------------------------------------------------------------

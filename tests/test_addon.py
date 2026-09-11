@@ -1948,6 +1948,54 @@ class TestScanListIsShared(unittest.TestCase):
                 "whole-set write the two panels drifted on" % name)
 
 
+class TestScanBrowserIsShared(unittest.TestCase):
+    """The tree and the page beside it are ONE widget, in Core.
+
+    Both panels used to assemble the same pair by hand -- CsScanList's
+    tree, CsScanView's preview, a zoom row under it -- and each chose
+    its own geometry. So moving the tree beside the page in Sketch
+    Scans left the Survey Notebook stacked, and the next change would
+    have done the same again. The standing rule (Nathan, 2026-09-11) is
+    that a change to this pair updates wherever it is used, and that is
+    only structurally true while neither panel can build its own.
+    """
+
+    PANELS = (("SketchScans", "SketchScans.js"),
+              ("SurveyNotebook", "SurveyNotebook.js"))
+
+    def source(self, folder, name):
+        with open(os.path.join(ADDON, folder, name)) as handle:
+            return handle.read()
+
+    def code(self, folder, name):
+        """The file with its comments stripped -- a rule about what a
+        panel CALLS must not be satisfied or broken by prose."""
+        out = []
+        for line in self.source(folder, name).splitlines():
+            stripped = line.strip()
+            if stripped.startswith("//") or stripped.startswith("*"):
+                continue
+            out.append(line)
+        return "\n".join(out)
+
+    def test_both_panels_build_the_browser_from_core(self):
+        for folder, name in self.PANELS:
+            self.assertIn(
+                "CsScanBrowser.build(", self.code(folder, name),
+                "%s should build the scans tree and preview through "
+                "CsScanBrowser" % name)
+
+    def test_neither_panel_assembles_the_pair_itself(self):
+        for folder, name in self.PANELS:
+            body = self.code(folder, name)
+            for call in ("CsScanList.build(", "CsScanPreview.build("):
+                self.assertNotIn(
+                    call, body,
+                    "%s calls %s itself -- that is the second copy of "
+                    "the arrangement, and it is what drifted" %
+                    (name, call))
+
+
 class TestTeachingCave(unittest.TestCase):
     """The teaching cave replaced the invented Lesson Cave.
 

@@ -615,20 +615,25 @@ SketchScans.buildDock = function(appWin) {
     }
     layout.addWidget(w.header, 0, 0);
 
-    w.list = new QTableWidget(0, 1);
-    try {
-        w.list.horizontalHeader().visible = false;
-        w.list.verticalHeader().visible = false;
-        w.list.horizontalHeader().stretchLastSection = true;
-        w.list.selectionBehavior = QAbstractItemView.SelectRows;
-        w.list.editTriggers = QAbstractItemView.NoEditTriggers;
-    } catch (eList) {
-    }
+    // THE TREE AND THE PAGE BESIDE IT, from Core: one widget, one
+    // arrangement, both panels. Anything about the PAIR -- which way
+    // round it sits, the ratio, the zoom row -- changes there and
+    // changes in the Survey Notebook at the same time, which is the
+    // whole reason it left this file (Nathan, 2026-09-11).
+    var browser = CsScanBrowser.build(body,
+        { settingKey: SketchScans.SETTING_SPLIT });
+    w.list = browser.list;
+    w.previewPane = browser.previewPane;
+    w.scanView = browser.preview;
+    w.fitButton = browser.fitButton;
+    w.zoomInButton = browser.zoomInButton;
+    w.zoomOutButton = browser.zoomOutButton;
+    w.splitter = browser.splitter;
+    var previewLayout = browser.previewLayout;
+    var zoomRow = browser.zoomRow;
 
-    // The preview: a real CAD view over a scratch document holding just
-    // the scan, so it zooms and pans (see ScanView.js). The old QLabel
-    // stays as the fallback for a build that cannot embed a view, and
-    // as the place messages go either way.
+    // The old QLabel stays as the fallback for a build that cannot
+    // embed a view, and as the place messages go either way.
     w.preview = new QLabel("");
     try {
         w.preview.minimumHeight = 40;
@@ -636,47 +641,31 @@ SketchScans.buildDock = function(appWin) {
     } catch (ePrev) {
     }
 
-    w.previewPane = new QWidget();
-    var previewLayout = new QVBoxLayout();
-    try {
-        previewLayout.setContentsMargins(0, 0, 0, 0);
-    } catch (eMargins) {
-    }
-    w.scanView = CsScanPreview.build(w.previewPane);
     if (w.scanView !== null) {
-        previewLayout.addWidget(w.scanView.view, 1, 0);
-        var zoomRow = new QHBoxLayout();
-        w.fitButton = new QPushButton(qsTr("Fit"));
-        w.fitButton.toolTip = qsTr("Fit the whole scan in the pane.");
-        w.zoomInButton = new QPushButton("+");
-        w.zoomOutButton = new QPushButton("\u2212");
         // A PAGE THAT ARRIVED SIDEWAYS. Not a placement problem -- the
         // pixels themselves are turned, and every tool downstream reads
         // them off disk -- so the button rewrites the scan rather than
         // carrying an angle beside it. It sits with the zoom controls
         // because it belongs to LOOKING at the page, not to placing it.
+        //
+        // THIS PANEL'S, not the shared row's: the Notebook types off a
+        // page, it does not repair one.
         w.rotateButton = new QPushButton("\u21BB");
         w.rotateButton.toolTip = qsTr("Turn this scan a quarter turn " +
             "clockwise AND SAVE IT BACK TO DISK, so every tool sees it " +
             "the right way up. The file itself is rewritten.");
         try {
-            w.zoomInButton.maximumWidth = 34;
-            w.zoomOutButton.maximumWidth = 34;
             w.rotateButton.maximumWidth = 34;
-            w.fitButton.maximumWidth = 50;
         } catch (eZw) {
         }
-        zoomRow.addWidget(w.fitButton, 0, 0);
-        zoomRow.addWidget(w.zoomOutButton, 0, 0);
-        zoomRow.addWidget(w.zoomInButton, 0, 0);
         zoomRow.addWidget(w.rotateButton, 0, 0);
-        zoomRow.addStretch(1);
-        previewLayout.addLayout(zoomRow, 0);
+        w.rotateButton.clicked.connect(function() {
+            SketchScans.rotateSelected();
+        });
+
         // THE TRIM BAR. Not an optional extra button: a scan is not
         // placeable until the caver has said which part of it they
-        // mean. A page with one sketch on it costs one click ("Use
-        // whole page") and nothing else; a page with three costs a
-        // drag.
+        // mean.
         var trimRow = new QHBoxLayout();
         w.trimLabel = new QLabel(qsTr("Trim: drag a box"));
         try {
@@ -697,18 +686,7 @@ SketchScans.buildDock = function(appWin) {
         w.trimRedoButton.clicked.connect(function() {
             SketchScans.resetTrim(true);
         });
-        w.fitButton.clicked.connect(function() {
-            CsScanPreview.fit(w.scanView);
-        });
-        w.zoomInButton.clicked.connect(function() {
-            CsScanPreview.zoom(w.scanView, 1.4);
-        });
-        w.zoomOutButton.clicked.connect(function() {
-            CsScanPreview.zoom(w.scanView, 1 / 1.4);
-        });
-        w.rotateButton.clicked.connect(function() {
-            SketchScans.rotateSelected();
-        });
+
         // A click in the scan reports the pixel it landed on. This is
         // the groundwork for picking alignment stations off the scan
         // instead of off the drawing; for now it proves the click
@@ -730,47 +708,9 @@ SketchScans.buildDock = function(appWin) {
         w.preview.visible = false;
     }
     previewLayout.addWidget(w.preview, w.scanView === null ? 1 : 0, 0);
-    w.previewPane.setLayout(previewLayout);
 
-    // Tree BESIDE preview on a draggable splitter, so the preview is
-    // whatever size the user wants it -- the drag is remembered, the
-    // same way the Survey Notebook remembers its page/status split.
-    w.splitter = new QSplitter(Qt.Horizontal);
-    w.splitter.addWidget(w.list);
-    w.splitter.addWidget(w.previewPane);
-    try {
-        w.splitter.setStretchFactor(0, 2); // the PICTURE gets the growth
-        w.splitter.setStretchFactor(1, 3);
-    } catch (eSf) {
-        // cosmetic
-    }
-    try {
-        var savedSplit = RSettings.getStringValue(
-            SketchScans.SETTING_SPLIT, "");
-        var splitSizes = [];
-        if (savedSplit.length > 0) {
-            var splitParts = savedSplit.split(",");
-            for (var si = 0; si < splitParts.length; si++) {
-                splitSizes.push(parseInt(splitParts[si], 10));
-            }
-        }
-        if (splitSizes.length === 2 &&
-                !isNaN(splitSizes[0]) && !isNaN(splitSizes[1])) {
-            w.splitter.setSizes(splitSizes);
-        } else {
-            // setSizes distributes PROPORTIONALLY when the panel is
-            // smaller than the request, so these are a RATIO and not
-            // two pixel counts: two parts tree to three parts page,
-            // which fits a filename and still reads the sketch.
-            w.splitter.setSizes([2 * SketchScans.DOCK_PREVIEW_H,
-                3 * SketchScans.DOCK_PREVIEW_H]);
-        }
-        w.splitter.splitterMoved.connect(function() {
-            try {
-                RSettings.setValue(SketchScans.SETTING_SPLIT,
-                    w.splitter.sizes().join(","));
-            } catch (eSave) {
-            }
+    CsScanBrowser.rememberSizes(w.splitter, SketchScans.SETTING_SPLIT,
+        function() {
             // The pane changed size under the picture. The LABEL path
             // needs a rescale; the view path does not, and re-showing
             // would throw away the zoom the caver had just set.
@@ -779,9 +719,7 @@ SketchScans.buildDock = function(appWin) {
                 SketchScans.showPreview();
             }
         });
-    } catch (eSplit) {
-        // bridge without sizes()/setSizes(): stretch factors stand
-    }
+
     layout.addWidget(w.splitter, 1, 0);
 
     // ---- the workflow tabs -------------------------------------------

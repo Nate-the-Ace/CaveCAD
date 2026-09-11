@@ -3388,45 +3388,44 @@ SurveyNotebook.buildDock = function(appWin) {
         } catch (eMargins) {
         }
 
-        // THE SAME BROWSER SKETCH SCANS HAS (Core/CsScanList.js): the
-        // cave's scans folder as a tree that folds, with a tick on
-        // every page finished with and on every trip whose pages are
-        // all done. Two lists over one folder would be two answers to
-        // "which have I done", and they would drift -- a page ticked
-        // in one panel still looking undone in the other, when the tick
-        // is the only record of what a caver has worked through.
+        // THE TREE AND THE PAGE BESIDE IT, from Core (CsScanBrowser):
+        // the same widget Sketch Scans builds, not a second assembly
+        // of the same parts. The cave's scans folder as a tree that
+        // folds, with a tick on every page finished with and on every
+        // trip whose pages are all done, and the page itself beside
+        // it -- a scanned page is taller than it is wide, so stacking
+        // them makes a letterbox of the thing being read.
         //
-        // It replaced a cascade of folder dropdowns, which answered
-        // the same question worse: it could say where a page was and
-        // never which ones were left.
-        w.scanList = CsScanList.build(w.scanPane);
+        // Two browsers over one folder would be two answers to "which
+        // have I done", and they would drift -- which is what happened
+        // when the layout changed in one panel and not the other
+        // (Nathan, 2026-09-11).
+        var browser = CsScanBrowser.build(w.scanPane, {
+            settingKey: "CaveSurvey/NotebookScanSplitWidths",
+            zoom: function(label, tip) {
+                return SurveyNotebook.smallButton(label, tip);
+            }
+        });
+        w.scanList = browser.list;
+        w.scanPreview = browser.preview;
+        w.scanFitButton = browser.fitButton;
+        w.scanInButton = browser.zoomInButton;
+        w.scanOutButton = browser.zoomOutButton;
+        CsScanBrowser.rememberSizes(browser.splitter,
+            "CaveSurvey/NotebookScanSplitWidths", null);
         try {
             w.scanList.minimumHeight = 90;
         } catch (eListH) {
         }
-        scanLayout.addWidget(w.scanList, 1, 0);
-
-        w.scanPreview = CsScanPreview.build(w.scanPane);
-        if (w.scanPreview !== null) {
-            scanLayout.addWidget(w.scanPreview.view, 3, 0);
-        } else {
+        if (w.scanPreview === null) {
             // No embedded view on this bridge: say so rather than
             // leaving an empty strip that looks broken.
             w.scanFallback = new QLabel("This build cannot show a scan " +
                 "here. Use Sketch Scans.");
             w.scanFallback.wordWrap = true;
-            scanLayout.addWidget(w.scanFallback, 1, 0);
+            browser.previewLayout.addWidget(w.scanFallback, 1, 0);
         }
-        var scanZoom = new QHBoxLayout();
-        w.scanFitButton = SurveyNotebook.smallButton("Fit",
-            "Fit the whole page in the pane.");
-        w.scanInButton = SurveyNotebook.smallButton("+", "Zoom in.");
-        w.scanOutButton = SurveyNotebook.smallButton("\u2212", "Zoom out.");
-        scanZoom.addWidget(w.scanFitButton, 0, 0);
-        scanZoom.addWidget(w.scanOutButton, 0, 0);
-        scanZoom.addWidget(w.scanInButton, 0, 0);
-        scanZoom.addStretch(1);
-        scanLayout.addLayout(scanZoom, 0);
+        scanLayout.addWidget(browser.splitter, 1, 0);
         w.scanPane.setLayout(scanLayout);
 
         // Between the ladder and the status box: the ladder is what is
@@ -3725,19 +3724,8 @@ SurveyNotebook.buildDock = function(appWin) {
         // no context menu on this bridge: the tick is still read here
         // and set from Sketch Scans
     }
-    SurveyNotebook.safeConnect(w.scanFitButton.clicked, function() {
-        if (w.scanPreview !== null) { CsScanPreview.fit(w.scanPreview); }
-    }, "Scan fit", w.problems);
-    SurveyNotebook.safeConnect(w.scanInButton.clicked, function() {
-        if (w.scanPreview !== null) {
-            CsScanPreview.zoom(w.scanPreview, 1.4);
-        }
-    }, "Scan zoom in", w.problems);
-    SurveyNotebook.safeConnect(w.scanOutButton.clicked, function() {
-        if (w.scanPreview !== null) {
-            CsScanPreview.zoom(w.scanPreview, 1 / 1.4);
-        }
-    }, "Scan zoom out", w.problems);
+    // Fit / + / - are wired by CsScanBrowser, once, for both panels.
+    // Connecting them again here would zoom twice per click.
     SurveyNotebook.safeConnect(w.newTripButton.clicked, function() {
         SurveyNotebook.newTrip(w);
     }, "New Trip button", w.problems);
