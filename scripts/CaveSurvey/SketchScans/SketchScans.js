@@ -346,6 +346,121 @@ SketchScans.setVisible = function(name, on) {
     });
 };
 
+/**
+ * THE PANEL FOLLOWS THE COMMAND (Nathan, 2026-09-11).
+ *
+ * A bay is a different job from browsing scans, and it was being done
+ * from two other panels: Feature Trace to draw with, the Symbol Palette
+ * to decorate with, this one to capture from. Showing those two
+ * automatically helped and still left three panels and a hunt.
+ *
+ * So the panel has a CONTEXT. While a bay is open it shows the bay's
+ * own buttons -- trace, decorate, capture, cancel -- and the three view
+ * tabs are put out of reach, because the view is not in question while
+ * you are standing in a bay. Close the bay and they come back.
+ *
+ * The full palettes are still one click away for the features and
+ * symbols this tab does not carry; what has gone is having to go and
+ * find them for the ordinary case.
+ */
+SketchScans.syncContext = function() {
+    var w = SketchScans.w;
+    if (isNull(w) || isNull(w.tabs) || isNull(w.bayTab)) {
+        return;
+    }
+    var open = false;
+    try {
+        open = SketchScans.bayOpen(EAction.getDocument());
+    } catch (eBay) {
+        open = false;
+    }
+    if (open === w.bayContext) {
+        return;                       // nothing changed
+    }
+    w.bayContext = open;
+    try {
+        if (open === true) {
+            // Remember where the caver was, so closing the bay puts
+            // them back on their own tab rather than on Plan.
+            if (w.tabs.currentIndex !== w.bayTab) {
+                w.beforeBay = w.tabs.currentIndex;
+            }
+            w.tabs.setTabEnabled(w.bayTab, true);
+            w.tabs.currentIndex = w.bayTab;
+            for (var i = 0; i < w.bayTab; i++) {
+                w.tabs.setTabEnabled(i, false);
+            }
+        } else {
+            for (var j = 0; j < w.bayTab; j++) {
+                w.tabs.setTabEnabled(j, true);
+            }
+            w.tabs.currentIndex = isNull(w.beforeBay) ? 2 : w.beforeBay;
+            w.tabs.setTabEnabled(w.bayTab, false);
+        }
+    } catch (eSwitch) {
+    }
+};
+
+/** Arms one feature and starts tracing, without leaving this panel.
+ *  The stroke lands on the SECTION layers because it is inside the bay
+ *  -- where you drag is what decides the view. */
+SketchScans.traceInBay = function(layerName) {
+    try {
+        if (typeof FeatureTrace === "undefined") {
+            SketchScans.showDock("CaveSurveyFeatureTraceDock");
+            return;
+        }
+        FeatureTrace.armLayer(layerName);
+        FeatureTrace.startRun();
+    } catch (e) {
+        warning("Sketch Scans: could not start tracing (" + e + ").");
+    }
+};
+
+/** Starts placing whatever the Symbol Palette last had armed, and
+ *  opens the palette when it has nothing -- a button that silently
+ *  does nothing is worse than one that hands you the chooser. */
+SketchScans.placeInBay = function() {
+    try {
+        if (typeof SymbolPalette === "undefined" ||
+                isNull(SymbolPalette.armed)) {
+            SketchScans.showDock("CaveSurveySymbolPaletteDock");
+            return;
+        }
+        SymbolPalette.startRun();
+    } catch (e) {
+        warning("Sketch Scans: could not start placing (" + e + ").");
+    }
+};
+
+/** Opens one of the suite's docks by objectName. */
+SketchScans.showDock = function(name) {
+    try {
+        var dock = RMainWindowQt.getMainWindow().findChild(name);
+        if (!isNull(dock)) {
+            dock.visible = true;
+        }
+    } catch (e) {
+    }
+};
+
+/** Tears the open bay down, leaving whatever was traced where it is. */
+SketchScans.cancelBay = function() {
+    try {
+        var doc = EAction.getDocument();
+        var di = EAction.getDocumentInterface();
+        var bay = SectionCapture.findBay(doc);
+        if (isNull(bay)) {
+            return;
+        }
+        SectionBay.cancel(doc, di, bay);
+        SketchScans.syncContext();
+        SketchScans.updateTrimGate();
+    } catch (e) {
+        warning("Sketch Scans: could not close the bay (" + e + ").");
+    }
+};
+
 /** The LRUD letter the section tab's combo is showing. */
 SketchScans.lrudIndex = function() {
     var out = 0;
@@ -391,7 +506,12 @@ SketchScans.frameIndex = function() {
         return 0;
     }
     try {
-        return w.tabs.currentIndex;
+        var at = w.tabs.currentIndex;
+        // THE BAY TAB IS NOT A VIEW. A bay is always a cross section,
+        // so while it is open the answer is 2 -- otherwise every
+        // frame-sensitive thing in this file would read "3" and fall
+        // through to plan.
+        return (at === w.bayTab) ? 2 : at;
     } catch (e) {
         return 0;
     }
@@ -739,6 +859,33 @@ SketchScans.buildDock = function(appWin) {
             } else if (name === "sketchButton") {
                 button = makeButton(qsTr("Sketch Section"), TIP.sketch);
                 button.enabled = false;
+            } else if (name === "traceWallsButton") {
+                button = makeButton(qsTr("Trace Walls"),
+                    qsTr("Draw the section's outline. The stroke lands " +
+                        "on the SECTION layers because it is inside " +
+                        "the bay -- where you drag is what decides the " +
+                        "view, here as everywhere."));
+            } else if (name === "traceFloorButton") {
+                button = makeButton(qsTr("Trace Floor"),
+                    qsTr("Draw floor detail inside the outline: a mud " +
+                        "bank, a breakdown pile, a ledge."));
+            } else if (name === "symbolButton") {
+                button = makeButton(qsTr("Place Symbol"),
+                    qsTr("Place the symbol the palette last had armed. " +
+                        "Open the palette itself to choose another."));
+            } else if (name === "moreFeaturesButton") {
+                button = makeButton(qsTr("More Features..."),
+                    qsTr("Open the Feature Trace panel, for the " +
+                        "features this tab does not carry."));
+            } else if (name === "captureButton") {
+                button = makeButton(qsTr("Capture Section"),
+                    qsTr("Place what you traced as a section block, " +
+                        "with a leader back to its station, and tear " +
+                        "the bay down."));
+            } else if (name === "cancelBayButton") {
+                button = makeButton(qsTr("Cancel Bay"),
+                    qsTr("Remove the frame, the scan and the ghost. " +
+                        "Whatever you traced stays exactly where it is."));
             } else {
                 continue;
             }
@@ -762,16 +909,30 @@ SketchScans.buildDock = function(appWin) {
         "elsewhereButton"];
     var SECTION_ORDER = ["sketchButton", "calibration", "alignButton",
         "elsewhereButton"];
+    // THE BAY'S OWN BUTTONS, in the order the work happens: trace the
+    // walls, trace the floor, put a symbol on it, and when it is a
+    // section, capture it. See SketchScans.syncContext for why these
+    // are a TAB rather than another panel.
+    var BAY_ORDER = ["traceWallsButton", "traceFloorButton",
+        "symbolButton", "moreFeaturesButton", "captureButton",
+        "cancelBayButton"];
 
     var planPage = makePage(PLAN_ORDER);
     var profilePage = makePage(PLAN_ORDER);
     var sectionPage = makePage(SECTION_ORDER);
-    w.buttonSets = [planPage.set, profilePage.set, sectionPage.set];
+    var bayPage = makePage(BAY_ORDER);
+    w.buttonSets = [planPage.set, profilePage.set, sectionPage.set,
+        bayPage.set];
 
     w.tabs.addTab(planPage.page, qsTr("Plan"));
     w.tabs.addTab(profilePage.page, qsTr("Profile"));
     w.tabs.addTab(sectionPage.page, qsTr("Cross Section"));
+    // THE FOURTH TAB IS A CONTEXT, not a view: it is the bay you are
+    // standing in, and it only exists while you are standing in one.
+    w.tabs.addTab(bayPage.page, qsTr("In the Bay"));
+    w.bayTab = 3;
     try {
+        w.tabs.setTabEnabled(w.bayTab, false);
         w.tabs.currentIndex = 0;
         w.tabs.toolTip = qsTr("Which view you are sketching. Profile " +
             "assigns to the ELEVATION's own stations, on " +
@@ -822,6 +983,30 @@ SketchScans.buildDock = function(appWin) {
     });
     SketchScans.eachButton(w, "calibCancelButton", function(b) {
         b.clicked.connect(function() { SketchScans.endCalibration(); });
+    });
+    SketchScans.eachButton(w, "traceWallsButton", function(b) {
+        b.clicked.connect(function() {
+            SketchScans.traceInBay(CsLayers.WALLS_SURVEYED);
+        });
+    });
+    SketchScans.eachButton(w, "traceFloorButton", function(b) {
+        b.clicked.connect(function() {
+            SketchScans.traceInBay(CsLayers.FLOOR);
+        });
+    });
+    SketchScans.eachButton(w, "symbolButton", function(b) {
+        b.clicked.connect(function() { SketchScans.placeInBay(); });
+    });
+    SketchScans.eachButton(w, "moreFeaturesButton", function(b) {
+        b.clicked.connect(function() {
+            SketchScans.showDock("CaveSurveyFeatureTraceDock");
+        });
+    });
+    SketchScans.eachButton(w, "captureButton", function(b) {
+        b.clicked.connect(function() { SketchScans.sketchClicked(); });
+    });
+    SketchScans.eachButton(w, "cancelBayButton", function(b) {
+        b.clicked.connect(function() { SketchScans.cancelBay(); });
     });
 
     body.setLayout(layout);
@@ -2420,6 +2605,9 @@ SketchScans.boxDrawn = function(box) {
  *  its own extra condition: a plan or profile scan has no ghost to
  *  trace onto. */
 SketchScans.updateTrimGate = function() {
+    // The panel follows the command: a bay that opened or closed since
+    // the last look changes which buttons belong here at all.
+    SketchScans.syncContext();
     var w = SketchScans.w;
     if (w === undefined || w === null) {
         return;

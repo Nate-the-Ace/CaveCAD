@@ -24411,31 +24411,6 @@ eqs(CsSymbolStore.PREFIX, "SYM_", "the symbol block prefix");
 })();
 
 // ---------------------------------------------------------------------
-// CsPanel's bay docks -- the panels a section bay opens, and puts back.
-//
-// The showing and hiding needs a main window; what is pinned here is
-// the REMEMBERING, which is where this can go wrong quietly: forget
-// what was open and Capture closes a panel the caver opened themselves.
-// ---------------------------------------------------------------------
-(function() {
-    ok(CsPanel.TRACING_DOCKS.length === 2,
-        "CsPanel: a bay opens the two panels you trace with");
-    ok(CsPanel.TRACING_DOCKS.indexOf("CaveSurveyFeatureTraceDock") >= 0 &&
-        CsPanel.TRACING_DOCKS.indexOf("CaveSurveySymbolPaletteDock") >= 0,
-        "CsPanel: Feature Trace and the Symbol Palette, by objectName " +
-            "-- which is how a dock is found from a context that does " +
-            "not own it");
-    ok(CsPanel.SETTING_RESTORE.indexOf("CaveSurvey/") === 0,
-        "CsPanel: and what was open is remembered in a setting, because " +
-            "the bay is opened from one script context and captured " +
-            "from another");
-    ok(typeof CsPanel.openTracingDocks === "function" &&
-        typeof CsPanel.restoreTracingDocks === "function",
-        "CsPanel: both halves exist -- an open with no put-back is how " +
-            "a panel ends up permanently on screen");
-})();
-
-// ---------------------------------------------------------------------
 // Report.
 // ---------------------------------------------------------------------
 
