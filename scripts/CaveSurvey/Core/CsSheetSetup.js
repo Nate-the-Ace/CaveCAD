@@ -33,10 +33,93 @@ var CsSheetSetup = {};
  * estimate a passage without reading the bar at all, and a survey group
  * whose maps all use round scales can lay two of them side by side.
  */
-CsSheetSetup.SCALES = [10, 20, 25, 30, 40, 50, 60, 80, 100, 150, 200,
-    300, 400, 500];
+/**
+ * Every plot scale offered, imperial first and metric after.
+ *
+ * `feetPerInch` is the one number the rest of this file works in: feet
+ * of cave per inch of paper. An imperial scale states it outright
+ * ("1\" = 50 ft"); a metric one states a RATIO instead, because that
+ * is how a metric map says it -- 1:500 means one of anything on paper
+ * is five hundred of the same thing in the cave, and it is the same
+ * scale whether the reader has a ruler in millimetres or inches. One
+ * inch of paper at 1:500 is 500 inches of cave, which is 500/12 feet,
+ * and that is the whole conversion.
+ *
+ * METRIC AT THE BOTTOM, for the reason the metric papers are: a list
+ * is a statement about what you will probably want, and these caves
+ * are surveyed in feet.
+ */
+CsSheetSetup.SCALE_ROWS = [
+    { label: "1\" = 10 ft", feetPerInch: 10, metric: false },
+    { label: "1\" = 20 ft", feetPerInch: 20, metric: false },
+    { label: "1\" = 25 ft", feetPerInch: 25, metric: false },
+    { label: "1\" = 30 ft", feetPerInch: 30, metric: false },
+    { label: "1\" = 40 ft", feetPerInch: 40, metric: false },
+    { label: "1\" = 50 ft", feetPerInch: 50, metric: false },
+    { label: "1\" = 60 ft", feetPerInch: 60, metric: false },
+    { label: "1\" = 80 ft", feetPerInch: 80, metric: false },
+    { label: "1\" = 100 ft", feetPerInch: 100, metric: false },
+    { label: "1\" = 150 ft", feetPerInch: 150, metric: false },
+    { label: "1\" = 200 ft", feetPerInch: 200, metric: false },
+    { label: "1\" = 300 ft", feetPerInch: 300, metric: false },
+    { label: "1\" = 400 ft", feetPerInch: 400, metric: false },
+    { label: "1\" = 500 ft", feetPerInch: 500, metric: false },
+    { label: "1:100", feetPerInch: 100 / 12, metric: true },
+    { label: "1:200", feetPerInch: 200 / 12, metric: true },
+    { label: "1:250", feetPerInch: 250 / 12, metric: true },
+    { label: "1:500", feetPerInch: 500 / 12, metric: true },
+    { label: "1:1000", feetPerInch: 1000 / 12, metric: true },
+    { label: "1:2000", feetPerInch: 2000 / 12, metric: true }
+];
 
-/** The sheets a cave map is usually plotted on, in inches. */
+/** The scales as bare feet-per-inch, in the same order. Derived, so
+ *  the two can never disagree about what is offered. */
+CsSheetSetup.SCALES = (function() {
+    var out = [];
+    for (var i = 0; i < CsSheetSetup.SCALE_ROWS.length; i++) {
+        out.push(CsSheetSetup.SCALE_ROWS[i].feetPerInch);
+    }
+    return out;
+})();
+
+/** The row one feet-per-inch belongs to, or null. */
+CsSheetSetup.scaleRow = function(feetPerInch) {
+    for (var i = 0; i < CsSheetSetup.SCALE_ROWS.length; i++) {
+        if (Math.abs(CsSheetSetup.SCALE_ROWS[i].feetPerInch -
+                feetPerInch) < 1e-9) {
+            return CsSheetSetup.SCALE_ROWS[i];
+        }
+    }
+    return null;
+};
+
+/** Is this scale a metric one? Decides whether the bar counts metres
+ *  and whether the caption reads as a ratio. */
+CsSheetSetup.isMetric = function(feetPerInch) {
+    var row = CsSheetSetup.scaleRow(feetPerInch);
+    return !isNull(row) && row.metric === true;
+};
+
+/** Metres in a foot, for the metric bar. */
+CsSheetSetup.M_PER_FT = 0.3048;
+
+/** Inches in a millimetre, for the metric papers below. */
+CsSheetSetup.MM = 1 / 25.4;
+
+/**
+ * The sheets a cave map is plotted on. ALWAYS IN INCHES internally,
+ * whatever the paper is called: the plot scale is feet per inch, and
+ * one unit through the whole file beats two and a conversion at every
+ * use.
+ *
+ * IMPERIAL FIRST, METRIC AFTER (Nathan, 2026-09-10). This suite's
+ * caves are surveyed in feet and plotted on ARCH D; the ISO papers are
+ * here because a cave map is not only a North American thing, and they
+ * are at the bottom because a list is a statement about what you will
+ * probably want. The metric names carry their MILLIMETRES, because
+ * that is what a caver reaching for A1 recognises -- the inches are
+ * this file's business, not theirs.
+ */
 CsSheetSetup.SHEETS = [
     { name: "ANSI A -- 11 x 8.5", w: 11, h: 8.5 },
     { name: "ANSI B -- 17 x 11", w: 17, h: 11 },
@@ -44,7 +127,17 @@ CsSheetSetup.SHEETS = [
     { name: "ARCH C -- 24 x 18", w: 24, h: 18 },
     { name: "ANSI D -- 34 x 22", w: 34, h: 22 },
     { name: "ARCH D -- 36 x 24", w: 36, h: 24 },
-    { name: "ARCH E -- 48 x 36", w: 48, h: 36 }
+    { name: "ARCH E -- 48 x 36", w: 48, h: 36 },
+    { name: "ISO A4 -- 297 x 210 mm",
+        w: 297 * CsSheetSetup.MM, h: 210 * CsSheetSetup.MM },
+    { name: "ISO A3 -- 420 x 297 mm",
+        w: 420 * CsSheetSetup.MM, h: 297 * CsSheetSetup.MM },
+    { name: "ISO A2 -- 594 x 420 mm",
+        w: 594 * CsSheetSetup.MM, h: 420 * CsSheetSetup.MM },
+    { name: "ISO A1 -- 841 x 594 mm",
+        w: 841 * CsSheetSetup.MM, h: 594 * CsSheetSetup.MM },
+    { name: "ISO A0 -- 1189 x 841 mm",
+        w: 1189 * CsSheetSetup.MM, h: 841 * CsSheetSetup.MM }
 ];
 
 /** The NSS template's own sheet, and so the default. */
@@ -137,8 +230,15 @@ CsSheetSetup.fit = function(caveWidthFeet, caveHeightFeet, sheet,
  * nothing.
  */
 CsSheetSetup.barFor = function(scale) {
-    var wanted = CsSheetSetup.BAR.length * scale;   // feet the bar spans
-    var steps = [1, 2, 5, 10, 15, 20, 25, 50, 100, 200, 250, 500, 1000];
+    // A METRIC SCALE COUNTS METRES. A bar under "1:500" marked off in
+    // feet asks a reader to convert in their head, which is the one
+    // thing a scale bar exists to spare them.
+    var metric = CsSheetSetup.isMetric(scale);
+    var perDisplay = metric ? CsSheetSetup.M_PER_FT : 1;   // display / ft
+    var wanted = CsSheetSetup.BAR.length * scale * perDisplay;
+    var steps = metric ?
+        [1, 2, 5, 10, 20, 25, 50, 100, 200, 250, 500, 1000] :
+        [1, 2, 5, 10, 15, 20, 25, 50, 100, 200, 250, 500, 1000];
     var best = null;
     for (var i = 0; i < steps.length; i++) {
         var blocks = Math.floor(wanted / steps[i]);
@@ -159,9 +259,16 @@ CsSheetSetup.barFor = function(scale) {
         best = { perBlock: Math.max(1, Math.round(wanted / 4)), blocks: 4 };
     }
     return {
+        // What the LABELS say, in the display unit.
         perBlock: best.perBlock,
         blocks: best.blocks,
-        totalFeet: best.perBlock * best.blocks
+        unit: metric ? "M" : "FT",
+        // And what the GEOMETRY is drawn from, always in feet: the
+        // drawing is measured in feet whatever the sheet is captioned
+        // in, and mixing the two is how a bar comes out the wrong
+        // length while its numbers look right.
+        perBlockFeet: best.perBlock / perDisplay,
+        totalFeet: (best.perBlock * best.blocks) / perDisplay
     };
 };
 
@@ -299,8 +406,12 @@ CsSheetSetup.atScale = function(inches, scale) {
     return inches * scale;
 };
 
-/** "1" = 50 FT" -- what the bar is captioned with. */
+/** What the bar is captioned with: "1" = 50 FT", or "1:500". */
 CsSheetSetup.scaleText = function(scale) {
+    var row = CsSheetSetup.scaleRow(scale);
+    if (!isNull(row)) {
+        return "SCALE:  " + row.label.toUpperCase();
+    }
     return "SCALE:  1\" = " + scale + " FT";
 };
 
@@ -315,27 +426,31 @@ CsSheetSetup.PLAN_SHEET = "plan";
 CsSheetSetup.ELEVATION_SHEET = "elevation";
 
 /**
- * The elevation sheet's rectangle: the same paper, at the same scale,
- * to the RIGHT of the plan's.
+ * Where the elevation sheet is drawn IN THE PREVIEW: the same paper, at
+ * the same scale, beside the plan's.
  *
- * TWO SHEETS, NOT ONE BIGGER ONE (Nathan, 2026-09-10). The elevation
- * has to be drawn at the plan's scale -- a map carrying two scales is a
- * lie -- and a cave whose plan fits ARCH D at 1" = 40 rarely has room
- * left for eight elevation bands at the same scale. The alternatives
- * were a scale step nobody asked for or paper nobody can print.
+ * TWO SHEETS, NOT ONE BIGGER ONE. The elevation has to be drawn at the
+ * plan's scale -- a map carrying two scales is a lie -- and a cave
+ * whose plan fits ARCH D at 1" = 40 rarely has room left for eight
+ * elevation bands at the same scale. The alternatives were a scale step
+ * nobody asked for or paper nobody can print.
  *
- * To the right rather than below, because below is where the elevation
- * already lives in the drawing: putting the second sheet there would
- * make "which of these is the sheet and which is the working area"
- * unanswerable at a glance.
+ * THE PREVIEW ONLY. The two sheets are separate FILES, each holding one
+ * sheet at its own origin; this places them side by side so the panel
+ * can show both pages at once, which is how a cartographer thinks about
+ * them even though no drawing ever holds both.
  */
 CsSheetSetup.elevationSheetBox = function(planBox, scale) {
     var gutter = CsSheetSetup.SHEET_GUTTER * scale;
+    // STACKED, NOT SIDE BY SIDE (Nathan, 2026-09-10). A dock is tall
+    // and narrow; two landscape pages beside each other in it come out
+    // as two postage stamps. One above the other fills the width, and
+    // the width is what a landscape page needs.
     return {
-        minX: planBox.maxX + gutter,
-        maxX: planBox.maxX + gutter + planBox.width,
-        minY: planBox.minY,
-        maxY: planBox.maxY,
+        minX: planBox.minX,
+        maxX: planBox.maxX,
+        minY: planBox.minY - gutter - planBox.height,
+        maxY: planBox.minY - gutter,
         width: planBox.width,
         height: planBox.height,
         footer: planBox.footer,
@@ -670,15 +785,21 @@ CsSheetSetup.SHEETS_FOLDER = "sheets";
  * cave" -- CsShelf.pickDrawing has to choose, and a generated sheet is
  * the wrong answer.
  */
-CsSheetSetup.sheetPathFor = function(caveFolder, caveName) {
+CsSheetSetup.sheetPathFor = function(caveFolder, caveName, kind) {
     var folder = isNull(caveFolder) ? "" :
         String(caveFolder).replace(/\/+$/, "");
     var name = CsPackage.safeName(isNull(caveName) ? "" : caveName);
     if (name === "") {
         name = "Cave";
     }
-    return folder + "/" + CsSheetSetup.SHEETS_FOLDER + "/" + name +
-        " Sheet.dxf";
+    // ONE SHEET PER FILE (Nathan, 2026-09-10: "it's not easy to print
+    // if they're combined"). Two sheets side by side in one drawing is
+    // one drawing a plotter sees as one enormous page: printing either
+    // of them means a window selection by hand, every time, for every
+    // copy. A file per sheet is a file per press of Print.
+    var which = (kind === CsSheetSetup.ELEVATION_SHEET) ?
+        " Profile Sheet.dxf" : " Plan Sheet.dxf";
+    return folder + "/" + CsSheetSetup.SHEETS_FOLDER + "/" + name + which;
 };
 
 /**
@@ -690,6 +811,8 @@ CsSheetSetup.sheetPathFor = function(caveFolder, caveName) {
  * "" when the path is not a sheet path at all.
  */
 CsSheetSetup.recordPathFor = function(sheetPath) {
+    // Works for either sheet: the cave folder is what is above the
+    // sheets folder, and its own name is the drawing's.
     var path = isNull(sheetPath) ? "" : String(sheetPath);
     var marker = "/" + CsSheetSetup.SHEETS_FOLDER + "/";
     var at = path.lastIndexOf(marker);

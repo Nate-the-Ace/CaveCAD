@@ -23603,6 +23603,42 @@ eqs(CsSymbolStore.PREFIX, "SYM_", "the symbol block prefix");
     ok(CsSheetSetup.sheetByName(CsSheetSetup.DEFAULT_SHEET) !== null,
         "CsSheetSetup: the default names a sheet that exists");
 
+    // METRIC PAPERS, AT THE BOTTOM. A list is a statement about what
+    // you will probably want, and these caves are surveyed in feet.
+    var firstMetric = -1, lastImperial = -1;
+    for (i = 0; i < CsSheetSetup.SHEETS.length; i++) {
+        var isMetric = CsSheetSetup.SHEETS[i].name.indexOf("mm") > 0;
+        if (isMetric && firstMetric < 0) {
+            firstMetric = i;
+        }
+        if (!isMetric) {
+            lastImperial = i;
+        }
+    }
+    ok(firstMetric > 0, "CsSheetSetup: the metric papers are on the list");
+    ok(lastImperial < firstMetric,
+        "CsSheetSetup: and every one of them is below every imperial " +
+            "one, rather than mixed in");
+    var a1 = CsSheetSetup.sheetByName("ISO A1 -- 841 x 594 mm");
+    ok(!isNull(a1), "CsSheetSetup: A1 is there");
+    near(a1.w, 841 / 25.4, 0.0001,
+        "CsSheetSetup: measured in INCHES like every other paper -- the " +
+            "plot scale is feet per inch, and one unit beats two");
+    near(a1.h, 594 / 25.4, 0.0001, "CsSheetSetup: in both directions");
+    ok(a1.name.indexOf("mm") > 0,
+        "CsSheetSetup: while its NAME says millimetres, which is what a " +
+            "caver reaching for A1 recognises");
+    // A1 is close to ARCH D, so a cave that fits one should fit the
+    // other -- a cheap check that the conversion is not out by 25.4.
+    var archDFit = CsSheetSetup.fit(600, 400,
+        CsSheetSetup.sheetByName("ARCH D -- 36 x 24"));
+    var a1Fit = CsSheetSetup.fit(600, 400, a1);
+    ok(Math.abs(CsSheetSetup.SCALES.indexOf(archDFit.scale) -
+        CsSheetSetup.SCALES.indexOf(a1Fit.scale)) <= 1,
+        "CsSheetSetup: A1 and ARCH D take the same cave at about the " +
+            "same scale (" + archDFit.scale + " against " +
+            a1Fit.scale + ")");
+
     // -- fitting ---------------------------------------------------
     var margin = Math.min(archD.w, archD.h) * CsSheetSetup.MARGIN_FRACTION;
     var usableW = archD.w - margin * 2;
@@ -23639,19 +23675,75 @@ eqs(CsSymbolStore.PREFIX, "SYM_", "the symbol block prefix");
         "CsSheetSetup: a cave that fits nowhere says so rather than " +
             "answering a scale that does not work");
 
-    // Every scale offered is a scale a reader recognises.
+    // Every scale offered is one a reader recognises, and each GROUP
+    // ascends. The groups restart, because the metric list is its own
+    // list -- 1:100 is finer than 1" = 500 ft and comes after it.
     var odd = [];
-    for (var i = 0; i < CsSheetSetup.SCALES.length; i++) {
-        if (CsSheetSetup.SCALES[i] !== Math.round(CsSheetSetup.SCALES[i])) {
-            odd.push(CsSheetSetup.SCALES[i]);
+    var lastImperialScale = null, lastMetricScale = null;
+    var firstMetricAt = -1, lastImperialAt = -1;
+    for (var i = 0; i < CsSheetSetup.SCALE_ROWS.length; i++) {
+        var row = CsSheetSetup.SCALE_ROWS[i];
+        if (isNull(row.label) || row.label === "") {
+            odd.push("row " + i + " has no label");
         }
-        if (i > 0 && CsSheetSetup.SCALES[i] <= CsSheetSetup.SCALES[i - 1]) {
-            odd.push(CsSheetSetup.SCALES[i]);
+        if (!(row.feetPerInch > 0)) {
+            odd.push(row.label + " is not a scale");
+        }
+        if (row.metric === true) {
+            if (firstMetricAt < 0) {
+                firstMetricAt = i;
+            }
+            if (lastMetricScale !== null &&
+                    row.feetPerInch <= lastMetricScale) {
+                odd.push(row.label + " is out of order");
+            }
+            lastMetricScale = row.feetPerInch;
+        } else {
+            lastImperialAt = i;
+            if (lastImperialScale !== null &&
+                    row.feetPerInch <= lastImperialScale) {
+                odd.push(row.label + " is out of order");
+            }
+            lastImperialScale = row.feetPerInch;
         }
     }
     ok(odd.length === 0,
-        "CsSheetSetup: the scales are whole numbers, ascending (" +
+        "CsSheetSetup: every scale is labelled and each group ascends (" +
             odd.join(", ") + ")");
+    ok(firstMetricAt > 0 && lastImperialAt < firstMetricAt,
+        "CsSheetSetup: and the metric ones are all below the imperial " +
+            "ones, as the metric papers are");
+    eqs(CsSheetSetup.SCALES.length, CsSheetSetup.SCALE_ROWS.length,
+        "CsSheetSetup: the bare list is derived from the rows, so the " +
+            "two cannot offer different things");
+
+    // A RATIO IS UNIT-FREE, which is why a metric scale is stated as
+    // one: 1:500 means one of anything on paper is five hundred of the
+    // same thing in the cave. One inch at 1:500 is 500 inches of cave,
+    // which is 500/12 feet.
+    near(CsSheetSetup.sheetByName("ARCH D -- 36 x 24") === null ? 0 :
+        CsSheetSetup.scaleRow(500 / 12).feetPerInch, 500 / 12, 0.0001,
+        "CsSheetSetup: 1:500 is 500/12 feet per inch");
+    ok(CsSheetSetup.isMetric(500 / 12),
+        "CsSheetSetup: and is known to be metric");
+    ok(!CsSheetSetup.isMetric(50),
+        "CsSheetSetup: while 1\" = 50 ft is not");
+    ok(CsSheetSetup.scaleText(500 / 12).indexOf("1:500") > 0,
+        "CsSheetSetup: a metric sheet is captioned with its ratio (" +
+            CsSheetSetup.scaleText(500 / 12) + ")");
+    ok(CsSheetSetup.scaleText(50).indexOf("50 FT") > 0,
+        "CsSheetSetup: and an imperial one with its feet");
+
+    // The metric bar counts METRES. A bar under "1:500" marked off in
+    // feet asks a reader to convert in their head, which is the one
+    // thing a scale bar exists to spare them.
+    var metricBar = CsSheetSetup.barFor(500 / 12);
+    eqs(metricBar.unit, "M", "CsSheetSetup: a metric bar counts metres");
+    eqs(CsSheetSetup.barFor(50).unit, "FT",
+        "CsSheetSetup: and an imperial one counts feet");
+    near(metricBar.perBlockFeet, metricBar.perBlock / 0.3048, 0.0001,
+        "CsSheetSetup: with its geometry still in feet -- the drawing " +
+            "is measured in feet whatever the sheet is captioned in");
 
     // -- the scale bar ---------------------------------------------
     var counted = [];
@@ -23666,7 +23758,8 @@ eqs(CsSymbolStore.PREFIX, "SYM_", "the symbol block prefix");
             counted.push(CsSheetSetup.SCALES[i] + ": " + bar.perBlock +
                 " ft steps");
         }
-        if (bar.totalFeet !== bar.perBlock * bar.blocks) {
+        if (Math.abs(bar.totalFeet - bar.perBlockFeet * bar.blocks) >
+                0.0001) {
             counted.push(CsSheetSetup.SCALES[i] + ": total disagrees");
         }
         // The bar must never claim more than three inches of paper.
@@ -23807,25 +23900,37 @@ eqs(CsSymbolStore.PREFIX, "SYM_", "the symbol block prefix");
     // presentation of it, and laying one out moves the elevation and
     // draws a border round everything.
     var sheetPath = CsSheetSetup.sheetPathFor("/caves/Truitt Cave",
-        "Truitt Cave");
-    eqs(sheetPath, "/caves/Truitt Cave/sheets/Truitt Cave Sheet.dxf",
-        "CsSheetSetup: the sheet is a separate file under the cave");
+        "Truitt Cave", CsSheetSetup.PLAN_SHEET);
+    eqs(sheetPath, "/caves/Truitt Cave/sheets/Truitt Cave Plan Sheet.dxf",
+        "CsSheetSetup: the plan sheet is a separate file under the cave");
+    // ONE SHEET PER FILE: two sheets in one drawing is one enormous
+    // page as far as a plotter is concerned.
+    eqs(CsSheetSetup.sheetPathFor("/caves/Truitt Cave", "Truitt Cave",
+        CsSheetSetup.ELEVATION_SHEET),
+        "/caves/Truitt Cave/sheets/Truitt Cave Profile Sheet.dxf",
+        "CsSheetSetup: and the profile sheet is a file of its own");
+    ok(CsSheetSetup.sheetPathFor("/c", "X", CsSheetSetup.PLAN_SHEET) !==
+        CsSheetSetup.sheetPathFor("/c", "X",
+            CsSheetSetup.ELEVATION_SHEET),
+        "CsSheetSetup: the two never land in the same file");
     ok(sheetPath.indexOf("/" + CsSheetSetup.SHEETS_FOLDER + "/") > 0,
         "CsSheetSetup: in its own subfolder -- a second .dxf beside the " +
             "drawing is a second candidate for which file IS this cave");
-    eqs(CsSheetSetup.sheetPathFor("/caves/Truitt Cave/", "Truitt Cave"),
-        sheetPath,
+    eqs(CsSheetSetup.sheetPathFor("/caves/Truitt Cave/", "Truitt Cave",
+        CsSheetSetup.PLAN_SHEET), sheetPath,
         "CsSheetSetup: a trailing slash on the folder changes nothing");
     // CsPackage.safeName drops the slash rather than replacing it, so
     // the name comes back "BatCave" -- what matters is that no separator
     // survives into a path this builds.
-    ok(CsSheetSetup.sheetPathFor("/caves/x", "Bat/Cave")
-        .split("/").length ===
-        CsSheetSetup.sheetPathFor("/caves/x", "BatCave").split("/").length,
+    ok(CsSheetSetup.sheetPathFor("/caves/x", "Bat/Cave",
+        CsSheetSetup.PLAN_SHEET).split("/").length ===
+        CsSheetSetup.sheetPathFor("/caves/x", "BatCave",
+            CsSheetSetup.PLAN_SHEET).split("/").length,
         "CsSheetSetup: a cave name with a slash cannot climb out of the " +
             "sheets folder (" +
             CsSheetSetup.sheetPathFor("/caves/x", "Bat/Cave") + ")");
-    ok(CsSheetSetup.sheetPathFor("/caves/x", "").indexOf("Cave Sheet") > 0,
+    ok(CsSheetSetup.sheetPathFor("/caves/x", "",
+        CsSheetSetup.PLAN_SHEET).indexOf("Cave Plan Sheet") > 0,
         "CsSheetSetup: a nameless cave still gets a file name");
 
     // A SHEET REBUILDS ITSELF: pressing Build Sheet while looking at
@@ -23835,9 +23940,15 @@ eqs(CsSymbolStore.PREFIX, "SYM_", "the symbol block prefix");
         "/caves/Truitt Cave/Truitt Cave.dxf",
         "CsSheetSetup: a sheet knows the drawing it was built from");
     eqs(CsSheetSetup.recordPathFor(
-        CsSheetSetup.sheetPathFor("/caves/Deep Hole", "Deep Hole")),
+        CsSheetSetup.sheetPathFor("/caves/Deep Hole", "Deep Hole",
+            CsSheetSetup.PLAN_SHEET)),
         "/caves/Deep Hole/Deep Hole.dxf",
         "CsSheetSetup: which is the inverse of where sheets are written");
+    eqs(CsSheetSetup.recordPathFor(
+        CsSheetSetup.sheetPathFor("/caves/Deep Hole", "Deep Hole",
+            CsSheetSetup.ELEVATION_SHEET)),
+        "/caves/Deep Hole/Deep Hole.dxf",
+        "CsSheetSetup: from either sheet");
     eqs(CsSheetSetup.recordPathFor("/caves/Truitt Cave/Truitt Cave.dxf"),
         "",
         "CsSheetSetup: a drawing that is not a sheet has no record " +
@@ -23850,18 +23961,21 @@ eqs(CsSymbolStore.PREFIX, "SYM_", "the symbol block prefix");
     // sheet rather than a scale step nobody asked for.
     var planSheet = CsSheetSetup.borderBox(caveBox, archD, 50, false, 4.0);
     var elevSheet = CsSheetSetup.elevationSheetBox(planSheet, 50);
-    ok(elevSheet.minX > planSheet.maxX,
-        "CsSheetSetup: the elevation sheet is clear of the plan's");
-    near(elevSheet.minX - planSheet.maxX,
+    ok(elevSheet.maxY < planSheet.minY,
+        "CsSheetSetup: the elevation page is stacked BELOW the plan's " +
+            "in the preview -- a dock is tall and narrow, and two " +
+            "landscape pages side by side in it are two postage stamps");
+    near(planSheet.minY - elevSheet.maxY,
         CsSheetSetup.SHEET_GUTTER * 50, 0.0001,
         "CsSheetSetup: by a gutter measured in inches of paper, so it " +
             "is the same gap at every scale");
+    near(elevSheet.minX, planSheet.minX, 0.0001,
+        "CsSheetSetup: with their left edges lined up");
     near(elevSheet.width, planSheet.width, 0.0001,
         "CsSheetSetup: the same paper");
     near(elevSheet.height, planSheet.height, 0.0001,
         "CsSheetSetup: in the same orientation");
-    near(elevSheet.minY, planSheet.minY, 0.0001,
-        "CsSheetSetup: with their feet lined up");
+
     ok(CsSheetSetup.PLAN_SHEET !== CsSheetSetup.ELEVATION_SHEET,
         "CsSheetSetup: the two sheets are told apart by kind, because " +
             "they do not carry the same furniture");
@@ -24279,7 +24393,8 @@ eqs(CsSymbolStore.PREFIX, "SYM_", "the symbol block prefix");
     // The folder name is the one CsSheetSetup writes into -- the two
     // cannot be allowed to disagree about where a sheet lives.
     ok(CsSheetFile.pathIsSheet(
-        CsSheetSetup.sheetPathFor("/caves/x", "X")),
+        CsSheetSetup.sheetPathFor("/caves/x", "X",
+            CsSheetSetup.PLAN_SHEET)),
         "CsSheetFile: the path Sheet Setup writes to is recognised as " +
             "a sheet by the guard that reads it");
 

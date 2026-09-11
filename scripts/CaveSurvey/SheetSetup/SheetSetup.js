@@ -392,15 +392,34 @@ SheetSetup.buildDock = function(appWin) {
             w.sheetCombo.currentIndex = s;
         }
     }
+    w.scaleCombo = new QComboBox();
+    for (var c = 0; c < CsSheetSetup.SCALE_ROWS.length; c++) {
+        // The ROW's own label: an imperial scale says "1" = 50 ft" and
+        // a metric one says "1:500", because that is how each is said.
+        w.scaleCombo.addItem(CsSheetSetup.SCALE_ROWS[c].label);
+    }
+
+    // ONE ROW, SPLIT DOWN THE MIDDLE (Nathan, 2026-09-10). A docked
+    // panel's scarce dimension is height -- the preview underneath is
+    // the thing worth giving it to -- and two fields that each need a
+    // label and a combo do not need two rows to say so.
+    //
+    // The two combo columns take equal stretch and the label columns
+    // take none, so the split lands in the middle whatever the dock is
+    // widened to.
     form.addWidget(new QLabel(qsTr("Paper:")), 0, 0);
     form.addWidget(w.sheetCombo, 0, 1);
-
-    w.scaleCombo = new QComboBox();
-    for (var c = 0; c < CsSheetSetup.SCALES.length; c++) {
-        w.scaleCombo.addItem("1\" = " + CsSheetSetup.SCALES[c] + " ft");
+    form.addWidget(new QLabel(qsTr("Scale:")), 0, 2);
+    form.addWidget(w.scaleCombo, 0, 3);
+    try {
+        form.setColumnStretch(0, 0);
+        form.setColumnStretch(1, 1);
+        form.setColumnStretch(2, 0);
+        form.setColumnStretch(3, 1);
+    } catch (eStretch) {
+        // a bridge without the setter gets whatever the grid gives,
+        // which is still one row
     }
-    form.addWidget(new QLabel(qsTr("Plot scale:")), 1, 0);
-    form.addWidget(w.scaleCombo, 1, 1);
     layout.addLayout(form, 0);
 
     w.fitLabel = new QLabel("");
@@ -536,8 +555,19 @@ SheetSetup.repaint = function() {
         elevation: w.cbElevation.checked === true,
         bands: w.state.bands
     });
+    // Painted at the size the label ACTUALLY has, not a fixed 150: the
+    // fields were squeezed onto one row to free vertical space, and the
+    // point of freeing it is for the picture to use it. Clamped at both
+    // ends so a very short dock still gets something legible and a very
+    // tall one does not paint a mural.
+    var previewH = 150;
+    try {
+        previewH = Math.max(120, Math.min(520, w.preview.height - 4));
+    } catch (eH) {
+        previewH = 150;
+    }
     var pixmap = SheetSetup.paintPreview(preview,
-        Math.max(200, w.preview.width - 8), 150);
+        Math.max(200, w.preview.width - 8), previewH);
     if (pixmap !== null) {
         w.preview.pixmap = pixmap;
     }
@@ -644,52 +674,72 @@ SheetSetup.intoCopy = function(recordPath, opts) {
             recordPath + " lives in, so there is nowhere to put the " +
             "sheet.";
     }
-    var target = CsSheetSetup.sheetPathFor(folder, caveName);
     try {
         (new QDir("/")).mkpath(folder + "/" +
             CsSheetSetup.SHEETS_FOLDER);
     } catch (eDir) {
     }
 
-    var di = new RDocumentInterface(
-        new RDocument(new RMemoryStorage(), createSpatialIndex()));
+    // ONE FILE PER SHEET. A plan file and, when asked for, a profile
+    // file -- never one drawing holding both, which is one enormous
+    // page as far as a plotter is concerned. See
+    // CsSheetSetup.sheetPathFor.
+    var kinds = [CsSheetSetup.PLAN_SHEET];
+    if (opts.elevation === true) {
+        kinds.push(CsSheetSetup.ELEVATION_SHEET);
+    }
+
+    var written = [];
     var said = "";
-    try {
-        if (di.importFile(recordPath, "", false) !==
-                RDocumentInterface.IoErrorNoError) {
-            return "Sheet Setup: could not read " + recordPath + ".";
-        }
-        said = SheetSetup.draw(di.getDocument(), di, opts);
-        if (!di.exportFile(target, CsSanitize.dxfFilter())) {
-            return "Sheet Setup: could not write " + target + ".";
-        }
-    } catch (e) {
-        return "Sheet Setup: building the sheet failed (" + e + ").";
-    } finally {
+    for (var k = 0; k < kinds.length; k++) {
+        var target = CsSheetSetup.sheetPathFor(folder, caveName, kinds[k]);
+        var di = new RDocumentInterface(
+            new RDocument(new RMemoryStorage(), createSpatialIndex()));
         try {
-            if (typeof destr === "function") {
-                destr(di);
+            if (di.importFile(recordPath, "", false) !==
+                    RDocumentInterface.IoErrorNoError) {
+                return "Sheet Setup: could not read " + recordPath + ".";
             }
-        } catch (eDestroy) {
+            var one = {};
+            for (var key in opts) {
+                if (opts.hasOwnProperty(key)) {
+                    one[key] = opts[key];
+                }
+            }
+            one.kind = kinds[k];
+            said = SheetSetup.draw(di.getDocument(), di, one);
+            if (!di.exportFile(target, CsSanitize.dxfFilter())) {
+                return "Sheet Setup: could not write " + target + ".";
+            }
+            written.push(target);
+        } catch (e) {
+            return "Sheet Setup: building the sheet failed (" + e + ").";
+        } finally {
+            try {
+                if (typeof destr === "function") {
+                    destr(di);
+                }
+            } catch (eDestroy) {
+            }
         }
     }
 
-    try {
-        // Opened for the caver, because a sheet they cannot see is a
-        // sheet they will assume did not happen.
-        //
-        // openFiles(), the global QCAD itself opens drawings with --
-        // NOT mainWindow.openFile(), which does not exist in this
-        // build (probed live, 2026-09-10: every plausible spelling on
-        // the main window came back undefined). Cave Shelf opens a cave
-        // the same way.
-        openFiles([target], false);
-    } catch (eOpen) {
-        return said + " Written to " + target + " -- open it from " +
-            "there; your own drawing was not touched.";
+    var names = [];
+    for (var n = 0; n < written.length; n++) {
+        names.push(CsShelf.basename(written[n]));
     }
-    return said + " Written to " + target + " -- your own drawing was " +
-        "not touched.";
+    var tail = " Written to " + CsSheetSetup.SHEETS_FOLDER + "/: " +
+        names.join(" and ") + " -- your own drawing was not touched.";
+    try {
+        // The PLAN sheet is the one opened: it is the map, and a caver
+        // who wanted the profile can open it from the same folder.
+        // openFiles(), the global QCAD opens drawings with -- see the
+        // note where this used mainWindow.openFile and could not.
+        openFiles([written[0]], false);
+    } catch (eOpen) {
+        return said + tail;
+    }
+    return said + tail;
 };
 
 /**
@@ -701,6 +751,11 @@ SheetSetup.intoCopy = function(recordPath, opts) {
  * Answers the sentence the caver is told.
  */
 SheetSetup.draw = function(doc, di, opts) {
+    // WHICH SHEET THIS FILE IS. Each is its own drawing holding one
+    // sheet -- see CsSheetSetup.sheetPathFor on why -- so the plan file
+    // has no elevation in it at all and the profile file has no plan.
+    var kind = isNull(opts.kind) ? CsSheetSetup.PLAN_SHEET : opts.kind;
+    var elevationSheet = (kind === CsSheetSetup.ELEVATION_SHEET);
     var caveBox = opts.caveBox;
     var sheet = opts.sheet;
     var scale = opts.scale;
@@ -776,6 +831,23 @@ SheetSetup.draw = function(doc, di, opts) {
 
     var drew = [];
 
+    // EACH FILE KEEPS ONE VIEW. The copy came from the record, which
+    // holds both: a plan sheet that quietly carried the elevation off
+    // the paper would plot it, and a profile sheet carrying the plan
+    // would be a plan sheet with a border in the wrong place.
+    var wrongFrame = elevationSheet ? "plan" : "profile";
+
+    // A PROFILE SHEET IS LAID OUT AROUND THE ELEVATION, measured
+    // BEFORE the plan is taken out -- the border goes round what this
+    // sheet actually shows, and on this sheet that is the bands.
+    if (elevationSheet) {
+        var elevBox = SheetSetup.frameBox(doc, "profile");
+        if (elevBox !== null) {
+            caveBox = elevBox;
+        }
+    }
+    var dropped = SheetSetup.eraseFrame(doc, di, wrongFrame);
+
     // THE SKETCH SCANS GO, ALWAYS. Not a checkbox: a scanned field
     // book page is a tracing reference, and everything worth keeping
     // off it has already been traced. See SheetSetup.eraseScans.
@@ -834,13 +906,25 @@ SheetSetup.draw = function(doc, di, opts) {
             }
             y -= unit(lines[n].inches * CsSheetSetup.LINE_SPACING);
         }
+        // WHICH VIEW THIS SHEET IS, said on the sheet. A reader
+        // holding the profile sheet on its own has to know, and the
+        // plan sheet says it too rather than leaving "the one without
+        // the words on it" as the way to tell them apart.
+        text(leftX, y, CsSheetSetup.TEXT.heading,
+            elevationSheet ? "EXTENDED ELEVATION" : "PLAN",
+            CsLayers.TITLE_BLOCK);
         drew.push("a title block");
     }
 
     if (wants.bar === true) {
         var bar = CsSheetSetup.barFor(scale);
         var barX = box.minX + box.width * 0.45;
-        var blockW = unit(CsSheetSetup.BAR.length) / bar.blocks;
+        // The bar's LENGTH comes from its own feet, not from three
+        // inches of paper: a metric bar is a round number of METRES,
+        // which is very nearly three inches and not exactly. One block
+        // spans perBlockFeet of cave, and perFoot turns that into
+        // drawing units.
+        var blockW = bar.perBlockFeet * perFoot;
         var barH = unit(CsSheetSetup.BAR.height);
         for (var b = 0; b <= bar.blocks; b++) {
             var x = barX + blockW * b;
@@ -858,11 +942,16 @@ SheetSetup.draw = function(doc, di, opts) {
             CsLayers.SCALE_BAR);
         text(barX + blockW * bar.blocks + unit(0.1),
             footY - unit(CsSheetSetup.BAR.tick * 2),
-            CsSheetSetup.TEXT.small, "FT", CsLayers.SCALE_BAR);
-        drew.push("a scale bar in " + bar.perBlock + " ft steps");
+            CsSheetSetup.TEXT.small, bar.unit, CsLayers.SCALE_BAR);
+        drew.push("a scale bar in " + bar.perBlock + " " +
+            bar.unit.toLowerCase() + " steps");
     }
 
-    if (wants.north === true) {
+    // NO NORTH ARROW ON A PROFILE SHEET. An elevation has no north --
+    // the layer registry says so in its own way by refusing
+    // NORTH-ARROW a per-view twin -- and an arrow here would answer a
+    // question the drawing cannot be asked.
+    if (wants.north === true && !elevationSheet) {
         var nx = box.maxX - box.margin;
         var ny = footY;
         var nh = unit(1.4);
@@ -891,111 +980,60 @@ SheetSetup.draw = function(doc, di, opts) {
         drew.push("a north arrow");
     }
 
-    // ---- sheet two: the extended elevation ---------------------------
-    //
-    // ITS OWN SHEET, at the SAME scale. A map carrying two scales is a
-    // lie, and a cave whose plan fits the paper at 1" = 40 rarely has
-    // room left for eight elevation bands beside it. See
-    // CsSheetSetup.elevationSheetBox for why the alternatives were
-    // rejected.
-    var elevation = null;
-    if (opts.elevation !== true) {
-        // UNTICKED MEANS GONE, not merely unplaced. The copy came from
-        // the record, so the elevation is IN it -- sitting a thousand
-        // feet below the plan, outside the border, on a sheet whose
-        // whole promise is that it is what gets plotted. A sheet that
-        // quietly carries a view nobody asked for is a sheet that plots
-        // one.
-        erased = SheetSetup.eraseElevation(doc, di);
-        if (erased > 0) {
-            drew.push("no elevation (" + erased + " removed)");
-        }
-    }
-    if (opts.elevation === true) {
-        elevation = CsSheetSetup.elevationSheetBox(box, scale);
-
-        line(elevation.minX, elevation.minY, elevation.maxX, elevation.minY,
-            CsLayers.BORDER, CsSheetSetup.ELEVATION_SHEET);
-        line(elevation.maxX, elevation.minY, elevation.maxX, elevation.maxY,
-            CsLayers.BORDER, CsSheetSetup.ELEVATION_SHEET);
-        line(elevation.maxX, elevation.maxY, elevation.minX, elevation.maxY,
-            CsLayers.BORDER, CsSheetSetup.ELEVATION_SHEET);
-        line(elevation.minX, elevation.maxY, elevation.minX, elevation.minY,
-            CsLayers.BORDER, CsSheetSetup.ELEVATION_SHEET);
-
-        var eLeft = elevation.minX + elevation.margin;
-        var eFoot = elevation.minY + elevation.margin * 0.55;
-
-        // The name, and what this sheet IS. A reader who picks up the
-        // second sheet on its own has to know which cave and which view
-        // without the first one in front of them.
-        var eName = isNull(values) || isNull(values.caveName) ? "" :
-            String(values.caveName);
-        text(eLeft, elevation.minY + elevation.margin * 0.95,
-            CsSheetSetup.TEXT.caveName,
-            eName === "" ? "CAVE NAME" : eName, CsLayers.TITLE_BLOCK,
-            CsSheetSetup.ELEVATION_SHEET);
-        text(eLeft, elevation.minY + elevation.margin * 0.95 -
-                unit(CsSheetSetup.TEXT.caveName *
-                    CsSheetSetup.LINE_SPACING),
-            CsSheetSetup.TEXT.heading, "EXTENDED ELEVATION",
-            CsLayers.TITLE_BLOCK, CsSheetSetup.ELEVATION_SHEET);
-
-        // The same bar as the plan's, because it is the same scale --
-        // and a sheet whose scale a reader has to go and look up on
-        // another sheet is a sheet that will be read wrong.
-        var eBar = CsSheetSetup.barFor(scale);
-        var eBarX = elevation.minX + elevation.width * 0.45;
-        var eBlockW = unit(CsSheetSetup.BAR.length) / eBar.blocks;
-        var eBarH = unit(CsSheetSetup.BAR.height);
-        for (var eb = 0; eb <= eBar.blocks; eb++) {
-            var ex = eBarX + eBlockW * eb;
-            line(ex, eFoot, ex, eFoot + eBarH, CsLayers.SCALE_BAR,
-                CsSheetSetup.ELEVATION_SHEET);
-            text(ex, eFoot - unit(CsSheetSetup.BAR.tick * 2),
-                CsSheetSetup.TEXT.small, String(eBar.perBlock * eb),
-                CsLayers.SCALE_BAR, CsSheetSetup.ELEVATION_SHEET);
-        }
-        line(eBarX, eFoot, eBarX + eBlockW * eBar.blocks, eFoot,
-            CsLayers.SCALE_BAR, CsSheetSetup.ELEVATION_SHEET);
-        line(eBarX, eFoot + eBarH, eBarX + eBlockW * eBar.blocks,
-            eFoot + eBarH, CsLayers.SCALE_BAR,
-            CsSheetSetup.ELEVATION_SHEET);
-        text(eBarX, eFoot + eBarH + unit(CsSheetSetup.TEXT.body),
-            CsSheetSetup.TEXT.body, CsSheetSetup.scaleText(scale),
-            CsLayers.SCALE_BAR, CsSheetSetup.ELEVATION_SHEET);
-
-        // NO NORTH ARROW. An elevation has no north -- the registry
-        // says so in its own way by refusing NORTH-ARROW a per-view
-        // twin -- and an arrow on this sheet would be answering a
-        // question the drawing cannot be asked.
-        drew.push("an elevation sheet");
-    }
-
     di.applyOperation(op);
-
-    // AND MOVE THE ELEVATION ONTO IT, now, rather than leaving a caver
-    // with an empty sheet and a note about regenerating. The region is
-    // translated as a unit -- CsProfileDraw.translateRegion takes the
-    // caver's own tracing with it -- and the next regenerate lands in
-    // the same place, because computeOrigin reads the border this run
-    // just drew.
-    var moved = 0;
-    if (elevation !== null) {
-        moved = SheetSetup.moveElevation(doc, di, elevation);
-    }
 
     return "Sheet Setup: " + drew.join(", ") +
         " at 1\" = " + scale + " ft on " + sheet.name +
         (fit.turned ? " (turned)" : "") +
         (cleared > 0 ? " -- the previous sheet was replaced" : "") +
-        (moved > 0 ? (" The elevation moved onto its own sheet (" +
-            moved + " bands).") : "") +
+        (dropped > 0 ? (" " + dropped + " " + wrongFrame +
+            "-frame entities left out.") : "") +
         (scansGone > 0 ? (" " + scansGone + " image" +
             (scansGone === 1 ? "" : "s") + " left out -- a sheet is " +
             "plotted, and a scan is something you trace from.") : "") +
         " Nothing was written into the location line; type that one " +
         "yourself.";
+};
+
+/** The extents of one frame's own content, or null. */
+SheetSetup.frameBox = function(doc, frame) {
+    var box = null;
+    var ids = doc.queryAllEntities(false, false);
+    for (var i = 0; i < ids.length; i++) {
+        var e = doc.queryEntity(ids[i]);
+        if (isNull(e) || CsTags.get(e, SS_TAG) !== "") {
+            continue;
+        }
+        var layer = CsBind.layerNameOf(doc, e);
+        if (CsLayers.frameOf(layer) !== frame) {
+            continue;
+        }
+        // The band BOXES describe the region rather than being drawn
+        // in it, and they are exactly the outline a border should sit
+        // outside of -- so they count.
+        var b = null;
+        try {
+            b = e.getBoundingBox();
+        } catch (eBox) {
+            b = null;
+        }
+        if (isNull(b)) {
+            continue;
+        }
+        var mn = b.getMinimum(), mx = b.getMaximum();
+        if (!isFinite(mn.x) || !isFinite(mx.x)) {
+            continue;
+        }
+        if (box === null) {
+            box = { minX: mn.x, minY: mn.y, maxX: mx.x, maxY: mx.y };
+        } else {
+            box.minX = Math.min(box.minX, mn.x);
+            box.minY = Math.min(box.minY, mn.y);
+            box.maxX = Math.max(box.maxX, mx.x);
+            box.maxY = Math.max(box.maxY, mx.y);
+        }
+    }
+    return box;
 };
 
 /**
@@ -1094,7 +1132,7 @@ SheetSetup.eraseScans = function(doc, di) {
  *
  * \return how many entities went.
  */
-SheetSetup.eraseElevation = function(doc, di) {
+SheetSetup.eraseFrame = function(doc, di, frame) {
     var op = new RDeleteObjectsOperation();
     var gone = 0;
     var locked = [];
@@ -1125,7 +1163,7 @@ SheetSetup.eraseElevation = function(doc, di) {
                     continue;
                 }
                 var layer = CsBind.layerNameOf(doc, e);
-                if (CsLayers.frameOf(layer) !== "profile") {
+                if (CsLayers.frameOf(layer) !== frame) {
                     continue;
                 }
                 op.deleteObject(e);

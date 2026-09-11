@@ -297,65 +297,29 @@ eqs(creditLines, 1,
     "and the last surveyor is still printed on the sheet");
 
 // ---------------------------------------------------------------------
-// THE SECOND SHEET.
+// THE SECOND SHEET IS A SECOND FILE.
 //
 // The elevation is drawn at the PLAN's scale -- a map carrying two
 // scales is a lie -- and a cave whose plan fills the paper has no room
-// left beside it, so the elevation gets its own sheet rather than a
-// scale step nobody asked for.
+// left beside it. But two sheets in ONE drawing is one enormous page as
+// far as a plotter is concerned, so each sheet is its own file
+// (Nathan, 2026-09-10: "it's not easy to print if they're combined").
+//
+// Here the PAGES are checked: the preview stacks them, and the layout
+// arithmetic has to keep them apart and the same size. The FILES are
+// checked further down, where there is a record on disk to build from.
 // ---------------------------------------------------------------------
 
 var planBox = CsSheetSetup.borderBox(caveBox, sheet, scale, false, 4.0);
 var elevBox = CsSheetSetup.elevationSheetBox(planBox, scale);
-ok(elevBox.minX > planBox.maxX,
-    "the elevation sheet sits clear to the right of the plan's");
+ok(elevBox.maxY < planBox.minY,
+    "the elevation page is stacked BELOW the plan's -- a dock is tall " +
+        "and narrow, and two landscape pages side by side in it are " +
+        "two postage stamps");
 near(elevBox.maxX - elevBox.minX, planBox.width, 0.0001,
     "on the same paper");
-near(elevBox.minY, planBox.minY, 0.0001,
-    "with their feet lined up, the way two sheets on a table are");
-
-var withElevation = SheetSetup.draw(doc, di, {
-    caveBox: caveBox, sheet: sheet, scale: scale, turned: false,
-    wants: { border: true, bar: true, north: true, title: true },
-    filled: { caveName: "Test Cave" }, survey: null, elevation: true
-});
-ok(String(withElevation).indexOf("elevation sheet") > 0,
-    "it reports drawing one (" + withElevation + ")");
-
-var elevPieces = 0, northOnElevation = 0, elevBorder = null;
-var after2 = pieces();
-for (i = 0; i < after2.length; i++) {
-    if (CsTags.get(after2[i], "SheetPiece") !==
-            CsSheetSetup.ELEVATION_SHEET) {
-        continue;
-    }
-    elevPieces += 1;
-    if (CsBind.layerNameOf(doc, after2[i]) === CsLayers.NORTH_ARROW) {
-        northOnElevation += 1;
-    }
-    var eb = after2[i].getBoundingBox();
-    var emn = eb.getMinimum(), emx = eb.getMaximum();
-    if (elevBorder === null) {
-        elevBorder = { minX: emn.x, maxX: emx.x };
-    } else {
-        elevBorder.minX = Math.min(elevBorder.minX, emn.x);
-        elevBorder.maxX = Math.max(elevBorder.maxX, emx.x);
-    }
-}
-ok(elevPieces > 0, "the elevation sheet has pieces on it");
-eqs(northOnElevation, 0,
-    "and NO north arrow -- an elevation has no north, and an arrow " +
-        "there would be answering a question the drawing cannot be asked");
-ok(elevBorder !== null && elevBorder.minX > planBox.maxX,
-    "everything on it is clear of the plan sheet");
-
-// THE SHEET IS FOUND BY ITS BORDER, which is how CsProfileDraw learns
-// where to put the elevation region on the next regenerate. A stored
-// coordinate would go stale the first time the cave grew.
-var read = CsSheetSetup.sheetBoxOn(doc, CsSheetSetup.ELEVATION_SHEET);
-ok(read !== null, "the elevation sheet can be found again by its tag");
-ok(read.minX > planBox.maxX,
-    "and it is the one to the right, not the plan's");
+near(elevBox.minX, planBox.minX, 0.0001,
+    "with their left edges lined up");
 
 // ---------------------------------------------------------------------
 // THE RECORD IS NEVER WRITTEN TO.
@@ -402,6 +366,16 @@ wall.setLayerId(recordDoc.getLayerId(CsLayers.WALLS_SURVEYED));
 var recOp = new RAddObjectsOperation();
 recOp.addObject(wall, false);
 recordDi.applyOperation(recOp);
+// An elevation in the record, so there is something for a profile
+// sheet to be about.
+CsLayers.ensure(recordDoc, recordDi, CsLayers.PROFILE_WALLS_SURVEYED);
+var band = new RLineEntity(recordDoc,
+    new RLineData(new RVector(0, -900), new RVector(700, -900)));
+band.setLayerId(recordDoc.getLayerId(CsLayers.PROFILE_WALLS_SURVEYED));
+var bandOp = new RAddObjectsOperation();
+bandOp.addObject(band, false);
+recordDi.applyOperation(bandOp);
+
 addScan(CsLayers.CTRL_SCAN, 10, 10);
 addScan(CsLayers.CTRL_PROFILE_SCAN, 10, -900);
 addScan(CsLayers.CTRL_SECTION_SCAN, 900, 10);
@@ -420,14 +394,21 @@ var reported = SheetSetup.intoCopy(recordPath, {
     caveBox: { minX: 0, minY: 0, maxX: 600, maxY: 300 },
     sheet: sheet, scale: 50, turned: false,
     wants: { border: true, bar: true, north: true, title: true },
-    filled: { caveName: "Truitt Cave" }, survey: null, elevation: false
+    filled: { caveName: "Truitt Cave" }, survey: null, elevation: true
 });
 ok(String(reported).indexOf("Sheet Setup:") === 0,
     "the copy path reports what it did (" + reported + ")");
 
-var sheetPath = CsSheetSetup.sheetPathFor(caveFolder, "Truitt Cave");
+var sheetPath = CsSheetSetup.sheetPathFor(caveFolder, "Truitt Cave",
+    CsSheetSetup.PLAN_SHEET);
+var profilePath = CsSheetSetup.sheetPathFor(caveFolder, "Truitt Cave",
+    CsSheetSetup.ELEVATION_SHEET);
 ok((new QFileInfo(sheetPath)).exists(),
-    "the sheet was written to its own file at " + sheetPath);
+    "the plan sheet was written to its own file at " + sheetPath);
+ok((new QFileInfo(profilePath)).exists(),
+    "and the profile sheet to a SECOND file -- two sheets in one " +
+        "drawing is one enormous page as far as a plotter is concerned");
+ok(sheetPath !== profilePath, "which are not the same file");
 
 eqs((new QFileInfo(recordPath)).size(), beforeSize,
     "and the cave's own record is exactly the size it was");
@@ -467,6 +448,58 @@ for (i = 0; i < copyIds.length; i++) {
 ok(inCopy > 0, "the copy carries the sheet");
 ok(wallsInCopy > 0,
     "and the cave itself -- a sheet with no map on it is a border");
+
+// EACH FILE KEEPS ONE VIEW. A plan sheet quietly carrying the elevation
+// off the paper would plot it; a profile sheet carrying the plan would
+// be a plan sheet with its border in the wrong place.
+function frameCounts(path) {
+    var fdi = new RDocumentInterface(
+        new RDocument(new RMemoryStorage(), createSpatialIndex()));
+    fdi.importFile(path, "", false);
+    var fdoc = fdi.getDocument();
+    var out = { plan: 0, profile: 0, north: 0, marked:
+        CsSheetFile.isSheet(fdoc), images: 0 };
+    var fids = fdoc.queryAllEntities(false, true);
+    for (var f = 0; f < fids.length; f++) {
+        var fe = fdoc.queryEntity(fids[f]);
+        if (isNull(fe)) { continue; }
+        if (fe.getType() === RS.EntityImage) { out.images += 1; }
+        // The sheet's own furniture is not the VIEW, and neither is
+        // the mark that says this is a sheet -- which lives on
+        // CTRL-HIDDEN and so counts as plan-frame if you let it.
+        if (CsBind.layerNameOf(fdoc, fe) === CsLayers.NORTH_ARROW) {
+            out.north += 1;
+        }
+        if (CsTags.get(fe, "SheetPiece") !== "" ||
+                CsTags.get(fe, CsSheetFile.TAG) !== "") {
+            continue;
+        }
+        var fl = CsBind.layerNameOf(fdoc, fe);
+
+        var fr = CsLayers.frameOf(fl);
+        if (fr === "plan") { out.plan += 1; }
+        if (fr === "profile") { out.profile += 1; }
+    }
+    return out;
+}
+
+var planFile = frameCounts(sheetPath);
+var profileFile = frameCounts(profilePath);
+
+ok(planFile.plan > 0, "the plan sheet has the plan on it");
+eqs(planFile.profile, 0, "and no elevation at all");
+ok(planFile.north > 0, "with a north arrow");
+
+ok(profileFile.profile > 0, "the profile sheet has the elevation on it");
+eqs(profileFile.plan, 0, "and no plan at all");
+eqs(profileFile.north, 0,
+    "and NO north arrow -- an elevation has no north, and an arrow " +
+        "there would answer a question the drawing cannot be asked");
+
+ok(planFile.marked && profileFile.marked,
+    "both files are marked as sheets");
+eqs(planFile.images + profileFile.images, 0,
+    "and neither carries a raster of any kind");
 
 // ---------------------------------------------------------------------
 // A SHEET IS MARKED, AND AN UNTICKED ELEVATION IS GONE FROM IT.
