@@ -98,9 +98,10 @@ scripts/CaveSurvey/AreaSync/
 scripts/CaveSurvey/Core/
     CsArea.js            NEW — catalog, seeded RNG, fill generation,
                          regeneration. No widgets.
-    CsSymbolStore.js     EXTENDED — already opens the template and
-                         saves/imports blocks; area patterns are AREA_*
-                         blocks with their own marker XDATA
+    CsSymbolStore.js     EXTENDED — already opens the custom library
+                         and saves/imports blocks; area patterns are
+                         AREA_* blocks in that same library, with their
+                         own marker XDATA
 ```
 
 `Core/CsAll.js` **and** the test harness's hand-written Core list both
@@ -246,8 +247,10 @@ nominal size. The panel switches to editor mode with these fields:
 - rotation — random or fixed
 
 **Save Pattern** takes every entity except the crosshair and the
-reference square and writes block `AREA_<slug>` into the template
-through `CsSymbolStore.saveBlock`, with an invisible marker point on
+reference square and writes block `AREA_<slug>` into the caver's own
+symbol library — `CsSymbolStore.customPath()`, i.e.
+`~/Documents/Cave/symbols/CaveCustomSymbols.dxf` — through
+`CsSymbolStore.saveBlock`, with an invisible marker point on
 `CTRL-HIDDEN` carrying, via `CsTags`:
 
     AreaName, AreaLayer, AreaPlacement, AreaDensity,
@@ -260,9 +263,11 @@ pattern works there, not just its shapes.
 **Edit** reopens a custom pattern's block in the editor. **Delete**
 removes it from the template only — never from drawings that used it.
 
-Accepted risk, identical to custom symbols: `publish.sh` copies
-`templates/` on every release, so a release overwrites a customised
-template and custom patterns go with it.
+No upgrade risk, and this is a CORRECTION to an earlier draft of this
+spec: custom symbols stopped living in the template on 2026-09-07
+precisely because a release replaces it. Area patterns join them in the
+library file, which no installer touches and which sits in the Cave
+folder that syncs and gets backed up.
 
 ## Regeneration
 
@@ -297,11 +302,22 @@ show a tile wall.
   neighbour.
 - **A folded section keeps its cell** — a half-width header strip whose
   row-mate stays half-width. A fold never reflows the grid.
-- **Right-click a section header for Move up / Move down**, disabled at
-  the ends. The order persists in `CaveSurvey/DrawOrder` as section
-  titles. A title in the setting that no longer exists is ignored; a
-  section not in the setting appends at the end — so a saved order
-  survives a tool being added or removed.
+- **Right-click a section header for Move Up / Move Down / Reset Order**,
+  the moves disabled at the ends. The order persists in
+  `CaveSurvey/DrawOrder` as section titles. A title in the setting that
+  no longer exists is ignored; a section not in the setting appends
+  after its original predecessor — so a saved order survives a tool
+  being added or removed.
+- **This machinery already exists.** `CsPanel.stack`, `stackAdd`,
+  `moveSection`, `saveOrder`, `orderedTitles` and `applyOrder` are what
+  Feature Trace and the Symbol Palette already use for their inner
+  sections, right-click menu included — the bridge hands script mouse
+  events to four widget classes and a header is none of them, so
+  drag-to-reorder is impossible and the menu is the answer. The only
+  missing piece is GRID relayout: `CsPanel.relayout` calls
+  `insertWidget`, which is a box layout's method. The stack gains an
+  optional column count and a grid relayout that spans a lone last
+  section across both columns.
 
 Reordering re-adds the EXISTING section widgets into the grid at their
 new positions. Section bodies are never rebuilt: each keeps its widgets
