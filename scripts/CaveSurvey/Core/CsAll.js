@@ -149,6 +149,11 @@ include(includeBasePath + "/CsTileArt.js");
 // the memory of which ones are shut. One copy, so a panel feature
 // asked for in one panel is a panel feature both have.
 include(includeBasePath + "/CsPanel.js");
+// The scan preview: an embedded QCAD view over a throwaway document
+// holding one scanned page. GUI context only, like CsPanel above, and
+// shared -- Sketch Scans traces against it and the Survey Notebook
+// types off it.
+include(includeBasePath + "/CsScanView.js");
 include(includeBasePath + "/CsSheet.js");
 include(includeBasePath + "/CsReport.js");
 // After CsLayers, CsSymbols, CsSheet, CsShapeLine, CsStats and

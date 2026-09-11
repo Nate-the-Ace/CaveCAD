@@ -2956,6 +2956,104 @@ SurveyNotebook.lineworkDialog = function(w) {
 // Widget construction
 // ---------------------------------------------------------------------
 
+/**
+ * Lists this cave's scanned pages into the chooser.
+ *
+ * The cave folder comes from the OPEN DRAWING, the same way Sketch
+ * Scans finds it: a notebook page belongs to a cave, and the scans it
+ * is typed off are that cave's. A drawing with no folder -- an unsaved
+ * one, a drawing outside a cave project -- gets an empty chooser and a
+ * line saying why, rather than a list of somebody else's pages.
+ */
+SurveyNotebook.fillScans = function(w) {
+    if (isNull(w) || isNull(w.scanCombo)) {
+        return;
+    }
+    var folder = null;
+    try {
+        folder = CsCave.scansDir(String(
+            EAction.getDocument().getFileName()));
+    } catch (eFolder) {
+        folder = null;
+    }
+    w.scanFiles = [];
+    try {
+        w.scanCombo.clear();
+    } catch (eClear) {
+    }
+    if (isNull(folder) || folder === "") {
+        try {
+            w.scanCombo.addItem("(save this drawing in a cave folder)");
+        } catch (eNone) {
+        }
+        return;
+    }
+    // The scans TREE, not CsCave.imageFiles -- that reads the cave's
+    // images/ folder, which is photographs. Scans live under scans/,
+    // usually one folder per trip, which is why this walks.
+    var filters = ["*.png", "*.jpg", "*.jpeg", "*.tif", "*.tiff",
+        "*.bmp", "*.gif"];
+    try {
+        var formats = QImageReader.supportedImageFormats();
+        if (!isNull(formats) && formats.length > 0) {
+            filters = [];
+            for (var f = 0; f < formats.length; f++) {
+                filters.push("*." + String(formats[f]));
+            }
+        }
+    } catch (eFormats) {
+    }
+    var relative = [];
+    try {
+        relative = CsCave.filesUnder(folder, filters, 4);
+    } catch (eList) {
+        relative = [];
+    }
+    var files = [];
+    for (var r = 0; r < relative.length; r++) {
+        files.push(folder + "/" + relative[r]);
+    }
+    if (files.length === 0) {
+        try {
+            w.scanCombo.addItem("(no scans in " + CsCave.SCANS + ")");
+        } catch (eEmpty) {
+        }
+        return;
+    }
+    for (var i = 0; i < files.length; i++) {
+        w.scanFiles.push(files[i]);
+        try {
+            // The path RELATIVE to scans/, because it names the trip:
+            // "4-6-24 Survey Scans/Team A/page 2.jpg" is the answer to
+            // "which page am I typing off", and the absolute path is
+            // the cave folder repeated thirty times.
+            w.scanCombo.addItem(relative[i]);
+        } catch (eAdd) {
+        }
+    }
+    SurveyNotebook.showScan(w);
+};
+
+/** Puts the chosen page in the pane. */
+SurveyNotebook.showScan = function(w) {
+    if (isNull(w) || w.scanPreview === null || isNull(w.scanFiles)) {
+        return;
+    }
+    var at = 0;
+    try {
+        at = w.scanCombo.currentIndex;
+    } catch (eIdx) {
+        at = 0;
+    }
+    if (at < 0 || at >= w.scanFiles.length) {
+        return;
+    }
+    try {
+        CsScanPreview.show(w.scanPreview, w.scanFiles[at]);
+    } catch (eShow) {
+    }
+};
+
 SurveyNotebook.buildDock = function(appWin) {
     var dock = new QDockWidget("Survey Notebook", appWin);
     dock.objectName = "CaveSurveyNotebookDock";
@@ -3159,7 +3257,94 @@ SurveyNotebook.buildDock = function(appWin) {
         } catch (eSplit) {
             // bridge without sizes()/setSizes(): stretch factors stand
         }
-        layout.addWidget(w.splitter, 1, 0);
+        // ---- the scans, beside the shots -----------------------------
+        //
+        // THE NUMBERS COME OFF THE PAGE (Nathan, 2026-09-11). Typing a
+        // trip into this notebook means reading a scanned field book
+        // -- distance, azimuth, inclination, LRUD, the note in the
+        // margin -- and the scan was in another panel. Every shot was
+        // a look away and a look back, and a wrong row is what that
+        // costs.
+        //
+        // So the page can sit beside the ladder, in the same dock, on a
+        // horizontal splitter: give either side more room by dragging,
+        // and it is remembered. Off by default -- a caver typing from
+        // paper on the desk does not want half their notebook gone --
+        // and toggled by the Scan button in the action row.
+        //
+        // THE SAME VIEWER Sketch Scans uses (Core/CsScanView.js), not a
+        // second one: it is an embedded CAD view with real zoom, pan
+        // and rotate, and every one of those was a trap somebody had
+        // to find once.
+        w.scanPane = new QWidget();
+        var scanLayout = new QVBoxLayout();
+        try {
+            scanLayout.setContentsMargins(0, 0, 0, 0);
+        } catch (eMargins) {
+        }
+        w.scanCombo = new QComboBox();
+        w.scanCombo.toolTip = "Which scanned page you are reading off. " +
+            "The list is this cave's scans folder.";
+        scanLayout.addWidget(w.scanCombo, 0, 0);
+        w.scanPreview = CsScanPreview.build(w.scanPane);
+        if (w.scanPreview !== null) {
+            scanLayout.addWidget(w.scanPreview.view, 1, 0);
+        } else {
+            // No embedded view on this bridge: say so rather than
+            // leaving an empty strip that looks broken.
+            w.scanFallback = new QLabel("This build cannot show a scan " +
+                "here. Use Sketch Scans.");
+            w.scanFallback.wordWrap = true;
+            scanLayout.addWidget(w.scanFallback, 1, 0);
+        }
+        var scanZoom = new QHBoxLayout();
+        w.scanFitButton = SurveyNotebook.smallButton("Fit",
+            "Fit the whole page in the pane.");
+        w.scanInButton = SurveyNotebook.smallButton("+", "Zoom in.");
+        w.scanOutButton = SurveyNotebook.smallButton("\u2212", "Zoom out.");
+        scanZoom.addWidget(w.scanFitButton, 0, 0);
+        scanZoom.addWidget(w.scanOutButton, 0, 0);
+        scanZoom.addWidget(w.scanInButton, 0, 0);
+        scanZoom.addStretch(1);
+        scanLayout.addLayout(scanZoom, 0);
+        w.scanPane.setLayout(scanLayout);
+
+        w.hsplit = new QSplitter(Qt.Horizontal);
+        w.hsplit.addWidget(w.scanPane);
+        w.hsplit.addWidget(w.splitter);
+        try {
+            w.hsplit.setStretchFactor(0, 2);
+            w.hsplit.setStretchFactor(1, 3);
+        } catch (eHsf) {
+        }
+        try {
+            var savedWide = RSettings.getStringValue(
+                "CaveSurvey/NotebookScanSplit", "");
+            if (savedWide.length > 0) {
+                var wideParts = savedWide.split(",");
+                var wideSizes = [];
+                for (var wi = 0; wi < wideParts.length; wi++) {
+                    wideSizes.push(parseInt(wideParts[wi], 10));
+                }
+                if (wideSizes.length === 2 && !isNaN(wideSizes[0]) &&
+                        !isNaN(wideSizes[1])) {
+                    w.hsplit.setSizes(wideSizes);
+                }
+            }
+            w.hsplit.splitterMoved.connect(function() {
+                RSettings.setValue("CaveSurvey/NotebookScanSplit",
+                    w.hsplit.sizes().join(","));
+            });
+        } catch (eWide) {
+        }
+        try {
+            w.scanPane.visible = RSettings.getBoolValue(
+                "CaveSurvey/NotebookScanVisible", false);
+        } catch (eScanVis) {
+            w.scanPane.visible = false;
+        }
+
+        layout.addWidget(w.hsplit, 1, 0);
         layout.addWidget(w.rowButtonBar, 0, 0);
     }
     w.statusLabel.visible =
@@ -3188,6 +3373,15 @@ SurveyNotebook.buildDock = function(appWin) {
         w.statusButton.checked = w.statusLabel.visible;
     } catch (eStatusChk) {
         // not checkable here: the box's own visibility is the state
+    }
+    w.scanButton = SurveyNotebook.smallButton("Scan",
+        "Show/hide the scanned page beside the shots -- the page you " +
+        "are typing off. Drag the bar between them to resize.");
+    try {
+        w.scanButton.checkable = true;
+        w.scanButton.checked = RSettings.getBoolValue(
+            "CaveSurvey/NotebookScanVisible", false);
+    } catch (eScanChk) {
     }
     w.moreButton = new QToolButton();
     w.moreButton.text = "\u22ef";
@@ -3256,6 +3450,7 @@ SurveyNotebook.buildDock = function(appWin) {
     actions.addWidget(w.newTripButton, 0, 0);
     actions.addStretch(1);
     actions.addWidget(w.statusButton, 0, 0);
+    actions.addWidget(w.scanButton, 0, 0);
     actions.addWidget(w.moreButton, 0, 0);
     layout.addLayout(actions, 0);
 
@@ -3360,6 +3555,37 @@ SurveyNotebook.buildDock = function(appWin) {
         } catch (eStatusSync) {
         }
     }, "Status button", w.problems);
+    SurveyNotebook.safeConnect(w.scanButton.clicked, function() {
+        w.scanPane.visible = !w.scanPane.visible;
+        RSettings.setValue("CaveSurvey/NotebookScanVisible",
+            w.scanPane.visible);
+        try {
+            w.scanButton.checked = w.scanPane.visible;
+        } catch (eScanSync) {
+        }
+        // FILLED WHEN IT IS FIRST SHOWN, not at startup: listing a
+        // cave's scans folder is a directory walk, and a caver who
+        // never opens this pane should never pay for it.
+        if (w.scanPane.visible === true) {
+            SurveyNotebook.fillScans(w);
+        }
+    }, "Scan button", w.problems);
+    SurveyNotebook.safeConnect(w.scanCombo.activated, function() {
+        SurveyNotebook.showScan(w);
+    }, "Scan chooser", w.problems);
+    SurveyNotebook.safeConnect(w.scanFitButton.clicked, function() {
+        if (w.scanPreview !== null) { CsScanPreview.fit(w.scanPreview); }
+    }, "Scan fit", w.problems);
+    SurveyNotebook.safeConnect(w.scanInButton.clicked, function() {
+        if (w.scanPreview !== null) {
+            CsScanPreview.zoom(w.scanPreview, 1.4);
+        }
+    }, "Scan zoom in", w.problems);
+    SurveyNotebook.safeConnect(w.scanOutButton.clicked, function() {
+        if (w.scanPreview !== null) {
+            CsScanPreview.zoom(w.scanPreview, 1 / 1.4);
+        }
+    }, "Scan zoom out", w.problems);
     SurveyNotebook.safeConnect(w.newTripButton.clicked, function() {
         SurveyNotebook.newTrip(w);
     }, "New Trip button", w.problems);

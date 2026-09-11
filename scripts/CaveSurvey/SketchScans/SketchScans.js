@@ -54,7 +54,10 @@ include(includeBasePath + "/ScanAlign.js");
 // buttons still call straight into them; only the folder moved.
 include(includeBasePath + "/../CrossSection/SectionBay.js");
 include(includeBasePath + "/../CrossSection/SectionCapture.js");
-include(includeBasePath + "/ScanView.js");
+// The scan viewer lives in Core now (CsScanView.js): the Survey
+// Notebook shows the same scans beside the shots being typed off them,
+// and two copies of an embedded CAD view is two copies of every trap
+// this one cost to find.
 include(includeBasePath + "/ScanTurn.js");
 
 // The panel, built once per session (FeatureTrace's pattern).

@@ -17277,7 +17277,7 @@ if (!IS_NODE) {
         loadRepoScript("scripts/CaveSurvey/Core/CsTrace.js");
         // ScanView.js subclasses RGraphicsViewQt at load time, so it
         // cannot be loaded under node -- but pixelText itself is pure.
-        loadRepoScript("scripts/CaveSurvey/SketchScans/ScanView.js");
+        loadRepoScript("scripts/CaveSurvey/Core/CsScanView.js");
         // ---------------------------------------------------------------------
         // CsScanPreview.pixelText -- a click reported as a pixel on the scan.
         // ---------------------------------------------------------------------
