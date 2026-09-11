@@ -41,6 +41,10 @@ include("scripts/EAction.js");
 includeBasePath = repoRoot + "/scripts/CaveSurvey/AreaFill";
 include(includeBasePath + "/AreaFillRun.js");
 
+// The listener (Task 7). Shares AreaFillRun.layersFor so a stroke and
+// a later regeneration can never disagree about where a fill belongs.
+include(includeBasePath + "/AreaFillListener.js");
+
 var failures = [];
 function ok(condition, what) {
     if (!condition) {
@@ -548,6 +552,532 @@ afBoundaryLayer.setLocked(false);
 var afUnlockBoundaryOp = new RModifyObjectsOperation();
 afUnlockBoundaryOp.addObject(afBoundaryLayer, false);
 di.applyOperation(afUnlockBoundaryOp);
+
+// =======================================================================
+// AreaFillListener -- Task 7. A fill follows its boundary: regenerate,
+// move, delete, and the guards that keep a rebuild from becoming a
+// redraw storm.
+// =======================================================================
+
+// ---------------------------------------------------------------------
+// Fixture: a fresh SAND area, far from every earlier stroke in this
+// file, dedicated to the listener's own tests below.
+// ---------------------------------------------------------------------
+
+var lstCx = afPlanCx + 900, lstCy = afPlanCy;
+var lstMade = AreaFillRun.commit(doc, di, squareStroke(lstCx, lstCy, 5),
+    "SAND", { scale: 1.0, density: 1.0 });
+ok(lstMade.ok === true,
+    "AreaFillListener fixture: the stroke that seeds this section " +
+    "succeeds (" + lstMade.reason + ")");
+var lstBoundary = afBoundaryFor(lstMade.id);
+ok(!isNull(lstBoundary), "AreaFillListener fixture: its boundary exists");
+var lstSeedBefore = CsTags.get(lstBoundary, CsArea.SEED_KEY);
+var lstCountBefore = CsArea.countOwned(doc, lstMade.id);
+ok(lstCountBefore > 0,
+    "AreaFillListener fixture: it drew a real fill to regenerate");
+
+/** Every fill entity's position for one area, as a sorted array of
+ *  {x, y}, rounded to a thousandth of a drawing unit -- the same
+ *  precision CsArea.signature uses, so "the same placements"
+ *  means the same thing on both sides of this file. */
+function fillPositions(areaId) {
+    var ids = CsArea.ownedBy(doc, areaId);
+    var out = [];
+    for (var i = 0; i < ids.length; i++) {
+        var e = doc.queryEntity(ids[i]);
+        if (isNull(e)) { continue; }
+        var pos = (e.getType() === RS.EntityBlockRef) ?
+            e.getPosition() : e.getBoundingBox().getCenter();
+        out.push({ x: Math.round(pos.x * 1000) / 1000,
+            y: Math.round(pos.y * 1000) / 1000 });
+    }
+    out.sort(function(a, b) { return (a.x - b.x) || (a.y - b.y); });
+    return out;
+}
+
+/** The same positions, as one comparable string -- "same placements",
+ *  not merely "same count": a reshuffle with an equal count sorts
+ *  differently and fails this. */
+function fillPosSig(areaId) {
+    var pts = fillPositions(areaId);
+    var parts = [];
+    for (var i = 0; i < pts.length; i++) {
+        parts.push(pts[i].x + "," + pts[i].y);
+    }
+    return parts.join("|");
+}
+
+/** Every fill entity's OWN id for one area, sorted -- proves entities
+ *  were literally untouched (not merely replaced with an equal set),
+ *  the same style of proof tests/callout_sync.js's own no-op-reflow
+ *  freeze test uses (leaderIdSig). */
+function fillIdSig(areaId) {
+    var ids = CsArea.ownedBy(doc, areaId).slice();
+    ids.sort(function(a, b) { return a - b; });
+    return ids.join(",");
+}
+
+/** Moves a boundary entity in drawing space and commits it as its own
+ *  transaction. entity.move(RVector) mutates the shape in place;
+ *  RModifyObjectsOperation is what actually commits that mutation --
+ *  the exact idiom tests/scan_reanchor_run.js uses to shift a station
+ *  and prove a listener follows it (RMoveSelectionOperation does not
+ *  exist in this build, and nothing else in this suite calls one). */
+function movedBoundaryBy(entity, dx, dy) {
+    entity.move(new RVector(dx, dy));
+    var mop = new RModifyObjectsOperation();
+    mop.addObject(entity, false);
+    di.applyOperation(mop);
+}
+
+// ---------------------------------------------------------------------
+// regenerate(): rebuilds from the boundary's own tags, same seed, same
+// placements as the original stroke drew.
+// ---------------------------------------------------------------------
+
+var lstPosBefore = fillPosSig(lstMade.id);
+var lstResult1 = CsArea.regenerate(doc, di, lstBoundary.getId());
+eqs(lstResult1, "regenerated",
+    "CsArea.regenerate: a boundary with no stamped signature " +
+    "yet is rebuilt");
+eqs(CsArea.countOwned(doc, lstMade.id), lstCountBefore,
+    "CsArea.regenerate: the rebuild makes the SAME number of " +
+    "elements the original stroke did");
+eqs(fillPosSig(lstMade.id), lstPosBefore,
+    "CsArea.regenerate: ... at the SAME placements -- same " +
+    "seed, same geometry, same scatter");
+eqs(CsTags.get(lstBoundary, CsArea.SEED_KEY), lstSeedBefore,
+    "CsArea.regenerate: the seed on the boundary was never " +
+    "re-rolled");
+
+// ---------------------------------------------------------------------
+// Regenerating an UNCHANGED area twice does nothing at all -- not
+// merely the same count, but the exact same entities, both times. This
+// is the freeze that keeps a rebuild from becoming a redraw storm: an
+// unconditional clear+rebuild would fire another transaction every
+// time, and the busy flag alone does not catch a signal queued before
+// it was set and delivered after it cleared -- see CalloutWrite's own
+// such regression, described in AreaFillListener.js's header, which is
+// exactly why the REAL guard lives in the signature compare here, not
+// only in busy.
+// ---------------------------------------------------------------------
+
+var lstIdsAfterFirst = fillIdSig(lstMade.id);
+var lstResult2 = CsArea.regenerate(doc, di, lstBoundary.getId());
+eqs(lstResult2, "unchanged",
+    "CsArea.regenerate: an unchanged boundary is recognised " +
+    "as unchanged");
+eqs(fillIdSig(lstMade.id), lstIdsAfterFirst,
+    "CsArea.regenerate: ... and touches NOT ONE entity -- " +
+    "same ids, not just the same count");
+
+var lstResult3 = CsArea.regenerate(doc, di, lstBoundary.getId());
+eqs(lstResult3, "unchanged",
+    "CsArea.regenerate: and a third call is just as inert");
+eqs(fillIdSig(lstMade.id), lstIdsAfterFirst,
+    "CsArea.regenerate: so the cycle cannot run away");
+
+// ---------------------------------------------------------------------
+// Moving a boundary moves its fill with it.
+// ---------------------------------------------------------------------
+
+var lstBeforeMove = fillPositions(lstMade.id);
+movedBoundaryBy(lstBoundary, 37, -19);
+var lstMoveResult = CsArea.regenerate(doc, di,
+    lstBoundary.getId());
+eqs(lstMoveResult, "regenerated",
+    "CsArea.regenerate: a moved boundary is rebuilt, not " +
+    "reported unchanged");
+eqs(CsArea.countOwned(doc, lstMade.id), lstCountBefore,
+    "CsArea.regenerate: the moved fill still has the same " +
+    "element count");
+var lstAfterMove = fillPositions(lstMade.id);
+ok(lstAfterMove.length === lstBeforeMove.length,
+    "fixture: same length to compare pointwise");
+var lstShiftedOk = true;
+for (var lm = 0; lm < lstBeforeMove.length; lm++) {
+    var expectX = Math.round((lstBeforeMove[lm].x + 37) * 1000) / 1000;
+    var expectY = Math.round((lstBeforeMove[lm].y - 19) * 1000) / 1000;
+    if (Math.abs(lstAfterMove[lm].x - expectX) > 0.01 ||
+            Math.abs(lstAfterMove[lm].y - expectY) > 0.01) {
+        lstShiftedOk = false;
+    }
+}
+ok(lstShiftedOk,
+    "CsArea.regenerate: every placement moved by EXACTLY " +
+    "the boundary's own offset (37, -19) -- the fill followed the " +
+    "boundary, not merely stayed the same size");
+
+// ---------------------------------------------------------------------
+// Deleting a boundary deletes its fill.
+// ---------------------------------------------------------------------
+
+var lstDelBefore = CsArea.countOwned(doc, lstMade.id);
+ok(lstDelBefore > 0, "fixture: there is a fill to lose");
+var lstDelOp = new RDeleteObjectsOperation();
+lstDelOp.deleteObject(lstBoundary);
+di.applyOperation(lstDelOp);
+
+ok(isNull(CsArea.boundaryOf(doc, lstMade.id)),
+    "CsArea.boundaryOf: the boundary is really gone -- " +
+    "queryAllEntities(false, true) excludes the undone entity, unlike " +
+    "queryEntity(id) on the same stale id");
+ok(CsArea.countOwned(doc, lstMade.id) > 0,
+    "fixture: the fill itself is still sitting there, orphaned, until " +
+    "something sweeps it");
+
+var lstSwept = CsArea.sweep(doc, di);
+ok(lstSwept > 0, "CsArea.sweep: it swept at least one orphan");
+eqs(CsArea.countOwned(doc, lstMade.id), 0,
+    "CsArea.sweep: deleting a boundary deletes its fill");
+
+eqs(CsArea.regenerate(doc, di, lstBoundary.getId()), "missing",
+    "CsArea.regenerate: called on a now-deleted boundary " +
+    "does nothing and says so");
+
+eqs(CsArea.sweep(doc, di), 0,
+    "CsArea.sweep: with no orphans left, a second sweep is " +
+    "a genuine no-op");
+
+// ---------------------------------------------------------------------
+// The failure-retry invariant: a rebuild that FAILS must not stamp the
+// signature. The freeze test above proves an UNCHANGED area is
+// recognised and left alone; this is its mirror image -- a BROKEN
+// area must never be mistaken for an unchanged one, or the next
+// transaction that so much as looks at it reads "unchanged" and gives
+// up on ever fixing it. Same rigor as the freeze test: a real failure
+// (a missing block, exactly as CsArea.build's own tests use), not a
+// forced return value.
+// ---------------------------------------------------------------------
+
+(function() {
+    // A catalog entry whose block this document genuinely does not
+    // have -- CsArea.entryFor looks entries up by key, so this has to
+    // be a real (if temporary) CATALOG member for AreaFillRun.commit
+    // and CsArea.regenerate to find it the normal way, not a
+    // hand-built object handed straight to CsArea.build the way the
+    // Task 5 "ghost" fixture above does.
+    CsArea.CATALOG.GHOST_AREA = { name: "Ghost Area", engine: "scatter",
+        layer: CsArea.CATALOG.SAND.layer,
+        boundaryLayer: "CTRL-AREA-BOUNDARY", blocks: ["AREA_GHOST_NOPE"],
+        density: 40, scaleMin: 0.8, scaleMax: 1.2, rotate: false };
+
+    var ghostCx = lstCx + 1000, ghostCy = lstCy;
+    var ghostMade = AreaFillRun.commit(doc, di,
+        squareStroke(ghostCx, ghostCy, 5), "GHOST_AREA",
+        { scale: 1.0, density: 1.0 });
+    ok(ghostMade.ok === false,
+        "fixture: the stroke itself reports failure -- the block is " +
+        "really missing, not a fixture bug (" + ghostMade.reason + ")");
+    var ghostBoundaryId = afBoundaryFor(ghostMade.id).getId();
+
+    // A FRESH doc.queryEntity(id) every time a tag is read, never a
+    // long-held handle: this suite has already hit stale-wrapper traps
+    // elsewhere, and a handle fetched once, then read again after a
+    // modify operation has since committed through a DIFFERENT
+    // fetch of the same id, is exactly that shape of trap. Querying
+    // fresh each time is what every other regenerate/reconcile caller
+    // in this file already does via a boundary's getId() round-trip.
+    function ghostSig() {
+        return CsTags.get(doc.queryEntity(ghostBoundaryId), CsArea.SIG_KEY);
+    }
+
+    eqs(ghostSig(), "",
+        "fixture: the failed stroke itself never stamped a signature " +
+        "either");
+
+    var ghostRegen1 = CsArea.regenerate(doc, di, ghostBoundaryId);
+    ok(ghostRegen1.indexOf("failed:") === 0,
+        "CsArea.regenerate: a rebuild that fails reports failure (" +
+        ghostRegen1 + ")");
+    eqs(ghostSig(), "",
+        "CsArea.regenerate: a FAILED rebuild does not stamp the " +
+        "signature");
+
+    var ghostRegen2 = CsArea.regenerate(doc, di, ghostBoundaryId);
+    ok(ghostRegen2.indexOf("failed:") === 0,
+        "CsArea.regenerate: with the block still missing, the very " +
+        "next call tries again and fails again (" + ghostRegen2 + ")");
+    ok(ghostRegen2 !== "unchanged",
+        "CsArea.regenerate: ... critically, NOT reported as " +
+        "\"unchanged\" -- a broken area must keep retrying, never " +
+        "freeze");
+    eqs(ghostSig(), "",
+        "CsArea.regenerate: ... and the second failure still does not " +
+        "stamp a signature");
+
+    // Now the block genuinely exists (imported at the top of this file
+    // for the SAND fixtures) -- point the same catalog entry at it and
+    // confirm the SAME boundary, never touched any other way, builds
+    // clean on the very next call.
+    CsArea.CATALOG.GHOST_AREA.blocks = ["AREA_STIPPLE"];
+    var ghostRegen3 = CsArea.regenerate(doc, di, ghostBoundaryId);
+    eqs(ghostRegen3, "regenerated",
+        "CsArea.regenerate: once the block exists, the very next call " +
+        "succeeds -- the earlier failures never froze it");
+    ok(CsArea.countOwned(doc, ghostMade.id) > 0,
+        "CsArea.regenerate: and it actually built a real fill this " +
+        "time");
+    ok(ghostSig() !== "",
+        "CsArea.regenerate: the signature is stamped now that a " +
+        "build has actually succeeded");
+
+    delete CsArea.CATALOG.GHOST_AREA;
+})();
+
+// ---------------------------------------------------------------------
+// Cost guard, part 1: a transaction that touches no area at all -- in a
+// document already FULL of areas -- never reaches CsArea.areaScan (the
+// shared full-document walk), never mind sweep, and changes nothing.
+// ---------------------------------------------------------------------
+
+var lstPlainOp = new RAddObjectsOperation();
+var lstPlainLine = new RLineEntity(doc, new RLineData(
+    new RVector(lstCx + 300, lstCy), new RVector(lstCx + 320, lstCy)));
+lstPlainOp.addObject(lstPlainLine, false);
+di.applyOperation(lstPlainOp);
+
+var lstPlainTransaction = {
+    getAffectedObjects: function() { return [lstPlainLine.getId()]; },
+    getGroup: function() { return -1; }
+};
+
+var lstPlainTouched = AreaFillListener.touchedIds(doc, lstPlainTransaction);
+var lstPlainAny = false;
+for (var lp in lstPlainTouched.ids) {
+    if (lstPlainTouched.ids.hasOwnProperty(lp)) { lstPlainAny = true; }
+}
+ok(!lstPlainAny,
+    "AreaFillListener.touchedIds: an entity with neither AreaId nor " +
+    "AreaOwner touches nothing, even in a document full of areas");
+ok(!lstPlainTouched.deletedBoundary,
+    "AreaFillListener.touchedIds: ... and reports no boundary deleted");
+
+var lstScanCalls = 0;
+var lstScanOriginal = CsArea.areaScan;
+CsArea.areaScan = function() {
+    lstScanCalls++;
+    return lstScanOriginal.apply(CsArea, arguments);
+};
+var lstBeforePlainCount = doc.queryAllEntities(false, true).length;
+AreaFillListener.onTransaction(doc, lstPlainTransaction);
+CsArea.areaScan = lstScanOriginal;
+
+eqs(lstScanCalls, 0,
+    "AreaFillListener.onTransaction: an unrelated edit never reaches " +
+    "CsArea.areaScan -- the cheap per-object gate stops it before the " +
+    "full-document walk, not just before sweep");
+eqs(doc.queryAllEntities(false, true).length, lstBeforePlainCount,
+    "AreaFillListener.onTransaction: ... and changes nothing");
+
+// ---------------------------------------------------------------------
+// Cost guard, part 2: sweep is gated on an actual removal, not run on
+// every area-touching transaction. An ordinary edit to a LIVE boundary
+// (no deletion in sight) must regenerate that one area without ever
+// calling CsArea.sweep -- dragging one boundary in a drawing with many
+// areas must not re-walk the document hunting for orphans on every
+// tick.
+// ---------------------------------------------------------------------
+
+// onTransaction only reaches CsArea.areaScan/sweep/regenerate once it
+// has resolved a real RDocumentInterface from RMainWindowQt's main
+// window -- which is null in a -no-gui run (measured: RMainWindowQt.
+// getMainWindow() answers null headlessly). Parts 2 and 3 need
+// onTransaction to run PAST that point to prove what it does with a
+// real dispatch, so a fake main window stands in for the length of
+// both -- restored immediately after part 3, and never touched by any
+// test before or after this pair (they all return earlier than this
+// gate, or call CsArea.* directly).
+var afFakeAppWin = { getDocumentInterface: function() { return di; } };
+var afMainWinOriginal = RMainWindowQt.getMainWindow;
+RMainWindowQt.getMainWindow = function() { return afFakeAppWin; };
+
+var lstLiveMade = AreaFillRun.commit(doc, di,
+    squareStroke(lstCx + 600, lstCy, 5), "SAND",
+    { scale: 1.0, density: 1.0 });
+ok(lstLiveMade.ok === true, "fixture: a live area for the sweep-gate test");
+var lstLiveBoundary = afBoundaryFor(lstLiveMade.id);
+
+var lstLiveSweepCalls = 0;
+var lstLiveSweepOriginal = CsArea.sweep;
+CsArea.sweep = function() {
+    lstLiveSweepCalls++;
+    return lstLiveSweepOriginal.apply(CsArea, arguments);
+};
+var lstLiveRegenCalls = 0;
+var lstLiveRegenOriginal = CsArea.regenerate;
+CsArea.regenerate = function() {
+    lstLiveRegenCalls++;
+    return lstLiveRegenOriginal.apply(CsArea, arguments);
+};
+
+movedBoundaryBy(lstLiveBoundary, 3, 3);   // a live, ordinary edit
+AreaFillListener.onTransaction(doc, {
+    getAffectedObjects: function() { return [lstLiveBoundary.getId()]; },
+    getGroup: function() { return -1; }
+});
+
+CsArea.sweep = lstLiveSweepOriginal;
+CsArea.regenerate = lstLiveRegenOriginal;
+
+eqs(lstLiveSweepCalls, 0,
+    "AreaFillListener.onTransaction: moving a LIVE boundary never " +
+    "calls CsArea.sweep -- nothing was removed, so there is nothing " +
+    "to sweep for");
+eqs(lstLiveRegenCalls, 1,
+    "AreaFillListener.onTransaction: ... but it does regenerate the " +
+    "area that was actually touched");
+
+// ---------------------------------------------------------------------
+// Cost guard, part 3: sweep DOES run when a boundary is genuinely
+// deleted -- through the real dispatch path this time, not a direct
+// CsArea.sweep call, so this proves onTransaction itself wires the
+// deletion flag through to the sweep, not merely that CsArea.sweep
+// works in isolation (already shown above).
+// ---------------------------------------------------------------------
+
+var lstGoneMade = AreaFillRun.commit(doc, di,
+    squareStroke(lstCx + 800, lstCy, 5), "SAND",
+    { scale: 1.0, density: 1.0 });
+ok(lstGoneMade.ok === true, "fixture: an area to delete through dispatch");
+var lstGoneBoundary = afBoundaryFor(lstGoneMade.id);
+ok(CsArea.countOwned(doc, lstGoneMade.id) > 0,
+    "fixture: it has a real fill before it is deleted");
+
+var lstGoneId = lstGoneBoundary.getId();
+var lstGoneDelOp = new RDeleteObjectsOperation();
+lstGoneDelOp.deleteObject(lstGoneBoundary);
+di.applyOperation(lstGoneDelOp);
+
+var lstGoneSweepCalls = 0;
+var lstGoneSweepOriginal = CsArea.sweep;
+CsArea.sweep = function() {
+    lstGoneSweepCalls++;
+    return lstGoneSweepOriginal.apply(CsArea, arguments);
+};
+AreaFillListener.onTransaction(doc, {
+    getAffectedObjects: function() { return [lstGoneId]; },
+    getGroup: function() { return -1; }
+});
+CsArea.sweep = lstGoneSweepOriginal;
+RMainWindowQt.getMainWindow = afMainWinOriginal;
+
+eqs(lstGoneSweepCalls, 1,
+    "AreaFillListener.onTransaction: a deleted boundary DOES trigger " +
+    "CsArea.sweep, through the dispatcher's own deletion detection");
+eqs(CsArea.countOwned(doc, lstGoneMade.id), 0,
+    "AreaFillListener.onTransaction: ... and the orphaned fill is " +
+    "really gone, end to end");
+
+// ---------------------------------------------------------------------
+// The re-entry guard: while busy, onTransaction returns before it even
+// calls touchedIds -- proven by a spy, not by inspection.
+// ---------------------------------------------------------------------
+
+var lstTouchedCalls = 0;
+var lstTouchedOriginal = AreaFillListener.touchedIds;
+AreaFillListener.touchedIds = function() {
+    lstTouchedCalls++;
+    return lstTouchedOriginal.apply(AreaFillListener, arguments);
+};
+AreaFillListener.busy = true;
+AreaFillListener.onTransaction(doc, lstPlainTransaction);
+AreaFillListener.busy = false;
+AreaFillListener.touchedIds = lstTouchedOriginal;
+
+eqs(lstTouchedCalls, 0,
+    "AreaFillListener.onTransaction: while busy, it returns before " +
+    "calling touchedIds at all -- proven with a spy, not by reading " +
+    "the source");
+
+// A genuinely area-touching transaction, run right after, confirms the
+// spy and the busy flag were not themselves the reason nothing
+// happened above -- the listener is alive and does react once busy is
+// clear again.
+var lstReviveMade = AreaFillRun.commit(doc, di,
+    squareStroke(lstCx + 500, lstCy, 5), "SAND",
+    { scale: 1.0, density: 1.0 });
+ok(lstReviveMade.ok === true,
+    "fixture: a fresh area to prove the listener still works post-spy");
+var lstReviveBoundary = afBoundaryFor(lstReviveMade.id);
+eqs(CsArea.regenerate(doc, di, lstReviveBoundary.getId()),
+    "regenerated",
+    "CsArea.regenerate: still works after the guard tests " +
+    "above -- the spies and the busy flag were restored cleanly");
+
+// ---------------------------------------------------------------------
+// A document with NO AreaId tags at all: the listener does no work.
+// A separate, clean document -- the shared `doc` above has plenty of
+// AreaId tags by now, so this is the only way to prove the "no areas
+// anywhere" case, not merely "no areas THIS transaction touched".
+// ---------------------------------------------------------------------
+
+(function() {
+    var bareDoc = new RDocument(new RMemoryStorage(), createSpatialIndex());
+    var bareDi = new RDocumentInterface(bareDoc);
+    CsLayers.ensureSurveyLayers(bareDoc, bareDi);
+
+    var bareOp = new RAddObjectsOperation();
+    var bareLine = new RLineEntity(bareDoc, new RLineData(
+        new RVector(0, 0), new RVector(10, 0)));
+    bareOp.addObject(bareLine, false);
+    bareDi.applyOperation(bareOp);
+
+    var bareTransaction = {
+        getAffectedObjects: function() { return [bareLine.getId()]; },
+        getGroup: function() { return -1; }
+    };
+
+    var bareTouched = AreaFillListener.touchedIds(bareDoc, bareTransaction);
+    var bareAny = false;
+    for (var bp in bareTouched.ids) {
+        if (bareTouched.ids.hasOwnProperty(bp)) { bareAny = true; }
+    }
+    ok(!bareAny,
+        "AreaFillListener.touchedIds: a document with no AreaId tags " +
+        "at all reports nothing touched");
+    ok(!bareTouched.deletedBoundary,
+        "AreaFillListener.touchedIds: ... and no boundary deletion " +
+        "either");
+
+    var bareScanCalls = 0;
+    var bareScanOriginal = CsArea.areaScan;
+    CsArea.areaScan = function() {
+        bareScanCalls++;
+        return bareScanOriginal.apply(CsArea, arguments);
+    };
+    var bareSweepCalls = 0;
+    var bareSweepOriginal = CsArea.sweep;
+    CsArea.sweep = function() {
+        bareSweepCalls++;
+        return bareSweepOriginal.apply(CsArea, arguments);
+    };
+    var bareRegenCalls = 0;
+    var bareRegenOriginal = CsArea.regenerate;
+    CsArea.regenerate = function() {
+        bareRegenCalls++;
+        return bareRegenOriginal.apply(CsArea, arguments);
+    };
+    var bareBeforeCount = bareDoc.queryAllEntities(false, true).length;
+    AreaFillListener.onTransaction(bareDoc, bareTransaction);
+    CsArea.areaScan = bareScanOriginal;
+    CsArea.sweep = bareSweepOriginal;
+    CsArea.regenerate = bareRegenOriginal;
+
+    eqs(bareScanCalls, 0,
+        "AreaFillListener.onTransaction: with no AreaId tags in the " +
+        "document, it never even reaches CsArea.areaScan");
+
+    eqs(bareSweepCalls, 0,
+        "AreaFillListener.onTransaction: with no AreaId tags in the " +
+        "document, sweep is never called");
+    eqs(bareRegenCalls, 0,
+        "AreaFillListener.onTransaction: ... and neither is regenerate");
+    eqs(bareDoc.queryAllEntities(false, true).length, bareBeforeCount,
+        "AreaFillListener.onTransaction: the document is left exactly " +
+        "as it was");
+})();
 
 var out;
 if (failures.length === 0) {

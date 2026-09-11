@@ -435,3 +435,338 @@ CsArea.clear = function(doc, op, areaId) {
     }
     return ids.length;
 };
+
+// ---------------------------------------------------------------------
+// Following a boundary that already exists in a document (Task 7):
+// regenerating a fill from a boundary's own tags, sweeping fill whose
+// boundary is gone, and the layer resolution the stroke (AreaFillRun,
+// Task 6) and this regeneration share. Everything above this divider
+// either never touches a document or was written for Tasks 5-6;
+// everything from here down is Task 7's own addition.
+//
+// LIVES HERE, NOT in AreaFillListener.js, for the same reason
+// CsShapeLine.reconcile lives in Core/CsShapeLine.js and not in
+// ShapedLinesListener.js: a transaction listener is a thin dispatcher
+// (busy flag, the cheap per-object gate, wiring into QCAD's signal),
+// and the actual business logic belongs where any OTHER caller can
+// reach it without dragging a transaction-listener file along -- Task
+// 12's "Sync Areas" menu tool regenerates every area on demand and
+// must not have to include a file whose only other job is listening
+// for live transactions it isn't one of.
+// ---------------------------------------------------------------------
+
+/**
+ * Where an area's fill and its boundary land, from ONE reading of the
+ * drawing's routing state.
+ *
+ * SHARED, deliberately, because AreaFillRun.commit (the stroke that
+ * draws a boundary) and CsArea.regenerate below (rebuilding its fill,
+ * whether from the live listener or a future "Sync Areas" tool) must
+ * never disagree about where the fill belongs. A caller that re-
+ * derived the layer its own way, even slightly differently, could
+ * regenerate a sand scatter onto BREAKDOWN because it read the routing
+ * rule a hair differently than the stroke that drew the boundary did.
+ *
+ * WHERE THE FIRST VERTEX LANDS decides the frame -- the same
+ * CsProfileBox.frameAt / CsLayers.twinFor / CsLayerVariants.nameFor
+ * idiom Feature Trace and ScatterBreakdown both already use. There is
+ * no plan button and no profile button.
+ *
+ * Only "profile" gets a run variant. A section area carries its bay's
+ * station on the boundary itself (see AreaFillRun.commit's call to
+ * CsTrace.tripFor), not a per-run layer -- a section has no bands to
+ * split by, unlike the profile's survey runs.
+ *
+ * \return {frame, bays, fillLayer, boundaryLayer}
+ */
+CsArea.layersFor = function(doc, entry, verts) {
+    var region = CsTrace.profileRegion(doc);
+    var bays = CsTrace.sectionBays(doc);
+    var frame = CsProfileBox.frameAt(doc, region, verts[0], bays);
+    var fillLayer = CsLayers.twinFor(entry.layer, frame);
+    var boundaryLayer = CsLayers.twinFor(entry.boundaryLayer, frame);
+
+    if (frame === "profile") {
+        var run = CsProfileBox.runForPath(CsProfileBox.boxes(doc), verts);
+        if (!isNull(run)) {
+            var fillVariant = CsLayerVariants.nameFor(fillLayer, run);
+            var boundaryVariant = CsLayerVariants.nameFor(boundaryLayer, run);
+            // nameFor answers null for a base the registry does not
+            // define (CsLayerVariants' own guard) -- fall back to the
+            // shared layer rather than hand a null layer name down the
+            // line to CsLayers.ensure.
+            if (fillVariant !== null) {
+                fillLayer = fillVariant;
+            }
+            if (boundaryVariant !== null) {
+                boundaryLayer = boundaryVariant;
+            }
+        }
+    }
+
+    return { frame: frame, bays: bays, fillLayer: fillLayer,
+        boundaryLayer: boundaryLayer };
+};
+
+/** XDATA key holding the signature of the last successful regenerate,
+ *  written to the BOUNDARY (never the fill, which is disposable and
+ *  gets thrown away and rebuilt). Compared on every regenerate() so an
+ *  unchanged boundary is a string compare and a return, never a
+ *  clear+rebuild. */
+CsArea.SIG_KEY = "AreaFillSig";
+
+/** A string that changes if and only if a regenerate would produce a
+ *  different fill: the boundary's own pattern/seed/scale/density tags,
+ *  plus its sampled geometry rounded to a thousandth of a drawing
+ *  unit. Float noise from move()/undo/redo must not be mistaken for a
+ *  real edit, and a real edit -- even a sub-pixel grip nudge -- must
+ *  never be mistaken for none. */
+CsArea.signature = function(boundary, verts) {
+    var parts = [];
+    for (var i = 0; i < verts.length; i++) {
+        parts.push(Math.round(verts[i].x * 1000) + "," +
+            Math.round(verts[i].y * 1000));
+    }
+    return [
+        CsTags.get(boundary, CsArea.PATTERN_KEY),
+        CsTags.get(boundary, CsArea.SEED_KEY),
+        CsTags.get(boundary, CsArea.SCALE_KEY),
+        CsTags.get(boundary, CsArea.DENSITY_KEY),
+        parts.join(";")
+    ].join("|");
+};
+
+/**
+ * ONE walk of the document answering both halves of "which fill goes
+ * with which boundary": every live boundary's entity, by its AreaId,
+ * and every fill entity's id, grouped by the AreaId it is owned by.
+ *
+ * THE SHARED SCAN. Before this existed, a caller reconciling several
+ * areas in one transaction (a drag that touches many boundaries, or a
+ * future "Sync Areas" that touches all of them) paid one
+ * queryAllEntities walk per area just to find its boundary
+ * (boundaryOf), and sweep paid another per area on top of that --
+ * O(areas) full-document scans where one suffices. Every caller that
+ * needs more than one lookup in the same transaction should build this
+ * ONCE and pass it to boundaryOf/sweep/regenerate rather than let each
+ * of them scan again.
+ *
+ * \return {owners: {areaId: [entityId, ...]}, boundaries: {areaId: entity}}
+ */
+CsArea.areaScan = function(doc) {
+    var owners = {};
+    var boundaries = {};
+    var ids = doc.queryAllEntities(false, true);
+    for (var i = 0; i < ids.length; i++) {
+        var e = doc.queryEntity(ids[i]);
+        if (isNull(e)) {
+            continue;
+        }
+        var aid = CsTags.get(e, CsArea.ID_KEY);
+        if (aid !== "") {
+            boundaries[aid] = e;
+            continue;
+        }
+        var oid = CsTags.get(e, CsArea.OWNER_KEY);
+        if (oid !== "") {
+            if (isNull(owners[oid])) {
+                owners[oid] = [];
+            }
+            owners[oid].push(ids[i]);
+        }
+    }
+    return { owners: owners, boundaries: boundaries };
+};
+
+/** The boundary entity carrying one area's id, or null when there is
+ *  none -- deleted, or never existed. queryAllEntities(false, true)
+ *  (which areaScan uses) EXCLUDES undone entities, unlike
+ *  queryEntity(id) on a stale id (which comes back with isUndone() ===
+ *  true rather than null) -- so this is the "is it still really here"
+ *  check, not queryEntity's.
+ *
+ *  `scan`, when given (from a caller's own CsArea.areaScan), is reused
+ *  instead of walking the document again -- pass one whenever more
+ *  than one area is being looked up in the same pass. */
+CsArea.boundaryOf = function(doc, areaId, scan) {
+    var s = isNull(scan) ? CsArea.areaScan(doc) : scan;
+    return isNull(s.boundaries[areaId]) ? null : s.boundaries[areaId];
+};
+
+/**
+ * Deletes any area fill whose boundary is gone -- a fill nobody can
+ * edit is a fill nobody wants sitting in the drawing pretending to be
+ * current content.
+ *
+ * Takes `scan` (from CsArea.areaScan) so a caller who already walked
+ * the document once this transaction -- AreaFillListener.onTransaction
+ * does, to resolve every touched area's boundary -- never pays for a
+ * second walk just to sweep. Without a `scan`, builds its own: still
+ * one walk, never one per area.
+ *
+ * \return how many entities were swept
+ */
+CsArea.sweep = function(doc, di, group, scan) {
+    var s = isNull(scan) ? CsArea.areaScan(doc) : scan;
+    var orphanIds = [];
+    for (var areaId in s.owners) {
+        if (!s.owners.hasOwnProperty(areaId)) {
+            continue;
+        }
+        if (isNull(s.boundaries[areaId])) {
+            orphanIds = orphanIds.concat(s.owners[areaId]);
+        }
+    }
+    if (orphanIds.length === 0) {
+        return 0;
+    }
+
+    var del = new RDeleteObjectsOperation();
+    for (var o = 0; o < orphanIds.length; o++) {
+        var ent = doc.queryEntityDirect(orphanIds[o]);
+        if (!isNull(ent)) {
+            del.deleteObject(ent);
+        }
+    }
+    if (group !== null && group !== undefined && group >= 0) {
+        del.setTransactionGroup(group);
+    }
+    di.applyOperation(del);
+    return orphanIds.length;
+};
+
+/**
+ * Clears and rebuilds one area's fill from its boundary's OWN tags.
+ *
+ * `boundaryId` is the boundary entity's real object id, not the AreaId
+ * it carries.
+ *
+ * NEVER RE-ROLLS THE SEED. It is read off the boundary, exactly as
+ * written at creation (AreaFillRun.commit), never regenerated here --
+ * a regenerate that re-rolled it would reshuffle a caver's boulder
+ * room on every touch, which is the one thing this whole mechanism
+ * exists to prevent.
+ *
+ * `group`, when given, joins both writes to the triggering edit's
+ * transaction group so one Ctrl+Z takes the caver's edit and the
+ * rebuild together -- the same idiom CsShapeLine.decorate uses.
+ *
+ * `ownedIds`, when given (from a caller's own CsArea.areaScan), is
+ * used as this area's current fill instead of a fresh CsArea.ownedBy
+ * scan -- the other half of the shared-scan saving areaScan's own
+ * header describes. Omit it (as a direct call from a test, or any
+ * caller with no scan of its own) and this falls back to one
+ * CsArea.ownedBy walk, same as before areaScan existed.
+ *
+ * COST, HONESTLY: even with a shared scan, this is not a free check.
+ * The "unchanged" fast path below is a signature STRING COMPARE (O(1)
+ * once verts are in hand) plus whatever `ownedIds` cost to obtain --
+ * one shared document walk per transaction when a caller passes a
+ * scan, one CsArea.ownedBy walk per call otherwise. What the freeze
+ * guarantees is that an unchanged area writes NOTHING and rebuilds
+ * NOTHING; it was never advertised as reading nothing, and a
+ * transaction that touches many areas already amortises the walk
+ * across all of them via one shared scan.
+ *
+ * \return "missing" | "not-an-area" | "no-pattern" | "no-shape" |
+ *         "unchanged" | "regenerated" | "failed:<reason>"
+ */
+CsArea.regenerate = function(doc, di, boundaryId, group, ownedIds) {
+    var boundary = doc.queryEntity(boundaryId);
+    if (isNull(boundary) || boundary.isUndone()) {
+        return "missing";
+    }
+    var areaId = CsTags.get(boundary, CsArea.ID_KEY);
+    if (areaId === "") {
+        return "not-an-area";
+    }
+    var key = CsTags.get(boundary, CsArea.PATTERN_KEY);
+    var entry = CsArea.entryFor(key);
+    if (isNull(entry)) {
+        return "no-pattern";
+    }
+    var verts = CsArea.vertsOf(boundary);
+    if (verts.length < 3) {
+        return "no-shape";
+    }
+
+    var sig = CsArea.signature(boundary, verts);
+    var existing = isNull(ownedIds) ? CsArea.ownedBy(doc, areaId) : ownedIds;
+    // A pattern with no fill AT ALL (BEDROCK: pattern === null) is
+    // correctly zero entities every time -- that must read as
+    // "unchanged" too, or this would clear+rebuild nothing, forever,
+    // on every transaction that so much as looks at a bedrock boundary.
+    var expectZero = entry.engine === "filled" && isNull(entry.pattern);
+    if (sig === CsTags.get(boundary, CsArea.SIG_KEY) &&
+            (existing.length > 0 || expectZero)) {
+        return "unchanged";
+    }
+
+    var seed = parseFloat(CsTags.get(boundary, CsArea.SEED_KEY));
+    var scale = parseFloat(CsTags.get(boundary, CsArea.SCALE_KEY));
+    var density = parseFloat(CsTags.get(boundary, CsArea.DENSITY_KEY));
+    if (isNaN(seed)) {
+        seed = CsArea.newSeed();   // only for a boundary predating this
+    }                               // tag; never re-rolled once present
+    if (isNaN(scale)) {
+        scale = 1.0;
+    }
+    if (isNaN(density)) {
+        density = 1.0;
+    }
+
+    // THE SHARED resolver -- never read the fill layer off the
+    // boundary's own layer. Most patterns route their boundary onto
+    // CTRL-AREA-BOUNDARY while the fill belongs on the pattern's own
+    // layer (or a profile/section twin of it); AreaFillRun.commit
+    // resolves the exact same way, off the exact same verts, so a
+    // stroke and its later regenerations can never disagree about
+    // where the fill belongs.
+    var routed = CsArea.layersFor(doc, entry, verts);
+    CsLayers.ensure(doc, di, routed.fillLayer);
+
+    var grouped = function(op) {
+        if (group !== null && group !== undefined && group >= 0) {
+            op.setTransactionGroup(group);
+        }
+        di.applyOperation(op);
+    };
+
+    if (existing.length > 0) {
+        // Deleted directly from the ids already in hand, rather than
+        // through CsArea.clear (which would re-walk the document to
+        // rediscover exactly the ids this function already has).
+        var del = new RDeleteObjectsOperation();
+        for (var d = 0; d < existing.length; d++) {
+            var oldEnt = doc.queryEntityDirect(existing[d]);
+            if (!isNull(oldEnt)) {
+                del.deleteObject(oldEnt);
+            }
+        }
+        grouped(del);
+    }
+
+    var add = new RAddObjectsOperation();
+    var built = CsArea.build(doc, add, boundary, entry,
+        { id: areaId, seed: seed, scale: scale, density: density,
+          layer: routed.fillLayer });
+    if (built.ok && built.count > 0) {
+        grouped(add);
+    }
+
+    if (!built.ok) {
+        // Do NOT stamp the signature: the boundary is left with no
+        // fill (the old one, if any, is already gone above), and the
+        // next transaction that so much as looks at it must retry the
+        // build rather than reading this as "unchanged" and giving up
+        // on it forever.
+        return "failed:" + built.reason;
+    }
+
+    CsTags.set(boundary, CsArea.SIG_KEY, sig);
+    var mod = new RModifyObjectsOperation();
+    mod.addObject(boundary, false);
+    grouped(mod);
+
+    return "regenerated";
+};

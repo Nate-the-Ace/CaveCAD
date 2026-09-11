@@ -142,6 +142,20 @@ CaveSurvey.init = function(basePath, splash) {
         // degrade to the manual sync path
     }
 
+    // Keep an area's fill on its boundary while the caver edits with
+    // QCAD's own tools -- the same arrangement as the two listeners
+    // above, for the same reason. Without it, an area's fill still
+    // works; it just needs a future Sync Areas run by hand after a
+    // boundary moves.
+    try {
+        include(includeBasePath + "/AreaFill/AreaFillListener.js");
+        if (typeof AreaFillListener !== "undefined") {
+            AreaFillListener.install();
+        }
+    } catch (eArea) {
+        // degrade to the manual sync path
+    }
+
     // Keep the previous version of a drawing beside it on every save.
     // A redraw is erase-then-draw across two operations, so a draw that
     // fails after the erase has landed leaves the drawing gutted -- and

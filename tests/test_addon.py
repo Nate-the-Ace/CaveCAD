@@ -76,6 +76,14 @@ def tool_source(name):
         return fh.read()
 
 
+def tool_source_at(relpath):
+    """Source of any add-on file by its path relative to ADDON -- for
+    CaveSurvey.js itself, which tool_source() cannot reach (it is not
+    <name>/<name>.js)."""
+    with open(os.path.join(ADDON, relpath)) as fh:
+        return fh.read()
+
+
 def live_init_definition(source):
     """The object name X for a live (non-commented) "X.init = function"
     assignment in source, or None. Parsed line-by-line rather than
@@ -117,6 +125,21 @@ def live_init_calls(source):
             continue
         for match in re.finditer(
                 r'([A-Za-z_][A-Za-z0-9_]*)\.init\(basePath\)', stripped):
+            found.add(match.group(1))
+    return found
+
+
+def live_install_calls(source):
+    """Object names X for every live "X.install()" call in source. Same
+    live-line filtering as live_init_calls -- a commented-out install()
+    must not count as wiring."""
+    found = set()
+    for line in source.splitlines():
+        stripped = line.strip()
+        if stripped.startswith("//"):
+            continue
+        for match in re.finditer(
+                r'([A-Za-z_][A-Za-z0-9_]*)\.install\(\)', stripped):
             found.add(match.group(1))
     return found
 
@@ -354,6 +377,44 @@ class TestAddonLayout(unittest.TestCase):
         loose = [f for f in os.listdir(ADDON)
                  if f.endswith(".js") and f != "CaveSurvey.js"]
         self.assertEqual(loose, [], "these belong in their own folders: %s" % loose)
+
+    # Every live-transaction listener this suite ships (a file whose own
+    # header says "installed once from CaveSurvey.js" and that defines an
+    # X.install() with no menu action anywhere to call it from). A listener
+    # with install() written but never called ships INERT: every one of
+    # its own tests still passes -- they call its reconcile/regenerate
+    # logic directly -- while no caver ever sees it react to a live edit.
+    # AreaFillListener shipped exactly this way for one commit before this
+    # test existed; this suite already has a scar from the same class of
+    # bug elsewhere (a tool absent from the menu, a save hook that never
+    # fired), which is why this is a standing structural check and not a
+    # one-off fix.
+    LISTENERS = {
+        "Callout/CalloutListener.js": "CalloutListener",
+        "ShapedLines/ShapedLinesListener.js": "ShapedLinesListener",
+        "AreaFill/AreaFillListener.js": "AreaFillListener",
+    }
+
+    def test_every_listener_is_included_and_installed(self):
+        source = tool_source_at("CaveSurvey.js")
+        included = live_includes(source)
+        installed = live_install_calls(source)
+        for relpath, obj in self.LISTENERS.items():
+            with self.subTest(listener=obj):
+                self.assertTrue(
+                    os.path.exists(os.path.join(ADDON, relpath)),
+                    "%s does not exist -- update TestAddonLayout.LISTENERS "
+                    "if it moved or was retired" % relpath)
+                self.assertIn(
+                    os.path.basename(relpath), included,
+                    "CaveSurvey.js does not include %s -- %s would be "
+                    "undefined at runtime" % (relpath, obj))
+                self.assertIn(
+                    obj, installed,
+                    "CaveSurvey.js never calls %s.install() -- %s ships "
+                    "inert: every one of its own tests still passes "
+                    "(they call its logic directly), but no caver ever "
+                    "sees it react to a live edit" % (obj, obj))
 
     # Tools whose action is registered but deliberately NOT on the menu:
     # their panel is reached through another tool's door. Listed with

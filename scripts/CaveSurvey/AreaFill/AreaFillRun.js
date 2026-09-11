@@ -78,55 +78,21 @@ AreaFillRun.armed = undefined;
  * Where an area's fill and its boundary land, from ONE reading of the
  * drawing's routing state.
  *
- * ITS OWN FUNCTION, deliberately, because Task 7's listener has to
- * resolve exactly the same two layers when a boundary moves and its
- * fill is rebuilt from scratch -- and the stroke that drew the
- * boundary and the listener that regenerates it must never disagree
- * about where the fill belongs. A listener that re-derived the layer
- * its own way, even slightly differently, could regenerate a sand
- * scatter onto BREAKDOWN because it read the routing rule a hair
- * differently than the stroke that drew the boundary did.
- *
- * WHERE THE FIRST VERTEX LANDS decides the frame -- the same
- * CsProfileBox.frameAt / CsLayers.twinFor / CsLayerVariants.nameFor
- * idiom Feature Trace and ScatterBreakdown both already use. There is
- * no plan button and no profile button.
- *
- * Only "profile" gets a run variant. A section area carries its bay's
- * station on the boundary itself (see AreaFillRun.commit's call to
- * CsTrace.tripFor), not a per-run layer -- a section has no bands to
- * split by, unlike the profile's survey runs.
- *
- * \return {frame, bays, fillLayer, boundaryLayer}
+ * LIVES IN CsArea (Core), NOT here, for the same reason CsShapeLine
+ * keeps its own layersFor in Core rather than in a Run file: the
+ * stroke that draws a boundary (this file) and the listener that
+ * regenerates its fill (AreaFillListener.js calling CsArea.regenerate,
+ * both Task 7) must never disagree about where the fill belongs, and a
+ * Core file (CsArea.js) can be included by either one without either
+ * depending on the other. An earlier draft of this file defined
+ * layersFor itself and had the listener reach up into this tool file
+ * to call it -- which worked, but left CsArea.regenerate (Core)
+ * depending on AreaFillRun.js (a tool file) ever being loaded, the
+ * exact upward dependency this suite's Core/tool split exists to
+ * forbid. This alias is kept only so any existing call written as
+ * AreaFillRun.layersFor(...) keeps working.
  */
-AreaFillRun.layersFor = function(doc, entry, verts) {
-    var region = CsTrace.profileRegion(doc);
-    var bays = CsTrace.sectionBays(doc);
-    var frame = CsProfileBox.frameAt(doc, region, verts[0], bays);
-    var fillLayer = CsLayers.twinFor(entry.layer, frame);
-    var boundaryLayer = CsLayers.twinFor(entry.boundaryLayer, frame);
-
-    if (frame === "profile") {
-        var run = CsProfileBox.runForPath(CsProfileBox.boxes(doc), verts);
-        if (!isNull(run)) {
-            var fillVariant = CsLayerVariants.nameFor(fillLayer, run);
-            var boundaryVariant = CsLayerVariants.nameFor(boundaryLayer, run);
-            // nameFor answers null for a base the registry does not
-            // define (CsLayerVariants' own guard) -- fall back to the
-            // shared layer rather than hand a null layer name down the
-            // line to CsLayers.ensure.
-            if (fillVariant !== null) {
-                fillLayer = fillVariant;
-            }
-            if (boundaryVariant !== null) {
-                boundaryLayer = boundaryVariant;
-            }
-        }
-    }
-
-    return { frame: frame, bays: bays, fillLayer: fillLayer,
-        boundaryLayer: boundaryLayer };
-};
+AreaFillRun.layersFor = CsArea.layersFor;
 
 /**
  * A genuinely CLOSED boundary spline through `verts`.
