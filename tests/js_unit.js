@@ -5353,6 +5353,15 @@ if (teamBoundaryRt.trips.length === 2) {
     ok(CsLayers.DEFAULTS["CTRL-RAW"][1] === "DASHED",
         "CTRL-RAW is dashed -- it is not the survey, it is where the survey was");
     ok(CsLayers.OFF["CTRL-RAW"] === true, "CTRL-RAW is created switched off");
+
+    eqs(JSON.stringify(CsLayers.DEFAULTS["ICE-SNOW"]),
+        JSON.stringify(["cyan", "CONTINUOUS", "Weight018"]),
+        "CsLayers: ICE-SNOW is a cyan hairline-plus feature layer");
+    eqs(JSON.stringify(CsLayers.DEFAULTS["CTRL-AREA-BOUNDARY"]),
+        JSON.stringify(["gray", "DASHED", "Weight000"]),
+        "CsLayers: CTRL-AREA-BOUNDARY prints as nothing");
+    eqs(CsLayers.twinFor("ICE-SNOW", "profile"), "PROFILE-ICE-SNOW",
+        "CsLayers: ICE-SNOW gets a profile twin like every other feature layer");
 })();
 
 // ---------------------------------------------------------------------

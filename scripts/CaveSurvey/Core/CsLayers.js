@@ -21,6 +21,7 @@ CsLayers.CTRL_LRUD = "CTRL-LRUD";
 CsLayers.CTRL_SPLAYS = "CTRL-SPLAYS";
 CsLayers.CTRL_HIDDEN = "CTRL-HIDDEN";
 CsLayers.CTRL_RAW = "CTRL-RAW";
+CsLayers.CTRL_AREA_BOUNDARY = "CTRL-AREA-BOUNDARY";
 // Where the loop closure error went: one arrow per station the
 // adjustment moved, and a label per loop. Generated, plan-frame, and
 // OFF by default -- it is a diagnostic drawn over the map, not map ink,
@@ -210,6 +211,7 @@ CsLayers.FORMATIONS_MOONMILK_POPCORN = "FORMATIONS-MOONMILK-POPCORN";
 CsLayers.SEDIMENT_SAND_GRAVEL = "SEDIMENT-SAND-GRAVEL";
 CsLayers.SEDIMENT_CLAY_MUD = "SEDIMENT-CLAY-MUD";
 CsLayers.GUANO = "GUANO";
+CsLayers.ICE_SNOW = "ICE-SNOW";
 CsLayers.BIOLOGY = "BIOLOGY";
 CsLayers.ARCHAEOLOGY = "ARCHAEOLOGY";
 CsLayers.GEOLOGY_JOINTS_FRACTURES = "GEOLOGY-JOINTS-FRACTURES";
@@ -345,6 +347,10 @@ CsLayers.DEFAULTS = {
     // Guano is a bat deposit before it is a sediment, so it reads with
     // biology rather than with the mud it lies on.
     "GUANO": ["limegreen", "CONTINUOUS", "Weight009"],
+    // Ice and snow are a floor covering like sediment, not a formation:
+    // cyan because they read as cold, and because the anchor family it
+    // shares the hue with never appears in the same part of a map.
+    "ICE-SNOW": ["cyan", "CONTINUOUS", "Weight018"],
     "BIOLOGY": ["limegreen", "CONTINUOUS", "Weight018"],
     "ARCHAEOLOGY": ["limegreen", "CONTINUOUS", "Weight018"],
     "GEOLOGY-JOINTS-FRACTURES": ["slateblue", "NSS_JOINT", "Weight009",
@@ -413,6 +419,11 @@ CsLayers.DEFAULTS = {
     "CTRL-SHAPE-SPINE": ["gray", "DASHED", "Weight000"],
     "CTRL-HIDDEN": ["gray", "CONTINUOUS", "Weight000"],
     "CTRL-RAW": ["gray", "DASHED", "Weight000"],
+    // An area's boundary is scaffolding, not linework: grabbable on
+    // screen, absent from the print. Patterns whose edge IS map
+    // linework (water, sump, flowstone, bedrock) route their boundary
+    // to their own layer instead -- see CsArea.CATALOG.
+    "CTRL-AREA-BOUNDARY": ["gray", "DASHED", "Weight000"],
     // Magenta, because nothing else on a cave map is: a closure arrow
     // has to be unmistakably NOT part of the drawing. The arrows
     // themselves are recoloured per station by size, so this is the
