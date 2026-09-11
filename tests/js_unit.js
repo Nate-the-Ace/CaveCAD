@@ -24761,6 +24761,110 @@ eqs(CsSymbolStore.PREFIX, "SYM_", "the symbol block prefix");
 })();
 
 // ---------------------------------------------------------------------
+// CsPanel.orderedTitles -- the Draw panel's grid depends on this
+// surviving an order that has drifted from what got built: a section
+// Task 10 has not shipped yet named in a saved order, and a section
+// that setting never knew about (added since).
+// ---------------------------------------------------------------------
+
+(function testDrawOrderResilience() {
+    var built = ["Trace", "Symbols", "Areas"];
+    var saved = ["Areas", "Ghosts", "Trace"];   // one gone, one missing
+    var order = CsPanel.orderedTitles(built, saved);
+    eqs(order.length, 3, "orderedTitles: every built section appears once");
+    ok(order.indexOf("Ghosts") === -1,
+        "orderedTitles: a section that no longer exists is dropped");
+    ok(order.indexOf("Symbols") !== -1,
+        "orderedTitles: a section the setting never knew is kept");
+})();
+
+// ---------------------------------------------------------------------
+// DrawPanel.buildDock -- an ordering failure must not cost the dock.
+// ---------------------------------------------------------------------
+//
+// applyOrder and relayout run AFTER the per-section try/catch loop, so
+// a caver's saved order breaking either of them used to throw straight
+// out of buildDock -- before body.setLayout/dock.setWidget ran -- and
+// undo the one thing that loop exists to guarantee: the panel appears
+// even when part of it refuses. Proven against the real DrawPanel.js,
+// with FeatureTrace and SymbolPalette stubbed to their buildBody
+// contract -- their own bodies are covered elsewhere, and pulling in
+// their full dependency graphs here would test nothing this task
+// touched. Skipped under node: DrawPanel.buildDock is Qt widgets top
+// to bottom, and there is no bridge for them there.
+// ---------------------------------------------------------------------
+
+(function testDrawPanelSurvivesOrderingFailure() {
+    if (typeof QWidget === "undefined" || typeof QGridLayout === "undefined") {
+        return;
+    }
+    // DrawPanel.js runs `DrawPanel.prototype = new EAction();` at load,
+    // same trap SurveyNotebook.js hits above -- stub it if the real
+    // class isn't in this headless engine.
+    if (typeof EAction === "undefined") {
+        EAction = function() {};
+        EAction.prototype.beginEvent = function() {};
+        EAction.prototype.terminate = function() {};
+        EAction.handleUserMessage = function() {};
+    }
+    // buildDock reports refused sections through the global `warning`,
+    // which this headless -no-gui engine does not preload either.
+    if (typeof warning === "undefined") {
+        warning = function() {};
+    }
+    if (typeof FeatureTrace === "undefined") {
+        FeatureTrace = {};
+    }
+    if (typeof SymbolPalette === "undefined") {
+        SymbolPalette = {};
+    }
+    FeatureTrace.buildBody = function(parent) { return new QWidget(parent); };
+    SymbolPalette.buildBody = function(parent) { return new QWidget(parent); };
+    loadRepoScript("scripts/CaveSurvey/DrawPanel/DrawPanel.js");
+
+    function tryBuild() {
+        var threw = null;
+        var dock = null;
+        try {
+            dock = DrawPanel.buildDock(null);
+        } catch (e) {
+            threw = e;
+        }
+        return { dock: dock, threw: threw };
+    }
+
+    var realApplyOrder = CsPanel.applyOrder;
+    CsPanel.applyOrder = function() {
+        throw new Error("ordering blew up");
+    };
+    var r1 = tryBuild();
+    CsPanel.applyOrder = realApplyOrder;
+    ok(r1.threw === null,
+        "DrawPanel.buildDock: an applyOrder failure does not escape " +
+        "buildDock");
+    ok(!isNull(r1.dock),
+        "DrawPanel.buildDock: the dock still gets built when ordering " +
+        "fails");
+    ok(!isNull(DrawPanel.sections[DrawPanel.SEC_TRACE]) &&
+        !isNull(DrawPanel.sections[DrawPanel.SEC_SYMBOLS]),
+        "DrawPanel.buildDock: both sections still built even though " +
+        "ordering them failed");
+
+    var realRelayout = CsPanel.relayout;
+    CsPanel.relayout = function() {
+        throw new Error("layout blew up");
+    };
+    var r2 = tryBuild();
+    CsPanel.relayout = realRelayout;
+    ok(r2.threw === null,
+        "DrawPanel.buildDock: a relayout failure does not escape " +
+        "buildDock either");
+    ok(!isNull(r2.dock),
+        "DrawPanel.buildDock: the dock still gets built when the grid " +
+        "placement pass fails");
+})();
+
+// ---------------------------------------------------------------------
 // Report.
 // ---------------------------------------------------------------------
 

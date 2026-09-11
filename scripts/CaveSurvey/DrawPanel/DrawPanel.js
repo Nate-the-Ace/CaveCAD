@@ -23,14 +23,35 @@
 // already knew how to fold and remember what a caver left shut; this
 // is CsPanel's section doing what it was written for, one level up.
 //
-// TWO COLUMNS, NOT TABS AND NOT A STACK. Tabs would put a wall and a
-// symbol on opposite sides of a click, and tracing a passage means
-// reaching for both in the same breath. Stacked, the second half sat
-// below the fold of a dock already 1500 pixels tall. Side by side --
-// tracing LEFT, symbols RIGHT, always those sides -- both are in view
-// at once and each column gets the dock's full height, which is the
-// dimension a wall of tiles actually needs. Fold a column by its
-// header and it shrinks to a strip, handing its width to the other.
+// A GRID, TWO WIDE, NOT TABS AND NOT ONE FIXED ROW. Tabs would put a
+// wall and a symbol on opposite sides of a click, and tracing a passage
+// means reaching for both in the same breath. Stacked in one column,
+// the second section sat below the fold of a dock already 1500 pixels
+// tall. Nathan approved this exact layout from a mockup, 2026-09-11:
+// rows of two, in the caver's own order, with a spare seat for the
+// third section coming next.
+//
+//   - Rows descend in section order, two sections per row.
+//   - A section ALONE on the last row spans the full width rather than
+//     leaving a hole beside it -- a dock is narrow and half of one is
+//     not worth wasting. (This is the two-section case today: Trace
+//     and Symbols share row 0. It becomes visible once Areas makes a
+//     third.)
+//   - A FOLDED section keeps its cell. Folding hides what is inside a
+//     section, not the section itself, so it never reflows the grid --
+//     a caver mid-trace does not want Symbols sliding under their
+//     cursor because they collapsed Trace a moment ago.
+//   - New sections simply APPEND at the end of the list below; where
+//     they land is `CsPanel.gridSpans`' arithmetic, not a coordinate
+//     anyone has to update by hand.
+//   - Right-click a header for Move Up / Move Down / Reset Order. Not a
+//     drag, and not for want of trying: this bridge hands script mouse
+//     events to four widget classes and a header is none of them --
+//     `CsPanel.stackAdd`'s own comment has the list. The order a caver
+//     picks is saved under DrawPanel.ORDER_SETTING and restored on
+//     every build, same shape as the fold memory but its own key: an
+//     old order naming a section that no longer exists must not cost
+//     the ones that do (CsPanel.orderedTitles).
 //
 // ONE BODY, ONE OWNER. Neither panel builds a dock of its own any
 // more, and that is not tidiness: each of them keeps its widgets in a
@@ -54,10 +75,19 @@ function DrawPanel(guiAction) {
 
 DrawPanel.prototype = new EAction();
 
-/** Where the fold state of THIS panel's two sections is remembered.
+/** Where the fold state of THIS panel's sections is remembered.
  *  Its own key: folding "Symbols" here is not the same act as folding
  *  a symbol CATEGORY inside it, which the palette remembers itself. */
 DrawPanel.COLLAPSED_SETTING = "CaveSurvey/DrawCollapsed";
+
+/** Where the caver's own row order is remembered. A separate key from
+ *  COLLAPSED_SETTING above -- fold state and row order are different
+ *  facts about a section and must not overwrite each other. */
+DrawPanel.ORDER_SETTING = "CaveSurvey/DrawOrder";
+
+/** The grid is two sections wide -- see the header comment for why,
+ *  and CsPanel.gridSpans for how a section lands in it. */
+DrawPanel.COLUMNS = 2;
 
 DrawPanel.SEC_TRACE = "Trace";
 DrawPanel.SEC_SYMBOLS = "Symbols";
@@ -73,16 +103,32 @@ DrawPanel.buildDock = function(appWin) {
     dock.objectName = "CaveSurveyDrawDock";
 
     var body = new QWidget(dock);
-    // HORIZONTAL. The order of this list is the order of the columns,
-    // and there is no reorder menu: left is tracing and right is
-    // symbols, which is a thing a caver's hand learns once.
-    var layout = new QHBoxLayout();
+    // A GRID, not a fixed row of columns -- see the header comment.
+    var layout = new QGridLayout();
     var collapsed = CsPanel.loadCollapsed(DrawPanel.COLLAPSED_SETTING);
+    // Nothing sits above this grid -- the dock's whole body is the
+    // stack -- so baseIndex is 0, unlike FeatureTrace's own stack
+    // pinning a readout and a search box above its sections.
+    var stack = CsPanel.stack(layout, DrawPanel.ORDER_SETTING, 0,
+        function() {
+            EAction.handleUserMessage(qsTr("Section order reset -- " +
+                "reopen the panel to see it."));
+        }, DrawPanel.COLUMNS);
+    // Assigned the moment it exists, not after ordering below: on the
+    // failure path ordering can throw, and DrawPanel.stack must never
+    // be left pointing at a PREVIOUS build's stack -- ensureDock and
+    // beginEvent rebuild this dock after a failure, so a stale stack
+    // here means dead widgets.
+    DrawPanel.stack = stack;
 
-    // EACH PANEL BUILDS ITS OWN BODY, into this one's column. Nothing
-    // is reimplemented here: the tiles, the search, the recent strip
-    // and every trap they cost are the ones those two files already
-    // carry.
+    // EACH PANEL BUILDS ITS OWN BODY, into this one's cell. Nothing is
+    // reimplemented here: the tiles, the search, the recent strip and
+    // every trap they cost are the ones those two files already carry.
+    //
+    // TASK 10 ADDS "Areas" HERE, as a third entry -- its own include(),
+    // its own try/catch, nothing else in this function changes: the
+    // grid, the stack and applyOrder below already know how to place a
+    // third section.
     var sections = [
         { title: DrawPanel.SEC_TRACE,
           build: function(parent) { return FeatureTrace.buildBody(parent); } },
@@ -101,16 +147,33 @@ DrawPanel.buildDock = function(appWin) {
             }
             inner.addWidget(sections[i].build(section.host), 1, 0);
             section.host.setLayout(inner);
-            // THE CALLER ADDS THE BOX. Leaving this out builds every
-            // widget correctly, parents them to the body, and shows a
-            // 46-pixel-tall empty panel.
-            layout.addWidget(section.box, 1, 0);
+            CsPanel.stackAdd(stack, section, sections[i].title);
             DrawPanel.sections[sections[i].title] = section;
         } catch (eSection) {
             // ONE COLUMN REFUSED IS NOT A PANEL REFUSED. A caver whose
             // symbol palette will not build still needs to trace.
             problems.push(sections[i].title + " (" + eSection + ")");
         }
+    }
+
+    // A SAVED ORDER IS RESTORED, THEN THE GRID IS LAID OUT -- both
+    // guarded, same as the section loop above: ordering is not drawing,
+    // and a caver whose saved order blows up still needs the dock to
+    // appear, in whatever order the sections built in.
+    try {
+        CsPanel.applyOrder(stack);
+    } catch (eOrder) {
+        problems.push("section order (" + eOrder + ")");
+    }
+    try {
+        // applyOrder already calls this internally when a saved order
+        // exists; it does NOT when there is none (a first-ever build)
+        // or when the saved order came back mismatched, and either way
+        // the loop above never called addWidget itself in grid mode --
+        // so this is the only thing that can place the boxes then.
+        CsPanel.relayout(stack);
+    } catch (eLayout) {
+        problems.push("section layout (" + eLayout + ")");
     }
 
     body.setLayout(layout);
