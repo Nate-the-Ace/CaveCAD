@@ -226,3 +226,212 @@ CsArea.placements = function(verts, entry, seed, scale, density) {
     }
     return out;
 };
+
+// ---------------------------------------------------------------------
+// Building and clearing a fill in a real document (Task 5). Everything
+// above this line is pure geometry and never touches doc/op; everything
+// below writes into one.
+// ---------------------------------------------------------------------
+
+/** The XDATA key every generated fill entity carries. Read back by
+ *  ownedBy/clear so a boundary's fill can be found and thrown away
+ *  without remembering which entities it made. */
+CsArea.OWNER_KEY = "AreaOwner";
+
+/** Keys on the boundary itself -- not read by this file, but named here
+ *  so the stroke action (Task 6) and the listener (Task 7) agree with
+ *  each other on what an area's XDATA looks like. */
+CsArea.ID_KEY = "AreaId";
+CsArea.PATTERN_KEY = "AreaPattern";
+CsArea.SCALE_KEY = "AreaScale";
+CsArea.DENSITY_KEY = "AreaDensity";
+CsArea.SEED_KEY = "AreaSeed";
+
+/** How finely a boundary curve is sampled into a polygon. */
+CsArea.STEP = 0.25;
+
+/**
+ * A boundary entity as [{x, y}, ...].
+ *
+ * THE SPLINE PROXY TRAP. shape.getPointCloud() on an RSpline delegates
+ * (RSpline.cpp) to approximateWithArcs(), which needs a spline proxy
+ * plugin that a `-no-gui -autostart` run never loads -- measured EMPTY
+ * there for both an open and a closed spline, while the identical call
+ * returns real points inside the GUI. Branching on WHETHER that first
+ * attempt came back empty would make one boundary sample differently in
+ * the two environments: polygonArea, bounds and pointInPolygon would
+ * then disagree with themselves across environments, and the same seed
+ * would scatter differently in a screenshot than in this test. So the
+ * branch below is fixed by the shape's TYPE, not by what getPointCloud
+ * happened to return -- a spline ALWAYS goes through getExploded()'s
+ * line/arc segments (not proxy-dependent, and not "an optimisation" to
+ * skip when getPointCloud looks like it worked), and everything else
+ * (polyline, circle, arc, line, ellipse) ALWAYS samples directly, which
+ * is both cheaper and exactly as accurate for those shapes in both
+ * environments. Do not turn this back into an emptiness check.
+ */
+CsArea.vertsOf = function(entity) {
+    var out = [];
+    var shape;
+    try {
+        shape = entity.getData().castToShape();
+    } catch (e) {
+        return [];
+    }
+    if (isNull(shape)) {
+        return [];
+    }
+    try {
+        if (shape.getShapeType() === RShape.Spline) {
+            var segments = entity.getExploded();
+            for (var s = 0; s < segments.length; s++) {
+                var pts = segments[s].getPointCloud(CsArea.STEP);
+                for (var p = 0; p < pts.length; p++) {
+                    out.push({ x: pts[p].x, y: pts[p].y });
+                }
+            }
+        } else {
+            var cloud = shape.getPointCloud(CsArea.STEP);
+            for (var i = 0; i < cloud.length; i++) {
+                out.push({ x: cloud[i].x, y: cloud[i].y });
+            }
+        }
+    } catch (eSample) {
+        return [];
+    }
+    return out;
+};
+
+/**
+ * Builds one area's fill into an operation the caller applies.
+ *
+ * Never throws: a missing block or an unshaped boundary comes back as
+ * {ok: false, reason} so a caller (the stroke action, the listener) can
+ * report it to the caver instead of crashing a transaction.
+ *
+ * \param opts {id, seed, scale, density, layer}
+ * \return {ok, count, reason}
+ */
+CsArea.build = function(doc, op, boundary, entry, opts) {
+    if (isNull(entry)) {
+        return { ok: false, count: 0, reason: "no such pattern" };
+    }
+    var verts = CsArea.vertsOf(boundary);
+    if (verts.length < 3) {
+        return { ok: false, count: 0, reason: "the boundary has no area" };
+    }
+    if (entry.engine === "filled") {
+        return CsArea.buildHatch(doc, op, boundary, entry, opts);
+    }
+    var places = CsArea.placements(verts, entry, opts.seed, opts.scale,
+        opts.density);
+    // Built into a local array FIRST, queued into `op` only once every
+    // placement has cleared the missing-block check. Calling
+    // op.addObject as each one passes would leave a LATER failure with
+    // earlier references already sitting in the caller's operation --
+    // and since this function reports {ok: false}, a caller has every
+    // reason to think applying that op is safe. It is not: op does not
+    // know "ok" from "false", only what was queued into it. Nothing
+    // partial may ever reach op.
+    var refs = [];
+    for (var i = 0; i < places.length; i++) {
+        var block = doc.queryBlock(places[i].block);
+        // isNull, not a truthiness check: a missing block comes back as
+        // a WRAPPED non-null object (typeof "object", getId()
+        // undefined), not JS null -- see the file header on CsArea and
+        // tools/make_area_blocks.js for the same trap.
+        if (isNull(block)) {
+            return { ok: false, count: 0,
+                reason: "this drawing has no " + places[i].block + " block" };
+        }
+        var data = new RBlockReferenceData(block.getId(),
+            new RVector(places[i].x, places[i].y),
+            new RVector(places[i].scale, places[i].scale),
+            places[i].angle, 1, 1, 1, 1);
+        var ref = new RBlockReferenceEntity(doc, data);
+        ref.setLayerId(doc.getLayerId(opts.layer));
+        CsTags.set(ref, CsArea.OWNER_KEY, opts.id);
+        refs.push(ref);
+    }
+    for (var r = 0; r < refs.length; r++) {
+        op.addObject(refs[r], false);
+    }
+    return { ok: true, count: refs.length, reason: "" };
+};
+
+/**
+ * One hatch entity over the boundary loop. BEDROCK has no pattern and
+ * draws nothing: its edge IS the symbol, so there is nothing to fill.
+ *
+ * THE POLYLINE TRAP. RHatchData.addBoundary will not stand a closed
+ * POLYLINE up as a single boundary shape -- QCAD's own Hatch tool
+ * (scripts/Draw/Hatch/HatchFromSelection/HatchFromSelection.js,
+ * .traverse) never tries: for a closed polyline it explodes into line
+ * and arc segments and adds each one to the loop, and only a circle,
+ * full ellipse or closed SPLINE goes in whole via
+ * getData().castToShape().clone(). Duck-typed on getVertices rather
+ * than the simple.js/library.js global isPolylineEntity, which this
+ * Core file has no business assuming is loaded.
+ */
+CsArea.buildHatch = function(doc, op, boundary, entry, opts) {
+    if (isNull(entry.pattern)) {
+        return { ok: true, count: 0, reason: "" };
+    }
+    var data = new RHatchData(entry.solid === true,
+        isNull(entry.patternScale) ? 1.0 : entry.patternScale,
+        isNull(entry.patternAngle) ? 0.0 : entry.patternAngle,
+        entry.pattern);
+    data.newLoop();
+    try {
+        var bd = boundary.getData();
+        if (typeof bd.getVertices === "function" &&
+                typeof boundary.getExploded === "function") {
+            var segments = boundary.getExploded();
+            for (var i = 0; i < segments.length; i++) {
+                data.addBoundary(segments[i].clone());
+            }
+        } else {
+            data.addBoundary(bd.castToShape().clone());
+        }
+    } catch (eShape) {
+        return { ok: false, count: 0,
+            reason: "this boundary has no usable shape" };
+    }
+    var hatch = new RHatchEntity(doc, data);
+    hatch.setLayerId(doc.getLayerId(opts.layer));
+    CsTags.set(hatch, CsArea.OWNER_KEY, opts.id);
+    op.addObject(hatch, false);
+    return { ok: true, count: 1, reason: "" };
+};
+
+/** Every entity id belonging to one area's fill. */
+CsArea.ownedBy = function(doc, areaId) {
+    var out = [];
+    var ids = doc.queryAllEntities(false, true);
+    for (var i = 0; i < ids.length; i++) {
+        var e = doc.queryEntity(ids[i]);
+        if (isNull(e)) {
+            continue;
+        }
+        if (CsTags.get(e, CsArea.OWNER_KEY) === areaId) {
+            out.push(ids[i]);
+        }
+    }
+    return out;
+};
+
+/** How many entities belong to one area's fill. */
+CsArea.countOwned = function(doc, areaId) {
+    return CsArea.ownedBy(doc, areaId).length;
+};
+
+/** Deletes one area's fill into an operation the caller applies. Only
+ *  entities tagged with THIS areaId -- a neighbour's fill, or anything
+ *  else in the drawing, is untouched. */
+CsArea.clear = function(doc, op, areaId) {
+    var ids = CsArea.ownedBy(doc, areaId);
+    for (var i = 0; i < ids.length; i++) {
+        op.deleteObject(doc.queryEntityDirect(ids[i]));
+    }
+    return ids.length;
+};
