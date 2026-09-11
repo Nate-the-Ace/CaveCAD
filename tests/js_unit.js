@@ -22916,6 +22916,205 @@ eqs(CsSymbolStore.PREFIX, "SYM_", "the symbol block prefix");
 })();
 
 // ---------------------------------------------------------------------
+// CsPanel.gridSpans -- where each section sits when a stack lays out
+// as a grid instead of a single column.
+// ---------------------------------------------------------------------
+
+(function testGridSpans() {
+    function spans(n, c) { return JSON.stringify(CsPanel.gridSpans(n, c)); }
+    eqs(spans(1, 2), JSON.stringify([{row:0,col:0,span:2}]),
+        "gridSpans: one section takes the whole width");
+    eqs(spans(2, 2), JSON.stringify([{row:0,col:0,span:1},
+                                     {row:0,col:1,span:1}]),
+        "gridSpans: two sections share a row");
+    eqs(spans(3, 2), JSON.stringify([{row:0,col:0,span:1},
+                                     {row:0,col:1,span:1},
+                                     {row:1,col:0,span:2}]),
+        "gridSpans: a lone third section spans the width");
+    eqs(spans(4, 2), JSON.stringify([{row:0,col:0,span:1},
+                                     {row:0,col:1,span:1},
+                                     {row:1,col:0,span:1},
+                                     {row:1,col:1,span:1}]),
+        "gridSpans: four sections make two full rows");
+    eqs(spans(5, 2), JSON.stringify([{row:0,col:0,span:1},
+                                     {row:0,col:1,span:1},
+                                     {row:1,col:0,span:1},
+                                     {row:1,col:1,span:1},
+                                     {row:2,col:0,span:2}]),
+        "gridSpans: a lone fifth section spans the width");
+
+    eqs(spans(3, 2.9), spans(3, 2),
+        "gridSpans: a fractional column count is floored, not handed " +
+        "to the bridge as a non-integer column index");
+})();
+
+// ---------------------------------------------------------------------
+// CsPanel.relayout (grid mode) -- the failure paths gridSpans itself
+// cannot exercise, proven against a mock layout so they run everywhere
+// including the node fallback.
+// ---------------------------------------------------------------------
+//
+// The rule under test: an ugly grid beats a missing section. Whatever
+// throws, and wherever, every section still gets SOME cell.
+
+(function testGridRelayoutRecovery() {
+    function mockBox(name) {
+        return { box: { name: name }, header: null, title: name };
+    }
+    function mockLayout(opts) {
+        opts = opts || {};
+        var calls = { removed: [], added: [] };
+        // Only the FIRST addWidget on a given box can be made to fail --
+        // it stands in for the real grid cell being refused, once, not
+        // for a bridge that refuses that box outright forever (which
+        // relayout cannot be expected to work around).
+        var addAttempts = {};
+        return {
+            calls: calls,
+            removeWidget: function(box) {
+                if (opts.failRemove === true) {
+                    throw new Error("remove refused: " + box.name);
+                }
+                calls.removed.push(box.name);
+            },
+            addWidget: function(box, row, col, rowSpan, colSpan) {
+                addAttempts[box.name] = (addAttempts[box.name] || 0) + 1;
+                if (opts.failAddNames &&
+                        opts.failAddNames.indexOf(box.name) !== -1 &&
+                        addAttempts[box.name] === 1) {
+                    throw new Error("add refused: " + box.name);
+                }
+                calls.added.push({ name: box.name, row: row, col: col,
+                    rowSpan: rowSpan, colSpan: colSpan });
+            }
+        };
+    }
+    function addedNames(layout) {
+        var out = [];
+        for (var i = 0; i < layout.calls.added.length; i++) {
+            out.push(layout.calls.added[i].name);
+        }
+        return out;
+    }
+    function addedFor(layout, name) {
+        for (var i = 0; i < layout.calls.added.length; i++) {
+            if (layout.calls.added[i].name === name) {
+                return layout.calls.added[i];
+            }
+        }
+        return null;
+    }
+
+    // Base case, nothing fails: the 5-argument shape matches gridSpans.
+    (function() {
+        var layout = mockLayout();
+        var stack = CsPanel.stack(layout, "unused", 0, null, 2);
+        CsPanel.stackAdd(stack, mockBox("A"), "A");
+        CsPanel.stackAdd(stack, mockBox("B"), "B");
+        CsPanel.stackAdd(stack, mockBox("C"), "C");
+        CsPanel.relayout(stack);
+        eqs(addedNames(layout).join(","), "A,B,C",
+            "grid relayout: every section placed when nothing throws");
+        var c = addedFor(layout, "C");
+        eqs(c.row + "," + c.col + "," + c.colSpan, "1,0,2",
+            "grid relayout: the lone last section's real span reaches " +
+            "the bridge");
+    })();
+
+    // One section's real cell is refused -- it still lands somewhere.
+    (function() {
+        var layout = mockLayout({ failAddNames: ["B"] });
+        var stack = CsPanel.stack(layout, "unused", 0, null, 2);
+        CsPanel.stackAdd(stack, mockBox("A"), "A");
+        CsPanel.stackAdd(stack, mockBox("B"), "B");
+        CsPanel.stackAdd(stack, mockBox("C"), "C");
+        CsPanel.relayout(stack);
+        ok(addedFor(layout, "A") !== null && addedFor(layout, "C") !== null,
+            "grid relayout: the sections that did not fail are unaffected " +
+            "by the one that did");
+        var b = addedFor(layout, "B");
+        ok(b !== null,
+            "grid relayout: a section whose real cell was refused still " +
+            "gets a recovered plain cell, not silence");
+        eqs(b.row + "," + b.col + "," + b.colSpan, "1,0,1",
+            "grid relayout: the recovery cell is a plain 1x1 placement, " +
+            "spans be damned");
+    })();
+
+    // removeWidget itself throws -- the add loop must still run for
+    // every section rather than returning with none of them re-added.
+    (function() {
+        var layout = mockLayout({ failRemove: true });
+        var stack = CsPanel.stack(layout, "unused", 0, null, 2);
+        CsPanel.stackAdd(stack, mockBox("A"), "A");
+        CsPanel.stackAdd(stack, mockBox("B"), "B");
+        CsPanel.stackAdd(stack, mockBox("C"), "C");
+        CsPanel.relayout(stack);
+        eqs(addedNames(layout).join(","), "A,B,C",
+            "grid relayout: a bridge with no removeWidget still gets " +
+            "every section re-added, not none of them");
+    })();
+})();
+
+// ---------------------------------------------------------------------
+// CsPanel.relayout (grid mode, real widgets) -- proves the same call
+// against an actual QGridLayout, where the harness has one. Under the
+// plain-node fallback (no CaveCAD bridge) there is no QWidget at all,
+// so this is skipped there rather than faked; the mock suite above is
+// what runs everywhere.
+// ---------------------------------------------------------------------
+
+(function testGridRelayoutRealWidgets() {
+    if (typeof QWidget === "undefined" || typeof QGridLayout === "undefined") {
+        return;
+    }
+    // itemAtPosition hands back a wrapper that is never === the widget
+    // this code passed in (a QCAD JS bridge trap already known from
+    // other panels), so identity is read through objectName instead.
+    function nameAt(grid, r, c) {
+        try {
+            var item = grid.itemAtPosition(r, c);
+            if (isNull(item)) {
+                return null;
+            }
+            var w = item.widget();
+            return isNull(w) ? null : String(w.objectName);
+        } catch (e) {
+            return "ERR:" + e;
+        }
+    }
+    function realBox(name) {
+        var w = new QWidget();
+        w.objectName = name;
+        return { box: w, header: null, title: name };
+    }
+
+    var grid = new QGridLayout();
+    var stack = CsPanel.stack(grid, "unused", 1, null, 2);
+    CsPanel.stackAdd(stack, realBox("A"), "A");
+    CsPanel.stackAdd(stack, realBox("B"), "B");
+    CsPanel.stackAdd(stack, realBox("C"), "C");
+    // The caller places the initial boxes itself, same contract as the
+    // box layout; baseIndex 1 stands in for one full-width widget above
+    // the grid (a readout, say) occupying row 0.
+    grid.addWidget(stack.sections[0].box, 1, 0, 1, 1);
+    grid.addWidget(stack.sections[1].box, 1, 1, 1, 1);
+    grid.addWidget(stack.sections[2].box, 2, 0, 1, 1);
+
+    CsPanel.relayout(stack);
+
+    eqs(nameAt(grid, 1, 0), "A",
+        "grid relayout (real): first section at baseIndex row, col 0");
+    eqs(nameAt(grid, 1, 1), "B",
+        "grid relayout (real): second section at baseIndex row, col 1");
+    eqs(nameAt(grid, 2, 0), "C",
+        "grid relayout (real): the lone third starts the next row");
+    eqs(nameAt(grid, 2, 1), "C",
+        "grid relayout (real): and its span really reaches the bridge's " +
+        "own layout, not just the pure gridSpans math");
+})();
+
+// ---------------------------------------------------------------------
 // FeatureTrace.layersOfTile -- what a tile's right-click menu acts on.
 // ---------------------------------------------------------------------
 //

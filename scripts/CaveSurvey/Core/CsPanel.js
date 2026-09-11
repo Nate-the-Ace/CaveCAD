@@ -276,18 +276,53 @@ CsPanel.orderedTitles = function(titles, saved) {
  * being dragged. So the reordering is on the header's own right-click
  * menu, which any widget can have.
  *
- * `baseIndex` is where the first section sits in the layout, so a panel
- * can keep a readout or a search box above the stack and still let the
- * sections below it be shuffled.
+ * `baseIndex` MEANS SOMETHING DIFFERENT in each mode. Box mode (no
+ * `columns`): it is a widget COUNT -- how many widgets precede the
+ * stack in `layout`, so a readout or a search box above it keeps its
+ * place while the sections below are shuffled. Grid mode (`columns`
+ * set): it is a ROW OFFSET, added to every section's row before it goes
+ * into the QGridLayout. That is only correct if whatever the panel put
+ * above the grid also lives in that same QGridLayout, one full-width
+ * row per widget -- a widget occupying two rows, or sharing a row with
+ * something else, would throw the offset off and nothing here would
+ * notice.
+ *
+ * `columns` is omitted for the box-layout behaviour every existing
+ * caller relies on -- `layout` stays a single column and sections are
+ * inserted with `insertWidget`. Pass a column count to lay `layout`
+ * (which must then be a QGridLayout) out as a grid instead: see
+ * `gridSpans` for the shape, and `relayout` for how it is applied.
  */
-CsPanel.stack = function(layout, settingKey, baseIndex, onChanged) {
+CsPanel.stack = function(layout, settingKey, baseIndex, onChanged, columns) {
     return {
         layout: layout,
         settingKey: settingKey,
         baseIndex: isNull(baseIndex) ? 0 : baseIndex,
         onChanged: isNull(onChanged) ? null : onChanged,
+        columns: isNull(columns) ? null : columns,
         sections: []
     };
+};
+
+/**
+ * Where each of `count` sections sits in a grid `columns` wide.
+ *
+ * A section ALONE on the last row spans the width rather than leaving a
+ * hole beside it -- a dock is narrow and half of one is not worth
+ * wasting (Nathan, 2026-09-11).
+ *
+ * Pure.
+ */
+CsPanel.gridSpans = function(count, columns) {
+    var cols = isNull(columns) || columns < 1 ? 1 : Math.floor(columns);
+    var out = [];
+    for (var i = 0; i < count; i++) {
+        var row = Math.floor(i / cols);
+        var col = i % cols;
+        var lone = (col === 0) && (i === count - 1);
+        out.push({ row: row, col: col, span: lone ? cols : 1 });
+    }
+    return out;
 };
 
 /** The titles currently in a stack, in their current order. */
@@ -377,20 +412,85 @@ CsPanel.resetOrder = function(stack) {
     }
 };
 
-/** Rearranges a stack's boxes in the layout to match its own order. */
+/** Rearranges a stack's boxes in the layout to match its own order.
+ *
+ *  Two shapes: a plain column, which is every existing caller, uses
+ *  `insertWidget` at the section's index past `baseIndex`. A grid
+ *  (`stack.columns` set) instead removes and re-adds each box at the
+ *  row/column `gridSpans` gives it, spanning the last lone one.
+ *
+ *  THE CHOICE HERE: an ugly grid over a missing section. A caver whose
+ *  Symbols section evaporated cannot work; one whose grid came out as a
+ *  single ragged column still can. So nothing in the grid branch is
+ *  allowed to simply stop partway through and leave a box neither
+ *  placed nor tracked -- every section gets a recovery attempt at a
+ *  plain 1x1 cell if its real spot did not take, whether that is
+ *  because `removeWidget` does not exist on this bridge or because the
+ *  five-argument `addWidget` refused one particular box. Only a box
+ *  that refuses BOTH attempts is left to the bridge's own layout
+ *  machinery, which by then has already been told about it twice.
+ *
+ *  TEST COVERAGE. `tests/js_unit.js` proves two different things about
+ *  this: a real QGridLayout (guarded by `typeof QWidget`, since the
+ *  node fallback has no widget bridge at all) shows the 5-argument
+ *  `addWidget` and the `baseIndex` row offset actually land where
+ *  `gridSpans` says, and a mock layout proves the recovery pass fires
+ *  when `removeWidget`/`addWidget` throw -- CaveCAD's own bridge never
+ *  refused either in testing, so that path is exercised by the mock,
+ *  not the live one. The right-click Move Up/Down driving a grid stack
+ *  end to end is not simulated here; that is Task 13's live check. */
 CsPanel.relayout = function(stack) {
     var i;
+    if (isNull(stack.columns)) {
+        try {
+            for (i = 0; i < stack.sections.length; i++) {
+                stack.layout.removeWidget(stack.sections[i].box);
+            }
+            for (i = 0; i < stack.sections.length; i++) {
+                stack.layout.insertWidget(stack.baseIndex + i,
+                    stack.sections[i].box, 0, 0);
+            }
+        } catch (e) {
+            // a bridge without insertWidget leaves the order alone,
+            // which is the panel's own order -- untidy, never broken
+        }
+        return;
+    }
+    // Removal is best-effort and NEVER aborts the rest of the function:
+    // a bridge that throws partway through still gets every section
+    // handed to the add loop below, whether or not it actually left the
+    // layout.
     try {
         for (i = 0; i < stack.sections.length; i++) {
             stack.layout.removeWidget(stack.sections[i].box);
         }
-        for (i = 0; i < stack.sections.length; i++) {
-            stack.layout.insertWidget(stack.baseIndex + i,
-                stack.sections[i].box, 0, 0);
+    } catch (eRemove) {
+    }
+    var spans = CsPanel.gridSpans(stack.sections.length, stack.columns);
+    var placed = [];
+    for (i = 0; i < stack.sections.length; i++) {
+        placed.push(false);
+        try {
+            stack.layout.addWidget(stack.sections[i].box,
+                stack.baseIndex + spans[i].row, spans[i].col, 1,
+                spans[i].span);
+            placed[i] = true;
+        } catch (eAdd) {
+            // the grid placement refused this one box; recovered below
         }
-    } catch (e) {
-        // a bridge without insertWidget leaves the order alone, which
-        // is the panel's own order -- untidy, never broken
+    }
+    for (i = 0; i < stack.sections.length; i++) {
+        if (placed[i]) {
+            continue;
+        }
+        try {
+            // Spans be damned -- a plain cell of its own beats a
+            // section that vanished from the panel.
+            stack.layout.addWidget(stack.sections[i].box,
+                stack.baseIndex + i, 0, 1, 1);
+        } catch (eRecover) {
+            // both attempts refused: nothing more this function can do
+        }
     }
 };
 
