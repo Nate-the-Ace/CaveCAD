@@ -208,36 +208,55 @@ SketchScans.saveCollapsed = function(scans, collapsed, rows) {
     }
 };
 
-// This cave's bookmarks, from settings. Stored exactly like the
-// collapsed set -- see CsScanTree.SETTING_BOOKMARKS for why those
-// helpers are shared rather than copied.
+// This cave's completed pages. THE STORE IS CsScanList's -- both
+// panels read and write through it, because each keeping its own copy
+// is exactly how the two got out of step.
 SketchScans.loadBookmarks = function(scans) {
-    try {
-        var map = CsScanTree.parseCollapsed(
-            RSettings.getStringValue(CsScanTree.SETTING_BOOKMARKS, ""));
-        return CsScanTree.collapsedSetFor(map, scans);
-    } catch (e) {
-        return {};
+    return CsScanList.loadComplete(scans);
+};
+
+/** Redraws every row's text from the CURRENT marks.
+ *
+ *  Every row and not just one: a folder's tick depends on what is
+ *  complete BENEATH it, so finishing a page can change an ancestor's
+ *  text as well as its own. */
+SketchScans.repaintMarks = function() {
+    var w = SketchScans.w;
+    if (isNull(w) || isNull(w.list) || isNull(w.rows)) {
+        return;
+    }
+    for (var r = 0; r < w.rows.length; r++) {
+        try {
+            w.list.item(r, 0).setText(SketchScans.rowText(
+                w.rows[r], w.collapsed, w.bookmarks, w.rows));
+        } catch (eText) {
+            // a stale glyph is cosmetic; the mark still stands
+        }
     }
 };
 
-// Writes them back, keeping only scans the panel actually listed -- a
-// bookmark on a scan that has been deleted or renamed falls out
-// instead of accreting forever.
-SketchScans.saveBookmarks = function(scans, bookmarks, rows) {
-    try {
-        var map = CsScanTree.parseCollapsed(
-            RSettings.getStringValue(CsScanTree.SETTING_BOOKMARKS, ""));
-        var valid = [];
-        for (var i = 0; i < rows.length; i++) {
-            if (rows[i].kind === "file") { valid.push(rows[i].rel); }
-        }
-        CsScanTree.recordCollapsed(map, scans, bookmarks, valid);
-        RSettings.setValue(CsScanTree.SETTING_BOOKMARKS,
-            CsScanTree.serializeCollapsed(map));
-    } catch (e) {
-        // a bridge without RSettings just forgets the bookmarks
+/** The other panel marked a page: take the store's word for it and
+ *  repaint. Registered once, at fill time. */
+SketchScans.marksChanged = function(folder) {
+    var w = SketchScans.w;
+    if (isNull(w) || w.scans === null || w.scans !== folder) {
+        return;
     }
+    w.bookmarks = CsScanList.loadComplete(folder);
+    SketchScans.repaintMarks();
+};
+
+// The FILE rows this panel listed, for pruning marks on pages that are
+// no longer there.
+SketchScans.listedRels = function(rows) {
+    var valid = [];
+    if (isNull(rows)) {
+        return null;
+    }
+    for (var i = 0; i < rows.length; i++) {
+        if (rows[i].kind === "file") { valid.push(rows[i].rel); }
+    }
+    return valid;
 };
 
 // The scan this cave was left on, from settings, or null.
@@ -2041,23 +2060,12 @@ SketchScans.buildDock = function(appWin) {
             return;
         }
         var rel = w.rows[row].rel;
-        if (w.bookmarks[rel] === true) {
-            delete w.bookmarks[rel];
-        } else {
-            w.bookmarks[rel] = true;
-        }
-        // Repaint every row, not just this one: a folder row's star
-        // depends on what is bookmarked BENEATH it, so bookmarking a
-        // scan can change an ancestor's text as well as its own.
-        for (var r = 0; r < w.rows.length; r++) {
-            try {
-                w.list.item(r, 0).setText(
-                    SketchScans.rowText(w.rows[r], w.collapsed, w.bookmarks, w.rows));
-            } catch (eText) {
-                // a stale glyph is cosmetic; the bookmark still stands
-            }
-        }
-        SketchScans.saveBookmarks(w.scans, w.bookmarks, w.rows);
+        // READ-MODIFY-WRITE, and the set that comes back is the one on
+        // disk -- not this panel's idea of it, which the other panel
+        // may have moved on from since this list was filled.
+        w.bookmarks = CsScanList.toggleComplete(w.scans, rel,
+            SketchScans.listedRels(w.rows));
+        SketchScans.repaintMarks();
         if (row >= 0) {
             w.list.selectRow(row);
         }
@@ -2228,6 +2236,10 @@ SketchScans.rebuild = function() {
     w.rows = CsScanTree.rowsOf(files);
     w.collapsed = SketchScans.loadCollapsed(scans);
     w.bookmarks = SketchScans.loadBookmarks(scans);
+    // While the Survey Notebook is open it is marking the same pages.
+    // ONE SLOT per panel, so refilling replaces this rather than
+    // stacking another closure on the old rows.
+    CsScanList.watch("SketchScans", SketchScans.marksChanged);
 
     CsScanList.fill(w.list, w.rows,
         { folder: scans, collapsed: w.collapsed, complete: w.bookmarks },

@@ -1919,14 +1919,33 @@ class TestScanListIsShared(unittest.TestCase):
                     % (name, wording))
 
     def test_both_panels_read_the_same_marks(self):
-        """A page ticked while tracing is ticked while typing."""
+        """A page ticked while tracing is ticked while typing.
+
+        Through CsScanList and not the setting directly. Each panel
+        used to parse SETTING_BOOKMARKS itself, keep its own copy of
+        the completed set, and write the WHOLE copy back on a toggle --
+        so whichever panel ticked second undid the other's tick with a
+        copy loaded before it happened. The store does the
+        read-modify-write now, which is only true if neither panel can
+        still write the setting behind its back.
+        """
         for folder, name in (("SketchScans", "SketchScans.js"),
                              ("SurveyNotebook", "SurveyNotebook.js")):
             panel = self.source(folder, name)
             self.assertIn(
+                "CsScanList.toggleComplete", panel,
+                "%s should mark pages through the shared store" % name)
+            self.assertIn(
+                "CsScanList.loadComplete", panel,
+                "%s should read the ticks from the shared store" % name)
+            self.assertIn(
+                "CsScanList.watch(", panel,
+                "%s should repaint when the other panel marks a page"
+                % name)
+            self.assertNotIn(
                 "CsScanTree.SETTING_BOOKMARKS", panel,
-                "%s should read the ticks from the one setting that "
-                "holds them" % name)
+                "%s writes the marks setting itself -- that is the "
+                "whole-set write the two panels drifted on" % name)
 
 
 class TestTeachingCave(unittest.TestCase):

@@ -3018,12 +3018,41 @@ SurveyNotebook.fillScans = function(w) {
     w.scanCollapsed = CsScanTree.collapsedSetFor(
         CsScanTree.parseCollapsed(RSettings.getStringValue(
             CsScanTree.SETTING, "")), folder);
-    w.scanComplete = CsScanTree.collapsedSetFor(
-        CsScanTree.parseCollapsed(RSettings.getStringValue(
-            CsScanTree.SETTING_BOOKMARKS, "")), folder);
+    w.scanComplete = CsScanList.loadComplete(folder);
+    // While Sketch Scans is open it is marking the same pages. ONE
+    // SLOT per panel, so refilling replaces this rather than stacking
+    // another closure on the old rows.
+    CsScanList.watch("SurveyNotebook", function(changed) {
+        SurveyNotebook.marksChanged(w, changed);
+    });
     CsScanList.fill(w.scanList, w.scanRows,
         { folder: folder, collapsed: w.scanCollapsed,
           complete: w.scanComplete }, {});
+};
+
+/** The other panel marked a page: take the store's word for it and
+ *  redraw. Every row, because a trip is ticked when everything in it
+ *  is done -- a page finished elsewhere can tick a folder here. */
+SurveyNotebook.marksChanged = function(w, folder) {
+    if (isNull(w) || isNull(w.scanList) || isNull(w.scanRows) ||
+            isNull(w.scansFolder) || w.scansFolder !== folder) {
+        return;
+    }
+    w.scanComplete = CsScanList.loadComplete(folder);
+    var keep = -1;
+    try {
+        keep = w.scanList.currentRow();
+    } catch (eRow) {
+    }
+    CsScanList.fill(w.scanList, w.scanRows,
+        { folder: folder, collapsed: w.scanCollapsed,
+          complete: w.scanComplete }, {});
+    try {
+        if (keep >= 0) {
+            w.scanList.setCurrentCell(keep, 0);
+        }
+    } catch (eSel) {
+    }
 };
 
 /** One row saying why the browser is empty. */
@@ -3085,22 +3114,16 @@ SurveyNotebook.toggleScanComplete = function(w, row) {
         return;
     }
     var rel = w.scanRows[row].rel;
-    w.scanComplete[rel] = (w.scanComplete[rel] !== true);
-    try {
-        var map = CsScanTree.parseCollapsed(RSettings.getStringValue(
-            CsScanTree.SETTING_BOOKMARKS, ""));
-        var rels = [];
-        for (var i = 0; i < w.scanRows.length; i++) {
-            if (w.scanRows[i].kind === "file") {
-                rels.push(w.scanRows[i].rel);
-            }
+    var rels = [];
+    for (var i = 0; i < w.scanRows.length; i++) {
+        if (w.scanRows[i].kind === "file") {
+            rels.push(w.scanRows[i].rel);
         }
-        CsScanTree.recordCollapsed(map, w.scansFolder, w.scanComplete,
-            rels);
-        RSettings.setValue(CsScanTree.SETTING_BOOKMARKS,
-            CsScanTree.serializeCollapsed(map));
-    } catch (eSave) {
     }
+    // READ-MODIFY-WRITE through the shared store, and draw from what
+    // comes back: Sketch Scans is marking the same pages, and writing
+    // this panel's whole copy back is how the two undid each other.
+    w.scanComplete = CsScanList.toggleComplete(w.scansFolder, rel, rels);
     // The page's own row, and every folder above it: a trip is ticked
     // when everything in it is done, so finishing the last page of one
     // changes a row the caver may not be looking at.
