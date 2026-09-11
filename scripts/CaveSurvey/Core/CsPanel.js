@@ -440,68 +440,6 @@ CsPanel.formGrid = function(fieldColumns) {
     return grid;
 };
 
-/**
- * The two ways to take work back, as a row of buttons: **Delete Last**
- * and **Erase**.
- *
- * ONE COPY, both panels -- this file's whole reason (see the header).
- * A caver who learns that a bad drop is one click to undo in the Symbol
- * Palette must not find Feature Trace has no such thing.
- *
- * WHY BOTH, when either alone sounds sufficient: they answer different
- * mistakes. Delete Last is the one you notice IMMEDIATELY -- the drag
- * that slipped, gone without leaving the keyboard. Erase is the one you
- * notice four strokes later, where undo would cost the four good ones
- * that followed it.
- *
- * Neither is Ctrl+Z's replacement, and the tooltips say so: an
- * extension is a single transaction, and undo is the right tool for
- * taking back part of a line rather than the whole of it.
- *
- * `onDeleteLast` and `onErase` are the panel's own callbacks -- this
- * builds and wires the row; what a click MEANS belongs to the panel
- * that knows its own layers.
- *
- * \return {row, deleteButton, eraseButton} -- buttons may be missing on
- *         a bridge that refused them, which is a row with fewer buttons
- *         rather than a panel that does not build.
- */
-CsPanel.undoRow = function(parent, onDeleteLast, onErase) {
-    var out = { row: null, deleteButton: null, eraseButton: null };
-    var row = new QHBoxLayout();
-    try {
-        row.setContentsMargins(4, 2, 4, 2);
-        row.setSpacing(6);
-    } catch (eMargins) {
-    }
-
-    try {
-        var del = new QPushButton(qsTr("Delete Last"), parent);
-        del.toolTip = qsTr("Remove the last thing you drew. A stroke that " +
-            "CONTINUED an existing line is not deleted this way -- press " +
-            "Ctrl+Z, which takes back that stroke alone.");
-        del.clicked.connect(onDeleteLast);
-        row.addWidget(del, 1, 0);
-        out.deleteButton = del;
-    } catch (eDel) {
-    }
-
-    try {
-        var erase = new QPushButton(qsTr("Erase"), parent);
-        erase.checkable = true;
-        erase.toolTip = qsTr("Click your own linework to remove it, one " +
-            "piece at a time. Only what this panel draws can be erased " +
-            "this way: the survey, its stations and your scans cannot.");
-        erase.clicked.connect(onErase);
-        row.addWidget(erase, 1, 0);
-        out.eraseButton = erase;
-    } catch (eErase) {
-    }
-
-    out.row = row;
-    return out;
-};
-
 /** How many tiles a Recent row keeps. Five, because cave work is a
  *  handful of features repeated a thousand times -- and because a row
  *  that scrolls is a second list to search rather than a shortcut. */

@@ -552,12 +552,6 @@ FeatureTraceRun.prototype.commit = function() {
             }
         }
         this.warnUnclaimedProfile(pathFrame, layerName);
-        // What Delete Last would take back. `extended` travels with it:
-        // a stroke that GREW a wall cannot be deleted as "the last
-        // stroke" -- the entity is the whole wall, five earlier strokes
-        // included -- and CsErase says so rather than deleting them.
-        CsErase.noteDrawn(doc, result.id, layerName, "feature",
-            result.extended === true);
         FeatureTraceRun.lastTrace = isNull(result.id) ? null : {
             id: result.id, layer: layerName, doc: FeatureTraceRun.docKey(doc)
         };

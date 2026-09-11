@@ -735,10 +735,6 @@ ShapedLinesRun.prototype.commit = function() {
     EAction.handleUserMessage(qsTr("%1: %2 decoration entities along " +
         "%3 points").arg(spec.label).arg(built.count).arg(kept.length));
 
-    // What Delete Last would take back: the whole feature, spine and
-    // ornament, which CsErase.wholeFeature resolves from this one id.
-    CsErase.noteDrawn(doc, spine.getId(), spec.label, "shaped", false);
-
     ShapedLinesRun.lastSpine = {
         shapeId: CsTags.get(spine, CsShapeLine.KEY.ID),
         layer: frameLayers.spine,
@@ -821,10 +817,6 @@ ShapedLinesRun.prototype.growExisting = function(doc, di, spec) {
 
     EAction.handleUserMessage(qsTr("%1: extended -- %2 points, ornament " +
         "rebuilt along the whole line").arg(spec.label).arg(grown.points));
-    // Marked EXTENDED: Delete Last must refuse this one and point at
-    // Ctrl+Z, which takes the addition alone. Deleting it would take
-    // the ledge the caver has been building all morning.
-    CsErase.noteDrawn(doc, this.growId, spec.label, "shaped", true);
     return true;
 };
 

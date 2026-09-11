@@ -103,7 +103,6 @@ include(includeBasePath + "/CsTags.js");
 include(includeBasePath + "/CsShapeLine.js");
 // After CsShapeLine (a shaped line is erased whole, spine and ornament)
 // and CsTrace (docKey, and the pick distance is TIE_FEET's twin).
-include(includeBasePath + "/CsErase.js");
 // After CsTags (reads ProfileBox tags) and CsTrace (region fallback).
 include(includeBasePath + "/CsProfileBox.js");
 // CsBind before CsDraw: eraseStations calls CsBind's suffix strippers,

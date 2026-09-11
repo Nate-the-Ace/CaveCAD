@@ -607,10 +607,6 @@ SymbolPaletteRun.prototype.commit = function() {
             .arg(feet === null ? "?" : feet.toFixed(1))
             .arg(RMath.rad2deg(this.placementAngle()).toFixed(0)));
     }
-    // What Delete Last would take back, in whichever panel the caver
-    // reaches for it: one record for both, because "the last thing I
-    // drew" is one fact from where they sit.
-    CsErase.noteDrawn(doc, ref.getId(), entry.nss, "symbol", false);
 
     // One more of that symbol in this view, so the tile's count is now
     // one behind. Recounted HERE rather than on a document listener,

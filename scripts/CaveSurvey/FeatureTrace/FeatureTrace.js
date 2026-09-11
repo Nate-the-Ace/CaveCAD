@@ -15,7 +15,6 @@
 include("scripts/EAction.js");
 include(includeBasePath + "/../Core/CsAll.js");
 include(includeBasePath + "/FeatureTraceRun.js");
-include(includeBasePath + "/FeatureEraseRun.js");
 // The shaped-line draw action, so this panel can arm a ledge or a
 // scallop as readily as a wall: same gesture, same freehand drag, same
 // view routing -- the only difference is that ornament comes with it.
@@ -832,92 +831,6 @@ FeatureTrace.connectTileMenu = function(button, entry) {
 };
 
 /**
- * Deletes the last thing drawn, from either panel.
- *
- * The refusals speak. A caver who presses a button and sees nothing
- * happen assumes the button is broken; the three ways this does nothing
- * -- no record, a stroke that continued a line, a layer that refused --
- * are three different things to do next.
- */
-FeatureTrace.deleteLast = function() {
-    var di = EAction.getDocumentInterface();
-    if (isNull(di)) {
-        return;
-    }
-    var doc = di.getDocument();
-    if (isNull(doc)) {
-        return;
-    }
-    var res = CsErase.deleteLast(doc, di);
-    if (res.status === "deleted") {
-        EAction.handleUserMessage(qsTr("Deleted the last %1 you drew.")
-            .arg(res.label === "" ? qsTr("feature") : res.label));
-    } else if (res.status === "extended") {
-        EAction.handleUserMessage(qsTr("Your last stroke CONTINUED an " +
-            "existing line rather than drawing a new one, so there is no " +
-            "last line to delete -- deleting it would take every earlier " +
-            "stroke of that line too. Press Ctrl+Z, which takes back just " +
-            "that stroke."));
-    } else if (res.status === "failed") {
-        EAction.handleUserMessage(qsTr("That line could not be deleted -- " +
-            "its layer may be locked or frozen."));
-    } else {
-        EAction.handleUserMessage(qsTr("Nothing to delete: nothing has " +
-            "been drawn from these panels in this drawing since it was " +
-            "opened, or what was drawn has already gone."));
-    }
-};
-
-/**
- * Turns Erase mode on and off.
- *
- * A MODE and not a one-shot, because the mistake it answers usually
- * comes in twos: a wandering stroke retraced badly is two lines to
- * clear before the third try. Escape leaves it, and the button
- * un-presses itself when the action ends however it ended -- a mode
- * whose button still looks armed after Escape is a mode a caver
- * believes they are still in.
- */
-FeatureTrace.toggleErase = function() {
-    var w = FeatureTrace.widgets;
-    var wanted = true;
-    if (!isNull(w) && !isNull(w.eraseButton)) {
-        try {
-            wanted = (w.eraseButton.checked === true);
-        } catch (eRead) {
-        }
-    }
-    var di = EAction.getDocumentInterface();
-    if (isNull(di)) {
-        return;
-    }
-    if (!wanted) {
-        // Leaving the mode: hand the drawing back to the trace the
-        // panel is armed for, rather than to whatever ran before it.
-        FeatureTrace.startRun();
-        return;
-    }
-    if (!FeatureEraseRun.start(di, null, FeatureTrace.eraseEnded)) {
-        FeatureTrace.eraseEnded();
-        EAction.handleUserMessage(qsTr("Erase mode could not start in " +
-            "this build."));
-    }
-};
-
-/** Un-presses the Erase button. Called by the action as it ends,
- *  whichever way it ended. */
-FeatureTrace.eraseEnded = function() {
-    var w = FeatureTrace.widgets;
-    if (isNull(w) || isNull(w.eraseButton)) {
-        return;
-    }
-    try {
-        w.eraseButton.checked = false;
-    } catch (e) {
-    }
-};
-
-/**
  * Arms the ONE tile a search has left showing, and starts drawing with
  * it. Says so when the search has not narrowed that far.
  *
@@ -1631,16 +1544,6 @@ FeatureTrace.buildBody = function(parent) {
         w.problems.push("section order (" + eOrder + ")");
     }
 
-    // -- taking a stroke back ----------------------------------------
-    try {
-        var undoRow = CsPanel.undoRow(body, FeatureTrace.deleteLast,
-            FeatureTrace.toggleErase);
-        w.eraseButton = undoRow.eraseButton;
-        layout.addLayout(undoRow.row, 0);
-    } catch (eUndo) {
-        w.problems.push("erase controls (" + eUndo + ")");
-    }
-
     // -- what the last trace cost ------------------------------------
     try {
         w.lastLabel = new QLabel(qsTr("Last: --"));
@@ -2059,7 +1962,6 @@ FeatureTrace.init = function(basePath) {
     action.setWidgetNames([]);
 
     FeatureTraceRun.init(basePath);
-    FeatureEraseRun.init(basePath);
 
     // The DOCK is Draw's to build (and Draw.init does it during add-on
     // init, so restoreState() can place it). This one only needs its

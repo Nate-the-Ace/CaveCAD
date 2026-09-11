@@ -29,7 +29,6 @@ include(includeBasePath + "/SymbolPaletteEdit.js");
 // identical -- click a thing of mine and it goes -- and only the list of
 // what counts as "mine" differs, which is a parameter. Two copies of a
 // mouse mode is two places for its exit path to be wrong.
-include(includeBasePath + "/../FeatureTrace/FeatureEraseRun.js");
 
 function SymbolPalette(guiAction) {
     EAction.call(this, guiAction);
@@ -1387,16 +1386,6 @@ SymbolPalette.buildBody = function(parent) {
         w.problems.push("editor row (" + eEditor + ")");
     }
 
-    // -- taking a placement back -------------------------------------
-    try {
-        var undoRow = CsPanel.undoRow(body, SymbolPalette.deleteLast,
-            SymbolPalette.toggleErase);
-        w.eraseButton = undoRow.eraseButton;
-        layout.addLayout(undoRow.row, 0);
-    } catch (eUndo) {
-        w.problems.push("erase controls (" + eUndo + ")");
-    }
-
     body.setLayout(layout);
     SymbolPalette.widgets = w;
 
@@ -1516,88 +1505,6 @@ SymbolPalette.leaveEditorMode = function() {
  * constructing with null: stock Print.js does exactly this, and
  * EAction's null-guiAction paths are not exercised anywhere.
  */
-/**
- * Deletes the last thing drawn, from EITHER panel.
- *
- * Deliberately not "the last SYMBOL": CsErase keeps one record for both
- * panels, because "the last thing I drew" is one fact from where the
- * caver sits. A caver who places a symbol, traces a wall, then reaches
- * for Delete Last means the wall.
- */
-SymbolPalette.deleteLast = function() {
-    var di = EAction.getDocumentInterface();
-    if (isNull(di)) {
-        return;
-    }
-    var doc = di.getDocument();
-    if (isNull(doc)) {
-        return;
-    }
-    var res = CsErase.deleteLast(doc, di);
-    if (res.status === "deleted") {
-        EAction.handleUserMessage(qsTr("Deleted the last %1 you drew.")
-            .arg(res.label === "" ? qsTr("symbol") : res.label));
-    } else if (res.status === "extended") {
-        EAction.handleUserMessage(qsTr("Your last stroke CONTINUED an " +
-            "existing line rather than drawing a new one, so there is no " +
-            "last line to delete -- deleting it would take every earlier " +
-            "stroke of that line too. Press Ctrl+Z, which takes back just " +
-            "that stroke."));
-    } else if (res.status === "failed") {
-        EAction.handleUserMessage(qsTr("That could not be deleted -- its " +
-            "layer may be locked or frozen."));
-    } else {
-        EAction.handleUserMessage(qsTr("Nothing to delete: nothing has " +
-            "been drawn from these panels in this drawing since it was " +
-            "opened, or what was drawn has already gone."));
-    }
-};
-
-/**
- * Turns Erase mode on and off, reaching only the layers the PALETTE
- * places on.
- *
- * A palette erase that could take traced walls would make the two
- * panels' Erase buttons the same button wearing two labels -- and the
- * caver reaching for this one is looking at a symbol.
- */
-SymbolPalette.toggleErase = function() {
-    var w = SymbolPalette.widgets;
-    var wanted = true;
-    if (!isNull(w) && !isNull(w.eraseButton)) {
-        try {
-            wanted = (w.eraseButton.checked === true);
-        } catch (eRead) {
-        }
-    }
-    var di = EAction.getDocumentInterface();
-    if (isNull(di)) {
-        return;
-    }
-    if (!wanted) {
-        SymbolPalette.startRun();
-        return;
-    }
-    if (!FeatureEraseRun.start(di, FeatureEraseRun.symbolLayers(),
-            SymbolPalette.eraseEnded)) {
-        SymbolPalette.eraseEnded();
-        EAction.handleUserMessage(qsTr("Erase mode could not start in " +
-            "this build."));
-    }
-};
-
-/** Un-presses the Erase button, however the mode ended. */
-SymbolPalette.eraseEnded = function() {
-    var w = SymbolPalette.widgets;
-    if (isNull(w) || isNull(w.eraseButton)) {
-        return;
-    }
-    try {
-        w.eraseButton.checked = false;
-    } catch (e) {
-    }
-};
-
 SymbolPalette.startRun = function() {
     var di = EAction.getDocumentInterface();
     if (isNull(di)) {
