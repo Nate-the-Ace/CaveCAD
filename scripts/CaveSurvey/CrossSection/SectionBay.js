@@ -204,6 +204,17 @@ SectionBay.run = function(scanPath, station, calibration, scanSize) {
             qsTr("\n\nScale the scan by hand: draw a line of a known " +
                 "length inside the frame and match the scan to it."));
     }
+    // THE BAY IS A PLACE YOU TRACE, so the panels you trace with come
+    // with it: Feature Trace and the Symbol Palette open here and are
+    // put back on Capture or Cancel. The caver was otherwise fetching
+    // them by hand from a third panel every time, and putting them
+    // away by hand afterwards. See CsPanel.openTracingDocks.
+    try {
+        CsPanel.openTracingDocks();
+    } catch (eDocks) {
+        // a bridge without the docks is a bay you trace in with the
+        // menu, which is what it was before this
+    }
     return bayId;
 };
 
@@ -701,6 +712,11 @@ SectionBay.askStation = function(doc) {
 SectionBay.cancel = function(doc, di, bay) {
     if (isNull(doc) || isNull(di) || bay === null || bay === undefined) {
         return;
+    }
+    // The bay opened them; the bay puts them back.
+    try {
+        CsPanel.restoreTracingDocks();
+    } catch (eDocks) {
     }
     var snapClass = (bay.frame !== null && !isNull(bay.frame)) ?
         CsTags.get(bay.frame, SectionBay.TAG_SNAP) : "";

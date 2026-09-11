@@ -590,6 +590,16 @@ SectionCapture.prototype.finish = function(position) {
             if (typeof SectionBayPanel !== "undefined") {
                 SectionBayPanel.hide();
             }
+            // And the tracing panels the bay opened go back to
+            // however the caver had them before it -- see
+            // CsPanel.openTracingDocks. Only on a CAPTURE that
+            // actually placed something: a refused block leaves the
+            // bay open, and a bay that is still open still wants its
+            // panels.
+            try {
+                CsPanel.restoreTracingDocks();
+            } catch (eDocks) {
+            }
         }
     } catch (e) {
         // LOCKED and FROZEN layers refuse writes SILENTLY here, so the
