@@ -47,7 +47,7 @@ SymbolPalette.armed = undefined;
 
 /** The dock and the widgets the panel updates. Module-level singletons
  *  because there is one panel per application window. */
-var csSymbolPaletteDock;
+// The panel lives in the Draw dock (see DrawPanel/DrawPanel.js).
 SymbolPalette.widgets = undefined;
 
 /** The entries the panel last built itself from, in panel order.
@@ -1146,14 +1146,11 @@ SymbolPalette.rebuildTiles = function() {
     SymbolPalette.refreshCustomButtons();
 };
 
-SymbolPalette.buildDock = function(appWin) {
-    var dock = new QDockWidget(qsTr("Symbol Palette"), appWin);
-    // Without an objectName restoreState() cannot identify the dock and
-    // silently forgets where it was.
-    dock.objectName = "CaveSurveySymbolPaletteDock";
-
+/** THE PANEL'S BODY, separated from its dock -- see
+ *  FeatureTrace.buildBody for why. */
+SymbolPalette.buildBody = function(parent) {
     var w = { problems: [], buttons: [], groupBoxes: [] };
-    var body = new QWidget(dock);
+    var body = new QWidget(parent);
     var layout = new QVBoxLayout();
 
     // -- cursor frame readout ----------------------------------------
@@ -1401,7 +1398,6 @@ SymbolPalette.buildDock = function(appWin) {
     }
 
     body.setLayout(layout);
-    dock.setWidget(body);
     SymbolPalette.widgets = w;
 
     try {
@@ -1420,8 +1416,12 @@ SymbolPalette.buildDock = function(appWin) {
         EAction.handleUserWarning("Symbol Palette: this CaveCAD build refused part of the " +
             "panel -- " + w.problems.join("; ") + ". Please report this.");
     }
-    return dock;
+    return body;
 };
+
+// NO DOCK OF ITS OWN. The body goes into the Draw panel's "Symbols"
+// section and nowhere else: `widgets` is module-level, so a second
+// copy of this body would leave one of the two wired to nothing.
 
 /** Deletes the armed custom symbol, after asking. */
 SymbolPalette.deleteArmed = function() {
@@ -1508,16 +1508,6 @@ SymbolPalette.leaveEditorMode = function() {
     }
 };
 
-/** Builds the dock and hands it to the main window. Idempotent. */
-SymbolPalette.ensureDock = function() {
-    if (csSymbolPaletteDock !== undefined && csSymbolPaletteDock !== null) {
-        return csSymbolPaletteDock;
-    }
-    var appWin = RMainWindowQt.getMainWindow();
-    csSymbolPaletteDock = SymbolPalette.buildDock(appWin);
-    appWin.addDockWidget(Qt.RightDockWidgetArea, csSymbolPaletteDock);
-    return csSymbolPaletteDock;
-};
 
 /**
  * Hands control to the placement action.
@@ -1656,20 +1646,16 @@ SymbolPalette.prototype.beginEvent = function() {
         return;
     }
 
+    // Opens the Draw panel with the Symbols section unfolded. NOT a
+    // toggle: somebody who typed "symbolpalette" wants a symbol.
     try {
-        var existed = (csSymbolPaletteDock !== undefined &&
-            csSymbolPaletteDock !== null);
-        var dock = SymbolPalette.ensureDock();
-        dock.visible = existed ? !dock.visible : true;
-        if (dock.visible) {
-            // The template may have gained or lost a symbol since last
-            // time -- another CaveCAD window, or a release.
-            CsSymbolStore.invalidate();
-            SymbolPalette.rebuildTiles();
-        }
+        DrawPanel.reveal(DrawPanel.SEC_SYMBOLS);
+        // The template may have gained or lost a symbol since last
+        // time -- another CaveCAD window, or a release.
+        CsSymbolStore.invalidate();
+        SymbolPalette.rebuildTiles();
     } catch (e) {
-        csSymbolPaletteDock = undefined;
-        EAction.handleUserWarning("Symbol Palette: this CaveCAD build refused the docked " +
+        EAction.handleUserWarning("Symbol Palette: this CaveCAD build refused the Draw " +
             "panel (" + e + ") -- please report this.");
     }
 
@@ -1686,27 +1672,20 @@ SymbolPalette.init = function(basePath) {
     action.setIcon(basePath + "/SymbolPalette.svg");
     action.setStatusTip(qsTr("Place cave symbols from a palette: pick one, " +
         "click to drop it, drag to aim it"));
-    action.setDefaultCommands(["symbolpalette", "sym"]);
+    // "sym" belongs to the Draw panel now; the long name still
+    // reaches this one.
+    action.setDefaultCommands(["symbolpalette"]);
     // 452 is "draw the map", beside Feature Trace, Shaped Lines,
     // Scatter Breakdown and Cross Section; 50 puts it after Cross
     // Section, which is the last of them.
     action.setGroupSortOrder(452);
     action.setSortOrder(50);
-    action.setWidgetNames(["CaveSurveyMenu", "CaveSurveyToolBar"]);
+    // NOT ON THE MENU -- see FeatureTrace.init. Draw is the one door.
+    action.setWidgetNames([]);
 
     SymbolPaletteRun.init(basePath);
     SymbolPaletteEdit.init(basePath);
 
-    // Build the dock NOW, during add-on init: the main window's
-    // readSettings()/restoreState() runs after init and can only place
-    // (and re-show) a dock that already exists. Created hidden; the
-    // saved window state decides whether it opens.
-    try {
-        var dock = SymbolPalette.ensureDock();
-        dock.visible = false;
-    } catch (eInit) {
-        csSymbolPaletteDock = undefined;
-        EAction.handleUserWarning("Symbol Palette: could not build the panel at startup (" +
-            eInit + "); the menu entry will try again.");
-    }
+    // The DOCK is Draw's to build, during add-on init, so that
+    // restoreState() can place it. Nothing to do here.
 };

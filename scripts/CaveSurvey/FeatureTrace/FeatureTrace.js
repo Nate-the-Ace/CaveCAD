@@ -202,7 +202,15 @@ FeatureTrace.smoothingFraction = function(name) {
 
 /** The dock, and the widgets the panel updates. Module-level singletons
  *  because there is one panel per application window. */
-var csFeatureTraceDock;
+// The panel lives in the Draw dock (see DrawPanel/DrawPanel.js). "Is it on
+// screen?" is asked of Draw, which owns it.
+FeatureTrace.showing = function() {
+    try {
+        return (typeof DrawPanel !== "undefined" && DrawPanel.showing());
+    } catch (e) {
+        return false;
+    }
+};
 FeatureTrace.widgets = undefined;
 
 /**
@@ -1477,14 +1485,22 @@ FeatureTrace.buildShapedGroup = function(w, parent, collapsed) {
     return section;
 };
 
-FeatureTrace.buildDock = function(appWin) {
-    var dock = new QDockWidget(qsTr("Feature Trace"), appWin);
-    // Without an objectName restoreState() cannot identify the dock and
-    // silently forgets where it was.
-    dock.objectName = "CaveSurveyFeatureTraceDock";
-
+/**
+ * THE PANEL'S BODY, separated from its dock.
+ *
+ * Drawing a cave is ONE job -- walls, ledges, symbols, all of it put on
+ * the map with the same hand -- and it lived in two docks. The Draw
+ * panel puts both bodies in one, as foldable sections, so this has to
+ * be buildable into somebody else's widget (Nathan, 2026-09-11).
+ *
+ * Sections and not tabs, because both panels already fold, remember
+ * what a caver left shut, and reorder from their own right-click menus
+ * -- and because tracing a passage means reaching for a wall and then a
+ * symbol, which tabs would make two clicks and a decision.
+ */
+FeatureTrace.buildBody = function(parent) {
     var w = { problems: [], buttons: [], shapedButtons: [], sections: [] };
-    var body = new QWidget(dock);
+    var body = new QWidget(parent);
     var layout = new QVBoxLayout();
     var collapsed = CsPanel.loadCollapsed(FeatureTrace.COLLAPSED_SETTING);
     // The sections can be reordered from their own right-click menus;
@@ -1635,7 +1651,6 @@ FeatureTrace.buildDock = function(appWin) {
 
     layout.addStretch(1);
     body.setLayout(layout);
-    dock.setWidget(body);
 
     try {
         FeatureTrace.widgets = w;   // rebuildRecent reads it
@@ -1652,8 +1667,13 @@ FeatureTrace.buildDock = function(appWin) {
     }
 
     FeatureTrace.widgets = w;
-    return dock;
+    return body;
 };
+
+// NO DOCK OF ITS OWN. The body goes into the Draw panel's "Trace"
+// section and nowhere else: `widgets` below is module-level, so a
+// second copy of this body would leave one of the two wired to
+// nothing -- a panel that looks right and does nothing when clicked.
 
 /** The profile region, cached.
  *
@@ -1883,9 +1903,7 @@ FeatureTrace.installListener = function(appWin) {
         appWin.addTransactionListener(adapter);
         adapter.transactionUpdated.connect(function(document, transaction) {
             try {
-                if (csFeatureTraceDock === undefined ||
-                        csFeatureTraceDock === null ||
-                        !csFeatureTraceDock.visible) {
+                if (!FeatureTrace.showing()) {
                     return;
                 }
                 FeatureTrace.markDirty();
@@ -1903,9 +1921,7 @@ FeatureTrace.installListener = function(appWin) {
         appWin.addCoordinateListener(coord);
         coord.coordinateUpdated.connect(function(docIface) {
             try {
-                if (csFeatureTraceDock === undefined ||
-                        csFeatureTraceDock === null ||
-                        !csFeatureTraceDock.visible || isNull(docIface)) {
+                if (!FeatureTrace.showing() || isNull(docIface)) {
                     return;
                 }
                 var pos = docIface.getLastPosition();
@@ -1939,9 +1955,7 @@ FeatureTrace.installListener = function(appWin) {
         appWin.addLayerListener(layerAdapter);
         layerAdapter.layersUpdated.connect(function(docIface, ids) {
             try {
-                if (csFeatureTraceDock === undefined ||
-                        csFeatureTraceDock === null ||
-                        !csFeatureTraceDock.visible) {
+                if (!FeatureTrace.showing()) {
                     return;
                 }
                 FeatureTrace.markDirty();
@@ -1958,16 +1972,6 @@ FeatureTrace.installListener = function(appWin) {
     }
 };
 
-/** Builds the dock and hands it to the main window. Idempotent. */
-FeatureTrace.ensureDock = function() {
-    if (csFeatureTraceDock !== undefined && csFeatureTraceDock !== null) {
-        return csFeatureTraceDock;
-    }
-    var appWin = RMainWindowQt.getMainWindow();
-    csFeatureTraceDock = FeatureTrace.buildDock(appWin);
-    appWin.addDockWidget(Qt.RightDockWidgetArea, csFeatureTraceDock);
-    return csFeatureTraceDock;
-};
 
 /** Hands control to the drag action.
  *
@@ -2013,19 +2017,19 @@ FeatureTrace.prototype.beginEvent = function() {
         return;
     }
 
+    // Opens the Draw panel with the Trace section unfolded. NOT a
+    // toggle: somebody who typed "featuretrace" wants to trace, and
+    // shutting the panel in their face when it was already open is
+    // the one answer that cannot be what they meant.
     try {
-        var existed = (csFeatureTraceDock !== undefined &&
-            csFeatureTraceDock !== null);
-        var dock = FeatureTrace.ensureDock();
-        dock.visible = existed ? !dock.visible : true;
+        DrawPanel.reveal(DrawPanel.SEC_TRACE);
         try {
             FeatureTrace.flush();
         } catch (eShow) {
             // a stale panel must never stop the tool opening
         }
     } catch (e) {
-        csFeatureTraceDock = undefined;
-        warning("Feature Trace: this CaveCAD build refused the docked " +
+        warning("Feature Trace: this CaveCAD build refused the Draw " +
             "panel (" + e + ") -- please report this.");
     }
 
@@ -2042,29 +2046,28 @@ FeatureTrace.init = function(basePath) {
     action.setIcon(basePath + "/FeatureTrace.svg");
     action.setStatusTip(qsTr("Trace cave walls and other features freehand: " +
         "drag along the sketch and a smooth line follows"));
-    action.setDefaultCommands(["featuretrace", "ft"]);
+    // "ft" belongs to the Draw panel now -- one door to the drawing
+    // tools -- and the long name still reaches this one for anybody
+    // who wants the tracing half on its own.
+    action.setDefaultCommands(["featuretrace"]);
     action.setGroupSortOrder(452);
-    // 45 puts this beside Scatter Breakdown (40), the other drawing
-    // tool. 75 -- the number first proposed -- is Generate Profile's,
-    // and a clash leaves menu order down to load sequence.
-    action.setSortOrder(10);
-    action.setWidgetNames(["CaveSurveyMenu", "CaveSurveyToolBar"]);
+    action.setSortOrder(12);
+    // NOT ON THE MENU. Draw is the door to the drawing tools now, and
+    // two entries opening two halves of one panel is the choice this
+    // consolidation exists to remove. The action stays registered --
+    // its own run actions hang off it, and `featuretrace` still types.
+    action.setWidgetNames([]);
 
     FeatureTraceRun.init(basePath);
     FeatureEraseRun.init(basePath);
 
-    // Build the dock NOW, during add-on init: the main window's
-    // readSettings()/restoreState() runs after init and can only place
-    // (and re-show) a dock that already exists. Created hidden; the
-    // saved window state decides whether it opens, exactly like QCAD's
-    // own docks. First-ever run: stays hidden until the action shows it.
+    // The DOCK is Draw's to build (and Draw.init does it during add-on
+    // init, so restoreState() can place it). This one only needs its
+    // listeners, which watch for the panel becoming visible.
     try {
-        var dock = FeatureTrace.ensureDock();
-        dock.visible = false;
         FeatureTrace.installListener(RMainWindowQt.getMainWindow());
     } catch (eInit) {
-        csFeatureTraceDock = undefined;
-        warning("Feature Trace: could not build the panel at startup (" +
-            eInit + "); the menu entry will try again.");
+        warning("Feature Trace: could not watch the drawing at startup (" +
+            eInit + "); the run list refreshes when a feature is armed.");
     }
 };

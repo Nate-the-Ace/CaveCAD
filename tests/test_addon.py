@@ -348,12 +348,41 @@ class TestAddonLayout(unittest.TestCase):
                  if f.endswith(".js") and f != "CaveSurvey.js"]
         self.assertEqual(loose, [], "these belong in their own folders: %s" % loose)
 
+    # Tools whose action is registered but deliberately NOT on the menu:
+    # their panel is reached through another tool's door. Listed with
+    # the reason, so taking a tool off the menu stays a decision.
+    OFF_MENU = {
+        "FeatureTrace": "its panel is a section of Draw",
+        "SymbolPalette": "its panel is a section of Draw",
+    }
+
     def test_tools_are_registered_on_the_menu_and_toolbar(self):
         for name in tool_dirs():
+            if name in self.OFF_MENU:
+                continue
             with self.subTest(tool=name):
                 source = tool_source(name)
                 for widget in WIDGET_NAMES:
                     self.assertIn(widget, source)
+
+    def test_off_menu_tools_say_so(self):
+        """A tool off the menu has to be off it on purpose.
+
+        setWidgetNames([]) is one character away from a typo that takes
+        a tool out of the menu silently -- which is the failure this
+        whole file exists for.
+        """
+        for name, why in self.OFF_MENU.items():
+            with self.subTest(tool=name):
+                source = tool_source(name)
+                self.assertIn(
+                    "action.setWidgetNames([]);", source,
+                    "%s is listed as off the menu (%s) but does not "
+                    "clear its widget names" % (name, why))
+                self.assertIn(
+                    "NOT ON THE MENU", source,
+                    "%s should say in its own source why it is off the "
+                    "menu" % name)
 
     def test_each_tool_points_setscriptfile_at_its_own_file(self):
         for name in tool_dirs():
@@ -535,6 +564,35 @@ class TestBasenameCollisions(unittest.TestCase):
         self.assertEqual(sorted(missing), [],
                          "these Core files are not included by CsAll.js: "
                          "%s" % sorted(missing))
+
+    def test_no_addon_file_shares_a_basename_with_qcad(self):
+        """The whole suite, not just Core. A TOOL file goes through the
+        same include(), so Draw/Draw.js was skipped in favour of QCAD's
+        own scripts/Draw/Draw.js -- published clean, passed every test,
+        and the panel did not exist in the running application. Only
+        the live engine showed it, which is exactly the gap this
+        closes. Skipped where CaveCAD is not installed."""
+        stock_root = ("/Applications/CaveCAD.app/Contents/Resources/"
+                      "scripts")
+        if not os.path.isdir(stock_root):
+            self.skipTest("CaveCAD is not installed here")
+        stock = set()
+        for dirpath, _dirnames, filenames in os.walk(stock_root):
+            for filename in filenames:
+                if filename.endswith(".js"):
+                    stock.add(filename)
+        clashes = []
+        for dirpath, _dirnames, filenames in os.walk(ADDON):
+            for filename in sorted(filenames):
+                if not filename.endswith(".js"):
+                    continue
+                if filename in stock:
+                    clashes.append(os.path.relpath(
+                        os.path.join(dirpath, filename), ADDON))
+        self.assertEqual(sorted(clashes), [],
+                         "include() dedupes by basename, so QCAD's copy "
+                         "wins and these files never load: %s"
+                         % sorted(clashes))
 
     def test_core_files_are_cs_prefixed(self):
         core = os.path.join(ADDON, "Core")
@@ -1499,11 +1557,10 @@ MENU = {
     "ExportCaveSurvey/ExportCaveSurvey.js": (451, 30, ["exportcavesurvey", "ecs"]),
     "LoopErrors/LoopErrors.js":           (451, 40, ["looperrors", "le"]),
     # 452 -- draw the map
-    "FeatureTrace/FeatureTrace.js":       (452, 10, ["featuretrace", "ft"]),
+    "DrawPanel/DrawPanel.js":             (452, 10, ["draw", "ft", "sym"]),
     "ShapedLines/ShapedLines.js":         (452, 20, ["shapedlines", "shl"]),
     "ScatterBreakdown/ScatterBreakdown.js": (452, 30, ["scatterbreakdown", "scb"]),
     "CrossSection/CrossSection.js":       (452, 40, ["crosssection", "cxs"]),
-    "SymbolPalette/SymbolPalette.js":     (452, 50, ["symbolpalette", "sym"]),
     # 453 -- put a reference under the map
     "SketchScans/SketchScans.js":         (453, 10, ["sketchscans", "ss"]),
     "SurfaceData/SurfaceData.js":         (453, 20, ["surfacedata", "sd"]),
@@ -1753,7 +1810,7 @@ class TestSheetFileGuard(unittest.TestCase):
 
     # Tools that modify the drawing, and so must refuse a sheet.
     MUST_GUARD = [
-        "BuildLegend", "Callout", "CrossSection", "FeatureTrace",
+        "BuildLegend", "Callout", "CrossSection", "DrawPanel", "FeatureTrace",
         "GenerateProfile", "ImportCaveSurvey", "LoopErrors",
         "RepairDrawing", "ScatterBreakdown", "ShapedLines",
         "SketchScans", "SurfaceData", "SurveyNotebook", "SymbolPalette",

@@ -401,7 +401,7 @@ SketchScans.syncContext = function() {
 SketchScans.traceInBay = function(layerName) {
     try {
         if (typeof FeatureTrace === "undefined") {
-            SketchScans.showDock("CaveSurveyFeatureTraceDock");
+            SketchScans.showDraw("trace");
             return;
         }
         FeatureTrace.armLayer(layerName);
@@ -418,7 +418,7 @@ SketchScans.placeInBay = function() {
     try {
         if (typeof SymbolPalette === "undefined" ||
                 isNull(SymbolPalette.armed)) {
-            SketchScans.showDock("CaveSurveySymbolPaletteDock");
+            SketchScans.showDraw("symbols");
             return;
         }
         SymbolPalette.startRun();
@@ -428,6 +428,23 @@ SketchScans.placeInBay = function() {
 };
 
 /** Opens one of the suite's docks by objectName. */
+/** Opens the Draw panel with one section unfolded. The bay's buttons
+ *  do the drawing themselves; this is the "and the rest of them" door,
+ *  and since the consolidation there is only one. */
+SketchScans.showDraw = function(which) {
+    // The section title is read INSIDE the guard, not passed in by the
+    // caller: `DrawPanel.SEC_TRACE` in an argument evaluates before the
+    // guard can catch a DrawPanel that never loaded.
+    try {
+        if (typeof DrawPanel === "undefined") {
+            SketchScans.showDock("CaveSurveyDrawDock");
+            return;
+        }
+        DrawPanel.reveal(which === "symbols" ? DrawPanel.SEC_SYMBOLS : DrawPanel.SEC_TRACE);
+    } catch (e) {
+    }
+};
+
 SketchScans.showDock = function(name) {
     try {
         var dock = RMainWindowQt.getMainWindow().findChild(name);
@@ -993,7 +1010,7 @@ SketchScans.buildDock = function(appWin) {
     });
     SketchScans.eachButton(w, "moreFeaturesButton", function(b) {
         b.clicked.connect(function() {
-            SketchScans.showDock("CaveSurveyFeatureTraceDock");
+            SketchScans.showDraw("trace");
         });
     });
     SketchScans.eachButton(w, "captureButton", function(b) {
