@@ -45,6 +45,10 @@ include(includeBasePath + "/CsSanitize.js");
 // copy): where the teaching cave lives and what resetting it means.
 include(includeBasePath + "/CsTeach.js");
 include(includeBasePath + "/CsAngles.js");
+// No dependencies of its own -- CsLayers.DEFAULTS is only read inside
+// the assertions that check the catalog against it (tests/js_unit.js),
+// never at load time here.
+include(includeBasePath + "/CsArea.js");
 include(includeBasePath + "/CsIgrfCoeffs.js");
 include(includeBasePath + "/CsGeomag.js");
 include(includeBasePath + "/CsModel.js");

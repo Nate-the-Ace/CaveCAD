@@ -168,6 +168,7 @@ var CORE_FILES = [
     // what is tested. The document half is covered by
     // tests/symbol_palette_run.js.
     "scripts/CaveSurvey/Core/CsSymbolStore.js",
+    "scripts/CaveSurvey/Core/CsArea.js",
     // Pure geometry (extents, fits, sample strokes) plus painters
     // that only touch QPixmap inside their bodies -- the pure half
     // is what is tested here.
@@ -24483,6 +24484,39 @@ eqs(CsSymbolStore.PREFIX, "SYM_", "the symbol block prefix");
         "CsScanTree: a page is called its last segment");
     eqs(CsScanTree.nameOf("loose.jpg"), "loose.jpg",
         "CsScanTree: even with no folders above it");
+})();
+
+// CsArea -- the dice are repeatable and the catalog agrees with the registry
+(function() {
+    var a = CsArea.rng(7), b = CsArea.rng(7), c = CsArea.rng(8);
+    var sameCount = 0, inRange = 0, differs = false;
+    for (var i = 0; i < 10; i++) {
+        var av = a(), bv = b(), cv = c();
+        if (av === bv) { sameCount++; }
+        if (av >= 0 && av < 1) { inRange++; }
+        if (av !== cv) { differs = true; }
+    }
+    eqs(sameCount, 10, "CsArea.rng: the same seed gives the same ten numbers");
+    eqs(inRange, 10, "CsArea.rng: every value lands in [0, 1)");
+    ok(differs, "CsArea.rng: a different seed gives different numbers");
+
+    var names = Object.keys(CsArea.CATALOG);
+    eqs(names.length, 13, "CsArea.CATALOG: thirteen built-in patterns");
+    var bad = [];
+    for (var n = 0; n < names.length; n++) {
+        var entry = CsArea.CATALOG[names[n]];
+        if (isNull(CsLayers.DEFAULTS[entry.layer])) {
+            bad.push(names[n] + " layer " + entry.layer);
+        }
+        if (isNull(CsLayers.DEFAULTS[entry.boundaryLayer])) {
+            bad.push(names[n] + " boundary layer " + entry.boundaryLayer);
+        }
+        if (entry.engine !== "scatter" && entry.engine !== "filled") {
+            bad.push(names[n] + " engine " + entry.engine);
+        }
+    }
+    eqs(bad.join(", "), "",
+        "CsArea.CATALOG: every layer named is a layer the registry has");
 })();
 
 // ---------------------------------------------------------------------
