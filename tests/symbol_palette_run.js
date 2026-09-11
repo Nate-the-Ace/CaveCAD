@@ -423,29 +423,27 @@ if (placedInBay.length === 1) {
 })();
 
 // ---------------------------------------------------------------------
-// 3b. The drag sets the size as well as the angle.
+// 3b. The drag sets the size as well as the angle. Always.
 // ---------------------------------------------------------------------
 
 // The mapping itself: the distance dragged IS the placed symbol's
 // radius, so one gesture means the same thing on a symbol half a unit
 // across and one ten units across.
-eqs(SymbolPaletteRun.scaleForDrag(2.0, 0.5, 1.0, true), 4.0,
+eqs(SymbolPaletteRun.scaleForDrag(2.0, 0.5, 1.0), 4.0,
     "scaleForDrag: dragging to twice a 0.5-unit symbol's radius asks " +
     "for scale 4");
-eqs(SymbolPaletteRun.scaleForDrag(5.0, 5.0, 1.0, true), 1.0,
+eqs(SymbolPaletteRun.scaleForDrag(5.0, 5.0, 1.0), 1.0,
     "scaleForDrag: dragging to exactly the symbol's own radius is " +
     "scale 1, whatever that radius is");
-eqs(SymbolPaletteRun.scaleForDrag(2.0, 0.5, 3.0, false), 3.0,
-    "scaleForDrag: with sizing switched off the panel's scale stands");
-eqs(SymbolPaletteRun.scaleForDrag(2.0, 0, 3.0, true), 3.0,
+eqs(SymbolPaletteRun.scaleForDrag(2.0, 0, 3.0), 3.0,
     "scaleForDrag: a symbol whose radius is unknown falls back to the " +
     "panel rather than dividing by zero");
-eqs(SymbolPaletteRun.scaleForDrag(0, 0.5, 2.5, true), 2.5,
+eqs(SymbolPaletteRun.scaleForDrag(0, 0.5, 2.5), 2.5,
     "scaleForDrag: a drag of no length is a click, and takes the panel");
-eqs(SymbolPaletteRun.scaleForDrag(0.0001, 5.0, 1.0, true),
+eqs(SymbolPaletteRun.scaleForDrag(0.0001, 5.0, 1.0),
     SymbolPaletteRun.MIN_SCALE,
     "scaleForDrag: a hair of a drag is floored, not placed invisible");
-eqs(SymbolPaletteRun.scaleForDrag(1e9, 0.5, 1.0, true),
+eqs(SymbolPaletteRun.scaleForDrag(1e9, 0.5, 1.0),
     SymbolPaletteRun.MAX_SCALE,
     "scaleForDrag: and a drag across the county is capped");
 
@@ -504,7 +502,7 @@ eqs(SymbolPaletteRun.sizeForScale(5.0, 0, 1.0), null,
     // a drag of 2.0 units on a 0.5-unit radius: scale 4
     action.angle = 0.0;
     action.dragScale = SymbolPaletteRun.scaleForDrag(2.0, action.radius,
-        1.0, true);
+        1.0);
     eqs(action.placementScale(), 4.0,
         "the placement takes the drag's scale over the panel's");
     action.commit();
@@ -528,12 +526,13 @@ eqs(SymbolPaletteRun.sizeForScale(5.0, 0, 1.0), null,
             "got " + sx + ")");
     }
 
-    // Sizing switched off: the drag still aims, the panel still sizes.
-    var aimOnly = new SymbolPaletteRun(null);
-    aimOnly.radius = 0.5;
-    aimOnly.dragScale = SymbolPaletteRun.scaleForDrag(2.0, 0.5, 1.0, false);
-    eqs(aimOnly.placementScale(), 1.0,
-        "with sizing off, a long drag places at the panel's scale");
+    // A drag ALWAYS sizes -- there is no switch. What still falls back
+    // is a drag that cannot mean a size: an unknown radius.
+    var noRadius = new SymbolPaletteRun(null);
+    noRadius.radius = 0;
+    noRadius.dragScale = SymbolPaletteRun.scaleForDrag(2.0, 0, 1.0);
+    eqs(noRadius.placementScale(), 1.0,
+        "a symbol whose radius is unknown places at the standard size");
 })();
 
 // ---------------------------------------------------------------------

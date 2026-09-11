@@ -186,21 +186,6 @@ SymbolPalette.angleValue = function() {
     return (v === null || isNaN(v)) ? 0.0 : v;
 };
 
-/** True when a drag sets the symbol's size as well as its angle.
- *  A panel that failed to build its checkbox answers TRUE -- the
- *  documented default -- rather than silently changing the gesture. */
-SymbolPalette.dragScaleEnabled = function() {
-    var w = SymbolPalette.widgets;
-    if (isNull(w) || isNull(w.dragScaleCheck)) {
-        return true;
-    }
-    try {
-        return w.dragScaleCheck.checked === true;
-    } catch (e) {
-        return true;
-    }
-};
-
 /**
  * Remembers what the drag in progress is asking for, so the next plain
  * click repeats it.
@@ -1142,26 +1127,6 @@ SymbolPalette.buildBody = function(parent) {
         layout.addWidget(w.frameLabel, 0, 0);
     } catch (eFrame) {
         w.problems.push("cursor frame readout (" + eFrame + ")");
-    }
-
-    // -- what a drag sets ---------------------------------------------
-    //
-    // ON BY DEFAULT: dragging out from the press point sets the size as
-    // well as the angle, and the distance dragged IS the symbol's
-    // radius, so the cursor sits on the edge of what will be placed.
-    // Switching it off leaves the drag aiming only, which is what a row
-    // of flow arrows that must all stay one size needs.
-    try {
-        w.dragScaleCheck = new QCheckBox(qsTr("Drag sets size too"));
-        w.dragScaleCheck.checked = true;
-        w.dragScaleCheck.toolTip = qsTr("While you drag, the distance " +
-            "from where you pressed becomes the symbol's radius, so you " +
-            "size and aim it in one gesture. Switch this off to aim " +
-            "only, which is what a row of flow arrows that must all " +
-            "stay one size needs.");
-        layout.addWidget(w.dragScaleCheck, 0, 0);
-    } catch (eDragScale) {
-        w.problems.push("drag-sets-size box (" + eDragScale + ")");
     }
 
     // -- search ------------------------------------------------------

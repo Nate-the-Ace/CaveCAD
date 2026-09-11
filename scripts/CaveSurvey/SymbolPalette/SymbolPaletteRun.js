@@ -132,17 +132,19 @@ SymbolPaletteRun.sizeForScale = function(scale, radius, perFoot) {
  * unit across and a north arrow ten units across, and the preview under
  * the cursor is the answer rather than a hint about it.
  *
- * Falls back to the panel's Scale field whenever it cannot mean
- * anything: sizing switched off, a symbol whose radius is unknown (an
- * empty or unreadable block), or a drag that has not passed the aim
- * threshold yet. That last one is what keeps a plain click a plain
- * click.
+ * ALWAYS. There is no switch for this (Nathan, 2026-09-11): a drag is
+ * a drag, and a gesture that sometimes sizes and sometimes does not is
+ * a gesture a caver has to check a box to understand.
+ *
+ * Falls back to `panelScale` only where the drag cannot mean anything:
+ * a symbol whose radius is unknown (an empty or unreadable block), or
+ * a drag that has not passed the aim threshold yet. That last one is
+ * what keeps a plain click a plain click.
  *
  * Pure.
  */
-SymbolPaletteRun.scaleForDrag = function(distance, radius, panelScale,
-        enabled) {
-    if (enabled !== true || isNull(radius) || radius <= 0 ||
+SymbolPaletteRun.scaleForDrag = function(distance, radius, panelScale) {
+    if (isNull(radius) || radius <= 0 ||
             isNull(distance) || !(distance > 0)) {
         return panelScale;
     }
@@ -179,16 +181,6 @@ SymbolPaletteRun.sizeFeet = function() {
         return SymbolPaletteRun.DEFAULT_SIZE_FEET;
     }
     return SymbolPalette.sizeValue();
-};
-
-/** True when a drag is allowed to set the symbol's SIZE as well as its
- *  angle. The panel's checkbox; on by default, and off is how a caver
- *  aims a row of flow arrows that must all stay one size. */
-SymbolPaletteRun.dragSetsScale = function() {
-    if (typeof SymbolPalette === "undefined") {
-        return true;
-    }
-    return SymbolPalette.dragScaleEnabled();
 };
 
 /** The panel's angle in radians, the default a plain click uses. */
@@ -442,7 +434,7 @@ SymbolPaletteRun.prototype.mouseMoveEvent = function(event) {
         this.angle = Math.atan2(here.y - this.anchor.y,
             here.x - this.anchor.x);
         this.dragScale = SymbolPaletteRun.scaleForDrag(d, this.radius,
-            this.clickScale(), SymbolPaletteRun.dragSetsScale());
+            this.clickScale());
     }
     this.showDragReadout();
     this.updatePreview();
