@@ -100,7 +100,10 @@ ShapedLinesRun.prototype.setState = function(state) {
         break;
 
     case ShapedLinesRun.State.Drawing:
-        var trStop = qsTr("Release where the line ends");
+        var trStop = (!isNull(spec) && spec.close === true) ?
+            qsTr("Drag round the edge and release near where you " +
+                "pressed -- a pit is a loop") :
+            qsTr("Release where the line ends");
         this.setCommandPrompt(trStop);
         this.setLeftMouseTip(trStop);
         this.setRightMouseTip("");
@@ -307,13 +310,8 @@ ShapedLinesRun.prototype.mouseReleaseEvent = function(event) {
         return;
     }
 
-    // AN EXTENSION IS NOT ASKED FOR A SIDE. The line being continued
-    // already has one, and it is the same line: asking again would let
-    // a caver put the hachures of one ledge on both sides of itself.
-    // So the stroke commits here, at the release, and the second click
-    // the side pick needs is never spent.
     this.growId = this.extendTarget();
-    if (this.growId !== null) {
+    if (!this.needsSidePick()) {
         this.commit();
         this.discard();
         this.setState(ShapedLinesRun.State.Idle);
@@ -322,6 +320,28 @@ ShapedLinesRun.prototype.mouseReleaseEvent = function(event) {
 
     this.setState(ShapedLinesRun.State.PickingSide);
     this.updatePreview();
+};
+
+/**
+ * Does this stroke have a side left to ask about?
+ *
+ * TWO STROKES DO NOT, and both commit at the release rather than
+ * spending a second click on a question already answered:
+ *
+ *   AN EXTENSION. The line being continued already has a side, and it
+ *   is the same line -- asking again would let a caver put the
+ *   hachures of one ledge on both sides of itself.
+ *
+ *   A PIT. Its hachures point into the hole and no cursor position
+ *   changes that (CsShapeLine.sideForPoint answers inward for a closed
+ *   path, wherever the cursor is), so the pick state was a prompt
+ *   asking a question whose answer it then ignored -- which reads
+ *   exactly like a broken tool: you move, and nothing on screen moves
+ *   (reported by Nathan, 2026-09-11). The side comes from the loop's
+ *   own winding, in prepare().
+ */
+ShapedLinesRun.prototype.needsSidePick = function() {
+    return this.growId === null && this.spineClosed !== true;
 };
 
 /**
@@ -469,8 +489,8 @@ ShapedLinesRun.prototype.prepare = function() {
         }
         this.spineClosed = true;
         // A pit's hachures point IN, and no cursor position changes
-        // that -- so it is decided once, here, and the side pick below
-        // simply confirms the feature.
+        // that -- so it is decided once, here, from the loop's own
+        // winding, and the release commits without a side pick.
         this.side = CsShapeLine.inwardSide(kept);
     } else {
         this.spineClosed = false;

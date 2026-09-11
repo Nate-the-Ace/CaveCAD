@@ -261,14 +261,15 @@ function shaped(styleKey, pts, shift) {
         buildSpine: ShapedLinesRun.prototype.buildSpine,
         extendTarget: ShapedLinesRun.prototype.extendTarget,
         growExisting: ShapedLinesRun.prototype.growExisting,
+        needsSidePick: ShapedLinesRun.prototype.needsSidePick,
         commit: ShapedLinesRun.prototype.commit
     };
     a.refreshFrames();
     if (!a.prepare()) {
         return null;
     }
-    // What mouseReleaseEvent does: an extension commits at the release
-    // and never enters the side pick.
+    // What mouseReleaseEvent does: a stroke with no side left to ask
+    // about commits at the release and never enters the side pick.
     a.growId = a.extendTarget();
     a.commit();
     return a;
@@ -391,6 +392,41 @@ eqs(CsShapeLine.spines(doc).length, beforeStray + 1,
     "a plan ledge does not continue a ledge on the profile twin layer, " +
         "even with Shift held -- band A's linework stays band A's");
 
+
+// ---------------------------------------------------------------------
+// A pit is finished at the release: there is no side to pick.
+// ---------------------------------------------------------------------
+//
+// Its hachures point into the hole whatever the cursor does, so a pick
+// state here was a prompt asking a question it then ignored -- the
+// tool looked broken because moving the mouse changed nothing.
+var loop = [];
+var cx = 900, cy = 900, r = 12;
+for (i = 0; i <= 24; i++) {
+    var th = (i / 24) * 2 * Math.PI;
+    loop.push({ x: cx + r * Math.cos(th), y: cy + r * Math.sin(th) });
+}
+var pit = shaped("pit", loop);
+ok(pit !== null, "a loop draws a pit");
+if (pit !== null) {
+    ok(pit.spineClosed === true, "and its spine is closed");
+    ok(pit.needsSidePick() === false,
+        "so the release commits it -- no side pick");
+    eqs(pit.side, CsShapeLine.inwardSide(pit.spinePts),
+        "with the hachures pointing into the hole, from the loop's own " +
+            "winding rather than from a cursor");
+}
+
+// The ledge it is NOT: an ordinary new stroke still asks.
+var asks = {
+    growId: null, spineClosed: false,
+    needsSidePick: ShapedLinesRun.prototype.needsSidePick
+};
+ok(asks.needsSidePick() === true,
+    "a new open stroke still gets the side pick");
+asks.growId = "something";
+ok(asks.needsSidePick() === false,
+    "and an extension never does");
 
 // ---------------------------------------------------------------------
 // The caver is told which happened.
