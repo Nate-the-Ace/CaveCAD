@@ -658,19 +658,15 @@ SketchScans.buildDock = function(appWin) {
                 "other sketches on it stay out of the drawing.");
         } catch (eTt) {
         }
-        w.trimWholeButton = new QPushButton(qsTr("Use whole page"));
-        w.trimWholeButton.toolTip = qsTr("Place the entire scanned " +
-            "page, as before. Nothing is written to disk.");
+        // NO "USE WHOLE PAGE". Scans get trimmed, always (Nathan,
+        // 2026-09-11): a field page holds three sketches and placing
+        // all of it puts the other two in the drawing.
         w.trimRedoButton = new QPushButton(qsTr("Redo box"));
         w.trimRedoButton.toolTip = qsTr("Forget this box and draw " +
             "another one.");
         trimRow.addWidget(w.trimLabel, 1, 0);
-        trimRow.addWidget(w.trimWholeButton, 0, 0);
         trimRow.addWidget(w.trimRedoButton, 0, 0);
         previewLayout.addLayout(trimRow, 0);
-        w.trimWholeButton.clicked.connect(function() {
-            SketchScans.chooseWholePage();
-        });
         w.trimRedoButton.clicked.connect(function() {
             SketchScans.resetTrim(true);
         });
@@ -2505,8 +2501,16 @@ SketchScans.rotateSelected = function() {
 //   - COMPARE the answer to QMessageBox.Yes, never truthy-test it. No
 //     is 65536, which is every bit as truthy as Yes.
 
-/** The whole page, deliberately -- no file written, the original path
- *  used, exactly what this tool did before trimming existed. */
+/**
+ * A box that turned out to cover the whole page: use the original file
+ * and write nothing.
+ *
+ * NOT A BUTTON any more -- there is no "use whole page" to press, and
+ * every scan is trimmed. This is the degenerate DRAG: a caver who
+ * boxes corner to corner has asked for the page, and writing a
+ * byte-for-byte copy of it to disk to honour that would leave a
+ * derivative behind for nothing. Its only caller is boxDrawn.
+ */
 SketchScans.chooseWholePage = function() {
     var w = SketchScans.w;
     if (w === undefined || w === null) {
@@ -2621,8 +2625,9 @@ SketchScans.updateTrimGate = function() {
                 (SketchScans.frameIndex() === 2));
         }
     } catch (e) {
-        // a bridge that cannot disable them leaves the old behaviour,
-        // which is placing the whole page -- never a wrong crop
+        // a bridge that cannot disable them leaves the buttons live;
+        // placing without a box still uses the whole page, which is
+        // untrimmed but never a WRONG crop
     }
 };
 
