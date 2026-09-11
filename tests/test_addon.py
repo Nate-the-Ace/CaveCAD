@@ -1821,6 +1821,57 @@ class TestSheetFileGuard(unittest.TestCase):
                       "and a marked drawing is a sheet wherever it sits")
 
 
+class TestScanListIsShared(unittest.TestCase):
+    """Two panels show the cave's scans; they must say the same things.
+
+    The list, the tick, the folded folders and the settings behind them
+    all moved to Core/CsScanList.js when the Survey Notebook needed the
+    same browser Sketch Scans has. The words are part of that: the
+    Notebook's own first version said "Finished with" where Sketch Scans
+    said "Mark Complete" -- one act, one setting, one tick, two names,
+    which is the drift sharing the list was supposed to end.
+    """
+
+    def source(self, *parts):
+        with open(os.path.join(ADDON, *parts)) as handle:
+            return handle.read()
+
+    def test_the_label_has_one_home(self):
+        core = self.source("Core", "CsScanList.js")
+        self.assertIn('CsScanList.MARK_COMPLETE = "Mark Complete"', core,
+                      "the menu wording lives with the list that draws "
+                      "the tick")
+        for folder, name in (("SketchScans", "SketchScans.js"),
+                             ("SurveyNotebook", "SurveyNotebook.js")):
+            panel = self.source(folder, name)
+            self.assertIn(
+                "CsScanList.markLabel", panel,
+                "%s should take the mark menu's wording from Core "
+                "rather than spelling its own" % name)
+
+    def test_no_panel_spells_the_label_itself(self):
+        for folder, name in (("SketchScans", "SketchScans.js"),
+                             ("SurveyNotebook", "SurveyNotebook.js")):
+            panel = self.source(folder, name)
+            for wording in ('"Mark Complete"', '"Mark Incomplete"',
+                            '"Finished with"'):
+                self.assertNotIn(
+                    wording, panel,
+                    "%s spells %s itself -- use CsScanList.markLabel, "
+                    "or the two panels will drift apart again"
+                    % (name, wording))
+
+    def test_both_panels_read_the_same_marks(self):
+        """A page ticked while tracing is ticked while typing."""
+        for folder, name in (("SketchScans", "SketchScans.js"),
+                             ("SurveyNotebook", "SurveyNotebook.js")):
+            panel = self.source(folder, name)
+            self.assertIn(
+                "CsScanTree.SETTING_BOOKMARKS", panel,
+                "%s should read the ticks from the one setting that "
+                "holds them" % name)
+
+
 class TestTeachingCave(unittest.TestCase):
     """The teaching cave replaced the invented Lesson Cave.
 

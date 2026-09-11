@@ -2078,9 +2078,11 @@ SketchScans.buildDock = function(appWin) {
                 // Kept on `w` so it is not collected while it is open --
                 // popup() returns immediately, unlike exec().
                 w.scanMenu = new QMenu();
-                var act = w.scanMenu.addAction(marked ?
-                    qsTr("Mark Incomplete") :
-                    qsTr("Mark Complete"));
+                // The label lives in Core with the list that draws
+                // the tick, so every panel showing this list says the
+                // same words.
+                var act = w.scanMenu.addAction(
+                    qsTr(CsScanList.markLabel(marked)));
                 try {
                     act.checkable = true;
                     act.checked = marked;

@@ -28,6 +28,24 @@ var CsScanList = {};
 CsScanList.COMPLETE = "✓";
 
 /**
+ * What the right-click menu calls marking a page finished with.
+ *
+ * HERE, so every panel showing this list says the same words. The
+ * Survey Notebook's copy said "Finished with" while Sketch Scans said
+ * "Mark Complete" -- the same act, the same setting, the same tick, and
+ * two names for it, which is exactly the drift that sharing the list
+ * was supposed to end (Nathan, 2026-09-11).
+ */
+CsScanList.MARK_COMPLETE = "Mark Complete";
+CsScanList.MARK_INCOMPLETE = "Mark Incomplete";
+
+/** The menu label for one page, given whether it is already marked. */
+CsScanList.markLabel = function(marked) {
+    return (marked === true) ? CsScanList.MARK_INCOMPLETE :
+        CsScanList.MARK_COMPLETE;
+};
+
+/**
  * A list widget configured the way both panels want it.
  *
  * One column, no headers, rows selected whole, nothing editable.

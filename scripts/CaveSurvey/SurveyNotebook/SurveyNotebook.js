@@ -3674,8 +3674,12 @@ SurveyNotebook.buildDock = function(appWin) {
             }
             var menu = new QMenu(w.scanList);
             var done = w.scanComplete[w.scanRows[row].rel] === true;
-            var act = menu.addAction(done ? "Not finished with" :
-                "Finished with");
+            var act = menu.addAction(qsTr(CsScanList.markLabel(done)));
+            try {
+                act.checkable = true;
+                act.checked = done;
+            } catch (eChk) {
+            }
             act.triggered.connect(function() {
                 SurveyNotebook.toggleScanComplete(w, row);
             });
