@@ -296,6 +296,124 @@ SketchScans.ensureDock = function() {
     return csSketchScansDock;
 };
 
+/**
+ * Runs fn over every copy of one named control across the workflow
+ * tabs.
+ *
+ * The tabs each carry their own buttons -- see the note where they are
+ * built -- so "the Insert & Align button" is three buttons, and the
+ * rest of this file has to keep being able to say it once.
+ */
+SketchScans.eachButton = function(w, name, fn) {
+    if (isNull(w) || isNull(w.buttonSets)) {
+        return;
+    }
+    for (var i = 0; i < w.buttonSets.length; i++) {
+        var control = w.buttonSets[i][name];
+        if (!isNull(control)) {
+            fn(control, i);
+        }
+    }
+};
+
+/** Sets one named control's text on every tab that has one. */
+SketchScans.setText = function(name, text) {
+    SketchScans.eachButton(SketchScans.w, name, function(b) {
+        try {
+            b.text = text;
+        } catch (e) {
+        }
+    });
+};
+
+/** Enables or disables one named control on every tab that has one. */
+SketchScans.setEnabled = function(name, on) {
+    SketchScans.eachButton(SketchScans.w, name, function(b) {
+        try {
+            b.enabled = (on === true);
+        } catch (e) {
+        }
+    });
+};
+
+/** Shows or hides one named control on every tab that has one. */
+SketchScans.setVisible = function(name, on) {
+    SketchScans.eachButton(SketchScans.w, name, function(b) {
+        try {
+            b.visible = (on === true);
+        } catch (e) {
+        }
+    });
+};
+
+/** The LRUD letter the section tab's combo is showing. */
+SketchScans.lrudIndex = function() {
+    var out = 0;
+    SketchScans.eachButton(SketchScans.w, "lrudCombo", function(c) {
+        try {
+            out = c.currentIndex;
+        } catch (e) {
+        }
+    });
+    return out;
+};
+
+/** Points that combo at one letter. */
+SketchScans.setLrudIndex = function(index) {
+    SketchScans.eachButton(SketchScans.w, "lrudCombo", function(c) {
+        try {
+            c.currentIndex = index;
+        } catch (e) {
+        }
+    });
+};
+
+/** Sets one named control's tooltip on every tab that has one. */
+SketchScans.setToolTip = function(name, tip) {
+    SketchScans.eachButton(SketchScans.w, name, function(b) {
+        try {
+            b.toolTip = tip;
+        } catch (e) {
+        }
+    });
+};
+
+/**
+ * Which view is being sketched: 0 plan, 1 profile, 2 cross section.
+ *
+ * READ OFF THE TAB, which is the point of the tabs: the view is a place
+ * you are rather than a setting you left somewhere. 0 when there are no
+ * tabs at all, which is the same answer the combo's own default gave.
+ */
+SketchScans.frameIndex = function() {
+    var w = SketchScans.w;
+    if (isNull(w) || isNull(w.tabs)) {
+        return 0;
+    }
+    try {
+        return w.tabs.currentIndex;
+    } catch (e) {
+        return 0;
+    }
+};
+
+/** Lets the caver change view, or stops them -- during a calibration
+ *  or an open bay, the view is decided and switching it mid-way would
+ *  ask a question nothing could answer. */
+SketchScans.setFrameEnabled = function(on) {
+    var w = SketchScans.w;
+    if (isNull(w) || isNull(w.tabs)) {
+        return;
+    }
+    for (var i = 0; i < 3; i++) {
+        try {
+            w.tabs.setTabEnabled(i, on === true ||
+                i === SketchScans.frameIndex());
+        } catch (e) {
+        }
+    }
+};
+
 SketchScans.buildDock = function(appWin) {
     var dock = new QDockWidget(qsTr("Sketch Scans"), appWin);
     // Without an objectName restoreState() cannot identify the dock and
@@ -512,141 +630,199 @@ SketchScans.buildDock = function(appWin) {
     }
     layout.addWidget(w.splitter, 1, 0);
 
-    // A GRID, NOT A ROW. Seven controls side by side cannot wrap, so
-    // their combined width WAS this panel's minimum -- 912 pixels of a
-    // 1920-wide window, leaving the drawing 894 (measured 2026-09-07,
-    // after Nathan asked what was eating the window). Two rows of four
-    // halve it, and the panel can then be dragged down to something a
-    // caver would choose.
-    var buttons = new QGridLayout();
-    w.refreshButton = new QPushButton(qsTr("Refresh"));
-    w.refreshButton.toolTip = qsTr("Re-read the scans folder -- new " +
-        "scans appear here once Drive has synced them.");
-    // ALIGN FIRST, THEN INSERT. The stations are picked on the scan in
-    // the viewer above, so the fit is known before the image is placed
-    // -- the caver never inserts a scan and then hunts for it in the
-    // drawing to align it.
-    w.pickAlignButton = new QPushButton(qsTr("Assign Stations to Scans"));
-    w.pickAlignButton.toolTip = qsTr("Click each station on the scan " +
-        "itself and say which station it is; the scan is then placed " +
-        "already fitted. Zoom in first -- the fit is only as good as " +
-        "the picks.");
-    // THREE FRAMES, ONE CONTROL. A checkbox could say plan-or-profile
-    // and nothing more; sections make that a third state, and a combo
-    // always has a value to read rather than a click history to
-    // reconstruct.
-    w.frameCombo = new QComboBox();
-    w.frameCombo.addItem(qsTr("Plan"));
-    w.frameCombo.addItem(qsTr("Profile"));
-    w.frameCombo.addItem(qsTr("Cross Section"));
-    w.frameCombo.currentIndex = 0;
-    w.frameCombo.toolTip = qsTr("Which view this scan is assigned to. " +
-        "Profile assigns to the ELEVATION's own stations, on " +
-        "CTRL-PROFILE-SCAN, following its band when the elevation is " +
-        "redrawn. Cross Section assigns to the PLAN's stations -- a " +
-        "section is cut at a plan station, not its own -- and lands on " +
-        "CTRL-SECTION-SCAN.");
-    // `activated`, not currentIndexChanged -- FeatureTrace's run combo
-    // draws the same line for the same reason: currentIndexChanged
-    // fires on a PROGRAMMATIC change too, and this handler must only
-    // react to the caver actually choosing something.
-    w.frameCombo.activated.connect(function() {
-        // THE GATE OWNS THIS BUTTON NOW. Sketch Section needs a cross
-        // section AND a trim choice; setting enabled here directly
-        // would switch it on for an untrimmed scan.
-        SketchScans.updateTrimGate();
-    });
-    w.alignButton = new QPushButton(qsTr("Insert && Align"));
-    w.alignButton.toolTip = qsTr("Insert the selected scan over the " +
-        "survey and start the align tool on it: pick two points on the " +
-        "scan and their true positions, and it fits.");
-    // THE ONE THING THE PANEL'S OWN LIST CANNOT REACH: a scan that has
-    // not made it into the cave's scans/ folder yet -- a photo still on
-    // a phone, a page scanned straight to the Desktop. This button
-    // skips the list and file-picks instead, then runs through the
-    // same insertAndAlign the list-driven "Insert && Align" uses, so
-    // there is exactly one insert-then-align path in this file, not two.
-    w.elsewhereButton = new QPushButton(
-        qsTr("Add a scan from elsewhere..."));
-    w.elsewhereButton.toolTip = qsTr("Insert and fit a scan that is " +
-        "not in this cave's scans folder.");
-    // THERE IS NO PLAIN "INSERT". A scan reaches this panel to be
-    // traced over, which means it has to sit where the survey says it
-    // sits; dropping one in unaligned only ever made a second step the
-    // caver had to remember. Insert & Align is the whole story.
-    // SKETCH SECTION IS GATED ON THE COMBO, not on the selected file --
-    // a plan or profile scan has no ghost to trace onto, so the button
-    // stays off until "Cross Section" is chosen, exactly the state the
-    // combo starts in.
-    w.sketchButton = new QPushButton(qsTr("Sketch Section"));
-    w.sketchButton.enabled = false;
-    w.sketchButton.toolTip = qsTr("Open a staging bay for the selected " +
-        "scan: the computed cross section at a chosen plan station, " +
-        "dashed, to scale the scan onto and trace by hand.");
-    // THE CORRECTION, AS A COMBO RATHER THAN A RE-PICK. The letter is
-    // INFERRED from the direction of the second click, and an inference
-    // is occasionally wrong -- a wall that leans, a station drawn low in
-    // its own outline. Making the caver re-click for that would punish
-    // them for the tool's guess; the two clicks are still perfectly
-    // good measurements of a pixel distance, and only the NAME attached
-    // to that distance is in doubt. So the letter is the one thing that
-    // can be changed after the fact, and changing it re-reads the same
-    // two clicks against a different measurement.
+    // ---- the workflow tabs -------------------------------------------
     //
-    // Hidden until there are two clicks to correct: an L/R/U/D combo
-    // sitting there before anything is picked invites the caver to
-    // choose a letter FIRST, which is a different (and worse) workflow
-    // -- it would mean promising to click that particular wall.
-    w.lrudCombo = new QComboBox();
-    for (var li = 0; li < CsSectionBay.LRUD_LETTERS.length; li++) {
-        w.lrudCombo.addItem(CsSectionBay.LRUD_LETTERS[li]);
-    }
-    w.lrudCombo.toolTip = qsTr("Which measurement the second click " +
-        "touched. Change it if the guess was wrong -- the two clicks " +
-        "stand, only the letter is re-read.");
-    w.calibCancelButton = new QPushButton(qsTr("Cancel"));
-    w.calibCancelButton.toolTip = qsTr("Abandon this calibration " +
-        "without opening a bay.");
+    // THREE WORKFLOWS, THREE TABS (Nathan, 2026-09-10). This was one
+    // grid of buttons plus a combo saying which view they applied to,
+    // and the combo was the whole problem: it made the view a SETTING
+    // rather than a place you are, and it left every button on screen
+    // whether or not it did anything in the view you had chosen.
+    // Sketch Section sat there greyed out through all the plan work,
+    // and Insert & Align sat there through the section work meaning
+    // something subtly different.
+    //
+    // A tab answers "which view am I sketching" by being open, and it
+    // shows only the buttons that view uses, in the order they are
+    // used. The frame is read off the tab -- SketchScans.frameIndex --
+    // so there is one answer to which view this is, and it is the one
+    // the caver is looking at.
+    //
+    // THE BUTTONS ARE PER TAB, three sets of them. A single set
+    // re-parented between pages is the other way, and it trades three
+    // cheap widgets for a re-parenting dance that this bridge does not
+    // reliably do; SketchScans.setText and setEnabled walk the copies
+    // so the rest of the file still says what it means.
+    w.tabs = new QTabWidget();
+    w.buttonSets = [];
+
+    var makeButton = function(label, tip) {
+        var b = new QPushButton(label);
+        if (!isNull(tip)) {
+            b.toolTip = tip;
+        }
+        return b;
+    };
+
+    var TIP = {
+        pickAlign: qsTr("Click each station on the scan itself and say " +
+            "which station it is; the scan is then placed already " +
+            "fitted. Zoom in first -- the fit is only as good as the " +
+            "picks."),
+        align: qsTr("Insert the selected scan over the survey and start " +
+            "the align tool on it: pick two points on the scan and " +
+            "their true positions, and it fits."),
+        elsewhere: qsTr("Insert and fit a scan that is not in this " +
+            "cave's scans folder -- a photo still on a phone, a page " +
+            "scanned straight to the Desktop."),
+        sketch: qsTr("Open a staging bay for the selected scan: the " +
+            "computed cross section at a chosen plan station, dashed, " +
+            "to scale the scan onto and trace by hand."),
+        lrud: qsTr("Which measurement the second click touched. Change " +
+            "it if the guess was wrong -- the two clicks stand, only " +
+            "the letter is re-read."),
+        calibCancel: qsTr("Abandon this calibration without opening a " +
+            "bay.")
+    };
+
+    /**
+     * One tab's page.
+     *
+     * `order` names the buttons this workflow uses, IN THE ORDER THEY
+     * ARE USED -- which is the other half of what the tabs are for. A
+     * panel that lists its buttons in the order somebody built them
+     * makes a caver read all of them every time.
+     */
+    var makePage = function(order) {
+        var page = new QWidget();
+        var grid = new QGridLayout();
+        var set = {};
+        var row = 0;
+        for (var i = 0; i < order.length; i++) {
+            var name = order[i];
+            if (name === "calibration") {
+                // THE CALIBRATION PAIR, hidden until there are two
+                // clicks to correct. An L/R/U/D combo sitting there
+                // before anything is picked invites the caver to choose
+                // a letter FIRST, which is a different and worse
+                // workflow -- it would mean promising to click that
+                // particular wall.
+                set.lrudCombo = new QComboBox();
+                for (var li = 0; li < CsSectionBay.LRUD_LETTERS.length;
+                        li++) {
+                    set.lrudCombo.addItem(CsSectionBay.LRUD_LETTERS[li]);
+                }
+                set.lrudCombo.toolTip = TIP.lrud;
+                set.calibCancelButton = makeButton(qsTr("Cancel"),
+                    TIP.calibCancel);
+                try {
+                    set.lrudCombo.maximumWidth = 60;
+                    set.lrudCombo.visible = false;
+                    set.calibCancelButton.visible = false;
+                } catch (eHide) {
+                    // a bridge that cannot hide them shows two idle
+                    // controls; both are inert until a calibration runs
+                }
+                grid.addWidget(set.lrudCombo, row, 0);
+                grid.addWidget(set.calibCancelButton, row, 1);
+                row += 1;
+                continue;
+            }
+            var button;
+            if (name === "pickAlignButton") {
+                button = makeButton(qsTr("Assign Stations to Scans"),
+                    TIP.pickAlign);
+            } else if (name === "alignButton") {
+                button = makeButton(qsTr("Insert && Align"), TIP.align);
+            } else if (name === "elsewhereButton") {
+                button = makeButton(qsTr("Add a scan from elsewhere..."),
+                    TIP.elsewhere);
+            } else if (name === "sketchButton") {
+                button = makeButton(qsTr("Sketch Section"), TIP.sketch);
+                button.enabled = false;
+            } else {
+                continue;
+            }
+            set[name] = button;
+            // ONE BUTTON PER ROW. A side dock should be tall and
+            // narrow, and the widest row is what the panel can never be
+            // narrower than -- these labels are sentences.
+            grid.addWidget(button, row, 0, 1, 2);
+            row += 1;
+        }
+        page.setLayout(grid);
+        return { page: page, set: set };
+    };
+
+    // THE ORDERS. Plan and profile are the same job against different
+    // stations: pick the stations on the scan, or place it and fit it
+    // in the drawing, and failing both, fetch a scan from outside the
+    // cave folder. A section is a different job entirely -- it starts
+    // at the bay.
+    var PLAN_ORDER = ["pickAlignButton", "alignButton",
+        "elsewhereButton"];
+    var SECTION_ORDER = ["sketchButton", "calibration", "alignButton",
+        "elsewhereButton"];
+
+    var planPage = makePage(PLAN_ORDER);
+    var profilePage = makePage(PLAN_ORDER);
+    var sectionPage = makePage(SECTION_ORDER);
+    w.buttonSets = [planPage.set, profilePage.set, sectionPage.set];
+
+    w.tabs.addTab(planPage.page, qsTr("Plan"));
+    w.tabs.addTab(profilePage.page, qsTr("Profile"));
+    w.tabs.addTab(sectionPage.page, qsTr("Cross Section"));
     try {
-        w.lrudCombo.maximumWidth = 60;
-        w.lrudCombo.visible = false;
-        w.calibCancelButton.visible = false;
-    } catch (eCalibHide) {
-        // a bridge that cannot hide them shows two extra idle controls;
-        // both are inert until a calibration is running
+        w.tabs.currentIndex = 0;
+        w.tabs.toolTip = qsTr("Which view you are sketching. Profile " +
+            "assigns to the ELEVATION's own stations, on " +
+            "CTRL-PROFILE-SCAN, following its band when the elevation " +
+            "is redrawn. Cross Section assigns to the PLAN's stations " +
+            "-- a section is cut at a plan station, not its own -- and " +
+            "lands on CTRL-SECTION-SCAN.");
+    } catch (eTabInit) {
     }
     try {
-        w.lrudCombo.activated.connect(function() {
-            SketchScans.correctLetter();
+        // `currentChanged`, and the same reasoning the old combo used
+        // `activated` for: switching tabs changes which view a scan is
+        // being assigned to, so the gate has to be recomputed.
+        w.tabs["currentChanged(int)"].connect(function() {
+            SketchScans.updateTrimGate();
         });
-    } catch (eLrudConn) {
-        // no correction on this bridge: the inferred letter stands, and
-        // the caver can still open the bay unscaled and scale by hand
-    }
-    try {
-        w.calibCancelButton.clicked.connect(function() {
-            SketchScans.endCalibration();
-        });
-    } catch (eCancelConn) {
+    } catch (eTabConn) {
     }
 
-    w.sketchButton.clicked.connect(function() {
-        SketchScans.sketchClicked();
+    // REFRESH SITS ABOVE THE TABS, because it is about the LIST rather
+    // than about any one workflow: re-reading the folder is the same
+    // act whichever view you are sketching.
+    w.refreshButton = makeButton(qsTr("Refresh"),
+        qsTr("Re-read the scans folder -- new scans appear here once " +
+            "Drive has synced them."));
+    layout.addWidget(w.refreshButton, 0, 0);
+    layout.addWidget(w.tabs, 0, 0);
+
+    // Every copy of a button, wired once each.
+    SketchScans.eachButton(w, "pickAlignButton", function(b) {
+        b.clicked.connect(function() { SketchScans.pickAlignClicked(); });
     });
-    // TWO COLUMNS, in reading order: which folder and which view first,
-    // then the two ways to place a scan, then the section work. A side
-    // dock should be tall and narrow -- the widest row is what the
-    // panel can never be narrower than, so no row holds more than two
-    // controls, and the long-named ones get a row to themselves.
-    buttons.addWidget(w.refreshButton, 0, 0);
-    buttons.addWidget(w.frameCombo, 0, 1);
-    buttons.addWidget(w.pickAlignButton, 1, 0);
-    buttons.addWidget(w.alignButton, 1, 1);
-    buttons.addWidget(w.elsewhereButton, 2, 0, 1, 2);
-    buttons.addWidget(w.lrudCombo, 3, 0);
-    buttons.addWidget(w.sketchButton, 3, 1);
-    buttons.addWidget(w.calibCancelButton, 4, 0, 1, 2);
-    layout.addLayout(buttons, 0);
+    SketchScans.eachButton(w, "alignButton", function(b) {
+        b.clicked.connect(function() { chooseInsert(); });
+    });
+    SketchScans.eachButton(w, "elsewhereButton", function(b) {
+        b.clicked.connect(function() { chooseElsewhere(); });
+    });
+    SketchScans.eachButton(w, "sketchButton", function(b) {
+        b.clicked.connect(function() { SketchScans.sketchClicked(); });
+    });
+    SketchScans.eachButton(w, "lrudCombo", function(c) {
+        try {
+            c.activated.connect(function() { SketchScans.correctLetter(); });
+        } catch (eLrudConn) {
+            // no correction on this bridge: the inferred letter stands
+        }
+    });
+    SketchScans.eachButton(w, "calibCancelButton", function(b) {
+        b.clicked.connect(function() { SketchScans.endCalibration(); });
+    });
 
     body.setLayout(layout);
     dock.setWidget(body);
@@ -804,7 +980,7 @@ SketchScans.buildDock = function(appWin) {
             if (w.picking !== null && w.picking.rel !== rel) {
                 // another scan: the picks belonged to the old one
                 w.picking = null;
-                w.pickAlignButton.text = qsTr("Assign Stations to Scans");
+                SketchScans.setText("pickAlignButton", qsTr("Assign Stations to Scans"));
             }
             // Likewise for a calibration: the two clicks are pixels on
             // ONE scan, and carrying them onto another would scale the
@@ -928,10 +1104,11 @@ SketchScans.buildDock = function(appWin) {
      *  is already long enough to hunt through. */
     var frameNow = function() {
         try {
-            if (w.frameCombo === undefined || w.frameCombo === null) {
+            if (isNull(SketchScans.w) ||
+                    isNull(SketchScans.w.tabs)) {
                 return "plan";
             }
-            switch (w.frameCombo.currentIndex) {
+            switch (SketchScans.frameIndex()) {
             case 1:  return "profile";
             case 2:  return "section";
             default: return "plan";
@@ -988,7 +1165,7 @@ SketchScans.buildDock = function(appWin) {
     /** Every pick so far, and what to do next. */
     var refreshPickState = function() {
         if (w.picking === null) {
-            w.pickAlignButton.text = qsTr("Assign Stations to Scans");
+            SketchScans.setText("pickAlignButton", qsTr("Assign Stations to Scans"));
             return;
         }
         var n = w.picking.pairs.length;
@@ -997,10 +1174,10 @@ SketchScans.buildDock = function(appWin) {
         // which kind of placement it would be. The wording matters: a
         // one-station place is assumed north-up and borrowed-scale, and
         // a caver who does not know that will not know to turn it.
-        w.pickAlignButton.text = (n >= 2) ?
+        SketchScans.setText("pickAlignButton", (n >= 2) ?
             qsTr("Place (%1 stations)").arg(n) :
             (n === 1 ? qsTr("Place (1 station, north-up)") :
-                qsTr("Cancel"));
+                qsTr("Cancel")));
         pickStatus(n === 0 ?
             qsTr("Click station 1 on the scan") :
             (n === 1 ?
@@ -1048,14 +1225,14 @@ SketchScans.buildDock = function(appWin) {
     var refreshCalibState = function() {
         var c = w.calibrating;
         try {
-            w.lrudCombo.visible = (c !== null && c.to !== null);
-            w.calibCancelButton.visible = (c !== null);
+            SketchScans.setVisible("lrudCombo", (c !== null && c.to !== null));
+            SketchScans.setVisible("calibCancelButton", (c !== null));
         } catch (eVis) {
         }
         if (c === null) {
             try {
-                w.sketchButton.text = qsTr("Sketch Section");
-                w.frameCombo.enabled = true;
+                SketchScans.setText("sketchButton", qsTr("Sketch Section"));
+                SketchScans.setFrameEnabled(true);
             } catch (eIdle) {
             }
             // THE GATE HAS THE LAST WORD on the placement buttons: an
@@ -1068,9 +1245,9 @@ SketchScans.buildDock = function(appWin) {
         // station and the frame belong to THIS calibration, not to
         // whatever the panel is set to by the time the bay opens.
         try {
-            w.pickAlignButton.enabled = false;
-            w.frameCombo.enabled = false;
-            w.sketchButton.enabled = true;
+            SketchScans.setEnabled("pickAlignButton", false);
+            SketchScans.setFrameEnabled(false);
+            SketchScans.setEnabled("sketchButton", true);
         } catch (eLock) {
         }
         var known = lrudText(c.lrud);
@@ -1102,9 +1279,9 @@ SketchScans.buildDock = function(appWin) {
                 (c.cal.inferred === true ? "" : qsTr("  (corrected)")));
         }
         try {
-            w.sketchButton.text = (c.cal !== null &&
+            SketchScans.setText("sketchButton", (c.cal !== null &&
                 c.cal.refused === undefined) ?
-                qsTr("Open Bay (scaled)") : qsTr("Open Bay (unscaled)");
+                qsTr("Open Bay (scaled)") : qsTr("Open Bay (unscaled)"));
         } catch (eText) {
         }
     };
@@ -1124,7 +1301,7 @@ SketchScans.buildDock = function(appWin) {
             var letter = String(c.cal.letter);
             for (var i = 0; i < CsSectionBay.LRUD_LETTERS.length; i++) {
                 if (CsSectionBay.LRUD_LETTERS[i] === letter) {
-                    w.lrudCombo.currentIndex = i;
+                    SketchScans.setLrudIndex(i);
                 }
             }
         } catch (eSync) {
@@ -1158,7 +1335,7 @@ SketchScans.buildDock = function(appWin) {
         }
         try {
             w.calibrating.forced =
-                CsSectionBay.LRUD_LETTERS[w.lrudCombo.currentIndex];
+                CsSectionBay.LRUD_LETTERS[SketchScans.lrudIndex()];
         } catch (e) {
             return;
         }
@@ -1414,7 +1591,7 @@ SketchScans.buildDock = function(appWin) {
             [pair], frame, effOne.rect);
         w.picking = null;
         try {
-            w.frameCombo.enabled = true;
+            SketchScans.setFrameEnabled(true);
         } catch (eUnlock) {
         }
         refreshPickState();
@@ -1505,7 +1682,7 @@ SketchScans.buildDock = function(appWin) {
             frame, effFit.rect);
         w.picking = null;
         try {
-            w.frameCombo.enabled = true;
+            SketchScans.setFrameEnabled(true);
         } catch (eUnlock) {
         }
         refreshPickState();
@@ -1601,7 +1778,9 @@ SketchScans.buildDock = function(appWin) {
         }
     };
 
-    w.pickAlignButton.clicked.connect(function() {
+    // Named rather than connected here: the button lives on the tabs
+    // now, three copies of it, and they are wired where they are built.
+    SketchScans.pickAlignClicked = function() {
         if (w.calibrating !== null) {
             return;               // a calibration owns the clicks already
         }
@@ -1628,11 +1807,11 @@ SketchScans.buildDock = function(appWin) {
         try {
             // locked while picks are being taken: the frame belongs to
             // the set of picks, not to whatever the combo says later
-            w.frameCombo.enabled = false;
+            SketchScans.setFrameEnabled(false);
         } catch (eLock) {
         }
         refreshPickState();
-    });
+    };
 
     w.list.itemSelectionChanged.connect(showPreview);
     // Remember the page we are on, so reopening this cave lands back
@@ -1741,8 +1920,7 @@ SketchScans.buildDock = function(appWin) {
     } catch (eCtx) {
     }
     w.refreshButton.clicked.connect(function() { SketchScans.refresh(); });
-    w.alignButton.clicked.connect(function() { chooseInsert(); });
-    w.elsewhereButton.clicked.connect(function() { chooseElsewhere(); });
+    // The tab buttons are wired where they are built, once per copy.
 
     // A re-shown dock re-reads the folder -- scans may have synced in
     // while it was hidden. Wrapped: not every bridge has the signal,
@@ -1829,7 +2007,7 @@ SketchScans.rebuild = function() {
     // against it and rebuild only when the answer would differ.
     w.stamp = (isNull(doc) ? "" : String(doc.getFileName())) + "|" +
         (scans === null ? "" : scans);
-    w.alignButton.enabled = false;
+    SketchScans.setEnabled("alignButton", false);
     // A REBUILT PANEL HAS NO SELECTION, so it has no trim choice
     // either; the gate turns the placement buttons back on when one is
     // made. Setting them from w.ready alone would offer a placement for
@@ -2249,8 +2427,8 @@ SketchScans.updateTrimGate = function() {
     var chosen = (w.trim !== null && w.trim !== undefined &&
         w.trim.chosen === true);
     try {
-        w.pickAlignButton.enabled = chosen;
-        w.alignButton.enabled = chosen;
+        SketchScans.setEnabled("pickAlignButton", chosen);
+        SketchScans.setEnabled("alignButton", chosen);
         w.trimRedoButton.enabled = chosen;
         // ONE BUTTON, TWO HALVES OF ONE WORKFLOW. Capture is the last
         // step of sketching a section and had no entry point anywhere
@@ -2259,19 +2437,21 @@ SketchScans.updateTrimGate = function() {
         // looking. While a bay is open this button IS the capture, and
         // it does not wait on a trim choice: the scan's part is over.
         if (SketchScans.bayOpen(EAction.getDocument())) {
-            w.sketchButton.text = qsTr("Capture Section");
-            w.sketchButton.toolTip = qsTr("Place what you traced in the " +
-                "open bay as a section block, with a leader back to its " +
-                "station, and tear the bay down.");
-            w.sketchButton.enabled = true;
+            SketchScans.setText("sketchButton", qsTr("Capture Section"));
+            SketchScans.setToolTip("sketchButton",
+                qsTr("Place what you traced in the open bay as a " +
+                    "section block, with a leader back to its station, " +
+                    "and tear the bay down."));
+            SketchScans.setEnabled("sketchButton", true);
         } else {
-            w.sketchButton.text = qsTr("Sketch Section");
-            w.sketchButton.toolTip = qsTr("Open a staging bay for the " +
-                "selected scan: the computed cross section at a chosen " +
-                "plan station, dashed, to scale the scan onto and trace " +
-                "by hand.");
-            w.sketchButton.enabled = chosen &&
-                (w.frameCombo.currentIndex === 2);
+            SketchScans.setText("sketchButton", qsTr("Sketch Section"));
+            SketchScans.setToolTip("sketchButton",
+                qsTr("Open a staging bay for the selected scan: the " +
+                    "computed cross section at a chosen plan station, " +
+                    "dashed, to scale the scan onto and trace by " +
+                    "hand."));
+            SketchScans.setEnabled("sketchButton", chosen &&
+                (SketchScans.frameIndex() === 2));
         }
     } catch (e) {
         // a bridge that cannot disable them leaves the old behaviour,
