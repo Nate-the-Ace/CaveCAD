@@ -259,3 +259,104 @@ CsScanTree.rowOfRel = function(rows, rel, collapsedSet) {
     }
     return -1;
 };
+
+// ---------------------------------------------------------------------
+// THE CASCADE.
+//
+// A flat list of every scanned page is the wrong control for a cave
+// with two hundred of them: Truitt Cave's are "2024 Scans/4-6-24 Survey
+// Scans/Team A/page 3.jpg", and a combo holding all of those is a combo
+// nobody can find a page in (Nathan, 2026-09-11: "can you make it a few
+// dropdowns based on the folders in the scans folder?").
+//
+// Surveyors already filed them the way they think about them -- year,
+// trip, team -- so the folders ARE the question the chooser should ask,
+// one level at a time. These are the pure answers behind that; the
+// panel makes a combo per level.
+// ---------------------------------------------------------------------
+
+/** How many folder levels deep the scans go. 0 when every page sits
+ *  directly in scans/, which is a cave with one combo. */
+CsScanTree.depthOf = function(files) {
+    var deepest = 0;
+    for (var i = 0; i < files.length; i++) {
+        var parts = String(files[i]).split("/");
+        var folders = parts.length - 1;
+        if (folders > deepest) {
+            deepest = folders;
+        }
+    }
+    return deepest;
+};
+
+/** True when `rel` sits under this folder path (a list of segments). */
+CsScanTree.isUnder = function(rel, prefix) {
+    var parts = String(rel).split("/");
+    if (parts.length - 1 < prefix.length) {
+        return false;
+    }
+    for (var i = 0; i < prefix.length; i++) {
+        if (parts[i] !== prefix[i]) {
+            return false;
+        }
+    }
+    return true;
+};
+
+/**
+ * The folder names one level below `prefix`, sorted the way a caver
+ * reads them.
+ *
+ * Distinct, because a folder holding thirty pages is still one folder.
+ */
+CsScanTree.foldersAt = function(files, prefix) {
+    var seen = {};
+    var out = [];
+    for (var i = 0; i < files.length; i++) {
+        var rel = String(files[i]);
+        if (!CsScanTree.isUnder(rel, prefix)) {
+            continue;
+        }
+        var parts = rel.split("/");
+        if (parts.length - 1 <= prefix.length) {
+            continue;            // a file at this level, not a folder
+        }
+        var name = parts[prefix.length];
+        if (seen[name] !== true) {
+            seen[name] = true;
+            out.push(name);
+        }
+    }
+    out.sort(CsCave.compareNatural);
+    return out;
+};
+
+/**
+ * The pages sitting DIRECTLY in `prefix` -- not in its subfolders.
+ *
+ * Directly, because the level combos are how you reach a subfolder:
+ * listing a folder's whole subtree here would put the same page in two
+ * places and undo the cascade.
+ */
+CsScanTree.filesAt = function(files, prefix) {
+    var out = [];
+    for (var i = 0; i < files.length; i++) {
+        var rel = String(files[i]);
+        if (!CsScanTree.isUnder(rel, prefix)) {
+            continue;
+        }
+        if (rel.split("/").length - 1 !== prefix.length) {
+            continue;
+        }
+        out.push(rel);
+    }
+    out.sort(CsCave.compareNatural);
+    return out;
+};
+
+/** The last segment of a relative path -- what a page is called. */
+CsScanTree.nameOf = function(rel) {
+    var text = String(isNull(rel) ? "" : rel);
+    var at = text.lastIndexOf("/");
+    return at < 0 ? text : text.substring(at + 1);
+};

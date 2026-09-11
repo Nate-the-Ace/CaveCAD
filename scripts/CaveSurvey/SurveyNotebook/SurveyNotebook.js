@@ -2957,16 +2957,21 @@ SurveyNotebook.lineworkDialog = function(w) {
 // ---------------------------------------------------------------------
 
 /**
- * Lists this cave's scanned pages into the chooser.
+ * Reads this cave's scans folder into the browser.
  *
  * The cave folder comes from the OPEN DRAWING, the same way Sketch
  * Scans finds it: a notebook page belongs to a cave, and the scans it
  * is typed off are that cave's. A drawing with no folder -- an unsaved
- * one, a drawing outside a cave project -- gets an empty chooser and a
+ * one, a drawing outside a cave project -- gets an empty list and a
  * line saying why, rather than a list of somebody else's pages.
+ *
+ * THE COLLAPSED FOLDERS AND THE TICKS ARE THE ONES SKETCH SCANS KEEPS.
+ * Same settings, same keys, read through CsScanTree: a page ticked
+ * there is ticked here, and a trip folded there opens folded here.
+ * That is the whole reason this is the same list.
  */
 SurveyNotebook.fillScans = function(w) {
-    if (isNull(w) || isNull(w.scanCombo)) {
+    if (isNull(w) || isNull(w.scanList)) {
         return;
     }
     var folder = null;
@@ -2976,18 +2981,13 @@ SurveyNotebook.fillScans = function(w) {
     } catch (eFolder) {
         folder = null;
     }
-    w.scanFiles = [];
-    try {
-        w.scanCombo.clear();
-    } catch (eClear) {
-    }
+    w.scansFolder = folder;
+    w.scanRows = [];
     if (isNull(folder) || folder === "") {
-        try {
-            w.scanCombo.addItem("(save this drawing in a cave folder)");
-        } catch (eNone) {
-        }
+        SurveyNotebook.sayNoScans(w, "(save this drawing in a cave folder)");
         return;
     }
+
     // The scans TREE, not CsCave.imageFiles -- that reads the cave's
     // images/ folder, which is photographs. Scans live under scans/,
     // usually one folder per trip, which is why this walks.
@@ -3009,47 +3009,121 @@ SurveyNotebook.fillScans = function(w) {
     } catch (eList) {
         relative = [];
     }
-    var files = [];
-    for (var r = 0; r < relative.length; r++) {
-        files.push(folder + "/" + relative[r]);
-    }
-    if (files.length === 0) {
-        try {
-            w.scanCombo.addItem("(no scans in " + CsCave.SCANS + ")");
-        } catch (eEmpty) {
-        }
+    if (relative.length === 0) {
+        SurveyNotebook.sayNoScans(w, "(no scans in " + CsCave.SCANS + ")");
         return;
     }
-    for (var i = 0; i < files.length; i++) {
-        w.scanFiles.push(files[i]);
+
+    w.scanRows = CsScanTree.rowsOf(relative);
+    w.scanCollapsed = CsScanTree.collapsedSetFor(
+        CsScanTree.parseCollapsed(RSettings.getStringValue(
+            CsScanTree.SETTING, "")), folder);
+    w.scanComplete = CsScanTree.collapsedSetFor(
+        CsScanTree.parseCollapsed(RSettings.getStringValue(
+            CsScanTree.SETTING_BOOKMARKS, "")), folder);
+    CsScanList.fill(w.scanList, w.scanRows,
+        { folder: folder, collapsed: w.scanCollapsed,
+          complete: w.scanComplete }, {});
+};
+
+/** One row saying why the browser is empty. */
+SurveyNotebook.sayNoScans = function(w, why) {
+    try {
+        w.scanList.setRowCount(0);
+        w.scanList.setRowCount(1);
+        w.scanList.setItem(0, 0, new QTableWidgetItem(why));
+    } catch (eSay) {
+    }
+};
+
+/** A click on a folder row folds it; a click on a page shows it. */
+SurveyNotebook.scanRowClicked = function(w, row) {
+    if (isNull(w) || isNull(w.scanRows) || row < 0 ||
+            row >= w.scanRows.length) {
+        return;
+    }
+    if (w.scanRows[row].kind === "folder") {
+        var rel = w.scanRows[row].rel;
+        w.scanCollapsed[rel] = (w.scanCollapsed[rel] !== true);
+        // Remembered in the SAME setting Sketch Scans uses, so a trip
+        // folded in one panel is folded in the other.
         try {
-            // The path RELATIVE to scans/, because it names the trip:
-            // "4-6-24 Survey Scans/Team A/page 2.jpg" is the answer to
-            // "which page am I typing off", and the absolute path is
-            // the cave folder repeated thirty times.
-            w.scanCombo.addItem(relative[i]);
-        } catch (eAdd) {
+            var map = CsScanTree.parseCollapsed(
+                RSettings.getStringValue(CsScanTree.SETTING, ""));
+            var rels = [];
+            for (var i = 0; i < w.scanRows.length; i++) {
+                if (w.scanRows[i].kind === "folder") {
+                    rels.push(w.scanRows[i].rel);
+                }
+            }
+            CsScanTree.recordCollapsed(map, w.scansFolder,
+                w.scanCollapsed, rels);
+            RSettings.setValue(CsScanTree.SETTING,
+                CsScanTree.serializeCollapsed(map));
+        } catch (eSave) {
         }
+        CsScanList.refreshRow(w.scanList, w.scanRows,
+            { collapsed: w.scanCollapsed, complete: w.scanComplete },
+            row);
+        CsScanList.applyHidden(w.scanList, w.scanRows, w.scanCollapsed);
+        return;
     }
     SurveyNotebook.showScan(w);
 };
 
-/** Puts the chosen page in the pane. */
+/**
+ * Marks the selected page finished with, or unmarks it.
+ *
+ * THE SAME MARK SKETCH SCANS KEEPS, in the same setting. Typing a page
+ * into this notebook is one of the two ways a page gets finished with
+ * -- the other is tracing it -- and a tick that only one of them could
+ * set would be a record of half the work.
+ */
+SurveyNotebook.toggleScanComplete = function(w, row) {
+    if (isNull(w) || isNull(w.scanRows) || row < 0 ||
+            row >= w.scanRows.length || w.scanRows[row].kind !== "file") {
+        return;
+    }
+    var rel = w.scanRows[row].rel;
+    w.scanComplete[rel] = (w.scanComplete[rel] !== true);
+    try {
+        var map = CsScanTree.parseCollapsed(RSettings.getStringValue(
+            CsScanTree.SETTING_BOOKMARKS, ""));
+        var rels = [];
+        for (var i = 0; i < w.scanRows.length; i++) {
+            if (w.scanRows[i].kind === "file") {
+                rels.push(w.scanRows[i].rel);
+            }
+        }
+        CsScanTree.recordCollapsed(map, w.scansFolder, w.scanComplete,
+            rels);
+        RSettings.setValue(CsScanTree.SETTING_BOOKMARKS,
+            CsScanTree.serializeCollapsed(map));
+    } catch (eSave) {
+    }
+    // The page's own row, and every folder above it: a trip is ticked
+    // when everything in it is done, so finishing the last page of one
+    // changes a row the caver may not be looking at.
+    CsScanList.fill(w.scanList, w.scanRows,
+        { folder: w.scansFolder, collapsed: w.scanCollapsed,
+          complete: w.scanComplete }, {});
+    try {
+        w.scanList.setCurrentCell(row, 0);
+    } catch (eSel) {
+    }
+};
+
+/** Puts the selected page in the pane. */
 SurveyNotebook.showScan = function(w) {
-    if (isNull(w) || w.scanPreview === null || isNull(w.scanFiles)) {
+    if (isNull(w) || w.scanPreview === null || isNull(w.scanRows)) {
         return;
     }
-    var at = 0;
-    try {
-        at = w.scanCombo.currentIndex;
-    } catch (eIdx) {
-        at = 0;
-    }
-    if (at < 0 || at >= w.scanFiles.length) {
+    var rel = CsScanList.selectedRel(w.scanList, w.scanRows);
+    if (rel === null || isNull(w.scansFolder)) {
         return;
     }
     try {
-        CsScanPreview.show(w.scanPreview, w.scanFiles[at]);
+        CsScanPreview.show(w.scanPreview, w.scansFolder + "/" + rel);
     } catch (eShow) {
     }
 };
@@ -3240,8 +3314,14 @@ SurveyNotebook.buildDock = function(appWin) {
                 for (var si = 0; si < splitParts.length; si++) {
                     splitSizes.push(parseInt(splitParts[si], 10));
                 }
-                if (splitSizes.length === 2 &&
-                    !isNaN(splitSizes[0]) && !isNaN(splitSizes[1])) {
+                // ONLY IF IT STILL FITS. The splitter gained the scan
+                // pane between the ladder and the status box, so a
+                // two-number split saved before that would leave the
+                // new pane with nothing -- and a caver who pressed
+                // Scan would see an empty strip and conclude it was
+                // broken.
+                if (splitSizes.length === w.splitter.count() &&
+                        !isNaN(splitSizes[0])) {
                     w.splitter.setSizes(splitSizes);
                 }
             } else {
@@ -3257,38 +3337,53 @@ SurveyNotebook.buildDock = function(appWin) {
         } catch (eSplit) {
             // bridge without sizes()/setSizes(): stretch factors stand
         }
-        // ---- the scans, beside the shots -----------------------------
+        // ---- the scans, under the shots -------------------------------
         //
         // THE NUMBERS COME OFF THE PAGE (Nathan, 2026-09-11). Typing a
         // trip into this notebook means reading a scanned field book
         // -- distance, azimuth, inclination, LRUD, the note in the
-        // margin -- and the scan was in another panel. Every shot was
-        // a look away and a look back, and a wrong row is what that
+        // margin -- and the scan was in another panel. Every shot was a
+        // look away and a look back, and a wrong row is what that
         // costs.
         //
-        // So the page can sit beside the ladder, in the same dock, on a
-        // horizontal splitter: give either side more room by dragging,
-        // and it is remembered. Off by default -- a caver typing from
-        // paper on the desk does not want half their notebook gone --
-        // and toggled by the Scan button in the action row.
+        // UNDER THE LADDER, not beside it. A shot row is wide -- name,
+        // seven numbers and a note -- and taking width from it to put
+        // a page alongside squeezed the thing being typed into. The
+        // ladder keeps the dock's width and the page takes the height
+        // below it, on the splitter that already divides this panel.
         //
         // THE SAME VIEWER Sketch Scans uses (Core/CsScanView.js), not a
-        // second one: it is an embedded CAD view with real zoom, pan
-        // and rotate, and every one of those was a trap somebody had
-        // to find once.
+        // second one: an embedded CAD view with real zoom, pan and
+        // rotate, every one of which was a trap somebody had to find
+        // once.
         w.scanPane = new QWidget();
         var scanLayout = new QVBoxLayout();
         try {
             scanLayout.setContentsMargins(0, 0, 0, 0);
         } catch (eMargins) {
         }
-        w.scanCombo = new QComboBox();
-        w.scanCombo.toolTip = "Which scanned page you are reading off. " +
-            "The list is this cave's scans folder.";
-        scanLayout.addWidget(w.scanCombo, 0, 0);
+
+        // THE SAME BROWSER SKETCH SCANS HAS (Core/CsScanList.js): the
+        // cave's scans folder as a tree that folds, with a tick on
+        // every page finished with and on every trip whose pages are
+        // all done. Two lists over one folder would be two answers to
+        // "which have I done", and they would drift -- a page ticked
+        // in one panel still looking undone in the other, when the tick
+        // is the only record of what a caver has worked through.
+        //
+        // It replaced a cascade of folder dropdowns, which answered
+        // the same question worse: it could say where a page was and
+        // never which ones were left.
+        w.scanList = CsScanList.build(w.scanPane);
+        try {
+            w.scanList.minimumHeight = 90;
+        } catch (eListH) {
+        }
+        scanLayout.addWidget(w.scanList, 1, 0);
+
         w.scanPreview = CsScanPreview.build(w.scanPane);
         if (w.scanPreview !== null) {
-            scanLayout.addWidget(w.scanPreview.view, 1, 0);
+            scanLayout.addWidget(w.scanPreview.view, 3, 0);
         } else {
             // No embedded view on this bridge: say so rather than
             // leaving an empty strip that looks broken.
@@ -3309,33 +3404,17 @@ SurveyNotebook.buildDock = function(appWin) {
         scanLayout.addLayout(scanZoom, 0);
         w.scanPane.setLayout(scanLayout);
 
-        w.hsplit = new QSplitter(Qt.Horizontal);
-        w.hsplit.addWidget(w.scanPane);
-        w.hsplit.addWidget(w.splitter);
+        // Between the ladder and the status box: the ladder is what is
+        // being typed into and keeps the top, the status box is two
+        // lines and keeps the bottom.
         try {
-            w.hsplit.setStretchFactor(0, 2);
-            w.hsplit.setStretchFactor(1, 3);
-        } catch (eHsf) {
+            w.splitter.insertWidget(1, w.scanPane);
+        } catch (eInsert) {
+            w.splitter.addWidget(w.scanPane);
         }
         try {
-            var savedWide = RSettings.getStringValue(
-                "CaveSurvey/NotebookScanSplit", "");
-            if (savedWide.length > 0) {
-                var wideParts = savedWide.split(",");
-                var wideSizes = [];
-                for (var wi = 0; wi < wideParts.length; wi++) {
-                    wideSizes.push(parseInt(wideParts[wi], 10));
-                }
-                if (wideSizes.length === 2 && !isNaN(wideSizes[0]) &&
-                        !isNaN(wideSizes[1])) {
-                    w.hsplit.setSizes(wideSizes);
-                }
-            }
-            w.hsplit.splitterMoved.connect(function() {
-                RSettings.setValue("CaveSurvey/NotebookScanSplit",
-                    w.hsplit.sizes().join(","));
-            });
-        } catch (eWide) {
+            w.splitter.setStretchFactor(1, 3);
+        } catch (eScanSf) {
         }
         try {
             w.scanPane.visible = RSettings.getBoolValue(
@@ -3344,7 +3423,7 @@ SurveyNotebook.buildDock = function(appWin) {
             w.scanPane.visible = false;
         }
 
-        layout.addWidget(w.hsplit, 1, 0);
+        layout.addWidget(w.splitter, 1, 0);
         layout.addWidget(w.rowButtonBar, 0, 0);
     }
     w.statusLabel.visible =
@@ -3570,9 +3649,46 @@ SurveyNotebook.buildDock = function(appWin) {
             SurveyNotebook.fillScans(w);
         }
     }, "Scan button", w.problems);
-    SurveyNotebook.safeConnect(w.scanCombo.activated, function() {
-        SurveyNotebook.showScan(w);
-    }, "Scan chooser", w.problems);
+    SurveyNotebook.safeConnect(w.scanList.cellClicked,
+        function(row, col) {
+            SurveyNotebook.scanRowClicked(w, row);
+        }, "Scan list", w.problems);
+    SurveyNotebook.safeConnect(w.scanList.itemSelectionChanged,
+        function() {
+            SurveyNotebook.showScan(w);
+        }, "Scan selection", w.problems);
+    try {
+        w.scanList.contextMenuPolicy = Qt.CustomContextMenu;
+        w.scanList.customContextMenuRequested.connect(function(pos) {
+            var row = -1;
+            try {
+                row = w.scanList.rowAt(pos.y());
+                if (row >= 0) {
+                    w.scanList.selectRow(row);
+                }
+            } catch (eRow) {
+            }
+            if (row < 0 || isNull(w.scanRows[row]) ||
+                    w.scanRows[row].kind !== "file") {
+                return;
+            }
+            var menu = new QMenu(w.scanList);
+            var done = w.scanComplete[w.scanRows[row].rel] === true;
+            var act = menu.addAction(done ? "Not finished with" :
+                "Finished with");
+            act.triggered.connect(function() {
+                SurveyNotebook.toggleScanComplete(w, row);
+            });
+            menu.exec(QCursor.pos());
+            try {
+                menu.deleteLater();
+            } catch (eDel) {
+            }
+        });
+    } catch (eMenu) {
+        // no context menu on this bridge: the tick is still read here
+        // and set from Sketch Scans
+    }
     SurveyNotebook.safeConnect(w.scanFitButton.clicked, function() {
         if (w.scanPreview !== null) { CsScanPreview.fit(w.scanPreview); }
     }, "Scan fit", w.problems);

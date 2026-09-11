@@ -147,7 +147,9 @@ SketchScans.SETTING_SPLIT = "CaveSurvey/SketchScansSplitterSizes";
 // The COMPLETE tick. A trip's scans run to dozens of IMG_4021-shaped
 // names, so "which of these have I already done" is a real question
 // with no other answer.
-SketchScans.COMPLETE = "\u2713";
+// The tick lives in Core with the list that draws it; this name stays
+// because the rest of this file says it.
+SketchScans.COMPLETE = CsScanList.COMPLETE;
 
 /**
  * The header line: which folder, how many scans, and what to do.
@@ -271,21 +273,10 @@ SketchScans.saveSelected = function(scans, rel, rows) {
 // folder rows, a glyph-wide gap on file rows so labels at one depth
 // line up across kinds.
 SketchScans.rowText = function(row, collapsed, bookmarks, rows) {
-    var indent = new Array(row.depth + 1).join("  ");
-    var marks = bookmarks || {};
-    if (row.kind === "folder") {
-        var folded = collapsed[row.rel] === true;
-        // A FOLDER IS TICKED WHEN EVERYTHING IN IT IS DONE -- open or
-        // collapsed, since "this trip is finished" is worth seeing
-        // either way. Ticking a folder that merely CONTAINS a finished
-        // page would put the same mark on a trip with one page done as
-        // on one with forty.
-        var done = CsScanTree.folderComplete(row.rel, rows || [], marks);
-        return indent + (folded ? "▸ " : "▾ ") + row.label +
-            (done ? "  " + SketchScans.COMPLETE : "");
-    }
-    return indent + (marks[row.rel] === true ?
-        SketchScans.COMPLETE + " " : "  ") + row.label;
+    // The list moved to Core (CsScanList) when the Survey Notebook
+    // needed the same browser -- two lists over one folder would be
+    // two answers to "which pages have I done".
+    return CsScanList.rowText(row, collapsed, bookmarks, rows);
 };
 
 /** Builds the dock and hands it to the main window. Idempotent. */
@@ -2223,36 +2214,9 @@ SketchScans.rebuild = function() {
     w.collapsed = SketchScans.loadCollapsed(scans);
     w.bookmarks = SketchScans.loadBookmarks(scans);
 
-    w.list.setRowCount(w.rows.length);
-    for (var i = 0; i < w.rows.length; i++) {
-        var item = new QTableWidgetItem(
-            SketchScans.rowText(w.rows[i], w.collapsed, w.bookmarks, w.rows));
-        if (w.rows[i].kind === "folder") {
-            // Bold, clickable, but never SELECTED -- the selection
-            // (and with it the preview pane) stays on a scan while
-            // folders fold and unfold around it.
-            try {
-                var bold = item.font();
-                bold.setBold(true);
-                item.setFont(bold);
-            } catch (eBold) {
-            }
-            try {
-                item.setFlags(Qt.ItemIsEnabled);
-            } catch (eFlags) {
-            }
-        } else {
-            try {
-                item.setToolTip("<img src=\"" + scans + "/" +
-                    w.rows[i].rel + "\" width=\"" +
-                    SketchScans.PREVIEW_W + "\">");
-            } catch (eTip) {
-                // no hover preview on this bridge; the pane still works
-            }
-        }
-        w.list.setItem(i, 0, item);
-    }
-    SketchScans.applyHidden();
+    CsScanList.fill(w.list, w.rows,
+        { folder: scans, collapsed: w.collapsed, complete: w.bookmarks },
+        { previewWidth: SketchScans.PREVIEW_W });
 
     // Initial selection: the scan this cave was left on. Only when
     // there is no memory of one -- a cave opened for the first time, a
@@ -2290,14 +2254,7 @@ SketchScans.rebuild = function() {
 
 SketchScans.applyHidden = function() {
     var w = SketchScans.w;
-    try {
-        for (var r = 0; r < w.rows.length; r++) {
-            w.list.setRowHidden(r,
-                CsScanTree.isHidden(w.rows[r], w.collapsed));
-        }
-    } catch (eHide) {
-        // an engine without setRowHidden shows the list flat
-    }
+    CsScanList.applyHidden(w.list, w.rows, w.collapsed);
 };
 
 // Rebuilds the panel ONLY when the active drawing (and with it the

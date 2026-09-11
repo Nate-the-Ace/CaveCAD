@@ -263,7 +263,11 @@ var CORE_FILES_NOT_LOADED = [
     // rule worth testing (a copy that cannot strip is not written) can
     // only be proved against a real file. Covered by
     // tests/package_cave.js and tests/teaching_cave_run.js.
-    "scripts/CaveSurvey/Core/CsSanitize.js"
+    "scripts/CaveSurvey/Core/CsSanitize.js",
+    // A QTableWidget renderer: every function takes a live table. The
+    // model it draws -- rows, folds, which folders count as complete --
+    // is CsScanTree, which IS exercised here.
+    "scripts/CaveSurvey/Core/CsScanList.js"
 ];
 
 // ---------------------------------------------------------------------
@@ -24408,6 +24412,70 @@ eqs(CsSymbolStore.PREFIX, "SYM_", "the symbol block prefix");
     ok(refusal.toLowerCase().indexOf("open the cave") > 0,
         "CsSheetFile: and answers the question actually being asked, " +
             "which is where to do this instead");
+})();
+
+// ---------------------------------------------------------------------
+// CsScanTree's cascade -- the folders as the question, one level at a
+// time. A flat list of two hundred pages is a control nobody can find a
+// page in; surveyors already filed them by year, trip and team.
+// ---------------------------------------------------------------------
+(function() {
+    var files = [
+        "2024 Scans/4-6-24 Survey Scans/Team A/page 1.jpg",
+        "2024 Scans/4-6-24 Survey Scans/Team A/page 2.jpg",
+        "2024 Scans/4-6-24 Survey Scans/Team B/page 1.jpg",
+        "2024 Scans/9-1-24 Survey Scans/page 1.jpg",
+        "loose page.jpg"
+    ];
+
+    eqs(CsScanTree.depthOf(files), 3,
+        "CsScanTree: the deepest scan is three folders down");
+    eqs(CsScanTree.depthOf(["a.jpg", "b.jpg"]), 0,
+        "CsScanTree: pages straight in scans/ are no folders deep, " +
+            "which is a cave with one chooser");
+    eqs(CsScanTree.depthOf([]), 0,
+        "CsScanTree: and no scans at all is the same");
+
+    var top = CsScanTree.foldersAt(files, []);
+    eqs(top.join("|"), "2024 Scans",
+        "CsScanTree: the top level lists folders only -- a loose page " +
+            "is not a folder (" + top.join("|") + ")");
+    var trips = CsScanTree.foldersAt(files, ["2024 Scans"]);
+    eqs(trips.join("|"), "4-6-24 Survey Scans|9-1-24 Survey Scans",
+        "CsScanTree: one level down lists that folder's own folders");
+    var teams = CsScanTree.foldersAt(files,
+        ["2024 Scans", "4-6-24 Survey Scans"]);
+    eqs(teams.join("|"), "Team A|Team B",
+        "CsScanTree: a folder holding thirty pages is still one folder");
+    eqs(CsScanTree.foldersAt(files,
+        ["2024 Scans", "4-6-24 Survey Scans", "Team A"]).length, 0,
+        "CsScanTree: a folder with no subfolders ends the cascade");
+
+    // DIRECTLY IN, not the whole subtree: the level combos are how you
+    // reach a subfolder, and listing its pages here would put the same
+    // page in two places.
+    eqs(CsScanTree.filesAt(files, []).join("|"), "loose page.jpg",
+        "CsScanTree: the top level's own pages are the loose ones");
+    eqs(CsScanTree.filesAt(files, ["2024 Scans"]).length, 0,
+        "CsScanTree: a folder that only holds folders holds no pages");
+    eqs(CsScanTree.filesAt(files,
+        ["2024 Scans", "4-6-24 Survey Scans", "Team A"]).length, 2,
+        "CsScanTree: and the leaf folder holds its two");
+    eqs(CsScanTree.filesAt(files,
+        ["2024 Scans", "9-1-24 Survey Scans"]).length, 1,
+        "CsScanTree: a trip with no team folders still lists its page");
+
+    ok(CsScanTree.isUnder("a/b/c.jpg", ["a", "b"]),
+        "CsScanTree: a page is under its own folder");
+    ok(!CsScanTree.isUnder("a/b/c.jpg", ["a", "z"]),
+        "CsScanTree: and not under a sibling of it");
+    ok(!CsScanTree.isUnder("a.jpg", ["a"]),
+        "CsScanTree: a page is not under a folder named after it");
+
+    eqs(CsScanTree.nameOf("2024 Scans/Team A/page 2.jpg"), "page 2.jpg",
+        "CsScanTree: a page is called its last segment");
+    eqs(CsScanTree.nameOf("loose.jpg"), "loose.jpg",
+        "CsScanTree: even with no folders above it");
 })();
 
 // ---------------------------------------------------------------------

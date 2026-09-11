@@ -154,6 +154,11 @@ include(includeBasePath + "/CsPanel.js");
 // shared -- Sketch Scans traces against it and the Survey Notebook
 // types off it.
 include(includeBasePath + "/CsScanView.js");
+// The scans browser itself: a folder tree on a table, with the tick
+// that says which pages a caver has finished with. Sketch Scans traces
+// from it and the Survey Notebook types from it -- two browsers over
+// one folder would be two answers to "which have I done".
+include(includeBasePath + "/CsScanList.js");
 include(includeBasePath + "/CsSheet.js");
 include(includeBasePath + "/CsReport.js");
 // After CsLayers, CsSymbols, CsSheet, CsShapeLine, CsStats and

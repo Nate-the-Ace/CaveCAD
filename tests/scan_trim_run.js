@@ -67,6 +67,10 @@ if (typeof qsTr === "undefined") {
 if (typeof isNumber === "undefined") {
     isNumber = function(v) { return typeof v === "number" && !isNaN(v); };
 }
+// The scans list moved to Core when the Survey Notebook needed the
+// same browser; SketchScans reads its tick and its renderer from there
+// at LOAD time, so it has to come first.
+loadRepoScript("scripts/CaveSurvey/Core/CsScanList.js");
 loadRepoScript("scripts/CaveSurvey/SketchScans/SketchScans.js");
 
 var failures = [], checks = 0;

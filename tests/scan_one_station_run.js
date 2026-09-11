@@ -66,6 +66,9 @@ if (typeof EAction === "undefined") {
     EAction.getDocumentInterface = function() { return null; };
     EAction.handleUserMessage = function() {};
 }
+// The scans list moved to Core when the Survey Notebook needed the
+// same browser; SketchScans reads its tick from there at LOAD time.
+loadRepoScript("scripts/CaveSurvey/Core/CsScanList.js");
 loadRepoScript("scripts/CaveSurvey/SketchScans/SketchScans.js");
 // ScanTurn.js derives from stock Transform, which is not loadable
 // headlessly -- but its geometry is static and that is what is under
