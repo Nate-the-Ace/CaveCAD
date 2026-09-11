@@ -55,7 +55,7 @@
     {
       "id": 6,
       "subject": "Task 7: The regeneration listener",
-      "status": "pending",
+      "status": "completed",
       "description": "**Goal:** Editing a boundary redraws its fill, deterministically, without a redraw storm.\n\n**Files:**\n- Create: `scripts/CaveSurvey/AreaFill/AreaFillListener.js`\n- Modify: `tests/area_fill_run.js`\n\n**Acceptance Criteria:**\n- [ ] `AreaFillListener.regenerate(doc, di, boundaryId)` clears and rebuilds that area's fill from the boundary's own tags\n- [ ] Regenerating an unchanged area twice leaves the same entity count and the same placements\n- [ ] Moving a boundary moves its fill with it\n- [ ] Deleting a boundary deletes its fill\n- [ ] A regeneration does not trigger another: the re-entry guard holds\n- [ ] The listener does no work when the document has no `AreaId` tags at all\n\n**Verify:** `/Applications/CaveCAD.app/Contents/MacOS/CaveCAD -no-dock-icon -no-gui -allow-multiple-instances -autostart tests/area_fill_run.js \"$PWD\"` \u2192 `ALL PASSED`\n\n**Steps:**\n- Step 1: Add the tests to `tests/area_fill_run.js`\n- Step 2: Run and watch it fail\n- Step 3: Write `scripts/CaveSurvey/AreaFill/AreaFillListener.js`\n- Step 4: Run to verify it passes\n- Step 5: Commit\n\n```json:metadata\n{\"files\": [\"scripts/CaveSurvey/AreaFill/AreaFillListener.js\", \"tests/area_fill_run.js\"], \"verifyCommand\": \"`/Applications/CaveCAD.app/Contents/MacOS/CaveCAD -no-dock-icon -no-gui -allow-multiple-instances -autostart tests/area_fill_run.js \\\"$PWD\\\"` \\u2192 `ALL PASSED`\", \"acceptanceCriteria\": [\"AreaFillListener.regenerate(doc, di, boundaryId) clears and rebuilds that area's fill from the boundary's own tags\", \"Regenerating an unchanged area twice leaves the same entity count and the same placements\", \"Moving a boundary moves its fill with it\", \"Deleting a boundary deletes its fill\", \"A regeneration does not trigger another: the re-entry guard holds\", \"The listener does no work when the document has no AreaId tags at all\"], \"modelTier\": \"standard\"}\n```",
       "blockedBy": [
         5
@@ -116,5 +116,5 @@
       ]
     }
   ],
-  "lastUpdated": "2026-09-11T14:04:28"
+  "lastUpdated": "2026-09-11T14:37:28"
 }
