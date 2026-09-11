@@ -2974,6 +2974,14 @@ SurveyNotebook.fillScans = function(w) {
     if (isNull(w) || isNull(w.scanList)) {
         return;
     }
+    // REGISTERED FIRST, before any of the ways this can give up. While
+    // Sketch Scans is open it is marking the same pages, and a panel
+    // that listened only after a successful listing would sit there
+    // showing ticks that had moved. ONE SLOT per panel, so refilling
+    // replaces this rather than stacking another closure on old rows.
+    CsScanList.watch("SurveyNotebook", function(changed) {
+        SurveyNotebook.marksChanged(w, changed);
+    });
     var folder = null;
     try {
         folder = CsCave.scansDir(String(
@@ -3019,12 +3027,6 @@ SurveyNotebook.fillScans = function(w) {
         CsScanTree.parseCollapsed(RSettings.getStringValue(
             CsScanTree.SETTING, "")), folder);
     w.scanComplete = CsScanList.loadComplete(folder);
-    // While Sketch Scans is open it is marking the same pages. ONE
-    // SLOT per panel, so refilling replaces this rather than stacking
-    // another closure on the old rows.
-    CsScanList.watch("SurveyNotebook", function(changed) {
-        SurveyNotebook.marksChanged(w, changed);
-    });
     CsScanList.fill(w.scanList, w.scanRows,
         { folder: folder, collapsed: w.scanCollapsed,
           complete: w.scanComplete }, {});
@@ -3439,12 +3441,19 @@ SurveyNotebook.buildDock = function(appWin) {
             w.splitter.setStretchFactor(1, 3);
         } catch (eScanSf) {
         }
+        // WANTED, not `.visible`. The dock is built hidden (add-on
+        // init runs before restoreState), and a child of a hidden
+        // parent reads visible=false however it was set -- so asking
+        // the WIDGET whether the caver wants this pane answers no,
+        // every time, until the dock is on screen. The intent lives
+        // here instead, and the widget follows it.
         try {
-            w.scanPane.visible = RSettings.getBoolValue(
+            w.scanWanted = RSettings.getBoolValue(
                 "CaveSurvey/NotebookScanVisible", false);
         } catch (eScanVis) {
-            w.scanPane.visible = false;
+            w.scanWanted = false;
         }
+        w.scanPane.visible = w.scanWanted;
 
         layout.addWidget(w.splitter, 1, 0);
         layout.addWidget(w.rowButtonBar, 0, 0);
@@ -3658,17 +3667,17 @@ SurveyNotebook.buildDock = function(appWin) {
         }
     }, "Status button", w.problems);
     SurveyNotebook.safeConnect(w.scanButton.clicked, function() {
-        w.scanPane.visible = !w.scanPane.visible;
-        RSettings.setValue("CaveSurvey/NotebookScanVisible",
-            w.scanPane.visible);
+        w.scanWanted = (w.scanWanted !== true);
+        w.scanPane.visible = w.scanWanted;
+        RSettings.setValue("CaveSurvey/NotebookScanVisible", w.scanWanted);
         try {
-            w.scanButton.checked = w.scanPane.visible;
+            w.scanButton.checked = w.scanWanted;
         } catch (eScanSync) {
         }
         // FILLED WHEN IT IS FIRST SHOWN, not at startup: listing a
         // cave's scans folder is a directory walk, and a caver who
         // never opens this pane should never pay for it.
-        if (w.scanPane.visible === true) {
+        if (w.scanWanted === true) {
             SurveyNotebook.fillScans(w);
         }
     }, "Scan button", w.problems);
@@ -3983,6 +3992,16 @@ SurveyNotebook.prototype.beginEvent = function() {
         var existed = (csNotebookDock !== undefined && csNotebookDock !== null);
         var dock = SurveyNotebook.ensureDock();
         dock.visible = existed ? !dock.visible : true;
+        // The scans pane can have been built with no drawing open --
+        // the dock is built during add-on init, before any document --
+        // so a pane restored open had nothing to list. Fill it now, on
+        // the way to being looked at.
+        if (dock.visible === true && !isNull(SurveyNotebook.page) &&
+                SurveyNotebook.page.scanWanted === true &&
+                (isNull(SurveyNotebook.page.scanRows) ||
+                    SurveyNotebook.page.scanRows.length === 0)) {
+            SurveyNotebook.fillScans(SurveyNotebook.page);
+        }
     } catch (e) {
         csNotebookDock = undefined;
         warning("Survey Notebook: this QCAD build refused the docked " +
