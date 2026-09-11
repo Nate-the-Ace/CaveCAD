@@ -140,10 +140,18 @@ SketchScans.PREVIEW_W = 420;
 // The inserted scan's fade, percent (0 = full strength). Half, the
 // basemap's value: an underlay must not out-shout the linework.
 SketchScans.FADE_PERCENT = 50;
-// The preview pane's STARTING height -- the user drags the splitter
-// for more or less, and the drag is remembered here:
+// The preview pane's STARTING share -- the user drags the splitter for
+// more or less, and the drag is remembered here. SIDE BY SIDE now:
+// a scanned field page is TALLER than it is wide, so stacking the
+// browser on top of it left the page to be read through a letterbox
+// (Nathan, 2026-09-11). Beside it, the picture gets the dock's whole
+// height and the tree only needs enough width for a filename.
+//
+// Its own settings key, not the old one: those remembered numbers are
+// HEIGHTS, and handing them to a horizontal splitter would open the
+// panel with the tree three times the width of the page.
 SketchScans.DOCK_PREVIEW_H = 240;
-SketchScans.SETTING_SPLIT = "CaveSurvey/SketchScansSplitterSizes";
+SketchScans.SETTING_SPLIT = "CaveSurvey/SketchScansSplitterWidths";
 // The COMPLETE tick. A trip's scans run to dozens of IMG_4021-shaped
 // names, so "which of these have I already done" is a real question
 // with no other answer.
@@ -724,15 +732,15 @@ SketchScans.buildDock = function(appWin) {
     previewLayout.addWidget(w.preview, w.scanView === null ? 1 : 0, 0);
     w.previewPane.setLayout(previewLayout);
 
-    // List over preview on a draggable splitter, so the preview is
+    // Tree BESIDE preview on a draggable splitter, so the preview is
     // whatever size the user wants it -- the drag is remembered, the
     // same way the Survey Notebook remembers its page/status split.
-    w.splitter = new QSplitter(Qt.Vertical);
+    w.splitter = new QSplitter(Qt.Horizontal);
     w.splitter.addWidget(w.list);
     w.splitter.addWidget(w.previewPane);
     try {
-        w.splitter.setStretchFactor(0, 3); // the list gets the growth
-        w.splitter.setStretchFactor(1, 1);
+        w.splitter.setStretchFactor(0, 2); // the PICTURE gets the growth
+        w.splitter.setStretchFactor(1, 3);
     } catch (eSf) {
         // cosmetic
     }
@@ -751,11 +759,11 @@ SketchScans.buildDock = function(appWin) {
             w.splitter.setSizes(splitSizes);
         } else {
             // setSizes distributes PROPORTIONALLY when the panel is
-            // smaller than the request -- [10000, 240] squeezed the
-            // preview to its 40px floor. 3:1 keeps the preview about a
-            // quarter of the panel at any size.
-            w.splitter.setSizes([3 * SketchScans.DOCK_PREVIEW_H,
-                SketchScans.DOCK_PREVIEW_H]);
+            // smaller than the request, so these are a RATIO and not
+            // two pixel counts: two parts tree to three parts page,
+            // which fits a filename and still reads the sketch.
+            w.splitter.setSizes([2 * SketchScans.DOCK_PREVIEW_H,
+                3 * SketchScans.DOCK_PREVIEW_H]);
         }
         w.splitter.splitterMoved.connect(function() {
             try {
