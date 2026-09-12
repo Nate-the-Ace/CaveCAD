@@ -1,7 +1,7 @@
 // Cave3DListener.js -- the 3D window follows the drawing as it is
 // edited.
 //
-// NOTHING DEPENDS ON THIS. The window's Refresh button is the
+// NOTHING DEPENDS ON THIS. The panel's Refresh button is the
 // guarantee; this listener is the same answer arrived at earlier.
 // CsBind.js states the reason plainly about the very same signal: it
 // "rests on a signal this bridge may not deliver". A design that only
@@ -60,7 +60,7 @@ Cave3DListener.install = function() {
 };
 
 Cave3DListener.onTransaction = function(document, transaction) {
-    // THE CHEAP GATE. With no window open this is the whole cost of
+    // THE CHEAP GATE. With no panel open this is the whole cost of
     // the listener: two property reads per transaction, no document
     // access at all. A caver who never opens the 3D view pays nothing
     // measurable for it being installed.

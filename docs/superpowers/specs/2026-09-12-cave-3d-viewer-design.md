@@ -313,3 +313,49 @@ RCave3dBridge exposes viewAll/viewPlan/viewProfile and the two visibility
 toggles alongside setMesh. Added so the view could be driven under test,
 kept because a script that can feed geometry should be able to aim the
 camera at it.
+
+### It became a docked panel (0.9.119.1 / cavecad-src 0.3.1.0)
+
+The design said a frameless QMainWindow, one per drawing. Nathan asked
+for it inside CaveCAD instead, and he is right: the cartographer is
+comparing this against the map, and two top-level windows have to be
+arranged by hand and re-arranged after every application switch.
+
+RCave3dWindow became RCave3dPanel, a plain QWidget the bridge puts in an
+RDockWidget and hands to RMainWindowQt::getMainWindow(). Floating is not
+lost -- QDockWidget still tears off.
+
+DOCKING IS DONE ENTIRELY IN C++ on purpose. The suite's other panels
+build their QDockWidget in script (DrawPanel.js), but handing a raw
+QWidget* out through newQObject and into the GENERATED QDockWidget
+wrapper would cross two different object bridges. That is the
+wrapper-only-widget trap this suite has already paid for once.
+
+Three things a dock needed that a window did not:
+
+  initializeGL drops the old shader programs first. Reparenting a
+  QOpenGLWidget -- exactly what floating and re-docking do -- destroys
+  its context and builds a new one, so the programs belong to a context
+  that has just died and would leak once per float.
+
+  resizeGL re-fits while the camera is untouched. A dock is resized
+  constantly, and a view that fitted itself once at the size the dock
+  happened to have on creation stays wrong for every size after. Once
+  the caver orbits or zooms it is their camera; View All, Plan and
+  Profile re-arm the auto-fit.
+
+  The panel needs a sizeHint, or the dock gives it the toolbar's height
+  and the cave is fitted into a letterbox.
+
+### THE TRAP THAT COST THE MOST: two build trees, one header
+
+qcadjsapi is built by its OWN ninja tree and is NOT built by running
+ninja in cavecad-src. It includes RCave3dBridge.h. Changing that
+header's members and rebuilding only cavecad-src left libcavecadjsapi
+allocating the OLD object size while libcavecadgui wrote the NEW layout
+-- heap corruption, surfacing as an EXC_BREAKPOINT inside malloc during
+QJSEngine setup, with a backtrace pointing at QtQml and nothing at all
+pointing here.
+
+ANY change to a header that qcadjsapi includes needs BOTH trees rebuilt.
+The relink alone is two targets and seconds; diagnosing the crash is not.

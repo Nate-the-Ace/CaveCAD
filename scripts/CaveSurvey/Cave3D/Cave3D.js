@@ -4,6 +4,13 @@
 //
 //   Cave Survey > 3D View   (or type "cave3d" / "c3")
 //
+// A DOCKED PANEL, not a separate window. The caver is comparing this
+// against the map, and two top-level windows have to be arranged by
+// hand and re-arranged after every application switch. Docked, the 3D
+// view sits beside the drawing with every other panel in the suite --
+// and QDockWidget still lets anyone who wants it tear the panel off and
+// float it.
+//
 // WHY. Every other view this suite draws is flat by construction -- the
 // plan looks down, the extended elevation looks sideways, a cross
 // section looks along. Each is a projection chosen to be drawn on
@@ -14,7 +21,7 @@
 // So this draws none of them. It takes the same survey those views are
 // projections OF, and shows it whole.
 //
-// NOTHING HERE DRAWS INTO THE DRAWING. The window is a view, not a
+// NOTHING HERE DRAWS INTO THE DRAWING. The panel is a view, not a
 // tool: it adds no entity, writes no tag, and a drawing that has been
 // looked at in 3D is byte-identical to one that has not.
 //
@@ -116,7 +123,7 @@ Cave3D.refresh = function() {
         mesh = CsMesh3d.build(read.survey, read.resolved);
     } catch (e) {
         // CsMesh3d refuses to build rather than place a station at datum
-        // zero. Say so in the window instead of leaving the last mesh up
+        // zero. Say so in the panel instead of leaving the last mesh up
         // and letting it pass for the current one.
         cave3d.clear(Cave3D.handle);
         cave3d.setStatus(Cave3D.handle, qsTr("Could not build: %1")
@@ -128,14 +135,14 @@ Cave3D.refresh = function() {
 };
 
 function cave3dRun() {
-    // The 3D window is a C++ widget in CaveCAD itself, reached through
-    // the global `cave3d`. An add-on can outlive the application it was
+    // The 3D view is a C++ panel in CaveCAD itself, reached through the
+    // global `cave3d`. An add-on can outlive the application it was
     // installed into -- a caver who updates the tools but not CaveCAD
     // would otherwise meet a bare ReferenceError from a menu entry that
     // looks like every other one.
     if (typeof cave3d === "undefined" || isNull(cave3d)) {
         warning(qsTr("3D View needs a newer CaveCAD.\n" +
-            "This version of the application has no 3D window in it. " +
+            "This version of the application has no 3D panel in it. " +
             "Everything else in the Cave Survey suite works as before."));
         return;
     }
