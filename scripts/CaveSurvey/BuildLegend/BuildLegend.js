@@ -1,15 +1,23 @@
 // BuildLegend.js
 //
 // QCAD add-on tool: generate the legend from what the map ACTUALLY
-// USES -- its lines as well as its symbols -- and say what each one
-// means.
+// USES -- its lines, its area fills, and its symbols -- and say what
+// each one means.
 //
-// Scans the drawing for catalogue symbols, traced feature layers and
-// shaped lines (Core/CsLegend.js decides what that adds up to), then
-// lays out one row each: a SAMPLE of the real thing beside its name,
-// and under the name one plain sentence saying what it is. Lines come
-// first and symbols after, because a reader meets the passage outline
-// before they meet the stalactites.
+// Scans the drawing for catalogue symbols, traced feature layers,
+// shaped lines and Area Fill patterns (Core/CsLegend.js decides what
+// that adds up to), then lays out one row each: a SAMPLE of the real
+// thing beside its name, and under the name one plain sentence saying
+// what it is. Lines come first, then areas, then symbols, because a
+// reader meets the passage outline before they meet its floor, and its
+// floor before the stalactites sitting on it.
+//
+// AN AREA ROW'S SWATCH IS CsArea.build, RUN FOR REAL, into a throwaway
+// square boundary drawn at the row's own position and never added to
+// the document itself -- the same "generator's own output, not a
+// stand-in for it" rule CsTileArt.iconOfFill follows for the Areas
+// panel's tiles, translated from a painted QPixmap into drawing
+// entities because that is what a legend is made of. See blAreaSwatch.
 //
 // Nothing is invented: a feature the map does not draw does not appear.
 // A legend explaining a rimstone dam that is nowhere on the sheet is
@@ -113,6 +121,102 @@ function blShapeDecor(doc, style, x, y, length) {
     };
 }
 
+/**
+ * A small closed square boundary, `side` drawing units across, centred
+ * vertically on the row's own baseline `y` -- the throwaway loop an
+ * area row's swatch fills into. NEVER added to the document by this
+ * function: the caller decides whether it belongs in `op` at all (a
+ * FILLED pattern keeps it, as its printed frame; a scatter pattern
+ * has no frame of its own -- see blAreaSwatch).
+ *
+ * A closed POLYLINE, not a periodic spline the way AreaFillRun.commit
+ * builds a caver's own stroke: a four-point square has no curve to
+ * fit, and CsArea.buildHatch's own polyline branch (THE POLYLINE TRAP,
+ * see its header) explodes a closed polyline into loop segments the
+ * same way QCAD's own Hatch tool does, so this is the cheaper shape
+ * for exactly the case this file needs.
+ */
+function blAreaBoundary(doc, x, y, side) {
+    var half = side / 2;
+    var rect = new RPolyline();
+    rect.appendVertex(new RVector(x, y - half), 0.0);
+    rect.appendVertex(new RVector(x + side, y - half), 0.0);
+    rect.appendVertex(new RVector(x + side, y + half), 0.0);
+    rect.appendVertex(new RVector(x, y + half), 0.0);
+    rect.setClosed(true);
+    return new RPolylineEntity(doc, new RPolylineData(rect));
+}
+
+/**
+ * Draws one AREA row's swatch: CsArea.build run for real against the
+ * throwaway square blAreaBoundary just made, so the legend's sand looks
+ * like the map's sand because it IS the map's sand generator.
+ *
+ * WHY THE FILL LANDS ON THE PATTERN'S OWN LAYER, not LEGEND, unlike
+ * every other sample this file draws. blStyleAs works by taking an
+ * entity THIS FILE already holds a reference to and overwriting its
+ * colour/linetype/lineweight explicitly before moving it onto LEGEND --
+ * that is how a line sample or a shaped line's ornament gets to look
+ * right while living on a layer that is not its own. CsArea.build
+ * (Core, off limits to this change) hands back none of the entities it
+ * queues into `op`; there is no reference to restyle and no seam to
+ * relayer. Handing it the pattern's REAL layer as `opts.layer` instead
+ * is not a workaround for that -- it is the more literal answer to
+ * "what does the reader get": on the finished map this pattern's fill
+ * lives on exactly that layer at exactly that layer's colour, so
+ * drawing the sample there is the map's own truth, not an approximation
+ * of it. Only the row's SQUARE FRAME (filled patterns only, built here,
+ * never by CsArea.build) and its label still live on LEGEND and clear
+ * with everything else.
+ *
+ * A FIXED id and a FIXED seed -- "legend-area:" + the pattern's own
+ * catalog key, and CsTileArt.SCATTER_SEED, the same seed the Areas
+ * panel's own preview tile rolls -- never CsArea.newSeed(): a legend is
+ * redrawn on every press of the button, and a scatter that reshuffled
+ * its boulders each time would make a caver think the pattern itself
+ * had changed. The id is also how the next run's clearing pass in
+ * buildLegendRun finds this row's own fill (CsArea.build stamps
+ * CsArea.OWNER_KEY on every entity it creates, exactly as it does for a
+ * real area) and throws it away before drawing a fresh one.
+ *
+ * Never throws outward: a pattern this build's engine cannot place (a
+ * missing block, an unreadable custom library) leaves the row with its
+ * frame, or nothing for a scatter pattern, rather than stopping the
+ * rest of the legend.
+ *
+ * Does NOT tag or queue the boundary itself into `op` -- that is the
+ * caller's job (buildLegendRun's own `keep`, the same as every other
+ * sample this file draws), because a FILLED pattern wants its frame
+ * kept and a scatter pattern does not. \return the boundary entity and
+ * whether the caller should keep it.
+ */
+function blAreaSwatch(doc, op, di, entry, key, x, y, side, legendLayerId) {
+    var boundary = blAreaBoundary(doc, x, y, side);
+
+    // The frame CsTileArt.iconOfFilled always draws, even over
+    // BEDROCK's null pattern -- a blank framed square is the truthful
+    // picture of "draws no fill", not a row with nothing in it. A
+    // scatter pattern's tile carries no frame (CsTileArt.iconOfScatter
+    // draws only its placed elements), so neither does this.
+    var showFrame = entry.engine === "filled";
+    if (showFrame) {
+        blStyleAs(doc, boundary, entry.layer, legendLayerId);
+    }
+
+    try {
+        CsLayers.ensure(doc, di, entry.layer);
+        CsArea.build(doc, op, boundary, entry,
+            { id: CsLegend.AREA_OWNER_PREFIX + key,
+              seed: CsTileArt.SCATTER_SEED, scale: 1.0, density: 1.0,
+              layer: entry.layer }, di);
+    } catch (eArea) {
+        // degrade to the frame alone (or nothing) rather than take the
+        // rest of the legend down with one bad pattern
+    }
+
+    return { boundary: boundary, keepBoundary: showFrame };
+}
+
 /** One line of legend text. */
 function blText(doc, x, y, height, label, layerId) {
     var text = new RTextEntity(doc, new RTextData(
@@ -165,12 +269,22 @@ function buildLegendRun() {
     var op = new RAddObjectsOperation();
     op.setText("Build legend");
 
-    // clear the previously generated legend, same undo step
+    // clear the previously generated legend, same undo step. An area
+    // row's FILL entities never carry CsLegend.TAG -- they are
+    // CsArea.build's own output, stamped with CsArea.OWNER_KEY instead,
+    // exactly as a real area's fill is -- so they are found by that tag
+    // and the "legend-area:" prefix blAreaSwatch gives them, in the
+    // same walk rather than a second one.
     var cleared = 0;
     var allIds = doc.queryAllEntities(false, false);
     for (var c = 0; c < allIds.length; c++) {
         var old = doc.queryEntity(allIds[c]);
-        if (!isNull(old) && CsTags.get(old, CsLegend.TAG) !== "") {
+        if (isNull(old)) {
+            continue;
+        }
+        var ownedByLegend = CsTags.get(old, CsArea.OWNER_KEY)
+            .indexOf(CsLegend.AREA_OWNER_PREFIX) === 0;
+        if (CsTags.get(old, CsLegend.TAG) !== "" || ownedByLegend) {
             op.deleteObject(old);
             cleared++;
         }
@@ -184,7 +298,7 @@ function buildLegendRun() {
     var textX = xText + sample + BL_TEXT_OFFSET;
     var y = yText;
 
-    var counts = { line: 0, shape: 0, symbol: 0 };
+    var counts = { line: 0, shape: 0, area: 0, symbol: 0 };
     var added = [];
 
     /** Everything this run draws goes through here: tagged so the next
@@ -220,7 +334,18 @@ function buildLegendRun() {
                     legendLayerId), row.key);
             }
             counts.shape++;
-        } else {
+        } else if (row.kind === "area") {
+            var areaEntry = CsArea.entryFor(row.pattern);
+            if (!isNull(areaEntry)) {
+                var side = CsLegend.AREA_SWATCH_FEET * perFoot;
+                var swatch = blAreaSwatch(doc, op, di, areaEntry,
+                    row.pattern, xText, y, side, legendLayerId);
+                if (swatch.keepBoundary === true) {
+                    keep(swatch.boundary, row.key);
+                }
+            }
+            counts.area++;
+        } else if (row.kind === "symbol") {
             var block = doc.queryBlock(row.block);
             if (!isNull(block)) {
                 // NORMALISED to one legend size. A custom symbol may be
@@ -273,6 +398,10 @@ function buildLegendRun() {
     if (counts.shape > 0) {
         parts.push(counts.shape + " shaped line" +
             (counts.shape === 1 ? "" : "s"));
+    }
+    if (counts.area > 0) {
+        parts.push(counts.area + " area pattern" +
+            (counts.area === 1 ? "" : "s"));
     }
     if (counts.symbol > 0) {
         parts.push(counts.symbol + " symbol" +

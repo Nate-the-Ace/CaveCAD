@@ -23733,6 +23733,64 @@ eqs(CsSymbolStore.AREA_MARKER_TAGS.custom, "AreaCustom",
     ok(keysOf(linesOnly).join(",") === "layer:WALLS-SURVEYED",
         "CsLegend: one half alone gets no headings");
 
+    // -- AREAS: only the patterns the drawing actually uses --------
+    // Literal {key, entry} pairs, the shape CsLegend.usage builds from
+    // a real document -- rowsFor never touches CsArea itself, so this
+    // needs no catalog loaded, same as the symbol literals above.
+    var sandEntry = { name: "Sand", layer: "SEDIMENT-SAND-GRAVEL",
+        help: "Loose grains dropped by flowing water." };
+    var waterEntry = { name: "Water / Lake", layer: "WATER-POOL-SUMP",
+        help: "Standing water -- a pool or a lake." };
+    var noAreas = CsLegend.rowsFor({ features: {}, symbols: [],
+        areas: [] });
+    ok(noAreas.length === 0,
+        "CsLegend: a map with no areas gets no AREAS section at all");
+    ok(CsLegend.rowsFor({ features: {}, symbols: [] }).length === 0,
+        "CsLegend: and neither does a caller with no `areas` field at all");
+
+    var twoAreas = CsLegend.rowsFor({ features: {}, symbols: [],
+        areas: [{ key: "SAND", entry: sandEntry },
+                { key: "WATER", entry: waterEntry }] });
+    ok(twoAreas.length === 2 && keysOf(twoAreas).join(",") ===
+        "area:SAND,area:WATER",
+        "CsLegend: sand and water in the drawing make exactly those " +
+            "two area rows, no heading needed for one section alone " +
+            "(" + keysOf(twoAreas).join(",") + ")");
+    ok(twoAreas[0].kind === "area" && twoAreas[0].label === "Sand" &&
+        twoAreas[0].pattern === "SAND",
+        "CsLegend: an area row carries the catalog key its swatch " +
+            "will rebuild from");
+    ok(twoAreas[0].means === sandEntry.help,
+        "CsLegend: an area row's sentence IS the catalog's own help " +
+            "text, not a second copy of it");
+
+    // A custom pattern with no `help` yet (an older library entry)
+    // prints no sentence, same rule a custom symbol already follows.
+    var customArea = CsLegend.rowsFor({ features: {}, symbols: [],
+        areas: [{ key: "my-glitter", entry: { name: "Glitter",
+            layer: "NOTES-GENERAL", help: "", custom: true } }] });
+    ok(customArea.length === 1 && customArea[0].label === "Glitter" &&
+        customArea[0].means === "",
+        "CsLegend: a custom area pattern is listed, with its own " +
+            "description when it has one and none when it does not");
+
+    // With lines, areas AND symbols all present, three sections means
+    // three headings, AREAS between LINES and SYMBOLS -- the order a
+    // reader meets the map: outline, then floor, then point features.
+    var everything = CsLegend.rowsFor({
+        features: { "layer:WALLS-SURVEYED": 1 },
+        symbols: [{ block: "SYM_PIT", nss: "Pit", uis: "Pit",
+            layer: "PITS-DOMES" }],
+        areas: [{ key: "SAND", entry: sandEntry }]
+    });
+    var everyOrder = keysOf(everything);
+    ok(everyOrder.indexOf("#" + CsLegend.HEADING_LINES) <
+        everyOrder.indexOf("#" + CsLegend.HEADING_AREAS) &&
+        everyOrder.indexOf("#" + CsLegend.HEADING_AREAS) <
+        everyOrder.indexOf("#" + CsLegend.HEADING_SYMBOLS),
+        "CsLegend: with all three present, AREAS is headed and sits " +
+            "between LINES and SYMBOLS (" + everyOrder.join(",") + ")");
+
     // -- what each row says ---------------------------------------
     ok(rows[0].label === "Surveyed Walls",
         "CsLegend: a line row is named the way its Feature Trace tile is");
