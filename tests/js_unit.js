@@ -128,6 +128,7 @@ var CORE_FILES = [
     "scripts/CaveSurvey/Core/CsNetwork.js",
     "scripts/CaveSurvey/Core/CsAdjust.js",
     "scripts/CaveSurvey/Core/CsLrud.js",
+    "scripts/CaveSurvey/Core/CsMesh3d.js",
     "scripts/CaveSurvey/Core/CsScanFit.js",
     "scripts/CaveSurvey/Core/CsScanFrame.js",
     "scripts/CaveSurvey/Core/CsScanTrim.js",
@@ -20708,6 +20709,96 @@ ok(!CsCave.isCaptureName("Truitt Cave.dxf"),
     "the drawing itself is not a capture");
 ok(!CsCave.isCaptureName("notes.glb.txt"),
     "the suffix has to be at the end");
+
+// ---------------------------------------------------------------------
+// CsMesh3d -- the passage as a surface
+// ---------------------------------------------------------------------
+
+function nearly(a, b, tol, what) {
+    ok(Math.abs(a - b) <= tol, what + " (" + a + " vs " + b + ")");
+}
+
+// A frame is orthonormal, and its forward is the direction asked for.
+var frEast = CsMesh3d.frameAt({ x: 1, y: 0, z: 0 });
+nearly(frEast.forward.x, 1, 1e-9, "frameAt points where it was told");
+nearly(CsMesh3d.dot(frEast.right, frEast.forward), 0, 1e-9,
+    "right is perpendicular to the passage");
+nearly(CsMesh3d.dot(frEast.up, frEast.forward), 0, 1e-9,
+    "up is perpendicular to the passage");
+nearly(CsMesh3d.dot(frEast.right, frEast.up), 0, 1e-9,
+    "right and up are perpendicular to each other");
+nearly(CsMesh3d.norm(frEast.right), 1, 1e-9, "right is a unit vector");
+nearly(frEast.right.z, 0, 1e-9,
+    "in a level passage right is horizontal, as a caver would draw it");
+
+// A vertical pitch must not produce a degenerate or randomly spinning
+// frame -- every horizontal direction is equally perpendicular there.
+var frUp = CsMesh3d.frameAt({ x: 0, y: 0, z: 1 });
+ok(frUp !== null, "a vertical passage still gets a frame");
+nearly(CsMesh3d.norm(frUp.right), 1, 1e-9,
+    "the vertical-passage frame is a unit frame, not a zero vector");
+nearly(CsMesh3d.dot(frUp.right, frUp.forward), 0, 1e-9,
+    "the vertical-passage frame is still orthogonal");
+var frUpAgain = CsMesh3d.frameAt({ x: 0, y: 0, z: 1 });
+nearly(frUp.right.x, frUpAgain.right.x, 1e-12,
+    "the same pitch gets the same frame every time, not a spinning one");
+
+ok(CsMesh3d.frameAt({ x: 0, y: 0, z: 0 }) === null,
+    "a station with no direction gets no frame");
+
+// A ring is the measured points, and only those.
+var origin = { x: 0, y: 0, z: 0 };
+var north = { x: 0, y: 1, z: 0 };
+
+var ringFull = CsMesh3d.ringAt(origin, north,
+    { left: 2, right: 3, up: 4, down: 1 }, [], CsTraverse.SLOPE);
+eqs(String(ringFull.length), "4", "four LRUD ticks, four ring points");
+for (var rq = 0; rq < ringFull.length; rq++) {
+    ok(isFinite(ringFull[rq].x) && isFinite(ringFull[rq].y) &&
+       isFinite(ringFull[rq].z), "ring point " + rq + " is finite");
+}
+// Up and down are vertical in a level passage; left and right are not.
+var zs = [];
+for (var rz = 0; rz < ringFull.length; rz++) { zs.push(ringFull[rz].z); }
+zs.sort(function(a, b) { return a - b; });
+nearly(zs[0], -1, 1e-9, "the down tick is one below the station");
+nearly(zs[3], 4, 1e-9, "the up tick is four above it");
+
+var ringZero = CsMesh3d.ringAt(origin, north,
+    { left: 0, right: 3, up: 4, down: 1 }, [], CsTraverse.SLOPE);
+eqs(String(ringZero.length), "4",
+    "an LRUD of 0 is a wall AT the station, not a missing measurement");
+
+var ringNull = CsMesh3d.ringAt(origin, north,
+    { left: null, right: 3, up: 4, down: 1 }, [], CsTraverse.SLOPE);
+eqs(String(ringNull.length), "3",
+    "an unmeasured side contributes no ring point");
+
+// A splay tip is a wall point like any other.
+var splayEast = { from: "A", to: "", distance: 10, azimuth: 90,
+    inclination: 0, splay: true };
+var ringSplay = CsMesh3d.ringAt(origin, north,
+    { left: 2, right: 3, up: 4, down: 1 }, [splayEast], CsTraverse.SLOPE);
+eqs(String(ringSplay.length), "5", "the splay tip joined the ring");
+
+// A splay aimed along the passage is on the centerline, not on a wall.
+var splayAlong = { from: "A", to: "", distance: 10, azimuth: 0,
+    inclination: 0, splay: true };
+var ringAlong = CsMesh3d.ringAt(origin, north,
+    { left: 2, right: 3, up: 4, down: 1 }, [splayAlong], CsTraverse.SLOPE);
+eqs(String(ringAlong.length), "4",
+    "a splay down the passage axis belongs to neither wall");
+
+// The ring comes back in angular order, which is what makes it loftable.
+var ordered = true;
+var prevAngle = null;
+for (var ra = 0; ra < ringSplay.length; ra++) {
+    var p = ringSplay[ra];
+    var a = Math.atan2(p.z - origin.z, p.x - origin.x);
+    if (prevAngle !== null && a < prevAngle - 1e-9) { ordered = false; }
+    prevAngle = a;
+}
+ok(ordered, "ring points come back in angular order");
 
 // ---------------------------------------------------------------------
 // Shelf triage -- health, badges, declination drift
