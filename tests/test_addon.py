@@ -1622,6 +1622,7 @@ MENU = {
     "DrawPanel/DrawPanel.js":             (452, 10, ["draw", "ft", "sym", "area"]),
     "ShapedLines/ShapedLines.js":         (452, 20, ["shapedlines", "shl"]),
     "ScatterBreakdown/ScatterBreakdown.js": (452, 30, ["scatterbreakdown", "scb"]),
+    "AreaSync/AreaSync.js":               (452, 35, ["syncareas", "sya"]),
     "CrossSection/CrossSection.js":       (452, 40, ["crosssection", "cxs"]),
     # 453 -- put a reference under the map
     "SketchScans/SketchScans.js":         (453, 10, ["sketchscans", "ss"]),
@@ -1872,9 +1873,9 @@ class TestSheetFileGuard(unittest.TestCase):
 
     # Tools that modify the drawing, and so must refuse a sheet.
     MUST_GUARD = [
-        "AreaFill", "BuildLegend", "Callout", "CrossSection", "DrawPanel",
-        "FeatureTrace", "GenerateProfile", "ImportCaveSurvey", "LoopErrors",
-        "RepairDrawing", "ScatterBreakdown", "ShapedLines",
+        "AreaFill", "AreaSync", "BuildLegend", "Callout", "CrossSection",
+        "DrawPanel", "FeatureTrace", "GenerateProfile", "ImportCaveSurvey",
+        "LoopErrors", "RepairDrawing", "ScatterBreakdown", "ShapedLines",
         "SketchScans", "SurfaceData", "SurveyNotebook", "SymbolPalette",
     ]
 

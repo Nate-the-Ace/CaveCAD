@@ -9,6 +9,28 @@
 // processes -- several independent breakdown zones no longer destroy
 // each other. One undo step.
 //
+// TASK 12, 2026-09-11 (Nathan): "Breakdown is just one area pattern
+// among thirteen." The placement maths moved to Core/CsArea.js --
+// CsArea.CATALOG.BLOCKS is this tool's own numbers (density 16,
+// scale 0.7-1.5, the SYM_BREAKDOWN trio), copied there so the panel's
+// Blocks tile and this menu command draw identically. THIS FILE KEEPS
+// EVERYTHING ELSE: its own menu entry, its own command names
+// ("scatterbreakdown"/"scb"), its own "BoundaryId" tagging (not
+// CsArea's "AreaOwner" -- a boundary this tool scatters is not made
+// into an area; see AreaSync.adopt for the tool that does that), and
+// its own clear-and-refill/one-undo-step behaviour. A transplant, not
+// a redesign -- this file's own tests (tests/scatter_breakdown_run.js)
+// are the proof nothing else moved.
+//
+// THE SEED. CsArea.placements needs one, and this tool never had one
+// before -- every re-run reshuffled the pile. Rolled once per boundary
+// and stored under CsArea.SEED_KEY (the same key CsArea.regenerate and
+// AreaSync.adopt read), so a boundary this tool has already scattered
+// keeps filling the same way on every later re-run rather than
+// reshuffling, and an old boundary adopted into an area by AreaSync
+// keeps the exact look it already had -- same seed, same catalog entry,
+// same verts, same placements.
+//
 // WORKFLOW:
 //   1. Draw a closed polyline on BREAKDOWN-BOUNDARY around the area.
 //   2. Run this tool (select specific boundaries first to do only
@@ -23,44 +45,11 @@ include(includeBasePath + "/../Core/CsAll.js");
 
 // ---- tunables --------------------------------------------------------
 
-var SB_VARIANTS = ["SYM_BREAKDOWN", "SYM_BREAKDOWN_B", "SYM_BREAKDOWN_C"];
 // The views this tool draws in. One button set serves all three: the
 // zone's LOCATION picks the view (CsProfileBox.frameAt), and
 // CsLayers.twinFor turns the plan layer into that view's twin. Nothing
 // here is a second button or a second layer to remember.
 var SB_FRAMES = ["plan", "profile", "section"];
-var SB_DENSITY = 16;       // boulder clusters per 100 sq drawing units
-var SB_SCALE_MIN = 0.7;
-var SB_SCALE_MAX = 1.5;
-
-// ---- geometry helpers (pure) ------------------------------------------
-
-function sbPointInPolygon(px, py, verts) {
-    var n = verts.length;
-    var inside = false;
-    var x1 = verts[0].x, y1 = verts[0].y;
-    for (var i = 1; i <= n; i++) {
-        var x2 = verts[i % n].x, y2 = verts[i % n].y;
-        if ((y1 > py) !== (y2 > py)) {
-            var xInt = (x2 - x1) * (py - y1) / (y2 - y1) + x1;
-            if (px < xInt) {
-                inside = !inside;
-            }
-        }
-        x1 = x2;
-        y1 = y2;
-    }
-    return inside;
-}
-
-function sbPolygonArea(verts) {
-    var a = 0;
-    for (var i = 0; i < verts.length; i++) {
-        var p1 = verts[i], p2 = verts[(i + 1) % verts.length];
-        a += p1.x * p2.y - p2.x * p1.y;
-    }
-    return Math.abs(a) / 2.0;
-}
 
 // closed polylines often store the closing vertex explicitly
 function sbCleanRing(verts) {
@@ -201,6 +190,13 @@ function scatterBreakdownRun() {
         return;
     }
 
+    // ONE transaction group for everything this run writes -- the
+    // block adds/deletes below AND the seed tag a first-time boundary
+    // gets stamped with (see the seed comment at the top of this file).
+    // Two operations sharing a group still land as ONE undo, the same
+    // idiom CsArea.regenerate and ShapedLines.dressOne already use.
+    var group = doc.getTransactionGroup() + 1;
+
     var op = new RAddObjectsOperation();
     op.setText("Scatter breakdown");
 
@@ -226,7 +222,7 @@ function scatterBreakdownRun() {
             var pos = ref.getPosition();
             for (var b = 0; b < boundaries.length; b++) {
                 var ring = sbCleanRing(boundaries[b].getData().getVertices());
-                if (sbPointInPolygon(pos.x, pos.y, ring)) {
+                if (CsArea.pointInPolygon(pos.x, pos.y, ring)) {
                     owner = String(boundaries[b].getId());
                     break;
                 }
@@ -241,6 +237,10 @@ function scatterBreakdownRun() {
     var totalPlaced = 0;
     var missingBlocks = false;
     var framesUsed = {};
+    // Boundaries stamped with a FRESH seed this run -- flushed in one
+    // RModifyObjectsOperation after the loop, grouped with `op` above
+    // so the seed write and the placed boulders land as one undo.
+    var seedWrites = [];
 
     for (b = 0; b < boundaries.length; b++) {
         var poly = boundaries[b];
@@ -266,48 +266,29 @@ function scatterBreakdownRun() {
         }
         var placeLayerId = doc.getLayerId(placeLayer);
 
-        var area = sbPolygonArea(verts);
-        var targetCount = Math.max(1, Math.round(area / 100.0 * SB_DENSITY));
-        var spacing = Math.max(0.6, Math.sqrt(area / targetCount) * 0.55);
-
-        var minx = verts[0].x, maxx = verts[0].x;
-        var miny = verts[0].y, maxy = verts[0].y;
-        for (var v = 1; v < verts.length; v++) {
-            minx = Math.min(minx, verts[v].x);
-            maxx = Math.max(maxx, verts[v].x);
-            miny = Math.min(miny, verts[v].y);
-            maxy = Math.max(maxy, verts[v].y);
+        // THE SEED -- read back off the boundary if this tool (or
+        // AreaSync.adopt) already stamped one there; rolled fresh only
+        // the first time. See this file's header: never re-rolled once
+        // present, so a re-run's pile looks the same as the last one.
+        var seed = parseFloat(CsTags.get(poly, CsArea.SEED_KEY));
+        if (isNaN(seed)) {
+            seed = CsArea.newSeed();
+            CsTags.set(poly, CsArea.SEED_KEY, String(seed));
+            seedWrites.push(poly);
         }
 
-        var accepted = [];
-        var attempts = 0;
-        var maxAttempts = Math.max(200, targetCount * 60);
-        while (accepted.length < targetCount && attempts < maxAttempts) {
-            attempts++;
-            var px = minx + Math.random() * (maxx - minx);
-            var py = miny + Math.random() * (maxy - miny);
-            if (!sbPointInPolygon(px, py, verts)) {
-                continue;
-            }
-            var okSpacing = true;
-            for (var k = 0; k < accepted.length; k++) {
-                var ddx = px - accepted[k].x, ddy = py - accepted[k].y;
-                if (ddx * ddx + ddy * ddy < spacing * spacing) {
-                    okSpacing = false;
-                    break;
-                }
-            }
-            if (okSpacing) {
-                accepted.push(new RVector(px, py));
-            }
-        }
+        // THE PLACEMENT MATHS -- CsArea.CATALOG.BLOCKS holds the exact
+        // numbers this tool used to carry itself (density 16, scale
+        // 0.7-1.5, the SYM_BREAKDOWN trio); scale/density multipliers of
+        // 1.0 reproduce this tool's own historical look unchanged.
+        var places = CsArea.placements(verts, CsArea.CATALOG.BLOCKS, seed,
+            1.0, 1.0);
 
-        for (k = 0; k < accepted.length; k++) {
-            var variant = SB_VARIANTS[Math.floor(Math.random() * SB_VARIANTS.length)];
-            var entry = CsSymbols.byBlock(variant);
-            var scale = SB_SCALE_MIN + Math.random() * (SB_SCALE_MAX - SB_SCALE_MIN);
-            var angle = Math.random() * 2 * Math.PI;
-            var blockRef = CsSymbols.insert(doc, entry, accepted[k], scale, angle);
+        for (var p = 0; p < places.length; p++) {
+            var entry = CsSymbols.byBlock(places[p].block);
+            var blockRef = CsSymbols.insert(doc, entry,
+                new RVector(places[p].x, places[p].y), places[p].scale,
+                places[p].angle);
             if (blockRef === null) {
                 missingBlocks = true;
                 continue;
@@ -325,7 +306,17 @@ function scatterBreakdownRun() {
         }
     }
 
+    op.setTransactionGroup(group);
     di.applyOperation(op);
+
+    if (seedWrites.length > 0) {
+        var seedMod = new RModifyObjectsOperation();
+        for (var sw = 0; sw < seedWrites.length; sw++) {
+            seedMod.addObject(seedWrites[sw], false);
+        }
+        seedMod.setTransactionGroup(group);
+        di.applyOperation(seedMod);
+    }
 
     var msg = "Scatter Breakdown: " + boundaries.length + " boundar" +
         (boundaries.length === 1 ? "y" : "ies") + ", " + totalPlaced +

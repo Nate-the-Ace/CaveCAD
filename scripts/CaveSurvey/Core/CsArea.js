@@ -58,18 +58,34 @@ CsArea.newSeed = function() {
 // degenerate filled member: pattern null, meaning it draws no fill at
 // all, only its printed boundary.
 CsArea.CATALOG = {
+    // spacingFactor/spacingMin: minimum separation between accepted
+    // placements, as CsArea.scatterPlacements' own header explains --
+    // BLOCKS' pair (0.55, floor 0.6) is ScatterBreakdown's own
+    // pre-transplant formula, carried over verbatim so boulders never
+    // land on top of each other the way that tool never let them.
+    // DEBRIS and PEBBLES get the same relative factor with NO floor:
+    // both scatter noticeably smaller elements (DEBRIS at a quarter to
+    // half scale, PEBBLES a small AREA_PEBBLE), where a stacked-icon
+    // artifact is just as visible as it is for a boulder, but a 0.6
+    // drawing-unit floor tuned for boulder-sized elements would thin a
+    // fine, dense scatter out for no visual reason. SAND and CLAY (a
+    // stipple, not discrete rocks) set neither -- coincident stipple
+    // dots are not a visible defect, and the spacing check would only
+    // cost the sampler time at their much higher densities.
     BLOCKS: { name: "Blocks", engine: "scatter", layer: "BREAKDOWN",
         boundaryLayer: "CTRL-AREA-BOUNDARY",
         blocks: ["SYM_BREAKDOWN", "SYM_BREAKDOWN_B", "SYM_BREAKDOWN_C"],
-        density: 16, scaleMin: 0.7, scaleMax: 1.5, rotate: true },
+        density: 16, scaleMin: 0.7, scaleMax: 1.5, rotate: true,
+        spacingFactor: 0.55, spacingMin: 0.6 },
     DEBRIS: { name: "Debris", engine: "scatter", layer: "BREAKDOWN",
         boundaryLayer: "CTRL-AREA-BOUNDARY",
         blocks: ["SYM_BREAKDOWN", "SYM_BREAKDOWN_B", "SYM_BREAKDOWN_C"],
-        density: 40, scaleMin: 0.25, scaleMax: 0.5, rotate: true },
+        density: 40, scaleMin: 0.25, scaleMax: 0.5, rotate: true,
+        spacingFactor: 0.55 },
     PEBBLES: { name: "Pebbles", engine: "scatter",
         layer: "SEDIMENT-SAND-GRAVEL", boundaryLayer: "CTRL-AREA-BOUNDARY",
         blocks: ["AREA_PEBBLE"], density: 55,
-        scaleMin: 0.6, scaleMax: 1.2, rotate: true },
+        scaleMin: 0.6, scaleMax: 1.2, rotate: true, spacingFactor: 0.55 },
     SAND: { name: "Sand", engine: "scatter",
         layer: "SEDIMENT-SAND-GRAVEL", boundaryLayer: "CTRL-AREA-BOUNDARY",
         blocks: ["AREA_STIPPLE"], density: 120,
@@ -258,6 +274,29 @@ CsArea.placements = function(verts, entry, seed, scale, density) {
  * Rejection sampling inside the bounding box, with a cap so a boundary
  * that is nearly all box -- a long thin passage cutting a diagonal --
  * cannot spin. The cap is generous: a 10% hit rate still fills.
+ *
+ * MINIMUM SPACING (Task 12 review round 2, 2026-09-11): ScatterBreakdown's
+ * own pre-transplant sampler rejected a candidate closer than
+ * `sqrt(area / want) * entry.spacingFactor` to one already accepted, so
+ * boulders never landed on top of each other. The first version of this
+ * transplant dropped that rule entirely -- CsArea.scatterPlacements had
+ * no spacing rejection at all -- which is a real, visible regression for
+ * BLOCKS: coincident boulders the old tool never produced. Restored
+ * here as an entry-level opt-in (`entry.spacingFactor`) rather than a
+ * blanket rule, because a dense stipple (SAND, CLAY) has no business
+ * paying for a spacing check it does not want and does not need -- see
+ * CsArea.CATALOG's own entries for which patterns set it.
+ *
+ * THE SAME DISCIPLINE as the point-in-polygon test: every candidate's
+ * random draws (position, block, scale, angle) happen BEFORE either
+ * rejection test, hit or miss on EITHER test, so the sequence still
+ * depends only on the seed and the geometry -- a spacing-rejected
+ * candidate costs exactly one more `tries` count, not an extra draw
+ * order change, and the same seed still reproduces the same placements.
+ * The existing try cap (want * 60 + 500) is UNCHANGED: a dense pattern
+ * in a thin polygon (or one so tightly spaced it cannot fit `want`
+ * elements at all) degrades to fewer accepted elements rather than
+ * spinning, exactly as it already did for the point-in-polygon test.
  */
 CsArea.scatterPlacements = function(verts, entry, rand, mul, densityMul) {
     var out = [];
@@ -268,14 +307,29 @@ CsArea.scatterPlacements = function(verts, entry, rand, mul, densityMul) {
     }
     var b = CsArea.bounds(verts);
     var w = b.maxX - b.minX, h = b.maxY - b.minY;
+    var minSpacing = 0;
+    if (!isNull(entry.spacingFactor) && entry.spacingFactor > 0) {
+        minSpacing = Math.sqrt(area / want) * entry.spacingFactor;
+        // BLOCKS' own absolute floor, carried over verbatim from
+        // ScatterBreakdown's pre-transplant formula
+        // (Math.max(0.6, sqrt(area/targetCount) * 0.55)): without it a
+        // tiny or extremely dense boundary could compute a spacing near
+        // zero, which is no spacing rule at all. Optional per entry --
+        // DEBRIS and PEBBLES scatter smaller elements and set no floor.
+        if (!isNull(entry.spacingMin) && entry.spacingMin > minSpacing) {
+            minSpacing = entry.spacingMin;
+        }
+    }
+    var minSpacingSq = minSpacing * minSpacing;
     var tries = 0, cap = want * 60 + 500;
     while (out.length < want && tries < cap) {
         tries++;
-        // These draws happen BEFORE the inside test, every attempt, hit
-        // or miss. That is what makes the sequence depend only on the
-        // seed and the geometry -- never on how many points happened to
-        // land outside -- so the same seed always reproduces the same
-        // placements. Reordering "to save a draw on a miss" breaks that.
+        // These draws happen BEFORE either rejection test, every
+        // attempt, hit or miss. That is what makes the sequence depend
+        // only on the seed and the geometry -- never on how many points
+        // happened to land outside or too close -- so the same seed
+        // always reproduces the same placements. Reordering "to save a
+        // draw on a miss" breaks that.
         var x = b.minX + rand() * w;
         var y = b.minY + rand() * h;
         var pickBlock = rand();
@@ -283,6 +337,19 @@ CsArea.scatterPlacements = function(verts, entry, rand, mul, densityMul) {
         var pickAngle = rand();
         if (!CsArea.pointInPolygon(x, y, verts)) {
             continue;
+        }
+        if (minSpacing > 0) {
+            var tooClose = false;
+            for (var oi = 0; oi < out.length; oi++) {
+                var ddx = x - out[oi].x, ddy = y - out[oi].y;
+                if (ddx * ddx + ddy * ddy < minSpacingSq) {
+                    tooClose = true;
+                    break;
+                }
+            }
+            if (tooClose) {
+                continue;
+            }
         }
         var blockIndex = Math.min(entry.blocks.length - 1,
             Math.floor(pickBlock * entry.blocks.length));
@@ -836,10 +903,19 @@ CsArea.sweep = function(doc, di, group, scan) {
  * transaction that touches many areas already amortises the walk
  * across all of them via one shared scan.
  *
+ * `allowImport` (Task 12, 2026-09-11): when true, a missing CUSTOM
+ * pattern's block is imported into `doc` on the caller's behalf -- see
+ * the NO `di` HANDED TO build() comment below for why this defaults to
+ * false/undefined and stays that way for AreaFillListener's own call.
+ * Sync Areas (AreaSync.run) is the one caller that passes true: a caver
+ * pressing that button is not inside a transaction callback the way the
+ * listener is, so there is no reentrancy hazard to protect against.
+ *
  * \return "missing" | "not-an-area" | "no-pattern" | "no-shape" |
  *         "unchanged" | "regenerated" | "failed:<reason>"
  */
-CsArea.regenerate = function(doc, di, boundaryId, group, ownedIds) {
+CsArea.regenerate = function(doc, di, boundaryId, group, ownedIds,
+        allowImport) {
     var boundary = doc.queryEntity(boundaryId);
     if (isNull(boundary) || boundary.isUndone()) {
         return "missing";
@@ -914,26 +990,30 @@ CsArea.regenerate = function(doc, di, boundaryId, group, ownedIds) {
         grouped(del);
     }
 
-    // NO `di` HANDED TO build() HERE, deliberately -- regenerate() runs
-    // from AreaFillListener.onTransaction, inside a transaction
-    // callback, with `busy` already true. Importing a missing custom
-    // block from there means CsSymbolStore.ensureBlock -> copyBlock,
-    // which issues several of its OWN applyOperation calls (the block,
-    // its layers, its geometry) from inside that callback -- reentrant
-    // in a way this file has not proven safe, and today "harmless" only
-    // because the imported entities happen to carry no AreaId/AreaOwner
-    // tags for the listener to notice. That is an accident of the
-    // current marker shape, not a guarantee, so this does not lean on
-    // it: a rebuild that finds its block missing reports the reason and
-    // leaves the fill empty, exactly as it already does for a missing
-    // BUILT-IN block. Importing on the caver's behalf stays where a
-    // caver actually initiated the write -- AreaFillRun.commit (the
-    // interactive stroke, which passes its own `di`) and Task 12's Sync
-    // Areas tool.
+    // `di` HANDED TO build() ONLY WHEN `allowImport` SAYS SO. The
+    // default (undefined, AreaFillListener's own call) keeps `di` out of
+    // build() entirely: regenerate() runs from
+    // AreaFillListener.onTransaction, inside a transaction callback,
+    // with `busy` already true. Importing a missing custom block from
+    // there means CsSymbolStore.ensureBlock -> copyBlock, which issues
+    // several of its OWN applyOperation calls (the block, its layers,
+    // its geometry) from inside that callback -- reentrant in a way this
+    // file has not proven safe, and today "harmless" only because the
+    // imported entities happen to carry no AreaId/AreaOwner tags for the
+    // listener to notice. That is an accident of the current marker
+    // shape, not a guarantee, so this does not lean on it: a rebuild
+    // that finds its block missing reports the reason and leaves the
+    // fill empty, exactly as it already does for a missing BUILT-IN
+    // block. Importing on the caver's behalf stays where a caver
+    // actually initiated the write -- AreaFillRun.commit (the
+    // interactive stroke, which passes its own `di` directly to build())
+    // and AreaSync.run (Task 12's Sync Areas, which passes
+    // allowImport=true here because a caver pressing that menu command
+    // is not inside a transaction callback either).
     var add = new RAddObjectsOperation();
     var built = CsArea.build(doc, add, boundary, entry,
         { id: areaId, seed: seed, scale: scale, density: density,
-          layer: routed.fillLayer });
+          layer: routed.fillLayer }, allowImport === true ? di : null);
     if (built.ok && built.count > 0) {
         grouped(add);
     }
