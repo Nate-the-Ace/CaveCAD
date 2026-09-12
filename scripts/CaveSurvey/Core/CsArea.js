@@ -1220,3 +1220,231 @@ CsArea.regenerate = function(doc, di, boundaryId, group, ownedIds,
 
     return "regenerated";
 };
+
+// ---------------------------------------------------------------------
+// Repicking a pattern on an area that already exists (2026-09-12,
+// beginner-friendliness batch). Everything above this divider was
+// written for Tasks 5-12; from here down is new.
+//
+// THE DEFECT: an area's boundary already carries everything a fill is
+// built from (AreaPattern, AreaScale, AreaDensity, AreaSeed), but
+// nothing before this could WRITE a new AreaPattern onto a boundary
+// that already had one -- the only way to change a tile was delete the
+// boundary and re-trace the whole loop. Wrong-tile is exactly the
+// mistake a beginner makes, so that recovery cost was the whole defect.
+// ---------------------------------------------------------------------
+
+/**
+ * Resolves a raw selection (whatever `doc.querySelectedEntities()`
+ * returned) down to the distinct AREA BOUNDARY entity ids among it.
+ *
+ * TWO WAYS IN, one answer. A boundary on CTRL-AREA-BOUNDARY prints as
+ * nothing -- it is an invisible construction line by design -- but is
+ * still selectable on screen; a beginner clicking on the actual drawn
+ * texture selects the FILL instead (a boulder, a stipple dot), and
+ * every fill entity carries AreaOwner pointing back at its area. Both
+ * resolve here to the same boundary id, so a caller (AreaFill's tile
+ * click) never has to know which one a caver actually clicked.
+ *
+ * DEDUPED BY AREA, not by input id: selecting a boundary AND one of its
+ * own fill elements together (an easy rubber-band accident) must not
+ * repattern that one area twice, which would cost it two identical
+ * rebuilds inside what is supposed to read as one action.
+ *
+ * `scan`, when given (a caller's own CsArea.areaScan), is reused rather
+ * than walked again -- the same shared-scan discipline CsArea.boundaryOf
+ * and CsArea.sweep already follow. Built once here, lazily, only if a
+ * fill id actually needs it -- a selection that is all boundaries costs
+ * no document walk at all.
+ *
+ * \return [boundaryEntityId, ...], never containing the same area twice
+ */
+CsArea.resolveSelection = function(doc, ids, scan) {
+    var out = [];
+    var seen = {};
+    var s = isNull(scan) ? null : scan;
+    for (var i = 0; i < ids.length; i++) {
+        var e = doc.queryEntity(ids[i]);
+        if (isNull(e) || e.isUndone()) {
+            continue;
+        }
+        var boundaryEntity = null;
+        if (CsTags.get(e, CsArea.ID_KEY) !== "") {
+            boundaryEntity = e;
+        } else {
+            var ownerId = CsTags.get(e, CsArea.OWNER_KEY);
+            if (ownerId !== "") {
+                if (s === null) {
+                    s = CsArea.areaScan(doc);
+                }
+                boundaryEntity = CsArea.boundaryOf(doc, ownerId, s);
+            }
+        }
+        if (isNull(boundaryEntity)) {
+            continue;
+        }
+        var key = String(boundaryEntity.getId());
+        if (seen[key] !== true) {
+            seen[key] = true;
+            out.push(boundaryEntity.getId());
+        }
+    }
+    return out;
+};
+
+/**
+ * Retags one or more existing area boundaries to a DIFFERENT pattern and
+ * rebuilds their fill -- the recovery path for a beginner's wrong tile.
+ * `boundaryIds` are boundary entity ids (CsArea.resolveSelection's own
+ * output shape); an id that is missing, undone, or not an area boundary
+ * is skipped rather than failing the whole batch.
+ *
+ * NEVER TOUCHES AreaSeed. The ground under the boundary has not moved --
+ * only which symbols are drawn on it -- so the same seed that already
+ * decided where a boulder pile's rocks land keeps deciding it under the
+ * new pattern too. See CsArea.rng's and CsArea.newSeed's own headers on
+ * why a seed is rolled once and never again.
+ *
+ * `opts` is {scale, density}, both optional. Given, they overwrite
+ * AreaScale/AreaDensity on every boundary in the SAME write as the
+ * pattern change -- this is also the path the Areas panel's own Scale
+ * and Density boxes use to reach a SELECTED area (see AreaFill.
+ * connectTile): re-clicking the pattern already armed, with an area
+ * selected and the boxes changed, rewrites scale/density without
+ * touching AreaPattern's value. Omitted, a boundary's existing
+ * scale/density survive unchanged.
+ *
+ * ONE TRANSACTION GROUP for the whole batch, however many boundaries are
+ * selected -- the retag and every rebuilt fill undo together in a single
+ * Ctrl+Z, the same idiom AreaSync.run already uses to fold several
+ * regenerate() calls into one undo step.
+ *
+ * VALIDATED BEFORE ANY WRITE: every id in `boundaryIds` is checked
+ * against the live document before the shared RModifyObjectsOperation is
+ * built, so a selection that mixes a real area with unrelated geometry
+ * still retags every real area in one clean transaction rather than
+ * failing outright or leaving a partial group behind.
+ *
+ * \return {ok, count, results: [{id, ok, reason}]} -- count is how many
+ *         boundaries were actually retagged and rebuilt (ok===true in
+ *         their own result); ok is true when count > 0.
+ */
+CsArea.repattern = function(doc, di, boundaryIds, key, opts) {
+    var entry = CsArea.entryFor(key);
+    var results = [];
+    if (isNull(entry)) {
+        return { ok: false, count: 0, results: results,
+            reason: "no such pattern" };
+    }
+    if (isNull(boundaryIds) || boundaryIds.length === 0) {
+        return { ok: false, count: 0, results: results,
+            reason: "nothing selected" };
+    }
+
+    var valid = [];
+    for (var i = 0; i < boundaryIds.length; i++) {
+        var id = boundaryIds[i];
+        var e = doc.queryEntity(id);
+        if (isNull(e) || e.isUndone()) {
+            results.push({ id: id, ok: false, reason: "missing" });
+            continue;
+        }
+        if (CsTags.get(e, CsArea.ID_KEY) === "") {
+            results.push({ id: id, ok: false, reason: "not an area" });
+            continue;
+        }
+        valid.push(e);
+    }
+    if (valid.length === 0) {
+        return { ok: false, count: 0, results: results,
+            reason: "no valid area in that selection" };
+    }
+
+    var group = doc.getTransactionGroup() + 1;
+    var mod = new RModifyObjectsOperation();
+    for (var v = 0; v < valid.length; v++) {
+        var boundary = valid[v];
+        CsTags.set(boundary, CsArea.PATTERN_KEY, key);
+        if (!isNull(opts) && !isNull(opts.scale)) {
+            CsTags.set(boundary, CsArea.SCALE_KEY, String(opts.scale));
+        }
+        if (!isNull(opts) && !isNull(opts.density)) {
+            CsTags.set(boundary, CsArea.DENSITY_KEY, String(opts.density));
+        }
+        mod.addObject(boundary, false);
+    }
+    mod.setTransactionGroup(group);
+    di.applyOperation(mod);
+
+    var okCount = 0;
+    for (var r = 0; r < valid.length; r++) {
+        // RE-QUERIED BY ID, not the `valid[r]` handle held above: a
+        // handle read after a modify operation has already gone through
+        // is the exact stale-tag trap this file's own header warns
+        // about ("reading tags off a long-held entity handle after
+        // modify operations gives stale values -- re-query").
+        // CsArea.regenerate re-queries by id internally anyway; this
+        // just hands it a fresh id, not a stale assumption about what
+        // is on the entity.
+        var boundaryId = valid[r].getId();
+        var res = CsArea.regenerate(doc, di, boundaryId, group);
+        var okOne = (res === "regenerated" || res === "unchanged");
+        if (okOne) {
+            okCount++;
+        }
+        results.push({ id: boundaryId, ok: okOne, reason: res });
+    }
+
+    return { ok: okCount > 0, count: okCount, results: results };
+};
+
+/**
+ * A rough estimate of how many elements a scatter/tile pattern will
+ * place over a polygon of the given area -- the SAME formula
+ * CsArea.scatterPlacements uses for its own `want` (and the density
+ * CsArea.tiledPlacements' lattice spacing works out to, per the header
+ * on that function: "elements per 100 sq units" means the same thing
+ * under either placement rule). Computed from the polygon area alone,
+ * with no sampling -- this runs BEFORE a fill is built, specifically so
+ * a caller can decide whether to build it at all.
+ *
+ * Zero for a filled (hatch) pattern, or any entry with no blocks to
+ * scatter: a hatch is one entity regardless of boundary size, so it has
+ * nothing here worth estimating or warning about.
+ *
+ * \return a non-negative integer
+ */
+CsArea.estimateCount = function(area, entry, densityMul) {
+    if (isNull(entry) || (entry.engine !== "scatter" && entry.engine !== "tile")) {
+        return 0;
+    }
+    var mul = isNull(densityMul) ? 1.0 : densityMul;
+    var want = Math.round((area / 100) * entry.density * mul);
+    return want > 0 ? want : 0;
+};
+
+/**
+ * A density multiplier that would bring an over-threshold estimate down
+ * to roughly `target` elements -- what a "thin it" offer actually thins
+ * TO, not just a warning with nothing behind it.
+ *
+ * NEVER SUGGESTS RAISING the density (a caller offering to "thin" a fill
+ * that hands back a bigger number would be a bug users would find fast),
+ * and never suggests all the way to zero: 0.1 is the Areas panel's own
+ * Density box floor (see AreaFill.js's densityBox.setRange) -- clamping
+ * here means whatever this function proposes is always a value that box
+ * can actually hold and a caver can actually type in by hand later.
+ *
+ * Rounded to a hundredth: the box shows two decimals, and a suggestion
+ * with more precision than the control that will display it just reads
+ * as noise.
+ */
+CsArea.suggestedDensityMul = function(currentDensityMul, estimate, target) {
+    var cur = isNull(currentDensityMul) ? 1.0 : currentDensityMul;
+    if (!(estimate > 0) || !(target > 0) || estimate <= target) {
+        return cur;
+    }
+    var suggested = Math.min(cur, cur * (target / estimate));
+    suggested = Math.max(0.1, suggested);
+    return Math.round(suggested * 100) / 100;
+};

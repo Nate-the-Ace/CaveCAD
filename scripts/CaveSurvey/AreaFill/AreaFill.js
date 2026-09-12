@@ -494,10 +494,75 @@ AreaFill.leaveEditorMode = function() {
     }
 };
 
-/** Arms an entry and starts the placement action. Its own function so
- *  the closure captures ONE key, not the loop variable. */
+/**
+ * Retags every area in the current selection to `key` and rebuilds its
+ * fill -- the wrong-tile recovery this panel exists to offer (2026-09-12,
+ * Nathan): before this, changing a drawn area's pattern meant deleting
+ * its boundary and re-tracing the whole loop.
+ *
+ * THE SAME PATH the Scale and Density boxes reach a selected area
+ * through, too -- see CsArea.repattern's own header. There is no second,
+ * parallel write for "just change the scale of what's selected": passing
+ * the CURRENTLY ARMED key back in does that (AreaPattern is rewritten to
+ * the same value it already held; only Scale/Density actually move).
+ *
+ * Always ends by rebuilding the tile grid, whether or not anything was
+ * actually repatterned -- see AreaFill.connectTile's own header on why
+ * that, not this function's own return value, is what tells the caver
+ * apart a repattern from an arm.
+ */
+AreaFill.repatternSelection = function(doc, di, boundaryIds, key) {
+    var entry = CsArea.entryFor(key);
+    var result = CsArea.repattern(doc, di, boundaryIds, key,
+        { scale: AreaFill.scale(), density: AreaFill.density() });
+    var name = isNull(entry) ? key : entry.name;
+    if (result.count > 0) {
+        EAction.handleUserMessage(qsTr("Repatterned %1 selected area%2 " +
+            "to %3.").arg(result.count).arg(result.count === 1 ? "" : "s")
+            .arg(name));
+    } else {
+        EAction.handleUserMessage(qsTr("Nothing in that selection is an " +
+            "area -- select a boundary or its fill first."));
+    }
+    AreaFill.rebuildTiles();
+};
+
+/**
+ * Arms an entry and starts the placement action -- UNLESS the document
+ * already has something selected that resolves to an existing area, in
+ * which case the click REPATTERNS that selection instead and never arms
+ * anything. Its own function so the closure captures ONE key, not the
+ * loop variable.
+ *
+ * THE SAME BUTTON, TWO ACTS, TOLD APART BY STATUS TEXT, DELIBERATELY
+ * (2026-09-12, one of the four decisions this task called out to make
+ * explicitly). A repattern never checks the tile (rebuildTiles() at the
+ * end of repatternSelection restores whatever WAS armed, or nothing,
+ * exactly as it was before the click -- Qt's own checkable-button click
+ * would otherwise leave this tile looking armed even though nothing was
+ * armed), never starts a stroke, and never changes the command prompt an
+ * arm would set. What DOES change is the panel's own status message:
+ * "Repatterned N selected area(s) to X" names what just happened in
+ * words an arm's "Press and drag to enclose..." prompt never uses, so a
+ * caver watching the status line cannot mistake one act for the other.
+ * A caver who wanted to arm a fresh stroke while unrelated geometry
+ * happened to be selected gets the repattern message instead of a
+ * command prompt -- a real, accepted tradeoff of this shape: the
+ * message says plainly what happened, and Ctrl+Z undoes it in one step
+ * if that was not the intent.
+ */
 AreaFill.connectTile = function(button, key) {
     button.clicked.connect(function() {
+        var di = EAction.getDocumentInterface();
+        var doc = isNull(di) ? null : di.getDocument();
+        if (!isNull(doc) && doc.hasSelection()) {
+            var boundaryIds = CsArea.resolveSelection(doc,
+                doc.querySelectedEntities());
+            if (boundaryIds.length > 0) {
+                AreaFill.repatternSelection(doc, di, boundaryIds, key);
+                return;
+            }
+        }
         AreaFill.arm(key);
         AreaFill.startRun();
     });

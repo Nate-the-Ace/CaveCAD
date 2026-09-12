@@ -1384,6 +1384,352 @@ eqs(CsArea.regenerate(doc, di, lstReviveBoundary.getId()),
 })();
 
 // =======================================================================
+// Repatterning (2026-09-12, beginner-friendliness batch). A wrong tile
+// no longer means deleting the boundary and re-tracing the loop --
+// CsArea.repattern rewrites AreaPattern (and, optionally, AreaScale/
+// AreaDensity) on an existing boundary and rebuilds its fill, keeping
+// the seed. CsArea.resolveSelection is the other half: a caver clicking
+// the drawn texture selects the FILL, not the invisible boundary, and
+// every fill entity's AreaOwner has to resolve back to it.
+// =======================================================================
+
+/** RE-QUERIED, not a long-held handle -- CsArea's own header on
+ *  CsArea.regenerate: "reading tags off a long-held entity handle after
+ *  modify operations gives stale values -- re-query." Every read of a
+ *  tag AFTER a CsArea.repattern call below goes through this, never
+ *  through the fixture's own boundary variable. */
+function reQ(entity) {
+    return doc.queryEntity(entity.getId());
+}
+
+(function repatterningChangesAnAreasPattern() {
+    var rpCx = lstCx + 2000, rpCy = lstCy;
+    var rpMade = AreaFillRun.commit(doc, di, squareStroke(rpCx, rpCy, 5),
+        "SAND", { scale: 1.0, density: 1.0 });
+    ok(rpMade.ok === true,
+        "repattern fixture: the original SAND stroke succeeds (" +
+        rpMade.reason + ")");
+    var rpBoundary = afBoundaryFor(rpMade.id);
+    ok(!isNull(rpBoundary), "repattern fixture: its boundary exists");
+    var rpSeedBefore = CsTags.get(rpBoundary, CsArea.SEED_KEY);
+    ok(rpSeedBefore !== "", "repattern fixture: it has a seed to keep");
+
+    // -------------------------------------------------------------
+    // CsArea.resolveSelection: BOTH the boundary id and a fill id
+    // resolve to the same boundary entity -- a beginner clicking the
+    // drawn stipple (the FILL) must reach the same area a caver who
+    // somehow clicked the invisible boundary would.
+    // -------------------------------------------------------------
+
+    var rpFillIds = CsArea.ownedBy(doc, rpMade.id);
+    ok(rpFillIds.length > 0, "repattern fixture: there is a fill to " +
+        "select instead of the boundary");
+
+    var rpFromBoundary = CsArea.resolveSelection(doc, [rpBoundary.getId()]);
+    eqs(rpFromBoundary.length, 1,
+        "CsArea.resolveSelection: selecting the boundary itself " +
+        "resolves to exactly one area");
+    eqs(rpFromBoundary[0], rpBoundary.getId(),
+        "CsArea.resolveSelection: ... itself");
+
+    var rpFromFill = CsArea.resolveSelection(doc, [rpFillIds[0]]);
+    eqs(rpFromFill.length, 1,
+        "CsArea.resolveSelection: selecting a FILL entity (what a " +
+        "beginner actually clicks) resolves to exactly one area too");
+    eqs(rpFromFill[0], rpBoundary.getId(),
+        "CsArea.resolveSelection: ... the SAME boundary the direct " +
+        "selection found");
+
+    var rpFromBoth = CsArea.resolveSelection(doc,
+        [rpBoundary.getId(), rpFillIds[0], rpFillIds[1]]);
+    eqs(rpFromBoth.length, 1,
+        "CsArea.resolveSelection: the boundary plus two of its own " +
+        "fill elements still dedupe to ONE area, not three");
+
+    ok(CsArea.resolveSelection(doc, [999999999]).length === 0,
+        "CsArea.resolveSelection: an id that is not in the document " +
+        "resolves to nothing, not a crash");
+
+    // -------------------------------------------------------------
+    // The repattern itself: SAND -> CLAY, keeping the seed.
+    // -------------------------------------------------------------
+
+    var rpResult = CsArea.repattern(doc, di, [rpBoundary.getId()], "CLAY");
+    eqs(rpResult.ok, true,
+        "CsArea.repattern: repatterning by the boundary id succeeds");
+    eqs(rpResult.count, 1, "CsArea.repattern: one area was repatterned");
+    eqs(CsTags.get(reQ(rpBoundary), CsArea.PATTERN_KEY), "CLAY",
+        "CsArea.repattern: AreaPattern is now the new key");
+    eqs(CsTags.get(reQ(rpBoundary), CsArea.SEED_KEY), rpSeedBefore,
+        "CsArea.repattern: AreaSeed is UNCHANGED -- the ground did not " +
+        "move, only the symbols covering it (acceptance criterion)");
+
+    var rpFillAfter = CsArea.ownedBy(doc, rpMade.id);
+    ok(rpFillAfter.length > 0,
+        "CsArea.repattern: the fill was actually rebuilt, not just " +
+        "the tag");
+    var rpWrongLayer = 0;
+    for (var rfi = 0; rfi < rpFillAfter.length; rfi++) {
+        var rref = doc.queryEntity(rpFillAfter[rfi]);
+        if (!isNull(rref) &&
+                doc.getLayerName(rref.getLayerId()) !==
+                CsArea.CATALOG.CLAY.layer) {
+            rpWrongLayer++;
+        }
+    }
+    eqs(rpWrongLayer, 0,
+        "CsArea.repattern: every rebuilt element landed on CLAY's own " +
+        "layer, not SAND's");
+
+    // -------------------------------------------------------------
+    // Repatterning again by the FILL id -- the path a beginner who
+    // clicked the drawn texture actually takes -- CLAY -> SAND, via
+    // resolveSelection feeding straight into repattern, exactly as
+    // AreaFill.connectTile's own click handler chains them.
+    // -------------------------------------------------------------
+
+    var rpFillId2 = CsArea.ownedBy(doc, rpMade.id)[0];
+    var rpBoundaryIds2 = CsArea.resolveSelection(doc, [rpFillId2]);
+    var rpResultByFill = CsArea.repattern(doc, di, rpBoundaryIds2, "SAND");
+    eqs(rpResultByFill.ok, true,
+        "CsArea.repattern: repatterning resolved FROM a selected FILL " +
+        "id succeeds (acceptance criterion)");
+    eqs(CsTags.get(reQ(rpBoundary), CsArea.PATTERN_KEY), "SAND",
+        "CsArea.repattern: ... and AreaPattern really did change back");
+
+    // -------------------------------------------------------------
+    // Scale and Density apply to a selected area through the same call
+    // -- no separate write path for the panel's boxes.
+    // -------------------------------------------------------------
+
+    var rpScaleResult = CsArea.repattern(doc, di, [rpBoundary.getId()],
+        "SAND", { scale: 2.5, density: 3.0 });
+    eqs(rpScaleResult.ok, true,
+        "CsArea.repattern: a repattern carrying scale/density succeeds");
+    eqs(CsTags.get(reQ(rpBoundary), CsArea.SCALE_KEY), "2.5",
+        "CsArea.repattern: AreaScale was written from opts.scale");
+    eqs(CsTags.get(reQ(rpBoundary), CsArea.DENSITY_KEY), "3",
+        "CsArea.repattern: AreaDensity was written from opts.density");
+})();
+
+// =======================================================================
+// One selection, several areas, ONE undo step -- acceptance criterion.
+// Two areas repatterned together must both change AND both roll back
+// together on a single group undo, the same AreaSync.run idiom already
+// proven for regenerate()+sweep()+adopt().
+// =======================================================================
+
+(function repatterningSeveralAreasIsOneUndoStep() {
+    var mrCx1 = lstCx + 2100, mrCy1 = lstCy;
+    var mrCx2 = lstCx + 2200, mrCy2 = lstCy;
+    var mr1 = AreaFillRun.commit(doc, di, squareStroke(mrCx1, mrCy1, 5),
+        "SAND", { scale: 1.0, density: 1.0 });
+    var mr2 = AreaFillRun.commit(doc, di, squareStroke(mrCx2, mrCy2, 5),
+        "SAND", { scale: 1.0, density: 1.0 });
+    ok(mr1.ok === true && mr2.ok === true,
+        "multi-repattern fixture: both SAND strokes succeed");
+    var mrB1 = afBoundaryFor(mr1.id), mrB2 = afBoundaryFor(mr2.id);
+
+    var mrGroupBefore = doc.getTransactionGroup();
+    var mrResult = CsArea.repattern(doc, di,
+        [mrB1.getId(), mrB2.getId()], "CLAY");
+    eqs(mrResult.ok, true, "CsArea.repattern: the batch of two succeeds");
+    eqs(mrResult.count, 2,
+        "CsArea.repattern: both areas were repatterned");
+    eqs(CsTags.get(reQ(mrB1), CsArea.PATTERN_KEY), "CLAY",
+        "CsArea.repattern: the first area really changed");
+    eqs(CsTags.get(reQ(mrB2), CsArea.PATTERN_KEY), "CLAY",
+        "CsArea.repattern: the second area really changed");
+
+    // ONE undo step: undoing once must put BOTH boundaries back to
+    // SAND, not just the last one written.
+    di.undo();
+    eqs(CsTags.get(doc.queryEntity(mrB1.getId()), CsArea.PATTERN_KEY),
+        "SAND",
+        "CsArea.repattern: ONE undo restores the FIRST area's pattern " +
+        "(acceptance criterion: one undo step for the whole batch)");
+    eqs(CsTags.get(doc.queryEntity(mrB2.getId()), CsArea.PATTERN_KEY),
+        "SAND",
+        "CsArea.repattern: ... and the SECOND area's, in the same undo");
+    di.redo();
+    eqs(CsTags.get(doc.queryEntity(mrB1.getId()), CsArea.PATTERN_KEY),
+        "CLAY",
+        "CsArea.repattern: redo brings both back to CLAY together");
+    eqs(CsTags.get(doc.queryEntity(mrB2.getId()), CsArea.PATTERN_KEY),
+        "CLAY", "CsArea.repattern: ... both, not just one");
+})();
+
+// =======================================================================
+// CsArea.repattern is picky about what it touches: a mixed selection
+// (a real area plus something that is not one) still repatterns the
+// real one, and an all-invalid selection reports failure without
+// applying any operation at all.
+// =======================================================================
+
+(function repatternSkipsWhatIsNotAnArea() {
+    var mxCx = lstCx + 2300, mxCy = lstCy;
+    var mxMade = AreaFillRun.commit(doc, di, squareStroke(mxCx, mxCy, 5),
+        "SAND", { scale: 1.0, density: 1.0 });
+    ok(mxMade.ok === true, "mixed-selection fixture: the stroke succeeds");
+    var mxBoundary = afBoundaryFor(mxMade.id);
+
+    var mxLine = new RLineEntity(doc, new RLineData(
+        new RVector(0, 0), new RVector(1, 1)));
+    var mxLineOp = new RAddObjectsOperation();
+    mxLineOp.addObject(mxLine, false);
+    di.applyOperation(mxLineOp);
+
+    var mxResult = CsArea.repattern(doc, di,
+        [mxBoundary.getId(), mxLine.getId()], "CLAY");
+    eqs(mxResult.ok, true,
+        "CsArea.repattern: a mixed selection still succeeds for the " +
+        "part that IS an area");
+    eqs(mxResult.count, 1,
+        "CsArea.repattern: only the real area was counted");
+    eqs(CsTags.get(reQ(mxBoundary), CsArea.PATTERN_KEY), "CLAY",
+        "CsArea.repattern: ... and it really was repatterned");
+
+    var mxAllInvalid = CsArea.repattern(doc, di, [mxLine.getId()], "CLAY");
+    eqs(mxAllInvalid.ok, false,
+        "CsArea.repattern: a selection with nothing that is an area " +
+        "reports failure rather than a hollow success");
+    eqs(mxAllInvalid.count, 0,
+        "CsArea.repattern: ... and touched zero areas");
+
+    eqs(CsArea.repattern(doc, di, [], "CLAY").ok, false,
+        "CsArea.repattern: an empty id list is refused outright");
+    eqs(CsArea.repattern(doc, di, [mxBoundary.getId()], "NO_SUCH_KEY").ok,
+        false,
+        "CsArea.repattern: an unknown pattern key is refused outright");
+})();
+
+// =======================================================================
+// The "this is going to draw a lot" guard (2026-09-12). Measured live:
+// a radius-25 SAND circle at the catalog's default density places 2315
+// block references with no warning. AreaFillRun.commit now estimates
+// the count from the polygon area alone (CsArea.estimateCount, the same
+// formula CsArea.scatterPlacements uses for its own `want`) BEFORE
+// building anything, and refuses to draw over
+// AreaFillRun.WARN_ELEMENT_THRESHOLD unless opts.confirmed is true.
+// =======================================================================
+
+(function bigFillWarnsBeforeDrawing() {
+    // A big enough circle of SAND (density 120) to clear the threshold
+    // by a wide margin, echoing the radius-25 measurement in this
+    // file's own header and AreaFillRun.WARN_ELEMENT_THRESHOLD's.
+    var bfRadius = 25;
+    var bfCx = lstCx + 3000, bfCy = lstCy;
+    var bfPoints = [];
+    var bfSegments = 40;
+    for (var bi = 0; bi <= bfSegments; bi++) {
+        var bang = (bi / bfSegments) * 2 * Math.PI;
+        bfPoints.push({ x: bfCx + bfRadius * Math.cos(bang),
+            y: bfCy + bfRadius * Math.sin(bang) });
+    }
+
+    var bfEntitiesBefore = doc.queryAllEntities(false, true).length;
+    var bfDeclined = AreaFillRun.commit(doc, di, bfPoints, "SAND",
+        { scale: 1.0, density: 1.0 });
+
+    eqs(bfDeclined.ok, false,
+        "AreaFillRun.commit: an unconfirmed big fill is refused, not " +
+        "drawn");
+    eqs(bfDeclined.warn, true,
+        "AreaFillRun.commit: ... and flagged specifically as a WARNING, " +
+        "not an ordinary refusal");
+    ok(bfDeclined.estimate > AreaFillRun.WARN_ELEMENT_THRESHOLD,
+        "AreaFillRun.commit: the estimate it hands back is really over " +
+        "the threshold (" + bfDeclined.estimate + ")");
+    // The measured pain point was 2315 for almost exactly this shape
+    // (radius 25, default SAND density) -- the estimate should land in
+    // the same neighbourhood, not an order of magnitude off.
+    ok(Math.abs(bfDeclined.estimate - 2315) < 400,
+        "AreaFillRun.commit: the estimate is close to the measured " +
+        "real-world count for this exact shape -- got " +
+        bfDeclined.estimate);
+    ok(bfDeclined.suggestedDensity > 0 &&
+        bfDeclined.suggestedDensity < 1.0,
+        "AreaFillRun.commit: a suggested (thinned) density is offered, " +
+        "below the density that triggered the warning -- got " +
+        bfDeclined.suggestedDensity);
+
+    eqs(doc.queryAllEntities(false, true).length, bfEntitiesBefore,
+        "AreaFillRun.commit: DECLINING (never confirming) leaves the " +
+        "drawing COMPLETELY unchanged -- not one entity was added " +
+        "(acceptance criterion)");
+
+    // Confirming draws it -- and the real count should land close to
+    // the estimate that was offered.
+    var bfConfirmed = AreaFillRun.commit(doc, di, bfPoints, "SAND",
+        { scale: 1.0, density: 1.0, confirmed: true });
+    ok(bfConfirmed.ok === true,
+        "AreaFillRun.commit: confirmed:true draws the same big fill (" +
+        bfConfirmed.reason + ")");
+    var bfRatio = bfConfirmed.count / bfDeclined.estimate;
+    ok(bfRatio > 0.5 && bfRatio < 1.5,
+        "AreaFillRun.commit: the ESTIMATE is close to what actually " +
+        "got placed -- estimate " + bfDeclined.estimate + ", actual " +
+        bfConfirmed.count + " (acceptance criterion)");
+
+    // Thinning to the suggested density actually reduces the count,
+    // and by roughly the ratio suggestedDensityMul promised.
+    var bfCx2 = lstCx + 3100, bfCy2 = lstCy;
+    var bfPoints2 = [];
+    for (var bj = 0; bj <= bfSegments; bj++) {
+        var bang2 = (bj / bfSegments) * 2 * Math.PI;
+        bfPoints2.push({ x: bfCx2 + bfRadius * Math.cos(bang2),
+            y: bfCy2 + bfRadius * Math.sin(bang2) });
+    }
+    var bfThinned = AreaFillRun.commit(doc, di, bfPoints2, "SAND",
+        { scale: 1.0, density: bfDeclined.suggestedDensity,
+          confirmed: true });
+    ok(bfThinned.ok === true,
+        "AreaFillRun.commit: drawing at the suggested density succeeds");
+    ok(bfThinned.count < bfConfirmed.count,
+        "AreaFillRun.commit: the thinned fill places noticeably fewer " +
+        "elements than the unthinned one -- " + bfThinned.count +
+        " vs " + bfConfirmed.count);
+})();
+
+// =======================================================================
+// CsArea.estimateCount / CsArea.suggestedDensityMul, pure -- no doc, no
+// op, exactly the shape a caller with only a polygon area and a catalog
+// entry has in hand before anything is built.
+// =======================================================================
+
+(function estimateAndSuggestAreUnitTestable() {
+    eqs(CsArea.estimateCount(1963.5, CsArea.CATALOG.SAND, 1.0), 2356,
+        "CsArea.estimateCount: matches CsArea.scatterPlacements' own " +
+        "`want` formula exactly (area/100 * density * densityMul, " +
+        "rounded)");
+    eqs(CsArea.estimateCount(1963.5, CsArea.CATALOG.WATER, 1.0), 0,
+        "CsArea.estimateCount: a FILLED pattern (a hatch, one entity " +
+        "regardless of size) estimates zero -- nothing to warn about");
+    eqs(CsArea.estimateCount(1963.5, CsArea.CATALOG.BEDROCK, 1.0), 0,
+        "CsArea.estimateCount: BEDROCK (no pattern at all) is zero too");
+    eqs(CsArea.estimateCount(0, CsArea.CATALOG.SAND, 1.0), 0,
+        "CsArea.estimateCount: zero area is zero elements, not NaN or " +
+        "negative");
+
+    var esSuggested = CsArea.suggestedDensityMul(1.0, 2356, 1500);
+    ok(esSuggested > 0 && esSuggested < 1.0,
+        "CsArea.suggestedDensityMul: thins DOWN when the estimate is " +
+        "over target -- got " + esSuggested);
+    var esNewEstimate = Math.round(1963.5 / 100 * CsArea.CATALOG.SAND.density *
+        esSuggested);
+    ok(esNewEstimate <= 1600,
+        "CsArea.suggestedDensityMul: applying the suggested density " +
+        "actually brings the estimate down near the target -- got " +
+        esNewEstimate);
+    eqs(CsArea.suggestedDensityMul(1.0, 500, 1500), 1.0,
+        "CsArea.suggestedDensityMul: an estimate already under target " +
+        "is left alone -- never suggests RAISING the density");
+    eqs(CsArea.suggestedDensityMul(1.0, 5000, 1500) >= 0.1, true,
+        "CsArea.suggestedDensityMul: never suggests below the panel's " +
+        "own Density box floor (0.1)");
+})();
+
+// =======================================================================
 // AreaFillEdit -- Task 11. A caver draws one element, names it, picks a
 // placement rule, and it joins the Areas palette permanently, in their
 // OWN library -- the round trip, and the fill it makes possible.

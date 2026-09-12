@@ -64,6 +64,27 @@ AreaFillRun.SAMPLE_PIXELS = 6;
 AreaFillRun.MIN_AREA = 1.0;
 
 /**
+ * Above this many estimated elements, commit() stops and hands back a
+ * warning instead of drawing -- the "this is going to draw a lot" guard
+ * (2026-09-12, measured live): a radius-25 circle of SAND at the
+ * catalog's own default density (120) places 2315 block references, and
+ * nothing told the caver that was coming. A beginner who fills a big
+ * room this way gets tens of thousands and concludes the application is
+ * broken, not that the density number is wrong.
+ *
+ * SIZED AGAINST THAT MEASUREMENT, not tuned to it exactly: 1500 sits
+ * clearly below 2315, so the very case that motivated this warns, and
+ * clearly above what an ordinary, deliberately-sized patch of any
+ * pattern places -- BLOCKS, the sparsest scatter (density 16), needs
+ * over 9000 sq drawing units of boundary to reach it, a genuinely huge
+ * room, not a normal boulder pile. A round number, not a fitted one:
+ * there is no "correct" threshold to derive, only a line comfortably
+ * between "a caver drew what they meant" and "a caver is about to wait
+ * on tens of thousands of block references".
+ */
+AreaFillRun.WARN_ELEMENT_THRESHOLD = 1500;
+
+/**
  * The armed pattern's catalog key, e.g. "SAND".
  *
  * Module state, the same shape as FeatureTrace.target: the panel (Task
@@ -202,9 +223,22 @@ AreaFillRun.refusalReason = function(doc, layerNames) {
  *
  * `points` are the raw captured drag, in drawing coordinates, exactly
  * as FeatureTraceRun.samples is; this function resamples and reduces
- * them itself. `opts` is {scale, density}.
+ * them itself. `opts` is {scale, density, confirmed}. `opts.confirmed`
+ * (2026-09-12): when the estimated element count is over
+ * AreaFillRun.WARN_ELEMENT_THRESHOLD and this is not true, NOTHING is
+ * drawn -- commit() hands back {ok: false, warn: true, estimate,
+ * suggestedDensity} instead, before touching the document at all (no
+ * layer is even ensured), so a caver who declines finds the drawing
+ * completely unchanged. The interactive action (mouseReleaseEvent
+ * below) is what turns that into a question and, on "yes", calls
+ * commit() again with confirmed:true; a caller with no UI to ask
+ * through (a test, Sync Areas, a future scripted import) passes
+ * confirmed:true itself to say "I already know, draw it".
  *
- * \return {ok, id, layer, boundaryLayer, count, tripId, reason}
+ * \return {ok, id, layer, boundaryLayer, count, tripId, reason} on
+ *         success or an ordinary refusal; {ok: false, warn: true,
+ *         estimate, suggestedDensity, reason} when the fill was not
+ *         drawn because it was never confirmed.
  */
 AreaFillRun.commit = function(doc, di, points, key, opts) {
     var entry = CsArea.entryFor(key);
@@ -234,10 +268,29 @@ AreaFillRun.commit = function(doc, di, points, key, opts) {
         verts = verts.slice(0, verts.length - 1);
     }
 
-    if (verts.length < 3 ||
-            CsArea.polygonArea(verts) < AreaFillRun.MIN_AREA) {
+    var area = CsArea.polygonArea(verts);
+    if (verts.length < 3 || area < AreaFillRun.MIN_AREA) {
         return { ok: false, id: null, count: 0,
             reason: "that loop encloses almost nothing" };
+    }
+
+    // THE GUARD ITSELF, checked BEFORE anything else touches the
+    // document (no layer is ensured, nothing is queued into an op) --
+    // see AreaFillRun.WARN_ELEMENT_THRESHOLD's own header. No sampler is
+    // run to get this number: CsArea.estimateCount is the same formula
+    // CsArea.scatterPlacements already uses for its own `want`, over the
+    // polygon area already computed above.
+    if (opts.confirmed !== true) {
+        var estimate = CsArea.estimateCount(area, entry, opts.density);
+        if (estimate > AreaFillRun.WARN_ELEMENT_THRESHOLD) {
+            return { ok: false, id: null, count: 0, warn: true,
+                estimate: estimate,
+                suggestedDensity: CsArea.suggestedDensityMul(
+                    isNull(opts.density) ? 1.0 : opts.density, estimate,
+                    AreaFillRun.WARN_ELEMENT_THRESHOLD),
+                reason: "that would place about " + estimate +
+                    " elements -- not drawn without confirming" };
+        }
     }
 
     var routed = AreaFillRun.layersFor(doc, entry, verts);
@@ -417,9 +470,45 @@ AreaFillRun.prototype.mouseReleaseEvent = function(event) {
         return;
     }
 
-    var result = AreaFillRun.commit(this.getDocument(),
-        this.getDocumentInterface(), this.samples, AreaFillRun.armed,
-        { scale: AreaFillRun.scale(), density: AreaFillRun.density() });
+    var doc = this.getDocument();
+    var di = this.getDocumentInterface();
+    var density = AreaFillRun.density();
+    var result = AreaFillRun.commit(doc, di, this.samples, AreaFillRun.armed,
+        { scale: AreaFillRun.scale(), density: density });
+
+    if (!result.ok && result.warn === true) {
+        // ASK, rather than silently refuse OR silently draw thousands of
+        // elements -- see AreaFillRun.WARN_ELEMENT_THRESHOLD's header.
+        //
+        // THE ONE PROVEN-TRUSTWORTHY MODAL SHAPE on this bridge (see
+        // docs/... js-bridge-traps, and AreaFill.deleteArmed's own use
+        // of it): the STATIC three/four-arg QMessageBox.question, with
+        // QMessageBox.Yes | QMessageBox.No (never
+        // makeQMessageBoxStandardButtons -- that flags object does not
+        // survive the bridge and question() returns Yes immediately,
+        // a confirmation that confirms itself), parented to
+        // RMainWindowQt.getMainWindow() (never to this modal), and its
+        // answer compared with === QMessageBox.Yes (never a truthy
+        // check -- an INSTANCE box's exec() returns the button code,
+        // where No is also truthy). That is a real, audited answer, not
+        // a guess -- so this stays modal rather than falling back to a
+        // silent non-modal report.
+        var answer = QMessageBox.question(RMainWindowQt.getMainWindow(),
+            qsTr("Large Fill"),
+            qsTr("That would place about %1 elements -- likely to read " +
+                "as noise and slow this drawing down.\n\nDraw it " +
+                "thinned instead, at density %2?")
+                .arg(result.estimate).arg(result.suggestedDensity),
+            QMessageBox.Yes | QMessageBox.No);
+        if (answer !== QMessageBox.Yes) {
+            EAction.handleUserMessage(qsTr("Nothing was drawn."));
+            this.setState(AreaFillRun.State.Idle);
+            return;
+        }
+        result = AreaFillRun.commit(doc, di, this.samples, AreaFillRun.armed,
+            { scale: AreaFillRun.scale(), density: result.suggestedDensity,
+              confirmed: true });
+    }
 
     if (!result.ok) {
         EAction.handleUserMessage(result.reason);
