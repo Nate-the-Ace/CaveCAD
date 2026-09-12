@@ -29,6 +29,21 @@ include(includeBasePath + "/CsSectionCut.js");
 
 var CsSection3d = {};
 
+// WHICH AXIS IS WHICH, because the names do not say it and getting it
+// wrong rotates every section by ninety degrees.
+//
+// CsSectionCut.seedFrame projects world UP onto the plane perpendicular
+// to the passage and calls the result `r`. So:
+//
+//     frame.r  is UP in the section's own plane
+//     frame.s  is ACROSS the passage, horizontal
+//
+// A section drawing is the other way round -- its x runs across the
+// passage and its y runs up the page -- so block x maps to s and block
+// y maps to r. Read `r` as "right" and every section comes out on its
+// side, and every offset pushes it into the ceiling instead of out to
+// one side. Both were done here once.
+
 /** Beyond this many passage widths from its station, a block's
  *  direction says nothing about which side the caver meant -- it is
  *  parked in a bay, or laid out on a sheet. */
@@ -44,25 +59,29 @@ CsSection3d.CLEARANCE = 0.6;
  * The caver already chose: SectionCapture marches the block to a spot
  * near its station and the caver may then have dragged it, so the plan
  * vector from station to block carries the answer. Only its SIGN along
- * the frame's r axis is used -- a section stands square to the passage
- * whichever way the block drifted.
+ * the frame's ACROSS axis is used -- a section stands square to the
+ * passage whichever way the block drifted.
+ *
+ * ALONG s, NOT r. `s` is the horizontal across-passage axis; `r` is up.
+ * Offsetting along r pushes the section through the ceiling, which is
+ * not a side.
  *
  * \param width the passage width at that station, for the far test
- * \return {x,y,z} unit vector, +r or -r
+ * \return {x,y,z} unit vector, +s or -s
  */
 CsSection3d.sideFor = function(blockPos, stationPos, frame, width) {
-    var r = frame.r;
+    var across = frame.s;
     var dx = blockPos.x - stationPos.x;
     var dy = blockPos.y - stationPos.y;
     var far = Math.max(width, 1) * CsSection3d.FAR_FACTOR;
     if (Math.sqrt(dx * dx + dy * dy) > far) {
-        return { x: r.x, y: r.y, z: r.z };
+        return { x: across.x, y: across.y, z: across.z };
     }
-    var along = dx * r.x + dy * r.y;
+    var along = dx * across.x + dy * across.y;
     if (along < 0) {
-        return { x: -r.x, y: -r.y, z: -r.z };
+        return { x: -across.x, y: -across.y, z: -across.z };
     }
-    return { x: r.x, y: r.y, z: r.z };
+    return { x: across.x, y: across.y, z: across.z };
 };
 
 /**
@@ -114,10 +133,13 @@ CsSection3d.place = function(polylines, opts) {
             if (!isFinite(u) || !isFinite(v)) {
                 continue;
             }
+            // Block x runs ACROSS the passage (frame.s) and block y
+            // runs UP it (frame.r). Swapping these rotates every
+            // section ninety degrees; see the axis note at the top.
             made.push({
-                x: ox + frame.r.x * u + frame.s.x * v,
-                y: oy + frame.r.y * u + frame.s.y * v,
-                z: oz + frame.r.z * u + frame.s.z * v
+                x: ox + frame.s.x * u + frame.r.x * v,
+                y: oy + frame.s.y * u + frame.r.y * v,
+                z: oz + frame.s.z * u + frame.r.z * v
             });
         }
         if (made.length >= 2) {

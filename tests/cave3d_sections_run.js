@@ -185,6 +185,9 @@ if (found.length === 1) {
         if (got !== null && got.frame !== null) {
             var side = CsSection3d.sideFor(sec.blockPos, stationPos,
                 got.frame, 6);
+            check("the side is horizontal -- a section hangs beside "
+                + "the passage, not above it",
+                Math.abs(side.z) < 1e-9);
             check("the side is a unit vector",
                 Math.abs(Math.sqrt(side.x * side.x + side.y * side.y +
                     side.z * side.z) - 1) < 1e-9);

@@ -154,3 +154,86 @@ The textured scan version. Sections drawn in place slicing the passage
 rather than offset. Picking or hovering a section. Section scans as
 images -- that is the texture subsystem, and this deliberately does not
 need it.
+
+---
+
+## As built (2026-09-12, 0.9.122.0 / cavecad-src 0.5.0.0)
+
+Shipped as designed. Both reuse decisions held: CsArea.vertsOf returned
+real points for every one of Truitt Cave's seven sections (465 to 2729
+points each), and CsSectionCut's frame needed no help.
+
+### The test drawing was there all along
+
+The spec said Truitt had no captured sections and Task 5 would have to
+make some. That was wrong, and wrong in an instructive way: the grep ran
+against `~/Documents/Cave/teaching/Truitt Cave/Truitt Cave.dxf`, a stale
+copy. The live working drawing is on Google Drive under
+`Library/CloudStorage/GoogleDrive-.../Survey Group/Truitt Cave/`, and it
+holds SEVEN sections with real scans.
+
+The lesson is not about sections. It is that a cave folder under
+~/Documents/Cave may be a stale copy of one that actually lives on the
+shared drive, and a grep that answers "no" about a drawing is worth
+checking against the file the application actually has open -- the
+command line prints the path on load.
+
+### The trip legend now survives a duplicated name
+
+Found while looking at Truitt, where nine trips all read "TRUITT CAVE".
+That turned out NOT to be a code defect: the Notebook's Survey field is
+the trip name, and it had been filled with the cave name instead. The
+data was wrong, not the label.
+
+The behaviour was still worth hardening, and the hardening changes
+nothing for correctly entered data -- a name that tells its trip apart
+is used plainly, exactly as before. Only a SHARED name falls back, to
+name + date; and because two trips can legitimately share both (Truitt
+has two on 2024-04-06, Team A and Team B out together, as the scan
+folders show), a shared name and date falls back further to a position
+suffix. Two teams out on one day is not an edge case in cave survey; it
+is a Saturday.
+
+So this is a degraded-data path, not a correction. Drawings already
+carrying the duplicated name still read clearly, and drawings filled in
+correctly are untouched.
+
+### THE AXIS SWAP, and why the test agreed with it
+
+Sections came out rotated ninety degrees, and offset into the ceiling
+rather than to one side. Both from one mistake.
+
+`CsSectionCut.seedFrame` projects world UP onto the plane perpendicular
+to the passage and calls that `r`. So `r` is UP and `s = d x r` is
+ACROSS. Read as "r is right", block x maps to r and block y to s -- and
+every section lies on its side while every offset climbs.
+
+THE UNIT TEST PASSED THROUGHOUT, because it hand-wrote its frame as
+`{r: east, s: up}` -- the same wrong assumption as the code. Two things
+agreeing with each other and disagreeing with the drawing is not a test,
+and no amount of assertions on a hand-made frame would have caught it.
+
+The tests now DERIVE the frame from CsSectionCut.seedFrame and assert
+its axes first, so the convention is checked against its owner rather
+than restated. The pitch case builds its frame through
+CsSectionCut.frameFor for the same reason. The axis note now sits at the
+top of CsSection3d.js where it cannot be missed.
+
+Caught by Nathan looking at the screen, which is the only place it was
+visible.
+
+### Verified live
+
+On the real Truitt drawing: all seven sections read, placed and drawn --
+8285 segments, no NaN. Every block sits 10 to 40 drawing units from its
+station, well inside FAR_FACTOR, so the side choice came from the caver
+in every case rather than from the fallback. Sections show edge-on in Plan, which is correct: a cross section stands
+vertical. After the axis fix, frame.r measures (0, 0, 1.0) and frame.s
+(0.94, 0.33, 0) on a real section at A2, with the offset horizontal to
+nineteen decimal places.
+
+NOT verified: a section on a genuine PITCH, which is the case
+CsSectionCut's carried theta exists for. Truitt's seven sections are all
+on near-horizontal passage. The frame is reused rather than re-derived
+precisely so this cannot go wrong, but the live proof is still owed and
+wants a cave with a sectioned drop.

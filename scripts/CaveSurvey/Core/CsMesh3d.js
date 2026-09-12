@@ -431,17 +431,69 @@ CsMesh3d.legendLength = function(value, unit) {
     return (Math.round(value * 10) / 10) + " " + u;
 };
 
-/** What to call a trip: what it calls itself, else its date, else its
- *  position. A trip with neither is still a real trip and still needs a
- *  row in the legend. */
+/**
+ * What to call a trip in a legend.
+ *
+ * ITS NAME ONLY IF ITS NAME TELLS IT APART. Real drawings routinely give
+ * every trip the CAVE's name -- Truitt Cave has nine trips all called
+ * "TRUITT CAVE" -- and a legend that repeats one word nine times has
+ * told the reader nothing while looking like it has. So a name shared
+ * with another trip is disambiguated by its date, and failing that by
+ * its position.
+ *
+ * A trip with no name and no date is still a real trip and still needs a
+ * row.
+ */
 CsMesh3d.tripLabel = function(survey, index) {
     var trips = (survey && survey.trips) ? survey.trips : [];
     var t = trips[index];
-    if (t !== undefined && t !== null) {
-        if (typeof t.name === "string" && t.name !== "") { return t.name; }
-        if (typeof t.date === "string" && t.date !== "") { return t.date; }
+    if (t === undefined || t === null) {
+        return "Trip " + (index + 1);
     }
-    return "Trip " + (index + 1);
+    var name = (typeof t.name === "string") ? t.name : "";
+    var date = (typeof t.date === "string") ? t.date : "";
+
+    if (name === "") {
+        return date !== "" ? date : "Trip " + (index + 1);
+    }
+
+    var shared = false;
+    for (var i = 0; i < trips.length; i++) {
+        if (i === index || trips[i] === null || trips[i] === undefined) {
+            continue;
+        }
+        if (trips[i].name === name) {
+            shared = true;
+            break;
+        }
+    }
+    if (!shared) {
+        return name;
+    }
+
+    // TWO TEAMS OUT ON ONE DAY IS NOT AN EDGE CASE. Truitt has two
+    // trips both called "TRUITT CAVE" on 2024-04-06 -- Team A and Team
+    // B, out together -- so the date alone does not always separate
+    // them either, and a legend with two identical rows is back where
+    // it started.
+    if (date !== "") {
+        var dateShared = false;
+        for (var j = 0; j < trips.length; j++) {
+            if (j === index || trips[j] === null ||
+                    trips[j] === undefined) {
+                continue;
+            }
+            if (trips[j].name === name && trips[j].date === date) {
+                dateShared = true;
+                break;
+            }
+        }
+        if (!dateShared) {
+            return name + " " + date;
+        }
+        return name + " " + date + " (" + (index + 1) + ")";
+    }
+    return name + " " + (index + 1);
 };
 
 /**

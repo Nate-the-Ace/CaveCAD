@@ -66,6 +66,7 @@ Cave3D.MODES = [
 Cave3D.SETTING_MODE = "Cave3D/ColorMode";
 Cave3D.SETTING_GHOST = "Cave3D/ShowGhost";
 Cave3D.SETTING_LEADS = "Cave3D/ShowLeads";
+Cave3D.SETTING_SECTIONS = "Cave3D/ShowSections";
 
 /** The chosen mode, read from settings the first time it is asked for.
  *  Not read at file scope: RSettings is not necessarily up when an
@@ -378,8 +379,13 @@ function cave3dRun() {
             // Remembered, but NOT rebuilt: both overlays have their own
             // buffer precisely so that showing and hiding them costs
             // nothing.
-            RSettings.setValue(which === "ghost"
-                ? Cave3D.SETTING_GHOST : Cave3D.SETTING_LEADS, on);
+            var key = Cave3D.SETTING_LEADS;
+            if (which === "ghost") {
+                key = Cave3D.SETTING_GHOST;
+            } else if (which === "sections") {
+                key = Cave3D.SETTING_SECTIONS;
+            }
+            RSettings.setValue(key, on);
         });
         Cave3D.connected = true;
     }
@@ -391,6 +397,10 @@ function cave3dRun() {
     // refresh rather than sitting with the other restores above.
     cave3d.setShowGhost(Cave3D.handle,
         RSettings.getBoolValue(Cave3D.SETTING_GHOST, false));
+    // Same reason as the ghost: only a built mesh knows whether this
+    // drawing holds any sections to show.
+    cave3d.setShowSections(Cave3D.handle,
+        RSettings.getBoolValue(Cave3D.SETTING_SECTIONS, false));
 }
 
 // ============================================================

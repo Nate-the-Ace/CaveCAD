@@ -21017,6 +21017,50 @@ dsurvey.trips.push({ name: "D", date: "" });
 eqs(String(CsMesh3d.tripOrder(dsurvey)[3]), "3",
     "an undated trip sorts last -- undated is not earliest");
 
+// A NAME THAT DOES NOT TELL TRIPS APART IS NOT A LABEL. Real drawings
+// name every trip after the cave -- Truitt Cave has nine called "TRUITT
+// CAVE" -- and a legend repeating one word nine times has told the
+// reader nothing while looking like it has.
+var samey = CsModel.newSurvey();
+samey.trips = [
+    { name: "TRUITT CAVE", date: "2025-03-02" },
+    { name: "TRUITT CAVE", date: "2026-08-31" },
+    { name: "Upper Series", date: "" },
+    { name: "", date: "2024-01-01" },
+    { name: "", date: "" }
+];
+eqs(CsMesh3d.tripLabel(samey, 0), "TRUITT CAVE 2025-03-02",
+    "a shared name is told apart by its date");
+eqs(CsMesh3d.tripLabel(samey, 1), "TRUITT CAVE 2026-08-31",
+    "and so is the one it clashed with");
+eqs(CsMesh3d.tripLabel(samey, 2), "Upper Series",
+    "a name of its own is left alone");
+eqs(CsMesh3d.tripLabel(samey, 3), "2024-01-01",
+    "no name falls back to the date");
+eqs(CsMesh3d.tripLabel(samey, 4), "Trip 5",
+    "neither name nor date still gets a row");
+
+var sharedNoDate = CsModel.newSurvey();
+sharedNoDate.trips = [{ name: "X", date: "" }, { name: "X", date: "" }];
+eqs(CsMesh3d.tripLabel(sharedNoDate, 1), "X 2",
+    "a shared name with no dates falls back to position");
+
+// Two teams out on one day is not an edge case: Truitt has two trips
+// both called "TRUITT CAVE" on 2024-04-06, Team A and Team B together,
+// so the date alone does not always separate them either.
+var sameDay = CsModel.newSurvey();
+sameDay.trips = [
+    { name: "TRUITT CAVE", date: "2024-04-06" },
+    { name: "TRUITT CAVE", date: "2024-04-06" },
+    { name: "TRUITT CAVE", date: "2024-06-04" }
+];
+eqs(CsMesh3d.tripLabel(sameDay, 0), "TRUITT CAVE 2024-04-06 (1)",
+    "two teams out on one day are still told apart");
+eqs(CsMesh3d.tripLabel(sameDay, 1), "TRUITT CAVE 2024-04-06 (2)",
+    "and so is the second of them");
+eqs(CsMesh3d.tripLabel(sameDay, 2), "TRUITT CAVE 2024-06-04",
+    "a trip whose date is its own keeps a clean label");
+
 // Ramp helpers must not divide by zero on a degenerate range.
 var oneTrip = mesh3dSurvey();
 var oneMesh = CsMesh3d.build(oneTrip, CsNetwork.resolve(oneTrip),
@@ -21071,14 +21115,24 @@ eqs(String(m3empty.leads.indices.length), "0",
 // CsSection3d -- a captured section standing beside the passage
 // ---------------------------------------------------------------------
 
-var s3frame = { d: { x: 0, y: 1, z: 0 },      // passage heading north
-                r: { x: 1, y: 0, z: 0 },      // right is east
-                s: { x: 0, y: 0, z: 1 } };    // up is up
+// THE FRAME COMES FROM THE MODULE THAT OWNS IT, never hand-written.
+// Hand-writing one here is what let a ninety-degree axis swap pass:
+// the test encoded the same wrong assumption as the code, so the two
+// agreed with each other and disagreed with the drawing.
+//
+// For a passage heading north, seedFrame projects world up onto the
+// perpendicular plane, so r is UP and s = d x r is EAST.
+var s3frame = CsSectionCut.seedFrame({ x: 0, y: 1, z: 0 });
+nearly(s3frame.r.z, 1, 1e-9, "seedFrame's r is UP, not right");
+nearly(s3frame.s.x, 1, 1e-9, "seedFrame's s is ACROSS the passage");
 var s3station = { x: 100, y: 200, z: 50 };
 
 // The caver already chose a side by dragging the block; this reads it.
 var sideE = CsSection3d.sideFor({ x: 130, y: 200 }, s3station, s3frame, 10);
 nearly(sideE.x, 1, 1e-9, "a block east of its station hangs east");
+nearly(sideE.z, 0, 1e-9,
+    "and hangs SIDEWAYS -- an offset along r would push it through "
+    + "the ceiling");
 var sideW = CsSection3d.sideFor({ x: 70, y: 200 }, s3station, s3frame, 10);
 nearly(sideW.x, -1, 1e-9, "a block west of its station hangs west");
 
@@ -21097,32 +21151,47 @@ var placed = CsSection3d.place(s3square, {
 });
 eqs(String(placed.length), "1", "one polyline in, one out");
 eqs(String(placed[0].length), "4", "four points in, four out");
-nearly(placed[0][0].x, 99, 1e-9, "block -1 east of a station at 100 is 99");
-nearly(placed[0][0].z, 49, 1e-9, "block -1 up from z 50 is 49");
+// Block x runs ACROSS the passage, block y runs UP it.
+nearly(placed[0][0].x, 99, 1e-9,
+    "block x is across the passage: -1 from an easting of 100 is 99");
+nearly(placed[0][0].z, 49, 1e-9,
+    "block y is up the section: -1 from a z of 50 is 49");
 nearly(placed[0][0].y, 200, 1e-9,
     "nothing moves along the passage: a section is a section");
+
+// The corner that catches a swap. Block (1, -1) is one ACROSS and one
+// DOWN -- if the axes are swapped it comes back one along and one up.
+var s3corner = CsSection3d.place([[{ x: 1, y: -1 }, { x: 1, y: 1 }]], {
+    station: s3station, frame: s3frame, scale: 1,
+    side: s3frame.s, offset: 0
+});
+nearly(s3corner[0][0].x, 101, 1e-9, "block +1 across is +1 east");
+nearly(s3corner[0][0].z, 49, 1e-9, "block -1 up is 1 below the station");
 
 // SCALE IS A DIVISION -- the failure this module most expects.
 var s3half = CsSection3d.place(s3square, {
     station: s3station, frame: s3frame, scale: 2,
-    side: { x: 1, y: 0, z: 0 }, offset: 0
+    side: s3frame.s, offset: 0
 });
 nearly(s3half[0][0].x, 99.5, 1e-9,
     "scale 2 is two drawing units per foot, so the section is HALF");
 var s3dbl = CsSection3d.place(s3square, {
     station: s3station, frame: s3frame, scale: 0.5,
-    side: { x: 1, y: 0, z: 0 }, offset: 0
+    side: s3frame.s, offset: 0
 });
 nearly(s3dbl[0][0].x, 98, 1e-9, "scale 0.5 doubles it");
 
 var s3off = CsSection3d.place(s3square, {
     station: s3station, frame: s3frame, scale: 1,
-    side: { x: 1, y: 0, z: 0 }, offset: 20
+    side: s3frame.s, offset: 20
 });
 nearly(s3off[0][0].x, 119, 1e-9, "offset 20 moves the whole section east");
+nearly(s3off[0][0].z, 49, 1e-9,
+    "and does NOT move it up: a section is offset sideways, not into "
+    + "the ceiling");
 
 var s3lead = CsSection3d.leaderFor({
-    station: s3station, side: { x: 1, y: 0, z: 0 }, offset: 20
+    station: s3station, side: s3frame.s, offset: 20
 });
 eqs(String(s3lead.length), "2", "a leader has two ends");
 nearly(s3lead[1].x, 100, 1e-9, "the leader comes home to the station");
@@ -21132,19 +21201,23 @@ nearly(s3lead[0].x, 120, 1e-9, "and starts out at the section");
 // throwing: one unreadable section must not take the 3D view down.
 eqs(String(CsSection3d.place(s3square, {
     station: s3station, frame: null, scale: 1,
-    side: { x: 1, y: 0, z: 0 }, offset: 0 }).length), "0",
+    side: s3frame.s, offset: 0 }).length), "0",
     "no frame, no section -- and no exception either");
 eqs(String(CsSection3d.place(null, {
     station: s3station, frame: s3frame, scale: 1,
-    side: { x: 1, y: 0, z: 0 }, offset: 0 }).length), "0",
+    side: s3frame.s, offset: 0 }).length), "0",
     "no geometry, no section");
 
 // A section on a steep passage still lands finite.
+// A pitch: seedFrame refuses (every perpendicular is equally good), so
+// frameFor's arbitrary-but-recorded branch is what a real one gets.
+var s3pitchFrame = CsSectionCut.frameFor(null, null, null,
+    { x: 0, y: 0, z: 1 });
+ok(s3pitchFrame.reseeded === true,
+    "a run opening on a pitch records its frame as arbitrary");
 var s3steep = CsSection3d.place(s3square, {
-    station: s3station,
-    frame: { d: { x: 0, y: 0, z: 1 }, r: { x: 1, y: 0, z: 0 },
-             s: { x: 0, y: 1, z: 0 } },
-    scale: 1, side: { x: 1, y: 0, z: 0 }, offset: 5
+    station: s3station, frame: s3pitchFrame.frame,
+    scale: 1, side: s3pitchFrame.frame.s, offset: 5
 });
 var s3bad = 0;
 for (var sb = 0; sb < s3steep[0].length; sb++) {
