@@ -37,24 +37,30 @@ var CsTrace = {};
  * (Nathan, 2026-09-12: "I want to raise the resolution at which ALL
  * trace splines are captured").
  *
- * WHY A QUARTER FOOT, measured rather than guessed. Splines are 8.6% of
- * a real cave file (Truitt: 1288 control points, 106 KB of 1.21 MB, 85
- * bytes a point), so four times the detail costs about 300 KB -- file
- * size is simply not the constraint here. What the interval really buys
- * is CORNER FIDELITY: fitSpline builds an APPROXIMATING cubic (fit-point
- * splines are a QCAD Pro feature this fork does not have -- see
- * fitSpline below for the release that cost), so every bend is pulled
- * inside its control polygon by a fraction of this spacing. At a foot
- * that is inches of rounding on each corner; at a quarter foot it is
- * under an inch.
+ * HALF A FOOT, and the number moved twice in one day for a reason worth
+ * recording. It was raised from 1.0 to 0.25 while traces were fitted by
+ * an APPROXIMATING cubic, where the only lever on a rounded corner was
+ * the step size. Once interpolatingSpline landed -- a curve that passes
+ * THROUGH its points -- the measurement changed the answer:
  *
- * And why not finer: at 1"=50ft a quarter foot is 0.13 mm on paper, a
- * fine pen line, so nothing below this survives a plot; CsWarp runs
- * per-vertex MLS against every station, so the cost that is actually
- * felt scales with this number; and below about here a stroke records
- * the trackpad rather than the cave.
+ *   fit             step      corner error     control points
+ *   approximating    1.0 ft      3.35 in            93
+ *   approximating    0.25 ft     0.97 in           369
+ *   interpolating    0.5 ft      0.35 in           185
+ *
+ * The corner is what reads on a map, and interpolating at half a foot
+ * beats approximating at a quarter foot there by three times, on half
+ * the points. Half the points also means half the CsWarp per-vertex MLS
+ * cost, which is the cost a caver actually feels when an adjustment
+ * moves linework -- file size never was the constraint (splines are 8.6%
+ * of a real cave file at 85 bytes a point).
+ *
+ * Not finer: at 1"=50ft a quarter foot is already 0.13 mm on paper,
+ * thinner than a pen line, and below about here a stroke records the
+ * trackpad rather than the cave. Full table in
+ * docs/superpowers/specs/2026-09-12-spline-fidelity.md.
  */
-CsTrace.INTERVAL_FEET = 0.25;
+CsTrace.INTERVAL_FEET = 0.5;
 
 /**
  * The sampling distance for a trace, in DRAWING UNITS.

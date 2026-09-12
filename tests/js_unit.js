@@ -17822,9 +17822,10 @@ if (!IS_NODE) {
         near(FeatureTrace.toleranceFraction(), 0.0, 1e-9,
             "FeatureTrace.toleranceFraction: no smoothing, whatever a " +
             "panel says");
-        near(CsTrace.INTERVAL_FEET, 0.25, 1e-9,
-            "CsTrace.INTERVAL_FEET: a quarter foot, the suite's one " +
-            "sampling interval (raised from 1.0, 2026-09-12)");
+        near(CsTrace.INTERVAL_FEET, 0.5, 1e-9,
+            "CsTrace.INTERVAL_FEET: half a foot -- the suite's one " +
+            "sampling interval, settled by measurement once traces " +
+            "started interpolating (2026-09-12)");
         eqs(FeatureTrace.DEFAULT_SMOOTHING, "No Smoothing",
             "and the fixed smoothing is none -- thinning a traced wall " +
             "is the tool second-guessing a measurement");
