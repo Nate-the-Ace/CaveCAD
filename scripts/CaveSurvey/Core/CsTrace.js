@@ -28,6 +28,47 @@ var CsTrace = {};
  * measured. An exaggerated elevation wants the same sheet smoothness as
  * a 1:1 one, so scaling by exaggeration only makes profile traces lumpy.
  */
+/**
+ * How finely a traced stroke is sampled, in FEET of cave.
+ *
+ * ONE NUMBER FOR EVERY TRACE IN THE SUITE -- feature walls, shaped-line
+ * spines and area boundaries all read it here, because "how much detail
+ * does a trace keep" is one question and three answers would drift
+ * (Nathan, 2026-09-12: "I want to raise the resolution at which ALL
+ * trace splines are captured").
+ *
+ * WHY A QUARTER FOOT, measured rather than guessed. Splines are 8.6% of
+ * a real cave file (Truitt: 1288 control points, 106 KB of 1.21 MB, 85
+ * bytes a point), so four times the detail costs about 300 KB -- file
+ * size is simply not the constraint here. What the interval really buys
+ * is CORNER FIDELITY: fitSpline builds an APPROXIMATING cubic (fit-point
+ * splines are a QCAD Pro feature this fork does not have -- see
+ * fitSpline below for the release that cost), so every bend is pulled
+ * inside its control polygon by a fraction of this spacing. At a foot
+ * that is inches of rounding on each corner; at a quarter foot it is
+ * under an inch.
+ *
+ * And why not finer: at 1"=50ft a quarter foot is 0.13 mm on paper, a
+ * fine pen line, so nothing below this survives a plot; CsWarp runs
+ * per-vertex MLS against every station, so the cost that is actually
+ * felt scales with this number; and below about here a stroke records
+ * the trackpad rather than the cave.
+ */
+CsTrace.INTERVAL_FEET = 0.25;
+
+/**
+ * The sampling distance for a trace, in DRAWING UNITS.
+ *
+ * spacingFor is units-per-FOOT -- a unit conversion, not an interval.
+ * Multiplying it by INTERVAL_FEET here is what keeps one setting
+ * meaning the same thing in a foot drawing and a metre one, and stops a
+ * caller reaching for spacingFor alone and silently getting a one-foot
+ * interval back.
+ */
+CsTrace.sampleSpacing = function(unitName) {
+    return CsTrace.spacingFor(unitName) * CsTrace.INTERVAL_FEET;
+};
+
 CsTrace.spacingFor = function(unitName) {
     if (unitName === CsUnits.METERS) {
         return CsUnits.convert(1.0, CsUnits.FEET, CsUnits.METERS);

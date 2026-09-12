@@ -109,7 +109,9 @@ FeatureTrace.SHAPED_ROWS = [
       alias: "calcite drapery cascade" },
     { label: "Rimstone Dam", style: "rimstone",
       alias: "gour pool dam" },
-    { label: "Slope", style: "slope", alias: "ramp incline breakdown slope" }
+    { label: "Slope", style: "slope", alias: "ramp incline breakdown slope" },
+    { label: "Wall Glyphs", style: "glyphs",
+      alias: "stone blocks rubble scatter wall ornament symbol" }
 ];
 
 /**
@@ -168,7 +170,15 @@ FeatureTrace.DEFAULT_SMOOTHING = "No Smoothing";
  * the same as it always did -- and so a future panel that wants them
  * back has something to bind to.
  */
-FeatureTrace.INTERVAL_FEET = 1.0;
+// RAISED FROM 1.0 TO A QUARTER FOOT, 2026-09-12: Nathan traced against a
+// scan and found a foot too coarse. The number itself now lives in
+// Core/CsTrace.js so walls, shaped-line spines and area boundaries all
+// sample alike -- see CsTrace.INTERVAL_FEET for the measurements behind
+// it. This name stays because the panel machinery binds to it.
+// READ AT CALL TIME, never assigned here at load time: a tool file can
+// be evaluated before Core, and a load-time read of CsTrace would throw
+// and cost the whole panel. intervalFeet() below is the accessor.
+FeatureTrace.INTERVAL_FEET = null;
 
 /**
  * Where an unrecognised smoothing name lands.
@@ -252,7 +262,11 @@ FeatureTrace.armLayer = function(layerName) {
  *  entry falls back rather than refusing: a bad number in a text box
  *  must not stop a caver mid-trace. */
 FeatureTrace.intervalFeet = function() {
-    return FeatureTrace.INTERVAL_FEET;
+    if (FeatureTrace.INTERVAL_FEET !== null &&
+            !isNull(FeatureTrace.INTERVAL_FEET)) {
+        return FeatureTrace.INTERVAL_FEET;   // a test or a caller pinned it
+    }
+    return CsTrace.INTERVAL_FEET;
 };
 
 /**
@@ -1319,12 +1333,29 @@ FeatureTrace.iconForStyle = function(styleKey) {
         // Spacing and size are the STYLE's, scaled to the sample: at
         // true cave spacing a 10 ft sample carries three hachures,
         // which is exactly what the tile should show.
+        // "glyphs" reads offset/jitter from `extra` rather than the
+        // size argument (see CsShapeLine.prims' own header); the seed
+        // is FIXED, not CsArea.newSeed(), for the same reason
+        // CsTileArt.SCATTER_SEED is fixed -- this is a picture of the
+        // PATTERN, and two viewings of one tile must show the same
+        // picture.
+        var extra = (spec.kind === "glyphs") ? {
+            offset: spec.offsetFeet || 0,
+            jitterPos: spec.jitterPosFeet || 0,
+            jitterRotRad: (spec.jitterRotDeg || 0) * Math.PI / 180,
+            jitterScaleFrac: spec.jitterScaleFrac || 0,
+            rand: CsArea.rng(424242)
+        } : undefined;
         var prims = CsShapeLine.prims(pts, spec.close === true, spec,
             side, spec.spacingFeet,
-            isNull(spec.sizeFeet) ? 2 : spec.sizeFeet);
-        // prims answers { lines, polylines }: a line is a PAIR of
-        // points, and a scallop chain is one bulged polyline
-        // ({points, bulges, closed}) rather than a list of arcs.
+            isNull(spec.sizeFeet) ? 2 : spec.sizeFeet, extra);
+        // prims answers { lines, polylines, glyphs }: a line is a PAIR
+        // of points, a scallop chain is one bulged polyline
+        // ({points, bulges, closed}) rather than a list of arcs, and a
+        // glyph is a placement {x, y, angle, scaleMul} with no
+        // geometry of its own -- painted below from the actual block's
+        // shapes, the same way CsTileArt.iconOfScatter paints an Area
+        // Fill tile.
         var clouds = [pts.slice(0)];
         if (spec.close === true) {
             clouds[0].push(pts[0]);   // close the ring for painting
@@ -1355,6 +1386,29 @@ FeatureTrace.iconForStyle = function(styleKey) {
             }
             if (walk.length > 1) {
                 clouds.push(walk);
+            }
+        }
+        if (prims.glyphs.length > 0) {
+            var symKey = spec.symbolDefault;
+            var shapes = CsTileArt.blockShapes()[symKey];
+            if (!isNull(shapes) && shapes.length > 0) {
+                var raw = CsTileArt.cloudsOfShapes(shapes);
+                for (i = 0; i < prims.glyphs.length; i++) {
+                    var g = prims.glyphs[i];
+                    var gs = (spec.sizeScale || 1) * g.scaleMul;
+                    var cos = Math.cos(g.angle), sin = Math.sin(g.angle);
+                    for (var c = 0; c < raw.length; c++) {
+                        var cloud = [];
+                        for (var p = 0; p < raw[c].length; p++) {
+                            var px = raw[c][p].x * gs, py = raw[c][p].y * gs;
+                            cloud.push({
+                                x: g.x + px * cos - py * sin,
+                                y: g.y + px * sin + py * cos
+                            });
+                        }
+                        clouds.push(cloud);
+                    }
+                }
             }
         }
         return CsTileArt.iconOfClouds(clouds, FeatureTrace.ICON,

@@ -25,6 +25,7 @@ function ShapedLinesRun(guiAction) {
     this.spineClosed = false;
     this.side = 1;           // which way the ornament faces, live
     this.previewSample = null;  // the spine walked once, reused per move
+    this.previewSeed = null;    // "glyphs" only: rolled once per stroke
     this.pathFrame = null;   // plan / profile / section, decided at release
     this.growId = null;      // the spine this stroke continues, if any
     this.extendForced = false;  // Shift was held at the press
@@ -52,7 +53,15 @@ ShapedLinesRun.SAMPLE_PIXELS = 6;
 
 /** Spine fidelity: resample interval in FEET and the reduce tolerance
  *  as a fraction of it. FeatureTrace's defaults (1 ft, Fine). */
-ShapedLinesRun.INTERVAL_FEET = 1.0;
+// One number for every trace in the suite -- see CsTrace.INTERVAL_FEET.
+// A shaped line's SPINE is sampled like any other trace; the spacing of
+// its ticks and scallops is a separate per-style number and is not this.
+// Read at CALL time (see the same note in FeatureTrace): a load-time
+// read of Core from a tool file depends on an include order nothing here
+// guarantees.
+ShapedLinesRun.intervalFeet = function() {
+    return CsTrace.INTERVAL_FEET;
+};
 ShapedLinesRun.TOLERANCE_FRACTION = 0.05;
 
 /**
@@ -209,6 +218,7 @@ ShapedLinesRun.prototype.escapeEvent = function() {
 ShapedLinesRun.prototype.discard = function() {
     this.samples = [];
     this.previewSample = null;
+    this.previewSeed = null;
     this.spinePts = null;
     this.spineClosed = false;
     this.pathFrame = null;
@@ -468,7 +478,7 @@ ShapedLinesRun.prototype.prepare = function() {
     }
 
     var perFoot = CsShapeLine.perFoot(doc);
-    var spacing = perFoot * ShapedLinesRun.INTERVAL_FEET;
+    var spacing = perFoot * ShapedLinesRun.intervalFeet();
     var kept = CsTrace.reduce(CsTrace.resample(this.samples, spacing),
         spacing * ShapedLinesRun.TOLERANCE_FRACTION);
     if (kept.length < 2) {
@@ -570,6 +580,18 @@ ShapedLinesRun.prototype.previewEntities = function() {
     CsTags.set(spine, CsShapeLine.KEY.SIDE, String(this.side));
     CsTags.set(spine, CsShapeLine.KEY.SCALE, "1");
     CsTags.set(spine, CsShapeLine.KEY.FRAME, this.pathFrame);
+    // "glyphs" only: rolled ONCE for this whole drag (cached on `this`,
+    // this preview spine is thrown away and rebuilt every move) and
+    // reused on every commit call, so the jitter does not visibly
+    // reshuffle under the cursor on every mouse-move -- the same seed
+    // then gets tagged onto the real spine at commit, so what the caver
+    // watched settle into place while dragging is what gets drawn.
+    if (spec.kind === "glyphs") {
+        if (isNull(this.previewSeed)) {
+            this.previewSeed = CsArea.newSeed();
+        }
+        CsTags.set(spine, CsShapeLine.KEY.SEED, String(this.previewSeed));
+    }
 
     var made = [spine];
     var built = null;
@@ -722,14 +744,25 @@ ShapedLinesRun.prototype.commit = function() {
     // growExisting never reaches here, so a grown line keeps its trip.
     CsTags.set(spine, CsTrace.TRIP_TAG,
         CsTrace.tripFor(doc, pathFrame, this.samples, this.bays));
+    // Reuse the seed the preview already showed, when there was one --
+    // see previewEntities' own note. buildDecor mints a fresh one if
+    // this is not set (a programmatic caller with no preview phase).
+    if (spec.kind === "glyphs" && !isNull(this.previewSeed)) {
+        CsTags.set(spine, CsShapeLine.KEY.SEED, String(this.previewSeed));
+    }
 
-    var built = CsShapeLine.buildDecor(doc, spine);
+    var built = CsShapeLine.buildDecor(doc, spine, null, di);
     if (isNull(built)) {
         EAction.handleUserMessage(qsTr("%1: could not decorate that " +
             "stroke. Nothing was drawn.").arg(spec.label));
         return;
     }
     CsTags.set(spine, CsShapeLine.KEY.SIG, built.sig);
+    if (built.seed !== null && built.seed !== undefined) {
+        // A "glyphs" spine's seed, rolled once here on its very first
+        // decoration and never again -- see buildDecor's own header.
+        CsTags.set(spine, CsShapeLine.KEY.SEED, String(built.seed));
+    }
 
     var before = doc.queryAllEntities(false, true).length;
     var that = this;

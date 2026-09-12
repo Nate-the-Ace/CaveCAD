@@ -100,7 +100,7 @@ function blSampleLine(doc, x, y, length) {
  *
  *  Side +1 puts the hachures BELOW the sample line, which is the way
  *  they are drawn on a map whose low ground is toward the reader. */
-function blShapeDecor(doc, style, x, y, length) {
+function blShapeDecor(doc, style, x, y, length, di) {
     var spec = CsShapeLine.STYLES[style];
     if (isNull(spec)) {
         return { spine: null, decor: [], layer: "" };
@@ -117,9 +117,16 @@ function blShapeDecor(doc, style, x, y, length) {
     CsTags.set(spine, CsShapeLine.KEY.ID, "legend-" + style);
     CsTags.set(spine, CsShapeLine.KEY.SIDE, "1");
     CsTags.set(spine, CsShapeLine.KEY.SCALE, "1");
+    // Wall Glyphs only: a FIXED seed, not CsArea.newSeed() -- a legend
+    // sample is a picture of the pattern, and rebuilding the sheet must
+    // not reshuffle it, the same reasoning CsTileArt.SCATTER_SEED
+    // documents for an Area Fill tile.
+    if (style === "glyphs") {
+        CsTags.set(spine, CsShapeLine.KEY.SEED, "424242");
+    }
     var built = null;
     try {
-        built = CsShapeLine.buildDecor(doc, spine);
+        built = CsShapeLine.buildDecor(doc, spine, null, di);
     } catch (eBuild) {
         built = null;
     }
@@ -396,7 +403,7 @@ function buildLegendRun() {
                 row.layer, legendLayerId), row.key);
             counts.line++;
         } else if (row.kind === "shape") {
-            var shaped = blShapeDecor(doc, row.style, xText, y, sample);
+            var shaped = blShapeDecor(doc, row.style, xText, y, sample, di);
             if (shaped.spineVisible === true && !isNull(shaped.spine)) {
                 keep(blStyleAs(doc, shaped.spine, shaped.spineLayer,
                     legendLayerId), row.key);

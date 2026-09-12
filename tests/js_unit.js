@@ -66,21 +66,49 @@ if (IS_NODE) {
     };
 }
 
-// Some builds' -autostart engines don't preload library.js:
-if (typeof isNull === "undefined") {
-    isNull = function(v) {
-        if (v === undefined || v === null) {
+// Some builds' -autostart engines don't preload library.js's isNull --
+// but this build is worse: it preloads a NATIVE isNull (typeof isNull
+// is already "function", so the old `typeof isNull === "undefined"`
+// guard never fired) that does not know about Qt6's __PROXY__
+// indirection at all. Measured 2026-09-12 on a brand-new RDocument
+// with no custom blocks: doc.queryBlock("anything-that-does-not-
+// exist") answers an RBlock wrapper whose __PROXY__ target's own
+// isNullWrapper() correctly says true, but the native global isNull()
+// never looks at __PROXY__ and answers false -- "this block exists"
+// for a block that was never created. CsShapeLine's missing-block
+// import path (buildDecor) depends on isNull(doc.queryBlock(...))
+// telling the truth, so it silently never ran ensureBlock. This
+// ALWAYS installs library.js's own algorithm (recursing through
+// __PROXY__, then isNullWrapper()/data()+isNull()) over whatever is
+// already bound, native or not -- the one place this suite's tests
+// can be sure they are exercising the same logic library.js ships.
+isNull = function(v) {
+    if (v === undefined || v === null) {
+        return true;
+    }
+    try {
+        if (RSettings.getQtVersion() >= 0x060000 &&
+                v.hasOwnProperty("__PROXY__")) {
+            return isNull(v.__PROXY__);
+        }
+    } catch (eProxy) {
+    }
+    try {
+        if (typeof v.isNullWrapper === "function" &&
+                v.isNullWrapper() === true) {
             return true;
         }
-        try {
-            if (typeof v.isNull === "function") {
-                return v.isNull();
-            }
-        } catch (e) {
+    } catch (eWrap) {
+    }
+    try {
+        if (typeof v.data === "function" && typeof v.isNull === "function" &&
+                v.isNull() === true) {
+            return true;
         }
-        return false;
-    };
-}
+    } catch (ePtr) {
+    }
+    return false;
+};
 // Same reason as isNull above -- the hookup tests further down build
 // real RDocuments, and this build's -autostart entry point does not
 // always preload library.js's own copy.
@@ -17764,15 +17792,15 @@ if (!IS_NODE) {
         // The drag action must work standalone: before the panel is
         // built, and if the bridge refuses to build it at all.
         FeatureTrace.widgets = undefined;
-        near(FeatureTrace.intervalFeet(), 1.0, 1e-9,
-            "FeatureTrace.intervalFeet: no panel means one foot");
+        near(FeatureTrace.intervalFeet(), CsTrace.INTERVAL_FEET, 1e-9,
+            "FeatureTrace.intervalFeet: no panel means the suite's interval");
         // ZERO, and that is the point: no panel must mean exactly what
         // the panel's own starting row means, or a trace taken before
         // the dock is built would be thinned differently from one taken
         // after it.
         near(FeatureTrace.toleranceFraction(), 0.0, 1e-9,
             "FeatureTrace.toleranceFraction: no panel means the default, No Smoothing");
-        near(FeatureTraceRun.intervalFeet(), 1.0, 1e-9,
+        near(FeatureTraceRun.intervalFeet(), CsTrace.INTERVAL_FEET, 1e-9,
             "FeatureTraceRun.intervalFeet: reads through to the default");
         near(FeatureTraceRun.toleranceFraction(), 0.0, 1e-9,
             "FeatureTraceRun.toleranceFraction: reads through to the default");
@@ -17788,13 +17816,15 @@ if (!IS_NODE) {
             intervalEdit: { text: "2.5" },
             smoothingCombo: { currentText: "Coarse" }
         };
-        near(FeatureTrace.intervalFeet(), 1.0, 1e-9,
-            "FeatureTrace.intervalFeet: one foot, whatever a panel says");
+        near(FeatureTrace.intervalFeet(), CsTrace.INTERVAL_FEET, 1e-9,
+            "FeatureTrace.intervalFeet: the suite's interval, whatever a " +
+            "panel says");
         near(FeatureTrace.toleranceFraction(), 0.0, 1e-9,
             "FeatureTrace.toleranceFraction: no smoothing, whatever a " +
             "panel says");
-        near(FeatureTrace.INTERVAL_FEET, 1.0, 1e-9,
-            "the fixed interval is a foot of cave");
+        near(CsTrace.INTERVAL_FEET, 0.25, 1e-9,
+            "CsTrace.INTERVAL_FEET: a quarter foot, the suite's one " +
+            "sampling interval (raised from 1.0, 2026-09-12)");
         eqs(FeatureTrace.DEFAULT_SMOOTHING, "No Smoothing",
             "and the fixed smoothing is none -- thinning a traced wall " +
             "is the tool second-guessing a measurement");
@@ -21620,7 +21650,7 @@ function syntheticTiff(w, h, floats) {
         ok(CsLayers.DEFAULTS[spec.decorLayer] !== undefined,
             "STYLES." + key + ".decorLayer is a registry layer");
         ok(spec.kind === "ticks" || spec.kind === "scallops" ||
-           spec.kind === "fans",
+           spec.kind === "fans" || spec.kind === "glyphs",
             "STYLES." + key + " kind is known");
     }
     ok(CsShapeLine.STYLES["flowstone"].spineLayer === "CTRL-SHAPE-SPINE",
@@ -21738,6 +21768,72 @@ function syntheticTiff(w, h, floats) {
     ok(ps.lines.length === 0 && ps.polylines.length === 1,
         "prims: a scallop style makes one polyline");
     ok(CsShapeLine.primCount(ps) === 1, "primCount: counts the chain");
+
+    // Wall Glyphs (kind "glyphs"): offset out from the spine, rotated
+    // to the tangent, seeded jitter. A stub rand() with a fixed
+    // sequence stands in for CsArea.rng so the maths is checked without
+    // pulling CsArea into this pure half.
+    var seq = [0.5, 0.5, 0.5, 0.5];   // 0.5 -> (0.5*2-1) == 0, no jitter
+    var si = 0;
+    var noJitter = function() {
+        var v = seq[si % seq.length];
+        si++;
+        return v;
+    };
+    var gl = CsShapeLine.glyphPlacements(line, false, 5, 2, 1, 0, 0, 0,
+        noJitter);
+    ok(gl.length === 2, "glyphPlacements: stations from spacing, got " +
+        gl.length);
+    near(gl[0].x, 2.5, 1e-9,
+        "glyphPlacements: no jitter sits on the station (inset half a " +
+        "spacing, like stations())");
+    near(gl[0].y, -2, 1e-9,
+        "glyphPlacements: side +1 offsets right of travel, like ticks");
+    near(gl[0].angle, 0, 1e-9,
+        "glyphPlacements: angle follows the tangent (travelling +x)");
+    near(gl[0].scaleMul, 1, 1e-9, "glyphPlacements: no jitter, no size change");
+    var glL = CsShapeLine.glyphPlacements(line, false, 5, 2, -1, 0, 0, 0,
+        noJitter);
+    near(glL[0].y, 2, 1e-9,
+        "glyphPlacements: side -1 mirrors the offset, like ticks");
+
+    // Jitter actually moves things, and the SAME rand sequence
+    // reproduces the SAME placements -- the determinism the seed
+    // persistence contract depends on.
+    var jseq = [0.9, 0.1, 0.8, 0.2];
+    var ji = 0;
+    var jitterRand = function() {
+        var v = jseq[ji % jseq.length];
+        ji++;
+        return v;
+    };
+    var gj1 = CsShapeLine.glyphPlacements(line, false, 5, 2, 1, 1, 0.5, 0.5,
+        jitterRand);
+    ji = 0;
+    var gj2 = CsShapeLine.glyphPlacements(line, false, 5, 2, 1, 1, 0.5, 0.5,
+        jitterRand);
+    eqs(JSON.stringify(gj1), JSON.stringify(gj2),
+        "glyphPlacements: the same rand sequence reproduces the same " +
+        "placements");
+    ok(Math.abs(gj1[0].x - gl[0].x) > 1e-9 ||
+       Math.abs(gj1[0].y - gl[0].y) > 1e-9,
+        "glyphPlacements: jitter actually moves the placement");
+    ok(Math.abs(gj1[0].angle - gl[0].angle) > 1e-9,
+        "glyphPlacements: rotation jitter actually rotates it");
+    ok(Math.abs(gj1[0].scaleMul - 1) > 1e-9,
+        "glyphPlacements: scale jitter actually changes the size");
+
+    // prims routes "glyphs" through glyphPlacements via `extra`, and a
+    // caller that hands in no `extra` at all (an old call site, or a
+    // kind that never asked for jitter) gets the no-jitter fallback
+    // rather than an exception or a silent Math.random reshuffle.
+    var pg = CsShapeLine.prims(line, false, CsShapeLine.STYLES["glyphs"],
+        1, 5, 0);
+    ok(pg.lines.length === 0 && pg.polylines.length === 0,
+        "prims: a glyphs style makes no lines or polylines");
+    ok(pg.glyphs.length === 2,
+        "prims: a glyphs style's placements come back on their own key");
+    ok(CsShapeLine.primCount(pg) === 2, "primCount: counts the glyphs");
 })();
 
 // ---------------------------------------------------------------------
@@ -21947,6 +22043,15 @@ if (!IS_NODE) {
         loadRepoScript("scripts/CaveSurvey/Core/CsTrace.js");
         loadRepoScript("scripts/CaveSurvey/Core/CsStore.js");
         loadRepoScript("scripts/CaveSurvey/Core/CsTags.js");
+        // Wall Glyphs only: CsArea for the seeded rng, CsSymbols/
+        // CsSymbolStore for the catalog lookup and the missing-block
+        // import path. Loaded explicitly, not picked up from CsAll.js's
+        // own order -- this suite's engine tests load Core by a
+        // hand-written list, and a file missing from it passes silently
+        // through the try/catch every one of these has.
+        loadRepoScript("scripts/CaveSurvey/Core/CsArea.js");
+        loadRepoScript("scripts/CaveSurvey/Core/CsSymbols.js");
+        loadRepoScript("scripts/CaveSurvey/Core/CsSymbolStore.js");
         loadRepoScript("scripts/CaveSurvey/Core/CsShapeLine.js");
 
         var doc = new RDocument(new RMemoryStorage(),
@@ -22201,6 +22306,175 @@ if (!IS_NODE) {
             "frameAt: inside a band box is the profile frame");
         ok(CsProfileBox.frameAt(doc, null, { x: 50, y: 500 }) === "plan",
             "frameAt: outside every box with no region falls back to plan");
+
+        // ---- Wall Glyphs: seeded block placements, on a real doc ----
+
+        // A drawing with no SYM_BREAKDOWN block yet, and no `di` handed
+        // to buildDecor: the acceptance rule is "imported, not failed",
+        // but only when a `di` is actually offered to import through --
+        // a read-only caller (CsCheck, a preview) must not be handed an
+        // exception just because the block is not there yet.
+        CsLayers.ensure(doc, di, CsLayers.WALL_GLYPHS);
+        var spineG0 = new RLineEntity(doc, new RLineData(
+            new RVector(0, -300), new RVector(40, -300)));
+        var sidG0 = CsUuid.v4();
+        CsTags.set(spineG0, CsShapeLine.KEY.ID, sidG0);
+        CsTags.set(spineG0, CsShapeLine.KEY.STYLE, "glyphs");
+        CsTags.set(spineG0, CsShapeLine.KEY.SIDE, "1");
+        var addG0 = new RAddObjectsOperation();
+        addG0.addObject(spineG0, false);
+        di.applyOperation(addG0);
+        ok(isNull(doc.queryBlock("SYM_BREAKDOWN")),
+            "glyphs fixture: the drawing really has no SYM_BREAKDOWN yet");
+        var builtNoDi = CsShapeLine.buildDecor(doc, spineG0, null, null);
+        ok(!isNull(builtNoDi) && builtNoDi.entities.length === 0,
+            "buildDecor: missing block with no di given decorates as " +
+            "empty, not a failure");
+
+        // Now hand in a `di`, stubbing ensureBlock the way this test
+        // stubs CsTags.get elsewhere -- what is under test is that
+        // buildDecor CALLS the import path when it needs to, not
+        // CsSymbolStore's own file-reading internals (symbol_palette_
+        // run.js already covers those against the real template).
+        var realEnsureBlock = CsSymbolStore.ensureBlock;
+        var ensureCalls = 0;
+        CsSymbolStore.ensureBlock = function(edoc, edi, blockName) {
+            ensureCalls++;
+            var bop = new RAddObjectsOperation();
+            bop.addObject(new RBlock(edoc, blockName, new RVector(0, 0)),
+                false);
+            edi.applyOperation(bop);
+            return { ok: true, imported: true, error: "" };
+        };
+        var builtImported;
+        try {
+            builtImported = CsShapeLine.buildDecor(doc, spineG0, null, di);
+        } finally {
+            CsSymbolStore.ensureBlock = realEnsureBlock;
+        }
+        ok(ensureCalls === 1,
+            "buildDecor: a missing block with a di given is imported " +
+            "on demand, not refused");
+        ok(!isNull(builtImported) && builtImported.entities.length > 0,
+            "buildDecor: the placements exist once the block is there");
+        ok(builtImported.entities[0].getType() === RS.EntityBlockRef,
+            "buildDecor: a glyphs placement is a block reference");
+        ok(doc.getLayerName(builtImported.entities[0].getLayerId()) ===
+                CsLayers.WALL_GLYPHS,
+            "buildDecor: glyphs land on WALL-GLYPHS, not BREAKDOWN");
+
+        // Commit it for real (SYM_BREAKDOWN now exists, so decorate()
+        // -- the path every real workflow, including Decorate
+        // Selection, funnels through -- can run without stubbing).
+        var rG0 = CsShapeLine.decorate(doc, di, spineG0, null);
+        ok(rG0 === "decorated", "decorate: a glyphs spine decorates, got " +
+            rG0);
+        var seedTag0 = CsTags.get(spineG0, CsShapeLine.KEY.SEED);
+        ok(seedTag0 !== "", "decorate: a glyphs spine is stamped with a seed");
+
+        // Regenerating with NOTHING changed is NOT a write, and the
+        // seed on the spine is untouched -- the CalloutWrite freeze
+        // lesson and the seed-persistence rule, both at once.
+        var spineG1 = CsShapeLine.spineOf(doc, sidG0);
+        var decorBefore = CsShapeLine.decorOf(doc, sidG0);
+        var rG1 = CsShapeLine.decorate(doc, di, spineG1, null);
+        ok(rG1 === "unchanged",
+            "decorate: an unmoved glyphs spine is a no-op, got " + rG1);
+        eqs(CsTags.get(spineG1, CsShapeLine.KEY.SEED), seedTag0,
+            "decorate: a no-op regeneration does not reroll the seed");
+
+        // MOVING THE SPINE regenerates the glyphs but the seed comes
+        // along unchanged -- Nathan's acceptance rule verbatim: "moving
+        // the spine regenerates them, and the seed is not re-rolled".
+        var moved = new RLineEntity(doc, new RLineData(
+            new RVector(0, -320), new RVector(40, -320)));
+        CsTags.set(moved, CsShapeLine.KEY.ID, sidG0);
+        CsTags.set(moved, CsShapeLine.KEY.STYLE, "glyphs");
+        CsTags.set(moved, CsShapeLine.KEY.SIDE, "1");
+        CsTags.set(moved, CsShapeLine.KEY.SEED, seedTag0);
+        var delOld = new RDeleteObjectsOperation();
+        delOld.deleteObject(spineG1);
+        di.applyOperation(delOld);
+        var addMoved = new RAddObjectsOperation();
+        addMoved.addObject(moved, false);
+        di.applyOperation(addMoved);
+        var rG2 = CsShapeLine.decorate(doc, di, moved, null);
+        ok(rG2 === "decorated",
+            "decorate: a moved glyphs spine regenerates, got " + rG2);
+        eqs(CsTags.get(moved, CsShapeLine.KEY.SEED), seedTag0,
+            "decorate: regenerating after a move keeps the same seed");
+        var decorMoved = CsShapeLine.decorOf(doc, sidG0);
+        ok(decorMoved.length === decorBefore.length,
+            "decorate: the moved spine gets the same NUMBER of glyphs " +
+            "back (same seed, same station count)");
+        // Same seed, same station count, same jitter draws in the same
+        // order -- REPLACED entities land in the same relative spots
+        // shifted by the same offset the spine moved by (20 units of Y).
+        var oldPos = decorBefore[0].getData().getPosition();
+        var newPos = decorMoved[0].getData().getPosition();
+        near(newPos.x, oldPos.x, 1e-6,
+            "decorate: identical seed reproduces identical placements " +
+            "(x unchanged by a pure Y-shift of the spine)");
+        near(newPos.y, oldPos.y - 20, 1e-6,
+            "decorate: identical seed reproduces identical placements " +
+            "(y follows the spine's own 20-unit shift exactly)");
+
+        // A DIFFERENT seed gives DIFFERENT placements -- otherwise the
+        // seed would not be doing anything.
+        CsTags.set(moved, CsShapeLine.KEY.SEED, String(seedTag0 * 7 % 2147483646 + 1));
+        CsTags.remove(moved, CsShapeLine.KEY.SIG);
+        var modReseed = new RModifyObjectsOperation();
+        modReseed.addObject(moved, false);
+        di.applyOperation(modReseed);
+        var rG3 = CsShapeLine.decorate(doc, di, moved, null);
+        ok(rG3 === "decorated", "decorate: a reseeded spine regenerates");
+        var decorReseeded = CsShapeLine.decorOf(doc, sidG0);
+        var reseededPos = decorReseeded[0].getData().getPosition();
+        ok(Math.abs(reseededPos.x - newPos.x) > 1e-6 ||
+           Math.abs(reseededPos.y - (newPos.y)) > 1e-6,
+            "decorate: a different seed gives a different placement");
+
+        // ShapedFlip's side toggle works on glyphs exactly as it does
+        // on ticks: the SIDE tag is the whole contract, and the offset
+        // math above already reuses ticks()' own normal.
+        CsTags.set(moved, CsShapeLine.KEY.SIDE, "-1");
+        CsTags.remove(moved, CsShapeLine.KEY.SIG);
+        var modFlip = new RModifyObjectsOperation();
+        modFlip.addObject(moved, false);
+        di.applyOperation(modFlip);
+        var rG4 = CsShapeLine.decorate(doc, di, moved, null);
+        ok(rG4 === "decorated", "decorate: flipping side regenerates");
+        var flippedGlyphs = CsShapeLine.decorOf(doc, sidG0);
+        var flippedPos = flippedGlyphs[0].getData().getPosition();
+        ok((flippedPos.y - (-320)) * (reseededPos.y - (-320)) < 0,
+            "decorate: flipping SIDE moves the glyphs to the other " +
+            "side of the spine, the same lever ShapedFlip pulls");
+
+        // The catalogue symbol is a per-spine choice: ShapeSymbol picks
+        // a different block, and SYM_ENTRANCE (shipped, distinct
+        // geometry) proves it was actually honoured rather than always
+        // falling back to the style default.
+        var entranceOp = new RAddObjectsOperation();
+        entranceOp.addObject(new RBlock(doc, "SYM_ENTRANCE",
+            new RVector(0, 0)), false);
+        di.applyOperation(entranceOp);
+        CsTags.set(moved, CsShapeLine.KEY.SYMBOL, "SYM_ENTRANCE");
+        CsTags.remove(moved, CsShapeLine.KEY.SIG);
+        var modSym = new RModifyObjectsOperation();
+        modSym.addObject(moved, false);
+        di.applyOperation(modSym);
+        var rG5 = CsShapeLine.decorate(doc, di, moved, null);
+        ok(rG5 === "decorated", "decorate: switching the symbol regenerates");
+        var symGlyphs = CsShapeLine.decorOf(doc, sidG0);
+        var symBlockId = doc.queryBlock("SYM_ENTRANCE").getId();
+        // getBlockId() answers the entity's OWNER block (which space it
+        // lives in -- model space, id 5 here -- -1 before it is added),
+        // not the block it references. getReferencedBlockId() is the
+        // one every other reader of a block reference in this suite
+        // uses (CsCheck, CsLegend, SectionEdit) -- probed 2026-09-12
+        // after this assertion first read back Model Space's own id.
+        ok(symGlyphs[0].getData().getReferencedBlockId() === symBlockId,
+            "decorate: ShapeSymbol picks which catalog block gets placed");
     })();
 }
 

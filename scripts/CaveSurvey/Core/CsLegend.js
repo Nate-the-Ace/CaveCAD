@@ -108,10 +108,12 @@ CsLegend.AREA_SWATCH_FEET = 1.8;
  *  Long enough for a dash pattern to show at least one gap, and for
  *  EVERY shaped line to carry two ornaments -- a one-tick sample reads
  *  as a mistake rather than as a pattern. The widest spacing in
- *  CsShapeLine.STYLES is the slope fan at 6 ft, so the sample has to
- *  clear twice that; the ceiling ledge at 5 ft showed a single tick at
- *  the 8 ft this started at (seen on Truitt Cave, 2026-09-10). */
-CsLegend.SAMPLE_FEET = 14.0;
+ *  CsShapeLine.STYLES was the slope fan at 6 ft (sample cleared twice
+ *  that at 14 ft) until Wall Glyphs (2026-09-12) added spacingFeet 8 --
+ *  a single glyph would have shown at 14 ft exactly like the ceiling
+ *  ledge's 5 ft did at the 8 ft this started at (seen on Truitt Cave,
+ *  2026-09-10). Raised to clear twice the NEW widest spacing. */
+CsLegend.SAMPLE_FEET = 16.0;
 
 /**
  * How big a symbol is drawn in the legend, in feet of cave.

@@ -34,7 +34,15 @@ CsShapeLine.KEY = {
     SCALE: "ShapeScale",
     SIG: "ShapeSig",
     DECOR: "ShapeDecor",
-    FRAME: "ShapeFrame"
+    FRAME: "ShapeFrame",
+    // "glyphs" only (2026-09-12). SEED is CsArea's own AreaSeed idea,
+    // carried over verbatim: rolled once when a spine first gets this
+    // style, then never touched again by a regeneration -- the same
+    // rule that keeps a boulder pile from reshuffling under a caver who
+    // has been looking at it for weeks. SYMBOL is which catalog block
+    // the caver picked; empty means the style's own symbolDefault.
+    SEED: "ShapeSeed",
+    SYMBOL: "ShapeSymbol"
 };
 
 /**
@@ -54,6 +62,7 @@ CsShapeLine.PROFILE_TWIN[CsLayers.RIMSTONE] = CsLayers.PROFILE_RIMSTONE;
 CsShapeLine.PROFILE_TWIN[CsLayers.SLOPE] = CsLayers.PROFILE_SLOPE;
 CsShapeLine.PROFILE_TWIN[CsLayers.CTRL_SHAPE_SPINE] =
     CsLayers.CTRL_PROFILE_SHAPE_SPINE;
+CsShapeLine.PROFILE_TWIN[CsLayers.WALL_GLYPHS] = CsLayers.PROFILE_WALL_GLYPHS;
 
 /**
  * The SECTION-frame twin of every layer a style names, exactly as
@@ -76,6 +85,7 @@ CsShapeLine.SECTION_TWIN[CsLayers.RIMSTONE] = CsLayers.SECTION_RIMSTONE;
 CsShapeLine.SECTION_TWIN[CsLayers.SLOPE] = CsLayers.SECTION_SLOPE;
 CsShapeLine.SECTION_TWIN[CsLayers.CTRL_SHAPE_SPINE] =
     CsLayers.CTRL_SECTION_SHAPE_SPINE;
+CsShapeLine.SECTION_TWIN[CsLayers.WALL_GLYPHS] = CsLayers.SECTION_WALL_GLYPHS;
 
 /** A style's spine/decor layers for a frame: the STYLES entry's own
  *  layers in the plan, their PROFILE_TWIN in the elevation, their
@@ -131,6 +141,23 @@ CsShapeLine.frameOfSpine = function(spine) {
  *                  ("lines splay down"). The spine is the slope BREAK
  *                  (the top edge); like the scallop styles it is
  *                  scaffolding and hides on CTRL-SHAPE-SPINE.
+ * kind "glyphs":   a catalog SYMBOL (default the UIS "Stone blocks"
+ *                  block, SYM_BREAKDOWN) placed every spacingFeet,
+ *                  offsetFeet out from the spine on the SIDE side,
+ *                  rotated to the local tangent, with seeded jitter in
+ *                  position/rotation/size (jitterPosFeet, jitterRotDeg,
+ *                  jitterScaleFrac). Nathan's ask, 2026-09-12: "the
+ *                  stone glyph on the outside of the cave walls at
+ *                  regular intervals" -- a sixth shaped-line kind
+ *                  rather than a new engine, because the spine-walk,
+ *                  side flip and profile/section twins already exist
+ *                  and a caver's wall is usually already traced. The
+ *                  spine hides on CTRL-SHAPE-SPINE like the other two
+ *                  scaffolding kinds; the glyphs themselves are the
+ *                  only new layer, WALL-GLYPHS -- wall ornament, not
+ *                  BREAKDOWN's floor bulk, so Feature Trace's
+ *                  completeness badges and CheckMap's per-layer counts
+ *                  cannot conflate the two.
  *
  * Every layer here must be a CsLayers constant, never a literal --
  * a unit test walks this table against the registry.
@@ -171,6 +198,32 @@ CsShapeLine.STYLES = {
         kind: "fans", spacingFeet: 6.0, sizeFeet: 3.0,
         splayDeg: 22,
         spineLayer: CsLayers.CTRL_SHAPE_SPINE, decorLayer: CsLayers.SLOPE,
+        close: false
+    },
+    // NUMBERS CHOSEN FOR A 1"=50' SHEET (2026-09-12). spacingFeet 8:
+    // dense enough to read as a texture running the length of a wall,
+    // loose enough that individual glyphs (a heavier mark than a tick)
+    // do not merge into a smear the way flowstone's 3 ft scallops
+    // would at this size. offsetFeet 1.2: clear of the wall line so
+    // the glyph does not overlap it, close enough to still read as
+    // "on the wall" rather than a separate floor scatter.
+    // sizeScale, NOT sizeFeet: a symbol block is authored at roughly a
+    // 1.0-unit (foot) radius of its own origin (see
+    // tools/make_area_blocks.js), the same convention CsArea.CATALOG's
+    // BLOCKS entry scales -- 1.0 here means "native size", matching
+    // that entry's own scaleMin/scaleMax centre.
+    // jitterPosFeet 0.4, jitterRotDeg 20, jitterScaleFrac 0.25: enough
+    // that a run of glyphs does not look like one rubber stamp dragged
+    // sideways, not so much that a caver cannot tell they are looking
+    // at a regular pattern at all -- tighter than CsArea's free-
+    // scattered BLOCKS (0.7-1.5x) because these sit in a visible row
+    // along a wall rather than a loose pile on the floor.
+    "glyphs": {
+        label: "Wall Glyphs",
+        kind: "glyphs", spacingFeet: 8.0, offsetFeet: 1.2, sizeScale: 1.0,
+        jitterPosFeet: 0.4, jitterRotDeg: 20, jitterScaleFrac: 0.25,
+        symbolDefault: "SYM_BREAKDOWN",
+        spineLayer: CsLayers.CTRL_SHAPE_SPINE, decorLayer: CsLayers.WALL_GLYPHS,
         close: false
     }
 };
@@ -308,6 +361,57 @@ CsShapeLine.fans = function(pts, closed, spacing, len, side, splayDeg) {
         }
     }
     return out;
+};
+
+/**
+ * Glyph placements: one {x, y, angle, scaleMul} per station, offset
+ * `offset` out from the spine on the SIDE side (the same normal ticks()
+ * uses, so ShapedFlip's side toggle works on this kind unmodified),
+ * rotated to the local tangent, with independent seeded jitter added to
+ * position (along both the tangent and the normal), rotation and size.
+ *
+ * PURE, and `rand` is a caller-supplied () -> [0,1) generator rather
+ * than a seed -- this file never rolls dice itself (CsArea.rng/newSeed
+ * do that), so the same geometry is exercised under node with a
+ * deterministic stub and in the engine with CsArea.rng(seed).
+ *
+ * DRAW ORDER OF THE THREE rand() CALLS PER STATION IS FIXED (tangent
+ * jitter, normal jitter, rotation jitter, then scale jitter) so a given
+ * seed always reproduces the same placements regardless of caller --
+ * the same discipline CsArea.scatterPlacements documents for its own
+ * draws.
+ *
+ * Returns [{x, y, angle, scaleMul}, ...].
+ */
+CsShapeLine.glyphPlacements = function(pts, closed, spacing, offset, side,
+        jitterPos, jitterRotRad, jitterScaleFrac, rand) {
+    var st = CsShapeLine.stations(pts, closed, spacing);
+    var out = [];
+    for (var i = 0; i < st.length; i++) {
+        var nx = st[i].ty * side, ny = -st[i].tx * side;
+        var bx = st[i].x + nx * offset, by = st[i].y + ny * offset;
+        var jt = (rand() * 2 - 1) * jitterPos;
+        var jn = (rand() * 2 - 1) * jitterPos;
+        var jr = (rand() * 2 - 1) * jitterRotRad;
+        var js = (rand() * 2 - 1) * jitterScaleFrac;
+        out.push({
+            x: bx + st[i].tx * jt + nx * jn,
+            y: by + st[i].ty * jt + ny * jn,
+            angle: Math.atan2(st[i].ty, st[i].tx) + jr,
+            scaleMul: Math.max(0.05, 1 + js)
+        });
+    }
+    return out;
+};
+
+/** A rand() that never jitters -- prims' fallback when a caller asks
+ *  for a glyphs style without handing in a seeded generator (the icon-
+ *  free code paths that build primitives outside the real document, if
+ *  any ever do). No jitter is a safer default than Math.random: a
+ *  silently unseeded style would reshuffle a wall's glyphs on every
+ *  regeneration, exactly the bug CsArea's own header warns about. */
+CsShapeLine.noJitterRand = function() {
+    return 0.5;
 };
 
 /**
@@ -453,8 +557,15 @@ CsShapeLine.sideForPoint = function(pts, closed, point) {
     return cross > 0 ? -1 : 1;
 };
 
-CsShapeLine.prims = function(pts, closed, spec, side, spacing, size) {
-    var out = { lines: [], polylines: [] };
+/**
+ * `extra` carries the glyphs kind's own numbers -- offset, jitter
+ * ranges and a seeded rand() -- rather than growing the positional
+ * argument list a sixth time for the one kind that needs them. Every
+ * other kind ignores it; a caller that omits it (every existing one)
+ * behaves exactly as before.
+ */
+CsShapeLine.prims = function(pts, closed, spec, side, spacing, size, extra) {
+    var out = { lines: [], polylines: [], glyphs: [] };
     if (spec.kind === "ticks") {
         out.lines = CsShapeLine.ticks(pts, closed, spacing, size, side);
     } else if (spec.kind === "fans") {
@@ -465,6 +576,12 @@ CsShapeLine.prims = function(pts, closed, spec, side, spacing, size) {
         if (s.points.length >= 2) {
             out.polylines.push(s);
         }
+    } else if (spec.kind === "glyphs") {
+        extra = extra || {};
+        out.glyphs = CsShapeLine.glyphPlacements(pts, closed, spacing,
+            extra.offset || 0, side, extra.jitterPos || 0,
+            extra.jitterRotRad || 0, extra.jitterScaleFrac || 0,
+            extra.rand || CsShapeLine.noJitterRand);
     }
     return out;
 };
@@ -472,7 +589,7 @@ CsShapeLine.prims = function(pts, closed, spec, side, spacing, size) {
 /** How many decor ENTITIES prims produce -- the listener's cheap
  *  "is the decoration complete" count. */
 CsShapeLine.primCount = function(prims) {
-    return prims.lines.length + prims.polylines.length;
+    return prims.lines.length + prims.polylines.length + prims.glyphs.length;
 };
 
 // ---------------------------------------------------------------------
@@ -717,7 +834,21 @@ CsShapeLine.spineOf = function(doc, id) {
     return null;
 };
 
-/** Every decoration entity carrying DECOR=<id>. */
+/** Every decoration entity carrying DECOR=<id>, in ENTITY-ID order.
+ *
+ * queryAllEntities walks the document's spatial index (RSpatialIndexNavel),
+ * not creation order -- measured 2026-09-12 building Wall Glyphs: a
+ * five-glyph regeneration came back in a different scramble before and
+ * after the spine moved, even though decorate() always builds and adds
+ * entities.lines[]/glyphs[] in the same left-to-right station order.
+ * Ticks and scallops never noticed because nothing compared decor[0]'s
+ * OWN coordinates across a regeneration -- only counts and layers.
+ * Glyphs' seed-reproducibility contract does exactly that ("moving the
+ * spine regenerates them" must land the SAME station's glyph in the
+ * same relative spot), so this needs a stable order. Entity ids are
+ * assigned sequentially as buildDecor's entities are added -- sorting
+ * by id recovers the creation order the spatial index scrambled.
+ */
 CsShapeLine.decorOf = function(doc, id) {
     var want = String(id);
     var out = [];
@@ -731,6 +862,7 @@ CsShapeLine.decorOf = function(doc, id) {
             out.push(e);
         }
     }
+    out.sort(function(a, b) { return a.getId() - b.getId(); });
     return out;
 };
 
@@ -773,10 +905,19 @@ CsShapeLine.scaleOf = function(spine) {
 /**
  * Build the decoration ENTITIES for a spine's current geometry --
  * shared by the first draw (before the spine is even added) and every
- * regeneration. Returns {entities, sig, count} or null when the spine
- * cannot be decorated (unknown style, degenerate geometry).
+ * regeneration. Returns {entities, sig, count, seed} or null when the
+ * spine cannot be decorated (unknown style, degenerate geometry).
+ *
+ * `di` is optional and used only by the "glyphs" kind, to import a
+ * missing symbol block on demand (CsSymbolStore.ensureBlock, the same
+ * path the Symbol Palette and Area Fill already use). Every existing
+ * caller omits it and gets the old behaviour for the five kinds that
+ * never touch a block; a caller building glyphs with no `di` (a
+ * preview, or CsCheck's read-only proofreading pass) simply gets no
+ * glyph entities for a block this drawing does not already have,
+ * rather than an exception.
  */
-CsShapeLine.buildDecor = function(doc, spine, sample) {
+CsShapeLine.buildDecor = function(doc, spine, sample, di) {
     var styleKey = CsTags.get(spine, CsShapeLine.KEY.STYLE);
     var spec = CsShapeLine.STYLES[styleKey];
     if (isNull(spec)) {
@@ -803,8 +944,31 @@ CsShapeLine.buildDecor = function(doc, spine, sample) {
         return null;
     }
 
+    // The seed is READ here, never rolled-and-forgotten, and only for
+    // the one kind that spends it: a spine with no ShapeSeed tag yet
+    // (its first decoration) gets a fresh one, but buildDecor never
+    // WRITES it back -- that is decorate()'s and every other caller's
+    // job, the same split CsArea's SEED_KEY draws between "roll if
+    // missing" and "persist" (see AreaSync.js). A build() that both
+    // minted and forgot the seed would look identical to one that
+    // persisted it right up until the NEXT regeneration reshuffled
+    // everything.
+    var seed = null;
+    var extra;
+    if (spec.kind === "glyphs") {
+        var seedTag = parseFloat(CsTags.get(spine, CsShapeLine.KEY.SEED));
+        seed = (!isNaN(seedTag) && seedTag > 0) ? seedTag : CsArea.newSeed();
+        extra = {
+            offset: (spec.offsetFeet || 0) * perFoot * scale,
+            jitterPos: (spec.jitterPosFeet || 0) * perFoot * scale,
+            jitterRotRad: (spec.jitterRotDeg || 0) * Math.PI / 180,
+            jitterScaleFrac: spec.jitterScaleFrac || 0,
+            rand: CsArea.rng(seed)
+        };
+    }
+
     var prims = CsShapeLine.prims(sample.points, sample.closed, spec,
-        side, spacing, size);
+        side, spacing, size, extra);
     var sid = CsTags.get(spine, CsShapeLine.KEY.ID);
     var decorLayer = CsShapeLine.layersFor(spec,
         CsShapeLine.frameOfSpine(spine)).decor;
@@ -836,12 +1000,55 @@ CsShapeLine.buildDecor = function(doc, spine, sample) {
         CsTags.set(pe, CsShapeLine.KEY.DECOR, sid);
         entities.push(pe);
     }
+    if (prims.glyphs.length > 0) {
+        // Which catalog block: the spine's own choice, or the style's
+        // default (SYM_BREAKDOWN, the UIS "Stone blocks" symbol) --
+        // never a literal, so a caver's custom-library symbol works the
+        // same way a shipped one does.
+        var symKey = CsTags.get(spine, CsShapeLine.KEY.SYMBOL);
+        if (symKey === "") {
+            symKey = spec.symbolDefault;
+        }
+        var symEntry = CsSymbols.byBlock(symKey);
+        if (isNull(symEntry) && symKey !== spec.symbolDefault) {
+            symEntry = CsSymbols.byBlock(spec.symbolDefault);
+        }
+        if (!isNull(symEntry)) {
+            // A DRAWING MISSING THE BLOCK GETS IT IMPORTED, not refused
+            // -- the same CsSymbolStore.ensureBlock path the Symbol
+            // Palette and Area Fill's custom patterns already use. Only
+            // attempted when a `di` was handed in: a preview or a
+            // read-only proofreading pass (CsCheck) must not mutate the
+            // document just to draw or count what it is looking at.
+            if (isNull(doc.queryBlock(symEntry.block)) && !isNull(di)) {
+                CsSymbolStore.ensureBlock(doc, di, symEntry.block);
+            }
+            // The absolute scale a placement gets: the block's own
+            // native-size baseline (spec.sizeScale, see the STYLES
+            // comment on why this is a multiplier and not sizeFeet),
+            // times the feature's own "Size scale" dialog field (the
+            // same `scale` every other kind's spacing/size already
+            // honours), times this ONE glyph's seeded jitter.
+            var baseScale = (spec.sizeScale || 1) * scale;
+            for (i = 0; i < prims.glyphs.length; i++) {
+                var g = prims.glyphs[i];
+                var ref = CsSymbols.insert(doc, symEntry,
+                    new RVector(g.x, g.y), baseScale * g.scaleMul, g.angle,
+                    decorLayer, di);
+                if (!isNull(ref)) {
+                    CsTags.set(ref, CsShapeLine.KEY.DECOR, sid);
+                    entities.push(ref);
+                }
+            }
+        }
+    }
 
     return {
         entities: entities,
         sig: CsShapeLine.signature(sample.points, sample.closed),
         count: entities.length,
-        decorLayer: decorLayer
+        decorLayer: decorLayer,
+        seed: seed
     };
 };
 
@@ -862,7 +1069,7 @@ CsShapeLine.decorate = function(doc, di, spine, group) {
     if (sid === "") {
         return "failed";
     }
-    var built = CsShapeLine.buildDecor(doc, spine);
+    var built = CsShapeLine.buildDecor(doc, spine, null, di);
     if (isNull(built)) {
         return "failed";
     }
@@ -896,8 +1103,18 @@ CsShapeLine.decorate = function(doc, di, spine, group) {
         grouped(add);
     });
 
-    // restamp the signature on the spine, same group
+    // restamp the signature on the spine, same group -- and, for a
+    // "glyphs" spine (built.seed is null for every other kind), the
+    // seed buildDecor minted or read. This only runs on an actual
+    // regeneration (the "unchanged" branch above already returned), so
+    // a spine's FIRST decoration persists the seed it was built with
+    // and every later one persists that same value right back --
+    // buildDecor reads whatever is already on the tag before minting a
+    // fresh one, so this never rerolls a spine that already has one.
     CsTags.set(spine, CsShapeLine.KEY.SIG, built.sig);
+    if (built.seed !== null && built.seed !== undefined) {
+        CsTags.set(spine, CsShapeLine.KEY.SEED, String(built.seed));
+    }
     var mod = new RModifyObjectsOperation();
     mod.addObject(spine, false);
     grouped(mod);

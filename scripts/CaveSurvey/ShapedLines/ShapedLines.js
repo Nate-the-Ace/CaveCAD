@@ -7,7 +7,9 @@
 // per-style draw buttons beside it:
 //
 //   LedgeFloorDraw / LedgeCeilingDraw / PitDraw / FlowstoneDraw /
-//   RimstoneDraw  -- freehand draw, one button per NSS symbol
+//   RimstoneDraw / SlopeDraw / GlyphsDraw -- freehand draw, one button
+//                 per NSS symbol (GlyphsDraw places a catalog block,
+//                 default the stone-blocks glyph, along the stroke)
 //   ShapedFlip    -- mirror ornament to the other side of the spine
 //   ShapedSync    -- manual regeneration fallback
 //   ShapedLinesListener -- not a tool; installed from CaveSurvey.js
@@ -31,6 +33,7 @@ include(includeBasePath + "/PitDraw.js");
 include(includeBasePath + "/FlowstoneDraw.js");
 include(includeBasePath + "/RimstoneDraw.js");
 include(includeBasePath + "/SlopeDraw.js");
+include(includeBasePath + "/GlyphsDraw.js");
 include(includeBasePath + "/ShapedFlip.js");
 include(includeBasePath + "/ShapedSync.js");
 
@@ -43,7 +46,7 @@ ShapedLines.prototype = new EAction();
 /** Style keys in the order the dialog offers them -- the draw-button
  *  order, so the two lists read the same. */
 ShapedLines.STYLE_ORDER = ["floorledge", "ceilingledge", "pit",
-    "flowstone", "rimstone", "slope"];
+    "flowstone", "rimstone", "slope", "glyphs"];
 
 /**
  * Ask which style/side/scale to dress the selection in.
@@ -77,6 +80,26 @@ ShapedLines.askOptions = function() {
         scaleEdit.text = "1";
         grid.addWidget(scaleEdit, 2, 1);
 
+        // Glyph picker: "glyphs" only, but shown for every style, the
+        // same way the Areas panel's Scale/Density boxes sit beside
+        // every pattern tile whether or not that pattern reads them --
+        // one control surface rather than one that appears and
+        // disappears under the caver's cursor as the style combo
+        // changes. Ignored for every style but "glyphs".
+        grid.addWidget(new QLabel(qsTr("Glyph:")), 3, 0);
+        var symbolCombo = new QComboBox();
+        var symbols = CsSymbols.merged().entries;
+        var glyphsDefault = CsShapeLine.STYLES["glyphs"].symbolDefault;
+        var defaultSymbolIdx = 0;
+        for (var s = 0; s < symbols.length; s++) {
+            symbolCombo.addItem(symbols[s].nss + " (" + symbols[s].block + ")");
+            if (symbols[s].block === glyphsDefault) {
+                defaultSymbolIdx = s;
+            }
+        }
+        symbolCombo.currentIndex = defaultSymbolIdx;
+        grid.addWidget(symbolCombo, 3, 1);
+
         var bar = new QHBoxLayout();
         var okBtn = new QPushButton(qsTr("OK"));
         var cancelBtn = new QPushButton(qsTr("Cancel"));
@@ -97,6 +120,7 @@ ShapedLines.askOptions = function() {
         var idx = styleCombo.currentIndex;
         var sideIdx = sideCombo.currentIndex;
         var scale = parseFloat(scaleEdit.text);
+        var symbolIdx = symbolCombo.currentIndex;
         destrDialog(dlg);
         if (answer === 0) {
             return null;
@@ -105,10 +129,12 @@ ShapedLines.askOptions = function() {
             styleKey: ShapedLines.STYLE_ORDER[
                 (idx >= 0 && idx < ShapedLines.STYLE_ORDER.length) ? idx : 0],
             side: (sideIdx === 1) ? -1 : 1,
-            scale: (!isNaN(scale) && scale > 0) ? scale : 1
+            scale: (!isNaN(scale) && scale > 0) ? scale : 1,
+            symbol: (symbolIdx >= 0 && symbolIdx < symbols.length) ?
+                symbols[symbolIdx].block : glyphsDefault
         };
     } catch (e) {
-        return { styleKey: "floorledge", side: 1, scale: 1 };
+        return { styleKey: "floorledge", side: 1, scale: 1, symbol: "" };
     }
 };
 
@@ -152,6 +178,13 @@ ShapedLines.dressOne = function(doc, di, entity, opts, group) {
     CsTags.set(entity, CsShapeLine.KEY.SIDE, String(side));
     CsTags.set(entity, CsShapeLine.KEY.SCALE, String(opts.scale));
     CsTags.set(entity, CsShapeLine.KEY.FRAME, frame);
+    // "glyphs" only reads this tag (buildDecor falls back to the
+    // style's symbolDefault for every other kind, or when it is
+    // empty), so setting it unconditionally for the other five kinds
+    // costs nothing and keeps this one write site simple.
+    if (!isNull(opts.symbol) && opts.symbol !== "") {
+        CsTags.set(entity, CsShapeLine.KEY.SYMBOL, opts.symbol);
+    }
     var mod = new RModifyObjectsOperation();
     mod.addObject(entity, false);
     if (group >= 0) {
@@ -281,6 +314,7 @@ ShapedLines.init = function(basePath) {
     FlowstoneDraw.init(basePath);
     RimstoneDraw.init(basePath);
     SlopeDraw.init(basePath);
+    GlyphsDraw.init(basePath);
     ShapedFlip.init(basePath);
     ShapedSync.init(basePath);
 };

@@ -169,6 +169,12 @@ CsLayers.LEDGE_CEILING = "LEDGE-CEILING";
 CsLayers.FLOWSTONE = "FLOWSTONE";
 CsLayers.RIMSTONE = "RIMSTONE";
 CsLayers.SLOPE = "SLOPE";
+// Wall Glyphs (2026-09-12): a catalog symbol (default the stone-blocks
+// glyph) walked along a spine like the ticks above, but its own layer
+// rather than BREAKDOWN -- BREAKDOWN is floor bulk and this is wall
+// ornament, and folding them together would conflate the two in
+// Feature Trace's completeness badges and CheckMap's per-layer counts.
+CsLayers.WALL_GLYPHS = "WALL-GLYPHS";
 CsLayers.CTRL_SHAPE_SPINE = "CTRL-SHAPE-SPINE";
 // The profile-frame twins: the SAME shaped-line buttons draw these
 // when the stroke lands in the elevation (decided by location -- see
@@ -180,6 +186,7 @@ CsLayers.PROFILE_LEDGE_CEILING = "PROFILE-LEDGE-CEILING";
 CsLayers.PROFILE_FLOWSTONE = "PROFILE-FLOWSTONE";
 CsLayers.PROFILE_RIMSTONE = "PROFILE-RIMSTONE";
 CsLayers.PROFILE_SLOPE = "PROFILE-SLOPE";
+CsLayers.PROFILE_WALL_GLYPHS = "PROFILE-WALL-GLYPHS";
 CsLayers.CTRL_PROFILE_SHAPE_SPINE = "CTRL-PROFILE-SHAPE-SPINE";
 
 // ---------------------------------------------------------------------
@@ -310,6 +317,13 @@ CsLayers.DEFAULTS = {
     // reads heavier than the wall beside it.
     "SLOPE": ["peru", "CONTINUOUS", "Weight009"],
     "FLOOR-SLOPE": ["peru", "CONTINUOUS", "Weight009"],
+    // Wall Glyphs: gray, the same colour BREAKDOWN uses, because colour
+    // says WHAT a thing is (stone) and this is the same material as the
+    // floor's breakdown, just placed as wall ornament rather than floor
+    // bulk -- Weight018 is the placed-SYMBOL weight (matching
+    // BREAKDOWN's own row below), not BREAKDOWN-BOUNDARY's texture
+    // weight, because a glyph IS the symbol, not a boundary around one.
+    "WALL-GLYPHS": ["gray", "CONTINUOUS", "Weight018"],
     // Breakdown is bulk, not boundary: gray so a room full of it does
     // not shout over the walls containing it.
     "BREAKDOWN": ["gray", "CONTINUOUS", "Weight018"],
@@ -559,6 +573,7 @@ CsLayers.PROFILE_NOTES_NAME = "PROFILE-NOTES-NAME";
 CsLayers.SECTION_NOTES_NAME = "SECTION-NOTES-NAME";
 CsLayers.SECTION_RIMSTONE = "SECTION-RIMSTONE";
 CsLayers.SECTION_SLOPE = "SECTION-SLOPE";
+CsLayers.SECTION_WALL_GLYPHS = "SECTION-WALL-GLYPHS";
 CsLayers.SECTION_TEXT_LABELS = "SECTION-TEXT-LABELS";
 CsLayers.SECTION_TEXT_NOTES = "SECTION-TEXT-NOTES";
 CsLayers.PROFILE_WALLS_SURVEYED = "PROFILE-WALLS-SURVEYED";

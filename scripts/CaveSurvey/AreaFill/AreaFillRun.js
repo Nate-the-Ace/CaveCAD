@@ -63,6 +63,11 @@ AreaFillRun.SAMPLE_PIXELS = 6;
  *  by. */
 AreaFillRun.MIN_AREA = 1.0;
 
+/** How hard a traced boundary is thinned, as a fraction of the sampling
+ *  step -- the same shape ShapedLinesRun uses, so one idea of "smoothing"
+ *  covers both. */
+AreaFillRun.TOLERANCE_FRACTION = 0.05;
+
 /**
  * Above this many estimated elements, commit() stops and hands back a
  * warning instead of drawing -- the "this is going to draw a lot" guard
@@ -252,8 +257,19 @@ AreaFillRun.commit = function(doc, di, points, key, opts) {
     }
 
     var unit = CsUnits.fromDrawingUnit(doc.getUnit(), RS);
+    // The suite's one sampling interval, not spacingFor alone -- that is
+    // units-per-foot and using it raw meant a one-foot boundary interval
+    // whatever the traces around it were doing (fixed 2026-09-12).
+    //
+    // The tolerance is a FRACTION of the spacing for the same reason the
+    // other two traces do it that way: 0.05 drawing units was a twentieth
+    // of a foot-long step and would have become a fifth of a quarter-foot
+    // one, thinning four times harder exactly when the point was to keep
+    // more detail.
+    var spacing = CsTrace.sampleSpacing(unit);
     var verts = CsTrace.reduce(
-        CsTrace.resample(points, CsTrace.spacingFor(unit)), 0.05);
+        CsTrace.resample(points, spacing),
+        spacing * AreaFillRun.TOLERANCE_FRACTION);
 
     // A caver's stroke (and this suite's own test fixtures) commonly
     // repeats the first point at the end to show the loop closing --
