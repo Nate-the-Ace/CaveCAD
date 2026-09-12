@@ -3174,8 +3174,19 @@ SurveyNotebook.buildDock = function(appWin) {
 
     // ---- trip header ------------------------------------------------
     var head1 = new QHBoxLayout();
-    head1.addWidget(new QLabel("Survey"), 0, 0);
+    // "TRIP OBJECTIVE", NOT "SURVEY". Every trip in a drawing belongs to
+    // the cave that drawing is of, so a field labelled "Survey" invites
+    // the cave's name -- typed again on every trip, which names nothing.
+    // What earns a field is what made THIS trip different: where the
+    // party went and what they meant to do. That is also what the 3D
+    // view's trip legend shows, and a legend reading the cave's name
+    // nine times has told the reader nothing.
+    head1.addWidget(new QLabel("Trip Objective"), 0, 0);
     w.nameEdit = SurveyNotebook.upperCase(w, new QLineEdit());
+    w.nameEdit.placeholderText = "what this trip set out to do";
+    w.nameEdit.toolTip = "What made this trip its own -- the lead " +
+        "pushed, the area mapped. Not the cave's name: every trip here " +
+        "is already in this cave.";
     head1.addWidget(w.nameEdit, 1, 0);
     head1.addWidget(new QLabel("Date"), 0, 0);
     w.dateEdit = new QLineEdit();
