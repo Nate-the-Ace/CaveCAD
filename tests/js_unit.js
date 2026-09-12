@@ -20689,9 +20689,25 @@ ok(!CsCave.isPreviewName("entrance.jpg"),
     "somebody's photograph is not the preview");
 ok(!CsCave.isPreviewName("preview.png"),
     "a bare preview.png is a photograph somebody named that");
-eqs(CsCave.SUBFOLDERS.join(","), "scans,PDF,images,backup",
-    "a cave project keeps sketches, maps, pictures and previous versions");
+eqs(CsCave.SUBFOLDERS.join(","), "scans,PDF,images,backup,lidar",
+    "a cave project keeps sketches, maps, pictures, previous versions " +
+    "and LiDAR captures");
 eqs(CsCave.BACKUP, "backup", "the backup folder is named plainly");
+eqs(CsCave.LIDAR, "lidar", "captures live in lidar/, never in scans/");
+
+// A capture is recognised by its extension. Polycam's free export is
+// glTF, so .glb and .gltf are the two that matter most.
+ok(CsCave.isCaptureName("Truitt Entrance Room.glb"),
+    "a .glb is a capture");
+ok(CsCave.isCaptureName("room.GLTF"),
+    "extension matching does not care about case");
+ok(CsCave.isCaptureName("cloud.laz"), "a point cloud is a capture");
+ok(!CsCave.isCaptureName("9-7-25 page 3.jpg"),
+    "a scanned notebook page is not a capture");
+ok(!CsCave.isCaptureName("Truitt Cave.dxf"),
+    "the drawing itself is not a capture");
+ok(!CsCave.isCaptureName("notes.glb.txt"),
+    "the suffix has to be at the end");
 
 // ---------------------------------------------------------------------
 // Shelf triage -- health, badges, declination drift

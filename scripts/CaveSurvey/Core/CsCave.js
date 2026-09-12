@@ -11,6 +11,7 @@
 //       scans/                 scanned hand sketches
 //       PDF/                   produced maps
 //       images/                photographs, and the map's own preview
+//       lidar/                 LiDAR captures
 //
 // PDF/ is where finished maps are kept, and nothing in the suite ever
 // writes one: plotting a sheet is the cartographer's job, and Package
@@ -47,7 +48,24 @@ CsCave.IMAGES = "images";
 // has been taken yet -- an empty backup/ says the guard exists; a
 // missing one says nothing.
 CsCave.BACKUP = "backup";
-CsCave.SUBFOLDERS = [CsCave.SCANS, CsCave.PDF, CsCave.IMAGES, CsCave.BACKUP];
+
+// LiDAR captures -- Polycam and the like.
+//
+// CALLED CAPTURES, NEVER SCANS. A scan in this suite is a scanned
+// notebook page: SketchScans, eleven CsScan* files, the shared browser
+// widget, the scans/ folder. One word for both would make every
+// sentence after this one ambiguous, so the phone's word loses and the
+// surveyor's word keeps its meaning.
+//
+// A CAPTURE IS LOCATION DATA -- a metric record of one specific place,
+// and the file may carry GPS and capture metadata besides. So lidar/ is
+// treated exactly like scans/ and images/ when a project is packaged:
+// left out of a sanitized package unless somebody asks for it by name.
+// See PackageCave.js.
+CsCave.LIDAR = "lidar";
+
+CsCave.SUBFOLDERS = [CsCave.SCANS, CsCave.PDF, CsCave.IMAGES,
+                     CsCave.BACKUP, CsCave.LIDAR];
 
 // The map's own preview lives in images/ with the photographs, under a
 // name derived from the drawing, so a person looking in that folder can
@@ -64,6 +82,32 @@ CsCave.PREVIEW_SUFFIX = " preview.png";
 /** The images folder for a cave folder, as it exists, or null. */
 CsCave.imagesFolderOf = function(folder) {
     return CsCave.findSubfolder(folder, CsCave.IMAGES);
+};
+
+/** The lidar folder for a cave folder, as it exists, or null. */
+CsCave.lidarFolderOf = function(folder) {
+    return CsCave.findSubfolder(folder, CsCave.LIDAR);
+};
+
+// What a capture file looks like. Polycam's free export is glTF, which
+// comes as either a .glb (one file, geometry and textures packed) or a
+// .gltf beside its .bin and textures; the rest are here because a
+// surveyor who paid for the other exports should not find their files
+// invisible to the packager.
+CsCave.CAPTURE_SUFFIXES = [".glb", ".gltf", ".obj", ".ply", ".stl",
+                           ".las", ".laz", ".e57", ".xyz", ".pts"];
+
+/** Whether a file name looks like a LiDAR capture. */
+CsCave.isCaptureName = function(name) {
+    var lower = String(name).toLowerCase();
+    for (var i = 0; i < CsCave.CAPTURE_SUFFIXES.length; i++) {
+        var suffix = CsCave.CAPTURE_SUFFIXES[i];
+        if (lower.length >= suffix.length &&
+            lower.lastIndexOf(suffix) === lower.length - suffix.length) {
+            return true;
+        }
+    }
+    return false;
 };
 
 /**
@@ -380,6 +424,29 @@ CsCave.imageFiles = function(folder, includePreview) {
             if (n.indexOf(".") === 0) { continue; }
             if (includePreview !== true && CsCave.isPreviewName(n)) { continue; }
             out.push(images + "/" + n);
+        }
+    } catch (e) {
+    }
+    return out;
+};
+
+// Every capture in a cave's lidar folder, as full paths, name-sorted.
+// A .gltf's companion .bin and textures are NOT listed separately: they
+// are parts of the capture the .gltf names, and a packager that offered
+// them as loose files would invite half a capture being copied.
+CsCave.captureFiles = function(folder) {
+    var out = [];
+    if (typeof QDir === "undefined") { return out; }
+    var lidar = CsCave.lidarFolderOf(folder);
+    if (lidar === null) { return out; }
+    try {
+        var dir = new QDir(lidar);
+        var names = dir.entryList([], QDir.Files | QDir.NoDotAndDotDot, QDir.Name);
+        for (var i = 0; i < names.length; i++) {
+            var n = String(names[i]);
+            if (n.indexOf(".") === 0) { continue; }
+            if (!CsCave.isCaptureName(n)) { continue; }
+            out.push(lidar + "/" + n);
         }
     } catch (e) {
     }

@@ -226,6 +226,17 @@ PackageCave.contentsOf = function(record) {
             return qsTr("photograph — re-encoded, EXIF removed — %1").arg(size);
         });
 
+    // A LiDAR capture is a metric record of one specific place, and the
+    // file may carry GPS and capture metadata besides -- so it is out of
+    // a sanitized package by default, exactly like a sketch or a
+    // photograph, and goes in only when somebody ticks it by name.
+    folderGroup("capture", CsCave.LIDAR + "/",
+        CsCave.captureFiles(record.folder), "capture",
+        { sanitized: false, full: true },
+        function(path, size) {
+            return qsTr("LiDAR capture — records the place itself — %1").arg(size);
+        });
+
     return groups;
 };
 
@@ -740,6 +751,17 @@ PackageCave.build = function(record, options) {
         if (scanCount > 0) {
             contents.push({ path: CsCave.SCANS + "/ (" + scanCount + ")",
                 note: "hand sketches" });
+        }
+    }
+
+    var captures = chosen("capture");
+    if (captures.length > 0) {
+        var captureCount = PackageCave.copyInto(captures,
+            staging + "/" + CsCave.LIDAR);
+        if (captureCount > 0) {
+            contents.push({ path: CsCave.LIDAR + "/ (" + captureCount + ")",
+                note: "LiDAR captures, copied as they are — nothing here " +
+                    "reads or strips their metadata" });
         }
     }
 
