@@ -23221,40 +23221,223 @@ eqs(CsSymbolStore.AREA_MARKER_TAGS.custom, "AreaCustom",
 })();
 
 // ---------------------------------------------------------------------
-// CsPanel.gridSpans -- where each section sits when a stack lays out
-// as a grid instead of a single column.
+// CsPanel.gridPlan -- where each section sits when a stack lays out as
+// a grid instead of a single column, folded ones included. Every case
+// here is one of the worked examples from the 2026-09-12 reversal
+// ("when I minimize a section, I want the others to grow into the
+// space") plus the plain unfolded case gridSpans used to answer alone.
 // ---------------------------------------------------------------------
 
-(function testGridSpans() {
-    function spans(n, c) { return JSON.stringify(CsPanel.gridSpans(n, c)); }
-    eqs(spans(1, 2), JSON.stringify([{row:0,col:0,span:2}]),
-        "gridSpans: one section takes the whole width");
-    eqs(spans(2, 2), JSON.stringify([{row:0,col:0,span:1},
-                                     {row:0,col:1,span:1}]),
-        "gridSpans: two sections share a row");
-    eqs(spans(3, 2), JSON.stringify([{row:0,col:0,span:1},
-                                     {row:0,col:1,span:1},
-                                     {row:1,col:0,span:2}]),
-        "gridSpans: a lone third section spans the width");
-    eqs(spans(4, 2), JSON.stringify([{row:0,col:0,span:1},
-                                     {row:0,col:1,span:1},
-                                     {row:1,col:0,span:1},
-                                     {row:1,col:1,span:1}]),
-        "gridSpans: four sections make two full rows");
-    eqs(spans(5, 2), JSON.stringify([{row:0,col:0,span:1},
-                                     {row:0,col:1,span:1},
-                                     {row:1,col:0,span:1},
-                                     {row:1,col:1,span:1},
-                                     {row:2,col:0,span:2}]),
-        "gridSpans: a lone fifth section spans the width");
+(function testGridPlan() {
+    function items(foldedFlags) {
+        var out = [];
+        for (var i = 0; i < foldedFlags.length; i++) {
+            out.push({ folded: foldedFlags[i] });
+        }
+        return out;
+    }
+    function plan(foldedFlags, cols) {
+        return JSON.stringify(CsPanel.gridPlan(items(foldedFlags), cols));
+    }
 
-    eqs(spans(3, 2.9), spans(3, 2),
-        "gridSpans: a fractional column count is floored, not handed " +
-        "to the bridge as a non-integer column index");
+    eqs(plan([false, false, false], 2),
+        JSON.stringify([
+            {row:0,col:0,span:1,stretch:1},
+            {row:0,col:1,span:1,stretch:1},
+            {row:1,col:0,span:2,stretch:1}]),
+        "gridPlan: none folded -- unchanged from the old gridSpans shape");
+
+    eqs(plan([false, true, false], 2),
+        JSON.stringify([
+            {row:0,col:0,span:2,stretch:1},
+            {row:1,col:0,span:2,stretch:0},
+            {row:2,col:0,span:2,stretch:1}]),
+        "gridPlan: middle folded -- first section alone on row 0 " +
+        "(the next one is folded), the fold gets a stretch-0 strip on " +
+        "row 1 in its own order position, third spans row 2");
+
+    eqs(plan([true, false, false], 2),
+        JSON.stringify([
+            {row:0,col:0,span:2,stretch:0},
+            {row:1,col:0,span:1,stretch:1},
+            {row:1,col:1,span:1,stretch:1}]),
+        "gridPlan: first folded -- strip on row 0, the other two share " +
+        "row 1 same as if the strip were never there");
+
+    eqs(plan([true, true, true], 2),
+        JSON.stringify([
+            {row:0,col:0,span:2,stretch:0},
+            {row:1,col:0,span:2,stretch:0},
+            {row:2,col:0,span:2,stretch:0}]),
+        "gridPlan: all folded -- three strips, no row claims height");
+
+    eqs(plan([false, false, true], 2),
+        JSON.stringify([
+            {row:0,col:0,span:1,stretch:1},
+            {row:0,col:1,span:1,stretch:1},
+            {row:1,col:0,span:2,stretch:0}]),
+        "gridPlan: last folded -- first two share row 0, the fold " +
+        "strips row 1");
+
+    // Order preservation AND cell shape, checked across every 5-item
+    // fold combination at once rather than trusting the five
+    // hand-picked cases above to have caught a regression by accident.
+    // A regression that scrambles col/span/stretch while leaving row
+    // order untouched would sail through an order-only check, so this
+    // asserts the rest of the contract too: a folded item is always a
+    // full-width strip with no stretch, and no two items ever claim the
+    // same {row, col} cell.
+    var orderOk = true;
+    var foldedShapeOk = true;
+    var noOverlap = true;
+    for (var mask = 0; mask < 32; mask++) {
+        var flags = [];
+        for (var b = 0; b < 5; b++) {
+            flags.push((mask & (1 << b)) !== 0);
+        }
+        var p = CsPanel.gridPlan(items(flags), 2);
+        var seenCells = {};
+        for (var k = 0; k < p.length; k++) {
+            if (k > 0 && p[k].row < p[k - 1].row) {
+                orderOk = false;
+            }
+            if (flags[k] === true &&
+                    (p[k].col !== 0 || p[k].span !== 2 ||
+                     p[k].stretch !== 0)) {
+                foldedShapeOk = false;
+            }
+            var cell = p[k].row + "," + p[k].col;
+            if (seenCells[cell] === true) {
+                noOverlap = false;
+            }
+            seenCells[cell] = true;
+        }
+    }
+    ok(orderOk,
+        "gridPlan: order is always preserved -- item i never lands " +
+        "above item i-1, for every fold pattern of 5 items");
+    ok(foldedShapeOk,
+        "gridPlan: every folded item is a full-width, unstretched strip " +
+        "({col:0, span:columns, stretch:0}), for every fold pattern");
+    ok(noOverlap,
+        "gridPlan: no two items in the same plan ever claim the same " +
+        "{row, col} cell, for every fold pattern");
 })();
 
 // ---------------------------------------------------------------------
-// CsPanel.relayout (grid mode) -- the failure paths gridSpans itself
+// CsPanel.isFolded -- the live read relayout uses instead of the stale
+// `section.open` flag (which CsPanel.section captures once and
+// connectSection's closure never writes back to).
+// ---------------------------------------------------------------------
+
+(function testIsFolded() {
+    // `open` is the real source of truth and wins even when a stale or
+    // simply wrong `host.visible` disagrees -- exactly the shape of the
+    // 2026-09-12 bug, where `host.visible` read false for every section
+    // before the dock was ever shown regardless of what `open` said.
+    ok(CsPanel.isFolded({ open: false, host: { visible: true } }) === true,
+        "isFolded: open:false reads as folded even if a not-yet-shown " +
+        "host still reports visible:true");
+    ok(CsPanel.isFolded({ open: true, host: { visible: false } }) === false,
+        "isFolded: open:true reads as NOT folded even though the host " +
+        "is not actually visible yet -- the exact bug this guards");
+    ok(CsPanel.isFolded({ open: true, host: null }) === false,
+        "isFolded: open:true with no host at all still reads as not " +
+        "folded");
+
+    // No `open` field at all (a bare mock never built by CsPanel.section)
+    // falls back to host.visible, same as before this existed.
+    ok(CsPanel.isFolded({ host: { visible: false } }) === true,
+        "isFolded: no open field -- falls back to a hidden host reading " +
+        "as folded");
+    ok(CsPanel.isFolded({ host: { visible: true } }) === false,
+        "isFolded: no open field -- falls back to a visible host reading " +
+        "as not folded");
+    ok(CsPanel.isFolded({ host: null }) === false,
+        "isFolded: no open field and no host at all reads as not folded " +
+        "rather than throwing");
+    ok(CsPanel.isFolded(null) === false,
+        "isFolded: a null section reads as not folded");
+})();
+
+// ---------------------------------------------------------------------
+// CsPanel.connectSection -- folding a STACKED section relayouts; an
+// UNSTACKED one (no section.stack) folds exactly as it always has and
+// asks for nothing. Exercised against a mock header/host rather than a
+// real QPushButton: this bridge has no way to simulate a click, so the
+// slot connectSection wires is captured directly and invoked by hand --
+// what it does with host.visible and section.stack is the same either
+// way.
+// ---------------------------------------------------------------------
+
+(function testConnectSectionRelayout() {
+    function mockHeader() {
+        var slot = null;
+        return {
+            text: "",
+            clicked: { connect: function(fn) { slot = fn; } },
+            fire: function() { slot(); }
+        };
+    }
+
+    // Stacked: folding calls back into CsPanel.relayout with THIS
+    // section's own stack.
+    (function() {
+        var header = mockHeader();
+        var host = { visible: true };
+        var section = { host: host, header: header, stack: null };
+        CsPanel.connectSection(header, host, "Trace", "unusedKey", section);
+        var stack = { marker: "Trace's stack" };
+        section.stack = stack;
+
+        var relayoutCalls = [];
+        var realRelayout = CsPanel.relayout;
+        CsPanel.relayout = function(s) { relayoutCalls.push(s); };
+
+        header.fire();   // fold
+        ok(host.visible === false,
+            "connectSection (stacked): folding hides the host");
+        eqs(relayoutCalls.length, 1,
+            "connectSection (stacked): folding relayouts exactly once");
+        ok(relayoutCalls[0] === stack,
+            "connectSection (stacked): relayout gets the section's OWN " +
+            "stack");
+
+        header.fire();   // unfold
+        ok(host.visible === true,
+            "connectSection (stacked): unfolding restores the host");
+        eqs(relayoutCalls.length, 2,
+            "connectSection (stacked): unfolding relayouts too");
+
+        CsPanel.relayout = realRelayout;
+    })();
+
+    // Unstacked: no section.stack, so folding never calls relayout --
+    // the pre-2026-09-12 behaviour, preserved for a section built
+    // outside any CsPanel.stack.
+    (function() {
+        var header = mockHeader();
+        var host = { visible: true };
+        // section omitted entirely -- connectSection must not require it
+        CsPanel.connectSection(header, host, "Lone", "unusedKey");
+
+        var relayoutCalls = 0;
+        var realRelayout = CsPanel.relayout;
+        CsPanel.relayout = function() { relayoutCalls++; };
+
+        header.fire();
+        ok(host.visible === false,
+            "connectSection (unstacked): still folds the host");
+        eqs(relayoutCalls, 0,
+            "connectSection (unstacked): never asks for a relayout -- " +
+            "there is no stack to hand a row back to");
+
+        CsPanel.relayout = realRelayout;
+    })();
+})();
+
+// ---------------------------------------------------------------------
+// CsPanel.relayout (grid mode) -- the failure paths gridPlan itself
 // cannot exercise, proven against a mock layout so they run everywhere
 // including the node fallback.
 // ---------------------------------------------------------------------
@@ -23263,12 +23446,18 @@ eqs(CsSymbolStore.AREA_MARKER_TAGS.custom, "AreaCustom",
 // throws, and wherever, every section still gets SOME cell.
 
 (function testGridRelayoutRecovery() {
-    function mockBox(name) {
-        return { box: { name: name }, header: null, title: name };
+    // `folded` is optional: omitted (or false) gives a section with no
+    // `host` at all, same as every existing caller of this mock, which
+    // CsPanel.isFolded reads as not folded rather than throwing.
+    function mockBox(name, folded) {
+        return { box: { name: name }, header: null, title: name,
+            host: (folded === true) ? { visible: false } :
+                (folded === false ? { visible: true } : null) };
     }
     function mockLayout(opts) {
         opts = opts || {};
         var calls = { removed: [], added: [] };
+        var stretches = {};
         // Only the FIRST addWidget on a given box can be made to fail --
         // it stands in for the real grid cell being refused, once, not
         // for a bridge that refuses that box outright forever (which
@@ -23276,6 +23465,7 @@ eqs(CsSymbolStore.AREA_MARKER_TAGS.custom, "AreaCustom",
         var addAttempts = {};
         return {
             calls: calls,
+            stretches: stretches,
             removeWidget: function(box) {
                 if (opts.failRemove === true) {
                     throw new Error("remove refused: " + box.name);
@@ -23291,6 +23481,9 @@ eqs(CsSymbolStore.AREA_MARKER_TAGS.custom, "AreaCustom",
                 }
                 calls.added.push({ name: box.name, row: row, col: col,
                     rowSpan: rowSpan, colSpan: colSpan });
+            },
+            setRowStretch: function(row, stretch) {
+                stretches[row] = stretch;
             }
         };
     }
@@ -23310,7 +23503,7 @@ eqs(CsSymbolStore.AREA_MARKER_TAGS.custom, "AreaCustom",
         return null;
     }
 
-    // Base case, nothing fails: the 5-argument shape matches gridSpans.
+    // Base case, nothing fails: the 5-argument shape matches gridPlan.
     (function() {
         var layout = mockLayout();
         var stack = CsPanel.stack(layout, "unused", 0, null, 2);
@@ -23358,6 +23551,81 @@ eqs(CsSymbolStore.AREA_MARKER_TAGS.custom, "AreaCustom",
         eqs(addedNames(layout).join(","), "A,B,C",
             "grid relayout: a bridge with no removeWidget still gets " +
             "every section re-added, not none of them");
+    })();
+
+    // Folding hands its row's stretch to the rest -- 2026-09-12's whole
+    // point. B folded: A alone on row 0 (stretch 1), B's strip on row 1
+    // (stretch 0), C spans row 2 (stretch 1).
+    (function() {
+        var layout = mockLayout();
+        var stack = CsPanel.stack(layout, "unused", 0, null, 2);
+        CsPanel.stackAdd(stack, mockBox("A", false), "A");
+        CsPanel.stackAdd(stack, mockBox("B", true), "B");
+        CsPanel.stackAdd(stack, mockBox("C", false), "C");
+        CsPanel.relayout(stack);
+        eqs(layout.stretches[0], 1,
+            "grid relayout: A's row (alone because B folded) stretches");
+        eqs(layout.stretches[1], 0,
+            "grid relayout: B's own strip row does not stretch");
+        eqs(layout.stretches[2], 1,
+            "grid relayout: C's row still stretches");
+    })();
+
+    // All folded -- every row a strip, none of them claiming height.
+    (function() {
+        var layout = mockLayout();
+        var stack = CsPanel.stack(layout, "unused", 0, null, 2);
+        CsPanel.stackAdd(stack, mockBox("A", true), "A");
+        CsPanel.stackAdd(stack, mockBox("B", true), "B");
+        CsPanel.stackAdd(stack, mockBox("C", true), "C");
+        CsPanel.relayout(stack);
+        eqs(layout.stretches[0] + "," + layout.stretches[1] + "," +
+            layout.stretches[2], "0,0,0",
+            "grid relayout: a row whose section is folded never stretches");
+    })();
+
+    // Fold, unfold, fold again -- no ghost row left claiming height.
+    // Same stack object across three relayout calls, exactly what a
+    // caver clicking one header three times drives through
+    // CsPanel.connectSection.
+    (function() {
+        var layout = mockLayout();
+        var stack = CsPanel.stack(layout, "unused", 0, null, 2);
+        var boxA = mockBox("A", false);
+        var boxB = mockBox("B", false);
+        var boxC = mockBox("C", false);
+        CsPanel.stackAdd(stack, boxA, "A");
+        CsPanel.stackAdd(stack, boxB, "B");
+        CsPanel.stackAdd(stack, boxC, "C");
+
+        CsPanel.relayout(stack);   // none folded: rows 0 and 1 stretch
+        eqs(layout.stretches[0] + "," + layout.stretches[1], "1,1",
+            "grid relayout (ghost check): baseline, nothing folded yet");
+
+        boxB.host.visible = false;   // fold B
+        CsPanel.relayout(stack);
+        // A alone on row 0, B's strip on row 1, C alone on row 2.
+        eqs(layout.stretches[0] + "," + layout.stretches[1] + "," +
+            layout.stretches[2], "1,0,1",
+            "grid relayout (ghost check): after folding B");
+
+        boxB.host.visible = true;   // unfold B: back to the two-row shape
+        CsPanel.relayout(stack);
+        eqs(layout.stretches[0] + "," + layout.stretches[1],
+            "1,1",
+            "grid relayout (ghost check): unfolding restores the " +
+            "two-row shape's stretch");
+        ok(layout.stretches[2] === 0,
+            "grid relayout (ghost check): row 2, which only the FOLDED " +
+            "layout used, is zeroed rather than left claiming height " +
+            "it no longer has a section on");
+
+        boxB.host.visible = false;   // fold again
+        CsPanel.relayout(stack);
+        eqs(layout.stretches[0] + "," + layout.stretches[1] + "," +
+            layout.stretches[2], "1,0,1",
+            "grid relayout (ghost check): folding again reproduces the " +
+            "same shape, not a shape corrupted by the earlier ghost");
     })();
 })();
 
@@ -23416,7 +23684,119 @@ eqs(CsSymbolStore.AREA_MARKER_TAGS.custom, "AreaCustom",
         "grid relayout (real): the lone third starts the next row");
     eqs(nameAt(grid, 2, 1), "C",
         "grid relayout (real): and its span really reaches the bridge's " +
-        "own layout, not just the pure gridSpans math");
+        "own layout, not just the pure gridPlan math");
+
+    // Fold B against the real QGridLayout and relayout again: A becomes
+    // alone on the baseIndex row (B's own real host is what
+    // CsPanel.isFolded reads, not a flag relayout is handed directly),
+    // B gets a strip, C keeps its row -- and the real rowStretch calls
+    // land where gridPlan says.
+    try {
+        stack.sections[1].host = { visible: false };   // fold B
+        CsPanel.relayout(stack);
+        eqs(nameAt(grid, 1, 0), "A",
+            "grid relayout (real, folded): A alone on the baseIndex row");
+        eqs(nameAt(grid, 1, 1), "A",
+            "grid relayout (real, folded): and its span really reaches " +
+            "column 1 too");
+        eqs(nameAt(grid, 2, 0), "B",
+            "grid relayout (real, folded): B's strip is on the next row");
+        eqs(nameAt(grid, 3, 0), "C",
+            "grid relayout (real, folded): C keeps its own row after " +
+            "B's strip");
+        eqs(grid.rowStretch(1), 1,
+            "grid relayout (real, folded): A's row stretches");
+        eqs(grid.rowStretch(2), 0,
+            "grid relayout (real, folded): B's strip row does not");
+        eqs(grid.rowStretch(3), 1,
+            "grid relayout (real, folded): C's row still does");
+
+        stack.sections[1].host.visible = true;   // unfold B
+        CsPanel.relayout(stack);
+        eqs(nameAt(grid, 1, 0), "A",
+            "grid relayout (real, unfolded): back to the original shape");
+        eqs(nameAt(grid, 1, 1), "B",
+            "grid relayout (real, unfolded): B is back beside A");
+        eqs(nameAt(grid, 2, 0), "C",
+            "grid relayout (real, unfolded): C is back on its own row");
+        eqs(grid.rowStretch(3), 0,
+            "grid relayout (real, unfolded): row 3, which only the " +
+            "folded layout used, is not left as a ghost claiming height");
+    } catch (eFoldReal) {
+        // A bridge without rowStretch() as a getter would throw here;
+        // the mock suite above already proves the stretch logic itself,
+        // so this block is a bonus against the real widget, not the
+        // only proof of it.
+    }
+})();
+
+// ---------------------------------------------------------------------
+// CsPanel.relayout, built the way DrawPanel.buildDock actually calls it
+// -- sections built by CsPanel.section (not bare mocks), on a widget
+// tree that has NEVER been shown, because that is exactly the moment
+// buildDock's own first relayout runs: before body.setLayout and
+// before appWin.addDockWidget. This is the case the mock-box tests
+// above cannot see, because a mock box has no real host widget for
+// Qt's realized-visibility rule to bite.
+//
+// THE BUG THIS CATCHES (2026-09-12): a QWidget's `visible` reads
+// `isVisible()`, which Qt defines as false for every descendant until
+// the whole ancestor chain is actually realised on screen -- so before
+// the dock is shown, EVERY section's host reports not-visible
+// regardless of what CsPanel.section explicitly requested, and reading
+// that as fold state turned the very first layout into N one-column
+// strips instead of the intended 2-wide grid. Only the next fold,
+// unfold or reorder (all running after the dock is on screen) happened
+// to call relayout again and correct it by accident.
+// ---------------------------------------------------------------------
+
+(function testInitialRelayoutBeforeDockShown() {
+    if (typeof QWidget === "undefined" || typeof QGridLayout === "undefined" ||
+            typeof QPushButton === "undefined") {
+        return;
+    }
+    function nameAt(grid, r, c) {
+        try {
+            var item = grid.itemAtPosition(r, c);
+            if (isNull(item)) {
+                return null;
+            }
+            var w = item.widget();
+            return isNull(w) ? null : String(w.objectName);
+        } catch (e) {
+            return "ERR:" + e;
+        }
+    }
+
+    var body = new QWidget();   // no parent -- never shown, like buildDock's
+                                 // own `body` at the point it calls relayout
+    var grid = new QGridLayout();
+    var collapsed = {};          // nothing in the caver's collapsed set
+    var stack = CsPanel.stack(grid, "unusedInitialRelayoutOrder", 0, null, 2);
+
+    var titles = ["A", "B", "C"];
+    for (var i = 0; i < titles.length; i++) {
+        var section = CsPanel.section(body, titles[i],
+            "unusedInitialRelayoutCollapsed", collapsed);
+        section.box.objectName = titles[i];
+        CsPanel.stackAdd(stack, section, titles[i]);
+    }
+
+    // Exactly buildDock's own sequence: build every section, then
+    // relayout, with nothing in between ever calling show().
+    CsPanel.relayout(stack);
+
+    eqs(nameAt(grid, 0, 0), "A",
+        "initial relayout (never shown): A and B share row 0 -- a real " +
+        "2-wide grid, not a strip");
+    eqs(nameAt(grid, 0, 1), "B",
+        "initial relayout (never shown): B sits beside A rather than " +
+        "being read as folded and pushed onto a row of its own");
+    eqs(nameAt(grid, 1, 0), "C",
+        "initial relayout (never shown): C is alone on row 1 and spans");
+    eqs(nameAt(grid, 1, 1), "C",
+        "initial relayout (never shown): and really spans in the real " +
+        "layout, not just the plan's math");
 })();
 
 // ---------------------------------------------------------------------

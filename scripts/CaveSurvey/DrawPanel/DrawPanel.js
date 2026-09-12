@@ -37,12 +37,16 @@
 //     not worth wasting. (This is the two-section case today: Trace
 //     and Symbols share row 0. It becomes visible once Areas makes a
 //     third.)
-//   - A FOLDED section keeps its cell. Folding hides what is inside a
-//     section, not the section itself, so it never reflows the grid --
-//     a caver mid-trace does not want Symbols sliding under their
-//     cursor because they collapsed Trace a moment ago.
+//   - A FOLDED section hands its row to the others. REVERSED,
+//     2026-09-12: it shipped the opposite way -- a folded section kept
+//     its cell so nothing moved under a caver's cursor -- but Nathan,
+//     having actually used the panel: "when I minimize a section... I
+//     want the others to grow into the space." A fold now relayouts
+//     (CsPanel.connectSection, via the section's own stack) so a
+//     folded section becomes a full-width strip and everyone else
+//     grows into what it gave up.
 //   - New sections simply APPEND at the end of the list below; where
-//     they land is `CsPanel.gridSpans`' arithmetic, not a coordinate
+//     they land is `CsPanel.gridPlan`'s arithmetic, not a coordinate
 //     anyone has to update by hand.
 //   - Right-click a header for Move Up / Move Down / Reset Order. Not a
 //     drag, and not for want of trying: this bridge hands script mouse
@@ -87,7 +91,7 @@ DrawPanel.COLLAPSED_SETTING = "CaveSurvey/DrawCollapsed";
 DrawPanel.ORDER_SETTING = "CaveSurvey/DrawOrder";
 
 /** The grid is two sections wide -- see the header comment for why,
- *  and CsPanel.gridSpans for how a section lands in it. */
+ *  and CsPanel.gridPlan for how a section lands in it. */
 DrawPanel.COLUMNS = 2;
 
 /** The least height a section keeps inside its row: a header plus a row
@@ -224,25 +228,14 @@ DrawPanel.buildDock = function(appWin) {
         problems.push("section layout (" + eLayout + ")");
     }
 
-    // THE ROWS DIVIDE THE DOCK, they do not take their natural height.
-    // Without this a tall first row pushes the second off the bottom --
-    // which is what happened to Areas. Equal stretch on every occupied
-    // row, so three sections mean roughly half the dock each for rows
-    // one and two rather than all of it for row one.
-    try {
-        var spans = CsPanel.gridSpans(stack.sections.length,
-            stack.columns);
-        var stretched = {};
-        for (var sp = 0; sp < spans.length; sp++) {
-            if (stretched[spans[sp].row] === true) {
-                continue;
-            }
-            layout.setRowStretch(spans[sp].row, 1);
-            stretched[spans[sp].row] = true;
-        }
-    } catch (eStretch) {
-        problems.push("row heights (" + eStretch + ")");
-    }
+    // THE ROWS DIVIDE THE DOCK, they do not take their natural height --
+    // CsPanel.relayout above already set each occupied row's stretch
+    // from the same CsPanel.gridPlan it placed the boxes with (1 for a
+    // row of unfolded sections, 0 for a folded one's strip), so there
+    // is nothing left to do here. Without SOME row stretch a tall first
+    // row pushes the second off the bottom, which is what happened to
+    // Areas before this existed; that is now relayout's job, done once,
+    // not duplicated here and in every future caller of a grid stack.
 
     body.setLayout(layout);
     dock.setWidget(body);

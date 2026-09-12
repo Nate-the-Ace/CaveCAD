@@ -131,19 +131,65 @@ CsPanel.section = function(parent, title, settingKey, collapsedSet) {
     outer.addWidget(host, 0, 0);
     box.setLayout(outer);
 
+    // Built before wiring so connectSection's closure can hand it back
+    // to its stack (`section.stack`, set by stackAdd) and ask for a
+    // relayout on every fold -- see connectSection's own comment.
+    var result = { box: box, host: host, header: header, open: open,
+        stack: null };
+
     try {
         host.visible = open;
         if (header !== null) {
-            CsPanel.connectSection(header, host, title, settingKey);
+            CsPanel.connectSection(header, host, title, settingKey, result);
         }
     } catch (eWire) {
     }
-    return { box: box, host: host, header: header, open: open };
+    return result;
+};
+
+/** Whether a section is folded right now.
+ *
+ *  `section.open` FIRST, NOT `host.visible` -- measured 2026-09-12: the
+ *  very first relayout a dock ever runs happens inside
+ *  DrawPanel.buildDock, before `body.setLayout` and before the dock is
+ *  handed to `addDockWidget`. A QWidget's `visible` there is not "what
+ *  was requested", it is `isVisible()`, which Qt defines as false for
+ *  EVERY descendant until the whole ancestor chain has actually been
+ *  realised on screen -- so reading it that early reported every
+ *  section as folded regardless of what CsPanel.section had just set,
+ *  and the grid came out as N full-width strips until the next fold,
+ *  unfold or reorder happened to call relayout again post-show and
+ *  correct it by accident.
+ *
+ *  So `open` is now kept accurate instead of read around: CsPanel.section
+ *  sets it from the caver's collapsed set, connectSection's click
+ *  handler writes the new value back on every toggle, and setOpen does
+ *  the same -- one field, always current, true before the widget is
+ *  ever shown and after. `host.visible` is kept only as a fallback for
+ *  a section that has no `open` at all (a bare mock in the test suite,
+ *  never one CsPanel.section built). */
+CsPanel.isFolded = function(section) {
+    try {
+        if (isNull(section)) {
+            return false;
+        }
+        if (typeof section.open === "boolean") {
+            return section.open === false;
+        }
+        return !isNull(section.host) && section.host.visible === false;
+    } catch (e) {
+        return false;
+    }
 };
 
 /** Wires one section's header to its contents. Its own function so the
- *  closure captures ONE title and host rather than a loop's. */
-CsPanel.connectSection = function(header, host, title, settingKey) {
+ *  closure captures ONE title and host rather than a loop's.
+ *
+ *  `section` is optional -- callers outside CsPanel.section itself (are
+ *  there none today) can still wire a header without one, and simply
+ *  get a section that folds without reflowing anything, same as before
+ *  this existed. */
+CsPanel.connectSection = function(header, host, title, settingKey, section) {
     header.clicked.connect(function() {
         var open = true;
         try {
@@ -156,7 +202,26 @@ CsPanel.connectSection = function(header, host, title, settingKey) {
             header.text = CsPanel.headerText(title, open);
         } catch (eText) {
         }
+        // Written back so CsPanel.isFolded has a live answer without
+        // ever asking the widget -- see that function's own comment for
+        // why `host.visible` cannot be trusted for this.
+        if (!isNull(section)) {
+            section.open = open;
+        }
         CsPanel.saveCollapsed(settingKey, title, !open);
+        // REVERSED, 2026-09-12: Nathan, looking at the live Draw panel,
+        // "when I minimize a section in the panel, I want the others to
+        // grow into the space" -- the opposite of the mockup rule this
+        // grid shipped with (a folded section used to keep its cell).
+        // A section only knows to ask for this if stackAdd put it in a
+        // stack; one built standalone has no `section.stack` and simply
+        // folds in place, exactly as it always has.
+        if (!isNull(section) && !isNull(section.stack)) {
+            try {
+                CsPanel.relayout(section.stack);
+            } catch (eRelayout) {
+            }
+        }
     });
 };
 
@@ -184,6 +249,11 @@ CsPanel.setOpen = function(section, title, open) {
         }
     } catch (eText) {
     }
+    // Same reason connectSection writes it back: CsPanel.isFolded reads
+    // `open`, never the widget, so a caller that forces a section open
+    // through this path (DrawPanel.reveal, a search) must keep it
+    // current too.
+    section.open = open;
 };
 
 /**
@@ -291,7 +361,7 @@ CsPanel.orderedTitles = function(titles, saved) {
  * caller relies on -- `layout` stays a single column and sections are
  * inserted with `insertWidget`. Pass a column count to lay `layout`
  * (which must then be a QGridLayout) out as a grid instead: see
- * `gridSpans` for the shape, and `relayout` for how it is applied.
+ * `gridPlan` for the shape, and `relayout` for how it is applied.
  */
 CsPanel.stack = function(layout, settingKey, baseIndex, onChanged, columns) {
     return {
@@ -305,22 +375,65 @@ CsPanel.stack = function(layout, settingKey, baseIndex, onChanged, columns) {
 };
 
 /**
- * Where each of `count` sections sits in a grid `columns` wide.
+ * Where each of `items` sits in a grid `columns` wide, given which are
+ * folded. `items` is `[{folded: bool}, ...]` in section order; returns
+ * one `{row, col, span, stretch}` per item, same order.
  *
- * A section ALONE on the last row spans the width rather than leaving a
- * hole beside it -- a dock is narrow and half of one is not worth
- * wasting (Nathan, 2026-09-11).
+ * REVERSED, 2026-09-12: Nathan, having actually used the Draw panel's
+ * grid, "when I minimize a section in the panel, I want the others to
+ * grow into the space" -- the opposite of the mockup rule this shipped
+ * with a day earlier, where a folded section kept its cell so nothing
+ * moved under a caver's cursor. This superseded gridSpans, which knew
+ * nothing about folding at all.
+ *
+ * THE RULES, IN ORDER:
+ *   - A FOLDED item takes a full-width strip row of its own, in its
+ *     ORDER position -- it does not move to the bottom. A strip gets
+ *     no share of the height (`stretch: 0`).
+ *   - UNFOLDED items flow left to right, `columns` wide, and their rows
+ *     get `stretch: 1`.
+ *   - An unfolded item ALONE on its row spans the full width -- the
+ *     original lone-row rule, generalised: alone because it is last,
+ *     or alone because the very next item in order is folded and so
+ *     starts a strip row of its own.
+ *   - Order is always preserved: item i never lands on a row above
+ *     item i-1's.
  *
  * Pure.
  */
-CsPanel.gridSpans = function(count, columns) {
+CsPanel.gridPlan = function(items, columns) {
     var cols = isNull(columns) || columns < 1 ? 1 : Math.floor(columns);
     var out = [];
-    for (var i = 0; i < count; i++) {
-        var row = Math.floor(i / cols);
-        var col = i % cols;
-        var lone = (col === 0) && (i === count - 1);
-        out.push({ row: row, col: col, span: lone ? cols : 1 });
+    var row = 0;
+    var flowCol = 0;
+    for (var i = 0; i < items.length; i++) {
+        if (items[i].folded) {
+            if (flowCol > 0) {
+                // An unfolded row was left mid-fill when this fold hit
+                // it -- close it out (a gap, not a stretch: only a
+                // truly LONE item ever gets its span widened) and start
+                // the strip on a fresh row.
+                row += 1;
+                flowCol = 0;
+            }
+            out.push({ row: row, col: 0, span: cols, stretch: 0 });
+            row += 1;
+        } else {
+            var lone = (flowCol === 0) &&
+                (i === items.length - 1 || items[i + 1].folded === true);
+            out.push({ row: row, col: flowCol,
+                span: lone ? cols : 1, stretch: 1 });
+            if (lone) {
+                row += 1;
+                flowCol = 0;
+            } else {
+                flowCol += 1;
+                if (flowCol >= cols) {
+                    flowCol = 0;
+                    row += 1;
+                }
+            }
+        }
     }
     return out;
 };
@@ -343,6 +456,11 @@ CsPanel.stackTitles = function(stack) {
  */
 CsPanel.stackAdd = function(stack, section, title) {
     section.title = title;
+    // The section's way back to its stack -- connectSection's closure
+    // uses it to ask for a relayout when this section folds or
+    // unfolds, so a fold can hand its row to the others instead of
+    // sitting on it (2026-09-12).
+    section.stack = stack;
     stack.sections.push(section);
     if (isNull(section.header)) {
         return;
@@ -417,7 +535,19 @@ CsPanel.resetOrder = function(stack) {
  *  Two shapes: a plain column, which is every existing caller, uses
  *  `insertWidget` at the section's index past `baseIndex`. A grid
  *  (`stack.columns` set) instead removes and re-adds each box at the
- *  row/column `gridSpans` gives it, spanning the last lone one.
+ *  row/column `gridPlan` gives it, and sets each occupied row's stretch
+ *  to what `gridPlan` says -- 0 for a folded section's strip, 1 for a
+ *  row of unfolded ones, so a fold hands its share of the dock's height
+ *  to whatever is left (Nathan, 2026-09-12; gridPlan's own comment has
+ *  the reversal this undid).
+ *
+ *  A GHOST ROW HOLDS HEIGHT FOREVER. `setRowStretch` has no "unset" --
+ *  the only way to take a row's stretch back is to set it to 0
+ *  explicitly. So this remembers which rows it stretched last time
+ *  (`stack._plannedRows`) and zeroes any that this pass did not reuse:
+ *  without that, fold-unfold-fold left the FIRST fold's row still
+ *  claiming height under the second, because nothing had ever told the
+ *  layout to let go of it.
  *
  *  THE CHOICE HERE: an ugly grid over a missing section. A caver whose
  *  Symbols section evaporated cannot work; one whose grid came out as a
@@ -434,7 +564,7 @@ CsPanel.resetOrder = function(stack) {
  *  this: a real QGridLayout (guarded by `typeof QWidget`, since the
  *  node fallback has no widget bridge at all) shows the 5-argument
  *  `addWidget` and the `baseIndex` row offset actually land where
- *  `gridSpans` says, and a mock layout proves the recovery pass fires
+ *  `gridPlan` says, and a mock layout proves the recovery pass fires
  *  when `removeWidget`/`addWidget` throw -- CaveCAD's own bridge never
  *  refused either in testing, so that path is exercised by the mock,
  *  not the live one. The right-click Move Up/Down driving a grid stack
@@ -466,15 +596,21 @@ CsPanel.relayout = function(stack) {
         }
     } catch (eRemove) {
     }
-    var spans = CsPanel.gridSpans(stack.sections.length, stack.columns);
+    var items = [];
+    for (i = 0; i < stack.sections.length; i++) {
+        items.push({ folded: CsPanel.isFolded(stack.sections[i]) });
+    }
+    var plan = CsPanel.gridPlan(items, stack.columns);
     var placed = [];
+    var rowsUsed = {};
     for (i = 0; i < stack.sections.length; i++) {
         placed.push(false);
         try {
             stack.layout.addWidget(stack.sections[i].box,
-                stack.baseIndex + spans[i].row, spans[i].col, 1,
-                spans[i].span);
+                stack.baseIndex + plan[i].row, plan[i].col, 1,
+                plan[i].span);
             placed[i] = true;
+            rowsUsed[stack.baseIndex + plan[i].row] = plan[i].stretch;
         } catch (eAdd) {
             // the grid placement refused this one box; recovered below
         }
@@ -488,10 +624,33 @@ CsPanel.relayout = function(stack) {
             // section that vanished from the panel.
             stack.layout.addWidget(stack.sections[i].box,
                 stack.baseIndex + i, 0, 1, 1);
+            rowsUsed[stack.baseIndex + i] = plan[i].stretch;
         } catch (eRecover) {
             // both attempts refused: nothing more this function can do
         }
     }
+    var prevRows = isNull(stack._plannedRows) ? {} : stack._plannedRows;
+    var r;
+    try {
+        for (r in rowsUsed) {
+            if (rowsUsed.hasOwnProperty(r)) {
+                stack.layout.setRowStretch(parseInt(r, 10), rowsUsed[r]);
+            }
+        }
+        for (r in prevRows) {
+            if (prevRows.hasOwnProperty(r) && !rowsUsed.hasOwnProperty(r)) {
+                // This row served a PREVIOUS relayout (an unfolded row
+                // that has since folded away, say) and is not part of
+                // this one -- let its height go rather than leave it a
+                // ghost still claiming a share of the dock.
+                stack.layout.setRowStretch(parseInt(r, 10), 0);
+            }
+        }
+    } catch (eStretch) {
+        // a bridge without setRowStretch leaves every row at its
+        // natural height -- untidy, never broken
+    }
+    stack._plannedRows = rowsUsed;
 };
 
 /** Puts a freshly built stack into the caver's saved order. */
