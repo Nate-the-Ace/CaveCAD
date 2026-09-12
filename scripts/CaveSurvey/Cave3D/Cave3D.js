@@ -67,6 +67,7 @@ Cave3D.SETTING_MODE = "Cave3D/ColorMode";
 Cave3D.SETTING_GHOST = "Cave3D/ShowGhost";
 Cave3D.SETTING_LEADS = "Cave3D/ShowLeads";
 Cave3D.SETTING_SECTIONS = "Cave3D/ShowSections";
+Cave3D.SETTING_SCANS = "Cave3D/ShowScans";
 
 /** The chosen mode, read from settings the first time it is asked for.
  *  Not read at file scope: RSettings is not necessarily up when an
@@ -253,6 +254,53 @@ Cave3D.sectionsBuffer = function(doc, survey, resolved) {
     return buf;
 };
 
+/**
+ * Every sketch scan of one kind, draped onto the passage.
+ *
+ * ONE BUFFER, MANY TEXTURES. `runs` says how many indices belong to each
+ * scan in turn, so the view binds one texture per scan without ever
+ * being told what a scan is.
+ *
+ * \return {positions, uvs, indices, paths, runs}
+ */
+Cave3D.scansBuffer = function(doc, resolved, kind) {
+    var buf = { positions: [], uvs: [], indices: [], paths: [], runs: [] };
+    var scans;
+    try {
+        scans = CsDrape.readScans(doc, kind);
+    } catch (e) {
+        return buf;
+    }
+    for (var i = 0; i < scans.length; i++) {
+        var g;
+        try {
+            g = CsDrape.grid(scans[i].quad, CsDrape.DIVISIONS,
+                resolved.stations);
+        } catch (eGrid) {
+            continue;
+        }
+        if (g.positions.length === 0 || g.indices.length === 0) {
+            // Nothing to sample under it. Skipped rather than drawn
+            // flat at some arbitrary elevation.
+            continue;
+        }
+        var base = buf.positions.length / 3;
+        var k;
+        for (k = 0; k < g.positions.length; k++) {
+            buf.positions.push(g.positions[k]);
+        }
+        for (k = 0; k < g.uvs.length; k++) {
+            buf.uvs.push(g.uvs[k]);
+        }
+        for (k = 0; k < g.indices.length; k++) {
+            buf.indices.push(base + g.indices[k]);
+        }
+        buf.paths.push(scans[i].path);
+        buf.runs.push(g.indices.length);
+    }
+    return buf;
+};
+
 /** One line for the panel's status bar. */
 Cave3D.statusText = function(read, mesh) {
     var triangles = mesh.triangles.indices.length / 3;
@@ -311,6 +359,14 @@ Cave3D.refresh = function() {
             read.resolved);
     } catch (eSections) {
         mesh.sections = { positions: [], colors: [], indices: [] };
+    }
+
+    try {
+        mesh.scans = Cave3D.scansBuffer(getDocument(), read.resolved,
+            "plan");
+    } catch (eScans) {
+        mesh.scans = { positions: [], uvs: [], indices: [], paths: [],
+                       runs: [] };
     }
 
     cave3d.setMesh(Cave3D.handle, mesh);
@@ -384,6 +440,8 @@ function cave3dRun() {
                 key = Cave3D.SETTING_GHOST;
             } else if (which === "sections") {
                 key = Cave3D.SETTING_SECTIONS;
+            } else if (which === "scans") {
+                key = Cave3D.SETTING_SCANS;
             }
             RSettings.setValue(key, on);
         });
@@ -401,6 +459,8 @@ function cave3dRun() {
     // drawing holds any sections to show.
     cave3d.setShowSections(Cave3D.handle,
         RSettings.getBoolValue(Cave3D.SETTING_SECTIONS, false));
+    cave3d.setShowScans(Cave3D.handle,
+        RSettings.getBoolValue(Cave3D.SETTING_SCANS, false));
 }
 
 // ============================================================
