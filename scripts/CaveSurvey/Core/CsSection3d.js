@@ -140,3 +140,121 @@ CsSection3d.leaderFor = function(opts) {
         { x: st.x, y: st.y, z: st.z }
     ];
 };
+
+// =====================================================================
+// QCAD context below this line. Everything above runs under node.
+//
+// CsTags and CsCallout are NOT included here, deliberately. CsAll loads
+// them AFTER this file, and pulling them earlier would reorder their own
+// dependencies. Nothing below touches them at file scope -- only inside
+// functions, by which time CsAll has loaded everything.
+// =====================================================================
+
+/**
+ * Every captured section in a drawing.
+ *
+ * THE BLOCK REFERENCE'S 2D ROTATION IS IGNORED ON PURPOSE. It is a
+ * sheet-layout choice -- which way the section was turned to sit beside
+ * the plan -- and says nothing about the passage. In three dimensions
+ * the section is squared to the passage by its frame, so honouring a
+ * sheet rotation would tilt it off the passage for the sake of a
+ * decision about paper.
+ *
+ * NEVER THROWS. A block this bridge cannot read yields no section, the
+ * same discipline as CsBind.pointsOf: one unreadable block must not take
+ * the whole 3D view down with it.
+ *
+ * \return [{station, scale, blockPos: {x, y}, polylines}]
+ */
+CsSection3d.readAll = function(doc) {
+    var out = [];
+    if (isNull(doc)) {
+        return out;
+    }
+    var ids;
+    try {
+        ids = doc.queryAllEntities(false, true);
+    } catch (e) {
+        return out;
+    }
+    for (var i = 0; i < ids.length; i++) {
+        try {
+            var ref = doc.queryEntity(ids[i]);
+            if (isNull(ref)) { continue; }
+            if (CsTags.get(ref, CsCallout.KEY.KIND) !==
+                    CsCallout.KIND_SECTION) {
+                continue;
+            }
+            if (CsTags.get(ref, CsCallout.KEY.ROLE) !==
+                    CsCallout.ROLE_BLOCK) {
+                continue;
+            }
+            var station = CsTags.get(ref, CsCallout.KEY.SECTION_STATION);
+            if (typeof station !== "string" || station === "") {
+                // A section that does not say which station it belongs
+                // to cannot be placed, and guessing the nearest one
+                // would stand somebody's drawing somewhere they did not
+                // draw it.
+                continue;
+            }
+            var scale = parseFloat(
+                CsTags.get(ref, CsCallout.KEY.SECTION_SCALE));
+            if (!isFinite(scale) || Math.abs(scale) < 1e-9) {
+                scale = 1;
+            }
+            var pos = ref.getPosition();
+            if (isNull(pos)) { continue; }
+            var polylines = CsSection3d.blockGeometry(doc, ref);
+            if (polylines.length === 0) { continue; }
+            out.push({ station: station, scale: scale,
+                       blockPos: { x: pos.x, y: pos.y },
+                       polylines: polylines });
+        } catch (eRead) {
+            continue;
+        }
+    }
+    return out;
+};
+
+/**
+ * A block reference's own geometry, block-local, as polylines.
+ *
+ * THROUGH CsArea.vertsOf, WHICH IS NOT AN ARBITRARY CHOICE. That
+ * function already encodes the spline proxy trap: getPointCloud() on an
+ * RSpline delegates to a proxy plugin that a `-no-gui -autostart` run
+ * never loads, so it measures EMPTY headlessly while returning real
+ * points inside the GUI. A flattener written fresh here would give
+ * sections that looked right live and vanished from the test suite --
+ * which is the one failure a test run cannot tell you about.
+ */
+CsSection3d.blockGeometry = function(doc, ref) {
+    var out = [];
+    var blockId;
+    try {
+        blockId = ref.getReferencedBlockId();
+    } catch (e) {
+        return out;
+    }
+    if (isNull(blockId) || blockId === RBlock.INVALID_ID) {
+        return out;
+    }
+    var ids;
+    try {
+        ids = doc.queryBlockEntities(blockId);
+    } catch (eq) {
+        return out;
+    }
+    for (var i = 0; i < ids.length; i++) {
+        try {
+            var e = doc.queryEntity(ids[i]);
+            if (isNull(e)) { continue; }
+            var verts = CsArea.vertsOf(e);
+            if (verts.length >= 2) {
+                out.push(verts);
+            }
+        } catch (eEnt) {
+            continue;
+        }
+    }
+    return out;
+};
