@@ -230,3 +230,86 @@ against stale code.
 
 glTF, captures, registration, slicing, station picking, selection sync,
 lighting beyond flat shading, textures. lidar/ is created and left empty.
+
+---
+
+## As built (2026-09-12, 0.9.119.0 / cavecad-src 0.3.0.0)
+
+Everything above shipped. What diverged, and what the live GUI taught:
+
+### The mesh transfer needed no fallback
+
+Task 5's spike was to MEASURE whether a large mesh survives the QJSEngine
+boundary as plain arrays, with a binary blob specified as the fallback.
+Pitfall Cave (530 triangles, 75 centerline segments) transfers with no
+perceptible delay through a QVariantList per array, so the blob path was
+not built. The cost is all in `toFloats` in RCave3dBridge.cpp -- one
+QVariant per number -- and that is the single function a blob would
+replace if a cave ever proves too big.
+
+Indices are NOT transferred. CsMesh3d emits unshared vertices with flat
+normals, so its indices are always sequential and the view draws with
+`glDrawArrays`. `setMesh` accepts the field and ignores it; the script
+side keeps emitting it because a mesh that shares vertices will need it.
+
+### The loft matches rings by ANGLE, not by index
+
+The design said "loft between consecutive stations' polygons" without
+saying how points in two rings pair up. Pairing by position in the list
+is wrong: it assumes both lists divide the circle the same way, and four
+LRUD ticks against eleven splays clustered up one wall would join the
+floor of one station to the ceiling of the next -- a strip that spirals
+through the passage instead of skinning it. Both rings are now sampled
+at the same angles, each sample taking the measured point nearest that
+angle. See CsMesh3d.nearestByAngle.
+
+### The walk is the spanning tree
+
+The design said stations arrive "in run order" and the plan first reached
+for CsStationOrder. That is first-appearance order over the legs and
+carries no adjacency guarantee at all. `resolved.legs` tagged `"new"` IS
+the spanning tree -- each leg attaches a newly placed station to one
+already placed -- so the walk is per-leg, the run/flush bookkeeping is
+gone, and branching is handled for free. Closure and tie legs draw a
+centerline but are never lofted.
+
+### Three defects only the live GUI could show
+
+Found with the MCP bridge driving a real window, none of them reachable
+from the headless harness:
+
+  VIEW ALL fitted the bounding SPHERE, whose radius on a cave is set
+  almost entirely by its LENGTH. A passage seen across its short axis
+  became a thread in a dark window. Now fits the eight box corners in
+  view space.
+
+  PAN used world Z as its up vector, which is right only while the camera
+  is level. In the plan view a vertical drag pushed the cave toward the
+  camera and appeared to do nothing. Framing and panning now share one
+  cameraBasis(); deriving the axes twice is how they came to disagree.
+
+  THE STATUS LABEL had no stretch factor in the status bar, so it kept
+  the sizeHint it had while empty and clipped everything after. It read
+  "5" where it meant "530 triangles, 75 centerline segments, 146.6 ft of
+  relief".
+
+### Verified live
+
+Against Pitfall Cave in a genuinely restarted CaveCAD: the passage
+renders; View All, Plan and Profile all frame correctly (the profile
+shows the pit and the lower level); the Passage and Centerline toggles
+work; left-drag rotates and middle-drag pans, driven as real posted
+QMouseEvents; a real transaction fires the listener exactly ONCE after
+its debounce (zero synchronously, one after), and Refresh rebuilds with
+the listener disabled.
+
+NOT verified by machine: wheel zoom. QWheelEvent is not wrapped for
+script, so no synthetic wheel event can be posted. The handler is six
+lines sharing nothing with the paths above.
+
+### The bridge gained camera control
+
+RCave3dBridge exposes viewAll/viewPlan/viewProfile and the two visibility
+toggles alongside setMesh. Added so the view could be driven under test,
+kept because a script that can feed geometry should be able to aim the
+camera at it.
