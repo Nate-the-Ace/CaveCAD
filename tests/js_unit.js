@@ -157,6 +157,7 @@ var CORE_FILES = [
     "scripts/CaveSurvey/Core/CsAdjust.js",
     "scripts/CaveSurvey/Core/CsLrud.js",
     "scripts/CaveSurvey/Core/CsMesh3d.js",
+    "scripts/CaveSurvey/Core/CsSection3d.js",
     "scripts/CaveSurvey/Core/CsScanFit.js",
     "scripts/CaveSurvey/Core/CsScanFrame.js",
     "scripts/CaveSurvey/Core/CsScanTrim.js",
@@ -21065,6 +21066,92 @@ for (var lbi = 0; lbi < noRaw.leads.positions.length; lbi++) {
 eqs(String(leadBad), "0", "no NaN in the lead markers");
 eqs(String(m3empty.leads.indices.length), "0",
     "a cave with no survey has no leads to mark");
+
+// ---------------------------------------------------------------------
+// CsSection3d -- a captured section standing beside the passage
+// ---------------------------------------------------------------------
+
+var s3frame = { d: { x: 0, y: 1, z: 0 },      // passage heading north
+                r: { x: 1, y: 0, z: 0 },      // right is east
+                s: { x: 0, y: 0, z: 1 } };    // up is up
+var s3station = { x: 100, y: 200, z: 50 };
+
+// The caver already chose a side by dragging the block; this reads it.
+var sideE = CsSection3d.sideFor({ x: 130, y: 200 }, s3station, s3frame, 10);
+nearly(sideE.x, 1, 1e-9, "a block east of its station hangs east");
+var sideW = CsSection3d.sideFor({ x: 70, y: 200 }, s3station, s3frame, 10);
+nearly(sideW.x, -1, 1e-9, "a block west of its station hangs west");
+
+// Parked in a bay or laid out on a sheet, the direction means nothing.
+var sideFar = CsSection3d.sideFor({ x: -9000, y: 200 }, s3station,
+    s3frame, 10);
+nearly(sideFar.x, 1, 1e-9,
+    "a block parked far away falls back to +r rather than aiming at it");
+
+var s3square = [[{ x: -1, y: -1 }, { x: 1, y: -1 },
+                 { x: 1, y: 1 }, { x: -1, y: 1 }]];
+
+var placed = CsSection3d.place(s3square, {
+    station: s3station, frame: s3frame, scale: 1,
+    side: { x: 1, y: 0, z: 0 }, offset: 0
+});
+eqs(String(placed.length), "1", "one polyline in, one out");
+eqs(String(placed[0].length), "4", "four points in, four out");
+nearly(placed[0][0].x, 99, 1e-9, "block -1 east of a station at 100 is 99");
+nearly(placed[0][0].z, 49, 1e-9, "block -1 up from z 50 is 49");
+nearly(placed[0][0].y, 200, 1e-9,
+    "nothing moves along the passage: a section is a section");
+
+// SCALE IS A DIVISION -- the failure this module most expects.
+var s3half = CsSection3d.place(s3square, {
+    station: s3station, frame: s3frame, scale: 2,
+    side: { x: 1, y: 0, z: 0 }, offset: 0
+});
+nearly(s3half[0][0].x, 99.5, 1e-9,
+    "scale 2 is two drawing units per foot, so the section is HALF");
+var s3dbl = CsSection3d.place(s3square, {
+    station: s3station, frame: s3frame, scale: 0.5,
+    side: { x: 1, y: 0, z: 0 }, offset: 0
+});
+nearly(s3dbl[0][0].x, 98, 1e-9, "scale 0.5 doubles it");
+
+var s3off = CsSection3d.place(s3square, {
+    station: s3station, frame: s3frame, scale: 1,
+    side: { x: 1, y: 0, z: 0 }, offset: 20
+});
+nearly(s3off[0][0].x, 119, 1e-9, "offset 20 moves the whole section east");
+
+var s3lead = CsSection3d.leaderFor({
+    station: s3station, side: { x: 1, y: 0, z: 0 }, offset: 20
+});
+eqs(String(s3lead.length), "2", "a leader has two ends");
+nearly(s3lead[1].x, 100, 1e-9, "the leader comes home to the station");
+nearly(s3lead[0].x, 120, 1e-9, "and starts out at the section");
+
+// A degenerate frame refuses rather than producing NaN, and without
+// throwing: one unreadable section must not take the 3D view down.
+eqs(String(CsSection3d.place(s3square, {
+    station: s3station, frame: null, scale: 1,
+    side: { x: 1, y: 0, z: 0 }, offset: 0 }).length), "0",
+    "no frame, no section -- and no exception either");
+eqs(String(CsSection3d.place(null, {
+    station: s3station, frame: s3frame, scale: 1,
+    side: { x: 1, y: 0, z: 0 }, offset: 0 }).length), "0",
+    "no geometry, no section");
+
+// A section on a steep passage still lands finite.
+var s3steep = CsSection3d.place(s3square, {
+    station: s3station,
+    frame: { d: { x: 0, y: 0, z: 1 }, r: { x: 1, y: 0, z: 0 },
+             s: { x: 0, y: 1, z: 0 } },
+    scale: 1, side: { x: 1, y: 0, z: 0 }, offset: 5
+});
+var s3bad = 0;
+for (var sb = 0; sb < s3steep[0].length; sb++) {
+    var sp = s3steep[0][sb];
+    if (!isFinite(sp.x) || !isFinite(sp.y) || !isFinite(sp.z)) { s3bad++; }
+}
+eqs(String(s3bad), "0", "a section on a pitch is finite in every axis");
 
 // Rings carry the angle they sat at, which is what lets two rings of
 // different sizes be matched by WHERE the wall was rather than by

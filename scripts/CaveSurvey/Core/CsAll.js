@@ -67,6 +67,10 @@ include(includeBasePath + "/CsScanTrim.js");
 include(includeBasePath + "/CsScanRotate.js");
 include(includeBasePath + "/CsScanReanchor.js");
 include(includeBasePath + "/CsSectionCut.js");
+
+// A captured cross section, standing in the 3D view. After CsSectionCut,
+// whose frame it reuses rather than deriving again.
+include(includeBasePath + "/CsSection3d.js");
 include(includeBasePath + "/CsSectionDraw.js");
 include(includeBasePath + "/CsSectionBay.js");
 // The extended elevation: CsProfile (pure geometry) needs CsLrud above
