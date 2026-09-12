@@ -138,6 +138,120 @@ Cave3D.read = function(doc) {
              adjusted: resolved.adjusted === true };
 };
 
+/** The colour every section is drawn in.
+ *
+ *  ONE COLOUR, AND NOT THE ACTIVE COLOUR MODE. A section is annotation
+ *  -- somebody's drawing of a place -- not another way of reading the
+ *  survey. Colouring it by depth or by trip would say something about
+ *  it that is not true. */
+Cave3D.SECTION_COLOR = [0.95, 0.80, 0.45];
+
+/** Dimmer, so a leader reads as a tether and not as more passage. */
+Cave3D.LEADER_COLOR = [0.55, 0.47, 0.28];
+
+/**
+ * Every captured section, placed into the world as line segments.
+ *
+ * Each section stands square to its passage on CsSectionCut's frame,
+ * offset clear on the side the caver put it on in plan, with a leader
+ * home to its station.
+ *
+ * \return {positions, colors, indices}
+ */
+Cave3D.sectionsBuffer = function(doc, survey, resolved) {
+    var buf = { positions: [], colors: [], indices: [] };
+    var found;
+    try {
+        found = CsSection3d.readAll(doc);
+    } catch (e) {
+        return buf;
+    }
+    if (found.length === 0) {
+        return buf;
+    }
+
+    var splays = CsLrud.splaysByStation(survey);
+    var legsByStation = {};
+    var noteLeg = function(name, leg) {
+        if (!legsByStation.hasOwnProperty(name)) {
+            legsByStation[name] = [];
+        }
+        legsByStation[name].push(leg);
+    };
+    var li;
+    for (li = 0; li < resolved.legs.length; li++) {
+        noteLeg(resolved.legs[li].from, resolved.legs[li]);
+        noteLeg(resolved.legs[li].to, resolved.legs[li]);
+    }
+
+    var push = function(a, b, col) {
+        var base = buf.positions.length / 3;
+        buf.positions.push(a.x, a.y, a.z, b.x, b.y, b.z);
+        buf.colors.push(col[0], col[1], col[2], col[0], col[1], col[2]);
+        buf.indices.push(base, base + 1);
+    };
+
+    for (var i = 0; i < found.length; i++) {
+        var sec = found[i];
+        var st = resolved.stations[sec.station];
+        if (st === undefined || typeof st.z !== "number" ||
+                !isFinite(st.z)) {
+            // A section naming a station this drawing no longer has.
+            continue;
+        }
+        var leg = CsSectionCut.nearestLeg(resolved, st, 1e9);
+        if (leg === null) { continue; }
+        var got = CsSectionCut.frameForLeg(resolved, leg.from, leg.to);
+        if (got === null || got.frame === null) { continue; }
+        var frame = got.frame;
+
+        // The passage's own size here, so a section clears the passage
+        // it belongs to rather than a guess at how wide that is.
+        var width = 0;
+        var dir = CsMesh3d.directionAt(sec.station, legsByStation, resolved);
+        if (dir !== null) {
+            var ring = CsMesh3d.ringAt(st, dir,
+                CsMesh3d.lrudAt(sec.station, survey),
+                splays[sec.station] || [], CsTraverse.SLOPE);
+            for (var ri = 0; ri < ring.length; ri++) {
+                var d = CsMesh3d.norm(CsMesh3d.sub(ring[ri], st));
+                if (d > width) { width = d; }
+            }
+        }
+        if (!(width > 0)) { width = 5; }
+
+        // Plus the section's OWN reach, or a big section would straddle
+        // the passage it was meant to stand clear of.
+        var reach = 0;
+        for (var pi = 0; pi < sec.polylines.length; pi++) {
+            for (var pj = 0; pj < sec.polylines[pi].length; pj++) {
+                var q = sec.polylines[pi][pj];
+                var rr = Math.sqrt(q.x * q.x + q.y * q.y) / sec.scale;
+                if (isFinite(rr) && rr > reach) { reach = rr; }
+            }
+        }
+
+        var side = CsSection3d.sideFor(sec.blockPos, st, frame, width);
+        var offset = width * (1 + CsSection3d.CLEARANCE) + reach;
+
+        var placed = CsSection3d.place(sec.polylines, {
+            station: st, frame: frame, scale: sec.scale,
+            side: side, offset: offset
+        });
+        for (var k = 0; k < placed.length; k++) {
+            for (var m = 0; m + 1 < placed[k].length; m++) {
+                push(placed[k][m], placed[k][m + 1],
+                     Cave3D.SECTION_COLOR);
+            }
+        }
+
+        var lead = CsSection3d.leaderFor({ station: st, side: side,
+            offset: offset });
+        push(lead[0], lead[1], Cave3D.LEADER_COLOR);
+    }
+    return buf;
+};
+
 /** One line for the panel's status bar. */
 Cave3D.statusText = function(read, mesh) {
     var triangles = mesh.triangles.indices.length / 3;
@@ -189,6 +303,15 @@ Cave3D.refresh = function() {
             .arg(String(e.message !== undefined ? e.message : e)));
         return;
     }
+    // The sections ride along on the same mesh object. Their own
+    // buffer, so showing and hiding them never rebuilds anything.
+    try {
+        mesh.sections = Cave3D.sectionsBuffer(getDocument(), read.survey,
+            read.resolved);
+    } catch (eSections) {
+        mesh.sections = { positions: [], colors: [], indices: [] };
+    }
+
     cave3d.setMesh(Cave3D.handle, mesh);
     cave3d.setStatus(Cave3D.handle, Cave3D.statusText(read, mesh));
 };
