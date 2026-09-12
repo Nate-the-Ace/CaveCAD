@@ -1,7 +1,7 @@
 # Our own spline maths, and what detail level is worth paying for
 
 Date: 2026-09-12
-Status: built and shipped; the interval is Nathan's open decision
+Status: built, measured, shipped; interval settled at half a foot
 
 ## Why
 
@@ -50,9 +50,26 @@ when interpolation returns null (fewer than four points, a zero-length
 path, a singular system). The fallback is not ceremony — a caver
 mid-trace must still get their line.
 
-**Open curves only.** A closed boundary needs the periodic variant,
-whose system is cyclic rather than banded. Area boundaries keep the
-approximating periodic fit until that is built.
+**Closed loops too, as of 0.9.120.2.** A closed boundary cannot use the
+banded solve: wrapping makes the system CYCLIC -- the first row reaches
+the last column and the last row the first -- and band elimination has
+nowhere to put those corners. Sherman-Morrison is the standard answer,
+solving it as a tridiagonal system plus a rank-one correction.
+
+Uniform parameterisation there, where the open fit uses centripetal, and
+deliberately: a closed boundary arrives already RESAMPLED at a fixed
+step, so its chords are equal and uniform is what the data is.
+
+`AreaFillRun.closedBoundary` interpolates first and keeps the
+approximating periodic fit as its fallback.
+
+A note on testing it, because it cost an hour: the first seam assertion
+failed at 179.7 degrees, which was not a corner at all. `getExploded`
+returns its segments in no particular order, so concatenating their
+samples jumps between opposite sides of the loop and fakes a reversal.
+Ordering the samples by angle about the centre restores the curve's own
+sequence. The maths was right and the measurement was wrong -- worth
+remembering the next time a geometry assertion fails loudly.
 
 ## What it is worth — measured
 
@@ -104,8 +121,11 @@ again (max 0.44, corner 0.36) at twice the cost. Nothing below a quarter
 foot is worth it: at 1"=50ft a quarter foot is 0.13 mm on paper, finer
 than a pen line.
 
-Not changed yet — the interval is one constant
-(`CsTrace.INTERVAL_FEET`) and the decision is Nathan's.
+**Taken, 0.9.120.1.** `CsTrace.INTERVAL_FEET` is 0.5. The number moved
+twice in one day and that is the honest record: raised 1.0 -> 0.25 while
+the approximating fit made step size the only lever on a corner, then
+settled at 0.5 once interpolation made the corner exact and the
+measurement said something different.
 
 ## Tests
 
@@ -124,6 +144,10 @@ failure:
 - determinism
 - a DXF round trip: exactly one SPLINE record survives, carrying every
   control point, with a real bounding box
+- and for closed loops: the periodic fit solves, passes through every
+  loop point as the ENGINE renders it (sampled through `getExploded`,
+  since `getPointCloud` is empty for a spline headless), has no corner at
+  the seam, and degrades to null on too few or coincident points
 
 `isValid()` is never asserted. It answered true for the spline that
 vanished.

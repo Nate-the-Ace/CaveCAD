@@ -152,6 +152,20 @@ AreaFillRun.layersFor = CsArea.layersFor;
  * while scattering its fill through a gap nothing sampled caught.
  */
 AreaFillRun.closedBoundary = function(doc, verts) {
+    // INTERPOLATING FIRST (2026-09-12). The approximating periodic fit
+    // below pulls the boundary inside the points a caver traced, by a
+    // fraction of the sampling step -- the same rounding that was
+    // measured at 3.35 inches on a wall corner. CsTrace's cyclic solver
+    // puts the curve THROUGH them instead, for the same control point
+    // count and the same file size.
+    //
+    // The fallback stays because interpolation answers null for a loop
+    // of fewer than four points or one with no spread, and a caver
+    // mid-stroke must still get a boundary.
+    var interp = CsTrace.periodicInterpolatingSpline(doc, verts);
+    if (!isNull(interp)) {
+        return interp;
+    }
     var data = new RSplineData();
     for (var i = 0; i < verts.length; i++) {
         data.appendControlPoint(new RVector(verts[i].x, verts[i].y));

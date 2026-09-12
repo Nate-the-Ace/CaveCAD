@@ -256,6 +256,120 @@ if (!isNull(ent)) {
     }
 }
 
+// ---- 7. closed loops: the periodic fit -------------------------------
+//
+// Sampled through getExploded, NOT getPointCloud: headless has no
+// spline proxy plugin and getPointCloud comes back empty for a spline.
+// CsArea.vertsOf branches on shape type for exactly this reason.
+
+function sampleCurve(entity) {
+    var out = [];
+    try {
+        var segs = entity.getExploded();
+        for (var i = 0; i < segs.length; i++) {
+            var cloud = segs[i].getPointCloud(0.05);
+            for (var j = 0; j < cloud.length; j++) {
+                out.push({ x: cloud[j].x, y: cloud[j].y });
+            }
+        }
+    } catch (e) {
+    }
+    return out;
+}
+
+var loop = [];
+for (var g = 0; g < 48; g++) {
+    var ang = (g / 48) * 2 * Math.PI;
+    var rad = 20 + 4 * Math.sin(ang * 3);
+    loop.push({ x: rad * Math.cos(ang), y: rad * Math.sin(ang) });
+}
+
+var pctrl = CsTrace.periodicInterpolatingControlPoints(loop);
+ok(pctrl !== null, "periodic: a closed loop solves");
+if (pctrl !== null) {
+    ok(pctrl.length === loop.length,
+        "periodic: one control point per loop point (got " +
+        pctrl.length + ")");
+    var pbad = 0;
+    for (var pc = 0; pc < pctrl.length; pc++) {
+        if (isNaN(pctrl[pc].x) || isNaN(pctrl[pc].y)) { pbad++; }
+    }
+    ok(pbad === 0, "periodic: no NaN control point");
+}
+
+var pent = CsTrace.periodicInterpolatingSpline(doc, loop);
+ok(!isNull(pent), "periodic: an entity comes back");
+if (!isNull(pent)) {
+    var pop = new RAddObjectsOperation();
+    pop.addObject(pent, false);
+    di.applyOperation(pop);
+
+    var curve = sampleCurve(pent);
+    ok(curve.length > 100,
+        "periodic: the curve samples (got " + curve.length +
+        " points) -- an empty sample means the entity did not render");
+
+    if (curve.length > 100) {
+        // does it pass through the loop points?
+        var pworst = 0;
+        for (var lp = 0; lp < loop.length; lp++) {
+            var nearest = 1e18;
+            for (var cs = 0; cs < curve.length; cs++) {
+                var ddx = curve[cs].x - loop[lp].x;
+                var ddy = curve[cs].y - loop[lp].y;
+                var dcur = Math.sqrt(ddx * ddx + ddy * ddy);
+                if (dcur < nearest) { nearest = dcur; }
+            }
+            if (nearest > pworst) { pworst = nearest; }
+        }
+        near(pworst, 0, 0.05,
+            "periodic: the closed curve passes through every loop point");
+
+        // AND NO CORNER AT THE SEAM. Measuring turns along the samples
+        // as they arrive does not work: getExploded hands its segments
+        // back in no particular order, so consecutive samples can jump
+        // between opposite sides of the loop and fake a 180-degree
+        // reversal that is an artefact of the sampling, not the curve
+        // (measured 2026-09-12 -- the first version of this assertion
+        // failed on exactly that).
+        //
+        // This loop is star-shaped about the origin, so ordering the
+        // samples by their angle around it restores the curve's own
+        // sequence, and then a real corner is the only thing that can
+        // spike the turn.
+        var ordered = curve.slice();
+        ordered.sort(function(A, B) {
+            return Math.atan2(A.y, A.x) - Math.atan2(B.y, B.x);
+        });
+        var thinned = [ordered[0]];
+        for (var o = 1; o < ordered.length; o++) {
+            if (CsTrace.distance(ordered[o], thinned[thinned.length - 1]) >
+                    0.02) {
+                thinned.push(ordered[o]);
+            }
+        }
+        var maxTurn = 0;
+        for (var t4 = 2; t4 < thinned.length; t4++) {
+            var a1 = Math.atan2(thinned[t4-1].y - thinned[t4-2].y,
+                thinned[t4-1].x - thinned[t4-2].x);
+            var a2 = Math.atan2(thinned[t4].y - thinned[t4-1].y,
+                thinned[t4].x - thinned[t4-1].x);
+            var turn = Math.abs(a2 - a1);
+            while (turn > Math.PI) { turn = Math.abs(turn - 2 * Math.PI); }
+            if (turn > maxTurn) { maxTurn = turn; }
+        }
+        ok(maxTurn < 0.6, "periodic: no corner at the seam (worst turn " +
+            (maxTurn * 180 / Math.PI).toFixed(1) + " deg between samples)");
+    }
+}
+
+ok(CsTrace.periodicInterpolatingControlPoints([{x:0,y:0},{x:1,y:0}]) === null,
+    "periodic: too few points is null, not a throw");
+var flat = [];
+for (var fz = 0; fz < 8; fz++) { flat.push({ x: 3, y: 3 }); }
+ok(CsTrace.periodicInterpolatingControlPoints(flat) === null,
+    "periodic: a loop of coincident points is null");
+
 // ---- report -----------------------------------------------------------
 
 if (failures.length > 0) {

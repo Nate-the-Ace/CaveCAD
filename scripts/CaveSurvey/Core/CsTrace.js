@@ -867,6 +867,143 @@ CsTrace.interpolatingSpline = function(doc, points) {
     return new RSplineEntity(doc, new RSplineData(spline));
 };
 
+/**
+ * Control points for a CLOSED cubic B-spline through `points`.
+ *
+ * A closed loop cannot use the banded solve above: wrapping makes the
+ * system CYCLIC -- the first row reaches the last column and the last
+ * row the first -- and band elimination has nowhere to put those two
+ * corners. Sherman-Morrison is the standard answer: solve the cyclic
+ * system as a tridiagonal one plus a rank-one correction.
+ *
+ * UNIFORM parameterisation here, where the open fit uses centripetal,
+ * and that is deliberate rather than lazy: a closed boundary arrives
+ * RESAMPLED at a fixed step, so its chords are already equal and
+ * uniform is what the data is. For a uniform closed cubic the curve at
+ * each knot is (P[i-1] + 4P[i] + P[i+1]) / 6, which is the system
+ * solved below.
+ *
+ * `points` must be the loop's DISTINCT points -- if the caller repeats
+ * the first point at the end to show the loop closing, drop it first,
+ * or the duplicate becomes a zero-length chord and a doubled knot.
+ *
+ * \return [{x, y}, ...] control points, or null.
+ */
+CsTrace.periodicInterpolatingControlPoints = function(points) {
+    if (isNull(points) || points.length < 4) {
+        return null;
+    }
+    var n = points.length;
+    var i;
+    // a closed loop of coincident points has no curve in it
+    var spread = 0;
+    for (i = 1; i < n; i++) {
+        spread += CsTrace.distance(points[i - 1], points[i]);
+    }
+    if (!(spread > 0)) {
+        return null;
+    }
+
+    var a = 1 / 6, b = 4 / 6, c = 1 / 6;
+
+    // Sherman-Morrison: solve T y = q and T z = w, then correct.
+    // T is the tridiagonal part with its first and last diagonal
+    // entries shifted so the rank-one term carries the corners.
+    var gamma = -b;
+    var solveTri = function(rhs) {
+        var cp = [], dp = [];
+        var bb = [];
+        for (i = 0; i < n; i++) {
+            bb.push(b);
+        }
+        bb[0] = b - gamma;
+        bb[n - 1] = b - a * c / gamma;
+        cp.push(c / bb[0]);
+        dp.push(rhs[0] / bb[0]);
+        for (i = 1; i < n; i++) {
+            var m = bb[i] - a * cp[i - 1];
+            if (!(Math.abs(m) > 1e-12)) {
+                return null;
+            }
+            cp.push(c / m);
+            dp.push((rhs[i] - a * dp[i - 1]) / m);
+        }
+        var x = [];
+        for (i = 0; i < n; i++) {
+            x.push(0);
+        }
+        x[n - 1] = dp[n - 1];
+        for (i = n - 2; i >= 0; i--) {
+            x[i] = dp[i] - cp[i] * x[i + 1];
+        }
+        return x;
+    };
+
+    var u = [];
+    for (i = 0; i < n; i++) {
+        u.push(0);
+    }
+    u[0] = gamma;
+    u[n - 1] = c;
+
+    var axis = function(getter) {
+        var q = [];
+        for (i = 0; i < n; i++) {
+            q.push(getter(points[i]));
+        }
+        var y = solveTri(q);
+        var z = solveTri(u);
+        if (y === null || z === null) {
+            return null;
+        }
+        var fact = (y[0] + (a / gamma) * y[n - 1]) /
+            (1 + z[0] + (a / gamma) * z[n - 1]);
+        var out = [];
+        for (i = 0; i < n; i++) {
+            out.push(y[i] - fact * z[i]);
+        }
+        return out;
+    };
+
+    var px = axis(function(p) { return p.x; });
+    var py = axis(function(p) { return p.y; });
+    if (px === null || py === null) {
+        return null;
+    }
+    var ctrl = [];
+    for (i = 0; i < n; i++) {
+        if (isNaN(px[i]) || isNaN(py[i])) {
+            return null;
+        }
+        ctrl.push({ x: px[i], y: py[i] });
+    }
+    return ctrl;
+};
+
+/**
+ * A closed cubic spline through `points`, or null.
+ *
+ * The caller keeps its own fallback: an approximating periodic spline
+ * always builds, and a caver mid-stroke must still get a boundary.
+ */
+CsTrace.periodicInterpolatingSpline = function(doc, points) {
+    var ctrl = CsTrace.periodicInterpolatingControlPoints(points);
+    if (ctrl === null) {
+        return null;
+    }
+    var spline = new RSpline();
+    spline.setDegree(CsTrace.INTERP_DEGREE);
+    spline.setPeriodic(true);
+    for (var i = 0; i < ctrl.length; i++) {
+        spline.appendControlPoint(new RVector(ctrl[i].x, ctrl[i].y));
+    }
+    try {
+        spline.updateInternal();
+    } catch (eUp) {
+    }
+    return new RSplineEntity(doc, new RSplineData(spline));
+};
+
 CsTrace.degreeFor = function(count) {
     if (count <= 2) {
         return 1;
