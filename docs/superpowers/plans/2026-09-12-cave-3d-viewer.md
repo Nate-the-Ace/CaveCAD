@@ -772,10 +772,37 @@ CsMesh3d.tripAt = function(name, survey) {
 };
 ```
 
-If `CsStationOrder.walk` does not have that signature, read
-`Core/CsStationOrder.js` and use the traversal it does expose; the
-requirement is only that stations arrive in connected run order so
-consecutive rings are genuinely adjacent.
+**CORRECTION, found while implementing Task 2 -- do not use
+`CsStationOrder`.** It exposes `walkOrder(survey)`, which is
+first-appearance order over the legs and carries NO adjacency
+guarantee: two consecutive names in it can be in different parts of the
+cave, and lofting between their rings would stretch a surface across
+open air.
+
+Iterate `resolved.legs` instead. `CsNetwork.resolve` returns them in
+resolution order tagged `kind` of `"new"` / `"closure"` / `"tie"`, and
+the `"new"` legs ARE the spanning tree -- each one attaches a
+newly-placed station to an already-placed one, so its two ends are
+genuinely adjacent by construction. So:
+
+- compute each station's ring once, lazily, and cache it by name
+- for every leg with `kind === "new"`, loft `ring(leg.from)` to
+  `ring(leg.to)`
+- skip the loft when either end is a junction (`counts[name] >= 3`),
+  which is how "a junction ends a run" expresses itself when the walk
+  is per-leg rather than per-run
+
+This drops the run/flush bookkeeping entirely and handles branching for
+free. Closure and tie legs are drawn on the centerline but never
+lofted: a closure leg joins two stations already placed by other
+routes, and lofting it would put a second surface over passage the
+spanning tree has already covered.
+
+One thing still to settle in code: `directionAt` averages every leg at
+a station, which at a junction means averaging branches that head
+different ways. Since junctions are not lofted anyway, the junction
+ring is only ever an endpoint -- but confirm the ring there still looks
+sane before moving on.
 
 - [ ] **Step 4: Run, expect pass**
 
