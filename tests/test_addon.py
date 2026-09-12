@@ -1622,6 +1622,7 @@ MENU = {
     # 452 -- draw the map
     "DrawPanel/DrawPanel.js":             (452, 10, ["draw", "ft", "sym", "area"]),
     "ShapedLines/ShapedLines.js":         (452, 20, ["shapedlines", "shl"]),
+    "ShapedLines/WallEdging.js":          (452, 36, ["walledging", "wed"]),
     "ScatterBreakdown/ScatterBreakdown.js": (452, 30, ["scatterbreakdown", "scb"]),
     "AreaSync/AreaSync.js":               (452, 35, ["syncareas", "sya"]),
     "CrossSection/CrossSection.js":       (452, 40, ["crosssection", "cxs"]),

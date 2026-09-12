@@ -21824,6 +21824,137 @@ function syntheticTiff(w, h, floats) {
     ok(Math.abs(gj1[0].scaleMul - 1) > 1e-9,
         "glyphPlacements: scale jitter actually changes the size");
 
+    // -- automatic edging: which side is OUTSIDE ---------------------
+    //
+    // The geometry, not a fixture that happens to agree. A wall along
+    // the x axis, stations placed deliberately, and the answer worked
+    // out by hand for each case.
+
+    var wallX = [];
+    for (var wx = 0; wx <= 40; wx += 2) {
+        wallX.push({ x: wx, y: 0 });
+    }
+    // For a spine running +x, glyphPlacements' +1 normal is (ty, -tx) =
+    // (0, -1) -- so side +1 is BELOW the wall and side -1 is above it.
+
+    // CONFIDENT: passage above the wall, so outside is below (+1)
+    var above = [{ x: 10, y: 8 }, { x: 20, y: 8 }, { x: 30, y: 8 }];
+    var sAbove = CsShapeLine.autoSides(wallX, false, 5, above, 2);
+    var wrong = 0, unsure = 0, skipped = 0;
+    for (var a1 = 0; a1 < sAbove.length; a1++) {
+        if (sAbove[a1].side !== 1) { wrong++; }
+        if (!sAbove[a1].sure) { unsure++; }
+        if (sAbove[a1].skip) { skipped++; }
+    }
+    eqs(wrong, 0, "autoSides: cave above means glyphs go below -- every " +
+        "station agrees");
+    eqs(skipped, 0, "autoSides: open passage skips nothing");
+
+    // and the mirror image, so a sign error cannot pass both
+    var below = [{ x: 10, y: -8 }, { x: 20, y: -8 }, { x: 30, y: -8 }];
+    var sBelow = CsShapeLine.autoSides(wallX, false, 5, below, 2);
+    var wrong2 = 0;
+    for (var a2 = 0; a2 < sBelow.length; a2++) {
+        if (sBelow[a2].side !== -1) { wrong2++; }
+    }
+    eqs(wrong2, 0, "autoSides: cave below means glyphs go above");
+
+    // BOTH SIDES: a fin, passage either face -- no outside exists
+    var fin = [{ x: 10, y: 8 }, { x: 20, y: 8 }, { x: 10, y: -8 },
+               { x: 20, y: -8 }];
+    var sFin = CsShapeLine.autoSides(wallX, false, 5, fin, 2);
+    var finSkips = 0;
+    for (var a3 = 0; a3 < sFin.length; a3++) {
+        if (sFin[a3].skip) { finSkips++; }
+    }
+    ok(finSkips > 0, "autoSides: a wall with passage on both faces skips " +
+        "-- a fin has no outside (skipped " + finSkips + " of " +
+        sFin.length + ")");
+
+    // A WALL RUNNING OUT OF A FIN INTO OPEN PASSAGE is edged only where
+    // there is an outside: stations both sides for the first stretch,
+    // one side only beyond it.
+    var mixed = [{ x: 5, y: 8 }, { x: 10, y: 8 }, { x: 15, y: 8 },
+                 { x: 25, y: 8 }, { x: 35, y: 8 },
+                 { x: 5, y: -8 }, { x: 10, y: -8 }, { x: 15, y: -8 }];
+    var sMix = CsShapeLine.autoSides(wallX, false, 5, mixed, 2);
+    // The boundary is not a cliff edge and should not be asserted as
+    // one: a station just past the fin's last one is still nearer to it
+    // than to anything else, so the skip fades out over a glyph or two.
+    // What must hold is that the fin end skips and the far end does not.
+    var nearSkip = 0, farSkip = 0, farKept = 0;
+    for (var a4 = 0; a4 < sMix.length; a4++) {
+        var atX = a4 * 5;
+        if (atX <= 15) {
+            if (sMix[a4].skip) { nearSkip++; }
+        } else if (atX >= 30) {
+            if (sMix[a4].skip) { farSkip++; } else { farKept++; }
+        }
+    }
+    ok(nearSkip > 0, "autoSides: the fin end of the wall skips");
+    ok(farKept > 0, "autoSides: and the open end is still edged");
+    eqs(farSkip, 0, "autoSides: well past the fin, nothing skips");
+
+    // AMBIGUOUS: the only station lies along the wall's own tangent, so
+    // it says nothing about across. That station gets no vote and
+    // inherits the wall's answer rather than a constant -- the bug this
+    // test exists for was glyphs defaulting to side +1 regardless.
+    var alongOnly = [{ x: 60, y: 0.2 }];
+    var sAlong = CsShapeLine.autoSides(wallX, false, 5, alongOnly, 2);
+    var sureCount = 0;
+    for (var a5 = 0; a5 < sAlong.length; a5++) {
+        if (sAlong[a5].sure) { sureCount++; }
+    }
+    ok(sureCount < sAlong.length,
+        "autoSides: a station along the wall cannot say which side is " +
+        "across, and is not counted as if it could");
+
+    // a wall MOSTLY confident, with an ambiguous stretch, inherits its
+    // own answer there -- not +1
+    var mostly = [{ x: 2, y: -9 }, { x: 8, y: -9 }, { x: 55, y: 0 }];
+    var sMostly = CsShapeLine.autoSides(wallX, false, 5, mostly, 2);
+    var inherited = null, agree = true;
+    for (var a6 = 0; a6 < sMostly.length; a6++) {
+        if (!sMostly[a6].sure) {
+            if (inherited === null) { inherited = sMostly[a6].side; }
+            if (sMostly[a6].side !== inherited) { agree = false; }
+        }
+    }
+    ok(inherited === -1 && agree,
+        "autoSides: an unsure stretch inherits the side its own wall " +
+        "resolved, not a global default (got " + inherited + ")");
+
+    // no survey at all: an answer, not a crash
+    var sNone = CsShapeLine.autoSides(wallX, false, 5, [], 2);
+    eqs(sNone.length, CsShapeLine.stations(wallX, false, 5).length,
+        "autoSides: a drawing with no stations still answers per station");
+
+    // THE DICE DO NOT DEPEND ON THE SKIPS. A skipped station still
+    // draws its four numbers, so editing one end of a wall cannot
+    // reshuffle the glyphs at the other.
+    var seqA = [0.9, 0.1, 0.8, 0.2, 0.3, 0.7, 0.4, 0.6];
+    var ia = 0;
+    var randA = function() { var v = seqA[ia % seqA.length]; ia++; return v; };
+    var allKept = [];
+    var someSkipped = [];
+    for (var kk = 0; kk < sAbove.length; kk++) {
+        allKept.push({ side: 1, skip: false });
+        someSkipped.push({ side: 1, skip: kk === 0 });
+    }
+    ia = 0;
+    var gAll = CsShapeLine.glyphPlacementsAuto(wallX, false, 5, 2, allKept,
+        1, 0.5, 0.5, randA);
+    ia = 0;
+    var gSkip = CsShapeLine.glyphPlacementsAuto(wallX, false, 5, 2,
+        someSkipped, 1, 0.5, 0.5, randA);
+    eqs(gSkip.length, gAll.length - 1,
+        "glyphPlacementsAuto: a skipped station places nothing");
+    if (gSkip.length > 0 && gAll.length > 1) {
+        eqs(JSON.stringify(gSkip[0]), JSON.stringify(gAll[1]),
+            "glyphPlacementsAuto: and the glyphs that remain are " +
+            "UNCHANGED -- the dice are rolled per station, skipped or not");
+    }
+
     // prims routes "glyphs" through glyphPlacements via `extra`, and a
     // caller that hands in no `extra` at all (an old call site, or a
     // kind that never asked for jitter) gets the no-jitter fallback

@@ -83,6 +83,88 @@ ShapedLinesListener.touchedIds = function(document, transaction) {
     return touched;
 };
 
+/**
+ * Walls drawn while the switch is on, which this transaction created.
+ *
+ * A caver who turns Wall Edging on and then traces another passage
+ * should not have to press it again -- the switch is a statement about
+ * the drawing, not a one-off action.
+ */
+ShapedLinesListener.freshWalls = function(document, transaction) {
+    var out = [];
+    if (typeof WallEdging === "undefined") {
+        return out;
+    }
+    try {
+        if (!WallEdging.isOn(document)) {
+            return out;
+        }
+    } catch (eOn) {
+        return out;
+    }
+    var ids;
+    try {
+        ids = transaction.getAffectedObjects();
+    } catch (eAff) {
+        return out;
+    }
+    var wallLayer = document.getLayerId(CsLayers.WALLS_SURVEYED);
+    if (wallLayer === RObject.INVALID_ID) {
+        return out;
+    }
+    for (var i = 0; i < ids.length; i++) {
+        var e = document.queryEntity(ids[i]);
+        if (isNull(e) || e.getLayerId() !== wallLayer) {
+            continue;
+        }
+        if (typeof e.isUndone === "function" && e.isUndone()) {
+            continue;
+        }
+        if (CsTags.get(e, CsShapeLine.KEY.STYLE) !== "") {
+            continue;   // already dressed, by the switch or by hand
+        }
+        if (!CsShapeLine.isSupported(e)) {
+            continue;
+        }
+        out.push(e.getId());
+    }
+    return out;
+};
+
+/**
+ * Dresses one freshly drawn wall, from inside the transaction callback.
+ *
+ * NO BLOCK IMPORT FROM HERE. Importing a missing symbol means
+ * CsSymbolStore.ensureBlock -> copyBlock, which issues several of its
+ * OWN applyOperation calls -- nested writes from inside a transaction
+ * listener, which CsArea.regenerate refuses to do for exactly this
+ * reason and says so in a comment written after this suite got bitten.
+ * So a drawing that has never placed the glyph block yet simply does
+ * not auto-dress until the caver toggles the switch (or draws a glyph
+ * some other way), which is a wall without ornament rather than a
+ * reentrant write.
+ */
+ShapedLinesListener.dressFreshWall = function(doc, di, id, group, cache) {
+    var spec = CsShapeLine.STYLES[WallEdging.STYLE];
+    if (isNull(spec)) {
+        return false;
+    }
+    var block = null;
+    try {
+        block = doc.queryBlock(spec.symbolDefault);
+    } catch (eB) {
+        block = null;
+    }
+    if (isNull(block)) {
+        return false;   // see the note above: not from in here
+    }
+    var wall = doc.queryEntity(id);
+    if (isNull(wall)) {
+        return false;
+    }
+    return WallEdging.dressOne(doc, di, wall, group, cache);
+};
+
 ShapedLinesListener.onTransaction = function(document, transaction) {
     if (ShapedLinesListener.busy) {
         return;
@@ -92,7 +174,8 @@ ShapedLinesListener.onTransaction = function(document, transaction) {
     }
 
     var touched = ShapedLinesListener.touchedIds(document, transaction);
-    var any = false;
+    var fresh = ShapedLinesListener.freshWalls(document, transaction);
+    var any = fresh.length > 0;
     for (var probe in touched) {
         if (touched.hasOwnProperty(probe)) {
             any = true;
@@ -128,16 +211,28 @@ ShapedLinesListener.onTransaction = function(document, transaction) {
     }
 
     ShapedLinesListener.busy = true;
+    var cache = {};
     try {
         for (var id in touched) {
             if (!touched.hasOwnProperty(id)) {
                 continue;
             }
             try {
-                CsShapeLine.reconcile(current, di, id, group);
+                // ONE station scan for the whole transaction, shared by
+                // every wall it touches -- the side test runs per glyph
+                // and a drag can touch several walls, so re-walking the
+                // drawing for each would be a product.
+                CsShapeLine.reconcile(current, di, id, group, cache);
             } catch (eOne) {
                 // One broken feature must not stop the others, and must
                 // never surface as a dialog mid-drag.
+            }
+        }
+        for (var w = 0; w < fresh.length; w++) {
+            try {
+                ShapedLinesListener.dressFreshWall(current, di, fresh[w],
+                    group, cache);
+            } catch (eFresh) {
             }
         }
     } finally {

@@ -27,6 +27,7 @@
 include("scripts/EAction.js");
 include(includeBasePath + "/../Core/CsAll.js");
 include(includeBasePath + "/ShapedLinesRun.js");
+include(includeBasePath + "/WallEdging.js");
 include(includeBasePath + "/LedgeFloorDraw.js");
 include(includeBasePath + "/LedgeCeilingDraw.js");
 include(includeBasePath + "/PitDraw.js");
@@ -308,6 +309,7 @@ ShapedLines.init = function(basePath) {
     // The draw buttons and companions live in sibling files QCAD cannot
     // discover on its own.
     ShapedLinesRun.init(basePath);
+    WallEdging.init(basePath);
     LedgeFloorDraw.init(basePath);
     LedgeCeilingDraw.init(basePath);
     PitDraw.init(basePath);

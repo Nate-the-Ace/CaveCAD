@@ -42,7 +42,14 @@ CsShapeLine.KEY = {
     // has been looking at it for weeks. SYMBOL is which catalog block
     // the caver picked; empty means the style's own symbolDefault.
     SEED: "ShapeSeed",
-    SYMBOL: "ShapeSymbol"
+    SYMBOL: "ShapeSymbol",
+    // "this wall was dressed BY THE SWITCH, not by hand" (2026-09-12).
+    // It decides two things: whether the side is recomputed per station
+    // against the survey, and whether turning the switch off may remove
+    // this decoration. A hand tool that edits an auto-dressed spine
+    // clears it, because after that the caver owns the wall and a
+    // toggle must not wipe their work.
+    AUTO: "ShapeAuto"
 };
 
 /**
@@ -404,6 +411,206 @@ CsShapeLine.glyphPlacements = function(pts, closed, spacing, offset, side,
     return out;
 };
 
+// ---- automatic wall edging: which side is OUTSIDE --------------------
+//
+// Stone glyphs belong outside a cave wall, and the drawing already says
+// where the cave is: the survey stations. So the side is not a guess, it
+// is geometry -- the direction from a point on the wall to the nearest
+// station IS the direction of the cave, and outside is the other way
+// (Nathan, 2026-09-12: "can the stone glyphs just automatically appear
+// near but outside the cave walls").
+//
+// DECIDED PER GLYPH, not per wall. One wall can run from open passage
+// into a fin between two passages, and the answer differs along it.
+
+/** How far off the wall's own tangent a station must sit before it can
+ *  say which side the cave is on. A station nearly ALONG the wall --
+ *  which is the normal case at the midpoint of a long shot -- says
+ *  almost nothing about across, and taking its word produces a
+ *  confident wrong answer. Sine of about 15 degrees. */
+CsShapeLine.SIDE_CONFIDENCE = 0.25;
+
+/** How much farther than the nearest station another one may be and
+ *  still count as "there is cave over there too". Three times: a
+ *  parallel passage much farther off than the one this wall belongs to
+ *  is a different part of the cave, not the other side of this rock. */
+CsShapeLine.BOTH_SIDES_RATIO = 3.0;
+
+/** Nearest of `stations` to (x, y): {d, sx, sy} , or null when there
+ *  are no stations at all (an undrawn survey, a scratch drawing). */
+CsShapeLine.nearestStation = function(stations, x, y) {
+    var best = null;
+    for (var i = 0; i < stations.length; i++) {
+        var dx = stations[i].x - x, dy = stations[i].y - y;
+        var d = Math.sqrt(dx * dx + dy * dy);
+        if (best === null || d < best.d) {
+            best = { d: d, sx: stations[i].x, sy: stations[i].y };
+        }
+    }
+    return best;
+};
+
+/**
+ * For each glyph station along a spine: which side is outside, or skip.
+ *
+ * \return [{side: 1|-1, skip: bool, sure: bool}, ...] in station order.
+ *
+ * Three cases, and the middle one is the whole reason this is not a
+ * one-liner:
+ *
+ *   CONFIDENT -- the nearest station sits across the wall, so the
+ *   perpendicular part of the direction to it is a real fraction of the
+ *   whole. Outside is the opposite side. Most of a cave is this.
+ *
+ *   AMBIGUOUS -- the nearest station lies roughly ALONG the wall, which
+ *   happens in the middle of any long shot with no station between.
+ *   Such a station cannot say which way is across, so this station gets
+ *   no vote of its own and inherits the wall's own answer (below).
+ *
+ *   BOTH SIDES -- stepping outward gets CLOSER to some other station
+ *   that is not much farther off than the near one. That is a fin or a
+ *   pillar: rock with passage on either face, no outside at all, and
+ *   the honest thing to draw is nothing. Glyphs pushed into the
+ *   neighbouring passage would be a drafting error a reader believes.
+ */
+CsShapeLine.autoSides = function(pts, closed, spacing, stations, probe) {
+    var st = CsShapeLine.stations(pts, closed, spacing);
+    var out = [];
+    var i;
+    if (isNull(stations) || stations.length === 0) {
+        for (i = 0; i < st.length; i++) {
+            out.push({ side: 1, skip: false, sure: false });
+        }
+        return out;
+    }
+    var reach = probe > 0 ? probe : 1;
+    for (i = 0; i < st.length; i++) {
+        var px = st[i].x, py = st[i].y;
+        // the +1 normal, matching glyphPlacements' own convention
+        var nx = st[i].ty, ny = -st[i].tx;
+        var near = CsShapeLine.nearestStation(stations, px, py);
+        var vx = near.sx - px, vy = near.sy - py;
+        var vlen = Math.sqrt(vx * vx + vy * vy);
+        if (!(vlen > 0)) {
+            out.push({ side: 1, skip: false, sure: false });
+            continue;
+        }
+        var perp = (vx * nx + vy * ny) / vlen;     // -1 .. 1
+        var sure = Math.abs(perp) >= CsShapeLine.SIDE_CONFIDENCE;
+        // the cave is toward the station, so outside is away from it
+        var side = perp > 0 ? -1 : 1;
+        var skip = false;
+        if (sure) {
+            // is there cave on the OUTWARD side as well?
+            var ox = px + nx * side * reach, oy = py + ny * side * reach;
+            var far = CsShapeLine.nearestStation(stations, ox, oy);
+            var backX = far.sx - px, backY = far.sy - py;
+            var backLen = Math.sqrt(backX * backX + backY * backY);
+            if (far.d < backLen &&
+                    backLen <= near.d * CsShapeLine.BOTH_SIDES_RATIO) {
+                skip = true;
+            }
+        }
+        out.push({ side: side, skip: skip, sure: sure });
+    }
+    // THE WALL'S OWN ANSWER fills in for the stations that had none.
+    // Its confident stretches vote; an ambiguous stretch inherits that
+    // rather than a global constant, because "side +1 of however this
+    // line happened to be traced" is not a direction in the cave.
+    var vote = 0;
+    for (i = 0; i < out.length; i++) {
+        if (out[i].sure && !out[i].skip) {
+            vote += out[i].side;
+        }
+    }
+    var fallback = vote < 0 ? -1 : 1;
+    for (i = 0; i < out.length; i++) {
+        if (!out[i].sure) {
+            out[i].side = fallback;
+        }
+    }
+    return out;
+};
+
+/**
+ * Glyph placements with a per-station side, and stations skipped.
+ *
+ * THE DICE ARE ROLLED FOR EVERY STATION, skipped or not -- four draws
+ * each, before the skip is applied. Rolling only for the ones that are
+ * kept would make the jitter depend on how many were skipped, so
+ * editing a wall at one end would reshuffle the glyphs at the other.
+ * Same discipline as CsArea's scatter, and for the same reason.
+ */
+CsShapeLine.glyphPlacementsAuto = function(pts, closed, spacing, offset,
+        sides, jitterPos, jitterRotRad, jitterScaleFrac, rand) {
+    var st = CsShapeLine.stations(pts, closed, spacing);
+    var out = [];
+    for (var i = 0; i < st.length; i++) {
+        var jt = (rand() * 2 - 1) * jitterPos;
+        var jn = (rand() * 2 - 1) * jitterPos;
+        var jr = (rand() * 2 - 1) * jitterRotRad;
+        var js = (rand() * 2 - 1) * jitterScaleFrac;
+        var pick = i < sides.length ? sides[i] : { side: 1, skip: false };
+        if (pick.skip === true) {
+            continue;
+        }
+        var nx = st[i].ty * pick.side, ny = -st[i].tx * pick.side;
+        var bx = st[i].x + nx * offset, by = st[i].y + ny * offset;
+        out.push({
+            x: bx + st[i].tx * jt + nx * jn,
+            y: by + st[i].ty * jt + ny * jn,
+            angle: Math.atan2(st[i].ty, st[i].tx) + jr,
+            scaleMul: Math.max(0.05, 1 + js)
+        });
+    }
+    return out;
+};
+
+/**
+ * Every survey station in the drawing, as plain points.
+ *
+ * PLAN ONLY, and that is a fact about the drawing rather than a choice:
+ * CsDraw and CsRebuild are the only writers of the Station tag and both
+ * draw the plan, so a profile band and a section bay contain no station
+ * geometry to reason against. Automatic edging therefore answers for
+ * plan walls; profile and section walls are dressed by hand with
+ * Decorate Selection, which knows the side because a caver told it.
+ *
+ * Cached per document: the side test runs per GLYPH, and a wall is many
+ * glyphs, so re-walking every entity each time would make the switch
+ * quadratic on a real cave.
+ */
+CsShapeLine.planStations = function(doc, cache) {
+    if (!isNull(cache) && !isNull(cache.stations)) {
+        return cache.stations;
+    }
+    var out = [];
+    try {
+        var found = CsTags.collectStations(doc);
+        for (var i = 0; i < found.length; i++) {
+            // `pos`, which is what collectStations calls it. Reading a
+            // field that is not there costs nothing loudly: every
+            // station was dropped, the list came back empty, and every
+            // wall quietly fell back to its default side (2026-09-12).
+            var p = found[i].pos;
+            if (!isNull(p) && !isNaN(p.x) && !isNaN(p.y)) {
+                out.push({ x: p.x, y: p.y });
+            }
+        }
+    } catch (e) {
+        out = [];
+    }
+    if (!isNull(cache)) {
+        cache.stations = out;
+    }
+    return out;
+};
+
+/** Is this spine dressed by the switch rather than by hand? */
+CsShapeLine.isAuto = function(spine) {
+    return CsTags.get(spine, CsShapeLine.KEY.AUTO) === "1";
+};
+
 /** A rand() that never jitters -- prims' fallback when a caller asks
  *  for a glyphs style without handing in a seeded generator (the icon-
  *  free code paths that build primitives outside the real document, if
@@ -578,10 +785,20 @@ CsShapeLine.prims = function(pts, closed, spec, side, spacing, size, extra) {
         }
     } else if (spec.kind === "glyphs") {
         extra = extra || {};
-        out.glyphs = CsShapeLine.glyphPlacements(pts, closed, spacing,
-            extra.offset || 0, side, extra.jitterPos || 0,
-            extra.jitterRotRad || 0, extra.jitterScaleFrac || 0,
-            extra.rand || CsShapeLine.noJitterRand);
+        if (!isNull(extra.sides)) {
+            // automatic edging: the side is decided per station against
+            // the survey, not once for the whole wall
+            out.glyphs = CsShapeLine.glyphPlacementsAuto(pts, closed,
+                spacing, extra.offset || 0, extra.sides,
+                extra.jitterPos || 0, extra.jitterRotRad || 0,
+                extra.jitterScaleFrac || 0,
+                extra.rand || CsShapeLine.noJitterRand);
+        } else {
+            out.glyphs = CsShapeLine.glyphPlacements(pts, closed, spacing,
+                extra.offset || 0, side, extra.jitterPos || 0,
+                extra.jitterRotRad || 0, extra.jitterScaleFrac || 0,
+                extra.rand || CsShapeLine.noJitterRand);
+        }
     }
     return out;
 };
@@ -917,7 +1134,7 @@ CsShapeLine.scaleOf = function(spine) {
  * glyph entities for a block this drawing does not already have,
  * rather than an exception.
  */
-CsShapeLine.buildDecor = function(doc, spine, sample, di) {
+CsShapeLine.buildDecor = function(doc, spine, sample, di, cache) {
     var styleKey = CsTags.get(spine, CsShapeLine.KEY.STYLE);
     var spec = CsShapeLine.STYLES[styleKey];
     if (isNull(spec)) {
@@ -965,6 +1182,17 @@ CsShapeLine.buildDecor = function(doc, spine, sample, di) {
             jitterScaleFrac: spec.jitterScaleFrac || 0,
             rand: CsArea.rng(seed)
         };
+        // AUTOMATIC EDGING decides the side per station against the
+        // survey instead of taking the spine's one ShapeSide tag. A
+        // hand-dressed wall keeps its tag and this whole branch is
+        // skipped, so Decorate Selection and ShapedFlip behave exactly
+        // as they did.
+        if (CsShapeLine.isAuto(spine) &&
+                CsShapeLine.frameOfSpine(spine) === "plan") {
+            extra.sides = CsShapeLine.autoSides(sample.points,
+                sample.closed, spacing, CsShapeLine.planStations(doc, cache),
+                extra.offset > 0 ? extra.offset : spacing);
+        }
     }
 
     var prims = CsShapeLine.prims(sample.points, sample.closed, spec,
@@ -1064,12 +1292,12 @@ CsShapeLine.buildDecor = function(doc, spine, sample, di) {
  *
  * Returns "unchanged" | "decorated" | "failed".
  */
-CsShapeLine.decorate = function(doc, di, spine, group) {
+CsShapeLine.decorate = function(doc, di, spine, group, cache) {
     var sid = CsTags.get(spine, CsShapeLine.KEY.ID);
     if (sid === "") {
         return "failed";
     }
-    var built = CsShapeLine.buildDecor(doc, spine, null, di);
+    var built = CsShapeLine.buildDecor(doc, spine, null, di, cache);
     if (isNull(built)) {
         return "failed";
     }
@@ -1136,7 +1364,53 @@ CsShapeLine.decorate = function(doc, di, spine, group) {
  *   anything else   -> regenerate (decorate() self-guards against
  *                      no-op writes).
  */
-CsShapeLine.reconcile = function(doc, di, id, group) {
+/**
+ * Strips the decoration and the shaped-line tags from a spine, leaving
+ * the line itself exactly as it was.
+ *
+ * THE SEED SURVIVES. Everything else goes, but ShapeSeed stays on the
+ * line, so switching wall edging off and on again reproduces the same
+ * jitter rather than reshuffling every glyph on a wall the caver has
+ * been looking at. That rule is the whole reason the seed is persisted
+ * in the first place; a toggle is not a reason to break it.
+ *
+ * \return true when something was removed.
+ */
+CsShapeLine.undress = function(doc, di, spine, group) {
+    var sid = CsTags.get(spine, CsShapeLine.KEY.ID);
+    if (sid === "") {
+        return false;
+    }
+    var grouped = function(op) {
+        if (group !== null && group !== undefined && group >= 0) {
+            op.setTransactionGroup(group);
+        }
+        di.applyOperation(op);
+    };
+    var existing = CsShapeLine.decorOf(doc, sid);
+    if (existing.length > 0) {
+        var del = new RDeleteObjectsOperation();
+        for (var d = 0; d < existing.length; d++) {
+            del.deleteObject(existing[d]);
+        }
+        grouped(del);
+    }
+    var fresh = doc.queryEntity(spine.getId());
+    if (isNull(fresh)) {
+        return existing.length > 0;
+    }
+    var mod = new RModifyObjectsOperation();
+    CsTags.remove(fresh, CsShapeLine.KEY.STYLE);
+    CsTags.remove(fresh, CsShapeLine.KEY.ID);
+    CsTags.remove(fresh, CsShapeLine.KEY.SIG);
+    CsTags.remove(fresh, CsShapeLine.KEY.AUTO);
+    CsTags.remove(fresh, CsShapeLine.KEY.SYMBOL);
+    mod.addObject(fresh, false);
+    grouped(mod);
+    return true;
+};
+
+CsShapeLine.reconcile = function(doc, di, id, group, cache) {
     var spine = CsShapeLine.spineOf(doc, id);
     var decor = CsShapeLine.decorOf(doc, id);
 
@@ -1171,7 +1445,7 @@ CsShapeLine.reconcile = function(doc, di, id, group) {
         return "unlinked";
     }
 
-    var r = CsShapeLine.decorate(doc, di, spine, group);
+    var r = CsShapeLine.decorate(doc, di, spine, group, cache);
     return (r === "unchanged") ? "unchanged" : "reflowed";
 };
 
