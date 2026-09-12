@@ -117,3 +117,92 @@ CsDrape.grid = function(quad, divisions, stations) {
     }
     return out;
 };
+
+// =====================================================================
+// QCAD context below this line. Everything above runs under node.
+//
+// CsTags, CsCave and CsScanFrame are used at CALL time only and not
+// included: CsAll's order already loads them, and pulling them earlier
+// from here would reorder their own dependencies.
+// =====================================================================
+
+/** The XDATA key a scan's path is stored under, relative to scans/. */
+CsDrape.PATH_TAG = "SketchScan";
+
+/**
+ * Every scan of one kind, with its file and the quad it occupies.
+ *
+ * THE ENTITY DOES NOT KNOW ITS OWN FILE. Probed against Truitt Cave's 28
+ * plan scans: getFileName() comes back EMPTY and getWidth()/getHeight()
+ * come back ZERO, through BOTH the method route and the property route.
+ * Taking those at face value gives a drape that finds no images and says
+ * nothing about why.
+ *
+ * The path is in XDATA, relative to the cave's scans folder -- the
+ * convention CsCave documents -- and the pixel size has to come from the
+ * file itself.
+ *
+ * \param kind "plan" | "profile" | "section", as CsScanFrame names them
+ * \return [{path, widthPx, heightPx, quad: {origin, u, v}}]
+ */
+CsDrape.readScans = function(doc, kind) {
+    var out = [];
+    if (isNull(doc)) {
+        return out;
+    }
+    var layerName = CsScanFrame.layerFor(kind);
+    var scans = CsCave.scansDir(doc.getFileName());
+    var ids;
+    try {
+        ids = doc.queryAllEntities(false, true);
+    } catch (e) {
+        return out;
+    }
+    for (var i = 0; i < ids.length; i++) {
+        try {
+            var e = doc.queryEntity(ids[i]);
+            if (isNull(e) || e.getType() !== RS.EntityImage) {
+                continue;
+            }
+            if (String(doc.getLayerName(e.getLayerId())) !== layerName) {
+                continue;
+            }
+            var stored = CsTags.get(e, CsDrape.PATH_TAG);
+            if (typeof stored !== "string" || stored === "") {
+                continue;
+            }
+            var path = CsCave.resolveUnderScans(scans, stored);
+            if (path === null || !(new QFileInfo(path)).exists()) {
+                // A scan whose file has gone is SKIPPED. A blank quad
+                // hanging over the passage says something false about
+                // what was drawn there.
+                continue;
+            }
+            var img = new QImage(path);
+            if (img.isNull()) {
+                continue;
+            }
+            var wpx = img.width(), hpx = img.height();
+            if (!(wpx > 0) || !(hpx > 0)) {
+                continue;
+            }
+            var ip = e.getInsertionPoint();
+            var u = e.getUVector();
+            var v = e.getVVector();
+            out.push({
+                path: path,
+                widthPx: wpx,
+                heightPx: hpx,
+                // u AND v ARE PER PIXEL. The quad spans the whole image,
+                // so each is multiplied by that dimension's pixel count.
+                quad: { origin: { x: ip.x, y: ip.y },
+                        u: { x: u.x * wpx, y: u.y * wpx },
+                        v: { x: v.x * hpx, y: v.y * hpx } }
+            });
+        } catch (eRead) {
+            // One unreadable scan must not take the whole drape down.
+            continue;
+        }
+    }
+    return out;
+};
