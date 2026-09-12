@@ -1618,6 +1618,7 @@ MENU = {
     "ImportCaveSurvey/ImportCaveSurvey.js": (451, 20, ["importcavesurvey", "ics"]),
     "ExportCaveSurvey/ExportCaveSurvey.js": (451, 30, ["exportcavesurvey", "ecs"]),
     "LoopErrors/LoopErrors.js":           (451, 40, ["looperrors", "le"]),
+    "Cave3D/Cave3D.js":                   (451, 50, ["cave3d", "c3"]),
     # 452 -- draw the map
     "DrawPanel/DrawPanel.js":             (452, 10, ["draw", "ft", "sym", "area"]),
     "ShapedLines/ShapedLines.js":         (452, 20, ["shapedlines", "shl"]),
@@ -1891,6 +1892,7 @@ class TestSheetFileGuard(unittest.TestCase):
         "CaveTemplate": "makes a NEW drawing from the template",
         "TeachingCave": "copies files between folders",
         "SheetSetup": "refuses a sheet in readState, with its own words",
+        "Cave3D": "opens a window onto the survey; draws no entity",
     }
 
     def guarded(self, folder):

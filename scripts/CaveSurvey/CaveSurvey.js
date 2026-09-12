@@ -156,6 +156,21 @@ CaveSurvey.init = function(basePath, splash) {
         // degrade to the manual sync path
     }
 
+    // Keep the 3D view following the drawing while the caver edits.
+    // UNLIKE the three listeners above this one writes nothing -- it
+    // reads the survey and pushes a mesh into a window -- so it carries
+    // no re-entrancy guard and joins no undo group. Without it the 3D
+    // view still works; it just needs its Refresh button pressed, which
+    // is the guarantee either way.
+    try {
+        include(includeBasePath + "/Cave3D/Cave3DListener.js");
+        if (typeof Cave3DListener !== "undefined") {
+            Cave3DListener.install();
+        }
+    } catch (eCave3d) {
+        // degrade to the Refresh button
+    }
+
     // Keep the previous version of a drawing beside it on every save.
     // A redraw is erase-then-draw across two operations, so a draw that
     // fails after the erase has landed leaves the drawing gutted -- and
