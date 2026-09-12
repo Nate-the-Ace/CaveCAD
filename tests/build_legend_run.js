@@ -189,6 +189,110 @@ ok(isNull(after.features["layer:CEILING"]),
     "the legend's own geometry never teaches the next run new features");
 
 // ---------------------------------------------------------------------
+// AREAS: a room of sand and a pool of water. The swatch's fill is
+// CsArea.build's own output, and the point of this section is proving
+// it landed where it was told to -- on LEGEND, restyled to the
+// pattern's own colour, never left on SEDIMENT-SAND-GRAVEL or
+// WATER-POOL-SUMP where CheckMap and Feature Trace's completeness
+// badge would count it as more cave than the survey actually has.
+// ---------------------------------------------------------------------
+
+function addAreaBoundary(x, y, side, patternKey) {
+    var rect = new RPolyline();
+    rect.appendVertex(new RVector(x, y), 0.0);
+    rect.appendVertex(new RVector(x + side, y), 0.0);
+    rect.appendVertex(new RVector(x + side, y + side), 0.0);
+    rect.appendVertex(new RVector(x, y + side), 0.0);
+    rect.setClosed(true);
+    var e = new RPolylineEntity(doc, new RPolylineData(rect));
+    CsTags.set(e, CsArea.ID_KEY, "area-" + patternKey);
+    CsTags.set(e, CsArea.PATTERN_KEY, patternKey);
+    var op = new RAddObjectsOperation();
+    op.addObject(e, false);
+    di.applyOperation(op);
+    return e.getId();
+}
+
+addAreaBoundary(0, 100, 20, "SAND");
+addAreaBoundary(50, 100, 20, "WATER");
+
+var usageAreas = CsLegend.usage(doc);
+eqs(usageAreas.areas.length, 2,
+    "a drawing with sand and water areas registers exactly those two " +
+        "patterns as used");
+ok(usageAreas.areas[0].key === "SAND" && usageAreas.areas[1].key === "WATER",
+    "in the catalog's own order, sand before water");
+
+var areaRowsOnly = [];
+var rowsWithAreas = CsLegend.rowsFor(usageAreas);
+for (i = 0; i < rowsWithAreas.length; i++) {
+    if (rowsWithAreas[i].kind === "area") {
+        areaRowsOnly.push(rowsWithAreas[i]);
+    }
+}
+eqs(areaRowsOnly.length, 2,
+    "exactly two AREAS rows, one per pattern actually in use, not " +
+        "all thirteen the catalog knows about");
+
+buildLegendRun();
+
+// Everything the legend has EVER drawn, area swatches included -- a
+// fill entity carries CsArea.OWNER_KEY ("legend-area:...") rather than
+// CsLegend.TAG on its own, but blAreaSwatch stamps CsLegend.TAG on it
+// too once restyled, so this one scan (mirroring buildLegendRun's own
+// clearing pass) finds every piece either way.
+function legendDrawnNow() {
+    var out = [];
+    var allIds2 = doc.queryAllEntities(false, false);
+    for (var k = 0; k < allIds2.length; k++) {
+        var ent = doc.queryEntity(allIds2[k]);
+        if (isNull(ent)) {
+            continue;
+        }
+        var owned = CsTags.get(ent, CsArea.OWNER_KEY)
+            .indexOf(CsLegend.AREA_OWNER_PREFIX) === 0;
+        if (CsTags.get(ent, CsLegend.TAG) !== "" || owned) {
+            out.push(ent);
+        }
+    }
+    return out;
+}
+
+var drawnWithAreas = legendDrawnNow();
+ok(drawnWithAreas.length > drawn.length,
+    "the legend grew once areas were added to the drawing");
+
+// THE ASSERTION THAT WOULD HAVE CAUGHT IT: a swatch's fill landing on
+// its pattern's own real layer (SEDIMENT-SAND-GRAVEL, WATER-POOL-SUMP)
+// reads to CheckMap and Feature Trace's completeness badge as more of
+// the real thing, since both walk a layer's contents with no ownership
+// filter. Every entity the legend just drew -- frame, fill and text
+// alike -- must sit on LEGEND and nowhere else.
+var offMapLayer = [];
+for (i = 0; i < drawnWithAreas.length; i++) {
+    var layerHere = CsBind.layerNameOf(doc, drawnWithAreas[i]);
+    if (layerHere !== CsLayers.LEGEND) {
+        offMapLayer.push(drawnWithAreas[i].getId() + ":" + layerHere);
+    }
+}
+eqs(offMapLayer.length, 0,
+    "no swatch entity -- fill or frame -- lands on a map feature " +
+        "layer (offenders: " + offMapLayer.join(",") + ")");
+
+// Rebuilding with an area pattern in use does not double its fill --
+// the bug an earlier version of this shipped with: clearing the old
+// legend was deferred into the same operation as drawing the new one,
+// so a stale fill was still live in the document, under the same
+// AreaOwner id, when the fresh one was built beside it.
+buildLegendRun();
+eqs(CsArea.ownedBy(doc, CsLegend.AREA_OWNER_PREFIX + "WATER").length, 1,
+    "rebuilding a legend with an area pattern in use does not double " +
+        "its swatch fill (WATER's hatch stays exactly one entity)");
+eqs(legendDrawnNow().length, drawnWithAreas.length,
+    "and the whole legend -- lines, areas and symbols alike -- still " +
+        "replaces rather than stacks once areas are part of it");
+
+// ---------------------------------------------------------------------
 
 if (failures.length === 0) {
     print("### BUILD LEGEND OK " + drawn.length + " entities");

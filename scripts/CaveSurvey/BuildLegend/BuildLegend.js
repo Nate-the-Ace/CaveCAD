@@ -17,7 +17,14 @@
 // the document itself -- the same "generator's own output, not a
 // stand-in for it" rule CsTileArt.iconOfFill follows for the Areas
 // panel's tiles, translated from a painted QPixmap into drawing
-// entities because that is what a legend is made of. See blAreaSwatch.
+// entities because that is what a legend is made of. The fill lands on
+// LEGEND, same as every other sample here (never a real feature layer
+// -- CheckMap and Feature Trace's completeness badge both walk layers
+// with no ownership filter, and a swatch left on BREAKDOWN or
+// WATER-POOL-SUMP reads to them as more of the real thing), then is
+// found back by CsArea.OWNER_KEY and given the pattern's own colour, so
+// it still looks like what the map draws without living where the map
+// draws it. See blAreaSwatch.
 //
 // Nothing is invented: a feature the map does not draw does not appear.
 // A legend explaining a rimstone dam that is nowhere on the sheet is
@@ -34,7 +41,14 @@
 // a tight sheet or a judge who wants the terse form.
 //
 // Re-running replaces the previous generated legend (tagged
-// CaveSurvey/LegendRow) in the same undo step as drawing the new one.
+// CaveSurvey/LegendRow): clearing the old one is its own transaction,
+// applied before a single stroke of the new one is drawn, so a rebuilt
+// area's fill is never found sitting beside a stale one under the same
+// AreaOwner id (see the clearing pass's own comment in buildLegendRun).
+// Undoing Build Legend therefore takes more than one step -- the old
+// legend's removal, the new text and frames, and one more per area
+// pattern in use, the same scaffolding-transaction trade-off
+// CsLayers.ensure already makes elsewhere in this file.
 //
 // USAGE:
 //   Cave Survey > Build Legend   (or type "bl")
@@ -152,32 +166,42 @@ function blAreaBoundary(doc, x, y, side) {
  * throwaway square blAreaBoundary just made, so the legend's sand looks
  * like the map's sand because it IS the map's sand generator.
  *
- * WHY THE FILL LANDS ON THE PATTERN'S OWN LAYER, not LEGEND, unlike
- * every other sample this file draws. blStyleAs works by taking an
- * entity THIS FILE already holds a reference to and overwriting its
- * colour/linetype/lineweight explicitly before moving it onto LEGEND --
- * that is how a line sample or a shaped line's ornament gets to look
- * right while living on a layer that is not its own. CsArea.build
- * (Core, off limits to this change) hands back none of the entities it
- * queues into `op`; there is no reference to restyle and no seam to
- * relayer. Handing it the pattern's REAL layer as `opts.layer` instead
- * is not a workaround for that -- it is the more literal answer to
- * "what does the reader get": on the finished map this pattern's fill
- * lives on exactly that layer at exactly that layer's colour, so
- * drawing the sample there is the map's own truth, not an approximation
- * of it. Only the row's SQUARE FRAME (filled patterns only, built here,
- * never by CsArea.build) and its label still live on LEGEND and clear
- * with everything else.
+ * EVERYTHING LANDS ON LEGEND, same as every other row -- opts.layer is
+ * a plain string CsArea.build passes straight to doc.getLayerId(), so
+ * "LEGEND" is as valid a target as the pattern's own real layer would
+ * be. Two tools that walk the drawing by LAYER with no ownership
+ * filter -- CsTrace.countOnLayers (Feature Trace's completeness badge)
+ * and CheckMap's per-layer counts and stray-linework scan -- read a
+ * swatch left on a real feature layer as more breakdown, more sand,
+ * more stray linework than the survey actually has. A first version of
+ * this file put the fill on the pattern's own layer instead, reasoning
+ * that ByLayer colour would come along for free; it did, but at the
+ * cost of feeding those two tools bad numbers, which is the worse
+ * trade.
+ *
+ * COLOUR IS RECOVERED AFTERWARD, not surrendered: CsArea.build hands
+ * back no reference to what it just queued, but it DOES stamp
+ * CsArea.OWNER_KEY on every entity it creates, exactly as it does for a
+ * real area -- so the fill is built into ITS OWN operation, applied
+ * immediately (the same "own small transaction" CsLayers.ensure already
+ * is, elsewhere in this file), then found back by that owner id
+ * (CsArea.ownedBy, unchanged Core) and restyled with blStyleAs from the
+ * pattern's own layer -- the same call every other sample in this file
+ * already makes to look right while living somewhere else. This is not
+ * one atomic add any more (a caver undoing Build Legend now undoes the
+ * text/frame in one step and each area's fill in ones before it,
+ * exactly the shape CsLayers.ensure's own scaffolding already accepted
+ * for this file) -- but nothing else in the drawing is misled about
+ * what the survey contains, which is the property that matters more.
  *
  * A FIXED id and a FIXED seed -- "legend-area:" + the pattern's own
  * catalog key, and CsTileArt.SCATTER_SEED, the same seed the Areas
  * panel's own preview tile rolls -- never CsArea.newSeed(): a legend is
  * redrawn on every press of the button, and a scatter that reshuffled
  * its boulders each time would make a caver think the pattern itself
- * had changed. The id is also how the next run's clearing pass in
- * buildLegendRun finds this row's own fill (CsArea.build stamps
- * CsArea.OWNER_KEY on every entity it creates, exactly as it does for a
- * real area) and throws it away before drawing a fresh one.
+ * had changed. The id is also how this function's OWN restyle step,
+ * and the next run's clearing pass in buildLegendRun, find this row's
+ * fill again.
  *
  * Never throws outward: a pattern this build's engine cannot place (a
  * missing block, an unreadable custom library) leaves the row with its
@@ -190,7 +214,7 @@ function blAreaBoundary(doc, x, y, side) {
  * kept and a scatter pattern does not. \return the boundary entity and
  * whether the caller should keep it.
  */
-function blAreaSwatch(doc, op, di, entry, key, x, y, side, legendLayerId) {
+function blAreaSwatch(doc, di, entry, key, x, y, side, legendLayerId) {
     var boundary = blAreaBoundary(doc, x, y, side);
 
     // The frame CsTileArt.iconOfFilled always draws, even over
@@ -203,12 +227,36 @@ function blAreaSwatch(doc, op, di, entry, key, x, y, side, legendLayerId) {
         blStyleAs(doc, boundary, entry.layer, legendLayerId);
     }
 
+    var ownerId = CsLegend.AREA_OWNER_PREFIX + key;
     try {
         CsLayers.ensure(doc, di, entry.layer);
-        CsArea.build(doc, op, boundary, entry,
-            { id: CsLegend.AREA_OWNER_PREFIX + key,
-              seed: CsTileArt.SCATTER_SEED, scale: 1.0, density: 1.0,
-              layer: entry.layer }, di);
+        var areaOp = new RAddObjectsOperation();
+        CsArea.build(doc, areaOp, boundary, entry,
+            { id: ownerId, seed: CsTileArt.SCATTER_SEED, scale: 1.0,
+              density: 1.0, layer: CsLayers.LEGEND }, di);
+        di.applyOperation(areaOp);
+
+        var fillIds = CsArea.ownedBy(doc, ownerId);
+        if (fillIds.length > 0) {
+            var mod = new RModifyObjectsOperation();
+            for (var i = 0; i < fillIds.length; i++) {
+                var fillEnt = doc.queryEntityDirect(fillIds[i]);
+                if (isNull(fillEnt)) {
+                    continue;
+                }
+                // blStyleAs sets the layer too -- a no-op here, since
+                // CsArea.build already put it on LEGEND, but it is the
+                // one call this file already trusts to copy an
+                // appearance across without a second copy of the logic.
+                blStyleAs(doc, fillEnt, entry.layer, legendLayerId);
+                // The same tag every other row's own pieces carry, so
+                // the "everything this run drew" invariant holds for an
+                // area's fill too, not just its frame and its label.
+                CsTags.set(fillEnt, CsLegend.TAG, "area:" + key);
+                mod.addObject(fillEnt, false);
+            }
+            di.applyOperation(mod);
+        }
     } catch (eArea) {
         // degrade to the frame alone (or nothing) rather than take the
         // rest of the legend down with one bad pattern
@@ -269,14 +317,28 @@ function buildLegendRun() {
     var op = new RAddObjectsOperation();
     op.setText("Build legend");
 
-    // clear the previously generated legend, same undo step. An area
-    // row's FILL entities never carry CsLegend.TAG -- they are
-    // CsArea.build's own output, stamped with CsArea.OWNER_KEY instead,
-    // exactly as a real area's fill is -- so they are found by that tag
-    // and the "legend-area:" prefix blAreaSwatch gives them, in the
-    // same walk rather than a second one.
+    // Clear the previously generated legend, APPLIED NOW rather than
+    // queued into `op` -- an area row's own fill is built through ITS
+    // OWN immediate transaction (blAreaSwatch, further down), and a
+    // stale entity only QUEUED for deletion here would still be sitting
+    // in the document, under the exact same AreaOwner id, when that
+    // rebuild runs -- found by CsArea.ownedBy right alongside the fresh
+    // fill it just made, restyled, tagged, and left behind uncleared.
+    // Measured, not theorised: the first version of this deferred the
+    // whole sweep into `op` the way every other row already safely did,
+    // and a second Build Legend run over a drawing with even one area
+    // pattern in use came out with the water hatch doubled. Clearing
+    // everything up front, before any row is drawn, is what removes the
+    // hazard for every row kind at once rather than only for areas.
+    //
+    // An area row's FILL entities never carry CsLegend.TAG on their
+    // own -- they are CsArea.build's own output, found by CsArea.
+    // OWNER_KEY's "legend-area:" prefix instead -- but blAreaSwatch also
+    // stamps CsLegend.TAG on them once restyled, so this one walk finds
+    // everything either way.
     var cleared = 0;
     var allIds = doc.queryAllEntities(false, false);
+    var toClear = [];
     for (var c = 0; c < allIds.length; c++) {
         var old = doc.queryEntity(allIds[c]);
         if (isNull(old)) {
@@ -285,9 +347,19 @@ function buildLegendRun() {
         var ownedByLegend = CsTags.get(old, CsArea.OWNER_KEY)
             .indexOf(CsLegend.AREA_OWNER_PREFIX) === 0;
         if (CsTags.get(old, CsLegend.TAG) !== "" || ownedByLegend) {
-            op.deleteObject(old);
-            cleared++;
+            toClear.push(allIds[c]);
         }
+    }
+    if (toClear.length > 0) {
+        var clearOp = new RDeleteObjectsOperation();
+        for (var cc = 0; cc < toClear.length; cc++) {
+            var toDelete = doc.queryEntityDirect(toClear[cc]);
+            if (!isNull(toDelete)) {
+                clearOp.deleteObject(toDelete);
+                cleared++;
+            }
+        }
+        di.applyOperation(clearOp);
     }
 
     var legendLayerId = doc.getLayerId(CsLayers.LEGEND);
@@ -338,7 +410,7 @@ function buildLegendRun() {
             var areaEntry = CsArea.entryFor(row.pattern);
             if (!isNull(areaEntry)) {
                 var side = CsLegend.AREA_SWATCH_FEET * perFoot;
-                var swatch = blAreaSwatch(doc, op, di, areaEntry,
+                var swatch = blAreaSwatch(doc, di, areaEntry,
                     row.pattern, xText, y, side, legendLayerId);
                 if (swatch.keepBoundary === true) {
                     keep(swatch.boundary, row.key);
