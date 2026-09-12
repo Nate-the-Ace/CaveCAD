@@ -182,7 +182,27 @@ DrawPanel.buildDock = function(appWin) {
     }
 
     body.setLayout(layout);
-    dock.setWidget(body);
+
+    // THE WHOLE GRID SCROLLS, and it has to. Trace on its own is taller
+    // than a laptop dock, so with three sections the second ROW -- Areas,
+    // spanning the width -- sat below the fold with nothing to reach it:
+    // present, built, and invisible (Nathan, 2026-09-12, who reported the
+    // section "having trouble loading" when it had in fact loaded fine).
+    // Sections carry their own inner scrolls for their tile walls; this
+    // one exists so a row can be reached at all.
+    var scroll = null;
+    try {
+        scroll = new QScrollArea();
+        scroll.setWidget(body);
+        scroll.setWidgetResizable(true);
+        scroll.horizontalScrollBarPolicy = Qt.ScrollBarAsNeeded;
+        dock.setWidget(scroll);
+    } catch (eScroll) {
+        // No scroll area on this bridge: the panel still works, and a
+        // caver can drag the dock wider to bring a row into view.
+        problems.push("panel scrolling (" + eScroll + ")");
+        dock.setWidget(body);
+    }
 
     if (problems.length > 0) {
         warning("Draw: this CaveCAD build refused " +

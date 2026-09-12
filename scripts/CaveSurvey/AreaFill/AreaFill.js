@@ -1046,13 +1046,27 @@ AreaFill.buildBody = function(parent) {
         layout.addWidget(w.editorLabel, 0, 0);
 
         w.editorFieldsHost = new QWidget();
-        var fields = new QFormLayout();
+        // A GRID, not a QFormLayout: this bridge generates QFormLayout
+        // WITHOUT addRow (probed live 2026-09-10 for Sheet Setup, and
+        // proved again the hard way on 2026-09-12 -- the first build of
+        // these fields threw on the first addRow, and because the whole
+        // editor block sits in one try, the Areas SECTION vanished from
+        // the Draw panel entirely). CsPanel.formGrid is the suite's own
+        // answer and every other panel with fields on it already uses
+        // it. Do not reach for QFormLayout here again.
+        var fields = CsPanel.formGrid(1);
+        var fieldRow = 0;
+        function addField(label, widget) {
+            fields.addWidget(new QLabel(label), fieldRow, 0);
+            fields.addWidget(widget, fieldRow, 1);
+            fieldRow++;
+        }
         w.editorFieldsHost.setLayout(fields);
         w.editorFieldsHost.visible = false;
 
         w.patternNameEdit = new QLineEdit("");
         w.patternNameEdit.toolTip = qsTr("What this pattern is called.");
-        fields.addRow(qsTr("Name"), w.patternNameEdit);
+        addField(qsTr("Name"), w.patternNameEdit);
 
         // OPTIONAL, deliberately -- a pattern with a blank description
         // still saves and still gets a tooltip (AreaFill.tileFor just
@@ -1062,7 +1076,7 @@ AreaFill.buildBody = function(parent) {
         w.patternHelpEdit = new QLineEdit("");
         w.patternHelpEdit.toolTip = qsTr("A short line describing what " +
             "this pattern is, shown in its tile's tooltip. Optional.");
-        fields.addRow(qsTr("What is it?"), w.patternHelpEdit);
+        addField(qsTr("What is it?"), w.patternHelpEdit);
 
         w.patternLayerCombo = new QComboBox();
         var homeLayers = AreaFillEdit.homeLayers();
@@ -1072,14 +1086,14 @@ AreaFill.buildBody = function(parent) {
         w.patternLayerCombo.toolTip = qsTr("The layer this pattern's " +
             "elements are placed on. Its profile and section twins are " +
             "derived from this one.");
-        fields.addRow(qsTr("Layer"), w.patternLayerCombo);
+        addField(qsTr("Layer"), w.patternLayerCombo);
 
         w.patternPlacementCombo = new QComboBox();
         w.patternPlacementCombo.addItem(qsTr("Scattered"));
         w.patternPlacementCombo.addItem(qsTr("Tiled"));
         w.patternPlacementCombo.toolTip = qsTr("How this pattern's " +
             "elements are laid out inside a boundary.");
-        fields.addRow(qsTr("Placement"), w.patternPlacementCombo);
+        addField(qsTr("Placement"), w.patternPlacementCombo);
 
         w.patternDensityBox = new QDoubleSpinBox();
         w.patternDensityBox.setRange(1, 500);
@@ -1087,7 +1101,7 @@ AreaFill.buildBody = function(parent) {
         w.patternDensityBox.setValue(30);
         w.patternDensityBox.toolTip = qsTr("The catalog's own density: " +
             "elements per 100 square drawing units at scale 1.");
-        fields.addRow(qsTr("Default density"), w.patternDensityBox);
+        addField(qsTr("Default density"), w.patternDensityBox);
 
         w.patternScaleMinBox = new QDoubleSpinBox();
         w.patternScaleMinBox.setRange(0.1, 5.0);
@@ -1096,7 +1110,7 @@ AreaFill.buildBody = function(parent) {
         w.patternScaleMinBox.setValue(0.8);
         w.patternScaleMinBox.toolTip = qsTr("The smallest an element is " +
             "drawn, relative to what you drew it at.");
-        fields.addRow(qsTr("Scale jitter min"), w.patternScaleMinBox);
+        addField(qsTr("Scale jitter min"), w.patternScaleMinBox);
 
         w.patternScaleMaxBox = new QDoubleSpinBox();
         w.patternScaleMaxBox.setRange(0.1, 5.0);
@@ -1105,7 +1119,7 @@ AreaFill.buildBody = function(parent) {
         w.patternScaleMaxBox.setValue(1.2);
         w.patternScaleMaxBox.toolTip = qsTr("The largest an element is " +
             "drawn, relative to what you drew it at.");
-        fields.addRow(qsTr("Scale jitter max"), w.patternScaleMaxBox);
+        addField(qsTr("Scale jitter max"), w.patternScaleMaxBox);
 
         w.patternRotateCombo = new QComboBox();
         w.patternRotateCombo.addItem(qsTr("Random"));
@@ -1113,7 +1127,7 @@ AreaFill.buildBody = function(parent) {
         w.patternRotateCombo.toolTip = qsTr("Random turns each placed " +
             "element to a different angle; Fixed always draws it the " +
             "way you drew it.");
-        fields.addRow(qsTr("Rotation"), w.patternRotateCombo);
+        addField(qsTr("Rotation"), w.patternRotateCombo);
 
         layout.addWidget(w.editorFieldsHost, 0, 0);
 
