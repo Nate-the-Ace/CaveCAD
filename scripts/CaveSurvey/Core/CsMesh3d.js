@@ -42,6 +42,8 @@
 
 include(includeBasePath + "/CsTraverse.js");
 include(includeBasePath + "/CsLrud.js");
+include(includeBasePath + "/CsClosure.js");
+include(includeBasePath + "/CsFrontier.js");
 
 var CsMesh3d = {};
 
@@ -225,6 +227,27 @@ CsMesh3d.TRIP_COLORS = [
     [0.60, 0.85, 0.45], [0.88, 0.48, 0.62], [0.75, 0.70, 0.35]
 ];
 
+// The closure bands, rendered. CsClosure names its colours in WORDS,
+// because it draws into a CAD drawing where colour is a layer property;
+// here they have to be actual light, so the words are mapped once.
+CsMesh3d.BAND_COLORS = {
+    green:  [0.45, 0.80, 0.45],
+    yellow: [0.90, 0.85, 0.35],
+    orange: [0.92, 0.60, 0.25],
+    red:    [0.90, 0.32, 0.30]
+};
+
+// Splay coverage, worst first, so the legend reads as a scale.
+//
+// This is the mode that says how much of the passage shape is measured
+// and how much is four numbers and a guess between them. The mesh
+// already draws LESS where less was measured; this says so out loud.
+CsMesh3d.COVERAGE = [
+    { key: "none",  color: [0.45, 0.45, 0.48], says: "nothing measured" },
+    { key: "lrud",  color: [0.72, 0.69, 0.60], says: "LRUD only" },
+    { key: "splay", color: [0.55, 0.82, 0.90], says: "splays measured" }
+];
+
 /** Colour for a depth, shallow (1) to deep (0), as a cool ramp. */
 CsMesh3d.depthColor = function(t) {
     if (!isFinite(t)) { t = 0.5; }
@@ -390,17 +413,170 @@ CsMesh3d.loft = function(tri, ringA, ringB, colorA, colorB) {
     }
 };
 
+/** A generic ramp, warm at the top of the range and cool at the bottom.
+ *  Deliberately unlike the depth ramp, so two modes never look alike and
+ *  a reader cannot mistake one legend for another. */
+CsMesh3d.rampColor = function(t) {
+    if (!isFinite(t)) { t = 0.5; }
+    if (t < 0) { t = 0; }
+    if (t > 1) { t = 1; }
+    return [0.30 + 0.62 * t, 0.72 - 0.34 * t, 0.85 - 0.55 * t];
+};
+
+/** A distance formatted for a legend: no more precision than a reader
+ *  can use, with the unit attached, because a bare number on a colour
+ *  bar is ambiguous between feet and metres. */
+CsMesh3d.legendLength = function(value, unit) {
+    var u = (unit === "m") ? "m" : "ft";
+    return (Math.round(value * 10) / 10) + " " + u;
+};
+
+/** What to call a trip: what it calls itself, else its date, else its
+ *  position. A trip with neither is still a real trip and still needs a
+ *  row in the legend. */
+CsMesh3d.tripLabel = function(survey, index) {
+    var trips = (survey && survey.trips) ? survey.trips : [];
+    var t = trips[index];
+    if (t !== undefined && t !== null) {
+        if (typeof t.name === "string" && t.name !== "") { return t.name; }
+        if (typeof t.date === "string" && t.date !== "") { return t.date; }
+    }
+    return "Trip " + (index + 1);
+};
+
+/**
+ * Trip indices in chronological order.
+ *
+ * Sorted by date, and trips SHARING a date by their position in the
+ * survey -- which is the order they were walked. Sorting on date alone
+ * would leave two trips on the same Saturday in an arbitrary order, and
+ * a ramp built on that order would put them in an arbitrary order too.
+ *
+ * A trip with no date sorts after the dated ones rather than before:
+ * "undated" is not "earliest", and putting it first would invent a
+ * history the survey does not record.
+ */
+CsMesh3d.tripOrder = function(survey) {
+    var trips = (survey && survey.trips) ? survey.trips : [];
+    var idx = [];
+    for (var i = 0; i < trips.length; i++) { idx.push(i); }
+    idx.sort(function(a, b) {
+        var da = (trips[a] && typeof trips[a].date === "string")
+            ? trips[a].date : "";
+        var db = (trips[b] && typeof trips[b].date === "string")
+            ? trips[b].date : "";
+        if (da !== db) {
+            if (da === "") { return 1; }
+            if (db === "") { return -1; }
+            return da < db ? -1 : 1;
+        }
+        return a - b;
+    });
+    return idx;
+};
+
+/**
+ * Traverse distance from `anchorName` to every station, walked along the
+ * legs.
+ *
+ * NOT straight-line distance. "How far in am I" is a question about the
+ * passage: a station fifty feet from the entrance through six hundred
+ * feet of crawl is six hundred feet in, and a straight line would call
+ * it fifty and be useless.
+ *
+ * \return {stationName: distance}, empty when there is nothing to walk
+ */
+CsMesh3d.distancesFrom = function(anchorName, resolved) {
+    var adj = {};
+    var add = function(from, to) {
+        if (!adj.hasOwnProperty(from)) { adj[from] = []; }
+        adj[from].push(to);
+    };
+    var i;
+    for (i = 0; i < resolved.legs.length; i++) {
+        add(resolved.legs[i].from, resolved.legs[i].to);
+        add(resolved.legs[i].to, resolved.legs[i].from);
+    }
+    var out = {};
+    var start = anchorName;
+    if (start === undefined || start === null ||
+            resolved.stations[start] === undefined) {
+        for (var n in resolved.stations) {
+            if (resolved.stations.hasOwnProperty(n)) { start = n; break; }
+        }
+    }
+    if (start === undefined || start === null ||
+            resolved.stations[start] === undefined) {
+        return out;
+    }
+    out[start] = 0;
+    var queue = [start];
+    var head = 0;
+    while (head < queue.length) {
+        var here = queue[head++];
+        var hs = resolved.stations[here];
+        var next = adj[here] || [];
+        for (var k = 0; k < next.length; k++) {
+            var nm = next[k];
+            if (out.hasOwnProperty(nm)) { continue; }
+            var ns = resolved.stations[nm];
+            if (ns === undefined) { continue; }
+            out[nm] = out[here] + CsMesh3d.norm(CsMesh3d.sub(ns, hs));
+            queue.push(nm);
+        }
+    }
+    return out;
+};
+
+/** The area a ring encloses: half the length of the summed cross
+ *  products of its edges about the first vertex, which is the vector
+ *  form of the shoelace formula and works on a polygon lying in any
+ *  plane in space. */
+CsMesh3d.ringArea = function(ring) {
+    if (ring.length < 3) { return 0; }
+    var sum = { x: 0, y: 0, z: 0 };
+    for (var i = 1; i + 1 < ring.length; i++) {
+        var c = CsMesh3d.cross(CsMesh3d.sub(ring[i], ring[0]),
+                               CsMesh3d.sub(ring[i + 1], ring[0]));
+        sum.x += c.x; sum.y += c.y; sum.z += c.z;
+    }
+    return CsMesh3d.norm(sum) / 2;
+};
+
+/** The value at a percentile of a list of numbers, by nearest rank. */
+CsMesh3d.percentile = function(values, p) {
+    if (values.length === 0) { return 0; }
+    var sorted = values.slice().sort(function(a, b) { return a - b; });
+    var i = Math.floor((sorted.length - 1) * p);
+    if (i < 0) { i = 0; }
+    if (i >= sorted.length) { i = sorted.length - 1; }
+    return sorted[i];
+};
+
 /**
  * The whole passage surface, ready for the GL window.
  *
  * \param survey   a Survey (CsModel)
  * \param resolved CsNetwork.resolve(survey)
- * \param opts     {colorBy: "trip"|"depth", tapeMode}
+ * \param opts     {colorBy, anchorName, tapeMode}
+ *                 colorBy is one of trip, depth, distance, size, date,
+ *                 closure, splay -- anything else falls back to trip.
+ *                 anchorName is the station "distance" measures from;
+ *                 absent, it uses the first station it finds.
  *
  * \return {triangles: {positions, normals, colors, indices},
  *          lines:     {positions, colors, indices},
  *          steps:     [{triangleVertices, lineVertices, station, trip}]
  *                     one per leg, cumulative -- see below,
+ *          ghost:     {positions, colors, indices} the as-surveyed
+ *                     network, EMPTY when there is nothing to compare,
+ *          leads:     {positions, colors, indices} a cross at each of
+ *                     CsFrontier's open ends,
+ *          legend:    {title, kind: "ramp"|"swatches", note, stops}
+ *                     what the colours mean. The VIEW NEVER COMPUTES
+ *                     THIS -- it paints the legend it is handed, so
+ *                     every unit that knows what a trip or a foot is
+ *                     stays on this side of the bridge,
  *          bounds:    {min: {x,y,z}, max: {x,y,z}}}
  *
  * WALKS THE SPANNING TREE, not a name order. `resolved.legs` arrives in
@@ -441,6 +617,10 @@ CsMesh3d.build = function(survey, resolved, opts) {
     if (survey === null || survey === undefined ||
             resolved === null || resolved === undefined) {
         return { triangles: tri, lines: lin, steps: [],
+                 legend: { title: "Trip", kind: "swatches",
+                           note: "", stops: [] },
+                 ghost: { positions: [], colors: [], indices: [] },
+                 leads: { positions: [], colors: [], indices: [] },
                  bounds: { min: { x: 0, y: 0, z: 0 },
                            max: { x: 0, y: 0, z: 0 } } };
     }
@@ -489,14 +669,201 @@ CsMesh3d.build = function(survey, resolved, opts) {
     }
     var zSpan = zHigh - zLow;
 
+    var unitName = survey.distanceUnit === "m" ? "m" : "ft";
+
+    // An unknown mode is a CALLER'S bug, and a mesh that refused to build
+    // over a spelling would take the panel down with it. So anything
+    // unrecognised becomes trip here, before either the colours or the
+    // legend are decided, so the two cannot disagree about what happened.
+    if (colorBy !== "depth" && colorBy !== "distance" && colorBy !== "size" &&
+            colorBy !== "date" && colorBy !== "closure" &&
+            colorBy !== "splay") {
+        colorBy = "trip";
+    }
+
+    // RAMP MODES carry a number per station and colour by where it sits
+    // in the range. BANDED MODES carry a swatch per station directly.
+    var rampValue = null;
+    var rampLow = 0, rampHigh = 1;
+    var bandOf = null;
+
+    if (colorBy === "distance") {
+        rampValue = CsMesh3d.distancesFrom(opts.anchorName, resolved);
+    } else if (colorBy === "size") {
+        rampValue = {};
+        for (name in resolved.stations) {
+            if (!resolved.stations.hasOwnProperty(name)) { continue; }
+            var sdir = CsMesh3d.directionAt(name, legsByStation, resolved);
+            if (sdir === null) { rampValue[name] = 0; continue; }
+            rampValue[name] = CsMesh3d.ringArea(CsMesh3d.ringAt(
+                resolved.stations[name], sdir,
+                CsMesh3d.lrudAt(name, survey),
+                splays[name] || [], tapeMode));
+        }
+    } else if (colorBy === "date") {
+        var order = CsMesh3d.tripOrder(survey);
+        var rank = {};
+        for (var oi = 0; oi < order.length; oi++) { rank[order[oi]] = oi; }
+        rampValue = {};
+        for (name in resolved.stations) {
+            if (resolved.stations.hasOwnProperty(name)) {
+                rampValue[name] = rank[CsMesh3d.tripAt(name, survey)] || 0;
+            }
+        }
+    } else if (colorBy === "closure") {
+        var shifts = resolved.shifts || {};
+        bandOf = function(stationName) {
+            var sh = shifts[stationName];
+            var d = (sh === undefined || sh === null) ? 0 : sh.distance;
+            var band = CsClosure.bandFor(d);
+            return CsMesh3d.BAND_COLORS[band.colour] ||
+                   CsMesh3d.BAND_COLORS.green;
+        };
+    } else if (colorBy === "splay") {
+        bandOf = function(stationName) {
+            if ((splays[stationName] || []).length > 0) {
+                return CsMesh3d.COVERAGE[2].color;
+            }
+            var lr = CsMesh3d.lrudAt(stationName, survey);
+            if (lr.left !== null || lr.right !== null ||
+                    lr.up !== null || lr.down !== null) {
+                return CsMesh3d.COVERAGE[1].color;
+            }
+            return CsMesh3d.COVERAGE[0].color;
+        };
+    }
+
+    if (rampValue !== null) {
+        var vals = [];
+        for (name in rampValue) {
+            if (rampValue.hasOwnProperty(name) && isFinite(rampValue[name])) {
+                vals.push(rampValue[name]);
+            }
+        }
+        if (vals.length === 0) {
+            rampLow = 0;
+            rampHigh = 1;
+        } else if (colorBy === "size") {
+            // CLAMPED. One big room otherwise puts every crawl at the
+            // bottom of a linear ramp over min..max, and the whole cave
+            // reads as one colour. The legend says it is clamped -- a
+            // scale that quietly discards its outliers while looking
+            // linear is a lie about the data.
+            rampLow = CsMesh3d.percentile(vals, 0.05);
+            rampHigh = CsMesh3d.percentile(vals, 0.95);
+        } else {
+            rampLow = Math.min.apply(null, vals);
+            rampHigh = Math.max.apply(null, vals);
+        }
+        if (!(rampHigh - rampLow > 1e-9)) {
+            // One trip, one station, or a cave of uniform size. Every
+            // value then sits mid-ramp rather than dividing by zero.
+            rampHigh = rampLow + 1;
+        }
+    }
+
     var colorAt = function(stationName, st) {
+        if (bandOf !== null) {
+            return bandOf(stationName);
+        }
+        if (rampValue !== null) {
+            var v = rampValue[stationName];
+            if (!isFinite(v)) { v = rampLow; }
+            var t = (v - rampLow) / (rampHigh - rampLow);
+            return CsMesh3d.rampColor(t);
+        }
         if (colorBy === "depth") {
             return CsMesh3d.depthColor(
                 zSpan > 1e-9 ? (st.z - zLow) / zSpan : 0.5);
         }
-        var t = CsMesh3d.tripAt(stationName, survey);
-        return CsMesh3d.TRIP_COLORS[t % CsMesh3d.TRIP_COLORS.length];
+        var tr = CsMesh3d.tripAt(stationName, survey);
+        return CsMesh3d.TRIP_COLORS[tr % CsMesh3d.TRIP_COLORS.length];
     };
+
+    // --- the legend, describing exactly the colouring just chosen ---
+    var legend = { title: "Trip", kind: "swatches", note: "", stops: [] };
+    var bi;
+
+    if (colorBy === "depth") {
+        legend.title = "Depth";
+        legend.kind = "ramp";
+        legend.stops = [
+            { color: CsMesh3d.depthColor(0),
+              label: CsMesh3d.legendLength(zLow, unitName) },
+            { color: CsMesh3d.depthColor(0.5),
+              label: CsMesh3d.legendLength(zLow + zSpan / 2, unitName) },
+            { color: CsMesh3d.depthColor(1),
+              label: CsMesh3d.legendLength(zHigh, unitName) }
+        ];
+    } else if (colorBy === "distance") {
+        legend.title = "Distance in";
+        legend.kind = "ramp";
+        legend.stops = [
+            { color: CsMesh3d.rampColor(0),
+              label: CsMesh3d.legendLength(rampLow, unitName) },
+            { color: CsMesh3d.rampColor(0.5),
+              label: CsMesh3d.legendLength((rampLow + rampHigh) / 2,
+                                           unitName) },
+            { color: CsMesh3d.rampColor(1),
+              label: CsMesh3d.legendLength(rampHigh, unitName) }
+        ];
+    } else if (colorBy === "size") {
+        legend.title = "Passage size";
+        legend.kind = "ramp";
+        legend.note = "5th-95th percentile";
+        legend.stops = [
+            { color: CsMesh3d.rampColor(0),
+              label: Math.round(rampLow) + " sq " + unitName },
+            { color: CsMesh3d.rampColor(0.5),
+              label: Math.round((rampLow + rampHigh) / 2) + " sq " + unitName },
+            { color: CsMesh3d.rampColor(1),
+              label: Math.round(rampHigh) + " sq " + unitName }
+        ];
+    } else if (colorBy === "date") {
+        legend.title = "Survey date";
+        legend.kind = "ramp";
+        var dOrder = CsMesh3d.tripOrder(survey);
+        var firstTrip = dOrder.length > 0 ? dOrder[0] : 0;
+        var lastTrip = dOrder.length > 0 ? dOrder[dOrder.length - 1] : 0;
+        legend.stops = [
+            { color: CsMesh3d.rampColor(0),
+              label: CsMesh3d.tripLabel(survey, firstTrip) },
+            { color: CsMesh3d.rampColor(1),
+              label: CsMesh3d.tripLabel(survey, lastTrip) }
+        ];
+    } else if (colorBy === "closure") {
+        legend.title = "Closure shift";
+        legend.kind = "swatches";
+        // An UNADJUSTED survey has no shifts at all, so every station
+        // lands in the "within a good tape read" band. That looks like a
+        // clean survey and is actually no information, so the legend
+        // says which of the two it is looking at.
+        legend.note = (resolved.shifts === undefined ||
+                       resolved.shifts === null)
+            ? "adjustment is off -- nothing has moved"
+            : "";
+        for (bi = 0; bi < CsClosure.BANDS.length; bi++) {
+            legend.stops.push({
+                color: CsMesh3d.BAND_COLORS[CsClosure.BANDS[bi].colour],
+                label: CsClosure.BANDS[bi].says
+            });
+        }
+    } else if (colorBy === "splay") {
+        legend.title = "Splay coverage";
+        legend.kind = "swatches";
+        for (bi = 0; bi < CsMesh3d.COVERAGE.length; bi++) {
+            legend.stops.push({ color: CsMesh3d.COVERAGE[bi].color,
+                                label: CsMesh3d.COVERAGE[bi].says });
+        }
+    } else {
+        var tripCount = Math.max(1, (survey.trips || []).length);
+        for (bi = 0; bi < tripCount; bi++) {
+            legend.stops.push({
+                color: CsMesh3d.TRIP_COLORS[bi % CsMesh3d.TRIP_COLORS.length],
+                label: CsMesh3d.tripLabel(survey, bi)
+            });
+        }
+    }
 
     var grow = function(p) {
         if (p.x < min.x) { min.x = p.x; }
@@ -596,10 +963,78 @@ CsMesh3d.build = function(survey, resolved, opts) {
         noteStep(leg.to);
     }
 
+    // --- the as-surveyed ghost ---
+    //
+    // NO RAW MEANS NO GHOST, and that is not a degenerate case: it is
+    // adjustment switched off, or a solve that did not converge, and in
+    // both the drawn geometry already IS the as-surveyed geometry. A
+    // ghost lying exactly on top of it would be noise. Same rule, and
+    // the same reasoning, as CsDraw's CTRL-RAW ghost.
+    //
+    // Its own buffer, so that showing and hiding it costs nothing and
+    // never rebuilds the mesh.
+    var ghost = { positions: [], colors: [], indices: [] };
+    var raw = resolved.raw;
+    if (raw !== undefined && raw !== null && raw.stations !== undefined) {
+        for (li = 0; li < resolved.legs.length; li++) {
+            var gleg = resolved.legs[li];
+            var ga = raw.stations[gleg.from];
+            var gb = raw.stations[gleg.to];
+            if (ga === undefined || gb === undefined) { continue; }
+            if (typeof ga.z !== "number" || typeof gb.z !== "number") {
+                continue;
+            }
+            var gbase = ghost.positions.length / 3;
+            ghost.positions.push(ga.x, ga.y, ga.z, gb.x, gb.y, gb.z);
+            ghost.colors.push(0.45, 0.45, 0.45, 0.45, 0.45, 0.45);
+            ghost.indices.push(gbase, gbase + 1);
+            grow(ga);
+            grow(gb);
+        }
+    }
+
+    // --- lead markers ---
+    //
+    // A three-axis cross rather than a dot: a dot at cave scale is one
+    // pixel and disappears into the passage behind it, while a cross
+    // reads as a mark ON the cave rather than a speck of it.
+    //
+    // AN OVERLAY, NOT A COLOUR MODE, because "where is the cave still
+    // going" is a question you ask WHILE looking at something else --
+    // while coloured by trip, to see who left it going; while coloured
+    // by depth, to see whether the leads are up or down.
+    var leads = { positions: [], colors: [], indices: [] };
+    var ends = CsFrontier.openEnds(survey);
+    if (ends.length > 0 && isFinite(min.x)) {
+        // Sized from the cave itself: a fixed arm length is invisible on
+        // a mile of passage and enormous in one small room.
+        var extent = Math.max(max.x - min.x, max.y - min.y, max.z - min.z);
+        if (!isFinite(extent) || extent <= 0) { extent = 1; }
+        var arm = extent * 0.01;
+        for (var ei = 0; ei < ends.length; ei++) {
+            var est = resolved.stations[ends[ei].station];
+            if (est === undefined || typeof est.z !== "number" ||
+                    !isFinite(est.z)) {
+                continue;
+            }
+            var axes = [[arm, 0, 0], [0, arm, 0], [0, 0, arm]];
+            for (var ai = 0; ai < axes.length; ai++) {
+                var ax = axes[ai];
+                var mbase = leads.positions.length / 3;
+                leads.positions.push(
+                    est.x - ax[0], est.y - ax[1], est.z - ax[2],
+                    est.x + ax[0], est.y + ax[1], est.z + ax[2]);
+                leads.colors.push(1.0, 0.85, 0.25, 1.0, 0.85, 0.25);
+                leads.indices.push(mbase, mbase + 1);
+            }
+        }
+    }
+
     if (!isFinite(min.x)) {
         min = { x: 0, y: 0, z: 0 };
         max = { x: 0, y: 0, z: 0 };
     }
-    return { triangles: tri, lines: lin, steps: steps,
+    return { triangles: tri, lines: lin, steps: steps, legend: legend,
+             ghost: ghost, leads: leads,
              bounds: { min: min, max: max } };
 };

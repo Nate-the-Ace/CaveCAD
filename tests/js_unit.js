@@ -20920,6 +20920,121 @@ ok(typeof m3steps[0].station === "string" && m3steps[0].station !== "",
     "each step names the station it arrived at");
 eqs(String(m3empty.steps.length), "0", "an empty survey has no steps");
 
+// --- the legend, and the seven colour modes ---------------------------
+
+var legTrip = CsMesh3d.build(m3survey, m3resolved, { colorBy: "trip" }).legend;
+eqs(legTrip.kind, "swatches", "trip colouring legends as swatches");
+eqs(legTrip.title, "Trip", "the trip legend says what it is");
+ok(legTrip.stops.length >= 1, "at least one swatch, even for one trip");
+
+var legDepth = CsMesh3d.build(m3survey, m3resolved, { colorBy: "depth" }).legend;
+eqs(legDepth.kind, "ramp", "depth colouring legends as a ramp");
+eqs(String(legDepth.stops.length), "3",
+    "a ramp is labelled at both ends and the middle");
+ok(legDepth.stops[0].label.indexOf("ft") >= 0,
+    "a depth label carries its unit");
+
+// An unknown mode is a caller's bug, not a reason to take the panel down.
+var legJunk = CsMesh3d.build(m3survey, m3resolved, { colorBy: "nonsense" });
+eqs(legJunk.legend.title, "Trip",
+    "an unknown mode falls back to trip rather than throwing");
+ok(legJunk.triangles.indices.length > 0,
+    "and still builds a mesh");
+
+// Every mode emits finite colours and a legend with something in it.
+["trip", "depth", "distance", "size", "date", "closure",
+ "splay"].forEach(function(mode) {
+    var m = CsMesh3d.build(m3survey, m3resolved, { colorBy: mode });
+    var bad = 0;
+    for (var ci2 = 0; ci2 < m.triangles.colors.length; ci2++) {
+        if (!isFinite(m.triangles.colors[ci2])) { bad += 1; }
+    }
+    eqs(String(bad), "0", mode + " emits finite colours");
+    ok(m.legend.stops.length > 0, mode + " returns a legend with stops");
+    ok(m.legend.title !== "", mode + " names itself in its legend");
+});
+
+var legSize = CsMesh3d.build(m3survey, m3resolved, { colorBy: "size" }).legend;
+ok(legSize.note.indexOf("percentile") >= 0,
+    "the size legend admits that it is clamped");
+
+var legClosure = CsMesh3d.build(m3survey, m3resolved,
+    { colorBy: "closure" }).legend;
+eqs(String(legClosure.stops.length), String(CsClosure.BANDS.length),
+    "one swatch per closure band");
+ok(legClosure.stops[0].label.indexOf("tape read") >= 0,
+    "a closure swatch carries the band's own words");
+ok(legClosure.note.indexOf("adjustment") >= 0,
+    "an unadjusted survey says so rather than looking clean");
+
+var legSplay = CsMesh3d.build(m3survey, m3resolved,
+    { colorBy: "splay" }).legend;
+eqs(String(legSplay.stops.length), "3", "splays, LRUD only, nothing");
+
+// Trip order within a date: earlier date first, then survey order.
+var dsurvey = CsModel.newSurvey();
+dsurvey.distanceUnit = "ft";
+dsurvey.trips = [
+    { name: "B", date: "2025-03-08" },
+    { name: "A", date: "2025-03-08" },
+    { name: "C", date: "2024-01-01" }
+];
+eqs(CsMesh3d.tripOrder(dsurvey).join(","), "2,0,1",
+    "earlier date first, then survey order within the same date");
+dsurvey.trips.push({ name: "D", date: "" });
+eqs(String(CsMesh3d.tripOrder(dsurvey)[3]), "3",
+    "an undated trip sorts last -- undated is not earliest");
+
+// Ramp helpers must not divide by zero on a degenerate range.
+var oneTrip = mesh3dSurvey();
+var oneMesh = CsMesh3d.build(oneTrip, CsNetwork.resolve(oneTrip),
+    { colorBy: "date" });
+var oneBad = 0;
+for (var ob = 0; ob < oneMesh.triangles.colors.length; ob++) {
+    if (!isFinite(oneMesh.triangles.colors[ob])) { oneBad += 1; }
+}
+eqs(String(oneBad), "0", "a single-trip cave still colours by date");
+
+// Distance is walked along the legs, not measured straight through rock.
+var dist = CsMesh3d.distancesFrom("A", m3resolved);
+eqs(String(dist["A"]), "0", "the anchor is zero distance from itself");
+nearly(dist["C"], 20, 1e-6,
+    "C is twenty feet in along two ten-foot legs");
+
+// Ring area, on a square of side 4 lying in a plane.
+var sq = [{ x: 0, y: 0, z: 0 }, { x: 4, y: 0, z: 0 },
+          { x: 4, y: 4, z: 0 }, { x: 0, y: 4, z: 0 }];
+nearly(CsMesh3d.ringArea(sq), 16, 1e-9, "a 4 by 4 ring encloses 16");
+eqs(String(CsMesh3d.ringArea([{ x: 0, y: 0, z: 0 }])), "0",
+    "a ring of one point encloses nothing");
+
+// --- the ghost and the leads ------------------------------------------
+
+var noRaw = CsMesh3d.build(m3survey, m3resolved);
+eqs(String(noRaw.ghost.indices.length), "0",
+    "no raw network means no ghost -- adjustment off, or a solve that " +
+    "did not converge, and the drawn geometry already IS as-surveyed");
+
+var rawResolved = CsNetwork.resolve(mesh3dSurvey());
+rawResolved.raw = CsNetwork.resolve(mesh3dSurvey());
+var withRaw = CsMesh3d.build(m3survey, rawResolved);
+ok(withRaw.ghost.indices.length > 0, "a raw network draws a ghost");
+var ghostBad = 0;
+for (var gbi = 0; gbi < withRaw.ghost.positions.length; gbi++) {
+    if (!isFinite(withRaw.ghost.positions[gbi])) { ghostBad += 1; }
+}
+eqs(String(ghostBad), "0", "no NaN in the ghost");
+
+// The three-station straight passage stops at C, which is a lead.
+ok(noRaw.leads.indices.length > 0, "an unfinished passage marks its lead");
+var leadBad = 0;
+for (var lbi = 0; lbi < noRaw.leads.positions.length; lbi++) {
+    if (!isFinite(noRaw.leads.positions[lbi])) { leadBad += 1; }
+}
+eqs(String(leadBad), "0", "no NaN in the lead markers");
+eqs(String(m3empty.leads.indices.length), "0",
+    "a cave with no survey has no leads to mark");
+
 // Rings carry the angle they sat at, which is what lets two rings of
 // different sizes be matched by WHERE the wall was rather than by
 // position in a list.

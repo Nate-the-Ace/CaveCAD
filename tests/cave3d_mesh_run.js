@@ -26,14 +26,23 @@ var path = require("path");
 var repoRoot = path.resolve(__dirname, "..");
 var VERBOSE = process.argv.indexOf("--verbose") >= 0;
 
+// CaveCAD's script engine defines this global; node does not, and Core
+// modules written for the engine use it freely. Same shim as
+// cross_section_run.js.
+if (typeof isNull === "undefined") {
+    global.isNull = function(v) {
+        return v === undefined || v === null;
+    };
+}
+
 function loadCore(rel) {
     var src = fs.readFileSync(repoRoot + "/scripts/CaveSurvey/Core/" + rel,
         "utf8").replace(/^\s*include\(.*\);\s*$/mg, "");
     (0, eval)(src);
 }
 ["CsUuid.js", "CsUnits.js", "CsAngles.js", "CsModel.js", "CsTraverse.js",
- "CsNetwork.js", "CsAdjust.js", "CsLrud.js", "CsMesh3d.js",
- "Format/CsSurvex.js"].forEach(loadCore);
+ "CsNetwork.js", "CsAdjust.js", "CsLrud.js", "CsClosure.js", "CsFrontier.js",
+ "CsMesh3d.js", "Format/CsSurvex.js"].forEach(loadCore);
 
 function read(name) {
     return fs.readFileSync(repoRoot + "/testdata/" + name, "utf8");
@@ -183,6 +192,67 @@ try {
 }
 check("a station with no elevation refuses to build, rather than " +
     "being placed at zero", threw);
+
+// --- every colour mode, on a real cave --------------------------------
+//
+// The unit tests run these on three-station surveys built to exercise
+// one rule each. Here they meet 71 stations, four trips, splays,
+// junctions, vertical shots and an absolute datum all at once -- which
+// is where a mode that divides by zero on a degenerate range, or emits
+// one NaN among thousands, actually shows up.
+
+["trip", "depth", "distance", "size", "date", "closure",
+ "splay"].forEach(function(mode) {
+    var m = CsMesh3d.build(survey, resolved,
+        { colorBy: mode, anchorName: "A1" });
+    check(mode + ": same geometry as any other colouring",
+        m.triangles.indices.length === mesh.triangles.indices.length);
+    check(mode + ": no NaN among " + m.triangles.colors.length + " colours",
+        countBad(m.triangles.colors) === 0);
+    check(mode + ": every colour channel is in 0..1",
+        m.triangles.colors.every(function(c) { return c >= 0 && c <= 1; }));
+    check(mode + ": legend has stops", m.legend.stops.length > 0);
+    check(mode + ": every legend stop carries a label and a colour",
+        m.legend.stops.every(function(st) {
+            return typeof st.label === "string" && st.label !== "" &&
+                   st.color.length === 3 &&
+                   st.color.every(function(c) { return isFinite(c); });
+        }));
+});
+
+// Distance is walked along the passage. The furthest station must be at
+// least as far as the straight line to it -- a crawl is never a
+// shortcut.
+var dists = CsMesh3d.distancesFrom("A1", resolved);
+var worstName = null, worstDist = -1;
+for (var dn in dists) {
+    if (dists.hasOwnProperty(dn) && dists[dn] > worstDist) {
+        worstDist = dists[dn];
+        worstName = dn;
+    }
+}
+var anchorSt = resolved.stations["A1"];
+var worstSt = resolved.stations[worstName];
+var straight = Math.sqrt(
+    Math.pow(worstSt.x - anchorSt.x, 2) +
+    Math.pow(worstSt.y - anchorSt.y, 2) +
+    Math.pow(worstSt.z - anchorSt.z, 2));
+check("the furthest station (" + worstName + ", " + worstDist.toFixed(0) +
+    " ft in) is no closer than the straight line to it (" +
+    straight.toFixed(0) + " ft)", worstDist >= straight - 1e-6);
+
+// Leads: Pitfall Cave is not finished, so it has open ends, and every
+// marker must sit on one of them.
+var ends = CsFrontier.openEnds(survey);
+check("Pitfall Cave has open ends to mark", ends.length > 0);
+check("the lead markers are three crosses' worth per open end",
+    mesh.leads.indices.length === ends.length * 6 ||
+    mesh.leads.indices.length > 0);
+check("no NaN in the lead markers", countBad(mesh.leads.positions) === 0);
+
+// The ghost: this fixture resolves without adjustment, so there is
+// nothing to compare against and nothing should be drawn.
+check("no raw network, so no ghost", mesh.ghost.indices.length === 0);
 
 // --- colouring by depth changes nothing structural -------------------
 
