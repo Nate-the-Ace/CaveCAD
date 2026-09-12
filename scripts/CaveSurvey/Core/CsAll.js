@@ -131,6 +131,10 @@ include(includeBasePath + "/CsBind.js");
 include(includeBasePath + "/CsFocus.js");
 include(includeBasePath + "/CsDraw.js");
 include(includeBasePath + "/CsWarp.js");
+
+// A scanned sketch laid onto the passage. After CsWarp, whose
+// inverse-square weighting it follows.
+include(includeBasePath + "/CsDrape.js");
 include(includeBasePath + "/CsRevise.js");
 // After CsRevise (it borrows withOffLayersOn) and CsModel/CsTags: the
 // per-trip metadata editor, which retags trip anchors and touches no

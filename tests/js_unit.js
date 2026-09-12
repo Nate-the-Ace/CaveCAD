@@ -158,6 +158,7 @@ var CORE_FILES = [
     "scripts/CaveSurvey/Core/CsLrud.js",
     "scripts/CaveSurvey/Core/CsMesh3d.js",
     "scripts/CaveSurvey/Core/CsSection3d.js",
+    "scripts/CaveSurvey/Core/CsDrape.js",
     "scripts/CaveSurvey/Core/CsScanFit.js",
     "scripts/CaveSurvey/Core/CsScanFrame.js",
     "scripts/CaveSurvey/Core/CsScanTrim.js",
@@ -21053,6 +21054,68 @@ eqs(CsMesh3d.tripLabel(sameDay, 1), "TRUITT CAVE 2024-04-06 (2)",
     "and so is the second of them");
 eqs(CsMesh3d.tripLabel(sameDay, 2), "TRUITT CAVE 2024-06-04",
     "a trip whose date is its own keeps a clean label");
+
+// ---------------------------------------------------------------------
+// CsDrape -- a sketch laid onto the passage
+// ---------------------------------------------------------------------
+
+var dStations = { A: { x: 0, y: 0, z: 100 }, B: { x: 10, y: 0, z: 110 } };
+nearly(CsDrape.elevationAt({ x: 0, y: 0 }, dStations), 100, 1e-6,
+    "at a station, its own elevation");
+nearly(CsDrape.elevationAt({ x: 10, y: 0 }, dStations), 110, 1e-6,
+    "at the other, the other's");
+var dMid = CsDrape.elevationAt({ x: 5, y: 0 }, dStations);
+ok(dMid > 100 && dMid < 110,
+    "between two stations, between their elevations");
+nearly(dMid, 105, 1e-6, "and exactly between when it is exactly between");
+
+// BEYOND REACH IT GOES FLAT. Past the last station there is no trend to
+// follow, and extrapolating a slope would invent a cave going somewhere
+// nobody surveyed.
+var dFar = CsDrape.elevationAt({ x: 100000, y: 0 }, dStations);
+ok(dFar === 110,
+    "far beyond the survey it takes the nearest station's own elevation");
+
+eqs(String(CsDrape.elevationAt({ x: 0, y: 0 }, {})), "null",
+    "no stations, no elevation -- and no NaN");
+eqs(String(CsDrape.elevationAt({ x: 0, y: 0 },
+    { A: { x: 0, y: 0 } })), "null",
+    "a station with no elevation is not one to sample");
+
+var dQuad = { origin: { x: 0, y: 0 }, u: { x: 10, y: 0 },
+              v: { x: 0, y: 10 } };
+var dG = CsDrape.grid(dQuad, 4, dStations);
+eqs(String(dG.positions.length / 3), "25", "(4+1)^2 vertices");
+eqs(String(dG.indices.length), String(4 * 4 * 6), "two triangles per cell");
+eqs(String(dG.uvs.length / 2), "25", "one uv pair per vertex");
+
+var dBad = 0;
+for (var dgi = 0; dgi < dG.positions.length; dgi++) {
+    if (!isFinite(dG.positions[dgi])) { dBad++; }
+}
+eqs(String(dBad), "0", "no NaN in a draped grid");
+
+// Every index addresses a vertex that exists.
+var dMax = dG.positions.length / 3;
+var dOob = 0;
+for (var doi = 0; doi < dG.indices.length; doi++) {
+    if (dG.indices[doi] < 0 || dG.indices[doi] >= dMax) { dOob++; }
+}
+eqs(String(dOob), "0", "every grid index is in range");
+
+// The corners land where the quad says, and v is flipped so an image's
+// top row sits at the top of the drawing.
+nearly(dG.positions[0], 0, 1e-9, "first vertex is the quad's origin");
+nearly(dG.uvs[1], 1, 1e-9, "and carries v = 1, the image's top");
+var dLast = dG.positions.length - 3;
+nearly(dG.positions[dLast], 10, 1e-9, "last vertex is the far corner");
+nearly(dG.uvs[dG.uvs.length - 1], 0, 1e-9, "carrying v = 0, the bottom");
+
+// No survey to drape onto is not a degenerate grid; it is no grid.
+eqs(String(CsDrape.grid(dQuad, 4, {}).positions.length), "0",
+    "nothing to sample means nothing to draw");
+eqs(String(CsDrape.grid(null, 4, dStations).positions.length), "0",
+    "no quad, no grid -- and no exception");
 
 // Ramp helpers must not divide by zero on a degenerate range.
 var oneTrip = mesh3dSurvey();
