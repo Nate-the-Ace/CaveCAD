@@ -1423,6 +1423,16 @@ CsArea.estimateCount = function(area, entry, densityMul) {
     return want > 0 ? want : 0;
 };
 
+/** The Areas panel's own Density box floor (AreaFill.js's densityBox
+ *  reads THIS, rather than a second 0.1 written into its own setRange
+ *  call) -- named and shared so a future change to the box's floor
+ *  cannot drift away from what CsArea.suggestedDensityMul is willing to
+ *  propose. Lives here, not in AreaFill.js: this file is GUI-free and
+ *  loads under node as readily as inside CaveCAD (see this file's own
+ *  header), so a test can read the same number the panel's spin box
+ *  uses without loading any Qt widget at all. */
+CsArea.DENSITY_FLOOR = 0.1;
+
 /**
  * A density multiplier that would bring an over-threshold estimate down
  * to roughly `target` elements -- what a "thin it" offer actually thins
@@ -1430,10 +1440,10 @@ CsArea.estimateCount = function(area, entry, densityMul) {
  *
  * NEVER SUGGESTS RAISING the density (a caller offering to "thin" a fill
  * that hands back a bigger number would be a bug users would find fast),
- * and never suggests all the way to zero: 0.1 is the Areas panel's own
- * Density box floor (see AreaFill.js's densityBox.setRange) -- clamping
- * here means whatever this function proposes is always a value that box
- * can actually hold and a caver can actually type in by hand later.
+ * and never suggests all the way to zero: clamped to CsArea.DENSITY_FLOOR
+ * so whatever this function proposes is always a value the Areas panel's
+ * own Density box can actually hold and a caver can actually type in by
+ * hand later.
  *
  * Rounded to a hundredth: the box shows two decimals, and a suggestion
  * with more precision than the control that will display it just reads
@@ -1445,6 +1455,6 @@ CsArea.suggestedDensityMul = function(currentDensityMul, estimate, target) {
         return cur;
     }
     var suggested = Math.min(cur, cur * (target / estimate));
-    suggested = Math.max(0.1, suggested);
+    suggested = Math.max(CsArea.DENSITY_FLOOR, suggested);
     return Math.round(suggested * 100) / 100;
 };

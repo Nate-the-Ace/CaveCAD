@@ -495,6 +495,96 @@ AreaFill.leaveEditorMode = function() {
 };
 
 /**
+ * Sets the selection-hint label to say what the NEXT tile click will do,
+ * given the document's CURRENT selection -- review finding, 2026-09-12:
+ * "the tile click is a coin flip a beginner cannot see coming." Blank
+ * (and hidden) when nothing selected resolves to an area, so the panel
+ * says nothing when there is nothing unusual to say; a selection that
+ * DOES resolve to one or more areas gets a line naming how many and
+ * what a tile does to them, in the same breath mentioning that Scale
+ * and Density reach the same selection -- the only place on this panel
+ * that fact is written down at all.
+ *
+ * SAFE TO CALL OFTEN: reading the selection and resolving it costs at
+ * most one CsArea.areaScan document walk (only when the selection
+ * contains a fill entity, not a boundary -- see CsArea.resolveSelection's
+ * own header), never a write.
+ */
+AreaFill.refreshSelectionHint = function() {
+    var w = AreaFill.widgets;
+    if (isNull(w) || isNull(w.selectionHint)) {
+        return;
+    }
+    var text = "";
+    try {
+        var di = EAction.getDocumentInterface();
+        var doc = isNull(di) ? null : di.getDocument();
+        if (!isNull(doc) && doc.hasSelection()) {
+            var boundaryIds = CsArea.resolveSelection(doc,
+                doc.querySelectedEntities());
+            if (boundaryIds.length > 0) {
+                text = qsTr("%1 area%2 selected -- a tile repatterns " +
+                    "them (Scale and Density apply to them too). Clear " +
+                    "the selection to draw a new one.")
+                    .arg(boundaryIds.length)
+                    .arg(boundaryIds.length === 1 ? "" : "s");
+            }
+        }
+    } catch (e) {
+        text = "";   // no readable document/selection -- say nothing
+    }
+    try {
+        w.selectionHint.text = text;
+        w.selectionHint.visible = (String(text).length > 0);
+    } catch (eSet) {
+    }
+};
+
+/**
+ * Wires AreaFill.refreshSelectionHint to QCAD's own live selection
+ * signal, ONCE, so the hint tracks a selection made while the panel
+ * already sits open and idle -- not just at the moments this file
+ * already refreshes it by hand (panel build, Area Fill's own
+ * beginEvent, after a repattern).
+ *
+ * THE SAME PROVEN IDIOM AreaFillListener.install ALREADY USES for
+ * transactions, one class over: RSelectionListenerAdapter is
+ * RTransactionListenerAdapter's sibling in the same generated wrapper
+ * family, and QCAD's OWN shipped status bar
+ * (scripts/Widgets/SelectionDisplay/SelectionDisplay.js) runs
+ * `appWin.addSelectionListener(new RSelectionListenerAdapter())` on
+ * every single session already -- this is not a guess at what the
+ * bridge supports, it is the same mechanism already running live in
+ * every CaveCAD window. The headless guard and try/catch degrade the
+ * same way addTransactionListener's own install already does: WITHOUT
+ * this listener (a build that refuses it, or a headless run with no
+ * window at all), the hint still updates at every panel build, every
+ * Area Fill command invocation, and after every repattern -- it only
+ * loses the ability to notice a selection made while the panel sits
+ * open and nothing else here happens to touch it. Degrade, never crash
+ * the panel.
+ */
+AreaFill.installSelectionHintListener = function() {
+    if (AreaFill.selectionListenerInstalled === true) {
+        return;
+    }
+    var appWin = RMainWindowQt.getMainWindow();
+    if (isNull(appWin) || isNull(appWin.addSelectionListener)) {
+        return;   // headless: no window to listen to
+    }
+    try {
+        AreaFill.selectionAdapter = new RSelectionListenerAdapter();
+        appWin.addSelectionListener(AreaFill.selectionAdapter);
+        AreaFill.selectionAdapter.selectionChanged.connect(
+            AreaFill.refreshSelectionHint);
+        AreaFill.selectionListenerInstalled = true;
+    } catch (e) {
+        // No live tracking -- see this function's own header for what
+        // still keeps the hint honest without it.
+    }
+};
+
+/**
  * Retags every area in the current selection to `key` and rebuilds its
  * fill -- the wrong-tile recovery this panel exists to offer (2026-09-12,
  * Nathan): before this, changing a drawn area's pattern meant deleting
@@ -525,6 +615,12 @@ AreaFill.repatternSelection = function(doc, di, boundaryIds, key) {
             "area -- select a boundary or its fill first."));
     }
     AreaFill.rebuildTiles();
+    // The selection itself did not change, but rebuildTiles() just
+    // re-read AreaFillRun.armed -- refresh the hint alongside it so the
+    // two never show a stale combination of each other, in case the
+    // live listener (AreaFill.installSelectionHintListener) is not
+    // installed.
+    AreaFill.refreshSelectionHint();
 };
 
 /**
@@ -534,22 +630,25 @@ AreaFill.repatternSelection = function(doc, di, boundaryIds, key) {
  * anything. Its own function so the closure captures ONE key, not the
  * loop variable.
  *
- * THE SAME BUTTON, TWO ACTS, TOLD APART BY STATUS TEXT, DELIBERATELY
+ * THE SAME BUTTON, TWO ACTS, TOLD APART BEFORE AND AFTER THE CLICK
  * (2026-09-12, one of the four decisions this task called out to make
- * explicitly). A repattern never checks the tile (rebuildTiles() at the
- * end of repatternSelection restores whatever WAS armed, or nothing,
- * exactly as it was before the click -- Qt's own checkable-button click
- * would otherwise leave this tile looking armed even though nothing was
- * armed), never starts a stroke, and never changes the command prompt an
- * arm would set. What DOES change is the panel's own status message:
- * "Repatterned N selected area(s) to X" names what just happened in
- * words an arm's "Press and drag to enclose..." prompt never uses, so a
- * caver watching the status line cannot mistake one act for the other.
- * A caver who wanted to arm a fresh stroke while unrelated geometry
- * happened to be selected gets the repattern message instead of a
- * command prompt -- a real, accepted tradeoff of this shape: the
- * message says plainly what happened, and Ctrl+Z undoes it in one step
- * if that was not the intent.
+ * explicitly; sharpened after review the same day -- see
+ * AreaFill.refreshSelectionHint's own header). BEFORE: the selection
+ * hint label, kept live by refreshSelectionHint, already says "N areas
+ * selected -- a tile repatterns them" whenever this fork is actually
+ * live, so a caver reads the mode off the panel before clicking anything
+ * rather than discovering it from what just happened. AFTER: the
+ * status message ("Repatterned N selected area(s) to X") is the
+ * confirmation that it actually happened, in words an arm's "Press and
+ * drag to enclose..." prompt never uses. A repattern never checks the
+ * tile (rebuildTiles() at the end of repatternSelection restores
+ * whatever WAS armed, or nothing, exactly as it was before the click --
+ * Qt's own checkable-button click would otherwise leave this tile
+ * looking armed even though nothing was armed), never starts a stroke,
+ * and never changes the command prompt an arm would set. A caver who
+ * wanted to arm a fresh stroke while an old selection was still live
+ * had the hint telling them so before they clicked; Ctrl+Z still undoes
+ * a mistaken repattern in one step regardless.
  */
 AreaFill.connectTile = function(button, key) {
     button.clicked.connect(function() {
@@ -786,6 +885,27 @@ AreaFill.buildBody = function(parent) {
         w.problems.push("search box (" + eSearchBox + ")");
     }
 
+    // -- the selection hint ----------------------------------------------
+    //
+    // SAYS WHAT THE NEXT TILE CLICK WILL DO, before it happens (review
+    // finding, 2026-09-12). Without this, a caver who just drew an area
+    // (or clicked one to inspect it) and then clicks a DIFFERENT tile
+    // meaning "start a new stroke" silently gets the SELECTED area
+    // repatterned instead -- AreaFill.connectTile's own fork is real and
+    // a beginner cannot see it coming. This label turns that fork into a
+    // visible mode instead of an after-the-fact status message, and
+    // doubles as the only UI surface that says "Scale/Density apply to
+    // a selected area too" -- otherwise nothing on the panel hints that
+    // path exists at all.
+    try {
+        w.selectionHint = new QLabel("");
+        w.selectionHint.wordWrap = true;
+        w.selectionHint.visible = false;
+        layout.addWidget(w.selectionHint, 0, 0);
+    } catch (eHint) {
+        w.problems.push("selection hint (" + eHint + ")");
+    }
+
     // -- scale and density ----------------------------------------------
     //
     // FEET-LIKE, NOT A RAW OP: both are multipliers CsArea.placements
@@ -824,7 +944,11 @@ AreaFill.buildBody = function(parent) {
             "filled pattern -- a hatch has no scattered elements to " +
             "thin out.");
         try {
-            w.densityBox.setRange(0.1, 5.0);
+            // The floor is CsArea.DENSITY_FLOOR, not a second literal
+            // 0.1 -- see that constant's own header: CsArea.
+            // suggestedDensityMul clamps a "thin it" suggestion to the
+            // exact same number, and the two must never drift apart.
+            w.densityBox.setRange(CsArea.DENSITY_FLOOR, 5.0);
             w.densityBox.setSingleStep(0.1);
             w.densityBox.setDecimals(2);
             w.densityBox.setValue(1.0);
@@ -1039,6 +1163,20 @@ AreaFill.buildBody = function(parent) {
         // the default column count stands for the session
     }
 
+    // LIVE TRACKING, installed once, plus an immediate read so the hint
+    // is never blank-by-default just because the panel happened to be
+    // built after something was already selected.
+    try {
+        AreaFill.installSelectionHintListener();
+    } catch (eListener) {
+        // see AreaFill.installSelectionHintListener's own header --
+        // degraded, not fatal
+    }
+    try {
+        AreaFill.refreshSelectionHint();
+    } catch (eHintInit) {
+    }
+
     if (w.problems.length > 0) {
         EAction.handleUserWarning("Area Fill: this CaveCAD build refused " +
             "part of the panel -- " + w.problems.join("; ") +
@@ -1067,6 +1205,14 @@ AreaFill.prototype.beginEvent = function() {
     } catch (e) {
         EAction.handleUserWarning("Area Fill: this CaveCAD build refused " +
             "the Draw panel (" + e + ") -- please report this.");
+    }
+
+    // The "area" command is also a "panel shown" moment -- refresh the
+    // hint here too, on top of the live listener, per the fallback this
+    // task called for.
+    try {
+        AreaFill.refreshSelectionHint();
+    } catch (eHint) {
     }
 
     this.terminate();
