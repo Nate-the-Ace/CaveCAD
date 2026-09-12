@@ -20897,6 +20897,49 @@ eqs(String(m3empty.triangles.indices.length), "0",
 ok(isFinite(m3empty.bounds.min.x),
     "an empty mesh still answers finite bounds");
 
+// Rings carry the angle they sat at, which is what lets two rings of
+// different sizes be matched by WHERE the wall was rather than by
+// position in a list.
+var angled = CsMesh3d.ringAt(origin, north,
+    { left: 2, right: 3, up: 4, down: 1 }, [], CsTraverse.SLOPE);
+var haveAngles = true;
+for (var ag = 0; ag < angled.length; ag++) {
+    if (typeof angled[ag].angle !== "number" ||
+            !isFinite(angled[ag].angle)) {
+        haveAngles = false;
+    }
+}
+ok(haveAngles, "every ring point carries its own angle");
+
+// nearestByAngle measures the short way round the circle. A point at
+// +179 degrees is two degrees from -179, not three hundred and
+// fifty-eight, and a loft that got this wrong would tear the seam open
+// at the back of every passage.
+var seam = [
+    { x: 0, y: 0, z: 0, angle: Math.PI - 0.02 },
+    { x: 9, y: 9, z: 9, angle: 0 }
+];
+var picked = CsMesh3d.nearestByAngle(seam, -Math.PI + 0.02);
+eqs(String(picked.x), "0",
+    "nearestByAngle crosses the seam the short way round");
+
+// THE TWIST. Two rings of very different size must pair by angle, not
+// by index. A four-tick ring against one with many splays up one wall
+// would, paired by position, join the floor of one station to the
+// ceiling of the next -- a strip that spirals through the passage
+// instead of skinning it.
+var sparse = [
+    { x: 0, y: 0, z: 0, angle: -Math.PI / 2 },   // floor
+    { x: 1, y: 0, z: 0, angle: 0 },              // right wall
+    { x: 2, y: 0, z: 0, angle: Math.PI / 2 },    // ceiling
+    { x: 3, y: 0, z: 0, angle: Math.PI }         // left wall
+];
+eqs(String(CsMesh3d.nearestByAngle(sparse, -Math.PI / 2).z), "0",
+    "asking for the floor gets the floor");
+eqs(String(CsMesh3d.nearestByAngle(sparse, Math.PI / 2).x), "2",
+    "asking for the ceiling gets the ceiling, not whatever is fourth " +
+    "in the list");
+
 // ---------------------------------------------------------------------
 // Shelf triage -- health, badges, declination drift
 // ---------------------------------------------------------------------

@@ -202,7 +202,12 @@ CsMesh3d.ringAt = function(station, dir, lrud, splays, tapeMode) {
             y: station.y + local[k].u * frame.right.y +
                            local[k].v * frame.up.y,
             z: station.z + local[k].u * frame.right.z +
-                           local[k].v * frame.up.z
+                           local[k].v * frame.up.z,
+            // The angle this point sat at in its own station's frame,
+            // carried out so the loft can match two rings up by WHERE
+            // the wall was rather than by position in a list. See
+            // CsMesh3d.loft.
+            angle: local[k].angle
         });
     }
     return out;
@@ -329,31 +334,59 @@ CsMesh3d.quad = function(tri, p0, p1, p2, p3, colorA, colorB) {
 };
 
 /**
+ * The ring point lying nearest a given angle, measured the short way
+ * round so that -179 degrees and +179 degrees are two degrees apart
+ * rather than three hundred and fifty eight.
+ */
+CsMesh3d.nearestByAngle = function(ring, angle) {
+    var best = ring[0];
+    var bestGap = Infinity;
+    for (var i = 0; i < ring.length; i++) {
+        var gap = Math.abs(ring[i].angle - angle);
+        if (gap > Math.PI) {
+            gap = 2 * Math.PI - gap;
+        }
+        if (gap < bestGap) {
+            bestGap = gap;
+            best = ring[i];
+        }
+    }
+    return best;
+};
+
+/**
  * Triangle strip between two rings.
  *
- * Rings rarely have the same number of points -- one station may have
- * four LRUD ticks and its neighbour eleven splays -- so both are
- * resampled onto the longer one's count. That repeats a point rather
- * than inventing one: every vertex emitted is still a vertex somebody
- * measured.
+ * MATCHED BY ANGLE, NOT BY INDEX. Rings rarely have the same number of
+ * points -- one station may have four LRUD ticks and its neighbour
+ * eleven splays -- and pairing them by position in the list silently
+ * assumes the two lists divide the circle the same way. They do not:
+ * four evenly spread ticks against eleven splays clustered up one wall
+ * would pair the floor of one station with the ceiling of the next, and
+ * the strip would twist through the passage rather than skin it.
+ *
+ * So both rings are sampled at the same set of angles, taken around the
+ * circle. Each sample picks the MEASURED point nearest that angle,
+ * repeating one where a ring is sparse rather than interpolating a
+ * wall position nobody recorded.
  *
  * Flat normals throughout. Smoothing across the strip would imply the
  * passage curves between stations in a way the data does not say.
  */
 CsMesh3d.loft = function(tri, ringA, ringB, colorA, colorB) {
     var n = Math.max(ringA.length, ringB.length);
-    if (n < 3) {
+    if (n < 3 || ringA.length < 1 || ringB.length < 1) {
         return;
     }
-    var at = function(ring, i) {
-        var k = Math.floor((i % n) * ring.length / n);
-        return ring[k % ring.length];
+    var angleOf = function(i) {
+        return -Math.PI + (2 * Math.PI) * ((i % n) / n);
     };
     for (var i = 0; i < n; i++) {
-        CsMesh3d.quad(tri,
-            at(ringA, i), at(ringA, i + 1),
-            at(ringB, i + 1), at(ringB, i),
-            colorA, colorB);
+        var a0 = CsMesh3d.nearestByAngle(ringA, angleOf(i));
+        var a1 = CsMesh3d.nearestByAngle(ringA, angleOf(i + 1));
+        var b0 = CsMesh3d.nearestByAngle(ringB, angleOf(i));
+        var b1 = CsMesh3d.nearestByAngle(ringB, angleOf(i + 1));
+        CsMesh3d.quad(tri, a0, a1, b1, b0, colorA, colorB);
     }
 };
 
