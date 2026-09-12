@@ -51,32 +51,37 @@ Beyond `CsDrape.REACH` from any station the drape goes FLAT rather than
 extrapolating: past the last station there is no trend to follow, and a
 plane is an honest answer where a guessed slope is not.
 
-## Profile: the exaggeration trap
+## Profile: exaggeration is 1, and the drawing says so by staying quiet
 
-THE HEADLINE RISK OF THIS WHOLE FEATURE.
+An earlier draft of this spec built machinery to DERIVE the vertical
+exaggeration of a band, on the grounds that it was recorded only as
+prose. That was over-engineering, and Nathan said so: hand-drawn
+profiles are not vertically exaggerated.
 
-A profile band is drawn with a VERTICAL EXAGGERATION. The caver then
-scales their scan onto that drawn band, so the scan's vertical is
-exaggerated too. Draping it into 3D without dividing that out stretches
-every sketch vertically -- and it still looks plausible, which is why it
-would ship.
+The drawing already answers the question cleanly.
+`CsProfileDraw.stampText` returns NULL when the exaggeration is 1, so no
+stamp is drawn at all -- the PRESENCE of a `ProfileExaggerationStamp` is
+the flag, and its absence means 1. Truitt Cave has none, across sixteen
+profile boxes.
 
-The exaggeration is recorded in the drawing ONLY AS PROSE: a stamp
-tagged `ProfileExaggerationStamp` reading "Vertical exaggeration 2x --
-not to sheet scale". Parsing a human sentence to recover a number the
-geometry depends on is not acceptable.
+So the drape asks one question: is there a stamp?
 
-So it is DERIVED FROM THE DRAWN GEOMETRY instead. The band's own drawn
-stations are in the drawing and `CsProfile.unrollBand` recomputes the
-same band at exaggeration 1; the ratio of drawn vertical span to
-computed vertical span IS the exaggeration, per band, measured rather
-than trusted. Two stations at different elevations are enough; a band
-whose stations are all at one elevation has no ratio to measure and is
-skipped with that reason given.
+    no stamp    exaggeration is 1. Band-local y IS elevation above the
+                datum. Nothing to divide out. This is every drawing
+                these tools have made.
 
-A machine-readable tag is ALSO added to `CsProfileDraw.stamp` going
-forward, so new drawings carry the number outright. The derivation stays
-as the path for every drawing already made -- including all of Nathan's.
+    a stamp     the region is vertically exaggerated, and a 1:1 hand
+                sketch fitted onto a stretched band is not a thing that
+                can be un-stretched honestly -- the fit that put it
+                there was uniform, so the sketch and the band never
+                agreed vertically in the first place. The profile drape
+                switches ITSELF off for that region and the status line
+                says why.
+
+REFUSING IS THE POINT. A vertically stretched sketch draped over a
+passage still looks plausible, which is exactly why it would ship
+unnoticed. Saying "this region is exaggerated, so its scans are not
+draped" is information; a stretched picture is not.
 
 ## Profile: the mapping
 
@@ -158,9 +163,9 @@ Pure, headless:
   - it interpolates between two stations, and goes FLAT beyond REACH
   - a grid over a scan quad has the right vertex and index counts, and
     no NaN
-  - exaggeration derived from a band of known ratio comes back as that
-    ratio
-  - a band with no vertical spread reports "cannot derive" rather than 1
+  - a drawing with no exaggeration stamp reports exaggeration 1
+  - a drawing WITH a stamp reports that its profile scans are not
+    drapeable, and why
   - band-local x maps onto the right leg, including at a leg boundary
   - a point past the end of a band clamps rather than extrapolating
 
@@ -169,8 +174,8 @@ Live:
   - a plan scan lies over the passage it was drawn of
   - paper keys out; pencil survives
   - a profile scan follows the passage round a bend
-  - a profile drape is NOT vertically stretched -- checked against a
-    known passage height, since this is the failure that looks fine
+  - a profile drape sits at true elevation -- checked against a known
+    passage height, since a stretched one still looks fine
   - floating and re-docking the panel does not lose the textures
 
 ## Out of scope
