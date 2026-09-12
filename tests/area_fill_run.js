@@ -45,6 +45,12 @@ include(includeBasePath + "/AreaFillRun.js");
 // a later regeneration can never disagree about where a fill belongs.
 include(includeBasePath + "/AreaFillListener.js");
 
+// The pattern editor (Task 11). savePattern is a plain function taking
+// a document and entities, same reasoning as AreaFillRun.commit's own
+// header: a test drives it directly, with no QDialog and no drawing
+// tab in front of it.
+include(includeBasePath + "/AreaFillEdit.js");
+
 var failures = [];
 function ok(condition, what) {
     if (!condition) {
@@ -1077,6 +1083,298 @@ eqs(CsArea.regenerate(doc, di, lstReviveBoundary.getId()),
     eqs(bareDoc.queryAllEntities(false, true).length, bareBeforeCount,
         "AreaFillListener.onTransaction: the document is left exactly " +
         "as it was");
+})();
+
+// =======================================================================
+// AreaFillEdit -- Task 11. A caver draws one element, names it, picks a
+// placement rule, and it joins the Areas palette permanently, in their
+// OWN library -- the round trip, and the fill it makes possible.
+// =======================================================================
+
+(function customAreaPattern() {
+    var tmpLibDir = QDir.tempPath() + "/cs_area_fill_edit_test";
+    new QDir().mkpath(tmpLibDir);
+    var tmpLibrary = tmpLibDir + "/CaveCustomSymbols.dxf";
+    if (new QFileInfo(tmpLibrary).exists()) {
+        new QFile(tmpLibrary).remove();
+    }
+
+    // RESTORED, not blanked -- a test that clobbers a real setting with
+    // "" and calls that clean is gambling that nobody had one. Reading
+    // it first and putting the SAME value back is the only way this can
+    // never leave a caver's own CaveSurvey/SymbolLibrary different than
+    // it found it.
+    var originalLibSetting = RSettings.getStringValue(
+        "CaveSurvey/SymbolLibrary", "");
+    RSettings.setValue("CaveSurvey/SymbolLibrary", tmpLibrary);
+
+    try {
+        var editorDoc = new RDocument(new RMemoryStorage(),
+            createSpatialIndex());
+        var elementEntities = [
+            new RLineEntity(editorDoc, new RLineData(
+                new RVector(-0.3, -0.3), new RVector(0.3, 0.3))),
+            new RLineEntity(editorDoc, new RLineData(
+                new RVector(-0.3, 0.3), new RVector(0.3, -0.3)))
+        ];
+        var meta = { name: "Popcorn", layer: "FORMATIONS-MOONMILK-POPCORN",
+            placement: "scatter", density: 30, scaleMin: 0.8, scaleMax: 1.2,
+            rotate: true };
+        var saved = AreaFillEdit.savePattern(editorDoc, elementEntities,
+            meta);
+        ok(saved.ok, "AreaFillEdit.savePattern: the pattern is written (" +
+            (isNull(saved.error) ? "" : saved.error) + ")");
+        eqs(saved.block, "AREA_POPCORN",
+            "AreaFillEdit.savePattern: the block name derived from the " +
+            "display name");
+        eqs(saved.key, "POPCORN",
+            "AreaFillEdit.savePattern: the catalog key it joins " +
+            "CsArea.merged() under");
+        ok(new QFileInfo(tmpLibrary).exists(),
+            "AreaFillEdit.savePattern: written into the TEMP library, " +
+            "not the caver's real one");
+
+        CsSymbolStore.invalidate(tmpLibrary);
+        var merged = CsArea.merged();
+        ok(!isNull(merged[saved.key]),
+            "CsArea.merged: a saved pattern joins the catalog");
+        eqs(merged[saved.key].layer, "FORMATIONS-MOONMILK-POPCORN",
+            "CsArea.merged: it remembers its home layer");
+        eqs(merged[saved.key].engine, "scatter",
+            "CsArea.merged: it remembers its placement rule");
+        ok(!isNull(CsArea.CATALOG.SAND),
+            "CsArea.merged: a custom pattern does not displace a built-in");
+        eqs(merged.SAND.layer, CsArea.CATALOG.SAND.layer,
+            "CsArea.merged: ... and the built-in SAND entry is untouched " +
+            "by the merge");
+
+        // ---------------------------------------------------------------
+        // The prefix guard, from BOTH sides. saveBlock must refuse an
+        // AREA_ name -- accepting it would write SYMBOL marker tags onto
+        // a pattern block, making it invisible to both list() (SYM_-only)
+        // and customAreaPatterns() (needs an AreaCustom marker): an
+        // orphan neither palette could see or delete. This IS the bug a
+        // review caught in this task's first draft, so it is pinned here.
+        // ---------------------------------------------------------------
+
+        var wrongPathSave = CsSymbolStore.saveBlock(null, saved.block,
+            editorDoc, elementEntities,
+            { nss: "x", uis: "", category: "Custom",
+              layer: CsLayers.BREAKDOWN });
+        eqs(wrongPathSave.ok, false,
+            "CsSymbolStore.saveBlock: an AREA_ name is refused, not " +
+            "silently accepted as an alternate prefix");
+
+        // ---------------------------------------------------------------
+        // A slug collision between two DIFFERENT custom patterns must be
+        // refused, not silently treated as an edit. "Popcorn" and
+        // "popcorn" differ only in case but slug to the SAME key/block
+        // name -- without the guard, this second save would report
+        // success and quietly overwrite the first caver's geometry.
+        // ---------------------------------------------------------------
+
+        var collideMeta = { name: "popcorn",
+            layer: "FORMATIONS-MOONMILK-POPCORN", placement: "scatter",
+            density: 10, scaleMin: 0.9, scaleMax: 1.1, rotate: false };
+        var collideEntities = [ new RLineEntity(editorDoc, new RLineData(
+            new RVector(0, 0), new RVector(0.1, 0.1))) ];
+        var collided = AreaFillEdit.savePattern(editorDoc, collideEntities,
+            collideMeta);
+        eqs(collided.ok, false,
+            "AreaFillEdit.savePattern: a different display name that " +
+            "slugs to an EXISTING custom pattern's key is refused, not " +
+            "silently overwritten");
+
+        CsSymbolStore.invalidate(tmpLibrary);
+        var afterCollision = CsArea.merged();
+        eqs(afterCollision[saved.key].name, "Popcorn",
+            "AreaFillEdit.savePattern: the refused save left the " +
+            "original pattern's name intact");
+
+        // ---------------------------------------------------------------
+        // THE CLAIM A CAVER CARES ABOUT, beyond the round trip: the saved
+        // pattern actually FILLS. A fresh document that has never seen
+        // AREA_POPCORN must still succeed -- the block is imported from
+        // the library first.
+        // ---------------------------------------------------------------
+
+        var placeDoc = new RDocument(new RMemoryStorage(),
+            createSpatialIndex());
+        var placeDi = new RDocumentInterface(placeDoc);
+        CsLayers.ensureSurveyLayers(placeDoc, placeDi);
+        CsLayers.ensure(placeDoc, placeDi, merged[saved.key].layer);
+        ok(isNull(placeDoc.queryBlock(saved.block)),
+            "fixture: the fresh drawing starts without the custom " +
+            "pattern's block");
+
+        var square = new RPolyline();
+        square.appendVertex(new RVector(0, 0));
+        square.appendVertex(new RVector(20, 0));
+        square.appendVertex(new RVector(20, 20));
+        square.appendVertex(new RVector(0, 20));
+        square.setClosed(true);
+        var boundary = new RPolylineEntity(placeDoc, new RPolylineData(square));
+        boundary.setLayerId(placeDoc.getLayerId("CTRL-AREA-BOUNDARY"));
+        var bOp = new RAddObjectsOperation();
+        bOp.addObject(boundary, false);
+        placeDi.applyOperation(bOp);
+
+        var fillOp = new RAddObjectsOperation();
+        var placed = CsArea.build(placeDoc, fillOp, boundary,
+            merged[saved.key],
+            { id: "popcorn-test", seed: 11, scale: 1.0, density: 1.0,
+              layer: merged[saved.key].layer }, placeDi);
+        placeDi.applyOperation(fillOp);
+
+        ok(placed.ok === true,
+            "CsArea.build: the custom pattern fills a boundary in a " +
+            "drawing that never saw its block (" + placed.reason + ")");
+        ok(placed.count > 0,
+            "CsArea.build: and actually placed elements");
+        ok(!isNull(placeDoc.queryBlock(saved.block)),
+            "CsArea.build: ... because the block was imported first");
+        eqs(CsArea.countOwned(placeDoc, "popcorn-test"), placed.count,
+            "CsArea.build: every placed element is tagged with its owner");
+
+        // ---------------------------------------------------------------
+        // A REGENERATE -- the listener's own path -- must never import a
+        // missing custom block on its own. Importing stays where a
+        // caver actually initiated the write (the interactive stroke
+        // above, or Task 12's Sync Areas); a rebuild that finds its
+        // block missing reports failure and leaves the fill empty,
+        // exactly as it already does for a missing BUILT-IN block.
+        // ---------------------------------------------------------------
+
+        var regenDoc = new RDocument(new RMemoryStorage(),
+            createSpatialIndex());
+        var regenDi = new RDocumentInterface(regenDoc);
+        CsLayers.ensureSurveyLayers(regenDoc, regenDi);
+        CsLayers.ensure(regenDoc, regenDi, merged[saved.key].layer);
+        CsLayers.ensure(regenDoc, regenDi, "CTRL-AREA-BOUNDARY");
+        ok(isNull(regenDoc.queryBlock(saved.block)),
+            "fixture: this second fresh drawing also starts without the " +
+            "pattern's block");
+
+        var regenSquare = new RPolyline();
+        regenSquare.appendVertex(new RVector(0, 0));
+        regenSquare.appendVertex(new RVector(20, 0));
+        regenSquare.appendVertex(new RVector(20, 20));
+        regenSquare.appendVertex(new RVector(0, 20));
+        regenSquare.setClosed(true);
+        var regenBoundary = new RPolylineEntity(regenDoc,
+            new RPolylineData(regenSquare));
+        regenBoundary.setLayerId(regenDoc.getLayerId("CTRL-AREA-BOUNDARY"));
+        CsTags.set(regenBoundary, CsArea.ID_KEY, "popcorn-regen");
+        CsTags.set(regenBoundary, CsArea.PATTERN_KEY, saved.key);
+        CsTags.set(regenBoundary, CsArea.SEED_KEY, "11");
+        CsTags.set(regenBoundary, CsArea.SCALE_KEY, "1.0");
+        CsTags.set(regenBoundary, CsArea.DENSITY_KEY, "1.0");
+        var regenOp = new RAddObjectsOperation();
+        regenOp.addObject(regenBoundary, false);
+        regenDi.applyOperation(regenOp);
+
+        var regenResult = CsArea.regenerate(regenDoc, regenDi,
+            regenBoundary.getId());
+        ok(regenResult.indexOf("failed:") === 0,
+            "CsArea.regenerate: a custom pattern's missing block is a " +
+            "FAILURE from this path, not a silent import (" +
+            regenResult + ")");
+        ok(isNull(regenDoc.queryBlock(saved.block)),
+            "CsArea.regenerate: ... and the block was never imported -- " +
+            "a rebuild must not reach into the library from inside a " +
+            "transaction callback");
+        eqs(CsArea.countOwned(regenDoc, "popcorn-regen"), 0,
+            "CsArea.regenerate: no fill was built either");
+
+        // ---------------------------------------------------------------
+        // DELETE: removes the block from the library only. The drawing
+        // above, already using the pattern, is untouched.
+        // ---------------------------------------------------------------
+
+        var del = CsSymbolStore.deleteAreaPattern(null, saved.block);
+        ok(del.ok, "CsSymbolStore.deleteAreaPattern: the pattern deletes " +
+            "from the library (" + del.error + ")");
+        ok(!isNull(placeDoc.queryBlock(saved.block)),
+            "CsSymbolStore.deleteAreaPattern: a drawing already using " +
+            "the pattern keeps its own copy of the block");
+
+        CsSymbolStore.invalidate(tmpLibrary);
+        var afterDelete = CsArea.merged();
+        ok(isNull(afterDelete[saved.key]),
+            "CsSymbolStore.deleteAreaPattern: the pattern is gone from " +
+            "the catalog after a delete");
+
+        // ---------------------------------------------------------------
+        // The widened prefix guard, from the caller's own side: neither
+        // save path accepts a name with neither SYM_ nor AREA_.
+        // ---------------------------------------------------------------
+
+        var rogue = CsSymbolStore.saveAreaPattern(null, "ROGUE_NOPE",
+            editorDoc, elementEntities, meta);
+        eqs(rogue.ok, false,
+            "CsSymbolStore.saveAreaPattern: a block name with neither " +
+            "known prefix is refused");
+    } finally {
+        RSettings.setValue("CaveSurvey/SymbolLibrary", originalLibSetting);
+        CsSymbolStore.invalidate();
+        if (new QFileInfo(tmpLibrary).exists()) {
+            new QFile(tmpLibrary).remove();
+        }
+        try {
+            new QDir().rmdir(tmpLibDir);
+        } catch (eRmDir) {
+        }
+    }
+})();
+
+// =======================================================================
+// AreaFillEdit.sessionAlive / blockedByOpenSession -- Task 11's fix for
+// a closed editor tab wedging the panel. A caver who closes the editor
+// window directly (not through Cancel) must not find every later
+// New Area Pattern.../Edit refused for the rest of the session with no
+// reachable Cancel to get out of it. No real MDI window is created here
+// -- these are plain fakes standing in for a live and a destroyed Qt
+// wrapper, which is exactly the distinction sessionAlive draws.
+// =======================================================================
+
+(function closedTabDoesNotWedgeTheEditor() {
+    // A "dead" session: touching it throws, the same way a destroyed
+    // Qt wrapper does in this build ("wrapped is NULL", measured
+    // elsewhere in this suite whenever a C++-side object outlives its
+    // JS wrapper's usefulness).
+    AreaFillEdit.session = { block: null, entry: null,
+        child: { windowTitle: "Pattern: Popcorn" },
+        di: { getDocument: function() {
+            throw new Error("wrapped is NULL"); } } };
+    ok(AreaFillEdit.isEditing(),
+        "fixture: the session looks open before the check runs");
+    eqs(AreaFillEdit.sessionAlive(), false,
+        "AreaFillEdit.sessionAlive: a session whose document throws on " +
+        "access reads as gone");
+    eqs(AreaFillEdit.blockedByOpenSession(), false,
+        "AreaFillEdit.blockedByOpenSession: a dead session does not " +
+        "block a new one from starting");
+    eqs(AreaFillEdit.session, null,
+        "AreaFillEdit.blockedByOpenSession: ... and clears the stale " +
+        "session as a side effect -- the wedge, turned into a no-op");
+
+    // A LIVE session still blocks, exactly as before this fix.
+    var live = { block: null, entry: null,
+        child: { windowTitle: "Pattern: Popcorn" },
+        di: { getDocument: function() { return {}; } } };
+    AreaFillEdit.session = live;
+    eqs(AreaFillEdit.blockedByOpenSession(), true,
+        "AreaFillEdit.blockedByOpenSession: a genuinely open session " +
+        "still blocks a new one");
+    eqs(AreaFillEdit.session, live,
+        "AreaFillEdit.blockedByOpenSession: ... and is left alone while " +
+        "it is still alive, not cleared out from under the caver");
+    AreaFillEdit.session = null;
+
+    // No session at all: neither blocks nor throws.
+    eqs(AreaFillEdit.blockedByOpenSession(), false,
+        "AreaFillEdit.blockedByOpenSession: no session at all is simply " +
+        "not blocked");
 })();
 
 var out;

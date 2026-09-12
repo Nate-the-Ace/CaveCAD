@@ -287,7 +287,7 @@ AreaFillRun.commit = function(doc, di, points, key, opts) {
 
     var built = CsArea.build(doc, op, boundary, entry,
         { id: id, seed: seed, scale: opts.scale, density: opts.density,
-          layer: routed.fillLayer });
+          layer: routed.fillLayer }, di);
     di.applyOperation(op);
 
     return { ok: built.ok, id: id, layer: routed.fillLayer,

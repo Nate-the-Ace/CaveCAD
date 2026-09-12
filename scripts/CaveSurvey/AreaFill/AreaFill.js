@@ -34,6 +34,7 @@
 include("scripts/EAction.js");
 include(includeBasePath + "/../Core/CsAll.js");
 include(includeBasePath + "/AreaFillRun.js");
+include(includeBasePath + "/AreaFillEdit.js");
 
 function AreaFill(guiAction) {
     EAction.call(this, guiAction);
@@ -171,6 +172,31 @@ AreaFill.wrapLabel = function(text, budget) {
     return lines.join("\n");
 };
 
+/**
+ * The custom patterns' own keys (CsSymbolStore.slugFor of the name a
+ * caver gave it), sorted by that pattern's display name.
+ *
+ * SEPARATE FROM AreaFill.ORDER, deliberately: ORDER is the thirteen
+ * shipped patterns in the fixed order Nathan chose for them, and a
+ * caver's own patterns have no such curated order -- alphabetical is
+ * the least surprising default, and the only one that does not shuffle
+ * every time a new one is saved.
+ */
+AreaFill.customKeys = function() {
+    var merged = CsArea.merged();
+    var keys = [];
+    for (var k in merged) {
+        if (merged.hasOwnProperty(k) && merged[k].custom === true) {
+            keys.push(k);
+        }
+    }
+    keys.sort(function(a, b) {
+        var an = merged[a].name, bn = merged[b].name;
+        return an < bn ? -1 : (an > bn ? 1 : 0);
+    });
+    return keys;
+};
+
 /** True when a catalog entry matches the panel's search text -- name or
  *  key, case-insensitively. Pure. */
 AreaFill.matches = function(key, entry, needle) {
@@ -254,6 +280,7 @@ AreaFill.arm = function(key) {
         }
     }
     AreaFill.refreshDensityEnabled();
+    AreaFill.refreshCustomButtons();
 };
 
 /** Clears the armed pattern and every checked tile. */
@@ -269,6 +296,41 @@ AreaFill.disarm = function() {
         }
     }
     AreaFill.refreshDensityEnabled();
+    AreaFill.refreshCustomButtons();
+};
+
+/** The armed catalog entry (built-in or custom), or null when nothing
+ *  is armed -- what Edit and Delete act on, the same way
+ *  SymbolPalette.armed does for symbols. */
+AreaFill.armedEntry = function() {
+    if (isNull(AreaFillRun.armed)) {
+        return null;
+    }
+    return CsArea.entryFor(AreaFillRun.armed);
+};
+
+/** Edit and Delete act on the armed pattern, and only a CUSTOM one --
+ *  the thirteen shipped patterns are code and cannot be redrawn or
+ *  removed. Mirrors SymbolPalette's own editButton/deleteButton gate. */
+AreaFill.refreshCustomButtons = function() {
+    var w = AreaFill.widgets;
+    if (isNull(w)) {
+        return;
+    }
+    var entry = AreaFill.armedEntry();
+    var editable = !isNull(entry) && entry.custom === true;
+    try {
+        if (!isNull(w.editPatternButton)) {
+            w.editPatternButton.enabled = editable;
+        }
+    } catch (e) {
+    }
+    try {
+        if (!isNull(w.deletePatternButton)) {
+            w.deletePatternButton.enabled = editable;
+        }
+    } catch (e2) {
+    }
 };
 
 /**
@@ -300,6 +362,132 @@ AreaFill.startRun = function() {
     }
     var runAction = RGuiAction.getByScriptFile(runPath);
     di.setCurrentAction(new AreaFillRun(runAction));
+};
+
+/** Deletes the armed custom pattern, after asking -- mirrors
+ *  SymbolPalette.deleteArmed. Library only: a drawing already using the
+ *  pattern keeps its own copy of the block, untouched. */
+AreaFill.deleteArmed = function() {
+    var entry = AreaFill.armedEntry();
+    if (isNull(entry) || entry.custom !== true) {
+        return;
+    }
+    var answer = QMessageBox.question(
+        RMainWindowQt.getMainWindow(), qsTr("Delete Pattern"),
+        qsTr("Remove %1 from your symbol library?\n\nDrawings that " +
+            "already use it keep their own copy of the pattern; new " +
+            "fills will not have it.").arg(entry.name),
+        QMessageBox.Yes | QMessageBox.No);
+    if (answer !== QMessageBox.Yes) {
+        return;
+    }
+    var res = CsSymbolStore.deleteAreaPattern(null, entry.blocks[0]);
+    if (!res.ok) {
+        QMessageBox.warning(RMainWindowQt.getMainWindow(),
+            qsTr("Delete Pattern"), res.error);
+        return;
+    }
+    try {
+        CsTileArt.invalidateBlockShapes();
+    } catch (eTile) {
+    }
+    AreaFill.disarm();
+    AreaFill.rebuildTiles();
+};
+
+/**
+ * Shows the editor's fields and the Save Pattern / Cancel row, fills
+ * them from an existing entry when editing one, and says what is being
+ * edited. Mirrors SymbolPalette.enterEditorMode -- the tiles stay put
+ * rather than being swapped out, so a caver drawing a new pattern can
+ * still see the ones that already exist.
+ */
+AreaFill.enterEditorMode = function(message, entry) {
+    var w = AreaFill.widgets;
+    if (isNull(w)) {
+        return;
+    }
+    try {
+        if (!isNull(w.editorLabel)) {
+            w.editorLabel.text = message;
+            w.editorLabel.visible = true;
+        }
+        if (!isNull(w.patternNameEdit)) {
+            w.patternNameEdit.text = isNull(entry) ? "" : entry.name;
+        }
+        if (!isNull(w.patternLayerCombo)) {
+            var layers = AreaFillEdit.homeLayers();
+            var want = isNull(entry) ? CsLayers.BREAKDOWN : entry.layer;
+            for (var l = 0; l < layers.length; l++) {
+                if (layers[l] === want) {
+                    w.patternLayerCombo.currentIndex = l;
+                    break;
+                }
+            }
+        }
+        if (!isNull(w.patternPlacementCombo)) {
+            w.patternPlacementCombo.currentIndex =
+                (!isNull(entry) && entry.engine === "tile") ? 1 : 0;
+        }
+        if (!isNull(w.patternDensityBox)) {
+            w.patternDensityBox.value = isNull(entry) ? 30 : entry.density;
+        }
+        if (!isNull(w.patternScaleMinBox)) {
+            w.patternScaleMinBox.value = isNull(entry) ? 0.8 : entry.scaleMin;
+        }
+        if (!isNull(w.patternScaleMaxBox)) {
+            w.patternScaleMaxBox.value = isNull(entry) ? 1.2 : entry.scaleMax;
+        }
+        if (!isNull(w.patternRotateCombo)) {
+            w.patternRotateCombo.currentIndex =
+                (!isNull(entry) && entry.rotate === false) ? 1 : 0;
+        }
+        if (!isNull(w.editorFieldsHost)) {
+            w.editorFieldsHost.visible = true;
+        }
+        if (!isNull(w.savePatternButton)) {
+            w.savePatternButton.visible = true;
+        }
+        if (!isNull(w.cancelPatternButton)) {
+            w.cancelPatternButton.visible = true;
+        }
+        if (!isNull(w.newPatternButton)) {
+            w.newPatternButton.enabled = false;
+        }
+    } catch (e) {
+    }
+    try {
+        // The dock has to be VISIBLE for Save Pattern to be pressable --
+        // see SymbolPalette.enterEditorMode's own header.
+        DrawPanel.reveal(DrawPanel.SEC_AREAS);
+    } catch (eShow) {
+    }
+};
+
+/** Puts the panel back into arming mode. */
+AreaFill.leaveEditorMode = function() {
+    var w = AreaFill.widgets;
+    if (isNull(w)) {
+        return;
+    }
+    try {
+        if (!isNull(w.editorLabel)) {
+            w.editorLabel.visible = false;
+        }
+        if (!isNull(w.editorFieldsHost)) {
+            w.editorFieldsHost.visible = false;
+        }
+        if (!isNull(w.savePatternButton)) {
+            w.savePatternButton.visible = false;
+        }
+        if (!isNull(w.cancelPatternButton)) {
+            w.cancelPatternButton.visible = false;
+        }
+        if (!isNull(w.newPatternButton)) {
+            w.newPatternButton.enabled = true;
+        }
+    } catch (e) {
+    }
 };
 
 /** Arms an entry and starts the placement action. Its own function so
@@ -395,9 +583,14 @@ AreaFill.rebuildTiles = function() {
     } catch (eSearch) {
     }
 
+    // The thirteen shipped patterns, in their curated order, followed by
+    // every custom pattern a caver has drawn and saved of their own --
+    // ONE grid, so a custom pattern reads as a full member of the
+    // palette rather than a second-class list bolted underneath it.
+    var keys = AreaFill.ORDER.concat(AreaFill.customKeys());
     var cell = 0;
-    for (var k = 0; k < AreaFill.ORDER.length; k++) {
-        var key = AreaFill.ORDER[k];
+    for (var k = 0; k < keys.length; k++) {
+        var key = keys[k];
         var entry = CsArea.entryFor(key);
         if (isNull(entry) || !AreaFill.matches(key, entry, needle)) {
             continue;
@@ -425,6 +618,7 @@ AreaFill.rebuildTiles = function() {
     } catch (eStretch) {
     }
     AreaFill.refreshDensityEnabled();
+    AreaFill.refreshCustomButtons();
 };
 
 /** See AreaFill.COLUMNS_HALF's own header: a RETRIED deferred read of
@@ -582,6 +776,166 @@ AreaFill.buildBody = function(parent) {
         w.problems.push("pattern area (" + eScroll + ")");
     }
 
+    // -- the caver's own patterns -----------------------------------------
+    //
+    // Same shape as SymbolPalette's New Symbol / Edit / Delete row --
+    // Task 11's whole point is that a caver who has drawn a symbol
+    // already knows how to draw a pattern.
+    try {
+        var custom = new QHBoxLayout();
+        w.newPatternButton = new QPushButton(qsTr("New Area Pattern..."));
+        w.newPatternButton.toolTip = qsTr("Draw one element of your own. " +
+            "Opens a drawing to draw it in; saving adds it to this " +
+            "palette and to your symbol library.");
+        w.newPatternButton.clicked.connect(function() {
+            try {
+                AreaFillEdit.startNew();
+            } catch (eNew) {
+                EAction.handleUserWarning("Area Fill: could not open the " +
+                    "pattern editor (" + eNew + ").");
+            }
+        });
+        custom.addWidget(w.newPatternButton, 1, 0);
+
+        w.editPatternButton = new QPushButton(qsTr("Edit"));
+        w.editPatternButton.enabled = false;
+        w.editPatternButton.toolTip = qsTr("Reopen your own pattern to " +
+            "change it. The patterns the suite ships cannot be edited.");
+        w.editPatternButton.clicked.connect(function() {
+            try {
+                AreaFillEdit.startEdit(AreaFill.armedEntry());
+            } catch (eEdit) {
+                EAction.handleUserWarning("Area Fill: could not open that " +
+                    "pattern (" + eEdit + ").");
+            }
+        });
+        custom.addWidget(w.editPatternButton, 0, 0);
+
+        w.deletePatternButton = new QPushButton(qsTr("Delete"));
+        w.deletePatternButton.enabled = false;
+        w.deletePatternButton.toolTip = qsTr("Remove your own pattern " +
+            "from your symbol library. Drawings that already use it " +
+            "keep their own copy.");
+        w.deletePatternButton.clicked.connect(function() {
+            try {
+                AreaFill.deleteArmed();
+            } catch (eDel) {
+                EAction.handleUserWarning("Area Fill: could not delete " +
+                    "that pattern (" + eDel + ").");
+            }
+        });
+        custom.addWidget(w.deletePatternButton, 0, 0);
+        layout.addLayout(custom, 0);
+    } catch (eCustom) {
+        w.problems.push("custom pattern buttons (" + eCustom + ")");
+    }
+
+    // -- the editor fields, built once and hidden -------------------------
+    //
+    // BUILT ONCE, never on demand -- see SymbolPaletteEdit's own header
+    // on why widgets made while the panel is already live are the
+    // riskiest shape this bridge has, and an editor whose Save button
+    // failed to construct would strand a caver with a drawing and no
+    // way to keep it.
+    try {
+        w.editorLabel = new QLabel("");
+        w.editorLabel.wordWrap = true;
+        w.editorLabel.visible = false;
+        layout.addWidget(w.editorLabel, 0, 0);
+
+        w.editorFieldsHost = new QWidget();
+        var fields = new QFormLayout();
+        w.editorFieldsHost.setLayout(fields);
+        w.editorFieldsHost.visible = false;
+
+        w.patternNameEdit = new QLineEdit("");
+        w.patternNameEdit.toolTip = qsTr("What this pattern is called.");
+        fields.addRow(qsTr("Name"), w.patternNameEdit);
+
+        w.patternLayerCombo = new QComboBox();
+        var homeLayers = AreaFillEdit.homeLayers();
+        for (var hl = 0; hl < homeLayers.length; hl++) {
+            w.patternLayerCombo.addItem(homeLayers[hl]);
+        }
+        w.patternLayerCombo.toolTip = qsTr("The layer this pattern's " +
+            "elements are placed on. Its profile and section twins are " +
+            "derived from this one.");
+        fields.addRow(qsTr("Layer"), w.patternLayerCombo);
+
+        w.patternPlacementCombo = new QComboBox();
+        w.patternPlacementCombo.addItem(qsTr("Scattered"));
+        w.patternPlacementCombo.addItem(qsTr("Tiled"));
+        w.patternPlacementCombo.toolTip = qsTr("How this pattern's " +
+            "elements are laid out inside a boundary.");
+        fields.addRow(qsTr("Placement"), w.patternPlacementCombo);
+
+        w.patternDensityBox = new QDoubleSpinBox();
+        w.patternDensityBox.setRange(1, 500);
+        w.patternDensityBox.setDecimals(0);
+        w.patternDensityBox.setValue(30);
+        w.patternDensityBox.toolTip = qsTr("The catalog's own density: " +
+            "elements per 100 square drawing units at scale 1.");
+        fields.addRow(qsTr("Default density"), w.patternDensityBox);
+
+        w.patternScaleMinBox = new QDoubleSpinBox();
+        w.patternScaleMinBox.setRange(0.1, 5.0);
+        w.patternScaleMinBox.setSingleStep(0.05);
+        w.patternScaleMinBox.setDecimals(2);
+        w.patternScaleMinBox.setValue(0.8);
+        w.patternScaleMinBox.toolTip = qsTr("The smallest an element is " +
+            "drawn, relative to what you drew it at.");
+        fields.addRow(qsTr("Scale jitter min"), w.patternScaleMinBox);
+
+        w.patternScaleMaxBox = new QDoubleSpinBox();
+        w.patternScaleMaxBox.setRange(0.1, 5.0);
+        w.patternScaleMaxBox.setSingleStep(0.05);
+        w.patternScaleMaxBox.setDecimals(2);
+        w.patternScaleMaxBox.setValue(1.2);
+        w.patternScaleMaxBox.toolTip = qsTr("The largest an element is " +
+            "drawn, relative to what you drew it at.");
+        fields.addRow(qsTr("Scale jitter max"), w.patternScaleMaxBox);
+
+        w.patternRotateCombo = new QComboBox();
+        w.patternRotateCombo.addItem(qsTr("Random"));
+        w.patternRotateCombo.addItem(qsTr("Fixed"));
+        w.patternRotateCombo.toolTip = qsTr("Random turns each placed " +
+            "element to a different angle; Fixed always draws it the " +
+            "way you drew it.");
+        fields.addRow(qsTr("Rotation"), w.patternRotateCombo);
+
+        layout.addWidget(w.editorFieldsHost, 0, 0);
+
+        var editorRow = new QHBoxLayout();
+        w.savePatternButton = new QPushButton(qsTr("Save Pattern"));
+        w.savePatternButton.toolTip = qsTr("Write what is in the pattern " +
+            "editor into your symbol library, and add it to this palette.");
+        w.savePatternButton.visible = false;
+        w.savePatternButton.clicked.connect(function() {
+            try {
+                AreaFillEdit.save();
+            } catch (eSave) {
+                EAction.handleUserWarning("Area Fill: the pattern could " +
+                    "not be saved (" + eSave + ").");
+            }
+        });
+        editorRow.addWidget(w.savePatternButton, 1, 0);
+
+        w.cancelPatternButton = new QPushButton(qsTr("Cancel"));
+        w.cancelPatternButton.toolTip = qsTr("Stop editing. The drawing " +
+            "stays open -- nothing you drew is thrown away.");
+        w.cancelPatternButton.visible = false;
+        w.cancelPatternButton.clicked.connect(function() {
+            try {
+                AreaFillEdit.cancel();
+            } catch (eCancel) {
+            }
+        });
+        editorRow.addWidget(w.cancelPatternButton, 0, 0);
+        layout.addLayout(editorRow, 0);
+    } catch (eEditor) {
+        w.problems.push("editor fields (" + eEditor + ")");
+    }
+
     body.setLayout(layout);
     AreaFill.widgets = w;
 
@@ -651,6 +1005,7 @@ AreaFill.init = function(basePath) {
     action.setWidgetNames([]);
 
     AreaFillRun.init(basePath);
+    AreaFillEdit.init(basePath);
 
     // The DOCK is Draw's to build, during add-on init, so that
     // restoreState() can place it. Nothing to do here.

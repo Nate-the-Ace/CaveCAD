@@ -22762,6 +22762,64 @@ eqs(CsSymbolStore.MARKER_TAGS.category, "SymbolCategory",
 eqs(CsSymbolStore.MARKER_TAGS.layer, "SymbolLayer", "marker tag: layer");
 eqs(CsSymbolStore.MARKER_TAGS.custom, "SymbolCustom", "marker tag: the flag");
 eqs(CsSymbolStore.PREFIX, "SYM_", "the symbol block prefix");
+eqs(CsSymbolStore.AREA_PREFIX, "AREA_", "the area pattern block prefix");
+
+// hasPrefix is the ONE primitive saveBlock's SYM_ refusal and
+// saveAreaPattern's AREA_ refusal both call -- deliberately NOT a
+// single "accepts either" guard shared between the two save paths.
+// That was Task 11's first draft, and it was wrong: it let an AREA_
+// name through saveBlock, which wrote SYMBOL marker tags onto it and
+// produced an orphan block invisible to both list() (SYM_-only) and
+// customAreaPatterns() (needs an AreaCustom marker). Each save path
+// checks its OWN prefix here instead.
+ok(CsSymbolStore.hasPrefix("SYM_STALACTITE", CsSymbolStore.PREFIX),
+    "hasPrefix: a symbol's own prefix passes its own check");
+ok(CsSymbolStore.hasPrefix("AREA_POPCORN", CsSymbolStore.AREA_PREFIX),
+    "hasPrefix: a pattern's own prefix passes its own check");
+ok(!CsSymbolStore.hasPrefix("AREA_POPCORN", CsSymbolStore.PREFIX),
+    "hasPrefix: a pattern's name does NOT pass the SYMBOL check -- " +
+    "saveBlock must refuse it, not silently accept the other kind's " +
+    "prefix");
+ok(!CsSymbolStore.hasPrefix("SYM_STALACTITE", CsSymbolStore.AREA_PREFIX),
+    "hasPrefix: and a symbol's name does not pass the PATTERN check " +
+    "either");
+ok(!CsSymbolStore.hasPrefix("ROGUE_BLOCK", CsSymbolStore.PREFIX) &&
+    !CsSymbolStore.hasPrefix("ROGUE_BLOCK", CsSymbolStore.AREA_PREFIX),
+    "hasPrefix: a name matching NEITHER prefix is refused by both checks");
+ok(!CsSymbolStore.hasPrefix("", CsSymbolStore.PREFIX),
+    "hasPrefix: so is an empty name");
+ok(!CsSymbolStore.hasPrefix(null, CsSymbolStore.PREFIX),
+    "hasPrefix: and a missing one");
+
+// slugFor is the core blockNameFor already used, pulled out so
+// AreaFillEdit's AREA_ names and CsArea.merged()'s catalogue keys are
+// built from the exact same rule.
+eqs(CsSymbolStore.slugFor("Popcorn"), "POPCORN",
+    "slugFor: the bare slug a custom pattern's block name and its " +
+    "merged() key both derive from");
+eqs(CsSymbolStore.slugFor("Rimstone dam"), "RIMSTONE_DAM",
+    "slugFor: the same collapsing rule blockNameFor uses");
+eqs(CsSymbolStore.slugFor("!!!"), null,
+    "slugFor: a name with nothing in it answers null");
+
+// The AREA marker tags are a WIRE FORMAT too, same reasoning as
+// MARKER_TAGS above -- and deliberately a DIFFERENT vocabulary, so a
+// block carrying one kind of marker is never mistaken for the other.
+eqs(CsSymbolStore.AREA_MARKER_TAGS.name, "AreaName", "area marker tag: name");
+eqs(CsSymbolStore.AREA_MARKER_TAGS.layer, "AreaLayer",
+    "area marker tag: layer");
+eqs(CsSymbolStore.AREA_MARKER_TAGS.placement, "AreaPlacement",
+    "area marker tag: placement rule");
+eqs(CsSymbolStore.AREA_MARKER_TAGS.density, "AreaDensity",
+    "area marker tag: density");
+eqs(CsSymbolStore.AREA_MARKER_TAGS.scaleMin, "AreaScaleMin",
+    "area marker tag: scale jitter min");
+eqs(CsSymbolStore.AREA_MARKER_TAGS.scaleMax, "AreaScaleMax",
+    "area marker tag: scale jitter max");
+eqs(CsSymbolStore.AREA_MARKER_TAGS.rotate, "AreaRotate",
+    "area marker tag: rotation rule");
+eqs(CsSymbolStore.AREA_MARKER_TAGS.custom, "AreaCustom",
+    "area marker tag: the flag CsArea.merged() gates on");
 
 // ---------------------------------------------------------------------
 // CsShapeLine.sideForPoint -- pointing at the low side.
@@ -24758,6 +24816,109 @@ eqs(CsSymbolStore.PREFIX, "SYM_", "the symbol block prefix");
         scaleMin: 0.7, scaleMax: 1.5, rotate: true };
     eqs(CsArea.placements(square, noBlocks, 42, 1.0, 1.0).length, 0,
         "CsArea.placements: an entry with no blocks places nothing");
+})();
+
+// Tiled is a REAL lattice, not the scatter engine wearing a different
+// label -- Task 11's editor offers Scattered | Tiled as the placement
+// RULE, and a UI that offers that choice and does the same thing either
+// way is worse than not offering it. Proven the only way that means
+// anything: neighbour spacing on a tiled pattern is far more CONSISTENT
+// than the same density scattered at random.
+(function testTiledLattice() {
+    var square = [{x:0,y:0},{x:20,y:0},{x:20,y:20},{x:0,y:20}];
+    var tileEntry = { engine: "tile", blocks: ["AREA_X"], density: 25,
+        scaleMin: 0.9, scaleMax: 1.1, rotate: false };
+    var scatterEntry = { engine: "scatter", blocks: ["AREA_X"], density: 25,
+        scaleMin: 0.9, scaleMax: 1.1, rotate: false };
+
+    var tiled = CsArea.placements(square, tileEntry, 100, 1.0, 1.0);
+    var scattered = CsArea.placements(square, scatterEntry, 100, 1.0, 1.0);
+    ok(tiled.length > 10,
+        "CsArea.placements (tile): a 20x20 square gets a real lattice's " +
+        "worth of elements");
+    ok(scattered.length > 10,
+        "fixture: the scatter comparison also gets a real number of " +
+        "elements");
+
+    /** Every point's distance to its own nearest neighbour. */
+    function nearestDistances(points) {
+        var out = [];
+        for (var i = 0; i < points.length; i++) {
+            var best = Infinity;
+            for (var j = 0; j < points.length; j++) {
+                if (i === j) { continue; }
+                var dx = points[i].x - points[j].x;
+                var dy = points[i].y - points[j].y;
+                var d = Math.sqrt(dx * dx + dy * dy);
+                if (d < best) { best = d; }
+            }
+            if (isFinite(best)) { out.push(best); }
+        }
+        return out;
+    }
+    function meanOf(arr) {
+        var s = 0;
+        for (var i = 0; i < arr.length; i++) { s += arr[i]; }
+        return arr.length === 0 ? 0 : s / arr.length;
+    }
+    function stddevOf(arr, mean) {
+        var s = 0;
+        for (var i = 0; i < arr.length; i++) {
+            var d = arr[i] - mean;
+            s += d * d;
+        }
+        return arr.length === 0 ? 0 : Math.sqrt(s / arr.length);
+    }
+
+    var tiledDist = nearestDistances(tiled);
+    var scatterDist = nearestDistances(scattered);
+    var tiledMean = meanOf(tiledDist);
+    var scatterMean = meanOf(scatterDist);
+    var tiledStd = stddevOf(tiledDist, tiledMean);
+    var scatterStd = stddevOf(scatterDist, scatterMean);
+
+    // The lattice's OWN spacing formula, restated here rather than read
+    // off CsArea.tiledPlacements -- a test that imported the constant
+    // under test would not be testing it.
+    var expectedSpacing = Math.sqrt(100 / tileEntry.density);
+    ok(Math.abs(tiledMean - expectedSpacing) < expectedSpacing * 0.35,
+        "CsArea.placements (tile): the mean nearest-neighbour distance " +
+        "tracks the lattice's own spacing (expected ~" + expectedSpacing +
+        ", got " + tiledMean + ")");
+
+    // THE PROOF THAT MATTERS: a lattice's neighbour spacing is far more
+    // CONSISTENT than a scatter's at the same density -- a low
+    // coefficient of variation (stddev/mean) for tiled, and a
+    // noticeably higher one for scattered. That numeric gap IS what
+    // "falls on a lattice" versus "falls at random" comes down to.
+    var tiledCv = tiledMean === 0 ? 0 : tiledStd / tiledMean;
+    var scatterCv = scatterMean === 0 ? 0 : scatterStd / scatterMean;
+    ok(tiledCv < 0.3,
+        "CsArea.placements (tile): neighbour spacing is tight -- a real " +
+        "lattice, not scatter wearing a label (coefficient of variation " +
+        tiledCv + ")");
+    ok(scatterCv > tiledCv * 1.5,
+        "CsArea.placements (tile vs scatter): the SAME density scattered " +
+        "at random has markedly less consistent spacing than the tiled " +
+        "lattice (" + scatterCv + " vs " + tiledCv + ")");
+
+    // Reproducibility -- the "every draw happens before the inside
+    // test" discipline tiledPlacements' own header insists on, proven
+    // the same way the scatter engine's is proven above: the same seed
+    // must reproduce the exact same lattice, point for point.
+    var tiledAgain = CsArea.placements(square, tileEntry, 100, 1.0, 1.0);
+    eqs(JSON.stringify(tiled), JSON.stringify(tiledAgain),
+        "CsArea.placements (tile): the same seed reproduces the exact " +
+        "same lattice");
+
+    var outside = 0;
+    for (var q = 0; q < tiled.length; q++) {
+        if (!CsArea.pointInPolygon(tiled[q].x, tiled[q].y, square)) {
+            outside++;
+        }
+    }
+    eqs(outside, 0,
+        "CsArea.placements (tile): every element is inside the boundary");
 })();
 
 // ---------------------------------------------------------------------

@@ -104,12 +104,70 @@ CsArea.CATALOG = {
         density: 6, scaleMin: 0.9, scaleMax: 1.3, rotate: true }
 };
 
-/** A catalog entry by key, built-in or (from Task 11) custom. */
-CsArea.entryFor = function(key) {
-    if (!isNull(CsArea.CATALOG[key])) {
-        return CsArea.CATALOG[key];
+/**
+ * The built-in catalog plus every pattern a caver has drawn and saved
+ * of their own -- ONE dict, keyed the same way for both: CsArea.CATALOG's
+ * own uppercase keys (SAND, BLOCKS, ...) for the thirteen shipped
+ * patterns, and CsSymbolStore.slugFor(name) for a custom one, so a
+ * caver's pattern named "Sand" collides with the shipped SAND rather
+ * than living beside it under a different spelling of the same word.
+ *
+ * BUILT-INS LAID ON TOP, deliberately, so that collision always
+ * resolves the same way: CsArea.CATALOG is code, shipped with the
+ * add-on, and a release cannot take back a slot a caver's own drawing
+ * has quietly claimed.
+ *
+ * NO SEPARATE CACHE HERE. CsSymbolStore.customAreaPatterns() already
+ * caches the library file open (keyed and invalidated exactly like
+ * CsSymbolStore.list()'s own cache), so calling this every time costs
+ * one small dict merge -- no DXF, no file stat beyond what that call
+ * already does -- never a second file open per call. That is what
+ * keeps this safe to call from inside CsArea.build/CsArea.regenerate,
+ * which run once per boundary, not once per scattered element.
+ */
+CsArea.merged = function() {
+    var out = {};
+    var custom = CsSymbolStore.customAreaPatterns(CsSymbolStore.customPath());
+    for (var i = 0; i < custom.entries.length; i++) {
+        var m = custom.entries[i];
+        var key = CsSymbolStore.slugFor(m.name);
+        if (key === null) {
+            continue;   // a marker with a blank name: unplaceable by
+        }                // key, so left out rather than shown as ""
+        out[key] = {
+            name: m.name,
+            engine: m.placement,
+            layer: m.layer,
+            // Every custom pattern's boundary is the same one layer --
+            // CTRL-AREA-BOUNDARY -- because there is no per-pattern
+            // boundary appearance to choose in the editor; only the
+            // shipped BEDROCK/WATER/SUMP/FLOWSTONE trio route their
+            // boundary onto their own fill layer instead, and that is
+            // a catalog-authored exception, not something a caver's
+            // own pattern can opt into from the editor.
+            boundaryLayer: "CTRL-AREA-BOUNDARY",
+            blocks: [m.block],
+            density: m.density,
+            scaleMin: m.scaleMin,
+            scaleMax: m.scaleMax,
+            rotate: m.rotate,
+            custom: true
+        };
     }
-    return null;
+    for (var ck in CsArea.CATALOG) {
+        if (CsArea.CATALOG.hasOwnProperty(ck)) {
+            out[ck] = CsArea.CATALOG[ck];
+        }
+    }
+    return out;
+};
+
+/** A catalog entry by key, built-in or (from Task 11) custom -- see
+ *  CsArea.merged() for how the two are combined and which one wins a
+ *  name collision. */
+CsArea.entryFor = function(key) {
+    var m = CsArea.merged();
+    return isNull(m[key]) ? null : m[key];
 };
 
 /** Even-odd point in polygon. A self-intersecting boundary is answered
@@ -174,31 +232,43 @@ CsArea.bounds = function(verts) {
 };
 
 /**
- * Where a scattered pattern's elements go.
- *
- * Rejection sampling inside the bounding box, with a cap so a boundary
- * that is nearly all box -- a long thin passage cutting a diagonal --
- * cannot spin. The cap is generous: a 10% hit rate still fills.
+ * Where a scattered OR tiled pattern's elements go -- dispatches to
+ * scatterPlacements or tiledPlacements below by entry.engine, both of
+ * which take the same shape of arguments and answer the same shape of
+ * result, so a caller (CsArea.build, CsTileArt.iconOfScatter) never has
+ * to know which one it is asking.
  *
  * \return [{x, y, block, scale, angle}, ...]
  */
 CsArea.placements = function(verts, entry, seed, scale, density) {
-    var out = [];
-    if (verts.length < 3 || entry.engine !== "scatter" ||
+    if (verts.length < 3 ||
+        (entry.engine !== "scatter" && entry.engine !== "tile") ||
         isNull(entry.blocks) || entry.blocks.length === 0) {
-        return out;
+        return [];
     }
+    var mul = isNull(scale) ? 1.0 : scale;
+    var densityMul = isNull(density) ? 1.0 : density;
+    var rand = CsArea.rng(seed);
+    return entry.engine === "tile" ?
+        CsArea.tiledPlacements(verts, entry, rand, mul, densityMul) :
+        CsArea.scatterPlacements(verts, entry, rand, mul, densityMul);
+};
+
+/**
+ * Rejection sampling inside the bounding box, with a cap so a boundary
+ * that is nearly all box -- a long thin passage cutting a diagonal --
+ * cannot spin. The cap is generous: a 10% hit rate still fills.
+ */
+CsArea.scatterPlacements = function(verts, entry, rand, mul, densityMul) {
+    var out = [];
     var area = CsArea.polygonArea(verts);
-    var want = Math.round((area / 100) * entry.density *
-        (isNull(density) ? 1.0 : density));
+    var want = Math.round((area / 100) * entry.density * densityMul);
     if (want <= 0) {
         return out;
     }
     var b = CsArea.bounds(verts);
     var w = b.maxX - b.minX, h = b.maxY - b.minY;
-    var rand = CsArea.rng(seed);
     var tries = 0, cap = want * 60 + 500;
-    var mul = isNull(scale) ? 1.0 : scale;
     while (out.length < want && tries < cap) {
         tries++;
         // These draws happen BEFORE the inside test, every attempt, hit
@@ -223,6 +293,83 @@ CsArea.placements = function(verts, entry, seed, scale, density) {
                 pickScale * (entry.scaleMax - entry.scaleMin)),
             angle: entry.rotate ? pickAngle * 2 * Math.PI : 0.0
         });
+    }
+    return out;
+};
+
+/**
+ * Where a TILED pattern's elements go: an actual lattice, not the
+ * scatter engine wearing a different label. Nathan's element-plus-rule
+ * design (see this file's header) means Tiled is HALF of that rule --
+ * offering the choice and then scattering anyway (the first draft of
+ * Task 11 did exactly this) is a UI that lies about what it is about to
+ * draw, which is worse than not offering Tiled at all.
+ *
+ * SPACING FROM DENSITY, same vocabulary the scatter engine's density
+ * number already uses ("elements per 100 sq units"): a lattice cell of
+ * area 100/density, on an infinite plane, produces exactly that many
+ * elements per 100 sq units, so a caver's Default Density field means
+ * the same thing under either placement rule.
+ *
+ * JITTERED, not a bare grid: a perfectly regular lattice of picture
+ * elements reads as a drawing error, not floor texture. Each lattice
+ * point moves by up to 15% of the spacing -- enough to break the eye's
+ * grid-detection, never enough for a row to cross its neighbour's row.
+ *
+ * THE SAME DISCIPLINE as scatterPlacements: every lattice cell draws
+ * its jitter/block/scale/angle from the rng before the inside test is
+ * even asked, hit or miss, empty cell or not -- so the sequence depends
+ * only on the seed and the geometry, and a regenerate() reproduces the
+ * exact same lattice a stroke first drew.
+ */
+CsArea.tiledPlacements = function(verts, entry, rand, mul, densityMul) {
+    var out = [];
+    var b = CsArea.bounds(verts);
+    var w = b.maxX - b.minX, h = b.maxY - b.minY;
+    if (!(w > 0) || !(h > 0)) {
+        return out;
+    }
+    var effDensity = entry.density * densityMul;
+    if (!(effDensity > 0)) {
+        return out;
+    }
+    var spacing = Math.sqrt(100 / effDensity);
+    if (!(spacing > 0) || isNaN(spacing)) {
+        return out;
+    }
+    var jitter = spacing * 0.15;
+
+    // Capped independently of area: a lattice's cell count is bounded
+    // by spacing alone, never by "how many were wanted" the way the
+    // scatter branch's retry cap is -- so a caver dragging a huge loop
+    // with a fine spacing cannot make this spin the way an unbounded
+    // want could.
+    var cols = Math.min(2000, Math.max(1, Math.ceil(w / spacing) + 1));
+    var rows = Math.min(2000, Math.max(1, Math.ceil(h / spacing) + 1));
+
+    for (var r = 0; r < rows; r++) {
+        for (var c = 0; c < cols; c++) {
+            var gx = b.minX + c * spacing;
+            var gy = b.minY + r * spacing;
+            var jx = (rand() - 0.5) * 2 * jitter;
+            var jy = (rand() - 0.5) * 2 * jitter;
+            var pickBlock = rand();
+            var pickScale = rand();
+            var pickAngle = rand();
+            var x = gx + jx, y = gy + jy;
+            if (!CsArea.pointInPolygon(x, y, verts)) {
+                continue;
+            }
+            var blockIndex = Math.min(entry.blocks.length - 1,
+                Math.floor(pickBlock * entry.blocks.length));
+            out.push({
+                x: x, y: y,
+                block: entry.blocks[blockIndex],
+                scale: mul * (entry.scaleMin +
+                    pickScale * (entry.scaleMax - entry.scaleMin)),
+                angle: entry.rotate ? pickAngle * 2 * Math.PI : 0.0
+            });
+        }
     }
     return out;
 };
@@ -310,9 +457,15 @@ CsArea.vertsOf = function(entity) {
  * report it to the caver instead of crashing a transaction.
  *
  * \param opts {id, seed, scale, density, layer}
+ * \param di, when given, lets a CUSTOM pattern's block be imported into
+ *        `doc` on demand -- see the missing-block branch below. Built-in
+ *        patterns are unaffected whether `di` is given or not: their
+ *        scatter blocks come from the template CaveTemplateApply pours
+ *        into every new drawing, never from a caver's own library, so
+ *        there is nothing for this to fetch on their behalf.
  * \return {ok, count, reason}
  */
-CsArea.build = function(doc, op, boundary, entry, opts) {
+CsArea.build = function(doc, op, boundary, entry, opts, di) {
     if (isNull(entry)) {
         return { ok: false, count: 0, reason: "no such pattern" };
     }
@@ -340,6 +493,21 @@ CsArea.build = function(doc, op, boundary, entry, opts) {
         // a WRAPPED non-null object (typeof "object", getId()
         // undefined), not JS null -- see the file header on CsArea and
         // tools/make_area_blocks.js for the same trap.
+        if (isNull(block) && !isNull(di) && entry.custom === true) {
+            // A CUSTOM pattern's block never came from the template --
+            // only ever from the caver's own library
+            // (CsSymbolStore.customPath()) -- so a drawing that has
+            // never placed this pattern before does not have it yet.
+            // Imported here, once, the same CsSymbolStore.ensureBlock
+            // path a placed SYMBOL already uses, so a pattern saved in
+            // one drawing fills correctly in the very next one with no
+            // "paste the block in first" step.
+            var imported = CsSymbolStore.ensureBlock(doc, di,
+                places[i].block);
+            if (imported.ok) {
+                block = doc.queryBlock(places[i].block);
+            }
+        }
         if (isNull(block)) {
             return { ok: false, count: 0,
                 reason: "this drawing has no " + places[i].block + " block" };
@@ -746,6 +914,22 @@ CsArea.regenerate = function(doc, di, boundaryId, group, ownedIds) {
         grouped(del);
     }
 
+    // NO `di` HANDED TO build() HERE, deliberately -- regenerate() runs
+    // from AreaFillListener.onTransaction, inside a transaction
+    // callback, with `busy` already true. Importing a missing custom
+    // block from there means CsSymbolStore.ensureBlock -> copyBlock,
+    // which issues several of its OWN applyOperation calls (the block,
+    // its layers, its geometry) from inside that callback -- reentrant
+    // in a way this file has not proven safe, and today "harmless" only
+    // because the imported entities happen to carry no AreaId/AreaOwner
+    // tags for the listener to notice. That is an accident of the
+    // current marker shape, not a guarantee, so this does not lean on
+    // it: a rebuild that finds its block missing reports the reason and
+    // leaves the fill empty, exactly as it already does for a missing
+    // BUILT-IN block. Importing on the caver's behalf stays where a
+    // caver actually initiated the write -- AreaFillRun.commit (the
+    // interactive stroke, which passes its own `di`) and Task 12's Sync
+    // Areas tool.
     var add = new RAddObjectsOperation();
     var built = CsArea.build(doc, add, boundary, entry,
         { id: areaId, seed: seed, scale: scale, density: density,

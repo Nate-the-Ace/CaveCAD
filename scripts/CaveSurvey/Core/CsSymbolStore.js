@@ -41,6 +41,35 @@ CsSymbolStore.TEMPLATE_NAME = "NSS_Cave_Template_PLAN.dxf";
  *  is recognisable as one without consulting any catalogue. */
 CsSymbolStore.PREFIX = "SYM_";
 
+/** Every area PATTERN block name starts with this -- CsArea.CATALOG's
+ *  own scatter blocks (AREA_STIPPLE, AREA_PEBBLE, ...) already used it
+ *  before a caver could draw one; Task 11 gives a custom pattern the
+ *  same vocabulary. Kept apart from PREFIX/list() rather than folded
+ *  into that filter: list() feeds the SYMBOL palette, and a widened
+ *  filter there would show a scatter block like AREA_STIPPLE in that
+ *  palette as an anonymous symbol the day this constant existed. See
+ *  customAreaPatterns() for the area-pattern equivalent of list(). */
+CsSymbolStore.AREA_PREFIX = "AREA_";
+
+/**
+ * True when `name` starts with `prefix`. The ONE primitive both
+ * saveBlock's SYM_ refusal and saveAreaPattern's AREA_ refusal call --
+ * not a single "accepts either" guard shared between them, which is
+ * what Task 11 shipped first and which was wrong: it let an AREA_ name
+ * through saveBlock, which then wrote SYMBOL marker tags onto it
+ * (MARKER_TAGS, not AREA_MARKER_TAGS) and produced a block invisible to
+ * BOTH list() (SYM_-only) and customAreaPatterns() (needs an
+ * AreaCustom marker) -- an orphan neither palette could see, edit or
+ * delete. Each save path checks its OWN prefix against this one
+ * function instead, so there is exactly one implementation of "does
+ * this name start with X" to get right, and a name matching neither
+ * prefix -- or the WRONG one for the path it came through -- is always
+ * refused.
+ */
+CsSymbolStore.hasPrefix = function(name, prefix) {
+    return !isNull(name) && String(name).indexOf(prefix) === 0;
+};
+
 /** The layer the self-describing marker point sits on inside a block.
  *  CTRL-HIDDEN is off in every drawing (CsLayers.OFF), which is what
  *  keeps the marker from printing. */
@@ -56,6 +85,23 @@ CsSymbolStore.MARKER_TAGS = {
     category: "SymbolCategory",
     layer: "SymbolLayer",
     custom: "SymbolCustom"
+};
+
+/** The tags a CUSTOM AREA PATTERN's marker carries -- its own
+ *  vocabulary, never MARKER_TAGS above. A symbol's marker and a
+ *  pattern's marker are read back by two different callers
+ *  (CsSymbolStore.list for the Symbol palette, CsArea.merged for the
+ *  Areas palette) that must never mistake one block's description for
+ *  the other's -- sharing a tag set would make that mistake free. */
+CsSymbolStore.AREA_MARKER_TAGS = {
+    name: "AreaName",
+    layer: "AreaLayer",
+    placement: "AreaPlacement",
+    density: "AreaDensity",
+    scaleMin: "AreaScaleMin",
+    scaleMax: "AreaScaleMax",
+    rotate: "AreaRotate",
+    custom: "AreaCustom"
 };
 
 /** Where a custom symbol lands when its saved metadata names no
@@ -74,6 +120,16 @@ CsSymbolStore.cache = {};
  *  out asks for one per placement, and reopening a DXF per mouse
  *  gesture is not a thing this tool is allowed to do. */
 CsSymbolStore.radii = {};
+
+/** customAreaPatterns() results, keyed by library path -- the AREA_
+ *  equivalent of `cache` above, and cleared by the SAME invalidate()
+ *  call. Kept in its own dict rather than folded into `cache`: the two
+ *  hold differently-shaped entries (a symbol's {nss, uis, category,
+ *  layer} against a pattern's {name, layer, placement, density, ...}),
+ *  and CsArea.merged() must never read a stale copy of the customPath()
+ *  file just because CsSymbolStore.list() happened to cache one for the
+ *  Symbol palette first. */
+CsSymbolStore.areaCache = {};
 
 /**
  * The template file, or null when there is none.
@@ -311,6 +367,148 @@ CsSymbolStore.metaOf = function(doc, block) {
 };
 
 /**
+ * The marker point inside a CUSTOM AREA PATTERN block, or null.
+ *
+ * The AREA_MARKER_TAGS sibling of markerOf above -- separate because a
+ * pattern's marker carries AreaCustom, never SymbolCustom, and a block
+ * that happens to carry the OTHER kind's marker must not read as this
+ * kind's (a block can only ever be one caver-drawn thing).
+ */
+CsSymbolStore.areaMarkerOf = function(doc, blockId) {
+    var ids;
+    try {
+        ids = doc.queryBlockEntities(blockId);
+    } catch (eQ) {
+        return null;
+    }
+    for (var i = 0; i < ids.length; i++) {
+        var e = null;
+        try {
+            e = doc.queryEntity(ids[i]);
+        } catch (eE) {
+            continue;
+        }
+        if (isNull(e)) {
+            continue;
+        }
+        if (CsTags.get(e, CsSymbolStore.AREA_MARKER_TAGS.custom) === "1") {
+            return e;
+        }
+    }
+    return null;
+};
+
+/**
+ * The area-pattern description a block definition carries, or null
+ * when it has no AreaCustom marker -- either a block this tool never
+ * wrote, or one of CsArea.CATALOG's own shipped AREA_ blocks (which
+ * describe themselves in code, not in a marker point).
+ */
+CsSymbolStore.areaMetaOf = function(doc, block) {
+    var marker = CsSymbolStore.areaMarkerOf(doc, block.getId());
+    if (marker === null) {
+        return null;
+    }
+    var t = CsSymbolStore.AREA_MARKER_TAGS;
+    var name = CsTags.get(marker, t.name);
+    var layer = CsTags.get(marker, t.layer);
+    var placement = CsTags.get(marker, t.placement);
+    var density = parseFloat(CsTags.get(marker, t.density));
+    var scaleMin = parseFloat(CsTags.get(marker, t.scaleMin));
+    var scaleMax = parseFloat(CsTags.get(marker, t.scaleMax));
+    return {
+        block: block.getName(),
+        name: name === "" ? block.getName() : name,
+        layer: layer === "" ? CsLayers.BREAKDOWN : layer,
+        placement: placement === "tile" ? "tile" : "scatter",
+        density: isNaN(density) ? 1.0 : density,
+        scaleMin: isNaN(scaleMin) ? 0.8 : scaleMin,
+        scaleMax: isNaN(scaleMax) ? 1.2 : scaleMax,
+        rotate: CsTags.get(marker, t.rotate) === "1",
+        custom: true
+    };
+};
+
+/**
+ * Every custom AREA PATTERN in one library-shaped file, as entries
+ * areaMetaOf shapes.
+ *
+ * THE AREA_ SIBLING OF list(), reading the SAME kind of file but never
+ * calling list() itself: list()'s own filter is SYM_-only on purpose
+ * (see AREA_PREFIX's header) -- a widened list() would hand
+ * CsArea.CATALOG's shipped AREA_STIPPLE/AREA_PEBBLE/... blocks back as
+ * anonymous "symbols" the moment a template held them, which it always
+ * does. So this walks the block table itself, filtering AREA_ and
+ * requiring an AreaCustom marker -- a shipped AREA_ block with no
+ * marker (every one of CsArea.CATALOG's) is silently skipped, not
+ * listed as an anonymous pattern the way list()'s SYM_ fallback would.
+ *
+ * Cached the same way and cleared by the same invalidate() call, so a
+ * caller (CsArea.merged, from inside a placement loop) never reopens
+ * the library file per call -- only per save or delete.
+ *
+ * \return { ok, entries, error } -- entries always an array, even for
+ *         a caver who has never saved a pattern (missing file is not
+ *         an error: merged() then falls back to the built-ins alone).
+ */
+CsSymbolStore.customAreaPatterns = function(path) {
+    if (isNull(path)) {
+        path = CsSymbolStore.customPath();
+    }
+    if (isNull(path)) {
+        return { ok: true, entries: [], error: "" };
+    }
+    if (CsSymbolStore.areaCache.hasOwnProperty(path)) {
+        return CsSymbolStore.areaCache[path];
+    }
+    var result;
+    try {
+        if (!new QFileInfo(path).exists()) {
+            result = { ok: true, entries: [], error: "" };
+            CsSymbolStore.areaCache[path] = result;
+            return result;
+        }
+    } catch (eEx) {
+        return { ok: false, entries: [], error:
+            "Your symbol library could not be checked: " + path };
+    }
+
+    var di = CsSymbolStore.openOffscreen(path);
+    if (di === null) {
+        return { ok: false, entries: [], error:
+            "Your symbol library could not be read: " + path };
+    }
+
+    result = { ok: true, entries: [], error: "" };
+    try {
+        var doc = di.getDocument();
+        var names = doc.getBlockNames();
+        for (var i = 0; i < names.length; i++) {
+            var name = String(names[i]);
+            if (name.indexOf(CsSymbolStore.AREA_PREFIX) !== 0) {
+                continue;
+            }
+            var block = doc.queryBlock(name);
+            if (isNull(block)) {
+                continue;
+            }
+            var meta = CsSymbolStore.areaMetaOf(doc, block);
+            if (meta === null) {
+                continue;   // an AREA_ block with no marker: not a
+            }                // pattern this tool ever wrote
+            result.entries.push(meta);
+        }
+    } catch (eList) {
+        result = { ok: false, entries: [], error:
+            "Your symbol library's block table could not be read (" +
+            eList + ")." };
+    }
+
+    CsSymbolStore.areaCache[path] = result;
+    return result;
+};
+
+/**
  * Every SYM_ block in the template, as catalogue-shaped entries.
  *
  * A block the shipped catalogue already names answers with the
@@ -536,6 +734,7 @@ CsSymbolStore.invalidate = function(path) {
     if (isNull(path)) {
         CsSymbolStore.cache = {};
         CsSymbolStore.radii = {};
+        CsSymbolStore.areaCache = {};
         return;
     }
     if (CsSymbolStore.cache.hasOwnProperty(path)) {
@@ -543,6 +742,9 @@ CsSymbolStore.invalidate = function(path) {
     }
     if (CsSymbolStore.radii.hasOwnProperty(path)) {
         delete CsSymbolStore.radii[path];
+    }
+    if (CsSymbolStore.areaCache.hasOwnProperty(path)) {
+        delete CsSymbolStore.areaCache[path];
     }
 };
 
@@ -943,25 +1145,42 @@ CsSymbolStore.ensureBlock = function(doc, di, blockName, path) {
 };
 
 /**
- * The block name a display name becomes: SYM_ plus the name upper-cased
- * with every run of non-alphanumerics turned into one underscore.
+ * A display name reduced to its BLOCK-NAME CORE: upper-cased, with
+ * every run of non-alphanumerics turned into one underscore and
+ * trimmed off the ends. Pure, and shared by blockNameFor (SYM_) and
+ * AreaFillEdit's own AREA_ names -- one slugging rule for both, so
+ * "Rimstone dam" always becomes RIMSTONE_DAM whichever prefix goes in
+ * front of it.
  *
- * Pure, and deliberately lossy in the same direction as the shipped
- * names -- "Rimstone dam" is SYM_RIMSTONE_DAM. A name that reduces to
- * nothing answers null rather than SYM_, which would be a block called
- * after nothing.
+ * Also DOUBLES as CsArea.merged()'s catalogue key for a custom pattern
+ * -- the same reason a caver's pattern named "Sand" collides with the
+ * shipped SAND entry (and loses) rather than living beside it under a
+ * different spelling of the same word.
+ *
+ * A name that reduces to nothing answers null rather than an empty
+ * string, which would be a block or a key called after nothing.
  */
-CsSymbolStore.blockNameFor = function(displayName) {
+CsSymbolStore.slugFor = function(displayName) {
     if (isNull(displayName)) {
         return null;
     }
     var core = String(displayName).toUpperCase()
         .replace(/[^A-Z0-9]+/g, "_")
         .replace(/^_+/, "").replace(/_+$/, "");
-    if (core.length === 0) {
-        return null;
-    }
-    return CsSymbolStore.PREFIX + core;
+    return core.length === 0 ? null : core;
+};
+
+/**
+ * The block name a display name becomes: SYM_ plus its slug.
+ *
+ * Deliberately lossy in the same direction as the shipped names --
+ * "Rimstone dam" is SYM_RIMSTONE_DAM. A name that reduces to nothing
+ * answers null rather than SYM_, which would be a block called after
+ * nothing.
+ */
+CsSymbolStore.blockNameFor = function(displayName) {
+    var core = CsSymbolStore.slugFor(displayName);
+    return core === null ? null : CsSymbolStore.PREFIX + core;
 };
 
 /**
@@ -993,7 +1212,7 @@ CsSymbolStore.saveBlock = function(path, blockName, srcDoc, entities, meta) {
             CsSymbolStore.customPath() + ", so there is nowhere to save " +
             "the symbol." };
     }
-    if (isNull(blockName) || blockName.indexOf(CsSymbolStore.PREFIX) !== 0) {
+    if (!CsSymbolStore.hasPrefix(blockName, CsSymbolStore.PREFIX)) {
         return { ok: false, replaced: false, error:
             "A symbol's block name must start with " +
             CsSymbolStore.PREFIX + "." };
@@ -1140,6 +1359,242 @@ CsSymbolStore.saveBlock = function(path, blockName, srcDoc, entities, meta) {
     }
     CsSymbolStore.invalidate(path);
     return { ok: true, replaced: replaced, error: "" };
+};
+
+/**
+ * Writes a CUSTOM AREA PATTERN into the caver's library: creates the
+ * block, or replaces the geometry of one that is already there, and
+ * stamps it with the marker CsArea.merged() reads back.
+ *
+ * A SIBLING OF saveBlock, not a reuse of it -- deliberately, even
+ * though the two bodies rhyme closely. A pattern's marker carries a
+ * different vocabulary (AREA_MARKER_TAGS) than a symbol's, and always
+ * goes to the LIBRARY, never the template: there is no "a pattern
+ * drawn before the library existed" case the way there was for
+ * symbols, since Area Fill did not exist until the library already did.
+ *
+ * `meta` is {name, layer, placement, density, scaleMin, scaleMax,
+ * rotate} -- AreaFillEdit.savePattern's job, not this function's, is
+ * making sure those seven fields are well-formed before they arrive
+ * here.
+ *
+ * \return { ok, error, replaced }
+ */
+CsSymbolStore.saveAreaPattern = function(path, blockName, srcDoc, entities,
+        meta) {
+    if (isNull(path)) {
+        path = CsSymbolStore.ensureCustomFile();
+    }
+    if (isNull(path)) {
+        return { ok: false, replaced: false, error:
+            "Your symbol library could not be created at " +
+            CsSymbolStore.customPath() + ", so there is nowhere to save " +
+            "the pattern." };
+    }
+    if (!CsSymbolStore.hasPrefix(blockName, CsSymbolStore.AREA_PREFIX)) {
+        return { ok: false, replaced: false, error:
+            "A pattern's block name must start with " +
+            CsSymbolStore.AREA_PREFIX + "." };
+    }
+    if (isNull(entities) || entities.length === 0) {
+        return { ok: false, replaced: false, error:
+            "There is nothing to save: draw the pattern first." };
+    }
+
+    var di = CsSymbolStore.openOffscreen(path);
+    if (di === null) {
+        return { ok: false, replaced: false, error:
+            "Your symbol library could not be read: " + path };
+    }
+    var doc = di.getDocument();
+
+    var replaced = false;
+    var blockId;
+    try {
+        var existing = doc.queryBlock(blockName);
+        if (!isNull(existing)) {
+            replaced = true;
+            blockId = existing.getId();
+            var oldIds = doc.queryBlockEntities(blockId);
+            var delOp = new RDeleteObjectsOperation();
+            for (var d = 0; d < oldIds.length; d++) {
+                var old = doc.queryEntity(oldIds[d]);
+                if (isNull(old)) {
+                    continue;
+                }
+                delOp.deleteObject(old);
+            }
+            di.applyOperation(delOp);
+        } else {
+            var block = new RBlock(doc, blockName, new RVector(0, 0));
+            di.applyOperation(new RAddObjectOperation(block));
+            blockId = doc.getBlockId(blockName);
+        }
+    } catch (eBlock) {
+        return { ok: false, replaced: false, error:
+            "Your symbol library refused a block named " + blockName +
+            " (" + eBlock + ")." };
+    }
+    if (isNull(blockId) || blockId === RObject.INVALID_ID) {
+        return { ok: false, replaced: false, error:
+            "Your symbol library refused a block named " + blockName + "." };
+    }
+
+    try {
+        CsLayers.ensure(doc, di, meta.layer);
+        CsLayers.ensure(doc, di, CsSymbolStore.MARKER_LAYER);
+    } catch (eEnsure) {
+    }
+
+    var op = new RAddObjectsOperation();
+    var copied = 0;
+    for (var i = 0; i < entities.length; i++) {
+        try {
+            var e = entities[i];
+            if (isNull(e)) {
+                continue;
+            }
+            CsSymbolStore.adopt(doc, e);
+            e.setBlockId(blockId);
+            var lid = doc.getLayerId(meta.layer);
+            if (!isNull(lid) && lid !== RObject.INVALID_ID) {
+                e.setLayerId(lid);
+            }
+            op.addObject(e, false);
+            copied++;
+        } catch (eCopy) {
+        }
+    }
+    if (copied === 0) {
+        return { ok: false, replaced: replaced, error:
+            "None of the pattern's geometry could be written into your " +
+            "symbol library." };
+    }
+
+    // The marker: AREA_MARKER_TAGS, not MARKER_TAGS -- see this file's
+    // own header on why the two never share a vocabulary. Added in the
+    // SAME operation as the geometry, so a pattern can never exist half
+    // saved: drawing there and description missing, or the reverse.
+    try {
+        var marker = new RPointEntity(doc,
+            new RPointData(new RVector(0, 0)));
+        marker.setBlockId(blockId);
+        var mlid = doc.getLayerId(CsSymbolStore.MARKER_LAYER);
+        if (!isNull(mlid) && mlid !== RObject.INVALID_ID) {
+            marker.setLayerId(mlid);
+        }
+        var t = CsSymbolStore.AREA_MARKER_TAGS;
+        CsTags.set(marker, t.custom, "1");
+        CsTags.set(marker, t.name, meta.name);
+        CsTags.set(marker, t.layer, meta.layer);
+        CsTags.set(marker, t.placement, meta.placement);
+        CsTags.set(marker, t.density, String(meta.density));
+        CsTags.set(marker, t.scaleMin, String(meta.scaleMin));
+        CsTags.set(marker, t.scaleMax, String(meta.scaleMax));
+        CsTags.set(marker, t.rotate, meta.rotate === true ? "1" : "0");
+        op.addObject(marker, false);
+    } catch (eMarker) {
+        return { ok: false, replaced: replaced, error:
+            "The pattern's own description could not be written (" +
+            eMarker + "), so nothing was saved -- a pattern with no " +
+            "layer or placement rule would be unplaceable." };
+    }
+
+    // THE MARKER'S OWN LAYER REFUSES IT -- the same CTRL-HIDDEN trap
+    // saveBlock's own header describes, measured against the same
+    // build. withLayerOn/withLayerUnlocked so the block and its
+    // description arrive together or not at all.
+    try {
+        CsLayers.withLayerOn(doc, di, CsSymbolStore.MARKER_LAYER,
+            function() {
+                CsLayers.withLayerUnlocked(doc, di,
+                    CsSymbolStore.MARKER_LAYER, function() {
+                        di.applyOperation(op);
+                    });
+            });
+    } catch (eApply) {
+        return { ok: false, replaced: replaced, error:
+            "Your symbol library refused the pattern's geometry (" +
+            eApply + ")." };
+    }
+    if (CsSymbolStore.areaMarkerOf(doc, blockId) === null) {
+        return { ok: false, replaced: replaced, error:
+            "The pattern was not saved: your symbol library would not " +
+            "accept its description, and a pattern with no layer or " +
+            "placement rule cannot be placed." };
+    }
+
+    if (!CsSymbolStore.write(di, path)) {
+        return { ok: false, replaced: replaced, error:
+            "Your symbol library could not be written: " + path +
+            "\nCheck that the file is not open elsewhere and that you " +
+            "can write to it." };
+    }
+    CsSymbolStore.invalidate(path);
+    return { ok: true, replaced: replaced, error: "" };
+};
+
+/**
+ * Deletes a custom area pattern from the caver's library.
+ *
+ * LIBRARY ONLY -- a pattern never lived in the template the way an old
+ * symbol could, so there is no second file to check the way
+ * deleteBlock's own null-path branch does for symbols.
+ *
+ * \return { ok, error }
+ */
+CsSymbolStore.deleteAreaPattern = function(path, blockName) {
+    if (isNull(path)) {
+        path = CsSymbolStore.customPath();
+    }
+    if (isNull(path)) {
+        return { ok: false, error: "There is nowhere to delete " +
+            blockName + " from." };
+    }
+    try {
+        if (!new QFileInfo(path).exists()) {
+            return { ok: true, error: "" };   // no library, nothing saved
+        }
+    } catch (eEx) {
+        return { ok: false, error: "Your symbol library could not be " +
+            "checked: " + path };
+    }
+    var di = CsSymbolStore.openOffscreen(path);
+    if (di === null) {
+        return { ok: false, error:
+            "Your symbol library could not be read: " + path };
+    }
+    var doc = di.getDocument();
+    var block = null;
+    try {
+        block = doc.queryBlock(blockName);
+    } catch (eQ) {
+    }
+    if (isNull(block)) {
+        CsSymbolStore.invalidate(path);
+        return { ok: true, error: "" };   // already gone
+    }
+    try {
+        var op = new RDeleteObjectsOperation();
+        var ids = doc.queryBlockEntities(block.getId());
+        for (var i = 0; i < ids.length; i++) {
+            var e = doc.queryEntity(ids[i]);
+            if (!isNull(e)) {
+                op.deleteObject(e);
+            }
+        }
+        op.deleteObject(block);
+        di.applyOperation(op);
+    } catch (eDel) {
+        return { ok: false, error: "Your symbol library refused to give " +
+            "up " + blockName + " (" + eDel + ")." };
+    }
+    if (!CsSymbolStore.write(di, path)) {
+        return { ok: false, error:
+            "Your symbol library could not be written: " + path };
+    }
+    CsSymbolStore.invalidate(path);
+    return { ok: true, error: "" };
 };
 
 /**
