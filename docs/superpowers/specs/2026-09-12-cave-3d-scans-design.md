@@ -14,6 +14,27 @@ Sections are already done and took a different road: a captured section
 holds traced GEOMETRY, so it needed no textures. Scans are pictures, so
 this is where the texture pipeline finally gets built.
 
+## Where a scan's file actually lives
+
+PROBED, NOT ASSUMED, against Truitt's 28 plan scans. An image entity's
+own `getFileName()` returns EMPTY and `getWidth()`/`getHeight()` return
+ZERO, through both the method and the property route. Taking those at
+face value would have produced a drape that found no images and said
+nothing.
+
+The suite keeps the path in XDATA instead, under the key `SketchScan`,
+stored RELATIVE to the cave's scans folder:
+
+    "2024 Scans/7-7-24 Survey notes/20240707-TRUITT_Page_03.jpg"
+
+`CsCave.resolveUnderScans(scansFolder, stored)` turns that into an
+absolute path. Pixel dimensions come from the image FILE, read when it
+is loaded for its texture, since the entity does not report them.
+
+Placement is `getInsertionPoint()`, `getUVector()`, `getVVector()` --
+these DO work, and u and v are PER-PIXEL vectors, so the scan's far
+corner is `origin + widthPx * u + heightPx * v`.
+
 ## The trimmed images are free
 
 `CsScanTrim` works by pointing the image entity at a smaller derivative
@@ -51,37 +72,17 @@ Beyond `CsDrape.REACH` from any station the drape goes FLAT rather than
 extrapolating: past the last station there is no trend to follow, and a
 plane is an honest answer where a guessed slope is not.
 
-## Profile: exaggeration is 1, and the drawing says so by staying quiet
+## Profile: no vertical exaggeration to undo
 
-An earlier draft of this spec built machinery to DERIVE the vertical
-exaggeration of a band, on the grounds that it was recorded only as
-prose. That was over-engineering, and Nathan said so: hand-drawn
-profiles are not vertically exaggerated.
+Settled by deleting it. Version 0.9.123.0 removed the profile's vertical
+exaggeration outright -- the setting, the stamp, and the parameter
+threaded through unrollBand, bandWallRuns and CsProfileDraw -- because
+hand-drawn profiles are not exaggerated and the generated bands should
+match them.
 
-The drawing already answers the question cleanly.
-`CsProfileDraw.stampText` returns NULL when the exaggeration is 1, so no
-stamp is drawn at all -- the PRESENCE of a `ProfileExaggerationStamp` is
-the flag, and its absence means 1. Truitt Cave has none, across sixteen
-profile boxes.
-
-So the drape asks one question: is there a stamp?
-
-    no stamp    exaggeration is 1. Band-local y IS elevation above the
-                datum. Nothing to divide out. This is every drawing
-                these tools have made.
-
-    a stamp     the region is vertically exaggerated, and a 1:1 hand
-                sketch fitted onto a stretched band is not a thing that
-                can be un-stretched honestly -- the fit that put it
-                there was uniform, so the sketch and the band never
-                agreed vertically in the first place. The profile drape
-                switches ITSELF off for that region and the status line
-                says why.
-
-REFUSING IS THE POINT. A vertically stretched sketch draped over a
-passage still looks plausible, which is exactly why it would ship
-unnoticed. Saying "this region is exaggerated, so its scans are not
-draped" is information; a stretched picture is not.
+So a band's y IS elevation, and the drape has nothing to divide out.
+This section used to describe machinery to recover an exaggeration
+factor; that machinery does not need to exist.
 
 ## Profile: the mapping
 
@@ -163,9 +164,6 @@ Pure, headless:
   - it interpolates between two stations, and goes FLAT beyond REACH
   - a grid over a scan quad has the right vertex and index counts, and
     no NaN
-  - a drawing with no exaggeration stamp reports exaggeration 1
-  - a drawing WITH a stamp reports that its profile scans are not
-    drapeable, and why
   - band-local x maps onto the right leg, including at a leg boundary
   - a point past the end of a band clamps rather than extrapolating
 
