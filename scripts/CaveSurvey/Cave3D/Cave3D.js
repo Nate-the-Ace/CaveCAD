@@ -42,8 +42,52 @@ function Cave3D(guiAction) {
 
 Cave3D.prototype = new EAction();
 
-/** The handle of the window this session has open, or null. */
+/** The handle of the panel this session has open, or null. */
 Cave3D.handle = null;
+
+/**
+ * The colour modes, in the order they appear in the dropdown.
+ *
+ * The keys are CsMesh3d colorBy values EXACTLY. One list, so a mode
+ * cannot be offered here that the mesh does not implement -- and a
+ * typo shows up as a missing entry rather than as a silent fallback to
+ * trip colouring that looks like it worked.
+ */
+Cave3D.MODES = [
+    { key: "trip",     label: qsTr("Trip") },
+    { key: "depth",    label: qsTr("Depth") },
+    { key: "distance", label: qsTr("Distance in") },
+    { key: "size",     label: qsTr("Passage size") },
+    { key: "date",     label: qsTr("Survey date") },
+    { key: "closure",  label: qsTr("Closure shift") },
+    { key: "splay",    label: qsTr("Splay coverage") }
+];
+
+Cave3D.SETTING_MODE = "Cave3D/ColorMode";
+Cave3D.SETTING_GHOST = "Cave3D/ShowGhost";
+Cave3D.SETTING_LEADS = "Cave3D/ShowLeads";
+
+/** The chosen mode, read from settings the first time it is asked for.
+ *  Not read at file scope: RSettings is not necessarily up when an
+ *  add-on is loaded. */
+Cave3D.mode = null;
+
+Cave3D.isKnownMode = function(key) {
+    for (var i = 0; i < Cave3D.MODES.length; i++) {
+        if (Cave3D.MODES[i].key === key) {
+            return true;
+        }
+    }
+    return false;
+};
+
+Cave3D.currentMode = function() {
+    if (Cave3D.mode === null) {
+        var saved = RSettings.getStringValue(Cave3D.SETTING_MODE, "trip");
+        Cave3D.mode = Cave3D.isKnownMode(saved) ? saved : "trip";
+    }
+    return Cave3D.mode;
+};
 
 /** Whether the refresh signal has been connected. Once only: the
  *  bridge outlives every run of this tool, so connecting on each run
@@ -72,8 +116,9 @@ Cave3D.read = function(doc) {
         // No anchor: resolve from whatever the survey fixes itself.
         // The mesh is still correct relative to itself; it simply is
         // not pinned where the drawing pins it.
-        return { survey: survey, resolved: CsNetwork.resolve(survey),
-                 anchored: false };
+        var plain = CsNetwork.resolve(survey);
+        return { survey: survey, resolved: plain, anchored: false,
+                 anchorName: "", adjusted: plain.adjusted === true };
     }
 
     // anchorZ is the drawing's vertical datum. A cave surveyed to an
@@ -88,17 +133,28 @@ Cave3D.read = function(doc) {
                   z: anchorZ }
     }, CsAdjust.optionsFromTags(recon.adjustTags));
 
-    return { survey: survey, resolved: resolved, anchored: true };
+    return { survey: survey, resolved: resolved, anchored: true,
+             anchorName: recon.anchorName,
+             adjusted: resolved.adjusted === true };
 };
 
-/** One line for the window's status bar. */
+/** One line for the panel's status bar. */
 Cave3D.statusText = function(read, mesh) {
     var triangles = mesh.triangles.indices.length / 3;
-    var segments = mesh.lines.indices.length / 2;
     var unit = read.survey.distanceUnit === "m" ? "m" : "ft";
     var depth = mesh.bounds.max.z - mesh.bounds.min.z;
-    var text = qsTr("%1 triangles, %2 centerline segments, %3 %4 of relief")
-        .arg(triangles).arg(segments).arg(depth.toFixed(1)).arg(unit);
+    var text = qsTr("%1  --  %2 triangles, %3 %4 of relief")
+        .arg(mesh.legend.title).arg(triangles)
+        .arg(depth.toFixed(1)).arg(unit);
+
+    if (mesh.ghost.indices.length === 0) {
+        // WHICH reason matters. One is a setting the caver can change
+        // and the other is a solve that failed and wants looking at, and
+        // "no ghost" alone leaves them unable to tell which they have.
+        text += read.adjusted === true
+            ? qsTr("  --  no ghost: the adjustment did not converge")
+            : qsTr("  --  no ghost: adjustment is off");
+    }
     if (read.anchored !== true) {
         text += qsTr("  --  no anchor station: not pinned to the " +
             "drawing's datum");
@@ -120,7 +176,10 @@ Cave3D.refresh = function() {
     }
     var mesh;
     try {
-        mesh = CsMesh3d.build(read.survey, read.resolved);
+        mesh = CsMesh3d.build(read.survey, read.resolved, {
+            colorBy: Cave3D.currentMode(),
+            anchorName: read.anchorName
+        });
     } catch (e) {
         // CsMesh3d refuses to build rather than place a station at datum
         // zero. Say so in the panel instead of leaving the last mesh up
@@ -163,18 +222,52 @@ function cave3dRun() {
         Cave3D.handle = cave3d.open(isNull(name) ? "" : name);
     }
 
+    // Fill the dropdown before the first refresh, so the panel opens
+    // showing the mode it is about to draw in.
+    var keys = [], labels = [];
+    for (var mi = 0; mi < Cave3D.MODES.length; mi++) {
+        keys.push(Cave3D.MODES[mi].key);
+        labels.push(Cave3D.MODES[mi].label);
+    }
+    cave3d.setColorModes(Cave3D.handle, keys, labels, Cave3D.currentMode());
+    cave3d.setShowLeads(Cave3D.handle,
+        RSettings.getBoolValue(Cave3D.SETTING_LEADS, false));
+
     if (!Cave3D.connected) {
-        // The window's Refresh button comes back as a signal carrying
-        // the handle. Connected once, for the life of the application.
+        // The panel's buttons come back as signals carrying the handle.
+        // Connected once, for the life of the application -- the bridge
+        // outlives every run of this tool, so connecting per run would
+        // stack up duplicate handlers that all fire.
         cave3d.refreshRequested.connect(function(handle) {
             if (handle === Cave3D.handle) {
                 Cave3D.refresh();
             }
         });
+        cave3d.colorModeChanged.connect(function(handle, mode) {
+            if (handle !== Cave3D.handle) { return; }
+            if (!Cave3D.isKnownMode(mode)) { return; }
+            Cave3D.mode = mode;
+            RSettings.setValue(Cave3D.SETTING_MODE, mode);
+            Cave3D.refresh();
+        });
+        cave3d.overlayToggled.connect(function(handle, which, on) {
+            if (handle !== Cave3D.handle) { return; }
+            // Remembered, but NOT rebuilt: both overlays have their own
+            // buffer precisely so that showing and hiding them costs
+            // nothing.
+            RSettings.setValue(which === "ghost"
+                ? Cave3D.SETTING_GHOST : Cave3D.SETTING_LEADS, on);
+        });
         Cave3D.connected = true;
     }
 
     Cave3D.refresh();
+
+    // The ghost's toggle is only meaningful once a mesh has said
+    // whether there is a ghost to show, which is why this follows the
+    // refresh rather than sitting with the other restores above.
+    cave3d.setShowGhost(Cave3D.handle,
+        RSettings.getBoolValue(Cave3D.SETTING_GHOST, false));
 }
 
 // ============================================================

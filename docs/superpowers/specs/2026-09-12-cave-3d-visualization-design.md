@@ -202,3 +202,67 @@ Live, in a genuinely restarted CaveCAD:
 Per-station picking or hover readout, camera that follows the
 animation, exporting a video, and any colour mode needing data the Core
 library does not already derive.
+
+---
+
+## As built (2026-09-12, 0.9.120.0 / cavecad-src 0.4.0.0)
+
+All seven modes, both overlays and the animation shipped as designed.
+Three things diverged.
+
+### The legend is a child widget, not a QPainter pass
+
+The design said the legend would paint in QPainter inside paintGL, on
+the grounds that QOpenGLWidget is a QPaintDevice and so needs no GL text
+machinery. That reasoning is correct and the technique still does not
+work here.
+
+Tried in both orders -- painter constructed after the raw GL calls, and
+painter constructed first with the GL wrapped in
+beginNativePainting/endNativePainting -- it drew NOTHING. No warning, no
+error, the painter reporting success. An unconditional magenta
+diagnostic string confirmed the paint pass itself never lands, so it was
+not the legend data failing to arrive.
+
+RCave3dLegend is therefore a child widget floating over the view:
+ordinary Qt painting no GL state can defeat, transparent to mouse events
+so a drag that starts on it still turns the camera, and to the reader
+the same thing -- a legend over the cave taking no layout space. The
+reason is written into the class header so nobody re-attempts the
+documented route believing it was never tried.
+
+### An undated trip sorts LAST, not first
+
+The spec said date mode sorts trips by date with same-date trips in
+survey order. It did not say where a trip with no date at all goes.
+Undated sorts after the dated ones: "undated" is not "earliest", and
+putting it first would invent a history the survey does not record.
+
+### The animation clamps to whole primitives
+
+A vertex prefix that ends mid-triangle draws a torn one, so the count
+passed to glDrawArrays is rounded down to a multiple of three for
+triangles and two for lines.
+
+## Verified live
+
+Against Pitfall Cave in a restarted CaveCAD: all seven modes render with
+correct legends -- Passage size carrying "5th-95th percentile", Closure
+shift four bands, Splay coverage three states showing the cave as mostly
+LRUD-only with a few splayed sections. The slider ranges 0..74, one step
+per leg for 75 legs, and shell and centerline reveal in lockstep. All
+four overlay gates verified: with every one off, nothing draws.
+
+The ghost could not be verified against a drawing that HAS a raw
+network, because the test fixture resolves without adjustment. Its two
+paths are covered headlessly -- empty when raw is absent, populated and
+NaN-free when present -- and the "no ghost" branch was seen live, with
+the toggle greyed and the status line naming the reason.
+
+## A trap this cost, worth keeping
+
+Editing RCave3dView.cpp by slicing between two function names deleted
+setTriangles and setLines along with the function being replaced,
+because they sat between it and the next landmark. The link error named
+them plainly; the lesson is that a slice between landmarks is only safe
+when you have checked what lies between them.
