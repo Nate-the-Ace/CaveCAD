@@ -32,7 +32,7 @@ PY="python3"
 status=0
 
 echo "=============================================================="
-echo " 1/35 Structural tests (add-on layout, includes, layers)"
+echo " 1/36 Structural tests (add-on layout, includes, layers)"
 echo "=============================================================="
 "$PY" -m unittest discover -s tests -v || status=1
 
@@ -61,7 +61,7 @@ fi
 
 echo
 echo "=============================================================="
-echo " 2/35 Add-on syntax check (inside CaveCAD's own script engine)"
+echo " 2/36 Add-on syntax check (inside CaveCAD's own script engine)"
 echo "=============================================================="
 if [ -e "$QCAD" ]; then
     output=$("$QCAD" -no-dock-icon -no-gui -allow-multiple-instances \
@@ -77,7 +77,7 @@ fi
 
 echo
 echo "=============================================================="
-echo " 3/35 Core unit tests (inside CaveCAD's own script engine)"
+echo " 3/36 Core unit tests (inside CaveCAD's own script engine)"
 echo "=============================================================="
 if [ -e "$QCAD" ]; then
     output=$("$QCAD" -no-dock-icon -no-gui -allow-multiple-instances \
@@ -98,7 +98,7 @@ fi
 
 echo
 echo "=============================================================="
-echo " 4/35 Profile draw round trip & linework regression (inside CaveCAD's own script engine)"
+echo " 4/36 Profile draw round trip & linework regression (inside CaveCAD's own script engine)"
 echo "=============================================================="
 if [ -e "$QCAD" ]; then
     output=$("$QCAD" -no-dock-icon -no-gui -allow-multiple-instances \
@@ -116,7 +116,7 @@ fi
 
 echo
 echo "=============================================================="
-echo " 5/35 Generate Profile tool, driven headlessly (inside CaveCAD's own script engine)"
+echo " 5/36 Generate Profile tool, driven headlessly (inside CaveCAD's own script engine)"
 echo "=============================================================="
 if [ -e "$QCAD" ]; then
     output=$("$QCAD" -no-dock-icon -no-gui -allow-multiple-instances \
@@ -134,7 +134,7 @@ fi
 
 echo
 echo "=============================================================="
-echo " 6/35 AlignImage stays in the plan frame (inside CaveCAD's own script engine)"
+echo " 6/36 AlignImage stays in the plan frame (inside CaveCAD's own script engine)"
 echo "=============================================================="
 if [ -e "$QCAD" ]; then
     output=$("$QCAD" -no-dock-icon -no-gui -allow-multiple-instances \
@@ -152,7 +152,7 @@ fi
 
 echo
 echo "=============================================================="
-echo " 7/35 CalloutWrite (inside CaveCAD's own script engine)"
+echo " 7/36 CalloutWrite (inside CaveCAD's own script engine)"
 echo "=============================================================="
 if [ -e "$QCAD" ]; then
     output=$("$QCAD" -no-dock-icon -no-gui -allow-multiple-instances \
@@ -169,7 +169,7 @@ fi
 
 echo
 echo "=============================================================="
-echo " 8/35 CalloutSync (inside CaveCAD's own script engine)"
+echo " 8/36 CalloutSync (inside CaveCAD's own script engine)"
 echo "=============================================================="
 if [ -e "$QCAD" ]; then
     output=$("$QCAD" -no-dock-icon -no-gui -allow-multiple-instances \
@@ -186,7 +186,7 @@ fi
 
 echo
 echo "=============================================================="
-echo " 9/35 Callout's elevation mode (inside CaveCAD's own script engine)"
+echo " 9/36 Callout's elevation mode (inside CaveCAD's own script engine)"
 echo "=============================================================="
 if [ -e "$QCAD" ]; then
     output=$("$QCAD" -no-dock-icon -no-gui -allow-multiple-instances \
@@ -204,7 +204,7 @@ fi
 
 echo
 echo "=============================================================="
-echo " 10/35 Repair Drawing (inside CaveCAD's own script engine)"
+echo " 10/36 Repair Drawing (inside CaveCAD's own script engine)"
 echo "=============================================================="
 if [ -e "$QCAD" ]; then
     output=$("$QCAD" -no-dock-icon -no-gui -allow-multiple-instances \
@@ -221,7 +221,7 @@ fi
 
 echo
 echo "=============================================================="
-echo " 11/35 Package Cave Project (inside CaveCAD's own script engine)"
+echo " 11/36 Package Cave Project (inside CaveCAD's own script engine)"
 echo "=============================================================="
 if [ -e "$QCAD" ]; then
     output=$("$QCAD" -no-dock-icon -no-gui -allow-multiple-instances \
@@ -239,7 +239,7 @@ fi
 
 echo
 echo "=============================================================="
-echo " 12/35 Export Cave Survey, driven headlessly (inside CaveCAD's own script engine)"
+echo " 12/36 Export Cave Survey, driven headlessly (inside CaveCAD's own script engine)"
 echo "=============================================================="
 if [ -e "$QCAD" ]; then
     output=$("$QCAD" -no-dock-icon -no-gui -allow-multiple-instances \
@@ -257,7 +257,7 @@ fi
 
 echo
 echo "=============================================================="
-echo " 13/35 Cross sections (inside CaveCAD's own script engine)"
+echo " 13/36 Cross sections (inside CaveCAD's own script engine)"
 echo "=============================================================="
 if [ -e "$QCAD" ]; then
     output=$("$QCAD" -no-dock-icon -no-gui -allow-multiple-instances \
@@ -274,7 +274,7 @@ fi
 
 echo
 echo "=============================================================="
-echo " 14/35 Sketched cross sections (inside CaveCAD's own script engine)"
+echo " 14/36 Sketched cross sections (inside CaveCAD's own script engine)"
 echo "=============================================================="
 if [ -e "$QCAD" ]; then
     output=$("$QCAD" -no-dock-icon -no-gui -allow-multiple-instances \
@@ -292,7 +292,7 @@ fi
 
 echo
 echo "=============================================================="
-echo " 15/35 Aligned scans follow the survey (inside CaveCAD's own script engine)"
+echo " 15/36 Aligned scans follow the survey (inside CaveCAD's own script engine)"
 echo "=============================================================="
 if [ -e "$QCAD" ]; then
     output=$("$QCAD" -no-dock-icon -no-gui -allow-multiple-instances \
@@ -309,7 +309,7 @@ fi
 
 echo
 echo "=============================================================="
-echo " 16/35 Trimming a scanned page (inside CaveCAD's own script engine)"
+echo " 16/36 Trimming a scanned page (inside CaveCAD's own script engine)"
 echo "=============================================================="
 if [ -e "$QCAD" ]; then
     output=$("$QCAD" -no-dock-icon -no-gui -allow-multiple-instances \
@@ -325,7 +325,7 @@ fi
 
 echo
 echo "=============================================================="
-echo " 17/35 Rotating a scanned page on disk (inside CaveCAD's own script engine)"
+echo " 17/36 Rotating a scanned page on disk (inside CaveCAD's own script engine)"
 echo "=============================================================="
 if [ -e "$QCAD" ]; then
     output=$("$QCAD" -no-dock-icon -no-gui -allow-multiple-instances \
@@ -341,7 +341,7 @@ fi
 
 echo
 echo "=============================================================="
-echo " 18/35 A sketch placed through ONE station (inside CaveCAD's own script engine)"
+echo " 18/36 A sketch placed through ONE station (inside CaveCAD's own script engine)"
 echo "=============================================================="
 if [ -e "$QCAD" ]; then
     output=$("$QCAD" -no-dock-icon -no-gui -allow-multiple-instances \
@@ -357,7 +357,7 @@ fi
 
 echo
 echo "=============================================================="
-echo " 19/35 The template pour (inside CaveCAD's own script engine)"
+echo " 19/36 The template pour (inside CaveCAD's own script engine)"
 echo "=============================================================="
 if [ -e "$QCAD" ]; then
     output=$("$QCAD" -no-dock-icon -no-gui -allow-multiple-instances \
@@ -374,7 +374,7 @@ fi
 
 echo
 echo "=============================================================="
-echo " 20/35 Pitfall Cave audit (the fixture manifest, executed)"
+echo " 20/36 Pitfall Cave audit (the fixture manifest, executed)"
 echo "=============================================================="
 if command -v node >/dev/null 2>&1; then
     node tests/pitfall_audit.js || status=1
@@ -385,7 +385,18 @@ fi
 
 echo
 echo "=============================================================="
-echo " 21/35 Scatter Breakdown picks its view by location (inside CaveCAD's own script engine)"
+echo " 21/36 The 3D passage mesh, built from Pitfall Cave"
+echo "=============================================================="
+if command -v node >/dev/null 2>&1; then
+    node tests/cave3d_mesh_run.js || status=1
+else
+    echo "SKIP: node not available -- CsMesh3d is pure ECMAScript and" \
+         "needs only an interpreter, not the engine."
+fi
+
+echo
+echo "=============================================================="
+echo " 22/36 Scatter Breakdown picks its view by location (inside CaveCAD's own script engine)"
 echo "=============================================================="
 if [ -e "$QCAD" ]; then
     output=$("$QCAD" -no-dock-icon -no-gui -allow-multiple-instances \
@@ -402,7 +413,7 @@ fi
 
 echo
 echo "=============================================================="
-echo " 22/35 Edit Trip retags a trip without forking it (inside CaveCAD's own script engine)"
+echo " 23/36 Edit Trip retags a trip without forking it (inside CaveCAD's own script engine)"
 echo "=============================================================="
 if [ -e "$QCAD" ]; then
     output=$("$QCAD" -no-dock-icon -no-gui -allow-multiple-instances \
@@ -420,7 +431,7 @@ fi
 
 echo
 echo "=============================================================="
-echo " 23/35 Incremental Notebook Draw matches a full redraw (inside CaveCAD's own script engine)"
+echo " 24/36 Incremental Notebook Draw matches a full redraw (inside CaveCAD's own script engine)"
 echo "=============================================================="
 if [ -e "$QCAD" ]; then
     output=$("$QCAD" -no-dock-icon -no-gui -allow-multiple-instances \
@@ -437,7 +448,7 @@ fi
 
 echo
 echo "=============================================================="
-echo " 24/35 Surface Data (inside CaveCAD's own script engine)"
+echo " 25/36 Surface Data (inside CaveCAD's own script engine)"
 echo "=============================================================="
 if [ -e "$QCAD" ]; then
     output=$("$QCAD" -no-dock-icon -no-gui -allow-multiple-instances \
@@ -454,7 +465,7 @@ fi
 
 echo
 echo "=============================================================="
-echo " 25/35 The geometry behind ScanAlign (inside CaveCAD's own script engine)"
+echo " 26/36 The geometry behind ScanAlign (inside CaveCAD's own script engine)"
 echo "=============================================================="
 if [ -e "$QCAD" ]; then
     output=$("$QCAD" -no-dock-icon -no-gui -allow-multiple-instances \
@@ -471,7 +482,7 @@ fi
 
 echo
 echo "=============================================================="
-echo " 26/35 Symbol Palette: symbols survive a file, and land in the"
+echo " 27/36 Symbol Palette: symbols survive a file, and land in the"
 echo "       view they were dropped in (inside CaveCAD's own script engine)"
 echo "=============================================================="
 if [ -e "$QCAD" ]; then
@@ -489,7 +500,7 @@ fi
 
 echo
 echo "=============================================================="
-echo " 27/35 Traced and shaped lines grow instead of piling up (inside CaveCAD's own script engine)"
+echo " 28/36 Traced and shaped lines grow instead of piling up (inside CaveCAD's own script engine)"
 echo "=============================================================="
 if [ -e "$QCAD" ]; then
     output=$("$QCAD" -no-dock-icon -no-gui -allow-multiple-instances \
@@ -506,7 +517,7 @@ fi
 
 echo
 echo "=============================================================="
-echo " 28/35 Traced linework says which trip drew it (inside CaveCAD's own script engine)"
+echo " 29/36 Traced linework says which trip drew it (inside CaveCAD's own script engine)"
 echo "=============================================================="
 if [ -e "$QCAD" ]; then
     output=$("$QCAD" -no-dock-icon -no-gui -allow-multiple-instances \
@@ -523,7 +534,7 @@ fi
 
 echo
 echo "=============================================================="
-echo " 29/35 Check Map reads a real drawing (inside CaveCAD's own script engine)"
+echo " 30/36 Check Map reads a real drawing (inside CaveCAD's own script engine)"
 echo "=============================================================="
 if [ -e "$QCAD" ]; then
     output=$("$QCAD" -no-dock-icon -no-gui -allow-multiple-instances \
@@ -541,7 +552,7 @@ fi
 
 echo
 echo "=============================================================="
-echo " 30/35 Build Legend explains the lines too (inside CaveCAD's own script engine)"
+echo " 31/36 Build Legend explains the lines too (inside CaveCAD's own script engine)"
 echo "=============================================================="
 if [ -e "$QCAD" ]; then
     output=$("$QCAD" -no-dock-icon -no-gui -allow-multiple-instances \
@@ -559,7 +570,7 @@ fi
 
 echo
 echo "=============================================================="
-echo " 31/35 Sheet Setup builds a printable sheet (inside CaveCAD's own script engine)"
+echo " 32/36 Sheet Setup builds a printable sheet (inside CaveCAD's own script engine)"
 echo "=============================================================="
 if [ -e "$QCAD" ]; then
     output=$("$QCAD" -no-dock-icon -no-gui -allow-multiple-instances \
@@ -577,7 +588,7 @@ fi
 
 echo
 echo "=============================================================="
-echo " 32/35 Loop Errors draws the closure where it happened (inside CaveCAD's own script engine)"
+echo " 33/36 Loop Errors draws the closure where it happened (inside CaveCAD's own script engine)"
 echo "=============================================================="
 if [ -e "$QCAD" ]; then
     output=$("$QCAD" -no-dock-icon -no-gui -allow-multiple-instances \
@@ -595,7 +606,7 @@ fi
 
 echo
 echo "=============================================================="
-echo " 33/35 One Complete mark, two panels (inside CaveCAD's own script engine)"
+echo " 34/36 One Complete mark, two panels (inside CaveCAD's own script engine)"
 echo "=============================================================="
 if [ -e "$QCAD" ]; then
     output=$("$QCAD" -no-dock-icon -no-gui -allow-multiple-instances \
@@ -612,7 +623,7 @@ fi
 
 echo
 echo "=============================================================="
-echo " 34/35 The teaching cave hands out a sanitized copy (inside CaveCAD's own script engine)"
+echo " 35/36 The teaching cave hands out a sanitized copy (inside CaveCAD's own script engine)"
 echo "=============================================================="
 if [ -e "$QCAD" ]; then
     output=$("$QCAD" -no-dock-icon -no-gui -allow-multiple-instances \
@@ -630,7 +641,7 @@ fi
 
 echo
 echo "=============================================================="
-echo " 35/35 Area Fill builds and clears a fill in a real drawing (inside CaveCAD's own script engine)"
+echo " 36/36 Area Fill builds and clears a fill in a real drawing (inside CaveCAD's own script engine)"
 echo "=============================================================="
 if [ -e "$QCAD" ]; then
     output=$("$QCAD" -no-dock-icon -no-gui -allow-multiple-instances \

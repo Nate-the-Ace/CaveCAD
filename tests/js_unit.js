@@ -20800,6 +20800,103 @@ for (var ra = 0; ra < ringSplay.length; ra++) {
 }
 ok(ordered, "ring points come back in angular order");
 
+// --- CsMesh3d.build ---------------------------------------------------
+
+// A three-station straight passage, LRUD at every arrival.
+function mesh3dSurvey() {
+    var sv = CsModel.newSurvey();
+    sv.caveName = "Mesh";
+    sv.distanceUnit = "ft";
+    sv.shots = [
+        { from: "A", to: "B", distance: 10, azimuth: 0, inclination: 0,
+          left: 2, right: 2, up: 3, down: 1, splay: false, trip: 0 },
+        { from: "B", to: "C", distance: 10, azimuth: 0, inclination: 0,
+          left: 2, right: 2, up: 3, down: 1, splay: false, trip: 0 }
+    ];
+    CsModel.ensureTrips(sv);
+    return sv;
+}
+
+var m3survey = mesh3dSurvey();
+var m3resolved = CsNetwork.resolve(m3survey);
+var m3 = CsMesh3d.build(m3survey, m3resolved);
+
+ok(m3.triangles.indices.length > 0, "the loft produced triangles");
+ok(m3.lines.indices.length > 0, "the centerline produced lines");
+
+var m3max = m3.triangles.positions.length / 3;
+var m3oob = 0;
+for (var t3 = 0; t3 < m3.triangles.indices.length; t3++) {
+    if (m3.triangles.indices[t3] < 0 || m3.triangles.indices[t3] >= m3max) {
+        m3oob += 1;
+    }
+}
+eqs(String(m3oob), "0", "every triangle index is in range");
+
+var m3bad = 0;
+for (var p3 = 0; p3 < m3.triangles.positions.length; p3++) {
+    if (!isFinite(m3.triangles.positions[p3])) { m3bad += 1; }
+}
+eqs(String(m3bad), "0", "no NaN among the triangle coordinates");
+
+var m3nbad = 0;
+for (var n3 = 0; n3 < m3.triangles.normals.length; n3++) {
+    if (!isFinite(m3.triangles.normals[n3])) { m3nbad += 1; }
+}
+eqs(String(m3nbad), "0", "no NaN among the normals");
+
+// Bounds are the extent of what was emitted, at the survey's own datum.
+nearly(m3.bounds.min.z, -1, 1e-6, "bounds reach the floor tick");
+nearly(m3.bounds.max.z, 3, 1e-6, "bounds reach the ceiling tick");
+nearly(m3.bounds.min.x, -2, 1e-6, "bounds reach the left wall");
+nearly(m3.bounds.max.x, 2, 1e-6, "bounds reach the right wall");
+
+// A missing elevation is an error, never a silent zero. This is the
+// sixth door on the datum trap; see CsMesh3d's header.
+var m3broken = CsNetwork.resolve(mesh3dSurvey());
+delete m3broken.stations["B"].z;
+var m3threw = false;
+try {
+    CsMesh3d.build(mesh3dSurvey(), m3broken);
+} catch (e3) {
+    m3threw = true;
+}
+ok(m3threw, "a station with no elevation refuses to build a mesh");
+
+// An absolute-datum cave keeps its datum: the whole passage sits up at
+// its real elevation, not rebased to zero.
+var m3high = mesh3dSurvey();
+m3high.fixed = { "A": { x: 0, y: 0, z: 1200 } };
+var m3highMesh = CsMesh3d.build(m3high, CsNetwork.resolve(m3high));
+ok(m3highMesh.bounds.min.z > 1100,
+    "an absolute-datum cave is not rebased to sea level (" +
+    m3highMesh.bounds.min.z + ")");
+
+// A closure leg is drawn on the centerline but never lofted -- the tree
+// has already surfaced that passage.
+var m3loopSurvey = mesh3dSurvey();
+m3loopSurvey.shots.push({ from: "C", to: "A", distance: 20, azimuth: 180,
+    inclination: 0, left: 2, right: 2, up: 3, down: 1,
+    splay: false, trip: 0 });
+var m3loopResolved = CsNetwork.resolve(m3loopSurvey);
+var m3loop = CsMesh3d.build(m3loopSurvey, m3loopResolved);
+ok(m3loop.lines.indices.length > m3.lines.indices.length,
+    "the closure leg is drawn on the centerline");
+
+// Colour by depth is honoured and differs from colour by trip.
+var m3depth = CsMesh3d.build(m3survey, m3resolved, { colorBy: "depth" });
+eqs(String(m3depth.triangles.colors.length),
+    String(m3.triangles.colors.length),
+    "colouring by depth emits the same amount of geometry");
+
+// An empty survey answers an empty mesh rather than throwing.
+var m3empty = CsMesh3d.build(CsModel.newSurvey(),
+    CsNetwork.resolve(CsModel.newSurvey()));
+eqs(String(m3empty.triangles.indices.length), "0",
+    "a survey with no shots makes no surface");
+ok(isFinite(m3empty.bounds.min.x),
+    "an empty mesh still answers finite bounds");
+
 // ---------------------------------------------------------------------
 // Shelf triage -- health, badges, declination drift
 // ---------------------------------------------------------------------
