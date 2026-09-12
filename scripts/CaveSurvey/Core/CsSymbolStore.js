@@ -101,6 +101,12 @@ CsSymbolStore.AREA_MARKER_TAGS = {
     scaleMin: "AreaScaleMin",
     scaleMax: "AreaScaleMax",
     rotate: "AreaRotate",
+    // The caver's own "what is it?" line -- optional (an empty tag is a
+    // valid answer, not a missing one), and read back into the same
+    // `help` field CsArea.CATALOG's built-ins carry, so a tile's
+    // tooltip never has to know whether it is looking at a shipped
+    // pattern or a caver's own.
+    help: "AreaHelp",
     custom: "AreaCustom"
 };
 
@@ -425,6 +431,11 @@ CsSymbolStore.areaMetaOf = function(doc, block) {
         scaleMin: isNaN(scaleMin) ? 0.8 : scaleMin,
         scaleMax: isNaN(scaleMax) ? 1.2 : scaleMax,
         rotate: CsTags.get(marker, t.rotate) === "1",
+        // "" for a pattern saved before AreaHelp existed, or one whose
+        // caver left the description blank -- both are a fine tooltip,
+        // just a shorter one (CsPanel.tipHtml leaves an empty help out
+        // rather than printing a blank line).
+        help: CsTags.get(marker, t.help),
         custom: true
     };
 };
@@ -1374,9 +1385,9 @@ CsSymbolStore.saveBlock = function(path, blockName, srcDoc, entities, meta) {
  * symbols, since Area Fill did not exist until the library already did.
  *
  * `meta` is {name, layer, placement, density, scaleMin, scaleMax,
- * rotate} -- AreaFillEdit.savePattern's job, not this function's, is
- * making sure those seven fields are well-formed before they arrive
- * here.
+ * rotate, help} -- AreaFillEdit.savePattern's job, not this function's,
+ * is making sure those eight fields are well-formed before they arrive
+ * here. `help` is a caver's own "what is it?" line and may be "".
  *
  * \return { ok, error, replaced }
  */
@@ -1492,6 +1503,7 @@ CsSymbolStore.saveAreaPattern = function(path, blockName, srcDoc, entities,
         CsTags.set(marker, t.scaleMin, String(meta.scaleMin));
         CsTags.set(marker, t.scaleMax, String(meta.scaleMax));
         CsTags.set(marker, t.rotate, meta.rotate === true ? "1" : "0");
+        CsTags.set(marker, t.help, isNull(meta.help) ? "" : meta.help);
         op.addObject(marker, false);
     } catch (eMarker) {
         return { ok: false, replaced: replaced, error:

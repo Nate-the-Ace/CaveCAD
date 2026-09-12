@@ -491,7 +491,9 @@ AreaFillEdit.collect = function(doc) {
  * disagree about what counts as a valid pattern.
  *
  * `meta` is {name, layer, placement, density, scaleMin, scaleMax,
- * rotate} -- placement is "scatter" or "tile", rotate is a boolean.
+ * rotate, help} -- placement is "scatter" or "tile", rotate is a
+ * boolean, help is a caver's own "what is it?" line and may be "" or
+ * omitted -- an empty description is a valid pattern, not a refusal.
  * `existingBlockName`, when given (an EDIT), keeps the block's name
  * fixed whatever the display name became -- renaming the block would
  * leave every already-placed instance pointing at a name that no
@@ -569,7 +571,11 @@ AreaFillEdit.savePattern = function(doc, entities, meta, existingBlockName) {
         density: density,
         scaleMin: scaleMin,
         scaleMax: scaleMax,
-        rotate: meta.rotate === true
+        rotate: meta.rotate === true,
+        // "" for a caver who left the description blank -- a pattern
+        // with no "what is it?" line is still a saveable pattern, just
+        // one whose tooltip has less to say (see AreaFill.tileFor).
+        help: isNull(meta.help) ? "" : String(meta.help).trim()
     };
 
     var res = CsSymbolStore.saveAreaPattern(null, blockName, doc, entities,
@@ -595,8 +601,8 @@ AreaFillEdit.savePattern = function(doc, entities, meta, existingBlockName) {
 
 /**
  * Reads the editor's own fields into the {name, layer, placement,
- * density, scaleMin, scaleMax, rotate} shape savePattern expects, or
- * null when the panel is not built (headless) -- the GUI half of the
+ * density, scaleMin, scaleMax, rotate, help} shape savePattern expects,
+ * or null when the panel is not built (headless) -- the GUI half of the
  * save flow, kept separate from savePattern so a test can hand in a
  * meta object directly without a panel in front of it.
  */
@@ -609,6 +615,7 @@ AreaFillEdit.readFields = function() {
     var layer = "";
     var placement = "scatter";
     var density = 1.0, scaleMin = 0.8, scaleMax = 1.2, rotate = true;
+    var help = "";
     try {
         name = String(w.patternNameEdit.text).trim();
     } catch (eName) {
@@ -639,9 +646,13 @@ AreaFillEdit.readFields = function() {
             .toLowerCase().indexOf("random") === 0;
     } catch (eRotate) {
     }
+    try {
+        help = String(w.patternHelpEdit.text).trim();
+    } catch (eHelp) {
+    }
     return { name: name, layer: layer, placement: placement,
         density: density, scaleMin: scaleMin, scaleMax: scaleMax,
-        rotate: rotate };
+        rotate: rotate, help: help };
 };
 
 /**

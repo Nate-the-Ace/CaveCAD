@@ -76,48 +76,72 @@ CsArea.CATALOG = {
         boundaryLayer: "CTRL-AREA-BOUNDARY",
         blocks: ["SYM_BREAKDOWN", "SYM_BREAKDOWN_B", "SYM_BREAKDOWN_C"],
         density: 16, scaleMin: 0.7, scaleMax: 1.5, rotate: true,
-        spacingFactor: 0.55, spacingMin: 0.6 },
+        spacingFactor: 0.55, spacingMin: 0.6,
+        help: "Boulders fallen from the ceiling -- the kind you climb " +
+            "over or squeeze between. Use Debris for anything smaller." },
     DEBRIS: { name: "Debris", engine: "scatter", layer: "BREAKDOWN",
         boundaryLayer: "CTRL-AREA-BOUNDARY",
         blocks: ["SYM_BREAKDOWN", "SYM_BREAKDOWN_B", "SYM_BREAKDOWN_C"],
         density: 40, scaleMin: 0.25, scaleMax: 0.5, rotate: true,
-        spacingFactor: 0.55 },
+        spacingFactor: 0.55,
+        help: "Rubble smaller than your helmet: chips and cobbles " +
+            "rather than boulders." },
     PEBBLES: { name: "Pebbles", engine: "scatter",
         layer: "SEDIMENT-SAND-GRAVEL", boundaryLayer: "CTRL-AREA-BOUNDARY",
         blocks: ["AREA_PEBBLE"], density: 55,
-        scaleMin: 0.6, scaleMax: 1.2, rotate: true, spacingFactor: 0.55 },
+        scaleMin: 0.6, scaleMax: 1.2, rotate: true, spacingFactor: 0.55,
+        help: "Rounded stones carried and sorted by water. Gravel, not " +
+            "sand." },
     SAND: { name: "Sand", engine: "scatter",
         layer: "SEDIMENT-SAND-GRAVEL", boundaryLayer: "CTRL-AREA-BOUNDARY",
         blocks: ["AREA_STIPPLE"], density: 120,
-        scaleMin: 0.8, scaleMax: 1.2, rotate: false },
+        scaleMin: 0.8, scaleMax: 1.2, rotate: false,
+        help: "Loose grains dropped by flowing water. Firm underfoot." },
     CLAY: { name: "Clay / Silt", engine: "scatter",
         layer: "SEDIMENT-CLAY-MUD", boundaryLayer: "CTRL-AREA-BOUNDARY",
         blocks: ["AREA_STIPPLE"], density: 45,
-        scaleMin: 0.7, scaleMax: 1.0, rotate: false },
+        scaleMin: 0.7, scaleMax: 1.0, rotate: false,
+        help: "Fine mud dropped by standing water. Sticky, and it " +
+            "holds a bootprint." },
     BEDROCK: { name: "Bedrock", engine: "filled", layer: "FLOOR",
-        boundaryLayer: "FLOOR", solid: false, pattern: null },
+        boundaryLayer: "FLOOR", solid: false, pattern: null,
+        help: "Solid rock floor with nothing lying on it. Draws its " +
+            "outline and no fill." },
     WATER: { name: "Water / Lake", engine: "filled",
         layer: "WATER-POOL-SUMP", boundaryLayer: "WATER-POOL-SUMP",
-        solid: true, pattern: "SOLID" },
+        solid: true, pattern: "SOLID",
+        help: "Standing water -- a pool or a lake. Its edge prints as " +
+            "the shoreline." },
     SUMP: { name: "Sump", engine: "filled", layer: "WATER-POOL-SUMP",
         boundaryLayer: "WATER-POOL-SUMP", solid: false,
-        pattern: "ansi31", patternScale: 2.0, patternAngle: 0.0 },
+        pattern: "ansi31", patternScale: 2.0, patternAngle: 0.0,
+        help: "Where the passage floods to the ceiling and the way on " +
+            "is underwater." },
     FLOWSTONE: { name: "Flowstone", engine: "filled", layer: "FLOWSTONE",
         boundaryLayer: "FLOWSTONE", solid: false,
-        pattern: "ansi31", patternScale: 1.0, patternAngle: Math.PI / 4 },
+        pattern: "ansi31", patternScale: 1.0, patternAngle: Math.PI / 4,
+        help: "Calcite sheeting over the floor or wall, laid down by a " +
+            "film of water." },
     MOONMILK: { name: "Moonmilk", engine: "filled",
         layer: "FORMATIONS-MOONMILK-POPCORN",
         boundaryLayer: "CTRL-AREA-BOUNDARY", solid: false,
-        pattern: "dots", patternScale: 1.0, patternAngle: 0.0 },
+        pattern: "dots", patternScale: 1.0, patternAngle: 0.0,
+        help: "Soft white paste on rock. Popcorn and coralloid belong " +
+            "here too." },
     GUANO: { name: "Guano", engine: "scatter", layer: "GUANO",
         boundaryLayer: "CTRL-AREA-BOUNDARY", blocks: ["AREA_DASH"],
-        density: 60, scaleMin: 0.8, scaleMax: 1.3, rotate: true },
+        density: 60, scaleMin: 0.8, scaleMax: 1.3, rotate: true,
+        help: "Bat droppings. Worth marking: it says where the roost " +
+            "is, and it is a hazard." },
     ICE: { name: "Ice / Snow", engine: "scatter", layer: "ICE-SNOW",
         boundaryLayer: "CTRL-AREA-BOUNDARY", blocks: ["AREA_CRYSTAL"],
-        density: 30, scaleMin: 0.8, scaleMax: 1.4, rotate: true },
+        density: 30, scaleMin: 0.8, scaleMax: 1.4, rotate: true,
+        help: "Ice or firn that lasts the year round." },
     BONES: { name: "Bones", engine: "scatter", layer: "ARCHAEOLOGY",
         boundaryLayer: "CTRL-AREA-BOUNDARY", blocks: ["AREA_BONE"],
-        density: 6, scaleMin: 0.9, scaleMax: 1.3, rotate: true }
+        density: 6, scaleMin: 0.9, scaleMax: 1.3, rotate: true,
+        help: "Bone deposits. Archaeological -- record them and leave " +
+            "them alone." }
 };
 
 /**
@@ -167,6 +191,13 @@ CsArea.merged = function() {
             scaleMin: m.scaleMin,
             scaleMax: m.scaleMax,
             rotate: m.rotate,
+            // A caver's own "what is it?" line, carried through exactly
+            // as CsArea.CATALOG's own built-in entries carry theirs --
+            // one field, read by both the tile tooltip and the legend
+            // that reuses it, never duplicated in a second place. Empty
+            // is a valid answer (m.help defaults to "" in areaMetaOf),
+            // not a caver's oversight to fix.
+            help: m.help,
             custom: true
         };
     }

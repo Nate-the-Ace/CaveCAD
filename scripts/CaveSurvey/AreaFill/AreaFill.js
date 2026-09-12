@@ -415,6 +415,10 @@ AreaFill.enterEditorMode = function(message, entry) {
         if (!isNull(w.patternNameEdit)) {
             w.patternNameEdit.text = isNull(entry) ? "" : entry.name;
         }
+        if (!isNull(w.patternHelpEdit)) {
+            w.patternHelpEdit.text =
+                (isNull(entry) || isNull(entry.help)) ? "" : entry.help;
+        }
         if (!isNull(w.patternLayerCombo)) {
             var layers = AreaFillEdit.homeLayers();
             var want = isNull(entry) ? CsLayers.BREAKDOWN : entry.layer;
@@ -520,10 +524,19 @@ AreaFill.tileFor = function(key, entry) {
         qsTr("Scatters picture elements across the boundary.") :
         qsTr("Fills the boundary as one region."));
     detail.push(entry.layer);
-    // No CsHelp entry for area patterns yet -- CsHelp.SYMBOL/FEATURE
-    // both predate this tool -- so this passes null for `help` exactly
-    // as SymbolPalette does for a custom symbol with no catalog prose.
-    button.toolTip = CsPanel.tipHtml(entry.name, null, detail);
+    // WHAT IT IS, not how it is drawn -- entry.help (CsArea.CATALOG's
+    // own field, or a caver's own AreaHelp for a custom pattern) says
+    // what a caver would tell another caver at the entrance; `detail`
+    // above stays the mechanical half (engine, layer) it always was.
+    // The two never repeat each other, so CsPanel.tipHtml's three parts
+    // (bold name, help, grey detail) read as one description read top
+    // to bottom rather than the same fact said three ways. A blank
+    // help (a custom pattern saved with no description) is passed as
+    // null, exactly the SymbolPalette convention CsPanel.tipHtml's own
+    // header describes.
+    var help = (isNull(entry.help) || entry.help === "") ?
+        null : { means: entry.help };
+    button.toolTip = CsPanel.tipHtml(entry.name, help, detail);
 
     var icon = null;
     try {
@@ -851,6 +864,16 @@ AreaFill.buildBody = function(parent) {
         w.patternNameEdit = new QLineEdit("");
         w.patternNameEdit.toolTip = qsTr("What this pattern is called.");
         fields.addRow(qsTr("Name"), w.patternNameEdit);
+
+        // OPTIONAL, deliberately -- a pattern with a blank description
+        // still saves and still gets a tooltip (AreaFill.tileFor just
+        // has less to show). This is the one field a built-in's help
+        // string has no equivalent slot for: CsArea.CATALOG's entries
+        // are written in code, a caver's own pattern is described here.
+        w.patternHelpEdit = new QLineEdit("");
+        w.patternHelpEdit.toolTip = qsTr("A short line describing what " +
+            "this pattern is, shown in its tile's tooltip. Optional.");
+        fields.addRow(qsTr("What is it?"), w.patternHelpEdit);
 
         w.patternLayerCombo = new QComboBox();
         var homeLayers = AreaFillEdit.homeLayers();

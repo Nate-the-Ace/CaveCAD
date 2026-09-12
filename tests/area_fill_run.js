@@ -62,6 +62,25 @@ function eqs(a, b, what) {
         ", got " + JSON.stringify(a) + ")");
 }
 
+// =======================================================================
+// Every catalog entry says what it is. A fourteenth pattern cannot slip
+// in with no `help` string -- this fails the moment CsArea.CATALOG gains
+// one, not just the thirteen shipped today -- because a caver reads the
+// tile before they read the code, and a tile with nothing in its
+// tooltip beyond "Fills the boundary as one region." is exactly the
+// defect this batch exists to close.
+// =======================================================================
+(function everyCatalogEntryHasHelp() {
+    for (var key in CsArea.CATALOG) {
+        if (!CsArea.CATALOG.hasOwnProperty(key)) {
+            continue;
+        }
+        var entry = CsArea.CATALOG[key];
+        ok(!isNull(entry.help) && String(entry.help).trim() !== "",
+            "CsArea.CATALOG." + key + ": has a non-empty help string");
+    }
+})();
+
 var doc = new RDocument(new RMemoryStorage(), createSpatialIndex());
 var di = new RDocumentInterface(doc);
 CsLayers.ensureSurveyLayers(doc, di);
@@ -1398,7 +1417,9 @@ eqs(CsArea.regenerate(doc, di, lstReviveBoundary.getId()),
         ];
         var meta = { name: "Popcorn", layer: "FORMATIONS-MOONMILK-POPCORN",
             placement: "scatter", density: 30, scaleMin: 0.8, scaleMax: 1.2,
-            rotate: true };
+            rotate: true,
+            help: "Small white nodules on the wall -- a caver's own " +
+                "description, not one of CsArea.CATALOG's built-in ones." };
         var saved = AreaFillEdit.savePattern(editorDoc, elementEntities,
             meta);
         ok(saved.ok, "AreaFillEdit.savePattern: the pattern is written (" +
@@ -1421,6 +1442,10 @@ eqs(CsArea.regenerate(doc, di, lstReviveBoundary.getId()),
             "CsArea.merged: it remembers its home layer");
         eqs(merged[saved.key].engine, "scatter",
             "CsArea.merged: it remembers its placement rule");
+        eqs(merged[saved.key].help, meta.help,
+            "CsArea.merged: a custom pattern's AreaHelp comes back as " +
+            "the entry's `help` field, the SAME field a built-in's " +
+            "own tooltip and the legend both read");
         ok(!isNull(CsArea.CATALOG.SAND),
             "CsArea.merged: a custom pattern does not displace a built-in");
         eqs(merged.SAND.layer, CsArea.CATALOG.SAND.layer,
@@ -1469,6 +1494,31 @@ eqs(CsArea.regenerate(doc, di, lstReviveBoundary.getId()),
         eqs(afterCollision[saved.key].name, "Popcorn",
             "AreaFillEdit.savePattern: the refused save left the " +
             "original pattern's name intact");
+
+        // ---------------------------------------------------------------
+        // An empty description is a valid pattern, not a refusal -- a
+        // caver who skips the "What is it?" field entirely (help is
+        // undefined, the same as a panel that was never touched) must
+        // still be able to save, and CsArea.merged still has to hand
+        // back SOMETHING tipHtml-safe rather than null/undefined.
+        // ---------------------------------------------------------------
+
+        var blankMeta = { name: "Rimwash",
+            layer: "FORMATIONS-MOONMILK-POPCORN", placement: "scatter",
+            density: 20, scaleMin: 0.8, scaleMax: 1.2, rotate: true };
+        var blankEntities = [ new RLineEntity(editorDoc, new RLineData(
+            new RVector(0, 0), new RVector(0.2, 0.2))) ];
+        var blankSaved = AreaFillEdit.savePattern(editorDoc, blankEntities,
+            blankMeta);
+        ok(blankSaved.ok, "AreaFillEdit.savePattern: a pattern with no " +
+            "`help` at all still saves (" +
+            (isNull(blankSaved.error) ? "" : blankSaved.error) + ")");
+
+        CsSymbolStore.invalidate(tmpLibrary);
+        var mergedBlank = CsArea.merged();
+        eqs(mergedBlank[blankSaved.key].help, "",
+            "CsArea.merged: a pattern saved with no description comes " +
+            "back with an empty `help`, not null or undefined");
 
         // ---------------------------------------------------------------
         // THE CLAIM A CAVER CARES ABOUT, beyond the round trip: the saved
