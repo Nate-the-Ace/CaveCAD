@@ -109,12 +109,12 @@
     {
       "id": 12,
       "subject": "Task 13: Version, changelog and live verification",
-      "status": "pending",
+      "status": "completed",
       "description": "**Goal:** 0.9.116.0 is published and confirmed working in the real application, not only in the harness.\n\n**Files:**\n- Modify: `VERSION`, `CHANGELOG.md`\n- Modify: `docs/superpowers/specs/2026-09-11-area-fill-design.md` (an As-built section, if anything diverged)\n\n**Acceptance Criteria:**\n- [ ] `VERSION` reads `0.9.116.0`\n- [ ] `CHANGELOG.md` has an entry naming the area tool and the Draw grid\n- [ ] `./tests/run_all.sh --publish` passes with the engine present\n- [ ] `tools/publish.sh` installs cleanly\n- [ ] Live in CaveCAD: Draw shows three sections two wide with Areas spanning the bottom row; right-click a header and Move Up reorders and survives a restart\n- [ ] Live: arm Sand, drag a loop, get stipple on `SEDIMENT-SAND-GRAVEL`; drag the boundary and the stipple follows\n- [ ] Live: arm Water, drag a loop, get a tint with a printed shoreline\n- [ ] Live: New Area Pattern\u2026, draw a blob, save, and place it\n\n**Verify:** `./tests/run_all.sh --publish` \u2192 `ALL TESTS PASSED`; then the live checks above through the MCP bridge\n\n**Steps:**\n- Step 1: Bump the version\n- Step 2: Write the changelog entry\n- Step 3: Publish\n- Step 4: Restart CaveCAD properly, then verify live\n- Step 5: Record divergence\n- Step 6: Commit\n\n```json:metadata\n{\"files\": [\"CHANGELOG.md\", \"docs/superpowers/specs/2026-09-11-area-fill-design.md\"], \"verifyCommand\": \"`./tests/run_all.sh --publish` \\u2192 `ALL TESTS PASSED`; then the live checks above through the MCP bridge\", \"acceptanceCriteria\": [\"VERSION reads 0.9.116.0\", \"CHANGELOG.md has an entry naming the area tool and the Draw grid\", \"./tests/run_all.sh --publish passes with the engine present\", \"tools/publish.sh installs cleanly\", \"Live in CaveCAD: Draw shows three sections two wide with Areas spanning the bottom row; right-click a header and Move Up reorders and survives a restart\", \"Live: arm Sand, drag a loop, get stipple on SEDIMENT-SAND-GRAVEL; drag the boundary and the stipple follows\", \"Live: arm Water, drag a loop, get a tint with a printed shoreline\", \"Live: New Area Pattern\\u2026, draw a blob, save, and place it\"], \"modelTier\": \"standard\"}\n```",
       "blockedBy": [
         11
       ]
     }
   ],
-  "lastUpdated": "2026-09-11T23:32:26"
+  "lastUpdated": "2026-09-11T23:37:02"
 }
