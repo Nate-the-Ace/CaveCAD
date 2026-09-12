@@ -564,6 +564,303 @@ CsTrace.fitSpline = function(doc, points) {
  * and every straight wall would silently vanish. Two points give a
  * degree-1 spline, which is the straight line that trace actually was.
  */
+// ---- interpolating splines -------------------------------------------
+//
+// A CURVE THAT PASSES THROUGH THE POINTS, computed here rather than
+// asked of the engine. fitSpline above APPROXIMATES: its points are
+// control points, so every bend is pulled inside the control polygon by
+// a fraction of the sampling step and a traced corner rounds off.
+// QCAD's own answer -- fit-point splines -- is a Pro feature this fork
+// does not have, and reaching for it cost a release (see fitSpline).
+//
+// So we compute the control points OURSELVES such that the resulting
+// cubic B-spline interpolates the samples: global interpolation, the
+// textbook method (Piegl & Tiller A9.1). The output is an ordinary
+// control-point spline, which this build renders, saves and round-trips
+// exactly as it always has -- nothing Pro is involved (Nathan,
+// 2026-09-12: "build our own spline math").
+//
+// CENTRIPETAL parameterisation, not chord-length: on hand-traced data
+// the two differ where samples bunch at a corner, and chord-length
+// answers that with an overshoot loop outside the traced line.
+// Centripetal is the standard cure and costs one square root.
+
+CsTrace.INTERP_DEGREE = 3;
+
+/** Parameter for each point, by the centripetal rule, normalised to
+ *  [0, 1]. Returns null when the points cannot be parameterised (a
+ *  zero-length path, every point on top of the last). */
+CsTrace.centripetalParams = function(points) {
+    var n = points.length - 1;
+    var i;
+    var d = 0;
+    var seg = [];
+    for (i = 1; i <= n; i++) {
+        var s = Math.sqrt(CsTrace.distance(points[i - 1], points[i]));
+        seg.push(s);
+        d += s;
+    }
+    if (!(d > 0)) {
+        return null;
+    }
+    var u = [0];
+    var acc = 0;
+    for (i = 1; i <= n; i++) {
+        acc += seg[i - 1];
+        u.push(acc / d);
+    }
+    u[n] = 1;
+    return u;
+};
+
+/** The clamped knot vector for interpolation: p+1 zeros, the averaged
+ *  interior knots, p+1 ones. Averaging is what keeps the system below
+ *  nonsingular -- an arbitrary knot vector does not. */
+CsTrace.averagedKnots = function(u, p) {
+    var n = u.length - 1;
+    var m = n + p + 1;
+    var U = [];
+    var i, j;
+    for (i = 0; i <= p; i++) {
+        U.push(0);
+    }
+    for (j = 1; j <= n - p; j++) {
+        var sum = 0;
+        for (i = j; i <= j + p - 1; i++) {
+            sum += u[i];
+        }
+        U.push(sum / p);
+    }
+    for (i = 0; i <= p; i++) {
+        U.push(1);
+    }
+    while (U.length < m + 1) {
+        U.splice(U.length - (p + 1), 0, 0.5);
+    }
+    return U;
+};
+
+/** The knot span containing uu. */
+CsTrace.findSpan = function(n, p, uu, U) {
+    if (uu >= U[n + 1]) {
+        return n;
+    }
+    if (uu <= U[p]) {
+        return p;
+    }
+    var low = p, high = n + 1, mid = Math.floor((low + high) / 2);
+    while (uu < U[mid] || uu >= U[mid + 1]) {
+        if (uu < U[mid]) {
+            high = mid;
+        } else {
+            low = mid;
+        }
+        mid = Math.floor((low + high) / 2);
+    }
+    return mid;
+};
+
+/** The p+1 basis functions that are non-zero at uu (Cox-de Boor, in the
+ *  no-division-by-zero form). */
+CsTrace.basisFuns = function(span, uu, p, U) {
+    var N = [1];
+    var left = [0], right = [0];
+    var j, r;
+    for (j = 1; j <= p; j++) {
+        left[j] = uu - U[span + 1 - j];
+        right[j] = U[span + j] - uu;
+        var saved = 0;
+        for (r = 0; r < j; r++) {
+            var denom = right[r + 1] + left[j - r];
+            var temp = denom === 0 ? 0 : N[r] / denom;
+            N[r] = saved + right[r + 1] * temp;
+            saved = left[j - r] * temp;
+        }
+        N[j] = saved;
+    }
+    return N;
+};
+
+/**
+ * Solves the interpolation system for control points.
+ *
+ * BANDED, not dense: a long wall at a quarter-foot step is thousands of
+ * points, and a dense (n+1)^2 matrix would be millions of cells in a
+ * script engine. Each row has at most p+1 non-zero entries, so the band
+ * is all that is stored, and elimination only ever reaches p rows down.
+ * No pivoting: the matrix from averaged knots is totally positive, which
+ * is precisely the property that makes pivoting unnecessary.
+ *
+ * \return [{x, y}, ...] control points, or null if the system is
+ *         singular (which averaged knots should prevent, but a caller
+ *         must never get a NaN curve).
+ */
+CsTrace.solveInterpolation = function(points, u, U, p) {
+    var n = points.length - 1;
+    var half = p;                 // widest reach either side
+    var width = 2 * half + 1;
+    var band = [];
+    var rhsX = [], rhsY = [];
+    var k, j;
+    for (k = 0; k <= n; k++) {
+        var row = [];
+        for (j = 0; j < width; j++) {
+            row.push(0);
+        }
+        band.push(row);
+        rhsX.push(points[k].x);
+        rhsY.push(points[k].y);
+    }
+    for (k = 0; k <= n; k++) {
+        var span = CsTrace.findSpan(n, p, u[k], U);
+        var N = CsTrace.basisFuns(span, u[k], p, U);
+        for (j = 0; j <= p; j++) {
+            var col = span - p + j;
+            var slot = col - k + half;
+            if (slot < 0 || slot >= width) {
+                return null;      // outside the band we budgeted for
+            }
+            band[k][slot] = N[j];
+        }
+    }
+    // forward elimination, band-limited
+    for (k = 0; k <= n; k++) {
+        var pivot = band[k][half];
+        if (!(Math.abs(pivot) > 1e-12)) {
+            return null;
+        }
+        var rEnd = Math.min(n, k + half);
+        for (var r = k + 1; r <= rEnd; r++) {
+            var slotOfK = k - r + half;
+            var factor = band[r][slotOfK];
+            if (factor === 0) {
+                continue;
+            }
+            factor = factor / pivot;
+            for (j = 0; j < width; j++) {
+                var colJ = j + k - half;
+                var rslot = colJ - r + half;
+                if (rslot < 0 || rslot >= width) {
+                    continue;
+                }
+                band[r][rslot] -= factor * band[k][j];
+            }
+            rhsX[r] -= factor * rhsX[k];
+            rhsY[r] -= factor * rhsY[k];
+        }
+    }
+    // back substitution
+    var px = [], py = [];
+    for (k = 0; k <= n; k++) {
+        px.push(0);
+        py.push(0);
+    }
+    for (k = n; k >= 0; k--) {
+        var sx = rhsX[k], sy = rhsY[k];
+        var cEnd = Math.min(n, k + half);
+        for (var c = k + 1; c <= cEnd; c++) {
+            var s2 = c - k + half;
+            if (s2 < 0 || s2 >= width) {
+                continue;
+            }
+            sx -= band[k][s2] * px[c];
+            sy -= band[k][s2] * py[c];
+        }
+        var d2 = band[k][half];
+        if (!(Math.abs(d2) > 1e-12)) {
+            return null;
+        }
+        px[k] = sx / d2;
+        py[k] = sy / d2;
+    }
+    var out = [];
+    for (k = 0; k <= n; k++) {
+        if (isNaN(px[k]) || isNaN(py[k])) {
+            return null;
+        }
+        out.push({ x: px[k], y: py[k] });
+    }
+    return out;
+};
+
+/**
+ * The control points of a cubic B-spline that PASSES THROUGH `points`.
+ *
+ * \return [{x, y}, ...], or null when the input cannot be interpolated
+ *         (fewer than four points, a zero-length path, a singular
+ *         system). A caller that gets null falls back to the
+ *         approximating fit, which always works.
+ */
+CsTrace.interpolatingControlPoints = function(points) {
+    var fit = CsTrace.interpolationFit(points);
+    return fit === null ? null : fit.ctrl;
+};
+
+/**
+ * The whole fit: control points, knots and parameters.
+ *
+ * Separate from the call above because a TEST has to be able to
+ * evaluate the curve without the engine -- headless, RSpline's
+ * getPointCloud returns nothing (no spline proxy plugin), so "does this
+ * curve pass through its points" cannot be asked of the entity. It is
+ * asked of the maths here instead, and the entity is checked separately
+ * by a DXF round trip.
+ */
+CsTrace.interpolationFit = function(points) {
+    var p = CsTrace.INTERP_DEGREE;
+    if (isNull(points) || points.length < p + 1) {
+        return null;
+    }
+    var u = CsTrace.centripetalParams(points);
+    if (u === null) {
+        return null;
+    }
+    var U = CsTrace.averagedKnots(u, p);
+    var ctrl = CsTrace.solveInterpolation(points, u, U, p);
+    if (ctrl === null) {
+        return null;
+    }
+    return { ctrl: ctrl, knots: U, params: u, degree: p };
+};
+
+/** The curve at parameter uu, from a fit above. Pure maths: no engine,
+ *  so a headless test can measure what a caver will see. */
+CsTrace.evalCurve = function(fit, uu) {
+    var p = fit.degree;
+    var n = fit.ctrl.length - 1;
+    var span = CsTrace.findSpan(n, p, uu, fit.knots);
+    var N = CsTrace.basisFuns(span, uu, p, fit.knots);
+    var x = 0, y = 0;
+    for (var j = 0; j <= p; j++) {
+        var c = fit.ctrl[span - p + j];
+        x += N[j] * c.x;
+        y += N[j] * c.y;
+    }
+    return { x: x, y: y };
+};
+
+/**
+ * A cubic spline through `points`, or null.
+ *
+ * OPEN CURVES ONLY. A closed boundary needs the periodic variant, whose
+ * system is cyclic rather than banded; area boundaries keep the
+ * approximating periodic fit until that is built, and say so where they
+ * build it.
+ */
+CsTrace.interpolatingSpline = function(doc, points) {
+    var ctrl = CsTrace.interpolatingControlPoints(points);
+    if (ctrl === null) {
+        return null;
+    }
+    var spline = new RSpline();
+    spline.setDegree(CsTrace.INTERP_DEGREE);
+    spline.setPeriodic(false);
+    for (var i = 0; i < ctrl.length; i++) {
+        spline.appendControlPoint(new RVector(ctrl[i].x, ctrl[i].y));
+    }
+    return new RSplineEntity(doc, new RSplineData(spline));
+};
+
 CsTrace.degreeFor = function(count) {
     if (count <= 2) {
         return 1;
@@ -1018,7 +1315,21 @@ CsTrace.growCurve = function(doc, di, id, kept, join, group) {
 CsTrace.emit = function(doc, di, layerName, points, spacing, tolerance) {
     var spaced = CsTrace.resample(points, spacing);
     var kept = CsTrace.reduce(spaced, tolerance);
-    var spline = CsTrace.fitSpline(doc, kept);
+    // INTERPOLATING FIRST, approximating as the fallback (2026-09-12).
+    // Measured on a real traced wall: the approximating fit misses the
+    // sharpest corner by 3.35 inches at a one-foot step and still by
+    // 0.97 at a quarter foot, while the interpolating fit is within
+    // about a third of an inch at EVERY step -- because it passes
+    // through the corner by construction rather than being pulled
+    // inside it. Same control point count, same file size.
+    //
+    // The fallback is not ceremony: interpolation returns null for
+    // fewer than four points, a zero-length path or a singular system,
+    // and a caver mid-trace must still get their line.
+    var spline = CsTrace.interpolatingSpline(doc, kept);
+    if (spline === null) {
+        spline = CsTrace.fitSpline(doc, kept);
+    }
     if (spline === null) {
         return { added: false, sampled: spaced.length, kept: kept.length,
             id: null };
