@@ -128,6 +128,18 @@ Cave3D.refresh = function() {
 };
 
 function cave3dRun() {
+    // The 3D window is a C++ widget in CaveCAD itself, reached through
+    // the global `cave3d`. An add-on can outlive the application it was
+    // installed into -- a caver who updates the tools but not CaveCAD
+    // would otherwise meet a bare ReferenceError from a menu entry that
+    // looks like every other one.
+    if (typeof cave3d === "undefined" || isNull(cave3d)) {
+        warning(qsTr("3D View needs a newer CaveCAD.\n" +
+            "This version of the application has no 3D window in it. " +
+            "Everything else in the Cave Survey suite works as before."));
+        return;
+    }
+
     var doc = getDocument();
     var read = Cave3D.read(doc);
     if (read === null) {

@@ -90,6 +90,10 @@ DrawPanel.ORDER_SETTING = "CaveSurvey/DrawOrder";
  *  and CsPanel.gridSpans for how a section lands in it. */
 DrawPanel.COLUMNS = 2;
 
+/** The least height a section keeps inside its row: a header plus a row
+ *  of tiles. Below this a section reads as broken rather than small. */
+DrawPanel.SECTION_MIN_HEIGHT = 150;
+
 DrawPanel.SEC_TRACE = "Trace";
 DrawPanel.SEC_SYMBOLS = "Symbols";
 DrawPanel.SEC_AREAS = "Areas";
@@ -150,7 +154,46 @@ DrawPanel.buildDock = function(appWin) {
                 inner.setContentsMargins(0, 0, 0, 0);
             } catch (eMargins) {
             }
-            inner.addWidget(sections[i].build(section.host), 1, 0);
+            // EVERY SECTION SCROLLS, AND EVERY SECTION IS CLAMPED.
+            // Trace on its own wants 1027 pixels and Symbols 625, so in
+            // a 1303-pixel dock the second row was squeezed to 242 and
+            // its buttons could not be reached at all (measured live,
+            // 2026-09-12; Nathan: "clamp the areas to the panel
+            // dimensions and let me scroll to hidden buttons").
+            //
+            // Clamping alone would only CLIP a section, so the two go
+            // together: the grid's rows share the height (setRowStretch
+            // below), and each section's body sits in a scroll area so
+            // whatever does not fit is still reachable. Symbols and
+            // Areas keep their own inner scroll for their tile walls --
+            // this one exists for the SECTION, which Trace had none of.
+            var built = sections[i].build(section.host);
+            var scroller = null;
+            try {
+                scroller = new QScrollArea();
+                scroller.setWidget(built);
+                scroller.setWidgetResizable(true);
+                // A METHOD, NOT A PROPERTY. Assigning
+                // horizontalScrollBarPolicy throws "read-only property"
+                // on this bridge -- which is exactly how the previous
+                // attempt at this silently fell back to no scrolling at
+                // all (probed live, 2026-09-12).
+                try {
+                    scroller.setHorizontalScrollBarPolicy(
+                        Qt.ScrollBarAsNeeded);
+                } catch (ePolicy) {
+                }
+                // Enough to show a header plus a row of tiles, so a
+                // folded-open section never collapses to a sliver.
+                scroller.setMinimumHeight(DrawPanel.SECTION_MIN_HEIGHT);
+                inner.addWidget(scroller, 1, 0);
+            } catch (eScroll) {
+                // No scroll area on this bridge: the section still
+                // works, it just cannot be scrolled within its row.
+                problems.push(sections[i].title + " scrolling (" +
+                    eScroll + ")");
+                inner.addWidget(built, 1, 0);
+            }
             section.host.setLayout(inner);
             CsPanel.stackAdd(stack, section, sections[i].title);
             DrawPanel.sections[sections[i].title] = section;
@@ -181,28 +224,28 @@ DrawPanel.buildDock = function(appWin) {
         problems.push("section layout (" + eLayout + ")");
     }
 
-    body.setLayout(layout);
-
-    // THE WHOLE GRID SCROLLS, and it has to. Trace on its own is taller
-    // than a laptop dock, so with three sections the second ROW -- Areas,
-    // spanning the width -- sat below the fold with nothing to reach it:
-    // present, built, and invisible (Nathan, 2026-09-12, who reported the
-    // section "having trouble loading" when it had in fact loaded fine).
-    // Sections carry their own inner scrolls for their tile walls; this
-    // one exists so a row can be reached at all.
-    var scroll = null;
+    // THE ROWS DIVIDE THE DOCK, they do not take their natural height.
+    // Without this a tall first row pushes the second off the bottom --
+    // which is what happened to Areas. Equal stretch on every occupied
+    // row, so three sections mean roughly half the dock each for rows
+    // one and two rather than all of it for row one.
     try {
-        scroll = new QScrollArea();
-        scroll.setWidget(body);
-        scroll.setWidgetResizable(true);
-        scroll.horizontalScrollBarPolicy = Qt.ScrollBarAsNeeded;
-        dock.setWidget(scroll);
-    } catch (eScroll) {
-        // No scroll area on this bridge: the panel still works, and a
-        // caver can drag the dock wider to bring a row into view.
-        problems.push("panel scrolling (" + eScroll + ")");
-        dock.setWidget(body);
+        var spans = CsPanel.gridSpans(stack.sections.length,
+            stack.columns);
+        var stretched = {};
+        for (var sp = 0; sp < spans.length; sp++) {
+            if (stretched[spans[sp].row] === true) {
+                continue;
+            }
+            layout.setRowStretch(spans[sp].row, 1);
+            stretched[spans[sp].row] = true;
+        }
+    } catch (eStretch) {
+        problems.push("row heights (" + eStretch + ")");
     }
+
+    body.setLayout(layout);
+    dock.setWidget(body);
 
     if (problems.length > 0) {
         warning("Draw: this CaveCAD build refused " +
