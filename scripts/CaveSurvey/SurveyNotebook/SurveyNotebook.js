@@ -3806,6 +3806,33 @@ SurveyNotebook.buildDock = function(appWin) {
     // built publishes it here -- the dock is a singleton, so "last" and
     // "the" are the same thing.
     SurveyNotebook.page = w;
+
+    // A RE-SHOWN DOCK RE-READS THE SCANS, the way Sketch Scans already
+    // does with the same signal. Filling only from the menu action's
+    // beginEvent was not enough (Nathan, 2026-09-12: "I have to turn it
+    // off and on again to get it to work"): restoreState can bring this
+    // dock back ALREADY VISIBLE at startup, which is not a toggle and so
+    // never ran the fill -- and the fill it did run was guarded on the
+    // list being empty, so a page left over from another drawing stayed
+    // put. Showing the dock is the moment the caver is about to look, so
+    // that is when the folder is read.
+    //
+    // Wrapped: not every bridge has the signal, and without it the panel
+    // behaves as it did before rather than failing to build.
+    try {
+        dock.visibilityChanged.connect(function(shown) {
+            if (shown !== true) {
+                return;
+            }
+            if (isNull(SurveyNotebook.page) ||
+                    SurveyNotebook.page.scanWanted !== true) {
+                return;
+            }
+            SurveyNotebook.fillScans(SurveyNotebook.page);
+        });
+    } catch (eVis) {
+        w.problems.push("scan pane refresh on show (" + eVis + ")");
+    }
     return dock;
 };
 
@@ -3984,10 +4011,12 @@ SurveyNotebook.prototype.beginEvent = function() {
         // the dock is built during add-on init, before any document --
         // so a pane restored open had nothing to list. Fill it now, on
         // the way to being looked at.
+        // NOT "only if the list is empty" any more. A list left over
+        // from another drawing is full and wrong, which is the case
+        // most worth refilling; and on a bridge without
+        // visibilityChanged this is the only fill there is.
         if (dock.visible === true && !isNull(SurveyNotebook.page) &&
-                SurveyNotebook.page.scanWanted === true &&
-                (isNull(SurveyNotebook.page.scanRows) ||
-                    SurveyNotebook.page.scanRows.length === 0)) {
+                SurveyNotebook.page.scanWanted === true) {
             SurveyNotebook.fillScans(SurveyNotebook.page);
         }
     } catch (e) {
