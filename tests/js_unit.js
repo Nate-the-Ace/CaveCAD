@@ -20897,6 +20897,29 @@ eqs(String(m3empty.triangles.indices.length), "0",
 ok(isFinite(m3empty.bounds.min.x),
     "an empty mesh still answers finite bounds");
 
+// The step table is what the build animation clamps against: how much
+// of each buffer the cave had after its first n+1 legs.
+var m3steps = m3.steps;
+ok(m3steps !== undefined && m3steps.length === m3resolved.legs.length,
+    "one step per leg");
+var m3mono = true;
+for (var sx = 1; sx < m3steps.length; sx++) {
+    if (m3steps[sx].triangleVertices < m3steps[sx - 1].triangleVertices ||
+            m3steps[sx].lineVertices < m3steps[sx - 1].lineVertices) {
+        m3mono = false;
+    }
+}
+ok(m3mono, "the step table never goes backwards");
+eqs(String(m3steps[m3steps.length - 1].triangleVertices),
+    String(m3.triangles.positions.length / 3),
+    "the last step reveals every triangle vertex");
+eqs(String(m3steps[m3steps.length - 1].lineVertices),
+    String(m3.lines.positions.length / 3),
+    "the last step reveals every line vertex");
+ok(typeof m3steps[0].station === "string" && m3steps[0].station !== "",
+    "each step names the station it arrived at");
+eqs(String(m3empty.steps.length), "0", "an empty survey has no steps");
+
 // Rings carry the angle they sat at, which is what lets two rings of
 // different sizes be matched by WHERE the wall was rather than by
 // position in a list.

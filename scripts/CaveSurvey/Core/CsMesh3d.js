@@ -399,6 +399,8 @@ CsMesh3d.loft = function(tri, ringA, ringB, colorA, colorB) {
  *
  * \return {triangles: {positions, normals, colors, indices},
  *          lines:     {positions, colors, indices},
+ *          steps:     [{triangleVertices, lineVertices, station, trip}]
+ *                     one per leg, cumulative -- see below,
  *          bounds:    {min: {x,y,z}, max: {x,y,z}}}
  *
  * WALKS THE SPANNING TREE, not a name order. `resolved.legs` arrives in
@@ -413,6 +415,13 @@ CsMesh3d.loft = function(tri, ringA, ringB, colorA, colorB) {
  * closure joins two stations the tree has already reached by other
  * routes, so lofting it would lay a second surface over passage that is
  * already covered.
+ *
+ * ONE PASS, NOT TWO. The centerline and the shell are emitted together,
+ * leg by leg, so both buffers share an ordering. That is what lets the
+ * build animation reveal them in lockstep by clamping a vertex count,
+ * instead of rebuilding anything: `steps[n]` is how much of each buffer
+ * the cave had after its first n+1 legs, and revealing it is passing
+ * that number to glDrawArrays.
  *
  * THROWS when a station on a plotted leg has no resolved elevation.
  * That is not defensive noise -- a z quietly defaulting to 0 rebases an
@@ -431,7 +440,7 @@ CsMesh3d.build = function(survey, resolved, opts) {
 
     if (survey === null || survey === undefined ||
             resolved === null || resolved === undefined) {
-        return { triangles: tri, lines: lin,
+        return { triangles: tri, lines: lin, steps: [],
                  bounds: { min: { x: 0, y: 0, z: 0 },
                            max: { x: 0, y: 0, z: 0 } } };
     }
@@ -498,26 +507,7 @@ CsMesh3d.build = function(survey, resolved, opts) {
         if (p.z > max.z) { max.z = p.z; }
     };
 
-    // --- the centerline: every leg the network resolved ---
-    for (li = 0; li < resolved.legs.length; li++) {
-        var cl = resolved.legs[li];
-        var ca = requireStation(cl.from);
-        var cb = requireStation(cl.to);
-        if (ca === null || cb === null) {
-            continue;
-        }
-        var colA = colorAt(cl.from, ca);
-        var colB = colorAt(cl.to, cb);
-        var lbase = lin.positions.length / 3;
-        lin.positions.push(ca.x, ca.y, ca.z, cb.x, cb.y, cb.z);
-        lin.colors.push(colA[0], colA[1], colA[2],
-                        colB[0], colB[1], colB[2]);
-        lin.indices.push(lbase, lbase + 1);
-        grow(ca);
-        grow(cb);
-    }
-
-    // --- the surface: one loft per spanning-tree leg ---
+    // --- one walk of the legs ---
     //
     // A station's ring is cached, because most stations are shared by
     // two legs and rebuilding the ring would re-project every splay
@@ -540,51 +530,76 @@ CsMesh3d.build = function(survey, resolved, opts) {
         return ring;
     };
 
+    var steps = [];
+    var noteStep = function(stationName) {
+        steps.push({
+            triangleVertices: tri.positions.length / 3,
+            lineVertices: lin.positions.length / 3,
+            station: stationName,
+            trip: CsMesh3d.tripAt(stationName, survey)
+        });
+    };
+
     for (li = 0; li < resolved.legs.length; li++) {
         var leg = resolved.legs[li];
-        if (leg.kind !== "new") {
-            continue;
-        }
         var a = requireStation(leg.from);
         var b = requireStation(leg.to);
         if (a === null || b === null) {
-            continue;
-        }
-        var along = CsMesh3d.normalize(CsMesh3d.sub(b, a));
-        if (along === null) {
-            // Two stations in the same place: no passage between them
-            // to put a surface on.
-            continue;
-        }
-
-        var dirA = ((counts[leg.from] || 0) >= 3)
-            ? along
-            : CsMesh3d.directionAt(leg.from, legsByStation, resolved);
-        var dirB = ((counts[leg.to] || 0) >= 3)
-            ? along
-            : CsMesh3d.directionAt(leg.to, legsByStation, resolved);
-        if (dirA === null) { dirA = along; }
-        if (dirB === null) { dirB = along; }
-
-        var ringA = ringFor(leg.from, a, dirA);
-        var ringB = ringFor(leg.to, b, dirB);
-        if (ringA.length < 3 || ringB.length < 3) {
-            // Not enough measured wall at one end to make a section.
-            // Drawing something anyway would be drawing a guess.
+            // Still a step, so the table stays aligned with the legs and
+            // a slider position means the same thing as the leg index it
+            // came from.
+            noteStep(leg.to);
             continue;
         }
 
-        CsMesh3d.loft(tri, ringA, ringB,
-            colorAt(leg.from, a), colorAt(leg.to, b));
+        var colA = colorAt(leg.from, a);
+        var colB = colorAt(leg.to, b);
 
-        var gi;
-        for (gi = 0; gi < ringA.length; gi++) { grow(ringA[gi]); }
-        for (gi = 0; gi < ringB.length; gi++) { grow(ringB[gi]); }
+        // --- this leg's centerline ---
+        var lbase = lin.positions.length / 3;
+        lin.positions.push(a.x, a.y, a.z, b.x, b.y, b.z);
+        lin.colors.push(colA[0], colA[1], colA[2],
+                        colB[0], colB[1], colB[2]);
+        lin.indices.push(lbase, lbase + 1);
+        grow(a);
+        grow(b);
+
+        // --- this leg's shell, when it is a spanning-tree leg ---
+        if (leg.kind === "new") {
+            var along = CsMesh3d.normalize(CsMesh3d.sub(b, a));
+            // A null `along` is two stations in the same place: no
+            // passage between them to put a surface on.
+            if (along !== null) {
+                var dirA = ((counts[leg.from] || 0) >= 3)
+                    ? along
+                    : CsMesh3d.directionAt(leg.from, legsByStation, resolved);
+                var dirB = ((counts[leg.to] || 0) >= 3)
+                    ? along
+                    : CsMesh3d.directionAt(leg.to, legsByStation, resolved);
+                if (dirA === null) { dirA = along; }
+                if (dirB === null) { dirB = along; }
+
+                var ringA = ringFor(leg.from, a, dirA);
+                var ringB = ringFor(leg.to, b, dirB);
+                // Fewer than three measured wall points at either end is
+                // not enough for a section, and drawing something anyway
+                // would be drawing a guess.
+                if (ringA.length >= 3 && ringB.length >= 3) {
+                    CsMesh3d.loft(tri, ringA, ringB, colA, colB);
+                    var gi;
+                    for (gi = 0; gi < ringA.length; gi++) { grow(ringA[gi]); }
+                    for (gi = 0; gi < ringB.length; gi++) { grow(ringB[gi]); }
+                }
+            }
+        }
+
+        noteStep(leg.to);
     }
 
     if (!isFinite(min.x)) {
         min = { x: 0, y: 0, z: 0 };
         max = { x: 0, y: 0, z: 0 };
     }
-    return { triangles: tri, lines: lin, bounds: { min: min, max: max } };
+    return { triangles: tri, lines: lin, steps: steps,
+             bounds: { min: min, max: max } };
 };
