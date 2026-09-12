@@ -12868,7 +12868,7 @@ function profileSnapshotLines(built) {
     for (i = 0; i < built.bands.length; i++) {
         b = built.bands[i];
         lines.push("BAND " + i + " key=" + b.key + " tie=" + b.tie +
-            " datum=" + n9(b.datum) + " exag=" + n9(b.exaggeration) +
+            " datum=" + n9(b.datum) +
             " tapeMode=" + b.tapeMode + " parent=" + b.parent +
             " zOffset=" + n9(b.zOffset) + " stopped=" + b.stopped +
             " reason=" + b.stoppedReason +
@@ -12925,7 +12925,7 @@ function profileSnapshotLines(built) {
 // number the change must not move.
 var PROFILE_GEOMETRY_BEFORE_INDEX = [
     "bands=4",
-    "BAND 0 key=A tie=null datum=100.000000000 exag=1.000000000 tapeMode=slope parent=null zOffset=0.000000000 stopped=null reason=null omitted=[]",
+    "BAND 0 key=A tie=null datum=100.000000000 tapeMode=slope parent=null zOffset=0.000000000 stopped=null reason=null omitted=[]",
     "  ST A1 x=0.000000000 y=100.000000000 z=100.000000000",
     "  ST A2 x=9.961946981 y=100.871557427 z=100.871557427",
     "  ST A3 x=19.948242328 y=100.348197865 z=100.348197865",
@@ -12947,7 +12947,7 @@ var PROFILE_GEOMETRY_BEFORE_INDEX = [
     // intended widening rather than a geometry regression hiding in a
     // golden fixture. Any FURTHER movement here is a real change and
     // must be explained, not re-baselined.
-    "BAND 1 key=B tie=A3 datum=100.348197865 exag=1.000000000 tapeMode=slope parent=A zOffset=-26.954744585 stopped=null reason=null omitted=[B7]",
+    "BAND 1 key=B tie=A3 datum=100.348197865 tapeMode=slope parent=A zOffset=-26.954744585 stopped=null reason=null omitted=[B7]",
     "  ST A3 x=0.000000000 y=100.348197865 z=100.348197865",
     "  ST B1 x=6.893654271 y=101.563735109 z=101.563735109",
     "  ST B2 x=14.874166673 y=102.121786899 z=102.121786899",
@@ -12957,7 +12957,7 @@ var PROFILE_GEOMETRY_BEFORE_INDEX = [
     "  LG B2->B3 kind=new (14.874166673,102.121786899)->(22.869293289,101.842590925) shotD=8.000000000",
     "  CEIL[0] (6.893654271,103.858040854) (13.753447333,104.621786899)",
     "  FLOOR[0] (6.893654271,99.269429363) (15.994886013,99.621786899)",
-    "BAND 2 key=C tie=B3 datum=101.842590925 exag=1.000000000 tapeMode=slope parent=B zOffset=-89.622888346 stopped=null reason=null omitted=[]",
+    "BAND 2 key=C tie=B3 datum=101.842590925 tapeMode=slope parent=B zOffset=-89.622888346 stopped=null reason=null omitted=[]",
     "  ST B3 x=0.000000000 y=101.842590925 z=101.842590925",
     "  ST C3 x=15.190740571 y=140.523359562 z=140.523359562",
     "  ST C2 x=25.177035918 y=140.000000000 z=140.000000000",
@@ -12967,7 +12967,7 @@ var PROFILE_GEOMETRY_BEFORE_INDEX = [
     "  LG C2->C1 kind=new (25.177035918,140.000000000)->(35.177035918,140.000000000) shotD=10.000000000",
     "  CEIL[0] (3.570155741,103.533063972) (16.274091012,141.937573125) (25.177035918,141.732050808) (36.462611138,141.532088886)",
     "  FLOOR[0] (-3.570155741,100.152117878) (14.107390130,139.109146000) (25.177035918,138.267949192) (33.891460699,138.467911114)",
-    "BAND 3 key=A4a tie=A4 datum=102.018275077 exag=1.000000000 tapeMode=slope parent=A zOffset=-111.527150619 stopped=null reason=null omitted=[]",
+    "BAND 3 key=A4a tie=A4 datum=102.018275077 tapeMode=slope parent=A zOffset=-111.527150619 stopped=null reason=null omitted=[]",
     "  ST A4 x=0.000000000 y=102.018275077 z=102.018275077",
     "  ST A4a1 x=5.868885604 y=100.770804932 z=100.770804932",
     "  ST A4a2 x=11.854269906 y=100.352266089 z=100.352266089",
@@ -13197,7 +13197,7 @@ var PROFILE_GEOMETRY_BEFORE_INDEX = [
     // back untouched, because CsDraw.survey reuses one across draws and
     // a map built from an earlier `resolved` answering for a later one
     // is a silently wrong profile.
-    var reused = { exaggeration: 1.0 };
+    var reused = {};
     CsProfile.build(bsv, bres, reused);
     ok(reused.legIndex === undefined,
         "build never writes its leg index back onto the caller's opts");
@@ -13513,23 +13513,25 @@ var PROFILE_GEOMETRY_BEFORE_INDEX = [
     eqs(band.legs[0].fromY, band.stations[0].y, "leg 0 fromY matches the anchored datum, not 0");
     eqs(band.legs[0].toY, band.stations[1].y, "leg 0 toY matches its TO station's Y");
 
-    // exaggeration scales about the datum, and leaves X alone
+    // A band's y IS elevation, and its x IS distance along the
+    // passage. Neither is scaled: there is no vertical exaggeration in
+    // this suite.
     var sv2 = CsModel.newSurvey();
     sv2.shots = [shotOf("A1", "A2", 10, 0, -45)];
     var r2 = CsNetwork.resolve(sv2, {});
     var b2 = CsProfile.unrollBand(CsProfile.groupRuns(r2).runs["A"], null, r2,
-        CsProfile.hierarchy(CsProfile.groupRuns(r2), r2),
-        { exaggeration: 2.0 });
-    near(b2.stations[1].y, -7.0710678 * 2.0, 1e-5, "Y doubled");
-    near(b2.stations[1].x, 7.0710678, 1e-5, "X untouched by exaggeration");
+        CsProfile.hierarchy(CsProfile.groupRuns(r2), r2), {});
+    near(b2.stations[1].y, -7.0710678, 1e-5,
+        "Y is the true drop, unscaled");
+    near(b2.stations[1].x, 7.0710678, 1e-5,
+        "X is the true distance along");
 
-    // I4: legs[0].toX/toY must match the ALREADY-exaggerated stations
-    // array exactly -- catches "toY ignoring exaggeration" (toY would
-    // then be the raw, unscaled rise) and "toX multiplied by
-    // exaggeration" (toX would then differ from the un-exaggerated X)
-    // in one comparison each, since stations[] is the trusted value.
-    eqs(b2.legs[0].toX, b2.stations[1].x, "leg 0 toX matches the (unscaled) station X");
-    eqs(b2.legs[0].toY, b2.stations[1].y, "leg 0 toY matches the exaggerated station Y");
+    // I4: legs[0].toX/toY must match the stations array exactly. The
+    // invariant outlives the exaggeration it was written to catch: the
+    // legs and the stations must agree about where a station is,
+    // however either is computed.
+    eqs(b2.legs[0].toX, b2.stations[1].x, "leg 0 toX matches its station's X");
+    eqs(b2.legs[0].toY, b2.stations[1].y, "leg 0 toY matches its station's Y");
 }());
 
 (function() {
@@ -14396,17 +14398,12 @@ var PROFILE_GEOMETRY_BEFORE_INDEX = [
 }());
 
 (function() {
-    // I4: the invariant is now structural, not just documented. A band
-    // built with exaggeration 5 -- its own station Y already scaled up
-    // accordingly -- must scale its wall points the SAME way even when
-    // bandWallRuns is called with a DIFFERENT (or missing) exaggeration
-    // in its own opts; it reads exaggeration/tapeMode off `band` itself
-    // now, not off opts. The rise is real (inc 30, not level) so the
-    // station's own Y is meaningfully amplified by the x5: under the
-    // OLD bug (bandWallRuns re-deriving Y from its own, mismatched
-    // opts.exaggeration default of 1), the ceiling would compute to Y
-    // 9 while the station itself sits at Y 25 -- a ceiling drawn BELOW
-    // its own station, measured exactly as the review reported it.
+    // A CEILING MUST STAY ABOVE ITS OWN STATION. This invariant was
+    // written to catch bandWallRuns re-deriving Y from its own opts
+    // rather than from the band, which once drew a ceiling BELOW the
+    // station it belonged to. The exaggeration that made the bug
+    // visible is gone; the invariant it exposed is not, and it is the
+    // part worth keeping.
     var sv = CsModel.newSurvey();
     var s1 = shotOf("A1", "A2", 10, 0, 30);   // rise = 10*sin(30) = 5
     s1.up = 4;
@@ -14416,20 +14413,16 @@ var PROFILE_GEOMETRY_BEFORE_INDEX = [
     var r = CsNetwork.resolve(sv, {});
     var g = CsProfile.groupRuns(r);
     var band = CsProfile.unrollBand(g.runs["A"], null, r,
-        CsProfile.hierarchy(g, r), { exaggeration: 5 });
-    eqs(band.exaggeration, 5, "fixture assumption: the band records its own exaggeration");
+        CsProfile.hierarchy(g, r), {});
     var a2 = band.stations[1];
-    near(a2.y, band.datum + 5 * 5, 1e-9,
-        "fixture assumption: A2's own Y is scaled by the band's exaggeration");
+    near(a2.y, band.datum + 5, 1e-9,
+        "fixture assumption: A2 sits a true five feet above the datum");
 
-    // opts.exaggeration here is deliberately absent (defaults to 1) --
-    // a mismatch against the band's own 5, on purpose
     var w = CsProfile.bandWallRuns(band, sv, r, {});
-    near(w.ceiling[0][0].y, band.datum + (5 + 4) * 5, 1e-9,
-        "ceiling scales by the BAND's exaggeration (5), not opts' mismatched default (1)");
+    near(w.ceiling[0][0].y, band.datum + 5 + 4, 1e-9,
+        "the ceiling is its station's elevation plus the measured up");
     ok(w.ceiling[0][0].y > a2.y,
-        "the ceiling point stays above its own (already-scaled) station -- " +
-        "a mismatched opts used to be able to put it below");
+        "the ceiling point stays above its own station")
 }());
 
 // ---------------------------------------------------------------------

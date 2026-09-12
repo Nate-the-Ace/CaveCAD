@@ -356,3 +356,30 @@ disappears.
 - Vertical exaggeration applied to sketched linework: a change of
   exaggeration mid-project is a manual retouch, not a migration.
 - Any length heuristic for spur-versus-branch. Naming is the surveyor's.
+
+---
+
+## Superseded 2026-09-12: vertical exaggeration removed
+
+The exaggeration setting, its stamp and the parameter threaded through
+`unrollBand`, `bandWallRuns`, `build` and `CsProfileDraw` are gone.
+
+Nathan's reason, and it is the right one: hand-drawn profiles are not
+vertically exaggerated, and the generated bands should match them. The
+setting defaulted to 1.0 and no drawing these tools have made ever used
+it -- Truitt Cave has none across sixteen bands.
+
+What it cost to keep was worse than what it bought. An exaggerated band
+beside a 1:1 field sketch is two drawings that disagree about vertical
+scale, and every feature reading a band's geometry afterwards -- the
+scan drape into the 3D view, which is what raised this -- had to carry
+the question. A suite with one vertical scale everywhere cannot have
+that class of disagreement at all.
+
+A band's `y` is now simply elevation. `yOf` survives as a function
+rather than becoming a bare `z` at each call site, because that is the
+one place a vertical scale would ever go again.
+
+The loop-closure arrow exaggeration in `CsClosure` is a DIFFERENT thing
+and is untouched: those arrows are exaggerated so a tenth of a foot is
+visible at all, and the caption states the factor.

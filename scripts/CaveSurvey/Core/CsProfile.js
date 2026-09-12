@@ -1505,7 +1505,7 @@ CsProfile.tieLegBetween = function(a, b, resolved, index) {
  * \param hier     CsProfile.hierarchy() result (unused today; passed so
  *                 callers need not special-case, and so a future
  *                 orientation rule has it to hand)
- * \param opts     {exaggeration: number (default 1), tapeMode,
+ * \param opts     {tapeMode,
  *                  adjacency: CsProfile.adjacency(resolved) already
  *                  built -- forwarded to CsProfile.longestChain so
  *                  laying out many bands from the same resolved survey
@@ -1520,14 +1520,12 @@ CsProfile.tieLegBetween = function(a, b, resolved, index) {
  *
  * \return {
  *   key, tie, datum,
- *   exaggeration, tapeMode: the SAME two values `opts` was called with
- *             (defaulted), carried on the band itself rather than left
- *             for a caller to remember and repeat -- CsProfile.
- *             bandWallRuns reads them from here, not from its own
- *             `opts`, so a band's walls can never be scaled against a
- *             different Y than its own stations were built with. See
- *             the review note on bandWallRuns for the bug this closes:
- *             the two used to have to agree by caller discipline alone.
+ *   tapeMode: the SAME value `opts` was called with (defaulted),
+ *             carried on the band itself rather than left for a caller
+ *             to remember and repeat -- CsProfile.bandWallRuns reads it
+ *             from here, not from its own `opts`. See the review note
+ *             on bandWallRuns for the bug that closes: the two used to
+ *             have to agree by caller discipline alone.
  *   stations: [{name, x, y, z}],
  *   legs:     [{shot, from, to, kind, fromX, fromY, toX, toY}] -- kind
  *             is the same "new" | "closure" | "tie" CsNetwork.resolve()
@@ -1547,8 +1545,6 @@ CsProfile.tieLegBetween = function(a, b, resolved, index) {
  */
 CsProfile.unrollBand = function(run, tie, resolved, hier, opts) {
     opts = opts || {};
-    var exag = (opts.exaggeration === undefined ||
-        opts.exaggeration === null) ? 1.0 : opts.exaggeration;
     var tapeMode = opts.tapeMode || CsTraverse.SLOPE;
 
     var found = CsProfile.longestChain(run, resolved, opts.adjacency);
@@ -1636,8 +1632,12 @@ CsProfile.unrollBand = function(run, tie, resolved, hier, opts) {
     // and the main loop below stops at chain[0] itself in the second
     // case, so no station ever gets drawn against a fabricated datum.
     var datum = (chain.length > 0) ? zOf(chain[0]) : null;
+    // A BAND'S Y IS SIMPLY ELEVATION. It stays a function rather than
+    // becoming a bare `z` at every call site because that is the one
+    // place a vertical scale would ever go again, and because every
+    // caller already reads as "the y for this z".
     var yOf = function(z) {
-        return datum + (z - datum) * exag;
+        return z;
     };
 
     var stations = [], legs = [], stopped = null, stoppedReason = null;
@@ -1711,7 +1711,6 @@ CsProfile.unrollBand = function(run, tie, resolved, hier, opts) {
         key: run.key,
         tie: tied ? tie : null,
         datum: datum,
-        exaggeration: exag,
         tapeMode: tapeMode,
         stations: stations,
         legs: legs,
@@ -1879,7 +1878,7 @@ CsProfile.classifySplay = function(shot, deadDeg) {
  *                  legs) already built -- both optional, computed fresh
  *                  when absent; CsProfile.build hoists them once for
  *                  the whole profile (see I2) and hands them down here} --
- *                  exaggeration and tapeMode are NOT read from here:
+ *                  tapeMode is NOT read from here:
  *                  they come off `band` itself (set by the
  *                  CsProfile.unrollBand() call that produced it), so
  *                  this can never scale its wall points against a
@@ -1914,8 +1913,6 @@ CsProfile.bandWallRuns = function(band, survey, resolved, opts) {
     // read off the band, not off `opts` -- see the docblock above and
     // the I4 review note: two independently-defaulted opts objects
     // agreeing was a caller-discipline promise, not a guarantee
-    var exag = (band.exaggeration === undefined ||
-        band.exaggeration === null) ? 1.0 : band.exaggeration;
     var tapeMode = band.tapeMode || CsTraverse.SLOPE;
 
     // I2: CsProfile.build hoists both of these once for the whole
@@ -1932,8 +1929,9 @@ CsProfile.bandWallRuns = function(band, survey, resolved, opts) {
         opts.legCounts : CsLrud.legCounts(resolved.legs);
 
     var datum = band.datum;
+    // Elevation, plainly -- see unrollBand's yOf.
     var yOf = function(z) {
-        return datum + (z - datum) * exag;
+        return z;
     };
 
     var ceilingRuns = [], floorRuns = [], flat = [];
@@ -2426,9 +2424,9 @@ CsProfile.layout = function(bands) {
  * as strictly as the adjacency graph: no caller override, built from
  * THIS call's `resolved`, and never written onto `opts`.
  *
- * The four fields CsProfile.unrollBand reads (exaggeration, tapeMode,
+ * The fields CsProfile.unrollBand reads (tapeMode,
  * adjacency, legIndex) plus the three CsProfile.bandWallRuns reads directly
- * (flatSplayDeg, splaysByStation, legCounts -- it reads exaggeration
+ * (flatSplayDeg, splaysByStation, legCounts -- it reads tapeMode
  * and tapeMode off the BAND itself instead, set by the unrollBand call
  * that produced it; see bandWallRuns' own docblock for why) are copied
  * into one small fixed-shape object built ONCE here and handed to
@@ -2481,7 +2479,7 @@ CsProfile.layout = function(bands) {
  *                        omitted from `undrawn` altogether, so it is
  *                        the fallback, not a missing case.
  *
- * \param opts {exaggeration, flatSplayDeg, tapeMode}
+ * \param opts {flatSplayDeg, tapeMode}
  * \return {
  *   bands: [band] in band order, each an unrollBand result plus
  *          {ceiling, floor, flat, zOffset},
@@ -2505,7 +2503,6 @@ CsProfile.build = function(survey, resolved, opts) {
     // C1/I2: always fresh, from THIS resolved/survey, never taken from
     // the caller -- see the docblock above.
     var bandOpts = {
-        exaggeration: opts.exaggeration,
         tapeMode: opts.tapeMode,
         flatSplayDeg: opts.flatSplayDeg,
         adjacency: CsProfile.adjacency(resolved),
@@ -2726,12 +2723,10 @@ CsProfile.build = function(survey, resolved, opts) {
  * shape and names it as the place to look first if one ever does.
  */
 CsProfile.settings = function() {
-    var auto = true, exag = 1.0, dead = CsProfile.FLAT_SPLAY_DEG;
+    var auto = true, dead = CsProfile.FLAT_SPLAY_DEG;
     var maxStations = CsProfile.AUTO_MAX_STATIONS_DEFAULT;
     try {
         auto = RSettings.getBoolValue("CaveSurvey/ProfileAuto", true);
-        exag = RSettings.getDoubleValue(
-            "CaveSurvey/ProfileVerticalExaggeration", 1.0);
         dead = RSettings.getDoubleValue("CaveSurvey/ProfileFlatSplayDeg",
             CsProfile.FLAT_SPLAY_DEG);
         maxStations = RSettings.getIntValue(
@@ -2740,15 +2735,12 @@ CsProfile.settings = function() {
     } catch (e) {
         // no RSettings (node): the defaults above stand
     }
-    if (!(exag > 0)) {
-        exag = 1.0;   // a zero or negative exaggeration would flatten the cave
-    }
     if (!(dead >= 0)) {
         dead = CsProfile.FLAT_SPLAY_DEG;
     }
     if (!(maxStations > 0)) {
-        // Guards a corrupted/hand-edited ini value the same way exag
-        // and dead do above -- NOT defensive filler. A NaN (a
+        // Guards a corrupted/hand-edited ini value the same way dead
+        // does above -- NOT defensive filler. A NaN (a
         // non-numeric string in the ini file) fails every ">"/">="
         // comparison, so an unguarded gate would silently never fire
         // (every survey looks "under the limit"), and a zero or
@@ -2757,6 +2749,6 @@ CsProfile.settings = function() {
         // honored", so both fall back to the shipped default instead.
         maxStations = CsProfile.AUTO_MAX_STATIONS_DEFAULT;
     }
-    return { auto: auto, exaggeration: exag, flatSplayDeg: dead,
+    return { auto: auto, flatSplayDeg: dead,
         maxStations: maxStations };
 };

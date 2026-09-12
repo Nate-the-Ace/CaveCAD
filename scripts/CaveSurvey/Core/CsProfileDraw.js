@@ -44,7 +44,7 @@ var CsProfileDraw = {};
 CsProfileDraw.TAGS = ["ProfileRun", "ProfileStation", "ProfileShot",
     "ProfileSplay", "ProfileFloorRun", "ProfileCeilingRun",
     "ProfileBandLabel", "ProfileZOffset", "ProfileOrigin",
-    "ProfileExaggerationStamp", "ProfileBox", "ProfileBoxLabel"];
+    "ProfileBox", "ProfileBoxLabel"];
 
 /** Layers the profile writes to, created if the drawing lacks them.
  *  CTRL-PROFILE-LRUD is NOT here -- see the TAGS docblock above;
@@ -499,8 +499,8 @@ CsProfileDraw.labelText = function(band) {
  * geometry is built from, not a drawing-space one.
  *
  * band.stations[0].y when the band drew a first station: true
- * elevation (already exaggerated -- unrollBand's own yOf), the same
- * height the leftmost centerline point sits at.
+ * elevation -- unrollBand's own yOf, which is elevation plainly -- the
+ * same height the leftmost centerline point sits at.
  *
  * 0.0, EXPLICITLY, when it did not (band.stations.length === 0). The
  * tempting shortcut -- `band.datum` -- is null in EXACTLY this case
@@ -690,83 +690,6 @@ CsProfileDraw.positionsOf = function(profile, origin) {
         }
     }
     return out;
-};
-
-/**
- * The exaggeration factor as it is written on the drawing: 2 reads
- * "2x", 1.5 reads "1.5x". Pure.
- *
- * A whole number loses its ".0" -- "2.0x" reads like a measurement to
- * one decimal place, which is not what a factor of two is -- and
- * anything else keeps exactly the digits it needs, trailing zeros
- * trimmed, so 1.50 and 1.5 are the same stamp.
- */
-CsProfileDraw.exaggerationText = function(exag) {
-    var n = Number(exag);
-    if (!isFinite(n)) {
-        return "";
-    }
-    var text;
-    if (Math.abs(n - Math.round(n)) < 1e-9) {
-        text = String(Math.round(n));
-    } else {
-        text = n.toFixed(3).replace(/0+$/, "").replace(/\.$/, "");
-    }
-    return text + "x";
-};
-
-/**
- * The stamp an exaggerated elevation carries, or null when there is
- * nothing to say. Pure -- CsProfileDraw.stamp draws what this returns.
- *
- * WHY IT EXISTS. A vertical exaggeration makes the cave look deeper
- * than it is, and the sheet's own scale bar measures the PLAN. A reader
- * scaling a height off the elevation with that bar gets a wrong number
- * and has nothing in the drawing to tell them so. At 1.0 -- the default
- * -- there is nothing to warn about, and a notice that is always there
- * is one nobody reads, so there is no stamp at all.
- */
-CsProfileDraw.stampText = function(profile) {
-    var bands = (profile && profile.bands) ? profile.bands : [];
-    if (bands.length === 0) {
-        return null;
-    }
-    // Every band is unrolled under the SAME opts.exaggeration
-    // (CsProfile.build passes one value to unrollBand for all of them),
-    // so the first band's factor is the region's factor.
-    var exag = (bands[0].exaggeration === undefined ||
-        bands[0].exaggeration === null) ? 1.0 : Number(bands[0].exaggeration);
-    if (!isFinite(exag) || Math.abs(exag - 1.0) < 1e-9) {
-        return null;
-    }
-    return "Vertical exaggeration " + CsProfileDraw.exaggerationText(exag) +
-        " -- not to sheet scale";
-};
-
-/**
- * Draws the exaggeration stamp, if there is one, into an operation
- * already open. Tagged ProfileExaggerationStamp, which is in
- * CsProfileDraw.TAGS, so erase() takes it with the rest of the
- * generated geometry and a redraw replaces it rather than stacking a
- * second copy on the first.
- *
- * Through CsDraw.addText like every other string this suite draws: the
- * capitalisation is that function's business, at one chokepoint, not
- * something written into the sentence above by hand.
- */
-CsProfileDraw.stamp = function(doc, op, profile, origin, bounds) {
-    var text = CsProfileDraw.stampText(profile);
-    if (text === null || bounds === null) {
-        return null;
-    }
-    var ox = (origin === undefined || origin === null) ? 0 : origin.x;
-    var oy = (origin === undefined || origin === null) ? 0 : origin.y;
-    // Above the region's own top edge, clear of the topmost band
-    // caption (which sits TEXT_HEIGHT * 4 above its band).
-    var pos = new RVector(ox + bounds.minX,
-        oy + bounds.maxY + CsDraw.TEXT_HEIGHT * 7.0);
-    return CsDraw.addText(doc, op, CsLayers.CTRL_PROFILE_TEXT_LABELS, text, pos,
-        RS.HAlignLeft, "ProfileExaggerationStamp", text);
 };
 
 // ---------------------------------------------------------------------
@@ -1349,9 +1272,6 @@ CsProfileDraw.render = function(doc, di, profile, opts) {
         CsProfileDraw.band(doc, di, op, bands[b], counts, origin);
         counts.bandsDrawn++;
     }
-
-    CsProfileDraw.stamp(doc, op, profile, origin,
-        CsProfileDraw.regionBounds(profile));
 
     // The bounding box around each band, with the band's name in its
     // top-left corner -- Nathan's frame bookkeeping (2026-08-28): a
