@@ -220,6 +220,65 @@ ok(waterIds.length === 1 &&
     "CsArea.build: and it really is an RHatchEntity");
 
 // ---------------------------------------------------------------------
+// AC1 (2026-09-12): the Areas panel's Scale box (opts.scale) MULTIPLIES
+// a filled pattern's own catalog patternScale. Before this fix
+// buildHatch never read opts.scale at all, so the Scale box did
+// nothing for water/sump/flowstone/moonmilk -- worse than disabled,
+// because it looked live.
+// ---------------------------------------------------------------------
+
+var sc2Op = new RAddObjectsOperation();
+var sc2Made = CsArea.build(doc, sc2Op, bB, CsArea.CATALOG.SUMP,
+    { id: "area-sc2", seed: 7, scale: 2.0, density: 1.0,
+      layer: CsArea.CATALOG.SUMP.layer });
+di.applyOperation(sc2Op);
+ok(sc2Made.ok === true,
+    "CsArea.build: a filled pattern with opts.scale=2.0 succeeds (" +
+    sc2Made.reason + ")");
+var sc2Ids = CsArea.ownedBy(doc, "area-sc2");
+eqs(sc2Ids.length, 1, "fixture: exactly one hatch to inspect");
+var sc2Hatch = doc.queryEntity(sc2Ids[0]);
+eqs(sc2Hatch.getScale(), CsArea.CATALOG.SUMP.patternScale * 2.0,
+    "CsArea.buildHatch: opts.scale=2.0 produces a hatch scaled to " +
+    "entry.patternScale * 2.0, not entry.patternScale alone");
+eqs(sc2Made.scale, CsArea.CATALOG.SUMP.patternScale * 2.0,
+    "CsArea.build: ... and reports the same effective scale it used, " +
+    "for a caller (CsArea.regenerate) to stamp AreaHatchScale with");
+
+// ---------------------------------------------------------------------
+// AC6: a SCATTER pattern's opts.scale is UNAFFECTED by the above --
+// it still means element size, exactly as before this fix. Only
+// buildHatch's own multiply changed; CsArea.placements/build's scatter
+// branch never touches entry.patternScale (scatter entries do not even
+// have one).
+// ---------------------------------------------------------------------
+
+var scatOp = new RAddObjectsOperation();
+var scatMade = CsArea.build(doc, scatOp, bA, CsArea.CATALOG.SAND,
+    { id: "area-scat2", seed: 11, scale: 2.0, density: 1.0,
+      layer: CsArea.CATALOG.SAND.layer });
+di.applyOperation(scatOp);
+ok(scatMade.ok === true && scatMade.count > 0,
+    "fixture: a scatter fill to check element sizes on (" +
+    scatMade.reason + ")");
+var scatIds = CsArea.ownedBy(doc, "area-scat2");
+var scatOutOfRange = 0;
+var scatMinExpect = 2.0 * CsArea.CATALOG.SAND.scaleMin;
+var scatMaxExpect = 2.0 * CsArea.CATALOG.SAND.scaleMax;
+for (var sci = 0; sci < scatIds.length; sci++) {
+    var scatRef = doc.queryEntity(scatIds[sci]);
+    if (isNull(scatRef)) { continue; }
+    var sx = scatRef.getScaleFactors().x;
+    if (sx < scatMinExpect - 0.001 || sx > scatMaxExpect + 0.001) {
+        scatOutOfRange++;
+    }
+}
+eqs(scatOutOfRange, 0,
+    "CsArea.build: every scattered element's own scale still falls in " +
+    "opts.scale * [scaleMin, scaleMax] -- opts.scale keeps meaning " +
+    "element size for a scatter pattern");
+
+// ---------------------------------------------------------------------
 // filled: the OTHER boundary shape -- a closed SPLINE -- also works.
 // This is the soft spot the plan flagged: addBoundary may refuse a
 // closed spline the way it refuses a whole polyline. It did not here;
@@ -830,6 +889,226 @@ eqs(CsArea.sweep(doc, di), 0,
         "build has actually succeeded");
 
     delete CsArea.CATALOG.GHOST_AREA;
+})();
+
+// =======================================================================
+// Hatch scale/angle: controllable from the panel, and PERSISTENT --
+// through ordinary regeneration AND through CaveCAD's own property
+// editor. Task 14, 2026-09-12 (Nathan): both paths must work, and both
+// must survive a regenerate, which is why this lives right after the
+// freeze tests above rather than beside CsArea.build's own hatch tests
+// near the top of this file -- it is exercising CsArea.regenerate, not
+// CsArea.build in isolation.
+// =======================================================================
+
+var hscCx = lstCx + 1200, hscCy = lstCy;
+var hscMade = AreaFillRun.commit(doc, di, squareStroke(hscCx, hscCy, 5),
+    "SUMP", { scale: 2.0, density: 1.0 });
+ok(hscMade.ok === true,
+    "hatch-scale fixture: a SUMP stroke with the panel's Scale at 2.0 " +
+    "succeeds (" + hscMade.reason + ")");
+var hscBoundary = afBoundaryFor(hscMade.id);
+ok(!isNull(hscBoundary), "hatch-scale fixture: its boundary exists");
+
+/** The one hatch entity owned by the hatch-scale fixture's area, or
+ *  null -- re-fetched every time, never held across a regenerate,
+ *  since a "regenerated" result deletes the old entity and adds a new
+ *  one with a different id (the file header's own FRESH doc.queryEntity
+ *  discipline). */
+function hscHatch() {
+    var ids = CsArea.ownedBy(doc, hscMade.id);
+    if (ids.length !== 1) {
+        return null;
+    }
+    return doc.queryEntity(ids[0]);
+}
+
+var hscExpectScale = CsArea.CATALOG.SUMP.patternScale * 2.0;
+var hscHatch1 = hscHatch();
+ok(!isNull(hscHatch1), "hatch-scale fixture: exactly one hatch exists");
+eqs(hscHatch1.getScale(), hscExpectScale,
+    "AreaFillRun.commit: a stroke drawn with the panel's Scale at 2.0 " +
+    "produces a hatch scaled to entry.patternScale * 2.0, not " +
+    "entry.patternScale alone (acceptance criterion 1)");
+
+// ---------------------------------------------------------------------
+// Acceptance criterion 2: that scale SURVIVES a regeneration -- move
+// the boundary, and the scale is still doubled.
+// ---------------------------------------------------------------------
+
+movedBoundaryBy(hscBoundary, 13, -7);
+eqs(CsArea.regenerate(doc, di, hscBoundary.getId()), "regenerated",
+    "CsArea.regenerate: a moved SUMP boundary is rebuilt");
+var hscHatch2 = hscHatch();
+ok(!isNull(hscHatch2), "fixture: still exactly one hatch after the move");
+eqs(hscHatch2.getScale(), hscExpectScale,
+    "CsArea.regenerate: the doubled scale survives a regeneration " +
+    "(acceptance criterion 2)");
+
+// ---------------------------------------------------------------------
+// Acceptance criterion 3: hand-editing the hatch's scale -- getScale/
+// setScale are RHatchEntity's own direct pass-through to the same
+// RHatchData field CaveCAD's property editor writes through
+// PropertyScaleFactor (RHatchEntity::setProperty, confirmed in
+// cavecad-src) -- and then regenerating KEEPS the hand-set scale
+// rather than reverting it.
+// ---------------------------------------------------------------------
+
+var hscHandScale = 9.5;
+hscHatch2.setScale(hscHandScale);
+var hscSetOp = new RModifyObjectsOperation();
+hscSetOp.addObject(hscHatch2, false);
+di.applyOperation(hscSetOp);
+
+eqs(CsArea.regenerate(doc, di, hscBoundary.getId()), "regenerated",
+    "CsArea.regenerate: a hand-edited hatch scale is treated as a " +
+    "real change, never reported as \"unchanged\"");
+var hscHatch3 = hscHatch();
+ok(!isNull(hscHatch3), "fixture: still exactly one hatch after capture");
+eqs(hscHatch3.getScale(), hscHandScale,
+    "CsArea.regenerate: the hand-set PropertyScaleFactor is KEPT, not " +
+    "reverted to the panel's own scale (acceptance criterion 3)");
+eqs(parseFloat(CsTags.get(doc.queryEntity(hscBoundary.getId()),
+    CsArea.SCALE_KEY)), hscHandScale / CsArea.CATALOG.SUMP.patternScale,
+    "CsArea.regenerate: ... folded back into AreaScale as observed / " +
+    "entry.patternScale, so the NEXT rebuild reproduces it too rather " +
+    "than doubling it again");
+
+// Immediately unchanged -- proves the capture itself is not a float
+// that never quite matches its own last write, the exact freeze family
+// this suite keeps finding new doors for.
+var hscIdsAfterScale = fillIdSig(hscMade.id);
+eqs(CsArea.regenerate(doc, di, hscBoundary.getId()), "unchanged",
+    "CsArea.regenerate: right after capturing a hand-set scale, the " +
+    "very next call is unchanged -- capture does not itself produce a " +
+    "fresh drift on every call");
+eqs(fillIdSig(hscMade.id), hscIdsAfterScale,
+    "CsArea.regenerate: ... and touches not one entity doing it");
+
+// ---------------------------------------------------------------------
+// Acceptance criterion 4: the same for PropertyAngle.
+// ---------------------------------------------------------------------
+
+var hscHandAngle = 1.2345;
+var hscHatch4 = hscHatch();
+hscHatch4.setAngle(hscHandAngle);
+var hscAngleOp = new RModifyObjectsOperation();
+hscAngleOp.addObject(hscHatch4, false);
+di.applyOperation(hscAngleOp);
+
+eqs(CsArea.regenerate(doc, di, hscBoundary.getId()), "regenerated",
+    "CsArea.regenerate: a hand-edited hatch angle is treated as a " +
+    "real change too");
+var hscHatch5 = hscHatch();
+ok(!isNull(hscHatch5),
+    "fixture: still exactly one hatch after angle capture");
+ok(Math.abs(hscHatch5.getAngle() - hscHandAngle) < 1e-9,
+    "CsArea.regenerate: the hand-set PropertyAngle is KEPT (acceptance " +
+    "criterion 4) -- got " + hscHatch5.getAngle());
+eqs(parseFloat(CsTags.get(doc.queryEntity(hscBoundary.getId()),
+    CsArea.ANGLE_KEY)), hscHandAngle,
+    "CsArea.regenerate: ... and stored directly on AreaAngle -- unlike " +
+    "scale, an angle has no catalog baseline to divide out");
+eqs(hscHatch5.getScale(), hscHandScale,
+    "CsArea.regenerate: capturing a new angle does not disturb the " +
+    "scale captured moments ago");
+
+var hscIdsAfterAngle = fillIdSig(hscMade.id);
+eqs(CsArea.regenerate(doc, di, hscBoundary.getId()), "unchanged",
+    "CsArea.regenerate: unchanged again right after the angle capture " +
+    "too");
+eqs(fillIdSig(hscMade.id), hscIdsAfterAngle,
+    "CsArea.regenerate: ... touching nothing");
+
+// ---------------------------------------------------------------------
+// Acceptance criterion 5: the existing freeze guard still holds for an
+// UNTOUCHED filled area -- regenerating it twice more writes nothing
+// and reports "unchanged" both times, same rigor as the SAND freeze
+// test earlier in this file.
+// ---------------------------------------------------------------------
+
+eqs(CsArea.regenerate(doc, di, hscBoundary.getId()), "unchanged",
+    "CsArea.regenerate: an untouched filled area is still recognised " +
+    "as unchanged (acceptance criterion 5)");
+eqs(fillIdSig(hscMade.id), hscIdsAfterAngle,
+    "CsArea.regenerate: ... touching not one entity");
+eqs(CsArea.regenerate(doc, di, hscBoundary.getId()), "unchanged",
+    "CsArea.regenerate: and a further call is just as inert");
+eqs(fillIdSig(hscMade.id), hscIdsAfterAngle,
+    "CsArea.regenerate: so a filled area's freeze cannot run away " +
+    "either, exactly like a scatter area's");
+
+// ---------------------------------------------------------------------
+// Migration (2026-09-12 review): adding ANGLE_KEY to CsArea.signature
+// invalidates every PRE-EXISTING area's stored signature, scatter areas
+// included, because an old boundary has no AreaAngle tag yet. The
+// first regenerate to touch each one after this upgrade must rebuild
+// once (new ids, same seed, same placements) and then go quiet --
+// never rebuild a SECOND time for a reason that never changes again.
+// Proven on a SAND (scatter) fixture on purpose: it is the non-obvious
+// half, since scatter never reads ANGLE_KEY for anything.
+// ---------------------------------------------------------------------
+
+(function() {
+    // afPlanBoundary/afPlanMade (Task 6's own SAND fixture) is used
+    // rather than a brand-new stroke so this cannot be confused with
+    // the ordinary "no signature stamped yet" first-regenerate case
+    // (already covered above) -- it is PRIMED with a real, CURRENT-
+    // format signature first, exactly as a boundary saved under this
+    // very release already has, before the pre-upgrade sig is forced
+    // onto it.
+    var migBoundary = afPlanBoundary;
+    CsArea.regenerate(doc, di, migBoundary.getId());   // establish a
+                                                        // current-format
+                                                        // baseline sig
+    var migVerts = CsArea.vertsOf(migBoundary);
+
+    // The PRE-upgrade signature format, by hand: identical to
+    // CsArea.signature's own five-part join, just without the
+    // ANGLE_KEY segment this task added -- exactly what a real
+    // boundary saved before this upgrade has stamped on it.
+    var migParts = [];
+    for (var mi = 0; mi < migVerts.length; mi++) {
+        migParts.push(Math.round(migVerts[mi].x * 1000) + "," +
+            Math.round(migVerts[mi].y * 1000));
+    }
+    var migOldSig = [
+        CsTags.get(migBoundary, CsArea.PATTERN_KEY),
+        CsTags.get(migBoundary, CsArea.SEED_KEY),
+        CsTags.get(migBoundary, CsArea.SCALE_KEY),
+        CsTags.get(migBoundary, CsArea.DENSITY_KEY),
+        migParts.join(";")
+    ].join("|");
+    ok(migOldSig !== CsArea.signature(migBoundary, migVerts),
+        "migration fixture: the hand-built PRE-upgrade signature really " +
+        "is different from what CsArea.signature computes now -- " +
+        "otherwise this test would prove nothing");
+
+    var migSigOp = new RModifyObjectsOperation();
+    CsTags.set(migBoundary, CsArea.SIG_KEY, migOldSig);
+    migSigOp.addObject(migBoundary, false);
+    di.applyOperation(migSigOp);
+
+    var migIdsBefore = fillIdSig(afPlanMade.id);
+    var migPosBefore = fillPosSig(afPlanMade.id);
+    eqs(CsArea.regenerate(doc, di, migBoundary.getId()), "regenerated",
+        "CsArea.regenerate: a boundary carrying a pre-ANGLE_KEY " +
+        "signature is rebuilt once on its first post-upgrade touch");
+    eqs(fillPosSig(afPlanMade.id), migPosBefore,
+        "CsArea.regenerate: ... at the SAME placements -- the migration " +
+        "rebuild changes ids, never what was actually drawn");
+    ok(fillIdSig(afPlanMade.id) !== migIdsBefore,
+        "CsArea.regenerate: ... though the entities themselves are " +
+        "genuinely new (different ids), which is the whole cost being " +
+        "documented, not a false alarm from this test");
+
+    var migIdsAfter = fillIdSig(afPlanMade.id);
+    eqs(CsArea.regenerate(doc, di, migBoundary.getId()), "unchanged",
+        "CsArea.regenerate: the very next touch is quiet again -- the " +
+        "migration is a ONE-TIME cost, not a standing freeze failure");
+    eqs(fillIdSig(afPlanMade.id), migIdsAfter,
+        "CsArea.regenerate: ... touching not one entity on that second " +
+        "pass");
 })();
 
 // ---------------------------------------------------------------------

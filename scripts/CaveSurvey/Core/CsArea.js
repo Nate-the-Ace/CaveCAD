@@ -461,6 +461,38 @@ CsArea.SCALE_KEY = "AreaScale";
 CsArea.DENSITY_KEY = "AreaDensity";
 CsArea.SEED_KEY = "AreaSeed";
 
+/** A hand-set hatch angle, filled patterns only (2026-09-12). There is
+ *  no catalog-wide "AngleScale" the way SCALE_KEY multiplies
+ *  entry.patternScale -- an angle has no baseline worth multiplying,
+ *  so this holds the caver's override outright, or "" to mean "use
+ *  the catalog's own patternAngle". Never read or written for a
+ *  scatter/tile entry. */
+CsArea.ANGLE_KEY = "AreaAngle";
+
+/**
+ * WHAT WE LAST WROTE, not what a caver may have since changed by hand.
+ * CsArea.buildHatch stamps its own effective scale/angle here every
+ * time it builds a hatch; CsArea.regenerate compares a live hatch
+ * entity's CURRENT RHatchEntity.getScale()/getAngle() against these
+ * two before touching anything, and a mismatch is how it tells "the
+ * caver used the property editor" apart from "this is our own last
+ * output" (2026-09-12 -- Nathan: both the Areas panel's Scale box and
+ * CaveCAD's standard property editor must work AND persist). Without
+ * this pair, a rebuild has no way to distinguish those two cases and
+ * either fights the caver's edit forever or -- if it just stopped
+ * rebuilding filled patterns altogether -- fights nothing at all. */
+CsArea.HATCH_SCALE_KEY = "AreaHatchScale";
+CsArea.HATCH_ANGLE_KEY = "AreaHatchAngle";
+
+/** Below this, a float apart is noise (undo/redo round-trips, DXF
+ *  string round-trips through CsTags), not a caver's edit. Wide
+ *  enough to swallow that noise, tight enough that a real Scale-box or
+ *  property-editor change -- always at least hundredths -- still
+ *  reads as one. The freeze lesson this suite keeps relearning is a
+ *  float that never quite equals its own last write; this is the
+ *  guard against becoming the next one. */
+CsArea.HATCH_EPS = 1e-6;
+
 /** How finely a boundary curve is sampled into a polygon. */
 CsArea.STEP = 0.25;
 
@@ -523,7 +555,12 @@ CsArea.vertsOf = function(entity) {
  * {ok: false, reason} so a caller (the stroke action, the listener) can
  * report it to the caver instead of crashing a transaction.
  *
- * \param opts {id, seed, scale, density, layer}
+ * \param opts {id, seed, scale, density, layer, angle}. `angle` is
+ *        read only by the filled/hatch engine (CsArea.buildHatch) --
+ *        a scatter/tile entry's per-element rotation is entry.rotate,
+ *        untouched by this. Omitted (null/undefined) on every fresh
+ *        stroke; CsArea.regenerate is the only caller that ever passes
+ *        one, carrying a caver's own hand-set hatch angle forward.
  * \param di, when given, lets a CUSTOM pattern's block be imported into
  *        `doc` on demand -- see the missing-block branch below. Built-in
  *        patterns are unaffected whether `di` is given or not: their
@@ -607,14 +644,31 @@ CsArea.build = function(doc, op, boundary, entry, opts, di) {
  * getData().castToShape().clone(). Duck-typed on getVertices rather
  * than the simple.js/library.js global isPolylineEntity, which this
  * Core file has no business assuming is loaded.
+ *
+ * opts.scale MULTIPLIES entry.patternScale (2026-09-12, Nathan): before
+ * this, the Areas panel's Scale spin box was wired to opts.scale but
+ * this function never read it, so the box did nothing for every filled
+ * pattern -- worse than disabling it, because it looked live. "How big
+ * is the texture" now means the same thing for a hatch as it already
+ * does for a scatter's element size. opts.angle, when given, overrides
+ * entry.patternAngle outright -- it carries a caver's own hand-set
+ * angle forward from CsArea.regenerate's capture (see HATCH_SCALE_KEY's
+ * own header); a fresh stroke never sets it, so the catalog angle still
+ * wins there. Returns the EFFECTIVE scale/angle it actually used, so a
+ * caller can stamp AreaHatchScale/AreaHatchAngle and later tell its own
+ * output apart from an edit.
  */
 CsArea.buildHatch = function(doc, op, boundary, entry, opts) {
     if (isNull(entry.pattern)) {
         return { ok: true, count: 0, reason: "" };
     }
-    var data = new RHatchData(entry.solid === true,
-        isNull(entry.patternScale) ? 1.0 : entry.patternScale,
-        isNull(entry.patternAngle) ? 0.0 : entry.patternAngle,
+    var baseScale = isNull(entry.patternScale) ? 1.0 : entry.patternScale;
+    var scaleMul = isNull(opts.scale) ? 1.0 : opts.scale;
+    var effScale = baseScale * scaleMul;
+    var baseAngle = isNull(entry.patternAngle) ? 0.0 : entry.patternAngle;
+    var effAngle = isNull(opts.angle) ? baseAngle : opts.angle;
+
+    var data = new RHatchData(entry.solid === true, effScale, effAngle,
         entry.pattern);
     data.newLoop();
     try {
@@ -636,7 +690,8 @@ CsArea.buildHatch = function(doc, op, boundary, entry, opts) {
     hatch.setLayerId(doc.getLayerId(opts.layer));
     CsTags.set(hatch, CsArea.OWNER_KEY, opts.id);
     op.addObject(hatch, false);
-    return { ok: true, count: 1, reason: "" };
+    return { ok: true, count: 1, reason: "", scale: effScale,
+        angle: effAngle };
 };
 
 /** Every entity id belonging to one area's fill. */
@@ -751,11 +806,32 @@ CsArea.layersFor = function(doc, entry, verts) {
 CsArea.SIG_KEY = "AreaFillSig";
 
 /** A string that changes if and only if a regenerate would produce a
- *  different fill: the boundary's own pattern/seed/scale/density tags,
- *  plus its sampled geometry rounded to a thousandth of a drawing
- *  unit. Float noise from move()/undo/redo must not be mistaken for a
- *  real edit, and a real edit -- even a sub-pixel grip nudge -- must
- *  never be mistaken for none. */
+ *  different fill: the boundary's own pattern/seed/scale/density/angle
+ *  tags, plus its sampled geometry rounded to a thousandth of a
+ *  drawing unit. Float noise from move()/undo/redo must not be
+ *  mistaken for a real edit, and a real edit -- even a sub-pixel grip
+ *  nudge -- must never be mistaken for none. ANGLE_KEY is included for
+ *  the same reason SCALE_KEY already was, even though the one caller
+ *  that ever writes it (CsArea.regenerate's own hatch-drift capture)
+ *  bypasses this signature check entirely on the call that writes it --
+ *  a future caller reading it need not know that.
+ *
+ *  A ONE-TIME MIGRATION COST, accepted (2026-09-12): adding ANGLE_KEY
+ *  to this string changes what every EXISTING area's signature hashes
+ *  to, because an old boundary has no AreaAngle tag yet -- so the very
+ *  first regenerate that touches each boundary after this upgrade
+ *  finds a mismatch, and rebuilds: every one of that area's fill
+ *  entities is deleted and recreated with new ids. This applies to a
+ *  SCATTER area exactly as much as a filled one, even though scatter
+ *  never reads ANGLE_KEY for anything -- the string changed, so the
+ *  compare fails, so it rebuilds once, same seed, same placements
+ *  (CsArea.rng is untouched), just new entity ids and a drawing marked
+ *  modified. Harmless, since a fill is derived and disposable and this
+ *  is exactly what regeneration exists to do -- but real: a caver who
+ *  asks "why did my boulders move" after upgrading has this as the
+ *  answer (they didn't move; their ids did). Every area is quiet again
+ *  -- "unchanged" -- on its second touch. Not worth a version-tagged
+ *  signature to avoid one harmless rebuild. */
 CsArea.signature = function(boundary, verts) {
     var parts = [];
     for (var i = 0; i < verts.length; i++) {
@@ -767,6 +843,7 @@ CsArea.signature = function(boundary, verts) {
         CsTags.get(boundary, CsArea.SEED_KEY),
         CsTags.get(boundary, CsArea.SCALE_KEY),
         CsTags.get(boundary, CsArea.DENSITY_KEY),
+        CsTags.get(boundary, CsArea.ANGLE_KEY),
         parts.join(";")
     ].join("|");
 };
@@ -934,27 +1011,92 @@ CsArea.regenerate = function(doc, di, boundaryId, group, ownedIds,
         return "no-shape";
     }
 
-    var sig = CsArea.signature(boundary, verts);
     var existing = isNull(ownedIds) ? CsArea.ownedBy(doc, areaId) : ownedIds;
+
+    var scale = parseFloat(CsTags.get(boundary, CsArea.SCALE_KEY));
+    if (isNaN(scale)) {
+        scale = 1.0;
+    }
+    var angleTag = CsTags.get(boundary, CsArea.ANGLE_KEY);
+    var angle = angleTag === "" ? null : parseFloat(angleTag);
+
+    // CAPTURE (2026-09-12, Nathan): a caver can select a filled area's
+    // hatch and change PropertyScaleFactor/PropertyAngle in CaveCAD's
+    // own property editor, and it redraws at once -- but the fill is
+    // DERIVED, rebuilt from these very tags on the next regenerate, so
+    // without this the edit would look real for a moment and then
+    // vanish with no warning the instant anything touched the
+    // boundary. Told apart from our OWN last write by comparing the
+    // live hatch's current scale/angle to what CsArea.buildHatch last
+    // stamped (HATCH_SCALE_KEY/HATCH_ANGLE_KEY) -- NOT by comparing to
+    // entry.patternScale/patternAngle, which would also fire on every
+    // ordinary Areas-panel Scale change and fight the caver over which
+    // input wins.
+    //
+    // Deliberately narrow: only filled patterns, only scale and angle.
+    // Pattern name, origin, solid and colour stay derived from the
+    // catalog on purpose -- a caver who wants a different pattern arms
+    // a different tile, not this entity's PropertyPatternName.
+    var captured = false;
+    if (entry.engine === "filled" && !isNull(entry.pattern) &&
+            existing.length === 1) {
+        var liveHatch = doc.queryEntity(existing[0]);
+        if (!isNull(liveHatch) && typeof liveHatch.getScale === "function" &&
+                typeof liveHatch.getAngle === "function") {
+            var wroteScale = parseFloat(
+                CsTags.get(boundary, CsArea.HATCH_SCALE_KEY));
+            var wroteAngle = parseFloat(
+                CsTags.get(boundary, CsArea.HATCH_ANGLE_KEY));
+            var liveScale = liveHatch.getScale();
+            var liveAngle = liveHatch.getAngle();
+            if (!isNaN(wroteScale) &&
+                    Math.abs(liveScale - wroteScale) > CsArea.HATCH_EPS) {
+                var patScale = isNull(entry.patternScale) ?
+                    1.0 : entry.patternScale;
+                if (patScale !== 0) {
+                    // The inverse of buildHatch's own multiply: AreaScale
+                    // is stored as "how much the caver wants on top of
+                    // the catalog's own scale", so a hand-set 4.0 on a
+                    // patternScale-2.0 entry stores 2.0, not 4.0 --
+                    // otherwise the NEXT rebuild would double it again.
+                    scale = liveScale / patScale;
+                    captured = true;
+                }
+            }
+            if (!isNaN(wroteAngle) &&
+                    Math.abs(liveAngle - wroteAngle) > CsArea.HATCH_EPS) {
+                angle = liveAngle;
+                captured = true;
+            }
+            if (captured) {
+                CsTags.set(boundary, CsArea.SCALE_KEY, scale);
+                if (angle !== null) {
+                    CsTags.set(boundary, CsArea.ANGLE_KEY, angle);
+                }
+            }
+        }
+    }
+
+    // Computed AFTER capture, deliberately: signature() reads SCALE_KEY/
+    // ANGLE_KEY straight off `boundary`, so if capture just rewrote
+    // them, this already reflects the caver's edit rather than the
+    // stale tag it would otherwise have hashed.
+    var sig = CsArea.signature(boundary, verts);
     // A pattern with no fill AT ALL (BEDROCK: pattern === null) is
     // correctly zero entities every time -- that must read as
     // "unchanged" too, or this would clear+rebuild nothing, forever,
     // on every transaction that so much as looks at a bedrock boundary.
     var expectZero = entry.engine === "filled" && isNull(entry.pattern);
-    if (sig === CsTags.get(boundary, CsArea.SIG_KEY) &&
+    if (!captured && sig === CsTags.get(boundary, CsArea.SIG_KEY) &&
             (existing.length > 0 || expectZero)) {
         return "unchanged";
     }
 
     var seed = parseFloat(CsTags.get(boundary, CsArea.SEED_KEY));
-    var scale = parseFloat(CsTags.get(boundary, CsArea.SCALE_KEY));
     var density = parseFloat(CsTags.get(boundary, CsArea.DENSITY_KEY));
     if (isNaN(seed)) {
         seed = CsArea.newSeed();   // only for a boundary predating this
     }                               // tag; never re-rolled once present
-    if (isNaN(scale)) {
-        scale = 1.0;
-    }
     if (isNaN(density)) {
         density = 1.0;
     }
@@ -1013,21 +1155,34 @@ CsArea.regenerate = function(doc, di, boundaryId, group, ownedIds,
     var add = new RAddObjectsOperation();
     var built = CsArea.build(doc, add, boundary, entry,
         { id: areaId, seed: seed, scale: scale, density: density,
-          layer: routed.fillLayer }, allowImport === true ? di : null);
+          angle: angle, layer: routed.fillLayer },
+        allowImport === true ? di : null);
     if (built.ok && built.count > 0) {
         grouped(add);
     }
 
     if (!built.ok) {
-        // Do NOT stamp the signature: the boundary is left with no
-        // fill (the old one, if any, is already gone above), and the
-        // next transaction that so much as looks at it must retry the
-        // build rather than reading this as "unchanged" and giving up
-        // on it forever.
+        // Do NOT stamp the signature (or the captured scale/angle,
+        // still sitting unmodified on `boundary` only in this
+        // function's own JS object, never handed to an operation
+        // above): the boundary is left with no fill (the old one, if
+        // any, is already gone above), and the next transaction that
+        // so much as looks at it must retry the build rather than
+        // reading this as "unchanged" and giving up on it forever.
         return "failed:" + built.reason;
     }
 
     CsTags.set(boundary, CsArea.SIG_KEY, sig);
+    // WHAT WE JUST WROTE, so the NEXT regenerate can tell a caver's
+    // property-editor edit apart from this rebuild's own output --
+    // see HATCH_SCALE_KEY's header. Only set for a real hatch
+    // (built.scale undefined for a scatter/tile fill or for BEDROCK's
+    // no-op build); left alone otherwise, same as ANGLE_KEY already
+    // stays "" for every non-filled entry.
+    if (!isNull(built.scale)) {
+        CsTags.set(boundary, CsArea.HATCH_SCALE_KEY, built.scale);
+        CsTags.set(boundary, CsArea.HATCH_ANGLE_KEY, built.angle);
+    }
     var mod = new RModifyObjectsOperation();
     mod.addObject(boundary, false);
     grouped(mod);

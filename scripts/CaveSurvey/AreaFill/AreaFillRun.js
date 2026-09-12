@@ -288,6 +288,14 @@ AreaFillRun.commit = function(doc, di, points, key, opts) {
     var built = CsArea.build(doc, op, boundary, entry,
         { id: id, seed: seed, scale: opts.scale, density: opts.density,
           layer: routed.fillLayer }, di);
+    // WHAT WE JUST WROTE (2026-09-12): a fresh stroke's own baseline,
+    // so the very first regenerate can already tell a property-editor
+    // edit apart from this stroke's own output instead of reading it
+    // as drift on its first look. See CsArea.HATCH_SCALE_KEY's header.
+    if (!isNull(built.scale)) {
+        CsTags.set(boundary, CsArea.HATCH_SCALE_KEY, built.scale);
+        CsTags.set(boundary, CsArea.HATCH_ANGLE_KEY, built.angle);
+    }
     di.applyOperation(op);
 
     return { ok: built.ok, id: id, layer: routed.fillLayer,
