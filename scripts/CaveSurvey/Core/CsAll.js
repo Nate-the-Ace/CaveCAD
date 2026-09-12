@@ -145,8 +145,11 @@ include(includeBasePath + "/CsSymbols.js");
 // layer in both directions) and CsTags (the marker point inside a
 // custom block is a property group).
 include(includeBasePath + "/CsSymbolStore.js");
-// After CsLayers and CsShapeLine: panel tiles are painted from the
-// layer appearance one and the generated ornament of the other.
+// After CsLayers and CsShapeLine (panel tiles are painted from the
+// layer appearance one and the generated ornament of the other), after
+// CsSymbolStore (an Area Fill scatter tile reads block geometry the
+// same way a symbol tile does) and after CsArea, already loaded far
+// above, whose placements() an Area Fill tile actually rolls.
 include(includeBasePath + "/CsTileArt.js");
 // Panel furniture shared by every dock: collapsible sections and
 // the memory of which ones are shut. One copy, so a panel feature

@@ -217,6 +217,311 @@ CsTileArt.penForLayer = function(layerName) {
     return pen;
 };
 
+// ---------------------------------------------------------------------
+// Area Fill previews (Task 10). A tile has to show what THAT pattern
+// puts on the map -- a scatter of picture elements for one, a wash or
+// ruled hatch for the other -- not a single hand-drawn stand-in for
+// both. Everything below degrades to null exactly as the rest of this
+// file does: a caller (AreaFill.tileFor) shows a named placeholder tile
+// rather than no tile.
+// ---------------------------------------------------------------------
+
+/** Every block's shapes, read from the caver's library and the
+ *  template and cached against the files' own modification stamp.
+ *
+ *  NOT SymbolPalette.loadShapes -- that filters to CsSymbolStore.PREFIX
+ *  ("SYM_") blocks only, and half of what a scatter pattern places
+ *  (AREA_PEBBLE, AREA_STIPPLE, AREA_DASH, AREA_CRYSTAL, AREA_BONE) is
+ *  named outside that prefix on purpose (CsArea.CATALOG's own header:
+ *  these are picture elements, not palette symbols). This reads every
+ *  block name the file defines, unfiltered, so both families are found
+ *  from the one open.
+ *
+ *  Cached because a Blocks/Debris/Pebbles/... panel of thirteen tiles,
+ *  several of them scattering dozens of placements each, would
+ *  otherwise reopen the full template DXF hundreds of times building
+ *  one panel -- the exact cost SymbolPalette.loadShapes' own header
+ *  warns against, multiplied by every placement instead of every tile.
+ *
+ *  KEYED BY MTIME+SIZE, not held for the process's whole life: a stale
+ *  cache silently painting yesterday's geometry after a symbol editor
+ *  rewrites one of these files is exactly the kind of landmine this
+ *  suite has stepped on before (the elevation-datum family, the save
+ *  hook that never fired). CaveShelf.mtimeOf's own idiom -- Qt's
+ *  QDateTime.toString() ignores the format string this bridge passes
+ *  it, so the text is whatever Qt's own default is: fine as an
+ *  identity, useless as a parsed date, and the size catches an edit
+ *  landing inside the same second. The cache is keyed on both files'
+ *  stamps at once (customPath is checked first and so answers a
+ *  duplicate block, which means the whole cache has to turn over the
+ *  moment EITHER file changes, not just the one a caller happens to
+ *  care about right now).
+ */
+CsTileArt._blockShapes = null;
+CsTileArt._blockShapesKey = null;
+
+/** The stamp CsTileArt.blockShapes() caches against -- both source
+ *  files' mtime+size, joined. Missing/unreadable reads as "0", the
+ *  same fallback CaveShelf.mtimeOf uses, so a file that comes and goes
+ *  still changes the key rather than throwing. */
+CsTileArt._blockShapesStamp = function() {
+    var places = [CsSymbolStore.customPath(), CsSymbolStore.templatePath()];
+    var parts = [];
+    for (var p = 0; p < places.length; p++) {
+        if (isNull(places[p])) {
+            parts.push("0");
+            continue;
+        }
+        try {
+            var info = new QFileInfo(places[p]);
+            parts.push(info.exists() ?
+                String(info.lastModified().toString()) + ":" + info.size() :
+                "0");
+        } catch (eStamp) {
+            parts.push("0");
+        }
+    }
+    return parts.join("|");
+};
+
+CsTileArt.blockShapes = function() {
+    var stamp = CsTileArt._blockShapesStamp();
+    if (CsTileArt._blockShapes !== null && CsTileArt._blockShapesKey === stamp) {
+        return CsTileArt._blockShapes;
+    }
+    var out = {};
+    var places = [CsSymbolStore.customPath(), CsSymbolStore.templatePath()];
+    for (var p = 0; p < places.length; p++) {
+        if (isNull(places[p])) {
+            continue;
+        }
+        try {
+            if (!new QFileInfo(places[p]).exists()) {
+                continue;
+            }
+        } catch (eEx) {
+            continue;
+        }
+        var di = CsSymbolStore.openOffscreen(places[p]);
+        if (di === null) {
+            continue;
+        }
+        var doc = di.getDocument();
+        var names = doc.getBlockNames();
+        for (var i = 0; i < names.length; i++) {
+            var name = String(names[i]);
+            if (out.hasOwnProperty(name)) {
+                continue;   // the library's copy already answered
+            }
+            var entities = CsSymbolStore.geometryOf(doc, name);
+            var shapes = [];
+            for (var j = 0; j < entities.length; j++) {
+                try {
+                    var got = entities[j].getShapes();
+                    for (var k = 0; k < got.length; k++) {
+                        shapes.push(got[k]);
+                    }
+                } catch (eShape) {
+                }
+            }
+            out[name] = shapes;
+        }
+    }
+    CsTileArt._blockShapes = out;
+    CsTileArt._blockShapesKey = stamp;
+    return out;
+};
+
+/** Forces the next CsTileArt.blockShapes() call to reopen the files,
+ *  regardless of what their mtime+size stamp says.
+ *
+ *  The mtime+size stamp above is the PRIMARY mechanism -- a symbol
+ *  editor rewriting one of these files already invalidates the cache
+ *  on its own, with no caller having to remember to call this. This
+ *  exists only as an explicit escape hatch (a test forcing a reread
+ *  without waiting on a filesystem clock, or a future caller that
+ *  knows something the stamp cannot see, such as a change to a file
+ *  CsSymbolStore reads from a path this function does not check) --
+ *  kept beside the cache it clears so that caller has an obvious place
+ *  to look. */
+CsTileArt.invalidateBlockShapes = function() {
+    CsTileArt._blockShapes = null;
+    CsTileArt._blockShapesKey = null;
+};
+
+/** A small closed square, `feet` across, centred on the origin -- the
+ *  sample boundary a scatter preview rolls its dice against. Square and
+ *  not the caver's real boundary shape: the tile is showing the
+ *  PATTERN, not a boundary this pattern has never seen. */
+CsTileArt.scatterSample = function(feet) {
+    var half = feet / 2;
+    return [
+        { x: -half, y: -half }, { x: half, y: -half },
+        { x: half, y: half }, { x: -half, y: half }
+    ];
+};
+
+/** How big a sample square a scatter tile rolls its dice against, in
+ *  drawing feet, and the fixed seed it rolls them with. FIXED, not
+ *  CsArea.newSeed(): the tile is a picture of the PATTERN, not of any
+ *  one caver's boundary, and a caver comparing "Blocks" against
+ *  "Debris" tiles must see two different densities, never two random
+ *  draws of a dice neither tile is actually armed with. */
+CsTileArt.SCATTER_SAMPLE_FEET = 20;
+CsTileArt.SCATTER_SEED = 424242;
+
+/**
+ * The tile for a SCATTER pattern: CsArea.placements run for real, over
+ * the fixed sample square above, painted with each placed block's own
+ * geometry at its rolled position, scale and angle.
+ *
+ * THE GENERATOR'S OWN OUTPUT, not a stand-in for it -- change the
+ * density or the scale range in CsArea.CATALOG tomorrow and this tile
+ * changes with it, the same promise FeatureTrace.iconForStyle makes for
+ * a shaped line's ornament.
+ */
+CsTileArt.iconOfScatter = function(entry, size, pen) {
+    var verts = CsTileArt.scatterSample(CsTileArt.SCATTER_SAMPLE_FEET);
+    var places = CsArea.placements(verts, entry, CsTileArt.SCATTER_SEED,
+        1.0, 1.0);
+    if (places.length === 0) {
+        return null;
+    }
+    var shapesByBlock = CsTileArt.blockShapes();
+    var clouds = [];
+    for (var i = 0; i < places.length; i++) {
+        var shapes = shapesByBlock[places[i].block];
+        if (isNull(shapes) || shapes.length === 0) {
+            continue;   // this drawing has no such block -- skip it,
+        }                // never let one missing block blank the tile
+        var raw = CsTileArt.cloudsOfShapes(shapes);
+        var cos = Math.cos(places[i].angle), sin = Math.sin(places[i].angle);
+        for (var c = 0; c < raw.length; c++) {
+            var cloud = [];
+            for (var p = 0; p < raw[c].length; p++) {
+                // Scale then rotate then translate -- the same order
+                // RBlockReferenceData applies a block reference in, so
+                // the tile's placement matches what CsArea.build would
+                // actually draw for these same rolled numbers.
+                var px = raw[c][p].x * places[i].scale;
+                var py = raw[c][p].y * places[i].scale;
+                cloud.push({
+                    x: places[i].x + px * cos - py * sin,
+                    y: places[i].y + px * sin + py * cos
+                });
+            }
+            clouds.push(cloud);
+        }
+    }
+    return CsTileArt.iconOfClouds(clouds, size, pen);
+};
+
+/**
+ * The tile for a FILLED pattern: the pattern's own look, painted
+ * directly rather than through a rendered RHatchEntity -- this bridge
+ * has no offscreen render path for a hatch entity the way it does for
+ * an RShape's point cloud, so the fill is drawn the way a caver would
+ * describe it rather than the way QCAD's hatch renderer would.
+ *
+ *   SOLID (WATER)         a flat wash filling the frame.
+ *   a named .pat pattern  a few ruled lines at the pattern's own angle
+ *                         -- "hatched", not a literal ansi31/dots tile,
+ *                         which is close enough at 30px and exactly as
+ *                         far as CsArea.CATALOG's own patternAngle goes.
+ *   null (BEDROCK)        an empty framed square: BEDROCK draws no fill
+ *                         at all, only its boundary (CsArea.buildHatch's
+ *                         own early return), and the tile says so by
+ *                         drawing nothing but the edge.
+ */
+CsTileArt.iconOfFilled = function(entry, size, pen) {
+    var pixmap = new QPixmap(size, size);
+    pixmap.fill(new QColor(0, 0, 0, 0));
+    var painter = new QPainter();
+    painter.begin(pixmap);
+    // THE WHOLE PAINT BODY IS ONE TRY. iconOfClouds wraps its own body
+    // the same way and for the same reason: painter.begin() was already
+    // called above, and if any draw call between here and end() throws,
+    // an unmatched begin() leaves this QPainter open. The NEXT tile's
+    // painter.begin() can then fail too on this bridge -- one bad
+    // pattern would otherwise take out every tile painted after it in
+    // the same panel build, not just its own.
+    try {
+        try {
+            painter.setRenderHint(QPainter.Antialiasing, true);
+        } catch (eHint) {
+        }
+        var color = (isNull(pen) || isNull(pen.color)) ?
+            new QColor(30, 30, 30) : pen.color;
+        var qpen = new QPen(color);
+        qpen.setWidth((isNull(pen) || isNull(pen.width)) ? 1 : pen.width);
+        painter.setPen(qpen);
+
+        var m = CsTileArt.MARGIN;
+        var inner = size - 2 * m;
+        try {
+            painter.setClipRect(m, m, inner, inner);
+        } catch (eClip) {
+            // an unclipped tile still frames correctly; only a hatch
+            // pattern's lines might overrun the border by a hair
+        }
+
+        if (isNull(entry.pattern)) {
+            painter.drawRect(m, m, inner, inner);
+        } else if (entry.solid === true) {
+            painter.fillRect(m, m, inner, inner, color);
+            painter.drawRect(m, m, inner, inner);
+        } else {
+            painter.drawRect(m, m, inner, inner);
+            var angle = isNull(entry.patternAngle) ? 0.0 : entry.patternAngle;
+            var spacing = Math.max(3, Math.round(size / 7));
+            var cos = Math.cos(angle), sin = Math.sin(angle);
+            var cx = size / 2, cy = size / 2;
+            var half = inner;   // generous: overrun is clipped above
+            var count = Math.ceil((inner * 1.5) / spacing);
+            for (var i = -count; i <= count; i++) {
+                var offset = i * spacing;
+                painter.drawLine(
+                    cx - cos * half + sin * offset,
+                    cy - sin * half - cos * offset,
+                    cx + cos * half + sin * offset,
+                    cy + sin * half - cos * offset);
+            }
+        }
+    } catch (ePaint) {
+        try {
+            painter.end();
+        } catch (eEnd) {
+        }
+        return null;
+    }
+
+    painter.end();
+    return new QIcon(pixmap);
+};
+
+/**
+ * A pattern's tile -- generated from the same geometry (or the same
+ * painted look, for a filled pattern) the real fill uses.
+ *
+ * \return a QIcon, or null when the pattern's own placements/blocks
+ *         could not be resolved or this build's painter refuses --
+ *         either way the caller falls back to a named placeholder tile,
+ *         never to a missing button.
+ */
+CsTileArt.iconOfFill = function(entry, size, pen) {
+    if (isNull(entry)) {
+        return null;
+    }
+    try {
+        if (entry.engine === "scatter") {
+            return CsTileArt.iconOfScatter(entry, size, pen);
+        }
+        return CsTileArt.iconOfFilled(entry, size, pen);
+    } catch (e) {
+        return null;
+    }
+};
+
 /**
  * A gentle S-curve through a box `feet` across, as {x, y} points.
  *

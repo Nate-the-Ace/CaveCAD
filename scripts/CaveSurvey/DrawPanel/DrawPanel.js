@@ -66,6 +66,7 @@ include("scripts/simple.js");
 include(includeBasePath + "/../Core/CsAll.js");
 include(includeBasePath + "/../FeatureTrace/FeatureTrace.js");
 include(includeBasePath + "/../SymbolPalette/SymbolPalette.js");
+include(includeBasePath + "/../AreaFill/AreaFill.js");
 
 var csDrawPanelDock;
 
@@ -91,6 +92,7 @@ DrawPanel.COLUMNS = 2;
 
 DrawPanel.SEC_TRACE = "Trace";
 DrawPanel.SEC_SYMBOLS = "Symbols";
+DrawPanel.SEC_AREAS = "Areas";
 
 /** The built sections by title, so `featuretrace` and `symbolpalette`
  *  can unfold the half they name. */
@@ -123,17 +125,20 @@ DrawPanel.buildDock = function(appWin) {
 
     // EACH PANEL BUILDS ITS OWN BODY, into this one's cell. Nothing is
     // reimplemented here: the tiles, the search, the recent strip and
-    // every trap they cost are the ones those two files already carry.
+    // every trap they cost are the ones those files already carry.
     //
-    // TASK 10 ADDS "Areas" HERE, as a third entry -- its own include(),
-    // its own try/catch, nothing else in this function changes: the
-    // grid, the stack and applyOrder below already know how to place a
-    // third section.
+    // "Areas" (Task 10) is the third entry, added the way the plan
+    // called for -- its own include() up top, its own try/catch below --
+    // and nothing else in this function changed to fit it: the grid,
+    // the stack and applyOrder already knew how to place a third
+    // section, and now do.
     var sections = [
         { title: DrawPanel.SEC_TRACE,
           build: function(parent) { return FeatureTrace.buildBody(parent); } },
         { title: DrawPanel.SEC_SYMBOLS,
-          build: function(parent) { return SymbolPalette.buildBody(parent); } }
+          build: function(parent) { return SymbolPalette.buildBody(parent); } },
+        { title: DrawPanel.SEC_AREAS,
+          build: function(parent) { return AreaFill.buildBody(parent); } }
     ];
     var problems = [];
     for (var i = 0; i < sections.length; i++) {
@@ -274,7 +279,11 @@ DrawPanel.init = function(basePath) {
         "trace features and shaped lines, place symbols"));
     // "ft" and "sym" still work, because a caver who has typed them for
     // a year should not have to learn that they now mean the same door.
-    action.setDefaultCommands(["draw", "ft", "sym"]);
+    // "area" is new with the Areas section (Task 10) -- AreaFill.init
+    // registers it too, its own RGuiAction, the same way "ft" and "sym"
+    // are FeatureTrace's and SymbolPalette's own commands as well as
+    // Draw's.
+    action.setDefaultCommands(["draw", "ft", "sym", "area"]);
     action.setGroupSortOrder(452);
     action.setSortOrder(10);
     action.setWidgetNames(["CaveSurveyMenu", "CaveSurveyToolBar"]);

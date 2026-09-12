@@ -48,14 +48,7 @@ WIDGET_NAMES = ["CaveSurveyMenu", "CaveSurveyToolBar"]
 
 # A folder is a TOOL if and only if it contains <Folder>.js. Folders
 # without one are libraries (Core/) and are never init'd by QCAD.
-#
-# AreaFill is temporarily here too: Task 6 of the area-fill plan adds
-# AreaFill/AreaFillRun.js (the stroke action) and Task 7 will add
-# AreaFillListener.js, but the panel that makes this a real TOOL --
-# AreaFill/AreaFill.js -- does not land until Task 10. Remove this
-# entry when that file exists; until then the folder is honestly a
-# library, not a mistyped tool.
-LIBRARY_DIRS = {"Core", "Templates", "AreaFill"}
+LIBRARY_DIRS = {"Core", "Templates"}
 
 
 def all_dirs():
@@ -422,6 +415,7 @@ class TestAddonLayout(unittest.TestCase):
     OFF_MENU = {
         "FeatureTrace": "its panel is a section of Draw",
         "SymbolPalette": "its panel is a section of Draw",
+        "AreaFill": "its panel is a section of Draw",
     }
 
     def test_tools_are_registered_on_the_menu_and_toolbar(self):
@@ -1625,7 +1619,7 @@ MENU = {
     "ExportCaveSurvey/ExportCaveSurvey.js": (451, 30, ["exportcavesurvey", "ecs"]),
     "LoopErrors/LoopErrors.js":           (451, 40, ["looperrors", "le"]),
     # 452 -- draw the map
-    "DrawPanel/DrawPanel.js":             (452, 10, ["draw", "ft", "sym"]),
+    "DrawPanel/DrawPanel.js":             (452, 10, ["draw", "ft", "sym", "area"]),
     "ShapedLines/ShapedLines.js":         (452, 20, ["shapedlines", "shl"]),
     "ScatterBreakdown/ScatterBreakdown.js": (452, 30, ["scatterbreakdown", "scb"]),
     "CrossSection/CrossSection.js":       (452, 40, ["crosssection", "cxs"]),
@@ -1878,8 +1872,8 @@ class TestSheetFileGuard(unittest.TestCase):
 
     # Tools that modify the drawing, and so must refuse a sheet.
     MUST_GUARD = [
-        "BuildLegend", "Callout", "CrossSection", "DrawPanel", "FeatureTrace",
-        "GenerateProfile", "ImportCaveSurvey", "LoopErrors",
+        "AreaFill", "BuildLegend", "Callout", "CrossSection", "DrawPanel",
+        "FeatureTrace", "GenerateProfile", "ImportCaveSurvey", "LoopErrors",
         "RepairDrawing", "ScatterBreakdown", "ShapedLines",
         "SketchScans", "SurfaceData", "SurveyNotebook", "SymbolPalette",
     ]
