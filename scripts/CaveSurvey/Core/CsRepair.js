@@ -45,6 +45,16 @@ CsRepair.run = function(doc, di, opts) {
         lines.push(qsTr("Survey data: skipped."));
     }
 
+    if (opts.relinkScans !== false) {
+        var rl = CsScanRelink.run(doc, di);
+        lines.push(CsScanRelink.summary(rl));
+        if (rl.relinked > 0) {
+            changed = true;
+        }
+    } else {
+        lines.push(qsTr("Scan images: skipped."));
+    }
+
     if (opts.restyle !== false) {
         var s = CsRestyle.ensureAndApply(doc, di);
         if (s.changed.length === 0 && s.added === 0) {

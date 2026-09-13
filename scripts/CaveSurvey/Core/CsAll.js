@@ -105,6 +105,7 @@ include(includeBasePath + "/CsRestyle.js");
 include(includeBasePath + "/CsRebuild.js");
 include(includeBasePath + "/CsCalloutSync.js");
 // After CsRebuild, CsCalloutSync and CsRestyle: CsRepair calls all three.
+include(includeBasePath + "/CsScanRelink.js");
 include(includeBasePath + "/CsRepair.js");
 include(includeBasePath + "/CsBackup.js");
 include(includeBasePath + "/CsTrace.js");

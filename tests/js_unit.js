@@ -275,6 +275,10 @@ var CORE_FILES_NOT_LOADED = [
     // which this file's own loadRepoScript cannot pull in the same way
     // CsAll.js's include() does. Covered by tests/callout_sync.js.
     "scripts/CaveSurvey/Core/CsCalloutSync.js",
+    // Every function takes a real RDocument and an RImageEntity, whose
+    // file property is the whole point. Covered by
+    // tests/repair_drawing_run.js.
+    "scripts/CaveSurvey/Core/CsScanRelink.js",
     // Thin orchestration over CsRebuild/CsRestyle/CsCalloutSync, all
     // three of which need a real document. Covered by
     // tests/repair_drawing_run.js.
