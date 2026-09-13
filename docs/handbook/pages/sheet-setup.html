@@ -1,0 +1,23 @@
+<h1>Sheet Setup</h1>
+<p>A docked palette for building a sheet, and a rough picture of it before you commit. <code>sheet</code></p>
+<h2>When you reach for it</h2>
+<p>When the map is drawn and has to become paper.</p>
+<h2>Steps</h2>
+<ol>
+<li>Pick the paper. ANSI and ARCH first, ISO A4 to A0 after.</li>
+<li>Take the proposed scale or change it. It offers the most detailed standard plot scale the plan fits at. Scales run <code>1" = 10 ft</code> up to <code>1" = 500 ft</code>, then the metric ratios <code>1:100</code> to <code>1:2000</code>. A metric sheet gets a bar counted in <b>metres</b> and captioned with its ratio.</li>
+<li>Tick what goes on the sheet: border, scale bar, north arrow, title block, and the extended elevation on a second sheet. The preview redraws as you tick — the paper, the cave's footprint on it, the furniture, and where the elevation bands land.</li>
+<li><b>Build Sheet</b> writes it. <b>One sheet per file</b>: <code>&lt;Cave&gt; Plan Sheet.dxf</code>, and <code>&lt;Cave&gt; Profile Sheet.dxf</code> when the elevation is ticked.</li>
+</ol>
+<h2>Scanned sketches never reach a sheet</h2>
+<p>Not a checkbox, a rule. A scanned page is a tracing reference; everything worth keeping off it has already been traced. On a plotted sheet it is a photograph of somebody's handwriting printed under the map. The rule is the entity, not the layer, so a sheet carries no raster at all — the aerial photograph included.</p>
+<h2>When it refuses</h2>
+<ul>
+<li>It says plainly when something is off the paper, and <i>which</i> thing.</li>
+<li>Unticking the elevation removes it from the sheet rather than leaving it unplaced — it would otherwise sit a thousand feet below the plan, outside the border.</li>
+</ul>
+<h2>See also</h2>
+<ul>
+<li><a href="build-legend.html">Build Legend</a></li>
+<li><a href="check-map.html">Check Map</a> — run it before you build the sheet</li>
+</ul>

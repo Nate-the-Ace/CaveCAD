@@ -71,6 +71,12 @@ printf '%s\n' "$VERSION" > "$STAGE/CaveSurvey/VERSION"
 mkdir -p "$STAGE/templates" "$STAGE/examples" "$STAGE/docs"
 cp "$REPO/templates/"*.dxf "$STAGE/templates/"
 
+# the handbook ships INSIDE the add-on for the same reason the templates
+# do: CsHandbook.rootPath() finds it beside itself with nothing to
+# configure, and a student's install is one folder either way.
+mkdir -p "$STAGE/CaveSurvey/Handbook"
+cp -R "$REPO/docs/handbook/." "$STAGE/CaveSurvey/Handbook/"
+
 # the NSS templates also ship INSIDE the add-on: the default-new hook
 # (CaveTemplate) finds them beside itself, nothing to configure
 mkdir -p "$STAGE/CaveSurvey/Templates"

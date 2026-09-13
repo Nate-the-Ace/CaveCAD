@@ -1006,6 +1006,7 @@ SketchScans.buildDock = function(appWin) {
 
     body.setLayout(layout);
     dock.setWidget(body);
+    CsPanel.attachHelp(dock, "SketchScans", qsTr("Sketch Scans"));
     SketchScans.w = w;
     // Nothing is selected yet, so nothing is placeable yet.
     SketchScans.updateTrimGate();

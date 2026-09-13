@@ -239,6 +239,7 @@ DrawPanel.buildDock = function(appWin) {
 
     body.setLayout(layout);
     dock.setWidget(body);
+    CsPanel.attachHelp(dock, "DrawPanel", qsTr("Draw"));
 
     if (problems.length > 0) {
         warning("Draw: this CaveCAD build refused " +

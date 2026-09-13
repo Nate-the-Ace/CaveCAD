@@ -899,3 +899,89 @@ CsPanel.tipHtml = function(title, help, detail) {
     }
     return parts.join("<br><br>");
 };
+
+/**
+ * The small `?` a panel puts in its header, wired to the handbook.
+ *
+ * ONE HELPER, NOT ONE PER PANEL. A panel feature written twice drifts:
+ * the fold headers and the scan browser are here for the same reason,
+ * and a ? that is a different size or opens a different way on each
+ * panel teaches a student that the suite is several programs.
+ *
+ * The press opens the Handbook dock at the page documenting `folder`
+ * (a tool folder name, "FeatureTrace"), or at the contents when that
+ * tool has no page -- a parked tool has none by design, and a panel
+ * whose ? did nothing at all would read as broken.
+ *
+ * Returns null when this build has no Handbook tool, so a caller can
+ * simply not add the button. Panels must tolerate that: the handbook
+ * is a separate tool folder and a stripped build may not carry it.
+ *
+ * \param folder the tool folder the panel belongs to
+ * \param label  what the page is called, for the tooltip
+ */
+CsPanel.helpButton = function(folder, label) {
+    if (typeof(Handbook) === "undefined") {
+        return null;
+    }
+    var button = new QPushButton("?");
+    button.toolTip = qsTr("What this panel is for, and how to use it: " +
+        "opens the handbook at ") + String(label) + ".";
+    button.flat = true;
+    try {
+        button.setMaximumWidth(22);
+        button.setMaximumHeight(22);
+    } catch (eSize) {
+        // a bridge without the setters gets a full-sized button, which
+        // is ugly and still opens the right page
+    }
+    button.clicked.connect(function() {
+        try {
+            var page = CsHandbook.forTool(folder);
+            Handbook.open(page);
+            if (page === null) {
+                Handbook.showContents();
+            }
+        } catch (e) {
+            // the handbook refusing to open must never take the panel
+            // that hosts the button down with it
+        }
+    });
+    return button;
+};
+
+/**
+ * Put the `?` in a panel's top-right corner.
+ *
+ * One line at the end of a buildDock, rather than a header row every
+ * panel builds for itself: the button then sits in the same place, the
+ * same size, on every panel in the suite -- and a panel that grows a
+ * header of its own later does not have to remember to keep it.
+ *
+ * `dock` is the QDockWidget, whose widget's layout the row goes into at
+ * the top. A bridge that will not insert at the top gets it at the
+ * bottom, which is worse and still works; a bridge with no Handbook
+ * tool gets nothing at all.
+ *
+ * \return the button, or null when nothing was attached
+ */
+CsPanel.attachHelp = function(dock, folder, label) {
+    var button = CsPanel.helpButton(folder, label);
+    if (button === null) {
+        return null;
+    }
+    try {
+        var layout = dock.widget().layout();
+        var row = new QHBoxLayout();
+        row.addStretch(1);
+        row.addWidget(button, 0, 0);
+        try {
+            layout.insertLayout(0, row);
+        } catch (eInsert) {
+            layout.addLayout(row, 0);
+        }
+    } catch (e) {
+        return null;
+    }
+    return button;
+};

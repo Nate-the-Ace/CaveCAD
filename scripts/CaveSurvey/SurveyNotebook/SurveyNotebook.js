@@ -3658,6 +3658,7 @@ SurveyNotebook.buildDock = function(appWin) {
 
     body.setLayout(layout);
     dock.setWidget(body);
+    CsPanel.attachHelp(dock, "SurveyNotebook", qsTr("Survey Notebook"));
 
     // ---- wiring ----------------------------------------------------
     {

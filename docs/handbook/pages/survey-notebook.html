@@ -1,0 +1,28 @@
+<h1>Survey Notebook</h1>
+<p>A docked notes page for typing a trip's shots in, with the scanned field book beside it. <code>snb</code></p>
+<h2>When you reach for it</h2>
+<p>Every time shots come out of a cave. This is where survey data enters a drawing, and where a trip is corrected afterwards.</p>
+<h2>Steps</h2>
+<ol>
+<li>Open the panel and type the shot ladder: station names, distance, azimuth, inclination, LRUD, and the note in the margin.</li>
+<li>Press <b>Scan</b> to put the page you are typing off <i>under</i> the ladder in the same dock, on a splitter you drag. Under rather than beside, because a shot row is wide and squeezing it is what costs you a wrong number.</li>
+<li>Watch closures, stats and warnings update as you type.</li>
+<li><b>Draw</b> writes it into the drawing in one undo step. Adding a trip redraws only that trip; anything that moves existing stations — a corrected declination, a re-closed loop — takes the full redraw. <b>Redraw All</b> in the <b>...</b> menu forces it.</li>
+</ol>
+<h2>Declination</h2>
+<p>The Notebook owns it: estimate declination from the survey date and the cave's location (IGRF), pin that location to a station as the drawing's geo anchor, and correct a trip's declination after the fact — the drawing rotates around the fix.</p>
+<h2>Correcting a trip</h2>
+<p><b>Load from drawing</b> revises <i>that</i> trip by identity, so fixing its date or team does not fork a duplicate. <b>Edit this trip...</b> in the <b>...</b> menu is the narrower correction: name, date, team, instruments, with nothing moved and no redraw. Declination is not among them — changing it rotates the plan, so it stays in Declination.</p>
+<h2>Try it on Truitt</h2>
+<p>Open the <b>...</b> menu, <b>Edit this trip...</b>, and correct a trip's date. Then check the trip count is unchanged: not forking a duplicate is the whole reason that path exists.</p>
+<h2>When it refuses</h2>
+<ul>
+<li><b>Delete...</b> refuses outright when a later trip ties into a station only this one reaches — that trip would be left with nowhere to start.</li>
+<li>Deleting asks separately what to do with linework bound to the trip, and leaves it unbound by default.</li>
+</ul>
+<h2>See also</h2>
+<ul>
+<li><a href="import-cave-survey.html">Import Cave Survey</a></li>
+<li><a href="loop-errors.html">Loop Errors</a></li>
+<li><a href="sketch-scans.html">Sketch Scans</a></li>
+</ul>

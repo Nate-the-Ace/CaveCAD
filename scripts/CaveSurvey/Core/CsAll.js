@@ -208,3 +208,7 @@ include(includeBasePath + "/CsSheetFile.js");
 // After CsModel, CsTraverse, CsProfile and (optionally) CsRevise --
 // CsContrib calls ensureTrips, offset, groupRuns and tripLabel.
 include(includeBasePath + "/CsContrib.js");
+
+// Depends on nothing in this library: the handbook's index and page
+// lookups read files beside the add-on, not the drawing.
+include(includeBasePath + "/CsHandbook.js");

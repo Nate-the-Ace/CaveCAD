@@ -120,6 +120,7 @@ CheckMap.buildDock = function(appWin) {
 
     body.setLayout(layout);
     dock.setWidget(body);
+    CsPanel.attachHelp(dock, "CheckMap", qsTr("Check Map"));
     CheckMap.widgets = w;
 
     w.list.itemSelectionChanged.connect(function() {

@@ -126,6 +126,7 @@ SectionBayPanel.ensureDock = function() {
 
     body.setLayout(layout);
     dock.setWidget(body);
+    CsPanel.attachHelp(dock, "CrossSection", qsTr("Cross Section"));
     appWin.addDockWidget(Qt.RightDockWidgetArea, dock);
     dock.visible = false;
 

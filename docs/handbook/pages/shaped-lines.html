@@ -1,0 +1,27 @@
+<h1>Shaped Lines</h1>
+<p>Cave-map line symbology as real, self-maintaining geometry. <code>shl</code></p>
+<h2>When you reach for it</h2>
+<p>For the six NSS line symbols: Floor Ledge (<code>lgf</code>), Ceiling Ledge (<code>lgc</code>), Pit (<code>pte</code>), Flowstone (<code>fst</code>), Rimstone Dam (<code>rst</code>), Slope (<code>slp</code>). They are drawn from the <b>Shaped Lines</b> group in the Feature Trace panel.</p>
+<h2>Steps</h2>
+<ol>
+<li>Arm the symbol, then drag along the edge.</li>
+<li>Release, and the feature follows your cursor until you <b>click the side the ornament goes on</b> — hachures on the down side, scallops bowing downslope, slope fans splaying downhill.</li>
+<li>Edit the line afterwards with QCAD's own tools; the ornament follows.</li>
+<li>A stroke continuing your last shaped line of the same style grows it, spine and ornament together, on one undo, with the side inherited.</li>
+</ol>
+<p>The same buttons work in both views: a stroke inside the elevation's band boxes lands on the <code>PROFILE-</code> twin layers automatically.</p>
+<h2>The other three commands</h2>
+<ul>
+<li><code>shl</code> itself is <b>Decorate Selection</b>: dress any existing line, polyline, arc, circle or spline the same way.</li>
+<li><b>Flip Shaped Side</b> (<code>shf</code>) mirrors the ornament on a line already drawn.</li>
+<li><b>Sync Shaped Lines</b> (<code>shs</code>) rebuilds the ornament by hand.</li>
+</ul>
+<h2>When it refuses</h2>
+<ul>
+<li>Flowstone, rimstone and slope spines live on <code>CTRL-SHAPE-SPINE</code>, off by default. Switch it on to reshape those edges.</li>
+</ul>
+<h2>See also</h2>
+<ul>
+<li><a href="feature-trace.html">Feature Trace</a></li>
+<li><a href="check-map.html">Check Map</a> — it flags a ledge whose hachures face the wrong way</li>
+</ul>

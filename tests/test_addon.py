@@ -16,6 +16,7 @@ The syntax of each script is checked separately, inside QCAD's own engine, by
 tests/js_syntax.js -- see tests/README.md.
 """
 
+import json
 import os
 import re
 import subprocess
@@ -1661,6 +1662,7 @@ class TestAddonDoesNotPatchStockPrototypes(unittest.TestCase):
 # means five visible separators and no UI code of our own.
 MENU = {
     # 450 -- start here
+    "Handbook/Handbook.js":               (450, 10, ["handbook", "hb"]),
     "CaveShelf/CaveShelf.js":             (450, 20, ["caveshelf", "caves"]),
     "CaveTemplate/CaveTemplate.js":       (450, 30, ["newcavemap", "ncm"]),
     "TeachingCave/TeachingCave.js":       (450, 40, ["teachingcave", "teach"]),
@@ -1947,6 +1949,7 @@ class TestSheetFileGuard(unittest.TestCase):
         "TeachingCave": "copies files between folders",
         "SheetSetup": "refuses a sheet in readState, with its own words",
         "Cave3D": "opens a window onto the survey; draws no entity",
+        "Handbook": "reads its own HTML pages; never the drawing",
     }
 
     def guarded(self, folder):
@@ -2171,6 +2174,179 @@ class TestTeachingCave(unittest.TestCase):
                       "already a teaching copy")
         self.assertIn("isTeaching", source,
                       "and CsTeach has to be able to tell")
+
+
+# ---------------------------------------------------------------------
+# The handbook.
+#
+# The pages are hand-written HTML, so nothing checks them but this: a
+# tool that ships undocumented, a page that documents a tool nobody has
+# any more, a link that points at no page, and an image nothing shows
+# are all silent faults -- the handbook still opens, and the one page
+# somebody needed is the one that is wrong.
+# ---------------------------------------------------------------------
+
+HANDBOOK = os.path.join(REPO, "docs", "handbook")
+
+
+def handbook_index():
+    with open(os.path.join(HANDBOOK, "index.json")) as handle:
+        return json.load(handle)
+
+
+class TestHandbook(unittest.TestCase):
+    def setUp(self):
+        self.index = handbook_index()
+        self.pages = self.index["pages"]
+        self.ids = [page["id"] for page in self.pages]
+
+    def test_page_ids_are_unique(self):
+        self.assertEqual(
+            sorted(self.ids), sorted(set(self.ids)),
+            "two pages share an id, so one of them is unreachable")
+
+    def test_a_page_file_is_named_after_its_id(self):
+        """Links are written as '<id>.html', so the two cannot differ."""
+        for page in self.pages:
+            with self.subTest(page=page["id"]):
+                self.assertEqual(page["file"], page["id"] + ".html")
+
+    def test_every_page_in_the_index_has_a_file(self):
+        missing = [page["id"] for page in self.pages
+                   if not os.path.exists(
+                       os.path.join(HANDBOOK, "pages", page["file"]))]
+        self.assertEqual(missing, [],
+                         "these pages are indexed but not written: %s"
+                         % missing)
+
+    def test_every_page_file_is_in_the_index(self):
+        """An unindexed page ships and is reachable from nowhere."""
+        on_disk = sorted(name[:-5]
+                         for name in os.listdir(
+                             os.path.join(HANDBOOK, "pages"))
+                         if name.endswith(".html"))
+        orphans = [name for name in on_disk if name not in self.ids]
+        self.assertEqual(orphans, [],
+                         "these pages are in no index entry: %s" % orphans)
+
+    def test_every_tool_has_a_page(self):
+        documented = set()
+        for page in self.pages:
+            for tool in page.get("tools", []):
+                documented.add(tool)
+        missing = [name for name in tool_dirs() if name not in documented]
+        self.assertEqual(
+            missing, [],
+            "these tools ship with no handbook page: %s -- write one "
+            "under docs/handbook/pages/ and add it to index.json"
+            % missing)
+
+    def test_no_page_documents_a_tool_that_is_gone(self):
+        tools = set(tool_dirs())
+        stale = sorted(tool for page in self.pages
+                       for tool in page.get("tools", [])
+                       if tool not in tools)
+        self.assertEqual(stale, [],
+                         "these pages document tools that no longer "
+                         "exist: %s" % stale)
+
+    def test_every_internal_link_resolves(self):
+        """A rotted link is the one fault a reader cannot work around."""
+        broken = []
+        for page in self.pages:
+            path = os.path.join(HANDBOOK, "pages", page["file"])
+            with open(path) as handle:
+                body = handle.read()
+            for href in re.findall(r'href="([^"]+)"', body):
+                if href.startswith("http:") or href.startswith("https:"):
+                    continue
+                target = href.split("#")[0]
+                if not target.endswith(".html"):
+                    broken.append((page["id"], href))
+                    continue
+                if target[:-5] not in self.ids:
+                    broken.append((page["id"], href))
+        self.assertEqual(broken, [],
+                         "these links point at no page: %s" % broken)
+
+    def test_every_image_used_is_shipped(self):
+        missing = []
+        for page in self.pages:
+            path = os.path.join(HANDBOOK, "pages", page["file"])
+            with open(path) as handle:
+                body = handle.read()
+            for src in re.findall(r'<img[^>]+src="([^"]+)"', body):
+                if not os.path.exists(
+                        os.path.join(HANDBOOK, "images", src)):
+                    missing.append((page["id"], src))
+        self.assertEqual(missing, [],
+                         "these pages show images that are not in "
+                         "docs/handbook/images: %s" % missing)
+
+    def test_every_shipped_image_is_used_or_indexed(self):
+        used = set()
+        for page in self.pages:
+            for shot in page.get("shots", []):
+                used.add(shot["image"])
+            path = os.path.join(HANDBOOK, "pages", page["file"])
+            with open(path) as handle:
+                for src in re.findall(r'<img[^>]+src="([^"]+)"',
+                                      handle.read()):
+                    used.add(src)
+        images = os.path.join(HANDBOOK, "images")
+        orphans = sorted(name for name in os.listdir(images)
+                         if not name.startswith(".") and name not in used)
+        self.assertEqual(orphans, [],
+                         "these images ship and nothing shows them: %s"
+                         % orphans)
+
+    def test_a_tool_page_says_when_you_reach_for_it(self):
+        """The skeleton every page shares, checked where it matters.
+
+        A page that only says what a tool IS leaves the beginner's
+        actual question -- when would I use this -- unanswered, which
+        is the failure the handbook exists to fix.
+        """
+        thin = []
+        for page in self.pages:
+            if page.get("class") != "tool":
+                continue
+            path = os.path.join(HANDBOOK, "pages", page["file"])
+            with open(path) as handle:
+                body = handle.read()
+            if "<h1>" not in body or "When you reach for it" not in body:
+                thin.append(page["id"])
+        self.assertEqual(thin, [],
+                         "these tool pages are missing an <h1> or a "
+                         "'When you reach for it' section: %s" % thin)
+
+    def test_the_shot_manifest_names_files_that_exist(self):
+        """A screenshot's record of what it depicts has to be real, or
+        the staleness check silently passes forever."""
+        bad = []
+        for page in self.pages:
+            for shot in page.get("shots", []):
+                if not os.path.exists(
+                        os.path.join(HANDBOOK, "images", shot["image"])):
+                    bad.append((page["id"], shot["image"]))
+                elif not os.path.exists(
+                        os.path.join(REPO, shot["depicts"])):
+                    bad.append((page["id"], shot["depicts"]))
+        self.assertEqual(bad, [],
+                         "these screenshot records point at nothing: %s"
+                         % bad)
+
+    def test_the_handbook_ships_inside_the_addon(self):
+        """Only meaningful against a staged package: in the repo the
+        add-on folder holds the tool and the pages live in docs/."""
+        if ADDON == os.path.join(REPO, "scripts", "CaveSurvey"):
+            self.skipTest("repo tree: the pages are read from docs/handbook")
+        index = os.path.join(ADDON, "Handbook", "index.json")
+        self.assertTrue(
+            os.path.exists(index),
+            "the staged package has no CaveSurvey/Handbook/index.json, "
+            "so an installed CaveCAD would say the handbook is not "
+            "installed -- check tools/make_package.sh")
 
 
 if __name__ == "__main__":

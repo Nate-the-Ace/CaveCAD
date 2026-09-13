@@ -1,0 +1,319 @@
+{
+  "pages": [
+    {
+      "id": "start-here",
+      "title": "Start here",
+      "class": "process",
+      "file": "start-here.html",
+      "shots": []
+    },
+    {
+      "id": "handbook",
+      "title": "Handbook",
+      "class": "tool",
+      "file": "handbook.html",
+      "stage": 450,
+      "tools": [
+        "Handbook"
+      ],
+      "shots": []
+    },
+    {
+      "id": "caves",
+      "title": "Caves",
+      "class": "tool",
+      "file": "caves.html",
+      "stage": 450,
+      "tools": [
+        "CaveShelf"
+      ],
+      "shots": []
+    },
+    {
+      "id": "new-cave-map",
+      "title": "New Cave Map",
+      "class": "tool",
+      "file": "new-cave-map.html",
+      "stage": 450,
+      "tools": [
+        "CaveTemplate"
+      ],
+      "shots": []
+    },
+    {
+      "id": "teaching-cave",
+      "title": "Teaching Cave",
+      "class": "tool",
+      "file": "teaching-cave.html",
+      "stage": 450,
+      "tools": [
+        "TeachingCave"
+      ],
+      "shots": []
+    },
+    {
+      "id": "reset-drawing",
+      "title": "Reset Drawing",
+      "class": "tool",
+      "file": "reset-drawing.html",
+      "stage": 450,
+      "tools": [
+        "ResetDrawing"
+      ],
+      "shots": []
+    },
+    {
+      "id": "survey-notebook",
+      "title": "Survey Notebook",
+      "class": "tool",
+      "file": "survey-notebook.html",
+      "stage": 451,
+      "tools": [
+        "SurveyNotebook"
+      ],
+      "shots": []
+    },
+    {
+      "id": "import-cave-survey",
+      "title": "Import Cave Survey",
+      "class": "tool",
+      "file": "import-cave-survey.html",
+      "stage": 451,
+      "tools": [
+        "ImportCaveSurvey"
+      ],
+      "shots": []
+    },
+    {
+      "id": "export-cave-survey",
+      "title": "Export Cave Survey",
+      "class": "tool",
+      "file": "export-cave-survey.html",
+      "stage": 451,
+      "tools": [
+        "ExportCaveSurvey"
+      ],
+      "shots": []
+    },
+    {
+      "id": "loop-errors",
+      "title": "Loop Errors",
+      "class": "tool",
+      "file": "loop-errors.html",
+      "stage": 451,
+      "tools": [
+        "LoopErrors"
+      ],
+      "shots": []
+    },
+    {
+      "id": "3d-view",
+      "title": "3D View",
+      "class": "tool",
+      "file": "3d-view.html",
+      "stage": 451,
+      "tools": [
+        "Cave3D"
+      ],
+      "shots": []
+    },
+    {
+      "id": "draw",
+      "title": "Draw",
+      "class": "tool",
+      "file": "draw.html",
+      "stage": 452,
+      "tools": [
+        "DrawPanel"
+      ],
+      "shots": []
+    },
+    {
+      "id": "feature-trace",
+      "title": "Feature Trace",
+      "class": "tool",
+      "file": "feature-trace.html",
+      "stage": 452,
+      "tools": [
+        "FeatureTrace"
+      ],
+      "shots": []
+    },
+    {
+      "id": "shaped-lines",
+      "title": "Shaped Lines",
+      "class": "tool",
+      "file": "shaped-lines.html",
+      "stage": 452,
+      "tools": [
+        "ShapedLines"
+      ],
+      "shots": []
+    },
+    {
+      "id": "scatter-breakdown",
+      "title": "Scatter Breakdown",
+      "class": "tool",
+      "file": "scatter-breakdown.html",
+      "stage": 452,
+      "tools": [
+        "ScatterBreakdown"
+      ],
+      "shots": []
+    },
+    {
+      "id": "sync-areas",
+      "title": "Sync Areas",
+      "class": "tool",
+      "file": "sync-areas.html",
+      "stage": 452,
+      "tools": [
+        "AreaSync"
+      ],
+      "shots": []
+    },
+    {
+      "id": "cross-section",
+      "title": "Cross Section",
+      "class": "tool",
+      "file": "cross-section.html",
+      "stage": 452,
+      "tools": [
+        "CrossSection"
+      ],
+      "shots": []
+    },
+    {
+      "id": "symbol-palette",
+      "title": "Symbol Palette",
+      "class": "tool",
+      "file": "symbol-palette.html",
+      "stage": 452,
+      "tools": [
+        "SymbolPalette"
+      ],
+      "shots": []
+    },
+    {
+      "id": "area-fill",
+      "title": "Area Fill",
+      "class": "tool",
+      "file": "area-fill.html",
+      "stage": 452,
+      "tools": [
+        "AreaFill"
+      ],
+      "shots": []
+    },
+    {
+      "id": "sketch-scans",
+      "title": "Sketch Scans",
+      "class": "tool",
+      "file": "sketch-scans.html",
+      "stage": 453,
+      "tools": [
+        "SketchScans"
+      ],
+      "shots": []
+    },
+    {
+      "id": "surface-data",
+      "title": "Surface Data",
+      "class": "tool",
+      "file": "surface-data.html",
+      "stage": 453,
+      "tools": [
+        "SurfaceData"
+      ],
+      "shots": []
+    },
+    {
+      "id": "sheet-setup",
+      "title": "Sheet Setup",
+      "class": "tool",
+      "file": "sheet-setup.html",
+      "stage": 454,
+      "tools": [
+        "SheetSetup"
+      ],
+      "shots": []
+    },
+    {
+      "id": "survey-stats",
+      "title": "Survey Stats",
+      "class": "tool",
+      "file": "survey-stats.html",
+      "stage": 454,
+      "tools": [
+        "SurveyStats"
+      ],
+      "shots": []
+    },
+    {
+      "id": "generate-profile",
+      "title": "Generate Profile",
+      "class": "tool",
+      "file": "generate-profile.html",
+      "stage": 454,
+      "tools": [
+        "GenerateProfile"
+      ],
+      "shots": []
+    },
+    {
+      "id": "build-legend",
+      "title": "Build Legend",
+      "class": "tool",
+      "file": "build-legend.html",
+      "stage": 454,
+      "tools": [
+        "BuildLegend"
+      ],
+      "shots": []
+    },
+    {
+      "id": "callout",
+      "title": "Callout",
+      "class": "tool",
+      "file": "callout.html",
+      "stage": 454,
+      "tools": [
+        "Callout"
+      ],
+      "shots": []
+    },
+    {
+      "id": "check-map",
+      "title": "Check Map",
+      "class": "tool",
+      "file": "check-map.html",
+      "stage": 455,
+      "tools": [
+        "CheckMap"
+      ],
+      "shots": []
+    },
+    {
+      "id": "repair-drawing",
+      "title": "Repair Drawing",
+      "class": "tool",
+      "file": "repair-drawing.html",
+      "stage": 455,
+      "tools": [
+        "RepairDrawing"
+      ],
+      "shots": []
+    },
+    {
+      "id": "package-cave-project",
+      "title": "Package Cave Project",
+      "class": "tool",
+      "file": "package-cave-project.html",
+      "stage": 455,
+      "tools": [
+        "PackageCave"
+      ],
+      "shots": []
+    }
+  ]
+}

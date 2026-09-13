@@ -249,7 +249,11 @@ var CORE_FILES = [
     "scripts/CaveSurvey/Core/CsSheetFile.js",
     // What survives emptying a drawing, and what the refusals say. The
     // walk and the delete live in ResetDrawing, where a document exists.
-    "scripts/CaveSurvey/Core/CsReset.js"
+    "scripts/CaveSurvey/Core/CsReset.js",
+    // The handbook index. Every lookup here is pure once the index is
+    // in hand, and the tests hand it one -- rootPath/readText are the
+    // QCAD half and are never CALLED from this file.
+    "scripts/CaveSurvey/Core/CsHandbook.js"
 ];
 for (var ci = 0; ci < CORE_FILES.length; ci++) {
     loadRepoScript(CORE_FILES[ci]);
@@ -27015,6 +27019,89 @@ eqs(CsSymbolStore.AREA_MARKER_TAGS.custom, "AreaCustom",
         "CsReset: and that the scans survived on disk");
     ok(done.indexOf("saved") !== -1,
         "CsReset: and that nothing has been written yet");
+})();
+
+// ---------------------------------------------------------------------
+// CsHandbook -- the handbook index, and the lookups over it.
+//
+// The index is handed in rather than read: rootPath() and readText()
+// are the QCAD half, and a suite that needed a real handbook folder on
+// disk would be testing the packaging rather than the lookups.
+// ---------------------------------------------------------------------
+
+(function() {
+    CsHandbook.cache = {
+        root: "/nowhere",
+        pages: [
+            { id: "start-here", title: "Start here", "class": "process",
+              file: "start-here.html" },
+            { id: "feature-trace", title: "Feature Trace", "class": "tool",
+              stage: 452, tools: ["FeatureTrace"], file: "feature-trace.html",
+              shots: [{ image: "ft.png", depicts: "a.js", hash: "abc" }] },
+            { id: "check-map", title: "Check Map", "class": "tool",
+              stage: 455, tools: ["CheckMap"], file: "check-map.html" },
+            { id: "line-up-a-scan", title: "Line a scan up", "class": "task",
+              file: "line-up-a-scan.html" }
+        ]
+    };
+    CsHandbook.bodies = {
+        "start-here": "the handbook lives inside cavecad",
+        "feature-trace": "drag along the wall and a line follows",
+        "check-map": "no scale bar, no north arrow",
+        "line-up-a-scan": "two stations for a plain fit"
+    };
+
+    ok(CsHandbook.page("check-map").title === "Check Map",
+        "CsHandbook: a page is found by id");
+    ok(CsHandbook.page("nothing-here") === null,
+        "CsHandbook: an id nobody wrote answers null rather than throwing");
+
+    ok(CsHandbook.forTool("FeatureTrace") === "feature-trace",
+        "CsHandbook: the ? button on a panel finds that tool's page");
+    ok(CsHandbook.forTool("TripFocus") === null,
+        "CsHandbook: a parked tool has no page, and that is not an error");
+
+    ok(CsHandbook.next("start-here") === "feature-trace",
+        "CsHandbook: reading order is the order of the index");
+    ok(CsHandbook.next("line-up-a-scan") === null,
+        "CsHandbook: the last page has no Next");
+    ok(CsHandbook.previous("feature-trace") === "start-here",
+        "CsHandbook: and back again");
+
+    var hits = CsHandbook.search("check");
+    ok(hits.length === 1 && hits[0] === "check-map",
+        "CsHandbook: a search finds a page");
+    hits = CsHandbook.search("scan");
+    ok(hits[0] === "line-up-a-scan",
+        "CsHandbook: a TITLE hit comes before a body hit -- somebody " +
+            "typing 'scan' wants the page called that");
+
+    ok(CsHandbook.search("   ").length === 0,
+        "CsHandbook: an empty search finds nothing rather than everything");
+
+    var stages = CsHandbook.stages();
+    ok(stages.length === 2 && stages[0].stage === 452 &&
+        stages[0].title === "Draw the map",
+        "CsHandbook: tool pages group under the menu's own stages, and " +
+            "a stage with no pages is left out");
+
+    ok(CsHandbook.ofClass("task").length === 1,
+        "CsHandbook: pages can be taken by class");
+
+    ok(CsHandbook.shots().length === 1 &&
+        CsHandbook.shots()[0].page === "feature-trace",
+        "CsHandbook: every screenshot is reachable with the page it " +
+            "belongs to, for the staleness check");
+
+    ok(CsHandbook.plainText("<p>a <b>wall</b></p>") === " a wall ",
+        "CsHandbook: tags come out of the haystack");
+    ok(CsHandbook.plainText("R&amp;D &lt;x&gt;") === "R&D <x>",
+        "CsHandbook: and the entities that matter come back");
+
+    CsHandbook.forget();
+    ok(CsHandbook.cache === null && CsHandbook.bodies === null,
+        "CsHandbook: forget() drops both caches, so a session that " +
+            "edits a page can reread it");
 })();
 
 // ---------------------------------------------------------------------

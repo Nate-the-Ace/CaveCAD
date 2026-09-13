@@ -466,6 +466,7 @@ SheetSetup.buildDock = function(appWin) {
 
     body.setLayout(layout);
     dock.setWidget(body);
+    CsPanel.attachHelp(dock, "SheetSetup", qsTr("Sheet Setup"));
     SheetSetup.widgets = w;
 
     var changed = function() {
