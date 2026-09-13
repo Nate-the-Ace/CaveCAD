@@ -232,8 +232,11 @@ CsScanView.prototype.mousePressEvent = function(event) {
         }
         this.tracePoints.push(picked);
         // Held down and moved, this becomes a freehand stroke; a single
-        // click leaves one corner. Both end up in the same list.
+        // click leaves one corner. Both end up in the same list, and
+        // what tells them apart on release is whether the stroke laid
+        // any points of its own after this one.
         this.traceDragging = true;
+        this.traceStrokeAt = this.tracePoints.length;
         if (typeof this.onTraceChanged === "function") {
             try {
                 this.onTraceChanged(this.tracePoints, picked);
@@ -401,9 +404,21 @@ CsScanView.prototype.mouseReleaseEvent = function(event) {
     CsScanView.callBase(this, "mouseReleaseEvent", event);
     this.panFrom = null;
     if (this.tracing === true) {
-        // The stroke stops; the outline does not. A caver can let go,
-        // move, and carry on clicking corners.
+        var wasDragging = (this.traceDragging === true);
         this.traceDragging = false;
+        var pts = this.tracePoints;
+        if (!wasDragging || pts === undefined || pts === null) {
+            return;
+        }
+        if (!CsScanView.strokeCloses(this)) {
+            return;
+        }
+        if (typeof this.onScanTraceDone === "function") {
+            try {
+                this.onScanTraceDone(pts.slice(0));
+            } catch (eRel) {
+            }
+        }
         return;
     }
     var from = this.boxFrom, to = this.boxTo;
@@ -427,6 +442,41 @@ CsScanView.prototype.mouseReleaseEvent = function(event) {
  *  both. */
 /** Corners before an outline can be closed by clicking its start. */
 CsScanView.MIN_TRACE_POINTS = 3;
+
+/**
+ * Does letting go here close the outline?
+ *
+ * LETTING GO OF A STROKE CLOSES THE SHAPE. Drawing round a sketch is
+ * one continuous movement, and having to find the first point again
+ * afterwards -- at whatever zoom, with the cursor already at the far
+ * end of the outline -- is a second job the caver did not ask for.
+ *
+ * A CLICK IS NOT A STROKE and must still just lay a corner. What
+ * separates them is whether MOVING added any points after the one the
+ * press put down: `traceStrokeAt` is the length of the list at press
+ * time, so the stroke laid something only if the list is longer now.
+ *
+ * Reads fields and nothing else, so the rule can be tested without a
+ * live view and a real mouse event -- which is the only reason the
+ * decision is out here rather than inline in the handler.
+ */
+CsScanView.strokeCloses = function(view) {
+    if (view === null || view === undefined) {
+        return false;
+    }
+    var pts = view.tracePoints;
+    if (pts === null || pts === undefined || pts.length === undefined) {
+        return false;
+    }
+    var at = view.traceStrokeAt;
+    if (at === null || at === undefined) {
+        return false;
+    }
+    if (pts.length <= at) {
+        return false;           // pressed and released without tracing
+    }
+    return pts.length >= CsScanView.MIN_TRACE_POINTS;
+};
 
 CsScanView.PAN_THRESHOLD = 4;
 try {
@@ -630,6 +680,7 @@ CsScanPreview.armTrace = function(preview, onDone, onChange) {
         preview.view.tracing = on;
         preview.view.tracePoints = [];
         preview.view.traceDragging = false;
+        preview.view.traceStrokeAt = null;
         // In MODEL units, which are page pixels: how near the first
         // corner counts as closing, and how far a freehand stroke moves
         // before it lays another point.
@@ -649,6 +700,7 @@ CsScanPreview.resetTrace = function(preview) {
     try {
         preview.view.tracePoints = [];
         preview.view.traceDragging = false;
+        preview.view.traceStrokeAt = null;
     } catch (e) {
     }
     CsScanPreview.clearBand(preview);

@@ -122,6 +122,37 @@ if (made.path !== null) {
     }
 }
 
+// ----------------------------------------------------------------------
+// LETTING GO OF A STROKE CLOSES THE SHAPE, but a click does not.
+//
+// CsScanView.strokeCloses is the real rule the release handler asks --
+// not a copy of it here. The handler itself needs a live view and a
+// real mouse event, which is exactly why the decision sits in a
+// function that needs neither.
+// ----------------------------------------------------------------------
+function atPress(points, strokeAt) {
+    return { tracePoints: points, traceStrokeAt: strokeAt };
+}
+
+// A stroke: the press laid one point, moving laid more.
+ok(CsScanView.strokeCloses(atPress(
+    [{ x: 0, y: 0 }, { x: 50, y: 0 }, { x: 50, y: 50 }], 1)),
+   "letting go of a traced stroke closes the shape");
+
+// A click: the press laid the fourth point and nothing moved after it.
+ok(!CsScanView.strokeCloses(atPress(
+    [{ x: 0, y: 0 }, { x: 50, y: 0 }, { x: 50, y: 50 }, { x: 0, y: 50 }], 4)),
+   "a click that did not move lays a corner and does NOT close");
+
+// A stroke too short to be a shape.
+ok(!CsScanView.strokeCloses(atPress([{ x: 0, y: 0 }, { x: 3, y: 0 }], 1)),
+   "two points are not a shape to close");
+
+// Nothing armed, nothing traced.
+ok(!CsScanView.strokeCloses(atPress([], null)),
+   "no stroke, nothing to close");
+ok(!CsScanView.strokeCloses(null), "and no view is not a crash");
+
 var dir = new QDir(caveDir);
 dir.removeRecursively();
 

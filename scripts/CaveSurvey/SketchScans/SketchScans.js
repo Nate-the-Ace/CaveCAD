@@ -671,9 +671,9 @@ SketchScans.buildDock = function(appWin) {
             + "outline"));
         try {
             w.trimLabel.toolTip = qsTr("Drag a box round the sketch you " +
-                "want, or press Trace to draw round it. Only that part " +
-                "of the page is placed, so the other sketches on it " +
-                "stay out of the drawing.");
+                "want, or press Trace to draw round it by hand. Only " +
+                "that part of the page is placed, so the other " +
+                "sketches on it stay out of the drawing.");
         } catch (eTt) {
         }
         // NO "USE WHOLE PAGE". Scans get trimmed, always (Nathan,
@@ -690,8 +690,9 @@ SketchScans.buildDock = function(appWin) {
         // the drawing shows through the parts that were cut away.
         w.traceButton = new QPushButton(qsTr("Trace"));
         w.traceButton.toolTip = qsTr("Draw round the sketch instead of " +
-            "boxing it: click corners, or hold the button down to " +
-            "trace freehand, then click the first point to close.");
+            "boxing it. Hold the button down, draw round it and let " +
+            "go -- releasing closes the shape. Or click corner by " +
+            "corner and click the first corner again to close.");
         w.traceUndoButton = new QPushButton(qsTr("Undo point"));
         w.traceUndoButton.toolTip = qsTr("Take back the last corner.");
         trimRow.addWidget(w.trimLabel, 1, 0);
@@ -2591,8 +2592,8 @@ SketchScans.startTrace = function() {
             function(points, cursor) {
                 CsScanPreview.showTrace(w.scanView, points, cursor);
             });
-        w.trimLabel.text = qsTr("Trim: click corners, or drag to trace "
-            + "-- click the first point to close");
+        w.trimLabel.text = qsTr("Trim: drag round the sketch and let go, "
+            + "or click corners and click the first one again");
     } catch (eArm) {
     }
     SketchScans.updateTrimGate();
