@@ -730,6 +730,23 @@ Cave3D.connectOnce = function() {
     if (Cave3D.connected) {
         return;
     }
+    // ONE ENGINE LISTENS, NOT ALL OF THEM.
+    //
+    // Cave3D.connected is per ENGINE, and there are several: the one
+    // that loads the add-ons, and one per menu action. Each has its own
+    // copy of this file and its own flag, so all of them connected to
+    // the one shared panel -- and a single press of Export ran the
+    // export once per engine, which the caver saw as the folder dialog
+    // opening again the moment the first film was written.
+    //
+    // The claim lives on the bridge because that is the thing there is
+    // only one of.
+    if (cave3d.claimSignals !== undefined && !cave3d.claimSignals()) {
+        // Someone else is listening. Nothing more to do here, and say
+        // so, so this engine does not try again on every run.
+        Cave3D.connected = true;
+        return;
+    }
     if (cave3d.refreshRequested !== undefined) {
         cave3d.refreshRequested.connect(function(handle) {
             if (handle !== Cave3D.handle) { return; }
