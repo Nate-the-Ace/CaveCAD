@@ -295,9 +295,13 @@ function resetDrawingRun() {
         backupPath = "";
     }
 
+    // doc.isModified(), NOT di.isModified(): the document interface has
+    // no such method in this build and answers a TypeError, which a
+    // guarded read turns into "not modified" -- so the warning about
+    // unsaved work would simply never appear. Probed live, 2026-09-13.
     var modified = false;
     try {
-        modified = di.isModified() === true;
+        modified = doc.isModified() === true;
     } catch (eM) {
         modified = false;
     }
@@ -335,7 +339,8 @@ function resetDrawingRun() {
  * A reset in front of a class must not be one stray Return away, which
  * is why the default button is Cancel and why OK starts disabled.
  */
-ResetDrawing.confirm = function(caveName, counts, backupPath, modified) {
+ResetDrawing.buildConfirm = function(caveName, counts, backupPath,
+        modified) {
     var dlg = new QDialog(getMainWindow());
     dlg.windowTitle = qsTr("Reset Drawing") +
         (caveName === null ? "" : " \u2014 " + caveName);
@@ -381,13 +386,28 @@ ResetDrawing.confirm = function(caveName, counts, backupPath, modified) {
     okBtn.clicked.connect(function() { dlg.accept(); });
     cancelBtn.clicked.connect(function() { dlg.reject(); });
 
-    var accepted = (dlg.exec() === QDialog.Accepted);
+    return { dlg: dlg, edit: edit, okBtn: okBtn, cancelBtn: cancelBtn };
+};
+
+/**
+ * Shows it, and answers whether the reset was confirmed.
+ *
+ * Split from buildConfirm so the dialog can be BUILT and inspected
+ * without exec()ing it -- a modal exec blocks the application until a
+ * human dismisses it, which makes the one kind of failure this build
+ * specialises in (a widget that silently does nothing) impossible to
+ * check any other way.
+ */
+ResetDrawing.confirm = function(caveName, counts, backupPath, modified) {
+    var built = ResetDrawing.buildConfirm(caveName, counts, backupPath,
+        modified);
+    var accepted = (built.dlg.exec() === QDialog.Accepted);
     // destroy() throws on every QDialog in this build; close and hand
     // it to Qt instead, guarded -- tearing down a dialog must never
     // cost the answer just given to it.
     try {
-        dlg.close();
-        dlg.deleteLater();
+        built.dlg.close();
+        built.dlg.deleteLater();
     } catch (eClose) {
     }
     return accepted;
