@@ -20,6 +20,19 @@
 
 var CsHandbook = {};
 
+/**
+ * Where this file was included from, captured AT INCLUDE TIME.
+ *
+ * `includeBasePath` is a global that QCAD repoints for every include,
+ * so by the time a button is pressed it is CaveCAD's own scripts folder
+ * -- measured live, 2026-09-13: "/Applications/CaveCAD.app/Contents/
+ * Resources/scripts". Reading it inside a function therefore finds the
+ * handbook nowhere. The value is only true while this file is being
+ * evaluated, which is here.
+ */
+CsHandbook.BASE = (typeof(includeBasePath) === "undefined") ?
+    "" : String(includeBasePath);
+
 /** The parsed index, or null before the first read. Cleared by
  *  CsHandbook.forget() so a session that edits pages can reread. */
 CsHandbook.cache = null;
@@ -38,10 +51,8 @@ CsHandbook.bodies = null;
  */
 CsHandbook.rootPath = function() {
     var candidates = [];
-    try {
-        candidates.push(includeBasePath + "/../Handbook");
-    } catch (eBase) {
-        // no includeBasePath in this context; the others still work
+    if (CsHandbook.BASE !== "") {
+        candidates.push(CsHandbook.BASE + "/../Handbook");
     }
     try {
         var setting = RSettings.getStringValue("CaveSurvey/HandbookPath", "");
@@ -50,10 +61,9 @@ CsHandbook.rootPath = function() {
         }
     } catch (eSet) {
     }
-    try {
+    if (CsHandbook.BASE !== "") {
         // a checkout: .../cavecad-tools/scripts/CaveSurvey/Core -> docs
-        candidates.push(includeBasePath + "/../../../docs/handbook");
-    } catch (eRepo) {
+        candidates.push(CsHandbook.BASE + "/../../../docs/handbook");
     }
 
     // A candidate counts only when its index.json is there. The FIRST
@@ -78,16 +88,11 @@ CsHandbook.rootPath = function() {
  * it was looked for, or the report they send back says only "broken".
  */
 CsHandbook.searchedPaths = function() {
-    var out = [];
-    try {
-        out.push(includeBasePath + "/../Handbook");
-    } catch (eBase) {
+    if (CsHandbook.BASE === "") {
+        return [];
     }
-    try {
-        out.push(includeBasePath + "/../../../docs/handbook");
-    } catch (eRepo) {
-    }
-    return out;
+    return [CsHandbook.BASE + "/../Handbook",
+        CsHandbook.BASE + "/../../../docs/handbook"];
 };
 
 /**

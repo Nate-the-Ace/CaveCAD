@@ -71,6 +71,15 @@ Handbook.buildDock = function(appWin) {
     w.view = new QTextBrowser();
     w.view.readOnly = true;
     try {
+        // A first run has no saved dock size, so the panel claims
+        // whatever its contents ask for -- and a QTextBrowser asks for
+        // very little. Measured live at 231 px tall, which is three
+        // lines of a page: enough to look broken.
+        w.view.setMinimumHeight(320);
+        w.view.setMinimumWidth(260);
+    } catch (eSize) {
+    }
+    try {
         w.view.openLinks = false;
         w.view.openExternalLinks = false;
     } catch (eLinks) {
@@ -219,6 +228,11 @@ Handbook.nextLink = function(pageId) {
 /** The breadcrumb above a page: its class or stage, then its title. */
 Handbook.crumbFor = function(page) {
     var where = "";
+    // The welcome page is not a lesson and does not want a crumb
+    // saying so: it is where the handbook starts.
+    if (page.id === Handbook.HOME) {
+        return page.title;
+    }
     if (page["class"] === "tool" && !isNull(CsHandbook.STAGES[page.stage])) {
         where = CsHandbook.STAGES[page.stage];
     } else if (page["class"] === "task") {
