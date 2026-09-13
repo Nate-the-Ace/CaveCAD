@@ -2039,6 +2039,17 @@ SketchScans.buildDock = function(appWin) {
             w.list.selectRow(row);
         }
     };
+    var markFolder = function(row, want) {
+        if (row < 0 || row >= w.rows.length ||
+                w.rows[row].kind !== "folder" || w.scans === null) {
+            return;
+        }
+        w.bookmarks = CsScanList.setFolderComplete(w.scans,
+            w.rows[row].rel, w.rows, want,
+            SketchScans.listedRels(w.rows));
+        SketchScans.repaintMarks();
+        w.list.selectRow(row);
+    };
     // The bookmark lives on the RIGHT-CLICK now, not on a button: it is
     // a per-scan action and it belongs on the scan, not in a row of
     // controls that apply to the panel.
@@ -2058,29 +2069,48 @@ SketchScans.buildDock = function(appWin) {
                 var py = (typeof pos.y === "function") ? pos.y() : pos.y;
                 var row = w.list.rowAt(py);
                 if (row === undefined || row === null || row < 0 ||
-                        row >= w.rows.length ||
-                        w.rows[row].kind !== "file") {
-                    return;          // a folder row has nothing to bookmark
+                        row >= w.rows.length) {
+                    return;
                 }
                 w.list.selectRow(row);
-                var rel = w.rows[row].rel;
-                var marked = w.bookmarks[rel] === true;
                 // Kept on `w` so it is not collected while it is open --
                 // popup() returns immediately, unlike exec().
                 w.scanMenu = new QMenu();
-                // The label lives in Core with the list that draws
-                // the tick, so every panel showing this list says the
-                // same words.
-                var act = w.scanMenu.addAction(
-                    qsTr(CsScanList.markLabel(marked)));
-                try {
-                    act.checkable = true;
-                    act.checked = marked;
-                } catch (eChk) {
+                if (w.rows[row].kind === "folder") {
+                    // A TRIP AT A TIME. Forty pages come back from one
+                    // trip and saying so should not cost forty
+                    // right-clicks. The folder's tick already means
+                    // "everything in here is done", so this sets it
+                    // directly.
+                    var fMarked = CsScanTree.folderComplete(
+                        w.rows[row].rel, w.rows, w.bookmarks);
+                    var fAct = w.scanMenu.addAction(
+                        qsTr(CsScanList.folderMarkLabel(fMarked)));
+                    try {
+                        fAct.checkable = true;
+                        fAct.checked = fMarked;
+                    } catch (eFChk) {
+                    }
+                    fAct.triggered.connect(function() {
+                        markFolder(row, !fMarked);
+                    });
+                } else {
+                    var rel = w.rows[row].rel;
+                    var marked = w.bookmarks[rel] === true;
+                    // The label lives in Core with the list that draws
+                    // the tick, so every panel showing this list says
+                    // the same words.
+                    var act = w.scanMenu.addAction(
+                        qsTr(CsScanList.markLabel(marked)));
+                    try {
+                        act.checkable = true;
+                        act.checked = marked;
+                    } catch (eChk) {
+                    }
+                    act.triggered.connect(function() {
+                        toggleBookmark(row);
+                    });
                 }
-                act.triggered.connect(function() {
-                    toggleBookmark(row);
-                });
                 w.scanMenu.popup(w.list.viewport().mapToGlobal(pos));
             } catch (eMenu) {
                 // no context menu on this bridge: the scan is still

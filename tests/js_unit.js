@@ -11108,6 +11108,58 @@ if (!IS_NODE) {
     ok(CsScanTree.folderComplete("2025 Scans/nothing", rows, trip) === false,
         "folderComplete: a folder with no scans has finished nothing");
 
+    // MARKING A WHOLE FOLDER. A trip comes back with forty pages and
+    // saying so should not cost forty right-clicks.
+    var fSet = {};
+    var fTouched = CsScanTree.markFolder(fSet, "2025 Scans/2-2 Trip",
+        rows, true);
+    eqs(fTouched, 2, "marking a trip folder marks both its pages");
+    ok(CsScanTree.folderComplete("2025 Scans/2-2 Trip", rows, fSet) === true,
+        "and the folder now reads as finished");
+    ok(fSet["2025 Scans/9-7 Trip/pageC.jpg"] !== true,
+        "while another trip is left alone");
+    ok(fSet["loose.jpg"] !== true, "and so is a page outside any folder");
+
+    // EVERYTHING BENEATH IT, however deep: marking the year marks the
+    // trips inside it, or a folder would say finished over pages that
+    // are not.
+    var yearSet = {};
+    eqs(CsScanTree.markFolder(yearSet, "2025 Scans", rows, true), 3,
+        "marking the year reaches every page in every trip under it");
+    ok(CsScanTree.folderComplete("2025 Scans", rows, yearSet) === true,
+        "so the year reads as finished too");
+    ok(yearSet["loose.jpg"] !== true,
+        "but still not a page sitting outside it");
+
+    // UNMARKING is the same rule in reverse.
+    eqs(CsScanTree.markFolder(yearSet, "2025 Scans/2-2 Trip", rows,
+        false), 2, "unmarking a trip clears both its pages");
+    ok(CsScanTree.folderComplete("2025 Scans", rows, yearSet) === false,
+        "and the year is no longer finished");
+    ok(yearSet["2025 Scans/9-7 Trip/pageC.jpg"] === true,
+        "while the trip that was not touched keeps its mark");
+
+    // NOTHING TO DO IS NOTHING DONE -- the caller writes and announces
+    // only when something actually changed.
+    eqs(CsScanTree.markFolder(fSet, "2025 Scans/2-2 Trip", rows, true),
+        0, "marking an already-finished folder changes nothing");
+    eqs(CsScanTree.markFolder({}, "2025 Scans/nothing", rows, true), 0,
+        "a folder with no scans in it marks nothing");
+    eqs(CsScanTree.markFolder({}, "", rows, true), 0,
+        "and no folder is not every folder");
+    eqs(CsScanTree.markFolder(null, "2025 Scans", rows, true), 0,
+        "no set, nothing marked -- and no exception");
+
+    // A PREFIX IS NOT A FOLDER. "2025 Scans" must not swallow a sibling
+    // whose name merely starts the same way.
+    var sibRows = CsScanTree.rowsOf(["2025 Scans/a.jpg",
+                                     "2025 Scans Old/b.jpg"]);
+    var sibSet = {};
+    eqs(CsScanTree.markFolder(sibSet, "2025 Scans", sibRows, true), 1,
+        "marking a folder leaves a sibling with a longer name alone");
+    ok(sibSet["2025 Scans Old/b.jpg"] !== true,
+        "and that sibling's page is untouched");
+
     // The panel lands on the first scan STILL TO DO -- the opposite of
     // a bookmark, and the point of the mark.
     var done = { "2025 Scans/2-2 Trip/pageA.jpg": true };

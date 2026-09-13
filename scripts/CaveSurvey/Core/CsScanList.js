@@ -38,6 +38,8 @@ CsScanList.COMPLETE = "✓";
  */
 CsScanList.MARK_COMPLETE = "Mark Complete";
 CsScanList.MARK_INCOMPLETE = "Mark Incomplete";
+CsScanList.MARK_FOLDER_COMPLETE = "Mark Folder Complete";
+CsScanList.MARK_FOLDER_INCOMPLETE = "Mark Folder Incomplete";
 
 // ---------------------------------------------------------------------
 // The marks themselves. ONE STORE, READ-MODIFY-WRITE.
@@ -141,6 +143,68 @@ CsScanList.announce = function(folder) {
 CsScanList.markLabel = function(marked) {
     return (marked === true) ? CsScanList.MARK_INCOMPLETE :
         CsScanList.MARK_COMPLETE;
+};
+
+/** The same, for a whole folder. */
+CsScanList.folderMarkLabel = function(marked) {
+    return (marked === true) ? CsScanList.MARK_FOLDER_INCOMPLETE :
+        CsScanList.MARK_FOLDER_COMPLETE;
+};
+
+/**
+ * Marks every page under a folder complete, or unmarks them all, and
+ * answers the set as it now stands on disk.
+ *
+ * A TRIP AT A TIME, because that is how the pages arrive: a caver comes
+ * back from a trip with forty scanned pages, works through them, and
+ * the last thing they want is forty right-clicks to say so. The folder
+ * tick already means "everything in here is done" (CsScanTree.
+ * folderComplete), so this is the way to say it directly.
+ *
+ * ONE WRITE, not one per page. Every toggleComplete announces, and
+ * forty announcements would have the other panel repaint forty times.
+ *
+ * Read-modify-write for the same reason toggleComplete is: the other
+ * panel is marking the same pages, and writing this panel's whole copy
+ * back is how the two undid each other.
+ *
+ * \param folderRel the folder's path relative to the scans folder
+ * \param rows      the display rows, as CsScanTree.rowsOf returns
+ * \param want      true to mark complete, false to unmark
+ * \return the set as it now stands
+ */
+CsScanList.setFolderComplete = function(folder, folderRel, rows, want,
+                                        listedRels) {
+    var set = CsScanList.loadComplete(folder);
+    if (folder === null || folder === undefined ||
+            typeof folderRel !== "string" || folderRel === "" ||
+            rows === null || rows === undefined) {
+        return set;
+    }
+    var touched = CsScanTree.markFolder(set, folderRel, rows, want);
+    if (touched === 0) {
+        // Nothing changed, so nothing is written and nobody is told.
+        return set;
+    }
+    try {
+        var map = CsScanTree.parseCollapsed(
+            RSettings.getStringValue(CsScanTree.SETTING_BOOKMARKS, ""));
+        var valid = listedRels;
+        if (valid === null || valid === undefined) {
+            valid = [];
+            for (var key in set) {
+                if (set[key] === true) { valid.push(key); }
+            }
+        }
+        CsScanTree.recordCollapsed(map, folder, set, valid);
+        RSettings.setValue(CsScanTree.SETTING_BOOKMARKS,
+            CsScanTree.serializeCollapsed(map));
+    } catch (e) {
+        // a bridge without RSettings forgets the marks; the panel still
+        // shows what this call decided, for this session
+    }
+    CsScanList.announce(folder);
+    return set;
 };
 
 /**

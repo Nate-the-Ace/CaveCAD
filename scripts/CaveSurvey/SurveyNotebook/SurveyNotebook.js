@@ -3161,6 +3161,36 @@ SurveyNotebook.scanRowClicked = function(w, row) {
  * -- the other is tracing it -- and a tick that only one of them could
  * set would be a record of half the work.
  */
+/**
+ * Marks every page under a folder complete, or unmarks them all.
+ *
+ * A TRIP AT A TIME: forty pages come back from one trip and saying so
+ * should not cost forty right-clicks. Sketch Scans offers the same
+ * thing on the same tree, through the same Core call, because the two
+ * panels show one list and a mark made in either belongs in both.
+ */
+SurveyNotebook.markScanFolder = function(w, row, want) {
+    if (isNull(w) || isNull(w.scanRows) || row < 0 ||
+            row >= w.scanRows.length || w.scanRows[row].kind !== "folder") {
+        return;
+    }
+    var rels = [];
+    for (var i = 0; i < w.scanRows.length; i++) {
+        if (w.scanRows[i].kind === "file") {
+            rels.push(w.scanRows[i].rel);
+        }
+    }
+    w.scanComplete = CsScanList.setFolderComplete(w.scansFolder,
+        w.scanRows[row].rel, w.scanRows, want, rels);
+    CsScanList.fill(w.scanList, w.scanRows,
+        { folder: w.scansFolder, collapsed: w.scanCollapsed,
+          complete: w.scanComplete }, {});
+    try {
+        w.scanList.setCurrentCell(row, 0);
+    } catch (eSel) {
+    }
+};
+
 SurveyNotebook.toggleScanComplete = function(w, row) {
     if (isNull(w) || isNull(w.scanRows) || row < 0 ||
             row >= w.scanRows.length || w.scanRows[row].kind !== "file") {
@@ -3761,21 +3791,35 @@ SurveyNotebook.buildDock = function(appWin) {
                 }
             } catch (eRow) {
             }
-            if (row < 0 || isNull(w.scanRows[row]) ||
-                    w.scanRows[row].kind !== "file") {
+            if (row < 0 || isNull(w.scanRows[row])) {
                 return;
             }
             var menu = new QMenu(w.scanList);
-            var done = w.scanComplete[w.scanRows[row].rel] === true;
-            var act = menu.addAction(qsTr(CsScanList.markLabel(done)));
-            try {
-                act.checkable = true;
-                act.checked = done;
-            } catch (eChk) {
+            if (w.scanRows[row].kind === "folder") {
+                var fDone = CsScanTree.folderComplete(w.scanRows[row].rel,
+                    w.scanRows, w.scanComplete);
+                var fAct = menu.addAction(
+                    qsTr(CsScanList.folderMarkLabel(fDone)));
+                try {
+                    fAct.checkable = true;
+                    fAct.checked = fDone;
+                } catch (eFChk) {
+                }
+                fAct.triggered.connect(function() {
+                    SurveyNotebook.markScanFolder(w, row, !fDone);
+                });
+            } else {
+                var done = w.scanComplete[w.scanRows[row].rel] === true;
+                var act = menu.addAction(qsTr(CsScanList.markLabel(done)));
+                try {
+                    act.checkable = true;
+                    act.checked = done;
+                } catch (eChk) {
+                }
+                act.triggered.connect(function() {
+                    SurveyNotebook.toggleScanComplete(w, row);
+                });
             }
-            act.triggered.connect(function() {
-                SurveyNotebook.toggleScanComplete(w, row);
-            });
             menu.exec(QCursor.pos());
             try {
                 menu.deleteLater();

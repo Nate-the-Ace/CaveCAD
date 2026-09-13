@@ -134,6 +134,45 @@ CsScanTree.folderComplete = function(folderRel, rows, complete) {
     return found;
 };
 
+// Sets or clears the mark on every scan beneath a folder, IN PLACE.
+//
+// A TRIP AT A TIME, because that is how the pages arrive: a caver comes
+// back with forty scanned pages, works through them, and the last thing
+// they want is forty right-clicks to say so. folderComplete above
+// already means "everything in here is done", so this is the way to say
+// it directly.
+//
+// EVERYTHING BENEATH IT, however deep. A trip folder holding per-team
+// subfolders is still one trip, and marking it done while its
+// subfolders stayed outstanding would leave a folder saying finished
+// over pages that are not.
+//
+// Returns how many scans actually changed, so a caller can write and
+// announce only when something did.
+CsScanTree.markFolder = function(complete, folderRel, rows, want) {
+    if (complete === null || complete === undefined ||
+            rows === null || rows === undefined ||
+            typeof folderRel !== "string" || folderRel === "") {
+        return 0;
+    }
+    // The trailing slash is what keeps "2025 Scans" from swallowing
+    // "2025 Scans Old": a folder is a path SEGMENT, not a prefix.
+    var prefix = folderRel + "/";
+    var touched = 0;
+    for (var i = 0; i < rows.length; i++) {
+        if (rows[i].kind !== "file") { continue; }
+        if (String(rows[i].rel).indexOf(prefix) !== 0) { continue; }
+        if (want === true) {
+            if (complete[rows[i].rel] !== true) { touched++; }
+            complete[rows[i].rel] = true;
+        } else {
+            if (complete[rows[i].rel] === true) { touched++; }
+            delete complete[rows[i].rel];
+        }
+    }
+    return touched;
+};
+
 // The first visible scan NOT yet complete, or -1: where the panel puts
 // the caver when it opens.
 //
