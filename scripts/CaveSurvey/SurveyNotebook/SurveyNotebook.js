@@ -2985,6 +2985,11 @@ SurveyNotebook.lineworkDialog = function(w) {
  * case AND the one nobody had reached yet: opening a second cave leaves
  * the first cave's pages sitting there, full and wrong.
  */
+/** How many times the startup fill asks for a drawing before giving up.
+ *  At 600ms each this waits about half a minute, which covers a large
+ *  drawing opening off a shared drive. */
+SurveyNotebook.SCAN_FILL_TRIES = 50;
+
 SurveyNotebook.refillIfStale = function(w) {
     if (isNull(w) || w.scanWanted !== true) {
         return false;
@@ -3865,16 +3870,35 @@ SurveyNotebook.buildDock = function(appWin) {
     SurveyNotebook.page = w;
 
     // THE DOCK RESTORED ALREADY VISIBLE never sends a visibility change,
-    // so nothing above ever fires for it. This one-shot runs once the
-    // application has finished starting, by which time a drawing is
-    // open, and fills the pane if the caver had left it open.
+    // so nothing above ever fires for it, and the pane sits empty until
+    // the caver toggles it off and on.
+    //
+    // IT RETRIES RATHER THAN GUESSING A DELAY. A single shot was tried
+    // at 1200ms and missed: this drawing lives on a shared drive and
+    // was not open yet when it fired, so the fill found no document,
+    // returned, and never came back -- measured, the pane still empty
+    // with scansForDoc never set. There is no signal here for "a
+    // drawing is now open", so the pane asks until there is one.
+    //
+    // It stops the moment it succeeds, so the cost is a handful of
+    // null checks on a normal start, and it gives up rather than
+    // polling forever on a session where no drawing is ever opened.
     try {
+        var tries = 0;
         var firstFill = new QTimer();
-        firstFill.singleShot = true;
+        firstFill.interval = 600;
         firstFill.timeout.connect(function() {
-            SurveyNotebook.refillIfStale(SurveyNotebook.page);
+            tries++;
+            var page = SurveyNotebook.page;
+            var filled = (!isNull(page) && page.scansForDoc !== undefined &&
+                page.scansForDoc !== null);
+            if (filled || tries > SurveyNotebook.SCAN_FILL_TRIES) {
+                firstFill.stop();
+                return;
+            }
+            SurveyNotebook.refillIfStale(page);
         });
-        firstFill.start(1200);
+        firstFill.start();
     } catch (eFirst) {
         w.problems.push("scan pane first fill (" + eFirst + ")");
     }
