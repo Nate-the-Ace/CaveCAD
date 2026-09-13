@@ -19,6 +19,19 @@
 // drawing still knows which file each image WAS, even when it no longer
 // knows where to find it.
 //
+// IT LASTS FOR THE SESSION, NOT THROUGH A SAVE. Measured on Truitt:
+// relinked 46 of 47, saved, reloaded -- 0 of 47. CaveCAD's DXF exporter
+// writes an IMAGEDEF with an EMPTY path for these images however the
+// entity is repaired, and drops a script-created image entity
+// altogether (93 images in memory came back as 47). Replacing the
+// entities instead was tried and is WORSE: the replacements do not
+// export either, so the drawing loses the images it had.
+//
+// So this makes the scans visible again -- in the 2D view, and to the
+// 3D panel's drape -- for as long as the drawing stays open, and has to
+// be run again next time. That is worth having and is not a fix. The
+// fix is in the exporter, and belongs in the fork.
+//
 // WHAT IT WILL NOT DO. It never guesses. An image with no tag is left
 // alone, and a tag naming a file that is not on disk is REPORTED rather
 // than quietly repointed at something nearby: an image silently showing
@@ -113,6 +126,9 @@ CsScanRelink.summary = function(r) {
         return qsTr("Scan images: all %1 still point at their files.")
             .arg(r.alreadyLinked);
     }
+    // SAYS IT DOES NOT LAST. A repair a caver believes is permanent,
+    // and is not, costs them the next session's confusion as well as
+    // this one's.
     var parts = [];
     if (r.relinked > 0) {
         parts.push(qsTr("%1 relinked").arg(r.relinked));
@@ -126,5 +142,10 @@ CsScanRelink.summary = function(r) {
     if (r.untagged > 0) {
         parts.push(qsTr("%1 with no record of their page").arg(r.untagged));
     }
-    return qsTr("Scan images: ") + parts.join(", ") + ".";
+    var text = qsTr("Scan images: ") + parts.join(", ") + ".";
+    if (r.relinked > 0) {
+        text += qsTr(" This lasts until the drawing is closed -- saving "
+            + "does not keep it, so run Repair Drawing again next time.");
+    }
+    return text;
 };

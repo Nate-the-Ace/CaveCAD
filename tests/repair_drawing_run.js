@@ -91,29 +91,33 @@ ok(before !== null && before.survey !== null,
 ok(before.survey.shots.length === 2, "the fixture drawing has two shots");
 
 // ---------------------------------------------------------------------
-// All three passes, defaults -- opts omitted entirely.
+// Every pass, defaults -- opts omitted entirely. FOUR now: relinking a
+// scan whose file reference was lost joined the repair in 0.9.126.0.
 // ---------------------------------------------------------------------
 var all = CsRepair.run(doc, di, {});
-ok(all.lines.length === 3, "all three passes report a line");
-ok(all.changed === true, "all three passes changed something");
+ok(all.lines.length === 4, "every pass reports a line");
+ok(all.changed === true, "the passes changed something");
 
 // ---------------------------------------------------------------------
 // Skip every pass -- nothing runs, nothing changes, and each line says
 // so, rather than silently doing nothing.
 // ---------------------------------------------------------------------
 var none = CsRepair.run(doc, di,
-    { rebuild: false, restyle: false, callouts: false });
+    { rebuild: false, restyle: false, callouts: false,
+      relinkScans: false });
 ok(none.changed === false, "skipping every pass changes nothing");
 ok(none.lines.join(" ").indexOf("skipped") !== -1,
     "a skipped pass says so");
 
 // ---------------------------------------------------------------------
-// One pass on, two off -- still three report lines, one per pass,
-// whether it ran or was skipped.
+// One pass on, the rest off -- still one report line per pass, whether
+// it ran or was skipped. Silence about a pass is indistinguishable from
+// a pass that did nothing, which is the point of the line.
 // ---------------------------------------------------------------------
 var one = CsRepair.run(doc, di,
-    { rebuild: false, restyle: true, callouts: false });
-ok(one.lines.length === 3, "a single pass still reports all three lines");
+    { rebuild: false, restyle: true, callouts: false,
+      relinkScans: false });
+ok(one.lines.length === 4, "a single pass still reports every pass");
 
 var out;
 if (failures.length === 0) {
