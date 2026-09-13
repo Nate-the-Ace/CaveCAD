@@ -21119,6 +21119,55 @@ eqs(CsMesh3d.tripLabel(sameDay, 1), "TRUITT CAVE 2024-04-06 (2)",
 eqs(CsMesh3d.tripLabel(sameDay, 2), "TRUITT CAVE 2024-06-04",
     "a trip whose date is its own keeps a clean label");
 
+// --- the middle of the passage ---------------------------------------
+//
+// A STATION IS NOT THE MIDDLE OF THE PASSAGE. It is wherever the
+// instrument sat -- often hard against a wall -- so a flight down the
+// line of the stations scrapes along whichever side they were set on.
+
+var rcStation = { x: 0, y: 0, z: 0 };
+// A passage running north, station against the left wall: nothing to
+// the left, ten feet to the right.
+var rcRing = [{ x: 0, y: 0, z: 0 }, { x: 10, y: 0, z: 0 },
+              { x: 10, y: 0, z: 6 }, { x: 0, y: 0, z: 6 }];
+var rcMid = CsMesh3d.ringCentre(rcStation, rcRing);
+nearly(rcMid.x, 5, 1e-9, "the middle sits between the walls, not on one");
+nearly(rcMid.z, 3, 1e-9, "and between the floor and the ceiling");
+
+eqs(CsMesh3d.ringCentre(rcStation, []).x, 0,
+    "with nothing measured, the station itself is the best there is");
+eqs(CsMesh3d.ringCentre(rcStation, null).z, 0, "and with no ring at all");
+
+// The buffer the view draws from.
+var rcBuf = CsMesh3d.outlineBuffer({
+    B: { centre: { x: 5, y: 0, z: 3 }, ring: rcRing },
+    A: { centre: { x: 1, y: 1, z: 1 }, ring: rcRing }
+});
+eqs(rcBuf.counts.length, 2, "one loop per station");
+eqs(rcBuf.names.join(","), "A,B", "in a stable order");
+eqs(rcBuf.counts[0], 4, "each loop says how many points it has");
+eqs(rcBuf.positions.length, 24, "and the points are laid end to end");
+eqs(rcBuf.centres[3], 5, "with the middle of each carried alongside");
+
+// A ring too small to be a loop is not one.
+eqs(CsMesh3d.outlineBuffer({ A: { centre: rcStation,
+    ring: [{ x: 0, y: 0, z: 0 }, { x: 1, y: 0, z: 0 }] } }).counts.length, 0,
+    "two points do not make a cross section");
+eqs(CsMesh3d.outlineBuffer(null).counts.length, 0, "and no sections, none");
+
+// The flight takes those middles.
+var rcCentres = CsFly.centresFrom(rcBuf);
+eqs(rcCentres.B.x, 5, "the flight reads the middles back by station");
+var rcResolved = { stations: { A: { x: 0, y: 0, z: 0 },
+                               B: { x: 0, y: 20, z: 0 } },
+                   legs: [{ from: "A", to: "B" }] };
+var rcWalk = CsFly.tour(rcResolved, rcCentres);
+nearly(rcWalk[0][1].x, 5, 1e-9,
+    "and flies through the middle of the passage, not along the station");
+var rcPlain = CsFly.tour(rcResolved);
+nearly(rcPlain[0][1].x, 0, 1e-9,
+    "with no middles worked out it still flies the stations");
+
 // --- station labels ---------------------------------------------------
 //
 // A passage in three dimensions is a shape with no name on it, and the

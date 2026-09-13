@@ -935,6 +935,19 @@ CsMesh3d.build = function(survey, resolved, opts) {
     // leg is asking.
     var ringCache = {};
 
+    // ONE RING PER STATION, kept for the flight: the camera flies the
+    // middle of the passage rather than the line of the stations, and
+    // draws the shape of it around itself as it goes.
+    var sectionAt = {};
+    var noteSection = function(stationName, st, ring) {
+        if (sectionAt.hasOwnProperty(stationName)) { return; }
+        if (ring === null || ring === undefined || ring.length < 3) { return; }
+        sectionAt[stationName] = {
+            centre: CsMesh3d.ringCentre(st, ring),
+            ring: ring
+        };
+    };
+
     var ringFor = function(stationName, st, dir) {
         var junction = (counts[stationName] || 0) >= 3;
         if (!junction && ringCache.hasOwnProperty(stationName)) {
@@ -946,6 +959,7 @@ CsMesh3d.build = function(survey, resolved, opts) {
         if (!junction) {
             ringCache[stationName] = ring;
         }
+        noteSection(stationName, st, ring);
         return ring;
     };
 
@@ -1089,6 +1103,7 @@ CsMesh3d.build = function(survey, resolved, opts) {
     return { triangles: tri, lines: lin, steps: steps, legend: legend,
              ghost: ghost, leads: leads,
              stations: CsMesh3d.stationLabels(resolved),
+             outlines: CsMesh3d.outlineBuffer(sectionAt),
              bounds: { min: min, max: max } };
 };
 
@@ -1107,6 +1122,77 @@ CsMesh3d.build = function(survey, resolved, opts) {
  *
  * \return {positions: [x,y,z,...], names: [...]}
  */
+/**
+ * The middle of the passage at a station, rather than the station.
+ *
+ * A STATION IS NOT THE MIDDLE OF THE PASSAGE. It is wherever the
+ * instrument sat -- against a wall, on a rock, a foot off the floor --
+ * and its LRUD says how far the passage runs from there. Flying down
+ * the line of the stations therefore scrapes along whichever side they
+ * happened to be set on. The middle of what was measured is the centre
+ * of the cross section.
+ *
+ * Taken from the RING so that splays count: a passage with a wide
+ * alcove on one side has its middle over towards the alcove, and the
+ * four LRUD ticks alone would not know. Falls back to the station
+ * itself when there is nothing measured to average.
+ *
+ * \return {x, y, z}
+ */
+/**
+ * The cross sections, flattened for the view.
+ *
+ * One closed loop per station, with the middle of each: the flight uses
+ * the middles for its path and the view draws the loop nearest the
+ * camera, so a caver flying the passage can see its shape around them.
+ *
+ * \return {positions: [x,y,z...], counts: [n...], centres: [x,y,z...],
+ *          names: [...]}
+ */
+CsMesh3d.outlineBuffer = function(sectionAt) {
+    var out = { positions: [], counts: [], centres: [], names: [] };
+    if (sectionAt === null || sectionAt === undefined) {
+        return out;
+    }
+    var names = [];
+    for (var name in sectionAt) {
+        if (sectionAt.hasOwnProperty(name)) { names.push(name); }
+    }
+    // Sorted, so two runs over one cave hand back the same order.
+    names.sort();
+    for (var i = 0; i < names.length; i++) {
+        var sec = sectionAt[names[i]];
+        if (sec === null || sec === undefined) { continue; }
+        var ring = sec.ring;
+        if (ring === null || ring === undefined || ring.length < 3) {
+            continue;
+        }
+        for (var r = 0; r < ring.length; r++) {
+            out.positions.push(ring[r].x, ring[r].y, ring[r].z);
+        }
+        out.counts.push(ring.length);
+        out.centres.push(sec.centre.x, sec.centre.y, sec.centre.z);
+        out.names.push(names[i]);
+    }
+    return out;
+};
+
+CsMesh3d.ringCentre = function(station, ring) {
+    if (ring === null || ring === undefined || ring.length === 0) {
+        return { x: station.x, y: station.y, z: station.z };
+    }
+    var x = 0, y = 0, z = 0, n = 0;
+    for (var i = 0; i < ring.length; i++) {
+        var p = ring[i];
+        if (!isFinite(p.x) || !isFinite(p.y) || !isFinite(p.z)) { continue; }
+        x += p.x; y += p.y; z += p.z; n++;
+    }
+    if (n === 0) {
+        return { x: station.x, y: station.y, z: station.z };
+    }
+    return { x: x / n, y: y / n, z: z / n };
+};
+
 CsMesh3d.stationLabels = function(resolved) {
     var out = { positions: [], names: [] };
     if (resolved === null || resolved === undefined ||

@@ -498,7 +498,11 @@ Cave3D.refresh = function() {
         // GUARDED: the tools can be updated without the application.
         var flight = { points: [], breaks: [] };
         try {
-            flight = CsFly.path(read.resolved);
+            // THROUGH THE MIDDLE OF THE PASSAGE, not along the line
+            // of the stations: the mesh worked out where the middle is
+            // when it built the cross sections.
+            flight = CsFly.path(read.resolved, null,
+                CsFly.centresFrom(mesh.outlines));
         } catch (eFly) {
         }
         cave3d.setFlyPath(Cave3D.handle, CsFly.flatten(flight.points),

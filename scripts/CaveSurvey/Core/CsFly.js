@@ -102,7 +102,49 @@ CsFly.runs = function(resolved) {
  *
  * \return [[{x,y,z}, ...], ...] -- one continuous walk per piece
  */
-CsFly.tour = function(resolved) {
+/**
+ * Where the camera should be at a station: the middle of the passage,
+ * when the mesh worked one out, and the station itself otherwise.
+ *
+ * A STATION IS NOT THE MIDDLE OF THE PASSAGE -- it is wherever the
+ * instrument sat, often hard against a wall -- so a flight down the
+ * line of the stations scrapes along whichever side they were set on.
+ */
+CsFly.centreOf = function(name, resolved, centres) {
+    if (centres !== null && centres !== undefined &&
+            centres.hasOwnProperty(name)) {
+        var c = centres[name];
+        if (CsFly.usable(c)) {
+            return { x: c.x, y: c.y, z: c.z };
+        }
+    }
+    var st = resolved.stations[name];
+    return { x: st.x, y: st.y, z: st.z };
+};
+
+/**
+ * The middles of the passage, by station name, out of a mesh's outline
+ * buffer.
+ *
+ * \return {name: {x, y, z}}
+ */
+CsFly.centresFrom = function(outlines) {
+    var out = {};
+    if (outlines === null || outlines === undefined ||
+            outlines.names === undefined || outlines.centres === undefined) {
+        return out;
+    }
+    for (var i = 0; i < outlines.names.length; i++) {
+        out[outlines.names[i]] = {
+            x: outlines.centres[i * 3],
+            y: outlines.centres[i * 3 + 1],
+            z: outlines.centres[i * 3 + 2]
+        };
+    }
+    return out;
+};
+
+CsFly.tour = function(resolved, centres) {
     var out = [];
     if (resolved === null || resolved === undefined ||
             resolved.legs === null || resolved.legs === undefined ||
@@ -135,7 +177,7 @@ CsFly.tour = function(resolved) {
     for (var s = 0; s < order.length; s++) {
         if (visitedStation[order[s]] === true) { continue; }
         var walk = CsFly.walkPiece(order[s], adj, unflown, visitedStation,
-            resolved);
+            resolved, centres);
         if (walk.length >= 2) {
             out.push(walk);
         }
@@ -149,11 +191,11 @@ CsFly.legKey = function(a, b) {
 };
 
 /** The walk over one connected piece of cave. */
-CsFly.walkPiece = function(start, adj, unflown, visitedStation, resolved) {
+CsFly.walkPiece = function(start, adj, unflown, visitedStation, resolved,
+                           centres) {
     var walk = [];
     var push = function(name) {
-        var st = resolved.stations[name];
-        walk.push({ x: st.x, y: st.y, z: st.z });
+        walk.push(CsFly.centreOf(name, resolved, centres));
         visitedStation[name] = true;
     };
     var at = start;
@@ -309,8 +351,8 @@ CsFly.resample = function(points, step) {
  *        of samples
  * \return {points: [{x,y,z}], breaks: [index, ...], length: <units>}
  */
-CsFly.path = function(resolved, step) {
-    var runs = CsFly.tour(resolved);
+CsFly.path = function(resolved, step, centres) {
+    var runs = CsFly.tour(resolved, centres);
     var out = { points: [], breaks: [], turns: [], length: 0 };
     if (runs.length === 0) { return out; }
     var use = step;
