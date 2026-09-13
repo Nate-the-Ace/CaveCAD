@@ -22,67 +22,46 @@ cave and the wrong one for emptying the drawing you already have open.
 
 ## What a reset is
 
-FULL. Survey data goes with everything else: a class starts by
-importing the survey, so leaving stations behind would skip the first
-lesson.
+FULL, and full means full. Nothing in the drawing survives:
 
-Kept:
+  * the survey -- stations, legs, splays, LRUD, trip metadata;
+  * the drawn map -- traced linework, shaped lines, symbols, area
+    fills, callouts, notes, profile bands, cross sections;
+  * the PLACED IMAGES -- every sketch scan and the aerial basemap;
+  * the georeference, which rides an entity and goes with it.
 
-  * IMAGE entities -- the sketch scans (plan, profile, section) and the
-    aerial basemap.
-  * The georeference: GeoLat / GeoLon / GeoStation, and the
-    GeoDrawX / GeoDrawY position they were pinned at.
-
-Deleted: everything else. Stations, legs, splays, LRUD, traced
-linework, shaped lines, symbols, area fills, callouts, profile bands,
-cross sections, text, dimensions, and any legacy survey data store.
+The first design of this tool kept the images and carried the
+georeference across on a marked point. That was wrong, and the reason it
+was wrong is the reason the tool exists: placing a scan, fitting it,
+trimming it and fetching the aerial are each a tool a student is here to
+learn, exactly as importing the survey is. A reset that left them
+standing would skip those lessons as surely as one that left the
+stations behind would skip the first.
 
 Then the layer table is brought back to the current template
 (CsRestyle.ensureAndApply), so a class does not start on the previous
 student's stray layers.
 
-The result is a drawing that looks new and happens to have images and a
-location in it.
+## What is NOT touched
 
-## Why the images can survive untouched
+The cave's FOLDER. scans/, images/, lidar/, PDF/ and backup/ come
+through exactly as they were, so every page, photograph, capture and
+plotted map is still there to be placed again. This tool empties a
+DRAWING and never a folder; Teaching Cave (CsTeach) is the one that
+resets a folder, from a pristine master.
 
-A placed scan is an IMAGE entity whose file pointer lives in the DXF's
-IMAGEDEF, and that pointer is the fragile part of the system -- Truitt
-Cave lost all forty-seven of them at once (see CsScanRelink). The
-reset never touches an image entity, never moves the drawing to another
-path, and never rebuilds an IMAGEDEF. Trim box, warp and placement ride
-through because nothing asks them to.
+That distinction is what makes the reset survivable. The expensive part
+of a cave project is the material on disk, not the placement of it.
 
-This is why the reset works IN PLACE rather than writing a fresh file
-beside the original: a drawing that changes folders loses its scan
-paths.
+## Why not just make a new drawing
 
-## Why the georeference needs a carrier
+Because a cave project is a folder whose drawing has a name, a backup
+history, a shelf entry, and a path that every scan is stored relative
+to. A new drawing is a new file somewhere else. The reset keeps all of
+that and empties what is inside it.
 
-The geo tags ride an ENTITY -- normally the anchor station -- and a full
-wipe takes that station with everything else. CsRevise hits the same
-problem on its non-rigid path and solves it by reading the anchor before
-the redraw and recommitting it after.
-
-The reset does the same, onto a carrier: a POINT on CTRL-AERIAL holding
-GeoLat / GeoLon / GeoStation / GeoDrawX / GeoDrawY plus a GeoCarrier
-marker, placed at the pinned position.
-
-Position matters. CsLocationPick compares the anchor entity's position
-against GeoDrawX/GeoDrawY and, past MOVE_EPS, asks whether the station
-has moved and the coordinate should be recomputed. A carrier at the
-pinned position keeps that question unasked. On a drawing georeferenced
-before those tags existed pinX/pinY are null, and the carrier goes at
-the old anchor entity's own position.
-
-This works at all because CsLocationPick.anchorRecord scans ANY entity
-for GeoLat/GeoLon -- it is not station-specific.
-
-The carrier must not outlive its purpose. After the next import the
-drawing would carry the geo tags twice, on the carrier and on the new
-anchor station, and anchorRecord returns whichever it finds first. So
-CsDraw.survey deletes any GeoCarrier entity when it commits a real
-anchor.
+It also works IN PLACE for a second reason: a drawing that changes
+folders loses the relative paths its scans are stored against.
 
 ## Guards, in order
 
@@ -103,10 +82,13 @@ implying otherwise.
 
 Title: `Reset Drawing -- <Cave>`.
 
-Body, in order: what goes, counted by kind ("412 stations, 1,830 traced
-entities, 96 symbols, 3 profile bands, 2 cross sections"); what stays
-("47 images kept, geo anchor kept"); the backup path just written; and,
-where the drawing is modified, the line about unsaved changes.
+Body, in order: what goes, counted in three numbers -- survey, drawn,
+and PLACED IMAGES counted apart, because somebody who has just spent an
+evening fitting forty-seven scans deserves to see that number before
+agreeing rather than a total that hides it; the line saying the location
+goes too and comes back from Set Cave Location; what is NOT touched (the
+folder, and everything on disk in it); the backup path just written;
+and, where the drawing is modified, the line about unsaved changes.
 
 Confirmation is typed: a line edit, and OK stays disabled until the
 text matches the cave's name, trimmed and case-insensitive. Default
@@ -120,31 +102,33 @@ the student decides.
 
 `Core/CsReset.js` -- pure, node-testable:
 
-  * `KEEP_LAYERS` -- CTRL-SCAN, CTRL-PROFILE-SCAN, CTRL-SECTION-SCAN,
-    CTRL-AERIAL.
-  * `keepsEntity({type, layer, tags})` -- true for an IMAGE on a keep
-    layer or carrying SketchScan / SectionScan. Type AND layer, so a
-    stray line drawn on CTRL-SCAN still goes.
-  * `planReset(state)` -> `{can, reason, warning, counts}`, the shape
+  * `keepsEntity(info)` -- false, always. It exists so the rule is
+    written down in one place with its reason attached, rather than
+    being the absence of a filter in the middle of the walk, and so the
+    walk and the count cannot drift apart if it ever changes.
+  * `countKind(info)` -- "image" for a placed image wherever it sits,
+    else "survey" for a CTRL- layer and "drawn" for the rest.
+  * `tally(infos)` -- {total, survey, drawn, images}.
+  * `planReset(state)` -> `{can, reason, warning}`, the shape
     CsTeach.planReset already uses: a refusal comes back as words a
     student can act on, never as a throw.
-  * `carrierFrom(anchorRecord)` -> `{x, y, tags}` or null.
-  * `summaryText(counts)`, `doneText(caveName, counts)`.
-  * `countKind(layer, tags)` -- which counted kind an entity falls in.
+  * `summaryText`, `doneText`, `matchesName`, `groupNumber`.
 
 `ResetDrawing/ResetDrawing.js` -- presenter and document work:
 
-  * `classify(doc)` -- walks queryAllEntities, splits keep from delete,
-    counts the deletions by kind.
-  * the dialog.
-  * `apply(doc, di, plan)` -- read anchorRecord, one
-    RDeleteObjectsOperation, commit the carrier, CsRestyle.ensureAndApply.
-  * `init(basePath)` -- the standard add-on wiring, without which the
-    tool never appears in the menu. Group 450, sorted beside Teaching
-    Cave; command `resetdrawing`. Icon pair, light and inverse.
+  * `classify(doc)` -- walks model space (not block definitions: a
+    symbol's DEFINITION is not drawing content, and emptying those
+    would empty the symbol library), splits ids from counts.
+  * `withEveryLayerEditable` -- clears off, frozen AND locked on every
+    layer for the delete, and puts each back. Locked is deliberately
+    cleared here where CsLayers.withLayersOn will not: a locked layer
+    refuses a delete in SILENCE, so the drawing would come back looking
+    emptied while whatever was protected quietly survived.
+  * `buildConfirm` / `confirm` -- split so the dialog can be built and
+    inspected without a modal exec blocking the application.
+  * `deleteAll`, `caveFolderOf`, `init(basePath)`.
 
-One edit outside the new files: CsDraw.survey deletes a GeoCarrier
-entity when it commits a real anchor.
+Nothing outside these two files changes.
 
 ## Not doing
 
@@ -152,22 +136,28 @@ Block purging and sheet-layout clearing. Sheets are separate files
 (CsSheetFile) so there are no layouts to clear, and purging blocks
 would take symbol definitions the palette expects to find.
 
-A "keep the survey, wipe the drawn work" mode. Asked and answered: the
-reset is full.
+A "keep the survey, wipe the drawn work" mode, and a "keep the images"
+mode. Asked and answered: the reset is full.
 
 ## Testing
 
-Unit tests in tests/js_unit.js over the pure half: keepsEntity across
-image/non-image and keep/other layers, planReset through each refusal
-and the go case, carrierFrom with and without pin tags, countKind, and
-the summary text.
+Unit tests in tests/js_unit.js over the pure half: keepsEntity over
+images and non-images alike, countKind's three-way split, the tally,
+planReset through each refusal and the go case, matchesName, and every
+line the dialog promises -- the image count, the location line, and the
+sentence saying the folder is not touched.
 
 CsReset.js must be added to the harness's hand-written Core file list.
 A Core file missing from that list does not fail -- it passes silently
 through the harness's deliberate catches, and every test that needed it
 is quietly skipped.
 
-Live GUI check on the Pitfall Cave fixture and on a Truitt copy: reset,
-confirm the images are still drawn and still linked to their files,
-confirm the geo anchor still answers, import a survey, confirm the
-carrier is gone and exactly one anchor remains.
+Engine test tests/reset_drawing_run.js (stage 11/44): a real document
+with a survey, two placed images, a georeferenced anchor station, a wall
+on a LOCKED layer and an aerial on an OFF one. After the reset: not one
+entity left, no image, no anchor, the scanned page still on disk, the
+template's layers back, and the locked and off layers restored to how
+they were. A second run finds nothing and the tool refuses.
+
+Live GUI check on a teaching copy: reset, confirm the drawing is empty
+and the cave folder is not.

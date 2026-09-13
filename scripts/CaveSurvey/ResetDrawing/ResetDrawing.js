@@ -1,16 +1,21 @@
 /**
  * ResetDrawing.js
  *
- * Empty a cave drawing without losing what was expensive to put in it:
- * the images stay, the cave's location stays, everything else goes.
+ * Empty a cave drawing completely, without touching the cave's folder.
  *
- *   Cave Survey > Reset Drawing   (or type "reset")
+ *   Cave Survey > Reset Drawing   (or type "rd")
  *
  * For teaching a class the same starting point twice, and for testing a
  * tool against a project that does not have to be rebuilt by hand every
- * run. The rules -- what survives, what a refusal says, where the
- * georeference is parked -- are in Core/CsReset.js and are tested under
- * node; this file is the walk, the dialog and the delete.
+ * run. Nothing in the drawing survives -- survey, linework, symbols,
+ * notes, sections, the placed sketch scans and the aerial basemap, and
+ * the georeference with them -- because every one of those is put there
+ * by a tool a student is here to learn. The scans and the imagery
+ * themselves stay on disk, so all of it can be done again.
+ *
+ * The rules -- what a refusal says, what the counts mean -- are in
+ * Core/CsReset.js and are tested under node; this file is the walk, the
+ * dialog and the delete.
  *
  * ORDER IS THE SAFETY PROPERTY, not the dialog. The backup is written
  * BEFORE the confirmation is even shown, and a backup that does not
@@ -32,7 +37,9 @@ ResetDrawing.prototype.beginEvent = function() {
     this.terminate();
 };
 
-/** One entity's facts, in the shape CsReset's pure half reads. */
+/** One entity's facts, in the shape CsReset's pure half reads. The
+ *  entity kind is read only so that images can be COUNTED apart -- it
+ *  no longer decides anything's fate. */
 ResetDrawing.infoFor = function(entity) {
     var isImage = false;
     try {
@@ -47,19 +54,11 @@ ResetDrawing.infoFor = function(entity) {
     } catch (eL) {
         layer = "";
     }
-    var tags = {};
-    for (var i = 0; i < CsReset.SCAN_TAGS.length; i++) {
-        try {
-            tags[CsReset.SCAN_TAGS[i]] = CsTags.get(entity,
-                CsReset.SCAN_TAGS[i]);
-        } catch (eT) {
-        }
-    }
-    return { isImage: isImage, layer: layer, tags: tags };
+    return { isImage: isImage, layer: layer };
 };
 
 /**
- * Walks model space and splits it: what is deleted, and what is kept.
+ * Walks model space and counts what is about to go.
  *
  * Model space only (allBlocks false). A symbol's BLOCK DEFINITION is
  * not drawing content -- the inserts that reference it are, and those
@@ -194,30 +193,6 @@ ResetDrawing.deleteAll = function(doc, di, ids) {
     return n;
 };
 
-/**
- * Parks the georeference on a carrier point, and removes any carrier a
- * previous reset left -- so running this twice leaves one, not two.
- *
- * \return true when a location was carried across.
- */
-ResetDrawing.placeCarrier = function(doc, di, carrier) {
-    if (carrier === null) {
-        return false;
-    }
-    CsLayers.ensure(doc, di, CsReset.CARRIER_LAYER);
-    var op = new RAddObjectsOperation();
-    var entity = CsDraw.addPoint(doc, op, CsReset.CARRIER_LAYER,
-        new RVector(carrier.x, carrier.y));
-    for (var k in carrier.tags) {
-        if (carrier.tags.hasOwnProperty(k)) {
-            CsTags.set(entity, k, carrier.tags[k]);
-        }
-    }
-    op.addObject(entity, false);
-    di.applyOperation(op);
-    return true;
-};
-
 /** The cave folder this drawing sits in, or null when it is not in one.
  *  A cave project has a scans/ folder; that is what makes it one. */
 ResetDrawing.caveFolderOf = function(path) {
@@ -310,19 +285,20 @@ function resetDrawingRun() {
         return;
     }
 
-    var anchor = CsLocationPick.anchorRecord(doc);
-    var carrier = CsReset.carrierFrom(anchor);
-    var carried = false;
+    // The georeference rides an entity and goes with it: nothing here
+    // reads or re-commits it. That is deliberate -- declaring the cave's
+    // location is one of the steps a class is here to practise, and a
+    // location quietly surviving a reset is one the student never
+    // learns to set.
     ResetDrawing.withEveryLayerEditable(doc, di, function() {
         ResetDrawing.deleteAll(doc, di, split.ids);
-        carried = ResetDrawing.placeCarrier(doc, di, carrier);
     });
     // The layer table last, so the drawing a class opens carries the
     // current palette and every layer the template has, not whatever
     // the previous student left behind.
     CsRestyle.ensureAndApply(doc, di);
 
-    var done = CsReset.doneText({ counts: split.counts, carrier: carried,
+    var done = CsReset.doneText({ counts: split.counts,
         backupPath: backupPath });
     try {
         QMessageBox.information(getMainWindow(), qsTr("Reset Drawing"),

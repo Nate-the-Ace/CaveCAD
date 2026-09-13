@@ -6,10 +6,11 @@
 // Prints "### RESET DRAWING OK <n>" or "### RESET DRAWING FAIL".
 //
 // What CsReset's unit tests cannot prove, because they never hold a
-// document: that the entities actually GO, that the images actually
-// STAY with their file references intact, that a locked or switched-off
-// layer does not silently keep what was on it, and that the
-// georeference survives the loss of the station that was carrying it.
+// document: that the entities actually GO -- all of them, the placed
+// images and the georeference included -- that a locked or switched-off
+// layer does not silently keep what was on it, and that the cave's
+// FOLDER comes through untouched, which is the whole reason emptying
+// the drawing is survivable.
 //
 // THE LOCKED-LAYER CASE IS THE POINT OF THIS FILE. Off, frozen and
 // locked layers refuse deletes in this build without a word, so a reset
@@ -110,12 +111,6 @@ aerial.setProperty(RImageEntity.PropertyFileName, scansDir + "/" + pageRel);
 aerial.setLayerId(doc.getLayerId(CsLayers.CTRL_AERIAL));
 addOp.addObject(aerial, false);
 
-// A line somebody drew ON the scan layer. Not a scan: it goes.
-var stray = new RLineEntity(doc,
-    new RLineData(new RVector(0, 0), new RVector(5, 5)));
-stray.setLayerId(doc.getLayerId(CsLayers.CTRL_SCAN));
-addOp.addObject(stray, false);
-
 var wall = new RLineEntity(doc,
     new RLineData(new RVector(10, 0), new RVector(10, 20)));
 wall.setLayerId(doc.getLayerId(CsLayers.WALLS_SURVEYED));
@@ -157,102 +152,59 @@ ok(CsLocationPick.anchorRecord(doc) !== null,
 // Reset.
 // ---------------------------------------------------------------------
 var split = ResetDrawing.classify(doc);
-ok(split.counts.images === 2, "both images are counted as kept");
-ok(split.counts.total > 4, "and the rest as doomed (" +
-    split.counts.total + ")");
+ok(split.counts.images === 2, "both images are counted, and counted apart");
+ok(split.ids.length === split.counts.total,
+    "everything counted is everything doomed -- the walk and the tally " +
+    "cannot disagree (" + split.counts.total + ")");
 
-var anchor = CsLocationPick.anchorRecord(doc);
-var carrier = CsReset.carrierFrom(anchor);
 ResetDrawing.withEveryLayerEditable(doc, di, function() {
     ResetDrawing.deleteAll(doc, di, split.ids);
-    ResetDrawing.placeCarrier(doc, di, carrier);
 });
 CsRestyle.ensureAndApply(doc, di);
 
-// -- what stayed -------------------------------------------------------
-var images = doc.queryAllEntities(false, false, RS.EntityImage);
-ok(images.length === 2, "both images are still in the drawing");
-var stillLinked = 0;
-for (var i = 0; i < images.length; i++) {
-    var img = doc.queryEntity(images[i]);
-    if (String(img.getProperty(RImageEntity.PropertyFileName)[0]) !== "") {
-        stillLinked++;
-    }
-}
-ok(stillLinked === 2, "with their file references untouched -- the reset " +
-    "never rebuilds an IMAGEDEF, which is how scans lose their paths");
-
-var after = CsLocationPick.anchorRecord(doc);
-ok(after !== null, "the cave's location survived the station that held it");
-ok(after !== null && Math.abs(after.lat - 34.5) < 1e-9 &&
-    Math.abs(after.lon + 85.25) < 1e-9, "unchanged");
-ok(after !== null && Math.abs(after.pos.x - anchorPos.x) < 1e-9 &&
-    Math.abs(after.pos.y - anchorPos.y) < 1e-9,
-    "and sitting exactly where it was pinned, so nothing downstream " +
-        "reads it as a station that has moved");
-ok(after !== null && CsLocationPick.isCarrier(after.entity),
-    "it is on a marked carrier, not pretending to be a station");
-
 // -- what went ---------------------------------------------------------
 var left = doc.queryAllEntities(false, false);
-var nonImage = 0;
+var survivors = 0;
 for (var j = 0; j < left.length; j++) {
-    var e = doc.queryEntity(left[j]);
-    if (isNull(e)) {
-        continue;
-    }
-    if (!isImageEntity(e) && !CsLocationPick.isCarrier(e)) {
-        nonImage++;
+    if (!isNull(doc.queryEntity(left[j]))) {
+        survivors++;
     }
 }
-ok(nonImage === 0, "nothing else is left -- including the wall on the " +
-    "LOCKED layer and the line drawn on the scan layer (" + nonImage +
-    " survived)");
+ok(survivors === 0, "the drawing is empty -- including both images, the " +
+    "wall on the LOCKED layer and the station that carried the " +
+    "georeference (" + survivors + " survived)");
 
+var images = doc.queryAllEntities(false, false, RS.EntityImage);
+ok(images.length === 0, "no placed image is left: placing a scan and " +
+    "fetching the aerial are lessons of their own, so leaving them " +
+    "behind would skip them");
+
+ok(CsLocationPick.anchorRecord(doc) === null,
+    "and no georeference -- it rides an entity, and every entity went");
+
+// -- what was NOT touched ---------------------------------------------
+ok((new QFileInfo(scansDir + "/" + pageRel)).exists(),
+    "the scanned page is still in the cave's scans/ folder -- the reset " +
+    "empties a DRAWING, never a folder, which is what makes the cave " +
+    "drawable again afterwards");
+
+// -- the layer table is the template's again --------------------------
+ok(doc.queryAllLayers().length > 50,
+    "the template's layers are all there (" +
+        doc.queryAllLayers().length + ")");
 ok(doc.queryLayer(CsLayers.WALLS_SURVEYED).isLocked() === true,
     "the locked layer is locked again afterwards");
 ok(doc.queryLayer(CsLayers.CTRL_AERIAL).isOff() === true,
     "and the layer that ships off is off again");
 
-// -- a real anchor beats the carrier ----------------------------------
-CsDraw.survey(survey, CsNetwork.resolve(survey, {}));
-var reStations = doc.queryAllEntities(false, false, RS.EntityPoint);
-var reAnchor = null;
-for (var k = 0; k < reStations.length; k++) {
-    var c2 = doc.queryEntity(reStations[k]);
-    if (!isNull(c2) && CsTags.get(c2, "Station") === "ENT") {
-        reAnchor = c2;
-        break;
-    }
-}
-if (reAnchor !== null) {
-    CsTags.commit(di, reAnchor, { GeoLat: 30.0, GeoLon: -80.0,
-        GeoStation: "ENT" });
-}
-var both = CsLocationPick.anchorRecord(doc);
-ok(both !== null && !CsLocationPick.isCarrier(both.entity),
-    "with a survey imported again, the real anchor station wins and the " +
-        "carrier steps aside");
-ok(both !== null && Math.abs(both.lat - 30.0) < 1e-9,
-    "so the coordinate read back is the station's, not the carrier's");
-
-// -- a second reset leaves ONE carrier, not two -----------------------
-var split2 = ResetDrawing.classify(doc);
-var anchor2 = CsLocationPick.anchorRecord(doc);
-ResetDrawing.withEveryLayerEditable(doc, di, function() {
-    ResetDrawing.deleteAll(doc, di, split2.ids);
-    ResetDrawing.placeCarrier(doc, di, CsReset.carrierFrom(anchor2));
-});
-var carriers = 0;
-var left2 = doc.queryAllEntities(false, false);
-for (var m = 0; m < left2.length; m++) {
-    var e2 = doc.queryEntity(left2[m]);
-    if (!isNull(e2) && CsLocationPick.isCarrier(e2)) {
-        carriers++;
-    }
-}
-ok(carriers === 1, "resetting twice leaves one carrier, not two (" +
-    carriers + ")");
+// -- running it twice is a no-op --------------------------------------
+var again = ResetDrawing.classify(doc);
+ok(again.counts.total === 0, "a second run finds nothing to delete");
+var plan = CsReset.planReset({ hasDocument: true, isSheet: false,
+    docPath: String(doc.getFileName()), inCaveFolder: true,
+    caveName: "Reset Test Cave", counts: again.counts });
+ok(plan.can === false,
+    "and the tool refuses rather than writing a backup for no reason");
 
 new QDir(caveDir).removeRecursively();
 
