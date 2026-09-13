@@ -21118,6 +21118,49 @@ eqs(CsMesh3d.tripLabel(sameDay, 1), "TRUITT CAVE 2024-04-06 (2)",
 eqs(CsMesh3d.tripLabel(sameDay, 2), "TRUITT CAVE 2024-06-04",
     "a trip whose date is its own keeps a clean label");
 
+// --- station labels ---------------------------------------------------
+//
+// A passage in three dimensions is a shape with no name on it, and the
+// first question asked of one is which bend you are looking at.
+
+var slResolved = { stations: {
+    "A1": { x: 0, y: 0, z: 0 },
+    "A10": { x: 10, y: 0, z: -1 },
+    "A2": { x: 20, y: 5, z: -2 }
+} };
+var slOut = CsMesh3d.stationLabels(slResolved);
+eqs(slOut.names.length, 3, "every station gets a label");
+eqs(slOut.positions.length, 9, "and three numbers each");
+// SORTED, so two runs over one cave hand back the same order and a
+// difference between them is about the cave rather than about hashing.
+eqs(slOut.names.join(","), "A1,A10,A2", "the order is stable");
+eqs(slOut.positions[3], 10, "a name and its point stay together (x)");
+eqs(slOut.positions[5], -1, "and its elevation");
+
+// EVERY station, not a chosen few: which ones can be READ is a question
+// about where the camera is, and only the view knows that.
+var slMany = { stations: {} };
+for (var sli = 0; sli < 500; sli++) {
+    slMany.stations["S" + sli] = { x: sli, y: 0, z: 0 };
+}
+eqs(CsMesh3d.stationLabels(slMany).names.length, 500,
+    "a big cave hands over all of them and lets the view thin them out");
+
+// A station with no usable position is not a label.
+var slBad = CsMesh3d.stationLabels({ stations: {
+    "OK": { x: 1, y: 2, z: 3 },
+    "NOZ": { x: 1, y: 2 },
+    "NAN": { x: 1, y: 2, z: NaN },
+    "NULL": null
+} });
+eqs(slBad.names.join(","), "OK",
+    "a station with no usable elevation is not labelled, rather than "
+    + "being labelled at zero");
+
+eqs(CsMesh3d.stationLabels(null).names.length, 0,
+    "no survey, no labels -- and no exception");
+eqs(CsMesh3d.stationLabels({}).names.length, 0, "and no stations likewise");
+
 // ---------------------------------------------------------------------
 // CsDrape -- a sketch laid onto the passage
 // ---------------------------------------------------------------------

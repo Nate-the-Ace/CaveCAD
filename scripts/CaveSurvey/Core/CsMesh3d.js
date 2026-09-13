@@ -1088,5 +1088,46 @@ CsMesh3d.build = function(survey, resolved, opts) {
     }
     return { triangles: tri, lines: lin, steps: steps, legend: legend,
              ghost: ghost, leads: leads,
+             stations: CsMesh3d.stationLabels(resolved),
              bounds: { min: min, max: max } };
+};
+
+/**
+ * Every station, as a point with its name, for the labels the 3D view
+ * writes over the passage.
+ *
+ * A SHAPE WITHOUT A NAME ON IT is what a passage in three dimensions
+ * is, and the first question a cartographer asks of one is which bend
+ * they are looking at.
+ *
+ * EVERY station, not a chosen few. Which ones can be read is a question
+ * about where the camera is, and only the view knows that -- it drops
+ * the ones that would overlap, nearest first. Choosing here would mean
+ * choosing again every time the camera moved.
+ *
+ * \return {positions: [x,y,z,...], names: [...]}
+ */
+CsMesh3d.stationLabels = function(resolved) {
+    var out = { positions: [], names: [] };
+    if (resolved === null || resolved === undefined ||
+            resolved.stations === null || resolved.stations === undefined) {
+        return out;
+    }
+    var names = [];
+    for (var name in resolved.stations) {
+        if (resolved.stations.hasOwnProperty(name)) { names.push(name); }
+    }
+    // Sorted, so the same cave hands back the same order every time and
+    // a diff of two runs is about the cave rather than about hashing.
+    names.sort();
+    for (var i = 0; i < names.length; i++) {
+        var st = resolved.stations[names[i]];
+        if (st === null || st === undefined) { continue; }
+        if (typeof st.x !== "number" || typeof st.y !== "number" ||
+                typeof st.z !== "number") { continue; }
+        if (!isFinite(st.x) || !isFinite(st.y) || !isFinite(st.z)) { continue; }
+        out.positions.push(st.x, st.y, st.z);
+        out.names.push(String(names[i]));
+    }
+    return out;
 };

@@ -68,6 +68,8 @@ Cave3D.SETTING_GHOST = "Cave3D/ShowGhost";
 Cave3D.SETTING_LEADS = "Cave3D/ShowLeads";
 Cave3D.SETTING_SECTIONS = "Cave3D/ShowSections";
 Cave3D.SETTING_SCANS = "Cave3D/ShowScans";
+/** Station names written over the passage. */
+Cave3D.SETTING_STATIONS = "Cave3D/ShowStations";
 /** Where a draped scan stops being pencil and starts being paper, as a
  *  luminance 0 to 1. Remembered because it is a property of the CAVER'S
  *  SCANNER, not of any one drawing: whoever photographs their books in
@@ -560,6 +562,8 @@ function cave3dRun() {
                 key = Cave3D.SETTING_SECTIONS;
             } else if (which === "scans") {
                 key = Cave3D.SETTING_SCANS;
+            } else if (which === "stations") {
+                key = Cave3D.SETTING_STATIONS;
             }
             RSettings.setValue(key, on);
         });
@@ -591,6 +595,12 @@ function cave3dRun() {
         RSettings.getBoolValue(Cave3D.SETTING_SECTIONS, false));
     cave3d.setShowScans(Cave3D.handle,
         RSettings.getBoolValue(Cave3D.SETTING_SCANS, false));
+    if (cave3d.setShowStations !== undefined) {
+        // GUARDED: the tools can be updated without the application,
+        // and an older CaveCAD has no station labels to switch on.
+        cave3d.setShowStations(Cave3D.handle,
+            RSettings.getBoolValue(Cave3D.SETTING_STATIONS, false));
+    }
     if (cave3d.setScanInk !== undefined) {
         cave3d.setScanInk(Cave3D.handle,
             RSettings.getDoubleValue(Cave3D.SETTING_SCAN_INK,
