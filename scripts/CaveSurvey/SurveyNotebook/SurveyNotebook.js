@@ -2970,6 +2970,44 @@ SurveyNotebook.lineworkDialog = function(w) {
  * there is ticked here, and a trip folded there opens folded here.
  * That is the whole reason this is the same list.
  */
+/**
+ * Fills the scan pane when it is wanted and what it shows no longer
+ * matches the drawing in front of the caver.
+ *
+ * THE PANE'S CONTENT DEPENDS ON THE DOCUMENT, not on visibility. Every
+ * earlier attempt at this bug hung off the pane being SHOWN, and each
+ * missed the same case: the dock is built during add-on init, before
+ * any document exists, and restoreState can bring it back ALREADY
+ * VISIBLE -- which is not a change, so no visibility signal, so no
+ * fill, so an empty pane the caver has to toggle off and on.
+ *
+ * Asking "is this listing of the drawing I am looking at" answers that
+ * case AND the one nobody had reached yet: opening a second cave leaves
+ * the first cave's pages sitting there, full and wrong.
+ */
+SurveyNotebook.refillIfStale = function(w) {
+    if (isNull(w) || w.scanWanted !== true) {
+        return false;
+    }
+    var now = null;
+    try {
+        now = String(EAction.getDocument().getFileName());
+    } catch (eNow) {
+        now = null;
+    }
+    if (now === null || now === "") {
+        // Still no drawing. Nothing to list, and nothing to be stale
+        // against -- the next call will catch it.
+        return false;
+    }
+    if (w.scansForDoc === now && w.scanRows !== undefined &&
+            w.scanRows !== null && w.scanRows.length > 0) {
+        return false;
+    }
+    SurveyNotebook.fillScans(w);
+    return true;
+};
+
 SurveyNotebook.fillScans = function(w) {
     if (isNull(w) || isNull(w.scanList)) {
         return;
@@ -2991,6 +3029,14 @@ SurveyNotebook.fillScans = function(w) {
     }
     w.scansFolder = folder;
     w.scanRows = [];
+    // WHICH DRAWING THIS LISTING IS OF. The pane's contents depend on
+    // the DOCUMENT, not on whether the pane is visible, so this is what
+    // says a listing has gone stale -- see refillIfStale.
+    try {
+        w.scansForDoc = String(EAction.getDocument().getFileName());
+    } catch (eForDoc) {
+        w.scansForDoc = null;
+    }
     if (isNull(folder) || folder === "") {
         SurveyNotebook.sayNoScans(w, "(save this drawing in a cave folder)");
         return;
@@ -3818,6 +3864,21 @@ SurveyNotebook.buildDock = function(appWin) {
     // "the" are the same thing.
     SurveyNotebook.page = w;
 
+    // THE DOCK RESTORED ALREADY VISIBLE never sends a visibility change,
+    // so nothing above ever fires for it. This one-shot runs once the
+    // application has finished starting, by which time a drawing is
+    // open, and fills the pane if the caver had left it open.
+    try {
+        var firstFill = new QTimer();
+        firstFill.singleShot = true;
+        firstFill.timeout.connect(function() {
+            SurveyNotebook.refillIfStale(SurveyNotebook.page);
+        });
+        firstFill.start(1200);
+    } catch (eFirst) {
+        w.problems.push("scan pane first fill (" + eFirst + ")");
+    }
+
     // A RE-SHOWN DOCK RE-READS THE SCANS, the way Sketch Scans already
     // does with the same signal. Filling only from the menu action's
     // beginEvent was not enough (Nathan, 2026-09-12: "I have to turn it
@@ -3835,11 +3896,7 @@ SurveyNotebook.buildDock = function(appWin) {
             if (shown !== true) {
                 return;
             }
-            if (isNull(SurveyNotebook.page) ||
-                    SurveyNotebook.page.scanWanted !== true) {
-                return;
-            }
-            SurveyNotebook.fillScans(SurveyNotebook.page);
+            SurveyNotebook.refillIfStale(SurveyNotebook.page);
         });
     } catch (eVis) {
         w.problems.push("scan pane refresh on show (" + eVis + ")");
@@ -4026,9 +4083,8 @@ SurveyNotebook.prototype.beginEvent = function() {
         // from another drawing is full and wrong, which is the case
         // most worth refilling; and on a bridge without
         // visibilityChanged this is the only fill there is.
-        if (dock.visible === true && !isNull(SurveyNotebook.page) &&
-                SurveyNotebook.page.scanWanted === true) {
-            SurveyNotebook.fillScans(SurveyNotebook.page);
+        if (dock.visible === true) {
+            SurveyNotebook.refillIfStale(SurveyNotebook.page);
         }
     } catch (e) {
         csNotebookDock = undefined;
