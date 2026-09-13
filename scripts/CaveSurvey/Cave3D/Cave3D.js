@@ -70,6 +70,10 @@ Cave3D.SETTING_SECTIONS = "Cave3D/ShowSections";
 Cave3D.SETTING_SCANS = "Cave3D/ShowScans";
 /** Station names written over the passage. */
 Cave3D.SETTING_STATIONS = "Cave3D/ShowStations";
+/** Frames an exported animation is written as. Twenty-four seconds at
+ *  twenty-five a second: long enough to follow a passage, short enough
+ *  that a caver is not left waiting on a folder of PNGs. */
+Cave3D.EXPORT_FRAMES = 600;
 /** Where a draped scan stops being pencil and starts being paper, as a
  *  luminance 0 to 1. Remembered because it is a property of the CAVER'S
  *  SCANNER, not of any one drawing: whoever photographs their books in
@@ -490,7 +494,96 @@ Cave3D.refresh = function() {
     }
 
     cave3d.setMesh(Cave3D.handle, mesh);
+    if (cave3d.setFlyPath !== undefined) {
+        // GUARDED: the tools can be updated without the application.
+        var flight = { points: [], breaks: [] };
+        try {
+            flight = CsFly.path(read.resolved);
+        } catch (eFly) {
+        }
+        cave3d.setFlyPath(Cave3D.handle, CsFly.flatten(flight.points),
+            flight.breaks);
+    }
     cave3d.setStatus(Cave3D.handle, Cave3D.statusText(read, mesh));
+};
+
+/**
+ * Writes the running animation out, a numbered PNG per frame.
+ *
+ * FRAMES, NOT A FILM. Encoding video would mean shipping an encoder or
+ * depending on whatever the caver happens to have installed, and a
+ * folder of numbered frames is something every editor on every platform
+ * will take. The command that turns them into a film is printed, so
+ * anyone who does have ffmpeg is one paste away.
+ *
+ * INTO THE CAVE'S OWN FOLDER by default, beside the drawing the
+ * animation is of, rather than wherever a file dialog last pointed.
+ */
+Cave3D.exportAnimation = function() {
+    if (Cave3D.handle === null || !cave3d.isOpen(Cave3D.handle)) {
+        return;
+    }
+    if (cave3d.exportFrames === undefined) {
+        warning(qsTr("Exporting an animation needs a newer CaveCAD."));
+        return;
+    }
+    var mode = "manual";
+    try { mode = String(cave3d.getCameraMode(Cave3D.handle)); } catch (e) {}
+    if (mode === "manual") {
+        // NOTHING IS MOVING, so there is nothing to write. Saying so
+        // beats six hundred copies of one frame.
+        warning(qsTr("Turn on Fly or Spin first -- an export writes "
+            + "whichever the camera is running."));
+        return;
+    }
+
+    var doc = getDocument();
+    var folder = CsCave.folderOf(isNull(doc) ? null : doc.getFileName());
+    var base = (folder === null) ? QDir.tempPath() : folder;
+    var name = "3d-" + mode + "-" + CsFly.stamp();
+    var dir = base + "/" + name;
+
+    var picked = QFileDialog.getExistingDirectory(
+        RMainWindowQt.getMainWindow(),
+        qsTr("Where should the frames go?"), base);
+    if (picked === null || picked === undefined || String(picked) === "") {
+        return;
+    }
+    dir = String(picked) + "/" + name;
+
+    var written = -1;
+    try {
+        written = cave3d.exportFrames(Cave3D.handle, dir,
+            Cave3D.EXPORT_FRAMES);
+    } catch (eExp) {
+        written = -1;
+    }
+    if (written <= 0) {
+        warning(qsTr("No frames could be written to %1.").arg(dir));
+        return;
+    }
+    // The recipe, written beside the frames: a caver who comes back to
+    // this folder in a year should not have to ask what it was for.
+    var note = "These are the frames of a " + mode + " animation of "
+        + (isNull(doc) ? "a cave" : CsCave.nameOf(doc.getFileName()))
+        + ", written by CaveCAD.\n\n"
+        + "To make a film of them, with ffmpeg installed:\n\n"
+        + "  ffmpeg -framerate 25 -i frame_%05d.png "
+        + "-c:v libx264 -pix_fmt yuv420p " + name + ".mp4\n\n"
+        + "Or drop the whole folder into any video editor as an image "
+        + "sequence.\n";
+    try {
+        var f = new QFile(dir + "/README.txt");
+        if (f.open(QIODevice.WriteOnly | QIODevice.Text)) {
+            var ts = new QTextStream(f);
+            ts.writeString(note);
+            ts.flush();
+            f.close();
+        }
+    } catch (eNote) {
+    }
+    cave3d.setStatus(Cave3D.handle,
+        qsTr("Wrote %1 frames to %2").arg(written).arg(dir));
 };
 
 function cave3dRun() {
@@ -567,6 +660,21 @@ function cave3dRun() {
             }
             RSettings.setValue(key, on);
         });
+        if (cave3d.exportRequested !== undefined) {
+            cave3d.exportRequested.connect(function(handle) {
+                if (handle !== Cave3D.handle) { return; }
+                Cave3D.exportAnimation();
+            });
+        }
+        if (cave3d.cameraModeChanged !== undefined) {
+            cave3d.cameraModeChanged.connect(function(handle, mode) {
+                if (handle !== Cave3D.handle) { return; }
+                // Not remembered between sessions: a cave opens still,
+                // and a view that started spinning on its own would be
+                // a surprise rather than a setting.
+                Cave3D.cameraMode = mode;
+            });
+        }
         if (cave3d.scanInkChanged !== undefined) {
             // GUARDED. The tools can be updated without the
             // application, and an older CaveCAD has no such signal --

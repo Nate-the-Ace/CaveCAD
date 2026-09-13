@@ -159,6 +159,7 @@ var CORE_FILES = [
     "scripts/CaveSurvey/Core/CsMesh3d.js",
     "scripts/CaveSurvey/Core/CsSection3d.js",
     "scripts/CaveSurvey/Core/CsDrape.js",
+    "scripts/CaveSurvey/Core/CsFly.js",
     "scripts/CaveSurvey/Core/CsScanFit.js",
     "scripts/CaveSurvey/Core/CsScanFrame.js",
     "scripts/CaveSurvey/Core/CsScanTrim.js",
@@ -21160,6 +21161,97 @@ eqs(slBad.names.join(","), "OK",
 eqs(CsMesh3d.stationLabels(null).names.length, 0,
     "no survey, no labels -- and no exception");
 eqs(CsMesh3d.stationLabels({}).names.length, 0, "and no stations likewise");
+
+// ---------------------------------------------------------------------
+// CsFly -- a camera path down the surveyed passage
+// ---------------------------------------------------------------------
+
+(function() {
+    function st(x, y, z) { return { x: x, y: y, z: z }; }
+    var flyResolved = {
+        stations: { A: st(0, 0, 0), B: st(100, 0, 0), C: st(100, 100, 0),
+                    X: st(500, 500, 50), Y: st(600, 500, 50),
+                    W: st(0, 0, 0) },
+        legs: [ { from: "A", to: "B" },
+                { from: "B", to: "C" },
+                // Somewhere else entirely: a branch, not a continuation.
+                { from: "X", to: "Y" },
+                // A splay is a wall hit, not passage anyone walked.
+                { from: "C", to: "W", splay: true } ]
+    };
+
+    var runs = CsFly.runs(flyResolved);
+    eqs(runs.length, 2, "legs that carry on from each other make one run");
+    eqs(runs[0].length, 3, "and the run holds every station along it");
+    eqs(runs[1].length, 2, "a leg starting elsewhere begins a new run");
+    eqs(runs[0][0].x, 0, "the run starts where the survey did");
+    eqs(runs[0][2].y, 100, "and ends where it ended");
+
+    // A SPLAY IS NOT PASSAGE. Flying down one would take the camera
+    // into the wall.
+    var splayOnly = CsFly.runs({ stations: { A: st(0,0,0), B: st(1,0,0) },
+        legs: [{ from: "A", to: "B", splay: true }] });
+    eqs(splayOnly.length, 0, "a survey of nothing but splays has no path");
+
+    eqs(CsFly.lengthOf(runs[0]), 200, "a run's length is walked, not flown");
+
+    // EVEN SPACING IS WHAT MAKES THE SPEED CONSTANT.
+    var even = CsFly.resample([st(0,0,0), st(100,0,0)], 25);
+    eqs(even.length, 5, "a hundred units at twenty-five gives five samples");
+    eqs(even[1].x, 25, "evenly spaced");
+    eqs(even[4].x, 100, "and it reaches the end");
+
+    // Uneven stations, even samples: the point of the exercise.
+    var uneven = CsFly.resample([st(0,0,0), st(10,0,0), st(210,0,0)], 10);
+    var gaps = [];
+    for (var g = 1; g < uneven.length; g++) {
+        gaps.push(Math.round(CsFly.distance(uneven[g-1], uneven[g]) * 1000) / 1000);
+    }
+    var worst = 0;
+    for (var gi = 0; gi < gaps.length; gi++) {
+        worst = Math.max(worst, Math.abs(gaps[gi] - 10));
+    }
+    ok(worst < 1e-6, "a short shot beside a long one still samples evenly "
+        + "(worst gap error " + worst + ")");
+
+    var single = CsFly.resample([st(3,4,5)], 10);
+    eqs(single.length, 1, "one station is one sample, not a crash");
+    eqs(CsFly.resample([], 10).length, 0, "and none is none");
+    eqs(CsFly.resample(null, 10).length, 0, "nor is null");
+
+    // The whole flight, with the jumps marked.
+    var path = CsFly.path(flyResolved, 25);
+    ok(path.points.length > 8, "the flight has samples (" +
+        path.points.length + ")");
+    eqs(path.breaks.length, 1, "and one break, where the survey jumped");
+    eqs(path.points[path.breaks[0]].x, 500,
+        "the break is at the first sample of the run that starts elsewhere");
+    eqs(path.length, 300, "the flight is as long as the passage walked");
+
+    // A default step, so a cave of any size takes a similar-sized flight.
+    var auto = CsFly.path(flyResolved);
+    ok(auto.points.length > 10 && auto.points.length < 400,
+        "an unasked-for step still gives a usable flight (" +
+        auto.points.length + " samples)");
+
+    eqs(CsFly.path(null).points.length, 0, "no survey, no flight");
+    eqs(CsFly.path({ legs: [], stations: {} }).points.length, 0,
+        "and no legs likewise");
+
+    // A station with no usable position is not flown to -- the datum
+    // trap, again.
+    var holed = CsFly.runs({ stations: { A: st(0,0,0), B: { x: 1, y: 2 } },
+        legs: [{ from: "A", to: "B" }] });
+    eqs(holed.length, 0, "a leg to a station with no elevation is not path");
+
+    // The folder name an export lands in.
+    var stamp = CsFly.stamp(new Date(2026, 8, 13, 7, 5));
+    eqs(stamp, "20260913-0705", "the stamp is sortable and readable");
+
+    var flat = CsFly.flatten([st(1,2,3), st(4,5,6)]);
+    eqs(flat.length, 6, "flatten gives three numbers a point");
+    eqs(flat[4], 5, "in order");
+}());
 
 // ---------------------------------------------------------------------
 // CsDrape -- a sketch laid onto the passage
