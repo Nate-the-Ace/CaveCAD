@@ -575,8 +575,33 @@ Cave3D.exportAnimation = function() {
     var dir = String(picked) + "/" + stem;
     var framesDir = dir + "/frames";
 
-    // THE FRAMES FIRST, into a folder of their own, because whether
-    // they become a film depends on a thing this machine may not have.
+    var film = "";
+    var why = "";
+
+    // THE SYSTEM'S OWN ENCODER FIRST. It takes the pictures as they are
+    // made, so no frames are written to disk at all and none have to be
+    // cleared away afterwards.
+    if (cave3d.exportFilm !== undefined) {
+        (new QDir()).mkpath(dir);
+        cave3d.setStatus(Cave3D.handle, qsTr("Filming..."));
+        try {
+            film = String(cave3d.exportFilm(Cave3D.handle,
+                dir + "/" + stem + ".mp4", Cave3D.EXPORT_FRAMES,
+                Cave3D.EXPORT_FPS));
+        } catch (eFilm) {
+            film = "";
+        }
+        if (film === "" && cave3d.lastEncodeError !== undefined) {
+            try { why = String(cave3d.lastEncodeError()); } catch (eW1) {}
+        }
+        if (film !== "") {
+            cave3d.setStatus(Cave3D.handle, qsTr("Wrote %1").arg(film));
+            return;
+        }
+    }
+
+    // NO ENCODER OF ITS OWN: the frames, and ffmpeg if the caver has
+    // one. A worse answer than a film, a better one than nothing.
     var written = -1;
     try {
         written = cave3d.exportFrames(Cave3D.handle, framesDir,
@@ -589,9 +614,6 @@ Cave3D.exportAnimation = function() {
         return;
     }
 
-    // THEN THE FILM, if there is anything here that can make one.
-    var film = "";
-    var why = "";
     if (cave3d.encodeFrames !== undefined) {
         cave3d.setStatus(Cave3D.handle,
             qsTr("Encoding %1 frames...").arg(written));
@@ -653,6 +675,127 @@ Cave3D.writeFrameNote = function(framesDir, dir, stem, mode, written, why) {
         }
     } catch (eNote) {
     }
+};
+
+/**
+ * The panel's own furniture: its title, its colour modes and the
+ * overlay switches, restored from what the caver last chose.
+ *
+ * SEPARATE FROM THE MESH because a panel can exist without one -- Qt
+ * puts the dock back where the caver left it on the next start, before
+ * this tool has run at all.
+ */
+Cave3D.dress = function() {
+    if (Cave3D.handle === null || !cave3d.isOpen(Cave3D.handle)) {
+        return;
+    }
+    var doc = getDocument();
+    if (!isNull(doc)) {
+        var name = CsCave.nameOf(doc.getFileName());
+        // open() on a panel that is already there only renames it and
+        // brings it forward.
+        cave3d.open(isNull(name) ? "" : name);
+    }
+    var keys = [], labels = [];
+    for (var mi = 0; mi < Cave3D.MODES.length; mi++) {
+        keys.push(Cave3D.MODES[mi].key);
+        labels.push(Cave3D.MODES[mi].label);
+    }
+    cave3d.setColorModes(Cave3D.handle, keys, labels, Cave3D.currentMode());
+    cave3d.setShowLeads(Cave3D.handle,
+        RSettings.getBoolValue(Cave3D.SETTING_LEADS, false));
+};
+
+/**
+ * Wires the panel's signals to this tool, once.
+ *
+ * CALLED FROM TWO PLACES and it has to be. The tool calls it when a
+ * caver opens the 3D view; init calls it after pre-building the panel,
+ * because a dock Qt restores from the saved layout comes up VISIBLE
+ * before the tool has ever run and asks for a mesh through
+ * refreshRequested -- with nothing listening, the caver gets an empty
+ * 3D view that looks broken.
+ *
+ * Connected once for the life of the application: the bridge outlives
+ * every run of the tool, so connecting per run would stack up duplicate
+ * handlers that all fire.
+ *
+ * EVERY REACH FOR A SIGNAL IS GUARDED, and every connection is its own
+ * statement. The tools can be updated without the application, and an
+ * older CaveCAD has fewer of these: one unguarded connect throws and
+ * leaves the panel with NOTHING connected -- which is how the Export
+ * button came to do nothing at all, silently, for a whole afternoon.
+ */
+Cave3D.connectOnce = function() {
+    if (Cave3D.connected) {
+        return;
+    }
+    if (cave3d.refreshRequested !== undefined) {
+        cave3d.refreshRequested.connect(function(handle) {
+            if (handle !== Cave3D.handle) { return; }
+            // A PANEL QT RESTORED HAS NOTHING IN IT -- no colour modes,
+            // no title, no toggles -- because the tool has never run.
+            Cave3D.dress();
+            Cave3D.refresh();
+        });
+    }
+    if (cave3d.colorModeChanged !== undefined) {
+        cave3d.colorModeChanged.connect(function(handle, mode) {
+            if (handle !== Cave3D.handle) { return; }
+            if (!Cave3D.isKnownMode(mode)) { return; }
+            Cave3D.mode = mode;
+            RSettings.setValue(Cave3D.SETTING_MODE, mode);
+            Cave3D.refresh();
+        });
+    }
+    if (cave3d.overlayToggled !== undefined) {
+        cave3d.overlayToggled.connect(function(handle, which, on) {
+            if (handle !== Cave3D.handle) { return; }
+            // Remembered, but NOT rebuilt: every overlay has its own
+            // buffer precisely so showing and hiding costs nothing.
+            var key = Cave3D.SETTING_LEADS;
+            if (which === "ghost") {
+                key = Cave3D.SETTING_GHOST;
+            } else if (which === "sections") {
+                key = Cave3D.SETTING_SECTIONS;
+            } else if (which === "scans") {
+                key = Cave3D.SETTING_SCANS;
+            } else if (which === "stations") {
+                key = Cave3D.SETTING_STATIONS;
+            }
+            RSettings.setValue(key, on);
+        });
+    }
+    if (cave3d.scanInkChanged !== undefined) {
+        cave3d.scanInkChanged.connect(function(handle, value) {
+            if (handle !== Cave3D.handle) { return; }
+            // Remembered, not rebuilt: the threshold is a shader
+            // uniform, so the view has already redrawn with it.
+            RSettings.setValue(Cave3D.SETTING_SCAN_INK, value);
+        });
+    }
+    if (cave3d.cameraSpeedChanged !== undefined) {
+        cave3d.cameraSpeedChanged.connect(function(handle, factor) {
+            if (handle !== Cave3D.handle) { return; }
+            RSettings.setValue(Cave3D.SETTING_CAMERA_SPEED, factor);
+        });
+    }
+    if (cave3d.cameraModeChanged !== undefined) {
+        cave3d.cameraModeChanged.connect(function(handle, mode) {
+            if (handle !== Cave3D.handle) { return; }
+            // Not remembered between sessions: a cave opens still, and
+            // a view that started spinning on its own would be a
+            // surprise rather than a setting.
+            Cave3D.cameraMode = mode;
+        });
+    }
+    if (cave3d.exportRequested !== undefined) {
+        cave3d.exportRequested.connect(function(handle) {
+            if (handle !== Cave3D.handle) { return; }
+            Cave3D.exportAnimation();
+        });
+    }
+    Cave3D.connected = true;
 };
 
 function cave3dRun() {

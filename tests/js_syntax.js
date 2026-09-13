@@ -111,5 +111,66 @@ if (addon === null) {
         }
     }
     print("### " + (TOOLS.length - failures) + "/" + TOOLS.length + " parsed");
-    print(failures === 0 ? "### SYNTAX OK" : "### SYNTAX FAILURES");
+
+    // CALLED BUT NEVER WRITTEN.
+    //
+    // Parsing does not catch a function that is called and does not
+    // exist -- it is a ReferenceError at RUN time, and in a signal
+    // handler or a guarded init that error is swallowed whole. That is
+    // exactly what happened to Cave3D.connectOnce: an edit removed it,
+    // everything still parsed, and every button on the 3D panel quietly
+    // stopped being connected to anything for an afternoon.
+    //
+    // So: for each file, every Thing.method() called on an object that
+    // file also DEFINES must have a "Thing.method = function"
+    // somewhere in the add-on.
+    var missing = 0;
+    var defined = {};
+    var calls = {};
+    for (var d = 0; d < TOOLS.length; d++) {
+        var text = readWhole(addon + TOOLS[d]);
+        if (text === null) { continue; }
+        // ANY assignment counts as defining it, not just "= function":
+        // a constant, or a function assigned from a local (which is how
+        // SketchScans hands its inner functions out), is just as
+        // defined as one written inline.
+        var def = /\b(Cs[A-Za-z0-9]*|Cave3D|SketchScans|SurveyNotebook)\.([A-Za-z0-9_]+)\s*=/g;
+        var m;
+        while ((m = def.exec(text)) !== null) {
+            defined[m[1] + "." + m[2]] = true;
+        }
+        var use = /\b(Cs[A-Za-z0-9]*|Cave3D|SketchScans|SurveyNotebook)\.([A-Za-z0-9_]+)\s*\(/g;
+        while ((m = use.exec(text)) !== null) {
+            var key = m[1] + "." + m[2];
+            if (!calls.hasOwnProperty(key)) { calls[key] = TOOLS[d]; }
+        }
+    }
+    for (var key in calls) {
+        if (!calls.hasOwnProperty(key)) { continue; }
+        if (defined[key] === true) { continue; }
+        // Things every object has.
+        var BUILT_IN = " hasOwnProperty toString valueOf constructor "
+            + "isPrototypeOf propertyIsEnumerable call apply bind ";
+        if (BUILT_IN.indexOf(" " + key.split(".")[1] + " ") >= 0) {
+            continue;
+        }
+        // Only complain about objects this add-on actually defines
+        // something on: a call to a Qt or QCAD object is not ours.
+        var owner = key.split(".")[0];
+        var ownsAny = false;
+        for (var known in defined) {
+            if (defined.hasOwnProperty(known) &&
+                    known.split(".")[0] === owner) { ownsAny = true; break; }
+        }
+        if (!ownsAny) { continue; }
+        print("FAIL  " + key + "() is called (" + calls[key] +
+              ") and never defined");
+        missing++;
+    }
+    if (missing > 0) {
+        print("### " + missing + " call(s) with nothing behind them");
+    }
+
+    print((failures === 0 && missing === 0)
+        ? "### SYNTAX OK" : "### SYNTAX FAILURES");
 }
