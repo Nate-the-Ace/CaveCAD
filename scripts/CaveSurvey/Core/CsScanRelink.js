@@ -117,9 +117,14 @@ CsScanRelink.run = function(doc, di) {
             // to the page puts the untrimmed sheet back on the map and
             // buries it. The box is its own tag, so honour it.
             var trim = CsScanTrim.parse(CsTags.get(e, CsScanTrim.TAG));
+            // A crop masked to a traced outline needs the outline too,
+            // or cutting it again gives back the whole box with all the
+            // clutter the caver drew around.
+            var shape = CsScanTrim.parseOutline(
+                CsTags.get(e, CsScanTrim.OUTLINE_TAG));
             var abs = null;
             if (trim !== null && !CsCave.isAbsolutePath(stored)) {
-                var made = CsScanTrim.write(scans, stored, trim);
+                var made = CsScanTrim.write(scans, stored, trim, shape);
                 if (made.path === null) {
                     // The derivative is gone and the page it was cut
                     // from cannot be read, so there is nothing to cut

@@ -667,24 +667,46 @@ SketchScans.buildDock = function(appWin) {
         // placeable until the caver has said which part of it they
         // mean.
         var trimRow = new QHBoxLayout();
-        w.trimLabel = new QLabel(qsTr("Trim: drag a box"));
+        w.trimLabel = new QLabel(qsTr("Trim: drag a box, or Trace an "
+            + "outline"));
         try {
             w.trimLabel.toolTip = qsTr("Drag a box round the sketch you " +
-                "want. Only that part of the page is placed, so the " +
-                "other sketches on it stay out of the drawing.");
+                "want, or press Trace to draw round it. Only that part " +
+                "of the page is placed, so the other sketches on it " +
+                "stay out of the drawing.");
         } catch (eTt) {
         }
         // NO "USE WHOLE PAGE". Scans get trimmed, always (Nathan,
         // 2026-09-11): a field page holds three sketches and placing
         // all of it puts the other two in the drawing.
-        w.trimRedoButton = new QPushButton(qsTr("Redo box"));
-        w.trimRedoButton.toolTip = qsTr("Forget this box and draw " +
-            "another one.");
+        w.trimRedoButton = new QPushButton(qsTr("Redo"));
+        w.trimRedoButton.toolTip = qsTr("Forget this trim and choose " +
+            "again.");
+        // TRACE, for a sketch a box cannot hold. A field page is often
+        // drawn corner to corner with two sketches sharing one sheet,
+        // and no rectangle round either of them leaves the other out.
+        // The crop is still a rectangle -- the outline's own bounding
+        // box -- with everything outside the line made transparent, so
+        // the drawing shows through the parts that were cut away.
+        w.traceButton = new QPushButton(qsTr("Trace"));
+        w.traceButton.toolTip = qsTr("Draw round the sketch instead of " +
+            "boxing it: click corners, or hold the button down to " +
+            "trace freehand, then click the first point to close.");
+        w.traceUndoButton = new QPushButton(qsTr("Undo point"));
+        w.traceUndoButton.toolTip = qsTr("Take back the last corner.");
         trimRow.addWidget(w.trimLabel, 1, 0);
+        trimRow.addWidget(w.traceButton, 0, 0);
+        trimRow.addWidget(w.traceUndoButton, 0, 0);
         trimRow.addWidget(w.trimRedoButton, 0, 0);
         previewLayout.addLayout(trimRow, 0);
         w.trimRedoButton.clicked.connect(function() {
             SketchScans.resetTrim(true);
+        });
+        w.traceButton.clicked.connect(function() {
+            SketchScans.startTrace();
+        });
+        w.traceUndoButton.clicked.connect(function() {
+            SketchScans.undoTracePoint();
         });
 
         // A click in the scan reports the pixel it landed on. This is
@@ -1205,12 +1227,12 @@ SketchScans.buildDock = function(appWin) {
     // elsewhere..." (a file picked from anywhere) end here, so there is
     // exactly one place that inserts an image and hands it to the align
     // tool -- see SketchScans.insert and SketchScans.alignSoon.
-    var insertAndAlign = function(path, name, trimRect) {
+    var insertAndAlign = function(path, name, trimRect, outline) {
         var di = EAction.getDocumentInterface();
         var doc = EAction.getDocument();
         if (isNull(di) || isNull(doc)) { return; }
         var placed = SketchScans.insert(doc, di, path, name,
-            frameNow(), trimRect);
+            frameNow(), trimRect, outline);
         if (placed === null) {
             return;                 // insert already explained why
         }
@@ -1234,7 +1256,7 @@ SketchScans.buildDock = function(appWin) {
         }
         var eff = SketchScans.effectivePath(rel);
         if (eff === null) { return; }
-        insertAndAlign(eff.path, rel, eff.rect);
+        insertAndAlign(eff.path, rel, eff.rect, eff.outline);
     };
 
     // NO SCANS-FOLDER LIST BEHIND THIS ONE. A file picked from anywhere
@@ -1251,7 +1273,7 @@ SketchScans.buildDock = function(appWin) {
         if (isNull(path) || String(path) === "") { return; }
         path = String(path);
         var name = new QFileInfo(path).fileName();
-        insertAndAlign(path, name, null);
+        insertAndAlign(path, name, null, null);
     };
 
     /** The drawing's plotted stations, and the order to walk them. */
@@ -2323,9 +2345,11 @@ SketchScans.effectivePath = function(rel) {
     if (w.trim !== null && w.trim !== undefined && w.trim.rel === rel &&
             w.trim.rect !== null && w.trim.rect !== undefined &&
             w.trim.path !== null && w.trim.path !== undefined) {
-        return { path: w.trim.path, rel: rel, rect: w.trim.rect };
+        return { path: w.trim.path, rel: rel, rect: w.trim.rect,
+                 outline: (w.trim.outline === undefined) ? null
+                     : w.trim.outline };
     }
-    return { path: w.scans + "/" + rel, rel: rel, rect: null };
+    return { path: w.scans + "/" + rel, rel: rel, rect: null, outline: null };
 };
 
 /**
@@ -2350,11 +2374,12 @@ SketchScans.resetTrim = function(reload) {
             CsScanPreview.show(w.scanView, w.scans + "/" + rel);
         }
         if (w.scanView !== null) {
+            CsScanPreview.armTrace(w.scanView, null, null);
             CsScanPreview.armBox(w.scanView, function(box) {
                 SketchScans.boxDrawn(box);
             });
         }
-        w.trimLabel.text = qsTr("Trim: drag a box");
+        w.trimLabel.text = qsTr("Trim: drag a box, or Trace an outline");
     } catch (e) {
         // a bridge that cannot relabel still gates on the state below
     }
@@ -2488,6 +2513,105 @@ SketchScans.chooseWholePage = function() {
 };
 
 /**
+ * A closed outline: cut it, mask it, and show the result.
+ *
+ * SAME CONTRACT AS boxDrawn, deliberately. The derivative is still a
+ * rectangle -- the outline's own bounding box -- with everything
+ * outside the line made transparent, so the placement that follows,
+ * the anchor mapping and the 3D drape all go on reading the same
+ * x/y/w/h they read for a boxed crop. The outline only decides which
+ * pixels inside that box survive.
+ */
+SketchScans.outlineDrawn = function(points) {
+    var w = SketchScans.w;
+    if (w === undefined || w === null || w.scanView === null) {
+        return;
+    }
+    var rel = SketchScans.selectedRel();
+    if (rel === null || rel === undefined || w.scans === null) {
+        return;
+    }
+    var shape = CsScanTrim.outlineFromPicks(points,
+        w.scanView.widthPx, w.scanView.heightPx);
+    if (shape === null) {
+        try {
+            CsScanPreview.resetTrace(w.scanView);
+            w.trimLabel.text = qsTr("Trim: that outline is too small -- "
+                + "trace a bigger one");
+        } catch (eSmall) {
+        }
+        return;
+    }
+    var rect = CsScanTrim.outlineBounds(shape);
+    var res = CsScanTrim.write(w.scans, rel, rect, shape);
+    if (res.path === null) {
+        try {
+            w.trimLabel.text = qsTr("Trim failed");
+        } catch (eLbl) {
+        }
+        warning("Sketch Scans: " + res.error);
+        return;
+    }
+    w.trim = { rel: rel, rect: rect, path: res.path, chosen: true,
+               outline: shape };
+    try {
+        CsScanPreview.armTrace(w.scanView, null, null);
+        CsScanPreview.armBox(w.scanView, null);
+        CsScanPreview.show(w.scanView, res.path);
+        w.trimLabel.text = qsTr("Trim: outline, ") + shape.length +
+            qsTr(" points");
+    } catch (eShow) {
+    }
+    SketchScans.updateTrimGate();
+};
+
+/** Start tracing an outline on the selected scan. */
+SketchScans.startTrace = function() {
+    var w = SketchScans.w;
+    if (w === undefined || w === null || w.scanView === null) {
+        return;
+    }
+    var rel = SketchScans.selectedRel();
+    if (rel === null || rel === undefined) {
+        return;
+    }
+    // Back to the untrimmed page first: an outline traced over a crop
+    // would be measured in the crop's pixels, and every tag this suite
+    // writes is in the PAGE's.
+    try {
+        if (w.scans !== null) {
+            CsScanPreview.show(w.scanView, w.scans + "/" + rel);
+        }
+    } catch (eShow) {
+    }
+    w.trim = { rel: rel, rect: null, path: null, chosen: false };
+    try {
+        CsScanPreview.armTrace(w.scanView,
+            function(points) { SketchScans.outlineDrawn(points); },
+            function(points, cursor) {
+                CsScanPreview.showTrace(w.scanView, points, cursor);
+            });
+        w.trimLabel.text = qsTr("Trim: click corners, or drag to trace "
+            + "-- click the first point to close");
+    } catch (eArm) {
+    }
+    SketchScans.updateTrimGate();
+};
+
+/** Take back the last corner of an outline in progress. */
+SketchScans.undoTracePoint = function() {
+    var w = SketchScans.w;
+    if (w === undefined || w === null || w.scanView === null) {
+        return;
+    }
+    var left = CsScanPreview.undoTracePoint(w.scanView);
+    if (left === null) {
+        return;
+    }
+    CsScanPreview.showTrace(w.scanView, left, null);
+};
+
+/**
  * A finished drag: normalise it, write the derivative, and show it.
  *
  * A FAILED WRITE LEAVES THE BUTTONS OFF. Falling back to the page here
@@ -2559,6 +2683,25 @@ SketchScans.updateTrimGate = function() {
         SketchScans.setEnabled("pickAlignButton", chosen);
         SketchScans.setEnabled("alignButton", chosen);
         w.trimRedoButton.enabled = chosen;
+        // Trace needs a scan to trace on, not a trim already made --
+        // it is one of the two ways of MAKING one.
+        var haveScan = (SketchScans.selectedRel() !== null &&
+            SketchScans.selectedRel() !== undefined);
+        if (w.traceButton !== undefined && w.traceButton !== null) {
+            w.traceButton.enabled = haveScan && !chosen;
+        }
+        if (w.traceUndoButton !== undefined && w.traceUndoButton !== null) {
+            var drawing = false;
+            try {
+                drawing = (w.scanView !== null &&
+                    w.scanView.tracing === true &&
+                    w.scanView.tracePoints !== undefined &&
+                    w.scanView.tracePoints !== null &&
+                    w.scanView.tracePoints.length > 0);
+            } catch (eDraw) {
+            }
+            w.traceUndoButton.enabled = drawing;
+        }
         // ONE BUTTON, TWO HALVES OF ONE WORKFLOW. Capture is the last
         // step of sketching a section and had no entry point anywhere
         // near the panel that starts it -- it lives on the Cave Survey
@@ -2601,9 +2744,14 @@ SketchScans.updateTrimGate = function() {
  * \param trimRect the box on the ORIGINAL page that `path` is a crop
  *        of, or null/absent when `path` IS the page. Recorded, never
  *        applied: the cropping already happened on disk.
+ * \param outline the traced outline on the ORIGINAL page, when the crop
+ *        was masked to one. Recorded for the same reason as the box and
+ *        applied no more than it is: the masking already happened on
+ *        disk. It is what lets the crop be cut again if the derivative
+ *        is ever deleted.
  * \return the entity id, or null (a message has been shown).
  */
-SketchScans.insert = function(doc, di, path, name, frame, trimRect) {
+SketchScans.insert = function(doc, di, path, name, frame, trimRect, outline) {
     var image = new QImage(path);
     if (image.isNull()) {
         warning("Sketch Scans: " + name + " could not be read as an " +
@@ -2676,6 +2824,10 @@ SketchScans.insert = function(doc, di, path, name, frame, trimRect) {
     // page it came from.
     if (trimRect !== undefined && trimRect !== null) {
         CsTags.set(entity, CsScanTrim.TAG, CsScanTrim.serialize(trimRect));
+    }
+    if (outline !== undefined && outline !== null && outline.length >= 3) {
+        CsTags.set(entity, CsScanTrim.OUTLINE_TAG,
+            CsScanTrim.serializeOutline(outline));
     }
     // To the very back, under the survey linework -- the basemap's
     // call, one below getMinDrawOrder() because THIS entity is not in
@@ -2755,7 +2907,7 @@ SketchScans.placedScales = function(doc) {
  * \return the entity id, or null (a message has been shown).
  */
 SketchScans.insertFitted = function(doc, di, path, name, fit, heightPx,
-        pairs, frame, trimRect) {
+        pairs, frame, trimRect, outline) {
     var image = new QImage(path);
     if (image.isNull()) {
         warning("Sketch Scans: " + name + " could not be read as an image.");
@@ -2804,6 +2956,10 @@ SketchScans.insertFitted = function(doc, di, path, name, fit, heightPx,
     // page it came from.
     if (trimRect !== undefined && trimRect !== null) {
         CsTags.set(entity, CsScanTrim.TAG, CsScanTrim.serialize(trimRect));
+    }
+    if (outline !== undefined && outline !== null && outline.length >= 3) {
+        CsTags.set(entity, CsScanTrim.OUTLINE_TAG,
+            CsScanTrim.serializeOutline(outline));
     }
     // The band it was assigned within, where the frame has bands. A
     // HINT for re-fitting, never trusted over the station names: a

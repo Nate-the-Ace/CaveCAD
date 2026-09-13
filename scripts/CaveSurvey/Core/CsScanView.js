@@ -206,6 +206,42 @@ CsScanView.prototype.mousePressEvent = function(event) {
     // also be assigning a station with the same drag, and the two are
     // never both wanted at once -- the box is chosen before any
     // placement control is even enabled.
+    // TRACING TAKES THE LEFT BUTTON, same bargain as boxing: a caver
+    // drawing round their sketch is not assigning a station with the
+    // same click.
+    if (this.tracing === true) {
+        if (this.tracePoints === undefined || this.tracePoints === null) {
+            this.tracePoints = [];
+        }
+        // Back on the first corner closes the shape. Measured in MODEL
+        // units, which are page pixels here, so the tolerance means the
+        // same thing however far the preview is zoomed.
+        if (this.tracePoints.length >= CsScanView.MIN_TRACE_POINTS) {
+            var f = this.tracePoints[0];
+            var dxC = picked.x - f.x, dyC = picked.y - f.y;
+            if (Math.sqrt(dxC * dxC + dyC * dyC) <= this.traceClosePx) {
+                this.traceDragging = false;
+                if (typeof this.onScanTraceDone === "function") {
+                    try {
+                        this.onScanTraceDone(this.tracePoints.slice(0));
+                    } catch (eDone) {
+                    }
+                }
+                return;
+            }
+        }
+        this.tracePoints.push(picked);
+        // Held down and moved, this becomes a freehand stroke; a single
+        // click leaves one corner. Both end up in the same list.
+        this.traceDragging = true;
+        if (typeof this.onTraceChanged === "function") {
+            try {
+                this.onTraceChanged(this.tracePoints, picked);
+            } catch (eCh) {
+            }
+        }
+        return;
+    }
     if (this.boxing === true) {
         this.boxFrom = picked;
         this.boxTo = null;
@@ -287,6 +323,36 @@ CsScanView.prototype.mouseMoveEvent = function(event) {
     // A BOX IN PROGRESS OWNS THE DRAG. No pan, and no base handling
     // either: the navigation action would start its own pan on the same
     // drag and the scan would slide out from under the box being drawn.
+    if (this.tracing === true) {
+        try {
+            var ivT = this.getImageView();
+            var vpT = CsScanView.viewPos(ivT, event);
+            if (vpT !== null) {
+                var mT = ivT.mapFromView(new RVector(vpT.x, vpT.y));
+                var here = { x: mT.x, y: mT.y };
+                if (this.traceDragging === true &&
+                        this.tracePoints !== undefined &&
+                        this.tracePoints !== null &&
+                        this.tracePoints.length > 0) {
+                    // Freehand: a point every so often rather than one
+                    // per reported pixel. The outline is decimated
+                    // afterwards anyway, and a point per pixel makes
+                    // the rubber band cost a regeneration each time.
+                    var lastT = this.tracePoints[this.tracePoints.length - 1];
+                    var dxT = here.x - lastT.x, dyT = here.y - lastT.y;
+                    if (Math.sqrt(dxT * dxT + dyT * dyT) >=
+                            this.traceStepPx) {
+                        this.tracePoints.push(here);
+                    }
+                }
+                if (typeof this.onTraceChanged === "function") {
+                    this.onTraceChanged(this.tracePoints, here);
+                }
+            }
+        } catch (eTr) {
+        }
+        return;
+    }
     if (this.boxFrom !== undefined && this.boxFrom !== null) {
         try {
             var ivB = this.getImageView();
@@ -334,6 +400,12 @@ CsScanView.prototype.mouseMoveEvent = function(event) {
 CsScanView.prototype.mouseReleaseEvent = function(event) {
     CsScanView.callBase(this, "mouseReleaseEvent", event);
     this.panFrom = null;
+    if (this.tracing === true) {
+        // The stroke stops; the outline does not. A caver can let go,
+        // move, and carry on clicking corners.
+        this.traceDragging = false;
+        return;
+    }
     var from = this.boxFrom, to = this.boxTo;
     this.boxFrom = null;
     this.boxTo = null;
@@ -353,6 +425,9 @@ CsScanView.prototype.mouseReleaseEvent = function(event) {
  *  QCAD's own navigation uses 4 (GraphicsViewNavigation/PanThreshold);
  *  the same number here, read from the same setting so one place tunes
  *  both. */
+/** Corners before an outline can be closed by clicking its start. */
+CsScanView.MIN_TRACE_POINTS = 3;
+
 CsScanView.PAN_THRESHOLD = 4;
 try {
     CsScanView.PAN_THRESHOLD = RSettings.getDoubleValue(
@@ -532,6 +607,115 @@ CsScanPreview.zoom = function(preview, factor) {
  * `onBox` is called with { a: <model point>, b: <model point> } when a
  * left drag finishes. Pass null to disarm.
  */
+/**
+ * Arm (or disarm) outline tracing on the preview.
+ *
+ * Clicks lay down corners; holding the button and moving traces
+ * freehand, and both land in the same list. Clicking back on the first
+ * corner closes the shape and calls `onDone` with it.
+ *
+ * \param onDone  function(points) when the outline is closed, or null
+ *                to disarm
+ * \param onChange function(points, cursor) while it is being drawn
+ */
+CsScanPreview.armTrace = function(preview, onDone, onChange) {
+    if (preview === null || preview === undefined) {
+        return;
+    }
+    try {
+        var on = (typeof onDone === "function");
+        preview.view.onScanTraceDone = on ? onDone : null;
+        preview.view.onTraceChanged =
+            (typeof onChange === "function") ? onChange : null;
+        preview.view.tracing = on;
+        preview.view.tracePoints = [];
+        preview.view.traceDragging = false;
+        // In MODEL units, which are page pixels: how near the first
+        // corner counts as closing, and how far a freehand stroke moves
+        // before it lays another point.
+        preview.view.traceClosePx = CsScanPreview.TRACE_CLOSE_PX;
+        preview.view.traceStepPx = CsScanPreview.TRACE_STEP_PX;
+        if (on) {
+            preview.view.boxing = false;
+            preview.view.onScanBox = null;
+        }
+        CsScanPreview.clearBand(preview);
+    } catch (e) {
+    }
+};
+
+/** Throw away the corners laid down so far, tracing still armed. */
+CsScanPreview.resetTrace = function(preview) {
+    try {
+        preview.view.tracePoints = [];
+        preview.view.traceDragging = false;
+    } catch (e) {
+    }
+    CsScanPreview.clearBand(preview);
+};
+
+/** Take back the last corner. \return what is left, or null. */
+CsScanPreview.undoTracePoint = function(preview) {
+    try {
+        var pts = preview.view.tracePoints;
+        if (pts === undefined || pts === null || pts.length === 0) {
+            return null;
+        }
+        pts.pop();
+        return pts;
+    } catch (e) {
+        return null;
+    }
+};
+
+/** How near the first corner closes the shape, in page pixels. */
+CsScanPreview.TRACE_CLOSE_PX = 12;
+/** How far a freehand stroke travels before laying another point. */
+CsScanPreview.TRACE_STEP_PX = 6;
+
+/**
+ * Draw (or move) the outline being traced: the corners so far, and a
+ * live segment out to the cursor.
+ *
+ * Same scratch-entity approach as showBand, and the same reason.
+ */
+CsScanPreview.showTrace = function(preview, points, cursor) {
+    if (preview === null || preview === undefined) {
+        return;
+    }
+    try {
+        CsScanPreview.clearBand(preview);
+        if (points === null || points === undefined || points.length === 0) {
+            return;
+        }
+        var pl = new RPolyline();
+        for (var i = 0; i < points.length; i++) {
+            pl.appendVertex(new RVector(points[i].x, points[i].y));
+        }
+        if (cursor !== null && cursor !== undefined) {
+            pl.appendVertex(new RVector(cursor.x, cursor.y));
+        }
+        // OPEN while it is being drawn. A closed one would draw the
+        // final edge back to the start before the caver has decided
+        // where the shape ends, which reads as a shape they did not
+        // make.
+        pl.setClosed(false);
+        if (pl.countVertices() < 2) {
+            return;
+        }
+        var entity = new RPolylineEntity(preview.doc, new RPolylineData(pl));
+        entity.setColor(new RColor(255, 0, 0));
+        try {
+            entity.setDrawOrder(
+                preview.doc.getStorage().getMaxDrawOrder() + 1);
+        } catch (eOrder) {
+        }
+        preview.di.applyOperation(new RAddObjectOperation(entity, false));
+        preview.band = entity;
+    } catch (e) {
+    }
+};
+
 CsScanPreview.armBox = function(preview, onBox) {
     if (preview === null || preview === undefined) {
         return;

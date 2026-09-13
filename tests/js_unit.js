@@ -23106,6 +23106,117 @@ eqs(CsScanTrim.serialize({ x: 120, y: 88, w: 900, h: 640 }),
 eqs(CsScanTrim.parse("120,88,900,640").w, 900, "parse w");
 eqs(CsScanTrim.parse("nonsense"), null, "parse rejects rubbish");
 
+// --- an outline instead of a box --------------------------------------
+//
+// A traced outline crops to its own BOUNDING BOX and clears everything
+// outside the line, so the derivative is still a rectangle and
+// everything downstream -- placement, the anchor mapping, the 3D drape,
+// relink -- goes on reading the same x/y/w/h.
+
+// The same flip as rectFromPicks: preview y runs up, image rows run down.
+var olPicks = [{ x: 10, y: 780 }, { x: 200, y: 780 }, { x: 200, y: 600 },
+               { x: 10, y: 600 }];
+var olFromPicks = CsScanTrim.outlineFromPicks(olPicks, 1000, 800);
+eqs(olFromPicks.length, 4, "four picks make four corners");
+eqs(olFromPicks[0].y, 20, "a pick near the top of the preview is near row 0");
+
+var olBox = CsScanTrim.outlineBounds(olFromPicks);
+eqs(olBox.x, 10, "the outline's box starts at its leftmost point");
+eqs(olBox.w, 190, "and spans to its rightmost");
+eqs(olBox.h, 180, "and the rows between its top and bottom");
+
+// Degenerate outlines are not outlines.
+eqs(CsScanTrim.tidyOutline([{ x: 0, y: 0 }, { x: 5, y: 0 }]), null,
+    "two points are not an outline");
+eqs(CsScanTrim.tidyOutline([{ x: 0, y: 0 }, { x: 5, y: 0 }, { x: 5, y: 5 }]),
+    null, "an outline under the minimum size is a stray click");
+eqs(CsScanTrim.tidyOutline(null), null, "no points, no outline");
+
+// A closing click back on the start is implied, not carried.
+var olClosed = CsScanTrim.tidyOutline([{ x: 0, y: 0 }, { x: 100, y: 0 },
+    { x: 100, y: 100 }, { x: 0, y: 0 }]);
+eqs(olClosed.length, 3, "a click back on the first corner closes rather "
+    + "than adding a fourth point");
+
+// Consecutive duplicates -- a double click, or a stroke that stopped.
+var olDup = CsScanTrim.tidyOutline([{ x: 0, y: 0 }, { x: 0, y: 0 },
+    { x: 100, y: 0 }, { x: 100, y: 100 }, { x: 100, y: 100 }]);
+eqs(olDup.length, 3, "repeated points are dropped");
+
+// DECIMATION, so a freehand stroke cannot blow the XDATA budget. A DXF
+// value line over 1023 characters used to take the rest of the file
+// with it, and a drawing written here still has to open in an older
+// CaveCAD than the one that fixed the reader.
+var olMany = [];
+for (var oli = 0; oli < 2000; oli++) {
+    // A circle, sampled far more finely than any shape needs.
+    var a = (oli / 2000) * Math.PI * 2;
+    olMany.push({ x: Math.round(500 + 400 * Math.cos(a)),
+                  y: Math.round(500 + 400 * Math.sin(a)) });
+}
+var olTidy = CsScanTrim.tidyOutline(olMany);
+ok(olTidy.length <= CsScanTrim.MAX_OUTLINE_POINTS,
+    "a freehand stroke is decimated to the budget (" + olTidy.length + ")");
+ok(olTidy.length >= 8,
+    "but keeps enough of the shape to still be a circle (" +
+    olTidy.length + ")");
+ok(CsScanTrim.serializeOutline(olTidy).length < 1023,
+    "and its tag fits on one DXF line (" +
+    CsScanTrim.serializeOutline(olTidy).length + " chars)");
+
+// The decimated circle still has a circle's extent.
+var olTidyBox = CsScanTrim.outlineBounds(olTidy);
+ok(Math.abs(olTidyBox.w - 800) <= 20 && Math.abs(olTidyBox.h - 800) <= 20,
+    "decimation keeps the shape's size (" + olTidyBox.w + "x" +
+    olTidyBox.h + ")");
+
+// INSIDE AND OUT, including a concave shape -- an L, which is the case
+// a convex test would get wrong and the one a field page actually needs.
+var olL = [{ x: 0, y: 0 }, { x: 100, y: 0 }, { x: 100, y: 40 },
+           { x: 40, y: 40 }, { x: 40, y: 100 }, { x: 0, y: 100 }];
+ok(CsScanTrim.contains(olL, 10, 10), "inside the top arm");
+ok(CsScanTrim.contains(olL, 10, 80), "inside the upright");
+ok(!CsScanTrim.contains(olL, 80, 80), "the notch is OUTSIDE the L");
+ok(!CsScanTrim.contains(olL, 120, 10), "and so is beyond the edge");
+
+// The tag round trip.
+var olText = CsScanTrim.serializeOutline(olL);
+eqs(olText, "0,0 100,0 100,40 40,40 40,100 0,100", "serializeOutline");
+var olBack = CsScanTrim.parseOutline(olText);
+eqs(olBack.length, 6, "parseOutline count");
+eqs(olBack[2].y, 40, "parseOutline reads a vertex");
+eqs(CsScanTrim.parseOutline("nonsense"), null, "parseOutline rejects rubbish");
+eqs(CsScanTrim.parseOutline("0,0 1,1"), null,
+    "two vertices are not an outline either");
+eqs(CsScanTrim.parseOutline(""), null, "an empty tag is no outline");
+
+// THE NAME CARRIES THE SHAPE'S IDENTITY, not the shape. The vertices do
+// not fit a file name, so a hash of them does -- which keeps the
+// property that matters: the same outline cut twice is the same file.
+var olName = CsScanTrim.fileName("Trip3/IMG_4021.JPG",
+    { x: 0, y: 0, w: 100, h: 100 }, olL);
+ok(/__TRIMMED_x0_y0_w100_h100_p[0-9a-f]{8}\.png$/.test(olName),
+    "an outlined crop's name carries a tag for it (" + olName + ")");
+eqs(CsScanTrim.fileName("Trip3/IMG_4021.JPG",
+        { x: 0, y: 0, w: 100, h: 100 }, olL),
+    olName, "the same outline names the same file");
+var olMoved = [{ x: 0, y: 0 }, { x: 100, y: 0 }, { x: 100, y: 40 },
+               { x: 41, y: 40 }, { x: 40, y: 100 }, { x: 0, y: 100 }];
+ok(CsScanTrim.fileName("Trip3/IMG_4021.JPG",
+        { x: 0, y: 0, w: 100, h: 100 }, olMoved) !== olName,
+    "a different outline names a different file");
+eqs(CsScanTrim.fileName("Trip3/IMG_4021.JPG", { x: 0, y: 0, w: 100, h: 100 }),
+    "IMG_4021__TRIMMED_x0_y0_w100_h100.png",
+    "and a plain box is named as it always was");
+
+// The name still parses, and says an outline was involved.
+var olParsed = CsScanTrim.parseName(olName);
+eqs(olParsed.w, 100, "an outlined name still yields its box");
+ok(olParsed.outlineHash !== undefined,
+    "and says the crop was masked to an outline");
+eqs(CsScanTrim.parseName("IMG_4021__TRIMMED_x0_y0_w100_h100.png")
+    .outlineHash, undefined, "a boxed one says nothing of the sort");
+
 // ---------------------------------------------------------------------
 // The eighth elevation-datum door: exporting a fix with no elevation.
 //
