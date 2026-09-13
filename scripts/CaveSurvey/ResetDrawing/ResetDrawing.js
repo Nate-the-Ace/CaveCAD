@@ -78,6 +78,7 @@ ResetDrawing.infoFor = function(entity) {
  */
 ResetDrawing.classify = function(doc) {
     var ids = [];
+    var kinds = [];
     var infos = [];
     var all = doc.queryAllEntities(false, false);
     for (var i = 0; i < all.length; i++) {
@@ -89,9 +90,110 @@ ResetDrawing.classify = function(doc) {
         infos.push(info);
         if (!CsReset.keepsEntity(info)) {
             ids.push(all[i]);
+            // Kept alongside the id, in the same order, so the delete can
+            // say WHAT it is removing without walking the drawing twice.
+            kinds.push(CsReset.countKind(info));
         }
     }
-    return { ids: ids, counts: CsReset.tally(infos) };
+    return { ids: ids, kinds: kinds, counts: CsReset.tally(infos) };
+};
+
+/**
+ * The progress window.
+ *
+ * A reset of a real cave takes several seconds -- the backup is a file
+ * copy that may cross Google Drive, and the drawing is a thousand
+ * entities and a layer table. Several seconds of a frozen window is
+ * indistinguishable from a crash, and a caver who believes a tool has
+ * crashed force-quits it, which is the one thing that could actually
+ * cost them work here.
+ *
+ * NO CANCEL BUTTON. Stopping half way through leaves a drawing that is
+ * neither the map it was nor the blank it was going to be, and the
+ * recovery -- close without saving -- is the same either way. A button
+ * that makes things worse is not a kindness.
+ *
+ * QProgressBar's minimum/maximum/value are READ-ONLY as properties in
+ * this bridge (probed live, 2026-09-13): setMinimum/setMaximum/setValue
+ * are the only way in, and the same goes for QProgressDialog's
+ * setValue/setLabelText. Assigning to .value there fails silently, which
+ * would leave the bar at zero for the whole run -- worse than no bar,
+ * because a stuck bar says "hung" out loud.
+ *
+ * Every call is guarded and the whole thing degrades to nothing: a
+ * progress window that cannot be built must never stop a reset that
+ * can.
+ */
+ResetDrawing.progress = function() {
+    var dlg = null;
+    try {
+        dlg = new QProgressDialog("", "", 0, 0, getMainWindow());
+        dlg.setWindowTitle(qsTr("Reset Drawing"));
+        dlg.setCancelButton(null);
+        dlg.setAutoClose(false);
+        dlg.setAutoReset(false);
+        dlg.setMinimumDuration(0);
+        dlg.setWindowModality(Qt.ApplicationModal);
+        dlg.show();
+        QCoreApplication.processEvents();
+    } catch (e) {
+        dlg = null;
+    }
+    var pump = function() {
+        try {
+            QCoreApplication.processEvents();
+        } catch (eP) {
+        }
+    };
+    return {
+        /** A phase with no count to give: the bar runs busy. */
+        say: function(text) {
+            if (dlg === null) { return; }
+            try {
+                dlg.setMaximum(0);      // 0/0 is Qt's busy indicator
+                dlg.setLabelText(text);
+            } catch (eS) {
+            }
+            pump();
+        },
+        /** A phase that knows how far along it is. */
+        step: function(text, done, total) {
+            if (dlg === null) { return; }
+            try {
+                dlg.setMaximum(total);
+                dlg.setValue(done);
+                dlg.setLabelText(text);
+            } catch (eT) {
+            }
+            pump();
+        },
+        hide: function() {
+            if (dlg === null) { return; }
+            try {
+                dlg.hide();
+            } catch (eH) {
+            }
+            pump();
+        },
+        show: function() {
+            if (dlg === null) { return; }
+            try {
+                dlg.show();
+            } catch (eSh) {
+            }
+            pump();
+        },
+        done: function() {
+            if (dlg === null) { return; }
+            try {
+                dlg.close();
+                dlg.deleteLater();
+            } catch (eD) {
+            }
+            dlg = null;
+            pump();
+        }
+    };
 };
 
 /**
@@ -184,8 +286,27 @@ ResetDrawing.withEveryLayerEditable = function(doc, di, fn) {
     return result;
 };
 
-/** Deletes every id in one operation. \return how many went. */
-ResetDrawing.deleteAll = function(doc, di, ids) {
+// How often the progress window is told, in entities. Every entity
+// would spend more time repainting than deleting; every thousand would
+// look stuck on a cave this size.
+ResetDrawing.REPORT_EVERY = 50;
+
+/**
+ * Deletes every id in ONE operation, saying what it is removing as it
+ * goes.
+ *
+ * One operation, still, because that is one undo step: the recovery
+ * story for a reset is a single Undo or a close without saving, and
+ * three operations would make it three. The progress reporting happens
+ * while the operation is BUILT, which is the part that walks the
+ * drawing; the apply that follows is one call nothing can subdivide, so
+ * it is announced rather than counted.
+ *
+ * \param kinds  same length as ids, from classify -- what each entity
+ *               is, so the window can name it.
+ * \return how many went.
+ */
+ResetDrawing.deleteAll = function(doc, di, ids, kinds, progress) {
     if (ids.length === 0) {
         return 0;
     }
@@ -197,6 +318,18 @@ ResetDrawing.deleteAll = function(doc, di, ids) {
             del.deleteObject(e);
             n++;
         }
+        if (progress !== undefined && progress !== null &&
+                (i % ResetDrawing.REPORT_EVERY) === 0) {
+            var kind = (kinds === undefined || kinds === null) ?
+                "" : kinds[i];
+            progress.step(CsReset.phaseText(kind, i + 1, ids.length),
+                i + 1, ids.length);
+        }
+    }
+    if (progress !== undefined && progress !== null) {
+        // The apply is one call: nothing to count, so say so plainly
+        // rather than leaving a bar sitting at 99%.
+        progress.say(qsTr("Applying the deletion..."));
     }
     di.applyOperation(del);
     return n;
@@ -316,6 +449,10 @@ function resetDrawingRun() {
     }
     var caveFolder = ResetDrawing.caveFolderOf(path);
     var caveName = CsCave.nameOf(path);
+
+    // The window goes up BEFORE the first slow thing, not after it.
+    var progress = ResetDrawing.progress();
+    progress.say(qsTr("Counting what is in the drawing..."));
     var split = ResetDrawing.classify(doc);
 
     var plan = CsReset.planReset({
@@ -327,6 +464,7 @@ function resetDrawingRun() {
         counts: split.counts
     });
     if (!plan.can) {
+        progress.done();
         try {
             QMessageBox.information(getMainWindow(), qsTr("Reset Drawing"),
                 plan.reason);
@@ -340,7 +478,11 @@ function resetDrawingRun() {
     // the tool. The dialog below is the second guard, never the only
     // one.
     var backupPath = "";
+    // Usually the slowest step of the lot: a cave on a shared drive is a
+    // megabyte of DXF going over the network before anything is asked.
+    progress.say(qsTr("Copying the drawing to its backup folder..."));
     if (CsBackup.copyPrevious(path) !== true) {
+        progress.done();
         var why = qsTr("Reset Drawing: could not write a copy of the " +
             "drawing into its backup folder, so nothing has been " +
             "changed. Check that ") + String(caveFolder) +
@@ -373,9 +515,13 @@ function resetDrawingRun() {
         modified = false;
     }
 
+    // Out of the way while a human reads and types.
+    progress.hide();
     if (!ResetDrawing.confirm(caveName, split.counts, backupPath, modified)) {
+        progress.done();
         return;
     }
+    progress.show();
 
     // The georeference rides an entity and goes with it: nothing here
     // reads or re-commits it. That is deliberate -- declaring the cave's
@@ -383,15 +529,19 @@ function resetDrawingRun() {
     // location quietly surviving a reset is one the student never
     // learns to set.
     ResetDrawing.withEveryLayerEditable(doc, di, function() {
-        ResetDrawing.deleteAll(doc, di, split.ids);
+        ResetDrawing.deleteAll(doc, di, split.ids, split.kinds, progress);
     });
     // The layer table last, so the drawing a class opens carries the
     // current palette and every layer the template has, not whatever
     // the previous student left behind.
+    progress.say(qsTr("Restoring the template's layers..."));
     CsRestyle.ensureAndApply(doc, di);
 
     // And the cave's state that is not in the drawing at all.
+    progress.say(qsTr("Clearing this cave's marks, location and thumbnail..."));
     var cleared = ResetDrawing.clearOutside(path);
+
+    progress.done();
 
     var done = CsReset.doneText({ counts: split.counts,
         backupPath: backupPath, cleared: cleared });

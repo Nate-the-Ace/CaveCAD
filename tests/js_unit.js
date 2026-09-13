@@ -26968,6 +26968,21 @@ eqs(CsSymbolStore.AREA_MARKER_TAGS.custom, "AreaCustom",
     eqs(CsReset.groupNumber(1000000), "1,000,000",
         "CsReset: two separators over a million");
 
+    // -- what the progress window says ------------------------------
+    eqs(CsReset.phaseText("survey", 400, 890),
+        "Removing survey data -- 400 of 890",
+        "CsReset: progress names WHAT is going, not just that something " +
+            "is -- the difference between a slow tool and one a caver " +
+            "believes has crashed");
+    eqs(CsReset.phaseText("image", 1, 42),
+        "Removing placed images -- 1 of 42",
+        "CsReset: the images are named as the images");
+    eqs(CsReset.phaseText("drawn", 1200, 1830),
+        "Removing drawn linework, symbols and notes -- 1,200 of 1,830",
+        "CsReset: counts are grouped here too");
+    ok(CsReset.phaseText("", 1, 2).indexOf("entities") !== -1,
+        "CsReset: an unknown kind still reads as a sentence");
+
     // -- the list joiner in the "cleared with it" sentence ----------
     eqs(CsReset.listText(["a"]), "a", "CsReset: one thing is itself");
     eqs(CsReset.listText(["a", "b"]), "a and b", "CsReset: two join with and");

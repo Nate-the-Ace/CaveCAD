@@ -157,9 +157,32 @@ ok(split.ids.length === split.counts.total,
     "everything counted is everything doomed -- the walk and the tally " +
     "cannot disagree (" + split.counts.total + ")");
 
+ok(split.kinds.length === split.ids.length,
+    "every doomed entity carries the kind the progress window names it " +
+    "by, in the same order as the ids");
+
+// A stand-in for the progress window: the real one needs a GUI, and
+// what matters here is that the delete REPORTS -- a bar that never
+// moves says "hung" as loudly as no bar at all.
+var reported = [];
+var fakeProgress = {
+    say: function(t) { reported.push("say:" + t); },
+    step: function(t, done, total) { reported.push(t); }
+};
+
 ResetDrawing.withEveryLayerEditable(doc, di, function() {
-    ResetDrawing.deleteAll(doc, di, split.ids);
+    ResetDrawing.deleteAll(doc, di, split.ids, split.kinds, fakeProgress);
 });
+
+ok(reported.length > 1, "the delete reported its progress more than once (" +
+    reported.length + " updates)");
+ok(reported[reported.length - 1].indexOf("say:Applying") === 0,
+    "and ends by announcing the apply, which is one call and cannot be " +
+    "counted -- better said than left at 99%");
+var named = reported.join(" ");
+ok(named.indexOf("survey data") !== -1 || named.indexOf("placed images") !== -1 ||
+    named.indexOf("drawn linework") !== -1,
+    "the updates name what is being removed");
 CsRestyle.ensureAndApply(doc, di);
 
 // -- what went ---------------------------------------------------------

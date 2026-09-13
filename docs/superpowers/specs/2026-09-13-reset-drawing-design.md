@@ -109,6 +109,37 @@ The backup copies the file ON DISK, so unsaved changes in the open
 drawing are not in it. The dialog says so rather than silently
 implying otherwise.
 
+## The progress window
+
+A reset of a real cave takes several seconds: the backup is a file copy
+that may cross Google Drive, and the drawing is a thousand entities and
+a layer table. Several seconds of a frozen window is indistinguishable
+from a crash, and a caver who believes a tool has crashed force-quits
+it -- which is the one thing that could actually cost them work here.
+
+So every phase says what it is doing, by name and by count: copying the
+backup, counting the drawing, then removing the survey data, the drawn
+linework and the placed images -- the same three numbers the
+confirmation quoted, so somebody watching recognises what they agreed to
+-- then restoring the layers and clearing the marks. The apply that
+follows the walk is one call nothing can subdivide, so it is announced
+rather than counted, instead of leaving a bar sitting at 99%.
+
+NO CANCEL BUTTON. Stopping half way leaves a drawing that is neither the
+map it was nor the blank it was going to be, and the recovery -- close
+without saving -- is the same either way. A button that makes things
+worse is not a kindness.
+
+The window is hidden while the confirmation is up, and the whole thing
+degrades to nothing: a progress window that cannot be built must never
+stop a reset that can.
+
+Bridge facts, probed live: QProgressDialog constructs, but QProgressBar's
+minimum/maximum/value are READ-ONLY as properties -- setMinimum/
+setMaximum/setValue are the only way in. Assigning to .value fails
+silently, which would leave the bar at zero for the whole run: worse
+than no bar, because a stuck bar says "hung" out loud.
+
 ## The dialog
 
 Title: `Reset Drawing -- <Cave>`.

@@ -186,6 +186,33 @@ CsReset.groupNumber = function(n) {
 };
 
 /**
+ * What each counted kind is called while it is being removed. The
+ * dialog counts in three numbers and the progress window names the same
+ * three, so somebody watching it recognises what they agreed to.
+ */
+CsReset.KIND_LABELS = {
+    survey: "survey data",
+    drawn: "drawn linework, symbols and notes",
+    image: "placed images"
+};
+
+/**
+ * One line of progress: what is going, and how far in.
+ *
+ * "Removing survey data -- 400 of 890". A bar alone says a wait is
+ * happening; this says what the wait IS, which is the difference
+ * between a slow tool and one a caver believes has crashed.
+ */
+CsReset.phaseText = function(kind, done, total) {
+    var label = CsReset.KIND_LABELS[kind];
+    if (label === undefined) {
+        label = "entities";
+    }
+    return "Removing " + label + " -- " + CsReset.groupNumber(done) +
+        " of " + CsReset.groupNumber(total);
+};
+
+/**
  * The dialog's body, as lines: what goes -- with the images counted
  * separately, because they are the part somebody will want to be sure
  * about -- what is NOT touched, where the copy went, and, where the
