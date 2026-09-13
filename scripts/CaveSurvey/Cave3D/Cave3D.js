@@ -68,6 +68,16 @@ Cave3D.SETTING_GHOST = "Cave3D/ShowGhost";
 Cave3D.SETTING_LEADS = "Cave3D/ShowLeads";
 Cave3D.SETTING_SECTIONS = "Cave3D/ShowSections";
 Cave3D.SETTING_SCANS = "Cave3D/ShowScans";
+/** Where a draped scan stops being pencil and starts being paper, as a
+ *  luminance 0 to 1. Remembered because it is a property of the CAVER'S
+ *  SCANNER, not of any one drawing: whoever photographs their books in
+ *  an entrance gets the same grey every time, and should not have to
+ *  find the setting again on every cave. */
+Cave3D.SETTING_SCAN_INK = "Cave3D/ScanInk";
+/** What the C++ view starts at. Kept in step with
+ *  RCave3dView::DEFAULT_SCAN_INK; a disagreement only means the slider
+ *  jumps once on the first run. */
+Cave3D.DEFAULT_SCAN_INK = 0.62;
 
 /** The chosen mode, read from settings the first time it is asked for.
  *  Not read at file scope: RSettings is not necessarily up when an
@@ -532,6 +542,18 @@ function cave3dRun() {
             }
             RSettings.setValue(key, on);
         });
+        if (cave3d.scanInkChanged !== undefined) {
+            // GUARDED. The tools can be updated without the
+            // application, and an older CaveCAD has no such signal --
+            // reaching for it would take the whole panel down with a
+            // TypeError at connect time.
+            cave3d.scanInkChanged.connect(function(handle, value) {
+                if (handle !== Cave3D.handle) { return; }
+                // Remembered, not rebuilt: the threshold is a shader
+                // uniform, so the view has already redrawn with it.
+                RSettings.setValue(Cave3D.SETTING_SCAN_INK, value);
+            });
+        }
         Cave3D.connected = true;
     }
 
@@ -548,6 +570,11 @@ function cave3dRun() {
         RSettings.getBoolValue(Cave3D.SETTING_SECTIONS, false));
     cave3d.setShowScans(Cave3D.handle,
         RSettings.getBoolValue(Cave3D.SETTING_SCANS, false));
+    if (cave3d.setScanInk !== undefined) {
+        cave3d.setScanInk(Cave3D.handle,
+            RSettings.getDoubleValue(Cave3D.SETTING_SCAN_INK,
+                Cave3D.DEFAULT_SCAN_INK));
+    }
 }
 
 // ============================================================
