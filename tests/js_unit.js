@@ -21106,10 +21106,12 @@ eqs(String(dOob), "0", "every grid index is in range");
 // The corners land where the quad says, and v is flipped so an image's
 // top row sits at the top of the drawing.
 nearly(dG.positions[0], 0, 1e-9, "first vertex is the quad's origin");
-nearly(dG.uvs[1], 1, 1e-9, "and carries v = 1, the image's top");
+nearly(dG.uvs[1], 0, 1e-9,
+    "carrying v = 0 -- the texture is uploaded mirrored, so v 0 is the "
+    + "image's bottom, which is where the quad's origin is");
 var dLast = dG.positions.length - 3;
 nearly(dG.positions[dLast], 10, 1e-9, "last vertex is the far corner");
-nearly(dG.uvs[dG.uvs.length - 1], 0, 1e-9, "carrying v = 0, the bottom");
+nearly(dG.uvs[dG.uvs.length - 1], 1, 1e-9, "and v = 1 at the far corner");
 
 // No survey to drape onto is not a degenerate grid; it is no grid.
 eqs(String(CsDrape.grid(dQuad, 4, {}).positions.length), "0",

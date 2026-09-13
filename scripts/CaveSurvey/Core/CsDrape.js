@@ -101,9 +101,12 @@ CsDrape.grid = function(quad, divisions, stations) {
                 return empty;
             }
             out.positions.push(x, y, z);
-            // v flipped: an image's rows run down from its top, and a
-            // drawing's y runs up.
-            out.uvs.push(s, 1 - t);
+            // NOT FLIPPED HERE. The texture is uploaded mirrored (see
+            // RCave3dTexture), which already puts image row 0 at v = 0,
+            // and the quad's t runs the same way as the drawing's y.
+            // Flipping again turned every sketch upside down -- two
+            // flips read as a mirror, which is what it looked like.
+            out.uvs.push(s, t);
         }
     }
     for (var jj = 0; jj < n; jj++) {
@@ -167,11 +170,37 @@ CsDrape.readScans = function(doc, kind) {
             if (String(doc.getLayerName(e.getLayerId())) !== layerName) {
                 continue;
             }
-            var stored = CsTags.get(e, CsDrape.PATH_TAG);
-            if (typeof stored !== "string" || stored === "") {
-                continue;
+            // THE ENTITY'S OWN FILE FIRST, when it has one. That is the
+            // image actually placed -- a trimmed derivative where the
+            // caver trimmed, the whole page where they did not -- and it
+            // is what the 2D view draws.
+            //
+            // The XDATA tag is PROVENANCE: which scanned page this came
+            // from. It is the fallback, and on Truitt it is the only
+            // thing left: every IMAGEDEF in that drawing carries an
+            // EMPTY path, so the images are broken links that 2D cannot
+            // draw either, and the tag is all that survived.
+            //
+            // Preferring the entity means trimming a scan in Sketch
+            // Scans is picked up here with no further work.
+            var path = null;
+            var own = "";
+            try {
+                own = String(e.getProperty(RImageEntity.PropertyFileName)[0]);
+            } catch (eProp) {
+                own = "";
             }
-            var path = CsCave.resolveUnderScans(scans, stored);
+            if (own !== "") {
+                path = CsCave.isAbsolutePath(own)
+                    ? own : CsCave.resolveUnderScans(scans, own);
+            }
+            if (path === null) {
+                var stored = CsTags.get(e, CsDrape.PATH_TAG);
+                if (typeof stored !== "string" || stored === "") {
+                    continue;
+                }
+                path = CsCave.resolveUnderScans(scans, stored);
+            }
             if (path === null || !(new QFileInfo(path)).exists()) {
                 // A scan whose file has gone is SKIPPED. A blank quad
                 // hanging over the passage says something false about
