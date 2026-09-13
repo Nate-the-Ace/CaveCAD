@@ -740,4 +740,22 @@ Cave3D.init = function(basePath) {
     action.setGroupSortOrder(451);
     action.setSortOrder(50);
     action.setWidgetNames(["CaveSurveyMenu", "CaveSurveyToolBar"]);
+
+    // BUILD THE PANEL NOW, HIDDEN. A QOpenGLWidget appearing in a
+    // window makes Qt rebuild that window natively, and macOS then
+    // reshuffles its Spaces around the new one -- which a caver sees as
+    // the desktop sliding and the screen going black for about a
+    // second. It cannot be avoided, so it is paid here, at startup,
+    // while the window is being put together anyway, rather than in the
+    // middle of their session the first time they open the 3D view.
+    //
+    // Guarded twice over: an older CaveCAD has no such call, and a
+    // failure to pre-build must not stop the tool being installed.
+    try {
+        if (typeof cave3d !== "undefined" && !isNull(cave3d) &&
+                cave3d.prewarm !== undefined) {
+            cave3d.prewarm();
+        }
+    } catch (ePrewarm) {
+    }
 };
