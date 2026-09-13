@@ -281,7 +281,8 @@ Cave3D.sectionsBuffer = function(doc, survey, resolved) {
  * to walk back, and guessing one would lay the sketch along a passage
  * nobody drew it against.
  */
-Cave3D.profileGridFor = function(scan, boxes, bandCache, survey, resolved) {
+Cave3D.profileGridFor = function(scan, boxes, bandCache, survey, resolved,
+                                 drawnStations) {
     var empty = { positions: [], uvs: [], indices: [] };
     var centre = { x: scan.quad.origin.x + scan.quad.u.x / 2,
                    y: scan.quad.origin.y + scan.quad.v.y / 2 };
@@ -320,7 +321,19 @@ Cave3D.profileGridFor = function(scan, boxes, bandCache, survey, resolved) {
     if (band === null) {
         return empty;
     }
-    return CsDrape.profileStrips(scan.quad, box, band, resolved);
+    // WHERE THE DRAWING PUT THE BAND, from its own drawn stations.
+    // The box's corner is not the band's first station -- it is drawn
+    // around the band with padding, and below it by however far the
+    // floor drops -- so taking the corner shifted every sketch forward
+    // along the passage and lifted it above the cave.
+    var place = CsDrape.placeBand(band, drawnStations);
+    if (place === null) {
+        // Either this band has no drawn stations to anchor on, or they
+        // disagree with the survey as it now stands. Nothing is drawn
+        // rather than something placed by guesswork.
+        return empty;
+    }
+    return CsDrape.profileStrips(scan.quad, place, band, resolved);
 };
 
 Cave3D.scansBuffer = function(doc, survey, resolved, kind) {
@@ -333,8 +346,16 @@ Cave3D.scansBuffer = function(doc, survey, resolved, kind) {
     }
     // A profile scan needs the band it sits in; a plan scan does not.
     var boxes = [];
+    var drawnStations = {};
     if (kind === "profile") {
         try { boxes = CsProfileBox.boxes(doc); } catch (eBox) { boxes = []; }
+        // Read once for the whole buffer: it walks every entity in the
+        // drawing, and a cave has more scans than it has bands.
+        try {
+            drawnStations = CsProfileBind.positions(doc);
+        } catch (ePos) {
+            drawnStations = {};
+        }
     }
     var bandCache = {};
 
@@ -343,7 +364,7 @@ Cave3D.scansBuffer = function(doc, survey, resolved, kind) {
         try {
             if (kind === "profile") {
                 g = Cave3D.profileGridFor(scans[i], boxes, bandCache,
-                    survey, resolved);
+                    survey, resolved, drawnStations);
             } else {
                 g = CsDrape.grid(scans[i].quad, CsDrape.DIVISIONS,
                     resolved.stations);

@@ -57,6 +57,13 @@ CsDrape.NEIGHBOURS = 6;
  *  follow the cave; too coarse and it bridges over a drop. */
 CsDrape.DIVISIONS = 24;
 
+/** How far two stations' recovered offsets may differ before the band
+ *  is called out of step with the drawing. Drawing units, and tight:
+ *  the forward map is a plain translation, so agreeing stations agree
+ *  exactly and anything past rounding means the two records are of
+ *  different surveys. */
+CsDrape.PLACE_TOLERANCE = 1e-6;
+
 /**
  * The elevation to drape a plan point at.
  *
@@ -356,10 +363,60 @@ CsDrape.bandPointTo3d = function(band, resolved, x, y) {
  *
  * \return {positions, uvs, indices}
  */
-CsDrape.profileStrips = function(quad, box, band, resolved) {
+/**
+ * Where a band sits in the drawing, as the translation that takes its
+ * own coordinates to drawing ones.
+ *
+ * CsProfileDraw.positionsOf is the forward map and it is a PLAIN
+ * TRANSLATION -- drawing = origin + (station.x, station.y + zOffset) --
+ * so one station that appears in both records recovers it exactly.
+ * Every other station is then checked against that same offset, and a
+ * band whose drawn stations disagree with its rebuilt ones answers
+ * NOTHING: the drawing has been revised out of step with the survey,
+ * and laying a sketch onto a passage that has since moved would put it
+ * somewhere nobody drew it.
+ *
+ * \param drawn {runKey/stationName: {x, y}} as CsProfileBind.positions
+ *              returns
+ * \return {offX, offY} or null when no station could be matched
+ */
+CsDrape.placeBand = function(band, drawn) {
+    if (band === null || band === undefined ||
+            drawn === null || drawn === undefined) {
+        return null;
+    }
+    var stations = (band.stations || []);
+    var dz = band.zOffset || 0.0;
+    var found = null;
+    var checked = 0;
+    for (var i = 0; i < stations.length; i++) {
+        var st = stations[i];
+        var key = String(band.key) + "/" + String(st.name);
+        var at = drawn[key];
+        if (at === undefined || at === null) { continue; }
+        // st.y is the band's own elevation; the drawing carries the
+        // band's vertical offset on top of it, exactly as positionsOf
+        // adds it.
+        var offX = at.x - st.x;
+        var offY = at.y - (st.y + dz);
+        if (found === null) {
+            found = { offX: offX, offY: offY };
+            checked++;
+            continue;
+        }
+        if (Math.abs(offX - found.offX) > CsDrape.PLACE_TOLERANCE ||
+                Math.abs(offY - found.offY) > CsDrape.PLACE_TOLERANCE) {
+            return null;
+        }
+        checked++;
+    }
+    return found;
+};
+
+CsDrape.profileStrips = function(quad, place, band, resolved) {
     var out = { positions: [], uvs: [], indices: [] };
-    if (quad === null || box === null || band === null ||
-            quad === undefined || box === undefined || band === undefined) {
+    if (quad === null || place === null || band === null ||
+            quad === undefined || place === undefined || band === undefined) {
         return out;
     }
     var legs = (band.legs || []);
@@ -376,15 +433,26 @@ CsDrape.profileStrips = function(quad, box, band, resolved) {
         return out;
     }
 
-    // The band's own extent, and therefore where the drawing put it.
-    var bandX0 = legs[0].fromX;
-    var bandYMin = stations[0].y, bandYMax = stations[0].y;
-    for (var si = 1; si < stations.length; si++) {
-        if (stations[si].y < bandYMin) { bandYMin = stations[si].y; }
-        if (stations[si].y > bandYMax) { bandYMax = stations[si].y; }
+    // WHERE THE DRAWING PUT THIS BAND, from the caller.
+    //
+    // This used to be guessed from the band's bounding box: the box's
+    // bottom-left corner was taken to be the band's first leg and its
+    // lowest station. It is neither. The box is drawn AROUND the band,
+    // so it sits outside the first station by whatever padding the box
+    // carries and below the lowest one by however far the floor drops
+    // under it -- and the sketch came out shifted forward along the
+    // passage and lifted above it by exactly those two amounts.
+    //
+    // CsProfileDraw.positionsOf is the forward map and it is a plain
+    // translation, so the caller recovers it exactly by comparing ONE
+    // drawn station against its own band coordinates. See
+    // CsDrape.placeBand.
+    var offX = place.offX;
+    var offY = place.offY;
+    if (typeof offX !== "number" || typeof offY !== "number" ||
+            !isFinite(offX) || !isFinite(offY)) {
+        return out;
     }
-    var offX = box.minX - bandX0;
-    var offY = box.minY - bandYMin;
 
     var toBandX = function(drawX) { return drawX - offX; };
     var toElev = function(drawY) { return drawY - offY; };

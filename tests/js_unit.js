@@ -21219,16 +21219,65 @@ var pdYMin = Math.min.apply(null, pdYs);
 var pdX0 = pdBand.legs[0].fromX;
 var pdX1 = pdBand.legs[pdBand.legs.length - 1].toX;
 
-// A box placed at a known offset from the band's own origin.
+// THE PLACEMENT COMES FROM THE DRAWN STATIONS, NOT FROM A BOX.
+//
+// This fixture used to build a box whose bottom-left corner WAS the
+// band's first leg and lowest station, and hand that to profileStrips
+// -- which is exactly the assumption the code made. The fixture and the
+// code agreed with each other and both disagreed with every real
+// drawing, where the box is drawn AROUND the band with padding and
+// reaches below its lowest station to the floor. Measured on Truitt:
+// all eight bands misplaced, up to 39 units forward along the passage
+// and 15 above it.
+//
+// So the placement is now recovered the way the drawing records it: one
+// drawn station against its own band coordinates.
 var pdOffX = 500, pdOffY = 300;
-var pdBox = { key: "A", minX: pdX0 + pdOffX, maxX: pdX1 + pdOffX,
-              minY: pdYMin + pdOffY, maxY: pdYMin + pdOffY + 20 };
+var pdDrawn = {};
+for (var pdS = 0; pdS < pdBand.stations.length; pdS++) {
+    var pdSt = pdBand.stations[pdS];
+    pdDrawn[pdBand.key + "/" + pdSt.name] = {
+        x: pdSt.x + pdOffX,
+        y: pdSt.y + (pdBand.zOffset || 0.0) + pdOffY
+    };
+}
+var pdPlace = CsDrape.placeBand(pdBand, pdDrawn);
+ok(pdPlace !== null, "a band with drawn stations can be placed");
+nearly(pdPlace.offX, pdOffX, 1e-6, "and the offset along the run is exact");
+nearly(pdPlace.offY, pdOffY, 1e-6, "and so is the one in elevation");
+
+// A box is no longer consulted, so padding on it changes nothing. This
+// is the assertion the old fixture could not make.
+var pdPadded = CsDrape.placeBand(pdBand, pdDrawn);
+nearly(pdPadded.offX, pdOffX, 1e-6,
+    "the placement owes nothing to any box drawn round the band");
+
+eqs(String(CsDrape.placeBand(pdBand, {})), "null",
+    "a band with no drawn station is not placed by guesswork");
+eqs(String(CsDrape.placeBand(null, pdDrawn)), "null",
+    "and neither is no band at all");
+
+// A drawing revised out of step with the survey: one station moved, so
+// the stations no longer agree on where the band sits.
+var pdSkewed = {};
+for (var pdK in pdDrawn) {
+    if (pdDrawn.hasOwnProperty(pdK)) {
+        pdSkewed[pdK] = { x: pdDrawn[pdK].x, y: pdDrawn[pdK].y };
+    }
+}
+var pdFirstKey = Object.keys(pdSkewed)[0];
+pdSkewed[pdFirstKey] = { x: pdSkewed[pdFirstKey].x + 7,
+                         y: pdSkewed[pdFirstKey].y };
+eqs(String(CsDrape.placeBand(pdBand, pdSkewed)), "null",
+    "stations that disagree about the placement answer nothing, rather "
+    + "than picking one and laying the sketch somewhere nobody drew it");
+
 // A scan covering the band's full width, two units tall from its floor.
 var pdScanQuad = { origin: { x: pdX0 + pdOffX, y: pdYMin + pdOffY },
                    u: { x: pdX1 - pdX0, y: 0 },
                    v: { x: 0, y: 2 } };
 
-var pdStrips = CsDrape.profileStrips(pdScanQuad, pdBox, pdBand, pdResolved);
+var pdStrips = CsDrape.profileStrips(pdScanQuad, pdPlace, pdBand, pdResolved);
 ok(pdStrips.positions.length > 0, "a profile scan makes strips");
 eqs(String(pdStrips.uvs.length / 2), String(pdStrips.positions.length / 3),
     "one uv per strip vertex");
@@ -21245,8 +21294,8 @@ for (var ps = 0; ps < pdStrips.positions.length; ps++) {
 }
 eqs(String(pdBad), "0", "no NaN in the strips");
 
-// THE OFFSET IS UNDONE. The scan's bottom edge sits at the box's minY,
-// which IS the band's own minimum elevation -- so the drape's lowest z
+// THE OFFSET IS UNDONE. The scan's bottom edge sits at the band's own
+// minimum elevation plus the drawing offset -- so the drape's lowest z
 // must be that elevation, not the drawing coordinate it was drawn at.
 var pdZs = [];
 for (var pz = 2; pz < pdStrips.positions.length; pz += 3) {
@@ -21264,10 +21313,23 @@ for (var pj = 1; pj < pdStrips.positions.length; pj += 3) {
 ok(Math.max.apply(null, pdSy) - Math.min.apply(null, pdSy) > 1e-6,
     "the strips follow the passage round its bend");
 
-eqs(String(CsDrape.profileStrips(null, pdBox, pdBand, pdResolved)
+eqs(String(CsDrape.profileStrips(null, pdPlace, pdBand, pdResolved)
     .positions.length), "0", "no quad, no strips -- and no exception");
 eqs(String(CsDrape.profileStrips(pdScanQuad, null, pdBand, pdResolved)
-    .positions.length), "0", "no band box, no strips");
+    .positions.length), "0", "no placement, no strips");
+
+// A DRAWN STATION LANDS ON ITS OWN STATION. This is the whole point of
+// the drape and the thing the box-corner guess got wrong: the "A2"
+// written on a sketch has to sit on station A2 in the cave.
+var pdCheckSt = pdBand.stations[1];
+var pdCheckAt = pdDrawn[pdBand.key + "/" + pdCheckSt.name];
+var pdLanded = CsDrape.bandPointTo3d(pdBand, pdResolved,
+    pdCheckAt.x - pdPlace.offX, pdCheckAt.y - pdPlace.offY);
+var pdTruth = pdResolved.stations[pdCheckSt.name];
+ok(pdLanded !== null, "a drawn station maps back into the cave");
+nearly(pdLanded.x, pdTruth.x, 1e-6, "a drawn station lands on its own x");
+nearly(pdLanded.y, pdTruth.y, 1e-6, "and its own y");
+nearly(pdLanded.z, pdTruth.z, 1e-6, "and its own elevation");
 
 // Ramp helpers must not divide by zero on a degenerate range.
 var oneTrip = mesh3dSurvey();
