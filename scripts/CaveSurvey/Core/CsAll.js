@@ -148,6 +148,10 @@ include(includeBasePath + "/CsDelta.js");
 include(includeBasePath + "/CsProfileBind.js");
 include(includeBasePath + "/CsPick.js");
 include(includeBasePath + "/CsLocationPick.js");
+// After CsLocationPick (it reads anchorRecord's shape) and CsLayers:
+// the rules for emptying a drawing without losing its images or its
+// location.
+include(includeBasePath + "/CsReset.js");
 // Pure prose: what each symbol and each traced feature MEANS, for
 // the panels' tooltips and the legend. Keyed by CsSymbols block
 // name and by FeatureTrace row, so it loads before both.

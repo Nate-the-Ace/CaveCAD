@@ -79,11 +79,20 @@ CsLocationPick.MOVE_EPS = 0.05;
  * lon, pos, pinX, pinY} -- or null when the drawing has none. pinX/Y
  * are the DRAWING position the coordinate was pinned at (GeoDrawX/Y
  * tags), null on drawings georeferenced before those tags existed.
+ *
+ * A RESET CARRIER LOSES TO A REAL ANCHOR. Reset Drawing parks the
+ * georeference on a marked point (CsReset.CARRIER_TAG) because the
+ * station that held it is deleted with everything else. Import a survey
+ * afterwards and the drawing carries the tags twice -- on the carrier
+ * and on the new anchor station -- so the carrier is taken only when
+ * nothing else answers. Without this the winner would be whichever the
+ * entity walk reached first.
  */
 CsLocationPick.anchorRecord = function(doc) {
     if (doc === undefined || doc === null) {
         return null;
     }
+    var carrier = null;
     var ids = doc.queryAllEntities(false, false);
     for (var i = 0; i < ids.length; i++) {
         var e = doc.queryEntity(ids[i]);
@@ -97,7 +106,7 @@ CsLocationPick.anchorRecord = function(doc) {
         }
         var pos = (typeof e.getPosition === "function") ?
             e.getPosition() : null;
-        return {
+        var rec = {
             entity: e,
             station: CsTags.get(e, "GeoStation"),
             lat: lat, lon: lon,
@@ -105,8 +114,24 @@ CsLocationPick.anchorRecord = function(doc) {
             pinX: CsTags.getNumber(e, "GeoDrawX"),
             pinY: CsTags.getNumber(e, "GeoDrawY")
         };
+        if (CsLocationPick.isCarrier(e)) {
+            if (carrier === null) {
+                carrier = rec;
+            }
+            continue;
+        }
+        return rec;
     }
-    return null;
+    return carrier;
+};
+
+/** Is this the point a reset parked the georeference on, rather than a
+ *  station that was actually surveyed? */
+CsLocationPick.isCarrier = function(entity) {
+    if (typeof CsReset === "undefined") {
+        return false;   // library loaded without CsReset: nothing to skip
+    }
+    return CsTags.get(entity, CsReset.CARRIER_TAG) !== "";
 };
 
 /**

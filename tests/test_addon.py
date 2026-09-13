@@ -1613,6 +1613,7 @@ MENU = {
     "CaveShelf/CaveShelf.js":             (450, 20, ["caveshelf", "caves"]),
     "CaveTemplate/CaveTemplate.js":       (450, 30, ["newcavemap", "ncm"]),
     "TeachingCave/TeachingCave.js":       (450, 40, ["teachingcave", "teach"]),
+    "ResetDrawing/ResetDrawing.js":       (450, 41, ["resetdrawing", "rd"]),
     # 451 -- survey data
     "SurveyNotebook/SurveyNotebook.js":   (451, 10, ["surveynotebook", "snb"]),
     "ImportCaveSurvey/ImportCaveSurvey.js": (451, 20, ["importcavesurvey", "ics"]),
@@ -1879,6 +1880,7 @@ class TestSheetFileGuard(unittest.TestCase):
         "DrawPanel", "FeatureTrace", "GenerateProfile", "ImportCaveSurvey",
         "LoopErrors", "RepairDrawing", "ScatterBreakdown", "ShapedLines",
         "SketchScans", "SurfaceData", "SurveyNotebook", "SymbolPalette",
+        "ResetDrawing",
     ]
 
     # Tools that only READ, and are welcome on a sheet: checking a sheet

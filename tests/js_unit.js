@@ -246,7 +246,10 @@ var CORE_FILES = [
     "scripts/CaveSurvey/Core/CsTeach.js",
     // The sheet mark. isSheet/mark need a document; the path rule and
     // the refusal text are pure and are what is tested here.
-    "scripts/CaveSurvey/Core/CsSheetFile.js"
+    "scripts/CaveSurvey/Core/CsSheetFile.js",
+    // What survives emptying a drawing, and what the refusals say. The
+    // walk and the delete live in ResetDrawing, where a document exists.
+    "scripts/CaveSurvey/Core/CsReset.js"
 ];
 for (var ci = 0; ci < CORE_FILES.length; ci++) {
     loadRepoScript(CORE_FILES[ci]);
@@ -26845,6 +26848,150 @@ eqs(CsSymbolStore.AREA_MARKER_TAGS.custom, "AreaCustom",
     ok(!isNull(r2.dock),
         "DrawPanel.buildDock: the dock still gets built when the grid " +
         "placement pass fails");
+})();
+
+// ---------------------------------------------------------------------
+// CsReset -- emptying a drawing without losing its images or its
+// location. Everything here decides what a DELETE is aimed at, so it is
+// pinned the way CsTeach's recursive delete is.
+// ---------------------------------------------------------------------
+(function() {
+    var image = function(layer, tags) {
+        return { isImage: true, layer: layer, tags: tags || {} };
+    };
+    var other = function(layer, tags) {
+        return { isImage: false, layer: layer, tags: tags || {} };
+    };
+
+    // -- what survives ----------------------------------------------
+    ok(CsReset.keepsEntity(image("CTRL-SCAN")),
+        "CsReset: a scan on its own layer stays");
+    ok(CsReset.keepsEntity(image("CTRL-AERIAL")),
+        "CsReset: so does the aerial basemap");
+    ok(CsReset.keepsEntity(image("CTRL-SECTION-SCAN")),
+        "CsReset: and a section's own scan");
+    ok(CsReset.keepsEntity(image("SOMEBODY-ELSE", { SketchScan: "p3.jpg" })),
+        "CsReset: a tagged scan stays wherever it was put -- the tag " +
+            "outlives the IMAGEDEF, so it is the better evidence");
+    ok(!CsReset.keepsEntity(other("CTRL-SCAN")),
+        "CsReset: a LINE drawn on a scan layer is not a scan and goes " +
+            "-- keeping the layer rather than the entity kind would " +
+            "leave a class starting on stray geometry");
+    ok(!CsReset.keepsEntity(image("WALLS-SURVEYED")),
+        "CsReset: an untagged image on a map layer is not one of ours");
+    ok(!CsReset.keepsEntity(null),
+        "CsReset: nothing is not kept");
+    ok(!CsReset.keepsEntity(image("SOMEBODY-ELSE", { SketchScan: "" })),
+        "CsReset: an EMPTY tag is not a tag, so it does not rescue an " +
+            "image off the scan layers");
+
+    // -- the tally the dialog counts from ----------------------------
+    var counts = CsReset.tally([
+        image("CTRL-SCAN", { SketchScan: "p1.jpg" }),
+        image("CTRL-AERIAL"),
+        other("CTRL-STATIONS"),
+        other("CTRL-SHOTS"),
+        other("WALLS-SURVEYED"),
+        other("NOTES-GENERAL")
+    ]);
+    near(counts.images, 2, 1e-9, "CsReset: both images counted as kept");
+    near(counts.total, 4, 1e-9, "CsReset: and the rest as doomed");
+    near(counts.survey, 2, 1e-9, "CsReset: CTRL- layers are the survey half");
+    near(counts.drawn, 2, 1e-9, "CsReset: everything else is the drawn half");
+    near(CsReset.tally(null).total, 0, 1e-9, "CsReset: nothing tallies to nothing");
+
+    // -- the refusals, each of which has to say what to do about it --
+    var base = { hasDocument: true, isSheet: false,
+        docPath: "/caves/Truitt/Truitt.dxf", inCaveFolder: true,
+        caveName: "Truitt", counts: { total: 12 } };
+    var copyOf = function(over) {
+        var c = {}, k;
+        for (k in base) { if (base.hasOwnProperty(k)) { c[k] = base[k]; } }
+        for (k in over) { if (over.hasOwnProperty(k)) { c[k] = over[k]; } }
+        return c;
+    };
+    ok(CsReset.planReset(base).can,
+        "CsReset: a saved cave drawing with something in it can be reset");
+    ok(!CsReset.planReset(copyOf({ hasDocument: false })).can,
+        "CsReset: no drawing, no reset");
+    ok(!CsReset.planReset(copyOf({ isSheet: true })).can,
+        "CsReset: a sheet is rebuilt from the record, not worked in");
+    ok(!CsReset.planReset(copyOf({ docPath: "" })).can,
+        "CsReset: an unsaved drawing has nothing to keep a copy of -- " +
+            "no backup, no wipe");
+    ok(!CsReset.planReset(copyOf({ inCaveFolder: false })).can,
+        "CsReset: outside a cave folder the backup has nowhere to go");
+    ok(!CsReset.planReset(copyOf({ counts: { total: 0 } })).can,
+        "CsReset: an already-clear drawing is left alone");
+    ok(CsReset.planReset(copyOf({ hasDocument: false })).reason.length > 20,
+        "CsReset: every refusal answers in words, never a throw");
+    ok(CsReset.planReset(null).can === false,
+        "CsReset: no state at all is a refusal too");
+
+    // -- the typed confirmation -------------------------------------
+    ok(CsReset.matchesName("  truitt  ", "Truitt"),
+        "CsReset: the typed name is trimmed and case-insensitive -- the " +
+            "box stops a stray Return, it does not test anybody's typing");
+    ok(!CsReset.matchesName("Truit", "Truitt"),
+        "CsReset: but it does have to be the name");
+    ok(!CsReset.matchesName("", ""),
+        "CsReset: an empty box never confirms an unnamed cave");
+
+    // -- where the georeference is parked ----------------------------
+    var pinned = CsReset.carrierFrom({ lat: 34.5, lon: -85.25,
+        station: "A1", pos: { x: 900, y: 900 }, pinX: 100, pinY: 200 });
+    near(pinned.x, 100, 1e-9, "CsReset: the carrier goes at the PIN, not at " +
+        "wherever the anchor entity had drifted to");
+    near(pinned.y, 200, 1e-9, "CsReset: on both axes");
+    eqs(String(pinned.tags.GeoStation), "A1",
+        "CsReset: the station's name travels with it");
+    eqs(String(pinned.tags[CsReset.CARRIER_TAG]), "1",
+        "CsReset: and it is MARKED, so a real anchor beats it later");
+    near(pinned.tags.GeoDrawX, 100, 1e-9,
+        "CsReset: the pin is re-declared, so nothing downstream reads " +
+            "the carrier as a station that has moved");
+
+    var unpinned = CsReset.carrierFrom({ lat: 34.5, lon: -85.25,
+        station: "A1", pos: { x: 900, y: 900 }, pinX: null, pinY: null });
+    near(unpinned.x, 900, 1e-9, "CsReset: a drawing georeferenced before the pin " +
+        "tags existed puts the carrier where its anchor sat");
+    ok(CsReset.carrierFrom(null) === null,
+        "CsReset: a drawing with no location carries none across");
+    ok(CsReset.carrierFrom({ lat: null, lon: null,
+        pos: { x: 1, y: 1 } }) === null,
+        "CsReset: and half a coordinate is no coordinate");
+
+    // -- what the dialog says ---------------------------------------
+    var lines = CsReset.summaryText({ caveName: "Truitt",
+        counts: { total: 1830, survey: 700, drawn: 1130, images: 47 },
+        backupPath: "/caves/Truitt/backup/Truitt-2026-09-13.dxf",
+        modified: true }).join("\n");
+    ok(lines.indexOf("1,830") !== -1,
+        "CsReset: counts are grouped, so 1830 reads as 1,830");
+    ok(lines.indexOf("47 images") !== -1,
+        "CsReset: what STAYS is said as plainly as what goes");
+    ok(lines.indexOf("backup/Truitt-2026-09-13.dxf") !== -1,
+        "CsReset: the copy's path is on screen before the wipe, not after");
+    ok(lines.indexOf("Unsaved changes") !== -1,
+        "CsReset: a modified drawing is told its unsaved edits are in " +
+            "neither place afterwards");
+    ok(CsReset.summaryText({ caveName: "Truitt", counts: {},
+        modified: false }).join("\n").indexOf("Unsaved changes") === -1,
+        "CsReset: and an unmodified one is not warned about nothing");
+    eqs(CsReset.groupNumber(999), "999", "CsReset: no separator under a thousand");
+    eqs(CsReset.groupNumber(1000000), "1,000,000", "CsReset: two separators over a million");
+
+    var done = CsReset.doneText({ counts: { total: 12, images: 3 },
+        carrier: true, backupPath: "/caves/Truitt/backup/x.dxf" }).join("\n");
+    ok(done.indexOf("/caves/Truitt/backup/x.dxf") !== -1,
+        "CsReset: the one question after a reset anybody regrets is " +
+            "where the old drawing went, so the answer is in the report");
+    ok(done.indexOf("saved") !== -1,
+        "CsReset: and that nothing has been written yet");
+    ok(CsReset.doneText({ counts: {}, carrier: false }).join("\n")
+        .indexOf("no location") !== -1,
+        "CsReset: a drawing with no location says so rather than " +
+            "claiming to have carried one");
 })();
 
 // ---------------------------------------------------------------------
