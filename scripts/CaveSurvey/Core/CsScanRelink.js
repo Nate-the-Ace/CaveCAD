@@ -19,6 +19,15 @@
 // drawing still knows which file each image WAS, even when it no longer
 // knows where to find it.
 //
+// THE PAGE IS NOT WHAT WAS PLACED. A scan goes into the drawing trimmed
+// to the box the caver drew on it, as a derivative file under scans'
+// Trimmed folder (CsScanTrim). The box is its own XDATA tag, ScanTrim,
+// so it survives too -- and it has to be honoured here. Relinking to
+// the page named by SketchScan puts the whole untrimmed sheet back on
+// the map, which is not the image that was lost. Where the derivative
+// itself has been deleted, CsScanTrim.write cuts it again from the
+// page; the name carries the box, so a box cut twice is the same file.
+//
 // IT SURVIVES A SAVE, SINCE CaveCAD 0.6.0.1. It did not before, and
 // the reason was not the exporter. dxflib read lines into a fixed
 // buffer and an over-long one left its tail, newline and all, in the
@@ -48,10 +57,13 @@ CsScanRelink.TAGS = ["SketchScan", "SectionScan"];
 /**
  * Re-points every image whose file reference has been lost.
  *
- * \return {relinked, missing: [name], untagged, alreadyLinked}
+ * \return {relinked, missing: [name], untagged, alreadyLinked,
+ *          retrimmed} -- retrimmed counts those put back to the box the
+ *          caver drew rather than to the whole page.
  */
 CsScanRelink.run = function(doc, di) {
-    var out = { relinked: 0, missing: [], untagged: 0, alreadyLinked: 0 };
+    var out = { relinked: 0, missing: [], untagged: 0, alreadyLinked: 0,
+                retrimmed: 0 };
     if (isNull(doc) || isNull(di)) {
         return out;
     }
@@ -99,8 +111,29 @@ CsScanRelink.run = function(doc, di) {
                 out.untagged++;
                 continue;
             }
-            var abs = CsCave.isAbsolutePath(stored)
-                ? stored : CsCave.resolveUnderScans(scans, stored);
+            // THE PAGE IS NOT WHAT WAS PLACED. SketchScan names the
+            // whole scanned page; what went into the drawing was the
+            // box the caver drew on it, as a derivative file. Relinking
+            // to the page puts the untrimmed sheet back on the map and
+            // buries it. The box is its own tag, so honour it.
+            var trim = CsScanTrim.parse(CsTags.get(e, CsScanTrim.TAG));
+            var abs = null;
+            if (trim !== null && !CsCave.isAbsolutePath(stored)) {
+                var made = CsScanTrim.write(scans, stored, trim);
+                if (made.path === null) {
+                    // The derivative is gone and the page it was cut
+                    // from cannot be read, so there is nothing to cut
+                    // again. Say so rather than placing the whole page:
+                    // a sheet covering the map is worse than a gap.
+                    out.missing.push(stored);
+                    continue;
+                }
+                abs = made.path;
+                out.retrimmed++;
+            } else {
+                abs = CsCave.isAbsolutePath(stored)
+                    ? stored : CsCave.resolveUnderScans(scans, stored);
+            }
             if (abs === null || !(new QFileInfo(abs)).exists()) {
                 out.missing.push(stored);
                 continue;
@@ -142,6 +175,11 @@ CsScanRelink.summary = function(r) {
     }
     if (r.untagged > 0) {
         parts.push(qsTr("%1 with no record of their page").arg(r.untagged));
+    }
+    if (r.retrimmed > 0) {
+        // WORTH SAYING. Otherwise a caver who sees "46 relinked" and a
+        // tidy map has no way to know the trims came back too.
+        parts.push(qsTr("%1 back to their trim box").arg(r.retrimmed));
     }
     var text = qsTr("Scan images: ") + parts.join(", ") + ".";
     if (r.relinked > 0) {
