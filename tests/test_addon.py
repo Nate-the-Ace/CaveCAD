@@ -725,6 +725,57 @@ class TestSiblingToolsAreWired(unittest.TestCase):
                         (name, name, obj, filename))
 
 
+class TestSimpleJsGlobals(unittest.TestCase):
+    """A file that calls getDocument() must include the file defining it.
+
+    getDocument() and getDocumentInterface() live in QCAD's
+    scripts/simple.js and nowhere else. A tool that calls one without
+    including it does NOT fail honestly: it works whenever some other
+    tool has already pulled simple.js into the script context this
+    session, and dies with "ReferenceError: getDocument is not defined"
+    when it is the first thing run after a launch. What a caver sees is
+    a menu entry that is present, enabled, and does nothing -- once,
+    unreproducibly, and never again that session.
+
+    Neither the engine harness nor a unit test can catch it: every
+    engine suite defines both functions by hand to point at its fixture
+    document, which is exactly what hides the missing include.
+
+    Core/ is exempt: those files are libraries, included by whoever uses
+    them, and CsAll.js is never an action's entry point.
+    """
+
+    # EAction.getDocument() is a different function on a class that is
+    # always in scope, and needs no include.
+    CALL = re.compile(r"(?<![.\w])getDocument(?:Interface)?\s*\(")
+
+    def tool_sources(self):
+        for folder, _subdirs, files in os.walk(ADDON):
+            if os.path.basename(folder) == "Core":
+                continue
+            for name in files:
+                if name.endswith(".js"):
+                    path = os.path.join(folder, name)
+                    with open(path, encoding="utf-8",
+                              errors="replace") as fh:
+                        yield os.path.relpath(path, ADDON), fh.read()
+
+    def test_callers_of_getdocument_include_simple_js(self):
+        missing = []
+        for rel, source in self.tool_sources():
+            if not self.CALL.search(source):
+                continue
+            if 'include("scripts/simple.js")' in source:
+                continue
+            missing.append(rel)
+        self.assertEqual(
+            sorted(missing), [],
+            "these files call getDocument()/getDocumentInterface() but "
+            "never include scripts/simple.js, where those are defined: "
+            "%s -- each is a tool that does nothing when it is the first "
+            "one run after a launch" % sorted(missing))
+
+
 class TestLayerVocabulary(unittest.TestCase):
     """The layer names in Core/CsLayers.js and the plan template must agree.
 

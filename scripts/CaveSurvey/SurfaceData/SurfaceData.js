@@ -12,6 +12,13 @@
  * separately worded ways when nobody had answered it yet.
  */
 include("scripts/EAction.js");
+// simple.js defines getDocument()/getDocumentInterface(), which this
+// file calls. Without the include the tool works only when some OTHER
+// tool has already pulled simple.js into the script context this
+// session -- so it fails when it is the FIRST thing run after a launch,
+// and works every time after that. See ResetDrawing.js, where that cost
+// a menu entry that did nothing.
+include("scripts/simple.js");
 include(includeBasePath + "/../Core/CsAll.js");
 
 function SurfaceData(guiAction) {

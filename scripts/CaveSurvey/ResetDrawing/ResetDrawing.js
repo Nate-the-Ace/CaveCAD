@@ -23,6 +23,15 @@
  * first.
  */
 include("scripts/EAction.js");
+// simple.js, and NOT because anything here is simple: getDocument() and
+// getDocumentInterface() are defined in it and nowhere else. Without
+// this the tool dies on its very first line with "ReferenceError:
+// getDocument is not defined" -- in the action's own script context
+// only, so the menu entry appears, is enabled, and does NOTHING when
+// clicked. The engine harness cannot catch it: tests/reset_drawing_run.js
+// defines both functions by hand to point at its fixture document, which
+// is exactly what hides the missing include.
+include("scripts/simple.js");
 include(includeBasePath + "/../Core/CsAll.js");
 
 function ResetDrawing(guiAction) {
