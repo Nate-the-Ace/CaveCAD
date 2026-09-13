@@ -323,10 +323,23 @@ CsScanView.eventPos = function(event) {
  * pan() takes a delta in VIEW pixels and flips y itself.
  */
 CsScanView.prototype.mouseMoveEvent = function(event) {
+    // A PAN IN PROGRESS COMES FIRST, and it has to: `tracing` is a MODE
+    // that stays on for as long as the caver is drawing an outline, not
+    // a gesture that lasts one drag, so a tracing branch ahead of this
+    // one swallows every middle-drag for the whole session and the scan
+    // cannot be moved while being traced -- which is exactly when it
+    // most needs to be, since the outline runs off the edge of the
+    // view. (Boxing never hit this: boxFrom is set only while the left
+    // button is actually down.)
+    var phase = CsScanView.movePhase(this);
+    if (phase === "pan") {
+        CsScanView.panStep(this, event);
+        return;
+    }
     // A BOX IN PROGRESS OWNS THE DRAG. No pan, and no base handling
     // either: the navigation action would start its own pan on the same
     // drag and the scan would slide out from under the box being drawn.
-    if (this.tracing === true) {
+    if (phase === "trace") {
         try {
             var ivT = this.getImageView();
             var vpT = CsScanView.viewPos(ivT, event);
@@ -356,7 +369,7 @@ CsScanView.prototype.mouseMoveEvent = function(event) {
         }
         return;
     }
-    if (this.boxFrom !== undefined && this.boxFrom !== null) {
+    if (phase === "box") {
         try {
             var ivB = this.getImageView();
             var vpB = CsScanView.viewPos(ivB, event);
@@ -371,32 +384,64 @@ CsScanView.prototype.mouseMoveEvent = function(event) {
         }
         return;
     }
-    if (this.panFrom === undefined || this.panFrom === null) {
-        CsScanView.callBase(this, "mouseMoveEvent", event);
-        return;
+    CsScanView.callBase(this, "mouseMoveEvent", event);
+};
+
+/**
+ * One step of a middle-drag pan.
+ *
+ * A THRESHOLD, the way QCAD's own DefaultNavigation has one. Every pan
+ * step regenerates the view, and regenerating a 4000-pixel scan is not
+ * cheap -- so a drag that reports a pixel at a time should not buy a
+ * full regeneration for each of them. Sub-threshold movement is
+ * ACCUMULATED rather than dropped, so the pan still tracks the mouse
+ * exactly; it just arrives in slightly coarser steps.
+ */
+/**
+ * What a mouse move means right now: "pan", "trace", "box" or "base".
+ *
+ * THE ORDER IS THE POINT, and it is why this is a function rather than
+ * a chain of ifs inside the handler. `tracing` is a MODE that stays on
+ * for as long as the caver is drawing an outline, while `panFrom` and
+ * `boxFrom` last one drag each -- so a tracing test placed ahead of the
+ * pan swallows every middle-drag for the whole session, and the scan
+ * cannot be moved while being traced. Which is exactly when it most
+ * needs to be: an outline runs off the edge of the view.
+ *
+ * Reads fields and nothing else, so the order can be tested without a
+ * live view and a real mouse event.
+ */
+CsScanView.movePhase = function(view) {
+    if (view === null || view === undefined) {
+        return "base";
     }
-    // mid-drag: ours alone, for the reason in mousePressEvent
+    if (view.panFrom !== undefined && view.panFrom !== null) {
+        return "pan";
+    }
+    if (view.tracing === true) {
+        return "trace";
+    }
+    if (view.boxFrom !== undefined && view.boxFrom !== null) {
+        return "box";
+    }
+    return "base";
+};
+
+CsScanView.panStep = function(view, event) {
     try {
         var at = CsScanView.eventPos(event);
         if (at === null) {
             return;
         }
-        var dx = at.x - this.panFrom.x, dy = at.y - this.panFrom.y;
-        // A THRESHOLD, the way QCAD's own DefaultNavigation has one.
-        // Every pan step regenerates the view, and regenerating a
-        // 4000-pixel scan is not cheap -- so a drag that reports a
-        // pixel at a time should not buy a full regeneration for each
-        // of them. Sub-threshold movement is ACCUMULATED rather than
-        // dropped, so the pan still tracks the mouse exactly; it just
-        // arrives in slightly coarser steps.
+        var dx = at.x - view.panFrom.x, dy = at.y - view.panFrom.y;
         if (Math.abs(dx) < CsScanView.PAN_THRESHOLD &&
                 Math.abs(dy) < CsScanView.PAN_THRESHOLD) {
             return;
         }
-        this.getImageView().pan(new RVector(dx, dy), true);
-        this.panFrom = at;
+        view.getImageView().pan(new RVector(dx, dy), true);
+        view.panFrom = at;
     } catch (e) {
-        this.panFrom = null;
+        view.panFrom = null;
     }
 };
 

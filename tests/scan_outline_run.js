@@ -153,6 +153,28 @@ ok(!CsScanView.strokeCloses(atPress([], null)),
    "no stroke, nothing to close");
 ok(!CsScanView.strokeCloses(null), "and no view is not a crash");
 
+// ----------------------------------------------------------------------
+// MIDDLE-DRAG PANS WHILE TRACING.
+//
+// `tracing` is a MODE that stays on for as long as the outline is being
+// drawn, while panFrom lasts one drag -- so a tracing test ahead of the
+// pan swallows every middle-drag for the whole session and the scan
+// cannot be moved while being traced. Which is when it most needs to
+// be: the outline runs off the edge of the view.
+// ----------------------------------------------------------------------
+ok(CsScanView.movePhase({ tracing: true, panFrom: { x: 5, y: 5 } }) === "pan",
+   "a pan in progress beats tracing, or the scan cannot be moved while "
+    + "it is being drawn round");
+ok(CsScanView.movePhase({ tracing: true }) === "trace",
+   "with no pan under way, tracing takes the move");
+ok(CsScanView.movePhase({ boxing: true, boxFrom: { x: 1, y: 1 } }) === "box",
+   "a box in progress takes it");
+ok(CsScanView.movePhase({ tracing: true, boxFrom: { x: 1, y: 1 } }) === "trace",
+   "tracing beats a stale box");
+ok(CsScanView.movePhase({}) === "base",
+   "and with nothing in progress the view handles its own move");
+ok(CsScanView.movePhase(null) === "base", "no view is not a crash");
+
 var dir = new QDir(caveDir);
 dir.removeRecursively();
 
