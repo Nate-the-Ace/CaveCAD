@@ -154,6 +154,55 @@ ok(!CsScanView.strokeCloses(atPress([], null)),
 ok(!CsScanView.strokeCloses(null), "and no view is not a crash");
 
 // ----------------------------------------------------------------------
+// THE MASK SURVIVES THE 3D VIEW'S TEXTURE CAP.
+//
+// RCave3dTexture scales anything over 2048px with SmoothTransformation
+// before upload, and a real survey page is bigger than that. Smooth
+// scaling of a masked image is where transparency goes wrong: a
+// transparent pixel carries RGB 0,0,0, so a scaler that blends
+// unpremultiplied would drag black into the paper along every cut
+// edge. This does the same scale and looks.
+// ----------------------------------------------------------------------
+var bigW = 2600, bigH = 2000;
+var bigPage = new QImage(bigW, bigH, QImage.Format_RGB32);
+bigPage.fill(new QColor(255, 255, 255));
+var bigRel = "Trip 1/big.png";
+ok(bigPage.save(scansDir + "/" + bigRel, "PNG"), "a page over the cap was written");
+
+var bigOutline = [{ x: 100, y: 100 }, { x: 2500, y: 100 },
+                  { x: 2500, y: 1000 }, { x: 1300, y: 1000 },
+                  { x: 1300, y: 1900 }, { x: 100, y: 1900 }];
+var bigBox = CsScanTrim.outlineBounds(bigOutline);
+var bigCut = CsScanTrim.write(scansDir, bigRel, bigBox, bigOutline);
+ok(bigCut.path !== null, "and masked to an outline");
+
+if (bigCut.path !== null) {
+    var bigImg = new QImage(bigCut.path);
+    // RCave3dTexture::MAX_PX
+    var scaled = bigImg.scaled(2048, 2048, Qt.KeepAspectRatio,
+        Qt.SmoothTransformation);
+    ok(scaled.hasAlphaChannel(),
+       "the mask still carries transparency after the downscale");
+
+    function at(fx, fy) {
+        return scaled.pixelColor(Math.round(scaled.width() * fx),
+                                 Math.round(scaled.height() * fy));
+    }
+    var deep = at(0.10, 0.10);
+    var nearEdge = at(0.47, 0.70);
+    var notch = at(0.80, 0.80);
+    ok(deep.alpha() === 255, "paper well inside the outline is kept");
+    ok(notch.alpha() === 0,
+       "and the notch is still cut away (" + notch.alpha() + ")");
+    // The edge is where unpremultiplied blending would show as a dark
+    // fringe, so compare it against paper far from any cut.
+    ok(nearEdge.alpha() === 255 &&
+       Math.abs(nearEdge.red() - deep.red()) < 40,
+       "paper beside a cut edge is not darkened by the scale (" +
+       nearEdge.red() + " against " + deep.red() + ")");
+}
+
+// ----------------------------------------------------------------------
 // MIDDLE-DRAG PANS WHILE TRACING.
 //
 // `tracing` is a MODE that stays on for as long as the outline is being

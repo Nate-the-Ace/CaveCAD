@@ -181,6 +181,82 @@ if (found.length === 1) {
         zMin.toFixed(2) + ".." + zMax.toFixed(2) + ")", zMax - zMin > 1e-6);
 }
 
+// ---------------------------------------------------------------------
+// A SCAN TRIMMED TO A TRACED OUTLINE, in 3D.
+//
+// The derivative is the outline's bounding box with everything outside
+// the line made transparent, so as far as the drape is concerned it is
+// an ordinary rectangular image -- which is the whole design, and
+// therefore the thing to assert rather than assume. What the 3D view
+// does with the transparency is a shader's business and cannot be seen
+// from here; that the SIZE and the QUAD come from the masked file, and
+// that the drape builds over it, can.
+// ---------------------------------------------------------------------
+
+var outline = [{ x: 2, y: 2 }, { x: 34, y: 2 }, { x: 34, y: 16 },
+               { x: 18, y: 16 }, { x: 18, y: 26 }, { x: 2, y: 26 }];
+var outBox = CsScanTrim.outlineBounds(outline);
+var cut = CsScanTrim.write(caveDir + "/scans", REL, outBox, outline);
+check("fixture: a masked derivative is cut (" + String(cut.error) + ")",
+    cut.path !== null);
+
+if (cut.path !== null) {
+    var maskedImg = new QImage(cut.path);
+    check("the masked file carries transparency at all",
+        !maskedImg.isNull() && maskedImg.hasAlphaChannel());
+    check("and is the size of the outline's box (" + maskedImg.width() +
+        "x" + maskedImg.height() + ")",
+        maskedImg.width() === outBox.w && maskedImg.height() === outBox.h);
+
+    // Placed the way SketchScans places a trimmed scan: the entity
+    // points at the derivative, and the XDATA names the PAGE.
+    var traced = new RImageEntity(doc, new RImageData(cut.path,
+        new RVector(400, 400), new RVector(0.25, 0), new RVector(0, 0.25),
+        1.0));
+    traced.setLayerId(doc.getLayerId(CsLayers.CTRL_SCAN));
+    traced.setProperty(RImageEntity.PropertyFileName, cut.path);
+    traced.setProperty(RImageEntity.PropertyUX, 0.25);
+    traced.setProperty(RImageEntity.PropertyUY, 0);
+    traced.setProperty(RImageEntity.PropertyVX, 0);
+    traced.setProperty(RImageEntity.PropertyVY, 0.25);
+    traced.setInsertionPoint(new RVector(400, 400));
+    CsTags.set(traced, CsDrape.PATH_TAG, REL);
+    CsTags.set(traced, CsScanTrim.TAG, CsScanTrim.serialize(outBox));
+    CsTags.set(traced, CsScanTrim.OUTLINE_TAG,
+        CsScanTrim.serializeOutline(outline));
+    di.applyOperation(new RAddObjectOperation(traced, false));
+
+    var withTraced = CsDrape.readScans(doc, "plan");
+    check("the traced scan is read alongside the boxed one (" +
+        withTraced.length + ")", withTraced.length === 2);
+
+    var tr = null;
+    for (var ti = 0; ti < withTraced.length; ti++) {
+        if (withTraced[ti].path === cut.path) { tr = withTraced[ti]; }
+    }
+    check("the drape reads the MASKED file, not the page it came from",
+        tr !== null);
+    if (tr !== null) {
+        check("its pixel size is the outline's box, not the page (" +
+            tr.widthPx + "x" + tr.heightPx + ")",
+            tr.widthPx === outBox.w && tr.heightPx === outBox.h);
+        check("and its quad spans that, at one u per pixel (" +
+            tr.quad.u.x + ")",
+            Math.abs(tr.quad.u.x - outBox.w * 0.25) < 1e-9);
+
+        // The drape itself: a masked scan is gridded like any other.
+        var trGrid = CsDrape.grid(tr.quad, 4, resolved.stations);
+        check("a masked scan drapes onto the passage like any other (" +
+            (trGrid.positions.length / 3) + " points)",
+            trGrid.positions.length > 0 && trGrid.indices.length > 0);
+        var trBad = 0;
+        for (var tb = 0; tb < trGrid.positions.length; tb++) {
+            if (!isFinite(trGrid.positions[tb])) { trBad++; }
+        }
+        check("with no NaN in it", trBad === 0);
+    }
+}
+
 // A kind with no scans answers empty rather than throwing.
 check("a kind with no scans reads empty",
     CsDrape.readScans(doc, "profile").length === 0);
