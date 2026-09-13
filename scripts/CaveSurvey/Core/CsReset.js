@@ -19,6 +19,15 @@
 // skip the first one. The georeference goes with them; it is declared
 // again with Set Cave Location, which is itself one of the steps.
 //
+// THREE THINGS OUTSIDE THE DRAWING GO WITH IT, because a drawing is not
+// the whole of what a class carries forward: the Complete marks on this
+// cave's scans, the last-declared location that Set Cave Location
+// offers as its default, and the map thumbnail the shelf card shows.
+// Each would otherwise hand the next student somebody else's progress.
+// The shelf entry stays, so the cave is still one click away and trips
+// can be added to it straight afterwards. ResetDrawing.clearOutside
+// does that work and says why for each.
+//
 // THE FILES ARE NOT TOUCHED. This empties a DRAWING, never a folder --
 // scans/, images/, lidar/, PDF/ and backup/ are left exactly as they
 // are, which is what makes the cave re-drawable afterwards. Teaching
@@ -142,6 +151,25 @@ CsReset.planReset = function(state) {
     };
 };
 
+/**
+ * "a", "a and b", "a, b and c" -- the Oxford-less join a sentence of
+ * cleared things reads best in.
+ */
+CsReset.listText = function(items) {
+    if (Object.prototype.toString.call(items) !== "[object Array]" ||
+            items.length === 0) {
+        return "";
+    }
+    if (items.length === 1) {
+        return String(items[0]);
+    }
+    var head = [];
+    for (var i = 0; i < items.length - 1; i++) {
+        head.push(String(items[i]));
+    }
+    return head.join(", ") + " and " + String(items[items.length - 1]);
+};
+
 /** A number with thousands separators, so 1830 reads as 1,830. */
 CsReset.groupNumber = function(n) {
     var v = Math.round(Number(n));
@@ -183,6 +211,10 @@ CsReset.summaryText = function(state) {
         " (sketch scans and the aerial basemap).");
     lines.push("The cave's location goes with them -- declare it again " +
         "with Set Cave Location.");
+    lines.push("");
+    lines.push("Also cleared: the Complete marks on this cave's scans, " +
+        "the last-declared location Set Cave Location offers, and the " +
+        "map thumbnail on the shelf. The cave stays on the shelf.");
     lines.push("");
     lines.push("The cave's FOLDER is not touched: every scan, " +
         "photograph, capture and PDF stays on disk, ready to be placed " +
@@ -230,6 +262,15 @@ CsReset.doneText = function(state) {
         "empty.");
     lines.push("The cave's folder is untouched -- the scans and the " +
         "imagery are still there to place again.");
+    var cleared = (s.cleared === null || s.cleared === undefined) ?
+        {} : s.cleared;
+    var also = [];
+    if (cleared.marks === true) { also.push("the Complete marks on its scans"); }
+    if (cleared.location === true) { also.push("the last-declared location"); }
+    if (cleared.preview === true) { also.push("the map thumbnail"); }
+    if (also.length > 0) {
+        lines.push("Cleared with it: " + CsReset.listText(also) + ".");
+    }
     if (s.backupPath !== null && s.backupPath !== undefined &&
             String(s.backupPath) !== "") {
         lines.push("The drawing as it was: " + String(s.backupPath));

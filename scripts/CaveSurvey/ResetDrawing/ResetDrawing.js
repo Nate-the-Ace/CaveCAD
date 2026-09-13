@@ -193,6 +193,89 @@ ResetDrawing.deleteAll = function(doc, di, ids) {
     return n;
 };
 
+/**
+ * The cave's state that lives OUTSIDE the drawing, cleared with it.
+ *
+ * A drawing is not the whole of what a class carries forward. Three
+ * pieces of per-cave state sit in application settings and in the
+ * folder, and each one would hand the next student somebody else's
+ * progress:
+ *
+ *   COMPLETE MARKS   which scanned pages have been finished with, kept
+ *                    per cave under the scans folder's own path. A
+ *                    student opening Sketch Scans would find the pages
+ *                    already ticked off.
+ *   THE LOCATION     the last coordinate declared anywhere. The anchor
+ *                    itself died with the drawing, but this is what Set
+ *                    Cave Location offers as its default, so the cave's
+ *                    entrance would still be a keystroke away from a
+ *                    drawing that is supposed to have no location yet.
+ *   THE PREVIEW      images/<Cave> preview.png, the thumbnail the shelf
+ *                    card shows. Left alone it is a picture of the map
+ *                    that was just deleted, until the next save.
+ *
+ * THE LOCATION IS APPLICATION-WIDE, not this cave's alone: clearing it
+ * means the next Set Cave Location in ANY drawing starts empty rather
+ * than at wherever was last declared. That is the point -- the setting
+ * exists to carry a coordinate between drawings, and carrying one out
+ * of a reset is exactly what it must not do.
+ *
+ * NOT CLEARED: the shelf entry, so the cave stays one click away and
+ * trips can be added to it straight afterwards; and Check Map's ignore
+ * list, which was not asked for.
+ *
+ * Each piece is attempted independently and none can fail the reset:
+ * the drawing is already empty by the time this runs, and a settings
+ * write that will not land is not a reason to leave a caver looking at
+ * a half-reported result.
+ *
+ * \return {marks, location, preview} -- what was actually cleared.
+ */
+ResetDrawing.clearOutside = function(docPath) {
+    var out = { marks: false, location: false, preview: false };
+
+    try {
+        var folder = CsCave.folderOf(docPath);
+        var scans = (folder === null) ? null :
+            CsCave.findSubfolder(folder, CsCave.SCANS);
+        if (scans !== null) {
+            var raw = String(RSettings.getStringValue(
+                CsScanTree.SETTING_BOOKMARKS, ""));
+            var map = CsScanTree.parseCollapsed(raw);
+            if (map.hasOwnProperty(scans)) {
+                // recordCollapsed with an empty set and no valid rels
+                // DELETES the cave's entry -- the generic per-cave
+                // string-set store, used as it is rather than grown a
+                // second copy that could drift (see CsScanTree.js).
+                CsScanTree.recordCollapsed(map, scans, {}, []);
+                RSettings.setValue(CsScanTree.SETTING_BOOKMARKS,
+                    CsScanTree.serializeCollapsed(map));
+                out.marks = true;
+            }
+        }
+    } catch (eMarks) {
+    }
+
+    try {
+        var hadLat = RSettings.getDoubleValue(
+            CsLocationPick.SETTING_LAT, -999) > -999;
+        RSettings.removeValue(CsLocationPick.SETTING_LAT);
+        RSettings.removeValue(CsLocationPick.SETTING_LON);
+        out.location = hadLat;
+    } catch (eLoc) {
+    }
+
+    try {
+        var preview = CsCave.previewPathFor(docPath);
+        if (preview !== null && (new QFileInfo(preview)).exists()) {
+            out.preview = (new QFile(preview)).remove();
+        }
+    } catch (ePrev) {
+    }
+
+    return out;
+};
+
 /** The cave folder this drawing sits in, or null when it is not in one.
  *  A cave project has a scans/ folder; that is what makes it one. */
 ResetDrawing.caveFolderOf = function(path) {
@@ -298,8 +381,11 @@ function resetDrawingRun() {
     // the previous student left behind.
     CsRestyle.ensureAndApply(doc, di);
 
+    // And the cave's state that is not in the drawing at all.
+    var cleared = ResetDrawing.clearOutside(path);
+
     var done = CsReset.doneText({ counts: split.counts,
-        backupPath: backupPath });
+        backupPath: backupPath, cleared: cleared });
     try {
         QMessageBox.information(getMainWindow(), qsTr("Reset Drawing"),
             done.join("\n"));

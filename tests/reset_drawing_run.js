@@ -206,6 +206,64 @@ var plan = CsReset.planReset({ hasDocument: true, isSheet: false,
 ok(plan.can === false,
     "and the tool refuses rather than writing a backup for no reason");
 
+// ---------------------------------------------------------------------
+// The state that lives OUTSIDE the drawing.
+//
+// Real settings and a real file, which is why this cannot be a unit
+// test. The settings are put back exactly as they were found at the
+// end: a test suite that leaves a caver's Complete marks cleared has
+// done the very thing the tool is careful about.
+// ---------------------------------------------------------------------
+var marksBefore = String(RSettings.getStringValue(
+    CsScanTree.SETTING_BOOKMARKS, ""));
+var latBefore = RSettings.getDoubleValue(CsLocationPick.SETTING_LAT, -999);
+var lonBefore = RSettings.getDoubleValue(CsLocationPick.SETTING_LON, -999);
+
+// A Complete mark on this cave's page, a remembered location, and a
+// thumbnail beside the drawing.
+var marks = CsScanTree.parseCollapsed(marksBefore);
+marks[scansDir] = [pageRel];
+RSettings.setValue(CsScanTree.SETTING_BOOKMARKS,
+    CsScanTree.serializeCollapsed(marks));
+CsLocationPick.remember({ lat: 34.5, lon: -85.25 });
+
+var previewPath = CsCave.previewPathFor(caveDir + "/Reset Test Cave.dxf");
+new QDir().mkpath(CsCave.folderOf(previewPath));
+ok(page.save(previewPath, "PNG"), "a map thumbnail was written");
+
+var cleared = ResetDrawing.clearOutside(caveDir + "/Reset Test Cave.dxf");
+
+ok(cleared.marks === true && cleared.location === true &&
+    cleared.preview === true,
+    "all three report as cleared, so the report cannot claim more than " +
+    "was done");
+var after = CsScanTree.parseCollapsed(String(
+    RSettings.getStringValue(CsScanTree.SETTING_BOOKMARKS, "")));
+ok(after[scansDir] === undefined,
+    "this cave's Complete marks are gone -- a student would otherwise " +
+    "open Sketch Scans and find the pages already ticked off");
+ok(RSettings.getDoubleValue(CsLocationPick.SETTING_LAT, -999) === -999,
+    "the last-declared location is gone, so Set Cave Location starts " +
+    "empty rather than one keystroke from the entrance it just forgot");
+ok(!(new QFileInfo(previewPath)).exists(),
+    "and the thumbnail, which would otherwise show the map that was " +
+    "just deleted until the next save");
+
+ok((new QFileInfo(scansDir + "/" + pageRel)).exists(),
+    "clearing a mark never touches the page it was about");
+
+var twice = ResetDrawing.clearOutside(caveDir + "/Reset Test Cave.dxf");
+ok(twice.marks === false && twice.preview === false,
+    "running it again clears nothing and says so rather than reporting " +
+    "work it did not do");
+
+// Put the caver's own settings back.
+RSettings.setValue(CsScanTree.SETTING_BOOKMARKS, marksBefore);
+if (latBefore > -999) { RSettings.setValue(CsLocationPick.SETTING_LAT, latBefore); }
+if (lonBefore > -999) { RSettings.setValue(CsLocationPick.SETTING_LON, lonBefore); }
+ok(String(RSettings.getStringValue(CsScanTree.SETTING_BOOKMARKS, "")) ===
+    marksBefore, "the suite left this machine's own marks as it found them");
+
 new QDir(caveDir).removeRecursively();
 
 var out;

@@ -26947,6 +26947,10 @@ eqs(CsSymbolStore.AREA_MARKER_TAGS.custom, "AreaCustom",
     ok(lines.indexOf("Set Cave Location") !== -1,
         "CsReset: the location goes too, and is told where it comes back " +
             "from rather than just disappearing");
+    ok(lines.indexOf("Complete marks") !== -1 &&
+        lines.indexOf("stays on the shelf") !== -1,
+        "CsReset: the dialog says what goes outside the drawing too, and " +
+            "that the shelf entry is not part of it");
     ok(lines.indexOf("FOLDER is not touched") !== -1,
         "CsReset: and what is NOT deleted is said as plainly -- the " +
             "scans are still on disk, which is the whole reason this is " +
@@ -26964,8 +26968,31 @@ eqs(CsSymbolStore.AREA_MARKER_TAGS.custom, "AreaCustom",
     eqs(CsReset.groupNumber(1000000), "1,000,000",
         "CsReset: two separators over a million");
 
+    // -- the list joiner in the "cleared with it" sentence ----------
+    eqs(CsReset.listText(["a"]), "a", "CsReset: one thing is itself");
+    eqs(CsReset.listText(["a", "b"]), "a and b", "CsReset: two join with and");
+    eqs(CsReset.listText(["a", "b", "c"]), "a, b and c",
+        "CsReset: three read as a sentence");
+    eqs(CsReset.listText([]), "", "CsReset: nothing joins to nothing");
+
     var done = CsReset.doneText({ counts: { total: 12, images: 3 },
-        backupPath: "/caves/Truitt/backup/x.dxf" }).join("\n");
+        backupPath: "/caves/Truitt/backup/x.dxf",
+        cleared: { marks: true, location: true, preview: true } }).join("\n");
+    ok(done.indexOf("Complete marks on its scans, the last-declared " +
+        "location and the map thumbnail") !== -1,
+        "CsReset: the report names the state cleared OUTSIDE the drawing " +
+            "-- a student would otherwise inherit the last one's progress");
+    ok(CsReset.doneText({ counts: {}, cleared: { marks: false,
+        location: false, preview: false } }).join("\n")
+        .indexOf("Cleared with it") === -1,
+        "CsReset: and claims nothing it did not actually clear");
+    ok(CsReset.doneText({ counts: {} }).join("\n").indexOf("Cleared") === -1,
+        "CsReset: a report with no cleared record at all still reads");
+
+    var doneOne = CsReset.doneText({ counts: { total: 1, images: 0 },
+        cleared: { marks: false, location: true, preview: false } }).join("\n");
+    ok(doneOne.indexOf("Cleared with it: the last-declared location.") !== -1,
+        "CsReset: one cleared thing reads as one thing");
     ok(done.indexOf("/caves/Truitt/backup/x.dxf") !== -1,
         "CsReset: the one question after a reset anybody regrets is " +
             "where the old drawing went, so the answer is in the report");

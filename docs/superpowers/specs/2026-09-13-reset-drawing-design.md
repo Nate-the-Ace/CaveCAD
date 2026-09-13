@@ -42,6 +42,37 @@ Then the layer table is brought back to the current template
 (CsRestyle.ensureAndApply), so a class does not start on the previous
 student's stray layers.
 
+## What goes with it, outside the drawing
+
+A drawing is not the whole of what a class carries forward. Three
+pieces of per-cave state live in application settings and in the folder,
+and each would hand the next student somebody else's progress:
+
+  * the COMPLETE MARKS on this cave's scans
+    (CaveSurvey/SketchScansBookmarks, keyed by the scans folder's own
+    path) -- otherwise a student opens Sketch Scans and finds the pages
+    already ticked off;
+  * the LAST-DECLARED LOCATION (CaveSurvey/LastLocationLat/Lon). The
+    anchor died with the drawing, but this is what Set Cave Location
+    offers as its default, so the entrance would still be a keystroke
+    away from a drawing that is supposed to have no location yet. It is
+    application-wide rather than this cave's alone, and clearing it is
+    the point: the setting exists to carry a coordinate between
+    drawings, and carrying one out of a reset is exactly what it must
+    not do.
+  * the MAP THUMBNAIL, images/<Cave> preview.png -- otherwise the shelf
+    card shows a picture of the map that was just deleted until the next
+    save.
+
+The SHELF ENTRY stays, deliberately: the cave should be one click away
+afterwards so trips can be added to it straight away. Check Map's ignore
+list stays too; it was not asked for.
+
+None of the three can fail the reset. The drawing is already empty by
+the time they run, and a settings write that will not land is not a
+reason to leave a caver looking at a half-reported result -- so each is
+attempted independently and the report names only what actually went.
+
 ## What is NOT touched
 
 The cave's FOLDER. scans/, images/, lidar/, PDF/ and backup/ come
