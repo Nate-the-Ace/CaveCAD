@@ -19,18 +19,19 @@
 // drawing still knows which file each image WAS, even when it no longer
 // knows where to find it.
 //
-// IT LASTS FOR THE SESSION, NOT THROUGH A SAVE. Measured on Truitt:
-// relinked 46 of 47, saved, reloaded -- 0 of 47. CaveCAD's DXF exporter
-// writes an IMAGEDEF with an EMPTY path for these images however the
-// entity is repaired, and drops a script-created image entity
-// altogether (93 images in memory came back as 47). Replacing the
-// entities instead was tried and is WORSE: the replacements do not
-// export either, so the drawing loses the images it had.
+// IT SURVIVES A SAVE, SINCE CaveCAD 0.6.0.1. It did not before, and
+// the reason was not the exporter. dxflib read lines into a fixed
+// buffer and an over-long one left its tail, newline and all, in the
+// stream: every group code and value pair after it came back a line out
+// of step and the rest of the file was dropped in silence. Our own
+// AreaFillSig XDATA crosses that length, so any drawing with an area
+// fill lost the whole OBJECTS section that follows -- every IMAGEDEF in
+// it. The export had been correct all along, writing 47 IMAGEDEFs with
+// matching handles and real paths; nothing was ever reading them back.
 //
-// So this makes the scans visible again -- in the 2D view, and to the
-// 3D panel's drape -- for as long as the drawing stays open, and has to
-// be run again next time. That is worth having and is not a fix. The
-// fix is in the exporter, and belongs in the fork.
+// Measured on Truitt, on the fixed reader: relinked 46 of 47, saved,
+// reloaded -- 46 of 47, with all 46 files found on disk. Against an
+// older CaveCAD the repair still only lasts the session.
 //
 // WHAT IT WILL NOT DO. It never guesses. An image with no tag is left
 // alone, and a tag naming a file that is not on disk is REPORTED rather
@@ -126,9 +127,9 @@ CsScanRelink.summary = function(r) {
         return qsTr("Scan images: all %1 still point at their files.")
             .arg(r.alreadyLinked);
     }
-    // SAYS IT DOES NOT LAST. A repair a caver believes is permanent,
-    // and is not, costs them the next session's confusion as well as
-    // this one's.
+    // SAYS TO SAVE. The repair is only in the drawing until it is
+    // written out, and a caver who closes without saving does the whole
+    // thing again next time.
     var parts = [];
     if (r.relinked > 0) {
         parts.push(qsTr("%1 relinked").arg(r.relinked));
@@ -144,8 +145,7 @@ CsScanRelink.summary = function(r) {
     }
     var text = qsTr("Scan images: ") + parts.join(", ") + ".";
     if (r.relinked > 0) {
-        text += qsTr(" This lasts until the drawing is closed -- saving "
-            + "does not keep it, so run Repair Drawing again next time.");
+        text += qsTr(" Save the drawing to keep it.");
     }
     return text;
 };
