@@ -74,6 +74,12 @@ Cave3D.SETTING_STATIONS = "Cave3D/ShowStations";
  *  twenty-five a second: long enough to follow a passage, short enough
  *  that a caver is not left waiting on a folder of PNGs. */
 Cave3D.EXPORT_FRAMES = 600;
+/** How fast the camera runs, as a multiple of its usual pace.
+ *
+ *  REMEMBERED, unlike the camera mode. Which way a caver likes to be
+ *  carried through a cave is a preference; whether the view is
+ *  currently flying is a thing they just did. */
+Cave3D.SETTING_CAMERA_SPEED = "Cave3D/CameraSpeed";
 /** Where a draped scan stops being pencil and starts being paper, as a
  *  luminance 0 to 1. Remembered because it is a property of the CAVER'S
  *  SCANNER, not of any one drawing: whoever photographs their books in
@@ -676,6 +682,12 @@ Cave3D.connectOnce = function() {
             }
             RSettings.setValue(key, on);
         });
+        if (cave3d.cameraSpeedChanged !== undefined) {
+            cave3d.cameraSpeedChanged.connect(function(handle, factor) {
+                if (handle !== Cave3D.handle) { return; }
+                RSettings.setValue(Cave3D.SETTING_CAMERA_SPEED, factor);
+            });
+        }
         if (cave3d.exportRequested !== undefined) {
             cave3d.exportRequested.connect(function(handle) {
                 if (handle !== Cave3D.handle) { return; }
@@ -766,6 +778,10 @@ function cave3dRun() {
         // and an older CaveCAD has no station labels to switch on.
         cave3d.setShowStations(Cave3D.handle,
             RSettings.getBoolValue(Cave3D.SETTING_STATIONS, false));
+    }
+    if (cave3d.setCameraSpeed !== undefined) {
+        cave3d.setCameraSpeed(Cave3D.handle,
+            RSettings.getDoubleValue(Cave3D.SETTING_CAMERA_SPEED, 1.0));
     }
     if (cave3d.setScanInk !== undefined) {
         cave3d.setScanInk(Cave3D.handle,
