@@ -21080,6 +21080,32 @@ var dFar = CsDrape.elevationAt({ x: 100000, y: 0 }, dStations);
 ok(dFar === 110,
     "far beyond the survey it takes the nearest station's own elevation");
 
+// IT FOLLOWS THE PASSAGE UNDER IT, NOT THE CAVE'S AVERAGE. Weighting
+// every station inside REACH sounds local and is not: a cave that fits
+// inside that radius has every station pulling on every point, and the
+// answer everywhere tends to the mean. The sheets came out flat, at one
+// height, which is what Truitt Cave looked like.
+//
+// Here one station sits low with a crowd of high ones a little way off,
+// all of them well inside REACH.
+var dCrowd = { LOW: { x: 0, y: 0, z: 0 } };
+for (var dc = 0; dc < 30; dc++) {
+    dCrowd["HIGH" + dc] = { x: 60 + dc, y: 60 + dc, z: 100 };
+}
+var dNearLow = CsDrape.elevationAt({ x: 1, y: 0 }, dCrowd);
+ok(dNearLow < 10,
+    "a point beside a low station drapes near it, not near the crowd "
+    + "of high ones inside REACH (got " + dNearLow + ")");
+
+// And the count is what makes that true, so it is worth saying out loud.
+var dSaved = CsDrape.NEIGHBOURS;
+CsDrape.NEIGHBOURS = 1e9;
+var dAveraged = CsDrape.elevationAt({ x: 1, y: 0 }, dCrowd);
+CsDrape.NEIGHBOURS = dSaved;
+ok(dAveraged > dNearLow,
+    "sampling everything in range instead pulls the same point up "
+    + "towards the crowd (got " + dAveraged + ")");
+
 eqs(String(CsDrape.elevationAt({ x: 0, y: 0 }, {})), "null",
     "no stations, no elevation -- and no NaN");
 eqs(String(CsDrape.elevationAt({ x: 0, y: 0 },

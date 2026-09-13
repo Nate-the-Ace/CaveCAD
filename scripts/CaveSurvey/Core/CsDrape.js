@@ -35,6 +35,23 @@ CsDrape.MIN_DIST_SQ = 1e-9;
  *  guessed slope is not. Drawing units. */
 CsDrape.REACH = 200;
 
+/** How many stations a point is draped from.
+ *
+ *  WHY A COUNT AND NOT A RADIUS. Weighting every station within REACH
+ *  sounds local and is not: a cave whose whole plan fits inside that
+ *  radius has every station pulling on every point, and inverse-square
+ *  weighting then returns something close to the cave's MEAN elevation
+ *  everywhere. The sheets come out flat, at one height, cutting through
+ *  the passage where it climbs and floating over it where it drops --
+ *  which is exactly what Truitt looked like. A count follows the survey
+ *  at whatever scale it was drawn: dense stations give a tight
+ *  neighbourhood, sparse ones a wide one, and neither needs a number
+ *  chosen per cave.
+ *
+ *  Small enough to stay local, big enough that one badly placed station
+ *  cannot tilt a whole sheet on its own. */
+CsDrape.NEIGHBOURS = 6;
+
 /** How finely a scan's quad is subdivided. A plan sketch is flat and
  *  the passage under it is not, so the grid is what lets the sheet
  *  follow the cave; too coarse and it bridges over a drop. */
@@ -47,9 +64,17 @@ CsDrape.DIVISIONS = 24;
  * \return z, or null when there is no station to sample at all
  */
 CsDrape.elevationAt = function(point, stations) {
-    var sumW = 0, sumZ = 0;
-    var nearest = null, nearestD2 = Infinity;
+    // THE NEAREST FEW, NOT EVERYTHING IN RANGE. See CsDrape.NEIGHBOURS:
+    // averaging the whole survey is what made every sheet flat.
     var reach2 = CsDrape.REACH * CsDrape.REACH;
+    var want = Math.max(1, Math.floor(CsDrape.NEIGHBOURS));
+    // Kept sorted by distance, shortest first, and never longer than
+    // `want`. A survey is small enough that this beats sorting all of
+    // it once per grid point, and there are (DIVISIONS + 1)^2 of those
+    // per sheet.
+    var best = [];
+    var nearest = null, nearestD2 = Infinity;
+
     for (var name in stations) {
         if (!stations.hasOwnProperty(name)) { continue; }
         var st = stations[name];
@@ -62,11 +87,22 @@ CsDrape.elevationAt = function(point, stations) {
             nearest = st;
         }
         if (d2 > reach2) { continue; }
-        var w = 1.0 / Math.max(d2, CsDrape.MIN_DIST_SQ);
-        sumW += w;
-        sumZ += w * st.z;
+        if (best.length === want && d2 >= best[best.length - 1].d2) {
+            continue;
+        }
+        var at = best.length;
+        while (at > 0 && best[at - 1].d2 > d2) { at--; }
+        best.splice(at, 0, { d2: d2, z: st.z });
+        if (best.length > want) { best.length = want; }
     }
-    if (sumW > 0) {
+
+    if (best.length > 0) {
+        var sumW = 0, sumZ = 0;
+        for (var i = 0; i < best.length; i++) {
+            var w = 1.0 / Math.max(best[i].d2, CsDrape.MIN_DIST_SQ);
+            sumW += w;
+            sumZ += w * best[i].z;
+        }
         return sumZ / sumW;
     }
     // Nothing within reach: the nearest station's own elevation, flat.
