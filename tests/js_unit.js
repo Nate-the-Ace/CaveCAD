@@ -21117,6 +21117,126 @@ eqs(String(CsDrape.grid(dQuad, 4, {}).positions.length), "0",
 eqs(String(CsDrape.grid(null, 4, dStations).positions.length), "0",
     "no quad, no grid -- and no exception");
 
+// --- the profile half -------------------------------------------------
+//
+// THE BAND IS BUILT BY THE MODULE THAT OWNS IT, never hand-written.
+// Hand-writing a frame is what let the section axis swap pass: the
+// fixture agreed with the bug and the test passed throughout.
+var pdSurvey = CsModel.newSurvey();
+pdSurvey.distanceUnit = "ft";
+pdSurvey.shots = [
+    { from: "A1", to: "A2", distance: 10, azimuth: 90, inclination: 0,
+      left: 2, right: 2, up: 3, down: 1, splay: false, trip: 0 },
+    { from: "A2", to: "A3", distance: 10, azimuth: 0, inclination: 0,
+      left: 2, right: 2, up: 3, down: 1, splay: false, trip: 0 }
+];
+CsModel.ensureTrips(pdSurvey);
+var pdResolved = CsNetwork.resolve(pdSurvey);
+var pdGrouped = CsProfile.groupRuns(pdResolved);
+var pdBand = CsProfile.unrollBand(pdGrouped.runs["A"], null, pdResolved,
+    CsProfile.hierarchy(pdGrouped, pdResolved), {});
+ok(pdBand.legs.length >= 2, "the fixture band has legs to walk");
+
+var pdFirst = pdBand.legs[0];
+var pdHit = CsDrape.alongBand(pdBand, pdFirst.fromX);
+eqs(pdHit.from, pdFirst.from, "the start of a band is its first leg");
+nearly(pdHit.t, 0, 1e-9, "at its very start");
+
+var pdMidX = (pdFirst.fromX + pdFirst.toX) / 2;
+var pdMid = CsDrape.alongBand(pdBand, pdMidX);
+nearly(pdMid.t, 0.5, 1e-9, "halfway along a leg is t 0.5");
+
+// CLAMPS rather than extrapolating: a sketch wider than its band has
+// run out of passage, not gained some.
+var pdPast = CsDrape.alongBand(pdBand, 1e9);
+nearly(pdPast.t, 1, 1e-9, "past the end it clamps to the last leg");
+var pdBefore = CsDrape.alongBand(pdBand, -1e9);
+nearly(pdBefore.t, 0, 1e-9, "before the start it clamps to the first");
+
+eqs(String(CsDrape.alongBand({ legs: [] }, 0)), "null",
+    "a band with no legs has nowhere to walk");
+eqs(String(CsDrape.alongBand(null, 0)), "null", "and neither has none");
+
+// A band point comes back as a real place in the cave. The second leg
+// turns north, so a point on it must have moved in y -- which is what a
+// single flat quad across the bend would get wrong.
+var pdSecond = pdBand.legs[1];
+var pdOnBend = CsDrape.bandPointTo3d(pdBand, pdResolved,
+    (pdSecond.fromX + pdSecond.toX) / 2, 42);
+ok(pdOnBend !== null, "a band point maps into the cave");
+nearly(pdOnBend.z, 42, 1e-9,
+    "band y IS elevation -- there is no exaggeration to undo");
+var pdA2 = pdResolved.stations["A2"], pdA3 = pdResolved.stations["A3"];
+ok(Math.abs(pdOnBend.y - pdA2.y) > 1e-6,
+    "a point on the second leg has followed the passage round the bend");
+ok(pdOnBend.y > Math.min(pdA2.y, pdA3.y) - 1e-6 &&
+   pdOnBend.y < Math.max(pdA2.y, pdA3.y) + 1e-6,
+    "and lies between that leg's own two stations");
+
+// --- profileStrips ----------------------------------------------------
+//
+// A band is drawn 1:1 at an OFFSET, so recovering band coordinates is a
+// translation. Treating it as a rescaling put the sketch below the cave
+// the first time -- measured on Truitt, drape z -60..44 against a cave
+// spanning -21..0.
+var pdYs = [];
+for (var py = 0; py < pdBand.stations.length; py++) {
+    pdYs.push(pdBand.stations[py].y);
+}
+var pdYMin = Math.min.apply(null, pdYs);
+var pdX0 = pdBand.legs[0].fromX;
+var pdX1 = pdBand.legs[pdBand.legs.length - 1].toX;
+
+// A box placed at a known offset from the band's own origin.
+var pdOffX = 500, pdOffY = 300;
+var pdBox = { key: "A", minX: pdX0 + pdOffX, maxX: pdX1 + pdOffX,
+              minY: pdYMin + pdOffY, maxY: pdYMin + pdOffY + 20 };
+// A scan covering the band's full width, two units tall from its floor.
+var pdScanQuad = { origin: { x: pdX0 + pdOffX, y: pdYMin + pdOffY },
+                   u: { x: pdX1 - pdX0, y: 0 },
+                   v: { x: 0, y: 2 } };
+
+var pdStrips = CsDrape.profileStrips(pdScanQuad, pdBox, pdBand, pdResolved);
+ok(pdStrips.positions.length > 0, "a profile scan makes strips");
+eqs(String(pdStrips.uvs.length / 2), String(pdStrips.positions.length / 3),
+    "one uv per strip vertex");
+
+// SEAMS AT THE BENDS. Two legs means an interior cut, so three columns
+// and two quads -- a single quad would cut the corner.
+ok(pdStrips.indices.length / 6 >= 2,
+    "a scan spanning two legs is cut into at least two quads (" +
+    (pdStrips.indices.length / 6) + ")");
+
+var pdBad = 0;
+for (var ps = 0; ps < pdStrips.positions.length; ps++) {
+    if (!isFinite(pdStrips.positions[ps])) { pdBad++; }
+}
+eqs(String(pdBad), "0", "no NaN in the strips");
+
+// THE OFFSET IS UNDONE. The scan's bottom edge sits at the box's minY,
+// which IS the band's own minimum elevation -- so the drape's lowest z
+// must be that elevation, not the drawing coordinate it was drawn at.
+var pdZs = [];
+for (var pz = 2; pz < pdStrips.positions.length; pz += 3) {
+    pdZs.push(pdStrips.positions[pz]);
+}
+nearly(Math.min.apply(null, pdZs), pdYMin, 1e-6,
+    "the drawing offset is translated away, not carried into the cave");
+
+// It follows the bend: the strips must move in y, which a flat quad
+// along one bearing could not.
+var pdSy = [];
+for (var pj = 1; pj < pdStrips.positions.length; pj += 3) {
+    pdSy.push(pdStrips.positions[pj]);
+}
+ok(Math.max.apply(null, pdSy) - Math.min.apply(null, pdSy) > 1e-6,
+    "the strips follow the passage round its bend");
+
+eqs(String(CsDrape.profileStrips(null, pdBox, pdBand, pdResolved)
+    .positions.length), "0", "no quad, no strips -- and no exception");
+eqs(String(CsDrape.profileStrips(pdScanQuad, null, pdBand, pdResolved)
+    .positions.length), "0", "no band box, no strips");
+
 // Ramp helpers must not divide by zero on a degenerate range.
 var oneTrip = mesh3dSurvey();
 var oneMesh = CsMesh3d.build(oneTrip, CsNetwork.resolve(oneTrip),

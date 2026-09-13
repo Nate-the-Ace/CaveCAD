@@ -263,7 +263,57 @@ Cave3D.sectionsBuffer = function(doc, survey, resolved) {
  *
  * \return {positions, uvs, indices, paths, runs}
  */
-Cave3D.scansBuffer = function(doc, resolved, kind) {
+/**
+ * One profile scan's strips, finding the band it sits in and unrolling
+ * that run to invert.
+ *
+ * A scan in no band is skipped: without a band there is no unrolled axis
+ * to walk back, and guessing one would lay the sketch along a passage
+ * nobody drew it against.
+ */
+Cave3D.profileGridFor = function(scan, boxes, bandCache, survey, resolved) {
+    var empty = { positions: [], uvs: [], indices: [] };
+    var centre = { x: scan.quad.origin.x + scan.quad.u.x / 2,
+                   y: scan.quad.origin.y + scan.quad.v.y / 2 };
+
+    // WHICH BAND, BY ELEVATION. Bands are stacked in y and each starts
+    // at the same x, so y is what tells them apart -- and a scan is
+    // routinely WIDER than the band box it was fitted over (measured on
+    // Truitt: a scan centred at x 606 against a box ending at 423), so
+    // asking for a box that contains the whole centre point misses
+    // eleven of sixteen.
+    //
+    // CsProfileBox.at returns the KEY, not the box, so the box itself
+    // still has to be found to get its span.
+    var box = null;
+    for (var bi = 0; bi < boxes.length; bi++) {
+        if (centre.y >= boxes[bi].minY - CsProfileBox.EDGE_EPS &&
+                centre.y <= boxes[bi].maxY + CsProfileBox.EDGE_EPS) {
+            box = boxes[bi];
+            break;
+        }
+    }
+    if (box === null) {
+        // Not in any band's elevation range: no unrolled axis to walk
+        // back, and guessing one would lay the sketch along a passage
+        // nobody drew it against.
+        return empty;
+    }
+    var band = bandCache[box.key];
+    if (band === undefined) {
+        var grouped = CsProfile.groupRuns(resolved);
+        var run = grouped.runs[box.key];
+        band = (run === undefined) ? null : CsProfile.unrollBand(run, null,
+            resolved, CsProfile.hierarchy(grouped, resolved), {});
+        bandCache[box.key] = band;
+    }
+    if (band === null) {
+        return empty;
+    }
+    return CsDrape.profileStrips(scan.quad, box, band, resolved);
+};
+
+Cave3D.scansBuffer = function(doc, survey, resolved, kind) {
     var buf = { positions: [], uvs: [], indices: [], paths: [], runs: [] };
     var scans;
     try {
@@ -271,11 +321,23 @@ Cave3D.scansBuffer = function(doc, resolved, kind) {
     } catch (e) {
         return buf;
     }
+    // A profile scan needs the band it sits in; a plan scan does not.
+    var boxes = [];
+    if (kind === "profile") {
+        try { boxes = CsProfileBox.boxes(doc); } catch (eBox) { boxes = []; }
+    }
+    var bandCache = {};
+
     for (var i = 0; i < scans.length; i++) {
         var g;
         try {
-            g = CsDrape.grid(scans[i].quad, CsDrape.DIVISIONS,
-                resolved.stations);
+            if (kind === "profile") {
+                g = Cave3D.profileGridFor(scans[i], boxes, bandCache,
+                    survey, resolved);
+            } else {
+                g = CsDrape.grid(scans[i].quad, CsDrape.DIVISIONS,
+                    resolved.stations);
+            }
         } catch (eGrid) {
             continue;
         }
@@ -299,6 +361,28 @@ Cave3D.scansBuffer = function(doc, resolved, kind) {
         buf.runs.push(g.indices.length);
     }
     return buf;
+};
+
+/** Two scan buffers as one, keeping each scan's own run length so the
+ *  view still binds one texture per scan. */
+Cave3D.mergeScanBuffers = function(a, b) {
+    var out = { positions: [], uvs: [], indices: [], paths: [], runs: [] };
+    [a, b].forEach(function(src) {
+        var base = out.positions.length / 3;
+        var i;
+        for (i = 0; i < src.positions.length; i++) {
+            out.positions.push(src.positions[i]);
+        }
+        for (i = 0; i < src.uvs.length; i++) { out.uvs.push(src.uvs[i]); }
+        for (i = 0; i < src.indices.length; i++) {
+            out.indices.push(base + src.indices[i]);
+        }
+        for (i = 0; i < src.paths.length; i++) {
+            out.paths.push(src.paths[i]);
+            out.runs.push(src.runs[i]);
+        }
+    });
+    return out;
 };
 
 /** One line for the panel's status bar. */
@@ -362,8 +446,11 @@ Cave3D.refresh = function() {
     }
 
     try {
-        mesh.scans = Cave3D.scansBuffer(getDocument(), read.resolved,
-            "plan");
+        var planScans = Cave3D.scansBuffer(getDocument(), read.survey,
+            read.resolved, "plan");
+        var profScans = Cave3D.scansBuffer(getDocument(), read.survey,
+            read.resolved, "profile");
+        mesh.scans = Cave3D.mergeScanBuffers(planScans, profScans);
     } catch (eScans) {
         mesh.scans = { positions: [], uvs: [], indices: [], paths: [],
                        runs: [] };

@@ -181,3 +181,64 @@ Live:
 Section scans as textures -- sections already draw from traced geometry
 and the picture adds only the original pencil. Editing or re-fitting a
 scan from the 3D view. Any write back into the drawing.
+
+---
+
+## As built (2026-09-12, 0.9.124.0 plan / 0.9.125.0 profile, src 0.6.0.0)
+
+Both drapes shipped. Four things worth keeping.
+
+### A scan entity does not know its own file
+
+Probed, not assumed. `getFileName()` returns EMPTY and
+`getWidth()`/`getHeight()` return ZERO on Truitt's 28 plan scans,
+through BOTH the method route and the property route. The path is XDATA
+under `SketchScan`, relative to the cave's scans folder; the pixel size
+comes from the file.
+
+The test fixture then hit the same trap from the other side:
+`RImageData`'s constructor vectors do not stick, because the entity has
+no `setData`, does not forward `setUVector`/`setVVector`, and
+`getData()` hands back a copy. A fixture quietly building a zero-sized
+scan would have been testing nothing.
+
+### GL objects must be destroyed against the context that owns them
+
+Floating the dock crashed with EXC_BAD_ACCESS inside
+`QOpenGLTexturePrivate::destroy()`. Reparenting a QOpenGLWidget destroys
+its context; `initializeGL` then runs against the NEW one, and deleting a
+texture there calls into the freed context. The shader programs carried
+the same latent bug and had simply not been the ones to fault.
+
+`initializeGL` now FORGETS what it holds without calling into GL, and
+the real destruction happens in a slot on `aboutToBeDestroyed` while the
+owning context is still alive and current.
+
+### CsProfileBox.at returns the KEY, not the box
+
+And profile scans are routinely WIDER than the band box they were fitted
+over -- measured, a scan centred at x 606 against a box ending at 423,
+which missed eleven of sixteen. Bands are stacked in elevation and all
+start at the same x, so the band is found by Y containment, and the box
+object is then looked up for its span.
+
+### A band is drawn 1:1 at an offset
+
+Recovering band coordinates is a TRANSLATION, not a rescaling. Treated
+as a rescaling, the sketches landed below the cave -- drape z -60 to 44
+against a cave spanning -21 to 0. The offset comes from the box: its
+minimum corner is the band's own minimum corner, moved to wherever the
+region was drawn.
+
+## Verified live on Truitt Cave
+
+28 plan scans draping onto the passage at 17500 vertices and 32256
+triangles, paper keyed out and pencil surviving; 11 profile scans in
+strips, seamed at every leg boundary so they follow the passage round
+its bends; textures surviving a float and re-dock.
+
+NOT verified: nothing was measured against a known passage height to
+confirm the profile drape sits at true elevation rather than merely
+plausible elevation. The translation is asserted in the unit tests
+against a band built by CsProfile itself, which is the strongest check
+available without a hand-measured reference.

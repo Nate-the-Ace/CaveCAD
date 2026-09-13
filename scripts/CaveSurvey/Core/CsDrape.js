@@ -206,3 +206,157 @@ CsDrape.readScans = function(doc, kind) {
     }
     return out;
 };
+
+// ---------------------------------------------------------------------
+// The profile half. Pure; tested under node.
+//
+// A PROFILE SKETCH IS DRAWN AGAINST AN UNROLLED AXIS. Its x is distance
+// travelled along the passage, not a direction, so there is no single
+// plane in three dimensions it belongs on -- it has to be walked back
+// onto the centreline it was unrolled from.
+//
+// CsProfile.unrollBand is the forward map, returning legs carrying
+// fromX/toX in band-local space. These invert it.
+// ---------------------------------------------------------------------
+
+/**
+ * The leg of a band spanning a band-local x, and how far along it.
+ *
+ * CLAMPS rather than extrapolating past either end: a sketch drawn
+ * wider than the band it sits in has run out of passage, not gained
+ * some.
+ *
+ * \return {from, to, t} or null when the band has no legs
+ */
+CsDrape.alongBand = function(band, x) {
+    if (band === null || band === undefined) { return null; }
+    var legs = band.legs || [];
+    if (legs.length === 0) { return null; }
+
+    var first = legs[0], last = legs[legs.length - 1];
+    if (x <= first.fromX) {
+        return { from: first.from, to: first.to, t: 0 };
+    }
+    if (x >= last.toX) {
+        return { from: last.from, to: last.to, t: 1 };
+    }
+    for (var i = 0; i < legs.length; i++) {
+        var leg = legs[i];
+        var span = leg.toX - leg.fromX;
+        // A zero-length span would divide by zero; the NEXT leg owns
+        // that x instead. Deterministic, so a point exactly on a leg
+        // boundary always lands on the same side of it.
+        if (span > 1e-12 && x >= leg.fromX && x < leg.toX) {
+            return { from: leg.from, to: leg.to,
+                     t: (x - leg.fromX) / span };
+        }
+    }
+    return { from: last.from, to: last.to, t: 1 };
+};
+
+/**
+ * A band-local point as a real position in the cave.
+ *
+ * x walks the centreline; y IS elevation and is taken straight across.
+ * There is no vertical exaggeration to undo -- it was removed from this
+ * suite in 0.9.123.0, so a band's y is simply elevation.
+ *
+ * \return {x, y, z} or null
+ */
+CsDrape.bandPointTo3d = function(band, resolved, x, y) {
+    var hit = CsDrape.alongBand(band, x);
+    if (hit === null) { return null; }
+    var a = resolved.stations[hit.from];
+    var b = resolved.stations[hit.to];
+    if (a === undefined || b === undefined) { return null; }
+    return {
+        x: a.x + (b.x - a.x) * hit.t,
+        y: a.y + (b.y - a.y) * hit.t,
+        z: y
+    };
+};
+
+/**
+ * A profile scan as strips, one per leg it spans.
+ *
+ * STRIPS, NOT ONE QUAD. Band-local x maps linearly onto a leg, but only
+ * WITHIN that leg -- a single quad stretched across a bend would cut the
+ * corner and lay the sketch through rock the passage goes around.
+ *
+ * A BAND IS DRAWN 1:1 AT AN OFFSET, so recovering band-local coordinates
+ * is a TRANSLATION, not a rescaling. The offset comes from the box: its
+ * minimum corner is the band's own minimum corner, moved to wherever the
+ * region was drawn. Treating it as a rescaling instead puts a sketch
+ * below the cave, which is what it did the first time.
+ *
+ * \return {positions, uvs, indices}
+ */
+CsDrape.profileStrips = function(quad, box, band, resolved) {
+    var out = { positions: [], uvs: [], indices: [] };
+    if (quad === null || box === null || band === null ||
+            quad === undefined || box === undefined || band === undefined) {
+        return out;
+    }
+    var legs = (band.legs || []);
+    var stations = (band.stations || []);
+    if (legs.length === 0 || stations.length === 0) {
+        return out;
+    }
+
+    var x0 = quad.origin.x;
+    var x1 = quad.origin.x + quad.u.x;
+    var yBottom = quad.origin.y;
+    var yTop = quad.origin.y + quad.v.y;
+    if (!(Math.abs(x1 - x0) > 1e-9) || !(Math.abs(yTop - yBottom) > 1e-9)) {
+        return out;
+    }
+
+    // The band's own extent, and therefore where the drawing put it.
+    var bandX0 = legs[0].fromX;
+    var bandYMin = stations[0].y, bandYMax = stations[0].y;
+    for (var si = 1; si < stations.length; si++) {
+        if (stations[si].y < bandYMin) { bandYMin = stations[si].y; }
+        if (stations[si].y > bandYMax) { bandYMax = stations[si].y; }
+    }
+    var offX = box.minX - bandX0;
+    var offY = box.minY - bandYMin;
+
+    var toBandX = function(drawX) { return drawX - offX; };
+    var toElev = function(drawY) { return drawY - offY; };
+
+    // A column at each end, and one at every leg boundary the scan
+    // spans, so every bend in the passage gets a seam in the sketch.
+    var lo = Math.min(x0, x1), hi = Math.max(x0, x1);
+    var cuts = [x0];
+    for (var i = 0; i < legs.length; i++) {
+        var legDrawX = legs[i].toX + offX;
+        if (legDrawX > lo && legDrawX < hi) {
+            cuts.push(legDrawX);
+        }
+    }
+    cuts.push(x1);
+    cuts.sort(function(a, b) { return a - b; });
+
+    for (var c = 0; c < cuts.length; c++) {
+        var dx = cuts[c];
+        var bx = toBandX(dx);
+        var pBottom = CsDrape.bandPointTo3d(band, resolved, bx,
+            toElev(yBottom));
+        var pTop = CsDrape.bandPointTo3d(band, resolved, bx,
+            toElev(yTop));
+        if (pBottom === null || pTop === null) {
+            return { positions: [], uvs: [], indices: [] };
+        }
+        var s = (dx - x0) / (x1 - x0);
+        out.positions.push(pBottom.x, pBottom.y, pBottom.z);
+        out.uvs.push(s, 0);
+        out.positions.push(pTop.x, pTop.y, pTop.z);
+        out.uvs.push(s, 1);
+    }
+
+    for (var q = 0; q + 1 < cuts.length; q++) {
+        var a = q * 2, b = a + 1, cc = a + 2, d = a + 3;
+        out.indices.push(a, cc, d, a, d, b);
+    }
+    return out;
+};
