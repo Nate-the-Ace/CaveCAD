@@ -15,16 +15,31 @@
 // own line through the passage would be showing them a trip nobody
 // made.
 //
-// WHERE IT BREAKS, IT BREAKS. A survey is not one continuous walk: it
-// branches, and the next leg in order often starts somewhere else
-// entirely. Those jumps are kept as jumps rather than being bridged
-// with invented passage -- see CsFly.runs.
+// IT WALKS THE CAVE THE WAY A CAVER DOES. A survey is not one
+// continuous line: it branches, and the next leg in survey order often
+// starts somewhere else entirely. Flying it in survey order means
+// teleporting at every branch, and stopping dead at the end of each
+// one.
+//
+// So the flight is a TOUR: out along a passage, and back the way it
+// came when it runs out, then on down the next branch. Every leg is
+// flown twice, once in each direction, which is what a caver pushing
+// leads actually does -- and it means the camera never jumps and never
+// stops facing a wall. See CsFly.tour.
 
 var CsFly = {};
 
 /** Samples closer together than this are the same place. Drawing
  *  units squared. */
 CsFly.MIN_STEP_SQ = 1e-9;
+
+/** Samples a flight is cut into when nobody asks for a spacing.
+ *
+ *  Matched to the ticks the panel's animation takes, so a caver sees
+ *  roughly one sample a frame: fewer and the camera skips past bends,
+ *  many more and the path costs memory for detail nobody can see at
+ *  flying speed. */
+CsFly.SAMPLES = 600;
 
 /**
  * The centreline as runs of connected legs, in survey order.
@@ -64,6 +79,161 @@ CsFly.runs = function(resolved) {
         at = b;
     }
     return out;
+};
+
+/**
+ * A continuous walk covering every leg of the cave.
+ *
+ * IT WALKS LEGS, NOT STATIONS. A depth-first walk of the stations turns
+ * around wherever it meets a station it has already been to -- which at
+ * a LOOP CLOSURE is not a dead end at all: the passage carries straight
+ * on, it has just been reached from the other side. Truitt came out
+ * with nine turn-arounds that way and has two.
+ *
+ * So this tracks which LEGS have been flown. From wherever it is, it
+ * takes an unflown leg if there is one; when there is not, it routes
+ * through passage it has already seen to the nearest station that still
+ * has one. That is what a caver pushing leads does, and it turns the
+ * camera round only where the cave itself turns round.
+ *
+ * ONE WALK PER CONNECTED PIECE. A survey with an unconnected second
+ * entrance is two caves as far as walking is concerned, and pretending
+ * otherwise would fly through rock between them.
+ *
+ * \return [[{x,y,z}, ...], ...] -- one continuous walk per piece
+ */
+CsFly.tour = function(resolved) {
+    var out = [];
+    if (resolved === null || resolved === undefined ||
+            resolved.legs === null || resolved.legs === undefined ||
+            resolved.stations === null || resolved.stations === undefined) {
+        return out;
+    }
+
+    var adj = {};
+    var order = [];
+    var seen = {};
+    var unflown = {};
+    var note = function(a, b) {
+        if (!adj.hasOwnProperty(a)) { adj[a] = []; }
+        if (adj[a].indexOf(b) < 0) { adj[a].push(b); }
+        if (seen[a] !== true) { seen[a] = true; order.push(a); }
+    };
+    for (var i = 0; i < resolved.legs.length; i++) {
+        var leg = resolved.legs[i];
+        if (leg === null || leg === undefined) { continue; }
+        if (leg.splay === true || leg.excludeFromAll === true) { continue; }
+        if (!CsFly.usable(resolved.stations[leg.from]) ||
+                !CsFly.usable(resolved.stations[leg.to])) { continue; }
+        if (leg.from === leg.to) { continue; }
+        note(leg.from, leg.to);
+        note(leg.to, leg.from);
+        unflown[CsFly.legKey(leg.from, leg.to)] = true;
+    }
+
+    var visitedStation = {};
+    for (var s = 0; s < order.length; s++) {
+        if (visitedStation[order[s]] === true) { continue; }
+        var walk = CsFly.walkPiece(order[s], adj, unflown, visitedStation,
+            resolved);
+        if (walk.length >= 2) {
+            out.push(walk);
+        }
+    }
+    return out;
+};
+
+/** One spelling of a leg, whichever end it is named from. */
+CsFly.legKey = function(a, b) {
+    return (String(a) < String(b)) ? (a + "\u0000" + b) : (b + "\u0000" + a);
+};
+
+/** The walk over one connected piece of cave. */
+CsFly.walkPiece = function(start, adj, unflown, visitedStation, resolved) {
+    var walk = [];
+    var push = function(name) {
+        var st = resolved.stations[name];
+        walk.push({ x: st.x, y: st.y, z: st.z });
+        visitedStation[name] = true;
+    };
+    var at = start;
+    push(at);
+
+    var guard = 0;
+    var limit = 200000;
+    while (guard++ < limit) {
+        // An unflown leg from here, if there is one.
+        var next = null;
+        var here = adj[at] || [];
+        for (var i = 0; i < here.length; i++) {
+            if (unflown[CsFly.legKey(at, here[i])] === true) {
+                next = here[i];
+                break;
+            }
+        }
+        if (next !== null) {
+            unflown[CsFly.legKey(at, next)] = false;
+            at = next;
+            push(at);
+            continue;
+        }
+        // Nothing left here: go to the nearest station that still has
+        // one, THROUGH passage already flown.
+        var route = CsFly.routeToUnflown(at, adj, unflown);
+        if (route === null) {
+            break;
+        }
+        for (var r = 1; r < route.length; r++) {
+            at = route[r];
+            push(at);
+        }
+    }
+    return walk;
+};
+
+/**
+ * The shortest way from `from` to a station with an unflown leg, over
+ * passage that is already known.
+ *
+ * Breadth first, so the camera takes the SHORTEST way back rather than
+ * retracing every step it took to get here -- which is both what a
+ * caver does and much less of the film spent on passage already shown.
+ *
+ * \return the route including `from`, or null when nothing is left
+ */
+CsFly.routeToUnflown = function(from, adj, unflown) {
+    var prev = {};
+    var queue = [from];
+    var seen = {};
+    seen[from] = true;
+    var head = 0;
+    while (head < queue.length) {
+        var at = queue[head++];
+        var here = adj[at] || [];
+        var wants = false;
+        for (var w = 0; w < here.length; w++) {
+            if (unflown[CsFly.legKey(at, here[w])] === true) {
+                wants = true;
+                break;
+            }
+        }
+        if (wants && at !== from) {
+            var route = [at];
+            var back = at;
+            while (back !== from) {
+                back = prev[back];
+                route.unshift(back);
+            }
+            return route;
+        }
+        for (var i = 0; i < here.length; i++) {
+            if (seen[here[i]] === true) { continue; }
+            seen[here[i]] = true;
+            prev[here[i]] = at;
+            queue.push(here[i]);
+        }
+    }
+    return null;
 };
 
 /** A station with a position that can be flown to. */
@@ -140,16 +310,22 @@ CsFly.resample = function(points, step) {
  * \return {points: [{x,y,z}], breaks: [index, ...], length: <units>}
  */
 CsFly.path = function(resolved, step) {
-    var runs = CsFly.runs(resolved);
-    var out = { points: [], breaks: [], length: 0 };
+    var runs = CsFly.tour(resolved);
+    var out = { points: [], breaks: [], turns: [], length: 0 };
     if (runs.length === 0) { return out; }
     var use = step;
     if (!(use > 0)) {
-        var longest = 0;
+        // ENOUGH SAMPLES TO FOLLOW THE PASSAGE. Spacing the samples by
+        // a fraction of the LONGEST RUN gave fifty of them for the
+        // whole of Truitt -- eighty feet apart, which flies past every
+        // bend in the cave without turning. The flight is what it is
+        // for, so the spacing comes from how many steps the animation
+        // takes, over the whole distance walked.
+        var total = 0;
         for (var r = 0; r < runs.length; r++) {
-            longest = Math.max(longest, CsFly.lengthOf(runs[r]));
+            total += CsFly.lengthOf(runs[r]);
         }
-        use = (longest > 0) ? (longest / 50.0) : 1.0;
+        use = (total > 0) ? (total / CsFly.SAMPLES) : 1.0;
     }
     for (var i = 0; i < runs.length; i++) {
         var sampled = CsFly.resample(runs[i], use);
@@ -165,8 +341,52 @@ CsFly.path = function(resolved, step) {
         }
         out.length += CsFly.lengthOf(runs[i]);
     }
+    out.turns = CsFly.turnsIn(out.points);
     return out;
 };
+
+/**
+ * Where the flight doubles back on itself.
+ *
+ * A tour walks out to a dead end and returns the way it came, so at
+ * that station the path reverses: the segment after points back along
+ * the segment before. A camera carried straight through that flips a
+ * hundred and eighty degrees between one frame and the next.
+ *
+ * Found by ANGLE rather than remembered from the walk, because the
+ * resampling moves every index -- and because a hairpin bend in the
+ * passage itself deserves the same treatment as a dead end. The camera
+ * stops and turns round at both, which is what a caver does.
+ *
+ * \return the sample indices where the path reverses
+ */
+CsFly.turnsIn = function(points, degrees) {
+    var out = [];
+    if (points === null || points === undefined || points.length < 3) {
+        return out;
+    }
+    var limit = Math.cos(((degrees === undefined || degrees === null)
+        ? CsFly.TURN_DEGREES : degrees) * Math.PI / 180.0);
+    for (var i = 1; i + 1 < points.length; i++) {
+        var ax = points[i].x - points[i - 1].x;
+        var ay = points[i].y - points[i - 1].y;
+        var az = points[i].z - points[i - 1].z;
+        var bx = points[i + 1].x - points[i].x;
+        var by = points[i + 1].y - points[i].y;
+        var bz = points[i + 1].z - points[i].z;
+        var la = Math.sqrt(ax * ax + ay * ay + az * az);
+        var lb = Math.sqrt(bx * bx + by * by + bz * bz);
+        if (!(la > 0) || !(lb > 0)) { continue; }
+        var dot = (ax * bx + ay * by + az * bz) / (la * lb);
+        if (dot <= limit) {
+            out.push(i);
+        }
+    }
+    return out;
+};
+
+/** How sharply the path must double back to count as a turn-around. */
+CsFly.TURN_DEGREES = 120;
 
 /** The path as a flat [x,y,z,...] array, which is what the view takes. */
 CsFly.flatten = function(points) {

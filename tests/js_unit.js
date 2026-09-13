@@ -21180,20 +21180,70 @@ eqs(CsMesh3d.stationLabels({}).names.length, 0, "and no stations likewise");
                 { from: "C", to: "W", splay: true } ]
     };
 
-    var runs = CsFly.runs(flyResolved);
-    eqs(runs.length, 2, "legs that carry on from each other make one run");
-    eqs(runs[0].length, 3, "and the run holds every station along it");
-    eqs(runs[1].length, 2, "a leg starting elsewhere begins a new run");
-    eqs(runs[0][0].x, 0, "the run starts where the survey did");
-    eqs(runs[0][2].y, 100, "and ends where it ended");
+    // A WALK OVER THE LEGS, NOT THE STATIONS. A depth-first walk of
+    // the stations turns around at every station it has already been
+    // to -- which at a loop closure is not a dead end at all, the
+    // passage carries straight on. Truitt came out with nine
+    // turn-arounds that way and has three.
+    var runs = CsFly.tour(flyResolved);
+    eqs(runs.length, 2, "one walk per connected piece of cave");
+    eqs(runs[0][0].x, 0, "the walk starts where the survey did");
+
+    var walked = [];
+    for (var wi = 0; wi < runs[0].length; wi++) {
+        walked.push(runs[0][wi].x + "," + runs[0][wi].y);
+    }
+    eqs(walked.join(" "), "0,0 100,0 100,100",
+        "a straight run is flown once, and stops where the cave does");
 
     // A SPLAY IS NOT PASSAGE. Flying down one would take the camera
     // into the wall.
-    var splayOnly = CsFly.runs({ stations: { A: st(0,0,0), B: st(1,0,0) },
+    var splayOnly = CsFly.tour({ stations: { A: st(0,0,0), B: st(1,0,0) },
         legs: [{ from: "A", to: "B", splay: true }] });
     eqs(splayOnly.length, 0, "a survey of nothing but splays has no path");
 
-    eqs(CsFly.lengthOf(runs[0]), 200, "a run's length is walked, not flown");
+    // A BRANCH: out to the end of one, back to the junction, out the
+    // other. The turn is at the dead end, where the cave turns round.
+    var forked = CsFly.tour({
+        stations: { A: st(0,0,0), B: st(10,0,0),
+                    L: st(10,10,0), R: st(10,-10,0) },
+        legs: [{ from: "A", to: "B" }, { from: "B", to: "L" },
+               { from: "B", to: "R" }] });
+    eqs(forked.length, 1, "a fork is still one walk");
+    var fwalk = [];
+    for (var fi = 0; fi < forked[0].length; fi++) {
+        fwalk.push(forked[0][fi].x + "," + forked[0][fi].y);
+    }
+    eqs(fwalk.join(" "), "0,0 10,0 10,10 10,0 10,-10",
+        "down one branch, back to the junction, and down the other");
+    eqs(CsFly.turnsIn(forked[0]).length, 1,
+        "and it turns around once, at the dead end it reached");
+
+    // A LOOP IS NOT A DEAD END. The passage carries on; it has only
+    // been reached from the other side. This is the case that gave
+    // Truitt nine turn-arounds instead of three.
+    var looped = CsFly.tour({
+        stations: { A: st(0,0,0), B: st(10,0,0), C: st(10,10,0),
+                    D: st(0,10,0) },
+        legs: [{ from: "A", to: "B" }, { from: "B", to: "C" },
+               { from: "C", to: "D" }, { from: "D", to: "A" }] });
+    eqs(CsFly.turnsIn(looped[0]).length, 0,
+        "a cave that loops round turns the camera round nowhere");
+
+    // EVERY LEG GETS FLOWN, measured by distance: the fork is 30 units
+    // of passage and the walk is 40, because the branch back to the
+    // junction is flown twice and nothing else is.
+    eqs(CsFly.lengthOf(forked[0]), 40,
+        "only the passage it has to come back through is flown twice");
+
+    // AND IT NEVER JUMPS.
+    var worstStep = 0;
+    for (var ws = 1; ws < forked[0].length; ws++) {
+        worstStep = Math.max(worstStep,
+            CsFly.distance(forked[0][ws - 1], forked[0][ws]));
+    }
+    ok(worstStep <= 10 + 1e-9,
+        "and never moves further than a single leg (" + worstStep + ")");
 
     // EVEN SPACING IS WHAT MAKES THE SPEED CONSTANT.
     var even = CsFly.resample([st(0,0,0), st(100,0,0)], 25);
@@ -21223,16 +21273,22 @@ eqs(CsMesh3d.stationLabels({}).names.length, 0, "and no stations likewise");
     var path = CsFly.path(flyResolved, 25);
     ok(path.points.length > 8, "the flight has samples (" +
         path.points.length + ")");
-    eqs(path.breaks.length, 1, "and one break, where the survey jumped");
+    // The only break left is between two pieces of cave that do not
+    // join -- there is no passage to fly between those.
+    eqs(path.breaks.length, 1, "the disconnected piece is still a break");
     eqs(path.points[path.breaks[0]].x, 500,
-        "the break is at the first sample of the run that starts elsewhere");
-    eqs(path.length, 300, "the flight is as long as the passage walked");
+        "and the break is where that other piece begins");
+    eqs(path.length, 300, "the flight covers every leg of the survey");
 
-    // A default step, so a cave of any size takes a similar-sized flight.
+    // A default step, so a cave of any size takes a similar-sized
+    // flight -- and a fine enough one to follow the passage round its
+    // bends. Spacing by the LONGEST RUN gave fifty samples for the
+    // whole of Truitt, eighty feet apart, which flew straight past
+    // every corner.
     var auto = CsFly.path(flyResolved);
-    ok(auto.points.length > 10 && auto.points.length < 400,
-        "an unasked-for step still gives a usable flight (" +
-        auto.points.length + " samples)");
+    ok(Math.abs(auto.points.length - CsFly.SAMPLES) < CsFly.SAMPLES * 0.2,
+        "an unasked-for step gives about one sample per animation step (" +
+        auto.points.length + " against " + CsFly.SAMPLES + ")");
 
     eqs(CsFly.path(null).points.length, 0, "no survey, no flight");
     eqs(CsFly.path({ legs: [], stations: {} }).points.length, 0,
@@ -21240,7 +21296,7 @@ eqs(CsMesh3d.stationLabels({}).names.length, 0, "and no stations likewise");
 
     // A station with no usable position is not flown to -- the datum
     // trap, again.
-    var holed = CsFly.runs({ stations: { A: st(0,0,0), B: { x: 1, y: 2 } },
+    var holed = CsFly.tour({ stations: { A: st(0,0,0), B: { x: 1, y: 2 } },
         legs: [{ from: "A", to: "B" }] });
     eqs(holed.length, 0, "a leg to a station with no elevation is not path");
 

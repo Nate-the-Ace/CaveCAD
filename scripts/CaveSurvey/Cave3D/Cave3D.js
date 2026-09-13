@@ -502,7 +502,7 @@ Cave3D.refresh = function() {
         } catch (eFly) {
         }
         cave3d.setFlyPath(Cave3D.handle, CsFly.flatten(flight.points),
-            flight.breaks);
+            flight.breaks, flight.turns || []);
     }
     cave3d.setStatus(Cave3D.handle, Cave3D.statusText(read, mesh));
 };
@@ -586,37 +586,39 @@ Cave3D.exportAnimation = function() {
         qsTr("Wrote %1 frames to %2").arg(written).arg(dir));
 };
 
-function cave3dRun() {
-    // The 3D view is a C++ panel in CaveCAD itself, reached through the
-    // global `cave3d`. An add-on can outlive the application it was
-    // installed into -- a caver who updates the tools but not CaveCAD
-    // would otherwise meet a bare ReferenceError from a menu entry that
-    // looks like every other one.
-    if (typeof cave3d === "undefined" || isNull(cave3d)) {
-        warning(qsTr("3D View needs a newer CaveCAD.\n" +
-            "This version of the application has no 3D panel in it. " +
-            "Everything else in the Cave Survey suite works as before."));
+/**
+ * Wires the panel's signals to this tool, once.
+ *
+ * CALLED FROM TWO PLACES and it has to be. The tool calls it when a
+ * caver opens the 3D view; init calls it after pre-building the panel,
+ * because a dock Qt restores from the saved layout comes up VISIBLE
+ * before the tool has ever run and asks for a mesh through
+ * refreshRequested -- with nothing listening, the caver gets an empty
+ * 3D view that looks broken.
+ *
+ * Connected once for the life of the application: the bridge outlives
+ * every run of the tool, so connecting per run would stack up duplicate
+ * handlers that all fire.
+ */
+/**
+ * The panel's own furniture: its title, its colour modes and the
+ * overlay switches, restored from what the caver last chose.
+ *
+ * SEPARATE FROM THE MESH because a panel can exist without one -- Qt
+ * puts the dock back where the caver left it on the next start, before
+ * this tool has run at all.
+ */
+Cave3D.dress = function() {
+    if (Cave3D.handle === null || !cave3d.isOpen(Cave3D.handle)) {
         return;
     }
-
     var doc = getDocument();
-    var read = Cave3D.read(doc);
-    if (read === null) {
-        warning(qsTr("3D View: no tagged survey stations found.\n" +
-            "Import a survey or type one into the Survey Notebook " +
-            "first -- there is no passage to look at without shots."));
-        return;
-    }
-
-    if (Cave3D.handle !== null && cave3d.isOpen(Cave3D.handle)) {
-        cave3d.raiseWindow(Cave3D.handle);
-    } else {
+    if (!isNull(doc)) {
         var name = CsCave.nameOf(doc.getFileName());
-        Cave3D.handle = cave3d.open(isNull(name) ? "" : name);
+        // open() on a panel that is already there only renames it and
+        // brings it forward.
+        cave3d.open(isNull(name) ? "" : name);
     }
-
-    // Fill the dropdown before the first refresh, so the panel opens
-    // showing the mode it is about to draw in.
     var keys = [], labels = [];
     for (var mi = 0; mi < Cave3D.MODES.length; mi++) {
         keys.push(Cave3D.MODES[mi].key);
@@ -625,16 +627,26 @@ function cave3dRun() {
     cave3d.setColorModes(Cave3D.handle, keys, labels, Cave3D.currentMode());
     cave3d.setShowLeads(Cave3D.handle,
         RSettings.getBoolValue(Cave3D.SETTING_LEADS, false));
+};
 
-    if (!Cave3D.connected) {
+Cave3D.connectOnce = function() {
+    if (Cave3D.connected) {
+        return;
+    }
+
         // The panel's buttons come back as signals carrying the handle.
         // Connected once, for the life of the application -- the bridge
         // outlives every run of this tool, so connecting per run would
         // stack up duplicate handlers that all fire.
         cave3d.refreshRequested.connect(function(handle) {
-            if (handle === Cave3D.handle) {
-                Cave3D.refresh();
-            }
+            if (handle !== Cave3D.handle) { return; }
+            // A PANEL QT RESTORED HAS NOTHING IN IT -- no colour modes,
+            // no title, no toggles -- because the tool has never run.
+            // Dress it before drawing into it, or the caver's first
+            // sight of the 3D view is a cave in an unnamed window with
+            // an empty mode dropdown.
+            Cave3D.dress();
+            Cave3D.refresh();
         });
         cave3d.colorModeChanged.connect(function(handle, mode) {
             if (handle !== Cave3D.handle) { return; }
@@ -687,8 +699,50 @@ function cave3dRun() {
                 RSettings.setValue(Cave3D.SETTING_SCAN_INK, value);
             });
         }
-        Cave3D.connected = true;
+    Cave3D.connected = true;
+};
+
+function cave3dRun() {
+    // The 3D view is a C++ panel in CaveCAD itself, reached through the
+    // global `cave3d`. An add-on can outlive the application it was
+    // installed into -- a caver who updates the tools but not CaveCAD
+    // would otherwise meet a bare ReferenceError from a menu entry that
+    // looks like every other one.
+    if (typeof cave3d === "undefined" || isNull(cave3d)) {
+        warning(qsTr("3D View needs a newer CaveCAD.\n" +
+            "This version of the application has no 3D panel in it. " +
+            "Everything else in the Cave Survey suite works as before."));
+        return;
     }
+
+    var doc = getDocument();
+    var read = Cave3D.read(doc);
+    if (read === null) {
+        warning(qsTr("3D View: no tagged survey stations found.\n" +
+            "Import a survey or type one into the Survey Notebook " +
+            "first -- there is no passage to look at without shots."));
+        return;
+    }
+
+    if (Cave3D.handle !== null && cave3d.isOpen(Cave3D.handle)) {
+        cave3d.raiseWindow(Cave3D.handle);
+    } else {
+        var name = CsCave.nameOf(doc.getFileName());
+        Cave3D.handle = cave3d.open(isNull(name) ? "" : name);
+    }
+
+    // Fill the dropdown before the first refresh, so the panel opens
+    // showing the mode it is about to draw in.
+    var keys = [], labels = [];
+    for (var mi = 0; mi < Cave3D.MODES.length; mi++) {
+        keys.push(Cave3D.MODES[mi].key);
+        labels.push(Cave3D.MODES[mi].label);
+    }
+    cave3d.setColorModes(Cave3D.handle, keys, labels, Cave3D.currentMode());
+    cave3d.setShowLeads(Cave3D.handle,
+        RSettings.getBoolValue(Cave3D.SETTING_LEADS, false));
+
+    Cave3D.connectOnce();
 
     Cave3D.refresh();
 
@@ -754,7 +808,15 @@ Cave3D.init = function(basePath) {
     try {
         if (typeof cave3d !== "undefined" && !isNull(cave3d) &&
                 cave3d.prewarm !== undefined) {
-            cave3d.prewarm();
+            // THE HANDLE COMES BACK, and is kept. Qt remembers where
+            // the caver put the dock and puts it BACK on the next
+            // start, visible, before this tool has ever run -- and the
+            // panel then asks for a mesh through refreshRequested.
+            // Without the handle that request arrives for a window this
+            // side does not think it owns, and is dropped: the caver
+            // gets an empty 3D view that looks broken.
+            Cave3D.handle = cave3d.prewarm();
+            Cave3D.connectOnce();
         }
     } catch (ePrewarm) {
     }
