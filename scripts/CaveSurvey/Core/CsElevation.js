@@ -294,3 +294,87 @@ CsElevation.sampleFloor = function(survey, resolved, point, opts) {
         multi: evidence.multi
     };
 };
+
+// ---------------------------------------------------------------------
+// The datum anchor
+// ---------------------------------------------------------------------
+//
+// A cave's station Elevation tags sit on whatever datum the survey ran
+// on: an entrance called zero, a benchmark, a GPS fix of unknown
+// quality. Nothing in the suite could turn one into a real-world
+// elevation, so nothing could honestly place a cave against a NAVD88
+// terrain surface.
+//
+// One stored number closes that: GeoElev on the georeference anchor,
+// the RAW 3DEP ground elevation there, in metres NAVD88 -- the same
+// store-canonical, convert-at-read convention GeoLat/GeoLon follow.
+// Surface Data writes it; it already sampled the value and only
+// printed it.
+//
+// Raw GROUND, not the entrance's own elevation. The entrance sits some
+// way below the surface above it, and that distance is a guess unless
+// somebody measured it. Storing the guessed-down number would cement a
+// guess into data a later reader cannot tell from a measurement.
+//
+// NOTHING HERE REWRITES A SURVEY. Every Elevation tag stays exactly as
+// surveyed and the offset is applied when an absolute number is
+// wanted. Rewriting them would rebase a whole cave against a 1 m
+// national DEM -- the elevation-datum trap with extra steps.
+
+/**
+ * How far the entrance station sits below the ground directly above
+ * it, in FEET. A display-time constant, applied on read, never stored.
+ * The project default; a measured per-cave depth would arrive as its
+ * own tag, and does not exist yet.
+ */
+CsElevation.ENTRANCE_DEPTH_FT = 5.0;
+
+/** ENTRANCE_DEPTH_FT expressed in a drawing's unit. */
+CsElevation.entranceDepth = function(unit) {
+    return CsUnits.convert(CsElevation.ENTRANCE_DEPTH_FT, CsUnits.FEET,
+        unit);
+};
+
+/**
+ * The constant that turns a survey elevation into an absolute one.
+ *
+ *   offset   = (geoElev - entranceDepth) - anchorZ
+ *   absolute = Elevation + offset
+ *
+ * PURE: plain numbers in, a plain number out.
+ *
+ * \param geoElevM the GeoElev tag -- ground elevation at the anchor,
+ *        METRES NAVD88 -- or null when the drawing has none
+ * \param anchorZ  the anchor station's own survey Elevation, in
+ *        DRAWING UNITS, or null when it carries none
+ * \param unit     the drawing's unit ("ft"/"m"), for the result
+ *
+ * \return the offset in drawing units, or null when it cannot be
+ *         known. NULL IS UNKNOWN, NOT ZERO. A caller that substitutes
+ *         zero silently rebases the cave to sea level, which is this
+ *         suite's oldest recurring bug.
+ */
+CsElevation.datumOffset = function(geoElevM, anchorZ, unit) {
+    if (geoElevM === null || geoElevM === undefined ||
+            !isFinite(geoElevM)) {
+        return null;
+    }
+    if (anchorZ === null || anchorZ === undefined || !isFinite(anchorZ)) {
+        return null;
+    }
+    var groundU = CsUnits.convert(geoElevM, CsUnits.METERS, unit);
+    return (groundU - CsElevation.entranceDepth(unit)) - anchorZ;
+};
+
+/**
+ * A survey elevation as an absolute one, given an offset from
+ * datumOffset. null offset in, null out -- an unknown datum has no
+ * absolute answer.
+ */
+CsElevation.absolute = function(z, offset) {
+    if (offset === null || offset === undefined || z === null ||
+            z === undefined) {
+        return null;
+    }
+    return z + offset;
+};

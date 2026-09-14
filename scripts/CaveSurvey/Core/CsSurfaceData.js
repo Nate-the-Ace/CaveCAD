@@ -595,7 +595,20 @@ CsSurfaceData.contours = function(doc, di, anchor) {
         return null;                // cancelled
     }
 
-    var demPath = QDir.tempPath() + "/cavecad-surface-dem.tif";
+    // The grid is KEPT, not deleted: it lands beside the drawing as
+    // <name>-surface.tif, the same shape (and the same privacy rule)
+    // as <name>-aerial.png. The 3D view meshes it into the terrain
+    // surface, and re-fetching a 512 px grid every time that panel
+    // opens would put a network round trip in front of a view button.
+    // An unsaved drawing has nowhere to keep it, so it falls back to
+    // the temp copy this pass has always used and removes it after --
+    // contours still draw; only the 3D terrain is unavailable until
+    // the drawing is saved and this is run again.
+    var demPath = CsGeoProject.demPathFor(doc.getFileName());
+    var demIsTemp = (demPath === null);
+    if (demIsTemp) {
+        demPath = QDir.tempPath() + "/cavecad-surface-dem.tif";
+    }
     var fetched = CsSurfaceData.fetch(CsGeoProject.demUrl(bbox, size),
         demPath);
     if (fetched !== true) {
@@ -607,12 +620,14 @@ CsSurfaceData.contours = function(doc, di, anchor) {
         var bytes = CsSurfaceData.readBinary(demPath);
         grid = CsContour.parseFloatTiff(bytes);
     } catch (eParse) {
-        QFile.remove(demPath);
+        QFile.remove(demPath);       // unreadable: keep nothing
         return qsTr("the service's reply could not be read as an "
             + "elevation grid (") + eParse + qsTr("). Try again, or a "
             + "smaller area.");
     }
-    QFile.remove(demPath);
+    if (demIsTemp) {
+        QFile.remove(demPath);
+    }
 
     var range = CsContour.range(grid.values);
     if (range === null) {
@@ -635,13 +650,27 @@ CsSurfaceData.contours = function(doc, di, anchor) {
 
     // The surface elevation right at the anchor station -- the
     // entrance's ground elevation, the number the lidar thread has
-    // always been after. Reported, never written into the survey.
+    // always been after. Reported AND stored, as GeoElev.
     var at = CsGeoProject.anchorGridCoord(bbox, grid.width, grid.height,
         anchor.lat, anchor.lon);
     var surf = CsContour.sampleAt(grid.values, grid.width, grid.height,
         at.col, at.row);
     var surfLine = "";
     if (surf !== null) {
+        // Stored as GeoElev on the anchor: METRES NAVD88, raw ground,
+        // the same store-canonical convention GeoLat/GeoLon follow.
+        // This is the drawing's datum anchor -- the one number that
+        // lets CsElevation.datumOffset turn a survey elevation into an
+        // absolute one -- and it is why the 3D view can stand the cave
+        // under its own hillside. RAW GROUND, not the entrance's own
+        // elevation: how far the entrance sits below the surface is a
+        // guess (CsElevation.ENTRANCE_DEPTH_FT) and a guess must not be
+        // cemented into stored data.
+        //
+        // No survey elevation is touched. The offset is applied on
+        // read; rewriting the Elevation tags would rebase the whole
+        // cave against a 1 m national DEM.
+        CsTags.commit(di, anchor.entity, { GeoElev: surf });
         surfLine = qsTr("\nSurface at ") +
             (anchor.name !== "" ? anchor.name : "the anchor") + ": " +
             CsSurfaceData.fmt(CsUnits.convert(surf, CsUnits.METERS, unit)) +

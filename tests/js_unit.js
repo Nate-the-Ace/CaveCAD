@@ -183,6 +183,7 @@ var CORE_FILES = [
     "scripts/CaveSurvey/Core/CsProfileDraw.js",
     "scripts/CaveSurvey/Core/CsCallout.js",
     "scripts/CaveSurvey/Core/CsElevation.js",
+    "scripts/CaveSurvey/Core/CsTerrain3d.js",
     "scripts/CaveSurvey/Core/CsValidate.js",
     "scripts/CaveSurvey/Core/CsStats.js",
     "scripts/CaveSurvey/Core/CsGrade.js",
@@ -10660,6 +10661,16 @@ if (!IS_NODE) {
         "runTagFor: the elevation has bands");
     ok(CsScanFrame.runTagFor("plan") === null,
         "runTagFor: the plan does not");
+
+    // SPLAY TIPS ARE PICKABLE IN THE PLAN. A wall hit is often the only
+    // feature on a sketch a caver can name with confidence.
+    eqs(CsScanFrame.splayTagFor("plan"), "SplayName",
+        "splayTagFor: plan splay tips are alignment targets");
+    ok(CsScanFrame.splayTagFor("profile") === null,
+        "splayTagFor: an elevation splay tick is a line, with no " +
+        "position to align to");
+    ok(CsScanFrame.splayTagFor("section") === null,
+        "splayTagFor: sections plot no splays of their own");
 
     // A NAME IS NOT AN ADDRESS IN THE ELEVATION. The same station
     // appears in every band it ties into, so a picker offering bare
@@ -28631,6 +28642,236 @@ eqs(CsSymbolStore.AREA_MARKER_TAGS.custom, "AreaCustom",
         "CsCalibrate.northFromArrow: two picks in the same place give no " +
         "direction");
 }());
+
+// ---------------------------------------------------------------------
+// The datum anchor: CsElevation.datumOffset / absolute.
+// ---------------------------------------------------------------------
+
+// A cave surveyed with its entrance called zero, under ground that
+// 3DEP puts at 300 m. The entrance sits ENTRANCE_DEPTH_FT below that
+// ground, so the offset is the ground minus the entrance depth.
+var groundFt = CsUnits.convert(300.0, CsUnits.METERS, CsUnits.FEET);
+near(CsElevation.datumOffset(300.0, 0.0, CsUnits.FEET),
+    groundFt - CsElevation.ENTRANCE_DEPTH_FT, 1e-9,
+    "datum offset, entrance surveyed as zero");
+
+// A cave already surveyed on an absolute datum needs almost no shift.
+near(CsElevation.datumOffset(300.0, groundFt - 5.0, CsUnits.FEET),
+    0.0, 1e-9, "datum offset, survey already absolute");
+
+// Metric drawing: the entrance depth converts too.
+near(CsElevation.datumOffset(300.0, 0.0, CsUnits.METERS),
+    300.0 - CsUnits.convert(5.0, CsUnits.FEET, CsUnits.METERS), 1e-9,
+    "datum offset in metres");
+
+// NULL IS UNKNOWN, NOT ZERO. This is the elevation-datum trap's front
+// door: a missing GeoElev that reads as an offset of zero silently
+// rebases an absolute-datum cave to sea level.
+ok(CsElevation.datumOffset(null, 0.0, CsUnits.FEET) === null,
+    "no GeoElev means no offset");
+ok(CsElevation.datumOffset(300.0, null, CsUnits.FEET) === null,
+    "anchor with no Elevation tag means no offset");
+ok(CsElevation.datumOffset(300.0, undefined, CsUnits.FEET) === null,
+    "undefined anchor elevation means no offset");
+ok(CsElevation.absolute(120.0, null) === null,
+    "absolute declines without an offset");
+near(CsElevation.absolute(120.0, 900.0), 1020.0, 1e-9,
+    "absolute applies the offset");
+
+// The offset is one constant for the whole cave: two stations keep
+// their surveyed separation exactly.
+var offA = CsElevation.datumOffset(300.0, 0.0, CsUnits.FEET);
+near(CsElevation.absolute(-40.0, offA) - CsElevation.absolute(-90.0, offA),
+    50.0, 1e-9, "the offset is rigid, stations keep their separation");
+
+// ---------------------------------------------------------------------
+// CsTerrain3d: the surface mesh.
+// ---------------------------------------------------------------------
+
+// (col, row) -> drawing coordinates: 2 units per cell, row 0 at the
+// top, so y decreases as row increases -- the same sense
+// CsGeoProject.gridTransform has.
+function terrainXf(col, row) {
+    return { x: col * 2.0, y: -row * 2.0 };
+}
+
+// A 4x3 ramp rising one metre per column, in metres.
+var rampVals = [];
+for (var tr = 0; tr < 3; tr++) {
+    for (var tc = 0; tc < 4; tc++) {
+        rampVals.push(100.0 + tc);
+    }
+}
+var rampGrid = { values: rampVals, width: 4, height: 3 };
+
+var tm = CsTerrain3d.mesh(rampGrid, terrainXf,
+    { unit: CsUnits.METERS, offset: 0.0 });
+eqs(tm.positions.length, 4 * 3 * 3, "terrain vertex count");
+eqs(tm.uvs.length, 4 * 3 * 2, "terrain uv count");
+eqs(tm.normals.length, 4 * 3 * 3, "terrain normal count");
+eqs(tm.indices.length, 3 * 2 * 6, "terrain index count (2x3 cells)");
+eqs(tm.holes, 0, "a complete grid has no holes");
+eqs(tm.stride, 1, "a small grid is not decimated");
+
+// Every index addresses a real vertex.
+var maxIdx = 0;
+for (var ii = 0; ii < tm.indices.length; ii++) {
+    if (tm.indices[ii] > maxIdx) { maxIdx = tm.indices[ii]; }
+}
+ok(maxIdx < tm.positions.length / 3, "terrain indices stay in range");
+
+// uvs are the fractional place in the grid -- which is the fractional
+// place in the photograph, because both come from one bbox.
+near(tm.uvs[0], 0.5 / 4, 1e-12, "first uv u");
+near(tm.uvs[1], 0.5 / 3, 1e-12, "first uv v");
+for (var uvi = 0; uvi < tm.uvs.length; uvi++) {
+    if (tm.uvs[uvi] < 0 || tm.uvs[uvi] > 1) {
+        ok(false, "uv out of range at " + uvi);
+        break;
+    }
+}
+
+// Normals point UP -- a terrain surface seen from above is never
+// edge-on or inverted, whatever the slope.
+var normalsUp = true;
+for (var ni = 2; ni < tm.normals.length; ni += 3) {
+    if (!(tm.normals[ni] > 0)) { normalsUp = false; }
+}
+ok(normalsUp, "every terrain normal points up");
+
+// A ramp rising to the east tilts its normals west.
+ok(tm.normals[0] < 0, "normal leans against the slope");
+
+// Winding: counter-clockwise seen from above (+z), so the cross
+// product of the first triangle's edges has a positive z.
+var ax = tm.positions[tm.indices[0] * 3], ay = tm.positions[tm.indices[0] * 3 + 1];
+var bx = tm.positions[tm.indices[1] * 3], by = tm.positions[tm.indices[1] * 3 + 1];
+var cx = tm.positions[tm.indices[2] * 3], cy = tm.positions[tm.indices[2] * 3 + 1];
+ok(((bx - ax) * (cy - ay) - (by - ay) * (cx - ax)) > 0,
+    "terrain triangles wind counter-clockwise from above");
+
+// The vertical frame is the SURVEY's: an offset lowers the terrain
+// into the cave's own datum rather than moving the cave.
+var tmOff = CsTerrain3d.mesh(rampGrid, terrainXf,
+    { unit: CsUnits.METERS, offset: 40.0 });
+near(tmOff.positions[2], tm.positions[2] - 40.0, 1e-9,
+    "the datum offset shifts terrain into the survey's frame");
+
+// An unknown datum places the terrain raw rather than guessing.
+var tmNull = CsTerrain3d.mesh(rampGrid, terrainXf,
+    { unit: CsUnits.METERS, offset: null });
+near(tmNull.positions[2], tm.positions[2], 1e-9,
+    "a null offset places terrain raw");
+
+// Bounds cover the drawn ground.
+ok(tm.bounds !== null, "terrain has bounds");
+near(tm.bounds.min.x, 0.0, 1e-9, "terrain bounds min x");
+near(tm.bounds.max.x, 6.0, 1e-9, "terrain bounds max x");
+near(tm.bounds.min.z, 100.0, 1e-9, "terrain bounds min z");
+near(tm.bounds.max.z, 103.0, 1e-9, "terrain bounds max z");
+
+// ---- no data --------------------------------------------------------
+//
+// 3DEP writes a huge negative float where it has nothing. The cells
+// touching it must be DROPPED, and no vertex may carry that value:
+// one of them in a bounding box makes the whole view unusable.
+var holeVals = rampVals.slice();
+holeVals[1 * 4 + 1] = -3.4e38;           // middle row, second column
+var holeGrid = { values: holeVals, width: 4, height: 3 };
+var th = CsTerrain3d.mesh(holeGrid, terrainXf,
+    { unit: CsUnits.METERS, offset: 0.0 });
+eqs(th.holes, 1, "one no-data sample counted");
+// That sample is a corner of four cells, so four cells go.
+eqs(th.indices.length, (3 * 2 - 4) * 6, "cells touching a hole are dropped");
+var anySpike = false;
+for (var hz = 2; hz < th.positions.length; hz += 3) {
+    if (th.positions[hz] < -1000) { anySpike = true; }
+}
+ok(!anySpike, "no vertex carries the no-data value");
+// The hole's own vertex is filled with the lowest real reading.
+near(th.positions[(1 * 4 + 1) * 3 + 2], 100.0, 1e-9,
+    "a no-data vertex takes the grid's floor, not its sentinel");
+
+// ---- decimation -----------------------------------------------------
+
+eqs(CsTerrain3d.stride(512, 200), 3, "stride decimates 512 to 200");
+eqs(CsTerrain3d.stride(120, 200), 1, "a grid under target is untouched");
+eqs(CsTerrain3d.stride(200, 200), 1, "a grid at target is untouched");
+// The last sample is always kept, so a decimated mesh covers the same
+// ground as the grid it came from.
+var samp = CsTerrain3d.samples(10, 3);
+eqs(samp[0], 0, "decimation keeps the first sample");
+eqs(samp[samp.length - 1], 9, "decimation keeps the last sample");
+
+var bigVals = [];
+for (var bi = 0; bi < 300 * 300; bi++) { bigVals.push(50.0); }
+var bigGrid = { values: bigVals, width: 300, height: 300 };
+var tb = CsTerrain3d.mesh(bigGrid, terrainXf,
+    { unit: CsUnits.METERS, offset: 0.0, target: 100 });
+ok(tb.cells.width <= 101 && tb.cells.height <= 101,
+    "a big grid decimates to about the target");
+ok(tb.stride > 1, "a big grid reports its stride");
+
+// ---- contour lines --------------------------------------------------
+//
+// Every vertex of a level's polyline sits at THAT level, so the lines
+// are on the surface by construction -- no draping, nothing to
+// reconcile.
+var tl = CsTerrain3d.contourLines(rampGrid, terrainXf, [101.0, 102.0],
+    { unit: CsUnits.METERS, offset: 0.0 });
+ok(tl.positions.length > 0, "contour lines are produced");
+eqs(tl.colors.length, tl.positions.length, "one colour per line vertex");
+var levelsSeen = {};
+for (var lz = 2; lz < tl.positions.length; lz += 3) {
+    levelsSeen[tl.positions[lz]] = true;
+}
+ok(levelsSeen[101.0] === true && levelsSeen[102.0] === true,
+    "contour vertices sit at their own level");
+ok(Object.keys(levelsSeen).length === 2,
+    "contour vertices sit at no other elevation");
+
+// Line vertices come in segment pairs.
+eqs((tl.positions.length / 3) % 2, 0, "contour lines are segment pairs");
+
+// The offset moves the lines with the mesh, or there would be two
+// surfaces.
+var tlOff = CsTerrain3d.contourLines(rampGrid, terrainXf, [101.0],
+    { unit: CsUnits.METERS, offset: 40.0 });
+near(tlOff.positions[2], 61.0, 1e-9, "contour lines take the datum offset");
+
+// ---- build ----------------------------------------------------------
+
+var tbuild = CsTerrain3d.build(rampGrid, terrainXf, {
+    unit: CsUnits.METERS, offset: 0.0, intervalM: 1.0,
+    texture: "/tmp/cave-aerial.png"
+});
+eqs(tbuild.texture, "/tmp/cave-aerial.png", "build carries the texture path");
+ok(tbuild.indices.length > 0, "build produces a mesh");
+ok(tbuild.lines.positions.length > 0, "build produces contour lines");
+ok(tbuild.levels > 0, "build reports how many levels it drew");
+
+var tnoc = CsTerrain3d.build(rampGrid, terrainXf, {
+    unit: CsUnits.METERS, offset: 0.0, intervalM: 1.0, contours: false
+});
+eqs(tnoc.lines.positions.length, 0, "contours can be switched off");
+ok(tnoc.indices.length > 0, "the mesh survives contours being off");
+
+// A drawing with no aerial still gets terrain, just no drape.
+var tnotex = CsTerrain3d.build(rampGrid, terrainXf,
+    { unit: CsUnits.METERS, offset: 0.0, intervalM: 1.0 });
+eqs(tnotex.texture, "", "no aerial means an empty texture path");
+
+// ---------------------------------------------------------------------
+// Privacy: the datum anchor is locating data.
+// ---------------------------------------------------------------------
+
+ok(CsPackage.GEO_TAGS.indexOf("GeoElev") >= 0,
+    "GeoElev is stripped with the other geo tags");
+eqs(CsGeoProject.demPathFor("/caves/Pitfall/Pitfall.dxf"),
+    "/caves/Pitfall/Pitfall-surface.tif", "the elevation grid's path");
+eqs(CsGeoProject.demPathFor(""), null,
+    "an unsaved drawing has nowhere to keep a grid");
+eqs(CsGeoProject.demPathFor(null), null, "null path in, null out");
 
 // ---------------------------------------------------------------------
 // Report.

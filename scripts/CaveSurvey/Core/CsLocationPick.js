@@ -103,7 +103,8 @@ CsLocationPick.anchorRecord = function(doc) {
             lat: lat, lon: lon,
             pos: pos,
             pinX: CsTags.getNumber(e, "GeoDrawX"),
-            pinY: CsTags.getNumber(e, "GeoDrawY")
+            pinY: CsTags.getNumber(e, "GeoDrawY"),
+            elev: CsTags.getNumber(e, "GeoElev")
         };
     }
     return null;
@@ -397,4 +398,27 @@ CsLocationPick.pageHtml = function() {
     L.push('};');
     L.push('</scr' + 'ipt></body></html>');
     return L.join("\n");
+};
+
+/**
+ * The drawing's datum offset -- what to add to any station's survey
+ * Elevation to get an absolute (NAVD88) one -- or null when this
+ * drawing has no GeoElev, no geo anchor, or an anchor carrying no
+ * elevation of its own.
+ *
+ * The document-side half of CsElevation.datumOffset, which owns the
+ * arithmetic and is pure. This file already reads the geo tags, so the
+ * lookup belongs here rather than teaching CsElevation about
+ * documents.
+ *
+ * NULL MEANS UNKNOWN. Callers must decline to answer, never fall back
+ * to zero.
+ */
+CsLocationPick.datumOffset = function(doc, unit) {
+    var rec = CsLocationPick.anchorRecord(doc);
+    if (rec === null || rec.elev === null) {
+        return null;
+    }
+    return CsElevation.datumOffset(rec.elev,
+        CsTags.getNumber(rec.entity, "Elevation"), unit);
 };

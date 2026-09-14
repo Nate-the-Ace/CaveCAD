@@ -172,6 +172,19 @@ PackageCave.contentsOf = function(record) {
         });
     }
 
+    // The elevation grid, same rule as the photograph: it names one
+    // hillside in one county, and a sanitized package cannot carry it.
+    var dem = CsGeoProject.demPathFor(record.drawing);
+    if (dem !== null && (new QFileInfo(dem)).exists()) {
+        root.children.push({
+            key: "surface", kind: "surface", path: dem,
+            label: CsShelf.basename(dem),
+            detail: qsTr("surface elevation grid — SHOWS THE SURFACE LOCATION"),
+            forced: false, sanitized: false, full: true,
+            sanitizedAllowed: false
+        });
+    }
+
     root.children.push({
         key: "data", kind: "data", path: "",
         label: qsTr("data/ — Compass, Survex, CSV"),
@@ -795,6 +808,18 @@ PackageCave.build = function(record, options) {
                     CsShelf.basename(aerials[a]))) {
                 contents.push({ path: CsShelf.basename(aerials[a]),
                     note: "aerial basemap — SHOWS THE SURFACE LOCATION" });
+            }
+        }
+    }
+
+    // The elevation grid travels under the same rule as the photograph.
+    var grids = chosen("surface");
+    if (options.full && grids.length > 0) {
+        for (var g = 0; g < grids.length; g++) {
+            if ((new QFile(grids[g])).copy(staging + "/" +
+                    CsShelf.basename(grids[g]))) {
+                contents.push({ path: CsShelf.basename(grids[g]),
+                    note: "surface elevation grid — SHOWS THE SURFACE LOCATION" });
             }
         }
     }

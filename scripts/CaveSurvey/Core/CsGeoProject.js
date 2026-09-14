@@ -338,3 +338,34 @@ CsGeoProject.imagePathFor = function(documentPath) {
     }
     return documentPath + "-aerial.png";
 };
+
+/**
+ * Where the elevation grid for a drawing lives: the drawing's own path
+ * with its extension replaced by "-surface.tif".
+ *
+ * Same shape, same reasoning and the same privacy rule as
+ * imagePathFor: a neutral filename with no coordinates in it, sitting
+ * beside the drawing so a cave folder carries its surface with it. The
+ * grid is locating data -- PackageCave must leave it out of a
+ * sanitized archive exactly as it leaves out the photograph.
+ *
+ * Kept rather than deleted (Surface Data used to remove its temp copy)
+ * because the 3D view meshes it into the terrain surface, and
+ * re-fetching a 512 px grid every time that panel opens would put a
+ * network round trip in front of a view button.
+ *
+ * \return the path, or null when the document has never been saved.
+ */
+CsGeoProject.demPathFor = function(documentPath) {
+    if (documentPath === undefined || documentPath === null ||
+        documentPath === "") {
+        return null;
+    }
+    var cut = documentPath.lastIndexOf(".");
+    var slash = Math.max(documentPath.lastIndexOf("/"),
+        documentPath.lastIndexOf("\\"));
+    if (cut > slash) {
+        return documentPath.substring(0, cut) + "-surface.tif";
+    }
+    return documentPath + "-surface.tif";
+};

@@ -88,6 +88,9 @@ include(includeBasePath + "/CsCallout.js");
 // After CsModel/CsTraverse/CsLrud/CsProfile (it uses classifySplay and
 // offset) and after CsCallout (it uses BASIS_FLOOR/BASIS_LINE).
 include(includeBasePath + "/CsElevation.js");
+// After CsContour (grids, marching squares), CsGeoProject (the grid
+// transform) and CsElevation (the datum offset it places terrain by).
+include(includeBasePath + "/CsTerrain3d.js");
 include(includeBasePath + "/CsValidate.js");
 include(includeBasePath + "/CsStats.js");
 include(includeBasePath + "/CsGrade.js");
