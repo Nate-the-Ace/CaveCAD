@@ -61,6 +61,27 @@ CsScanFrame.stationTagFor = function(kind) {
     }
 };
 
+/**
+ * The XDATA tag that frame's SPLAY TIPS carry, or null when the frame
+ * plots none.
+ *
+ * SPLAY TIPS ARE ALIGNMENT TARGETS TOO, and on a sketch they are often
+ * the only features a caver can identify with confidence: the middle of
+ * a room carries no station, but its corners carry splays. ScanAlign's
+ * own station table has offered them since it was written; this picker
+ * did not, so the same wall hit was reachable from one alignment route
+ * and invisible from the other.
+ *
+ * PLAN ONLY. A plan splay ends in a POINT tagged SplayName, which has a
+ * position to align to. The elevation's near-horizontal splays are
+ * drawn as a LINE tick (ProfileSplay) with no position of their own,
+ * and nothing may read a tag whose geometry cannot answer where it is
+ * -- the same rule that keeps SectionStation unread.
+ */
+CsScanFrame.splayTagFor = function(kind) {
+    return CsScanFrame.normaliseKind(kind) === "plan" ? "SplayName" : null;
+};
+
 /** The tag carrying which band a frame's point belongs to, or null when
  *  the frame has no bands. */
 CsScanFrame.runTagFor = function(kind) {
@@ -156,6 +177,7 @@ CsScanFrame.placesIn = function(doc, kind) {
     }
     var frame = CsScanFrame.normaliseKind(kind);
     var tag = CsScanFrame.stationTagFor(frame);
+    var splayTag = CsScanFrame.splayTagFor(frame);
     var runTag = CsScanFrame.runTagFor(frame);
     var candidates = [];
     var ids = doc.queryAllEntities(false, true);
@@ -165,6 +187,12 @@ CsScanFrame.placesIn = function(doc, kind) {
             continue;
         }
         var name = CsTags.get(e, tag);
+        if (name === "" && splayTag !== null) {
+            // A splay tip carries its own name ("A3.2"), which is never
+            // a station name, so the two namespaces cannot collide in
+            // the table below.
+            name = CsTags.get(e, splayTag);
+        }
         if (name === "") {
             continue;
         }

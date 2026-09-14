@@ -120,6 +120,7 @@ SectionCapture.prototype.beginEvent = function() {
     this.proposed = SectionCapture.proposePosition(doc, this.bay);
     if (this.proposed === null) {
         // Boxed in. Honest answer: the caver places it.
+        SectionCapture.zoomToPlacement(doc, di, this.bay, null);
         this.setCommandPrompt(qsTr("No clear spot found -- pick where " +
             "the section goes"));
         this.setLeftMouseTip(qsTr("Position of the section"));
@@ -129,6 +130,7 @@ SectionCapture.prototype.beginEvent = function() {
         di.setClickMode(RAction.PickCoordinate);
         return;
     }
+    SectionCapture.zoomToPlacement(doc, di, this.bay, this.proposed);
     this.setCommandPrompt(qsTr("Enter to accept the proposed spot, or " +
         "pick another"));
     this.setLeftMouseTip(qsTr("Position of the section"));
@@ -527,14 +529,7 @@ SectionCapture.obstaclesOf = function(doc, bay) {
 
 /** March outward from the station and propose a spot, or null. */
 SectionCapture.proposePosition = function(doc, bay) {
-    var stations = CsTags.collectStations(doc);
-    var at = null;
-    for (var i = 0; i < stations.length; i++) {
-        if (stations[i].name === bay.station) {
-            at = { x: stations[i].pos.x, y: stations[i].pos.y };
-            break;
-        }
-    }
+    var at = SectionCapture.stationPosOf(doc, bay.station);
     if (at === null) {
         return null;
     }
@@ -564,6 +559,86 @@ SectionCapture.tangentAt = function(doc, station) {
         return { x: b.x - a.x, y: b.y - a.y };
     } catch (e) {
         return { x: 1, y: 0 };
+    }
+};
+
+/** Where a station sits on the plan, or null when the drawing has no
+ *  station by that name. */
+SectionCapture.stationPosOf = function(doc, station) {
+    try {
+        var stations = CsTags.collectStations(doc);
+        for (var i = 0; i < stations.length; i++) {
+            if (stations[i].name === station) {
+                return { x: stations[i].pos.x, y: stations[i].pos.y };
+            }
+        }
+    } catch (e) {
+        // a drawing that cannot be read for stations simply has none
+    }
+    return null;
+};
+
+/**
+ * Everything the caver must be able to see while placing: the station
+ * the section hangs off, and the section itself at `position`, with
+ * the leader between them.
+ *
+ * `position` may be null -- a boxed-in station has no proposal -- and
+ * then the box is the station plus a section-sized allowance all round,
+ * so the click-to-place fallback still starts looking at the station
+ * rather than at the bay.
+ *
+ * \return {x1,y1,x2,y2} or null when the station is not on the drawing
+ */
+SectionCapture.placementBox = function(doc, bay, position) {
+    var at = SectionCapture.stationPosOf(doc, bay.station);
+    if (at === null) {
+        return null;
+    }
+    var origin = SectionCapture.originOf(bay);
+    var local = SectionCapture.localBoxOf(doc, bay, origin);
+    var w = Math.abs(local.x2 - local.x1);
+    var h = Math.abs(local.y2 - local.y1);
+    var box;
+    if (isNull(position)) {
+        // No proposal: allow for a section landing on any side.
+        var r = Math.max(w, h, 1) + CsSectionBay.MARGIN;
+        box = { x1: at.x - r, y1: at.y - r, x2: at.x + r, y2: at.y + r };
+    } else {
+        box = { x1: Math.min(at.x, position.x + local.x1),
+                y1: Math.min(at.y, position.y + local.y1),
+                x2: Math.max(at.x, position.x + local.x2),
+                y2: Math.max(at.y, position.y + local.y2) };
+    }
+    // A degenerate box (a single traced dot, say) zooms to nothing.
+    if (box.x2 - box.x1 < 1) { box.x1 -= 1; box.x2 += 1; }
+    if (box.y2 - box.y1 < 1) { box.y1 -= 1; box.y2 += 1; }
+    return box;
+};
+
+/**
+ * PUT THE STATION ON SCREEN BEFORE THE FIRST CLICK.
+ *
+ * The bay is framed off to one side of the plan -- SectionBay.zoomTo
+ * left the view sitting on it -- while the proposal lands beside the
+ * station the section was cut at, which is usually nowhere near. Every
+ * capture therefore began with the caver panning back across the plan
+ * by hand to find a preview they could not see, once per section drawn.
+ *
+ * Failure is survivable in both directions: a station that cannot be
+ * found, or a build that cannot zoom, leaves the view exactly where it
+ * was and the capture still works.
+ */
+SectionCapture.zoomToPlacement = function(doc, di, bay, position) {
+    try {
+        var box = SectionCapture.placementBox(doc, bay, position);
+        if (box === null || isNull(di)) {
+            return;
+        }
+        di.zoomTo(new RBox(new RVector(box.x1, box.y1),
+                           new RVector(box.x2, box.y2)), 40);
+    } catch (e) {
+        // a view that will not move is not a reason to refuse a capture
     }
 };
 
@@ -643,6 +718,9 @@ SectionCapture.captureNow = function(doc, di) {
     if (position === null) {
         position = SectionCapture.originOf(bay);
     }
+    // Before capture: the bay's traced entities are what size the box,
+    // and capture moves them into the block.
+    SectionCapture.zoomToPlacement(doc, di, bay, position);
     try {
         var id = SectionCapture.capture(doc, di, bay, position);
         if (id === null) {
