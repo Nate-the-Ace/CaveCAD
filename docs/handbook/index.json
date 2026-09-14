@@ -8,6 +8,23 @@
       "shots": []
     },
     {
+      "id": "start-here-tool",
+      "title": "Start Here",
+      "class": "tool",
+      "stage": 450,
+      "tools": [
+        "StartHere"
+      ],
+      "file": "start-here-tool.html",
+      "shots": [
+        {
+          "image": "start-here-panel.png",
+          "depicts": "scripts/CaveSurvey/StartHere/StartHere.js",
+          "hash": "3e5ac0b9698a2b95f5741725895f5aa22c916e4d0a74691fbc60317d146dd4fa"
+        }
+      ]
+    },
+    {
       "id": "handbook",
       "title": "Handbook",
       "class": "tool",

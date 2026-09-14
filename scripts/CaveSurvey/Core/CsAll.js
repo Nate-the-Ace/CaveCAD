@@ -213,3 +213,7 @@ include(includeBasePath + "/CsContrib.js");
 // Depends on nothing in this library: the handbook's index and page
 // lookups read files beside the add-on, not the drawing.
 include(includeBasePath + "/CsHandbook.js");
+
+// After CsHandbook: the lessons are the handbook's own process
+// pages, and the steps are lifted out of them.
+include(includeBasePath + "/CsGuide.js");

@@ -1663,6 +1663,7 @@ class TestAddonDoesNotPatchStockPrototypes(unittest.TestCase):
 # means five visible separators and no UI code of our own.
 MENU = {
     # 450 -- start here
+    "StartHere/StartHere.js":             (450, 5, ["starthere", "sh"]),
     "Handbook/Handbook.js":               (450, 10, ["handbook", "hb"]),
     "CaveShelf/CaveShelf.js":             (450, 20, ["caveshelf", "caves"]),
     "CaveTemplate/CaveTemplate.js":       (450, 30, ["newcavemap", "ncm"]),
@@ -1951,6 +1952,7 @@ class TestSheetFileGuard(unittest.TestCase):
         "SheetSetup": "refuses a sheet in readState, with its own words",
         "Cave3D": "opens a window onto the survey; draws no entity",
         "Handbook": "reads its own HTML pages; never the drawing",
+        "StartHere": "ticks a checklist in the settings; draws nothing",
     }
 
     def guarded(self, folder):

@@ -254,7 +254,10 @@ var CORE_FILES = [
     // The handbook index. Every lookup here is pure once the index is
     // in hand, and the tests hand it one -- rootPath/readText are the
     // QCAD half and are never CALLED from this file.
-    "scripts/CaveSurvey/Core/CsHandbook.js"
+    "scripts/CaveSurvey/Core/CsHandbook.js",
+    // The lessons as a checklist. stepsOf parses a page the tests
+    // hand it; nothing here touches a document.
+    "scripts/CaveSurvey/Core/CsGuide.js"
 ];
 for (var ci = 0; ci < CORE_FILES.length; ci++) {
     loadRepoScript(CORE_FILES[ci]);
@@ -27342,6 +27345,85 @@ eqs(CsSymbolStore.AREA_MARKER_TAGS.custom, "AreaCustom",
     ok(CsHandbook.cache === null && CsHandbook.bodies === null,
         "CsHandbook: forget() drops both caches, so a session that " +
             "edits a page can reread it");
+})();
+
+// ---------------------------------------------------------------------
+// CsGuide -- the lessons as a checklist.
+//
+// stepsOf reads a real file, so this suite writes one: a lesson page
+// with an ordered list to lift and a second list that must be left
+// alone. Progress goes through RSettings, which this engine has.
+// ---------------------------------------------------------------------
+
+(function() {
+    var root = QDir.tempPath() + "/cs_guide_" + (new Date()).getTime();
+    new QDir(root).mkpath("pages");
+    var page = root + "/pages/lesson-x.html";
+    var f = new QFile(page);
+    f.open(QIODevice.WriteOnly);
+    var out = new QTextStream(f);
+    out.writeString("<h1>Lesson X</h1><h2>Do this</h2><ol>" +
+        "<li>Open <b>Caves</b>.</li>" +
+        "<li>Read the trip table.</li>" +
+        "<li>Orbit the cave in <b>3D View</b>.</li>" +
+        "</ol><h2>If it goes wrong</h2><ol><li>Not a step.</li></ol>");
+    f.close();
+
+    CsHandbook.cache = {
+        root: root,
+        pages: [
+            { id: "start-here", title: "Start here", "class": "process",
+              file: "start-here.html" },
+            { id: "lesson-x", title: "Lesson X", "class": "process",
+              file: "lesson-x.html" },
+            { id: "lesson-y", title: "Lesson Y", "class": "process",
+              file: "lesson-y.html" }
+        ]
+    };
+    CsGuide.forget();
+
+    var lessons = CsGuide.lessons();
+    ok(lessons.length === 2 && lessons[0].id === "lesson-x",
+        "CsGuide: the welcome page is not a lesson -- it is read, not " +
+            "worked down");
+
+    var steps = CsGuide.stepsOf("lesson-x");
+    ok(steps.length === 3, "CsGuide: every step of the FIRST list is " +
+        "lifted, and the 'if it goes wrong' list is left alone");
+    ok(steps[0] === "Open Caves.", "CsGuide: a step comes out as the " +
+        "words, with the markup gone and no space left in front of the " +
+        "full stop the bold tag was next to");
+
+    ok(CsGuide.stepsOf("lesson-y").length === 0,
+        "CsGuide: a page that cannot be read answers no steps rather " +
+            "than throwing");
+
+    var p = CsGuide.progress("lesson-x");
+    ok(p.done === 0 && p.total === 3, "CsGuide: nothing is ticked yet");
+
+    CsGuide.setDone("lesson-x", 1, true);
+    ok(CsGuide.done("lesson-x")[1] === true,
+        "CsGuide: a tick survives being read back");
+    ok(CsGuide.progress("lesson-x").done === 1,
+        "CsGuide: and it counts");
+
+    CsGuide.setDone("lesson-x", 1, false);
+    ok(CsGuide.progress("lesson-x").done === 0,
+        "CsGuide: unticking counts too");
+
+    ok(CsGuide.resumeAt() === "lesson-x",
+        "CsGuide: an unfinished lesson is where a student resumes");
+    CsGuide.setDone("lesson-x", 0, true);
+    CsGuide.setDone("lesson-x", 1, true);
+    CsGuide.setDone("lesson-x", 2, true);
+    ok(CsGuide.resumeAt() === "lesson-y",
+        "CsGuide: a finished lesson sends them on -- and lesson-y has " +
+            "no steps, which counts as unfinished rather than done");
+
+    CsGuide.forget();
+    ok(CsGuide.progress("lesson-x").done === 0,
+        "CsGuide: starting over forgets every tick");
+    CsHandbook.forget();
 })();
 
 // ---------------------------------------------------------------------
