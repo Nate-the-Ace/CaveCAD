@@ -213,6 +213,7 @@ var CORE_FILES = [
     "scripts/CaveSurvey/Core/Format/CsSurvex.js",
     "scripts/CaveSurvey/Core/Format/CsCsv.js",
     "scripts/CaveSurvey/Core/Format/CsTherion.js",
+    "scripts/CaveSurvey/Core/Format/CsTherion2.js",
     "scripts/CaveSurvey/Core/Format/CsRegistry.js",
     // before CsRevise: moveLinework's per-vertex dispatch calls
     // CsWarp.mlsSimilarity when it runs
@@ -27425,6 +27426,221 @@ eqs(CsSymbolStore.AREA_MARKER_TAGS.custom, "AreaCustom",
         "CsGuide: starting over forgets every tick");
     CsHandbook.forget();
 })();
+
+// ---------------------------------------------------------------------
+// CsTherion2 -- the .th2 sketch reader
+// ---------------------------------------------------------------------
+(function() {
+    loadRepoScript("scripts/CaveSurvey/Core/Format/CsTherion.js");
+    loadRepoScript("scripts/CaveSurvey/Core/Format/CsTherion2.js");
+
+    // -- the small readers -------------------------------------------
+    eqs(CsTherion2.number("12.5"), 12.5, "CsTherion2.number: a decimal");
+    eqs(CsTherion2.number("-3"), -3, "CsTherion2.number: negative");
+    eqs(CsTherion2.number("12abc"), null,
+        "CsTherion2.number: refuses a number with a tail rather than " +
+        "reading 12 and putting a vertex where nobody drew one");
+    eqs(CsTherion2.number(undefined), null, "CsTherion2.number: undefined");
+
+    var opts = CsTherion2.options(["100", "-20", "wall", "-subtype",
+        "presumed", "-close", "on"]);
+    eqs(opts.words.length, 3, "CsTherion2.options: three positional words");
+    eqs(opts.words[1], "-20",
+        "CsTherion2.options: a negative number is a word, not a switch");
+    eqs(opts.opts.subtype, "presumed", "CsTherion2.options: -subtype");
+    eqs(opts.opts.close, "on", "CsTherion2.options: -close");
+    eqs(CsTherion2.options(["line", "-close"]).opts.close, "",
+        "CsTherion2.options: a trailing switch records empty, not dropped");
+
+    eqs(CsTherion2.bracket("[a b c]").length, 3, "CsTherion2.bracket: three");
+    eqs(CsTherion2.bracket("plain").length, 0,
+        "CsTherion2.bracket: unbracketed is not a group");
+
+    var scale = CsTherion2.scale("[0 0 100 0 0.0 0.0 50.0 0.0 ft]");
+    near(scale.unitsPerDrawing, 0.5, 1e-9,
+        "CsTherion2.scale: 100 scrap units over 50 ft is 0.5 ft per unit");
+    eqs(scale.unit, "ft", "CsTherion2.scale: the unit comes back");
+    near(CsTherion2.scale("2.5").unitsPerDrawing, 2.5, 1e-9,
+        "CsTherion2.scale: the bare-number dialect");
+    eqs(CsTherion2.scale("[0 0 0 0 0 0 5 0 m]"), null,
+        "CsTherion2.scale: a zero-length scrap span has no scale");
+    eqs(CsTherion2.scale(undefined), null, "CsTherion2.scale: absent");
+
+    eqs(CsTherion2.projection("plan").projection, "plan",
+        "CsTherion2.projection: the bare word");
+    eqs(CsTherion2.projection("[elevation 90]").projection, "elevation",
+        "CsTherion2.projection: the bracket form");
+    eqs(CsTherion2.projection("[elevation 90]").angle, 90,
+        "CsTherion2.projection: the bracket form carries its azimuth");
+    eqs(CsTherion2.projection("sideways").projection, null,
+        "CsTherion2.projection: an unknown projection is not guessed at");
+
+    var straight = CsTherion2.segment(["10", "-6"], false);
+    eqs(straight.c1, null, "CsTherion2.segment: two numbers is a straight run");
+    var curved = CsTherion2.segment(["1", "2", "3", "4", "5", "6"], false);
+    eqs(curved.to[0], 5, "CsTherion2.segment: a cubic ends at its last pair");
+    eqs(curved.c1[1], 2, "CsTherion2.segment: the first control point");
+    eqs(curved.c2[0], 3, "CsTherion2.segment: the second control point");
+    eqs(CsTherion2.segment(["1", "2", "3", "4", "5", "6"], true).c1, null,
+        "CsTherion2.segment: the first segment of a line has nothing to " +
+        "curve from, so its controls are dropped");
+    eqs(CsTherion2.segment(["smooth", "off"], false), null,
+        "CsTherion2.segment: a non-coordinate line is not a segment");
+
+    ok(CsTherion2.isOn(""), "CsTherion2.isOn: a bare switch means on");
+    ok(!CsTherion2.isOn("off"), "CsTherion2.isOn: off");
+
+    // -- the fixture --------------------------------------------------
+    var th2 = CsTherion2.parse(
+        readTextFile(repoRoot + "/testdata/PitfallCave.th2"));
+
+    function findingWithCode(model, code) {
+        for (var i = 0; i < model.findings.length; i++) {
+            if (model.findings[i].code === code) {
+                return model.findings[i];
+            }
+        }
+        return null;
+    }
+    function scrapNamed(model, name) {
+        for (var i = 0; i < model.scraps.length; i++) {
+            if (model.scraps[i].name === name) {
+                return model.scraps[i];
+            }
+        }
+        return null;
+    }
+
+    eqs(th2.scraps.length, 5,
+        "CsTherion2.parse: every scrap in the file is returned, including " +
+        "the ones whose projection is refused -- the report has to be " +
+        "able to name them");
+
+    ok(findingWithCode(th2, "th2-input") !== null,
+        "CsTherion2.parse: a split project is refused out loud");
+    ok(findingWithCode(th2, "th2-image") !== null,
+        "CsTherion2.parse: a pinned raster is reported, not imported");
+    ok(findingWithCode(th2, "th2-projected-elevation") !== null,
+        "CsTherion2.parse: a projected elevation is refused, because the " +
+        "suite's profile is an extended one");
+    ok(findingWithCode(th2, "th2-projection") !== null,
+        "CsTherion2.parse: an unknown projection is reported");
+    eqs(findingWithCode(th2, "th2-unclosed"), null,
+        "CsTherion2.parse: the fixture closes every scrap");
+
+    var plan = scrapNamed(th2, "plan1");
+    eqs(plan.projection, "plan", "CsTherion2.parse: the plan scrap");
+    near(plan.scale.unitsPerDrawing, 0.5, 1e-9,
+        "CsTherion2.parse: the scrap's own scale");
+
+    eqs(plan.stations.length, 4,
+        "CsTherion2.parse: four station ties, and they are NOT points");
+    eqs(plan.stations[0].name, "A1",
+        "CsTherion2.parse: the station keeps its survey name");
+    near(plan.stations[1].x, -28, 1e-9, "CsTherion2.parse: station x");
+    near(plan.stations[1].y, -50, 1e-9, "CsTherion2.parse: station y");
+
+    eqs(plan.sections.length, 1,
+        "CsTherion2.parse: a section reference is its own kind of thing");
+    eqs(plan.sections[0].scrap, "xs1",
+        "CsTherion2.parse: the section names the scrap it stands for -- " +
+        "the only tie a cross section scrap has to a place in the cave");
+
+    eqs(plan.points.length, 7,
+        "CsTherion2.parse: the drawing's own points, stations and " +
+        "sections having been taken out");
+    var stal = plan.points[0];
+    eqs(stal.type, "stalactite", "CsTherion2.parse: the point type");
+    eqs(stal.orientation, 45, "CsTherion2.parse: -orientation");
+    eqs(stal.scale, "l", "CsTherion2.parse: -scale on a point");
+    eqs(plan.points[1].orientation, null,
+        "CsTherion2.parse: a point with no -orientation has none, " +
+        "rather than a silent zero");
+    eqs(plan.points[3].text, "684.6",
+        "CsTherion2.parse: an altitude's -value is its text");
+    eqs(plan.points[4].text, "GOES, TOO TIGHT FOR DAVE",
+        "CsTherion2.parse: a quoted -text survives the tokenizer whole");
+    eqs(plan.points[6].type, "u:bolt-hanger",
+        "CsTherion2.parse: a user-defined point type is kept, not dropped");
+
+    eqs(plan.lines.length, 7, "CsTherion2.parse: seven line blocks");
+    var wall = plan.lines[0];
+    eqs(wall.type, "wall", "CsTherion2.parse: the line type");
+    eqs(wall.id, "leftwall", "CsTherion2.parse: -id");
+    eqs(wall.segs.length, 4, "CsTherion2.parse: four segments");
+    eqs(wall.segs[0].c1, null,
+        "CsTherion2.parse: the start point carries no controls");
+    eqs(wall.segs[2].c1[0], -30,
+        "CsTherion2.parse: the cubic's controls survive the read");
+    near(wall.segs[2].to[1], -90, 1e-9,
+        "CsTherion2.parse: the cubic ends at its last pair");
+
+    eqs(plan.lines[1].subtype, "presumed", "CsTherion2.parse: -subtype");
+    eqs(plan.lines[2].subtype, "invisible",
+        "CsTherion2.parse: an invisible wall is read and left for the " +
+        "mapping to decide about");
+    ok(plan.lines[3].closed,
+        "CsTherion2.parse: -close on its own line inside the block still " +
+        "reaches the line");
+    eqs(plan.lines[6].type, "u:handline",
+        "CsTherion2.parse: a user-defined line type is kept");
+
+    eqs(plan.areas.length, 1, "CsTherion2.parse: one area");
+    eqs(plan.areas[0].type, "water", "CsTherion2.parse: the area type");
+    eqs(plan.areas[0].lineIds[0], "pool",
+        "CsTherion2.parse: an area names its boundary lines by id");
+
+    var ext = scrapNamed(th2, "ext1");
+    eqs(ext.projection, "extended", "CsTherion2.parse: the extended scrap");
+    eqs(ext.stations.length, 3, "CsTherion2.parse: extended station ties");
+    var xs = scrapNamed(th2, "xs1");
+    eqs(xs.projection, "none",
+        "CsTherion2.parse: a cross section is drawn in no projection");
+    eqs(xs.stations.length, 0,
+        "CsTherion2.parse: a cross section carries no station ties, which " +
+        "is why it cannot be warped");
+    eqs(scrapNamed(th2, "elev1").projection, "elevation",
+        "CsTherion2.parse: the refused scrap still says what it was");
+    eqs(scrapNamed(th2, "odd1").projection, null,
+        "CsTherion2.parse: an unreadable projection is null, not guessed");
+
+    // -- degenerate files ---------------------------------------------
+    var empty = CsTherion2.parse("");
+    eqs(empty.scraps.length, 0, "CsTherion2.parse: an empty file");
+    ok(findingWithCode(empty, "th2-empty") !== null,
+        "CsTherion2.parse: an empty file says so rather than returning null");
+
+    var noScraps = CsTherion2.parse("encoding utf-8\n");
+    ok(findingWithCode(noScraps, "th2-no-scraps") !== null,
+        "CsTherion2.parse: a file with no scrap in it says so");
+
+    var unclosed = CsTherion2.parse(
+        "scrap s1 -projection plan\n\tline wall\n\t\t0 0\n\t\t10 10\n");
+    eqs(unclosed.scraps.length, 1,
+        "CsTherion2.parse: a missing endscrap keeps the scrap rather than " +
+        "dropping a whole sketch over one line");
+    eqs(unclosed.scraps[0].lines.length, 1,
+        "CsTherion2.parse: a missing endline keeps the line too");
+    ok(findingWithCode(unclosed, "th2-unclosed") !== null,
+        "CsTherion2.parse: and says so");
+
+    var defaulted = CsTherion2.parse("scrap s1\n\tline wall\n\t\t0 0\n" +
+        "\t\t1 1\n\tendline\nendscrap\n");
+    eqs(defaulted.scraps[0].projection, "plan",
+        "CsTherion2.parse: a scrap declaring no projection is a plan, " +
+        "which is Therion's own default and nearly every phone sketch");
+
+    var noName = CsTherion2.parse(
+        "scrap s1 -projection plan\n\tpoint 0 0 station\nendscrap\n");
+    eqs(noName.scraps[0].stations.length, 0,
+        "CsTherion2.parse: a station marker naming no station ties " +
+        "nothing, and is not a symbol either");
+
+    var commented = CsTherion2.parse("scrap s1 -projection plan # here\n" +
+        "\tpoint 0 0 stalactite  # a big one\nendscrap\n");
+    eqs(commented.scraps[0].points.length, 1,
+        "CsTherion2.parse: a trailing comment does not eat the point");
+}());
 
 // ---------------------------------------------------------------------
 // Report.
