@@ -1684,6 +1684,8 @@ MENU = {
     "CrossSection/CrossSection.js":       (452, 40, ["crosssection", "cxs"]),
     # 453 -- put a reference under the map
     "SketchScans/SketchScans.js":         (453, 10, ["sketchscans", "ss"]),
+    "EntranceLocation/EntranceLocation.js": (453, 15,
+                                          ["entrancelocation", "el"]),
     "SurfaceData/SurfaceData.js":         (453, 20, ["surfacedata", "sd"]),
     # 454 -- finish the sheet
     "SheetSetup/SheetSetup.js":           (454, 5, ["sheetsetup", "sheet"]),
@@ -1935,7 +1937,7 @@ class TestSheetFileGuard(unittest.TestCase):
         "DrawPanel", "FeatureTrace", "GenerateProfile", "ImportCaveSurvey",
         "LoopErrors", "RepairDrawing", "ScatterBreakdown", "ShapedLines",
         "SketchScans", "SurfaceData", "SurveyNotebook", "SymbolPalette",
-        "ResetDrawing",
+        "ResetDrawing", "EntranceLocation",
     ]
 
     # Tools that only READ, and are welcome on a sheet: checking a sheet

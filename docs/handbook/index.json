@@ -258,6 +258,17 @@
       ]
     },
     {
+      "id": "entrance-location",
+      "title": "Entrance Location",
+      "class": "tool",
+      "file": "entrance-location.html",
+      "stage": 453,
+      "tools": [
+        "EntranceLocation"
+      ],
+      "shots": []
+    },
+    {
       "id": "surface-data",
       "title": "Surface Data",
       "class": "tool",
@@ -573,42 +584,42 @@
     },
     {
       "id": "lesson-1",
-      "title": "Lesson 1 — Your first cave map",
+      "title": "Lesson 1 \u2014 Your first cave map",
       "class": "process",
       "file": "lesson-1.html",
       "shots": []
     },
     {
       "id": "lesson-2",
-      "title": "Lesson 2 — Typing a trip into the notebook",
+      "title": "Lesson 2 \u2014 Typing a trip into the notebook",
       "class": "process",
       "file": "lesson-2.html",
       "shots": []
     },
     {
       "id": "lesson-3",
-      "title": "Lesson 3 — Drawing walls over a scan",
+      "title": "Lesson 3 \u2014 Drawing walls over a scan",
       "class": "process",
       "file": "lesson-3.html",
       "shots": []
     },
     {
       "id": "lesson-4",
-      "title": "Lesson 4 — Sections and the profile",
+      "title": "Lesson 4 \u2014 Sections and the profile",
       "class": "process",
       "file": "lesson-4.html",
       "shots": []
     },
     {
       "id": "lesson-5",
-      "title": "Lesson 5 — Reading the map for faults",
+      "title": "Lesson 5 \u2014 Reading the map for faults",
       "class": "process",
       "file": "lesson-5.html",
       "shots": []
     },
     {
       "id": "lesson-6",
-      "title": "Lesson 6 — Sharing it",
+      "title": "Lesson 6 \u2014 Sharing it",
       "class": "process",
       "file": "lesson-6.html",
       "shots": []

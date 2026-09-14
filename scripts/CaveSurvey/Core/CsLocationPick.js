@@ -422,3 +422,268 @@ CsLocationPick.datumOffset = function(doc, unit) {
     return CsElevation.datumOffset(rec.elev,
         CsTags.getNumber(rec.entity, "Elevation"), unit);
 };
+
+/**
+ * Stores the drawing's entrance location on one station, replacing any
+ * anchor that was there before.
+ *
+ * ONE ANCHOR PER DRAWING. Every other station carrying geo tags is
+ * stripped first -- two anchors disagreeing about where a cave is
+ * would be read by whichever one queryAllEntities happened to hand
+ * back first, and that order is not stable.
+ *
+ * GeoDrawX/Y record the DRAWING position the coordinate was pinned at,
+ * so a station dragged over the imagery later can have its coordinate
+ * recomputed rather than silently keeping a stale one (see
+ * resolveMovedAnchor).
+ *
+ * \param entity the station point to anchor to
+ * \param coord  {lat, lon}
+ * \param elevM  ground elevation in METRES NAVD88, or null when it
+ *               could not be looked up -- null is UNKNOWN, and is
+ *               written as no tag at all rather than as a zero
+ * \return true
+ */
+CsLocationPick.writeAnchor = function(doc, di, entity, coord, elevM) {
+    CsLocationPick.clearAnchor(doc, di, entity);
+
+    var tags = {
+        GeoLat: coord.lat,
+        GeoLon: coord.lon,
+        GeoStation: CsTags.get(entity, "Station")
+    };
+    if (typeof entity.getPosition === "function") {
+        var pos = entity.getPosition();
+        tags.GeoDrawX = pos.x;
+        tags.GeoDrawY = pos.y;
+    }
+    if (elevM !== null && elevM !== undefined && isFinite(elevM)) {
+        tags.GeoElev = elevM;
+    }
+    CsTags.commit(di, entity, tags);
+    CsLocationPick.remember(coord);
+    return true;
+};
+
+/**
+ * Takes the geo tags off every station except `keep` (pass null to
+ * clear the drawing's location entirely).
+ *
+ * The grid fetched for the old location is NOT deleted: it is a file
+ * beside the drawing, and deleting a caver's files as a side effect of
+ * moving a pin is not this function's business. It is stale, though,
+ * and the surface will not draw until Surface Data has been run again
+ * -- which is what the 3D panel's own "run Surface Data" line says.
+ *
+ * \return how many stations were cleared.
+ */
+CsLocationPick.clearAnchor = function(doc, di, keep) {
+    var cleared = 0;
+    var ids = doc.queryAllEntities(false, false);
+    for (var i = 0; i < ids.length; i++) {
+        var e = doc.queryEntity(ids[i]);
+        if (isNull(e)) {
+            continue;
+        }
+        if (keep !== null && keep !== undefined &&
+                e.getId() === keep.getId()) {
+            continue;
+        }
+        var carries = false;
+        for (var t = 0; t < CsPackage.GEO_TAGS.length; t++) {
+            var v = CsTags.get(e, CsPackage.GEO_TAGS[t]);
+            if (v !== null && v !== undefined && v !== "") {
+                carries = true;
+            }
+        }
+        // GeoDrawX/Y are NOT in GEO_TAGS -- that list is what
+        // sanitizing strips, and a drawing position is not a location.
+        // Moving the pin still has to clear them, or the new anchor
+        // inherits the old one's pinned position and every later
+        // "has this station moved?" check answers about the wrong spot.
+        if (!carries && CsTags.get(e, "GeoDrawX") === "") {
+            continue;
+        }
+        for (var r = 0; r < CsPackage.GEO_TAGS.length; r++) {
+            CsTags.remove(e, CsPackage.GEO_TAGS[r]);
+        }
+        CsTags.remove(e, "GeoDrawX");
+        CsTags.remove(e, "GeoDrawY");
+        var op = new RModifyObjectsOperation();
+        op.addObject(e, false);
+        di.applyOperation(op);
+        cleared++;
+    }
+    return cleared;
+};
+
+/** The surface's own layers: everything Surface Data drew, which is
+ *  fixed to the WORLD rather than to the survey and therefore never
+ *  moves when the cave is nudged into place over it. */
+CsLocationPick.SURFACE_LAYERS = ["CTRL-AERIAL", "CTRL-CONTOUR",
+    "CTRL-CONTOUR-MAJOR"];
+
+/** True when this entity belongs to the surface rather than the cave.
+ *  Tag first, layer second: the tags are what a re-run looks for, and
+ *  the layers catch anything drawn by an older build. */
+CsLocationPick.isSurfaceEntity = function(entity) {
+    if (CsTags.get(entity, "SurfaceContours") === "1" ||
+            CsTags.get(entity, "AerialBasemap") === "1") {
+        return true;
+    }
+    var layer = "";
+    try {
+        layer = entity.getLayerName();
+    } catch (e) {
+        return false;
+    }
+    return CsLocationPick.SURFACE_LAYERS.indexOf(layer) >= 0;
+};
+
+/**
+ * The lowest surface contour vertex within `radius` of a point, or
+ * null when no contour passes near enough.
+ *
+ * WHY THE LOWEST. A cave entrance is usually at the bottom of
+ * something -- a sink, a swallet, the foot of a bluff -- and on an
+ * aerial photograph that bottom is a shape you can see but not a point
+ * you can click accurately. The contours already say which way is
+ * down, so the click only has to be close.
+ *
+ * Reads the ContourElevation tag, in DRAWING UNITS, as Surface Data
+ * wrote it. A contour with no readable elevation is skipped rather
+ * than assumed to be at zero.
+ *
+ * \return {x, y, elevation} or null
+ */
+CsLocationPick.lowPointNear = function(doc, point, radius) {
+    var best = null;
+    var ids = doc.queryAllEntities(false, true);
+    for (var i = 0; i < ids.length; i++) {
+        var e = doc.queryEntity(ids[i]);
+        if (isNull(e) || CsTags.get(e, "SurfaceContours") !== "1") {
+            continue;
+        }
+        var elev = CsTags.getNumber(e, "ContourElevation");
+        if (elev === null) {
+            continue;
+        }
+        var shape = null;
+        try {
+            shape = e.getData().castToShape();
+        } catch (eShape) {
+            continue;
+        }
+        if (shape === null || isNull(shape) ||
+                typeof shape.getClosestPointOnShape !== "function") {
+            continue;
+        }
+        var near = shape.getClosestPointOnShape(point, true);
+        if (isNull(near)) {
+            continue;
+        }
+        var d = point.getDistanceTo(near);
+        if (d > radius) {
+            continue;
+        }
+        // Lowest wins; a tie goes to the nearer one, so a click
+        // between two runs of the same contour lands where it was
+        // aimed.
+        if (best === null || elev < best.elevation ||
+                (elev === best.elevation && d < best.distance)) {
+            best = { x: near.x, y: near.y, elevation: elev, distance: d };
+        }
+    }
+    return best;
+};
+
+/**
+ * Slides the whole cave so that `station` lands on `point`.
+ *
+ * THE SURVEY MOVES AS ONE RIGID PIECE. Every entity in the drawing
+ * moves by the same offset -- linework, symbols, scans, the profile
+ * region, captured sections, the lot -- so nothing internal to the
+ * drawing changes its relationship to anything else. The only things
+ * left behind are the SURFACE's own entities, which are pinned to the
+ * world rather than to the cave: moving those too would move the
+ * photograph with the cave and achieve exactly nothing.
+ *
+ * LAYERS THAT WOULD REFUSE ARE OPENED FIRST. Off, frozen and locked
+ * layers all swallow a modify without a word in this build, and a
+ * half-moved drawing -- the cave shifted, its scans left behind -- is
+ * far worse than a refusal.
+ *
+ * \return how many entities moved
+ */
+CsLocationPick.moveSurvey = function(doc, di, offset) {
+    var ids = doc.queryAllEntities(false, true);
+    var moving = [];
+    var layerNames = {};
+    for (var i = 0; i < ids.length; i++) {
+        var e = doc.queryEntity(ids[i]);
+        if (isNull(e) || CsLocationPick.isSurfaceEntity(e)) {
+            continue;
+        }
+        moving.push(e);
+        try {
+            layerNames[e.getLayerName()] = true;
+        } catch (eLayer) {
+        }
+    }
+    if (moving.length === 0) {
+        return 0;
+    }
+
+    var names = [];
+    for (var n in layerNames) {
+        if (layerNames.hasOwnProperty(n)) {
+            names.push(n);
+        }
+    }
+
+    // withLayerUnlocked takes one layer, so the locked ones are opened
+    // by recursing through the list and doing the work at the bottom.
+    var apply = function() {
+        var op = new RModifyObjectsOperation();
+        for (var m = 0; m < moving.length; m++) {
+            moving[m].move(offset);
+            op.addObject(moving[m], false);
+        }
+        di.applyOperation(op);
+        return moving.length;
+    };
+    var unlockThen = function(index) {
+        if (index >= names.length) {
+            return apply();
+        }
+        return CsLayers.withLayerUnlocked(doc, di, names[index],
+            function() {
+                return unlockThen(index + 1);
+            });
+    };
+
+    return CsLayers.withLayersOn(doc, di, names, function() {
+        return unlockThen(0);
+    });
+};
+
+/**
+ * What the anchor's coordinate becomes once its station has been moved
+ * over georeferenced imagery: the latitude/longitude of where it now
+ * sits, read through the frame the old coordinate was pinned in.
+ *
+ * NEEDS A PINNED FRAME (GeoDrawX/Y). A drawing georeferenced before
+ * those tags existed has no way to say what ground a drawing point
+ * covers, and this returns null rather than inventing one.
+ *
+ * \return {lat, lon} or null
+ */
+CsLocationPick.coordAtPoint = function(doc, point, unit) {
+    var rec = CsLocationPick.anchorRecord(doc);
+    if (rec === null || rec.pinX === null || rec.pinY === null) {
+        return null;
+    }
+    return CsGeoProject.latLonAtDrawingPoint(
+        { x: point.x, y: point.y },
+        { lat: rec.lat, lon: rec.lon, x: rec.pinX, y: rec.pinY }, unit);
+};

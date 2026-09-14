@@ -250,6 +250,54 @@ CsSurfaceData.fetch = function(url, path) {
 // with anything else the engine loads into the global scope.
 CsSurfaceData.TIMEOUT_S = 60;
 
+/**
+ * The ground elevation at ONE coordinate, in metres NAVD88, or null.
+ *
+ * The same 3DEP service the contour pass uses, asked for the smallest
+ * window it will serve rather than a whole survey's worth of ground:
+ * this exists so setting an entrance location can store the drawing's
+ * datum anchor (GeoElev) straight away, without the caver having to run
+ * a full imagery-and-contours fetch to get one number.
+ *
+ * NO DIALOG, EVER. It returns null on every failure -- no network, no
+ * coverage, an unreadable reply -- and the caller says what that means
+ * in its own words. A location is still worth storing when the
+ * elevation lookup fails.
+ */
+CsSurfaceData.GROUND_WINDOW_M = 200;
+
+CsSurfaceData.groundElevationAt = function(lat, lon) {
+    if (lat === null || lat === undefined || lon === null ||
+            lon === undefined) {
+        return null;
+    }
+    var extent = { width: CsSurfaceData.GROUND_WINDOW_M,
+                   height: CsSurfaceData.GROUND_WINDOW_M };
+    var bbox = CsGeoProject.mercatorBbox(lat, lon, extent, null);
+    var size = CsGeoProject.pixelSize(bbox, CsGeoProject.DEM_NATIVE_RES_M,
+        CsGeoProject.DEM_MAX_PX, CsGeoProject.DEM_MIN_PX);
+
+    var path = QDir.tempPath() + "/cavecad-point-elevation.tif";
+    if (CsSurfaceData.fetch(CsGeoProject.demUrl(bbox, size), path) !== true) {
+        return null;
+    }
+    var grid;
+    try {
+        grid = CsContour.parseFloatTiff(CsSurfaceData.readBinary(path));
+    } catch (e) {
+        QFile.remove(path);
+        return null;
+    }
+    QFile.remove(path);
+
+    // The coordinate is the middle of the window by construction, so
+    // the reading wanted is the middle of the grid.
+    var at = CsGeoProject.anchorGridCoord(bbox, grid.width, grid.height,
+        lat, lon);
+    return CsContour.sampleAt(grid.values, grid.width, grid.height,
+        at.col, at.row);
+};
+
 // ============================================================
 // Aerial imagery pass (formerly the standalone Aerial Basemap tool).
 // ============================================================
