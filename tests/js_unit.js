@@ -28335,6 +28335,118 @@ eqs(CsSymbolStore.AREA_MARKER_TAGS.custom, "AreaCustom",
 }());
 
 // ---------------------------------------------------------------------
+// CsCalibrate -- how big a legacy map is, and which way it faces
+// ---------------------------------------------------------------------
+(function() {
+    loadRepoScript("scripts/CaveSurvey/Core/CsUnits.js");
+    loadRepoScript("scripts/CaveSurvey/Core/CsScanFit.js");
+    loadRepoScript("scripts/CaveSurvey/Core/CsCalibrate.js");
+
+    function P(x, y) { return { x: x, y: y }; }
+
+    // -- unscaled is a real answer ------------------------------------
+    var none = CsCalibrate.unscaled();
+    eqs(none.scaled, false, "CsCalibrate.unscaled: claims no scale");
+    eqs(none.evidence, CsCalibrate.NONE, "CsCalibrate.unscaled: and says so");
+    ok(CsCalibrate.describe(none).indexOf("No length") !== -1,
+        "CsCalibrate.describe: an unscaled map says no length can be " +
+        "quoted from it");
+
+    // -- one distance --------------------------------------------------
+    var bar = CsCalibrate.fromDistance(P(0, 0), P(100, 0), 50, "ft", "ft",
+        CsCalibrate.SCALEBAR);
+    ok(bar.scaled, "CsCalibrate.fromDistance: a scale bar scales the map");
+    near(bar.scale, 0.5, 1e-9,
+        "CsCalibrate.fromDistance: 100 source units over 50 ft");
+    eqs(bar.evidence, CsCalibrate.SCALEBAR,
+        "CsCalibrate.fromDistance: WHICH evidence it was is recorded -- a " +
+        "printed bar and somebody's memory give the same kind of number " +
+        "and are not worth the same");
+
+    var metric = CsCalibrate.fromDistance(P(0, 0), P(100, 0), 10, "m", "ft");
+    near(metric.scale, CsUnits.convert(10, "m", "ft") / 100, 1e-9,
+        "CsCalibrate.fromDistance: the stated unit is converted to the " +
+        "drawing's");
+
+    ok(!CsCalibrate.fromDistance(P(5, 5), P(5, 5), 50, "ft", "ft").scaled,
+        "CsCalibrate.fromDistance: two picks in the same place say " +
+        "nothing about size");
+    ok(!CsCalibrate.fromDistance(P(0, 0), P(10, 0), 0, "ft", "ft").scaled,
+        "CsCalibrate.fromDistance: a distance of zero scales nothing");
+
+    // -- several distances ----------------------------------------------
+    var agree = CsCalibrate.fromDistances([
+        { a: P(0, 0), b: P(100, 0), stated: 50, unit: "ft" },
+        { a: P(0, 0), b: P(200, 0), stated: 100, unit: "ft" },
+        { a: P(0, 0), b: P(40, 0), stated: 20, unit: "ft" }
+    ], "ft");
+    near(agree.scale, 0.5, 1e-9,
+        "CsCalibrate.fromDistances: three agreeing numbers");
+    near(agree.spread, 0, 1e-9, "CsCalibrate.fromDistances: no disagreement");
+    eqs(agree.warnings.length, 0, "CsCalibrate.fromDistances: and no fuss");
+
+    // One badly picked pair: the median ignores it, a mean would not.
+    var outlier = CsCalibrate.fromDistances([
+        { a: P(0, 0), b: P(100, 0), stated: 50, unit: "ft" },
+        { a: P(0, 0), b: P(100, 0), stated: 51, unit: "ft" },
+        { a: P(0, 0), b: P(100, 0), stated: 200, unit: "ft" }
+    ], "ft");
+    near(outlier.scale, 0.51, 1e-9,
+        "CsCalibrate.fromDistances: the MEDIAN, so one badly picked pair " +
+        "does not drag the scale -- with scribbled field numbers a " +
+        "single bad one is the likely failure, not a spread of small " +
+        "errors");
+    ok(outlier.spread > CsCalibrate.SPREAD_WARN,
+        "CsCalibrate.fromDistances: and the disagreement is measured");
+    ok(outlier.warnings.length > 0,
+        "CsCalibrate.fromDistances: and SHOWN -- handing back the middle " +
+        "with no comment would bury the one fact the caver can act on");
+    ok(CsCalibrate.describe(outlier).indexOf("disagree") !== -1,
+        "CsCalibrate.describe: the disagreement reaches the reader too");
+
+    ok(!CsCalibrate.fromDistances([], "ft").scaled,
+        "CsCalibrate.fromDistances: nothing given, nothing claimed");
+    ok(!CsCalibrate.fromDistances(null, "ft").scaled,
+        "CsCalibrate.fromDistances: and null is not a crash");
+
+    // -- known points ----------------------------------------------------
+    // The source is drawn at half size and turned a quarter turn.
+    var tied = CsCalibrate.fromPoints([
+        { source: P(0, 0), dest: P(100, 200) },
+        { source: P(80, 0), dest: P(100, 240) },
+        { source: P(80, -80), dest: P(140, 240) }
+    ]);
+    ok(tied.scaled, "CsCalibrate.fromPoints: known points scale the map");
+    eqs(tied.evidence, CsCalibrate.POINTS, "CsCalibrate.fromPoints: evidence");
+    ok(tied.matrix !== undefined && tied.matrix !== null,
+        "CsCalibrate.fromPoints: and carry a full transform -- the only " +
+        "evidence that fixes rotation and POSITION as well as scale, " +
+        "which is what makes a source TIED");
+    ok(tied.northDeg !== null,
+        "CsCalibrate.fromPoints: north falls out of the fit");
+    near(tied.residual.worst, 0, 1e-6,
+        "CsCalibrate.fromPoints: an exact fit misses by nothing, and the " +
+        "residual is reported rather than assumed away");
+
+    ok(!CsCalibrate.fromPoints([{ source: P(1, 1), dest: P(5, 5) }]).scaled,
+        "CsCalibrate.fromPoints: ONE point is not enough -- a single " +
+        "GPS'd entrance says where the cave is and nothing about how big " +
+        "it is or which way it faces");
+
+    // -- north from the map's own arrow -------------------------------------
+    near(CsCalibrate.northFromArrow(P(0, 0), P(0, 10)), 0, 1e-9,
+        "CsCalibrate.northFromArrow: an arrow already pointing up the " +
+        "page needs no turn, which is how a drafted cave map nearly " +
+        "always is");
+    near(CsCalibrate.northFromArrow(P(0, 0), P(10, 0)), 270, 1e-9,
+        "CsCalibrate.northFromArrow: an arrow pointing right needs the " +
+        "map turned to put it up");
+    eqs(CsCalibrate.northFromArrow(P(3, 3), P(3, 3)), null,
+        "CsCalibrate.northFromArrow: two picks in the same place give no " +
+        "direction");
+}());
+
+// ---------------------------------------------------------------------
 // Report.
 // ---------------------------------------------------------------------
 

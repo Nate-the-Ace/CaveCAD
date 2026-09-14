@@ -121,6 +121,9 @@ include(includeBasePath + "/CsShapeLine.js");
 // How much a piece of this map is worth trusting. Pure, and no
 // dependencies: every other file may read it.
 include(includeBasePath + "/CsProvenance.js");
+// How big a legacy map is and which way it faces. After CsScanFit
+// (the point fit is its) and CsUnits.
+include(includeBasePath + "/CsCalibrate.js");
 include(includeBasePath + "/CsSketch.js");
 // After CsShapeLine (a shaped line is erased whole, spine and ornament)
 // and CsTrace (docKey, and the pick distance is TIE_FEET's twin).
