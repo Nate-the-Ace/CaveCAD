@@ -278,6 +278,13 @@ for (var ci = 0; ci < CORE_FILES.length; ci++) {
 // testing a library that does not contain it: the decision has to be
 // written down either way. See the harness-traps note.
 var CORE_FILES_NOT_LOADED = [
+    // Every function takes a real RDocument and an
+    // RDocumentInterface: it writes entities through CsTrace.addCurve,
+    // CsShapeLine.dress, CsArea.create and CsSymbols.insert, which is
+    // the whole point of it -- an imported wall has to go in through
+    // the same doors a traced one does. Covered by
+    // tests/sketch_import_run.js.
+    "scripts/CaveSurvey/Core/CsSketchDraw.js",
     // The include manifest itself -- it is the list, not a member of
     // it, and loadRepoScript strips the include() lines that are its
     // entire content.

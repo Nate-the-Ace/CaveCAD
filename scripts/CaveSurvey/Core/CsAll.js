@@ -141,6 +141,10 @@ include(includeBasePath + "/CsWarp.js");
 // CsWarp the bend, so it sits after both -- though it calls them only
 // when it runs, never at load.
 include(includeBasePath + "/CsSketchPlace.js");
+// The write half: after CsTrace, CsShapeLine, CsArea, CsSymbols and
+// CsDraw, whose doors it writes through so an imported wall IS a
+// traced wall.
+include(includeBasePath + "/CsSketchDraw.js");
 
 // A scanned sketch laid onto the passage. After CsWarp, whose
 // inverse-square weighting it follows.
