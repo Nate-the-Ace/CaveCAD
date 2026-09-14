@@ -137,6 +137,10 @@ include(includeBasePath + "/CsBind.js");
 include(includeBasePath + "/CsFocus.js");
 include(includeBasePath + "/CsDraw.js");
 include(includeBasePath + "/CsWarp.js");
+// Landing a Therion scrap on the survey: CsScanFit does the fit and
+// CsWarp the bend, so it sits after both -- though it calls them only
+// when it runs, never at load.
+include(includeBasePath + "/CsSketchPlace.js");
 
 // A scanned sketch laid onto the passage. After CsWarp, whose
 // inverse-square weighting it follows.

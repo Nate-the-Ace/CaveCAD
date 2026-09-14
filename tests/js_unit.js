@@ -27826,6 +27826,179 @@ eqs(CsSymbolStore.AREA_MARKER_TAGS.custom, "AreaCustom",
 }());
 
 // ---------------------------------------------------------------------
+// CsSketchPlace -- landing a Therion scrap on the survey
+// ---------------------------------------------------------------------
+(function() {
+    loadRepoScript("scripts/CaveSurvey/Core/CsScanFit.js");
+    loadRepoScript("scripts/CaveSurvey/Core/CsRevise.js");
+    loadRepoScript("scripts/CaveSurvey/Core/CsWarp.js");
+    loadRepoScript("scripts/CaveSurvey/Core/CsSketchPlace.js");
+
+    function scrapWith(stations, scale) {
+        return { name: "s", projection: "plan", scale: scale,
+            stations: stations, lines: [], areas: [], points: [],
+            sections: [] };
+    }
+    function st(name, x, y) { return { name: name, x: x, y: y }; }
+
+    // A known transform: the scrap is drawn at half size, turned 90
+    // degrees and shifted, so a correct fit recovers exactly that.
+    var targets = {
+        "A1": { x: 100, y: 200 },
+        "A2": { x: 100, y: 240 },
+        "A3": { x: 140, y: 240 }
+    };
+    var scrap = scrapWith([st("A1", 0, 0), st("A2", 80, 0),
+        st("A3", 80, -80)], { unitsPerDrawing: 0.5, unit: "ft" });
+
+    var solved = CsSketchPlace.solve(scrap, targets, {});
+    ok(solved.ok, "CsSketchPlace.solve: three ties place the scrap");
+    eqs(solved.kind, "affine",
+        "CsSketchPlace.solve: three ties allow the stretch and skew out");
+    eqs(solved.used, 3, "CsSketchPlace.solve: three ties used");
+    eqs(solved.missing.length, 0, "CsSketchPlace.solve: none missing");
+    near(solved.residual.worst, 0, 1e-6,
+        "CsSketchPlace.solve: an exact three-point fit misses by nothing");
+
+    var a1 = CsSketchPlace.at(solved, 0, 0);
+    near(a1.x, 100, 1e-6, "CsSketchPlace.at: A1 lands on A1 (x)");
+    near(a1.y, 200, 1e-6, "CsSketchPlace.at: A1 lands on A1 (y)");
+    var a3 = CsSketchPlace.at(solved, 80, -80);
+    near(a3.x, 140, 1e-6, "CsSketchPlace.at: A3 lands on A3 (x)");
+    near(a3.y, 240, 1e-6, "CsSketchPlace.at: A3 lands on A3 (y)");
+
+    // -- the warp is what makes a MOVED station land ------------------
+    // THE FOURTH STATION IS WHERE THE WARP STARTS EARNING ITS KEEP. An
+    // affine has six unknowns and three pairs give it six equations, so
+    // a three-tie fit passes exactly through all three whatever the
+    // survey has done since -- there is nothing left for a warp to
+    // correct. From the fourth tie on the fit is a compromise, and the
+    // difference between "close" and "on the station" is the warp.
+    var fourScrap = scrapWith([st("A1", 0, 0), st("A2", 80, 0),
+        st("A3", 80, -80), st("A4", 0, -80)], null);
+    // A4 has been pulled off where an affine through the others would
+    // put it -- exactly what a loop closure adjustment does.
+    var moved = {
+        "A1": { x: 100, y: 200 },
+        "A2": { x: 100, y: 240 },
+        "A3": { x: 140, y: 240 },
+        "A4": { x: 146, y: 203 }
+    };
+    var bent = CsSketchPlace.solve(fourScrap, moved, {});
+    ok(bent.warp !== null, "CsSketchPlace.solve: four ties can be warped");
+    ok(bent.residual.worst > 1,
+        "CsSketchPlace.solve: the fit alone cannot reach a station the " +
+        "adjustment moved, and the residual says by how far");
+
+    var atA4 = CsSketchPlace.at(bent, 0, -80);
+    near(atA4.x, 146, 1e-6,
+        "CsSketchPlace.at: the warp puts a station marker exactly on its " +
+        "station, however far the adjustment moved it");
+    near(atA4.y, 203, 1e-6, "CsSketchPlace.at: and in y");
+    var atA1 = CsSketchPlace.at(bent, 0, 0);
+    near(atA1.x, 100, 1e-6,
+        "CsSketchPlace.at: and does not disturb the ones that already fit");
+    near(atA1.y, 200, 1e-6, "CsSketchPlace.at: in y too");
+
+    // The residual is the PRE-warp figure: see this block's header for
+    // why quoting the post-warp one would be a lie every time.
+    var exactThree = CsSketchPlace.solve(scrap, targets, {});
+    near(exactThree.residual.worst, 0, 1e-6,
+        "CsSketchPlace.solve: a three-tie affine is exact, so its warp " +
+        "has nothing to do -- the honest residual is zero and says so");
+
+    // -- two ties ------------------------------------------------------
+    var twoTie = CsSketchPlace.solve(
+        scrapWith([st("A1", 0, 0), st("A3", 80, -80)], null), targets, {});
+    eqs(twoTie.kind, "similarity",
+        "CsSketchPlace.solve: two ties keep the sketch's shape");
+    ok(twoTie.warp !== null, "CsSketchPlace.solve: two ties can still bend");
+
+    // -- one tie -------------------------------------------------------
+    var oneTie = CsSketchPlace.solve(scrapWith([st("A1", 10, 10)], null),
+        targets, { scaleFactor: 0.5 });
+    ok(oneTie.ok, "CsSketchPlace.solve: one tie still places the scrap");
+    eqs(oneTie.kind, "translation",
+        "CsSketchPlace.solve: one tie fixes position and nothing else");
+    eqs(oneTie.warp, null,
+        "CsSketchPlace.solve: one tie cannot bend anything, and says so");
+    ok(oneTie.warnings.length >= 1,
+        "CsSketchPlace.solve: and the caver is told");
+    var scaled = CsSketchPlace.at(oneTie, 30, 10);
+    near(scaled.x, 110, 1e-6,
+        "CsSketchPlace.at: 20 scrap units at 0.5 is 10 drawing units on");
+    near(scaled.y, 200, 1e-6, "CsSketchPlace.at: and no turn");
+
+    var noScale = CsSketchPlace.solve(scrapWith([st("A1", 0, 0)], null),
+        targets, {});
+    eqs(noScale.warnings.length, 2,
+        "CsSketchPlace.solve: one tie AND no declared scale is two " +
+        "separate things worth saying");
+
+    // -- no tie --------------------------------------------------------
+    var noTie = CsSketchPlace.solve(scrapWith([st("ZZ9", 0, 0)], null),
+        targets, {});
+    ok(!noTie.ok,
+        "CsSketchPlace.solve: a scrap tied to no station this drawing " +
+        "has is not placed -- anywhere would be a guess wearing the " +
+        "look of a measurement");
+    eqs(noTie.missing[0], "ZZ9",
+        "CsSketchPlace.solve: and the unknown station is named");
+
+    var coincident = CsSketchPlace.solve(
+        scrapWith([st("A1", 5, 5), st("A2", 5, 5)], null), targets, {});
+    ok(!coincident.ok,
+        "CsSketchPlace.solve: two markers in the same place give no " +
+        "direction and no size");
+
+    // -- station names -------------------------------------------------
+    eqs(CsSketchPlace.lookupStation(targets, "a1").x, 100,
+        "CsSketchPlace.lookupStation: case is ignored, as everywhere " +
+        "else in the suite");
+    eqs(CsSketchPlace.lookupStation(targets, "A1@main").x, 100,
+        "CsSketchPlace.lookupStation: Therion's own 1@main spelling " +
+        "finds the station this suite names A1");
+    eqs(CsSketchPlace.lookupStation(targets, "nope"), null,
+        "CsSketchPlace.lookupStation: and an unknown name is null");
+    eqs(CsSketchPlace.lookupStation(null, "A1"), null,
+        "CsSketchPlace.lookupStation: no targets at all");
+
+    // -- paths ----------------------------------------------------------
+    var path = CsSketchPlace.path(solved, [
+        { to: [0, 0], c1: null, c2: null },
+        { to: [80, 0], c1: [20, 0], c2: [60, 0] }
+    ]);
+    eqs(path.length, 2, "CsSketchPlace.path: every segment comes back");
+    near(path[0].to.x, 100, 1e-6, "CsSketchPlace.path: the start point");
+    ok(path[1].c1 !== null,
+        "CsSketchPlace.path: a cubic's controls are placed too -- bending " +
+        "the ends and leaving the controls would sag the curve exactly " +
+        "where the warp was working hardest");
+    eqs(path[0].c1, null,
+        "CsSketchPlace.path: a straight segment stays straight");
+    eqs(CsSketchPlace.path(noTie, []), null,
+        "CsSketchPlace.path: an unplaced scrap has no path");
+
+    // -- symbol size and facing -------------------------------------------
+    near(CsSketchPlace.scaleOf({ a: 2, b: 0, c: 0, d: 0, e: 2, f: 0 }),
+        2, 1e-9, "CsSketchPlace.scaleOf: a plain doubling");
+    near(CsSketchPlace.scaleOf({ a: 0, b: -3, c: 0, d: 3, e: 0, f: 0 }),
+        3, 1e-9, "CsSketchPlace.scaleOf: a quarter turn does not change size");
+    near(CsSketchPlace.scaleOf(null), 1, 1e-9,
+        "CsSketchPlace.scaleOf: no matrix is native size, never zero");
+
+    var upright = { a: 1, b: 0, c: 0, d: 0, e: 1, f: 0 };
+    near(CsSketchPlace.orientation(upright, 45), 45, 1e-9,
+        "CsSketchPlace.orientation: an unturned fit keeps the angle");
+    near(CsSketchPlace.orientation(upright, null), 0, 1e-9,
+        "CsSketchPlace.orientation: no -orientation is no turn");
+    // A fit that turns the scrap a quarter turn turns every symbol on it.
+    var quarter = { a: 0, b: -1, c: 0, d: 1, e: 0, f: 0 };
+    near(CsSketchPlace.orientation(quarter, 0), 270, 1e-9,
+        "CsSketchPlace.orientation: a turned fit turns the symbols with it");
+}());
+
+// ---------------------------------------------------------------------
 // Report.
 // ---------------------------------------------------------------------
 
