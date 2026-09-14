@@ -28856,6 +28856,22 @@ var tnoc = CsTerrain3d.build(rampGrid, terrainXf, {
 eqs(tnoc.lines.positions.length, 0, "contours can be switched off");
 ok(tnoc.indices.length > 0, "the mesh survives contours being off");
 
+// The view asks nobody for a contour interval, so it picks a 1/2/5
+// step near the target number of lines -- never a surprising 37.
+eqs(CsTerrain3d.niceInterval(100.0, 10), 10.0, "nice interval, 100 over 10");
+eqs(CsTerrain3d.niceInterval(240.0, 12), 20.0, "nice interval, 240 over 12");
+eqs(CsTerrain3d.niceInterval(60.0, 12), 5.0, "nice interval, 60 over 12");
+eqs(CsTerrain3d.niceInterval(12.0, 12), 1.0, "nice interval, 12 over 12");
+eqs(CsTerrain3d.niceInterval(0.0, 12), 0, "no relief, no interval");
+var niceSteps = [1, 2, 5];
+var niceOk = true;
+for (var nz = 3.0; nz < 4000.0; nz *= 1.37) {
+    var st = CsTerrain3d.niceInterval(nz, 12);
+    var mant = st / Math.pow(10, Math.floor(Math.log(st) / Math.LN10 + 1e-9));
+    if (niceSteps.indexOf(Math.round(mant)) < 0) { niceOk = false; }
+}
+ok(niceOk, "every interval is a 1, 2 or 5 step");
+
 // A drawing with no aerial still gets terrain, just no drape.
 var tnotex = CsTerrain3d.build(rampGrid, terrainXf,
     { unit: CsUnits.METERS, offset: 0.0, intervalM: 1.0 });
@@ -28867,6 +28883,10 @@ eqs(tnotex.texture, "", "no aerial means an empty texture path");
 
 ok(CsPackage.GEO_TAGS.indexOf("GeoElev") >= 0,
     "GeoElev is stripped with the other geo tags");
+// The fetch window is a Mercator bbox around the entrance: locating
+// data as surely as the coordinate itself.
+ok(CsPackage.GEO_TAGS.indexOf("SurfaceBbox") >= 0,
+    "the stored fetch window is stripped too");
 eqs(CsGeoProject.demPathFor("/caves/Pitfall/Pitfall.dxf"),
     "/caves/Pitfall/Pitfall-surface.tif", "the elevation grid's path");
 eqs(CsGeoProject.demPathFor(""), null,

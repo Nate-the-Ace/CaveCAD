@@ -670,7 +670,21 @@ CsSurfaceData.contours = function(doc, di, anchor) {
         // No survey elevation is touched. The offset is applied on
         // read; rewriting the Elevation tags would rebase the whole
         // cave against a 1 m national DEM.
-        CsTags.commit(di, anchor.entity, { GeoElev: surf });
+        //
+        // SurfaceBbox rides along: the Mercator window this grid was
+        // actually fetched for. The window is computed from the plan
+        // data's extent, so it CHANGES as a cave is drawn -- recomputing
+        // it later to place the kept grid would register the surface
+        // against a window the grid was never cut to, and slide the
+        // whole hillside sideways by however much the cave had grown.
+        // The grid's own size comes from the TIFF; only the ground it
+        // covers has to be remembered. Locating data, so it is stripped
+        // with the other geo tags.
+        CsTags.commit(di, anchor.entity, {
+            GeoElev: surf,
+            SurfaceBbox: [bbox.xmin, bbox.ymin, bbox.xmax, bbox.ymax]
+                .join(",")
+        });
         surfLine = qsTr("\nSurface at ") +
             (anchor.name !== "" ? anchor.name : "the anchor") + ": " +
             CsSurfaceData.fmt(CsUnits.convert(surf, CsUnits.METERS, unit)) +

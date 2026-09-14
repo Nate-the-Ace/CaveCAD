@@ -339,3 +339,38 @@ CsTerrain3d.build = function(grid, transform, opts) {
         levels: levels.length
     };
 };
+
+/**
+ * A contour interval for a given span of ground, in the SAME unit the
+ * span is given in.
+ *
+ * The plan drawing's contours are drawn at an interval the caver
+ * chooses and Surface Data asks for. The 3D view asks nobody: it is a
+ * view, opened from a button, and a dialog in front of it would be one
+ * question too many for a decoration. So it picks a 1/2/5 x 10^n step
+ * that puts roughly `target` lines across the relief -- the same family
+ * of steps a contour map uses, so the answer is never a surprising
+ * number like 37.
+ */
+CsTerrain3d.niceInterval = function(span, target) {
+    if (!(span > 0)) {
+        return 0;
+    }
+    if (!(target > 0)) {
+        target = 12;
+    }
+    var raw = span / target;
+    var mag = Math.pow(10, Math.floor(Math.log(raw) / Math.LN10));
+    var norm = raw / mag;
+    var step;
+    if (norm <= 1.5) {
+        step = 1;
+    } else if (norm <= 3.5) {
+        step = 2;
+    } else if (norm <= 7.5) {
+        step = 5;
+    } else {
+        step = 10;
+    }
+    return step * mag;
+};

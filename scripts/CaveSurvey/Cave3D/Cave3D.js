@@ -94,6 +94,23 @@ Cave3D.SETTING_SCAN_INK = "Cave3D/ScanInk";
  *  jumps once on the first run. */
 Cave3D.DEFAULT_SCAN_INK = 0.62;
 
+/** The surface above the cave, its contour lines, and how solid the
+ *  surface is drawn. Remembered like the other overlays: a caver who
+ *  works with the ground showing wants it showing on the next cave
+ *  too. */
+Cave3D.SETTING_TERRAIN = "Cave3D/ShowTerrain";
+Cave3D.SETTING_TERRAIN_CONTOURS = "Cave3D/ShowTerrainContours";
+Cave3D.SETTING_TERRAIN_OPACITY = "Cave3D/TerrainOpacity";
+/** What the C++ view starts at. Kept in step with
+ *  RCave3dView::DEFAULT_TERRAIN_OPACITY. */
+Cave3D.DEFAULT_TERRAIN_OPACITY = 0.5;
+
+/** Roughly how many contour lines to put across the relief. The plan
+ *  drawing asks the caver for an interval; a view opened from a button
+ *  must not, so CsTerrain3d.niceInterval picks a 1/2/5 step that lands
+ *  near this. */
+Cave3D.TERRAIN_CONTOUR_LEVELS = 12;
+
 /** The chosen mode, read from settings the first time it is asked for.
  *  Not read at file scope: RSettings is not necessarily up when an
  *  add-on is loaded. */
@@ -432,6 +449,119 @@ Cave3D.mergeScanBuffers = function(a, b) {
 };
 
 /** One line for the panel's status bar. */
+/**
+ * The ground above the cave: the elevation grid Surface Data left
+ * beside the drawing, meshed and placed in the survey's own vertical
+ * frame, with the aerial photograph as its texture.
+ *
+ * ALWAYS RETURNS A BUFFER, never throws. A drawing with no grid, no
+ * georeference or no datum anchor simply has no surface, and the panel
+ * greys the toggle -- which is a fact about the drawing, not a
+ * failure. The reason travels back in `why` so the status line can say
+ * which it is.
+ *
+ * THE FETCH WINDOW IS READ, NOT RECOMPUTED. Surface Data stored the
+ * Mercator bbox it actually fetched for, because that window is
+ * derived from the plan data's extent and therefore GROWS as the cave
+ * is drawn. Recomputing it here would register a kept grid against a
+ * window it was never cut to and slide the whole hillside sideways.
+ *
+ * \return {terrain, why} -- terrain is the block setMesh takes.
+ */
+Cave3D.terrainBuffer = function(doc, read) {
+    var empty = {
+        positions: [], normals: [], uvs: [], indices: [], texture: "",
+        lines: { positions: [], colors: [] },
+        bounds: null, holes: 0, levels: 0
+    };
+    var none = function(why) {
+        return { terrain: empty, why: why };
+    };
+
+    if (typeof CsTerrain3d === "undefined") {
+        return none("");
+    }
+    var demPath = CsGeoProject.demPathFor(doc.getFileName());
+    if (demPath === null) {
+        return none(qsTr("no surface: this drawing has never been saved"));
+    }
+    if (!(new QFileInfo(demPath)).exists()) {
+        return none(qsTr("no surface: run Surface Data to fetch the "
+            + "ground above this cave"));
+    }
+
+    var rec = CsLocationPick.anchorRecord(doc);
+    if (rec === null || rec.pos === null) {
+        return none(qsTr("no surface: this drawing has no georeference"));
+    }
+    var bboxTag = CsTags.get(rec.entity, "SurfaceBbox");
+    if (bboxTag === null || bboxTag === undefined || bboxTag === "") {
+        return none(qsTr("no surface: the elevation grid predates the "
+            + "3D view -- run Surface Data again"));
+    }
+    var parts = String(bboxTag).split(",");
+    if (parts.length !== 4) {
+        return none(qsTr("no surface: the stored fetch window is "
+            + "unreadable -- run Surface Data again"));
+    }
+    var bbox = {
+        xmin: parseFloat(parts[0]), ymin: parseFloat(parts[1]),
+        xmax: parseFloat(parts[2]), ymax: parseFloat(parts[3])
+    };
+
+    var grid;
+    try {
+        grid = CsContour.parseFloatTiff(CsSurfaceData.readBinary(demPath));
+    } catch (eGrid) {
+        return none(qsTr("no surface: the elevation grid could not be "
+            + "read (%1)").arg(String(eGrid)));
+    }
+    var range = CsContour.range(grid.values);
+    if (range === null) {
+        return none(qsTr("no surface: the elevation grid holds no "
+            + "readings"));
+    }
+
+    var unit = CsUnits.fromDrawingUnit(doc.getUnit(), RS);
+    var transform = CsGeoProject.gridTransform(bbox, grid.width,
+        grid.height, { lat: rec.lat, lon: rec.lon, pos: rec.pos }, unit);
+    var offset = CsLocationPick.datumOffset(doc, unit);
+
+    // No photograph is not a failure: the ground still has shape.
+    var texture = CsGeoProject.imagePathFor(doc.getFileName());
+    if (texture === null || !(new QFileInfo(texture)).exists()) {
+        texture = "";
+    }
+
+    var terrain;
+    try {
+        terrain = CsTerrain3d.build(grid, transform, {
+            unit: unit,
+            offset: offset,
+            intervalM: CsTerrain3d.niceInterval(range.max - range.min,
+                Cave3D.TERRAIN_CONTOUR_LEVELS),
+            texture: texture
+        });
+    } catch (eBuild) {
+        return none(qsTr("no surface: %1").arg(String(eBuild)));
+    }
+
+    var why = "";
+    if (offset === null) {
+        // THE ONE CASE THAT MUST SPEAK UP. Without GeoElev there is no
+        // way to relate the survey's elevations to the ground's, so the
+        // surface is placed at its own true elevation and may sit far
+        // from the cave. Guessing an offset to make the picture look
+        // right is the elevation-datum trap.
+        why = qsTr("surface placed at its own elevation: this drawing "
+            + "has no datum anchor, so run Surface Data to set one");
+    } else {
+        why = qsTr("cave meets the surface %1 %2 up")
+            .arg(offset.toFixed(1)).arg(unit);
+    }
+    return { terrain: terrain, why: why };
+};
+
 Cave3D.statusText = function(read, mesh) {
     var triangles = mesh.triangles.indices.length / 3;
     var unit = read.survey.distanceUnit === "m" ? "m" : "ft";
@@ -502,6 +632,20 @@ Cave3D.refresh = function() {
                        runs: [] };
     }
 
+    // The ground above it, from the grid Surface Data left beside the
+    // drawing. Its own buffer, so switching the surface on and off
+    // never rebuilds the cave.
+    var terrainWhy = "";
+    try {
+        var got = Cave3D.terrainBuffer(getDocument(), read);
+        mesh.terrain = got.terrain;
+        terrainWhy = got.why;
+    } catch (eTerrain) {
+        mesh.terrain = { positions: [], normals: [], uvs: [], indices: [],
+                         texture: "", lines: { positions: [], colors: [] },
+                         bounds: null, holes: 0, levels: 0 };
+    }
+
     cave3d.setMesh(Cave3D.handle, mesh);
     if (cave3d.setFlyPath !== undefined) {
         // GUARDED: the tools can be updated without the application.
@@ -524,7 +668,9 @@ Cave3D.refresh = function() {
                 flight.breaks, flight.turns || []);
         }
     }
-    cave3d.setStatus(Cave3D.handle, Cave3D.statusText(read, mesh));
+    cave3d.setStatus(Cave3D.handle,
+        Cave3D.statusText(read, mesh) +
+        (terrainWhy !== "" ? "  --  " + terrainWhy : ""));
 };
 
 /**
@@ -779,6 +925,10 @@ Cave3D.connectOnce = function() {
                 key = Cave3D.SETTING_SCANS;
             } else if (which === "stations") {
                 key = Cave3D.SETTING_STATIONS;
+            } else if (which === "terrain") {
+                key = Cave3D.SETTING_TERRAIN;
+            } else if (which === "terraincontours") {
+                key = Cave3D.SETTING_TERRAIN_CONTOURS;
             }
             RSettings.setValue(key, on);
         });
@@ -789,6 +939,13 @@ Cave3D.connectOnce = function() {
             // Remembered, not rebuilt: the threshold is a shader
             // uniform, so the view has already redrawn with it.
             RSettings.setValue(Cave3D.SETTING_SCAN_INK, value);
+        });
+    }
+    if (cave3d.terrainOpacityChanged !== undefined) {
+        cave3d.terrainOpacityChanged.connect(function(handle, value) {
+            if (handle !== Cave3D.handle) { return; }
+            // Remembered, not rebuilt: opacity is a shader uniform.
+            RSettings.setValue(Cave3D.SETTING_TERRAIN_OPACITY, value);
         });
     }
     if (cave3d.cameraSpeedChanged !== undefined) {
@@ -870,6 +1027,19 @@ function cave3dRun() {
         RSettings.getBoolValue(Cave3D.SETTING_SECTIONS, false));
     cave3d.setShowScans(Cave3D.handle,
         RSettings.getBoolValue(Cave3D.SETTING_SCANS, false));
+    if (cave3d.setShowTerrain !== undefined) {
+        // GUARDED: the tools can be updated without the application,
+        // and an older CaveCAD has no surface to switch on. AFTER the
+        // refresh, for the ghost's reason: only a built mesh knows
+        // whether this drawing has an elevation grid beside it.
+        cave3d.setTerrainOpacity(Cave3D.handle,
+            RSettings.getDoubleValue(Cave3D.SETTING_TERRAIN_OPACITY,
+                Cave3D.DEFAULT_TERRAIN_OPACITY));
+        cave3d.setShowTerrain(Cave3D.handle,
+            RSettings.getBoolValue(Cave3D.SETTING_TERRAIN, false));
+        cave3d.setShowTerrainContours(Cave3D.handle,
+            RSettings.getBoolValue(Cave3D.SETTING_TERRAIN_CONTOURS, false));
+    }
     if (cave3d.setShowStations !== undefined) {
         // GUARDED: the tools can be updated without the application,
         // and an older CaveCAD has no station labels to switch on.

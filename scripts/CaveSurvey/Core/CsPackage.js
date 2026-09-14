@@ -24,7 +24,8 @@ var CsPackage = {};
 // GeoElev joins them: the ground elevation at the entrance, which
 // with a photograph of the surface is very nearly a location, and on
 // its own narrows a search to one contour of one hillside.
-CsPackage.GEO_TAGS = ["GeoLat", "GeoLon", "GeoStation", "GeoElev"];
+CsPackage.GEO_TAGS = ["GeoLat", "GeoLon", "GeoStation", "GeoElev",
+    "SurfaceBbox"];
 
 /**
  * A copy of a survey with the cave's location taken out of it.
