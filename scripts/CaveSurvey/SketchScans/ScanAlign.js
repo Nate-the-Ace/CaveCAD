@@ -596,9 +596,37 @@ ScanAlign.prototype.stationContext = function() {
         for (var i = 0; i < stations.length; i++) {
             plotted[stations[i].name] = stations[i].pos;
         }
+        // SPLAY TIPS ARE TARGETS TOO. Every drawn splay ends in a
+        // named, tagged point at the wall it hit, and on a sketch those
+        // wall hits are often the only features a caver can identify
+        // with confidence -- the middle of a room carries no station,
+        // but its corners carry splays. Read straight off the drawing
+        // rather than re-derived from the survey, so the names and
+        // positions here are exactly the ones on the map, gaps in the
+        // numbering included (see CsTags.collectSplays' docblock).
+        var ids = doc.queryAllEntities(false, false);
+        for (i = 0; i < ids.length; i++) {
+            var e = doc.queryEntity(ids[i]);
+            if (isNull(e) || typeof e.getPosition !== "function") {
+                continue;
+            }
+            var tip = CsTags.get(e, "SplayName");
+            if (tip === "" || plotted.hasOwnProperty(tip)) {
+                continue;
+            }
+            plotted[tip] = e.getPosition();
+        }
         // The drawing's own survey, in notebook order -- the
         // "fingerprint". This is what makes the walk follow a branch
         // to its tie-in instead of counting on through the run.
+        //
+        // STATIONS ONLY, deliberately, even though the splay tips above
+        // are now valid targets. The walk drives "assume the next one"
+        // and a station carries half a dozen splays: advancing through
+        // every wall hit between D2 and D3 would turn a six-click
+        // alignment into a forty-click one. A splay tip is reached by
+        // TYPING its name, which is exactly the gesture a caver makes
+        // when they have found one on the sketch.
         var order = CsStationOrder.walkOrder(
             CsRevise.resolveAsDrawn(doc).survey);
         if (order.length === 0) {

@@ -164,8 +164,32 @@ CsValidate.check = function(survey, resolved) {
                 if (azDiff < CsValidate.DUPLICATE_AZIMUTH_DEG &&
                     distDiff < Math.max(a.distance, b.distance) *
                         CsValidate.DUPLICATE_DISTANCE_FRACTION) {
-                    // agreeing duplicate / backsight pair: normal
-                    // practice, say nothing
+                    // AGREEING duplicate. Within ONE trip that is
+                    // normal practice -- a foresight and its backsight,
+                    // or a leg read twice -- and saying anything about
+                    // it would cry wolf on every careful survey.
+                    //
+                    // ACROSS trips it is not practice, it is a page
+                    // drawn twice: two trips cannot both have walked
+                    // the same leg and written down the same numbers.
+                    // This case used to fall into the same silence, and
+                    // that is exactly how a whole duplicated trip hid
+                    // in a drawing -- agreeing to within a declination
+                    // correction (well under DUPLICATE_AZIMUTH_DEG),
+                    // it said nothing at all, while the duplicate legs
+                    // made every station on the run look like a
+                    // junction to CsLrud.wallRuns (LRUD walls stopped
+                    // drawing) and raised a phantom loop per leg.
+                    if ((a.trip || 0) === (b.trip || 0)) {
+                        continue;
+                    }
+                    findings.push({ severity: "error", shotIndex: idxs[j],
+                        code: "duplicate-across-trips",
+                        message: "Trip " + (a.trip || 0) + " and trip " +
+                            (b.trip || 0) + " both record the shot " +
+                            a.from + " to " + a.to + " -- the same page " +
+                            "was probably drawn twice. Delete one of " +
+                            "them in Edit Trip." });
                     continue;
                 }
                 var flippedDiff = CsAngles.azimuthDifference(
@@ -175,6 +199,23 @@ CsValidate.check = function(survey, resolved) {
                         code: "backsight-as-foresight",
                         message: "Shot " + b.from + " to " + b.to +
                             " reads about 180 deg from its duplicate -- was a backsight entered as a foresight?" });
+                } else if ((a.trip || 0) !== (b.trip || 0)) {
+                    // Same leg, two trips, DISAGREEING readings: still
+                    // a page drawn twice, just one whose declination or
+                    // corrected numbers moved it further than the
+                    // agreeing case. Named as the duplicate it is --
+                    // "check your notes, these two readings disagree"
+                    // sends the caver back underground for a leg that
+                    // was only ever surveyed once.
+                    findings.push({ severity: "error", shotIndex: idxs[j],
+                        code: "duplicate-across-trips",
+                        message: "Trip " + (a.trip || 0) + " and trip " +
+                            (b.trip || 0) + " both record the shot " +
+                            a.from + " to " + a.to + " (azimuth differs " +
+                            azDiff.toFixed(1) + " deg, distance " +
+                            distDiff.toFixed(2) + ") -- the same page was " +
+                            "probably drawn twice, once with a different " +
+                            "declination. Delete one of them in Edit Trip." });
                 } else {
                     findings.push({ severity: "warning", shotIndex: idxs[j],
                         code: "duplicate-disagrees",
@@ -182,6 +223,64 @@ CsValidate.check = function(survey, resolved) {
                             " disagree (azimuth differs " + azDiff.toFixed(1) +
                             " deg, distance " + distDiff.toFixed(2) + ")." });
                 }
+            }
+        }
+    }
+
+    // ---- a trip with nowhere to keep its own record ---------------
+    //
+    // A trip's date, team, instruments and declination ride a TAG on
+    // the first station the trip owns (CsDraw.survey's per-trip anchor
+    // block). A trip that owns no station therefore has nowhere to
+    // write them: the drawing takes its shots and silently forgets
+    // whose they were, and on the next read it comes back with an
+    // empty date and team. That is not only a lost record -- it is
+    // self-perpetuating, because SurveyNotebook matches a page to the
+    // trip it revises by date|team, so a trip whose record vanished
+    // can never be matched again and every redraw of that page appends
+    // yet another copy.
+    //
+    // Ownership is "the trip of the first shot that touches the
+    // station", the same rule CsDelta.stationTrips and CsDraw use.
+    // Spelled out here rather than called, so Validate keeps loading
+    // without CsDelta.
+    if (survey.trips !== undefined && survey.trips !== null &&
+            survey.trips.length > 1) {
+        var ownerOf = {};
+        for (i = 0; i < shots.length; i++) {
+            var os = shots[i];
+            if (os.excludeFromAll) {
+                continue;
+            }
+            var ot = os.trip || 0;
+            if (os.from !== "" && ownerOf[os.from] === undefined) {
+                ownerOf[os.from] = ot;
+            }
+            if (!os.splay && os.to !== "" && ownerOf[os.to] === undefined) {
+                ownerOf[os.to] = ot;
+            }
+        }
+        var owns = {};
+        for (var on in ownerOf) {
+            if (ownerOf.hasOwnProperty(on)) {
+                owns[ownerOf[on]] = true;
+            }
+        }
+        var hasShots = {};
+        for (i = 0; i < shots.length; i++) {
+            if (!shots[i].excludeFromAll) {
+                hasShots[shots[i].trip || 0] = true;
+            }
+        }
+        for (var tp = 0; tp < survey.trips.length; tp++) {
+            if (hasShots[tp] === true && owns[tp] !== true) {
+                findings.push({ severity: "error", shotIndex: -1,
+                    code: "trip-owns-no-station",
+                    message: "Trip " + tp + " has shots but reaches no " +
+                        "station of its own, so its date and team cannot " +
+                        "be stored in the drawing and will be lost on " +
+                        "the next read. It is almost certainly a page " +
+                        "that was drawn twice -- delete it in Edit Trip." });
             }
         }
     }

@@ -163,6 +163,7 @@ var CORE_FILES = [
     "scripts/CaveSurvey/Core/CsScanFit.js",
     "scripts/CaveSurvey/Core/CsScanFrame.js",
     "scripts/CaveSurvey/Core/CsScanTrim.js",
+    "scripts/CaveSurvey/Core/CsScanPdf.js",
     "scripts/CaveSurvey/Core/CsScanRotate.js",
     "scripts/CaveSurvey/Core/CsSectionCut.js",
     // pure helpers only (captionText/scaleText); its document functions
@@ -23420,6 +23421,90 @@ ok(!CsScanTrim.isTrimPath("Trimmed_notes/x.png"),
     "a folder merely starting with Trimmed is a real folder");
 ok(!CsScanTrim.isTrimPath("Trip3/IMG_4021.JPG"), "an ordinary page");
 
+// ---------------------------------------------------------------------
+// CsScanPdf -- a scanner's one-PDF-per-trip, split into pages.
+// ---------------------------------------------------------------------
+
+ok(CsScanPdf.isPdfPath("Trip3/TRUITT_02-02-2025.pdf"), "a pdf");
+ok(CsScanPdf.isPdfPath("Trip3/SCAN.PDF"), "case does not matter");
+ok(!CsScanPdf.isPdfPath("Trip3/IMG_4021.JPG"), "a page is not a pdf");
+ok(!CsScanPdf.isPdfPath("Trip3/notes.pdf.jpg"),
+    "a jpg that merely mentions pdf is not one");
+ok(!CsScanPdf.isPdfPath(""), "nothing is not a pdf");
+
+// PADDED TO THE PAGE COUNT, so a listing sorted by name is in page
+// order -- "p10" before "p2" is how a ten-page trip reads wrong
+// forever.
+eqs(CsScanPdf.pageName("Trip3/scan.pdf", 0, 5), "Trip3/scan-p01.png",
+    "page 1 of 5");
+eqs(CsScanPdf.pageName("Trip3/scan.pdf", 4, 5), "Trip3/scan-p05.png",
+    "page 5 of 5");
+eqs(CsScanPdf.pageName("Trip3/scan.pdf", 9, 12), "Trip3/scan-p10.png",
+    "a twelve-page trip still pads to two");
+eqs(CsScanPdf.pageName("Trip3/scan.pdf", 0, 120), "Trip3/scan-p001.png",
+    "and a hundred-page one pads to three");
+eqs(CsScanPdf.pageName("scan.pdf", 0, 1), "scan-p01.png",
+    "a pdf at the top of scans/ keeps its place");
+eqs(CsScanPdf.pageNames("Trip3/scan.pdf", 3).join(","),
+    "Trip3/scan-p01.png,Trip3/scan-p02.png,Trip3/scan-p03.png",
+    "every page of a three-page trip");
+
+// THE SPLIT STATE IS READ OFF THE FILES THEMSELVES -- no flag is
+// stored anywhere, so deleting the pages brings the PDF back and
+// deleting ONE brings it back too (that trip is no longer whole).
+var pdfRel = "Trip3/scan.pdf";
+var allPages = CsScanPdf.pageNames(pdfRel, 3);
+eqs(CsScanPdf.splitState(pdfRel, [pdfRel], 3), "none",
+    "a pdf on its own has not been split");
+eqs(CsScanPdf.splitState(pdfRel, [pdfRel].concat(allPages), 3), "complete",
+    "every page present is a complete split");
+eqs(CsScanPdf.splitState(pdfRel,
+    [pdfRel, allPages[0], allPages[2]], 3), "partial",
+    "a missing middle page is a partial split");
+eqs(CsScanPdf.splitState(pdfRel, [pdfRel, "Trip3/scan-p01.png"], 1),
+    "complete", "a one-page pdf needs one page");
+eqs(CsScanPdf.splitState(pdfRel, allPages, 0), "none",
+    "an unreadable pdf (no page count) is never complete");
+eqs(CsScanPdf.splitState("Trip3/IMG_4021.JPG", [], 3), "none",
+    "a page is not a pdf and has no split state");
+
+// ---------------------------------------------------------------------
+// CsScanTree.keepScans -- ONE answer to "what is in scans/", because
+// two panels draw this tree and they used to disagree: Sketch Scans
+// filtered its own derivatives out and the Survey Notebook filtered
+// nothing, so every crop Scan Trim had written showed up there as a
+// page (Nathan, 2026-09-14).
+// ---------------------------------------------------------------------
+(function() {
+    var counts = { "Trip3/scan.pdf": 2, "Trip3/half.pdf": 3 };
+    var pageCountOf = function(rel) {
+        return counts.hasOwnProperty(rel) ? counts[rel] : 0;
+    };
+    var listing = [
+        "Trip3/IMG_4021.JPG",
+        "Trip3/Trimmed/IMG_4021 TRIMMED 10 10 20 20.png",
+        "Trip3/scan.pdf",
+        "Trip3/scan-p01.png",
+        "Trip3/scan-p02.png",
+        "Trip3/half.pdf",
+        "Trip3/half-p01.png"
+    ];
+    var kept = CsScanTree.keepScans(listing, pageCountOf).join(",");
+    ok(kept.indexOf("Trip3/IMG_4021.JPG") !== -1, "an ordinary page stays");
+    ok(kept.indexOf("Trimmed/") === -1,
+        "a Scan Trim crop never reaches the tree");
+    ok(kept.indexOf("Trip3/scan.pdf") === -1,
+        "a fully split pdf drops out -- its pages ARE the trip now");
+    ok(kept.indexOf("Trip3/scan-p01.png") !== -1 &&
+        kept.indexOf("Trip3/scan-p02.png") !== -1,
+        "and its pages are what is listed instead");
+    ok(kept.indexOf("Trip3/half.pdf") !== -1,
+        "a HALF split pdf stays listed: it is still the only way to " +
+        "right-click it and finish the job");
+    eqs(CsScanTree.keepScans([], pageCountOf).length, 0,
+        "an empty folder keeps nothing");
+})();
+
 // The tag.
 eqs(CsScanTrim.serialize({ x: 120, y: 88, w: 900, h: 640 }),
     "120,88,900,640", "serialize");
@@ -23760,6 +23845,70 @@ eqs(CsValidate.DUPLICATE_AZIMUTH_DEG, 5.0,
     "the duplicate azimuth window is still 5 degrees");
 eqs(CsValidate.DUPLICATE_DISTANCE_FRACTION, 0.05,
     "and the distance window still 5%");
+
+// THE SAME LEG UNDER TWO TRIPS IS NOT A BACKSIGHT PAIR.
+//
+// Regression, from a real drawing: a J-run notebook page was drawn a
+// second time after a declination correction, landing as its own trip
+// beside the one it should have revised. Every leg was then recorded
+// twice, 4.74 deg apart -- inside DUPLICATE_AZIMUTH_DEG, so the
+// duplicate check called it an ordinary agreeing pair and said
+// NOTHING, for 14 shots. Meanwhile the doubled legs made every station
+// on the run look like a junction to CsLrud.wallRuns (the run's LRUD
+// walls stopped drawing entirely) and raised one phantom loop per leg.
+//
+// Within one trip an agreeing duplicate is still normal practice and
+// still silent. Across trips it never is.
+function dupTripSurvey(secondAzimuth, secondTrip) {
+    var sv = CsModel.newSurvey();
+    sv.trips = [CsModel.newTrip(), CsModel.newTrip()];
+    var a = shotOf("D1", "D2", 100, 90, 0);
+    a.trip = 0;
+    var b = shotOf("D1", "D2", 100, secondAzimuth, 0);
+    b.trip = secondTrip;
+    sv.shots = [a, b];
+    return sv;
+}
+ok(!hasCode(findingsFor(dupTripSurvey(94.9, 0)), "duplicate-across-trips"),
+    "an agreeing duplicate inside ONE trip is a backsight pair, not a " +
+    "duplicated page");
+ok(hasCode(findingsFor(dupTripSurvey(94.9, 1)), "duplicate-across-trips"),
+    "the same agreeing pair under TWO trips is a page drawn twice");
+ok(hasCode(findingsFor(dupTripSurvey(95.1, 1)), "duplicate-across-trips"),
+    "and so is a DISAGREEING pair under two trips -- the declination " +
+    "case that started this");
+ok(!hasCode(findingsFor(dupTripSurvey(95.1, 1)), "duplicate-disagrees"),
+    "which is reported as the duplicate it is, not as two readings " +
+    "that disagree: 'check your notes' sends a caver back underground " +
+    "for a leg that was only ever surveyed once");
+ok(CsValidate.checkHasErrors(findingsFor(dupTripSurvey(94.9, 1))),
+    "a duplicated page is an ERROR, not a warning -- it silently " +
+    "breaks wall runs and invents loops");
+
+// A TRIP WITH NOWHERE TO KEEP ITS RECORD.
+//
+// The same regression's second half, and the reason it compounds: a
+// trip's date and team ride a tag on the first station the trip OWNS,
+// so a trip whose stations all belong to an earlier trip writes no
+// record at all and reads back blank. SurveyNotebook matches a page to
+// the trip it revises by date|team, so the blank trip can never be
+// matched again -- and every later redraw of that page appends yet
+// another copy.
+function orphanTripSurvey(secondTripReaches) {
+    var sv = CsModel.newSurvey();
+    sv.trips = [CsModel.newTrip(), CsModel.newTrip()];
+    var a = shotOf("O1", "O2", 30, 90, 0);
+    a.trip = 0;
+    var b = shotOf("O1", secondTripReaches, 30, 180, 0);
+    b.trip = 1;
+    sv.shots = [a, b];
+    return sv;
+}
+ok(hasCode(findingsFor(orphanTripSurvey("O2")), "trip-owns-no-station"),
+    "a trip whose every station belongs to an earlier trip has nowhere " +
+    "to store its own date and team");
+ok(!hasCode(findingsFor(orphanTripSurvey("O3")), "trip-owns-no-station"),
+    "a trip that reaches one station of its own is fine");
 
 // A reading that is about 180 deg from its twin is a backsight in the
 // foresight column, which is a DIFFERENT finding from a disagreement.
@@ -24318,6 +24467,24 @@ eqs(CsSymbolStore.blockNameFor(""), null,
     "blockNameFor: so does an empty name");
 eqs(CsSymbolStore.blockNameFor(null), null,
     "blockNameFor: and a missing one");
+
+// THE GENERATION COUNTER, which is how a caller that caches something
+// derived from the symbol files (SymbolPalette's rendered tile shapes)
+// knows a save has happened without knowing which file it touched.
+// It exists because the palette used to re-read BOTH symbol files --
+// two full DXF imports -- on every keystroke in its search box.
+(function() {
+    var before = CsSymbolStore.generation;
+    ok(typeof before === "number", "CsSymbolStore.generation is a number");
+    CsSymbolStore.invalidate();
+    ok(CsSymbolStore.generation === before + 1,
+        "a whole-store invalidate bumps the generation");
+    var mid = CsSymbolStore.generation;
+    CsSymbolStore.invalidate("/no/such/library.dxf");
+    ok(CsSymbolStore.generation === mid + 1,
+        "invalidating ONE path bumps it too -- a caller comparing " +
+        "generations must not miss a single-file save");
+})();
 
 // The merged catalogue: the shipped 28 plus whatever the template
 // carries, built-ins winning a collision. Stubbed rather than read off
