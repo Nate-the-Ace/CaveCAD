@@ -558,7 +558,10 @@ CsLocationPick.isSurfaceEntity = function(entity) {
  */
 CsLocationPick.lowPointNear = function(doc, point, radius) {
     var best = null;
-    var ids = doc.queryAllEntities(false, true);
+    // MODEL SPACE ONLY. An entity inside a block definition carries
+    // BLOCK-LOCAL coordinates, so measuring a distance from a drawing
+    // point to one is comparing two different coordinate systems.
+    var ids = doc.queryAllEntities(false, false);
     for (var i = 0; i < ids.length; i++) {
         var e = doc.queryEntity(ids[i]);
         if (isNull(e) || CsTags.get(e, "SurfaceContours") !== "1") {
@@ -616,7 +619,23 @@ CsLocationPick.lowPointNear = function(doc, point, radius) {
  * \return how many entities moved
  */
 CsLocationPick.moveSurvey = function(doc, di, offset) {
-    var ids = doc.queryAllEntities(false, true);
+    // MODEL SPACE ONLY -- `allBlocks: false`. This is the difference
+    // between translating a drawing and wrecking it, and it cost a
+    // real cave's layout to learn (2026-09-14).
+    //
+    // queryAllEntities(false, TRUE) also returns every entity INSIDE
+    // every block DEFINITION. Moving those moves the symbol, callout
+    // or section bay within its own definition -- for EVERY insert of
+    // it, since a definition is shared -- while the block REFERENCE
+    // moves as well. The result is each block's contents displaced
+    // twice over and every other copy of that symbol dragged along
+    // with it, which looks like the drawing coming apart rather than
+    // sliding.
+    //
+    // A block reference in model space is one entity and carries its
+    // whole definition with it. Nothing inside a definition should
+    // ever be touched by a translation of the drawing.
+    var ids = doc.queryAllEntities(false, false);
     var moving = [];
     var layerNames = {};
     for (var i = 0; i < ids.length; i++) {

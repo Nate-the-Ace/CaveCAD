@@ -358,6 +358,34 @@ function entranceLocationMoveTo(doc, di, clicked) {
         + "they are fixed to the world, and the cave is what was in "
         + "the wrong place."));
 
+    // THE SURFACE IS NOW CUT FOR THE WRONG WINDOW. Both the photograph
+    // and the elevation grid were fetched around where the cave used
+    // to be, so after a nudge the cave sits nearer one edge of them --
+    // and the 3D terrain reads the stored fetch window, which no
+    // longer matches the survey. Re-fetching is the finish of the
+    // move, not a separate chore. Asked rather than assumed: it is a
+    // network fetch, and a caver working offline in a field house must
+    // be able to say no and keep the imagery they have.
+    if (coord !== null) {
+        lines.push("");
+        lines.push(qsTr("Fetch the surface again for where the cave "
+            + "now sits?"));
+        var answer = QMessageBox.question(getMainWindow(),
+            qsTr("Entrance Location"), lines.join("\n"),
+            QMessageBox.Yes | QMessageBox.No);
+        if (answer === QMessageBox.Yes) {
+            var report = CsSurfaceData.run(doc, di,
+                { imagery: true, contours: true });
+            try {
+                QMessageBox.information(getMainWindow(),
+                    qsTr("Entrance Location"), report.lines.join("\n"));
+            } catch (eReport) {
+                EAction.handleUserMessage(report.lines[0]);
+            }
+        }
+        return;
+    }
+
     try {
         QMessageBox.information(getMainWindow(),
             qsTr("Entrance Location"), lines.join("\n"));
