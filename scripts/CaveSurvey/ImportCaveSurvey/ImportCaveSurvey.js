@@ -163,16 +163,115 @@ function importCaveSurvey() {
         CsDraw.zoomToSurvey(survey, resolved);
     }
 
+    // -- the drawing half, if the file brought one ---------------------
+    // A Therion project is numbers AND a sketch: the .th beside one or
+    // more .th2 pages. Importing only the numbers left a caver who had
+    // sketched the whole cave on a phone re-tracing, by hand, a
+    // photograph of a drawing they already had in vector. This is the
+    // same gesture, one door.
+    var sketchSummary = importSiblingSketches(doc, di, fileName, drawn);
+
     // -- report in plain language ------------------------------------------
     var summary = "Format: " + format.label + "\n" +
         "Drawing units: " + survey.distanceUnit + "\n" +
-        CsReport.drawSummary(survey, resolved, drawn, findings);
+        CsReport.drawSummary(survey, resolved, drawn, findings) +
+        sketchSummary;
     if (resolved.unresolved.length > 0 ||
         CsValidate.checkHasErrors(findings)) {
         QMessageBox.warning(getMainWindow(), "Import Cave Survey", summary);
     } else {
         QMessageBox.information(getMainWindow(), "Import Cave Survey", summary);
     }
+}
+
+
+/**
+ * Offers the .th2 sketches sitting beside the file just imported.
+ *
+ * ASKED, NOT ASSUMED. Importing a sketch draws real map ink on the
+ * feature layers, which is a bigger thing than importing a centreline
+ * and not what every caver wants on every import -- some have already
+ * traced this cave by hand and want the numbers refreshed, nothing
+ * more.
+ *
+ * Nothing is offered when the survey itself drew no stations: a scrap
+ * is placed on its station markers, and with no stations in the
+ * drawing every scrap would be refused one at a time.
+ *
+ * \return a block of text to append to the import report, or "".
+ */
+function importSiblingSketches(doc, di, surveyPath, drawn) {
+    if (drawn === null || drawn === undefined || drawn.stationsDrawn <= 0) {
+        return "";
+    }
+    var sketches = CsSketchStore.siblings(surveyPath);
+    if (sketches.length === 0) {
+        return "";
+    }
+
+    var names = [];
+    for (var i = 0; i < sketches.length; i++) {
+        names.push(CsSketchStore.nameOf(sketches[i]));
+    }
+    var asked = QMessageBox.question(getMainWindow(), "Import Cave Survey",
+        (sketches.length === 1 ?
+            "A Therion sketch sits beside this survey:\n\n" :
+            "Therion sketches sit beside this survey:\n\n") +
+        "    " + names.join("\n    ") + "\n\n" +
+        "Import the drawing too? Walls, symbols and areas from the " +
+        "sketch become real linework on the map's own layers, fitted " +
+        "to the stations you have just drawn.",
+        QMessageBox.Yes | QMessageBox.No, QMessageBox.Yes);
+    if (asked !== QMessageBox.Yes) {
+        return "";
+    }
+
+    // A BACKUP FIRST. Drawing a sketch in is one of this suite's
+    // destructive operations the moment a scrap already present is
+    // replaced -- see Core/CsBackup.js on why this is the moment.
+    try {
+        CsBackup.beforeWrite(doc.getFileName());
+    } catch (eBackup) {
+        // An unsaved drawing has no file to keep a copy of, which is
+        // not a reason to refuse the import.
+    }
+
+    var totals = CsSketchDraw.newReport();
+    var lines = [];
+    var cancelled = false;
+    for (i = 0; i < sketches.length && !cancelled; i++) {
+        var result = CsSketchDraw.fromFile(doc, di, sketches[i],
+            { decide: sketchDecision });
+        cancelled = result.cancelled;
+        lines.push(CsSketchReport.forFile(names[i], result));
+        CsSketchDraw.addTo(totals, result.totals);
+    }
+
+    return "\n\n" + CsSketchReport.summary(totals, lines);
+}
+
+/**
+ * Asked once per scrap this drawing already holds.
+ *
+ * REFUSE AND ASK, per scrap, because by the time a sketch comes round
+ * again a caver has very likely worked on the ink it put here --
+ * trimmed a wall, moved a symbol, traced over a gap. Overwriting that
+ * silently is somebody's evening gone; importing beside it leaves two
+ * of everything.
+ */
+function sketchDecision(scrapName, alreadyHere) {
+    var answer = QMessageBox.question(getMainWindow(),
+        "Import Cave Survey",
+        "The sketch \"" + scrapName + "\" is already in this drawing (" +
+        alreadyHere + " pieces of linework).\n\n" +
+        "Replace it with the version in the file? Anything you have " +
+        "changed here since importing it will go.",
+        QMessageBox.Yes | QMessageBox.No | QMessageBox.Cancel,
+        QMessageBox.No);
+    if (answer === QMessageBox.Cancel) {
+        return "cancel";
+    }
+    return (answer === QMessageBox.Yes) ? "replace" : "skip";
 }
 
 // ============================================================

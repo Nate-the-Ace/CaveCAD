@@ -285,6 +285,11 @@ var CORE_FILES_NOT_LOADED = [
     // the same doors a traced one does. Covered by
     // tests/sketch_import_run.js.
     "scripts/CaveSurvey/Core/CsSketchDraw.js",
+    // Reads a real RDocument's entities and the filesystem (QFileInfo,
+    // QDir) to answer which sketches are already imported and which
+    // sit beside the survey file. Covered by
+    // tests/sketch_import_run.js.
+    "scripts/CaveSurvey/Core/CsSketchStore.js",
     // The include manifest itself -- it is the list, not a member of
     // it, and loadRepoScript strips the include() lines that are its
     // entire content.
@@ -28069,6 +28074,113 @@ eqs(CsSymbolStore.AREA_MARKER_TAGS.custom, "AreaCustom",
     var quarter = { a: 0, b: -1, c: 0, d: 1, e: 0, f: 0 };
     near(CsSketchPlace.orientation(quarter, 0), 270, 1e-9,
         "CsSketchPlace.orientation: a turned fit turns the symbols with it");
+}());
+
+// ---------------------------------------------------------------------
+// CsSketchReport -- what a caver is told after importing a sketch
+// ---------------------------------------------------------------------
+(function() {
+    loadRepoScript("scripts/CaveSurvey/Core/CsSketchReport.js");
+
+    function report(over) {
+        var base = { lines: 0, shapes: 0, areas: 0, symbols: 0, texts: 0,
+            marks: 0, callouts: 0, skipped: 0, failed: 0,
+            unknown: [], warnings: [] };
+        for (var k in over) {
+            if (over.hasOwnProperty(k)) {
+                base[k] = over[k];
+            }
+        }
+        return base;
+    }
+
+    eqs(CsSketchReport.plural(1, "wall", "walls"), "1 wall",
+        "CsSketchReport.plural: one");
+    eqs(CsSketchReport.plural(12, "wall", "walls"), "12 walls",
+        "CsSketchReport.plural: many");
+    eqs(CsSketchReport.plural(0, "wall", "walls"), "0 walls",
+        "CsSketchReport.plural: none is still plural");
+
+    eqs(CsSketchReport.counts(report({ lines: 12, areas: 1 })),
+        "12 lines, 1 area",
+        "CsSketchReport.counts: only what is non-zero -- a line reading " +
+        "\"0 areas, 0 symbols\" is noise in front of the number that " +
+        "matters");
+    eqs(CsSketchReport.counts(report({})), "nothing",
+        "CsSketchReport.counts: an empty scrap says so in a word");
+
+    // -- the fit ------------------------------------------------------
+    eqs(CsSketchReport.fit(null, "ft"), "not placed",
+        "CsSketchReport.fit: nothing placed");
+    eqs(CsSketchReport.fit({ ok: false }, "ft"), "not placed",
+        "CsSketchReport.fit: a refused placement");
+
+    var bent = CsSketchReport.fit({ ok: true, kind: "affine", used: 4,
+        warp: [1, 2], residual: { worst: 1.234 } }, "ft");
+    ok(bent.indexOf("4 stations") !== -1,
+        "CsSketchReport.fit: says how many stations it had");
+    ok(bent.indexOf("bent") !== -1,
+        "CsSketchReport.fit: and that it was bent onto them");
+    ok(bent.indexOf("1.23 ft") !== -1,
+        "CsSketchReport.fit: quotes the PRE-warp miss, to two decimals " +
+        "-- three would imply a precision a hand sketch has never had");
+
+    var rigid = CsSketchReport.fit({ ok: true, kind: "similarity",
+        used: 2, warp: null, residual: { worst: 0 } }, "ft");
+    eqs(rigid.indexOf("bent"), -1,
+        "CsSketchReport.fit: a scrap that was not bent does not claim " +
+        "to have been");
+
+    ok(CsSketchReport.fit({ ok: true, kind: "translation", used: 1,
+        warp: null, residual: null }, "ft").indexOf("single station") !== -1,
+        "CsSketchReport.fit: one tie is described, not given a residual " +
+        "-- a residual over one point is always zero and says nothing");
+
+    // -- a file -------------------------------------------------------
+    var text = CsSketchReport.forFile("PitfallCave.th2", {
+        findings: [{ severity: "warning", code: "th2-input",
+            message: "This sketch pulls in another file." }],
+        scraps: [
+            { name: "plan1", placed: true,
+              report: report({ lines: 12, symbols: 3 }) },
+            { name: "ext1", placed: false,
+              reason: "it belongs in the extended elevation" }
+        ],
+        cancelled: false
+    });
+    ok(text.indexOf("plan1: 12 lines, 3 symbols") !== -1,
+        "CsSketchReport.forFile: what came in");
+    ok(text.indexOf("ext1: not imported -- it belongs in") !== -1,
+        "CsSketchReport.forFile: and every scrap that did NOT, by name " +
+        "and with the reason -- a missing page found weeks later with " +
+        "no idea which it was is the failure this prevents");
+    ok(text.indexOf("pulls in another file") !== -1,
+        "CsSketchReport.forFile: the parser's own findings are carried " +
+        "through, not swallowed");
+
+    ok(CsSketchReport.forFile("x.th2", null).indexOf("could not be read")
+        !== -1, "CsSketchReport.forFile: a file that would not open");
+
+    // -- the whole run -------------------------------------------------
+    var run = CsSketchReport.summary(
+        report({ lines: 40, failed: 2, unknown: ["u:handline", "gours"],
+            warnings: ["The sketch marks only one station."] }),
+        ["PitfallCave.th2:\n    plan1: 40 lines"]);
+    ok(run.indexOf("In all: 40 lines") !== -1,
+        "CsSketchReport.summary: the total");
+    ok(run.indexOf("u:handline, gours") !== -1,
+        "CsSketchReport.summary: unrecognised types are NAMED -- \"2 " +
+        "unrecognised types\" tells a caver nothing they can do, and " +
+        "tells us nothing to add to the mapping");
+    ok(run.indexOf("2 pieces of the sketch could not be drawn") !== -1,
+        "CsSketchReport.summary: and what failed outright");
+    ok(run.indexOf("- The sketch marks only one station.") !== -1,
+        "CsSketchReport.summary: every warning survives to the reader");
+
+    eqs(CsSketchReport.summary(report({ lines: 3 }), ["a.th2:"])
+            .indexOf("Not recognised"), -1,
+        "CsSketchReport.summary: a clean run says nothing about " +
+        "unrecognised types");
 }());
 
 // ---------------------------------------------------------------------

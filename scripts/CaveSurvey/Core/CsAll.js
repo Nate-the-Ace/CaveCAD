@@ -145,6 +145,10 @@ include(includeBasePath + "/CsSketchPlace.js");
 // CsDraw, whose doors it writes through so an imported wall IS a
 // traced wall.
 include(includeBasePath + "/CsSketchDraw.js");
+// Which sketches are already here, and which sit beside the survey.
+include(includeBasePath + "/CsSketchStore.js");
+// The words a caver reads afterwards. Pure, and tested as such.
+include(includeBasePath + "/CsSketchReport.js");
 
 // A scanned sketch laid onto the passage. After CsWarp, whose
 // inverse-square weighting it follows.

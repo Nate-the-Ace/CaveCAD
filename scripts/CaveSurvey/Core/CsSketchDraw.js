@@ -536,3 +536,136 @@ CsSketchDraw.scrap = function(doc, di, scrap, solution, opts) {
 
     return report;
 };
+
+// ---------------------------------------------------------------------
+// A whole file.
+// ---------------------------------------------------------------------
+
+/**
+ * Which projections this release can place, and where a scrap of each
+ * one ends up.
+ *
+ * A scrap whose projection is not here is REPORTED BY NAME and left
+ * alone -- never placed "somewhere reasonable". A sketch silently
+ * landing half its pages in the wrong view is the failure a caver
+ * would find weeks later, with no way to tell which half.
+ */
+CsSketchDraw.PLACES = {
+    "plan": "the plan",
+    "extended": "the extended elevation",
+    "none": "a cross section"
+};
+
+/**
+ * Reads one .th2 and draws every scrap in it that can be placed.
+ *
+ * \param path the .th2 file.
+ * \param opts {group, decide} -- decide is called as
+ *        decide(scrapName, alreadyHere) for a scrap this drawing
+ *        already holds, and answers "replace", "skip" or "cancel".
+ *        Without it a scrap already present is SKIPPED, never
+ *        replaced: silence is not consent to overwrite somebody's
+ *        evening.
+ * \return {ok, findings, scraps: [{name, projection, placed, report,
+ *          reason}], totals}
+ */
+CsSketchDraw.fromFile = function(doc, di, path, opts) {
+    var o = (opts === undefined || opts === null) ? {} : opts;
+    var out = { ok: false, findings: [], scraps: [],
+        totals: CsSketchDraw.newReport(), cancelled: false };
+    if (isNull(doc) || isNull(di)) {
+        return out;
+    }
+
+    var file = new QFile(String(path));
+    if (!file.open(QIODevice.ReadOnly | QIODevice.Text)) {
+        out.findings.push({ severity: "error", code: "th2-unreadable",
+            message: "Could not open " + path });
+        return out;
+    }
+    var content = new QTextStream(file).readAll();
+    file.close();
+
+    var model = CsTherion2.parse(content);
+    out.findings = model.findings;
+    var name = CsSketchStore.nameOf(path);
+    var present = CsSketchStore.present(doc);
+    var targets = CsSketchStore.planTargets(doc);
+
+    for (var i = 0; i < model.scraps.length; i++) {
+        var scrap = model.scraps[i];
+        var row = { name: scrap.name, projection: scrap.projection,
+            placed: false, report: null, reason: "" };
+        out.scraps.push(row);
+
+        if (scrap.projection === null ||
+                CsSketchDraw.PLACES[scrap.projection] === undefined) {
+            row.reason = "its projection is not one this release places";
+            continue;
+        }
+        // Only the plan is placed in this release. Extended and cross
+        // section scraps are READ, named and left -- see PLACES.
+        if (scrap.projection !== "plan") {
+            row.reason = "it belongs in " +
+                CsSketchDraw.PLACES[scrap.projection] +
+                ", which this release does not place yet";
+            continue;
+        }
+
+        var key = CsSketchStore.keyFor(name, scrap.name);
+        if (present[key] !== undefined) {
+            var answer = (o.decide === undefined || o.decide === null) ?
+                "skip" : o.decide(scrap.name, present[key]);
+            if (answer === "cancel") {
+                out.cancelled = true;
+                return out;
+            }
+            if (answer !== "replace") {
+                row.reason = "it is already in this drawing (" +
+                    present[key] + " entities), and was left alone";
+                continue;
+            }
+            CsSketchStore.remove(doc, di,
+                CsSketchStore.idsOf(doc, name, scrap.name), o.group);
+        }
+
+        var solution = CsSketchPlace.solve(scrap, targets,
+            { scaleFactor: CsSketchStore.scaleFactor(doc, scrap) });
+        if (!solution.ok) {
+            row.reason = solution.warnings.length > 0 ?
+                solution.warnings[solution.warnings.length - 1] :
+                "it could not be placed";
+            out.totals.warnings.push("Scrap \"" + scrap.name + "\": " +
+                row.reason);
+            continue;
+        }
+
+        row.report = CsSketchDraw.scrap(doc, di, scrap, solution,
+            { file: name, group: o.group });
+        row.placed = true;
+        CsSketchDraw.addTo(out.totals, row.report);
+    }
+
+    out.ok = true;
+    return out;
+};
+
+/**
+ * Folds one scrap's report into a running total.
+ */
+CsSketchDraw.addTo = function(total, one) {
+    if (one === null || one === undefined) {
+        return;
+    }
+    var counted = ["lines", "shapes", "areas", "symbols", "texts",
+        "marks", "callouts", "skipped", "failed"];
+    for (var i = 0; i < counted.length; i++) {
+        total[counted[i]] += one[counted[i]];
+    }
+    for (var u = 0; u < one.unknown.length; u++) {
+        CsSketchDraw.noteUnknown(total, one.unknown[u]);
+    }
+    for (var w = 0; w < one.warnings.length; w++) {
+        total.warnings.push(one.warnings[w]);
+    }
+};
