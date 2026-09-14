@@ -16,6 +16,7 @@ The syntax of each script is checked separately, inside QCAD's own engine, by
 tests/js_syntax.js -- see tests/README.md.
 """
 
+import hashlib
 import json
 import os
 import re
@@ -2335,6 +2336,35 @@ class TestHandbook(unittest.TestCase):
         self.assertEqual(bad, [],
                          "these screenshot records point at nothing: %s"
                          % bad)
+
+    def test_no_screenshot_is_stale(self):
+        """A shot records the tool file it depicts and that file's hash.
+
+        PUBLISH ONLY, deliberately. A panel changes far more often than
+        its screenshot needs retaking, and a check that blocked every
+        edit until somebody reopened CaveCAD would be switched off
+        within a week. A release is the moment the pictures have to be
+        honest, so that is where this bites.
+
+        It never recaptures: what state a panel should be photographed
+        in is a decision, not a fixture.
+        """
+        if not PUBLISH_CHECK:
+            self.skipTest("publish-only: a shot goes stale between releases")
+        stale = []
+        for page in self.pages:
+            for shot in page.get("shots", []):
+                path = os.path.join(REPO, shot["depicts"])
+                with open(path, "rb") as handle:
+                    now = hashlib.sha256(handle.read()).hexdigest()
+                if now != shot["hash"]:
+                    stale.append("%s (%s)" % (page["id"], shot["image"]))
+        self.assertEqual(
+            stale, [],
+            "these screenshots were taken of a panel that has changed "
+            "since: %s -- retake them through the MCP bridge, or say "
+            "in the commit why the picture is still true and update "
+            "the hash" % stale)
 
     def test_the_handbook_ships_inside_the_addon(self):
         """Only meaningful against a staged package: in the repo the

@@ -921,9 +921,12 @@ CsPanel.tipHtml = function(title, help, detail) {
  * \param label  what the page is called, for the tooltip
  */
 CsPanel.helpButton = function(folder, label) {
-    if (typeof(Handbook) === "undefined") {
-        return null;
-    }
+    // The Handbook tool is NOT required to exist yet. A panel's dock is
+    // built during init, and the order tools are init'd in is not ours
+    // to rely on -- measured 2026-09-13: Draw's dock is built while
+    // Handbook is still undefined, so a guard here attached no button
+    // to the busiest panel in the suite and one to every other. The
+    // press is what needs the tool, and by then it is loaded.
     var button = new QPushButton("?");
     button.toolTip = qsTr("What this panel is for, and how to use it: " +
         "opens the handbook at ") + String(label) + ".";
@@ -936,6 +939,11 @@ CsPanel.helpButton = function(folder, label) {
         // is ugly and still opens the right page
     }
     button.clicked.connect(function() {
+        if (typeof(Handbook) === "undefined") {
+            warning(qsTr("This build has no Handbook tool installed, so " +
+                "there is nothing for the ? to open."));
+            return;
+        }
         try {
             var page = CsHandbook.forTool(folder);
             Handbook.open(page);
@@ -971,15 +979,25 @@ CsPanel.attachHelp = function(dock, folder, label) {
         return null;
     }
     try {
-        var layout = dock.widget().layout();
+        // WRAP, do not reach into the panel's own layout. Measured
+        // 2026-09-13: Draw's body is a QGridLayout, which has no
+        // insertLayout and whose addLayout takes a row and a column --
+        // so a version of this that inserted into the existing layout
+        // silently attached nothing on exactly the busiest panel. A
+        // wrapper works whatever the body is laid out with.
+        var body = dock.widget();
+        var wrapper = new QWidget(dock);
+        var stack = new QVBoxLayout();
+        stack.setContentsMargins(0, 0, 0, 0);
+        stack.setSpacing(2);
         var row = new QHBoxLayout();
+        row.setContentsMargins(0, 0, 4, 0);
         row.addStretch(1);
         row.addWidget(button, 0, 0);
-        try {
-            layout.insertLayout(0, row);
-        } catch (eInsert) {
-            layout.addLayout(row, 0);
-        }
+        stack.addLayout(row, 0);
+        stack.addWidget(body, 1, 0);
+        wrapper.setLayout(stack);
+        dock.setWidget(wrapper);
     } catch (e) {
         return null;
     }

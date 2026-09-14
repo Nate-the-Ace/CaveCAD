@@ -16,7 +16,13 @@
       "tools": [
         "Handbook"
       ],
-      "shots": []
+      "shots": [
+        {
+          "image": "handbook-panel.png",
+          "depicts": "scripts/CaveSurvey/Handbook/Handbook.js",
+          "hash": "8f70c58eeccecf8ceb3fd7881fa9e22fa10b2b867423f6439be086d78b288bc0"
+        }
+      ]
     },
     {
       "id": "caves",
@@ -71,7 +77,13 @@
       "tools": [
         "SurveyNotebook"
       ],
-      "shots": []
+      "shots": [
+        {
+          "image": "survey-notebook-panel.png",
+          "depicts": "scripts/CaveSurvey/SurveyNotebook/SurveyNotebook.js",
+          "hash": "acb607da2331d8be6368cdd6df5a0325845ef36bb84f92a77ec6ebaf9b3b0d49"
+        }
+      ]
     },
     {
       "id": "import-cave-survey",
@@ -126,7 +138,13 @@
       "tools": [
         "DrawPanel"
       ],
-      "shots": []
+      "shots": [
+        {
+          "image": "draw-panel.png",
+          "depicts": "scripts/CaveSurvey/DrawPanel/DrawPanel.js",
+          "hash": "6dcaa58ea50f4cbab1bf5bec23a6cfca114957cf6b6658a648b95d68a89986b2"
+        }
+      ]
     },
     {
       "id": "feature-trace",
@@ -214,7 +232,13 @@
       "tools": [
         "SketchScans"
       ],
-      "shots": []
+      "shots": [
+        {
+          "image": "sketch-scans-panel.png",
+          "depicts": "scripts/CaveSurvey/SketchScans/SketchScans.js",
+          "hash": "0acb74469a321b265e7169276efbbef8953f1a721bffa46df7563fdd155bf921"
+        }
+      ]
     },
     {
       "id": "surface-data",
@@ -236,7 +260,13 @@
       "tools": [
         "SheetSetup"
       ],
-      "shots": []
+      "shots": [
+        {
+          "image": "sheet-setup-panel.png",
+          "depicts": "scripts/CaveSurvey/SheetSetup/SheetSetup.js",
+          "hash": "8708f186da47fc5d891d9d362871db9a050b13dcf3cadc06baf956f8254c8302"
+        }
+      ]
     },
     {
       "id": "survey-stats",
@@ -291,7 +321,13 @@
       "tools": [
         "CheckMap"
       ],
-      "shots": []
+      "shots": [
+        {
+          "image": "check-map-panel.png",
+          "depicts": "scripts/CaveSurvey/CheckMap/CheckMap.js",
+          "hash": "566c367cccfd8409e3b2e85dd8f3ba14069a26878765c95ceeef4b10ae910aa5"
+        }
+      ]
     },
     {
       "id": "repair-drawing",
