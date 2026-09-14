@@ -378,3 +378,122 @@ CsSketchPlace.orientation = function(matrix, orientationDeg) {
     var result = (base + turn) % 360;
     return result < 0 ? result + 360 : result;
 };
+
+// ---------------------------------------------------------------------
+// Cubics to points.
+// ---------------------------------------------------------------------
+
+/**
+ * How far a flattened cubic may stray from the curve it stands for,
+ * in drawing units. A tenth of a foot: below what a pen line covers on
+ * a 1" = 50 ft sheet, and far below what a sketcher's hand said.
+ */
+CsSketchPlace.FLATNESS = 0.1;
+
+/**
+ * A placed path as ordinary points lying ON the curve.
+ *
+ * WHY FLATTEN AT ALL, having gone to the trouble of keeping the
+ * cubics through the parse and the warp. The entity this suite stores
+ * a traced feature as is an interpolating spline through points --
+ * that is what CsTrace.controlPointsOf reads, what CsTrace.growCurve
+ * extends, what CsShapeLine takes as a spine and what CsWarp bends
+ * later. Writing something else would make an imported wall a
+ * second-class object that half the suite could not touch, which is
+ * the opposite of the point of importing ink.
+ *
+ * NOT THE SAME AS RESAMPLING A DRAG. CsTrace.resample walks a captured
+ * freehand stroke at a fixed step to thin out a caver's hand; these
+ * points are the CURVE EVALUATED, placed where the cubic actually
+ * goes, at whatever density the curvature needs. A straight run
+ * between two anchors stays two points.
+ *
+ * Subdivides rather than stepping a parameter: a cubic parameterised
+ * evenly bunches its samples where it is straight and starves them
+ * where it bends, which is exactly backwards.
+ *
+ * \param placed the output of CsSketchPlace.path.
+ * \param tolerance drawing units; CsSketchPlace.FLATNESS when absent.
+ * \return an array of {x, y}, or [] when there is nothing to draw.
+ */
+CsSketchPlace.flatten = function(placed, tolerance) {
+    var tol = (tolerance === undefined || tolerance === null ||
+        !(tolerance > 0)) ? CsSketchPlace.FLATNESS : tolerance;
+    var out = [];
+    if (placed === undefined || placed === null || placed.length === 0) {
+        return out;
+    }
+    if (placed[0].to === null) {
+        return out;
+    }
+    out.push({ x: placed[0].to.x, y: placed[0].to.y });
+    for (var i = 1; i < placed.length; i++) {
+        var seg = placed[i];
+        if (seg.to === null) {
+            continue;
+        }
+        var from = out[out.length - 1];
+        if (seg.c1 === null || seg.c2 === null) {
+            out.push({ x: seg.to.x, y: seg.to.y });
+            continue;
+        }
+        CsSketchPlace.subdivide(from, seg.c1, seg.c2, seg.to, tol, 0, out);
+        out.push({ x: seg.to.x, y: seg.to.y });
+    }
+    return out;
+};
+
+/**
+ * One cubic, split until flat, appending everything but its end point.
+ *
+ * The end point is the caller's to add, so that consecutive segments
+ * do not each contribute the joint between them.
+ *
+ * The depth cap is not ceremony: a cusp (both controls on top of an
+ * anchor) never satisfies a flatness test, and a sketch is allowed to
+ * contain one.
+ */
+CsSketchPlace.MAX_SUBDIVISION = 12;
+
+CsSketchPlace.subdivide = function(p0, p1, p2, p3, tol, depth, out) {
+    if (depth >= CsSketchPlace.MAX_SUBDIVISION ||
+            CsSketchPlace.isFlat(p0, p1, p2, p3, tol)) {
+        return;
+    }
+    // de Casteljau at the middle.
+    function mid(a, b) { return { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 }; }
+    var p01 = mid(p0, p1), p12 = mid(p1, p2), p23 = mid(p2, p3);
+    var p012 = mid(p01, p12), p123 = mid(p12, p23);
+    var centre = mid(p012, p123);
+
+    CsSketchPlace.subdivide(p0, p01, p012, centre, tol, depth + 1, out);
+    out.push({ x: centre.x, y: centre.y });
+    CsSketchPlace.subdivide(centre, p123, p23, p3, tol, depth + 1, out);
+};
+
+/**
+ * Whether a cubic is within `tol` of the straight line through its
+ * ends.
+ *
+ * Measures both control points' distance from the chord. A cubic lies
+ * inside the hull of its four points, so controls close to the chord
+ * mean the curve is too.
+ *
+ * The degenerate case -- both ends in the same place -- is NOT flat
+ * unless the controls are there as well: that is a loop, and calling
+ * it flat would erase it.
+ */
+CsSketchPlace.isFlat = function(p0, p1, p2, p3, tol) {
+    var dx = p3.x - p0.x, dy = p3.y - p0.y;
+    var span = Math.sqrt(dx * dx + dy * dy);
+    if (span < 1e-12) {
+        var d1 = Math.sqrt((p1.x - p0.x) * (p1.x - p0.x) +
+            (p1.y - p0.y) * (p1.y - p0.y));
+        var d2 = Math.sqrt((p2.x - p0.x) * (p2.x - p0.x) +
+            (p2.y - p0.y) * (p2.y - p0.y));
+        return d1 <= tol && d2 <= tol;
+    }
+    var off1 = Math.abs((p1.x - p0.x) * dy - (p1.y - p0.y) * dx) / span;
+    var off2 = Math.abs((p2.x - p0.x) * dy - (p2.y - p0.y) * dx) / span;
+    return off1 <= tol && off2 <= tol;
+};

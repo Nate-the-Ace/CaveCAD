@@ -27979,6 +27979,72 @@ eqs(CsSymbolStore.AREA_MARKER_TAGS.custom, "AreaCustom",
     eqs(CsSketchPlace.path(noTie, []), null,
         "CsSketchPlace.path: an unplaced scrap has no path");
 
+    // -- cubics to points -------------------------------------------------
+    function P(x, y) { return { x: x, y: y }; }
+
+    var straightOnly = CsSketchPlace.flatten([
+        { to: P(0, 0), c1: null, c2: null },
+        { to: P(10, 0), c1: null, c2: null }
+    ], 0.1);
+    eqs(straightOnly.length, 2,
+        "CsSketchPlace.flatten: a straight run between two anchors stays " +
+        "two points -- this evaluates the curve, it does not resample a " +
+        "drag at a fixed step");
+
+    var curved = CsSketchPlace.flatten([
+        { to: P(0, 0), c1: null, c2: null },
+        { to: P(30, 0), c1: P(10, 20), c2: P(20, 20) }
+    ], 0.1);
+    ok(curved.length > 5,
+        "CsSketchPlace.flatten: a real curve is subdivided until flat");
+    near(curved[0].x, 0, 1e-9, "CsSketchPlace.flatten: starts at the start");
+    near(curved[curved.length - 1].x, 30, 1e-9,
+        "CsSketchPlace.flatten: and ends at the end");
+    near(curved[curved.length - 1].y, 0, 1e-9,
+        "CsSketchPlace.flatten: in y too");
+
+    // Every point must lie ON the curve, which is the whole claim. This
+    // symmetric cubic peaks at t = 0.5, where B(0.5) = (p0 + 3p1 + 3p2
+    // + p3) / 8 -- both controls sitting at y = 20 gives 6/8 * 20 = 15,
+    // NOT the 3/8 * 20 a single raised control would give.
+    var peak = 0;
+    for (var ci = 0; ci < curved.length; ci++) {
+        if (curved[ci].y > peak) {
+            peak = curved[ci].y;
+        }
+    }
+    near(peak, 15, 0.2,
+        "CsSketchPlace.flatten: the samples reach the curve's own height " +
+        "(15), which here is below the control points at 20");
+
+    var coarse = CsSketchPlace.flatten([
+        { to: P(0, 0), c1: null, c2: null },
+        { to: P(30, 0), c1: P(10, 20), c2: P(20, 20) }
+    ], 2.0);
+    ok(coarse.length < curved.length,
+        "CsSketchPlace.flatten: a looser tolerance costs fewer points");
+
+    var cusp = CsSketchPlace.flatten([
+        { to: P(0, 0), c1: null, c2: null },
+        { to: P(0, 0), c1: P(10, 0), c2: P(-10, 0) }
+    ], 0.1);
+    ok(cusp.length > 2,
+        "CsSketchPlace.flatten: a loop back to its own start is not flat, " +
+        "and is not erased");
+    ok(cusp.length < 5000,
+        "CsSketchPlace.flatten: and the depth cap stops it subdividing " +
+        "a cusp forever");
+
+    eqs(CsSketchPlace.flatten(null, 0.1).length, 0,
+        "CsSketchPlace.flatten: nothing to draw");
+    eqs(CsSketchPlace.flatten([], 0.1).length, 0,
+        "CsSketchPlace.flatten: an empty path");
+
+    ok(CsSketchPlace.isFlat(P(0, 0), P(1, 0), P(2, 0), P(3, 0), 0.1),
+        "CsSketchPlace.isFlat: a straight cubic is flat");
+    ok(!CsSketchPlace.isFlat(P(0, 0), P(1, 5), P(2, 5), P(3, 0), 0.1),
+        "CsSketchPlace.isFlat: a bent one is not");
+
     // -- symbol size and facing -------------------------------------------
     near(CsSketchPlace.scaleOf({ a: 2, b: 0, c: 0, d: 0, e: 2, f: 0 }),
         2, 1e-9, "CsSketchPlace.scaleOf: a plain doubling");
