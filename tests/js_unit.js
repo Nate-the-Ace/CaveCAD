@@ -200,6 +200,7 @@ var CORE_FILES = [
     // what is tested. The document half is covered by
     // tests/symbol_palette_run.js.
     "scripts/CaveSurvey/Core/CsSymbolStore.js",
+    "scripts/CaveSurvey/Core/CsProvenance.js",
     "scripts/CaveSurvey/Core/CsArea.js",
     // CsSketch is NOT loaded here: its tables read CsLayers.* at load
     // time, and this list has no CsLayers in it. Its own test block
@@ -28181,6 +28182,156 @@ eqs(CsSymbolStore.AREA_MARKER_TAGS.custom, "AreaCustom",
             .indexOf("Not recognised"), -1,
         "CsSketchReport.summary: a clean run says nothing about " +
         "unrecognised types");
+}());
+
+// ---------------------------------------------------------------------
+// CsProvenance -- how much a piece of this map is worth trusting
+// ---------------------------------------------------------------------
+(function() {
+    var P = CsProvenance;
+
+    function src(over) {
+        var base = { id: "s1", rung: P.TRACED, scaled: true,
+            title: "the 1987 map", author: "J. WEBB", year: "1987" };
+        for (var k in over) {
+            if (over.hasOwnProperty(k)) { base[k] = over[k]; }
+        }
+        return base;
+    }
+
+    // -- the ladder ---------------------------------------------------
+    eqs(P.LADDER.length, 3, "CsProvenance: three rungs");
+    ok(P.height(P.TRACED) < P.height(P.TIED),
+        "CsProvenance.height: traced is below tied");
+    ok(P.height(P.TIED) < P.height(P.SURVEYED),
+        "CsProvenance.height: tied is below surveyed");
+    eqs(P.height("superseded"), -1,
+        "CsProvenance.height: SUPERSEDED is not a rung -- it is a " +
+        "retirement flag, and putting it on the ladder would make it " +
+        "sound like an improvement on tied");
+
+    ok(P.atLeast(P.SURVEYED, P.TRACED),
+        "CsProvenance.atLeast: surveyed clears a traced floor");
+    ok(!P.atLeast(P.TRACED, P.SURVEYED),
+        "CsProvenance.atLeast: traced does not clear a surveyed floor");
+    ok(!P.atLeast("excellent", P.TRACED),
+        "CsProvenance.atLeast: a rung this file does not know is never " +
+        "\"at least\" anything -- reading an unreadable value as " +
+        "trustworthy is the direction that puts a made-up length on a " +
+        "sheet");
+
+    // -- inherit and override -----------------------------------------
+    var plain = P.resolve({}, null);
+    eqs(plain.rung, P.SURVEYED,
+        "CsProvenance.resolve: no provenance at all is SURVEYED, so " +
+        "every drawing made before this file existed is already correct");
+    eqs(plain.from, "default", "CsProvenance.resolve: and says so");
+
+    var inherited = P.resolve({ SourceId: "s1" }, src({}));
+    eqs(inherited.rung, P.TRACED,
+        "CsProvenance.resolve: an entity with a source inherits its rung");
+    eqs(inherited.from, "source", "CsProvenance.resolve: from the source");
+
+    var over = P.resolve({ SourceId: "s1", Rung: P.TIED,
+        RungReason: "surveyed entrance series fixes this stretch" },
+        src({}));
+    eqs(over.rung, P.TIED, "CsProvenance.resolve: an override is honoured");
+    eqs(over.from, "override", "CsProvenance.resolve: and marked as one");
+    ok(over.reason.length > 0, "CsProvenance.resolve: carrying its reason");
+
+    var noReason = P.resolve({ SourceId: "s1", Rung: P.TIED }, src({}));
+    eqs(noReason.rung, P.TRACED,
+        "CsProvenance.resolve: an override with NO reason is refused and " +
+        "falls back to the source -- honouring it would make the " +
+        "reason requirement advice rather than a rule");
+    ok(noReason.finding !== null,
+        "CsProvenance.resolve: and the caver is told, by finding");
+
+    var nonsense = P.resolve({ SourceId: "s1", Rung: "excellent",
+        RungReason: "it looks right" }, src({}));
+    eqs(nonsense.rung, P.TRACED,
+        "CsProvenance.resolve: a rung that means nothing here is not " +
+        "guessed at");
+    ok(nonsense.finding !== null, "CsProvenance.resolve: and is reported");
+
+    // -- what may be claimed -------------------------------------------
+    var measured = P.mayQuoteLength(P.SURVEYED, null);
+    ok(measured.allowed && measured.kind === "measured",
+        "CsProvenance.mayQuoteLength: surveyed passage has a length");
+
+    var estimate = P.mayQuoteLength(P.TRACED, src({}));
+    ok(estimate.allowed && estimate.kind === "estimate",
+        "CsProvenance.mayQuoteLength: a SCALED traced source gives an " +
+        "estimate, which is a different word on purpose");
+
+    var unscaled = P.mayQuoteLength(P.TRACED, src({ scaled: false }));
+    ok(!unscaled.allowed,
+        "CsProvenance.mayQuoteLength: an UNSCALED source has no length " +
+        "at all -- not a length of unknown accuracy. Measuring it would " +
+        "report the size of a photocopy");
+    eqs(unscaled.kind, "none", "CsProvenance.mayQuoteLength: none");
+    ok(unscaled.why.length > 0, "CsProvenance.mayQuoteLength: and says why");
+
+    ok(P.mayQuoteLength(P.TIED, src({ rung: P.TIED })).kind === "estimate",
+        "CsProvenance.mayQuoteLength: tied ink is anchored, still not " +
+        "measured");
+
+    ok(P.mayQuoteGrade(P.SURVEYED),
+        "CsProvenance.mayQuoteGrade: surveyed passage may be graded");
+    ok(!P.mayQuoteGrade(P.TIED),
+        "CsProvenance.mayQuoteGrade: tied passage may NOT -- a grade is " +
+        "a statement about instruments and closure, and traced ink had " +
+        "neither");
+    ok(!P.mayQuoteGrade(P.TRACED),
+        "CsProvenance.mayQuoteGrade: nor traced");
+
+    // -- the sentence a reader gets -------------------------------------
+    eqs(P.describe(P.SURVEYED, null), P.RUNGS.surveyed.sentence,
+        "CsProvenance.describe: surveyed passage says so plainly");
+    var line = P.describe(P.TRACED, src({}));
+    ok(line.indexOf("the 1987 map") !== -1 &&
+            line.indexOf("J. WEBB") !== -1 && line.indexOf("1987") !== -1,
+        "CsProvenance.describe: who drew it and when reaches the READER, " +
+        "not just a record nobody opens");
+    ok(line.indexOf("Not surveyed") !== -1,
+        "CsProvenance.describe: and it always ends by saying so");
+    ok(P.describe(P.TRACED, src({ scaled: false }))
+            .indexOf("NOT TO SCALE") !== -1,
+        "CsProvenance.describe: an unscaled source says NOT TO SCALE, " +
+        "which is what a sheet built from one must print instead of a bar");
+    ok(P.describe(P.TIED, src({ rung: P.TIED }))
+            .indexOf("anchored") !== -1,
+        "CsProvenance.describe: tied ink says what anchored it");
+
+    // -- superseded -----------------------------------------------------
+    ok(!P.isSuperseded({}), "CsProvenance.isSuperseded: nothing said");
+    ok(P.isSuperseded({ Superseded: "1" }),
+        "CsProvenance.isSuperseded: marked");
+    ok(!P.isSuperseded({ Superseded: "false" }),
+        "CsProvenance.isSuperseded: explicitly not");
+
+    // -- what the whole drawing may claim -------------------------------
+    eqs(P.overall([]), P.SURVEYED,
+        "CsProvenance.overall: a drawing with nothing traced in it");
+    eqs(P.overall([{ rung: P.SURVEYED }, { rung: P.TRACED }]), P.TRACED,
+        "CsProvenance.overall: a half-traced cave is NOT a surveyed cave " +
+        "-- a reader holding one sheet asks one question, and the honest " +
+        "answer is set by the weakest passage on it");
+    eqs(P.overall([{ rung: P.SURVEYED },
+            { rung: P.TRACED, superseded: true }]), P.SURVEYED,
+        "CsProvenance.overall: superseded ink does not hold the map " +
+        "down -- a fully resurveyed cave would otherwise still report " +
+        "as traced until somebody deleted the old linework");
+
+    // -- the work queue --------------------------------------------------
+    var prog = P.progress([{ superseded: true }, { superseded: true },
+        { superseded: false }, {}]);
+    eqs(prog.total, 4, "CsProvenance.progress: how much there is");
+    eqs(prog.superseded, 2, "CsProvenance.progress: how much is done");
+    near(prog.fraction, 0.5, 1e-9, "CsProvenance.progress: the fraction");
+    eqs(P.progress([]).fraction, 0,
+        "CsProvenance.progress: an empty source is 0, not a division by " +
+        "zero dressed as progress");
 }());
 
 // ---------------------------------------------------------------------
