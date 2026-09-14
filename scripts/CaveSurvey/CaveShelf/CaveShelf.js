@@ -620,6 +620,14 @@ CaveShelf.show = function() {
     atStartup.checked =
         RSettings.getBoolValue(CaveShelf.SETTING_SHOW, true) === true;
     footer.addWidget(atStartup, 0, 0);
+    // The shelf is a dialog, not a dock, so CsPanel.attachHelp -- which
+    // wraps a dock's widget -- has nothing to wrap. The button is the
+    // same one, in the same corner of the same footer the rest of the
+    // shelf's actions live in.
+    var shelfHelp = CsPanel.helpButton("CaveShelf", qsTr("Caves"));
+    if (shelfHelp !== null) {
+        footer.addWidget(shelfHelp, 0, 0);
+    }
     footer.addStretch(1);
 
     var newCaveButton = new QPushButton(qsTr("New Cave..."));
