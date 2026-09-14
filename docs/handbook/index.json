@@ -461,6 +461,104 @@
       "class": "task",
       "file": "set-up-a-student.html",
       "shots": []
+    },
+    {
+      "id": "words-survey",
+      "title": "Station, shot, splay, LRUD",
+      "class": "concept",
+      "file": "words-survey.html",
+      "shots": []
+    },
+    {
+      "id": "words-layers",
+      "title": "Layers: what the map is saying",
+      "class": "concept",
+      "file": "words-layers.html",
+      "shots": []
+    },
+    {
+      "id": "words-datum",
+      "title": "Elevation, and the datum trap",
+      "class": "concept",
+      "file": "words-datum.html",
+      "shots": []
+    },
+    {
+      "id": "words-trips",
+      "title": "Trips, and revising one",
+      "class": "concept",
+      "file": "words-trips.html",
+      "shots": []
+    },
+    {
+      "id": "words-files",
+      "title": "Where a cave's files live",
+      "class": "concept",
+      "file": "words-files.html",
+      "shots": []
+    },
+    {
+      "id": "words-privacy",
+      "title": "The privacy rule",
+      "class": "concept",
+      "file": "words-privacy.html",
+      "shots": []
+    },
+    {
+      "id": "words-symbols",
+      "title": "Symbol conventions",
+      "class": "concept",
+      "file": "words-symbols.html",
+      "shots": []
+    },
+    {
+      "id": "words-closure",
+      "title": "Loop closure and adjustment",
+      "class": "concept",
+      "file": "words-closure.html",
+      "shots": []
+    },
+    {
+      "id": "lesson-1",
+      "title": "Lesson 1 — Your first cave map",
+      "class": "process",
+      "file": "lesson-1.html",
+      "shots": []
+    },
+    {
+      "id": "lesson-2",
+      "title": "Lesson 2 — Typing a trip into the notebook",
+      "class": "process",
+      "file": "lesson-2.html",
+      "shots": []
+    },
+    {
+      "id": "lesson-3",
+      "title": "Lesson 3 — Drawing walls over a scan",
+      "class": "process",
+      "file": "lesson-3.html",
+      "shots": []
+    },
+    {
+      "id": "lesson-4",
+      "title": "Lesson 4 — Sections and the profile",
+      "class": "process",
+      "file": "lesson-4.html",
+      "shots": []
+    },
+    {
+      "id": "lesson-5",
+      "title": "Lesson 5 — Reading the map for faults",
+      "class": "process",
+      "file": "lesson-5.html",
+      "shots": []
+    },
+    {
+      "id": "lesson-6",
+      "title": "Lesson 6 — Sharing it",
+      "class": "process",
+      "file": "lesson-6.html",
+      "shots": []
     }
   ]
 }
