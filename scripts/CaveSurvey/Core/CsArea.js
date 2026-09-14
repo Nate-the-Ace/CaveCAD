@@ -1458,3 +1458,197 @@ CsArea.suggestedDensityMul = function(currentDensityMul, estimate, target) {
     suggested = Math.max(CsArea.DENSITY_FLOOR, suggested);
     return Math.round(suggested * 100) / 100;
 };
+
+// ---------------------------------------------------------------------
+// Writing a boundary, and refusing to.
+// ---------------------------------------------------------------------
+
+/**
+ * A genuinely CLOSED boundary spline through `verts`.
+ *
+ * PERIODIC, not "fit an open spline and flip a flag": CsTrace.fitSpline
+ * builds its RSpline with setPeriodic(false) baked in (see that
+ * function's own header) and hands back an RSplineEntity, which has no
+ * setClosed at all -- there is nothing to flip after the fact, and
+ * calling one that does not exist is exactly the bug the plan's first
+ * draft of this file had. This builds the RSplineData directly and
+ * marks it periodic BEFORE update(), the same idiom CsRevise.js uses
+ * to rebuild a periodic spline in place (its RSplineEntity warp
+ * branch) and the same one tests/area_fill_run.js's own
+ * addSplineBoundary fixture already used, in Task 5, to build a closed
+ * test boundary before this file existed.
+ *
+ * `verts` must already have any duplicate closing vertex removed
+ * (commit() does this) -- a periodic spline closes the loop itself by
+ * wrapping its LAST control point back to its FIRST, so a
+ * caller-supplied duplicate at the seam would double up a control
+ * point exactly where the curve closes, denting the loop right there.
+ *
+ * PROVING it closed, in a `-no-gui` run: CsArea.vertsOf samples a
+ * spline through getExploded()'s line/arc segments, never through
+ * getPointCloud() -- the one sampling path that needs no spline proxy
+ * plugin and so is the only one this build can read headlessly at all
+ * (see CsArea.vertsOf's own header). A test that samples this boundary
+ * with CsArea.vertsOf and finds its first and last points a hair apart,
+ * with a non-trivial CsArea.polygonArea in between, has verified a real
+ * closed loop -- not a boundary that merely looks closed on screen
+ * while scattering its fill through a gap nothing sampled caught.
+ */
+CsArea.closedBoundary = function(doc, verts) {
+    // INTERPOLATING FIRST (2026-09-12). The approximating periodic fit
+    // below pulls the boundary inside the points a caver traced, by a
+    // fraction of the sampling step -- the same rounding that was
+    // measured at 3.35 inches on a wall corner. CsTrace's cyclic solver
+    // puts the curve THROUGH them instead, for the same control point
+    // count and the same file size.
+    //
+    // The fallback stays because interpolation answers null for a loop
+    // of fewer than four points or one with no spread, and a caver
+    // mid-stroke must still get a boundary.
+    var interp = CsTrace.periodicInterpolatingSpline(doc, verts);
+    if (!isNull(interp)) {
+        return interp;
+    }
+    var data = new RSplineData();
+    for (var i = 0; i < verts.length; i++) {
+        data.appendControlPoint(new RVector(verts[i].x, verts[i].y));
+    }
+    data.setDegree(CsTrace.degreeFor(verts.length));
+    data.setPeriodic(true);
+    data.update();
+    return new RSplineEntity(doc, data);
+};
+
+/**
+ * Why an add was refused, as a sentence naming the layer and its
+ * state, or "" when neither layer refuses.
+ *
+ * Modelled on FeatureTraceRun.refusalReason, extended to a LIST of
+ * layers because one area touches two (the fill and its boundary) and
+ * either can be the one a caver locked. LOCKED is checked directly,
+ * the same as FeatureTraceRun does, because CsLayers.refusesEdits
+ * deliberately excludes it (a lock is something the surveyor did on
+ * purpose, not a visibility state a writer may reveal for the length
+ * of its own write -- see that function's own header); OFF and FROZEN
+ * both go through CsLayers.refusesEdits so this file does not carry a
+ * second copy of that reasoning.
+ *
+ * Reads every named layer back rather than stopping at the first
+ * missing one: a locked fill layer and a perfectly fine boundary layer
+ * is a real, nameable state, and the caver should hear about the one
+ * that is actually wrong.
+ */
+CsArea.refusalReason = function(doc, layerNames) {
+    for (var i = 0; i < layerNames.length; i++) {
+        var name = layerNames[i];
+        var lay = null;
+        try {
+            lay = doc.queryLayer(name);
+        } catch (e) {
+            lay = null;
+        }
+        if (isNull(lay)) {
+            return qsTr("Nothing was drawn: layer %1 could not be found " +
+                "or created.").arg(name);
+        }
+        var locked = false;
+        try {
+            locked = lay.isLocked();
+        } catch (eLocked) {
+        }
+        if (locked) {
+            return qsTr("Nothing was drawn: layer %1 is LOCKED. Unlock " +
+                "it in the Layer List and trace again.").arg(name);
+        }
+        if (CsLayers.refusesEdits(lay)) {
+            return qsTr("Nothing was drawn: layer %1 is FROZEN or turned " +
+                "OFF. Fix that in the Layer List and trace again.")
+                .arg(name);
+        }
+    }
+    return "";
+};
+
+/**
+ * Writes one area: its boundary, its tags, and its fill.
+ *
+ * The half of Area Fill's own commit that is not about a stroke. Split
+ * out when the Therion sketch importer needed it: a scrap's area
+ * arrives as a boundary somebody already drew, so none of the
+ * stroke-shaped guards above it apply -- but everything here does,
+ * down to which trip gets the credit.
+ *
+ * \param entry the CsArea.merged() row for `key`.
+ * \param verts the boundary, in drawing coordinates.
+ * \param opts {scale, density} and, optionally, {trip} to state the
+ *        trip rather than have it derived from the nearest station.
+ * \return {ok, id, layer, boundaryLayer, count, tripId, reason}
+ */
+CsArea.create = function(doc, di, entry, key, verts, opts) {
+    var routed = CsArea.layersFor(doc, entry, verts);
+
+    // ENSURE BEFORE READING BACK. A profile run's twin/variant layer
+    // (PROFILE-SEDIMENT-SAND-GRAVEL-A) may not exist in this drawing
+    // yet -- routing computes its NAME, not its presence -- and
+    // doc.queryLayer of a name nobody has created yet answers null the
+    // same way a genuinely missing layer would. Checking refusalReason
+    // first would misreport every brand-new variant as "could not be
+    // found", which is not a refusal at all. CsLayers.ensure is a
+    // no-op when the layer already exists (doc.hasLayer's own guard),
+    // so a layer a caver actually locked earlier is untouched and
+    // still reads back locked below.
+    CsLayers.ensure(doc, di, routed.fillLayer);
+    CsLayers.ensure(doc, di, routed.boundaryLayer);
+
+    var refusal = CsArea.refusalReason(doc,
+        [routed.fillLayer, routed.boundaryLayer]);
+    if (refusal !== "") {
+        return { ok: false, id: null, count: 0, reason: refusal };
+    }
+
+    var id = CsUuid.v4();
+    var seed = CsArea.newSeed();
+    var op = new RAddObjectsOperation();
+
+    var boundary = CsArea.closedBoundary(doc, verts);
+    boundary.setLayerId(doc.getLayerId(routed.boundaryLayer));
+    CsTags.set(boundary, CsArea.ID_KEY, id);
+    CsTags.set(boundary, CsArea.PATTERN_KEY, key);
+    CsTags.set(boundary, CsArea.SCALE_KEY, String(opts.scale));
+    CsTags.set(boundary, CsArea.DENSITY_KEY, String(opts.density));
+    CsTags.set(boundary, CsArea.SEED_KEY, String(seed));
+
+    // WHICH TRIP DREW IT -- never a default of 0. See CsTrace.tripFor's
+    // own header and the elevation datum family of bugs this suite has
+    // closed five doors on: a trip id of 0 is not "no trip", it is trip
+    // zero, and a boundary silently defaulted to it looks attributed
+    // until someone asks which trip drew it.
+    //
+    // A CALLER MAY STATE IT. An imported scrap knows which trip
+    // sketched it from the file it came in, which is better evidence
+    // than the nearest station; a stroke does not, and derives it.
+    var trip = (opts.trip !== undefined && opts.trip !== null &&
+        opts.trip !== "") ? opts.trip :
+        CsTrace.tripFor(doc, routed.frame, verts, routed.bays);
+    if (!isNull(trip)) {
+        CsTags.set(boundary, CsTrace.TRIP_TAG, trip);
+    }
+    op.addObject(boundary, false);
+
+    var built = CsArea.build(doc, op, boundary, entry,
+        { id: id, seed: seed, scale: opts.scale, density: opts.density,
+          layer: routed.fillLayer }, di);
+    // WHAT WE JUST WROTE (2026-09-12): a fresh stroke's own baseline,
+    // so the very first regenerate can already tell a property-editor
+    // edit apart from this stroke's own output instead of reading it
+    // as drift on its first look. See CsArea.HATCH_SCALE_KEY's header.
+    if (!isNull(built.scale)) {
+        CsTags.set(boundary, CsArea.HATCH_SCALE_KEY, built.scale);
+        CsTags.set(boundary, CsArea.HATCH_ANGLE_KEY, built.angle);
+    }
+    di.applyOperation(op);
+
+    return { ok: built.ok, id: id, layer: routed.fillLayer,
+        boundaryLayer: routed.boundaryLayer, count: built.count,
+        tripId: trip, reason: built.reason };
+};
