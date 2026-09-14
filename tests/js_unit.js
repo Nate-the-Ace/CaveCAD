@@ -201,6 +201,10 @@ var CORE_FILES = [
     // tests/symbol_palette_run.js.
     "scripts/CaveSurvey/Core/CsSymbolStore.js",
     "scripts/CaveSurvey/Core/CsArea.js",
+    // CsSketch is NOT loaded here: its tables read CsLayers.* at load
+    // time, and this list has no CsLayers in it. Its own test block
+    // loads CsLayers, CsSymbols, CsArea and CsShapeLine first and then
+    // it, which is the order CsAll.js uses for the same reason.
     // Pure geometry (extents, fits, sample strokes) plus painters
     // that only touch QPixmap inside their bodies -- the pure half
     // is what is tested here.
@@ -27640,6 +27644,185 @@ eqs(CsSymbolStore.AREA_MARKER_TAGS.custom, "AreaCustom",
         "\tpoint 0 0 stalactite  # a big one\nendscrap\n");
     eqs(commented.scraps[0].points.length, 1,
         "CsTherion2.parse: a trailing comment does not eat the point");
+}());
+
+// ---------------------------------------------------------------------
+// CsSketch -- Therion's vocabulary, in CaveCAD's own terms
+// ---------------------------------------------------------------------
+(function() {
+    loadRepoScript("scripts/CaveSurvey/Core/CsLayers.js");
+    loadRepoScript("scripts/CaveSurvey/Core/CsSymbols.js");
+    loadRepoScript("scripts/CaveSurvey/Core/CsArea.js");
+    loadRepoScript("scripts/CaveSurvey/Core/CsShapeLine.js");
+    loadRepoScript("scripts/CaveSurvey/Core/CsSketch.js");
+
+    // -- THE AGREEMENT TEST ------------------------------------------
+    // Every name these tables reach for must exist. A mapping row is
+    // one word, easy to misspell and impossible to see wrong by
+    // reading -- a layer that does not exist is a silent new layer, a
+    // block that does not exist is a missing symbol, and neither shows
+    // up until a caver imports a sketch and finds a hole in it. Same
+    // discipline as the template/registry agreement test.
+    var knownLayers = {};
+    for (var layerKey in CsLayers) {
+        if (CsLayers.hasOwnProperty(layerKey) &&
+                typeof CsLayers[layerKey] === "string") {
+            knownLayers[CsLayers[layerKey]] = true;
+        }
+    }
+    var knownBlocks = {};
+    for (var bi = 0; bi < CsSymbols.CATALOG.length; bi++) {
+        knownBlocks[CsSymbols.CATALOG[bi].block] = true;
+    }
+
+    function checkTable(table, what) {
+        for (var type in table) {
+            if (!table.hasOwnProperty(type)) {
+                continue;
+            }
+            var action = table[type];
+            var where = what + " \"" + type + "\"";
+            if (action.kind === "layer" || action.kind === "text" ||
+                    action.kind === "unknown") {
+                ok(knownLayers[action.layer] === true,
+                    where + ": names a layer CsLayers defines (" +
+                    action.layer + ")");
+            } else if (action.kind === "symbol") {
+                ok(knownBlocks[action.block] === true,
+                    where + ": names a block CsSymbols.CATALOG carries (" +
+                    action.block + ")");
+            } else if (action.kind === "area") {
+                ok(CsArea.CATALOG.hasOwnProperty(action.pattern),
+                    where + ": names a CsArea.CATALOG pattern (" +
+                    action.pattern + ")");
+            } else if (action.kind === "shape") {
+                ok(CsShapeLine.STYLES.hasOwnProperty(action.style),
+                    where + ": names a CsShapeLine style (" +
+                    action.style + ")");
+            } else {
+                ok(action.kind === "skip" || action.kind === "callout",
+                    where + ": has a kind this file knows (" +
+                    action.kind + ")");
+            }
+        }
+    }
+    checkTable(CsSketch.LINES, "CsSketch.LINES");
+    checkTable(CsSketch.WALL_SUBTYPES, "CsSketch.WALL_SUBTYPES");
+    checkTable(CsSketch.POINTS, "CsSketch.POINTS");
+    checkTable(CsSketch.AREAS, "CsSketch.AREAS");
+
+    // Every table needs its catch-all, or an unrecognised type comes
+    // back undefined and the caller draws nothing while reporting
+    // nothing -- the exact silent loss this file exists to prevent.
+    ok(CsSketch.LINES.u !== undefined, "CsSketch.LINES: has a fallback");
+    ok(CsSketch.POINTS.u !== undefined, "CsSketch.POINTS: has a fallback");
+    ok(CsSketch.AREAS.u !== undefined, "CsSketch.AREAS: has a fallback");
+
+    // -- resolving ----------------------------------------------------
+    var wall = CsSketch.resolveLine({ type: "wall", subtype: null });
+    eqs(wall.action.layer, CsLayers.WALLS_SURVEYED,
+        "CsSketch.resolveLine: a plain wall is a surveyed wall");
+    ok(wall.known, "CsSketch.resolveLine: and it is a known type");
+
+    eqs(CsSketch.resolveLine({ type: "wall", subtype: "presumed" })
+            .action.layer, CsLayers.WALLS_INFERRED,
+        "CsSketch.resolveLine: a presumed wall is an INFERRED wall -- " +
+        "the distinction a beginner reader most often gets wrong");
+    eqs(CsSketch.resolveLine({ type: "wall", subtype: "invisible" })
+            .action.kind, "skip",
+        "CsSketch.resolveLine: an invisible wall is not drawn, because " +
+        "the sketcher asked for it not to be");
+
+    var oddSub = CsSketch.resolveLine({ type: "wall", subtype: "marble" });
+    eqs(oddSub.action.layer, CsLayers.WALLS_SURVEYED,
+        "CsSketch.resolveLine: an unknown wall subtype is still a WALL, " +
+        "not catch-all ink -- the type carries more meaning than the " +
+        "subtype");
+    ok(!oddSub.known, "CsSketch.resolveLine: and it is reported as unknown");
+
+    eqs(CsSketch.resolveLine({ type: "floor-step", subtype: null })
+            .action.style, "floorledge",
+        "CsSketch.resolveLine: a floor step becomes a shaped line, " +
+        "ornament and all");
+    eqs(CsSketch.resolveLine({ type: "survey", subtype: null })
+            .action.kind, "skip",
+        "CsSketch.resolveLine: the centreline is already drawn, from " +
+        "measurements, and is not traced over by the sketch's copy");
+
+    var userLine = CsSketch.resolveLine({ type: "u:handline",
+        subtype: null });
+    eqs(userLine.action.kind, "unknown",
+        "CsSketch.resolveLine: a caver's own line type is kept");
+    ok(!userLine.known,
+        "CsSketch.resolveLine: and reported, so it can be mapped later");
+    eqs(userLine.action.layer, CsSketch.FALLBACK_LAYER,
+        "CsSketch.resolveLine: on the catch-all layer, visible and " +
+        "plainly not a wall");
+
+    eqs(CsSketch.resolvePoint({ type: "stalactite" }).action.block,
+        "SYM_STALACTITE", "CsSketch.resolvePoint: a catalogue symbol");
+    eqs(CsSketch.resolvePoint({ type: "altitude" }).action.kind,
+        "callout",
+        "CsSketch.resolvePoint: an altitude is a callout, so the note " +
+        "stays text-editable and keeps its leader");
+    eqs(CsSketch.resolvePoint({ type: "continuation" }).action.layer,
+        CsLayers.NOTES_DIG,
+        "CsSketch.resolvePoint: a continuation is a lead, and lands on " +
+        "the nearest thing this suite has until leads get a tool");
+    eqs(CsSketch.resolvePoint({ type: "dimensions" }).action.kind, "skip",
+        "CsSketch.resolvePoint: xtherion's editor scaffolding is not cave");
+
+    eqs(CsSketch.resolveArea({ type: "water" }).action.pattern, "WATER",
+        "CsSketch.resolveArea: water");
+    eqs(CsSketch.resolveArea({ type: "snow" }).action.pattern, "ICE",
+        "CsSketch.resolveArea: snow shares the ice pattern");
+    ok(!CsSketch.resolveArea({ type: "u:tarmac" }).known,
+        "CsSketch.resolveArea: a caver's own area type is reported");
+
+    ok(CsSketch.isUserType("u:bolt-hanger"),
+        "CsSketch.isUserType: the documented spelling");
+    ok(CsSketch.isUserType("u"), "CsSketch.isUserType: the bare form");
+    ok(!CsSketch.isUserType("wall"), "CsSketch.isUserType: an ordinary type");
+
+    // Rimstone goes one way only, and that is a fact worth pinning:
+    // this suite draws it, Therion has no line for it, so nothing may
+    // quietly invent a mapping that produces rimstone dams a sketcher
+    // never drew.
+    var rimstoneRows = 0;
+    for (var lineType in CsSketch.LINES) {
+        if (CsSketch.LINES.hasOwnProperty(lineType) &&
+                CsSketch.LINES[lineType].style === "rimstone") {
+            rimstoneRows++;
+        }
+    }
+    eqs(rimstoneRows, 0,
+        "CsSketch.LINES: no th2 line becomes a rimstone dam -- Therion " +
+        "has no line for it, and inventing one would draw formations " +
+        "nobody sketched");
+
+    // -- point sizes ---------------------------------------------------
+    near(CsSketch.pointScale("m"), 1.0, 1e-9,
+        "CsSketch.pointScale: m is native size");
+    ok(CsSketch.pointScale("xl") > CsSketch.pointScale("l"),
+        "CsSketch.pointScale: xl is larger than l");
+    near(CsSketch.pointScale(null), 1.0, 1e-9,
+        "CsSketch.pointScale: no -scale is native size");
+    near(CsSketch.pointScale("2.5"), 2.5, 1e-9,
+        "CsSketch.pointScale: Therion's bare-number dialect");
+    near(CsSketch.pointScale("enormous"), 1.0, 1e-9,
+        "CsSketch.pointScale: an unreadable size is native, not zero");
+
+    // -- borders claimed by areas --------------------------------------
+    var claimed = CsSketch.borderIds({ areas: [
+        { type: "water", lineIds: ["pool", "shelf"] },
+        { type: "sand", lineIds: ["bank"] }
+    ] });
+    ok(claimed.pool === true && claimed.bank === true,
+        "CsSketch.borderIds: every id an area claims");
+    eqs(claimed.wall, undefined,
+        "CsSketch.borderIds: and nothing it does not");
+    eqs(CsSketch.borderIds(null).pool, undefined,
+        "CsSketch.borderIds: a scrap with no areas claims nothing");
 }());
 
 // ---------------------------------------------------------------------

@@ -115,6 +115,10 @@ include(includeBasePath + "/CsTags.js");
 // After CsLayers (STYLES reads layer constants at eval time), CsTrace
 // (spacingFor) and CsTags (spine/decor tag IO).
 include(includeBasePath + "/CsShapeLine.js");
+// The Therion sketch vocabulary, in CaveCAD's own terms. After
+// CsLayers, CsSymbols, CsArea and CsShapeLine: its tables name what
+// those four define, and they are read at load.
+include(includeBasePath + "/CsSketch.js");
 // After CsShapeLine (a shaped line is erased whole, spine and ornament)
 // and CsTrace (docKey, and the pick distance is TIE_FEET's twin).
 // After CsTags (reads ProfileBox tags) and CsTrace (region fallback).
