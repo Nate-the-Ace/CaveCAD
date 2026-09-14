@@ -214,3 +214,77 @@ CsSketchStore.scaleFactor = function(doc, scrap) {
     }
     return CsUnits.convert(perUnit, scrap.scale.unit, drawingUnit);
 };
+
+/**
+ * Where the stations of an EXTENDED scrap sit, in the drawn profile.
+ *
+ * The profile is not one drawing: it is a band per survey run, drawn
+ * one below another, and the same station name can appear in more than
+ * one of them (a junction station belongs to both runs that meet
+ * there). So a scrap has to be assigned to a RUN before its stations
+ * mean anything.
+ *
+ * THE RUN IS DECIDED BY MAJORITY, not by the first station matched. A
+ * sketched page covers one stretch of passage; whichever run holds most
+ * of its station markers is the run it was drawn of. Deciding on the
+ * first match instead would hand a whole page to the wrong band any
+ * time its first marker happened to be the junction station shared with
+ * the neighbouring run -- and the page would land somewhere real and
+ * plausible and wrong, which is the worst kind of wrong.
+ *
+ * \param scrap a scrap from the CsTherion2 model.
+ * \return {targets, runKey, runs} -- targets keyed by BARE station
+ *         name, ready for CsSketchPlace; runKey the band chosen; runs
+ *         how many bands held any of these stations. targets is empty
+ *         when the profile holds none of them.
+ */
+CsSketchStore.profileTargets = function(doc, scrap) {
+    var empty = { targets: {}, runKey: null, runs: 0 };
+    if (isNull(doc) || scrap === null || scrap === undefined) {
+        return empty;
+    }
+    var drawn = CsProfileBind.positions(doc);
+    var wanted = {};
+    var i;
+    for (i = 0; i < scrap.stations.length; i++) {
+        wanted[String(scrap.stations[i].name).toUpperCase()] = true;
+    }
+
+    // Tally, per run, the stations of this scrap that the band holds.
+    var byRun = {};
+    for (var key in drawn) {
+        if (!drawn.hasOwnProperty(key)) {
+            continue;
+        }
+        var cut = key.indexOf("/");
+        if (cut === -1) {
+            continue;
+        }
+        var runKey = key.substring(0, cut);
+        var name = key.substring(cut + 1);
+        if (wanted[String(name).toUpperCase()] !== true) {
+            continue;
+        }
+        if (byRun[runKey] === undefined) {
+            byRun[runKey] = { count: 0, targets: {} };
+        }
+        byRun[runKey].count++;
+        byRun[runKey].targets[name] = { x: drawn[key].x, y: drawn[key].y };
+    }
+
+    var best = null, bestKey = null, runs = 0;
+    for (var candidate in byRun) {
+        if (!byRun.hasOwnProperty(candidate)) {
+            continue;
+        }
+        runs++;
+        if (best === null || byRun[candidate].count > best.count) {
+            best = byRun[candidate];
+            bestKey = candidate;
+        }
+    }
+    if (best === null) {
+        return empty;
+    }
+    return { targets: best.targets, runKey: bestKey, runs: runs };
+};

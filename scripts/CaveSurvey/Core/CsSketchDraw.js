@@ -155,6 +155,28 @@ CsSketchDraw.curveThrough = function(doc, points) {
 };
 
 /**
+ * The layer a plan layer name becomes in THIS scrap's frame.
+ *
+ * Every layer this file writes to goes through here, so the whole of
+ * it stays frame-agnostic: a plan scrap keeps the plan names, and an
+ * extended scrap gets the PROFILE- twins through CsLayers.twinFor.
+ *
+ * A twin that does not exist (twinFor answers null for a layer the
+ * registry has no frame version of -- a sheet layer, a NO_TWIN entry)
+ * falls back to the plan name rather than dropping the entity. That is
+ * the lesser wrong: a mark on the plan layer is visible and can be
+ * moved, and a mark that was never drawn cannot.
+ */
+CsSketchDraw.layer = function(ctx, planLayer) {
+    if (ctx.layerFor === null || ctx.layerFor === undefined) {
+        return planLayer;
+    }
+    var twin = ctx.layerFor(planLayer);
+    return (twin === null || twin === undefined || twin === "") ?
+        planLayer : twin;
+};
+
+/**
  * Draws one line from a scrap.
  *
  * \return the entity id that landed, or null.
@@ -191,7 +213,8 @@ CsSketchDraw.line = function(doc, di, ctx, line, index) {
 
     var isShape = (action.kind === "shape");
     var spec = isShape ? CsShapeLine.STYLES[action.style] : null;
-    var layerName = isShape ? spec.spineLayer : action.layer;
+    var layerName = CsSketchDraw.layer(ctx,
+        isShape ? spec.spineLayer : action.layer);
 
     var spline = CsSketchDraw.curveThrough(doc, points);
     if (spline === null) {
@@ -269,8 +292,9 @@ CsSketchDraw.point = function(doc, di, ctx, point, index) {
             return CsSketchDraw.mark(doc, di, ctx, point, action, at,
                 tagIndex);
         }
-        var layerName = (action.kind === "callout") ?
-            CsLayers.NOTES_ELEVATION : action.layer;
+        var layerName = CsSketchDraw.layer(ctx,
+            (action.kind === "callout") ? CsLayers.NOTES_ELEVATION :
+                action.layer);
         var op = new RAddObjectsOperation();
         if (ctx.group !== undefined && ctx.group >= 0) {
             op.setTransactionGroup(ctx.group);
@@ -311,8 +335,7 @@ CsSketchDraw.symbol = function(doc, di, ctx, point, action, at, tagIndex) {
     // the drawing measures angles; a bearing is clockwise from north.
     var rotation = (90 - bearing) * Math.PI / 180;
 
-    var layerName = isNull(ctx.layerFor) ? entry.layer :
-        ctx.layerFor(entry.layer);
+    var layerName = CsSketchDraw.layer(ctx, entry.layer);
     CsLayers.ensure(doc, di, layerName);
 
     // CsSymbols.insert BUILDS the reference and leaves adding it to the
@@ -353,7 +376,7 @@ CsSketchDraw.symbol = function(doc, di, ctx, point, action, at, tagIndex) {
  * as a place rather than as a picture.
  */
 CsSketchDraw.mark = function(doc, di, ctx, point, action, at, tagIndex) {
-    var layerName = action.layer;
+    var layerName = CsSketchDraw.layer(ctx, action.layer);
     CsLayers.ensure(doc, di, layerName);
     var op = new RAddObjectsOperation();
     if (ctx.group !== undefined && ctx.group >= 0) {
@@ -462,7 +485,8 @@ CsSketchDraw.areaOutline = function(doc, di, ctx, area, index, action) {
         ctx.report.failed++;
         return null;
     }
-    var landed = CsTrace.addCurve(doc, di, action.layer, spline, ctx.group);
+    var landed = CsTrace.addCurve(doc, di,
+        CsSketchDraw.layer(ctx, action.layer), spline, ctx.group);
     if (!landed.added || isNull(landed.id)) {
         ctx.report.failed++;
         return null;
@@ -603,12 +627,9 @@ CsSketchDraw.fromFile = function(doc, di, path, opts) {
             row.reason = "its projection is not one this release places";
             continue;
         }
-        // Only the plan is placed in this release. Extended and cross
-        // section scraps are READ, named and left -- see PLACES.
-        if (scrap.projection !== "plan") {
-            row.reason = "it belongs in " +
-                CsSketchDraw.PLACES[scrap.projection] +
-                ", which this release does not place yet";
+        if (scrap.projection === "none") {
+            row.reason = "it is a cross section, which this release " +
+                "does not place yet";
             continue;
         }
 
@@ -629,7 +650,38 @@ CsSketchDraw.fromFile = function(doc, di, path, opts) {
                 CsSketchStore.idsOf(doc, name, scrap.name), o.group);
         }
 
-        var solution = CsSketchPlace.solve(scrap, targets,
+        // WHICH STATIONS, AND ON WHICH LAYERS, is the whole of the
+        // difference between a plan scrap and an extended one. The
+        // plan's stations are where they are on the map; an extended
+        // scrap's are in a profile BAND, one per survey run, and its
+        // ink belongs on the PROFILE- twins. Everything after this is
+        // identical, which is why CsSketchDraw takes a layerFor hook
+        // rather than knowing about frames.
+        var scrapTargets = targets;
+        var layerFor = null;
+        if (scrap.projection === "extended") {
+            var band = CsSketchStore.profileTargets(doc, scrap);
+            if (band.runKey === null) {
+                row.reason = "the extended elevation in this drawing " +
+                    "holds none of the stations this page is drawn " +
+                    "against -- generate the profile first";
+                out.totals.warnings.push("Scrap \"" + scrap.name +
+                    "\": " + row.reason);
+                continue;
+            }
+            scrapTargets = band.targets;
+            layerFor = function(planLayer) {
+                return CsLayers.twinFor(planLayer, "profile");
+            };
+            if (band.runs > 1) {
+                out.totals.warnings.push("Scrap \"" + scrap.name +
+                    "\" marks stations in " + band.runs + " survey " +
+                    "runs; it was drawn into " + band.runKey +
+                    ", which holds most of them.");
+            }
+        }
+
+        var solution = CsSketchPlace.solve(scrap, scrapTargets,
             { scaleFactor: CsSketchStore.scaleFactor(doc, scrap) });
         if (!solution.ok) {
             row.reason = solution.warnings.length > 0 ?
@@ -641,7 +693,7 @@ CsSketchDraw.fromFile = function(doc, di, path, opts) {
         }
 
         row.report = CsSketchDraw.scrap(doc, di, scrap, solution,
-            { file: name, group: o.group });
+            { file: name, group: o.group, layerFor: layerFor });
         row.placed = true;
         CsSketchDraw.addTo(out.totals, row.report);
     }

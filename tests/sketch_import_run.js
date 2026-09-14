@@ -288,6 +288,90 @@ ok(control !== null && control.length >= 2,
     "extend it and CsWarp can bend it later");
 
 // =======================================================================
+// An EXTENDED scrap lands in the profile band, on the PROFILE- layers.
+// =======================================================================
+//
+// The difference between a plan scrap and an extended one is entirely
+// which stations it is fitted to and which layers its ink goes on. So
+// this builds a real profile in a fresh document and imports the
+// fixture's own ext1 page against it.
+
+(function() {
+    function shotOf(from, to, d, az, inc, u, dn) {
+        var shot = CsModel.newShot();
+        shot.from = from; shot.to = to; shot.distance = d;
+        shot.azimuth = az; shot.inclination = inc || 0;
+        shot.up = (u === undefined) ? null : u;
+        shot.down = (dn === undefined) ? null : dn;
+        return shot;
+    }
+
+    var survey = CsModel.newSurvey();
+    survey.shots = [
+        shotOf("A1", "A2", 30, 210, -10, 4, 2),
+        shotOf("A2", "A3", 33, 223, -8, 4, 2)
+    ];
+    var resolved = CsNetwork.resolve(survey, {});
+
+    var pdoc = new RDocument(new RMemoryStorage(), createSpatialIndex());
+    var pdi = new RDocumentInterface(pdoc);
+    CsLayers.ensureSurveyLayers(pdoc, pdi);
+    var profile = CsProfile.build(survey, resolved, {});
+    var rendered = CsProfileDraw.render(pdoc, pdi, profile, {});
+    ok(rendered.bandsDrawn >= 1, "extended: a profile band is drawn");
+
+    var extScrap = null;
+    for (var i = 0; i < sketch.scraps.length; i++) {
+        if (sketch.scraps[i].name === "ext1") {
+            extScrap = sketch.scraps[i];
+        }
+    }
+    ok(extScrap !== null, "extended: the fixture has an extended scrap");
+
+    var band = CsSketchStore.profileTargets(pdoc, extScrap);
+    ok(band.runKey !== null,
+        "extended: the scrap's stations are found in a drawn band");
+    ok(band.runs >= 1, "extended: at least one run holds them");
+
+    var extSolution = CsSketchPlace.solve(extScrap, band.targets, {});
+    ok(extSolution.ok, "extended: and the page places on them");
+
+    var extReport = CsSketchDraw.scrap(pdoc, pdi, extScrap, extSolution, {
+        file: "PitfallCave.th2",
+        layerFor: function(planLayer) {
+            return CsLayers.twinFor(planLayer, "profile");
+        }
+    });
+
+    function mineOn(name) {
+        if (!pdoc.hasLayer(name)) {
+            return 0;
+        }
+        var ids = pdoc.queryLayerEntities(pdoc.getLayerId(name), true);
+        var n = 0;
+        for (var k = 0; k < ids.length; k++) {
+            if (CsTags.get(pdoc.queryEntity(ids[k]),
+                    CsSketchDraw.KEY.FILE) === "PitfallCave.th2") {
+                n++;
+            }
+        }
+        return n;
+    }
+
+    eqs(extReport.lines, 1, "extended: the wall comes in");
+    eqs(mineOn(CsLayers.twinFor(CsLayers.WALLS_SURVEYED, "profile")), 1,
+        "extended: on the PROFILE- twin of the wall layer, never on the " +
+        "plan's own -- a profile wall drawn onto the plan layer would " +
+        "sit on the map as a wall nobody surveyed there");
+    eqs(mineOn(CsLayers.WALLS_SURVEYED), 0,
+        "extended: and nothing of it lands in the plan");
+
+    eqs(extReport.shapes, 1, "extended: the floor step is dressed");
+    eqs(mineOn(CsLayers.twinFor(CsLayers.LEDGE_FLOOR, "profile")), 1,
+        "extended: its spine on the profile twin too");
+}());
+
+// =======================================================================
 // Report.
 // =======================================================================
 
