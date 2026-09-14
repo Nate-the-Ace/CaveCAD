@@ -561,3 +561,63 @@ CsSectionBay.clearerSide = function(origin, perp, obstacles, probe) {
     };
     return (count(-1) < count(1)) ? -1 : 1;
 };
+
+/**
+ * Which station to offer next when a caver opens another bay.
+ *
+ * A caver sketching a passage's sections works ALONG it: A1, A2, A3.
+ * The station dialog used to land on the first name in the list every
+ * time, so every section after the first meant scrolling past the ones
+ * already drawn. This walks forward instead -- past the last station
+ * that already carries a section, to the first that does not.
+ *
+ * DERIVED FROM THE DRAWING, never from a remembered setting: what has
+ * been sectioned is written in the drawing itself, so the suggestion
+ * survives a restart, a different machine, and someone else's copy of
+ * the cave, and it cannot drift out of step with what is really there.
+ *
+ * \param names  candidate stations, in walk order (the survey's own)
+ * \param done   station names that already carry a section
+ * \return the name to preselect, or null when there are no candidates.
+ *         Pure.
+ */
+CsSectionBay.suggestStation = function(names, done) {
+    if (names === null || names === undefined || names.length === 0) {
+        return null;
+    }
+    var sectioned = {};
+    var i;
+    if (done !== null && done !== undefined) {
+        for (i = 0; i < done.length; i++) {
+            if (done[i] !== null && done[i] !== undefined &&
+                    String(done[i]) !== "") {
+                sectioned[String(done[i])] = true;
+            }
+        }
+    }
+    // The last station in walk order that already has a section: where
+    // the caver left off, whatever order they actually drew them in.
+    var lastDone = -1;
+    for (i = 0; i < names.length; i++) {
+        if (sectioned[String(names[i])] === true) {
+            lastDone = i;
+        }
+    }
+    if (lastDone < 0) {
+        return String(names[0]);         // nothing sectioned yet
+    }
+    for (i = lastDone + 1; i < names.length; i++) {
+        if (sectioned[String(names[i])] !== true) {
+            return String(names[i]);     // the usual answer: next along
+        }
+    }
+    // Past the end. Fall back to the first gap earlier in the walk --
+    // a caver who skipped one wants to be taken back to it rather than
+    // to the top of a list they have already worked through.
+    for (i = 0; i < names.length; i++) {
+        if (sectioned[String(names[i])] !== true) {
+            return String(names[i]);
+        }
+    }
+    return String(names[names.length - 1]); // every station sectioned
+};

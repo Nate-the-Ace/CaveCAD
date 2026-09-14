@@ -319,6 +319,15 @@ check("1: it has a ghost", bay0 !== null && bay0.ghost !== null);
 check("1: it has a scan", bay0 !== null && bay0.scan !== null);
 check("1: and nothing is swept while nothing is traced",
     bay0 !== null && bay0.traced.length === 0);
+// The station dialog's head start comes off the drawing, so it has to
+// see an OPEN bay as a station already spoken for -- otherwise a caver
+// opening a second bay is offered the one they are standing in.
+var doneNow = SectionBay.sectionedStations(doc);
+check("1: an open bay counts as a station already sectioned",
+    doneNow.indexOf("A2") >= 0);
+check("1: and the next bay is offered the station after it",
+    CsSectionBay.suggestStation(["A1", "A2", "A3"], doneNow) === "A3");
+
 check("1: the frame really is on the LOCKED CTRL-SECTION-BOX layer -- " +
     "which is what claim 7's teardown has to get past",
     bay0 !== null &&

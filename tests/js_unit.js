@@ -11108,6 +11108,25 @@ if (!IS_NODE) {
         "clearerSide: away from the crowded side");
     eqs(CsSectionBay.clearerSide({ x: 0, y: 0 }, { x: 0, y: 1 }, [], 20), 1,
         "clearerSide: a tie goes positive, so the answer is stable");
+
+    // --- which station to offer next ----------------------------------
+    var walk = ["A1", "A2", "A3", "A4"];
+    eqs(CsSectionBay.suggestStation(walk, []), "A1",
+        "suggestStation: nothing sectioned yet starts at the beginning");
+    eqs(CsSectionBay.suggestStation(walk, ["A1", "A2"]), "A3",
+        "suggestStation: the station after the last one sectioned");
+    eqs(CsSectionBay.suggestStation(walk, ["A2", "A1"]), "A3",
+        "suggestStation: walk order decides, not the order drawn in");
+    eqs(CsSectionBay.suggestStation(walk, ["A3"]), "A4",
+        "suggestStation: a skipped station does not drag the offer back");
+    eqs(CsSectionBay.suggestStation(walk, ["A4"]), "A1",
+        "suggestStation: past the end, back to the first gap");
+    eqs(CsSectionBay.suggestStation(walk, ["A1", "A2", "A3", "A4"]), "A4",
+        "suggestStation: every station sectioned still answers a name");
+    eqs(CsSectionBay.suggestStation([], ["A1"]), null,
+        "suggestStation: no candidates, no suggestion");
+    eqs(CsSectionBay.suggestStation(walk, null), "A1",
+        "suggestStation: a missing done-list is not a throw");
 }());
 
 // ---------------------------------------------------------------------

@@ -69,6 +69,11 @@ SectionBay.ROLE_SCAN = "scan";
  *  it is rebuilt. */
 SectionBay.TAG_SNAP = "SectionBaySnap";
 
+/** The station an open bay is cut at, parked on the FRAME. Read back by
+ *  SectionCapture.findBay, and by SectionBay.sectionedStations so a bay
+ *  left open counts as a station already spoken for. */
+SectionBay.TAG_STATION = "SectionBayStation";
+
 /** The placed reference's own scale and rotation, parked on the FRAME
  *  while its bay is open.
  *
@@ -322,7 +327,7 @@ SectionBay.addFrame = function(doc, di, rect, bayId, station,
     // geometry.
     CsTags.set(e, SectionBay.TAG_BAY, bayId);
     CsTags.set(e, "SectionBayRole", SectionBay.ROLE_FRAME);
-    CsTags.set(e, "SectionBayStation", station);
+    CsTags.set(e, SectionBay.TAG_STATION, station);
     // CsTags.set no-ops on null/undefined/"" by design (see CsTags.js),
     // so a snap this build could not name just leaves the tag absent --
     // SectionCapture.restoreSnap already treats an absent tag as "leave
@@ -618,9 +623,43 @@ SectionBay.currentSnapClassName = function(di) {
     }
 };
 
+/**
+ * Stations that already carry a section: the captured blocks' own
+ * station tags, plus any bay standing open right now.
+ *
+ * READ OFF THE DRAWING rather than remembered in a setting -- see
+ * CsSectionBay.suggestStation for why. Returns plain names, in no
+ * particular order; suggestStation orders them against the walk.
+ */
+SectionBay.sectionedStations = function(doc) {
+    var out = [];
+    if (isNull(doc)) {
+        return out;
+    }
+    var seen = {};
+    var keys = [CsCallout.KEY.SECTION_STATION, SectionBay.TAG_STATION];
+    var ids = doc.queryAllEntities(false, false);
+    for (var i = 0; i < ids.length; i++) {
+        var e = doc.queryEntity(ids[i]);
+        if (isNull(e)) {
+            continue;
+        }
+        for (var k = 0; k < keys.length; k++) {
+            var name = CsTags.get(e, keys[k]);
+            if (name !== "" && seen[name] !== true) {
+                seen[name] = true;
+                out.push(String(name));
+            }
+        }
+    }
+    return out;
+};
+
 /** Ask which station this section is cut at. Plan stations, in walk
  *  order -- the order the survey visited them, not name order, so a
- *  branch reads the way the notebook does. */
+ *  branch reads the way the notebook does, and PRESELECTED at the
+ *  station after the last one already sectioned, so sketching a run of
+ *  sections walks forward on its own. */
 SectionBay.askStation = function(doc) {
     var stations = CsTags.collectStations(doc);
     if (stations.length === 0) {
@@ -664,6 +703,17 @@ SectionBay.askStation = function(doc) {
         dlg.setLabelText(qsTr("Station this section is cut at:"));
         dlg.setComboBoxEditable(false);
         dlg.setComboBoxItems(names);
+        // PRESELECT THE NEXT ONE ALONG. Guarded on its own: a build
+        // whose QInputDialog does not take a text value must still ask
+        // the question, just without the head start.
+        try {
+            var suggested = CsSectionBay.suggestStation(names,
+                SectionBay.sectionedStations(doc));
+            if (suggested !== null) {
+                dlg.setTextValue(suggested);
+            }
+        } catch (eSuggest) {
+        }
         if (dlg.exec() !== QDialog.Accepted) {
             return null;                 // cancelled: nothing chosen
         }
