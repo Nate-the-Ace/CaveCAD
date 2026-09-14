@@ -744,6 +744,12 @@ AreaFill.rebuildTiles = function() {
     try {
         for (var i = 0; i < w.tileWidgets.length; i++) {
             try {
+                // Hidden BEFORE it is detached: setParent(null) makes a
+                // widget a top-level window, and on a fullscreen macOS
+                // CaveCAD a visible one flashes up as its own black
+                // fullscreen space until deleteLater runs. See
+                // SymbolPalette.rebuildTiles for the live report.
+                w.tileWidgets[i].visible = false;
                 w.tileWidgets[i].setParent(null);
                 w.tileWidgets[i].deleteLater();
             } catch (eDel) {

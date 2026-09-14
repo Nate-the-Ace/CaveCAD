@@ -42,7 +42,7 @@ function loadRepoScript(rel) {
 }
 ["CsUuid", "CsUnits", "CsAngles", "CsCave", "CsScanTree", "CsStore",
  "CsTags", "CsLayers", "CsStationOrder", "CsScanFit", "CsScanFrame",
- "CsScanTrim"].forEach(function(m) {
+ "CsScanTrim", "CsScanPdf"].forEach(function(m) {
     loadRepoScript("scripts/CaveSurvey/Core/" + m + ".js");
 });
 

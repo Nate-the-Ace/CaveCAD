@@ -399,3 +399,54 @@ CsScanTree.nameOf = function(rel) {
     var at = text.lastIndexOf("/");
     return at < 0 ? text : text.substring(at + 1);
 };
+
+/**
+ * Decides which of `rels` are pages a caver should see.
+ *
+ * HERE, IN THE PURE MODEL, and not beside the listing in CsScanList:
+ * CsScanList is a QTableWidget renderer that the unit suite cannot
+ * load at all, and a rule about which files are pages is exactly the
+ * kind of thing that needs a test. CsScanList.scanFiles walks the
+ * folder and hands the answer through this.
+ *
+ * Testable without a folder on disk:
+ * `pageCountOf` is handed in, and a test passes a function that answers
+ * from a table instead of opening a PDF.
+ *
+ * \param rels         relative paths, as CsCave.filesUnder answers them
+ * \param pageCountOf  function(rel) -> page count of that PDF
+ * 
+eturn the kept paths, input order. Pure.
+ */
+CsScanTree.keepScans = function(rels, pageCountOf) {
+    var out = [];
+    for (var i = 0; i < rels.length; i++) {
+        var rel = String(rels[i]);
+        var base = rel.substring(rel.lastIndexOf("/") + 1);
+        try {
+            if (CsCave.isPreviewName && CsCave.isPreviewName(base)) {
+                continue;
+            }
+        } catch (ePrev) {
+        }
+        try {
+            if (CsScanTrim.isTrimPath(rel)) {
+                continue;
+            }
+        } catch (eTrim) {
+        }
+        if (CsScanPdf.isPdfPath(rel)) {
+            var pages = 0;
+            try {
+                pages = pageCountOf(rel);
+            } catch (eCount) {
+                pages = 0;
+            }
+            if (CsScanPdf.splitState(rel, rels, pages) === "complete") {
+                continue;   // its pages are the trip now
+            }
+        }
+        out.push(rel);
+    }
+    return out;
+};

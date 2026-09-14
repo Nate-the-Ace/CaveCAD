@@ -100,39 +100,15 @@ SketchScans.DEPTH = 4;
 /**
  * Image files under a scans folder, RECURSIVE, as paths relative to it,
  * name-sorted, by the formats QImage reads.
+ *
+ * DELEGATES TO CORE. The filtering used to live here -- previews out,
+ * Scan Trim's crops out -- and the Survey Notebook, listing the same
+ * folder for the same reason, had none of it. One listing, in
+ * CsScanList, is what stops those two answers drifting apart again
+ * (2026-09-14); the split-PDF rule arrived with it.
  */
 SketchScans.imageFiles = function(folder) {
-    var filters = [];
-    try {
-        var formats = QImageReader.supportedImageFormats();
-        for (var i = 0; i < formats.length; i++) {
-            filters.push("*." + String(formats[i]));
-        }
-    } catch (e) {
-        filters = ["*.png", "*.jpg", "*.jpeg", "*.tif", "*.tiff",
-            "*.bmp", "*.gif"];
-    }
-    var names = CsCave.filesUnder(folder, filters, SketchScans.DEPTH);
-    var out = [];
-    for (var k = 0; k < names.length; k++) {
-        var name = names[k];
-        var base = name.substring(name.lastIndexOf("/") + 1);
-        // the map's own generated preview is not a sketch
-        if (CsCave.isPreviewName && CsCave.isPreviewName(base)) {
-            continue;
-        }
-        // NOR IS A TRIMMED DERIVATIVE. It is a crop of a page already
-        // in this list; showing both would offer the same sketch twice
-        // and make the shelf grow with every trim. The filter belongs
-        // HERE and not in CsCave.filesUnder, which the photo tools
-        // share and which has no business knowing about this suite's
-        // derivatives.
-        if (CsScanTrim.isTrimPath(name)) {
-            continue;
-        }
-        out.push(name);
-    }
-    return out;
+    return CsScanList.scanFiles(folder, SketchScans.DEPTH);
 };
 
 // Hover-tooltip preview width; the in-dock pane scales to itself.
@@ -2095,6 +2071,11 @@ SketchScans.buildDock = function(appWin) {
                     fAct.triggered.connect(function() {
                         markFolder(row, !fMarked);
                     });
+                    try {
+                        CsScanList.addRevealAction(w.scanMenu, w.scans,
+                            w.rows[row].rel, true);
+                    } catch (eRevealF) {
+                    }
                 } else {
                     var rel = w.rows[row].rel;
                     var marked = w.bookmarks[rel] === true;
@@ -2111,6 +2092,25 @@ SketchScans.buildDock = function(appWin) {
                     act.triggered.connect(function() {
                         toggleBookmark(row);
                     });
+                    // A PDF of a whole trip is not a page anything here
+                    // can trace; this is the way it becomes pages. The
+                    // action adds itself only for a PDF row, and lives
+                    // in Core so the Notebook's copy of this tree
+                    // offers the same thing in the same words.
+                    try {
+                        CsScanList.addSplitAction(w.scanMenu,
+                            w.scans, rel,
+                            function() { SketchScans.refresh(); });
+                    } catch (eSplit) {
+                    }
+                    // Everything this suite does NOT do to a scan --
+                    // rename it, delete it, drag forty more in -- is
+                    // done in Finder, and this is the way there.
+                    try {
+                        CsScanList.addRevealAction(w.scanMenu, w.scans,
+                            rel, false);
+                    } catch (eReveal) {
+                    }
                 }
                 w.scanMenu.popup(w.list.viewport().mapToGlobal(pos));
             } catch (eMenu) {

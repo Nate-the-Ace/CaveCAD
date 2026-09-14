@@ -139,6 +139,283 @@ CsScanList.announce = function(folder) {
     }
 };
 
+// ---------------------------------------------------------------------
+// WHAT IS IN A CAVE'S scans FOLDER -- one answer, for every panel.
+// ---------------------------------------------------------------------
+//
+// THE BUG THIS EXISTS FOR (Nathan, 2026-09-14: "trimmed images need to
+// not show up in the scan view tree"). Sketch Scans listed the folder
+// and filtered its own derivatives out; the Survey Notebook listed the
+// same folder with a bare CsCave.filesUnder and filtered nothing. So
+// every crop Scan Trim had ever written showed up as a page in the
+// Notebook's tree, beside the page it was cut from -- the same drift
+// sharing the LIST was supposed to end, in the one part that was still
+// copied rather than shared: the listing itself.
+//
+// Three kinds of file are in that folder and are NOT pages of field
+// notes:
+//   - the map's own generated preview (CsCave.isPreviewName)
+//   - Scan Trim's crops, under Trimmed/ (CsScanTrim.isTrimPath)
+//   - a PDF that has already been split into page images beside it
+//     (CsScanPdf) -- the pages ARE the trip now, and listing the PDF
+//     too offers every page twice, once as itself and once inside a
+//     file that previews as page 1.
+//
+// A PDF that has NOT been split still lists, and must: it is the only
+// way to right-click it and split it.
+
+/** The file patterns a scans folder is read with -- whatever this
+ *  build's QImageReader can open, PDFs included, and a fixed list when
+ *  it cannot be asked. */
+CsScanList.scanFilters = function() {
+    var filters = [];
+    try {
+        var formats = QImageReader.supportedImageFormats();
+        for (var i = 0; i < formats.length; i++) {
+            filters.push("*." + String(formats[i]));
+        }
+    } catch (e) {
+        filters = [];
+    }
+    if (filters.length === 0) {
+        filters = ["*.png", "*.jpg", "*.jpeg", "*.tif", "*.tiff",
+            "*.bmp", "*.gif", "*.pdf"];
+    }
+    return filters;
+};
+
+/**
+ * Every page under a cave's scans folder, as relative paths, in the
+ * order the tree draws them.
+ *
+ * EVERY PANEL CALLS THIS. A panel that lists the folder itself is a
+ * panel that will show a different set from the one beside it.
+ */
+CsScanList.scanFiles = function(folder, maxDepth) {
+    var rels = [];
+    try {
+        rels = CsCave.filesUnder(folder, CsScanList.scanFilters(),
+            isNull(maxDepth) ? 4 : maxDepth);
+    } catch (eList) {
+        return [];
+    }
+    return CsScanTree.keepScans(rels, function(rel) {
+        return CsScanPdf.pageCount(folder + "/" + rel);
+    });
+};
+
+/** What the right-click menu calls splitting a PDF. HERE, like the
+ *  mark labels above, so every panel showing this list says the same
+ *  words. */
+CsScanList.SPLIT_PDF = "Split into Pages";
+
+/**
+ * Adds "Split into Pages" to a scan row's context menu, when that row
+ * is a PDF.
+ *
+ * SHARED, and for the reason the whole file is: the scans tree appears
+ * in Sketch Scans and in the Survey Notebook, and a right-click that
+ * can split a trip in one of them and not the other is the same drift
+ * as two different words for the tick.
+ *
+ * Does nothing for a row that is not a PDF, so a caller can call it on
+ * every file row without asking first.
+ *
+ * \param menu    the QMenu being built
+ * \param folder  the cave's scans folder, absolute
+ * \param rel     the row's path, relative to it
+ * \param onDone  called after a successful split, to re-list the folder
+ */
+CsScanList.addSplitAction = function(menu, folder, rel, onDone) {
+    if (isNull(menu) || typeof rel !== "string" ||
+            !CsScanPdf.isPdfPath(rel)) {
+        return null;
+    }
+    var action = null;
+    try {
+        action = menu.addAction(qsTr(CsScanList.SPLIT_PDF));
+    } catch (eAdd) {
+        return null;
+    }
+    action.triggered.connect(function() {
+        CsScanList.splitPdf(folder, rel, onDone);
+    });
+    return action;
+};
+
+/** What the right-click menu calls showing a scan in the file manager.
+ *  Two names because it is two different applications, and a menu that
+ *  says "Finder" on Linux is a menu written by somebody who has never
+ *  run it there. */
+CsScanList.REVEAL_MAC = "Reveal in Finder";
+CsScanList.REVEAL_OTHER = "Open Containing Folder";
+
+/** True when this machine has macOS's `open`. The label and the method
+ *  both hang off this, and it is a file test rather than a platform
+ *  string because the platform string is the thing that would be
+ *  wrong on the one build nobody tested. */
+CsScanList.hasMacOpen = function() {
+    try {
+        return new QFileInfo("/usr/bin/open").exists();
+    } catch (e) {
+        return false;
+    }
+};
+
+/** The menu label for revealing, on this machine. */
+CsScanList.revealLabel = function(isMac) {
+    return (isMac === true) ? CsScanList.REVEAL_MAC :
+        CsScanList.REVEAL_OTHER;
+};
+
+/**
+ * Adds "Reveal in Finder" to a scan row's context menu.
+ *
+ * WHY A CAVER WANTS THIS. Everything else this suite does to a scan is
+ * something it knows how to do -- mark it, trim it, split it. Renaming
+ * a page, deleting a bad scan, dragging in forty more from a phone,
+ * fixing a trip folder somebody named wrong: those are file
+ * management, they happen in Finder, and the alternative is hunting
+ * down a folder six levels inside a Google Drive mount by hand
+ * (Nathan, 2026-09-14).
+ *
+ * A FILE ROW reveals the file itself, selected. A FOLDER ROW opens
+ * that folder. Both are what the row points at.
+ *
+ * \param menu      the QMenu being built
+ * \param folder    the cave's scans folder, absolute
+ * \param rel       the row's path, relative to it
+ * \param isFolder  true for a trip row, false for a page
+ */
+CsScanList.addRevealAction = function(menu, folder, rel, isFolder) {
+    if (isNull(menu) || typeof folder !== "string" || folder === "" ||
+            typeof rel !== "string") {
+        return null;
+    }
+    var action = null;
+    try {
+        action = menu.addAction(
+            qsTr(CsScanList.revealLabel(CsScanList.hasMacOpen())));
+    } catch (eAdd) {
+        return null;
+    }
+    // Plain strings in the closure and nothing else: a Qt wrapper held
+    // across a deferred call is one of this bridge's crash modes.
+    var target = folder + "/" + rel;
+    var asFolder = (isFolder === true);
+    action.triggered.connect(function() {
+        CsScanList.reveal(target, asFolder);
+    });
+    return action;
+};
+
+/**
+ * Shows one path in the machine's file manager.
+ *
+ * TWO WAYS, and the good one first. `open -R` reveals the file with it
+ * SELECTED, which is the difference between "here is the folder, find
+ * it again" and "here it is". Everything else gets
+ * QDesktopServices.openUrl on the containing folder, which opens the
+ * right window and selects nothing.
+ *
+ * THE LAUNCH TRAP (probed 2026-09-14): `QProcess.startDetached(prog,
+ * args)` as a static does not exist here, and calling the INSTANCE
+ * method with both arguments warns "Too many arguments, ignoring 2"
+ * and returns false -- it would have launched `open` with no path at
+ * all. setProgram + setArguments + startDetached() is the form that
+ * works. Detached and not start(), because a QProcess collected at the
+ * end of this function takes its child with it.
+ */
+CsScanList.reveal = function(absPath, isFolder) {
+    var containing = absPath;
+    if (isFolder !== true) {
+        var cut = String(absPath).lastIndexOf("/");
+        containing = (cut > 0) ? String(absPath).substring(0, cut) :
+            String(absPath);
+    }
+    if (isFolder !== true && CsScanList.hasMacOpen()) {
+        try {
+            var proc = new QProcess();
+            proc.setProgram("/usr/bin/open");
+            proc.setArguments(["-R", absPath]);
+            if (proc.startDetached() === true) {
+                return true;
+            }
+        } catch (eProc) {
+            // fall through to the folder, which is most of the answer
+        }
+    }
+    try {
+        return QDesktopServices.openUrl(QUrl.fromLocalFile(containing)) ===
+            true;
+    } catch (eUrl) {
+        EAction.handleUserWarning(qsTr("This build could not open %1.")
+            .arg(containing));
+        return false;
+    }
+};
+
+/**
+ * Splits one PDF and says what happened.
+ *
+ * Its own function so the menu action's closure holds three strings
+ * and nothing else -- a Qt wrapper captured in a deferred closure is
+ * one of this bridge's crash modes.
+ */
+CsScanList.splitPdf = function(folder, rel, onDone) {
+    var abs = folder + "/" + rel;
+    var pages = CsScanPdf.pageCount(abs);
+    if (pages < 1) {
+        EAction.handleUserWarning(qsTr("%1 could not be read as a PDF.")
+            .arg(rel));
+        return;
+    }
+    // A HALF-SPLIT PDF is the only case that can overwrite anything: a
+    // fully split one is not in the tree to be right-clicked. Ask,
+    // because the pages it would replace may be ones a caver has
+    // already trimmed and traced from.
+    var existing = CsScanPdf.splitState(rel,
+        CsCave.filesUnder(folder, ["*" + CsScanPdf.EXTENSION], 4), pages);
+    if (existing === "partial") {
+        var sure = QMessageBox.question(RMainWindowQt.getMainWindow(),
+            qsTr("Split into Pages"),
+            qsTr("Some pages of %1 have already been written. Split it " +
+                "again and those files are overwritten. Continue?")
+                .arg(rel),
+            QMessageBox.Yes | QMessageBox.No);
+        if (sure !== QMessageBox.Yes) {
+            return;
+        }
+    }
+    EAction.handleUserMessage(qsTr("Splitting %1 -- %2 pages at %3 dpi...")
+        .arg(rel).arg(pages).arg(CsScanPdf.DPI));
+    var res = CsScanPdf.split(abs);
+    if (!res.ok) {
+        EAction.handleUserWarning(qsTr("%1 was not split: %2")
+            .arg(rel).arg(res.error));
+        return;
+    }
+    EAction.handleUserMessage(qsTr("%1 is now %2 pages. The PDF itself " +
+        "drops out of the list -- its pages are the trip now.")
+        .arg(rel).arg(res.written.length));
+    // The panel that was right-clicked re-lists through `onDone`. The
+    // OTHER one picks the change up on its next refresh -- both re-read
+    // the folder when their dock is re-shown -- because `announce`
+    // carries a MARKS change and its watchers repaint ticks, they do
+    // not re-walk the folder. Announcing anyway costs nothing and keeps
+    // the ticks honest if a page name has gone.
+    try {
+        CsScanList.announce(folder);
+    } catch (eTell) {
+    }
+    if (!isNull(onDone)) {
+        try {
+            onDone();
+        } catch (eDone) {
+        }
+    }
+};
+
 /** The menu label for one page, given whether it is already marked. */
 CsScanList.markLabel = function(marked) {
     return (marked === true) ? CsScanList.MARK_INCOMPLETE :

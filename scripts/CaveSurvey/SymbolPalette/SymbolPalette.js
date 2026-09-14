@@ -250,18 +250,45 @@ SymbolPalette.armFiltered = function() {
     if (isNull(w) || isNull(w.buttons)) {
         return;
     }
-    if (w.buttons.length !== 1) {
-        EAction.handleUserMessage(w.buttons.length === 0 ?
+    // THE SHOWING TILES, not every tile. The panel keeps a widget for
+    // every symbol now and hides the ones a search rules out, so
+    // "w.buttons.length" is the whole catalogue and would answer "28
+    // symbols still match" to every search ever typed.
+    var showing = SymbolPalette.showingTiles();
+    if (showing.length !== 1) {
+        EAction.handleUserMessage(showing.length === 0 ?
             qsTr("No symbol matches that.") :
             qsTr("%1 symbols still match. Type more of the name, then " +
-                "press Return.").arg(w.buttons.length));
+                "press Return.").arg(showing.length));
         return;
     }
-    var entry = w.buttons[0].entry;
+    var entry = showing[0].entry;
     SymbolPalette.arm(entry);
     SymbolPalette.startRun();
     EAction.handleUserMessage(qsTr("Armed %1. Click in the drawing to " +
         "place it.").arg(entry.nss));
+};
+
+/** The tiles a search has left showing, in panel order. Reads what the
+ *  last filter DECIDED rather than re-running the match, for
+ *  armFiltered's own reason: what the caver can see is the only honest
+ *  answer to "which one", and a second filtering pass could disagree
+ *  with the one on screen. */
+SymbolPalette.showingTiles = function() {
+    var w = SymbolPalette.widgets;
+    var out = [];
+    if (isNull(w) || isNull(w.buttons)) {
+        return out;
+    }
+    for (var i = 0; i < w.buttons.length; i++) {
+        // `showing` is what applyFilter DECIDED. A tile that has never
+        // been through a filter has none, and counts as showing --
+        // which is right: before the first filter, nothing is hidden.
+        if (w.buttons[i].showing !== false) {
+            out.push(w.buttons[i]);
+        }
+    }
+    return out;
 };
 
 SymbolPalette.disarm = function() {
@@ -434,14 +461,46 @@ SymbolPalette.iconFor = function(shapes, size, penColor) {
 };
 
 /**
- * Every symbol's shapes, read once out of the template.
+ * Every symbol's shapes, CACHED until a save or a delete.
  *
- * One open of the template for the whole panel rather than one per
- * tile: the file is a full DXF import, and 28 of them would be felt.
+ * The read underneath is two full DXF imports (the caver's library and
+ * the cave template) plus a walk of every block's geometry in both.
+ * rebuildTiles calls this, and rebuildTiles used to run on every
+ * keystroke in the search box -- so filtering for "gour" was eight DXF
+ * imports and eight offscreen RDocumentInterfaces, none of which this
+ * bridge ever frees. Measured against the live GUI 2026-09-14, after a
+ * caver typed into the Draw panel's Symbols search and the application
+ * came within sight of dying.
+ *
+ * Keyed on CsSymbolStore.generation, which that store bumps on every
+ * invalidate() -- so saving, renaming or deleting a symbol drops this
+ * with it, and nothing else has to know the cache exists.
  *
  * \return { byBlock: {name: [shapes]}, error }
  */
 SymbolPalette.loadShapes = function() {
+    var gen = 0;
+    try {
+        gen = CsSymbolStore.generation;
+    } catch (eGen) {
+        gen = 0;
+    }
+    if (!isNull(SymbolPalette.shapeCache) &&
+            SymbolPalette.shapeCacheGeneration === gen) {
+        return SymbolPalette.shapeCache;
+    }
+    var fresh = SymbolPalette.readShapes();
+    SymbolPalette.shapeCache = fresh;
+    SymbolPalette.shapeCacheGeneration = gen;
+    return fresh;
+};
+
+/** The cached answer, and the store generation it was read at. */
+SymbolPalette.shapeCache = null;
+SymbolPalette.shapeCacheGeneration = -1;
+
+/** The actual read. Never call this directly -- see loadShapes. */
+SymbolPalette.readShapes = function() {
     var out = { byBlock: {}, error: "" };
     // BOTH FILES, the caver's library first so their own version of a
     // symbol is the one pictured. One open each, for the whole panel.
@@ -961,6 +1020,12 @@ SymbolPalette.buildGroup = function(w, parent, group, shapes, collapsed) {
     var section = CsPanel.section(parent, group.category,
         SymbolPalette.COLLAPSED_SETTING, collapsed);
     var inner = new QGridLayout();
+    // KEPT ON THE SECTION so applyFilter can repack this grid without
+    // building a single widget: the tiles a search hides are the same
+    // objects it shows again, and a tile's icon is a rendered pixmap
+    // nobody wants painted twice.
+    section.grid = inner;
+    section.tiles = [];
     var cell = 0;
     for (var i = 0; i < group.entries.length; i++) {
         var entry = group.entries[i];
@@ -972,7 +1037,9 @@ SymbolPalette.buildGroup = function(w, parent, group, shapes, collapsed) {
                 Math.floor(cell / SymbolPalette.GRID_COLUMNS),
                 cell % SymbolPalette.GRID_COLUMNS);
             cell++;
-            w.buttons.push({ button: button, entry: entry });
+            var tile = { button: button, entry: entry };
+            section.tiles.push(tile);
+            w.buttons.push(tile);
         } catch (e) {
             w.problems.push(entry.block + " (" + e + ")");
         }
@@ -989,6 +1056,95 @@ SymbolPalette.buildGroup = function(w, parent, group, shapes, collapsed) {
     }
     section.host.setLayout(inner);
     return section;
+};
+
+/** True once the one-off template migration has run this session. */
+SymbolPalette.migrationDone = false;
+
+/**
+ * Moves a caver's own symbols out of the cave template and into their
+ * symbol library, where a CaveCAD update cannot overwrite them.
+ *
+ * Its own function so rebuildTiles can call it on the FIRST rebuild and
+ * never again -- see the call site for why once is enough.
+ */
+SymbolPalette.runTemplateMigration = function() {
+    try {
+        var moved = CsSymbolStore.migrateFromTemplate();
+        if (moved.moved.length > 0) {
+            EAction.handleUserMessage(qsTr("Moved %1 of your own symbols " +
+                "out of the cave template and into your symbol library, " +
+                "where a CaveCAD update cannot overwrite them: %2")
+                .arg(moved.moved.length).arg(moved.moved.join(", ")));
+        }
+    } catch (eMigrate) {
+        // a migration that cannot run leaves the symbols where they
+        // are, which is exactly where they were working from before
+    }
+};
+
+/** How long the panel waits after the last keystroke before it filters.
+ *  Long enough that typing a whole word is ONE rebuild, short enough
+ *  that a caver who has stopped typing does not notice the wait. */
+SymbolPalette.FILTER_DELAY_MS = 200;
+
+/** The pending filter, or null. Module-level so a second keystroke can
+ *  cancel the first one's timer rather than queue a second rebuild. */
+SymbolPalette.filterTimer = null;
+
+/**
+ * Rebuilds the tiles AFTER the caver stops typing.
+ *
+ * A rebuild tears down and rebuilds every tile widget in the panel.
+ * Wired straight to textChanged, that ran once per keystroke, and each
+ * run reparented the live group boxes to null -- which on a fullscreen
+ * macOS CaveCAD threw up a black fullscreen window per box until
+ * deleteLater caught up. The hide-before-detach in rebuildTiles is what
+ * stops the windows; this is what stops there being six rebuilds in
+ * flight to make them out of.
+ */
+SymbolPalette.scheduleFilter = function() {
+    if (typeof QTimer === "undefined") {
+        SymbolPalette.filterNow();   // no timers on this bridge
+        return;
+    }
+    try {
+        if (SymbolPalette.filterTimer !== null) {
+            SymbolPalette.filterTimer.stop();
+        }
+    } catch (eStop) {
+    }
+    try {
+        var timer = new QTimer(RMainWindowQt.getMainWindow());
+        timer.singleShot = true;
+        timer.timeout.connect(function() {
+            SymbolPalette.filterTimer = null;
+            try {
+                SymbolPalette.filterNow();
+            } catch (eRebuild) {
+            }
+        });
+        SymbolPalette.filterTimer = timer;
+        timer.start(SymbolPalette.FILTER_DELAY_MS);
+    } catch (eTimer) {
+        // a bridge that refused the timer filters immediately, which is
+        // the behaviour this had before the debounce existed
+        SymbolPalette.filterTimer = null;
+        SymbolPalette.filterNow();
+    }
+};
+
+/** Runs a pending filter NOW. For Return, which acts on what the tiles
+ *  show and so cannot be allowed to read a stale set. */
+SymbolPalette.flushFilter = function() {
+    try {
+        if (SymbolPalette.filterTimer !== null) {
+            SymbolPalette.filterTimer.stop();
+            SymbolPalette.filterTimer = null;
+            SymbolPalette.filterNow();
+        }
+    } catch (eFlush) {
+    }
 };
 
 /**
@@ -1011,8 +1167,19 @@ SymbolPalette.rebuildTiles = function() {
         // Delete the old boxes. Reparenting to null and calling
         // deleteLater is how a script drops a widget in this bridge;
         // hiding them would leave their buttons connected and armable.
+        //
+        // HIDDEN FIRST, AND THAT ORDER IS THE WHOLE BUG. setParent(null)
+        // makes a widget a TOP-LEVEL WINDOW. On macOS, with CaveCAD
+        // fullscreen, each detached-but-not-yet-deleted group box came
+        // up as its own black fullscreen space -- six of them at once,
+        // one per category, all vanishing again when deleteLater finally
+        // ran. Reported live 2026-09-14, searching the Draw panel's
+        // Symbols section. CsPanel.clearLayout had this right already;
+        // this loop and AreaFill.rebuildTiles were the two places that
+        // never learnt it.
         for (var i = 0; i < w.groupBoxes.length; i++) {
             try {
+                w.groupBoxes[i].visible = false;
                 w.groupBoxes[i].setParent(null);
                 w.groupBoxes[i].deleteLater();
             } catch (eDel) {
@@ -1024,20 +1191,17 @@ SymbolPalette.rebuildTiles = function() {
     w.buttons = [];
 
     // A symbol drawn before the library existed still lives in the
-    // template, where the next release will overwrite it. Moving it is
-    // safe to do here and costs nothing when there is nothing to move,
-    // which is every rebuild after the first.
-    try {
-        var moved = CsSymbolStore.migrateFromTemplate();
-        if (moved.moved.length > 0) {
-            EAction.handleUserMessage(qsTr("Moved %1 of your own symbols " +
-                "out of the cave template and into your symbol library, " +
-                "where a CaveCAD update cannot overwrite them: %2")
-                .arg(moved.moved.length).arg(moved.moved.join(", ")));
-        }
-    } catch (eMigrate) {
-        // a migration that cannot run leaves the symbols where they
-        // are, which is exactly where they were working from before
+    // template, where the next release will overwrite it.
+    //
+    // ONCE PER SESSION, NOT ONCE PER REBUILD. "Costs nothing when there
+    // is nothing to move" was wrong: the check itself is a list() of
+    // the template, and the panel rebuilds on every keystroke in the
+    // search box. Nothing can put a stray symbol back into the template
+    // while the panel is open -- the editor writes to the library --
+    // so the first rebuild is the only one that can find anything.
+    if (!SymbolPalette.migrationDone) {
+        SymbolPalette.migrationDone = true;
+        SymbolPalette.runTemplateMigration();
     }
 
     var merged = CsSymbols.merged();
@@ -1056,25 +1220,19 @@ SymbolPalette.rebuildTiles = function() {
     }
 
     var shapes = SymbolPalette.loadShapes().byBlock;
-    var needle = "";
-    try {
-        needle = isNull(w.searchEdit) ? "" : String(w.searchEdit.text);
-    } catch (eSearch) {
-    }
 
-    var groups = SymbolPalette.grouped(merged.entries, needle);
-    // The caver's own order of the categories, when they have set one.
-    // A search does not reorder anything -- it filters -- so the stack
-    // is built either way and simply has fewer sections in it.
+    // THE WHOLE CATALOGUE, ALWAYS -- the search is not applied here.
+    // A rebuild is the expensive thing in this panel (a rendered pixmap
+    // per tile, and a QWidget per tile to hang it on), so it happens
+    // when the CATALOGUE changes -- a save, a rename, a delete -- and
+    // never because somebody typed a letter. applyFilter below does the
+    // typing case by showing and hiding tiles that already exist.
+    var groups = SymbolPalette.grouped(merged.entries, "");
     w.stack = CsPanel.stack(w.tileLayout,
         SymbolPalette.COLLAPSED_SETTING, 0, function() {
             SymbolPalette.rebuildTiles();
         });
-    // A SEARCH OPENS EVERYTHING. A caver typing "gour" wants to be
-    // shown it, not to be told it is inside a group they collapsed
-    // last week -- and the collapsed set is left alone, so clearing the
-    // search puts the panel back the way they had it.
-    var collapsed = (needle === "") ? SymbolPalette.loadCollapsed() : {};
+    var collapsed = SymbolPalette.loadCollapsed();
     for (var g = 0; g < groups.length; g++) {
         try {
             var section = SymbolPalette.buildGroup(w, w.tileHost, groups[g],
@@ -1091,6 +1249,20 @@ SymbolPalette.rebuildTiles = function() {
     } catch (eOrder) {
         w.problems.push("category order (" + eOrder + ")");
     }
+    // The stack's order AFTER applyOrder is the caver's order, and it
+    // is the order every filter works from: applyFilter narrows
+    // stack.sections to the ones with a match, so this is the only
+    // place the full set is remembered.
+    w.allSections = w.stack.sections.slice(0);
+    // What the tiles were built FROM. A filter compares this against
+    // the store's current generation and rebuilds instead of filtering
+    // when a save has happened since -- which is what stops a deleted
+    // symbol staying on screen and clickable.
+    try {
+        w.builtAtGeneration = CsSymbolStore.generation;
+    } catch (eGen) {
+        w.builtAtGeneration = -1;
+    }
 
     // The tiles are new objects, so the counts have to be written again.
     try {
@@ -1099,8 +1271,8 @@ SymbolPalette.rebuildTiles = function() {
         w.problems.push("symbol counts (" + eCounts + ")");
     }
 
-    // Re-arm what was armed, if it is still in the list: a search that
-    // hides the armed tile must not silently disarm the tool mid-job.
+    // Re-arm what was armed, if it is still in the list: a rebuild
+    // after a save must not silently disarm the tool mid-job.
     if (armedBlock !== null) {
         for (var b = 0; b < w.buttons.length; b++) {
             if (w.buttons[b].entry.block === armedBlock) {
@@ -1112,6 +1284,149 @@ SymbolPalette.rebuildTiles = function() {
         }
     }
     SymbolPalette.refreshCustomButtons();
+    // The panel is built showing everything; whatever is in the search
+    // box now decides what stays showing.
+    SymbolPalette.applyFilter();
+};
+
+/**
+ * Shows the tiles that match the search box, hides the rest.
+ *
+ * NO WIDGET IS BUILT OR DESTROYED HERE, and that is the whole point.
+ * Every tile carries a rendered pixmap of its symbol's real geometry;
+ * rebuilding thirty of those per keystroke is what made typing in this
+ * panel feel like the application had stalled, on top of the two DXF
+ * imports and the whole-drawing symbol count each rebuild also ran.
+ * Filtering touches visibility and grid cells only.
+ *
+ * WHAT STILL HAS TO BE RIGHT:
+ *   - A category with no match disappears entirely, header and all --
+ *     an empty group heading reads as "nothing here matched" nine
+ *     times over, which is worse than a short panel.
+ *   - A SEARCH OPENS EVERYTHING it shows. A caver typing "gour" wants
+ *     the rimstone dam on screen, not folded inside a group they
+ *     collapsed last week. The collapsed set is never written to, so
+ *     clearing the search puts the panel back exactly as they had it.
+ *   - The grid is REPACKED rather than left with holes: hiding the
+ *     second of three tiles must not leave a gap where it was.
+ *   - The counts are NOT recomputed. They come from a walk of every
+ *     block reference in the drawing, which on a real cave is the
+ *     slowest thing this panel can do, and filtering changes none of
+ *     them.
+ */
+SymbolPalette.applyFilter = function() {
+    var w = SymbolPalette.widgets;
+    if (isNull(w) || isNull(w.stack) || isNull(w.allSections)) {
+        return;
+    }
+    var needle = "";
+    try {
+        needle = isNull(w.searchEdit) ? "" : String(w.searchEdit.text);
+    } catch (eSearch) {
+        needle = "";
+    }
+    var searching = (needle !== "");
+    var collapsed = searching ? {} : SymbolPalette.loadCollapsed();
+
+    // Every section box comes out of the layout first. The ones with a
+    // match go back in through CsPanel.relayout below; the others stay
+    // out and hidden. removeWidget does NOT reparent -- which matters:
+    // setParent(null) on a visible widget is what used to throw black
+    // fullscreen windows up on macOS (see rebuildTiles).
+    for (var r = 0; r < w.allSections.length; r++) {
+        try {
+            w.tileLayout.removeWidget(w.allSections[r].box);
+        } catch (eRemove) {
+        }
+    }
+
+    var showing = [];
+    for (var i = 0; i < w.allSections.length; i++) {
+        var section = w.allSections[i];
+        var tiles = isNull(section.tiles) ? [] : section.tiles;
+        var cell = 0;
+        // Out of the grid, all of them, so the survivors can be laid
+        // back down with no holes between them.
+        for (var t = 0; t < tiles.length; t++) {
+            try {
+                section.grid.removeWidget(tiles[t].button);
+            } catch (eOut) {
+            }
+        }
+        for (t = 0; t < tiles.length; t++) {
+            var hit = SymbolPalette.matches(tiles[t].entry, needle);
+            // RECORDED, not read back off the widget later. A tile's
+            // `visible` is isVisible(): false while the dock is still
+            // being built, false inside a folded section, false for a
+            // hidden panel -- none of which mean "the search ruled it
+            // out". Same rule CsPanel.isFolded states for `open`.
+            tiles[t].showing = hit;
+            try {
+                tiles[t].button.visible = hit;
+            } catch (eVis) {
+            }
+            if (!hit) {
+                continue;
+            }
+            try {
+                section.grid.addWidget(tiles[t].button,
+                    Math.floor(cell / SymbolPalette.GRID_COLUMNS),
+                    cell % SymbolPalette.GRID_COLUMNS);
+            } catch (eIn) {
+            }
+            cell++;
+        }
+        var keep = (cell > 0);
+        try {
+            section.box.visible = keep;
+        } catch (eBox) {
+        }
+        if (!keep) {
+            continue;
+        }
+        // Folded or not, decided the same way a rebuild used to decide
+        // it -- through CsPanel.setOpen, which does NOT write to the
+        // caver's collapsed set.
+        try {
+            CsPanel.setOpen(section, section.title,
+                collapsed[section.title] !== true);
+        } catch (eOpen) {
+        }
+        showing.push(section);
+    }
+
+    w.stack.sections = showing;
+    try {
+        CsPanel.relayout(w.stack);
+    } catch (eLayout) {
+    }
+};
+
+/**
+ * The filter, run now: rebuilds first if the catalogue changed under it.
+ *
+ * A filter reuses the tiles a rebuild made. If a symbol has been saved,
+ * renamed or deleted since -- CsSymbolStore.generation says so -- those
+ * tiles are the wrong set, and a hide-only filter would leave a deleted
+ * symbol on screen and clickable. Then, and only then, this rebuilds
+ * (and rebuildTiles applies the filter itself on the way out).
+ */
+SymbolPalette.filterNow = function() {
+    var w = SymbolPalette.widgets;
+    if (isNull(w)) {
+        return;
+    }
+    var gen = -1;
+    try {
+        gen = CsSymbolStore.generation;
+    } catch (eGen) {
+        gen = -1;
+    }
+    if (w.builtAtGeneration !== gen) {
+        SymbolPalette.rebuildTiles();
+        return;
+    }
+    SymbolPalette.applyFilter();
 };
 
 /** THE PANEL'S BODY, separated from its dock -- see
@@ -1141,7 +1456,7 @@ SymbolPalette.buildBody = function(parent) {
         }
         w.searchEdit.textChanged.connect(function(text) {
             try {
-                SymbolPalette.rebuildTiles();
+                SymbolPalette.scheduleFilter();
             } catch (eFilter) {
                 // never throw out of a signal handler
             }
@@ -1154,6 +1469,12 @@ SymbolPalette.buildBody = function(parent) {
         try {
             w.searchEdit.returnPressed.connect(function() {
                 try {
+                    // The tiles Return reads must be the tiles for the
+                    // text in the box, not the ones a debounce has not
+                    // caught up with yet -- armFiltered arms the ONE
+                    // tile left showing, so a stale set is a shortcut
+                    // that arms the wrong symbol.
+                    SymbolPalette.flushFilter();
                     SymbolPalette.armFiltered();
                 } catch (eArm) {
                 }

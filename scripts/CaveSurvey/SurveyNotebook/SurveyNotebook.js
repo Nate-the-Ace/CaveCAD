@@ -3050,21 +3050,16 @@ SurveyNotebook.fillScans = function(w) {
     // The scans TREE, not CsCave.imageFiles -- that reads the cave's
     // images/ folder, which is photographs. Scans live under scans/,
     // usually one folder per trip, which is why this walks.
-    var filters = ["*.png", "*.jpg", "*.jpeg", "*.tif", "*.tiff",
-        "*.bmp", "*.gif"];
-    try {
-        var formats = QImageReader.supportedImageFormats();
-        if (!isNull(formats) && formats.length > 0) {
-            filters = [];
-            for (var f = 0; f < formats.length; f++) {
-                filters.push("*." + String(formats[f]));
-            }
-        }
-    } catch (eFormats) {
-    }
+    //
+    // THROUGH CORE, not a listing of its own. This panel used to call
+    // CsCave.filesUnder directly and keep everything it answered, so
+    // every crop Scan Trim had ever written showed up here as a page
+    // (Nathan, 2026-09-14) while Sketch Scans, filtering its own copy,
+    // showed none of them. CsScanList.scanFiles is the one answer both
+    // panels now draw.
     var relative = [];
     try {
-        relative = CsCave.filesUnder(folder, filters, 4);
+        relative = CsScanList.scanFiles(folder, 4);
     } catch (eList) {
         relative = [];
     }
@@ -3809,6 +3804,11 @@ SurveyNotebook.buildDock = function(appWin) {
                 fAct.triggered.connect(function() {
                     SurveyNotebook.markScanFolder(w, row, !fDone);
                 });
+                try {
+                    CsScanList.addRevealAction(menu, w.scansFolder,
+                        w.scanRows[row].rel, true);
+                } catch (eRevealF) {
+                }
             } else {
                 var done = w.scanComplete[w.scanRows[row].rel] === true;
                 var act = menu.addAction(qsTr(CsScanList.markLabel(done)));
@@ -3820,6 +3820,21 @@ SurveyNotebook.buildDock = function(appWin) {
                 act.triggered.connect(function() {
                     SurveyNotebook.toggleScanComplete(w, row);
                 });
+                // The same entry Sketch Scans offers on the same tree,
+                // from the same place in Core: a PDF of a whole trip
+                // becomes one image per page. Adds itself only for a
+                // PDF row.
+                try {
+                    CsScanList.addSplitAction(menu, w.scansFolder,
+                        w.scanRows[row].rel,
+                        function() { SurveyNotebook.fillScans(w); });
+                } catch (eSplit) {
+                }
+                try {
+                    CsScanList.addRevealAction(menu, w.scansFolder,
+                        w.scanRows[row].rel, false);
+                } catch (eReveal) {
+                }
             }
             menu.exec(QCursor.pos());
             try {

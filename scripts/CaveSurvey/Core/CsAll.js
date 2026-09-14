@@ -64,6 +64,7 @@ include(includeBasePath + "/CsMesh3d.js");
 include(includeBasePath + "/CsScanFit.js");
 include(includeBasePath + "/CsScanFrame.js");
 include(includeBasePath + "/CsScanTrim.js");
+include(includeBasePath + "/CsScanPdf.js");
 include(includeBasePath + "/CsScanRotate.js");
 include(includeBasePath + "/CsScanReanchor.js");
 include(includeBasePath + "/CsSectionCut.js");

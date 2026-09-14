@@ -121,6 +121,11 @@ CsSymbolStore.DEFAULT_CATEGORY = "Custom";
  *  this list on every rebuild. invalidate() drops it after a save. */
 CsSymbolStore.cache = {};
 
+/** How many times invalidate() has run this session. A counter and not
+ *  a flag, so a caller comparing it against the value it last read
+ *  cannot miss a save that happened between two of its own reads. */
+CsSymbolStore.generation = 0;
+
 /** Symbol radii, keyed by template path then block name, filled by
  *  list() while it already has the template open. Dragging a symbol
  *  out asks for one per placement, and reopening a DXF per mouse
@@ -742,6 +747,13 @@ CsSymbolStore.migrateFromTemplate = function() {
 /** Forgets the cached listing, so the next list() reads the file again.
  *  Called after any write; called with no path, forgets everything. */
 CsSymbolStore.invalidate = function(path) {
+    // BUMPED ON EVERY INVALIDATION, whole-store or one file. A caller
+    // that caches something DERIVED from these files (SymbolPalette's
+    // rendered tile shapes) keeps the generation it read at and throws
+    // its own cache away when this moves -- without having to know
+    // which paths this store keeps or when a save touched them.
+    CsSymbolStore.generation = (isNull(CsSymbolStore.generation) ? 0 :
+        CsSymbolStore.generation) + 1;
     if (isNull(path)) {
         CsSymbolStore.cache = {};
         CsSymbolStore.radii = {};
