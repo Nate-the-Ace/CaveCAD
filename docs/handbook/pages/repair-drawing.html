@@ -1,14 +1,15 @@
 <h1>Repair Drawing</h1>
-<p>Three repair passes in one dialog, run in the order that matters. <code>rep</code></p>
+<p>Four repair passes in one dialog, run in the order that matters. <code>rep</code></p>
 <h2>When you reach for it</h2>
 <p>An old drawing that predates a change; a drawing edited in another program; callout arrows that have come adrift; a cave whose layers look nothing like the palette.</p>
-<h2>The three passes</h2>
+<h2>The four passes</h2>
 <ol>
 <li><b>Survey data</b> first — re-derive the survey model from what the drawing already holds, and upgrade a legacy drawing's tags to the current schema. First because a legacy drawing's tags have to be current before anything else reads them.</li>
-<li><b>Layers</b> second — add the registry layers this drawing is missing and rewrite colour, linetype and lineweight on the ones it has. A drawing keeps the layer appearance it was born with, so a cave started before a palette change stays on the old one until this runs. Second because rebuilding survey data can add layers.</li>
+<li><b>Scan images</b> second — put back the file reference of a scan whose page has been moved, renamed or re-synced. The placement is untouched: the scan returns at the size and angle it was fitted at. This pass has no checkbox and always runs; relinking a scan that is where it says it is changes nothing.</li>
+<li><b>Layers</b> third — add the registry layers this drawing is missing and rewrite colour, linetype and lineweight on the ones it has. A drawing keeps the layer appearance it was born with, so a cave started before a palette change stays on the old one until this runs. Because rebuilding survey data can add layers.</li>
 <li><b>Callouts</b> last — put every callout arrow back on its note after the note has been moved or reworded, and re-key a copied callout sharing an id with the original. Last because restyling can move a note onto a different layer and strand its arrows.</li>
 </ol>
-<p>Each is a checkbox, on by default. One combined report; unticking a pass gives a line saying it was skipped.</p>
+<p>Three of the four are checkboxes, on by default; the scan relink always runs. One combined report, and unticking a pass gives a line saying it was skipped.</p>
 <h2>See also</h2>
 <ul>
 <li><a href="check-map.html">Check Map</a> — what is wrong, rather than fixing it</li>

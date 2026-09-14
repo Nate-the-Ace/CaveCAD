@@ -314,6 +314,153 @@
         "PackageCave"
       ],
       "shots": []
+    },
+    {
+      "id": "line-up-a-scan",
+      "title": "Get a scan to line up under the drawing",
+      "class": "task",
+      "file": "line-up-a-scan.html",
+      "shots": []
+    },
+    {
+      "id": "put-a-scan-back",
+      "title": "Put a scan back when its file moved",
+      "class": "task",
+      "file": "put-a-scan-back.html",
+      "shots": []
+    },
+    {
+      "id": "trim-a-scan",
+      "title": "Trim a scan to the sketch, not the page",
+      "class": "task",
+      "file": "trim-a-scan.html",
+      "shots": []
+    },
+    {
+      "id": "sketches-in-3d",
+      "title": "Lay sketches on the passage in 3D",
+      "class": "task",
+      "file": "sketches-in-3d.html",
+      "shots": []
+    },
+    {
+      "id": "surface-under-the-cave",
+      "title": "Put aerial imagery and contours under the cave",
+      "class": "task",
+      "file": "surface-under-the-cave.html",
+      "shots": []
+    },
+    {
+      "id": "add-a-trip",
+      "title": "Add a trip to a cave you already have",
+      "class": "task",
+      "file": "add-a-trip.html",
+      "shots": []
+    },
+    {
+      "id": "correct-a-reading",
+      "title": "Correct a bad reading",
+      "class": "task",
+      "file": "correct-a-reading.html",
+      "shots": []
+    },
+    {
+      "id": "bring-in-a-survey",
+      "title": "Bring in a survey from other software",
+      "class": "task",
+      "file": "bring-in-a-survey.html",
+      "shots": []
+    },
+    {
+      "id": "hand-the-survey-out",
+      "title": "Write the survey back out",
+      "class": "task",
+      "file": "hand-the-survey-out.html",
+      "shots": []
+    },
+    {
+      "id": "set-the-location",
+      "title": "Set the cave's location",
+      "class": "task",
+      "file": "set-the-location.html",
+      "shots": []
+    },
+    {
+      "id": "trace-a-long-wall",
+      "title": "Trace one wall across several passes",
+      "class": "task",
+      "file": "trace-a-long-wall.html",
+      "shots": []
+    },
+    {
+      "id": "draw-a-ledge",
+      "title": "Draw a ledge or pit the right way round",
+      "class": "task",
+      "file": "draw-a-ledge.html",
+      "shots": []
+    },
+    {
+      "id": "fill-the-floor",
+      "title": "Fill the floor with a pattern",
+      "class": "task",
+      "file": "fill-the-floor.html",
+      "shots": []
+    },
+    {
+      "id": "capture-a-section",
+      "title": "Capture a cross section, three routes",
+      "class": "task",
+      "file": "capture-a-section.html",
+      "shots": []
+    },
+    {
+      "id": "rebuild-the-elevation",
+      "title": "Rebuild the extended elevation",
+      "class": "task",
+      "file": "rebuild-the-elevation.html",
+      "shots": []
+    },
+    {
+      "id": "build-a-sheet",
+      "title": "Put a sheet together at a scale that fits",
+      "class": "task",
+      "file": "build-a-sheet.html",
+      "shots": []
+    },
+    {
+      "id": "make-the-legend",
+      "title": "Make the legend say what the map uses",
+      "class": "task",
+      "file": "make-the-legend.html",
+      "shots": []
+    },
+    {
+      "id": "work-check-map-down",
+      "title": "Work Check Map's list down to nothing",
+      "class": "task",
+      "file": "work-check-map-down.html",
+      "shots": []
+    },
+    {
+      "id": "where-the-loop-error-is",
+      "title": "See where a loop error actually happened",
+      "class": "task",
+      "file": "where-the-loop-error-is.html",
+      "shots": []
+    },
+    {
+      "id": "hand-a-cave-over",
+      "title": "Hand a cave to someone else",
+      "class": "task",
+      "file": "hand-a-cave-over.html",
+      "shots": []
+    },
+    {
+      "id": "set-up-a-student",
+      "title": "Set a student up on the teaching cave",
+      "class": "task",
+      "file": "set-up-a-student.html",
+      "shots": []
     }
   ]
 }
