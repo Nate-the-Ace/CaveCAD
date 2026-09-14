@@ -1478,20 +1478,62 @@ CsTrace.emit = function(doc, di, layerName, points, spacing, tolerance) {
             id: null };
     }
 
+    var landed = CsTrace.addCurve(doc, di, layerName, spline, null);
+    return {
+        added: landed.added,
+        sampled: spaced.length,
+        kept: kept.length,
+        id: landed.id
+    };
+};
+
+/**
+ * Adds a built curve to a layer, and reports what actually landed.
+ *
+ * SPLIT OUT OF emit so a second caller can reach it. The Therion
+ * sketch importer writes curves that must NOT go through emit's
+ * resample-and-reduce pipeline -- that pipeline exists to thin a
+ * caver's freehand drag, and a scrap's geometry has already been
+ * evaluated off its own cubics at a stated tolerance (see
+ * CsSketchPlace.flatten). Everything BELOW the pipeline, though, it
+ * needs exactly: the layer-on wrapper and the counted add.
+ *
+ * Wrapped in CsLayers.withLayerOn because this build's
+ * RAddObjectsOperation silently refuses an add to a layer that is off
+ * -- no error, no exception, the entity simply never lands.
+ *
+ * COUNTED, not assumed. An earlier version of emit returned added:true
+ * whenever a curve could be BUILT, so the panel cheerfully reported
+ * "44 sampled, 10 kept" for a trace that never reached the drawing.
+ *
+ * `id` is found by DIFFING the layer's contents across the add rather
+ * than read off the object handed in: this build assigns the id inside
+ * applyOperation and that object is not reliably the one that ends up
+ * in the document. null when nothing landed, and null rather than a
+ * guess if more than one entity appeared -- something else wrote to the
+ * layer during the add, and tagging the wrong entity is worse than
+ * tagging none.
+ *
+ * \param group an optional transaction group, so a caller writing many
+ *        curves can put them all on one undo.
+ * \return {added: bool, id: id|null}
+ */
+CsTrace.addCurve = function(doc, di, layerName, entity, group) {
+    if (isNull(doc) || isNull(di) || isNull(entity)) {
+        return { added: false, id: null };
+    }
     CsLayers.ensure(doc, di, layerName);
     var layerId = doc.getLayerId(layerName);
-    spline.setLayerId(layerId);
+    entity.setLayerId(layerId);
 
-    // COUNTED, not assumed. An earlier version returned added:true
-    // whenever a curve could be built, so the panel cheerfully reported
-    // "44 sampled, 10 kept" for a trace that never reached the drawing
-    // -- this build refuses adds silently in more ways than one, and a
-    // report that cannot be wrong is worth the extra query.
     var before = doc.queryLayerEntities(layerId, true);
 
     CsLayers.withLayerOn(doc, di, layerName, function() {
         var op = new RAddObjectsOperation();
-        op.addObject(spline, false);
+        op.addObject(entity, false);
+        if (group !== null && group !== undefined && group >= 0) {
+            op.setTransactionGroup(group);
+        }
         di.applyOperation(op);
     });
 
@@ -1509,8 +1551,6 @@ CsTrace.emit = function(doc, di, layerName, points, spacing, tolerance) {
     }
     return {
         added: (after.length > before.length),
-        sampled: spaced.length,
-        kept: kept.length,
         id: (fresh.length === 1) ? fresh[0] : null
     };
 };

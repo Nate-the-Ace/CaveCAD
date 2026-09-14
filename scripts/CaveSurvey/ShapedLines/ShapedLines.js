@@ -140,60 +140,18 @@ ShapedLines.askOptions = function() {
 };
 
 /**
- * Dress one existing entity as a shaped line: tag it as a spine and
- * decorate. The entity STAYS on its own layer -- relocating a caver's
- * geometry is not this tool's call; only the decoration lands on the
- * style's decor layer. Closed geometry with a ticks style aims the
- * ornament inward, the pit rule.
+ * Dress one existing entity as a shaped line.
+ *
+ * THE WORK IS CsShapeLine.dress'S, in Core, and this is the name this
+ * tool's own callers have always used. It moved there when the Therion
+ * sketch importer needed to dress an imported ledge exactly the way a
+ * hand-drawn one is dressed: Core may not reach into a tool folder, and
+ * a second implementation of the spine tags would drift from this one
+ * silently -- a shaped line whose tags are subtly wrong looks right
+ * until something regenerates it.
  */
 ShapedLines.dressOne = function(doc, di, entity, opts, group) {
-    var spec = CsShapeLine.STYLES[opts.styleKey];
-    if (isNull(spec)) {
-        return false;
-    }
-
-    var side = opts.side;
-    var perFoot = CsShapeLine.perFoot(doc);
-    var probe = CsShapeLine.sampleEntity(entity,
-        CsShapeLine.sampleStep(spec.spacingFeet * perFoot * opts.scale));
-    if (isNull(probe) || probe.points.length < 2) {
-        return false;
-    }
-    if (probe.closed && spec.kind !== "scallops") {
-        side = CsShapeLine.inwardSide(probe.points) * (opts.side === -1 ? -1 : 1);
-    }
-
-    // Which FRAME the entity's geometry sits in decides which layer
-    // family the decoration joins -- the caver's entity itself stays
-    // where it is, so its layer name proves nothing (a profile sketch
-    // on layer "0" is ordinary). Location is the evidence: an open
-    // section bay first, then the band boxes, then the derived region
-    // as the fallback (opts.region and opts.bays are the caller's
-    // cached CsTrace.profileRegion and CsTrace.sectionBays).
-    var mid = probe.points[Math.floor(probe.points.length / 2)];
-    var frame = CsProfileBox.frameAt(doc, opts.region || null, mid,
-        opts.bays || []);
-
-    CsTags.set(entity, CsShapeLine.KEY.ID, CsUuid.v4());
-    CsTags.set(entity, CsShapeLine.KEY.STYLE, opts.styleKey);
-    CsTags.set(entity, CsShapeLine.KEY.SIDE, String(side));
-    CsTags.set(entity, CsShapeLine.KEY.SCALE, String(opts.scale));
-    CsTags.set(entity, CsShapeLine.KEY.FRAME, frame);
-    // "glyphs" only reads this tag (buildDecor falls back to the
-    // style's symbolDefault for every other kind, or when it is
-    // empty), so setting it unconditionally for the other five kinds
-    // costs nothing and keeps this one write site simple.
-    if (!isNull(opts.symbol) && opts.symbol !== "") {
-        CsTags.set(entity, CsShapeLine.KEY.SYMBOL, opts.symbol);
-    }
-    var mod = new RModifyObjectsOperation();
-    mod.addObject(entity, false);
-    if (group >= 0) {
-        mod.setTransactionGroup(group);
-    }
-    di.applyOperation(mod);
-
-    return CsShapeLine.decorate(doc, di, entity, group) === "decorated";
+    return CsShapeLine.dress(doc, di, entity, opts, group);
 };
 
 ShapedLines.prototype.beginEvent = function() {
