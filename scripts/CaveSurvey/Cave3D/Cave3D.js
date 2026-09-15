@@ -450,6 +450,108 @@ Cave3D.mergeScanBuffers = function(a, b) {
 
 /** One line for the panel's status bar. */
 /**
+ * The surface contour lines the DRAWING already has, lifted into 3D.
+ *
+ * WHY LIFT RATHER THAN REGENERATE. The plan drawing's contours were
+ * drawn at an interval the caver chose, and they are the answer to
+ * "what contours does this cave have" -- so 3D showing a different set
+ * at a different interval is simply wrong, whatever it costs. It also
+ * happens to be far cheaper: marching squares over a 3DEP grid costs
+ * about 237 ms PER LEVEL in this engine (measured, 428x236), so
+ * regenerating one real cave's foot-interval contours came to
+ * thirty-one seconds of frozen panel. The lines are already in the
+ * document, each tagged with its own elevation. Read them.
+ *
+ * Thinned on the way through: a grid-traced contour carries a vertex
+ * per cell, and 61,607 segments of boxed doubles cross the bridge
+ * twice over (position and colour). At CsTerrain3d.THIN_TOLERANCE_M --
+ * well under the grid's own sample spacing -- the same cave comes
+ * through as about 6,000, and nothing visible changes.
+ *
+ * ELEVATIONS ARE THE TAG'S, IN DRAWING UNITS, as Surface Data wrote
+ * them: absolute NAVD88. The datum offset converts them into the
+ * survey's frame, exactly as the mesh is converted.
+ *
+ * \return {positions, colors, levels} -- levels is how many distinct
+ *         elevations were found, for the status line.
+ */
+Cave3D.terrainContoursFromDrawing = function(doc, unit, offset) {
+    var out = { positions: [], colors: [], levels: 0 };
+    var shift = (offset === null || offset === undefined) ? 0.0 : offset;
+    var tol = CsUnits.convert(CsTerrain3d.THIN_TOLERANCE_M,
+        CsUnits.METERS, unit);
+    var seen = {};
+
+    var ids = doc.queryAllEntities(false, false);
+    for (var i = 0; i < ids.length; i++) {
+        var e = doc.queryEntity(ids[i]);
+        if (isNull(e) || CsTags.get(e, "SurfaceContours") !== "1") {
+            continue;
+        }
+        var levelU = CsTags.getNumber(e, "ContourElevation");
+        if (levelU === null) {
+            continue;             // the elevation LABELS carry the tag too
+        }
+        var shape = null;
+        try {
+            shape = e.getData().castToShape();
+        } catch (eShape) {
+            continue;
+        }
+        if (shape === null || isNull(shape)) {
+            continue;
+        }
+
+        var pts = [];
+        if (typeof shape.getVertices === "function") {
+            var vs = shape.getVertices();
+            for (var v = 0; v < vs.length; v++) {
+                pts.push({ x: vs[v].x, y: vs[v].y });
+            }
+        } else if (typeof shape.getStartPoint === "function" &&
+                typeof shape.getEndPoint === "function") {
+            pts.push({ x: shape.getStartPoint().x,
+                       y: shape.getStartPoint().y });
+            pts.push({ x: shape.getEndPoint().x,
+                       y: shape.getEndPoint().y });
+        }
+        if (pts.length < 2) {
+            continue;
+        }
+        pts = CsTerrain3d.thinPolyline(pts, tol);
+        if (pts.length < 2) {
+            continue;
+        }
+
+        seen[String(levelU)] = true;
+        var z = levelU - shift;
+        // The drawing already decided which contours are major -- they
+        // are the ones on the heavier layer. Read that rather than
+        // recomputing "every fifth", which would disagree with the plan
+        // the moment an interval changed.
+        var major = false;
+        try {
+            major = (e.getLayerName() === CsLayers.CTRL_CONTOUR_MAJOR);
+        } catch (eLayer) {
+        }
+        var c = major ? Cave3D.CONTOUR_MAJOR_COLOR
+                      : Cave3D.CONTOUR_MINOR_COLOR;
+        for (var k = 0; k + 1 < pts.length; k++) {
+            out.positions.push(pts[k].x, pts[k].y, z,
+                               pts[k + 1].x, pts[k + 1].y, z);
+            out.colors.push(c[0], c[1], c[2], c[0], c[1], c[2]);
+        }
+    }
+    out.levels = Object.keys(seen).length;
+    return out;
+};
+
+/** The two contour colours in the 3D view, matching the plan
+ *  drawing's own major/minor weighting. */
+Cave3D.CONTOUR_MAJOR_COLOR = [0.85, 0.72, 0.45];
+Cave3D.CONTOUR_MINOR_COLOR = [0.62, 0.53, 0.36];
+
+/**
  * The ground above the cave: the elevation grid Surface Data left
  * beside the drawing, meshed and placed in the survey's own vertical
  * frame, with the aerial photograph as its texture.
@@ -533,17 +635,39 @@ Cave3D.terrainBuffer = function(doc, read) {
         texture = "";
     }
 
+    // THE DRAWING'S OWN CONTOURS FIRST. They are what this cave has,
+    // at the interval its cartographer chose, and reading them costs
+    // no marching squares at all. Only a drawing with none falls back
+    // to generating a set from the grid.
+    var drawn = { positions: [], colors: [], levels: 0 };
+    try {
+        drawn = Cave3D.terrainContoursFromDrawing(doc, unit, offset);
+    } catch (eDrawn) {
+        drawn = { positions: [], colors: [], levels: 0 };
+    }
+
     var terrain;
     try {
         terrain = CsTerrain3d.build(grid, transform, {
             unit: unit,
             offset: offset,
+            // Generating is the FALLBACK, so it is switched off
+            // entirely whenever the drawing has contours of its own.
+            contours: drawn.levels === 0,
             intervalM: CsTerrain3d.niceInterval(range.max - range.min,
                 Cave3D.TERRAIN_CONTOUR_LEVELS),
+            thinTolerance: CsUnits.convert(CsTerrain3d.THIN_TOLERANCE_M,
+                CsUnits.METERS, unit),
             texture: texture
         });
     } catch (eBuild) {
         return none(qsTr("no surface: %1").arg(String(eBuild)));
+    }
+    if (drawn.levels > 0) {
+        terrain.lines = { positions: drawn.positions,
+                          colors: drawn.colors };
+        terrain.levels = drawn.levels;
+        terrain.fromDrawing = true;
     }
 
     var why = "";
@@ -558,6 +682,15 @@ Cave3D.terrainBuffer = function(doc, read) {
     } else {
         why = qsTr("cave meets the surface %1 %2 up")
             .arg(offset.toFixed(1)).arg(unit);
+    }
+    if (terrain.levels > 0) {
+        // SAY WHERE THE LINES CAME FROM. "19 contours" against a
+        // drawing showing 130 of them is the report that would have
+        // caught this sooner.
+        why += terrain.fromDrawing === true
+            ? qsTr("  --  %1 contours, as drawn").arg(terrain.levels)
+            : qsTr("  --  %1 contours, generated (this drawing has "
+                 + "none of its own)").arg(terrain.levels);
     }
     return { terrain: terrain, why: why };
 };

@@ -28872,6 +28872,50 @@ for (var nz = 3.0; nz < 4000.0; nz *= 1.37) {
 }
 ok(niceOk, "every interval is a 1, 2 or 5 step");
 
+// ---- thinning -------------------------------------------------------
+//
+// A grid-traced contour carries a vertex per cell; every one crosses
+// the bridge as six boxed doubles (position and colour). Dropping the
+// ones that say nothing is what keeps a real cave's 61,607 segments
+// from being sent in full.
+var straight = [{x:0,y:0},{x:1,y:0},{x:2,y:0},{x:3,y:0},{x:4,y:0}];
+eqs(CsTerrain3d.thinPolyline(straight, 0.1).length, 2,
+    "a straight run thins to its ends");
+var corner = [{x:0,y:0},{x:1,y:0},{x:2,y:0},{x:2,y:1},{x:2,y:2}];
+eqs(CsTerrain3d.thinPolyline(corner, 0.1).length, 3,
+    "a corner survives thinning");
+var wiggle = [{x:0,y:0},{x:1,y:0.05},{x:2,y:0}];
+eqs(CsTerrain3d.thinPolyline(wiggle, 0.1).length, 2,
+    "a wiggle under tolerance is dropped");
+eqs(CsTerrain3d.thinPolyline(wiggle, 0.01).length, 3,
+    "the same wiggle survives a finer tolerance");
+eqs(CsTerrain3d.thinPolyline(straight, 0).length, straight.length,
+    "no tolerance drops nothing");
+var twoPts = [{x:0,y:0},{x:1,y:1}];
+eqs(CsTerrain3d.thinPolyline(twoPts, 1).length, 2,
+    "a single segment cannot be thinned away");
+// Ends are never dropped: a contour that lost its last vertex would
+// fall short of where the ground actually is.
+var thinnedEnds = CsTerrain3d.thinPolyline(corner, 10);
+eqs(thinnedEnds[0].x, 0, "thinning keeps the first vertex");
+eqs(thinnedEnds[thinnedEnds.length - 1].y, 2,
+    "thinning keeps the last vertex");
+
+// ---- the generated fallback cannot hang the panel --------------------
+//
+// Marching squares costs ~237 ms PER LEVEL over a real 3DEP grid in
+// this engine, so a foot interval over 130 ft of relief is 31 seconds
+// of frozen panel -- which is exactly what "the detailed one doesn't
+// render" turned out to be. An interval finer than the ceiling is
+// widened, never marched.
+var manyLevels = CsTerrain3d.build(rampGrid, terrainXf, {
+    unit: CsUnits.METERS, offset: 0.0, intervalM: 0.001
+});
+ok(manyLevels.levels <= CsTerrain3d.MAX_GENERATED_LEVELS,
+   "a too-fine interval is widened, not marched (got " +
+   manyLevels.levels + ")");
+ok(manyLevels.levels > 0, "widening still draws contours");
+
 // A drawing with no aerial still gets terrain, just no drape.
 var tnotex = CsTerrain3d.build(rampGrid, terrainXf,
     { unit: CsUnits.METERS, offset: 0.0, intervalM: 1.0 });

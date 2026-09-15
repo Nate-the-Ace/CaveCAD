@@ -288,6 +288,15 @@ CsTerrain3d.contourLines = function(grid, transform, levelsM, opts) {
             if (pts.length < 2) {
                 continue;
             }
+            // Thinned for the same reason the drawing's own contours
+            // are: a grid-traced line has a vertex per cell, and every
+            // one costs six boxed doubles across the bridge.
+            pts = CsTerrain3d.thinPolyline(pts,
+                (o.thinTolerance === undefined || o.thinTolerance === null)
+                    ? 0 : o.thinTolerance);
+            if (pts.length < 2) {
+                continue;
+            }
             var n = runs[ri].closed ? pts.length : pts.length - 1;
             for (var k = 0; k < n; k++) {
                 var a = transform(pts[k].x, pts[k].y);
@@ -321,6 +330,30 @@ CsTerrain3d.build = function(grid, transform, opts) {
         var range = CsContour.range(grid.values);
         if (range !== null) {
             levels = CsContour.levels(range.min, range.max, o.intervalM);
+            // A HARD CEILING ON MARCHING. See MAX_GENERATED_LEVELS: the
+            // cost is linear in levels and measured in whole seconds
+            // per handful, so an interval fine enough to be interesting
+            // is an interval fine enough to hang the panel. Widening
+            // the interval is the honest way to stay under it -- the
+            // lines stay where the ground is, there are just fewer.
+            if (levels.length > CsTerrain3d.MAX_GENERATED_LEVELS) {
+                var coarse = CsTerrain3d.niceInterval(
+                    range.max - range.min,
+                    CsTerrain3d.MAX_GENERATED_LEVELS);
+                levels = CsContour.levels(range.min, range.max, coarse);
+                // niceInterval AIMS at a count; it does not promise
+                // one, because it rounds to a 1/2/5 step -- 29 levels
+                // came back from a request for 24. The ceiling is a
+                // ceiling, so keep doubling until it really is under
+                // it. Doubling a 1/2/5 step gives another 1/2/5 step,
+                // so the interval stays a number a map would use.
+                while (levels.length > CsTerrain3d.MAX_GENERATED_LEVELS &&
+                        coarse < (range.max - range.min)) {
+                    coarse *= 2;
+                    levels = CsContour.levels(range.min, range.max,
+                        coarse);
+                }
+            }
             lines = CsTerrain3d.contourLines(grid, transform, levels, o);
         }
     }
@@ -374,3 +407,65 @@ CsTerrain3d.niceInterval = function(span, target) {
     }
     return step * mag;
 };
+
+/**
+ * The most levels the generated fallback will ever march.
+ *
+ * MEASURED, NOT GUESSED: one level of marching squares over a 428x236
+ * 3DEP grid costs ~237 ms in this engine, so a foot interval over 130
+ * ft of relief is THIRTY-ONE SECONDS of frozen panel -- which is what
+ * "the detailed one doesn't render" turned out to be. The fallback
+ * exists only for a drawing with no contours of its own; when the
+ * drawing HAS them they are lifted instead, at whatever interval they
+ * were drawn at, for no marching at all.
+ */
+CsTerrain3d.MAX_GENERATED_LEVELS = 24;
+
+/**
+ * Drops vertices that say nothing: a point closer than `tol` to the
+ * line between the one kept before it and the one after is carrying no
+ * shape.
+ *
+ * WHY IT IS WORTH DOING. A contour traced out of a 1 m elevation grid
+ * has a vertex every cell -- 61,607 segments across one cave's 130
+ * levels, measured -- and every one of them crosses the script bridge
+ * as boxed doubles, twice (position and colour). At half a foot of
+ * tolerance the same lines come through as about 6,000 segments, a
+ * tenth of the traffic, and nothing visible changes: half a foot is
+ * far under the grid's own sample spacing, so the detail being dropped
+ * was never a measurement in the first place.
+ *
+ * A running anchor, not a full Douglas-Peucker: one pass, no recursion,
+ * and it cannot drop a corner that matters because every kept vertex
+ * becomes the next anchor.
+ *
+ * \param points [{x, y}]
+ * \param tol    perpendicular distance, in the points' own units
+ */
+CsTerrain3d.thinPolyline = function(points, tol) {
+    if (points.length < 3 || !(tol > 0)) {
+        return points;
+    }
+    var out = [points[0]];
+    var anchor = points[0];
+    for (var i = 1; i < points.length - 1; i++) {
+        var next = points[i + 1];
+        var dx = next.x - anchor.x;
+        var dy = next.y - anchor.y;
+        var len = Math.sqrt(dx * dx + dy * dy);
+        var d = (len < 1e-12) ? 0 :
+            Math.abs(dy * (points[i].x - anchor.x) -
+                     dx * (points[i].y - anchor.y)) / len;
+        if (d > tol) {
+            out.push(points[i]);
+            anchor = points[i];
+        }
+    }
+    out.push(points[points.length - 1]);
+    return out;
+};
+
+/** How far a contour vertex may sit off its neighbours' line before it
+ *  is kept, in METRES. Well under 3DEP's own 1 m sample spacing, so
+ *  what it drops was never measured ground. */
+CsTerrain3d.THIN_TOLERANCE_M = 0.15;
