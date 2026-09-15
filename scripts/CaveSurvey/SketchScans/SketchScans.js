@@ -298,8 +298,9 @@ SketchScans.ensureDock = function() {
  * tabs.
  *
  * The tabs each carry their own buttons -- see the note where they are
- * built -- so "the Insert & Align button" is three buttons, and the
- * rest of this file has to keep being able to say it once.
+ * built -- so "the Sketch Section button" is one name over several
+ * widgets, and the rest of this file has to keep being able to say it
+ * once.
  */
 SketchScans.eachButton = function(w, name, fn) {
     if (isNull(w) || isNull(w.buttonSets)) {
@@ -729,8 +730,8 @@ SketchScans.buildDock = function(appWin) {
     // rather than a place you are, and it left every button on screen
     // whether or not it did anything in the view you had chosen.
     // Sketch Section sat there greyed out through all the plan work,
-    // and Insert & Align sat there through the section work meaning
-    // something subtly different.
+    // and the placement buttons sat there through the section work
+    // meaning something subtly different.
     //
     // A tab answers "which view am I sketching" by being open, and it
     // shows only the buttons that view uses, in the order they are
@@ -759,12 +760,12 @@ SketchScans.buildDock = function(appWin) {
             "which station it is; the scan is then placed already " +
             "fitted. Zoom in first -- the fit is only as good as the " +
             "picks."),
-        align: qsTr("Insert the selected scan over the survey and start " +
-            "the align tool on it: pick two points on the scan and " +
-            "their true positions, and it fits."),
-        elsewhere: qsTr("Insert and fit a scan that is not in this " +
-            "cave's scans folder -- a photo still on a phone, a page " +
-            "scanned straight to the Desktop."),
+        elsewhere: qsTr("Pick any scan and fit it by hand: it is " +
+            "placed over the survey and the align tool starts on it " +
+            "-- two points on the scan, their true positions. For a " +
+            "scan whose station marks cannot be read, and for a photo " +
+            "still on a phone or a page scanned to the Desktop. The " +
+            "dialog opens in this cave's scans folder."),
         sketch: qsTr("Open a staging bay for the selected scan: the " +
             "computed cross section at a chosen plan station, dashed, " +
             "to scale the scan onto and trace by hand."),
@@ -822,10 +823,8 @@ SketchScans.buildDock = function(appWin) {
             if (name === "pickAlignButton") {
                 button = makeButton(qsTr("Assign Stations to Scans"),
                     TIP.pickAlign);
-            } else if (name === "alignButton") {
-                button = makeButton(qsTr("Insert && Align"), TIP.align);
             } else if (name === "elsewhereButton") {
-                button = makeButton(qsTr("Add a scan from elsewhere..."),
+                button = makeButton(qsTr("Add a Scan and Fit by Hand..."),
                     TIP.elsewhere);
             } else if (name === "sketchButton") {
                 button = makeButton(qsTr("Sketch Section"), TIP.sketch);
@@ -872,13 +871,11 @@ SketchScans.buildDock = function(appWin) {
     };
 
     // THE ORDERS. Plan and profile are the same job against different
-    // stations: pick the stations on the scan, or place it and fit it
-    // in the drawing, and failing both, fetch a scan from outside the
-    // cave folder. A section is a different job entirely -- it starts
+    // stations: pick the stations on the scan, and failing that, fetch
+    // a scan from anywhere and fit it by hand. A section is a different job entirely -- it starts
     // at the bay.
-    var PLAN_ORDER = ["pickAlignButton", "alignButton",
-        "elsewhereButton"];
-    var SECTION_ORDER = ["sketchButton", "calibration", "alignButton",
+    var PLAN_ORDER = ["pickAlignButton", "elsewhereButton"];
+    var SECTION_ORDER = ["sketchButton", "calibration",
         "elsewhereButton"];
     // THE BAY'S OWN BUTTONS, in the order the work happens: trace the
     // walls, trace the floor, put a symbol on it, and when it is a
@@ -935,9 +932,6 @@ SketchScans.buildDock = function(appWin) {
     // Every copy of a button, wired once each.
     SketchScans.eachButton(w, "pickAlignButton", function(b) {
         b.clicked.connect(function() { SketchScans.pickAlignClicked(); });
-    });
-    SketchScans.eachButton(w, "alignButton", function(b) {
-        b.clicked.connect(function() { chooseInsert(); });
     });
     SketchScans.eachButton(w, "elsewhereButton", function(b) {
         b.clicked.connect(function() { chooseElsewhere(); });
@@ -1200,11 +1194,19 @@ SketchScans.buildDock = function(appWin) {
         SketchScans.saveCollapsed(w.scans, w.collapsed, w.rows);
     };
 
-    // THE ONE INSERT-THEN-ALIGN PATH. Both "Insert && Align" (a file
-    // already listed from the scans folder) and "Add a scan from
-    // elsewhere..." (a file picked from anywhere) end here, so there is
-    // exactly one place that inserts an image and hands it to the align
-    // tool -- see SketchScans.insert and SketchScans.alignSoon.
+    // THE ONE INSERT-THEN-ALIGN PATH. Both the double-click on a listed
+    // scan and "Add a scan from elsewhere..." (a file picked from
+    // anywhere) end here, so there is exactly one place that inserts an
+    // image and hands it to the align tool -- see SketchScans.insert
+    // and SketchScans.alignSoon.
+    //
+    // NO BUTTON OF ITS OWN ANY MORE (Nathan, 2026-09-14). "Insert &&
+    // Align" sat beside "Assign Stations to Scans" offering the same
+    // end -- a scan placed and fitted -- by the weaker means, and a
+    // panel that offers two routes to one place makes the caver choose
+    // between them every time. The 2-point fit still matters for a scan
+    // whose station marks cannot be read, so it keeps two doors: the
+    // double-click on a row, and the elsewhere button.
     var insertAndAlign = function(path, name, trimRect, outline) {
         var di = EAction.getDocumentInterface();
         var doc = EAction.getDocument();
@@ -1237,19 +1239,58 @@ SketchScans.buildDock = function(appWin) {
         insertAndAlign(eff.path, rel, eff.rect, eff.outline);
     };
 
-    // NO SCANS-FOLDER LIST BEHIND THIS ONE. A file picked from anywhere
-    // has no cave-relative name to tag it with, so the file's own base
-    // name stands in -- it never has to match anything in scans/, it is
-    // only ever read back by CsTags.get(entity, "SketchScan") for
-    // display and for placedCountOf's count of copies from one source.
+    /**
+     * The cave-relative name of a path that turns out to live in THIS
+     * cave's scans folder, or null when it is from anywhere else.
+     *
+     * WHY THE DIALOG LOOKS INSIDE THE FOLDER AT ALL. This button is now
+     * the discoverable door to the 2-point fit -- the "Insert && Align"
+     * button that only ever offered listed scans is gone -- so a caver
+     * reaching for it will sometimes pick a file that IS in scans/. A
+     * path treated as foreign there loses two things the listed route
+     * had: the cave-relative tag, and any trim or traced outline
+     * standing for that scan. Recognising it costs one comparison.
+     */
+    var relativeToScans = function(path) {
+        if (w.scans === null || w.scans === undefined) { return null; }
+        try {
+            var root = new QFileInfo(w.scans).canonicalFilePath();
+            var file = new QFileInfo(path).canonicalFilePath();
+            if (isNull(root) || isNull(file)) { return null; }
+            root = String(root);
+            file = String(file);
+            if (root === "" || file === "") { return null; }
+            if (file.indexOf(root + "/") !== 0) { return null; }
+            return file.substring(root.length + 1);
+        } catch (e) {
+            return null;            // no canonical path: treat as foreign
+        }
+    };
+
+    // A FILE PICKED FROM ANYWHERE has no cave-relative name to tag it
+    // with, so the file's own base name stands in -- it never has to
+    // match anything in scans/, it is only ever read back by
+    // CsTags.get(entity, "SketchScan") for display and for
+    // placedCountOf's count of copies from one source. A file that does
+    // live in scans/ keeps its relative name and its trim: see
+    // relativeToScans.
     var chooseElsewhere = function() {
         var doc = EAction.getDocument();
         if (isNull(doc)) { return; }
         var path = QFileDialog.getOpenFileName(getMainWindow(),
-            qsTr("Select a scan to align"), "",
+            qsTr("Select a scan to align"),
+            (w.scans === null || w.scans === undefined) ? "" : w.scans,
             qsTr("Images (*.png *.jpg *.jpeg *.tif *.tiff *.bmp)"));
         if (isNull(path) || String(path) === "") { return; }
         path = String(path);
+        var rel = relativeToScans(path);
+        if (rel !== null) {
+            var eff = SketchScans.effectivePath(rel);
+            if (eff !== null) {
+                insertAndAlign(eff.path, rel, eff.rect, eff.outline);
+                return;
+            }
+        }
         var name = new QFileInfo(path).fileName();
         insertAndAlign(path, name, null, null);
     };
@@ -2209,7 +2250,6 @@ SketchScans.rebuild = function() {
     // against it and rebuild only when the answer would differ.
     w.stamp = (isNull(doc) ? "" : String(doc.getFileName())) + "|" +
         (scans === null ? "" : scans);
-    SketchScans.setEnabled("alignButton", false);
     // A REBUILT PANEL HAS NO SELECTION, so it has no trim choice
     // either; the gate turns the placement buttons back on when one is
     // made. Setting them from w.ready alone would offer a placement for
@@ -2713,7 +2753,6 @@ SketchScans.updateTrimGate = function() {
         w.trim.chosen === true);
     try {
         SketchScans.setEnabled("pickAlignButton", chosen);
-        SketchScans.setEnabled("alignButton", chosen);
         w.trimRedoButton.enabled = chosen;
         // Trace needs a scan to trace on, not a trim already made --
         // it is one of the two ways of MAKING one.
