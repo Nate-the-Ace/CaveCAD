@@ -980,7 +980,7 @@ CsProfileDraw.computeOrigin = function(doc, profile) {
                 CsSheetSetup.ELEVATION_SHEET);
             if (sheet !== null) {
                 var inset = (sheet.maxX - sheet.minX) *
-                    CsSheetSetup.MARGIN_FRACTION;
+                    CsSheetSetup.BAND_INSET_FRACTION;
                 return new RVector(sheet.minX + inset - bounds.minX,
                     sheet.maxY - inset - bounds.maxY);
             }

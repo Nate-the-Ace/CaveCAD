@@ -163,6 +163,473 @@ CaveShelf.mtimeOf = function(path) {
  *   legacy    true when the drawing predates tag schema v3
  * }
  */
+/**
+ * The trip table's columns: what each one is called, and the KEY it is
+ * remembered by.
+ *
+ * ONE LIST, so the header, the cells and the arrangement cannot
+ * disagree about how many columns there are or what order they were
+ * built in -- the bug that a hand-written header label list and a
+ * hand-written cell list always eventually have.
+ */
+/**
+ * `edit` is the CsTripEdit field a cell writes, or null for a column
+ * that is not a caver's to type.
+ *
+ * WHAT IS NOT EDITABLE, AND WHY. Shots and Ends at are COUNTED from the
+ * survey -- typing over them would be typing over arithmetic. Decl is
+ * the interesting one: changing a declination re-rotates every azimuth
+ * in the trip and moves the whole plan, so it is not metadata at all,
+ * and it already has an editor that knows how to do it properly (Survey
+ * Notebook's declination dialog, with the IGRF estimate behind Infer).
+ * Nathan, 2026-09-15: read-only here, and double-clicking it opens the
+ * tool that owns it.
+ */
+CaveShelf.COLUMNS = [
+    { id: "trip", label: "Trip", edit: "name" },
+    { id: "date", label: "Date", edit: "date" },
+    { id: "decl", label: "Decl", edit: null },
+    { id: "team", label: "Team", edit: "team" },
+    { id: "shots", label: "Shots", edit: null },
+    { id: "from", label: "From", edit: null },
+    { id: "to", label: "To", edit: null },
+    { id: "ends", label: "Ends at", edit: null }
+];
+
+/** Which columns a caver can type in, in column order. */
+CaveShelf.columnsEditable = function() {
+    var out = [];
+    for (var i = 0; i < CaveShelf.COLUMNS.length; i++) {
+        out.push(!isNull(CaveShelf.COLUMNS[i].edit));
+    }
+    return out;
+};
+
+/** The field one column writes, or null. */
+CaveShelf.columnField = function(id) {
+    for (var i = 0; i < CaveShelf.COLUMNS.length; i++) {
+        if (CaveShelf.COLUMNS[i].id === id) {
+            return isNull(CaveShelf.COLUMNS[i].edit) ? null :
+                CaveShelf.COLUMNS[i].edit;
+        }
+    }
+    return null;
+};
+
+/** Where a caver's own arrangement of those columns is remembered. */
+CaveShelf.COLUMN_SETTING = "CaveSurvey/ShelfTripColumns";
+
+CaveShelf.columnIds = function() {
+    var out = [];
+    for (var i = 0; i < CaveShelf.COLUMNS.length; i++) {
+        out.push(CaveShelf.COLUMNS[i].id);
+    }
+    return out;
+};
+
+CaveShelf.columnLabels = function() {
+    var out = [];
+    for (var i = 0; i < CaveShelf.COLUMNS.length; i++) {
+        out.push(CaveShelf.COLUMNS[i].label);
+    }
+    return out;
+};
+
+/**
+ * One trip as its row of cells, in the columns' own order.
+ *
+ * Pure, and separate from the table: what a row SAYS is worth testing
+ * without a widget, and it is the half that keeps meaning something
+ * when a column is hidden or dragged elsewhere.
+ */
+CaveShelf.tripRow = function(trip) {
+    var endNames = [];
+    var ends = isNull(trip.ends) ? [] : trip.ends;
+    for (var e = 0; e < ends.length; e++) {
+        endNames.push(ends[e].station);
+    }
+    var dash = "\u2014";
+    return {
+        trip: CaveShelf.tripLabel(trip),
+        date: trip.date,
+        decl: CsShelf.declinationText(trip.declination),
+        team: trip.team,
+        shots: String(trip.shots),
+        // Where the day's survey tied in and where it stopped -- NOT
+        // the same as Ends at, which lists what is still open: a trip
+        // that tied back into the cave has no open end and still went
+        // from somewhere to somewhere.
+        from: isNull(trip.start) || trip.start === "" ? dash : trip.start,
+        to: isNull(trip.end) || trip.end === "" ? dash : trip.end,
+        ends: endNames.length === 0 ? dash : endNames.join(", ")
+    };
+};
+
+/**
+ * One cell's flags and tooltip: editable where a caver's typing is what
+ * the field IS, read-only where the number is counted or the change is
+ * not a metadata change at all.
+ */
+CaveShelf.dressCell = function(table, cell, id, trip) {
+    var field = CaveShelf.columnField(id);
+    // THE FLAG AND THE LOOK, IN ONE CALL. A cell that refuses a
+    // double-click while looking exactly like the one beside it that
+    // accepts one reads as a broken table, not as a counted column --
+    // see CsPanel.markCell, which shades what cannot be typed in.
+    CsPanel.markCell(table, cell, field !== null);
+    try {
+        if (field !== null) {
+            cell.setToolTip(qsTr("Double-click to edit. This is the " +
+                "same field Survey Notebook's \"Edit this trip...\" " +
+                "writes."));
+        } else if (id === "decl") {
+            cell.setToolTip(qsTr("Declination is not typed here: " +
+                "changing it re-rotates every azimuth in the trip and " +
+                "moves the plan. Double-click to open the cave and its " +
+                "declination editor."));
+        } else if (id === "from" || id === "to") {
+            cell.setToolTip(qsTr("Where this trip's survey started and " +
+                "stopped, in the order it was walked. Read from the " +
+                "shots, not typed."));
+        } else {
+            cell.setToolTip(qsTr("Counted from the survey."));
+        }
+    } catch (eTip) {
+    }
+    // The Decl column greys its TEXT where nothing is set. A different
+    // channel from the read-only wash on purpose: the background says
+    // "not yours to type", the foreground says "nobody has said", and
+    // a cell can honestly be both.
+    if (id === "decl" && !isNull(trip) &&
+            !CsShelf.hasDeclination(trip.declination)) {
+        try {
+            cell.setForeground(new QBrush(new QColor(150, 150, 150)));
+        } catch (eGrey) {
+        }
+    }
+};
+
+/** The open drawings, as CsShelf.editTarget wants them. */
+CaveShelf.openDrawings = function() {
+    var out = [];
+    try {
+        var subs = RMainWindowQt.getMainWindow().getMdiArea().subWindowList();
+        for (var i = 0; i < subs.length; i++) {
+            var doc = null;
+            try {
+                doc = subs[i].getDocument();
+            } catch (eDoc) {
+                continue;
+            }
+            if (isNull(doc)) {
+                continue;
+            }
+            out.push({ path: String(doc.getFileName()),
+                       modified: doc.isModified() === true,
+                       window: subs[i] });
+        }
+    } catch (eMdi) {
+    }
+    return out;
+};
+
+/**
+ * A cell a caver has just typed into, written back to the cave.
+ *
+ * THROUGH THE OPEN DOCUMENT, ALWAYS. See CsShelf.editTarget: a cave on
+ * screen is the authority on itself, and one that is not open is opened
+ * rather than having its file rewritten around a one-word change.
+ *
+ * The table is refilled from the drawing afterwards either way -- an
+ * edit that was refused, normalized (5/6/2024 becomes 2024-05-06) or
+ * rejected has to show what actually landed, not what was typed.
+ */
+CaveShelf.commitCell = function(state, table, item, status) {
+    if (CaveShelf.filling === true || isNull(item)) {
+        return;
+    }
+    var row = -1, column = -1;
+    try {
+        row = item.row();
+        column = item.column();
+    } catch (eAt) {
+        return;
+    }
+    if (isNull(state.read) || isNull(state.read.trips) ||
+            row < 0 || row >= state.read.trips.length ||
+            column < 0 || column >= CaveShelf.COLUMNS.length) {
+        return;
+    }
+    var field = CaveShelf.columnField(CaveShelf.COLUMNS[column].id);
+    if (field === null) {
+        return;
+    }
+    var typed = "";
+    try {
+        typed = String(item.text());
+    } catch (eText) {
+        return;
+    }
+    var trip = state.read.trips[row];
+    var path = isNull(state.record) ? "" : state.record.drawing;
+    var caveName = isNull(state.record) ? "" : state.record.name;
+
+    // WHERE IT LANDS: the open tab if the cave has one, and otherwise
+    // the FILE itself, with nothing to agree to. Transparent editing is
+    // what this table is for, and it only became honest once the DXF
+    // round trip stopped losing a layer's OFF state -- see
+    // CsShelf.editTarget and CaveShelf.applyToFile.
+    var open = CaveShelf.openDrawings();
+    var target = CsShelf.editTarget(path, open);
+    var applied = (target.mode === "live") ?
+        CaveShelf.applyEdit(open[target.at].window, trip.id, field, typed) :
+        CaveShelf.applyToFile(path, trip.id, field, typed);
+    if (!isNull(applied.error)) {
+        try {
+            status.text = applied.error;
+        } catch (eStatus) {
+        }
+        warning("Cave Shelf: " + applied.error);
+    } else {
+        CaveShelf.forget(path);
+        try {
+            // A file edit is ON DISK; a live one leaves the cave's tab
+            // modified, and the caver has to save it. The sentence has
+            // to say which, because the table looks identical either
+            // way.
+            status.text = CsShelf.editReport(caveName, field, typed,
+                target.mode !== "live");
+        } catch (eSay) {
+        }
+    }
+    CaveShelf.refillFrom(state, table);
+};
+
+/**
+ * Write one field into one trip of an OPEN drawing.
+ *
+ * The survey is read back from that document rather than reused from
+ * the shelf's own summary: the shelf's copy came off the FILE, and the
+ * document may have moved on since.
+ *
+ * \return {error: "..."} or {changes: n}
+ */
+CaveShelf.applyEdit = function(window, tripId, field, text) {
+    var doc = null, di = null;
+    try {
+        doc = window.getDocument();
+        di = window.getDocumentInterface();
+    } catch (eDoc) {
+        return { error: "That cave's window would not answer." };
+    }
+    if (isNull(doc) || isNull(di)) {
+        return { error: "That cave's window would not answer." };
+    }
+    // THE READ, THEN ITS SURVEY. CsRevise.surveyFromDocument answers a
+    // RECONSTRUCTION -- {survey, resolved, ...} -- and handing that
+    // whole object to CsTripEdit.rows yields no rows at all, so every
+    // edit would have reported the trip as missing. Caught before it
+    // ever ran, by writing the engine test against the same call.
+    var read = null;
+    try {
+        read = CsRevise.surveyFromDocument(doc);
+    } catch (eSurvey) {
+        return { error: "Could not read the survey back: " + eSurvey };
+    }
+    if (isNull(read) || isNull(read.survey)) {
+        return { error: "Could not read the survey back." };
+    }
+    var survey = read.survey;
+    var rows = CsTripEdit.rows(survey);
+    var row = null;
+    for (var i = 0; i < rows.length; i++) {
+        if (rows[i].tripId === tripId) {
+            row = rows[i];
+        }
+    }
+    if (row === null) {
+        return { error: "That trip is not in the drawing any more." };
+    }
+    var input = CsTripEdit.inputFor(row, field, text);
+    if (input === null) {
+        return { error: "That column is not editable." };
+    }
+    var done = CsTripEdit.commit(doc, di, survey, [input]);
+    if (!isNull(done.error)) {
+        return { error: done.error };
+    }
+    return { changes: done.changes.length };
+};
+
+/**
+ * Write one field into one trip of a cave that is NOT open, in the file
+ * itself.
+ *
+ * TRANSPARENT, AND ONLY BECAUSE THE ROUND TRIP IS EXACT. Nathan asked
+ * for this on 2026-09-15 -- "are we able to transparently update the
+ * map file without having to explicitly opening it for editing?" -- and
+ * the honest answer that morning was no: a DXF round trip through this
+ * build lost a layer's OFF state. It was fixed in the application
+ * (RDxfExporter::writeLayer negated a colour dxflib was already
+ * negating; RDxfImporter::addLayer folded off into frozen), measured
+ * exact on a real cave -- 1953 entities, 72 blocks, 46 images, 153
+ * layers, 171 tagged entities, 11 trips, all unchanged -- and only then
+ * was this switched on.
+ *
+ * WRITTEN BESIDE, THEN MOVED INTO PLACE. exportFile writes straight
+ * over its target, so a failure halfway through would leave a caver
+ * holding half a cave. The new drawing is written next to the old one
+ * and only swapped in once it is whole, and every step of the swap is
+ * checked -- a silently failed rename would leave the edit in a stray
+ * file nobody ever opens.
+ *
+ * \return {error: "..."} or {changes: n}
+ */
+CaveShelf.applyToFile = function(path, tripId, field, text) {
+    var di = new RDocumentInterface(
+        new RDocument(new RMemoryStorage(), createSpatialIndex()));
+    var temp = path + ".editing.dxf";
+    var aside = path + ".previous.dxf";
+    try {
+        if (di.importFile(path, "", false) !==
+                RDocumentInterface.IoErrorNoError) {
+            return { error: "Could not read " + path + "." };
+        }
+        var doc = di.getDocument();
+        var read = CsRevise.surveyFromDocument(doc);
+        if (isNull(read) || isNull(read.survey)) {
+            return { error: "Could not read the survey in " + path + "." };
+        }
+        var rows = CsTripEdit.rows(read.survey);
+        var row = null;
+        for (var i = 0; i < rows.length; i++) {
+            if (rows[i].tripId === tripId) {
+                row = rows[i];
+            }
+        }
+        if (row === null) {
+            return { error: "That trip is not in the drawing any more." };
+        }
+        var input = CsTripEdit.inputFor(row, field, text);
+        if (input === null) {
+            return { error: "That column is not editable." };
+        }
+        var done = CsTripEdit.commit(doc, di, read.survey, [input]);
+        if (!isNull(done.error)) {
+            return { error: done.error };
+        }
+        if (done.changes.length === 0) {
+            return { changes: 0 };
+        }
+        if (!di.exportFile(temp, CsSanitize.dxfFilter())) {
+            return { error: "Could not write the cave's drawing." };
+        }
+        return CaveShelf.swapIn(path, temp, aside, done.changes.length);
+    } catch (e) {
+        return { error: "Editing " + path + " failed (" + e + ")." };
+    } finally {
+        try {
+            if (typeof destr === "function") {
+                destr(di);
+            }
+        } catch (eDestroy) {
+        }
+        CaveShelf.dropFile(temp);
+    }
+};
+
+/**
+ * Put the freshly written drawing where the cave lives, keeping the old
+ * one until the swap has actually happened.
+ *
+ * Three steps, each checked: the cave moves aside, the new drawing
+ * takes its place, and only then is the old one let go. A failure at
+ * any step puts the caver's own drawing back.
+ */
+CaveShelf.swapIn = function(path, fresh, aside, changes) {
+    CaveShelf.dropFile(aside);
+    try {
+        if (!(new QFile(path)).rename(aside)) {
+            return { error: "Could not replace " + path +
+                " -- the drawing would not move aside, so nothing was " +
+                "changed." };
+        }
+    } catch (eAside) {
+        return { error: "Could not replace " + path + " (" + eAside + ")." };
+    }
+    var moved = false;
+    try {
+        moved = (new QFile(fresh)).rename(path);
+    } catch (eMove) {
+        moved = false;
+    }
+    if (!moved) {
+        try {
+            (new QFile(aside)).rename(path);
+        } catch (ePut) {
+        }
+        return { error: "Could not put the edited drawing in place; the " +
+            "cave's own drawing is untouched." };
+    }
+    CaveShelf.dropFile(aside);
+    return { changes: changes };
+};
+
+/** Let one working file go, if it is there. Never the cave's own. */
+CaveShelf.dropFile = function(path) {
+    try {
+        if ((new QFileInfo(path)).exists()) {
+            (new QFile(path)).remove();
+        }
+    } catch (e) {
+    }
+};
+
+/** Redraw the table from the drawing, whatever was typed. */
+CaveShelf.refillFrom = function(state, table) {
+    if (typeof state.refill === "function") {
+        state.refill();
+    }
+};
+
+/** Drop one cave from the read cache, so the next read is the file. */
+CaveShelf.forget = function(path) {
+    try {
+        if (!isNull(CaveShelf.cache) && !isNull(CaveShelf.cache[path])) {
+            delete CaveShelf.cache[path];
+        }
+    } catch (e) {
+    }
+};
+
+/**
+ * The declination cell, double-clicked: open the cave and the editor
+ * that owns declination.
+ *
+ * NOT AN EDIT IN THE TABLE. Changing a declination re-rotates every
+ * azimuth in the trip; the dialog that does it has the IGRF estimate,
+ * the redraw and the confirmation, and none of that belongs behind a
+ * double-click in a list.
+ */
+CaveShelf.declinationRoute = function(state) {
+    if (isNull(state.record)) {
+        return;
+    }
+    var answer = QMessageBox.question(getMainWindow(), "Cave Shelf",
+        qsTr("Declination is set per trip in Survey Notebook, where " +
+            "Infer can estimate it from the cave's location and the " +
+            "trip's date -- changing it re-rotates the survey, so it " +
+            "is not typed into a list.\n\nOpen %1 now?")
+            .arg(state.record.name),
+        QMessageBox.Yes | QMessageBox.No);
+    if (answer !== QMessageBox.Yes) {
+        return;
+    }
+    CaveShelf.pendingDeclination = true;
+    CaveShelf.pendingPath = state.record.drawing;
+    state.dialog.accept();
+};
+
 CaveShelf.readCave = function(record) {
     var blank = { ok: false, error: "", trips: [], ends: [], length: 0,
         unit: "ft", legacy: false, survey: null, startable: false };
@@ -277,6 +744,7 @@ CaveShelf.summarize = function(recon, doc, folder) {
     var push = function(id, record) {
         if (seen[id] === true) { return; }
         seen[id] = true;
+        var span = CsShelf.tripSpan(survey.shots, id);
         trips.push({
             id: id,
             name: record === null || record === undefined ? "" :
@@ -285,6 +753,17 @@ CaveShelf.summarize = function(recon, doc, folder) {
                 CsShelf.clean(record.date),
             team: record === null || record === undefined ? "" :
                 CsShelf.clean(record.team),
+            // NOT defaulted to zero. Zero is what an untold trip
+            // already reads as, and the whole point of the column is
+            // to tell those apart from a real measurement -- so a trip
+            // with no record at all keeps null and the column says
+            // "not set" for both, honestly, rather than inventing a
+            // number nobody measured.
+            declination: (record === null || record === undefined ||
+                typeof record.declination !== "number") ? null :
+                record.declination,
+            start: span.start,
+            end: span.end,
             shots: counts[id] === undefined ? 0 : counts[id],
             ends: CsFrontier.openEndsOfTrip(survey, id)
         });
@@ -511,7 +990,9 @@ CaveShelf.show = function() {
         records: [],     // what the list currently shows
         record: null,    // the selected cave
         read: null,      // its reconstruction
-        trip: -1         // the selected trip, -1 for none
+        trip: -1,        // the selected trip, -1 for none
+        dialog: null,    // the window itself, for an edit that must close it
+        refill: null     // redraw the table from the drawing
     };
 
     var outer = new QVBoxLayout();
@@ -588,16 +1069,38 @@ CaveShelf.show = function() {
     header.addLayout(heading, 1);
     right.addLayout(header, 0);
 
-    var table = new QTableWidget(0, 5);
+    // SIX COLUMNS, and Decl is next to the date on purpose: it is a
+    // measurement ABOUT that day in that place, and a caver comparing
+    // it against what the needle does now is reading the two together.
+    //
+    // That is the DEFAULT, not the law -- the header can be dragged
+    // into any order and right-clicked for which columns show, and
+    // what a caver leaves it as is what they get next time. See
+    // CsPanel.arrangeColumns; the keys are what is remembered, so a
+    // column added later lands in everybody's table instead of
+    // shuffling the arrangement they had.
+    var table = new QTableWidget(0, CaveShelf.COLUMNS.length);
     try {
-        table.setHorizontalHeaderLabels(["Trip", "Date", "Team", "Shots",
-            "Ends at"]);
+        table.setHorizontalHeaderLabels(CaveShelf.columnLabels());
         table.verticalHeader().visible = false;
         table.horizontalHeader().stretchLastSection = true;
         table.selectionBehavior = QAbstractItemView.SelectRows;
-        table.editTriggers = QAbstractItemView.NoEditTriggers;
+        // TYPE STRAIGHT INTO THE ROW. Trip, Date and Team are the same
+        // four fields Survey Notebook's "Edit this trip..." owns, and
+        // they land through the same CsTripEdit.commit -- see
+        // CaveShelf.commitCell. Everything else is read-only, cell by
+        // cell, not by switching editing off for the whole table.
+        table.editTriggers = QAbstractItemView.DoubleClicked |
+            QAbstractItemView.EditKeyPressed;
     } catch (eTable) {
     }
+    var columns = CsPanel.arrangeColumns(table, CaveShelf.columnIds(),
+        CaveShelf.columnLabels(), CaveShelf.COLUMN_SETTING);
+    // The headings of the columns that are read from the survey are
+    // dimmed, so the difference is visible before a caver clicks into
+    // one and finds nothing happens.
+    CsPanel.markHeadings(table, CaveShelf.columnLabels(),
+        CaveShelf.columnsEditable());
     right.addWidget(table, 1, 0);
 
     var health = new QLabel("");
@@ -732,24 +1235,37 @@ CaveShelf.show = function() {
         }
         subtitle.text = parts.join("  ·  ");
 
+        // FILLING IS NOT EDITING. setText fires itemChanged exactly
+        // as a caver's typing does (probed 2026-09-15), so a refill
+        // with the signal live would commit every cell it wrote back
+        // into the drawing.
+        CaveShelf.filling = true;
         table.setRowCount(read.trips.length);
         for (var t = 0; t < read.trips.length; t++) {
             var trip = read.trips[t];
-            var endNames = [];
-            for (var e = 0; e < trip.ends.length; e++) {
-                endNames.push(trip.ends[e].station);
-            }
-            var cells = [
-                CaveShelf.tripLabel(trip),
-                trip.date,
-                trip.team,
-                String(trip.shots),
-                endNames.length === 0 ? "—" : endNames.join(", ")
-            ];
-            for (var c = 0; c < cells.length; c++) {
-                table.setItem(t, c, new QTableWidgetItem(cells[c]));
+            var row = CaveShelf.tripRow(trip);
+            for (var c = 0; c < CaveShelf.COLUMNS.length; c++) {
+                var id = CaveShelf.COLUMNS[c].id;
+                var cell = new QTableWidgetItem(row[id]);
+                CaveShelf.dressCell(table, cell, id, trip);
+                // A TRIP WITH NO DECLINATION SAYS SO QUIETLY BUT SAYS
+                // SO. Greyed rather than hidden: it is a gap in the
+                // survey, not an error, and a caver scanning the column
+                // should be able to see at a glance which trips were
+                // never corrected -- the azimuths in those are magnetic
+                // bearings a map is calling true.
+                if (id === "decl" &&
+                        !CsShelf.hasDeclination(trip.declination)) {
+                    try {
+                        cell.setForeground(new QBrush(
+                            new QColor(150, 150, 150)));
+                    } catch (eGrey) {
+                    }
+                }
+                table.setItem(t, c, cell);
             }
         }
+        CaveShelf.filling = false;
         try {
             table.resizeColumnsToContents();
         } catch (eResize) {
@@ -887,6 +1403,38 @@ CaveShelf.show = function() {
         // buttons still cover open/trip
     }
 
+    // AN EDIT IS COMMITTED WHEN THE CELL IS. Not on a Save button: a
+    // table is a place where typing and pressing Return means the
+    // thing is done, and a shelf with an Apply somewhere would be a
+    // list that silently discards work when it closes.
+    state.dialog = dialog;
+    state.refill = function() { showDetail(); };
+    try {
+        table["itemChanged(QTableWidgetItem*)"].connect(function(item) {
+            CaveShelf.commitCell(state, table, item, health);
+        });
+    } catch (eChanged) {
+        try {
+            table.itemChanged.connect(function(item) {
+                CaveShelf.commitCell(state, table, item, health);
+            });
+        } catch (eChanged2) {
+            // no signal here: the cells simply stay as they were typed
+            // until the next read, which is the table as it was before
+        }
+    }
+    // The Decl cell is read-only, and a double-click on it is a caver
+    // asking to change it -- so it answers with the tool that can.
+    try {
+        table["cellDoubleClicked(int, int)"].connect(function(row, column) {
+            if (column >= 0 && column < CaveShelf.COLUMNS.length &&
+                    CaveShelf.COLUMNS[column].id === "decl") {
+                CaveShelf.declinationRoute(state);
+            }
+        });
+    } catch (eDouble) {
+    }
+
     table.itemSelectionChanged.connect(function() {
         state.trip = table.currentRow();
         if (state.read !== null) {
@@ -923,6 +1471,44 @@ CaveShelf.show = function() {
 
     RSettings.setValue(CaveShelf.SETTING_SHOW, atStartup.checked === true);
     destrDialog(dialog);
+
+    // AFTER THE SHELF IS GONE, not before: opening a drawing from under
+    // a modal dialog is asking the application to build an MDI child
+    // while a nested event loop owns the screen.
+    CaveShelf.runPending();
+};
+
+/**
+ * The cave a caver asked to be taken to, opened once the shelf has
+ * closed.
+ *
+ * ONLY THE DECLINATION ROUTE USES THIS NOW. A cell edit no longer needs
+ * a cave opened at all -- it goes straight into the file (see
+ * CaveShelf.applyToFile) -- but declination is not a cell edit: it
+ * re-rotates the survey, and the editor that does it properly lives in
+ * Survey Notebook, in the cave's own window.
+ */
+CaveShelf.runPending = function() {
+    var declination = CaveShelf.pendingDeclination === true;
+    CaveShelf.pendingDeclination = false;
+    if (!declination) {
+        return;
+    }
+    var path = CaveShelf.pendingPath;
+    CaveShelf.pendingPath = "";
+    if (isNull(path) || path === "") {
+        return;
+    }
+    try {
+        openFiles([path], false);
+    } catch (eOpen) {
+        warning("Cave Shelf: could not open " + path + " (" + eOpen + ").");
+        return;
+    }
+    EAction.handleUserMessage(qsTr("Cave Shelf: opened this cave. " +
+        "Declination lives in Survey Notebook -- load the trip and " +
+        "use Decl, or Infer to estimate it from the location and " +
+        "date."));
 };
 
 /** The sentence under the trip table. */

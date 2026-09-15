@@ -63,6 +63,551 @@ CsPanel.saveCollapsed = function(settingKey, title, collapsed) {
     }
 };
 
+// ---------------------------------------------------------------------
+// COLUMNS A CAVER ARRANGES.
+//
+// Nathan, 2026-09-15: "does the table object let me rearrange the
+// columns by dragging them around? I want to be able to hide or show
+// columns on demand." It does -- probed against this build rather than
+// assumed: setSectionsMovable/sectionsMovable, moveSection/visualIndex,
+// hideSection/showSection/isSectionHidden and the header's own context
+// menu are all real here, and all of them DO something when called.
+//
+// What is stored is KEYS, never column numbers. A saved arrangement
+// outlives the table it was made on: the Decl column was added between
+// Date and Team on 2026-09-15, and an order remembered as "3, 1, 0"
+// would have quietly shuffled itself the day that happened. Keys also
+// mean a column that is retired simply drops out of the arrangement
+// instead of hiding whatever took its index.
+//
+// Two settings per table: the visual ORDER and the HIDDEN set, both
+// comma-separated keys, in the plain-string form every other setting in
+// this suite uses.
+//
+// Everything here is pure except apply/attach: the sanitising is where
+// the bugs live, and it is testable without a table.
+// ---------------------------------------------------------------------
+
+// ---------------------------------------------------------------------
+// WHAT CANNOT BE TYPED IN LOOKS LIKE IT.
+//
+// Nathan, 2026-09-15: "for read only columns, I want to visually make
+// them distinct so that it's clear why clicking on them isn't doing
+// anything." A cell that silently refuses a double-click is the worst
+// kind of dead control -- it looks identical to the one beside it that
+// works, so the caver concludes the table is broken rather than that
+// the column is counted.
+//
+// SHADED MEANS LOCKED, which is the spreadsheet idiom everybody already
+// carries: a wash over the cell, and a dimmer heading above it.
+//
+// THE TINT IS THE TEXT COLOUR AT LOW ALPHA, not a grey. A fixed grey is
+// only ever right in one theme -- CaveCAD's panels are dark (the
+// palette's Base here measures 23,23,23) and a light-grey wash would
+// glare; on a light theme the same grey would vanish. A wash of the
+// text colour darkens a light table and lightens a dark one by the
+// same small amount, whatever the theme is doing.
+//
+// FOREGROUND IS LEFT ALONE deliberately: the shelf's Decl column
+// already greys its TEXT to mean "not set", and a second meaning on the
+// same channel would make both unreadable.
+// ---------------------------------------------------------------------
+
+/** How strong the wash is, out of 255. Enough to see the column edge,
+ *  not enough to fight the text. */
+CsPanel.READ_ONLY_ALPHA = 22;
+
+/** How much a read-only column's HEADING is dimmed toward the
+ *  background, 0 (invisible) to 1 (full strength). */
+CsPanel.READ_ONLY_HEADING = 0.55;
+
+/**
+ * Blend two colours. `weight` is how much of `a` survives.
+ *
+ * Pure, and the reason the dimming is testable: what a heading should
+ * look like is arithmetic on the palette, not a constant somebody
+ * picked while looking at one theme.
+ */
+CsPanel.blend = function(a, b, weight) {
+    var w = (isNull(weight) || !isFinite(weight)) ? 0.5 :
+        Math.max(0, Math.min(1, weight));
+    var mix = function(x, y) {
+        return Math.round(x * w + y * (1 - w));
+    };
+    return { r: mix(a.r, b.r), g: mix(a.g, b.g), b: mix(a.b, b.b) };
+};
+
+/** A widget's palette as plain numbers: {text, base}. Null when this
+ *  build will not answer, which costs the tint and nothing else. */
+CsPanel.paletteOf = function(widget) {
+    try {
+        var palette = widget.palette;
+        var text = palette.color(QPalette.Text);
+        var base = palette.color(QPalette.Base);
+        return {
+            text: { r: text.red(), g: text.green(), b: text.blue() },
+            base: { r: base.red(), g: base.green(), b: base.blue() }
+        };
+    } catch (e) {
+        return null;
+    }
+};
+
+/** The wash a read-only cell carries, or null. */
+CsPanel.readOnlyBrush = function(widget) {
+    var palette = CsPanel.paletteOf(widget);
+    if (palette === null) {
+        return null;
+    }
+    try {
+        return new QBrush(new QColor(palette.text.r, palette.text.g,
+            palette.text.b, CsPanel.READ_ONLY_ALPHA));
+    } catch (e) {
+        return null;
+    }
+};
+
+/** The colour a read-only heading is written in, or null. */
+CsPanel.readOnlyHeadingBrush = function(widget) {
+    var palette = CsPanel.paletteOf(widget);
+    if (palette === null) {
+        return null;
+    }
+    var dim = CsPanel.blend(palette.text, palette.base,
+        CsPanel.READ_ONLY_HEADING);
+    try {
+        return new QBrush(new QColor(dim.r, dim.g, dim.b));
+    } catch (e) {
+        return null;
+    }
+};
+
+/**
+ * Mark one cell as a caver's to type in, or not: the edit flag and the
+ * wash together, so the two can never disagree.
+ *
+ * One call, because they ARE one decision -- a cell tinted but still
+ * editable, or editable but tinted, is worse than either.
+ */
+CsPanel.markCell = function(table, cell, editable) {
+    try {
+        var flags = cell.flags();
+        cell.setFlags(editable === true ? (flags | Qt.ItemIsEditable) :
+            (flags & ~Qt.ItemIsEditable));
+    } catch (eFlags) {
+        // a bridge without item flags gets a table that edits nothing
+    }
+    if (editable === true) {
+        return;
+    }
+    var brush = CsPanel.readOnlyBrush(table);
+    if (brush === null) {
+        return;
+    }
+    try {
+        cell.setBackground(brush);
+    } catch (eBack) {
+    }
+};
+
+/**
+ * Dim the HEADINGS of the columns that cannot be typed in.
+ *
+ * \param editable [bool] per column, in LOGICAL order
+ *
+ * The heading is set as an item so it can be coloured at all; a header
+ * that has none is given one first, carrying the label it already
+ * shows.
+ */
+CsPanel.markHeadings = function(table, labels, editable) {
+    var brush = CsPanel.readOnlyHeadingBrush(table);
+    if (brush === null) {
+        return;
+    }
+    for (var i = 0; i < labels.length; i++) {
+        if (editable[i] === true) {
+            continue;
+        }
+        try {
+            var head = table.horizontalHeaderItem(i);
+            if (isNull(head)) {
+                head = new QTableWidgetItem(labels[i]);
+                table.setHorizontalHeaderItem(i, head);
+            }
+            head.setForeground(brush);
+        } catch (eHead) {
+        }
+    }
+};
+
+/** The two settings keys one table uses, derived from one name. */
+CsPanel.columnKeys = function(settingKey) {
+    return { order: settingKey + "Order", hidden: settingKey + "Hidden" };
+};
+
+/**
+ * A stored arrangement, made safe against the table it will be applied
+ * to.
+ *
+ * \param keys   the table's own column keys, in the order they are
+ *               built -- which is also the default order
+ * \param order  what was stored, or ""
+ * \param hidden what was stored, or ""
+ * \return { order: [key...], hidden: {key: true} }
+ *
+ * The rules are all about not trapping anybody:
+ *   - a key the table does not have is dropped (a retired column)
+ *   - a key the table has but the arrangement does not is APPENDED (a
+ *     new column appears rather than never being seen)
+ *   - duplicates collapse to the first
+ *   - and if the arrangement would hide EVERY column, nothing is
+ *     hidden: an empty table reads as a broken one, and a caver who
+ *     did that to themselves has no header left to fix it from.
+ */
+CsPanel.readColumns = function(keys, order, hidden) {
+    var known = {};
+    var i;
+    for (i = 0; i < keys.length; i++) {
+        known[keys[i]] = true;
+    }
+    var out = [];
+    var taken = {};
+    var parts = String(isNull(order) ? "" : order).split(",");
+    for (i = 0; i < parts.length; i++) {
+        var key = parts[i].trim();
+        if (key === "" || known[key] !== true || taken[key] === true) {
+            continue;
+        }
+        taken[key] = true;
+        out.push(key);
+    }
+    for (i = 0; i < keys.length; i++) {
+        if (taken[keys[i]] !== true) {
+            out.push(keys[i]);
+        }
+    }
+
+    var off = {};
+    var shut = 0;
+    parts = String(isNull(hidden) ? "" : hidden).split(",");
+    for (i = 0; i < parts.length; i++) {
+        var gone = parts[i].trim();
+        if (gone === "" || known[gone] !== true || off[gone] === true) {
+            continue;
+        }
+        off[gone] = true;
+        shut += 1;
+    }
+    if (shut >= keys.length && keys.length > 0) {
+        off = {};
+    }
+    return { order: out, hidden: off };
+};
+
+/** An arrangement as the two strings it is stored as. */
+CsPanel.columnsText = function(arrangement) {
+    var hidden = [];
+    for (var key in arrangement.hidden) {
+        if (arrangement.hidden.hasOwnProperty(key) &&
+                arrangement.hidden[key] === true) {
+            hidden.push(key);
+        }
+    }
+    return { order: arrangement.order.join(","), hidden: hidden.join(",") };
+};
+
+/** What is stored for this table, read and made safe. */
+CsPanel.loadColumns = function(settingKey, keys) {
+    var names = CsPanel.columnKeys(settingKey);
+    var order = "", hidden = "";
+    try {
+        order = RSettings.getStringValue(names.order, "");
+        hidden = RSettings.getStringValue(names.hidden, "");
+    } catch (e) {
+        // a bridge without settings forgets between sessions, which is
+        // a table that opens in its default arrangement
+    }
+    return CsPanel.readColumns(keys, order, hidden);
+};
+
+/** Stores one arrangement. */
+CsPanel.saveColumns = function(settingKey, arrangement) {
+    var names = CsPanel.columnKeys(settingKey);
+    var text = CsPanel.columnsText(arrangement);
+    try {
+        RSettings.setValue(names.order, text.order);
+        RSettings.setValue(names.hidden, text.hidden);
+    } catch (e) {
+    }
+};
+
+/**
+ * The moves that put `order` on screen, as [{from, to}] in the order
+ * they must be made.
+ *
+ * ONE AT A TIME, AND FROM THE LEFT. moveSection works in VISUAL
+ * indices and every move renumbers everything to its right, so the
+ * moves cannot be worked out all at once and replayed -- each one is
+ * computed against where things are after the last. That is what this
+ * simulates, which is also why it can be tested without a header.
+ *
+ * \param keys    the table's column keys, in LOGICAL order
+ * \param order   the visual order wanted, as keys
+ * \param visual  where each logical column sits now: [logical] -> visual
+ */
+CsPanel.columnMoves = function(keys, order, visual) {
+    var now = [];      // visual position -> logical index
+    var i;
+    for (i = 0; i < keys.length; i++) {
+        var at = (isNull(visual) || isNull(visual[i])) ? i : visual[i];
+        now[at] = i;
+    }
+    for (i = 0; i < keys.length; i++) {
+        if (isNull(now[i])) {
+            now[i] = i;
+        }
+    }
+    var moves = [];
+    var slot = 0;   // the next VISUAL place to fill
+    for (i = 0; i < order.length; i++) {
+        var logical = keys.indexOf(order[i]);
+        if (logical < 0) {
+            // A key this table does not have takes no place: it must
+            // not leave a gap that shifts every real column one to the
+            // right. (readColumns strips these already; this is the
+            // belt to that pair of braces.)
+            continue;
+        }
+        var from = now.indexOf(logical);
+        if (from >= 0 && from !== slot) {
+            moves.push({ from: from, to: slot });
+            now.splice(from, 1);
+            now.splice(slot, 0, logical);
+        }
+        slot += 1;
+    }
+    return moves;
+};
+
+/**
+ * Give a table's header the arrangement a caver left it in, and let
+ * them change it: drag a column to move it, right-click for which
+ * columns show.
+ *
+ * PROBED, NOT ASSUMED (2026-09-15, headless against this build):
+ * setSectionsMovable/sectionsMovable, moveSection/visualIndex,
+ * hideSection/showSection/isSectionHidden, setColumnHidden and the
+ * header's customContextMenuRequested are all real here AND all take
+ * effect when called. Nothing in this file is reached for on faith --
+ * and every piece of it is still guarded, because a bridge that
+ * refuses one of them should cost the arrangement, never the table.
+ *
+ * \param table      a QTableWidget the caller built
+ * \param keys       column keys in LOGICAL order (the order built)
+ * \param labels     what each column is called, same order
+ * \param settingKey where the arrangement is remembered
+ * \return the widget bag { table, keys, labels, settingKey, menu }, or
+ *         null when this build will not arrange columns -- the table
+ *         still works, it just stays as it was built.
+ */
+CsPanel.arrangeColumns = function(table, keys, labels, settingKey) {
+    var header = null;
+    try {
+        header = table.horizontalHeader();
+    } catch (eHeader) {
+        return null;
+    }
+    if (isNull(header)) {
+        return null;
+    }
+    var bag = { table: table, keys: keys, labels: labels,
+                settingKey: settingKey, header: header, menu: null };
+    try {
+        header.setSectionsMovable(true);
+    } catch (eMove) {
+        // a header that will not move sections still hides columns
+    }
+    CsPanel.applyColumns(bag, CsPanel.loadColumns(settingKey, keys));
+
+    // A DRAG IS A DECISION, so it is remembered the moment it lands
+    // rather than at some tidier time that may never come.
+    try {
+        header["sectionMoved(int, int, int)"].connect(function() {
+            CsPanel.rememberColumns(bag);
+        });
+    } catch (eSignal) {
+        try {
+            header.sectionMoved.connect(function() {
+                CsPanel.rememberColumns(bag);
+            });
+        } catch (eSignal2) {
+        }
+    }
+
+    // THE MENU LIVES ON THE HEADER, where a caver right-clicks to ask
+    // "what else could be here" -- and it is kept on the bag rather
+    // than in a local, because a QMenu held only by a local goes out
+    // of scope while it is open.
+    try {
+        header.contextMenuPolicy = Qt.CustomContextMenu;
+        header["customContextMenuRequested(const QPoint&)"].connect(
+            function(pos) {
+                CsPanel.columnMenu(bag, pos);
+            });
+    } catch (eMenu) {
+        try {
+            header.customContextMenuRequested.connect(function(pos) {
+                CsPanel.columnMenu(bag, pos);
+            });
+        } catch (eMenu2) {
+        }
+    }
+    return bag;
+};
+
+/** Put one arrangement on screen. */
+CsPanel.applyColumns = function(bag, arrangement) {
+    var i;
+    try {
+        for (i = 0; i < bag.keys.length; i++) {
+            bag.table.setColumnHidden(i,
+                arrangement.hidden[bag.keys[i]] === true);
+        }
+    } catch (eHide) {
+    }
+    var visual = [];
+    try {
+        for (i = 0; i < bag.keys.length; i++) {
+            visual.push(bag.header.visualIndex(i));
+        }
+    } catch (eVisual) {
+        visual = null;
+    }
+    try {
+        var moves = CsPanel.columnMoves(bag.keys, arrangement.order, visual);
+        for (i = 0; i < moves.length; i++) {
+            bag.header.moveSection(moves[i].from, moves[i].to);
+        }
+    } catch (eMove) {
+    }
+};
+
+/** What the header is showing now, as an arrangement. */
+CsPanel.currentColumns = function(bag) {
+    var order = [];
+    var hidden = {};
+    var slots = [];
+    var i;
+    for (i = 0; i < bag.keys.length; i++) {
+        var at = i;
+        try {
+            at = bag.header.visualIndex(i);
+        } catch (eVisual) {
+        }
+        slots[at] = bag.keys[i];
+        try {
+            if (bag.table.isColumnHidden(i) === true) {
+                hidden[bag.keys[i]] = true;
+            }
+        } catch (eHidden) {
+        }
+    }
+    for (i = 0; i < slots.length; i++) {
+        if (!isNull(slots[i])) {
+            order.push(slots[i]);
+        }
+    }
+    return CsPanel.readColumns(bag.keys, order.join(","),
+        CsPanel.columnsText({ order: order, hidden: hidden }).hidden);
+};
+
+/** Records what the header is showing now. */
+CsPanel.rememberColumns = function(bag) {
+    CsPanel.saveColumns(bag.settingKey, CsPanel.currentColumns(bag));
+};
+
+/** Show or hide one column, and remember it. */
+CsPanel.toggleColumn = function(bag, key, show) {
+    var at = bag.keys.indexOf(key);
+    if (at < 0) {
+        return;
+    }
+    // NEVER THE LAST ONE. A table with every column hidden reads as a
+    // table that failed to load, and the header it would be fixed from
+    // is gone with them.
+    if (show !== true) {
+        var left = 0;
+        for (var i = 0; i < bag.keys.length; i++) {
+            try {
+                if (i !== at && bag.table.isColumnHidden(i) !== true) {
+                    left += 1;
+                }
+            } catch (eCount) {
+            }
+        }
+        if (left === 0) {
+            return;
+        }
+    }
+    try {
+        bag.table.setColumnHidden(at, show !== true);
+    } catch (eHide) {
+        return;
+    }
+    CsPanel.rememberColumns(bag);
+};
+
+/** The right-click menu on a table header: one tick per column, and a
+ *  way back to how it shipped. */
+CsPanel.columnMenu = function(bag, pos) {
+    try {
+        var menu = new QMenu(bag.table);
+        var addToggle = function(key, label) {
+            var action = menu.addAction(label);
+            action.checkable = true;
+            var at = bag.keys.indexOf(key);
+            var shown = true;
+            try {
+                shown = bag.table.isColumnHidden(at) !== true;
+            } catch (eShown) {
+            }
+            action.checked = shown;
+            action.toggled.connect(function(on) {
+                CsPanel.toggleColumn(bag, key, on);
+            });
+        };
+        for (var i = 0; i < bag.keys.length; i++) {
+            addToggle(bag.keys[i], bag.labels[i]);
+        }
+        menu.addSeparator();
+        var reset = menu.addAction(qsTr("Reset Columns"));
+        reset.triggered.connect(function() {
+            CsPanel.resetColumns(bag);
+        });
+        bag.menu = menu;   // a menu held only by a local dies while open
+        var global = null;
+        try {
+            global = bag.header.mapToGlobal(pos);
+        } catch (eMap) {
+            global = null;
+        }
+        if (global === null) {
+            menu.popup(QCursor.pos());
+        } else {
+            menu.popup(global);
+        }
+    } catch (eMenu) {
+        // no menu here: dragging still arranges the columns
+    }
+};
+
+/** Back to the order and visibility the table was built with. */
+CsPanel.resetColumns = function(bag) {
+    var fresh = { order: bag.keys.slice(0), hidden: {} };
+    CsPanel.applyColumns(bag, fresh);
+    CsPanel.saveColumns(bag.settingKey, fresh);
+};
+
 /** The chevron on a section header: pointing UP when the section is
  *  open (click to fold it away), DOWN when it is shut.
  *

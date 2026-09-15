@@ -1916,6 +1916,54 @@ class TestNamespacesAreDeclared(unittest.TestCase):
         self.assertEqual([], offenders, "\n".join(offenders))
 
 
+class TestSheetIsReopenedNotJustActivated(unittest.TestCase):
+    """A rebuilt sheet has to be RE-READ, not merely brought to the front.
+
+    QCAD's openFiles walks the open tabs first and, finding one whose
+    file name matches, activates it and returns without re-reading the
+    file (library.js, the foundExisting branch). Sheet Setup rebuilds a
+    sheet from the record every time it is pressed, so the second build
+    showed the FIRST build's drawing: new file on disk, old tab on
+    screen, nothing saying so. Reported live 2026-09-14 as "Build Sheet
+    failed to open the built sheet".
+
+    The fix is to close every sheet this run wrote before opening the
+    plan, through openFiles' own third argument. Structural because the
+    failure needs an MDI area with a tab already in it -- there is no
+    such thing in a headless run.
+    """
+
+    def test_build_closes_the_old_tab_then_opens_on_a_later_pass(self):
+        path = os.path.join(ADDON, "SheetSetup", "SheetSetup.js")
+        with open(path) as handle:
+            source = handle.read()
+        self.assertIn(
+            "closeActiveSubWindow()", source,
+            "SheetSetup no longer closes an already-open sheet before "
+            "opening the rebuilt one -- openFiles would then activate "
+            "the stale tab and the rebuild would be invisible")
+        self.assertIn(
+            "SheetSetup.openPending", source,
+            "SheetSetup no longer defers the open past the queued "
+            "close; an open issued in the same pass finds the doomed "
+            "tab, activates it, and is then closed with it -- leaving "
+            "no sheet on screen at all")
+        closes = source.find("closeActiveSubWindow()")
+        defers = source.find("timer.start(0)", closes)
+        self.assertNotEqual(
+            defers, -1,
+            "the open after a close is not on a timer, so it races the "
+            "close it is waiting for")
+
+    def test_the_sheet_that_is_shown_is_the_plan(self):
+        """written[0] is the plan sheet; a profile sheet is opened from
+        the folder by anyone who wants it."""
+        path = os.path.join(ADDON, "SheetSetup", "SheetSetup.js")
+        with open(path) as handle:
+            source = handle.read()
+        self.assertIn("SheetSetup.pendingSheet = written[0]", source)
+
+
 class TestSheetFileGuard(unittest.TestCase):
     """A sheet is not a drawing to work in.
 

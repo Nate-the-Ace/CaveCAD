@@ -634,6 +634,153 @@ CsShelf.declinationValue = function(result) {
     return (typeof value === "number" && isFinite(value)) ? value : null;
 };
 
+/**
+ * A trip's declination, as the shelf's own column says it.
+ *
+ * WHY THE COLUMN EXISTS (Nathan, 2026-09-15). Every one of Truitt
+ * Cave's eleven trips records 0.0, which is this suite's DEFAULT for a
+ * trip nobody has told rather than a measurement -- and nothing on
+ * screen said so. A drawing carries on quietly being a magnetic survey
+ * that calls itself true: the azimuths were never corrected, the sheet
+ * can draw no magnetic north, and the map is out by however many
+ * degrees the place is out by.
+ *
+ * So zero and missing both read "not set", in the column a caver looks
+ * at before a trip. A real declination reads as a compass says it:
+ * "3.2\u00b0 E", "1.4\u00b0 W".
+ *
+ * \return the cell's text, never empty.
+ */
+/**
+ * The first and last station of one trip, in the order it was surveyed.
+ *
+ * FOR REFERENCE, which is exactly what a caver wants from a trip list:
+ * where that day's survey tied in, and where it stopped. Neither is the
+ * same as the "Ends at" column, which lists the trip's OPEN ends -- a
+ * trip can finish at a station it tied back into, leaving no open end
+ * at all, and it still started and ended somewhere.
+ *
+ * LEGS ONLY. A splay is a measurement of the passage wall, not a step
+ * along the survey, and a trip whose first record happens to be a splay
+ * off the tie-in station did not "start" at that wall. CsFrontier.isLeg
+ * is the suite's own definition and is reused rather than restated.
+ *
+ * FILE ORDER IS SURVEY ORDER. Shots are stored in the order they were
+ * read from the notebook, which is the order they were walked; nothing
+ * is sorted here, because any sort would be inventing an order the cave
+ * does not have.
+ *
+ * \param shots  a survey's shots
+ * \param tripId which trip
+ * \return {start, end} -- "" for a trip with no legs in it yet
+ */
+CsShelf.tripSpan = function(shots, tripId) {
+    var out = { start: "", end: "" };
+    if (Object.prototype.toString.call(shots) !== "[object Array]") {
+        return out;
+    }
+    var wanted = (typeof tripId === "number") ? tripId : 0;
+    for (var i = 0; i < shots.length; i++) {
+        var shot = shots[i];
+        if (shot === null || shot === undefined) {
+            continue;
+        }
+        var id = (typeof shot.trip === "number") ? shot.trip : 0;
+        if (id !== wanted) {
+            continue;
+        }
+        var leg = (typeof CsFrontier !== "undefined" &&
+            typeof CsFrontier.isLeg === "function") ?
+            CsFrontier.isLeg(shot) :
+            (CsShelf.clean(shot.from) !== "" && CsShelf.clean(shot.to) !== "");
+        if (!leg) {
+            continue;
+        }
+        if (out.start === "") {
+            out.start = CsShelf.clean(shot.from);
+        }
+        out.end = CsShelf.clean(shot.to);
+    }
+    return out;
+};
+
+/**
+ * Where an edit typed into the shelf's trip table should land.
+ *
+ * THE OPEN TAB WINS, ALWAYS. A cave open in the application is the
+ * authority on its own contents: writing its file behind it would be
+ * overwritten by the caver's next save, and the tab would sit there
+ * showing the old trip list with no sign anything had happened. So an
+ * open cave is edited THROUGH its own document -- one undo step, the
+ * tab true, the caver saving when they are ready.
+ *
+ * A cave that is NOT open is edited IN THE FILE: imported, changed,
+ * written back. That was not always safe. Until 2026-09-15 a DXF round
+ * trip through this build lost a layer's OFF state -- measured: off
+ * went in, on came out, while FROZEN and LOCKED survived -- because the
+ * exporter negated the layer colour to mean "off" and dxflib negated it
+ * again, and the importer folded off into frozen on the way back. Both
+ * are fixed in the application itself (RDxfExporter::writeLayer,
+ * RDxfImporter::addLayer), and the round trip is now exact on a real
+ * cave: 1953 entities, 72 blocks, 46 images, 153 layers, 171 tagged
+ * entities, 11 trips, all identical.
+ *
+ * \param path     the cave's drawing
+ * \param openDocs [{path, modified}] -- the open tabs
+ * \return {mode: "live", at: <index into openDocs>} or {mode: "file"}
+ */
+CsShelf.editTarget = function(path, openDocs) {
+    var want = CsShelf.clean(path);
+    var docs = (Object.prototype.toString.call(openDocs) ===
+        "[object Array]") ? openDocs : [];
+    if (want !== "") {
+        for (var i = 0; i < docs.length; i++) {
+            if (docs[i] === null || docs[i] === undefined) {
+                continue;
+            }
+            if (CsShelf.clean(docs[i].path) === want) {
+                return { mode: "live", at: i };
+            }
+        }
+    }
+    return { mode: "file" };
+};
+
+/**
+ * What a shelf edit is worth saying afterwards.
+ *
+ * The one thing a caver cannot see from the table is that the change
+ * is not on disk yet -- the cave's tab is now modified, exactly as if
+ * they had drawn in it, and closing without saving would take the edit
+ * with it.
+ */
+CsShelf.editReport = function(caveName, field, value, saved) {
+    var what = CsShelf.clean(value) === "" ?
+        (field + " cleared") : (field + " is now \"" +
+            CsShelf.clean(value) + "\"");
+    return caveName + ": " + what + "." +
+        (saved === true ? "" :
+            " The cave is open with unsaved changes -- save it to keep this.");
+};
+
+CsShelf.NOT_SET = "not set";
+
+CsShelf.declinationText = function(declination) {
+    if (typeof declination !== "number" || !isFinite(declination) ||
+            declination === 0) {
+        return CsShelf.NOT_SET;
+    }
+    return Math.abs(declination).toFixed(1) + "\u00b0 " +
+        (declination > 0 ? "E" : "W");
+};
+
+/** Is this trip's declination one the tools can use? The column greys
+ *  the ones that are not, and the sheet draws no magnetic north for
+ *  them. */
+CsShelf.hasDeclination = function(declination) {
+    return CsShelf.declinationText(declination) !== CsShelf.NOT_SET;
+};
+
 CsShelf.DRIFT_DEGREES = 0.5;
 
 CsShelf.declinationDrift = function(trips, igrfFor) {

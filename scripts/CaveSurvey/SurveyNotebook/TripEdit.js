@@ -438,20 +438,16 @@ TripEdit.open = function(tripId) {
                 date: String(f.date.text), team: String(f.team.text),
                 instruments: String(f.instruments.text) });
         }
-        var plan = CsTripEdit.planEdits(read.survey, inputs);
-        if (plan.error !== undefined) {
-            QMessageBox.warning(null, "Edit Trip", plan.error);
+        // THE SHARED SEQUENCE. plan -> apply -> write lives in
+        // CsTripEdit.commit, because the Cave Shelf's trip table edits
+        // the same four fields and must land them the same way.
+        var done = CsTripEdit.commit(doc, di, read.survey, inputs);
+        if (done.error !== undefined) {
+            QMessageBox.warning(null, "Edit Trip", done.error);
             return; // dialog stays open, typing intact
         }
-        if (plan.changes.length === 0) {
-            applied.done = true;
-            dlg.accept();
-            return;
-        }
-        CsTripEdit.applyToSurvey(read.survey, plan.changes);
-        applied.res = CsTripEdit.writeTags(doc, di, read.survey,
-            plan.changes);
-        applied.changes = plan.changes;
+        applied.res = done.res;
+        applied.changes = done.changes;
         applied.done = true;
         dlg.accept();
     };

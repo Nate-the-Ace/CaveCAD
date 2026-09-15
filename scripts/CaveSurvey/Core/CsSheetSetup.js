@@ -143,11 +143,32 @@ CsSheetSetup.SHEETS = [
 /** The NSS template's own sheet, and so the default. */
 CsSheetSetup.DEFAULT_SHEET = "ARCH D -- 36 x 24";
 
-/** How much of the sheet is kept clear of the cave, as a fraction of
- *  the sheet's short side. The title block, the legend and the scale
- *  bar have to live somewhere, and a map drawn to the paper's edge
- *  cannot be bound, trimmed or held. */
-CsSheetSetup.MARGIN_FRACTION = 0.12;
+/**
+ * How much of the sheet is kept clear at every edge, in INCHES of
+ * paper. A map drawn to the paper's edge cannot be bound, trimmed or
+ * held, and a plotter's own unprintable border is about this wide.
+ *
+ * HALF AN INCH, FLAT (Nathan, 2026-09-14). It used to be a twelfth of
+ * the sheet's short side, which on ARCH D is nearly THREE inches all
+ * round -- seven per cent of the paper's area given to white space, and
+ * enough to cost a cave a whole scale step. A margin is a physical
+ * allowance for the plotter and the binder; it does not get bigger
+ * because the paper did.
+ */
+CsSheetSetup.MARGIN_INCHES = 0.5;
+
+/**
+ * How far inside its own border the extended elevation's bands are
+ * parked, as a fraction of the sheet's width.
+ *
+ * A FRACTION and not inches, unlike the margin above, because the only
+ * thing known where this is used is a border already drawn in a
+ * drawing: CsProfileDraw finds the elevation sheet by its border and
+ * has no paper size and no plot scale to turn inches into units with.
+ * The same number is used everywhere the bands are placed OR previewed,
+ * which is what matters -- the picture and the placement have to agree.
+ */
+CsSheetSetup.BAND_INSET_FRACTION = 0.03;
 
 /** Printed text heights, in INCHES on the finished sheet. Everything
  *  drawn by this tool is one of these multiplied by the plot scale.
@@ -192,7 +213,7 @@ CsSheetSetup.sheetByName = function(name) {
  */
 CsSheetSetup.fit = function(caveWidthFeet, caveHeightFeet, sheet,
         footerInches) {
-    var margin = Math.min(sheet.w, sheet.h) * CsSheetSetup.MARGIN_FRACTION;
+    var margin = CsSheetSetup.MARGIN_INCHES;
     var footer = (isNull(footerInches) || !(footerInches > 0)) ? 0 :
         footerInches;
     var usableW = sheet.w - margin * 2;
@@ -467,26 +488,432 @@ CsSheetSetup.elevationSheetBox = function(planBox, scale) {
  * is a lie is worse than one that did not fit the paper.
  */
 CsSheetSetup.borderBox = function(caveBox, sheet, scale, turned,
-        footerInches) {
+        footerInches, shiftInches) {
     var w = (turned === true ? sheet.h : sheet.w) * scale;
     var h = (turned === true ? sheet.w : sheet.h) * scale;
     var footer = ((isNull(footerInches) || !(footerInches > 0)) ? 0 :
         footerInches) * scale;
-    var cx = (caveBox.minX + caveBox.maxX) / 2;
+    // THE PAPER MOVES, NOT THE CAVE. A cartographer who drags the cave
+    // across the preview is asking for the map to sit elsewhere on the
+    // page -- and the cave's coordinates are survey data, so the only
+    // thing that may move is the sheet under it. `shiftInches` is that
+    // drag, negated by the caller: see SheetSetup.draw.
+    var shift = CsSheetSetup.offsetOf({ sheet: shiftInches }, "sheet");
+    var cx = (caveBox.minX + caveBox.maxX) / 2 + shift.x * scale;
     // Centred in the space ABOVE the footer, not in the whole sheet.
     // The SHEET drops by half the footer, which is the same thing as
     // the cave rising by half of it: the band the title block occupies
     // is reserved rather than shared, and the credits stop printing
     // over the passage.
-    var cy = (caveBox.minY + caveBox.maxY) / 2 - footer / 2;
+    var cy = (caveBox.minY + caveBox.maxY) / 2 - footer / 2 +
+        shift.y * scale;
     return {
         minX: cx - w / 2, maxX: cx + w / 2,
         minY: cy - h / 2, maxY: cy + h / 2,
         width: w, height: h,
         footer: footer,
-        margin: Math.min(sheet.w, sheet.h) *
-            CsSheetSetup.MARGIN_FRACTION * scale
+        margin: CsSheetSetup.MARGIN_INCHES * scale
     };
+};
+
+// ---------------------------------------------------------------------
+// MAGNETIC NORTH, BESIDE THE TRUE ONE.
+//
+// The suite rotates every azimuth by the trip's declination as it
+// draws, so what is on the sheet is TRUE north -- and a caver standing
+// in the cave is holding a compass that points somewhere else. A map
+// that shows only true north is asking its reader to know the
+// declination and do the arithmetic in the dark.
+//
+// So the arrow carries both: true north up, and a magnetic arm at the
+// declination of the LATEST trip, labelled with that declination and
+// the date it belongs to. Declination drifts -- a degree every few
+// years in most of North America -- so "magnetic north" without a date
+// is a number with a shelf life and no label on it.
+//
+// THE LATEST TRIP, not the first: a reader takes a map underground to
+// use it, and the most recent survey is the closest thing the map has
+// to the compass in their hand.
+// ---------------------------------------------------------------------
+
+/**
+ * The declination to draw magnetic north at, and the date it came
+ * from. Null when the survey cannot say.
+ *
+ * \return { declination, date } -- date "" when the trip has none.
+ *
+ * Dates are ISO ("2024-11-03"), so they sort as text; a trip with no
+ * date cannot be the latest by date and is only fallen back on when
+ * NOTHING in the survey is dated. Ties go to the trip further down the
+ * list, which is the order the file was written in.
+ *
+ * A DECLINATION OF ZERO IS NOT AN ANSWER. It is the suite's own default
+ * for a trip nobody has told, and this build cannot tell that apart
+ * from a place where the needle really does point true: Truitt Cave's
+ * eleven trips all read 0.0 with a source of "user" (measured live,
+ * 2026-09-14). Drawing a magnetic arm there would put a second arrow
+ * exactly on top of the true one and print "MAGNETIC NORTH 0.0°" on a
+ * sheet, which is a claim about the world that nothing in the drawing
+ * supports. So zero answers null: true north only, and the map says
+ * nothing it cannot back up.
+ */
+CsSheetSetup.latestDeclination = function(survey) {
+    if (isNull(survey) || isNull(survey.trips)) {
+        return null;
+    }
+    var best = null;
+    var undated = null;
+    for (var i = 0; i < survey.trips.length; i++) {
+        var trip = survey.trips[i];
+        if (isNull(trip)) {
+            continue;
+        }
+        var d = trip.declination;
+        if (isNull(d) || !isFinite(d) || Number(d) === 0) {
+            continue;
+        }
+        var date = isNull(trip.date) ? "" : String(trip.date);
+        if (date === "") {
+            undated = { declination: Number(d), date: "" };
+            continue;
+        }
+        if (best === null || date >= best.date) {
+            best = { declination: Number(d), date: date };
+        }
+    }
+    return best !== null ? best : undated;
+};
+
+/**
+ * Which way magnetic north points on a sheet drawn in TRUE north.
+ *
+ * Declination is positive EAST (see Core/CsModel.js), and east is +x
+ * on a drawing whose north is +y -- so a positive declination swings
+ * the needle clockwise from up. A unit vector, so the caller decides
+ * how long the arm is.
+ */
+CsSheetSetup.magneticUnit = function(declination) {
+    var d = (isNull(declination) || !isFinite(declination)) ? 0 :
+        Number(declination);
+    var rad = d * Math.PI / 180;
+    return { x: Math.sin(rad), y: Math.cos(rad) };
+};
+
+/** The arrow, in inches of paper. The magnetic arm is drawn shorter
+ *  than the true one so the two cannot be mistaken for each other at a
+ *  glance, and its head smaller for the same reason. */
+CsSheetSetup.NORTH = {
+    height: 1.4,
+    headLength: 0.4,
+    headHalf: 0.18,
+    magneticHeight: 0.85,
+    magneticHeadLength: 0.18,
+    magneticHeadHalf: 0.075
+};
+
+/** The magnetic arm's grey. Secondary, the way a compass rose draws it:
+ *  the true arrow is what the map is drawn in, and the arm is a fact
+ *  about a needle. Dark enough to survive a plot and a photocopy. */
+CsSheetSetup.MAGNETIC_GREY = [128, 128, 128];
+
+/**
+ * How the magnetic arm is captioned, under the true north line:
+ * "MAGNETIC NORTH 3.2° E (2024-11-03)".
+ *
+ * THE DATE IS PART OF THE FACT. Declination drifts about a degree every
+ * few years, so a magnetic north with no date on it is a number with a
+ * shelf life and no label -- and the date this carries is the LATEST
+ * trip's, which is the survey nearest the compass a reader is holding.
+ */
+CsSheetSetup.magneticText = function(reading) {
+    if (isNull(reading)) {
+        return "";
+    }
+    var d = reading.declination;
+    var side = d > 0 ? "E" : (d < 0 ? "W" : "");
+    var out = "MAGNETIC NORTH " + Math.abs(d).toFixed(1) + "°" +
+        (side === "" ? "" : " " + side);
+    if (!isNull(reading.date) && reading.date !== "") {
+        out += " (" + reading.date + ")";
+    }
+    return out;
+};
+
+// ---------------------------------------------------------------------
+// ARRANGING THE PAGE BY HAND.
+//
+// The layout this file computes is a sensible default, not a law: the
+// title block goes bottom left, the bar at 45% across, the arrow at the
+// right margin. A real map has a reason to break that -- a cave whose
+// plan runs down the left of the sheet leaves the bar sitting on top of
+// it, and the only cartographer who can see that is the one looking at
+// the preview.
+//
+// So each piece carries an OFFSET, measured in INCHES OF PAPER from
+// where the default put it. Inches and not drawing units because the
+// scale is one of the two things the panel is for changing: a bar
+// nudged two inches to the right stays two inches to the right when the
+// scale steps, rather than leaping across the page.
+//
+// Everything below is pure -- boxes, offsets and hit tests -- so the
+// arithmetic a drag depends on is testable without a mouse.
+// ---------------------------------------------------------------------
+
+/** The pieces a caver may drag. "cave" moves the PAPER under the cave;
+ *  see CsSheetSetup.borderBox. */
+CsSheetSetup.MOVABLE = ["cave", "title", "bar", "north"];
+
+/** How near an edge has to come before it snaps to one, in INCHES of
+ *  paper. A tenth of an inch is about a pen width on the finished
+ *  sheet: near enough that nobody meant to be that close by accident,
+ *  far enough that a hand on a mouse can hit it. */
+CsSheetSetup.SNAP_INCHES = 0.1;
+
+/** Is this a piece a caver may drag? */
+CsSheetSetup.isMovable = function(kind) {
+    return CsSheetSetup.MOVABLE.indexOf(kind) >= 0;
+};
+
+/** One piece's offset, in inches of paper, defaulted to no move at
+ *  all. Tolerates null, a missing entry and a half-written one. */
+CsSheetSetup.offsetOf = function(offsets, kind) {
+    var out = { x: 0, y: 0 };
+    if (isNull(offsets) || isNull(offsets[kind])) {
+        return out;
+    }
+    var off = offsets[kind];
+    if (!isNull(off.x) && isFinite(off.x)) {
+        out.x = off.x;
+    }
+    if (!isNull(off.y) && isFinite(off.y)) {
+        out.y = off.y;
+    }
+    return out;
+};
+
+/** Has anything been moved at all? Decides whether the panel's Reset
+ *  is worth offering. */
+CsSheetSetup.anyMoved = function(offsets) {
+    if (isNull(offsets)) {
+        return false;
+    }
+    for (var i = 0; i < CsSheetSetup.MOVABLE.length; i++) {
+        var off = CsSheetSetup.offsetOf(offsets, CsSheetSetup.MOVABLE[i]);
+        if (Math.abs(off.x) > 1e-9 || Math.abs(off.y) > 1e-9) {
+            return true;
+        }
+    }
+    return false;
+};
+
+/** `offsets` with one piece moved a further dx, dy INCHES. Answers a
+ *  new object; the one passed in is never written to, so a drag in
+ *  progress can be thrown away by forgetting its result. */
+CsSheetSetup.withOffset = function(offsets, kind, dxInches, dyInches) {
+    var out = {};
+    var k;
+    if (!isNull(offsets)) {
+        for (k in offsets) {
+            if (offsets.hasOwnProperty(k)) {
+                out[k] = { x: CsSheetSetup.offsetOf(offsets, k).x,
+                           y: CsSheetSetup.offsetOf(offsets, k).y };
+            }
+        }
+    }
+    var was = CsSheetSetup.offsetOf(offsets, kind);
+    out[kind] = { x: was.x + dxInches, y: was.y + dyInches };
+    return out;
+};
+
+/**
+ * The margin rectangle inside one sheet: the line a map is kept inside
+ * so it can be bound, trimmed and held.
+ *
+ * Drawn DASHED in the preview and never on the sheet itself -- it is a
+ * guide, not furniture, which is why previewFits skips it.
+ */
+CsSheetSetup.marginBox = function(sheetBox) {
+    var m = isNull(sheetBox.margin) ? 0 : sheetBox.margin;
+    return { minX: sheetBox.minX + m, minY: sheetBox.minY + m,
+             maxX: sheetBox.maxX - m, maxY: sheetBox.maxY - m };
+};
+
+/**
+ * A rectangle cut into dashes, as [{x1, y1, x2, y2}].
+ *
+ * The preview document is built from scratch every repaint and holds no
+ * linetype table worth the name, so the dashes are GEOMETRY. That also
+ * makes the margin outline testable: a dashed line either has the right
+ * segments or it does not.
+ */
+CsSheetSetup.dashRect = function(box, dashLength) {
+    var out = [];
+    var len = (isNull(dashLength) || !(dashLength > 0)) ? 1 : dashLength;
+    var run = function(x1, y1, x2, y2) {
+        var dx = x2 - x1, dy = y2 - y1;
+        var total = Math.sqrt(dx * dx + dy * dy);
+        if (!(total > 0)) {
+            return;
+        }
+        var ux = dx / total, uy = dy / total;
+        var at = 0;
+        while (at < total) {
+            var end = Math.min(at + len, total);
+            out.push({ x1: x1 + ux * at, y1: y1 + uy * at,
+                       x2: x1 + ux * end, y2: y1 + uy * end });
+            at = end + len;   // one dash, one gap
+        }
+    };
+    run(box.minX, box.minY, box.maxX, box.minY);
+    run(box.maxX, box.minY, box.maxX, box.maxY);
+    run(box.maxX, box.maxY, box.minX, box.maxY);
+    run(box.minX, box.maxY, box.minX, box.minY);
+    return out;
+};
+
+/**
+ * Which piece is under a point, or null.
+ *
+ * TOPMOST FIRST, which is the order they were added in reverse: the
+ * title block sits inside the cave's own footprint on nearly every map,
+ * and a caver reaching for the title block is not reaching for the
+ * thousand-foot rectangle behind it.
+ *
+ * `pad` widens the catch, in drawing units, so a north arrow four
+ * tenths of an inch wide can still be grabbed.
+ */
+CsSheetSetup.pickAt = function(preview, x, y, pad) {
+    if (isNull(preview) || isNull(preview.items)) {
+        return null;
+    }
+    var grow = (isNull(pad) || !(pad > 0)) ? 0 : pad;
+    for (var i = preview.items.length - 1; i >= 0; i--) {
+        var item = preview.items[i];
+        if (!CsSheetSetup.isMovable(item.kind)) {
+            continue;
+        }
+        var b = item.box;
+        if (x >= b.minX - grow && x <= b.maxX + grow &&
+                y >= b.minY - grow && y <= b.maxY + grow) {
+            return item;
+        }
+    }
+    return null;
+};
+
+/**
+ * The lines a dragged piece may snap to, in DRAWING units.
+ *
+ * The paper's own edges, the margin, and every other piece's edges and
+ * middle -- which is what "line the bar up under the title block" and
+ * "centre the arrow on the page" both mean. The piece being dragged is
+ * left out: a box cannot snap to itself.
+ */
+CsSheetSetup.snapLines = function(preview, kind) {
+    var out = { xs: [], ys: [], xMid: [], yMid: [] };
+    if (isNull(preview) || isNull(preview.items)) {
+        return out;
+    }
+    var push = function(list, v) {
+        if (list.indexOf(v) === -1) { list.push(v); }
+    };
+    for (var i = 0; i < preview.items.length; i++) {
+        var item = preview.items[i];
+        if (item.kind === kind) {
+            continue;
+        }
+        var b = item.box;
+        push(out.xs, b.minX);
+        push(out.xs, b.maxX);
+        push(out.ys, b.minY);
+        push(out.ys, b.maxY);
+        // MIDLINES ARE KEPT APART from the edges, and `xs`/`ys` carry
+        // them too so an EDGE may still land on one. The separate list
+        // is what lets a centring snap win a tie: see snapMove.
+        push(out.xMid, (b.minX + b.maxX) / 2);
+        push(out.yMid, (b.minY + b.maxY) / 2);
+        push(out.xs, (b.minX + b.maxX) / 2);
+        push(out.ys, (b.minY + b.maxY) / 2);
+    }
+    return out;
+};
+
+/**
+ * A drag, pulled onto the nearest edge it nearly hit.
+ *
+ * Each axis is decided on its own -- an edge that lines up vertically
+ * should not have to give up its horizontal place to say so -- and what
+ * comes back names the line it took, so the preview can draw it and the
+ * caver can see WHY the piece stopped where it did.
+ *
+ * \param box   where the piece sits now, before this drag
+ * \param dx,dy the drag, in drawing units
+ * \param lines from CsSheetSetup.snapLines
+ * \param tol   how near counts, in drawing units
+ * \return {dx, dy, guideX, guideY, centredX, centredY} -- the guides
+ *         null when nothing was near enough, and the centred flags true
+ *         when the piece was pulled onto a MIDLINE rather than an edge,
+ *         so the panel can say so and draw the guide differently.
+ */
+CsSheetSetup.snapMove = function(box, dx, dy, lines, tol) {
+    var out = { dx: dx, dy: dy, guideX: null, guideY: null,
+        centredX: false, centredY: false };
+    if (isNull(lines) || !(tol > 0)) {
+        return out;
+    }
+    var midX = (box.minX + box.maxX) / 2 + dx;
+    var midY = (box.minY + box.maxY) / 2 + dy;
+    var best = function(edges, candidates) {
+        var pick = null;
+        if (isNull(candidates)) {
+            return null;
+        }
+        for (var e = 0; e < edges.length; e++) {
+            for (var c = 0; c < candidates.length; c++) {
+                var gap = candidates[c] - edges[e];
+                if (Math.abs(gap) > tol) {
+                    continue;
+                }
+                if (pick === null || Math.abs(gap) < Math.abs(pick.gap)) {
+                    pick = { gap: gap, line: candidates[c] };
+                }
+            }
+        }
+        return pick;
+    };
+    // CENTRING WINS A TIE (Nathan, 2026-09-14). "Put the scale bar in
+    // the middle of the page" is the snap a cartographer most wants and
+    // the one hardest to hit by hand -- and a page's midline usually
+    // has another piece's edge somewhere near it, which would otherwise
+    // grab the drag first and leave the bar a hair off centre. So the
+    // MIDDLE of the dragged box is offered the midlines on their own
+    // before everything is considered together.
+    var axis = function(edges, mid, mids, all) {
+        var centred = best([mid], mids);
+        if (centred !== null) {
+            return { gap: centred.gap, line: centred.line, centred: true };
+        }
+        var any = best(edges, all);
+        if (any === null) {
+            return null;
+        }
+        return { gap: any.gap, line: any.line, centred: false };
+    };
+    var x = axis([box.minX + dx, box.maxX + dx, midX], midX,
+        lines.xMid, lines.xs);
+    if (x !== null) {
+        out.dx = dx + x.gap;
+        out.guideX = x.line;
+        out.centredX = x.centred;
+    }
+    var y = axis([box.minY + dy, box.maxY + dy, midY], midY,
+        lines.yMid, lines.ys);
+    if (y !== null) {
+        out.dy = dy + y.gap;
+        out.guideY = y.line;
+        out.centredY = y.centred;
+    }
+    return out;
 };
 
 // ---------------------------------------------------------------------
@@ -513,14 +940,19 @@ CsSheetSetup.borderBox = function(caveBox, sheet, scale, turned,
  *   turned       paper turned?
  *   footerInches how tall the furniture band is
  *   wants        {border, bar, north, title}
+ *   offsets      {kind: {x, y}} -- hand-arranged moves, in INCHES of
+ *                paper, for the pieces in CsSheetSetup.MOVABLE
+ *   declination  the latest trip's declination, so the north box
+ *                covers the magnetic arm the sheet will draw
  *   elevation    true to include the second sheet
  *   bands        [{minX, minY, maxX, maxY}] the elevation's own boxes
  * }
  *
  * \return { bounds: {minX, minY, maxX, maxY}, items: [{kind, box}] }
  *
- * `kind` is one of "sheet", "elevation-sheet", "cave", "title", "bar",
- * "north", "band" -- the panel colours by it and the tests read it.
+ * `kind` is one of "sheet", "elevation-sheet", "margin", "cave",
+ * "title", "bar", "north", "band" -- the panel colours by it and the
+ * tests read it.
  */
 CsSheetSetup.preview = function(state) {
     var out = { bounds: null, items: [] };
@@ -532,24 +964,41 @@ CsSheetSetup.preview = function(state) {
     var box = CsSheetSetup.borderBox(state.caveBox, state.sheet, scale,
         state.turned === true, state.footerInches);
 
+    // EVERY MOVABLE PIECE IS ADDED THROUGH ITS OWN OFFSET. A drag is
+    // remembered in inches of paper, so it survives a scale step and a
+    // paper change -- and the drawn sheet reads the same numbers, which
+    // is what makes the preview a preview rather than a picture.
     var add = function(kind, minX, minY, maxX, maxY) {
+        var off = CsSheetSetup.offsetOf(state.offsets, kind);
+        var dx = off.x * scale, dy = off.y * scale;
         out.items.push({ kind: kind,
-            box: { minX: minX, minY: minY, maxX: maxX, maxY: maxY } });
+            box: { minX: minX + dx, minY: minY + dy,
+                   maxX: maxX + dx, maxY: maxY + dy } });
     };
 
     add("sheet", box.minX, box.minY, box.maxX, box.maxY);
+    // THE MARGIN, DASHED. The band a map is kept out of so it can be
+    // bound and trimmed -- invisible until now, which is why furniture
+    // dragged by hand had nothing to be square with.
+    var planMargin = CsSheetSetup.marginBox(box);
+    add("margin", planMargin.minX, planMargin.minY,
+        planMargin.maxX, planMargin.maxY);
     add("cave", state.caveBox.minX, state.caveBox.minY,
         state.caveBox.maxX, state.caveBox.maxY);
 
     var inch = function(v) { return v * scale; };
-    var foot = box.minY + box.margin * 0.55;
+    // ON THE MARGIN LINE. With a margin of nearly three inches the
+    // furniture could sit at a fraction of it and still be inside the
+    // guide; at half an inch, anything less than the whole margin is
+    // furniture printed in the plotter's own unprintable border.
+    var foot = box.minY + box.margin;
 
     if (wants.title === true) {
         var titleH = isNull(state.footerInches) ? 2 : state.footerInches;
         add("title", box.minX + box.margin,
-            box.minY + box.margin * 0.35,
+            box.minY + box.margin,
             box.minX + box.margin + inch(CsSheetSetup.TITLE_INCHES),
-            box.minY + box.margin * 0.35 + inch(titleH));
+            box.minY + box.margin + inch(titleH));
     }
     if (wants.bar === true) {
         var barX = box.minX + box.width * 0.45;
@@ -558,14 +1007,26 @@ CsSheetSetup.preview = function(state) {
     }
     if (wants.north === true) {
         var nx = box.maxX - box.margin;
-        add("north", nx - inch(0.2), foot, nx + inch(0.2),
-            foot + inch(1.4));
+        // BOTH ARMS, and the two letters at the magnetic tip: the box
+        // is what a caver grabs and what the fit check measures, so it
+        // has to be the whole piece rather than the true arrow alone.
+        var arm = CsSheetSetup.magneticUnit(state.declination);
+        var reach = CsSheetSetup.NORTH.magneticHeight;
+        var armX = arm.x * reach;
+        var armY = arm.y * reach;
+        add("north",
+            nx + inch(Math.min(-0.2, armX - 0.1)), foot,
+            nx + inch(Math.max(0.2, armX + 0.35)),
+            foot + inch(Math.max(CsSheetSetup.NORTH.height, armY)));
     }
 
     if (state.elevation === true) {
         var second = CsSheetSetup.elevationSheetBox(box, scale);
         add("elevation-sheet", second.minX, second.minY,
             second.maxX, second.maxY);
+        var elevMargin = CsSheetSetup.marginBox(second);
+        add("margin", elevMargin.minX, elevMargin.minY,
+            elevMargin.maxX, elevMargin.maxY);
         var bands = isNull(state.bands) ? [] : state.bands;
         if (bands.length > 0) {
             // The bands as they will land: the region keeps its own
@@ -581,7 +1042,7 @@ CsSheetSetup.preview = function(state) {
                 }
             }
             var inset = (second.maxX - second.minX) *
-                CsSheetSetup.MARGIN_FRACTION;
+                CsSheetSetup.BAND_INSET_FRACTION;
             var dx = (second.minX + inset) - bMinX;
             var dy = (second.maxY - inset) - bMaxY;
             for (i = 0; i < bands.length; i++) {
@@ -626,7 +1087,11 @@ CsSheetSetup.previewFits = function(preview) {
     var out = { fits: true, spilling: [] };
     for (i = 0; i < preview.items.length; i++) {
         item = preview.items[i];
-        if (item.kind === "sheet" || item.kind === "elevation-sheet") {
+        if (item.kind === "sheet" || item.kind === "elevation-sheet" ||
+                item.kind === "margin") {
+            // A MARGIN IS A GUIDE, NOT A PIECE. It is drawn inside its
+            // own sheet by construction, and counting it would make the
+            // answer "everything fits" say nothing.
             continue;
         }
         var inside = false;

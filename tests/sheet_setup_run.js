@@ -615,6 +615,298 @@ eqs(recScans, 3,
         "ones, plus the stray on layer 0 -- the record keeps every " +
         "scan, which is where they belong");
 
+// ---------------------------------------------------------------------
+// THE NORTH ARROW CARRIES MAGNETIC NORTH TOO.
+//
+// The sheet is drawn in TRUE north -- every azimuth was rotated by the
+// trip's declination as it was drawn -- and the compass a caver holds
+// underground is not. So the arrow has two arms from one origin, and
+// the magnetic one is drawn at the LATEST trip's declination. What is
+// asserted here is the thing no arithmetic test can see: the direction
+// of the line that actually landed in the drawing.
+// ---------------------------------------------------------------------
+(function() {
+    var magDoc = new RDocument(new RMemoryStorage(), createSpatialIndex());
+    var magDi = new RDocumentInterface(magDoc);
+    CsLayers.ensure(magDoc, magDi, CsLayers.WALLS_SURVEYED);
+    var seg = new RLineEntity(magDoc,
+        new RLineData(new RVector(0, 0), new RVector(1000, 400)));
+    seg.setLayerId(magDoc.getLayerId(CsLayers.WALLS_SURVEYED));
+    var addOp = new RAddObjectsOperation();
+    addOp.addObject(seg, false);
+    magDi.applyOperation(addOp);
+
+    var magBox = SheetSetup.caveBox(magDoc);
+    var declination = 12.0;
+    SheetSetup.draw(magDoc, magDi, {
+        caveBox: magBox, sheet: sheet, scale: scale, turned: false,
+        wants: { border: false, bar: false, north: true, title: false },
+        filled: {}, elevation: false,
+        survey: { trips: [
+            { name: "old", date: "2019-04-06", declination: 1.0 },
+            { name: "new", date: "2024-11-03", declination: declination }
+        ] }
+    });
+
+    // Every line the arrow drew, by direction from its own origin.
+    var lines = [];
+    var texts = [];
+    var ids = magDoc.queryAllEntities(false, false);
+    for (var i = 0; i < ids.length; i++) {
+        var e = magDoc.queryEntity(ids[i]);
+        if (isNull(e) || CsTags.get(e, "SheetPiece") === "") {
+            continue;
+        }
+        if (CsBind.layerNameOf(magDoc, e) !== CsLayers.NORTH_ARROW) {
+            continue;
+        }
+        try {
+            var shape = e.castToShape();
+            if (!isNull(shape) && typeof shape.getStartPoint === "function" &&
+                    typeof shape.getEndPoint === "function") {
+                var a = shape.getStartPoint(), b = shape.getEndPoint();
+                lines.push({ ax: a.x, ay: a.y, bx: b.x, by: b.y });
+                continue;
+            }
+        } catch (eShape) {
+        }
+        try {
+            texts.push(CsSheet.textOf(e));
+        } catch (eText) {
+        }
+    }
+    ok(lines.length >= 6,
+        "the arrow drew both arms and both heads (" + lines.length +
+            " lines)");
+
+    // The TRUE arm is the vertical one; the MAGNETIC arm shares its
+    // start and leans by the declination.
+    var trueArm = null, magArm = null;
+    for (i = 0; i < lines.length; i++) {
+        var dx = lines[i].bx - lines[i].ax;
+        var dy = lines[i].by - lines[i].ay;
+        var len = Math.sqrt(dx * dx + dy * dy);
+        if (len < 1) {
+            continue;
+        }
+        var deg = Math.atan2(dx, dy) * 180 / Math.PI;
+        if (Math.abs(deg) < 0.001 && (trueArm === null || len > trueArm.len)) {
+            trueArm = { len: len, ax: lines[i].ax, ay: lines[i].ay };
+        }
+        if (Math.abs(deg - declination) < 0.001 &&
+                (magArm === null || len > magArm.len)) {
+            magArm = { len: len, ax: lines[i].ax, ay: lines[i].ay,
+                       deg: deg };
+        }
+    }
+    ok(trueArm !== null, "there is a true north arm, straight up the page");
+    ok(magArm !== null,
+        "and a magnetic arm leaning by the LATEST trip's declination, " +
+            "not the first trip's 1.0 degrees");
+    if (trueArm !== null && magArm !== null) {
+        near(magArm.ax, trueArm.ax, 0.01,
+            "the two arms share an origin -- one piece of furniture, " +
+                "and the angle between them IS the declination");
+        near(magArm.ay, trueArm.ay, 0.01, "in y as well as x");
+        ok(magArm.len < trueArm.len,
+            "the magnetic arm is drawn shorter, so the two cannot be " +
+                "mistaken for each other at a glance");
+    }
+
+    var caption = "";
+    var mn = false;
+    for (i = 0; i < texts.length; i++) {
+        if (String(texts[i]).indexOf("MAGNETIC NORTH") >= 0) {
+            caption = String(texts[i]);
+        }
+        if (String(texts[i]) === "mN") {
+            mn = true;
+        }
+    }
+    ok(caption.indexOf("12.0") >= 0 && caption.indexOf("E") >= 0,
+        "the caption says how far east (" + caption + ")");
+    ok(caption.indexOf("2024-11-03") >= 0,
+        "and WHEN it was true -- declination drifts, so an undated " +
+            "one is a number with a shelf life and no label (" +
+            caption + ")");
+    ok(mn,
+        "the arm itself is labelled mN -- in that case, which is how a " +
+            "compass rose tells the two norths apart, and which the " +
+            "sheet's own CsDraw.caps would otherwise flatten to the " +
+            "true arrow's own label");
+
+    // GREY, and the whole arm of it. The true arrow takes its colour
+    // from the layer like every other piece of furniture; the magnetic
+    // one is deliberately secondary.
+    var greyed = 0, arms = 0;
+    for (i = 0; i < ids.length; i++) {
+        var ge = magDoc.queryEntity(ids[i]);
+        if (isNull(ge) || CsTags.get(ge, "SheetPiece") === "") {
+            continue;
+        }
+        if (CsBind.layerNameOf(magDoc, ge) !== CsLayers.NORTH_ARROW) {
+            continue;
+        }
+        var colour = null;
+        try {
+            colour = ge.getColor();
+        } catch (eCol) {
+            continue;
+        }
+        if (isNull(colour) || colour.isByLayer()) {
+            continue;
+        }
+        arms += 1;
+        if (colour.red() === CsSheetSetup.MAGNETIC_GREY[0] &&
+                colour.green() === CsSheetSetup.MAGNETIC_GREY[1] &&
+                colour.blue() === CsSheetSetup.MAGNETIC_GREY[2]) {
+            greyed += 1;
+        }
+    }
+    eqs(greyed, arms,
+        "every entity the magnetic arm drew is grey, not just some of " +
+            "them (" + greyed + " of " + arms + ")");
+    eqs(arms, 5,
+        "and that is the arm, its two head strokes, the mN label and " +
+            "the caption -- five pieces (" + arms + ")");
+
+    // A survey with nothing to say draws the true arrow and no arm.
+    var bareDoc = new RDocument(new RMemoryStorage(), createSpatialIndex());
+    var bareDi = new RDocumentInterface(bareDoc);
+    CsLayers.ensure(bareDoc, bareDi, CsLayers.WALLS_SURVEYED);
+    var bareSeg = new RLineEntity(bareDoc,
+        new RLineData(new RVector(0, 0), new RVector(500, 200)));
+    bareSeg.setLayerId(bareDoc.getLayerId(CsLayers.WALLS_SURVEYED));
+    var bareOp = new RAddObjectsOperation();
+    bareOp.addObject(bareSeg, false);
+    bareDi.applyOperation(bareOp);
+    SheetSetup.draw(bareDoc, bareDi, {
+        caveBox: SheetSetup.caveBox(bareDoc), sheet: sheet, scale: scale,
+        turned: false,
+        wants: { border: false, bar: false, north: true, title: false },
+        filled: {}, survey: null, elevation: false
+    });
+    var bareTexts = 0;
+    var bareIds = bareDoc.queryAllEntities(false, false);
+    for (i = 0; i < bareIds.length; i++) {
+        var be = bareDoc.queryEntity(bareIds[i]);
+        if (isNull(be) || CsTags.get(be, "SheetPiece") === "") {
+            continue;
+        }
+        try {
+            if (String(CsSheet.textOf(be)).indexOf("MAGNETIC") >= 0) {
+                bareTexts += 1;
+            }
+        } catch (eBare) {
+        }
+    }
+    eqs(bareTexts, 0,
+        "a drawing with no survey in it gets a true north arrow and no " +
+            "magnetic claim -- there is nothing to base one on");
+}());
+
+
+// ---------------------------------------------------------------------
+// A HAND-ARRANGED PAGE IS THE PAGE THAT GETS BUILT.
+//
+// The preview lets a cartographer drag the furniture around, and that
+// is worth nothing unless the drawn sheet lands where the picture said
+// it would. The drag is remembered in INCHES OF PAPER, so this asks the
+// only question that matters against a real document: does an offset of
+// n inches move the drawn piece n inches at the plot scale?
+// ---------------------------------------------------------------------
+(function() {
+    var arrangedDoc = new RDocument(new RMemoryStorage(),
+        createSpatialIndex());
+    var arrangedDi = new RDocumentInterface(arrangedDoc);
+    var mkLine = function(d, i, layer, x1, y1, x2, y2) {
+        CsLayers.ensure(d, i, layer);
+        var e = new RLineEntity(d,
+            new RLineData(new RVector(x1, y1), new RVector(x2, y2)));
+        e.setLayerId(d.getLayerId(layer));
+        var op = new RAddObjectsOperation();
+        op.addObject(e, false);
+        i.applyOperation(op);
+    };
+    mkLine(arrangedDoc, arrangedDi, CsLayers.WALLS_SURVEYED, 0, 0, 1000, 0);
+    mkLine(arrangedDoc, arrangedDi, CsLayers.WALLS_SURVEYED, 0, 400,
+        1000, 400);
+    var aBox = SheetSetup.caveBox(arrangedDoc);
+
+    var layout = function(offsets) {
+        // Each layout is drawn into the SAME document in turn: a re-run
+        // replaces the last sheet, which is exactly how a caver moving
+        // a piece and pressing Build again gets one sheet and not two.
+        SheetSetup.draw(arrangedDoc, arrangedDi, {
+            caveBox: aBox, sheet: sheet, scale: scale, turned: false,
+            wants: { border: true, bar: true, north: true, title: true },
+            filled: { caveName: "Arranged Cave" }, survey: null,
+            elevation: false, offsets: offsets
+        });
+        var out = {};
+        var ids = arrangedDoc.queryAllEntities(false, false);
+        for (var i = 0; i < ids.length; i++) {
+            var e = arrangedDoc.queryEntity(ids[i]);
+            if (isNull(e) || CsTags.get(e, "SheetPiece") === "") {
+                continue;
+            }
+            var layer = CsBind.layerNameOf(arrangedDoc, e);
+            var b = e.getBoundingBox();
+            var mn = b.getMinimum(), mx = b.getMaximum();
+            if (isNull(out[layer])) {
+                out[layer] = { minX: mn.x, minY: mn.y,
+                               maxX: mx.x, maxY: mx.y };
+            } else {
+                out[layer].minX = Math.min(out[layer].minX, mn.x);
+                out[layer].minY = Math.min(out[layer].minY, mn.y);
+                out[layer].maxX = Math.max(out[layer].maxX, mx.x);
+                out[layer].maxY = Math.max(out[layer].maxY, mx.y);
+            }
+        }
+        return out;
+    };
+
+    var before = layout({});
+    var after = layout({ bar: { x: 2, y: 1 }, north: { x: -3, y: 0 },
+        title: { x: 0.5, y: 0.25 } });
+
+    near(after[CsLayers.SCALE_BAR].minX - before[CsLayers.SCALE_BAR].minX,
+        2 * scale, 0.01,
+        "a scale bar dragged two inches right is drawn two inches " +
+            "right, at the plot scale");
+    near(after[CsLayers.SCALE_BAR].minY - before[CsLayers.SCALE_BAR].minY,
+        1 * scale, 0.01, "and one inch up");
+    near(after[CsLayers.NORTH_ARROW].minX -
+        before[CsLayers.NORTH_ARROW].minX, -3 * scale, 0.01,
+        "a north arrow dragged three inches left follows it");
+    near(after[CsLayers.TITLE_BLOCK].minX -
+        before[CsLayers.TITLE_BLOCK].minX, 0.5 * scale, 0.01,
+        "and the whole title block moves as one piece");
+    near(after[CsLayers.TITLE_BLOCK].minY -
+        before[CsLayers.TITLE_BLOCK].minY, 0.25 * scale, 0.01,
+        "including upward, where its lines stack");
+    near(after[CsLayers.BORDER].minX, before[CsLayers.BORDER].minX, 0.01,
+        "moving the furniture never moves the paper");
+
+    // THE CAVE IS THE ODD ONE. A cartographer dragging the cave across
+    // the preview is asking for the map to sit elsewhere on the PAGE,
+    // and survey coordinates are not a layout decision -- so the paper
+    // moves the other way and the cave stays exactly where it was
+    // surveyed.
+    var slid = layout({ cave: { x: 4, y: -2 } });
+    near(slid[CsLayers.BORDER].minX - before[CsLayers.BORDER].minX,
+        -4 * scale, 0.01,
+        "dragging the cave four inches right slides the PAPER four " +
+            "inches left, which is the same picture");
+    near(slid[CsLayers.BORDER].minY - before[CsLayers.BORDER].minY,
+        2 * scale, 0.01, "and two inches up for a cave dragged down");
+    near(SheetSetup.caveBox(arrangedDoc).minX, aBox.minX, 0.01,
+        "the cave itself has not moved one unit");
+    near(slid[CsLayers.TITLE_BLOCK].minX -
+        before[CsLayers.TITLE_BLOCK].minX, -4 * scale, 0.01,
+        "and the furniture travels with the paper it is placed on");
+}());
+
 try {
     (new QDir(QDir.tempPath() + "/CaveCADSheetTest")).removeRecursively();
 } catch (eClean) {

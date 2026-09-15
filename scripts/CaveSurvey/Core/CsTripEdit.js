@@ -397,6 +397,60 @@ CsTripEdit.writeTags = function(doc, di, survey, changes) {
  * is the whole point -- this tool cannot fix it, and the tool that can
  * is somewhere else.
  */
+/**
+ * Plan, apply and write one set of trip-field edits, in one call.
+ *
+ * ONE COPY OF THE SEQUENCE. planEdits -> applyToSurvey -> writeTags is
+ * the whole of "edit a trip", and it now has two callers: Survey
+ * Notebook's Edit this trip... dialog, and the Cave Shelf's trip table,
+ * where a caver types straight into the row. Two hand-written copies of
+ * a three-step sequence is how the second caller ends up quietly
+ * skipping the ensureTrips inside applyToSurvey and leaving
+ * survey.date mirroring the old value.
+ *
+ * ALL OR NOTHING, which is planEdits' own rule: a set of inputs with
+ * one impossible date in it changes nothing at all, and says why.
+ *
+ * \param inputs [{tripId, name, date, team, instruments}], raw text
+ * \return {changes: [...], res: <writeTags result>} -- changes empty
+ *         and res null when nothing differed -- or {error: "..."}
+ */
+CsTripEdit.commit = function(doc, di, survey, inputs) {
+    var plan = CsTripEdit.planEdits(survey, inputs);
+    if (plan.error !== undefined) {
+        return { error: plan.error };
+    }
+    if (plan.changes.length === 0) {
+        return { changes: [], res: null };
+    }
+    CsTripEdit.applyToSurvey(survey, plan.changes);
+    return { changes: plan.changes,
+             res: CsTripEdit.writeTags(doc, di, survey, plan.changes) };
+};
+
+/**
+ * One trip's fields as CsTripEdit.commit wants them, with one field
+ * replaced by what a caver typed.
+ *
+ * The shelf edits ONE CELL at a time, and planEdits compares a whole
+ * trip: the three fields nobody touched have to be handed back exactly
+ * as they are, or an edit to Team would blank the name and the date.
+ *
+ * \param row   a CsTripEdit.rows entry
+ * \param field "name", "date", "team" or "instruments"
+ * \param text  what was typed
+ * \return the input entry, or null when `field` is not editable here
+ */
+CsTripEdit.inputFor = function(row, field, text) {
+    if (isNull(row) || CsTripEdit.FIELDS.indexOf(field) === -1) {
+        return null;
+    }
+    var input = { tripId: row.tripId, name: row.name, date: row.date,
+                  team: row.team, instruments: row.instruments };
+    input[field] = isNull(text) ? "" : String(text);
+    return input;
+};
+
 CsTripEdit.dateChanged = function(changes) {
     for (var i = 0; i < changes.length; i++) {
         if (changes[i].before.date !== changes[i].after.date) {

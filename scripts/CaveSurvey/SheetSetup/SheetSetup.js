@@ -196,11 +196,23 @@ SheetSetup.readSurvey = function(doc) {
 
 var csSheetSetupDock;
 
+/** What the panel says under the preview when nothing is being
+ *  dragged. Held here so the drag readout can put it back. */
+// SHORT ON PURPOSE. A wrapped QLabel under a stretching view is given
+// the height its sizeHint asked for BEFORE the wrap, so a three-line
+// sentence here is drawn clipped -- measured live, 2026-09-14, with the
+// first line cut in half. The rest of the explanation is the
+// handbook's job.
+SheetSetup.HINT = qsTr("Drag a piece to arrange the page. Edges and " +
+    "middles snap.");
+
 /** How the preview paints each kind of box. */
 SheetSetup.PREVIEW_STYLE = {
     "sheet": { line: [70, 70, 70], fill: [255, 255, 255], width: 2 },
     "elevation-sheet": { line: [70, 70, 70], fill: [255, 255, 255],
         width: 2 },
+    "margin": { line: [150, 150, 150], fill: null, width: 1,
+        dashed: true },
     "cave": { line: [40, 90, 190], fill: [40, 90, 190, 40], width: 1 },
     "band": { line: [40, 90, 190], fill: [40, 90, 190, 40], width: 1 },
     "title": { line: [150, 100, 30], fill: [220, 170, 70, 90], width: 1 },
@@ -245,10 +257,20 @@ SheetSetup.paintPreview = function(preview, width, height) {
             var pen = new QPen(new QColor(style.line[0], style.line[1],
                 style.line[2]));
             pen.setWidth(style.width);
+            if (style.dashed === true) {
+                try {
+                    pen.setStyle(Qt.DashLine);
+                } catch (eDash) {
+                }
+            }
             painter.setPen(pen);
-            painter.setBrush(new QBrush(new QColor(style.fill[0],
-                style.fill[1], style.fill[2],
-                style.fill.length > 3 ? style.fill[3] : 255)));
+            if (isNull(style.fill)) {
+                painter.setBrush(new QBrush());
+            } else {
+                painter.setBrush(new QBrush(new QColor(style.fill[0],
+                    style.fill[1], style.fill[2],
+                    style.fill.length > 3 ? style.fill[3] : 255)));
+            }
             painter.drawRect(x, y, Math.max(w, 1), Math.max(h, 1));
         }
         painter.end();
@@ -263,7 +285,8 @@ SheetSetup.paintPreview = function(preview, width, height) {
 SheetSetup.readState = function(doc) {
     var state = { ok: false, why: "", caveBox: null, caveW: 0, caveH: 0,
         recordPath: "", hasElevation: false, bands: [], filled: {},
-        titleLines: [], footerInches: 0 };
+        titleLines: [], footerInches: 0, declination: null,
+        declinationDate: "" };
     if (isNull(doc)) {
         state.why = "No drawing open.";
         return state;
@@ -318,6 +341,11 @@ SheetSetup.readState = function(doc) {
 
     var read = SheetSetup.readSurvey(doc);
     state.survey = read.survey;
+    // The magnetic arm the north arrow will carry, so the preview's
+    // north box is the whole piece rather than the true arrow alone.
+    var reading = CsSheetSetup.latestDeclination(read.survey);
+    state.declination = isNull(reading) ? null : reading.declination;
+    state.declinationDate = isNull(reading) ? "" : reading.date;
     state.filled = CsSheetSetup.autoFill(read.survey, read.stats,
         read.grade);
     state.titleLines = CsSheetSetup.titleLines(
@@ -376,7 +404,11 @@ SheetSetup.buildDock = function(appWin) {
     var dock = new QDockWidget(qsTr("Sheet Setup"), appWin);
     dock.objectName = "CaveSurveySheetSetupDock";
 
-    var w = { state: null, quiet: false };
+    // WHAT HAS BEEN DRAGGED WHERE, in inches of paper, per piece.
+    // Inches because the scale is one of the two things this panel
+    // exists to change: a bar nudged two inches right stays two inches
+    // right when the scale steps.
+    var w = { state: null, quiet: false, offsets: {} };
     var body = new QWidget(dock);
     var layout = new QVBoxLayout();
 
@@ -426,13 +458,41 @@ SheetSetup.buildDock = function(appWin) {
     w.fitLabel.wordWrap = true;
     layout.addWidget(w.fitLabel, 0, 0);
 
-    w.preview = new QLabel("");
-    try {
-        w.preview.setMinimumHeight(150);
-        w.preview.alignment = Qt.AlignCenter;
-    } catch (ePrev) {
+    // THE PREVIEW IS A VIEW, NOT A PICTURE (Nathan, 2026-09-14). A
+    // QPixmap in a QLabel could show the layout and nothing more: this
+    // bridge gives a script no way to get a click coordinate out of a
+    // label, so "put the scale bar over there" was a wish. An embedded
+    // QCAD view over a scratch document takes drags, and
+    // Core/CsSheetView.js holds the wiring.
+    //
+    // The label stays as the FALLBACK: a build that refuses the view
+    // still gets the picture, which is what the panel had before.
+    w.pane = CsSheetPreview.build(body);
+    if (w.pane !== null) {
+        try {
+            w.pane.view.setMinimumHeight(150);
+        } catch (eMin) {
+        }
+        layout.addWidget(w.pane.view, 1, 0);
+        w.pane.view.onDrag = function(kind, snapped) {
+            SheetSetup.dragTo(kind, snapped);
+        };
+        w.pane.view.onDragDone = function() {
+            SheetSetup.dragDone();
+        };
+    } else {
+        w.preview = new QLabel("");
+        try {
+            w.preview.setMinimumHeight(150);
+            w.preview.alignment = Qt.AlignCenter;
+        } catch (ePrev) {
+        }
+        layout.addWidget(w.preview, 1, 0);
     }
-    layout.addWidget(w.preview, 1, 0);
+
+    w.hint = new QLabel(SheetSetup.HINT);
+    w.hint.wordWrap = true;
+    layout.addWidget(w.hint, 0, 0);
 
     w.cbBorder = new QCheckBox(qsTr("Border"));
     w.cbBar = new QCheckBox(qsTr("Scale bar"));
@@ -462,6 +522,11 @@ SheetSetup.buildDock = function(appWin) {
     w.refreshButton.toolTip = qsTr("Measure the cave again -- after " +
         "another trip, or after tracing more of it.");
     row.addWidget(w.refreshButton, 0, 0);
+    w.resetButton = new QPushButton(qsTr("Reset Layout"));
+    w.resetButton.toolTip = qsTr("Put every piece back where the " +
+        "default layout puts it.");
+    w.resetButton.enabled = false;
+    row.addWidget(w.resetButton, 0, 0);
     layout.addLayout(row, 0);
 
     body.setLayout(layout);
@@ -487,6 +552,7 @@ SheetSetup.buildDock = function(appWin) {
     w.cbElevation.toggled.connect(changed);
     w.buildButton.clicked.connect(function() { SheetSetup.build(); });
     w.refreshButton.clicked.connect(function() { SheetSetup.refresh(); });
+    w.resetButton.clicked.connect(function() { SheetSetup.resetLayout(); });
 
     return dock;
 };
@@ -505,6 +571,49 @@ SheetSetup.suggestScale = function() {
     w.quiet = true;
     w.scaleCombo.currentIndex = at < 0 ? 0 : at;
     w.quiet = was;
+};
+
+/**
+ * Fit the page into the pane once the layout has settled.
+ *
+ * WHY A TIMER. The panel draws its first page while the dock is still
+ * being laid out: an autoZoom there fits to a size the view is about to
+ * stop having, and the sheet ends up a postage stamp in the middle of
+ * an empty pane (measured live, 2026-09-14). A zero-interval timer runs
+ * after Qt has finished laying the dock out, which is the first moment
+ * the view's real size exists.
+ *
+ * The timer is kept on SheetSetup rather than in a local: one held only
+ * by a local goes out of scope before it fires. Only a plain JS call
+ * lives in the closure -- a Qt wrapper held across that boundary is one
+ * of this bridge's crash modes.
+ */
+SheetSetup.fitLater = function() {
+    try {
+        var timer = new QTimer();
+        timer.singleShot = true;
+        timer.timeout.connect(function() {
+            SheetSetup.fitNow();
+        });
+        SheetSetup.fitTimer = timer;
+        timer.start(0);
+    } catch (e) {
+        // no timer here: the view keeps whatever zoom autoZoom gave it
+        SheetSetup.fitNow();
+    }
+};
+
+/** Fit the page into the pane now. */
+SheetSetup.fitNow = function() {
+    var w = SheetSetup.widgets;
+    if (isNull(w) || isNull(w.pane) || w.pane === undefined) {
+        return;
+    }
+    try {
+        CsSheetPreview.fit(w.pane);
+        w.pane.view.fitPending = false;
+    } catch (e) {
+    }
 };
 
 /** Reads the drawing again and repaints. */
@@ -529,6 +638,7 @@ SheetSetup.refresh = function() {
     }
     SheetSetup.suggestScale();
     SheetSetup.repaint();
+    SheetSetup.fitLater();
 };
 
 /** Redraws the picture and the words under it. */
@@ -554,23 +664,41 @@ SheetSetup.repaint = function() {
         wants: { border: w.cbBorder.checked, bar: w.cbBar.checked,
             north: w.cbNorth.checked, title: w.cbTitle.checked },
         elevation: w.cbElevation.checked === true,
-        bands: w.state.bands
+        bands: w.state.bands,
+        offsets: w.offsets,
+        declination: w.state.declination
     });
-    // Painted at the size the label ACTUALLY has, not a fixed 150: the
-    // fields were squeezed onto one row to free vertical space, and the
-    // point of freeing it is for the picture to use it. Clamped at both
-    // ends so a very short dock still gets something legible and a very
-    // tall one does not paint a mural.
-    var previewH = 150;
-    try {
-        previewH = Math.max(120, Math.min(520, w.preview.height - 4));
-    } catch (eH) {
-        previewH = 150;
+    w.preview_data = preview;
+    if (w.pane !== null && w.pane !== undefined) {
+        // WHAT PAGE THIS IS. The view re-fits when this string changes
+        // and not otherwise: a re-fit on every repaint would make a
+        // drag chase its own tail, zooming out from under the cursor
+        // as the piece it grabbed moved the bounds.
+        var pageKey = [String(w.sheetCombo.currentText), scale,
+            fit.turned, w.cbElevation.checked === true,
+            w.state.recordPath].join("|");
+        CsSheetPreview.show(w.pane, preview, { scale: scale,
+            guideX: w.guideX, guideY: w.guideY,
+            centredX: w.centredX === true, centredY: w.centredY === true,
+            pageKey: pageKey });
+    } else {
+        // The fallback picture, for a build that refused the view.
+        // Painted at the size the label ACTUALLY has, not a fixed 150.
+        var previewH = 150;
+        try {
+            previewH = Math.max(120, Math.min(520, w.preview.height - 4));
+        } catch (eH) {
+            previewH = 150;
+        }
+        var pixmap = SheetSetup.paintPreview(preview,
+            Math.max(200, w.preview.width - 8), previewH);
+        if (pixmap !== null) {
+            w.preview.pixmap = pixmap;
+        }
     }
-    var pixmap = SheetSetup.paintPreview(preview,
-        Math.max(200, w.preview.width - 8), previewH);
-    if (pixmap !== null) {
-        w.preview.pixmap = pixmap;
+    try {
+        w.resetButton.enabled = CsSheetSetup.anyMoved(w.offsets);
+    } catch (eReset) {
     }
 
     var spill = CsSheetSetup.previewFits(preview);
@@ -642,8 +770,105 @@ SheetSetup.build = function() {
         wants: { border: w.cbBorder.checked, bar: w.cbBar.checked,
             north: w.cbNorth.checked, title: w.cbTitle.checked },
         filled: w.state.filled, survey: w.state.survey,
-        elevation: w.cbElevation.checked === true
+        elevation: w.cbElevation.checked === true,
+        offsets: w.offsets
     }));
+};
+
+/**
+ * A piece being dragged, reported in DRAWING units and snapped.
+ *
+ * The move is turned into INCHES of paper and added to what the piece
+ * already carries, and the panel redraws from that -- so the picture a
+ * caver is dragging IS the layout that will be built, not a rubber band
+ * over an unchanged one.
+ */
+SheetSetup.dragTo = function(kind, snapped) {
+    var w = SheetSetup.widgets;
+    if (isNull(w) || isNull(w.state) || w.state.ok !== true) {
+        return;
+    }
+    var scale = CsSheetSetup.SCALES[w.scaleCombo.currentIndex];
+    if (!(scale > 0)) {
+        return;
+    }
+    // FROM WHERE THE DRAG BEGAN, not from the last frame: the view
+    // reports the whole move each time, measured against the box it
+    // grabbed, so adding each frame to the last would move the piece
+    // twice as far as the mouse.
+    if (isNull(w.dragFrom) || w.dragKind !== kind) {
+        w.dragKind = kind;
+        w.dragFrom = CsSheetSetup.offsetOf(w.offsets, kind);
+    }
+    var moved = {};
+    var k;
+    for (k in w.offsets) {
+        if (w.offsets.hasOwnProperty(k)) {
+            moved[k] = CsSheetSetup.offsetOf(w.offsets, k);
+        }
+    }
+    moved[kind] = { x: w.dragFrom.x + snapped.dx / scale,
+                    y: w.dragFrom.y + snapped.dy / scale };
+    w.offsets = moved;
+    w.guideX = snapped.guideX;
+    w.guideY = snapped.guideY;
+    w.centredX = snapped.centredX === true;
+    w.centredY = snapped.centredY === true;
+    SheetSetup.repaint();
+    // SAY IT OUT LOUD. A piece sitting a hair off centre looks exactly
+    // like one on it, and the guide line alone does not say WHICH kind
+    // of line it is to a caver who has not read the handbook.
+    try {
+        if (w.centredX && w.centredY) {
+            w.hint.text = qsTr("Centred both ways.");
+        } else if (w.centredX) {
+            w.hint.text = qsTr("Centred left to right.");
+        } else if (w.centredY) {
+            w.hint.text = qsTr("Centred top to bottom.");
+        } else {
+            w.hint.text = SheetSetup.HINT;
+        }
+    } catch (eHint) {
+    }
+};
+
+/** The drag is over: the guides go, the offset stays. */
+SheetSetup.dragDone = function() {
+    var w = SheetSetup.widgets;
+    if (isNull(w)) {
+        return;
+    }
+    w.dragKind = null;
+    w.dragFrom = null;
+    w.guideX = null;
+    w.guideY = null;
+    w.centredX = false;
+    w.centredY = false;
+    try {
+        w.hint.text = SheetSetup.HINT;
+    } catch (eHint) {
+    }
+    SheetSetup.repaint();
+};
+
+/** Every piece back where the default layout puts it. */
+SheetSetup.resetLayout = function() {
+    var w = SheetSetup.widgets;
+    if (isNull(w)) {
+        return;
+    }
+    w.offsets = {};
+    w.dragKind = null;
+    w.dragFrom = null;
+    w.guideX = null;
+    w.guideY = null;
+    w.centredX = false;
+    w.centredY = false;
+    try {
+        w.hint.text = SheetSetup.HINT;
+    } catch (eHint) {
+    }
+    SheetSetup.repaint();
 };
 
 SheetSetup.ensureDock = function() {
@@ -731,16 +956,107 @@ SheetSetup.intoCopy = function(recordPath, opts) {
     }
     var tail = " Written to " + CsSheetSetup.SHEETS_FOLDER + "/: " +
         names.join(" and ") + " -- your own drawing was not touched.";
+    // A SHEET ALREADY ON SCREEN IS NOT REOPENED (Nathan, 2026-09-14:
+    // "Build Sheet failed to open the built sheet"). QCAD's openFiles
+    // walks the open tabs first and, finding one whose file name
+    // matches, ACTIVATES it and returns -- it never re-reads the file
+    // (library.js, the foundExisting branch). A sheet is rebuilt from
+    // the record every single time it is built, so the second build
+    // shows the FIRST build's drawing, silently: the file on disk is
+    // new, the tab is old, and nothing says so.
+    SheetSetup.reopen(written);
+    return said + tail;
+};
+
+/**
+ * Show the sheets this run wrote, re-read from disk.
+ *
+ * CLOSE, THEN OPEN ON THE NEXT PASS. Closing a sub window is QUEUED:
+ * `closeActiveSubWindow` returns before the window is gone, so an open
+ * issued immediately afterwards still finds the doomed tab in
+ * `subWindowList`, activates it, and returns -- and the queued close
+ * then takes it away. Measured live 2026-09-14: the rebuild ended with
+ * NO sheet on screen at all, which is the same complaint one step
+ * further on. A zero-interval timer runs after Qt has finished closing,
+ * which is the first moment an open can win.
+ *
+ * Only a plain JS call lives in the timer's closure: a Qt wrapper held
+ * across that boundary is one of this bridge's crash modes.
+ *
+ * \param written every file this build wrote; the first is the PLAN
+ *                sheet, which is the one shown -- it is the map, and a
+ *                caver who wanted the profile can open it from the
+ *                same folder.
+ */
+SheetSetup.reopen = function(written) {
+    if (isNull(written) || written.length === 0) {
+        return;
+    }
+    var closed = 0;
     try {
-        // The PLAN sheet is the one opened: it is the map, and a caver
-        // who wanted the profile can open it from the same folder.
+        var mdi = RMainWindowQt.getMainWindow().getMdiArea();
+        var subs = mdi.subWindowList();
+        for (var i = 0; i < subs.length; i++) {
+            var open = "";
+            try {
+                open = String(subs[i].getDocument().getFileName());
+            } catch (eName) {
+                continue;
+            }
+            if (open === "") {
+                continue;
+            }
+            var here = (new QFileInfo(open)).absoluteFilePath();
+            for (var k = 0; k < written.length; k++) {
+                if (here !== (new QFileInfo(written[k])).absoluteFilePath()) {
+                    continue;
+                }
+                // A sheet the caver has drawn on asks to be saved
+                // first, which is Qt's own prompt and the right
+                // question: the rebuild has already replaced it.
+                mdi.setActiveSubWindow(subs[i]);
+                mdi.closeActiveSubWindow();
+                closed += 1;
+                break;
+            }
+        }
+    } catch (eClose) {
+        // no MDI area to ask (a scripted run): the open below is still
+        // right for a sheet that was not on screen
+    }
+    SheetSetup.pendingSheet = written[0];
+    if (closed === 0) {
+        SheetSetup.openPending();
+        return;
+    }
+    try {
+        var timer = new QTimer();
+        timer.singleShot = true;
+        timer.timeout.connect(function() {
+            SheetSetup.openPending();
+        });
+        SheetSetup.openTimer = timer;
+        timer.start(0);
+    } catch (eTimer) {
+        SheetSetup.openPending();
+    }
+};
+
+/** Open the sheet SheetSetup.reopen set aside, once. */
+SheetSetup.openPending = function() {
+    var path = SheetSetup.pendingSheet;
+    SheetSetup.pendingSheet = null;
+    if (isNull(path) || path === "") {
+        return;
+    }
+    try {
         // openFiles(), the global QCAD opens drawings with -- see the
         // note where this used mainWindow.openFile and could not.
-        openFiles([written[0]], false);
+        openFiles([path], false);
     } catch (eOpen) {
-        return said + tail;
+        warning(qsTr("Sheet Setup: the sheet was written but would " +
+            "not open (") + eOpen + "). " + path);
     }
-    return said + tail;
 };
 
 /**
@@ -776,8 +1092,15 @@ SheetSetup.draw = function(doc, di, opts) {
     var footerInches = Math.max(
         CsSheetSetup.linesHeight(titleLines) + 0.4,
         CsSheetSetup.BAR.height + CsSheetSetup.TEXT.body * 4);
+    // HAND-ARRANGED MOVES, in inches of paper. The cave's own is the
+    // odd one: a caver dragging the cave across the preview is asking
+    // for the map to sit elsewhere on the PAGE, and survey coordinates
+    // are not a layout decision -- so the paper moves the other way
+    // instead, which is what the negation is.
+    var offsets = isNull(opts.offsets) ? {} : opts.offsets;
+    var caveOff = CsSheetSetup.offsetOf(offsets, "cave");
     var box = CsSheetSetup.borderBox(caveBox, sheet, scale, fit.turned,
-        footerInches);
+        footerInches, { x: -caveOff.x, y: -caveOff.y });
     var layers = [CsLayers.BORDER, CsLayers.SCALE_BAR,
         CsLayers.NORTH_ARROW, CsLayers.TITLE_BLOCK];
     for (var L = 0; L < layers.length; L++) {
@@ -801,7 +1124,7 @@ SheetSetup.draw = function(doc, di, opts) {
     var unit = function(inches) {
         return CsSheetSetup.atScale(inches, scale) * perFoot;
     };
-    var text = function(x, y, inches, label, layer, kind) {
+    var text = function(x, y, inches, label, layer, kind, keepCase) {
         var height = unit(inches);
         // The wrap width is generous on purpose: the lines are wrapped
         // by CsSheetSetup.titleLines before they get here, and a narrow
@@ -811,7 +1134,8 @@ SheetSetup.draw = function(doc, di, opts) {
             new RVector(x, y), new RVector(x, y), height,
             unit(CsSheetSetup.TITLE_INCHES * 4),
             RS.VAlignMiddle, RS.HAlignLeft, RS.LeftToRight, RS.Exact,
-            1.0, CsDraw.caps(label), "standard", false, false, 0.0, false));
+            1.0, keepCase === true ? String(label) : CsDraw.caps(label),
+            "standard", false, false, 0.0, false));
         e.setLayerId(doc.getLayerId(layer));
         // The tag says which SHEET a piece belongs to as well as
         // marking it generated: CsProfileDraw asks where sheet two is
@@ -828,6 +1152,24 @@ SheetSetup.draw = function(doc, di, opts) {
         CsTags.set(e, SS_TAG, isNull(kind) ? layer : kind);
         op.addObject(e, false);
         return e;
+    };
+
+    /** Paints one entity the magnetic arm's grey. The sheet's layers
+     *  carry every other colour decision -- see CsLayers and the
+     *  palette rule -- but both arms are ONE piece of furniture on one
+     *  layer, and the whole point of the second is that it is not the
+     *  first. Grey says "secondary" the way every compass rose on
+     *  paper does, and Build Legend and Loop Errors colour entities
+     *  the same way for the same kind of reason. */
+    var greyed = function(entity) {
+        try {
+            entity.setColor(new RColor(CsSheetSetup.MAGNETIC_GREY[0],
+                CsSheetSetup.MAGNETIC_GREY[1],
+                CsSheetSetup.MAGNETIC_GREY[2]));
+        } catch (eColor) {
+            // a build that will not colour an entity still gets an arm
+        }
+        return entity;
     };
 
     var drew = [];
@@ -873,8 +1215,11 @@ SheetSetup.draw = function(doc, di, opts) {
     // title block, then the scale bar, then the north arrow. That is
     // the order a reader's eye takes them in, and it is the order the
     // NSS template's own reference sheet uses.
-    var footY = box.minY + box.margin * 0.55;
+    var footY = box.minY + box.margin;
     var leftX = box.minX + box.margin;
+    var titleOff = CsSheetSetup.offsetOf(offsets, "title");
+    var barOff = CsSheetSetup.offsetOf(offsets, "bar");
+    var northOff = CsSheetSetup.offsetOf(offsets, "north");
 
     if (wants.title === true) {
         // What each field will say: whatever the drawing already holds,
@@ -892,10 +1237,11 @@ SheetSetup.draw = function(doc, di, opts) {
         // first live run.
         var values = titleValues;
         var lines = titleLines;
-        var y = box.minY + box.margin * 0.35 +
-            unit(CsSheetSetup.linesHeight(lines));
+        var titleX = leftX + unit(titleOff.x);
+        var y = box.minY + box.margin +
+            unit(CsSheetSetup.linesHeight(lines)) + unit(titleOff.y);
         for (var n = 0; n < lines.length; n++) {
-            var t = text(leftX, y, lines[n].inches, lines[n].text,
+            var t = text(titleX, y, lines[n].inches, lines[n].text,
                 CsLayers.TITLE_BLOCK);
             if (lines[n].fieldId !== "") {
                 CsTags.set(t, CsSheet.TAG, lines[n].fieldId);
@@ -911,7 +1257,7 @@ SheetSetup.draw = function(doc, di, opts) {
         // holding the profile sheet on its own has to know, and the
         // plan sheet says it too rather than leaving "the one without
         // the words on it" as the way to tell them apart.
-        text(leftX, y, CsSheetSetup.TEXT.heading,
+        text(titleX, y, CsSheetSetup.TEXT.heading,
             elevationSheet ? "EXTENDED ELEVATION" : "PLAN",
             CsLayers.TITLE_BLOCK);
         drew.push("a title block");
@@ -919,7 +1265,8 @@ SheetSetup.draw = function(doc, di, opts) {
 
     if (wants.bar === true) {
         var bar = CsSheetSetup.barFor(scale);
-        var barX = box.minX + box.width * 0.45;
+        var barX = box.minX + box.width * 0.45 + unit(barOff.x);
+        var barY = footY + unit(barOff.y);
         // The bar's LENGTH comes from its own feet, not from three
         // inches of paper: a metric bar is a round number of METRES,
         // which is very nearly three inches and not exactly. One block
@@ -929,20 +1276,20 @@ SheetSetup.draw = function(doc, di, opts) {
         var barH = unit(CsSheetSetup.BAR.height);
         for (var b = 0; b <= bar.blocks; b++) {
             var x = barX + blockW * b;
-            line(x, footY, x, footY + barH, CsLayers.SCALE_BAR);
-            text(x, footY - unit(CsSheetSetup.BAR.tick * 2),
+            line(x, barY, x, barY + barH, CsLayers.SCALE_BAR);
+            text(x, barY - unit(CsSheetSetup.BAR.tick * 2),
                 CsSheetSetup.TEXT.small, String(bar.perBlock * b),
                 CsLayers.SCALE_BAR);
         }
-        line(barX, footY, barX + blockW * bar.blocks, footY,
+        line(barX, barY, barX + blockW * bar.blocks, barY,
             CsLayers.SCALE_BAR);
-        line(barX, footY + barH, barX + blockW * bar.blocks, footY + barH,
+        line(barX, barY + barH, barX + blockW * bar.blocks, barY + barH,
             CsLayers.SCALE_BAR);
-        text(barX, footY + barH + unit(CsSheetSetup.TEXT.body),
+        text(barX, barY + barH + unit(CsSheetSetup.TEXT.body),
             CsSheetSetup.TEXT.body, CsSheetSetup.scaleText(scale),
             CsLayers.SCALE_BAR);
         text(barX + blockW * bar.blocks + unit(0.1),
-            footY - unit(CsSheetSetup.BAR.tick * 2),
+            barY - unit(CsSheetSetup.BAR.tick * 2),
             CsSheetSetup.TEXT.small, bar.unit, CsLayers.SCALE_BAR);
         drew.push("a scale bar in " + bar.perBlock + " " +
             bar.unit.toLowerCase() + " steps");
@@ -953,32 +1300,79 @@ SheetSetup.draw = function(doc, di, opts) {
     // NORTH-ARROW a per-view twin -- and an arrow here would answer a
     // question the drawing cannot be asked.
     if (wants.north === true && !elevationSheet) {
-        var nx = box.maxX - box.margin;
-        var ny = footY;
-        var nh = unit(1.4);
+        var arrow = CsSheetSetup.NORTH;
+        var nx = box.maxX - box.margin + unit(northOff.x);
+        var ny = footY + unit(northOff.y);
+        var nh = unit(arrow.height);
         line(nx, ny, nx, ny + nh, CsLayers.NORTH_ARROW);
-        line(nx, ny + nh, nx - unit(0.18), ny + nh - unit(0.4),
-            CsLayers.NORTH_ARROW);
-        line(nx, ny + nh, nx + unit(0.18), ny + nh - unit(0.4),
-            CsLayers.NORTH_ARROW);
+        line(nx, ny + nh, nx - unit(arrow.headHalf),
+            ny + nh - unit(arrow.headLength), CsLayers.NORTH_ARROW);
+        line(nx, ny + nh, nx + unit(arrow.headHalf),
+            ny + nh - unit(arrow.headLength), CsLayers.NORTH_ARROW);
         text(nx - unit(0.09), ny + nh + unit(0.28),
             CsSheetSetup.TEXT.heading, "N", CsLayers.NORTH_ARROW);
         // WHICH north, said out loud. The suite rotates the survey by
         // the declination as it draws, so what is on the sheet is TRUE
         // north -- and a reader who assumes otherwise is out by
         // degrees. The declination is printed as the evidence.
+        var reading = CsSheetSetup.latestDeclination(read.survey);
         var decl = "";
-        if (!isNull(read.survey) && !isNull(read.survey.trips) &&
-                read.survey.trips.length > 0) {
-            var d = read.survey.trips[0].declination;
-            if (!isNull(d) && isFinite(d) && d !== 0) {
-                decl = "  (DECLINATION " + Number(d).toFixed(1) +
-                    "° APPLIED)";
-            }
+        if (!isNull(reading) && reading.declination !== 0) {
+            decl = "  (DECLINATION " +
+                Number(reading.declination).toFixed(1) + "° APPLIED)";
         }
         text(nx - unit(0.9), ny - unit(0.2), CsSheetSetup.TEXT.small,
             "TRUE NORTH" + decl, CsLayers.NORTH_ARROW);
-        drew.push("a north arrow");
+        if (!isNull(reading)) {
+            // UNDER the true north line, not out beside the arm: the
+            // arrow lives at the right margin, and a caption drawn to
+            // the right of a magnetic tip runs straight off the paper.
+            greyed(text(nx - unit(0.9),
+                ny - unit(0.2 + CsSheetSetup.TEXT.small * 2),
+                CsSheetSetup.TEXT.small,
+                CsSheetSetup.magneticText(reading),
+                CsLayers.NORTH_ARROW));
+        }
+
+        // MAGNETIC NORTH, ON THE SAME PIN (Nathan, 2026-09-14). One
+        // arrow with two arms, sharing an origin and the north arrow's
+        // own layer and tag: it is one piece of furniture, it moves as
+        // one when the arrow is dragged, and a reader takes the angle
+        // between the arms as the declination because that is exactly
+        // what it is. A separate symbol somewhere else on the sheet
+        // would be a second thing to place and a second thing to get
+        // out of step.
+        if (!isNull(reading)) {
+            var mag = CsSheetSetup.magneticUnit(reading.declination);
+            var mh = unit(arrow.magneticHeight);
+            var tipX = nx + mag.x * mh;
+            var tipY = ny + mag.y * mh;
+            greyed(line(nx, ny, tipX, tipY, CsLayers.NORTH_ARROW));
+            // The head, built in the arm's own frame and rotated with
+            // it: a head drawn square to the page leans wrong the
+            // moment the declination is anything but zero.
+            var back = unit(arrow.magneticHeadLength);
+            var half = unit(arrow.magneticHeadHalf);
+            var bx = tipX - mag.x * back, by = tipY - mag.y * back;
+            greyed(line(tipX, tipY, bx - mag.y * half,
+                by + mag.x * half, CsLayers.NORTH_ARROW));
+            greyed(line(tipX, tipY, bx + mag.y * half,
+                by - mag.x * half, CsLayers.NORTH_ARROW));
+            // "mN", in the case it is written in: a lower-case m for
+            // magnetic beside the capital N, which is how a compass
+            // rose tells the two apart in one glyph. keepCase, because
+            // everything else on a sheet is drawn through CsDraw.caps
+            // and capitals here would just be the true arrow's label
+            // again.
+            greyed(text(tipX + mag.x * unit(0.12) - unit(0.06),
+                tipY + unit(0.18), CsSheetSetup.TEXT.small, "mN",
+                CsLayers.NORTH_ARROW, null, true));
+            drew.push("a north arrow with magnetic north at " +
+                Number(reading.declination).toFixed(1) + "°" +
+                (reading.date === "" ? "" : " (" + reading.date + ")"));
+        } else {
+            drew.push("a north arrow");
+        }
     }
 
     di.applyOperation(op);
@@ -1199,7 +1593,7 @@ SheetSetup.moveElevation = function(doc, di, sheetBox) {
         if (maxY === null || boxes[i].maxY > maxY) { maxY = boxes[i].maxY; }
     }
     var inset = (sheetBox.maxX - sheetBox.minX) *
-        CsSheetSetup.MARGIN_FRACTION;
+        CsSheetSetup.BAND_INSET_FRACTION;
     var dx = (sheetBox.minX + inset) - minX;
     var dy = (sheetBox.maxY - inset) - maxY;
     if (Math.abs(dx) < 0.0001 && Math.abs(dy) < 0.0001) {

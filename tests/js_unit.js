@@ -293,6 +293,12 @@ var CORE_FILES_NOT_LOADED = [
     // sit beside the survey file. Covered by
     // tests/sketch_import_run.js.
     "scripts/CaveSurvey/Core/CsSketchStore.js",
+    // Subclasses RGraphicsViewQt at load time, so it cannot be loaded
+    // under node at all -- and everything a drag depends on (the
+    // offsets, the margin box, the dashes, the hit test and the
+    // snapping) is pure arithmetic in CsSheetSetup.js, which IS
+    // loaded. What is left here is Qt event plumbing.
+    "scripts/CaveSurvey/Core/CsSheetView.js",
     // The include manifest itself -- it is the list, not a member of
     // it, and loadRepoScript strips the include() lines that are its
     // entire content.
@@ -21932,6 +21938,160 @@ ok(CsShelf.badgeLine(shelfBadges).indexOf("⚠ closes 2.4%") !== -1,
     "the badge line marks warnings");
 eqs(CsShelf.badgeLine([]), "", "no badges, no line");
 
+// ---------------------------------------------------------------------
+// The shelf's DECL column -- where declination is not being used.
+//
+// Zero is this suite's default for a trip nobody has told, not a
+// measurement: all eleven of Truitt Cave's trips read 0.0. A drawing
+// like that is quietly a magnetic survey calling itself true, and the
+// column exists to say so before the next trip is added to it.
+// ---------------------------------------------------------------------
+eqs(CsShelf.declinationText(3.2), "3.2\u00b0 E",
+    "declinationText: east is said as east, the way a compass says it");
+eqs(CsShelf.declinationText(-1.35), "1.4\u00b0 W",
+    "declinationText: and west as west, not as a minus sign");
+eqs(CsShelf.declinationText(0), CsShelf.NOT_SET,
+    "declinationText: zero is the untold default, and reads as not set");
+eqs(CsShelf.declinationText(null), CsShelf.NOT_SET,
+    "declinationText: so does a trip that carries no declination at all");
+eqs(CsShelf.declinationText(undefined), CsShelf.NOT_SET,
+    "declinationText: and one that carries nothing");
+eqs(CsShelf.declinationText("3.2"), CsShelf.NOT_SET,
+    "declinationText: text is not a measurement");
+ok(CsShelf.hasDeclination(3.2) === true &&
+    CsShelf.hasDeclination(0) === false &&
+    CsShelf.hasDeclination(null) === false,
+    "hasDeclination: the same rule, for the cell that greys itself");
+
+// ---------------------------------------------------------------------
+// A trip's span: where that day's survey tied in, and where it stopped.
+// Not the same question as "Ends at", which lists what is still OPEN --
+// a trip that tied back into the cave leaves no open end and still went
+// from somewhere to somewhere.
+// ---------------------------------------------------------------------
+(function testTripSpan() {
+    var shots = [
+        { from: "ENT", to: "A1", trip: 0 },
+        { from: "A1", to: "A2", trip: 0 },
+        { from: "A2", to: "B1", trip: 1 },
+        { from: "B1", to: "B2", trip: 1 },
+        { from: "B2", to: "B3", trip: 1 }
+    ];
+    var first = CsShelf.tripSpan(shots, 0);
+    eqs(first.start, "ENT", "tripSpan: the first leg's FROM station");
+    eqs(first.end, "A2", "tripSpan: and the last leg's TO station");
+    var second = CsShelf.tripSpan(shots, 1);
+    eqs(second.start, "A2",
+        "tripSpan: a later trip starts where it tied into the cave, " +
+            "which is a station an earlier trip set");
+    eqs(second.end, "B3", "tripSpan: and ends where it stopped");
+
+    // FILE ORDER IS SURVEY ORDER. Nothing is sorted: any sort would be
+    // inventing an order the cave does not have.
+    var backwards = CsShelf.tripSpan([
+        { from: "Z9", to: "Z8", trip: 0 },
+        { from: "Z8", to: "A1", trip: 0 }], 0);
+    eqs(backwards.start + "-" + backwards.end, "Z9-A1",
+        "tripSpan: read in the order the shots are stored, whatever " +
+            "the station names do");
+
+    // LEGS ONLY. A splay measures a wall; it is not a step along the
+    // survey, and a trip whose first record is a splay did not start
+    // at that wall.
+    var splayed = CsShelf.tripSpan([
+        { from: "ENT", to: "W1", trip: 0, splay: true },
+        { from: "ENT", to: "A1", trip: 0 },
+        { from: "A1", to: "W2", trip: 0, splay: true }], 0);
+    eqs(splayed.start + "-" + splayed.end, "ENT-A1",
+        "tripSpan: splays are skipped at both ends");
+    var excluded = CsShelf.tripSpan([
+        { from: "ENT", to: "A1", trip: 0, excludeFromAll: true },
+        { from: "A1", to: "A2", trip: 0 }], 0);
+    eqs(excluded.start, "A1",
+        "tripSpan: and so is a shot excluded from the survey");
+    var selfShot = CsShelf.tripSpan([
+        { from: "A1", to: "A1", trip: 0 },
+        { from: "A1", to: "A2", trip: 0 }], 0);
+    eqs(selfShot.start, "A1",
+        "tripSpan: a station to itself is a typo, not a connection");
+
+    var empty = CsShelf.tripSpan([{ from: "ENT", to: "A1", trip: 0 }], 3);
+    eqs(empty.start + "|" + empty.end, "|",
+        "tripSpan: a trip with no legs in it yet has no span, and says " +
+            "so with empties rather than guessing");
+    eqs(CsShelf.tripSpan(null, 0).start, "",
+        "tripSpan: no shots, no span");
+    var untripped = CsShelf.tripSpan([{ from: "ENT", to: "A1" }], 0);
+    eqs(untripped.start, "ENT",
+        "tripSpan: a shot with no trip number belongs to trip 0, the " +
+            "same rule the shot counts use");
+    var single = CsShelf.tripSpan([{ from: "ENT", to: "A1", trip: 0 }], 0);
+    eqs(single.start + "-" + single.end, "ENT-A1",
+        "tripSpan: one leg is a span of one leg");
+})();
+
+// ---------------------------------------------------------------------
+// Where a shelf edit lands. The open tab is the authority on its own
+// cave: writing its file behind it would be overwritten by the caver's
+// next save, and the tab would show the old trip list with no sign
+// anything had happened.
+// ---------------------------------------------------------------------
+(function testEditTarget() {
+    var open = [
+        { path: "/caves/Other/Other.dxf", modified: false },
+        { path: "/caves/Truitt Cave/Truitt Cave.dxf", modified: true }
+    ];
+    var live = CsShelf.editTarget("/caves/Truitt Cave/Truitt Cave.dxf", open);
+    eqs(live.mode, "live",
+        "editTarget: a cave open in a tab is edited through that tab");
+    eqs(live.at, 1, "editTarget: and says which tab");
+    eqs(CsShelf.editTarget("/caves/Truitt Cave/Truitt Cave.dxf",
+        [{ path: "/caves/Other/Other.dxf", modified: false }]).mode, "file",
+        "editTarget: a cave that is not open is edited in the FILE -- " +
+            "which only became safe once the DXF round trip stopped " +
+            "losing a layer's OFF state (fixed in the app, 2026-09-15)");
+    eqs(CsShelf.editTarget("/caves/Truitt Cave/Truitt Cave.dxf", []).mode,
+        "file", "editTarget: with nothing open at all");
+    eqs(CsShelf.editTarget("", open).mode, "file",
+        "editTarget: a cave with no drawing matches nothing");
+    eqs(CsShelf.editTarget("/caves/Truitt Cave/Truitt Cave.dxf",
+        [null, undefined]).mode, "file",
+        "editTarget: and a tab list with holes in it does not throw");
+    ok(CsShelf.editReport("Truitt Cave", "team", "TIM, ADRIA", false)
+        .indexOf("unsaved") >= 0,
+        "editReport: says the cave now has unsaved changes -- the one " +
+            "thing the table cannot show");
+    ok(CsShelf.editReport("Truitt Cave", "date", "", false)
+        .indexOf("cleared") >= 0,
+        "editReport: emptying a field is said as clearing it");
+})();
+
+// ---------------------------------------------------------------------
+// One cell edited, three fields untouched. planEdits compares a whole
+// trip, so the fields nobody typed in have to be handed back exactly
+// as they are -- or editing Team would blank the name and the date.
+// ---------------------------------------------------------------------
+(function testInputFor() {
+    var row = { tripId: 2, name: "SUMP LEAD", date: "2024-11-03",
+                team: "TIM, ADRIA", instruments: "COMPASS, TAPE" };
+    var one = CsTripEdit.inputFor(row, "team", "TIM, ADRIA, GRACE");
+    eqs(one.tripId, 2, "inputFor: the trip it belongs to");
+    eqs(one.team, "TIM, ADRIA, GRACE", "inputFor: the field that was typed");
+    eqs(one.name, "SUMP LEAD", "inputFor: the name, untouched");
+    eqs(one.date, "2024-11-03", "inputFor: the date, untouched");
+    eqs(one.instruments, "COMPASS, TAPE",
+        "inputFor: and the instruments the shelf does not even show");
+    eqs(CsTripEdit.inputFor(row, "name", "").name, "",
+        "inputFor: clearing a field is a value, not a missing one");
+    ok(CsTripEdit.inputFor(row, "declination", "3.2") === null,
+        "inputFor: declination is not one of these fields -- it rotates " +
+            "the survey, and has its own editor");
+    ok(CsTripEdit.inputFor(row, "shots", "12") === null,
+        "inputFor: neither is a counted column");
+    ok(CsTripEdit.inputFor(null, "team", "x") === null,
+        "inputFor: and no row is no input");
+})();
+
 // The date shape CsGeomag wants. A JS Date here reads as NaN and the
 // drift check silently never fires -- which is exactly what shipped
 // once.
@@ -24823,6 +24983,139 @@ eqs(CsSymbolStore.AREA_MARKER_TAGS.custom, "AreaCustom",
 })();
 
 // ---------------------------------------------------------------------
+// What a read-only column looks like. The tint is the TEXT colour at
+// low alpha rather than a fixed grey, so it darkens a light table and
+// lightens a dark one by the same amount -- CaveCAD's own panels are
+// dark, and a light-grey wash picked by eye would glare there and
+// vanish anywhere else.
+// ---------------------------------------------------------------------
+(function testReadOnlyBlend() {
+    var white = { r: 255, g: 255, b: 255 };
+    var black = { r: 0, g: 0, b: 0 };
+    var half = CsPanel.blend(white, black, 0.5);
+    eqs(half.r + "," + half.g + "," + half.b, "128,128,128",
+        "blend: half of each");
+    var most = CsPanel.blend(white, black, CsPanel.READ_ONLY_HEADING);
+    ok(most.r > 128 && most.r < 255,
+        "blend: a dimmed heading is between the text and the " +
+            "background, not either of them (" + most.r + ")");
+    var dark = CsPanel.blend({ r: 20, g: 20, b: 20 },
+        { r: 255, g: 255, b: 255 }, CsPanel.READ_ONLY_HEADING);
+    ok(dark.r > 20 && dark.r < 255,
+        "blend: and lands between them the other way round too, which " +
+            "is what makes it work in both themes");
+    eqs(JSON.stringify(CsPanel.blend(white, black, 1)),
+        JSON.stringify(white), "blend: all of the first");
+    eqs(JSON.stringify(CsPanel.blend(white, black, 0)),
+        JSON.stringify(black), "blend: all of the second");
+    eqs(JSON.stringify(CsPanel.blend(white, black, 5)),
+        JSON.stringify(white), "blend: a weight past the end is clamped");
+    eqs(JSON.stringify(CsPanel.blend(white, black, null)),
+        JSON.stringify(CsPanel.blend(white, black, 0.5)),
+        "blend: no weight is an even mix, never a NaN colour");
+    ok(CsPanel.READ_ONLY_ALPHA > 0 && CsPanel.READ_ONLY_ALPHA < 60,
+        "the wash is faint: enough to see the column, not enough to " +
+            "fight the text (" + CsPanel.READ_ONLY_ALPHA + "/255)");
+})();
+
+// ---------------------------------------------------------------------
+// CsPanel column arranging -- a caver's own order and their hidden set,
+// remembered by KEY so a column added later cannot shuffle it.
+// ---------------------------------------------------------------------
+
+(function testColumnArranging() {
+    var keys = ["trip", "date", "decl", "team", "shots", "ends"];
+
+    var fresh = CsPanel.readColumns(keys, "", "");
+    eqs(fresh.order.join(","), keys.join(","),
+        "readColumns: nothing remembered is the order the table was built");
+    eqs(CsPanel.columnsText(fresh).hidden, "",
+        "readColumns: and nothing hidden");
+
+    var moved = CsPanel.readColumns(keys, "decl,date,trip", "team");
+    eqs(moved.order.join(","), "decl,date,trip,team,shots,ends",
+        "readColumns: what was remembered comes first, in that order, " +
+            "and the rest follow in the order the table built them");
+    ok(moved.order.indexOf("team") >= 0,
+        "readColumns: a HIDDEN column keeps its place in the order -- " +
+            "showing it again must put it back where it was, not at " +
+            "the end");
+    ok(moved.hidden.team === true && moved.hidden.decl !== true,
+        "readColumns: the hidden set is read back too");
+
+    // A COLUMN ADDED LATER is the case that keys exist for: Decl was
+    // put between Date and Team on 2026-09-15, and an arrangement
+    // stored as numbers would have shuffled every table that had one.
+    var before = CsPanel.readColumns(keys, "trip,date,team,shots,ends", "");
+    eqs(before.order.join(","), "trip,date,team,shots,ends,decl",
+        "readColumns: a column the arrangement has never heard of is " +
+            "APPENDED rather than dropped -- it appears, which is how " +
+            "anybody finds out it exists");
+
+    var retired = CsPanel.readColumns(keys,
+        "trip,grade,date,decl,team,shots,ends", "grade");
+    eqs(retired.order.join(","), "trip,date,decl,team,shots,ends",
+        "readColumns: a column the table no longer has drops out");
+    ok(retired.hidden.grade !== true,
+        "readColumns: and cannot hide anything from the far side of " +
+            "its own retirement");
+
+    var doubled = CsPanel.readColumns(keys, "date,date,trip", "team,team");
+    eqs(doubled.order.join(","), "date,trip,decl,team,shots,ends",
+        "readColumns: a key said twice is one column");
+
+    // HIDING EVERYTHING IS NOT AN ARRANGEMENT. An empty table reads as
+    // a broken one, and the header it would be fixed from is gone with
+    // the columns.
+    var blanked = CsPanel.readColumns(keys, "", keys.join(","));
+    eqs(CsPanel.columnsText(blanked).hidden, "",
+        "readColumns: an arrangement that hides every column hides none");
+    var nearly = CsPanel.readColumns(keys, "", "trip,date,decl,team,shots");
+    eqs(CsPanel.columnsText(nearly).hidden.split(",").length, 5,
+        "readColumns: but hiding all BUT one is a caver's business");
+
+    eqs(CsPanel.columnsText({ order: ["a", "b"], hidden: { b: true } }).order,
+        "a,b", "columnsText: the order, comma separated");
+    eqs(CsPanel.columnsText({ order: ["a", "b"], hidden: { b: true } }).hidden,
+        "b", "columnsText: and the hidden set");
+
+    // -- the moves that put an order on screen ----------------------
+    // moveSection works in VISUAL indices and renumbers everything to
+    // its right, so the moves have to be computed one at a time
+    // against where things are after the last one.
+    var simulate = function(keyList, moves) {
+        var now = keyList.slice(0);
+        for (var i = 0; i < moves.length; i++) {
+            var taken = now.splice(moves[i].from, 1)[0];
+            now.splice(moves[i].to, 0, taken);
+        }
+        return now;
+    };
+    var target = ["decl", "trip", "ends", "date", "team", "shots"];
+    var moves = CsPanel.columnMoves(keys, target, null);
+    eqs(simulate(keys, moves).join(","), target.join(","),
+        "columnMoves: replaying the moves in order lands on the " +
+            "arrangement asked for");
+    eqs(CsPanel.columnMoves(keys, keys, null).length, 0,
+        "columnMoves: an order already on screen costs no moves");
+
+    // From a header that is ALREADY rearranged: visual[logical].
+    var visual = [2, 0, 1, 3, 4, 5];      // date, decl, trip, team...
+    var onScreen = [];
+    for (var v = 0; v < keys.length; v++) {
+        onScreen[visual[v]] = keys[v];
+    }
+    var moves2 = CsPanel.columnMoves(keys, target, visual);
+    eqs(simulate(onScreen, moves2).join(","), target.join(","),
+        "columnMoves: and from wherever the header happens to be now");
+
+    var partial = CsPanel.columnMoves(keys, ["ghost", "decl"], null);
+    eqs(simulate(keys, partial).join(","), "decl,trip,date,team,shots,ends",
+        "columnMoves: a key the table does not have is skipped rather " +
+            "than moving whatever sits at index -1");
+})();
+
+// ---------------------------------------------------------------------
 // CsPanel.gridPlan -- where each section sits when a stack lays out as
 // a grid instead of a single column, folded ones included. Every case
 // here is one of the worked examples from the 2026-09-12 reversal
@@ -26196,7 +26489,7 @@ eqs(CsSymbolStore.AREA_MARKER_TAGS.custom, "AreaCustom",
             a1Fit.scale + ")");
 
     // -- fitting ---------------------------------------------------
-    var margin = Math.min(archD.w, archD.h) * CsSheetSetup.MARGIN_FRACTION;
+    var margin = CsSheetSetup.MARGIN_INCHES;
     var usableW = archD.w - margin * 2;
 
     // A cave that fits comfortably takes the SMALLEST scale that works,
@@ -26450,6 +26743,342 @@ eqs(CsSymbolStore.AREA_MARKER_TAGS.custom, "AreaCustom",
         "CsSheetSetup: turned paper swaps the border, not the cave");
     ok(border.margin > 0 && border.margin < border.height / 2,
         "CsSheetSetup: and keeps a margin the furniture can live in");
+
+
+    // -- magnetic north, beside the true one ------------------------
+    // The suite rotates every azimuth by the declination as it draws,
+    // so the sheet is in TRUE north and the compass in a caver's hand
+    // is not. The arrow carries both arms, and the magnetic one is
+    // drawn at the LATEST trip's declination: declination drifts, and
+    // the most recent survey is the closest the map has to the needle
+    // the reader is holding.
+    var declSurvey = { trips: [
+        { name: "one", date: "2019-04-06", declination: 1.5 },
+        { name: "three", date: "2024-11-03", declination: 3.2 },
+        { name: "two", date: "2021-01-15", declination: 2.0 } ] };
+    var latest = CsSheetSetup.latestDeclination(declSurvey);
+    near(latest.declination, 3.2, 1e-9,
+        "CsSheetSetup: magnetic north takes the LATEST trip's " +
+            "declination, whatever order the trips are listed in");
+    eqs(latest.date, "2024-11-03",
+        "CsSheetSetup: and the date it belongs to");
+    var tied = CsSheetSetup.latestDeclination({ trips: [
+        { date: "2024-11-03", declination: 3.2 },
+        { date: "2024-11-03", declination: 3.4 } ] });
+    near(tied.declination, 3.4, 1e-9,
+        "CsSheetSetup: two trips on one day -- the later one in the " +
+            "file wins, which is the order it was surveyed in");
+    var undated = CsSheetSetup.latestDeclination({ trips: [
+        { date: "", declination: 2.5 } ] });
+    near(undated.declination, 2.5, 1e-9,
+        "CsSheetSetup: a survey with no dates at all still has a " +
+            "declination worth drawing");
+    eqs(undated.date, "",
+        "CsSheetSetup: it just cannot say when it was true");
+    var datedWins = CsSheetSetup.latestDeclination({ trips: [
+        { date: "", declination: 9.9 },
+        { date: "2024-11-03", declination: 3.2 } ] });
+    near(datedWins.declination, 3.2, 1e-9,
+        "CsSheetSetup: an undated trip is only fallen back on when " +
+            "NOTHING is dated");
+    ok(CsSheetSetup.latestDeclination(null) === null &&
+        CsSheetSetup.latestDeclination({ trips: [] }) === null,
+        "CsSheetSetup: no survey, no magnetic north");
+    ok(CsSheetSetup.latestDeclination({ trips: [
+        { date: "2024-01-01", declination: null } ] }) === null,
+        "CsSheetSetup: and a trip whose declination is missing is not " +
+            "a declination of zero");
+    // ZERO IS THE SUITE'S OWN DEFAULT, not an answer: every one of
+    // Truitt Cave's eleven trips reads 0.0 with a source of "user".
+    // Drawing an arm there would stack a second arrow on the true one
+    // and print a claim about the world the drawing cannot back up.
+    ok(CsSheetSetup.latestDeclination({ trips: [
+        { date: "2024-01-01", declination: 0 } ] }) === null,
+        "CsSheetSetup: a declination of zero is not a magnetic north");
+    var skipsZero = CsSheetSetup.latestDeclination({ trips: [
+        { date: "2019-01-01", declination: 2.4 },
+        { date: "2024-01-01", declination: 0 } ] });
+    ok(skipsZero !== null && skipsZero.date === "2019-01-01",
+        "CsSheetSetup: so the latest trip that HAS one is the one " +
+            "drawn, and its own date is what the caption says");
+
+    // EAST IS POSITIVE and east is +x, so a positive declination
+    // swings the needle clockwise from straight up.
+    var east = CsSheetSetup.magneticUnit(30);
+    near(east.x, 0.5, 1e-9,
+        "CsSheetSetup: 30 degrees east puts the needle half a unit east");
+    near(east.y, Math.sqrt(3) / 2, 1e-9, "CsSheetSetup: and mostly north");
+    var west = CsSheetSetup.magneticUnit(-30);
+    near(west.x, -0.5, 1e-9,
+        "CsSheetSetup: a western declination leans the other way");
+    var none = CsSheetSetup.magneticUnit(0);
+    near(none.x, 0, 1e-9,
+        "CsSheetSetup: no declination is straight up the page");
+    near(none.y, 1, 1e-9, "CsSheetSetup: a unit vector, always");
+    near(CsSheetSetup.magneticUnit(null).y, 1, 1e-9,
+        "CsSheetSetup: and nothing to go on is treated as no " +
+            "declination rather than a NaN arm");
+
+    eqs(CsSheetSetup.magneticText({ declination: 3.2,
+        date: "2024-11-03" }),
+        "MAGNETIC NORTH 3.2\u00b0 E (2024-11-03)",
+        "CsSheetSetup: the caption says which way, how far, and WHEN");
+    eqs(CsSheetSetup.magneticText({ declination: -1.75, date: "" }),
+        "MAGNETIC NORTH 1.8\u00b0 W",
+        "CsSheetSetup: west is said as west, not as a minus sign");
+    eqs(CsSheetSetup.magneticText(null), "",
+        "CsSheetSetup: nothing to say, nothing said");
+
+    // The north BOX covers both arms: it is what a caver grabs and
+    // what the fit check measures.
+    var leaning = CsSheetSetup.preview({
+        caveBox: caveBox, sheet: archD, scale: 50, turned: false,
+        footerInches: 4.0,
+        wants: { border: true, bar: true, north: true, title: true },
+        elevation: false, bands: [], declination: 30
+    });
+    var upright = CsSheetSetup.preview({
+        caveBox: caveBox, sheet: archD, scale: 50, turned: false,
+        footerInches: 4.0,
+        wants: { border: true, bar: true, north: true, title: true },
+        elevation: false, bands: [], declination: 0
+    });
+    var northOf = function(pv) {
+        for (var q = 0; q < pv.items.length; q++) {
+            if (pv.items[q].kind === "north") { return pv.items[q].box; }
+        }
+        return null;
+    };
+    ok(northOf(leaning).maxX > northOf(upright).maxX,
+        "CsSheetSetup: an eastern declination widens the north box to " +
+            "the east, because that is where the arm went");
+
+    // -- arranging the page by hand ---------------------------------
+    // A drag is remembered in INCHES OF PAPER, per piece, so it
+    // survives a scale step -- and both the preview and the drawn
+    // sheet read the same numbers, which is the only reason the
+    // picture can be believed.
+    ok(CsSheetSetup.isMovable("title") && CsSheetSetup.isMovable("bar") &&
+        CsSheetSetup.isMovable("north") && CsSheetSetup.isMovable("cave"),
+        "CsSheetSetup: the furniture and the cave can be dragged");
+    ok(!CsSheetSetup.isMovable("sheet") &&
+        !CsSheetSetup.isMovable("margin"),
+        "CsSheetSetup: the paper and its margin cannot -- they are " +
+            "what everything else is placed against");
+    var noOff = CsSheetSetup.offsetOf(null, "bar");
+    ok(noOff.x === 0 && noOff.y === 0,
+        "CsSheetSetup: a piece nobody has moved has not moved");
+    var halfWritten = CsSheetSetup.offsetOf({ bar: { x: 2 } }, "bar");
+    ok(halfWritten.x === 2 && halfWritten.y === 0,
+        "CsSheetSetup: and half an offset is half a move, not a NaN");
+    ok(CsSheetSetup.anyMoved({}) === false &&
+        CsSheetSetup.anyMoved({ bar: { x: 0, y: 0 } }) === false,
+        "CsSheetSetup: nothing moved is nothing to reset");
+    ok(CsSheetSetup.anyMoved({ bar: { x: 0, y: -1.5 } }) === true,
+        "CsSheetSetup: one nudge is");
+    var moved = CsSheetSetup.withOffset({ bar: { x: 1, y: 0 } },
+        "bar", 0.5, -2);
+    near(moved.bar.x, 1.5, 1e-9,
+        "CsSheetSetup: a second drag adds to the first");
+    near(moved.bar.y, -2, 1e-9, "CsSheetSetup: on both axes");
+    ok(CsSheetSetup.withOffset({ bar: { x: 1, y: 0 } }, "north", 1, 1)
+        .bar.x === 1,
+        "CsSheetSetup: and leaves every other piece where it was");
+
+    // THE PAPER MOVES, NOT THE CAVE. A dragged cave is a decision
+    // about the page; the survey's coordinates are not a layout.
+    var shifted = CsSheetSetup.borderBox(caveBox, archD, 50, false, 0,
+        { x: 2, y: -1 });
+    near(shifted.minX - border.minX, 2 * 50, 0.0001,
+        "CsSheetSetup: shifting the sheet moves the border, in inches " +
+            "of paper at the plot scale");
+    near(shifted.minY - border.minY, -1 * 50, 0.0001,
+        "CsSheetSetup: on both axes");
+    near(shifted.width, border.width, 0.0001,
+        "CsSheetSetup: and never resizes the paper");
+
+    // -- how wide the margin is ------------------------------------
+    // HALF AN INCH, FLAT. It was a twelfth of the short side, which on
+    // ARCH D is nearly three inches all round -- white space that cost
+    // a cave a scale step. A margin is a physical allowance for the
+    // plotter and the binder, not a share of the paper.
+    near(CsSheetSetup.MARGIN_INCHES, 0.5, 1e-9,
+        "CsSheetSetup: the margin is half an inch of paper");
+    near(border.margin, 0.5 * 50, 0.0001,
+        "CsSheetSetup: which is half an inch at the plot scale, in " +
+            "drawing units");
+    var bigPaper = CsSheetSetup.borderBox(caveBox,
+        CsSheetSetup.sheetByName("ARCH E -- 48 x 36"), 50, false);
+    near(bigPaper.margin, border.margin, 0.0001,
+        "CsSheetSetup: and does not grow because the paper did");
+
+    // -- the margin, dashed ----------------------------------------
+    var marginOf = CsSheetSetup.marginBox(border);
+    near(marginOf.minX - border.minX, border.margin, 0.0001,
+        "CsSheetSetup: the margin box is the border inset by the margin");
+    near(border.maxY - marginOf.maxY, border.margin, 0.0001,
+        "CsSheetSetup: on every side");
+    var dashes = CsSheetSetup.dashRect(
+        { minX: 0, minY: 0, maxX: 10, maxY: 10 }, 1);
+    ok(dashes.length === 20,
+        "CsSheetSetup: a 10-unit side cut into 1-unit dashes and gaps " +
+            "is five dashes, four sides (" + dashes.length + ")");
+    ok(dashes[0].x1 === 0 && dashes[0].x2 === 1 && dashes[0].y1 === 0,
+        "CsSheetSetup: starting at the corner and running along the edge");
+    ok(dashes[1].x1 === 2,
+        "CsSheetSetup: with a gap the width of a dash between them");
+    ok(CsSheetSetup.dashRect({ minX: 0, minY: 0, maxX: 0, maxY: 0 }, 1)
+        .length === 0,
+        "CsSheetSetup: a rectangle with no size has no dashes");
+
+    var arranged = CsSheetSetup.preview({
+        caveBox: caveBox, sheet: archD, scale: 50, turned: false,
+        footerInches: 4.0,
+        wants: { border: true, bar: true, north: true, title: true },
+        elevation: false, bands: [],
+        offsets: { bar: { x: 3, y: 1 } }
+    });
+    var plain = CsSheetSetup.preview({
+        caveBox: caveBox, sheet: archD, scale: 50, turned: false,
+        footerInches: 4.0,
+        wants: { border: true, bar: true, north: true, title: true },
+        elevation: false, bands: []
+    });
+    var boxOf = function(pv, kind) {
+        for (var q = 0; q < pv.items.length; q++) {
+            if (pv.items[q].kind === kind) {
+                return pv.items[q].box;
+            }
+        }
+        return null;
+    };
+    near(boxOf(arranged, "bar").minX - boxOf(plain, "bar").minX, 3 * 50,
+        0.0001,
+        "CsSheetSetup: a moved bar is previewed where it was moved to");
+    near(boxOf(arranged, "bar").minY - boxOf(plain, "bar").minY, 1 * 50,
+        0.0001, "CsSheetSetup: on both axes");
+    near(boxOf(arranged, "north").minX, boxOf(plain, "north").minX,
+        0.0001,
+        "CsSheetSetup: and nothing else moves with it");
+    ok(boxOf(plain, "margin") !== null,
+        "CsSheetSetup: the preview shows the page margin");
+    ok(CsSheetSetup.previewFits(plain).fits === true,
+        "CsSheetSetup: which is a GUIDE, not a piece -- counting it " +
+            "would make 'everything fits' say nothing");
+    var marginItem = boxOf(plain, "margin");
+    var sheetItem = boxOf(plain, "sheet");
+    ok(marginItem.minX > sheetItem.minX && marginItem.maxY < sheetItem.maxY,
+        "CsSheetSetup: drawn inside the paper it belongs to");
+
+    // -- picking a piece up ----------------------------------------
+    // TOPMOST FIRST. The title block sits inside the cave's own
+    // footprint on nearly every map, and a caver reaching for it is
+    // not reaching for the thousand-foot rectangle behind it.
+    var titleBox = boxOf(plain, "title");
+    var grabbed = CsSheetSetup.pickAt(plain,
+        (titleBox.minX + titleBox.maxX) / 2,
+        (titleBox.minY + titleBox.maxY) / 2, 0);
+    ok(grabbed !== null && grabbed.kind === "title",
+        "CsSheetSetup: a click on the title block picks the title block");
+    var caveOnly = CsSheetSetup.pickAt(plain, 500, 380, 0);
+    ok(caveOnly !== null && caveOnly.kind === "cave",
+        "CsSheetSetup: a click on bare cave picks the cave");
+    var offPaper = CsSheetSetup.pickAt(plain, sheetItem.minX - 10000,
+        sheetItem.minY - 10000, 0);
+    ok(offPaper === null,
+        "CsSheetSetup: a click on nothing picks nothing");
+    ok(CsSheetSetup.pickAt(null, 0, 0, 0) === null,
+        "CsSheetSetup: and a click with no preview behind it does not " +
+            "throw");
+    var northBox = boxOf(plain, "north");
+    ok(CsSheetSetup.pickAt(plain, northBox.maxX + 4, northBox.minY + 4,
+        10) !== null,
+        "CsSheetSetup: the catch is padded, so a north arrow four " +
+            "tenths of an inch wide can still be grabbed");
+
+    // -- snapping ---------------------------------------------------
+    var lines = CsSheetSetup.snapLines(plain, "bar");
+    ok(lines.xs.indexOf(sheetItem.minX) >= 0 &&
+        lines.ys.indexOf(sheetItem.minY) >= 0,
+        "CsSheetSetup: the paper's own edges are snap lines");
+    ok(lines.xs.indexOf(marginItem.minX) >= 0,
+        "CsSheetSetup: and the margin's");
+    var barBox = boxOf(plain, "bar");
+    ok(lines.xs.indexOf(barBox.minX) === -1 ||
+        lines.xs.indexOf(barBox.minX) !== -1,
+        "CsSheetSetup: (a box may share an edge with another piece)");
+    var selfLines = CsSheetSetup.snapLines(plain, "sheet");
+    ok(selfLines.xs.indexOf(sheetItem.minX) === -1,
+        "CsSheetSetup: a box is never offered its own edges -- it " +
+            "cannot snap to itself");
+
+    // A drag that lands NEARLY on the margin is pulled onto it, and
+    // says which line it took so the preview can draw the reason.
+    var target = marginItem.minX;
+    var wanted = target - barBox.minX;      // exactly onto the margin
+    var sloppy = wanted + 2;                // two units short of it
+    var snap = CsSheetSetup.snapMove(barBox, sloppy, 0,
+        { xs: [target], ys: [] }, CsSheetSetup.SNAP_INCHES * 50);
+    near(snap.dx, wanted, 0.0001,
+        "CsSheetSetup: a near miss snaps onto the line");
+    near(snap.guideX, target, 0.0001,
+        "CsSheetSetup: and names the line it took");
+    ok(snap.guideY === null,
+        "CsSheetSetup: the other axis is decided on its own");
+    var wide = CsSheetSetup.snapMove(barBox, wanted + 5000, 0,
+        { xs: [target], ys: [] }, CsSheetSetup.SNAP_INCHES * 50);
+    near(wide.dx, wanted + 5000, 0.0001,
+        "CsSheetSetup: a drag nowhere near a line is left alone");
+    ok(wide.guideX === null,
+        "CsSheetSetup: with no guide to draw");
+    // CENTRES COUNT. "Centre the arrow on the page" is a snap, not a
+    // calculation a cartographer should be doing by eye.
+    var mid = (sheetItem.minX + sheetItem.maxX) / 2;
+    var toCentre = mid - (barBox.minX + barBox.maxX) / 2;
+    var centred = CsSheetSetup.snapMove(barBox, toCentre + 1, 0,
+        { xs: [mid], ys: [], xMid: [mid], yMid: [] },
+        CsSheetSetup.SNAP_INCHES * 50);
+    near(centred.dx, toCentre, 0.0001,
+        "CsSheetSetup: a box's middle snaps to a line as its edges do");
+    ok(centred.centredX === true && centred.centredY === false,
+        "CsSheetSetup: and says which axis was CENTRED rather than " +
+            "merely lined up, so the panel can say so too");
+
+    // CENTRING WINS A TIE. A page's midline nearly always has some
+    // other piece's edge near it, and an edge snap that got there
+    // first would leave the bar a hair off centre -- which looks
+    // exactly like being on it.
+    var nearlyMid = mid + CsSheetSetup.SNAP_INCHES * 50 * 0.4;
+    var contested = CsSheetSetup.snapMove(barBox, toCentre, 0,
+        { xs: [mid, nearlyMid], ys: [], xMid: [mid], yMid: [] },
+        CsSheetSetup.SNAP_INCHES * 50);
+    near(contested.guideX, mid, 0.0001,
+        "CsSheetSetup: with an edge nearer than the midline, the " +
+            "midline still takes the drag");
+    ok(contested.centredX === true,
+        "CsSheetSetup: and it is reported as a centring");
+    near((barBox.minX + barBox.maxX) / 2 + contested.dx, mid, 0.0001,
+        "CsSheetSetup: the box's own middle lands ON it");
+
+    // BOTH AXES AT ONCE: dead centre of the page, which is two
+    // independent snaps and not a special case.
+    var toMidY = (sheetItem.minY + sheetItem.maxY) / 2 -
+        (barBox.minY + barBox.maxY) / 2;
+    var dead = CsSheetSetup.snapMove(barBox, toCentre + 1, toMidY - 1,
+        CsSheetSetup.snapLines(plain, "bar"),
+        CsSheetSetup.SNAP_INCHES * 50);
+    ok(dead.centredX === true && dead.centredY === true,
+        "CsSheetSetup: a piece can be centred both ways at once");
+
+    // The midlines are in BOTH lists: an EDGE may still land on one.
+    var midLines = CsSheetSetup.snapLines(plain, "bar");
+    ok(midLines.xMid.indexOf(mid) >= 0 && midLines.xs.indexOf(mid) >= 0,
+        "CsSheetSetup: a midline is offered to edges as well as to " +
+            "middles");
+
+    var untouched = CsSheetSetup.snapMove(barBox, 7, 9, null, 0);
+    ok(untouched.dx === 7 && untouched.dy === 9,
+        "CsSheetSetup: with nothing to snap to, a drag is the drag");
 
     // -- the sheet is its own FILE ---------------------------------
     // The record drawing is the cave; a sheet is a decision about one
