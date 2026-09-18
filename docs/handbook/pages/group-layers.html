@@ -1,0 +1,31 @@
+<h1>Group Layers</h1>
+<p>File this drawing's layers into starter groups for the Layer Manager palette. <code>gl</code></p>
+<h2>When you reach for it</h2>
+<p>Once, soon after a drawing exists, and again whenever a trip has added layers you want filed. A cave carries over 150 layers before per-run variants multiply them, and a fresh drawing opens with every one of them in a single <b>Ungrouped</b> heap. This makes the first arrangement so the palette is worth opening.</p>
+<h2>Steps</h2>
+<ol>
+<li><b>Cave Survey &gt; Group Layers</b>.</li>
+<li>Open the <b>Layer Manager</b> (<b>View &gt; Layer Manager</b>) to see the six groups.</li>
+<li>Rearrange them however you like. Right-click a layer for <b>Add to Group</b>, a group row for <b>Rename</b> or <b>Delete</b>.</li>
+</ol>
+<h2>The six groups</h2>
+<ul>
+<li><b>Plan</b>, <b>Profile</b>, <b>Sections</b> — hand-traced ink, split by view.</li>
+<li><b>Survey control</b> — everything generated: shots, stations, LRUD, closure arrows, in all three views at once. Turning the survey skeleton off is one decision, not three.</li>
+<li><b>Scans &amp; basemap</b> — sketch scans and the aerial imagery. Off together for a plot, on together for tracing, and the heaviest things on the screen.</li>
+<li><b>Sheet</b> — border, title block, scale bar, north arrow, and layer 0.</li>
+</ul>
+<p>Notes get no group of their own on purpose: <code>PROFILE-NOTES-DIG</code> belongs with the profile you are working on, not in a pile of notes from three different views. Per-run variants land with their base layer for free — <code>PROFILE-CEILING-A</code> is profile, <code>CTRL-SCAN-A</code> is a scan — because a variant's token goes last and its prefix still reads.</p>
+<h2>It only ever adds</h2>
+<p>Run it again after a trip and it picks up the layers that have appeared since. Every group you made by hand, and every layer you filed by hand, stays exactly where it is. There is no reset to defaults, because the groups are yours the moment it has run once.</p>
+<p>The groups live in the drawing, so they travel with the file, and everything about them is editable in the palette afterwards. This tool writes the first arrangement; it does not own it.</p>
+<h2>When it refuses</h2>
+<ul>
+<li><b>On a sheet.</b> A sheet is rebuilt from the cave's record every time Sheet Setup runs, so anything written into one is lost. Open the cave's own drawing instead.</li>
+<li><b>Without the Layer Manager.</b> The groups are stored by that palette, so a build without it has nowhere to put them, and the tool says so rather than failing quietly.</li>
+</ul>
+<h2>See also</h2>
+<ul>
+<li><a href="words-layers.html">Layers, in words</a></li>
+<li><a href="check-map.html">Check Map</a></li>
+</ul>

@@ -103,6 +103,12 @@ include(includeBasePath + "/Format/CsTherion2.js");
 include(includeBasePath + "/Format/CsRegistry.js");
 include(includeBasePath + "/CsLayers.js");
 include(includeBasePath + "/CsLayerVariants.js");
+
+// After CsLayers, whose frameOf it reuses: which starter group each
+// layer belongs in, for the GroupLayers tool. Pure -- it never touches a
+// document, and it knows nothing about CaveCAD's Layer Manager beyond
+// handing it a list of names.
+include(includeBasePath + "/CsLayerGroups.js");
 // After CsLayers and CsLayerVariants: CsRestyle re-applies
 // CsLayers.styleOf to layers that already exist, and resolves variant
 // layers through CsLayerVariants.baseOf.

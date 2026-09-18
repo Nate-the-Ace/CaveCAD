@@ -29567,6 +29567,468 @@ eqs(CsGeoProject.demPathFor(""), null,
 eqs(CsGeoProject.demPathFor(null), null, "null path in, null out");
 
 // ---------------------------------------------------------------------
+// CsLayerGroups: which starter group a layer belongs in.
+//
+// The classifier the Group Layers tool runs on every layer in a drawing.
+// Pure -- a name in, a group name out -- and asserted here rather than
+// in the GUI because getting one of these wrong is invisible: the layer
+// still appears, just in the wrong group.
+// ---------------------------------------------------------------------
+
+loadRepoScript("scripts/CaveSurvey/Core/CsLayers.js");
+loadRepoScript("scripts/CaveSurvey/Core/CsLayerGroups.js");
+
+ok(typeof CsLayerGroups !== "undefined", "CsLayerGroups loaded");
+
+eqs(CsLayerGroups.classify(CsLayers.WALLS_SURVEYED), CsLayerGroups.PLAN,
+    "hand-traced plan linework is Plan");
+eqs(CsLayerGroups.classify(CsLayers.NOTES_HAZARD), CsLayerGroups.PLAN,
+    "a plan note is Plan, not a Notes group of its own");
+eqs(CsLayerGroups.classify(CsLayers.PROFILE_CEILING), CsLayerGroups.PROFILE,
+    "hand-traced profile linework is Profile");
+eqs(CsLayerGroups.classify("PROFILE-NOTES-DIG"), CsLayerGroups.PROFILE,
+    "a profile note stays with the profile a caver is working on");
+eqs(CsLayerGroups.classify(CsLayers.SECTION_WALLS_SURVEYED), CsLayerGroups.SECTIONS,
+    "hand-traced section linework is Sections");
+
+// CTRL- beats the frame: the survey skeleton is switched off in all
+// three views at once, so it is one group and not three.
+eqs(CsLayerGroups.classify(CsLayers.CTRL_SHOTS), CsLayerGroups.CONTROL,
+    "generated plan geometry is Survey control");
+eqs(CsLayerGroups.classify(CsLayers.CTRL_PROFILE_SHOTS), CsLayerGroups.CONTROL,
+    "generated profile geometry is Survey control, not Profile");
+eqs(CsLayerGroups.classify(CsLayers.CTRL_SECTION_OUTLINE), CsLayerGroups.CONTROL,
+    "generated section geometry is Survey control, not Sections");
+
+// Scans and basemap beat CTRL-, or several of them would be swallowed.
+eqs(CsLayerGroups.classify(CsLayers.CTRL_SCAN), CsLayerGroups.SCANS,
+    "a sketch scan is Scans & basemap despite its CTRL- prefix");
+eqs(CsLayerGroups.classify(CsLayers.CTRL_AERIAL), CsLayerGroups.SCANS,
+    "the aerial basemap is Scans & basemap");
+eqs(CsLayerGroups.classify(CsLayers.CTRL_CONTOUR_MAJOR), CsLayerGroups.SCANS,
+    "surface contours are Scans & basemap");
+eqs(CsLayerGroups.classify(CsLayers.CTRL_PROFILE_SCAN), CsLayerGroups.SCANS,
+    "a profile scan is Scans & basemap, not Profile");
+
+eqs(CsLayerGroups.classify(CsLayers.BORDER), CsLayerGroups.SHEET,
+    "page furniture is Sheet");
+eqs(CsLayerGroups.classify(CsLayers.TITLE_BLOCK), CsLayerGroups.SHEET,
+    "the title block is Sheet");
+
+// Per-run variants carry their base layer's prefix, so they land with
+// their base for free -- the same property CsLayers.frameOf relies on.
+eqs(CsLayerGroups.classify("PROFILE-CEILING-A"), CsLayerGroups.PROFILE,
+    "a per-run profile variant lands with the profile");
+eqs(CsLayerGroups.classify("CTRL-SCAN-A"), CsLayerGroups.SCANS,
+    "a per-run scan variant lands with the scans");
+eqs(CsLayerGroups.classify("CTRL-PROFILE-SHOTS-B"), CsLayerGroups.CONTROL,
+    "a per-run control variant lands with the control layers");
+
+// CROSS-SECTION-MARKERS is the mark in the PLAN saying where a section
+// was cut. It matches neither section prefix and must stay with the plan
+// -- the same invariant CsLayers.frameOf is tested for.
+eqs(CsLayerGroups.classify(CsLayers.CROSS_SECTION_MARKERS), CsLayerGroups.PLAN,
+    "the section cut mark stays with the plan");
+
+// Layer 0 and Defpoints are in CsLayers.SHEET_LAYERS, so they answer
+// "sheet" like the border and title block do. That is the right home for
+// them: they are page bookkeeping, not cave.
+eqs(CsLayerGroups.classify("0"), CsLayerGroups.SHEET,
+    "layer 0 files with the page furniture, as CsLayers already frames it");
+eqs(CsLayerGroups.classify("Defpoints"), CsLayerGroups.SHEET,
+    "and so does Defpoints");
+eqs(CsLayerGroups.classify("SOME-LAYER-NOBODY-REGISTERED"), CsLayerGroups.PLAN,
+    "an unrecognised layer lands in Plan rather than nowhere");
+eqs(CsLayerGroups.classify(undefined), CsLayerGroups.PLAN,
+    "a missing name lands somewhere rather than throwing");
+
+// Every layer in the registry must classify into a group that exists.
+// A classify() returning something not in GROUPS would make the tool
+// write a group the palette never orders.
+(function() {
+    var bad = [];
+    for (var key in CsLayers) {
+        if (!CsLayers.hasOwnProperty(key) || typeof CsLayers[key] !== "string") {
+            continue;
+        }
+        var group = CsLayerGroups.classify(CsLayers[key]);
+        if (CsLayerGroups.GROUPS.indexOf(group) < 0) {
+            bad.push(CsLayers[key] + " -> " + group);
+        }
+    }
+    eqs(bad.length, 0,
+        "every registry layer classifies into a group that exists (" +
+        bad.slice(0, 3).join("; ") + ")");
+})();
+
+// plan() buckets names and keeps every group as a key, so a cave with no
+// sections yet still shows the Sections group to trace into.
+(function() {
+    var planned = CsLayerGroups.plan([
+        CsLayers.WALLS_SURVEYED, CsLayers.CTRL_SHOTS, CsLayers.CTRL_AERIAL
+    ]);
+    eqs(planned[CsLayerGroups.PLAN].join(","), CsLayers.WALLS_SURVEYED,
+        "plan() buckets a plan layer");
+    eqs(planned[CsLayerGroups.CONTROL].join(","), CsLayers.CTRL_SHOTS,
+        "plan() buckets a control layer");
+    eqs(planned[CsLayerGroups.SCANS].join(","), CsLayers.CTRL_AERIAL,
+        "plan() buckets the basemap");
+    ok(!isNull(planned[CsLayerGroups.SECTIONS]) &&
+       planned[CsLayerGroups.SECTIONS].length === 0,
+        "an empty group is still a key, so the palette shows it");
+})();
+
+// ---------------------------------------------------------------------
+// Layer Manager: groups and layer states.
+//
+// These two files live in the FORK (cavecad-src), not in this repo --
+// the palette is CaveCAD's, and nothing in it knows the word "cave". They
+// are pure data over plain objects, which is the whole reason they can be
+// tested from here at all; everything needing a widget or a transaction
+// lives in RLayerTreeQt.js and LayerManager.js and is verified live.
+//
+// loadRepoScript resolves against this repo, so the fork is loaded by an
+// explicit path. A missing fork is a FAILURE, not a skip: a suite that
+// quietly stops testing a file when the file moves is the harness trap
+// this whole section is written against.
+// ---------------------------------------------------------------------
+
+// qsTranslate is Qt's; isFunction is QCAD's library.js, which this
+// harness does not load. Both are shimmed rather than worked around in
+// the model: the model is fork code and must read like fork code.
+if (typeof qsTranslate === "undefined") {
+    qsTranslate = function(context, text) { return text; };
+}
+if (typeof isFunction === "undefined") {
+    isFunction = function(v) { return typeof v === "function"; };
+}
+
+var forkRoot = repoRoot + "/../cavecad-src";
+var layerManagerLoaded = true;
+try {
+    var lmFiles = [
+        "/scripts/Widgets/LayerManager/LayerGroups.js",
+        "/scripts/Widgets/LayerManager/LayerStates.js"
+    ];
+    for (var lmi = 0; lmi < lmFiles.length; lmi++) {
+        var lmSrc = readTextFile(forkRoot + lmFiles[lmi]);
+        lmSrc = lmSrc.replace(/^\s*include\(.*\);\s*$/mg, "");
+        (0, eval)(lmSrc);
+    }
+} catch (lmErr) {
+    layerManagerLoaded = false;
+    ok(false, "Layer Manager model files load from " + forkRoot +
+        " (" + lmErr + ")");
+}
+
+// Assert the load actually happened before asserting anything about
+// behaviour. Without this, a file that failed to define its class turns
+// every test below into a silent ReferenceError swallowed by the runner.
+ok(layerManagerLoaded && typeof LayerGroups === "function",
+    "LayerGroups is defined after loading the fork");
+ok(layerManagerLoaded && typeof LayerStates === "function",
+    "LayerStates is defined after loading the fork");
+
+if (layerManagerLoaded) {
+
+    // A stand-in for RLayer: the three flags, which is every part of a
+    // layer these models touch now that nothing is stored on one.
+    function FakeLayer(name) {
+        this.name = name;
+        this.off = false;
+        this.frozen = false;
+        this.locked = false;
+    }
+    FakeLayer.prototype.getName = function() { return this.name; };
+    FakeLayer.prototype.isOff = function() { return this.off; };
+    FakeLayer.prototype.setOff = function(v) { this.off = v; };
+    FakeLayer.prototype.isFrozen = function() { return this.frozen; };
+    FakeLayer.prototype.setFrozen = function(v) { this.frozen = v; };
+    FakeLayer.prototype.isLocked = function() { return this.locked; };
+    FakeLayer.prototype.setLocked = function(v) { this.locked = v; };
+
+    // A stand-in for RDocument: a variable store and a layer table.
+    function FakeDoc(layerNames) {
+        this.vars = {};
+        this.modified = false;
+        this.layers = [];
+        for (var i = 0; i < (layerNames || []).length; i++) {
+            this.layers.push(new FakeLayer(layerNames[i]));
+        }
+    }
+    FakeDoc.prototype.getVariable = function(key, def) {
+        return this.vars.hasOwnProperty(key) ? this.vars[key] : def;
+    };
+    FakeDoc.prototype.setVariable = function(key, value) { this.vars[key] = value; };
+    FakeDoc.prototype.removeVariable = function(key) { delete this.vars[key]; };
+    FakeDoc.prototype.hasVariable = function(key) {
+        return this.vars.hasOwnProperty(key);
+    };
+    FakeDoc.prototype.setModified = function(v) { this.modified = v; };
+    FakeDoc.prototype.queryAllLayers = function() {
+        var ids = [];
+        for (var i = 0; i < this.layers.length; i++) {
+            ids.push(i);
+        }
+        return ids;
+    };
+    FakeDoc.prototype.queryLayer = function(idOrName) {
+        if (typeof idOrName === "number") {
+            return this.layers[idOrName];
+        }
+        for (var i = 0; i < this.layers.length; i++) {
+            if (this.layers[i].name === idOrName) {
+                return this.layers[i];
+            }
+        }
+        return undefined;
+    };
+
+    // -- names --------------------------------------------------------
+
+    ok(LayerGroups.isValidName("Plan work"), "a plain group name is valid");
+    ok(!LayerGroups.isValidName(""), "an empty group name is rejected");
+    ok(!LayerGroups.isValidName("   "), "a whitespace group name is rejected");
+    ok(!LayerGroups.isValidName("Trip 3|Plot"),
+        "a group name containing the separator is rejected");
+    ok(!LayerGroups.isValidName(new Array(200).join("x")),
+        "an over-long group name is rejected");
+    ok(LayerGroups.nameError("Plan work") === undefined,
+        "a valid name reports no error");
+    ok(typeof LayerGroups.nameError("a|b") === "string",
+        "the separator rejection explains itself");
+    ok(!LayerStates.isValidName("Plan|only"),
+        "a state name obeys the same rule as a group name");
+
+    // -- membership in the registry -----------------------------------
+
+    var reg = LayerGroups.emptyRegistry();
+    eqs(LayerGroups.groupNames(reg).length, 0, "a fresh registry has no groups");
+    eqs(LayerGroups.groupsOfLayer(reg, "WALLS-SURVEYED").length, 0,
+        "an unfiled layer belongs to nothing");
+
+    ok(LayerGroups.addTo(reg, "WALLS-SURVEYED", "Plan work"),
+        "filing a layer changes the registry");
+    ok(!LayerGroups.addTo(reg, "WALLS-SURVEYED", "Plan work"),
+        "filing the same layer twice changes nothing");
+    eqs(LayerGroups.groupNames(reg).join(","), "Plan work",
+        "filing into a new group creates it");
+
+    LayerGroups.addTo(reg, "WALLS-SURVEYED", "Trip 3");
+    LayerGroups.addTo(reg, "CTRL-SHOTS", "Plan work");
+    eqs(LayerGroups.groupsOfLayer(reg, "WALLS-SURVEYED").join(","), "Plan work,Trip 3",
+        "a layer can belong to several groups");
+    eqs(LayerGroups.membersOf(reg, "Plan work").join(","), "WALLS-SURVEYED,CTRL-SHOTS",
+        "a group lists its members in filing order");
+
+    ok(LayerGroups.removeFrom(reg, "WALLS-SURVEYED", "Plan work"),
+        "unfiling a layer changes the registry");
+    ok(!LayerGroups.removeFrom(reg, "WALLS-SURVEYED", "Plan work"),
+        "unfiling it twice changes nothing");
+    eqs(LayerGroups.groupsOfLayer(reg, "WALLS-SURVEYED").join(","), "Trip 3",
+        "its other membership survives");
+
+    // An emptied group still exists -- that is the whole reason the
+    // registry holds group names rather than deriving them.
+    LayerGroups.removeFrom(reg, "CTRL-SHOTS", "Plan work");
+    eqs(LayerGroups.membersOf(reg, "Plan work").length, 0, "the group is empty");
+    ok(LayerGroups.groupNames(reg).indexOf("Plan work") >= 0,
+        "an emptied group still exists");
+
+    // -- renaming and deleting groups ---------------------------------
+
+    ok(LayerGroups.renameGroup(reg, "Trip 3", "Trip 4"), "renaming a group takes");
+    eqs(LayerGroups.groupsOfLayer(reg, "WALLS-SURVEYED").join(","), "Trip 4",
+        "members follow the rename");
+
+    LayerGroups.addTo(reg, "CTRL-SHOTS", "Plan work");
+    LayerGroups.renameGroup(reg, "Trip 4", "Plan work");
+    eqs(LayerGroups.groupNames(reg).join(","), "Plan work",
+        "renaming onto an existing group merges the two");
+    eqs(LayerGroups.membersOf(reg, "Plan work").join(","), "CTRL-SHOTS,WALLS-SURVEYED",
+        "and the merged group holds both sets of members");
+
+    ok(LayerGroups.deleteGroup(reg, "Plan work"), "deleting a group takes");
+    eqs(LayerGroups.groupNames(reg).length, 0, "and the group is gone");
+
+    // -- the sweep ----------------------------------------------------
+    //
+    // Membership is keyed by layer name and lives in the document, not on
+    // the layer, so a layer deleted or renamed behind this palette's back
+    // leaves its name behind. The sweep is what keeps that out of the
+    // tree.
+
+    var sweepReg = LayerGroups.emptyRegistry();
+    LayerGroups.addTo(sweepReg, "WALLS-SURVEYED", "Plan work");
+    LayerGroups.addTo(sweepReg, "GONE-LAYER", "Plan work");
+    LayerStates.setState(sweepReg, "Plan only",
+        { "WALLS-SURVEYED": "000", "GONE-LAYER": "110" });
+
+    ok(LayerGroups.sweep(sweepReg, ["WALLS-SURVEYED"]), "the sweep reports a drop");
+    eqs(LayerGroups.membersOf(sweepReg, "Plan work").join(","), "WALLS-SURVEYED",
+        "a layer the document no longer has is dropped from its group");
+    ok(LayerStates.getCode(sweepReg, "Plan only", "GONE-LAYER") === undefined,
+        "and from every state");
+    eqs(LayerStates.getCode(sweepReg, "Plan only", "WALLS-SURVEYED"), "000",
+        "while the layers that remain keep their entries");
+    ok(!LayerGroups.sweep(sweepReg, ["WALLS-SURVEYED"]),
+        "a second sweep finds nothing to drop");
+
+    // -- round trip through the stored form ---------------------------
+
+    var lmDoc = new FakeDoc(["WALLS-SURVEYED", "CTRL-SHOTS", "CTRL-STATIONS"]);
+    eqs(LayerGroups.readRegistry(lmDoc).groups.length, 0,
+        "a fresh document has an empty registry");
+
+    var writeReg = LayerGroups.emptyRegistry();
+    LayerGroups.addTo(writeReg, "WALLS-SURVEYED", "Plan work");
+    LayerGroups.addTo(writeReg, "CTRL-SHOTS", "Plan work");
+    LayerGroups.addTo(writeReg, "WALLS-SURVEYED", "Trip 3");
+    LayerGroups.createGroup(writeReg, "Empty on purpose");
+    LayerStates.setState(writeReg, "Plan only",
+        { "WALLS-SURVEYED": "000", "CTRL-SHOTS": "110" });
+    LayerGroups.writeRegistry(lmDoc, writeReg);
+    ok(lmDoc.modified, "writing the registry marks the document modified");
+
+    var back = LayerGroups.readRegistry(lmDoc);
+    eqs(LayerGroups.groupNames(back).join(","), "Plan work,Trip 3,Empty on purpose",
+        "group order and an empty group both round-trip");
+    eqs(LayerGroups.membersOf(back, "Plan work").join(","), "WALLS-SURVEYED,CTRL-SHOTS",
+        "members round-trip");
+    eqs(LayerStates.stateNames(back).join(","), "Plan only", "state names round-trip");
+    eqs(LayerStates.getCode(back, "Plan only", "CTRL-SHOTS"), "110",
+        "state codes round-trip against the right layer");
+    ok(LayerStates.getCode(back, "Plan only", "CTRL-STATIONS") === undefined,
+        "a layer the state never mentioned stays unmentioned");
+
+    // The stored form is a name table plus indices into it, and a state's
+    // codes are positional against that table. Pin the shape: a decode
+    // that silently shifted by one would still read back SOMETHING.
+    var stored = LayerGroups.encode(writeReg);
+    eqs(stored.v, 1, "the stored form carries a version");
+    eqs(stored.l.length, 2, "the table holds each referenced layer once");
+    eqs(stored.s[0].c.length, stored.l.length * 3,
+        "a state's code string covers the whole table, three characters each");
+
+    // -- chunking -----------------------------------------------------
+    //
+    // RDxfExporter writes these variables as XRecords into QCAD_OBJECTS,
+    // and dxflib's reader dies at 1024 characters on one line, silently
+    // dropping the rest of the section. Pin the chunk size, not just the
+    // round trip: a correct reassembly of over-long chunks would still
+    // brick the drawing on save.
+
+    var bigNames = [];
+    for (var bi = 0; bi < 300; bi++) {
+        bigNames.push("CTRL-SURVEY-RUN-" + bi + "-WALLS-SURVEYED");
+    }
+    var bigDoc = new FakeDoc(bigNames);
+    var bigReg = LayerGroups.emptyRegistry();
+    for (bi = 0; bi < bigNames.length; bi++) {
+        LayerGroups.addTo(bigReg, bigNames[bi], "Everything");
+    }
+    var bigFlags = {};
+    for (bi = 0; bi < bigNames.length; bi++) {
+        bigFlags[bigNames[bi]] = "110";
+    }
+    LayerStates.setState(bigReg, "All hidden", bigFlags);
+    LayerGroups.writeRegistry(bigDoc, bigReg);
+
+    var chunkCount = parseInt(bigDoc.getVariable(LayerGroups.VAR + "Count", 0), 10);
+    ok(chunkCount > 1, "a real-sized registry is split across several chunks");
+    var longest = 0;
+    for (var ci2 = 0; ci2 < chunkCount; ci2++) {
+        var chunk = String(bigDoc.getVariable(LayerGroups.VAR + ci2, ""));
+        if (chunk.length > longest) {
+            longest = chunk.length;
+        }
+    }
+    ok(longest <= LayerGroups.CHUNK,
+        "no registry chunk exceeds the DXF-safe budget (longest " + longest + ")");
+    ok(LayerGroups.CHUNK < 1000,
+        "the chunk budget stays clear of dxflib's 1023 character line limit");
+
+    var bigBack = LayerGroups.readRegistry(bigDoc);
+    eqs(LayerGroups.membersOf(bigBack, "Everything").length, 300,
+        "a chunked registry reassembles completely");
+    eqs(LayerStates.getCode(bigBack, "All hidden", bigNames[299]), "110",
+        "and the last layer's state code survives the chunk boundaries");
+
+    // Shrinking must not leave a tail of stale chunks, or the next read
+    // splices dead JSON onto live JSON.
+    LayerGroups.writeRegistry(bigDoc, LayerGroups.emptyRegistry());
+    eqs(LayerGroups.readRegistry(bigDoc).groups.length, 0,
+        "shrinking the registry drops the chunks it no longer needs");
+    ok(!bigDoc.hasVariable(LayerGroups.VAR + (chunkCount - 1)),
+        "the last stale chunk is actually removed");
+
+    // A truncated blob loses its groups but must still open.
+    var brokenDoc = new FakeDoc(["WALLS-SURVEYED"]);
+    brokenDoc.setVariable(LayerGroups.VAR + "Count", 1);
+    brokenDoc.setVariable(LayerGroups.VAR + "0", '{"v":1,"l":["A"');
+    eqs(LayerGroups.readRegistry(brokenDoc).groups.length, 0,
+        "an unparseable registry reads as empty rather than throwing");
+
+    // A member index past the end of the table is corruption, not a layer.
+    eqs(LayerGroups.decode({ v: 1, l: ["A"], g: [{ n: "G", m: [0, 7] }], s: [] })
+            .groups[0].members.join(","), "A",
+        "an out-of-range member index is discarded, not resolved");
+
+    // -- flag codes ---------------------------------------------------
+
+    var sl = new FakeLayer("CTRL-CLOSURE");
+    eqs(LayerStates.encode(sl), "000", "a plain layer encodes as all clear");
+    sl.setOff(true);
+    sl.setLocked(true);
+    eqs(LayerStates.encode(sl), "101", "off and locked encode in their own places");
+
+    var target = new FakeLayer("WALLS-SURVEYED");
+    ok(LayerStates.applyCode(target, "110"), "applying a different state changes the layer");
+    ok(target.isOff() && target.isFrozen() && !target.isLocked(),
+        "the applied flags land in the right places");
+    ok(!LayerStates.applyCode(target, "110"),
+        "applying the state it already has changes nothing");
+    ok(!LayerStates.applyCode(target, undefined), "an absent code changes nothing");
+
+    // applyCode, not apply: LayerStates is a function object, so an
+    // "apply" property never takes and the call silently reaches
+    // Function.prototype.apply instead. Asserted so a rename back fails
+    // here rather than in the GUI.
+    ok(LayerStates.apply === Function.prototype.apply,
+        "LayerStates.apply is still Function's, which is why the model does not use that name");
+
+    // -- states within a registry -------------------------------------
+
+    var stReg = LayerGroups.emptyRegistry();
+    LayerStates.setState(stReg, "A", { "X": "000" });
+    LayerStates.setState(stReg, "B", { "X": "110" });
+    eqs(LayerStates.stateNames(stReg).join(","), "A,B", "states keep their order");
+
+    LayerStates.setState(stReg, "A", { "X": "001" });
+    eqs(LayerStates.stateNames(stReg).join(","), "A,B",
+        "re-saving a state keeps its place rather than appending a second");
+    eqs(LayerStates.getCode(stReg, "A", "X"), "001", "and overwrites its flags");
+
+    ok(LayerStates.renameState(stReg, "A", "C"), "renaming a state takes");
+    eqs(LayerStates.stateNames(stReg).join(","), "C,B", "the renamed state keeps its place");
+    LayerStates.renameState(stReg, "C", "B");
+    eqs(LayerStates.stateNames(stReg).join(","), "B",
+        "renaming onto an existing state replaces it");
+
+    ok(LayerStates.removeState(stReg, "B"), "deleting a state takes");
+    eqs(LayerStates.stateNames(stReg).length, 0, "and it is gone");
+    ok(!LayerStates.removeState(stReg, "B"), "deleting it again changes nothing");
+
+    // -- snapshot -----------------------------------------------------
+
+    var snapDoc = new FakeDoc(["A", "B"]);
+    snapDoc.queryLayer("B").setOff(true);
+    var snap = LayerStates.snapshot(snapDoc);
+    eqs(snap["A"], "000", "a snapshot records every layer");
+    eqs(snap["B"], "100", "including the ones that are off");
+}
+
+// ---------------------------------------------------------------------
 // Report.
 // ---------------------------------------------------------------------
 

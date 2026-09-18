@@ -1695,6 +1695,7 @@ MENU = {
     "Callout/Callout.js":                 (454, 40, ["callout", "cal", "cscallout", "cscal"]),
     # 455 -- fix and share
     "CheckMap/CheckMap.js":               (455, 5, ["checkmap", "chk"]),
+    "GroupLayers/GroupLayers.js":         (455, 7, ["grouplayers", "gl"]),
     "RepairDrawing/RepairDrawing.js":     (455, 10, ["repairdrawing", "rep"]),
     "PackageCave/PackageCave.js":         (455, 20, ["packagecave", "pc", "pkgcave"]),
 }
@@ -1985,7 +1986,7 @@ class TestSheetFileGuard(unittest.TestCase):
         "DrawPanel", "FeatureTrace", "GenerateProfile", "ImportCaveSurvey",
         "LoopErrors", "RepairDrawing", "ScatterBreakdown", "ShapedLines",
         "SketchScans", "SurfaceData", "SurveyNotebook", "SymbolPalette",
-        "ResetDrawing", "EntranceLocation",
+        "ResetDrawing", "EntranceLocation", "GroupLayers",
     ]
 
     # Tools that only READ, and are welcome on a sheet: checking a sheet
