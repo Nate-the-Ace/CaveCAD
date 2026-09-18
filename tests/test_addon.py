@@ -586,6 +586,55 @@ class TestIncludes(unittest.TestCase):
                             "%s includes missing %s" % (filename, target))
 
 
+class TestFunctionPropertyShadowing(unittest.TestCase):
+    """A static named apply(), call(), bind() or name is a silent no-op.
+
+    A class declared `function MyTool() {}` IS a Function object, and
+    Function already carries apply, call, bind and name. Assigning over
+    one of those does not take: the property stays Function's, so
+    `MyTool.apply(doc)` reaches Function.prototype.apply, calls the class
+    with `doc` as `this`, and returns undefined. Nothing throws, nothing
+    is logged, and the caller just sees an empty result.
+
+    Cost two separate live debugging sessions in one day -- once as
+    LayerStates.apply in the fork's Layer Manager, once as
+    GroupLayers.apply here -- which is why it is a test and not a note.
+
+    A plain object (`var CsRestyle = {};`) has no such properties and is
+    not flagged: CsRestyle.apply, CsScanFit.apply and CsRevise.apply are
+    all fine, and renaming them would be churn for nothing. The
+    declaration form is what decides, so this test reads it per file
+    rather than matching on the member name alone.
+    """
+
+    RESERVED = ["apply", "call", "bind", "name", "caller", "arguments"]
+
+    def test_no_static_shadows_a_function_property(self):
+        declared = re.compile(r"^function\s+([A-Za-z_$][\w$]*)\s*\(", re.M)
+        assigned = re.compile(
+            r"^\s*([A-Z][A-Za-z0-9_]*)\.(" + "|".join(self.RESERVED) + r")\s*=",
+            re.M)
+        offenders = []
+        for folder, _subdirs, files in os.walk(ADDON):
+            for name in files:
+                if not name.endswith(".js"):
+                    continue
+                path = os.path.join(folder, name)
+                with open(path) as handle:
+                    source = handle.read()
+                functions = set(declared.findall(source))
+                for match in assigned.finditer(source):
+                    if match.group(1) in functions:
+                        offenders.append("%s: %s.%s" % (
+                            os.path.relpath(path, ADDON),
+                            match.group(1), match.group(2)))
+        self.assertEqual(
+            [], offenders,
+            "these assignments silently do not take, because the class is "
+            "a Function and Function already owns the property: %s -- "
+            "rename the member (applyCode, fileAll, ...)" % offenders)
+
+
 class TestBasenameCollisions(unittest.TestCase):
     """QCAD's include() dedupes by BASENAME: a library file sharing a
     name with anything QCAD already included (Draw.js, File.js, ...)

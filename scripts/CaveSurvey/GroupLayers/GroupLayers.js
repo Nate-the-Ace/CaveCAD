@@ -67,10 +67,16 @@ GroupLayers.model = function() {
  * Split out from the dialog so the engine test can call it against a
  * fixture document and read the counts back.
  *
+ * NOT named apply(). GroupLayers is a function object and Function
+ * carries its own apply, so the assignment does not take and the call
+ * lands in Function.prototype.apply -- which returns undefined and
+ * reports nothing. The same trap waits on call, bind and name; there is
+ * a test in test_addon.py that now refuses all four.
+ *
  * \return { groups: n, filed: n, already: n } or undefined if the
  * palette is missing.
  */
-GroupLayers.apply = function(doc) {
+GroupLayers.fileAll = function(doc) {
     var model = GroupLayers.model();
     if (model === undefined) {
         return undefined;
@@ -127,7 +133,7 @@ function groupLayersRun() {
         return;
     }
 
-    var result = GroupLayers.apply(doc);
+    var result = GroupLayers.fileAll(doc);
 
     // Repaint the palette: the registry changed under it and nothing
     // else will tell it. notifyLayerListeners is the same door the layer
