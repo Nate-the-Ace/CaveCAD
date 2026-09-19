@@ -32,6 +32,14 @@
 <li><b>Linetype</b> and <b>Lineweight</b> — a list that <i>draws</i> what it is offering, so you pick a dash pattern or a thickness by looking at it rather than by reading its name.</li>
 </ul>
 
+<h3>Isolating a layer</h3>
+<p>Right-click a layer and pick <b>Isolate</b> to hide everything else. Right-click a multi-selection to isolate the lot, or a group row to isolate the group.</p>
+<p><b>While something is isolated, the only entry is Unisolate</b>, named after whatever is isolated — not after the row you right-clicked. You cannot isolate a second time. That is on purpose: isolating again would take its picture of a cave that is already hidden and write it over the only record of how the cave really looked, and your arrangement would be gone with nothing to undo.</p>
+<p>Unisolate does not mean "show all layers", which would invent an arrangement you never chose. Every layer goes back to the colour, linetype, lineweight and four switches it actually had — so a layer that was hidden before you isolated is hidden again afterwards.</p>
+<p>The isolated row is shown in bold, so a cave down to one layer says why.</p>
+<p>The isolated layer is shown even if it was switched off, and becomes the current layer. A layer you create while isolated stays visible: you just made it, so you are looking at it. Applying a layer state ends the isolation — the state is the arrangement you have just asked for, and an Unisolate left armed would undo your choice later on its own.</p>
+<p>It is remembered <b>in the drawing</b>. Save while isolated and the file itself has every layer hidden, so the way back has to travel with it: reopen and Unisolate is waiting. An older CaveCAD will not know about it and can only fall back to Show All Layers.</p>
+
 <h2>Groups</h2>
 <p>Layers are filed into groups, and groups nest one level:</p>
 <ul>

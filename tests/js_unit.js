@@ -30901,6 +30901,113 @@ if (layerManagerLoaded) {
     ok(!LayerStates.removeState(stReg, "B"), "deleting it again changes nothing");
 
 
+
+    // -- isolating a layer ---------------------------------------------
+    //
+    // Isolation is stored beside the states and never among them: it is
+    // a temporary view with one way out, not a picture a caver named
+    // and chose to keep.
+
+    (function() {
+        var reg = LayerGroups.emptyRegistry();
+        ok(isNull(LayerGroups.isolation(reg)),
+            "a fresh registry is not isolated");
+        eqs(LayerGroups.isolatedLayers(reg).length, 0,
+            "and names no isolated layer");
+
+        var before = {
+            "WALLS": { off: false, frozen: false, color: "#ff0000" },
+            "SCAN":  { off: false, frozen: false },
+            "NOTES": { off: true,  frozen: true }
+        };
+        ok(LayerGroups.setIsolation(reg, ["WALLS"], before),
+            "isolation is recorded");
+        eqs(LayerGroups.isolatedLayers(reg).join(","), "WALLS",
+            "and names what is isolated");
+
+        // A SECOND ISOLATION IS REFUSED. Taking it would snapshot a
+        // cave that is already hidden over the only record of how it
+        // really looked, and the arrangement would be gone with
+        // nothing to undo. The menu never offers it; this is the half
+        // that cannot be got round.
+        ok(LayerGroups.setIsolation(reg, ["SCAN"], {}) === false,
+            "a second isolation is refused");
+        eqs(LayerGroups.isolatedLayers(reg).join(","), "WALLS",
+            "and leaves the first one untouched");
+
+        ok(LayerGroups.clearIsolation(reg), "it can be cleared");
+        ok(LayerGroups.clearIsolation(reg) === false,
+            "and clearing twice says nothing happened");
+        ok(LayerGroups.setIsolation(reg, [], {}) === false,
+            "isolating nothing is not isolating");
+    })();
+
+    // The record survives the round trip a save and a reopen perform.
+    (function() {
+        var reg = LayerGroups.emptyRegistry();
+        LayerGroups.setIsolation(reg, ["WALLS"], {
+            "WALLS": { off: false, frozen: false, color: "#ff0000",
+                       lineweight: 50 },
+            "SCAN":  { off: false, frozen: false, color: "#00ff00" },
+            "NOTES": { off: true,  frozen: true }
+        });
+
+        var back = LayerGroups.decode(LayerGroups.encode(reg));
+        eqs(LayerGroups.isolatedLayers(back).join(","), "WALLS",
+            "the isolated layer survives encode and decode");
+        eqs(Object.keys(back.isolation.before).sort().join(","),
+            "NOTES,SCAN,WALLS",
+            "and so does a record for EVERY layer -- the records are " +
+            "positional over the name table, so every layer they " +
+            "mention has to be in it");
+        eqs(back.isolation.before["WALLS"].color, "#ff0000",
+            "with the colour it had");
+        eqs(back.isolation.before["NOTES"].off, true,
+            "and the flags of a layer that was already hidden");
+    })();
+
+    // A v2 blob has no isolation and must still read.
+    (function() {
+        var older = LayerGroups.encode(LayerGroups.emptyRegistry());
+        ok(isNull(older.i),
+            "a registry with no isolation writes no isolation key");
+        ok(isNull(LayerGroups.decode(older).isolation),
+            "and a blob without one decodes as not isolated");
+
+        // A malformed record opens as a drawing that is simply not
+        // isolated. Throwing on the way in would make the groups
+        // unreadable too.
+        ok(isNull(LayerGroups.decode({ v: 2, l: ["A"], g: [], s: [],
+            i: "nonsense" }).isolation),
+            "a corrupt isolation is ignored, not fatal");
+        ok(isNull(LayerGroups.decode({ v: 2, l: ["A"], g: [], s: [],
+            i: { n: [7], r: [] } }).isolation),
+            "and an index past the name table isolates nothing rather " +
+            "than leaving a mode with no name in it");
+    })();
+
+    // Deleting the isolated layer ends the isolation rather than
+    // leaving an Unisolate entry naming a layer that is gone.
+    (function() {
+        var reg = LayerGroups.emptyRegistry();
+        LayerGroups.setIsolation(reg, ["WALLS"], {
+            "WALLS": { off: false }, "SCAN": { off: false }
+        });
+        ok(LayerGroups.sweep(reg, ["SCAN"]),
+            "the sweep reports the loss");
+        ok(isNull(LayerGroups.isolation(reg)),
+            "and the isolation is gone with its layer");
+
+        // One of several going is not the same thing.
+        var many = LayerGroups.emptyRegistry();
+        LayerGroups.setIsolation(many, ["WALLS", "SCAN"], {
+            "WALLS": { off: false }, "SCAN": { off: false }
+        });
+        LayerGroups.sweep(many, ["SCAN"]);
+        eqs(LayerGroups.isolatedLayers(many).join(","), "SCAN",
+            "the isolation survives on whichever layers are left");
+    })();
+
     // -- .clas export and import --------------------------------------
     //
     // CaveCAD's own layer-state file. Not AutoCAD's .las and never will
