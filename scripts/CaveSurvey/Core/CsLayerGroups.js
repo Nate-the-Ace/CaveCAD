@@ -1,4 +1,4 @@
-// CsLayerGroups.js -- which starter group a layer belongs in.
+// CsLayerGroups.js -- which group a layer belongs in.
 //
 // Part of the Cave Survey Core library. The classification is pure data
 // -- a layer name in, a group name out -- and fileInto() at the bottom
@@ -14,102 +14,236 @@
 // entry of its own, because that is what it is: a drawing-wide tidy of
 // something already there.
 //
-// WHY STARTER GROUPS AT ALL. The registry holds over 150 layers before
-// per-run variants multiply them -- Truitt Cave carries 285 -- so a cave
-// drawing otherwise opens with the lot in a single Ungrouped heap. Groups
-// are arbitrary and hand-made by design; this is the first filing, not
-// the only one.
+// EVERY LAYER IS FILED. An earlier cut of this left the plan's own ink
+// unfiled so that Ungrouped would read as the working set; it does not
+// survive contact with a real cave, where "Ungrouped" then holds the
+// fifty-odd layers you care most about under a label that says nobody
+// decided. Ungrouped is now what it says: the layers that arrived after
+// the filing, and nothing else.
 //
-// THIS SCHEME IS NATHAN'S, taken from the arrangement he built by hand in
-// Truitt Cave on 2026-09-18 and adopted whole rather than argued with.
-// The template carries the same six groups, and a test holds the two in
-// agreement. Two things about it are worth stating because they are
-// decisions and not accidents:
+// THE VOCABULARY IS THE SYMBOL PALETTE'S. Structure, Floor, Formations,
+// Water, Geology, Annotation, Survey and Sheet are the categories
+// CsSymbols already files its 28 symbols under, so a caver who knows
+// which drawer a symbol lives in knows which group its layer is in. Two
+// words differ from that list and both are deliberate: "Passage" reads
+// better than "Structure" on a cave map, and "Geology & Finds" widens
+// the geology drawer to hold the biology, archaeology and rigging layers
+// that have no symbol at all and would otherwise need a group each.
 //
-//   - THE PLAN'S OWN INK IS DELIBERATELY NOT FILED. Walls, floor,
-//     ceiling, breakdown, formations, sediment, ledges, the entrance, the
-//     dripline and the section cut marks all stay in Ungrouped, which
-//     makes Ungrouped the working set -- the layers you are actually
-//     drawing on -- rather than a leftovers bin. classify() returns
-//     undefined for those, and that is a real answer, not a gap.
-//   - CONTROL IS ONE GROUP FOR ALL THREE FRAMES, scans and basemap
-//     included. CTRL-AERIAL, CTRL-CONTOUR and CTRL-SCAN sit with
-//     CTRL-SHOTS because they are all "not my ink", and the one switch
-//     that hides all of it is worth more than the finer split.
-//
-// Notes DO get a group here, and it is the plan's notes only: PROFILE-
-// NOTES-DIG goes to Profile Layers with the rest of the profile, because
-// a note belongs with the view it annotates.
+// WHAT IS NOT DERIVED FROM THE FRAME. The profile and section frames get
+// one group each rather than a copy of the whole plan vocabulary: eight
+// more groups holding PROFILE-FORMATIONS-* and friends would triple the
+// row count to separate layers a caver switches together anyway. Notes
+// and water inside those frames go with their frame, because a note
+// belongs with the view it annotates.
 
 var CsLayerGroups = {};
 
 /**
- * The groups this tool creates, in the order they appear in the palette.
- * The other views first, then the machinery, then the page furniture --
- * which puts the plan's own unfiled ink last, next to where Ungrouped
- * always sits.
+ * The groups, in the order they are created and shown. Parents come
+ * before their children, because creating a group inside one that does
+ * not exist yet does nothing.
+ *
+ * The plan's ink first, because that is what a caver draws, then the
+ * other two views, then what sits underneath, then the machinery, then
+ * the page.
  */
 CsLayerGroups.GROUPS = [
-    "Profile Layers",
-    "Cross Section Layers",
-    "Notes Layers",
-    "Water Layers",
-    "Control Layers",
-    "Sheet Layers"
+    "Plan",
+    "Passage",
+    "Floor",
+    "Formations",
+    "Water",
+    "Geology & Finds",
+    "Notes",
+    "Profile",
+    "Cross Sections",
+    "Scans & Basemap",
+    "Control",
+    "Sheet"
 ];
 
-CsLayerGroups.PROFILE = "Profile Layers";
-CsLayerGroups.SECTIONS = "Cross Section Layers";
-CsLayerGroups.NOTES = "Notes Layers";
-CsLayerGroups.WATER = "Water Layers";
-CsLayerGroups.CONTROL = "Control Layers";
-CsLayerGroups.SHEET = "Sheet Layers";
+/**
+ * Which groups are nested, and inside what.
+ *
+ * SIX PLAN FAMILIES UNDER ONE PARENT, which is what keeps the palette
+ * to six top level rows instead of eleven. "Plan" holds no layers of
+ * its own -- classify never returns it -- and exists to be the single
+ * switch for everything a caver draws in plan, with the families
+ * underneath for when the switch is too coarse.
+ *
+ * One level deep and no more, which is all the palette draws.
+ */
+CsLayerGroups.PARENTS = function() {
+    return {
+        "Passage": CsLayerGroups.PLAN_GROUP,
+        "Floor": CsLayerGroups.PLAN_GROUP,
+        "Formations": CsLayerGroups.PLAN_GROUP,
+        "Water": CsLayerGroups.PLAN_GROUP,
+        "Geology & Finds": CsLayerGroups.PLAN_GROUP,
+        "Notes": CsLayerGroups.PLAN_GROUP
+    };
+};
+
+CsLayerGroups.PLAN_GROUP = "Plan";
+CsLayerGroups.PASSAGE = "Passage";
+CsLayerGroups.FLOOR = "Floor";
+CsLayerGroups.FORMATIONS = "Formations";
+CsLayerGroups.WATER = "Water";
+CsLayerGroups.GEOLOGY = "Geology & Finds";
+CsLayerGroups.NOTES = "Notes";
+CsLayerGroups.PROFILE = "Profile";
+CsLayerGroups.SECTIONS = "Cross Sections";
+CsLayerGroups.SCANS = "Scans & Basemap";
+CsLayerGroups.CONTROL = "Control";
+CsLayerGroups.SHEET = "Sheet";
 
 /**
- * The page furniture, by name.
+ * Tracing sources and background imagery: the pictures under the map,
+ * as opposed to the survey drawn on top of it.
  *
- * NOT CsLayers.SHEET_LAYERS, which also holds "0" and "Defpoints".
- * Layer 0 is where stray work lands and belongs in front of a caver, not
- * filed away with the border; Defpoints is QCAD's own bookkeeping and
- * goes to Control with the rest of the machinery. NORTH-ARROW is here and
- * is not in CsLayers.SHEET_LAYERS at all.
+ * Their own group and NOT part of Control, which is the one change made
+ * to the arrangement rather than copied from it. They are the heaviest
+ * things on the screen and the toggle a caver reaches for most often
+ * while tracing is "hide the scan, keep the stations" -- which a single
+ * Control group cannot express.
+ *
+ * Matched as PREFIXES, so a per-run variant (CTRL-SCAN-A) lands with its
+ * base.
  */
-CsLayerGroups.SHEET_FURNITURE = function() {
+CsLayerGroups.SCAN_LAYERS = function() {
     return [
-        CsLayers.BORDER,
-        CsLayers.TITLE_BLOCK,
-        CsLayers.LEGEND,
-        CsLayers.SCALE_BAR,
-        CsLayers.NORTH_ARROW
+        CsLayers.CTRL_SCAN,
+        CsLayers.CTRL_PROFILE_SCAN,
+        CsLayers.CTRL_SECTION_SCAN,
+        CsLayers.CTRL_AERIAL,
+        CsLayers.CTRL_CONTOUR,
+        CsLayers.CTRL_CONTOUR_MAJOR
     ];
 };
 
 /**
- * \return The starter group \c layerName belongs in, or UNDEFINED for the
- * plan's own ink, which is left unfiled on purpose (see the header).
+ * The page, plus the two layers CAD itself owns.
+ *
+ * CsLayers.SHEET_LAYERS already holds "0" and "Defpoints" alongside the
+ * border and title block, and they stay together here. Layer 0 has to be
+ * SOMEWHERE now that every layer is filed, and Sheet is the group least
+ * likely to be switched off while working -- which matters, because
+ * hiding layer 0 hides stray work, the exact fault Check Map exists to
+ * find. NORTH-ARROW is added: it is page furniture and is not in
+ * CsLayers.SHEET_LAYERS.
+ */
+CsLayerGroups.SHEET_FURNITURE = function() {
+    return CsLayers.SHEET_LAYERS.concat([CsLayers.NORTH_ARROW]);
+};
+
+/**
+ * The plan's own ink, by layer name, in the same categories the symbol
+ * palette files symbols under.
+ *
+ * Written out rather than derived from a prefix, because these names
+ * have no shared prefix to derive from -- WALLS-SURVEYED, DRIPLINE and
+ * PITS-DOMES are all Passage and look nothing alike. A registry layer
+ * missing from here is caught by a test rather than landing silently in
+ * the wrong place.
+ */
+CsLayerGroups.PLAN_INK = function() {
+    var map = {};
+    var put = function(group, names) {
+        for (var i = 0; i < names.length; i++) {
+            if (names[i] !== undefined) {
+                map[names[i]] = group;
+            }
+        }
+    };
+
+    // What the passage IS: its walls, its roof, and the ways in and out.
+    put(CsLayerGroups.PASSAGE, [
+        CsLayers.WALLS_SURVEYED, CsLayers.WALLS_INFERRED,
+        CsLayers.WALL_GLYPHS, CsLayers.CEILING, CsLayers.LEDGE_CEILING,
+        CsLayers.OVERHANG_LEDGE, CsLayers.DRIPLINE, CsLayers.ENTRANCE,
+        CsLayers.PITS_DOMES, CsLayers.CLIMBS_CHIMNEYS
+    ]);
+
+    // What you are standing on, and what it is made of.
+    put(CsLayerGroups.FLOOR, [
+        CsLayers.FLOOR, CsLayers.FLOOR_SLOPE, CsLayers.SLOPE,
+        CsLayers.LEDGE_FLOOR, CsLayers.BREAKDOWN,
+        CsLayers.BREAKDOWN_BOUNDARY, CsLayers.SEDIMENT_CLAY_MUD,
+        CsLayers.SEDIMENT_SAND_GRAVEL, CsLayers.GUANO, CsLayers.ICE_SNOW
+    ]);
+
+    put(CsLayerGroups.FORMATIONS, [
+        CsLayers.FORMATIONS_DRIP, CsLayers.FORMATIONS_DRAPERY,
+        CsLayers.FORMATIONS_FLOWSTONE, CsLayers.FORMATIONS_RIMSTONE,
+        CsLayers.FORMATIONS_MOONMILK_POPCORN, CsLayers.FLOWSTONE,
+        CsLayers.RIMSTONE
+    ]);
+
+    // The rock itself, what lives in it, what was left in it, and what
+    // was bolted to it -- one drawer, because each is a layer or two and
+    // they are read together when they are read at all.
+    put(CsLayerGroups.GEOLOGY, [
+        CsLayers.GEOLOGY_JOINTS_FRACTURES, CsLayers.BIOLOGY,
+        CsLayers.ARCHAEOLOGY, CsLayers.ANCHORS_BOLTS
+    ]);
+
+    // Ceiling height is a measurement written on the map, which is why
+    // the symbol palette files its symbol under Annotation and not Floor.
+    put(CsLayerGroups.NOTES, [CsLayers.CEILING_HEIGHT]);
+
+    // The mark in the PLAN saying where a section was cut. Survey
+    // bookkeeping about the drawing, not a feature of the cave -- the
+    // symbol palette files it under Survey for the same reason.
+    put(CsLayerGroups.CONTROL, [CsLayers.CROSS_SECTION_MARKERS]);
+
+    return map;
+};
+
+/**
+ * \return The group \c layerName belongs in. Every layer gets one; an
+ * unrecognised name answers Passage, for the same reason
+ * CsLayers.frameOf answers "plan" -- the plan is where a caver's own
+ * linework goes, and guessing the working view is the safe guess.
  */
 CsLayerGroups.classify = function(layerName) {
     if (layerName === undefined || layerName === null) {
-        return undefined;
+        return CsLayerGroups.PASSAGE;
     }
     var name = String(layerName);
+    var i;
+
+    // Scans before Control: several of them carry the CTRL- prefix and
+    // would otherwise be swallowed by it.
+    var scans = CsLayerGroups.SCAN_LAYERS();
+    for (i = 0; i < scans.length; i++) {
+        if (scans[i] !== undefined &&
+                (name === scans[i] || name.indexOf(scans[i] + "-") === 0)) {
+            return CsLayerGroups.SCANS;
+        }
+    }
 
     var furniture = CsLayerGroups.SHEET_FURNITURE();
-    for (var i = 0; i < furniture.length; i++) {
-        if (furniture[i] !== undefined && name === furniture[i]) {
+    for (i = 0; i < furniture.length; i++) {
+        if (name === furniture[i]) {
             return CsLayerGroups.SHEET;
         }
     }
 
-    // Everything generated, in every frame, plus QCAD's own scratch
-    // layer. Checked before the frame so CTRL-PROFILE-SHOTS is control
-    // rather than profile.
-    if (name.indexOf("CTRL-") === 0 || name === "Defpoints") {
+    // Named plan layers before any prefix rule: CROSS-SECTION-MARKERS is
+    // in this table and must not be read as a SECTION- layer.
+    var ink = CsLayerGroups.PLAN_INK();
+    if (ink.hasOwnProperty(name)) {
+        return ink[name];
+    }
+
+    // Everything generated, in every frame. Before the frame rules, so
+    // CTRL-PROFILE-SHOTS is control rather than profile.
+    if (name.indexOf("CTRL-") === 0) {
         return CsLayerGroups.CONTROL;
     }
 
-    // The other two views, hand-traced. These carry their own notes and
-    // text with them -- PROFILE-NOTES-DIG is profile, not notes.
+    // The other two views carry their own notes, text and water.
     if (name.indexOf("PROFILE-") === 0) {
         return CsLayerGroups.PROFILE;
     }
@@ -117,17 +251,23 @@ CsLayerGroups.classify = function(layerName) {
         return CsLayerGroups.SECTIONS;
     }
 
-    // The plan's notes and text.
     if (name.indexOf("NOTES-") === 0 || name.indexOf("TEXT-") === 0) {
         return CsLayerGroups.NOTES;
     }
-
     if (name.indexOf("WATER-") === 0) {
         return CsLayerGroups.WATER;
     }
 
-    // The plan's own ink, layer 0, and CROSS-SECTION-MARKERS: unfiled.
-    return undefined;
+    // A per-run variant of a named plan layer: WALLS-SURVEYED-A and the
+    // like. Checked last, because every prefix rule above is cheaper and
+    // more specific than walking the table.
+    for (var base in ink) {
+        if (ink.hasOwnProperty(base) && name.indexOf(base + "-") === 0) {
+            return ink[base];
+        }
+    }
+
+    return CsLayerGroups.PASSAGE;
 };
 
 /**
@@ -135,8 +275,7 @@ CsLayerGroups.classify = function(layerName) {
  *
  * Every group in GROUPS appears as a key even when it has no members: a
  * cave with no cross sections yet should still show the group, so that
- * tracing one has somewhere obvious to go. Layers classify() leaves
- * unfiled appear under no key at all.
+ * tracing one has somewhere obvious to go.
  */
 CsLayerGroups.plan = function(layerNames) {
     var res = {};
@@ -145,13 +284,64 @@ CsLayerGroups.plan = function(layerNames) {
         res[CsLayerGroups.GROUPS[i]] = [];
     }
     for (i = 0; i < layerNames.length; i++) {
-        var group = CsLayerGroups.classify(layerNames[i]);
-        if (group !== undefined) {
-            res[group].push(layerNames[i]);
-        }
+        res[CsLayerGroups.classify(layerNames[i])].push(layerNames[i]);
     }
     return res;
 };
+
+
+// ---------------------------------------------------------------------
+// Layer states shipped with the template.
+//
+// A cave map alternates between two looks, and they are worth having
+// before anybody saves one of their own: an empty state combo teaches
+// nothing about what states are for.
+// ---------------------------------------------------------------------
+
+/** Off, frozen, locked -- the code LayerStates reads. */
+CsLayerGroups.CODE_ON = "000";
+CsLayerGroups.CODE_OFF = "110";
+
+CsLayerGroups.STATE_TRACING = "Tracing";
+CsLayerGroups.STATE_PLOT = "Plot ready";
+
+/**
+ * \return { name: flags } for the states the template ships, given the
+ * layer names it holds.
+ *
+ * TRACING is the working view: the scan and the survey skeleton both on,
+ * so there is something to trace against and something to trace it onto,
+ * and the page furniture off, because a border drawn round the paper is
+ * in the way while you work.
+ *
+ * PLOT READY is what gets printed: nothing but the cave and the page.
+ * The scans go because a plotted sheet carrying a photograph of
+ * somebody's handwriting is the fault Sheet Setup already refuses, and
+ * the control layers go because they are not map ink.
+ */
+CsLayerGroups.templateStates = function(layerNames) {
+    var hiddenWhileTracing = [CsLayerGroups.SHEET];
+    var hiddenWhenPlotting = [CsLayerGroups.SCANS, CsLayerGroups.CONTROL];
+
+    var tracing = {};
+    var plot = {};
+    for (var i = 0; i < layerNames.length; i++) {
+        var name = layerNames[i];
+        var group = CsLayerGroups.classify(name);
+        tracing[name] = hiddenWhileTracing.indexOf(group) >= 0 ?
+            CsLayerGroups.CODE_OFF : CsLayerGroups.CODE_ON;
+        plot[name] = hiddenWhenPlotting.indexOf(group) >= 0 ?
+            CsLayerGroups.CODE_OFF : CsLayerGroups.CODE_ON;
+    }
+
+    var states = {};
+    states[CsLayerGroups.STATE_TRACING] = tracing;
+    states[CsLayerGroups.STATE_PLOT] = plot;
+    return states;
+};
+
+/** The state names the template ships, in the order they appear. */
+CsLayerGroups.STATES = [CsLayerGroups.STATE_TRACING, CsLayerGroups.STATE_PLOT];
 
 
 // ---------------------------------------------------------------------
@@ -174,7 +364,7 @@ CsLayerGroups.model = function() {
 };
 
 /**
- * Files every layer in \c doc into its starter group.
+ * Files every layer in \c doc into its group.
  *
  * ONLY EVER ADDS. A group a caver made by hand, and a layer they filed
  * by hand, are both left exactly as they are -- so this can be run on a
@@ -182,8 +372,8 @@ CsLayerGroups.model = function() {
  * is also why there is no "reset to defaults": the arrangement is theirs
  * the moment they touch it.
  *
- * \return { groups: n, filed: n, already: n, unfiled: n }, or undefined
- * if the palette is missing.
+ * \return { groups: n, filed: n, already: n }, or undefined if the
+ * palette is missing.
  */
 CsLayerGroups.fileInto = function(doc) {
     var model = CsLayerGroups.model();
@@ -198,20 +388,17 @@ CsLayerGroups.fileInto = function(doc) {
     // that order even when one of them is still empty.
     var i;
     var created = 0;
+    var parents = CsLayerGroups.PARENTS();
     for (i = 0; i < CsLayerGroups.GROUPS.length; i++) {
-        if (model.createGroup(reg, CsLayerGroups.GROUPS[i])) {
+        var group = CsLayerGroups.GROUPS[i];
+        if (model.createGroup(reg, group, parents[group])) {
             created++;
         }
     }
 
-    var filed = 0, already = 0, unfiled = 0;
+    var filed = 0, already = 0;
     for (i = 0; i < names.length; i++) {
-        var group = CsLayerGroups.classify(names[i]);
-        if (group === undefined) {
-            // The plan's own ink, left in Ungrouped on purpose -- that is
-            // the working set, not a leftovers bin.
-            unfiled++;
-        } else if (model.addTo(reg, names[i], group)) {
+        if (model.addTo(reg, names[i], CsLayerGroups.classify(names[i]))) {
             filed++;
         } else {
             already++;
@@ -219,6 +406,5 @@ CsLayerGroups.fileInto = function(doc) {
     }
 
     model.writeRegistry(doc, reg);
-    return { groups: created, filed: filed, already: already,
-             unfiled: unfiled };
+    return { groups: created, filed: filed, already: already };
 };

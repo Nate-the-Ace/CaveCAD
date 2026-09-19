@@ -96,6 +96,25 @@ function initNewFile(mdiChild) {
             // unit stays at the application default
         }
 
+        // Carry the Layer Manager's groups and states across.
+        // RPasteOperation copies entities, layers and blocks and NOT
+        // document variables, which is where that registry lives -- so
+        // a template-poured drawing arrived with all 208 layers and no
+        // arrangement at all, while opening the template file directly
+        // showed them filed. Read and re-written through the model
+        // rather than copied variable by variable, so the chunking is
+        // done by the code that owns it.
+        try {
+            if (typeof LayerGroups !== "undefined") {
+                LayerGroups.writeRegistry(di.getDocument(),
+                    LayerGroups.readRegistry(sourceDi.getDocument()));
+            }
+        } catch (eGroups) {
+            // No Layer Manager in this build: the drawing is fine
+            // without groups, and a missing palette must not cost a
+            // caver their new map.
+        }
+
         // Switch the registry's hidden layers OFF. The template cannot
         // carry this itself: a layer's off state does not survive a DXF
         // round trip in this build (probed 2026-08-28 -- exported off,

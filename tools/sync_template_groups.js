@@ -53,24 +53,28 @@ include(core + "/CsLayerGroups.js");
  * only against the bundle, so the per-user path has to be spelled out.
  */
 function layerGroupsModel() {
-    if (typeof LayerGroups !== "undefined") {
-        return LayerGroups;
-    }
-    var candidates = [
-        "scripts/Widgets/LayerManager/LayerGroups.js",
-        RSettings.getDataLocation() + "/scripts/Widgets/LayerManager/LayerGroups.js"
-    ];
-    for (var i = 0; i < candidates.length; i++) {
-        try {
-            include(candidates[i]);
-        } catch (e) {
-            // include() logs its own "not found"; try the next place.
+    if (typeof LayerGroups === "undefined" || typeof LayerStates === "undefined") {
+        var roots = [
+            "scripts/Widgets/LayerManager/",
+            RSettings.getDataLocation() + "/scripts/Widgets/LayerManager/"
+        ];
+        for (var i = 0; i < roots.length; i++) {
+            try {
+                include(roots[i] + "LayerGroups.js");
+                include(roots[i] + "LayerStates.js");
+            } catch (e) {
+                // include() logs its own "not found"; try the next place.
+            }
+            if (typeof LayerGroups !== "undefined" &&
+                    typeof LayerStates !== "undefined") {
+                break;
+            }
         }
-        if (typeof LayerGroups !== "undefined") {
-            return LayerGroups;
-        }
     }
-    return undefined;
+    if (typeof LayerGroups === "undefined" || typeof LayerStates === "undefined") {
+        return undefined;
+    }
+    return LayerGroups;
 }
 
 function dxfLibFilter() {
@@ -91,21 +95,44 @@ function dxfLibFilter() {
  * leaves the template's bytes alone and publish.sh does not archive a
  * template that differs only by a rewrite.
  */
-function sameAs(model, reg, wanted) {
+function sameAs(model, reg, wanted, states) {
     var names = model.groupNames(reg);
     if (names.length !== wanted.length) {
         return false;
     }
-    for (var i = 0; i < wanted.length; i++) {
+    var i, j;
+    for (i = 0; i < wanted.length; i++) {
         if (names[i] !== wanted[i].name) {
+            return false;
+        }
+        if (model.parentOf(reg, wanted[i].name) !== wanted[i].parent) {
             return false;
         }
         var have = model.membersOf(reg, wanted[i].name);
         if (have.length !== wanted[i].members.length) {
             return false;
         }
-        for (var j = 0; j < have.length; j++) {
+        for (j = 0; j < have.length; j++) {
             if (have[j] !== wanted[i].members[j]) {
+                return false;
+            }
+        }
+    }
+
+    var stateNames = LayerStates.stateNames(reg);
+    if (stateNames.length !== CsLayerGroups.STATES.length) {
+        return false;
+    }
+    for (i = 0; i < CsLayerGroups.STATES.length; i++) {
+        var stateName = CsLayerGroups.STATES[i];
+        if (stateNames[i] !== stateName) {
+            return false;
+        }
+        var wantFlags = states[stateName];
+        for (var layerName in wantFlags) {
+            if (wantFlags.hasOwnProperty(layerName) &&
+                    LayerStates.getCode(reg, stateName, layerName) !==
+                        wantFlags[layerName]) {
                 return false;
             }
         }
@@ -141,15 +168,18 @@ function syncGroups(path) {
     }
 
     var planned = CsLayerGroups.plan(names);
+    var parents = CsLayerGroups.PARENTS();
     var wanted = [];
     var i;
     for (i = 0; i < CsLayerGroups.GROUPS.length; i++) {
         var group = CsLayerGroups.GROUPS[i];
-        wanted.push({ name: group, members: planned[group] });
+        wanted.push({ name: group, members: planned[group],
+                      parent: parents[group] });
     }
+    var states = CsLayerGroups.templateStates(names);
 
     var reg = model.readRegistry(doc);
-    if (sameAs(model, reg, wanted)) {
+    if (sameAs(model, reg, wanted, states)) {
         print("skip  " + path + " -- groups already match CsLayerGroups");
         return true;
     }
@@ -160,14 +190,23 @@ function syncGroups(path) {
     var fresh = model.emptyRegistry();
     var filed = 0;
     for (i = 0; i < wanted.length; i++) {
-        model.createGroup(fresh, wanted[i].name);
+        model.createGroup(fresh, wanted[i].name, wanted[i].parent);
         for (var j = 0; j < wanted[i].members.length; j++) {
             model.addTo(fresh, wanted[i].members[j], wanted[i].name);
             filed++;
         }
     }
-    // Layer states are a caver's own; the template ships none, and this
-    // tool must not invent any.
+
+    // The two states a cave map alternates between. Shipped because an
+    // empty state combo teaches nothing about what states are for, and
+    // because these two are the same pair every drawing needs. A caver's
+    // own states are added beside them and never touched by this tool --
+    // which only ever writes the template, never a real drawing.
+    for (i = 0; i < CsLayerGroups.STATES.length; i++) {
+        LayerStates.setState(fresh, CsLayerGroups.STATES[i],
+            states[CsLayerGroups.STATES[i]]);
+    }
+
     model.writeRegistry(doc, fresh);
 
     if (di.exportFile(path, dxfLibFilter()) !== true) {
@@ -176,11 +215,12 @@ function syncGroups(path) {
     }
 
     print("ok    " + path + " -- " + wanted.length + " group(s), " +
-        filed + " of " + names.length + " layers filed");
+        filed + " of " + names.length + " layers filed, " +
+        CsLayerGroups.STATES.length + " state(s)");
     for (i = 0; i < wanted.length; i++) {
-        print("      " + wanted[i].name + ": " + wanted[i].members.length);
+        print("      " + (isNull(wanted[i].parent) ? "" : "  ") +
+            wanted[i].name + ": " + wanted[i].members.length);
     }
-    print("      ungrouped (the plan's own ink): " + (names.length - filed));
     return true;
 }
 

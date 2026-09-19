@@ -29567,106 +29567,155 @@ eqs(CsGeoProject.demPathFor(""), null,
 eqs(CsGeoProject.demPathFor(null), null, "null path in, null out");
 
 // ---------------------------------------------------------------------
-// CsLayerGroups: which starter group a layer belongs in.
+// CsLayerGroups: which group a layer belongs in.
 //
 // The classifier the template sync and Repair Drawing's filing pass both
-// run on every layer. Pure -- a name in, a group name out, or undefined
-// for the plan's own ink, which is left unfiled on purpose. Asserted
-// here rather than in the GUI because getting one of these wrong is
-// invisible: the layer still appears, just in the wrong place.
-//
-// The scheme is Nathan's Truitt Cave arrangement, adopted whole. The
-// order-dependent rules are what these tests exist for.
+// run on every layer. Pure -- a name in, a group name out. Asserted here
+// rather than in the GUI because getting one of these wrong is
+// invisible: the layer still appears, just in the wrong drawer.
 // ---------------------------------------------------------------------
 
 loadRepoScript("scripts/CaveSurvey/Core/CsLayers.js");
 loadRepoScript("scripts/CaveSurvey/Core/CsLayerGroups.js");
 
 ok(typeof CsLayerGroups !== "undefined", "CsLayerGroups loaded");
-eqs(CsLayerGroups.GROUPS.length, 6, "six starter groups");
+eqs(CsLayerGroups.GROUPS.length, 12, "twelve groups, six of them nested");
 
-// -- the plan's own ink is unfiled, and that is an answer --------------
+// -- the nesting keeps the palette to six top level rows --------------
 
-ok(CsLayerGroups.classify(CsLayers.WALLS_SURVEYED) === undefined,
-    "plan wall linework is left unfiled, so Ungrouped is the working set");
-ok(CsLayerGroups.classify(CsLayers.FLOOR) === undefined,
-    "so is the floor");
-ok(CsLayerGroups.classify(CsLayers.FORMATIONS_DRIP) === undefined,
-    "so are the formations");
-ok(CsLayerGroups.classify(CsLayers.CROSS_SECTION_MARKERS) === undefined,
-    "and the section cut mark, which lives in the plan");
-ok(CsLayerGroups.classify("0") === undefined,
-    "layer 0 stays in front of the caver rather than filed with the border");
-ok(CsLayerGroups.classify("SOME-LAYER-NOBODY-REGISTERED") === undefined,
-    "an unrecognised layer is unfiled rather than guessed at");
-ok(CsLayerGroups.classify(undefined) === undefined,
-    "a missing name is unfiled rather than throwing");
+(function() {
+    var parents = CsLayerGroups.PARENTS();
+    var top = [], nested = [];
+    for (var i = 0; i < CsLayerGroups.GROUPS.length; i++) {
+        var g = CsLayerGroups.GROUPS[i];
+        if (parents[g] === undefined) { top.push(g); } else { nested.push(g); }
+    }
+    eqs(top.join(" | "),
+        "Plan | Profile | Cross Sections | Scans & Basemap | Control | Sheet",
+        "six top level rows, in work order");
+    eqs(nested.length, 6, "and six families nested under Plan");
+    for (var j = 0; j < nested.length; j++) {
+        eqs(parents[nested[j]], CsLayerGroups.PLAN_GROUP,
+            nested[j] + " is nested under Plan");
+    }
+    // A parent must be created before the group that names it, or
+    // createGroup files into something that does not exist yet.
+    ok(CsLayerGroups.GROUPS.indexOf(CsLayerGroups.PLAN_GROUP) <
+       CsLayerGroups.GROUPS.indexOf(CsLayerGroups.PASSAGE),
+        "parents come before their children in GROUPS");
+    // One level and no more: no parent may itself be nested.
+    for (var k in parents) {
+        if (parents.hasOwnProperty(k)) {
+            ok(parents[parents[k]] === undefined,
+                "the nesting is one level deep (" + k + ")");
+        }
+    }
+})();
 
-// -- the other two views own their notes and text ----------------------
+// -- every layer is filed, and Plan holds none directly ---------------
+
+ok(CsLayerGroups.classify(CsLayers.WALLS_SURVEYED) !== undefined,
+    "the plan's own ink IS filed now");
+ok(CsLayerGroups.classify("SOME-LAYER-NOBODY-REGISTERED") ===
+   CsLayerGroups.PASSAGE,
+    "an unrecognised layer lands in Passage, the working view");
+ok(CsLayerGroups.classify(undefined) === CsLayerGroups.PASSAGE,
+    "and so does a missing name, rather than throwing");
+
+(function() {
+    var direct = [];
+    for (var key in CsLayers) {
+        if (CsLayers.hasOwnProperty(key) && typeof CsLayers[key] === "string" &&
+                CsLayerGroups.classify(CsLayers[key]) === CsLayerGroups.PLAN_GROUP) {
+            direct.push(CsLayers[key]);
+        }
+    }
+    eqs(direct.length, 0,
+        "Plan is a parent and holds no layers of its own (" +
+        direct.slice(0, 3).join(", ") + ")");
+})();
+
+// -- the plan's families ----------------------------------------------
+
+eqs(CsLayerGroups.classify(CsLayers.WALLS_SURVEYED), CsLayerGroups.PASSAGE,
+    "walls are Passage");
+eqs(CsLayerGroups.classify(CsLayers.DRIPLINE), CsLayerGroups.PASSAGE,
+    "so is the dripline, which shares no prefix with them");
+eqs(CsLayerGroups.classify(CsLayers.PITS_DOMES), CsLayerGroups.PASSAGE,
+    "and pits and domes");
+eqs(CsLayerGroups.classify(CsLayers.BREAKDOWN), CsLayerGroups.FLOOR,
+    "breakdown is Floor, as the symbol palette files its symbol");
+eqs(CsLayerGroups.classify(CsLayers.SEDIMENT_CLAY_MUD), CsLayerGroups.FLOOR,
+    "and sediment");
+eqs(CsLayerGroups.classify(CsLayers.FLOWSTONE), CsLayerGroups.FORMATIONS,
+    "flowstone is Formations even without the FORMATIONS- prefix");
+eqs(CsLayerGroups.classify(CsLayers.WATER_PERENNIAL), CsLayerGroups.WATER,
+    "plan water is Water");
+eqs(CsLayerGroups.classify(CsLayers.BIOLOGY), CsLayerGroups.GEOLOGY,
+    "biology shares the Geology & Finds drawer");
+eqs(CsLayerGroups.classify(CsLayers.ANCHORS_BOLTS), CsLayerGroups.GEOLOGY,
+    "and so does rigging");
+eqs(CsLayerGroups.classify(CsLayers.NOTES_HAZARD), CsLayerGroups.NOTES,
+    "a plan note is Notes");
+eqs(CsLayerGroups.classify(CsLayers.TEXT_LABELS), CsLayerGroups.NOTES,
+    "plan text is filed with the notes");
+eqs(CsLayerGroups.classify(CsLayers.CEILING_HEIGHT), CsLayerGroups.NOTES,
+    "ceiling height is a measurement written on the map, so Notes -- " +
+    "the same drawer the symbol palette files its symbol under");
+
+// -- the other two views own their notes, text and water ---------------
 
 eqs(CsLayerGroups.classify(CsLayers.PROFILE_CEILING), CsLayerGroups.PROFILE,
-    "hand-traced profile linework is Profile Layers");
+    "hand-traced profile linework is Profile");
 eqs(CsLayerGroups.classify("PROFILE-NOTES-DIG"), CsLayerGroups.PROFILE,
-    "a profile note goes with the profile, not with the plan's notes");
+    "a profile note goes with the profile");
 eqs(CsLayerGroups.classify("PROFILE-WATER-PERENNIAL"), CsLayerGroups.PROFILE,
-    "and so does profile water, rather than being pulled into Water Layers");
+    "and profile water, rather than being pulled into the plan's Water");
 eqs(CsLayerGroups.classify(CsLayers.SECTION_WALLS_SURVEYED),
-    CsLayerGroups.SECTIONS, "hand-traced section linework is Cross Section Layers");
-eqs(CsLayerGroups.classify("SECTION-NOTES-DIG"), CsLayerGroups.SECTIONS,
-    "a section note goes with the section");
+    CsLayerGroups.SECTIONS, "section linework is Cross Sections");
 
-// -- control is one group for all three frames, scans included ---------
+// -- scans are out of Control, which is the one change made ------------
 
+eqs(CsLayerGroups.classify(CsLayers.CTRL_SCAN), CsLayerGroups.SCANS,
+    "a sketch scan is Scans & Basemap, so it hides without the stations");
+eqs(CsLayerGroups.classify(CsLayers.CTRL_AERIAL), CsLayerGroups.SCANS,
+    "and the aerial basemap");
+eqs(CsLayerGroups.classify(CsLayers.CTRL_CONTOUR_MAJOR), CsLayerGroups.SCANS,
+    "and the surface contours");
 eqs(CsLayerGroups.classify(CsLayers.CTRL_SHOTS), CsLayerGroups.CONTROL,
-    "generated plan geometry is Control Layers");
+    "the survey skeleton stays in Control");
 eqs(CsLayerGroups.classify(CsLayers.CTRL_PROFILE_SHOTS), CsLayerGroups.CONTROL,
-    "generated profile geometry is Control, not Profile");
-eqs(CsLayerGroups.classify(CsLayers.CTRL_SECTION_OUTLINE), CsLayerGroups.CONTROL,
-    "generated section geometry is Control, not Cross Section");
-eqs(CsLayerGroups.classify(CsLayers.CTRL_SCAN), CsLayerGroups.CONTROL,
-    "a sketch scan is Control -- one switch hides everything that is not your ink");
-eqs(CsLayerGroups.classify(CsLayers.CTRL_AERIAL), CsLayerGroups.CONTROL,
-    "and so is the aerial basemap");
-eqs(CsLayerGroups.classify("Defpoints"), CsLayerGroups.CONTROL,
-    "Defpoints is QCAD's bookkeeping and goes with the machinery");
+    "in every frame at once");
+eqs(CsLayerGroups.classify(CsLayers.CROSS_SECTION_MARKERS),
+    CsLayerGroups.CONTROL,
+    "the section cut mark is survey bookkeeping, not a feature -- and " +
+    "must not be read as a SECTION- layer");
 
-// -- the plan's notes, text and water ----------------------------------
-
-eqs(CsLayerGroups.classify(CsLayers.NOTES_HAZARD), CsLayerGroups.NOTES,
-    "a plan note is Notes Layers");
-eqs(CsLayerGroups.classify(CsLayers.TEXT_LABELS), CsLayerGroups.NOTES,
-    "plan text is filed with the plan's notes");
-eqs(CsLayerGroups.classify(CsLayers.WATER_PERENNIAL), CsLayerGroups.WATER,
-    "plan water is its own group");
-
-// -- the page furniture, and only the page furniture -------------------
+// -- the page, and the two layers CAD owns -----------------------------
 
 eqs(CsLayerGroups.classify(CsLayers.BORDER), CsLayerGroups.SHEET,
-    "the border is Sheet Layers");
+    "the border is Sheet");
 eqs(CsLayerGroups.classify(CsLayers.NORTH_ARROW), CsLayerGroups.SHEET,
-    "the north arrow is Sheet Layers -- it is not in CsLayers.SHEET_LAYERS at all");
-eqs(CsLayerGroups.classify(CsLayers.TITLE_BLOCK), CsLayerGroups.SHEET,
-    "the title block is Sheet Layers");
+    "the north arrow is Sheet, though CsLayers.SHEET_LAYERS omits it");
+eqs(CsLayerGroups.classify("0"), CsLayerGroups.SHEET,
+    "layer 0 goes to Sheet -- the group least likely to be switched off, " +
+    "because hiding layer 0 hides stray work");
+eqs(CsLayerGroups.classify("Defpoints"), CsLayerGroups.SHEET,
+    "and Defpoints with it");
 
-// CsLayers.SHEET_LAYERS holds "0" and "Defpoints" as well, and this
-// scheme deliberately files those two elsewhere. Pinned so that reusing
-// that list here later is a test failure rather than a silent change.
-ok(CsLayers.SHEET_LAYERS.indexOf("0") >= 0 &&
-   CsLayerGroups.classify("0") !== CsLayerGroups.SHEET,
-    "the sheet group is NOT CsLayers.SHEET_LAYERS -- layer 0 is excluded");
-ok(CsLayers.SHEET_LAYERS.indexOf("NORTH-ARROW") < 0,
-    "and it is not a subset of it either -- NORTH-ARROW is only here");
-
-// -- per-run variants ride on their base layer's prefix ----------------
+// -- per-run variants ride on their base layer -------------------------
 
 eqs(CsLayerGroups.classify("PROFILE-CEILING-A"), CsLayerGroups.PROFILE,
     "a per-run profile variant lands with the profile");
-eqs(CsLayerGroups.classify("CTRL-SCAN-A"), CsLayerGroups.CONTROL,
-    "a per-run scan variant lands with the control layers");
+eqs(CsLayerGroups.classify("CTRL-SCAN-A"), CsLayerGroups.SCANS,
+    "a per-run scan variant lands with the scans");
 eqs(CsLayerGroups.classify("CTRL-PROFILE-SHOTS-B"), CsLayerGroups.CONTROL,
-    "so does a per-run control variant");
+    "a per-run control variant lands with control");
+eqs(CsLayerGroups.classify("WALLS-SURVEYED-A"), CsLayerGroups.PASSAGE,
+    "and a per-run variant of a NAMED plan layer lands with its base, " +
+    "which the prefix rules cannot do on their own");
 
-// -- every classification names a group that exists --------------------
+// -- nothing falls through ---------------------------------------------
 
 (function() {
     var bad = [];
@@ -29675,32 +29724,28 @@ eqs(CsLayerGroups.classify("CTRL-PROFILE-SHOTS-B"), CsLayerGroups.CONTROL,
             continue;
         }
         var group = CsLayerGroups.classify(CsLayers[key]);
-        if (group !== undefined && CsLayerGroups.GROUPS.indexOf(group) < 0) {
+        if (CsLayerGroups.GROUPS.indexOf(group) < 0) {
             bad.push(CsLayers[key] + " -> " + group);
         }
     }
     eqs(bad.length, 0,
-        "every registry layer classifies into a group that exists, or into " +
-        "none (" + bad.slice(0, 3).join("; ") + ")");
+        "every registry layer classifies into a group that exists (" +
+        bad.slice(0, 3).join("; ") + ")");
 })();
 
-// The plan's ink is a real share of the registry, not one stray layer --
-// a classifier that started filing everything would still pass the test
-// above.
+// Passage is the fallback, so a plan layer missing from PLAN_INK would
+// land there and look deliberate. Pin the ones that must be listed
+// rather than caught: each is in a family the fallback would get wrong.
 (function() {
-    var unfiled = 0, total = 0;
-    for (var key in CsLayers) {
-        if (!CsLayers.hasOwnProperty(key) || typeof CsLayers[key] !== "string") {
-            continue;
-        }
-        total++;
-        if (CsLayerGroups.classify(CsLayers[key]) === undefined) {
-            unfiled++;
-        }
+    var ink = CsLayerGroups.PLAN_INK();
+    var mustBeListed = [CsLayers.BREAKDOWN, CsLayers.FLOWSTONE,
+        CsLayers.GUANO, CsLayers.BIOLOGY, CsLayers.CEILING_HEIGHT,
+        CsLayers.CROSS_SECTION_MARKERS];
+    for (var i = 0; i < mustBeListed.length; i++) {
+        ok(ink.hasOwnProperty(mustBeListed[i]),
+            mustBeListed[i] + " is named in PLAN_INK, not left to the " +
+            "Passage fallback");
     }
-    ok(unfiled > 20 && unfiled < total / 2,
-        "the plan's own ink is a substantial minority of the registry (" +
-        unfiled + " of " + total + " unfiled)");
 })();
 
 // -- plan() buckets, and keeps empty groups as keys --------------------
@@ -29709,18 +29754,55 @@ eqs(CsLayerGroups.classify("CTRL-PROFILE-SHOTS-B"), CsLayerGroups.CONTROL,
     var planned = CsLayerGroups.plan([
         CsLayers.WALLS_SURVEYED, CsLayers.CTRL_SHOTS, CsLayers.WATER_PERENNIAL
     ]);
+    eqs(planned[CsLayerGroups.PASSAGE].join(","), CsLayers.WALLS_SURVEYED,
+        "plan() buckets a wall");
     eqs(planned[CsLayerGroups.CONTROL].join(","), CsLayers.CTRL_SHOTS,
         "plan() buckets a control layer");
-    eqs(planned[CsLayerGroups.WATER].join(","), CsLayers.WATER_PERENNIAL,
-        "plan() buckets a water layer");
     ok(!isNull(planned[CsLayerGroups.SECTIONS]) &&
        planned[CsLayerGroups.SECTIONS].length === 0,
         "an empty group is still a key, so the palette shows it");
-    var filed = 0;
-    for (var g in planned) {
-        if (planned.hasOwnProperty(g)) { filed += planned[g].length; }
+    ok(!isNull(planned[CsLayerGroups.PLAN_GROUP]) &&
+       planned[CsLayerGroups.PLAN_GROUP].length === 0,
+        "and the parent group is a key with nothing directly in it");
+})();
+
+// -- the two states the template ships ---------------------------------
+
+(function() {
+    eqs(CsLayerGroups.STATES.join(", "), "Tracing, Plot ready",
+        "two shipped states");
+
+    var names = [CsLayers.WALLS_SURVEYED, CsLayers.CTRL_SHOTS,
+                 CsLayers.CTRL_SCAN, CsLayers.BORDER];
+    var states = CsLayerGroups.templateStates(names);
+    var tracing = states[CsLayerGroups.STATE_TRACING];
+    var plot = states[CsLayerGroups.STATE_PLOT];
+
+    eqs(tracing[CsLayers.CTRL_SCAN], CsLayerGroups.CODE_ON,
+        "Tracing keeps the scan on -- there has to be something to trace");
+    eqs(tracing[CsLayers.CTRL_SHOTS], CsLayerGroups.CODE_ON,
+        "and the stations, to trace it onto");
+    eqs(tracing[CsLayers.BORDER], CsLayerGroups.CODE_OFF,
+        "and puts the page furniture away, which is in the way while working");
+    eqs(tracing[CsLayers.WALLS_SURVEYED], CsLayerGroups.CODE_ON,
+        "the cave itself stays on, obviously");
+
+    eqs(plot[CsLayers.CTRL_SCAN], CsLayerGroups.CODE_OFF,
+        "Plot ready drops the scan -- a plotted sheet carrying somebody's " +
+        "handwriting is the fault Sheet Setup already refuses");
+    eqs(plot[CsLayers.CTRL_SHOTS], CsLayerGroups.CODE_OFF,
+        "and the survey skeleton, which is not map ink");
+    eqs(plot[CsLayers.BORDER], CsLayerGroups.CODE_ON,
+        "and brings the page back");
+    eqs(plot[CsLayers.WALLS_SURVEYED], CsLayerGroups.CODE_ON,
+        "leaving the cave and the page");
+
+    // Every layer gets an entry in both, or a restore would leave the
+    // odd one wherever the last state left it.
+    for (var i = 0; i < names.length; i++) {
+        ok(!isNull(tracing[names[i]]) && !isNull(plot[names[i]]),
+            names[i] + " has an entry in both shipped states");
     }
-    eqs(filed, 2, "and the unfiled plan layer appears under no key at all");
 })();
 
 // ---------------------------------------------------------------------
@@ -30018,6 +30100,130 @@ if (layerManagerLoaded) {
     eqs(LayerGroups.decode({ v: 1, l: ["A"], g: [{ n: "G", m: [0, 7] }], s: [] })
             .groups[0].members.join(","), "A",
         "an out-of-range member index is discarded, not resolved");
+
+    // -- nesting, one level and no more -------------------------------
+
+    (function() {
+        var reg = LayerGroups.emptyRegistry();
+        LayerGroups.createGroup(reg, "Plan");
+        ok(LayerGroups.createGroup(reg, "Passage", "Plan"),
+            "a group can be created inside another");
+        LayerGroups.createGroup(reg, "Floor", "Plan");
+        LayerGroups.createGroup(reg, "Control");
+
+        eqs(LayerGroups.topLevelGroups(reg).join(","), "Plan,Control",
+            "only unnested groups are top level");
+        eqs(LayerGroups.childrenOf(reg, "Plan").join(","), "Passage,Floor",
+            "children come back in registry order");
+        eqs(LayerGroups.parentOf(reg, "Passage"), "Plan", "and know their parent");
+        ok(LayerGroups.parentOf(reg, "Control") === undefined,
+            "a top level group has no parent");
+
+        // A parent answers for its children: that is what the group row's
+        // eye and lock act on.
+        LayerGroups.addTo(reg, "WALLS-SURVEYED", "Passage");
+        LayerGroups.addTo(reg, "FLOOR", "Floor");
+        eqs(LayerGroups.membersOf(reg, "Plan").length, 0,
+            "a parent can hold no layers of its own");
+        eqs(LayerGroups.membersUnder(reg, "Plan").join(","),
+            "WALLS-SURVEYED,FLOOR",
+            "but membersUnder reaches everything inside it");
+        eqs(LayerGroups.membersUnder(reg, "Passage").join(","), "WALLS-SURVEYED",
+            "and a leaf answers for itself");
+
+        // The same layer in two nested groups is reported once, or a
+        // group toggle would try to change it twice in one operation.
+        LayerGroups.addTo(reg, "WALLS-SURVEYED", "Floor");
+        eqs(LayerGroups.membersUnder(reg, "Plan").length, 2,
+            "a layer in two children is counted once");
+
+        // Three deep is refused rather than drawn.
+        LayerGroups.createGroup(reg, "Walls");
+        ok(!LayerGroups.setParent(reg, "Walls", "Passage"),
+            "nesting inside a group that is itself nested is refused");
+        ok(LayerGroups.parentOf(reg, "Walls") === undefined,
+            "and the group stays where it was");
+        ok(!LayerGroups.setParent(reg, "Plan", "Passage"),
+            "and so is nesting a parent inside its own child");
+        ok(!LayerGroups.setParent(reg, "Passage", "Passage"),
+            "a group cannot be its own parent");
+        ok(!LayerGroups.setParent(reg, "Passage", "No Such Group"),
+            "nor nested inside one that does not exist");
+
+        ok(LayerGroups.setParent(reg, "Passage", undefined),
+            "a nested group can be moved back out");
+        // Un-nesting clears the parent and moves nothing: the group
+        // keeps its place in registry order rather than being shuffled
+        // to the end, so the palette does not reorder itself under a
+        // caver who only meant to un-nest one row.
+        eqs(LayerGroups.topLevelGroups(reg).join(","), "Plan,Passage,Control,Walls",
+            "and joins the top level, keeping its place in the order");
+        LayerGroups.setParent(reg, "Passage", "Plan");
+    })();
+
+    // Deleting a parent must not delete what was inside it.
+    (function() {
+        var reg = LayerGroups.emptyRegistry();
+        LayerGroups.createGroup(reg, "Plan");
+        LayerGroups.addTo(reg, "WALLS-SURVEYED", "Passage");
+        LayerGroups.setParent(reg, "Passage", "Plan");
+
+        ok(LayerGroups.deleteGroup(reg, "Plan"), "the parent is deleted");
+        ok(LayerGroups.findGroup(reg, "Passage") !== undefined,
+            "its child survives -- losing a shelf must not lose what was on it");
+        ok(LayerGroups.parentOf(reg, "Passage") === undefined,
+            "and comes back to the top level");
+        eqs(LayerGroups.membersOf(reg, "Passage").join(","), "WALLS-SURVEYED",
+            "with its layers still in it");
+    })();
+
+    // Renaming a parent has to re-point its children, or they are
+    // flattened on the next read and it looks like the rename moved them.
+    (function() {
+        var reg = LayerGroups.emptyRegistry();
+        LayerGroups.createGroup(reg, "Plan");
+        LayerGroups.createGroup(reg, "Passage", "Plan");
+        LayerGroups.renameGroup(reg, "Plan", "Plan view");
+        eqs(LayerGroups.parentOf(reg, "Passage"), "Plan view",
+            "children follow a parent's rename");
+        eqs(LayerGroups.topLevelGroups(reg).join(","), "Plan view",
+            "and stay nested");
+    })();
+
+    // Nesting round-trips through the stored form, and a blob claiming
+    // depth it cannot have is flattened rather than trusted.
+    (function() {
+        var reg = LayerGroups.emptyRegistry();
+        LayerGroups.createGroup(reg, "Plan");
+        LayerGroups.addTo(reg, "WALLS-SURVEYED", "Passage");
+        LayerGroups.setParent(reg, "Passage", "Plan");
+        reg.ungroupedLabel = "Not yet filed";
+
+        var back = LayerGroups.deserialize(LayerGroups.serialize(reg));
+        eqs(LayerGroups.parentOf(back, "Passage"), "Plan",
+            "nesting round-trips");
+        eqs(back.ungroupedLabel, "Not yet filed",
+            "and so does the Ungrouped row's name");
+
+        eqs(LayerGroups.parentOf(
+                LayerGroups.decode({ v: 1, l: [], s: [], g: [
+                    { n: "A" }, { n: "B", p: "A" }, { n: "C", p: "B" }]}),
+                "C"),
+            undefined,
+            "a group three deep is flattened to the top on read");
+        eqs(LayerGroups.parentOf(
+                LayerGroups.decode({ v: 1, l: [], s: [], g: [
+                    { n: "A", p: "Nowhere" }]}),
+                "A"),
+            undefined,
+            "and so is one naming a parent that does not exist");
+        eqs(LayerGroups.parentOf(
+                LayerGroups.decode({ v: 1, l: [], s: [], g: [
+                    { n: "A", p: "A" }]}),
+                "A"),
+            undefined,
+            "and one that is its own parent, which would hang the walk");
+    })();
 
     // -- flag codes ---------------------------------------------------
 
