@@ -97,6 +97,21 @@ CsSheetView.viewPos = function(imageView, event) {
     return { x: at.x * dpr, y: at.y * dpr };
 };
 
+/** The buttons still held, as a mask, or null when this bridge cannot
+ *  say. QMouseEvent::buttons is a FUNCTION here, like x and y. */
+CsSheetView.buttonsOf = function(event) {
+    try {
+        var b = (typeof event.buttons === "function") ?
+            event.buttons() : event.buttons;
+        if (b === null || b === undefined) {
+            return null;
+        }
+        return (typeof b.valueOf === "function") ? b.valueOf() : b;
+    } catch (e) {
+        return null;
+    }
+};
+
 /** The point on the PAGE under a mouse event, or null. */
 CsSheetView.prototype.modelPos = function(event) {
     try {
@@ -174,6 +189,16 @@ CsSheetView.prototype.mousePressEvent = function(event) {
 /** A drag in progress, snapped, reported in INCHES of paper. */
 CsSheetView.prototype.mouseMoveEvent = function(event) {
     if (!isNull(this.panFrom) && this.panFrom !== undefined) {
+        // THE BUTTON IS RE-CHECKED EVERY MOVE, not trusted to a release
+        // that may never come -- see CsSheetSetup.panHeld for why one
+        // goes missing here. Without this the preview keeps following
+        // the mouse with nothing held down.
+        if (!CsSheetSetup.panHeld(CsSheetView.buttonsOf(event),
+                Qt.MidButton)) {
+            this.panFrom = null;
+            CsSheetView.callBase(this, "mouseMoveEvent", event);
+            return;
+        }
         try {
             var now = CsSheetView.eventPos(event);
             if (now !== null) {
@@ -189,6 +214,13 @@ CsSheetView.prototype.mouseMoveEvent = function(event) {
     }
     if (isNull(this.dragKind) || this.dragKind === undefined) {
         CsSheetView.callBase(this, "mouseMoveEvent", event);
+        return;
+    }
+    // A PIECE DRAG IS HELD THE SAME WAY, and for the same reason: the
+    // left press is not chained either when a piece is grabbed, so a
+    // lost release would leave the box stuck to the cursor.
+    if (!CsSheetSetup.panHeld(CsSheetView.buttonsOf(event), Qt.LeftButton)) {
+        this.endDrag();
         return;
     }
     var at = this.modelPos(event);
@@ -213,8 +245,14 @@ CsSheetView.prototype.mouseMoveEvent = function(event) {
     }
 };
 
-/** The drag ends. The panel keeps whatever the last move reported. */
-CsSheetView.prototype.mouseReleaseEvent = function(event) {
+/**
+ * Forget the drag in progress and tell the panel it ended.
+ *
+ * \return the kind that was being dragged, or null when nothing was.
+ *         Shared by the release and by the move that finds the button
+ *         already up, so both end a drag exactly the same way.
+ */
+CsSheetView.prototype.endDrag = function() {
     var kind = this.dragKind;
     var moved = this.dragMoved === true;
     this.panFrom = null;
@@ -224,14 +262,22 @@ CsSheetView.prototype.mouseReleaseEvent = function(event) {
     this.dragLines = null;
     this.dragMoved = false;
     if (isNull(kind) || kind === undefined) {
-        CsSheetView.callBase(this, "mouseReleaseEvent", event);
-        return;
+        return null;
     }
     if (typeof this.onDragDone === "function") {
         try {
             this.onDragDone(kind, moved);
         } catch (eHandler) {
+            // a handler that throws must not leave the view mid-drag
         }
+    }
+    return kind;
+};
+
+/** The drag ends. The panel keeps whatever the last move reported. */
+CsSheetView.prototype.mouseReleaseEvent = function(event) {
+    if (this.endDrag() === null) {
+        CsSheetView.callBase(this, "mouseReleaseEvent", event);
     }
 };
 
@@ -344,13 +390,48 @@ CsSheetPreview.line = function(preview, x1, y1, x2, y2, color) {
  * chase its own tail: the piece moves, the bounds grow, the view zooms,
  * and the cursor is no longer over what it grabbed.
  */
+/**
+ * Empty the scratch document of ENTITIES ONLY, ready for a redraw.
+ *
+ * NOT di.clear(), which is what this used to be and what made a drag
+ * beachball. RDocumentInterface::clear throws the whole document away
+ * and calls RDocument::init to build another: layer 0, three linetypes,
+ * model and paper space with their layouts, and something like fifty
+ * RSettings lookups for units, dimension and printing defaults. That is
+ * fine once per page and ruinous at one per mouse move -- which is what
+ * a drag costs, since every frame redraws the layout. Deleting the
+ * handful of lines this preview draws leaves the tables alone.
+ */
+CsSheetPreview.wipe = function(preview) {
+    try {
+        var ids = preview.doc.queryAllEntities(false, true);
+        if (isNull(ids) || ids.length === 0) {
+            return;
+        }
+        var del = new RDeleteObjectsOperation();
+        for (var i = 0; i < ids.length; i++) {
+            var e = preview.doc.queryEntityDirect(ids[i]);
+            if (!isNull(e)) {
+                del.deleteObject(e);
+            }
+        }
+        preview.di.applyOperation(del);
+    } catch (e) {
+        // a document that refuses the delete still gets the old way
+        try {
+            preview.di.clear();
+        } catch (eClear) {
+        }
+    }
+};
+
 CsSheetPreview.show = function(preview, data, opts) {
     if (isNull(preview) || isNull(data)) {
         return false;
     }
     var options = isNull(opts) ? {} : opts;
     try {
-        preview.di.clear();
+        CsSheetPreview.wipe(preview);
         preview.view.preview = data;
         var scale = (isNull(options.scale) || !(options.scale > 0)) ?
             1 : options.scale;
@@ -404,6 +485,14 @@ CsSheetPreview.show = function(preview, data, opts) {
             }
         }
         preview.di.applyOperation(op);
+        // THE UNDO STACK IS DROPPED EVERY FRAME. Nothing undoes a
+        // scratch preview, and a drag applies an operation per mouse
+        // move: without this the stack keeps every frame's entities
+        // alive and the drag gets slower the longer it lasts.
+        try {
+            preview.doc.resetTransactionStack();
+        } catch (eStack) {
+        }
 
         var key = isNull(options.pageKey) ? "" : String(options.pageKey);
         if (key !== preview.pageKey) {

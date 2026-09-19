@@ -1334,3 +1334,69 @@ CsSheetSetup.sheetBoxOn = function(doc, kind) {
     }
     return box;
 };
+
+/**
+ * Is the middle button STILL down, given the buttons mask a move event
+ * reported?
+ *
+ * WHY A PAN NEEDS ASKING. The middle-drag pan lives in a field
+ * (`panFrom` on the view) that only mouseReleaseEvent clears, and a
+ * release that never arrives leaves that field set: the preview then
+ * keeps following the mouse with no button held at all, and the only
+ * way out is another middle click. Releases DO go missing here -- the
+ * middle press is deliberately not chained to the base handler (the
+ * navigation action would pan a second time on the same drag), so the
+ * view is never the one Qt considers to be dragging, and a release
+ * delivered to another widget, or eaten by the window manager on a
+ * middle-drag, never reaches the override.
+ *
+ * So every move re-checks the buttons it was handed instead of trusting
+ * the field. Pure arithmetic on a mask so it can be tested without a
+ * live view: a bridge that cannot report buttons hands in null, and
+ * that case has to stay true or the pan would stop on its first step.
+ *
+ * \param mask   Qt buttons mask off the move event, or null/undefined
+ *               when this bridge cannot report one.
+ * \param button The button the gesture is held with -- Qt.MidButton for
+ *               the pan, Qt.LeftButton for a piece drag. Passed in so
+ *               the test does not need Qt loaded; defaults to 4, which
+ *               is Qt.MidButton everywhere this runs.
+ */
+CsSheetSetup.panHeld = function(mask, button) {
+    if (mask === null || mask === undefined || isNaN(mask)) {
+        return true;
+    }
+    var bit = (button === null || button === undefined || isNaN(button)) ?
+        4 : button;
+    return (mask & bit) !== 0;
+};
+
+/**
+ * The identity of one frame of a drag: what the preview would draw.
+ *
+ * WHY A DRAG NEEDS ONE. Every reported move redraws the whole layout,
+ * and a SNAPPED move reports a position that does not change: the piece
+ * is pinned to the guide while the mouse wanders inside the snap
+ * tolerance. Those frames used to redraw anyway -- the same picture,
+ * tens of times a second, each one rebuilding the scratch document --
+ * which is exactly when the panel beachballed, right as a piece "wanted
+ * to" snap. Comparing this key first throws that work away.
+ *
+ * The rounding is deliberate: the offset is carried in inches of paper
+ * and nothing in the preview can show a ten-thousandth of an inch, so
+ * two positions that round together ARE the same picture.
+ */
+CsSheetSetup.dragKey = function(kind, snapped) {
+    if (isNull(snapped)) {
+        return null;
+    }
+    var r = function(v) {
+        if (v === null || v === undefined || isNaN(v)) {
+            return "-";
+        }
+        return Math.round(v * 10000) / 10000;
+    };
+    return [String(kind), r(snapped.dx), r(snapped.dy),
+        r(snapped.guideX), r(snapped.guideY),
+        snapped.centredX === true, snapped.centredY === true].join("|");
+};

@@ -792,6 +792,15 @@ SheetSetup.dragTo = function(kind, snapped) {
     if (!(scale > 0)) {
         return;
     }
+    // A FRAME THAT DRAWS THE SAME PICTURE IS DROPPED HERE. While a
+    // piece is held on a snap guide the mouse keeps moving and the
+    // piece does not, so every one of those moves used to rebuild the
+    // preview for nothing -- see CsSheetSetup.dragKey.
+    var key = CsSheetSetup.dragKey(kind, snapped);
+    if (key !== null && key === w.dragFrame) {
+        return;
+    }
+    w.dragFrame = key;
     // FROM WHERE THE DRAG BEGAN, not from the last frame: the view
     // reports the whole move each time, measured against the box it
     // grabbed, so adding each frame to the last would move the piece
@@ -819,14 +828,19 @@ SheetSetup.dragTo = function(kind, snapped) {
     // like one on it, and the guide line alone does not say WHICH kind
     // of line it is to a caver who has not read the handbook.
     try {
+        var say = SheetSetup.HINT;
         if (w.centredX && w.centredY) {
-            w.hint.text = qsTr("Centred both ways.");
+            say = qsTr("Centred both ways.");
         } else if (w.centredX) {
-            w.hint.text = qsTr("Centred left to right.");
+            say = qsTr("Centred left to right.");
         } else if (w.centredY) {
-            w.hint.text = qsTr("Centred top to bottom.");
-        } else {
-            w.hint.text = SheetSetup.HINT;
+            say = qsTr("Centred top to bottom.");
+        }
+        // ONLY WHEN IT CHANGES. The hint is a word-wrapped label, so a
+        // new string of a different length relays out the whole dock --
+        // and a relayout resizes the view under the cursor mid-drag.
+        if (String(w.hint.text) !== String(say)) {
+            w.hint.text = say;
         }
     } catch (eHint) {
     }
@@ -840,6 +854,7 @@ SheetSetup.dragDone = function() {
     }
     w.dragKind = null;
     w.dragFrom = null;
+    w.dragFrame = null;
     w.guideX = null;
     w.guideY = null;
     w.centredX = false;
