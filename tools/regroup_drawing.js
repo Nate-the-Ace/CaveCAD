@@ -16,9 +16,13 @@
 // a copy -- which it does not do for you, because a backup this script
 // wrote is a backup nobody looked at.
 //
-// LAYER STATES ARE NOT TOUCHED. States and groups are separate things
-// that happen to share one blob; a caver's saved states survive a
-// regroup exactly as they are.
+// A CAVER'S LAYER STATES ARE NEVER TOUCHED. States and groups are
+// separate things that happen to share one blob, and every state
+// already in the drawing survives a regroup exactly as it was. The one
+// thing this adds is the pair the template ships -- Tracing and Plot
+// ready -- and only when the drawing has neither, because a cave made
+// before the template carried them has none and nothing else would
+// ever give it any.
 
 var args = RSettings.getOriginalArguments();
 var target = args[args.length - 1];
@@ -94,6 +98,11 @@ function regroup(path) {
     reg.states = before.states;
     reg.ungroupedLabel = before.ungroupedLabel;
 
+    // A drawing older than the shipped states has none, and nothing
+    // else would ever give it any. Only the missing ones, never over
+    // the top of a caver's own.
+    var seeded = CsLayerGroups.seedStates(reg, names);
+
     var parents = CsLayerGroups.PARENTS();
     var i;
     for (i = 0; i < CsLayerGroups.GROUPS.length; i++) {
@@ -124,7 +133,8 @@ function regroup(path) {
             LayerGroups.membersOf(reg, g).length);
     }
     print("      states kept: " + (hadStates.length === 0 ? "(none)" :
-        hadStates.join(", ")));
+        hadStates.join(", ")) +
+        (seeded > 0 ? ", " + seeded + " seeded" : ""));
     return true;
 }
 

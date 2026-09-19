@@ -419,6 +419,42 @@ CsLayerGroups.fileInto = function(doc) {
         }
     }
 
+    var states = CsLayerGroups.seedStates(reg, names);
+
     model.writeRegistry(doc, reg);
-    return { groups: created, filed: filed, already: already };
+    return { groups: created, filed: filed, already: already,
+             states: states };
+};
+
+/**
+ * Gives \c reg the two states the template ships, if it has not got
+ * them.
+ *
+ * ONLY THE MISSING ONES, and never over the top of one that is already
+ * there: a caver who has saved their own "Plot ready" means theirs, and
+ * a repair pass that quietly replaced it with the shipped one would be
+ * taking work away. That is the same rule the group half follows.
+ *
+ * This exists because a drawing made before the template carried
+ * states has none, and nothing else would ever give it any -- Truitt
+ * Cave came through its regroup with an empty state list and looked,
+ * reasonably, as though it had lost them.
+ *
+ * \return How many states were added.
+ */
+CsLayerGroups.seedStates = function(reg, layerNames) {
+    if (typeof LayerStates === "undefined") {
+        return 0;
+    }
+    var wanted = CsLayerGroups.templateStates(layerNames);
+    var added = 0;
+    for (var i = 0; i < CsLayerGroups.STATES.length; i++) {
+        var name = CsLayerGroups.STATES[i];
+        if (!isNull(LayerStates.findState(reg, name))) {
+            continue;
+        }
+        LayerStates.setState(reg, name, wanted[name]);
+        added++;
+    }
+    return added;
 };

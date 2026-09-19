@@ -29816,6 +29816,7 @@ eqs(CsLayerGroups.classify("WALLS-SURVEYED-A"), CsLayerGroups.PASSAGE,
     }
 })();
 
+
 // ---------------------------------------------------------------------
 // Layer Manager: groups and layer states.
 //
@@ -30627,6 +30628,44 @@ if (layerManagerLoaded) {
         eqs(mixed.states[0].name, "Good", "and it is the one with a valid name");
         eqs(Object.keys(mixed.states[0].flags).join(","), "A",
             "with only the entries that are real codes");
+    })();
+
+
+    // -- the shipped states reaching an older drawing ------------------
+    //
+    // seedStates fills in the two the template ships, only those, and
+    // only when they are missing. A cave made before the template
+    // carried states has none and nothing else would ever give it any
+    // -- Truitt Cave came through its regroup with an empty state list
+    // and looked, reasonably, as though it had lost them.
+    //
+    // No guard on CsLayerGroups here on purpose: this block runs after
+    // both halves are loaded, and a test that quietly skips itself is
+    // the failure mode this suite already has a rule about.
+    (function() {
+        var names = [CsLayers.WALLS_SURVEYED, CsLayers.CTRL_SCAN,
+                     CsLayers.BORDER];
+
+        var fresh = LayerGroups.emptyRegistry();
+        eqs(CsLayerGroups.seedStates(fresh, names), 2,
+            "a drawing with no states gets both shipped ones");
+        eqs(LayerStates.stateNames(fresh).join(","), "Tracing,Plot ready",
+            "under the names the template uses");
+        eqs(CsLayerGroups.seedStates(fresh, names), 0,
+            "and a second pass adds nothing");
+
+        // A caver's own state of the same name is left alone.
+        // Replacing it with the shipped one would be a repair pass
+        // taking work away.
+        var mine = LayerGroups.emptyRegistry();
+        LayerStates.setState(mine, "Plot ready",
+            { "WALLS-SURVEYED": { off: true } });
+        eqs(CsLayerGroups.seedStates(mine, names), 1,
+            "only the genuinely missing one is added");
+        ok(LayerStates.getRecord(mine, "Plot ready", "WALLS-SURVEYED").off === true,
+            "and the caver's own is untouched");
+        eqs(LayerStates.stateNames(mine).join(","), "Plot ready,Tracing",
+            "the existing one keeps its place");
     })();
 
     // -- snapshot -----------------------------------------------------

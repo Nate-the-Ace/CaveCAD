@@ -81,9 +81,13 @@ CsRepair.run = function(doc, di, opts) {
         } else if (g.filed === 0 && g.groups === 0) {
             lines.push(qsTr("Layer groups: already filed."));
         } else {
-            lines.push(qsTr("Layer groups: %1 filed, %2 already there, "
-                + "%3 left in Ungrouped.")
-                .arg(g.filed).arg(g.already).arg(g.unfiled));
+            lines.push(qsTr("Layer groups: %1 filed, %2 already there.")
+                .arg(g.filed).arg(g.already));
+            changed = true;
+        }
+        if (!isNull(g) && g.states > 0) {
+            lines.push(qsTr("Layer states: %1 added (Tracing, Plot ready).")
+                .arg(g.states));
             changed = true;
         }
     } else {
