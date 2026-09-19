@@ -534,20 +534,19 @@ CsLayerGroups.runsOfTrips = function(survey) {
  * have put layers into by hand is not this function's to take away.
  * CsLayerGroups.renameTripGroups closes that gap for the one caller
  * that knows a rename happened.
- *
- * \param caveName the survey's own name, when the caller has it
  */
-CsLayerGroups.tripGroupName = function(tripId, trip, caveName) {
+CsLayerGroups.tripGroupName = function(tripId, trip) {
     var label = "Trip " + tripId;
     var name = (isNull(trip) || isNull(trip.name)) ? "" : String(trip.name);
-    // A TRIP NAMED AFTER THE CAVE IS NAMED AFTER NOTHING. Most importers
-    // fill every trip's name with the survey's own -- Truitt Cave has
-    // eleven trips all called "TRUITT CAVE" -- and repeating it eleven
-    // times down the palette says less than the trip number alone.
-    if (!isNull(caveName) && String(caveName) !== "" &&
-            name.toLowerCase() === String(caveName).toLowerCase()) {
-        name = "";
-    }
+    // THE NAME IS SHOWN AS IT IS, even when an importer has filled
+    // every trip with the same string. Suppressing a trip name that
+    // matched the cave's was tried and removed: there is no reliable
+    // cave name to compare against. survey.name is trip 0's name
+    // mirrored up for pre-trip readers (CsModel.ensureTrips), and
+    // survey.caveName comes from the legacy SurveyName tag, which
+    // stored caveName-or-name and is ambiguous by CsRevise's own
+    // admission -- so on a real cave BOTH read as trip 0's name, and
+    // the rule silently stripped the one trip whose name it could see.
     if (name !== "") {
         label += " — " + name;
     }
@@ -605,8 +604,7 @@ CsLayerGroups.tripFiling = function(survey, layerNames) {
             }
         }
         out.push({
-            group: CsLayerGroups.tripGroupName(t, survey.trips[t],
-                survey.name),
+            group: CsLayerGroups.tripGroupName(t, survey.trips[t]),
             runs: runs.slice(0),
             layers: layers
         });
@@ -729,7 +727,7 @@ CsLayerGroups.fileTripsQuietly = function(doc) {
  * \param changes CsTripEdit.planEdits changes: [{tripId, before, after}]
  * \return how many groups were renamed
  */
-CsLayerGroups.renameTripGroups = function(doc, changes, caveName) {
+CsLayerGroups.renameTripGroups = function(doc, changes) {
     var model = CsLayerGroups.model();
     if (model === undefined || isNull(changes) || changes.length === 0) {
         return 0;
@@ -742,8 +740,8 @@ CsLayerGroups.renameTripGroups = function(doc, changes, caveName) {
                 c.before.name === c.after.name) {
             continue;
         }
-        var from = CsLayerGroups.tripGroupName(c.tripId, c.before, caveName);
-        var to = CsLayerGroups.tripGroupName(c.tripId, c.after, caveName);
+        var from = CsLayerGroups.tripGroupName(c.tripId, c.before);
+        var to = CsLayerGroups.tripGroupName(c.tripId, c.after);
         // Not if the new name is already a group: renameGroup would be
         // merging two groups, which is a bigger thing than a typo fix
         // and not one to do behind the caver's back. The filing pass

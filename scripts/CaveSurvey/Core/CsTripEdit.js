@@ -428,7 +428,7 @@ CsTripEdit.commit = function(doc, di, survey, inputs) {
     // A renamed trip takes its Layer Manager group with it, or the
     // typo this dialog exists to fix survives in the palette.
     try {
-        CsLayerGroups.renameTripGroups(doc, plan.changes, survey.name);
+        CsLayerGroups.renameTripGroups(doc, plan.changes);
     }
     catch (eGroups) {
     }

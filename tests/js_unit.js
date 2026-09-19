@@ -29838,10 +29838,26 @@ eqs(CsLayerGroups.classify("WALLS-SURVEYED-A"), CsLayerGroups.PASSAGE,
     eqs(CsLayerGroups.tripGroupName(4, { name: "North|South" }),
         "Trip 4 \u2014 North/South",
         "the record separator cannot reach a group name");
-    eqs(CsLayerGroups.tripGroupName(2, { name: "Truitt Cave" }, "TRUITT CAVE"),
-        "Trip 2",
-        "a trip named after the cave is named after nothing -- most " +
-        "importers fill every trip with the survey's own name");
+    // A name is shown as it is. Suppressing one that matched the cave
+    // was tried and removed -- no drawing holds a reliable cave name:
+    // survey.name is trip 0's mirrored up, and survey.caveName comes
+    // from the ambiguous legacy SurveyName tag, so on Truitt Cave both
+    // read "FIRST CLASS - TEAM A" and the rule ate trip 0's own name.
+    (function() {
+        var named = {
+            caveName: "FIRST CLASS - TEAM A",
+            name: "FIRST CLASS - TEAM A",
+            trips: [ { name: "FIRST CLASS - TEAM A" },
+                     { name: "FIRST CLASS - TEAM B" } ],
+            shots: [ { from: "A1", to: "A2", trip: 0 },
+                     { from: "B1", to: "B2", trip: 1 } ]
+        };
+        var filed = CsLayerGroups.tripFiling(named, []);
+        eqs(filed[0].group, "Trip 0 \u2014 FIRST CLASS - TEAM A",
+            "trip 0 keeps its name even though the survey mirrors it");
+        eqs(filed[1].group, "Trip 1 \u2014 FIRST CLASS - TEAM B",
+            "and so does every other trip");
+    })();
 
     var layers = ["WALLS-SURVEYED", "PROFILE-CEILING-A", "PROFILE-FLOOR-A",
                   "PROFILE-CEILING-B", "PROFILE-CEILING-C",
