@@ -610,13 +610,22 @@ class TestTemplateLayerGroups(unittest.TestCase):
                           self.CAVECAD)
 
     def test_the_shipped_template_is_already_grouped(self):
+        if PUBLISH_CHECK:
+            # A publish check points TEMPLATES at the staged copy, whose
+            # tree is the INSTALLED layout (CaveSurvey/Core/..., no
+            # scripts/ above it) and so is not a repoRoot this tool can
+            # read. The staged template is a byte copy of the repo's, and
+            # the repo's is what this test is about, so checking it twice
+            # would only be checking cp.
+            self.skipTest("the staged copy is not a repoRoot; the repo's "
+                          "own template is checked on every other run")
         result = subprocess.run(
             [self.CAVECAD, "-no-dock-icon", "-no-gui",
              "-allow-multiple-instances", "-autostart",
              os.path.join(REPO, "tools", "sync_template_groups.js"), REPO],
             stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=180)
         output = result.stdout.decode("utf-8", "replace")
-        plan = os.path.join(TEMPLATES, "NSS_Cave_Template_PLAN.dxf")
+        plan = os.path.join(REPO, "templates", "NSS_Cave_Template_PLAN.dxf")
         self.assertIn(
             "skip  %s -- groups already match CsLayerGroups" % plan,
             output.splitlines(),
