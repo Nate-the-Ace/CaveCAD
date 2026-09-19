@@ -55,13 +55,18 @@ function repairDrawingRun() {
     var cbRestyle = new QCheckBox(
         qsTr("Layers -- add any layer this drawing is missing, and put "
            + "the rest back on the current palette"));
+    var cbGroups = new QCheckBox(
+        qsTr("Layer groups -- file this drawing's layers into the Layer "
+           + "Manager's groups, adding to whatever you have arranged"));
     var cbCallouts = new QCheckBox(
         qsTr("Callouts -- put every note's arrows back on the note"));
     cbRebuild.checked = true;
     cbRestyle.checked = true;
+    cbGroups.checked = true;
     cbCallouts.checked = true;
     layout.addWidget(cbRebuild, 0, 0);
     layout.addWidget(cbRestyle, 0, 0);
+    layout.addWidget(cbGroups, 0, 0);
     layout.addWidget(cbCallouts, 0, 0);
 
     var buttons = new QDialogButtonBox(QDialogButtonBox.Ok
@@ -96,6 +101,7 @@ function repairDrawingRun() {
     var opts = {
         rebuild: cbRebuild.checked,
         restyle: cbRestyle.checked,
+        groups: cbGroups.checked,
         callouts: cbCallouts.checked
     };
     // destroy() THROWS on every QDialog in this build --
@@ -130,7 +136,8 @@ RepairDrawing.init = function(basePath) {
     action.setScriptFile(basePath + "/RepairDrawing.js");
     action.setIcon(basePath + "/RepairDrawing.svg");
     action.setStatusTip(qsTr("Fix a drawing that is out of date or out "
-        + "of step: survey tags, layer palette, callout arrows"));
+        + "of step: survey tags, layer palette, layer groups, callout "
+        + "arrows"));
     action.setDefaultCommands(["repairdrawing", "rep"]);
     action.setGroupSortOrder(455);
     action.setSortOrder(10);

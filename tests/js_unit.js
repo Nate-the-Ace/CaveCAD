@@ -29569,82 +29569,105 @@ eqs(CsGeoProject.demPathFor(null), null, "null path in, null out");
 // ---------------------------------------------------------------------
 // CsLayerGroups: which starter group a layer belongs in.
 //
-// The classifier the Group Layers tool runs on every layer in a drawing.
-// Pure -- a name in, a group name out -- and asserted here rather than
-// in the GUI because getting one of these wrong is invisible: the layer
-// still appears, just in the wrong group.
+// The classifier the template sync and Repair Drawing's filing pass both
+// run on every layer. Pure -- a name in, a group name out, or undefined
+// for the plan's own ink, which is left unfiled on purpose. Asserted
+// here rather than in the GUI because getting one of these wrong is
+// invisible: the layer still appears, just in the wrong place.
+//
+// The scheme is Nathan's Truitt Cave arrangement, adopted whole. The
+// order-dependent rules are what these tests exist for.
 // ---------------------------------------------------------------------
 
 loadRepoScript("scripts/CaveSurvey/Core/CsLayers.js");
 loadRepoScript("scripts/CaveSurvey/Core/CsLayerGroups.js");
 
 ok(typeof CsLayerGroups !== "undefined", "CsLayerGroups loaded");
+eqs(CsLayerGroups.GROUPS.length, 6, "six starter groups");
 
-eqs(CsLayerGroups.classify(CsLayers.WALLS_SURVEYED), CsLayerGroups.PLAN,
-    "hand-traced plan linework is Plan");
-eqs(CsLayerGroups.classify(CsLayers.NOTES_HAZARD), CsLayerGroups.PLAN,
-    "a plan note is Plan, not a Notes group of its own");
+// -- the plan's own ink is unfiled, and that is an answer --------------
+
+ok(CsLayerGroups.classify(CsLayers.WALLS_SURVEYED) === undefined,
+    "plan wall linework is left unfiled, so Ungrouped is the working set");
+ok(CsLayerGroups.classify(CsLayers.FLOOR) === undefined,
+    "so is the floor");
+ok(CsLayerGroups.classify(CsLayers.FORMATIONS_DRIP) === undefined,
+    "so are the formations");
+ok(CsLayerGroups.classify(CsLayers.CROSS_SECTION_MARKERS) === undefined,
+    "and the section cut mark, which lives in the plan");
+ok(CsLayerGroups.classify("0") === undefined,
+    "layer 0 stays in front of the caver rather than filed with the border");
+ok(CsLayerGroups.classify("SOME-LAYER-NOBODY-REGISTERED") === undefined,
+    "an unrecognised layer is unfiled rather than guessed at");
+ok(CsLayerGroups.classify(undefined) === undefined,
+    "a missing name is unfiled rather than throwing");
+
+// -- the other two views own their notes and text ----------------------
+
 eqs(CsLayerGroups.classify(CsLayers.PROFILE_CEILING), CsLayerGroups.PROFILE,
-    "hand-traced profile linework is Profile");
+    "hand-traced profile linework is Profile Layers");
 eqs(CsLayerGroups.classify("PROFILE-NOTES-DIG"), CsLayerGroups.PROFILE,
-    "a profile note stays with the profile a caver is working on");
-eqs(CsLayerGroups.classify(CsLayers.SECTION_WALLS_SURVEYED), CsLayerGroups.SECTIONS,
-    "hand-traced section linework is Sections");
+    "a profile note goes with the profile, not with the plan's notes");
+eqs(CsLayerGroups.classify("PROFILE-WATER-PERENNIAL"), CsLayerGroups.PROFILE,
+    "and so does profile water, rather than being pulled into Water Layers");
+eqs(CsLayerGroups.classify(CsLayers.SECTION_WALLS_SURVEYED),
+    CsLayerGroups.SECTIONS, "hand-traced section linework is Cross Section Layers");
+eqs(CsLayerGroups.classify("SECTION-NOTES-DIG"), CsLayerGroups.SECTIONS,
+    "a section note goes with the section");
 
-// CTRL- beats the frame: the survey skeleton is switched off in all
-// three views at once, so it is one group and not three.
+// -- control is one group for all three frames, scans included ---------
+
 eqs(CsLayerGroups.classify(CsLayers.CTRL_SHOTS), CsLayerGroups.CONTROL,
-    "generated plan geometry is Survey control");
+    "generated plan geometry is Control Layers");
 eqs(CsLayerGroups.classify(CsLayers.CTRL_PROFILE_SHOTS), CsLayerGroups.CONTROL,
-    "generated profile geometry is Survey control, not Profile");
+    "generated profile geometry is Control, not Profile");
 eqs(CsLayerGroups.classify(CsLayers.CTRL_SECTION_OUTLINE), CsLayerGroups.CONTROL,
-    "generated section geometry is Survey control, not Sections");
+    "generated section geometry is Control, not Cross Section");
+eqs(CsLayerGroups.classify(CsLayers.CTRL_SCAN), CsLayerGroups.CONTROL,
+    "a sketch scan is Control -- one switch hides everything that is not your ink");
+eqs(CsLayerGroups.classify(CsLayers.CTRL_AERIAL), CsLayerGroups.CONTROL,
+    "and so is the aerial basemap");
+eqs(CsLayerGroups.classify("Defpoints"), CsLayerGroups.CONTROL,
+    "Defpoints is QCAD's bookkeeping and goes with the machinery");
 
-// Scans and basemap beat CTRL-, or several of them would be swallowed.
-eqs(CsLayerGroups.classify(CsLayers.CTRL_SCAN), CsLayerGroups.SCANS,
-    "a sketch scan is Scans & basemap despite its CTRL- prefix");
-eqs(CsLayerGroups.classify(CsLayers.CTRL_AERIAL), CsLayerGroups.SCANS,
-    "the aerial basemap is Scans & basemap");
-eqs(CsLayerGroups.classify(CsLayers.CTRL_CONTOUR_MAJOR), CsLayerGroups.SCANS,
-    "surface contours are Scans & basemap");
-eqs(CsLayerGroups.classify(CsLayers.CTRL_PROFILE_SCAN), CsLayerGroups.SCANS,
-    "a profile scan is Scans & basemap, not Profile");
+// -- the plan's notes, text and water ----------------------------------
+
+eqs(CsLayerGroups.classify(CsLayers.NOTES_HAZARD), CsLayerGroups.NOTES,
+    "a plan note is Notes Layers");
+eqs(CsLayerGroups.classify(CsLayers.TEXT_LABELS), CsLayerGroups.NOTES,
+    "plan text is filed with the plan's notes");
+eqs(CsLayerGroups.classify(CsLayers.WATER_PERENNIAL), CsLayerGroups.WATER,
+    "plan water is its own group");
+
+// -- the page furniture, and only the page furniture -------------------
 
 eqs(CsLayerGroups.classify(CsLayers.BORDER), CsLayerGroups.SHEET,
-    "page furniture is Sheet");
+    "the border is Sheet Layers");
+eqs(CsLayerGroups.classify(CsLayers.NORTH_ARROW), CsLayerGroups.SHEET,
+    "the north arrow is Sheet Layers -- it is not in CsLayers.SHEET_LAYERS at all");
 eqs(CsLayerGroups.classify(CsLayers.TITLE_BLOCK), CsLayerGroups.SHEET,
-    "the title block is Sheet");
+    "the title block is Sheet Layers");
 
-// Per-run variants carry their base layer's prefix, so they land with
-// their base for free -- the same property CsLayers.frameOf relies on.
+// CsLayers.SHEET_LAYERS holds "0" and "Defpoints" as well, and this
+// scheme deliberately files those two elsewhere. Pinned so that reusing
+// that list here later is a test failure rather than a silent change.
+ok(CsLayers.SHEET_LAYERS.indexOf("0") >= 0 &&
+   CsLayerGroups.classify("0") !== CsLayerGroups.SHEET,
+    "the sheet group is NOT CsLayers.SHEET_LAYERS -- layer 0 is excluded");
+ok(CsLayers.SHEET_LAYERS.indexOf("NORTH-ARROW") < 0,
+    "and it is not a subset of it either -- NORTH-ARROW is only here");
+
+// -- per-run variants ride on their base layer's prefix ----------------
+
 eqs(CsLayerGroups.classify("PROFILE-CEILING-A"), CsLayerGroups.PROFILE,
     "a per-run profile variant lands with the profile");
-eqs(CsLayerGroups.classify("CTRL-SCAN-A"), CsLayerGroups.SCANS,
-    "a per-run scan variant lands with the scans");
+eqs(CsLayerGroups.classify("CTRL-SCAN-A"), CsLayerGroups.CONTROL,
+    "a per-run scan variant lands with the control layers");
 eqs(CsLayerGroups.classify("CTRL-PROFILE-SHOTS-B"), CsLayerGroups.CONTROL,
-    "a per-run control variant lands with the control layers");
+    "so does a per-run control variant");
 
-// CROSS-SECTION-MARKERS is the mark in the PLAN saying where a section
-// was cut. It matches neither section prefix and must stay with the plan
-// -- the same invariant CsLayers.frameOf is tested for.
-eqs(CsLayerGroups.classify(CsLayers.CROSS_SECTION_MARKERS), CsLayerGroups.PLAN,
-    "the section cut mark stays with the plan");
+// -- every classification names a group that exists --------------------
 
-// Layer 0 and Defpoints are in CsLayers.SHEET_LAYERS, so they answer
-// "sheet" like the border and title block do. That is the right home for
-// them: they are page bookkeeping, not cave.
-eqs(CsLayerGroups.classify("0"), CsLayerGroups.SHEET,
-    "layer 0 files with the page furniture, as CsLayers already frames it");
-eqs(CsLayerGroups.classify("Defpoints"), CsLayerGroups.SHEET,
-    "and so does Defpoints");
-eqs(CsLayerGroups.classify("SOME-LAYER-NOBODY-REGISTERED"), CsLayerGroups.PLAN,
-    "an unrecognised layer lands in Plan rather than nowhere");
-eqs(CsLayerGroups.classify(undefined), CsLayerGroups.PLAN,
-    "a missing name lands somewhere rather than throwing");
-
-// Every layer in the registry must classify into a group that exists.
-// A classify() returning something not in GROUPS would make the tool
-// write a group the palette never orders.
 (function() {
     var bad = [];
     for (var key in CsLayers) {
@@ -29652,30 +29675,52 @@ eqs(CsLayerGroups.classify(undefined), CsLayerGroups.PLAN,
             continue;
         }
         var group = CsLayerGroups.classify(CsLayers[key]);
-        if (CsLayerGroups.GROUPS.indexOf(group) < 0) {
+        if (group !== undefined && CsLayerGroups.GROUPS.indexOf(group) < 0) {
             bad.push(CsLayers[key] + " -> " + group);
         }
     }
     eqs(bad.length, 0,
-        "every registry layer classifies into a group that exists (" +
-        bad.slice(0, 3).join("; ") + ")");
+        "every registry layer classifies into a group that exists, or into " +
+        "none (" + bad.slice(0, 3).join("; ") + ")");
 })();
 
-// plan() buckets names and keeps every group as a key, so a cave with no
-// sections yet still shows the Sections group to trace into.
+// The plan's ink is a real share of the registry, not one stray layer --
+// a classifier that started filing everything would still pass the test
+// above.
+(function() {
+    var unfiled = 0, total = 0;
+    for (var key in CsLayers) {
+        if (!CsLayers.hasOwnProperty(key) || typeof CsLayers[key] !== "string") {
+            continue;
+        }
+        total++;
+        if (CsLayerGroups.classify(CsLayers[key]) === undefined) {
+            unfiled++;
+        }
+    }
+    ok(unfiled > 20 && unfiled < total / 2,
+        "the plan's own ink is a substantial minority of the registry (" +
+        unfiled + " of " + total + " unfiled)");
+})();
+
+// -- plan() buckets, and keeps empty groups as keys --------------------
+
 (function() {
     var planned = CsLayerGroups.plan([
-        CsLayers.WALLS_SURVEYED, CsLayers.CTRL_SHOTS, CsLayers.CTRL_AERIAL
+        CsLayers.WALLS_SURVEYED, CsLayers.CTRL_SHOTS, CsLayers.WATER_PERENNIAL
     ]);
-    eqs(planned[CsLayerGroups.PLAN].join(","), CsLayers.WALLS_SURVEYED,
-        "plan() buckets a plan layer");
     eqs(planned[CsLayerGroups.CONTROL].join(","), CsLayers.CTRL_SHOTS,
         "plan() buckets a control layer");
-    eqs(planned[CsLayerGroups.SCANS].join(","), CsLayers.CTRL_AERIAL,
-        "plan() buckets the basemap");
+    eqs(planned[CsLayerGroups.WATER].join(","), CsLayers.WATER_PERENNIAL,
+        "plan() buckets a water layer");
     ok(!isNull(planned[CsLayerGroups.SECTIONS]) &&
        planned[CsLayerGroups.SECTIONS].length === 0,
         "an empty group is still a key, so the palette shows it");
+    var filed = 0;
+    for (var g in planned) {
+        if (planned.hasOwnProperty(g)) { filed += planned[g].length; }
+    }
+    eqs(filed, 2, "and the unfiled plan layer appears under no key at all");
 })();
 
 // ---------------------------------------------------------------------

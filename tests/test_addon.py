@@ -586,6 +586,46 @@ class TestIncludes(unittest.TestCase):
                             "%s includes missing %s" % (filename, target))
 
 
+class TestTemplateLayerGroups(unittest.TestCase):
+    """The shipped template's layer groups must be what CsLayerGroups says.
+
+    The template ships with its layers already filed, so a new cave map
+    opens with the Layer Manager arranged and nothing to run. That only
+    holds if the stored arrangement and the classifier agree: a layer
+    added to the registry, or a rule changed in CsLayerGroups, otherwise
+    leaves the template saying something nobody can reproduce.
+
+    Asserted by running the sync tool over the shipped bytes and
+    demanding the pure skip path, the same bargain
+    TestSyncTemplateLayers strikes -- which means the real classifier
+    does the comparing and there is no second copy of the rules here to
+    drift.
+    """
+
+    CAVECAD = "/Applications/CaveCAD.app/Contents/MacOS/CaveCAD"
+
+    def setUp(self):
+        if not os.path.exists(self.CAVECAD):
+            self.skipTest("CaveCAD not found at %s -- see run_all.sh" %
+                          self.CAVECAD)
+
+    def test_the_shipped_template_is_already_grouped(self):
+        result = subprocess.run(
+            [self.CAVECAD, "-no-dock-icon", "-no-gui",
+             "-allow-multiple-instances", "-autostart",
+             os.path.join(REPO, "tools", "sync_template_groups.js"), REPO],
+            stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=180)
+        output = result.stdout.decode("utf-8", "replace")
+        plan = os.path.join(TEMPLATES, "NSS_Cave_Template_PLAN.dxf")
+        self.assertIn(
+            "skip  %s -- groups already match CsLayerGroups" % plan,
+            output.splitlines(),
+            "the shipped template's layer groups are out of step with "
+            "CsLayerGroups -- re-run tools/sync_template_groups.js. "
+            "Got: %r" % output)
+        self.assertIn("### SYNC TEMPLATE GROUPS OK", output.splitlines())
+
+
 class TestFunctionPropertyShadowing(unittest.TestCase):
     """A static named apply(), call(), bind() or name is a silent no-op.
 
@@ -598,7 +638,8 @@ class TestFunctionPropertyShadowing(unittest.TestCase):
 
     Cost two separate live debugging sessions in one day -- once as
     LayerStates.apply in the fork's Layer Manager, once as
-    GroupLayers.apply here -- which is why it is a test and not a note.
+    CsLayerGroups' filing pass here -- which is why it is a test and
+    not a note.
 
     A plain object (`var CsRestyle = {};`) has no such properties and is
     not flagged: CsRestyle.apply, CsScanFit.apply and CsRevise.apply are
@@ -1744,7 +1785,6 @@ MENU = {
     "Callout/Callout.js":                 (454, 40, ["callout", "cal", "cscallout", "cscal"]),
     # 455 -- fix and share
     "CheckMap/CheckMap.js":               (455, 5, ["checkmap", "chk"]),
-    "GroupLayers/GroupLayers.js":         (455, 7, ["grouplayers", "gl"]),
     "RepairDrawing/RepairDrawing.js":     (455, 10, ["repairdrawing", "rep"]),
     "PackageCave/PackageCave.js":         (455, 20, ["packagecave", "pc", "pkgcave"]),
 }
@@ -2035,7 +2075,7 @@ class TestSheetFileGuard(unittest.TestCase):
         "DrawPanel", "FeatureTrace", "GenerateProfile", "ImportCaveSurvey",
         "LoopErrors", "RepairDrawing", "ScatterBreakdown", "ShapedLines",
         "SketchScans", "SurfaceData", "SurveyNotebook", "SymbolPalette",
-        "ResetDrawing", "EntranceLocation", "GroupLayers",
+        "ResetDrawing", "EntranceLocation",
     ]
 
     # Tools that only READ, and are welcome on a sheet: checking a sheet

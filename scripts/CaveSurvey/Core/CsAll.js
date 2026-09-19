@@ -105,9 +105,8 @@ include(includeBasePath + "/CsLayers.js");
 include(includeBasePath + "/CsLayerVariants.js");
 
 // After CsLayers, whose frameOf it reuses: which starter group each
-// layer belongs in, for the GroupLayers tool. Pure -- it never touches a
-// document, and it knows nothing about CaveCAD's Layer Manager beyond
-// handing it a list of names.
+// layer belongs in, for the template sync and Repair Drawing's filing
+// pass. Pure but for fileInto, the way CsLayers is pure but for ensure.
 include(includeBasePath + "/CsLayerGroups.js");
 // After CsLayers and CsLayerVariants: CsRestyle re-applies
 // CsLayers.styleOf to layers that already exist, and resolves variant

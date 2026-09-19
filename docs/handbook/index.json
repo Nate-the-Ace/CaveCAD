@@ -358,17 +358,6 @@
       ]
     },
     {
-      "id": "group-layers",
-      "title": "Group Layers",
-      "class": "tool",
-      "file": "group-layers.html",
-      "stage": 455,
-      "tools": [
-        "GroupLayers"
-      ],
-      "shots": []
-    },
-    {
       "id": "repair-drawing",
       "title": "Repair Drawing",
       "class": "tool",

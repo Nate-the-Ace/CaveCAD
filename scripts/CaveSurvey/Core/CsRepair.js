@@ -1,14 +1,16 @@
 /**
  * CsRepair.js
  *
- * The three repair passes, run together and reported together.
+ * The repair passes, run together and reported together.
  *
- * They were three menu entries once, which meant the honest answer to
- * "which one do I run?" was "all three, in this order" -- an order
+ * They were separate menu entries once, which meant the honest answer to
+ * "which one do I run?" was "all of them, in this order" -- an order
  * nobody had written down. The order matters: rebuild first, because a
  * legacy drawing's tags have to be current before anything reads them;
- * restyle second, because rebuild can add layers; callout sync last,
- * because a restyle can move a note's layer out from under its arrows.
+ * restyle second, because rebuild can add layers; LAYER GROUPS after
+ * restyle, because restyle is what adds the layers that then need
+ * filing; callout sync last, because a restyle can move a note's layer
+ * out from under its arrows.
  */
 var CsRepair = {};
 
@@ -19,8 +21,9 @@ var CsRepair = {};
  * against a document that is NOT the active one: all three passes
  * succeed on the drawing passed in.
  *
- * \param opts Object with boolean rebuild, restyle, callouts. A missing
- *             key means run that pass -- the dialog's default is all three.
+ * \param opts Object with boolean rebuild, restyle, groups, callouts. A
+ *             missing key means run that pass -- the dialog's default is
+ *             all of them.
  * \return {lines: Array of String, changed: Boolean}
  */
 CsRepair.run = function(doc, di, opts) {
@@ -66,6 +69,25 @@ CsRepair.run = function(doc, di, opts) {
         }
     } else {
         lines.push(qsTr("Layers: skipped."));
+    }
+
+    if (opts.groups !== false) {
+        var g = CsLayerGroups.fileInto(doc);
+        if (isNull(g)) {
+            // No Layer Manager in this build -- say so rather than
+            // reporting a pass that did not happen as a success.
+            lines.push(qsTr("Layer groups: this build has no Layer "
+                + "Manager palette."));
+        } else if (g.filed === 0 && g.groups === 0) {
+            lines.push(qsTr("Layer groups: already filed."));
+        } else {
+            lines.push(qsTr("Layer groups: %1 filed, %2 already there, "
+                + "%3 left in Ungrouped.")
+                .arg(g.filed).arg(g.already).arg(g.unfiled));
+            changed = true;
+        }
+    } else {
+        lines.push(qsTr("Layer groups: skipped."));
     }
 
     if (opts.callouts !== false) {

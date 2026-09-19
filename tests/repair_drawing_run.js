@@ -91,11 +91,13 @@ ok(before !== null && before.survey !== null,
 ok(before.survey.shots.length === 2, "the fixture drawing has two shots");
 
 // ---------------------------------------------------------------------
-// Every pass, defaults -- opts omitted entirely. FOUR now: relinking a
-// scan whose file reference was lost joined the repair in 0.9.126.0.
+// Every pass, defaults -- opts omitted entirely. FIVE now: relinking a
+// scan whose file reference was lost joined the repair in 0.9.126.0, and
+// filing the layers into the Layer Manager's groups in 0.9.141.0 --
+// which is also where the standalone Group Layers menu entry went.
 // ---------------------------------------------------------------------
 var all = CsRepair.run(doc, di, {});
-ok(all.lines.length === 4, "every pass reports a line");
+ok(all.lines.length === 5, "every pass reports a line");
 ok(all.changed === true, "the passes changed something");
 
 // ---------------------------------------------------------------------
@@ -104,8 +106,9 @@ ok(all.changed === true, "the passes changed something");
 // ---------------------------------------------------------------------
 var none = CsRepair.run(doc, di,
     { rebuild: false, restyle: false, callouts: false,
-      relinkScans: false });
+      relinkScans: false, groups: false });
 ok(none.changed === false, "skipping every pass changes nothing");
+ok(none.lines.length === 5, "and every skipped pass still reports");
 ok(none.lines.join(" ").indexOf("skipped") !== -1,
     "a skipped pass says so");
 
@@ -116,8 +119,8 @@ ok(none.lines.join(" ").indexOf("skipped") !== -1,
 // ---------------------------------------------------------------------
 var one = CsRepair.run(doc, di,
     { rebuild: false, restyle: true, callouts: false,
-      relinkScans: false });
-ok(one.lines.length === 4, "a single pass still reports every pass");
+      relinkScans: false, groups: false });
+ok(one.lines.length === 5, "a single pass still reports every pass");
 
 var out;
 if (failures.length === 0) {
