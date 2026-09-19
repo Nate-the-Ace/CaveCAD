@@ -563,8 +563,8 @@ CsLocationPick.lowPointNear = function(doc, point, radius) {
     // measuring a distance from a drawing point to one is normally
     // comparing two different coordinate systems -- CsContour.BLOCK is
     // the exception, and only because Surface Data inserts it once at
-    // the origin with identity scale and rotation. No other block is
-    // read here.
+    // its own base point, unscaled and unrotated, which shifts its
+    // contents by nothing. No other block is read here.
     var found = CsContour.drawnEntities(doc);
     for (var i = 0; i < found.length; i++) {
         var e = found[i];

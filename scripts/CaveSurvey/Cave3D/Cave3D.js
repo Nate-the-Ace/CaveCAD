@@ -482,10 +482,10 @@ Cave3D.terrainContoursFromDrawing = function(doc, unit, offset) {
         CsUnits.METERS, unit);
     var seen = {};
 
-    // The contours are drawn inside CsContour.BLOCK, inserted at the
-    // origin unscaled and unrotated, so the block's own coordinates
-    // are the drawing's -- which is what lets this read them without
-    // composing the reference's transform.
+    // The contours are drawn inside CsContour.BLOCK, inserted at its
+    // own base point (the entrance) unscaled and unrotated, so the
+    // block's own coordinates are the drawing's -- which is what lets
+    // this read them without composing the reference's transform.
     var found = CsContour.drawnEntities(doc);
     for (var i = 0; i < found.length; i++) {
         var e = found[i];

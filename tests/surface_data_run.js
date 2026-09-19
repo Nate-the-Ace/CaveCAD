@@ -188,7 +188,11 @@ for (var gr = 0; gr < gh; gr++) {
 var gGrid = { values: gvals, width: gw, height: gh };
 var gBbox = CsGeoProject.mercatorBbox(37.0, -85.0,
     { width: 400, height: 400 }, { x: 0, y: 0 });
-var gAnchor = { lat: 37.0, lon: -85.0, pos: { x: 0, y: 0 }, name: "A1" };
+// A POSITION WELL AWAY FROM THE ORIGIN, deliberately: the block's base
+// point is the entrance, so an anchor at (0,0) would agree with a
+// drawing origin by accident and prove nothing.
+var gAnchor = { lat: 37.0, lon: -85.0, pos: { x: 120, y: -40 },
+                name: "A1" };
 
 function contourBlockRefs(doc) {
     var found = [];
@@ -239,9 +243,35 @@ ok(refsFirst.length === 1,
     "one insert carries the whole set (got " + refsFirst.length + ")");
 if (refsFirst.length === 1) {
     var refPos = refsFirst[0].getData().getPosition();
-    ok(refPos.x === 0 && refPos.y === 0,
-        "the insert is at the origin -- block coordinates ARE drawing " +
-        "coordinates");
+    ok(refPos.x === 120 && refPos.y === -40,
+        "the insert sits on the entrance station (got " + refPos.x + "," +
+        refPos.y + ")");
+    var basePoint = docAnchored.queryBlock(blockIdFirst).getOrigin();
+    ok(basePoint.x === 120 && basePoint.y === -40,
+        "the block's base point is the entrance too -- that is the grip");
+    ok(refPos.x === basePoint.x && refPos.y === basePoint.y,
+        "insert equals base point, so the contents are shifted by " +
+        "nothing and block coordinates ARE drawing coordinates");
+}
+
+// The proof of that last one: a contour drawn for this grid must lie
+// near the anchor, not near the drawing origin.
+var inBlockIds = docAnchored.queryBlockEntities(blockIdFirst);
+var sample = null;
+for (var sv = 0; sv < inBlockIds.length; sv++) {
+    var se = docAnchored.queryEntity(inBlockIds[sv]);
+    if (!isNull(se) && CsTags.getNumber(se, "ContourElevation") !== null) {
+        sample = se;
+        break;
+    }
+}
+ok(sample !== null, "a contour line is there to measure");
+if (sample !== null) {
+    var sBox = sample.getBoundingBox();
+    var cx = (sBox.getMinimum().x + sBox.getMaximum().x) / 2.0;
+    ok(Math.abs(cx - 120) < 4000,
+        "the contour geometry is in DRAWING coordinates, around the " +
+        "anchor (centre x " + Math.round(cx) + ")");
 }
 
 // Everything the readers need is still findable through the block.

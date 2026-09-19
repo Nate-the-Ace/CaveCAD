@@ -436,14 +436,20 @@ CsContour.sampleAt = function(values, w, h, x, y) {
 // ============================================================
 // The drawn side: where a fetched contour set LIVES in a drawing.
 //
-// Surface Data draws its contours into ONE block, inserted once at the
-// drawing's origin with identity scale and rotation, so a caver can
-// select the whole surface with a single click instead of a window
-// over a thousand polylines. The identity insert is what lets everything
-// downstream keep reading block-local coordinates as drawing
-// coordinates -- change it and CsLocationPick.lowPointNear and
-// Cave3D.terrainContoursFromDrawing both start measuring against a
-// frame the contours are not in.
+// Surface Data draws its contours into ONE block, inserted once, so a
+// caver can select the whole surface with a single click instead of a
+// window over a thousand polylines.
+//
+// THE BLOCK'S BASE POINT IS THE ENTRANCE STATION, and the reference is
+// inserted at that same point, unscaled and unrotated. A reference
+// draws its contents shifted by (insert - base), so setting the two
+// equal shifts them by nothing: the geometry inside the block is still
+// in DRAWING coordinates, and the grip a caver grabs to move the
+// surface sits on the entrance rather than on a drawing origin that
+// may be a mile away. Break that equality -- a different base point, a
+// dragged insert, a scale, a rotation -- and CsLocationPick.
+// lowPointNear and Cave3D.terrainContoursFromDrawing both start
+// measuring against a frame the contours are no longer drawn in.
 //
 // The tags stay on the entities INSIDE the block (SurfaceContours=1,
 // ContourElevation=<drawing units>), and the reference carries

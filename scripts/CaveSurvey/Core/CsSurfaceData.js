@@ -826,7 +826,11 @@ CsSurfaceData.drawContours = function(doc, di, grid, levels, interval, bbox,
     CsLayers.ensure(doc, di, CsLayers.CTRL_CONTOUR);
     CsLayers.ensure(doc, di, CsLayers.CTRL_CONTOUR_MAJOR);
 
-    var blockId = CsSurfaceData.contourBlockId(doc, di);
+    // THE BASE POINT IS THE ENTRANCE, not the drawing origin: that is
+    // the grip a caver grabs, and the surface's one meaningful handle
+    // is the station the whole fetch was anchored on.
+    var base = new RVector(anchor.pos.x, anchor.pos.y);
+    var blockId = CsSurfaceData.contourBlockId(doc, di, base);
     if (blockId === null) {
         return { lines: 0 };
     }
@@ -851,10 +855,15 @@ CsSurfaceData.drawContours = function(doc, di, grid, levels, interval, bbox,
         di.applyOperation(lower);
     }
 
-    // One insert, at the origin, scale 1, rotation 0 -- the identity
-    // CsContour.drawnEntities' readers depend on.
+    // One insert, AT THE BASE POINT, scale 1, rotation 0. A block
+    // reference draws its contents shifted by (insert - base), so
+    // inserting at the base point shifts them by nothing: the contour
+    // geometry inside the block stays in drawing coordinates, which is
+    // what CsContour.drawnEntities' readers depend on, while the grip
+    // the caver drags sits on the entrance instead of on a drawing
+    // origin that may be nowhere near the cave.
     var ref = new RBlockReferenceEntity(doc,
-        new RBlockReferenceData(blockId, new RVector(0, 0),
+        new RBlockReferenceData(blockId, base,
             new RVector(1, 1), 0.0));
     ref.setLayerId(doc.getLayerId(CsLayers.CTRL_CONTOUR));
     ref.setDrawOrder(floor);
@@ -872,18 +881,25 @@ CsSurfaceData.drawContours = function(doc, di, grid, levels, interval, bbox,
 };
 
 /**
- * The contour block, made if this drawing has none yet. Empty on the
- * way out: the fetch that calls this has already erased the previous
- * run, definition and all.
+ * The contour block, made if this drawing has none yet, with its base
+ * point at `base` -- the entrance station. Empty on the way out: the
+ * fetch that calls this has already erased the previous run,
+ * definition and all.
+ *
+ * A base point that disagrees with where the reference is inserted
+ * shifts every contour by the difference, so these two are set
+ * together and nowhere else.
  *
  * \return the block id, or null when it could not be made.
  */
-CsSurfaceData.contourBlockId = function(doc, di) {
+CsSurfaceData.contourBlockId = function(doc, di, base) {
+    var at = isNull(base) ? new RVector(0, 0) :
+        new RVector(base.x, base.y);
     var existing = CsContour.blockIdOf(doc);
     if (existing !== null) {
         return existing;
     }
-    var block = new RBlock(doc, CsContour.BLOCK, new RVector(0, 0));
+    var block = new RBlock(doc, CsContour.BLOCK, at);
     di.applyOperation(new RAddObjectOperation(block, false));
     return CsContour.blockIdOf(doc);
 };
