@@ -298,9 +298,23 @@ CsLayerGroups.plan = function(layerNames) {
 // nothing about what states are for.
 // ---------------------------------------------------------------------
 
-/** Off, frozen, locked -- the code LayerStates reads. */
-CsLayerGroups.CODE_ON = "000";
-CsLayerGroups.CODE_OFF = "110";
+/**
+ * The two records the shipped states use.
+ *
+ * VISIBILITY ONLY, deliberately. A LayerStates record may carry colour,
+ * linetype and lineweight as well, and a state a caver SAVES carries
+ * all of it -- but a state shipped in the template must not, or
+ * applying "Plot ready" would also put every layer back to the palette
+ * the template was built with and quietly undo Restyle Layers. A field
+ * a record omits is left alone on restore, which is exactly what these
+ * want.
+ */
+CsLayerGroups.SHOWN = function() {
+    return { off: false, frozen: false };
+};
+CsLayerGroups.HIDDEN = function() {
+    return { off: true, frozen: true };
+};
 
 CsLayerGroups.STATE_TRACING = "Tracing";
 CsLayerGroups.STATE_PLOT = "Plot ready";
@@ -329,9 +343,9 @@ CsLayerGroups.templateStates = function(layerNames) {
         var name = layerNames[i];
         var group = CsLayerGroups.classify(name);
         tracing[name] = hiddenWhileTracing.indexOf(group) >= 0 ?
-            CsLayerGroups.CODE_OFF : CsLayerGroups.CODE_ON;
+            CsLayerGroups.HIDDEN() : CsLayerGroups.SHOWN();
         plot[name] = hiddenWhenPlotting.indexOf(group) >= 0 ?
-            CsLayerGroups.CODE_OFF : CsLayerGroups.CODE_ON;
+            CsLayerGroups.HIDDEN() : CsLayerGroups.SHOWN();
     }
 
     var states = {};

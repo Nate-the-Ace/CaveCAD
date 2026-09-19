@@ -29778,24 +29778,35 @@ eqs(CsLayerGroups.classify("WALLS-SURVEYED-A"), CsLayerGroups.PASSAGE,
     var tracing = states[CsLayerGroups.STATE_TRACING];
     var plot = states[CsLayerGroups.STATE_PLOT];
 
-    eqs(tracing[CsLayers.CTRL_SCAN], CsLayerGroups.CODE_ON,
+    var shown = function(r) { return r.off === false && r.frozen === false; };
+    var hidden = function(r) { return r.off === true && r.frozen === true; };
+
+    ok(shown(tracing[CsLayers.CTRL_SCAN]),
         "Tracing keeps the scan on -- there has to be something to trace");
-    eqs(tracing[CsLayers.CTRL_SHOTS], CsLayerGroups.CODE_ON,
+    ok(shown(tracing[CsLayers.CTRL_SHOTS]),
         "and the stations, to trace it onto");
-    eqs(tracing[CsLayers.BORDER], CsLayerGroups.CODE_OFF,
+    ok(hidden(tracing[CsLayers.BORDER]),
         "and puts the page furniture away, which is in the way while working");
-    eqs(tracing[CsLayers.WALLS_SURVEYED], CsLayerGroups.CODE_ON,
+    ok(shown(tracing[CsLayers.WALLS_SURVEYED]),
         "the cave itself stays on, obviously");
 
-    eqs(plot[CsLayers.CTRL_SCAN], CsLayerGroups.CODE_OFF,
+    ok(hidden(plot[CsLayers.CTRL_SCAN]),
         "Plot ready drops the scan -- a plotted sheet carrying somebody's " +
         "handwriting is the fault Sheet Setup already refuses");
-    eqs(plot[CsLayers.CTRL_SHOTS], CsLayerGroups.CODE_OFF,
+    ok(hidden(plot[CsLayers.CTRL_SHOTS]),
         "and the survey skeleton, which is not map ink");
-    eqs(plot[CsLayers.BORDER], CsLayerGroups.CODE_ON,
+    ok(shown(plot[CsLayers.BORDER]),
         "and brings the page back");
-    eqs(plot[CsLayers.WALLS_SURVEYED], CsLayerGroups.CODE_ON,
+    ok(shown(plot[CsLayers.WALLS_SURVEYED]),
         "leaving the cave and the page");
+
+    // VISIBILITY ONLY. A shipped state that also carried colour would
+    // undo Restyle Layers every time somebody applied it.
+    ok(isNull(tracing[CsLayers.WALLS_SURVEYED].color) &&
+       isNull(tracing[CsLayers.WALLS_SURVEYED].linetype) &&
+       isNull(tracing[CsLayers.WALLS_SURVEYED].lineweight),
+        "a shipped state carries no appearance, so applying it cannot " +
+        "put the palette back to the day the template was built");
 
     // Every layer gets an entry in both, or a restore would leave the
     // odd one wherever the last state left it.
@@ -29858,6 +29869,21 @@ ok(layerManagerLoaded && typeof LayerStates === "function",
 
 if (layerManagerLoaded) {
 
+    // A state's entry is a RECORD now -- off/frozen/locked plus
+    // plottable, snappable, colour, linetype and lineweight, every
+    // field optional. These two keep the tests below readable: rec()
+    // builds a flags-only record from the old three-character spelling,
+    // flagsOf() reads one back out.
+    var rec = function(code) { return LayerStates.unpackRecord(code); };
+    var flagsOf = function(record) {
+        if (isNull(record)) { return undefined; }
+        return LayerStates.packRecord(record).split(LayerStates.FIELD_SEP)[0]
+            .substring(0, 3);
+    };
+    var stateCode = function(reg, name, layerName) {
+        return flagsOf(LayerStates.getRecord(reg, name, layerName));
+    };
+
     // A stand-in for RLayer: the three flags, which is every part of a
     // layer these models touch now that nothing is stored on one.
     function FakeLayer(name) {
@@ -29865,6 +29891,16 @@ if (layerManagerLoaded) {
         this.off = false;
         this.frozen = false;
         this.locked = false;
+        this.plottable = true;
+        this.snappable = true;
+        // A stand-in RColor: colorToText only asks it these four things.
+        this.color = { isByLayer: function() { return false; },
+                       isByBlock: function() { return false; },
+                       red: function() { return 255; },
+                       green: function() { return 255; },
+                       blue: function() { return 255; } };
+        this.lineweight = 25;
+        this.linetypeId = 2;
     }
     FakeLayer.prototype.getName = function() { return this.name; };
     FakeLayer.prototype.isOff = function() { return this.off; };
@@ -29873,6 +29909,16 @@ if (layerManagerLoaded) {
     FakeLayer.prototype.setFrozen = function(v) { this.frozen = v; };
     FakeLayer.prototype.isLocked = function() { return this.locked; };
     FakeLayer.prototype.setLocked = function(v) { this.locked = v; };
+    FakeLayer.prototype.isPlottable = function() { return this.plottable; };
+    FakeLayer.prototype.setPlottable = function(v) { this.plottable = v; };
+    FakeLayer.prototype.isSnappable = function() { return this.snappable; };
+    FakeLayer.prototype.setSnappable = function(v) { this.snappable = v; };
+    FakeLayer.prototype.getColor = function() { return this.color; };
+    FakeLayer.prototype.setColor = function(v) { this.color = v; };
+    FakeLayer.prototype.getLineweight = function() { return this.lineweight; };
+    FakeLayer.prototype.setLineweight = function(v) { this.lineweight = v; };
+    FakeLayer.prototype.getLinetypeId = function() { return this.linetypeId; };
+    FakeLayer.prototype.setLinetypeId = function(v) { this.linetypeId = v; };
 
     // A stand-in for RDocument: a variable store and a layer table.
     function FakeDoc(layerNames) {
@@ -29989,14 +30035,14 @@ if (layerManagerLoaded) {
     LayerGroups.addTo(sweepReg, "WALLS-SURVEYED", "Plan work");
     LayerGroups.addTo(sweepReg, "GONE-LAYER", "Plan work");
     LayerStates.setState(sweepReg, "Plan only",
-        { "WALLS-SURVEYED": "000", "GONE-LAYER": "110" });
+        { "WALLS-SURVEYED": rec("000"), "GONE-LAYER": rec("110") });
 
     ok(LayerGroups.sweep(sweepReg, ["WALLS-SURVEYED"]), "the sweep reports a drop");
     eqs(LayerGroups.membersOf(sweepReg, "Plan work").join(","), "WALLS-SURVEYED",
         "a layer the document no longer has is dropped from its group");
-    ok(LayerStates.getCode(sweepReg, "Plan only", "GONE-LAYER") === undefined,
+    ok(LayerStates.getRecord(sweepReg, "Plan only", "GONE-LAYER") === undefined,
         "and from every state");
-    eqs(LayerStates.getCode(sweepReg, "Plan only", "WALLS-SURVEYED"), "000",
+    eqs(stateCode(sweepReg, "Plan only", "WALLS-SURVEYED"), "000",
         "while the layers that remain keep their entries");
     ok(!LayerGroups.sweep(sweepReg, ["WALLS-SURVEYED"]),
         "a second sweep finds nothing to drop");
@@ -30013,7 +30059,7 @@ if (layerManagerLoaded) {
     LayerGroups.addTo(writeReg, "WALLS-SURVEYED", "Trip 3");
     LayerGroups.createGroup(writeReg, "Empty on purpose");
     LayerStates.setState(writeReg, "Plan only",
-        { "WALLS-SURVEYED": "000", "CTRL-SHOTS": "110" });
+        { "WALLS-SURVEYED": rec("000"), "CTRL-SHOTS": rec("110") });
     LayerGroups.writeRegistry(lmDoc, writeReg);
     ok(lmDoc.modified, "writing the registry marks the document modified");
 
@@ -30023,19 +30069,46 @@ if (layerManagerLoaded) {
     eqs(LayerGroups.membersOf(back, "Plan work").join(","), "WALLS-SURVEYED,CTRL-SHOTS",
         "members round-trip");
     eqs(LayerStates.stateNames(back).join(","), "Plan only", "state names round-trip");
-    eqs(LayerStates.getCode(back, "Plan only", "CTRL-SHOTS"), "110",
+    eqs(stateCode(back, "Plan only", "CTRL-SHOTS"), "110",
         "state codes round-trip against the right layer");
-    ok(LayerStates.getCode(back, "Plan only", "CTRL-STATIONS") === undefined,
+    ok(LayerStates.getRecord(back, "Plan only", "CTRL-STATIONS") === undefined,
         "a layer the state never mentioned stays unmentioned");
 
-    // The stored form is a name table plus indices into it, and a state's
-    // codes are positional against that table. Pin the shape: a decode
-    // that silently shifted by one would still read back SOMETHING.
+    // The stored form is a name table plus indices into it, and a
+    // state's records are positional against that table. Pin the shape:
+    // a decode that silently shifted by one would still read back
+    // SOMETHING.
     var stored = LayerGroups.encode(writeReg);
-    eqs(stored.v, 1, "the stored form carries a version");
+    eqs(stored.v, LayerGroups.VERSION, "the stored form carries a version");
+    eqs(stored.v, 2, "and it is 2 -- the version that added appearance");
     eqs(stored.l.length, 2, "the table holds each referenced layer once");
-    eqs(stored.s[0].c.length, stored.l.length * 3,
-        "a state's code string covers the whole table, three characters each");
+    eqs(stored.s[0].r.length, stored.l.length,
+        "a state carries one record slot per table entry");
+    eqs(stored.s[0].r[0].split(LayerStates.FIELD_SEP).length, 4,
+        "each record has its four slots: flags, colour, linetype, lineweight");
+    eqs(stored.s[0].r[0].substring(0, 3), "000",
+        "with the flags first, still readable at a glance");
+    eqs(LayerGroups.encode(LayerGroups.deserialize(
+            LayerGroups.serialize(writeReg))).s[0].r.length,
+        stored.s[0].r.length,
+        "and the slot count survives a round trip");
+
+    // A version 1 blob is still read: its states were three characters
+    // per table entry and meant flags only, which is what they become.
+    (function() {
+        var v1 = LayerGroups.decode({
+            v: 1, l: ["A", "B"], g: [],
+            s: [{ n: "Old", c: "110" + LayerGroups.NO_CODE }]
+        });
+        eqs(LayerStates.stateNames(v1).join(","), "Old",
+            "a version 1 state still reads");
+        eqs(flagsOf(LayerStates.getRecord(v1, "Old", "A")), "110",
+            "with its flags");
+        ok(LayerStates.getRecord(v1, "Old", "B") === undefined,
+            "and its placeholder still means no entry");
+        ok(isNull(LayerStates.getRecord(v1, "Old", "A").color),
+            "and no appearance, because version 1 never held any");
+    })();
 
     // -- chunking -----------------------------------------------------
     //
@@ -30056,7 +30129,7 @@ if (layerManagerLoaded) {
     }
     var bigFlags = {};
     for (bi = 0; bi < bigNames.length; bi++) {
-        bigFlags[bigNames[bi]] = "110";
+        bigFlags[bigNames[bi]] = rec("110");
     }
     LayerStates.setState(bigReg, "All hidden", bigFlags);
     LayerGroups.writeRegistry(bigDoc, bigReg);
@@ -30078,7 +30151,7 @@ if (layerManagerLoaded) {
     var bigBack = LayerGroups.readRegistry(bigDoc);
     eqs(LayerGroups.membersOf(bigBack, "Everything").length, 300,
         "a chunked registry reassembles completely");
-    eqs(LayerStates.getCode(bigBack, "All hidden", bigNames[299]), "110",
+    eqs(stateCode(bigBack, "All hidden", bigNames[299]), "110",
         "and the last layer's state code survives the chunk boundaries");
 
     // Shrinking must not leave a tail of stale chunks, or the next read
@@ -30228,20 +30301,37 @@ if (layerManagerLoaded) {
     // -- flag codes ---------------------------------------------------
 
     var sl = new FakeLayer("CTRL-CLOSURE");
-    eqs(LayerStates.encode(sl), "000", "a plain layer encodes as all clear");
+    eqs(flagsOf(LayerStates.encode(undefined, sl)), "000",
+        "a plain layer encodes as all clear");
     sl.setOff(true);
     sl.setLocked(true);
-    eqs(LayerStates.encode(sl), "101", "off and locked encode in their own places");
+    eqs(flagsOf(LayerStates.encode(undefined, sl)), "101",
+        "off and locked encode in their own places");
+
+    // A saved state is a photograph of the WHOLE layer, not just
+    // whether you can see it: that is the difference between this and
+    // the shipped template states, which carry visibility only.
+    (function() {
+        var full = LayerStates.encode(undefined, new FakeLayer("WALLS-SURVEYED"));
+        eqs(full.color, "#ffffff", "encode records the colour as hex");
+        eqs(full.lineweight, 25, "and the lineweight");
+        eqs(full.plottable, true, "and whether it plots");
+        eqs(full.snappable, true, "and whether it snaps");
+        ok(isNull(full.linetype),
+            "and the linetype only when it was handed a document to " +
+            "resolve the id against -- an id means nothing in another drawing");
+    })();
 
     var target = new FakeLayer("WALLS-SURVEYED");
-    ok(LayerStates.applyCode(target, "110"), "applying a different state changes the layer");
+    ok(LayerStates.applyRecord(undefined, target, rec("110")),
+        "applying a different state changes the layer");
     ok(target.isOff() && target.isFrozen() && !target.isLocked(),
         "the applied flags land in the right places");
-    ok(!LayerStates.applyCode(target, "110"),
+    ok(!LayerStates.applyRecord(undefined, target, rec("110")),
         "applying the state it already has changes nothing");
-    ok(!LayerStates.applyCode(target, undefined), "an absent code changes nothing");
+    ok(!LayerStates.applyRecord(undefined, target, undefined), "an absent code changes nothing");
 
-    // applyCode, not apply: LayerStates is a function object, so an
+    // applyRecord, not apply: LayerStates is a function object, so an
     // "apply" property never takes and the call silently reaches
     // Function.prototype.apply instead. Asserted so a rename back fails
     // here rather than in the GUI.
@@ -30251,14 +30341,14 @@ if (layerManagerLoaded) {
     // -- states within a registry -------------------------------------
 
     var stReg = LayerGroups.emptyRegistry();
-    LayerStates.setState(stReg, "A", { "X": "000" });
-    LayerStates.setState(stReg, "B", { "X": "110" });
+    LayerStates.setState(stReg, "A", { "X": rec("000") });
+    LayerStates.setState(stReg, "B", { "X": rec("110") });
     eqs(LayerStates.stateNames(stReg).join(","), "A,B", "states keep their order");
 
-    LayerStates.setState(stReg, "A", { "X": "001" });
+    LayerStates.setState(stReg, "A", { "X": rec("001") });
     eqs(LayerStates.stateNames(stReg).join(","), "A,B",
         "re-saving a state keeps its place rather than appending a second");
-    eqs(LayerStates.getCode(stReg, "A", "X"), "001", "and overwrites its flags");
+    eqs(stateCode(stReg, "A", "X"), "001", "and overwrites its flags");
 
     ok(LayerStates.renameState(stReg, "A", "C"), "renaming a state takes");
     eqs(LayerStates.stateNames(stReg).join(","), "C,B", "the renamed state keeps its place");
@@ -30282,9 +30372,9 @@ if (layerManagerLoaded) {
 
         var reg = LayerGroups.emptyRegistry();
         LayerStates.setState(reg, "Tracing",
-            { "WALLS-SURVEYED": "000", "CTRL-SCAN": "000", "BORDER": "110" });
+            { "WALLS-SURVEYED": rec("000"), "CTRL-SCAN": rec("000"), "BORDER": rec("110") });
         LayerStates.setState(reg, "Plot ready",
-            { "WALLS-SURVEYED": "000", "CTRL-SCAN": "110", "BORDER": "000" });
+            { "WALLS-SURVEYED": rec("000"), "CTRL-SCAN": rec("110"), "BORDER": rec("000") });
 
         var data = LayerStates.toExport(reg, undefined, "Truitt Cave.dxf");
         eqs(data.format, LayerStates.FORMAT, "the file says what it is");
@@ -30294,12 +30384,14 @@ if (layerManagerLoaded) {
 
         // The map is by NAME, not by position: a person may edit this
         // file, and an edit must not shift every flag after it.
-        eqs(data.states[0].flags["BORDER"], "110",
+        eqs(flagsOf(data.states[0].flags["BORDER"]), "110",
             "flags are keyed by layer name");
+        ok(typeof data.states[0].flags["BORDER"] === "object",
+            "and each one is a record, not a bare code");
 
         // Exporting must not hand out a live view of the registry.
-        data.states[0].flags["BORDER"] = "999";
-        eqs(LayerStates.getCode(reg, "Tracing", "BORDER"), "110",
+        data.states[0].flags["BORDER"] = { off: false };
+        eqs(stateCode(reg, "Tracing", "BORDER"), "110",
             "the export is a copy -- editing it does not touch the drawing");
 
         // Named subset.
@@ -30313,7 +30405,7 @@ if (layerManagerLoaded) {
     (function() {
         var reg = LayerGroups.emptyRegistry();
         LayerStates.setState(reg, "Tracing",
-            { "WALLS-SURVEYED": "000", "CTRL-SCAN": "000", "BORDER": "110" });
+            { "WALLS-SURVEYED": rec("000"), "CTRL-SCAN": rec("000"), "BORDER": rec("110") });
         var text = JSON.stringify(LayerStates.toExport(reg));
 
         var parsed = LayerStates.fromExport(text);
@@ -30326,14 +30418,14 @@ if (layerManagerLoaded) {
         eqs(res.imported, 1, "one state imported");
         eqs(res.replaced, 0, "replacing nothing");
         eqs(res.dropped, 0, "and dropping nothing");
-        eqs(LayerStates.getCode(into, "Tracing", "BORDER"), "110",
+        eqs(stateCode(into, "Tracing", "BORDER"), "110",
             "the codes survive the round trip");
     })();
 
     // Importing what you just exported is a no-op, not a duplicate.
     (function() {
         var reg = LayerGroups.emptyRegistry();
-        LayerStates.setState(reg, "Tracing", { "WALLS-SURVEYED": "000" });
+        LayerStates.setState(reg, "Tracing", { "WALLS-SURVEYED": rec("000") });
         var parsed = LayerStates.fromExport(
             JSON.stringify(LayerStates.toExport(reg)));
         var res = LayerStates.importInto(reg, parsed.states, ["WALLS-SURVEYED"]);
@@ -30348,8 +30440,8 @@ if (layerManagerLoaded) {
     (function() {
         var reg = LayerGroups.emptyRegistry();
         LayerStates.setState(reg, "Tracing",
-            { "WALLS-SURVEYED": "000", "PROFILE-CEILING-Z": "110",
-              "CTRL-SCAN": "000" });
+            { "WALLS-SURVEYED": rec("000"), "PROFILE-CEILING-Z": rec("110"),
+              "CTRL-SCAN": rec("000") });
         var parsed = LayerStates.fromExport(
             JSON.stringify(LayerStates.toExport(reg)));
 
@@ -30358,9 +30450,9 @@ if (layerManagerLoaded) {
             ["WALLS-SURVEYED", "CTRL-SCAN"]);
         eqs(res.imported, 1, "the state still imports");
         eqs(res.dropped, 1, "and says how many layer entries it could not use");
-        ok(LayerStates.getCode(into, "Tracing", "PROFILE-CEILING-Z") === undefined,
+        ok(LayerStates.getRecord(into, "Tracing", "PROFILE-CEILING-Z") === undefined,
             "the unknown layer is not carried");
-        eqs(LayerStates.getCode(into, "Tracing", "WALLS-SURVEYED"), "000",
+        eqs(stateCode(into, "Tracing", "WALLS-SURVEYED"), "000",
             "while the layers in common come through");
 
         // Nothing in common at all: skipped rather than imported empty,
@@ -30377,15 +30469,15 @@ if (layerManagerLoaded) {
     // different name.
     (function() {
         var into = LayerGroups.emptyRegistry();
-        LayerStates.setState(into, "Mine", { "WALLS-SURVEYED": "110" });
+        LayerStates.setState(into, "Mine", { "WALLS-SURVEYED": rec("110") });
         var from = LayerGroups.emptyRegistry();
-        LayerStates.setState(from, "Theirs", { "WALLS-SURVEYED": "000" });
+        LayerStates.setState(from, "Theirs", { "WALLS-SURVEYED": rec("000") });
         var parsed = LayerStates.fromExport(
             JSON.stringify(LayerStates.toExport(from)));
         LayerStates.importInto(into, parsed.states, ["WALLS-SURVEYED"]);
         eqs(LayerStates.stateNames(into).join(","), "Mine,Theirs",
             "an import merges rather than replacing the lot");
-        eqs(LayerStates.getCode(into, "Mine", "WALLS-SURVEYED"), "110",
+        eqs(stateCode(into, "Mine", "WALLS-SURVEYED"), "110",
             "and leaves the existing state alone");
     })();
 
@@ -30407,7 +30499,7 @@ if (layerManagerLoaded) {
         var from = LayerGroups.emptyRegistry();
         LayerGroups.createGroup(from, "Somebody else's group");
         LayerGroups.addTo(from, "WALLS-SURVEYED", "Somebody else's group");
-        LayerStates.setState(from, "Theirs", { "WALLS-SURVEYED": "110" });
+        LayerStates.setState(from, "Theirs", { "WALLS-SURVEYED": rec("110") });
 
         var exported = LayerStates.toExport(from);
         ok(isNull(exported.groups),
@@ -30426,7 +30518,7 @@ if (layerManagerLoaded) {
             "and moves no layer between groups");
         eqs(into.ungroupedLabel, "Leftovers",
             "and leaves the Ungrouped row's name alone");
-        eqs(LayerStates.getCode(into, "Theirs", "WALLS-SURVEYED"), "110",
+        eqs(stateCode(into, "Theirs", "WALLS-SURVEYED"), "110",
             "while the state itself arrives");
     })();
 
@@ -30447,15 +30539,15 @@ if (layerManagerLoaded) {
             "a file with no states yields none");
 
         // A malformed entry is dropped, never stored: a two-character
-        // code reaching applyCode would be ignored there anyway, and a
+        // code reaching applyRecord would be ignored there anyway, and a
         // stored one would be invisible until somebody wondered why a
         // layer never moved.
         var mixed = LayerStates.fromExport(JSON.stringify({
             format: LayerStates.FORMAT, version: 1,
             states: [
-                { name: "Good", flags: { "A": "000", "B": "11", "C": 7 } },
-                { name: "", flags: { "A": "000" } },
-                { name: "Bad|Name", flags: { "A": "000" } }
+                { name: "Good", flags: { "A": rec("000"), "B": "11", "C": 7 } },
+                { name: "", flags: { "A": rec("000") } },
+                { name: "Bad|Name", flags: { "A": rec("000") } }
             ]
         }));
         eqs(mixed.states.length, 1, "only the usable state is read");
@@ -30469,8 +30561,10 @@ if (layerManagerLoaded) {
     var snapDoc = new FakeDoc(["A", "B"]);
     snapDoc.queryLayer("B").setOff(true);
     var snap = LayerStates.snapshot(snapDoc);
-    eqs(snap["A"], "000", "a snapshot records every layer");
-    eqs(snap["B"], "100", "including the ones that are off");
+    eqs(flagsOf(snap["A"]), "000", "a snapshot records every layer");
+    eqs(flagsOf(snap["B"]), "100", "including the ones that are off");
+    eqs(snap["A"].color, "#ffffff",
+        "and records its appearance too -- a saved state is the whole layer");
 }
 
 // ---------------------------------------------------------------------

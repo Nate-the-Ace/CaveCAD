@@ -130,9 +130,16 @@ function sameAs(model, reg, wanted, states) {
         }
         var wantFlags = states[stateName];
         for (var layerName in wantFlags) {
-            if (wantFlags.hasOwnProperty(layerName) &&
-                    LayerStates.getCode(reg, stateName, layerName) !==
-                        wantFlags[layerName]) {
+            if (!wantFlags.hasOwnProperty(layerName)) {
+                continue;
+            }
+            // Compared through the packed form: two records are the
+            // same when they store the same, and object identity says
+            // nothing useful here.
+            var have = LayerStates.getRecord(reg, stateName, layerName);
+            if (isNull(have) ||
+                    LayerStates.packRecord(have) !==
+                        LayerStates.packRecord(wantFlags[layerName])) {
                 return false;
             }
         }
