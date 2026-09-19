@@ -30270,6 +30270,200 @@ if (layerManagerLoaded) {
     eqs(LayerStates.stateNames(stReg).length, 0, "and it is gone");
     ok(!LayerStates.removeState(stReg, "B"), "deleting it again changes nothing");
 
+
+    // -- .clas export and import --------------------------------------
+    //
+    // CaveCAD's own layer-state file. Not AutoCAD's .las and never will
+    // be; the distinct extension is how a file that will not open says
+    // so by its name.
+
+    (function() {
+        eqs(LayerStates.FILE_SUFFIX, "clas", "the file extension is .clas");
+
+        var reg = LayerGroups.emptyRegistry();
+        LayerStates.setState(reg, "Tracing",
+            { "WALLS-SURVEYED": "000", "CTRL-SCAN": "000", "BORDER": "110" });
+        LayerStates.setState(reg, "Plot ready",
+            { "WALLS-SURVEYED": "000", "CTRL-SCAN": "110", "BORDER": "000" });
+
+        var data = LayerStates.toExport(reg, undefined, "Truitt Cave.dxf");
+        eqs(data.format, LayerStates.FORMAT, "the file says what it is");
+        eqs(data.version, LayerStates.FORMAT_VERSION, "and which version");
+        eqs(data.origin, "Truitt Cave.dxf", "and where it came from");
+        eqs(data.states.length, 2, "both states are exported");
+
+        // The map is by NAME, not by position: a person may edit this
+        // file, and an edit must not shift every flag after it.
+        eqs(data.states[0].flags["BORDER"], "110",
+            "flags are keyed by layer name");
+
+        // Exporting must not hand out a live view of the registry.
+        data.states[0].flags["BORDER"] = "999";
+        eqs(LayerStates.getCode(reg, "Tracing", "BORDER"), "110",
+            "the export is a copy -- editing it does not touch the drawing");
+
+        // Named subset.
+        eqs(LayerStates.toExport(reg, ["Plot ready"]).states.length, 1,
+            "a named subset exports just those");
+        eqs(LayerStates.toExport(reg, ["No Such State"]).states.length, 0,
+            "and a name that is not there exports nothing rather than throwing");
+    })();
+
+    // Round trip, into a drawing that has every layer.
+    (function() {
+        var reg = LayerGroups.emptyRegistry();
+        LayerStates.setState(reg, "Tracing",
+            { "WALLS-SURVEYED": "000", "CTRL-SCAN": "000", "BORDER": "110" });
+        var text = JSON.stringify(LayerStates.toExport(reg));
+
+        var parsed = LayerStates.fromExport(text);
+        ok(parsed.error === undefined, "a file we wrote reads back clean");
+        eqs(parsed.states.length, 1, "with its state");
+
+        var into = LayerGroups.emptyRegistry();
+        var res = LayerStates.importInto(into, parsed.states,
+            ["WALLS-SURVEYED", "CTRL-SCAN", "BORDER"]);
+        eqs(res.imported, 1, "one state imported");
+        eqs(res.replaced, 0, "replacing nothing");
+        eqs(res.dropped, 0, "and dropping nothing");
+        eqs(LayerStates.getCode(into, "Tracing", "BORDER"), "110",
+            "the codes survive the round trip");
+    })();
+
+    // Importing what you just exported is a no-op, not a duplicate.
+    (function() {
+        var reg = LayerGroups.emptyRegistry();
+        LayerStates.setState(reg, "Tracing", { "WALLS-SURVEYED": "000" });
+        var parsed = LayerStates.fromExport(
+            JSON.stringify(LayerStates.toExport(reg)));
+        var res = LayerStates.importInto(reg, parsed.states, ["WALLS-SURVEYED"]);
+        eqs(res.imported, 1, "the state is written");
+        eqs(res.replaced, 1, "over the one already there");
+        eqs(LayerStates.stateNames(reg).join(","), "Tracing",
+            "so a re-import leaves one state, not two");
+    })();
+
+    // A different cave: the layers it does not have are dropped, and
+    // counted rather than lost quietly.
+    (function() {
+        var reg = LayerGroups.emptyRegistry();
+        LayerStates.setState(reg, "Tracing",
+            { "WALLS-SURVEYED": "000", "PROFILE-CEILING-Z": "110",
+              "CTRL-SCAN": "000" });
+        var parsed = LayerStates.fromExport(
+            JSON.stringify(LayerStates.toExport(reg)));
+
+        var into = LayerGroups.emptyRegistry();
+        var res = LayerStates.importInto(into, parsed.states,
+            ["WALLS-SURVEYED", "CTRL-SCAN"]);
+        eqs(res.imported, 1, "the state still imports");
+        eqs(res.dropped, 1, "and says how many layer entries it could not use");
+        ok(LayerStates.getCode(into, "Tracing", "PROFILE-CEILING-Z") === undefined,
+            "the unknown layer is not carried");
+        eqs(LayerStates.getCode(into, "Tracing", "WALLS-SURVEYED"), "000",
+            "while the layers in common come through");
+
+        // Nothing in common at all: skipped rather than imported empty,
+        // which would look like a state that does nothing.
+        var other = LayerGroups.emptyRegistry();
+        var none = LayerStates.importInto(other, parsed.states, ["SOMETHING-ELSE"]);
+        eqs(none.imported, 0, "a state with no layer in common is not imported");
+        eqs(none.skipped, 1, "it is reported as skipped");
+        eqs(LayerStates.stateNames(other).length, 0,
+            "and leaves no empty state behind");
+    })();
+
+    // Importing must not disturb a state that was already there under a
+    // different name.
+    (function() {
+        var into = LayerGroups.emptyRegistry();
+        LayerStates.setState(into, "Mine", { "WALLS-SURVEYED": "110" });
+        var from = LayerGroups.emptyRegistry();
+        LayerStates.setState(from, "Theirs", { "WALLS-SURVEYED": "000" });
+        var parsed = LayerStates.fromExport(
+            JSON.stringify(LayerStates.toExport(from)));
+        LayerStates.importInto(into, parsed.states, ["WALLS-SURVEYED"]);
+        eqs(LayerStates.stateNames(into).join(","), "Mine,Theirs",
+            "an import merges rather than replacing the lot");
+        eqs(LayerStates.getCode(into, "Mine", "WALLS-SURVEYED"), "110",
+            "and leaves the existing state alone");
+    })();
+
+    // STATES AND GROUPS ARE SEPARATE, and that is a decision rather
+    // than an accident of the storage. They share one blob in the
+    // drawing, but a state holds only the three flags per layer, a
+    // .clas carries only states, and an import must never touch an
+    // arrangement somebody built by hand -- a cave with defined groups
+    // is exactly the case where silently overriding them would be
+    // worst. Asserted here because the two living in one registry makes
+    // it easy to reach across by accident.
+    (function() {
+        var into = LayerGroups.emptyRegistry();
+        LayerGroups.createGroup(into, "Plan");
+        LayerGroups.createGroup(into, "Passage", "Plan");
+        LayerGroups.addTo(into, "WALLS-SURVEYED", "Passage");
+        into.ungroupedLabel = "Leftovers";
+
+        var from = LayerGroups.emptyRegistry();
+        LayerGroups.createGroup(from, "Somebody else's group");
+        LayerGroups.addTo(from, "WALLS-SURVEYED", "Somebody else's group");
+        LayerStates.setState(from, "Theirs", { "WALLS-SURVEYED": "110" });
+
+        var exported = LayerStates.toExport(from);
+        ok(isNull(exported.groups),
+            "a .clas carries no groups at all");
+        eqs(JSON.stringify(exported).indexOf("Somebody else's group"), -1,
+            "not even by accident through the state's own data");
+
+        var parsed = LayerStates.fromExport(JSON.stringify(exported));
+        LayerStates.importInto(into, parsed.states, ["WALLS-SURVEYED"]);
+
+        eqs(LayerGroups.groupNames(into).join(","), "Plan,Passage",
+            "importing states adds no groups");
+        eqs(LayerGroups.parentOf(into, "Passage"), "Plan",
+            "and disturbs no nesting");
+        eqs(LayerGroups.membersOf(into, "Passage").join(","), "WALLS-SURVEYED",
+            "and moves no layer between groups");
+        eqs(into.ungroupedLabel, "Leftovers",
+            "and leaves the Ungrouped row's name alone");
+        eqs(LayerStates.getCode(into, "Theirs", "WALLS-SURVEYED"), "110",
+            "while the state itself arrives");
+    })();
+
+    // -- what a bad file does -----------------------------------------
+
+    (function() {
+        ok(typeof LayerStates.fromExport("not json at all").error === "string",
+            "unparseable text is refused with a reason");
+        ok(typeof LayerStates.fromExport('{"hello":1}').error === "string",
+            "JSON that is not a .clas is refused");
+        ok(typeof LayerStates.fromExport(JSON.stringify(
+                { format: LayerStates.FORMAT, version: 99, states: [] })).error
+            === "string",
+            "a file from a newer CaveCAD is refused rather than half-read");
+        ok(LayerStates.fromExport(JSON.stringify(
+                { format: LayerStates.FORMAT, version: 1, states: [] })).states.length
+            === 0,
+            "a file with no states yields none");
+
+        // A malformed entry is dropped, never stored: a two-character
+        // code reaching applyCode would be ignored there anyway, and a
+        // stored one would be invisible until somebody wondered why a
+        // layer never moved.
+        var mixed = LayerStates.fromExport(JSON.stringify({
+            format: LayerStates.FORMAT, version: 1,
+            states: [
+                { name: "Good", flags: { "A": "000", "B": "11", "C": 7 } },
+                { name: "", flags: { "A": "000" } },
+                { name: "Bad|Name", flags: { "A": "000" } }
+            ]
+        }));
+        eqs(mixed.states.length, 1, "only the usable state is read");
+        eqs(mixed.states[0].name, "Good", "and it is the one with a valid name");
+        eqs(Object.keys(mixed.states[0].flags).join(","), "A",
+            "with only the entries that are real codes");
+    })();
+
     // -- snapshot -----------------------------------------------------
 
     var snapDoc = new FakeDoc(["A", "B"]);
