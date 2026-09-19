@@ -18378,6 +18378,38 @@ if (!IS_NODE) {
         "CsLayerVariants.split: the whole multi-word base is recovered");
     eqs(deep.token, "A", "CsLayerVariants.split: with its token");
 
+    // NOT ONE registry layer parses as a variant. The single-example
+    // test above passed for the wrong reason -- PROFILE-WALLS is not a
+    // registry layer, so PROFILE-WALLS-INFERRED was refused by the base
+    // test and never reached the question being asked. Thirteen layers
+    // in the runtime registry DO split cleanly into two registry names
+    // (CEILING-HEIGHT, FLOOR-SLOPE, BREAKDOWN-BOUNDARY,
+    // NOTES-ELEVATION-LINE, CTRL-CONTOUR-MAJOR, and the profile and
+    // section twins), and every one of them read as a per-run variant
+    // until this was fixed. Swept rather than listed: the next layer
+    // whose name ends in another layer's name should fail here on the
+    // day it is added to the registry, not the day a caver's profile
+    // work goes missing.
+    (function() {
+        var wrong = [];
+        for (var nm in CsLayers.DEFAULTS) {
+            if (!CsLayers.DEFAULTS.hasOwnProperty(nm)) { continue; }
+            if (CsLayerVariants.split(nm) !== null) { wrong.push(nm); }
+        }
+        eqs(wrong.join(", "), "",
+            "CsLayerVariants.split: no registry layer parses as a variant");
+
+        // And the variants OF those layers still do, which is what the
+        // fix must not cost: CEILING-HEIGHT-A is run A of the shared
+        // ceiling-height layer.
+        var v = CsLayerVariants.split("PROFILE-CEILING-HEIGHT-A");
+        ok(v !== null,
+            "CsLayerVariants.split: a variant of one of them still reads");
+        eqs(v.base, "PROFILE-CEILING-HEIGHT",
+            "CsLayerVariants.split: with the whole layer as its base");
+        eqs(v.token, "A", "CsLayerVariants.split: and the run as its token");
+    })();
+
     // -- baseOf -----------------------------------------------------
     eqs(CsLayerVariants.baseOf("PROFILE-CEILING-A"), "PROFILE-CEILING",
         "CsLayerVariants.baseOf: a variant points at its base");

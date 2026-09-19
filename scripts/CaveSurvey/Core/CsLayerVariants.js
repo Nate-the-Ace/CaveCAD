@@ -100,12 +100,23 @@ CsLayerVariants.nameFor = function(base, token) {
  * cleanly and means something entirely different. Only a remainder the
  * registry actually defines is accepted, which makes this exact instead
  * of nearly right.
+ *
+ * A REGISTRY LAYER IS NEVER A VARIANT, whatever it splits into. Thirteen
+ * of them are a registry layer plus one more segment that is also a
+ * registry layer -- CEILING-HEIGHT over CEILING, FLOOR-SLOPE over FLOOR,
+ * and the profile and section twins of both. Without this test they
+ * parse as run HEIGHT of CEILING, and warnUnclaimedProfile then reads
+ * the shared PROFILE-CEILING-HEIGHT as a run's own layer and says
+ * nothing -- which is the one case it exists to speak up about.
  */
 CsLayerVariants.split = function(name) {
     if (isNull(name)) {
         return null;
     }
     var s = String(name);
+    if (!isNull(CsLayers.DEFAULTS[s])) {
+        return null;   // a registry layer in its own right
+    }
     var cut = s.lastIndexOf(CsLayerVariants.SEP);
     if (cut <= 0 || cut === s.length - 1) {
         return null;
