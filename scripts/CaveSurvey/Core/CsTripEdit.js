@@ -424,8 +424,15 @@ CsTripEdit.commit = function(doc, di, survey, inputs) {
         return { changes: [], res: null };
     }
     CsTripEdit.applyToSurvey(survey, plan.changes);
-    return { changes: plan.changes,
-             res: CsTripEdit.writeTags(doc, di, survey, plan.changes) };
+    var res = CsTripEdit.writeTags(doc, di, survey, plan.changes);
+    // A renamed trip takes its Layer Manager group with it, or the
+    // typo this dialog exists to fix survives in the palette.
+    try {
+        CsLayerGroups.renameTripGroups(doc, plan.changes, survey.name);
+    }
+    catch (eGroups) {
+    }
+    return { changes: plan.changes, res: res };
 };
 
 /**

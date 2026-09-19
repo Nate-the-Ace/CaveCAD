@@ -40,11 +40,18 @@
 <li><b>Scans &amp; Basemap</b> — sketch scans, aerial imagery, surface contours</li>
 <li><b>Control</b> — everything the suite generates, in all three views at once</li>
 <li><b>Sheet</b> — border, title block, legend, scale bar, north arrow, and layer 0</li>
+<li><b>Trips</b> — a row per survey trip, holding the layers of the runs it surveyed</li>
 </ul>
 <p>Six rows at the top level, so the panel opens as a short list you can read rather than a wall. A group's eye and lock act on everything under it and show <i>mixed</i> when its members disagree.</p>
 <p><b>A new cave map arrives already filed</b> — the template carries the arrangement. An older drawing gets it from <a href="repair-drawing.html">Repair Drawing</a>, whose layer-groups pass files anything unfiled. That pass only ever adds: a group you made and a layer you filed by hand are both left alone.</p>
 <p>Right-click for <b>New Group</b>, <b>New Group Inside</b>, <b>Rename</b>, <b>Move to Top Level</b>, <b>Delete Group</b>, and <b>Add to Group</b> for the selected layers. Deleting a group never deletes a layer, and never deletes the groups nested inside it — they move up.</p>
 <p><b>A layer can be in more than one group.</b> <b>Add to Group</b> on a layer that is already filed adds a second home rather than moving it, and the layer then appears under both — useful for a group like <i>Trip 3</i> or <i>Check before plotting</i> that cuts across the standard six. Switching it in one place switches the layer, so both rows change together; <b>Remove from</b> takes away that one membership and leaves the others. The default filing never does this: it puts each layer in exactly one group, and the second one is yours to make.</p>
+<h3>Trip groups</h3>
+<p><b>Trips</b> is a group of its own, with a row per survey trip, filled in for you.</p>
+<p>A trip owns no layers — provenance rides on the entities themselves, and splitting layers by trip would cut a wall in half the moment it was continued on a later trip. What a trip <i>does</i> own is survey runs, and a run has real layers: the per-run profile layers. So <b>Trip 3</b> means the layers of the runs surveyed on trip 3, which is what you mean when you say it — show me what I drew that day.</p>
+<p>It is an extra membership, never a move: a layer stays in Profile and gains its trip. A run continued the following weekend appears under both trips, because that is the truth about the layer.</p>
+<p>The group is derived, not assigned once, so a trip drawn before anything was traced in its band starts empty and fills in. <a href="repair-drawing.html">Repair Drawing</a> re-derives them all; drawing a page, importing a survey, and correcting a trip's name each keep them current on their own. A trip named after the cave — which is what most importers write — is listed by its number alone.</p>
+
 <p><b>Expand All</b> and <b>Collapse All</b> are at the top of the same menu, and what you leave open is remembered.</p>
 <p><b>Ungrouped</b> is last and holds whatever is in no group — layers that appeared after the filing. You can rename that row to whatever it actually means in your cave.</p>
 

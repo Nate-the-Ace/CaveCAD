@@ -162,6 +162,11 @@ function importCaveSurvey() {
     if (drawn.stationsDrawn > 0) {
         CsDraw.zoomToSurvey(survey, resolved);
     }
+    // An import is the other way trips come into being, and every one
+    // it brought gets its group.
+    if (typeof CsLayerGroups !== "undefined") {
+        CsLayerGroups.fileTripsQuietly(doc);
+    }
 
     // -- the drawing half, if the file brought one ---------------------
     // A Therion project is numbers AND a sketch: the .th beside one or

@@ -815,6 +815,12 @@ SurveyNotebook.drawSurveyInner = function(w, forceFull) {
     var drawn = CsDraw.survey(survey, resolved, undefined, undefined, seqBase,
         { doc: doc, di: di });
     CsDraw.zoomToSurvey(survey, resolved);
+    // The trip now exists in the drawing, so it gets its group. Derived
+    // from the DOCUMENT's survey, never this page's: a page numbers its
+    // trips from 0 for itself.
+    if (typeof CsLayerGroups !== "undefined") {
+        CsLayerGroups.fileTripsQuietly(doc);
+    }
 
     QMessageBox.information(null, "Survey Notebook",
         (tieIn !== null ? ("Tied into existing station " + tieIn +
@@ -1417,6 +1423,9 @@ SurveyNotebook.drawPartial = function(w, doc, di, merged, resolved,
             profileResolved: resolved
         });
     CsDraw.zoomToSurvey(merged, resolved);
+    if (typeof CsLayerGroups !== "undefined") {
+        CsLayerGroups.fileTripsQuietly(doc);
+    }
 
     var geoLine = "";
     if (geoAtRisk) {
@@ -1642,6 +1651,9 @@ SurveyNotebook.drawMergedSurvey = function(w, doc, survey, recon,
     var drawn = CsDraw.survey(merged, resolved, undefined, undefined, seqBase,
         { doc: doc, di: di });
     CsDraw.zoomToSurvey(merged, resolved);
+    if (typeof CsLayerGroups !== "undefined") {
+        CsLayerGroups.fileTripsQuietly(doc);
+    }
 
     // -- traced linework follows its own stations ---------------------
     // This is the second way to revise a trip in place, and it owes the

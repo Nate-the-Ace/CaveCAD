@@ -29798,6 +29798,82 @@ eqs(CsLayerGroups.classify("WALLS-SURVEYED-A"), CsLayerGroups.PASSAGE,
         "and the parent group is a key with nothing directly in it");
 })();
 
+// -- trip groups -------------------------------------------------------
+//
+// A trip owns no layers; its group is the layers of the RUNS it
+// surveyed. These are the pure halves -- runsOfTrips and tripFiling --
+// so the derivation is pinned without a document.
+
+(function() {
+    var survey = {
+        trips: [ { name: "Entrance series" }, { name: "" },
+                 { name: "Back of the cave" } ],
+        shots: [
+            { from: "A1", to: "A2", trip: 0 },
+            { from: "A2", to: "A3", trip: 0 },
+            { from: "A3", to: "B1", trip: 0 },
+            // a splay: its far end is a point in the air, not a
+            // station, and must not name a run
+            { from: "B1", to: "B1.3", trip: 0, splay: true },
+            { from: "B1", to: "B2", trip: 1 },
+            { from: "C1", to: "C2", trip: 2 }
+        ]
+    };
+
+    var runs = CsLayerGroups.runsOfTrips(survey);
+    eqs(runs[0].sort().join(","), "A,B",
+        "a trip's runs come from its shots' stations");
+    eqs(runs[1].sort().join(","), "B",
+        "run B is trip 1's too -- a run continued on a later trip " +
+        "belongs to both");
+    eqs(runs[2].sort().join(","), "C", "and trip 2 has its own");
+    ok(runs[0].indexOf("B1.") < 0,
+        "a splay's far end names no run");
+
+    eqs(CsLayerGroups.tripGroupName(0, survey.trips[0]),
+        "Trip 0 \u2014 Entrance series",
+        "the group is named like the Edit Trip dialog's row");
+    eqs(CsLayerGroups.tripGroupName(1, survey.trips[1]), "Trip 1",
+        "an unnamed trip is just its number");
+    eqs(CsLayerGroups.tripGroupName(4, { name: "North|South" }),
+        "Trip 4 \u2014 North/South",
+        "the record separator cannot reach a group name");
+    eqs(CsLayerGroups.tripGroupName(2, { name: "Truitt Cave" }, "TRUITT CAVE"),
+        "Trip 2",
+        "a trip named after the cave is named after nothing -- most " +
+        "importers fill every trip with the survey's own name");
+
+    var layers = ["WALLS-SURVEYED", "PROFILE-CEILING-A", "PROFILE-FLOOR-A",
+                  "PROFILE-CEILING-B", "PROFILE-CEILING-C",
+                  "PROFILE-CEILING-HEIGHT", "CTRL-SHOTS"];
+    var filing = CsLayerGroups.tripFiling(survey, layers);
+    eqs(filing.length, 3, "one entry per trip");
+    eqs(filing[0].layers.sort().join(","),
+        "PROFILE-CEILING-A,PROFILE-CEILING-B,PROFILE-FLOOR-A",
+        "trip 0 gets the layers of both its runs");
+    eqs(filing[1].layers.join(","), "PROFILE-CEILING-B",
+        "and the shared run's layer is in trip 1's group as well");
+    eqs(filing[2].layers.join(","), "PROFILE-CEILING-C", "as is trip 2's");
+
+    // The shared layers stay out of every trip group. WALLS-SURVEYED is
+    // not one trip's, and PROFILE-CEILING-HEIGHT is a registry layer
+    // that merely LOOKS like run HEIGHT of PROFILE-CEILING -- see
+    // CsLayerVariants.split.
+    var all = filing[0].layers.concat(filing[1].layers, filing[2].layers);
+    ok(all.indexOf("WALLS-SURVEYED") < 0,
+        "a shared plan layer belongs to no trip");
+    ok(all.indexOf("PROFILE-CEILING-HEIGHT") < 0,
+        "nor does a registry layer that splits like a variant");
+
+    // A trip nobody has traced for yet: an entry, with no layers.
+    var untraced = CsLayerGroups.tripFiling(
+        { trips: [{ name: "" }], shots: [{ from: "Z1", to: "Z2", trip: 0 }] },
+        layers);
+    eqs(untraced.length, 1, "the trip is still listed");
+    eqs(untraced[0].layers.length, 0,
+        "with nothing in it -- its band has not been traced");
+})();
+
 // -- the two states the template ships ---------------------------------
 
 (function() {

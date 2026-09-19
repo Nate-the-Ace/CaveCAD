@@ -458,3 +458,306 @@ CsLayerGroups.seedStates = function(reg, layerNames) {
     }
     return added;
 };
+
+// ---------------------------------------------------------------------
+// Trip groups
+// ---------------------------------------------------------------------
+
+/** The parent every trip group hangs under. Its own row, so twelve
+ *  trips do not push the six standard groups off the top of the
+ *  palette. */
+CsLayerGroups.TRIPS = "Trips";
+
+/**
+ * A TRIP OWNS NO LAYERS, so its group is DERIVED and re-derived rather
+ * than assigned once.
+ *
+ * Provenance rides on entities as CsBind.TRIP_TAG, and splitting layers
+ * by trip was rejected on purpose -- it would fragment a wall continued
+ * on a later trip, and CsTrace.nearestEnd only ties within a layer, so
+ * those fragments could never be joined again. That decision stands.
+ *
+ * What a trip DOES own is survey runs: its shots name stations, a
+ * station names its run (CsProfile.runKeyOf), and a run has real layers
+ * of its own -- the per-run profile variants CsLayerVariants makes. So
+ * "Trip 3" means the layers of the runs trip 3 surveyed, which is the
+ * useful thing a caver means when they say it: show me what I drew that
+ * day.
+ *
+ * It is an ADDITIONAL membership, never a move. PROFILE-CEILING-B stays
+ * in Profile and gains Trip 3, because the Layer Manager lets a layer
+ * live in more than one group. Isolating a trip therefore costs nothing
+ * from the standard arrangement.
+ *
+ * TWO TRIPS CAN SHARE A RUN -- run B continued the following weekend --
+ * and both trip groups then hold its layers. That is the truth about
+ * the layer, not a collision to resolve.
+ *
+ * \param survey a CsModel survey (normalized by CsModel.ensureTrips)
+ * \return {tripId: [runKey]} in no particular order
+ */
+CsLayerGroups.runsOfTrips = function(survey) {
+    var out = {};
+    if (isNull(survey) || isNull(survey.shots)) {
+        return out;
+    }
+    for (var i = 0; i < survey.shots.length; i++) {
+        var sh = survey.shots[i];
+        var trip = sh.trip || 0;
+        if (out[trip] === undefined) {
+            out[trip] = [];
+        }
+        // A splay has no "to" station -- its far end is a point in the
+        // air, not a station -- so only its "from" names a run.
+        var ends = sh.splay === true ? [sh.from] : [sh.from, sh.to];
+        for (var e = 0; e < ends.length; e++) {
+            var key = CsProfile.runKeyOf(ends[e]);
+            if (key === null || key === "") {
+                continue;
+            }
+            if (out[trip].indexOf(key) < 0) {
+                out[trip].push(key);
+            }
+        }
+    }
+    return out;
+};
+
+/**
+ * The group name for a trip. "Trip 0" or "Trip 0 — Entrance series".
+ *
+ * The same label CsTripEdit.rows builds, so the name in the palette is
+ * the name in the Edit Trip dialog. A trip RENAMED after this ran keeps
+ * its old group until the filing is re-run, and the re-run then adds
+ * the new name rather than renaming the old one -- the caver's own
+ * groups are never renamed or deleted by a pass, and a group they may
+ * have put layers into by hand is not this function's to take away.
+ * CsLayerGroups.renameTripGroups closes that gap for the one caller
+ * that knows a rename happened.
+ *
+ * \param caveName the survey's own name, when the caller has it
+ */
+CsLayerGroups.tripGroupName = function(tripId, trip, caveName) {
+    var label = "Trip " + tripId;
+    var name = (isNull(trip) || isNull(trip.name)) ? "" : String(trip.name);
+    // A TRIP NAMED AFTER THE CAVE IS NAMED AFTER NOTHING. Most importers
+    // fill every trip's name with the survey's own -- Truitt Cave has
+    // eleven trips all called "TRUITT CAVE" -- and repeating it eleven
+    // times down the palette says less than the trip number alone.
+    if (!isNull(caveName) && String(caveName) !== "" &&
+            name.toLowerCase() === String(caveName).toLowerCase()) {
+        name = "";
+    }
+    if (name !== "") {
+        label += " — " + name;
+    }
+    // "|" separates records in the stored blob, so a trip named with
+    // one would be unreadable. Replaced rather than refused: the trip
+    // keeps its name, only the group spells it differently.
+    return label.replace(/\|/g, "/");
+};
+
+/**
+ * What the trip filing WOULD do -- pure, so it can be tested without a
+ * document.
+ *
+ * \param survey     a CsModel survey
+ * \param layerNames every layer in the drawing
+ * \return [{group, runs: [runKey], layers: [name]}] in trip order
+ */
+CsLayerGroups.tripFiling = function(survey, layerNames) {
+    var out = [];
+    if (isNull(survey) || isNull(survey.trips)) {
+        return out;
+    }
+    if (isNull(layerNames)) {
+        layerNames = [];
+    }
+    var runsOf = CsLayerGroups.runsOfTrips(survey);
+
+    // Layer -> its run, resolved once. A cave has three hundred layers
+    // and a dozen trips, and asking the question per trip would parse
+    // every name twelve times.
+    var runOfLayer = {};
+    var i;
+    for (i = 0; i < layerNames.length; i++) {
+        var parts = (typeof CsLayerVariants === "undefined") ? null :
+            CsLayerVariants.split(layerNames[i]);
+        if (parts !== null) {
+            runOfLayer[layerNames[i]] = parts.token;
+        }
+    }
+
+    for (var t = 0; t < survey.trips.length; t++) {
+        var runs = runsOf[t] || [];
+        var wanted = {};
+        for (i = 0; i < runs.length; i++) {
+            var clean = (typeof CsLayerVariants === "undefined") ? runs[i] :
+                CsLayerVariants.sanitize(runs[i]);
+            if (clean !== null) {
+                wanted[clean] = true;
+            }
+        }
+        var layers = [];
+        for (i = 0; i < layerNames.length; i++) {
+            if (wanted[runOfLayer[layerNames[i]]] === true) {
+                layers.push(layerNames[i]);
+            }
+        }
+        out.push({
+            group: CsLayerGroups.tripGroupName(t, survey.trips[t],
+                survey.name),
+            runs: runs.slice(0),
+            layers: layers
+        });
+    }
+    return out;
+};
+
+/**
+ * Files \c doc's trips into groups under "Trips".
+ *
+ * Reads the survey out of the drawing itself, so this needs nothing but
+ * the document and can be re-run at any time. Re-running is expected:
+ * a trip's per-run profile layers are created ON DEMAND, when somebody
+ * first traces in that band, so a trip group filed the day the trip was
+ * drawn is empty and fills in later.
+ *
+ * AN EMPTY TRIP GROUP IS CREATED ANYWAY. It says the trip exists and
+ * nothing has been traced for it yet, which is worth seeing, and it
+ * gives the caver somewhere to drag a layer by hand.
+ *
+ * ONLY EVER ADDS, like the rest of this module.
+ *
+ * \return { groups: n, filed: n, already: n }, or undefined when this
+ * build has no Layer Manager or the drawing holds no survey.
+ */
+CsLayerGroups.fileTrips = function(doc) {
+    if (CsLayerGroups.model() === undefined ||
+            typeof CsRevise === "undefined") {
+        return undefined;
+    }
+    // surveyFromDocument returns the RECONSTRUCTION, not the survey --
+    // the survey is one field of it, beside the anchor and the
+    // adjustment tags.
+    var recon = CsRevise.surveyFromDocument(doc);
+    return CsLayerGroups.fileTripsFrom(doc,
+        isNull(recon) ? null : recon.survey);
+};
+
+/**
+ * fileTrips with the survey handed in.
+ *
+ * THE SURVEY MUST BE THE WHOLE DRAWING'S, not one notebook page's. A
+ * page survey numbers its trips from 0 for itself, so filing from one
+ * would name the page's only trip "Trip 0" and file the drawing's
+ * fourth trip under the first one's group. Every caller therefore
+ * either reads the survey back out of the document or is the rebuild
+ * that already holds all of it.
+ */
+CsLayerGroups.fileTripsFrom = function(doc, survey) {
+    var model = CsLayerGroups.model();
+    if (model === undefined) {
+        return undefined;
+    }
+    if (isNull(survey) || isNull(survey.shots) || survey.shots.length === 0) {
+        return undefined;
+    }
+    CsModel.ensureTrips(survey);
+
+    var names = model.layerNamesOf(doc).sort();
+    var plan = CsLayerGroups.tripFiling(survey, names);
+    var reg = model.readRegistry(doc);
+
+    var created = 0;
+    if (model.createGroup(reg, CsLayerGroups.TRIPS)) {
+        created++;
+    }
+    var filed = 0, already = 0;
+    for (var i = 0; i < plan.length; i++) {
+        if (model.createGroup(reg, plan[i].group, CsLayerGroups.TRIPS)) {
+            created++;
+        }
+        for (var k = 0; k < plan[i].layers.length; k++) {
+            if (model.addTo(reg, plan[i].layers[k], plan[i].group)) {
+                filed++;
+            } else {
+                already++;
+            }
+        }
+    }
+
+    model.writeRegistry(doc, reg);
+    return { groups: created, filed: filed, already: already,
+             trips: plan.length };
+};
+
+/**
+ * fileTrips that can never break the thing that called it.
+ *
+ * Every caller is a DRAW -- the survey is on the page, the undo step is
+ * closed, and the caver is looking at their cave. Filing the trip into
+ * a palette group is housekeeping that happens afterwards, and an
+ * exception from it (a build with no palette, a drawing whose survey
+ * will not read back) must not turn a successful draw into a stack
+ * trace.
+ *
+ * \return the fileTrips result, or undefined if it could not run.
+ */
+CsLayerGroups.fileTripsQuietly = function(doc) {
+    try {
+        return CsLayerGroups.fileTrips(doc);
+    }
+    catch (e) {
+        return undefined;
+    }
+};
+
+/**
+ * Follows a trip RENAME through to its group.
+ *
+ * Without this, correcting a trip's name in the Edit Trip dialog would
+ * leave "Trip 3 — Nroth passage" in the palette and the next filing
+ * pass would add "Trip 3 — North passage" beside it, so the typo
+ * outlives the fix and the caver has two groups for one trip. A rename
+ * is the one case where a pass may touch a group it did not just make:
+ * the group is this module's own, named after the trip, and following
+ * the trip is what it is for.
+ *
+ * Layers stay where they are -- renameGroup re-points the membership.
+ *
+ * \param changes CsTripEdit.planEdits changes: [{tripId, before, after}]
+ * \return how many groups were renamed
+ */
+CsLayerGroups.renameTripGroups = function(doc, changes, caveName) {
+    var model = CsLayerGroups.model();
+    if (model === undefined || isNull(changes) || changes.length === 0) {
+        return 0;
+    }
+    var reg = model.readRegistry(doc);
+    var renamed = 0;
+    for (var i = 0; i < changes.length; i++) {
+        var c = changes[i];
+        if (isNull(c.before) || isNull(c.after) ||
+                c.before.name === c.after.name) {
+            continue;
+        }
+        var from = CsLayerGroups.tripGroupName(c.tripId, c.before, caveName);
+        var to = CsLayerGroups.tripGroupName(c.tripId, c.after, caveName);
+        // Not if the new name is already a group: renameGroup would be
+        // merging two groups, which is a bigger thing than a typo fix
+        // and not one to do behind the caver's back. The filing pass
+        // will fill the existing group instead.
+        if (isNull(model.findGroup(reg, from)) ||
+                !isNull(model.findGroup(reg, to))) {
+            continue;
+        }
+        if (model.renameGroup(reg, from, to)) {
+            renamed++;
+        }
+    }
+    if (renamed > 0) {
+        model.writeRegistry(doc, reg);
+    }
+    return renamed;
+};

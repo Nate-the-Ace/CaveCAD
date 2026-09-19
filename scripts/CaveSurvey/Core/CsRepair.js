@@ -90,6 +90,20 @@ CsRepair.run = function(doc, di, opts) {
                 .arg(g.states));
             changed = true;
         }
+        // Trip groups are DERIVED from the survey and from layers that
+        // are made on demand, so unlike the standard filing they are
+        // never finished: a trip drawn months ago gains layers the day
+        // somebody traces in its band. Re-derived here every repair.
+        var tg = CsLayerGroups.fileTrips(doc);
+        if (isNull(tg)) {
+            lines.push(qsTr("Trip groups: no survey in this drawing."));
+        } else if (tg.filed === 0 && tg.groups === 0) {
+            lines.push(qsTr("Trip groups: already filed."));
+        } else {
+            lines.push(qsTr("Trip groups: %1 trip(s), %2 layer(s) filed.")
+                .arg(tg.trips).arg(tg.filed));
+            changed = true;
+        }
     } else {
         lines.push(qsTr("Layer groups: skipped."));
     }
