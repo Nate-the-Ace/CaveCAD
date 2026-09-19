@@ -29846,7 +29846,8 @@ var layerManagerLoaded = true;
 try {
     var lmFiles = [
         "/scripts/Widgets/LayerManager/LayerGroups.js",
-        "/scripts/Widgets/LayerManager/LayerStates.js"
+        "/scripts/Widgets/LayerManager/LayerStates.js",
+        "/scripts/Widgets/LayerManager/LayerFilter.js"
     ];
     for (var lmi = 0; lmi < lmFiles.length; lmi++) {
         var lmSrc = readTextFile(forkRoot + lmFiles[lmi]);
@@ -29866,6 +29867,8 @@ ok(layerManagerLoaded && typeof LayerGroups === "function",
     "LayerGroups is defined after loading the fork");
 ok(layerManagerLoaded && typeof LayerStates === "function",
     "LayerStates is defined after loading the fork");
+ok(layerManagerLoaded && typeof LayerFilter === "function",
+    "LayerFilter is defined after loading the fork");
 
 if (layerManagerLoaded) {
 
@@ -29956,6 +29959,76 @@ if (layerManagerLoaded) {
         }
         return undefined;
     };
+
+
+    // -- the filter box -----------------------------------------------
+    //
+    // Its own file precisely so it can be tested: RLayerTreeQt
+    // subclasses RTreeWidget at load time and cannot be loaded without
+    // Qt, and a filter that quietly matches the wrong thing is the kind
+    // of bug a caver blames their layer names for.
+
+    (function() {
+        var names = ["walls-surveyed", "walls-inferred", "ctrl-shots",
+                     "ctrl-scan", "ctrl-lrud-wall-left",
+                     "ctrl-lrud-wall-right", "profile-ceiling",
+                     "water-perennial", "formations-drip"];
+        var matching = function(text) {
+            var m = LayerFilter.build(text);
+            if (isNull(m)) { return "(no filter)"; }
+            var hit = [];
+            for (var i = 0; i < names.length; i++) {
+                if (m(names[i])) { hit.push(names[i]); }
+            }
+            return hit.join(",");
+        };
+
+        ok(LayerFilter.build("") === undefined, "empty text is no filter");
+        ok(LayerFilter.build("   ") === undefined, "and neither is whitespace");
+        ok(LayerFilter.build(undefined) === undefined, "nor a missing one");
+
+        // Plain text is a SUBSTRING search. Anchoring it would make
+        // "scan" match nothing, which reads as a broken filter.
+        eqs(matching("scan"), "ctrl-scan", "plain text matches anywhere in a name");
+        eqs(matching("wall"),
+            "walls-surveyed,walls-inferred,ctrl-lrud-wall-left,ctrl-lrud-wall-right",
+            "including in the middle");
+
+        // A wildcard makes it a pattern, and a pattern is anchored.
+        eqs(matching("ctrl-*"),
+            "ctrl-shots,ctrl-scan,ctrl-lrud-wall-left,ctrl-lrud-wall-right",
+            "a trailing star anchors at the start");
+        eqs(matching("*scan*"), "ctrl-scan", "stars either side match anywhere");
+        eqs(matching("*-drip"), "formations-drip", "a leading star anchors at the end");
+        eqs(matching("walls-surveyed"), "walls-surveyed",
+            "an exact name still matches itself");
+
+        // ? is exactly one character, which is the whole reason to have
+        // it: LEFT and RIGHT differ by one.
+        eqs(matching("ctrl-lrud-wall-?????"), "ctrl-lrud-wall-right",
+            "a question mark is exactly one character, so RIGHT matches");
+        eqs(matching("ctrl-lrud-wall-????"), "ctrl-lrud-wall-left",
+            "and LEFT does not");
+
+        // Commas are alternatives.
+        eqs(matching("water-*,formations-*"),
+            "water-perennial,formations-drip", "commas separate alternatives");
+        eqs(matching("scan,profile-*"), "ctrl-scan,profile-ceiling",
+            "and mix substring with pattern");
+        eqs(matching("water-*, ,formations-*"),
+            "water-perennial,formations-drip",
+            "an empty alternative is ignored rather than matching all");
+
+        eqs(matching("zzz*"), "", "a pattern matching nothing matches nothing");
+
+        // A hyphen is not a character class and a dot is not any
+        // character: layer names are full of both.
+        ok(LayerFilter.build("ctrl-lrud-wall-left")("ctrl-lrud-wall-left"),
+            "hyphens are literal");
+        ok(!LayerFilter.build("a.c")("abc"),
+            "a dot is a dot, not any character");
+        ok(LayerFilter.build("a.c")("xa.cx"), "and still matches itself");
+    })();
 
     // -- names --------------------------------------------------------
 
