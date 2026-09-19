@@ -415,6 +415,13 @@
       "shots": []
     },
     {
+      "id": "layer-manager",
+      "title": "Find, switch and restyle layers in the Layer Manager",
+      "class": "task",
+      "file": "layer-manager.html",
+      "shots": []
+    },
+    {
       "id": "add-a-trip",
       "title": "Add a trip to a cave you already have",
       "class": "task",
