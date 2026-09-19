@@ -184,6 +184,8 @@ var CORE_FILES = [
     "scripts/CaveSurvey/Core/CsCallout.js",
     "scripts/CaveSurvey/Core/CsElevation.js",
     "scripts/CaveSurvey/Core/CsTerrain3d.js",
+    "scripts/CaveSurvey/Core/CsCover.js",
+    "scripts/CaveSurvey/Core/CsStationCard.js",
     "scripts/CaveSurvey/Core/CsValidate.js",
     "scripts/CaveSurvey/Core/CsStats.js",
     "scripts/CaveSurvey/Core/CsGrade.js",
@@ -21063,6 +21065,41 @@ var m3loop = CsMesh3d.build(m3loopSurvey, m3loopResolved);
 ok(m3loop.lines.indices.length > m3.lines.indices.length,
     "the closure leg is drawn on the centerline");
 
+// ---- the first station's LRUD ---------------------------------------
+//
+// No shot ARRIVES at the station a survey starts from, so its walls
+// have nowhere to hang and live in survey.startLrud instead -- the
+// notebook's first row. A 3D view that only scanned arrivals drew the
+// entrance with no passage around it at all, and measured its depth of
+// cover over the centerline instead of over the ceiling.
+var m3start = mesh3dSurvey();
+m3start.startLrud = { left: 4, right: 5, up: 6, down: 2 };
+eqs(CsMesh3d.firstStation(m3start), "A", "the survey starts at A");
+var m3startLrud = CsMesh3d.lrudAt("A", m3start);
+eqs(m3startLrud.up, 6, "the first station reads its LRUD from startLrud");
+eqs(m3startLrud.left, 4, "and all four sides of it");
+// AND ONLY THAT STATION. A station further in with nothing arriving
+// must not inherit the entrance's walls.
+eqs(CsMesh3d.lrudAt("nowhere", m3start).up, null,
+    "startLrud belongs to the first station alone");
+// The shot that arrives still wins where there is one.
+eqs(CsMesh3d.lrudAt("B", m3start).up, 3,
+    "an arriving shot still carries the LRUD it measured");
+// A survey with no startLrud is unchanged.
+eqs(CsMesh3d.lrudAt("A", mesh3dSurvey()).up, null,
+    "no startLrud, no invented walls");
+// The ring at the first station now has wall points, which is what
+// puts a surface on the entrance passage.
+var m3startMesh = CsMesh3d.build(m3start, CsNetwork.resolve(m3start));
+var m3startRing = null;
+for (var msi = 0; msi < m3startMesh.outlines.names.length; msi++) {
+    if (m3startMesh.outlines.names[msi] === "A") {
+        m3startRing = m3startMesh.outlines.counts[msi];
+    }
+}
+ok(m3startRing !== null && m3startRing >= 3,
+    "the first station gets a cross section of its own");
+
 // Colour by depth is honoured and differs from colour by trip.
 var m3depth = CsMesh3d.build(m3survey, m3resolved, { colorBy: "depth" });
 eqs(String(m3depth.triangles.colors.length),
@@ -27325,6 +27362,58 @@ eqs(CsSymbolStore.AREA_MARKER_TAGS.custom, "AreaCustom",
             "rather than filling in blanks");
 })();
 
+// A middle-drag pan that never hears its release leaves the preview
+// stuck to the cursor, so every move re-reads the buttons instead.
+(function testPanHeld() {
+    ok(CsSheetSetup.panHeld(4, 4),
+        "CsSheetSetup: middle still down, the pan carries on");
+    ok(CsSheetSetup.panHeld(6, 4),
+        "CsSheetSetup: middle down alongside another button still pans");
+    ok(!CsSheetSetup.panHeld(0, 4),
+        "CsSheetSetup: nothing held at all ENDS the pan -- this is the " +
+            "lost-release case the preview used to get stuck in");
+    ok(!CsSheetSetup.panHeld(1, 4),
+        "CsSheetSetup: left alone is not the pan's button");
+    ok(CsSheetSetup.panHeld(1, 1),
+        "CsSheetSetup: and the same test holds a piece drag by the left");
+    ok(!CsSheetSetup.panHeld(4, 1),
+        "CsSheetSetup: middle does not keep a piece drag alive");
+    ok(CsSheetSetup.panHeld(null, 4),
+        "CsSheetSetup: a bridge that cannot report buttons keeps the " +
+            "gesture rather than cancelling it on its first step");
+    ok(CsSheetSetup.panHeld(undefined, 4),
+        "CsSheetSetup: same when buttons is missing entirely");
+})();
+
+// A snapped piece stops moving while the mouse does not, and every one
+// of those frames used to redraw the whole preview.
+(function testDragKey() {
+    var held = { dx: 1.5, dy: 2.0, guideX: 3.0, guideY: null,
+        centredX: true, centredY: false };
+    eqs(CsSheetSetup.dragKey("bar", held),
+        CsSheetSetup.dragKey("bar", { dx: 1.5, dy: 2.0, guideX: 3.0,
+            guideY: null, centredX: true, centredY: false }),
+        "CsSheetSetup: a frame that draws the same picture keys the " +
+            "same, so the redraw is dropped");
+    ok(CsSheetSetup.dragKey("bar", held) !==
+        CsSheetSetup.dragKey("north", held),
+        "CsSheetSetup: a different piece is a different frame");
+    ok(CsSheetSetup.dragKey("bar", held) !==
+        CsSheetSetup.dragKey("bar", { dx: 1.6, dy: 2.0, guideX: 3.0,
+            guideY: null, centredX: true, centredY: false }),
+        "CsSheetSetup: a piece that actually moved redraws");
+    ok(CsSheetSetup.dragKey("bar", held) !==
+        CsSheetSetup.dragKey("bar", { dx: 1.5, dy: 2.0, guideX: 3.0,
+            guideY: null, centredX: false, centredY: false }),
+        "CsSheetSetup: the guide changing colour is a redraw too");
+    eqs(CsSheetSetup.dragKey("bar", { dx: 1.50000001, dy: 2.0,
+            guideX: 3.0, guideY: null, centredX: true, centredY: false }),
+        CsSheetSetup.dragKey("bar", held),
+        "CsSheetSetup: a ten-millionth of an inch is not a new picture");
+    ok(isNull(CsSheetSetup.dragKey("bar", null)),
+        "CsSheetSetup: nothing snapped, nothing to compare");
+})();
+
 // ---------------------------------------------------------------------
 // CsClosure -- turning a closure percentage into arrows. The
 // exaggeration is the honesty problem here, so it is what most of these
@@ -29581,6 +29670,259 @@ ok(manyLevels.levels > 0, "widening still draws contours");
 var tnotex = CsTerrain3d.build(rampGrid, terrainXf,
     { unit: CsUnits.METERS, offset: 0.0, intervalM: 1.0 });
 eqs(tnotex.texture, "", "no aerial means an empty texture path");
+
+// ---------------------------------------------------------------------
+// CsCover: how much ground sits over a passage.
+// ---------------------------------------------------------------------
+
+// ---- the inverse transform ------------------------------------------
+//
+// gridTransform is affine, so its inverse is a 2x2 solve and a round
+// trip must come back to where it started. A version of this that
+// searched the grid would pass this test and be wrong about
+// everything between the samples.
+var covInv = CsCover.inverse(terrainXf);
+ok(covInv !== null, "an affine transform inverts");
+var covRt = covInv(terrainXf(2.5, 1.25).x, terrainXf(2.5, 1.25).y);
+near(covRt.col, 2.5, 1e-9, "inverse round trip, column");
+near(covRt.row, 1.25, 1e-9, "inverse round trip, row");
+eqs(CsCover.inverse(function() { return { x: 0, y: 0 }; }), null,
+    "a degenerate transform has no inverse");
+
+// ---- sampling --------------------------------------------------------
+//
+// rampGrid rises one metre per column, so a sample half way between
+// two columns is half a metre between their readings. Metres in,
+// drawing units out, minus the datum offset -- the same arithmetic
+// CsTerrain3d.mesh does, and the reason neither may keep its own copy.
+var covSample = CsCover.sampler(rampGrid, terrainXf,
+    { unit: CsUnits.METERS, offset: 0.0 });
+near(covSample(0, 0), 100.0, 1e-9, "a sample on a grid node reads it");
+near(covSample(2.0, 0), 101.0, 1e-9, "one cell across is one metre up");
+near(covSample(1.0, 0), 100.5, 1e-9, "bilinear between two columns");
+near(covSample(1.0, -2.0), 100.5, 1e-9, "and between rows as well");
+
+// The datum offset comes off the ground, not out of the cave: the
+// survey's frame is what the whole 3D view is drawn in.
+var covOffSample = CsCover.sampler(rampGrid, terrainXf,
+    { unit: CsUnits.METERS, offset: 40.0 });
+near(covOffSample(0, 0), 60.0, 1e-9, "the datum offset lowers the ground");
+
+// ---- holes are null, never a number ---------------------------------
+//
+// CsTerrain3d fills a no-data cell with the grid's lowest reading so a
+// bounding box stays usable. A MEASUREMENT filled that way reports
+// hundreds of feet of rock over a hole in the data.
+var covHole = CsCover.sampler(holeGrid, terrainXf,
+    { unit: CsUnits.METERS, offset: 0.0 });
+eqs(covHole(2.0, -2.0), null, "a no-data corner makes the sample null");
+eqs(covHole(0.0, 0.0), null,
+    "a cell touching the hole is null too, not interpolated round it");
+eqs(covSample(-100.0, 0.0), null, "outside the grid is null");
+eqs(covSample(0.0, 100.0), null, "outside the grid the other way too");
+eqs(CsCover.sampler(null, terrainXf, {})(0, 0), null,
+    "no grid at all still answers");
+
+// ---- cover at a station ---------------------------------------------
+//
+// OVER THE CEILING, not over the centerline: the ceiling is the top of
+// the rock a dig from the surface has to come through, and in a tall
+// borehole the difference is the whole finding.
+var covSurvey = mesh3dSurvey();
+var covResolved = CsNetwork.resolve(covSurvey);
+// A window that actually covers the cave. terrainXf's cells are two
+// units wide and its grid is four across, which is six feet of ground
+// -- the passage runs twenty feet north of it, and a sampler outside
+// its grid correctly answers null.
+function covXf(col, row) {
+    return { x: col * 20.0 - 20.0, y: 20.0 - row * 20.0 };
+}
+// A flat surface at 100 m, in feet, so the arithmetic is readable.
+var covFlatVals = [];
+for (var cfi = 0; cfi < 12; cfi++) { covFlatVals.push(100.0); }
+var covFlatGrid = { values: covFlatVals, width: 4, height: 3 };
+var covFlat = CsCover.sampler(covFlatGrid, covXf,
+    { unit: CsUnits.FEET, offset: 0.0 });
+var covGroundFt = CsUnits.convert(100.0, CsUnits.METERS, CsUnits.FEET);
+var covVals = CsCover.atStations(covSurvey, covResolved, covFlat);
+// B and C arrive with up = 3; A was never arrived at, so it has none.
+near(covVals["B"], covGroundFt - (covResolved.stations["B"].z + 3.0), 1e-6,
+    "cover is ground minus the ceiling");
+near(covVals["A"], covGroundFt - covResolved.stations["A"].z, 1e-6,
+    "a station with no up reading answers over its centerline");
+
+// NEGATIVE COVER IS KEPT. A station above the modelled ground is a
+// wrong datum, a bad anchor or a sample off a cliff -- and a
+// Math.max(0, ...) here would hide the failure this suite has closed
+// five separate doors on.
+var covLow = CsCover.sampler(covFlatGrid, covXf,
+    { unit: CsUnits.FEET, offset: covGroundFt + 50.0 });
+var covNeg = CsCover.atStations(covSurvey, covResolved, covLow);
+ok(covNeg["B"] < 0, "a station above the ground reports negative cover");
+
+// ---- the summary the status line reads ------------------------------
+var covSum = CsCover.summary({ A: 10, B: 40, C: null, D: -2 });
+eqs(covSum.count, 3, "the summary counts the stations it could measure");
+eqs(covSum.unknown, 1, "and the ones it could not");
+eqs(covSum.above, 1, "and the ones sitting above the ground");
+eqs(covSum.thinnest.name, "D", "the thinnest station is named");
+eqs(covSum.thickest.name, "B", "so is the thickest");
+eqs(CsCover.summary({}).thinnest, null, "no values, nothing to report");
+
+// ---- the mesh's cover mode ------------------------------------------
+var covMesh = CsMesh3d.build(covSurvey, covResolved,
+    { colorBy: "cover", cover: covVals });
+eqs(covMesh.legend.title, "Depth of cover", "the legend names the mode");
+eqs(covMesh.legend.kind, "ramp", "cover is a ramp");
+ok(covMesh.legend.note.indexOf("percentile") >= 0,
+    "a clamped scale says it is clamped");
+// THE UNKNOWN SWATCH IS PART OF THE SCALE. A grey passage with no
+// entry in the legend reads as a colour the ramp forgot to explain.
+var covHasUnknown = false;
+for (var cli = 0; cli < covMesh.legend.stops.length; cli++) {
+    if (covMesh.legend.stops[cli].label.indexOf("no surface") >= 0) {
+        covHasUnknown = true;
+    }
+}
+ok(covHasUnknown, "the legend carries the unknown swatch");
+
+// ---- the outlines carry their legs -----------------------------------
+//
+// The hover ring rides the tube BETWEEN stations, so the view needs to
+// know which two sections each lofted leg joins. Names alone would
+// make the renderer look them up, which is a second place that knows
+// how a cave is put together.
+var covOutlines = covMesh.outlines;
+ok(covOutlines.legs.length >= 2, "the outlines carry leg index pairs");
+var legsEven = (covOutlines.legs.length % 2) === 0;
+ok(legsEven, "leg indices come in pairs");
+var legsInRange = true;
+for (var oli = 0; oli < covOutlines.legs.length; oli++) {
+    if (covOutlines.legs[oli] < 0 ||
+            covOutlines.legs[oli] >= covOutlines.counts.length) {
+        legsInRange = false;
+    }
+}
+ok(legsInRange, "every leg index names a loop that exists");
+// A leg never joins a section to itself: that is not a length of
+// passage and there is nothing along it to interpolate.
+var legsDistinct = true;
+for (var olj = 0; olj + 1 < covOutlines.legs.length; olj += 2) {
+    if (covOutlines.legs[olj] === covOutlines.legs[olj + 1]) {
+        legsDistinct = false;
+    }
+}
+ok(legsDistinct, "no leg joins a section to itself");
+// AND IT IS A SQUARE, NOT A POINT ON THE RAMP. Fed into the gradient
+// it would bend the ramp's own colours and take a place in an order
+// it has none in.
+var covUnknownStop = null;
+for (var cui = 0; cui < covMesh.legend.stops.length; cui++) {
+    if (covMesh.legend.stops[cui].label.indexOf("no surface") >= 0) {
+        covUnknownStop = covMesh.legend.stops[cui];
+    }
+}
+eqs(covUnknownStop.swatch, true, "the unknown stop is off the scale");
+
+// Hot at the thin end, and the two ends are not the same colour.
+ok(CsMesh3d.coverColor(0)[0] > CsMesh3d.coverColor(1)[0],
+    "thin cover is the redder end of the ramp");
+
+// A cave with no surface data draws entirely in the unknown grey
+// rather than falling back to a colouring that looks like it worked.
+var covNoneMesh = CsMesh3d.build(covSurvey, covResolved,
+    { colorBy: "cover", cover: {} });
+var covAllGrey = covNoneMesh.triangles.colors.length > 0;
+for (var cgi = 0; cgi < covNoneMesh.triangles.colors.length; cgi += 3) {
+    if (Math.abs(covNoneMesh.triangles.colors[cgi] -
+            CsMesh3d.COVER_UNKNOWN[0]) > 1e-9) {
+        covAllGrey = false;
+    }
+}
+ok(covAllGrey, "no surface data colours the whole cave unknown");
+
+// ---------------------------------------------------------------------
+// CsStationCard: what one station has to say.
+// ---------------------------------------------------------------------
+
+var cardOpts = { unit: "ft", cover: covVals["B"],
+                 ground: covGroundFt, datumOffset: 1200.0,
+                 anchorName: "A" };
+var card = CsStationCard.build(covSurvey, covResolved, "B", cardOpts);
+ok(card !== null, "a resolved station has a card");
+eqs(card.title, "B", "the card is titled with the station");
+
+function cardValue(c, label) {
+    for (var i = 0; i < c.rows.length; i++) {
+        if (c.rows[i][0] === label) { return c.rows[i][1]; }
+    }
+    return null;
+}
+
+ok(cardValue(card, "Depth of cover") !== null, "the card reports cover");
+ok(cardValue(card, "Surface elevation") !== null,
+    "and the ground elevation it came from, so the figure can be checked");
+// IN THE SAME FRAME as the absolute elevation above it: 100 m of
+// ground plus the cave's datum offset, not a relative number sitting
+// beside an absolute one.
+eqs(cardValue(card, "Surface elevation"),
+    CsStationCard.length(covGroundFt + 1200.0, "ft"),
+    "the surface row is a real-world elevation when the datum is known");
+// With no datum anchor there is no real-world frame to put it in, so
+// it falls back to the survey's own and says which it is.
+var cardRel = CsStationCard.build(covSurvey, covResolved, "B",
+    { unit: "ft", cover: covVals["B"], ground: covGroundFt,
+      datumOffset: null, anchorName: "A" });
+ok(cardValue(cardRel, "Surface above") !== null,
+    "no datum anchor, and the surface row is relative and says so");
+ok(cardValue(card, "Elevation") !== null, "and its own elevation");
+ok(cardValue(card, "Elevation, absolute") !== null,
+    "and the absolute one when the drawing has a datum anchor");
+ok(cardValue(card, "L / R / U / D") !== null, "and the passage around it");
+
+// A MISSING FACT IS A MISSING ROW. An empty value beside a label reads
+// as a measurement of nothing.
+var cardBare = CsStationCard.build(covSurvey, covResolved, "B",
+    { unit: "ft", cover: null, ground: null, datumOffset: null,
+      anchorName: "A" });
+eqs(cardValue(cardBare, "Depth of cover"), null,
+    "no cover, no cover row");
+eqs(cardValue(cardBare, "Elevation, absolute"), null,
+    "no datum anchor, no absolute elevation -- not a zero");
+ok(cardValue(cardBare, "Elevation") !== null,
+    "the facts that are known are still there");
+
+// An unadjusted survey has not moved and was never adjusted, and those
+// are different answers. Only one of them is about survey quality.
+eqs(cardValue(card, "Closure shift"), null,
+    "an unadjusted survey shows no closure row");
+
+// A station with no up reading still gets a card.
+ok(CsStationCard.build(covSurvey, covResolved, "A", cardOpts) !== null,
+    "the first station has a card too");
+eqs(CsStationCard.build(covSurvey, covResolved, "nowhere", cardOpts), null,
+    "a station that is not in the survey has no card");
+
+// An unmeasured wall is a dash, never a zero: a zero left wall is a
+// wall against your shoulder.
+ok(CsStationCard.lrudText({ left: 2, right: null, up: 3, down: 1 }, "ft")
+    .indexOf("--") >= 0, "an unmeasured wall reads as a dash");
+eqs(CsStationCard.lrudText({ left: null, right: null, up: null,
+    down: null }, "ft"), null, "no LRUD at all is no row");
+
+// NO COORDINATES, EVER. This card is the obvious place someone would
+// add them, and a cave's location does not leave the cave.
+var cardText = "";
+for (var cri = 0; cri < card.rows.length; cri++) {
+    cardText += card.rows[cri][0] + " " + card.rows[cri][1] + " ";
+}
+var cardLeaks = ["atitude", "ongitude", "Lat", "Lon", "Easting",
+                 "Northing", "UTM", "Coordinate"];
+var cardClean = true;
+for (var cki = 0; cki < cardLeaks.length; cki++) {
+    if (cardText.indexOf(cardLeaks[cki]) >= 0) { cardClean = false; }
+}
+ok(cardClean, "no row on a station card carries a coordinate");
 
 // ---------------------------------------------------------------------
 // Privacy: the datum anchor is locating data.

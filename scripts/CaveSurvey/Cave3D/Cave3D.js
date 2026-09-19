@@ -60,7 +60,12 @@ Cave3D.MODES = [
     { key: "size",     label: qsTr("Passage size") },
     { key: "date",     label: qsTr("Survey date") },
     { key: "closure",  label: qsTr("Closure shift") },
-    { key: "splay",    label: qsTr("Splay coverage") }
+    { key: "splay",    label: qsTr("Splay coverage") },
+    // LAST, and the only one that needs something outside the survey:
+    // without a 3DEP grid and a datum anchor beside the drawing it
+    // draws the cave in its unknown grey and the status line says
+    // which of the two is missing.
+    { key: "cover",    label: qsTr("Depth of cover") }
 ];
 
 Cave3D.SETTING_MODE = "Cave3D/ColorMode";
@@ -556,15 +561,21 @@ Cave3D.CONTOUR_MAJOR_COLOR = [0.85, 0.72, 0.45];
 Cave3D.CONTOUR_MINOR_COLOR = [0.62, 0.53, 0.36];
 
 /**
- * The ground above the cave: the elevation grid Surface Data left
- * beside the drawing, meshed and placed in the survey's own vertical
- * frame, with the aerial photograph as its texture.
+ * The ground above the cave, loaded once: the 3DEP grid Surface Data
+ * left beside the drawing, the transform that places it in drawing
+ * coordinates, and the datum offset that puts its elevations in the
+ * survey's own vertical frame.
  *
- * ALWAYS RETURNS A BUFFER, never throws. A drawing with no grid, no
- * georeference or no datum anchor simply has no surface, and the panel
- * greys the toggle -- which is a fact about the drawing, not a
- * failure. The reason travels back in `why` so the status line can say
- * which it is.
+ * ONE LOAD, TWO READERS. The terrain overlay meshes this grid and the
+ * cover colouring samples it. Loading it twice would be two code paths
+ * that can disagree about where the ground is -- and they would
+ * disagree silently, as a hillside in one place and a cover figure
+ * measured to another.
+ *
+ * ALWAYS ANSWERS, never throws. A drawing with no grid, no
+ * georeference or no datum anchor simply has no surface, which is a
+ * fact about the drawing rather than a failure; `why` says which it
+ * is, in a sentence a caver can act on.
  *
  * THE FETCH WINDOW IS READ, NOT RECOMPUTED. Surface Data stored the
  * Mercator bbox it actually fetched for, because that window is
@@ -572,18 +583,16 @@ Cave3D.CONTOUR_MINOR_COLOR = [0.62, 0.53, 0.36];
  * is drawn. Recomputing it here would register a kept grid against a
  * window it was never cut to and slide the whole hillside sideways.
  *
- * \return {terrain, why} -- terrain is the block setMesh takes.
+ * \return {grid, transform, offset, unit, texture, range, why} with
+ *         grid null when there is no surface. `offset` null means the
+ *         datum is UNKNOWN -- not zero. A caller that substitutes zero
+ *         rebases the cave to sea level.
  */
-Cave3D.terrainBuffer = function(doc, read) {
-    var empty = {
-        positions: [], normals: [], uvs: [], indices: [], texture: "",
-        lines: { positions: [], colors: [] },
-        bounds: null, holes: 0, levels: 0
-    };
+Cave3D.surfaceContext = function(doc) {
     var none = function(why) {
-        return { terrain: empty, why: why };
+        return { grid: null, transform: null, offset: null,
+                 unit: null, texture: "", range: null, why: why };
     };
-
     if (typeof CsTerrain3d === "undefined") {
         return none("");
     }
@@ -629,15 +638,97 @@ Cave3D.terrainBuffer = function(doc, read) {
     }
 
     var unit = CsUnits.fromDrawingUnit(doc.getUnit(), RS);
-    var transform = CsGeoProject.gridTransform(bbox, grid.width,
-        grid.height, { lat: rec.lat, lon: rec.lon, pos: rec.pos }, unit);
-    var offset = CsLocationPick.datumOffset(doc, unit);
 
     // No photograph is not a failure: the ground still has shape.
     var texture = CsGeoProject.imagePathFor(doc.getFileName());
     if (texture === null || !(new QFileInfo(texture)).exists()) {
         texture = "";
     }
+
+    return {
+        grid: grid,
+        transform: CsGeoProject.gridTransform(bbox, grid.width,
+            grid.height, { lat: rec.lat, lon: rec.lon, pos: rec.pos }, unit),
+        offset: CsLocationPick.datumOffset(doc, unit),
+        unit: unit,
+        texture: texture,
+        range: range,
+        why: ""
+    };
+};
+
+/**
+ * Depth of cover at every station, and the sentence to say about it.
+ *
+ * \return {values, summary, why} -- values is what CsMesh3d's cover
+ *         mode and the station card both take, every station present
+ *         and null where the surface has no reading. An absent surface
+ *         gives an EMPTY map and a why: the mode then draws the cave
+ *         in its unknown grey and says which step is missing, rather
+ *         than falling back to a colouring that looks like it worked.
+ */
+Cave3D.coverValues = function(doc, read, ctx) {
+    ctx = ctx || Cave3D.surfaceContext(doc);
+    if (ctx.grid === null) {
+        return { values: {}, summary: null, why: ctx.why };
+    }
+    var why = "";
+    if (ctx.offset === null) {
+        // WITHOUT GeoElev THERE IS NO COVER. The grid's elevations are
+        // NAVD88 and the survey's are its own datum; subtracting one
+        // from the other without the offset that relates them produces
+        // a number with no meaning, and it would look like feet of
+        // rock. Refuse rather than guess -- guessing here is the
+        // elevation-datum trap with a new face.
+        return { values: {}, summary: null,
+                 why: qsTr("no cover: this drawing has no datum anchor, "
+                     + "so run Surface Data to set one") };
+    }
+    var sample = CsCover.sampler(ctx.grid, ctx.transform,
+        { unit: ctx.unit, offset: ctx.offset });
+    var values = CsCover.atStations(read.survey, read.resolved, sample);
+    return { values: values, summary: CsCover.summary(values), why: why };
+};
+
+/**
+ * The ground above the cave: the elevation grid Surface Data left
+ * beside the drawing, meshed and placed in the survey's own vertical
+ * frame, with the aerial photograph as its texture.
+ *
+ * ALWAYS RETURNS A BUFFER, never throws. A drawing with no grid, no
+ * georeference or no datum anchor simply has no surface, and the panel
+ * greys the toggle -- which is a fact about the drawing, not a
+ * failure. The reason travels back in `why` so the status line can say
+ * which it is.
+ *
+ * THE FETCH WINDOW IS READ, NOT RECOMPUTED. Surface Data stored the
+ * Mercator bbox it actually fetched for, because that window is
+ * derived from the plan data's extent and therefore GROWS as the cave
+ * is drawn. Recomputing it here would register a kept grid against a
+ * window it was never cut to and slide the whole hillside sideways.
+ *
+ * \return {terrain, why} -- terrain is the block setMesh takes.
+ */
+Cave3D.terrainBuffer = function(doc, read, ctx) {
+    var empty = {
+        positions: [], normals: [], uvs: [], indices: [], texture: "",
+        lines: { positions: [], colors: [] },
+        bounds: null, holes: 0, levels: 0
+    };
+    var none = function(why) {
+        return { terrain: empty, why: why };
+    };
+
+    ctx = ctx || Cave3D.surfaceContext(doc);
+    if (ctx.grid === null) {
+        return none(ctx.why);
+    }
+    var grid = ctx.grid;
+    var transform = ctx.transform;
+    var offset = ctx.offset;
+    var unit = ctx.unit;
+    var texture = ctx.texture;
+    var range = ctx.range;
 
     // THE DRAWING'S OWN CONTOURS FIRST. They are what this cave has,
     // at the interval its cartographer chose, and reading them costs
@@ -699,6 +790,36 @@ Cave3D.terrainBuffer = function(doc, read) {
     return { terrain: terrain, why: why };
 };
 
+/**
+ * What the status line says about a set of cover values.
+ *
+ * THE THINNEST STATION BY NAME. A ramp can be read for "somewhere over
+ * there is thin"; the number a caver repeats to anybody else is a
+ * figure and a station, and this is the only place it appears.
+ */
+Cave3D.coverStatus = function(summary, unit) {
+    if (summary === null || summary === undefined || summary.count === 0) {
+        return "";
+    }
+    var text = qsTr("thinnest cover %1 %2 at %3  --  thickest %4 %2")
+        .arg(summary.thinnest.value.toFixed(1)).arg(unit)
+        .arg(summary.thinnest.name)
+        .arg(summary.thickest.value.toFixed(1));
+    if (summary.above > 0) {
+        // NOT A FOOTNOTE. One station above the ground is an entrance
+        // under a foot of slope error; a cave of them is a wrong datum
+        // reported as thin rock, which is the failure this suite has
+        // closed five separate doors on.
+        text += qsTr("  --  %1 station(s) sit above the modelled ground")
+            .arg(summary.above);
+    }
+    if (summary.unknown > 0) {
+        text += qsTr("  --  %1 outside the surface data")
+            .arg(summary.unknown);
+    }
+    return text;
+};
+
 Cave3D.statusText = function(read, mesh) {
     var triangles = mesh.triangles.indices.length / 3;
     var unit = read.survey.distanceUnit === "m" ? "m" : "ft";
@@ -734,11 +855,39 @@ Cave3D.refresh = function() {
             qsTr("No tagged survey in this drawing."));
         return;
     }
+    // ONE SURFACE LOAD for the whole refresh: the terrain overlay
+    // meshes this grid and the cover colouring samples it, and two
+    // loads could place the ground in two places without ever saying
+    // so.
+    var ctx;
+    try {
+        ctx = Cave3D.surfaceContext(getDocument());
+    } catch (eCtx) {
+        ctx = { grid: null, transform: null, offset: null, unit: null,
+                texture: "", range: null, why: "" };
+    }
+
+    // COVER IS COMPUTED WHATEVER THE MODE, because the station card
+    // reports it on a cave being looked at by trip or by depth. It is
+    // a few hundred bilinear samples; the grid is already in memory.
+    var cover = { values: {}, summary: null, why: ctx.why };
+    try {
+        cover = Cave3D.coverValues(getDocument(), read, ctx);
+    } catch (eCover) {
+        cover = { values: {}, summary: null, why: String(eCover) };
+    }
+    Cave3D.cover = cover;
+    Cave3D.surface = ctx;
+    // Kept for the station card, which answers a click and must not
+    // re-read and re-resolve the whole drawing to do it.
+    Cave3D.lastRead = read;
+
     var mesh;
     try {
         mesh = CsMesh3d.build(read.survey, read.resolved, {
             colorBy: Cave3D.currentMode(),
-            anchorName: read.anchorName
+            anchorName: read.anchorName,
+            cover: cover.values
         });
     } catch (e) {
         // CsMesh3d refuses to build rather than place a station at datum
@@ -774,7 +923,7 @@ Cave3D.refresh = function() {
     // never rebuilds the cave.
     var terrainWhy = "";
     try {
-        var got = Cave3D.terrainBuffer(getDocument(), read);
+        var got = Cave3D.terrainBuffer(getDocument(), read, ctx);
         mesh.terrain = got.terrain;
         terrainWhy = got.why;
     } catch (eTerrain) {
@@ -805,8 +954,20 @@ Cave3D.refresh = function() {
                 flight.breaks, flight.turns || []);
         }
     }
+    // THE COVER SENTENCE ONLY IN THE COVER MODE. It is a long line and
+    // the panel has one status bar; a caver looking at trips does not
+    // need the thinnest roof in the cave reported at them.
+    var coverWhy = "";
+    if (Cave3D.currentMode() === "cover") {
+        coverWhy = Cave3D.coverStatus(cover.summary,
+            read.survey.distanceUnit === "m" ? "m" : "ft");
+        if (coverWhy === "" && cover.why !== "") {
+            coverWhy = cover.why;
+        }
+    }
     cave3d.setStatus(Cave3D.handle,
         Cave3D.statusText(read, mesh) +
+        (coverWhy !== "" ? "  --  " + coverWhy : "") +
         (terrainWhy !== "" ? "  --  " + terrainWhy : ""));
 };
 
@@ -1009,6 +1170,63 @@ Cave3D.dress = function() {
  * leaves the panel with NOTHING connected -- which is how the Export
  * button came to do nothing at all, silently, for a whole afternoon.
  */
+/**
+ * Answer a click on a station: build its card and hand the view the
+ * finished lines.
+ *
+ * THE VIEW IS HANDED STRINGS, not facts. It knows where the station is
+ * on screen and nothing else -- no units, no trip names, no datum --
+ * for the same reason RCave3dLegend is handed its labels.
+ */
+Cave3D.showStationCard = function(station) {
+    if (Cave3D.handle === null || cave3d.showStationCard === undefined) {
+        return;
+    }
+    var read = Cave3D.lastRead;
+    if (read === null || read === undefined) {
+        return;
+    }
+    var cover = Cave3D.cover || { values: {} };
+    var ctx = Cave3D.surface || { grid: null };
+    var unit = read.survey.distanceUnit === "m" ? "m" : "ft";
+
+    // The ground elevation the cover figure came from, so a reader can
+    // check it against a topo map. Recovered from the cover rather
+    // than sampled a second time: two samples could differ and only
+    // one of them is on the card.
+    var st = read.resolved.stations[station];
+    var ground = null;
+    var cv = cover.values[station];
+    if (st !== undefined && typeof cv === "number" && isFinite(cv)) {
+        ground = cv + CsCover.ceilingAt(station, read.survey, st);
+    }
+
+    var card;
+    try {
+        card = CsStationCard.build(read.survey, read.resolved, station, {
+            unit: unit,
+            cover: (typeof cv === "number" && isFinite(cv)) ? cv : null,
+            ground: ground,
+            datumOffset: ctx.offset,
+            anchorName: read.anchorName
+        });
+    } catch (e) {
+        card = null;
+    }
+    if (card === null) {
+        cave3d.hideStationCard(Cave3D.handle);
+        return;
+    }
+    var labels = [];
+    var values = [];
+    for (var i = 0; i < card.rows.length; i++) {
+        labels.push(card.rows[i][0]);
+        values.push(card.rows[i][1]);
+    }
+    cave3d.showStationCard(Cave3D.handle, station, card.title,
+        labels, values);
+};
+
 Cave3D.connectOnce = function() {
     if (Cave3D.connected) {
         return;
@@ -1098,6 +1316,19 @@ Cave3D.connectOnce = function() {
             // a view that started spinning on its own would be a
             // surprise rather than a setting.
             Cave3D.cameraMode = mode;
+        });
+    }
+    if (cave3d.stationPicked !== undefined) {
+        cave3d.stationPicked.connect(function(handle, station) {
+            if (handle !== Cave3D.handle) { return; }
+            // An EMPTY name is a click that hit nothing, which closes
+            // the card. The view decides what "hit" means -- it owns
+            // the projection -- and this side decides what to say.
+            if (station === "") {
+                cave3d.hideStationCard(Cave3D.handle);
+                return;
+            }
+            Cave3D.showStationCard(station);
         });
     }
     if (cave3d.exportRequested !== undefined) {

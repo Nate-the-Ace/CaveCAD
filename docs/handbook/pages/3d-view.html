@@ -6,7 +6,9 @@
 <ol>
 <li><b>Cave Survey &gt; 3D View</b>. It is a docked panel, beside the drawing, because you are comparing the two.</li>
 <li>Pan, zoom and rotate freely, or snap to <b>Plan</b> and <b>Profile</b>.</li>
-<li>Colour by any of seven things from the dropdown: trip, depth, distance in along the passage, passage size, survey date, closure shift, splay coverage. The floating legend says what the colours mean.</li>
+<li>Colour by any of eight things from the dropdown: trip, depth, distance in along the passage, passage size, survey date, closure shift, splay coverage, depth of cover. The floating legend says what the colours mean.</li>
+<li><b>Hover over the passage</b> and the cross section nearest the cursor lights up in amber &mdash; roughly what the passage is doing at that spot, which the outside of a tube cannot show. It follows the cursor and is gone when you leave the view.</li>
+<li><b>Click a station name</b>, or the passage near a station, for a card of its numbers: its trip and date, its elevation (and its real-world elevation when the drawing has a datum anchor), the depth of cover over it and the surface elevation that came from, how far in it is, the passage around it, and how far closure moved it. The card stays beside the station as you turn the cave. Click it, click empty space, or press Esc to put it away.</li>
 <li>Toggle the three overlays: the centerline, a grey ghost of the survey as recorded before closure moved anything, and a mark on every lead.</li>
 <li>The play button and scrub slider build the cave one shot at a time, in the order it was surveyed.</li>
 <li><b>Terrain</b> puts the ground above the cave, with the aerial photograph draped over it. <b>Contours</b> shows the drawing's own surface contours on that ground &mdash; the same lines at the same interval the plan has &mdash; and the <b>Surface</b> slider sets how solid the hillside is — slide it down to see the passage through the hill, up to read the ground. Both need <a href="surface-data.html">Surface Data</a> to have been run on this drawing; they are greyed out otherwise.</li>
@@ -16,6 +18,10 @@
 <p>Captured cross sections stand beside the passage they were drawn of, and your scanned sketches drape onto it. The panel draws no entity and writes no tag: a drawing that has been looked at in 3D is byte-identical to one that has not.</p>
 <p>The contour lines are the drawing's own, lifted to their elevations &mdash; so what you see in 3D is what the plan shows, at whatever interval you chose. A drawing with no contours drawn gets a generated set instead, at a coarse interval, and the status line says which you are looking at.</p>
 <p>The terrain is the elevation grid Surface Data left beside the drawing, at the resolution USGS 3DEP published it, with the same aerial photograph the plan view sits on. Nothing about the surface is invented here: every vertex is a real reading, and where 3DEP has no data there is a hole in the surface rather than a guess.</p>
+<h2>Depth of cover</h2>
+<p>Every other colouring is a fact about the survey. This one is about the rock: how much ground sits between the surface and the <i>top</i> of the passage — over the ceiling, not over the centreline, because that is what a dig from the surface has to come through. Thin cover is the hot end of the scale, because thin cover is the finding: a possible daylight lead, a dig worth trying, the breakdown overhead, the quarry above.</p>
+<p>The status line names the thinnest station and its figure, which is the number worth repeating to anyone else. Stations the surface has no reading over — outside the fetched window, or in a hole in the 3DEP data — are drawn in a flat grey that appears in the legend; they are not drawn as "no rock at all".</p>
+<p>If stations report as sitting <i>above</i> the ground, read that as a warning rather than a thin roof. One station doing it is the entrance under a foot of slope error. Many of them means the survey's elevations are not on the datum the drawing thinks they are, and the cover figures are meaningless until that is fixed.</p>
 <h2>How the cave meets the surface</h2>
 <p>A survey's elevations are on whatever datum it was run on — often the entrance called zero. Surface Data stores what 3DEP says the ground is at the entrance, and the 3D view uses that one number to stand the cave under its own hillside, with the entrance station about five feet below the surface. Every other station keeps its surveyed height above or below the entrance exactly: the cave is moved as one rigid piece, and nothing in the drawing is rewritten.</p>
 <p>The status line says how far it moved. A number far larger than you expect means the survey's elevations are not on the datum you think they are — worth knowing, and the reason the shift is reported rather than quietly applied. On a drawing with no stored ground elevation the surface is placed at its own true elevation and the status line says so; it may then sit well above or below the cave.</p>
@@ -23,6 +29,7 @@
 <ul>
 <li>The ghost overlay is absent by design when there is nothing to compare — adjustment off, or a solve that did not converge.</li>
 <li>Terrain and Contours are greyed out until Surface Data has fetched an elevation grid for this drawing, and the drawing has been saved — the grid lives beside the drawing file.</li>
+<li>Depth of cover needs both an elevation grid and a datum anchor from Surface Data. Without them the cave draws entirely in the unknown grey and the status line says which of the two is missing &mdash; it does not fall back to another colouring and look like it worked.</li>
 <li>Passage-size colouring is clamped to the 5th–95th percentile, and the legend says so: one big room otherwise puts every crawl at the bottom of the ramp.</li>
 </ul>
 <h2>See also</h2>

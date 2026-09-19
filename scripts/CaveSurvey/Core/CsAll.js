@@ -91,6 +91,12 @@ include(includeBasePath + "/CsElevation.js");
 // After CsContour (grids, marching squares), CsGeoProject (the grid
 // transform) and CsElevation (the datum offset it places terrain by).
 include(includeBasePath + "/CsTerrain3d.js");
+// After CsContour and CsGeoProject (it samples the same grid through
+// the same transform) and after CsMesh3d (it reads the LRUD at a
+// station to find the ceiling).
+include(includeBasePath + "/CsCover.js");
+// After CsMesh3d (trip labels, distances, LRUD) and CsLrud (splays).
+include(includeBasePath + "/CsStationCard.js");
 include(includeBasePath + "/CsValidate.js");
 include(includeBasePath + "/CsStats.js");
 include(includeBasePath + "/CsGrade.js");

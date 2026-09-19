@@ -256,6 +256,31 @@ CsMesh3d.depthColor = function(t) {
     return [0.25 + 0.60 * t, 0.45 + 0.40 * t, 0.70 + 0.25 * (1 - t)];
 };
 
+/** Colour for a depth of cover, thin (0) to deep (1).
+ *
+ *  HOT AT THE THIN END, unlike every other ramp here, and that is the
+ *  whole point of the mode: thin rock is the finding -- a possible
+ *  daylight lead, a dig worth trying, the breakdown overhead, the
+ *  quarry above -- and a scale that made the deepest passage the
+ *  loudest colour would shout about the part nobody can reach.
+ */
+CsMesh3d.coverColor = function(t) {
+    if (!isFinite(t)) { t = 0.5; }
+    if (t < 0) { t = 0; }
+    if (t > 1) { t = 1; }
+    // red -> orange -> yellow -> olive -> deep blue-green
+    return [0.92 - 0.62 * t, 0.22 + 0.40 * t, 0.18 + 0.42 * t];
+};
+
+/** A station the surface has no reading over: a hole in the grid, a
+ *  station outside the fetched window, or no surface data at all.
+ *
+ *  ITS OWN FLAT GREY, and a labelled swatch in the legend beside the
+ *  ramp. Painting unknown cover at the bottom of the ramp would say
+ *  "no rock above this passage" in the loudest colour on the scale.
+ */
+CsMesh3d.COVER_UNKNOWN = [0.52, 0.52, 0.55];
+
 /**
  * The direction the passage runs at a station: the mean of the unit
  * vectors of the non-splay legs touching it.
@@ -305,7 +330,43 @@ CsMesh3d.lrudAt = function(name, survey) {
                      up: s.up, down: s.down };
         }
     }
+    // THE FIRST STATION IS NEVER ARRIVED AT, so no shot carries its
+    // LRUD and the scan above finds nothing. Its reading lives in
+    // survey.startLrud -- the notebook's first row, which has walls
+    // but no shot to hang them on. Without this the entrance station
+    // has no measured passage around it at all: no ring in the 3D
+    // view, and a depth of cover measured over the centerline instead
+    // of over the ceiling. CsLrud does this for the plan's walls
+    // (its firstFrom / startLrud seeding); this is the same rule.
+    //
+    // ONLY the station the survey starts from. startLrud belongs to
+    // that one station, and handing it to any station that happens to
+    // have nothing arriving would put the entrance's walls around
+    // whatever else the scan missed.
+    if (name === CsMesh3d.firstStation(survey) &&
+            survey.startLrud !== null && survey.startLrud !== undefined) {
+        var sl = survey.startLrud;
+        return { left: sl.left, right: sl.right,
+                 up: sl.up, down: sl.down };
+    }
     return { left: null, right: null, up: null, down: null };
+};
+
+/** The station a survey starts from: the `from` of its first real
+ *  shot. The one station no shot arrives at, and therefore the one
+ *  whose LRUD has nowhere else to live. */
+CsMesh3d.firstStation = function(survey) {
+    if (survey === null || survey === undefined ||
+            survey.shots === undefined) {
+        return null;
+    }
+    for (var i = 0; i < survey.shots.length; i++) {
+        var s = survey.shots[i];
+        if (s.splay !== true && !s.excludeFromAll) {
+            return s.from;
+        }
+    }
+    return null;
 };
 
 /**
@@ -612,9 +673,15 @@ CsMesh3d.percentile = function(values, p) {
  * \param resolved CsNetwork.resolve(survey)
  * \param opts     {colorBy, anchorName, tapeMode}
  *                 colorBy is one of trip, depth, distance, size, date,
- *                 closure, splay -- anything else falls back to trip.
+ *                 closure, splay, cover -- anything else falls back to
+ *                 trip.
  *                 anchorName is the station "distance" measures from;
  *                 absent, it uses the first station it finds.
+ *                 cover is {station: depth of cover in drawing units,
+ *                 or null}, from CsCover.atStations -- required by the
+ *                 cover mode and ignored by every other one. This file
+ *                 never reads a grid: the surface, its datum and its
+ *                 georeference stay on the caller's side.
  *
  * \return {triangles: {positions, normals, colors, indices},
  *          lines:     {positions, colors, indices},
@@ -729,7 +796,7 @@ CsMesh3d.build = function(survey, resolved, opts) {
     // legend are decided, so the two cannot disagree about what happened.
     if (colorBy !== "depth" && colorBy !== "distance" && colorBy !== "size" &&
             colorBy !== "date" && colorBy !== "closure" &&
-            colorBy !== "splay") {
+            colorBy !== "splay" && colorBy !== "cover") {
         colorBy = "trip";
     }
 
@@ -738,6 +805,8 @@ CsMesh3d.build = function(survey, resolved, opts) {
     var rampValue = null;
     var rampLow = 0, rampHigh = 1;
     var bandOf = null;
+    var coverValues = {};
+    var coverLow = 0, coverHigh = 1;
 
     if (colorBy === "distance") {
         rampValue = CsMesh3d.distancesFrom(opts.anchorName, resolved);
@@ -782,6 +851,47 @@ CsMesh3d.build = function(survey, resolved, opts) {
                 return CsMesh3d.COVERAGE[1].color;
             }
             return CsMesh3d.COVERAGE[0].color;
+        };
+    } else if (colorBy === "cover") {
+        // NOT A rampValue MODE, though it looks like one. The ramp path
+        // treats a missing value as the bottom of its range; here a
+        // missing value means the surface has no reading over that
+        // station, and colouring it "no rock at all" would be the
+        // loudest wrong answer the mode can give. So cover keeps its
+        // own clamp and its own unknown colour.
+        //
+        // CsCover computed the values -- against a grid, a datum offset
+        // and a georeference this file must never learn about. They
+        // arrive already in the drawing's units.
+        coverValues = opts.cover || {};
+        var cvals = [];
+        for (name in coverValues) {
+            if (coverValues.hasOwnProperty(name) &&
+                    typeof coverValues[name] === "number" &&
+                    isFinite(coverValues[name])) {
+                cvals.push(coverValues[name]);
+            }
+        }
+        if (cvals.length === 0) {
+            coverLow = 0;
+            coverHigh = 1;
+        } else {
+            // CLAMPED like passage size, and for the same reason: one
+            // passage under a ridge otherwise flattens every shallow
+            // lead into one colour. The legend says it is clamped.
+            coverLow = CsMesh3d.percentile(cvals, 0.05);
+            coverHigh = CsMesh3d.percentile(cvals, 0.95);
+            if (!(coverHigh - coverLow > 1e-9)) {
+                coverHigh = coverLow + 1;
+            }
+        }
+        bandOf = function(stationName) {
+            var v = coverValues[stationName];
+            if (typeof v !== "number" || !isFinite(v)) {
+                return CsMesh3d.COVER_UNKNOWN;
+            }
+            return CsMesh3d.coverColor(
+                (v - coverLow) / (coverHigh - coverLow));
         };
     }
 
@@ -900,6 +1010,27 @@ CsMesh3d.build = function(survey, resolved, opts) {
                 label: CsClosure.BANDS[bi].says
             });
         }
+    } else if (colorBy === "cover") {
+        legend.title = "Depth of cover";
+        legend.kind = "ramp";
+        legend.note = "5th-95th percentile, over the ceiling";
+        legend.stops = [
+            { color: CsMesh3d.coverColor(0),
+              label: CsMesh3d.legendLength(coverLow, unitName) },
+            { color: CsMesh3d.coverColor(0.5),
+              label: CsMesh3d.legendLength((coverLow + coverHigh) / 2,
+                                           unitName) },
+            { color: CsMesh3d.coverColor(1),
+              label: CsMesh3d.legendLength(coverHigh, unitName) },
+            // IN THE LEGEND, BUT NOT ON THE SCALE. A grey passage
+            // with no entry here reads as a colour the ramp forgot to
+            // explain; a grey fed into the ramp ITSELF would bend the
+            // gradient and claim a place in an order it has none in.
+            // `swatch` is how a ramp legend says "square, under the
+            // bar".
+            { color: CsMesh3d.COVER_UNKNOWN, label: "no surface reading",
+              swatch: true }
+        ];
     } else if (colorBy === "splay") {
         legend.title = "Splay coverage";
         legend.kind = "swatches";
@@ -934,6 +1065,7 @@ CsMesh3d.build = function(survey, resolved, opts) {
     // surface to its own approach, so the ring there depends on which
     // leg is asking.
     var ringCache = {};
+    var loftedLegs = [];
 
     // ONE RING PER STATION, kept for the flight: the camera flies the
     // middle of the passage rather than the line of the stations, and
@@ -1019,6 +1151,13 @@ CsMesh3d.build = function(survey, resolved, opts) {
                 // would be drawing a guess.
                 if (ringA.length >= 3 && ringB.length >= 3) {
                     CsMesh3d.loft(tri, ringA, ringB, colA, colB);
+                    // WHICH SECTIONS THIS LEG JOINS. The view needs it
+                    // to answer "what is the passage doing HERE" for a
+                    // point BETWEEN two stations -- the whole length of
+                    // the tube, not the handful of places an instrument
+                    // stood. Only lofted legs: a closure carries no
+                    // surface, so there is nothing along it to show.
+                    loftedLegs.push([leg.from, leg.to]);
                     var gi;
                     for (gi = 0; gi < ringA.length; gi++) { grow(ringA[gi]); }
                     for (gi = 0; gi < ringB.length; gi++) { grow(ringB[gi]); }
@@ -1103,7 +1242,7 @@ CsMesh3d.build = function(survey, resolved, opts) {
     return { triangles: tri, lines: lin, steps: steps, legend: legend,
              ghost: ghost, leads: leads,
              stations: CsMesh3d.stationLabels(resolved),
-             outlines: CsMesh3d.outlineBuffer(sectionAt),
+             outlines: CsMesh3d.outlineBuffer(sectionAt, loftedLegs),
              bounds: { min: min, max: max } };
 };
 
@@ -1146,11 +1285,17 @@ CsMesh3d.build = function(survey, resolved, opts) {
  * the middles for its path and the view draws the loop nearest the
  * camera, so a caver flying the passage can see its shape around them.
  *
+ * \param loftedLegs [[fromName, toName], ...] -- the legs that carry a
+ *        surface, so the view can read the passage BETWEEN two
+ *        stations and not only at them.
+ *
  * \return {positions: [x,y,z...], counts: [n...], centres: [x,y,z...],
- *          names: [...]}
+ *          names: [...], legs: [i, j, ...] pairs of indices into the
+ *          loops above}
  */
-CsMesh3d.outlineBuffer = function(sectionAt) {
-    var out = { positions: [], counts: [], centres: [], names: [] };
+CsMesh3d.outlineBuffer = function(sectionAt, loftedLegs) {
+    var out = { positions: [], counts: [], centres: [], names: [],
+                legs: [] };
     if (sectionAt === null || sectionAt === undefined) {
         return out;
     }
@@ -1173,6 +1318,21 @@ CsMesh3d.outlineBuffer = function(sectionAt) {
         out.counts.push(ring.length);
         out.centres.push(sec.centre.x, sec.centre.y, sec.centre.z);
         out.names.push(names[i]);
+    }
+
+    // The legs, as index pairs. A leg whose either end kept no loop --
+    // a station with fewer than three measured wall points -- is
+    // dropped: there is nothing to interpolate between.
+    var indexOf = {};
+    for (var oi = 0; oi < out.names.length; oi++) {
+        indexOf[out.names[oi]] = oi;
+    }
+    var legs = loftedLegs || [];
+    for (var li = 0; li < legs.length; li++) {
+        var a = indexOf[legs[li][0]];
+        var b = indexOf[legs[li][1]];
+        if (a === undefined || b === undefined || a === b) { continue; }
+        out.legs.push(a, b);
     }
     return out;
 };
