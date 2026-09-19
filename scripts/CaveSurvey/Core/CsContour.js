@@ -432,3 +432,74 @@ CsContour.sampleAt = function(values, w, h, x, y) {
     return tl * (1 - fx) * (1 - fy) + tr * fx * (1 - fy) +
         bl * (1 - fx) * fy + br * fx * fy;
 };
+
+// ============================================================
+// The drawn side: where a fetched contour set LIVES in a drawing.
+//
+// Surface Data draws its contours into ONE block, inserted once at the
+// drawing's origin with identity scale and rotation, so a caver can
+// select the whole surface with a single click instead of a window
+// over a thousand polylines. The identity insert is what lets everything
+// downstream keep reading block-local coordinates as drawing
+// coordinates -- change it and CsLocationPick.lowPointNear and
+// Cave3D.terrainContoursFromDrawing both start measuring against a
+// frame the contours are not in.
+//
+// The tags stay on the entities INSIDE the block (SurfaceContours=1,
+// ContourElevation=<drawing units>), and the reference carries
+// SurfaceContours=1 as well so the generated-underlay filters that
+// walk model space still recognise it.
+// ============================================================
+
+/** The one block every fetched contour set is drawn into. */
+CsContour.BLOCK = "CaveSurveyContours";
+
+/** The contour block's id, or null when this drawing has none. */
+CsContour.blockIdOf = function(doc) {
+    var id;
+    try {
+        id = doc.getBlockId(CsContour.BLOCK);
+    } catch (e) {
+        return null;
+    }
+    if (id === undefined || id === null || id < 0) {
+        return null;
+    }
+    if (typeof RBlock !== "undefined" && id === RBlock.INVALID_ID) {
+        return null;
+    }
+    return id;
+};
+
+/**
+ * Every entity a contour fetch drew: the contour block's contents,
+ * plus anything in model space still tagged SurfaceContours=1 -- the
+ * block reference itself, and the loose polylines older builds drew
+ * before there was a block.
+ *
+ * Block-local coordinates are drawing coordinates here; see the note
+ * above on why the insert is fixed at the origin.
+ */
+CsContour.drawnEntities = function(doc) {
+    var out = [];
+    var i, e;
+    var ids = doc.queryAllEntities(false, false);
+    for (i = 0; i < ids.length; i++) {
+        e = doc.queryEntity(ids[i]);
+        if (!isNull(e) && CsTags.get(e, "SurfaceContours") === "1") {
+            out.push(e);
+        }
+    }
+    var blockId = CsContour.blockIdOf(doc);
+    if (blockId === null) {
+        return out;
+    }
+    var bids = doc.queryBlockEntities(blockId);
+    for (i = 0; i < bids.length; i++) {
+        e = doc.queryEntity(bids[i]);
+        if (!isNull(e)) {
+            out.push(e);
+        }
+    }
+    return out;
+};

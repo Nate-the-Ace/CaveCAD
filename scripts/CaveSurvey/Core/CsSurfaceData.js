@@ -754,6 +754,13 @@ CsSurfaceData.contours = function(doc, di, anchor) {
  * intervals -- go on CTRL-CONTOUR-MAJOR with an elevation label at
  * their midpoint; the rest on CTRL-CONTOUR.
  *
+ * EVERYTHING GOES INSIDE ONE BLOCK (CsContour.BLOCK), inserted once at
+ * the drawing's origin with identity scale and rotation, so one click
+ * selects the whole surface instead of a window-select over a thousand
+ * separate polylines that also catches the cave. The layers are still
+ * the entities' own, inside the block, so CTRL-CONTOUR and
+ * CTRL-CONTOUR-MAJOR keep switching them off and styling them.
+ *
  * \return {lines: n}
  */
 CsSurfaceData.drawContours = function(doc, di, grid, levels, interval, bbox,
@@ -810,15 +817,29 @@ CsSurfaceData.drawContours = function(doc, di, grid, levels, interval, bbox,
         }
     }
 
-    // Replace the previous run, make sure the layers exist, then land
-    // the new set just above the drawing's floor -- over the aerial
-    // photograph, under everything drawn since. The basemap, when
-    // present, is pushed one step further down so the stack stays
-    // photo < contours < survey.
+    // Only now is the document touched. The previous run goes FIRST,
+    // and goes completely: its linework, its reference, and the block
+    // DEFINITION itself. Refilling a surviving definition would leave a
+    // drawing carrying the old fetch's extent inside a block claiming
+    // to hold the new one.
     CsSurfaceData.eraseExistingContours(doc, di);
     CsLayers.ensure(doc, di, CsLayers.CTRL_CONTOUR);
     CsLayers.ensure(doc, di, CsLayers.CTRL_CONTOUR_MAJOR);
 
+    var blockId = CsSurfaceData.contourBlockId(doc, di);
+    if (blockId === null) {
+        return { lines: 0 };
+    }
+    for (var bz = 0; bz < entities.length; bz++) {
+        entities[bz].setBlockId(blockId);
+    }
+
+    // Land the new set just above the drawing's floor -- over the
+    // aerial photograph, under everything drawn since. The basemap,
+    // when present, is pushed one step further down so the stack stays
+    // photo < contours < survey. The DRAW ORDER IS THE REFERENCE'S:
+    // that one entity is what model space stacks, and the contents
+    // inside the block ride with it.
     var floor = doc.getStorage().getMinDrawOrder() - 1;
     var basemaps = CsSurfaceData.findBasemapCandidates(doc);
     if (basemaps.length > 0) {
@@ -830,10 +851,19 @@ CsSurfaceData.drawContours = function(doc, di, grid, levels, interval, bbox,
         di.applyOperation(lower);
     }
 
+    // One insert, at the origin, scale 1, rotation 0 -- the identity
+    // CsContour.drawnEntities' readers depend on.
+    var ref = new RBlockReferenceEntity(doc,
+        new RBlockReferenceData(blockId, new RVector(0, 0),
+            new RVector(1, 1), 0.0));
+    ref.setLayerId(doc.getLayerId(CsLayers.CTRL_CONTOUR));
+    ref.setDrawOrder(floor);
+    CsTags.set(ref, "SurfaceContours", "1");
+    entities.push(ref);
+
     var op = new RAddObjectsOperation();
     op.setText("Draw surface contours");
     for (var ei = 0; ei < entities.length; ei++) {
-        entities[ei].setDrawOrder(floor);
         op.addObject(entities[ei], false);
     }
     di.applyOperation(op);
@@ -842,27 +872,74 @@ CsSurfaceData.drawContours = function(doc, di, grid, levels, interval, bbox,
 };
 
 /**
- * Deletes any previous contour set so a re-run replaces it. The tag,
+ * The contour block, made if this drawing has none yet. Empty on the
+ * way out: the fetch that calls this has already erased the previous
+ * run, definition and all.
+ *
+ * \return the block id, or null when it could not be made.
+ */
+CsSurfaceData.contourBlockId = function(doc, di) {
+    var existing = CsContour.blockIdOf(doc);
+    if (existing !== null) {
+        return existing;
+    }
+    var block = new RBlock(doc, CsContour.BLOCK, new RVector(0, 0));
+    di.applyOperation(new RAddObjectOperation(block, false));
+    return CsContour.blockIdOf(doc);
+};
+
+/**
+ * Deletes any previous contour set so a re-run replaces it, COMPLETELY:
+ * the linework and labels inside the contour block, the loose
+ * polylines older builds drew straight into model space, the block
+ * reference, and finally the block DEFINITION itself. The tag,
  * SurfaceContours=1, is the standalone tool's original tag -- see the
  * file header on why it was not renamed.
+ *
+ * The definition goes too, rather than being refilled, so a fetch can
+ * never inherit anything from the one before it: a definition that
+ * survives keeps its old base point, its old contents' draw orders and
+ * whatever a caver did to it in between, and a half-replaced block is
+ * invisible until it is printed.
+ *
+ * TWO OPERATIONS, in this order. The contents and the reference go
+ * first; the block object goes second, once nothing is left pointing
+ * into it. Deleting a block with live entities still inside it in the
+ * same operation leaves the storage to cascade, which is exactly the
+ * kind of thing that gets found later in a DXF that will not reopen.
+ *
+ * \return the number of entities removed (the block itself is not
+ *         counted).
  */
 CsSurfaceData.eraseExistingContours = function(doc, di) {
-    var doomed = [];
-    var ids = doc.queryAllEntities(false, false);
-    for (var i = 0; i < ids.length; i++) {
-        var e = doc.queryEntity(ids[i]);
-        if (!isNull(e) && CsTags.get(e, "SurfaceContours") === "1") {
-            doomed.push(e);
+    var doomed = CsContour.drawnEntities(doc);
+    if (doomed.length > 0) {
+        var op = new RDeleteObjectsOperation();
+        op.setText("Erase surface contours");
+        for (var k = 0; k < doomed.length; k++) {
+            op.deleteObject(doomed[k]);
+        }
+        di.applyOperation(op);
+    }
+
+    var blockId = CsContour.blockIdOf(doc);
+    if (blockId !== null) {
+        var block = doc.queryBlock(blockId);
+        if (!isNull(block)) {
+            // Never while it is the block being edited: that would
+            // delete the space under the caver's own cursor.
+            if (blockId === doc.getCurrentBlockId() &&
+                    typeof Block !== "undefined" &&
+                    typeof Block.editBlock === "function") {
+                Block.editBlock(di,
+                    doc.getBlockName(doc.getModelSpaceBlockId()));
+            }
+            var drop = new RDeleteObjectsOperation();
+            drop.setText("Erase surface contours");
+            drop.deleteObject(block);
+            di.applyOperation(drop);
         }
     }
-    if (doomed.length === 0) {
-        return 0;
-    }
-    var op = new RDeleteObjectsOperation();
-    for (var k = 0; k < doomed.length; k++) {
-        op.deleteObject(doomed[k]);
-    }
-    di.applyOperation(op);
     return doomed.length;
 };
 

@@ -7,6 +7,9 @@
 <li><b>Cave Survey &gt; Surface Data</b>. Two checkboxes, both on by default: aerial imagery (USGS NAIP) and contours (USGS 3DEP, labelled in the drawing's unit).</li>
 <li>Both need the drawing's <b>geo anchor</b>: an existing Geo Reference, a station named A1 (the entrance, by convention), or a single selected station point.</li>
 </ol>
+<h2>The contours are one block</h2>
+<p>Every contour line and elevation label a fetch draws goes into a single block, inserted once. Click any contour and the whole surface selects, so it can be moved out of the way, switched off or deleted in one go without a window-select that also catches the cave. Their layers still work as they always did: <b>CTRL-CONTOUR</b> and <b>CTRL-CONTOUR-MAJOR</b>.</p>
+<p>Fetching again replaces the set completely — the old linework and the old block are deleted first, so nothing from an earlier fetch is left behind.</p>
 <h2>When it refuses</h2>
 <ul>
 <li>With no anchor at all it refuses outright rather than fetching anything. Set one first from <b>Survey Notebook &gt; Declination</b>, which offers to store it.</li>

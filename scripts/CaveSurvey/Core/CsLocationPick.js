@@ -558,13 +558,17 @@ CsLocationPick.isSurfaceEntity = function(entity) {
  */
 CsLocationPick.lowPointNear = function(doc, point, radius) {
     var best = null;
-    // MODEL SPACE ONLY. An entity inside a block definition carries
-    // BLOCK-LOCAL coordinates, so measuring a distance from a drawing
-    // point to one is comparing two different coordinate systems.
-    var ids = doc.queryAllEntities(false, false);
-    for (var i = 0; i < ids.length; i++) {
-        var e = doc.queryEntity(ids[i]);
-        if (isNull(e) || CsTags.get(e, "SurfaceContours") !== "1") {
+    // MODEL SPACE PLUS THE ONE BLOCK THE CONTOURS LIVE IN. An entity
+    // inside a block definition carries BLOCK-LOCAL coordinates, so
+    // measuring a distance from a drawing point to one is normally
+    // comparing two different coordinate systems -- CsContour.BLOCK is
+    // the exception, and only because Surface Data inserts it once at
+    // the origin with identity scale and rotation. No other block is
+    // read here.
+    var found = CsContour.drawnEntities(doc);
+    for (var i = 0; i < found.length; i++) {
+        var e = found[i];
+        if (isNull(e)) {
             continue;
         }
         var elev = CsTags.getNumber(e, "ContourElevation");

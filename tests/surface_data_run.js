@@ -166,6 +166,135 @@ ok(bothOffBare.ok === true,
 ok(bothOffBare.lines.join(" ").split("skipped").length === 3,
     "both passes report skipped on the unanchored drawing too");
 
+// ---------------------------------------------------------------------
+// Fixture 4: the DRAWN side, with no network at all. A grid is made
+// here rather than fetched, so this exercises exactly what
+// CsSurfaceData.drawContours does with one: the contours go inside
+// CsContour.BLOCK, one reference carries them, and a re-run erases
+// the previous set INCLUDING the block definition.
+// ---------------------------------------------------------------------
+
+getDocument = function() { return docAnchored; };
+getDocumentInterface = function() { return diAnchored; };
+
+// A ramp: elevation rises with the row, so every level crosses it.
+var gw = 16, gh = 16;
+var gvals = [];
+for (var gr = 0; gr < gh; gr++) {
+    for (var gc = 0; gc < gw; gc++) {
+        gvals.push(300.0 + gr * 2.0);      // metres
+    }
+}
+var gGrid = { values: gvals, width: gw, height: gh };
+var gBbox = CsGeoProject.mercatorBbox(37.0, -85.0,
+    { width: 400, height: 400 }, { x: 0, y: 0 });
+var gAnchor = { lat: 37.0, lon: -85.0, pos: { x: 0, y: 0 }, name: "A1" };
+
+function contourBlockRefs(doc) {
+    var found = [];
+    var ids = doc.queryAllEntities(false, false);
+    for (var i = 0; i < ids.length; i++) {
+        var e = doc.queryEntity(ids[i]);
+        if (isNull(e) || e.getType() !== RS.EntityBlockRef) {
+            continue;
+        }
+        if (CsTags.get(e, "SurfaceContours") === "1") {
+            found.push(e);
+        }
+    }
+    return found;
+}
+
+function looseContours(doc) {
+    var n = 0;
+    var ids = doc.queryAllEntities(false, false);
+    for (var i = 0; i < ids.length; i++) {
+        var e = doc.queryEntity(ids[i]);
+        if (isNull(e) || e.getType() === RS.EntityBlockRef) {
+            continue;
+        }
+        if (CsTags.get(e, "SurfaceContours") === "1") {
+            n++;
+        }
+    }
+    return n;
+}
+
+var gLevels = CsContour.levels(
+    CsUnits.convert(300.0, CsUnits.METERS, CsUnits.FEET),
+    CsUnits.convert(330.0, CsUnits.METERS, CsUnits.FEET), 10);
+var firstDraw = CsSurfaceData.drawContours(docAnchored, diAnchored, gGrid,
+    gLevels, 10, gBbox, { width: gw, height: gh }, gAnchor, CsUnits.FEET);
+
+ok(firstDraw.lines > 0, "the fixture grid produces contour lines");
+var blockIdFirst = CsContour.blockIdOf(docAnchored);
+ok(blockIdFirst !== null, "the contour block exists after a draw");
+ok(docAnchored.queryBlockEntities(blockIdFirst).length > 0,
+    "the contour linework is inside the block, not in model space");
+ok(looseContours(docAnchored) === 0,
+    "nothing tagged SurfaceContours is left loose in model space");
+
+var refsFirst = contourBlockRefs(docAnchored);
+ok(refsFirst.length === 1,
+    "one insert carries the whole set (got " + refsFirst.length + ")");
+if (refsFirst.length === 1) {
+    var refPos = refsFirst[0].getData().getPosition();
+    ok(refPos.x === 0 && refPos.y === 0,
+        "the insert is at the origin -- block coordinates ARE drawing " +
+        "coordinates");
+}
+
+// Everything the readers need is still findable through the block.
+var drawnFirst = CsContour.drawnEntities(docAnchored);
+ok(drawnFirst.length > firstDraw.lines,
+    "drawnEntities reaches inside the block");
+var withElev = 0;
+for (var dz = 0; dz < drawnFirst.length; dz++) {
+    if (CsTags.getNumber(drawnFirst[dz], "ContourElevation") !== null) {
+        withElev++;
+    }
+}
+ok(withElev === firstDraw.lines,
+    "every contour line still carries its elevation tag");
+
+// A re-run replaces: a NEW definition, and nothing of the old one left.
+var oldBlockEntities = docAnchored.queryBlockEntities(blockIdFirst);
+var secondDraw = CsSurfaceData.drawContours(docAnchored, diAnchored, gGrid,
+    gLevels, 10, gBbox, { width: gw, height: gh }, gAnchor, CsUnits.FEET);
+ok(secondDraw.lines === firstDraw.lines,
+    "a re-run draws the same set again");
+ok(contourBlockRefs(docAnchored).length === 1,
+    "a re-run leaves ONE insert, not two");
+// A DELETED ENTITY IS STILL QUERYABLE by id in this storage -- it
+// comes back as an undone object rather than null, so "is it gone?"
+// has to be asked of the block that would hold it, never of
+// queryEntity. Asking the wrong way passes on a drawing that still
+// carries every contour it ever fetched.
+var blockIdSecond = CsContour.blockIdOf(docAnchored);
+ok(blockIdSecond !== null && blockIdSecond !== blockIdFirst,
+    "the re-run built a NEW definition rather than refilling the old");
+var nowInBlock = docAnchored.queryBlockEntities(blockIdSecond);
+var survivors = 0;
+for (var ov = 0; ov < oldBlockEntities.length; ov++) {
+    for (var nv = 0; nv < nowInBlock.length; nv++) {
+        if (oldBlockEntities[ov] === nowInBlock[nv]) {
+            survivors++;
+        }
+    }
+}
+ok(survivors === 0,
+    "no linework survived from the previous run (got " + survivors + ")");
+ok(docAnchored.queryBlockEntities(blockIdFirst).length === 0,
+    "the previous definition holds nothing");
+
+// And the erase takes the definition itself, not just its contents.
+CsSurfaceData.eraseExistingContours(docAnchored, diAnchored);
+ok(CsContour.blockIdOf(docAnchored) === null,
+    "erasing removes the block DEFINITION too");
+ok(contourBlockRefs(docAnchored).length === 0, "and its insert");
+ok(CsContour.drawnEntities(docAnchored).length === 0,
+    "and nothing is left for the readers to find");
+
 var out;
 if (failures.length === 0) {
     out = "### SURFACE DATA OK " + passed;

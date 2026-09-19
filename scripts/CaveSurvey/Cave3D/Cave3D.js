@@ -482,15 +482,19 @@ Cave3D.terrainContoursFromDrawing = function(doc, unit, offset) {
         CsUnits.METERS, unit);
     var seen = {};
 
-    var ids = doc.queryAllEntities(false, false);
-    for (var i = 0; i < ids.length; i++) {
-        var e = doc.queryEntity(ids[i]);
-        if (isNull(e) || CsTags.get(e, "SurfaceContours") !== "1") {
+    // The contours are drawn inside CsContour.BLOCK, inserted at the
+    // origin unscaled and unrotated, so the block's own coordinates
+    // are the drawing's -- which is what lets this read them without
+    // composing the reference's transform.
+    var found = CsContour.drawnEntities(doc);
+    for (var i = 0; i < found.length; i++) {
+        var e = found[i];
+        if (isNull(e)) {
             continue;
         }
         var levelU = CsTags.getNumber(e, "ContourElevation");
         if (levelU === null) {
-            continue;             // the elevation LABELS carry the tag too
+            continue;             // the LABELS and the block REFERENCE
         }
         var shape = null;
         try {

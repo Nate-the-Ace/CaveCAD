@@ -70,9 +70,11 @@ function loadCore(rel) {
     (0, eval)(text);
 }
 
+// CsContour.js rides along for CsContour.drawnEntities: contours are
+// drawn inside a block now, and lowPointNear reads them through it.
 var CORE = ["CsUuid.js", "CsUnits.js", "CsTags.js", "CsLayers.js",
             "CsPackage.js", "CsAngles.js", "CsGeoProject.js",
-            "CsLocationPick.js"];
+            "CsContour.js", "CsLocationPick.js"];
 for (var ci = 0; ci < CORE.length; ci++) {
     loadCore(CORE[ci]);
 }
@@ -219,6 +221,49 @@ if (low !== null) {
 }
 ok(CsLocationPick.lowPointNear(doc, new RVector(200, 70), 1) === null,
    "nothing within reach means no snap");
+
+// ---------------------------------------------------------------------
+// A contour inside the contour BLOCK, which is where Surface Data
+// draws them now. The snap has to reach into it, and it may do so only
+// because that block is inserted once at the origin unscaled and
+// unrotated -- block coordinates are drawing coordinates.
+// ---------------------------------------------------------------------
+
+var cbOp = new RAddObjectsOperation();
+cbOp.addObject(new RBlock(doc, CsContour.BLOCK, new RVector(0, 0)));
+di.applyOperation(cbOp);
+var contourBlockId = doc.getBlockId(CsContour.BLOCK);
+
+var inBlockOp = new RAddObjectsOperation();
+var inBlock = new RLineEntity(doc,
+    new RLineData(new RVector(0, 65), new RVector(400, 65)));
+inBlock.setBlockId(contourBlockId);
+CsTags.set(inBlock, "SurfaceContours", "1");
+CsTags.set(inBlock, "ContourElevation", "1180");
+inBlockOp.addObject(inBlock, false);
+var blockRef = new RBlockReferenceEntity(doc,
+    new RBlockReferenceData(contourBlockId, new RVector(0, 0),
+        new RVector(1, 1), 0));
+CsTags.set(blockRef, "SurfaceContours", "1");
+inBlockOp.addObject(blockRef, false);
+di.applyOperation(inBlockOp);
+
+ok(CsContour.blockIdOf(doc) === contourBlockId,
+   "the contour block is found by name");
+
+var lowInBlock = CsLocationPick.lowPointNear(doc, new RVector(200, 70), 100);
+ok(lowInBlock !== null, "a contour inside the block is found");
+if (lowInBlock !== null) {
+    near(lowInBlock.elevation, 1180, 1e-9,
+         "the contour inside the block wins on elevation");
+    near(lowInBlock.y, 65, 1e-9,
+         "the snap lands on the block's own coordinates");
+}
+
+// The block REFERENCE carries the tag but no elevation, and must not
+// be mistaken for a contour: it has no shape to snap to.
+ok(CsLocationPick.lowPointNear(doc, new RVector(200, 70), 1) === null,
+   "the reference itself is not snapped to");
 
 // ---------------------------------------------------------------------
 // Report.
