@@ -1165,9 +1165,15 @@ CaveShelf.show = function() {
             }
             state.records.push(record);
             list.setRowCount(state.records.length);
+            // SHOWN IN CAPS, stored as typed. A cave's name is a map
+            // title, and the shelf reads as one list of caves rather
+            // than a jumble of whatever case each project folder was
+            // named in. Only the cell text is upper-cased: the record,
+            // the folder, the search and every drawing that carries the
+            // name keep the caver's own spelling.
             list.setItem(state.records.length - 1, 0,
                 new QTableWidgetItem((record.favorite === true ? "★ " : "") +
-                    record.name));
+                    String(record.name).toUpperCase()));
         }
         if (state.records.length === 0) {
             return;

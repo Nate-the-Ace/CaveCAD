@@ -1216,6 +1216,9 @@ SketchScans.buildDock = function(appWin) {
         if (placed === null) {
             return;                 // insert already explained why
         }
+        // Before the align tool takes over: its first question is
+        // "click a point on the image", which needs the image visible.
+        SketchScans.zoomToPlaced(doc, di, placed);
         SketchScans.alignSoon(placed);
     };
 
@@ -1797,6 +1800,7 @@ SketchScans.buildDock = function(appWin) {
         if (placedOne === null) {
             return;
         }
+        SketchScans.zoomToPlaced(doc, di, placedOne);
         EAction.handleUserMessage(rel + " placed on " + pair.name +
             " north-up, at " + (Math.round(perPixel * 1000) / 1000) +
             " units per pixel -- the middle of the " + neighbours.length +
@@ -1885,6 +1889,7 @@ SketchScans.buildDock = function(appWin) {
         }
         refreshPickState();
         pickStatus("");
+        SketchScans.zoomToPlaced(doc, di, placed);
         if (placed !== null) {
             // WHAT THE FIT ACTUALLY DID, in numbers -- and a warning
             // when the numbers say it cannot be right.
@@ -2117,6 +2122,14 @@ SketchScans.buildDock = function(appWin) {
                             w.rows[row].rel, true);
                     } catch (eRevealF) {
                     }
+                    // The tree's own leavings, on the tree's own menu:
+                    // adds itself only when there are crops to delete.
+                    try {
+                        CsScanList.addFlushTrimmedAction(w.scanMenu,
+                            w.scans,
+                            function() { SketchScans.refresh(); });
+                    } catch (eFlushF) {
+                    }
                 } else {
                     var rel = w.rows[row].rel;
                     var marked = w.bookmarks[rel] === true;
@@ -2151,6 +2164,12 @@ SketchScans.buildDock = function(appWin) {
                         CsScanList.addRevealAction(w.scanMenu, w.scans,
                             rel, false);
                     } catch (eReveal) {
+                    }
+                    try {
+                        CsScanList.addFlushTrimmedAction(w.scanMenu,
+                            w.scans,
+                            function() { SketchScans.refresh(); });
+                    } catch (eFlush) {
                     }
                 }
                 w.scanMenu.popup(w.list.viewport().mapToGlobal(pos));
@@ -3102,6 +3121,43 @@ SketchScans.insertFitted = function(doc, di, path, name, fit, heightPx,
     warning("Sketch Scans: the insert added nothing -- the " +
         layer + " layer may be locked or frozen.");
     return null;
+};
+
+/**
+ * PUT THE SCAN ON SCREEN ONCE IT LANDS.
+ *
+ * A scan is placed where its stations put it, which is wherever that
+ * part of the cave happens to sit -- and the caver is usually looking
+ * at something else entirely, often at the whole map zoomed out far
+ * enough that a single page of field notes is a smudge. So a placement
+ * that worked perfectly looked exactly like a placement that did
+ * nothing, and the next move was always the same: hunt for it.
+ *
+ * Zoomed to the scan's own box with a margin, so the survey around it
+ * is visible too -- a sketch on screen with none of the passage it was
+ * drawn over is no more use than one off screen.
+ *
+ * Failure is survivable: a build that cannot zoom, or an entity with no
+ * box, leaves the view exactly where it was, and the scan is placed
+ * either way.
+ */
+SketchScans.zoomToPlaced = function(doc, di, entityId) {
+    if (entityId === null || entityId === undefined || isNull(di)) {
+        return;
+    }
+    try {
+        var e = doc.queryEntity(entityId);
+        if (isNull(e)) {
+            return;
+        }
+        var box = e.getBoundingBox();
+        if (isNull(box) || !box.isValid()) {
+            return;
+        }
+        di.zoomTo(box, 40);
+    } catch (eZoom) {
+        // a view that will not move is not a reason to undo a placement
+    }
 };
 
 /**

@@ -626,3 +626,136 @@ CsScanTrim.write = function(scansFolder, pageRel, rect, outline) {
     }
     return { path: out, error: null };
 };
+
+// ---------------------------------------------------------------------
+// FLUSHING THE CROPS -- the folder grows, and nothing ever emptied it.
+// ---------------------------------------------------------------------
+//
+// Every trim writes a new file, and the name carries the box, so moving
+// the box by one pixel writes another. A cave traced over a season ends
+// up with hundreds of them, all of them fat PNGs, none of them ever
+// deleted -- the folder is a scratch pad the suite never cleared up
+// after itself.
+//
+// A CROP IS REGENERABLE, which is what makes deleting one safe: the
+// drawing keeps the page it was cut from (SketchScan) and the box it
+// was cut to (ScanTrim), and CsScanRelink cuts it again from those two
+// when the file is not there. That is not a reason to delete one that
+// is in use, though: the image in the open drawing points at the FILE,
+// and pulling it out from under a drawing somebody is working in blanks
+// the underlay until they run the repair. So the ones a drawing is
+// holding stay, and only the strays go.
+
+/** Every derivative in the cave's Trimmed folder, as
+ *  {rel, abs, bytes}. Empty when there is no such folder. */
+CsScanTrim.crops = function(scans) {
+    var out = [];
+    if (typeof QDir === "undefined" || typeof scans !== "string" ||
+            scans === "") {
+        return out;
+    }
+    var rels = CsCave.filesUnder(scans, [], 4);
+    for (var i = 0; i < rels.length; i++) {
+        var rel = String(rels[i]);
+        if (!CsScanTrim.isTrimPath(rel)) {
+            continue;
+        }
+        var abs = scans + "/" + rel;
+        var bytes = 0;
+        try {
+            bytes = Number(new QFileInfo(abs).size());
+        } catch (eSize) {
+            bytes = 0;
+        }
+        out.push({ rel: rel, abs: abs, bytes: bytes });
+    }
+    return out;
+};
+
+/**
+ * The crop files a document is holding open, as {absolutePath: true}.
+ *
+ * READ OFF THE IMAGE ENTITIES, not off the tags: the tags say what a
+ * crop WOULD be cut from, and the file name says what is on screen
+ * right now. It is the second one that goes blank if the file is
+ * deleted under it.
+ */
+CsScanTrim.cropsInUse = function(doc) {
+    var out = {};
+    if (isNull(doc) || typeof RImageEntity === "undefined") {
+        return out;
+    }
+    var ids;
+    try {
+        ids = doc.queryAllEntities(false, true);
+    } catch (eQuery) {
+        return out;
+    }
+    for (var i = 0; i < ids.length; i++) {
+        try {
+            var e = doc.queryEntity(ids[i]);
+            if (isNull(e) || e.getType() !== RS.EntityImage) {
+                continue;
+            }
+            // getProperty answers a LIST here, value first -- the same
+            // read CsScanRelink does two files over.
+            var f = String(e.getProperty(RImageEntity.PropertyFileName)[0]);
+            if (f !== "" && f !== "undefined") {
+                out[f] = true;
+            }
+        } catch (eOne) {
+            // an image we cannot read the path of is one we must assume
+            // is in use -- but we cannot name it, so the crop it holds
+            // is protected only by being named by another image. This
+            // is why flush reports what it deleted.
+            continue;
+        }
+    }
+    return out;
+};
+
+/**
+ * Deletes the crops nothing is holding.
+ *
+ * \param scans the cave's scans folder
+ * \param inUse {absolutePath: true} from cropsInUse, or null for "the
+ *              drawing holds nothing", which is true of a cave that is
+ *              not open
+ * \return {deleted, kept, freed, failed} -- freed in bytes.
+ */
+CsScanTrim.flush = function(scans, inUse) {
+    var out = { deleted: 0, kept: 0, freed: 0, failed: 0 };
+    var held = (inUse === null || inUse === undefined) ? {} : inUse;
+    var crops = CsScanTrim.crops(scans);
+    for (var i = 0; i < crops.length; i++) {
+        if (held[crops[i].abs] === true) {
+            out.kept++;
+            continue;
+        }
+        var gone = false;
+        try {
+            gone = new QFile(crops[i].abs).remove();
+        } catch (eRemove) {
+            gone = false;
+        }
+        if (gone) {
+            out.deleted++;
+            out.freed += crops[i].bytes;
+        } else {
+            out.failed++;
+        }
+    }
+    return out;
+};
+
+/** Bytes as a caver would say them -- "12.4 MB". */
+CsScanTrim.sizeText = function(bytes) {
+    var n = Number(bytes);
+    if (!isFinite(n) || n <= 0) {
+        return "0 KB";
+    }
+    if (n < 1024 * 1024) {
+        return (Math.round(n / 1024 * 10) / 10) + " KB";
+    }
+    return (Math.round(n / (1024 * 1024) * 10) / 10) + " MB";
+};

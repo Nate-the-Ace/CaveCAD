@@ -175,6 +175,60 @@ CsFrontier.firstLeg = function(survey) {
 };
 
 /**
+ * The marker a party writes in the note column when a passage is DONE.
+ *
+ * "EOS" -- end of survey -- is what a caver writes on the last row
+ * before turning round at a choke, a sump, a dig that needs tools, a
+ * lead somebody else has already pushed. It is written as a word, so it
+ * matches on word boundaries: a note reading "EOS, too tight to follow"
+ * closes the station, and a station called EOSTER does not.
+ */
+CsFrontier.EOS_RE = /(^|[^A-Za-z0-9])(EOS|E\.O\.S\.?|END OF SURVEY)([^A-Za-z0-9]|$)/i;
+
+/** True when a note says the survey deliberately ended here. */
+CsFrontier.notesSayClosed = function(notes) {
+    if (notes === undefined || notes === null) { return false; }
+    return CsFrontier.EOS_RE.test(String(notes));
+};
+
+/**
+ * The stations a party wrote off in the notebook, read from the notes.
+ *
+ * WHY THIS IS NOT A GUESS. Everything else in this file is geometry: a
+ * station with one leg is an end because the line stops there, and no
+ * opinion is involved. A CLOSED end is the one thing geometry cannot
+ * see -- a choke and a lead look identical to the shots -- so openEnds
+ * has always taken the closed names from its caller. Nobody ever passed
+ * any, which meant a cave's every dead end came back as a lead and the
+ * frontier list read as a list of places somebody already went.
+ *
+ * The party did record it, though: they wrote EOS in the margin. A note
+ * belongs to the ROW it is on, and a row's station is its TO -- the
+ * station just reached, which is the one they turned round at. So the
+ * note closes `to`, never `from`.
+ *
+ * Splays carry notes too ("EOS, aven above") and are skipped: a splay
+ * describes the wall at a station it hangs off, not an end of the line.
+ *
+ * \return {stationName: true}
+ */
+CsFrontier.closedByNote = function(survey) {
+    var out = {};
+    if (survey === undefined || survey === null ||
+            Object.prototype.toString.call(survey.shots) !== "[object Array]") {
+        return out;
+    }
+    for (var i = 0; i < survey.shots.length; i++) {
+        var shot = survey.shots[i];
+        if (!CsFrontier.isLeg(shot)) { continue; }
+        if (!CsFrontier.notesSayClosed(shot.notes)) { continue; }
+        var to = CsFrontier.clean(shot.to);
+        if (to !== "") { out[to] = true; }
+    }
+    return out;
+};
+
+/**
  * The open ends of a survey: stations one leg long that are neither
  * control nor deliberately closed.
  *
@@ -184,7 +238,11 @@ CsFrontier.firstLeg = function(survey) {
  *               that trip ended), which is legitimate but is not the
  *               cave's frontier.
  * \param options optional:
- *                  closed: [name] stations to treat as tied off
+ *                  closed: [name] stations to treat as tied off, ON TOP
+ *                          of the ones the notebook already closed with
+ *                          an EOS note (see closedByNote)
+ *                  ignoreNotes: true to read the shots' notes for
+ *                          nothing and honour `closed` alone
  *
  * \return [{station, trip, degree, hasLrud, lastIndex}], newest trip
  *         first, then latest shot first, then by name.
@@ -196,7 +254,11 @@ CsFrontier.openEnds = function(survey, options) {
     }
     var opts = (options === undefined || options === null) ? {} : options;
 
-    var closed = {};
+    // The notebook's own EOS notes first, then whatever the caller
+    // adds. A caller that wants the raw geometry -- every one-leg
+    // station, closed or not -- asks for it with ignoreNotes.
+    var closed = (opts.ignoreNotes === true) ? {} :
+        CsFrontier.closedByNote(survey);
     if (Object.prototype.toString.call(opts.closed) === "[object Array]") {
         for (var c = 0; c < opts.closed.length; c++) {
             var closedName = CsFrontier.clean(opts.closed[c]);

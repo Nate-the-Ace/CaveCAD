@@ -309,6 +309,111 @@ CsScanList.addRevealAction = function(menu, folder, rel, isFolder) {
     return action;
 };
 
+/** The label for the flush action, count and size baked in, so the
+ *  menu says what it is about to throw away before it is clicked. */
+CsScanList.flushLabel = function(count, bytes) {
+    return qsTr("Delete %1 Trimmed Crop(s) (%2)")
+        .arg(count).arg(CsScanTrim.sizeText(bytes));
+};
+
+/**
+ * Adds "Delete N Trimmed Crops" to a scan tree's context menu, when
+ * there are any to delete.
+ *
+ * WHY IT IS ON THIS MENU AND NOT A BUTTON. The crops are the tree's
+ * own leavings -- every trim the caver drew in this panel wrote one --
+ * and the tree deliberately does not show them (CsScanList's own
+ * header on what is in a scans folder). Something invisible that grows
+ * without limit needs a door, and the menu the folder already has is
+ * the door, in both panels at once.
+ *
+ * \param folder the cave's scans folder, absolute
+ * \param onDone called after a flush, to re-read the folder
+ */
+CsScanList.addFlushTrimmedAction = function(menu, folder, onDone) {
+    if (isNull(menu) || typeof folder !== "string" || folder === "") {
+        return null;
+    }
+    var crops = CsScanTrim.crops(folder);
+    if (crops.length === 0) {
+        return null;   // nothing to say: a clean folder gets no entry
+    }
+    var total = 0;
+    for (var i = 0; i < crops.length; i++) {
+        total += crops[i].bytes;
+    }
+    var action = null;
+    try {
+        action = menu.addAction(CsScanList.flushLabel(crops.length, total));
+    } catch (eAdd) {
+        return null;
+    }
+    // A plain string and a function in the closure, nothing wrapped.
+    var target = folder;
+    action.triggered.connect(function() {
+        CsScanList.flushTrimmed(target, onDone);
+    });
+    return action;
+};
+
+/**
+ * Deletes the crops nothing is holding, having asked first.
+ *
+ * WHAT THE CAVER IS PROMISED. A crop is a derivative: the drawing
+ * remembers the page it came from and the box it was cut to, and the
+ * repair cuts it again from those. So this is emptying a scratch
+ * folder, not deleting work -- and the ones the OPEN drawing is
+ * displaying right now are left where they are anyway, because
+ * deleting those blanks the underlay somebody is tracing over until
+ * they run the repair.
+ */
+CsScanList.flushTrimmed = function(folder, onDone) {
+    var crops = CsScanTrim.crops(folder);
+    if (crops.length === 0) {
+        EAction.handleUserMessage(qsTr("There are no trimmed crops to "
+            + "delete."));
+        return;
+    }
+    var total = 0;
+    for (var i = 0; i < crops.length; i++) {
+        total += crops[i].bytes;
+    }
+    var inUse = null;
+    try {
+        inUse = CsScanTrim.cropsInUse(EAction.getDocument());
+    } catch (eDoc) {
+        inUse = null;
+    }
+    var sure = QMessageBox.question(RMainWindowQt.getMainWindow(),
+        qsTr("Delete Trimmed Crops"),
+        qsTr("%1 trimmed crops (%2) are in this cave's Trimmed folder.\n\n"
+            + "Each one is a cut-out of a page, and the drawing remembers "
+            + "which page and which box -- Repair Drawing cuts any of them "
+            + "again if it is needed. Crops the open drawing is showing "
+            + "are kept.\n\nDelete the rest?")
+            .arg(crops.length).arg(CsScanTrim.sizeText(total)),
+        QMessageBox.Yes | QMessageBox.No);
+    if (sure !== QMessageBox.Yes) {
+        return;
+    }
+    var res = CsScanTrim.flush(folder, inUse);
+    var said = qsTr("Deleted %1 trimmed crop(s), freeing %2.")
+        .arg(res.deleted).arg(CsScanTrim.sizeText(res.freed));
+    if (res.kept > 0) {
+        said += " " + qsTr("%1 still on the map were kept.").arg(res.kept);
+    }
+    if (res.failed > 0) {
+        said += " " + qsTr("%1 could not be deleted.").arg(res.failed);
+    }
+    EAction.handleUserMessage(said);
+    if (typeof onDone === "function") {
+        try {
+            onDone();
+        } catch (eDone) {
+        }
+    }
+};
+
 /**
  * Shows one path in the machine's file manager.
  *

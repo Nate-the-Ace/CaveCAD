@@ -3,7 +3,7 @@
 <p>It sits beside CaveCAD's plain <b>Layer List</b>, which is untouched and still there — the flat alphabetical view is one click away when you want it.</p>
 
 <h2>The table</h2>
-<p>Eight columns, in the order AutoCAD's Layer Properties Manager uses, because that is the table most cavers already know:</p>
+<p>Eight columns, in the order a CAD layer table conventionally uses, because that is the table most cavers already know:</p>
 <ul>
 <li><b>Layer</b> — the name, and the group tree</li>
 <li><b>On</b> — shown or hidden</li>
@@ -14,7 +14,7 @@
 <li><b>Linetype</b> — solid, dashed, and the rest</li>
 <li><b>Lineweight</b> — printed thickness</li>
 </ul>
-<p><b>On and Freeze are separate</b>, as they are in AutoCAD and are not in the plain Layer List. Switching a layer off hides it; freezing it also takes it out of regeneration, which is what you want for the hundred-odd generated layers while you work.</p>
+<p><b>On and Freeze are separate</b>, which they are not in the plain Layer List. Switching a layer off hides it; freezing it also takes it out of regeneration, which is what you want for the hundred-odd generated layers while you work.</p>
 <p>Eight columns will not fit a narrow palette. <b>Right-click the header</b> to tick the ones you want, and CaveCAD remembers.</p>
 
 <h2>Changing things</h2>
@@ -87,7 +87,7 @@
 <p>A layer that did not exist when the state was saved is left alone when it is applied. Nothing is guessed at.</p>
 
 <h3>Carrying states to another cave</h3>
-<p>Export writes a <code>.clas</code> file — CaveCAD's own, not AutoCAD's <code>.las</code>, and the two do not read each other. Import merges: a state of the same name is replaced, everything else is left, so re-importing what you just exported changes nothing.</p>
+<p>Export writes a <code>.clas</code> file — CaveCAD's own, not the <code>.las</code> layer states other CAD packages write, and the two do not read each other. Import merges: a state of the same name is replaced, everything else is left, so re-importing what you just exported changes nothing.</p>
 <p>Layers the other cave does not have are dropped, and the report says how many, because carrying one cave's states to another is a normal thing to do and a quiet partial result would not be.</p>
 <p><b>States never carry groups.</b> Importing states into a cave you have arranged by hand cannot disturb that arrangement.</p>
 

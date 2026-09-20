@@ -3821,6 +3821,11 @@ SurveyNotebook.buildDock = function(appWin) {
                         w.scanRows[row].rel, true);
                 } catch (eRevealF) {
                 }
+                try {
+                    CsScanList.addFlushTrimmedAction(menu, w.scansFolder,
+                        function() { SurveyNotebook.fillScans(w); });
+                } catch (eFlushF) {
+                }
             } else {
                 var done = w.scanComplete[w.scanRows[row].rel] === true;
                 var act = menu.addAction(qsTr(CsScanList.markLabel(done)));
@@ -3846,6 +3851,11 @@ SurveyNotebook.buildDock = function(appWin) {
                     CsScanList.addRevealAction(menu, w.scansFolder,
                         w.scanRows[row].rel, false);
                 } catch (eReveal) {
+                }
+                try {
+                    CsScanList.addFlushTrimmedAction(menu, w.scansFolder,
+                        function() { SurveyNotebook.fillScans(w); });
+                } catch (eFlush) {
                 }
             }
             menu.exec(QCursor.pos());

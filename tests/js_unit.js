@@ -22788,6 +22788,54 @@ eqs(frSplayEnds[0].station, "A3", "splayed station is still the open end");
 eqs(CsFrontier.openEnds(frChain, { closed: ["A3"] }).length, 0,
     "closed station drops out");
 
+// EOS IN THE MARGIN CLOSES THE END. The party wrote "end of survey" on
+// the row they turned round on; that is the same fact `closed` carries,
+// already recorded, and reading it is what stops every choke in the
+// cave coming back as a lead.
+var frEosShot = frontierShot("A2", "A3");
+frEosShot.notes = "EOS, chokes solid";
+var frEos = frontierSurvey([frontierShot("A1", "A2"), frEosShot]);
+eqs(CsFrontier.openEnds(frEos).length, 0,
+    "EOS in the note closes the end it was written on");
+eqs(CsFrontier.openEnds(frEos, { ignoreNotes: true }).length, 1,
+    "...and the raw geometry is still there for a caller that wants it");
+
+// The note belongs to the row's TO station -- the one just reached and
+// turned round at -- never to the station walked from.
+var frEosFrom = frontierSurvey([
+    frontierShot("A1", "A2"),
+    frEosShot,
+    frontierShot("A2", "B1")
+]);
+var frEosFromEnds = CsFrontier.openEnds(frEosFrom);
+eqs(frEosFromEnds.length, 1, "EOS closes A3 only");
+eqs(frEosFromEnds[0].station, "B1",
+    "and the branch off the SAME shot's from-station is still a lead");
+
+// Written as a word. A note that merely contains those letters is not a
+// party saying they stopped.
+ok(CsFrontier.notesSayClosed("EOS") === true, "bare EOS closes");
+ok(CsFrontier.notesSayClosed("eos -- sumped") === true,
+    "lower case closes; a caver writing in a wet notebook is not shouting");
+ok(CsFrontier.notesSayClosed("E.O.S.") === true, "dotted EOS closes");
+ok(CsFrontier.notesSayClosed("end of survey here") === true,
+    "and so does writing it out");
+ok(CsFrontier.notesSayClosed("REOS4 ties in here") === false,
+    "a station name that contains the letters does not");
+ok(CsFrontier.notesSayClosed("") === false, "an empty note closes nothing");
+ok(CsFrontier.notesSayClosed(null) === false, "nor does no note at all");
+
+// A splay's note describes the wall at a station, not an end of the
+// line, and must not tie off the station it hangs from.
+var frEosSplay = frontierShot("A3", "A3.1");
+frEosSplay.splay = true;
+frEosSplay.notes = "EOS, aven above";
+eqs(CsFrontier.openEnds(frontierSurvey([
+    frontierShot("A1", "A2"),
+    frontierShot("A2", "A3"),
+    frEosSplay
+])).length, 1, "an EOS note on a SPLAY leaves the station a lead");
+
 // Fixed stations are control, never leads.
 var frFixed = frontierSurvey([
     frontierShot("A1", "A2"),

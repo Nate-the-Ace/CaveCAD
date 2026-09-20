@@ -170,6 +170,72 @@ check("a whole-page placement carries no ScanTrim tag",
     wholeId !== null &&
     CsTags.get(doc.queryEntity(wholeId), CsScanTrim.TAG) === "");
 
+// --- the view follows the scan --------------------------------------
+//
+// A placed scan is zoomed to, or the caver has to hunt for the page
+// they just placed. Headless there is no view to move, which is one of
+// the ways this has to not throw.
+check("zooming to a placed scan never throws", (function () {
+    try {
+        SketchScans.zoomToPlaced(doc, di, trimmedId);
+        SketchScans.zoomToPlaced(doc, di, null);
+        SketchScans.zoomToPlaced(doc, di, -1);
+        return true;
+    } catch (eZoom) {
+        return false;
+    }
+})());
+
+// --- flushing the crops ---------------------------------------------
+//
+// The Trimmed folder is a scratch pad: a box moved by one pixel writes
+// another file and nothing ever deleted one. Flushing empties it --
+// except for the crops the open drawing is actually showing, which
+// would blank somebody's underlay if they went.
+var stray = CsScanTrim.write(scans, "Trip3/IMG_4021.png",
+    { x: 10, y: 10, w: 120, h: 90 });
+check("a second crop was written", stray.path !== null);
+
+var allCrops = CsScanTrim.crops(scans);
+check("both crops are found in the Trimmed folder", allCrops.length === 2);
+check("and each one carries its size",
+    allCrops[0].bytes > 0 && allCrops[1].bytes > 0);
+
+var held = CsScanTrim.cropsInUse(doc);
+check("the crop the drawing is showing reads as in use",
+    held[String(out.path)] === true);
+check("and the one nothing placed does not",
+    held[String(stray.path)] !== true);
+
+var flushed = CsScanTrim.flush(scans, held);
+check("the stray was deleted", flushed.deleted === 1);
+check("the one on the map was kept", flushed.kept === 1);
+check("nothing refused to go", flushed.failed === 0);
+check("and the freed bytes were counted", flushed.freed > 0);
+check("the stray file is really gone",
+    !(new QFileInfo(stray.path).exists()));
+check("the placed crop is still there",
+    new QFileInfo(out.path).exists());
+
+// A SECOND FLUSH IS A NO-OP, not an error: the only crop left is the
+// one being displayed.
+var twice = CsScanTrim.flush(scans, held);
+check("flushing again deletes nothing", twice.deleted === 0);
+check("and still keeps the one in use", twice.kept === 1);
+
+// NO DOCUMENT AT ALL -- a cave that is not open holds nothing, so
+// every crop is a stray. This is the path the shelf takes.
+var allGone = CsScanTrim.flush(scans, null);
+check("with no drawing holding it, the last crop goes too",
+    allGone.deleted === 1);
+check("and the folder is empty of crops",
+    CsScanTrim.crops(scans).length === 0);
+
+check("sizes read as a caver says them",
+    CsScanTrim.sizeText(2 * 1024 * 1024) === "2 MB" &&
+    CsScanTrim.sizeText(1536) === "1.5 KB" &&
+    CsScanTrim.sizeText(0) === "0 KB");
+
 if (failures.length === 0) {
     print("### SCAN TRIM OK " + checks);
 } else {
