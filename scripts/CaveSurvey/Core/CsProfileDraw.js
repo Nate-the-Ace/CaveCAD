@@ -28,6 +28,9 @@
 //   ProfileFloorRun    generated floor polyline
 //   ProfileCeilingRun  generated ceiling polyline
 //   ProfileBandLabel   the band's caption
+//   ProfilePitchLabel  a drop's depth, keyed to the station it hangs
+//                      from -- the elevation's twin of the plan's
+//                      PitchLabel
 //   ProfileZOffset     on the caption: the datum shift, when displaced
 //
 // NO ProfileLrud TAG, DELIBERATELY. An earlier draft of this table
@@ -44,7 +47,7 @@ var CsProfileDraw = {};
 CsProfileDraw.TAGS = ["ProfileRun", "ProfileStation", "ProfileShot",
     "ProfileSplay", "ProfileFloorRun", "ProfileCeilingRun",
     "ProfileBandLabel", "ProfileZOffset", "ProfileOrigin",
-    "ProfileBox", "ProfileBoxLabel"];
+    "ProfileBox", "ProfileBoxLabel", "ProfilePitchLabel"];
 
 /** Layers the profile writes to, created if the drawing lacks them.
  *  CTRL-PROFILE-LRUD is NOT here -- see the TAGS docblock above;
@@ -664,7 +667,77 @@ CsProfileDraw.band = function(doc, di, op, band, counts, origin) {
         counts.flatTicks++;
     }
 
+    CsProfileDraw.pitchLabels(doc, di, op, band, at, counts);
+
     CsProfileDraw.label(doc, di, op, band, at);
+};
+
+/**
+ * "P 187 FT" beside the drop, in the ELEVATION -- the view where a
+ * pitch actually looks like a pitch.
+ *
+ * WHY IT IS NEEDED HERE TOO, when the plan already has one. The plan's
+ * label exists because a pitch has no plan extent at all: the drawing
+ * shows a dot, and the number is the only thing that says how far it
+ * falls. The elevation has the opposite problem. Here the drop is the
+ * most prominent thing on the page -- a bare vertical line, a hundred
+ * feet of it -- and it is the one line with NO scale cue of its own:
+ * no walls to either side, no bends, nothing but two station points at
+ * its ends. A reader can see there is a pitch and cannot see how big
+ * it is without measuring it off the frame.
+ *
+ * ONLY WHERE THE WHOLE PITCH IS IN THIS BAND. A drop whose top is in
+ * one band and whose bottom is in another is not drawn as one line
+ * anywhere, and a number beside half of it would be a claim about
+ * geometry the reader cannot see. Those are left to the plan's label,
+ * which is always whole because the plan never splits a cave into
+ * bands.
+ *
+ * The label sits beside the MIDDLE of the drop rather than at its top,
+ * because in this view the middle is where the empty space is, and
+ * hugs the line closely -- an extended elevation's X axis is distance
+ * travelled, so horizontal room beside a pitch belongs to whatever
+ * passage comes next.
+ */
+CsProfileDraw.pitchLabels = function(doc, di, op, band, at, counts) {
+    var pitches = band.pitches || [];
+    if (pitches.length === 0) {
+        return;
+    }
+    // THE GENERATOR'S OWN TEXT LAYER, not the NOTES twin.
+    //
+    // PROFILE-NOTES-ANNOTATION is where this belongs by meaning -- it
+    // is a mark for the reader, and it would survive a caver turning
+    // the control layers off to print. It is the wrong answer anyway,
+    // and the rule that says so is load-bearing: everything
+    // CsProfileDraw.erase owns must be CTRL-, or the generator owns a
+    // layer in the traced vocabulary and CsBind starts treating
+    // generated captions as the caver's own linework. The band caption
+    // is the same kind of thing and lives here for the same reason.
+    var layer = CsProfileDraw.layerFor(doc, di,
+        CsLayers.CTRL_PROFILE_TEXT_LABELS, band);
+    var byName = {};
+    for (var i = 0; i < band.stations.length; i++) {
+        byName[band.stations[i].name] = band.stations[i];
+    }
+    for (i = 0; i < pitches.length; i++) {
+        var pitch = pitches[i];
+        var topSt = byName[pitch.top];
+        var bottomSt = byName[pitch.bottom];
+        if (topSt === undefined || bottomSt === undefined) {
+            continue;   // not wholly in this band -- see the docblock
+        }
+        var midY = (topSt.y + bottomSt.y) / 2.0;
+        var midX = (topSt.x + bottomSt.x) / 2.0;
+        var text = CsDraw.addText(doc, op, layer,
+            CsDraw.caps(pitch.text),
+            at(midX + CsDraw.TEXT_HEIGHT * 0.8, midY),
+            RS.HAlignLeft, "ProfilePitchLabel", pitch.top);
+        CsTags.set(text, "ProfileRun", band.key);
+        if (counts !== undefined && counts !== null) {
+            counts.pitchLabels = (counts.pitchLabels || 0) + 1;
+        }
+    }
 };
 
 /**
@@ -1262,7 +1335,8 @@ CsProfileDraw.render = function(doc, di, profile, opts) {
     var erased = CsProfileDraw.erase(doc, di);
 
     var counts = { bandsDrawn: 0, legsDrawn: 0, stationsDrawn: 0,
-        ceilingRuns: 0, floorRuns: 0, flatTicks: 0, erased: erased };
+        ceilingRuns: 0, floorRuns: 0, flatTicks: 0, pitchLabels: 0,
+        erased: erased };
 
     var op = new RAddObjectsOperation();
     op.setText("Draw extended elevation");

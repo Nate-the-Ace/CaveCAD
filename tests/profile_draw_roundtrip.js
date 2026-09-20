@@ -71,7 +71,10 @@ var CORE = ["CsUnits", "CsCave", "CsGeoProject", "CsAngles", "CsIgrfCoeffs",
     "CsGeomag", "CsModel", "CsTraverse", "CsNetwork", "CsAdjust", "CsLrud",
     "CsValidate", "CsStats", "CsGrade", "CsTags", "CsStore", "CsLayers",
     "CsDraw",
-    "CsProfile", "CsProfileDraw",
+    // CsPitch before CsProfile: build() attaches each band the drops
+    // it draws whole, so the elevation and the plan cannot disagree
+    // about how deep one is.
+    "CsPitch", "CsProfile", "CsProfileDraw",
     // CsWarp before CsRevise -- moveLinework's per-vertex dispatch
     // calls CsWarp.mlsSimilarity when it runs.
     "CsWarp",
@@ -126,7 +129,7 @@ function shotOf(from, to, d, az, inc, u, dn) {
 var KNOWN_PROFILE_TAGS = ["ProfileRun", "ProfileStation", "ProfileShot",
     "ProfileSplay", "ProfileFloorRun", "ProfileCeilingRun",
     "ProfileBandLabel", "ProfileZOffset",
-    "ProfileBox", "ProfileBoxLabel"];
+    "ProfileBox", "ProfileBoxLabel", "ProfilePitchLabel"];
 
 /** Every Profile*-tagged entity in the doc, as
  *  {id, entity, layer, tags: {key: value}}. */
@@ -3335,6 +3338,126 @@ function drawPlanSurvey(doc, di, resolved, names) {
 
     destr(iO);
 }());
+// =======================================================================
+// A DROP IS LABELLED IN THE ELEVATION TOO, and only when this band
+// draws the whole of it.
+//
+// The plan's label exists because a pitch has no plan extent -- the
+// drawing is a dot. Here the drop is the most prominent thing on the
+// page and the one line with no scale cue of its own: no walls either
+// side, no bends, nothing but two station points at its ends.
+// =======================================================================
+(function() {
+    var svP = CsModel.newSurvey();
+    svP.shots = [
+        shotOf("A1", "A2", 30, 90, 0),
+        shotOf("A2", "A3", 62, 0, -90),
+        shotOf("A3", "A4", 125, 0, -90),
+        shotOf("A4", "A5", 40, 90, 0)
+    ];
+    var resP = CsNetwork.resolve(svP, {});
+    var profP = CsProfile.build(svP, resP, {});
+
+    var bandA = null;
+    for (var b = 0; b < profP.bands.length; b++) {
+        if (profP.bands[b].key === "A") { bandA = profP.bands[b]; }
+    }
+    ok(bandA !== null, "pitch-label: the fixture builds a band A");
+    if (bandA !== null) {
+        eqs(bandA.pitches.length, 1,
+            "pitch-label: band A holds the one drop, whole");
+        eqs(bandA.pitches[0].text, "P 187 ft (62 + 125)",
+            "pitch-label: and carries the SAME text the plan draws -- " +
+            "one answer, so the two views cannot disagree about a depth");
+    }
+
+    var dP = new RDocument(new RMemoryStorage(), createSpatialIndex());
+    var iP = new RDocumentInterface(dP);
+    CsLayers.ensureSurveyLayers(dP, iP);
+    CsProfileDraw.render(dP, iP, profP, {});
+
+    var labels = [];
+    var ids = dP.queryAllEntities(false, false);
+    for (var i = 0; i < ids.length; i++) {
+        var e = dP.queryEntity(ids[i]);
+        if (isNull(e)) { continue; }
+        if (CsTags.get(e, "ProfilePitchLabel") === "") { continue; }
+        labels.push(e);
+    }
+    eqs(labels.length, 1, "pitch-label: exactly one drawn");
+    if (labels.length === 1) {
+        eqs(String(CsTags.get(labels[0], "ProfilePitchLabel")), "A2",
+            "pitch-label: keyed to the station the drop hangs from");
+        ok(String(CsTags.get(labels[0], "ProfileRun")) === "A",
+            "pitch-label: and carries its band's run, as every entity " +
+            "this module draws must");
+        // The generator may own nothing in the caver's namespace --
+        // see CsProfileDraw.LAYERS and the ownership test above.
+        ok(String(dP.queryLayer(labels[0].getLayerId()).getName())
+                .indexOf("CTRL-") === 0,
+            "pitch-label: on a CTRL- layer, so erase() owns it and " +
+            "CsBind does not mistake it for traced linework");
+        // Beside the MIDDLE of the drop, which is where the empty
+        // space in this view is.
+        var midY = null, topY = null, botY = null;
+        for (i = 0; i < bandA.stations.length; i++) {
+            if (bandA.stations[i].name === "A2") { topY = bandA.stations[i].y; }
+            if (bandA.stations[i].name === "A4") { botY = bandA.stations[i].y; }
+        }
+        midY = (topY + botY) / 2.0;
+        var origin = CsProfileDraw.regionOrigin(dP);
+        var oy = (origin === null) ? 0 : origin.y;
+        near(labels[0].getPosition().y, oy + midY + (bandA.zOffset || 0),
+            1e-6, "pitch-label: level with the middle of the drop");
+    }
+
+    // A DROP INTO A NEW RUN IS STILL WHOLE. A band opens at its TIE
+    // station, so the leg joining the run to its parent is drawn
+    // inside it -- and a pitch hanging off a passage into a new
+    // lettered series is therefore one line in one band, with both
+    // its ends on it.
+    var svQ = CsModel.newSurvey();
+    svQ.shots = [
+        shotOf("A1", "A2", 30, 90, 0),
+        shotOf("A2", "B1", 80, 0, -90)
+    ];
+    var profQ = CsProfile.build(svQ, CsNetwork.resolve(svQ, {}), {});
+    var whole = 0;
+    for (b = 0; b < profQ.bands.length; b++) {
+        whole += profQ.bands[b].pitches.length;
+    }
+    eqs(profQ.pitches.length, 1, "pitch-label: the cave has one drop");
+    eqs(whole, 1,
+        "pitch-label: and the band that opens at its top draws it " +
+        "whole, so it is labelled");
+
+    // ...but a drop onto a station the band DEMOTED is not. A run with
+    // two arms keeps the longer one; a pitch down the shorter arm has
+    // its bottom nowhere on the page, and half a line with a depth
+    // beside it is a claim about geometry the reader cannot see.
+    var svR = CsModel.newSurvey();
+    svR.shots = [
+        shotOf("C1", "C2", 30, 90, 0),
+        shotOf("C2", "C3", 30, 90, 0),
+        shotOf("C3", "C4", 30, 90, 0),
+        shotOf("C4", "C6", 30, 90, 0),
+        shotOf("C6", "C7", 30, 90, 0),
+        shotOf("C4", "C5", 40, 0, 90)
+    ];
+    var profR = CsProfile.build(svR, CsNetwork.resolve(svR, {}), {});
+    var wholeR = 0;
+    for (b = 0; b < profR.bands.length; b++) {
+        wholeR += profR.bands[b].pitches.length;
+    }
+    eqs(profR.pitches.length, 1,
+        "pitch-label: the cave still HAS the aven off the demoted arm");
+    eqs(wholeR, 0,
+        "pitch-label: but no band draws it whole, so no band puts a " +
+        "number beside half of it");
+
+    destr(iP);
+}());
+
 // =======================================================================
 // Report.
 // =======================================================================

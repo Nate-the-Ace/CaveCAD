@@ -2576,7 +2576,9 @@ CsProfile.layout = function(bands) {
  * \param opts {flatSplayDeg, tapeMode}
  * \return {
  *   bands: [band] in band order, each an unrollBand result plus
- *          {ceiling, floor, flat, zOffset},
+ *          {ceiling, floor, flat, zOffset, pitches},
+ *   pitches: every drop and aven in the cave (CsPitch.find), whole,
+ *            whether or not any single band draws it whole,
  *   findings: {omitted, mismatches, secondTies, orphans, strandedRoots,
  *              stopped: [{run, station, reason}], ungrouped,
  *              undrawn: [{from, to, kind, reason}],
@@ -2638,6 +2640,15 @@ CsProfile.build = function(survey, resolved, opts) {
         band.floor = walls.floor;
         band.flat = walls.flat;
         band.parent = hier.parents[key];
+        // THE DROPS THIS BAND DRAWS WHOLE. A pitch is a property of
+        // the cave, not of the elevation, so it is found once
+        // (CsPitch) and then attached to whichever band draws both of
+        // its ends -- the drawing layer should not be re-deriving what
+        // a pitch is, and a band that holds only half a drop must not
+        // put a number beside half a line. `text` is carried rather
+        // than the unit, so the label a reader sees in the plan and
+        // the one they see in the elevation cannot disagree.
+        band.pitches = [];
         wallPointsSkipped += walls.skipped;
         bands.push(band);
 
@@ -2693,8 +2704,39 @@ CsProfile.build = function(survey, resolved, opts) {
             reason: reason });
     }
 
+    // ---- pitches, attached to the band that draws them whole -------
+    //
+    // Found once over the whole cave and then handed to bands, rather
+    // than each band deciding for itself what a pitch is: the plan and
+    // the elevation must not be able to disagree about how deep a drop
+    // is, and the only way to guarantee that is for there to be one
+    // answer. A band takes a pitch only when BOTH its ends are in that
+    // band -- see CsProfileDraw.pitchLabels for why half a drop gets
+    // no number.
+    var pitches = CsPitch.find(survey, resolved, {});
+    var unitForLabel = survey.distanceUnit;
+    for (i = 0; i < bands.length; i++) {
+        var bandStations = {};
+        for (rs = 0; rs < bands[i].stations.length; rs++) {
+            bandStations[bands[i].stations[rs].name] = true;
+        }
+        for (var pj = 0; pj < pitches.length; pj++) {
+            if (bandStations[pitches[pj].top] === true &&
+                    bandStations[pitches[pj].bottom] === true) {
+                bands[i].pitches.push({
+                    top: pitches[pj].top,
+                    bottom: pitches[pj].bottom,
+                    drop: pitches[pj].drop,
+                    aven: pitches[pj].aven,
+                    text: CsPitch.label(pitches[pj], unitForLabel)
+                });
+            }
+        }
+    }
+
     return {
         bands: bands,
+        pitches: pitches,
         findings: {
             omitted: omitted,
             mismatches: hier.mismatches,

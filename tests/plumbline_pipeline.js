@@ -43,7 +43,7 @@ function loadCore(rel) {
 }
 ["CsUuid.js", "CsUnits.js", "CsAngles.js", "CsModel.js", "CsTraverse.js",
  "CsNetwork.js", "CsAdjust.js", "CsLrud.js", "CsFrontier.js",
- "CsProfile.js", "CsSectionCut.js",
+ "CsPitch.js", "CsProfile.js", "CsSectionCut.js",
  "CsMesh3d.js", "CsValidate.js", "CsStats.js", "CsGrade.js",
  "Format/CsCompass.js", "Format/CsWalls.js", "Format/CsSurvex.js",
  "Format/CsCsv.js", "Format/CsTherion.js",
