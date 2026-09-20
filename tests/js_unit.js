@@ -31844,6 +31844,55 @@ if (layerManagerLoaded) {
         "section: a rock drawn inside the outline leaves the wall "
         + "where it was");
 
+    // AN OPEN SECTION STAYS OPEN where the notebook says why.
+    //
+    // A trace left unclosed has two meanings and the drawing cannot
+    // tell them apart: the passage carries on that way, or the caver
+    // had not finished. The trace says WHERE the gap is; the "P" in
+    // the notebook says it was MEANT.
+    var openRight = {
+        scale: 1,
+        polylines: [[
+            { x: 2, y: -1 },     // starts low on the right...
+            { x: -2, y: -1 },
+            { x: -2, y: 1 },
+            { x: 2, y: 1 }       // ...and stops, leaving the right open
+        ]]
+    };
+    var pRight = { left: 2, right: null, up: 1, down: 1,
+                   rightOpen: true };
+    var openRing = CsMesh3d.sectionRing(station, north, openRight, pRight);
+    ok(openRing.gaps !== undefined && openRing.gaps.length > 0,
+        "open section: a gap the notebook wrote P against is declared");
+    ok(CsMesh3d.isOpenAt(openRing, 0) === true,
+        "open section: and the tube has no wall straight out to the "
+        + "right, which is the side that was written P");
+    ok(CsMesh3d.isOpenAt(openRing, Math.PI) === false,
+        "open section: while the left, which was drawn, is still walled");
+
+    // THE SAME TRACE WITH NO P closes as it always did -- an unfinished
+    // section must not read as a hole in the cave.
+    var noP = CsMesh3d.sectionRing(station, north, openRight,
+        { left: 2, right: 2, up: 1, down: 1 });
+    ok(noP.gaps === undefined || noP.gaps.length === 0,
+        "open section: a gap nobody wrote P against is not an opening");
+    ok(CsMesh3d.isOpenAt(noP, 0) === false,
+        "open section: so the tube skins across it, as before");
+
+    // A P THE CAVER THEN DREW A WALL ACROSS: the drawing is the more
+    // specific statement about this station, and wins.
+    var closedTrace = CsMesh3d.sectionRing(station, north, lopsided,
+        { left: 1, right: null, up: 1, down: 1, rightOpen: true });
+    ok(CsMesh3d.isOpenAt(closedTrace, 0) === false,
+        "open section: a wall drawn across a side written P is still a "
+        + "wall -- the drawing is the later and more specific word");
+
+    // A ring with no gaps at all answers false for everything, which
+    // is every LRUD-built ring in the suite.
+    ok(CsMesh3d.isOpenAt(CsMesh3d.ringAt(station, north,
+        { left: 2, right: 2, up: 2, down: 2 }, []), 0) === false,
+        "open section: a measured ring declares nothing open");
+
     // Rubbish in, nothing out: the LRUD then answers, as before.
     eqs(CsMesh3d.sectionRing(station, north, null).length, 0,
         "section: no section, no ring");

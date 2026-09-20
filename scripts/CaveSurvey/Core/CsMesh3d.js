@@ -167,7 +167,7 @@ CsMesh3d.SECTION_BUCKETS = 64;
  * \return ring points [{x, y, z, angle}], or [] when there is nothing
  *         usable. Pure.
  */
-CsMesh3d.sectionRing = function(station, dir, sec) {
+CsMesh3d.sectionRing = function(station, dir, sec, lrud) {
     if (sec === null || sec === undefined ||
             Object.prototype.toString.call(sec.polylines) !==
                 "[object Array]") {
@@ -229,6 +229,24 @@ CsMesh3d.sectionRing = function(station, dir, sec) {
     }
     kept.sort(function(a, b) { return a.angle - b.angle; });
 
+    // WHERE THE OUTLINE WAS LEFT OPEN ON PURPOSE.
+    //
+    // An unclosed trace has two meanings and the drawing cannot tell
+    // them apart: the passage carries on that way, or the caver had
+    // not finished. The notebook already answers it -- a side written
+    // "P" is the party saying they looked and found no wall -- so the
+    // TRACE says where the gap is and the LRUD says whether it was
+    // meant (Nathan, 2026-09-20: "if the cross section is open, and
+    // state Passage in that direction, then it should stay open").
+    //
+    // A gap nobody wrote P against closes as it always has, so an
+    // unfinished section still renders as passage rather than as a
+    // hole in the cave.
+    var gaps = CsMesh3d.openSpans(buckets, lrud);
+    if (gaps.length > 0) {
+        kept.gaps = gaps;
+    }
+
     var out = [];
     for (i = 0; i < kept.length; i++) {
         out.push({
@@ -240,6 +258,83 @@ CsMesh3d.sectionRing = function(station, dir, sec) {
                            kept[i].v * frame.up.z,
             angle: kept[i].angle
         });
+    }
+    if (kept.gaps !== undefined) {
+        out.gaps = kept.gaps;
+    }
+    return out;
+};
+
+/** The angle each LRUD side sits at in a ring's own frame: the same
+ *  places ringAt puts its four ticks. */
+CsMesh3d.SIDE_ANGLES = {
+    right: 0,
+    up: Math.PI / 2,
+    left: Math.PI,
+    down: -Math.PI / 2
+};
+
+/**
+ * The angular spans a traced section deliberately left open.
+ *
+ * A span counts only when the trace has no wall across it AND the
+ * notebook wrote "P" for a side pointing into it. Both halves are
+ * needed: the trace alone cannot say whether a gap was meant, and the
+ * P alone cannot say how wide the opening is -- the caver drew that.
+ *
+ * \param buckets the angular buckets sectionRing filled, {slot: point}
+ * \param lrud    the station's reading, for its leftOpen/rightOpen/
+ *                upOpen/downOpen flags. Absent means nothing is open.
+ * \return [[fromAngle, toAngle]], possibly empty. Pure.
+ */
+CsMesh3d.openSpans = function(buckets, lrud) {
+    var out = [];
+    if (lrud === null || lrud === undefined) {
+        return out;
+    }
+    var openAngles = [];
+    var side;
+    for (side in CsMesh3d.SIDE_ANGLES) {
+        if (!CsMesh3d.SIDE_ANGLES.hasOwnProperty(side)) { continue; }
+        if (lrud[side + "Open"] === true) {
+            openAngles.push(CsMesh3d.SIDE_ANGLES[side]);
+        }
+    }
+    if (openAngles.length === 0) {
+        return out;
+    }
+    var n = CsMesh3d.SECTION_BUCKETS;
+    var slotOf = function(angle) {
+        var slot = Math.floor((CsMesh3d.wrapAngle(angle) + Math.PI) /
+            (2 * Math.PI) * n);
+        if (slot < 0) { slot = 0; }
+        if (slot >= n) { slot = n - 1; }
+        return slot;
+    };
+    var angleOfSlot = function(slot) {
+        return -Math.PI + (2 * Math.PI) * (slot / n);
+    };
+    var empty = function(slot) {
+        return buckets[((slot % n) + n) % n] === undefined;
+    };
+    var claimed = {};
+    for (var i = 0; i < openAngles.length; i++) {
+        var seed = slotOf(openAngles[i]);
+        if (!empty(seed) || claimed[seed] === true) {
+            // The trace HAS a wall facing the open side: the caver
+            // drew one there, and a drawn wall beats a written P --
+            // it is the more specific statement about this station.
+            continue;
+        }
+        // Walk out both ways to the extent of the hole the caver left.
+        var from = seed, to = seed, steps = 0;
+        while (empty(from - 1) && steps < n) { from -= 1; steps += 1; }
+        steps = 0;
+        while (empty(to + 1) && steps < n) { to += 1; steps += 1; }
+        for (var c = from; c <= to; c++) {
+            claimed[((c % n) + n) % n] = true;
+        }
+        out.push([angleOfSlot(from), angleOfSlot(to + 1)]);
     }
     return out;
 };
@@ -645,12 +740,65 @@ CsMesh3d.loft = function(tri, ringA, ringB, colorA, colorB) {
         return -Math.PI + (2 * Math.PI) * ((i % n) / n);
     };
     for (var i = 0; i < n; i++) {
+        var mid = angleOf(i) + Math.PI / n;
+        // WHERE THE PASSAGE GOES ON, NO SURFACE. A ring may declare
+        // spans with no wall in them -- a traced section left open on
+        // a side the notebook recorded "P" -- and skinning across one
+        // would put a wall where the party looked and found none. Both
+        // ends have to be walled for a quad to exist, which is what
+        // makes the hole close again as soon as the next station says
+        // there is a wall.
+        if (CsMesh3d.isOpenAt(ringA, mid) ||
+                CsMesh3d.isOpenAt(ringB, mid)) {
+            continue;
+        }
         var a0 = CsMesh3d.nearestByAngle(ringA, angleOf(i));
         var a1 = CsMesh3d.nearestByAngle(ringA, angleOf(i + 1));
         var b0 = CsMesh3d.nearestByAngle(ringB, angleOf(i));
         var b1 = CsMesh3d.nearestByAngle(ringB, angleOf(i + 1));
         CsMesh3d.quad(tri, a0, a1, b1, b0, colorA, colorB);
     }
+};
+
+/**
+ * True when a ring declares no wall at this angle.
+ *
+ * A ring carries its open spans on itself, as `gaps`: pairs of angles
+ * a wall was looked for and deliberately not found. A ring with none
+ * -- every ring built from LRUD ticks alone -- answers false for
+ * everything, which is the behaviour this file had before open spans
+ * existed.
+ */
+CsMesh3d.isOpenAt = function(ring, angle) {
+    if (ring === null || ring === undefined ||
+            Object.prototype.toString.call(ring.gaps) !== "[object Array]") {
+        return false;
+    }
+    var a = CsMesh3d.wrapAngle(angle);
+    for (var i = 0; i < ring.gaps.length; i++) {
+        var span = ring.gaps[i];
+        if (Object.prototype.toString.call(span) !== "[object Array]" ||
+                span.length < 2) {
+            continue;
+        }
+        var from = CsMesh3d.wrapAngle(span[0]);
+        var to = CsMesh3d.wrapAngle(span[1]);
+        if (from <= to) {
+            if (a >= from && a <= to) { return true; }
+        } else if (a >= from || a <= to) {
+            // The span runs across the seam at +/- pi.
+            return true;
+        }
+    }
+    return false;
+};
+
+/** An angle brought into (-pi, pi]. */
+CsMesh3d.wrapAngle = function(angle) {
+    var a = angle;
+    while (a <= -Math.PI) { a += 2 * Math.PI; }
+    while (a > Math.PI) { a -= 2 * Math.PI; }
+    return a;
 };
 
 /** A generic ramp, warm at the top of the range and cool at the bottom.
@@ -1290,7 +1438,8 @@ CsMesh3d.build = function(survey, resolved, opts) {
         // what the tube is made of; the LRUD answers everywhere else.
         var ring = [];
         if (sections.hasOwnProperty(stationName)) {
-            ring = CsMesh3d.sectionRing(st, dir, sections[stationName]);
+            ring = CsMesh3d.sectionRing(st, dir, sections[stationName],
+                CsMesh3d.lrudAt(stationName, survey));
         }
         if (ring.length < 3) {
             ring = CsMesh3d.ringAt(st, dir,
