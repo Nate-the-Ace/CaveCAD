@@ -555,6 +555,13 @@
       "shots": []
     },
     {
+      "id": "words-vertical",
+      "title": "Vertical caves: how to tell CaveCAD",
+      "class": "concept",
+      "file": "words-vertical.html",
+      "shots": []
+    },
+    {
       "id": "words-trips",
       "title": "Trips, and revising one",
       "class": "concept",
