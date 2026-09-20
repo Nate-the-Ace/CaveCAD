@@ -91,13 +91,37 @@ ok(before !== null && before.survey !== null,
 ok(before.survey.shots.length === 2, "the fixture drawing has two shots");
 
 // ---------------------------------------------------------------------
-// Every pass, defaults -- opts omitted entirely. FIVE now: relinking a
-// scan whose file reference was lost joined the repair in 0.9.126.0, and
-// filing the layers into the Layer Manager's groups in 0.9.141.0 --
+// Every pass, defaults -- opts omitted entirely. FIVE passes: relinking
+// a scan whose file reference was lost joined the repair in 0.9.126.0,
+// and filing the layers into the Layer Manager's groups in 0.9.141.0 --
 // which is also where the standalone Group Layers menu entry went.
+//
+// A PASS IS NOT A LINE. The groups pass speaks up to three times in one
+// run -- the layer groups it filed, any layer states it had to add, and
+// the TRIP groups derived from the survey (0.9.150.0) -- so counting
+// lines counts what this particular fixture happened to need, and broke
+// the moment a pass grew a second sentence. What the report actually
+// promises is that no pass stays SILENT: each one names itself, whether
+// it ran, skipped, or found nothing to do. Assert that instead.
 // ---------------------------------------------------------------------
+var PASS_PREFIXES = ["Survey data:", "Scan images:", "Layers:",
+                     "Layer groups:", "Callouts:"];
+
+/** True when every pass named itself somewhere in these lines. */
+function everyPassSpoke(lines) {
+    var joined = lines.join("\n");
+    for (var p = 0; p < PASS_PREFIXES.length; p++) {
+        if (joined.indexOf(PASS_PREFIXES[p]) === -1) {
+            return false;
+        }
+    }
+    return true;
+}
+
 var all = CsRepair.run(doc, di, {});
-ok(all.lines.length === 5, "every pass reports a line");
+ok(everyPassSpoke(all.lines), "every pass reports a line");
+ok(all.lines.length >= PASS_PREFIXES.length,
+    "and no pass is reported by borrowing another's line");
 ok(all.changed === true, "the passes changed something");
 
 // ---------------------------------------------------------------------
@@ -108,7 +132,10 @@ var none = CsRepair.run(doc, di,
     { rebuild: false, restyle: false, callouts: false,
       relinkScans: false, groups: false });
 ok(none.changed === false, "skipping every pass changes nothing");
-ok(none.lines.length === 5, "and every skipped pass still reports");
+ok(none.lines.length === PASS_PREFIXES.length &&
+    everyPassSpoke(none.lines),
+    "and every skipped pass still reports -- exactly once, since a pass "
+    + "that did not run has only the one thing to say");
 ok(none.lines.join(" ").indexOf("skipped") !== -1,
     "a skipped pass says so");
 
@@ -120,7 +147,9 @@ ok(none.lines.join(" ").indexOf("skipped") !== -1,
 var one = CsRepair.run(doc, di,
     { rebuild: false, restyle: true, callouts: false,
       relinkScans: false, groups: false });
-ok(one.lines.length === 5, "a single pass still reports every pass");
+ok(one.lines.length === PASS_PREFIXES.length &&
+    everyPassSpoke(one.lines),
+    "a single pass still reports every pass");
 
 var out;
 if (failures.length === 0) {
