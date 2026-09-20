@@ -23,6 +23,51 @@ CsTraverse.SLOPE = "slope";
 CsTraverse.HORIZONTAL = "horizontal";
 
 /**
+ * Inclination magnitude (degrees) at and beyond which a shot IS a
+ * pitch rather than a steep passage.
+ *
+ * THE ONE DEFINITION. Two modules had independently arrived at 85 and
+ * said so in prose -- CsValidate's near-plumb warning and CsProfile's
+ * passage-direction rule -- and a third question, unwritten until now,
+ * has the same answer: whether this leg's COMPASS reading means
+ * anything. A magnetic bearing sighted along a near-vertical shot is
+ * noise; the needle swings, the caver is hanging on a rope, and the
+ * number written down is a formality. Past this angle a bearing is not
+ * evidence of a passage direction, and a good deal of geometry
+ * downstream depends on agreeing about where that line is. It lives
+ * here, in the lowest file in the Core, so the agreement is structural
+ * rather than three comments promising each other.
+ *
+ * WHY 85 AND NOT 89. At 85 degrees a 100 ft shot still has 8.7 ft of
+ * plan projection, which is a real horizontal offset and is plotted as
+ * one -- "plumb" here does NOT mean "draw it straight down", it means
+ * "do not read this leg's compass as a passage bearing". Nothing in
+ * this codebase snaps geometry to vertical; the coordinates always
+ * come from the numbers as recorded.
+ */
+CsTraverse.PLUMB_DEG = 85.0;
+
+/**
+ * True when a shot is a pitch by the rule above -- an aven (+) as much
+ * as a drop (-). Reads the EFFECTIVE inclination, so a plumb recorded
+ * with a backsight is still a plumb.
+ *
+ * An unusable inclination is NOT plumb: absent evidence is not
+ * evidence of vertical, the same way `unusable` refuses to let an
+ * absent reading act as a measured zero.
+ */
+CsTraverse.isPlumb = function(shot) {
+    if (shot === null || shot === undefined) {
+        return false;
+    }
+    var inc = CsTraverse.effectiveInclination(shot);
+    if (CsTraverse.unusable(inc)) {
+        return false;
+    }
+    return Math.abs(inc) >= CsTraverse.PLUMB_DEG;
+};
+
+/**
  * The azimuth a shot is computed with. With only a foresight, that
  * foresight; with a backsight too, the circular mean of the foresight
  * and the reversed backsight -- the standard fs/bs correction, worth
@@ -108,6 +153,27 @@ CsTraverse.offset = function(shot, tapeMode) {
 
     var plan, dz;
     if (tapeMode === CsTraverse.HORIZONTAL) {
+        // A HELD-LEVEL TAPE CANNOT MEASURE A PLUMB. Under the
+        // horizontal convention the tape IS the plan distance and the
+        // rise is plan * tan(inc), which at +/-90 is infinite: there is
+        // no horizontal tape reading that gets you down a pitch. Left
+        // ungated this returned {dx: Infinity, dy: NaN, dz: Infinity}
+        // -- coordinates that pass every finite check downstream
+        // because callers test for `null`, not for infinity, and then
+        // poison a bounding box, a zoom extent or a least-squares
+        // normal matrix somewhere far away. Refusing it is the same
+        // contract `unusable` already sets: a reading that cannot be a
+        // measurement is `null`, never a number.
+        //
+        // Unreachable from any importer today (the file formats all
+        // mean slope distance, and SLOPE is the default everywhere),
+        // but reachable the moment a user switches an old level-tape
+        // survey to HORIZONTAL and it contains one plumbed pitch --
+        // which is exactly what old US surveys of vertical caves look
+        // like.
+        if (Math.abs(inc) >= 90.0 - 1e-9) {
+            return null;
+        }
         plan = shot.distance;
         dz = shot.distance * Math.tan(incRad);
     } else {

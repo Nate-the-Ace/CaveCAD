@@ -51,6 +51,17 @@ CsLrud.tickEnd = function(station, azimuthDeg, side, length) {
         // this special case itself.
         return { x: station.x, y: station.y };
     }
+    if (typeof azimuthDeg !== "number" || !isFinite(azimuthDeg)) {
+        // NO BEARING, NO TICK. A measured length with nothing to aim
+        // it along is not half a wall point, it is no wall point: the
+        // only way to draw it would be to pick a direction, and the
+        // one that used to get picked by default -- 0, straight north
+        // -- is a wall the survey never saw. This sits BELOW the
+        // zero-length branch on purpose: "the wall is at the station"
+        // needs no direction to be true, and a pitch whose walls
+        // really are at the rope is exactly where both cases meet.
+        return null;
+    }
     var perp = (side === "R") ? azimuthDeg + 90.0 : azimuthDeg - 90.0;
     var rad = perp * Math.PI / 180.0;
     return {
@@ -182,11 +193,42 @@ CsLrud.planBearing = function(a, b) {
     if (!isFinite(dx) || !isFinite(dy)) {
         return null;
     }
-    if (dx === 0.0 && dy === 0.0) {
+    if (Math.abs(dx) <= CsLrud.COINCIDENT_PLAN &&
+            Math.abs(dy) <= CsLrud.COINCIDENT_PLAN) {
         return null;
     }
     return CsLrud.normalizeAz(Math.atan2(dx, dy) * 180.0 / Math.PI);
 };
+
+/**
+ * Below this plan separation two stations are the SAME POINT as far as
+ * a bearing is concerned, and there is no direction between them.
+ *
+ * THIS IS WHAT A PITCH LOOKS LIKE IN PLAN, and the test used to be
+ * `dx === 0 && dy === 0`, which a pitch never satisfies. A plumbed leg
+ * goes through `CsTraverse.offset`, where the plan projection is
+ * `distance * cos(90 degrees)` -- and `Math.cos(Math.PI / 2)` is
+ * 6.1e-17, not 0. So a 187 ft free-fall placed its lower station
+ * 1.1e-14 ft to the north, `planBearing` divided that dust by itself,
+ * and out came a confident bearing of 000 degrees.
+ *
+ * Every consequence of that was silent and wrong in the same
+ * direction. `stationAxes` gained a way out at both ends of every
+ * pitch, so a pit floor with one passage leaving it read as a THROUGH
+ * station and took its passage axis from the bisector of the real
+ * passage and a rounding error; a pit head with a passage and a drop
+ * did the same; a shaft with two leads off the bottom read as a
+ * three-way JUNCTION and broke its wall runs there. None of it could
+ * show up in a horizontal cave, where no leg is ever steep enough for
+ * the projection to collapse -- which is why it survived this long.
+ *
+ * 1e-6 in the survey's own distance unit: far above the ~1e-14 that
+ * trigonometry leaves behind, far below any offset a tape and compass
+ * can produce or a loop adjustment can shift a station by. A leg that
+ * really does move a thousandth of a foot across the map still has a
+ * bearing and still gets one.
+ */
+CsLrud.COINCIDENT_PLAN = 1e-6;
 
 /**
  * How far apart two bearings may be and still be "the same way out".
@@ -368,6 +410,25 @@ CsLrud.throughPair = function(axes, name) {
 CsLrud.passageAzimuthAt = function(axes, name, arrivalAz) {
     var pair = CsLrud.throughPair(axes, name);
     if (pair === null) {
+        // Not a through station, so there is no bisector to take. If
+        // the ARRIVING leg could not supply a bearing either -- which
+        // is what a station at the foot of a pitch looks like, the
+        // caver having come down a rope with nothing to sight along --
+        // then a station with exactly ONE way out still answers the
+        // question: that way out is where the passage goes, and it is
+        // the direction the caver was facing when they pulled the
+        // tapes. Better than the alternative in both directions: not
+        // null (which costs the station its walls) and certainly not a
+        // fallback bearing of north.
+        if (arrivalAz === null || arrivalAz === undefined ||
+                !isFinite(arrivalAz)) {
+            var only = (axes === null || axes === undefined) ?
+                undefined : axes[name];
+            if (only !== undefined && only !== null &&
+                    only.dirs.length === 1) {
+                return only.dirs[0].mean;
+            }
+        }
         return arrivalAz;
     }
     var dirs = axes[name].dirs;
@@ -478,7 +539,19 @@ CsLrud.stationWallPoints = function(st, passageAz, lrud, splays, side,
         var len = (side === "L") ? lrud.left : lrud.right;
         // tickEnd itself now returns a point AT the station for 0 and
         // null for not-measured/open ("P") -- see its own docblock.
-        var p = CsLrud.tickEnd(st, lrud.azimuth, side, len);
+        //
+        // The tick swings off the bearing the caver FACED wherever
+        // there was one; where there was not (a pitch -- see
+        // CsModel.lrudForStation, which hands on null rather than a
+        // near-vertical compass sight), it swings off the passage
+        // direction instead. That is the one substitution this
+        // codebase allows itself, and it is not an invention: at the
+        // foot of a drop the caver measures L and R across the passage
+        // they are about to walk, which is exactly what `passageAz`
+        // names. If even that is unknown, tickEnd draws nothing.
+        var tickAz = (lrud.azimuth === null || lrud.azimuth === undefined ||
+            !isFinite(lrud.azimuth)) ? passageAz : lrud.azimuth;
+        var p = CsLrud.tickEnd(st, tickAz, side, len);
         if (p !== null) {
             // the tick is perpendicular to the passage, so it sits
             // at along-passage 0 and leads its ties
@@ -562,7 +635,12 @@ CsLrud.stationWallPoints3D = function(st, passageAz, lrud, splays, side,
         var len = (side === "L") ? lrud.left : lrud.right;
         // tickEnd itself now returns a point AT the station for 0 and
         // null for not-measured/open ("P") -- see its own docblock.
-        var p = CsLrud.tickEnd(st, lrud.azimuth, side, len);
+        // The tick's bearing falls back to the passage direction where
+        // no bearing was sighted, exactly as the 2D twin above does;
+        // keeping the two in step is the whole point of this pair.
+        var tickAz3 = (lrud.azimuth === null || lrud.azimuth === undefined ||
+            !isFinite(lrud.azimuth)) ? passageAz : lrud.azimuth;
+        var p = CsLrud.tickEnd(st, tickAz3, side, len);
         if (p !== null) {
             // L and R are measured horizontally, so they sit at the
             // station's own elevation. `atStation` is carried through

@@ -153,9 +153,39 @@ CsFormatCsv.parse = function(content) {
             shot.to = "";
         }
         shot.distance = dist;
-        shot.azimuth = CsAngles.normalizeAzimuth(parseFloat(rec.azimuth) || 0.0);
         var inc = opt(rec.inclination);
         shot.inclination = inc === null ? 0.0 : inc;
+        // AN EMPTY AZIMUTH CELL IS NOT A BEARING OF ZERO. This read
+        // `parseFloat(rec.azimuth) || 0.0`, so a blank column, a dash,
+        // a stray word -- and, because `||` treats it as falsy, a
+        // legitimate bearing of exactly 0 -- all came out as due
+        // north. On a plumbed pitch that is harmless arithmetic (the
+        // plan projection it multiplies is zero) and it is what a
+        // vertical survey's notes actually look like, so it is
+        // accepted and MARKED. On anything else it is a fabricated
+        // direction that plots the leg, and the whole cave hanging off
+        // it, somewhere nobody surveyed: the leg is refused and the
+        // refusal is reported, the same rule the Survex reader keeps.
+        var azRaw = (rec.azimuth === undefined || rec.azimuth === null) ?
+            "" : String(rec.azimuth).replace(/^\s+|\s+$/g, "");
+        var azNum = parseFloat(azRaw);
+        if (azRaw === "" || isNaN(azNum)) {
+            if (Math.abs(shot.inclination) >= CsTraverse.PLUMB_DEG) {
+                shot.azimuth = 0.0;
+                shot.azimuthOmitted = true;
+            } else {
+                CsModel.addParseFinding(survey, "warning",
+                    "bearing-omitted-not-plumb",
+                    "Leg " + (rec.from || "?") + " to " + (rec.to || "?") +
+                    " has no azimuth and is not plumb (inclination " +
+                    shot.inclination.toFixed(2) + "), so the leg was " +
+                    "SKIPPED -- anything beyond it is now unconnected. " +
+                    "A bearing may only be left out on a plumbed shot.");
+                continue;
+            }
+        } else {
+            shot.azimuth = CsAngles.normalizeAzimuth(azNum);
+        }
         var eL = lrudCell(rec.left), eR = lrudCell(rec.right);
         var eU = lrudCell(rec.up), eD = lrudCell(rec.down);
         shot.left = eL.value; shot.leftAll = eL.all; shot.leftOpen = eL.open;
@@ -242,7 +272,11 @@ CsFormatCsv.write = function(survey) {
             (s.excludeFromLength ? "L" : "") +
             (s.noAdjust ? "C" : "");
         // notes is the last column, so its commas are safe as-is
-        out.push([s.from, s.splay ? "" : s.to, s.distance, s.azimuth,
+        out.push([s.from, s.splay ? "" : s.to, s.distance,
+            // written back out EMPTY when no bearing was sighted, so
+            // the file says what the notes said -- see the reader's
+            // note above for why a 0 here would be a different claim
+            s.azimuthOmitted ? "" : s.azimuth,
             s.inclination,
             lrudText(s.left, s.leftAll, s.leftOpen),
             lrudText(s.right, s.rightAll, s.rightOpen),

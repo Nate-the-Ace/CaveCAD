@@ -2894,6 +2894,120 @@ function tieInFixture(openSides) {
 })();
 
 (function() {
+    // ---- VERTICAL CAVES: a pitch has no plan bearing -------------
+    //
+    // Every assertion in this block was wrong before Plumbline Pit
+    // went in, and every one of them was wrong ONLY in a cave with a
+    // pitch in it -- which is why a suite of 7000 assertions over a
+    // horizontal fixture said nothing.
+
+    // 1. A plumb leg does not create a "way out". cos(90 degrees) is
+    //    6.1e-17, not 0, so the lower station lands a rounding error
+    //    to the north and planBearing used to report 000.
+    var pit = CsModel.newSurvey();
+    pit.shots.push(shotOf("P1", "P2", 100, 0, -90));
+    pit.shots.push(shotOf("P2", "P3", 30, 90, 0));
+    var pitRes = CsNetwork.resolve(pit, {});
+    var pitAxes = CsLrud.stationAxes(pitRes);
+    ok(CsLrud.planBearing(pitRes.stations["P1"], pitRes.stations["P2"]) === null,
+        "a plumb leg has NO plan bearing -- the float dust from " +
+        "cos(90) is not a direction");
+    eqs(pitAxes["P2"].dirs.length, 1,
+        "the foot of a pitch with one passage leaving it has ONE way " +
+        "out, not two");
+    ok(!CsLrud.isJunction(pitAxes, "P2"),
+        "...so it is not a junction, and its wall runs do not break there");
+
+    // 2. That one way out IS the passage direction when the arriving
+    //    leg had no bearing to give.
+    near(CsLrud.passageAzimuthAt(pitAxes, "P2", null), 90, 1e-6,
+        "at a pit foot the single way out answers for the passage " +
+        "direction the arriving plumb could not");
+
+    // 3. A shot's compass reading is withheld from the LRUD when the
+    //    shot is a pitch -- the needle was noise there.
+    var lr = CsModel.newSurvey();
+    var drop = shotOf("Q1", "Q2", 100, 0, -90);
+    drop.left = 4; drop.right = 6;
+    lr.shots.push(drop);
+    lr.shots.push(shotOf("Q2", "Q3", 30, 90, 0));
+    var lrudQ2 = CsModel.lrudForStation(lr, "Q2");
+    ok(lrudQ2 !== null && lrudQ2.azimuth === null,
+        "LRUD at the foot of a pitch carries NO bearing (null), not the " +
+        "compass column's formality");
+    eqs(lrudQ2.left, 4, "...while the measured lengths are untouched");
+
+    // 4. With no bearing at all there is no tick -- never a north one.
+    ok(CsLrud.tickEnd({ x: 0, y: 0 }, null, "L", 5) === null,
+        "a measured length with no bearing draws NO wall point");
+    ok(CsLrud.tickEnd({ x: 0, y: 0 }, null, "L", 0) !== null,
+        "...but a zero length still does: the wall is AT the station, " +
+        "which needs no direction to be true");
+
+    // 5. End to end: the pit-foot walls come off the ONWARD passage,
+    //    so L is 4 ft to the north of a passage running east.
+    var lrRes = CsNetwork.resolve(lr, {});
+    var lrAxes = CsLrud.stationAxes(lrRes);
+    var azQ2 = CsLrud.passageAzimuthAt(lrAxes, "Q2", null);
+    var lp = CsLrud.stationWallPoints(lrRes.stations["Q2"], azQ2,
+        lrudQ2, null, "L");
+    ok(lp.length === 1, "the pit foot still gets its left wall point");
+    near(lp[0].y - lrRes.stations["Q2"].y, 4, 1e-6,
+        "and it is 4 ft LEFT of the onward passage, not 4 ft west of a " +
+        "bearing nobody sighted");
+})();
+
+(function() {
+    // A bearing omitted in the FILE, which is what a vertical survey's
+    // notes look like, survives a Survex round trip as an absence.
+    var txt = "*units length feet\n" +
+        "*data normal from to tape compass clino\n" +
+        "V1\tV2\t42.00\t-\t-90\n" +
+        "V2\tV3\t20.00\t120\t-3\n";
+    var sv = CsFormatSurvex.parse(txt);
+    eqs(sv.shots.length, 2, "both legs read");
+    ok(sv.shots[0].azimuthOmitted === true,
+        "a dash in the compass column is recorded as an ABSENT bearing");
+    ok(sv.shots[1].azimuthOmitted === false,
+        "...and a real reading is not");
+    ok(CsFormatSurvex.write(sv).indexOf("42.00\t-\t") >= 0,
+        "and it is written back out as a dash, not as a bearing of 0 -- " +
+        "the file must not gain a claim the notes never made");
+
+    // The same omission on a leg that is NOT plumb is refused, and the
+    // refusal is now something the user can read. It used to be a bare
+    // `continue`: the leg vanished, everything past it went
+    // unconnected, and nothing said why.
+    var bad = CsFormatSurvex.parse("*units length feet\n" +
+        "*data normal from to tape compass clino\n" +
+        "W1\tW2\t20.00\t-\t-40\n");
+    eqs(bad.shots.length, 0, "a bearingless non-plumb leg is still refused");
+    var pf = CsModel.parseFindings(bad);
+    ok(pf.length === 1 && pf[0].code === "bearing-omitted-not-plumb",
+        "...but the refusal is REPORTED now, with the line to look at");
+
+    // CSV had the same hole and worse: `parseFloat(cell) || 0` turned
+    // a blank azimuth into due north on ANY leg, plumb or not.
+    var csvPlumb = CsFormatCsv.parse(
+        "from,to,distance,azimuth,inclination\nC1,C2,42,,-90\n");
+    eqs(csvPlumb.shots.length, 1, "CSV: a blank azimuth on a plumb is kept");
+    ok(csvPlumb.shots[0].azimuthOmitted === true,
+        "CSV: ...and marked as an absent bearing");
+    var csvBad = CsFormatCsv.parse(
+        "from,to,distance,azimuth,inclination\nC1,C2,42,,-40\n");
+    eqs(csvBad.shots.length, 0,
+        "CSV: a blank azimuth on a NON-plumb leg is refused, not read " +
+        "as a bearing of north");
+    ok(CsModel.parseFindings(csvBad).length === 1,
+        "CSV: and reported");
+    var csvNorth = CsFormatCsv.parse(
+        "from,to,distance,azimuth,inclination\nC1,C2,42,0,-3\n");
+    ok(csvNorth.shots.length === 1 && csvNorth.shots[0].azimuthOmitted === false,
+        "CSV: a REAL bearing of 0 is a reading, not an absence (the old " +
+        "`|| 0.0` could not tell them apart)");
+})();
+
+(function() {
     // clusterBearings, at the edges of its own tolerance
     var c = CsLrud.clusterBearings([0, 25, 180], 30);
     ok(c.length === 2, "cluster: 25 degrees apart is one way out");
@@ -24499,14 +24613,37 @@ function plumbSurvey(inclination) {
     sv.shots = [shotOf("P1", "P2", 10, 0, inclination)];
     return sv;
 }
-ok(!hasCode(findingsFor(plumbSurvey(85)), "near-plumb"),
-    "85 degrees is not yet near-plumb (the test is strictly greater)");
+ok(!hasCode(findingsFor(plumbSurvey(84.9)), "near-plumb"),
+    "84.9 degrees is not yet near-plumb");
+ok(hasCode(findingsFor(plumbSurvey(85)), "near-plumb"),
+    "85 degrees IS near-plumb -- the boundary angle falls on the same " +
+    "side of the line here as it does in CsTraverse.isPlumb, which is " +
+    "what decides whether the drawing rules read this leg's compass");
 ok(hasCode(findingsFor(plumbSurvey(85.1)), "near-plumb"),
     "85.1 degrees is");
 ok(hasCode(findingsFor(plumbSurvey(-90)), "near-plumb"),
     "a DECLARED plumb is flagged too -- the warning says vertical, " +
     "which is true either way");
 eqs(CsValidate.NEAR_PLUMB_DEG, 85, "the near-plumb threshold is still 85");
+eqs(CsValidate.NEAR_PLUMB_DEG, CsTraverse.PLUMB_DEG,
+    "and it is the SAME 85 the geometry uses, not a second copy");
+ok(CsTraverse.isPlumb({ distance: 10, azimuth: 0, inclination: -85 }),
+    "isPlumb: a drop at the threshold is a pitch");
+ok(CsTraverse.isPlumb({ distance: 10, azimuth: 0, inclination: 90 }),
+    "isPlumb: an AVEN is a pitch too (sign does not decide)");
+ok(!CsTraverse.isPlumb({ distance: 10, azimuth: 0, inclination: -84.5 }),
+    "isPlumb: just under the threshold is ordinary steep passage");
+ok(!CsTraverse.isPlumb({ distance: 10, azimuth: 0, inclination: null }),
+    "isPlumb: an ABSENT inclination is not evidence of vertical");
+ok(CsTraverse.isPlumb({ distance: 10, azimuth: 0, inclination: -90,
+        backInclination: 90 }),
+    "isPlumb: a plumb recorded with a backsight is still a plumb");
+ok(CsTraverse.offset({ distance: 100, azimuth: 0, inclination: -90 },
+        CsTraverse.HORIZONTAL) === null,
+    "a held-LEVEL tape cannot measure a plumb: refused, not infinite");
+ok(CsTraverse.offset({ distance: 100, azimuth: 0, inclination: -90 },
+        CsTraverse.SLOPE) !== null,
+    "the same shot on a SLOPE tape is an ordinary 100 ft drop");
 
 // duplicate readings: agreeing pairs say nothing, disagreeing ones do.
 function dupSurvey(secondAzimuth, secondDistance) {

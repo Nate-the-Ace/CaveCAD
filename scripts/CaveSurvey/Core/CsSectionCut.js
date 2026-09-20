@@ -363,14 +363,23 @@ CsSectionCut.polygonAt = function(survey, resolved, stationName, frame,
     // recorded on), so a section and the plan walls cannot disagree
     // about it. At a loop tie-in, where the recorded bearing cuts
     // across the passage rather than running down it, they used to.
+    // null, NOT 0, when the arriving leg sighted no bearing -- which
+    // on a pitch it did not (CsModel.lrudForStation withholds a
+    // near-vertical compass sight rather than passing it on). A 0 here
+    // was a section oriented due north because nobody had said
+    // otherwise, and the caver could not tell that from a section that
+    // really does face north. passageAzimuthAt understands null and
+    // answers from the station's own ways out; only if THAT is unknown
+    // too is there nothing to orient against, and 0 is then a last
+    // resort rather than a first guess.
     var arrivalAz = (lrud !== null && lrud !== undefined &&
-        lrud.azimuth !== undefined && lrud.azimuth !== null) ?
-        lrud.azimuth : 0;
+        lrud.azimuth !== undefined && lrud.azimuth !== null &&
+        isFinite(lrud.azimuth)) ? lrud.azimuth : null;
     var axes = o.stationAxes || CsLrud.stationAxes(resolved);
     var passageAz = CsLrud.passageAzimuthAt(axes, stationName, arrivalAz);
     if (passageAz === null || passageAz === undefined ||
             !isFinite(passageAz)) {
-        passageAz = arrivalAz;
+        passageAz = (arrivalAz === null) ? 0 : arrivalAz;
     }
 
     var raw = [], i;

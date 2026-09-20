@@ -171,6 +171,21 @@ CsModel.newShot = function() {
         inclination: 0.0,
         backAzimuth: null,      // backsight compass, uncorrected (deg)
         backInclination: null,  // backsight clino, uncorrected (deg)
+        // True when NO BEARING WAS SIGHTED on this leg -- the notes
+        // carry a dash where the compass reading goes, which every
+        // survey format allows on a plumbed pitch and which a caver
+        // hanging on a rope writes because the needle is meaningless
+        // there, not because they forgot. `azimuth` still holds a
+        // number (0, plus whatever declination the trip applies) so
+        // that every consumer of a shot can go on doing arithmetic
+        // with it -- at a plumb that number is multiplied by a plan
+        // projection of zero and moves nothing. What it must NEVER do
+        // is act as evidence of a DIRECTION: it is not a bearing that
+        // happens to read north, it is the absence of a bearing. The
+        // rules that swing an LRUD tick or orient a cross section ask
+        // this flag before they use `azimuth` (see
+        // CsLrud.tickAzimuthAt).
+        azimuthOmitted: false,
         left: null,
         right: null,
         up: null,
@@ -502,7 +517,22 @@ CsModel.lrudForStation = function(survey, stationName) {
                 upAll: s.upAll, downAll: s.downAll,
                 leftOpen: !!s.leftOpen, rightOpen: !!s.rightOpen,
                 upOpen: !!s.upOpen, downOpen: !!s.downOpen,
-                azimuth: s.azimuth
+                // THE BEARING THE TAPES WERE PULLED ACROSS, or null
+                // when there wasn't one. L and R are perpendicular to
+                // the way the caver was facing, and on a pitch the
+                // caver was facing nothing in particular: the shot has
+                // no sighted bearing at all (`azimuthOmitted`), or it
+                // has a number written in the compass column that is
+                // a near-vertical sight and so is noise
+                // (`CsTraverse.isPlumb`). Handing either on as though
+                // it aimed the tapes puts both wall points at right
+                // angles to an invention. Consumers take `null` to
+                // mean "ask the passage instead" -- see
+                // CsLrud.passageAzimuthAt and CsLrud.tickEnd, neither
+                // of which will draw a wall in a direction nobody
+                // sighted.
+                azimuth: (s.azimuthOmitted || CsTraverse.isPlumb(s)) ?
+                    null : s.azimuth
             };
         }
     }

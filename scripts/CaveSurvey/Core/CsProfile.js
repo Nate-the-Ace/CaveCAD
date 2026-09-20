@@ -1735,12 +1735,13 @@ CsProfile.AUTO_MAX_STATIONS_DEFAULT = 3000;
  * as PLUMB for passage-direction purposes: a shot that steep is a
  * pitch, and a magnetic compass's reading on a near-vertical shot is
  * noise, not a passage bearing -- CsValidate already flags a shot past
- * this same 85 degrees as "near-plumb" for exactly that reason (see
- * its own near-plumb warning); this reuses the number rather than
- * inventing a second, disagreeing definition of "plumb" in this
- * codebase. See bandWallRuns for what "treated as plumb" means here.
+ * this same angle as "near-plumb" for exactly that reason (see its own
+ * near-plumb warning). Both now read the single definition in
+ * CsTraverse.PLUMB_DEG rather than each carrying its own copy of the
+ * number and a comment promising the copies agree. See bandWallRuns
+ * for what "treated as plumb" means here.
  */
-CsProfile.PLUMB_INCLINATION_DEG = 85.0;
+CsProfile.PLUMB_INCLINATION_DEG = CsTraverse.PLUMB_DEG;
 
 /**
  * Which line a splay belongs to: "ceiling", "floor", or "flat".

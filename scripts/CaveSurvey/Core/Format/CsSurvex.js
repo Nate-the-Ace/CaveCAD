@@ -391,13 +391,37 @@ CsFormatSurvex.parse = function(content) {
 
             var compass = rec.hasOwnProperty("compass") ?
                 parseFloat(rec.compass) : NaN;
+            var compassOmitted = false;
             if (isNaN(compass)) {
                 // OMIT ("-") is legal on plumbed legs; anything else
-                // with no bearing isn't a usable shot
+                // with no bearing isn't a usable shot.
+                //
+                // REFUSING IT IS RIGHT AND SILENCE WAS NOT. Survex
+                // itself rejects an omitted compass on anything short
+                // of a true plumb, and so does this -- at 85 degrees a
+                // 100 ft tape still swings 8.7 ft across the map, and
+                // there is no honest direction to swing it in. But a
+                // dropped leg leaves NO trace in the model: the
+                // stations beyond it are simply unconnected, and a
+                // vertical cave whose notes read "42.0  -  -87" for
+                // every pitch loses its whole lower half to a `continue`
+                // nobody can see. The leg is still refused; the refusal
+                // is now something the user is told, with the line to
+                // look at.
                 if (!plumbed) {
+                    CsModel.addParseFinding(survey, "warning",
+                        "bearing-omitted-not-plumb",
+                        "Line " + (li + 1) + ": leg " + rec.from + " to " +
+                        rec.to + " has no compass reading and is not plumb " +
+                        "(clino " + clino.toFixed(2) + "), so the leg was " +
+                        "SKIPPED -- anything beyond it is now unconnected. " +
+                        "A bearing may only be omitted on a plumbed shot; " +
+                        "record the clino as 90 (or UP/DOWN) if it really " +
+                        "was one.");
                     continue;
                 }
                 compass = 0.0;
+                compassOmitted = true;
             } else {
                 compass = compassToDegrees(compass);
             }
@@ -408,6 +432,7 @@ CsFormatSurvex.parse = function(content) {
             shot.from = fullName(rec.from);
             shot.to = anonTo ? "" : fullName(rec.to);
             shot.distance = intoSurveyUnit(tape);
+            shot.azimuthOmitted = compassOmitted;
             shot.azimuth = CsAngles.normalizeAzimuth(compass + declination);
             // provenance: the value in force at THIS leg. A bare
             // *declination change does not start a new trip, so this
@@ -675,8 +700,16 @@ CsFormatSurvex.write = function(survey) {
             // declination again.
             var az = CsAngles.normalizeAzimuth(s.azimuth - decl);
             var toName = s.splay ? (s.to !== "" ? s.to : "..") : s.to;
+            // A LEG WITH NO BEARING SIGHTED GOES BACK OUT WITH NO
+            // BEARING. Writing the model's stand-in 0 would turn "the
+            // compass was not read" into "the compass read north" in
+            // the file -- a claim the notes never made, and one that
+            // the next read of that file could not tell from a real
+            // due-north pitch. Survex's own "-" says exactly what
+            // happened, and this reader puts the flag straight back.
+            var azOut = s.azimuthOmitted ? "-" : az.toFixed(2);
             var lineOut = s.from + "\t" + toName + "\t" +
-                s.distance.toFixed(2) + "\t" + az.toFixed(2) + "\t" +
+                s.distance.toFixed(2) + "\t" + azOut + "\t" +
                 s.inclination.toFixed(2);
             if (anyBack) {
                 var bAz = (s.backAzimuth === null || s.backAzimuth === undefined) ?

@@ -35,8 +35,15 @@ CsValidate.FSBS_TOLERANCE_DEG = 3.0;
  *  vertical caves and equally a classic sign-flip site, so it is a
  *  gentle warning rather than an error -- and a DECLARED plumb (+/-90)
  *  is past it too, on purpose: the flag says "this is vertical", which
- *  is true either way. */
-CsValidate.NEAR_PLUMB_DEG = 85;
+ *  is true either way.
+ *
+ *  THE NUMBER ITSELF NOW LIVES IN ONE PLACE (CsTraverse.PLUMB_DEG).
+ *  This name stays because it is what the finding's message means to a
+ *  reader, but it is no longer a second, independently editable 85 --
+ *  the warning a caver sees and the geometry rule that decides whether
+ *  to read this leg's compass as a passage bearing must not be able to
+ *  drift apart. */
+CsValidate.NEAR_PLUMB_DEG = CsTraverse.PLUMB_DEG;
 
 /** Two readings of the same pair agree when they are within this many
  *  degrees AND within DUPLICATE_DISTANCE_FRACTION of each other. */
@@ -130,7 +137,17 @@ CsValidate.check = function(survey, resolved) {
 
         // Nearly plumb shots are common in vertical caves but also a
         // classic sign-flip/typo site -- flag once, gently.
-        if (Math.abs(s.inclination) > CsValidate.NEAR_PLUMB_DEG &&
+        //
+        // The comparison is `>=`, matching CsTraverse.isPlumb, so the
+        // boundary angle itself falls on the SAME side of the line in
+        // the warning a caver reads and in the geometry rule that
+        // stops reading this leg's compass as a passage bearing. With
+        // `>` here and `>=` there, a shot recorded at exactly the
+        // threshold was treated as a pitch by every drawing rule while
+        // the validator said nothing about it -- the one angle where
+        // the two disagreed, and the one a caver is most likely to
+        // write down deliberately.
+        if (Math.abs(s.inclination) >= CsValidate.NEAR_PLUMB_DEG &&
                 s.distance > 0) {
             findings.push({ severity: "warning", shotIndex: i, code: "near-plumb",
                 message: "Inclination " + s.inclination +
