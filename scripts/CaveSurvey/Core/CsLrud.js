@@ -646,6 +646,83 @@ CsLrud.stationCeilingFloor3D = function(st, lrud) {
     return out;
 };
 
+/** The station a survey starts from: the `from` of its first real
+ *  shot -- the one station no shot arrives at. */
+CsLrud.firstStationOf = function(survey) {
+    if (survey === null || survey === undefined ||
+            survey.shots === undefined) {
+        return null;
+    }
+    for (var i = 0; i < survey.shots.length; i++) {
+        var s = survey.shots[i];
+        if (s.splay !== true && !s.excludeFromAll) {
+            return s.from;
+        }
+    }
+    return null;
+};
+
+/**
+ * Every station whose walls live in a start-LRUD rather than on a
+ * shot, as {stationName: lrud}.
+ *
+ * One entry per trip that begins at a station nothing arrives at,
+ * plus the survey-level startLrud for the cave's own first station.
+ * A trip that begins at a station an earlier trip already reached is
+ * NOT in here: that station's walls are on the shot that arrived,
+ * which is the measurement taken facing the passage rather than a
+ * page's opening row.
+ */
+CsLrud.startLruds = function(survey) {
+    var out = {};
+    if (survey === null || survey === undefined ||
+            survey.shots === undefined) {
+        return out;
+    }
+    // Which stations are ARRIVED at: those have their walls on a shot.
+    var arrived = {};
+    var i;
+    for (i = 0; i < survey.shots.length; i++) {
+        var s = survey.shots[i];
+        if (s.splay !== true && !s.excludeFromAll && s.to !== "") {
+            arrived[s.to] = true;
+        }
+    }
+    // The first station of each trip, in the survey's own order.
+    var firstOfTrip = {};
+    for (i = 0; i < survey.shots.length; i++) {
+        var sh = survey.shots[i];
+        if (sh.splay === true || sh.excludeFromAll || sh.from === "") {
+            continue;
+        }
+        var trip = (typeof sh.trip === "number") ? sh.trip : 0;
+        if (firstOfTrip[trip] === undefined) {
+            firstOfTrip[trip] = sh.from;
+        }
+    }
+    var take = function(name, lrud) {
+        if (name === undefined || name === null || name === "" ||
+                lrud === null || lrud === undefined ||
+                arrived[name] === true || out.hasOwnProperty(name)) {
+            return;
+        }
+        out[name] = lrud;
+    };
+    // The survey's own, first: it is the entrance's, and on a cave
+    // whose trips carry none it is the only one there is.
+    take(CsLrud.firstStationOf(survey), survey.startLrud);
+    if (Object.prototype.toString.call(survey.trips) === "[object Array]") {
+        for (var t = 0; t < survey.trips.length; t++) {
+            var tp = survey.trips[t];
+            if (tp === null || tp === undefined) {
+                continue;
+            }
+            take(firstOfTrip[t], tp.startLrud);
+        }
+    }
+    return out;
+};
+
 /**
  * Wall polylines for a resolved survey.
  *
@@ -834,13 +911,7 @@ CsLrud.wallRuns = function(survey, resolved, tapeMode) {
     // cannot see it -- its LRUD lives in survey.startLrud, oriented by
     // the leg that leaves it (the same rule CsDraw.survey uses for its
     // tick).
-    var firstFrom = null;
-    for (var f = 0; f < resolved.legs.length; f++) {
-        if (resolved.legs[f].kind !== "closure") {
-            firstFrom = resolved.legs[f].from;
-            break;
-        }
-    }
+    var startLruds = CsLrud.startLruds(survey);
 
     // Wall evidence at the station a run BEGINS at. Every other station
     // enters the walk as some leg's arrival (leg.to below); the station
@@ -856,28 +927,34 @@ CsLrud.wallRuns = function(survey, resolved, tapeMode) {
         var passageAz = CsLrud.passageAzimuthAt(axes, name,
             CsTraverse.effectiveAzimuth(leg.shot));
         var lrud = CsModel.lrudForStation(survey, name);
-        if ((lrud === null || lrud === undefined) && name === firstFrom &&
-                survey.startLrud !== null &&
-                survey.startLrud !== undefined) {
+        // EVERY TRIP'S START, not only the survey's. startLruds pairs
+        // each trip's opening row with the station that trip begins
+        // at; before it this asked only about firstFrom, so a trip
+        // surveyed outward from a new station -- which is what
+        // starting a branch looks like -- lost the walls typed on its
+        // first row, in the plan exactly as in the 3D tube.
+        if ((lrud === null || lrud === undefined) &&
+                startLruds.hasOwnProperty(name)) {
+            var sLr = startLruds[name];
             lrud = {
-                left: survey.startLrud.left,
-                right: survey.startLrud.right,
-                up: survey.startLrud.up,
-                down: survey.startLrud.down,
-                leftAll: survey.startLrud.leftAll || null,
-                rightAll: survey.startLrud.rightAll || null,
-                upAll: survey.startLrud.upAll || null,
-                downAll: survey.startLrud.downAll || null,
+                left: sLr.left,
+                right: sLr.right,
+                up: sLr.up,
+                down: sLr.down,
+                leftAll: sLr.leftAll || null,
+                rightAll: sLr.rightAll || null,
+                upAll: sLr.upAll || null,
+                downAll: sLr.downAll || null,
                 // THE OPEN FLAGS TRAVEL TOO. Without them the survey's
                 // first station could be read "P P" -- looked at,
                 // found open -- and still arrive here looking exactly
                 // like a station nobody measured, which is the very
                 // confusion the rest of this function now refuses to
                 // make.
-                leftOpen: survey.startLrud.leftOpen === true,
-                rightOpen: survey.startLrud.rightOpen === true,
-                upOpen: survey.startLrud.upOpen === true,
-                downOpen: survey.startLrud.downOpen === true,
+                leftOpen: sLr.leftOpen === true,
+                rightOpen: sLr.rightOpen === true,
+                upOpen: sLr.upOpen === true,
+                downOpen: sLr.downOpen === true,
                 // The tick swings off the bearing the caver FACED, not
                 // off the derived axis -- see the PASSAGE AXES note
                 // above for why a measured length is never re-aimed.

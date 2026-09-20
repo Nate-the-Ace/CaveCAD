@@ -366,27 +366,47 @@ CsMesh3d.lrudAt = function(name, survey) {
                      downOpen: s.downOpen === true };
         }
     }
-    // THE FIRST STATION IS NEVER ARRIVED AT, so no shot carries its
-    // LRUD and the scan above finds nothing. Its reading lives in
-    // survey.startLrud -- the notebook's first row, which has walls
-    // but no shot to hang them on. Without this the entrance station
-    // has no measured passage around it at all: no ring in the 3D
-    // view, and a depth of cover measured over the centerline instead
-    // of over the ceiling. CsLrud does this for the plan's walls
-    // (its firstFrom / startLrud seeding); this is the same rule.
+    // A STATION NO SHOT ARRIVES AT still has walls, and they live
+    // somewhere else: in a start-LRUD.
     //
-    // ONLY the station the survey starts from. startLrud belongs to
-    // that one station, and handing it to any station that happens to
-    // have nothing arriving would put the entrance's walls around
-    // whatever else the scan missed.
-    if (name === CsMesh3d.firstStation(survey) &&
-            survey.startLrud !== null && survey.startLrud !== undefined) {
-        var sl = survey.startLrud;
+    // The notebook's first row is a station with walls and no shot to
+    // hang them on, so what the caver typed there is kept as the
+    // trip's startLrud. Without reading it back the station has no
+    // measured passage around it at all: no ring in the 3D view, and
+    // a depth of cover measured over the centerline instead of over
+    // the ceiling.
+    //
+    // EVERY TRIP'S, not just the survey's. This used to look only at
+    // survey.startLrud and only for the cave's very first station, so
+    // a trip that STARTED somewhere new -- a page whose anchor row is
+    // a station nothing has reached yet, which is what beginning a
+    // branch looks like -- had the walls the caver typed on that row
+    // silently dropped (Nathan, 2026-09-20: "when entering B1 for
+    // trip 1, it's not drawing LRUD correctly"). Measured: B1 got no
+    // ring while A1, the same case one trip earlier, got one.
+    //
+    // STILL TRIP BY TRIP, which is the rule the old code was right
+    // about: a start-LRUD belongs to ONE station, the one its trip
+    // starts from. Handing it to any station that happens to have
+    // nothing arriving would put one trip's walls around another
+    // trip's gap.
+    var starts = CsLrud.startLruds(survey);
+    if (starts.hasOwnProperty(name)) {
+        var sl = starts[name];
         return { left: sl.left, right: sl.right,
-                 up: sl.up, down: sl.down };
+                 up: sl.up, down: sl.down,
+                 // THE OPEN FLAGS RIDE ALONG HERE TOO. They did not,
+                 // and a first station read "P P" was indistinguish-
+                 // able from one nobody measured -- the one place in
+                 // the suite where that distinction was still lost.
+                 leftOpen: sl.leftOpen === true,
+                 rightOpen: sl.rightOpen === true,
+                 upOpen: sl.upOpen === true,
+                 downOpen: sl.downOpen === true };
     }
     return { left: null, right: null, up: null, down: null };
 };
+
 
 /** The station a survey starts from: the `from` of its first real
  *  shot. The one station no shot arrives at, and therefore the one

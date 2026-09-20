@@ -31678,6 +31678,85 @@ if (layerManagerLoaded) {
 }
 
 // ---------------------------------------------------------------------
+// A TRIP THAT STARTS SOMEWHERE NEW keeps the walls typed on its first
+// row -- in the plan and in the 3D tube alike.
+// ---------------------------------------------------------------------
+//
+// A station nothing arrives at has its walls in a start-LRUD: the
+// notebook's opening row has walls and no shot to hang them on. That
+// was read back for the CAVE's first station only, so a trip surveyed
+// outward from a new station -- which is what beginning a branch looks
+// like -- lost them. Measured before the fix: B1 got no ring in the
+// tube while A1, the identical case one trip earlier, got one.
+
+(function startLrudTests() {
+    function sShot(from, to, d, az, trip, l, r, u, dn) {
+        var s = CsModel.newShot();
+        s.from = from; s.to = to; s.distance = d; s.azimuth = az;
+        s.inclination = 0; s.trip = trip;
+        s.left = l; s.right = r; s.up = u; s.down = dn;
+        return s;
+    }
+    var sv = CsModel.newSurvey();
+    sv.trips = [CsModel.newTrip(), CsModel.newTrip()];
+    sv.shots.push(sShot("A1", "A2", 30, 90, 0, 3, 4, 6, 1));
+    sv.shots.push(sShot("A2", "A3", 30, 90, 0, 3, 4, 6, 1));
+    // Trip 1 surveyed outward from a new station and tied in at the
+    // far end, so nothing ever arrives at B1.
+    sv.shots.push(sShot("B1", "B2", 25, 0, 1, 9, 9, 9, 9));
+    sv.shots.push(sShot("B2", "A3", 20, 180, 1, 3, 3, 5, 1));
+    sv.startLrud = { left: 2, right: 2, up: 5, down: 1 };
+    sv.trips[0].startLrud = sv.startLrud;
+    sv.trips[1].startLrud = { left: 7, right: 7, up: 12, down: 2 };
+
+    var starts = CsLrud.startLruds(sv);
+    ok(starts.hasOwnProperty("A1"), "startLruds: the cave's first station");
+    ok(starts.hasOwnProperty("B1"),
+        "startLruds: and the station a later trip starts from");
+    eqs(starts["B1"].left, 7, "startLruds: with that trip's own walls");
+    ok(!starts.hasOwnProperty("A2"),
+        "startLruds: never a station a shot arrives at -- its walls are "
+        + "the measurement taken facing the passage");
+    ok(!starts.hasOwnProperty("B2"),
+        "startLruds: nor one in the middle of a trip");
+
+    var lB1 = CsMesh3d.lrudAt("B1", sv);
+    eqs(lB1.left, 7, "the tube reads B1's walls off its trip's first row");
+    eqs(lB1.up, 12, "...all four of them");
+    var lA1 = CsMesh3d.lrudAt("A1", sv);
+    eqs(lA1.left, 2, "and the cave's own first station still works");
+    ok(lA1.leftOpen === false,
+        "a start-LRUD carries the open flags too, so a first station "
+        + "read \"P\" is not mistaken for one nobody measured");
+
+    var sres = CsAdjust.resolveAndAdjust(sv, {});
+    var smesh = CsMesh3d.build(sv, sres, { colorBy: "trip" });
+    var ringed = {};
+    for (var ri = 0; ri < smesh.outlines.names.length; ri++) {
+        ringed[smesh.outlines.names[ri]] = smesh.outlines.counts[ri];
+    }
+    ok(ringed["B1"] > 0,
+        "and the tube has a ring at B1 -- the bug this fixes was no "
+        + "ring there at all");
+    ok(ringed["A1"] > 0, "as it always did at A1");
+
+    // THE PLAN WALLS take the same rule from the same place.
+    var runs = CsLrud.wallRuns(sv, sres);
+    var walled = {};
+    var sides = [runs.left, runs.right];
+    for (var sd = 0; sd < sides.length; sd++) {
+        for (var rr = 0; rr < sides[sd].length; rr++) {
+            var stns = sides[sd][rr].stations || [];
+            for (var st = 0; st < stns.length; st++) {
+                walled[stns[st]] = true;
+            }
+        }
+    }
+    ok(walled["B1"] === true,
+        "the plan's wall runs reach B1 too -- one answer, both views");
+})();
+
+// ---------------------------------------------------------------------
 // CsGhost: what a page of notes would draw, before it draws it.
 // ---------------------------------------------------------------------
 
