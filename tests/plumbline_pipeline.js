@@ -1,6 +1,11 @@
-// plumbline_pipeline.js -- runs the whole pure-geometry stack over
-// Plumbline Pit and asserts that nothing in it produces a number that
-// is not a number.
+// plumbline_pipeline.js -- runs the whole pure-geometry stack over the
+// VERTICAL FIXTURE FAMILY and asserts that nothing in it produces a
+// number that is not a number.
+//
+// Plumbline Pit (a cave that is mostly air) and Stairstep Cave (both
+// kinds of passage interleaved), through every reader each of them
+// has. The name is Plumbline's because Plumbline came first; what the
+// file covers is the family.
 //
 //   node tests/plumbline_pipeline.js
 //   node tests/plumbline_pipeline.js --verbose
@@ -110,13 +115,20 @@ function finite(value, label) {
 // ---------------------------------------------------------------------
 
 var sources = [
-    { name: "PlumblinePit.svx",
+    // THE MIXED CAVE FIRST, because it is the one most likely to break:
+    // both kinds of passage in one drawing, chunk boundaries every few
+    // stations through its staircase, and two pieces sitting either
+    // side of the fold threshold.
+    { name: "StairstepCave.svx", mostlyAir: false,
+      survey: CsFormatSurvex.parse(
+          fs.readFileSync(repoRoot + "/testdata/StairstepCave.svx", "utf8")) },
+    { name: "PlumblinePit.svx", mostlyAir: true,
       survey: CsFormatSurvex.parse(
           fs.readFileSync(repoRoot + "/testdata/PlumblinePit.svx", "utf8")) },
-    { name: "PlumblinePit.dat",
+    { name: "PlumblinePit.dat", mostlyAir: true,
       survey: CsFormatCompass.parse(
           fs.readFileSync(repoRoot + "/testdata/PlumblinePit.dat", "utf8")) },
-    { name: "PlumblinePit.csv",
+    { name: "PlumblinePit.csv", mostlyAir: true,
       survey: CsFormatCsv.parse(
           fs.readFileSync(repoRoot + "/testdata/PlumblinePit.csv", "utf8")) }
 ];
@@ -126,6 +138,13 @@ console.log("PLUMBLINE PIT PIPELINE");
 for (var si = 0; si < sources.length; si++) {
     var name = sources[si].name;
     var survey = sources[si].survey;
+    // A CAVE THAT IS MOSTLY AIR and a cave that is mostly passage are
+    // both supposed to come through here intact, and a few of the
+    // checks below are about SHAPE rather than correctness -- they say
+    // "this fixture really is a pit" and are meaningless against one
+    // that is not. Gated rather than deleted: losing them would lose
+    // the proof that Plumbline is still the cave it claims to be.
+    var mostlyAir = sources[si].mostlyAir === true;
     console.log("");
     console.log("== " + name);
 
@@ -172,12 +191,18 @@ for (var si = 0; si < sources.length; si++) {
         name + ": the fixture validates with warnings only");
     var stats = CsStats.compute(survey, resolved, CsTraverse.SLOPE);
     finite(stats, name + ": stats");
-    ok(stats.depth > 350,
+    ok(stats.depth > 200,
         name + ": depth survives the reader (" + stats.depth.toFixed(1) + ")");
-    ok(stats.surveyedLength > stats.planLength * 1.5,
-        name + ": the tape is much longer than its own plan projection (" +
-        stats.surveyedLength.toFixed(0) + " vs " +
+    ok(stats.surveyedLength >= stats.planLength - 1e-6,
+        name + ": the tape is never shorter than its own plan " +
+        "projection (" + stats.surveyedLength.toFixed(0) + " vs " +
         stats.planLength.toFixed(0) + ")");
+    if (mostlyAir) {
+        ok(stats.surveyedLength > stats.planLength * 1.5,
+            name + ": and in a cave that is mostly air it is much " +
+            "longer (" + stats.surveyedLength.toFixed(0) + " vs " +
+            stats.planLength.toFixed(0) + ")");
+    }
     var grade = CsGrade.compute(survey, resolved, stats);
     finite(grade, name + ": BCRA grade");
 
@@ -350,14 +375,17 @@ for (var si = 0; si < sources.length; si++) {
         // around a vertical shaft is exactly where a section frame
         // that degenerates would collapse the passage to a disc.
         var dz3 = mesh.bounds.max.z - mesh.bounds.min.z;
-        ok(dz3 > 300,
-            name + ": the mesh spans the cave's depth (" +
-            dz3.toFixed(0) + " ft)");
+        ok(Math.abs(dz3 - stats.depth) < stats.depth * 0.5,
+            name + ": the mesh spans roughly the cave's depth (" +
+            dz3.toFixed(0) + " ft against " + stats.depth.toFixed(0) + ")");
         var dx3 = mesh.bounds.max.x - mesh.bounds.min.x;
         var dy3 = mesh.bounds.max.y - mesh.bounds.min.y;
-        ok(dz3 > Math.max(dx3, dy3),
-            name + ": and is taller than it is wide, as the cave is (" +
-            dz3.toFixed(0) + " vs " + Math.max(dx3, dy3).toFixed(0) + ")");
+        if (mostlyAir) {
+            ok(dz3 > Math.max(dx3, dy3),
+                name + ": and is taller than it is wide, as the cave " +
+                "is (" + dz3.toFixed(0) + " vs " +
+                Math.max(dx3, dy3).toFixed(0) + ")");
+        }
     }
 
     // ---- cross sections, at and along every leg --------------------

@@ -19,7 +19,7 @@ Pit caves are not a niche. Most long horizontal caves have vertical in
 them, and every one of the bugs below fires the first time a drawing
 contains a rope.
 
-## The fixture
+## The fixtures
 
 `testdata/PlumblinePit.*` — 380 ft deep in 148 ft of plan extent, four
 pitches, an aven, a shaft that is nearly a duplicate of its neighbour,
@@ -32,15 +32,32 @@ one that carries the traps only a pitch can spring. The two fail for
 different reasons and are audited separately, so a run says which kind
 of cave broke.
 
+**`testdata/StairstepCave.*`** — the mixed one, added when the per-piece
+layout rule made "which kind of cave is this" a question nothing asks.
+4138 ft long, 246 ft deep, 655 ft across: a vertical entrance series
+into a long wandering upper level, a staircase of four small drops down
+to a lower streamway wandering the other way *directly beneath it in
+plan*, and an aven closing a loop that runs down a pitch and back up.
+Ten numbered traps in its manifest.
+
+Its point is the boundary. Pitfall's trunk folds by 0.42 and Plumbline's
+pieces by under 0.01 — nothing was ever near `CsChunk.FOLD_LIMIT`.
+Stairstep's upper trunk folds **0.25** and unrolls; its lower streamway
+folds **0.23** and stays projected. Two pieces of the same kind of
+passage, either side of the line, in one drawing. If that pair looks
+wrong side by side, the number is wrong and this is the cave that says
+so.
+
 Three test stages, all pure ECMAScript, all in `tests/run_all.sh`:
 
 | Stage | File | Asks |
 |---|---|---|
 | 22 | `tests/plumbline_audit.js` | does each of the 22 documented pitfalls still behave? |
-| 23 | `tests/plumbline_pipeline.js` | does every pass in the Core return finite geometry over this cave? |
+| 23 | `tests/plumbline_pipeline.js` | does every pass in the Core return finite geometry over Plumbline AND Stairstep? |
 | (in 3) | `tests/js_unit.js`, `plumbline-draw` | does the whole fixture DRAW into a real document? |
 
-Regenerate the fixture with `node tools/make_pit_cave.js`. It verifies
+Regenerate with `node tools/make_pit_cave.js` and
+`node tools/make_mixed_cave.js`. It verifies
 its own output and rewrites the manifest's measured numbers, so the
 manifest cannot drift from the files it describes.
 
