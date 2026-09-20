@@ -57,6 +57,10 @@ include(includeBasePath + "/CsTraverse.js");
 include(includeBasePath + "/CsNetwork.js");
 include(includeBasePath + "/CsAdjust.js");
 include(includeBasePath + "/CsLrud.js");
+// After CsTraverse (whose isPlumb/PLUMB_DEG decides what counts as a
+// pitch at all) and beside CsLrud: the vertical in a cave as a thing
+// rather than a list of legs, and the label a map puts beside it.
+include(includeBasePath + "/CsPitch.js");
 include(includeBasePath + "/CsGhost.js");
 
 // The 3D passage surface. After CsTraverse and CsLrud, whose splay

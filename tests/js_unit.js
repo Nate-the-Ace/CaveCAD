@@ -156,6 +156,7 @@ var CORE_FILES = [
     "scripts/CaveSurvey/Core/CsNetwork.js",
     "scripts/CaveSurvey/Core/CsAdjust.js",
     "scripts/CaveSurvey/Core/CsLrud.js",
+    "scripts/CaveSurvey/Core/CsPitch.js",
     "scripts/CaveSurvey/Core/CsGhost.js",
     "scripts/CaveSurvey/Core/CsMesh3d.js",
     "scripts/CaveSurvey/Core/CsSection3d.js",
@@ -2891,6 +2892,125 @@ function tieInFixture(openSides) {
     near(CsLrud.passageAzimuthAt(axes, "A2", 350), 0, 1e-6,
         "passage axis: at a bend it is the bisector, not the shot that " +
         "arrived");
+})();
+
+(function() {
+    // ---- CsPitch: the vertical as a THING, not a list of legs -----
+    function pitchSurvey(legs) {
+        var sv = CsModel.newSurvey();
+        for (var i = 0; i < legs.length; i++) {
+            sv.shots.push(shotOf(legs[i][0], legs[i][1], legs[i][2],
+                legs[i][3], legs[i][4]));
+        }
+        return sv;
+    }
+    function pitchesOf(sv, opts) {
+        return CsPitch.find(sv, CsNetwork.resolve(sv, {}), opts);
+    }
+
+    // A REBELAYED DROP IS ONE PITCH. 62 ft to a ledge and 125 ft of
+    // free-fall is a 187 ft entrance drop, and no caver has ever
+    // called it anything else.
+    var sv = pitchSurvey([
+        ["A1", "A2", 20, 90, 0],
+        ["A2", "A3", 62, 0, -90],
+        ["A3", "A4", 125, 0, -90],
+        ["A4", "A5", 30, 90, 0]
+    ]);
+    var ps = pitchesOf(sv);
+    eqs(ps.length, 1, "a rebelayed drop is ONE pitch, not two");
+    near(ps[0].drop, 187, 1e-6, "and it is 187 ft deep");
+    eqs(ps[0].top, "A2", "hanging from the lip");
+    eqs(ps[0].bottom, "A4", "landing on the floor");
+    eqs(ps[0].rebelays, 1, "with one rebelay");
+    eqs(CsPitch.label(ps[0], "ft"), "P 187 ft (62 + 125)",
+        "and the label carries the total AND the rope, which are " +
+        "different questions");
+
+    // A SIDE PASSAGE AT THE REBELAY DOES NOT END THE PITCH. The
+    // station is a junction by every other rule in this suite; the
+    // drop is still 187 ft of air.
+    var svWindow = pitchSurvey([
+        ["A1", "A2", 20, 90, 0],
+        ["A2", "A3", 62, 0, -90],
+        ["A3", "B1", 24, 310, 34],
+        ["A3", "A4", 125, 0, -90]
+    ]);
+    var pw = pitchesOf(svWindow);
+    eqs(pw.length, 1, "a window passage off the rebelay ledge does not " +
+        "split the drop in two");
+    near(pw[0].drop, 187, 1e-6, "...it is still 187 ft of air");
+
+    // A SHAFT THAT SPLITS IS TWO PITCHES. Two ropes, two labels: a
+    // single depth would be one no rope ever spans.
+    var svSplit = pitchSurvey([
+        ["S1", "S2", 40, 0, -90],
+        ["S1", "S3", 25, 0, -90]
+    ]);
+    eqs(pitchesOf(svSplit).length, 2,
+        "two drops from one station are two pitches");
+
+    // SHOT UPWARD OR DOWNWARD IS THE SAME HOLE. The label must
+    // describe the cave, not the notebook.
+    var svDown = pitchSurvey([["D1", "D2", 30, 90, 0],
+                              ["D2", "D3", 60, 0, -90]]);
+    var svUp = pitchSurvey([["D1", "D2", 30, 90, 0],
+                            ["D3", "D2", 60, 0, 90]]);
+    var pd = pitchesOf(svDown), pu = pitchesOf(svUp);
+    eqs(pd.length, 1, "shot downward: one pitch");
+    eqs(pu.length, 1, "shot upward: one pitch");
+    near(pd[0].drop, pu[0].drop, 1e-6, "...the same depth either way");
+    eqs(pd[0].top, pu[0].top, "...hanging from the same station");
+    eqs(pd[0].aven, pu[0].aven,
+        "...and called the same thing: which end the tape started at " +
+        "is not a fact about the cave");
+
+    // AN AVEN IS A HOLE IN THE CEILING WITH NOTHING AT THE TOP.
+    var svAven = pitchSurvey([["V1", "V2", 30, 90, 0],
+                              ["V2", "V3", 20, 0, 90]]);
+    var pa = pitchesOf(svAven);
+    eqs(pa.length, 1, "an aven is found");
+    ok(pa[0].aven === true, "and known to be one: nobody has been up " +
+        "there, so its top station is the end of the line");
+    eqs(CsPitch.label(pa[0], "ft"), "AVEN 20 ft",
+        "and a reader is told so in the word, not left to infer it");
+    // ...and once it HAS been pushed, it stops being one.
+    var svPushed = pitchSurvey([["V1", "V2", 30, 90, 0],
+                                ["V2", "V3", 20, 0, 90],
+                                ["V3", "V4", 40, 45, -2]]);
+    ok(pitchesOf(svPushed)[0].aven === false,
+        "an aven pushed into passage is a pitch FROM that passage now");
+
+    // THE THRESHOLD IS A LENGTH, because what makes a pitch a pitch to
+    // the reader is how far they are going to fall.
+    var svStep = pitchSurvey([["T1", "T2", 20, 90, 0],
+                              ["T2", "T3", 4, 0, -90]]);
+    eqs(pitchesOf(svStep).length, 0,
+        "a 4 ft plumbed step is not a pitch and gets no label");
+    eqs(pitchesOf(svStep, { minDrop: 0 }).length, 1,
+        "...but it is still findable when a caller asks for everything");
+
+    // A NEAR-PLUMB LEG IS A PITCH AND A STEEP ONE IS NOT, on the same
+    // line every other rule uses.
+    var svLine = pitchSurvey([["L1", "L2", 20, 90, 0],
+                              ["L2", "L3", 40, 90, -85],
+                              ["L3", "L4", 40, 90, -84.5]]);
+    var pl = pitchesOf(svLine);
+    eqs(pl.length, 1, "the -85 leg is a pitch, the -84.5 leg is passage");
+    near(pl[0].drop, 40 * Math.sin(85 * Math.PI / 180), 1e-6,
+        "and the pitch is the VERTICAL extent, not the tape reading");
+
+    // Rounding is how a caver says it.
+    eqs(CsPitch.round(186.7), "187", "a long drop is a whole number");
+    eqs(CsPitch.round(6.53), "6.5", "a short one keeps its decimal");
+
+    // Rope advice is advisory and says so by never reaching the label.
+    var rope = CsPitch.ropeAdvice(ps[0], "ft");
+    ok(rope >= ps[0].drop + 15,
+        "rope advice clears the drop with rigging and a tail");
+    ok(CsPitch.label(ps[0], "ft").indexOf(String(rope)) < 0,
+        "and never appears in the map label, where it would read as " +
+        "surveyed fact");
 })();
 
 (function() {
@@ -7907,6 +8027,38 @@ if (!IS_NODE) {
         ok(foundL && foundR,
             "plumbline-draw: the foot of the 187 ft entrance drop keeps " +
             "both its wall ticks (L " + foundL + ", R " + foundR + ")");
+
+        // THE PITCHES ARE LABELLED. In plan the entrance drop is a
+        // dot -- its two stations are the same point -- so without
+        // this the deepest thing in the cave draws as a numbered
+        // speck.
+        ok(drawn.pitchesDrawn >= 4,
+            "plumbline-draw: the pitches are labelled, got " +
+            drawn.pitchesDrawn);
+        var pitchTexts = [];
+        for (qi = 0; qi < ids.length; qi++) {
+            var pe = doc.queryEntity(ids[qi]);
+            if (isNull(pe)) { continue; }
+            if (CsTags.get(pe, "PitchLabel") === "") { continue; }
+            try {
+                pitchTexts.push(String(pe.getPlainText()));
+            } catch (eT) {
+            }
+        }
+        var sawEntrance = false, sawAven = false;
+        for (qi = 0; qi < pitchTexts.length; qi++) {
+            if (pitchTexts[qi].indexOf("187") >= 0 &&
+                    pitchTexts[qi].indexOf("62") >= 0 &&
+                    pitchTexts[qi].indexOf("125") >= 0) {
+                sawEntrance = true;
+            }
+            if (pitchTexts[qi].indexOf("AVEN") >= 0) { sawAven = true; }
+        }
+        ok(sawEntrance,
+            "plumbline-draw: the entrance drop reads as ONE 187 ft pitch " +
+            "with its rebelay named, got [" + pitchTexts.join(" / ") + "]");
+        ok(sawAven,
+            "plumbline-draw: and the aven is called an aven, not a pitch");
         eqs(badGeometry, 0,
             "plumbline-draw: and no entity anywhere in the drawing has a " +
             "non-finite position");

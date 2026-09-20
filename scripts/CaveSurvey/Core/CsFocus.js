@@ -51,6 +51,10 @@ CsFocus.TAG_RULES = [
     { tag: "SplayLabel",       mode: "one", base: "splay" },
     { tag: "NoteLabel",        mode: "one" },
     { tag: "NoteLeader",       mode: "one" },
+    // A pitch label hangs off the station the pitch drops from, so it
+    // is attributed to that one station exactly as a note is.
+    { tag: "PitchLabel",       mode: "one" },
+    { tag: "PitchLeader",      mode: "one" },
     { tag: "Shot",             mode: "pair" },
     { tag: "RawStation",       mode: "one" },
     { tag: "RawShot",          mode: "pair" },

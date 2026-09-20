@@ -293,20 +293,38 @@ CsDraw.lrud = function(doc, op, pos, name, azimuthDeg, left, right, up, down, al
  * (right of travel first, left as fallback, a fixed offset when no
  * LRUD), on TEXT-NOTES, with a leader pointing at the station.
  */
-CsDraw.noteLeader = function(doc, op, pos, name, note, azimuthDeg, lrud) {
+CsDraw.noteLeader = function(doc, op, pos, name, note, azimuthDeg, lrud,
+        opts) {
+    // opts, all optional and all defaulting to what a station NOTE has
+    // always done:
+    //   tagLabel, tagLeader  the tags a redraw finds these by. A second
+    //                        kind of generated label at the same station
+    //                        must NOT answer to "NoteLabel": the two
+    //                        would erase each other's survivors and, on
+    //                        the way there, sit on top of one another.
+    //   preferLeft           put the text on the LEFT of travel first.
+    //                        A station that carries both a note and a
+    //                        pitch label needs them on opposite sides
+    //                        or the reader gets one line of text over
+    //                        another.
+    var o = opts || {};
+    var tagLabel = o.tagLabel || "NoteLabel";
+    var tagLeader = o.tagLeader || "NoteLeader";
     var az = (azimuthDeg === undefined || azimuthDeg === null) ?
         0.0 : azimuthDeg;
-    var side = 90.0; // right of the direction of travel
+    var side = o.preferLeft === true ? -90.0 : 90.0;
     var wall = 0.0;
     var r = (lrud !== null && lrud !== undefined &&
         lrud.right !== null && lrud.right !== undefined) ? lrud.right : null;
     var l = (lrud !== null && lrud !== undefined &&
         lrud.left !== null && lrud.left !== undefined) ? lrud.left : null;
-    if (r !== null) {
-        wall = r;
-    } else if (l !== null) {
-        side = -90.0;
-        wall = l;
+    var near = o.preferLeft === true ? l : r;
+    var far = o.preferLeft === true ? r : l;
+    if (near !== null) {
+        wall = near;
+    } else if (far !== null) {
+        side = -side;
+        wall = far;
     }
     var rad = (az + side) * Math.PI / 180.0;
     var dirX = Math.sin(rad), dirY = Math.cos(rad);
@@ -354,7 +372,7 @@ CsDraw.noteLeader = function(doc, op, pos, name, note, azimuthDeg, lrud) {
         1.0, CsDraw.caps(note), "standard", false, false, 0.0, false);
     var textEntity = new RTextEntity(doc, textData);
     textEntity.setLayerId(layerId);
-    CsTags.set(textEntity, "NoteLabel", name);
+    CsTags.set(textEntity, tagLabel, name);
     CsTags.set(textEntity, CsCallout.KEY.ID, id);
     CsTags.set(textEntity, CsCallout.KEY.ROLE, CsCallout.ROLE_TEXT);
     CsTags.set(textEntity, CsCallout.KEY.KIND, CsCallout.KIND_TEXT);
@@ -390,7 +408,7 @@ CsDraw.noteLeader = function(doc, op, pos, name, note, azimuthDeg, lrud) {
         }
         var leader = new RLeaderEntity(doc, new RLeaderData(pl, true));
         leader.setLayerId(layerId);
-        CsTags.set(leader, "NoteLeader", name);
+        CsTags.set(leader, tagLeader, name);
         CsTags.set(leader, CsCallout.KEY.ID, id);
         CsTags.set(leader, CsCallout.KEY.ROLE, CsCallout.ROLE_LEADER);
         CsTags.set(leader, CsCallout.KEY.STYLE, "annotation");
@@ -407,7 +425,7 @@ CsDraw.noteLeader = function(doc, op, pos, name, note, azimuthDeg, lrud) {
         CsDraw.addLine(doc, op, layerName,
             new RVector(tip.x, tip.y),
             new RVector(lastPt.x, lastPt.y),
-            "NoteLeader", name);
+            tagLeader, name);
     }
 };
 
@@ -442,7 +460,7 @@ CsDraw.noteLeader = function(doc, op, pos, name, note, azimuthDeg, lrud) {
  * withLayerOn operation. See the block itself for why the ghost is
  * tagged RawShot/RawStation and nothing else.
  *
- * \return {stationsDrawn, shotsDrawn, closuresDrawn, tiesDrawn,
+ * \return {stationsDrawn, pitchesDrawn, shotsDrawn, closuresDrawn, tiesDrawn,
  *          hiddenDrawn, wallsDrawn, splaysDrawn, ghostDrawn, skipped,
  *          splaysSkipped, wallPointsSkipped} -- the last two count
  *          splays CsTraverse.offset refused (no usable distance/
@@ -743,6 +761,42 @@ CsDraw.survey = function(survey, resolved, originStation, originPos,
                     firstLegAzimuth, lrud);
         }
         stationsDrawn++;
+    }
+
+    // ---- pitch labels -----------------------------------------------
+    //
+    // "P 187 FT" beside the entrance drop is the single most-read mark
+    // on a pit map, and nothing else on the drawing answers the
+    // question: in plan a 187 ft free-fall has no extent at all (its
+    // two stations are the same point -- see CsLrud.COINCIDENT_PLAN),
+    // so without this the deepest thing in the cave is drawn as a dot
+    // with a station number on it.
+    //
+    // Drawn from the same pass as the stations, and keyed to the
+    // pitch's TOP station, so a redraw of that station takes its label
+    // with it (see eraseStations' PitchLabel rules) and a cave with no
+    // pitches gains nothing. On the LEFT of travel, because the
+    // station's own note goes right and a pit head often has both.
+    var pitchesDrawn = 0;
+    if (CsPitch.labelsEnabled()) {
+        var pitches = CsPitch.find(survey, resolved, {});
+        for (var pi2 = 0; pi2 < pitches.length; pi2++) {
+            var pitch = pitches[pi2];
+            if (omit[pitch.top] === true ||
+                    resolved.stations[pitch.top] === undefined) {
+                continue;
+            }
+            CsLayers.ensure(doc, di, CsLayers.NOTES_ANNOTATION);
+            var pLrud = CsModel.lrudForStation(survey, pitch.top);
+            var pAz = CsLrud.tickAzimuthAt(drawAxes, pitch.top, pLrud,
+                resolved);
+            CsDraw.noteLeader(doc, op, at(pitch.top), pitch.top,
+                CsPitch.label(pitch, survey.distanceUnit),
+                pAz !== null ? pAz : firstLegAzimuth, pLrud,
+                { tagLabel: "PitchLabel", tagLeader: "PitchLeader",
+                  preferLeft: true });
+            pitchesDrawn++;
+        }
     }
 
     var shotsDrawn = 0, closuresDrawn = 0, tiesDrawn = 0;
@@ -1212,6 +1266,12 @@ CsDraw.survey = function(survey, resolved, originStation, originPos,
 
     return {
         stationsDrawn: stationsDrawn,
+        // Labels the draw generated for the pitches it found. Counted
+        // and returned rather than left implicit: a pit map whose
+        // deepest feature drew as a numbered dot is what this exists
+        // to prevent, and a caller reporting to the user should be
+        // able to say it happened.
+        pitchesDrawn: pitchesDrawn,
         shotsDrawn: shotsDrawn,
         closuresDrawn: closuresDrawn,
         tiesDrawn: tiesDrawn,
@@ -1516,6 +1576,18 @@ CsDraw.eraseStations = function(doc, stationNames, di) {
         }
         if (!kill) {
             v = CsTags.get(e, "NoteLeader");
+            if (v !== "" && inSet[v] === true) { kill = true; }
+        }
+        // A pitch label belongs to the station the pitch hangs from,
+        // and dies with it. Its own tags rather than NoteLabel's: a
+        // pit head often carries both, and one pair of tags for two
+        // labels would have each erase finding the other's half.
+        if (!kill) {
+            v = CsTags.get(e, "PitchLabel");
+            if (v !== "" && inSet[v] === true) { kill = true; }
+        }
+        if (!kill) {
+            v = CsTags.get(e, "PitchLeader");
             if (v !== "" && inSet[v] === true) { kill = true; }
         }
         if (!kill) {

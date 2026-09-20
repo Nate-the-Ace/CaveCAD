@@ -110,11 +110,36 @@ inferences it used.
   one scalar sigma per leg; the scalar now depends on which instrument
   produced the leg's direction, and the data says which.
 
-## Not fixed — the drawing side
+## The drawing side
 
-These are the findings from the same audit that are about what a pit map
-LOOKS like rather than whether the geometry is honest. None of them is
-started.
+Findings from the same audit about what a pit map LOOKS like rather than
+whether the geometry is honest.
+
+### Done
+
+**Rigging symbology** (0.9.166–0.9.168). Eight shipped symbols in a
+`Rigging` category — bolt, Y-hang, rebelay, deviation, natural anchor,
+rope, cable ladder, traverse line — all on `ANCHORS-BOLTS`, the cyan
+rigging layer `CsLayers` had reserved since the palette was written with
+nothing ever drawing on it. Geometry lives in
+`tools/make_rigging_symbols.js` and is re-runnable. Provenance is stated
+in `CsSymbols.js`: Therion defines equipment symbols once, in the Slovak
+SKBB set, and UIS/NSS have none of their own. Three of the eight agree
+with SKBB; the bolt and the rebelay/deviation pair diverge for reasons
+written down there. A caver adds their own through **New Symbol...**
+under the same category, and `symbol_palette_run` pins that both derived
+lists — the category picker and the home-layer picker — still offer it.
+
+**Pitch-depth labels** (0.9.169). `Core/CsPitch.js` finds every pitch
+and aven; `CsDraw.survey` labels them where they hang from, as generated
+callouts on `NOTES-ANNOTATION`, keyed to the top station so a redraw
+takes them with it. A rebelayed drop is ONE pitch — "P 187 ft (62 +
+125)", because that is what a caver calls it — and a passage leading off
+the rebelay ledge does not split it. An aven is decided by whether
+anything carries on at the top, not by which end the tape started at.
+Under 10 ft gets no label. Off with `CaveSurvey/PitchLabels`.
+
+### Open
 
 1. **The extended elevation collapses on a pitch, correctly, and
    nothing downstream knows.** Its X axis advances by plan distance, so
@@ -136,20 +161,11 @@ started.
    depth-graded rendering, no per-level plan insets, no "this passage is
    under that one" convention.
 
-4. **No rigging symbology.** `CsLayers` reserves a cyan rigging layer
-   (`CsLayers.js`, "rigging and gear -- anchors, climbs, equipment
-   notes") and nothing draws on it. `CsSymbols.CATALOG` has `Pit`,
-   `Dome` and `Climb` and stops: no bolt, no Y-hang, no rebelay, no
-   deviation, no natural anchor, no rope, no cable ladder, no traverse
-   line.
+4. **A pitch label exists only in the plan.** The extended elevation
+   draws the same drop as a vertical line and puts no number on it,
+   which is the view where the drop is actually visible as a drop.
 
-5. **No pitch-depth annotation.** A pit map's single most important
-   label — "P 187" beside the drop — cannot be generated. The callout
-   suite already derives floor elevations and already knows how to say
-   "(pit)" when a station's D has more than one reading, so this is a
-   sibling of work that exists rather than a new mechanism.
-
-6. **`CsAdjust` is still isotropic.** Weighting a declared plumb by
+5. **`CsAdjust` is still isotropic.** Weighting a declared plumb by
    gravity rather than by a compass is a real improvement and is not the
    whole answer: a leg's vertical and horizontal variances genuinely
    differ, and the header rules anisotropic covariance out by decision.
