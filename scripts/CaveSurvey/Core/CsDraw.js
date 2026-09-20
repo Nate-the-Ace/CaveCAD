@@ -239,6 +239,16 @@ CsDraw.lrud = function(doc, op, pos, name, azimuthDeg, left, right, up, down, al
                 tipPos = new RVector(pos.x, pos.y);
             } else {
                 var end = CsLrud.tickEnd(pos, azimuthDeg, side, len);
+                if (end === null) {
+                    // NO BEARING, NO TICK -- the same answer the plan's
+                    // wall builder gives (CsLrud.stationWallPoints), and
+                    // it has to be given HERE too or the two views of
+                    // the same station disagree. Reachable at a station
+                    // whose walls were measured on a pitch and whose
+                    // passage direction is unknown as well: a dead-end
+                    // shaft bottom with nothing leading off it.
+                    continue;
+                }
                 tipPos = new RVector(end.x, end.y);
                 CsDraw.addLine(doc, op, CsLayers.CTRL_LRUD, pos, tipPos,
                     "LRUDLine", name !== "" ? (name + "." + suffix) : "");
@@ -263,7 +273,13 @@ CsDraw.lrud = function(doc, op, pos, name, azimuthDeg, left, right, up, down, al
         var downText = !hasDown ? "-" :
             (allSides && allSides.downAll ? allSides.downAll.join("/") : down.toFixed(2));
         var text = "U" + upText + " D" + downText;
-        var rad = (azimuthDeg + 90.0) * Math.PI / 180.0;
+        // A note still gets placed when there is no bearing -- it is
+        // text about the station, not geometry measured off one -- but
+        // it is offset along a fixed diagonal rather than along NaN,
+        // which would put it at the origin.
+        var noteAz = (typeof azimuthDeg === "number" && isFinite(azimuthDeg)) ?
+            azimuthDeg : 45.0;
+        var rad = (noteAz + 90.0) * Math.PI / 180.0;
         var off = CsDraw.TEXT_HEIGHT * 1.5;
         CsDraw.addText(doc, op, CsLayers.CTRL_STATION_LABELS, text,
             new RVector(pos.x + off * Math.sin(rad), pos.y + off * Math.cos(rad)),
@@ -615,6 +631,10 @@ CsDraw.survey = function(survey, resolved, originStation, originPos,
         }
     }
 
+    // Passage axes for the whole survey, once: CsLrud.tickAzimuthAt
+    // needs them at any station whose LRUD was measured on a pitch.
+    var drawAxes = CsLrud.stationAxes(resolved);
+
     var stationsDrawn = 0;
     var firstPoint;
     var tripAnchor = {}; // trip index -> that trip's anchor point entity
@@ -693,7 +713,17 @@ CsDraw.survey = function(survey, resolved, originStation, originPos,
             }
         }
         if (lrud !== null) {
-            CsDraw.lrud(doc, op, at(name), name, lrud.azimuth,
+            // THE TICK'S BEARING, NOT THE TAG'S. `lrud.azimuth` is null
+            // at a station reached by a pitch -- there was no bearing to
+            // face -- and CsLrud.tickAzimuthAt answers with the
+            // passage's own direction instead, which is the same rule
+            // the plan's wall builder uses. The two must agree: the
+            // ticks drawn here and the wall polyline drawn from
+            // CsLrud.wallRuns are the same measurement seen twice, and
+            // a reader looking at a pit foot would see the wall miss
+            // its own tick by 90 degrees.
+            CsDraw.lrud(doc, op, at(name), name,
+                CsLrud.tickAzimuthAt(drawAxes, name, lrud),
                 lrud.left, lrud.right, lrud.up, lrud.down, {
                     leftAll: lrud.leftAll, rightAll: lrud.rightAll,
                     upAll: lrud.upAll, downAll: lrud.downAll
@@ -708,7 +738,9 @@ CsDraw.survey = function(survey, resolved, originStation, originPos,
             // invalid id -- entities land, on nothing, silently.
             CsLayers.ensure(doc, di, CsLayers.NOTES_ANNOTATION);
             CsDraw.noteLeader(doc, op, at(name), name, noteText,
-                lrud !== null ? lrud.azimuth : firstLegAzimuth, lrud);
+                CsLrud.tickAzimuthAt(drawAxes, name, lrud) !== null ?
+                    CsLrud.tickAzimuthAt(drawAxes, name, lrud) :
+                    firstLegAzimuth, lrud);
         }
         stationsDrawn++;
     }

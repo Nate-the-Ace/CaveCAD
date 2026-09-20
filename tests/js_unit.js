@@ -7849,6 +7849,90 @@ if (!IS_NODE) {
                 splaysDrawn: 5, ghostDrawn: 99 }));
     })();
 
+    // ---- A PITCH RECONSTRUCTED FROM THE DRAWING ---------------------
+    (function() {
+        var doc = new RDocument(new RMemoryStorage(), new RSpatialIndexNavel());
+        var di = new RDocumentInterface(doc);
+        getDocument = function() { return doc; };
+        getDocumentInterface = function() { return di; };
+        CsLayers.ensureSurveyLayers(doc, di);
+        var op = new RAddObjectsOperation();
+
+        // P1 at 1742, 62 ft straight down to P2, then 30 ft level east.
+        // The pitch's two stations sit on the SAME plan point, which is
+        // what a rope looks like from above.
+        var p1 = CsDraw.addPoint(doc, op, CsLayers.CTRL_STATIONS,
+            new RVector(0, 0));
+        CsTags.tagStation(p1, { name: "P1", seq: 0, z: 1742.0 });
+        op.addObject(p1, false);
+        var p2 = CsDraw.addPoint(doc, op, CsLayers.CTRL_STATIONS,
+            new RVector(0, 0));
+        CsTags.tagStation(p2, { name: "P2", seq: 1, z: 1680.0 });
+        op.addObject(p2, false);
+        var p3 = CsDraw.addPoint(doc, op, CsLayers.CTRL_STATIONS,
+            new RVector(30, 0));
+        CsTags.tagStation(p3, { name: "P3", seq: 2, azimuth: 90, z: 1680.0 });
+        op.addObject(p3, false);
+        di.applyOperation(op);
+
+        var back = CsTags.surveyFromDocument(doc);
+        eqs(back.shots.length, 2, "reconstruct: both legs came back");
+        var drop = back.shots[0];
+        // THE WHOLE POINT. This used to come back as a leg 0 ft long at
+        // 0 degrees, because the distance was the PLAN distance and the
+        // inclination came off a tag nothing has ever written.
+        near(drop.distance, 62.0, 1e-6,
+            "reconstruct: a 62 ft free-fall comes back 62 ft long, from " +
+            "the drawing's own station elevations");
+        near(drop.inclination, -90.0, 1e-6,
+            "reconstruct: ...and plumb, not level");
+        ok(drop.azimuthOmitted === true,
+            "reconstruct: with NO bearing -- there is none to recover " +
+            "from two stations on one point");
+        ok(CsTraverse.isPlumb(drop),
+            "reconstruct: so it is still a pitch to every rule that asks");
+        ok(drop.distanceIsSlope === true,
+            "reconstruct: marked as already-slope, so " +
+            "CsRebuild.toSlopeDistances does not divide by cos twice");
+
+        var level = back.shots[1];
+        near(level.distance, 30.0, 1e-6,
+            "reconstruct: a level leg is unchanged");
+        near(level.inclination, 0.0, 1e-6, "reconstruct: ...and level");
+
+        var conv = CsRebuild.toSlopeDistances(back);
+        eqs(conv.fromElevations, 2,
+            "toSlopeDistances: both legs already carried slope distances");
+        eqs(conv.scaled, 0, "toSlopeDistances: so nothing was rescaled");
+        near(back.shots[0].distance, 62.0, 1e-6,
+            "toSlopeDistances: and the pitch is still 62 ft, not 62/cos(90)");
+
+        // A station with NO elevation tag: there is nothing truthful to
+        // say about the vertical, so the old answer stands rather than
+        // a datum being invented for it.
+        var doc2 = new RDocument(new RMemoryStorage(), new RSpatialIndexNavel());
+        var di2 = new RDocumentInterface(doc2);
+        getDocument = function() { return doc2; };
+        getDocumentInterface = function() { return di2; };
+        CsLayers.ensureSurveyLayers(doc2, di2);
+        var op2 = new RAddObjectsOperation();
+        var n1 = CsDraw.addPoint(doc2, op2, CsLayers.CTRL_STATIONS,
+            new RVector(0, 0));
+        CsTags.tagStation(n1, { name: "N1", seq: 0 });
+        op2.addObject(n1, false);
+        var n2 = CsDraw.addPoint(doc2, op2, CsLayers.CTRL_STATIONS,
+            new RVector(0, 10));
+        CsTags.tagStation(n2, { name: "N2", seq: 1, azimuth: 0 });
+        op2.addObject(n2, false);
+        di2.applyOperation(op2);
+        var back2 = CsTags.surveyFromDocument(doc2);
+        near(back2.shots[0].distance, 10.0, 1e-6,
+            "reconstruct: with no elevations, the plan distance stands");
+        ok(back2.shots[0].distanceIsSlope !== true,
+            "...and is NOT claimed to be a slope distance, so the legacy " +
+            "cos inference still applies to it");
+    })();
+
     // ---- LEGACY UPGRADE: hand-tagged station points, no leg data ----
     (function() {
         var doc = new RDocument(new RMemoryStorage(), new RSpatialIndexNavel());
@@ -7925,10 +8009,19 @@ if (!IS_NODE) {
         ok(rep.vertical === 0,
             "rsd-upgrade: no near-vertical shots in this fixture, got " +
             rep.vertical);
-        ok(rep.scaled === 1,
-            "rsd-upgrade: exactly ONE shot was rescaled -- the recovered " +
-            "splay has no inclination to convert against and must not " +
-            "be counted as converted, got " + rep.scaled);
+        // NO SHOT NEEDS THE COS INFERENCE ANY MORE on a fixture whose
+        // stations carry elevations: CsTags.surveyFromDocument takes
+        // the slope distance straight from the two elevations, which
+        // is exact and -- unlike dividing a plan length by cos -- works
+        // on a pitch, where there is no plan length to divide. The
+        // recovered splay still converts against nothing and is still
+        // counted as neither.
+        ok(rep.scaled === 0,
+            "rsd-upgrade: no shot needed the plan/cos inference, got " +
+            rep.scaled);
+        ok(rep.fromElevations === 2,
+            "rsd-upgrade: BOTH legs took their slope distance from the " +
+            "drawing's own station elevations, got " + rep.fromElevations);
         ok(rep.splaysUnplaceable === 1,
             "rsd-upgrade: the one splay the redraw could not put back is " +
             "reported, not lost in silence, got " + rep.splaysUnplaceable);
@@ -7938,8 +8031,8 @@ if (!IS_NODE) {
             "rsd-upgrade: and the loss is named in the user's own " +
             "message, got '" + rep.message + "'");
         ok(rep.message.indexOf(
-            "inferred from geometry (slope = plan/cos(inclination))")
-            >= 0, "rsd-upgrade: report says distances were inferred, got '" +
+            "Distances taken from the drawing's own station elevations")
+            >= 0, "rsd-upgrade: report says WHICH inference it used, got '" +
             rep.message + "'");
         // CRITICAL 2: CsRebuild.redraw's own CsDraw.survey call
         // runs a profile pass too -- before this fix the return value's

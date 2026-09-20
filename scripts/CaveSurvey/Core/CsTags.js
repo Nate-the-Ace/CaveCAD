@@ -477,11 +477,85 @@ CsTags.surveyFromDocument = function(doc) {
             var az = CsTags.getNumber(st.entity, "Azimuth");
             var dx = st.pos.x - prev.pos.x;
             var dy = st.pos.y - prev.pos.y;
-            shot.distance = Math.sqrt(dx * dx + dy * dy);
-            shot.azimuth = az !== null ? az :
-                CsAngles.normalizeAzimuth(Math.atan2(dx, dy) * 180.0 / Math.PI);
-            var inc = CsTags.getNumber(st.entity, "Inclination");
-            shot.inclination = inc !== null ? inc : 0.0;
+            var plan = Math.sqrt(dx * dx + dy * dy);
+
+            // THE DRAWING IS NOT FLAT AND NEITHER IS WHAT COMES BACK
+            // OUT OF IT.
+            //
+            // This used to read `distance = plan` and take the
+            // inclination from an "Inclination" tag that NOTHING in
+            // this suite has ever written (CsDraw.station's data object
+            // has no such field, so CsTags.tagStation sets it to
+            // undefined and it never lands). So every reconstructed leg
+            // came back LEVEL, with the tape reading its own plan
+            // projection. In a horizontal cave that is a fraction of a
+            // percent and invisible. In a vertical one it is the whole
+            // cave: a 187 ft free-fall reconstructs as a leg 1.1e-14 ft
+            // long at 0 degrees -- which trips `bad-distance`, drops
+            // out of the surveyed length, and stops being a pitch to
+            // every rule that asks.
+            //
+            // The elevations were on the drawing the entire time, one
+            // per station, and the pair of them says exactly what the
+            // tags could not: dz is a subtraction, the tape is the
+            // hypotenuse, and the inclination is the angle between.
+            // Nothing is invented and no tag has to be added.
+            //
+            // The resolved GEOMETRY never depended on any of this --
+            // every station here is written into survey.fixed with its
+            // own coordinate below, so resolve() places them all from
+            // control regardless. What depended on it was everything
+            // that reads the SHOTS: the cave's length, its depth
+            // profile, the validator, and whether a rope is a rope.
+            var zPrev = CsTags.getNumber(prev.entity, "Elevation");
+            var zHere = CsTags.getNumber(st.entity, "Elevation");
+            if (zPrev !== null && zHere !== null) {
+                var dz = zHere - zPrev;
+                shot.distance = Math.sqrt(plan * plan + dz * dz);
+                shot.inclination = (plan === 0.0 && dz === 0.0) ? 0.0 :
+                    Math.atan2(dz, plan) * 180.0 / Math.PI;
+                // A READER ANNOTATION, not a model field: this shot's
+                // distance is ALREADY a slope distance.
+                // CsRebuild.toSlopeDistances exists to turn a chain
+                // reconstruction's plan distances into slope ones by
+                // dividing by cos(inclination), and running that over a
+                // distance that is already the hypotenuse divides by
+                // the same cosine twice. It skips anything carrying
+                // this. Deliberately absent (rather than `false`) on
+                // every other shot in the suite, so that every existing
+                // caller of that function keeps the behaviour it had.
+                shot.distanceIsSlope = true;
+            } else {
+                // One of the two stations has no elevation on the
+                // drawing at all. There is then nothing truthful to say
+                // about the vertical, so this keeps the old answer --
+                // the plan distance, level -- rather than inventing a
+                // datum for it. See this function's own SEVENTH DOOR
+                // note: absent is not zero, and the honest cost of that
+                // is a leg that reads as level because nobody said
+                // otherwise.
+                shot.distance = plan;
+                var incTag = CsTags.getNumber(st.entity, "Inclination");
+                shot.inclination = incTag !== null ? incTag : 0.0;
+            }
+
+            // A PITCH HAS NO BEARING TO RECONSTRUCT. Below
+            // CsLrud.COINCIDENT_PLAN the two stations are the same
+            // point in plan and `atan2` would be dividing rounding
+            // error by rounding error -- the same fabrication
+            // CsLrud.planBearing refuses. The Azimuth tag, where the
+            // drawing has one, is the bearing the LRUD was recorded on
+            // and is used as before; where there is neither, the leg
+            // comes back saying so.
+            if (az !== null) {
+                shot.azimuth = az;
+            } else if (plan > CsLrud.COINCIDENT_PLAN) {
+                shot.azimuth = CsAngles.normalizeAzimuth(
+                    Math.atan2(dx, dy) * 180.0 / Math.PI);
+            } else {
+                shot.azimuth = 0.0;
+                shot.azimuthOmitted = true;
+            }
             var lrudTag = function(key) {
                 return CsModel.parseLrudEntry(CsTags.get(st.entity, key));
             };

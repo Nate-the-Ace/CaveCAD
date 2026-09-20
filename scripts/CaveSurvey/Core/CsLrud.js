@@ -391,6 +391,47 @@ CsLrud.throughPair = function(axes, name) {
 };
 
 /**
+ * The bearing a station's L and R ticks are drawn along.
+ *
+ * ONE RULE, SHARED, because four callers need it and each of them
+ * drawing a wall in a slightly different direction is not a bug anyone
+ * would find by looking at one of them. In order of what the survey
+ * actually knows:
+ *
+ *   1. the bearing the caver FACED when they pulled the tapes
+ *      (`lrud.azimuth`), which is what L and R are perpendicular to;
+ *   2. failing that -- a pitch, where there was no bearing to face and
+ *      CsModel.lrudForStation hands on null rather than the compass
+ *      column's formality -- the direction the PASSAGE runs, which at
+ *      the foot of a drop is what the caver was measuring across
+ *      anyway;
+ *   3. failing that too, null, and the tick is not drawn. A measured
+ *      length aimed in a direction nobody knows is not half a wall
+ *      point.
+ *
+ * \param lrud      CsModel.lrudForStation result, or null
+ * \param passageAz CsLrud.passageAzimuthAt for the same station, or
+ *                  null/undefined when it is unknown
+ * \return degrees, or null
+ */
+CsLrud.tickAzimuth = function(lrud, passageAz) {
+    if (lrud !== null && lrud !== undefined &&
+            typeof lrud.azimuth === "number" && isFinite(lrud.azimuth)) {
+        return lrud.azimuth;
+    }
+    if (typeof passageAz === "number" && isFinite(passageAz)) {
+        return passageAz;
+    }
+    return null;
+};
+
+/** tickAzimuth for a caller that has the axes rather than the angle. */
+CsLrud.tickAzimuthAt = function(axes, name, lrud) {
+    return CsLrud.tickAzimuth(lrud,
+        CsLrud.passageAzimuthAt(axes, name, null));
+};
+
+/**
  * The direction the PASSAGE runs at a station, which is not always the
  * direction of the leg that arrived there.
  *
@@ -549,9 +590,8 @@ CsLrud.stationWallPoints = function(st, passageAz, lrud, splays, side,
         // foot of a drop the caver measures L and R across the passage
         // they are about to walk, which is exactly what `passageAz`
         // names. If even that is unknown, tickEnd draws nothing.
-        var tickAz = (lrud.azimuth === null || lrud.azimuth === undefined ||
-            !isFinite(lrud.azimuth)) ? passageAz : lrud.azimuth;
-        var p = CsLrud.tickEnd(st, tickAz, side, len);
+        var p = CsLrud.tickEnd(st, CsLrud.tickAzimuth(lrud, passageAz),
+            side, len);
         if (p !== null) {
             // the tick is perpendicular to the passage, so it sits
             // at along-passage 0 and leads its ties
@@ -638,9 +678,8 @@ CsLrud.stationWallPoints3D = function(st, passageAz, lrud, splays, side,
         // The tick's bearing falls back to the passage direction where
         // no bearing was sighted, exactly as the 2D twin above does;
         // keeping the two in step is the whole point of this pair.
-        var tickAz3 = (lrud.azimuth === null || lrud.azimuth === undefined ||
-            !isFinite(lrud.azimuth)) ? passageAz : lrud.azimuth;
-        var p = CsLrud.tickEnd(st, tickAz3, side, len);
+        var p = CsLrud.tickEnd(st, CsLrud.tickAzimuth(lrud, passageAz),
+            side, len);
         if (p !== null) {
             // L and R are measured horizontally, so they sit at the
             // station's own elevation. `atStation` is carried through

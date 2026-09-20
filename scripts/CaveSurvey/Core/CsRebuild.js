@@ -149,13 +149,27 @@ CsRebuild.legacyMeta = function(doc) {
  * (absent or non-finite, but never a real 0), reused here rather than
  * re-derived.
  *
- * \return {scaled, vertical} how many shots were rescaled, and how
- *         many were left alone as near-vertical
+ * \return {scaled, vertical, fromElevations} how many shots were
+ *         rescaled, how many were left alone as near-vertical, and how
+ *         many already carried a slope distance the reader took from
+ *         the drawing's own station elevations
  */
 CsRebuild.toSlopeDistances = function(survey) {
-    var scaled = 0, vertical = 0;
+    var scaled = 0, vertical = 0, fromElevations = 0;
     for (var i = 0; i < survey.shots.length; i++) {
         var shot = survey.shots[i];
+        if (shot.distanceIsSlope === true) {
+            fromElevations++;
+            // Already a slope distance: CsTags.surveyFromDocument had
+            // both stations' Elevation tags and took the hypotenuse
+            // directly, which is better evidence than anything this
+            // function can infer. Dividing it by cos(inclination) again
+            // would lengthen every inclined leg by the same factor
+            // twice -- 15% at 30 degrees, and without limit as the leg
+            // approaches vertical, which is the case this whole family
+            // of problems lives in.
+            continue;
+        }
         if (CsTraverse.unusable(shot.inclination)) {
             continue;
         }
@@ -170,7 +184,8 @@ CsRebuild.toSlopeDistances = function(survey) {
         shot.distance = shot.distance / c;
         scaled++;
     }
-    return { scaled: scaled, vertical: vertical };
+    return { scaled: scaled, vertical: vertical,
+             fromElevations: fromElevations };
 };
 
 /**
@@ -293,7 +308,8 @@ CsRebuild.profileNote = function(drawn) {
  */
 CsRebuild.rebuild = function(doc, di) {
     var report = { mode: "nothing", stations: 0, shots: 0, scaled: 0,
-        vertical: 0, splaysUnplaceable: 0, inferred: false, erased: 0,
+        vertical: 0, fromElevations: 0,
+        splaysUnplaceable: 0, inferred: false, erased: 0,
         tagsWritten: 0, lrudNamed: 0, hadStore: false, message: "",
         dialog: "", warning: "" };
 
@@ -328,6 +344,7 @@ CsRebuild.rebuild = function(doc, di) {
         var conv = CsRebuild.toSlopeDistances(survey);
         report.scaled = conv.scaled;
         report.vertical = conv.vertical;
+        report.fromElevations = conv.fromElevations;
         report.inferred = true;
 
         // one trip, from the legacy metadata block
@@ -368,8 +385,28 @@ CsRebuild.rebuild = function(doc, di) {
             "tag schema v3 -- " + report.stations + " station" +
             (report.stations === 1 ? "" : "s") + " and " + report.shots +
             " shot" + (report.shots === 1 ? "" : "s") + " now carry " +
-            "their own data. Distances inferred from geometry " +
-            "(slope = plan/cos(inclination))." +
+            "their own data. " +
+            // WHICH KIND OF INFERENCE, because they are not equally
+            // good and the difference is largest exactly where it
+            // matters most. A drawing that recorded an elevation per
+            // station says what the vertical really was, and the tape
+            // is then the hypotenuse -- exact, and it works on a pitch.
+            // A drawing without them leaves only the drawn plan length
+            // and an inclination tag to divide it by, which cannot
+            // recover a plumb at all (there is no plan length to
+            // scale). Saying "slope = plan/cos(inclination)" for a run
+            // that did neither would be a report of work not done.
+            (report.fromElevations > 0 ?
+                "Distances taken from the drawing's own station " +
+                "elevations (" + report.fromElevations + " shot" +
+                (report.fromElevations === 1 ? "" : "s") + ")." :
+                "Distances inferred from geometry " +
+                "(slope = plan/cos(inclination)).") +
+            (report.fromElevations > 0 && report.scaled > 0 ?
+                " " + report.scaled + " shot" +
+                (report.scaled === 1 ? "" : "s") + " had no elevation on " +
+                "record and were inferred from geometry instead " +
+                "(slope = plan/cos(inclination))." : "") +
             (anchorZ !== 0 ? " Elevations kept on the recorded datum -- " +
                 recon.anchorName + " at " +
                 CsReport.length(anchorZ, survey.distanceUnit) + "." : "") +
