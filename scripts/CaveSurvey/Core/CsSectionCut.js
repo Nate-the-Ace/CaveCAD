@@ -355,12 +355,23 @@ CsSectionCut.polygonAt = function(survey, resolved, stationName, frame,
     var byStation = o.splaysByStation || CsLrud.splaysByStation(survey);
     var splays = byStation[stationName] || [];
     var tapeMode = o.tapeMode || CsTraverse.SLOPE;
-    // The LRUD's own azimuth where there is one -- the same value
-    // tickEnd is given by the plan -- so a section and the plan walls
-    // cannot disagree about which way the passage runs here.
-    var passageAz = (lrud !== null && lrud !== undefined &&
+    // WHICH WAY THE PASSAGE RUNS HERE, which is only used to decide
+    // which side of it a splay hit and which splays are dead along the
+    // axis -- never to place a point. The plan asks exactly the same
+    // question the same way (CsLrud.passageAzimuthAt over the station's
+    // clustered ways out, falling back to the bearing the LRUD was
+    // recorded on), so a section and the plan walls cannot disagree
+    // about it. At a loop tie-in, where the recorded bearing cuts
+    // across the passage rather than running down it, they used to.
+    var arrivalAz = (lrud !== null && lrud !== undefined &&
         lrud.azimuth !== undefined && lrud.azimuth !== null) ?
         lrud.azimuth : 0;
+    var axes = o.stationAxes || CsLrud.stationAxes(resolved);
+    var passageAz = CsLrud.passageAzimuthAt(axes, stationName, arrivalAz);
+    if (passageAz === null || passageAz === undefined ||
+            !isFinite(passageAz)) {
+        passageAz = arrivalAz;
+    }
 
     var raw = [], i;
     var sides = ["L", "R"];

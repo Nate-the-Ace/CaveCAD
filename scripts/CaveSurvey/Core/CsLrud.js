@@ -112,6 +112,344 @@ CsLrud.relativeBearing = function(a, b) {
     return d;
 };
 
+// ---------------------------------------------------------------------
+// PASSAGE AXES -- what the legs meeting at a station say about which way
+// the passage runs there, and whether the station is really a junction.
+//
+// WHY THIS EXISTS. Counting legs is not the same question as "does the
+// passage branch here". A loop tie-in has three legs -- the two that
+// walk the passage through, plus the closure leg that arrives back
+// along the SAME passage -- and a leg count calls that a junction, ends
+// every wall run at it, and leaves a hole in the map at exactly the
+// station a loop was closed on. Clustering the legs by DIRECTION says
+// what a caver standing there would say: two ways out, not three, so
+// the passage goes through.
+//
+// The same clustering answers the other half of the problem. LRUD is
+// recorded facing the leg that ARRIVED, and a tie-in shot often cuts
+// across the passage rather than running down it -- so its L/R ray
+// points down open passage and the party writes "P". That "P" is a
+// reading, not a gap: it says "no wall this way", and the wall either
+// side of it is continuous. Knowing the passage's own axis (not the
+// tie-in shot's) is what lets the splay ordering and the junction test
+// agree with the cave instead of with the notebook's page order.
+//
+// WHAT THIS DELIBERATELY DOES NOT DO: re-aim the LRUD tick itself.
+// `tickEnd` still swings L and R off `lrud.azimuth`, the bearing the
+// caver actually faced when they pulled the tape. Swinging a measured
+// length onto a bearing nobody sighted would move a wall point to a
+// place the tape never touched -- inventing data, which is the one
+// thing this whole file refuses to do. The axis informs which SIDE a
+// splay is on, how points ORDER along the passage, whether a station
+// BRANCHES, and which frame the 3D ring is squared to. It never
+// changes a measured coordinate.
+
+/**
+ * An azimuth folded into [0, 360).
+ *
+ * The last line is not decoration. A bisector computed through atan2
+ * lands a few parts in 1e16 either side of due north, and the negative
+ * side folds to 359.99999999999994 -- arithmetically right, and a
+ * number no caver would accept as a bearing if it ever reached a
+ * dialog or a label. Anything that close to a full turn IS north.
+ */
+CsLrud.normalizeAz = function(deg) {
+    if (deg === null || deg === undefined || !isFinite(deg)) {
+        return null;
+    }
+    var d = deg % 360.0;
+    if (d < 0.0) {
+        d += 360.0;
+    }
+    if (d >= 360.0 - 1e-9) {
+        return 0.0;
+    }
+    return d;
+};
+
+/**
+ * Plan bearing from a to b in degrees, or null when the two points
+ * coincide (no direction to report) or either is unusable.
+ *
+ * Matches tickEnd's convention: x is east, y is north, so the bearing
+ * is atan2(dx, dy).
+ */
+CsLrud.planBearing = function(a, b) {
+    if (a === null || a === undefined || b === null || b === undefined) {
+        return null;
+    }
+    var dx = b.x - a.x, dy = b.y - a.y;
+    if (!isFinite(dx) || !isFinite(dy)) {
+        return null;
+    }
+    if (dx === 0.0 && dy === 0.0) {
+        return null;
+    }
+    return CsLrud.normalizeAz(Math.atan2(dx, dy) * 180.0 / Math.PI);
+};
+
+/**
+ * How far apart two bearings may be and still be "the same way out".
+ *
+ * 30 degrees: wide enough that a closure leg arriving back down a
+ * passage merges with the leg that walks it (survey shots down one
+ * passage rarely disagree by more than that), narrow enough that a
+ * side lead at 45 degrees still reads as its own way out.
+ */
+CsLrud.AXIS_TOLERANCE_DEG = 30.0;
+
+/**
+ * How near to opposite two ways out must be before the station counts
+ * as a THROUGH station with a single passage axis. 120 degrees leaves
+ * room for a real bend to still read as through-passage; anything
+ * sharper is a corner, and a corner has no single axis to bisect.
+ */
+CsLrud.THROUGH_SEPARATION_DEG = 120.0;
+
+/**
+ * Groups bearings into distinct ways out.
+ *
+ * Greedy and order-dependent BY DESIGN: the first unclaimed bearing
+ * seeds a cluster, every later bearing within `tol` of the cluster's
+ * running circular mean joins it, and the mean is re-derived from the
+ * members as it grows. Deterministic for a given input order, which is
+ * all a wall run needs -- resolved.legs has a stable order, so a
+ * drawing rebuilt from the same survey clusters identically.
+ *
+ * \return [{mean: azimuthDeg, count: n}] in seed order
+ */
+CsLrud.clusterBearings = function(bearings, tol) {
+    if (tol === undefined || tol === null) {
+        tol = CsLrud.AXIS_TOLERANCE_DEG;
+    }
+    var rad = Math.PI / 180.0;
+    var taken = [];
+    var out = [];
+    var i, j;
+    for (i = 0; i < bearings.length; i++) {
+        taken.push(false);
+    }
+    for (i = 0; i < bearings.length; i++) {
+        if (taken[i] || bearings[i] === null || bearings[i] === undefined) {
+            continue;
+        }
+        taken[i] = true;
+        var sx = Math.sin(bearings[i] * rad);
+        var sy = Math.cos(bearings[i] * rad);
+        var n = 1;
+        var mean = bearings[i];
+        for (j = i + 1; j < bearings.length; j++) {
+            if (taken[j] || bearings[j] === null ||
+                    bearings[j] === undefined) {
+                continue;
+            }
+            if (Math.abs(CsLrud.relativeBearing(mean, bearings[j])) > tol) {
+                continue;
+            }
+            taken[j] = true;
+            sx += Math.sin(bearings[j] * rad);
+            sy += Math.cos(bearings[j] * rad);
+            n += 1;
+            mean = CsLrud.normalizeAz(Math.atan2(sx, sy) * 180.0 / Math.PI);
+        }
+        out.push({ mean: mean, count: n });
+    }
+    return out;
+};
+
+/**
+ * The ways out of every station, from the geometry the resolver placed
+ * rather than from the shots' recorded bearings.
+ *
+ * READ FROM COORDINATES ON PURPOSE. A leg's own azimuth can be absent,
+ * be a backsight, or have been adjusted by loop closure; the placed
+ * stations are the single version of the cave every view already
+ * agrees on, and a bearing derived from them cannot disagree with the
+ * line the map draws. Every leg counts -- "new", "tie" AND "closure" --
+ * because a closure leg is a surveyed passage like any other and is
+ * exactly the leg that makes a tie-in look like a junction.
+ *
+ * \param resolved CsNetwork.resolve() result
+ * \param tol      cluster width in degrees (AXIS_TOLERANCE_DEG)
+ *
+ * \return {stationName: {dirs: [{mean, count}], legs: n}}
+ *         Stations whose legs all have zero length, and stations the
+ *         resolver never placed, are absent -- a caller must treat a
+ *         missing entry as "nothing known", never as "no ways out".
+ */
+CsLrud.stationAxes = function(resolved, tol) {
+    var raw = {};
+    var note = function(name, deg) {
+        if (deg === null) {
+            return;
+        }
+        if (!raw.hasOwnProperty(name)) {
+            raw[name] = [];
+        }
+        raw[name].push(deg);
+    };
+    var legs = (resolved === null || resolved === undefined) ?
+        [] : (resolved.legs || []);
+    for (var i = 0; i < legs.length; i++) {
+        var leg = legs[i];
+        var a = resolved.stations[leg.from];
+        var b = resolved.stations[leg.to];
+        var f = CsLrud.planBearing(a, b);
+        if (f === null) {
+            continue;
+        }
+        // OUTWARD from each end: the direction a caver standing there
+        // would point to leave along this leg.
+        note(leg.from, f);
+        note(leg.to, CsLrud.normalizeAz(f + 180.0));
+    }
+    var out = {};
+    for (var name in raw) {
+        if (raw.hasOwnProperty(name)) {
+            out[name] = { dirs: CsLrud.clusterBearings(raw[name], tol),
+                          legs: raw[name].length };
+        }
+    }
+    return out;
+};
+
+/**
+ * Does the passage BRANCH at this station -- three or more distinct
+ * ways out?
+ *
+ * A station the axes do not know about answers false: absence of
+ * geometry is not evidence of a junction, and a caller that wants the
+ * old leg-count answer for such a station has to ask for it (wallRuns
+ * does exactly that).
+ */
+CsLrud.isJunction = function(axes, name) {
+    var a = (axes === null || axes === undefined) ? undefined : axes[name];
+    if (a === undefined || a === null) {
+        return false;
+    }
+    return a.dirs.length >= 3;
+};
+
+/**
+ * The two opposite ways out of a THROUGH station, as indices into
+ * `axes[name].dirs`, or null when the station is not one (a dead end,
+ * a corner sharper than THROUGH_SEPARATION_DEG, or a junction).
+ */
+CsLrud.throughPair = function(axes, name) {
+    var a = (axes === null || axes === undefined) ? undefined : axes[name];
+    if (a === undefined || a === null || a.dirs.length !== 2) {
+        return null;
+    }
+    var sep = Math.abs(CsLrud.relativeBearing(a.dirs[0].mean,
+        a.dirs[1].mean));
+    if (sep < CsLrud.THROUGH_SEPARATION_DEG) {
+        return null;
+    }
+    return { a: 0, b: 1 };
+};
+
+/**
+ * The direction the PASSAGE runs at a station, which is not always the
+ * direction of the leg that arrived there.
+ *
+ * At a through station the axis is the bisector of the two ways out --
+ * so a tie-in shot cutting across the passage no longer decides which
+ * side a splay is on or how points order along the wall. Anywhere else
+ * (dead end, corner, junction, unknown station) the arriving leg's own
+ * bearing is the best answer there is, and is returned unchanged.
+ *
+ * The result is oriented to agree with travel: whichever way round the
+ * bisector points, it is flipped if need be so it leads AWAY from the
+ * station the caver came from. When `arrivalAz` is not a usable number
+ * the bisector is returned in its own arbitrary-but-deterministic
+ * orientation rather than nothing -- a defined axis with an unknown
+ * sign still orders points consistently along one wall.
+ */
+CsLrud.passageAzimuthAt = function(axes, name, arrivalAz) {
+    var pair = CsLrud.throughPair(axes, name);
+    if (pair === null) {
+        return arrivalAz;
+    }
+    var dirs = axes[name].dirs;
+    var rad = Math.PI / 180.0;
+    var u0 = { x: Math.sin(dirs[pair.a].mean * rad),
+               y: Math.cos(dirs[pair.a].mean * rad) };
+    var u1 = { x: Math.sin(dirs[pair.b].mean * rad),
+               y: Math.cos(dirs[pair.b].mean * rad) };
+    // Bisector of "away from one way out" and "toward the other" --
+    // for two near-opposite bearings that is the passage's own line.
+    var fx = u1.x - u0.x, fy = u1.y - u0.y;
+    if (fx === 0.0 && fy === 0.0) {
+        return arrivalAz;
+    }
+    var axis = CsLrud.normalizeAz(Math.atan2(fx, fy) * 180.0 / Math.PI);
+    if (arrivalAz === null || arrivalAz === undefined ||
+            !isFinite(arrivalAz)) {
+        return axis;
+    }
+    if (Math.abs(CsLrud.relativeBearing(arrivalAz, axis)) > 90.0) {
+        axis = CsLrud.normalizeAz(axis + 180.0);
+    }
+    return axis;
+};
+
+/**
+ * Which of a station's ways out a bearing belongs to -- the index into
+ * `axes[name].dirs` of the nearest cluster, or -1 when the station is
+ * unknown or the bearing unusable.
+ *
+ * Lets a caller fold several legs that all leave the same way (a
+ * closure leg alongside the leg it closes onto, say) down to one,
+ * without re-deriving the clustering itself.
+ */
+CsLrud.nearestCluster = function(axes, name, bearing) {
+    var a = (axes === null || axes === undefined) ? undefined : axes[name];
+    if (a === undefined || a === null) {
+        return -1;
+    }
+    if (bearing === null || bearing === undefined || !isFinite(bearing)) {
+        return -1;
+    }
+    var best = -1, bestD = null;
+    for (var i = 0; i < a.dirs.length; i++) {
+        var d = Math.abs(CsLrud.relativeBearing(a.dirs[i].mean, bearing));
+        if (bestD === null || d < bestD) {
+            bestD = d;
+            best = i;
+        }
+    }
+    return best;
+};
+
+/** Was this side of the station written "P" (open passage)? */
+CsLrud.sideOpen = function(lrud, side) {
+    if (lrud === null || lrud === undefined) {
+        return false;
+    }
+    return (side === "L") ? (lrud.leftOpen === true) :
+                            (lrud.rightOpen === true);
+};
+
+/**
+ * Did the party record ANYTHING about this station's walls in plan --
+ * a length either side, or a "P" saying there is no wall that way?
+ *
+ * "P" counts. That is the whole point: a station read "P P" was looked
+ * at and found open, which is evidence, and treating it as an
+ * unmeasured station is what used to end a wall run at every loop
+ * tie-in. CsFrontier.hasLrud has read it this way for some time; this
+ * is the same rule reaching the walls.
+ */
+CsLrud.hasPlanEvidence = function(lrud) {
+    if (lrud === null || lrud === undefined) {
+        return false;
+    }
+    return (lrud.left !== null && lrud.left !== undefined) ||
+           (lrud.right !== null && lrud.right !== undefined) ||
+           lrud.leftOpen === true || lrud.rightOpen === true;
+};
+
+
 /**
  * One station's wall points on one side, in along-passage order.
  *
@@ -314,10 +652,49 @@ CsLrud.stationCeilingFloor3D = function(st, lrud) {
  * Walks the legs in resolution order, collecting each side's wall
  * points -- the station's LRUD tick end (or the station itself where
  * a side reads 0) plus every splay that hit that side. A run breaks
- * at a junction station, at a station with NO wall evidence at all
- * (neither LRUD nor splays), at a closure leg, and where the next leg
+ * where the passage BRANCHES (three or more distinct ways out, by
+ * CsLrud.stationAxes -- not three or more legs, see below), at a
+ * station with NO wall evidence at all, at a closure leg, at the
+ * mouth of a surveyed lead on an open side, and where the next leg
  * does not continue from the previous one's arrival -- each break
  * starts a new polyline rather than inventing a connection.
+ *
+ * WHAT IS NOT A BREAK, AND USED TO BE:
+ *
+ *   A LOOP TIE-IN. Three legs meet there -- the two that walk the
+ *   passage through and the closure leg arriving back down it -- and
+ *   counting legs called that a junction, so every wall run ended at
+ *   exactly the station a loop was closed on. The ways out are
+ *   clustered by direction now, the closure leg merges with the leg it
+ *   runs alongside, and the walls go through.
+ *
+ *   A SIDE WRITTEN "P". Open passage is a READING -- the party looked
+ *   and found no wall that way -- not a blank cell. It contributes no
+ *   wall point, because there is no wall to put one on, but the run
+ *   carries through the station and joins the last measured point to
+ *   the next one. LRUD walls are continuous; "P" says where the wall
+ *   is absent, not where the drawing should stop.
+ *
+ * WHY BRIDGING AN OPEN SIDE CANNOT SEAL A LEAD OFF, which is the one
+ * thing that could go wrong with the paragraph above. Joining the
+ * points either side of an open side would be wrong if the side were
+ * open BECAUSE a passage leaves there -- the bridge would draw a wall
+ * across its mouth. It cannot happen: a lead that was surveyed has a
+ * leg going down it, a leg going down it is a third way out, and a
+ * third way out is a junction, which ends both runs before any of this
+ * is reached. A lead that was NOT surveyed leaves no trace in the data
+ * at all, and no rule here or anywhere else can find what was never
+ * recorded. (An earlier draft carried a separate perpendicular-leg
+ * test for this. Every station it could fire on was already a junction
+ * by the line above, so it was dead code dressed as a safety rule --
+ * which is worse than no rule, because it reads like the hazard is
+ * being handled somewhere it is not. The profile's own version of the
+ * check is NOT dead and stays: a pitch is plumb, has no plan bearing,
+ * and so never shows up as a way out -- see CsProfile.bandWallRuns.)
+ *
+ * Neither of these invents a coordinate. Every point in every run is
+ * still a measured tick end or a splay tip; what changed is only which
+ * of them are joined to which.
  *
  * THAT LAST BREAK EXISTS BECAUSE "resolution order" is not "walk
  * order". resolved.legs can place a junction station's arrival, then
@@ -373,26 +750,57 @@ CsLrud.wallRuns = function(survey, resolved, tapeMode) {
         tapeMode = CsTraverse.SLOPE;
     }
     var counts = CsLrud.legCounts(resolved.legs);
+    var axes = CsLrud.stationAxes(resolved);
     var splays = CsLrud.splaysByStation(survey);
+
+    // WHERE THE PASSAGE REALLY BRANCHES -- three or more distinct ways
+    // out, not three or more legs. A loop tie-in has a closure leg
+    // arriving back down the passage it already walks; by leg count
+    // that is a junction and every wall run used to end there, leaving
+    // a hole in the map at exactly the station a loop was closed on.
+    // By direction it is two ways out, and the walls go through.
+    //
+    // The leg count is still the answer for a station the axes never
+    // saw (never placed, or every leg zero-length): there is no
+    // geometry to cluster there, so the old test is the only evidence
+    // left rather than a silent "not a junction".
+    var isJunction = function(n) {
+        if (axes.hasOwnProperty(n)) {
+            return CsLrud.isJunction(axes, n);
+        }
+        return counts[n] > 2;
+    };
     var leftRuns = [], rightRuns = [];
     var left = [], right = [];
     var leftNames = [], leftSeen = {};
     var rightNames = [], rightSeen = {};
     var stats = { skipped: 0 };
 
-    var flush = function() {
+    // PER SIDE, because the two walls do not always end together. An
+    // open ("P") side that is the mouth of a surveyed lead must stop
+    // there rather than being bridged across the lead, while the other
+    // wall of the same passage carries straight on past it. flush()
+    // (both at once) is still what a junction, a closure and a station
+    // with no wall evidence at all use.
+    var flushLeft = function() {
         if (left.length >= 2) {
             leftRuns.push({ points: left, stations: leftNames });
         }
+        left = [];
+        leftNames = [];
+        leftSeen = {};
+    };
+    var flushRight = function() {
         if (right.length >= 2) {
             rightRuns.push({ points: right, stations: rightNames });
         }
-        left = [];
         right = [];
-        leftNames = [];
-        leftSeen = {};
         rightNames = [];
         rightSeen = {};
+    };
+    var flush = function() {
+        flushLeft();
+        flushRight();
     };
 
     var pointsFor = function(stationName, side, lrud, passageAz) {
@@ -442,10 +850,11 @@ CsLrud.wallRuns = function(survey, resolved, tapeMode) {
     // seeding them.
     var seedRunStart = function(leg) {
         var name = leg.from;
-        if (counts[name] > 2) {
+        if (isJunction(name)) {
             return;
         }
-        var passageAz = CsTraverse.effectiveAzimuth(leg.shot);
+        var passageAz = CsLrud.passageAzimuthAt(axes, name,
+            CsTraverse.effectiveAzimuth(leg.shot));
         var lrud = CsModel.lrudForStation(survey, name);
         if ((lrud === null || lrud === undefined) && name === firstFrom &&
                 survey.startLrud !== null &&
@@ -459,7 +868,20 @@ CsLrud.wallRuns = function(survey, resolved, tapeMode) {
                 rightAll: survey.startLrud.rightAll || null,
                 upAll: survey.startLrud.upAll || null,
                 downAll: survey.startLrud.downAll || null,
-                azimuth: passageAz
+                // THE OPEN FLAGS TRAVEL TOO. Without them the survey's
+                // first station could be read "P P" -- looked at,
+                // found open -- and still arrive here looking exactly
+                // like a station nobody measured, which is the very
+                // confusion the rest of this function now refuses to
+                // make.
+                leftOpen: survey.startLrud.leftOpen === true,
+                rightOpen: survey.startLrud.rightOpen === true,
+                upOpen: survey.startLrud.upOpen === true,
+                downOpen: survey.startLrud.downOpen === true,
+                // The tick swings off the bearing the caver FACED, not
+                // off the derived axis -- see the PASSAGE AXES note
+                // above for why a measured length is never re-aimed.
+                azimuth: CsTraverse.effectiveAzimuth(leg.shot)
             };
         }
         append(left, pointsFor(name, "L", lrud, passageAz),
@@ -500,44 +922,66 @@ CsLrud.wallRuns = function(survey, resolved, tapeMode) {
         // The leg reached a new station (leg.to for forward legs).
         var name = leg.to;
         var lrud = CsModel.lrudForStation(survey, name);
-        // The passage direction at that station: the leg that reached
-        // it. Available even where LRUD is not, which is what lets a
-        // splay-only station carry walls at all.
+        // The passage direction at that station. Two bearings are in
+        // play and they are NOT the same thing:
+        //
+        //   arrivalAz  the bearing of the leg that reached the station
+        //              -- what the caver faced, and so what the L and
+        //              R tapes were pulled perpendicular to.
+        //   passageAz  the direction the PASSAGE runs, which at a
+        //              through station is the bisector of its two ways
+        //              out. At a tie-in, whose shot often cuts across
+        //              the passage rather than down it, these differ by
+        //              a lot.
+        //
+        // passageAz decides which SIDE a splay is on and how the
+        // points ORDER along the wall; arrivalAz stays inside
+        // `lrud.azimuth` and keeps aiming the measured tick. Swapping
+        // that round would swing a measured length onto a bearing
+        // nobody sighted.
         //
         // DECLARED DIVERGENCE FROM CsProfile.bandWallRuns (review
-        // minor): if this leg's own azimuth is unusable (no usable
-        // reading, no backsight to fall back on), `passageAz` here is
-        // `null` or `NaN` -- and unlike CsProfile.bandWallRuns's
-        // `hasDir` flag, nothing below guards against it. `azRad =
-        // passageAz * Math.PI / 180` then quietly becomes `0` (null
-        // coerces) or `NaN` (undefined/NaN propagates), so `alongX`/
-        // `alongY` become a wrong-but-finite direction, or NaN. NO
-        // COORDINATE is ever wrong from this: every point in
+        // minor), now narrower than it was: where this leg's own
+        // azimuth is unusable AND the station is not a through station,
+        // `passageAz` is still null or NaN and nothing below guards
+        // against it. `azRad` then quietly becomes 0 (null coerces) or
+        // NaN, so `alongX`/`alongY` become a wrong-but-finite direction
+        // or NaN. NO COORDINATE is ever wrong from this: every point in
         // `entries` comes from `CsTraverse.offset`/`CsLrud.tickEnd`
         // directly, never from `passageAz`, and the sort's `order`
         // tiebreak is a total order, so a NaN `t` only ever falls back
-        // to input order rather than corrupting anything -- the
-        // no-NaN-coordinate criterion holds. What breaks is the
-        // along-passage ORDERING promise in this function's own
-        // docblock, silently, for a leg whose own azimuth cannot be
-        // read. Unreachable today (every current writer of a leg's
-        // shot supplies a real azimuth), reachable the moment the
-        // upstream parser task starts passing one through as absent.
-        // Left unguarded rather than adding a second `hasDir`-style
-        // fallback here: that is real design work (what SHOULD the
-        // order fall back to?) that belongs with whichever task first
-        // makes it reachable, not bolted on defensively now.
-        var passageAz = CsTraverse.effectiveAzimuth(leg.shot);
+        // to input order. What breaks is the along-passage ORDERING
+        // promise, silently. A through station now recovers on its own
+        // (passageAzimuthAt returns the bisector, whose sign is
+        // arbitrary but whose line is right); everywhere else this is
+        // still unreachable today and still belongs to whichever task
+        // first makes it reachable.
+        var arrivalAz = CsTraverse.effectiveAzimuth(leg.shot);
+        var passageAz = CsLrud.passageAzimuthAt(axes, name, arrivalAz);
 
         var lp = pointsFor(name, "L", lrud, passageAz);
         var rp = pointsFor(name, "R", lrud, passageAz);
 
-        if (counts[name] > 2 || (lp.length === 0 && rp.length === 0)) {
-            // junction, or a station with nothing measured about its
-            // walls: close out the runs. A junction station's own
-            // points still terminate them.
+        if (isJunction(name)) {
+            // The passage branches here: close out the runs. A
+            // junction station's own points still terminate them.
             append(left, lp, leftNames, leftSeen, name);
             append(right, rp, rightNames, rightSeen, name);
+            flush();
+            prevTo = name;
+            continue;
+        }
+
+        if (lp.length === 0 && rp.length === 0 &&
+                !CsLrud.hasPlanEvidence(lrud)) {
+            // Nothing measured about this station's walls at all --
+            // no length, no splay, and no "P". THE "P" IS THE WHOLE
+            // POINT OF THIS TEST: a side written "P" yields no wall
+            // point (there is no wall to put one on) but it is a
+            // reading, so the run carries through it and joins the
+            // last measured point to the next one. Before this, a
+            // station read "P P" was indistinguishable from one nobody
+            // looked at, and the wall simply stopped.
             flush();
             prevTo = name;
             continue;

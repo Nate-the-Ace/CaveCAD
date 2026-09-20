@@ -290,11 +290,22 @@ CsMesh3d.COVER_UNKNOWN = [0.52, 0.52, 0.55];
  * leg's own direction instead, which is what each branch's own surface
  * should be squared to, and is how CsLrud ends a wall run at a junction
  * with the geometry of the run that arrived.
+ *
+ * ONE VECTOR PER WAY OUT, NOT PER LEG, when `axes` is supplied. At a
+ * loop tie-in the closure leg runs back down the passage the other two
+ * legs already walk, so counting it again pulls the mean toward
+ * whichever direction happens to have two legs in it and tilts the
+ * ring away from the passage. Folding legs that leave the same way
+ * down to one representative (CsLrud.nearestCluster over
+ * CsLrud.stationAxes) gives the passage the say, not the notebook.
+ * Without `axes` the old per-leg mean stands, so a caller that has not
+ * been taught is unchanged.
  */
-CsMesh3d.directionAt = function(name, legsByStation, resolved) {
+CsMesh3d.directionAt = function(name, legsByStation, resolved, axes) {
     var legs = legsByStation[name] || [];
     var sum = { x: 0, y: 0, z: 0 };
     var n = 0;
+    var seenWay = {};
     for (var i = 0; i < legs.length; i++) {
         var a = resolved.stations[legs[i].from];
         var b = resolved.stations[legs[i].to];
@@ -304,6 +315,20 @@ CsMesh3d.directionAt = function(name, legsByStation, resolved) {
         var v = CsMesh3d.normalize(CsMesh3d.sub(b, a));
         if (v === null) {
             continue;
+        }
+        if (axes !== undefined && axes !== null) {
+            // The way OUT of this station along this leg, which is the
+            // leg's own bearing at its `from` end and the reverse of it
+            // at its `to` end.
+            var out = (legs[i].from === name) ?
+                CsLrud.planBearing(a, b) : CsLrud.planBearing(b, a);
+            var way = CsLrud.nearestCluster(axes, name, out);
+            if (way >= 0) {
+                if (seenWay[way] === true) {
+                    continue;
+                }
+                seenWay[way] = true;
+            }
         }
         sum.x += v.x;
         sum.y += v.y;
@@ -326,8 +351,19 @@ CsMesh3d.lrudAt = function(name, survey) {
     for (var i = 0; i < survey.shots.length; i++) {
         var s = survey.shots[i];
         if (s.splay !== true && s.to === name && !s.excludeFromAll) {
+            // THE OPEN FLAGS RIDE ALONG. A side written "P" is a
+            // reading -- the party looked and found no wall that way --
+            // and a caller that cannot see the flag reads a station
+            // recorded "P P P P" as one nobody measured. ringAt still
+            // plots no point for an open side (there is no wall to put
+            // one on), but the splay-coverage colouring below can now
+            // tell "checked, wide open" from "never looked".
             return { left: s.left, right: s.right,
-                     up: s.up, down: s.down };
+                     up: s.up, down: s.down,
+                     leftOpen: s.leftOpen === true,
+                     rightOpen: s.rightOpen === true,
+                     upOpen: s.upOpen === true,
+                     downOpen: s.downOpen === true };
         }
     }
     // THE FIRST STATION IS NEVER ARRIVED AT, so no shot carries its
@@ -745,6 +781,18 @@ CsMesh3d.build = function(survey, resolved, opts) {
     }
 
     var counts = CsLrud.legCounts(resolved.legs);
+    // WAYS OUT, clustered by direction. A loop tie-in has three legs
+    // and two ways out; by leg count it read as a junction, so its ring
+    // was squared to the arriving leg alone and never cached. See
+    // CsLrud.stationAxes. The leg count stays as the fallback for a
+    // station the axes never saw.
+    var axes = CsLrud.stationAxes(resolved);
+    var branches = function(n) {
+        if (axes.hasOwnProperty(n)) {
+            return CsLrud.isJunction(axes, n);
+        }
+        return (counts[n] || 0) >= 3;
+    };
     var splays = CsLrud.splaysByStation(survey);
 
     var legsByStation = {};
@@ -814,7 +862,8 @@ CsMesh3d.build = function(survey, resolved, opts) {
         rampValue = {};
         for (name in resolved.stations) {
             if (!resolved.stations.hasOwnProperty(name)) { continue; }
-            var sdir = CsMesh3d.directionAt(name, legsByStation, resolved);
+            var sdir = CsMesh3d.directionAt(name, legsByStation, resolved,
+                axes);
             if (sdir === null) { rampValue[name] = 0; continue; }
             rampValue[name] = CsMesh3d.ringArea(CsMesh3d.ringAt(
                 resolved.stations[name], sdir,
@@ -846,8 +895,11 @@ CsMesh3d.build = function(survey, resolved, opts) {
                 return CsMesh3d.COVERAGE[2].color;
             }
             var lr = CsMesh3d.lrudAt(stationName, survey);
+            // "P" counts as measured here: the party looked.
             if (lr.left !== null || lr.right !== null ||
-                    lr.up !== null || lr.down !== null) {
+                    lr.up !== null || lr.down !== null ||
+                    lr.leftOpen || lr.rightOpen ||
+                    lr.upOpen || lr.downOpen) {
                 return CsMesh3d.COVERAGE[1].color;
             }
             return CsMesh3d.COVERAGE[0].color;
@@ -1081,7 +1133,7 @@ CsMesh3d.build = function(survey, resolved, opts) {
     };
 
     var ringFor = function(stationName, st, dir) {
-        var junction = (counts[stationName] || 0) >= 3;
+        var junction = branches(stationName);
         if (!junction && ringCache.hasOwnProperty(stationName)) {
             return ringCache[stationName];
         }
@@ -1135,12 +1187,14 @@ CsMesh3d.build = function(survey, resolved, opts) {
             // A null `along` is two stations in the same place: no
             // passage between them to put a surface on.
             if (along !== null) {
-                var dirA = ((counts[leg.from] || 0) >= 3)
+                var dirA = branches(leg.from)
                     ? along
-                    : CsMesh3d.directionAt(leg.from, legsByStation, resolved);
-                var dirB = ((counts[leg.to] || 0) >= 3)
+                    : CsMesh3d.directionAt(leg.from, legsByStation,
+                        resolved, axes);
+                var dirB = branches(leg.to)
                     ? along
-                    : CsMesh3d.directionAt(leg.to, legsByStation, resolved);
+                    : CsMesh3d.directionAt(leg.to, legsByStation,
+                        resolved, axes);
                 if (dirA === null) { dirA = along; }
                 if (dirB === null) { dirB = along; }
 

@@ -2729,6 +2729,249 @@ function splayFixture() {
 })();
 
 // ---------------------------------------------------------------------
+// Passage axes, and "P" as a reading rather than a gap.
+//
+// The bug these pin: a loop tie-in has three legs and two ways out, and
+// its LRUD is often written "P" because the tie-in shot cuts across the
+// passage so the L/R ray points down open cave. Counting legs called
+// that a junction and reading "P" as a blank cell called it unmeasured,
+// so the wall stopped dead at exactly the station a loop closed on --
+// twice over.
+// ---------------------------------------------------------------------
+
+// A north-south passage A1-A2-A3 with a second route A1-B1-A2 that ties
+// back in at A2 along the SAME bearing. A2 therefore has three legs and
+// two ways out, and its LRUD is written "P" both sides.
+function tieInFixture(openSides) {
+    var sv = CsModel.newSurvey();
+    sv.startLrud = { left: 2, right: 2, up: null, down: null,
+        leftAll: null, rightAll: null, upAll: null, downAll: null,
+        leftOpen: false, rightOpen: false, upOpen: false, downOpen: false };
+    var a = shotOf("A1", "A2", 10, 0);
+    if (openSides) {
+        a.leftOpen = true;      // "P": looked, no wall that way
+        a.rightOpen = true;
+    }                            // else: blank -- nobody measured
+    var b = shotOf("A2", "A3", 10, 0);
+    b.left = 2;
+    b.right = 2;
+    sv.shots.push(a);
+    sv.shots.push(b);
+    sv.shots.push(shotOf("A1", "B1", 5, 0));
+    sv.shots.push(shotOf("B1", "A2", 5, 0));   // the tie-in / closure leg
+    return sv;
+}
+
+(function() {
+    var sv = tieInFixture(true);
+    var r = CsNetwork.resolve(sv, {});
+    var axes = CsLrud.stationAxes(r);
+    ok(axes["A2"] !== undefined && axes["A2"].legs === 3,
+        "passage axes: the tie-in station really does have three legs");
+    ok(axes["A2"].dirs.length === 2,
+        "passage axes: three legs, two ways out -- the closure leg " +
+        "merges with the leg it runs alongside (got " +
+        (axes["A2"] ? axes["A2"].dirs.length : "none") + ")");
+    ok(CsLrud.isJunction(axes, "A2") === false,
+        "passage axes: a loop tie-in is NOT a junction");
+    ok(CsLrud.legCounts(r.legs)["A2"] > 2,
+        "passage axes: ...and the leg count, which is what used to " +
+        "decide this, still says it is -- so the fixture is not vacuous");
+})();
+
+(function() {
+    // THE HEADLINE: the wall runs straight through the "P" station,
+    // joining A1's tick to A3's.
+    var sv = tieInFixture(true);
+    var w = CsLrud.wallRuns(sv, CsNetwork.resolve(sv, {}));
+    var spans = function(runs, x) {
+        for (var i = 0; i < runs.length; i++) {
+            var pts = runs[i].points;
+            var lo = false, hi = false;
+            for (var j = 0; j < pts.length; j++) {
+                if (Math.abs(pts[j].x - x) < 1e-9 &&
+                        Math.abs(pts[j].y - 0) < 1e-9) { lo = true; }
+                if (Math.abs(pts[j].x - x) < 1e-9 &&
+                        Math.abs(pts[j].y - 20) < 1e-9) { hi = true; }
+            }
+            if (lo && hi) { return true; }
+        }
+        return false;
+    };
+    ok(spans(w.left, -2),
+        "P walls: the left wall carries through a tie-in written \"P\" " +
+        "-- A1's tick joined to A3's");
+    ok(spans(w.right, 2),
+        "P walls: and so does the right wall");
+})();
+
+(function() {
+    // The control, and the line this must not cross: a station nobody
+    // measured at all still breaks the run. "P" is a reading; blank is
+    // not, and they must not collapse back into each other.
+    var sv = tieInFixture(false);
+    var w = CsLrud.wallRuns(sv, CsNetwork.resolve(sv, {}));
+    var spans = false;
+    for (var i = 0; i < w.left.length; i++) {
+        var pts = w.left[i].points;
+        var lo = false, hi = false;
+        for (var j = 0; j < pts.length; j++) {
+            if (Math.abs(pts[j].y - 0) < 1e-9) { lo = true; }
+            if (Math.abs(pts[j].y - 20) < 1e-9) { hi = true; }
+        }
+        if (lo && hi) { spans = true; }
+    }
+    ok(spans === false,
+        "P walls: an UNMEASURED station still breaks the run -- \"P\" " +
+        "and a blank cell must not collapse into each other");
+})();
+
+(function() {
+    // A real branch still ends the runs. Same passage, but the third
+    // leg leaves east instead of tying back in: three ways out.
+    var sv = CsModel.newSurvey();
+    var a = shotOf("A1", "A2", 10, 0);
+    a.left = 2; a.right = 2;
+    var b = shotOf("A2", "A3", 10, 0);
+    b.left = 2; b.right = 2;
+    var c = shotOf("A3", "A4", 10, 0);
+    c.left = 2; c.right = 2;
+    var d = shotOf("A3", "C1", 10, 90);   // the branch
+    d.left = 2; d.right = 2;
+    sv.shots.push(a); sv.shots.push(b); sv.shots.push(c); sv.shots.push(d);
+    var r = CsNetwork.resolve(sv, {});
+    var axes = CsLrud.stationAxes(r);
+    ok(axes["A3"].dirs.length === 3 && CsLrud.isJunction(axes, "A3"),
+        "passage axes: three ways out IS a junction");
+    var w = CsLrud.wallRuns(sv, r);
+    var through = false;
+    for (var i = 0; i < w.left.length; i++) {
+        var pts = w.left[i].points;
+        var lo = false, hi = false;
+        for (var j = 0; j < pts.length; j++) {
+            if (Math.abs(pts[j].y - 10) < 1e-9) { lo = true; }
+            if (Math.abs(pts[j].y - 30) < 1e-9) { hi = true; }
+        }
+        if (lo && hi) { through = true; }
+    }
+    ok(through === false,
+        "passage axes: a run still ends where the passage branches");
+})();
+
+(function() {
+    // passageAzimuthAt, on its own. A through station's axis is the
+    // bisector of its two ways out, oriented to agree with travel.
+    var axes = { S: { dirs: [{ mean: 180, count: 1 },
+                             { mean: 0, count: 1 }], legs: 2 } };
+    near(CsLrud.passageAzimuthAt(axes, "S", 10), 0, 1e-9,
+        "passage axis: oriented the way the caver was walking");
+    near(CsLrud.passageAzimuthAt(axes, "S", 190), 180, 1e-9,
+        "passage axis: ...and flipped when they walked the other way");
+
+    // A corner has no single axis, so the arriving leg stands.
+    var corner = { S: { dirs: [{ mean: 180, count: 1 },
+                               { mean: 90, count: 1 }], legs: 2 } };
+    near(CsLrud.passageAzimuthAt(corner, "S", 45), 45, 1e-9,
+        "passage axis: a right-angle corner keeps the arriving bearing");
+
+    // An unknown station keeps it too.
+    near(CsLrud.passageAzimuthAt({}, "nowhere", 77), 77, 1e-9,
+        "passage axis: an unplaced station keeps the arriving bearing");
+})();
+
+(function() {
+    // ...and from real geometry: a 20-degree dogleg. The axis at the
+    // bend is 0, the bearing the caver arrived on is 350, and the
+    // splay ordering now uses the first.
+    var sv = CsModel.newSurvey();
+    sv.shots.push(shotOf("A1", "A2", 10, 350));
+    sv.shots.push(shotOf("A2", "A3", 10, 10));
+    var axes = CsLrud.stationAxes(CsNetwork.resolve(sv, {}));
+    near(CsLrud.passageAzimuthAt(axes, "A2", 350), 0, 1e-6,
+        "passage axis: at a bend it is the bisector, not the shot that " +
+        "arrived");
+})();
+
+(function() {
+    // clusterBearings, at the edges of its own tolerance
+    var c = CsLrud.clusterBearings([0, 25, 180], 30);
+    ok(c.length === 2, "cluster: 25 degrees apart is one way out");
+    var c2 = CsLrud.clusterBearings([0, 35, 180], 30);
+    ok(c2.length === 3, "cluster: 35 degrees apart is two");
+    var c3 = CsLrud.clusterBearings([350, 10], 30);
+    ok(c3.length === 1 && Math.abs(CsLrud.relativeBearing(c3[0].mean, 0)) < 1e-6,
+        "cluster: wraps across north, and means there (got " +
+        (c3.length ? c3[0].mean : "none") + ")");
+})();
+
+(function() {
+    // hasPlanEvidence is the rule that rescues "P", stated on its own
+    ok(CsLrud.hasPlanEvidence({ left: null, right: null,
+        leftOpen: true, rightOpen: false }) === true,
+        "evidence: \"P\" on one side is a reading");
+    ok(CsLrud.hasPlanEvidence({ left: null, right: null,
+        leftOpen: false, rightOpen: false }) === false,
+        "evidence: two blank cells are not");
+    ok(CsLrud.hasPlanEvidence({ left: 0, right: null }) === true,
+        "evidence: a measured 0 is a reading, as it always was");
+    ok(CsLrud.hasPlanEvidence(null) === false,
+        "evidence: no LRUD row at all is not");
+})();
+
+(function() {
+    // The survey's first station gets its "P" through startLrud, which
+    // used to drop the open flags on the floor.
+    var sv = CsModel.newSurvey();
+    sv.startLrud = { left: null, right: null, up: null, down: null,
+        leftAll: null, rightAll: null, upAll: null, downAll: null,
+        leftOpen: true, rightOpen: true, upOpen: false, downOpen: false };
+    var a = shotOf("A1", "A2", 10, 0);
+    a.left = 2; a.right = 2;
+    var b = shotOf("A2", "A3", 10, 0);
+    b.left = 2; b.right = 2;
+    sv.shots.push(a); sv.shots.push(b);
+    var w = CsLrud.wallRuns(sv, CsNetwork.resolve(sv, {}));
+    ok(w.left.length === 1 && w.left[0].points.length === 2,
+        "P walls: a first station read \"P\" opens the run rather than " +
+        "withholding it");
+})();
+
+(function() {
+    // 3D: one direction vector per WAY OUT, not per leg. The tie-in
+    // fixture has two legs leaving A2 southward and one north; counting
+    // the southward pair twice tilts the ring frame.
+    var sv = tieInFixture(true);
+    var r = CsNetwork.resolve(sv, {});
+    var axes = CsLrud.stationAxes(r);
+    var byStation = {};
+    for (var i = 0; i < r.legs.length; i++) {
+        var lg = r.legs[i];
+        (byStation[lg.from] = byStation[lg.from] || []).push(lg);
+        (byStation[lg.to] = byStation[lg.to] || []).push(lg);
+    }
+    var folded = CsMesh3d.directionAt("A2", byStation, r, axes);
+    ok(folded !== null && Math.abs(folded.x) < 1e-9 &&
+            Math.abs(folded.y - 1) < 1e-9,
+        "3D axes: the ring frame at a tie-in points down the passage");
+    // and the un-taught call still behaves as it always did
+    var perLeg = CsMesh3d.directionAt("A2", byStation, r);
+    ok(perLeg !== null,
+        "3D axes: a caller that passes no axes still gets the old mean");
+})();
+
+(function() {
+    // 3D: "P" reaches the mesh's own LRUD lookup
+    var sv = CsModel.newSurvey();
+    var a = shotOf("A1", "A2", 10, 0);
+    a.leftOpen = true;
+    sv.shots.push(a);
+    var lr = CsMesh3d.lrudAt("A2", sv);
+    ok(lr.leftOpen === true && lr.left === null,
+        "3D axes: lrudAt carries the open flag, and \"P\" is still not " +
+        "a length");
+})();
+
+// ---------------------------------------------------------------------
 // Splay walls -- an unmeasurable splay is skipped, not placed at the
 // station. `splayOf` cannot itself build a null-distance shot (`d`
 // passes straight through, but a real fixture needs `s.distance` set
@@ -13974,6 +14217,139 @@ var PROFILE_GEOMETRY_BEFORE_INDEX = [
     var w = CsProfile.bandWallRuns(band, sv, r, {});
     near(w.ceiling[0][0].y, 0, 1e-9, "U of 0 is a ceiling point at the station");
     ok(w.floor.length === 0, "null D draws no floor at all");
+}());
+
+(function() {
+    // "P" up, in profile. A1-A2-A3-A4 level; A2's ceiling is written
+    // "P" -- the party looked up and found nothing. The ceiling run
+    // must carry through it, joining A1's ceiling point to A3's,
+    // rather than stopping the way a blank cell makes it stop.
+    var mk = function(openUp) {
+        var sv = CsModel.newSurvey();
+        var s1 = shotOf("A1", "A2", 10, 0, 0);
+        // A2 is either read "P" up (looked, nothing there) or left
+        // entirely blank. Nothing else is recorded at A2 either way, so
+        // the ONLY difference between the two fixtures is whether that
+        // one cell is a reading.
+        if (openUp) { s1.upOpen = true; }
+        var s2 = shotOf("A2", "A3", 10, 0, 0);
+        s2.up = 4; s2.down = 2;
+        var s3 = shotOf("A3", "A4", 10, 0, 0);
+        s3.up = 4; s3.down = 2;
+        sv.shots = [s1, s2, s3];
+        sv.startLrud = { left: null, right: null, up: 4, down: 2,
+            leftAll: null, rightAll: null, upAll: null, downAll: null,
+            leftOpen: false, rightOpen: false,
+            upOpen: false, downOpen: false };
+        return sv;
+    };
+    var runsFor = function(sv) {
+        var r = CsNetwork.resolve(sv, {});
+        var g = CsProfile.groupRuns(r);
+        var band = CsProfile.unrollBand(g.runs["A"], null, r,
+            CsProfile.hierarchy(g, r), {});
+        return CsProfile.bandWallRuns(band, sv, r, {});
+    };
+    var longest = function(runs) {
+        var n = 0;
+        for (var i = 0; i < runs.length; i++) {
+            if (runs[i].length > n) { n = runs[i].length; }
+        }
+        return n;
+    };
+
+    var open = runsFor(mk(true));
+    ok(open.ceiling.length === 1 && longest(open.ceiling) === 3,
+        "profile P: a \"P\" ceiling carries the run through -- one run " +
+        "of three points (got " + open.ceiling.length + " run(s), " +
+        "longest " + longest(open.ceiling) + ")");
+    ok(longest(open.floor) === 3,
+        "profile P: and the floor across the same station carries too");
+
+    // The control: the SAME station with the cell simply left blank
+    // breaks both runs. "P" and blank must stay distinct in the
+    // profile exactly as they now are in plan.
+    var blank = runsFor(mk(false));
+    ok(longest(blank.ceiling) < 3 && longest(blank.floor) < 3,
+        "profile P: a station with nothing recorded at all still " +
+        "breaks the runs (ceiling " + longest(blank.ceiling) +
+        ", floor " + longest(blank.floor) + ")");
+}());
+
+(function() {
+    // A loop tie-in in profile: three legs, two ways out, and the
+    // ceiling must not stop there either.
+    var sv = CsModel.newSurvey();
+    var s1 = shotOf("A1", "A2", 10, 0, 0);
+    s1.up = 4; s1.down = 2;
+    var s2 = shotOf("A2", "A3", 10, 0, 0);
+    s2.up = 4; s2.down = 2;
+    sv.shots = [s1, s2, shotOf("A1", "B1", 5, 0, 0),
+                shotOf("B1", "A2", 5, 0, 0)];
+    sv.startLrud = { left: null, right: null, up: 4, down: 2,
+        leftAll: null, rightAll: null, upAll: null, downAll: null,
+        leftOpen: false, rightOpen: false, upOpen: false, downOpen: false };
+    var r = CsNetwork.resolve(sv, {});
+    var axes = CsLrud.stationAxes(r);
+    ok(CsLrud.legCounts(r.legs)["A2"] > 2 &&
+        CsLrud.isJunction(axes, "A2") === false,
+        "profile axes: the tie-in fixture is three legs and two ways out");
+    var g = CsProfile.groupRuns(r);
+    var band = CsProfile.unrollBand(g.runs["A"], null, r,
+        CsProfile.hierarchy(g, r), {});
+    var w = CsProfile.bandWallRuns(band, sv, r, {});
+    var through = false;
+    for (var i = 0; i < w.ceiling.length; i++) {
+        if (w.ceiling[i].length >= 3) { through = true; }
+    }
+    ok(through,
+        "profile axes: the ceiling runs through a loop tie-in instead " +
+        "of ending at it");
+}());
+
+(function() {
+    // ...and the guard that stays live in profile but not in plan: a
+    // PITCH is plumb, so it has no plan bearing and never shows up as
+    // a way out. A "P" down with a pitch dropping out of the station
+    // must NOT be floored over.
+    var sv = CsModel.newSurvey();
+    var s1 = shotOf("A1", "A2", 10, 0, 0);
+    s1.up = 4; s1.downOpen = true;        // "P" down at A2
+    var s2 = shotOf("A2", "A3", 10, 0, 0);
+    s2.up = 4; s2.down = 2;
+    var s3 = shotOf("A3", "A4", 10, 0, 0);
+    s3.up = 4; s3.down = 2;
+    var pit = shotOf("A2", "P1", 20, 0, -90);   // the pitch
+    sv.shots = [s1, s2, s3, pit];
+    sv.startLrud = { left: null, right: null, up: 4, down: 2,
+        leftAll: null, rightAll: null, upAll: null, downAll: null,
+        leftOpen: false, rightOpen: false, upOpen: false, downOpen: false };
+    var r = CsNetwork.resolve(sv, {});
+    ok(CsLrud.stationAxes(r)["A2"].dirs.length === 2,
+        "profile pitch: a plumb leg is not a way out in plan, which is " +
+        "why the profile needs its own check");
+    var g = CsProfile.groupRuns(r);
+    var band = CsProfile.unrollBand(g.runs["A"], null, r,
+        CsProfile.hierarchy(g, r), {});
+    var w = CsProfile.bandWallRuns(band, sv, r, {});
+    var floored = false;
+    for (var i = 0; i < w.floor.length; i++) {
+        var xs = [];
+        for (var j = 0; j < w.floor[i].length; j++) {
+            xs.push(w.floor[i][j].x);
+        }
+        // a run holding BOTH the station before the pitch and the one
+        // after it has bridged straight over the pitch head
+        var lo = false, hi = false;
+        for (j = 0; j < xs.length; j++) {
+            if (Math.abs(xs[j] - band.stations[0].x) < 1e-9) { lo = true; }
+            if (Math.abs(xs[j] - band.stations[2].x) < 1e-9) { hi = true; }
+        }
+        if (lo && hi) { floored = true; }
+    }
+    ok(floored === false,
+        "profile pitch: an open floor with a pitch dropping out of it " +
+        "is not floored over");
 }());
 
 (function() {

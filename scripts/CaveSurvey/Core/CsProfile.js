@@ -1874,7 +1874,8 @@ CsProfile.classifySplay = function(shot, deadDeg) {
  * \param resolved CsNetwork.resolve() result
  * \param opts     {flatSplayDeg: number (default FLAT_SPLAY_DEG),
  *                  splaysByStation: CsLrud.splaysByStation(survey)
- *                  already built, legCounts: CsLrud.legCounts(resolved.
+ *                  already built, stationAxes: CsLrud.stationAxes(
+ *                  resolved) already built, legCounts: CsLrud.legCounts(resolved.
  *                  legs) already built -- both optional, computed fresh
  *                  when absent; CsProfile.build hoists them once for
  *                  the whole profile (see I2) and hands them down here} --
@@ -1927,6 +1928,19 @@ CsProfile.bandWallRuns = function(band, survey, resolved, opts) {
         opts.splaysByStation : CsLrud.splaysByStation(survey);
     var counts = (opts.legCounts !== undefined && opts.legCounts !== null) ?
         opts.legCounts : CsLrud.legCounts(resolved.legs);
+    // Ways out per station, clustered by DIRECTION. Same reason as
+    // CsLrud.wallRuns: a loop tie-in has three legs and two ways out,
+    // and ending the ceiling and floor runs at it leaves a hole in the
+    // profile at exactly the station a loop was closed on.
+    var axes = (opts.stationAxes !== undefined &&
+        opts.stationAxes !== null) ?
+        opts.stationAxes : CsLrud.stationAxes(resolved);
+    var isJunctionAt = function(n) {
+        if (axes.hasOwnProperty(n)) {
+            return CsLrud.isJunction(axes, n);
+        }
+        return counts[n] > 2;
+    };
 
     var datum = band.datum;
     // Elevation, plainly -- see unrollBand's yOf.
@@ -1938,15 +1952,27 @@ CsProfile.bandWallRuns = function(band, survey, resolved, opts) {
     var ceiling = [], floor = [];
     var skipped = 0;
 
-    var flush = function() {
+    // PER SIDE, for the same reason CsLrud.wallRuns splits its own:
+    // a "P" up with a pitch climbing out of the station is the mouth
+    // of a lead, and bridging the ceiling across it would roof the
+    // pitch over -- while the floor under the same station carries
+    // straight on. flush() (both at once) is still what a junction, a
+    // closure leg and a station with no evidence at all use.
+    var flushCeiling = function() {
         if (ceiling.length >= 2) {
             ceilingRuns.push(ceiling);
         }
+        ceiling = [];
+    };
+    var flushFloor = function() {
         if (floor.length >= 2) {
             floorRuns.push(floor);
         }
-        ceiling = [];
         floor = [];
+    };
+    var flush = function() {
+        flushCeiling();
+        flushFloor();
     };
 
     // Which stations a PLUMB leg lands on, computed FIRST and kept
@@ -1969,6 +1995,50 @@ CsProfile.bandWallRuns = function(band, survey, resolved, opts) {
             plumbArrival[bl.to] = true;
         }
     }
+
+    // WHICH STATIONS HAVE A PITCH LEAVING THEM, and which way. This is
+    // the profile's answer to the sealing hazard: a "P" up or down
+    // means "no ceiling / no floor within reach that way", and the run
+    // bridges straight across it -- UNLESS a surveyed passage leaves
+    // vertically there, in which case bridging would roof the pitch
+    // over or floor the aven in. Read from resolved.legs, not
+    // band.legs: a lead off the band is exactly the leg the band does
+    // not contain, and it is the one that matters here.
+    var leadsUp = {}, leadsDown = {};
+    var noteLead = function(map, name, other) {
+        if (!map.hasOwnProperty(name)) {
+            map[name] = [];
+        }
+        map[name].push(other);
+    };
+    var rlegs = resolved.legs || [];
+    for (li = 0; li < rlegs.length; li++) {
+        var rl = rlegs[li];
+        inc = CsTraverse.effectiveInclination(rl.shot);
+        if (inc === null || inc === undefined || !isFinite(inc) ||
+                Math.abs(inc) < CsProfile.PLUMB_INCLINATION_DEG) {
+            continue;
+        }
+        // From the `from` end the leg leaves the way it is inclined;
+        // from the `to` end the way OUT is back the other way.
+        noteLead(inc > 0 ? leadsUp : leadsDown, rl.from, rl.to);
+        noteLead(inc > 0 ? leadsDown : leadsUp, rl.to, rl.from);
+    }
+    // A pitch the band itself walks through is the PASSAGE, not a lead
+    // off it: the leg a caver arrived on and the one they carry
+    // on down are the passage, not leads off it.
+    var hasLead = function(map, name, prevName, nextName) {
+        var list = map[name];
+        if (list === undefined) {
+            return false;
+        }
+        for (var q = 0; q < list.length; q++) {
+            if (list[q] !== prevName && list[q] !== nextName) {
+                return true;
+            }
+        }
+        return false;
+    };
 
     // Passage azimuth per station (with the opening-station fallback
     // described above, withheld for a PLUMB leg's own landing station)
@@ -2105,8 +2175,19 @@ CsProfile.bandWallRuns = function(band, survey, resolved, opts) {
         cEntries.sort(byAlong);
         fEntries.sort(byAlong);
 
-        var isJunction = counts[st.name] > 2;
-        var noEvidence = (cEntries.length === 0 && fEntries.length === 0);
+        var isJunction = isJunctionAt(st.name);
+        // A "P" up or down is a READING -- the party looked and found
+        // no ceiling / no floor that way -- not a blank cell. It plots
+        // no point, because there is nothing to plot one on, but the
+        // run carries through the station and joins the last measured
+        // point to the next. Same rule, same reason, as
+        // CsLrud.hasPlanEvidence on the plan side.
+        var openUp = (lrud !== null && lrud !== undefined &&
+            lrud.upOpen === true);
+        var openDown = (lrud !== null && lrud !== undefined &&
+            lrud.downOpen === true);
+        var noEvidence = (cEntries.length === 0 && fEntries.length === 0 &&
+            !openUp && !openDown);
 
         for (k = 0; k < cEntries.length; k++) {
             ceiling.push(cEntries[k].p);
@@ -2145,6 +2226,18 @@ CsProfile.bandWallRuns = function(band, survey, resolved, opts) {
         // to catch.
         if (isJunction || noEvidence) {
             flush();
+            continue;
+        }
+
+        // ...but do not bridge across the mouth of a pitch or an aven.
+        var prevName = (i > 0) ? band.stations[i - 1].name : null;
+        var nextName = (i + 1 < band.stations.length) ?
+            band.stations[i + 1].name : null;
+        if (openUp && hasLead(leadsUp, st.name, prevName, nextName)) {
+            flushCeiling();
+        }
+        if (openDown && hasLead(leadsDown, st.name, prevName, nextName)) {
+            flushFloor();
         }
     }
     flush();
@@ -2508,7 +2601,8 @@ CsProfile.build = function(survey, resolved, opts) {
         adjacency: CsProfile.adjacency(resolved),
         legIndex: CsProfile.legIndex(resolved),
         splaysByStation: CsLrud.splaysByStation(survey),
-        legCounts: CsLrud.legCounts(resolved.legs)
+        legCounts: CsLrud.legCounts(resolved.legs),
+        stationAxes: CsLrud.stationAxes(resolved)
     };
 
     // station name -> its run key, for classifying an undrawn leg as
