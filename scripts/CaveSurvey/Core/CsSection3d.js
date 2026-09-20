@@ -188,7 +188,7 @@ CsSection3d.leaderFor = function(opts) {
  *
  * \return [{station, scale, blockPos: {x, y}, polylines}]
  */
-CsSection3d.readAll = function(doc) {
+CsSection3d.readAll = function(doc, wallsOnly) {
     var out = [];
     if (isNull(doc)) {
         return out;
@@ -226,7 +226,8 @@ CsSection3d.readAll = function(doc) {
             }
             var pos = ref.getPosition();
             if (isNull(pos)) { continue; }
-            var polylines = CsSection3d.blockGeometry(doc, ref);
+            var polylines = CsSection3d.blockGeometry(doc, ref,
+                wallsOnly === true);
             if (polylines.length === 0) { continue; }
             out.push({ station: station, scale: scale,
                        blockPos: { x: pos.x, y: pos.y },
@@ -234,6 +235,24 @@ CsSection3d.readAll = function(doc) {
         } catch (eRead) {
             continue;
         }
+    }
+    return out;
+};
+
+/**
+ * Every station that has a traced section, as the tube wants it:
+ * {stationName: {scale, polylines}} with the WALL outline only.
+ *
+ * A station with two sections drawn on it keeps the LAST one read --
+ * the same "last reading wins" the rest of the suite uses, and a
+ * choice nobody has asked to make differently yet.
+ */
+CsSection3d.wallRingsByStation = function(doc) {
+    var out = {};
+    var all = CsSection3d.readAll(doc, true);
+    for (var i = 0; i < all.length; i++) {
+        out[all[i].station] = { scale: all[i].scale,
+                                polylines: all[i].polylines };
     }
     return out;
 };
@@ -249,7 +268,57 @@ CsSection3d.readAll = function(doc) {
  * sections that looked right live and vanished from the test suite --
  * which is the one failure a test run cannot tell you about.
  */
-CsSection3d.blockGeometry = function(doc, ref) {
+/**
+ * The layers a section's PASSAGE OUTLINE is drawn on.
+ *
+ * The walls trace tool and nothing else. A captured section also holds
+ * floor detail, breakdown and ceiling lines -- a caver draws the rocks
+ * with the same hand as the walls -- and those are drawings of things
+ * INSIDE the passage. Building a tube out of them pulls its surface in
+ * to wrap a boulder (Nathan, 2026-09-20: "sometimes wall is used to
+ * draw rocks and things").
+ *
+ * INFERRED WALLS COUNT. A dashed wall is still the caver saying where
+ * the passage edge runs; the dashes say how sure they are, which is a
+ * question for the map and not for the shape of a tube.
+ */
+CsSection3d.WALL_LAYERS = [
+    "SECTION-WALLS-SURVEYED",
+    "SECTION-WALLS-INFERRED"
+];
+
+/** True for an entity on one of the section wall layers. */
+CsSection3d.isWallEntity = function(entity) {
+    if (isNull(entity)) {
+        return false;
+    }
+    var layer = "";
+    try {
+        layer = String(entity.getLayerName());
+    } catch (e) {
+        return false;
+    }
+    for (var i = 0; i < CsSection3d.WALL_LAYERS.length; i++) {
+        if (layer === CsSection3d.WALL_LAYERS[i]) {
+            return true;
+        }
+    }
+    return false;
+};
+
+/**
+ * A section's WALL geometry only, block-local, as polylines.
+ *
+ * blockGeometry's sibling, and deliberately not a flag on it: what the
+ * Sections overlay stands beside the passage is the caver's whole
+ * drawing, floor and all, because that is what they drew. What the
+ * TUBE is built from is the outline alone.
+ */
+CsSection3d.wallGeometry = function(doc, ref) {
+    return CsSection3d.blockGeometry(doc, ref, true);
+};
+
+CsSection3d.blockGeometry = function(doc, ref, wallsOnly) {
     var out = [];
     var blockId;
     try {
@@ -270,6 +339,9 @@ CsSection3d.blockGeometry = function(doc, ref) {
         try {
             var e = doc.queryEntity(ids[i]);
             if (isNull(e)) { continue; }
+            if (wallsOnly === true && !CsSection3d.isWallEntity(e)) {
+                continue;
+            }
             var verts = CsArea.vertsOf(e);
             if (verts.length >= 2) {
                 out.push(verts);

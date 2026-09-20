@@ -31757,6 +31757,144 @@ if (layerManagerLoaded) {
 })();
 
 // ---------------------------------------------------------------------
+// A TRACED CROSS SECTION BUILDS THE TUBE where one was drawn.
+// ---------------------------------------------------------------------
+//
+// Four LRUD ticks make a four-sided prism, and the passage is not one.
+// Where a caver stood in it and drew the outline, that drawing is the
+// better answer -- so the tube uses it and falls back to the ticks
+// everywhere else.
+
+(function sectionRingTests() {
+    // A section three units to the RIGHT of the station and one unit
+    // up, drawn asymmetric ON PURPOSE: a symmetric outline cannot tell
+    // a correct mapping from a mirrored one, which is the single
+    // mistake that would be invisible until somebody measured a cave
+    // against its own map.
+    var lopsided = {
+        scale: 1,
+        polylines: [[
+            { x: 3, y: 0 },      // 3 to the caver's RIGHT
+            { x: 3, y: 1 },
+            { x: -1, y: 1 },     // 1 to the caver's LEFT
+            { x: -1, y: -1 },
+            { x: 3, y: -1 },
+            { x: 3, y: 0 }
+        ]]
+    };
+    var station = { x: 0, y: 0, z: 0 };
+    // Walking due north: the caver's right is EAST (+x in the drawing).
+    var north = { x: 0, y: 1, z: 0 };
+    var ring = CsMesh3d.sectionRing(station, north, lopsided);
+    ok(ring.length >= 3, "section: a traced outline makes a ring");
+
+    var east = -Infinity, west = Infinity;
+    for (var i = 0; i < ring.length; i++) {
+        if (ring[i].x > east) { east = ring[i].x; }
+        if (ring[i].x < west) { west = ring[i].x; }
+    }
+    // SECTIONS ARE DRAWN LOOKING FORWARD (Nathan, 2026-09-20), so the
+    // page's right is the caver's right, which walking north is east.
+    ok(Math.abs(east - 3) < 1e-6,
+        "section: the wide side lands on the caver's RIGHT (east, "
+        + "walking north) -- got " + east);
+    ok(Math.abs(west - (-1)) < 1e-6,
+        "section: and the narrow side on their left -- got " + west);
+
+    // Walking SOUTH, the same drawing must land the other way round in
+    // the world: the caver's right is now west.
+    var south = { x: 0, y: -1, z: 0 };
+    var back = CsMesh3d.sectionRing(station, south, lopsided);
+    var bWest = Infinity;
+    for (i = 0; i < back.length; i++) {
+        if (back[i].x < bWest) { bWest = back[i].x; }
+    }
+    ok(Math.abs(bWest - (-3)) < 1e-6,
+        "section: walking the other way, the same wide side is west -- "
+        + "the drawing is read relative to travel, not to the compass");
+
+    // SCALE divides, the way CsSection3d.place does it.
+    var halved = CsMesh3d.sectionRing(station, north,
+        { scale: 2, polylines: lopsided.polylines });
+    var hEast = -Infinity;
+    for (i = 0; i < halved.length; i++) {
+        if (halved[i].x > hEast) { hEast = halved[i].x; }
+    }
+    ok(Math.abs(hEast - 1.5) < 1e-6,
+        "section: drawn at twice scale, the passage is half as wide");
+
+    // ONLY THE OUTSIDE. A trace that wanders inside the passage --
+    // round a boulder, along a ledge -- must not pull the tube in past
+    // the wall the same trace drew.
+    var withRock = {
+        scale: 1,
+        polylines: [
+            lopsided.polylines[0] === undefined ? [] :
+                lopsided.polylines[0],
+            [{ x: 0.4, y: 0.1 }, { x: 0.5, y: 0.2 },
+             { x: 0.4, y: 0.3 }]        // a rock near the middle
+        ]
+    };
+    var rocked = CsMesh3d.sectionRing(station, north, withRock);
+    var rEast = -Infinity;
+    for (i = 0; i < rocked.length; i++) {
+        if (rocked[i].x > rEast) { rEast = rocked[i].x; }
+    }
+    ok(Math.abs(rEast - 3) < 1e-6,
+        "section: a rock drawn inside the outline leaves the wall "
+        + "where it was");
+
+    // Rubbish in, nothing out: the LRUD then answers, as before.
+    eqs(CsMesh3d.sectionRing(station, north, null).length, 0,
+        "section: no section, no ring");
+    eqs(CsMesh3d.sectionRing(station, north,
+        { scale: 1, polylines: [[{ x: 1, y: 0 }]] }).length, 0,
+        "section: one point is not a section");
+    eqs(CsMesh3d.sectionRing(station, { x: 0, y: 0, z: 0 },
+        lopsided).length, 0,
+        "section: a leg going nowhere has no frame to draw in");
+
+    // AND IT REACHES THE TUBE, replacing the four ticks at that
+    // station and only there.
+    function tShot(from, to, az) {
+        var sh = CsModel.newShot();
+        sh.from = from; sh.to = to; sh.distance = 30; sh.azimuth = az;
+        sh.inclination = 0;
+        sh.left = 2; sh.right = 2; sh.up = 2; sh.down = 2;
+        return sh;
+    }
+    var tsv = CsModel.newSurvey();
+    tsv.shots.push(tShot("A1", "A2", 0));
+    tsv.shots.push(tShot("A2", "A3", 0));
+    var tres = CsAdjust.resolveAndAdjust(tsv, {});
+    var plain = CsMesh3d.build(tsv, tres, { colorBy: "trip" });
+    var withSec = CsMesh3d.build(tsv, tres, {
+        colorBy: "trip",
+        sections: { A2: lopsided }
+    });
+    function ringSize(mesh, name) {
+        for (var k = 0; k < mesh.outlines.names.length; k++) {
+            if (mesh.outlines.names[k] === name) {
+                return mesh.outlines.counts[k];
+            }
+        }
+        return 0;
+    }
+    eqs(ringSize(plain, "A2"), 4, "four ticks make a four-point ring");
+    ok(ringSize(withSec, "A2") > 4,
+        "and a traced section makes a richer one -- got " +
+        ringSize(withSec, "A2"));
+    // A3 and not A1: LRUD belongs to the station a shot ARRIVES at, so
+    // A1 has none here and correctly gets no ring at all.
+    eqs(ringSize(withSec, "A3"), 4,
+        "while a station with no section keeps its four ticks");
+    eqs(ringSize(plain, "A1"), 0,
+        "and the first station, whose LRUD nothing recorded, still has "
+        + "no ring either way");
+    eqs(ringSize(withSec, "A1"), 0, "with sections in play or not");
+})();
+
+// ---------------------------------------------------------------------
 // CsGhost: what a page of notes would draw, before it draws it.
 // ---------------------------------------------------------------------
 

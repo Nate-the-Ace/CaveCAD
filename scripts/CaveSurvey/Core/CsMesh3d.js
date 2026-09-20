@@ -122,6 +122,129 @@ CsMesh3d.frameAt = function(dir) {
 };
 
 /**
+ * How many angular buckets a traced section is reduced to.
+ *
+ * A hand-traced outline can carry hundreds of vertices, and the loft
+ * walks every ring by angle -- so the cost of a detailed section is
+ * paid at every leg it touches, on a cave with hundreds of them. Sixty
+ * four is finer than a passage outline is ever read at in this view,
+ * and it is what makes a traced section no more expensive to loft than
+ * a measured one.
+ */
+CsMesh3d.SECTION_BUCKETS = 64;
+
+/**
+ * A traced cross section as a ring around its station.
+ *
+ * WHY A SECTION BEATS AN LRUD. Four ticks make a four-sided prism, and
+ * the passage is not one. Where a caver has stood in the passage and
+ * drawn its actual outline, that drawing is a better answer than the
+ * four numbers -- so the tube uses it, and falls back to the LRUD
+ * everywhere else.
+ *
+ * THE FRAME IS THIS FILE'S, not the section's own display frame.
+ * Angles have to agree with the rings either side of this one, because
+ * that is what the loft matches on; a second frame here would be a
+ * second answer to "which way is up at this station" and would show up
+ * as a twist at every station that had a section drawn.
+ *
+ * DRAWN LOOKING FORWARD, along the direction of travel (Nathan,
+ * 2026-09-20). So the page's x is the caver's right -- which is
+ * frame.right, the same side `tick("right", 1, 0)` puts the R wall on
+ * -- and the page's y is up. Read the other way round and every
+ * sectioned station comes out mirrored, left wall on the right.
+ *
+ * OUTERMOST WINS in each angular bucket, which is where "only the
+ * outside walls" lives: a trace that wanders inside the passage --
+ * round a boulder, along a ledge, over breakdown -- cannot pull the
+ * tube in past the wall it also drew, and a re-entrant the loft could
+ * not render anyway costs nothing.
+ *
+ * \param station {x, y, z} of the station, in drawing coordinates
+ * \param dir     the passage direction there
+ * \param sec     {scale, polylines: [[{x, y}]]} block-local, (0,0) at
+ *                the station -- what CsSection3d.readAll answers
+ * \return ring points [{x, y, z, angle}], or [] when there is nothing
+ *         usable. Pure.
+ */
+CsMesh3d.sectionRing = function(station, dir, sec) {
+    if (sec === null || sec === undefined ||
+            Object.prototype.toString.call(sec.polylines) !==
+                "[object Array]") {
+        return [];
+    }
+    var frame = CsMesh3d.frameAt(dir);
+    if (frame === null) {
+        return [];
+    }
+    var scale = sec.scale;
+    if (typeof scale !== "number" || !isFinite(scale) ||
+            Math.abs(scale) < 1e-9) {
+        scale = 1;
+    }
+    var buckets = {};
+    var i, j;
+    for (i = 0; i < sec.polylines.length; i++) {
+        var line = sec.polylines[i];
+        if (Object.prototype.toString.call(line) !== "[object Array]") {
+            continue;
+        }
+        for (j = 0; j < line.length; j++) {
+            var pt = line[j];
+            if (pt === null || pt === undefined ||
+                    typeof pt.x !== "number" || typeof pt.y !== "number" ||
+                    !isFinite(pt.x) || !isFinite(pt.y)) {
+                continue;
+            }
+            var u = pt.x / scale;
+            var v = pt.y / scale;
+            var radius = Math.sqrt(u * u + v * v);
+            if (radius < 1e-9) {
+                // A vertex ON the station says nothing about which way
+                // any wall lies.
+                continue;
+            }
+            var angle = Math.atan2(v, u);
+            var slot = Math.floor((angle + Math.PI) /
+                (2 * Math.PI) * CsMesh3d.SECTION_BUCKETS);
+            if (slot < 0) { slot = 0; }
+            if (slot >= CsMesh3d.SECTION_BUCKETS) {
+                slot = CsMesh3d.SECTION_BUCKETS - 1;
+            }
+            var held = buckets[slot];
+            if (held === undefined || radius > held.radius) {
+                buckets[slot] = { u: u, v: v, angle: angle,
+                                  radius: radius };
+            }
+        }
+    }
+
+    var kept = [];
+    for (var key in buckets) {
+        if (buckets.hasOwnProperty(key)) { kept.push(buckets[key]); }
+    }
+    if (kept.length < 3) {
+        // Two points are a line, not a section. Let the LRUD answer.
+        return [];
+    }
+    kept.sort(function(a, b) { return a.angle - b.angle; });
+
+    var out = [];
+    for (i = 0; i < kept.length; i++) {
+        out.push({
+            x: station.x + kept[i].u * frame.right.x +
+                           kept[i].v * frame.up.x,
+            y: station.y + kept[i].u * frame.right.y +
+                           kept[i].v * frame.up.y,
+            z: station.z + kept[i].u * frame.right.z +
+                           kept[i].v * frame.up.z,
+            angle: kept[i].angle
+        });
+    }
+    return out;
+};
+
+/**
  * One station's cross section: the measured wall points around it, in
  * angular order, as world coordinates.
  *
@@ -783,6 +906,11 @@ CsMesh3d.build = function(survey, resolved, opts) {
     opts = opts || {};
     var tapeMode = opts.tapeMode || CsTraverse.SLOPE;
     var colorBy = opts.colorBy || "trip";
+    // TRACED CROSS SECTIONS, by station: {name: {scale, polylines}},
+    // block-local with (0,0) at the station, as CsSection3d.readAll
+    // answers. Optional -- a caller that passes none gets the tube
+    // this file has always built, out of LRUD and splays.
+    var sections = opts.sections || {};
 
     var tri = { positions: [], normals: [], colors: [], indices: [] };
     var lin = { positions: [], colors: [], indices: [] };
@@ -1157,9 +1285,18 @@ CsMesh3d.build = function(survey, resolved, opts) {
         if (!junction && ringCache.hasOwnProperty(stationName)) {
             return ringCache[stationName];
         }
-        var ring = CsMesh3d.ringAt(st, dir,
-            CsMesh3d.lrudAt(stationName, survey),
-            splays[stationName] || [], tapeMode);
+        // A TRACED SECTION BEATS THE FOUR TICKS. Where the caver has
+        // drawn the passage's actual outline at this station, that is
+        // what the tube is made of; the LRUD answers everywhere else.
+        var ring = [];
+        if (sections.hasOwnProperty(stationName)) {
+            ring = CsMesh3d.sectionRing(st, dir, sections[stationName]);
+        }
+        if (ring.length < 3) {
+            ring = CsMesh3d.ringAt(st, dir,
+                CsMesh3d.lrudAt(stationName, survey),
+                splays[stationName] || [], tapeMode);
+        }
         if (!junction) {
             ringCache[stationName] = ring;
         }

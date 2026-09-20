@@ -917,6 +917,17 @@ Cave3D.refresh = function() {
                 texture: "", range: null, why: "" };
     }
 
+    // THE TRACED SECTIONS, read once for the whole refresh: the tube
+    // is built out of them where they exist, and the Sections overlay
+    // stands the caver's whole drawing (floor detail and all) beside
+    // the passage separately.
+    var sectionRings = {};
+    try {
+        sectionRings = CsSection3d.wallRingsByStation(getDocument());
+    } catch (eRings) {
+        sectionRings = {};
+    }
+
     // COVER IS COMPUTED WHATEVER THE MODE, because the station card
     // reports it on a cave being looked at by trip or by depth. It is
     // a few hundred bilinear samples; the grid is already in memory.
@@ -937,7 +948,10 @@ Cave3D.refresh = function() {
         mesh = CsMesh3d.build(read.survey, read.resolved, {
             colorBy: Cave3D.currentMode(),
             anchorName: read.anchorName,
-            cover: cover.values
+            cover: cover.values,
+            // WHERE THE CAVER DREW THE PASSAGE, the tube is built
+            // from their outline instead of the four LRUD ticks.
+            sections: sectionRings
         });
     } catch (e) {
         // CsMesh3d refuses to build rather than place a station at datum
@@ -1029,7 +1043,8 @@ Cave3D.refresh = function() {
         scans: mesh.scans,
         terrain: mesh.terrain,
         terrainWhy: terrainWhy,
-        cover: cover
+        cover: cover,
+        sections3d: sectionRings
     };
 };
 
@@ -1074,7 +1089,12 @@ Cave3D.recolour = function() {
             colorBy: Cave3D.currentMode(),
             anchorName: read.anchorName,
             cover: (buffers.cover === null || buffers.cover === undefined)
-                ? {} : buffers.cover.values
+                ? {} : buffers.cover.values,
+            // The traced sections too, or changing colour would throw
+            // away the tube the caver's own outlines built.
+            sections: (buffers.sections3d === null ||
+                       buffers.sections3d === undefined)
+                ? {} : buffers.sections3d
         });
     } catch (eBuild) {
         mesh = null;
