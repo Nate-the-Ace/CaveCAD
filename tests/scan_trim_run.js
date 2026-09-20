@@ -42,7 +42,7 @@ function loadRepoScript(rel) {
 }
 ["CsUuid", "CsUnits", "CsAngles", "CsCave", "CsScanTree", "CsStore",
  "CsTags", "CsLayers", "CsStationOrder", "CsScanFit", "CsScanFrame",
- "CsScanTrim", "CsScanPdf"].forEach(function(m) {
+ "CsScanTrim", "CsScanPdf", "CsSanitize", "CsScanList"].forEach(function(m) {
     loadRepoScript("scripts/CaveSurvey/Core/" + m + ".js");
 });
 
@@ -185,6 +185,44 @@ check("zooming to a placed scan never throws", (function () {
         return false;
     }
 })());
+
+// --- the page the DRAWING was left on --------------------------------
+//
+// The per-machine memory of the selected page does not travel with the
+// cave: open it on the other laptop, or hand it to the other person on
+// the trip, and the tree opens on page one. Where the caver has got to
+// is part of the drawing's state, so it rides IN the drawing -- which
+// is only true if it survives being written out and read back.
+CsScanList.rememberInDrawing(doc, "Trip3/IMG_4021.png");
+check("the drawing remembers the page",
+    CsScanList.selectedInDrawing(doc) === "Trip3/IMG_4021.png");
+
+var selPath = QDir.tempPath() + "/cs-scan-selected-" +
+    String(new Date().getTime()) + ".dxf";
+check("the drawing wrote out",
+    di.exportFile(selPath, CsSanitize.dxfFilter(), false));
+var reopened = new RDocument(new RMemoryStorage(), createSpatialIndex());
+var reopenedDi = new RDocumentInterface(reopened);
+reopenedDi.importFile(selPath);
+check("and still names it after a save and a reopen -- the whole "
+    + "point, since a variable that does not survive the DXF is no "
+    + "memory",
+    CsScanList.selectedInDrawing(reopened) === "Trip3/IMG_4021.png");
+QFile.remove(selPath);
+
+// A drawing that has never recorded one says so, rather than guessing.
+var fresh = new RDocument(new RMemoryStorage(), createSpatialIndex());
+check("a drawing with no record of a page answers null",
+    CsScanList.selectedInDrawing(fresh) === null);
+check("and so does no drawing at all",
+    CsScanList.selectedInDrawing(null) === null);
+
+// THE DRAWING WINS over this machine's memory: it came with the file,
+// from whoever last worked on the cave.
+check("the landing page is the one the drawing names",
+    CsScanList.landingPage(doc, scans) === "Trip3/IMG_4021.png");
+check("and falls back to this machine's memory when it names none",
+    CsScanList.landingPage(fresh, scans) === CsScanList.selectedIn(scans));
 
 // --- flushing the crops ---------------------------------------------
 //

@@ -140,6 +140,159 @@ CsScanList.announce = function(folder) {
 };
 
 // ---------------------------------------------------------------------
+// WHICH PAGE THE CAVER IS ON -- one answer, for every panel.
+// ---------------------------------------------------------------------
+//
+// The same argument as the marks above, for the other half of the
+// browser's state. Sketch Scans remembered the selected page per cave
+// and the Notebook remembered nothing, so the two trees sat side by
+// side showing different pages: tick a page off in one, look across,
+// and the preview beside it was of something else. Worse when tracing,
+// where the Notebook's pane is the page being READ and Sketch Scans'
+// is the page being PLACED -- they are the same page, and keeping them
+// in step by hand is a click every time either one moves.
+//
+// The selection is broadcast the way a mark is, and persisted the way
+// a mark is, so it also survives the panel being closed and reopened.
+
+/** Panels that want to know when the selected page changes. One slot
+ *  per key, and the panel that CAUSED the change is not told about its
+ *  own move -- it is already there, and selecting a row inside a
+ *  selection handler is how a signal loop starts. */
+CsScanList.selectionWatchers = {};
+
+CsScanList.watchSelection = function(key, fn) {
+    CsScanList.selectionWatchers[key] = fn;
+};
+
+// THE DRAWING'S OWN MEMORY of the page, as well as this machine's.
+//
+// The settings store above is per MACHINE: it survives closing the
+// panel and reopening the cave, and it does not survive the cave being
+// opened on the other laptop, or by the other person on the trip. The
+// page a caver is working through is part of where the drawing HAS GOT
+// TO, so it belongs in the drawing (Nathan, 2026-09-19) -- which is
+// also what makes it come back after a restart with a clean settings
+// file.
+//
+// A DOCUMENT VARIABLE, which RDxfExporter writes into QCAD_OBJECTS and
+// the reader hands back. One short relative path, nowhere near the
+// 1024-character line the DXF reader dies on, so unlike the Layer
+// Manager's blob this needs no chunking.
+//
+// IT MARKS THE DRAWING MODIFIED, because that is what saving with the
+// drawing means: browsing to another page is a change to the file, and
+// a caver who closes without saving keeps the page the file already
+// named. setVariable is a no-op when the value has not changed, so
+// clicking the same page twice does not dirty anything.
+CsScanList.SELECTED_VAR = "CaveSurveySelectedScan";
+
+/** The page this DRAWING was left on, or null. */
+CsScanList.selectedInDrawing = function(doc) {
+    if (isNull(doc)) {
+        return null;
+    }
+    try {
+        var got = doc.getVariable(CsScanList.SELECTED_VAR, "", false);
+        var rel = (got === null || got === undefined) ? "" : String(got);
+        return rel === "" ? null : rel;
+    } catch (e) {
+        return null;
+    }
+};
+
+/** Writes it into the drawing. Silent when there is no drawing: the
+ *  shelf browses a cave that is not open, and that is not an error. */
+CsScanList.rememberInDrawing = function(doc, rel) {
+    if (isNull(doc) || rel === null || rel === undefined || rel === "") {
+        return;
+    }
+    try {
+        doc.setVariable(CsScanList.SELECTED_VAR, String(rel));
+    } catch (e) {
+        // a build that will not take the variable still has the
+        // per-machine memory below
+    }
+};
+
+/**
+ * The page to open a cave's tree on: what the DRAWING says, and only
+ * then what this machine remembers.
+ *
+ * The drawing wins because it is the shared answer -- it came with the
+ * file, from whoever last worked on it, which is the fact a second
+ * caver opening the cave wants. The machine's memory is the fallback
+ * for a drawing that has never recorded one.
+ */
+CsScanList.landingPage = function(doc, folder) {
+    var inDrawing = CsScanList.selectedInDrawing(doc);
+    if (inDrawing !== null) {
+        return inDrawing;
+    }
+    return CsScanList.selectedIn(folder);
+};
+
+/** The page this cave was left on, or null. */
+CsScanList.selectedIn = function(folder) {
+    try {
+        return CsScanTree.selectedRelFor(
+            CsScanTree.parseCollapsed(
+                RSettings.getStringValue(CsScanTree.SETTING_SELECTED, "")),
+            folder);
+    } catch (e) {
+        return null;
+    }
+};
+
+/**
+ * Records the page a panel has just moved to and tells the others.
+ *
+ * \param folder the cave's scans folder
+ * \param rel    the page now selected, relative to it
+ * \param rows   the tree's rows, so a selection naming a page that is
+ *               no longer there can be pruned (as the marks are)
+ * \param fromKey the panel making the move, which is not told about it
+ */
+CsScanList.selectionMoved = function(folder, rel, rows, fromKey) {
+    if (typeof folder !== "string" || folder === "") {
+        return;
+    }
+    // Into the drawing first, so the page travels with the file.
+    try {
+        CsScanList.rememberInDrawing(EAction.getDocument(), rel);
+    } catch (eDoc) {
+        // no document, or a build with no EAction: the per-machine
+        // memory below still holds
+    }
+    try {
+        var map = CsScanTree.parseCollapsed(
+            RSettings.getStringValue(CsScanTree.SETTING_SELECTED, ""));
+        var valid = [];
+        if (rows !== null && rows !== undefined) {
+            for (var i = 0; i < rows.length; i++) {
+                if (rows[i].kind === "file") { valid.push(rows[i].rel); }
+            }
+        }
+        CsScanTree.recordSelected(map, folder, rel, valid);
+        RSettings.setValue(CsScanTree.SETTING_SELECTED,
+            CsScanTree.serializeCollapsed(map));
+    } catch (eSave) {
+        // a bridge without RSettings forgets where we were; the panels
+        // still agree for this session, which is the bigger half
+    }
+    for (var key in CsScanList.selectionWatchers) {
+        if (key === fromKey) {
+            continue;
+        }
+        try {
+            CsScanList.selectionWatchers[key](folder, rel);
+        } catch (eTell) {
+            delete CsScanList.selectionWatchers[key];
+        }
+    }
+};
+
+// ---------------------------------------------------------------------
 // WHAT IS IN A CAVE'S scans FOLDER -- one answer, for every panel.
 // ---------------------------------------------------------------------
 //

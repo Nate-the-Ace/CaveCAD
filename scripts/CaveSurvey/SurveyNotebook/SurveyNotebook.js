@@ -323,6 +323,10 @@ SurveyNotebook.setSurvey = function(w, survey) {
 // ---------------------------------------------------------------------
 
 SurveyNotebook.EDIT_WIDTH = 64;   // measurement cells
+
+/** The objectName every ladder cell wears, so the focus listener can
+ *  tell a cell from any other widget that takes focus. */
+SurveyNotebook.CELL_NAME = "CaveSurveyNotebookCell";
 SurveyNotebook.CELL_HEIGHT = 30;  // uniform input height
 SurveyNotebook.FONT_SIZE = 14;    // readable at arm's length
 
@@ -427,6 +431,18 @@ SurveyNotebook.makeCell = function(w, width) {
     var e = SurveyNotebook.styleCell(new QLineEdit());
     e.maximumWidth = width || SurveyNotebook.EDIT_WIDTH;
     e.minimumWidth = width || SurveyNotebook.EDIT_WIDTH;
+    // NAMED SO THE PAGE CAN FOLLOW THE CURSOR. Tabbing down a long
+    // ladder walked the focus off the bottom of the scroll area and
+    // the view stayed where it was: the caver was typing into a cell
+    // they could not see, which is exactly how a reading lands in the
+    // wrong column. The focus listener scrolls to any widget wearing
+    // this name -- see CELL_NAME's use in the focusChanged wiring.
+    try {
+        e.objectName = SurveyNotebook.CELL_NAME;
+    } catch (eName) {
+        // no objectName on this bridge: the cell still works, the
+        // page simply will not follow it
+    }
     SurveyNotebook.safeConnect(e.textEdited, function() {
         SurveyNotebook.refresh(w);
     }, "cell refresh", w.problems);
@@ -465,6 +481,10 @@ SurveyNotebook.addStationRow = function(w, stationName) {
     // catcher when this is the last station. A small multiline box,
     // tall enough to actually read.
     SurveyNotebook.styleCell(row.notes, 48);
+    try {
+        row.notes.objectName = SurveyNotebook.CELL_NAME;
+    } catch (eNoteName) {
+    }
     row.notes.minimumWidth = 170;
     row.notes.maximumHeight = 48;
     try {
@@ -576,7 +596,27 @@ SurveyNotebook.applyTabOrder = function(w) {
     // thing in the chain: the next station's name, or the "+" catcher
     // after the last station, which grows the page like tabbing off
     // the last D does.
-    var order = [rows[0].name];
+    // THE HEADER IS THE TOP OF THE CHAIN. A trip is written from the
+    // top of the page down -- objective, date, team, declination,
+    // instruments -- and then the shots. Tab off Instr used to leave
+    // the panel for whatever the layout happened to hold next, with
+    // nothing visibly focused: the caver's typing went nowhere and the
+    // only way back into the ladder was the mouse. Instr now hands
+    // over to the first station's name, which is the next thing
+    // written on the paper page too.
+    //
+    // The header fields are only chained when they EXIST: this runs
+    // from addStationRow, which the panel may call while it is still
+    // being built.
+    var order = [];
+    var header = [w.nameEdit, w.dateEdit, w.teamEdit, w.declEdit,
+                  w.instrEdit];
+    for (var h = 0; h < header.length; h++) {
+        if (header[h] !== null && header[h] !== undefined) {
+            order.push(header[h]);
+        }
+    }
+    order.push(rows[0].name);
     if (rows.length > 1) {
         var r1 = rows[1];
         order.push(rows[0].notes,
@@ -602,6 +642,39 @@ SurveyNotebook.applyTabOrder = function(w) {
         // older bridge without setTabOrder: keep default order
     }
 };
+
+/**
+ * Scrolls the notes page so a cell that has just taken focus is on it.
+ *
+ * ensureWidgetVisible takes MARGINS, and they are what makes this
+ * useful rather than merely correct: with none, a cell tabbed into
+ * from below lands flush against the bottom edge with the next row --
+ * the one about to be typed -- still hidden, so every Tab scrolls by
+ * exactly one row and the page never gets ahead of the caver. A
+ * row-and-a-bit of margin keeps what comes next in view.
+ *
+ * Silent on failure in every direction: no scroll area yet, a bridge
+ * without ensureWidgetVisible, a widget whose C++ side has gone. None
+ * of them is a reason to interrupt somebody typing.
+ */
+SurveyNotebook.followFocus = function(w, widget) {
+    if (w === null || w === undefined || widget === null ||
+            widget === undefined) {
+        return;
+    }
+    if (w.ladderArea === null || w.ladderArea === undefined) {
+        return;
+    }
+    try {
+        w.ladderArea.ensureWidgetVisible(widget, 24,
+            SurveyNotebook.FOLLOW_MARGIN);
+    } catch (eScroll) {
+    }
+};
+
+/** How much of the page to keep visible below a focused cell, in
+ *  pixels -- about a station line and a shot line. */
+SurveyNotebook.FOLLOW_MARGIN = 56;
 
 /**
  * Tab off the last station's D and the page GROWS: focus landing on
@@ -3037,6 +3110,13 @@ SurveyNotebook.fillScans = function(w) {
     CsScanList.watch("SurveyNotebook", function(changed) {
         SurveyNotebook.marksChanged(w, changed);
     });
+    // AND WHICH PAGE. Sketch Scans browses the same folder beside
+    // this, and the two used to sit on different pages in it -- while
+    // tracing, this pane holds the page being read and that one holds
+    // the page being placed, which are the same page.
+    CsScanList.watchSelection("SurveyNotebook", function(folder, rel) {
+        SurveyNotebook.selectionElsewhere(w, folder, rel);
+    });
     var folder = null;
     try {
         folder = CsCave.scansDir(String(
@@ -3085,9 +3165,30 @@ SurveyNotebook.fillScans = function(w) {
         CsScanTree.parseCollapsed(RSettings.getStringValue(
             CsScanTree.SETTING, "")), folder);
     w.scanComplete = CsScanList.loadComplete(folder);
-    CsScanList.fill(w.scanList, w.scanRows,
-        { folder: folder, collapsed: w.scanCollapsed,
-          complete: w.scanComplete }, {});
+    // THE REFILL IS NOT A MOVE. Clearing the rows fires the selection
+    // signal with nothing selected; recording that would tell the
+    // other panel the caver had navigated away from the page they are
+    // still on.
+    w.scanFilling = true;
+    try {
+        CsScanList.fill(w.scanList, w.scanRows,
+            { folder: folder, collapsed: w.scanCollapsed,
+              complete: w.scanComplete }, {});
+        // Land on the page the cave was left on, whichever panel left
+        // it there -- this tree used to open on row 0 every time.
+        var landing = CsScanTree.rowOfRel(w.scanRows,
+            CsScanList.landingPage(EAction.getDocument(), folder),
+            w.scanCollapsed);
+        if (landing >= 0) {
+            try {
+                w.scanList.setCurrentCell(landing, 0);
+            } catch (eLand) {
+            }
+        }
+    } finally {
+        w.scanFilling = false;
+    }
+    SurveyNotebook.showScan(w);
 };
 
 /** The other panel marked a page: take the store's word for it and
@@ -3104,15 +3205,87 @@ SurveyNotebook.marksChanged = function(w, folder) {
         keep = w.scanList.currentRow();
     } catch (eRow) {
     }
-    CsScanList.fill(w.scanList, w.scanRows,
-        { folder: folder, collapsed: w.scanCollapsed,
-          complete: w.scanComplete }, {});
+    w.scanFilling = true;
     try {
-        if (keep >= 0) {
-            w.scanList.setCurrentCell(keep, 0);
+        CsScanList.fill(w.scanList, w.scanRows,
+            { folder: folder, collapsed: w.scanCollapsed,
+              complete: w.scanComplete }, {});
+        try {
+            if (keep >= 0) {
+                w.scanList.setCurrentCell(keep, 0);
+            }
+        } catch (eSel) {
         }
+    } finally {
+        w.scanFilling = false;
+    }
+};
+
+/**
+ * This panel moved to another page: remember it and tell the others.
+ *
+ * Not while the list is being refilled -- clearing the rows fires the
+ * selection signal with nothing selected, which would record "no page"
+ * over the page the refill is about to land on. That is the same guard
+ * Sketch Scans keeps as w.building, under this panel's own name.
+ */
+SurveyNotebook.selectionMoved = function(w) {
+    if (isNull(w) || w.scanFilling === true ||
+            isNull(w.scanRows) || isNull(w.scansFolder)) {
+        return;
+    }
+    var rel = SurveyNotebook.selectedScanRel(w);
+    if (rel === null) {
+        return;                 // a folder row is not a page
+    }
+    CsScanList.selectionMoved(w.scansFolder, rel, w.scanRows,
+        "SurveyNotebook");
+};
+
+/** The page selected in this panel's tree, or null for a folder row
+ *  or no selection at all. */
+SurveyNotebook.selectedScanRel = function(w) {
+    var row = -1;
+    try {
+        row = w.scanList.currentRow();
+    } catch (eRow) {
+        return null;
+    }
+    if (row < 0 || isNull(w.scanRows) || row >= w.scanRows.length) {
+        return null;
+    }
+    return w.scanRows[row].kind === "file" ? w.scanRows[row].rel : null;
+};
+
+/**
+ * Sketch Scans moved to another page: follow it.
+ *
+ * This cave's folder only, and only to a row that is really there and
+ * not folded away -- opening a folder the caver collapsed to show them
+ * a page they did not ask for is a worse fix than not following.
+ */
+SurveyNotebook.selectionElsewhere = function(w, folder, rel) {
+    if (isNull(w) || isNull(w.scanList) || isNull(w.scanRows) ||
+            isNull(w.scansFolder) || w.scansFolder !== folder) {
+        return;
+    }
+    if (rel === null || rel === undefined || rel === "") {
+        return;
+    }
+    if (SurveyNotebook.selectedScanRel(w) === rel) {
+        return;
+    }
+    var row = CsScanTree.rowOfRel(w.scanRows, rel, w.scanCollapsed);
+    if (row < 0) {
+        return;
+    }
+    var was = w.scanFilling;
+    w.scanFilling = true;       // our own move must not echo back
+    try {
+        w.scanList.setCurrentCell(row, 0);
     } catch (eSel) {
     }
+    w.scanFilling = was;
 };
 
 /** One row saying why the browser is empty. */
@@ -3718,6 +3891,18 @@ SurveyNotebook.buildDock = function(appWin) {
                         // change, so the click path can't double-add
                         w.sentinelFocusAdd = true;
                         SurveyNotebook.autoAddStation(w);
+                        return;
+                    }
+                    // THE PAGE FOLLOWS THE CURSOR. Tab walks down a
+                    // ladder that is taller than the panel, and the
+                    // scroll area does not move on its own: past a
+                    // dozen stations the caver was typing readings
+                    // into cells below the bottom edge, which is how a
+                    // number ends up in the wrong column. Scrolling to
+                    // the focused cell with a margin keeps the row
+                    // being typed, and the one after it, on screen.
+                    if (focused === SurveyNotebook.CELL_NAME) {
+                        SurveyNotebook.followFocus(w, newW);
                     }
                 });
                 w.focusAddWired = true;
@@ -3787,6 +3972,7 @@ SurveyNotebook.buildDock = function(appWin) {
     SurveyNotebook.safeConnect(w.scanList.itemSelectionChanged,
         function() {
             SurveyNotebook.showScan(w);
+            SurveyNotebook.selectionMoved(w);
         }, "Scan selection", w.problems);
     try {
         w.scanList.contextMenuPolicy = Qt.CustomContextMenu;

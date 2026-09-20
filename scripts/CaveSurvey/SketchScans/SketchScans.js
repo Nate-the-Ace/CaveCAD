@@ -243,12 +243,12 @@ SketchScans.listedRels = function(rows) {
     return valid;
 };
 
-// The scan this cave was left on, from settings, or null.
+// The scan this cave was left on: what the DRAWING recorded, and
+// failing that what this machine remembers. Core holds both, because
+// the Notebook's copy of the tree has to land on the same page.
 SketchScans.loadSelected = function(scans) {
     try {
-        var map = CsScanTree.parseCollapsed(
-            RSettings.getStringValue(CsScanTree.SETTING_SELECTED, ""));
-        return CsScanTree.selectedRelFor(map, scans);
+        return CsScanList.landingPage(EAction.getDocument(), scans);
     } catch (e) {
         return null;
     }
@@ -256,20 +256,53 @@ SketchScans.loadSelected = function(scans) {
 
 // Writes it back. Called on every selection change: a dock has no
 // closing moment to save on, same as the collapsed set.
+//
+// THROUGH CORE, which also tells the Survey Notebook's copy of this
+// tree. The two panels browse one folder and were free to sit on
+// different pages in it -- and when tracing, the Notebook's pane holds
+// the page being read while this one holds the page being placed, the
+// same page, kept in step by hand.
 SketchScans.saveSelected = function(scans, rel, rows) {
-    try {
-        var map = CsScanTree.parseCollapsed(
-            RSettings.getStringValue(CsScanTree.SETTING_SELECTED, ""));
-        var valid = [];
-        for (var i = 0; i < rows.length; i++) {
-            if (rows[i].kind === "file") { valid.push(rows[i].rel); }
-        }
-        CsScanTree.recordSelected(map, scans, rel, valid);
-        RSettings.setValue(CsScanTree.SETTING_SELECTED,
-            CsScanTree.serializeCollapsed(map));
-    } catch (e) {
-        // a bridge without RSettings just forgets where we were
+    CsScanList.selectionMoved(scans, rel, rows, "SketchScans");
+};
+
+/**
+ * The Notebook moved to another page: follow it.
+ *
+ * Only for THIS cave's folder, and only when the row is really there
+ * and visible -- a page inside a folder this panel has collapsed is
+ * not somewhere the selection can go, and forcing it open would undo
+ * a fold the caver made. w.building guards the rebuild case, where the
+ * table fires selection signals of its own.
+ */
+SketchScans.selectionElsewhere = function(scans, rel) {
+    var w = SketchScans.w;
+    if (w === undefined || w === null ||
+            isNull(w.list) || isNull(w.rows) ||
+            w.scans === null || w.scans === undefined ||
+            w.scans !== scans) {
+        return;
     }
+    if (rel === null || rel === undefined || rel === "") {
+        return;
+    }
+    if (SketchScans.selectedRel() === rel) {
+        return;                     // already there: nothing to do
+    }
+    var row = CsScanTree.rowOfRel(w.rows, rel, w.collapsed);
+    if (row < 0) {
+        return;
+    }
+    var was = w.building;
+    w.building = true;              // our own save must not echo back
+    try {
+        w.list.selectRow(row);
+    } catch (eSel) {
+    }
+    w.building = was;
+    // The preview follows on its own: selecting a row fires the
+    // table's own itemSelectionChanged, which is what draws it, and
+    // w.building suppresses only the SAVE.
 };
 
 // The text of one row: indentation by depth, a disclosure glyph on
@@ -638,6 +671,29 @@ SketchScans.buildDock = function(appWin) {
         zoomRow.addWidget(w.rotateButton, 0, 0);
         w.rotateButton.clicked.connect(function() {
             SketchScans.rotateSelected();
+        });
+
+        // A PAGE THAT CAME OUT BACK TO FRONT -- shot through the back
+        // of the sheet, traced on the reverse of tracing paper, taken
+        // with a phone's front camera. Same argument as the turn: the
+        // pixels are the thing that is wrong, and the file is where
+        // every tool downstream reads them from.
+        //
+        // HORIZONTAL ONLY, one button. A vertical flip is this one
+        // followed by two turns, and the reversal a scan actually
+        // arrives with is nearly always left-for-right.
+        w.flipButton = new QPushButton("\u21C4");
+        w.flipButton.toolTip = qsTr("Mirror this scan left-for-right " +
+            "AND SAVE IT BACK TO DISK, for a page that came out back " +
+            "to front. The file itself is rewritten. (For a top-to-" +
+            "bottom flip, mirror it and then turn it twice.)");
+        try {
+            w.flipButton.maximumWidth = 34;
+        } catch (eFw) {
+        }
+        zoomRow.addWidget(w.flipButton, 0, 0);
+        w.flipButton.clicked.connect(function() {
+            SketchScans.flipSelected();
         });
 
         // THE TRIM BAR. Not an optional extra button: a scan is not
@@ -2299,6 +2355,9 @@ SketchScans.rebuild = function() {
     // ONE SLOT per panel, so refilling replaces this rather than
     // stacking another closure on the old rows.
     CsScanList.watch("SketchScans", SketchScans.marksChanged);
+    // ...and the page the other panel is on, for the same reason and
+    // in the same one-slot-per-panel way.
+    CsScanList.watchSelection("SketchScans", SketchScans.selectionElsewhere);
 
     CsScanList.fill(w.list, w.rows,
         { folder: scans, collapsed: w.collapsed, complete: w.bookmarks },
@@ -2520,38 +2579,61 @@ SketchScans.placedCountOf = function(doc, rel) {
  * Four more presses put a page back where it started; what a re-encode
  * costs a JPEG cannot be undone by anything, prompt or no prompt.
  */
+SketchScans.flipSelected = function() {
+    SketchScans.rewriteSelected("flip");
+};
+
 SketchScans.rotateSelected = function() {
+    SketchScans.rewriteSelected("turn");
+};
+
+/**
+ * Turns or mirrors the selected page and says what it cost.
+ *
+ * ONE PATH FOR BOTH, because everything around the pixels is the same:
+ * the same selection, the same crops dropped with the old pixels, the
+ * same trim choice invalidated, and the same thing a caver has to act
+ * on afterwards -- the placements of this page already in the drawing,
+ * which keep their frames while the sketch inside them moves.
+ *
+ * \param kind "turn" or "flip"
+ */
+SketchScans.rewriteSelected = function(kind) {
     var w = SketchScans.w;
     if (w === undefined || w === null || w.scans === null ||
             w.scans === undefined) {
         return;
     }
+    var flipping = (kind === "flip");
     var rel = SketchScans.selectedRel();
     if (rel === null || rel === undefined) {
-        warning("Sketch Scans: select a scan to rotate.");
+        warning("Sketch Scans: select a scan to " +
+            (flipping ? "mirror." : "rotate."));
         return;
     }
 
-    // Counted BEFORE the turn, and reported after it: the placements
-    // are what a caver has to act on, and they are the same before and
-    // after -- the turn changes the pixels under them, not their number.
+    // Counted BEFORE the rewrite, and reported after it: the
+    // placements are what a caver has to act on, and they are the same
+    // before and after -- this changes the pixels under them, not
+    // their number.
     var placed = SketchScans.placedCountOf(EAction.getDocument(), rel);
 
-    var turned = CsScanRotate.turn(w.scans, rel);
-    if (turned.ok !== true) {
-        warning("Sketch Scans: " + turned.error);
+    var done = flipping ? CsScanRotate.flip(w.scans, rel, "horizontal")
+                        : CsScanRotate.turn(w.scans, rel);
+    if (done.ok !== true) {
+        warning("Sketch Scans: " + done.error);
         return;
     }
-    var dropped = turned.dropped;
 
     // THE TRIM CHOICE DIES WITH THE OLD PIXELS. A box drawn on the page
     // as it was is a box on a page that no longer exists, so the panel
     // goes back to "no choice made yet" and reloads the preview from
     // the rewritten file.
     SketchScans.resetTrim(true);
-    var said = rel + qsTr(" rotated clockwise -- now ") +
-        turned.w + " \u00d7 " + turned.h + qsTr(" pixels") +
-        (dropped > 0 ? qsTr(", and ") + dropped +
+    var said = rel + (flipping ? qsTr(" mirrored left-for-right -- still ")
+                               : qsTr(" rotated clockwise -- now ")) +
+        done.w + " \u00d7 " + done.h + qsTr(" pixels") +
+        (done.dropped > 0 ? qsTr(", and ") + done.dropped +
             qsTr(" trimmed crop(s) of it were removed") : "") + ".";
     // The placements are the part a caver has to do something about,
     // so they are said every time rather than only when a box was
@@ -2560,7 +2642,7 @@ SketchScans.rotateSelected = function() {
         said += qsTr(" It is placed in this drawing ") +
             (placed === 1 ? qsTr("once") : (placed + qsTr(" times"))) +
             qsTr("; those placements keep their frames, so the sketch " +
-            "inside them has turned -- re-align them.");
+            "inside them has moved -- re-align them.");
     }
     EAction.handleUserMessage(said);
 };

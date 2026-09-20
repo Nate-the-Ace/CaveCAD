@@ -113,6 +113,57 @@ check("the refusal names the extension",
 check("and the file is still there, untouched",
     new QFileInfo(odd).exists());
 
+// --- the mirror ------------------------------------------------------
+//
+// A page that came out back to front. Same machinery as the turn --
+// same staging, same crops dropped, same refusals -- so what is worth
+// pinning here is the DIRECTION and the fact that the page keeps its
+// shape, which is what tells a mirror from a rotation.
+var flipRel = "Trip3/IMG_4023.png";
+var flipPath = scans + "/" + flipRel;
+check("the flip fixture saved", page.save(flipPath, "PNG"));
+var flipCrop = CsScanTrim.write(scans, flipRel, { x: 8, y: 8, w: 60, h: 60 });
+check("its crop was written", flipCrop.error === null);
+
+var flipped = CsScanRotate.flip(scans, flipRel, "horizontal");
+check("flip reports ok", flipped.ok === true);
+check("the page kept its own name", new QFileInfo(flipPath).exists());
+check("and no staging file was left behind",
+    !new QFileInfo(flipPath + CsScanRotate.TEMP_SUFFIX).exists());
+
+var mirror = new QImage(flipPath);
+check("a mirror keeps the page's shape",
+    mirror.width() === pxW && mirror.height() === pxH);
+check("and reports it", flipped.w === pxW && flipped.h === pxH);
+// THE DIRECTION. A left-for-right mirror takes (x, y) to (W-1-x, y),
+// and nothing else does: a vertical flip or either rotation lands the
+// marker somewhere else.
+check("the marked pixel landed where a LEFT-FOR-RIGHT mirror puts it",
+    String(mirror.pixelColor(pxW - 1 - 50, 20).name()) === "#000000");
+check("and not where a top-to-bottom flip would",
+    String(mirror.pixelColor(50, pxH - 1 - 20).name()) === "#ffffff");
+check("the page's crop went with its old pixels",
+    !new QFileInfo(flipCrop.path).exists());
+
+// Twice is where you started, which is the property that makes this
+// safe to press when you are not sure.
+CsScanRotate.flip(scans, flipRel, "horizontal");
+var back = new QImage(flipPath);
+check("mirroring twice restores the page",
+    String(back.pixelColor(50, 20).name()) === "#000000");
+
+// The other axis, asked for by name.
+var vert = CsScanRotate.flip(scans, flipRel, "vertical");
+check("a vertical flip reports ok", vert.ok === true);
+var upside = new QImage(flipPath);
+check("and swaps top for bottom",
+    String(upside.pixelColor(50, pxH - 1 - 20).name()) === "#000000");
+
+// It refuses what the turn refuses -- same gate, one implementation.
+var noFlip = CsScanRotate.flip(scans, "Trip3/notes.xcf", "horizontal");
+check("a format this suite will not write is refused by flip too",
+    noFlip.ok === false);
+
 // --- the writable-format gate, against Qt's real answer ---------------
 var formats = CsScanRotate.writableFormats();
 check("Qt reports writable formats here", formats.length > 0);

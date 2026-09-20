@@ -156,17 +156,73 @@ CsScanRotate.writableFormats = function() {
  * \return { ok: true, w, h } or { ok: false, error: <message> }.
  */
 CsScanRotate.turn = function(scansFolder, pageRel) {
+    // rotate(90) as a matrix: m11 0, m12 1, m21 -1, m22 0.
+    return CsScanRotate.rewrite(scansFolder, pageRel,
+        new QTransform(0, 1, 0,
+                      -1, 0, 0,
+                       0, 0, 1),
+        "rotating");
+};
+
+/**
+ * Mirrors a page and saves it back, the same way turn() rotates one.
+ *
+ * WHY A SCAN IS EVER MIRRORED. A page photographed through the back of
+ * the sheet, a phone's front camera, a sketch traced onto tracing
+ * paper and scanned from the wrong side -- the sketch is right, the
+ * pixels are reversed, and every tool downstream reads the pixels.
+ *
+ * MIRRORING THE FILE, NOT THE PLACEMENT, for exactly the reasons the
+ * top of this file gives for rotation: the preview, the trim box, the
+ * two-point fit and the section bay all read the page off disk, and a
+ * mirror carried beside the file would have to be honoured by each of
+ * them separately or quietly ignored by one of them.
+ *
+ * \param axis "horizontal" to swap left and right (the usual one: it
+ *             is the axis a page gets flipped about), "vertical" to
+ *             swap top and bottom.
+ */
+CsScanRotate.flip = function(scansFolder, pageRel, axis) {
+    var horizontal = (String(axis) !== "vertical");
+    return CsScanRotate.rewrite(scansFolder, pageRel,
+        horizontal ? new QTransform(-1, 0, 0,
+                                     0, 1, 0,
+                                     0, 0, 1)
+                   : new QTransform(1,  0, 0,
+                                    0, -1, 0,
+                                    0,  0, 1),
+        "flipping");
+};
+
+/**
+ * Reads a page, applies one transform to its pixels, and writes it
+ * back over itself.
+ *
+ * THE SHARED HALF of turn and flip, which differ only in the matrix.
+ * Everything that is delicate about rewriting somebody's scan lives
+ * here once: the format is taken from the NAME so the page lands back
+ * under the name every drawing references, the new pixels are staged
+ * beside the file so a save that dies half way through takes the
+ * STAGING file with it, the original is removed before the rename
+ * because QFile.rename will not overwrite, and the page's trimmed
+ * crops are dropped because they are cut-outs of pixels that no longer
+ * exist.
+ *
+ * \param verb what to call this in an error a caver reads
+ * \return {ok, w, h, dropped} or {ok: false, error}
+ */
+CsScanRotate.rewrite = function(scansFolder, pageRel, transform, verb) {
     var path = String(scansFolder) + "/" + pageRel;
     var format = CsScanRotate.formatOf(pageRel);
     if (format === null) {
         return { ok: false, error: pageRel + " is a ." +
             CsScanRotate.extOf(pageRel) + " page, which this suite " +
-            "will not rewrite. Rotate it in an image editor, or save " +
+            "will not rewrite. Change it in an image editor, or save " +
             "it as JPEG or PNG first." };
     }
     if (!CsScanRotate.canWrite(format, CsScanRotate.writableFormats())) {
         return { ok: false, error: "this build of CaveCAD cannot write " +
-            format + " images, so " + pageRel + " cannot be rotated " +
+            format + " images, so " + pageRel + " cannot be changed " +
             "in place." };
     }
 
@@ -183,15 +239,12 @@ CsScanRotate.turn = function(scansFolder, pageRel) {
 
     var turned;
     try {
-        // rotate(90) as a matrix: m11 0, m12 1, m21 -1, m22 0.
-        turned = image.transformed(new QTransform(0, 1, 0,
-                                                 -1, 0, 0,
-                                                  0, 0, 1));
+        turned = image.transformed(transform);
     } catch (eTurn) {
         turned = null;
     }
     if (turned === null || turned.isNull()) {
-        return { ok: false, error: "rotating " + pageRel + " failed -- " +
+        return { ok: false, error: verb + " " + pageRel + " failed -- " +
             "the page may be too large to hold in memory." };
     }
 
@@ -204,7 +257,7 @@ CsScanRotate.turn = function(scansFolder, pageRel) {
     }
     if (!saved) {
         try { QFile.remove(temp); } catch (eRm) { }
-        return { ok: false, error: "the rotated page could not be " +
+        return { ok: false, error: "the changed page could not be " +
             "written beside " + path + " -- the scans folder may be " +
             "read-only." };
     }
@@ -231,16 +284,16 @@ CsScanRotate.turn = function(scansFolder, pageRel) {
     }
     if (!moved) {
         // The worst case this file has: the page is gone from its own
-        // name and the rotation is sitting beside it. Say exactly where
-        // it is rather than pretending nothing happened.
-        return { ok: false, error: "the rotated page was written to " +
+        // name and the new pixels are sitting beside it. Say exactly
+        // where they are rather than pretending nothing happened.
+        return { ok: false, error: "the changed page was written to " +
             temp + " but could not be renamed over " + path +
-            ". Rename it by hand -- the rotated scan is that file." };
+            ". Rename it by hand -- that file is the changed scan." };
     }
     // THE CROPS GO WITH THE OLD PIXELS, and they go HERE rather than
-    // at the caller: a rotation that left them behind would leave the
+    // at the caller: a rewrite that left them behind would leave the
     // folder holding crops of a page that no longer exists, whichever
-    // tool did the rotating.
+    // tool did the rewriting.
     return { ok: true, w: turned.width(), h: turned.height(),
              dropped: CsScanRotate.dropStaleTrims(scansFolder, pageRel) };
 };

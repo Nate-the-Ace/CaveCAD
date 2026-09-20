@@ -144,6 +144,80 @@ CsScanList.toggleComplete(FOLDER, PAGES[2], PAGES);
 ok(isNull(CsScanList.watchers["dead"]),
     "and it is dropped rather than throwing every time");
 
+// ---------------------------------------------------------------------
+// 6. THE SELECTED PAGE, the other half of a browser's state.
+// ---------------------------------------------------------------------
+//
+// The two panels browse one folder and used to sit on different pages
+// in it: only Sketch Scans remembered a selection, and neither told
+// the other when it moved. While tracing, one pane holds the page
+// being read and the other the page being placed -- the same page.
+function clearSelection() {
+    var map = CsScanTree.parseCollapsed(RSettings.getStringValue(
+        CsScanTree.SETTING_SELECTED, ""));
+    delete map[FOLDER];
+    RSettings.setValue(CsScanTree.SETTING_SELECTED,
+        CsScanTree.serializeCollapsed(map));
+}
+clearSelection();
+CsScanList.selectionWatchers = {};
+
+ok(CsScanList.selectedIn(FOLDER) === null,
+    "a cave nobody has browsed has no remembered page");
+
+var told = [];
+CsScanList.watchSelection("panelA", function(folder, rel) {
+    told.push("A:" + rel);
+});
+CsScanList.watchSelection("panelB", function(folder, rel) {
+    told.push("B:" + rel);
+});
+
+// THE PANEL THAT MOVED IS NOT TOLD ABOUT ITS OWN MOVE. It is already
+// there, and selecting a row from inside a selection handler is how a
+// signal loop starts.
+CsScanList.selectionMoved(FOLDER, PAGES[1],
+    [{ kind: "file", rel: PAGES[0] }, { kind: "file", rel: PAGES[1] },
+     { kind: "file", rel: PAGES[2] }], "panelA");
+eqs(told.length, 1, "only the other panel is told");
+eqs(told[0], "B:" + PAGES[1], "and it is told which page");
+eqs(CsScanList.selectedIn(FOLDER), PAGES[1],
+    "the page is remembered for the cave");
+
+// It survives both panels closing: that is what the store is for.
+told = [];
+CsScanList.selectionWatchers = {};
+eqs(CsScanList.selectedIn(FOLDER), PAGES[1],
+    "and outlives the panels that were showing it");
+
+// A page that is no longer in the folder is pruned, as a mark is.
+CsScanList.selectionMoved(FOLDER, PAGES[2],
+    [{ kind: "file", rel: PAGES[2] }], "panelA");
+eqs(CsScanList.selectedIn(FOLDER), PAGES[2], "the new page is stored");
+CsScanList.selectionMoved(FOLDER, PAGES[2], [], "panelA");
+ok(CsScanList.selectedIn(FOLDER) !== PAGES[0],
+    "a selection naming a page the tree no longer lists does not stand");
+
+// A watcher whose widgets have gone is dropped, not thrown from.
+CsScanList.selectionWatchers = {};
+told = [];
+CsScanList.watchSelection("live", function(folder, rel) {
+    told.push(rel);
+});
+CsScanList.watchSelection("dead", function() { throw new Error("gone"); });
+CsScanList.selectionMoved(FOLDER, PAGES[0], null, "panelA");
+eqs(told.length, 1, "a throwing selection watcher does not stop the others");
+CsScanList.selectionMoved(FOLDER, PAGES[0], null, "panelA");
+ok(isNull(CsScanList.selectionWatchers["dead"]),
+    "and it is dropped rather than throwing every time");
+
+CsScanList.selectionWatchers = {};
+clearSelection();
+var selMap = CsScanTree.parseCollapsed(RSettings.getStringValue(
+    CsScanTree.SETTING_SELECTED, ""));
+ok(isNull(selMap[FOLDER]),
+    "the selection test takes its own settings back too");
+
 CsScanList.watchers = {};
 clear();
 var goneMap = CsScanTree.parseCollapsed(RSettings.getStringValue(
