@@ -107,9 +107,40 @@ CsAdjust.CG_TOLERANCE_FRACTION = 1e-12;
 CsAdjust.MIN_VARIANCE = 1e-12;
 CsAdjust.DEG = Math.PI / 180.0;
 
+/**
+ * The angular sigma of a DECLARED PLUMB -- a leg the notes record with
+ * no bearing at all, because the caver plumbed it instead of sighting
+ * it (Shot.azimuthOmitted).
+ *
+ * WHY A PITCH IS NOT A COMPASS LEG. `sigmaAngle` is the error of a
+ * hand compass and clino, and it is the right number for a leg whose
+ * direction came off those instruments. A plumbed pitch's direction
+ * did not: it came off GRAVITY. The rope hangs straight whatever the
+ * compass says, the caver wrote a dash rather than a bearing precisely
+ * because there was nothing to sight, and the residual uncertainty is
+ * how far the plumb line really is from vertical -- a fraction of a
+ * degree, not the one and a half a hand compass carries.
+ *
+ * WHAT IT WAS DOING BEFORE. With one sigma for every leg, a 187 ft
+ * free-fall was modelled as being horizontally uncertain by 187 *
+ * sigmaAngle, about 4.9 ft -- making it by a distance the SOFTEST leg
+ * in any loop it belongs to, and so the one the adjustment poured the
+ * misclosure into. The output is a rope leaning across the map, which
+ * is both wrong and, on a pit map, visibly wrong: the one line on the
+ * drawing a reader knows the true attitude of without being told.
+ *
+ * This is NOT anisotropic covariance, which CsAdjust's header rules
+ * out by decision -- it is still one scalar per leg. It is the
+ * recognition that the scalar depends on which instrument produced the
+ * leg's direction, and the data says which.
+ */
+CsAdjust.PLUMB_SIGMA_ANGLE_DEG = 0.5;
+
 /** The variance of one leg, never zero (weights are its reciprocal). */
 CsAdjust.legVariance = function(shot, sigmaTape, sigmaAngle) {
-    var angular = shot.distance * sigmaAngle * CsAdjust.DEG;
+    var sa = (shot && shot.azimuthOmitted === true) ?
+        CsAdjust.PLUMB_SIGMA_ANGLE_DEG : sigmaAngle;
+    var angular = shot.distance * sa * CsAdjust.DEG;
     var v = sigmaTape * sigmaTape + angular * angular;
     return v < CsAdjust.MIN_VARIANCE ? CsAdjust.MIN_VARIANCE : v;
 };

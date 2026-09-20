@@ -404,8 +404,43 @@ CsModel.ensureTrips = function(survey) {
     survey.declinationSource = t0.declinationSource;
     survey.distanceUnit = t0.distanceUnit;
     survey.startNote = t0.startNote;
-    survey.startLrud = t0.startLrud;
+    // MIRRORS DOWN, BUT DOES NOT ERASE. Every other field here is
+    // copied trip-0-to-survey unconditionally, which is right for a
+    // label the trip owns. startLrud is different: it is the only one
+    // a caller is likely to set on the SURVEY after the trips already
+    // exist, and this line then threw it away -- silently, on the next
+    // ensureTrips, which is the first thing every writer calls. The
+    // entrance's own walls are what got thrown away: no shot arrives
+    // at the first station, so startLrud is the only place they live
+    // (see CsLrud.wallRuns' startLruds pass), and a sinkhole rim or a
+    // pitch head would simply export with no width. Where trip 0 has
+    // nothing and the survey does, the survey's value is ADOPTED
+    // upward instead.
+    if ((t0.startLrud === null || t0.startLrud === undefined) &&
+            survey.startLrud !== null && survey.startLrud !== undefined) {
+        t0.startLrud = survey.startLrud;
+    } else {
+        survey.startLrud = t0.startLrud;
+    }
     return survey;
+};
+
+/**
+ * Sets the first station's LRUD in BOTH places it has to live: on the
+ * survey, where every consumer reads it, and on trip 0, which owns it.
+ *
+ * Use this rather than assigning `survey.startLrud` directly. The two
+ * copies exist because a trip is the unit of revision and the survey
+ * is the unit of drawing, and keeping them in step by hand is the kind
+ * of thing that works until the day someone sets one of them after the
+ * trips are built.
+ */
+CsModel.setStartLrud = function(survey, lrud) {
+    survey.startLrud = lrud || null;
+    if (survey.trips !== undefined && survey.trips !== null &&
+            survey.trips.length > 0) {
+        survey.trips[0].startLrud = survey.startLrud;
+    }
 };
 
 /** The trip record a shot belongs to (trip 0 when unset). */
