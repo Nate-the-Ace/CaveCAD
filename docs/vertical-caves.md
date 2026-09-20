@@ -190,6 +190,22 @@ before the next draw. Written for every chunk, not only the moved
 ones, or a redraw between two drags reflows the pieces that had not
 moved.
 
+**Per-piece layout** (0.9.175). The chunked elevation no longer draws
+every piece the same way. Each is measured — `CsChunk.foldOf` sums a
+piece's along-plane steps and compares them with the span it actually
+occupies — and a piece that folds back behind itself past
+`CsChunk.FOLD_LIMIT` is unrolled instead of projected. Pitfall's trunk
+walks 1424 ft along its plane in 825 ft of page and unrolls; every
+piece of Plumbline folds by ≤0.01 and stays projected. Same engine,
+opposite answers, nothing declared.
+
+Unrolling needs one path through a piece, so `CsChunk.refine` carves
+the branches it cannot carry into their own chunks, tied at the
+junction they leave, and repeats until the split is stable. On Pitfall
+that turns 7 chunks into 12 and keeps every drawn station on the page.
+**A mixed cave is the normal case**, and this is what makes it the
+default one.
+
 ### Looked at and left
 
 **The extended elevation collapses on a pitch** — its X axis advances

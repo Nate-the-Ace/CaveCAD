@@ -289,18 +289,45 @@ CsChunk.bands = function(survey, resolved, chunks, opts) {
     // next chunk straight through that chamber.
     var raw = [];
     for (i = 0; i < chunks.length; i++) {
-        var band = CsProject.band(survey, resolved, {
-            stations: chunks[i].stations,
-            legs: chunks[i].legs,
-            tapeMode: o.tapeMode
-        });
+        // EACH PIECE DRAWN THE WAY ITS OWN SHAPE DESERVES. A piece
+        // CsChunk.refine measured as folding back on itself is
+        // unrolled, so it reads end to end; everything else is
+        // projected, so it keeps true position. Neither is a property
+        // of the cave and neither is a setting -- it is decided per
+        // piece, from that piece's own geometry.
+        var band = null;
+        if (chunks[i].layout === CsChunk.LAYOUT_UNROLLED) {
+            band = CsChunk.unrolledBand(survey, resolved, chunks[i], o);
+            if (band !== null) {
+                // An unrolled band carries no projection of its own.
+                // The wall builder still needs ONE axis for the piece
+                // -- see CsProfile.bandWallRuns' fixedAzimuth note --
+                // and for an unrolled piece that axis is per station,
+                // which is what bandWallRuns does by default. Null
+                // here asks for exactly that.
+                band.projection = null;
+                band.datum = null;
+            }
+        }
+        if (band === null) {
+            band = CsProject.band(survey, resolved, {
+                stations: chunks[i].stations,
+                legs: chunks[i].legs,
+                tapeMode: o.tapeMode
+            });
+            chunks[i].layout = CsChunk.LAYOUT_PROJECTED;
+        }
         var walls = CsProfile.bandWallRuns(band, survey, resolved, {
             tapeMode: o.tapeMode,
             flatSplayDeg: o.flatSplayDeg,
             splaysByStation: splaysByStation,
             legCounts: legCounts,
             stationAxes: stationAxes,
-            fixedAzimuth: band.projection.azimuth
+            // One axis for a PROJECTED piece, the passage's own
+            // direction per station for an UNROLLED one.
+            fixedAzimuth: (band.projection === null ||
+                band.projection === undefined) ? null :
+                band.projection.azimuth
         });
         band.ceiling = walls.ceiling;
         band.floor = walls.floor;
@@ -338,6 +365,7 @@ CsChunk.bands = function(survey, resolved, chunks, opts) {
         var placed = CsChunk.shiftBand(raw[i].band, shift);
         placed.key = chunks[i].key;
         placed.chunkKind = chunks[i].kind;
+        placed.chunkLayout = chunks[i].layout;
         placed.chunkOffset = shift;
         // DEPTH IS LOCKED, and this is the line that locks it. Every
         // other elevation in this suite may set a zOffset to fit more
@@ -350,6 +378,265 @@ CsChunk.bands = function(survey, resolved, chunks, opts) {
     }
     bands.wallPointsSkipped = wallPointsSkipped;
     return bands;
+};
+
+/**
+ * Past this much of a chunk folded back on itself, projecting it hides
+ * more than unrolling it drops.
+ *
+ * A PROJECTION HIDES, AN UNROLLING DROPS, and neither is free. Flatten
+ * a wandering trunk onto one plane and the parts of it that double
+ * back land on top of the parts that came the other way; unroll it
+ * instead and it reads end to end, at the price of one path through
+ * every junction. Which cost is smaller is a fact about the piece of
+ * cave, not about the cave as a whole -- which is the entire reason
+ * this is decided per chunk.
+ *
+ * MEASURED, NOT GUESSED: a chunk's legs are walked and their
+ * along-plane steps summed, then compared with the span the chunk
+ * actually occupies on the page. Pitfall Cave's main trunk walks 1424
+ * ft along its own plane and spans 825, so two fifths of it is
+ * somewhere behind the rest of it. Plumbline Pit's pieces fold by
+ * almost nothing, which is why the pit reads perfectly well projected
+ * and the trunk does not.
+ */
+CsChunk.FOLD_LIMIT = 0.25;
+
+/**
+ * How much of a chunk is folded back behind itself when projected:
+ * 0 for a piece that runs straight along its own plane, approaching 1
+ * for one that doubles back on every leg.
+ */
+CsChunk.foldOf = function(band) {
+    var walked = 0.0;
+    for (var i = 0; i < band.legs.length; i++) {
+        walked += Math.abs(band.legs[i].toX - band.legs[i].fromX);
+    }
+    if (!(walked > 0)) {
+        // A chunk with no along-plane extent at all -- a rope. Nothing
+        // is folded behind anything, because there is nothing beside
+        // it; the answer is 0 rather than a division by zero.
+        return 0.0;
+    }
+    var ext = CsChunk.extentOf(band);
+    var span = ext.hi - ext.lo;
+    var fold = 1.0 - (span / walked);
+    return (fold < 0) ? 0.0 : fold;
+};
+
+/**
+ * One chunk UNROLLED instead of projected: X is distance walked along
+ * the passage, exactly as the extended elevation does it, but for this
+ * piece alone and at its own true elevation.
+ *
+ * Built through CsProfile.unrollBand, from a run made of the chunk's
+ * own stations, so there is one implementation of unrolling in this
+ * codebase and not two.
+ *
+ * \return a band, or null when the chunk cannot be unrolled at all
+ */
+CsChunk.unrolledBand = function(survey, resolved, chunk, opts) {
+    var o = opts || {};
+    var run = { key: chunk.key, stations: chunk.stationList.slice(0) };
+    var band;
+    try {
+        band = CsProfile.unrollBand(run, null, resolved, null, {
+            tapeMode: o.tapeMode,
+            adjacency: o.adjacency,
+            legIndex: o.legIndex
+        });
+    } catch (e) {
+        return null;
+    }
+    if (band === null || band === undefined ||
+            band.stations.length < 2) {
+        return null;
+    }
+    return band;
+};
+
+/** How many refine passes a cave gets before the split is called
+ *  final. Each pass can only ever make chunks SMALLER, so this is a
+ *  guard against a pathological survey rather than a real limit. */
+CsChunk.MAX_REFINE_PASSES = 6;
+
+/**
+ * Splits further where a projection would hide too much, and gives the
+ * branches it costs their own chunks.
+ *
+ * THE PIECE THAT MADE THIS NECESSARY is Pitfall Cave's main trunk: 59
+ * stations, 1424 ft walked along its own plane, 825 ft of page to do
+ * it in. Two fifths of that passage is drawn behind the rest of
+ * itself. Unrolling fixes it -- that is what an extended elevation is
+ * for -- but unrolling needs ONE path through the piece, and this
+ * trunk has branches, so eleven stations would simply be dropped.
+ *
+ * Neither loss is acceptable and neither has to be taken: a branch
+ * that unrolling cannot carry becomes a chunk of its own, tied back at
+ * the junction it leaves, at its own true depth. The trunk then reads
+ * end to end and the branches are all still on the page. That is the
+ * whole idea of chunks applied one level further down, and it is why
+ * this is a refinement of the split rather than a choice between two
+ * bad layouts.
+ *
+ * A MIXED CAVE IS THE NORMAL CASE, not a special one. Pitfall is 2400
+ * ft of horizontal passage with three drops in it; Plumbline is 380 ft
+ * of air with a few crawls. Both go through here and neither is
+ * declared to be anything: the trunk unrolls because it measurably
+ * folds, the ropes project because they measurably do not, and no
+ * setting anywhere says which cave is which.
+ */
+CsChunk.refine = function(survey, resolved, chunks, opts) {
+    var o = opts || {};
+    var out = chunks.slice(0);
+    for (var pass = 0; pass < CsChunk.MAX_REFINE_PASSES; pass++) {
+        var changed = false;
+        var next = [];
+        for (var i = 0; i < out.length; i++) {
+            var chunk = out[i];
+            if (chunk.kind !== CsChunk.KIND_PASSAGE ||
+                    chunk.layout === CsChunk.LAYOUT_UNROLLED) {
+                next.push(chunk);
+                continue;
+            }
+            var band = CsProject.band(survey, resolved, {
+                stations: chunk.stations, legs: chunk.legs,
+                tapeMode: o.tapeMode
+            });
+            if (CsChunk.foldOf(band) <= CsChunk.FOLD_LIMIT) {
+                next.push(chunk);
+                continue;
+            }
+            var unrolled = CsChunk.unrolledBand(survey, resolved, chunk, o);
+            if (unrolled === null) {
+                // Nothing better is available: a piece that cannot be
+                // unrolled keeps the projection it has, folded and all.
+                // Saying so beats silently pretending it is fine.
+                chunk.foldedAnyway = true;
+                next.push(chunk);
+                continue;
+            }
+            chunk.layout = CsChunk.LAYOUT_UNROLLED;
+            if (unrolled.omitted.length === 0) {
+                next.push(chunk);
+                continue;
+            }
+            var pieces = CsChunk.carveBranches(chunk, unrolled.omitted,
+                resolved);
+            next.push(pieces.trunk);
+            for (var b = 0; b < pieces.branches.length; b++) {
+                next.push(pieces.branches[b]);
+            }
+            changed = true;
+        }
+        out = next;
+        if (!changed) {
+            break;
+        }
+    }
+    return out;
+};
+
+CsChunk.LAYOUT_PROJECTED = "projected";
+CsChunk.LAYOUT_UNROLLED = "unrolled";
+
+/**
+ * Takes the stations an unrolling could not carry out of a chunk and
+ * makes them chunks of their own.
+ *
+ * EACH BRANCH KEEPS ITS JUNCTION. The station a branch leaves from
+ * stays in the trunk AND joins the branch, exactly as a pitch's head
+ * belongs to the passage above it and to the drop -- that shared
+ * station is the tie, and it is what lets the drawing join two pieces
+ * that each know where it is.
+ */
+CsChunk.carveBranches = function(chunk, omitted, resolved) {
+    var isOmitted = {};
+    var i;
+    for (i = 0; i < omitted.length; i++) {
+        isOmitted[omitted[i]] = true;
+    }
+
+    // Legs with an omitted end leave the trunk; the rest stay.
+    var branchLegs = [], trunkLegs = {};
+    for (var key in chunk.legs) {
+        if (!chunk.legs.hasOwnProperty(key)) { continue; }
+        var ends = String(key).split("\u0000");
+        if (isOmitted[ends[0]] === true || isOmitted[ends[1]] === true) {
+            branchLegs.push({ key: key, a: ends[0], b: ends[1] });
+        } else {
+            trunkLegs[key] = true;
+        }
+    }
+
+    // Connected components over the branch legs.
+    var parent = {};
+    var find = function(x) {
+        while (parent[x] !== x) { parent[x] = parent[parent[x]]; x = parent[x]; }
+        return x;
+    };
+    var union = function(x, y) {
+        if (parent[x] === undefined) { parent[x] = x; }
+        if (parent[y] === undefined) { parent[y] = y; }
+        var rx = find(x), ry = find(y);
+        if (rx !== ry) { parent[rx] = ry; }
+    };
+    for (i = 0; i < branchLegs.length; i++) {
+        union(branchLegs[i].a, branchLegs[i].b);
+    }
+    var groups = {};
+    for (i = 0; i < branchLegs.length; i++) {
+        var root = find(branchLegs[i].a);
+        if (groups[root] === undefined) {
+            groups[root] = { stations: {}, stationList: [], legs: {} };
+        }
+        var g = groups[root];
+        g.legs[branchLegs[i].key] = true;
+        var pair = [branchLegs[i].a, branchLegs[i].b];
+        for (var k = 0; k < 2; k++) {
+            if (g.stations[pair[k]] !== true) {
+                g.stations[pair[k]] = true;
+                g.stationList.push(pair[k]);
+            }
+        }
+    }
+
+    var trunkStations = {}, trunkList = [];
+    for (i = 0; i < chunk.stationList.length; i++) {
+        var name = chunk.stationList[i];
+        if (isOmitted[name] === true) { continue; }
+        trunkStations[name] = true;
+        trunkList.push(name);
+    }
+    var trunk = {
+        key: chunk.key, kind: CsChunk.KIND_PASSAGE,
+        stations: trunkStations, stationList: trunkList,
+        legs: trunkLegs, pitch: null,
+        layout: CsChunk.LAYOUT_UNROLLED,
+        top: CsChunk.shallowest(trunkList, resolved),
+        bottom: CsChunk.deepest(trunkList, resolved)
+    };
+    trunk.topZ = CsChunk.zOf(resolved, trunk.top);
+    trunk.bottomZ = CsChunk.zOf(resolved, trunk.bottom);
+
+    var branches = [];
+    for (var rootKey in groups) {
+        if (!groups.hasOwnProperty(rootKey)) { continue; }
+        var gg = groups[rootKey];
+        var head = CsChunk.shallowest(gg.stationList, resolved);
+        var branch = {
+            key: "BRANCH-" + head, kind: CsChunk.KIND_PASSAGE,
+            stations: gg.stations, stationList: gg.stationList,
+            legs: gg.legs, pitch: null,
+            layout: null,
+            top: head,
+            bottom: CsChunk.deepest(gg.stationList, resolved)
+        };
+        branch.topZ = CsChunk.zOf(resolved, branch.top);
+        branch.bottomZ = CsChunk.zOf(resolved, branch.bottom);
+        branches.push(branch);
+    }
+    return { trunk: trunk, branches: branches };
 };
 
 /** A band's DRAWN horizontal extent: stations, legs and walls. */
@@ -414,7 +701,8 @@ CsChunk.median = function(values) {
  */
 CsChunk.build = function(survey, resolved, opts) {
     var o = opts || {};
-    var chunks = CsChunk.split(survey, resolved, o);
+    var chunks = CsChunk.refine(survey, resolved,
+        CsChunk.split(survey, resolved, o), o);
     var bands = CsChunk.bands(survey, resolved, chunks, o);
 
     var pitches = CsPitch.find(survey, resolved, o);

@@ -3718,6 +3718,105 @@ function drawPlanSurvey(doc, di, resolved, names) {
 }());
 
 // =======================================================================
+// A MIXED CAVE, which is the normal case.
+//
+// Most long horizontal caves have vertical in them and most pits have
+// a crawl at the bottom. Nothing declares which kind a cave is, so the
+// engine has to decide PER PIECE, from that piece's own geometry --
+// and get opposite answers inside one cave without being told.
+// =======================================================================
+(function() {
+    var svM = CsModel.newSurvey();
+    // A trunk that wanders back and forth (so a projection folds it),
+    // with a branch off the middle, and a drop at the end.
+    svM.shots = [
+        shotOf("T1", "T2", 60, 90, 0, 4, 2),
+        shotOf("T2", "T3", 60, 180, 0, 4, 2),
+        shotOf("T3", "T4", 60, 270, 0, 4, 2),
+        shotOf("T4", "T5", 60, 180, 0, 4, 2),
+        shotOf("T5", "T6", 60, 90, 0, 4, 2),
+        shotOf("T3", "S1", 40, 0, 0, 3, 1),      // a branch
+        shotOf("S1", "S2", 40, 0, 0, 3, 1),
+        shotOf("T6", "P1", 80, 0, -90, 2, 0)     // and a drop
+    ];
+    var resM = CsNetwork.resolve(svM, {});
+    var profM = CsProfile.build(svM, resM, { mode: "chunked" });
+
+    var unrolled = 0, projected = 0, pitchPieces = 0;
+    for (var i = 0; i < profM.bands.length; i++) {
+        if (profM.bands[i].chunkLayout === "unrolled") { unrolled++; }
+        if (profM.bands[i].chunkLayout === "projected") { projected++; }
+        if (profM.bands[i].chunkKind === "pitch") { pitchPieces++; }
+    }
+    ok(unrolled >= 1,
+        "mixed: the wandering trunk is UNROLLED, because projecting it " +
+        "folds it back behind itself");
+    ok(projected >= 1,
+        "mixed: and the rest is PROJECTED, because it does not");
+    eqs(pitchPieces, 1, "mixed: the drop is its own piece");
+    ok(profM.bands.length >= 3,
+        "mixed: trunk, branch and drop -- the drop lands on a dead end, " +
+        "so there is no passage chunk at its foot, got " +
+        profM.bands.length);
+
+    // NOTHING IS LOST TO THE CHOICE. Unrolling needs one path through
+    // a piece, so a branch would be dropped -- unless the branch
+    // becomes a piece of its own, which is what refine() does.
+    var drawn = {};
+    for (i = 0; i < profM.bands.length; i++) {
+        for (var k = 0; k < profM.bands[i].stations.length; k++) {
+            drawn[profM.bands[i].stations[k].name] = true;
+        }
+    }
+    var missing = [];
+    for (var name in resM.stations) {
+        if (!resM.stations.hasOwnProperty(name)) { continue; }
+        if (drawn[name] !== true) { missing.push(name); }
+    }
+    eqs(missing.length, 0,
+        "mixed: every station is on the page -- the branch unrolling " +
+        "could not carry became its own piece rather than being " +
+        "dropped (missing: " + missing.join(",") + ")");
+
+    // Still at true depth, still not colliding.
+    var displaced = 0;
+    for (i = 0; i < profM.bands.length; i++) {
+        if (Math.abs(profM.bands[i].zOffset || 0) > 1e-9) { displaced++; }
+    }
+    eqs(displaced, 0, "mixed: nothing is displaced off true elevation");
+    var spans = [];
+    for (i = 0; i < profM.bands.length; i++) {
+        spans.push(CsChunk.extentOf(profM.bands[i]));
+    }
+    spans.sort(function(a, b) { return a.lo - b.lo; });
+    var over = 0;
+    for (i = 1; i < spans.length; i++) {
+        if (spans[i].lo < spans[i - 1].hi - 1e-9) { over++; }
+    }
+    eqs(over, 0, "mixed: and no two pieces overlap");
+
+    // A PIECE THAT DOES NOT FOLD IS LEFT ALONE. The fold measurement
+    // is what decides, so a straight piece keeps true position.
+    var svS = CsModel.newSurvey();
+    svS.shots = [
+        shotOf("A1", "A2", 60, 90, 0, 4, 2),
+        shotOf("A2", "A3", 60, 90, 0, 4, 2),
+        shotOf("A3", "A4", 60, 90, 0, 4, 2)
+    ];
+    var profS = CsProfile.build(svS, CsNetwork.resolve(svS, {}),
+        { mode: "chunked" });
+    eqs(profS.bands.length, 1, "straight: one piece");
+    eqs(profS.bands[0].chunkLayout, "projected",
+        "straight: a passage that runs along its own plane is left " +
+        "projected, at true position");
+    near(CsChunk.foldOf(profS.bands[0]), 0, 1e-9,
+        "straight: nothing folded behind anything");
+
+    destr(new RDocumentInterface(new RDocument(new RMemoryStorage(),
+        createSpatialIndex())));
+}());
+
+// =======================================================================
 // Report.
 // =======================================================================
 

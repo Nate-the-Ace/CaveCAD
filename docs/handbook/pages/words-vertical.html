@@ -31,8 +31,15 @@
 <li><b>A plumbed leg is weighted by gravity</b> in the loop adjustment rather than by a compass it never used — so misclosure is not poured into the one line on the drawing whose true attitude a reader already knows.</li>
 </ul>
 
+<h2>A cave is rarely all one thing</h2>
+<p>Most long horizontal caves have vertical in them and most pits have a crawl at the bottom, so the engine never asks which kind you have — it decides <i>per piece of cave</i>, from that piece's own geometry. A chunked elevation cuts the cave at its pitches, then measures each piece: one that would fold back behind itself if flattened onto a plane is unrolled so it reads end to end, and one that would not is left projected, at true position. A branch that unrolling cannot carry becomes a piece of its own rather than being dropped.</p>
+<p>So the same command, with nothing set differently, unrolls the 2400 ft trunk of a horizontal cave and stacks the ropes of a pit — in the same drawing if the cave has both.</p>
 <h2>Choosing the view</h2>
-<p><b>Cave Survey &gt; Generate Profile</b> asks which elevation to draw and remembers the answer. For a pit, take <b>chunked</b> — the cave cut into pieces at its pitches, every piece at its true depth. <b>Projected</b> is the next best and is one piece. <b>Extended</b> is the right answer for a long horizontal cave and the wrong one here: it unrolls the passage, so the arrangement of the shafts — which in a pit <i>is</i> the cave — is the first thing it throws away. See <a href="generate-profile.html">Generate Profile</a>.</p>
+<p><b>Cave Survey &gt; Generate Profile</b> asks which elevation to draw and remembers the answer.</p>
+<p><b>Chunked</b> is the one that handles a cave with both kinds of passage in it, because it is the only one that stops treating the cave as one thing. Take it unless you have a reason not to.</p>
+<p><b>Extended</b> unrolls the whole cave on one rule: right for a long horizontal cave that wanders, wrong for anything with rope in it, because the arrangement of the shafts — which in a pit <i>is</i> the cave — is the first thing it throws away, and the bands it stacks are pushed off true depth to stop them overprinting.</p>
+<p><b>Projected</b> keeps the whole cave in one piece at true position: right for a pit, and it draws passages on top of each other wherever the cave really does.</p>
+<p>See <a href="generate-profile.html">Generate Profile</a>.</p>
 
 <h2>Rigging</h2>
 <p>Bolts, Y-hangs, rebelays, deviations, natural anchors, rope, cable ladder and traverse lines are in the <b>Rigging</b> category of the <a href="symbol-palette.html">Symbol Palette</a>, all on one layer so a map printed for someone who is not rigging the cave turns the whole topo off in one click. Add your own there too.</p>
