@@ -98,7 +98,7 @@
         {
           "image": "survey-notebook-panel.png",
           "depicts": "scripts/CaveSurvey/SurveyNotebook/SurveyNotebook.js",
-          "hash": "e79fd035d4a8620410fffd13d3cf14f5307936865b0b7a169d7cdc813f586124"
+          "hash": "81dc07dca7af5abbf91286b795e60c04c4d81590601223a3f495df39187dee6a"
         }
       ]
     },
@@ -253,7 +253,7 @@
         {
           "image": "sketch-scans-panel.png",
           "depicts": "scripts/CaveSurvey/SketchScans/SketchScans.js",
-          "hash": "4addeb2bd34a060a481102bab5bbc40934afa5fb2e0df40af851e8d7ebd80d37"
+          "hash": "9a680093921bda17432414ca508af2448ed1de649ffe63daec086b3ee506b088"
         }
       ]
     },
