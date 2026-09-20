@@ -156,6 +156,7 @@ var CORE_FILES = [
     "scripts/CaveSurvey/Core/CsNetwork.js",
     "scripts/CaveSurvey/Core/CsAdjust.js",
     "scripts/CaveSurvey/Core/CsLrud.js",
+    "scripts/CaveSurvey/Core/CsGhost.js",
     "scripts/CaveSurvey/Core/CsMesh3d.js",
     "scripts/CaveSurvey/Core/CsSection3d.js",
     "scripts/CaveSurvey/Core/CsDrape.js",
@@ -31675,6 +31676,168 @@ if (layerManagerLoaded) {
     eqs(snap["A"].color, "#ffffff",
         "and records its appearance too -- a saved state is the whole layer");
 }
+
+// ---------------------------------------------------------------------
+// CsGhost: what a page of notes would draw, before it draws it.
+// ---------------------------------------------------------------------
+
+ok(typeof CsGhost !== "undefined", "CsGhost loaded");
+
+(function ghostTests() {
+    function gShot(from, to, d, az, inc) {
+        var s = CsModel.newShot();
+        s.from = from; s.to = to;
+        s.distance = d; s.azimuth = az; s.inclination = inc || 0;
+        return s;
+    }
+    function gSurvey(shots) {
+        var sv = CsModel.newSurvey();
+        sv.shots = shots;
+        return sv;
+    }
+
+    // A straight chain east: three stations, two legs, no loop.
+    var chain = gSurvey([gShot("A1", "A2", 10, 90, 0),
+                         gShot("A2", "A3", 10, 90, 0)]);
+    var chainRes = CsAdjust.resolveAndAdjust(chain, {});
+    var g = CsGhost.segments(chain, chainRes);
+    eqs(g.legs.length, 2, "ghost: one segment per leg");
+    eqs(g.stations.length, 3, "ghost: one mark per station");
+    eqs(g.unplaced.length, 0, "ghost: a solvable page places everything");
+    eqs(g.raw.length, 0,
+        "ghost: nothing moved, so no as-surveyed line is drawn -- two "
+        + "lines on top of each other say nothing and cost twice");
+    ok(Math.abs(g.legs[0][0].x - 0) < 1e-6 &&
+       Math.abs(g.legs[0][1].x - 10) < 1e-6,
+        "ghost: the segment runs between the two stations' own positions");
+
+    // A HALF-TYPED SHOT is the normal state of this data. A leg whose
+    // far station cannot be placed draws nothing and is not an error.
+    var typing = gSurvey([gShot("A1", "A2", 10, 90, 0),
+                          gShot("B9", "B10", 10, 90, 0)]);
+    var typingRes = CsAdjust.resolveAndAdjust(typing, {});
+    var gt = CsGhost.segments(typing, typingRes);
+    ok(gt.legs.length >= 1, "ghost: the part that solves is still drawn");
+
+    // A SPLAY IS A MEASUREMENT TOO, and is kept apart from the legs so
+    // the panel can draw it thinner.
+    var splayShot = gShot("A2", "A2.1", 3, 0, 0);
+    splayShot.splay = true;
+    var withSplay = gSurvey([gShot("A1", "A2", 10, 90, 0), splayShot]);
+    var splayRes = CsAdjust.resolveAndAdjust(withSplay, {});
+    var gs = CsGhost.segments(withSplay, splayRes);
+    eqs(gs.legs.length, 1, "ghost: a splay is not a leg");
+    eqs(gs.splays.length, 1, "ghost: and is drawn as a splay");
+
+    // EXCLUDED SHOTS are not drawn: they are not survey.
+    var exShot = gShot("A2", "X1", 10, 0, 0);
+    exShot.excludeFromAll = true;
+    var withEx = gSurvey([gShot("A1", "A2", 10, 90, 0), exShot]);
+    var exRes = CsAdjust.resolveAndAdjust(withEx, {});
+    eqs(CsGhost.segments(withEx, exRes).legs.length, 1,
+        "ghost: a shot excluded from everything draws no line");
+
+    // WALLS come from the same wallRuns CsDraw calls.
+    var walled = gSurvey([gShot("A1", "A2", 10, 90, 0),
+                          gShot("A2", "A3", 10, 90, 0)]);
+    walled.shots[0].left = 2; walled.shots[0].right = 3;
+    walled.shots[1].left = 2; walled.shots[1].right = 3;
+    var wres = CsAdjust.resolveAndAdjust(walled, {});
+    var gw = CsGhost.segments(walled, wres);
+    ok(gw.walls.length > 0, "ghost: LRUD makes wall lines");
+    ok(gw.walls[0].length >= 2, "ghost: a wall run is a polyline");
+
+    // THE AS-SURVEYED LINE, where closure moved something. The shift
+    // is taken back off the adjusted position rather than solved a
+    // second time, so the two can only differ by the adjustment.
+    var moved = {
+        stations: { A1: { x: 0, y: 0, z: 0 }, A2: { x: 10, y: 1, z: 0 } },
+        legs: [], shifts: { A2: { dx: 0, dy: 1, dz: 0, distance: 1 } }
+    };
+    var before = CsGhost.beforeAdjustment(moved, "A2");
+    ok(before !== null && Math.abs(before.y - 0) < 1e-9,
+        "ghost: the as-surveyed position is the adjusted one less its shift");
+    ok(CsGhost.beforeAdjustment(moved, "A1") === null,
+        "ghost: a station that did not move has no second position");
+
+    var movedSurvey = gSurvey([gShot("A1", "A2", 10, 90, 0)]);
+    var gm = CsGhost.segments(movedSurvey, moved);
+    eqs(gm.raw.length, 1, "ghost: a moved leg draws its as-surveyed line too");
+    ok(Math.abs(gm.raw[0][1].y - 0) < 1e-9,
+        "ghost: and that line ends where the survey put it, not where "
+        + "the adjustment did");
+
+    // FOCUS: on a drawing that already holds a cave, the page is
+    // resolved as part of the whole survey -- the only way its
+    // stations land where Draw will put them -- so the ghost has to be
+    // told which of those stations is the page, or it draws the whole
+    // cave over the copy already on the map.
+    var big = gSurvey([gShot("A1", "A2", 10, 90, 0),
+                       gShot("A2", "A3", 10, 90, 0),
+                       gShot("A3", "A4", 10, 90, 0)]);
+    big.shots[0].left = 2; big.shots[0].right = 2;
+    big.shots[1].left = 2; big.shots[1].right = 2;
+    big.shots[2].left = 2; big.shots[2].right = 2;
+    var bigRes = CsAdjust.resolveAndAdjust(big, {});
+    var all = CsGhost.segments(big, bigRes);
+    var page = CsGhost.segments(big, bigRes,
+        { focus: { A3: true, A4: true } });
+    eqs(all.legs.length, 3, "ghost: unfocused draws every leg");
+    // A LEG WITH ONE END ON THE PAGE IS THE PAGE'S -- that is exactly
+    // what the tie-in shot is, and not drawing it would leave the new
+    // passage floating unattached to the station it was surveyed from.
+    eqs(page.legs.length, 2,
+        "ghost: focused draws the page's legs and its tie-in");
+    eqs(page.stations.length, 2, "ghost: and only its stations");
+    eqs(CsGhost.segments(big, bigRes, { focus: { A4: true } }).legs.length,
+        1, "ghost: one station on the page means one leg reaches it");
+    eqs(CsGhost.segments(big, bigRes,
+        { focus: { NOTHERE: true } }).legs.length, 0,
+        "ghost: a page naming no drawn station draws no legs");
+    eqs(CsGhost.segments(big, bigRes,
+        { focus: { NOTHERE: true } }).walls.length, 0,
+        "ghost: and no wall runs either");
+
+    // A SHIFT TOO SMALL TO SEE is not drawn as its own line: every
+    // station in an adjusted cave moves by something, and drawing all
+    // of them means a second copy of the map a hair from the first.
+    var tiny = {
+        stations: { A1: { x: 0, y: 0, z: 0 }, A2: { x: 100, y: 0, z: 0 } },
+        legs: [],
+        shifts: { A2: { dx: 0, dy: 0.001, dz: 0, distance: 0.001 } }
+    };
+    var tinySurvey = gSurvey([gShot("A1", "A2", 100, 90, 0)]);
+    eqs(CsGhost.segments(tinySurvey, tiny).raw.length, 0,
+        "ghost: a shift of a thousandth of the leg draws no second line");
+
+    var bigShift = {
+        stations: { A1: { x: 0, y: 0, z: 0 }, A2: { x: 100, y: 0, z: 0 } },
+        legs: [],
+        shifts: { A2: { dx: 0, dy: 9, dz: 0, distance: 9 } }
+    };
+    eqs(CsGhost.segments(tinySurvey, bigShift).raw.length, 1,
+        "ghost: a shift of nine percent of it does");
+    ok(CsGhost.movedVisibly({ x: 0, y: 0 }, { x: 10, y: 0 },
+        null, { x: 10, y: 5 }) === true,
+        "ghost: movedVisibly measures the shift against the leg length");
+
+    // EMPTY AND BOUNDS.
+    ok(CsGhost.isEmpty(CsGhost.segments(gSurvey([]), {})),
+        "ghost: an empty page draws nothing");
+    ok(CsGhost.bounds(CsGhost.segments(gSurvey([]), {})) === null,
+        "ghost: and has no box");
+    var box = CsGhost.bounds(g);
+    ok(box !== null && Math.abs(box.x1 - 0) < 1e-6 &&
+       Math.abs(box.x2 - 20) < 1e-6,
+        "ghost: the box spans the drawn page");
+
+    // Rubbish in, empty out -- this runs on every keystroke and must
+    // never be the thing that throws.
+    ok(CsGhost.isEmpty(CsGhost.segments(null, null)),
+        "ghost: no survey draws nothing");
+    ok(CsGhost.isEmpty(CsGhost.segments(gSurvey([]), null)),
+        "ghost: no resolve draws nothing");
+})();
 
 // ---------------------------------------------------------------------
 // Report.

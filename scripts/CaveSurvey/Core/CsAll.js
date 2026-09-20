@@ -57,6 +57,7 @@ include(includeBasePath + "/CsTraverse.js");
 include(includeBasePath + "/CsNetwork.js");
 include(includeBasePath + "/CsAdjust.js");
 include(includeBasePath + "/CsLrud.js");
+include(includeBasePath + "/CsGhost.js");
 
 // The 3D passage surface. After CsTraverse and CsLrud, whose splay
 // offsets and junction counts it reuses rather than re-deriving.

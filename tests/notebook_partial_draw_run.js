@@ -336,6 +336,133 @@ eqs(CsRevise.surveyFromDocument(typed.doc).survey.trips.length, 4,
     "a page nobody loaded still appends as a new trip");
 
 // ---------------------------------------------------------------------
+// THE GHOST LANDS WHERE DRAW LANDS.
+// ---------------------------------------------------------------------
+//
+// The preview drawn while a caver types is only worth anything if it
+// is in the same place the shots are about to go. Both now run the
+// same two plan functions, and this is what says so: the preview's
+// resolved positions are compared, station by station, against the
+// positions Draw actually wrote into the drawing.
+//
+// BOTH PATHS, because they decide their anchor completely differently
+// -- the plain one ties into a station by name or floats free, the
+// merged one holds the existing drawing where it stands -- and a
+// preview that matched only one of them would be wrong exactly half
+// the time.
+
+/** A fake panel whose page is this survey. */
+function pageWidget(page) {
+    return {
+        loadedTripId: null,
+        _page: page
+    };
+}
+var realSheetSurvey = SurveyNotebook.sheetSurvey;
+SurveyNotebook.sheetSurvey = function(w) {
+    if (w !== null && w !== undefined && w._page !== undefined) {
+        return w._page;
+    }
+    return realSheetSurvey(w);
+};
+
+// --- the merged path: a page added to a drawing that has survey ------
+var ghostDoc = freshDrawing();
+getDocument = function() { return ghostDoc.doc; };
+getDocumentInterface = function() { return ghostDoc.di; };
+var ghostPage = pageSurvey("T2S4");
+var ghostPlan = SurveyNotebook.previewPlan(pageWidget(ghostPage));
+ok(ghostPlan !== null, "ghost: a page over a real drawing has a plan");
+ok(ghostPlan.merged === true,
+    "ghost: and it takes the merged path, as Draw does");
+
+var ghostSegs = CsGhost.segments(ghostPlan.survey, ghostPlan.resolved);
+ok(ghostSegs.legs.length > 0, "ghost: the merged page draws legs");
+ok(ghostSegs.walls.length > 0, "ghost: and walls from its LRUD");
+
+// Draw it for real, and compare.
+messages = [];
+SurveyNotebook.drawMergedSurvey(pageWidget(ghostPage), ghostDoc.doc,
+    ghostPage, CsRevise.surveyFromDocument(ghostDoc.doc), true);
+var drawnAt = positionsOf(ghostDoc.doc);
+var worst = 0;
+var checked = 0;
+for (var gn in ghostPlan.resolved.stations) {
+    if (!ghostPlan.resolved.stations.hasOwnProperty(gn)) { continue; }
+    if (drawnAt[gn] === undefined) { continue; }
+    var pr = ghostPlan.resolved.stations[gn];
+    var dx = Math.abs(pr.x - drawnAt[gn].x);
+    var dy = Math.abs(pr.y - drawnAt[gn].y);
+    if (dx > worst) { worst = dx; }
+    if (dy > worst) { worst = dy; }
+    checked++;
+}
+ok(checked >= 5, "ghost: enough stations to compare (" + checked + ")");
+ok(worst < 1e-6,
+    "ghost: every previewed station is where Draw put it, to within " +
+    worst + " -- the merged path");
+
+// --- the plain path: a page onto an empty drawing --------------------
+var emptyDoc = new RDocument(new RMemoryStorage(), createSpatialIndex());
+var emptyDi = new RDocumentInterface(emptyDoc);
+getDocument = function() { return emptyDoc; };
+getDocumentInterface = function() { return emptyDi; };
+var firstPage = pageSurvey("A1");
+var firstPlan = SurveyNotebook.previewPlan(pageWidget(firstPage));
+ok(firstPlan !== null, "ghost: a page over an empty drawing has a plan");
+eqs(firstPlan.merged, false, "ghost: and takes the plain path");
+
+messages = [];
+SurveyNotebook.drawSurvey(pageWidget(firstPage));
+var firstDrawn = positionsOf(emptyDoc);
+var worstPlain = 0;
+var checkedPlain = 0;
+for (var fn2 in firstPlan.resolved.stations) {
+    if (!firstPlan.resolved.stations.hasOwnProperty(fn2)) { continue; }
+    if (firstDrawn[fn2] === undefined) { continue; }
+    var fp = firstPlan.resolved.stations[fn2];
+    var fdx = Math.abs(fp.x - firstDrawn[fn2].x);
+    var fdy = Math.abs(fp.y - firstDrawn[fn2].y);
+    if (fdx > worstPlain) { worstPlain = fdx; }
+    if (fdy > worstPlain) { worstPlain = fdy; }
+    checkedPlain++;
+}
+ok(checkedPlain >= 5,
+    "ghost: enough stations to compare on the plain path (" +
+    checkedPlain + ")");
+ok(worstPlain < 1e-6,
+    "ghost: every previewed station is where Draw put it, to within " +
+    worstPlain + " -- the plain path");
+
+// --- and it changes nothing ------------------------------------------
+//
+// The whole promise of the preview is that Draw is the only thing that
+// commits. previewPlan is the half that touches the document, so it is
+// the half that has to be provably read-only.
+var quietDoc = freshDrawing();
+getDocument = function() { return quietDoc.doc; };
+getDocumentInterface = function() { return quietDoc.di; };
+var beforeDigest = digestOf(quietDoc.doc);
+var beforeCount = CsTags.collectStations(quietDoc.doc).length;
+for (var rep = 0; rep < 5; rep++) {
+    SurveyNotebook.previewPlan(pageWidget(pageSurvey("T2S4")));
+}
+var afterDigest = digestOf(quietDoc.doc);
+eqs(CsTags.collectStations(quietDoc.doc).length, beforeCount,
+    "ghost: previewing adds no station to the drawing");
+eqs(afterDigest.shots, beforeDigest.shots,
+    "ghost: and no shot -- a drawing previewed at five times "
+    + "reconstructs to exactly what it did before");
+eqs(afterDigest.tripCount, beforeDigest.tripCount,
+    "ghost: and no trip");
+
+// An empty page previews nothing rather than throwing.
+ok(SurveyNotebook.previewPlan(pageWidget(CsModel.newSurvey())) === null,
+    "ghost: a page with no shots has nothing to preview");
+
+SurveyNotebook.sheetSurvey = realSheetSurvey;
+
+// ---------------------------------------------------------------------
 // Report.
 // ---------------------------------------------------------------------
 

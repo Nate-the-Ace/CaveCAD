@@ -10,6 +10,12 @@
 <li>Watch closures, stats and warnings update as you type.</li>
 <li><b>Draw</b> writes it into the drawing in one undo step. Adding a trip redraws only that trip; anything that moves existing stations — a corrected declination, a re-closed loop — takes the full redraw. <b>Redraw All</b> in the <b>...</b> menu forces it.</li>
 </ol>
+<h2>Watching the page draw itself</h2>
+<p>As you type, the page is drawn over the map as a <b>ghost</b>: orange shot lines, blue dashed walls from the LRUD, and a grey dashed line wherever loop closure has moved a leg appreciably. Nothing is added to the drawing — no entity, no undo step, nothing to save. <b>Draw</b> is still the only thing that commits.</p>
+<p>It is there because the status line's numbers are a poor way to catch a typing mistake: a transposed azimuth is a plausible bearing and a metric distance on a page of feet is a plausible distance. Both are obvious the moment the passage is drawn.</p>
+<p>The ghost lands exactly where Draw will put the shots — same tie-in, same anchor, same adjustment — because both ask the same code where the page goes. Only the stations on <i>this page</i> are ghosted; the cave already drawn around them is left alone.</p>
+<p>The <b>Preview</b> button turns it off, for typing over a dense part of a finished map. What you leave it as is what you get next time.</p>
+
 <h2>LRUD: blank is not the same as P</h2>
 <p>Leave an LRUD cell <b>blank</b> and you are saying nobody measured it: the wall on that side is unknown, and the map breaks its wall line at that station rather than guessing across the gap.</p>
 <p>Type <b>P</b> and you are saying the party looked and found <i>no wall that way</i> — open passage. That is a reading, not a gap, so the wall either side carries straight through, and the 3D passage tube keeps its shape instead of pinching shut at the station.</p>

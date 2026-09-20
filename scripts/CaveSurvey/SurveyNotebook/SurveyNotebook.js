@@ -728,8 +728,13 @@ SurveyNotebook.refresh = function(w) {
             "between the stations they connect; azimuth clockwise from " +
             "north, distance along the tape, backsights optional. LRUD " +
             "sits beside its station.");
+        // A page emptied back to nothing takes its ghost with it.
+        SurveyNotebook.clearGhost();
         return;
     }
+    // THE PAGE, DRAWN. Every keystroke already recomputes the survey
+    // for the status line; this puts the same answer on the map.
+    SurveyNotebook.ghostSoon(w);
     // The status line has to describe what Draw would PRODUCE, so it
     // resolves-and-adjusts under the current settings -- the same
     // options Draw itself will take for this page. (Loop errors printed
@@ -779,6 +784,12 @@ SurveyNotebook.refresh = function(w) {
 // answer, and two readers of one tag are two readers that drift.
 
 SurveyNotebook.drawSurvey = function(w, forceFull) {
+    // THE GHOST COMES OFF FIRST. Draw is about to put the real thing
+    // where the ghost is, and a preview left on top of its own result
+    // is a set of doubled lines the caver has to work out the meaning
+    // of. It comes back on the next keystroke, over the drawn survey,
+    // which is exactly what it should show then: no difference.
+    SurveyNotebook.clearGhost();
     // Any failure in here must be SEEN, not swallowed by the engine.
     try {
         SurveyNotebook.drawSurveyInner(w, forceFull === true);
@@ -790,44 +801,251 @@ SurveyNotebook.drawSurvey = function(w, forceFull) {
     }
 };
 
-SurveyNotebook.drawSurveyInner = function(w, forceFull) {
-    var doc = getDocument();
-    // A SHEET IS NOT A DRAWING TO WORK IN. It is rebuilt from the
-    // cave's record every time Build Sheet is pressed, so anything
-    // drawn here goes with it -- silently, weeks later. See
-    // Core/CsSheetFile.js.
-    if (CsSheetFile.blocks(doc, "Survey Notebook")) {
+/**
+ * Where a page lands when the drawing has no v3 survey to merge with.
+ *
+ * LIFTED OUT OF Draw SO THE PREVIEW CAN ASK THE SAME QUESTION. The
+ * ghost drawn while a caver types has to appear where Draw is going to
+ * put the shots, and the only way to promise that is for both to run
+ * this one function. A preview that decided its own anchor would be
+ * wrong in exactly the case somebody is watching it for -- a page that
+ * ties into an existing station.
+ *
+ * \return {anchor, tieIn} -- anchor undefined when the page floats
+ *         free (nothing selected, first station unknown to the
+ *         drawing), tieIn the station name when it tied into one.
+ */
+/**
+ * The page as Draw would resolve it, WITHOUT touching the drawing.
+ *
+ * Runs the same branch Draw runs -- merge into the reconstructed cave
+ * when the drawing holds v3 survey data, plain anchored resolve
+ * otherwise -- through the same two plan functions, and stops at the
+ * resolve. Nothing is erased, nothing is added, no tag is read that
+ * Draw does not read.
+ *
+ * \return {survey, resolved, merged} or null when there is nothing to
+ *         preview (no document, no shots, a sheet file).
+ */
+// ---------------------------------------------------------------------
+// THE GHOST -- the page, drawn over the map, before Draw draws it.
+// ---------------------------------------------------------------------
+//
+// A caver typing a trip in from a wet notebook is checking that they
+// typed it right, and the status line's numbers are a poor way to do
+// that: a transposed azimuth is a plausible bearing and a metric
+// distance on a page of feet is a plausible distance. Both are obvious
+// the moment the passage is drawn. So the page is drawn continuously,
+// as preview shapes on the view -- and Draw stays the only thing that
+// writes an entity.
+//
+// NOTHING HERE TOUCHES THE DOCUMENT. addShapeToPreview paints into the
+// view's preview layer: no entity, no undo step, no modified flag, and
+// gone the moment the preview is cleared. A drawing that has been
+// previewed at is byte-identical to one that has not.
+
+/** How the three kinds of ghost line are drawn. */
+SurveyNotebook.GHOST_LEG = new RColor(255, 170, 0);
+SurveyNotebook.GHOST_WALL = new RColor(140, 190, 255);
+SurveyNotebook.GHOST_RAW = new RColor(150, 150, 150);
+
+/**
+ * Repaints the ghost from whatever is on the page right now.
+ *
+ * SILENT IN EVERY FAILURE DIRECTION. This runs on a keystroke, behind
+ * somebody typing numbers: a bridge with no preview API, a page that
+ * will not resolve, a document that went away between the keystroke
+ * and the timer -- none of them is worth a message, and all of them
+ * simply leave the view as it was.
+ */
+SurveyNotebook.showGhost = function(w) {
+    if (isNull(w) || w.ghostOn === false) {
         return;
     }
     var di = getDocumentInterface();
-    if (doc === undefined || doc === null) {
-        QMessageBox.warning(null, "Survey Notebook", "No drawing is open.");
+    if (isNull(di) || typeof di.addShapeToPreview !== "function") {
         return;
+    }
+    var plan = null;
+    try {
+        plan = SurveyNotebook.previewPlan(w);
+    } catch (ePlan) {
+        plan = null;
+    }
+    var segs = null;
+    if (plan !== null) {
+        try {
+            segs = CsGhost.segments(plan.survey, plan.resolved,
+                { focus: plan.focus });
+        } catch (eSeg) {
+            segs = null;
+        }
+    }
+    try {
+        di.clearPreview();
+        if (segs === null || CsGhost.isEmpty(segs)) {
+            di.repaintViews();
+            return;
+        }
+        di.beginPreview();
+        var brush = new QBrush();
+        var lw = RLineweight.Weight000;
+        var paint = function(runs, color, style, dashes) {
+            for (var i = 0; i < runs.length; i++) {
+                var pts = runs[i];
+                for (var p = 1; p < pts.length; p++) {
+                    var line = new RLine(
+                        new RVector(pts[p - 1].x, pts[p - 1].y),
+                        new RVector(pts[p].x, pts[p].y));
+                    di.addShapeToPreview(line, color, brush, lw,
+                        style, dashes);
+                }
+            }
+        };
+        // AS-SURVEYED FIRST, so the adjusted line is drawn over it
+        // rather than under: the adjusted one is where the shots are
+        // going, and it is the one to read when they overlap.
+        paint(segs.raw, SurveyNotebook.GHOST_RAW,
+            Qt.CustomDashLine.valueOf(), [4, 4]);
+        paint(segs.walls, SurveyNotebook.GHOST_WALL,
+            Qt.CustomDashLine.valueOf(), [6, 3]);
+        paint(segs.splays, SurveyNotebook.GHOST_WALL,
+            Qt.CustomDashLine.valueOf(), [2, 3]);
+        paint(segs.legs, SurveyNotebook.GHOST_LEG,
+            Qt.SolidLine.valueOf(), []);
+        // A CROSS ON EACH STATION, the size of the text the map uses,
+        // so a station with no shot off it yet still shows somewhere.
+        var tick = CsDraw.TEXT_HEIGHT * 0.5;
+        for (var s = 0; s < segs.stations.length; s++) {
+            var st = segs.stations[s];
+            var h = new RLine(new RVector(st.x - tick, st.y),
+                              new RVector(st.x + tick, st.y));
+            var v = new RLine(new RVector(st.x, st.y - tick),
+                              new RVector(st.x, st.y + tick));
+            di.addShapeToPreview(h, SurveyNotebook.GHOST_LEG, brush, lw,
+                Qt.SolidLine.valueOf(), []);
+            di.addShapeToPreview(v, SurveyNotebook.GHOST_LEG, brush, lw,
+                Qt.SolidLine.valueOf(), []);
+        }
+        di.endPreview();
+        di.repaintViews();
+    } catch (ePaint) {
+        // A half-painted ghost is worse than none.
+        try {
+            di.clearPreview();
+            di.repaintViews();
+        } catch (eClear) {
+        }
+    }
+};
+
+/** Takes the ghost off the view. Called when the panel closes, when
+ *  Draw commits (the real thing is there now), and when the page
+ *  empties. */
+SurveyNotebook.clearGhost = function() {
+    var di = getDocumentInterface();
+    if (isNull(di) || typeof di.clearPreview !== "function") {
+        return;
+    }
+    try {
+        di.clearPreview();
+        di.repaintViews();
+    } catch (e) {
+    }
+};
+
+/**
+ * Asks for a repaint shortly.
+ *
+ * COALESCED, because refresh() runs on every keystroke and a caver
+ * types faster than a cave resolves. The timer restarts on each call,
+ * so a burst of typing paints once at the end of it rather than once
+ * per character -- and the pause is short enough that it reads as
+ * live.
+ */
+SurveyNotebook.GHOST_DELAY = 150;
+
+SurveyNotebook.ghostSoon = function(w) {
+    if (isNull(w) || w.ghostOn === false) {
+        return;
+    }
+    try {
+        if (isNull(w.ghostTimer)) {
+            w.ghostTimer = new QTimer(w.statusLabel);
+            w.ghostTimer.singleShot = true;
+            w.ghostTimer.timeout.connect(function() {
+                SurveyNotebook.showGhost(w);
+            });
+        }
+        w.ghostTimer.start(SurveyNotebook.GHOST_DELAY);
+    } catch (eTimer) {
+        // No timer on this bridge: paint immediately instead. Slower
+        // under fast typing, still correct.
+        SurveyNotebook.showGhost(w);
+    }
+};
+
+SurveyNotebook.previewPlan = function(w) {
+    var doc = getDocument();
+    if (isNull(doc)) {
+        return null;
+    }
+    // A sheet is not a drawing to work in, and Draw refuses it -- so a
+    // ghost over one would be promising something that cannot happen.
+    //
+    // isSheet, NOT blocks: blocks() SAYS SO to the caver, which is
+    // right when they pressed Draw and would be a warning per
+    // keystroke here.
+    try {
+        if (CsSheetFile.isSheet(doc)) {
+            return null;
+        }
+    } catch (eSheet) {
     }
     var survey = SurveyNotebook.sheetSurvey(w);
-    if (survey.shots.length === 0) {
-        QMessageBox.information(null, "Survey Notebook", "No shots to draw.");
-        return;
+    if (survey === null || survey === undefined ||
+            survey.shots.length === 0) {
+        return null;
     }
-
-    // A drawing that already holds exact (v3) survey data makes Draw
-    // TRIP-AWARE: the page's shots replace (or join) their trip inside
-    // the full merged survey, and the whole thing redraws once.
-    // Anything else -- empty drawing, untagged linework, legacy pre-v3
-    // tags -- takes the plain path below, exactly as it always has.
     var recon = null;
     try {
         recon = CsRevise.surveyFromDocument(doc);
     } catch (eRecon) {
-        recon = null; // unreadable tags: treat as no existing survey
+        recon = null;
     }
-    if (recon !== null && recon.legacy !== true &&
-            recon.survey.shots.length > 0) {
-        SurveyNotebook.drawMergedSurvey(w, doc, survey, recon,
-            forceFull === true);
-        return;
+    // THE STATIONS ON THIS PAGE, which is what the ghost draws. On the
+    // merged path the survey handed to CsGhost is the WHOLE cave --
+    // the only way the page's stations land where Draw will put them
+    // -- and without this the preview would ghost every leg of the
+    // cave over the ones already drawn.
+    var focus = {};
+    var pageNames = CsModel.stationNames(survey);
+    for (var n = 0; n < pageNames.length; n++) {
+        focus[pageNames[n]] = true;
     }
 
+    if (recon !== null && recon.legacy !== true &&
+            recon.survey.shots.length > 0) {
+        var mplan = SurveyNotebook.mergedPlan(w, doc, survey, recon);
+        return {
+            survey: mplan.merged,
+            resolved: CsAdjust.resolveAndAdjust(mplan.merged,
+                { anchor: mplan.anchor }, mplan.adjustOpts),
+            focus: focus,
+            merged: true
+        };
+    }
+    var plan = SurveyNotebook.plainAnchor(doc, survey);
+    return {
+        survey: survey,
+        resolved: CsAdjust.resolveAndAdjust(survey,
+            { anchor: plan.anchor }),
+        focus: focus,
+        merged: false
+    };
+};
+
+SurveyNotebook.plainAnchor = function(doc, survey) {
     // Anchor priority: an explicitly selected station wins; otherwise,
     // if the page's FIRST station name already exists in the drawing,
     // the new survey ties into it automatically -- name the tie-in
@@ -868,6 +1086,51 @@ SurveyNotebook.drawSurveyInner = function(w, forceFull) {
             }
         }
     }
+
+    return { anchor: anchor, tieIn: tieIn };
+};
+
+SurveyNotebook.drawSurveyInner = function(w, forceFull) {
+    var doc = getDocument();
+    // A SHEET IS NOT A DRAWING TO WORK IN. It is rebuilt from the
+    // cave's record every time Build Sheet is pressed, so anything
+    // drawn here goes with it -- silently, weeks later. See
+    // Core/CsSheetFile.js.
+    if (CsSheetFile.blocks(doc, "Survey Notebook")) {
+        return;
+    }
+    var di = getDocumentInterface();
+    if (doc === undefined || doc === null) {
+        QMessageBox.warning(null, "Survey Notebook", "No drawing is open.");
+        return;
+    }
+    var survey = SurveyNotebook.sheetSurvey(w);
+    if (survey.shots.length === 0) {
+        QMessageBox.information(null, "Survey Notebook", "No shots to draw.");
+        return;
+    }
+
+    // A drawing that already holds exact (v3) survey data makes Draw
+    // TRIP-AWARE: the page's shots replace (or join) their trip inside
+    // the full merged survey, and the whole thing redraws once.
+    // Anything else -- empty drawing, untagged linework, legacy pre-v3
+    // tags -- takes the plain path below, exactly as it always has.
+    var recon = null;
+    try {
+        recon = CsRevise.surveyFromDocument(doc);
+    } catch (eRecon) {
+        recon = null; // unreadable tags: treat as no existing survey
+    }
+    if (recon !== null && recon.legacy !== true &&
+            recon.survey.shots.length > 0) {
+        SurveyNotebook.drawMergedSurvey(w, doc, survey, recon,
+            forceFull === true);
+        return;
+    }
+
+    var plan = SurveyNotebook.plainAnchor(doc, survey);
+    var anchor = plan.anchor;
+    var tieIn = plan.tieIn;
 
     // A page drawn onto an empty or untagged drawing CREATES geometry,
     // so it takes the current settings; CsDraw.survey records them on
@@ -1545,8 +1808,22 @@ SurveyNotebook.drawPartial = function(w, doc, di, merged, resolved,
         (replaced > 0 ? " after the replace" : "") + ".");
 };
 
-SurveyNotebook.drawMergedSurvey = function(w, doc, survey, recon,
-        forceFull) {
+/**
+ * What Draw would merge this page into, and where that merge lands.
+ *
+ * THE OTHER HALF OF plainAnchor, for the path a drawing with real
+ * survey data in it takes: the page's trip is merged into the whole
+ * reconstructed cave, and the result is anchored so the drawing stays
+ * exactly where it stands. Extracted for the same reason -- the ghost
+ * has to be drawn where Draw will put it, and one function is the only
+ * way to be sure of that.
+ *
+ * READ-ONLY. It reads the document's stations and tags and changes
+ * nothing, so the preview can call it on every keystroke.
+ *
+ * \return {merged, anchor, adjustOpts, merge}
+ */
+SurveyNotebook.mergedPlan = function(w, doc, survey, recon) {
     var tripRecord = SurveyNotebook.tripRecordOf(survey);
     var loadedTripId = (w !== null && w !== undefined &&
         typeof w.loadedTripId === "number") ? w.loadedTripId : null;
@@ -1643,8 +1920,24 @@ SurveyNotebook.drawMergedSurvey = function(w, doc, survey, recon,
     // cave under linework that was traced against it, and calls it a
     // revision. The record comes off the trip-0 anchor, which recon
     // read before any of this began.
+    return { merged: merged, anchor: anchor, merge: merge,
+             adjustOpts: CsAdjust.optionsFromTags(recon.adjustTags || {}) };
+};
+
+SurveyNotebook.drawMergedSurvey = function(w, doc, survey, recon,
+        forceFull) {
+    var plan = SurveyNotebook.mergedPlan(w, doc, survey, recon);
+    var merge = plan.merge;
+    var merged = plan.merged;
+    var anchor = plan.anchor;
+    var mergedNames = CsModel.stationNames(merged);
+    var inMerged = {};
+    for (var i = 0; i < mergedNames.length; i++) {
+        inMerged[mergedNames[i]] = true;
+    }
+
     var resolved = CsAdjust.resolveAndAdjust(merged, { anchor: anchor },
-        CsAdjust.optionsFromTags(recon.adjustTags || {}));
+        plan.adjustOpts);
     var findings = CsValidate.check(merged, resolved);
 
     // Erase by station name: everything the merged survey owns, plus
@@ -3756,6 +4049,22 @@ SurveyNotebook.buildDock = function(appWin) {
     } catch (eStatusChk) {
         // not checkable here: the box's own visibility is the state
     }
+    // THE GHOST'S OWN SWITCH. On by default -- it is the answer to
+    // "did I type that right" and a caver should not have to know it
+    // exists to get it -- but a page being typed over a dense part of
+    // a finished map is a real reason to want the map to itself.
+    w.ghostButton = SurveyNotebook.smallButton("Preview",
+        "Draw this page over the map as you type it: shot lines, the " +
+        "walls the LRUD makes, and a dashed line where loop closure " +
+        "moved things. Nothing is added to the drawing until Draw.");
+    try {
+        w.ghostButton.checkable = true;
+        w.ghostOn = RSettings.getBoolValue(
+            "CaveSurvey/NotebookGhost", true);
+        w.ghostButton.checked = w.ghostOn;
+    } catch (eGhostChk) {
+        w.ghostOn = true;
+    }
     w.scanButton = SurveyNotebook.smallButton("Scan",
         "Show/hide the scanned page beside the shots -- the page you " +
         "are typing off. Drag the bar between them to resize.");
@@ -3831,6 +4140,7 @@ SurveyNotebook.buildDock = function(appWin) {
     actions.addWidget(w.drawButton, 0, 0);
     actions.addWidget(w.newTripButton, 0, 0);
     actions.addStretch(1);
+    actions.addWidget(w.ghostButton, 0, 0);
     actions.addWidget(w.statusButton, 0, 0);
     actions.addWidget(w.scanButton, 0, 0);
     actions.addWidget(w.moreButton, 0, 0);
@@ -3938,6 +4248,19 @@ SurveyNotebook.buildDock = function(appWin) {
     SurveyNotebook.safeConnect(w.inferButton.clicked, function() {
         SurveyNotebook.inferDeclination(w);
     }, "Infer button", w.problems);
+    SurveyNotebook.safeConnect(w.ghostButton.clicked, function() {
+        w.ghostOn = (w.ghostOn === false);
+        RSettings.setValue("CaveSurvey/NotebookGhost", w.ghostOn);
+        try {
+            w.ghostButton.checked = w.ghostOn;
+        } catch (eGhostSync) {
+        }
+        if (w.ghostOn) {
+            SurveyNotebook.showGhost(w);
+        } else {
+            SurveyNotebook.clearGhost();
+        }
+    }, "Preview button", w.problems);
     SurveyNotebook.safeConnect(w.statusButton.clicked, function() {
         w.statusLabel.visible = !w.statusLabel.visible;
         RSettings.setValue("CaveSurvey/NotebookStatusVisible",
@@ -4186,9 +4509,17 @@ SurveyNotebook.buildDock = function(appWin) {
     try {
         dock.visibilityChanged.connect(function(shown) {
             if (shown !== true) {
+                // THE GHOST BELONGS TO THE OPEN PANEL. A preview of a
+                // page nobody can see is a set of lines over the map
+                // with nothing to explain them, and no way to make
+                // them go away.
+                SurveyNotebook.clearGhost();
                 return;
             }
             SurveyNotebook.refillIfStale(SurveyNotebook.page);
+            // Back on show: the page is still there, so its ghost
+            // should be too.
+            SurveyNotebook.ghostSoon(SurveyNotebook.page);
         });
     } catch (eVis) {
         w.problems.push("scan pane refresh on show (" + eVis + ")");
