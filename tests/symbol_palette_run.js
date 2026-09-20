@@ -860,6 +860,32 @@ eqs(SymbolPaletteRun.sizeForScale(5.0, 0, 1.0), null,
             if (lib.entries[i].block === dupName) { after = lib.entries[i]; }
         }
         ok(after !== null, "the renamed symbol is still there");
+
+        // ONE description, not two. The rename empties the block and
+        // refills it, and the marker lives on CTRL-HIDDEN, which is OFF
+        // -- a layer this build silently refuses a DELETE on, exactly as
+        // it refuses an add. The old marker used to survive the
+        // emptying and sit beside the new one, so the palette showed
+        // whichever markerOf reached first: the rename appeared to do
+        // nothing, on and off, with nothing logged. Counting the
+        // markers is what says the emptying really emptied.
+        (function countMarkers() {
+            var g = CsSymbolStore.geometryFor(dupName);
+            var blk = g === null ? null : g.doc.queryBlock(dupName);
+            var markers = 0;
+            if (!isNull(blk)) {
+                var ids = g.doc.queryBlockEntities(blk.getId());
+                for (var m = 0; m < ids.length; m++) {
+                    var en = g.doc.queryEntity(ids[m]);
+                    if (!isNull(en) && CsTags.get(en,
+                            CsSymbolStore.MARKER_TAGS.custom) === "1") {
+                        markers++;
+                    }
+                }
+            }
+            eqs(markers, 1, "and carries exactly ONE marker -- a re-save " +
+                "replaces the symbol's description, never adds a second");
+        })();
         if (after !== null) {
             eqs(after.nss, "My drip", "under its new name");
             eqs(after.category, "Water", "in its new category");

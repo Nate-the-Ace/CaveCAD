@@ -354,6 +354,88 @@ CsSymbolStore.markerOf = function(doc, blockId) {
 };
 
 /**
+ * Deletes every entity inside a block definition, whatever layer each
+ * one sits on.
+ *
+ * WHY THIS IS NOT A BARE RDeleteObjectsOperation. A block being saved
+ * over is emptied first and refilled, and one of the things inside it
+ * is the MARKER -- the point on CTRL-HIDDEN carrying the symbol's name,
+ * category and home layer. CTRL-HIDDEN is OFF in the registry, and this
+ * build SILENTLY REFUSES a delete on an off, frozen or locked layer
+ * exactly as it refuses an add (the same measurement that made saving a
+ * new symbol wrap its add in withLayerOn, 2026-09-06).
+ *
+ * So the old marker survived the emptying, the new one was added beside
+ * it, and the block ended up with TWO descriptions of itself. Whichever
+ * one markerOf reached first is the one the palette showed -- storage
+ * order, not the caver's edit -- which is why renaming a custom symbol
+ * appeared to do nothing at all, intermittently.
+ *
+ * Every layer the old entities are on is turned on and unlocked for the
+ * delete and put back afterwards, the marker's own layer included.
+ *
+ * \return the number of entities the block had. Safe on a block that
+ *         is already empty.
+ */
+CsSymbolStore.emptyBlock = function(doc, di, blockId) {
+    var oldIds;
+    try {
+        oldIds = doc.queryBlockEntities(blockId);
+    } catch (eQuery) {
+        return 0;
+    }
+    if (oldIds.length === 0) {
+        return 0;
+    }
+    var delOp = new RDeleteObjectsOperation();
+    var names = [CsSymbolStore.MARKER_LAYER];
+    var seen = {};
+    seen[CsSymbolStore.MARKER_LAYER] = true;
+    var count = 0;
+    for (var d = 0; d < oldIds.length; d++) {
+        var old = doc.queryEntity(oldIds[d]);
+        if (isNull(old)) {
+            continue;
+        }
+        try {
+            var lname = String(old.getLayerName());
+            if (lname !== "" && seen[lname] !== true) {
+                seen[lname] = true;
+                names.push(lname);
+            }
+        } catch (eLayer) {
+            // a layer we cannot name is one we cannot unlock; the
+            // delete still goes in, and simply may not take
+        }
+        delOp.deleteObject(old);
+        count++;
+    }
+
+    // withLayerUnlocked takes one name, so the list is nested one call
+    // deep per layer -- each unlocks, and every one of them is locked
+    // again on the way back out, exception or not.
+    function unlockThen(i, fn) {
+        if (i >= names.length) {
+            fn();
+            return;
+        }
+        CsLayers.withLayerUnlocked(doc, di, names[i], function() {
+            unlockThen(i + 1, fn);
+        });
+    }
+    try {
+        CsLayers.withLayersOn(doc, di, names, function() {
+            unlockThen(0, function() {
+                di.applyOperation(delOp);
+            });
+        });
+    } catch (eApply) {
+        return 0;
+    }
+    return count;
+};
+
+/**
  * The catalogue entry a block definition describes, or null when it
  * carries no marker (i.e. it is one of the shipped 28, whose metadata
  * is CsSymbols.CATALOG).
@@ -1265,16 +1347,7 @@ CsSymbolStore.saveBlock = function(path, blockName, srcDoc, entities, meta) {
         if (!isNull(existing)) {
             replaced = true;
             blockId = existing.getId();
-            var oldIds = doc.queryBlockEntities(blockId);
-            var delOp = new RDeleteObjectsOperation();
-            for (var d = 0; d < oldIds.length; d++) {
-                var old = doc.queryEntity(oldIds[d]);
-                if (isNull(old)) {
-                    continue;
-                }
-                delOp.deleteObject(old);
-            }
-            di.applyOperation(delOp);
+            CsSymbolStore.emptyBlock(doc, di, blockId);
         } else {
             var block = new RBlock(doc, blockName, new RVector(0, 0));
             di.applyOperation(new RAddObjectOperation(block));
@@ -1438,16 +1511,7 @@ CsSymbolStore.saveAreaPattern = function(path, blockName, srcDoc, entities,
         if (!isNull(existing)) {
             replaced = true;
             blockId = existing.getId();
-            var oldIds = doc.queryBlockEntities(blockId);
-            var delOp = new RDeleteObjectsOperation();
-            for (var d = 0; d < oldIds.length; d++) {
-                var old = doc.queryEntity(oldIds[d]);
-                if (isNull(old)) {
-                    continue;
-                }
-                delOp.deleteObject(old);
-            }
-            di.applyOperation(delOp);
+            CsSymbolStore.emptyBlock(doc, di, blockId);
         } else {
             var block = new RBlock(doc, blockName, new RVector(0, 0));
             di.applyOperation(new RAddObjectOperation(block));
