@@ -513,20 +513,54 @@ CsShapeLine.autoSides = function(pts, closed, spacing, stations, probe) {
         }
         out.push({ side: side, skip: skip, sure: sure });
     }
-    // THE WALL'S OWN ANSWER fills in for the stations that had none.
-    // Its confident stretches vote; an ambiguous stretch inherits that
-    // rather than a global constant, because "side +1 of however this
-    // line happened to be traced" is not a direction in the cave.
-    var vote = 0;
+    // THE NEAREST CONFIDENT NEIGHBOUR ALONG THE WALL fills in for the
+    // stations that had no answer of their own.
+    //
+    // This used to be one vote for the WHOLE run, and that is wrong
+    // wherever a run changes sides along its length -- a wall that
+    // leaves open passage and becomes a fin between two passages is
+    // one polyline with two different answers, and a majority vote
+    // gives the losing half stone drawn into the passage next door.
+    //
+    // MEASURED, which is why it changed: over a cave with long
+    // wandering passage a QUARTER of glyph stations come back unsure
+    // (Stairstep Cave: 25%, against 11% on a horizontal cave), because
+    // the nearest station to a wall's midpoint is usually ahead of it
+    // or behind it rather than across it. A fallback that covers a
+    // quarter of the drawing is not an edge case, and "the majority of
+    // this polyline" is not a direction in the cave.
+    //
+    // Walking outward from each unsure station to the first confident
+    // one on either side, and taking the closer, keeps a side change
+    // local to where it actually happens. A run with NO confident
+    // station anywhere still needs an answer, and there the old vote
+    // is the honest one: +1, arbitrary, and no worse than it was.
+    var lastSure = [];
+    var seen = -1;
     for (i = 0; i < out.length; i++) {
-        if (out[i].sure && !out[i].skip) {
-            vote += out[i].side;
-        }
+        if (out[i].sure && !out[i].skip) { seen = i; }
+        lastSure.push(seen);
     }
-    var fallback = vote < 0 ? -1 : 1;
+    var nextSure = [];
+    seen = -1;
+    for (i = out.length - 1; i >= 0; i--) {
+        if (out[i].sure && !out[i].skip) { seen = i; }
+        nextSure[i] = seen;
+    }
     for (i = 0; i < out.length; i++) {
-        if (!out[i].sure) {
-            out[i].side = fallback;
+        if (out[i].sure) {
+            continue;
+        }
+        var before = lastSure[i], after = nextSure[i];
+        if (before < 0 && after < 0) {
+            out[i].side = 1;    // nothing confident anywhere on this wall
+        } else if (before < 0) {
+            out[i].side = out[after].side;
+        } else if (after < 0) {
+            out[i].side = out[before].side;
+        } else {
+            out[i].side = ((i - before) <= (after - i)) ?
+                out[before].side : out[after].side;
         }
     }
     return out;
@@ -604,6 +638,83 @@ CsShapeLine.planStations = function(doc, cache) {
         cache.stations = out;
     }
     return out;
+};
+
+/**
+ * The ELEVATION's station cloud, for a profile wall's side test.
+ *
+ * THE PREMISE THAT THIS IS IMPOSSIBLE IS STALE. WallEdging's own
+ * header said plan walls only, "because CsDraw and CsRebuild are the
+ * only writers of the Station tag and both draw the plan, so a profile
+ * band holds no station geometry to reason against". That was true
+ * when it was written. CsProfileDraw tags every station it draws with
+ * ProfileStation, and has for as long as the elevation has been a
+ * region of the plan drawing -- so the elevation has had exactly the
+ * same evidence available all along.
+ *
+ * It matters more than it did: on a pit map the elevation is the
+ * PRIMARY view, so "plan only" meant the main drawing of a vertical
+ * cave got no rock outside its walls at all.
+ *
+ * SCOPED BY PROXIMITY, NOT BY BAND. A chunked elevation lays its
+ * pieces out side by side with a gap between them, and the side test
+ * only ever asks for the NEAREST station -- so a wall in one piece
+ * finds its own piece's stations without anyone having to track which
+ * band it belongs to. The one way that could go wrong is two bands
+ * closer together than a wall is to its own stations, which the
+ * layout's gap exists to prevent.
+ */
+CsShapeLine.profileStations = function(doc, cache) {
+    if (!isNull(cache) && !isNull(cache.profileStations)) {
+        return cache.profileStations;
+    }
+    var out = [];
+    try {
+        var ids = doc.queryAllEntities(false, true);
+        for (var i = 0; i < ids.length; i++) {
+            var e = doc.queryEntity(ids[i]);
+            if (isNull(e)) {
+                continue;
+            }
+            if (CsTags.get(e, "ProfileStation") === "") {
+                continue;
+            }
+            // The station POINT, not its label: both carry the tag,
+            // and a label sits a couple of text heights above the
+            // point it names. Taking both would put a phantom station
+            // in the ceiling of every passage.
+            if (!(e instanceof RPointEntity)) {
+                continue;
+            }
+            var p = e.getPosition();
+            if (!isNull(p) && !isNaN(p.x) && !isNaN(p.y)) {
+                out.push({ x: p.x, y: p.y });
+            }
+        }
+    } catch (eProf) {
+        out = [];
+    }
+    if (!isNull(cache)) {
+        cache.profileStations = out;
+    }
+    return out;
+};
+
+/**
+ * The station cloud a spine's own frame should be measured against.
+ *
+ * A section is deliberately absent: a section bay is one station's
+ * worth of cave seen end-on, so there is no cloud to reason against
+ * and no "outside" that geometry can find. Those stay hand-dressed.
+ */
+CsShapeLine.stationsForFrame = function(doc, cache, frame) {
+    if (frame === "profile") {
+        return CsShapeLine.profileStations(doc, cache);
+    }
+    if (frame === "section") {
+        return [];
+    }
+    return CsShapeLine.planStations(doc, cache);
 };
 
 /** Is this spine dressed by the switch rather than by hand? */
@@ -1187,10 +1298,11 @@ CsShapeLine.buildDecor = function(doc, spine, sample, di, cache) {
         // hand-dressed wall keeps its tag and this whole branch is
         // skipped, so Decorate Selection and ShapedFlip behave exactly
         // as they did.
-        if (CsShapeLine.isAuto(spine) &&
-                CsShapeLine.frameOfSpine(spine) === "plan") {
+        var spineFrame = CsShapeLine.frameOfSpine(spine);
+        if (CsShapeLine.isAuto(spine) && spineFrame !== "section") {
             extra.sides = CsShapeLine.autoSides(sample.points,
-                sample.closed, spacing, CsShapeLine.planStations(doc, cache),
+                sample.closed, spacing,
+                CsShapeLine.stationsForFrame(doc, cache, spineFrame),
                 extra.offset > 0 ? extra.offset : spacing);
         }
     }

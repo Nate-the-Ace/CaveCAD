@@ -19,12 +19,22 @@
 // passage on BOTH faces (a fin, a pillar) has no outside and is left
 // bare rather than having stone drawn into the passage next door.
 //
-// PLAN WALLS ONLY, and that is a fact about the drawing rather than a
-// preference: CsDraw and CsRebuild are the only writers of the Station
-// tag and both draw the plan, so a profile band and a section bay hold
-// no station geometry to reason against. Profile and section walls are
-// dressed by hand with Decorate Selection, which knows the side because
-// a caver said so.
+// PLAN AND ELEVATION WALLS. It was plan only, on the grounds that
+// "CsDraw and CsRebuild are the only writers of the Station tag and
+// both draw the plan, so a profile band holds no station geometry to
+// reason against". That stopped being true when the elevation became a
+// region of the plan drawing: CsProfileDraw tags every station it
+// draws with ProfileStation, so the same evidence has been sitting
+// there unused. It matters most in exactly the cave this was worst
+// for -- on a pit map the elevation is the PRIMARY view, so plan-only
+// meant the main drawing of a vertical cave had no rock outside its
+// walls at all.
+//
+// SECTION BAYS STAY HAND-DRESSED, and that one IS a fact about the
+// drawing: a bay is one station's worth of cave seen end-on, so there
+// is no station cloud to reason against and no outside that geometry
+// can find. Decorate Selection knows the side there because a caver
+// said so.
 
 include("scripts/EAction.js");
 include("scripts/simple.js");
@@ -141,19 +151,44 @@ WallEdging.setFlag = function(doc, di, on, group) {
  *  deliberately not among them: those are the dashed, unmeasured
  *  stretches, and edging them would claim more about the rock than the
  *  survey earned. */
+/** The layer an entity sits on, by name; "" when it cannot be read. */
+WallEdging.layerNameOf = function(doc, entity) {
+    try {
+        var layer = doc.queryLayer(entity.getLayerId());
+        if (isNull(layer)) {
+            return "";
+        }
+        return String(layer.getName());
+    } catch (e) {
+        return "";
+    }
+};
+
+WallEdging.WALL_LAYERS = function() {
+    // The elevation's own surveyed-wall layer alongside the plan's.
+    // Not the CTRL- wall runs of either frame: those are the
+    // generator's scaffolding, they are redrawn from the survey on
+    // every draw, and dressing them would mean the stone vanished
+    // every time the cave was redrawn.
+    return [CsLayers.WALLS_SURVEYED, CsLayers.PROFILE_WALLS_SURVEYED];
+};
+
 WallEdging.eligibleWalls = function(doc) {
     var out = [];
-    var layerId = doc.getLayerId(CsLayers.WALLS_SURVEYED);
-    if (layerId === RObject.INVALID_ID) {
-        return out;
-    }
-    var ids = doc.queryLayerEntities(layerId, true);
-    for (var i = 0; i < ids.length; i++) {
-        var e = doc.queryEntity(ids[i]);
-        if (isNull(e) || !CsShapeLine.isSupported(e)) {
+    var layers = WallEdging.WALL_LAYERS();
+    for (var L = 0; L < layers.length; L++) {
+        var layerId = doc.getLayerId(layers[L]);
+        if (layerId === RObject.INVALID_ID) {
             continue;
         }
-        out.push(e);
+        var ids = doc.queryLayerEntities(layerId, true);
+        for (var i = 0; i < ids.length; i++) {
+            var e = doc.queryEntity(ids[i]);
+            if (isNull(e) || !CsShapeLine.isSupported(e)) {
+                continue;
+            }
+            out.push(e);
+        }
     }
     return out;
 };
@@ -192,6 +227,18 @@ WallEdging.dressOne = function(doc, di, wall, group, cache) {
     CsTags.set(fresh, CsShapeLine.KEY.STYLE, WallEdging.STYLE);
     CsTags.set(fresh, CsShapeLine.KEY.ID, CsUuid.v4());
     CsTags.set(fresh, CsShapeLine.KEY.AUTO, "1");
+    // THE FRAME, FROM THE LAYER THE WALL IS ON.
+    //
+    // ShapeFrame is written when a caver DRAWS a shaped line, and a
+    // traced wall is not one -- it is ordinary linework this switch is
+    // taking over. Without this the tag is absent, frameOfSpine
+    // defaults to "plan", and an elevation wall would be measured
+    // against the PLAN's station cloud: a cloud in a different part of
+    // the drawing entirely, so every glyph on it would take whichever
+    // side the plan happened to be on. Silent, and wrong in a way that
+    // looks like a rendering bug rather than a frame mix-up.
+    CsTags.set(fresh, CsShapeLine.KEY.FRAME,
+        CsLayers.frameOf(WallEdging.layerNameOf(doc, fresh)));
     var mod = new RModifyObjectsOperation();
     mod.addObject(fresh, false);
     if (group !== null && group !== undefined && group >= 0) {

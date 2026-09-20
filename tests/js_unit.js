@@ -23950,6 +23950,43 @@ function syntheticTiff(w, h, floats) {
         "autoSides: an unsure stretch inherits the side its own wall " +
         "resolved, not a global default (got " + inherited + ")");
 
+    // A WALL THAT CHANGES SIDES ALONG ITS LENGTH, which is the case a
+    // whole-run vote gets wrong for half of itself.
+    //
+    // A long wall with cave close below its left end and close above
+    // its right end, and nothing near the middle. The ends come out
+    // confident either way; the MIDDLE is the test, because that is
+    // where a vote hands every station one answer and half of them are
+    // on the wrong side of the rock. Measured on a real cave, a
+    // quarter of glyph stations land in exactly this state.
+    var wallLong = [{ x: 0, y: 0 }, { x: 120, y: 0 }];
+    var twoSided = [{ x: 5, y: -4 }, { x: 15, y: -4 },
+                    { x: 105, y: 4 }, { x: 115, y: 4 }];
+    var sTwo = CsShapeLine.autoSides(wallLong, false, 5, twoSided, 2);
+    var wrongEnd = 0, leftUnsure = 0, rightUnsure = 0;
+    for (var a7 = 0; a7 < sTwo.length; a7++) {
+        if (sTwo[a7].sure) { continue; }
+        var atX7 = a7 * 5;
+        if (atX7 >= 40 && atX7 <= 55) {
+            leftUnsure++;
+            // cave BELOW this end, so outside is above: -1
+            if (sTwo[a7].side !== -1) { wrongEnd++; }
+        } else if (atX7 >= 65 && atX7 <= 80) {
+            rightUnsure++;
+            // cave ABOVE this end, so outside is below: +1
+            if (sTwo[a7].side !== 1) { wrongEnd++; }
+        }
+    }
+    ok(leftUnsure > 0 && rightUnsure > 0,
+        "autoSides: the two-sided wall really is ambiguous in the " +
+        "middle, both halves of it (" + leftUnsure + " / " +
+        rightUnsure + ")");
+    eqs(wrongEnd, 0,
+        "autoSides: and each ambiguous station takes the answer of the " +
+        "CONFIDENT station nearest it, so a wall with cave below one " +
+        "end and above the other is right along its whole length -- a " +
+        "whole-run vote gave one half the other half's answer");
+
     // no survey at all: an answer, not a crash
     var sNone = CsShapeLine.autoSides(wallX, false, 5, [], 2);
     eqs(sNone.length, CsShapeLine.stations(wallX, false, 5).length,

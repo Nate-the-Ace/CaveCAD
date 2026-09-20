@@ -215,6 +215,87 @@ for (var q = 0; q < Math.min(southAgain.length, southGlyphs.length); q++) {
 ok(drift < 1e-6, "and in the SAME PLACES -- a toggle must not reshuffle " +
     "a wall the caver has been looking at (drift " + drift + ")");
 
+// ---- THE ELEVATION GETS ROCK TOO -------------------------------------
+//
+// It was plan only, on the grounds that a profile band held no station
+// geometry to reason against. It holds ProfileStation points and has
+// for as long as the elevation has been a region of the plan drawing,
+// and on a pit map the elevation is the PRIMARY view -- so plan-only
+// meant the main drawing of a vertical cave had no rock outside its
+// walls at all.
+(function() {
+    var pdoc = new RDocument(new RMemoryStorage(), createSpatialIndex());
+    var pdi = new RDocumentInterface(pdoc);
+    CsLayers.ensure(pdoc, pdi, CsLayers.PROFILE_WALLS_SURVEYED);
+    CsLayers.ensure(pdoc, pdi, CsLayers.CTRL_PROFILE_STATIONS);
+
+    // An elevation wall, with the elevation's own stations BELOW it,
+    // and a decoy cloud far away on the plan's side of the drawing.
+    // If the frame is read wrong, the decoy wins and every glyph goes
+    // the other way.
+    var op = new RAddObjectsOperation();
+    var wall = new RPolylineEntity(pdoc, new RPolylineData());
+    wall.appendVertex(new RVector(0, 0));
+    wall.appendVertex(new RVector(40, 0));
+    wall.appendVertex(new RVector(80, 0));
+    wall.setLayerId(pdoc.getLayerId(CsLayers.PROFILE_WALLS_SURVEYED));
+    op.addObject(wall, false);
+    var sx;
+    for (sx = 10; sx <= 70; sx += 20) {
+        var st = new RPointEntity(pdoc,
+            new RPointData(new RVector(sx, -9)));
+        st.setLayerId(pdoc.getLayerId(CsLayers.CTRL_PROFILE_STATIONS));
+        CsTags.set(st, "ProfileStation", "P" + sx);
+        op.addObject(st, false);
+    }
+    // the decoy: plan stations ABOVE the same wall, a long way off in
+    // the drawing but reachable by a nearest-station search that is
+    // looking at the wrong cloud
+    CsLayers.ensure(pdoc, pdi, CsLayers.CTRL_STATIONS);
+    for (sx = 10; sx <= 70; sx += 20) {
+        var ps = new RPointEntity(pdoc,
+            new RPointData(new RVector(sx, 9)));
+        ps.setLayerId(pdoc.getLayerId(CsLayers.CTRL_STATIONS));
+        CsTags.set(ps, "Station", "A" + sx);
+        op.addObject(ps, false);
+    }
+    pdi.applyOperation(op);
+
+    var elig = WallEdging.eligibleWalls(pdoc);
+    eqs(elig.length, 1,
+        "an elevation wall is eligible for edging (" + elig.length + ")");
+
+    var res = WallEdging.applySwitch(pdoc, pdi, true, -1);
+    eqs(res.dressed, 1, "and the switch dresses it");
+
+    var again = pdoc.queryEntity(elig[0].getId());
+    eqs(String(CsTags.get(again, CsShapeLine.KEY.FRAME)), "profile",
+        "the wall is tagged as being in the PROFILE frame, taken from " +
+        "the layer it sits on -- a traced wall carries no ShapeFrame " +
+        "of its own");
+
+    // The glyphs must be ABOVE the wall: the elevation's cave is below
+    // it. The plan decoy is above, so reading the wrong cloud puts
+    // them below and this catches it.
+    var aboveCount = 0, belowCount = 0;
+    var ids = pdoc.queryAllEntities(false, true);
+    for (var i = 0; i < ids.length; i++) {
+        var e = pdoc.queryEntity(ids[i]);
+        if (isNull(e)) { continue; }
+        if (CsTags.get(e, CsShapeLine.KEY.DECOR) === "") { continue; }
+        var bb = e.getBoundingBox();
+        if (isNull(bb)) { continue; }
+        if (bb.getCenter().y > 0) { aboveCount++; } else { belowCount++; }
+    }
+    ok(aboveCount > 0,
+        "the elevation's glyphs are drawn (" + aboveCount + " above, " +
+        belowCount + " below)");
+    eqs(belowCount, 0,
+        "and ALL of them are on the side away from the elevation's own " +
+        "stations -- not the plan's, which sit on the other side for " +
+        "exactly this check");
+})();
+
 // ---- the switch survives a save and reopen ---------------------------
 
 var tmp = repoRoot + "/tests/.wall_edging.dxf";
