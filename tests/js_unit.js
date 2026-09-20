@@ -7849,6 +7849,69 @@ if (!IS_NODE) {
                 splaysDrawn: 5, ghostDrawn: 99 }));
     })();
 
+    // ---- THE WHOLE OF PLUMBLINE PIT, DRAWN ------------------------
+    //
+    // The pure-geometry stack over this fixture is covered by
+    // tests/plumbline_pipeline.js; what that cannot reach is the
+    // DOCUMENT. CsDraw.lrud would have thrown at the foot of every
+    // pitch the moment CsLrud.tickEnd started refusing to draw a wall
+    // in a direction nobody sighted -- a crash reachable only by
+    // drawing a cave with a rope in it, and so by nothing in this
+    // suite before Plumbline Pit existed.
+    (function() {
+        var fixture = repoRoot + "/testdata/PlumblinePit.svx";
+        var f = new QFile(fixture);
+        if (!f.open(QIODevice.ReadOnly | QIODevice.Text)) {
+            ok(false, "plumbline-draw: cannot read " + fixture);
+            return;
+        }
+        var stream = new QTextStream(f);
+        var text = stream.readAll();
+        f.close();
+
+        var doc = new RDocument(new RMemoryStorage(), new RSpatialIndexNavel());
+        var di = new RDocumentInterface(doc);
+        getDocument = function() { return doc; };
+        getDocumentInterface = function() { return di; };
+        CsLayers.ensureSurveyLayers(doc, di);
+
+        var sv = CsFormatSurvex.parse(text);
+        var resolved = CsNetwork.resolve(sv, {});
+        var drawn = CsDraw.survey(sv, resolved);
+
+        ok(drawn.stationsDrawn === 24,
+            "plumbline-draw: every station drawn, got " + drawn.stationsDrawn);
+        ok(drawn.shotsDrawn + drawn.closuresDrawn + drawn.tiesDrawn > 15,
+            "plumbline-draw: the legs are drawn, got " +
+            (drawn.shotsDrawn + drawn.closuresDrawn + drawn.tiesDrawn));
+        ok(drawn.splaysDrawn > 10,
+            "plumbline-draw: the splay rings are drawn, got " +
+            drawn.splaysDrawn);
+
+        // The foot of P1 has its L and R ticks, swung off the passage
+        // it opens onto -- not missing, and not pointing north.
+        var ids = doc.queryAllEntities(false, false);
+        var foundL = false, foundR = false, badGeometry = 0;
+        for (var qi = 0; qi < ids.length; qi++) {
+            var e = doc.queryEntity(ids[qi]);
+            if (isNull(e)) { continue; }
+            var lrName = CsTags.get(e, "LRUDName");
+            if (lrName === "A5.L") { foundL = true; }
+            if (lrName === "A5.R") { foundR = true; }
+            var bb = e.getBoundingBox();
+            if (!isNull(bb)) {
+                var c = bb.getCenter();
+                if (!isFinite(c.x) || !isFinite(c.y)) { badGeometry++; }
+            }
+        }
+        ok(foundL && foundR,
+            "plumbline-draw: the foot of the 187 ft entrance drop keeps " +
+            "both its wall ticks (L " + foundL + ", R " + foundR + ")");
+        eqs(badGeometry, 0,
+            "plumbline-draw: and no entity anywhere in the drawing has a " +
+            "non-finite position");
+    })();
+
     // ---- A PITCH RECONSTRUCTED FROM THE DRAWING ---------------------
     (function() {
         var doc = new RDocument(new RMemoryStorage(), new RSpatialIndexNavel());

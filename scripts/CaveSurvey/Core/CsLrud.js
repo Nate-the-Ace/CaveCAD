@@ -425,10 +425,68 @@ CsLrud.tickAzimuth = function(lrud, passageAz) {
     return null;
 };
 
-/** tickAzimuth for a caller that has the axes rather than the angle. */
-CsLrud.tickAzimuthAt = function(axes, name, lrud) {
-    return CsLrud.tickAzimuth(lrud,
+/**
+ * The passage direction at the OTHER END of the pitch this station
+ * hangs on, for a station that has no direction of its own.
+ *
+ * A blind shaft -- an aven climbed to a dead end, a pit dropped to a
+ * floor with nothing leading off it -- gives its far station no way
+ * out at all: the only leg touching it is plumb, and a plumb has no
+ * plan bearing (CsLrud.planBearing). The caver still measured L and R
+ * up there, and refusing to draw them costs the drawing the one width
+ * it has for the top of the aven or the bottom of the pit.
+ *
+ * What they were facing is not recorded and cannot be. What is known
+ * is that they arrived from the station at the other end of the rope,
+ * in a passage running some direction, and turned round or looked up.
+ * Using that passage's direction is a CONVENTION, and it is the only
+ * one available that is not a guess at a compass bearing: it keeps the
+ * blind end's walls parallel to the passage that leads to it, which is
+ * what a caver drawing the same sketch by hand would do.
+ *
+ * Only a PLUMB leg is followed. A station reached by an ordinary leg
+ * has a way out of its own and never gets here.
+ */
+CsLrud.acrossPitchAzimuth = function(axes, resolved, name) {
+    if (resolved === null || resolved === undefined || !resolved.legs) {
+        return null;
+    }
+    for (var i = 0; i < resolved.legs.length; i++) {
+        var leg = resolved.legs[i];
+        var other = null;
+        if (leg.from === name) {
+            other = leg.to;
+        } else if (leg.to === name) {
+            other = leg.from;
+        } else {
+            continue;
+        }
+        if (!CsTraverse.isPlumb(leg.shot)) {
+            continue;
+        }
+        var az = CsLrud.passageAzimuthAt(axes, other, null);
+        if (typeof az === "number" && isFinite(az)) {
+            return az;
+        }
+    }
+    return null;
+};
+
+/**
+ * tickAzimuth for a caller that has the axes rather than the angle.
+ *
+ * `resolved` is optional and only consulted for the blind-shaft case
+ * above -- a station whose only leg is a pitch. Callers that have it
+ * should pass it: without it, the top of an aven and the bottom of a
+ * blind pit draw with no width.
+ */
+CsLrud.tickAzimuthAt = function(axes, name, lrud, resolved) {
+    var az = CsLrud.tickAzimuth(lrud,
         CsLrud.passageAzimuthAt(axes, name, null));
+    if (az !== null) {
+        return az;
+    }
+    return CsLrud.acrossPitchAzimuth(axes, resolved, name);
 };
 
 /**

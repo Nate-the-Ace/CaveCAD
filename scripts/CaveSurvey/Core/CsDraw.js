@@ -723,7 +723,7 @@ CsDraw.survey = function(survey, resolved, originStation, originPos,
             // a reader looking at a pit foot would see the wall miss
             // its own tick by 90 degrees.
             CsDraw.lrud(doc, op, at(name), name,
-                CsLrud.tickAzimuthAt(drawAxes, name, lrud),
+                CsLrud.tickAzimuthAt(drawAxes, name, lrud, resolved),
                 lrud.left, lrud.right, lrud.up, lrud.down, {
                     leftAll: lrud.leftAll, rightAll: lrud.rightAll,
                     upAll: lrud.upAll, downAll: lrud.downAll
@@ -738,8 +738,8 @@ CsDraw.survey = function(survey, resolved, originStation, originPos,
             // invalid id -- entities land, on nothing, silently.
             CsLayers.ensure(doc, di, CsLayers.NOTES_ANNOTATION);
             CsDraw.noteLeader(doc, op, at(name), name, noteText,
-                CsLrud.tickAzimuthAt(drawAxes, name, lrud) !== null ?
-                    CsLrud.tickAzimuthAt(drawAxes, name, lrud) :
+                CsLrud.tickAzimuthAt(drawAxes, name, lrud, resolved) !== null ?
+                    CsLrud.tickAzimuthAt(drawAxes, name, lrud, resolved) :
                     firstLegAzimuth, lrud);
         }
         stationsDrawn++;
