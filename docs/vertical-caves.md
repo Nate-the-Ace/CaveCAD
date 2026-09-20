@@ -161,23 +161,41 @@ close in the cave, and every pitch is labelled, including the ones
 band-splitting silences in the extended view. Generate Profile asks
 which kind and remembers the answer.
 
+### Looked at and left
+
+**The extended elevation collapses on a pitch** — its X axis advances
+by plan distance, so a plumb advances it by nothing and a run that is
+all pitch is a band with no width. Chased, measured, and largely
+answered by the two features above rather than by changing it:
+
+- it is *correct*. A rope travels no distance along the passage, and
+  drawing it as a vertical line is what an extended elevation means.
+- a bare vertical line is now legible, because the pitch label sits
+  beside it.
+- the frame does not collapse with the band: the caption gives the box
+  its width. That was a side effect nobody had written down; it is
+  pinned now in `profile_draw_roundtrip`.
+- the projected elevation has no bands at all, so for a cave where this
+  actually hurts, the answer is to draw the other kind.
+
+What remains is that `CsProfile.layout` displaces a band that merely
+*touches* another in elevation. That edge is deliberate, documented and
+fuzzed over 20,000 surveys in `CsProfile.GUTTER_MIN`'s own docblock —
+"just barely touches" and "just barely clears" are different physical
+facts — so it is not a vertical bug and was left alone.
+
+An all-pitch band is now exercised rather than theoretical: it had
+never been, because every band in every fixture the suite had contained
+some horizontal passage.
+
 ### Open
 
-1. **The extended elevation collapses on a pitch, correctly, and
-   nothing downstream knows.** Its X axis advances by plan distance, so
-   a plumb advances it by nothing and consecutive stations land on one
-   vertical line. That is right for the rope — a rope IS a vertical line
-   — and wrong for everything that has to lay the band out: labels stack
-   on each other, and a band whose whole run is pitch has no width for a
-   frame (`CsProfileBox`) or a drape to use. Pitfall V18 pins the
-   behaviour; what to DO about it is a decision, not a bug fix.
-
-2. **The plan view has no way to show two levels.** A4 sits directly
+1. **The plan view has no way to show two levels.** A4 sits directly
    above A5 in the fixture, 125 ft apart. Nothing cues depth: no
    depth-graded rendering, no per-level plan insets, no "this passage is
    under that one" convention.
 
-3. **`CsAdjust` is still isotropic.** Weighting a declared plumb by
+2. **`CsAdjust` is still isotropic.** Weighting a declared plumb by
    gravity rather than by a compass is a real improvement and is not the
    whole answer: a leg's vertical and horizontal variances genuinely
    differ, and the header rules anisotropic covariance out by decision.

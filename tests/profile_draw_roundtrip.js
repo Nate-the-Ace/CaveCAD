@@ -3459,6 +3459,41 @@ function drawPlanSurvey(doc, di, resolved, names) {
 }());
 
 // =======================================================================
+// A BAND THAT IS ENTIRELY PITCH still has a frame.
+//
+// Zero width by construction -- an extended elevation's X is distance
+// travelled and a rope travels none -- so the one thing that could go
+// wrong is a bounding box of zero width, which is a line rather than a
+// frame. The caption is what saves it, and that is worth pinning
+// because it is a side effect rather than a decision anyone wrote down.
+// =======================================================================
+(function() {
+    var svV = CsModel.newSurvey();
+    svV.shots = [
+        shotOf("A1", "A2", 30, 90, 0),
+        shotOf("A2", "B1", 40, 0, -90),
+        shotOf("B1", "B2", 50, 0, -90)
+    ];
+    var profV = CsProfile.build(svV, CsNetwork.resolve(svV, {}),
+        { mode: "extended" });
+    var bandV = null;
+    for (var i = 0; i < profV.bands.length; i++) {
+        if (profV.bands[i].key === "B") { bandV = profV.bands[i]; }
+    }
+    ok(bandV !== null, "all-pitch: the shaft gets its own band");
+    if (bandV !== null) {
+        var box = CsProfileDraw.bandBox(bandV);
+        ok(box !== null, "all-pitch: a zero-width band is still boxable");
+        ok(box.maxX - box.minX > 0,
+            "all-pitch: and its box has width, from the caption -- a " +
+            "frame of zero width would be a line, not a frame");
+        ok(box.maxY - box.minY > 80,
+            "all-pitch: and the height of the shaft, got " +
+            (box.maxY - box.minY).toFixed(1));
+    }
+}());
+
+// =======================================================================
 // THE PROJECTED ELEVATION renders through the SAME code as the
 // extended one -- which is the whole architectural claim, and the
 // reason it is worth a fixture rather than a reading.

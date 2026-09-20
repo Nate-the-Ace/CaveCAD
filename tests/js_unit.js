@@ -2896,6 +2896,66 @@ function tieInFixture(openSides) {
 })();
 
 (function() {
+    // ---- A BAND THAT IS ENTIRELY PITCH ----------------------------
+    //
+    // Zero width, a hundred and fifty feet tall. It is what an
+    // extended elevation MUST draw for a shaft surveyed straight down
+    // -- X is distance travelled along the passage and a plumb travels
+    // none -- and it was never exercised, because every band in every
+    // fixture this suite had contained some horizontal passage.
+    var svV = CsModel.newSurvey();
+    svV.shots = [
+        shotOf("A1", "A2", 30, 90, 0),
+        shotOf("A2", "B1", 40, 0, -90),
+        shotOf("B1", "B2", 50, 0, -90),
+        shotOf("B2", "B3", 60, 0, -90)
+    ];
+    var resV = CsNetwork.resolve(svV, {});
+    var profV = CsProfile.build(svV, resV, { mode: "extended" });
+    var bandV = null;
+    for (var i = 0; i < profV.bands.length; i++) {
+        if (profV.bands[i].key === "B") { bandV = profV.bands[i]; }
+    }
+    ok(bandV !== null, "all-pitch: the shaft gets its own band");
+    if (bandV !== null) {
+        var lo = null, hi = null;
+        for (i = 0; i < bandV.stations.length; i++) {
+            var x = bandV.stations[i].x;
+            if (lo === null || x < lo) { lo = x; }
+            if (hi === null || x > hi) { hi = x; }
+        }
+        near(hi - lo, 0, 1e-9,
+            "all-pitch: and it has NO WIDTH, which is correct -- a rope " +
+            "travels no distance along the passage");
+        var spanV = CsProfile.bandSpan(bandV);
+        ok(spanV !== null, "all-pitch: it still has a vertical span");
+        near(spanV.hi - spanV.lo, 150, 1e-6,
+            "all-pitch: 150 ft of it");
+        // (That its BOX does not collapse with it -- the caption gives
+        // the frame its width -- is asserted in
+        // tests/profile_draw_roundtrip.js, which has the drawing layer
+        // loaded. This block is pure Core.)
+        //
+        // And it is labelled, which is what makes a bare vertical line
+        // readable at all.
+        eqs(bandV.pitches.length, 1,
+            "all-pitch: the whole shaft is ONE labelled drop");
+        eqs(bandV.pitches[0].text, "P 150 ft (40 + 50 + 60)",
+            "all-pitch: named with its rope sections, got " +
+            bandV.pitches[0].text);
+    }
+
+    // THE PROJECTED ELEVATION HAS NO SUCH CASE, which is the real
+    // answer to it: there are no bands to be degenerate.
+    var projV = CsProfile.build(svV, resV, { mode: "projected" });
+    eqs(projV.bands.length, 1, "all-pitch: projected draws one band");
+    eqs(projV.bands[0].stations.length, 5,
+        "all-pitch: holding every station in the cave -- A1 and A2 as " +
+        "well as the shaft, because a projection has no runs to split " +
+        "them between");
+})();
+
+(function() {
     // ---- CsProject: the cave flattened onto one chosen plane -------
     function projSurvey(legs) {
         var sv = CsModel.newSurvey();
