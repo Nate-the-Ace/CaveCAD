@@ -139,6 +139,28 @@ the rebelay ledge does not split it. An aven is decided by whether
 anything carries on at the top, not by which end the tape started at.
 Under 10 ft gets no label. Off with `CaveSurvey/PitchLabels`.
 
+**A projected elevation** (0.9.171). `Core/CsProject.js` flattens the
+cave's real coordinates onto one chosen vertical plane and returns it
+in `CsProfile.build`'s own shape — one band, shaped exactly as
+`unrollBand` shapes a run — so `CsProfileDraw` never learns there are
+two kinds and the whole frame, erase, binding, box and pitch-label
+plumbing is shared. The alternative was a fourth layer frame with its
+own erase, binding rules and tag namespace, all to be kept in step
+with the profile's by hand.
+
+The default plane is the cave's first principal axis in plan: the
+direction it is longest along, which is the plane that throws away
+least. A cave with no horizontal extent has none, and says so rather
+than fitting an axis to `cos(90)`'s rounding error. An axis is a line,
+so 040 and 220 are one answer. The caption names the plane and says
+when it was chosen for the caver rather than by them.
+
+A projection draws **every** station and every leg — there is no chain
+to pick and nothing to demote — so loops close on the page as they
+close in the cave, and every pitch is labelled, including the ones
+band-splitting silences in the extended view. Generate Profile asks
+which kind and remembers the answer.
+
 ### Open
 
 1. **The extended elevation collapses on a pitch, correctly, and
@@ -150,23 +172,18 @@ Under 10 ft gets no label. Off with `CaveSurvey/PitchLabels`.
    frame (`CsProfileBox`) or a drape to use. Pitfall V18 pins the
    behaviour; what to DO about it is a decision, not a bug fix.
 
-2. **There is no projected profile.** `CsProfile`'s own header says so:
-   an extended elevation unrolls the passage, a projected profile
-   flattens real coordinates onto one chosen vertical plane. For a pit
-   cave the projected one is the PRIMARY view, not a secondary. This is
-   the largest missing piece.
-
-3. **The plan view has no way to show two levels.** A4 sits directly
+2. **The plan view has no way to show two levels.** A4 sits directly
    above A5 in the fixture, 125 ft apart. Nothing cues depth: no
    depth-graded rendering, no per-level plan insets, no "this passage is
    under that one" convention.
 
-4. **A pitch label exists only in the plan.** The extended elevation
-   draws the same drop as a vertical line and puts no number on it,
-   which is the view where the drop is actually visible as a drop.
-
-5. **`CsAdjust` is still isotropic.** Weighting a declared plumb by
+3. **`CsAdjust` is still isotropic.** Weighting a declared plumb by
    gravity rather than by a compass is a real improvement and is not the
    whole answer: a leg's vertical and horizontal variances genuinely
    differ, and the header rules anisotropic covariance out by decision.
    Worth revisiting now that there is a fixture that can measure it.
+   **Left deliberately.** The header rules it out by an explicit
+   decision, and overturning a documented architectural decision is not
+   something to do unsupervised — the gravity weighting was a change
+   *within* the existing "one scalar sigma per leg" rule, which is why
+   it was fair game and this is not.

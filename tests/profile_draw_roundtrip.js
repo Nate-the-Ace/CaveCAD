@@ -74,7 +74,7 @@ var CORE = ["CsUnits", "CsCave", "CsGeoProject", "CsAngles", "CsIgrfCoeffs",
     // CsPitch before CsProfile: build() attaches each band the drops
     // it draws whole, so the elevation and the plan cannot disagree
     // about how deep one is.
-    "CsPitch", "CsProfile", "CsProfileDraw",
+    "CsPitch", "CsProfile", "CsProject", "CsProfileDraw",
     // CsWarp before CsRevise -- moveLinework's per-vertex dispatch
     // calls CsWarp.mlsSimilarity when it runs.
     "CsWarp",
@@ -3456,6 +3456,107 @@ function drawPlanSurvey(doc, di, resolved, names) {
         "number beside half of it");
 
     destr(iP);
+}());
+
+// =======================================================================
+// THE PROJECTED ELEVATION renders through the SAME code as the
+// extended one -- which is the whole architectural claim, and the
+// reason it is worth a fixture rather than a reading.
+// =======================================================================
+(function() {
+    var svX = CsModel.newSurvey();
+    svX.shots = [
+        shotOf("A1", "A2", 40, 90, 0, 3, 2),
+        shotOf("A2", "A3", 60, 0, -90, 2, 0),
+        shotOf("A3", "A4", 40, 90, 0, 4, 1),
+        // A loop back: a projection draws this whole, where an
+        // extended elevation has to pick one way round.
+        shotOf("A4", "A5", 40, 180, 0, 3, 1),
+        shotOf("A5", "A6", 40, 270, 0, 3, 1)
+    ];
+    var resX = CsNetwork.resolve(svX, {});
+
+    var profX = CsProfile.build(svX, resX, { mode: "projected" });
+    eqs(profX.bands.length, 1,
+        "projected: ONE band -- a projection does not divide a cave " +
+        "into runs, every station is on the same plane");
+    var bandX = profX.bands[0];
+    eqs(bandX.key, "PROJ", "projected: under its own band key");
+    eqs(bandX.stations.length, 6,
+        "projected: EVERY placed station is drawn, none omitted");
+    eqs(bandX.legs.length, resX.legs.length,
+        "projected: and every drawn leg, loops included");
+    eqs(bandX.omitted.length, 0,
+        "projected: nothing is demoted -- there is no chain to pick");
+
+    // True elevation, not unrolled distance.
+    var lo = null, hi = null;
+    for (var i = 0; i < bandX.stations.length; i++) {
+        var y = bandX.stations[i].y;
+        if (lo === null || y < lo) { lo = y; }
+        if (hi === null || y > hi) { hi = y; }
+    }
+    near(hi - lo, 60, 1e-6,
+        "projected: the drawing is 60 ft tall, which is the cave");
+
+    // The caption names the plane. A reader who is not told which way
+    // they are looking is holding a picture of some cave.
+    var cap = CsProfileDraw.labelText(bandX);
+    ok(cap.indexOf("PROJECTED") === 0,
+        "projected: the caption says so, got '" + cap + "'");
+    ok(cap.indexOf("LONG AXIS") >= 0,
+        "projected: and says the plane was chosen FOR the caver when " +
+        "it was, got '" + cap + "'");
+    var asked = CsProfile.build(svX, resX,
+        { mode: "projected", azimuth: 40 });
+    eqs(asked.projection.source, "asked",
+        "projected: an azimuth the caver gave is not reported as chosen");
+    ok(CsProfileDraw.labelText(asked.bands[0]).indexOf("LONG AXIS") < 0,
+        "projected: ...and the caption does not claim otherwise");
+
+    // An axis has no direction, only a line.
+    var a40 = CsProfile.build(svX, resX, { mode: "projected", azimuth: 40 });
+    var a220 = CsProfile.build(svX, resX, { mode: "projected", azimuth: 220 });
+    near(a40.projection.azimuth, a220.projection.azimuth, 1e-9,
+        "projected: 040 and 220 are the same plane");
+
+    // ...and it goes through the real renderer, onto real layers, with
+    // every entity carrying its run like any other band's.
+    var dX = new RDocument(new RMemoryStorage(), createSpatialIndex());
+    var iX = new RDocumentInterface(dX);
+    CsLayers.ensureSurveyLayers(dX, iX);
+    var out = CsProfileDraw.render(dX, iX, profX, {});
+    ok(out.stationsDrawn === 6,
+        "projected: the renderer drew every station, got " +
+        out.stationsDrawn);
+    ok(out.legsDrawn === resX.legs.length,
+        "projected: and every leg, got " + out.legsDrawn);
+    ok(out.pitchLabels >= 1,
+        "projected: the 60 ft drop is labelled, got " + out.pitchLabels);
+
+    var scanned = scanProfileEntities(dX);
+    ok(scanned.length > 0, "projected: it left tagged entities behind");
+    var untagged = 0, offCtrl = 0;
+    for (i = 0; i < scanned.length; i++) {
+        if (!scanned[i].tags.hasOwnProperty("ProfileRun")) { untagged++; }
+        if (String(scanned[i].layer).indexOf("CTRL-") !== 0) { offCtrl++; }
+    }
+    eqs(untagged, 0,
+        "projected: every entity carries ProfileRun, so a scoped erase " +
+        "reaches it exactly as it reaches an extended band's");
+    eqs(offCtrl, 0,
+        "projected: and all of it is on CTRL- layers, so the generator " +
+        "still owns nothing in the caver's namespace");
+
+    // ERASE, which is the claim that matters most: the projected
+    // elevation is not a second view that the extended one would leave
+    // behind when it redrew.
+    var removed = CsProfileDraw.erase(dX, iX);
+    ok(removed > 0, "projected: erase() removes it, got " + removed);
+    eqs(scanProfileEntities(dX).length, 0,
+        "projected: ...all of it");
+
+    destr(iX);
 }());
 
 // =======================================================================

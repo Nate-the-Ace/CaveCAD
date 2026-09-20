@@ -43,7 +43,7 @@ function loadCore(rel) {
 }
 ["CsUuid.js", "CsUnits.js", "CsAngles.js", "CsModel.js", "CsTraverse.js",
  "CsNetwork.js", "CsAdjust.js", "CsLrud.js", "CsFrontier.js",
- "CsPitch.js", "CsProfile.js", "CsSectionCut.js",
+ "CsPitch.js", "CsProfile.js", "CsProject.js", "CsSectionCut.js",
  "CsMesh3d.js", "CsValidate.js", "CsStats.js", "CsGrade.js",
  "Format/CsCompass.js", "Format/CsWalls.js", "Format/CsSurvex.js",
  "Format/CsCsv.js", "Format/CsTherion.js",
@@ -239,6 +239,48 @@ for (var si = 0; si < sources.length; si++) {
             name + ": the bands hold " + stationsInBands + " stations");
         CsProfile.layout(profile.bands);
         finite(profile.bands, name + ": profile bands after layout");
+    }
+
+    // ---- the PROJECTED elevation -----------------------------------
+    //
+    // The view a pit cave actually wants: real coordinates on one
+    // plane, so the shafts stack the way they stack underground.
+    var proj = CsProfile.build(survey, resolved,
+        { mode: CsProject.MODE_PROJECTED });
+    ok(proj !== null && proj.bands && proj.bands.length === 1,
+        name + ": the projected elevation builds as ONE band");
+    if (proj && proj.bands && proj.bands.length === 1) {
+        var pband = proj.bands[0];
+        finite(pband.stations, name + ": projected stations");
+        finite(pband.legs, name + ": projected legs");
+        finite(pband.ceiling, name + ": projected ceiling runs");
+        finite(pband.floor, name + ": projected floor runs");
+        ok(pband.stations.length ===
+                Object.keys(resolved.stations).length,
+            name + ": and draws EVERY station (" + pband.stations.length +
+            " of " + Object.keys(resolved.stations).length + ") -- a " +
+            "projection has no chain to pick and nothing to demote");
+        ok(pband.legs.length === resolved.legs.length,
+            name + ": and every leg, the loop closure included");
+        var plo = null, phi = null;
+        for (var pi2 = 0; pi2 < pband.stations.length; pi2++) {
+            var py = pband.stations[pi2].y;
+            if (plo === null || py < plo) { plo = py; }
+            if (phi === null || py > phi) { phi = py; }
+        }
+        ok(Math.abs((phi - plo) - stats.depth) < 0.05,
+            name + ": drawn at TRUE depth (" + (phi - plo).toFixed(1) +
+            " vs the survey's " + stats.depth.toFixed(1) + ")");
+        ok(proj.projection.azimuth >= 0 && proj.projection.azimuth < 180,
+            name + ": on a plane in [0, 180) -- an axis is a line, not " +
+            "a direction");
+        // EVERY pitch is labelled here, including the ones the
+        // extended elevation has to drop: a projection draws every
+        // station, so a drop is never split across bands.
+        ok(pband.pitches.length === proj.pitches.length,
+            name + ": every one of the cave's " + proj.pitches.length +
+            " drops is labelled (" + pband.pitches.length + ") -- no " +
+            "band splitting to lose one behind");
     }
 
     // ---- 3D passage mesh -------------------------------------------

@@ -174,6 +174,7 @@ var CORE_FILES = [
     "scripts/CaveSurvey/Core/CsSectionDraw.js",
     "scripts/CaveSurvey/Core/CsSectionBay.js",
     "scripts/CaveSurvey/Core/CsProfile.js",
+    "scripts/CaveSurvey/Core/CsProject.js",
     // CsProfileDraw is QCAD-context for render()/erase()/band()/run()/
     // label() (RVector, RLineEntity, ...), but CsProfileDraw.labelText
     // and CsProfileDraw.labelY0 are pure -- no document, no QCAD symbol
@@ -2892,6 +2893,113 @@ function tieInFixture(openSides) {
     near(CsLrud.passageAzimuthAt(axes, "A2", 350), 0, 1e-6,
         "passage axis: at a bend it is the bisector, not the shot that " +
         "arrived");
+})();
+
+(function() {
+    // ---- CsProject: the cave flattened onto one chosen plane -------
+    function projSurvey(legs) {
+        var sv = CsModel.newSurvey();
+        for (var i = 0; i < legs.length; i++) {
+            sv.shots.push(shotOf(legs[i][0], legs[i][1], legs[i][2],
+                legs[i][3], legs[i][4]));
+        }
+        return sv;
+    }
+
+    // THE PLANE DEFAULTS TO THE ONE THAT THROWS AWAY LEAST: the
+    // direction the cave is longest along.
+    var eastWest = projSurvey([["A1", "A2", 100, 90, 0],
+                               ["A2", "A3", 100, 90, 0],
+                               ["A3", "A4", 5, 0, 0]]);
+    var resEW = CsNetwork.resolve(eastWest, {});
+    // Not exactly 090: the 5 ft leg off the end is real cave and it
+    // pulls the fitted axis by about three quarters of a degree. That
+    // is the honest answer -- an axis fitted to the stations, not
+    // snapped to the longest leg -- so the tolerance is wide enough to
+    // admit it and narrow enough to catch an axis that is wrong.
+    near(CsProject.principalAzimuth(resEW), 90, 1.5,
+        "a cave running east-west is longest along 090");
+    var northSouth = projSurvey([["B1", "B2", 100, 0, 0],
+                                 ["B2", "B3", 100, 0, 0],
+                                 ["B3", "B4", 5, 90, 0]]);
+    near(CsProject.principalAzimuth(CsNetwork.resolve(northSouth, {})),
+        0, 1.5, "...and one running north-south along 000");
+
+    // A CAVE WITH NO HORIZONTAL EXTENT HAS NO PREFERRED PLANE, and
+    // fitting one to rounding error would be inventing a direction.
+    var shaft = projSurvey([["S1", "S2", 100, 0, -90],
+                            ["S2", "S3", 100, 0, -90]]);
+    var resShaft = CsNetwork.resolve(shaft, {});
+    ok(CsProject.principalAzimuth(resShaft) === null,
+        "a single shaft has no preferred plane, and says so rather " +
+        "than fitting an axis to cos(90)'s rounding error");
+    var picked = CsProject.resolveAzimuth(resShaft, null);
+    eqs(picked.source, "arbitrary",
+        "...so the plane it gets is arbitrary, and reported as such");
+
+    // AN AXIS IS A LINE, NOT A DIRECTION.
+    near(CsProject.resolveAzimuth(resEW, 40).azimuth,
+        CsProject.resolveAzimuth(resEW, 220).azimuth, 1e-9,
+        "040 and 220 are the same plane");
+    ok(CsProject.principalAzimuth(resEW) < 180,
+        "and a fitted axis is folded into [0, 180)");
+
+    // The projection itself: along a 090 plane, east IS x.
+    near(CsProject.along(10, 0, 90), 10, 1e-9,
+        "on a 090 plane, 10 ft east is 10 ft along");
+    near(CsProject.along(0, 10, 90), 0, 1e-9,
+        "...and 10 ft north is nowhere along it -- that is what a " +
+        "projection throws away");
+    near(CsProject.along(0, 10, 0), 10, 1e-9,
+        "on a 000 plane, 10 ft north is 10 ft along");
+
+    // EVERY STATION IS DRAWN. The extended elevation has to pick one
+    // path through a run because its X is cumulative; a projection
+    // does not, so a loop closes on the page as it closes in the cave.
+    var loop = projSurvey([["L1", "L2", 30, 90, 0],
+                           ["L2", "L3", 30, 0, 0],
+                           ["L3", "L4", 30, 270, 0],
+                           ["L4", "L1", 30, 180, 0]]);
+    var resLoop = CsNetwork.resolve(loop, {});
+    var bandLoop = CsProject.band(loop, resLoop, {});
+    eqs(bandLoop.stations.length, 4, "a loop keeps all four stations");
+    eqs(bandLoop.omitted.length, 0, "and demotes none of them");
+    eqs(bandLoop.legs.length, resLoop.legs.length,
+        "and draws every leg, the closure included");
+
+    // Y IS TRUE ELEVATION, not an unrolled anything.
+    var deep = projSurvey([["D1", "D2", 40, 90, 0],
+                           ["D2", "D3", 100, 0, -90]]);
+    var bandDeep = CsProject.band(deep, CsNetwork.resolve(deep, {}), {});
+    var lo = null, hi = null;
+    for (var i = 0; i < bandDeep.stations.length; i++) {
+        var y = bandDeep.stations[i].y;
+        if (lo === null || y < lo) { lo = y; }
+        if (hi === null || y > hi) { hi = y; }
+    }
+    near(hi - lo, 100, 1e-6, "a 100 ft drop draws 100 ft tall");
+
+    // THE MODE IS A MODE. CsProfile.build dispatches, so every caller
+    // downstream takes either kind without knowing which it has.
+    var built = CsProfile.build(deep, CsNetwork.resolve(deep, {}),
+        { mode: CsProject.MODE_PROJECTED });
+    eqs(built.bands.length, 1, "a projected build is one band");
+    eqs(built.bands[0].key, CsProject.BAND_KEY, "under the PROJ key");
+    var ext = CsProfile.build(deep, CsNetwork.resolve(deep, {}),
+        { mode: CsProject.MODE_EXTENDED });
+    ok(ext.bands[0].key !== CsProject.BAND_KEY,
+        "and the extended one is unchanged by any of this");
+
+    // The caption tells the reader which way they are looking, and
+    // whether anybody chose it.
+    ok(CsProject.caption({ azimuth: 40, source: "asked" }) ===
+        "PROJECTED 040",
+        "the caption names the plane, zero-padded so it reads as a " +
+        "bearing");
+    ok(CsProject.caption({ azimuth: 9, source: "principal" })
+        .indexOf("LONG AXIS") >= 0,
+        "...and says when the plane was picked for the caver, because " +
+        "a number nobody chose must not print as though they had");
 })();
 
 (function() {

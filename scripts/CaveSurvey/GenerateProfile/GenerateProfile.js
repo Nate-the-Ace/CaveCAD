@@ -155,6 +155,75 @@ function generateProfileSplayLossWarning(doc, survey) {
         "from the notes.";
 }
 
+/**
+ * Asks which elevation to draw, and on what plane.
+ *
+ * \return {mode, azimuth} or null when cancelled.
+ *
+ * DIALOG MECHANICS, all of them the hard way round in this build and
+ * all of them measured rather than assumed (see the suite's own notes
+ * in SymbolPaletteEdit.askMeta): signals connect to CLOSURES, never to
+ * slot names, and a QDialog is closed and handed to Qt rather than
+ * destroyed. Getting either wrong throws where the dialog is BUILT, so
+ * the command dies before anything is ever shown.
+ */
+function generateProfileAskMode() {
+    var current = CsProject.settings();
+    var dlg = new QDialog(RMainWindowQt.getMainWindow());
+    dlg.windowTitle = qsTr("Generate Profile");
+    var v = new QVBoxLayout();
+
+    v.addWidget(new QLabel(qsTr("Which elevation?")), 0, 0);
+    var modeCombo = new QComboBox();
+    modeCombo.addItem(qsTr("Extended -- unrolled along the passage"));
+    modeCombo.addItem(qsTr("Projected -- flattened onto one plane"));
+    modeCombo.currentIndex =
+        (current.mode === CsProject.MODE_PROJECTED) ? 1 : 0;
+    v.addWidget(modeCombo, 0, 0);
+
+    v.addWidget(new QLabel(qsTr("Projection plane (degrees, or blank " +
+        "for the cave's long axis)")), 0, 0);
+    var azEdit = new QLineEdit(
+        current.azimuth === CsProject.AZIMUTH_AUTO ? "" :
+            String(current.azimuth));
+    azEdit.toolTip = qsTr("The compass line the cave is flattened onto. " +
+        "Left blank, the cave's own longest direction is used, which " +
+        "is the plane that throws away least. Only used by the " +
+        "projected elevation.");
+    v.addWidget(azEdit, 0, 0);
+
+    var bb = new QDialogButtonBox(QDialogButtonBox.Ok |
+        QDialogButtonBox.Cancel);
+    bb.accepted.connect(function() { dlg.accept(); });
+    bb.rejected.connect(function() { dlg.reject(); });
+    v.addWidget(bb, 0, 0);
+    dlg.setLayout(v);
+
+    var accepted = (dlg.exec() === QDialog.Accepted);
+    var mode = (modeCombo.currentIndex === 1) ?
+        CsProject.MODE_PROJECTED : CsProject.MODE_EXTENDED;
+    var azText = String(azEdit.text).replace(/^\s+|\s+$/g, "");
+    try {
+        dlg.close();
+        dlg.deleteLater();
+    } catch (eClose) {
+    }
+    if (!accepted) {
+        return null;
+    }
+    var azimuth = (azText === "") ? CsProject.AZIMUTH_AUTO : azText;
+    // REMEMBERED, so the automatic pass on every later draw keeps
+    // drawing whichever kind was chosen here rather than reverting to
+    // the default the next time the plan is redrawn.
+    try {
+        RSettings.setValue(CsProject.SETTING_MODE, mode);
+        RSettings.setValue(CsProject.SETTING_AZIMUTH, azimuth);
+    } catch (eSet) {
+        // an unremembered choice still draws what was asked for now
+    }
+    return { mode: mode, azimuth: azimuth };
+}
+
 function generateProfileRun() {
     var doc = getDocument();
     if (doc === undefined || doc === null) {
@@ -210,6 +279,26 @@ function generateProfileRun() {
     // is a region of THIS drawing now, below the plan -- it is already
     // on screen the moment it is drawn, for both callers.
     var settings = CsProfile.settings();
+
+    // WHICH ELEVATION, asked rather than assumed.
+    //
+    // A cave has one elevation and two ways of drawing it, and which
+    // one is right is a property of the cave: a long horizontal cave
+    // wants the extended one (no passage hides behind another), a pit
+    // wants the projected one (the arrangement of the shafts IS the
+    // cave). This is the command a caver reaches for when they want to
+    // look at it a different way, so it is the place to ask.
+    //
+    // The answer is REMEMBERED in the settings, so the automatic pass
+    // on every draw keeps drawing whichever kind was last chosen here.
+    // Cancelling changes nothing and draws nothing.
+    var chosen = generateProfileAskMode();
+    if (chosen === null) {
+        return;
+    }
+    settings.mode = chosen.mode;
+    settings.azimuth = chosen.azimuth;
+
     var outcome = CsDraw.profileNow(doc, getDocumentInterface(), survey,
         resolved, settings);
     if (outcome.skipped) {
@@ -261,7 +350,7 @@ GenerateProfile.init = function(basePath) {
     action.setRequiresDocument(true);
     action.setScriptFile(basePath + "/GenerateProfile.js");
     action.setIcon(basePath + "/GenerateProfile.svg");
-    action.setStatusTip(qsTr("Rebuild the extended elevation and show what it could not draw"));
+    action.setStatusTip(qsTr("Rebuild the elevation -- extended or projected -- and show what it could not draw"));
     action.setDefaultCommands(["generateprofile", "gp", "genprofile"]);
     action.setGroupSortOrder(454);
     action.setSortOrder(20);

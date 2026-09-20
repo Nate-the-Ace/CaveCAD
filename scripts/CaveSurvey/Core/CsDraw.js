@@ -1454,7 +1454,14 @@ CsDraw.profile = function(doc, di, survey, resolved) {
 CsDraw.profileNow = function(doc, di, survey, resolved, settings) {
     var built = CsProfile.build(survey, resolved, {
         exaggeration: settings.exaggeration,
-        flatSplayDeg: settings.flatSplayDeg
+        flatSplayDeg: settings.flatSplayDeg,
+        // Passed through only when the CALLER named one. Absent,
+        // CsProfile.build reads the setting itself, which is what the
+        // automatic pass wants; a command that just ASKED the caver
+        // which elevation they want hands the answer straight in
+        // rather than writing the setting and hoping it is read back.
+        mode: settings.mode,
+        azimuth: settings.azimuth
     });
     var counts = CsProfileDraw.render(doc, di, built, {});
     return { counts: counts, profile: built };

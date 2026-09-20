@@ -252,6 +252,11 @@ function withSpies(fn) {
     var savedInformation = QMessageBox.information;
     var savedHandleUserMessage = EAction.handleUserMessage;
     var savedWarningHandler = warning.handler;
+    // THE MODE DIALOG IS MODAL, so a headless run that reached it would
+    // block forever rather than fail -- the one failure mode a suite
+    // cannot report on. Stubbed exactly as QMessageBox.information is,
+    // and for the same reason: nobody is listening.
+    var savedAskMode = generateProfileAskMode;
 
     var spy = {
         capturedSurvey: null,
@@ -259,6 +264,8 @@ function withSpies(fn) {
         capturedCounts: null,
         informationCalls: [],
         handleUserMessageCalls: [],
+        askModeCalls: 0,
+        askModeAnswer: { mode: "extended", azimuth: "auto" },
         warnings: []
     };
 
@@ -283,6 +290,10 @@ function withSpies(fn) {
         spy.capturedCounts = counts;
         return counts;
     };
+    generateProfileAskMode = function() {
+        spy.askModeCalls++;
+        return spy.askModeAnswer;
+    };
     QMessageBox.information = function(parent, title, text) {
         spy.informationCalls.push({ title: title, text: text });
     };
@@ -299,6 +310,7 @@ function withSpies(fn) {
         CsRevise.resolveAsDrawn = savedResolveAsDrawn;
         CsProfileDraw.render = savedRender;
         QMessageBox.information = savedInformation;
+        generateProfileAskMode = savedAskMode;
         EAction.handleUserMessage = savedHandleUserMessage;
         warning.handler = savedWarningHandler;
     }
@@ -638,6 +650,44 @@ withSpies(function(spy) {
 // point erased by hand, its splays left behind. There is no origin to
 // measure such a tip from and CsDraw.survey would not redraw it either,
 // so the tool has to SAY the profile is missing it.
+// =======================================================================
+// THE MODE IS ASKED FOR, AND CANCELLING DRAWS NOTHING.
+//
+// A modal dialog in a command is a hang waiting to happen -- headless,
+// and in any future caller that forgets. Two claims are worth pinning:
+// the command asks exactly once, and a caver who cancels gets no
+// geometry and no report rather than the default elevation drawn at
+// them.
+// =======================================================================
+withSpies(function(spy) {
+    spy.askModeAnswer = { mode: "projected", azimuth: "40" };
+    generateProfileRun();
+    eqs(spy.askModeCalls, 1, "the command asks which elevation, once");
+    ok(spy.capturedBuilt !== null,
+        "and having been answered, it builds one");
+    if (spy.capturedBuilt !== null) {
+        eqs(spy.capturedBuilt.bands.length, 1,
+            "projected: one band reached the renderer");
+        eqs(spy.capturedBuilt.bands[0].key, "PROJ",
+            "projected: under the PROJ key");
+        ok(Math.abs(spy.capturedBuilt.projection.azimuth - 40) < 1e-9,
+            "projected: on the plane the caver asked for, got " +
+            spy.capturedBuilt.projection.azimuth);
+    }
+});
+
+withSpies(function(spy) {
+    spy.askModeAnswer = null;   // cancelled
+    generateProfileRun();
+    eqs(spy.askModeCalls, 1, "cancelling still counts as being asked");
+    ok(spy.capturedBuilt === null,
+        "but nothing is built -- a cancel must not draw the default " +
+        "elevation at a caver who just said no");
+    eqs(spy.informationCalls.length, 0,
+        "...and no report is shown for work that did not happen");
+});
+
+
 // =======================================================================
 
 {

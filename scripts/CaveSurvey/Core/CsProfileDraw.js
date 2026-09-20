@@ -468,6 +468,17 @@ CsProfileDraw.erase = function(doc, di, runKey) {
  * CsProfileDraw.label() below; this is only WHAT it says.
  */
 CsProfileDraw.labelText = function(band) {
+    // A PROJECTED elevation names its PLANE, because a reader has to
+    // be told which way they are looking or the drawing is a picture
+    // of some cave rather than of this one. It has no run to name --
+    // there is one band and it holds the whole cave.
+    if (band.projection !== undefined && band.projection !== null) {
+        var ptext = CsProject.caption(band.projection);
+        if (band.stations.length === 0) {
+            return ptext + " -- NOTHING PLACED";
+        }
+        return ptext;
+    }
     var text = band.key + " SURVEY";
     if (band.tie !== null && band.tie !== undefined && band.tie !== "") {
         text += " (FROM " + band.tie + ")";

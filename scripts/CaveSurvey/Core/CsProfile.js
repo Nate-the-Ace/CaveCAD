@@ -2047,6 +2047,22 @@ CsProfile.bandWallRuns = function(band, survey, resolved, opts) {
     // landed on by a closure leg.
     var azAt = {}, closureAt = {};
     var az, plumb;
+    // A PROJECTED elevation has ONE axis for the whole cave, not one
+    // per station.
+    //
+    // Everything below asks "which way does the passage run here"
+    // because an EXTENDED elevation's X is distance travelled along
+    // it, so a splay's contribution to X is its along-passage
+    // component. A projected elevation flattens real coordinates onto
+    // one chosen vertical plane, so the same question has one answer
+    // everywhere: the plane's own strike. Handing that in as every
+    // station's direction is not a hack -- it is the same projection,
+    // stated once instead of derived per station -- and it keeps one
+    // implementation of the wall builder rather than two that would
+    // drift.
+    var fixedAz = (opts && opts.fixedAzimuth !== undefined &&
+        opts.fixedAzimuth !== null && isFinite(opts.fixedAzimuth)) ?
+        opts.fixedAzimuth : null;
     for (li = 0; li < band.legs.length; li++) {
         bl = band.legs[li];
         if (bl.kind === "closure") {
@@ -2062,6 +2078,15 @@ CsProfile.bandWallRuns = function(band, survey, resolved, opts) {
         azAt[bl.to] = az;
         if (azAt[bl.from] === undefined && !plumbArrival[bl.from]) {
             azAt[bl.from] = az;
+        }
+    }
+    if (fixedAz !== null) {
+        // Every station, including the ones the walk above withheld a
+        // direction from: on a projected plane a plumb leg's landing
+        // station has an X axis like any other, because the axis was
+        // never its passage's to begin with.
+        for (li = 0; li < band.stations.length; li++) {
+            azAt[band.stations[li].name] = fixedAz;
         }
     }
 
@@ -2593,6 +2618,35 @@ CsProfile.layout = function(bands) {
  */
 CsProfile.build = function(survey, resolved, opts) {
     opts = opts || {};
+    // WHICH ELEVATION THIS DRAWING DRAWS.
+    //
+    // Dispatched here, at the one entry point every caller already
+    // uses, rather than at each of them: the renderer, the box, the
+    // binder and the report all take a profile-shaped result and none
+    // of them should have to know there are two kinds. A projected
+    // elevation IS a profile result -- one band, shaped exactly as
+    // unrollBand shapes a run -- which is what makes that possible.
+    //
+    // `opts.mode` wins over the setting so a caller can ask for one
+    // explicitly (a test, or a command that offers both); absent, the
+    // setting decides, and its default is the extended elevation this
+    // suite has always drawn.
+    var mode = opts.mode;
+    var wantAz = opts.azimuth;
+    if (mode === undefined || mode === null) {
+        var cfg = CsProject.settings();
+        mode = cfg.mode;
+        if (wantAz === undefined || wantAz === null) {
+            wantAz = cfg.azimuth;
+        }
+    }
+    if (mode === CsProject.MODE_PROJECTED) {
+        return CsProject.build(survey, resolved, {
+            azimuth: wantAz,
+            tapeMode: opts.tapeMode,
+            flatSplayDeg: opts.flatSplayDeg
+        });
+    }
     var grouped = CsProfile.groupRuns(resolved);
     var hier = CsProfile.hierarchy(grouped, resolved);
 

@@ -88,6 +88,10 @@ include(includeBasePath + "/CsSectionBay.js");
 // (which loads these three right after CsLrud, well before CsLayers/
 // CsTags/CsDraw) rather than needing to sit after them here too.
 include(includeBasePath + "/CsProfile.js");
+// After CsProfile, whose band shape it produces and whose
+// bandWallRuns it calls: the PROJECTED elevation, which is a mode of
+// the same view rather than a second one.
+include(includeBasePath + "/CsProject.js");
 include(includeBasePath + "/CsProfileDraw.js");
 include(includeBasePath + "/CsCallout.js");
 // After CsModel/CsTraverse/CsLrud/CsProfile (it uses classifySplay and
