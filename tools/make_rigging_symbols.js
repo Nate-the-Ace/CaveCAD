@@ -150,16 +150,32 @@ var RIGGING = {
         ["arc", 0.0606, -0.8575, 0.1106, 123.2, 236.8]
     ],
 
-    // A CABLE LADDER. Rungs rather than a ladder-shaped glyph: at plot
-    // scale the two rails plus four rungs still read, and a finer
-    // ladder would fill in solid.
+    // A CABLE LADDER, with WAVY rails.
+    //
+    // The rails were straight, which by the convention is a different
+    // piece of equipment: Therion tells `point rope-ladder` from
+    // `point fixed-ladder` by exactly this and nothing else -- wavy
+    // rails hang, straight rails are bolted to the rock. A cable
+    // ladder is the hanging kind, so it gets the wave, the same wave
+    // the rope symbol carries and for the same reason.
+    //
+    // The two rails wave IN PHASE, as Therion's do: a hanging ladder
+    // twists as a unit rather than its two sides swinging apart. The
+    // rungs sit at the wave's crossings, where both rails are back on
+    // their nominal line, so a rung meets each rail square instead of
+    // landing somewhere along a curve.
     SYM_CABLE_LADDER: [
-        ["line", -0.13, 0, -0.13, -0.90],
-        ["line", 0.13, 0, 0.13, -0.90],
-        ["line", -0.13, -0.16, 0.13, -0.16],
-        ["line", -0.13, -0.40, 0.13, -0.40],
-        ["line", -0.13, -0.64, 0.13, -0.64],
-        ["line", -0.13, -0.88, 0.13, -0.88]
+        ["arc", -0.24812, -0.1125, 0.16312, -43.6, 43.6],
+        ["arc", -0.01188, -0.3375, 0.16312, 136.4, 223.6],
+        ["arc", -0.24812, -0.5625, 0.16312, -43.6, 43.6],
+        ["arc", -0.01188, -0.7875, 0.16312, 136.4, 223.6],
+        ["arc", 0.01188, -0.1125, 0.16312, -43.6, 43.6],
+        ["arc", 0.24812, -0.3375, 0.16312, 136.4, 223.6],
+        ["arc", 0.01188, -0.5625, 0.16312, -43.6, 43.6],
+        ["arc", 0.24812, -0.7875, 0.16312, 136.4, 223.6],
+        ["line", -0.13, -0.225, 0.13, -0.225],
+        ["line", -0.13, -0.45, 0.13, -0.45],
+        ["line", -0.13, -0.675, 0.13, -0.675]
     ],
 
     // A TRAVERSE LINE: two anchors and a rope that SAGS between them.

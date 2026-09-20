@@ -89,12 +89,13 @@ CsSymbols.CATALOG = [
     // NSS names below are therefore descriptive, not canonical; the
     // UIS column carries the longer phrase a legend needs.
     //
-    // Two of these agree with SKBB by having been derived from the same
-    // thing the symbol is: the TRAVERSE LINE is a sag between two
-    // anchor dots in both, and the ROPE is wavy in both (Therion's
-    // `line rope` is a plain undecorated line -- `noassign`, there is
-    // no per-set glyph -- and its rope-ladder is told from its fixed
-    // ladder by giving the rails a wave).
+    // Three of these agree with SKBB: the TRAVERSE LINE is a sag
+    // between two anchor dots in both, and the ROPE and the CABLE
+    // LADDER both carry the wave. Therion's `line rope` is a plain
+    // undecorated line (`noassign` -- there is no per-set glyph), and
+    // its `point rope-ladder` is told from `point fixed-ladder` by
+    // exactly one thing: wavy rails hang, straight rails are bolted to
+    // the rock. A cable ladder is the hanging kind.
     //
     // Two DIVERGE, deliberately and worth knowing about:
     //   * BOLT. SKBB draws an anchor side-on -- a vertical wall line, a

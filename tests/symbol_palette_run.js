@@ -55,6 +55,11 @@ includeBasePath = repoRoot + "/scripts/CaveSurvey/Core";
 include(includeBasePath + "/CsAll.js");
 includeBasePath = repoRoot + "/scripts/CaveSurvey/SymbolPalette";
 include(includeBasePath + "/SymbolPaletteRun.js");
+// The panel and the Save Symbol dialog. Needed for the grouping the
+// panel draws from and for homeLayers(), which is what decides whether
+// a caver can file their own symbol on the rigging layer at all.
+include(includeBasePath + "/SymbolPalette.js");
+include(includeBasePath + "/SymbolPaletteEdit.js");
 
 var failures = [];
 function ok(condition, what) {
@@ -959,6 +964,102 @@ eqs(SymbolPaletteRun.sizeForScale(5.0, 0, 1.0), null,
         scratch, [], { nss: "Nothing", uis: "", category: "Custom",
             layer: CsLayers.BREAKDOWN });
     eqs(res.ok, false, "an empty symbol is refused");
+})();
+
+// ---------------------------------------------------------------------
+// A CAVER CAN ADD THEIR OWN RIGGING SYMBOL.
+//
+// The shipped eight are not the whole of rigging -- a maillon, a knot,
+// a hanger type somebody's club draws differently -- and the answer to
+// that has to be the same answer every other category gets: draw it,
+// name it, file it. Nothing about the Rigging category is special-cased
+// anywhere, which is exactly the claim worth pinning, because both
+// halves of it are DERIVED and either could be lost by a change that
+// looks unrelated:
+//
+//   * the category list in the Save Symbol dialog comes from the
+//     merged catalogue, so Rigging appears there only because the
+//     shipped entries put it there;
+//   * the home-layer list is filtered from the layer registry by
+//     frame, sheet-ness and CTRL- prefix, so ANCHORS-BOLTS is offered
+//     only because it survives all three filters.
+//
+// A regression in either one leaves a caver able to draw a rigging
+// symbol and unable to file it as one.
+// ---------------------------------------------------------------------
+(function() {
+    var layers = SymbolPaletteEdit.homeLayers();
+    ok(layers.indexOf(CsLayers.ANCHORS_BOLTS) >= 0,
+        "the rigging layer is offered as a home layer for a new symbol");
+    ok(layers.indexOf(CsLayers.CLIMBS_CHIMNEYS) >= 0,
+        "...and so is the climbs layer beside it");
+
+    var cats = CsSymbols.categoriesOf(CsSymbols.merged().entries);
+    ok(cats.indexOf("Rigging") >= 0,
+        "Rigging is offered as a category (it is derived from the " +
+        "shipped entries, not hardcoded anywhere)");
+
+    // ...and end to end: save one, and find it listed under Rigging
+    // with the rest.
+    var doc = new RDocument(new RMemoryStorage(), createSpatialIndex());
+    var m1 = new RCircleEntity(doc, new RCircleData(
+        new RCircle(new RVector(0, 0), 0.18)));
+    var m2 = new RLineEntity(doc, new RLineData(
+        new RVector(-0.18, 0), new RVector(0.18, 0)));
+    var meta = { nss: "Maillon", uis: "Quick link",
+        category: "Rigging", layer: CsLayers.ANCHORS_BOLTS };
+    var name = CsSymbolStore.blockNameFor(meta.nss);
+    var saved = CsSymbolStore.saveBlock(templatePath, name, doc,
+        [m1, m2], meta);
+    ok(saved.ok, "a caver's own rigging symbol saves (" + saved.error + ")");
+
+    CsSymbolStore.invalidate();
+    var listed = CsSymbolStore.list(templatePath);
+    var mine = null;
+    for (var i = 0; i < listed.entries.length; i++) {
+        if (listed.entries[i].block === name) { mine = listed.entries[i]; }
+    }
+    // The shipped eight are CODE, so they are counted in the catalogue
+    // rather than in this test's scratch template -- which holds only
+    // the couple of blocks the test put there, by design (a test that
+    // wrote into the repository's own template would leave the
+    // repository different than it found it).
+    var shippedRigging = 0;
+    for (i = 0; i < CsSymbols.CATALOG.length; i++) {
+        if (CsSymbols.CATALOG[i].category === "Rigging") { shippedRigging++; }
+    }
+    ok(mine !== null, "and comes back in the listing");
+    if (mine !== null) {
+        eqs(mine.category, "Rigging", "under the Rigging category");
+        eqs(mine.layer, CsLayers.ANCHORS_BOLTS, "on the rigging layer");
+        eqs(mine.custom, true,
+            "marked custom, so the caver can edit and delete their own " +
+            "while the shipped eight stay put");
+    }
+    ok(shippedRigging >= 8,
+        "beside the shipped rigging symbols rather than instead of them, " +
+        "got " + shippedRigging);
+
+    // The grouping the panel draws from puts them together: the
+    // catalogue's eight and the caver's own in ONE Rigging group, not
+    // two groups that happen to share a name.
+    var forPanel = CsSymbols.CATALOG.slice(0);
+    if (mine !== null) { forPanel.push(mine); }
+    var groups = SymbolPalette.grouped(forPanel, "");
+    var riggingGroup = null, riggingGroups = 0;
+    for (i = 0; i < groups.length; i++) {
+        if (groups[i].category === "Rigging") {
+            riggingGroup = groups[i];
+            riggingGroups++;
+        }
+    }
+    ok(riggingGroup !== null, "the panel has a Rigging group to draw");
+    eqs(riggingGroups, 1, "exactly one Rigging group, not two");
+    if (riggingGroup !== null) {
+        ok(riggingGroup.entries.length >= 9,
+            "holding the shipped eight plus the caver's own, got " +
+            riggingGroup.entries.length);
+    }
 })();
 
 // ---------------------------------------------------------------------
