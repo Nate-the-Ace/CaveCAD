@@ -829,7 +829,10 @@ SketchScans.buildDock = function(appWin) {
             "it if the guess was wrong -- the two clicks stand, only " +
             "the letter is re-read."),
         calibCancel: qsTr("Abandon this calibration without opening a " +
-            "bay.")
+            "bay."),
+        pickCancel: qsTr("Abandon this assignment. The picks are "
+            + "dropped and nothing is placed; the scan and the survey "
+            + "are untouched.")
     };
 
     /**
@@ -879,6 +882,33 @@ SketchScans.buildDock = function(appWin) {
             if (name === "pickAlignButton") {
                 button = makeButton(qsTr("Assign Stations to Scans"),
                     TIP.pickAlign);
+            } else if (name === "pickCancelButton") {
+                // THE WAY OUT OF AN ASSIGNMENT, and the reason it is
+                // its own button rather than a second meaning for the
+                // one above (Nathan, 2026-09-19: "got into a state
+                // where i could not cancel out of assigning stations
+                // to a profile").
+                //
+                // The assign button reads "Cancel" only while NO
+                // station has been picked. From the first pick on it
+                // reads "Place", and there was nothing else to press:
+                // the only way out of a half-made assignment was to
+                // complete it and undo the placement afterwards. Worse
+                // when the placement could not be made at all -- one
+                // pick on a cave with no other scan placed has no
+                // scale to borrow, so Place refused every time, the
+                // tabs stayed locked, and the panel was simply stuck.
+                //
+                // Hidden until an assignment is running, the way the
+                // calibration's own Cancel is.
+                button = makeButton(qsTr("Cancel Assignment"),
+                    TIP.pickCancel);
+                try {
+                    button.visible = false;
+                } catch (ePickHide) {
+                    // a bridge that cannot hide it shows one idle
+                    // button, which is inert unless an assignment runs
+                }
             } else if (name === "elsewhereButton") {
                 button = makeButton(qsTr("Add a Scan and Fit by Hand..."),
                     TIP.elsewhere);
@@ -930,7 +960,8 @@ SketchScans.buildDock = function(appWin) {
     // stations: pick the stations on the scan, and failing that, fetch
     // a scan from anywhere and fit it by hand. A section is a different job entirely -- it starts
     // at the bay.
-    var PLAN_ORDER = ["pickAlignButton", "elsewhereButton"];
+    var PLAN_ORDER = ["pickAlignButton", "pickCancelButton",
+        "elsewhereButton"];
     var SECTION_ORDER = ["sketchButton", "calibration",
         "elsewhereButton"];
     // THE BAY'S OWN BUTTONS, in the order the work happens: trace the
@@ -1004,6 +1035,9 @@ SketchScans.buildDock = function(appWin) {
     });
     SketchScans.eachButton(w, "calibCancelButton", function(b) {
         b.clicked.connect(function() { SketchScans.endCalibration(); });
+    });
+    SketchScans.eachButton(w, "pickCancelButton", function(b) {
+        b.clicked.connect(function() { SketchScans.cancelPicking(); });
     });
     SketchScans.eachButton(w, "traceWallsButton", function(b) {
         b.clicked.connect(function() {
@@ -1185,9 +1219,19 @@ SketchScans.buildDock = function(appWin) {
             } catch (eClearPick) {
             }
             if (w.picking !== null && w.picking.rel !== rel) {
-                // another scan: the picks belonged to the old one
-                w.picking = null;
-                SketchScans.setText("pickAlignButton", qsTr("Assign Stations to Scans"));
+                // ANOTHER SCAN: the picks belonged to the old one.
+                //
+                // THROUGH cancelPicking, which is the only thing that
+                // puts back everything an assignment takes. Dropping
+                // the picks and relabelling the button by hand -- what
+                // this did -- left the VIEW TABS locked, because they
+                // are disabled while picks are being taken so a scan
+                // cannot be fitted to half a plan and half an
+                // elevation. No assignment was running any more and
+                // there was still no way back to another tab: the
+                // second half of the same dead end the Cancel button
+                // exists for.
+                SketchScans.cancelPicking();
             }
             // Likewise for a calibration: the two clicks are pixels on
             // ONE scan, and carrying them onto another would scale the
@@ -1423,8 +1467,12 @@ SketchScans.buildDock = function(appWin) {
     var refreshPickState = function() {
         if (w.picking === null) {
             SketchScans.setText("pickAlignButton", qsTr("Assign Stations to Scans"));
+            SketchScans.setVisible("pickCancelButton", false);
             return;
         }
+        // THE WAY OUT IS ALWAYS THERE while an assignment is running,
+        // whatever the other button currently says.
+        SketchScans.setVisible("pickCancelButton", true);
         var n = w.picking.pairs.length;
         // ONE STATION IS A PLACEMENT NOW, at the scale the scans
         // already placed agree on -- so the button offers it, and says
@@ -2037,6 +2085,30 @@ SketchScans.buildDock = function(appWin) {
         }
     };
 
+    /**
+     * Abandons an assignment in progress.
+     *
+     * Everything it touched goes back: the picks are dropped, the view
+     * tabs are unlocked (they are held while picks are taken, so a
+     * scan cannot end up fitted to half a plan and half an elevation),
+     * and the status line clears. NOTHING WAS DRAWN -- a pick is a
+     * point on a scan and a station name, held in this panel and
+     * nowhere else -- so there is nothing to undo and nothing to warn
+     * about.
+     */
+    SketchScans.cancelPicking = function() {
+        if (w.picking === null) {
+            return;
+        }
+        w.picking = null;
+        try {
+            SketchScans.setFrameEnabled(true);
+        } catch (eUnlock) {
+        }
+        refreshPickState();
+        pickStatus("");
+    };
+
     // Named rather than connected here: the button lives on the tabs
     // now, three copies of it, and they are wired where they are built.
     SketchScans.pickAlignClicked = function() {
@@ -2047,9 +2119,9 @@ SketchScans.buildDock = function(appWin) {
             if (w.picking.pairs.length >= 1) {
                 placeAligned();
             } else {
-                w.picking = null;
-                refreshPickState();
-                pickStatus("");
+                // Nothing picked yet: this button still reads Cancel,
+                // and it means the same thing the Cancel button does.
+                SketchScans.cancelPicking();
             }
             return;
         }
