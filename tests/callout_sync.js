@@ -51,6 +51,7 @@ var FILES = [
     "scripts/CaveSurvey/Core/CsPitch.js",
     "scripts/CaveSurvey/Core/CsProfile.js",
     "scripts/CaveSurvey/Core/CsProject.js",
+    "scripts/CaveSurvey/Core/CsChunk.js",
     "scripts/CaveSurvey/Core/CsDraw.js",
     "scripts/CaveSurvey/Core/CsCallout.js",
     "scripts/CaveSurvey/Core/CsElevation.js",

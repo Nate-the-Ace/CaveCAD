@@ -92,6 +92,10 @@ include(includeBasePath + "/CsProfile.js");
 // bandWallRuns it calls: the PROJECTED elevation, which is a mode of
 // the same view rather than a second one.
 include(includeBasePath + "/CsProject.js");
+// After CsProject, whose per-piece projection it calls, and CsPitch,
+// whose drops decide where it cuts: the cave in pieces, so an
+// elevation can be arranged rather than merely generated.
+include(includeBasePath + "/CsChunk.js");
 include(includeBasePath + "/CsProfileDraw.js");
 include(includeBasePath + "/CsCallout.js");
 // After CsModel/CsTraverse/CsLrud/CsProfile (it uses classifySplay and

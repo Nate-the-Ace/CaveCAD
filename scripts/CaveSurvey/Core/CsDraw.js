@@ -1461,7 +1461,13 @@ CsDraw.profileNow = function(doc, di, survey, resolved, settings) {
         // which elevation they want hands the answer straight in
         // rather than writing the setting and hoping it is read back.
         mode: settings.mode,
-        azimuth: settings.azimuth
+        azimuth: settings.azimuth,
+        // WHERE THE CHUNKS ALREADY ARE. Read off the drawing before
+        // anything is erased, so a redraw lands the pieces back where
+        // the caver arranged them rather than reflowing them into the
+        // preset's row. Harmless and empty for the other two modes,
+        // which have no chunks to place.
+        offsets: CsProfileDraw.chunkOffsets(doc)
     });
     var counts = CsProfileDraw.render(doc, di, built, {});
     return { counts: counts, profile: built };

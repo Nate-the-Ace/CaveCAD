@@ -43,7 +43,8 @@ function loadCore(rel) {
 }
 ["CsUuid.js", "CsUnits.js", "CsAngles.js", "CsModel.js", "CsTraverse.js",
  "CsNetwork.js", "CsAdjust.js", "CsLrud.js", "CsFrontier.js",
- "CsPitch.js", "CsProfile.js", "CsProject.js", "CsSectionCut.js",
+ "CsPitch.js", "CsProfile.js", "CsProject.js", "CsChunk.js",
+ "CsSectionCut.js",
  "CsMesh3d.js", "CsValidate.js", "CsStats.js", "CsGrade.js",
  "Format/CsCompass.js", "Format/CsWalls.js", "Format/CsSurvex.js",
  "Format/CsCsv.js", "Format/CsTherion.js",
@@ -281,6 +282,53 @@ for (var si = 0; si < sources.length; si++) {
             name + ": every one of the cave's " + proj.pitches.length +
             " drops is labelled (" + pband.pitches.length + ") -- no " +
             "band splitting to lose one behind");
+    }
+
+    // ---- the CHUNKED elevation -------------------------------------
+    //
+    // The cave cut at its pitches, every piece at true depth. The two
+    // claims worth checking over a real cave: nothing is displaced,
+    // and no two pieces overlap.
+    var chunked = CsProfile.build(survey, resolved,
+        { mode: CsProject.MODE_CHUNKED });
+    ok(chunked !== null && chunked.bands && chunked.bands.length > 4,
+        name + ": the chunked elevation builds (" +
+        (chunked && chunked.bands ? chunked.bands.length : 0) + " pieces)");
+    if (chunked && chunked.bands) {
+        finite(chunked.bands, name + ": chunked bands");
+        var displaced = 0;
+        for (var ci2 = 0; ci2 < chunked.bands.length; ci2++) {
+            if (Math.abs(chunked.bands[ci2].zOffset || 0) > 1e-9) {
+                displaced++;
+            }
+        }
+        ok(displaced === 0,
+            name + ": and NOTHING is displaced off true elevation (" +
+            displaced + ")");
+        var spans = [];
+        for (ci2 = 0; ci2 < chunked.bands.length; ci2++) {
+            spans.push(CsChunk.extentOf(chunked.bands[ci2]));
+        }
+        spans.sort(function(a, b) { return a.lo - b.lo; });
+        var over = 0;
+        for (ci2 = 1; ci2 < spans.length; ci2++) {
+            if (spans[ci2].lo < spans[ci2 - 1].hi - 1e-9) { over++; }
+        }
+        ok(over === 0,
+            name + ": and no two pieces overlap (" + over + ")");
+        // A cave's pitches are all chunk boundaries, so every drop is
+        // drawn whole inside one piece and labelled there.
+        var labelled = 0;
+        for (ci2 = 0; ci2 < chunked.bands.length; ci2++) {
+            labelled += chunked.bands[ci2].pitches.length;
+        }
+        ok(labelled === chunked.pitches.length,
+            name + ": every drop is labelled (" + labelled + " of " +
+            chunked.pitches.length + ") -- a pitch IS a chunk, so it " +
+            "can never be split across two");
+        ok(chunked.ties.length > 0,
+            name + ": the pieces are tied back together (" +
+            chunked.ties.length + ")");
     }
 
     // ---- 3D passage mesh -------------------------------------------

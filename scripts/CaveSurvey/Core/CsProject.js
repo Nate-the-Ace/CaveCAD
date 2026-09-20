@@ -50,6 +50,8 @@ CsProject.BAND_KEY = "PROJ";
 CsProject.SETTING_MODE = "CaveSurvey/ProfileMode";
 CsProject.MODE_EXTENDED = "extended";
 CsProject.MODE_PROJECTED = "projected";
+/** The cave cut into pieces at its pitches and arranged (CsChunk). */
+CsProject.MODE_CHUNKED = "chunked";
 /** Degrees, or "auto" for CsProject.principalAzimuth. */
 CsProject.SETTING_AZIMUTH = "CaveSurvey/ProjectionAzimuth";
 CsProject.AZIMUTH_AUTO = "auto";
@@ -66,7 +68,8 @@ CsProject.settings = function() {
         // No RSettings (node, the test harness). The defaults ARE the
         // answer, so returning them is not a guess.
     }
-    if (mode !== CsProject.MODE_PROJECTED) {
+    if (mode !== CsProject.MODE_PROJECTED &&
+            mode !== CsProject.MODE_CHUNKED) {
         mode = CsProject.MODE_EXTENDED;
     }
     return { mode: mode, azimuth: azimuth };
@@ -99,13 +102,16 @@ CsProject.settings = function() {
  *         point (a cave that is all pitch, which is a real thing and
  *         has no preferred plane at all)
  */
-CsProject.principalAzimuth = function(resolved) {
+CsProject.principalAzimuth = function(resolved, only) {
     if (resolved === null || resolved === undefined || !resolved.stations) {
         return null;
     }
     var xs = [], ys = [], n = 0, name;
     for (name in resolved.stations) {
         if (!resolved.stations.hasOwnProperty(name)) { continue; }
+        if (only !== undefined && only !== null && only[name] !== true) {
+            continue;
+        }
         var st = resolved.stations[name];
         if (!isFinite(st.x) || !isFinite(st.y)) { continue; }
         xs.push(st.x); ys.push(st.y); n++;
@@ -144,7 +150,7 @@ CsProject.MIN_SPREAD = 1e-6;
  *  cave's own principal axis, or due north when even that is
  *  undefined -- and the caller is told which, because "we picked it
  *  for you" and "you asked for 040" are different claims. */
-CsProject.resolveAzimuth = function(resolved, want) {
+CsProject.resolveAzimuth = function(resolved, want, only) {
     if (want !== undefined && want !== null &&
             String(want) !== CsProject.AZIMUTH_AUTO) {
         var v = parseFloat(want);
@@ -152,7 +158,7 @@ CsProject.resolveAzimuth = function(resolved, want) {
             return { azimuth: ((v % 180.0) + 180.0) % 180.0, source: "asked" };
         }
     }
-    var auto = CsProject.principalAzimuth(resolved);
+    var auto = CsProject.principalAzimuth(resolved, only);
     if (auto !== null) {
         return { azimuth: auto, source: "principal" };
     }
@@ -160,6 +166,12 @@ CsProject.resolveAzimuth = function(resolved, want) {
     // thing, so the arbitrary choice costs the reader nothing -- but
     // it is still arbitrary and still says so.
     return { azimuth: 0.0, source: "arbitrary" };
+};
+
+/** An undirected leg key, so a caller naming a set of legs need not
+ *  know which way round the surveyor shot each one. */
+CsProject.legKey = function(a, b) {
+    return (a < b) ? (a + "\u0000" + b) : (b + "\u0000" + a);
 };
 
 /**
@@ -192,14 +204,21 @@ CsProject.along = function(x, y, azimuthDeg) {
 CsProject.band = function(survey, resolved, opts) {
     var o = opts || {};
     var picked = CsProject.resolveAzimuth(resolved,
-        o.azimuth === undefined ? null : o.azimuth);
+        o.azimuth === undefined ? null : o.azimuth, o.stations || null);
     var az = picked.azimuth;
+
+    // A SUBSET, when the caller has one. CsChunk projects one piece of
+    // a cave at a time onto that piece's own plane, which is the same
+    // operation over fewer stations -- not a different one, and not
+    // worth a second implementation.
+    var only = o.stations || null;
 
     var stations = [];
     var placed = {};
     var name, st;
     for (name in resolved.stations) {
         if (!resolved.stations.hasOwnProperty(name)) { continue; }
+        if (only !== null && only[name] !== true) { continue; }
         st = resolved.stations[name];
         if (!isFinite(st.x) || !isFinite(st.y) || !isFinite(st.z)) {
             // NEVER DEFAULTS A MISSING COORDINATE. Same rule as
@@ -223,6 +242,10 @@ CsProject.band = function(survey, resolved, opts) {
     var skipped = 0;
     for (var i = 0; i < resolved.legs.length; i++) {
         var leg = resolved.legs[i];
+        if (o.legs !== undefined && o.legs !== null &&
+                o.legs[CsProject.legKey(leg.from, leg.to)] !== true) {
+            continue;   // not this chunk's leg
+        }
         var a = placed[leg.from], b = placed[leg.to];
         if (a === undefined || b === undefined) {
             skipped++;

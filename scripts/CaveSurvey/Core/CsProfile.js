@@ -2647,6 +2647,19 @@ CsProfile.build = function(survey, resolved, opts) {
             flatSplayDeg: opts.flatSplayDeg
         });
     }
+    if (mode === CsProject.MODE_CHUNKED) {
+        return CsChunk.build(survey, resolved, {
+            tapeMode: opts.tapeMode,
+            flatSplayDeg: opts.flatSplayDeg,
+            minDrop: opts.minDrop,
+            // POSITIONS THE CAVER ALREADY DRAGGED TO. Read off the
+            // drawing by the caller (CsDraw.profileNow), because this
+            // function is pure and a drawing is not something it can
+            // see. Absent, every chunk is placed by the preset, which
+            // is what a first draw wants.
+            offsets: opts.offsets
+        });
+    }
     var grouped = CsProfile.groupRuns(resolved);
     var hier = CsProfile.hierarchy(grouped, resolved);
 

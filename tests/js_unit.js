@@ -175,6 +175,7 @@ var CORE_FILES = [
     "scripts/CaveSurvey/Core/CsSectionBay.js",
     "scripts/CaveSurvey/Core/CsProfile.js",
     "scripts/CaveSurvey/Core/CsProject.js",
+    "scripts/CaveSurvey/Core/CsChunk.js",
     // CsProfileDraw is QCAD-context for render()/erase()/band()/run()/
     // label() (RVector, RLineEntity, ...), but CsProfileDraw.labelText
     // and CsProfileDraw.labelY0 are pure -- no document, no QCAD symbol

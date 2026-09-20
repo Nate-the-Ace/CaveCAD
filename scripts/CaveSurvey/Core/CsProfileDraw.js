@@ -28,6 +28,12 @@
 //   ProfileFloorRun    generated floor polyline
 //   ProfileCeilingRun  generated ceiling polyline
 //   ProfileBandLabel   the band's caption
+//   ProfileChunkTie    the dashed join between two chunks, keyed to
+//                      the station they share
+//   ProfileChunk       on a chunk's caption: which chunk it is
+//   ProfileChunkOffset ...and where on the sheet that chunk sits, so
+//                      an arrangement survives a redraw
+//   ProfileChunkKind   ...and whether it is a pitch or a passage
 //   ProfilePitchLabel  a drop's depth, keyed to the station it hangs
 //                      from -- the elevation's twin of the plan's
 //                      PitchLabel
@@ -47,7 +53,9 @@ var CsProfileDraw = {};
 CsProfileDraw.TAGS = ["ProfileRun", "ProfileStation", "ProfileShot",
     "ProfileSplay", "ProfileFloorRun", "ProfileCeilingRun",
     "ProfileBandLabel", "ProfileZOffset", "ProfileOrigin",
-    "ProfileBox", "ProfileBoxLabel", "ProfilePitchLabel"];
+    "ProfileBox", "ProfileBoxLabel", "ProfilePitchLabel",
+    "ProfileChunkTie", "ProfileChunk", "ProfileChunkOffset",
+    "ProfileChunkKind"];
 
 /** Layers the profile writes to, created if the drawing lacks them.
  *  CTRL-PROFILE-LRUD is NOT here -- see the TAGS docblock above;
@@ -468,6 +476,14 @@ CsProfileDraw.erase = function(doc, di, runKey) {
  * CsProfileDraw.label() below; this is only WHAT it says.
  */
 CsProfileDraw.labelText = function(band) {
+    // A CHUNK names what it IS -- the drop, or the passage it starts
+    // from -- because its key is bookkeeping and a reader should never
+    // have to decode one. It has no run and no plane worth printing:
+    // every chunk is projected on its own, and which plane a
+    // twelve-foot crawl was flattened onto is not information.
+    if (band.chunkKind !== undefined && band.chunkKind !== null) {
+        return CsChunk.caption(band);
+    }
     // A PROJECTED elevation names its PLANE, because a reader has to
     // be told which way they are looking or the drawing is a picture
     // of some cave rather than of this one. It has no run to name --
@@ -566,6 +582,20 @@ CsProfileDraw.label = function(doc, di, op, band, at) {
     var dz = band.zOffset || 0.0;
     if (Math.abs(dz) > 1e-9) {
         CsTags.set(label, "ProfileZOffset", String(dz));
+    }
+    // A CHUNK'S POSITION ON THE SHEET, written beside the thing it
+    // positions. This is what makes the arrangement survive a redraw:
+    // CsProfileDraw.chunkOffsets reads it back and CsChunk.bands
+    // prefers it to the preset. Written for EVERY chunk, including the
+    // ones still sitting where the preset put them -- an offset that
+    // only appeared once a caver had dragged something would mean a
+    // redraw between two drags re-flowed the pieces that had not
+    // moved, around the one that had.
+    if (band.chunkKind !== undefined && band.chunkKind !== null) {
+        CsTags.set(label, "ProfileChunk", band.key);
+        CsTags.set(label, "ProfileChunkOffset",
+            String(band.chunkOffset || 0.0));
+        CsTags.set(label, "ProfileChunkKind", band.chunkKind);
     }
 };
 
@@ -1158,6 +1188,51 @@ CsProfileDraw.regionOrigin = function(doc) {
 };
 
 /**
+ * Where each chunk sits on the sheet, read back off the drawing.
+ *
+ * A CHUNKED ELEVATION IS ARRANGED, NOT JUST GENERATED. The preset puts
+ * the pieces in a row; a caver then drags them where the map wants
+ * them, and a redraw that ignored that would undo an afternoon's
+ * layout every time the survey gained a station. Each chunk's caption
+ * carries its own offset, so the arrangement lives on the drawing --
+ * beside the thing it positions, and inside the file rather than in a
+ * setting that belongs to the application.
+ *
+ * THE OFFSET IS READ FROM THE TAG, NOT FROM WHERE THE CAPTION ENDED
+ * UP. The tag is what CsProfileDraw wrote; deriving the position from
+ * the caption's current coordinates instead would let an accidental
+ * nudge of one text entity silently redefine where a whole piece of
+ * cave belongs.
+ *
+ * \return {chunkKey: x}; empty when the drawing holds no chunked
+ *         elevation, which is what a first draw sees
+ */
+CsProfileDraw.chunkOffsets = function(doc) {
+    var out = {};
+    var ids = doc.queryAllEntities(false, false);
+    for (var i = 0; i < ids.length; i++) {
+        var e = doc.queryEntity(ids[i]);
+        if (isNull(e)) {
+            continue;
+        }
+        var key = CsTags.get(e, "ProfileChunk");
+        if (key === null || key === "") {
+            continue;
+        }
+        var v = parseFloat(CsTags.get(e, "ProfileChunkOffset"));
+        if (isNaN(v)) {
+            // Unreadable is not zero. A chunk whose offset cannot be
+            // read is left to the preset, which puts it somewhere
+            // sensible; snapping it to the origin would pile it on top
+            // of the first piece of the cave.
+            continue;
+        }
+        out[String(key)] = v;
+    }
+    return out;
+};
+
+/**
  * Moves EVERY entity in the profile frame by one vector. QCAD only.
  * \return the number of entities moved
  *
@@ -1347,7 +1422,7 @@ CsProfileDraw.render = function(doc, di, profile, opts) {
 
     var counts = { bandsDrawn: 0, legsDrawn: 0, stationsDrawn: 0,
         ceilingRuns: 0, floorRuns: 0, flatTicks: 0, pitchLabels: 0,
-        erased: erased };
+        tiesDrawn: 0, erased: erased };
 
     var op = new RAddObjectsOperation();
     op.setText("Draw extended elevation");
@@ -1356,6 +1431,48 @@ CsProfileDraw.render = function(doc, di, profile, opts) {
     for (var b = 0; b < bands.length; b++) {
         CsProfileDraw.band(doc, di, op, bands[b], counts, origin);
         counts.bandsDrawn++;
+    }
+
+    // THE JOINS BETWEEN CHUNKS. A chunked elevation is the cave cut
+    // up, and a cut with nothing drawn across it is a cave that stops:
+    // the reader has no way to tell which piece continues into which.
+    // The tie is drawn from the shared station in one chunk to the
+    // SAME shared station in the other -- a real correspondence, not a
+    // decorative arrow -- and it is dashed, because it is the only
+    // line on the drawing that is not passage.
+    counts.tiesDrawn = 0;
+    if (profile && profile.ties && profile.ties.length > 0) {
+        var placedAt = {};
+        for (b = 0; b < bands.length; b++) {
+            for (var si = 0; si < bands[b].stations.length; si++) {
+                var bst = bands[b].stations[si];
+                placedAt[bands[b].key + "\u0000" + bst.name] =
+                    { x: bst.x, y: bst.y + (bands[b].zOffset || 0.0) };
+            }
+        }
+        var tieLayer = CsLayers.CTRL_PROFILE_SHOTS;
+        CsLayers.ensure(doc, di, tieLayer);
+        var ox2 = (origin === undefined || origin === null) ? 0 : origin.x;
+        var oy2 = (origin === undefined || origin === null) ? 0 : origin.y;
+        for (var ti = 0; ti < profile.ties.length; ti++) {
+            var tie = profile.ties[ti];
+            var ka = bands[tie.a] ? bands[tie.a].key : null;
+            var kb = bands[tie.b] ? bands[tie.b].key : null;
+            if (ka === null || kb === null) { continue; }
+            var pa = placedAt[ka + "\u0000" + tie.station];
+            var pb = placedAt[kb + "\u0000" + tie.station];
+            if (pa === undefined || pb === undefined) { continue; }
+            var tl = CsDraw.addLine(doc, op, tieLayer,
+                new RVector(ox2 + pa.x, oy2 + pa.y),
+                new RVector(ox2 + pb.x, oy2 + pb.y),
+                "ProfileChunkTie", tie.station);
+            // ProfileRun as well, so a scoped erase reaches it exactly
+            // as it reaches everything else this module draws. The tie
+            // belongs to BOTH chunks; it is filed under the first, and
+            // erasing either redraws both anyway.
+            CsTags.set(tl, "ProfileRun", ka);
+            counts.tiesDrawn++;
+        }
     }
 
     // The bounding box around each band, with the band's name in its

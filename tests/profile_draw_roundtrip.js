@@ -74,7 +74,7 @@ var CORE = ["CsUnits", "CsCave", "CsGeoProject", "CsAngles", "CsIgrfCoeffs",
     // CsPitch before CsProfile: build() attaches each band the drops
     // it draws whole, so the elevation and the plan cannot disagree
     // about how deep one is.
-    "CsPitch", "CsProfile", "CsProject", "CsProfileDraw",
+    "CsPitch", "CsProfile", "CsProject", "CsChunk", "CsProfileDraw",
     // CsWarp before CsRevise -- moveLinework's per-vertex dispatch
     // calls CsWarp.mlsSimilarity when it runs.
     "CsWarp",
@@ -129,7 +129,9 @@ function shotOf(from, to, d, az, inc, u, dn) {
 var KNOWN_PROFILE_TAGS = ["ProfileRun", "ProfileStation", "ProfileShot",
     "ProfileSplay", "ProfileFloorRun", "ProfileCeilingRun",
     "ProfileBandLabel", "ProfileZOffset",
-    "ProfileBox", "ProfileBoxLabel", "ProfilePitchLabel"];
+    "ProfileBox", "ProfileBoxLabel", "ProfilePitchLabel",
+    "ProfileChunkTie", "ProfileChunk", "ProfileChunkOffset",
+    "ProfileChunkKind"];
 
 /** Every Profile*-tagged entity in the doc, as
  *  {id, entity, layer, tags: {key: value}}. */
@@ -3592,6 +3594,127 @@ function drawPlanSurvey(doc, di, resolved, names) {
         "projected: ...all of it");
 
     destr(iX);
+}());
+
+// =======================================================================
+// THE CHUNKED ELEVATION: the cave cut at its pitches, arranged, and
+// the arrangement surviving a redraw.
+//
+// That last claim is the whole feature. A caver spends an afternoon
+// placing the pieces; a redraw that reflowed them into the preset's
+// row every time the survey gained a station would make the mode
+// useless, and would do it silently.
+// =======================================================================
+(function() {
+    var svK = CsModel.newSurvey();
+    svK.shots = [
+        shotOf("A1", "A2", 30, 90, 0, 3, 2),
+        shotOf("A2", "A3", 60, 0, -90, 2, 0),    // a drop
+        shotOf("A3", "A4", 40, 90, 0, 4, 1),
+        shotOf("A4", "A5", 50, 0, -90, 2, 0),    // and another
+        shotOf("A5", "A6", 30, 90, 0, 3, 1)
+    ];
+    var resK = CsNetwork.resolve(svK, {});
+    var profK = CsProfile.build(svK, resK, { mode: "chunked" });
+
+    eqs(profK.chunks.length, 5,
+        "chunked: three passages and two drops, got " +
+        profK.chunks.length);
+    var kinds = { pitch: 0, passage: 0 };
+    for (var c = 0; c < profK.chunks.length; c++) {
+        kinds[profK.chunks[c].kind]++;
+    }
+    eqs(kinds.pitch, 2, "chunked: two pitch chunks");
+    eqs(kinds.passage, 3, "chunked: three passage chunks");
+    eqs(profK.bands.length, 5, "chunked: one band per chunk");
+
+    // DEPTH IS LOCKED. Every other elevation may displace a band to
+    // fit more cave on a page; this one may not, because comparing two
+    // chunks' depths by eye is the whole reason the cave was cut up.
+    var displaced = 0;
+    for (c = 0; c < profK.bands.length; c++) {
+        if (Math.abs(profK.bands[c].zOffset || 0) > 1e-9) { displaced++; }
+    }
+    eqs(displaced, 0, "chunked: NOTHING is displaced off true elevation");
+
+    // Pieces do not collide: the layout measures a chunk's DRAWN
+    // extent, walls included, not just its centreline.
+    var boxes = [];
+    for (c = 0; c < profK.bands.length; c++) {
+        boxes.push(CsChunk.extentOf(profK.bands[c]));
+    }
+    boxes.sort(function(a, b) { return a.lo - b.lo; });
+    var overlaps = 0;
+    for (c = 1; c < boxes.length; c++) {
+        if (boxes[c].lo < boxes[c - 1].hi) { overlaps++; }
+    }
+    eqs(overlaps, 0,
+        "chunked: no two pieces overlap -- the layout measures the " +
+        "walls, and a pitch with a chamber at its foot is much wider " +
+        "than the rope down the middle of it");
+
+    // The joins are real correspondences: the same station in two
+    // pieces.
+    ok(profK.ties.length >= 4,
+        "chunked: the pieces are tied back together, got " +
+        profK.ties.length);
+    for (c = 0; c < profK.ties.length; c++) {
+        var tie = profK.ties[c];
+        ok(profK.chunks[tie.a].stations[tie.station] === true &&
+            profK.chunks[tie.b].stations[tie.station] === true,
+            "chunked: tie at " + tie.station + " is a station BOTH " +
+            "pieces hold");
+    }
+
+    // ---- drawn, then re-drawn, with a chunk moved in between -------
+    var dK = new RDocument(new RMemoryStorage(), createSpatialIndex());
+    var iK = new RDocumentInterface(dK);
+    CsLayers.ensureSurveyLayers(dK, iK);
+    var outK = CsProfileDraw.render(dK, iK, profK, {});
+    ok(outK.tiesDrawn >= 4,
+        "chunked: the joins are DRAWN, got " + outK.tiesDrawn);
+
+    var readBack = CsProfileDraw.chunkOffsets(dK);
+    var keyCount = 0;
+    for (var k in readBack) {
+        if (readBack.hasOwnProperty(k)) { keyCount++; }
+    }
+    eqs(keyCount, 5,
+        "chunked: every chunk's position is written onto the drawing, " +
+        "not only the ones a caver has moved -- otherwise a redraw " +
+        "between two drags reflows the pieces that did not move");
+
+    // A caver drags one piece a long way off.
+    var moved = profK.bands[1].key;
+    readBack[moved] = 400.0;
+    var profK2 = CsProfile.build(svK, resK,
+        { mode: "chunked", offsets: readBack });
+    var placedAt = null;
+    for (c = 0; c < profK2.bands.length; c++) {
+        if (profK2.bands[c].key === moved) {
+            placedAt = profK2.bands[c].chunkOffset;
+        }
+    }
+    near(placedAt, 400.0, 1e-9,
+        "chunked: a redraw puts the moved piece back where the caver " +
+        "put it, not where the preset would");
+    // ...and the pieces that were NOT moved stay put.
+    var before = {}, after = {};
+    for (c = 0; c < profK.bands.length; c++) {
+        before[profK.bands[c].key] = profK.bands[c].chunkOffset;
+    }
+    for (c = 0; c < profK2.bands.length; c++) {
+        after[profK2.bands[c].key] = profK2.bands[c].chunkOffset;
+    }
+    var drifted = 0;
+    for (k in before) {
+        if (!before.hasOwnProperty(k) || k === moved) { continue; }
+        if (Math.abs(before[k] - after[k]) > 1e-9) { drifted++; }
+    }
+    eqs(drifted, 0,
+        "chunked: and every other piece is exactly where it was");
+
+    destr(iK);
 }());
 
 // =======================================================================

@@ -177,8 +177,10 @@ function generateProfileAskMode() {
     var modeCombo = new QComboBox();
     modeCombo.addItem(qsTr("Extended -- unrolled along the passage"));
     modeCombo.addItem(qsTr("Projected -- flattened onto one plane"));
+    modeCombo.addItem(qsTr("Chunked -- cut at the pitches, arranged"));
     modeCombo.currentIndex =
-        (current.mode === CsProject.MODE_PROJECTED) ? 1 : 0;
+        (current.mode === CsProject.MODE_PROJECTED) ? 1 :
+        ((current.mode === CsProject.MODE_CHUNKED) ? 2 : 0);
     v.addWidget(modeCombo, 0, 0);
 
     v.addWidget(new QLabel(qsTr("Projection plane (degrees, or blank " +
@@ -189,7 +191,9 @@ function generateProfileAskMode() {
     azEdit.toolTip = qsTr("The compass line the cave is flattened onto. " +
         "Left blank, the cave's own longest direction is used, which " +
         "is the plane that throws away least. Only used by the " +
-        "projected elevation.");
+        "projected elevation -- a chunked one gives every piece its " +
+        "own plane, which is most of why the pieces read better than " +
+        "the whole.");
     v.addWidget(azEdit, 0, 0);
 
     var bb = new QDialogButtonBox(QDialogButtonBox.Ok |
@@ -200,8 +204,12 @@ function generateProfileAskMode() {
     dlg.setLayout(v);
 
     var accepted = (dlg.exec() === QDialog.Accepted);
-    var mode = (modeCombo.currentIndex === 1) ?
-        CsProject.MODE_PROJECTED : CsProject.MODE_EXTENDED;
+    var mode = CsProject.MODE_EXTENDED;
+    if (modeCombo.currentIndex === 1) {
+        mode = CsProject.MODE_PROJECTED;
+    } else if (modeCombo.currentIndex === 2) {
+        mode = CsProject.MODE_CHUNKED;
+    }
     var azText = String(azEdit.text).replace(/^\s+|\s+$/g, "");
     try {
         dlg.close();

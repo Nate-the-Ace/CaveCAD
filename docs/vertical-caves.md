@@ -161,6 +161,35 @@ close in the cave, and every pitch is labelled, including the ones
 band-splitting silences in the extended view. Generate Profile asks
 which kind and remembers the answer.
 
+**A chunked elevation** (0.9.173). The cave cut into pieces at its
+pitches and arranged. `Core/CsChunk.js` splits it — a drop is one
+chunk, rebelays included; a passage chunk is a connected piece of
+what is left once the pitch legs are taken out of the graph, which is
+exactly "the cave you can walk around without rigging". Each piece is
+projected onto its *own* plane, which is a freedom the whole-cave
+projection does not have and is most of why the pieces read better
+than the whole.
+
+Both whole-cave modes pay for their one rule somewhere: extended
+displaces its bands off true depth, projected draws things on top of
+each other because underground they are. Chunks pay neither.
+**Depth is locked** — a chunk slides sideways and never up or down —
+so any two depths on the sheet compare by eye. Dotted ties join the
+stations two pieces share.
+
+The layout measures a chunk's *drawn* extent, walls included, not its
+centreline: Plumbline's entrance drop is a rope with a bell chamber at
+the bottom, so its centreline has no width and its splay ring fans 25
+ft either side. The first version laid out on centrelines and put the
+next piece straight through the chamber — caught by rendering it, and
+by nothing else.
+
+A caver's arrangement survives a redraw: each chunk's position is
+written onto its own caption (`ProfileChunkOffset`) and read back
+before the next draw. Written for every chunk, not only the moved
+ones, or a redraw between two drags reflows the pieces that had not
+moved.
+
 ### Looked at and left
 
 **The extended elevation collapses on a pitch** — its X axis advances
@@ -190,12 +219,18 @@ some horizontal passage.
 
 ### Open
 
-1. **The plan view has no way to show two levels.** A4 sits directly
+1. **Chunks cannot be dragged from the GUI yet.** The position is
+   read, honoured and persisted, and `CsProfileDraw` writes it — but
+   nothing yet notices a caver moving a chunk's geometry and updates
+   the tag. Today the offsets can only be set by a caller. That is the
+   next piece of this feature and it is a listener, not a redesign.
+
+2. **The plan view has no way to show two levels.** A4 sits directly
    above A5 in the fixture, 125 ft apart. Nothing cues depth: no
    depth-graded rendering, no per-level plan insets, no "this passage is
    under that one" convention.
 
-2. **`CsAdjust` is still isotropic.** Weighting a declared plumb by
+3. **`CsAdjust` is still isotropic.** Weighting a declared plumb by
    gravity rather than by a compass is a real improvement and is not the
    whole answer: a leg's vertical and horizontal variances genuinely
    differ, and the header rules anisotropic covariance out by decision.
