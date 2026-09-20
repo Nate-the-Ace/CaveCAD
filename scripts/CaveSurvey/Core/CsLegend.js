@@ -372,7 +372,7 @@ CsLegend.usage = function(doc) {
     }
 
     // THE CAVER'S OWN SYMBOLS COUNT. CsSymbols.byBlock knows only the
-    // shipped 28, so a map using a custom symbol had it silently left
+    // shipped set, so a map using a custom symbol had it silently left
     // out of the legend -- Truitt Cave has 32 mud slopes on it and the
     // legend never mentioned them, which is the one thing a legend
     // must not do. merged() is the catalogue plus the caver's own

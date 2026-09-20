@@ -19,7 +19,7 @@
 //      block reference rather than on linework: plan ground gives the
 //      plan layer, a profile band's box gives that band's run layer, a
 //      section bay gives the section layer AND the station stamp.
-//   4. The shipped 28 are not editable. saveBlock and deleteBlock both
+//   4. The shipped symbols are not editable. saveBlock and deleteBlock both
 //      refuse a catalogue name, because the next release would take the
 //      change back and the legend would describe geometry that is gone.
 
@@ -793,7 +793,7 @@ eqs(SymbolPaletteRun.sizeForScale(5.0, 0, 1.0), null,
 //     that nothing else could.
 // ---------------------------------------------------------------------
 //
-// DUPLICATE is the answer to "the shipped 28 cannot be edited": copy
+// DUPLICATE is the answer to "the shipped set cannot be edited": copy
 // one into the library under a new name and it is yours. RENAME changes
 // what a symbol IS CALLED and where it is filed without redrawing a
 // line -- and never changes the block name, because every placed

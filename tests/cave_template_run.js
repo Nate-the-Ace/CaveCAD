@@ -215,6 +215,72 @@ if (onNew) {
         "with TemplateOnNew explicitly off, File > New stays empty");
 }
 
+// ---------------------------------------------------------------------
+// EVERY SHIPPED SYMBOL HAS GEOMETRY IN THE TEMPLATE.
+//
+// The catalogue is code and the geometry is in the DXF, and nothing
+// held the two together: a CATALOG entry whose block was never drawn
+// lists in the palette, places without complaint, and puts NOTHING on
+// the map -- CsSymbols.insert returns null, the caller reports a
+// missing block, and the caver is told their drawing is wrong when the
+// template is. Adding the eight rigging symbols was the first time a
+// whole category arrived at once, which is exactly when the two halves
+// are most likely to be committed apart.
+//
+// Read from the shipped FILE rather than from a poured document, so
+// this fails in the repo where the fix is, not in a user's drawing.
+// ---------------------------------------------------------------------
+(function() {
+    var tdoc = new RDocument(new RMemoryStorage(), new RSpatialIndexNavel());
+    var tdi = new RDocumentInterface(tdoc);
+    var tpath = repoRoot + "/templates/NSS_Cave_Template_PLAN.dxf";
+    if (tdi.importFile(tpath, "", false) !== RDocumentInterface.IoErrorNoError) {
+        ok(false, "symbols: cannot read the shipped template");
+        return;
+    }
+    var missing = [], empty = [], offLayer = [];
+    for (var ci = 0; ci < CsSymbols.CATALOG.length; ci++) {
+        var entry = CsSymbols.CATALOG[ci];
+        // doc.hasBlock, not isNull(queryBlock): queryBlock hands back a
+        // wrapper for a block that is not there which is neither null
+        // nor usable, and every existence test written the obvious way
+        // answers "yes" for a block that does not exist.
+        if (!tdoc.hasBlock(entry.block)) {
+            missing.push(entry.block);
+            continue;
+        }
+        var ids = tdoc.queryBlockEntities(tdoc.getBlockId(entry.block));
+        if (ids.length === 0) {
+            empty.push(entry.block);
+            continue;
+        }
+        // ...and its home layer has to be one the registry knows, or
+        // the geometry lands with whatever appearance the drawing
+        // happens to give an unknown name.
+        if (CsLayers.DEFAULTS[entry.layer] === undefined) {
+            offLayer.push(entry.block + " -> " + entry.layer);
+        }
+    }
+    eqs(missing.length, 0,
+        "every catalogued symbol has a block in the shipped template" +
+        (missing.length ? " (missing: " + missing.join(", ") + ")" : ""));
+    eqs(empty.length, 0,
+        "...and none of those blocks is empty" +
+        (empty.length ? " (empty: " + empty.join(", ") + ")" : ""));
+    eqs(offLayer.length, 0,
+        "...and every one names a layer the registry declares" +
+        (offLayer.length ? " (" + offLayer.join(", ") + ")" : ""));
+
+    // The rigging category specifically: it is the one a vertical cave
+    // needs and the one that did not exist.
+    var rigging = 0;
+    for (ci = 0; ci < CsSymbols.CATALOG.length; ci++) {
+        if (CsSymbols.CATALOG[ci].category === "Rigging") { rigging++; }
+    }
+    ok(rigging >= 8,
+        "the Rigging category carries at least 8 symbols, got " + rigging);
+})();
+
 // A null child must be survivable: QCAD calls this hook before the
 // document interface exists in some paths.
 initNewFile(null);

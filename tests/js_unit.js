@@ -25463,7 +25463,7 @@ eqs(CsSymbolStore.blockNameFor(null), null,
         "generations must not miss a single-file save");
 })();
 
-// The merged catalogue: the shipped 28 plus whatever the template
+// The merged catalogue: the shipped set plus whatever the template
 // carries, built-ins winning a collision. Stubbed rather than read off
 // the real template, so the test says the same thing on a machine with
 // no Cave folder as on one with a template full of a caver's own work.
@@ -25528,7 +25528,7 @@ eqs(CsSymbolStore.blockNameFor(null), null,
 })();
 
 // A store that cannot find the template still answers a usable
-// catalogue: the palette must open with the shipped 28 in it and the
+// catalogue: the palette must open with the shipped set in it and the
 // reason showing, not empty.
 (function testMergedWithoutTemplate() {
     var realList = CsSymbolStore.listAll;

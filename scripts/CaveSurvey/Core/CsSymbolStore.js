@@ -437,7 +437,7 @@ CsSymbolStore.emptyBlock = function(doc, di, blockId) {
 
 /**
  * The catalogue entry a block definition describes, or null when it
- * carries no marker (i.e. it is one of the shipped 28, whose metadata
+ * carries no marker (i.e. it is one of the shipped set, whose metadata
  * is CsSymbols.CATALOG).
  */
 CsSymbolStore.metaOf = function(doc, block) {
@@ -723,7 +723,7 @@ CsSymbolStore.listAll = function() {
 
     // A failure in EITHER file is worth saying, but neither empties the
     // list: a caver with an unreadable template still has their own
-    // symbols, and one with no library still has the shipped 28.
+    // symbols, and one with no library still has the shipped set.
     if (!tpl.ok) {
         out.ok = false;
         out.error = tpl.error;
@@ -758,7 +758,7 @@ CsSymbolStore.migrateFromTemplate = function() {
     for (var i = 0; i < tpl.entries.length; i++) {
         var entry = tpl.entries[i];
         if (CsSymbols.byBlock(entry.block) !== null) {
-            continue;   // one of the shipped 28: it belongs there
+            continue;   // one of the shipped set: it belongs there
         }
         strays.push(entry);
     }
@@ -1688,7 +1688,7 @@ CsSymbolStore.deleteAreaPattern = function(path, blockName) {
 /**
  * Deletes a symbol from the template.
  *
- * Refuses the shipped 28 for the same reason saveBlock does: the
+ * Refuses the shipped set for the same reason saveBlock does: the
  * catalogue would go on naming a block that is not there, and the next
  * release would put it back.
  */

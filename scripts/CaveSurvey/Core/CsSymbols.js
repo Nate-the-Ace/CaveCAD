@@ -69,7 +69,46 @@ CsSymbols.CATALOG = [
     { block: "SYM_CLIMB_ARROW", nss: "Climb", uis: "Climb direction",
         layer: "CLIMBS-CHIMNEYS", category: "Structure" },
     { block: "SYM_JOINT_TICK", nss: "Joint / fracture", uis: "Fissure / joint",
-        layer: "GEOLOGY-JOINTS-FRACTURES", category: "Geology" }
+        layer: "GEOLOGY-JOINTS-FRACTURES", category: "Geology" },
+
+    // ---- RIGGING ----------------------------------------------------
+    //
+    // How you get down it, which this catalogue had nothing for: Pit,
+    // Dome and Climb described the SHAPE of the vertical and stopped,
+    // while CsLayers has reserved ANCHORS-BOLTS (cyan -- the rigging
+    // and gear family) since the palette was written and nothing ever
+    // drew on it.
+    //
+    // NSS names are descriptive here rather than canonical: the NSS set
+    // has no rigging symbols to be canonical against, because a rigging
+    // topo is a caving document rather than a survey one. The names are
+    // the ones cavers say out loud, and the UIS column carries the
+    // longer phrase a legend needs.
+    //
+    // ALL ON ONE LAYER on purpose. A caver turning rigging off wants it
+    // ALL off -- the bolts, the rope, the ladder, the lot -- because
+    // the reason to turn it off is to print a map for someone who is
+    // not rigging the cave. Splitting anchors from rope would make that
+    // two clicks and give a reader half a rigging topo, which is worse
+    // than none.
+    { block: "SYM_BOLT", nss: "Bolt", uis: "Bolt / drilled anchor",
+        layer: "ANCHORS-BOLTS", category: "Rigging" },
+    { block: "SYM_Y_HANG", nss: "Y-hang", uis: "Two-bolt Y-hang",
+        layer: "ANCHORS-BOLTS", category: "Rigging" },
+    { block: "SYM_REBELAY", nss: "Rebelay", uis: "Rebelay",
+        layer: "ANCHORS-BOLTS", category: "Rigging" },
+    { block: "SYM_DEVIATION", nss: "Deviation", uis: "Deviation",
+        layer: "ANCHORS-BOLTS", category: "Rigging" },
+    { block: "SYM_NATURAL_ANCHOR", nss: "Natural anchor",
+        uis: "Thread / natural belay", layer: "ANCHORS-BOLTS",
+        category: "Rigging" },
+    { block: "SYM_ROPE_DROP", nss: "Rope", uis: "Rope / rigged pitch",
+        layer: "ANCHORS-BOLTS", category: "Rigging" },
+    { block: "SYM_CABLE_LADDER", nss: "Cable ladder", uis: "Ladder",
+        layer: "ANCHORS-BOLTS", category: "Rigging" },
+    { block: "SYM_TRAVERSE_LINE", nss: "Traverse line",
+        uis: "Traverse / safety line", layer: "ANCHORS-BOLTS",
+        category: "Rigging" }
 ];
 
 CsSymbols.byBlock = function(blockName) {
@@ -82,7 +121,7 @@ CsSymbols.byBlock = function(blockName) {
 };
 
 /**
- * The catalogue as the PALETTE sees it: the shipped 28 plus every
+ * The catalogue as the PALETTE sees it: the shipped set plus every
  * custom symbol the template carries.
  *
  * Built-ins win a name collision. A caver cannot create one through

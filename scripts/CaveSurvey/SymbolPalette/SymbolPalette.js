@@ -307,7 +307,7 @@ SymbolPalette.disarm = function() {
 };
 
 /** Edit and Delete act on the armed symbol, and only a CUSTOM symbol
- *  can be either. The shipped 28 are code: an edited copy in the
+ *  can be either. The shipped symbols are code: an edited copy in the
  *  template would be silently taken back by the next release. */
 SymbolPalette.refreshCustomButtons = function() {
     var w = SymbolPalette.widgets;
@@ -577,7 +577,7 @@ SymbolPalette.connectTile = function(button, entry) {
  *   Rename...        its NAME, alias, category and home layer, without
  *                    redrawing a line. A symbol saved into the wrong
  *                    category used to mean drawing it again.
- *   Duplicate...     copy ANY symbol -- the shipped 28 included -- into
+ *   Duplicate...     copy ANY symbol -- the shipped ones included -- into
  *                    the library under a new name. This is the answer
  *                    to "I want the stalactite, but mine": the shipped
  *                    ones cannot be edited, and now they do not have to
