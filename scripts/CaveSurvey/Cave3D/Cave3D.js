@@ -843,11 +843,61 @@ Cave3D.statusText = function(read, mesh) {
     return text;
 };
 
+/**
+ * What the panel was last dressed for: "<handle>|<drawing path>".
+ *
+ * See dressIfNeeded.
+ */
+Cave3D.dressedFor = null;
+
+/**
+ * Makes sure the panel's own furniture matches the drawing before a
+ * mesh is pushed into it.
+ *
+ * THE BUG THIS EXISTS FOR (Nathan, 2026-09-20: "in the 3d view, the
+ * style dropdown is empty"). Two things rebuild the mesh: the panel's
+ * Refresh, which goes through refreshRequested and dresses first, and
+ * the TRANSACTION LISTENER, which called refresh() straight. So any
+ * edit to the drawing filled the view with a cave while the colour
+ * dropdown, the window title and the leads toggle stayed exactly as
+ * an undressed panel has them -- empty, unnamed, off. A panel Qt
+ * restored at startup and a listener rebuild between them produced a
+ * 3D view showing a cave, with a legend naming the colour mode, above
+ * an empty dropdown that could not say what it was showing.
+ *
+ * Dressing is cheap (filling an eight-item combo) but not free, and it
+ * resets the combo, so this does it only when the pairing of panel and
+ * drawing has changed since last time -- which also re-titles the
+ * window when a caver switches drawings, something the old
+ * dress-on-refresh path did and the listener path never did.
+ */
+Cave3D.dressIfNeeded = function() {
+    if (Cave3D.handle === null) {
+        return;
+    }
+    var path = "";
+    try {
+        var doc = getDocument();
+        path = isNull(doc) ? "" : String(doc.getFileName());
+    } catch (ePath) {
+        path = "";
+    }
+    var key = String(Cave3D.handle) + "|" + path;
+    if (Cave3D.dressedFor === key) {
+        return;
+    }
+    Cave3D.dress();
+    Cave3D.dressedFor = key;
+};
+
 /** Rebuild the mesh from the drawing and push it into the window. */
 Cave3D.refresh = function() {
     if (Cave3D.handle === null || !cave3d.isOpen(Cave3D.handle)) {
         return;
     }
+    // WHOEVER ASKED FOR THIS REBUILD, the panel around it has to make
+    // sense: the listener rebuilds without going near dress().
+    Cave3D.dressIfNeeded();
     var read = Cave3D.read(getDocument());
     if (read === null) {
         cave3d.clear(Cave3D.handle);
@@ -969,6 +1019,88 @@ Cave3D.refresh = function() {
         Cave3D.statusText(read, mesh) +
         (coverWhy !== "" ? "  --  " + coverWhy : "") +
         (terrainWhy !== "" ? "  --  " + terrainWhy : ""));
+
+    // THE EXPENSIVE HALF, KEPT. See recolour: the sections, the
+    // scanned sketches and the ground do not depend on which colour
+    // mode the cave is drawn in, and rebuilding them to change a
+    // colour is most of what a mode change used to cost.
+    Cave3D.lastBuffers = {
+        sections: mesh.sections,
+        scans: mesh.scans,
+        terrain: mesh.terrain,
+        terrainWhy: terrainWhy,
+        cover: cover
+    };
+};
+
+/**
+ * Redraws the cave in a different colour, without rebuilding it.
+ *
+ * WHY THIS EXISTS (Nathan, 2026-09-20: the style dropdown "lags").
+ * Picking a colour mode used to run the whole refresh: re-read the
+ * drawing, re-resolve the survey, re-cut the sections, and re-decode
+ * every scanned sketch draped on the passage. Measured on Truitt, that
+ * last part alone was 248ms of a 430ms round trip -- for a change that
+ * touches nothing but the colour of the triangles.
+ *
+ * None of those buffers depend on the colour mode. So a mode change
+ * now rebuilds the coloured mesh from the read it already has (12ms on
+ * the same cave) and hands back the sections, scans and terrain
+ * exactly as they were.
+ *
+ * FALLS BACK TO A FULL REFRESH whenever it cannot be sure: no cached
+ * read, no cached buffers, or a mesh that will not build. The cached
+ * read is the same one the station card uses, and it is replaced by
+ * every refresh -- including the one the transaction listener fires
+ * after any edit -- so it cannot describe a drawing that has moved on.
+ */
+Cave3D.recolour = function() {
+    if (Cave3D.handle === null || !cave3d.isOpen(Cave3D.handle)) {
+        return;
+    }
+    var read = Cave3D.lastRead;
+    var buffers = Cave3D.lastBuffers;
+    if (isNull(read) || isNull(buffers)) {
+        Cave3D.refresh();
+        return;
+    }
+    var mesh = null;
+    try {
+        // THE SAME OPTIONS THE FULL BUILD USES, anchorName included:
+        // CsMesh3d refuses to place a station at datum zero and reads
+        // the anchor to know what zero means, so dropping it here
+        // would make a recolour fail where a refresh succeeds.
+        mesh = CsMesh3d.build(read.survey, read.resolved, {
+            colorBy: Cave3D.currentMode(),
+            anchorName: read.anchorName,
+            cover: (buffers.cover === null || buffers.cover === undefined)
+                ? {} : buffers.cover.values
+        });
+    } catch (eBuild) {
+        mesh = null;
+    }
+    if (isNull(mesh)) {
+        Cave3D.refresh();
+        return;
+    }
+    mesh.sections = buffers.sections;
+    mesh.scans = buffers.scans;
+    mesh.terrain = buffers.terrain;
+    cave3d.setMesh(Cave3D.handle, mesh);
+
+    var coverWhy = "";
+    if (Cave3D.currentMode() === "cover" &&
+            !isNull(buffers.cover)) {
+        coverWhy = Cave3D.coverStatus(buffers.cover.summary,
+            read.survey.distanceUnit === "m" ? "m" : "ft");
+        if (coverWhy === "" && buffers.cover.why !== "") {
+            coverWhy = buffers.cover.why;
+        }
+    }
+    cave3d.setStatus(Cave3D.handle,
+        Cave3D.statusText(read, mesh) +
+        (coverWhy !== "" ? "  --  " + coverWhy : "") +
+        (buffers.terrainWhy !== "" ? "  --  " + buffers.terrainWhy : ""));
 };
 
 /**
@@ -1148,6 +1280,15 @@ Cave3D.dress = function() {
     cave3d.setColorModes(Cave3D.handle, keys, labels, Cave3D.currentMode());
     cave3d.setShowLeads(Cave3D.handle,
         RSettings.getBoolValue(Cave3D.SETTING_LEADS, false));
+    // Remember what this dressing was FOR, so dressIfNeeded can tell
+    // whether the panel still matches the drawing in front of it.
+    try {
+        var dressedDoc = getDocument();
+        Cave3D.dressedFor = String(Cave3D.handle) + "|" +
+            (isNull(dressedDoc) ? "" : String(dressedDoc.getFileName()));
+    } catch (eDressed) {
+        Cave3D.dressedFor = null;
+    }
 };
 
 /**
@@ -1263,7 +1404,8 @@ Cave3D.connectOnce = function() {
             if (!Cave3D.isKnownMode(mode)) { return; }
             Cave3D.mode = mode;
             RSettings.setValue(Cave3D.SETTING_MODE, mode);
-            Cave3D.refresh();
+            // COLOUR ONLY: the cave itself has not changed.
+            Cave3D.recolour();
         });
     }
     if (cave3d.overlayToggled !== undefined) {
