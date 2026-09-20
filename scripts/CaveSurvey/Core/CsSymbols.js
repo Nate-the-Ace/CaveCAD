@@ -79,11 +79,36 @@ CsSymbols.CATALOG = [
     // and gear family) since the palette was written and nothing ever
     // drew on it.
     //
-    // NSS names are descriptive here rather than canonical: the NSS set
-    // has no rigging symbols to be canonical against, because a rigging
-    // topo is a caving document rather than a survey one. The names are
-    // the ones cavers say out loud, and the UIS column carries the
-    // longer phrase a legend needs.
+    // WHERE THESE COME FROM, corrected after checking rather than
+    // asserted. There IS a set to answer to: Therion carries equipment
+    // point symbols -- anchor, rope, rope-ladder, fixed-ladder, steps,
+    // traverse, bridge, handrail -- and defines every one of them in
+    // exactly ONE symbol set, the Slovak SKBB (src/therion-mpost/
+    // thPoint.mp). UIS, NSS and BCRA have no rigging symbols of their
+    // own, so whichever set you select you get the SKBB drawing. The
+    // NSS names below are therefore descriptive, not canonical; the
+    // UIS column carries the longer phrase a legend needs.
+    //
+    // Two of these agree with SKBB by having been derived from the same
+    // thing the symbol is: the TRAVERSE LINE is a sag between two
+    // anchor dots in both, and the ROPE is wavy in both (Therion's
+    // `line rope` is a plain undecorated line -- `noassign`, there is
+    // no per-set glyph -- and its rope-ladder is told from its fixed
+    // ladder by giving the rails a wave).
+    //
+    // Two DIVERGE, deliberately and worth knowing about:
+    //   * BOLT. SKBB draws an anchor side-on -- a vertical wall line, a
+    //     hanger stub, a ring -- which is right in an elevation and
+    //     means nothing in PLAN, where there is no wall face to be
+    //     side-on to. The crossed circle here is the climbing- and
+    //     caving-topo mark for a drilled anchor and survives being
+    //     small.
+    //   * REBELAY and DEVIATION have no symbol in any set. Therion does
+    //     them with line geometry plus an anchor attribute, which suits
+    //     a drawn rigging topo and not a palette you place marks from.
+    //     Ours exist because the distinction is the one a caver most
+    //     needs on the page: a rebelay's rope stops and is re-anchored,
+    //     a deviation's kinks through and carries on.
     //
     // ALL ON ONE LAYER on purpose. A caver turning rigging off wants it
     // ALL off -- the bolts, the rope, the ladder, the lot -- because

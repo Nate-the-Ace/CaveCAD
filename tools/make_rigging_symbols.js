@@ -126,15 +126,28 @@ var RIGGING = {
         ["line", 0, -0.37, 0, -0.66]
     ],
 
-    // A ROPE DROP: the rope head, with its knot. Placed at the lip, it
-    // says a rope hangs here; the length belongs in a note beside it,
-    // not in the symbol, because the symbol would then be wrong the
-    // first time anyone re-rigs.
+    // A ROPE: an anchor ring with rope hanging from it. Placed at the
+    // lip, it says a rope hangs here; the length belongs in a note
+    // beside it, not in the symbol, because the symbol would then be
+    // wrong the first time anyone re-rigs.
+    //
+    // THE WAVE IS WHAT MAKES IT ROPE, and it replaced two short
+    // slanting strokes across a straight line that were meant to read
+    // as coils and read as a CUT instead -- a line with ticks across
+    // it is a break mark on every drawing that has one. Therion's own
+    // set is the authority here and it settles the question twice
+    // over: its `line rope` is a plain thick line with no decoration
+    // at all (`noassign` in thsymbolsetlist.pl -- there is no per-set
+    // glyph to get wrong), and its `point rope-ladder` tells a rope
+    // ladder from a fixed one by giving the rails a WAVE where the
+    // fixed ladder's are straight. Wavy means rope. Nothing in the
+    // convention ever crosses a rope with a stroke.
     SYM_ROPE_DROP: [
-        ["circle", 0, -0.11, 0.105],
-        ["line", 0, -0.215, 0, -0.95],
-        ["line", -0.09, -0.40, 0.09, -0.46],
-        ["line", -0.09, -0.62, 0.09, -0.68]
+        ["circle", 0, -0.105, 0.105],
+        ["arc", -0.0606, -0.3025, 0.1106, -56.8, 56.8],
+        ["arc", 0.0606, -0.4875, 0.1106, 123.2, 236.8],
+        ["arc", -0.0606, -0.6725, 0.1106, -56.8, 56.8],
+        ["arc", 0.0606, -0.8575, 0.1106, 123.2, 236.8]
     ],
 
     // A CABLE LADDER. Rungs rather than a ladder-shaped glyph: at plot
