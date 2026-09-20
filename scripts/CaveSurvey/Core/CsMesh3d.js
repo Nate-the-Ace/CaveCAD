@@ -134,6 +134,34 @@ CsMesh3d.frameAt = function(dir) {
 CsMesh3d.SECTION_BUCKETS = 64;
 
 /**
+ * Files one wall point into its angular bucket, keeping the OUTERMOST.
+ *
+ * The bucket map is {slot: {u, v, angle, radius}} in the ring's own
+ * plane. A point at the station itself says nothing about which way
+ * any wall lies and is dropped.
+ */
+CsMesh3d.bucketPoint = function(buckets, u, v) {
+    if (!isFinite(u) || !isFinite(v)) {
+        return;
+    }
+    var radius = Math.sqrt(u * u + v * v);
+    if (radius < 1e-9) {
+        return;
+    }
+    var angle = Math.atan2(v, u);
+    var slot = Math.floor((angle + Math.PI) /
+        (2 * Math.PI) * CsMesh3d.SECTION_BUCKETS);
+    if (slot < 0) { slot = 0; }
+    if (slot >= CsMesh3d.SECTION_BUCKETS) {
+        slot = CsMesh3d.SECTION_BUCKETS - 1;
+    }
+    var held = buckets[slot];
+    if (held === undefined || radius > held.radius) {
+        buckets[slot] = { u: u, v: v, angle: angle, radius: radius };
+    }
+};
+
+/**
  * A traced cross section as a ring around its station.
  *
  * WHY A SECTION BEATS AN LRUD. Four ticks make a four-sided prism, and
@@ -167,7 +195,8 @@ CsMesh3d.SECTION_BUCKETS = 64;
  * \return ring points [{x, y, z, angle}], or [] when there is nothing
  *         usable. Pure.
  */
-CsMesh3d.sectionRing = function(station, dir, sec, lrud) {
+CsMesh3d.sectionRing = function(station, dir, sec, lrud, splays,
+        tapeMode) {
     if (sec === null || sec === undefined ||
             Object.prototype.toString.call(sec.polylines) !==
                 "[object Array]") {
@@ -184,6 +213,23 @@ CsMesh3d.sectionRing = function(station, dir, sec, lrud) {
     }
     var buckets = {};
     var i, j;
+
+    // THE OUTER SHELL OF BOTH (Nathan, 2026-09-20: "when lruds and
+    // walls intersect, i only want the outer most"). A traced section
+    // does not replace what was measured at that station -- the tape
+    // and the pencil are two readings of one passage, and where they
+    // disagree the passage is at least as wide as the wider of them.
+    // A tick poking out through a trace drawn a little tight is a
+    // measurement, not an error to be clipped off; a trace drawn wide
+    // of a tick is the caver saying the wall is really out there.
+    //
+    // So both go into the same buckets and the outermost wins, which
+    // is the same rule the traced points already use among themselves.
+    var measured = CsMesh3d.measuredLocals(frame, lrud, splays, tapeMode);
+    for (i = 0; i < measured.length; i++) {
+        CsMesh3d.bucketPoint(buckets, measured[i].u, measured[i].v);
+    }
+
     for (i = 0; i < sec.polylines.length; i++) {
         var line = sec.polylines[i];
         if (Object.prototype.toString.call(line) !== "[object Array]") {
@@ -196,26 +242,7 @@ CsMesh3d.sectionRing = function(station, dir, sec, lrud) {
                     !isFinite(pt.x) || !isFinite(pt.y)) {
                 continue;
             }
-            var u = pt.x / scale;
-            var v = pt.y / scale;
-            var radius = Math.sqrt(u * u + v * v);
-            if (radius < 1e-9) {
-                // A vertex ON the station says nothing about which way
-                // any wall lies.
-                continue;
-            }
-            var angle = Math.atan2(v, u);
-            var slot = Math.floor((angle + Math.PI) /
-                (2 * Math.PI) * CsMesh3d.SECTION_BUCKETS);
-            if (slot < 0) { slot = 0; }
-            if (slot >= CsMesh3d.SECTION_BUCKETS) {
-                slot = CsMesh3d.SECTION_BUCKETS - 1;
-            }
-            var held = buckets[slot];
-            if (held === undefined || radius > held.radius) {
-                buckets[slot] = { u: u, v: v, angle: angle,
-                                  radius: radius };
-            }
+            CsMesh3d.bucketPoint(buckets, pt.x / scale, pt.y / scale);
         }
     }
 
@@ -340,6 +367,65 @@ CsMesh3d.openSpans = function(buckets, lrud) {
 };
 
 /**
+ * Everything MEASURED at a station, in the ring's own plane.
+ *
+ * u along the frame's right, v along its up, the station at the
+ * origin: the four LRUD ticks and the tip of every splay. Split out of
+ * ringAt so a traced section can be merged with the same points rather
+ * than replacing them -- see sectionRing.
+ *
+ * \return [{u, v, angle}], unsorted. Pure.
+ */
+CsMesh3d.measuredLocals = function(frame, lrud, splays, tapeMode) {
+    var local = [];
+    if (frame === null || frame === undefined) {
+        return local;
+    }
+    lrud = lrud || {};
+    if (splays === undefined || splays === null) {
+        splays = [];
+    }
+    if (tapeMode === undefined || tapeMode === null) {
+        tapeMode = CsTraverse.SLOPE;
+    }
+    var add = function(u, v) {
+        if (!isFinite(u) || !isFinite(v)) {
+            return;
+        }
+        local.push({ u: u, v: v, angle: Math.atan2(v, u) });
+    };
+    var tick = function(name, uSign, vSign) {
+        var d = lrud[name];
+        if (d === null || d === undefined || !isFinite(d)) {
+            return;
+        }
+        add(uSign * d, vSign * d);
+    };
+    tick("right", 1, 0);
+    tick("left", -1, 0);
+    tick("up", 0, 1);
+    tick("down", 0, -1);
+
+    for (var i = 0; i < splays.length; i++) {
+        var shot = splays[i];
+        var o = CsTraverse.offset(shot, tapeMode);
+        if (o === null) {
+            continue;
+        }
+        var vec = { x: o.dx, y: o.dy, z: o.dz };
+        var u = CsMesh3d.dot(vec, frame.right);
+        var v = CsMesh3d.dot(vec, frame.up);
+        if (Math.abs(u) < 1e-9 && Math.abs(v) < 1e-9) {
+            // Aimed along the passage: on the centerline, a wall point
+            // for neither side.
+            continue;
+        }
+        add(u, v);
+    }
+    return local;
+};
+
+/**
  * One station's cross section: the measured wall points around it, in
  * angular order, as world coordinates.
  *
@@ -371,47 +457,7 @@ CsMesh3d.ringAt = function(station, dir, lrud, splays, tapeMode) {
     }
     lrud = lrud || {};
 
-    // The ring is built in the frame's own plane: u along `right`, v
-    // along `up`, the station at the origin. Sorting by angle there is
-    // what puts the points in ring order.
-    var local = [];
-
-    var add = function(u, v) {
-        if (!isFinite(u) || !isFinite(v)) {
-            return;
-        }
-        local.push({ u: u, v: v, angle: Math.atan2(v, u) });
-    };
-
-    var tick = function(name, uSign, vSign) {
-        var d = lrud[name];
-        if (d === null || d === undefined || !isFinite(d)) {
-            return;
-        }
-        add(uSign * d, vSign * d);
-    };
-    tick("right", 1, 0);
-    tick("left", -1, 0);
-    tick("up", 0, 1);
-    tick("down", 0, -1);
-
-    for (var i = 0; i < splays.length; i++) {
-        var shot = splays[i];
-        var o = CsTraverse.offset(shot, tapeMode);
-        if (o === null) {
-            continue;
-        }
-        var vec = { x: o.dx, y: o.dy, z: o.dz };
-        var u = CsMesh3d.dot(vec, frame.right);
-        var v = CsMesh3d.dot(vec, frame.up);
-        if (Math.abs(u) < 1e-9 && Math.abs(v) < 1e-9) {
-            // Aimed along the passage: on the centerline, a wall point
-            // for neither side.
-            continue;
-        }
-        add(u, v);
-    }
-
+    var local = CsMesh3d.measuredLocals(frame, lrud, splays, tapeMode);
     local.sort(function(a, b) { return a.angle - b.angle; });
 
     var out = [];
@@ -1439,7 +1485,8 @@ CsMesh3d.build = function(survey, resolved, opts) {
         var ring = [];
         if (sections.hasOwnProperty(stationName)) {
             ring = CsMesh3d.sectionRing(st, dir, sections[stationName],
-                CsMesh3d.lrudAt(stationName, survey));
+                CsMesh3d.lrudAt(stationName, survey),
+                splays[stationName] || [], tapeMode);
         }
         if (ring.length < 3) {
             ring = CsMesh3d.ringAt(st, dir,

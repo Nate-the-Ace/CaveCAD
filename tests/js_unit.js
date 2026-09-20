@@ -31844,6 +31844,55 @@ if (layerManagerLoaded) {
         "section: a rock drawn inside the outline leaves the wall "
         + "where it was");
 
+    // THE OUTER SHELL OF BOTH READINGS. A tick that pokes out through
+    // a trace drawn a little tight is a measurement, not an error to
+    // clip off; a trace drawn wide of a tick is the caver saying the
+    // wall is really out there. Whichever is further out is the wall.
+    var tightTrace = {
+        scale: 1,
+        polylines: [[
+            { x: 1, y: 0 }, { x: 1, y: 1 }, { x: -1, y: 1 },
+            { x: -1, y: -1 }, { x: 1, y: -1 }, { x: 1, y: 0 }
+        ]]
+    };
+    var wideRight = { left: 1, right: 6, up: 1, down: 1 };
+    var shell = CsMesh3d.sectionRing(station, north, tightTrace,
+        wideRight, []);
+    var sEast = -Infinity;
+    for (i = 0; i < shell.length; i++) {
+        if (shell[i].x > sEast) { sEast = shell[i].x; }
+    }
+    ok(Math.abs(sEast - 6) < 1e-6,
+        "outer shell: an LRUD tick outside the trace keeps its distance "
+        + "-- got " + sEast);
+
+    var wideTrace = CsMesh3d.sectionRing(station, north, lopsided,
+        { left: 1, right: 1, up: 1, down: 1 }, []);
+    var wEast = -Infinity;
+    for (i = 0; i < wideTrace.length; i++) {
+        if (wideTrace[i].x > wEast) { wEast = wideTrace[i].x; }
+    }
+    ok(Math.abs(wEast - 3) < 1e-6,
+        "outer shell: and a trace outside the ticks keeps its own -- "
+        + "got " + wEast);
+
+    // A SPLAY counts as a measurement here too, the way it does in a
+    // ring built without a section.
+    var splayShot = CsModel.newShot();
+    splayShot.from = "A2"; splayShot.to = "";
+    splayShot.splay = true;
+    splayShot.distance = 8; splayShot.azimuth = 90;
+    splayShot.inclination = 0;
+    var splayed = CsMesh3d.sectionRing(station, north, tightTrace,
+        { left: 1, right: 1, up: 1, down: 1 }, [splayShot]);
+    var pEast = -Infinity;
+    for (i = 0; i < splayed.length; i++) {
+        if (splayed[i].x > pEast) { pEast = splayed[i].x; }
+    }
+    ok(Math.abs(pEast - 8) < 1e-6,
+        "outer shell: a splay reaching past both is still the wall -- "
+        + "got " + pEast);
+
     // AN OPEN SECTION STAYS OPEN where the notebook says why.
     //
     // A trace left unclosed has two meanings and the drawing cannot
