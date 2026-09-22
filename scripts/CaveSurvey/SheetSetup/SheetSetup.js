@@ -162,13 +162,14 @@ SheetSetup.readWhole = function(doc, field) {
  *  no survey in it yet. A sheet is still worth building on a drawing
  *  that has only tracing on it; it just cannot fill in the numbers. */
 SheetSetup.readSurvey = function(doc) {
-    var out = { survey: null, stats: null, grade: null };
+    var out = { survey: null, resolved: null, stats: null, grade: null };
     try {
         var asDrawn = CsRevise.resolveAsDrawn(doc);
         if (isNull(asDrawn)) {
             return out;
         }
         out.survey = asDrawn.survey;
+        out.resolved = asDrawn.resolved;
         out.survey.distanceUnit = CsUnits.fromDrawingUnit(doc.getUnit(), RS);
         out.stats = CsStats.compute(out.survey, asDrawn.resolved,
             CsTraverse.SLOPE);
@@ -220,6 +221,19 @@ SheetSetup.PREVIEW_STYLE = {
     "north": { line: [60, 130, 60], fill: [90, 180, 90, 110], width: 1 }
 };
 
+/** The style for any item kind, including a per-chunk "band:<key>"
+ *  kind -- one box per chunk, sharing plain "band"'s look. See
+ *  CsSheetSetup.preview and CsSheetSetup.isMovable. */
+SheetSetup.previewStyleFor = function(kind) {
+    if (!isNull(SheetSetup.PREVIEW_STYLE[kind])) {
+        return SheetSetup.PREVIEW_STYLE[kind];
+    }
+    if (typeof kind === "string" && kind.indexOf("band:") === 0) {
+        return SheetSetup.PREVIEW_STYLE.band;
+    }
+    return null;
+};
+
 /** Paints one preview into a pixmap. Rough by design -- see
  *  CsSheetSetup.preview. */
 SheetSetup.paintPreview = function(preview, width, height) {
@@ -245,7 +259,7 @@ SheetSetup.paintPreview = function(preview, width, height) {
 
         for (var i = 0; i < preview.items.length; i++) {
             var item = preview.items[i];
-            var style = SheetSetup.PREVIEW_STYLE[item.kind];
+            var style = SheetSetup.previewStyleFor(item.kind);
             if (isNull(style)) {
                 continue;
             }
@@ -272,6 +286,17 @@ SheetSetup.paintPreview = function(preview, width, height) {
                     style.fill.length > 3 ? style.fill[3] : 255)));
             }
             painter.drawRect(x, y, Math.max(w, 1), Math.max(h, 1));
+            // A CHUNK BOX NEEDS ITS OWN LABEL. Furniture is told apart
+            // by colour alone, which works for four fixed pieces of
+            // four different colours -- it does not work for however
+            // many chunks a cave has, all the same colour. See
+            // CsSheetSetup.preview, which is the only place item.label
+            // is ever set.
+            if (!isNull(item.label) && item.label !== "") {
+                painter.setPen(new QPen(new QColor(style.line[0],
+                    style.line[1], style.line[2])));
+                painter.drawText(x + 2, y + 12, String(item.label));
+            }
         }
         painter.end();
         return pixmap;
@@ -341,6 +366,7 @@ SheetSetup.readState = function(doc) {
 
     var read = SheetSetup.readSurvey(doc);
     state.survey = read.survey;
+    state.resolved = read.resolved;
     // The magnetic arm the north arrow will carry, so the preview's
     // north box is the whole piece rather than the true arrow alone.
     var reading = CsSheetSetup.latestDeclination(read.survey);
@@ -354,11 +380,67 @@ SheetSetup.readState = function(doc) {
         CsSheetSetup.linesHeight(state.titleLines) + 0.4,
         CsSheetSetup.BAR.height + CsSheetSetup.TEXT.body * 4);
     state.hasElevation = SheetSetup.hasElevation(doc);
+    state.chunked = false;
     if (state.hasElevation) {
+        var mode = "extended";
         try {
-            state.bands = CsProfileBox.boxes(doc);
-        } catch (eBands) {
-            state.bands = [];
+            mode = RSettings.getStringValue("CaveSurvey/ProfileMode",
+                "extended");
+        } catch (eMode) {
+        }
+        state.chunked = (mode === "chunked");
+        // A CHUNKED SHEET NEEDS EACH CHUNK'S OWN BOX AND CAPTION, which
+        // the live drawing's box layer does not carry (CsProfileBox
+        // reads back a bare key, not the caver-facing pitch-depth
+        // text) -- so this is computed fresh from CsProfile.build
+        // rather than read off the drawing, same auto-layout preset
+        // Generate Profile itself would land on. A caver's in-progress
+        // drag lives only in w.offsets and is applied later, purely in
+        // CsSheetSetup.preview -- see CsSheetSetup.js:1049.
+        if (state.chunked && !isNull(state.resolved)) {
+            try {
+                var chunkSettings = CsProfile.settings();
+                var builtChunks = CsProfile.build(state.survey,
+                    state.resolved,
+                    { flatSplayDeg: chunkSettings.flatSplayDeg,
+                      offsets: {} });
+                var boxMargin;
+                try {
+                    var boxUnit = CsUnits.fromDrawingUnit(doc.getUnit(), RS);
+                    boxMargin = CsUnits.convert(
+                        CsProfileDraw.BOX_MARGIN_FEET, CsUnits.FEET,
+                        boxUnit);
+                } catch (eMargin) {
+                    boxMargin = CsProfileDraw.BOX_MARGIN_FEET;
+                }
+                var chunkBoxes = CsProfileDraw.boxesFor(builtChunks,
+                    boxMargin);
+                state.bands = [];
+                for (var bi = 0; bi < builtChunks.bands.length; bi++) {
+                    var bnd = builtChunks.bands[bi];
+                    var bx = null;
+                    for (var boxi = 0; boxi < chunkBoxes.length; boxi++) {
+                        if (chunkBoxes[boxi].key === bnd.key) {
+                            bx = chunkBoxes[boxi];
+                            break;
+                        }
+                    }
+                    if (bx === null) {
+                        continue;
+                    }
+                    state.bands.push({ key: bnd.key, minX: bx.minX,
+                        minY: bx.minY, maxX: bx.maxX, maxY: bx.maxY,
+                        label: CsChunk.caption(bnd) });
+                }
+            } catch (eChunked) {
+                state.bands = [];
+            }
+        } else {
+            try {
+                state.bands = CsProfileBox.boxes(doc);
+            } catch (eBands) {
+                state.bands = [];
+            }
         }
     }
     state.ok = true;
@@ -665,6 +747,7 @@ SheetSetup.repaint = function() {
             north: w.cbNorth.checked, title: w.cbTitle.checked },
         elevation: w.cbElevation.checked === true,
         bands: w.state.bands,
+        chunked: w.state.chunked === true,
         offsets: w.offsets,
         declination: w.state.declination
     });
@@ -770,6 +853,7 @@ SheetSetup.build = function() {
         wants: { border: w.cbBorder.checked, bar: w.cbBar.checked,
             north: w.cbNorth.checked, title: w.cbTitle.checked },
         filled: w.state.filled, survey: w.state.survey,
+        resolved: w.state.resolved, chunked: w.state.chunked === true,
         elevation: w.cbElevation.checked === true,
         offsets: w.offsets
     }));
@@ -1195,6 +1279,17 @@ SheetSetup.draw = function(doc, di, opts) {
     // would be a plan sheet with a border in the wrong place.
     var wrongFrame = elevationSheet ? "plan" : "profile";
 
+    // A CHUNKED ELEVATION IS REDRAWN AT THE CAVER'S ARRANGEMENT before
+    // anything below measures it, so the frame this sheet lays itself
+    // out around is the one the caver actually dragged -- see
+    // SheetSetup.buildChunkedElevation for why this regenerates rather
+    // than translates.
+    if (elevationSheet && opts.chunked === true && !isNull(opts.survey) &&
+            !isNull(opts.resolved)) {
+        SheetSetup.buildChunkedElevation(doc, di, opts.survey,
+            opts.resolved, offsets, scale);
+    }
+
     // A PROFILE SHEET IS LAID OUT AROUND THE ELEVATION, measured
     // BEFORE the plan is taken out -- the border goes round what this
     // sheet actually shows, and on this sheet that is the bands.
@@ -1403,6 +1498,54 @@ SheetSetup.draw = function(doc, di, opts) {
             "plotted, and a scan is something you trace from.") : "") +
         " Nothing was written into the location line; type that one " +
         "yourself.";
+};
+
+/**
+ * Redraws a chunked elevation into (doc, di) at the caver's chosen
+ * per-chunk arrangement, in place of whatever chunked geometry the
+ * sheet copy already carries.
+ *
+ * REGENERATED, NOT TRANSLATED. A tie line between two chunks is one
+ * entity spanning both chunks' real coordinates, filed under a single
+ * chunk's ProfileRun tag (Core/CsProfileDraw.js, CsProfileDraw.render's
+ * tie loop) -- moving one chunk's entities by that tag would drag the
+ * WHOLE tie with it, stranding the end belonging to the chunk that did
+ * not move. This calls the same build+render pipeline Generate Profile
+ * already uses on the live drawing, so every tie is computed fresh
+ * from each chunk's TRUE final position.
+ *
+ * \param offsets {"band:<key>": {x, y}} in INCHES OF PAPER, the shape
+ *        CsSheetSetup.offsetOf reads everywhere else in this file.
+ * \param scale   feet of cave per inch of paper -- what a chunk's
+ *        inches-of-paper drag is converted through to reach the
+ *        drawing units CsProfile.build's own offsets are in.
+ */
+SheetSetup.buildChunkedElevation = function(doc, di, survey, resolved,
+        offsets, scale) {
+    if (isNull(survey) || isNull(resolved)) {
+        return null;
+    }
+    var perFoot = CsShapeLine.perFoot(doc);
+    var chunkOffsets = {};
+    var k;
+    for (k in offsets) {
+        if (!offsets.hasOwnProperty(k) || k.indexOf("band:") !== 0) {
+            continue;
+        }
+        var off = CsSheetSetup.offsetOf(offsets, k);
+        // inches of paper -> feet of cave (the scale) -> drawing units
+        // (perFoot) -- the same two-step conversion CsSheetSetup.preview's
+        // own `add()` closure and SheetSetup.draw's `unit()` already do.
+        chunkOffsets[k.substring("band:".length)] =
+            off.x * scale * perFoot;
+    }
+    var profileSettings = CsProfile.settings();
+    var profile = CsProfile.build(survey, resolved,
+        { flatSplayDeg: profileSettings.flatSplayDeg,
+          offsets: chunkOffsets });
+    SheetSetup.eraseFrame(doc, di, "profile");
+    CsProfileDraw.render(doc, di, profile, {});
+    return profile;
 };
 
 /** The extents of one frame's own content, or null. */

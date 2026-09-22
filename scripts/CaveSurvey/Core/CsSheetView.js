@@ -301,6 +301,19 @@ CsSheetPreview.STYLE = {
     "north": { color: [45, 130, 60], width: 0 }
 };
 
+/** The style for any item kind, including a per-chunk "band:<key>"
+ *  kind -- one box per chunk, sharing plain "band"'s look. See
+ *  CsSheetSetup.preview and CsSheetSetup.isMovable. */
+CsSheetPreview.styleFor = function(kind) {
+    if (!isNull(CsSheetPreview.STYLE[kind])) {
+        return CsSheetPreview.STYLE[kind];
+    }
+    if (typeof kind === "string" && kind.indexOf("band:") === 0) {
+        return CsSheetPreview.STYLE.band;
+    }
+    return null;
+};
+
 /** The guide line a snap landed on. Magenta, the way every CAD says
  *  "this is why it stopped here". */
 CsSheetPreview.GUIDE = [220, 40, 200];
@@ -445,7 +458,7 @@ CsSheetPreview.show = function(preview, data, opts) {
         var i;
         for (i = 0; i < data.items.length; i++) {
             var item = data.items[i];
-            var style = CsSheetPreview.STYLE[item.kind];
+            var style = CsSheetPreview.styleFor(item.kind);
             if (isNull(style)) {
                 continue;
             }
@@ -462,6 +475,25 @@ CsSheetPreview.show = function(preview, data, opts) {
             }
             op.addObject(CsSheetPreview.rect(preview, item.box, style),
                 false);
+            // A CHUNK BOX NEEDS ITS OWN LABEL -- furniture is told
+            // apart by colour alone, which does not work for however
+            // many same-coloured chunks a cave has. Only
+            // CsSheetSetup.preview ever sets item.label (one per
+            // chunk, today).
+            if (!isNull(item.label) && item.label !== "") {
+                var lblPos = new RVector(item.box.minX,
+                    item.box.maxY);
+                var lblData = new RTextData(lblPos, lblPos,
+                    (item.box.maxY - item.box.minY) * 0.12,
+                    item.box.maxX - item.box.minX, RS.VAlignTop,
+                    RS.HAlignLeft, RS.LeftToRight, RS.Exact, 1.0,
+                    String(item.label), "standard", false, false, 0.0,
+                    false);
+                var lbl = new RTextEntity(preview.doc, lblData);
+                lbl.setColor(new RColor(style.color[0], style.color[1],
+                    style.color[2]));
+                op.addObject(lbl, false);
+            }
         }
 
         // THE GUIDES LAST, so they read on top of what they explain.

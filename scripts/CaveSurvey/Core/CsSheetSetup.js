@@ -669,9 +669,20 @@ CsSheetSetup.MOVABLE = ["cave", "title", "bar", "north"];
  *  far enough that a hand on a mouse can hit it. */
 CsSheetSetup.SNAP_INCHES = 0.1;
 
-/** Is this a piece a caver may drag? */
+/** Is this a piece a caver may drag?
+ *
+ * A CHUNK BOX IS MOVABLE BY PREFIX, not by membership in MOVABLE: there
+ * is one of it per chunk, and the count varies per cave, so it cannot
+ * be a fixed array entry the way the four furniture pieces are. The
+ * un-keyed literal "band" (an extended or projected sheet's single
+ * elevation footprint) is deliberately NOT covered by this -- only the
+ * per-chunk "band:<key>" form CsSheetSetup.preview emits for a chunked
+ * Profile Sheet is. */
 CsSheetSetup.isMovable = function(kind) {
-    return CsSheetSetup.MOVABLE.indexOf(kind) >= 0;
+    if (CsSheetSetup.MOVABLE.indexOf(kind) >= 0) {
+        return true;
+    }
+    return typeof kind === "string" && kind.indexOf("band:") === 0;
 };
 
 /** One piece's offset, in inches of paper, defaulted to no move at
@@ -697,8 +708,12 @@ CsSheetSetup.anyMoved = function(offsets) {
     if (isNull(offsets)) {
         return false;
     }
-    for (var i = 0; i < CsSheetSetup.MOVABLE.length; i++) {
-        var off = CsSheetSetup.offsetOf(offsets, CsSheetSetup.MOVABLE[i]);
+    var k;
+    for (k in offsets) {
+        if (!offsets.hasOwnProperty(k) || !CsSheetSetup.isMovable(k)) {
+            continue;
+        }
+        var off = CsSheetSetup.offsetOf(offsets, k);
         if (Math.abs(off.x) > 1e-9 || Math.abs(off.y) > 1e-9) {
             return true;
         }
@@ -1046,8 +1061,21 @@ CsSheetSetup.preview = function(state) {
             var dx = (second.minX + inset) - bMinX;
             var dy = (second.maxY - inset) - bMaxY;
             for (i = 0; i < bands.length; i++) {
-                add("band", bands[i].minX + dx, bands[i].minY + dy,
+                // A CHUNK GETS ITS OWN KIND, so its own entry in
+                // state.offsets and its own drag: `add()` above already
+                // looks up CsSheetSetup.offsetOf(state.offsets, kind)
+                // per kind, so a unique "band:<key>" per chunk is the
+                // whole mechanism -- see CsSheetSetup.isMovable. A
+                // non-chunked elevation (extended/projected) keeps the
+                // single shared "band" kind it has always had.
+                var bandKind = (state.chunked === true &&
+                    !isNull(bands[i].key)) ?
+                    ("band:" + bands[i].key) : "band";
+                add(bandKind, bands[i].minX + dx, bands[i].minY + dy,
                     bands[i].maxX + dx, bands[i].maxY + dy);
+                if (bandKind !== "band" && !isNull(bands[i].label)) {
+                    out.items[out.items.length - 1].label = bands[i].label;
+                }
             }
         }
     }
