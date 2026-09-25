@@ -34,6 +34,44 @@ CsUnits.normalize = function(name) {
 };
 
 /**
+ * Reads a number a person typed, accepting a decimal comma. Returns NaN
+ * for anything that is not one -- the same contract as parseFloat, whose
+ * leniency (trailing text ignored) it keeps.
+ *
+ * parseFloat alone is a silent data bug outside the English-speaking
+ * world: a caver in Europe types "12,5" and parseFloat reads 12. So:
+ *   "12,5"      -> 12.5   one comma, no dot: the comma is the decimal
+ *   "1.234,5"   -> 1234.5 both: the LAST one is the decimal and the
+ *   "1,234.5"   -> 1234.5 other is digit grouping
+ *   "1,234"     -> 1.234  a lone comma is always a decimal -- survey
+ *                         values are never typed with grouping, and a
+ *                         grouped reading here would be the silent bug
+ *                         turned the other way round
+ *   "1,2,3"     -> NaN    two commas and no dot mean nothing
+ * Only for text a person typed: tags, rows and file formats are written
+ * with a dot by the code itself and keep parseFloat.
+ */
+CsUnits.parseNumber = function(text) {
+    if (text === undefined || text === null) {
+        return NaN;
+    }
+    var s = String(text).replace(/^\s+|\s+$/g, "");
+    var comma = s.lastIndexOf(",");
+    var dot = s.lastIndexOf(".");
+    if (comma >= 0 && dot >= 0) {
+        s = (comma > dot) ?
+            s.replace(/\./g, "").replace(",", ".") :
+            s.replace(/,/g, "");
+    } else if (comma >= 0) {
+        if (s.indexOf(",") !== comma) {
+            return NaN;
+        }
+        s = s.replace(",", ".");
+    }
+    return parseFloat(s);
+};
+
+/**
  * Converts a distance between "ft" and "m". Unknown units pass the
  * value through unchanged -- a wrong number is worse than a missing
  * conversion, and the callers validate units before this point.

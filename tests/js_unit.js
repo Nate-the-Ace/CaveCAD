@@ -387,6 +387,19 @@ near(CsUnits.convert(1.0, "m", "ft"), 3.280839895, 1e-9, "m to ft");
 near(CsUnits.convert(3.280839895, "ft", "m"), 1.0, 1e-9, "ft to m");
 near(CsUnits.convert(7.5, "ft", "ft"), 7.5, 0, "same unit passthrough");
 
+// A typed decimal comma must not read as its integer part -- "12,5" was
+// 12 under parseFloat, silently, for every comma-decimal locale.
+near(CsUnits.parseNumber("12.5"), 12.5, 0, "parseNumber dot");
+near(CsUnits.parseNumber(" 12,5 "), 12.5, 0, "parseNumber decimal comma");
+near(CsUnits.parseNumber("-3,25"), -3.25, 0, "parseNumber negative comma");
+near(CsUnits.parseNumber("1.234,5"), 1234.5, 0, "parseNumber European grouping");
+near(CsUnits.parseNumber("1,234.5"), 1234.5, 0, "parseNumber English grouping");
+near(CsUnits.parseNumber("1,234"), 1.234, 0, "parseNumber lone comma is decimal");
+ok(isNaN(CsUnits.parseNumber("1,2,3")), "parseNumber two commas no dot");
+ok(isNaN(CsUnits.parseNumber("")), "parseNumber blank");
+ok(isNaN(CsUnits.parseNumber(null)), "parseNumber null");
+near(CsUnits.parseNumber(7), 7, 0, "parseNumber number passthrough");
+
 // ---------------------------------------------------------------------
 // Angles
 // ---------------------------------------------------------------------
@@ -446,6 +459,9 @@ ok(CsModel.nextStationName("LEAD") === "LEAD1", "next name no digits");
 // no wall that way at all). P used to be folded into 0 by convention;
 // that conflation is the defect this suite fixes, so these are the
 // tests that would have caught it.
+var peComma = CsModel.parseLrudEntry("5,5/10,25");
+near(peComma.value, 10.25, 0, "LRUD decimal comma primary");
+near(peComma.all[0], 5.5, 0, "LRUD decimal comma ledge");
 var pe = CsModel.parseLrudEntry("P");
 ok(pe.value === null && pe.all === null && pe.open === true,
     "P parses as open passage: value null, open true -- NOT 0");

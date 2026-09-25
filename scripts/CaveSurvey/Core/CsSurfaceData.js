@@ -584,7 +584,7 @@ CsSurfaceData.askInterval = function(unit) {
     if (typed === null) {
         return null;
     }
-    var v = parseFloat(typed);
+    var v = CsUnits.parseNumber(typed);
     if (isNaN(v) || v <= 0) {
         warning("Surface Data: \"" + typed + "\" is not a usable " +
             "interval -- a positive number of " + unit + ".");

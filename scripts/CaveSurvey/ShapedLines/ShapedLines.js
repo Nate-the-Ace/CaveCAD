@@ -120,7 +120,7 @@ ShapedLines.askOptions = function() {
         var answer = dlg.exec();
         var idx = styleCombo.currentIndex;
         var sideIdx = sideCombo.currentIndex;
-        var scale = parseFloat(scaleEdit.text);
+        var scale = CsUnits.parseNumber(scaleEdit.text);
         var symbolIdx = symbolCombo.currentIndex;
         destrDialog(dlg);
         if (answer === 0) {

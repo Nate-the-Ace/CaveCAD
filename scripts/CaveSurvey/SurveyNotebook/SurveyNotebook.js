@@ -121,7 +121,7 @@ SurveyNotebook.cellNumber = function(edit) {
     if (v === "" || v === "--") {
         return null;
     }
-    var n = parseFloat(v);
+    var n = CsUnits.parseNumber(v);
     return isNaN(n) ? null : n;
 };
 
@@ -132,7 +132,7 @@ SurveyNotebook.sheetSurvey = function(w) {
     survey.date = String(w.dateEdit.text);
     survey.team = String(w.teamEdit.text);
     survey.instruments = String(w.instrEdit.text);
-    survey.declination = parseFloat(w.declEdit.text) || 0.0;
+    survey.declination = CsUnits.parseNumber(w.declEdit.text) || 0.0;
     survey.declinationSource = w.declSource;
     survey.distanceUnit = w.unit;
 

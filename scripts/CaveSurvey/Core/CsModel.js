@@ -663,7 +663,7 @@ CsModel.parseLrudEntry = function(text) {
             open = true;
             continue;
         }
-        var n = parseFloat(pTrim);
+        var n = CsUnits.parseNumber(pTrim);
         if (!isNaN(n)) {
             values.push(n);
         }

@@ -153,7 +153,7 @@ CsProject.MIN_SPREAD = 1e-6;
 CsProject.resolveAzimuth = function(resolved, want, only) {
     if (want !== undefined && want !== null &&
             String(want) !== CsProject.AZIMUTH_AUTO) {
-        var v = parseFloat(want);
+        var v = CsUnits.parseNumber(want);
         if (isFinite(v)) {
             return { azimuth: ((v % 180.0) + 180.0) % 180.0, source: "asked" };
         }
