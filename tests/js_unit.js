@@ -10138,9 +10138,15 @@ if (!IS_NODE) {
                 if (gsts[gg].name === "L2") { geoSt = gsts[gg]; }
             }
             ok(geoSt !== null, "geo-carry: fixture still has L2");
+            // GeoElev and SurfaceBbox ride the anchor too (Surface Data
+            // writes them); before 2026-09-25 the re-home copied only
+            // lat/lon/station, and Truitt Cave's 3D view lost its
+            // hillside on every Draw.
             CsTags.commit(di, geoSt.entity, { GeoLat: 37.187,
                 GeoLon: -86.101, GeoStation: "L2",
-                GeoDrawX: geoSt.pos.x, GeoDrawY: geoSt.pos.y });
+                GeoDrawX: geoSt.pos.x, GeoDrawY: geoSt.pos.y,
+                GeoElev: 248.75,
+                SurfaceBbox: "-9644481.19,4743608.98,-9644157.61,4743856.54" });
 
             drawWithDecl(-2.5);
 
@@ -10158,6 +10164,12 @@ if (!IS_NODE) {
                     Math.abs(geoRec.pos.y - geoRec.pinY) < 1e-6,
                     "geo-carry: re-pinned at the redrawn position, so " +
                     "the revision never reads as a dragged entrance");
+                near(geoRec.elev, 248.75, 1e-9,
+                    "geo-carry: GeoElev (the datum anchor) survives the Draw");
+                ok(CsTags.get(geoRec.entity, "SurfaceBbox") ===
+                    "-9644481.19,4743608.98,-9644157.61,4743856.54",
+                    "geo-carry: SurfaceBbox survives the Draw, got '" +
+                    CsTags.get(geoRec.entity, "SurfaceBbox") + "'");
             }
         } finally {
             QMessageBox = realBox;

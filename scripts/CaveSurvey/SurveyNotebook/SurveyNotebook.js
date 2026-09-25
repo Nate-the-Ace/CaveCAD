@@ -1730,6 +1730,9 @@ SurveyNotebook.drawPartial = function(w, doc, di, merged, resolved,
     // page is a revision of a trip that owns the anchored station.
     var geoBefore = CsLocationPick.anchorRecord(doc);
     var geoAtRisk = geoBefore !== null && onPage[geoBefore.station] === true;
+    // snapshot every anchor tag BEFORE the erase takes the point away
+    var geoCarried = geoBefore !== null ?
+        CsLocationPick.carriedTags(geoBefore.entity) : null;
 
     var replaced = CsLayers.withLayerOn(doc, di, CsLayers.CTRL_HIDDEN,
         function() {
@@ -1774,13 +1777,7 @@ SurveyNotebook.drawPartial = function(w, doc, di, merged, resolved,
             }
         }
         if (geoHome !== null) {
-            CsTags.commit(di, geoHome.entity, {
-                GeoLat: geoBefore.lat,
-                GeoLon: geoBefore.lon,
-                GeoStation: geoBefore.station,
-                GeoDrawX: geoHome.pos.x,
-                GeoDrawY: geoHome.pos.y
-            });
+            CsLocationPick.rehome(di, geoCarried, geoHome.entity);
         } else {
             geoLine = "\n\nThe geo anchor was on station " +
                 geoBefore.station + ", which this page no longer " +
@@ -2006,6 +2003,9 @@ SurveyNotebook.drawMergedSurvey = function(w, doc, survey, recon,
     // (2026-08-27), whose contours were anchored and whose anchor
     // was gone.
     var geoBefore = CsLocationPick.anchorRecord(doc);
+    // snapshot every anchor tag BEFORE the erase takes the point away
+    var geoCarried = geoBefore !== null ?
+        CsLocationPick.carriedTags(geoBefore.entity) : null;
 
     var replaced = CsLayers.withLayerOn(doc, di, CsLayers.CTRL_HIDDEN,
         function() {
@@ -2069,13 +2069,7 @@ SurveyNotebook.drawMergedSurvey = function(w, doc, survey, recon,
             }
         }
         if (geoHome !== null) {
-            CsTags.commit(di, geoHome.entity, {
-                GeoLat: geoBefore.lat,
-                GeoLon: geoBefore.lon,
-                GeoStation: geoBefore.station,
-                GeoDrawX: geoHome.pos.x,
-                GeoDrawY: geoHome.pos.y
-            });
+            CsLocationPick.rehome(di, geoCarried, geoHome.entity);
         } else {
             geoLine = "\n\nThe geo anchor was on station " +
                 geoBefore.station + ", which this page no longer " +

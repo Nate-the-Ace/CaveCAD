@@ -611,8 +611,10 @@ Cave3D.surfaceContext = function(doc) {
     }
     var bboxTag = CsTags.get(rec.entity, "SurfaceBbox");
     if (bboxTag === null || bboxTag === undefined || bboxTag === "") {
-        return none(qsTr("no surface: the elevation grid predates the "
-            + "3D view -- run Surface Data again"));
+        // An old grid, or one whose window a notebook Draw dropped
+        // before CsLocationPick.rehome carried it (fixed 2026-09-25).
+        return none(qsTr("no surface: the drawing has lost where its "
+            + "elevation grid was fetched -- run Surface Data again"));
     }
     var parts = String(bboxTag).split(",");
     if (parts.length !== 4) {

@@ -1912,7 +1912,8 @@ CsRevise.apply = function(doc, di, recon, newSurvey) {
         if (gs !== "") {
             geoName = gs;
             geoAnchor = { station: gs, lat: CsTags.get(ge, "GeoLat"),
-                lon: CsTags.get(ge, "GeoLon") };
+                lon: CsTags.get(ge, "GeoLon"),
+                carried: CsLocationPick.carriedTags(ge) };
             break;
         }
     }
@@ -2360,23 +2361,9 @@ CsRevise.apply = function(doc, di, recon, newSurvey) {
         if (geoAnchor !== null) {
             var newGeoEntity = findStationEntity(geoAnchor.station);
             if (newGeoEntity !== null) {
-                var geoTags = {
-                    GeoLat: geoAnchor.lat,
-                    GeoLon: geoAnchor.lon,
-                    GeoStation: geoAnchor.station
-                };
-                // Re-PIN at the redrawn position: the revision moved
-                // the station but its real-world coordinate did not
-                // change, so the pin follows the station -- otherwise
-                // the ground-window tools would read a survey re-solve
-                // as "the entrance was dragged over the imagery" and
-                // offer a bogus recompute.
-                if (typeof newGeoEntity.getPosition === "function") {
-                    var gpos = newGeoEntity.getPosition();
-                    geoTags.GeoDrawX = gpos.x;
-                    geoTags.GeoDrawY = gpos.y;
-                }
-                CsTags.commit(di, newGeoEntity, geoTags);
+                // Every anchor tag (GeoElev, SurfaceBbox too), re-pinned
+                // at the redrawn position -- see CsLocationPick.rehome.
+                CsLocationPick.rehome(di, geoAnchor.carried, newGeoEntity);
             } else {
                 // the anchored station didn't survive this revision --
                 // the user deleted that leg. There is no honest

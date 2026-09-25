@@ -110,6 +110,55 @@ CsLocationPick.anchorRecord = function(doc) {
     return null;
 };
 
+// Every tag that belongs to the PLACE the anchor marks rather than to
+// the station point it rides on. A redraw erases that point and draws
+// a new one, so whoever re-homes the anchor must carry ALL of these --
+// the three-tag copies that predated this list dropped GeoElev and
+// SurfaceBbox on every notebook Draw, and the 3D view lost its
+// hillside (found on Truitt Cave, 2026-09-25). GeoDrawX/Y are not
+// here: the pin is re-set at the redrawn position, never copied.
+CsLocationPick.CARRIED_TAGS = ["GeoLat", "GeoLon", "GeoStation",
+    "GeoElev", "SurfaceBbox"];
+
+/**
+ * Snapshot of the anchor tags on `entity`, to hand to rehome() after a
+ * redraw. Only tags actually present are kept, so re-homing never
+ * writes an empty GeoElev onto a drawing that never had one.
+ */
+CsLocationPick.carriedTags = function(entity) {
+    var out = {};
+    for (var i = 0; i < CsLocationPick.CARRIED_TAGS.length; i++) {
+        var k = CsLocationPick.CARRIED_TAGS[i];
+        var v = CsTags.get(entity, k);
+        if (v !== "" && v !== null && v !== undefined) {
+            out[k] = v;
+        }
+    }
+    return out;
+};
+
+/**
+ * Recommits a carriedTags() snapshot onto the redrawn station point and
+ * re-pins it at that point's position: the redraw moved the station but
+ * its real-world coordinate did not change, so the pin follows the
+ * station -- otherwise the ground-window tools would read a re-solve as
+ * "the entrance was dragged over the imagery".
+ */
+CsLocationPick.rehome = function(di, carried, entity) {
+    var tags = {};
+    for (var k in carried) {
+        if (carried.hasOwnProperty(k)) {
+            tags[k] = carried[k];
+        }
+    }
+    if (typeof entity.getPosition === "function") {
+        var p = entity.getPosition();
+        tags.GeoDrawX = p.x;
+        tags.GeoDrawY = p.y;
+    }
+    CsTags.commit(di, entity, tags);
+};
+
 /**
  * The geo station's CURRENT best coordinate: recomputed through the
  * pinned frame when the station has moved since its coordinate was
