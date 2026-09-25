@@ -135,23 +135,25 @@ TripEdit.reportText = function(changes, res) {
     if (changes.length === 0) {
         return qsTr("Edit Trip: nothing changed.");
     }
-    var msg = "Edit Trip: " + changes.length + " trip" +
-        (changes.length === 1 ? "" : "s") + " updated (";
     var parts = [];
     for (var i = 0; i < changes.length; i++) {
         parts.push(qsTr("trip %1").arg(String(changes[i].tripId)));
     }
-    msg += parts.join(", ") + "). Tags only -- nothing was moved or " +
-        "redrawn.";
+    var msg = (changes.length === 1 ?
+        qsTr("Edit Trip: %1 trip updated (%2). Tags only -- nothing was " +
+            "moved or redrawn.") :
+        qsTr("Edit Trip: %1 trips updated (%2). Tags only -- nothing was " +
+            "moved or redrawn.")).arg(changes.length).arg(parts.join(", "));
     if (res.missing.length > 0) {
-        msg += " Trip " + res.missing.join(", trip ") + " has no " +
+        msg += " " + qsTr("Trip %1 has no " +
             "station in the drawing to carry its metadata, so that " +
-            "edit could not be stored.";
+            "edit could not be stored.")
+            .arg(res.missing.join(", " + qsTr("trip") + " "));
     }
     if (CsTripEdit.dateChanged(changes)) {
-        msg += " A changed date means the trip's declination was " +
+        msg += " " + qsTr("A changed date means the trip's declination was " +
             "estimated for the wrong day: check it in Survey " +
-            "Notebook > Declination.";
+            "Notebook > Declination.");
     }
     return msg;
 };
@@ -183,12 +185,17 @@ TripEdit.deleteTrip = function(doc, di, read, request) {
 
     var bound = CsTripEdit.lineworkOfTrip(doc, tripId, {}).owned.length;
     var sure = QMessageBox.question(null, qsTr("Edit Trip"),
-        "Delete " + request.label + " from this drawing?\n\n" +
-        "Its " + request.shots + " shot" +
-        (request.shots === 1 ? "" : "s") + ", the stations only it " +
-        "reaches and everything drawn for them go. Every trip after " +
-        "it is renumbered. The cave redraws without it, and the " +
-        "previous version of the drawing is kept beside it first.",
+        qsTr("Delete %1 from this drawing?").arg(request.label) + "\n\n" +
+        (request.shots === 1 ?
+            qsTr("Its %1 shot, the stations only it " +
+                "reaches and everything drawn for them go. Every trip after " +
+                "it is renumbered. The cave redraws without it, and the " +
+                "previous version of the drawing is kept beside it first.") :
+            qsTr("Its %1 shots, the stations only it " +
+                "reaches and everything drawn for them go. Every trip after " +
+                "it is renumbered. The cave redraws without it, and the " +
+                "previous version of the drawing is kept beside it first."))
+            .arg(request.shots),
         QMessageBox.Yes | QMessageBox.No);
     if (sure !== QMessageBox.Yes) {
         return;
@@ -198,11 +205,13 @@ TripEdit.deleteTrip = function(doc, di, read, request) {
     var keepLinework = true;
     if (bound > 0) {
         var answer = QMessageBox.question(null, qsTr("Edit Trip"),
-            bound + " piece" + (bound === 1 ? "" : "s") + " of traced " +
-            "linework " + (bound === 1 ? "is" : "are") + " bound to " +
-            "this trip.\n\nKeep the tracing (it stays in the drawing, " +
+            (bound === 1 ?
+                qsTr("%1 piece of traced linework is bound to this trip.") :
+                qsTr("%1 pieces of traced linework are bound to this trip."))
+                .arg(bound) + "\n\n" +
+            qsTr("Keep the tracing (it stays in the drawing, " +
             "no longer claimed by any trip), or delete it with the " +
-            "trip?\n\nYes keeps it. No deletes it.",
+            "trip?\n\nYes keeps it. No deletes it."),
             QMessageBox.Yes | QMessageBox.No | QMessageBox.Cancel);
         if (answer === QMessageBox.Cancel) {
             return;
@@ -217,27 +226,36 @@ TripEdit.deleteTrip = function(doc, di, read, request) {
         return;
     }
 
-    var msg = "Edit Trip: deleted " + request.label + " -- " +
-        res.removedShots + " shot" + (res.removedShots === 1 ? "" : "s") +
-        " gone, " + res.trips + " trip" + (res.trips === 1 ? "" : "s") +
-        " left, renumbered from " + tripId + " on.";
+    var msg = qsTr("Edit Trip: deleted %1 -- %2 gone, %3 left, " +
+        "renumbered from %4 on.")
+        .arg(request.label)
+        .arg((res.removedShots === 1 ? qsTr("%1 shot") : qsTr("%1 shots"))
+            .arg(res.removedShots))
+        .arg((res.trips === 1 ? qsTr("%1 trip") : qsTr("%1 trips"))
+            .arg(res.trips))
+        .arg(tripId);
     if (res.linework.unbound > 0) {
-        msg += " " + res.linework.unbound + " traced item" +
-            (res.linework.unbound === 1 ? "" : "s") + " kept and " +
-            "unbound.";
+        msg += " " + (res.linework.unbound === 1 ?
+            qsTr("%1 traced item kept and unbound.") :
+            qsTr("%1 traced items kept and unbound."))
+            .arg(res.linework.unbound);
     }
     if (res.linework.deleted > 0) {
-        msg += " " + res.linework.deleted + " traced item" +
-            (res.linework.deleted === 1 ? "" : "s") + " deleted with it.";
+        msg += " " + (res.linework.deleted === 1 ?
+            qsTr("%1 traced item deleted with it.") :
+            qsTr("%1 traced items deleted with it."))
+            .arg(res.linework.deleted);
     }
     if (res.linework.renumbered > 0) {
-        msg += " " + res.linework.renumbered + " re-keyed to " +
-            "the trip's new id.";
+        msg += " " + qsTr("%1 re-keyed to the trip's new id.")
+            .arg(res.linework.renumbered);
     }
     if (res.moved > 0) {
-        msg += " The delete re-solved the survey: " + res.moved +
-            " station" + (res.moved === 1 ? "" : "s") + " moved, and " +
-            "the tracing bound to them followed.";
+        msg += " " + (res.moved === 1 ?
+            qsTr("The delete re-solved the survey: %1 station moved, and " +
+                "the tracing bound to them followed.") :
+            qsTr("The delete re-solved the survey: %1 stations moved, and " +
+                "the tracing bound to them followed.")).arg(res.moved);
     }
     EAction.handleUserMessage(msg);
     QMessageBox.information(null, qsTr("Edit Trip"), msg);
@@ -296,12 +314,12 @@ TripEdit.open = function(tripId) {
     var layout = new QVBoxLayout();
 
     layout.addWidget(new QLabel(single ?
-        ("Correct this trip's name, date, team or instrument list --\n" +
+        qsTr("Correct this trip's name, date, team or instrument list --\n" +
         "the edit lands on the trip you loaded, not on a new copy of\n" +
         "it, and nothing is moved or redrawn. Declination is not\n" +
         "edited here: changing it rotates the plan, so it lives in\n" +
         "Survey Notebook > Declination.") :
-        ("The trips in this drawing. Correct a name, date, team or\n" +
+        qsTr("The trips in this drawing. Correct a name, date, team or\n" +
         "instrument list here -- the edit lands on the trip you edit,\n" +
         "not on a new copy of it, and nothing is moved or redrawn.\n" +
         "Declination is not edited here: changing it rotates the plan,\n" +
@@ -309,8 +327,9 @@ TripEdit.open = function(tripId) {
 
     var host = new QWidget();
     var grid = new QGridLayout();
-    var head = ["Trip", "Shots", "Declination", "Name", "Date (YYYY-MM-DD)",
-        "Team", "Instruments", ""];
+    var head = [qsTr("Trip"), qsTr("Shots"), qsTr("Declination"),
+        qsTr("Name"), qsTr("Date (YYYY-MM-DD)"), qsTr("Team"),
+        qsTr("Instruments"), ""];
     for (var h = 0; h < head.length; h++) {
         grid.addWidget(new QLabel(head[h]), 0, h);
     }

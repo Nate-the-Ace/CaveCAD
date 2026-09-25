@@ -285,6 +285,28 @@ CsRebuild.profileNote = function(drawn) {
         .arg(String(drawn.profile.reason));
 };
 
+/** "1 station" / "4 stations" -- each form a whole phrase to translate. */
+CsRebuild.stationsText = function(n) {
+    return (n === 1 ? qsTr("%1 station") : qsTr("%1 stations")).arg(n);
+};
+
+/** "1 shot" / "4 shots". */
+CsRebuild.shotsText = function(n) {
+    return (n === 1 ? qsTr("%1 shot") : qsTr("%1 shots")).arg(n);
+};
+
+/** The splays a redraw could not put back, with a leading space, or "". */
+CsRebuild.splaysNote = function(n) {
+    if (!(n > 0)) {
+        return "";
+    }
+    return " " + (n === 1 ?
+        qsTr("%1 splay had no inclination on record and could not be " +
+            "redrawn.") :
+        qsTr("%1 splays had no inclination on record and could not be " +
+            "redrawn.")).arg(n);
+};
+
 /**
  * The whole job, headless.
  *
@@ -382,11 +404,10 @@ CsRebuild.rebuild = function(doc, di) {
         // were before the reader could see them at all, only now the
         // run can say how many instead of the loss being invisible.
         report.splaysUnplaceable = up.drawn.splaysSkipped || 0;
-        report.message = "Rebuild Survey Data: upgraded this drawing to " +
-            "tag schema v3 -- " + report.stations + " station" +
-            (report.stations === 1 ? "" : "s") + " and " + report.shots +
-            " shot" + (report.shots === 1 ? "" : "s") + " now carry " +
-            "their own data. " +
+        report.message = qsTr("Rebuild Survey Data: upgraded this drawing to " +
+            "tag schema v3 -- %1 and %2 now carry their own data.")
+            .arg(CsRebuild.stationsText(report.stations))
+            .arg(CsRebuild.shotsText(report.shots)) + " " +
             // WHICH KIND OF INFERENCE, because they are not equally
             // good and the difference is largest exactly where it
             // matters most. A drawing that recorded an elevation per
@@ -398,28 +419,30 @@ CsRebuild.rebuild = function(doc, di) {
             // scale). Saying "slope = plan/cos(inclination)" for a run
             // that did neither would be a report of work not done.
             (report.fromElevations > 0 ?
-                "Distances taken from the drawing's own station " +
-                "elevations (" + report.fromElevations + " shot" +
-                (report.fromElevations === 1 ? "" : "s") + ")." :
-                "Distances inferred from geometry " +
-                "(slope = plan/cos(inclination)).") +
+                qsTr("Distances taken from the drawing's own station " +
+                "elevations (%1).")
+                    .arg(CsRebuild.shotsText(report.fromElevations)) :
+                qsTr("Distances inferred from geometry " +
+                "(slope = plan/cos(inclination)).")) +
             (report.fromElevations > 0 && report.scaled > 0 ?
-                " " + report.scaled + " shot" +
-                (report.scaled === 1 ? "" : "s") + " had no elevation on " +
-                "record and were inferred from geometry instead " +
-                "(slope = plan/cos(inclination))." : "") +
-            (anchorZ !== 0 ? " Elevations kept on the recorded datum -- " +
-                recon.anchorName + " at " +
-                CsReport.length(anchorZ, survey.distanceUnit) + "." : "") +
-            (report.vertical > 0 ? " " + report.vertical + " near-" +
-                "vertical shot" + (report.vertical === 1 ? "" : "s") +
-                " had no plan length to scale; distance left as drawn." :
+                " " + (report.scaled === 1 ?
+                    qsTr("%1 shot had no elevation on record and was " +
+                        "inferred from geometry instead " +
+                        "(slope = plan/cos(inclination)).") :
+                    qsTr("%1 shots had no elevation on record and were " +
+                        "inferred from geometry instead " +
+                        "(slope = plan/cos(inclination)).")).arg(report.scaled) :
                 "") +
-            (report.splaysUnplaceable > 0 ? " " +
-                report.splaysUnplaceable + " splay" +
-                (report.splaysUnplaceable === 1 ? "" : "s") +
-                " had no inclination on record and could not be redrawn." :
+            (anchorZ !== 0 ? " " + qsTr("Elevations kept on the recorded " +
+                "datum -- %1 at %2.").arg(recon.anchorName)
+                .arg(CsReport.length(anchorZ, survey.distanceUnit)) : "") +
+            (report.vertical > 0 ? " " + (report.vertical === 1 ?
+                qsTr("%1 near-vertical shot had no plan length to scale; " +
+                    "distance left as drawn.") :
+                qsTr("%1 near-vertical shots had no plan length to scale; " +
+                    "distance left as drawn.")).arg(report.vertical) :
                 "") +
+            CsRebuild.splaysNote(report.splaysUnplaceable) +
             CsRebuild.profileNote(up.drawn);
         return report;
     }
@@ -444,19 +467,15 @@ CsRebuild.rebuild = function(doc, di) {
         report.stations = heal.drawn.stationsDrawn;
         report.shots = CsRebuild.shotCount(heal.drawn);
         report.splaysUnplaceable = heal.drawn.splaysSkipped || 0;
-        report.message = "Rebuild Survey Data: redrew " + report.stations +
-            " station" + (report.stations === 1 ? "" : "s") + " and " +
-            report.shots + " shot" + (report.shots === 1 ? "" : "s") +
+        report.message = qsTr("Rebuild Survey Data: redrew %1 and %2" +
             " from the drawing's own survey data -- already tag schema " +
-            "v3, nothing inferred." +
-            (healZ !== 0 ? " Elevations kept on the recorded datum -- " +
-                recon.anchorName + " at " +
-                CsReport.length(healZ, recon.survey.distanceUnit) + "." : "") +
-            (report.splaysUnplaceable > 0 ? " " +
-                report.splaysUnplaceable + " splay" +
-                (report.splaysUnplaceable === 1 ? "" : "s") +
-                " had no inclination on record and could not be redrawn." :
-                "") +
+            "v3, nothing inferred.")
+            .arg(CsRebuild.stationsText(report.stations))
+            .arg(CsRebuild.shotsText(report.shots)) +
+            (healZ !== 0 ? " " + qsTr("Elevations kept on the recorded " +
+                "datum -- %1 at %2.").arg(recon.anchorName)
+                .arg(CsReport.length(healZ, recon.survey.distanceUnit)) : "") +
+            CsRebuild.splaysNote(report.splaysUnplaceable) +
             CsRebuild.profileNote(heal.drawn);
         return report;
     }
@@ -659,11 +678,11 @@ CsRebuild.fromGeometry = function(doc, di, report) {
 
     if (tagsWritten === 0 && lrudNamed === 0) {
         report.mode = "nothing";
-        report.message = "Rebuild Survey Data: " +
-            (report.hadStore ? "migrated the survey data store onto the " +
-                "entities and removed it; nothing else to do." :
-                "nothing to do -- every station already carries its " +
-                "data.");
+        report.message = report.hadStore ?
+            qsTr("Rebuild Survey Data: migrated the survey data store onto " +
+                "the entities and removed it; nothing else to do.") :
+            qsTr("Rebuild Survey Data: nothing to do -- every station " +
+                "already carries its data.");
         return report;
     }
 
@@ -671,19 +690,19 @@ CsRebuild.fromGeometry = function(doc, di, report) {
     CsStore.migrate(doc, di);
 
     report.mode = "geometry";
-    report.message = "Rebuild Survey Data: recovered " + tagsWritten +
-        " station" + (tagsWritten === 1 ? "" : "s") + " and " +
-        lrudNamed + " LRUD point" + (lrudNamed === 1 ? "" : "s") +
-        " from the drawing's geometry.";
-    report.dialog = "Recovered " + tagsWritten + " station" +
-        (tagsWritten === 1 ? "" : "s") + " and " + lrudNamed +
-        " LRUD point" + (lrudNamed === 1 ? "" : "s") +
+    var lrudText = (lrudNamed === 1 ? qsTr("%1 LRUD point") :
+        qsTr("%1 LRUD points")).arg(lrudNamed);
+    report.message = qsTr("Rebuild Survey Data: recovered %1 and %2" +
+        " from the drawing's geometry.")
+        .arg(CsRebuild.stationsText(tagsWritten)).arg(lrudText);
+    report.dialog = qsTr("Recovered %1 and %2" +
         " from the drawing's geometry and tagged the entities " +
         "directly.\n\nTie-ins, redraw-replace, LRUD Walls and Survey " +
         "Stats now work on this drawing. What geometry doesn't carry " +
         "-- legacy azimuth/inclination readings and numeric LRUD -- " +
         "could not be recovered; positions are exact.\n\nRun the tool " +
-        "again to lift the recovered data to tag schema v3.";
+        "again to lift the recovered data to tag schema v3.")
+        .arg(CsRebuild.stationsText(tagsWritten)).arg(lrudText);
     return report;
 };
 
