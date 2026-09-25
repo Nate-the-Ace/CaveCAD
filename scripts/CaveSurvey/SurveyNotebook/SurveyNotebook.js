@@ -4525,7 +4525,7 @@ SurveyNotebook.buildDock = function(appWin) {
         });
         firstFill.start();
     } catch (eFirst) {
-        w.problems.push("scan pane first fill (" + eFirst + ")");
+        w.problems.push(qsTr("scan pane first fill (%1)").arg(String(eFirst)));
     }
 
     // A RE-SHOWN DOCK RE-READS THE SCANS, the way Sketch Scans already
@@ -4556,7 +4556,8 @@ SurveyNotebook.buildDock = function(appWin) {
             SurveyNotebook.ghostSoon(SurveyNotebook.page);
         });
     } catch (eVis) {
-        w.problems.push("scan pane refresh on show (" + eVis + ")");
+        w.problems.push(qsTr("scan pane refresh on show (%1)")
+            .arg(String(eVis)));
     }
     return dock;
 };

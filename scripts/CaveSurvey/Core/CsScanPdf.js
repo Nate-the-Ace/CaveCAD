@@ -187,14 +187,14 @@ CsScanPdf.dim = function(obj, which) {
 CsScanPdf.split = function(absPath, dpi) {
     var out = { ok: false, written: [], pages: 0, error: "" };
     if (typeof QImageReader === "undefined") {
-        out.error = "This build cannot read PDFs.";
+        out.error = qsTr("This build cannot read PDFs.");
         return out;
     }
     var resolution = (typeof dpi === "number" && dpi > 0) ? dpi :
         CsScanPdf.DPI;
     var pages = CsScanPdf.pageCount(absPath);
     if (pages < 1) {
-        out.error = "That PDF could not be read.";
+        out.error = qsTr("That PDF could not be read.");
         return out;
     }
     out.pages = pages;
@@ -207,7 +207,8 @@ CsScanPdf.split = function(absPath, dpi) {
             // already delivered an image is not one to re-scale.
             var reader = new QImageReader(absPath);
             if (i > 0 && !reader.jumpToImage(i)) {
-                out.error = "Page " + (i + 1) + " could not be reached.";
+                out.error = qsTr("Page %1 could not be reached.")
+                    .arg(String((i + 1)));
                 return out;
             }
             var size = reader.size();
@@ -217,20 +218,24 @@ CsScanPdf.split = function(absPath, dpi) {
                 Math.round(CsScanPdf.dim(size, "height") * factor)));
             var image = reader.read();
             if (isNull(image) || image.isNull()) {
-                out.error = "Page " + (i + 1) + " came out empty.";
+                out.error = qsTr("Page %1 came out empty.")
+                    .arg(String((i + 1)));
                 return out;
             }
             // The format is passed EXPLICITLY: save(path) alone returns
             // false and writes nothing on this bridge, extension or no
             // extension (measured 2026-09-14).
             if (!image.save(target, CsScanPdf.FORMAT)) {
-                out.error = "Page " + (i + 1) + " could not be written " +
-                    "to " + target;
+                out.error = qsTr("Page %1 could not be written to %2")
+                    .arg(String((i + 1)))
+                    .arg(String(target));
                 return out;
             }
             out.written.push(target);
         } catch (e) {
-            out.error = "Page " + (i + 1) + " failed (" + e + ")";
+            out.error = qsTr("Page %1 failed (%2)")
+                .arg(String((i + 1)))
+                .arg(String(e));
             return out;
         }
     }

@@ -194,8 +194,9 @@ DrawPanel.buildDock = function(appWin) {
             } catch (eScroll) {
                 // No scroll area on this bridge: the section still
                 // works, it just cannot be scrolled within its row.
-                problems.push(sections[i].title + " scrolling (" +
-                    eScroll + ")");
+                problems.push(qsTr("%1 scrolling (%2)")
+                    .arg(String(sections[i].title))
+                    .arg(String(eScroll)));
                 inner.addWidget(built, 1, 0);
             }
             section.host.setLayout(inner);
@@ -215,7 +216,7 @@ DrawPanel.buildDock = function(appWin) {
     try {
         CsPanel.applyOrder(stack);
     } catch (eOrder) {
-        problems.push("section order (" + eOrder + ")");
+        problems.push(qsTr("section order (%1)").arg(String(eOrder)));
     }
     try {
         // applyOrder already calls this internally when a saved order
@@ -225,7 +226,7 @@ DrawPanel.buildDock = function(appWin) {
         // so this is the only thing that can place the boxes then.
         CsPanel.relayout(stack);
     } catch (eLayout) {
-        problems.push("section layout (" + eLayout + ")");
+        problems.push(qsTr("section layout (%1)").arg(String(eLayout)));
     }
 
     // THE ROWS DIVIDE THE DOCK, they do not take their natural height --

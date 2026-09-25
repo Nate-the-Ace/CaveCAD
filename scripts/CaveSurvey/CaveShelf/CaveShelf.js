@@ -124,11 +124,11 @@ CaveShelf.notDownloaded = function(path) {
         return null;
     }
     if (!CsCave.isUnderDrive(path, CsCave.driveRoots())) {
-        return "The drawing is empty:\n" + path;
+        return qsTr("The drawing is empty:\n%1").arg(String(path));
     }
-    return "Not downloaded from the drive yet — the file is here but its " +
+    return qsTr("Not downloaded from the drive yet — the file is here but its " +
         "contents are not.\n\nOpen the cave's folder (Open Project Folder) " +
-        "and let the drive fetch it, then come back.";
+        "and let the drive fetch it, then come back.");
 };
 
 /**
@@ -421,10 +421,10 @@ CaveShelf.applyEdit = function(window, tripId, field, text) {
         doc = window.getDocument();
         di = window.getDocumentInterface();
     } catch (eDoc) {
-        return { error: "That cave's window would not answer." };
+        return { error: qsTr("That cave's window would not answer.") };
     }
     if (isNull(doc) || isNull(di)) {
-        return { error: "That cave's window would not answer." };
+        return { error: qsTr("That cave's window would not answer.") };
     }
     // THE READ, THEN ITS SURVEY. CsRevise.surveyFromDocument answers a
     // RECONSTRUCTION -- {survey, resolved, ...} -- and handing that
@@ -435,10 +435,11 @@ CaveShelf.applyEdit = function(window, tripId, field, text) {
     try {
         read = CsRevise.surveyFromDocument(doc);
     } catch (eSurvey) {
-        return { error: "Could not read the survey back: " + eSurvey };
+        return { error: qsTr("Could not read the survey back: %1")
+            .arg(String(eSurvey)) };
     }
     if (isNull(read) || isNull(read.survey)) {
-        return { error: "Could not read the survey back." };
+        return { error: qsTr("Could not read the survey back.") };
     }
     var survey = read.survey;
     var rows = CsTripEdit.rows(survey);
@@ -449,11 +450,11 @@ CaveShelf.applyEdit = function(window, tripId, field, text) {
         }
     }
     if (row === null) {
-        return { error: "That trip is not in the drawing any more." };
+        return { error: qsTr("That trip is not in the drawing any more.") };
     }
     var input = CsTripEdit.inputFor(row, field, text);
     if (input === null) {
-        return { error: "That column is not editable." };
+        return { error: qsTr("That column is not editable.") };
     }
     var done = CsTripEdit.commit(doc, di, survey, [input]);
     if (!isNull(done.error)) {
@@ -494,12 +495,13 @@ CaveShelf.applyToFile = function(path, tripId, field, text) {
     try {
         if (di.importFile(path, "", false) !==
                 RDocumentInterface.IoErrorNoError) {
-            return { error: "Could not read " + path + "." };
+            return { error: qsTr("Could not read %1.").arg(String(path)) };
         }
         var doc = di.getDocument();
         var read = CsRevise.surveyFromDocument(doc);
         if (isNull(read) || isNull(read.survey)) {
-            return { error: "Could not read the survey in " + path + "." };
+            return { error: qsTr("Could not read the survey in %1.")
+                .arg(String(path)) };
         }
         var rows = CsTripEdit.rows(read.survey);
         var row = null;
@@ -509,11 +511,11 @@ CaveShelf.applyToFile = function(path, tripId, field, text) {
             }
         }
         if (row === null) {
-            return { error: "That trip is not in the drawing any more." };
+            return { error: qsTr("That trip is not in the drawing any more.") };
         }
         var input = CsTripEdit.inputFor(row, field, text);
         if (input === null) {
-            return { error: "That column is not editable." };
+            return { error: qsTr("That column is not editable.") };
         }
         var done = CsTripEdit.commit(doc, di, read.survey, [input]);
         if (!isNull(done.error)) {
@@ -523,11 +525,13 @@ CaveShelf.applyToFile = function(path, tripId, field, text) {
             return { changes: 0 };
         }
         if (!di.exportFile(temp, CsSanitize.dxfFilter())) {
-            return { error: "Could not write the cave's drawing." };
+            return { error: qsTr("Could not write the cave's drawing.") };
         }
         return CaveShelf.swapIn(path, temp, aside, done.changes.length);
     } catch (e) {
-        return { error: "Editing " + path + " failed (" + e + ")." };
+        return { error: qsTr("Editing %1 failed (%2).")
+            .arg(String(path))
+            .arg(String(e)) };
     } finally {
         try {
             if (typeof destr === "function") {
@@ -551,12 +555,14 @@ CaveShelf.swapIn = function(path, fresh, aside, changes) {
     CaveShelf.dropFile(aside);
     try {
         if (!(new QFile(path)).rename(aside)) {
-            return { error: "Could not replace " + path +
-                " -- the drawing would not move aside, so nothing was " +
-                "changed." };
+            return { error: qsTr("Could not replace %1 -- the drawing would " +
+                "not move aside, so nothing was changed.")
+                .arg(String(path)) };
         }
     } catch (eAside) {
-        return { error: "Could not replace " + path + " (" + eAside + ")." };
+        return { error: qsTr("Could not replace %1 (%2).")
+            .arg(String(path))
+            .arg(String(eAside)) };
     }
     var moved = false;
     try {
@@ -569,8 +575,8 @@ CaveShelf.swapIn = function(path, fresh, aside, changes) {
             (new QFile(aside)).rename(path);
         } catch (ePut) {
         }
-        return { error: "Could not put the edited drawing in place; the " +
-            "cave's own drawing is untouched." };
+        return { error: qsTr("Could not put the edited drawing in place; the " +
+            "cave's own drawing is untouched.") };
     }
     CaveShelf.dropFile(aside);
     return { changes: changes };
@@ -637,22 +643,22 @@ CaveShelf.readCave = function(record) {
 
     if (record === null || record === undefined ||
             CsShelf.clean(record.drawing) === "") {
-        blank.error = "No drawing yet. New Trip starts one from the NSS " +
+        blank.error = qsTr("No drawing yet. New Trip starts one from the NSS " +
             "template, saves it in this folder, and opens the notebook " +
-            "on the first station.";
+            "on the first station.");
         blank.startable = true;
         return blank;
     }
 
     var path = record.drawing;
     if (!(new QFileInfo(path)).exists()) {
-        blank.error = "The drawing is missing:\n" + path;
+        blank.error = qsTr("The drawing is missing:\n%1").arg(String(path));
         return blank;
     }
     if (CsShelf.extension(path) === "dwg") {
-        blank.error = "This cave's drawing is a DWG. CaveCAD reads DXF -- " +
+        blank.error = qsTr("This cave's drawing is a DWG. CaveCAD reads DXF -- " +
             "convert it (any CAD that writes DXF will do) and register " +
-            "the cave again.";
+            "the cave again.");
         return blank;
     }
 
@@ -692,7 +698,8 @@ CaveShelf.readCave = function(record) {
                 caveDoc, record.folder);
         }
     } catch (e) {
-        read = { ok: false, error: "Could not read this cave: " + e,
+        read = { ok: false, error: qsTr("Could not read this cave: %1")
+            .arg(String(e)),
             trips: [], ends: [], length: 0, unit: "ft", legacy: false,
             survey: null };
     } finally {
@@ -716,7 +723,7 @@ CaveShelf.readCave = function(record) {
 CaveShelf.summarize = function(recon, doc, folder) {
     var survey = (recon === null || recon === undefined) ? null : recon.survey;
     if (survey === null || survey === undefined) {
-        return { ok: false, error: "This drawing carries no survey data.",
+        return { ok: false, error: qsTr("This drawing carries no survey data."),
             trips: [], ends: [], length: 0, unit: "ft", legacy: false,
             survey: null, startable: true };
     }

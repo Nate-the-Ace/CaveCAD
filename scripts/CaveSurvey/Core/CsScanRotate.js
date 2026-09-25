@@ -215,15 +215,17 @@ CsScanRotate.rewrite = function(scansFolder, pageRel, transform, verb) {
     var path = String(scansFolder) + "/" + pageRel;
     var format = CsScanRotate.formatOf(pageRel);
     if (format === null) {
-        return { ok: false, error: pageRel + " is a ." +
-            CsScanRotate.extOf(pageRel) + " page, which this suite " +
-            "will not rewrite. Change it in an image editor, or save " +
-            "it as JPEG or PNG first." };
+        return { ok: false, error: qsTr("%1 is a .%2 page, which this suite " +
+            "will not rewrite. Change it in an image editor, or save it as " +
+            "JPEG or PNG first.")
+            .arg(String(pageRel))
+            .arg(String(CsScanRotate.extOf(pageRel))) };
     }
     if (!CsScanRotate.canWrite(format, CsScanRotate.writableFormats())) {
-        return { ok: false, error: "this build of CaveCAD cannot write " +
-            format + " images, so " + pageRel + " cannot be changed " +
-            "in place." };
+        return { ok: false, error: qsTr("this build of CaveCAD cannot write " +
+            "%1 images, so %2 cannot be changed in place.")
+            .arg(String(format))
+            .arg(String(pageRel)) };
     }
 
     var image;
@@ -233,8 +235,8 @@ CsScanRotate.rewrite = function(scansFolder, pageRel, transform, verb) {
         image = null;
     }
     if (image === null || image.isNull()) {
-        return { ok: false, error: path + " could not be read as an " +
-            "image." };
+        return { ok: false, error: qsTr("%1 could not be read as an image.")
+            .arg(String(path)) };
     }
 
     var turned;
@@ -244,8 +246,10 @@ CsScanRotate.rewrite = function(scansFolder, pageRel, transform, verb) {
         turned = null;
     }
     if (turned === null || turned.isNull()) {
-        return { ok: false, error: verb + " " + pageRel + " failed -- " +
-            "the page may be too large to hold in memory." };
+        return { ok: false, error: qsTr("%1 %2 failed -- the page may be too " +
+            "large to hold in memory.")
+            .arg(String(verb))
+            .arg(String(pageRel)) };
     }
 
     var temp = path + CsScanRotate.TEMP_SUFFIX;
@@ -257,9 +261,9 @@ CsScanRotate.rewrite = function(scansFolder, pageRel, transform, verb) {
     }
     if (!saved) {
         try { QFile.remove(temp); } catch (eRm) { }
-        return { ok: false, error: "the changed page could not be " +
-            "written beside " + path + " -- the scans folder may be " +
-            "read-only." };
+        return { ok: false, error: qsTr("the changed page could not be " +
+            "written beside %1 -- the scans folder may be read-only.")
+            .arg(String(path)) };
     }
 
     // The original has to go before the rename: QFile.rename does not
@@ -267,14 +271,15 @@ CsScanRotate.rewrite = function(scansFolder, pageRel, transform, verb) {
     try {
         if (!QFile.remove(path)) {
             QFile.remove(temp);
-            return { ok: false, error: path + " could not be replaced " +
-                "-- it may be open in another program. The scan is " +
-                "unchanged." };
+            return { ok: false, error: qsTr("%1 could not be replaced -- it " +
+                "may be open in another program. The scan is unchanged.")
+                .arg(String(path)) };
         }
     } catch (eDel) {
         try { QFile.remove(temp); } catch (eRm2) { }
-        return { ok: false, error: path + " could not be replaced. The " +
-            "scan is unchanged." };
+        return { ok: false, error: qsTr("%1 could not be replaced. The scan " +
+            "is unchanged.")
+            .arg(String(path)) };
     }
     var moved = false;
     try {
@@ -286,9 +291,11 @@ CsScanRotate.rewrite = function(scansFolder, pageRel, transform, verb) {
         // The worst case this file has: the page is gone from its own
         // name and the new pixels are sitting beside it. Say exactly
         // where they are rather than pretending nothing happened.
-        return { ok: false, error: "the changed page was written to " +
-            temp + " but could not be renamed over " + path +
-            ". Rename it by hand -- that file is the changed scan." };
+        return { ok: false, error: qsTr("the changed page was written to %1 " +
+            "but could not be renamed over %2. Rename it by hand -- that " +
+            "file is the changed scan.")
+            .arg(String(temp))
+            .arg(String(path)) };
     }
     // THE CROPS GO WITH THE OLD PIXELS, and they go HERE rather than
     // at the caller: a rewrite that left them behind would leave the

@@ -146,8 +146,8 @@ CsReset.planReset = function(state) {
     }
     return {
         can: true, reason: "",
-        warning: "This empties the drawing completely. The cave's " +
-            "folder is not touched."
+        warning: qsTr("This empties the drawing completely. The cave's " +
+            "folder is not touched.")
     };
 };
 
@@ -208,8 +208,10 @@ CsReset.phaseText = function(kind, done, total) {
     if (label === undefined) {
         label = "entities";
     }
-    return "Removing " + label + " -- " + CsReset.groupNumber(done) +
-        " of " + CsReset.groupNumber(total);
+    return qsTr("Removing %1 -- %2 of %3")
+        .arg(String(label))
+        .arg(String(CsReset.groupNumber(done)))
+        .arg(String(CsReset.groupNumber(total)));
 };
 
 /**
@@ -228,7 +230,7 @@ CsReset.summaryText = function(state) {
     var name = (s.caveName === null || s.caveName === undefined ||
         String(s.caveName) === "") ? "this cave" : String(s.caveName);
     var lines = [];
-    lines.push("Empties the drawing of " + name + " completely.");
+    lines.push(qsTr("Empties the drawing of %1 completely.").arg(String(name)));
     lines.push("");
     lines.push("Deletes all " + num(c.total || 0) + " entities: " +
         num(c.survey || 0) + " survey (stations, legs, LRUD), " +
@@ -236,31 +238,31 @@ CsReset.summaryText = function(state) {
         num(c.images || 0) +
         ((c.images === 1) ? " placed image" : " placed images") +
         " (sketch scans and the aerial basemap).");
-    lines.push("The cave's location goes with them -- declare it again " +
-        "with Set Cave Location.");
+    lines.push(qsTr("The cave's location goes with them -- declare it again " +
+        "with Set Cave Location."));
     lines.push("");
-    lines.push("Also cleared: the Complete marks on this cave's scans, " +
+    lines.push(qsTr("Also cleared: the Complete marks on this cave's scans, " +
         "the last-declared location Set Cave Location offers, and the " +
-        "map thumbnail on the shelf. The cave stays on the shelf.");
+        "map thumbnail on the shelf. The cave stays on the shelf."));
     lines.push("");
-    lines.push("The cave's FOLDER is not touched: every scan, " +
+    lines.push(qsTr("The cave's FOLDER is not touched: every scan, " +
         "photograph, capture and PDF stays on disk, ready to be placed " +
-        "again.");
+        "again."));
     lines.push("");
     if (s.backupPath !== null && s.backupPath !== undefined &&
             String(s.backupPath) !== "") {
-        lines.push("A copy of the saved drawing is at " +
-            String(s.backupPath) + ".");
+        lines.push(qsTr("A copy of the saved drawing is at %1.")
+            .arg(String(s.backupPath)));
     }
     if (s.modified === true) {
         // Said plainly rather than implied: the backup is a file copy,
         // and edits that were never written are in neither place once
         // this runs.
-        lines.push("Unsaved changes in the open drawing are NOT in that " +
-            "copy and will be lost.");
+        lines.push(qsTr("Unsaved changes in the open drawing are NOT in that " +
+            "copy and will be lost."));
     }
     lines.push("");
-    lines.push("Type the cave's name to confirm.");
+    lines.push(qsTr("Type the cave's name to confirm."));
     return lines;
 };
 
@@ -284,11 +286,12 @@ CsReset.doneText = function(state) {
     var c = (s.counts === null || s.counts === undefined) ? {} : s.counts;
     var num = CsReset.groupNumber;
     var lines = [];
-    lines.push("Reset: " + num(c.total || 0) + " entities deleted, " +
-        num(c.images || 0) + " of them placed images. The drawing is " +
-        "empty.");
-    lines.push("The cave's folder is untouched -- the scans and the " +
-        "imagery are still there to place again.");
+    lines.push(qsTr("Reset: %1 entities deleted, %2 of them placed images. " +
+        "The drawing is empty.")
+        .arg(String(num(c.total || 0)))
+        .arg(String(num(c.images || 0))));
+    lines.push(qsTr("The cave's folder is untouched -- the scans and the " +
+        "imagery are still there to place again."));
     var cleared = (s.cleared === null || s.cleared === undefined) ?
         {} : s.cleared;
     var also = [];
@@ -296,13 +299,14 @@ CsReset.doneText = function(state) {
     if (cleared.location === true) { also.push("the last-declared location"); }
     if (cleared.preview === true) { also.push("the map thumbnail"); }
     if (also.length > 0) {
-        lines.push("Cleared with it: " + CsReset.listText(also) + ".");
+        lines.push(qsTr("Cleared with it: %1.")
+            .arg(String(CsReset.listText(also))));
     }
     if (s.backupPath !== null && s.backupPath !== undefined &&
             String(s.backupPath) !== "") {
-        lines.push("The drawing as it was: " + String(s.backupPath));
+        lines.push(qsTr("The drawing as it was: %1").arg(String(s.backupPath)));
     }
-    lines.push("Nothing has been saved yet -- close without saving to " +
-        "undo all of this.");
+    lines.push(qsTr("Nothing has been saved yet -- close without saving to " +
+        "undo all of this."));
     return lines;
 };

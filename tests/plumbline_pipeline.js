@@ -32,6 +32,8 @@
 
 var fs = require("fs");
 var path = require("path");
+// qsTr and .arg, which the add-on's messages need and node lacks
+(0, eval)(fs.readFileSync(path.join(__dirname, "qstr_shim.js"), "utf8"));
 var repoRoot = path.resolve(__dirname, "..");
 var VERBOSE = process.argv.indexOf("--verbose") >= 0;
 

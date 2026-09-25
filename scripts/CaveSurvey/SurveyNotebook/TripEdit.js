@@ -60,13 +60,13 @@ TripEdit.read = function(doc) {
         recon = CsRevise.surveyFromDocument(doc);
     } catch (e) {
         return { ok: false, rows: [], survey: null,
-            error: "Edit Trip: could not read this drawing's survey (" +
-                e + ")." };
+            error: qsTr("Edit Trip: could not read this drawing's survey (%1).")
+                .arg(String(e)) };
     }
     if (recon === null || recon === undefined ||
             recon.survey === null || recon.survey === undefined) {
         return { ok: false, rows: [], survey: null,
-            error: "Edit Trip: no survey in this drawing." };
+            error: qsTr("Edit Trip: no survey in this drawing.") };
     }
     if (recon.legacy === true) {
         // A legacy drawing's trips are CHAIN-GUESSED, not read off
@@ -74,16 +74,16 @@ TripEdit.read = function(doc) {
         // an edit that appeared to work and vanished on reopen would
         // be worse than a refusal.
         return { ok: false, rows: [], survey: null,
-            error: "Edit Trip: this drawing predates the current tag " +
+            error: qsTr("Edit Trip: this drawing predates the current tag " +
                 "schema, so its trips are reconstructed rather than " +
                 "recorded, and there is nowhere to store an edit. Run " +
                 "Rebuild Survey Data first -- it upgrades the tags in " +
-                "place -- then try again." };
+                "place -- then try again.") };
     }
     var rows = CsTripEdit.rows(recon.survey);
     if (rows.length === 0) {
         return { ok: false, rows: [], survey: null,
-            error: "Edit Trip: this drawing has no trips yet." };
+            error: qsTr("Edit Trip: this drawing has no trips yet.") };
     }
     return { ok: true, rows: rows, survey: recon.survey, error: "" };
 };
@@ -133,13 +133,13 @@ TripEdit.upperCase = function(edit) {
 /** The summary line after a successful edit. */
 TripEdit.reportText = function(changes, res) {
     if (changes.length === 0) {
-        return "Edit Trip: nothing changed.";
+        return qsTr("Edit Trip: nothing changed.");
     }
     var msg = "Edit Trip: " + changes.length + " trip" +
         (changes.length === 1 ? "" : "s") + " updated (";
     var parts = [];
     for (var i = 0; i < changes.length; i++) {
-        parts.push("trip " + changes[i].tripId);
+        parts.push(qsTr("trip %1").arg(String(changes[i].tripId)));
     }
     msg += parts.join(", ") + "). Tags only -- nothing was moved or " +
         "redrawn.";

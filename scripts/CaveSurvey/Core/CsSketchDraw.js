@@ -243,9 +243,10 @@ CsSketchDraw.line = function(doc, di, ctx, line, index) {
             // ornament failed. Counted as a line rather than lost,
             // and Shaped Lines' own Sync can dress it later.
             ctx.report.lines++;
-            ctx.report.warnings.push("A " + line.type + " came in as a " +
-                "plain line: its symbology could not be generated. " +
-                "Shaped Lines > Sync will try again.");
+            ctx.report.warnings.push(qsTr("A %1 came in as a plain line: its " +
+                "symbology could not be generated. Shaped Lines > Sync will " +
+                "try again.")
+                .arg(String(line.type)));
         }
     } else {
         ctx.report.lines++;
@@ -352,9 +353,11 @@ CsSketchDraw.symbol = function(doc, di, ctx, point, action, at, tagIndex) {
         di);
     if (isNull(ref)) {
         ctx.report.failed++;
-        ctx.report.warnings.push("This drawing has no " + entry.block +
-            " block, so the " + point.type + " symbols in the sketch " +
-            "were not placed. It was not started from the NSS template.");
+        ctx.report.warnings.push(qsTr("This drawing has no %1 block, so the " +
+            "%2 symbols in the sketch were not placed. It was not started " +
+            "from the NSS template.")
+            .arg(String(entry.block))
+            .arg(String(point.type)));
         return null;
     }
     CsSketchDraw.stamp(ref, ctx.file, ctx.scrapName, tagIndex, point.type);
@@ -433,8 +436,9 @@ CsSketchDraw.area = function(doc, di, ctx, area, index) {
     if (!made.ok) {
         ctx.report.failed++;
         if (!isNull(made.reason) && made.reason !== "") {
-            ctx.report.warnings.push("An area of " + area.type +
-                " was not filled: " + made.reason);
+            ctx.report.warnings.push(qsTr("An area of %1 was not filled: %2")
+                .arg(String(area.type))
+                .arg(String(made.reason)));
         }
         return null;
     }
@@ -604,7 +608,7 @@ CsSketchDraw.fromFile = function(doc, di, path, opts) {
     var file = new QFile(String(path));
     if (!file.open(QIODevice.ReadOnly | QIODevice.Text)) {
         out.findings.push({ severity: "error", code: "th2-unreadable",
-            message: "Could not open " + path });
+            message: qsTr("Could not open %1").arg(String(path)) });
         return out;
     }
     var content = new QTextStream(file).readAll();
@@ -665,8 +669,9 @@ CsSketchDraw.fromFile = function(doc, di, path, opts) {
                 row.reason = "the extended elevation in this drawing " +
                     "holds none of the stations this page is drawn " +
                     "against -- generate the profile first";
-                out.totals.warnings.push("Scrap \"" + scrap.name +
-                    "\": " + row.reason);
+                out.totals.warnings.push(qsTr("Scrap \"%1\": %2")
+                    .arg(String(scrap.name))
+                    .arg(String(row.reason)));
                 continue;
             }
             scrapTargets = band.targets;
@@ -674,10 +679,12 @@ CsSketchDraw.fromFile = function(doc, di, path, opts) {
                 return CsLayers.twinFor(planLayer, "profile");
             };
             if (band.runs > 1) {
-                out.totals.warnings.push("Scrap \"" + scrap.name +
-                    "\" marks stations in " + band.runs + " survey " +
-                    "runs; it was drawn into " + band.runKey +
-                    ", which holds most of them.");
+                out.totals.warnings.push(qsTr("Scrap \"%1\" marks stations in " +
+                    "%2 survey runs; it was drawn into %3, which holds most " +
+                    "of them.")
+                    .arg(String(scrap.name))
+                    .arg(String(band.runs))
+                    .arg(String(band.runKey)));
             }
         }
 
@@ -687,8 +694,9 @@ CsSketchDraw.fromFile = function(doc, di, path, opts) {
             row.reason = solution.warnings.length > 0 ?
                 solution.warnings[solution.warnings.length - 1] :
                 "it could not be placed";
-            out.totals.warnings.push("Scrap \"" + scrap.name + "\": " +
-                row.reason);
+            out.totals.warnings.push(qsTr("Scrap \"%1\": %2")
+                .arg(String(scrap.name))
+                .arg(String(row.reason)));
             continue;
         }
 

@@ -281,7 +281,8 @@ CsRebuild.profileNote = function(drawn) {
             !drawn.profile.skipped) {
         return "";
     }
-    return " Profile: not written -- " + drawn.profile.reason + ".";
+    return qsTr(" Profile: not written -- %1.")
+        .arg(String(drawn.profile.reason));
 };
 
 /**
@@ -477,8 +478,9 @@ CsRebuild.fromGeometry = function(doc, di, report) {
     var LRUD_RADIUS = 1000000;                    // tips matched to NEAREST station
 
     if (!doc.hasLayer(CsLayers.CTRL_STATIONS)) {
-        report.warning = "Rebuild Survey Data: no " + CsLayers.CTRL_STATIONS +
-            " layer -- nothing to recover.";
+        report.warning = qsTr("Rebuild Survey Data: no %1 layer -- nothing to " +
+            "recover.")
+            .arg(String(CsLayers.CTRL_STATIONS));
         return report;
     }
 
@@ -528,8 +530,9 @@ CsRebuild.fromGeometry = function(doc, di, report) {
     }
 
     if (stationPts.length === 0) {
-        report.warning = "Rebuild Survey Data: no station points found on " +
-            CsLayers.CTRL_STATIONS + ".";
+        report.warning = qsTr("Rebuild Survey Data: no station points found " +
+            "on %1.")
+            .arg(String(CsLayers.CTRL_STATIONS));
         return report;
     }
 

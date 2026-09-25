@@ -179,7 +179,7 @@ TeachingCave.repointScans = function(drawingPath, scansFolder) {
     try {
         if (di.importFile(drawingPath, "", false) !==
                 RDocumentInterface.IoErrorNoError) {
-            out.error = "Could not reopen the sanitized drawing.";
+            out.error = qsTr("Could not reopen the sanitized drawing.");
             return out;
         }
         var doc = di.getDocument();
@@ -218,11 +218,12 @@ TeachingCave.repointScans = function(drawingPath, scansFolder) {
 
         out.ok = di.exportFile(drawingPath, CsSanitize.dxfFilter());
         if (!out.ok) {
-            out.error = "Could not rewrite the drawing with its own " +
-                "scan paths.";
+            out.error = qsTr("Could not rewrite the drawing with its own " +
+                "scan paths.");
         }
     } catch (eRepoint) {
-        out.error = "Re-pointing the scans failed: " + eRepoint;
+        out.error = qsTr("Re-pointing the scans failed: %1")
+            .arg(String(eRepoint));
     } finally {
         try {
             if (typeof destr === "function") {
@@ -249,7 +250,7 @@ TeachingCave.buildMaster = function(record, caveRoot, caveName) {
         stripped: 0, repointed: 0, dropped: 0 };
 
     if (!TeachingCave.makeFolder(master)) {
-        out.error = "Could not make " + master + ".";
+        out.error = qsTr("Could not make %1.").arg(String(master));
         return out;
     }
 
@@ -308,7 +309,8 @@ TeachingCave.reset = function(caveRoot, caveName) {
         repointed: 0, dropped: 0 };
 
     if (!TeachingCave.folderExists(master)) {
-        out.error = "There is no pristine copy at " + master + ".";
+        out.error = qsTr("There is no pristine copy at %1.")
+            .arg(String(master));
         return out;
     }
     // THE GUARD ON A RECURSIVE DELETE. Everything else in this tool is
@@ -316,8 +318,9 @@ TeachingCave.reset = function(caveRoot, caveName) {
     // teaching folder, and if the arithmetic that says so is ever
     // wrong, the tool refuses rather than deleting.
     if (!CsTeach.isTeaching(caveRoot, working)) {
-        out.error = "Refusing to replace " + working + ": it is not " +
-            "inside the teaching folder.";
+        out.error = qsTr("Refusing to replace %1: it is not inside the " +
+            "teaching folder.")
+            .arg(String(working));
         return out;
     }
     if (TeachingCave.folderExists(working)) {
@@ -327,7 +330,8 @@ TeachingCave.reset = function(caveRoot, caveName) {
     out.drawing = CsTeach.drawingIn(working, caveName);
     out.ok = TeachingCave.fileExists(out.drawing);
     if (!out.ok) {
-        out.error = "The copy did not arrive at " + out.drawing + ".";
+        out.error = qsTr("The copy did not arrive at %1.")
+            .arg(String(out.drawing));
         return out;
     }
     // AND POINT ITS SCANS AT ITSELF. A byte copy of the master is a

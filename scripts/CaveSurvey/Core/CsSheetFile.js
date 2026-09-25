@@ -117,12 +117,12 @@ CsSheetFile.isSheet = function(doc) {
  * asking, which is not "why won't it" but "where do I do this then".
  */
 CsSheetFile.refusal = function(toolName) {
-    return toolName + ": this is a SHEET, not the cave's drawing.\n\n" +
-        "A sheet is built from the cave's record and rebuilt every " +
-        "time you press Build Sheet, so anything drawn here is lost " +
-        "the next time anybody does -- silently, and with no way " +
-        "back. Open the cave's own drawing, make the change there, " +
-        "and build the sheet again.";
+    return qsTr("%1: this is a SHEET, not the cave's drawing.\n\nA sheet is " +
+        "built from the cave's record and rebuilt every time you press Build " +
+        "Sheet, so anything drawn here is lost the next time anybody does -- " +
+        "silently, and with no way back. Open the cave's own drawing, make " +
+        "the change there, and build the sheet again.")
+        .arg(String(toolName));
 };
 
 /**

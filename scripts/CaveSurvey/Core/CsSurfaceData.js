@@ -222,23 +222,23 @@ CsSurfaceData.fetch = function(url, path) {
         process.kill();
         QFile.remove(path);
         if (neverStarted) {
-            return "curl at /usr/bin/curl could not be started. Check " +
-                "that curl is installed at that path.";
+            return qsTr("curl at /usr/bin/curl could not be started. Check " +
+                "that curl is installed at that path.");
         }
-        return "The download did not finish within " +
-            CsSurfaceData.TIMEOUT_S + " seconds. Check the network " +
-            "connection and try again.";
+        return qsTr("The download did not finish within %1 seconds. Check the " +
+            "network connection and try again.")
+            .arg(String(CsSurfaceData.TIMEOUT_S));
     }
     if (process.exitCode() !== 0) {
         QFile.remove(path);
-        return "curl exited with code " + process.exitCode() +
-            ". The National Map service may be down, or the network " +
-            "unavailable.";
+        return qsTr("curl exited with code %1. The National Map service may " +
+            "be down, or the network unavailable.")
+            .arg(String(process.exitCode()));
     }
 
     var info = new QFileInfo(path);
     if (!info.exists() || info.size() === 0) {
-        return "No data was written to " + path + ".";
+        return qsTr("No data was written to %1.").arg(String(path));
     }
     return true;
 };
@@ -406,8 +406,8 @@ CsSurfaceData.place = function(doc, di, path, bbox, size, unitsPerPixel,
     // caller that skips the run-level check, at the cost of one cheap
     // typeof.
     if (typeof RImageData === "undefined" || typeof RImageEntity === "undefined") {
-        return "This build's script engine has no image support " +
-            "(RImageData). The CaveCAD fork is the supported platform.";
+        return qsTr("This build's script engine has no image support " +
+            "(RImageData). The CaveCAD fork is the supported platform.");
     }
 
     // The image's insertion point is its lower-left corner. Work out
@@ -444,7 +444,7 @@ CsSurfaceData.place = function(doc, di, path, bbox, size, unitsPerPixel,
         }
         entity = new RImageEntity(doc, data);
     } catch (e) {
-        return "Creating the image entity failed: " + e;
+        return qsTr("Creating the image entity failed: %1").arg(String(e));
     }
 
     // Only now erase any previous basemap and ensure the layer exists

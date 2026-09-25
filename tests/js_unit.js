@@ -38,6 +38,9 @@ if (IS_NODE) {
     readBinaryFile = function(path) {
         return nodeFs.readFileSync(path, "latin1");
     };
+    // qsTr and .arg, which the add-on's messages need and node lacks
+    (0, eval)(nodeFs.readFileSync(nodePath.join(__dirname, "qstr_shim.js"),
+        "utf8"));
 } else {
     var args = RSettings.getOriginalArguments();
     repoRoot = args[args.length - 1];

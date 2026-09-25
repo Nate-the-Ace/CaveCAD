@@ -507,16 +507,17 @@ AreaFillEdit.collect = function(doc) {
 AreaFillEdit.savePattern = function(doc, entities, meta, existingBlockName) {
     if (isNull(meta) || isNull(meta.name) ||
             String(meta.name).trim() === "") {
-        return { ok: false, error: "A pattern needs a name." };
+        return { ok: false, error: qsTr("A pattern needs a name.") };
     }
     var slug = CsSymbolStore.slugFor(meta.name);
     if (slug === null) {
-        return { ok: false, error: "That name has no letters or numbers " +
-            "in it, so it cannot become a pattern. Try another." };
+        return { ok: false, error: qsTr("That name has no letters or numbers " +
+            "in it, so it cannot become a pattern. Try another.") };
     }
     if (!isNull(CsArea.CATALOG[slug])) {
-        return { ok: false, error: "There is already a pattern called " +
-            CsArea.CATALOG[slug].name + ". Give yours a different name." };
+        return { ok: false, error: qsTr("There is already a pattern called " +
+            "%1. Give yours a different name.")
+            .arg(String(CsArea.CATALOG[slug].name)) };
     }
     // A SLUG COLLISION BETWEEN TWO CUSTOM PATTERNS, checked only for a
     // NEW save (existingBlockName is null) -- an edit already keeps its
@@ -534,21 +535,23 @@ AreaFillEdit.savePattern = function(doc, entities, meta, existingBlockName) {
         var already = CsArea.merged()[slug];
         if (!isNull(already) && already.custom === true &&
                 already.name !== String(meta.name).trim()) {
-            return { ok: false, error: "There is already a pattern of " +
-                "your own called " + already.name + " that this name " +
-                "would collide with (both become " +
-                CsSymbolStore.AREA_PREFIX + slug + "). Give yours a " +
-                "different name, or use Edit on " + already.name +
-                " if that is the one you meant to change." };
+            return { ok: false, error: qsTr("There is already a pattern of " +
+                "your own called %1 that this name would collide with (both " +
+                "become %2%3). Give yours a different name, or use Edit on " +
+                "%4 if that is the one you meant to change.")
+                .arg(String(already.name))
+                .arg(String(CsSymbolStore.AREA_PREFIX))
+                .arg(String(slug))
+                .arg(String(already.name)) };
         }
     }
     if (isNull(meta.layer) || meta.layer === "") {
-        return { ok: false, error: "A pattern needs a home layer." };
+        return { ok: false, error: qsTr("A pattern needs a home layer.") };
     }
     if (isNull(entities) || entities.length === 0) {
-        return { ok: false, error: "There is nothing to save: draw the " +
+        return { ok: false, error: qsTr("There is nothing to save: draw the " +
             "pattern first. (The crosshair and the square are guides, " +
-            "not geometry.)" };
+            "not geometry.)") };
     }
 
     var blockName = isNull(existingBlockName) ?

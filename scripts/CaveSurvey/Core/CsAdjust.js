@@ -596,8 +596,8 @@ CsAdjust.adjust = function(survey, resolved, opts) {
             iterations: iterations,
             sigmaTape: sigmaTape,
             sigmaAngle: sigmaAngle,
-            warning: "the adjustment did not converge -- coordinates are " +
-                "as surveyed, with the misclosure still on the closing leg"
+            warning: qsTr("the adjustment did not converge -- coordinates are " +
+                "as surveyed, with the misclosure still on the closing leg")
         });
     }
 

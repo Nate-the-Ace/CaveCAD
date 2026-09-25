@@ -288,8 +288,9 @@ AreaSync.run = function(doc, di) {
     // steps for what reads to a caver as one command.
     var adopted = AreaSync.adopt(doc, di, group);
 
-    var msg = "Sync Areas: " + counts.regenerated + " rebuilt, " +
-        counts.unchanged + " unchanged";
+    var msg = qsTr("Sync Areas: %1 rebuilt, %2 unchanged")
+        .arg(String(counts.regenerated))
+        .arg(String(counts.unchanged));
     if (counts.failed > 0) {
         msg += ", " + counts.failed + " failed";
     }

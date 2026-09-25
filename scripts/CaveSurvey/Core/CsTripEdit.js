@@ -128,16 +128,22 @@ CsTripEdit.normalizeDate = function(text) {
         d = parseInt(us[2], 10);
         y = parseInt(us[3], 10);
     } else {
-        return { ok: false, error: "\"" + s + "\" is not a date. Use " +
-            "YYYY-MM-DD (or M/D/YYYY), or leave it empty." };
+        return { ok: false, error: qsTr("\"%1\" is not a date. Use YYYY-MM-DD " +
+            "(or M/D/YYYY), or leave it empty.")
+            .arg(String(s)) };
     }
     if (m < 1 || m > 12) {
-        return { ok: false, error: "\"" + s + "\" has no month " + m +
-            "." };
+        return { ok: false, error: qsTr("\"%1\" has no month %2.")
+            .arg(String(s))
+            .arg(String(m)) };
     }
     if (d < 1 || d > CsTripEdit.daysInMonth(y, m)) {
-        return { ok: false, error: "\"" + s + "\" is not a real date: " +
-            "month " + m + " of " + y + " has no day " + d + "." };
+        return { ok: false, error: qsTr("\"%1\" is not a real date: month %2 " +
+            "of %3 has no day %4.")
+            .arg(String(s))
+            .arg(String(m))
+            .arg(String(y))
+            .arg(String(d)) };
     }
     return { ok: true,
         value: y + "-" + CsTripEdit.pad2(m) + "-" + CsTripEdit.pad2(d) };
@@ -180,14 +186,16 @@ CsTripEdit.planEdits = function(survey, inputs) {
         var id = inp.tripId;
         if (typeof id !== "number" || id < 0 ||
                 id >= survey.trips.length) {
-            return { error: "No trip " + id + " in this drawing. " +
-                "Nothing was changed." };
+            return { error: qsTr("No trip %1 in this drawing. Nothing was " +
+                "changed.")
+                .arg(String(id)) };
         }
         var trip = survey.trips[id];
         var dateOut = CsTripEdit.normalizeDate(inp.date);
         if (!dateOut.ok) {
-            return { error: "Trip " + id + ": " + dateOut.error +
-                " Nothing was changed." };
+            return { error: qsTr("Trip %1: %2 Nothing was changed.")
+                .arg(String(id))
+                .arg(String(dateOut.error)) };
         }
         var nu = { name: trim(inp.name), date: dateOut.value,
             team: trim(inp.team), instruments: trim(inp.instruments) };
@@ -225,10 +233,11 @@ CsTripEdit.planEdits = function(survey, inputs) {
                     CsModel.tripFingerprint(survey.trips[b])) {
                 continue; // already indistinguishable before this edit
             }
-            return { error: "Trip " + a + " and trip " + b +
-                " would have the same date and team, which makes them " +
-                "the same trip. Merging trips is not what this does. " +
-                "Nothing was changed." };
+            return { error: qsTr("Trip %1 and trip %2 would have the same " +
+                "date and team, which makes them the same trip. Merging " +
+                "trips is not what this does. Nothing was changed.")
+                .arg(String(a))
+                .arg(String(b)) };
         }
     }
 
@@ -728,12 +737,13 @@ CsTripEdit.deleteTrip = function(doc, di, recon, tripId, opts) {
     var survey = recon.survey;
     CsModel.ensureTrips(survey);
     if (tripId < 0 || tripId >= survey.trips.length) {
-        return { ok: false, error: "No trip " + tripId + " in this drawing." };
+        return { ok: false, error: qsTr("No trip %1 in this drawing.")
+            .arg(String(tripId)) };
     }
     if (survey.trips.length <= 1) {
-        return { ok: false, error: "This drawing holds only one trip. " +
+        return { ok: false, error: qsTr("This drawing holds only one trip. " +
             "Deleting it would leave a drawing with a survey's marks " +
-            "and no survey -- start a new drawing instead." };
+            "and no survey -- start a new drawing instead.") };
     }
 
     // WHO ELSE STANDS ON THIS TRIP'S STATIONS. A later trip that tied

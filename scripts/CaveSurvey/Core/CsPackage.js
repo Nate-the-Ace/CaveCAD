@@ -246,10 +246,11 @@ CsPackage.manifest = function(info) {
     lines.push("");
 
     lines.push("SURVEY");
-    lines.push("  Length      " + CsPackage.formatLength(i.length, i.unit));
+    lines.push(qsTr("  Length      %1")
+        .arg(String(CsPackage.formatLength(i.length, i.unit))));
     var trips = Object.prototype.toString.call(i.trips) === "[object Array]" ?
         i.trips : [];
-    lines.push("  Trips       " + trips.length);
+    lines.push(qsTr("  Trips       %1").arg(String(trips.length)));
 
     var ends = Object.prototype.toString.call(i.ends) === "[object Array]" ?
         i.ends : [];
@@ -289,7 +290,7 @@ CsPackage.manifest = function(info) {
     var contents = Object.prototype.toString.call(i.contents) === "[object Array]" ?
         i.contents : [];
     if (contents.length === 0) {
-        lines.push("  (nothing but this file)");
+        lines.push(qsTr("  (nothing but this file)"));
     }
     for (var c = 0; c < contents.length; c++) {
         lines.push("  " + CsPackage.pad(contents[c].path, 30) +
@@ -298,23 +299,23 @@ CsPackage.manifest = function(info) {
     lines.push("");
 
     if (i.full === true) {
-        lines.push("THIS IS A FULL ARCHIVE");
-        lines.push("  It carries the cave's location: the drawing's geographic");
-        lines.push("  anchor tags, the survey's own fixed station control in");
-        lines.push("  data/, and the aerial basemap if one was fetched.");
-        lines.push("  It is meant for the survey group's own storage and for");
-        lines.push("  handing a project to the next cartographer -- not for");
-        lines.push("  general distribution.");
+        lines.push(qsTr("THIS IS A FULL ARCHIVE"));
+        lines.push(qsTr("  It carries the cave's location: the drawing's geographic"));
+        lines.push(qsTr("  anchor tags, the survey's own fixed station control in"));
+        lines.push(qsTr("  data/, and the aerial basemap if one was fetched."));
+        lines.push(qsTr("  It is meant for the survey group's own storage and for"));
+        lines.push(qsTr("  handing a project to the next cartographer -- not for"));
+        lines.push(qsTr("  general distribution."));
     }
     else {
         lines.push("SANITIZED");
-        lines.push("  The drawing in this package carries no geographic anchor,");
-        lines.push("  and no aerial photograph of the surface travels with it.");
-        lines.push("  The survey files in data/ carry no fixed station");
-        lines.push("  coordinates: the cave's shape is all of it, tied to");
-        lines.push("  nothing on the surface.");
-        lines.push("  Any PDF included is exactly as it was plotted -- a map");
-        lines.push("  shows whatever its cartographer chose to show.");
+        lines.push(qsTr("  The drawing in this package carries no geographic anchor,"));
+        lines.push(qsTr("  and no aerial photograph of the surface travels with it."));
+        lines.push(qsTr("  The survey files in data/ carry no fixed station"));
+        lines.push(qsTr("  coordinates: the cave's shape is all of it, tied to"));
+        lines.push(qsTr("  nothing on the surface."));
+        lines.push(qsTr("  Any PDF included is exactly as it was plotted -- a map"));
+        lines.push(qsTr("  shows whatever its cartographer chose to show."));
     }
     lines.push("");
     return lines.join("\n");

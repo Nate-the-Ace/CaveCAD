@@ -187,24 +187,25 @@ CsClosure.headBarbs = function(tail, head, sizeDrawing) {
  */
 CsClosure.caption = function(factor, worstFeet, worstStation, loopCount) {
     var lines = [];
-    lines.push("LOOP CLOSURE ERROR -- ARROWS EXAGGERATED " +
-        factor + "x");
+    lines.push(qsTr("LOOP CLOSURE ERROR -- ARROWS EXAGGERATED %1x")
+        .arg(String(factor)));
     if (factor === 1) {
         lines[0] = "LOOP CLOSURE ERROR -- ARROWS AT TRUE SIZE";
     }
-    lines.push("Each arrow runs from where the raw survey put a " +
-        "station to where it is drawn.");
+    lines.push(qsTr("Each arrow runs from where the raw survey put a " +
+        "station to where it is drawn."));
     if (!isNull(worstStation) && worstStation !== "") {
-        lines.push("Worst: " + worstStation + " moved " +
-            worstFeet.toFixed(2) + " ft (" +
-            CsClosure.bandFor(worstFeet).says + ").");
+        lines.push(qsTr("Worst: %1 moved %2 ft (%3).")
+            .arg(String(worstStation))
+            .arg(worstFeet.toFixed(2))
+            .arg(String(CsClosure.bandFor(worstFeet).says)));
     }
     if (!isNull(loopCount) && loopCount > 0) {
         lines.push(loopCount + " loop" + (loopCount === 1 ? "" : "s") +
             " in this survey.");
     }
-    lines.push("This layer is a diagnostic. Switch it off before " +
-        "plotting.");
+    lines.push(qsTr("This layer is a diagnostic. Switch it off before " +
+        "plotting."));
     return lines;
 };
 

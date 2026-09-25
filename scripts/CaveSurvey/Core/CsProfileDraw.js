@@ -491,7 +491,7 @@ CsProfileDraw.labelText = function(band) {
     if (band.projection !== undefined && band.projection !== null) {
         var ptext = CsProject.caption(band.projection);
         if (band.stations.length === 0) {
-            return ptext + " -- NOTHING PLACED";
+            return qsTr("%1 -- NOTHING PLACED").arg(String(ptext));
         }
         return ptext;
     }

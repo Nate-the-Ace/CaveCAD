@@ -995,9 +995,9 @@ SheetSetup.intoCopy = function(recordPath, opts) {
     var folder = CsCave.folderOf(recordPath);
     var caveName = CsCave.nameOf(recordPath);
     if (isNull(folder) || folder === "") {
-        return "Sheet Setup: could not work out which folder " +
-            recordPath + " lives in, so there is nowhere to put the " +
-            "sheet.";
+        return qsTr("Sheet Setup: could not work out which folder %1 lives " +
+            "in, so there is nowhere to put the sheet.")
+            .arg(String(recordPath));
     }
     try {
         (new QDir("/")).mkpath(folder + "/" +
@@ -1023,7 +1023,8 @@ SheetSetup.intoCopy = function(recordPath, opts) {
         try {
             if (di.importFile(recordPath, "", false) !==
                     RDocumentInterface.IoErrorNoError) {
-                return "Sheet Setup: could not read " + recordPath + ".";
+                return qsTr("Sheet Setup: could not read %1.")
+                    .arg(String(recordPath));
             }
             var one = {};
             for (var key in opts) {
@@ -1034,11 +1035,13 @@ SheetSetup.intoCopy = function(recordPath, opts) {
             one.kind = kinds[k];
             said = SheetSetup.draw(di.getDocument(), di, one);
             if (!di.exportFile(target, CsSanitize.dxfFilter())) {
-                return "Sheet Setup: could not write " + target + ".";
+                return qsTr("Sheet Setup: could not write %1.")
+                    .arg(String(target));
             }
             written.push(target);
         } catch (e) {
-            return "Sheet Setup: building the sheet failed (" + e + ").";
+            return qsTr("Sheet Setup: building the sheet failed (%1).")
+                .arg(String(e));
         } finally {
             try {
                 if (typeof destr === "function") {

@@ -84,19 +84,23 @@ CsValidate.check = function(survey, resolved) {
         // ---- field sanity ----------------------------------------
         if (!s.splay && s.from !== "" && s.from === s.to) {
             findings.push({ severity: "error", shotIndex: i, code: "self-loop",
-                message: "Shot goes from " + s.from + " to itself." });
+                message: qsTr("Shot goes from %1 to itself.")
+                    .arg(String(s.from)) });
         }
         if (!(s.distance > 0)) {
             findings.push({ severity: "error", shotIndex: i, code: "bad-distance",
-                message: "Distance must be a positive number." });
+                message: qsTr("Distance must be a positive number.") });
         }
         if (s.azimuth < 0 || s.azimuth >= 360) {
             findings.push({ severity: "warning", shotIndex: i, code: "azimuth-range",
-                message: "Azimuth " + s.azimuth + " is outside 0-360 and will be wrapped." });
+                message: qsTr("Azimuth %1 is outside 0-360 and will be " +
+                    "wrapped.")
+                    .arg(String(s.azimuth)) });
         }
         if (s.inclination < -90 || s.inclination > 90) {
             findings.push({ severity: "error", shotIndex: i, code: "inclination-range",
-                message: "Inclination " + s.inclination + " is outside -90 to +90." });
+                message: qsTr("Inclination %1 is outside -90 to +90.")
+                    .arg(String(s.inclination)) });
         }
         var lrudFields = [["left", s.left], ["right", s.right],
             ["up", s.up], ["down", s.down]];
@@ -104,8 +108,9 @@ CsValidate.check = function(survey, resolved) {
             var v = lrudFields[j][1];
             if (v !== null && v !== undefined && v < 0) {
                 findings.push({ severity: "warning", shotIndex: i, code: "negative-lrud",
-                    message: "Negative " + lrudFields[j][0] +
-                        " reading; negative LRUD usually means 'not measured'." });
+                    message: qsTr("Negative %1 reading; negative LRUD usually " +
+                        "means 'not measured'.")
+                        .arg(String(lrudFields[j][0])) });
             }
         }
 
@@ -116,11 +121,13 @@ CsValidate.check = function(survey, resolved) {
             if (bsDiff > CsValidate.FSBS_TOLERANCE_DEG) {
                 findings.push({ severity: "warning", shotIndex: i,
                     code: "fsbs-azimuth-disagree",
-                    message: "Shot " + s.from + " to " + s.to +
-                        ": foresight and backsight compass disagree by " +
-                        bsDiff.toFixed(1) + " deg (over " +
-                        CsValidate.FSBS_TOLERANCE_DEG + ") -- re-read, or " +
-                        "one instrument needs calibrating." });
+                    message: qsTr("Shot %1 to %2: foresight and backsight " +
+                        "compass disagree by %3 deg (over %4) -- re-read, or " +
+                        "one instrument needs calibrating.")
+                        .arg(String(s.from))
+                        .arg(String(s.to))
+                        .arg(bsDiff.toFixed(1))
+                        .arg(String(CsValidate.FSBS_TOLERANCE_DEG)) });
             }
         }
         if (s.backInclination !== null && s.backInclination !== undefined) {
@@ -128,10 +135,12 @@ CsValidate.check = function(survey, resolved) {
             if (incDiff > CsValidate.FSBS_TOLERANCE_DEG) {
                 findings.push({ severity: "warning", shotIndex: i,
                     code: "fsbs-inclination-disagree",
-                    message: "Shot " + s.from + " to " + s.to +
-                        ": foresight and backsight clino disagree by " +
-                        incDiff.toFixed(1) + " deg (over " +
-                        CsValidate.FSBS_TOLERANCE_DEG + ")." });
+                    message: qsTr("Shot %1 to %2: foresight and backsight " +
+                        "clino disagree by %3 deg (over %4).")
+                        .arg(String(s.from))
+                        .arg(String(s.to))
+                        .arg(incDiff.toFixed(1))
+                        .arg(String(CsValidate.FSBS_TOLERANCE_DEG)) });
             }
         }
 
@@ -150,8 +159,9 @@ CsValidate.check = function(survey, resolved) {
         if (Math.abs(s.inclination) >= CsValidate.NEAR_PLUMB_DEG &&
                 s.distance > 0) {
             findings.push({ severity: "warning", shotIndex: i, code: "near-plumb",
-                message: "Inclination " + s.inclination +
-                    " is nearly plumb; fine if this was a plumbed pitch." });
+                message: qsTr("Inclination %1 is nearly plumb; fine if this " +
+                    "was a plumbed pitch.")
+                    .arg(String(s.inclination)) });
         }
 
         if (!s.splay && s.from !== "" && s.to !== "") {
@@ -202,11 +212,13 @@ CsValidate.check = function(survey, resolved) {
                     }
                     findings.push({ severity: "error", shotIndex: idxs[j],
                         code: "duplicate-across-trips",
-                        message: "Trip " + (a.trip || 0) + " and trip " +
-                            (b.trip || 0) + " both record the shot " +
-                            a.from + " to " + a.to + " -- the same page " +
-                            "was probably drawn twice. Delete one of " +
-                            "them in Edit Trip." });
+                        message: qsTr("Trip %1 and trip %2 both record the " +
+                            "shot %3 to %4 -- the same page was probably " +
+                            "drawn twice. Delete one of them in Edit Trip.")
+                            .arg(String((a.trip || 0)))
+                            .arg(String((b.trip || 0)))
+                            .arg(String(a.from))
+                            .arg(String(a.to)) });
                     continue;
                 }
                 var flippedDiff = CsAngles.azimuthDifference(
@@ -214,8 +226,11 @@ CsValidate.check = function(survey, resolved) {
                 if (flippedDiff < CsValidate.DUPLICATE_AZIMUTH_DEG) {
                     findings.push({ severity: "warning", shotIndex: idxs[j],
                         code: "backsight-as-foresight",
-                        message: "Shot " + b.from + " to " + b.to +
-                            " reads about 180 deg from its duplicate -- was a backsight entered as a foresight?" });
+                        message: qsTr("Shot %1 to %2 reads about 180 deg from " +
+                            "its duplicate -- was a backsight entered as a " +
+                            "foresight?")
+                            .arg(String(b.from))
+                            .arg(String(b.to)) });
                 } else if ((a.trip || 0) !== (b.trip || 0)) {
                     // Same leg, two trips, DISAGREEING readings: still
                     // a page drawn twice, just one whose declination or
@@ -226,19 +241,26 @@ CsValidate.check = function(survey, resolved) {
                     // was only ever surveyed once.
                     findings.push({ severity: "error", shotIndex: idxs[j],
                         code: "duplicate-across-trips",
-                        message: "Trip " + (a.trip || 0) + " and trip " +
-                            (b.trip || 0) + " both record the shot " +
-                            a.from + " to " + a.to + " (azimuth differs " +
-                            azDiff.toFixed(1) + " deg, distance " +
-                            distDiff.toFixed(2) + ") -- the same page was " +
-                            "probably drawn twice, once with a different " +
-                            "declination. Delete one of them in Edit Trip." });
+                        message: qsTr("Trip %1 and trip %2 both record the " +
+                            "shot %3 to %4 (azimuth differs %5 deg, distance " +
+                            "%6) -- the same page was probably drawn twice, " +
+                            "once with a different declination. Delete one " +
+                            "of them in Edit Trip.")
+                            .arg(String((a.trip || 0)))
+                            .arg(String((b.trip || 0)))
+                            .arg(String(a.from))
+                            .arg(String(a.to))
+                            .arg(azDiff.toFixed(1))
+                            .arg(distDiff.toFixed(2)) });
                 } else {
                     findings.push({ severity: "warning", shotIndex: idxs[j],
                         code: "duplicate-disagrees",
-                        message: "Shots between " + a.from + " and " + a.to +
-                            " disagree (azimuth differs " + azDiff.toFixed(1) +
-                            " deg, distance " + distDiff.toFixed(2) + ")." });
+                        message: qsTr("Shots between %1 and %2 disagree " +
+                            "(azimuth differs %3 deg, distance %4).")
+                            .arg(String(a.from))
+                            .arg(String(a.to))
+                            .arg(azDiff.toFixed(1))
+                            .arg(distDiff.toFixed(2)) });
                 }
             }
         }
@@ -293,11 +315,12 @@ CsValidate.check = function(survey, resolved) {
             if (hasShots[tp] === true && owns[tp] !== true) {
                 findings.push({ severity: "error", shotIndex: -1,
                     code: "trip-owns-no-station",
-                    message: "Trip " + tp + " has shots but reaches no " +
-                        "station of its own, so its date and team cannot " +
-                        "be stored in the drawing and will be lost on " +
-                        "the next read. It is almost certainly a page " +
-                        "that was drawn twice -- delete it in Edit Trip." });
+                    message: qsTr("Trip %1 has shots but reaches no station " +
+                        "of its own, so its date and team cannot be stored " +
+                        "in the drawing and will be lost on the next read. " +
+                        "It is almost certainly a page that was drawn twice " +
+                        "-- delete it in Edit Trip.")
+                        .arg(String(tp)) });
             }
         }
     }
@@ -308,20 +331,25 @@ CsValidate.check = function(survey, resolved) {
             var loop = resolved.loops[i];
             if (loop.percent > CsValidate.CLOSURE_WARN_PERCENT) {
                 findings.push({ severity: "warning", shotIndex: -1, code: "loop-misclosure",
-                    message: "Loop " + loop.from + " ... " + loop.to + " closes " +
-                        loop.error.toFixed(2) + " off over " +
-                        loop.traverseLength.toFixed(1) + " surveyed (" +
-                        loop.percent.toFixed(1) + "%). Over " +
-                        CsValidate.CLOSURE_WARN_PERCENT +
-                        "% usually means a blunder somewhere on the loop." });
+                    message: qsTr("Loop %1 ... %2 closes %3 off over %4 " +
+                        "surveyed (%5%). Over %6% usually means a blunder " +
+                        "somewhere on the loop.")
+                        .arg(String(loop.from))
+                        .arg(String(loop.to))
+                        .arg(loop.error.toFixed(2))
+                        .arg(loop.traverseLength.toFixed(1))
+                        .arg(loop.percent.toFixed(1))
+                        .arg(String(CsValidate.CLOSURE_WARN_PERCENT)) });
             }
         }
         for (i = 0; i < resolved.unresolved.length; i++) {
             var u = resolved.unresolved[i];
             findings.push({ severity: "error", shotIndex: shots.indexOf(u),
                 code: "unconnected",
-                message: "Shot " + u.from + " to " + u.to +
-                    " never connects to the rest of the survey -- check the station names." });
+                message: qsTr("Shot %1 to %2 never connects to the rest of " +
+                    "the survey -- check the station names.")
+                    .arg(String(u.from))
+                    .arg(String(u.to)) });
         }
     }
 

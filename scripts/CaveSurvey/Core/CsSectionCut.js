@@ -238,10 +238,10 @@ CsSectionCut.AT_STATION_T = 1e-6;
  */
 CsSectionCut.thinReason = function(station, measured) {
     if (!(measured > 0)) {
-        return "station " + station + " has no measured wall points of " +
-            "its own, so there is no outline to cut -- LRUD is recorded " +
-            "with the shot INTO a station, so the first station of a " +
-            "survey chain has none";
+        return qsTr("station %1 has no measured wall points of its own, so " +
+            "there is no outline to cut -- LRUD is recorded with the shot " +
+            "INTO a station, so the first station of a survey chain has none")
+            .arg(String(station));
     }
     return "station " + station + " has only " + measured +
         " measured wall point" + (measured === 1 ? "" : "s") + ", and " +

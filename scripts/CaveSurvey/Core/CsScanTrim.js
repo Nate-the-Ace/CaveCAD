@@ -571,9 +571,10 @@ CsScanTrim.write = function(scansFolder, pageRel, rect, outline) {
     var name = CsScanTrim.fileName(pageRel, rect, shape);
     var folder = CsScanTrim.folderIn(scansFolder);
     if (folder === null) {
-        return { path: null, error: "the " + CsScanTrim.FOLDER +
-            " folder could not be created in " + scansFolder +
-            " -- the scans folder may be read-only." };
+        return { path: null, error: qsTr("the %1 folder could not be created " +
+            "in %2 -- the scans folder may be read-only.")
+            .arg(String(CsScanTrim.FOLDER))
+            .arg(String(scansFolder)) };
     }
     var out = folder + "/" + name;
     try {
@@ -591,8 +592,8 @@ CsScanTrim.write = function(scansFolder, pageRel, rect, outline) {
         page = null;
     }
     if (page === null || page.isNull()) {
-        return { path: null, error: pagePath +
-            " could not be read as an image." };
+        return { path: null, error: qsTr("%1 could not be read as an image.")
+            .arg(String(pagePath)) };
     }
     var cropped;
     try {
@@ -601,16 +602,18 @@ CsScanTrim.write = function(scansFolder, pageRel, rect, outline) {
         cropped = null;
     }
     if (cropped === null || cropped.isNull()) {
-        return { path: null, error: "cropping " + pagePath +
-            " to " + CsScanTrim.serialize(rect) + " failed -- the page " +
-            "may be too large to hold in memory." };
+        return { path: null, error: qsTr("cropping %1 to %2 failed -- the " +
+            "page may be too large to hold in memory.")
+            .arg(String(pagePath))
+            .arg(String(CsScanTrim.serialize(rect))) };
     }
     if (shape !== null) {
         var masked = CsScanTrim.mask(cropped, shape, rect);
         if (masked === null) {
-            return { path: null, error: "masking " + pagePath +
-                " to the traced outline failed -- the crop may be too " +
-                "large to hold in memory." };
+            return { path: null, error: qsTr("masking %1 to the traced " +
+                "outline failed -- the crop may be too large to hold in " +
+                "memory.")
+                .arg(String(pagePath)) };
         }
         cropped = masked;
     }
@@ -621,8 +624,9 @@ CsScanTrim.write = function(scansFolder, pageRel, rect, outline) {
         saved = false;
     }
     if (!saved) {
-        return { path: null, error: "the trimmed image could not be " +
-            "written to " + out + "." };
+        return { path: null, error: qsTr("the trimmed image could not be " +
+            "written to %1.")
+            .arg(String(out)) };
     }
     return { path: out, error: null };
 };
@@ -752,10 +756,11 @@ CsScanTrim.flush = function(scans, inUse) {
 CsScanTrim.sizeText = function(bytes) {
     var n = Number(bytes);
     if (!isFinite(n) || n <= 0) {
-        return "0 KB";
+        return qsTr("0 KB");
     }
     if (n < 1024 * 1024) {
-        return (Math.round(n / 1024 * 10) / 10) + " KB";
+        return qsTr("%1 KB").arg(String((Math.round(n / 1024 * 10) / 10)));
     }
-    return (Math.round(n / (1024 * 1024) * 10) / 10) + " MB";
+    return qsTr("%1 MB")
+        .arg(String((Math.round(n / (1024 * 1024) * 10) / 10)));
 };

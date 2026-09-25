@@ -179,7 +179,7 @@ CsCalloutSync.refusalFor = function(doc, layerName) {
         lay = null;
     }
     if (isNull(lay)) {
-        return "layer " + layerName + " could not be found";
+        return qsTr("layer %1 could not be found").arg(String(layerName));
     }
     var locked = false;
     try {
@@ -188,11 +188,12 @@ CsCalloutSync.refusalFor = function(doc, layerName) {
         locked = false;
     }
     if (locked) {
-        return "layer " + layerName + " is LOCKED -- unlock it in the " +
-            "Layer List";
+        return qsTr("layer %1 is LOCKED -- unlock it in the Layer List")
+            .arg(String(layerName));
     }
     if (CsLayers.refusesEdits(lay)) {
-        return "layer " + layerName + " refuses edits (off or frozen)";
+        return qsTr("layer %1 refuses edits (off or frozen)")
+            .arg(String(layerName));
     }
     return null;
 };

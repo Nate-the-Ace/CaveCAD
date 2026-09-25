@@ -221,7 +221,7 @@ CsProvenance.resolve = function(entityTags, source) {
 CsProvenance.mayQuoteLength = function(rung, source) {
     if (!CsProvenance.isRung(rung)) {
         return { allowed: false, kind: "none",
-            why: "its confidence is not one this drawing knows" };
+            why: qsTr("its confidence is not one this drawing knows") };
     }
     var spec = CsProvenance.RUNGS[rung];
     if (spec.measured) {
@@ -229,8 +229,8 @@ CsProvenance.mayQuoteLength = function(rung, source) {
     }
     if (source === undefined || source === null || !source.scaled) {
         return { allowed: false, kind: "none",
-            why: "nothing scaled the map it was traced from, so its " +
-                "size on the page means nothing" };
+            why: qsTr("nothing scaled the map it was traced from, so its " +
+                "size on the page means nothing") };
     }
     return { allowed: true, kind: "estimate", why: "" };
 };
@@ -259,7 +259,7 @@ CsProvenance.mayQuoteGrade = function(rung) {
  */
 CsProvenance.describe = function(rung, source) {
     if (!CsProvenance.isRung(rung)) {
-        return "Confidence unknown.";
+        return qsTr("Confidence unknown.");
     }
     var spec = CsProvenance.RUNGS[rung];
     if (spec.measured || source === undefined || source === null) {
@@ -288,7 +288,7 @@ CsProvenance.describe = function(rung, source) {
     if (!source.scaled) {
         line += ". NOT TO SCALE";
     }
-    return line + ". Not surveyed.";
+    return qsTr("%1. Not surveyed.").arg(String(line));
 };
 
 /**

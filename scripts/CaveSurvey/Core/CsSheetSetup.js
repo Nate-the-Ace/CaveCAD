@@ -431,9 +431,9 @@ CsSheetSetup.atScale = function(inches, scale) {
 CsSheetSetup.scaleText = function(scale) {
     var row = CsSheetSetup.scaleRow(scale);
     if (!isNull(row)) {
-        return "SCALE:  " + row.label.toUpperCase();
+        return qsTr("SCALE:  %1").arg(String(row.label.toUpperCase()));
     }
-    return "SCALE:  1\" = " + scale + " FT";
+    return qsTr("SCALE:  1\" = %1 FT").arg(String(scale));
 };
 
 /** How far apart two sheets sit in the drawing, in inches of paper.

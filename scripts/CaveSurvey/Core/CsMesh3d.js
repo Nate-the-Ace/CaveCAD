@@ -882,7 +882,7 @@ CsMesh3d.tripLabel = function(survey, index) {
     var trips = (survey && survey.trips) ? survey.trips : [];
     var t = trips[index];
     if (t === undefined || t === null) {
-        return "Trip " + (index + 1);
+        return qsTr("Trip %1").arg(String((index + 1)));
     }
     var name = (typeof t.name === "string") ? t.name : "";
     var date = (typeof t.date === "string") ? t.date : "";

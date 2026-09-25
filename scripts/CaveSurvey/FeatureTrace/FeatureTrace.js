@@ -550,7 +550,9 @@ FeatureTrace.buildGroup = function(w, parent, title, header, collapsed) {
             inner.addLayout(header, 0, 0, 1, FeatureTrace.GRID_COLUMNS);
             firstRow = 1;
         } catch (eHeader) {
-            w.problems.push(title + " header (" + eHeader + ")");
+            w.problems.push(qsTr("%1 header (%2)")
+                .arg(String(title))
+                .arg(String(eHeader)));
         }
     }
 
@@ -1485,7 +1487,7 @@ FeatureTrace.buildBody = function(parent) {
         w.frameLabel = new QLabel(qsTr("Cursor:  --"));
         layout.addWidget(w.frameLabel, 0, 0);
     } catch (eFrame) {
-        w.problems.push("cursor frame readout (" + eFrame + ")");
+        w.problems.push(qsTr("cursor frame readout (%1)").arg(String(eFrame)));
     }
 
     // -- search --------------------------------------------------------
@@ -1528,11 +1530,12 @@ FeatureTrace.buildBody = function(parent) {
                 }
             });
         } catch (eReturn) {
-            w.problems.push("search box Return (" + eReturn + ")");
+            w.problems.push(qsTr("search box Return (%1)")
+                .arg(String(eReturn)));
         }
         layout.addWidget(w.searchEdit, 0, 0);
     } catch (eSearchBox) {
-        w.problems.push("search box (" + eSearchBox + ")");
+        w.problems.push(qsTr("search box (%1)").arg(String(eSearchBox)));
     }
 
     // -- what you have been using ------------------------------------
@@ -1551,7 +1554,7 @@ FeatureTrace.buildBody = function(parent) {
         }
         layout.addLayout(w.recentRow, 0);
     } catch (eRecent) {
-        w.problems.push("recent row (" + eRecent + ")");
+        w.problems.push(qsTr("recent row (%1)").arg(String(eRecent)));
     }
 
     // -- the features ------------------------------------------------
@@ -1571,7 +1574,7 @@ FeatureTrace.buildBody = function(parent) {
             title: FeatureTrace.SEC_FEATURES, buttons: w.buttons,
             grid: featureSection.grid, firstRow: featureSection.firstRow });
     } catch (eFeatures) {
-        w.problems.push("feature group (" + eFeatures + ")");
+        w.problems.push(qsTr("feature group (%1)").arg(String(eFeatures)));
     }
 
     // -- the shaped lines --------------------------------------------
@@ -1588,14 +1591,14 @@ FeatureTrace.buildBody = function(parent) {
             title: FeatureTrace.SEC_SHAPED, buttons: w.shapedButtons,
             grid: shapedSection.grid, firstRow: shapedSection.firstRow });
     } catch (eShaped) {
-        w.problems.push("shaped lines group (" + eShaped + ")");
+        w.problems.push(qsTr("shaped lines group (%1)").arg(String(eShaped)));
     }
 
     // -- which elevation band a stroke belongs to --------------------
     try {
         CsPanel.applyOrder(stack);
     } catch (eOrder) {
-        w.problems.push("section order (" + eOrder + ")");
+        w.problems.push(qsTr("section order (%1)").arg(String(eOrder)));
     }
 
     // -- what the last trace cost ------------------------------------
@@ -1603,7 +1606,7 @@ FeatureTrace.buildBody = function(parent) {
         w.lastLabel = new QLabel(qsTr("Last: --"));
         layout.addWidget(w.lastLabel, 0, 0);
     } catch (eLast) {
-        w.problems.push("last-trace readout (" + eLast + ")");
+        w.problems.push(qsTr("last-trace readout (%1)").arg(String(eLast)));
     }
 
     layout.addStretch(1);
@@ -1614,7 +1617,7 @@ FeatureTrace.buildBody = function(parent) {
         FeatureTrace.rebuildRecent();
         FeatureTrace.refreshCounts();
     } catch (eRecentFill) {
-        w.problems.push("recent row fill (" + eRecentFill + ")");
+        w.problems.push(qsTr("recent row fill (%1)").arg(String(eRecentFill)));
     }
 
     if (w.problems.length > 0) {

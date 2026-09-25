@@ -547,7 +547,7 @@ SymbolPalette.readShapes = function() {
         }
     }
     if (opened === 0) {
-        out.error = "no symbol files could be read";
+        out.error = qsTr("no symbol files could be read");
     }
     return out;
 };
@@ -1247,7 +1247,7 @@ SymbolPalette.rebuildTiles = function() {
     try {
         CsPanel.applyOrder(w.stack);
     } catch (eOrder) {
-        w.problems.push("category order (" + eOrder + ")");
+        w.problems.push(qsTr("category order (%1)").arg(String(eOrder)));
     }
     // The stack's order AFTER applyOrder is the caver's order, and it
     // is the order every filter works from: applyFilter narrows
@@ -1268,7 +1268,7 @@ SymbolPalette.rebuildTiles = function() {
     try {
         SymbolPalette.refreshCounts();
     } catch (eCounts) {
-        w.problems.push("symbol counts (" + eCounts + ")");
+        w.problems.push(qsTr("symbol counts (%1)").arg(String(eCounts)));
     }
 
     // Re-arm what was armed, if it is still in the list: a rebuild
@@ -1441,7 +1441,7 @@ SymbolPalette.buildBody = function(parent) {
         w.frameLabel = new QLabel(qsTr("Cursor:  --"));
         layout.addWidget(w.frameLabel, 0, 0);
     } catch (eFrame) {
-        w.problems.push("cursor frame readout (" + eFrame + ")");
+        w.problems.push(qsTr("cursor frame readout (%1)").arg(String(eFrame)));
     }
 
     // -- search ------------------------------------------------------
@@ -1480,11 +1480,12 @@ SymbolPalette.buildBody = function(parent) {
                 }
             });
         } catch (eReturn) {
-            w.problems.push("search box Return (" + eReturn + ")");
+            w.problems.push(qsTr("search box Return (%1)")
+                .arg(String(eReturn)));
         }
         layout.addWidget(w.searchEdit, 0, 0);
     } catch (eSearchBox) {
-        w.problems.push("search box (" + eSearchBox + ")");
+        w.problems.push(qsTr("search box (%1)").arg(String(eSearchBox)));
     }
 
     // -- a place to say the template could not be read ---------------
@@ -1494,7 +1495,7 @@ SymbolPalette.buildBody = function(parent) {
         w.problemLabel.visible = false;
         layout.addWidget(w.problemLabel, 0, 0);
     } catch (eProblem) {
-        w.problems.push("problem label (" + eProblem + ")");
+        w.problems.push(qsTr("problem label (%1)").arg(String(eProblem)));
     }
 
     // -- what you have been using ------------------------------------
@@ -1514,7 +1515,7 @@ SymbolPalette.buildBody = function(parent) {
         }
         layout.addLayout(w.recentRow, 0);
     } catch (eRecent) {
-        w.problems.push("recent row (" + eRecent + ")");
+        w.problems.push(qsTr("recent row (%1)").arg(String(eRecent)));
     }
 
     // -- the tiles, in a scroll area ---------------------------------
@@ -1531,7 +1532,7 @@ SymbolPalette.buildBody = function(parent) {
         scroll.setWidgetResizable(true);
         layout.addWidget(scroll, 1, 0);
     } catch (eScroll) {
-        w.problems.push("symbol area (" + eScroll + ")");
+        w.problems.push(qsTr("symbol area (%1)").arg(String(eScroll)));
     }
 
     // -- the caver's own symbols -------------------------------------
@@ -1584,7 +1585,8 @@ SymbolPalette.buildBody = function(parent) {
         custom.addWidget(w.deleteButton, 0, 0);
         layout.addLayout(custom, 0);
     } catch (eCustom) {
-        w.problems.push("custom symbol buttons (" + eCustom + ")");
+        w.problems.push(qsTr("custom symbol buttons (%1)")
+            .arg(String(eCustom)));
     }
 
     // -- the editor row ----------------------------------------------
@@ -1629,7 +1631,7 @@ SymbolPalette.buildBody = function(parent) {
         editorRow.addWidget(w.cancelSymbolButton, 0, 0);
         layout.addLayout(editorRow, 0);
     } catch (eEditor) {
-        w.problems.push("editor row (" + eEditor + ")");
+        w.problems.push(qsTr("editor row (%1)").arg(String(eEditor)));
     }
 
     body.setLayout(layout);
@@ -1638,13 +1640,13 @@ SymbolPalette.buildBody = function(parent) {
     try {
         SymbolPalette.rebuildRecent();
     } catch (eRecentFill) {
-        w.problems.push("recent row fill (" + eRecentFill + ")");
+        w.problems.push(qsTr("recent row fill (%1)").arg(String(eRecentFill)));
     }
 
     try {
         SymbolPalette.rebuildTiles();
     } catch (eBuild) {
-        w.problems.push("symbol tiles (" + eBuild + ")");
+        w.problems.push(qsTr("symbol tiles (%1)").arg(String(eBuild)));
     }
 
     if (w.problems.length > 0) {

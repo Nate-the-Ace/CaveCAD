@@ -49,116 +49,116 @@ var CsHelp = {};
  */
 CsHelp.SYMBOL = {
     "SYM_ENTRANCE": {
-        means: "Where the cave opens to the surface.",
-        rule: "By convention the entrance station is A1, and it is where a reader looks first -- name it in the title block."
+        means: qsTr("Where the cave opens to the surface."),
+        rule: qsTr("By convention the entrance station is A1, and it is where a reader looks first -- name it in the title block.")
     },
     "SYM_PIT": {
-        means: "A drop in the floor too deep to climb down.",
-        rule: "Size it to the OPENING. Depth is a number in a callout, not a bigger symbol."
+        means: qsTr("A drop in the floor too deep to climb down."),
+        rule: qsTr("Size it to the OPENING. Depth is a number in a callout, not a bigger symbol.")
     },
     "SYM_DOME": {
-        means: "A shaft going up out of the ceiling with no matching hole in the floor.",
-        rule: "A dome is one you can stand under; a pit is one you would fall into. The same shaft is a dome from below and a pit from above."
+        means: qsTr("A shaft going up out of the ceiling with no matching hole in the floor."),
+        rule: qsTr("A dome is one you can stand under; a pit is one you would fall into. The same shaft is a dome from below and a pit from above.")
     },
     "SYM_BREAKDOWN": {
-        means: "Collapsed ceiling rock lying on the floor.",
-        rule: "Draw the blocks at the size they really are and scatter them unevenly. Rows of identical blocks read as wallpaper."
+        means: qsTr("Collapsed ceiling rock lying on the floor."),
+        rule: qsTr("Draw the blocks at the size they really are and scatter them unevenly. Rows of identical blocks read as wallpaper.")
     },
     "SYM_BREAKDOWN_B": {
-        means: "Collapsed ceiling rock lying on the floor -- a second block shape.",
-        rule: "Mix the three breakdown shapes in one rubble field. That is what the variants are for."
+        means: qsTr("Collapsed ceiling rock lying on the floor -- a second block shape."),
+        rule: qsTr("Mix the three breakdown shapes in one rubble field. That is what the variants are for.")
     },
     "SYM_BREAKDOWN_C": {
-        means: "Collapsed ceiling rock lying on the floor -- a third block shape.",
-        rule: "Mix the three breakdown shapes in one rubble field. That is what the variants are for."
+        means: qsTr("Collapsed ceiling rock lying on the floor -- a third block shape."),
+        rule: qsTr("Mix the three breakdown shapes in one rubble field. That is what the variants are for.")
     },
     "SYM_STALACTITE": {
-        means: "A dripstone cone hanging from the ceiling.",
-        rule: "Stalactites hold TIGHT to the ceiling; stalagmites MIGHT reach it one day."
+        means: qsTr("A dripstone cone hanging from the ceiling."),
+        rule: qsTr("Stalactites hold TIGHT to the ceiling; stalagmites MIGHT reach it one day.")
     },
     "SYM_STALAGMITE": {
-        means: "A dripstone cone standing up from the floor.",
-        rule: "Stalactites hold TIGHT to the ceiling; stalagmites MIGHT reach it one day."
+        means: qsTr("A dripstone cone standing up from the floor."),
+        rule: qsTr("Stalactites hold TIGHT to the ceiling; stalagmites MIGHT reach it one day.")
     },
     "SYM_COLUMN": {
-        means: "A stalactite and a stalagmite that met and joined floor to ceiling.",
-        rule: "Only where the two have actually joined. A near miss is two symbols, not one."
+        means: qsTr("A stalactite and a stalagmite that met and joined floor to ceiling."),
+        rule: qsTr("Only where the two have actually joined. A near miss is two symbols, not one.")
     },
     "SYM_FLOWSTONE": {
-        means: "Calcite sheeting over rock, like water frozen mid-flow.",
-        rule: "This marks a patch. For the EDGE of a flowstone bank, draw the Flowstone shaped line instead."
+        means: qsTr("Calcite sheeting over rock, like water frozen mid-flow."),
+        rule: qsTr("This marks a patch. For the EDGE of a flowstone bank, draw the Flowstone shaped line instead.")
     },
     "SYM_DRAPERY": {
-        means: "A thin hanging sheet of calcite, formed along a slanted ceiling.",
-        rule: "A drapery is a sheet seen edge-on; a stalactite is a cone. If it hangs from a crack rather than a point, it is this."
+        means: qsTr("A thin hanging sheet of calcite, formed along a slanted ceiling."),
+        rule: qsTr("A drapery is a sheet seen edge-on; a stalactite is a cone. If it hangs from a crack rather than a point, it is this.")
     },
     "SYM_RIMSTONE_DAM": {
-        means: "The rim of a gour -- a calcite dam holding a pool of water.",
-        rule: "For a run of dams down a slope, draw the Rimstone Dam shaped line so the scallops bow downslope."
+        means: qsTr("The rim of a gour -- a calcite dam holding a pool of water."),
+        rule: qsTr("For a run of dams down a slope, draw the Rimstone Dam shaped line so the scallops bow downslope.")
     },
     "SYM_MOONMILK_POPCORN": {
-        means: "Soft white paste (moonmilk) or knobbly coral-like growth (popcorn) on rock.",
+        means: qsTr("Soft white paste (moonmilk) or knobbly coral-like growth (popcorn) on rock."),
         rule: ""
     },
     "SYM_CLAY_MUD_TICK": {
-        means: "A clay or mud floor.",
-        rule: "Cover the area SPARSELY. A solid mat of ticks prints as a black blob and hides the linework under it."
+        means: qsTr("A clay or mud floor."),
+        rule: qsTr("Cover the area SPARSELY. A solid mat of ticks prints as a black blob and hides the linework under it.")
     },
     "SYM_SAND_GRAVEL_DOT": {
-        means: "A sand or gravel floor.",
-        rule: "Dot it heavier where the deposit is deep and thinner at its edges -- the fade is how a reader sees the edge."
+        means: qsTr("A sand or gravel floor."),
+        rule: qsTr("Dot it heavier where the deposit is deep and thinner at its edges -- the fade is how a reader sees the edge.")
     },
     "SYM_GUANO": {
-        means: "Bat or bird droppings on the floor.",
-        rule: "Worth mapping: it marks a roost, and a roost changes when the cave may be entered."
+        means: qsTr("Bat or bird droppings on the floor."),
+        rule: qsTr("Worth mapping: it marks a roost, and a roost changes when the cave may be entered.")
     },
     "SYM_NORTH_ARROW": {
-        means: "Which way is north on the sheet.",
-        rule: "Say WHICH north -- true or magnetic, with the declination used. An arrow that does not say is the commonest fault on a beginner's map."
+        means: qsTr("Which way is north on the sheet."),
+        rule: qsTr("Say WHICH north -- true or magnetic, with the declination used. An arrow that does not say is the commonest fault on a beginner's map.")
     },
     "SYM_FIXED_POINT": {
-        means: "A station whose position is known from outside the survey -- a GPS fix or a benchmark.",
-        rule: "The whole cave hangs off these. Two fixed points that disagree will fight, and the loop closure is where you will see it."
+        means: qsTr("A station whose position is known from outside the survey -- a GPS fix or a benchmark."),
+        rule: qsTr("The whole cave hangs off these. Two fixed points that disagree will fight, and the loop closure is where you will see it.")
     },
     "SYM_SECTION_MARKER": {
-        means: "Marks where a cross section was cut, and which way the viewer faces.",
-        rule: "Its letters must match the caption on the section itself. A section nobody can find on the plan is a section nobody reads."
+        means: qsTr("Marks where a cross section was cut, and which way the viewer faces."),
+        rule: qsTr("Its letters must match the caption on the section itself. A section nobody can find on the plan is a section nobody reads.")
     },
     "SYM_CEILING_HEIGHT": {
-        means: "How far it is from the floor to the ceiling at that spot.",
-        rule: "Put them where the passage CHANGES -- a low crawl, a high dome. One every few feet is noise."
+        means: qsTr("How far it is from the floor to the ceiling at that spot."),
+        rule: qsTr("Put them where the passage CHANGES -- a low crawl, a high dome. One every few feet is noise.")
     },
     "SYM_SIPHON": {
-        means: "Water filling the passage to the roof, which can drain.",
-        rule: "A siphon may be passable in dry weather; a sump is not. If nobody has seen it open, call it a sump."
+        means: qsTr("Water filling the passage to the roof, which can drain."),
+        rule: qsTr("A siphon may be passable in dry weather; a sump is not. If nobody has seen it open, call it a sump.")
     },
     "SYM_SPRING": {
-        means: "Where the cave's water comes back out at the surface.",
+        means: qsTr("Where the cave's water comes back out at the surface."),
         rule: ""
     },
     "SYM_DRIP_SEEP": {
-        means: "Water entering through the ceiling or wall with no channel.",
+        means: qsTr("Water entering through the ceiling or wall with no channel."),
         rule: ""
     },
     "SYM_SUMP": {
-        means: "Standing water filling the passage to the roof.",
-        rule: "The mapped cave ends here unless someone dives it. Mark it -- a passage that just stops reads as unfinished survey."
+        means: qsTr("Standing water filling the passage to the roof."),
+        rule: qsTr("The mapped cave ends here unless someone dives it. Mark it -- a passage that just stops reads as unfinished survey.")
     },
     "SYM_FLOW_ARROW": {
-        means: "Which way the water runs.",
-        rule: "Point it DOWNSTREAM. Put one in every stream passage: the drainage is half of what a cave map is for."
+        means: qsTr("Which way the water runs."),
+        rule: qsTr("Point it DOWNSTREAM. Put one in every stream passage: the drainage is half of what a cave map is for.")
     },
     "SYM_SLOPE_TICK": {
-        means: "Which way the floor tilts.",
-        rule: "The arrow points DOWNHILL, the way water would run."
+        means: qsTr("Which way the floor tilts."),
+        rule: qsTr("The arrow points DOWNHILL, the way water would run.")
     },
     "SYM_CLIMB_ARROW": {
-        means: "A climb that can be done without rope.",
-        rule: "The arrow points UP the climb. Put the height beside it -- a climb with no number tells a reader nothing about the trip."
+        means: qsTr("A climb that can be done without rope."),
+        rule: qsTr("The arrow points UP the climb. Put the height beside it -- a climb with no number tells a reader nothing about the trip.")
     },
     "SYM_JOINT_TICK": {
-        means: "A fracture in the bedrock that the passage follows.",
-        rule: "Draw it along the joint's own direction. It is the answer to why the cave goes where it goes."
+        means: qsTr("A fracture in the bedrock that the passage follows."),
+        rule: qsTr("Draw it along the joint's own direction. It is the answer to why the cave goes where it goes.")
     }
 };
 
@@ -172,69 +172,69 @@ CsHelp.SYMBOL = {
  */
 CsHelp.FEATURE = {
     "layer:WALLS-SURVEYED": {
-        label: "Surveyed Walls",
-        means: "The edge of the passage where you measured it -- drawn solid.",
-        rule: "Solid means MEASURED. Use it only where a tape, an LRUD or a splay actually reached the wall."
+        label: qsTr("Surveyed Walls"),
+        means: qsTr("The edge of the passage where you measured it -- drawn solid."),
+        rule: qsTr("Solid means MEASURED. Use it only where a tape, an LRUD or a splay actually reached the wall.")
     },
     "layer:WALLS-INFERRED": {
-        label: "Inferred Walls",
-        means: "The edge of the passage where you did not measure it -- drawn dashed.",
-        rule: "Dashed means SKETCHED. Guessing is allowed and hiding the guess is not: the dashes are the map being honest."
+        label: qsTr("Inferred Walls"),
+        means: qsTr("The edge of the passage where you did not measure it -- drawn dashed."),
+        rule: qsTr("Dashed means SKETCHED. Guessing is allowed and hiding the guess is not: the dashes are the map being honest.")
     },
     "layer:BREAKDOWN": {
         label: "Breakdown",
-        means: "One block drawn to its real shape, rather than a scatter of symbols.",
-        rule: "For a whole rubble field, outline it as a Breakdown Boundary and let Scatter Breakdown fill it."
+        means: qsTr("One block drawn to its real shape, rather than a scatter of symbols."),
+        rule: qsTr("For a whole rubble field, outline it as a Breakdown Boundary and let Scatter Breakdown fill it.")
     },
     "layer:BREAKDOWN-BOUNDARY": {
-        label: "Breakdown Boundary",
-        means: "The extent of a rubble field.",
-        rule: "CLOSE the loop -- Scatter Breakdown fills closed boundaries and skips open ones."
+        label: qsTr("Breakdown Boundary"),
+        means: qsTr("The extent of a rubble field."),
+        rule: qsTr("CLOSE the loop -- Scatter Breakdown fills closed boundaries and skips open ones.")
     },
     "layer:ENTRANCE": {
         label: "Entrance",
-        means: "The lip of the entrance itself, where the cave begins.",
+        means: qsTr("The lip of the entrance itself, where the cave begins."),
         rule: ""
     },
     "layer:CEILING": {
         label: "Ceiling",
-        means: "A ceiling edge seen from below: an overhang, a roof channel, the lip of an alcove.",
-        rule: "Ceiling detail belongs INSIDE the walls. Drawn out at the wall line it reads as a second wall."
+        means: qsTr("A ceiling edge seen from below: an overhang, a roof channel, the lip of an alcove."),
+        rule: qsTr("Ceiling detail belongs INSIDE the walls. Drawn out at the wall line it reads as a second wall.")
     },
     "layer:FLOOR": {
         label: "Floor",
-        means: "Floor detail inside the walls: the edge of a mud bank, a sand ledge, a bedrock rib.",
-        rule: "A floor line that steps DOWN is a ledge -- draw it as a Floor Ledge so the drop shows."
+        means: qsTr("Floor detail inside the walls: the edge of a mud bank, a sand ledge, a bedrock rib."),
+        rule: qsTr("A floor line that steps DOWN is a ledge -- draw it as a Floor Ledge so the drop shows.")
     },
     "style:floorledge": {
-        label: "Floor Ledge",
-        means: "A step down in the floor you could climb.",
-        rule: "The hachures go on the LOW side. Click that side after the drag -- the tool asks."
+        label: qsTr("Floor Ledge"),
+        means: qsTr("A step down in the floor you could climb."),
+        rule: qsTr("The hachures go on the LOW side. Click that side after the drag -- the tool asks.")
     },
     "style:ceilingledge": {
-        label: "Ceiling Ledge",
-        means: "A step in the ceiling: an overhang, or where the roof jumps up.",
-        rule: "The hachures go on the side the ceiling is LOWER, the same way a floor ledge marks its drop."
+        label: qsTr("Ceiling Ledge"),
+        means: qsTr("A step in the ceiling: an overhang, or where the roof jumps up."),
+        rule: qsTr("The hachures go on the side the ceiling is LOWER, the same way a floor ledge marks its drop.")
     },
     "style:pit": {
         label: "Pit",
-        means: "A drop too deep to climb, drawn as a closed outline round the hole.",
-        rule: "The ring closes on itself, so it has no ends and cannot be extended -- draw the whole rim in one stroke."
+        means: qsTr("A drop too deep to climb, drawn as a closed outline round the hole."),
+        rule: qsTr("The ring closes on itself, so it has no ends and cannot be extended -- draw the whole rim in one stroke.")
     },
     "style:flowstone": {
         label: "Flowstone",
-        means: "The edge of a sheet of calcite flowing over the rock.",
-        rule: "The scallops bow DOWNSLOPE, the way the water ran."
+        means: qsTr("The edge of a sheet of calcite flowing over the rock."),
+        rule: qsTr("The scallops bow DOWNSLOPE, the way the water ran.")
     },
     "style:rimstone": {
-        label: "Rimstone Dam",
-        means: "A run of gour dams stepping down a slope.",
-        rule: "The scallops bow DOWNSLOPE -- each dam bulges away from the water it holds back."
+        label: qsTr("Rimstone Dam"),
+        means: qsTr("A run of gour dams stepping down a slope."),
+        rule: qsTr("The scallops bow DOWNSLOPE -- each dam bulges away from the water it holds back.")
     },
     "style:slope": {
         label: "Slope",
-        means: "A floor tilting steeply enough to notice, but not a ledge.",
-        rule: "The fans splay DOWNHILL. If the drop is a step rather than a ramp, it is a Floor Ledge."
+        means: qsTr("A floor tilting steeply enough to notice, but not a ledge."),
+        rule: qsTr("The fans splay DOWNHILL. If the drop is a step rather than a ramp, it is a Floor Ledge.")
     }
 };
 

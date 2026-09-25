@@ -190,9 +190,9 @@ CsSketchPlace.solve = function(scrap, targets, options) {
     }
 
     if (tie.pairs.length === 0) {
-        out.warnings.push("The sketch carries no station markers this " +
+        out.warnings.push(qsTr("The sketch carries no station markers this " +
             "drawing recognises, so there is nothing tying it to the " +
-            "cave. It is not placed.");
+            "cave. It is not placed."));
         return out;
     }
 
@@ -202,24 +202,24 @@ CsSketchPlace.solve = function(scrap, targets, options) {
         out.kind = "translation";
         out.ok = true;
         out.residual = CsScanFit.residuals(tie.pairs, out.matrix);
-        out.warnings.push("The sketch marks only one station, which " +
+        out.warnings.push(qsTr("The sketch marks only one station, which " +
             "fixes where it sits and nothing else: its size comes from " +
             "the scale the sketch declares, and north is taken to be up " +
-            "the page. It is not bent onto the survey.");
+            "the page. It is not bent onto the survey."));
         if (opts.scaleFactor === undefined || opts.scaleFactor === null ||
                 !(opts.scaleFactor > 0)) {
-            out.warnings.push("It declares no scale either, so it is " +
+            out.warnings.push(qsTr("It declares no scale either, so it is " +
                 "placed at one drawing unit per sketch unit. Check its " +
-                "size before you trust it.");
+                "size before you trust it."));
         }
         return out;
     }
 
     var fit = CsScanFit.fit(tie.pairs);
     if (fit === null) {
-        out.warnings.push("The sketch's station markers all sit in the " +
+        out.warnings.push(qsTr("The sketch's station markers all sit in the " +
             "same place, so they give no direction and no size. It is " +
-            "not placed.");
+            "not placed."));
         return out;
     }
 
@@ -231,10 +231,10 @@ CsSketchPlace.solve = function(scrap, targets, options) {
     out.residual = CsScanFit.residuals(tie.pairs, fit.matrix);
 
     if (out.thin) {
-        out.warnings.push("The sketch's station markers sit almost in a " +
+        out.warnings.push(qsTr("The sketch's station markers sit almost in a " +
             "straight line, so nothing can be said about the direction " +
             "across that line. The sketch keeps its shape rather than " +
-            "being stretched on a guess.");
+            "being stretched on a guess."));
     }
 
     out.warp = CsSketchPlace.warpPairs(tie.pairs, fit.matrix);

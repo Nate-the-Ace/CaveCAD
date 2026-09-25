@@ -200,22 +200,22 @@ function exportCaveSurvey() {
     CsModel.ensureTrips(survey);
 
     var lines = [];
-    lines.push("Wrote " + CsShelf.basename(fileName));
+    lines.push(qsTr("Wrote %1").arg(String(CsShelf.basename(fileName))));
     lines.push("");
-    lines.push("Format      " + format.label);
-    lines.push("Units       " + survey.distanceUnit);
-    lines.push("Stations    " + stations);
+    lines.push(qsTr("Format      %1").arg(String(format.label)));
+    lines.push(qsTr("Units       %1").arg(String(survey.distanceUnit)));
+    lines.push(qsTr("Stations    %1").arg(String(stations)));
     lines.push("Legs        " + legs +
         (splays > 0 ? "   (plus " + splays + " splays)" : ""));
-    lines.push("Trips       " + survey.trips.length);
+    lines.push(qsTr("Trips       %1").arg(String(survey.trips.length)));
     if (format.id === "compass") {
-        lines.push("Location    not carried -- Compass files have no fix line");
+        lines.push(qsTr("Location    not carried -- Compass files have no fix line"));
     } else if (!control) {
-        lines.push("Location    none recorded in this drawing");
+        lines.push(qsTr("Location    none recorded in this drawing"));
     } else if (keepControl) {
-        lines.push("Location    INCLUDED -- this file carries the entrance");
+        lines.push(qsTr("Location    INCLUDED -- this file carries the entrance"));
     } else {
-        lines.push("Location    left out -- no fixed station coordinates");
+        lines.push(qsTr("Location    left out -- no fixed station coordinates"));
     }
     lines.push("");
     lines.push(fileName);

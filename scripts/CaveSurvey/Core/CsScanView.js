@@ -669,7 +669,7 @@ CsScanPreview.pixelText = function(point, heightPx) {
     }
     var col = Math.round(point.x);
     var row = Math.round(heightPx - point.y);
-    return col + ", " + row + " px";
+    return qsTr("%1, %2 px").arg(String(col)).arg(String(row));
 };
 
 /** Fit the whole scan back into the pane. */

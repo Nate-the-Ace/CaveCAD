@@ -256,9 +256,9 @@ LoopErrors.draw = function(doc, di, read) {
     di.applyOperation(op);
 
     if (arrows.length === 0) {
-        return "Loop Errors: nothing moved by more than " + LE_MIN_FEET +
-            " ft -- this survey has no loop worth drawing, which is " +
-            "the good answer.";
+        return qsTr("Loop Errors: nothing moved by more than %1 ft -- this " +
+            "survey has no loop worth drawing, which is the good answer.")
+            .arg(String(LE_MIN_FEET));
     }
     return "Loop Errors: " + arrows.length + " station" +
         (arrows.length === 1 ? "" : "s") + " marked, worst " +

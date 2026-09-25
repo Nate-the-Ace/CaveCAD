@@ -36,8 +36,8 @@ CsGrade.compute = function(survey, resolved, stats) {
     if (resolved.loops.length === 0) {
         centreline = 3;
         centrelineText = "3 (no loops -- nothing to verify a higher grade against)";
-        notes.push("No closed loops: closure cannot verify the survey, so the " +
-            "defensible centreline grade stays at 3. Tie in a loop to support 5.");
+        notes.push(qsTr("No closed loops: closure cannot verify the survey, so the " +
+            "defensible centreline grade stays at 3. Tie in a loop to support 5."));
     } else {
         var worst = 0.0;
         for (var i = 0; i < resolved.loops.length; i++) {
@@ -61,8 +61,8 @@ CsGrade.compute = function(survey, resolved, stats) {
                 "% -- likely a blunder; resurvey recommended)";
         }
     }
-    notes.push("Coordinates are computed, not protractor-plotted, which " +
-        "grade 5 requires -- that condition is met automatically here.");
+    notes.push(qsTr("Coordinates are computed, not protractor-plotted, which " +
+        "grade 5 requires -- that condition is met automatically here."));
 
     // ---- detail grade from LRUD coverage --------------------------
     var stationsWithLrud = 0;
@@ -81,9 +81,9 @@ CsGrade.compute = function(survey, resolved, stats) {
         stationsWithLrud >= stationNames.length - 1) {
         detail = "c";
         detailText = "c (passage dimensions recorded at every station)";
-        notes.push("Grade d additionally requires stations placed at every " +
+        notes.push(qsTr("Grade d additionally requires stations placed at every " +
             "significant passage change -- that is a judgment the data " +
-            "cannot make for you.");
+            "cannot make for you."));
     } else if (coverage >= 0.5) {
         detail = "b";
         detailText = "b (LRUD at " + stationsWithLrud + " of " +

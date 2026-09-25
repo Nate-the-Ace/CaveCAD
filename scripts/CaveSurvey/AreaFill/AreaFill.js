@@ -888,7 +888,7 @@ AreaFill.buildBody = function(parent) {
         });
         layout.addWidget(w.searchEdit, 0, 0);
     } catch (eSearchBox) {
-        w.problems.push("search box (" + eSearchBox + ")");
+        w.problems.push(qsTr("search box (%1)").arg(String(eSearchBox)));
     }
 
     // -- the selection hint ----------------------------------------------
@@ -909,7 +909,7 @@ AreaFill.buildBody = function(parent) {
         w.selectionHint.visible = false;
         layout.addWidget(w.selectionHint, 0, 0);
     } catch (eHint) {
-        w.problems.push("selection hint (" + eHint + ")");
+        w.problems.push(qsTr("selection hint (%1)").arg(String(eHint)));
     }
 
     // -- scale and density ----------------------------------------------
@@ -964,7 +964,8 @@ AreaFill.buildBody = function(parent) {
         controls.addStretch(1);
         layout.addLayout(controls, 0);
     } catch (eControls) {
-        w.problems.push("scale/density controls (" + eControls + ")");
+        w.problems.push(qsTr("scale/density controls (%1)")
+            .arg(String(eControls)));
     }
 
     // -- the tiles, in a scroll area -------------------------------------
@@ -981,7 +982,7 @@ AreaFill.buildBody = function(parent) {
         scroll.setWidgetResizable(true);
         layout.addWidget(scroll, 1, 0);
     } catch (eScroll) {
-        w.problems.push("pattern area (" + eScroll + ")");
+        w.problems.push(qsTr("pattern area (%1)").arg(String(eScroll)));
     }
 
     // -- the caver's own patterns -----------------------------------------
@@ -1038,7 +1039,8 @@ AreaFill.buildBody = function(parent) {
         custom.addWidget(w.deletePatternButton, 0, 0);
         layout.addLayout(custom, 0);
     } catch (eCustom) {
-        w.problems.push("custom pattern buttons (" + eCustom + ")");
+        w.problems.push(qsTr("custom pattern buttons (%1)")
+            .arg(String(eCustom)));
     }
 
     // -- the editor fields, built once and hidden -------------------------
@@ -1169,7 +1171,7 @@ AreaFill.buildBody = function(parent) {
         editorRow.addWidget(w.cancelPatternButton, 0, 0);
         layout.addLayout(editorRow, 0);
     } catch (eEditor) {
-        w.problems.push("editor fields (" + eEditor + ")");
+        w.problems.push(qsTr("editor fields (%1)").arg(String(eEditor)));
     }
 
     body.setLayout(layout);
@@ -1178,7 +1180,7 @@ AreaFill.buildBody = function(parent) {
     try {
         AreaFill.rebuildTiles();
     } catch (eBuild) {
-        w.problems.push("pattern tiles (" + eBuild + ")");
+        w.problems.push(qsTr("pattern tiles (%1)").arg(String(eBuild)));
     }
 
     try {

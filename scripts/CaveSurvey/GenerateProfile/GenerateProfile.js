@@ -146,13 +146,14 @@ function generateProfileSplayLossWarning(doc, survey) {
     if (drawn === recovered) {
         return "";
     }
-    return "\n\nWARNING -- " + drawn + " splay(s) tagged in the drawing, " +
-        "but only " + recovered + " could be rebuilt from it: a splay " +
-        "whose own station is no longer in the drawing has nothing to " +
-        "hang on. The floor and ceiling lines above are missing that " +
-        "many splays -- run Rebuild Survey Data to repair the drawing, " +
-        "or Import Cave Survey or the Survey Notebook to draw it again " +
-        "from the notes.";
+    return qsTr("\n\nWARNING -- %1 splay(s) tagged in the drawing, but only " +
+        "%2 could be rebuilt from it: a splay whose own station is no longer " +
+        "in the drawing has nothing to hang on. The floor and ceiling lines " +
+        "above are missing that many splays -- run Rebuild Survey Data to " +
+        "repair the drawing, or Import Cave Survey or the Survey Notebook to " +
+        "draw it again from the notes.")
+        .arg(String(drawn))
+        .arg(String(recovered));
 }
 
 /**

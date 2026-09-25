@@ -568,13 +568,17 @@ CsSymbolStore.customAreaPatterns = function(path) {
         }
     } catch (eEx) {
         return { ok: false, entries: [], error:
-            "Your symbol library could not be checked: " + path };
+            qsTr("Your symbol library " +
+            "could not be checked: %1")
+            .arg(String(path)) };
     }
 
     var di = CsSymbolStore.openOffscreen(path);
     if (di === null) {
         return { ok: false, entries: [], error:
-            "Your symbol library could not be read: " + path };
+            qsTr("Your symbol library " +
+            "could not be read: %1")
+            .arg(String(path)) };
     }
 
     result = { ok: true, entries: [], error: "" };
@@ -598,8 +602,9 @@ CsSymbolStore.customAreaPatterns = function(path) {
         }
     } catch (eList) {
         result = { ok: false, entries: [], error:
-            "Your symbol library's block table could not be read (" +
-            eList + ")." };
+            qsTr("Your symbol " +
+            "library's block table could not be read (%1).")
+            .arg(String(eList)) };
     }
 
     CsSymbolStore.areaCache[path] = result;
@@ -634,7 +639,9 @@ CsSymbolStore.list = function(path) {
     var di = CsSymbolStore.openOffscreen(path);
     if (di === null) {
         return { ok: false, entries: [], error:
-            "The cave template could not be read: " + path };
+            qsTr("The cave template " +
+            "could not be read: %1")
+            .arg(String(path)) };
     }
 
     var result = { ok: true, entries: [], error: "" };
@@ -675,8 +682,9 @@ CsSymbolStore.list = function(path) {
         }
     } catch (eList) {
         result = { ok: false, entries: [], error:
-            "The cave template's block table could not be read (" +
-            eList + ")." };
+            qsTr("The cave template's " +
+            "block table could not be read (%1).")
+            .arg(String(eList)) };
     }
 
     CsSymbolStore.cache[path] = result;
@@ -768,12 +776,12 @@ CsSymbolStore.migrateFromTemplate = function() {
 
     var customPath = CsSymbolStore.ensureCustomFile();
     if (isNull(customPath)) {
-        out.error = "The symbol library could not be created.";
+        out.error = qsTr("The symbol library could not be created.");
         return out;
     }
     var srcDi = CsSymbolStore.openOffscreen(tplPath);
     if (srcDi === null) {
-        out.error = "The cave template could not be read.";
+        out.error = qsTr("The cave template could not be read.");
         return out;
     }
     var srcDoc = srcDi.getDocument();
@@ -816,7 +824,8 @@ CsSymbolStore.migrateFromTemplate = function() {
             }
         }
         if (!landed) {
-            out.error = name + " could not be moved into the library.";
+            out.error = qsTr("%1 could not be moved into the library.")
+                .arg(String(name));
             continue;
         }
         CsSymbolStore.deleteBlock(tplPath, name);
@@ -1086,16 +1095,16 @@ CsSymbolStore.copyBlock = function(srcDoc, doc, di, blockName) {
         src = null;
     }
     if (isNull(src)) {
-        return { ok: false, error: "The template has no block named " +
-            blockName + "." };
+        return { ok: false, error: qsTr("The template has no block named %1.")
+            .arg(String(blockName)) };
     }
 
     var ids = [];
     try {
         ids = srcDoc.queryBlockEntities(src.getId());
     } catch (eQ) {
-        return { ok: false, error: "The template's " + blockName +
-            " could not be read." };
+        return { ok: false, error: qsTr("The template's %1 could not be read.")
+            .arg(String(blockName)) };
     }
 
     // The layers the definition's entities sit on. Ensured BEFORE the
@@ -1133,12 +1142,15 @@ CsSymbolStore.copyBlock = function(srcDoc, doc, di, blockName) {
         di.applyOperation(blockOp);
         blockId = doc.getBlockId(blockName);
     } catch (eAdd) {
-        return { ok: false, error: "This drawing refused a block named " +
-            blockName + " (" + eAdd + ")." };
+        return { ok: false, error: qsTr("This drawing refused a block named " +
+            "%1 (%2).")
+            .arg(String(blockName))
+            .arg(String(eAdd)) };
     }
     if (isNull(blockId) || blockId === RObject.INVALID_ID) {
-        return { ok: false, error: "This drawing refused a block named " +
-            blockName + "." };
+        return { ok: false, error: qsTr("This drawing refused a block named " +
+            "%1.")
+            .arg(String(blockName)) };
     }
 
     var op = new RAddObjectsOperation();
@@ -1168,8 +1180,9 @@ CsSymbolStore.copyBlock = function(srcDoc, doc, di, blockName) {
         }
     }
     if (moved === 0) {
-        return { ok: false, error: "The template's " + blockName +
-            " holds no geometry to copy." };
+        return { ok: false, error: qsTr("The template's %1 holds no geometry " +
+            "to copy.")
+            .arg(String(blockName)) };
     }
     // THROUGH EVERY LAYER THE BLOCK USES, on and unlocked. The marker
     // point lives on CTRL-HIDDEN, which is off in the registry, and an
@@ -1187,8 +1200,10 @@ CsSymbolStore.copyBlock = function(srcDoc, doc, di, blockName) {
             di.applyOperation(op);
         });
     } catch (eApply) {
-        return { ok: false, error: "This drawing refused " + blockName +
-            "'s geometry (" + eApply + ")." };
+        return { ok: false, error: qsTr("This drawing refused %1's geometry " +
+            "(%2).")
+            .arg(String(blockName))
+            .arg(String(eApply)) };
     }
     return { ok: true, error: "" };
 };
@@ -1231,7 +1246,7 @@ CsSymbolStore.ensureBlock = function(doc, di, blockName, path) {
         }
         var srcDi = CsSymbolStore.openOffscreen(places[p]);
         if (srcDi === null) {
-            lastError = "Could not read " + places[p];
+            lastError = qsTr("Could not read %1").arg(String(places[p]));
             continue;
         }
         if (isNull(srcDi.getDocument().queryBlock(blockName))) {
@@ -1313,30 +1328,36 @@ CsSymbolStore.saveBlock = function(path, blockName, srcDoc, entities, meta) {
     }
     if (isNull(path)) {
         return { ok: false, replaced: false, error:
-            "Your symbol library could not be created at " +
-            CsSymbolStore.customPath() + ", so there is nowhere to save " +
-            "the symbol." };
+            qsTr("Your symbol library " +
+            "could not be created at %1, so there is nowhere to save the " +
+            "symbol.")
+            .arg(String(CsSymbolStore.customPath())) };
     }
     if (!CsSymbolStore.hasPrefix(blockName, CsSymbolStore.PREFIX)) {
         return { ok: false, replaced: false, error:
-            "A symbol's block name must start with " +
-            CsSymbolStore.PREFIX + "." };
+            qsTr("A symbol's block " +
+            "name must start with %1.")
+            .arg(String(CsSymbolStore.PREFIX)) };
     }
     if (CsSymbols.byBlock(blockName) !== null) {
         return { ok: false, replaced: false, error:
-            blockName + " is one of the symbols the suite ships. Give " +
-            "yours a different name -- an edited copy of a shipped symbol " +
-            "would be overwritten by the next CaveCAD update." };
+            qsTr("%1 is one of the " +
+            "symbols the suite ships. Give yours a different name -- an " +
+            "edited copy of a shipped symbol would be overwritten by the " +
+            "next CaveCAD update.")
+            .arg(String(blockName)) };
     }
     if (isNull(entities) || entities.length === 0) {
         return { ok: false, replaced: false, error:
-            "There is nothing to save: draw the symbol first." };
+            qsTr("There is nothing to save: draw the symbol first.") };
     }
 
     var di = CsSymbolStore.openOffscreen(path);
     if (di === null) {
         return { ok: false, replaced: false, error:
-            "The cave template could not be read: " + path };
+            qsTr("The cave template " +
+            "could not be read: %1")
+            .arg(String(path)) };
     }
     var doc = di.getDocument();
 
@@ -1355,12 +1376,16 @@ CsSymbolStore.saveBlock = function(path, blockName, srcDoc, entities, meta) {
         }
     } catch (eBlock) {
         return { ok: false, replaced: false, error:
-            "The template refused a block named " + blockName +
-            " (" + eBlock + ")." };
+            qsTr("The template " +
+            "refused a block named %1 (%2).")
+            .arg(String(blockName))
+            .arg(String(eBlock)) };
     }
     if (isNull(blockId) || blockId === RObject.INVALID_ID) {
         return { ok: false, replaced: false, error:
-            "The template refused a block named " + blockName + "." };
+            qsTr("The template " +
+            "refused a block named %1.")
+            .arg(String(blockName)) };
     }
 
     // The home layer has to EXIST in the template, or the geometry
@@ -1393,8 +1418,8 @@ CsSymbolStore.saveBlock = function(path, blockName, srcDoc, entities, meta) {
     }
     if (copied === 0) {
         return { ok: false, replaced: replaced, error:
-            "None of the symbol's geometry could be written into the " +
-            "template." };
+            qsTr("None of the symbol's geometry could be written into the " +
+            "template.") };
     }
 
     // The marker: the block's own record of what it is. Added in the
@@ -1417,9 +1442,10 @@ CsSymbolStore.saveBlock = function(path, blockName, srcDoc, entities, meta) {
         op.addObject(marker, false);
     } catch (eMarker) {
         return { ok: false, replaced: replaced, error:
-            "The symbol's own description could not be written (" +
-            eMarker + "), so nothing was saved -- a symbol with no " +
-            "category or layer would be unplaceable." };
+            qsTr("The symbol's own " +
+            "description could not be written (%1), so nothing was saved -- " +
+            "a symbol with no category or layer would be unplaceable.")
+            .arg(String(eMarker)) };
     }
 
     // THE MARKER'S OWN LAYER REFUSES IT. CTRL-HIDDEN is off in the
@@ -1439,19 +1465,23 @@ CsSymbolStore.saveBlock = function(path, blockName, srcDoc, entities, meta) {
             });
     } catch (eApply) {
         return { ok: false, replaced: replaced, error:
-            "The template refused the symbol's geometry (" + eApply + ")." };
+            qsTr("The template " +
+            "refused the symbol's geometry (%1).")
+            .arg(String(eApply)) };
     }
     if (CsSymbolStore.markerOf(doc, blockId) === null) {
         return { ok: false, replaced: replaced, error:
-            "The symbol was not saved: the template would not accept its " +
+            qsTr("The symbol was not saved: the template would not accept its " +
             "description, and a symbol with no category or layer cannot " +
-            "be placed." };
+            "be placed.") };
     }
 
     if (!CsSymbolStore.write(di, path)) {
         return { ok: false, replaced: replaced, error:
-            "The template could not be written: " + path + "\nCheck that " +
-            "the file is not open elsewhere and that you can write to it." };
+            qsTr("The template could " +
+            "not be written: %1\nCheck that the file is not open elsewhere " +
+            "and that you can write to it.")
+            .arg(String(path)) };
     }
     CsSymbolStore.invalidate(path);
     return { ok: true, replaced: replaced, error: "" };
@@ -1483,24 +1513,28 @@ CsSymbolStore.saveAreaPattern = function(path, blockName, srcDoc, entities,
     }
     if (isNull(path)) {
         return { ok: false, replaced: false, error:
-            "Your symbol library could not be created at " +
-            CsSymbolStore.customPath() + ", so there is nowhere to save " +
-            "the pattern." };
+            qsTr("Your symbol library " +
+            "could not be created at %1, so there is nowhere to save the " +
+            "pattern.")
+            .arg(String(CsSymbolStore.customPath())) };
     }
     if (!CsSymbolStore.hasPrefix(blockName, CsSymbolStore.AREA_PREFIX)) {
         return { ok: false, replaced: false, error:
-            "A pattern's block name must start with " +
-            CsSymbolStore.AREA_PREFIX + "." };
+            qsTr("A pattern's block " +
+            "name must start with %1.")
+            .arg(String(CsSymbolStore.AREA_PREFIX)) };
     }
     if (isNull(entities) || entities.length === 0) {
         return { ok: false, replaced: false, error:
-            "There is nothing to save: draw the pattern first." };
+            qsTr("There is nothing to save: draw the pattern first.") };
     }
 
     var di = CsSymbolStore.openOffscreen(path);
     if (di === null) {
         return { ok: false, replaced: false, error:
-            "Your symbol library could not be read: " + path };
+            qsTr("Your symbol library " +
+            "could not be read: %1")
+            .arg(String(path)) };
     }
     var doc = di.getDocument();
 
@@ -1519,12 +1553,16 @@ CsSymbolStore.saveAreaPattern = function(path, blockName, srcDoc, entities,
         }
     } catch (eBlock) {
         return { ok: false, replaced: false, error:
-            "Your symbol library refused a block named " + blockName +
-            " (" + eBlock + ")." };
+            qsTr("Your symbol library " +
+            "refused a block named %1 (%2).")
+            .arg(String(blockName))
+            .arg(String(eBlock)) };
     }
     if (isNull(blockId) || blockId === RObject.INVALID_ID) {
         return { ok: false, replaced: false, error:
-            "Your symbol library refused a block named " + blockName + "." };
+            qsTr("Your symbol library " +
+            "refused a block named %1.")
+            .arg(String(blockName)) };
     }
 
     try {
@@ -1554,8 +1592,8 @@ CsSymbolStore.saveAreaPattern = function(path, blockName, srcDoc, entities,
     }
     if (copied === 0) {
         return { ok: false, replaced: replaced, error:
-            "None of the pattern's geometry could be written into your " +
-            "symbol library." };
+            qsTr("None of the pattern's geometry could be written into your " +
+            "symbol library.") };
     }
 
     // The marker: AREA_MARKER_TAGS, not MARKER_TAGS -- see this file's
@@ -1583,9 +1621,10 @@ CsSymbolStore.saveAreaPattern = function(path, blockName, srcDoc, entities,
         op.addObject(marker, false);
     } catch (eMarker) {
         return { ok: false, replaced: replaced, error:
-            "The pattern's own description could not be written (" +
-            eMarker + "), so nothing was saved -- a pattern with no " +
-            "layer or placement rule would be unplaceable." };
+            qsTr("The pattern's own " +
+            "description could not be written (%1), so nothing was saved -- " +
+            "a pattern with no layer or placement rule would be unplaceable.")
+            .arg(String(eMarker)) };
     }
 
     // THE MARKER'S OWN LAYER REFUSES IT -- the same CTRL-HIDDEN trap
@@ -1602,21 +1641,23 @@ CsSymbolStore.saveAreaPattern = function(path, blockName, srcDoc, entities,
             });
     } catch (eApply) {
         return { ok: false, replaced: replaced, error:
-            "Your symbol library refused the pattern's geometry (" +
-            eApply + ")." };
+            qsTr("Your symbol library " +
+            "refused the pattern's geometry (%1).")
+            .arg(String(eApply)) };
     }
     if (CsSymbolStore.areaMarkerOf(doc, blockId) === null) {
         return { ok: false, replaced: replaced, error:
-            "The pattern was not saved: your symbol library would not " +
+            qsTr("The pattern was not saved: your symbol library would not " +
             "accept its description, and a pattern with no layer or " +
-            "placement rule cannot be placed." };
+            "placement rule cannot be placed.") };
     }
 
     if (!CsSymbolStore.write(di, path)) {
         return { ok: false, replaced: replaced, error:
-            "Your symbol library could not be written: " + path +
-            "\nCheck that the file is not open elsewhere and that you " +
-            "can write to it." };
+            qsTr("Your symbol library " +
+            "could not be written: %1\nCheck that the file is not open " +
+            "elsewhere and that you can write to it.")
+            .arg(String(path)) };
     }
     CsSymbolStore.invalidate(path);
     return { ok: true, replaced: replaced, error: "" };
@@ -1636,21 +1677,24 @@ CsSymbolStore.deleteAreaPattern = function(path, blockName) {
         path = CsSymbolStore.customPath();
     }
     if (isNull(path)) {
-        return { ok: false, error: "There is nowhere to delete " +
-            blockName + " from." };
+        return { ok: false, error: qsTr("There is nowhere to delete %1 from.")
+            .arg(String(blockName)) };
     }
     try {
         if (!new QFileInfo(path).exists()) {
             return { ok: true, error: "" };   // no library, nothing saved
         }
     } catch (eEx) {
-        return { ok: false, error: "Your symbol library could not be " +
-            "checked: " + path };
+        return { ok: false, error: qsTr("Your symbol library could not be " +
+            "checked: %1")
+            .arg(String(path)) };
     }
     var di = CsSymbolStore.openOffscreen(path);
     if (di === null) {
         return { ok: false, error:
-            "Your symbol library could not be read: " + path };
+            qsTr("Your symbol library " +
+            "could not be read: %1")
+            .arg(String(path)) };
     }
     var doc = di.getDocument();
     var block = null;
@@ -1674,12 +1718,16 @@ CsSymbolStore.deleteAreaPattern = function(path, blockName) {
         op.deleteObject(block);
         di.applyOperation(op);
     } catch (eDel) {
-        return { ok: false, error: "Your symbol library refused to give " +
-            "up " + blockName + " (" + eDel + ")." };
+        return { ok: false, error: qsTr("Your symbol library refused to give " +
+            "up %1 (%2).")
+            .arg(String(blockName))
+            .arg(String(eDel)) };
     }
     if (!CsSymbolStore.write(di, path)) {
         return { ok: false, error:
-            "Your symbol library could not be written: " + path };
+            qsTr("Your symbol library " +
+            "could not be written: %1")
+            .arg(String(path)) };
     }
     CsSymbolStore.invalidate(path);
     return { ok: true, error: "" };
@@ -1719,13 +1767,16 @@ CsSymbolStore.deleteBlock = function(path, blockName) {
                 trouble };
     }
     if (CsSymbols.byBlock(blockName) !== null) {
-        return { ok: false, error: blockName + " is one of the symbols the " +
-            "suite ships and cannot be deleted." };
+        return { ok: false, error: qsTr("%1 is one of the symbols the suite " +
+            "ships and cannot be deleted.")
+            .arg(String(blockName)) };
     }
     var di = CsSymbolStore.openOffscreen(path);
     if (di === null) {
         return { ok: false, error:
-            "The cave template could not be read: " + path };
+            qsTr("The cave template could " +
+            "not be read: %1")
+            .arg(String(path)) };
     }
     var doc = di.getDocument();
     var block = null;
@@ -1749,12 +1800,16 @@ CsSymbolStore.deleteBlock = function(path, blockName) {
         op.deleteObject(block);
         di.applyOperation(op);
     } catch (eDel) {
-        return { ok: false, error: "The template refused to give up " +
-            blockName + " (" + eDel + ")." };
+        return { ok: false, error: qsTr("The template refused to give up %1 " +
+            "(%2).")
+            .arg(String(blockName))
+            .arg(String(eDel)) };
     }
     if (!CsSymbolStore.write(di, path)) {
         return { ok: false, error:
-            "The template could not be written: " + path };
+            qsTr("The template could not " +
+            "be written: %1")
+            .arg(String(path)) };
     }
     CsSymbolStore.invalidate(path);
     return { ok: true, error: "" };

@@ -143,8 +143,10 @@ PackageCave.contentsOf = function(record) {
         try {
             var bytes = (new QFileInfo(path)).size();
             if (bytes < 1024) { return bytes + " B"; }
-            if (bytes < 1024 * 1024) { return Math.round(bytes / 1024) + " KB"; }
-            return (Math.round(bytes / 1024 / 102.4) / 10) + " MB";
+            if (bytes < 1024 * 1024) { return qsTr("%1 KB")
+                .arg(String(Math.round(bytes / 1024))); }
+            return qsTr("%1 MB")
+                .arg(String((Math.round(bytes / 1024 / 102.4) / 10)));
         } catch (e) {
             return "";
         }
@@ -897,16 +899,18 @@ PackageCave.runZip = function(command) {
         process.setWorkingDirectory(command.workingDirectory);
         process.start(command.program, command.args);
         if (!process.waitForStarted(10000)) {
-            return { ok: false, error: command.program + " would not start." };
+            return { ok: false, error: qsTr("%1 would not start.")
+                .arg(String(command.program)) };
         }
         if (!process.waitForFinished(PackageCave.TIMEOUT_S * 1000)) {
             process.kill();
-            return { ok: false, error: "zipping timed out." };
+            return { ok: false, error: qsTr("zipping timed out.") };
         }
         if (process.exitCode() !== 0) {
-            return { ok: false, error: command.program + " exited " +
-                process.exitCode() + ": " +
-                String(process.readAllStandardError()) };
+            return { ok: false, error: qsTr("%1 exited %2: %3")
+                .arg(String(command.program))
+                .arg(String(process.exitCode()))
+                .arg(String(process.readAllStandardError())) };
         }
         return { ok: true, error: "" };
     } catch (e) {

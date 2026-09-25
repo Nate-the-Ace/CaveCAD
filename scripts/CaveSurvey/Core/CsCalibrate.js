@@ -92,14 +92,14 @@ CsCalibrate.fromDistance = function(a, b, stated, statedUnit, drawingUnit,
     var span = CsCalibrate.dist(a, b);
     if (!(span > 0)) {
         var samePlace = CsCalibrate.unscaled();
-        samePlace.warnings.push("Both picks are in the same place, so " +
-            "they say nothing about size.");
+        samePlace.warnings.push(qsTr("Both picks are in the same place, so " +
+            "they say nothing about size."));
         return samePlace;
     }
     if (!(stated > 0)) {
         var noNumber = CsCalibrate.unscaled();
-        noNumber.warnings.push("A distance of " + stated + " cannot " +
-            "scale anything.");
+        noNumber.warnings.push(qsTr("A distance of %1 cannot scale anything.")
+            .arg(String(stated)));
         return noNumber;
     }
     var real = CsUnits.convert(stated, statedUnit, drawingUnit);
@@ -141,8 +141,8 @@ CsCalibrate.fromDistances = function(rows, drawingUnit) {
     }
     if (scales.length === 0) {
         var none = CsCalibrate.unscaled();
-        none.warnings.push("None of the distances given could scale " +
-            "anything.");
+        none.warnings.push(qsTr("None of the distances given could scale " +
+            "anything."));
         return none;
     }
     scales.sort(function(x, y) { return x - y; });
@@ -161,11 +161,11 @@ CsCalibrate.fromDistances = function(rows, drawingUnit) {
         scale: chosen, northDeg: null, spread: spread,
         used: scales.length, warnings: [] };
     if (spread > CsCalibrate.SPREAD_WARN) {
-        out.warnings.push("The distances given disagree by up to " +
-            Math.round(spread * 100) + "%. One of them is probably " +
-            "wrong, or two picks landed on the wrong points -- the " +
-            "middle one was used, but check them before trusting a " +
-            "length off this map.");
+        out.warnings.push(qsTr("The distances given disagree by up to %1%. " +
+            "One of them is probably wrong, or two picks landed on the wrong " +
+            "points -- the middle one was used, but check them before " +
+            "trusting a length off this map.")
+            .arg(String(Math.round(spread * 100))));
     }
     return out;
 };
@@ -191,8 +191,8 @@ CsCalibrate.fromPoints = function(pairs) {
     var fit = CsScanFit.fit(pairs);
     if (fit === null) {
         var no = CsCalibrate.unscaled();
-        no.warnings.push("Two points in different places are needed to " +
-            "tie a map to the world.");
+        no.warnings.push(qsTr("Two points in different places are needed to " +
+            "tie a map to the world."));
         return no;
     }
     var sx = Math.sqrt(fit.matrix.a * fit.matrix.a +
@@ -206,10 +206,10 @@ CsCalibrate.fromPoints = function(pairs) {
         spread: null, used: pairs.length, warnings: [],
         matrix: fit.matrix, kind: fit.kind, residual: residual };
     if (fit.thin === true) {
-        out.warnings.push("The points given sit almost in a straight " +
+        out.warnings.push(qsTr("The points given sit almost in a straight " +
             "line, so nothing can be said about the direction across " +
             "it. The map keeps its shape rather than being stretched " +
-            "on a guess.");
+            "on a guess."));
     }
     return out;
 };
@@ -262,17 +262,18 @@ CsCalibrate.northFromArrow = function(tail, head) {
 CsCalibrate.describe = function(calibration) {
     if (calibration === null || calibration === undefined ||
             !calibration.scaled) {
-        return "Nothing scales this map. No length can be quoted from it.";
+        return qsTr("Nothing scales this map. No length can be quoted from it.");
     }
     switch (calibration.evidence) {
     case CsCalibrate.SCALEBAR:
-        return "Scaled from the map's own scale bar.";
+        return qsTr("Scaled from the map's own scale bar.");
     case CsCalibrate.DISTANCE:
-        return "Scaled from one stated distance.";
+        return qsTr("Scaled from one stated distance.");
     case CsCalibrate.DISTANCES:
-        return "Scaled from " + calibration.used + " stated distances, " +
-            "which disagree by up to " +
-            Math.round((calibration.spread || 0) * 100) + "%.";
+        return qsTr("Scaled from %1 stated distances, which disagree by up to " +
+            "%2%.")
+            .arg(String(calibration.used))
+            .arg(String(Math.round((calibration.spread || 0) * 100)));
     case CsCalibrate.POINTS:
         return "Tied to " + calibration.used + " known points; the " +
             "worst is out by " +
@@ -280,6 +281,6 @@ CsCalibrate.describe = function(calibration) {
                 calibration.residual === undefined ? "?" :
                 calibration.residual.worst.toFixed(2)) + ".";
     default:
-        return "Scaled by unrecorded means.";
+        return qsTr("Scaled by unrecorded means.");
     }
 };

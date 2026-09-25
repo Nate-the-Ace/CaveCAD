@@ -79,13 +79,13 @@ CsSketchReport.counts = function(report) {
  */
 CsSketchReport.fit = function(solution, unitName) {
     if (solution === null || solution === undefined || !solution.ok) {
-        return "not placed";
+        return qsTr("not placed");
     }
     var unit = (unitName === undefined || unitName === null) ? "" :
         " " + unitName;
     if (solution.kind === "translation") {
-        return "placed on its single station marker, at the scale the " +
-            "sketch declares";
+        return qsTr("placed on its single station marker, at the scale the " +
+            "sketch declares");
     }
     var worst = solution.residual === null ? 0 : solution.residual.worst;
     var how = "fitted on " + CsSketchReport.plural(solution.used,
@@ -96,8 +96,10 @@ CsSketchReport.fit = function(solution, unitName) {
     // Two decimals: a tenth of a foot is the scale at which a caver
     // starts caring, and three would imply a precision a hand sketch
     // has never had.
-    return how + "; before bending, the worst station was out by " +
-        worst.toFixed(2) + unit;
+    return qsTr("%1; before bending, the worst station was out by %2%3")
+        .arg(String(how))
+        .arg(worst.toFixed(2))
+        .arg(String(unit));
 };
 
 /**
@@ -109,7 +111,7 @@ CsSketchReport.fit = function(solution, unitName) {
 CsSketchReport.forFile = function(name, result) {
     var lines = [name + ":"];
     if (result === null || result === undefined) {
-        lines.push("    could not be read");
+        lines.push(qsTr("    could not be read"));
         return lines.join("\n");
     }
     for (var i = 0; i < result.findings.length; i++) {
@@ -121,12 +123,13 @@ CsSketchReport.forFile = function(name, result) {
             lines.push("    " + scrap.name + ": " +
                 CsSketchReport.counts(scrap.report));
         } else {
-            lines.push("    " + scrap.name + ": not imported -- " +
-                scrap.reason);
+            lines.push(qsTr("    %1: not imported -- %2")
+                .arg(String(scrap.name))
+                .arg(String(scrap.reason)));
         }
     }
     if (result.cancelled) {
-        lines.push("    stopped here at your request");
+        lines.push(qsTr("    stopped here at your request"));
     }
     return lines.join("\n");
 };
@@ -140,7 +143,7 @@ CsSketchReport.summary = function(totals, fileBlocks) {
         lines.push(fileBlocks[i]);
     }
     lines.push("");
-    lines.push("In all: " + CsSketchReport.counts(totals) + ".");
+    lines.push(qsTr("In all: %1.").arg(String(CsSketchReport.counts(totals))));
 
     if (totals.unknown.length > 0) {
         // NAMED, not counted. "4 unrecognised types" tells a caver

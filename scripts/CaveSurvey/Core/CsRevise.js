@@ -736,14 +736,17 @@ CsRevise.parseTripEdits = function(rows) {
         var text = String(r.text === undefined || r.text === null ?
             "" : r.text).replace(/^\s+|\s+$/g, "");
         if (!/^[+-]?(\d+\.?\d*|\.\d+)$/.test(text)) {
-            return { error: "Trip " + r.tripId + ": \"" + text +
-                "\" is not a number (degrees, east positive). " +
-                "Nothing was changed." };
+            return { error: qsTr("Trip %1: \"%2\" is not a number (degrees, " +
+                "east positive). Nothing was changed.")
+                .arg(String(r.tripId))
+                .arg(String(text)) };
         }
         var value = parseFloat(text);
         if (!isFinite(value)) {
-            return { error: "Trip " + r.tripId + ": \"" + text +
-                "\" is not a usable number. Nothing was changed." };
+            return { error: qsTr("Trip %1: \"%2\" is not a usable number. " +
+                "Nothing was changed.")
+                .arg(String(r.tripId))
+                .arg(String(text)) };
         }
         // Unchanged means "still reads as what we prefilled", NOT
         // "equals the recorded double". The prefill is
@@ -1552,7 +1555,8 @@ CsRevise.lineworkSummary = function(moved, unmoved, bound, stationsMoved,
             lines.push("  " + list[u]);
         }
         if (list.length > cap) {
-            lines.push("  ... and " + (list.length - cap) + " more");
+            lines.push(qsTr("  ... and %1 more")
+                .arg(String((list.length - cap))));
         }
     }
     if (n === 0 && w === 0 && didStationsMove) {
@@ -1570,10 +1574,10 @@ CsRevise.lineworkSummary = function(moved, unmoved, bound, stationsMoved,
         // could follow, did, just by bending rather than sliding as one
         // piece, so this warning must not fire on that case either.
         lines.push("");
-        lines.push("WARNING -- hand-drawn linework that is not bound " +
+        lines.push(qsTr("WARNING -- hand-drawn linework that is not bound " +
             "to the survey did NOT move with it; re-trace walls and " +
             "detail near the moved stations, or bind it first " +
-            "(Adopt linework) and revise again.");
+            "(Adopt linework) and revise again."));
     }
     return lines;
 };

@@ -486,7 +486,9 @@ CsShelf.healthText = function(stats, grade, unit) {
     var u = (unit === undefined || unit === null) ? "" : unit;
 
     if (typeof stats.depth === "number" && stats.depth > 0) {
-        parts.push("depth " + Math.round(stats.depth) + " " + u);
+        parts.push(qsTr("depth %1 %2")
+            .arg(String(Math.round(stats.depth)))
+            .arg(String(u)));
     }
     if (typeof stats.stationCount === "number") {
         parts.push(stats.stationCount + " station" +

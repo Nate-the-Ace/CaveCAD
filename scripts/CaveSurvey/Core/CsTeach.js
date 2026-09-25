@@ -123,9 +123,10 @@ CsTeach.planReset = function(state) {
     }
     return {
         can: true, verb: "replace", reason: "",
-        warning: "This throws away everything in the teaching copy of " +
-            name + " and lays down a fresh one. Any drawing a student " +
-            "has done there is gone. The original cave is not touched."
+        warning: qsTr("This throws away everything in the teaching copy of %1 " +
+            "and lays down a fresh one. Any drawing a student has done there " +
+            "is gone. The original cave is not touched.")
+            .arg(String(name))
     };
 };
 
@@ -151,9 +152,10 @@ CsTeach.planMaster = function(state) {
     }
     if (state.masterExists === true) {
         return { can: true, verb: "refresh", reason: "",
-            warning: "This replaces the pristine copy of " +
-                state.caveName + " that resets go back to. Do it when " +
-                "the real cave has been surveyed further." };
+            warning: qsTr("This replaces the pristine copy of %1 that resets " +
+                "go back to. Do it when the real cave has been surveyed " +
+                "further.")
+                .arg(String(state.caveName)) };
     }
     return { can: true, verb: "create", reason: "", warning: "" };
 };

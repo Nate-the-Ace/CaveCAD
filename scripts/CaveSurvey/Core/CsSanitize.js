@@ -119,7 +119,7 @@ CsSanitize.writeCopy = function(sourcePath, targetPath) {
     try {
         if (di.importFile(sourcePath, "", false) !==
                 RDocumentInterface.IoErrorNoError) {
-            result.error = "Could not read the drawing.";
+            result.error = qsTr("Could not read the drawing.");
             return result;
         }
         var doc = di.getDocument();
@@ -150,10 +150,10 @@ CsSanitize.writeCopy = function(sourcePath, targetPath) {
             if (typeof CsSurfaceData === "undefined" ||
                     typeof CsSurfaceData.eraseExistingImagery !==
                         "function") {
-                result.error = "Cannot sanitize: the basemap eraser " +
+                result.error = qsTr("Cannot sanitize: the basemap eraser " +
                     "(CsSurfaceData.eraseExistingImagery) is missing, " +
                     "so aerial imagery could not be removed. No " +
-                    "sanitized copy has been written.";
+                    "sanitized copy has been written.");
                 return;
             }
             result.basemaps = CsSurfaceData.eraseExistingImagery(doc, di);
@@ -164,11 +164,11 @@ CsSanitize.writeCopy = function(sourcePath, targetPath) {
 
         result.ok = di.exportFile(targetPath, CsSanitize.dxfFilter());
         if (!result.ok) {
-            result.error = "Could not write the sanitized drawing.";
+            result.error = qsTr("Could not write the sanitized drawing.");
         }
     } catch (e) {
         result.ok = false;
-        result.error = "Sanitizing failed: " + e;
+        result.error = qsTr("Sanitizing failed: %1").arg(String(e));
     } finally {
         // destr() is QCAD's own safe destroyer and is what PackageCave
         // used here; a context without it leaks a memory document,
