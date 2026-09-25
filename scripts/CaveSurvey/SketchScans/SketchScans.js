@@ -2236,7 +2236,7 @@ SketchScans.buildDock = function(appWin) {
                     var fMarked = CsScanTree.folderComplete(
                         w.rows[row].rel, w.rows, w.bookmarks);
                     var fAct = w.scanMenu.addAction(
-                        qsTr(CsScanList.folderMarkLabel(fMarked)));
+                        CsScanList.menuText(CsScanList.folderMarkLabel(fMarked)));
                     try {
                         fAct.checkable = true;
                         fAct.checked = fMarked;
@@ -2265,7 +2265,7 @@ SketchScans.buildDock = function(appWin) {
                     // the tick, so every panel showing this list says
                     // the same words.
                     var act = w.scanMenu.addAction(
-                        qsTr(CsScanList.markLabel(marked)));
+                        CsScanList.menuText(CsScanList.markLabel(marked)));
                     try {
                         act.checkable = true;
                         act.checked = marked;

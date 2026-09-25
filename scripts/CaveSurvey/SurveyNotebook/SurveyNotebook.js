@@ -470,10 +470,10 @@ SurveyNotebook.addStationRow = function(w, stationName) {
         notes: SurveyNotebook.upperCasePlain(w, new QPlainTextEdit()),
         widgets: []
     };
-    row.name.toolTip = "Station name. Blank line = separator: the " +
+    row.name.toolTip = qsTr("Station name. Blank line = separator: the " +
         "next named line re-anchors the chain (write an earlier " +
         "station to branch from it). <station>.<n> (A3.1) = splay " +
-        "shot off the current station: azimuth + distance to a wall.";
+        "shot off the current station: azimuth + distance to a wall.");
     // Notes are INTENTIONAL: click to write one. ClickFocus keeps Tab
     // from ever landing here, so flying through measurements skips the
     // box -- but once you're IN a note, Tab moves on to the next
@@ -498,10 +498,10 @@ SurveyNotebook.addStationRow = function(w, stationName) {
     } catch (eTc) {
         // older bridge: Tab keeps inserting a tab character here
     }
-    row.notes.placeholderText = "note...";
-    row.notes.toolTip = "Station note -- stored with the survey data " +
+    row.notes.placeholderText = qsTr("note...");
+    row.notes.toolTip = qsTr("Station note -- stored with the survey data " +
         "(and exported as the shot's comment). Click to edit; Tab " +
-        "moves on to the next station.";
+        "moves on to the next station.");
     SurveyNotebook.safeConnect(row.notes.textChanged, function() {
         SurveyNotebook.refresh(w);
     }, "note refresh", w.problems);
@@ -724,10 +724,10 @@ SurveyNotebook.refresh = function(w) {
     if (survey.shots.length === 0) {
         w.statusLabel.setPlainText(
             (bindLine !== "" ? bindLine + "\n\n" : "") +
-            "No shots yet. Shots are written " +
+            qsTr("No shots yet. Shots are written " +
             "between the stations they connect; azimuth clockwise from " +
             "north, distance along the tape, backsights optional. LRUD " +
-            "sits beside its station.");
+            "sits beside its station."));
         // A page emptied back to nothing takes its ghost with it.
         SurveyNotebook.clearGhost();
         return;
@@ -749,15 +749,18 @@ SurveyNotebook.refresh = function(w) {
     if (bindLine !== "") {
         lines.push(bindLine);
     }
-    lines.push("Length " + CsReport.length(stats.surveyedLength, w.unit) +
-        "   Depth " + CsReport.length(stats.depth, w.unit) +
-        "   Stations " + stats.stationCount +
-        "   Grade " + grade.uis);
+    lines.push(qsTr("Length %1   Depth %2   Stations %3   Grade %4")
+        .arg(CsReport.length(stats.surveyedLength, w.unit))
+        .arg(CsReport.length(stats.depth, w.unit))
+        .arg(stats.stationCount)
+        .arg(grade.uis));
     for (var i = 0; i < resolved.loops.length; i++) {
         var loop = resolved.loops[i];
-        lines.push("Loop " + loop.from + " to " + loop.to + ": " +
-            loop.error.toFixed(2) + " over " + loop.traverseLength.toFixed(1) +
-            " (" + loop.percent.toFixed(2) + "%)");
+        lines.push(qsTr("Loop %1 to %2: %3 over %4 (%5%)")
+            .arg(loop.from).arg(loop.to)
+            .arg(loop.error.toFixed(2))
+            .arg(loop.traverseLength.toFixed(1))
+            .arg(loop.percent.toFixed(2)));
     }
     var shown = 0;
     for (i = 0; i < findings.length && shown < 4; i++) {
@@ -766,7 +769,8 @@ SurveyNotebook.refresh = function(w) {
         shown++;
     }
     if (findings.length > shown) {
-        lines.push("(" + (findings.length - shown) + " more -- see Draw's report)");
+        lines.push(qsTr("(%1 more -- see Draw's report)")
+            .arg(findings.length - shown));
     }
     w.statusLabel.setPlainText(lines.join("\n"));
 };
@@ -794,10 +798,11 @@ SurveyNotebook.drawSurvey = function(w, forceFull) {
     try {
         SurveyNotebook.drawSurveyInner(w, forceFull === true);
     } catch (e) {
-        QMessageBox.warning(null, "Survey Notebook",
-            "Draw failed inside this build's bridge:\n\n" + e +
-            "\n\n" + (e.stack ? String(e.stack).substring(0, 600) : "") +
-            "\n\nPlease report this text.");
+        QMessageBox.warning(null, qsTr("Survey Notebook"),
+            qsTr("Draw failed inside this build's bridge:\n\n%1\n\n%2" +
+                "\n\nPlease report this text.")
+                .arg(String(e))
+                .arg(e.stack ? String(e.stack).substring(0, 600) : ""));
     }
 };
 
@@ -1053,7 +1058,7 @@ SurveyNotebook.plainAnchor = function(doc, survey) {
     // position and elevation both.
     var anchor;
     var tieIn = null;
-    var sel = CsPick.startPointFromSelection(doc, "Survey Notebook");
+    var sel = CsPick.startPointFromSelection(doc, qsTr("Survey Notebook"));
     if (sel !== undefined && survey.shots.length > 0) {
         // No reconstruction exists on this path (recon was null,
         // legacy, or empty above), so there is no recorded datum to
@@ -1096,17 +1101,17 @@ SurveyNotebook.drawSurveyInner = function(w, forceFull) {
     // cave's record every time Build Sheet is pressed, so anything
     // drawn here goes with it -- silently, weeks later. See
     // Core/CsSheetFile.js.
-    if (CsSheetFile.blocks(doc, "Survey Notebook")) {
+    if (CsSheetFile.blocks(doc, qsTr("Survey Notebook"))) {
         return;
     }
     var di = getDocumentInterface();
     if (doc === undefined || doc === null) {
-        QMessageBox.warning(null, "Survey Notebook", "No drawing is open.");
+        QMessageBox.warning(null, qsTr("Survey Notebook"), qsTr("No drawing is open."));
         return;
     }
     var survey = SurveyNotebook.sheetSurvey(w);
     if (survey.shots.length === 0) {
-        QMessageBox.information(null, "Survey Notebook", "No shots to draw.");
+        QMessageBox.information(null, qsTr("Survey Notebook"), qsTr("No shots to draw."));
         return;
     }
 
@@ -1158,16 +1163,20 @@ SurveyNotebook.drawSurveyInner = function(w, forceFull) {
         CsLayerGroups.fileTripsQuietly(doc);
     }
 
-    QMessageBox.information(null, "Survey Notebook",
-        (tieIn !== null ? ("Tied into existing station " + tieIn +
+    QMessageBox.information(null, qsTr("Survey Notebook"),
+        (tieIn !== null ? qsTr("Tied into existing station %1" +
             " -- the new survey continues from its position and " +
-            "elevation.\n\n") : "") +
-        (replaced > 0 ? ("Replaced " + replaced + " previously drawn " +
-            "mark" + (replaced === 1 ? "" : "s") + " for this page's " +
-            "stations (undo twice to restore them).\n\n") : "") +
+            "elevation.").arg(tieIn) + "\n\n" : "") +
+        (replaced > 0 ? (replaced === 1 ?
+            qsTr("Replaced %1 previously drawn mark for this page's " +
+                "stations (undo twice to restore them).") :
+            qsTr("Replaced %1 previously drawn marks for this page's " +
+                "stations (undo twice to restore them).")).arg(replaced) +
+            "\n\n" : "") +
         CsReport.drawSummary(survey, resolved, drawn, findings) +
-        "\n\nDrawn as one undo step" +
-        (replaced > 0 ? " after the replace" : "") + ".");
+        "\n\n" + (replaced > 0 ?
+            qsTr("Drawn as one undo step after the replace.") :
+            qsTr("Drawn as one undo step.")));
 };
 
 // ---------------------------------------------------------------------
@@ -1545,7 +1554,7 @@ SurveyNotebook.tripChoiceLabel = function(tripId, trip, shotCount, range) {
         return String(v === undefined || v === null ? "" : v)
             .replace(/\|/g, "/").replace(/^\s+|\s+$/g, "");
     };
-    var parts = ["Trip " + tripId + ":"];
+    var parts = [qsTr("Trip %1:").arg(tripId)];
     var f = clean(range === undefined || range === null ? "" : range.from);
     var t = clean(range === undefined || range === null ? "" : range.to);
     if (f !== "" && t !== "") {
@@ -1557,8 +1566,8 @@ SurveyNotebook.tripChoiceLabel = function(tripId, trip, shotCount, range) {
         // field that still tells the trips apart
         parts.push(clean(trip.date));
     }
-    parts.push("(" + shotCount + " shot" +
-        (shotCount === 1 ? "" : "s") + ")");
+    parts.push((shotCount === 1 ? qsTr("(%1 shot)") : qsTr("(%1 shots)"))
+        .arg(shotCount));
     return parts.join(" ");
 };
 
@@ -1572,29 +1581,30 @@ SurveyNotebook.tripChoiceLabel = function(tripId, trip, shotCount, range) {
 SurveyNotebook.loadFromDrawing = function(w) {
     var doc = getDocument();
     if (doc === undefined || doc === null) {
-        QMessageBox.warning(null, "Survey Notebook", "No drawing is open.");
+        QMessageBox.warning(null, qsTr("Survey Notebook"), qsTr("No drawing is open."));
         return;
     }
     var recon;
     try {
         recon = CsRevise.surveyFromDocument(doc);
     } catch (eRe) {
-        QMessageBox.warning(null, "Survey Notebook",
-            "Couldn't read the survey back from this drawing (" + eRe + ").");
+        QMessageBox.warning(null, qsTr("Survey Notebook"),
+            qsTr("Couldn't read the survey back from this drawing (%1).")
+                .arg(String(eRe)));
         return;
     }
     if (recon.legacy === true) {
-        QMessageBox.information(null, "Survey Notebook",
-            "This drawing's survey predates the exact tag schema, so " +
+        QMessageBox.information(null, qsTr("Survey Notebook"),
+            qsTr("This drawing's survey predates the exact tag schema, so " +
             "its shots can't be loaded back faithfully.\n\n" +
             "Run Repair Drawing (command: rep) " +
             "first -- it upgrades the tags in place -- then Load " +
-            "Drawing again.");
+            "Drawing again."));
         return;
     }
     if (recon.survey.shots.length === 0) {
-        QMessageBox.warning(null, "Survey Notebook",
-            "No survey shots found in this drawing -- nothing to load.");
+        QMessageBox.warning(null, qsTr("Survey Notebook"),
+            qsTr("No survey shots found in this drawing -- nothing to load."));
         return;
     }
 
@@ -1613,9 +1623,9 @@ SurveyNotebook.loadFromDrawing = function(w) {
     if (withShots.length === 0) {
         // shots tagged with a trip id no trip record covers (a
         // hand-edited drawing): no header to load them under
-        QMessageBox.warning(null, "Survey Notebook",
-            "This drawing's shots don't belong to any trip recorded in " +
-            "it, so there's no trip header to load them under.");
+        QMessageBox.warning(null, qsTr("Survey Notebook"),
+            qsTr("This drawing's shots don't belong to any trip recorded in " +
+            "it, so there's no trip header to load them under."));
         return;
     }
     var tripId;
@@ -1629,9 +1639,10 @@ SurveyNotebook.loadFromDrawing = function(w) {
                 SurveyNotebook.tripStationRange(recon.survey,
                     withShots[i])));
         }
-        var choice = getItem("Survey Notebook",
-            "This drawing holds " + withShots.length + " trips -- one " +
-            "page is one trip. Load which?", labels.join("|"), 0, "|");
+        var choice = getItem(qsTr("Survey Notebook"),
+            qsTr("This drawing holds %1 trips -- one " +
+            "page is one trip. Load which?").arg(withShots.length),
+            labels.join("|"), 0, "|");
         if (choice === undefined) {
             return;
         }
@@ -1664,14 +1675,16 @@ SurveyNotebook.loadFromDrawing = function(w) {
     // Without it, correcting the date or team you just loaded forked
     // the trip into a duplicate instead of revising it.
     w.loadedTripId = tripId;
-    EAction.handleUserMessage("Survey Notebook: loaded trip " + tripId +
-        " (" + counts[tripId] + " shot" +
-        (counts[tripId] === 1 ? "" : "s") + ") from the drawing. Edit " +
+    EAction.handleUserMessage((counts[tripId] === 1 ?
+        qsTr("Survey Notebook: loaded trip %1 (%2 shot) from the drawing.") :
+        qsTr("Survey Notebook: loaded trip %1 (%2 shots) from the drawing."))
+        .arg(tripId).arg(counts[tripId]) + " " +
+        qsTr("Edit " +
         "the page and Draw to revise that trip in place. (Backsights " +
         "and Compass-style exclusion flags don't fit on this page, but " +
         "they are preserved through the redraw -- except that editing " +
         "a shot's azimuth drops that shot's backsight, since the two " +
-        "would then disagree.)");
+        "would then disagree.)"));
 };
 
 /**
@@ -1779,30 +1792,34 @@ SurveyNotebook.drawPartial = function(w, doc, di, merged, resolved,
         if (geoHome !== null) {
             CsLocationPick.rehome(di, geoCarried, geoHome.entity);
         } else {
-            geoLine = "\n\nThe geo anchor was on station " +
-                geoBefore.station + ", which this page no longer " +
+            geoLine = "\n\n" + qsTr("The geo anchor was on station %1, " +
+                "which this page no longer " +
                 "draws -- the georeference is LOST. Re-anchor before " +
-                "fetching imagery again.";
+                "fetching imagery again.").arg(geoBefore.station);
         }
     }
 
     var fp = CsModel.tripFingerprint(merged.trips[tripId]);
     var tripLine = (merge.replaced ?
-        ("Replaced trip " + tripId + " (" + fp + ") with this page's " +
-            "shots.") :
-        ("Added this page as new trip " + tripId + " (" + fp + ").")) +
-        " Nothing else moved, so only this trip was redrawn -- use " +
-        "Redraw All in the ... menu to redraw the whole cave.";
+        qsTr("Replaced trip %1 (%2) with this page's shots.") :
+        qsTr("Added this page as new trip %1 (%2).")).arg(tripId).arg(fp) +
+        " " + qsTr("Nothing else moved, so only this trip was redrawn -- use " +
+        "Redraw All in the ... menu to redraw the whole cave.");
 
-    EAction.handleUserMessage("Survey Notebook: " + tripLine + geoLine);
-    QMessageBox.information(null, "Survey Notebook",
+    EAction.handleUserMessage(qsTr("Survey Notebook: %1").arg(tripLine) +
+        geoLine);
+    QMessageBox.information(null, qsTr("Survey Notebook"),
         tripLine + "\n\n" +
-        (replaced > 0 ? ("Replaced " + replaced + " previously drawn " +
-            "mark" + (replaced === 1 ? "" : "s") + " for this trip " +
-            "(undo twice to restore them).\n\n") : "") +
+        (replaced > 0 ? (replaced === 1 ?
+            qsTr("Replaced %1 previously drawn mark for this trip " +
+                "(undo twice to restore them).") :
+            qsTr("Replaced %1 previously drawn marks for this trip " +
+                "(undo twice to restore them).")).arg(replaced) +
+            "\n\n" : "") +
         CsReport.drawSummary(merged, resolved, drawn, findings) + geoLine +
-        "\n\nDrawn as one undo step" +
-        (replaced > 0 ? " after the replace" : "") + ".");
+        "\n\n" + (replaced > 0 ?
+            qsTr("Drawn as one undo step after the replace.") :
+            qsTr("Drawn as one undo step.")));
 };
 
 /**
@@ -1885,7 +1902,7 @@ SurveyNotebook.mergedPlan = function(w, doc, survey, recon) {
     // for stations the anchored component never reaches, so this
     // places a genuinely NEW, disconnected trip where the user asked
     // and changes nothing when the page ties into the existing survey.
-    var sel = CsPick.startPointFromSelection(doc, "Survey Notebook");
+    var sel = CsPick.startPointFromSelection(doc, qsTr("Survey Notebook"));
     if (sel !== undefined && survey.shots.length > 0) {
         var firstPage = survey.shots[0].from;
         if (firstPage !== "" && firstPage !== anchor.name &&
@@ -2071,19 +2088,19 @@ SurveyNotebook.drawMergedSurvey = function(w, doc, survey, recon,
         if (geoHome !== null) {
             CsLocationPick.rehome(di, geoCarried, geoHome.entity);
         } else {
-            geoLine = "\n\nThe geo anchor was on station " +
-                geoBefore.station + ", which this page no longer " +
+            geoLine = "\n\n" + qsTr("The geo anchor was on station %1, " +
+                "which this page no longer " +
                 "draws -- the georeference is LOST. Re-anchor before " +
-                "fetching imagery again.";
+                "fetching imagery again.").arg(geoBefore.station);
         }
     }
 
     var fp = CsModel.tripFingerprint(merged.trips[merge.tripId]);
-    var tripLine = merge.replaced ?
-        ("Replaced trip " + merge.tripId + " (" + fp + ") with this " +
+    var tripLine = (merge.replaced ?
+        qsTr("Replaced trip %1 (%2) with this " +
             "page's shots; the whole survey redrew as one merged model.") :
-        ("Added this page as new trip " + merge.tripId + " (" + fp +
-            ") alongside the drawing's existing trips.");
+        qsTr("Added this page as new trip %1 (%2) " +
+            "alongside the drawing's existing trips.")).arg(merge.tripId).arg(fp);
 
     // No RevisionLog anymore (Nathan, 2026-08-27): Drive's version
     // history is the record, and the unbounded tag line is what bricked
@@ -2095,46 +2112,51 @@ SurveyNotebook.drawMergedSurvey = function(w, doc, survey, recon,
     var carried = merge.carried;
     var carryBits = [];
     var shotWord = function(n) {
-        return n + " shot" + (n === 1 ? "" : "s");
+        return (n === 1 ? qsTr("%1 shot") : qsTr("%1 shots")).arg(n);
     };
     if (carried.backsights > 0) {
-        carryBits.push("kept the backsight readings on " +
-            shotWord(carried.backsights));
+        carryBits.push(qsTr("kept the backsight readings on %1")
+            .arg(shotWord(carried.backsights)));
     }
     if (carried.flags > 0) {
-        carryBits.push("kept the exclusion flags on " +
-            shotWord(carried.flags));
+        carryBits.push(qsTr("kept the exclusion flags on %1")
+            .arg(shotWord(carried.flags)));
     }
     if (carried.droppedBacksights > 0) {
-        carryBits.push("dropped the backsight on " +
-            shotWord(carried.droppedBacksights) + " whose azimuth or " +
+        carryBits.push(qsTr("dropped the backsight on %1 whose azimuth or " +
             "inclination the page changed, since it would no longer " +
-            "agree with the foresight");
+            "agree with the foresight")
+            .arg(shotWord(carried.droppedBacksights)));
     }
     var carryLine = carryBits.length === 0 ? "" :
-        (" Backsights and exclusion flags have no cells on the page, " +
+        (" " + qsTr("Backsights and exclusion flags have no cells on the page, " +
             "so they carried over from the shots the drawing already " +
-            "held: " + carryBits.join("; ") + ".");
+            "held: %1.").arg(carryBits.join("; ")));
 
-    EAction.handleUserMessage("Survey Notebook: " + tripLine + carryLine +
-        lwLine + geoLine);
-    QMessageBox.information(null, "Survey Notebook",
+    EAction.handleUserMessage(qsTr("Survey Notebook: %1").arg(tripLine) +
+        carryLine + lwLine + geoLine);
+    QMessageBox.information(null, qsTr("Survey Notebook"),
         tripLine + carryLine + "\n\n" +
-        (replaced > 0 ? ("Replaced " + replaced + " previously drawn " +
-            "mark" + (replaced === 1 ? "" : "s") + " (undo twice to " +
-            "restore them).\n\n") : "") +
+        (replaced > 0 ? (replaced === 1 ?
+            qsTr("Replaced %1 previously drawn mark (undo twice to " +
+                "restore them).") :
+            qsTr("Replaced %1 previously drawn marks (undo twice to " +
+                "restore them).")).arg(replaced) + "\n\n" : "") +
         CsReport.drawSummary(merged, resolved, drawn, findings) + lwLine +
         geoLine +
-        "\n\nDrawn as one undo step" +
-        (replaced > 0 ? " after the replace" : "") +
+        "\n\n" + (replaced > 0 ?
+            qsTr("Drawn as one undo step after the replace") :
+            qsTr("Drawn as one undo step")) +
         // said out loud because it changes what one undo does: the
         // linework move is its own operation, exactly as it is on
         // CsRevise.apply's path -- and the automatic binding is another
         // one in front of it, which is why the count is named here
-        (lwBound > 0 ? "; binding " + lwBound + " untagged item" +
-            (lwBound === 1 ? "" : "s") + " was a further one" : "") +
+        (lwBound > 0 ? (lwBound === 1 ?
+            qsTr("; binding %1 untagged item was a further one") :
+            qsTr("; binding %1 untagged items was a further one"))
+            .arg(lwBound) : "") +
         (lw !== null && (lw.moved > 0 || lw.warped > 0) ?
-            "; the linework move is a further one" : "") +
+            qsTr("; the linework move is a further one") : "") +
         // and the log write is the last one, for the same reason: a
         // user undoing back past the redraw needs to know how many
         // steps that is. Named for the write, not for the new entry --
@@ -2146,14 +2168,14 @@ SurveyNotebook.drawMergedSurvey = function(w, doc, survey, recon,
 
 SurveyNotebook.importFile = function(w) {
     var fileName = QFileDialog.getOpenFileName(null,
-        "Import survey file", "", CsFormatRegistry.combinedFileFilter());
+        qsTr("Import survey file"), "", CsFormatRegistry.combinedFileFilter());
     if (isNull(fileName) || String(fileName) === "") {
         return;
     }
     var f = new QFile(fileName);
     if (!f.open(QIODevice.ReadOnly | QIODevice.Text)) {
-        QMessageBox.warning(null, "Survey Notebook",
-            "Could not open " + fileName);
+        QMessageBox.warning(null, qsTr("Survey Notebook"),
+            qsTr("Could not open %1").arg(fileName));
         return;
     }
     var content = new QTextStream(f).readAll();
@@ -2161,14 +2183,14 @@ SurveyNotebook.importFile = function(w) {
 
     var format = CsFormatRegistry.detect(fileName, content);
     if (format === null) {
-        QMessageBox.warning(null, "Survey Notebook",
-            "Couldn't detect the format of that file.");
+        QMessageBox.warning(null, qsTr("Survey Notebook"),
+            qsTr("Couldn't detect the format of that file."));
         return;
     }
     var survey = format.parse(content);
     if (survey.shots.length === 0) {
-        QMessageBox.warning(null, "Survey Notebook",
-            "No shots parsed (format tried: " + format.label + ").");
+        QMessageBox.warning(null, qsTr("Survey Notebook"),
+            qsTr("No shots parsed (format tried: %1).").arg(format.label));
         return;
     }
     SurveyNotebook.setSurvey(w, survey);
@@ -2177,14 +2199,14 @@ SurveyNotebook.importFile = function(w) {
 SurveyNotebook.exportFile = function(w) {
     var survey = SurveyNotebook.sheetSurvey(w);
     if (survey.shots.length === 0) {
-        QMessageBox.information(null, "Survey Notebook", "Nothing to export.");
+        QMessageBox.information(null, qsTr("Survey Notebook"), qsTr("Nothing to export."));
         return;
     }
     var labels = [];
     for (var i = 0; i < CsFormatRegistry.FORMATS.length; i++) {
         labels.push(CsFormatRegistry.FORMATS[i].label);
     }
-    var choice = getItem("Survey Notebook", "Export as which format?",
+    var choice = getItem(qsTr("Survey Notebook"), qsTr("Export as which format?"),
         labels.join("|"), 0, "|");
     if (choice === undefined) {
         return;
@@ -2196,22 +2218,23 @@ SurveyNotebook.exportFile = function(w) {
         }
     }
     var fileName = QFileDialog.getSaveFileName(null,
-        "Export " + format.label, "", format.fileFilter);
+        qsTr("Export %1").arg(format.label), "", format.fileFilter);
     if (isNull(fileName) || String(fileName) === "") {
         return;
     }
     var content = format.write(survey);
     var f = new QFile(fileName);
     if (!f.open(QIODevice.WriteOnly | QIODevice.Text)) {
-        QMessageBox.warning(null, "Survey Notebook",
-            "Could not write " + fileName);
+        QMessageBox.warning(null, qsTr("Survey Notebook"),
+            qsTr("Could not write %1").arg(fileName));
         return;
     }
     var stream = new QTextStream(f);
     stream.writeString(content);
     f.close();
-    EAction.handleUserMessage("Survey Notebook: exported " +
-        survey.shots.length + " shots to " + fileName);
+    EAction.handleUserMessage(
+        qsTr("Survey Notebook: exported %1 shots to %2")
+            .arg(survey.shots.length).arg(fileName));
 };
 
 /**
@@ -2307,19 +2330,20 @@ SurveyNotebook.offerGeoAnchor = function(doc, coord) {
     }
 
     var stationName = CsTags.get(carrier, "Station");
-    var shown = stationName !== "" ? ("station " + stationName) :
-        "the selected point";
+    var shown = stationName !== "" ? qsTr("station %1").arg(stationName) :
+        qsTr("the selected point");
 
     var answer;
     try {
-        answer = QMessageBox.question(null, "Survey Notebook",
-            "Store " + coord.lat.toFixed(6) + ", " + coord.lon.toFixed(6) +
-            " as this drawing's geo anchor, on " + shown + "?\n\n" +
+        answer = QMessageBox.question(null, qsTr("Survey Notebook"),
+            qsTr("Store %1, %2 as this drawing's geo anchor, on %3?\n\n" +
             "The anchor is the drawing's tie to real-world coordinates: " +
             "aerial imagery aligns to it, revisions pivot on it, and " +
             "exports derive coordinates from it. The drawing's geometry " +
             "is NOT changed.\n\n" +
-            "No just uses the location for this estimate.",
+            "No just uses the location for this estimate.")
+                .arg(coord.lat.toFixed(6)).arg(coord.lon.toFixed(6))
+                .arg(shown),
             QMessageBox.Yes | QMessageBox.No);
     } catch (eQ) {
         return null; // no question, no write -- the estimate stands alone
@@ -2350,9 +2374,9 @@ SurveyNotebook.offerGeoAnchor = function(doc, coord) {
         CsTags.commit(getDocumentInterface(), carrier, geoTags);
         CsLocationPick.remember(coord);
     } catch (eW) {
-        QMessageBox.warning(null, "Survey Notebook",
-            "Couldn't store the geo anchor (" + eW +
-            "). The estimate above still stands.");
+        QMessageBox.warning(null, qsTr("Survey Notebook"),
+            qsTr("Couldn't store the geo anchor (%1). " +
+            "The estimate above still stands.").arg(String(eW)));
         return null;
     }
     return { station: stationName !== "" ? stationName : "anchor" };
@@ -2422,12 +2446,12 @@ SurveyNotebook.offerIgrfTripRevisions = function(doc, coord) {
             // IGRF is shown at 2 decimals here because that's the
             // precision reviseDeclination is actually handed below --
             // see the rounding comment in CsRevise.tripsNeedingRevision.
-            answer = QMessageBox.question(null, "Survey Notebook",
-                "Trip " + c.tripId + " (" + c.date +
-                (c.team !== "" ? ", " + c.team : "") + "): recorded " +
-                c.recorded.toFixed(2) + " deg, IGRF estimates " +
-                c.igrf.toFixed(2) + " deg here. " +
-                "Revise this trip's azimuths?",
+            answer = QMessageBox.question(null, qsTr("Survey Notebook"),
+                qsTr("Trip %1 (%2): recorded %3 deg, IGRF estimates " +
+                "%4 deg here. Revise this trip's azimuths?")
+                    .arg(c.tripId)
+                    .arg(c.date + (c.team !== "" ? ", " + c.team : ""))
+                    .arg(c.recorded.toFixed(2)).arg(c.igrf.toFixed(2)),
                 QMessageBox.Yes | QMessageBox.No);
         } catch (eQ) {
             // This bridge refused the question. Asking about the rest
@@ -2456,10 +2480,10 @@ SurveyNotebook.offerIgrfTripRevisions = function(doc, coord) {
                 marked[mi].igrf, "igrf");
         }
     } catch (eRv) {
-        QMessageBox.warning(null, "Survey Notebook",
-            "Couldn't prepare the declination revision (" + eRv +
-            "). Nothing further was changed; the geo anchor was still " +
-            "stored.");
+        QMessageBox.warning(null, qsTr("Survey Notebook"),
+            qsTr("Couldn't prepare the declination revision (%1). " +
+            "Nothing further was changed; the geo anchor was still " +
+            "stored.").arg(String(eRv)));
         return;
     }
 
@@ -2467,10 +2491,10 @@ SurveyNotebook.offerIgrfTripRevisions = function(doc, coord) {
     try {
         report = CsRevise.apply(doc, getDocumentInterface(), recon, revised);
     } catch (eAp) {
-        QMessageBox.warning(null, "Survey Notebook",
-            "Applying the declination revision failed (" + eAp +
-            "). If the drawing looks half-moved, undo restores it. The " +
-            "geo anchor was still stored.");
+        QMessageBox.warning(null, qsTr("Survey Notebook"),
+            qsTr("Applying the declination revision failed (%1). " +
+            "If the drawing looks half-moved, undo restores it. The " +
+            "geo anchor was still stored.").arg(String(eAp)));
         return;
     }
     EAction.handleUserMessage(CsReport.revisionSummary(report));
@@ -2494,9 +2518,9 @@ SurveyNotebook.offerIgrfTripRevisions = function(doc, coord) {
 SurveyNotebook.inferDeclination = function(w) {
     var m = /^(\d{4})-(\d{1,2})-(\d{1,2})$/.exec(String(w.dateEdit.text));
     if (m === null) {
-        QMessageBox.information(null, "Survey Notebook",
-            "Enter the survey date (YYYY-MM-DD) in the header first -- " +
-            "declination drifts over the years, so the date matters.");
+        QMessageBox.information(null, qsTr("Survey Notebook"),
+            qsTr("Enter the survey date (YYYY-MM-DD) in the header first -- " +
+            "declination drifts over the years, so the date matters."));
         return;
     }
 
@@ -2508,7 +2532,7 @@ SurveyNotebook.inferDeclination = function(w) {
     if (shared !== null && shared.source === "anchor") {
         coord = shared;
     } else {
-        coord = CsLocationPick.ask("Survey Notebook", "");
+        coord = CsLocationPick.ask(qsTr("Survey Notebook"), "");
         if (coord === null) {
             return;
         }
@@ -2520,8 +2544,8 @@ SurveyNotebook.inferDeclination = function(w) {
         day: parseInt(m[3], 10)
     });
     if (result === null) {
-        QMessageBox.warning(null, "Survey Notebook",
-            "That date is before 1900 -- outside the IGRF model.");
+        QMessageBox.warning(null, qsTr("Survey Notebook"),
+            qsTr("That date is before 1900 -- outside the IGRF model."));
         return;
     }
     w.declEdit.text = result.declination.toFixed(2);
@@ -2534,19 +2558,20 @@ SurveyNotebook.inferDeclination = function(w) {
     var anchored = prompted ?
         SurveyNotebook.offerGeoAnchor(getDocument(), coord) : null;
     var anchorLine = anchored === null ? "" :
-        ("\n\nGeo anchor stored on station " + anchored.station +
+        ("\n\n" + qsTr("Geo anchor stored on station %1" +
             " -- this drawing's tie to real-world coordinates. Aerial " +
             "imagery aligns to it and revisions pivot on it; the " +
-            "geometry was not changed.");
+            "geometry was not changed.").arg(anchored.station));
     if (anchored !== null) {
-        EAction.handleUserMessage("Survey Notebook: geo anchor stored on " +
-            "station " + anchored.station + " at " +
-            coord.lat.toFixed(6) + ", " + coord.lon.toFixed(6) + ".");
+        EAction.handleUserMessage(
+            qsTr("Survey Notebook: geo anchor stored on station %1 at %2, %3.")
+                .arg(anchored.station).arg(coord.lat.toFixed(6))
+                .arg(coord.lon.toFixed(6)));
     }
 
-    QMessageBox.information(null, "Survey Notebook",
+    QMessageBox.information(null, qsTr("Survey Notebook"),
         CsReport.igrfLine(result, coord.lat, coord.lon, String(w.dateEdit.text)) +
-        "\n\nFilled into the header -- edit it freely; it stays your call." +
+        "\n\n" + qsTr("Filled into the header -- edit it freely; it stays your call.") +
         anchorLine);
 
     // A freshly WRITTEN anchor is the first authoritative location this
@@ -2604,42 +2629,43 @@ SurveyNotebook.reviseDeclinations = function(w) {
     try {
         SurveyNotebook.reviseDeclinationsInner(w);
     } catch (e) {
-        QMessageBox.warning(null, "Survey Notebook",
-            "Declination revision failed inside this build's bridge:\n\n" +
-            e + "\n\n" +
-            (e.stack ? String(e.stack).substring(0, 600) : "") +
-            "\n\nPlease report this text.");
+        QMessageBox.warning(null, qsTr("Survey Notebook"),
+            qsTr("Declination revision failed inside this build's bridge:" +
+                "\n\n%1\n\n%2\n\nPlease report this text.")
+                .arg(String(e))
+                .arg(e.stack ? String(e.stack).substring(0, 600) : ""));
     }
 };
 
 SurveyNotebook.reviseDeclinationsInner = function(w) {
     var doc = getDocument();
     if (doc === undefined || doc === null) {
-        QMessageBox.warning(null, "Survey Notebook", "No drawing is open.");
+        QMessageBox.warning(null, qsTr("Survey Notebook"), qsTr("No drawing is open."));
         return;
     }
     var recon;
     try {
         recon = CsRevise.surveyFromDocument(doc);
     } catch (eRe) {
-        QMessageBox.warning(null, "Survey Notebook",
-            "Couldn't read the survey back from this drawing (" + eRe + ").");
+        QMessageBox.warning(null, qsTr("Survey Notebook"),
+            qsTr("Couldn't read the survey back from this drawing (%1).")
+                .arg(String(eRe)));
         return;
     }
     if (recon.legacy === true) {
-        QMessageBox.information(null, "Survey Notebook",
-            "This drawing's survey predates the exact tag schema, so " +
+        QMessageBox.information(null, qsTr("Survey Notebook"),
+            qsTr("This drawing's survey predates the exact tag schema, so " +
             "its shots can't be revised safely from what's stored.\n\n" +
             "Run Repair Drawing (command: rep) " +
             "first -- it upgrades the tags in place -- then revise the " +
-            "declination per trip.");
+            "declination per trip."));
         return;
     }
     if (recon.survey.shots.length === 0) {
-        QMessageBox.warning(null, "Survey Notebook",
-            "No survey shots found in this drawing -- there is no trip " +
+        QMessageBox.warning(null, qsTr("Survey Notebook"),
+            qsTr("No survey shots found in this drawing -- there is no trip " +
             "declination to revise. Use Infer beside the header's Decl " +
-            "for the page you are about to draw.");
+            "for the page you are about to draw."));
         return;
     }
     SurveyNotebook.tripDeclinationDialog(doc, recon);
@@ -2686,10 +2712,10 @@ SurveyNotebook.tripDeclinationDialog = function(doc, recon) {
 
     try {
         dlg = new QDialog(getMainWindow());
-        dlg.windowTitle = "Declination";
+        dlg.windowTitle = qsTr("Declination");
         var layout = new QVBoxLayout();
 
-        var intro = new QLabel(
+        var intro = new QLabel(qsTr(
             "Trips already in this drawing. Drop in the correct\n" +
             "declination per trip (degrees, east positive) and the\n" +
             "drawing adjusts: azimuths rotate by the difference and\n" +
@@ -2698,13 +2724,13 @@ SurveyNotebook.tripDeclinationDialog = function(doc, recon) {
             "the page's readings were taken under.\n" +
             "IGRF fills the estimate for a trip's date -- it needs a\n" +
             "geo-referenced station in the drawing and a YYYY-MM-DD\n" +
-            "trip date.");
+            "trip date."));
         layout.addWidget(intro, 0, 0);
 
         var grid = new QGridLayout();
-        grid.addWidget(new QLabel("Trip"), 0, 0);
-        grid.addWidget(new QLabel("Recorded"), 0, 1);
-        grid.addWidget(new QLabel("New declination"), 0, 2);
+        grid.addWidget(new QLabel(qsTr("Trip")), 0, 0);
+        grid.addWidget(new QLabel(qsTr("Recorded")), 0, 1);
+        grid.addWidget(new QLabel(qsTr("New declination")), 0, 2);
 
         for (var t = 0; t < trips.length; t++) {
             var trip = trips[t];
@@ -2718,7 +2744,7 @@ SurveyNotebook.tripDeclinationDialog = function(doc, recon) {
             edit.text = CsRevise.declText(trip.declination);
             grid.addWidget(edit, gridRow, 2);
 
-            var igrfBtn = new QPushButton("IGRF");
+            var igrfBtn = new QPushButton("IGRF"); // i18n-ok: model name
             var tripDate = CsRevise.parseIsoDate(trip.date);
 
             var row = { tripId: t, recorded: trip.declination,
@@ -2740,25 +2766,25 @@ SurveyNotebook.tripDeclinationDialog = function(doc, recon) {
             (function(r, d, tr) {
                 connectOk(igrfBtn.clicked, function() {
                     if (geo === null) {
-                        QMessageBox.warning(null, "Survey Notebook",
-                            "No geo reference in this drawing -- pin a " +
+                        QMessageBox.warning(null, qsTr("Survey Notebook"),
+                            qsTr("No geo reference in this drawing -- pin a " +
                             "station to a latitude/longitude first, then " +
-                            "IGRF can fill from it.");
+                            "IGRF can fill from it."));
                         return;
                     }
                     if (d === null) {
-                        QMessageBox.warning(null, "Survey Notebook",
-                            "Trip " + r.tripId + "'s date (\"" + tr.date +
-                            "\") isn't YYYY-MM-DD, so IGRF can't be " +
+                        QMessageBox.warning(null, qsTr("Survey Notebook"),
+                            qsTr("Trip %1's date (\"%2\") isn't YYYY-MM-DD, " +
+                            "so IGRF can't be " +
                             "evaluated for it -- give the trip a date in " +
-                            "that form.");
+                            "that form.").arg(r.tripId).arg(tr.date));
                         return;
                     }
                     var res = CsGeomag.declination(geo.lat, geo.lon, d);
                     if (res === null) {
-                        QMessageBox.warning(null, "Survey Notebook",
-                            d.year + " is before 1900, outside the IGRF " +
-                            "model.");
+                        QMessageBox.warning(null, qsTr("Survey Notebook"),
+                            qsTr("%1 is before 1900, outside the IGRF " +
+                            "model.").arg(d.year));
                         return;
                     }
                     // 2 decimals is the suite-wide IGRF-apply
@@ -2774,14 +2800,14 @@ SurveyNotebook.tripDeclinationDialog = function(doc, recon) {
             })(row, tripDate, trip);
 
             if (geo !== null && tripDate !== null) {
-                igrfBtn.toolTip = "Fill the IGRF estimate for " +
-                    trip.date + " at the drawing's geo reference.";
+                igrfBtn.toolTip = qsTr("Fill the IGRF estimate for %1 " +
+                    "at the drawing's geo reference.").arg(trip.date);
             } else {
                 igrfBtn.toolTip = geo === null ?
-                    "No geo reference in this drawing -- pin a station " +
-                    "to a latitude/longitude to enable IGRF fills." :
-                    "This trip's date isn't YYYY-MM-DD, so IGRF " +
-                    "can't be evaluated for it.";
+                    qsTr("No geo reference in this drawing -- pin a station " +
+                    "to a latitude/longitude to enable IGRF fills.") :
+                    qsTr("This trip's date isn't YYYY-MM-DD, so IGRF " +
+                    "can't be evaluated for it.");
                 try {
                     igrfBtn.enabled = false;
                 } catch (eDis) {
@@ -2798,24 +2824,24 @@ SurveyNotebook.tripDeclinationDialog = function(doc, recon) {
         // drawing's geo reference and that trip's own date. Only FILLS
         // the fields -- the recorded-vs-estimate rows stay reviewable,
         // and nothing rotates until Apply.
-        var igrfAllBtn = new QPushButton("IGRF All");
-        igrfAllBtn.toolTip = "Fill every trip's declination estimate " +
+        var igrfAllBtn = new QPushButton(qsTr("IGRF All"));
+        igrfAllBtn.toolTip = qsTr("Fill every trip's declination estimate " +
             "from the drawing's geo reference and each trip's own " +
-            "date. Review the rows, then Apply revises them together.";
+            "date. Review the rows, then Apply revises them together.");
         buttons.addWidget(igrfAllBtn, 0, 0);
         buttons.addStretch(1);
-        var applyBtn = new QPushButton("Apply");
-        var cancelBtn = new QPushButton("Cancel");
+        var applyBtn = new QPushButton(qsTr("Apply"));
+        var cancelBtn = new QPushButton(qsTr("Cancel"));
         buttons.addWidget(applyBtn, 0, 0);
         buttons.addWidget(cancelBtn, 0, 0);
         layout.addLayout(buttons, 0);
 
         connectOk(igrfAllBtn.clicked, function() {
             if (geo === null) {
-                QMessageBox.warning(null, "Survey Notebook",
-                    "No geo reference in this drawing -- pin a station " +
-                    "to a latitude/longitude first, then IGRF can fill " +
-                    "from it.");
+                QMessageBox.warning(null, qsTr("Survey Notebook"),
+                    qsTr("No geo reference in this drawing -- pin a " +
+                    "station to a latitude/longitude first, then " +
+                    "IGRF can fill from it."));
                 return;
             }
             var filled = 0;
@@ -2823,14 +2849,14 @@ SurveyNotebook.tripDeclinationDialog = function(doc, recon) {
             for (var fi = 0; fi < rows.length; fi++) {
                 var fr = rows[fi];
                 if (fr.date === null) {
-                    skipped.push("Trip " + fr.tripId + ": date \"" +
-                        fr.tripDateText + "\" isn't YYYY-MM-DD");
+                    skipped.push(qsTr("Trip %1: date \"%2\" isn't YYYY-MM-DD")
+                        .arg(fr.tripId).arg(fr.tripDateText));
                     continue;
                 }
                 var res = CsGeomag.declination(geo.lat, geo.lon, fr.date);
                 if (res === null) {
-                    skipped.push("Trip " + fr.tripId + ": " +
-                        fr.date.year + " is before 1900, outside IGRF");
+                    skipped.push(qsTr("Trip %1: %2 is before 1900, outside IGRF")
+                        .arg(fr.tripId).arg(fr.date.year));
                     continue;
                 }
                 // same 2-decimal convention as the per-row button and
@@ -2841,11 +2867,13 @@ SurveyNotebook.tripDeclinationDialog = function(doc, recon) {
                 filled++;
             }
             if (skipped.length > 0) {
-                QMessageBox.warning(null, "Survey Notebook",
-                    filled + " of " + rows.length + " trips filled " +
-                    "from IGRF. Not filled:\n\n" + skipped.join("\n") +
+                QMessageBox.warning(null, qsTr("Survey Notebook"),
+                    qsTr("%1 of %2 trips filled " +
+                    "from IGRF. Not filled:\n\n%3" +
                     "\n\nThose rows keep their recorded value; fix the " +
-                    "trip date and run IGRF All again, or type a value.");
+                    "trip date and run IGRF All again, or type a value.")
+                        .arg(filled).arg(rows.length)
+                        .arg(skipped.join("\n")));
             }
         });
 
@@ -2869,17 +2897,17 @@ SurveyNotebook.tripDeclinationDialog = function(doc, recon) {
             dlg.reject();
         }) && wired;
         if (!wired) {
-            QMessageBox.warning(null, "Survey Notebook",
-                "This build's script bridge couldn't wire the dialog " +
-                "buttons. Nothing was changed.");
+            QMessageBox.warning(null, qsTr("Survey Notebook"),
+                qsTr("This build's script bridge couldn't wire the dialog " +
+                "buttons. Nothing was changed."));
             return;
         }
 
         dlg.exec();
     } catch (eDlg) {
-        QMessageBox.warning(null, "Survey Notebook",
-            "Couldn't build the revision dialog (" + eDlg +
-            "). Nothing was changed.");
+        QMessageBox.warning(null, qsTr("Survey Notebook"),
+            qsTr("Couldn't build the revision dialog (%1). " +
+            "Nothing was changed.").arg(String(eDlg)));
         return;
     }
 
@@ -2890,12 +2918,12 @@ SurveyNotebook.tripDeclinationDialog = function(doc, recon) {
     // ---- decide (pure) ------------------------------------------------
     var decision = CsRevise.parseTripEdits(state.rowsData);
     if (decision.error !== undefined) {
-        QMessageBox.warning(null, "Survey Notebook", decision.error);
+        QMessageBox.warning(null, qsTr("Survey Notebook"), decision.error);
         return;
     }
     if (decision.changes.length === 0) {
-        QMessageBox.information(null, "Survey Notebook",
-            "No declination changes.");
+        QMessageBox.information(null, qsTr("Survey Notebook"),
+            qsTr("No declination changes."));
         return;
     }
 
@@ -2909,9 +2937,9 @@ SurveyNotebook.tripDeclinationDialog = function(doc, recon) {
     try {
         pristine = CsRevise.surveyFromDocument(doc);
     } catch (ePr) {
-        QMessageBox.warning(null, "Survey Notebook",
-            "Couldn't re-read the survey (" + ePr +
-            "). Nothing was changed.");
+        QMessageBox.warning(null, qsTr("Survey Notebook"),
+            qsTr("Couldn't re-read the survey (%1). " +
+            "Nothing was changed.").arg(String(ePr)));
         return;
     }
 
@@ -2926,9 +2954,10 @@ SurveyNotebook.tripDeclinationDialog = function(doc, recon) {
         report = CsRevise.apply(doc, getDocumentInterface(), pristine,
             recon.survey);
     } catch (eAp) {
-        QMessageBox.warning(null, "Survey Notebook",
-            "Applying the revision failed (" + eAp +
-            "). If the drawing looks half-moved, undo restores it.");
+        QMessageBox.warning(null, qsTr("Survey Notebook"),
+            qsTr("Applying the revision failed (%1). " +
+            "If the drawing looks half-moved, undo restores it.")
+                .arg(String(eAp)));
         return;
     }
 
@@ -2937,14 +2966,15 @@ SurveyNotebook.tripDeclinationDialog = function(doc, recon) {
     // of the dialog was picking one.
     var tripBits = [];
     for (c = 0; c < decision.changes.length; c++) {
-        tripBits.push("trip " + decision.changes[c].tripId + " -> " +
-            CsRevise.declText(decision.changes[c].value) +
-            " (" + decision.changes[c].source + ")");
+        tripBits.push(qsTr("trip %1 -> %2 (%3)")
+            .arg(decision.changes[c].tripId)
+            .arg(CsRevise.declText(decision.changes[c].value))
+            .arg(decision.changes[c].source));
     }
-    var summary = "Declination revised: " + tripBits.join(", ") + "\n\n" +
-        CsReport.revisionSummary(report);
+    var summary = qsTr("Declination revised: %1").arg(tripBits.join(", ")) +
+        "\n\n" + CsReport.revisionSummary(report);
     EAction.handleUserMessage(summary);
-    QMessageBox.information(null, "Survey Notebook", summary);
+    QMessageBox.information(null, qsTr("Survey Notebook"), summary);
 };
 
 // ---------------------------------------------------------------------
@@ -3000,24 +3030,24 @@ SurveyNotebook.pageFingerprint = function(w) {
 SurveyNotebook.pageTrip = function(w) {
     var doc = getDocument();
     if (doc === undefined || doc === null) {
-        return { error: "No drawing is open." };
+        return { error: qsTr("No drawing is open.") };
     }
     var recon;
     try {
         recon = CsRevise.surveyFromDocument(doc);
     } catch (eRe) {
-        return { error: "Couldn't read the survey back from this " +
-            "drawing (" + eRe + ")." };
+        return { error: qsTr("Couldn't read the survey back from this " +
+            "drawing (%1).").arg(String(eRe)) };
     }
     if (recon.legacy === true) {
-        return { error: "This drawing's survey predates the exact tag " +
+        return { error: qsTr("This drawing's survey predates the exact tag " +
             "schema, so its trips can't be identified reliably -- and " +
             "linework has to be tied to a trip id.\n\nRun Repair " +
-            "Drawing (command: rep) first." };
+            "Drawing (command: rep) first.") };
     }
     if (recon.survey.shots.length === 0) {
-        return { error: "Nothing is drawn in this drawing yet. Draw " +
-            "this page first -- linework binds to a trip that exists." };
+        return { error: qsTr("Nothing is drawn in this drawing yet. Draw " +
+            "this page first -- linework binds to a trip that exists.") };
     }
     CsModel.ensureTrips(recon.survey);
     var fp = SurveyNotebook.pageFingerprint(w);
@@ -3032,10 +3062,10 @@ SurveyNotebook.pageTrip = function(w) {
                 label: CsRevise.tripLabel(t, recon.survey.trips[t]) };
         }
     }
-    return { error: "This page's trip (" + fp + ") isn't in the " +
+    return { error: qsTr("This page's trip (%1) isn't in the " +
         "drawing yet, so there is no trip id to bind linework to.\n\n" +
         "Draw the page first, or Load from drawing to work on a trip " +
-        "that is already there." };
+        "that is already there.").arg(fp) };
 };
 
 /**
@@ -3051,9 +3081,9 @@ SurveyNotebook.autoBindStatusLine = function(w) {
     if (CsBind.autoBindEnabled()) {
         return "";
     }
-    return "AUTOMATIC LINEWORK BINDING IS OFF -- hand-drawn walls and " +
+    return qsTr("AUTOMATIC LINEWORK BINDING IS OFF -- hand-drawn walls and " +
         "detail will NOT follow the survey when a trip is revised " +
-        "unless you bind them yourself (Linework... > Adopt).";
+        "unless you bind them yourself (Linework... > Adopt).");
 };
 
 /** Shows the switch on the button. Only the OFF state is worth a label:
@@ -3064,7 +3094,8 @@ SurveyNotebook.updateLineworkButton = function(w) {
     }
     var on = CsBind.autoBindEnabled();
     try {
-        w.lineworkButton.text = on ? "Linework..." : "Linework: auto OFF";
+        w.lineworkButton.text = on ? qsTr("Linework...") :
+            qsTr("Linework: auto OFF");
     } catch (eT) {
         // a button that won't be renamed still reports state in the
         // status box and in its own dialog
@@ -3077,12 +3108,12 @@ SurveyNotebook.updateLineworkButton = function(w) {
     }
     try {
         w.lineworkButton.toolTip = on ?
-            ("Hand-drawn linework binds itself: a revision works out " +
+            qsTr("Hand-drawn linework binds itself: a revision works out " +
                 "which stations your walls and detail were drawn " +
                 "against, tags them, and moves them with the passage. " +
                 "Click to see what that means, to adopt linework now, " +
                 "or to switch it off.") :
-            ("Automatic linework binding is OFF: revising a trip will " +
+            qsTr("Automatic linework binding is OFF: revising a trip will " +
                 "move the survey and leave your tracing behind. Click " +
                 "to switch it back on, or to adopt linework by hand.");
     } catch (eTt) {
@@ -3100,10 +3131,10 @@ SurveyNotebook.setAutoBind = function(w, on) {
     SurveyNotebook.updateLineworkButton(w);
     SurveyNotebook.refresh(w);
     var said = now ?
-        ("Survey Notebook: automatic linework binding is ON. Revisions " +
+        qsTr("Survey Notebook: automatic linework binding is ON. Revisions " +
             "will bind and move hand-drawn work that they can tie to " +
             "the survey, and say how much they claimed.") :
-        ("Survey Notebook: automatic linework binding is OFF. Nothing " +
+        qsTr("Survey Notebook: automatic linework binding is OFF. Nothing " +
             "will be tagged for you; linework already bound still " +
             "moves with its stations.");
     if (CsBind.lastError !== wasError && CsBind.lastError !== "") {
@@ -3127,7 +3158,7 @@ SurveyNotebook.setAutoBind = function(w, on) {
 SurveyNotebook.adoptLinework = function(w) {
     var pt = SurveyNotebook.pageTrip(w);
     if (pt.error !== undefined) {
-        QMessageBox.warning(null, "Survey Notebook", pt.error);
+        QMessageBox.warning(null, qsTr("Survey Notebook"), pt.error);
         return;
     }
     var items;
@@ -3137,33 +3168,34 @@ SurveyNotebook.adoptLinework = function(w) {
         // a revision would work it out.
         items = CsBind.adoptable(pt.doc, pt.tripId, pt.tripStations);
     } catch (eAd) {
-        QMessageBox.warning(null, "Survey Notebook",
-            "Couldn't scan this drawing for linework (" + eAd +
-            "). Nothing was changed.");
+        QMessageBox.warning(null, qsTr("Survey Notebook"),
+            qsTr("Couldn't scan this drawing for linework (%1). " +
+            "Nothing was changed.").arg(String(eAd)));
         return;
     }
     var c = CsBind.countBySource(items);
     if (c.total === 0) {
-        QMessageBox.information(null, "Survey Notebook",
-            "Nothing to adopt: every entity on a linework layer in " +
+        QMessageBox.information(null, qsTr("Survey Notebook"),
+            qsTr("Nothing to adopt: every entity on a linework layer in " +
             "this drawing is either already bound or is the suite's " +
-            "own geometry.");
+            "own geometry."));
         return;
     }
     var bound = c.snap + c.proximity;
-    var answer = QMessageBox.question(null, "Survey Notebook",
-        "Bind " + c.total + " untagged entit" +
-        (c.total === 1 ? "y" : "ies") + "?\n\n" +
-        bound + " will bind to stations (" + c.snap +
+    var answer = QMessageBox.question(null, qsTr("Survey Notebook"),
+        (c.total === 1 ? qsTr("Bind %1 untagged entity?") :
+            qsTr("Bind %1 untagged entities?")).arg(c.total) + "\n\n" +
+        qsTr("%1 will bind to stations (%2" +
         " snapped exactly to station, LRUD or splay points, " +
-        c.proximity + " by proximity), each to the trip those stations " +
-        "belong to\n" +
-        c.trip + " found no station and will follow " + pt.label +
+        "%3 by proximity), each to the trip those stations " +
+        "belong to").arg(bound).arg(c.snap).arg(c.proximity) + "\n" +
+        qsTr("%1 found no station and will follow %2" +
         " as a whole -- only this action will claim those; a revision " +
-        "leaves them alone rather than guess\n\n" +
-        "Nothing moves now: this writes the tags, in one undo step. " +
+        "leaves them alone rather than guess").arg(c.trip).arg(pt.label) +
+        "\n\n" +
+        qsTr("Nothing moves now: this writes the tags, in one undo step. " +
         "When a trip is next revised, each bound entity moves with " +
-        "its OWN stations.",
+        "its OWN stations."),
         QMessageBox.Yes | QMessageBox.No);
     if (answer !== QMessageBox.Yes) {
         return;
@@ -3183,17 +3215,20 @@ SurveyNotebook.adoptLinework = function(w) {
                 entries);
         });
     } catch (eTag) {
-        QMessageBox.warning(null, "Survey Notebook",
-            "Couldn't write the linework tags (" + eTag +
-            "). Undo restores the drawing if anything was half-written.");
+        QMessageBox.warning(null, qsTr("Survey Notebook"),
+            qsTr("Couldn't write the linework tags (%1). " +
+            "Undo restores the drawing if anything was half-written.")
+                .arg(String(eTag)));
         return;
     }
-    var summary = "Bound " + tagged + " entit" +
-        (tagged === 1 ? "y" : "ies") + ": " + bound +
-        " to their own stations, " + c.trip + " to " + pt.label +
-        " as a whole. One undo step.";
-    EAction.handleUserMessage("Survey Notebook: " + summary);
-    QMessageBox.information(null, "Survey Notebook", summary);
+    var summary = (tagged === 1 ?
+        qsTr("Bound %1 entity: %2 to their own stations, %3 to %4" +
+            " as a whole. One undo step.") :
+        qsTr("Bound %1 entities: %2 to their own stations, %3 to %4" +
+            " as a whole. One undo step."))
+        .arg(tagged).arg(bound).arg(c.trip).arg(pt.label);
+    EAction.handleUserMessage(qsTr("Survey Notebook: %1").arg(summary));
+    QMessageBox.information(null, qsTr("Survey Notebook"), summary);
 };
 
 /**
@@ -3214,26 +3249,28 @@ SurveyNotebook.lineworkDialog = function(w) {
     var canAdopt = (pt.error === undefined);
 
     var stateText = (on ?
-        "Automatic binding is ON (the default)." :
-        "Automatic binding is OFF -- nothing is tagged for you.") +
-        (canAdopt ? (" This page is " + pt.label + ".") :
-            ("\nAdopt isn't available: " + pt.error));
+        qsTr("Automatic binding is ON (the default).") :
+        qsTr("Automatic binding is OFF -- nothing is tagged for you.")) +
+        (canAdopt ? (" " + qsTr("This page is %1.").arg(pt.label)) :
+            ("\n" + qsTr("Adopt isn't available: %1").arg(pt.error)));
     if (CsBind.autoTagged > 0) {
-        stateText += "\n" + CsBind.autoTagged + " entit" +
-            (CsBind.autoTagged === 1 ? "y has" : "ies have") +
-            " been tagged as you drew this session.";
+        stateText += "\n" + (CsBind.autoTagged === 1 ?
+            qsTr("%1 entity has been tagged as you drew this session.") :
+            qsTr("%1 entities have been tagged as you drew this session."))
+            .arg(CsBind.autoTagged);
     }
     if (CsBind.lastError !== "") {
-        stateText += "\nLast tagging problem: " + CsBind.lastError;
+        stateText += "\n" + qsTr("Last tagging problem: %1")
+            .arg(CsBind.lastError);
     }
 
     var outcome = "";
     var dlg = null;
     try {
         dlg = new QDialog(getMainWindow());
-        dlg.windowTitle = "Linework";
+        dlg.windowTitle = qsTr("Linework");
         var layout = new QVBoxLayout();
-        layout.addWidget(new QLabel(
+        layout.addWidget(new QLabel(qsTr(
             "Hand-drawn linework -- traced walls, sketched detail,\n" +
             "inserted symbols -- follows the survey by itself. You do\n" +
             "not have to switch anything on first.\n" +
@@ -3258,14 +3295,15 @@ SurveyNotebook.lineworkDialog = function(w) {
             "ADOPT binds what is already drawn NOW, with a count of\n" +
             "what binds to what before it commits -- and it is the only\n" +
             "way to claim a sketch that binds to no station, since it\n" +
-            "is the only place you can say which trip that belongs to."),
+            "is the only place you can say which trip that belongs to.")),
             0, 0);
         layout.addWidget(new QLabel(stateText), 0, 0);
 
         var buttons = new QHBoxLayout();
         var switchBtn = new QPushButton(on ?
-            "Turn automatic binding OFF" : "Turn automatic binding ON");
-        var adoptBtn = new QPushButton("Adopt existing linework...");
+            qsTr("Turn automatic binding OFF") :
+            qsTr("Turn automatic binding ON"));
+        var adoptBtn = new QPushButton(qsTr("Adopt existing linework..."));
         if (!canAdopt) {
             try {
                 adoptBtn.enabled = false;
@@ -3273,7 +3311,7 @@ SurveyNotebook.lineworkDialog = function(w) {
                 // stays clickable; adoptLinework re-checks and explains
             }
         }
-        var closeBtn = new QPushButton("Close");
+        var closeBtn = new QPushButton(qsTr("Close"));
         buttons.addWidget(switchBtn, 0, 0);
         buttons.addWidget(adoptBtn, 0, 0);
         buttons.addStretch(1);
@@ -3298,16 +3336,16 @@ SurveyNotebook.lineworkDialog = function(w) {
         // done any other way, so offer that much as a question.
         var q;
         try {
-            q = QMessageBox.question(null, "Survey Notebook",
+            q = QMessageBox.question(null, qsTr("Survey Notebook"),
                 stateText + "\n\n" + (on ?
-                    "Turn automatic linework binding OFF? Revising a " +
+                    qsTr("Turn automatic linework binding OFF? Revising a " +
                     "trip will then move the survey and leave your " +
-                    "tracing where it is." :
-                    "Turn automatic linework binding back ON? " +
+                    "tracing where it is.") :
+                    qsTr("Turn automatic linework binding back ON? " +
                     "Revisions will tag hand-drawn work they can tie " +
-                    "to the survey, and move it.") +
-                "\n\n(This build refused the Linework dialog, so Adopt " +
-                "isn't reachable here: " + eDlg + ")",
+                    "to the survey, and move it.")) +
+                "\n\n" + qsTr("(This build refused the Linework dialog, " +
+                "so Adopt isn't reachable here: %1)").arg(String(eDlg)),
                 QMessageBox.Yes | QMessageBox.No);
         } catch (eQ) {
             return;
@@ -3422,7 +3460,7 @@ SurveyNotebook.fillScans = function(w) {
         w.scansForDoc = null;
     }
     if (isNull(folder) || folder === "") {
-        SurveyNotebook.sayNoScans(w, "(save this drawing in a cave folder)");
+        SurveyNotebook.sayNoScans(w, qsTr("(save this drawing in a cave folder)"));
         return;
     }
 
@@ -3443,7 +3481,7 @@ SurveyNotebook.fillScans = function(w) {
         relative = [];
     }
     if (relative.length === 0) {
-        SurveyNotebook.sayNoScans(w, "(no scans in " + CsCave.SCANS + ")");
+        SurveyNotebook.sayNoScans(w, qsTr("(no scans in %1)").arg(CsCave.SCANS));
         return;
     }
 
@@ -3702,7 +3740,7 @@ SurveyNotebook.showScan = function(w) {
 };
 
 SurveyNotebook.buildDock = function(appWin) {
-    var dock = new QDockWidget("Survey Notebook", appWin);
+    var dock = new QDockWidget(qsTr("Survey Notebook"), appWin);
     dock.objectName = "CaveSurveyNotebookDock";
 
     var w = {};
@@ -3729,56 +3767,56 @@ SurveyNotebook.buildDock = function(appWin) {
     // party went and what they meant to do. That is also what the 3D
     // view's trip legend shows, and a legend reading the cave's name
     // nine times has told the reader nothing.
-    head1.addWidget(new QLabel("Trip Objective"), 0, 0);
+    head1.addWidget(new QLabel(qsTr("Trip Objective")), 0, 0);
     w.nameEdit = SurveyNotebook.upperCase(w, new QLineEdit());
-    w.nameEdit.placeholderText = "what this trip set out to do";
-    w.nameEdit.toolTip = "What made this trip its own -- the lead " +
+    w.nameEdit.placeholderText = qsTr("what this trip set out to do");
+    w.nameEdit.toolTip = qsTr("What made this trip its own -- the lead " +
         "pushed, the area mapped. Not the cave's name: every trip here " +
-        "is already in this cave.";
+        "is already in this cave.");
     head1.addWidget(w.nameEdit, 1, 0);
-    head1.addWidget(new QLabel("Date"), 0, 0);
+    head1.addWidget(new QLabel(qsTr("Date")), 0, 0);
     w.dateEdit = new QLineEdit();
-    w.dateEdit.placeholderText = "YYYY-MM-DD";
+    w.dateEdit.placeholderText = qsTr("YYYY-MM-DD");
     w.dateEdit.maximumWidth = 110;
     head1.addWidget(w.dateEdit, 0, 0);
     layout.addLayout(head1, 0);
 
     var head2 = new QHBoxLayout();
-    head2.addWidget(new QLabel("Team"), 0, 0);
+    head2.addWidget(new QLabel(qsTr("Team")), 0, 0);
     w.teamEdit = SurveyNotebook.upperCase(w, new QLineEdit());
     head2.addWidget(w.teamEdit, 1, 0);
-    head2.addWidget(new QLabel("Decl"), 0, 0);
+    head2.addWidget(new QLabel(qsTr("Decl")), 0, 0);
     w.declEdit = new QLineEdit();
     w.declEdit.placeholderText = "0.0 (E+)";
     w.declEdit.maximumWidth = 80;
     // Says which of the two declination paths this field is, because
     // the other one is three buttons away (see the per-trip revision
     // section above).
-    w.declEdit.toolTip = "The declination THIS PAGE's compass readings " +
+    w.declEdit.toolTip = qsTr("The declination THIS PAGE's compass readings " +
         "were taken under (east positive): the azimuth cells are " +
         "magnetic, this converts them to true when you Draw.\n" +
         "To CORRECT the declination of a trip already in the drawing, " +
         "use Declination... instead -- that rotates the stored shots " +
-        "and logs the revision.";
+        "and logs the revision.");
     head2.addWidget(w.declEdit, 0, 0);
-    w.inferButton = new QPushButton("Infer");
+    w.inferButton = new QPushButton(qsTr("Infer"));
     var head3 = new QHBoxLayout();
-    head3.addWidget(new QLabel("Instr"), 0, 0);
+    head3.addWidget(new QLabel(qsTr("Instr")), 0, 0);
     w.instrEdit = SurveyNotebook.upperCase(w, new QLineEdit());
-    w.instrEdit.placeholderText = "COMPASS, TAPE, CLINO...";
-    w.instrEdit.toolTip = "The instruments this page's readings were " +
-        "taken with (model, serial -- free text). Stored with the trip.";
+    w.instrEdit.placeholderText = qsTr("COMPASS, TAPE, CLINO...");
+    w.instrEdit.toolTip = qsTr("The instruments this page's readings were " +
+        "taken with (model, serial -- free text). Stored with the trip.");
     w.inferButton.toolTip =
-        "Estimate declination from the survey date and the cave's " +
+        qsTr("Estimate declination from the survey date and the cave's " +
         "location (IGRF model, 1900 to present). Always editable.\n" +
         "If it has to ask where the cave is, it offers to keep that " +
-        "location as the drawing's geo anchor.";
+        "location as the drawing's geo anchor.");
     head2.addWidget(w.inferButton, 0, 0);
     layout.addLayout(head2, 0);
     head3.addWidget(w.instrEdit, 1, 0);
     layout.addLayout(head3, 0);
 
-    var columnHelp =
+    var columnHelp = qsTr(
         "The notes page: shots are written between the stations they " +
         "connect.\n" +
         "Azm: what the COMPASS reads (magnetic, clockwise from north);\n" +
@@ -3790,7 +3828,7 @@ SurveyNotebook.buildDock = function(appWin) {
         "Blank station line = separator; the next named line " +
         "re-anchors the chain (branching, paper-style).\n" +
         "Station A3.1 while the chain stands at A3 = splay: azimuth + " +
-        "distance to a wall, no new station.";
+        "distance to a wall, no new station.");
 
     // ---- the notes page (ladder) --------------------------------------
     {
@@ -3804,8 +3842,9 @@ SurveyNotebook.buildDock = function(appWin) {
             // spacing stays at defaults
         }
 
-        var headers = ["Station", "Dist", "Azm", "Inc",
-            "L", "R", "U", "D", "Notes"];
+        var headers = [qsTr("Station"), qsTr("Dist"), qsTr("Azm"),
+            qsTr("Inc"), qsTr("L", "LRUD left"), qsTr("R", "LRUD right"),
+            qsTr("U", "LRUD up"), qsTr("D", "LRUD down"), qsTr("Notes")];
         for (var h = 0; h < headers.length; h++) {
             var hd = new QLabel(headers[h]);
             try {
@@ -3850,10 +3889,10 @@ SurveyNotebook.buildDock = function(appWin) {
         w.sentinel.objectName = "CaveSurveyNotebookAutoAdd";
         w.sentinel.maximumWidth = 32;
         w.sentinel.alignment = Qt.AlignCenter;
-        w.sentinel.toolTip = "Next station: Tab lands here from the " +
-            "last D and adds it automatically";
-        w.addRowButton = new QPushButton("+ Station");
-        w.delRowButton = new QPushButton("- Station");
+        w.sentinel.toolTip = qsTr("Next station: Tab lands here from the " +
+            "last D and adds it automatically");
+        w.addRowButton = new QPushButton(qsTr("+ Station"));
+        w.delRowButton = new QPushButton(qsTr("- Station"));
         rowButtons.addWidget(w.sentinel, 0, 0);
         rowButtons.addWidget(w.addRowButton, 0, 0);
         rowButtons.addWidget(w.delRowButton, 0, 0);
@@ -3979,8 +4018,8 @@ SurveyNotebook.buildDock = function(appWin) {
         if (w.scanPreview === null) {
             // No embedded view on this bridge: say so rather than
             // leaving an empty strip that looks broken.
-            w.scanFallback = new QLabel("This build cannot show a scan " +
-                "here. Use Sketch Scans.");
+            w.scanFallback = new QLabel(qsTr("This build cannot show a scan " +
+                "here. Use Sketch Scans."));
             w.scanFallback.wordWrap = true;
             browser.previewLayout.addWidget(w.scanFallback, 1, 0);
         }
@@ -4021,12 +4060,12 @@ SurveyNotebook.buildDock = function(appWin) {
 
     // ---- actions ------------------------------------------------------
     var actions = new QHBoxLayout();
-    w.drawButton = new QPushButton("Draw");
-    w.drawButton.toolTip = "Draw the survey into the drawing, one undo step.";
-    w.newTripButton = new QPushButton("New Trip");
-    w.newTripButton.toolTip = "Start the next trip's page: pick the " +
+    w.drawButton = new QPushButton(qsTr("Draw"));
+    w.drawButton.toolTip = qsTr("Draw the survey into the drawing, one undo step.");
+    w.newTripButton = new QPushButton(qsTr("New Trip"));
+    w.newTripButton.toolTip = qsTr("Start the next trip's page: pick the " +
         "station it ties into (open ends suggested), header prefilled " +
-        "from the drawing. The drawing is not touched.";
+        "from the drawing. The drawing is not touched.");
     // THE ACTION ROW SETS THIS DOCK'S MINIMUM WIDTH, and the dock's
     // width is map space the caver does not get. Nine full buttons
     // wanted roughly 1000px; the two pressed every session stay full,
@@ -4034,9 +4073,9 @@ SurveyNotebook.buildDock = function(appWin) {
     // five that are occasional errands live under a menu. The floor is
     // then the shot ladder (name + 7 x EDIT_WIDTH + notes), which is
     // the next thing to shrink if more room is wanted.
-    w.statusButton = SurveyNotebook.smallButton("Status",
-        "Show/hide the live status box (drag the bar above it to " +
-        "resize).");
+    w.statusButton = SurveyNotebook.smallButton(qsTr("Status"),
+        qsTr("Show/hide the live status box (drag the bar above it to " +
+        "resize)."));
     try {
         w.statusButton.checkable = true;
         w.statusButton.checked = w.statusLabel.visible;
@@ -4047,10 +4086,10 @@ SurveyNotebook.buildDock = function(appWin) {
     // "did I type that right" and a caver should not have to know it
     // exists to get it -- but a page being typed over a dense part of
     // a finished map is a real reason to want the map to itself.
-    w.ghostButton = SurveyNotebook.smallButton("Preview",
-        "Draw this page over the map as you type it: shot lines, the " +
+    w.ghostButton = SurveyNotebook.smallButton(qsTr("Preview"),
+        qsTr("Draw this page over the map as you type it: shot lines, the " +
         "walls the LRUD makes, and a dashed line where loop closure " +
-        "moved things. Nothing is added to the drawing until Draw.");
+        "moved things. Nothing is added to the drawing until Draw."));
     try {
         w.ghostButton.checkable = true;
         w.ghostOn = RSettings.getBoolValue(
@@ -4059,9 +4098,9 @@ SurveyNotebook.buildDock = function(appWin) {
     } catch (eGhostChk) {
         w.ghostOn = true;
     }
-    w.scanButton = SurveyNotebook.smallButton("Scan",
-        "Show/hide the scanned page beside the shots -- the page you " +
-        "are typing off. Drag the bar between them to resize.");
+    w.scanButton = SurveyNotebook.smallButton(qsTr("Scan"),
+        qsTr("Show/hide the scanned page beside the shots -- the page you " +
+        "are typing off. Drag the bar between them to resize."));
     try {
         w.scanButton.checkable = true;
         w.scanButton.checked = RSettings.getBoolValue(
@@ -4069,56 +4108,56 @@ SurveyNotebook.buildDock = function(appWin) {
     } catch (eScanChk) {
     }
     w.moreButton = new QToolButton();
-    w.moreButton.text = "\u22ef";
-    w.moreButton.toolTip = "Import, export, clear the page, load a trip " +
-        "from the drawing, revise declinations, edit or delete a trip.";
+    w.moreButton.text = "\u22ef"; // i18n-ok: ellipsis glyph
+    w.moreButton.toolTip = qsTr("Import, export, clear the page, load a trip " +
+        "from the drawing, revise declinations, edit or delete a trip.");
     try {
         w.moreButton.autoRaise = true;
     } catch (eRaise) {
     }
     w.moreMenu = new QMenu();
-    w.importAction = w.moreMenu.addAction("Import File...");
-    w.exportAction = w.moreMenu.addAction("Export File...");
+    w.importAction = w.moreMenu.addAction(qsTr("Import File..."));
+    w.exportAction = w.moreMenu.addAction(qsTr("Export File..."));
     w.moreMenu.addSeparator();
-    w.loadDrawingAction = w.moreMenu.addAction("Load from drawing");
-    w.loadDrawingAction.toolTip = "Fill the page from a trip already in " +
+    w.loadDrawingAction = w.moreMenu.addAction(qsTr("Load from drawing"));
+    w.loadDrawingAction.toolTip = qsTr("Fill the page from a trip already in " +
         "the drawing, so this page becomes that trip's revision sheet. " +
-        "Edit and Draw to replace it in place.";
-    w.redrawAllAction = w.moreMenu.addAction("Redraw All");
-    w.redrawAllAction.toolTip = "Redraw the WHOLE cave from the drawing's " +
+        "Edit and Draw to replace it in place.");
+    w.redrawAllAction = w.moreMenu.addAction(qsTr("Redraw All"));
+    w.redrawAllAction.toolTip = qsTr("Redraw the WHOLE cave from the drawing's " +
         "own data, not just this page's trip. Draw normally redraws only " +
         "the trip you typed when nothing else moved; this forces the full " +
         "redraw, which is what re-splits a wall run at a new junction and " +
-        "re-orients a tie-in station's LRUD.";
-    w.declReviseAction = w.moreMenu.addAction("Declination...");
-    w.declReviseAction.toolTip = "Correct the declination of the trips " +
+        "re-orients a tie-in station's LRUD.");
+    w.declReviseAction = w.moreMenu.addAction(qsTr("Declination..."));
+    w.declReviseAction.toolTip = qsTr("Correct the declination of the trips " +
         "already in the drawing: one row per trip, IGRF on tap, and the " +
         "drawing turns by the difference. Not the same as the header's " +
-        "Decl, which is what this page's own readings were taken under.";
-    w.editTripAction = w.moreMenu.addAction("Edit this trip...");
-    w.editTripAction.toolTip = "Correct the loaded trip's name, date, " +
+        "Decl, which is what this page's own readings were taken under.");
+    w.editTripAction = w.moreMenu.addAction(qsTr("Edit this trip..."));
+    w.editTripAction.toolTip = qsTr("Correct the loaded trip's name, date, " +
         "team or instruments -- edits land on the trip itself, not a " +
         "new copy of it, and nothing is moved or redrawn. With no trip " +
         "loaded, every trip in the drawing is listed to pick from. " +
-        "Also where a trip is deleted outright.";
+        "Also where a trip is deleted outright.");
     w.moreMenu.addSeparator();
     // The tracing itself lives in Feature Trace now, but the BINDING
     // SWITCH does not: this entry is still the only way to turn
     // automatic linework binding off, and the only way to reach Adopt.
     // Checkable so the menu shows a mark when binding is switched off
     // -- state that used to be a pressed button in the row.
-    w.lineworkButton = w.moreMenu.addAction("Linework...");
+    w.lineworkButton = w.moreMenu.addAction(qsTr("Linework..."));
     try {
         w.lineworkButton.checkable = true;
     } catch (eChk) {
         // not checkable here: the label carries the state on its own
     }
     w.moreMenu.addSeparator();
-    w.clearAction = w.moreMenu.addAction("Clear");
-    w.clearAction.toolTip = "Empty the page for the next survey. The " +
+    w.clearAction = w.moreMenu.addAction(qsTr("Clear"));
+    w.clearAction.toolTip = qsTr("Empty the page for the next survey. The " +
         "team clears too; the rest of the header (name, date, " +
         "declination, instruments) is kept. Nothing in the drawing is " +
-        "touched.";
+        "touched.");
     w.moreButton.setMenu(w.moreMenu);
     // 2 = QToolButton::InstantPopup, WRITTEN AS A NUMBER ON PURPOSE.
     // QToolButton.InstantPopup is UNDEFINED in this bridge (probed
@@ -4225,9 +4264,9 @@ SurveyNotebook.buildDock = function(appWin) {
             SurveyNotebook.autoAddStation(w);
         }, "+ catcher Enter", w.problems);
         if (!w.focusAddWired) {
-            w.sentinel.toolTip = "Next station: Tab here from the last " +
+            w.sentinel.toolTip = qsTr("Next station: Tab here from the last " +
                 "D, then press Enter (this build's bridge has no focus " +
-                "signal, so the extra keypress is needed)";
+                "signal, so the extra keypress is needed)");
         }
     }
     SurveyNotebook.safeConnect(w.drawButton.clicked, function() {
@@ -4310,7 +4349,7 @@ SurveyNotebook.buildDock = function(appWin) {
                 var fDone = CsScanTree.folderComplete(w.scanRows[row].rel,
                     w.scanRows, w.scanComplete);
                 var fAct = menu.addAction(
-                    qsTr(CsScanList.folderMarkLabel(fDone)));
+                    CsScanList.menuText(CsScanList.folderMarkLabel(fDone)));
                 try {
                     fAct.checkable = true;
                     fAct.checked = fDone;
@@ -4331,7 +4370,7 @@ SurveyNotebook.buildDock = function(appWin) {
                 }
             } else {
                 var done = w.scanComplete[w.scanRows[row].rel] === true;
-                var act = menu.addAction(qsTr(CsScanList.markLabel(done)));
+                var act = menu.addAction(CsScanList.menuText(CsScanList.markLabel(done)));
                 try {
                     act.checkable = true;
                     act.checked = done;
@@ -4377,9 +4416,9 @@ SurveyNotebook.buildDock = function(appWin) {
         SurveyNotebook.newTrip(w);
     }, "New Trip button", w.problems);
     SurveyNotebook.safeConnect(w.clearAction.triggered, function() {
-        var sure = QMessageBox.question(null, "Survey Notebook",
-            "Clear the page? The team clears with it; the rest of the " +
-            "header stays and the drawing is not touched.",
+        var sure = QMessageBox.question(null, qsTr("Survey Notebook"),
+            qsTr("Clear the page? The team clears with it; the rest of the " +
+            "header stays and the drawing is not touched."),
             QMessageBox.Yes | QMessageBox.No);
         if (sure !== QMessageBox.Yes) {
             return;
@@ -4418,11 +4457,11 @@ SurveyNotebook.buildDock = function(appWin) {
             SurveyNotebook.lineworkDialog(w);
         } catch (e) {
             SurveyNotebook.updateLineworkButton(w);
-            QMessageBox.warning(null, "Survey Notebook",
-                "Linework binding failed inside this build's bridge:" +
-                "\n\n" + e + "\n\n" +
-                (e.stack ? String(e.stack).substring(0, 600) : "") +
-                "\n\nPlease report this text.");
+            QMessageBox.warning(null, qsTr("Survey Notebook"),
+                qsTr("Linework binding failed inside this build's bridge:" +
+                "\n\n%1\n\n%2\n\nPlease report this text.")
+                    .arg(String(e))
+                    .arg(e.stack ? String(e.stack).substring(0, 600) : ""));
         }
     }, "Linework button", w.problems);
     // Draw-time tagging, installed here because this is the earliest
@@ -4440,9 +4479,10 @@ SurveyNotebook.buildDock = function(appWin) {
     SurveyNotebook.addStationRow(w, "A2");
 
     if (w.problems.length > 0) {
-        EAction.handleUserWarning("Survey Notebook: this build's script " +
-            "bridge refused: " + w.problems.join("; ") +
-            " -- those controls are inert; the rest of the panel works.");
+        EAction.handleUserWarning(qsTr("Survey Notebook: this build's script " +
+            "bridge refused: %1" +
+            " -- those controls are inert; the rest of the panel works.")
+            .arg(w.problems.join("; ")));
     }
 
     SurveyNotebook.refresh(w);
@@ -4642,7 +4682,7 @@ SurveyNotebook.startTripAt = function(station) {
 SurveyNotebook.newTrip = function(w) {
     var doc = getDocument();
     if (doc === undefined || doc === null) {
-        QMessageBox.warning(null, "Survey Notebook", "No drawing is open.");
+        QMessageBox.warning(null, qsTr("Survey Notebook"), qsTr("No drawing is open."));
         return;
     }
 
@@ -4656,23 +4696,23 @@ SurveyNotebook.newTrip = function(w) {
         }
     }
     if (dirty) {
-        var sure = QMessageBox.question(null, "Survey Notebook",
-            "Start a new trip? This page's entries are cleared; the " +
-            "drawing is not touched.", QMessageBox.Yes | QMessageBox.No);
+        var sure = QMessageBox.question(null, qsTr("Survey Notebook"),
+            qsTr("Start a new trip? This page's entries are cleared; the " +
+            "drawing is not touched."), QMessageBox.Yes | QMessageBox.No);
         if (sure !== QMessageBox.Yes) {
             return;
         }
     }
 
     var defaults = SurveyNotebook.tripDefaults();
-    var label = "Tie the new trip into station:";
+    var label = qsTr("Tie the new trip into station:");
     if (defaults.ends.length > 0) {
         var shown = defaults.ends.slice(0, 6).join(", ");
         if (defaults.ends.length > 6) { shown += ", ..."; }
-        label += "\nOpen ends: " + shown;
+        label += "\n" + qsTr("Open ends: %1").arg(shown);
     }
     var dialog = new QInputDialog(RMainWindowQt.getMainWindow());
-    dialog.windowTitle = "New Trip";
+    dialog.windowTitle = qsTr("New Trip");
     dialog.setInputMode(QInputDialog.TextInput);
     dialog.setLabelText(label);
     dialog.setTextValue(defaults.ends.length > 0 ? defaults.ends[0] : "A1");
@@ -4705,9 +4745,10 @@ SurveyNotebook.prototype.beginEvent = function() {
         }
     } catch (e) {
         csNotebookDock = undefined;
-        warning("Survey Notebook: this QCAD build refused the docked " +
-            "panel (" + e + "). Azimuth Traverse and Import Cave Survey " +
-            "cover the same work meanwhile -- please report this.");
+        warning(qsTr("Survey Notebook: this QCAD build refused the docked " +
+            "panel (%1). Azimuth Traverse and Import Cave Survey " +
+            "cover the same work meanwhile -- please report this.")
+            .arg(String(e)));
     }
 
     this.terminate();

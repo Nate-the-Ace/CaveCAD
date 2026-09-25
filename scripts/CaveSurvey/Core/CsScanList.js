@@ -41,6 +41,27 @@ CsScanList.MARK_INCOMPLETE = "Mark Incomplete";
 CsScanList.MARK_FOLDER_COMPLETE = "Mark Folder Complete";
 CsScanList.MARK_FOLDER_INCOMPLETE = "Mark Folder Incomplete";
 
+/**
+ * The on-screen text for one of this file's menu-label constants. The
+ * constants stay English -- they are what the pure helpers return and
+ * tests compare -- and only the menu shows the translation. Written
+ * out literal by literal because lupdate can only extract a literal;
+ * qsTr(CsScanList.MARK_COMPLETE) would translate at runtime but never
+ * reach a translator.
+ */
+CsScanList.menuText = function(label) {
+    switch (label) {
+    case "Mark Complete": return qsTr("Mark Complete");
+    case "Mark Incomplete": return qsTr("Mark Incomplete");
+    case "Mark Folder Complete": return qsTr("Mark Folder Complete");
+    case "Mark Folder Incomplete": return qsTr("Mark Folder Incomplete");
+    case "Split into Pages": return qsTr("Split into Pages");
+    case "Reveal in Finder": return qsTr("Reveal in Finder");
+    case "Open Containing Folder": return qsTr("Open Containing Folder");
+    }
+    return label;
+};
+
 // ---------------------------------------------------------------------
 // The marks themselves. ONE STORE, READ-MODIFY-WRITE.
 // ---------------------------------------------------------------------
@@ -386,7 +407,7 @@ CsScanList.addSplitAction = function(menu, folder, rel, onDone) {
     }
     var action = null;
     try {
-        action = menu.addAction(qsTr(CsScanList.SPLIT_PDF));
+        action = menu.addAction(CsScanList.menuText(CsScanList.SPLIT_PDF));
     } catch (eAdd) {
         return null;
     }
@@ -448,7 +469,8 @@ CsScanList.addRevealAction = function(menu, folder, rel, isFolder) {
     var action = null;
     try {
         action = menu.addAction(
-            qsTr(CsScanList.revealLabel(CsScanList.hasMacOpen())));
+            CsScanList.menuText(
+                CsScanList.revealLabel(CsScanList.hasMacOpen())));
     } catch (eAdd) {
         return null;
     }
