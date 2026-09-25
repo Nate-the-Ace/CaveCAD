@@ -22460,6 +22460,18 @@ eqs(CsMesh3d.stationLabels({}).names.length, 0, "and no stations likewise");
     var stamp = CsFly.stamp(new Date(2026, 8, 13, 7, 5));
     eqs(stamp, "20260913-0705", "the stamp is sortable and readable");
 
+    // A recording is named for the colouring it shows, so a folder of
+    // them reads as "which view is this" without opening any.
+    eqs(CsFly.filmStem("Truitt Cave", "Depth of cover", "fly",
+        "20260913-0705"), "Truitt Cave - Depth of cover - fly 20260913-0705",
+        "the film is named cave, visualization, camera, time");
+    eqs(CsFly.filmStem("A/B: Cave", "Distance in", "spin", "20260913-0705"),
+        "A_B_ Cave - Distance in - spin 20260913-0705",
+        "a name that cannot be a file name is made into one");
+    eqs(CsFly.filmStem("", "", "fly", "20260913-0705"),
+        "cave - fly 20260913-0705",
+        "no drawing name and no method still names the film");
+
     var flat = CsFly.flatten([st(1,2,3), st(4,5,6)]);
     eqs(flat.length, 6, "flatten gives three numbers a point");
     eqs(flat[4], 5, "in order");

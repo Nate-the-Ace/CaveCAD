@@ -448,3 +448,23 @@ CsFly.stamp = function(now) {
     return d.getFullYear() + two(d.getMonth() + 1) + two(d.getDate()) +
         "-" + two(d.getHours()) + two(d.getMinutes());
 };
+
+/**
+ * What an exported recording (and its folder) is called: the cave, the
+ * visualization it is coloured by, the camera, and when --
+ * "Truitt Cave - Depth of cover - fly 20260913-0705". Named for the
+ * visualization so a folder of films says which view each one is
+ * without opening it. Anything a file name cannot hold becomes "_".
+ */
+CsFly.filmStem = function(caveName, methodLabel, camera, stamp) {
+    function safe(t) {
+        return String(t === undefined || t === null ? "" : t)
+            .replace(/[^A-Za-z0-9._ -]/g, "_");
+    }
+    var parts = [safe(caveName) !== "" ? safe(caveName) : "cave"];
+    if (safe(methodLabel) !== "") {
+        parts.push(safe(methodLabel));
+    }
+    parts.push(safe(camera) + " " + safe(stamp));
+    return parts.join(" - ");
+};

@@ -1167,9 +1167,14 @@ Cave3D.exportAnimation = function() {
     }
 
     var name = CsCave.nameOf(isNull(doc) ? null : doc.getFileName());
-    if (isNull(name) || String(name) === "") { name = "cave"; }
-    var stem = String(name).replace(/[^A-Za-z0-9._ -]/g, "_") + " " + mode
-        + " " + CsFly.stamp();
+    var method = "";
+    for (var mi = 0; mi < Cave3D.MODES.length; mi++) {
+        if (Cave3D.MODES[mi].key === Cave3D.currentMode()) {
+            method = Cave3D.MODES[mi].label;
+        }
+    }
+    var stem = CsFly.filmStem(isNull(name) ? "" : name, method, mode,
+        CsFly.stamp());
     var dir = String(picked) + "/" + stem;
     var framesDir = dir + "/frames";
 
