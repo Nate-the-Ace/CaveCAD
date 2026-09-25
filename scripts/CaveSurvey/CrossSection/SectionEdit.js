@@ -246,7 +246,7 @@ SectionEdit.explodeInto = function(doc, di, ref, bayId) {
     var members = CalloutWrite.members(doc, calloutId);
 
     var op = new RAddObjectsOperation();
-    op.setText("Reopen section sketch");
+    op.setText(qsTr("Reopen section sketch"));
 
     // Every layer this single operation touches -- the tracing's own
     // (whatever the caver drew on), the reference's, and each leader's.
@@ -490,7 +490,7 @@ SectionEdit.reopenScan = function(doc, di, path, fit, box, bayId) {
     entity.setDrawOrder(doc.getStorage().getMinDrawOrder() - 1);
 
     var op = new RAddObjectsOperation();
-    op.setText("Underlay section scan");
+    op.setText(qsTr("Underlay section scan"));
     op.addObject(entity, false);
     CsLayers.withLayerOn(doc, di, CsLayers.CTRL_SECTION_SCAN, function() {
         di.applyOperation(op);

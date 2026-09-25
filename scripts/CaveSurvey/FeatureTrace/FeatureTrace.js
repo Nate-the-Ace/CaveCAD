@@ -1923,9 +1923,10 @@ FeatureTrace.installListener = function(appWin) {
         FeatureTrace.layerListener = layerAdapter;
     } catch (e) {
         FeatureTrace.listener = null;
-        warning("Feature Trace: could not watch the drawing for survey " +
-            "runs (" + e + "); the run list refreshes when the panel is " +
-            "reopened or a feature is armed.");
+        warning(qsTr("Feature Trace: could not watch the drawing for survey " +
+            "runs (%1); the run list refreshes when the panel is reopened or " +
+            "a feature is armed.")
+            .arg(String(e)));
     }
 };
 
@@ -1986,8 +1987,9 @@ FeatureTrace.prototype.beginEvent = function() {
             // a stale panel must never stop the tool opening
         }
     } catch (e) {
-        warning("Feature Trace: this CaveCAD build refused the Draw " +
-            "panel (" + e + ") -- please report this.");
+        warning(qsTr("Feature Trace: this CaveCAD build refused the Draw " +
+            "panel (%1) -- please report this.")
+            .arg(String(e)));
     }
 
     this.terminate();
@@ -2023,7 +2025,8 @@ FeatureTrace.init = function(basePath) {
     try {
         FeatureTrace.installListener(RMainWindowQt.getMainWindow());
     } catch (eInit) {
-        warning("Feature Trace: could not watch the drawing at startup (" +
-            eInit + "); the run list refreshes when a feature is armed.");
+        warning(qsTr("Feature Trace: could not watch the drawing at startup " +
+            "(%1); the run list refreshes when a feature is armed.")
+            .arg(String(eInit)));
     }
 };

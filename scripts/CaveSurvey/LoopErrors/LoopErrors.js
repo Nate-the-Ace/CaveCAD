@@ -140,7 +140,7 @@ LoopErrors.draw = function(doc, di, read) {
     }
 
     var op = new RAddObjectsOperation();
-    op.setText("Loop errors");
+    op.setText(qsTr("Loop errors"));
 
     var cleared = 0;
     var allIds = doc.queryAllEntities(false, false);

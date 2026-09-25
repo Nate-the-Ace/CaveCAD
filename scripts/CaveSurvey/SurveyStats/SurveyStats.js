@@ -24,7 +24,7 @@ include(includeBasePath + "/../Core/CsAll.js");
 function surveyStatsRun() {
     var doc = getDocument();
     if (doc === undefined || doc === null) {
-        warning("Survey Stats: no active drawing document.");
+        warning(qsTr("Survey Stats: no active drawing document."));
         return;
     }
 
@@ -36,9 +36,9 @@ function surveyStatsRun() {
     // real loop (Truitt's F survey, 2026-08-27) counted as zero.
     var asDrawn = CsRevise.resolveAsDrawn(doc);
     if (asDrawn === null) {
-        warning("Survey Stats: no tagged survey stations found.\n" +
+        warning(qsTr("Survey Stats: no tagged survey stations found.\n" +
             "Run Azimuth Traverse, Import Cave Survey or the Survey " +
-            "Notebook first.");
+            "Notebook first."));
         return;
     }
     var survey = asDrawn.survey;
@@ -76,19 +76,20 @@ function surveyStatsRun() {
     }
 
     if (!canStamp) {
-        QMessageBox.information(getMainWindow(), "Survey Stats", summary);
+        QMessageBox.information(getMainWindow(), qsTr("Survey Stats"), summary);
         return;
     }
 
-    var answer = QMessageBox.question(getMainWindow(), "Survey Stats",
-        summary + "\n\nWrite length, depth and grade into the title block?",
+    var answer = QMessageBox.question(getMainWindow(), qsTr("Survey Stats"),
+        qsTr("%1\n\nWrite length, depth and grade into the title block?")
+            .arg(String(summary)),
         QMessageBox.Yes | QMessageBox.No);
     if (answer !== QMessageBox.Yes) {
         return;
     }
 
     var op = new RModifyObjectsOperation();
-    op.setText("Survey stats into title block");
+    op.setText(qsTr("Survey stats into title block"));
     var wrote = [];
     var tryWrite = function(fieldId, value) {
         var field = CsSheet.fieldById(fieldId);

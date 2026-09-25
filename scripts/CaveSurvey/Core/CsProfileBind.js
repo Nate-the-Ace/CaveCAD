@@ -361,7 +361,7 @@ CsProfileBind.claim = function(doc, di) {
     }
     var epsilon = CsBind.epsilonFor(doc);
     var op = new RModifyObjectsOperation();
-    op.setText("Bind traced profile linework");
+    op.setText(qsTr("Bind traced profile linework"));
     var any = false;
 
     var ids = doc.queryAllEntities(false, false);

@@ -848,7 +848,7 @@ CalloutWrite.createSection = function(doc, di, spec) {
         String(spec.cut.nearest));
 
     var op = new RAddObjectsOperation();
-    op.setText("Place cross section");
+    op.setText(qsTr("Place cross section"));
     op.addObject(ref, false);
 
     CalloutWrite.addSectionLeaders(doc, op, id, spec.cut, scale, at,
@@ -936,7 +936,7 @@ CalloutWrite.reanchorSketchLeader = function(doc, di, id, m, stationAt) {
     var layerName = CsCallout.STYLES[style] ||
         CsCallout.STYLES[CsCallout.STYLE_DEFAULT];
     var op = new RAddObjectsOperation();
-    op.setText("Re-anchor sketched section leader");
+    op.setText(qsTr("Re-anchor sketched section leader"));
     for (var i = 0; i < m.leaders.length; i++) {
         op.deleteObject(m.leaders[i]);
     }
@@ -1062,7 +1062,7 @@ CalloutWrite.refreshSections = function(doc, di, survey, resolved) {
             }
             if (tips.length > 0) {
                 var lop = new RAddObjectsOperation();
-                lop.setText("Re-aim cross section leaders");
+                lop.setText(qsTr("Re-aim cross section leaders"));
                 for (li = 0; li < m.leaders.length; li++) {
                     lop.deleteObject(m.leaders[li]);
                 }
@@ -1083,7 +1083,7 @@ CalloutWrite.refreshSections = function(doc, di, survey, resolved) {
             CsTags.set(m.block, CsCallout.KEY.SECTION_NEAREST,
                 String(cut.nearest));
             var mop = new RModifyObjectsOperation();
-            mop.setText("Record section provenance");
+            mop.setText(qsTr("Record section provenance"));
             mop.addObject(m.block, false);
             di.applyOperation(mop);
         } catch (eTag) {

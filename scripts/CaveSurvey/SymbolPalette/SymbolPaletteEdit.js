@@ -349,8 +349,8 @@ SymbolPaletteEdit.startNew = function() {
     }
     var opened = SymbolPaletteEdit.openEditorDocument(qsTr("New Symbol"));
     if (isNull(opened)) {
-        EAction.handleUserWarning("Symbol Palette: this CaveCAD build would not open a " +
-            "drawing to draw the symbol in.");
+        EAction.handleUserWarning(qsTr("Symbol Palette: this CaveCAD build would not open a " +
+            "drawing to draw the symbol in."));
         return;
     }
     var di = opened.di;
@@ -407,17 +407,18 @@ SymbolPaletteEdit.startEdit = function(entry) {
         }
     }
     if (srcDi === null) {
-        EAction.handleUserWarning("Symbol Palette: " + entry.nss +
-            " could not be found in your symbol library or in the cave " +
-            "template, so it cannot be opened for editing.");
+        EAction.handleUserWarning(qsTr("Symbol Palette: %1 could not be found " +
+            "in your symbol library or in the cave template, so it cannot be " +
+            "opened for editing.")
+            .arg(String(entry.nss)));
         return;
     }
 
     var opened = SymbolPaletteEdit.openEditorDocument(
         qsTr("Symbol: %1").arg(entry.nss));
     if (isNull(opened)) {
-        EAction.handleUserWarning("Symbol Palette: this CaveCAD build would not open a " +
-            "drawing to edit the symbol in.");
+        EAction.handleUserWarning(qsTr("Symbol Palette: this CaveCAD build would not open a " +
+            "drawing to edit the symbol in."));
         return;
     }
     var di = opened.di;

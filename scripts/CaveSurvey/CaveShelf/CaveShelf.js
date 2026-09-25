@@ -92,8 +92,9 @@ function caveShowLauncher() {
         } catch (e) {
             // The launcher failing must not leave the user staring at an
             // empty application with no way in.
-            EAction.handleUserWarning("Cave shelf: " + e +
-                " -- use File > New, or Cave Survey > Caves.");
+            EAction.handleUserWarning(qsTr("Cave shelf: %1 -- use File > New, " +
+                "or Cave Survey > Caves.")
+                .arg(String(e)));
         }
     });
     timer.start(0);
@@ -389,7 +390,7 @@ CaveShelf.commitCell = function(state, table, item, status) {
             status.text = applied.error;
         } catch (eStatus) {
         }
-        warning("Cave Shelf: " + applied.error);
+        warning(qsTr("Cave Shelf: %1").arg(String(applied.error)));
     } else {
         CaveShelf.forget(path);
         try {
@@ -615,7 +616,7 @@ CaveShelf.declinationRoute = function(state) {
     if (isNull(state.record)) {
         return;
     }
-    var answer = QMessageBox.question(getMainWindow(), "Cave Shelf",
+    var answer = QMessageBox.question(getMainWindow(), qsTr("Cave Shelf"),
         qsTr("Declination is set per trip in Survey Notebook, where " +
             "Infer can estimate it from the cave's location and the " +
             "trip's date -- changing it re-rotates the survey, so it " +
@@ -1508,7 +1509,9 @@ CaveShelf.runPending = function() {
     try {
         openFiles([path], false);
     } catch (eOpen) {
-        warning("Cave Shelf: could not open " + path + " (" + eOpen + ").");
+        warning(qsTr("Cave Shelf: could not open %1 (%2).")
+            .arg(String(path))
+            .arg(String(eOpen)));
         return;
     }
     EAction.handleUserMessage(qsTr("Cave Shelf: opened this cave. " +

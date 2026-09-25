@@ -1276,7 +1276,7 @@ ScanAlign.prototype.recordAssignedStations = function(di, imageId) {
         CsTags.set(image, CsStationOrder.TAG,
             CsStationOrder.serializeAssigned(names));
         var op = new RModifyObjectsOperation();
-        op.setText("Record aligned stations");
+        op.setText(qsTr("Record aligned stations"));
         // false: keeps the entity on the layer it is already on
         op.addObject(image, false);
         di.applyOperation(op);

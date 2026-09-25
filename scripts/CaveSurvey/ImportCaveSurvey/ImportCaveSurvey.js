@@ -48,13 +48,13 @@ function importCaveSurvey() {
     }
     var di = getDocumentInterface();
     if (doc === undefined || doc === null) {
-        warning("Import Cave Survey: no active drawing document.");
+        warning(qsTr("Import Cave Survey: no active drawing document."));
         return;
     }
 
     // -- pick the file ------------------------------------------------
     var fileName = QFileDialog.getOpenFileName(getMainWindow(),
-        "Select a cave survey file", "",
+        qsTr("Select a cave survey file"), "",
         CsFormatRegistry.combinedFileFilter());
     // isNull + String: a bridge that hands back a wrapped empty QString
     // is truthy, and `!fileName` would sail past the cancel
@@ -64,7 +64,8 @@ function importCaveSurvey() {
 
     var file = new QFile(fileName);
     if (!file.open(QIODevice.ReadOnly | QIODevice.Text)) {
-        warning("Import Cave Survey: could not open\n" + fileName);
+        warning(qsTr("Import Cave Survey: could not open\n%1")
+            .arg(String(fileName)));
         return;
     }
     var content = new QTextStream(file).readAll();
@@ -77,8 +78,8 @@ function importCaveSurvey() {
         for (var i = 0; i < CsFormatRegistry.FORMATS.length; i++) {
             labels.push(CsFormatRegistry.FORMATS[i].label);
         }
-        var choice = getItem("Import Cave Survey",
-            "The format couldn't be detected -- which is it?",
+        var choice = getItem(qsTr("Import Cave Survey"),
+            qsTr("The format couldn't be detected -- which is it?"),
             labels.join("|"), 0, "|");
         if (choice === undefined) {
             return;
@@ -93,8 +94,9 @@ function importCaveSurvey() {
     // -- parse ----------------------------------------------------------
     var survey = format.parse(content);
     if (survey.shots.length === 0) {
-        warning("Import Cave Survey: no shots were parsed from this file.\n" +
-            "Format tried: " + format.label);
+        warning(qsTr("Import Cave Survey: no shots were parsed from this " +
+            "file.\nFormat tried: %1")
+            .arg(String(format.label)));
         return;
     }
 
@@ -183,9 +185,9 @@ function importCaveSurvey() {
         sketchSummary;
     if (resolved.unresolved.length > 0 ||
         CsValidate.checkHasErrors(findings)) {
-        QMessageBox.warning(getMainWindow(), "Import Cave Survey", summary);
+        QMessageBox.warning(getMainWindow(), qsTr("Import Cave Survey"), summary);
     } else {
-        QMessageBox.information(getMainWindow(), "Import Cave Survey", summary);
+        QMessageBox.information(getMainWindow(), qsTr("Import Cave Survey"), summary);
     }
 }
 
@@ -218,7 +220,7 @@ function importSiblingSketches(doc, di, surveyPath, drawn) {
     for (var i = 0; i < sketches.length; i++) {
         names.push(CsSketchStore.nameOf(sketches[i]));
     }
-    var asked = QMessageBox.question(getMainWindow(), "Import Cave Survey",
+    var asked = QMessageBox.question(getMainWindow(), qsTr("Import Cave Survey"),
         (sketches.length === 1 ?
             "A Therion sketch sits beside this survey:\n\n" :
             "Therion sketches sit beside this survey:\n\n") +
@@ -266,11 +268,12 @@ function importSiblingSketches(doc, di, surveyPath, drawn) {
  */
 function sketchDecision(scrapName, alreadyHere) {
     var answer = QMessageBox.question(getMainWindow(),
-        "Import Cave Survey",
-        "The sketch \"" + scrapName + "\" is already in this drawing (" +
-        alreadyHere + " pieces of linework).\n\n" +
-        "Replace it with the version in the file? Anything you have " +
-        "changed here since importing it will go.",
+        qsTr("Import Cave Survey"),
+        qsTr("The sketch \"%1\" is already in this drawing (%2 pieces of " +
+            "linework).\n\nReplace it with the version in the file? Anything " +
+            "you have changed here since importing it will go.")
+            .arg(String(scrapName))
+            .arg(String(alreadyHere)),
         QMessageBox.Yes | QMessageBox.No | QMessageBox.Cancel,
         QMessageBox.No);
     if (answer === QMessageBox.Cancel) {

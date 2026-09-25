@@ -123,7 +123,7 @@ CsScanReanchor.backfill = function(doc, di) {
     }
     var cache = {};
     var op = new RModifyObjectsOperation();
-    op.setText("Record scan anchors");
+    op.setText(qsTr("Record scan anchors"));
     var n = 0;
     for (var i = 0; i < scans.length; i++) {
         try {
@@ -167,7 +167,7 @@ CsScanReanchor.run = function(doc, di) {
     }
     var cache = {};
     var op = new RModifyObjectsOperation();
-    op.setText("Move scans with the survey");
+    op.setText(qsTr("Move scans with the survey"));
     var any = false;
 
     for (var i = 0; i < scans.length; i++) {

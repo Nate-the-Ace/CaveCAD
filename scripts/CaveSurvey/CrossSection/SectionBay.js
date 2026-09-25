@@ -334,7 +334,7 @@ SectionBay.addFrame = function(doc, di, rect, bayId, station,
     // the snap alone" rather than guessing.
     CsTags.set(e, SectionBay.TAG_SNAP, priorSnapClass);
     var op = new RAddObjectsOperation();
-    op.setText("Open section bay");
+    op.setText(qsTr("Open section bay"));
     op.addObject(e, false);
     // CTRL-SECTION-BOX ships LOCKED (CsLayers.LOCKED) -- a caver's own
     // protection against dragging the frame the sweep is measured
@@ -377,7 +377,7 @@ SectionBay.addGhost = function(doc, di, cut, scale, rect, bayId) {
     CsTags.set(e, SectionBay.TAG_BAY, bayId);
     CsTags.set(e, "SectionBayRole", SectionBay.ROLE_GHOST);
     var op = new RAddObjectsOperation();
-    op.setText("Draw section ghost");
+    op.setText(qsTr("Draw section ghost"));
     op.addObject(e, false);
     // OFF layers refuse adds SILENTLY in this build -- CTRL-SECTION-
     // GHOST ships visible, but a caver may since have switched it off,
@@ -498,7 +498,7 @@ SectionBay.addScan = function(doc, di, scan, ghostBox, rect, bayId) {
     // in storage yet.
     entity.setDrawOrder(doc.getStorage().getMinDrawOrder() - 1);
     var op = new RAddObjectsOperation();
-    op.setText("Underlay section scan");
+    op.setText(qsTr("Underlay section scan"));
     op.addObject(entity, false);
     CsLayers.withLayerOn(doc, di, CsLayers.CTRL_SECTION_SCAN,
         function() {
@@ -755,7 +755,7 @@ SectionBay.cancel = function(doc, di, bay) {
     var snapClass = (bay.frame !== null && !isNull(bay.frame)) ?
         CsTags.get(bay.frame, SectionBay.TAG_SNAP) : "";
     var op = new RAddObjectsOperation();
-    op.setText("Cancel section bay");
+    op.setText(qsTr("Cancel section bay"));
     if (bay.frame !== null) { op.deleteObject(bay.frame); }
     if (bay.ghost !== null) { op.deleteObject(bay.ghost); }
     if (bay.scan !== null) { op.deleteObject(bay.scan); }

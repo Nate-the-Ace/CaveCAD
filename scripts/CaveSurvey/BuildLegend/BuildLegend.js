@@ -288,7 +288,7 @@ function blText(doc, x, y, height, label, layerId) {
 function buildLegendRun() {
     var doc = getDocument();
     if (doc === undefined || doc === null) {
-        warning("Build Legend: no active drawing document.");
+        warning(qsTr("Build Legend: no active drawing document."));
         return;
     }
     // A SHEET IS NOT A DRAWING TO WORK IN. It is rebuilt from the
@@ -303,18 +303,18 @@ function buildLegendRun() {
     var explain = CsLegend.explaining();
     var rows = CsLegend.rowsFor(CsLegend.usage(doc));
     if (rows.length === 0) {
-        warning("Build Legend: this map has nothing to explain yet.\n" +
+        warning(qsTr("Build Legend: this map has nothing to explain yet.\n" +
             "Trace some walls or place some symbols first -- the " +
-            "legend only ever describes what the map actually uses.");
+            "legend only ever describes what the map actually uses."));
         return;
     }
 
     // ---- where does the legend go? -----------------------------------
-    var xText = getDouble("Build Legend", "Legend position X:", 0.0, 3);
+    var xText = getDouble("Build Legend", qsTr("Legend position X:"), 0.0, 3);
     if (xText === undefined) {
         return;
     }
-    var yText = getDouble("Build Legend", "Legend position Y (top):", 0.0, 3);
+    var yText = getDouble("Build Legend", qsTr("Legend position Y (top):"), 0.0, 3);
     if (yText === undefined) {
         return;
     }
@@ -322,7 +322,7 @@ function buildLegendRun() {
     CsLayers.ensure(doc, di, CsLayers.LEGEND);
 
     var op = new RAddObjectsOperation();
-    op.setText("Build legend");
+    op.setText(qsTr("Build legend"));
 
     // Clear the previously generated legend, APPLIED NOW rather than
     // queued into `op` -- an area row's own fill is built through ITS

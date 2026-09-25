@@ -315,8 +315,9 @@ StartHere.prototype.beginEvent = function() {
         StartHere.open();
     } catch (e) {
         csStartHereDock = undefined;
-        warning("Start Here: this CaveCAD build refused the docked " +
-            "panel (" + e + ") -- please report this.");
+        warning(qsTr("Start Here: this CaveCAD build refused the docked panel " +
+            "(%1) -- please report this.")
+            .arg(String(e)));
     }
 
     this.terminate();
@@ -350,7 +351,8 @@ StartHere.init = function(basePath) {
         dock.visible = false;
     } catch (eInit) {
         csStartHereDock = undefined;
-        warning("Start Here: could not build the panel at startup (" +
-            eInit + "); the menu entry will try again.");
+        warning(qsTr("Start Here: could not build the panel at startup (%1); " +
+            "the menu entry will try again.")
+            .arg(String(eInit)));
     }
 };

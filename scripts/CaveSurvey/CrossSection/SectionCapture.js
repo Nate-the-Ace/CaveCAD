@@ -781,7 +781,7 @@ SectionCapture.capture = function(doc, di, bay, position) {
     }
 
     var op = new RAddObjectsOperation();
-    op.setText("Capture sketched section");
+    op.setText(qsTr("Capture sketched section"));
 
     // Every layer this single operation touches besides the three bay
     // layers below -- the annotation layer the reference and leader

@@ -486,7 +486,7 @@ CsSurfaceData.place = function(doc, di, path, bbox, size, unitsPerPixel,
     entity.setDrawOrder(doc.getStorage().getMinDrawOrder() - 1);
 
     var op = new RAddObjectsOperation();
-    op.setText("Insert aerial basemap");
+    op.setText(qsTr("Insert aerial basemap"));
     op.addObject(entity, false);
     di.applyOperation(op);
 
@@ -574,7 +574,7 @@ CsSurfaceData.askInterval = function(unit) {
         preset = (unit === CsUnits.FEET) ? "10" : "5";
     }
     var dialog = new QInputDialog(RMainWindowQt.getMainWindow());
-    dialog.windowTitle = "Surface Data";
+    dialog.windowTitle = qsTr("Surface Data");
     dialog.setInputMode(QInputDialog.TextInput);
     dialog.setLabelText("Contour interval (" + unit + "):");
     dialog.setTextValue(preset);
@@ -586,8 +586,10 @@ CsSurfaceData.askInterval = function(unit) {
     }
     var v = CsUnits.parseNumber(typed);
     if (isNaN(v) || v <= 0) {
-        warning("Surface Data: \"" + typed + "\" is not a usable " +
-            "interval -- a positive number of " + unit + ".");
+        warning(qsTr("Surface Data: \"%1\" is not a usable interval -- a " +
+            "positive number of %2.")
+            .arg(String(typed))
+            .arg(String(unit)));
         return null;
     }
     RSettings.setValue("CaveSurvey/ContourInterval", String(v));
@@ -871,7 +873,7 @@ CsSurfaceData.drawContours = function(doc, di, grid, levels, interval, bbox,
     entities.push(ref);
 
     var op = new RAddObjectsOperation();
-    op.setText("Draw surface contours");
+    op.setText(qsTr("Draw surface contours"));
     for (var ei = 0; ei < entities.length; ei++) {
         op.addObject(entities[ei], false);
     }
@@ -931,7 +933,7 @@ CsSurfaceData.eraseExistingContours = function(doc, di) {
     var doomed = CsContour.drawnEntities(doc);
     if (doomed.length > 0) {
         var op = new RDeleteObjectsOperation();
-        op.setText("Erase surface contours");
+        op.setText(qsTr("Erase surface contours"));
         for (var k = 0; k < doomed.length; k++) {
             op.deleteObject(doomed[k]);
         }
@@ -951,7 +953,7 @@ CsSurfaceData.eraseExistingContours = function(doc, di) {
                     doc.getBlockName(doc.getModelSpaceBlockId()));
             }
             var drop = new RDeleteObjectsOperation();
-            drop.setText("Erase surface contours");
+            drop.setText(qsTr("Erase surface contours"));
             drop.deleteObject(block);
             di.applyOperation(drop);
         }

@@ -999,8 +999,9 @@ AreaFill.buildBody = function(parent) {
             try {
                 AreaFillEdit.startNew();
             } catch (eNew) {
-                EAction.handleUserWarning("Area Fill: could not open the " +
-                    "pattern editor (" + eNew + ").");
+                EAction.handleUserWarning(qsTr("Area Fill: could not open the " +
+                    "pattern editor (%1).")
+                    .arg(String(eNew)));
             }
         });
         custom.addWidget(w.newPatternButton, 1, 0);
@@ -1013,8 +1014,9 @@ AreaFill.buildBody = function(parent) {
             try {
                 AreaFillEdit.startEdit(AreaFill.armedEntry());
             } catch (eEdit) {
-                EAction.handleUserWarning("Area Fill: could not open that " +
-                    "pattern (" + eEdit + ").");
+                EAction.handleUserWarning(qsTr("Area Fill: could not open " +
+                    "that pattern (%1).")
+                    .arg(String(eEdit)));
             }
         });
         custom.addWidget(w.editPatternButton, 0, 0);
@@ -1028,8 +1030,9 @@ AreaFill.buildBody = function(parent) {
             try {
                 AreaFill.deleteArmed();
             } catch (eDel) {
-                EAction.handleUserWarning("Area Fill: could not delete " +
-                    "that pattern (" + eDel + ").");
+                EAction.handleUserWarning(qsTr("Area Fill: could not delete " +
+                    "that pattern (%1).")
+                    .arg(String(eDel)));
             }
         });
         custom.addWidget(w.deletePatternButton, 0, 0);
@@ -1146,8 +1149,9 @@ AreaFill.buildBody = function(parent) {
             try {
                 AreaFillEdit.save();
             } catch (eSave) {
-                EAction.handleUserWarning("Area Fill: the pattern could " +
-                    "not be saved (" + eSave + ").");
+                EAction.handleUserWarning(qsTr("Area Fill: the pattern could " +
+                    "not be saved (%1).")
+                    .arg(String(eSave)));
             }
         });
         editorRow.addWidget(w.savePatternButton, 1, 0);
@@ -1223,8 +1227,9 @@ AreaFill.prototype.beginEvent = function() {
     try {
         DrawPanel.reveal(DrawPanel.SEC_AREAS);
     } catch (e) {
-        EAction.handleUserWarning("Area Fill: this CaveCAD build refused " +
-            "the Draw panel (" + e + ") -- please report this.");
+        EAction.handleUserWarning(qsTr("Area Fill: this CaveCAD build refused " +
+            "the Draw panel (%1) -- please report this.")
+            .arg(String(e)));
     }
 
     // The "area" command is also a "panel shown" moment -- refresh the

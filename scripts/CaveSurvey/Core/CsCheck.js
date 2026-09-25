@@ -87,9 +87,9 @@ CsCheck.ORDER = ["error", "warning", "note"];
 /** What a severity is called on screen. The words are the point: a
  *  beginner does not know what "warning" is being weighed against. */
 CsCheck.LABEL = {
-    "error": "Fix before sharing",
-    "warning": "Probably not what you meant",
-    "note": "Polish"
+    "error": qsTr("Fix before sharing"),
+    "warning": qsTr("Probably not what you meant"),
+    "note": qsTr("Polish")
 };
 /**
  * WHY EACH FAULT MATTERS. One paragraph per CODE, because the reason
@@ -102,89 +102,89 @@ CsCheck.LABEL = {
  */
 CsCheck.WHY = {
     "sheet.scalebar":
-        "Without one, nothing on the map can be measured -- a reader " +
+        qsTr("Without one, nothing on the map can be measured -- a reader " +
         "cannot tell a 20 ft crawl from a 200 ft passage. A printed " +
         "map is resized by every photocopier it meets, which is why " +
         "the bar is drawn on the sheet rather than written as '1 inch " +
-        "= 50 feet'.",
+        "= 50 feet'."),
     "sheet.north":
-        "A cave map without one cannot be lined up with a compass, a " +
+        qsTr("A cave map without one cannot be lined up with a compass, a " +
         "surface map or the next cave over. Say WHICH north it is -- " +
         "true or magnetic, with the declination used -- because a " +
-        "reader who assumes the wrong one is out by degrees.",
+        "reader who assumes the wrong one is out by degrees."),
     "sheet.titleblock":
-        "A map nobody can attribute or date is a map nobody can " +
+        qsTr("A map nobody can attribute or date is a map nobody can " +
         "check, correct or build on. Who surveyed it and when is what " +
         "lets the next party tell your work from theirs -- and it is " +
-        "the credit the people who carried the tape are owed.",
+        "the credit the people who carried the tape are owed."),
     "sheet.legend":
-        "You know what every mark means today. A reader does not, and " +
+        qsTr("You know what every mark means today. A reader does not, and " +
         "neither will you in five years. Build Legend generates one " +
         "from the symbols this map actually uses, so it can never " +
-        "explain a symbol the map does not have.",
+        "explain a symbol the map does not have."),
     "layer.symbol":
-        "Layers are how a cave map is read, printed and switched off: " +
+        qsTr("Layers are how a cave map is read, printed and switched off: " +
         "a stalactite sitting on the water layer turns blue with the " +
         "streams and vanishes when someone hides them. Placing a " +
         "symbol from the Symbol Palette puts it on its own layer " +
         "every time -- this happens when one is copied, or dragged " +
-        "from another drawing.",
+        "from another drawing."),
     "layer.stray":
-        "Everything the suite draws goes on a named layer, and the " +
+        qsTr("Everything the suite draws goes on a named layer, and the " +
         "layer decides how it prints and whether Restyle Layers can " +
         "reach it. Work on layer 0 -- what CAD gives you when nothing " +
         "is chosen -- is invisible to every tool here and will not " +
-        "restyle, plot or export with the rest of the map.",
+        "restyle, plot or export with the rest of the map."),
     "layer.hidden":
-        "Work on a hidden layer is still in the drawing and still in " +
+        qsTr("Work on a hidden layer is still in the drawing and still in " +
         "the file -- it just does not print, and you cannot see that " +
         "it is missing. This is worth a look before plotting: either " +
         "it belongs on the map, or it should be deleted rather than " +
-        "left where the next person will find it.",
+        "left where the next person will find it."),
     "walls.gap":
-        "A wall that stops just short of the next one leaves a hole " +
+        qsTr("A wall that stops just short of the next one leaves a hole " +
         "the reader's eye falls through, and any tool that fills or " +
         "measures an area will leak out of it. Continue the stroke " +
         "instead: a trace that carries on from an existing end GROWS " +
-        "that line rather than starting a second one.",
+        "that line rather than starting a second one."),
     "walls.orphan":
-        "Cave maps are drawn ON the survey: every wall is traced " +
+        qsTr("Cave maps are drawn ON the survey: every wall is traced " +
         "beside the stations that measured it. Linework this far from " +
         "any station is either remembered rather than surveyed -- in " +
         "which case it belongs on Inferred Walls, dashed, so the map " +
-        "says so -- or it was drawn in the wrong place entirely.",
+        "says so -- or it was drawn in the wrong place entirely."),
     "boundary.open":
-        "Scatter Breakdown fills CLOSED boundaries and skips open " +
+        qsTr("Scatter Breakdown fills CLOSED boundaries and skips open " +
         "ones without complaining, so an open outline is a rubble " +
         "field that silently never gets its blocks. Close the loop " +
-        "back onto its own start.",
+        "back onto its own start."),
     "section.untied":
-        "A section is a statement about ONE place in the cave. With " +
+        qsTr("A section is a statement about ONE place in the cave. With " +
         "nothing tying it to a station, a reader cannot tell where " +
         "the cut was taken, and a revision cannot move it when that " +
-        "part of the cave is resurveyed.",
+        "part of the cave is resurveyed."),
     "shape.stale":
-        "The hachures and scallops are generated along the line and " +
+        qsTr("The hachures and scallops are generated along the line and " +
         "normally follow it. One that has drifted usually means the " +
         "line was edited while the suite was not watching -- Sync " +
-        "Shaped Lines rebuilds them.",
+        "Shaped Lines rebuilds them."),
     "ledge.uphill":
-        "Hachures go on the LOW side -- the side you would fall to. " +
+        qsTr("Hachures go on the LOW side -- the side you would fall to. " +
         "The floor levels nearest this one say the ornamented side is " +
         "the HIGHER one, which reads as a drop going up. Worth " +
         "looking at rather than trusting: this is judged from the " +
-        "nearest stations, not measured. Flip Shaped Side mirrors it.",
+        "nearest stations, not measured. Flip Shaped Side mirrors it."),
     "survey.closure":
-        "A loop that comes back to its start off by this much has a " +
+        qsTr("A loop that comes back to its start off by this much has a " +
         "reading in it that is wrong, and every wall traced off those " +
         "stations inherits the error. Survey Notebook flags the " +
         "suspect shots; fixing one bad backsight is worth more than " +
-        "any amount of redrawing.",
+        "any amount of redrawing."),
     "check.more":
-        "The list is capped so it stays a list rather than a wall of " +
+        qsTr("The list is capped so it stays a list rather than a wall of " +
         "text. Fix some of these and press Check Again -- the rest " +
         "will appear. Ignoring this row hides only the count, never " +
-        "the findings themselves."
+        "the findings themselves.")
 };
 
 /**
@@ -238,7 +238,7 @@ CsCheck.finding = function(code, severity, title, why, count, at, layer) {
 
 /** Distances a caver reads: "3 ft", "74 ft". */
 CsCheck.feet = function(value) {
-    return Math.round(value) + " ft";
+    return qsTr("%1 ft").arg(Math.round(value));
 };
 
 /**
@@ -259,8 +259,8 @@ CsCheck.capped = function(code, findings) {
     var out = findings.slice(0, CsCheck.MAX_PER_CHECK);
     var rest = findings.length - CsCheck.MAX_PER_CHECK;
     out.push(CsCheck.finding("check.more", findings[0].severity,
-        "and " + rest + " more like the " + CsCheck.MAX_PER_CHECK +
-            " above", null, rest, null, code));
+        qsTr("and %1 more like the %2 above")
+            .arg(rest).arg(CsCheck.MAX_PER_CHECK), null, rest, null, code));
     return out;
 };
 
@@ -291,7 +291,7 @@ CsCheck.checkScaleBar = function(scan) {
         return [];
     }
     return [CsCheck.finding("sheet.scalebar", "error",
-        "No scale bar on the sheet", null, 1, null, "SCALE-BAR")];
+        qsTr("No scale bar on the sheet"), null, 1, null, "SCALE-BAR")];
 };
 
 /** And no north arrow is a map that cannot be walked with. */
@@ -300,7 +300,7 @@ CsCheck.checkNorthArrow = function(scan) {
         return [];
     }
     return [CsCheck.finding("sheet.north", "error",
-        "No north arrow on the sheet", null, 1, null, "NORTH-ARROW")];
+        qsTr("No north arrow on the sheet"), null, 1, null, "NORTH-ARROW")];
 };
 
 /**
@@ -318,7 +318,7 @@ CsCheck.checkTitleBlock = function(scan) {
         var value = scan.titleBlock[field.id];
         if (isNull(value) || String(value).replace(/\s/g, "") === "") {
             out.push(CsCheck.finding("sheet.titleblock", "error",
-                "The title block does not say: " + field.label,
+                qsTr("The title block does not say: %1").arg(field.label),
                 null, 1, null, "TITLE-BLOCK:" + field.id));
         }
     }
@@ -331,7 +331,7 @@ CsCheck.checkLegend = function(scan) {
         return [];
     }
     return [CsCheck.finding("sheet.legend", "warning",
-        "Symbols are used but there is no legend",
+        qsTr("Symbols are used but there is no legend"),
         null, scan.symbolCount, null, "LEGEND")];
 };
 
@@ -345,7 +345,8 @@ CsCheck.checkSymbolLayers = function(scan) {
         }
         var name = isNull(sym.name) || sym.name === "" ? sym.block : sym.name;
         out.push(CsCheck.finding("layer.symbol", "error",
-            "A " + name + " is on " + sym.layer + ", not " + sym.home,
+            qsTr("A %1 is on %2, not %3").arg(name).arg(sym.layer)
+                .arg(sym.home),
             null, 1, sym.at, sym.layer));
     }
     return CsCheck.capped("layer.symbol", out);
@@ -380,8 +381,9 @@ CsCheck.checkStrayLayers = function(scan) {
         var layer = order[n];
         var count = strays[layer];
         out.push(CsCheck.finding("layer.stray", "warning",
-            count + " thing" + (count === 1 ? "" : "s") + " drawn on " +
-                (layer === "0" ? "0 (the default layer)" : layer),
+            (count === 1 ? qsTr("%1 thing drawn on %2") :
+                qsTr("%1 things drawn on %2")).arg(count)
+                .arg(layer === "0" ? qsTr("0 (the default layer)") : layer),
             null, count, where[layer], layer));
     }
     return CsCheck.capped("layer.stray", out);
@@ -396,8 +398,9 @@ CsCheck.checkHiddenContent = function(scan) {
             continue;
         }
         out.push(CsCheck.finding("layer.hidden", "warning",
-            lay.count + " thing" + (lay.count === 1 ? "" : "s") +
-                " on " + lay.name + ", which is switched off",
+            (lay.count === 1 ? qsTr("%1 thing on %2, which is switched off") :
+                qsTr("%1 things on %2, which is switched off"))
+                .arg(lay.count).arg(lay.name),
             null, lay.count, null, lay.name));
     }
     return CsCheck.capped("layer.hidden", out);
@@ -444,7 +447,7 @@ CsCheck.checkWallGaps = function(scan) {
             continue;
         }
         out.push(CsCheck.finding("walls.gap", "warning",
-            "Two wall lines stop " + CsCheck.feet(feet) + " apart",
+            qsTr("Two wall lines stop %1 apart").arg(CsCheck.feet(feet)),
             null, 1, ends[i].at, ends[i].layer));
     }
     return CsCheck.capped("walls.gap", out);
@@ -461,11 +464,10 @@ CsCheck.checkOrphanLinework = function(scan) {
         }
         out.push(CsCheck.finding("walls.orphan", "warning",
             item.nearestStation === null ?
-                ("A line on " + item.layer + " with no station anywhere " +
-                    "in the drawing") :
-                ("A line on " + item.layer + " is " +
-                    CsCheck.feet(item.nearestStation) +
-                    " from the nearest station"),
+                qsTr("A line on %1 with no station anywhere " +
+                    "in the drawing").arg(item.layer) :
+                qsTr("A line on %1 is %2 from the nearest station")
+                    .arg(item.layer).arg(CsCheck.feet(item.nearestStation)),
             null, 1, item.at, item.layer));
     }
     return CsCheck.capped("walls.orphan", out);
@@ -479,7 +481,7 @@ CsCheck.checkOpenBoundaries = function(scan) {
             continue;
         }
         out.push(CsCheck.finding("boundary.open", "warning",
-            "A breakdown boundary is not closed",
+            qsTr("A breakdown boundary is not closed"),
             null, 1, scan.boundaries[i].at, scan.boundaries[i].layer));
     }
     return CsCheck.capped("boundary.open", out);
@@ -493,7 +495,7 @@ CsCheck.checkSectionTies = function(scan) {
             continue;
         }
         out.push(CsCheck.finding("section.untied", "warning",
-            "A cross section is tied to no station",
+            qsTr("A cross section is tied to no station"),
             null, 1, scan.sections[i].at, scan.sections[i].layer));
     }
     return CsCheck.capped("section.untied", out);
@@ -507,7 +509,7 @@ CsCheck.checkStaleShapes = function(scan) {
             continue;
         }
         out.push(CsCheck.finding("shape.stale", "note",
-            "A shaped line's ornament is out of step with its line",
+            qsTr("A shaped line's ornament is out of step with its line"),
             null, 1, scan.shapes[i].at, scan.shapes[i].layer));
     }
     return CsCheck.capped("shape.stale", out);
@@ -523,9 +525,8 @@ CsCheck.checkLedgeSides = function(scan) {
             continue;
         }
         out.push(CsCheck.finding("ledge.uphill", "note",
-            "A ledge's hachures may be on the high side -- the " +
-                "ornamented side reads " + CsCheck.feet(ledge.drop) +
-                " higher",
+            qsTr("A ledge's hachures may be on the high side -- the " +
+                "ornamented side reads %1 higher").arg(CsCheck.feet(ledge.drop)),
             null, 1, ledge.at, ledge.layer));
     }
     return CsCheck.capped("ledge.uphill", out);
@@ -538,9 +539,9 @@ CsCheck.checkClosure = function(scan) {
         return [];
     }
     return [CsCheck.finding("survey.closure", "warning",
-        "The survey closes at " + scan.closurePercent.toFixed(1) +
-            "%, over the " + scan.closureLimit.toFixed(1) + "% worth " +
-            "questioning",
+        qsTr("The survey closes at %1%, over the %2% worth questioning")
+            .arg(scan.closurePercent.toFixed(1))
+            .arg(scan.closureLimit.toFixed(1)),
         null, 1, null, "")];
 };
 
@@ -768,10 +769,10 @@ CsCheck.countOf = function(result, severity) {
  *  worse than none. */
 CsCheck.summary = function(result, ignoredCount) {
     if (result.clean) {
-        var clean = "Check Map: nothing to fix -- all " + result.checked +
-            " checks pass.";
+        var clean = qsTr("Check Map: nothing to fix -- all %1 checks pass.")
+            .arg(result.checked);
         if (!isNull(ignoredCount) && ignoredCount > 0) {
-            clean += " " + ignoredCount + " ignored.";
+            clean += " " + qsTr("%1 ignored.").arg(ignoredCount);
         }
         return clean;
     }
@@ -782,13 +783,13 @@ CsCheck.summary = function(result, ignoredCount) {
             parts.push(n + " " + CsCheck.LABEL[CsCheck.ORDER[i]].toLowerCase());
         }
     }
-    var text = "Check Map: " + parts.join(", ") + ".";
+    var text = qsTr("Check Map: %1.").arg(parts.join(", "));
     if (!isNull(ignoredCount) && ignoredCount > 0) {
-        text += " " + ignoredCount + " ignored.";
+        text += " " + qsTr("%1 ignored.").arg(ignoredCount);
     }
     if (result.failed.length > 0) {
-        text += " (" + result.failed.length + " check could not run: " +
-            result.failed.join(", ") + ")";
+        text += " " + qsTr("(%1 check could not run: %2)")
+            .arg(result.failed.length).arg(result.failed.join(", "));
     }
     return text;
 };

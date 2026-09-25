@@ -331,8 +331,8 @@ AreaFillEdit.startNew = function() {
     }
     var opened = AreaFillEdit.openEditorDocument(qsTr("New Area Pattern"));
     if (isNull(opened)) {
-        EAction.handleUserWarning("Area Fill: this CaveCAD build would not open a " +
-            "drawing to draw the pattern in.");
+        EAction.handleUserWarning(qsTr("Area Fill: this CaveCAD build would not open a " +
+            "drawing to draw the pattern in."));
         return;
     }
     var di = opened.di;
@@ -370,22 +370,24 @@ AreaFillEdit.startEdit = function(entry) {
     var libPath = CsSymbolStore.customPath();
     var blockName = entry.blocks[0];
     if (isNull(libPath) || !new QFileInfo(libPath).exists()) {
-        EAction.handleUserWarning("Area Fill: " + entry.name +
-            " could not be found in your symbol library.");
+        EAction.handleUserWarning(qsTr("Area Fill: %1 could not be found in " +
+            "your symbol library.")
+            .arg(String(entry.name)));
         return;
     }
     var srcDi = CsSymbolStore.openOffscreen(libPath);
     if (srcDi === null || isNull(srcDi.getDocument().queryBlock(blockName))) {
-        EAction.handleUserWarning("Area Fill: " + entry.name +
-            " could not be found in your symbol library.");
+        EAction.handleUserWarning(qsTr("Area Fill: %1 could not be found in " +
+            "your symbol library.")
+            .arg(String(entry.name)));
         return;
     }
 
     var opened = AreaFillEdit.openEditorDocument(
         qsTr("Pattern: %1").arg(entry.name));
     if (isNull(opened)) {
-        EAction.handleUserWarning("Area Fill: this CaveCAD build would not open a " +
-            "drawing to edit the pattern in.");
+        EAction.handleUserWarning(qsTr("Area Fill: this CaveCAD build would not open a " +
+            "drawing to edit the pattern in."));
         return;
     }
     var di = opened.di;

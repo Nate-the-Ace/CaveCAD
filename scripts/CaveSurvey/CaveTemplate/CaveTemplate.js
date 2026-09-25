@@ -49,9 +49,9 @@ CaveTemplate.prototype.beginEvent = function() {
         }
     }
     if (!triggered) {
-        EAction.handleUserMessage("New Cave Map: couldn't reach the " +
+        EAction.handleUserMessage(qsTr("New Cave Map: couldn't reach the " +
             "stock New action -- use File > New; the template fills " +
-            "in there too.");
+            "in there too."));
     }
 
     this.terminate();

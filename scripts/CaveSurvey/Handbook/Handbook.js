@@ -409,8 +409,9 @@ Handbook.prototype.beginEvent = function() {
         Handbook.open(Handbook.HOME);
     } catch (e) {
         csHandbookDock = undefined;
-        warning("Handbook: this CaveCAD build refused the docked panel (" +
-            e + ") -- please report this.");
+        warning(qsTr("Handbook: this CaveCAD build refused the docked panel " +
+            "(%1) -- please report this.")
+            .arg(String(e)));
     }
 
     this.terminate();
@@ -443,7 +444,8 @@ Handbook.init = function(basePath) {
         dock.visible = false;
     } catch (eInit) {
         csHandbookDock = undefined;
-        warning("Handbook: could not build the panel at startup (" +
-            eInit + "); the menu entry will try again.");
+        warning(qsTr("Handbook: could not build the panel at startup (%1); " +
+            "the menu entry will try again.")
+            .arg(String(eInit)));
     }
 };

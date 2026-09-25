@@ -67,9 +67,9 @@ function initNewFile(mdiChild) {
         }
     }
     if (tpl === null) {
-        EAction.handleUserWarning("Cave template: " +
+        EAction.handleUserWarning(qsTr("Cave template: " +
             "NSS_Cave_Template_PLAN.dxf not found beside the add-on or " +
-            "in Documents/Cave/templates -- new drawing left empty.");
+            "in Documents/Cave/templates -- new drawing left empty."));
         return;
     }
 
@@ -79,7 +79,8 @@ function initNewFile(mdiChild) {
     try {
         if (sourceDi.importFile(tpl, "", false) !==
                 RDocumentInterface.IoErrorNoError) {
-            EAction.handleUserWarning("Cave template: could not read " + tpl);
+            EAction.handleUserWarning(qsTr("Cave template: could not read %1")
+                .arg(String(tpl)));
             return;
         }
 
@@ -184,9 +185,9 @@ function initNewFile(mdiChild) {
             // zoom is a nicety
         }
 
-        EAction.handleUserMessage("New cave map: NSS template loaded " +
+        EAction.handleUserMessage(qsTr("New cave map: NSS template loaded " +
             "(layers, symbols, title block). The drawing has no file " +
-            "name yet -- Save will ask where to put it.");
+            "name yet -- Save will ask where to put it."));
     } finally {
         destr(sourceDi);
     }

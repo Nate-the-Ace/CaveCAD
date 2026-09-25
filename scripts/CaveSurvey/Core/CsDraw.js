@@ -604,7 +604,7 @@ CsDraw.survey = function(survey, resolved, originStation, originPos,
     };
 
     var op = new RAddObjectsOperation();
-    op.setText("Draw cave survey");
+    op.setText(qsTr("Draw cave survey"));
 
     var offX = 0, offY = 0;
     if (originStation !== undefined && originStation !== null &&
@@ -1054,7 +1054,7 @@ CsDraw.survey = function(survey, resolved, originStation, originPos,
     if (hiddenLegs.length > 0) {
         CsLayers.withLayerOn(doc, di, CsLayers.CTRL_HIDDEN, function() {
             var hop = new RAddObjectsOperation();
-            hop.setText("Draw hidden survey legs");
+            hop.setText(qsTr("Draw hidden survey legs"));
             for (var hi = 0; hi < hiddenLegs.length; hi++) {
                 var hLeg = hiddenLegs[hi];
                 CsDraw.shotLine(doc, hop, at(hLeg.from), at(hLeg.to),
@@ -1115,7 +1115,7 @@ CsDraw.survey = function(survey, resolved, originStation, originPos,
         };
         CsLayers.withLayerOn(doc, di, CsLayers.CTRL_RAW, function() {
             var gop = new RAddObjectsOperation();
-            gop.setText("Draw as-surveyed ghost");
+            gop.setText(qsTr("Draw as-surveyed ghost"));
             for (var gi = 0; gi < rawLegs.length; gi++) {
                 var gLeg = rawLegs[gi];
                 if (gLeg.shot.excludeFromPlot) {
@@ -1526,7 +1526,7 @@ CsDraw.eraseStations = function(doc, stationNames, di) {
     var splayBaseOf = CsBind.splayBase;
 
     var op = new RAddObjectsOperation();
-    op.setText("Replace survey marks");
+    op.setText(qsTr("Replace survey marks"));
     var removed = 0;
     var offLayers = [];      // off layers the kill list touches
     var offLayerSeen = {};   // layer name -> is it off (asked once)

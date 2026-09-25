@@ -175,14 +175,14 @@ TripEdit.deleteTrip = function(doc, di, read, request) {
         // the DRAWING says.
         recon = CsRevise.surveyFromDocument(doc);
     } catch (eRe) {
-        QMessageBox.warning(null, "Edit Trip",
-            "Couldn't re-read the drawing (" + eRe + "). Nothing was " +
-            "deleted.");
+        QMessageBox.warning(null, qsTr("Edit Trip"),
+            qsTr("Couldn't re-read the drawing (%1). Nothing was deleted.")
+                .arg(String(eRe)));
         return;
     }
 
     var bound = CsTripEdit.lineworkOfTrip(doc, tripId, {}).owned.length;
-    var sure = QMessageBox.question(null, "Edit Trip",
+    var sure = QMessageBox.question(null, qsTr("Edit Trip"),
         "Delete " + request.label + " from this drawing?\n\n" +
         "Its " + request.shots + " shot" +
         (request.shots === 1 ? "" : "s") + ", the stations only it " +
@@ -197,7 +197,7 @@ TripEdit.deleteTrip = function(doc, di, read, request) {
     // No default. A caver who does not answer this keeps their tracing.
     var keepLinework = true;
     if (bound > 0) {
-        var answer = QMessageBox.question(null, "Edit Trip",
+        var answer = QMessageBox.question(null, qsTr("Edit Trip"),
             bound + " piece" + (bound === 1 ? "" : "s") + " of traced " +
             "linework " + (bound === 1 ? "is" : "are") + " bound to " +
             "this trip.\n\nKeep the tracing (it stays in the drawing, " +
@@ -213,7 +213,7 @@ TripEdit.deleteTrip = function(doc, di, read, request) {
     var res = CsTripEdit.deleteTrip(doc, di, recon, tripId,
         { keepLinework: keepLinework });
     if (!res.ok) {
-        QMessageBox.warning(null, "Edit Trip", res.error);
+        QMessageBox.warning(null, qsTr("Edit Trip"), res.error);
         return;
     }
 
@@ -240,7 +240,7 @@ TripEdit.deleteTrip = function(doc, di, read, request) {
             "the tracing bound to them followed.";
     }
     EAction.handleUserMessage(msg);
-    QMessageBox.information(null, "Edit Trip", msg);
+    QMessageBox.information(null, qsTr("Edit Trip"), msg);
 };
 
 /**
@@ -257,7 +257,7 @@ TripEdit.deleteTrip = function(doc, di, read, request) {
 TripEdit.open = function(tripId) {
     var doc = getDocument();
     if (doc === undefined || doc === null) {
-        warning("Survey Notebook: no active drawing document.");
+        warning(qsTr("Survey Notebook: no active drawing document."));
         return;
     }
     var di = getDocumentInterface();
@@ -284,14 +284,15 @@ TripEdit.open = function(tripId) {
             }
         }
         if (rows.length === 0) {
-            EAction.handleUserMessage("Survey Notebook: trip " + tripId +
-                " is no longer in the drawing.");
+            EAction.handleUserMessage(qsTr("Survey Notebook: trip %1 is no " +
+                "longer in the drawing.")
+                .arg(String(tripId)));
             return;
         }
     }
 
     var dlg = new QDialog(getMainWindow());
-    dlg.windowTitle = "Edit Trip";
+    dlg.windowTitle = qsTr("Edit Trip");
     var layout = new QVBoxLayout();
 
     layout.addWidget(new QLabel(single ?
@@ -369,8 +370,8 @@ TripEdit.open = function(tripId) {
             fields.push({ tripId: row.tripId, name: nameEdit,
                 date: dateEdit, team: teamEdit, instruments: instrEdit });
         } else {
-            var why = new QLabel("no station in the drawing carries " +
-                "this trip's tags");
+            var why = new QLabel(qsTr("no station in the drawing carries " +
+                "this trip's tags"));
             why.enabled = false;
             grid.addWidget(why, g, 8);
         }
@@ -443,7 +444,7 @@ TripEdit.open = function(tripId) {
         // the same four fields and must land them the same way.
         var done = CsTripEdit.commit(doc, di, read.survey, inputs);
         if (done.error !== undefined) {
-            QMessageBox.warning(null, "Edit Trip", done.error);
+            QMessageBox.warning(null, qsTr("Edit Trip"), done.error);
             return; // dialog stays open, typing intact
         }
         applied.res = done.res;
@@ -467,9 +468,9 @@ TripEdit.open = function(tripId) {
         wired = false;
     }
     if (!wired) {
-        QMessageBox.warning(null, "Edit Trip",
-            "This build's script bridge couldn't wire the dialog " +
-            "buttons. Nothing was changed.");
+        QMessageBox.warning(null, qsTr("Edit Trip"),
+            qsTr("This build's script bridge couldn't wire the dialog " +
+            "buttons. Nothing was changed."));
         return;
     }
 
@@ -483,7 +484,7 @@ TripEdit.open = function(tripId) {
         return; // cancelled
     }
     if (applied.res === null) {
-        EAction.handleUserMessage("Edit Trip: nothing changed.");
+        EAction.handleUserMessage(qsTr("Edit Trip: nothing changed."));
         return;
     }
     EAction.handleUserMessage(

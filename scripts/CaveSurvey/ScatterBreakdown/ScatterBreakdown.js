@@ -104,7 +104,7 @@ function sbFramesPhrase(used) {
 function scatterBreakdownRun() {
     var doc = getDocument();
     if (doc === undefined || doc === null) {
-        warning("Scatter Breakdown: no active drawing document.");
+        warning(qsTr("Scatter Breakdown: no active drawing document."));
         return;
     }
     // A SHEET IS NOT A DRAWING TO WORK IN. It is rebuilt from the
@@ -137,9 +137,9 @@ function scatterBreakdownRun() {
         }
     }
     if (!anyBoundaryLayer) {
-        warning("Scatter Breakdown: draw a closed polyline on the " +
-            CsLayers.BREAKDOWN_BOUNDARY + " layer around the breakdown " +
-            "area first.");
+        warning(qsTr("Scatter Breakdown: draw a closed polyline on the %1 " +
+            "layer around the breakdown area first.")
+            .arg(String(CsLayers.BREAKDOWN_BOUNDARY)));
         return;
     }
 
@@ -198,7 +198,7 @@ function scatterBreakdownRun() {
     var group = doc.getTransactionGroup() + 1;
 
     var op = new RAddObjectsOperation();
-    op.setText("Scatter breakdown");
+    op.setText(qsTr("Scatter breakdown"));
 
     // Collect the boundary ids being redone, then clear only THEIR
     // previous blocks (tagged CaveSurvey/BoundaryId).

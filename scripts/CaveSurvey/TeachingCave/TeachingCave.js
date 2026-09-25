@@ -436,18 +436,18 @@ function teachingCaveRun() {
             sourceIsTeaching: CsTeach.isTeaching(caveRoot, record.folder)
         });
         if (plan.can !== true) {
-            warning("Teaching Cave: " + plan.reason);
+            warning(qsTr("Teaching Cave: %1").arg(String(plan.reason)));
             return;
         }
         if (plan.warning !== "" &&
-                QMessageBox.question(getMainWindow(), "Teaching Cave",
-                    plan.warning + "\n\nGo ahead?",
+                QMessageBox.question(getMainWindow(), qsTr("Teaching Cave"),
+                    qsTr("%1\n\nGo ahead?").arg(String(plan.warning)),
                     QMessageBox.Yes | QMessageBox.No) !== QMessageBox.Yes) {
             return;
         }
         var built = TeachingCave.buildMaster(record, caveRoot, pickedName);
         if (built.ok !== true) {
-            warning("Teaching Cave: " + built.error);
+            warning(qsTr("Teaching Cave: %1").arg(String(built.error)));
             return;
         }
         try {
@@ -474,18 +474,18 @@ function teachingCaveRun() {
         caveName: caveName
     });
     if (resetPlan.can !== true) {
-        warning("Teaching Cave: " + resetPlan.reason);
+        warning(qsTr("Teaching Cave: %1").arg(String(resetPlan.reason)));
         return;
     }
     if (resetPlan.warning !== "" &&
-            QMessageBox.question(getMainWindow(), "Teaching Cave",
-                resetPlan.warning + "\n\nReset it?",
+            QMessageBox.question(getMainWindow(), qsTr("Teaching Cave"),
+                qsTr("%1\n\nReset it?").arg(String(resetPlan.warning)),
                 QMessageBox.Yes | QMessageBox.No) !== QMessageBox.Yes) {
         return;
     }
     var done = TeachingCave.reset(caveRoot, caveName);
     if (done.ok !== true) {
-        warning("Teaching Cave: " + done.error);
+        warning(qsTr("Teaching Cave: %1").arg(String(done.error)));
         return;
     }
     TeachingCave.shelve(caveRoot, caveName);

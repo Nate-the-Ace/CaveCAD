@@ -1341,7 +1341,7 @@ CsMesh3d.build = function(survey, resolved, opts) {
     var bi;
 
     if (colorBy === "depth") {
-        legend.title = "Depth";
+        legend.title = qsTr("Depth");
         legend.kind = "ramp";
         legend.stops = [
             { color: CsMesh3d.depthColor(0),
@@ -1352,7 +1352,7 @@ CsMesh3d.build = function(survey, resolved, opts) {
               label: CsMesh3d.legendLength(zHigh, unitName) }
         ];
     } else if (colorBy === "distance") {
-        legend.title = "Distance in";
+        legend.title = qsTr("Distance in");
         legend.kind = "ramp";
         legend.stops = [
             { color: CsMesh3d.rampColor(0),
@@ -1364,7 +1364,7 @@ CsMesh3d.build = function(survey, resolved, opts) {
               label: CsMesh3d.legendLength(rampHigh, unitName) }
         ];
     } else if (colorBy === "size") {
-        legend.title = "Passage size";
+        legend.title = qsTr("Passage size");
         legend.kind = "ramp";
         legend.note = "5th-95th percentile";
         legend.stops = [
@@ -1376,7 +1376,7 @@ CsMesh3d.build = function(survey, resolved, opts) {
               label: Math.round(rampHigh) + " sq " + unitName }
         ];
     } else if (colorBy === "date") {
-        legend.title = "Survey date";
+        legend.title = qsTr("Survey date");
         legend.kind = "ramp";
         var dOrder = CsMesh3d.tripOrder(survey);
         var firstTrip = dOrder.length > 0 ? dOrder[0] : 0;
@@ -1388,7 +1388,7 @@ CsMesh3d.build = function(survey, resolved, opts) {
               label: CsMesh3d.tripLabel(survey, lastTrip) }
         ];
     } else if (colorBy === "closure") {
-        legend.title = "Closure shift";
+        legend.title = qsTr("Closure shift");
         legend.kind = "swatches";
         // An UNADJUSTED survey has no shifts at all, so every station
         // lands in the "within a good tape read" band. That looks like a
@@ -1405,7 +1405,7 @@ CsMesh3d.build = function(survey, resolved, opts) {
             });
         }
     } else if (colorBy === "cover") {
-        legend.title = "Depth of cover";
+        legend.title = qsTr("Depth of cover");
         legend.kind = "ramp";
         legend.note = "5th-95th percentile, over the ceiling";
         legend.stops = [
@@ -1426,7 +1426,7 @@ CsMesh3d.build = function(survey, resolved, opts) {
               swatch: true }
         ];
     } else if (colorBy === "splay") {
-        legend.title = "Splay coverage";
+        legend.title = qsTr("Splay coverage");
         legend.kind = "swatches";
         for (bi = 0; bi < CsMesh3d.COVERAGE.length; bi++) {
             legend.stops.push({ color: CsMesh3d.COVERAGE[bi].color,

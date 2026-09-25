@@ -67,9 +67,9 @@ var csSketchScansDock;
 function sketchScansRun() {
     if (typeof RImageData === "undefined" ||
             typeof RImageEntity === "undefined") {
-        warning("Sketch Scans: this build's script engine has no image " +
+        warning(qsTr("Sketch Scans: this build's script engine has no image " +
             "support (RImageData).\nThe CaveCAD fork is the supported " +
-            "platform.");
+            "platform."));
         return;
     }
     try {
@@ -87,8 +87,9 @@ function sketchScansRun() {
         }
     } catch (e) {
         csSketchScansDock = undefined;
-        warning("Sketch Scans: this CaveCAD build refused the docked " +
-            "panel (" + e + ") -- please report this.");
+        warning(qsTr("Sketch Scans: this CaveCAD build refused the docked " +
+            "panel (%1) -- please report this.")
+            .arg(String(e)));
     }
 }
 
@@ -444,7 +445,8 @@ SketchScans.traceInBay = function(layerName) {
         FeatureTrace.armLayer(layerName);
         FeatureTrace.startRun();
     } catch (e) {
-        warning("Sketch Scans: could not start tracing (" + e + ").");
+        warning(qsTr("Sketch Scans: could not start tracing (%1).")
+            .arg(String(e)));
     }
 };
 
@@ -460,7 +462,8 @@ SketchScans.placeInBay = function() {
         }
         SymbolPalette.startRun();
     } catch (e) {
-        warning("Sketch Scans: could not start placing (" + e + ").");
+        warning(qsTr("Sketch Scans: could not start placing (%1).")
+            .arg(String(e)));
     }
 };
 
@@ -505,7 +508,8 @@ SketchScans.cancelBay = function() {
         SketchScans.syncContext();
         SketchScans.updateTrimGate();
     } catch (e) {
-        warning("Sketch Scans: could not close the bay (" + e + ").");
+        warning(qsTr("Sketch Scans: could not close the bay (%1).")
+            .arg(String(e)));
     }
 };
 
@@ -1724,10 +1728,11 @@ SketchScans.buildDock = function(appWin) {
             // Nothing to calibrate against. Said out loud rather than
             // silently skipped: the caver is about to be handed the
             // hand-scaling workflow and should know why.
-            warning("Sketch Scans: " + station + " has no LRUD in this " +
-                "drawing's survey, so there is no known distance to set " +
-                "a scale from. The bay opens auto-fitted; scale the scan " +
-                "by hand over the ghost.");
+            warning(qsTr("Sketch Scans: %1 has no LRUD in this drawing's " +
+                "survey, so there is no known distance to set a scale from. " +
+                "The bay opens auto-fitted; scale the scan by hand over the " +
+                "ghost.")
+                .arg(String(station)));
             SketchScans.sketchSoon(path, station, null);
             return;
         }
@@ -1770,8 +1775,8 @@ SketchScans.buildDock = function(appWin) {
             }
         }
         if (offer.length === 0) {
-            warning("Sketch Scans: every plotted station is already on " +
-                "this scan.");
+            warning(qsTr("Sketch Scans: every plotted station is already on " +
+                "this scan."));
             return;
         }
         // THE NEXT STATION IN ORDER IS ALREADY SELECTED, so a run down
@@ -1873,18 +1878,18 @@ SketchScans.buildDock = function(appWin) {
         var neighbours = SketchScans.placedScales(doc);
         var perPixel = CsScanFit.medianOf(neighbours);
         if (perPixel === null) {
-            warning("Sketch Scans: there is no scan placed in this " +
+            warning(qsTr("Sketch Scans: there is no scan placed in this " +
                 "drawing yet, so there is no scale to borrow. Pick a " +
                 "second station on this scan -- the two of them " +
                 "measure the scale -- and every one-station sketch " +
-                "after it can lean on this one.");
+                "after it can lean on this one."));
             return;
         }
         var pair = w.picking.pairs[0];
         var matrix = CsScanFit.anchoredFit(pair, perPixel, 0);
         if (matrix === null) {
-            warning("Sketch Scans: the borrowed scale is not a usable " +
-                "number.");
+            warning(qsTr("Sketch Scans: the borrowed scale is not a usable " +
+                "number."));
             return;
         }
         var rel = w.picking.rel;
@@ -1935,9 +1940,9 @@ SketchScans.buildDock = function(appWin) {
         }
         var fit = CsScanFit.fit(w.picking.pairs);
         if (fit === null) {
-            warning("Sketch Scans: those picks do not describe a fit -- " +
+            warning(qsTr("Sketch Scans: those picks do not describe a fit -- " +
                 "two stations in different places on the scan are the " +
-                "least it takes.");
+                "least it takes."));
             return;
         }
         // A MIRRORED FIT IS NOT PLACED AT ALL. It lays the scan down
@@ -1958,12 +1963,13 @@ SketchScans.buildDock = function(appWin) {
                     "so it cannot say WHICH one is wrong. A fourth " +
                     "station is the first one it can disagree with.";
             }
-            warning("Sketch Scans: these picks would lay the scan down " +
-                "MIRRORED -- backwards, as if read through the paper." +
-                "\n\nThey wind one way on the scan and the other way in " +
-                "the drawing, so at least one is on the wrong mark or " +
-                "has the wrong name." + which +
-                "\n\nNothing has been placed. Cancel Align and re-pick.");
+            warning(qsTr("Sketch Scans: these picks would lay the scan down " +
+                "MIRRORED -- backwards, as if read through the " +
+                "paper.\n\nThey wind one way on the scan and the other way " +
+                "in the drawing, so at least one is on the wrong mark or has " +
+                "the wrong name.%1\n\nNothing has been placed. Cancel Align " +
+                "and re-pick.")
+                .arg(String(which)));
             return;
         }
         // Read the residuals BEFORE clearing the picks -- they are the
@@ -2027,12 +2033,12 @@ SketchScans.buildDock = function(appWin) {
                         }
                     }
                     if (worstBack > 0.01) {
-                        warning("Sketch Scans: the placed scan does not " +
-                            "put " + worstName + " where the drawing has " +
-                            "it -- out by " +
-                            (Math.round(worstBack * 100) / 100) +
-                            ". That is a placement fault, not a bad pick; " +
-                            "please report it.");
+                        warning(qsTr("Sketch Scans: the placed scan does not " +
+                            "put %1 where the drawing has it -- out by %2. " +
+                            "That is a placement fault, not a bad pick; " +
+                            "please report it.")
+                            .arg(String(worstName))
+                            .arg(String((Math.round(worstBack * 100) / 100))));
                     } else {
                         EAction.handleUserMessage(qsTr("Placement " +
                             "verified: every picked station lands on its " +
@@ -2061,7 +2067,7 @@ SketchScans.buildDock = function(appWin) {
                     "wrong place or named as the wrong station. Undo and " +
                     "check the picks.");
             } else if (fit.thin === true) {
-                warning("Sketch Scans: those stations lie too close to a " +
+                warning(qsTr("Sketch Scans: those stations lie too close to a " +
                     "straight line for a stretch-and-skew fit to mean " +
                     "anything -- across the line it would be guessing, " +
                     "and guessing there is what turns a scan sideways." +
@@ -2069,7 +2075,7 @@ SketchScans.buildDock = function(appWin) {
                     "the two furthest-apart picks instead, keeping its " +
                     "shape. For a fit that can correct a scanner's " +
                     "stretch, pick a station well OFF the line of the " +
-                    "others.");
+                    "others."));
             } else if (pairs.length <= 3) {
                 EAction.handleUserMessage(qsTr("Note: %1 picks always " +
                     "fit exactly, so a zero miss proves nothing. Add a " +
@@ -2130,8 +2136,8 @@ SketchScans.buildDock = function(appWin) {
             return;
         }
         if (stationsNow() === null) {
-            warning("Sketch Scans: this drawing has no plotted stations " +
-                "to align to. Draw the survey first.");
+            warning(qsTr("Sketch Scans: this drawing has no plotted stations " +
+                "to align to. Draw the survey first."));
             return;
         }
         w.picking = { pairs: [], rel: rel, frame: null };
@@ -2693,7 +2699,7 @@ SketchScans.rewriteSelected = function(kind) {
     var done = flipping ? CsScanRotate.flip(w.scans, rel, "horizontal")
                         : CsScanRotate.turn(w.scans, rel);
     if (done.ok !== true) {
-        warning("Sketch Scans: " + done.error);
+        warning(qsTr("Sketch Scans: %1").arg(String(done.error)));
         return;
     }
 
@@ -2794,7 +2800,7 @@ SketchScans.outlineDrawn = function(points) {
             w.trimLabel.text = qsTr("Trim failed");
         } catch (eLbl) {
         }
-        warning("Sketch Scans: " + res.error);
+        warning(qsTr("Sketch Scans: %1").arg(String(res.error)));
         return;
     }
     w.trim = { rel: rel, rect: rect, path: res.path, chosen: true,
@@ -2897,7 +2903,7 @@ SketchScans.boxDrawn = function(box) {
             w.trimLabel.text = qsTr("Trim failed");
         } catch (eLbl) {
         }
-        warning("Sketch Scans: " + res.error);
+        warning(qsTr("Sketch Scans: %1").arg(String(res.error)));
         return;
     }
     w.trim = { rel: rel, rect: rect, path: res.path, chosen: true };
@@ -2998,13 +3004,13 @@ SketchScans.updateTrimGate = function() {
 SketchScans.insert = function(doc, di, path, name, frame, trimRect, outline) {
     var image = new QImage(path);
     if (image.isNull()) {
-        warning("Sketch Scans: " + name + " could not be read as an " +
-            "image.");
+        warning(qsTr("Sketch Scans: %1 could not be read as an image.")
+            .arg(String(name)));
         return null;
     }
     var pxW = image.width(), pxH = image.height();
     if (pxW < 1 || pxH < 1) {
-        warning("Sketch Scans: " + name + " has no size.");
+        warning(qsTr("Sketch Scans: %1 has no size.").arg(String(name)));
         return null;
     }
 
@@ -3045,7 +3051,8 @@ SketchScans.insert = function(doc, di, path, name, frame, trimRect, outline) {
         }
         entity = new RImageEntity(doc, data);
     } catch (e) {
-        warning("Sketch Scans: creating the image entity failed: " + e);
+        warning(qsTr("Sketch Scans: creating the image entity failed: %1")
+            .arg(String(e)));
         return null;
     }
 
@@ -3091,7 +3098,7 @@ SketchScans.insert = function(doc, di, path, name, frame, trimRect, outline) {
     }
 
     var op = new RAddObjectsOperation();
-    op.setText("Insert sketch scan");
+    op.setText(qsTr("Insert sketch scan"));
     op.addObject(entity, false);
     di.applyOperation(op);
 
@@ -3101,8 +3108,9 @@ SketchScans.insert = function(doc, di, path, name, frame, trimRect, outline) {
             return ids[i];
         }
     }
-    warning("Sketch Scans: the insert operation added nothing -- the " +
-        layer + " layer may be locked or frozen.");
+    warning(qsTr("Sketch Scans: the insert operation added nothing -- the %1 " +
+        "layer may be locked or frozen.")
+        .arg(String(layer)));
     return null;
 };
 
@@ -3154,12 +3162,13 @@ SketchScans.insertFitted = function(doc, di, path, name, fit, heightPx,
         pairs, frame, trimRect, outline) {
     var image = new QImage(path);
     if (image.isNull()) {
-        warning("Sketch Scans: " + name + " could not be read as an image.");
+        warning(qsTr("Sketch Scans: %1 could not be read as an image.")
+            .arg(String(name)));
         return null;
     }
     var pxW = image.width(), pxH = image.height();
     if (pxW < 1 || pxH < 1) {
-        warning("Sketch Scans: " + name + " has no size.");
+        warning(qsTr("Sketch Scans: %1 has no size.").arg(String(name)));
         return null;
     }
 
@@ -3177,7 +3186,8 @@ SketchScans.insertFitted = function(doc, di, path, name, fit, heightPx,
         }
         entity = new RImageEntity(doc, data);
     } catch (e) {
-        warning("Sketch Scans: creating the image entity failed: " + e);
+        warning(qsTr("Sketch Scans: creating the image entity failed: %1")
+            .arg(String(e)));
         return null;
     }
 
@@ -3262,7 +3272,7 @@ SketchScans.insertFitted = function(doc, di, path, name, fit, heightPx,
         beforeIds[ids[i]] = true;
     }
     var op = new RAddObjectsOperation();
-    op.setText("Place aligned sketch scan");
+    op.setText(qsTr("Place aligned sketch scan"));
     op.addObject(entity, false);
     di.applyOperation(op);
 
@@ -3272,8 +3282,9 @@ SketchScans.insertFitted = function(doc, di, path, name, fit, heightPx,
             return ids[i];
         }
     }
-    warning("Sketch Scans: the insert added nothing -- the " +
-        layer + " layer may be locked or frozen.");
+    warning(qsTr("Sketch Scans: the insert added nothing -- the %1 layer may " +
+        "be locked or frozen.")
+        .arg(String(layer)));
     return null;
 };
 
@@ -3343,9 +3354,10 @@ SketchScans.alignSoon = function(entityId) {
                 ScanAlign.scriptPath);
             di.setCurrentAction(new ScanAlign(guiAction));
         } catch (eAct) {
-            EAction.handleUserWarning("Sketch Scans: the scan is " +
-                "inserted and selected, but the align tool would not " +
-                "start (" + eAct + ").");
+            EAction.handleUserWarning(qsTr("Sketch Scans: the scan is " +
+                "inserted and selected, but the align tool would not start " +
+                "(%1).")
+                .arg(String(eAct)));
         }
     });
     timer.start(0);
@@ -3375,7 +3387,8 @@ SketchScans.sketchSoon = function(path, station, calibration) {
         try {
             SectionBay.run(path, name, cal);
         } catch (e) {
-            EAction.handleUserWarning("Sketch Section: " + e);
+            EAction.handleUserWarning(qsTr("Sketch Section: %1")
+                .arg(String(e)));
         }
     });
     timer.start(0);
@@ -3562,7 +3575,8 @@ SketchScans.init = function(basePath) {
         SketchScans.installListener(RMainWindowQt.getMainWindow());
     } catch (eInit) {
         csSketchScansDock = undefined;
-        warning("Sketch Scans: could not build the panel at startup (" +
-            eInit + "); the menu entry will try again.");
+        warning(qsTr("Sketch Scans: could not build the panel at startup " +
+            "(%1); the menu entry will try again.")
+            .arg(String(eInit)));
     }
 };

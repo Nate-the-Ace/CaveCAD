@@ -50,7 +50,7 @@ include(includeBasePath + "/../Core/CsAll.js");
  *  why this used to be three separately-worded warning() calls instead
  *  of one shared helper. `reason` carries no trailing period of its own. */
 function generateProfileRefuse(reason) {
-    warning("Generate Profile: " + reason + ".");
+    warning(qsTr("Generate Profile: %1.").arg(String(reason)));
 }
 
 /**
@@ -327,7 +327,7 @@ function generateProfileRun() {
     // drew real geometry into the drawing, so a dialog that fails to
     // open must not make the command look like it did nothing.
     try {
-        QMessageBox.information(getMainWindow(), "Generate Profile", text);
+        QMessageBox.information(getMainWindow(), qsTr("Generate Profile"), text);
     } catch (e) {
         try {
             EAction.handleUserMessage(text.replace(/\n/g, "  "));

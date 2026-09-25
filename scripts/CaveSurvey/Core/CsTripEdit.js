@@ -334,7 +334,7 @@ CsTripEdit.writeTags = function(doc, di, survey, changes) {
 
     var run = function() {
         var op = new RModifyObjectsOperation();
-        op.setText("Edit trip");
+        op.setText(qsTr("Edit trip"));
         var written = 0;
         var seen = {};
         var ids = doc.queryAllEntities(false, false);
@@ -583,7 +583,7 @@ CsTripEdit.applyLinework = function(doc, di, plan, keep) {
     var out = { unbound: 0, deleted: 0, renumbered: 0 };
     var run = function() {
         var op = new RModifyObjectsOperation();
-        op.setText("Re-key linework");
+        op.setText(qsTr("Re-key linework"));
         var i;
         for (i = 0; i < plan.renumber.length; i++) {
             CsTags.set(plan.renumber[i].entity, CsBind.TRIP_TAG,

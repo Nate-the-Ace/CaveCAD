@@ -18,9 +18,9 @@ CsReport.drawSummary = function(survey, resolved, drawn, findings) {
     // Prefer the drawing-level cave name over the trip name -- it's
     // the more meaningful label when both are present.
     if (survey.caveName || survey.name) {
-        lines.push("Survey: " + (survey.caveName || survey.name));
+        lines.push(qsTr("Survey: %1").arg(survey.caveName || survey.name));
     }
-    lines.push("Stations plotted: " + drawn.stationsDrawn);
+    lines.push(qsTr("Stations plotted: %1").arg(drawn.stationsDrawn));
     // Loop closures and control ties are counted apart from ordinary
     // shots by CsDraw, so both have to be named here or the printed
     // total is smaller than the drawing. A tie is not a closure -- it
@@ -29,22 +29,23 @@ CsReport.drawSummary = function(survey, resolved, drawn, findings) {
     // existed simply says nothing about ties.
     var extraLegs = [];
     if (drawn.closuresDrawn > 0) {
-        extraLegs.push(drawn.closuresDrawn + " loop closure" +
-            (drawn.closuresDrawn === 1 ? "" : "s"));
+        extraLegs.push((drawn.closuresDrawn === 1 ? qsTr("%1 loop closure") :
+            qsTr("%1 loop closures")).arg(drawn.closuresDrawn));
     }
     if (drawn.tiesDrawn !== undefined && drawn.tiesDrawn > 0) {
-        extraLegs.push(drawn.tiesDrawn + " control tie" +
-            (drawn.tiesDrawn === 1 ? "" : "s"));
+        extraLegs.push((drawn.tiesDrawn === 1 ? qsTr("%1 control tie") :
+            qsTr("%1 control ties")).arg(drawn.tiesDrawn));
     }
-    lines.push("Shots drawn: " + drawn.shotsDrawn +
+    lines.push(qsTr("Shots drawn: %1").arg(drawn.shotsDrawn) +
         (extraLegs.length > 0 ? (" (+" + extraLegs.join(", ") + ")") : ""));
     if (drawn.wallsDrawn !== undefined && drawn.wallsDrawn > 0) {
-        lines.push("Wall runs drawn: " + drawn.wallsDrawn +
-            " (dashed = approximate; trace real walls over them)");
+        lines.push(qsTr("Wall runs drawn: %1" +
+            " (dashed = approximate; trace real walls over them)")
+            .arg(drawn.wallsDrawn));
     }
     if (drawn.splaysDrawn !== undefined && drawn.splaysDrawn > 0) {
-        lines.push("Splays drawn: " + drawn.splaysDrawn +
-            " (thin rays on CTRL-SPLAYS)");
+        lines.push(qsTr("Splays drawn: %1 (thin rays on CTRL-SPLAYS)")
+            .arg(drawn.splaysDrawn));
     }
     // Named apart from the generic "Skipped" line below: that one
     // means excluded or never-connected, but an unmeasurable splay's
@@ -52,16 +53,19 @@ CsReport.drawSummary = function(survey, resolved, drawn, findings) {
     // distance or a reading for the splay itself. Conflating the two
     // would tell a surveyor to go check a connection that is fine.
     if (drawn.splaysSkipped !== undefined && drawn.splaysSkipped > 0) {
-        lines.push("Splays not drawn: " + drawn.splaysSkipped +
-            " (no distance, or no azimuth/inclination, on record)");
+        lines.push(qsTr("Splays not drawn: %1" +
+            " (no distance, or no azimuth/inclination, on record)")
+            .arg(drawn.splaysSkipped));
     }
     if (drawn.wallPointsSkipped !== undefined && drawn.wallPointsSkipped > 0) {
-        lines.push("Wall points skipped: " + drawn.wallPointsSkipped +
-            " (splay had no distance, or no azimuth/inclination, on record)");
+        lines.push(qsTr("Wall points skipped: %1" +
+            " (splay had no distance, or no azimuth/inclination, on record)")
+            .arg(drawn.wallPointsSkipped));
     }
     if (drawn.skipped > 0) {
-        lines.push("Skipped: " + drawn.skipped +
-            " (excluded shots, or shots that never connected)");
+        lines.push(qsTr("Skipped: %1" +
+            " (excluded shots, or shots that never connected)")
+            .arg(drawn.skipped));
     }
     // The AUTOMATIC profile pass's own outcome, folded into the ordinary
     // draw summary every production caller already shows -- without
@@ -75,7 +79,8 @@ CsReport.drawSummary = function(survey, resolved, drawn, findings) {
     // so the two paths never describe the same event two different ways.
     if (drawn.profile !== undefined && drawn.profile !== null &&
             drawn.profile.skipped) {
-        lines.push("Profile: not written -- " + drawn.profile.reason + ".");
+        lines.push(qsTr("Profile: not written -- %1.")
+            .arg(drawn.profile.reason));
     }
     // THE SAME DEFECT, TWICE MORE. `drawn.elevations` was a real field
     // on CsDraw.survey's return that nothing shipped ever read -- a
@@ -84,12 +89,12 @@ CsReport.drawSummary = function(survey, resolved, drawn, findings) {
     // sections and would have gone the same way. Both are printed here,
     // and only when there is something to say: a draw that re-derived
     // nothing stays quiet.
-    var elevLine = CsReport.refreshLine("Elevation labels",
+    var elevLine = CsReport.refreshLine(qsTr("Elevation labels"),
         drawn.elevations, ["updated", "upgraded", "downgraded", "lost"]);
     if (elevLine !== null) {
         lines.push(elevLine);
     }
-    var sectionLine = CsReport.refreshLine("Cross sections",
+    var sectionLine = CsReport.refreshLine(qsTr("Cross sections"),
         drawn.sections, ["updated", "frozen", "lost", "refused"]);
     if (sectionLine !== null) {
         lines.push(sectionLine);
@@ -97,30 +102,35 @@ CsReport.drawSummary = function(survey, resolved, drawn, findings) {
     // Scans that followed the survey -- or could not. A scan left
     // behind by a correction is exactly the kind of stale thing that
     // reaches a plotted map unnoticed.
-    var scanLine = CsReport.refreshLine("Aligned scans", drawn.scans,
+    var scanLine = CsReport.refreshLine(qsTr("Aligned scans"), drawn.scans,
         ["moved", "stale", "refused", "backfilled"]);
     if (scanLine !== null) {
         lines.push(scanLine);
     }
 
     if (survey.declination !== 0 && survey.declinationSource !== "") {
-        var srcWord = { file: "from the file", user: "entered by hand",
-            igrf: "IGRF estimate" }[survey.declinationSource] ||
+        var srcWord = { file: qsTr("from the file"),
+            user: qsTr("entered by hand"),
+            igrf: qsTr("IGRF estimate") }[survey.declinationSource] ||
             survey.declinationSource;
-        lines.push("Declination applied: " +
-            CsAngles.formatDeclination(survey.declination) +
-            " (" + srcWord + ")");
+        lines.push(qsTr("Declination applied: %1 (%2)")
+            .arg(CsAngles.formatDeclination(survey.declination))
+            .arg(srcWord));
     }
 
     for (var i = 0; i < resolved.loops.length; i++) {
         var loop = resolved.loops[i];
-        lines.push("Loop " + loop.from + " to " + loop.to + ": closes " +
-            loop.error.toFixed(2) + " off over " +
-            loop.traverseLength.toFixed(1) + " surveyed (" +
-            loop.percent.toFixed(2) + "%)" +
-            (loop.percent <= 1.0 ? " -- good" : "") +
-            " [horizontal " + loop.horizontal.toFixed(2) +
-            ", vertical " + loop.vertical.toFixed(2) + "]");
+        lines.push((loop.percent <= 1.0 ?
+            qsTr("Loop %1 to %2: closes %3 off over %4 surveyed (%5%)" +
+                " -- good [horizontal %6, vertical %7]") :
+            qsTr("Loop %1 to %2: closes %3 off over %4 surveyed (%5%)" +
+                " [horizontal %6, vertical %7]"))
+            .arg(loop.from).arg(loop.to)
+            .arg(loop.error.toFixed(2))
+            .arg(loop.traverseLength.toFixed(1))
+            .arg(loop.percent.toFixed(2))
+            .arg(loop.horizontal.toFixed(2))
+            .arg(loop.vertical.toFixed(2)));
     }
 
     // A control tie is not a loop: it is the single leg joining two
@@ -132,10 +142,12 @@ CsReport.drawSummary = function(survey, resolved, drawn, findings) {
     var ties = resolved.ties || [];
     for (i = 0; i < ties.length; i++) {
         var tieItem = ties[i];
-        lines.push("Control tie " + tieItem.from + " to " + tieItem.to +
-            ": " + tieItem.error.toFixed(2) + " between fixed points " +
-            "[horizontal " + tieItem.horizontal.toFixed(2) +
-            ", vertical " + tieItem.vertical.toFixed(2) + "]");
+        lines.push(qsTr("Control tie %1 to %2: %3 between fixed points " +
+            "[horizontal %4, vertical %5]")
+            .arg(tieItem.from).arg(tieItem.to)
+            .arg(tieItem.error.toFixed(2))
+            .arg(tieItem.horizontal.toFixed(2))
+            .arg(tieItem.vertical.toFixed(2)));
     }
 
     // What the adjustment did -- or plainly that none was made, so a
@@ -148,23 +160,25 @@ CsReport.drawSummary = function(survey, resolved, drawn, findings) {
     if (resolved.adjusted === true) {
         var sum = resolved.summary;
         if (sum.movedCount > 0) {
-            lines.push("Adjusted by least squares: " + sum.movedCount +
-                " station" + (sum.movedCount === 1 ? "" : "s") +
-                " moved, most of all " + sum.worstStation + " at " +
-                CsReport.length(sum.worstShift, survey.distanceUnit) +
-                " (" + sum.iterations + " iteration" +
-                (sum.iterations === 1 ? "" : "s") + ").");
+            lines.push(qsTr("Adjusted by least squares: %1" +
+                " moved, most of all %2 at %3 (%4).")
+                .arg((sum.movedCount === 1 ? qsTr("%1 station") :
+                    qsTr("%1 stations")).arg(sum.movedCount))
+                .arg(sum.worstStation)
+                .arg(CsReport.length(sum.worstShift, survey.distanceUnit))
+                .arg((sum.iterations === 1 ? qsTr("%1 iteration") :
+                    qsTr("%1 iterations")).arg(sum.iterations)));
         } else if (sum.stationCount > 0) {
-            lines.push("Adjusted by least squares: nothing moved -- " +
-                "the survey already closes within tolerance.");
+            lines.push(qsTr("Adjusted by least squares: nothing moved -- " +
+                "the survey already closes within tolerance."));
         }
         if (sum.stationCount > 0) {
-            lines.push("The as-surveyed centreline is on layer " +
+            lines.push(qsTr("The as-surveyed centreline is on layer " +
                 "CTRL-RAW, switched off -- turn it on to see exactly " +
-                "what moved.");
+                "what moved."));
         }
-        lines.push("Held fixed: " + (sum.pinned.length > 0 ?
-            sum.pinned.join(", ") : "nothing"));
+        lines.push(qsTr("Held fixed: %1").arg(sum.pinned.length > 0 ?
+            sum.pinned.join(", ") : qsTr("nothing")));
     } else if (resolved.summary !== undefined && resolved.summary !== null &&
             resolved.summary.warning !== undefined) {
         // A half-solved network is worse than an unsolved one, because
@@ -172,16 +186,16 @@ CsReport.drawSummary = function(survey, resolved, drawn, findings) {
         // coordinates in this case, and this warning is its own words,
         // verbatim, not a paraphrase.
         lines.push("");
-        lines.push("WARNING -- " + resolved.summary.warning);
+        lines.push(qsTr("WARNING -- %1").arg(resolved.summary.warning));
     } else if (resolved.loops.length > 0 && ties.length > 0) {
-        lines.push("Not adjusted: the misclosures above are still " +
-            "as surveyed.");
+        lines.push(qsTr("Not adjusted: the misclosures above are still " +
+            "as surveyed."));
     } else if (resolved.loops.length > 0) {
-        lines.push("Not adjusted: the misclosure is still on the " +
-            "closing leg, as surveyed.");
+        lines.push(qsTr("Not adjusted: the misclosure is still on the " +
+            "closing leg, as surveyed."));
     } else if (ties.length > 0) {
-        lines.push("Not adjusted: the gap against fixed control is " +
-            "still as surveyed.");
+        lines.push(qsTr("Not adjusted: the gap against fixed control is " +
+            "still as surveyed."));
     }
 
     // Task 1b: when an explicit anchor and *fix control shared a
@@ -199,26 +213,35 @@ CsReport.drawSummary = function(survey, resolved, drawn, findings) {
         if (cf.offset !== null && cf.applied.length > 0) {
             var planShift = Math.sqrt(cf.offset.dx * cf.offset.dx +
                 cf.offset.dy * cf.offset.dy);
-            lines.push("Fixed control " + cf.applied.join(", ") +
-                " shifted " + CsReport.length(planShift, unit) +
-                " in plan" +
-                (cf.offset.dz !== 0 ?
-                    " and " + CsReport.length(Math.abs(cf.offset.dz), unit) +
-                    (cf.offset.dz > 0 ? " up" : " down") : "") +
-                " to line up with the anchor -- the survey's shape " +
-                "didn't change, only where it's drawn.");
+            // %3 is always present: a surplus .arg() logs a warning
+            var dzText = cf.offset.dz === 0 ? "" :
+                CsReport.length(Math.abs(cf.offset.dz), unit);
+            lines.push((cf.offset.dz === 0 ?
+                qsTr("Fixed control %1 shifted %2 in plan%3" +
+                    " to line up with the anchor -- the survey's shape " +
+                    "didn't change, only where it's drawn.") :
+                cf.offset.dz > 0 ?
+                qsTr("Fixed control %1 shifted %2 in plan and %3 up" +
+                    " to line up with the anchor -- the survey's shape " +
+                    "didn't change, only where it's drawn.") :
+                qsTr("Fixed control %1 shifted %2 in plan and %3 down" +
+                    " to line up with the anchor -- the survey's shape " +
+                    "didn't change, only where it's drawn."))
+                .arg(cf.applied.join(", "))
+                .arg(CsReport.length(planShift, unit))
+                .arg(dzText));
         }
         if (cf.notHonored.length > 0) {
             lines.push("");
-            lines.push("WARNING -- fixed control not used for " +
-                cf.notHonored.join(", ") + ": " + cf.reason + ".");
+            lines.push(qsTr("WARNING -- fixed control not used for %1: %2.")
+                .arg(cf.notHonored.join(", ")).arg(cf.reason));
         }
     }
 
     if (resolved.unresolved.length > 0) {
         lines.push("");
-        lines.push("WARNING -- " + resolved.unresolved.length +
-            " shot(s) never connected (check station names):");
+        lines.push(qsTr("WARNING -- %1 shot(s) never connected " +
+            "(check station names):").arg(resolved.unresolved.length));
         for (i = 0; i < resolved.unresolved.length; i++) {
             var u = resolved.unresolved[i];
             lines.push("  " + u.from + " -> " + u.to);
@@ -227,7 +250,7 @@ CsReport.drawSummary = function(survey, resolved, drawn, findings) {
 
     if (findings !== undefined && findings !== null && findings.length > 0) {
         lines.push("");
-        lines.push("Checks (advisory -- your notes are the authority):");
+        lines.push(qsTr("Checks (advisory -- your notes are the authority):"));
         for (i = 0; i < findings.length; i++) {
             lines.push("  " + findings[i].severity.toUpperCase() + ": " +
                 findings[i].message);
@@ -254,13 +277,13 @@ CsReport.refreshLine = function(label, counts, keys) {
         return null;
     }
     var words = {
-        moved: "re-fitted to the moved survey",
-        matched: "already in place",
-        backfilled: "given anchors for the first time",
-        updated: "re-derived", upgraded: "upgraded",
-        downgraded: "downgraded", unchanged: "unchanged",
-        frozen: "frozen", lost: "whose basis is gone",
-        refused: "no longer cuttable"
+        moved: qsTr("re-fitted to the moved survey"),
+        matched: qsTr("already in place"),
+        backfilled: qsTr("given anchors for the first time"),
+        updated: qsTr("re-derived"), upgraded: qsTr("upgraded"),
+        downgraded: qsTr("downgraded"), unchanged: qsTr("unchanged"),
+        frozen: qsTr("frozen"), lost: qsTr("whose basis is gone"),
+        refused: qsTr("no longer cuttable")
     };
     var parts = [];
     for (var i = 0; i < keys.length; i++) {
@@ -280,25 +303,28 @@ CsReport.refreshLine = function(label, counts, keys) {
 CsReport.statsSummary = function(survey, stats, grade) {
     var unit = survey.distanceUnit;
     var lines = [];
-    lines.push("Surveyed length: " + CsReport.length(stats.surveyedLength, unit) +
-        "  (plan: " + CsReport.length(stats.planLength, unit) + ")");
-    lines.push("Vertical extent: " + CsReport.length(stats.depth, unit) +
-        (stats.depth > 0 ? "  (" + stats.lowest + " lowest, " +
-            stats.highest + " highest)" : ""));
-    lines.push("Stations: " + stats.stationCount + "   Shots: " + stats.shotCount +
-        "   Loops: " + stats.loopCount);
+    lines.push(qsTr("Surveyed length: %1  (plan: %2)")
+        .arg(CsReport.length(stats.surveyedLength, unit))
+        .arg(CsReport.length(stats.planLength, unit)));
+    lines.push(qsTr("Vertical extent: %1").arg(CsReport.length(stats.depth, unit)) +
+        (stats.depth > 0 ? "  " + qsTr("(%1 lowest, %2 highest)")
+            .arg(stats.lowest).arg(stats.highest) : ""));
+    lines.push(qsTr("Stations: %1   Shots: %2   Loops: %3")
+        .arg(stats.stationCount).arg(stats.shotCount).arg(stats.loopCount));
     if (stats.worstLoop !== null) {
-        lines.push("Worst loop closure: " + stats.worstLoop.percent.toFixed(2) +
-            "% (" + stats.worstLoop.from + " to " + stats.worstLoop.to +
-            ", horizontal " + stats.worstLoop.horizontal.toFixed(2) +
-            ", vertical " + stats.worstLoop.vertical.toFixed(2) + ")");
+        lines.push(qsTr("Worst loop closure: %1% (%2 to %3, horizontal %4, " +
+            "vertical %5)")
+            .arg(stats.worstLoop.percent.toFixed(2))
+            .arg(stats.worstLoop.from).arg(stats.worstLoop.to)
+            .arg(stats.worstLoop.horizontal.toFixed(2))
+            .arg(stats.worstLoop.vertical.toFixed(2)));
     }
     lines.push("");
-    lines.push("Centreline grade: " + grade.centrelineText);
-    lines.push("Detail grade: " + grade.detailText);
-    lines.push("Sheet designation: " + grade.uis);
+    lines.push(qsTr("Centreline grade: %1").arg(grade.centrelineText));
+    lines.push(qsTr("Detail grade: %1").arg(grade.detailText));
+    lines.push(qsTr("Sheet designation: %1").arg(grade.uis));
     for (var i = 0; i < grade.notes.length; i++) {
-        lines.push("Note: " + grade.notes[i]);
+        lines.push(qsTr("Note: %1").arg(grade.notes[i]));
     }
     return lines.join("\n");
 };
@@ -312,12 +338,12 @@ CsReport.UNMOVED_SHOWN = 8;
 CsReport.revisionSummary = function(report) {
     var lines = [];
     if (report.rigid) {
-        lines.push("Revision applied as one rigid move: the whole drawing " +
+        lines.push(qsTr("Revision applied as one rigid move: the whole drawing " +
             "turned and shifted as a single body, hand-drawn linework " +
-            "included.");
+            "included."));
     } else {
-        lines.push("Revision changed the survey's shape: the survey marks " +
-            "were erased and redrawn from the revised data.");
+        lines.push(qsTr("Revision changed the survey's shape: the survey marks " +
+            "were erased and redrawn from the revised data."));
     }
 
     // Name the station the revision held fixed -- it decides what
@@ -329,16 +355,17 @@ CsReport.revisionSummary = function(report) {
     if (report.anchorUsed !== undefined && report.anchorUsed !== null) {
         var au = report.anchorUsed;
         if (au.source === "georef") {
-            lines.push("Anchor station: " + au.name + " -- it held still " +
+            lines.push(qsTr("Anchor station: %1 -- it held still " +
                 "because it is the georeferenced station, the drawing's " +
-                "one tie to real-world coordinates.");
+                "one tie to real-world coordinates.").arg(au.name));
         } else if (au.source === "stale") {
             lines.push("");
-            lines.push("WARNING -- anchor station " + au.name +
+            lines.push(qsTr("WARNING -- anchor station %1" +
                 " could not be found in the drawing; its last known " +
-                "position was used instead.");
+                "position was used instead.").arg(au.name));
         } else {
-            lines.push("Anchor station: " + au.name + " (trip 0's anchor).");
+            lines.push(qsTr("Anchor station: %1 (trip 0's anchor).")
+                .arg(au.name));
         }
 
         if (report.anchorMoved !== undefined && report.anchorMoved !== null) {
@@ -346,15 +373,15 @@ CsReport.revisionSummary = function(report) {
             var hasOffset = dx !== undefined && dx !== null &&
                 dy !== undefined && dy !== null;
             var offset = hasOffset ? Math.sqrt(dx * dx + dy * dy) : null;
-            lines.push("Anchor station " + au.name + " had been moved" +
-                (offset !== null ? " " + offset.toFixed(2) : "") +
+            lines.push(qsTr("Anchor station %1 had been moved%2" +
                 " since the survey was last read from the drawing; the " +
                 "revision followed its current position -- the drawing " +
-                "is the truth.");
+                "is the truth.").arg(au.name)
+                .arg(offset !== null ? " " + offset.toFixed(2) : ""));
         }
     }
 
-    lines.push("Stations moved: " + report.stationsChanged);
+    lines.push(qsTr("Stations moved: %1").arg(report.stationsChanged));
     var top = Math.min(5, report.moved.length);
     for (var i = 0; i < top; i++) {
         lines.push("  " + report.moved[i].name + ": " +
@@ -371,11 +398,13 @@ CsReport.revisionSummary = function(report) {
                 break;
             }
         }
-        lines.push("Loop " + after.from + " to " + after.to + ": closes " +
-            (before !== null ? before.error.toFixed(2) + " -> " : "") +
-            after.error.toFixed(2) + " off (" +
-            after.percent.toFixed(2) + "%)" +
-            (after.percent <= 1.0 ? " -- good" : ""));
+        lines.push((after.percent <= 1.0 ?
+            qsTr("Loop %1 to %2: closes %3%4 off (%5%) -- good") :
+            qsTr("Loop %1 to %2: closes %3%4 off (%5%)"))
+            .arg(after.from).arg(after.to)
+            .arg(before !== null ? before.error.toFixed(2) + " -> " : "")
+            .arg(after.error.toFixed(2))
+            .arg(after.percent.toFixed(2)));
     }
 
     if (!report.rigid) {
@@ -409,17 +438,18 @@ CsReport.revisionSummary = function(report) {
     // happen" channel.
     if (report.profile !== undefined && report.profile !== null &&
             report.profile.skipped) {
-        lines.push("Profile: not written -- " + report.profile.reason + ".");
+        lines.push(qsTr("Profile: not written -- %1.")
+            .arg(report.profile.reason));
     }
     return lines.join("\n");
 };
 
 /** One line for an IGRF estimate, always labelled as one. */
 CsReport.igrfLine = function(result, lat, lon, dateText) {
-    return "IGRF estimate for " + dateText + " at " +
-        lat.toFixed(4) + ", " + lon.toFixed(4) + ": " +
-        CsAngles.formatDeclination(result.declination) +
-        " (model accuracy is a fraction of a degree -- fine against any compass)";
+    return qsTr("IGRF estimate for %1 at %2, %3: %4" +
+        " (model accuracy is a fraction of a degree -- fine against any compass)")
+        .arg(dateText).arg(lat.toFixed(4)).arg(lon.toFixed(4))
+        .arg(CsAngles.formatDeclination(result.declination));
 };
 
 /**
@@ -464,11 +494,11 @@ CsReport.igrfLine = function(result, lat, lon, dateText) {
 CsReport.profileSummary = function(profile, outcome) {
     var lines = [];
     if (outcome !== undefined && outcome !== null && outcome.skipped) {
-        lines.push("Profile: not written -- " + outcome.reason + ".");
+        lines.push(qsTr("Profile: not written -- %1.").arg(outcome.reason));
         return lines.join("\n");
     }
     if (profile === null || profile === undefined) {
-        return "Profile: nothing to draw.";
+        return qsTr("Profile: nothing to draw.");
     }
 
     var c = (outcome && outcome.counts) ? outcome.counts : {};
@@ -476,13 +506,14 @@ CsReport.profileSummary = function(profile, outcome) {
     // the drawing the user is looking at now, not a sibling file they
     // would have to go and open. Naming a path here again would send a
     // reader looking for a file that no longer exists.
-    lines.push("Profile drawn in this drawing, below the plan");
-    lines.push("  " + (c.bandsDrawn || 0) + " band(s), " +
-        (c.legsDrawn || 0) + " leg(s), " + (c.stationsDrawn || 0) +
-        " station(s)");
-    lines.push("  " + (c.ceilingRuns || 0) + " ceiling run(s), " +
-        (c.floorRuns || 0) + " floor run(s), " + (c.flatTicks || 0) +
-        " level splay tick(s)");
+    lines.push(qsTr("Profile drawn in this drawing, below the plan"));
+    lines.push("  " + qsTr("%1 band(s), %2 leg(s), %3 station(s)")
+        .arg(c.bandsDrawn || 0).arg(c.legsDrawn || 0)
+        .arg(c.stationsDrawn || 0));
+    lines.push("  " + qsTr("%1 ceiling run(s), %2 floor run(s), " +
+        "%3 level splay tick(s)")
+        .arg(c.ceilingRuns || 0).arg(c.floorRuns || 0)
+        .arg(c.flatTicks || 0));
     // level splays are counted, not hidden: a splay inside the dead
     // zone contributed nothing to either line, and a reader who cannot
     // see how many there were cannot judge whether the dead zone is
@@ -529,45 +560,47 @@ CsReport.profileSummary = function(profile, outcome) {
     // being reached at all, and a caught exception that reaches no one
     // is worse than a crash that at least stops the show.
     if (c.claimed && c.claimed.error) {
-        lines.push("  WARNING -- binding traced linework to the survey " +
-            "failed, so nothing was claimed or moved for it this run: " +
-            c.claimed.error);
+        lines.push("  " + qsTr("WARNING -- binding traced linework to the survey " +
+            "failed, so nothing was claimed or moved for it this run: %1")
+            .arg(c.claimed.error));
     }
 
     var f = profile.findings;
     var i;
     if (f.mismatches.length > 0) {
         for (i = 0; i < f.mismatches.length; i++) {
-            lines.push("  CHECK the name: run " + f.mismatches[i].run +
-                " reads as a spur of " + f.mismatches[i].expected +
-                " but ties in at " + f.mismatches[i].actual +
-                " -- drawn at the surveyed junction");
+            lines.push("  " + qsTr("CHECK the name: run %1" +
+                " reads as a spur of %2 but ties in at %3" +
+                " -- drawn at the surveyed junction")
+                .arg(f.mismatches[i].run).arg(f.mismatches[i].expected)
+                .arg(f.mismatches[i].actual));
         }
     }
     if (f.omitted.length > 0) {
-        lines.push("  off the main chain, not drawn: " + f.omitted.join(", "));
+        lines.push("  " + qsTr("off the main chain, not drawn: %1")
+            .arg(f.omitted.join(", ")));
     }
     if (f.secondTies.length > 0) {
         for (i = 0; i < f.secondTies.length; i++) {
-            lines.push("  run " + f.secondTies[i].run +
-                " also touches " + f.secondTies[i].otherStation +
-                " (drawn as a tie line, not a second band)");
+            lines.push("  " + qsTr("run %1 also touches %2" +
+                " (drawn as a tie line, not a second band)")
+                .arg(f.secondTies[i].run).arg(f.secondTies[i].otherStation));
         }
     }
     if (f.orphans.length > 0) {
         // Disconnected means exactly that: no leg of any kind reaches
         // the rest of the cave. This one IS actionable -- a connecting
         // shot is missing.
-        lines.push("  no connection to the rest of the survey, a tie " +
-            "shot is missing: " + f.orphans.join(", "));
+        lines.push("  " + qsTr("no connection to the rest of the survey, a tie " +
+            "shot is missing: %1").arg(f.orphans.join(", ")));
     }
     if (f.strandedRoots !== undefined && f.strandedRoots.length > 0) {
         // Connected, but not attached as anyone's child. The data is
         // fine and nothing needs surveying -- the band simply starts its
         // own stack. Saying "no connection" here would send someone
         // hunting for a shot that already exists.
-        lines.push("  connected, but drawn as its own band rather than " +
-            "hanging off another: " + f.strandedRoots.join(", "));
+        lines.push("  " + qsTr("connected, but drawn as its own band rather than " +
+            "hanging off another: %1").arg(f.strandedRoots.join(", ")));
     }
     if (f.stopped.length > 0) {
         // stoppedReason distinguishes THREE causes, not two -- collapsing
@@ -580,27 +613,28 @@ CsReport.profileSummary = function(profile, outcome) {
             var st = f.stopped[i];
             var why;
             if (st.reason === "no-leg") {
-                why = "no leg reaches it";
+                why = qsTr("no leg reaches it");
             } else if (st.reason === "unmeasurable") {
-                why = "the leg to it has no usable distance, azimuth " +
-                    "or inclination on record";
+                why = qsTr("the leg to it has no usable distance, azimuth " +
+                    "or inclination on record");
             } else {
                 // "no-z", and any future reason this function does not
                 // yet know the name of -- silence here would be worse
                 // than a slightly generic label
-                why = "no resolved elevation";
+                why = qsTr("no resolved elevation");
             }
-            lines.push("  band stopped at " + st.station + ": " + why);
+            lines.push("  " + qsTr("band stopped at %1: %2")
+                .arg(st.station).arg(why));
         }
     }
     if (f.ungrouped.length > 0) {
-        lines.push("  station names that could not be read as a run: " +
-            f.ungrouped.join(", "));
+        lines.push("  " + qsTr("station names that could not be read as a run: %1")
+            .arg(f.ungrouped.join(", ")));
     }
     if (f.wallPointsSkipped !== undefined && f.wallPointsSkipped > 0) {
-        lines.push("  " + f.wallPointsSkipped + " splay wall point(s) " +
+        lines.push("  " + qsTr("%1 splay wall point(s) " +
             "skipped (no usable distance, or no azimuth/inclination, " +
-            "on record)");
+            "on record)").arg(f.wallPointsSkipped));
     }
     if (f.undrawn !== undefined && f.undrawn.length > 0) {
         // Every leg CsNetwork.resolve() produced is either drawn in a
@@ -625,8 +659,8 @@ CsReport.profileSummary = function(profile, outcome) {
             undrawnParts.push(byReason[reasonOrder[ro]] + " " +
                 reasonOrder[ro]);
         }
-        lines.push("  legs not drawn on any band (" + f.undrawn.length +
-            "): " + undrawnParts.join(", "));
+        lines.push("  " + qsTr("legs not drawn on any band (%1): %2")
+            .arg(f.undrawn.length).arg(undrawnParts.join(", ")));
     }
     return lines.join("\n");
 };

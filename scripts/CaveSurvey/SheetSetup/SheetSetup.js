@@ -835,7 +835,7 @@ SheetSetup.build = function() {
     }
     if (w.state.rebuilding === true) {
         var lost = !isNull(doc) && doc.isModified() === true;
-        if (lost && QMessageBox.question(getMainWindow(), "Sheet Setup",
+        if (lost && QMessageBox.question(getMainWindow(), qsTr("Sheet Setup"),
                 qsTr("This sheet has unsaved changes, and rebuilding " +
                     "replaces it from the cave's drawing -- they will " +
                     "be gone.\n\nRebuild anyway?"),
@@ -1207,7 +1207,7 @@ SheetSetup.draw = function(doc, di, opts) {
     }
 
     var op = new RAddObjectsOperation();
-    op.setText("Sheet setup");
+    op.setText(qsTr("Sheet setup"));
 
     var cleared = 0;
     var allIds = doc.queryAllEntities(false, false);
@@ -1782,8 +1782,9 @@ SheetSetup.prototype.beginEvent = function() {
         SheetSetup.refresh();
     } catch (e) {
         csSheetSetupDock = undefined;
-        warning("Sheet Setup: this CaveCAD build refused the docked " +
-            "panel (" + e + ") -- please report this.");
+        warning(qsTr("Sheet Setup: this CaveCAD build refused the docked " +
+            "panel (%1) -- please report this.")
+            .arg(String(e)));
     }
 
     this.terminate();
@@ -1814,7 +1815,8 @@ SheetSetup.init = function(basePath) {
         dock.visible = false;
     } catch (eInit) {
         csSheetSetupDock = undefined;
-        warning("Sheet Setup: could not build the panel at startup (" +
-            eInit + "); the menu entry will try again.");
+        warning(qsTr("Sheet Setup: could not build the panel at startup (%1); " +
+            "the menu entry will try again.")
+            .arg(String(eInit)));
     }
 };

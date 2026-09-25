@@ -1545,8 +1545,9 @@ SymbolPalette.buildBody = function(parent) {
             try {
                 SymbolPaletteEdit.startNew();
             } catch (eNew) {
-                EAction.handleUserWarning("Symbol Palette: could not open the symbol " +
-                    "editor (" + eNew + ").");
+                EAction.handleUserWarning(qsTr("Symbol Palette: could not " +
+                    "open the symbol editor (%1).")
+                    .arg(String(eNew)));
             }
         });
         custom.addWidget(w.newButton, 1, 0);
@@ -1560,8 +1561,9 @@ SymbolPalette.buildBody = function(parent) {
             try {
                 SymbolPaletteEdit.startEdit(SymbolPalette.armed);
             } catch (eEdit) {
-                EAction.handleUserWarning("Symbol Palette: could not open that symbol (" +
-                    eEdit + ").");
+                EAction.handleUserWarning(qsTr("Symbol Palette: could not " +
+                    "open that symbol (%1).")
+                    .arg(String(eEdit)));
             }
         });
         custom.addWidget(w.editButton, 0, 0);
@@ -1574,8 +1576,9 @@ SymbolPalette.buildBody = function(parent) {
             try {
                 SymbolPalette.deleteArmed();
             } catch (eDel) {
-                EAction.handleUserWarning("Symbol Palette: could not delete that symbol (" +
-                    eDel + ").");
+                EAction.handleUserWarning(qsTr("Symbol Palette: could not " +
+                    "delete that symbol (%1).")
+                    .arg(String(eDel)));
             }
         });
         custom.addWidget(w.deleteButton, 0, 0);
@@ -1606,8 +1609,9 @@ SymbolPalette.buildBody = function(parent) {
             try {
                 SymbolPaletteEdit.save();
             } catch (eSave) {
-                EAction.handleUserWarning("Symbol Palette: the symbol could not be saved (" +
-                    eSave + ").");
+                EAction.handleUserWarning(qsTr("Symbol Palette: the symbol " +
+                    "could not be saved (%1).")
+                    .arg(String(eSave)));
             }
         });
         editorRow.addWidget(w.saveSymbolButton, 1, 0);
@@ -1804,8 +1808,9 @@ SymbolPalette.prototype.beginEvent = function() {
         CsSymbolStore.invalidate();
         SymbolPalette.rebuildTiles();
     } catch (e) {
-        EAction.handleUserWarning("Symbol Palette: this CaveCAD build refused the Draw " +
-            "panel (" + e + ") -- please report this.");
+        EAction.handleUserWarning(qsTr("Symbol Palette: this CaveCAD build " +
+            "refused the Draw panel (%1) -- please report this.")
+            .arg(String(e)));
     }
 
     this.terminate();

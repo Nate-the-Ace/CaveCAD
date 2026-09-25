@@ -1074,7 +1074,7 @@ CsRevise.moveLinework = function(doc, di, oldPos, newPos, tripStations,
 
     var origin = new RVector(0, 0);
     var op = new RModifyObjectsOperation();
-    op.setText("Move traced linework");
+    op.setText(qsTr("Move traced linework"));
     // every op.addObject(ent, false) below: false keeps its own layer
     var anyMoved = false;
     var ids = doc.queryAllEntities(false, false);
@@ -2172,7 +2172,7 @@ CsRevise.apply = function(doc, di, recon, newSurvey) {
 
         withOffLayersOn(function() {
             var op = new RModifyObjectsOperation();
-            op.setText("Apply survey revision");
+            op.setText(qsTr("Apply survey revision"));
             var ids = doc.queryAllEntities(false, false);
             for (var i = 0; i < ids.length; i++) {
                 var e = doc.queryEntity(ids[i]);

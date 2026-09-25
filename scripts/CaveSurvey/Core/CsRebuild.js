@@ -608,7 +608,7 @@ CsRebuild.fromGeometry = function(doc, di, report) {
 
     // ---- commit station tags -----------------------------------------
     var op = new RModifyObjectsOperation();
-    op.setText("Rebuild survey data");
+    op.setText(qsTr("Rebuild survey data"));
     var tagsWritten = 0;
     for (i = 0; i < stationPts.length; i++) {
         var st = stationPts[i];

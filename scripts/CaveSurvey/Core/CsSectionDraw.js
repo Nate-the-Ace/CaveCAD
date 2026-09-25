@@ -261,7 +261,7 @@ CsSectionDraw.define = function(doc, di, sectionId, cut, opts) {
     CsLayers.ensure(doc, di, CsLayers.CTRL_SECTION_TEXT_LABELS);
 
     var op = new RAddObjectsOperation();
-    op.setText("Draw cross section");
+    op.setText(qsTr("Draw cross section"));
 
     // Clear what the generator drew last time. The block holds ONLY
     // generated content -- a caver who wants to keep their own edits

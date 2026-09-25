@@ -218,7 +218,7 @@ CsStore.migrate = function(doc, di) {
     var records = CsStore.parse(String(storeEntity.getPlainText()));
 
     var op = new RModifyObjectsOperation();
-    op.setText("Migrate survey data to entity tags");
+    op.setText(qsTr("Migrate survey data to entity tags"));
     var migrated = 0;
     var ids = doc.queryAllEntities(false, true);
     for (var i = 0; i < ids.length; i++) {

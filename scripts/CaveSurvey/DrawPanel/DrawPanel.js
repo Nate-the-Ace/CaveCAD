@@ -317,8 +317,9 @@ DrawPanel.prototype.beginEvent = function() {
         }
     } catch (e) {
         csDrawPanelDock = undefined;
-        warning("Draw: this CaveCAD build refused the docked panel (" +
-            e + ") -- please report this.");
+        warning(qsTr("Draw: this CaveCAD build refused the docked panel (%1) " +
+            "-- please report this.")
+            .arg(String(e)));
     }
 
     this.terminate();
@@ -353,7 +354,8 @@ DrawPanel.init = function(basePath) {
         dock.visible = false;
     } catch (eInit) {
         csDrawPanelDock = undefined;
-        warning("Draw: could not build the panel at startup (" + eInit +
-            "); the menu entry will try again.");
+        warning(qsTr("Draw: could not build the panel at startup (%1); the " +
+            "menu entry will try again.")
+            .arg(String(eInit)));
     }
 };

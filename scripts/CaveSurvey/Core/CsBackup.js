@@ -556,10 +556,11 @@ CsBackup.beforeWrite = function(path) {
     }
     if (!made && !CsBackup.warnedThisSession) {
         CsBackup.warnedThisSession = true;
-        warning("Cave Survey: could not keep a backup of " + path +
-            " in " + CsBackup.backupFolderFor(path) + ". Saving anyway " +
-            "-- but there is no previous version to fall back on, so " +
-            "check the folder is writable.");
+        warning(qsTr("Cave Survey: could not keep a backup of %1 in %2. " +
+            "Saving anyway -- but there is no previous version to fall back " +
+            "on, so check the folder is writable.")
+            .arg(String(path))
+            .arg(String(CsBackup.backupFolderFor(path))));
     }
     return made;
 };

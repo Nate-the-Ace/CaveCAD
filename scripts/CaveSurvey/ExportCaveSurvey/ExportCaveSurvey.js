@@ -71,7 +71,7 @@ function exportControlNames(survey) {
 function exportCaveSurvey() {
     var doc = getDocument();
     if (doc === undefined || doc === null) {
-        warning("Export Cave Survey: no active drawing document.");
+        warning(qsTr("Export Cave Survey: no active drawing document."));
         return;
     }
 
@@ -80,9 +80,9 @@ function exportCaveSurvey() {
     // reader that restores trips, splays, flags and notebook order.
     var asDrawn = CsRevise.resolveAsDrawn(doc);
     if (asDrawn === null) {
-        warning("Export Cave Survey: no tagged survey stations found.\n" +
+        warning(qsTr("Export Cave Survey: no tagged survey stations found.\n" +
             "Run Azimuth Traverse, Import Cave Survey or the Survey " +
-            "Notebook first.");
+            "Notebook first."));
         return;
     }
     var survey = asDrawn.survey;
@@ -96,7 +96,7 @@ function exportCaveSurvey() {
     var suggested = QDir.homePath() + "/" + stem;
 
     var fileName = QFileDialog.getSaveFileName(getMainWindow(),
-        "Export the survey as", suggested,
+        qsTr("Export the survey as"), suggested,
         CsFormatRegistry.combinedFileFilter());
     // isNull + String: a bridge that hands back a wrapped empty QString
     // is truthy, and `!fileName` would sail past the cancel
@@ -113,8 +113,8 @@ function exportCaveSurvey() {
         for (var i = 0; i < CsFormatRegistry.FORMATS.length; i++) {
             labels.push(CsFormatRegistry.FORMATS[i].label);
         }
-        var choice = getItem("Export Cave Survey",
-            "That name carries no extension I know -- which format is it?",
+        var choice = getItem(qsTr("Export Cave Survey"),
+            qsTr("That name carries no extension I know -- which format is it?"),
             labels.join("|"), 0, "|");
         if (choice === undefined) {
             return;
@@ -138,7 +138,7 @@ function exportCaveSurvey() {
     if (control && format.id !== "compass") {
         var names = exportControlNames(survey);
         var answer = QMessageBox.question(getMainWindow(),
-            "Export Cave Survey",
+            qsTr("Export Cave Survey"),
             "This survey is tied to fixed station control at " +
             names.join(", ") + ".\n\n" +
             "On an ordinary import those coordinates are the cave's " +
@@ -169,17 +169,20 @@ function exportCaveSurvey() {
     try {
         text = format.write(survey);
     } catch (e) {
-        warning("Export Cave Survey: " + format.label +
-            " could not express this survey.\n" + e);
+        warning(qsTr("Export Cave Survey: %1 could not express this " +
+            "survey.\n%2")
+            .arg(String(format.label))
+            .arg(String(e)));
         return;
     }
     if (text === null || text === undefined || text === "") {
-        warning("Export Cave Survey: " + format.label +
-            " produced nothing for this survey.");
+        warning(qsTr("Export Cave Survey: %1 produced nothing for this survey.")
+            .arg(String(format.label)));
         return;
     }
     if (writeTextFile(fileName, text) === false) {
-        warning("Export Cave Survey: could not write\n" + fileName);
+        warning(qsTr("Export Cave Survey: could not write\n%1")
+            .arg(String(fileName)));
         return;
     }
 
@@ -217,7 +220,7 @@ function exportCaveSurvey() {
     lines.push("");
     lines.push(fileName);
 
-    QMessageBox.information(getMainWindow(), "Export Cave Survey",
+    QMessageBox.information(getMainWindow(), qsTr("Export Cave Survey"),
         lines.join("\n"));
 }
 

@@ -221,14 +221,18 @@ CsLocationPick.resolveMovedAnchor = function(doc, di, anchor, title) {
     // getMainWindow is a GUI global -- absent in the headless harness
     var win = (typeof getMainWindow === "function") ? getMainWindow() : null;
     var answer = QMessageBox.question(win, title,
-        name + " has moved " + (Math.round(dist * 100) / 100) + " " +
-        unit + " since its location was pinned.\n\n" +
-        "Recompute its latitude/longitude from where it now sits over " +
-        "the georeferenced imagery?\n\n" +
-        "Yes: where it sits is the truth -- the coordinate becomes " +
-        ll.lat.toFixed(6) + ", " + ll.lon.toFixed(6) + ".\n" +
-        "No: the stored coordinate (" + rec.lat.toFixed(6) + ", " +
-        rec.lon.toFixed(6) + ") stays the truth for the new position.",
+        qsTr("%1 has moved %2 %3 since its location was pinned.\n\nRecompute " +
+            "its latitude/longitude from where it now sits over the " +
+            "georeferenced imagery?\n\nYes: where it sits is the truth -- " +
+            "the coordinate becomes %4, %5.\nNo: the stored coordinate (%6, " +
+            "%7) stays the truth for the new position.")
+            .arg(String(name))
+            .arg(String((Math.round(dist * 100) / 100)))
+            .arg(String(unit))
+            .arg(ll.lat.toFixed(6))
+            .arg(ll.lon.toFixed(6))
+            .arg(rec.lat.toFixed(6))
+            .arg(rec.lon.toFixed(6)),
         QMessageBox.Yes | QMessageBox.No);
     if (answer === QMessageBox.Yes) {
         CsTags.commit(di, rec.entity, {
@@ -281,7 +285,7 @@ CsLocationPick.ask = function(title, defaultText) {
     }
     var coord = CsAngles.parseLatLon(text);
     if (coord === null) {
-        warning(title + ": couldn't read that coordinate.");
+        warning(qsTr("%1: couldn't read that coordinate.").arg(String(title)));
         return null;
     }
     // a declared location is trusted -- share it with every tool
@@ -310,17 +314,17 @@ CsLocationPick.askText = function(title, prompt, preset) {
         layout.addWidget(edit, 0, 0);
 
         var bar = new QHBoxLayout();
-        var mapBtn = new QPushButton("Map...");
-        mapBtn.toolTip = "Open a browser map. Click the spot; the " +
+        var mapBtn = new QPushButton(qsTr("Map..."));
+        mapBtn.toolTip = qsTr("Open a browser map. Click the spot; the " +
             "coordinate is copied to the clipboard -- paste it into " +
-            "the field here.";
-        var fromBtn = new QPushButton("From Entrance");
-        fromBtn.toolTip = "Read the geo station's coordinate into the " +
+            "the field here.");
+        var fromBtn = new QPushButton(qsTr("From Entrance"));
+        fromBtn.toolTip = qsTr("Read the geo station's coordinate into the " +
             "field. If the station has been moved since imagery was " +
             "fetched, this is its NEW location, computed from where it " +
-            "now sits over that imagery.";
-        var okBtn = new QPushButton("OK");
-        var cancelBtn = new QPushButton("Cancel");
+            "now sits over that imagery.");
+        var okBtn = new QPushButton(qsTr("OK"));
+        var cancelBtn = new QPushButton(qsTr("Cancel"));
         try {
             okBtn["default"] = true;
         } catch (eDef) {
@@ -336,8 +340,8 @@ CsLocationPick.askText = function(title, prompt, preset) {
         mapBtn.clicked.connect(function() {
             if (!CsLocationPick.openMap()) {
                 QMessageBox.information(getMainWindow(), title,
-                    "The map page could not be opened. Type the " +
-                    "coordinate, or use From Entrance.");
+                    qsTr("The map page could not be opened. Type the " +
+                    "coordinate, or use From Entrance."));
             }
         });
         fromBtn.clicked.connect(function() {
@@ -347,8 +351,8 @@ CsLocationPick.askText = function(title, prompt, preset) {
                 CsLocationPick.entranceCoord(doc) : null;
             if (best === null) {
                 QMessageBox.information(getMainWindow(), title,
-                    "No geo station in this drawing yet -- there is " +
-                    "no entrance coordinate to read. Pick or type one.");
+                    qsTr("No geo station in this drawing yet -- there is " +
+                    "no entrance coordinate to read. Pick or type one."));
                 return;
             }
             edit.text = best.lat.toFixed(6) + ", " + best.lon.toFixed(6);

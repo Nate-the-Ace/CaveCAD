@@ -59,7 +59,7 @@ CsPick.startPointFromSelection = function(doc, title) {
             "Point 2: (" + p2.x.toFixed(3) + ", " + p2.y.toFixed(3) + ")"
         ];
         var choice = getItem(title,
-            "Start from which endpoint of the selected entity?",
+            qsTr("Start from which endpoint of the selected entity?"),
             labels.join("|"), 0, "|");
         if (choice === undefined) {
             return undefined;
@@ -83,18 +83,21 @@ CsPick.startPointFromSelection = function(doc, title) {
  */
 CsPick.singleSelected = function(doc, toolName) {
     if (!doc.hasSelection()) {
-        warning(toolName + ": select exactly one entity first.");
+        warning(qsTr("%1: select exactly one entity first.")
+            .arg(String(toolName)));
         return null;
     }
     var ids = doc.querySelectedEntities();
     if (ids.length !== 1) {
-        warning(toolName + ": select exactly ONE entity (found " +
-            ids.length + ").");
+        warning(qsTr("%1: select exactly ONE entity (found %2).")
+            .arg(String(toolName))
+            .arg(String(ids.length)));
         return null;
     }
     var entity = doc.queryEntity(ids[0]);
     if (isNull(entity)) {
-        warning(toolName + ": could not read the selected entity.");
+        warning(qsTr("%1: could not read the selected entity.")
+            .arg(String(toolName)));
         return null;
     }
     return entity;

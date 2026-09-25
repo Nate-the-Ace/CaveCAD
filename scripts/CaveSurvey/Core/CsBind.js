@@ -963,7 +963,7 @@ CsBind.tagEntities = function(doc, di, entries) {
 
     var write = function() {
         var op = new RModifyObjectsOperation();
-        op.setText("Tag linework");
+        op.setText(qsTr("Tag linework"));
         var n = 0;
         for (var k = 0; k < entries.length; k++) {
             var en = entries[k];

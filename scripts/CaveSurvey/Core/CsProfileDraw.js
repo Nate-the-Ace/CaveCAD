@@ -1262,7 +1262,7 @@ CsProfileDraw.translateRegion = function(doc, di, dx, dy) {
     var offset = new RVector(dx, dy);
     var ids = doc.queryAllEntities(false, false);
     var op = new RModifyObjectsOperation();
-    op.setText("Move the elevation region");
+    op.setText(qsTr("Move the elevation region"));
     var moved = 0, i, e, lname;
     for (i = 0; i < ids.length; i++) {
         e = doc.queryEntity(ids[i]);
@@ -1425,7 +1425,7 @@ CsProfileDraw.render = function(doc, di, profile, opts) {
         tiesDrawn: 0, erased: erased };
 
     var op = new RAddObjectsOperation();
-    op.setText("Draw extended elevation");
+    op.setText(qsTr("Draw extended elevation"));
 
     var bands = (profile && profile.bands) ? profile.bands : [];
     for (var b = 0; b < bands.length; b++) {

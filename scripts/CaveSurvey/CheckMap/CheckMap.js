@@ -202,8 +202,9 @@ CheckMap.saveIgnored = function(path, set) {
         RSettings.setValue(CheckMap.ignoreKey(path),
             CsCheck.serializeIgnored(set));
     } catch (e) {
-        EAction.handleUserMessage("Check Map: could not remember that " +
-            "(" + e + ") -- the finding will be back next time.");
+        EAction.handleUserMessage(qsTr("Check Map: could not remember that " +
+            "(%1) -- the finding will be back next time.")
+            .arg(String(e)));
     }
 };
 
@@ -260,7 +261,7 @@ CheckMap.showListMenu = function() {
     clearAct.triggered.connect(function() {
         w.ignored = {};
         CheckMap.saveIgnored(w.path, w.ignored);
-        EAction.handleUserMessage("Check Map: every finding is back.");
+        EAction.handleUserMessage(qsTr("Check Map: every finding is back."));
         CheckMap.refresh();
     });
 
@@ -442,8 +443,9 @@ CheckMap.showMe = function() {
             new RVector(finding.at.x - reach, finding.at.y - reach),
             new RVector(finding.at.x + reach, finding.at.y + reach)));
     } catch (e) {
-        EAction.handleUserMessage("Check Map: could not frame that " +
-            "finding (" + e + ").");
+        EAction.handleUserMessage(qsTr("Check Map: could not frame that " +
+            "finding (%1).")
+            .arg(String(e)));
     }
 };
 
@@ -470,8 +472,9 @@ CheckMap.prototype.beginEvent = function() {
         CheckMap.refresh();
     } catch (e) {
         csCheckMapDock = undefined;
-        warning("Check Map: this CaveCAD build refused the docked " +
-            "panel (" + e + ") -- please report this.");
+        warning(qsTr("Check Map: this CaveCAD build refused the docked panel " +
+            "(%1) -- please report this.")
+            .arg(String(e)));
     }
 
     this.terminate();
@@ -502,7 +505,8 @@ CheckMap.init = function(basePath) {
         dock.visible = false;
     } catch (eInit) {
         csCheckMapDock = undefined;
-        warning("Check Map: could not build the panel at startup (" +
-            eInit + "); the menu entry will try again.");
+        warning(qsTr("Check Map: could not build the panel at startup (%1); " +
+            "the menu entry will try again.")
+            .arg(String(eInit)));
     }
 };
