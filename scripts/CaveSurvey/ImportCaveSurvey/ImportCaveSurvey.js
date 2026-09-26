@@ -53,7 +53,7 @@ function importCaveSurvey() {
     }
 
     // -- pick the file ------------------------------------------------
-    var fileName = QFileDialog.getOpenFileName(getMainWindow(),
+    var fileName = CsFiles.openFile(getMainWindow(),
         "Select a cave survey file", "",
         CsFormatRegistry.combinedFileFilter());
     // isNull + String: a bridge that hands back a wrapped empty QString

@@ -140,6 +140,7 @@ var CORE_FILES = [
     "scripts/CaveSurvey/Core/CsUuid.js",
     "scripts/CaveSurvey/Core/CsUnits.js",
     "scripts/CaveSurvey/Core/CsCave.js",
+    "scripts/CaveSurvey/Core/CsFiles.js",
     "scripts/CaveSurvey/Core/CsShelf.js",
     "scripts/CaveSurvey/Core/CsBackup.js",
     "scripts/CaveSurvey/Core/CsScanTree.js",
@@ -23223,6 +23224,48 @@ eqs(pkgNix.program, "zip", "everything else zips with zip(1)");
 eqs(pkgNix.workingDirectory, "/tmp/stage",
     "zip runs in the staging directory so paths stay relative");
 eqs(pkgNix.args[pkgNix.args.length - 1], "CAVE", "zip is handed the folder, not its contents");
+
+// Unpacking a package: the reverse, with programs every platform has.
+// tar is bsdtar on macOS and Windows 10+, reads zip, and refuses entries
+// that would land outside the target; Linux's GNU tar cannot read zip,
+// so Python's zipfile does it there (same refusal).
+var unMac = CsPackage.unzipCommand("darwin", "/d/a b.zip", "/x/stage");
+eqs(unMac.program, "tar", "macOS unpacks with tar");
+eqs(unMac.args.join("|"), "-xf|/d/a b.zip|-C|/x/stage",
+    "tar is handed the archive and the target as separate arguments");
+var unWin = CsPackage.unzipCommand("windows", "C:/d/a.zip", "C:/x/stage");
+eqs(unWin.program, "tar", "Windows 10+ unpacks with its own tar.exe");
+var unNix = CsPackage.unzipCommand("linux", "/d/a.zip", "/x/stage");
+eqs(unNix.program, "python3", "Linux unpacks with Python's zipfile");
+eqs(unNix.args[unNix.args.length - 2], "/d/a.zip", "the archive is an argument, not spliced into code");
+eqs(unNix.args[unNix.args.length - 1], "/x/stage", "and so is the target");
+
+// A package unpacks to ONE cave folder; macOS litter does not count.
+eqs(CsPackage.packageRoot(["ALL DAY CAVE"], []), "ALL DAY CAVE",
+    "a package's single folder is the cave");
+eqs(CsPackage.packageRoot(["ALL DAY CAVE", "__MACOSX"], [".DS_Store"]),
+    "ALL DAY CAVE", "Finder's __MACOSX and .DS_Store are not a second root");
+ok(CsPackage.packageRoot(["A", "B"], []) === null,
+    "two folders at the top is not a cave package");
+ok(CsPackage.packageRoot(["A"], ["loose.dxf"]) === null,
+    "a loose file beside the folder is not a cave package");
+ok(CsPackage.packageRoot([], []) === null, "an empty archive is not a cave");
+
+// Never onto an existing cave.
+var taken = { "/c/ALL DAY CAVE": true, "/c/ALL DAY CAVE (2)": true };
+eqs(CsPackage.freeFolder("/c", "ALL DAY CAVE", function(p) { return taken[p] === true; }),
+    "/c/ALL DAY CAVE (3)", "an import beside an existing cave takes the next free name");
+eqs(CsPackage.freeFolder("/c/", "NEW CAVE", function() { return false; }),
+    "/c/NEW CAVE", "a free name is used as it is");
+
+// Which drawing in the unpacked folder is the cave.
+eqs(CsPackage.packageDrawing("ALL DAY CAVE", ["notes.dxf", "ALL DAY CAVE.dxf"]),
+    "ALL DAY CAVE.dxf", "the drawing named for the cave wins");
+eqs(CsPackage.packageDrawing("X", ["Truitt Cave.dxf", "Truitt Cave.bak001.dxf",
+        "Truitt Cave.dxf.2026-09-16_072835.bak"]),
+    "Truitt Cave.dxf", "backups are never the drawing");
+ok(CsPackage.packageDrawing("X", ["a.dxf", "b.dxf"]) === null,
+    "two candidates and no name match: ask, don't guess");
 
 eqs(CsPackage.formatLength(4180.4, "ft"), "4,180 ft", "length reads like a number");
 eqs(CsPackage.formatLength(0, "m"), "0 m", "a cave with no survey still formats");

@@ -1868,7 +1868,7 @@ CaveShelf.addFolder = function(parent) {
     var roots = CsCave.driveRoots();
     var start = roots.length > 0 ? roots[0] : QDir.homePath();
 
-    var picked = QFileDialog.getExistingDirectory(parent,
+    var picked = CsFiles.directory(parent,
         qsTr("Pick a folder that holds caves"), start);
     if (isNull(picked) || String(picked) === "") { return 0; }
     var folder = String(picked).replace(/\\/g, "/").replace(/\/+$/, "");
@@ -2025,18 +2025,26 @@ CaveShelf.importFile = function(parent) {
     var roots = CsCave.driveRoots();
     var start = roots.length > 0 ? roots[0] : QDir.homePath();
 
-    var filter = qsTr("Cave surveys and drawings") + " (*.dat *.srv *.svx " +
-        "*.csv *.dxf *.dwg);;" + CsFormatRegistry.combinedFileFilter() +
+    var filter = qsTr("Cave surveys, drawings and packages") +
+        " (*.dat *.srv *.svx *.csv *.dxf *.dwg *.zip);;" +
+        CsFormatRegistry.combinedFileFilter() +
         ";;" + qsTr("Drawings") + " (*.dxf *.dwg);;" +
+        qsTr("Cave packages") + " (*.zip);;" +
         qsTr("Every file") + " (*)";
 
-    var picked = QFileDialog.getOpenFileName(parent,
+    var picked = CsFiles.openFile(parent,
         qsTr("Import a cave from a file"), start, filter);
     if (isNull(picked) || String(picked) === "") { return null; }
     var path = String(picked).replace(/\\/g, "/");
 
-    // A drawing is already a cave: its folder is the project.
     var extension = CsShelf.extension(path);
+
+    // A zip from Package Cave is a whole cave folder.
+    if (extension === "zip") {
+        return CaveShelf.importPackage(parent, path);
+    }
+
+    // A drawing is already a cave: its folder is the project.
     if (extension === "dxf" || extension === "dwg") {
         var folder = CsCave.folderOf(path);
         if (folder === null) { return null; }
@@ -2048,6 +2056,96 @@ CaveShelf.importFile = function(parent) {
     }
 
     return CaveShelf.importSurveyFile(parent, path);
+};
+
+/**
+ * Unpacks a Package Cave zip (sanitized or FULL) into a cave folder and
+ * puts it on the shelf.
+ *
+ * Unpacked into a hidden staging folder INSIDE the chosen parent, then
+ * renamed into place: the parent is often a synced drive, and a rename
+ * on one volume either happens or doesn't, where a copy across volumes
+ * can stop halfway. Never lands on an existing cave -- a clash takes the
+ * next free "(2)" name.
+ *
+ * \return the record imported, or null.
+ */
+CaveShelf.importPackage = function(parent, zipPath) {
+    var title = qsTr("Import Cave");
+    var roots = CsCave.driveRoots();
+    var start = roots.length > 0 ? roots[0] : QDir.homePath();
+    var parentFolder = CsFiles.directory(parent,
+        qsTr("Where should the cave in %1 live?")
+            .arg(CsShelf.basename(zipPath)), start);
+    if (parentFolder === "") { return null; }
+    parentFolder = parentFolder.replace(/\\/g, "/").replace(/\/+$/, "");
+
+    var staging = parentFolder + "/.cavecad-import-" + (new Date()).getTime();
+    if (!(new QDir()).mkpath(staging)) {
+        EAction.handleUserWarning(qsTr("Could not create ") + staging);
+        return null;
+    }
+    var cleanup = function() {
+        try { (new QDir(staging)).removeRecursively(); } catch (e) {}
+    };
+
+    var run = CsPackage.runCommand(
+        CsPackage.unzipCommand(RS.getSystemId(), zipPath, staging), 300);
+    if (!run.ok) {
+        cleanup();
+        QMessageBox.warning(parent, title,
+            qsTr("Could not unpack %1:\n%2")
+                .arg(CsShelf.basename(zipPath)).arg(run.error));
+        return null;
+    }
+
+    var top = new QDir(staging);
+    var rootName = CsPackage.packageRoot(
+        top.entryList([], QDir.Dirs | QDir.NoDotAndDotDot, 0),
+        top.entryList([], QDir.Files | QDir.NoDotAndDotDot, 0));
+    if (rootName === null) {
+        cleanup();
+        QMessageBox.warning(parent, title,
+            qsTr("%1 is not a cave package: a package made by Package Cave " +
+                "holds exactly one cave folder.").arg(CsShelf.basename(zipPath)));
+        return null;
+    }
+
+    var inside = new QDir(staging + "/" + rootName);
+    var dxfs = inside.entryList(["*.dxf", "*.DXF"], QDir.Files, QDir.Name);
+    var drawingName = CsPackage.packageDrawing(rootName, dxfs);
+    if (drawingName === null && dxfs.length > 1) {
+        var picked = CaveShelf.choose(parent, title,
+            qsTr("Which drawing is the cave?"), dxfs);
+        drawingName = (picked === null || picked === "") ? null : String(picked);
+    }
+    if (drawingName === null) {
+        cleanup();
+        QMessageBox.warning(parent, title,
+            qsTr("There is no drawing in %1.").arg(CsShelf.basename(zipPath)));
+        return null;
+    }
+
+    var folder = CsPackage.freeFolder(parentFolder, rootName, function(p) {
+        return (new QFileInfo(p)).exists();
+    });
+    if (folder === null ||
+            !(new QDir()).rename(staging + "/" + rootName, folder)) {
+        cleanup();
+        EAction.handleUserWarning(qsTr("Could not move the unpacked cave to ") +
+            folder);
+        return null;
+    }
+    cleanup();
+
+    var record = CsShelf.normalize({ name: CsCave.nameOf(folder + "/" + drawingName),
+        folder: folder, drawing: folder + "/" + drawingName });
+    CsShelf.register(record);
+    CaveShelf.offerProjectFolders(parent, folder);
+    EAction.handleUserMessage(qsTr("Imported %1 into %2")
+        .arg(CsShelf.basename(zipPath)).arg(folder));
+    var saved = CsShelf.find(folder);
+    return saved === null ? record : saved;
 };
 
 /**
@@ -2109,7 +2207,7 @@ CaveShelf.importSurveyFile = function(parent, path) {
     // ---- where it lives --------------------------------------------------
     var roots = CsCave.driveRoots();
     var start = roots.length > 0 ? roots[0] : QDir.homePath();
-    var parentFolder = QFileDialog.getExistingDirectory(parent,
+    var parentFolder = CsFiles.directory(parent,
         qsTr("Where should %1 live?").arg(name), start);
     if (isNull(parentFolder) || String(parentFolder) === "") { return null; }
     parentFolder = String(parentFolder).replace(/\\/g, "/")
@@ -2241,7 +2339,7 @@ CaveShelf.newCave = function(parent) {
 
     var roots = CsCave.driveRoots();
     var start = roots.length > 0 ? roots[0] : QDir.homePath();
-    var parentFolder = QFileDialog.getExistingDirectory(parent,
+    var parentFolder = CsFiles.directory(parent,
         qsTr("Where should %1 live?").arg(safe), start);
     if (isNull(parentFolder) || String(parentFolder) === "") { return null; }
     parentFolder = String(parentFolder).replace(/\\/g, "/").replace(/\/+$/, "");

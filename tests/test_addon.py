@@ -685,6 +685,35 @@ class TestFunctionPropertyShadowing(unittest.TestCase):
             "rename the member (applyCode, fileAll, ...)" % offenders)
 
 
+class TestNoNativeFileDialogs(unittest.TestCase):
+    """QFileDialog's statics (getOpenFileName, getSaveFileName,
+    getExistingDirectory, ...) silently open the PLATFORM's picker
+    whatever CaveCAD's preference says, and Nathan's standing rule is Qt's
+    own dialogs everywhere. Every picker goes through Core/CsFiles.js,
+    which builds the dialog and passes getDontUseNativeDialog(). Found on
+    Windows, 2026-09-26: eleven call sites had drifted to the statics."""
+
+    STATIC = re.compile(r"QFileDialog\.get(OpenFileName|OpenFileNames|"
+                        r"SaveFileName|ExistingDirectory|OpenFileUrl)\s*\(")
+
+    def test_no_file_dialog_statics(self):
+        offenders = []
+        for folder, _subdirs, files in os.walk(ADDON):
+            for name in files:
+                if not name.endswith(".js") or name == "CsFiles.js":
+                    continue
+                path = os.path.join(folder, name)
+                with open(path) as handle:
+                    for number, line in enumerate(handle, 1):
+                        if self.STATIC.search(line):
+                            offenders.append("%s:%d" % (
+                                os.path.relpath(path, ADDON), number))
+        self.assertEqual(
+            [], offenders,
+            "these open the platform's file dialog: %s -- use "
+            "CsFiles.openFile / saveFile / directory" % offenders)
+
+
 class TestBasenameCollisions(unittest.TestCase):
     """QCAD's include() dedupes by BASENAME: a library file sharing a
     name with anything QCAD already included (Draw.js, File.js, ...)

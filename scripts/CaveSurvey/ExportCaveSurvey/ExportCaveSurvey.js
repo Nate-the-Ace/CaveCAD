@@ -95,7 +95,7 @@ function exportCaveSurvey() {
     }
     var suggested = QDir.homePath() + "/" + stem;
 
-    var fileName = QFileDialog.getSaveFileName(getMainWindow(),
+    var fileName = CsFiles.saveFile(getMainWindow(),
         "Export the survey as", suggested,
         CsFormatRegistry.combinedFileFilter());
     // isNull + String: a bridge that hands back a wrapped empty QString

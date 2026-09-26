@@ -433,7 +433,7 @@ PackageCave.ask = function(parent, record) {
     dialog.setLayout(layout);
 
     changeButton.clicked.connect(function() {
-        var picked = QFileDialog.getExistingDirectory(dialog,
+        var picked = CsFiles.directory(dialog,
             qsTr("Where should the package go?"), destination);
         if (!isNull(picked) && String(picked) !== "") {
             destination = String(picked).replace(/\\/g, "/")

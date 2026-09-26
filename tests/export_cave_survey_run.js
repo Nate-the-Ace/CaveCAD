@@ -156,7 +156,7 @@ try {
 }
 ok((new QDir()).mkpath(outDir), "made a folder to export into");
 
-var savedGetSaveFileName = QFileDialog.getSaveFileName;
+var savedSaveFile = CsFiles.saveFile;
 var savedQuestion = QMessageBox.question;
 var savedInformation = QMessageBox.information;
 var savedWarning = (typeof warning === "function") ? warning : null;
@@ -164,7 +164,7 @@ var savedWarning = (typeof warning === "function") ? warning : null;
 var spy;
 function runExport(path, answerYes) {
     spy = { path: path, questions: [], informations: [], warnings: [] };
-    QFileDialog.getSaveFileName = function() { return spy.path; };
+    CsFiles.saveFile = function() { return spy.path; };
     QMessageBox.question = function(parent, title, text) {
         spy.questions.push(text);
         return answerYes ? QMessageBox.Yes : QMessageBox.No;
@@ -176,7 +176,7 @@ function runExport(path, answerYes) {
     try {
         exportCaveSurvey();
     } finally {
-        QFileDialog.getSaveFileName = savedGetSaveFileName;
+        CsFiles.saveFile = savedSaveFile;
         QMessageBox.question = savedQuestion;
         QMessageBox.information = savedInformation;
         if (savedWarning !== null) { warning = savedWarning; }

@@ -196,6 +196,107 @@ CsPackage.zipCommand = function(system, staging, folder, zipPath) {
     };
 };
 
+/**
+ * The command that unpacks a package into `dest` -- zipCommand's reverse.
+ *
+ * tar is bsdtar on macOS and on Windows 10 and later (System32\tar.exe),
+ * reads zip archives, and refuses entries that would land outside the
+ * target (absolute paths, ".."). GNU tar on Linux cannot read zip, so
+ * Python's zipfile does it there; it applies the same refusal. The
+ * archive and target are ARGUMENTS, never spliced into the program text,
+ * so no file name can become code.
+ *
+ * \return {program, args}
+ */
+CsPackage.unzipCommand = function(system, zipPath, dest) {
+    var os = String(system === undefined || system === null ? "" : system)
+        .toLowerCase();
+    if (os === "darwin" || os === "osx" || os === "macos" ||
+            os === "windows" || os === "win32" || os === "win") {
+        return { program: "tar", args: ["-xf", zipPath, "-C", dest] };
+    }
+    return {
+        program: "python3",
+        args: ["-c", "import sys, zipfile; " +
+            "zipfile.ZipFile(sys.argv[1]).extractall(sys.argv[2])",
+            zipPath, dest]
+    };
+};
+
+/** Runs {program, args} and waits. \return {ok, error} */
+CsPackage.runCommand = function(command, timeoutS) {
+    try {
+        var process = new QProcess();
+        if (!isNull(command.workingDirectory)) {
+            process.setWorkingDirectory(command.workingDirectory);
+        }
+        process.start(command.program, command.args);
+        if (!process.waitForStarted(10000)) {
+            return { ok: false, error: command.program + " would not start." };
+        }
+        if (!process.waitForFinished((timeoutS || 300) * 1000)) {
+            process.kill();
+            return { ok: false, error: command.program + " timed out." };
+        }
+        if (process.exitCode() !== 0) {
+            return { ok: false, error: command.program + " exited " +
+                process.exitCode() + ": " +
+                String(process.readAllStandardError()) };
+        }
+        return { ok: true, error: "" };
+    } catch (e) {
+        return { ok: false, error: String(e) };
+    }
+};
+
+/**
+ * The one cave folder an unpacked package holds, or null when it is not
+ * shaped like a package. zipCommand zips the cave folder WITH its name,
+ * so a package is exactly one folder; Finder's __MACOSX and .DS_Store
+ * litter is ignored.
+ */
+CsPackage.packageRoot = function(dirs, files) {
+    var realDirs = [];
+    for (var i = 0; i < dirs.length; i++) {
+        if (String(dirs[i]) !== "__MACOSX") { realDirs.push(String(dirs[i])); }
+    }
+    var realFiles = 0;
+    for (var j = 0; j < files.length; j++) {
+        if (String(files[j]) !== ".DS_Store") { realFiles++; }
+    }
+    return (realDirs.length === 1 && realFiles === 0) ? realDirs[0] : null;
+};
+
+/**
+ * parent/name, or the first "name (2)", "name (3)"... not taken.
+ * An import never lands on top of an existing cave.
+ */
+CsPackage.freeFolder = function(parent, name, exists) {
+    var base = String(parent).replace(/\/+$/, "") + "/" + name;
+    if (!exists(base)) { return base; }
+    for (var n = 2; n < 1000; n++) {
+        var candidate = base + " (" + n + ")";
+        if (!exists(candidate)) { return candidate; }
+    }
+    return null;
+};
+
+/**
+ * Which .dxf in the unpacked cave folder is the cave: the one named for
+ * the folder, else the only non-backup one. Null when that is ambiguous.
+ */
+CsPackage.packageDrawing = function(rootName, dxfNames) {
+    var own = String(rootName) + ".dxf";
+    var candidates = [];
+    for (var i = 0; i < dxfNames.length; i++) {
+        var n = String(dxfNames[i]);
+        if (!/\.dxf$/i.test(n) || /\.bak\d*\.dxf$/i.test(n)) { continue; }
+        if (n.toLowerCase() === own.toLowerCase()) { return n; }
+        candidates.push(n);
+    }
+    return candidates.length === 1 ? candidates[0] : null;
+};
+
 /** Right-pads, for the manifest's columns. */
 CsPackage.pad = function(text, width) {
     var out = (text === undefined || text === null) ? "" : String(text);

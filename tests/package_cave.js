@@ -409,6 +409,22 @@ ok(zipped.ok, "the platform's zip program ran: " + zipped.error);
 ok((new QFileInfo(zipPath)).exists(), "an archive exists where it was asked for");
 ok((new QFileInfo(zipPath)).size() > 0, "the archive is not empty");
 
+// ---------------------------------------------------------------------
+// And unpacks again: Cave Shelf's Import reverses Package Cave.
+// ---------------------------------------------------------------------
+var unpackTo = root + "/unpacked";
+(new QDir()).mkpath(unpackTo);
+var unzipped = CsPackage.runCommand(
+    CsPackage.unzipCommand(RS.getSystemId(), zipPath, unpackTo), 120);
+ok(unzipped.ok, "the platform's unzip program ran: " + unzipped.error);
+var top = new QDir(unpackTo);
+var rootName = CsPackage.packageRoot(
+    top.entryList([], QDir.Dirs | QDir.NoDotAndDotDot, 0),
+    top.entryList([], QDir.Files | QDir.NoDotAndDotDot, 0));
+eqs(rootName, "PITFALL CAVE", "the package unpacks to its one cave folder");
+ok((new QFileInfo(unpackTo + "/PITFALL CAVE/MANIFEST.txt")).exists(),
+    "the files inside come back where they were");
+
 try {
     (new QDir(root)).removeRecursively();
 } catch (eClean) {

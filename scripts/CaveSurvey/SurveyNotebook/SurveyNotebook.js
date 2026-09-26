@@ -2145,7 +2145,7 @@ SurveyNotebook.drawMergedSurvey = function(w, doc, survey, recon,
 };
 
 SurveyNotebook.importFile = function(w) {
-    var fileName = QFileDialog.getOpenFileName(null,
+    var fileName = CsFiles.openFile(null,
         "Import survey file", "", CsFormatRegistry.combinedFileFilter());
     if (isNull(fileName) || String(fileName) === "") {
         return;
@@ -2195,7 +2195,7 @@ SurveyNotebook.exportFile = function(w) {
             format = CsFormatRegistry.FORMATS[i];
         }
     }
-    var fileName = QFileDialog.getSaveFileName(null,
+    var fileName = CsFiles.saveFile(null,
         "Export " + format.label, "", format.fileFilter);
     if (isNull(fileName) || String(fileName) === "") {
         return;

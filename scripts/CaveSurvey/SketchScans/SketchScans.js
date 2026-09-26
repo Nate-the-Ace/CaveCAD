@@ -1380,7 +1380,7 @@ SketchScans.buildDock = function(appWin) {
     var chooseElsewhere = function() {
         var doc = EAction.getDocument();
         if (isNull(doc)) { return; }
-        var path = QFileDialog.getOpenFileName(getMainWindow(),
+        var path = CsFiles.openFile(getMainWindow(),
             qsTr("Select a scan to align"),
             (w.scans === null || w.scans === undefined) ? "" : w.scans,
             qsTr("Images (*.png *.jpg *.jpeg *.tif *.tiff *.bmp)"));

@@ -18,6 +18,7 @@
 include(includeBasePath + "/CsUuid.js");
 include(includeBasePath + "/CsUnits.js");
 include(includeBasePath + "/CsCave.js");
+include(includeBasePath + "/CsFiles.js");
 // After CsCave: the shelf reads CsCave.SCANS/PDF when it scans a cave
 // folder, and CsCave.driveRoots when a save registers itself.
 include(includeBasePath + "/CsShelf.js");

@@ -1159,7 +1159,7 @@ Cave3D.exportAnimation = function() {
     var folder = CsCave.folderOf(isNull(doc) ? null : doc.getFileName());
     var base = (folder === null) ? QDir.tempPath() : folder;
 
-    var picked = QFileDialog.getExistingDirectory(
+    var picked = CsFiles.directory(
         RMainWindowQt.getMainWindow(),
         qsTr("Where should the animation go?"), base);
     if (picked === null || picked === undefined || String(picked) === "") {
