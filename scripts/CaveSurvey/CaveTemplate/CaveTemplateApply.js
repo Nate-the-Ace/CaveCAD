@@ -15,6 +15,13 @@
 // point), and the new document keeps no file name, so Save can never
 // silently overwrite the template.
 
+// This file's folder, captured AT INCLUDE TIME (see CsHandbook.BASE):
+// initNewFile runs long after, when includeBasePath names some other
+// script's folder. Reading it there found no template in the release
+// builds, where nothing else supplies one, and new drawings came up blank.
+var CaveTemplateApply_BASE = (typeof(includeBasePath) === "undefined") ?
+    "" : String(includeBasePath);
+
 function initNewFile(mdiChild) {
     // ---- gate -------------------------------------------------------
     // A ONE-SHOT SUPPRESSION, and the only thing that beats every other
@@ -54,7 +61,7 @@ function initNewFile(mdiChild) {
     // Beside the add-on first (the package build puts it there), then
     // the published Cave folder as a fallback for repo checkouts.
     var candidates = [
-        includeBasePath + "/../Templates/NSS_Cave_Template_PLAN.dxf",
+        CaveTemplateApply_BASE + "/../Templates/NSS_Cave_Template_PLAN.dxf",
         RSettings.getStringValue("CaveSurvey/TemplatePath", ""),
         QDir.homePath() + "/Documents/Cave/templates/NSS_Cave_Template_PLAN.dxf"
     ];

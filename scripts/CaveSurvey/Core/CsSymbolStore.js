@@ -36,6 +36,15 @@ var CsSymbolStore = {};
 /** The template file name. One spelling, used by every lookup. */
 CsSymbolStore.TEMPLATE_NAME = "NSS_Cave_Template_PLAN.dxf";
 
+/**
+ * This file's folder, captured AT INCLUDE TIME -- see CsHandbook.BASE.
+ * includeBasePath read inside a function names whatever was included
+ * last, so the shipped template beside the add-on was never found; only
+ * the ~/Documents/Cave/templates fallback on a publish.sh machine hid it.
+ */
+CsSymbolStore.BASE = (typeof(includeBasePath) === "undefined") ?
+    "" : String(includeBasePath);
+
 /** Every symbol block name starts with this, custom ones included.
  *  It is what list() filters the template's block table by, so a symbol
  *  is recognisable as one without consulting any catalogue. */
@@ -155,7 +164,7 @@ CsSymbolStore.areaCache = {};
 CsSymbolStore.templatePath = function() {
     var candidates = [];
     try {
-        candidates.push(includeBasePath + "/../Templates/" +
+        candidates.push(CsSymbolStore.BASE + "/../Templates/" +
             CsSymbolStore.TEMPLATE_NAME);
     } catch (eBase) {
         // no includeBasePath in this context; the other two still work
@@ -255,7 +264,7 @@ CsSymbolStore.ensureCustomFile = function() {
 CsSymbolStore.searchedPaths = function() {
     var out = [];
     try {
-        out.push(includeBasePath + "/../Templates/" +
+        out.push(CsSymbolStore.BASE + "/../Templates/" +
             CsSymbolStore.TEMPLATE_NAME);
     } catch (eBase) {
     }

@@ -32830,6 +32830,32 @@ ok(typeof CsGhost !== "undefined", "CsGhost loaded");
 })();
 
 // ---------------------------------------------------------------------
+// The template beside the add-on is found from the folder the file was
+// LOADED from. includeBasePath is repointed by every include, so read at
+// call time it names some other script's folder; the release builds
+// (add-on inside the app, no ~/Documents/Cave/templates) then found no
+// template and every new drawing came up blank (2026-09-26).
+// ---------------------------------------------------------------------
+(function() {
+    var had = (typeof includeBasePath !== "undefined");
+    var saved = had ? includeBasePath : undefined;
+    includeBasePath = "/nowhere/at/all";
+    try {
+        var looked = CsSymbolStore.searchedPaths();
+        ok(String(looked[0]).indexOf("/nowhere") !== 0,
+            "template lookup ignores includeBasePath at call time, got " +
+            looked[0]);
+        ok(typeof CsSymbolStore.BASE === "string" &&
+            looked[0] === CsSymbolStore.BASE + "/../Templates/" +
+                CsSymbolStore.TEMPLATE_NAME,
+            "template lookup starts beside the add-on's Core folder, got " +
+            looked[0]);
+    } finally {
+        includeBasePath = saved;
+    }
+}());
+
+// ---------------------------------------------------------------------
 // Report.
 // ---------------------------------------------------------------------
 
