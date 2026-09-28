@@ -24,10 +24,12 @@ function LinetypeMaker(guiAction) {
 LinetypeMaker.prototype = new EAction();
 
 /** Table columns, in order. Kind is derived, never typed. */
-LinetypeMaker.COLUMNS = ["Kind", "Length", "Text", "Font", "Size", "Anchor",
-                         "Rot\u00b0", "X", "Y"];
+// No X / Y columns: where the text sits is the Anchor's job (Nathan,
+// 2026-09-28). The raw offsets still live on the model -- an imported
+// linetype whose placement matches no anchor keeps it, shown as Custom.
+LinetypeMaker.COLUMNS = ["Kind", "Length", "Text", "Font", "Size", "Anchor", "Rot\u00b0"];
 LinetypeMaker.COL = { KIND: 0, LENGTH: 1, TEXT: 2, FONT: 3, SIZE: 4, ANCHOR: 5,
-                      ROT: 6, X: 7, Y: 8 };
+                      ROT: 6 };
 
 /** The words each font's dropdown entry is drawn with. No spaces: the
  *  engine's linetype text cannot hold one. */
@@ -339,14 +341,20 @@ LinetypeMaker.fontCombo = function(row, current) {
 /** The anchor dropdown for one text row; the index maps to an anchor code. */
 LinetypeMaker.anchorCombo = function(row, current) {
     var combo = new QComboBox();
-    var codes = CsLinetype.ANCHORS.concat(["custom"]);
+    // Custom is offered only to a row that already is custom (an imported
+    // placement); there is no way to make one here, and picking an anchor
+    // replaces it.
+    var codes = CsLinetype.ANCHORS.slice(0);
+    if (codes.indexOf(current) < 0) {
+        codes.push("custom");
+    }
     var at = codes.indexOf(current);
     for (var i = 0; i < codes.length; i++) {
         combo.addItem(qsTr(CsLinetype.ANCHOR_LABELS[codes[i]]));
     }
-    combo.setCurrentIndex(at < 0 ? codes.indexOf("custom") : at);
+    combo.setCurrentIndex(at < 0 ? codes.length - 1 : at);
     combo.toolTip = qsTr("Where the text sits: Left / Center / Right in its own row, " +
-        "Top / Middle / Bottom against the line. Typing X or Y makes it Custom.");
+        "Top / Middle / Bottom against the line.");
     combo.activated.connect(function(index) {
         LinetypeMaker.comboChanged(LinetypeMaker.COL.ANCHOR, row, codes[index]);
     });
@@ -374,8 +382,7 @@ LinetypeMaker.load = function(model, selectRows) {
             // them stay empty or their text shows through.
             var cells = [CsLinetype.kindOf(s), CsLinetype.num(s.length), s.text,
                 "", isText ? CsLinetype.num(s.scale) : "", "",
-                isText ? CsLinetype.num(s.rotation) : "",
-                isText ? CsLinetype.num(s.x) : "", isText ? CsLinetype.num(s.y) : ""];
+                isText ? CsLinetype.num(s.rotation) : ""];
             for (var c = 0; c < cells.length; c++) {
                 var item = new QTableWidgetItem(String(cells[c]));
                 if (c === C.KIND || (!isText && c > C.TEXT)) {
@@ -508,8 +515,7 @@ LinetypeMaker.cellEdited = function(row, col) {
     } finally {
         w.filling = false;
     }
-    // Typed offsets are the caver's own placement: those rows go Custom.
-    LinetypeMaker.readForm((col === C.X || col === C.Y) ? rows : []);
+    LinetypeMaker.readForm();
 };
 
 /** A dropdown pick: the same value for every selected text row. */
@@ -528,10 +534,11 @@ LinetypeMaker.comboChanged = function(col, row, value) {
 
 /**
  * Reads the form back into the model; never while load() is filling.
- * Font and anchor are not read here: their dropdowns write the model
- * directly. `custom` lists rows whose X/Y were just typed.
+ * Font and anchor are not read here -- their dropdowns write the model
+ * directly -- and neither are X/Y, which have no column: they come from
+ * the anchor, or stay as imported for a Custom row.
  */
-LinetypeMaker.readForm = function(custom) {
+LinetypeMaker.readForm = function() {
     var w = LinetypeMaker.w;
     var C = LinetypeMaker.COL;
     if (w.filling) {
@@ -555,11 +562,8 @@ LinetypeMaker.readForm = function(custom) {
             var size = LinetypeMaker.cell(r, C.SIZE);
             s.scale = size === "" ? LinetypeMaker.TEXT_SIZE : Number(size);
             s.rotation = Number(LinetypeMaker.cell(r, C.ROT)) || 0;
-            s.x = Number(LinetypeMaker.cell(r, C.X)) || 0;
-            s.y = Number(LinetypeMaker.cell(r, C.Y)) || 0;
-            if (custom && custom.indexOf(r) >= 0) {
-                s.anchor = "custom";
-            }
+            s.x = had ? prev.x : 0;
+            s.y = had ? prev.y : 0;
         }
         m.segments.push(s);
     }
