@@ -2436,6 +2436,79 @@ class TestUserMessagesAreSeen(unittest.TestCase):
         self.assertEqual(missing, [], "stale DIAGNOSTICS entries")
 
 
+class TestSectionBayPanelBelongsToTheApplication(unittest.TestCase):
+    """The bay panel is opened from Cross Section, which runs in the
+    active TAB'S script engine and cannot be setForceGlobal (it needs its
+    document for the interactive cut). So the dock is built in init --
+    the application engine -- and show/hide reach it by objectName.
+
+    Measured live 2026-09-27: built lazily from the tab engine, a bay in
+    a second tab built a second dock, and closing the first tab left a
+    dock whose Capture and Cancel called into a destroyed engine.
+    """
+
+    def source(self, name):
+        with open(os.path.join(ADDON, "CrossSection", name)) as handle:
+            code = re.sub(r"/\*.*?\*/", "", handle.read(), flags=re.S)
+            return re.sub(r"//[^\n]*", "", code)
+
+    def body(self, source, name):
+        match = re.search(r"\nSectionBayPanel\." + name +
+                          r" = function\([^)]*\) \{(.*?)\n\};", source, re.S)
+        self.assertIsNotNone(match, "SectionBayPanel.%s is gone" % name)
+        return match.group(1)
+
+    def test_no_engine_local_dock_cache(self):
+        """A module variable holding the dock is empty in every engine
+        but the one that set it -- the root of the duplicate."""
+        source = self.source("SectionBayPanel.js")
+        self.assertIsNone(
+            re.search(r"^var \w*[Dd]ock\w* = ", source, re.M),
+            "SectionBayPanel caches its dock in a global again; find it "
+            "by objectName with SectionBayPanel.dock()")
+
+    def test_show_and_hide_never_build_the_dock(self):
+        source = self.source("SectionBayPanel.js")
+        for name in ("show", "hide", "follow"):
+            code = self.body(source, name)
+            self.assertNotIn("ensureDock(", code,
+                             "SectionBayPanel.%s builds the dock -- from a "
+                             "tab's engine, that is the bug" % name)
+            self.assertNotIn("new QDockWidget", code)
+
+    def test_label_is_found_by_name_not_expando(self):
+        """`dock.label = ...` exists only on the wrapper of the engine
+        that set it; another engine's findChild wrapper has no .label."""
+        source = self.source("SectionBayPanel.js")
+        self.assertNotIn("dock.label", source)
+        self.assertIn("SectionBayPanel.label(", self.body(source, "show"))
+        self.assertIn("SectionBayPanel.LABEL_NAME", self.body(source, "label"))
+
+    def test_dock_is_built_from_init_only(self):
+        cross = self.source("CrossSection.js")
+        init = re.search(r"\nCrossSection\.init = function\(basePath\) \{"
+                         r"(.*?)\n\};", cross, re.S).group(1)
+        self.assertIn("SectionBayPanel.install()", init)
+        begin = re.search(r"\.prototype\.beginEvent = function\(\) \{"
+                          r"(.*?)\n\};", cross, re.S).group(1)
+        self.assertNotIn("ensureDock(", begin)
+        self.assertNotIn("install(", begin)
+
+    def test_panel_follows_the_active_tab(self):
+        """Closing the bay's tab has to hide the panel; the MDI area's
+        activation signal is what fires when a tab closes."""
+        install = self.body(self.source("SectionBayPanel.js"), "install")
+        self.assertIn("subWindowActivated.connect", install)
+        self.assertIn("SectionBayPanel.follow()", install)
+
+    def test_a_stale_dock_is_retired_before_building(self):
+        ensure = self.body(self.source("SectionBayPanel.js"), "ensureDock")
+        self.assertIn("SectionBayPanel.retire(", ensure)
+        retire = self.body(self.source("SectionBayPanel.js"), "retire")
+        self.assertIn("objectName", retire)
+        self.assertIn("deleteLater()", retire)
+
+
 class TestScanListIsShared(unittest.TestCase):
     """Two panels show the cave's scans; they must say the same things.
 

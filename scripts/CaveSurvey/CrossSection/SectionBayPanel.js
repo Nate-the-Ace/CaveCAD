@@ -34,14 +34,60 @@ include(includeBasePath + "/SectionCapture.js");
 function SectionBayPanel() {
 }
 
-/** The dock, built once. Module-local so `show`/`hide` are idempotent
- *  and there is never more than one of these floating around. */
-var csSectionBayPanelDock = null;
+/**
+ * ONE DOCK, OWNED BY THE APPLICATION'S SCRIPT ENGINE.
+ *
+ * Cross Section is a document-level interactive action, so QCAD runs it
+ * in the active tab's OWN script engine, and every engine has its own
+ * globals. When this panel cached its dock in a module variable and
+ * built it on first show, a bay opened from a second tab found that
+ * variable empty and built a second dock; closing the first tab then
+ * destroyed the engine the first dock's buttons called into, and they
+ * did nothing (Nathan, 2026-09-27; Sheet Setup's orphan crashed
+ * CaveCAD on hover). Cross Section cannot be setForceGlobal like the
+ * other panel openers -- it needs its document for the whole
+ * interactive cut -- so instead:
+ *
+ * - CrossSection.init, which runs in the application engine, builds
+ *   the dock. Its buttons' closures live as long as CaveCAD does.
+ * - show/hide, from whichever engine, find the dock by objectName and
+ *   touch only real Qt properties. A JS expando (the old `dock.label`)
+ *   exists only on the wrapper of the engine that set it, so the label
+ *   is found by objectName too.
+ * - A tab engine NEVER builds the dock. If the startup build failed,
+ *   the panel is missing -- a lesser failure than a dock wired to an
+ *   engine that is about to die.
+ * - The panel follows the ACTIVE tab (SectionBayPanel.follow, wired to
+ *   the MDI area in init): switching tabs shows the bay of the tab you
+ *   are looking at, or hides the panel; closing the bay's tab hides it.
+ */
+SectionBayPanel.DOCK_NAME = "CaveSurveySectionBayDock";
+SectionBayPanel.LABEL_NAME = "CaveSurveySectionBayLabel";
+
+/** The one live dock, or null. Engine-neutral: asks the main window. */
+SectionBayPanel.dock = function() {
+    try {
+        var dock = RMainWindowQt.getMainWindow().findChild(
+            SectionBayPanel.DOCK_NAME);
+        return isNull(dock) ? null : dock;
+    } catch (e) {
+        return null;
+    }
+};
+
+/** The label saying where the bay is, found by name -- see above. */
+SectionBayPanel.label = function(dock) {
+    try {
+        var label = dock.findChild(SectionBayPanel.LABEL_NAME);
+        return isNull(label) ? null : label;
+    } catch (e) {
+        return null;
+    }
+};
 
 /**
- * Show the panel, docked to the right, with Capture and Cancel wired up.
- * Safe to call repeatedly: the dock is built once and just re-shown and
- * re-labelled after that.
+ * Show the panel, docked to the right, labelled with the bay's station.
+ * Safe to call repeatedly and from any script engine.
  *
  * \param doc, di   the open document -- read fresh at click time too,
  *                   since the panel can sit open for as long as the
@@ -54,54 +100,111 @@ SectionBayPanel.show = function(doc, di, bay) {
     if (isNull(doc) || isNull(di) || bay === null || bay === undefined) {
         return;
     }
-    SectionBayPanel.ensureDock();
-    try {
-        csSectionBayPanelDock.label.text = (bay.station !== null &&
+    var dock = SectionBayPanel.dock();
+    if (dock === null) {
+        return;
+    }
+    var label = SectionBayPanel.label(dock);
+    if (label !== null) {
+        label.text = (bay.station !== null &&
                 bay.station !== undefined && bay.station !== "") ?
             qsTr("Section bay open at %1").arg(bay.station) :
             qsTr("Section bay open");
-    } catch (eLbl) {
     }
     try {
-        csSectionBayPanelDock.visible = true;
-        csSectionBayPanelDock.raise();
+        dock.visible = true;
+        dock.raise();
     } catch (eShow) {
     }
 };
 
 /** Hide the panel. Safe to call when it was never built. */
 SectionBayPanel.hide = function() {
-    if (csSectionBayPanelDock === null) {
+    var dock = SectionBayPanel.dock();
+    if (dock === null) {
         return;
     }
     try {
-        csSectionBayPanelDock.visible = false;
+        dock.visible = false;
     } catch (e) {
     }
 };
 
-/** Build the dock, idempotently -- modelled on SketchScans.buildDock,
- *  the only other dock this add-on builds by hand. */
+/**
+ * Match the panel to the active tab: shown for its open bay, hidden
+ * when it has none -- or when there is no tab left at all. Wired to the
+ * MDI area's subWindowActivated in init, which fires on every tab
+ * switch and when a closing tab hands focus on (or to nothing).
+ */
+SectionBayPanel.follow = function() {
+    var doc = null;
+    try {
+        doc = EAction.getDocument();
+    } catch (eDoc) {
+        doc = null;
+    }
+    var bay = null;
+    if (!isNull(doc)) {
+        try {
+            bay = SectionCapture.findBay(doc);
+        } catch (eBay) {
+            bay = null;
+        }
+    }
+    if (bay === null) {
+        SectionBayPanel.hide();
+        return;
+    }
+    SectionBayPanel.show(doc, EAction.getDocumentInterface(), bay);
+};
+
+/**
+ * Retire a dock by that name: renamed first, so the next findChild can
+ * never answer with it again, then hidden and handed to Qt to delete.
+ * deleteLater, not destroy(): the retiring dock may belong to another
+ * engine, and nothing here should run inside it.
+ */
+SectionBayPanel.retire = function(dock) {
+    try {
+        dock.objectName = SectionBayPanel.DOCK_NAME + "Retired";
+        dock.visible = false;
+        RMainWindowQt.getMainWindow().removeDockWidget(dock);
+        dock.deleteLater();
+    } catch (e) {
+    }
+};
+
+/**
+ * Build the dock -- from CrossSection.init ONLY, in the application
+ * engine (see the header). Any dock already carrying the name is
+ * retired first: there must never be two, and one this engine did not
+ * build has buttons wired to some other engine.
+ */
 SectionBayPanel.ensureDock = function() {
-    if (csSectionBayPanelDock !== null) {
-        return csSectionBayPanelDock;
+    for (var guard = 0; guard < 8; guard++) {
+        var old = SectionBayPanel.dock();
+        if (old === null) {
+            break;
+        }
+        SectionBayPanel.retire(old);
     }
     var appWin = RMainWindowQt.getMainWindow();
     var dock = new QDockWidget(qsTr("Section Bay"), appWin);
     // Without an objectName, restoreState() cannot identify the dock
-    // and silently forgets where it was -- the same trap SketchScans'
-    // own dock avoids.
-    dock.objectName = "CaveSurveySectionBayDock";
+    // and silently forgets where it was -- and show/hide could not find
+    // it from a tab's engine.
+    dock.objectName = SectionBayPanel.DOCK_NAME;
 
     var body = new QWidget(dock);
     var layout = new QVBoxLayout();
 
-    dock.label = new QLabel(qsTr("Section bay open"));
+    var label = new QLabel(qsTr("Section bay open"));
+    label.objectName = SectionBayPanel.LABEL_NAME;
     try {
-        dock.label.wordWrap = true;
+        label.wordWrap = true;
     } catch (eWrap) {
     }
-    layout.addWidget(dock.label, 0, 0);
+    layout.addWidget(label, 0, 0);
 
     var buttons = new QHBoxLayout();
     var captureBtn = new QPushButton(qsTr("Capture"));
@@ -129,9 +232,19 @@ SectionBayPanel.ensureDock = function() {
     CsPanel.attachHelp(dock, "CrossSection", qsTr("Cross Section"));
     appWin.addDockWidget(Qt.RightDockWidgetArea, dock);
     dock.visible = false;
-
-    csSectionBayPanelDock = dock;
     return dock;
+};
+
+/**
+ * Startup wiring, from CrossSection.init: the dock, and the tab
+ * follower. Both closures belong to the application engine.
+ */
+SectionBayPanel.install = function() {
+    SectionBayPanel.ensureDock();
+    var mdi = RMainWindowQt.getMainWindow().getMdiArea();
+    mdi.subWindowActivated.connect(function() {
+        SectionBayPanel.follow();
+    });
 };
 
 /**

@@ -350,4 +350,16 @@ CrossSection.init = function(basePath) {
     // bay to capture. It still has to be a registered RGuiAction for
     // the interactive EAction to run.
     SectionCapture.init(basePath);
+
+    // The bay panel is built HERE, in the application's script engine,
+    // never from beginEvent -- which runs in the active tab's own engine
+    // and would leave the panel's buttons wired to it after the tab
+    // closed. See SectionBayPanel.js's header. Also before
+    // restoreState(), which can only place a dock that already exists.
+    try {
+        SectionBayPanel.install();
+    } catch (eDock) {
+        warning("Cross Section: could not build the bay panel at " +
+            "startup (" + eDock + ").");
+    }
 };
