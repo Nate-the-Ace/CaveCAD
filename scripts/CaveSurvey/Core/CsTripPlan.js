@@ -531,7 +531,9 @@ CsTripPlan.build = function(survey, resolved, opts) {
     var i;
     for (i = 0; i < order.order.length; i++) {
         var target = order.order[i];
-        var edges = CsTripPlan.pathTo(CsTripPlan.shortest(adj, at), target);
+        // Reachable by construction (order() dropped what is not, and the
+        // graph is undirected), guarded like the way home below.
+        var edges = CsTripPlan.pathTo(CsTripPlan.shortest(adj, at), target) || [];
         var steps = CsTripPlan.describe(edges, ctx);
         var mins = 0;
         for (var k = 0; k < steps.length; k++) {
